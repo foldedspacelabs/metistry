@@ -89,9 +89,9 @@ EMPTY=pan(L,"THREE WAYS THIS LIST IS EMPTY, AND THEY ARE NOT THE SAME",
         "The system ran and nothing happened worth recording. A quiet day, not a fault.",action="Widen to 7 days"),L)
     + card(panel_state(L,I["clip"],L["tt"],"No captures in the last 24 hours.",
         "Six other kinds have rows in this window.",action="Clear the filter"),L)
-    + card(panel_state(L,I["warn"],L["fail"],"Couldn't load activity.",
+    + card(panel_state(L,I["failed"],L["fail"],"Couldn't load activity.",
         "<b>Nothing is known</b> about this window. This is not an empty feed.",
-        reason="activity_feed · connection refused",action="Try again"),L),14)
+        reason="activity_feed · connection refused",action="Try Again"),L),14)
   + nt(L,"The third never renders as &ldquo;nothing happened&rdquo;, which is the lie a shared empty state tells "
         "(P5). One case the wire cannot separate: a first run is identical to a quiet day, so the empty state's "
         "action resolves it — widen to 7 days and the answer is the same or it is not.",14))

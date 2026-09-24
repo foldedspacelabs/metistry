@@ -73,6 +73,13 @@ I["stop"]='<rect x="6.5" y="6.5" width="11" height="11" rx="2"/>'
 I["send"]='<path d="M4.5 12h14.5"/><path d="M12.5 5.5L19 12l-6.5 6.5"/>'
 I["display"]='<rect x="3" y="4.5" width="18" height="12" rx="2"/><path d="M9 20h6M12 16.5V20"/>'
 
+from fixture import F
+ASSISTANT_NAME="Metis"   # C88: the name the owner configures, default Metis — every attribution label reads it
+AN=ASSISTANT_NAME.upper()
+I["failed"]='<circle cx="12" cy="12" r="8.2"/><path d="M9.2 9.2l5.6 5.6M14.8 9.2l-5.6 5.6"/>'
+I["relay"]='<rect x="7.5" y="6.5" width="9" height="11" rx="2.2"/><path d="M2.5 12h5M16.5 12h5"/><circle cx="12" cy="12" r="1.3" fill="currentColor" stroke="none"/>'
+I["ask"]='<path d="M5 5.5h14v10h-8.5L6 19v-3.5H5z"/><path d="M10.3 9.1a1.8 1.8 0 113.1 1.3c-.7.5-1.4.8-1.4 1.7"/><circle cx="12" cy="13.9" r=".55" fill="currentColor" stroke="none"/>'
+
 def page(title,body,w,h,ground):
     return f'''<!doctype html>
 <html lang="en">
@@ -152,14 +159,14 @@ def states_panel(T,name):
     panels=row(card(panel_state(T,I["tray"],T["tt"],"Nothing in the last 24h","Activity fills as agents work and collectors run."),T)
       + card(panel_state(T,I["plug"],T["abs"],"Not configured",
              'Set <span style="font-family: '+MONO+'; font-size: 11px;">METISTRY_AWS_*</span> to fill this in.',action="Open the doc"),T)
-      + card(panel_state(T,I["warn"],T["fail"],"Could not read spend","The collector answered, and the answer was an error.",
-             reason="over_cap · aws-costs · run 4f21",action="Try again"),T),14)
+      + card(panel_state(T,I["failed"],T["fail"],"Could not read spend","The collector answered, and the answer was an error.",
+             reason="over_cap · aws-costs · run 4f21",action="Try Again"),T),14)
     stale=(f'<div style="background: {T["surface"]}; border: 1px solid {T["border"]}; border-radius: 12px; padding: 18px;">'
            f'<div style="display: flex; align-items: center; gap: 10px;">'
            f'<span style="font-size: 11px; font-weight: 700; letter-spacing: 0.09em; color: {T["tt"]};">AWS SPEND · 30D</span>'
            f'{pill(T,"3d old",T["stale"],T["staleq"],I["clock"])}</div>'
            f'<div style="font-size: 30px; font-weight: 600; color: {T["tp"]}; margin-top: 10px;">$128.44</div>'
-           f'<div style="font-size: 12px; color: {T["ts"]}; margin-top: 4px;">last collected 16 Sep, 04:10</div></div>')
+           f'<div style="font-size: 12px; color: {T["ts"]}; margin-top: 4px;">last collected 16 Sep, 4:10 AM</div></div>')
     disabled=(f'<div style="background: {T["surface"]}; border: 1px solid {T["border"]}; border-radius: 12px; padding: 18px;">'
               f'<div style="display: flex; gap: 8px; align-items: center;">'
               f'<button disabled style="font: inherit; font-size: 12px; font-weight: 600; padding: 7px 15px; '
@@ -195,8 +202,10 @@ copy=(f'<div style="background: {L["surface"]}; border: 1px solid {L["border"]};
           ("stale",L["stale"],"it was answering and has not lately","<b>no — it annotates</b>","“3d” beside the name; the row keeps its own state")])
       + '</table></div>')
 def btn(T,label,kind="secondary",glyph=None,icon_only=False,title=None,spark=False):
-    if kind=="affirm": st=f'border: 0; background: {T["aff"]}; color: {T["onaff"]};'
+    # C92: the one filled answer is the accent. "affirm" kept as the name so call sites read as before.
+    if kind in ("affirm","primary"): st=f'border: 0; background: {T["acc"]}; color: {T["onacc"]};'
     elif kind=="dest": st=f'border: 0; background: {T["dest"]}; color: {T["ondest"]};'
+    elif kind=="disabled": st=f'border: 1px solid {T["border"]}; background: transparent; color: {T["tt"]};'
     elif kind=="ghost": st=f'border: 1px solid {T["bc"]}; background: transparent; color: {T["ts"]};'
     else: st=f'border: 1px solid {T["bc"]}; background: {T["surface"]}; color: {T["tp"]};'
     tt=f' title="{title}" aria-label="{title}"' if title else ""
@@ -210,11 +219,12 @@ def btn(T,label,kind="secondary",glyph=None,icon_only=False,title=None,spark=Fal
     return (f'<button{tt} style="font: inherit; font-size: 12px; font-weight: 600; padding: 7px 13px; '
             f'border-radius: 8px; display: inline-flex; align-items: center; white-space: nowrap; {st}">{g}{label}</button>')
 
-def actions(T,icons=True):
+def actions(T,icons=True,disabled=False):
     g=lambda k: (I[k] if icons else None)
+    k=lambda kind: "disabled" if disabled else kind   # C63: a disabled control takes a dimmer ink, never opacity
     return (f'<div style="display: flex; align-items: center; gap: 8px; margin-top: 14px;">'
-            f'{btn(T,"Approve","affirm",g("check"))}{btn(T,"Decline","dest",g("x"))}'
-            f'{btn(T,"Revise","secondary",g("pencil"))}'
+            f'{btn(T,"Approve",k("affirm"),g("check"))}{btn(T,"Revise",k("secondary"),g("pencil"))}'
+            f'{btn(T,"Decline",k("secondary"),g("x"))}'
             f'<span style="flex-grow: 1;"></span>'
             f'{btn(T,"","ghost",I["later"],icon_only=True,title="Review later")}</div>')
 
@@ -281,8 +291,7 @@ def reqcard(T,*,glyph,typ,title,agent,when,prev="",acts=True,icons=True,state="p
                 f'<span style="display: flex; color: {T["stale"]}; flex-shrink: 0;">{ic(I["clock"],14,2)}</span>'
                 f'<span style="font-size: 12px; color: {T["stale"]}; line-height: 1.5;">This moved while the card was open, '
                 f'so nothing was sent. The card below is the current version.</span></div></div>')
-    dim='opacity: .55;' if state=="deciding" else ''
-    a=(f'<div style="{dim}">{actions(T,icons)}</div>') if acts else ""
+    a=actions(T,icons,disabled=(state=="deciding")) if acts else ""
     return (f'<div style="{w} background: {T["surface"]}; border: 1px solid {T["border"]}; border-radius: 12px; '
             f'padding: 16px; box-sizing: border-box;">{head_row(T,glyph,typ,agent,when)}{ttl}{prev}{a}</div>')
 
@@ -309,7 +318,7 @@ def bellcase(T,count,label,why):
 
 def trustmark(T,kind):
     if kind=="internal": return ""
-    fg,bg,txt = ((T["deg"],T["degq"],"external") if kind=="external" else (T["ts"],T["absq"],"you"))
+    fg,bg,txt = (T["ts"],T["absq"],"external" if kind=="external" else "you")   # provenance, not a fault (amendments §8.3)
     return (f'<span style="display: inline-flex; align-items: center; padding: 1px 7px; border-radius: 999px; '
             f'background: {bg}; color: {fg}; font-size: 10.5px; font-weight: 600; letter-spacing: 0.02em;">{txt}</span>')
 
@@ -341,12 +350,12 @@ def panel2(T,empty=False,w=400):
     else:
         a=reqcard(T,glyph=I["key"],typ="ACCESS",title='Read <span style="font-family: '+MONO+'; font-size: 13px;">Areas/Finance</span>',
                   agent="drey-dev",when="12m",prev=scope_preview(T))
-        b=reqcard(T,glyph=I["book"],typ="NOTE",title="Keep the note on lease renewal",agent="assistant",when="1h",
+        b=reqcard(T,glyph=I["book"],typ="NOTE",title="Keep the note on lease renewal",agent="metis",when="1h",
                   prev=note_preview(T))
         body=(f'<div style="padding: 12px; display: flex; flex-direction: column; gap: 10px; background: {T["bg"]};">'
               + grouplabel(T,"ACCESS","2") + a + grouplabel(T,"NOTES","1") + b + '</div>')
         foot=(f'<div style="padding: 11px 16px; border-top: 1px solid {T["border"]};">'
-              f'<span style="font-size: 12px; font-weight: 600; color: {T["acc"]};">Show all 12 →</span></div>')
+              f'<span style="font-size: 12px; font-weight: 600; color: {T["acc"]};">Open Needs You →</span></div>')
     return (f'<div style="width: {w}px; background: {T["elevated"]}; border: 1px solid {T["bc"]}; border-radius: 14px; '
             f'box-shadow: 0 10px 34px rgba(26,24,21,0.16); overflow: hidden; display: flex; flex-direction: column; '
             f'flex-shrink: 0;">{head}{body}{foot}</div>')
@@ -381,8 +390,8 @@ def listrow(T,glyph,typ,title,agent,when,sel=False,trust="internal",result=None,
 
 LIST=[(I["key"],"ACCESS",'Read <span style="font-family: '+MONO+'; font-size: 13px;">Areas/Finance</span>',"drey-dev","12m","internal"),
       (I["key"],"ACCESS","Write to the release notes folder","taskuary","41m","external"),
-      (I["book"],"NOTE","Keep the note on lease renewal","assistant","1h","internal"),
-      (I["book"],"NOTE","Keep the note on Q4 compute pricing","assistant","2h","internal"),
+      (I["book"],"NOTE","Keep the note on lease renewal","metis","1h","internal"),
+      (I["book"],"NOTE","Keep the note on Q4 compute pricing","metis","2h","internal"),
       (I["key"],"ACCESS","Enrol a new agent on the Studio","—","3h","external")]
 
 def fulllist(T,mode="select",w=760):
@@ -393,7 +402,7 @@ def fulllist(T,mode="select",w=760):
              f'border-bottom: 1px solid {T["border"]};">'
              f'<span style="font-size: 12.5px; font-weight: 600; color: {T["tp"]};">{n} selected</span>'
              f'<span style="flex-grow: 1;"></span>'
-             f'{btn(T,"Later","secondary",I["later"])}{btn(T,"Skip","secondary")}{btn(T,"Decline","dest",I["x"])}'
+             f'{btn(T,"Later","secondary",I["later"])}{btn(T,"Skip","secondary")}{btn(T,"Decline","secondary",I["x"])}'
              f'<span style="font-size: 12px; font-weight: 600; color: {T["acc"]}; margin-left: 4px;">Clear</span></div>')
     if mode=="result":
         bar=(f'<div style="display: flex; align-items: flex-start; gap: 10px; padding: 11px 16px; background: {T["degq"]}; '
@@ -404,7 +413,7 @@ def fulllist(T,mode="select",w=760):
              f'<div style="font-size: 12px; color: {T["ts"]}; line-height: 1.5; margin-top: 2px;">'
              f'One was answered somewhere else while this was open. It is still selected — nothing was lost and '
              f'nothing was re-sent.</div></div>'
-             f'{btn(T,"Retry 1","secondary")}</div>')
+             f'{btn(T,"Try Again","secondary")}</div>')
     rows=""
     for i,(g,t,ti,a,w2,tr) in enumerate(LIST):
         sel = (mode in ("select","result")) and i<3
@@ -415,7 +424,7 @@ def fulllist(T,mode="select",w=760):
     head=(f'<div style="display: flex; align-items: center; gap: 12px; padding: 13px 16px; background: {T["surface"]}; '
           f'border-bottom: 1px solid {T["border"]};">'
           f'<span style="font-size: 14px; font-weight: 600; color: {T["tp"]};">Needs You</span>'
-          f'<span style="font-size: 12.5px; color: {T["ts"]}; flex-grow: 1;">12 waiting</span>'
+          f'<span style="font-size: 12.5px; color: {T["ts"]}; flex-grow: 1;">{len(LIST)} waiting</span>'
           f'<span style="font-size: 12px; font-weight: 600; color: {T["acc"]};">Select all on this page</span></div>')
     return (f'<div style="width: {w}px; border: 1px solid {T["bc"]}; border-radius: 12px; overflow: hidden; '
             f'background: {T["bg"]}; flex-shrink: 0;">{head}{bar}{rows}</div>')
@@ -434,7 +443,7 @@ def sheet(T,w=330):
             f'<div style="padding: 12px; display: flex; flex-direction: column; gap: 10px; background: {T["bg"]};">'
             f'{grouplabel(T,"ACCESS","2")}{a}</div>'
             f'<div style="padding: 13px 16px; border-top: 1px solid {T["border"]}; text-align: center;">'
-            f'<span style="font-size: 13px; font-weight: 600; color: {T["acc"]};">Show all 12</span></div></div>')
+            f'<span style="font-size: 13px; font-weight: 600; color: {T["acc"]};">Open Needs You</span></div></div>')
 
 def pan(T,title,inner,w=None):
     return (f'<div style="background: {T["surface"]}; border: 1px solid {T["border"]}; border-radius: 14px; padding: 22px;'
@@ -464,7 +473,7 @@ def receipt(T,mode):
     elif mode=="queued":
         g,c,txt=(ic(I["clock"],13,2.2),T["deg"],"queued — will send when the instance is reachable")
     else:
-        g,c,txt=(ic(I["warn"],13,2.2),T["fail"],"couldn’t reach the instance — <b>connection refused</b>")
+        g,c,txt=(ic(I["failed"],13,2.2),T["fail"],"couldn’t reach the instance — <b>connection refused</b>")
     return (f'<div style="display: flex; align-items: flex-start; gap: 7px; margin-top: 11px; font-size: 12px; '
             f'color: {T["ts"]}; line-height: 1.45;">'
             f'<span style="display: flex; color: {c}; margin-top: 1px; flex-shrink: 0;">{g}</span>'
@@ -481,13 +490,13 @@ def composer(T,*,state="empty",w=380):
     attach = f'<div style="margin-top: 10px;">{filechip(T)}</div>' if state in ("attaching","failed") else ""
     disabled = state=="sending"
     prim=(f'<button style="font: inherit; font-size: 12.5px; font-weight: 600; padding: 7px 15px; border-radius: 8px; '
-          f'border: 0; background: {T["acc"]}; color: {T["onacc"]}; opacity: {0.55 if disabled else 1};">Capture</button>')
+          f'border: 0; background: {T["sunken"] if disabled else T["acc"]}; color: {T["tt"] if disabled else T["onacc"]};">Capture</button>')
     rmode={"empty":"none","typing":"none","attaching":"none","sending":"pending",
            "captured":"done","queued":"queued","failed":"failed"}[state]
     extra=""
     if state=="failed":
-        extra=(f'<div style="display: flex; gap: 8px; margin-top: 10px;">{btn(T,"Retry","secondary")}'
-               f'{btn(T,"Copy the text","ghost")}</div>')
+        extra=(f'<div style="display: flex; gap: 8px; margin-top: 10px;">{btn(T,"Try Again","secondary")}'
+               f'{btn(T,"Copy the Text","ghost")}</div>')
     return (f'<div style="width: {w}px; background: {T["elevated"]}; border: 1px solid {T["bc"]}; border-radius: 14px; '
             f'box-shadow: 0 10px 34px rgba(26,24,21,0.16); padding: 16px; flex-shrink: 0;">'
             f'<div style="border: 1px solid {T["bc"]}; border-radius: 10px; padding: 11px 12px; background: {T["surface"]};">'
@@ -602,13 +611,13 @@ def trow(T,*,kind="md",title,bits,done=False,carried=0,chips2=None,warn=None,las
     return (f'<div style="display: flex; gap: 11px; align-items: flex-start; padding: 11px 14px; '
             f'background: {T["accq"] if sel else "transparent"};'
             + ("" if last else f' border-bottom: 1px solid {T["border"]};') + '">'
-            + (f'<span style="display: flex; flex-shrink: 0; color: {T["tt"]}; opacity: 0.55; margin-top: 1px;">'
+            + (f'<span style="display: flex; flex-shrink: 0; color: {T["tt"]}; margin-top: 1px;">'
                f'{ic(I["grip"],15,2.6)}</span>' if drag else "")
             + f'<span style="margin-top: 1px; display: flex;">{lead}</span>'
             f'<div style="flex-grow: 1; min-width: 0;">'
             f'<div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">'
             f'<span style="font-size: 14px; color: {T["tp"]}; '
-            + ("text-decoration: line-through; opacity: 0.55;" if done else "") + f'">{title}</span>'
+            + (f"text-decoration: line-through; color: {T['tt']};" if done else "") + f'">{title}</span>'
             f'{carry(T,carried)}{extra}</div>{reason(T,bits)}{w}</div></div>')
 
 def meter(T,planned,cap):
@@ -635,7 +644,7 @@ def standup(T):
             f'<div style="display: flex; align-items: center; gap: 9px; padding: 11px 14px; '
             f'border-bottom: 1px solid {T["border"]};">'
             f'<span style="font-size: 12.5px; font-weight: 600; color: {T["tp"]}; flex-grow: 1;">Standup draft</span>'
-            f'<span style="font-size: 11.5px; color: {T["tt"]};">09:15</span>'
+            f'<span style="font-size: 11.5px; color: {T["tt"]};">9:15 AM</span>'
             f'{btn(T,"Copy","secondary",I["copy"])}</div>'
             f'<div style="padding: 12px 14px; font-size: 12.5px; line-height: 1.6; color: {T["tp"]};">'
             + "".join(f'<div>{l}</div>' for l in lines)
@@ -654,7 +663,7 @@ def todayhead(T,stale="2 min ago"):
     return (f'<div style="padding: 14px 16px 13px; background: {T["surface"]}; border-bottom: 1px solid {T["border"]};">'
             f'<div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">'
             f'<span style="font-size: 17px; font-weight: 600; color: {T["tp"]};">Today</span>'
-            f'<span style="font-size: 12.5px; color: {T["ts"]};">Sunday 20 September</span>'
+            f'<span style="font-size: 12.5px; color: {T["ts"]};">{F["day"]}</span>'
             f'<span style="flex-grow: 1;"></span>'
             f'<span style="font-size: 11.5px; color: {T["tt"]};">as of {stale}</span>'
             f'{seg(T)}</div>{meter(T,285,240)}</div>')
@@ -727,7 +736,7 @@ def timecol(T,label,dim=False):
     return (f'<span style="width: 92px; flex-shrink: 0; font-variant-numeric: tabular-nums; font-size: 12px; '
             f'color: {T["tt"] if dim else T["ts"]}; padding-top: 2px;">{label}</span>')
 
-def nowline(T,at="8:52"):
+def nowline(T,at="8:52 AM"):
     return (f'<div style="display: flex; align-items: center; gap: 10px; margin: 4px 0 2px;">'
             f'{timecol(T,at)}'
             f'<span style="width: 7px; height: 7px; border-radius: 50%; background: {T["acc"]}; flex-shrink: 0;"></span>'
@@ -748,7 +757,7 @@ def prep(T,glyph,text,link=None):
 def generated(T,text):
     return (f'<div style="margin-top: 10px; background: {T["agq"]}; border-radius: 9px; padding: 9px 11px;">'
             f'<div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">'
-            f'<span style="font-size: 10px; font-weight: 700; letter-spacing: 0.07em; color: {T["ag"]};">ASSISTANT</span>'
+            f'<span style="font-size: 10px; font-weight: 700; letter-spacing: 0.07em; color: {T["ag"]};">{AN}</span>'
             f'<span style="font-size: 10.5px; color: {T["ts"]};">written, not retrieved</span></div>'
             f'<div style="font-size: 12.5px; color: {T["tp"]}; line-height: 1.5;">{text}</div></div>')
 
@@ -766,7 +775,7 @@ def meeting(T,*,time,title,sub,preps,gen=None,pred=None,actions_=True,last=False
             f'<span style="font-size: 14.5px; font-weight: 600; color: {T["tp"]};">{title}</span>'
             f'<span style="font-size: 12px; color: {T["ts"]};">{sub}</span>'
             f'<span style="flex-grow: 1;"></span>'
-            + (btn(T,"Open notes","secondary",I["note"]) if actions_ else "") + '</div>'
+            + (btn(T,"Open Notes","secondary",I["note"]) if actions_ else "") + '</div>'
             + "".join(prep(T,g,t) for g,t in preps)
             + (generated(T,gen) if gen else "")
             + (predicted(T,*pred) if pred else "") + '</div></div>')
@@ -808,11 +817,11 @@ def railsec(T,title,inner,right=None):
             + f'</div>{inner}</div>')
 
 def agentrow(T,name,what,state,last=False):
-    tint={"working":(T["ag"],T["agq"]),"waiting":(T["deg"],T["degq"]),"done":(T["ok"],T["okq"])}[state]
+    # amendments §8.3: presence is filled/hollow plus degraded — no presence palette of its own
+    dot=presdot(T,{"working":"working","waiting":"queued","done":"idle"}[state])
     return (f'<div style="display: flex; align-items: flex-start; gap: 9px; padding: 8px 0;'
             + ("" if last else f' border-bottom: 1px solid {T["border"]};') + '">'
-            f'<span style="width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; margin-top: 5px; '
-            f'background: {tint[0]};"></span>'
+            f'<span style="display: flex; margin-top: 4px;">{dot}</span>'
             f'<div style="min-width: 0; flex-grow: 1;">'
             f'<div style="font-family: {MONO}; font-size: 11.5px; color: {T["tp"]};">{name}</div>'
             f'<div style="font-size: 11.5px; color: {T["ts"]}; line-height: 1.45; margin-top: 2px;">{what}</div>'
@@ -828,7 +837,7 @@ def rail(T,w=286):
     agents=(agentrow(T,"drey-dev","migrating the settings pane · 12m in","working")
             + agentrow(T,"taskuary","wants write access to <b>docs/</b>","waiting")
             + agentrow(T,"claude-usage","cache report finished · 4 findings","done",last=True))
-    changes=(changerow(T,"<b>Design review</b> moved to 13:00","20m ago")
+    changes=(changerow(T,"<b>Design review</b> moved to 11:00 AM","20m ago")
              + changerow(T,"Jim replied about the SOW","41m ago")
              + changerow(T,"<b>work #418</b> went to in_review","1h ago",last=True))
     return (f'<div style="width: {w}px; flex-shrink: 0; border-left: 1px solid {T["border"]}; padding: 16px 16px 16px 18px; '
@@ -838,30 +847,30 @@ def rail(T,w=286):
                 f'<span style="display: flex; color: {T["acc"]};">{ic(I["bell"],15)}</span>'
                 f'<span><b style="color: {T["tp"]};">4 waiting</b> — one is about today</span></div>',"Open")
             + railsec(T,"AGENTS",agents)
-            + railsec(T,"SINCE YOU LAST LOOKED",changes,"9:04") + '</div>')
+            + railsec(T,"SINCE YOU LAST LOOKED",changes,"9:04 AM") + '</div>')
 
 def slimrow(T,title,bits,carried=0,last=False):
     return trow(T,kind="md",title=title,bits=bits,carried=carried,drag=True,last=last)
 
 def spine(T):
-    g1=(slimrow(T,"Sign the SOW",["due today","P1","~15m","Jim asks at 09:30"],carried=2)
+    g1=(slimrow(T,"Sign the SOW",["due today","P1","~15m","Jim asks at 9:30 AM"],carried=2)
         + slimrow(T,"Call the dentist",["overdue by 2 days","P2","~15m"],carried=5,last=True))
     g2=(slimrow(T,"Write the design brief for the settings pane",
                 ["due Wed","P1","~45m","blocking <b>work #418</b>"])
         + slimrow(T,"Review the lease comparables",["due Fri","P2","~90m"],last=True))
     return (earlier(T)
       + nowline(T)
-      + meeting(T,time="09:15",title="Standup draft",sub="ready to copy",preps=[],actions_=False,
+      + meeting(T,time="9:15 AM",title="Standup draft",sub="ready to copy",preps=[],actions_=False,
                 pred=("Copy","— posting is yours; Metistry never sends it",I["copy"]))
-      + meeting(T,time="09:30–10:00",title="1:1 with Jim Fallon",sub="2 people",
+      + meeting(T,time="9:30–10:00 AM",title="1:1 with Jim Fallon",sub="2 people",
           preps=[(I["person"],'<b>People/Jim Fallon</b> — 3 open tasks assigned to him, last met 6 September'),
                  (I["check"],'you owe him: <b>Sign the SOW</b> — P1, on today’s list'),
                  (I["note"],'last time: <b>Journal/Meetings/2026-09-06-jim.md</b> — “revisit the Q4 scope once the lease lands”')],
           gen="The lease comparables came back 4% under his number, which is the thing you did not have on the 6th. "
               "He has been waiting on the SOW since Tuesday.",
-          pred=("Draft the agenda","— you have 3 open items with Jim",I["pencil"]))
+          pred=("Draft the Agenda","— you have 3 open items with Jim",I["pencil"]))
       + gap(T,"1h 30m",g1,"2 tasks fit · 30m to spare")
-      + meeting(T,time="13:00–14:00",title="Design review",sub="4 people · moved from 11:00",
+      + meeting(T,time="11:00–11:45 AM",title="Design review",sub="4 people · moved from 1:00 PM",
           preps=[(I["board"],'<b>work #418</b> is in review and is what this is about'),
                  (I["note"],'the settings brief is not written yet — it is in the gap above')],
           pred=("Open work #418","— the review is about it",I["board"]))
@@ -875,7 +884,7 @@ def hub(T,w=1180):
             f'<div style="padding: 14px 16px 13px; background: {T["surface"]}; border-bottom: 1px solid {T["border"]};">'
             f'<div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">'
             f'<span style="font-size: 17px; font-weight: 600; color: {T["tp"]};">Today</span>'
-            f'<span style="font-size: 12.5px; color: {T["ts"]};">Sunday 20 September</span>'
+            f'<span style="font-size: 12.5px; color: {T["ts"]};">{F["day"]}</span>'
             f'<span style="flex-grow: 1;"></span>'
             f'<span style="font-size: 11.5px; color: {T["tt"]};">as of 2 min ago</span>{seg(T)}</div>'
             f'{meter3(T)}</div>'
@@ -1059,7 +1068,7 @@ def thumbs(T,state=None):
     return (f'<span style="display: inline-flex; gap: 2px;">'
             f'{b(I["up"],state=="up",T["ok"])}{b(I["down"],state=="down",T["deg"])}</span>')
 
-def agentprose(T,text,*,who="Metis",when="08:47",state=None,note=False,w=None):
+def agentprose(T,text,*,who=ASSISTANT_NAME,when="8:47 AM",state=None,note=False,w=None):
     n=""
     if note:
         n=(f'<div style="margin-top: 10px; padding: 9px 11px; border-radius: 8px; background: {T["surface"]}; '
@@ -1080,7 +1089,7 @@ PROSEP=pan(L,"AGENT PROSE — A DIFFERENT TYPEFACE, AND A VERDICT ON EVERY PIECE
   + agentprose(L,"The lease comparables came back 4% under his number, which is the thing you did not have on the "
                  "6th. He has been waiting on the SOW since Tuesday.")
   + agentprose(L,"Two of the four tasks you carried into today were also on Monday’s plan. They are both small.",
-               when="09:02",state="down",note=True)
+               when="9:02 AM",state="down",note=True)
   + '</div>'
   + nt(L,"<b>Agent prose is set in the system serif</b> — <code>ui-serif</code>, which is New York on Apple and "
          "Georgia elsewhere. No font is loaded, so P7 holds. The point is that you can tell it is the assistant "
@@ -1095,8 +1104,8 @@ PROSEP=pan(L,"AGENT PROSE — A DIFFERENT TYPEFACE, AND A VERDICT ON EVERY PIECE
 SPARKP=pan(L,"THE SPARK — ONE MARK FOR METIS, TWO MEANINGS",
   f'<div style="display: flex; gap: 16px; flex-wrap: wrap; align-items: center; margin-bottom: 4px;">'
   f'{btn(L,"Delegate","secondary",I["spark"])}'
-  f'{btn(L,"Draft the agenda","secondary",I["spark"])}'
-  f'{btn(L,"Ask for changes","ghost",I["spark"])}'
+  f'{btn(L,"Draft the Agenda","secondary",I["spark"])}'
+  f'{btn(L,"Revise","ghost",I["spark"])}'
   f'<span style="display: inline-flex; align-items: center; gap: 7px; padding: 4px 10px; border-radius: 999px; '
   f'background: {L["agq"]}; color: {L["ag"]}; font-size: 11.5px; font-weight: 600;">'
   f'{ic(I["spark"],12,1.9)}Metis wrote this</span></div>'
@@ -1249,11 +1258,11 @@ def artcard(T,*,name,made,body,forwhat,changed=None,w=None,compact=False):
           + '</div>')
     fresh=""
     if changed:
-        fresh=(f'<div style="padding: 0 13px 11px;">{st(T,changed)}</div>')
+        fresh=(f'<div style="padding: 0 13px 11px;">{st(T,changed,"stale")}</div>')
     acts=(f'<div style="display: flex; align-items: center; gap: 8px; padding: 11px 13px; '
           f'border-top: 1px solid {T["border"]}; flex-wrap: wrap;">'
           f'{btn(T,"Open","secondary")}{btn(T,"Copy","ghost",I["copy"])}'
-          f'{btn(T,"Ask for changes","ghost",I["pencil"])}'
+          f'{btn(T,"Revise","ghost",I["pencil"])}'
           f'<span style="flex-grow: 1;"></span>'
           f'<span style="font-size: 11.5px; color: {T["ts"]};">for <b style="color: {T["tp"]};">{forwhat}</b></span></div>')
     return (f'<div style="' + (f'width: {w}px; ' if w else "") + f'border: 1px solid {T["border"]}; border-radius: 11px; '
@@ -1263,13 +1272,13 @@ def revision(T,w=None):
     return (f'<div style="' + (f'width: {w}px; ' if w else "") + f'background: {T["agq"]}; border-radius: 11px; '
             f'padding: 12px 14px;">'
             f'<div style="display: flex; align-items: center; gap: 7px; margin-bottom: 6px;">'
-            f'<span style="font-size: 10px; font-weight: 700; letter-spacing: 0.07em; color: {T["ag"]};">ASSISTANT</span>'
-            f'<span style="font-size: 10.5px; color: {T["ts"]};">changed your day · 08:47</span></div>'
+            f'<span style="font-size: 10px; font-weight: 700; letter-spacing: 0.07em; color: {T["ag"]};">{AN}</span>'
+            f'<span style="font-size: 10.5px; color: {T["ts"]};">changed your day · 8:47 AM</span></div>'
             f'<div style="font-size: 12.5px; color: {T["tp"]}; line-height: 1.55;">'
             f'You asked to push the lease review to tomorrow and put the brief first. '
-            f'<b>3 items moved</b> — the brief is now in the 09:45 gap, and the review is on tomorrow’s plan.</div>'
+            f'<b>3 items moved</b> — the brief is now in the 9:45 AM gap, and the review is on tomorrow’s plan.</div>'
             f'<div style="display: flex; gap: 8px; margin-top: 11px;">{btn(T,"Undo","secondary",I["undo"])}'
-            f'{btn(T,"Show me what moved","ghost")}</div></div>')
+            f'{btn(T,"Show What Moved","ghost")}</div></div>')
 
 def askbar(T):
     return (f'<div style="display: flex; align-items: center; gap: 10px; padding: 10px 13px; border-radius: 11px; '
@@ -1322,7 +1331,7 @@ def meeting2(T,*,time,title,sub,preps,gen=None,pred=None,series=None,last=False)
             f'<div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">'
             f'<span style="font-size: 14.5px; font-weight: 600; color: {T["tp"]};">{title}</span>'
             f'<span style="font-size: 12px; color: {T["ts"]};">{sub}</span>'
-            f'<span style="flex-grow: 1;"></span>{btn(T,"Open notes","secondary",I["note"])}</div>'
+            f'<span style="flex-grow: 1;"></span>{btn(T,"Open Notes","secondary",I["note"])}</div>'
             + "".join(prep(T,g,t) for g,t in preps) + ser
             + (generated(T,gen) if gen else "")
             + (predicted(T,*pred) if pred else "") + '</div></div>')
@@ -1359,7 +1368,7 @@ def prose(T,text,*,when="8:47 AM",state=None,acts=None,diffblock=None,w=None):
             f'padding: 12px 14px;">'
             f'<div style="display: flex; align-items: center; gap: 7px; margin-bottom: 7px;">'
             f'<span style="display: flex; color: {T["ag"]};">{ic(I["spark"],14,1.7)}</span>'
-            f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; color: {T["ag"]};">ASSISTANT</span>'
+            f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; color: {T["ag"]};">{AN}</span>'
             f'<span style="font-size: 10.5px; color: {T["ts"]};">{when}</span>'
             f'<span style="flex-grow: 1;"></span>{thumbs(T,state)}</div>'
             f'<div style="font-family: {SERIF}; font-size: 14.5px; line-height: 1.55; color: {T["tp"]};">{text}</div>'
@@ -1420,8 +1429,8 @@ def calblock(T,w=None):
                    "long run at it.",
       when="8:41 AM",
       diffblock=diff(T,summary="What would change on your calendar",lines=CALDIFF,open_=True),
-      acts=[btn(T,"Block The Focus Time","secondary",I["spark"]),
-            btn(T,"Draft The Move To Vendor","ghost",I["spark"]),
+      acts=[btn(T,"Block the Focus Time","secondary",I["spark"]),
+            btn(T,"Draft the Move to Vendor","ghost",I["spark"]),
             btn(T,"Not Today","ghost")],w=w)
 
 CALP=pan(L,"CALENDAR HELP — AND THE LINE METIS DOES NOT CROSS",
@@ -1641,7 +1650,7 @@ def specimen(T,name,stack,why,rec=False):
             f'padding: 15px; background: {T["agq"] if rec else T["surface"]};">'
             f'<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 9px;">'
             f'<span style="display: flex; color: {T["ag"]};">{ic(I["spark"],13,1.7)}</span>'
-            f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; color: {T["ag"]};">ASSISTANT</span>'
+            f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; color: {T["ag"]};">{AN}</span>'
             f'<span style="flex-grow: 1;"></span>'
             f'<span style="font-size: 11px; color: {T["tt"]};">{name}</span></div>'
             + (f'<div style="font-family: {stack}; font-size: 14.5px; line-height: 1.55; color: {T["tp"]}; '
@@ -1696,8 +1705,8 @@ def calblock2(T,dark=False,w=None):
                    "long run at it.",
       when="8:41 AM",
       diffblock=calplan(T,dark),
-      acts=[btn(T,"Block The Focus Time","secondary",I["spark"]),
-            btn(T,"Move The Vendor Sync","secondary",I["spark"]),
+      acts=[btn(T,"Block the Focus Time","secondary",I["spark"]),
+            btn(T,"Move the Vendor Sync&hellip;","secondary",I["spark"]),
             btn(T,"Not Today","ghost")],w=w)
 
 def policyrow(T,label,value,why,last=False):
@@ -1717,7 +1726,8 @@ POLICY=pan(L,"YOUR RESCHEDULING RULES — METIS ACTS INSIDE THEM, NEVER OUTSIDE"
   + policyrow(L,"Meetings Metis may move",
       f'{opt(L,"Ones I own",True)} {opt(L,"Any")} {opt(L,"None")}',
       "A 1:1 you scheduled is yours to move; a meeting someone else called is not. This is the setting that makes "
-      "the whole feature safe, so it is first and it defaults to the narrow answer.")
+      "the whole feature safe, so it is first and it defaults to the narrow answer. Any meeting with other people "
+      "in it <b>warns first</b>, naming who will be told (C90).")
   + policyrow(L,"Least notice",f'{opt(L,"2 hours",True)} {opt(L,"1 day")}',
       "Below this, Metis proposes and never moves — a meeting starting in twenty minutes is not a scheduling "
       "problem, it is a phone call.")
@@ -1727,9 +1737,9 @@ POLICY=pan(L,"YOUR RESCHEDULING RULES — METIS ACTS INSIDE THEM, NEVER OUTSIDE"
   + policyrow(L,"Other people’s calendars",f'{opt(L,"Avoid conflicts",True)} {opt(L,"Ignore")}',
       "Free/busy only, and only for attendees whose calendars you can already see. Metis does not learn anything "
       "about their day beyond whether a slot is taken.")
-  + policyrow(L,"Tell them",f'{opt(L,"Draft for me",True)}',
-      "Metistry never sends. The move happens on the calendar; the note to the attendees is written for you and you "
-      "press send.",last=True)
+  + policyrow(L,"Tell them",f'{opt(L,"The calendar tells them",True)} {opt(L,"Draft a note too")}',
+      "Metistry itself never sends. Moving the event is what tells them — the calendar sends its own update — and "
+      "the warning before the move names every person who gets one.",last=True)
   + '</div>'
   + nt(L,"<b>Rescheduling is opt-in and per-user, because the rules are personal.</b> A manager moving their own "
          "1:1s is a different risk from someone shuffling a customer call, and no default can tell them apart. So "
@@ -1739,8 +1749,28 @@ POLICY=pan(L,"YOUR RESCHEDULING RULES — METIS ACTS INSIDE THEM, NEVER OUTSIDE"
          "one recurring meeting that looks movable and is not. A policy without an escape hatch gets turned off "
          "entirely the first time it is wrong.",12))
 
+def moveconfirm(T,w=380):
+    """C90: Metis may move a meeting with other people in it, and warns first. Neutral — moving a
+    meeting is not a fault — and it names people, because *Are you sure?* names nothing."""
+    ppl="".join(f'<div style="display: flex; align-items: center; gap: 8px; padding: 3px 0;">'
+                f'<span style="display: flex; color: {T["ts"]};">{ic(I["person"],13,1.9)}</span>'
+                f'<span style="font-size: 12.5px; color: {T["tp"]};">{n}</span></div>'
+                for n in ("Sam Kessler","Priya Shah","Dana Ruiz"))
+    return (f'<div style="width: {w}px; background: {T["elevated"]}; border: 1px solid {T["bc"]}; border-radius: 12px; '
+            f'box-shadow: 0 12px 34px rgba(26,24,21,0.18); padding: 14px 16px;">'
+            f'<div style="font-size: 14px; font-weight: 600; color: {T["tp"]};">Move the Vendor Sync to 11:45 AM?</div>'
+            f'<div style="font-size: 12px; color: {T["ts"]}; margin-top: 4px;">Your calendar sends these three the update.</div>'
+            f'<div style="margin-top: 9px; padding: 6px 10px; background: {T["sunken"]}; border-radius: 8px;">{ppl}</div>'
+            f'<div style="display: flex; gap: 7px; margin-top: 12px;">{btn(T,"Move It","affirm")}'
+            f'{btn(T,"Cancel","secondary")}</div></div>')
+
 CALP2=pan(L,"A CALENDAR CHANGE IS A SHAPE, NOT A DIFF",
   calblock2(L)
+  + f'<div style="display: flex; gap: 16px; align-items: flex-start; margin-top: 14px;">{moveconfirm(L)}'
+  + f'<div style="flex-grow: 1; min-width: 0;">'
+  + nt(L,"<b>Moving a meeting with other people in it warns first</b> (C90). The warning names who will be told "
+         "and the new time; nothing is tinted, because a move is not a fault. A meeting that is only yours moves "
+         "without it.") + '</div></div>'
   + nt(L,"<b>You were right that the diff was wrong here.</b> A diff is a <i>text</i> grammar: it reads top to "
          "bottom, every line is equal, and it says nothing about duration or adjacency. A calendar change is about "
          "<b>shape</b> — how long the blocks are, what sits next to what, how big the hole in the middle is. Two "
@@ -1852,7 +1882,7 @@ def spine6(T):
                 states=[("5th Day","deg",I["clock"])],last=True))
     g2=(trow3(T,title="Write the design brief for the settings pane",p=1,d="Wed",e="45m",
               links=[("project","Settings Pane",I["board"]),("agent","Work #418",I["agents"])],spark=True)
-        + trow3(T,title="Review the lease comparables",p=2,d="Fri",e="90m",
+        + trow3(T,title="Review the lease comparables",p=2,d="Wed",e="90m",
                 links=[("note","Lease Renewal",I["note"])],spark=True,last=True))
     art=(f'<div style="display: flex; gap: 10px; padding: 13px 0; border-bottom: 1px solid {T["border"]};">'
          f'{timecol(T,"9:15 AM")}<div style="flex-grow: 1; min-width: 0; max-width: 560px;">'
@@ -1863,22 +1893,22 @@ def spine6(T):
              forwhat="Standup · 9:15 AM · recurring",changed="2 Things Changed Since This Was Written")
          + '</div></div>')
     return (fold(T) + nowbar(T) + art
-      + meeting5(T,time="9:30–10:00 AM",title="1:1 with Jim Fallon",sub="every other Friday",
+      + meeting5(T,time="9:30–10:00 AM",title="1:1 with Jim Fallon",sub="every other Tuesday",
           preps=[(I["person"],"3 open tasks assigned to",(("person","Jim Fallon",I["person"]),)),
                  (I["check"],"you owe him",(("plain","Sign the SOW",I["check"]),))],
           series=True,
           gen="The lease comparables came back 4% under his number, which is the thing you did not have on the 6th. "
               "He has been waiting on the SOW since Tuesday.",
-          pred=("Draft The Agenda","— 3 open items, and one carried from last time"))
-      + gap(T,"1h 30m",g1,"2 tasks fit · 30m to spare")
-      + focusblock(T,"12:30 PM","Focus — the settings brief","90m")
+          pred=("Draft the Agenda","— 3 open items, and one carried from last time"))
+      + gap(T,"35m",g1,"2 tasks fit · 5m to spare")
       + travel(T,"25m","to the Ann Arbor office")
-      + meeting5(T,time="1:00–2:00 PM",title="Design review",sub="4 people · in person",
+      + meeting5(T,time=F["design_review"],title="Design review",sub="4 people · in person · moved from 1:00 PM",
           preps=[(I["board"],"in review, and what this is about",(("agent","Work #418",I["agents"]),)),
-                 (I["note"],"written in the block above",(("project","Settings Pane",I["board"]),))],
+                 (I["note"],"its brief gets the focus block after it",(("project","Settings Pane",I["board"]),))],
           pred=("Open Work #418","— the review is about it"))
       + travel(T,"25m","back")
-      + gap(T,"2h 10m",g2,"1 of 2 fits"))
+      + focusblock(T,"12:30 PM","Focus — the settings brief","90m")
+      + gap(T,"2h",g2,"1 of 2 fits"))
 
 def hub6(T,dark=False,w=1280):
     return (f'<div style="width: {w}px; border: 1px solid {T["bc"]}; border-radius: 12px; overflow: hidden; '
@@ -1888,7 +1918,7 @@ def hub6(T,dark=False,w=1280):
             f'<div style="padding: 14px 16px 13px; background: {T["surface"]}; border-bottom: 1px solid {T["border"]};">'
             f'<div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">'
             f'<span style="font-size: 17px; font-weight: 600; color: {T["tp"]};">Today</span>'
-            f'<span style="font-size: 12.5px; color: {T["ts"]};">Sunday 20 September</span>'
+            f'<span style="font-size: 12.5px; color: {T["ts"]};">{F["day"]}</span>'
             f'<span style="flex-grow: 1;"></span>'
             f'<span style="font-size: 11.5px; color: {T["tt"]};">as of 2 min ago</span>{seg(T)}</div>'
             f'{daybar(T,dark)}</div>'
@@ -1898,7 +1928,7 @@ def hub6(T,dark=False,w=1280):
                     diffblock=diff(T,summary="3 items moved on today’s plan",lines=[
                         (" ","9:30 AM  1:1 with Jim Fallon"),
                         ("-","Review the lease comparables   due Fri"),
-                        ("+","Review the lease comparables   due Mon"),
+                        ("+","Review the lease comparables   due Wed"),
                         ("-","Write the design brief         3rd"),
                         ("+","Write the design brief         1st")]),
                     acts=[btn(T,"Undo","secondary",I["undo"])]) + '</div>'
@@ -2044,7 +2074,7 @@ def accesscard(T,*,state="pending",width=None,agent="drey-dev",trust="internal",
     body=head+title+askreason(T,ASK_REASON)+scope
     acts=(f'<div style="display: flex; align-items: center; gap: 8px; margin-top: 14px;">'
           f'{btn(T,"Approve","affirm",I["check"])}{btn(T,"Revise","secondary",I["pencil"])}'
-          f'{btn(T,"Decline","dest",I["x"])}'
+          f'{btn(T,"Decline","secondary",I["x"])}'
           f'<span style="flex-grow: 1;"></span>'
           f'{btn(T,"","ghost",I["later"],icon_only=True,title="Later — it comes back on its own")}</div>')
     if state=="pending":
@@ -2112,12 +2142,12 @@ def routineprose(T,text,*,when,w=None):
             f'margin: 2px 16px 12px 44px; box-sizing: border-box;">'
             f'<div style="display: flex; align-items: center; gap: 7px;">'
             f'<span style="display: flex; color: {T["ag"]};">{ic(I["spark"],13,2.2)}</span>'
-            f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["ag"]};">METIS WROTE THIS</span>'
+            f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["ag"]};">{AN} WROTE THIS</span>'
             f'<span style="flex-grow: 1;"></span>'
             f'<span style="font-size: 11px; color: {T["ts"]};">{when}</span></div>'
             f'<div style="font-family: {SERIF}; font-size: 13px; color: {T["tp"]}; line-height: 1.6; margin-top: 9px;">{text}</div>'
             f'<div style="display: flex; align-items: center; gap: 10px; margin-top: 11px;">'
-            f'{btn(T,"Open the file","secondary",I["note"])}'
+            f'{btn(T,"Open the File","secondary",I["note"])}'
             f'<span style="flex-grow: 1;"></span>'
             + thumbs(T) + '</div></div>')
 
@@ -2137,7 +2167,7 @@ def routinerows(T,*,last_absent=False):
             detail=ms+"Journal/Plan/2026-09-21.md</span> &middot; built-in &middot; 9 tasks, 2 meetings, 45m left empty",
             when="6m",kind="system",spark=True,expand="what it wrote")
           + routineprose(T,PLAN_PROSE,when="6:02 AM")
-          + feedrow(T,glyph=I["repeat"],actor="collator",subject="Morning Digest",
+          + feedrow(T,glyph=I["repeat"],actor="collator",subject="Morning Brief",
             detail="ran its routine &middot; "+ms+"Journal/Digest/2026-09-21.md</span> &middot; 6 rows from 4 files",
             when="1h",kind="agent",spark=True,expand="what it wrote")
           + routineprose(T,STANDUP_PROSE,when="9:02 AM"))
@@ -2334,7 +2364,7 @@ def roster(T,w=None):
     wd=f"width: {w}px;" if w else "flex-grow: 1; min-width: 0;"
     head=(f'<div style="display: flex; align-items: center; gap: 10px; padding: 14px 16px;">'
           f'<span style="font-size: 17px; font-weight: 600; color: {T["tp"]}; flex-grow: 1;">Agents</span>'
-          f'{btn(T,"New credential","secondary",I["plus"])}</div>'
+          f'{btn(T,"New Credential","secondary",I["plus"])}</div>'
           f'<div style="display: grid; grid-template-columns: 9px minmax(0,1fr) 150px 116px 64px 54px 16px; gap: 12px; '
           f'padding: 0 16px 7px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; color: {T["tt"]};">'
           f'<span></span><span>CREDENTIAL</span><span>ROLE</span><span>SEES</span>'
@@ -2342,11 +2372,11 @@ def roster(T,w=None):
     rows=(credrow(T,id_="metis",role="the instance assistant",scope="folders · 4",spend="$0.31",seen="now",
             state="working",open_=True)
           + openrow(T)
-          + credrow(T,id_="drey-dev",role="an agent",scope="folders · 1",spend="$0.04",seen="12m",state="queued",
+          + credrow(T,id_="drey-dev",role="an agent",scope="folders · 1",spend="$0.52",seen="12m",state="queued",
               note="1 bundle waiting")
           + credrow(T,id_="taskuary",role="an agent",external=True,scope="titles",spend="—",seen="41m",state="idle",
               ceiling="asked twice for <b>Areas/Finance</b> · declined both · it can no longer ask")
-          + credrow(T,id_="research-crew",role="a crew",scope="folders · 2",spend="$1.90",seen="3h",
+          + credrow(T,id_="research-crew",role="a crew",scope="folders · 2",spend="$0.19",seen="3h",
               state="interrupted",note="a lease expired 20m ago and the claim is still held",last=True))
     return (f'<div style="{wd} background: {T["bg"]};">{head}{rows}{revokedgroup(T)}</div>')
 
@@ -2384,7 +2414,7 @@ def replyturn(T,text,*,when="8:47 AM",quotebar=True,hang=True,w=MEASURE,state=No
     return (f'<div style="{bar} box-sizing: border-box;">'
             f'<div style="display: flex; align-items: center; gap: 7px; margin-bottom: 6px;">'
             f'<span style="display: flex; color: {T["ag"]};">{ic(I["spark"],13,2.2)}</span>'
-            f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["ag"]};">ASSISTANT</span>'
+            f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["ag"]};">{AN}</span>'
             f'<span style="font-size: 11px; color: {T["tt"]};">{when}</span>'
             f'<span style="flex-grow: 1;"></span>{thumbs(T,state)}</div>'
             f'<div style="font-family: {SERIF}; font-size: 14.5px; color: {T["tp"]}; line-height: 1.62;">{text}</div></div>')
@@ -2485,7 +2515,7 @@ def transcript(T,*,w=None,inflight=True):
         strip=(f'<div style="width: {MEASURE}px; box-sizing: border-box;">'
                f'<div style="display: flex; align-items: center; gap: 7px; margin-bottom: 6px;">'
                f'<span style="display: flex; color: {T["ag"]};">{ic(I["spark"],13,2.2)}</span>'
-               f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["ag"]};">ASSISTANT</span>'
+               f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["ag"]};">{AN}</span>'
                f'<span style="font-size: 11px; color: {T["tt"]};">8:48 AM</span></div>'
                f'<div style="background: {T["agq"]}; border-radius: 10px; padding: 10px 12px;">'
                f'{toolstrip(T)}</div></div>')
@@ -2525,10 +2555,10 @@ def roster2(T,w=None):
     wd=f"width: {w}px;" if w else "flex-grow: 1; min-width: 0;"
     head=(f'<div style="display: flex; align-items: center; gap: 10px; padding: 14px 16px 4px;">'
           f'<span style="font-size: 17px; font-weight: 600; color: {T["tp"]}; flex-grow: 1;">Agents</span>'
-          f'{btn(T,"New agent","secondary",I["plus"])}</div>')
+          f'{btn(T,"New Agent","secondary",I["plus"])}</div>')
     yours=(groupbar(T,"YOURS","3")
-           + arow(T,name="collator",what="daily at 6:02 AM · Morning Digest",seen="6m",state="working",
-                  sel=True,link="Morning Digest")
+           + arow(T,name="collator",what="daily at 6:02 AM · Morning Brief",seen="6m",state="working",
+                  sel=True,link="Morning Brief")
            + arow(T,name="vendor-research",what="when Metis delegates",seen="3h")
            + arow(T,name="inbox-triage",what="paused",seen="—",last=True))
     conn=(groupbar(T,"CONNECTED","2")
@@ -2574,7 +2604,7 @@ def reachblock(T,*,routine_extra=True):
     if routine_extra:
         extra=(f'<div style="background: {T["degq"]}; border-radius: 9px; padding: 11px 13px; margin-top: 11px;">'
                f'<div style="font-size: 11.5px; color: {T["tp"]}; line-height: 1.55;">'
-               f'During <span style="font-weight: 600; color: {T["acc"]};">Morning Digest</span> it can also read '
+               f'During <span style="font-weight: 600; color: {T["acc"]};">Morning Brief</span> it can also read '
                + mono("Areas/Finance",T["tp"],11.5) + ' and write ' + mono("Journal/Digest/",T["tp"],11.5) + '.'
                f'</div><div style="font-size: 11.5px; color: {T["ts"]}; line-height: 1.5; margin-top: 5px;">'
                f'It holds neither the rest of the time.</div></div>')
@@ -2621,18 +2651,18 @@ def detailhead(T,*,name,what,state,actions_):
 
 def localdetail(T,w=None):
     wd=f"width: {w}px; flex-shrink: 0;" if w else "flex-grow: 1; min-width: 0;"
-    acts=f'<div style="display: flex; gap: 8px;">{btn(T,"Run now","secondary",I["spark"],spark=True)}{btn(T,"Pause","ghost")}</div>'
+    acts=f'<div style="display: flex; gap: 8px;">{btn(T,"Run Now","secondary",I["spark"],spark=True)}{btn(T,"Pause","ghost")}</div>'
     return (f'<div style="{wd} background: {T["bg"]};">'
-            + detailhead(T,name="collator",what="yours · runs daily at 6:02 AM for Morning Digest",
+            + detailhead(T,name="collator",what="yours · runs daily at 6:02 AM for Morning Brief",
                          state="working",actions_=acts)
             + f'<div style="padding: 16px; display: flex; flex-direction: column; gap: 16px;">'
             + defeditor(T)
             + permmatrix(T,routine_grant=True,
                 note="A marked line is access this agent does not hold on its own. Outside "
-                     "<b>Morning Digest</b> it cannot read <b>Areas/Vendors</b> or write to "
+                     "<b>Morning Brief</b> it cannot read <b>Areas/Vendors</b> or write to "
                      "<b>Journal/Digest/</b>.")
             + block(T,"ITS ROUTINES",sunk(T,
-                linkrow(T,"Morning Digest","each day at 6:02 AM · grants 2 more paths for the task")
+                linkrow(T,"Morning Brief","each day at 6:02 AM · grants 2 more paths for the task")
                 + linkrow(T,"Vendor Sweep","each day at 7:00 AM · failed 2 days ago",last=True)))
             + block(T,"RECENT RUNS",sunk(T,
                 runrow(T,"today 6:02 AM","wrote Journal/Digest/2026-09-21.md","2.1&cent;")
@@ -2670,7 +2700,7 @@ def conndetail(T,w=None):
 
 # ===================== ROUTINES ==========================================
 def rrow(T,*,name,who,when,how,nxt,state="ok",last=False,built=False):
-    gl_,tone = {"ok":(I["check"],T["ok"]),"none":(None,T["ts"]),"fail":(I["warn"],T["deg"]),
+    gl_,tone = {"ok":(I["check"],T["ok"]),"none":(None,T["ts"]),"fail":(I["failed"],T["fail"]),
                 "paused":(None,T["tt"])}[state]
     mark=(f'<span style="display: flex; color: {tone};">{ic(gl_,13,2.2)}</span>' if gl_ else
           '<span style="width: 13px;"></span>')
@@ -2688,13 +2718,13 @@ def routineroster(T,w=None):
     wd=f"width: {w}px;" if w else "flex-grow: 1; min-width: 0;"
     head=(f'<div style="display: flex; align-items: center; gap: 10px; padding: 14px 16px 4px;">'
           f'<span style="font-size: 17px; font-weight: 600; color: {T["tp"]}; flex-grow: 1;">Routines</span>'
-          f'{btn(T,"New routine","secondary",I["plus"])}</div>'
+          f'{btn(T,"New Routine","secondary",I["plus"])}</div>'
           f'<div style="display: grid; grid-template-columns: minmax(0,1fr) 126px 150px 152px 92px; gap: 12px; '
           f'padding: 6px 16px 6px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; color: {T["tt"]};">'
           f'<span>ROUTINE</span><span>WHO RUNS IT</span><span>WHEN IT ACTS</span><span>HOW IT WENT</span>'
           f'<span style="text-align: right;">NEXT</span></div>')
     day=(groupbar(T,"EACH DAY","4")
-         + rrow(T,name="Morning Digest",who="collator",when="6:02 AM",how="6m ago",nxt="6:02 AM")
+         + rrow(T,name="Morning Brief",who="collator",when="6:02 AM",how="6m ago",nxt="6:02 AM")
          + rrow(T,name="Tomorrow&rsquo;s Plan",who="",when="each evening",how="9:14 PM",nxt="tonight",built=True)
          + rrow(T,name="Reply Review",who="",when="overnight",how="nothing to do",nxt="tonight",
                 state="none",built=True)
@@ -2761,9 +2791,9 @@ def actsblock(T):
 
 def routinedetail(T,w=None):
     wd=f"width: {w}px; flex-shrink: 0;" if w else "flex-grow: 1; min-width: 0;"
-    acts=f'<div style="display: flex; gap: 8px;">{btn(T,"Run now","secondary",I["spark"],spark=True)}{btn(T,"Pause","ghost")}</div>'
+    acts=f'<div style="display: flex; gap: 8px;">{btn(T,"Run Now","secondary",I["spark"],spark=True)}{btn(T,"Pause","ghost")}</div>'
     return (f'<div style="{wd} background: {T["bg"]};">'
-            + detailhead(T,name="Morning Digest",what="collator &middot; each day at 6:02 AM",
+            + detailhead(T,name="Morning Brief",what="collator &middot; each day at 6:02 AM",
                          state="working",actions_=acts)
             + f'<div style="padding: 16px; display: flex; flex-direction: column; gap: 16px;">'
             + promptlayers(T) + reachlayers(T)
@@ -2791,10 +2821,10 @@ MODEL_GLYPH={"Knowledge":"know","Work":"work","Artifacts":"note","Inbox":"tray",
              "Jira":"plug","Confluence":"plug"}
 
 def maylabel(T,mode):
-    """The wire says allow | propose | deny. The owner reads Allow | Ask First |
-    Never — the same rename the tier words already got (`titles`/`folders` for
+    """The wire says allow | propose | deny. The owner reads On | Ask | Off (C93,
+    ruled 2026-09-23) — the same rename the tier words already got (`titles`/`folders` for
     `index`/`areas`). Weight channel, never green-for-yes and red-for-no."""
-    lab={"allow":"Allow","propose":"Ask First","deny":"Never"}[mode]
+    lab={"allow":"On","propose":"Ask","deny":"Off"}[mode]
     if mode=="allow":   st=f'background: {T["tp"]}; border: 1px solid {T["tp"]};'
     elif mode=="propose": st=f'background: transparent; border: 1.5px solid {T["tp"]};'
     else:               st=f'background: transparent; border: 1px dashed {T["tt"]};'
@@ -2929,13 +2959,13 @@ def routinelist2(T,w=None):
           f'padding: 6px 16px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; color: {T["tt"]};">'
           f'<span></span><span>WHEN</span><span>ROUTINE</span><span>AGENT</span><span>RECURRENCE</span></div>')
     today=(dayband(T,"TODAY")
-           + occrow(T,at="6:02 AM",name="Morning Digest",agent="collator",recur="Every day at 6:02 AM")
+           + occrow(T,at="6:02 AM",name="Morning Brief",agent="collator",recur="Every day at 6:02 AM")
            + occrow(T,at="7:00 AM",name="Vendor Sweep",agent="vendor-research",recur="Every day at 7:00 AM",
                     state="fail")
            + occrow(T,at="6:00 PM",name="Knowledge Fold",agent=None,recur="Every evening")
            + occrow(T,at="10:00 PM",name="Tomorrow&rsquo;s Plan",agent=None,recur="Every evening",last=True))
     tom=(dayband(T,"TOMORROW · TUESDAY")
-         + occrow(T,at="6:02 AM",name="Morning Digest",agent="collator",recur="Every day at 6:02 AM")
+         + occrow(T,at="6:02 AM",name="Morning Brief",agent="collator",recur="Every day at 6:02 AM")
          + occrow(T,at="7:00 AM",name="Vendor Sweep",agent="vendor-research",recur="Every day at 7:00 AM")
          + occrow(T,at="9:00 AM",name="Standup Notes",agent="collator",recur="Every Tuesday at 9:00 AM")
          + occrow(T,at="6:00 PM",name="Knowledge Fold",agent=None,recur="Every evening",last=True))
@@ -2999,7 +3029,7 @@ def sessionview(T):
             f'<div style="font-family: {SERIF}; font-size: 13px; color: {T["tp"]}; line-height: 1.6;">{OUT_SAMPLE}</div>'
             f'<div style="display: flex; align-items: center; gap: 10px; margin-top: 11px; padding-top: 11px; '
             f'border-top: 1px solid {T["border"]};">'
-            f'{btn(T,"Open The File","secondary",I["note"])}{btn(T,"Copy Prompt","ghost",I["copy"])}'
+            f'{btn(T,"Open the File","secondary",I["note"])}{btn(T,"Copy Prompt","ghost",I["copy"])}'
             f'<span style="flex-grow: 1;"></span>{thumbs(T)}</div></div>')
 
 def histrow(T,when,what,cost,*,ok=True,open_=False,last=False):
@@ -3021,11 +3051,11 @@ def suggestion(T):
             f'<div style="display: flex; align-items: center; gap: 7px;">'
             f'<span style="display: flex; color: {T["ag"]};">{ic(I["spark"],13,2.2)}</span>'
             f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["ag"]};">'
-            f'METIS SUGGESTS</span></div>'
+            f'{AN} SUGGESTS</span></div>'
             f'<div style="font-family: {SERIF}; font-size: 13px; color: {T["tp"]}; line-height: 1.6; '
             f'margin-top: 9px;">{SUGGEST}</div>'
             f'<div style="display: flex; align-items: center; gap: 8px; margin-top: 12px;">'
-            f'{btn(T,"Change The Schedule","secondary",I["check"])}{btn(T,"Dismiss","ghost")}'
+            f'{btn(T,"Approve","affirm",I["check"])}{btn(T,"Revise","secondary",I["pencil"])}{btn(T,"Decline","secondary",I["x"])}'
             f'<span style="flex-grow: 1;"></span>{thumbs(T)}</div></div>')
 
 def historyblock(T):
@@ -3042,7 +3072,7 @@ def routinedetail2(T,w=None):
     head=(f'<div style="display: flex; align-items: center; gap: 12px; padding: 13px 16px; '
           f'border-bottom: 1px solid {T["border"]};">'
           f'<span style="display: flex; color: {T["ts"]};">{ic(I["chevr"],15,2.2)}</span>'
-          f'<div style="flex-grow: 1; min-width: 0;">{renamefield(T,"Morning Digest")}'
+          f'<div style="flex-grow: 1; min-width: 0;">{renamefield(T,"Morning Brief")}'
           f'<div style="display: flex; align-items: center; gap: 7px; margin-top: 5px; padding-left: 10px;">'
           f'<span style="font-size: 12px; color: {T["ts"]};">Run by</span>'
           f'<span style="display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; '
@@ -3075,8 +3105,8 @@ RES_GLYPH={"Knowledge":"know","Work":"work","Artifacts":"note","Inbox":"tray",
 
 def askmark(T):
     """This verb lands as a request instead of running. The wire's `propose`."""
-    return (f'<span title="Asks you first" style="display: inline-flex; align-items: center; '
-            f'color: {T["ts"]}; vertical-align: -1px;">{ic(I["later"],11,2.1)}</span>')
+    return (f'<span title="Ask" style="display: inline-flex; align-items: center; '
+            f'color: {T["ts"]}; vertical-align: -1px;">{ic(I["ask"],11,2.0)}</span>')
 
 def provmark(T,label):
     return (f'<span style="display: inline-flex; align-items: center; gap: 3px; font-size: 10px; '
@@ -3108,8 +3138,8 @@ def permmatrix(T,*,proxied=True,label="PERMISSIONS",note=None,routine_grant=Fals
     kread=[("Areas/Ops",True,False,None),("Areas/Finance",True,False,"Needs You #311")]
     kwrite=[]
     if routine_grant:
-        kread=kread+[("Areas/Vendors",True,False,"Morning Digest only")]
-        kwrite=[("Journal/Digest/",True,False,"Morning Digest only")]
+        kread=kread+[("Areas/Vendors",True,False,"Morning Brief only")]
+        kwrite=[("Journal/Digest/",True,False,"Morning Brief only")]
     rows=(resrow(T,res="Knowledge",read=kread,write=kwrite)
           + resrow(T,res="Work",read=[("All tasks",False,False,None)],
             write=[("Update",False,False,None),("Comment",False,False,None),("Dispatch",False,True,None)])
@@ -3124,9 +3154,9 @@ def permmatrix(T,*,proxied=True,label="PERMISSIONS",note=None,routine_grant=Fals
     leg=(f'<div style="display: flex; align-items: center; gap: 18px; margin-top: 11px; padding-top: 10px; '
          f'border-top: 1px solid {T["border"]};">'
          f'<span style="display: inline-flex; align-items: center; gap: 6px;">{askmark(T)}'
-         f'<span style="font-size: 11.5px; color: {T["ts"]};">Asks you first</span></span>'
+         f'<span style="font-size: 11.5px; color: {T["ts"]};">Ask &mdash; comes to you first</span></span>'
          + (f'<span style="display: inline-flex; align-items: center; gap: 6px;">'
-            f'<span style="display: flex; color: {T["ag"]};">{ic(I["plug"],12,1.9)}</span>'
+            f'<span style="display: flex; color: {T["ag"]};">{ic(I["relay"],12,1.9)}</span>'
             f'<span style="font-size: 11.5px; color: {T["ts"]};">Reached through Metistry</span></span>' if proxied else "")
          + f'<span style="flex-grow: 1;"></span>'
            f'<span style="font-size: 11.5px; color: {T["ts"]};">Anything not listed is not granted.</span></div>')
@@ -3188,13 +3218,14 @@ def timeline(T,*,w=None):
 
 # ---------- Resources: where a connection is defined -------------------------
 def connrow(T,*,name,kind,tools,used,state="ok",last=False):
+    # C95: an expired credential is failed, with its own mark, not the degraded dot
     dot=(f'<span style="width: 8px; height: 8px; border-radius: 50%; background: {T["ok"]};"></span>'
          if state=="ok" else
-         f'<span style="width: 8px; height: 8px; border-radius: 50%; background: {T["deg"]};"></span>')
+         f'<span style="display: flex; color: {T["fail"]}; margin-left: -2px;">{ic(I["failed"],12,2.2)}</span>')
     return (f'<div style="display: grid; grid-template-columns: 9px 140px 124px 80px minmax(0,1fr) 16px; '
             f'align-items: center; gap: 12px; padding: 11px 16px; {bd_(T,last)}">{dot}'
             f'<span style="display: inline-flex; align-items: center; gap: 8px;">'
-            f'<span style="display: flex; color: {T["ag"]};">{ic(I["plug"],14,1.8)}</span>'
+            f'<span style="display: flex; color: {T["ag"]};">{ic(I["relay"],14,1.8)}</span>'
             f'<span style="font-size: 13px; font-weight: 500; color: {T["tp"]};">{name}</span></span>'
             f'<span style="font-size: 12px; color: {T["ts"]};">{kind}</span>'
             f'<span style="font-size: 12px; color: {T["ts"]};">{tools}</span>'
@@ -3205,7 +3236,7 @@ def resourcelist(T,w=None):
     wd=f"width: {w}px;" if w else "flex-grow: 1; min-width: 0;"
     head=(f'<div style="display: flex; align-items: center; gap: 10px; padding: 14px 16px 4px;">'
           f'<span style="font-size: 17px; font-weight: 600; color: {T["tp"]}; flex-grow: 1;">Resources</span>'
-          f'{btn(T,"Connect A Server","secondary",I["plus"])}</div>'
+          f'{btn(T,"Connect a Server","secondary",I["plus"])}</div>'
           f'<div style="display: grid; grid-template-columns: 9px 140px 124px 80px minmax(0,1fr) 16px; gap: 12px; '
           f'padding: 6px 16px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; color: {T["tt"]};">'
           f'<span></span><span>SERVER</span><span>KIND</span><span>TOOLS</span><span>GRANTED TO</span><span></span></div>')
@@ -3214,7 +3245,7 @@ def resourcelist(T,w=None):
           + connrow(T,name="Confluence",kind="MCP &middot; work network",tools="6 tools",used="collator")
           + connrow(T,name="Linear",kind="MCP &middot; hosted",tools="9 tools",used="Nobody yet")
           + connrow(T,name="Sentry",kind="MCP &middot; hosted",tools="4 tools",
-            used="Token expired 2 days ago",state="deg",last=True))
+            used="Last worked 2 days ago &middot; token expired",state="fail",last=True))
     return f'<div style="{wd} background: {T["bg"]};">{head}{rows}</div>'
 
 
@@ -3450,7 +3481,7 @@ def folddigest(T,w=None):
             f'<div style="font-family: {SERIF}; font-size: 14.5px; color: {T["tp"]}; line-height: 1.65; '
             f'margin-top: 11px;">{body}</div>'
             f'<div style="display: flex; align-items: center; gap: 9px; margin-top: 13px;">'
-            + btn(T,"Open The Fold","secondary",I["note"]) + btn(T,"Earlier Folds","ghost")
+            + btn(T,"Open the Fold","secondary",I["note"]) + btn(T,"Earlier Folds","ghost")
             + f'<span style="flex-grow: 1;"></span>{thumbs(T)}</div>'
             + teachline(T,"Metis writes here, in its own voice, as its own commit. <b>Your own daily note is "
                           "never touched</b> — one writer per file, and this is not that file.") + '</div>')
@@ -3514,8 +3545,8 @@ def sourceline(T,*,ok=True):
     if ok:
         return (f'<div style="display: flex; align-items: center; gap: 10px; background: {T["sunken"]}; '
                 f'border-radius: 9px; padding: 10px 14px;">'
-                f'<span style="width: 8px; height: 8px; border-radius: 50%; background: {T["ok"]};"></span>'
-                f'<span style="font-size: 12px; color: {T["tp"]};">4 sources, all current</span>'
+                f'<span style="width: 8px; height: 8px; border-radius: 50%; box-sizing: border-box; border: 1.5px solid {T["tt"]};"></span>'
+                f'<span style="font-size: 12px; color: {T["tp"]};">4 sources &middot; freshness unknown</span>'
                 f'<span style="flex-grow: 1;"></span>'
                 f'<span style="display: flex; color: {T["tt"]};">{ic(I["chevr"],13,2.2)}</span></div>')
     return (f'<div style="background: {T["sunken"]}; border-radius: 9px; padding: 10px 14px;">'
@@ -3563,7 +3594,7 @@ def draftreview(T,w=None):
             f'<div style="display: flex; align-items: center; gap: 7px;">'
             f'<span style="display: flex; color: {T["ag"]};">{ic(I["spark"],13,2.2)}</span>'
             f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["ag"]};">'
-            f'METIS WROTE THIS FROM 3 CAPTURES</span></div>'
+            f'{AN} WROTE THIS FROM 3 CAPTURES</span></div>'
             f'<div style="font-family: {SERIF}; font-size: 14px; color: {T["tp"]}; line-height: 1.65; '
             f'margin-top: 10px;">{DRAFT_BODY}</div></div>'
             + block(T,"WHERE IT CAME FROM",sunk(T,
@@ -3575,8 +3606,8 @@ def draftreview(T,w=None):
                 + kv(T,"Removes","status: draft &mdash; agents can read it from then on")
                 + kv(T,"Answers","the request waiting in Needs You",last=True)))
             + f'<div style="display: flex; align-items: center; gap: 9px;">'
-            + btn(T,"Accept","affirm",I["check"]) + btn(T,"Edit First","secondary",I["pencil"])
-            + btn(T,"Discard","dest",I["x"]) + '</div>'
+            + btn(T,"Approve","affirm",I["check"]) + btn(T,"Revise","secondary",I["pencil"])
+            + btn(T,"Decline","secondary",I["x"]) + '</div>'
             + teachline(T,"This arrived as a request, so answering it here answers it there. <b>Needs You</b> is "
                           "where a decision is asked for; this is where there is room to correct the prose.")
             + '</div></div>')
@@ -3604,8 +3635,8 @@ def conflictresolve(T,w=None):
             f'stopped rather than choosing, so <b>the title and date on this row are not facts yet</b>.</div></div>'
             + diff(T,summary="Yours, against what the fold wrote",lines=CONFLICT,open_=True)
             + f'<div style="display: flex; align-items: center; gap: 9px; flex-wrap: wrap;">'
-            + btn(T,"Keep Mine","secondary") + btn(T,"Take The Fold&rsquo;s","secondary")
-            + btn(T,"Merge In Obsidian","ghost",I["note"]) + '</div>'
+            + btn(T,"Keep Mine","secondary") + btn(T,"Take the Fold&rsquo;s","secondary")
+            + btn(T,"Merge in Obsidian","ghost",I["note"]) + '</div>'
             + teachline(T,"<b>One writer per file</b> is the rule that makes the vault safe to share with agents. A "
                           "conflict is that rule holding — the alternative is a silent overwrite.")
             + '</div></div>')
@@ -3628,7 +3659,7 @@ def glass(T,*,radius=18,marks=False,tint=None):
     grounding shadow. The scrim is the only one that is not decoration."""
     dark = T is D
     a = GLASS_MARK if marks else GLASS_TEXT
-    top,bot = (a+0.02, a-0.01)
+    top,bot = (a+0.02, a)   # C74: the floor is the floor — no stop may dip under it
     spec = "rgba(255, 255, 255, 0.20)" if dark else "rgba(255, 255, 255, 0.62)"
     lip  = "rgba(255, 255, 255, 0.07)" if dark else "rgba(255, 255, 255, 0.24)"
     base = "rgba(0, 0, 0, 0.30)" if dark else "rgba(0, 0, 0, 0.055)"
@@ -3651,7 +3682,7 @@ def motioncss():
             '50% { transform: scale(1.5); opacity: 0.12; } }'
             '.mt-breath { animation: mtbreath 2.6s cubic-bezier(.42,0,.58,1) infinite; }'
             '@media (prefers-reduced-motion: reduce) { .mt-breath { animation: none; '
-            'transform: scale(1.32); opacity: 0.4; } }'
+            'transform: scale(1.5); opacity: 0.4; } }'
             '</style>')
 
 # ---------- the mark, the senses ----------------------------------------------
@@ -3756,7 +3787,7 @@ def quickfield(T,*,kind="note",saved=False,w=270,top=0,right=52):
     if saved:
         inner=(f'<span style="display: flex; color: {T["ok"]};">{ic(I["check"],14,2.2)}</span>'
                f'<span style="font-size: 12px; color: {T["tp"]};">{"Noted" if kind=="note" else "To-do added"}</span>'
-               f'<span style="font-family: {MONO}; font-size: 11px; color: {T["ts"]};">13:02</span>')
+               f'<span style="font-family: {MONO}; font-size: 11px; color: {T["ts"]};">1:02 PM</span>')
     else:
         ph = "Send him the comparables before Friday" if kind=="todo" else "Measuring against last year, not the comps"
         inner=(f'<span style="display: flex; color: {T["ts"]};">{ic(g,14,1.9)}</span>'
@@ -3812,9 +3843,9 @@ def jotlog(T,*,open_=True):
           f'<span style="display: flex; color: {T["tt"]};">{ic(I["chevd"] if open_ else I["chevr"],12,2.2)}</span></div>')
     if not open_: return head
     return (head + f'<div style="margin-top: 6px;">'
-            + jotrow(T,kind="note",when="13:02",text="He is measuring against last year, not the comparables")
-            + jotrow(T,kind="todo",when="13:20",text="Send him the four comparables before Friday")
-            + jotrow(T,kind="note",when="13:38",text="Volume tier claim needs checking",last=True) + '</div>')
+            + jotrow(T,kind="note",when="1:02 PM",text="He is measuring against last year, not the comparables")
+            + jotrow(T,kind="todo",when="1:20 PM",text="Send him the four comparables before Friday")
+            + jotrow(T,kind="note",when="1:38 PM",text="Volume tier claim needs checking",last=True) + '</div>')
 
 def barpanel(T,*,live=False,w=328,senses=("screen","mic")):
     """Chat, as it was before the mode pills: the tail of the one conversation and
@@ -3822,7 +3853,7 @@ def barpanel(T,*,live=False,w=328,senses=("screen","mic")):
     if live:
         head=(f'<div style="display: flex; align-items: center; gap: 9px; padding: 11px 13px 10px;">'
               f'{breathmark(T,size=15)}'
-              f'<span style="font-family: {MONO}; font-size: 12px; color: {T["ag"]};">13:42</span>'
+              f'<span style="font-family: {MONO}; font-size: 12px; color: {T["ag"]};">13m 42s</span>'
               f'<span style="font-size: 11.5px; color: {T["ts"]};">Zoom</span>'
               f'<span style="flex-grow: 1;"></span>'
               + "".join(sensepip(T,s,size=12) for s in senses) + '</div>')
@@ -3925,7 +3956,7 @@ def kept(T):
                       f'<span style="font-size: 12px; color: {T["ts"]};">{b}</span></div>'
               for i,(a,b) in enumerate([
                 ("Audio","never kept"),
-                ("Transcript","90 minutes, then gone"),
+                ("Transcript","30 days"),
                 ("Notes","only what you approve, in your vault")])) + '</div>')
 
 def capturesettings(T,w=520,bare=False):
@@ -3966,7 +3997,7 @@ def crumb(T,parts):
     return f'<span style="display: inline-flex; align-items: center; gap: 8px;">{sep.join(out)}</span>'
 
 def runheader(T,*,crumbs,title,when,ok=True,why=None):
-    state=(pill(T,"ran clean",T["ok"],T["okq"]) if ok else pill(T,"failed",T["deg"],T["degq"]))
+    state=(pill(T,"ran clean",T["ok"],T["okq"]) if ok else pill(T,"failed",T["fail"],T["failq"],I["failed"]))
     err=(f'<div style="margin-top: 11px; background: {T["degq"]}; border-radius: 9px; padding: 10px 13px; '
          f'font-size: 12.5px; color: {T["tp"]}; line-height: 1.5;">{why}</div>') if why else ""
     return (f'<div style="padding: 14px 18px 13px; border-bottom: 1px solid {T["border"]};">'
@@ -3998,7 +4029,7 @@ def agentturn(T,text,when):
     return (f'<div style="border-left: 2px solid {T["ag"]}; padding-left: 14px;">'
             f'<div style="display: flex; align-items: center; gap: 7px; margin-bottom: 5px;">'
             f'<span style="display: flex; color: {T["ag"]};">{ic(I["spark"],12,2.2)}</span>'
-            f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["ag"]};">METIS</span>'
+            f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["ag"]};">{AN}</span>'
             f'<span style="font-family: {MONO}; font-size: 10.5px; color: {T["tt"]};">{when}</span></div>'
             f'<div style="font-family: {SERIF}; font-size: 13.5px; color: {T["tp"]}; line-height: 1.62;">{text}</div></div>')
 
@@ -4034,7 +4065,7 @@ def sessionpane(T,*,failed=False,w=None):
                        "what is on, what moved, what needs me. Cite the file every line came from.",open_=True)
             + '</div>')
     calls=(toolcall(T,name="calendar.events",args='{ "day": "2026-09-22" }',
-                    result='4 events · first at 09:15 "Standup" · last at 15:00 "Vendor review"',ms="0.4s",open_=False)
+                    result='4 events · first at 09:15 "Standup" · last at 13:00 "Vendor review"',ms="0.4s",open_=False)
            + toolcall(T,name="knowledge.read",args='{ "path": "Journal/2026-09-21.md" }',
                       result='1,204 words · 3 open loops · mentions "lease comps" twice',ms="0.2s")
            + (toolcall(T,name="knowledge.read",args='{ "path": "Areas/Finance/runway.md" }',result="",ms="0.1s",
@@ -4047,9 +4078,9 @@ def sessionpane(T,*,failed=False,w=None):
            if failed else
            agentturn(T,"Four things on today. The lease comparables are the one that moved: they came back "
                        "<b>4% under</b> his number. #418 is still blocked on the vendor terms. Brief written to "
-                       "<b>Journal/2026-09-22.md</b>.","6:03:12"))
+                       "<b>Journal/Brief/2026-09-22.md</b>.","6:03:12"))
     out=(f'<div style="display: flex; align-items: center; gap: 9px; margin-top: 4px;">'
-         + btn(T,"Open The Brief","secondary",I["note"]) + btn(T,"Continue In Chat","ghost",I["chat"])
+         + btn(T,"Open the Brief","secondary",I["note"]) + btn(T,"Continue in Chat","ghost",I["chat"])
          + f'<span style="flex-grow: 1;"></span>{thumbs(T)}</div>')
     return (f'<div style="{wd} padding: 16px 18px 18px;">{layers}'
             f'<div style="display: flex; flex-direction: column; gap: 12px;">'
@@ -4119,7 +4150,7 @@ def sidecol(T,*,failed=False,chat=False,w=340):
                   f'margin-bottom: 8px;">{t}</div>')
     return (f'<div style="width: {w}px; flex-shrink: 0; border-left: 1px solid {T["border"]}; '
             f'background: {T["surface"]}; padding: 16px 16px 18px; display: flex; flex-direction: column; gap: 18px;">'
-            f'<div>{lbl("WHAT METIS TOOK FROM THIS")}{learned(T,failed=failed,chat=chat)}</div>'
+            f'<div>{lbl(f"WHAT {AN} TOOK FROM THIS")}{learned(T,failed=failed,chat=chat)}</div>'
             f'<div>{lbl("THE RUN")}{factgrid(T)}</div>'
             + ('' if chat else f'<div>{lbl("TOOL CALLS &middot; 3")}{toolsequence(T,failed=failed)}</div>')
             + '</div>')
@@ -4131,7 +4162,7 @@ def rundetail(T,*,failed=False):
             f'flex-grow: 1; min-width: 0;">{toolbar(T)}'
             f'<div style="display: flex; align-items: stretch;">{sidebar8(T,"Routines")}'
             f'<div style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column;">'
-            + runheader(T,crumbs=["Routines","Morning brief","Today, 6:02 AM"],title="Morning brief",
+            + runheader(T,crumbs=["Routines","Morning Brief","Today, 6:02 AM"],title="Morning Brief",
                         when="Tuesday 22 September &middot; 6:02 AM",ok=not failed,why=why)
             + f'<div style="display: flex; align-items: stretch; flex-grow: 1;">'
             + sessionpane(T,failed=failed) + sidecol(T,failed=failed) + '</div></div></div></div>')
@@ -4147,7 +4178,7 @@ def chatsession(T,w=None):
             + f'<div style="display: flex; align-items: stretch;">'
             + f'<div style="flex-grow: 1; min-width: 0; padding: 16px 18px 18px; display: flex; flex-direction: column; '
               f'gap: 12px;">{turns}'
-            + f'<div style="display: flex; gap: 9px; margin-top: 4px;">{btn(T,"Open In Chat","secondary",I["chat"])}</div></div>'
+            + f'<div style="display: flex; gap: 9px; margin-top: 4px;">{btn(T,"Open in Chat","secondary",I["chat"])}</div></div>'
             + sidecol(T,chat=True) + '</div></div>')
 
 def archivesettings(T,w=500,bare=False):
@@ -4202,7 +4233,7 @@ def reqhead(T,glyph,typ,agent,when,trust="internal",extra=""):
             f'<span style="display: flex; color: {T["ts"]};">{ic(glyph,14,1.9)}</span>'
             f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; color: {T["ts"]};">{typ}</span>'
             f'{extra}<span style="flex-grow: 1;"></span>'
-            f'{mono(agent,T["ag"],11)}{trustmark(T,trust)}'
+            f'{agentchip(T,agent)}{trustmark(T,trust)}'
             f'<span style="font-size: 11px; color: {T["tt"]};">{when}</span></div>')
 
 def accesscard2(T,*,state="pending",width=None,agent="drey-dev",trust="internal",when="12m",
@@ -4215,7 +4246,7 @@ def accesscard2(T,*,state="pending",width=None,agent="drey-dev",trust="internal"
            f'Read {mono(asked if state!="revising" else "Areas/Finance/Vendors",T["tp"],13.5)}</div>')
     acts=(f'<div style="display: flex; align-items: center; gap: 7px; margin-top: 12px;">'
           f'{btn(T,"Approve","affirm",I["check"])}{btn(T,"Revise","secondary",I["pencil"])}'
-          f'{btn(T,"Decline","dest",I["x"])}<span style="flex-grow: 1;"></span>'
+          f'{btn(T,"Decline","secondary",I["x"])}<span style="flex-grow: 1;"></span>'
           f'{btn(T,"","ghost",I["later"],icon_only=True,title="Later")}{helplink(T)}</div>')
     why=(f'<div style="background: {T["agq"]}; border-radius: 8px; padding: 8px 10px; font-size: 12px; '
          f'color: {T["tp"]}; line-height: 1.5;">To reconcile the vendor invoices against the March renewal.</div>')
@@ -4229,7 +4260,7 @@ def accesscard2(T,*,state="pending",width=None,agent="drey-dev",trust="internal"
                f'<span style="font-size: 11.5px; font-weight: 600; color: {T["acc"]};">Edit &rarr;</span></div>')
         return (f'<div style="{w} background: {T["surface"]}; border: 1px solid {T["border"]}; border-radius: 12px; '
                 f'padding: 14px 15px; box-sizing: border-box;">{body}'
-                f'<div style="display: flex; gap: 7px; margin-top: 11px;">{btn(T,"Decline","dest",I["x"])}'
+                f'<div style="display: flex; gap: 7px; margin-top: 11px;">{btn(T,"Decline","secondary",I["x"])}'
                 f'<span style="flex-grow: 1;"></span>{helplink(T)}</div></div>')
     if state=="revising":
         tree="".join(f'<div style="display: flex; align-items: center; gap: 8px; padding: 4px 0 4px {8+d*14}px; '
@@ -4280,14 +4311,15 @@ def meetingcard(T,*,expanded=True,result=False,width=None):
         return (f'<div style="{w} background: {T["surface"]}; border: 1px solid {T["border"]}; border-radius: 12px; '
                 f'padding: 14px 15px; box-sizing: border-box;">{head}{title}'
                 f'<div style="display: flex; gap: 7px; margin-top: 12px;">{btn(T,"Accept All","affirm",I["check"])}'
-                f'{btn(T,"Review","secondary")}</div></div>')
-    note=(f'<div style="border-left: 2px solid {T["ag"]}; padding-left: 11px; font-family: {SERIF}; font-size: 12.5px; '
+                f'{btn(T,"Open","secondary")}</div></div>')
+    # C69: outside a transcript agent text takes the wash, not the rule
+    note=(f'<div style="background: {T["agq"]}; border-radius: 8px; padding: 9px 11px; font-family: {SERIF}; font-size: 12.5px; '
           f'color: {T["tp"]}; line-height: 1.55;">Kessler confirmed net-45 and dropped the volume tier. The March '
           f'renewal is no longer the cheapest option; Orlin may undercut it.</div>'
           f'<div style="display: flex; align-items: center; gap: 7px; margin-top: 9px;">'
           + (f'<span style="display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: {T["ok"]};">'
-             f'{ic(I["check"],12,2.2)}Accepted</span>' if result else
-             f'{btn(T,"Accept","affirm",I["check"])}{btn(T,"Revise","secondary",I["pencil"])}')
+             f'{ic(I["check"],12,2.2)}Approved</span>' if result else
+             f'{btn(T,"Approve","affirm",I["check"])}{btn(T,"Revise","secondary",I["pencil"])}')
           + f'<span style="flex-grow: 1;"></span>{mono("Journal/Meetings/2026-09-22-vendor-review.md",T["ts"],10.5)}</div>')
     states=(["ok","ok","answered","ok"] if result else [None]*4)
     todos="".join(todoline(T,t,state=s,last=i==3) for i,(t,s) in enumerate(zip(TODOS,states)))
@@ -4304,9 +4336,9 @@ def meetingcard(T,*,expanded=True,result=False,width=None):
     foot=("" if result else
           f'<div style="display: flex; gap: 7px; margin-top: 13px; padding-top: 12px; border-top: 1px solid {T["border"]};">'
           f'{btn(T,"Accept All","affirm",I["check"])}{btn(T,"Revise","secondary",I["pencil"])}'
-          f'{btn(T,"Decline All","dest",I["x"])}'
+          f'{btn(T,"Decline All","secondary",I["x"])}'
           f'<span style="flex-grow: 1;"></span>'
-          f'<span style="font-size: 11.5px; font-weight: 600; color: {T["acc"]}; align-self: center;">Open the session &rarr;</span></div>')
+          f'<span style="font-size: 11.5px; font-weight: 600; color: {T["acc"]}; align-self: center;">Open the Session &rarr;</span></div>')
     return (f'<div style="{w} background: {T["surface"]}; border: 1px solid {T["border"]}; border-radius: 12px; '
             f'padding: 14px 15px; box-sizing: border-box;">{head}{title}'
             f'<div style="margin-top: 12px;">{band}</div>'
@@ -4331,14 +4363,17 @@ def panel3(T,w=400):
     action=(f'<div style="background: {T["surface"]}; border: 1px solid {T["border"]}; border-radius: 12px; '
             f'padding: 14px 15px;">{reqhead(T,I["work"],"ACTION","drey-dev","40m")}'
             f'<div style="font-size: 14.5px; font-weight: 600; color: {T["tp"]}; margin-top: 9px;">Comment on #418</div>'
+            f'<div style="background: {T["agq"]}; border-radius: 8px; padding: 8px 10px; margin-top: 8px; font-family: {SERIF}; '
+            f'font-size: 12.5px; color: {T["tp"]}; line-height: 1.5;">Invoices 0612 and 0804 are at net-45; the comparison '
+            f'uses net-45 for those two only.</div>'
             f'<div style="display: flex; gap: 7px; margin-top: 12px;">{btn(T,"Approve","affirm",I["check"])}'
-            f'{btn(T,"Revise","secondary",I["pencil"])}{btn(T,"Decline","dest",I["x"])}</div></div>')
+            f'{btn(T,"Revise","secondary",I["pencil"])}{btn(T,"Decline","secondary",I["x"])}</div></div>')
     body=(f'<div style="padding: 12px; display: flex; flex-direction: column; gap: 10px; background: {T["bg"]};">'
           + grouplabel(T,"MEETINGS","1") + meetingcard(T,expanded=False)
           + grouplabel(T,"ACCESS","1") + accesscard2(T)
           + grouplabel(T,"ACTIONS","1") + action + '</div>')
     foot=(f'<div style="padding: 11px 16px; border-top: 1px solid {T["border"]};">'
-          f'<span style="font-size: 12px; font-weight: 600; color: {T["acc"]};">Show all 4 &rarr;</span></div>')
+          f'<span style="font-size: 12px; font-weight: 600; color: {T["acc"]};">Open Needs You &rarr;</span></div>')
     return (f'<div style="width: {w}px; background: {T["elevated"]}; border: 1px solid {T["bc"]}; border-radius: 14px; '
             f'box-shadow: 0 10px 34px rgba(26,24,21,0.16); overflow: hidden; display: flex; flex-direction: column; '
             f'flex-shrink: 0;">{head}{body}{foot}</div>')
@@ -4363,8 +4398,8 @@ def modechip(T,mode,why=None):
 
 def agentchip(T,name,remote=False):
     return (f'<span style="display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 7px; '
-            f'background: {T["sunken"]}; font-family: {MONO}; font-size: 11px; color: {T["ag"]};">'
-            + (f'<span style="display: flex; color: {T["ts"]};">{ic(I["plug"],10,2)}</span>' if remote else '')
+            f'background: {T["agq"]}; font-family: {MONO}; font-size: 11px; color: {T["ag"]};">'
+            + (f'<span style="display: flex; color: {T["ag"]};">{ic(I["relay"],10,2)}</span>' if remote else '')
             + f'{name}</span>')
 
 def spendbar(T,spent,budget,over=False):
@@ -4378,11 +4413,11 @@ def spendbar(T,spent,budget,over=False):
 
 PROJECTS=[
   dict(id="drey",title="Drey",mode="autonomous",why=None,members=[("drey-dev",False),("collator",False),("devin",True)],
-       open=14,blocked=2,spent=1.84,budget=5,last="4m"),
+       open=14,blocked=2,spent=0.72,budget=5,last="4m"),
   dict(id="metistry",title="Metistry",mode="review",why="owner",members=[("builder",False),("reviewer",False)],
-       open=22,blocked=0,spent=0.62,budget=4,last="18m"),
+       open=22,blocked=0,spent=0.18,budget=4,last="18m"),
   dict(id="fsl-ops",title="FSL ops",mode="review",why="budget",members=[("taskuary",True),("collator",False)],
-       open=6,blocked=1,spent=3.41,budget=3,last="1h"),
+       open=6,blocked=1,spent=0.58,budget=0.5,last="1h"),
   dict(id="home",title="Home",mode="autonomous",why=None,members=[("collator",False)],
        open=3,blocked=0,spent=0.04,budget=1,last="2d"),
 ]
@@ -4459,11 +4494,11 @@ def projdetail(T,*,why=None):
           f'<span style="font-size: 12px; color: {T["ts"]};">{toggle_lbl}</span>{toggle(T,mode=="review")}</div>'
           f'<div style="font-size: 11.5px; color: {T["ts"]}; margin-top: 6px;">'
           + ("$5 a day &middot; 20 handoffs at once" if why is None else
-             "review since 2:40 PM (over budget) &middot; $3 a day &middot; 20 handoffs at once")
+             "review since 2:40 PM (over budget) &middot; $0.50 a day &middot; 20 handoffs at once")
           + f'</div>{trip}</div>')
     stats=(f'<div style="display: flex; gap: 34px; padding: 16px 18px; border-bottom: 1px solid {T["border"]};">'
            + stat(T,"14","open tasks") + stat(T,"2","blocked",T["deg"]) + stat(T,"3","handoffs in flight")
-           + stat(T,"1","queued") + stat(T,"4","open threads") + stat(T,"$1.84","spent today") + '</div>')
+           + stat(T,"1","queued") + stat(T,"4","open threads") + stat(T,"$0.72","spent today") + '</div>')
     members=(f'<div><div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">'
              f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.08em; color: {T["tt"]};">AGENTS &middot; 3</span>'
              f'<span style="flex-grow: 1;"></span>{btn(T,"Add Agent","secondary",I["plus"])}</div>'
@@ -4490,7 +4525,7 @@ def modeconfirm(T,*,to="autonomous",w=440):
     if to=="autonomous":
         title="Switch Drey back to autonomous?"
         text="Its agents will hand work to each other without you again."
-        go=btn(T,"Switch to Autonomous","dest")
+        go=btn(T,"Switch to Autonomous","affirm")
     else:
         title="Put Drey in review?"
         text="3 handoffs in flight will wait for you."
@@ -4568,12 +4603,12 @@ def detailpop(T,*,kind="work",w=460):
                     f'<div style="font-size: 11.5px; color: {T["acc"]}; font-weight: 600; margin-top: 6px;">Open room &rarr;</div>',
                     meta="4 comments")
         hist=dsec(T,"HISTORY",
-                  histrow2(T,"2:41","drey-dev","claimed it")
+                  histrow2(T,"2:41 PM","drey-dev","claimed it")
                   + histrow2(T,"2:10","drey-dev","blocked on #417 &mdash; waiting on terms")
-                  + histrow2(T,"11:58","you","set priority 1, due Friday",agent=False)
+                  + histrow2(T,"11:58 AM","you","set priority 1, due Friday",agent=False)
                   + histrow2(T,"11:30","metis","created from the Vendor review meeting",last=True))
         acts=(f'<div style="padding: 11px 16px 13px; border-top: 1px solid {T["border"]}; display: flex; gap: 7px;">'
-              f'{btn(T,"Comment","secondary",I["chat"])}{btn(T,"Open On Board","ghost",I["board"])}'
+              f'{btn(T,"Comment","secondary",I["chat"])}{btn(T,"Open on Board","ghost",I["board"])}'
               f'<span style="flex-grow: 1;"></span>'
               f'<span style="font-size: 11.5px; color: {T["ts"]}; align-self: center;">from vendor-summary v3</span></div>')
         body=desc+held+blocked+thread+hist+acts
@@ -4585,12 +4620,12 @@ def detailpop(T,*,kind="work",w=460):
              f'<div style="color: {T["tp"]}; background: {T["accq"]}; margin: 0 -11px; padding: 0 11px;">'
              f'- [ ] Send Kessler the revised volume numbers &#128197; 2026-09-24</div>'
              f'<div>- [ ] Ask Orlin for their updated terms</div></div>')
-        body=(dsec(T,"IN YOUR NOTE",ctx,meta=mono("Journal/2026-09-22.md",T["ts"],10.5),first=True)
-              + dsec(T,"HISTORY",histrow2(T,"11:30","metis","added from the Vendor review meeting")
-                     + histrow2(T,"11:42","you","set due Thursday",agent=False,last=True))
+        body=(dsec(T,"IN THE MEETING NOTE",ctx,meta=mono(F["meeting_note"],T["ts"],10.5),first=True)
+              + dsec(T,"HISTORY",histrow2(T,"1:51 PM",ASSISTANT_NAME.lower(),"added when you approved the Vendor review notes")
+                     + histrow2(T,"2:05 PM","you","set due Thursday",agent=False,last=True))
               + f'<div style="padding: 11px 16px 13px; border-top: 1px solid {T["border"]}; display: flex; gap: 7px;">'
-              f'{btn(T,"Complete","affirm",I["check"])}{btn(T,"Open In Obsidian","secondary",I["note"])}'
-              f'{btn(T,"Hand To An Agent","ghost",I["agents"])}</div>')
+              f'{btn(T,"Complete","affirm",I["check"])}{btn(T,"Open in Obsidian","secondary",I["note"])}'
+              f'{btn(T,"Delegate","ghost",I["spark"])}</div>')
     return (f'<div style="width: {w}px; background: {T["elevated"]}; border: 1px solid {T["bc"]}; border-radius: 13px; '
             f'box-shadow: 0 14px 40px rgba(26,24,21,0.20); overflow: hidden; flex-shrink: 0;">{head}'
             f'<div style="border-top: 1px solid {T["border"]};">{body}</div></div>')
@@ -4802,11 +4837,11 @@ def roommsg(T,who,text,when):
     return (f'<div style="border-left: 2px solid {T["ag"]}; padding-left: 12px;">'
             f'<div style="display: flex; align-items: center; gap: 7px; margin-bottom: 4px;">{agentchip(T,who)}'
             f'<span style="font-size: 10.5px; color: {T["tt"]};">{when}</span></div>'
-            f'<div style="font-size: 12.5px; color: {T["tp"]}; line-height: 1.55;">{text}</div></div>')
+            f'<div style="font-family: {SERIF}; font-size: 13px; color: {T["tp"]}; line-height: 1.55;">{text}</div></div>')
 
 def roomview(T):
     head=(f'<div style="padding: 14px 18px 12px; border-bottom: 1px solid {T["border"]};">'
-          f'{crumb(T,["Work","Rooms","#418"])}'
+          f'{crumb(T,["Work","Board","#418","Room"])}'
           f'<div style="display: flex; align-items: center; gap: 10px; margin-top: 8px;">'
           f'<span style="display: flex; color: {T["ag"]};">{ic(I["board"],16,1.9)}</span>'
           f'<span style="font-size: 17px; font-weight: 600; color: {T["tp"]};">#418 Reconcile vendor invoices</span>'
@@ -4816,18 +4851,18 @@ def roomview(T):
           f'<span style="display: flex; color: {T["acc"]};">{ic(I["bell"],14,2)}</span>'
           f'<span style="font-size: 12.5px; color: {T["tp"]}; flex-grow: 1;"><b>Came to you.</b> Ten agent turns went by '
           f'without you; the next one was not stored.</span></div>')
-    msgs=(roommsg(T,"collator","Invoices 0612 and 0804 are at net-45. The rest are on the old terms.","2:02")
-          + roommsg(T,"drey-dev","Then the renewal comparison should use net-45 for those two only.","2:05")
-          + roommsg(T,"collator","Agreed, but the volume tier question is still open.","2:07")
+    msgs=(roommsg(T,"collator","Invoices 0612 and 0804 are at net-45. The rest are on the old terms.","2:02 PM")
+          + roommsg(T,"drey-dev","Then the renewal comparison should use net-45 for those two only.","2:05 PM")
+          + roommsg(T,"collator","Agreed, but the volume tier question is still open.","2:07 PM")
           + f'<div style="font-size: 11.5px; color: {T["tt"]}; text-align: center;">7 more agent turns</div>'
-          + roommsg(T,"drey-dev","Still waiting on whether the tier is gone for Q4 too.","2:31"))
+          + roommsg(T,"drey-dev","Still waiting on whether the tier is gone for Q4 too.","2:31 PM"))
     comp=(f'<div style="margin: 0 18px 16px; border-top: 1px solid {T["border"]}; padding-top: 12px;">'
           f'<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">'
           f'{tailmeter(T,10)}<span style="font-size: 11.5px; color: {T["ts"]};">10 of 10 agent turns &middot; '
           f'yours resets it</span></div>'
           f'<div style="display: flex; align-items: center; gap: 8px; background: {T["surface"]}; border: 1px solid {T["bc"]}; '
           f'border-radius: 10px; padding: 9px 11px;">'
-          f'<span style="flex-grow: 1; font-size: 12.5px; color: {T["tt"]};">Add to the room&hellip;</span>'
+          f'<span style="flex-grow: 1; font-size: 12.5px; color: {T["tt"]};">Add to the Room&hellip;</span>'
           f'<span style="display: flex; color: {T["ts"]};">{ic(I["send"],14,1.9)}</span></div></div>')
     return (f'<div style="flex-grow: 1; min-width: 0; background: {T["bg"]};">{head}{band}'
             f'<div style="padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; max-width: 640px;">{msgs}</div>'
@@ -4898,7 +4933,7 @@ def usagepop(T,*,state="normal",w=400):
                          + (f'<span style="flex-grow: 1;"></span><span style="font-size: 11px; color: {T["ts"]};">{m}</span>' if m else '')
                          + '</div>')
     daily=f'<div style="padding: 4px 16px 14px;">{lbl("EACH DAY",f"${max(DAYS):.2f} peak")}{daybars(T,DAYS)}</div>'
-    rows=[("collator",14.10,True),("drey-dev",11.60,True),("Morning brief",6.30,False),("Chat",5.10,False),("Other",4.10,False)]
+    rows=[("collator",14.10,True),("drey-dev",11.60,True),("Morning Brief",6.30,False),("Chat",5.10,False),("Other",4.10,False)]
     where=(f'<div style="padding: 12px 16px; border-top: 1px solid {T["border"]};">{lbl("WHERE IT WENT")}'
            + "".join(spendrow(T,n,v,14.10,agent=a,last=i==4) for i,(n,v,a) in enumerate(rows)) + '</div>')
     facts=(f'<div style="padding: 11px 16px; border-top: 1px solid {T["border"]}; display: flex; flex-direction: column; gap: 5px; '

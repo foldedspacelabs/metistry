@@ -26,7 +26,7 @@ canvas order:
 | `Main` · `Direction-B` · `Direction-C` | round A — the three brand directions; **C, the keyed square, was chosen** |
 | `Wordmark` | the wordmark, outlined from IBM Plex Sans SemiBold |
 | `Icon-App` · `Icon-Web` | macOS/iOS icons and the PWA set, with the optical ramp |
-| `Colour` · `Kit` · `Theme` | the accent, the brand kit, light and dark |
+| `Colour` · `Kit` · `Theme` | the accent, the brand kit, light and dark. **`Theme`'s window shows the round-B five-row nav** — trust its colours, not its sidebar; every screen board carries the current light and dark |
 | `States` | empty · absent · failed · stale |
 | `Request` | the request card and the bell panel |
 | `Chat` · `Activity` · `NeedsYou` · `Capture` | screens 1–4 |
@@ -38,7 +38,7 @@ canvas order:
 | `Routines` | **screen 8** — the schedule, one routine, the two prompt layers |
 | `Resources` | **screen 9** — proxied MCP servers, per-tool grants |
 | `Usage` | **screen 17, new 2026-09-23** — the popover under the gauge, light and dark |
-| `Artifacts` | **screen 16, new 2026-09-23** — margin threads, compare, rooms and the cap |
+| `Artifacts` | **screen 16, new 2026-09-23** — margin threads, compare, and a task's room opened over Board (no Rooms list, C89) |
 | `Settings` | **screen 15, new 2026-09-23** — the window, four panes, larger text, dark |
 | `CardDetail` | **screen 14, new 2026-09-22** — both kinds of task, light and dark |
 | `Projects` | **screen 13, new 2026-09-22** — mode first, project permissions inherited by every agent |
@@ -111,16 +111,20 @@ rules, and the structural rulings. `review-00-plan.md` remains the log — searc
 not read; the amendments file is the one to read.
 
 `design-brief.md`, `design-system.md`, `app-ux-plan.md` and `ux-direction.md`
-were **not updated for v0.11.0** and still describe a six-section sidebar and a
-Work section with four children. The current authority is
-**`daily-flow-spec.md`, `PRODUCT.md` and `glossary.md`** (C26). When they
-disagree, the newer three win and the disagreement gets logged.
+were **not updated for v0.11.0** and still describe a six-section sidebar.
+`design-system.md` now carries a banner listing every superseded passage, and a
+note at each. **The winning sources, newest first: the ratified rows of
+`review-00-plan.md` (C-numbers), `design-system-amendments.md`, the screen
+specs, then `glossary.md`** (updated 2026-09-23). `daily-flow-spec.md` and
+`PRODUCT.md` still govern behaviour and data; where they describe navigation or
+naming they are older than the rulings (daily-flow §10 is marked). When sources
+disagree, the newer wins and the disagreement gets logged.
 
 ## 3. What is ratified — do not re-litigate
 
 **Motion** (C16, ruled 2026-09-22). Motion only where it carries information the
 reader cannot otherwise get, stopping the moment that information is in words.
-The three waiting dots are the only loop in the product.
+Two loops, a closed list (C75): the chat's three waiting dots and the recording breath.
 
 **The floating bar** (ruled 2026-09-22). A second, additive interface: always
 present while the capture bridge is installed, minimal at rest, louder while a
@@ -239,9 +243,20 @@ SwiftUI's `.serif`.
 | Build-side preview | `dev-preview-round-e.md` | **draft 2026-09-22** — what the developer needs, in one file; keep it current as rounds land |
 
 **Review 01 (2026-09-23): read `review-01-holistic.md` before drawing anything.** A
-holistic pass over all 24 boards and 28 documents: eleven rulings the owner owes
-(§1), cleanup against rules already made (§2), the three whole-product gaps —
-phone, offline, keyboard (§3) — and the ranked daily-use opportunities (§5).
+holistic pass over all 24 boards and 28 documents. **All eleven rulings are made
+(C88–C98)** and written as rules in `design-system-amendments.md` §8; **the §2
+cleanup is done** (status in review 01 §8); **every §5 opportunity was adopted**;
+**the iPhone and PWA designs are deferred** by the owner.
+
+**Next round, in order:** (1) **Today elevated** — the one Morning Brief as
+Today's first state, a Next Up card, Close the Day, three predictions a page, live
+checkboxes (C97, C98). (2) **Needs You calmer** — the C96 events drawn, the
+meeting card produced at Stop with proposed due dates and *Draft Follow-up*.
+(3) **Offline and keyboard/VoiceOver** (review 01 §3.1). (4) **States for screens
+10–17** and the §3.3 flows, including the Compute pane.
+
+**Sample data comes from `boards/fixture.py`** (amendments §8.4). Put a number
+there before drawing it on a second board.
 
 **Not drawn:** the Obsidian plugin's remaining surfaces.
 
@@ -269,8 +284,8 @@ the canvas is now generated from a module in `boards/` except `Facets`, `Plugin`
 `Voice` and `Item-Model`. `bellpanel()` is gone — it drew the *"1 snoozed"*
 header C21 killed; `panel2()` is the panel.
 
-**87 contradictions** are logged in `review-00-plan.md`. C38 and C51 are closed. C40–C87 are
-round E's. Two of them are rules the system is missing rather than faults in a
+**98 contradictions** are logged in `review-00-plan.md`. C38, C51 and C62 are closed. C40–C87 are
+round E's; C88–C98 are review 01's rulings. Two of them are rules the system is missing rather than faults in a
 file: **C45** (a failed consequential operation leaves the request pending) and
 **C49** (a mark that carries meaning takes an ink token, never a border token —
 `border-strong` fails 3:1 against every ground). **C67** is a process fault
@@ -294,9 +309,9 @@ calendar tiers). **A1** (events return only title/start/end) and **A2**
 (Metistry may not write the meeting note) block the most. **A5** and **B4** need
 a ruling from the owner, not a ticket.
 
-**Open rulings the owner owes:** C16 (motion — the working indicator vs
-*ux-direction.md*'s "a word, not a spinner"), A5 (`prose` outside a fold
-template), B4 (where a revised day is stored and under whose principal).
+**Open rulings the owner owes:** A5 (`prose` outside a fold template), B4
+(where a revised day is stored and under whose principal — now also what *Close
+the Day* writes). C16 was ruled 2026-09-22.
 
 **Requests from screen 7** (`screen-07-agents.md` §12): **C1** a
 `collector_health` query, without which `stale` is undrawable anywhere; **C2**

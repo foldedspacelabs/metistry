@@ -7,7 +7,7 @@ gone from the library.
 """
 from lib import *
 
-CW,CH=1880,2220
+CW,CH=1880,2360
 
 CARD=pan(L,"THE CARD, PREVIEW EXPANDED",
   reqcard(L,glyph=I["key"],typ="ACCESS",
@@ -21,7 +21,7 @@ STATES=pan(L,"FOUR ANSWERS, AND THE THREE STATES AFTER ONE",
   f'<div style="display: flex; flex-direction: column; gap: 14px;">'
   + "".join(f'<div>{sub(l,L["tt"])}{c}</div>' for l,c in [
       ("DECIDING — DISABLED, AND NOTHING SPINS",
-       reqcard(L,glyph=I["book"],typ="NOTE",title="Keep the note on lease renewal",agent="assistant",when="1h",
+       reqcard(L,glyph=I["book"],typ="NOTE",title="Keep the note on lease renewal",agent="metis",when="1h",
                prev=note_preview(L),state="deciding",width=400)),
       ("SETTLED — ONE LINE, UNDO WHERE REVERSIBLE",
        reqcard(L,glyph=I["key"],typ="ACCESS",title="",agent="drey-dev",when="12m",state="approved",width=400)),

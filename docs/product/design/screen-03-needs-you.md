@@ -328,3 +328,19 @@ YOURS     2 notes, 1 to-do — already saved, and included in the notes.
 - **Every to-do can be accepted, revised or declined on its own.**
 - **It needs a group id on proposals (C81)**, and that group is where C77's
   session-time anchors get promoted to the note's path.
+
+## 11. Corrected 2026-09-23 (review 01)
+
+- **Buttons (C92):** Approve is the one accent-filled button; Revise and Decline
+  are outlined, in that order. *Decline All* is outlined too. A filled
+  destructive button appears only for an act that cannot be undone.
+- **The meeting card's notes take the `agent-quiet` wash**, not the 2px rule —
+  the rule belongs to transcripts (C69). A note is answered **Approve · Revise**;
+  the collapsed card's second button is **Open**.
+- **An action card shows its payload.** *Comment on #418* shows the comment, on
+  the wash, above its answers — approving something unseen is not a decision.
+- **Provenance is neutral:** *external* is a grey chip, not the warning tint.
+- **The agent chip is the one tinted pill** (amendments §8.3), here as everywhere.
+- **Events that are not questions arrive here too (C96)** — a budget stop and a
+  failed routine as `report`, an expired credential as `access`, a knowledge
+  conflict as `review`. Drawn next round with the calmer panel.

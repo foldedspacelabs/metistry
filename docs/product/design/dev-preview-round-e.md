@@ -142,7 +142,7 @@ a read, except where noted.
    `task_update`, `comment`, `capture` are drawn as **Model · Action · May**, not as
    four flat strings — and `comment` is one kind reaching **two** models, since
    `commentArgs` takes either `work_id` or `artifact_id` + `version_id`, exactly one.
-   User-facing words: **Allow · Ask First · Never**.
+   User-facing words: **On · Ask · Off** (C93, 2026-09-23; this preview first said Allow · Ask First · Never).
 7. **Proxied external MCP servers need a model** (C56). Metistry holds the
    credential for a server a remote agent cannot reach, and mediates. Structurally
    that is a row in the same permissions table with one new provenance value —

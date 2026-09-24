@@ -20,7 +20,7 @@ REST=pan(L,"AT REST — A TOOLBAR, ONE CLICK PER ACT",
     + nt(L,"Glyphs only, with the native tooltip and its shortcut on hover. They sit on the thin glass, so they "
           "are drawn in <b>text-secondary</b>; no labels, because a label on 0.75 glass would need tertiary ink "
           "and tertiary is barred there (C74).",12)
-    + nt(L,"Fades to 55% after ten seconds idle; never while recording.",12) + '</div>',18,align="flex-start"))
+    + nt(L,"After ten seconds idle only the decoration fades &mdash; shadow and edge. The glass holds its floor and the ink its strength (C63, C74); never while recording.",12) + '</div>',18,align="flex-start"))
 
 QUICK=pan(L,"NOTE AND TO-DO — CLICK, TYPE, RETURN",
   row(desktop(L,inner=railtool(L,top=90,hot="note")+quickfield(L,kind="note",top=154),w=560,h=360,
@@ -139,7 +139,7 @@ SETTINGS=pan(L,"SETTINGS — A SWITCH, A PLACE, THREE PERMISSIONS, AND WHAT IT K
     + nt(L,"<b>Permissions say whether, not when.</b> <i>Approved</i> or <i>not yet asked</i>. The date a grant "
           "was given is trivia; what a person wants to know is whether they will be interrupted.",12)
     + nt(L,"<b>What Metis keeps</b>, in three rows of two words: <i>audio &mdash; never kept</i>, <i>transcript "
-          "&mdash; 90 minutes, then gone</i>, <i>notes &mdash; only what you approve, in your vault</i>. No "
+          "&mdash; 30 days</i>, <i>notes &mdash; only what you approve, in your vault</i>. No "
           "paths: where it is stored is our problem, and naming <b>.metistry/state</b> in a settings pane was "
           "documentation leaking into the product.",12)
     + nt(L,"<b>Purge now</b> keeps its place with the amount beside it, because a destructive verb should say "
@@ -157,8 +157,8 @@ ASKS=pan(L,"WHAT THIS ASKS OF THE BUILD",
     "<b>The private compute tier</b>, refused at <b>metistry compute assign</b> when pointed off-machine. "
     "<i>Staying on this Mac</i> is only honest if the verb enforces it.",
     "<b>Per-grant state, not a health word</b> &mdash; approved or never asked, per grant, for the Settings pane.",
-    "<b>A retention number and a purge verb.</b> The pane draws 90 minutes and an amount; both need a ruling "
-    "(daily-flow Q4) and a verb that empties the buffer.",
+    "<b>A retention number and a purge verb.</b> The pane draws 30 days (C91) and an amount; the purge "
+    "needs a verb and a verb that empties the buffer.",
     "<b>Edge, display and vertical offset</b> as a preference, plus the global on/off. Top and bottom edges are "
     "not offered: the menu bar and the Dock own them.",
     "<b>Nothing in exposes:.</b> The assistant may not start a session &mdash; invariant 9 by absence. The bar "

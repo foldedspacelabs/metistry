@@ -72,12 +72,12 @@ Routines                                                [+ New Routine]
 
     WHEN      ROUTINE             AGENT              RECURRENCE
 TODAY
-    6:02 AM   Morning Digest      collator →         ↻ Every day at 6:02 AM
+    6:02 AM   Morning Brief      collator →         ↻ Every day at 6:02 AM
  !  7:00 AM   Vendor Sweep        vendor-research →  ↻ Every day at 7:00 AM
     6:00 PM   Knowledge Fold      Built-in           ↻ Every evening
    10:00 PM   Tomorrow's Plan     Built-in           ↻ Every evening
 TOMORROW · TUESDAY
-    6:02 AM   Morning Digest      collator →         ↻ Every day at 6:02 AM
+    6:02 AM   Morning Brief      collator →         ↻ Every day at 6:02 AM
     9:00 AM   Standup Notes       collator →         ↻ Every Tuesday at 9:00 AM
 INACTIVE
  ⏱  —         Inbox Triage        inbox-triage →     ↻ Paused 4 days ago by you
@@ -146,7 +146,7 @@ compute the union themselves.
 
 | Resource | Read | Write |
 | --- | --- | --- |
-| Knowledge | `Areas/Ops` · `Areas/Vendors` *(Morning Digest only)* | `Journal/Digest/` *(Morning Digest only)* |
+| Knowledge | `Areas/Ops` · `Areas/Vendors` *(Morning Brief only)* | `Journal/Digest/` *(Morning Brief only)* |
 | Work | All tasks | Update · Comment |
 
 And the sentence that makes the layering safe: *outside this routine, `collator`
@@ -228,3 +228,13 @@ Most of this screen is drawn ahead of its wire, per the owner's ruling of
 | **D6** | `next_run_at`, computed where the runner already computes due-ness |
 | **D7** | a routine outcome beyond `ok` — `acted` versus `silent`. Without it the list cannot tell a working routine from a sleeping one, and four of five ship deliberately silent |
 | **D8** | a routine task prompt, additive over the agent's definition, plus D2's grant and D3's `agent` field. These three are one feature |
+
+## Corrected 2026-09-23 (review 01)
+
+- **Metis suggests** is a proposal, so it is answered **Approve · Revise ·
+  Decline** like every other (amendments §8.1); *Change The Schedule* and
+  *Dismiss* are gone.
+- The 6:02 AM routine is **Morning Brief** everywhere (C55, C97). Folding
+  *Tomorrow's Plan* and *Standup Draft* into it as sections is next round's Today
+  work.
+- A failed run carries the failed mark in the failed ink.

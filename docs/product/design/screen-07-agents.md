@@ -37,7 +37,7 @@ Three things per row. **Who it is, what it is, whether it's working.**
 Agents                                                    [+ New agent]
 
 YOURS · 3
-●  collator            daily at 6:02 AM · Morning Digest              6m
+●  collator            daily at 6:02 AM · Morning Brief              6m
 ◌  vendor-research     when Metis delegates                           3h
 ◌  inbox-triage        paused                                          —
 
@@ -99,7 +99,7 @@ area list verbatim.
 
 Then the part that matters: **access this agent does not hold on its own.**
 
-> During **Morning Digest** it can also read `Areas/Finance` and write
+> During **Morning Brief** it can also read `Areas/Finance` and write
 > `Journal/Digest/`.
 
 A routine-granted permission is the most forgettable access in the system. You
@@ -158,9 +158,9 @@ control in it, so `Knowledge` appeared twice and most of the table was furniture
 | ⧉ Jira | 3 projects | Comment ⏱ |
 | ⧉ Confluence | 2 spaces | — |
 
-*⏱ asks you first · ⧉ reached through Metistry · anything not listed is not granted*
+*Ask — asks you first · ⧉ reached through Metistry · anything not listed is not granted*
 
-**There is no Allow / Ask First / Never control.** Absence is the denial, which is
+**There is no On / Ask / Off control here.** Absence is the denial, which is
 the same information in none of the space — and the honest shape, because the list
 of what an agent *cannot* do is infinite. A verb that waits for the owner carries
 one glyph; nothing else needs a state at all. Changing any of it is a single
@@ -244,7 +244,7 @@ Three things follow from it that the design should hold to:
    every marker on it.
 2. **Reading your vault and acting in a shared system are not the same risk.**
    `Areas/Finance` is your own folder; a Jira comment is *acting as you where
-   other people watch*. That is why Read is `Allow` and Comment is `Ask First` in
+   other people watch*. That is why Read is `On` and Comment is `Ask` in
    the drawn rows, and it is why a per-server grant cannot be one switch.
 3. **The bridge contract already supplies the rules.** `CLAUDE.md` requires every
    bridge to do lazy tool discovery, **preview-then-confirm on destructive
@@ -252,5 +252,5 @@ Three things follow from it that the design should hold to:
    contract inherits the behaviour this screen would otherwise have to invent.
 
 The servers themselves are defined on **Resources** — `screen-09-resources.md`,
-a new top-level row. One place holds the credential; granting a server to an agent
+in **Settings ▸ Resources** (C57; this first said a new top-level row). One place holds the credential; granting a server to an agent
 or a routine happens in the table above, like everything else.

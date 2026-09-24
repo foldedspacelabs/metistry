@@ -3,7 +3,7 @@ from lib import *
 
 # =========================== THE BOARD ==================================
 COLS=[("Backlog","backlog",12,0,"age"),("Addressed To","assigned",5,1,"owner"),
-      ("In Progress","in_progress",4,1,"lease"),("Needs You","needs_you",2,2,"why"),
+      ("In Progress","in_progress",4,1,"lease"),("Blocked","needs_you",2,2,"why"),
       ("Done","done",31,0,"when"),("Reported","reported",9,0,"report")]
 
 def kindglyph(T,kind):
@@ -68,8 +68,8 @@ def board(T):
     inprog=(bcard(T,title="Book the follow-up",shows="lease",lease="4m left",thread=True)
             + bcard(T,title="Rebuild the cache report",shows="lease",lease="lease lapsed 12m ago",
                     esc="Lease Lapsed"))
-    needs=(bcard(T,title="Publish the tokens package",shows="why",why="Blocked",esc="Blocked",thread=True)
-           + bcard(T,title="Sign off the vendor SOW",shows="why",why="Waiting On You"))
+    needs=(bcard(T,title="Publish the tokens package",shows="why",why="Waiting on #417 to merge",thread=True)
+           + bcard(T,title="Sign off the vendor SOW",shows="why",why="Waiting on You"))
     done="".join(compactrow(T,t,m,report=r) for t,m,r in
         [("Cache report — 4 findings","claude-usage · 1h",True),
          ("Fix the reconciler lock path","closed 2h ago",False),
@@ -80,7 +80,7 @@ def board(T):
             + bcol(T,"Backlog",12,0,backlog,showing="3 of 12")
             + bcol(T,"Assigned",5,1,assigned)
             + bcol(T,"In Progress",4,1,inprog)
-            + bcol(T,"Needs You",2,2,needs)
+            + bcol(T,"Blocked",2,2,needs)
             + bcol(T,"Done",40,0,done,narrow=True,showing="5 of 40")
             + '</div>')
 
@@ -88,7 +88,7 @@ def bwindow(T,w=1460):
     chips="".join(f'<span style="padding: 3px 10px; border-radius: 999px; font-size: 12px; '
                   f'font-weight: {600 if s else 500}; background: {T["accq"] if s else "transparent"}; '
                   f'border: 1px solid {T["acc"] if s else T["bc"]}; color: {T["acc"] if s else T["ts"]};">{n}</span>'
-        for n,s in [("All projects",True),("Settings Pane",False),("Lease Renewal",False),("Ops",False)])
+        for n,s in [("All Projects",True),("Settings Pane",False),("Lease Renewal",False),("Ops",False),("Has Thread",False)])
     return (f'<div style="width: {w}px; border: 1px solid {T["bc"]}; border-radius: 12px; overflow: hidden; '
             f'background: {T["bg"]}; flex-shrink: 0;">{toolbar(T)}<div style="display: flex;">{sidebar8(T,"Work")}'
             f'<div style="flex-grow: 1; min-width: 0;">'
@@ -129,7 +129,7 @@ WHATCOL=pan(L,"EACH COLUMN SHOWS THE FACET THAT COLUMN IS ABOUT",
       ("Backlog","how long has nobody taken this?",gl(L,I["clock"],"2d in backlog")),
       ("Assigned","whose name is on it?",ent(L,"agent","drey-dev",I["agents"])),
       ("In Progress","how much lease is left?",gl(L,I["clock"],"4m left")),
-      ("Needs You","why is it stuck?",st(L,"Blocked")),
+      ("Blocked","what would unblock it?",st(L,"Waiting on #417 to merge")),
       ("Done","when did it close — and did anything come back?",
        gl(L,I["check"],"closed 2h ago") + " " + ent(L,"note","4 findings",I["note"]))])
   + '</table>'
@@ -140,7 +140,7 @@ WHATCOL=pan(L,"EACH COLUMN SHOWS THE FACET THAT COLUMN IS ABOUT",
   + nt(L,"Everything else is a <b>mark</b> rather than a chip: a speech bubble if the card has a room "
          "(<code>has_thread</code>, already on the wire so the board never asks a second endpoint), a note glyph in "
          "<b>entity-note</b> if it was promoted from your vault (<code>external_ref</code>). Two glyphs, no words, "
-         "and both are clickable.",12))
+         "and both open the card&rsquo;s detail, where the thread is a section (C84).",12))
 
 DRAGS=pan(L,"THE BOARD OFFERS NO DROP THE SERVICE WOULD REFUSE",
   f'<div style="display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap;">'
@@ -151,7 +151,7 @@ DRAGS=pan(L,"THE BOARD OFFERS NO DROP THE SERVICE WOULD REFUSE",
   + bcard(L,title="Rebuild the cache report",shows="lease",lease="lease lapsed 12m ago",esc="Lease Lapsed")
   + f'<div style="border: 1.5px dashed {L["acc"]}; border-radius: 9px; padding: 14px 10px; text-align: center; '
     f'background: {L["accq"]};">'
-    f'<span style="font-size: 11.5px; font-weight: 600; color: {L["acc"]};">Release to Addressed To</span></div>'
+    f'<span style="font-size: 11.5px; font-weight: 600; color: {L["acc"]};">Release to Assigned</span></div>'
   + '</div></div>'
   f'<div style="flex-grow: 1; min-width: 0;">'
   + nt(L,"<b>A drop target is drawn only where a statement in <code>packages/tasks</code> would succeed</b>, and "

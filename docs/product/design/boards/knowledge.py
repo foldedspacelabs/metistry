@@ -76,7 +76,7 @@ SPLIT=pan(L,"DECIDE IN NEEDS YOU · EDIT ON KNOWLEDGE",
        "note&rsquo;s <b>status: draft</b> frontmatter marks the same row.&rdquo; One pending thing, two places it "
        "can be seen.")
   + nt(L,"So the split is not a duplication, it is the same row read twice. <b>Needs You</b> asks <i>yes or "
-        "no</i> in a queue you work down. <b>Knowledge</b> gives the prose reading width and an <b>Edit First</b> "
+        "no</i> in a queue you work down. <b>Knowledge</b> gives the prose reading width and an <b>Revise</b> "
         "button, because a draft that is nearly right is corrected, not declined.",12)
   + nt(L,"<b>Answering either answers both.</b> The card says so in as many words &mdash; <i>this arrived as a "
         "request, so answering it here answers it there</i> &mdash; because two surfaces showing one pending item "
@@ -136,7 +136,7 @@ CALLS=pan(L,"JUDGEMENT CALLS, AND WHAT MOVED OUT",
       "<b>The page table is gone from the top level.</b> A flat list of every file answered <i>what is in here</i> "
       "with data instead of meaning. <b>Areas</b> answers it with a written line each; the table lives behind an "
       "area and behind search.",
-      "<b>Sources fold to one line.</b> <i>4 sources, all current</i> &mdash; and it expands itself when one is "
+      "<b>Sources fold to one line.</b> <i>4 sources &middot; freshness unknown</i> until the wire can say otherwise (P5) &mdash; and it expands itself when one is "
       "not, which is the only time the detail earns the space. The <b>stale</b> and <b>failed</b> drawings are kept "
       "intact inside it; C1 is still unanswered by the wire, four rounds on.",
       "<b>The two link lists stay, on a page.</b> They answer <i>what points at this</i>, which is a question the "

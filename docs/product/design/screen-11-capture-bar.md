@@ -216,7 +216,7 @@ One switch, one place, three permissions, and what it keeps.
   holds these, and a console that pretended to grant one would be lying about who
   decides.
 - **What Metis keeps**, in three rows of two words: *audio — never kept*;
-  *transcript — 90 minutes, then gone*; *notes — only what you approve, in your
+  *transcript — 30 days* (C91; this first said 90 minutes); *notes — only what you approve, in your
   vault*. **No paths.** Naming `.metistry/state` in a settings pane was
   documentation leaking into the product.
 - **Purge now** keeps the amount beside it, because a destructive verb should say
@@ -250,3 +250,15 @@ an inbox capture, and extracted action items as task-line proposals. The researc
 deliberately makes it byte-identical to what the Gemini-mail path produces, so one
 reviewing habit covers both. If it needs its own card kind on Needs You, that is a
 back-patch to screen 4 rather than a new screen.
+
+## Corrected 2026-09-23 (review 01)
+
+- **Idle:** after ten seconds only the decoration fades — shadow and specular
+  edge. The scrim holds its floor and the ink its strength; fading the whole bar to
+  55% was opacity on the ink (C63) on glass already at its floor (C74).
+- **The glass gradient no longer dips below its floor**: the bottom stop is the
+  floor itself (it was 0.85 under text against the 0.86 rule).
+- **Reduced motion holds the halo at its widest**, as §3.1 said (it held at 1.32).
+- **Times:** jots carry the clock with AM/PM (*1:02 PM*); the live counter is a
+  duration and says so (*13m 42s*).
+- **Transcript retention is 30 days** from the end of the session (C91).

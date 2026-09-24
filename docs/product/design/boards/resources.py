@@ -22,7 +22,7 @@ def conndetail(T,w=None):
           f'<span style="display: flex; color: {T["ts"]};">{ic(I["chevr"],15,2.2)}</span>'
           f'<div style="flex-grow: 1; min-width: 0;">'
           f'<div style="display: flex; align-items: center; gap: 9px;">'
-          f'<span style="display: flex; color: {T["ag"]};">{ic(I["plug"],15,1.8)}</span>'
+          f'<span style="display: flex; color: {T["ag"]};">{ic(I["relay"],15,1.8)}</span>'
           f'<span style="font-size: 15px; font-weight: 600; color: {T["tp"]};">Jira</span></div>'
           f'<div style="font-size: 12px; color: {T["ts"]}; margin-top: 3px;">MCP &middot; your work network &middot; '
           f'reachable only from this machine</div></div>'
@@ -36,7 +36,7 @@ def conndetail(T,w=None):
     lent=sunk(T,
         linkrow(T,"collator","Read issues in 3 projects &middot; comment, asking first")
         + linkrow(T,"drey-dev","Read issues in 1 project")
-        + linkrow(T,"Morning Digest","Read issues in 3 projects &mdash; during the run only",last=True))
+        + linkrow(T,"Morning Brief","Read issues in 3 projects &mdash; during the run only",last=True))
     return (f'<div style="{wd} background: {T["bg"]};">{head}'
             f'<div style="padding: 16px; display: flex; flex-direction: column; gap: 16px;">'
             + block(T,"THE CONNECTION",conn)
@@ -83,7 +83,7 @@ APPROVE=pan(L,"WHAT &ldquo;ASK&rdquo; ACTUALLY LOOKS LIKE — AND THE PROBLEM IN
     f'<span style="display: flex; color: {L["deg"]};">{ic(I["warn"],14,2)}</span>'
     f'<span style="font-size: 12.5px; font-weight: 600; color: {L["tp"]};">A synchronous approval inside an '
     f'unattended run is a contradiction</span></div>'
-    f'<div style="font-size: 12px; color: {L["tp"]}; line-height: 1.55; margin-top: 6px;">Morning Digest runs at '
+    f'<div style="font-size: 12px; color: {L["tp"]}; line-height: 1.55; margin-top: 6px;">Morning Brief runs at '
     f'6:02 AM and wants to comment on PROJ-412. You are asleep. Blocking means the routine is half-done for three '
     f'hours; failing means it produced nothing because of a step that was never urgent.</div></div>'
   + nt(L,"<b>The answer that matches everything else in the product: the run finishes without it, and says so.</b> "
@@ -113,10 +113,9 @@ FOUND=pan(L,"WHAT THIS NEEDS, AND THE ONE THING IT CHANGES ELSEWHERE",
            "matrix can render it as one more row."),
     ("D12","a proxy audit line. Every call an agent makes through Metistry is Metistry acting with the "
            "owner&rsquo;s credential, which is exactly the thing <b>runs</b> exists to record."),
-    ("C50","<b>the nav is nine rows.</b> Today &middot; Chat &middot; Activity &middot; Work &#9656; &middot; "
-           "Knowledge &#9656; &middot; Routines &middot; Resources &middot; Agents. Worth saying plainly: the "
-           "seven-row rule has now been broken twice, and the argument each time was the same one C30 used. If "
-           "there is a tenth, the rule is not a rule and the sidebar needs a different idea.")])))
+    ("C57","<b>the nav is eight rows, and Resources is not one of them.</b> Today &middot; Chat &middot; Activity "
+           "&middot; Work &#9656; &middot; Knowledge &#9656; &middot; Agents &middot; Routines. Resources lives in "
+           "Settings: a connection is configured once and then read from the tables that grant it.")])))
 
 body=(heading("ROUND E · SCREEN 9, NEW","Resources — the connections Metistry holds, and lends",
    "Metistry can reach servers your agents cannot, so it holds the credential and mediates. A connection is "

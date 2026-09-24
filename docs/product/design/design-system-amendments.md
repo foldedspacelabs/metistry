@@ -2,7 +2,7 @@
 
 **What rounds C–E established, as rules rather than as findings.**
 
-`review-00-plan.md` holds 64 contradictions. That file is a *log*: it records what
+`review-00-plan.md` holds 98 contradictions. That file is a *log*: it records what
 disagreed with what, in the order it was found, and it is searched rather than
 read. This file is the other half — the **positive statements** those findings
 produced, organised by when you need them. Every rule here was paid for by a
@@ -29,7 +29,7 @@ Two consequences that keep coming up:
   computes five states; `working`, `queued` and `idle` take none, because none of
   them is a fault. Five colours on a roster is a roster where colour has stopped
   meaning anything.
-- **A permission is not a moral position.** `Allow` / `Ask First` / `Never` are
+- **A permission is not a moral position.** `On` / `Ask` / `Off` are
   drawn in weight, never green-for-yes and red-for-no. Red is spoken for by
   `failed`.
 
@@ -64,7 +64,7 @@ A read-only checkbox at `opacity: 0.55` composites to **1.86:1** against
 correctly. **A disabled or recessive mark takes a dimmer ink at full opacity**, and
 the contrast check must be fed the composited value rather than the token.
 
-### 1.5 A glass surface has an opacity floor of 0.85 (C70)
+### 1.5 A glass surface has an opacity floor: 0.86 under text, 0.75 under marks (C70, C74)
 
 Translucency changes the ground under the ink, so a correct token composites to an
 incorrect ratio — the same class of fault as dimming the ink (§1.4), from the other
@@ -209,7 +209,7 @@ the same discipline as `later` not blocking.
   case-corrected.
 - **Rename the wire's enums for the reader, once, and everywhere.** `index` /
   `areas` read as **Titles** / **Folders**; `allow` / `propose` / `deny` read as
-  **Allow** / **Ask First** / **Never**.
+  **On** / **Ask** / **Off** (C93, ruled 2026-09-23; was *Allow / Ask First / Never*).
 - **One idea, one term.** *Schedule* and *Recurrence*, not "when it acts" and
   "ticks". A second word for one idea is a second thing to learn.
 - **Never name the runner's internals.** "Silent" described how the scheduler
@@ -299,7 +299,8 @@ What falls out of it, with no further rules needed:
 
 - The three waiting dots run only while there is genuinely nothing to report,
   and are **replaced** — not supplemented — the instant a tool name can be
-  printed. They are the only looping animation the product is permitted.
+  printed. They were the only looping animation until C75 admitted the recording
+  breath; the list is closed at two.
 - Streaming prose is its own motion; the strip collapses to one line.
 - At 60s the product reports what it knows (*nothing back for 62 seconds*),
   which is a fact, not a state change: `degraded`, never `failed`.
@@ -368,3 +369,81 @@ one a lie by association.
   Mono) or every number is inflated.
 - **Log the contradiction; do not route around it.** 75 of them, and the ones that
   became rules are in this file.
+
+---
+
+## 8. One term, one component (review 01, ruled 2026-09-23)
+
+The holistic review found the same idea drawn and worded several ways across
+seventeen screens. These are the winners; a screen that disagrees is wrong.
+
+### 8.1 Names and words
+
+- **The assistant is called by the name the owner gives it (C88)**, default
+  *Metis*, in every label that attributes words or acts to it: the transcript
+  attribution, *Metis wrote this*, actor chips, *Metis suggests*. *Assistant* is
+  the role in the glossary and never a label.
+- **Requests and proposals are answered Approve · Revise · Decline, then Later
+  (C92).** *Skip* exists only in bulk. The same three verbs wherever the owner
+  settles something an agent proposed — Knowledge drafts, Routines suggestions,
+  a meeting card (*Accept All* stays the meeting card's bulk verb, beside Revise
+  and *Decline All*). Not *Accept*, *Discard*, *Dismiss*, *Edit First* or
+  *Not Today* on a request.
+- **Delegate**, with the spark, is the one verb for handing work to an agent.
+- **Permissions read On · Ask · Off (C93)**; project modes **Autonomous /
+  Review (C94)**.
+- **Casing is HIG title style.** Controls, titles and column headers are Title
+  Case with articles, short conjunctions and short prepositions lower: *Open the
+  File*, *Run Now*, *Connect a Server*, *New Agent*. Values stay verbatim.
+- **Clock times are 12-hour with AM/PM** (*1:02 PM*). A duration says it is one
+  (*4m 12s*, *at 12:40 in*), so it cannot be misread as a time.
+- **One display name per routine (C55)**, and the morning's is **Morning Brief**
+  (C97).
+- **Retry copy** is the States board's: *Try Again*, and *Couldn't …* in prose.
+
+### 8.2 Buttons carry weight, not alarm (C92)
+
+On a request, **Approve is the one accent-filled button**; Revise and Decline
+are outlined. A filled destructive button appears only for an act that cannot be
+undone, and that act confirms first (P3). Decline keeps its cross glyph so the
+pair survives greyscale.
+
+### 8.3 One component per idea
+
+- **Agent chip:** one tinted pill in the `agent` hue, mono id. A roster row may
+  show the id bare. Never accent, never grey.
+- **Presence:** filled/hollow dot plus `degraded` — the Agents board's version
+  (C54). No other presence palette.
+- **Staleness is neutral.** A `stale` chip and *2 things changed* are grey; the
+  tint is for something wrong (§1.1).
+- **Provenance is neutral or hue**, never tint: *external* is a fact about where
+  a request came from, not a fault.
+- **An expired credential is `failed`** (C95), with both timestamps (§2.3).
+- **One glyph, one meaning.** The plug is *absent*; *reached through Metistry* is
+  the relay glyph. The clock-arrow is *Later*; *Ask* is its own mark; *paused* is
+  the pause bars. *Failed* has its own mark, so it never depends on colour alone
+  to differ from *degraded*.
+
+### 8.4 One set of sample data
+
+Every board draws its people, times, amounts and counts from one fixture
+(`boards/fixture.py`, started 2026-09-23: the day, the Needs You count, the
+meeting times, today's spend and the two file paths). A count on a badge matches
+the rows beneath it; a meeting has one time on every board; spend sums. Literals
+move into the fixture as boards change — a number drawn on two boards goes there
+first. Developers copy board data as
+acceptance data, so a board that disagrees with itself ships a bug.
+
+### 8.5 Where things go (C89, C90, C96–C98)
+
+- **A thread lives with its subject.** No Rooms list; *Open Room* from a card
+  opens the thread over Board (C89).
+- **Metis may move a meeting with other people in it after a warning** that
+  names who is told and the new time (C90).
+- **Anything that needs the owner is a Needs You request**, even when it is not
+  a question: a budget stop, a failed routine, an expired credential, a
+  knowledge conflict (C96).
+- **One morning brief, shown as Today** (C97); it writes a machine-owned file,
+  never the owner's daily note — one writer per file.
+- **A task can be ticked where it is shown** — Today, Board, card detail (C98).
+

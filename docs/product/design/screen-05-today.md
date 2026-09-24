@@ -480,3 +480,97 @@ The offer is proactive but not a nag: it appears when the day is measurably
 fragmented — the bar is how it knows — and **Not Today** means not today, not
 *ask again in an hour*. `POST /events` already has a preview-then-execute
 shape, so the mechanism exists; what is new is the reason and the restraint.
+
+---
+
+# 15. v7 — one morning, Next Up, and a way to end the day (2026-09-24)
+
+Board: `Today-Hub`, redrawn. Review 01 §5 items 1–5 and 8, and rulings C97 and
+C98. Three moments of one day (the fixture's Tuesday 22 September): **8:52 AM**
+first open, **9:04 AM** half an hour before a meeting, **5:08 PM** the close.
+
+## 15.1 The Morning Brief is Today's first state (C97)
+
+- One wash, one voice: a serif paragraph of what matters, then **one section —
+  Standup**, collapsed, with **Copy Standup** on its header. *Metistry doesn't
+  post this* stays, once, inside it.
+- **The plan is not repeated.** The plan is the day below; the brief's foot
+  says so — *The plan is the day below · 7 tasks, 2 carried* — and names its
+  file, `Journal/Brief/<date>.md`. Say a fact once.
+- **It folds to a line** once read (scrolled past, or on the next open):
+  *Morning Brief — Four things today; the lease comparables are the one that
+  moved.* Click reopens it.
+- **Absent** (no working days in `Me/profile.md`) and **failed** (the run
+  failed; two timestamps) are drawn; both end *the day below is still
+  complete*, because the spine does not depend on the brief.
+- On Routines, *Tomorrow's Plan* and *Standup Draft* become steps of the
+  Morning Brief rather than routines of their own (next Routines pass). Build:
+  `morning-brief` gains the plan and standup renders as sections of one file.
+
+## 15.2 Next Up
+
+From **30 minutes before** the next event, a card sticks under the header:
+
+- **Retrieved first:** the title and time, who is in it, **what you owe them**
+  (tickable), **last time** (the note, its action items, the one still open).
+- **One generated line**, in the wash, labelled *written, not retrieved*.
+- **Actions:** Open Notes · **Record** — which opens the floating bar with this
+  event already chosen, so a meeting recording starts in one click — and one
+  prediction with its reason (*Draft the Agenda — 3 open items with Jim*).
+- For the **standup** it is two lines and *Copy Standup*; the draft stays in the
+  brief. With nothing left: *Nothing else on your calendar today.*
+- The event in the spine shows *in Next Up ↑* instead of repeating the briefing.
+- Build: A1 (attendees, location), A3 (event → note link) and A4 (attendee →
+  person page) — the same three this idea was always blocked on.
+
+## 15.3 One Metis voice open at a time; three predictions a page
+
+- At most **one expanded wash** on the page. At first open it is the brief;
+  once the brief folds, it is the Next Up line. Calendar help sits **folded to
+  one line beside its one action** (*Move the Lease Call…*, which warns first,
+  C90).
+- **Predictions: ≤3 per page** (§12.5). v7 has two: *Draft the Agenda* and
+  *Move the Lease Call…*. *Open Work #418* was a link dressed as a prediction —
+  it is now the chip it points at. **Delegate appears on hover**, not on every
+  row.
+
+## 15.4 A checkbox ticks (C98) — and no dialog (proposed C99)
+
+Phase 1 now includes the check route. **One click ticks**; the row strikes in
+`text-tertiary` and a receipt names the file with **Undo** beneath it. §5's
+confirmation step is **dropped**: the route changes two bytes and Undo is a
+second mechanical write, so a dialog guards nothing and taxes the most frequent
+act of the day. The 409 refusal is unchanged — a line edited in Obsidian
+meanwhile is refused in `stale` with the current line shown. *This reverses §5's
+confirm; logged as C99 for the owner to confirm.*
+
+## 15.5 Close the Day
+
+From 30 minutes before `working_hours` end, the top of Today becomes **Close the
+Day**:
+
+- **Done** — a count and the first three, expandable.
+- **Still open** — each with **Tomorrow · This Week · Someday**; nothing is
+  deleted and no note is edited.
+- **Owed to people** — from people facets and meeting to-dos.
+- **Tomorrow** — the shape of the next working day, from the preview route.
+- **Close the Day** stores the choices and folds the day to one line (*Day
+  closed at 5:14 PM · 6 done · 2 to tomorrow · 1 this week · Reopen*).
+  `plan-tomorrow` reads them at 7 PM.
+- **Where the choices live is B4**, still the owner's ruling; the reading
+  offered there (app state, owner-only route, never markdown) is what is drawn.
+
+## 15.6 Slipping, a saved view
+
+In **All**, beside Today: **Slipping · Owed · Waiting on Others** — saved
+filters in the existing `where:` language. Slipping is *carried three or more
+times, overdue, or owed to someone*. The Sunday weekly review message links
+here.
+
+## 15.7 The day bar, and one fix underneath it
+
+The v7 day bar reads *5h 2m committed of 9h · everything planned fits*; *Doesn't
+Fit* stays in the legend at 0m, hollow, so the category is still learnable.
+**The day bar had been drawing grey since the Usage round**: the usage popover
+declared its own `CHART_L`/`CHART_D` as single colours and shadowed the ramp the
+day bar indexes into. Renamed; every board that draws the ramp is correct again.

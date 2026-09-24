@@ -13,6 +13,7 @@ F=dict(
     vendor_sync="1:00–1:30 PM",          # what calendar help proposes moving to 11:45 AM
     vendor_review="1:00–1:42 PM",        # the recorded meeting, 42 min; jots at 1:02, 1:20, 1:38 PM
     spend_today=1.84,                     # Usage; projects (1.52) + Metis (0.31) + other (0.01)
-    brief_file="Journal/Brief/2026-09-22.md",   # machine-owned; never the owner's daily note
+    brief_file="Journal/Brief/2026-09-22.md",
+    daily_note="Journal/2026-09-22.md",     # the owner's own note — only the owner's hand writes it (the check route)   # machine-owned; never the owner's daily note
     meeting_note="Journal/Meetings/2026-09-22-vendor-review.md",
 )

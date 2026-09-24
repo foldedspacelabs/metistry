@@ -238,6 +238,11 @@ SwiftUI's `.serif`.
 | Facets & colour | `facets-and-colour.md` | the system itself |
 | Build-side preview | `dev-preview-round-e.md` | **draft 2026-09-22** — what the developer needs, in one file; keep it current as rounds land |
 
+**Review 01 (2026-09-23): read `review-01-holistic.md` before drawing anything.** A
+holistic pass over all 24 boards and 28 documents: eleven rulings the owner owes
+(§1), cleanup against rules already made (§2), the three whole-product gaps —
+phone, offline, keyboard (§3) — and the ranked daily-use opportunities (§5).
+
 **Not drawn:** the Obsidian plugin's remaining surfaces.
 
 **Run detail is drawn (screen 12, 2026-09-22).** What follows was the state before it: `seed/queries/run_detail.yaml`

@@ -16,38 +16,25 @@ section label and band header, and it will fail the moment either token moves.
 ## 0. Where the drawings are
 
 **The canvas — every artboard:**
-<https://claude.ai/artifact/Ld6h7R8CVer4TncfNeLXNb> — *Metistry brand — round A*,
+<https://claude.ai/artifact/Ld6h7R8CVer4TncfNeLXNb> — *Metistry — design canvas*,
 a Design-type artifact. Read it with the Artifact tool (`action: "read"`, and
-`scope: "files"` on it to list the boards); do not web-fetch it. Its boards, in
-canvas order:
+`scope: "files"` on it to list the boards); do not web-fetch it. **Laid out
+2026-09-24 in labelled rows, top to bottom:**
 
-| Board | What it holds |
+| Row | Boards |
 | --- | --- |
-| `Main` · `Direction-B` · `Direction-C` | round A — the three brand directions; **C, the keyed square, was chosen** |
-| `Wordmark` | the wordmark, outlined from IBM Plex Sans SemiBold |
-| `Icon-App` · `Icon-Web` | macOS/iOS icons and the PWA set, with the optical ramp |
-| `Colour` · `Kit` · `Theme` | the accent, the brand kit, light and dark. **`Theme`'s window shows the round-B five-row nav** — trust its colours, not its sidebar; every screen board carries the current light and dark |
-| `States` | empty · absent · failed · stale |
-| `Request` | the request card and the bell panel |
-| `Chat` · `Activity` · `NeedsYou` · `Capture` | screens 1–4 |
-| `Today` | **ported** — the row, chip and state vocabulary; the window mock removed (C51). Was: the first Today pass — row, chip and state vocabulary, and the **absent state** of the spine |
-| `Today-Hub` | **the current Today** — the spine, the day bar, calendar help |
-| `Board` | Work ▸ Board, five columns |
-| `Facets` | the three channels, the ladder, the spark |
-| `Agents` | **screen 7** — the roster, a local agent, a connected agent |
-| `Routines` | **screen 8** — the schedule, one routine, the two prompt layers |
-| `Resources` | **screen 9** — proxied MCP servers, per-tool grants |
-| `Usage` | **screen 17, new 2026-09-23** — the popover under the gauge, light and dark |
-| `Artifacts` | **screen 16, new 2026-09-23** — margin threads, compare, and a task's room opened over Board (no Rooms list, C89) |
-| `Settings` | **screen 15, new 2026-09-23** — the window, four panes, larger text, dark |
-| `CardDetail` | **screen 14, new 2026-09-22** — both kinds of task, light and dark |
-| `Projects` | **screen 13, new 2026-09-22** — mode first, project permissions inherited by every agent |
-| `RunDetail` | **screen 12, new 2026-09-22** — a routine run, a failed run, a chat session, Settings ▸ Sessions |
-| `CaptureBar` | **screen 11, new 2026-09-22** — the floating bar over a desktop, live and at rest, glass measured |
-| `Knowledge` | **screen 10, rebuilt 2026-09-22** — the fold digest, what needs your eye, areas described, a draft settled, a conflict resolved |
-| `Plugin` | the Obsidian plugin — the mirror, the picker, editable chips |
-| `Voice` | six system serifs and a Times control |
-| `Item-Model` | the item contract (its ladder section is superseded by `Facets`) |
+| **Mac — the day** | `Today-Hub` (**Today v7**, screen 5 §15), `Chat`, `NeedsYou`, `Activity`, `CaptureBar`, `Capture` (its window still has the old sidebar) |
+| **Mac — Work** | `Board`, `CardDetail`, `Projects`, `Artifacts` (screen 16; a task's room, no Rooms list) |
+| **Mac — Knowledge, Agents, Routines** | `Knowledge`, `Agents`, `Routines`, `RunDetail` |
+| **Mac — Settings and Usage** | `Settings`, `Resources`, `Usage` |
+| **PWA — phone and narrow window** | `PWA-Shell`, `PWA-Today`, `PWA-NeedsYou`, `PWA-Work`, `PWA-More` (screen 18, new 2026-09-24) |
+| **The system** | `States`, `Request`, `Facets`, `Voice` |
+| **Brand** | `Direction-C` (chosen), `Wordmark`, `Icon-App`, `Icon-Web`, `Colour`, `Kit` |
+| **The Obsidian plugin** | `Plugin` |
+| **Archive — superseded** | `Main` and `Direction-B` (brand directions not taken), `Theme` (round-B nav), `Today` (the v5 vocabulary; v7 supersedes it), `Item-Model` |
+
+A new board goes in its section's row, 80px after the last one; a row's title is
+a `title1` note 300px above it. Rows are 420px apart below the tallest board.
 
 `Facets`, `Plugin`, `Voice` and `Item-Model` are **not yet modules** in
 `boards/` — they were built from earlier snapshots of the library. Every *screen*
@@ -248,12 +235,19 @@ holistic pass over all 24 boards and 28 documents. **All eleven rulings are made
 cleanup is done** (status in review 01 §8); **every §5 opportunity was adopted**;
 **the iPhone and PWA designs are deferred** by the owner.
 
-**Next round, in order:** (1) **Today elevated** — the one Morning Brief as
-Today's first state, a Next Up card, Close the Day, three predictions a page, live
-checkboxes (C97, C98). (2) **Needs You calmer** — the C96 events drawn, the
+**Done 2026-09-24:** **Today v7** (screen 5 §15 — Morning Brief, Next Up, Close
+the Day, ticking tasks, Slipping) and **the PWA** (screen 18 — phone and narrow
+window, the offline rule per verb, install, enrolment, notifications, and
+Compute ▸ Budgets drawn first). The owner reopened the PWA as a release feature;
+the native iPhone app stays deferred.
+
+**Next round, in order:** (1) **Needs You calmer** — the C96 events drawn, the
 meeting card produced at Stop with proposed due dates and *Draft Follow-up*.
-(3) **Offline and keyboard/VoiceOver** (review 01 §3.1). (4) **States for screens
-10–17** and the §3.3 flows, including the Compute pane.
+(2) **Routines** folded to the one Morning Brief (C97). (3) **Keyboard and
+VoiceOver** (review 01 §3.1; offline is now specified in screen 18 §4). (4)
+**States for screens 10–17** and the §3.3 flows, including the Mac's Compute
+pane from the PWA's. **Owed by the owner:** C99 (no confirm on a tick) and B4
+(where Close the Day's choices live).
 
 **Sample data comes from `boards/fixture.py`** (amendments §8.4). Put a number
 there before drawing it on a second board.
@@ -284,7 +278,7 @@ the canvas is now generated from a module in `boards/` except `Facets`, `Plugin`
 `Voice` and `Item-Model`. `bellpanel()` is gone — it drew the *"1 snoozed"*
 header C21 killed; `panel2()` is the panel.
 
-**98 contradictions** are logged in `review-00-plan.md`. C38, C51 and C62 are closed. C40–C87 are
+**100 contradictions** are logged in `review-00-plan.md`. C38, C51 and C62 are closed. C40–C87 are
 round E's; C88–C98 are review 01's rulings. Two of them are rules the system is missing rather than faults in a
 file: **C45** (a failed consequential operation leaves the request pending) and
 **C49** (a mark that carries meaning takes an ink token, never a border token —

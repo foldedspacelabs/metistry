@@ -6,7 +6,7 @@ more than one board belongs here first.
 """
 F=dict(
     day="Tuesday 22 September",          # the day every screen is drawn on
-    needs_you=4,                          # the bell badge, the panel header, Today's rail
+    needs_you=10,                         # the sidebar row's count (C110), the list header, Today's rail
     standup="9:15 AM",
     one_on_one="9:30–10:00 AM",          # 1:1 with Jim Fallon, every other Tuesday
     design_review="11:00–11:45 AM",      # 4 people, in person; moved from 1:00 PM

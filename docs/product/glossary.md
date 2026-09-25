@@ -26,7 +26,8 @@ Obsidian, or any text editor, forever; nothing is locked in a database.
 dropping it. Share sheet, Shortcuts, the **+** in the window, the floating bar,
 an agent's `capture` call: all the same door, all under five seconds.
 
-**Request** — anything that needs *you*. The bell opens **Needs You**, which
+**Request** — anything that needs *you*. **Needs You** appears at the top of the
+sidebar while something is waiting (the bell, on a phone), and
 lists requests — everything that needs you, whether Metis, an agent, or a
 source Metistry reads (GitHub, Calendar, Mail, Linear) is asking. A request
 from a source clears itself when you answer at the source. A request has one of

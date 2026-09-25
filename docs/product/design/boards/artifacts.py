@@ -7,7 +7,7 @@ row is the cap, and only the owner resolves.
 """
 from lib import *
 
-CW,CH=2600,3400
+CW,CH=2600,3420
 
 ALIST=pan(L,"ARTIFACTS — WHAT EXISTS, WHO MADE THE LATEST, WHAT&rsquo;S BEING DISCUSSED",
   row(workwin(L,artlist(L)),18)

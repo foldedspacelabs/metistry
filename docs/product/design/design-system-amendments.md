@@ -237,7 +237,8 @@ the same discipline as `later` not blocking.
 - **Two detail shapes beat one that fits neither.** Forcing a connected agent and
   a local agent through one layout gave the first an empty Definition section and
   the second an action matrix it does not use.
-- **The nav rule (C57).** Eight rows. The seven-row rule has been broken twice, both
+- **The nav rule (C57).** Eight rows — plus **Needs You** above Today while
+  something is waiting (C110). The seven-row rule has been broken twice, both
   times with the same argument — *this is not a property of the thing it sits
   under*. **A third break should move something out rather than add a row.**
 
@@ -473,9 +474,10 @@ acceptance data, so a board that disagrees with itself ships a bug.
   and sources the collectors read. A source request is a **mirror**: it exists
   only while the source names the owner, and clears when answered there. Metis
   may raise an inferred one, and says it inferred it (C108, screen 3 §12.7).
-- **The bell opens a view, not a panel (C109).** On the Mac, Needs You takes the
-  main area as list and detail; the bell is a toggle and shows pressed; the
-  sidebar shows no selection; the title bar leads back. No sidebar row.
+- **Needs You is a sidebar row above Today, present only while something is
+  waiting (C110, revising C109).** It opens a list-and-detail view in the main
+  area; its count is the one badge; the Mac toolbar has no bell. The phone keeps
+  the bell in its header.
 - **A request with several questions steps through them one at a time** and
   sends them together from a summary.
 

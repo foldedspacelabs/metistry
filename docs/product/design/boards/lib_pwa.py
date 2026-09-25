@@ -25,7 +25,7 @@ def tabbar(T,sel="Today",w=PW,safe=True):
             f'background: {T["surface"]}; border-top: 0.5px solid {T["bc"]}; display: flex; '
             + (f'padding: 0 {max(0,(w-560)//2)}px;' if w>600 else '') + f'">{cells}</div>')
 
-def hdrbtns(T,count="4"):
+def hdrbtns(T,count=str(F["needs_you"])):
     return (f'<span style="display: inline-flex; align-items: center; gap: 18px;">'
             f'<span style="display: flex; color: {T["acc"]};" aria-label="Capture">{ic(I["plus"],22)}</span>'
             f'<span aria-label="Needs You">{bell(T,count,22)}</span></span>')

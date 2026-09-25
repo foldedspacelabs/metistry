@@ -562,3 +562,22 @@ row** — the eight rows stand (C57).
 
 §12.3's all-at-once card remains the fallback for a narrow place that can only
 show one card (a notification's expanded view), and is otherwise superseded.
+
+### 13.3 Revised the same day: a sidebar row, while something is waiting (C110)
+
+The owner, after seeing the toggle: **add Needs You to the sidebar, above Today,
+with the bell — but only when there are items in it.** This replaces §13.1's
+toggle; the list-and-detail view is unchanged.
+
+- **The row appears with the first request and carries the count** — the
+  product's one badge. With nothing waiting it is not drawn, and the sidebar is
+  its eight rows.
+- **Selecting it is ordinary navigation**: it highlights like any row and you
+  leave it like any section. No pressed bell, no *‹ Today*, no Esc-to-return.
+- **The toolbar bell is removed on the Mac.** ⌘0 opens Needs You; a notification
+  tap and Today's *N waiting* land here with their request selected.
+- **Answering the last request doesn't pull the floor out**: the view shows
+  *Nothing needs you* and the row stays until you go elsewhere, then leaves.
+- **The phone and the narrow PWA window keep the bell in the header**, since the
+  tab bar has no room for a conditional tab.
+

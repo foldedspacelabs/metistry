@@ -24,7 +24,6 @@ def toolbar2(T,pressed=True,count="10"):
             f'<span style="font-size: 13px; font-weight: 600; color: {T["tp"]};">Metistry</span>'
             f'<span style="flex-grow: 1;"></span>'
             f'<span style="display: flex; color: {T["acc"]};">{ic(I["plus"],18)}</span>'
-            + (bellpressed(T,count) if pressed else bell(T,count,18))
             + f'<span style="display: flex; color: {T["ts"]};">{ic(I["gauge"],18)}</span></div>')
 
 # ---------- the list -------------------------------------------------------------------
@@ -71,10 +70,8 @@ def nyhead(T,back="Today",n=10):
          f'font-size: 12px; color: {T["tp"]};">From: Everyone {ic(I["chevd"],11,2.2)}</span>')
     return (f'<div style="padding: 12px 18px 12px; background: {T["surface"]}; border-bottom: 1px solid {T["border"]};">'
             f'<div style="display: flex; align-items: center; gap: 12px;">'
-            f'<span style="display: inline-flex; align-items: center; gap: 2px; font-size: 13px; color: {T["acc"]};">{ic(I["back"] if "back" in I else I["chevr"],15,2.2)}{back}</span>'
-            f'<span style="font-size: 20px; font-weight: 650; color: {T["tp"]}; margin-left: 6px;">Needs You</span>'
-            f'<span style="font-size: 13px; color: {T["ts"]};">{n} waiting</span><span style="flex-grow: 1;"></span>'
-            f'<span style="font-size: 11.5px; color: {T["tt"]};">Esc or the bell to go back</span></div>'
+            f'<span style="font-size: 20px; font-weight: 650; color: {T["tp"]};">Needs You</span>'
+            f'<span style="font-size: 13px; color: {T["ts"]};">{n} waiting</span><span style="flex-grow: 1;"></span></div>'
             f'<div style="display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 11px;">{chips}'
             f'<span style="flex-grow: 1;"></span>{frm}</div></div>')
 
@@ -83,13 +80,13 @@ def keys(T):
                   f'padding: 1px 6px; border-radius: 5px; border: 1px solid {T["bc"]}; color: {T["tp"]};">{a}</span>{b}</span>')
     return (f'<div style="display: flex; gap: 16px; flex-wrap: wrap; padding: 10px 24px; border-top: 1px solid {T["border"]}; '
             f'font-size: 11.5px; color: {T["ts"]}; background: {T["surface"]};">'
-            + k("↑ ↓","move") + k("↵","primary") + k("R","Revise") + k("L","Later") + k("⌘↵","send") + k("Esc","back") + '</div>')
+            + k("↑ ↓","move") + k("↵","primary") + k("R","Revise") + k("L","Later") + k("⌘↵","send") + k("⌘0","Needs You") + '</div>')
 
 def nywin(T,sel,detail,*,w=1440,h=None,back="Today"):
     hh=f"height: {h}px;" if h else ""
     return (f'<div style="width: {w}px; {hh} border: 1px solid {T["bc"]}; border-radius: 12px; overflow: hidden; background: {T["bg"]}; '
             f'flex-shrink: 0; display: flex; flex-direction: column;">{toolbar2(T)}'
-            f'<div style="display: flex; flex-grow: 1; min-height: 0;">{sidebar8(T,sel=None)}'
+            f'<div style="display: flex; flex-grow: 1; min-height: 0;">{sidebar8(T,sel="Needs You")}'
             f'<div style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column;">{nyhead(T,back)}'
             f'<div style="display: flex; flex-grow: 1; min-height: 0;">{nylist(T,sel)}'
             f'<div style="flex-grow: 1; min-width: 0; padding: 22px 28px 26px;">{detail}</div></div>{keys(T)}</div></div></div>')
@@ -191,4 +188,4 @@ def emptydetail(T):
             f'<div style="font-size: 18px; font-weight: 600; color: {T["tp"]}; margin-top: 10px;">Nothing needs you.</div>'
             f'<div style="font-size: 13.5px; color: {T["ts"]}; margin-top: 6px; line-height: 1.5;">When Metis, an agent or a source '
             f'you connected asks for something, it lands here &mdash; and only then does the bell show a number.</div>'
-            f'<div style="margin-top: 16px;">{btn(T,"Back to Today","secondary")}</div></div>')
+            f'<div style="font-size: 12.5px; color: {T["ts"]}; margin-top: 10px;">This row leaves the sidebar when you go elsewhere.</div></div>')

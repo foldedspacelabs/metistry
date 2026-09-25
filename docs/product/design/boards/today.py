@@ -6,7 +6,7 @@ moments of one day: first open, the half hour before a meeting, the end.
 from lib import *
 from lib_today import *
 
-CW,CH=2620,7760
+CW,CH=2620,7960
 
 def side(title,notes):
     return (f'<div style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 14px;">'
@@ -35,9 +35,9 @@ B_N=side("9:04 AM &mdash; NEXT UP, AND ONE VOICE AT A TIME",[
 C_N=side("5:08 PM &mdash; CLOSE THE DAY",[
   "<b>The end of the day has a screen.</b> What got done, what is still open and where it goes, what you owe people, "
   "and the shape of tomorrow.",
-  "<b>Closing writes three places</b> (B4, ruled 2026-09-25): the day to <b>Journal/Close/&lt;date&gt;.md</b>, each "
-  "task&rsquo;s new date into its own line, and <b>tomorrow&rsquo;s plan</b> at once &mdash; so the Morning Brief starts "
-  "from what you decided. Tonight&rsquo;s fold reads the close into knowledge."])
+  "<b>Owed to people is a list of tasks</b>, tickable and movable like the rest, with the person on each (C102).",
+  "<b>Closing keeps today&rsquo;s note current</b>: it rewrites the Metistry section of the daily note, dates each "
+  "deferred line, and writes <b>tomorrow&rsquo;s plan</b> at once. Tonight&rsquo;s fold reads it into knowledge."])
 
 def comp(title,inner): return pan(L,title,inner)
 BRIEFS=comp("THE BRIEF &mdash; OPEN, FOLDED, ABSENT, FAILED",
@@ -69,15 +69,24 @@ def dest(T,g,where,what,how,last=False):
             f'<div style="flex-grow: 1; min-width: 0;"><div>{mono(where,T["tp"],12)}</div>'
             f'<div style="font-size: 12.5px; color: {T["tp"]}; margin-top: 3px; line-height: 1.45;">{what}</div>'
             f'<div style="font-size: 11.5px; color: {T["ts"]}; margin-top: 2px;">{how}</div></div></div>')
-WRITES=comp("WHAT CLOSING WRITES (B4, RULED 2026-09-25)",
-  dest(L,"note",F["close_file"],"Done, what moved and where, what you owe people, and your line for tomorrow.",
-       "Your act, so your file: <b>source: user</b>, one writer. The fold reads it tonight.")
-  + dest(L,"check","Journal/2026-09-22.md &middot; Areas/Ops/lease.md","Each deferred task gets its date: "
-         "<b>&#9203; 2026-09-23</b> for Tomorrow, the week&rsquo;s last working day for This Week, <b>#someday</b> for Someday.",
+NOTESEC=("## Today &middot; Metistry<br>"
+         "<span style=\"color: "+L["ts"]+";\">&lt;!-- metistry:day &middot; updated 5:14 PM &middot; edits above and below this section are yours --&gt;</span><br>"
+         "**Done** &mdash; Sign the SOW &middot; Call the dentist &middot; Write the design brief &middot; +3<br>"
+         "**Moved** &mdash; 3 to Wed &middot; Send Jim the revised Q4 scope &rarr; Fri &middot; the walkthrough checklist &rarr; someday<br>"
+         "**Meetings** &mdash; [[2026-09-22-vendor-review|Vendor review]] &middot; [[2026-09-22-design-review|Design review]]<br>"
+         "**For tomorrow** &mdash; Kessler first &mdash; the volume numbers decide the renewal.<br>"
+         "<span style=\"color: "+L["ts"]+";\">&lt;!-- /metistry:day --&gt;</span>")
+WRITES=comp("WHAT CLOSING WRITES (C101, C102 &mdash; RULED 2026-09-25)",
+  dest(L,"note",F["daily_note"]+" &middot; its Metistry section","Done, what moved and to when, the meetings, and your line for tomorrow.",
+       "Only between its markers; the rest of the note is yours. The brief writes it at 6 AM, closing rewrites it (C102).")
+  + f'<div style="margin: 2px 0 8px 26px; background: {L["sunken"]}; border-radius: 8px; padding: 9px 11px; '
+    f'font-family: {MONO}; font-size: 11px; color: {L["tp"]}; line-height: 1.6;">{NOTESEC}</div>'
+  + dest(L,"check","each deferred task&rsquo;s own line","<b>&#9203; 2026-09-23</b> for Tomorrow, the week&rsquo;s last working day for "
+         "This Week, <b>#someday</b> for Someday. Owed items are tasks like any other.",
          "The check route&rsquo;s sibling &mdash; one field on one line, refused if the line changed.")
   + dest(L,"spark",F["plan_file"],"Tomorrow&rsquo;s plan, written now rather than at 7 PM, and led by your line.",
-         "plan-tomorrow runs on close; a later reopen and close re-renders it. It becomes the Morning Brief&rsquo;s day.")
-  + dest(L,"know","Knowledge, via tonight&rsquo;s fold","What was owed to whom, as proposals on each person&rsquo;s page; "
+         "plan-tomorrow runs on close; closing again re-renders it. It becomes the Morning Brief&rsquo;s day.")
+  + dest(L,"know","Knowledge, via tonight&rsquo;s fold","What is owed to whom, as proposals on each person&rsquo;s page; "
          "what slipped, for the weekly review.","Proposals, as ever (C79) &mdash; the fold never writes your pages.",last=True))
 
 NEXTS=comp("NEXT UP &mdash; A STANDUP, AND NOTHING LEFT",

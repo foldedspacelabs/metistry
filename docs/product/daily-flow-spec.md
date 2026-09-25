@@ -522,7 +522,7 @@ edits going in `Journal/Plan/*` and `Journal/Fold/*`."*
 | `Journal/Plan/<date>.md` | `plan-tomorrow` | `plan-tomorrow` | schedule, today's tasks + why, carry-overs, what agents are waiting on |
 | `Journal/Fold/<date>.md` | the assistant's fold turn | `knowledge-fold` | what happened, what was decided, `decisions:` frontmatter |
 | `Journal/Standup/<date>.md` | `standup-draft` | `standup-draft` | yesterday / today / blockers, rendered from `Templates/Standup.md` |
-| `Journal/Close/<date>.md` *(added 2026-09-25, C101)* | the owner's close route | the owner (`source: user`) | done, moved and where, owed, a line for tomorrow — read by `plan-tomorrow` and the fold |
+| `Journal/<date>.md` — **only its `metistry:day` section** *(added 2026-09-25, C102)* | `morning-brief`, the owner's close | Metistry, between its markers; the owner everywhere else | the day's plan and meetings at 6 AM; done, moved, the line for tomorrow on close |
 
 The daily note **embeds** the machine files (`![[Journal/Plan/2026-09-22]]`,
 `![[Journal/Standup/2026-09-22]]`, `![[Journal/Fold/2026-09-22]]`), so the

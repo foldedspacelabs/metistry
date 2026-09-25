@@ -79,7 +79,7 @@ is worse than no person page.
 
 ---
 
-### A5 · Generated prep prose has nowhere legal to come from — needs a ruling
+### A5 · Generated prep prose has nowhere legal to come from — **ruled 2026-09-25 (C103): prose allowed**
 
 §6.2 makes `prose` **fold-templates only**, deliberately, and the assistant's
 two lines on a meeting card are exactly a `prose` directive outside a fold
@@ -190,11 +190,11 @@ resolve "the previous instance" through `vault_meeting_refs` (A3).
 
 ### B4 · Where a revised day is stored, and under whose hand — **ruled 2026-09-25 (C101)**
 
-> **Ruling:** Close the Day's choices persist **to knowledge and to the next
-> day's plan** — `Journal/Close/<date>.md`, `⏳`/`#someday` on each line through a
-> schedule route, and `plan-tomorrow` run on close. See `screen-05-today.md`
-> §15.5.1. The reading below (app state) was not taken for the close; it still
-> stands for a *reordering* of today, which writes nothing.
+> **Ruling:** Close the Day's choices persist **to the daily note (its
+> Metistry section), the next day's plan and knowledge** — no separate close
+> file (C101, C102). `⏳`/`#someday` on each line through a schedule route, and
+> `plan-tomorrow` run on close. See `screen-05-today.md` §15.5.1. The reading
+> below (app state) still stands for a *reordering* of today, which writes nothing.
 
 §10.1 says the user's drag order is authoritative and stored (C29, still open).
 This design adds a second writer to that same state: **you tell the assistant

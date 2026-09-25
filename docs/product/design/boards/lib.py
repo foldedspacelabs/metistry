@@ -3482,8 +3482,8 @@ def folddigest(T,w=None):
             f'<div style="display: flex; align-items: center; gap: 9px; margin-top: 13px;">'
             + btn(T,"Open the Fold","secondary",I["note"]) + btn(T,"Earlier Folds","ghost")
             + f'<span style="flex-grow: 1;"></span>{thumbs(T)}</div>'
-            + teachline(T,"Metis writes here, in its own voice, as its own commit. <b>Your own daily note is "
-                          "never touched</b> — one writer per file, and this is not that file.") + '</div>')
+            + teachline(T,"Metis writes here, in its own voice, as its own commit. In your daily note it writes "
+                          "<b>only its own section</b>, between its markers; the rest of the note is yours.") + '</div>')
 
 def eyerow(T,*,glyph,what,page,why,action,tone=None,last=False):
     return (f'<div style="display: grid; grid-template-columns: 17px 128px minmax(0,1fr) 128px; '

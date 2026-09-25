@@ -246,8 +246,10 @@ meeting card produced at Stop with proposed due dates and *Draft Follow-up*.
 (2) **Routines** folded to the one Morning Brief (C97). (3) **Keyboard and
 VoiceOver** (review 01 §3.1; offline is now specified in screen 18 §4). (4)
 **States for screens 10–17** and the §3.3 flows, including the Mac's Compute
-pane from the PWA's. C99 (no confirm on a tick) and B4 (Close the Day writes the close file, the
-tasks' dates and tomorrow's plan — C101) were ruled 2026-09-25.
+pane from the PWA's. Ruled 2026-09-25: C99 (no confirm on a tick); C101/C102 (Close the Day updates
+the daily note's Metistry section, dates each deferred line and writes
+tomorrow's plan — no close file; owed items are tasks); C103 (prose allowed
+outside a fold).
 
 **Sample data comes from `boards/fixture.py`** (amendments §8.4). Put a number
 there before drawing it on a second board.
@@ -278,7 +280,7 @@ the canvas is now generated from a module in `boards/` except `Facets`, `Plugin`
 `Voice` and `Item-Model`. `bellpanel()` is gone — it drew the *"1 snoozed"*
 header C21 killed; `panel2()` is the panel.
 
-**101 contradictions** are logged in `review-00-plan.md`. C38, C51 and C62 are closed. C40–C87 are
+**103 contradictions** are logged in `review-00-plan.md`. C38, C51 and C62 are closed. C40–C87 are
 round E's; C88–C98 are review 01's rulings. Two of them are rules the system is missing rather than faults in a
 file: **C45** (a failed consequential operation leaves the request pending) and
 **C49** (a mark that carries meaning takes an ink token, never a border token —
@@ -303,8 +305,8 @@ calendar tiers). **A1** (events return only title/start/end) and **A2**
 (Metistry may not write the meeting note) block the most. **A5** and **B4** need
 a ruling from the owner, not a ticket.
 
-**Open rulings the owner owes:** A5 (`prose` outside a fold template). B4 was
-ruled 2026-09-25 (C101); C16 on 2026-09-22.
+**Open rulings the owner owes:** none outstanding from review 01 or the Today
+requests (A5 → C103, B4 → C101 on 2026-09-25; C16 on 2026-09-22).
 
 **Requests from screen 7** (`screen-07-agents.md` §12): **C1** a
 `collector_health` query, without which `stale` is undrawable anywhere; **C2**

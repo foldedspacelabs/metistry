@@ -27,16 +27,17 @@ dropping it. Share sheet, Shortcuts, the **+** in the window, the floating bar,
 an agent's `capture` call: all the same door, all under five seconds.
 
 **Request** — anything that needs *you*. The bell opens **Needs You**, which
-lists requests — including things that are not questions, like a budget that
-stopped work or a sign-in that expired, because Needs You is the one place to
-look. A request has one of seven types:
+lists requests — everything an agent needs from you, including things that are
+not questions, like a sign-in that expired. A request has one of nine types:
 
 | Type | It is asking you to |
 |---|---|
 | **note** | keep something (a fact, a captured page, a draft to settle) |
 | **report** | read what an agent found — a finding, a decision, a gotcha, progress |
 | **review** | look at an artifact someone wants your eyes on |
-| **question** | answer something Metis cannot continue without |
+| **question** | answer one or more questions an agent cannot continue without — pick from its choices, or say something else |
+| **pull request** | review and approve code changes, or reply in a pull request's thread — posted to GitHub as you |
+| **meeting** | settle a recorded meeting's notes and to-dos |
 | **access** | grant an agent more than it has — including when the agent asked for a named folder itself |
 | **improvement** | change how the system itself behaves |
 | **action** | do one thing on your behalf — dispatch a brief, move a card, comment, capture |

@@ -551,34 +551,41 @@ Day**:
 
 - **Done** — a count and the first three, expandable.
 - **Still open** — each with **Tomorrow · This Week · Someday**; nothing is
-  deleted and no note is edited.
-- **Owed to people** — from people facets and meeting to-dos.
+  deleted.
+- **Owed to people** — **tasks**, tickable and movable like the rest, whose
+  person facet says who is waiting (C102). They come from people facets and
+  meeting to-dos; there is no separate "owed" object.
 - **Tomorrow** — the shape of the next working day, from the preview route.
 - **A line for tomorrow** — optional, the owner's own words. It leads
   tomorrow's plan and the Morning Brief.
 - **Close the Day** folds the day to one line (*Day closed at 5:14 PM · 6 done
-  · 2 to tomorrow · 1 this week · Reopen*) naming what it wrote.
+  · 3 to tomorrow · 1 this week · 1 someday · Reopen*) naming what it wrote.
 
-### 15.5.1 What closing writes (B4, ruled 2026-09-25 — C101)
+### 15.5.1 What closing writes (C101, C102 — ruled 2026-09-25)
 
-The owner ruled that the choices persist **into knowledge and into the next
-day's plan**, not into app state. Closing is the owner's act, so each write is
-the owner's hand, made mechanical — the same argument as the check route:
+The owner ruled that the choices persist into **today's daily note, the next
+day's plan and knowledge** — and that there is **no separate close file**: the
+daily note is kept up to date instead.
 
 | Where | What | Writer |
 | --- | --- | --- |
-| `Journal/Close/<date>.md` | done, what moved and where, owed to people, the line for tomorrow | the owner's close route; `source: user`; one writer |
+| **today's daily note, its Metistry section** | done, what moved and to when, the day's meetings (linked), the line for tomorrow | Metistry, **only between its markers** (`<!-- metistry:day -->` … `<!-- /metistry:day -->`); everything else in the note is the owner's |
 | each deferred task's own line | `⏳ <date>` — tomorrow, or the week's last working day; **Someday** adds `#someday` and drops any `⏳` | the **schedule route**, the check route's sibling: one field on one line, 409 if the line changed |
-| `Journal/Plan/<tomorrow>.md` | tomorrow's plan, **now** rather than at 7 PM, led by the line | `plan-tomorrow`, triggered by the close; reopen-and-close re-renders it |
+| `Journal/Plan/<tomorrow>.md` | tomorrow's plan, **now** rather than at 7 PM, led by the line | `plan-tomorrow`, triggered by the close; closing again re-renders it |
 | knowledge | who is owed what → proposals on each person's page; what slipped → the weekly review | tonight's fold, as proposals (C79) |
 
-- **Never closed?** `plan-tomorrow` still runs at its 7 PM gate from the day as
-  it stands, and says so in the plan: *the day was not closed*.
-- **Reopen** undoes nothing already written; closing again rewrites the close
-  file and the plan, and reschedules only the lines whose choice changed.
+- **The section is kept current, not written once.** The Morning Brief writes
+  it at 6:02 AM with the day's plan and meetings; Close the Day rewrites it with
+  what happened. Each write replaces the section whole and stamps the time.
+- **Where it goes:** under a `## Today · Metistry` heading — appended the first
+  time if the note has none, and found by its markers after that, wherever the
+  owner has moved it. The daily-note template may place the markers.
+- **If the markers were deleted or broken**, nothing is written into the note:
+  the close still completes, and a `note` request in Needs You says the section
+  could not be found. Metistry never guesses where the owner's text ends.
+- **Never closed?** `plan-tomorrow` still runs at 7 PM from the day as it
+  stands and says so; the section keeps its morning version.
 - `#someday` tasks leave Today and Slipping and appear in the weekly review.
-- The owner may embed the close in the daily-note template
-  (`![[Journal/Close/{{date}}]]`) — his template, so it is not a second writer.
 
 ## 15.6 Slipping, a saved view
 

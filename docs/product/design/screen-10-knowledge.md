@@ -47,8 +47,8 @@ is the longest stretch of agent text in the product:
   feedback control, unchanged.
 
 **Under it, the rule it depends on:** *Metis writes here, in its own voice, as its
-own commit. Your own daily note is never touched — one writer per file, and this
-is not that file.*
+own commit. In your daily note it writes only its own section, between its
+markers; the rest of the note is yours* (C102, 2026-09-25).
 
 ## 3. Needs your eye — and why this is not a second queue
 

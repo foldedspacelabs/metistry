@@ -248,20 +248,20 @@ def rail7(T,w=286,at="9:04 AM"):
             + railsec(T,"SINCE YOU LAST LOOKED",changes,at) + '</div>')
 
 def closeday(T,*,closed=False,w=None,phone=False):
-    """Review 01 §5.5. The end of the day has a screen. What it stores is app
-    state (B4's reading, still the owner's to rule); nothing edits a note, and
-    tomorrow's plan reads it at 7 PM."""
+    """Review 01 §5.5. The end of the day has a screen. Closing updates the
+    Metistry section of today's note, reschedules deferred lines, and writes
+    tomorrow's plan (C101, C102). Owed items are tasks with a person on them."""
     wd=f"width: {w}px; box-sizing: border-box;" if w else ""
     if closed:
         return (f'<div style="{wd} border: 1px solid {T["border"]}; border-radius: 10px; background: {T["surface"]}; '
                 f'padding: 10px 13px; font-size: 12.5px; color: {T["ts"]};">'
                 f'<div style="display: flex; align-items: center; gap: 9px;">'
                 f'<span style="display: flex; color: {T["ok"]};">{ic(I["check"],14,2.2)}</span>'
-                f'<span><b style="color: {T["tp"]};">Day closed at 5:14 PM</b> &middot; 6 done &middot; 2 to tomorrow &middot; 1 this week</span>'
+                f'<span><b style="color: {T["tp"]};">Day closed at 5:14 PM</b> &middot; 6 done &middot; 3 to tomorrow &middot; 1 this week &middot; 1 someday</span>'
                 f'<span style="flex-grow: 1;"></span><span style="font-weight: 600; color: {T["acc"]};">Reopen</span></div>'
                 f'<div style="display: flex; gap: 12px; flex-wrap: wrap; margin: 6px 0 0 23px; font-size: 11.5px;">'
-                + mono(F["close_file"],T["ts"],10.5)
-                + f'<span>&middot; 3 tasks rescheduled in their notes</span>'
+                + mono(F["daily_note"],T["ts"],10.5)
+                + f'<span>&middot; its Metistry section updated</span><span>&middot; 5 tasks rescheduled</span>'
                 f'<span>&middot; tomorrow&rsquo;s plan written</span></div></div>')
     choice=lambda sel:segchoice(T,[(I["chevr"],"Tomorrow"),(I["cal"],"This Week"),(I["later"],"Someday")],sel)
     def openrow(title,bits,sel,last=False):
@@ -279,12 +279,12 @@ def closeday(T,*,closed=False,w=None,phone=False):
           + f'<span style="color: {T["acc"]}; font-weight: 600;">+3 more</span></div>')
     opens=(openrow("Read drey-dev&rsquo;s migration notes",[prio(T,3),est(T,"30m")],"Tomorrow")
            + openrow("Renew the parking permit",[prio(T,3),due(T,"Today",True),est(T,"10m")],"Tomorrow")
-           + openrow("Send Jim the revised Q4 scope",[prio(T,2),ent(T,"person","Jim Fallon",I["person"]),
-                     st(T,"4th Day","deg",I["clock"])],"This Week",last=True))
-    owed=("".join(f'<div style="display: flex; align-items: baseline; gap: 8px; padding: 5px 0; font-size: 12.5px; color: {T["ts"]};">'
-                  f'{ent(T,"person",p,I["person"])}<span>{what}</span></div>'
-                  for p,what in (("Jim Fallon","the revised Q4 scope &middot; 4th day"),
-                                 ("Sam Kessler","the revised volume numbers &middot; due Thu, from the Vendor review"))))
+           + openrow("Draft the lease walkthrough checklist",[prio(T,3),est(T,"20m")],"Someday",last=True))
+    # C102: owed items are tasks — tickable — whose person facet says who is waiting
+    owed=(openrow("Send Jim the revised Q4 scope",[prio(T,2),ent(T,"person","Jim Fallon",I["person"]),
+                  st(T,"4th Day","deg",I["clock"])],"This Week")
+          + openrow("Send Kessler the revised volume numbers",[prio(T,2),due(T,"Thu"),
+                    ent(T,"person","Sam Kessler",I["person"]),ent(T,"note","Vendor review",I["note"])],"Tomorrow",last=True))
     tmr=(f'<div style="display: flex; gap: 3px; margin-top: 6px;">'
          + "".join(f'<div style="width: {wv}%; height: 18px; border-radius: 4px; background: '
                    f'{seghex(T,0,T is D) if k=="m" else T["sunken"]};"></div>'
@@ -306,9 +306,8 @@ def closeday(T,*,closed=False,w=None,phone=False):
               f'numbers decide the renewal.</div>'
             + f'<div style="display: flex; align-items: center; gap: 10px; margin-top: 14px; flex-wrap: wrap;">'
               f'{btn(T,"Close the Day","affirm",I["check"])}'
-              f'<span style="font-size: 12px; color: {T["ts"]}; line-height: 1.45;">Saves the day to '
-              + mono(F["close_file"],T["ts"],10.5)
-              + f', reschedules 3 tasks in their notes, and writes tomorrow&rsquo;s plan.</span></div></div>')
+              f'<span style="font-size: 12px; color: {T["ts"]}; line-height: 1.45;">Updates today&rsquo;s note, '
+              f'reschedules 5 tasks, and writes tomorrow&rsquo;s plan.</span></div></div>')
 
 def todaywin7(T,*,at,top,spine,w=1280,dark=False,rail_at="yesterday"):
     return (f'<div style="width: {w}px; border: 1px solid {T["bc"]}; border-radius: 12px; overflow: hidden; '

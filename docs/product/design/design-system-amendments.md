@@ -443,7 +443,14 @@ acceptance data, so a board that disagrees with itself ships a bug.
 - **Anything that needs the owner is a Needs You request**, even when it is not
   a question: a budget stop, a failed routine, an expired credential, a
   knowledge conflict (C96).
-- **One morning brief, shown as Today** (C97); it writes a machine-owned file,
-  never the owner's daily note — one writer per file.
+- **One morning brief, shown as Today** (C97). It writes its own file and the
+  **Metistry section** of the daily note (C102).
+- **One writer per region.** In the owner's daily note Metistry writes only
+  between its `metistry:day` markers; the rest is the owner's. Broken markers
+  stop the write and raise a request (C102).
+- **Owed is a facet, not an object.** Something owed to a person is a task with
+  that person on it — tickable wherever it appears (C102).
+- **Generated prose may appear outside a fold** — attributed, in the wash, marked
+  *written, not retrieved* (C103).
 - **A task can be ticked where it is shown** — Today, Board, card detail (C98).
 

@@ -23,7 +23,7 @@ a Design-type artifact. Read it with the Artifact tool (`action: "read"`, and
 
 | Row | Boards |
 | --- | --- |
-| **Mac — the day** | `Today-Hub` (**Today v7**, screen 5 §15), `Chat`, `NeedsYou`, `Activity`, `CaptureBar`, `Capture` (its window still has the old sidebar) |
+| **Mac — the day** | `Today-Hub` (**Today v7**, screen 5 §15), `Chat`, `NeedsYou` (v3 cards), **`NeedsYou-v4`** (the request pattern, questions, pull requests — screen 3 §12), `Activity`, `CaptureBar`, `Capture` (its window still has the old sidebar) |
 | **Mac — Work** | `Board`, `CardDetail`, `Projects`, `Artifacts` (screen 16; a task's room, no Rooms list) |
 | **Mac — Knowledge, Agents, Routines** | `Knowledge`, `Agents`, `Routines`, `RunDetail` |
 | **Mac — Settings and Usage** | `Settings`, `Resources`, `Usage` |
@@ -241,10 +241,14 @@ window, the offline rule per verb, install, enrolment, notifications, and
 Compute ▸ Budgets drawn first). The owner reopened the PWA as a release feature;
 the native iPhone app stays deferred.
 
-**Next round, in order:** (1) **Needs You calmer** — the C96 events drawn, the
-meeting card produced at Stop with proposed due dates and *Draft Follow-up*.
-(2) **Routines** folded to the one Morning Brief (C97). (3) **Keyboard and
-VoiceOver** (review 01 §3.1; offline is now specified in screen 18 §4). (4)
+**Needs You v4 is drawn (2026-09-25, screen 3 §12, board `NeedsYou-v4`):** one
+request pattern (header · ask · context · body · answers) with a closed set of
+bodies; **questions** with several multiple-choice answers, context and free text;
+**pull requests** reviewed and answered in Metistry, posted to GitHub as the
+owner; the C96 events and the meeting-at-Stop as instances. Nine request types.
+
+**Next round, in order:** (1) **Routines** folded to the one Morning Brief (C97). (2) **Keyboard and
+VoiceOver** (review 01 §3.1; offline is now specified in screen 18 §4). (3)
 **States for screens 10–17** and the §3.3 flows, including the Mac's Compute
 pane from the PWA's. Ruled 2026-09-25: C99 (no confirm on a tick); C101/C102 (Close the Day updates
 the daily note's Metistry section, dates each deferred line and writes
@@ -280,7 +284,7 @@ the canvas is now generated from a module in `boards/` except `Facets`, `Plugin`
 `Voice` and `Item-Model`. `bellpanel()` is gone — it drew the *"1 snoozed"*
 header C21 killed; `panel2()` is the panel.
 
-**103 contradictions** are logged in `review-00-plan.md`. C38, C51 and C62 are closed. C40–C87 are
+**107 contradictions** are logged in `review-00-plan.md`. C38, C51 and C62 are closed. C40–C87 are
 round E's; C88–C98 are review 01's rulings. Two of them are rules the system is missing rather than faults in a
 file: **C45** (a failed consequential operation leaves the request pending) and
 **C49** (a mark that carries meaning takes an ink token, never a border token —

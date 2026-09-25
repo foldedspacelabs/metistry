@@ -454,3 +454,19 @@ acceptance data, so a board that disagrees with itself ships a bug.
   *written, not retrieved* (C103).
 - **A task can be ticked where it is shown** — Today, Board, card detail (C98).
 
+## 9. Requests — one pattern (2026-09-25)
+
+- **Every request is five parts:** header · the ask · context · one body block ·
+  answers. A type chooses a body from a closed set — choices, diff, thread,
+  before and after, preview, to-dos, excerpt — and names its primary verb. **A new
+  type is a row in the table, not a new card** (`screen-03-needs-you.md` §12.2).
+- **Context separates the agent's words from what it read**: prose on the wash,
+  then retrieved chips.
+- **Revise is always free text back to whoever asked.**
+- **When an answer posts to another system, the button uses that system's word**
+  — *Request Changes* on a pull request. This is the one exception to §8.1's verb
+  set, and it exists because the button is naming the state it will create there.
+- **A card never acts on something the owner didn't see**: a request whose subject
+  changed while open (new commits, an edited line, a moved row) turns `stale` and
+  sends nothing.
+

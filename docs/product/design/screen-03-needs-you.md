@@ -344,3 +344,132 @@ YOURS     2 notes, 1 to-do — already saved, and included in the notes.
 - **Events that are not questions arrive here too (C96)** — a budget stop and a
   failed routine as `report`, an expired credential as `access`, a knowledge
   conflict as `review`. Drawn next round with the calmer panel.
+
+---
+
+## 12. v4 — everything an agent needs from you, one pattern (2026-09-25)
+
+Board: `NeedsYou-v4`. The owner's framing: **Needs You is where everything an agent
+needs from the owner arrives**, and more types will come. So the work is a
+pattern first and two new types second.
+
+**Rulings taken before drawing (2026-09-25):** several multiple-choice questions
+per card; pull requests are reviewed and answered **in Metistry**, posting to
+GitHub as the owner; PR requests arrive **from agents and from GitHub's own
+review requests**.
+
+### 12.1 What I found first
+
+- **Questions exist, narrowly.** `decision` rows come only from Metis ending a
+  reply with a ` ```decision ` block — one title, 2–8 options of ≤80 chars —
+  and *"the options are the ONLY answers the server will later accept"*
+  (`packages/core/src/decision-block.ts`). Chat already settles one with free
+  text (`server.ts:630`). No context, one question, one choice; **other agents
+  cannot ask at all** — `requests_create` files reports, and one of its report
+  kinds is also called `decision` (C104).
+- **PRs are collected, never asked.** `github-state` reconciles PRs with a
+  **read-only** token and marks `needs_my_review`; `prs_for_review` exists and the
+  morning brief lists them. Nothing reaches Needs You, no agent can ask for a
+  review, and review comments are not collected (C106).
+
+### 12.2 The pattern — five parts, a closed set of bodies
+
+1. **Header** — type · who asked (an agent chip, or a person when GitHub asked)
+   · provenance · age.
+2. **The ask** — one line.
+3. **Context** — the agent's words on the wash, then the **retrieved** things
+   they rest on as chips (a task, a file, a ruling). Generated and retrieved never
+   mix, so the owner can check the premise before answering.
+4. **Body** — exactly one block from a closed set: **choices · diff · thread ·
+   before and after · preview · to-dos · excerpt**.
+5. **Answers** — the type's primary verb, the one filled button · **Revise** ·
+   Decline · Later · `?`.
+
+| Type | Body | Primary | Revise | Decline |
+| --- | --- | --- | --- | --- |
+| question | choices | Send Answers | Revise | Decline |
+| pull request | diff · thread | Approve · Reply | Request Changes | — |
+| access | before and after | Approve | Revise (narrow it) | Decline |
+| action | preview | Approve | Revise | Decline |
+| meeting | to-dos | Accept All | Revise | Decline All |
+| review | before and after · preview | Approve · Keep Mine | Revise · Take the Other | Decline |
+| note · improvement | preview · before and after | Approve | Revise | Decline |
+| report | excerpt | its one act (Try Again, Reconnect) | — | Dismiss |
+
+- **A new type is a row, not a card.** It picks a body block and names its
+  primary verb; the panel, the full window and the phone sheet render it.
+- **Revise is always free text, always back to whoever asked** — the course
+  correction when the agent didn't get it quite right.
+- **When an answer posts to another system, the button uses that system's
+  word.** *Request Changes* is GitHub's review state, so it is Revise's name on a
+  pull request. (Amends amendments §8.1's one verb set.)
+- Filters show only the types present, with counts. The bell is still the only
+  badge.
+
+### 12.3 Question
+
+- **Any number of questions per card**, each **pick one** or **pick any**, and
+  every one ends in **Something else…** — an answer in the owner's words, sent as
+  that question's answer (C105).
+- **Send Answers** fills only when every question has an answer; the count above
+  it says how many are left.
+- **Revise answers none of them** — it tells the agent the questions are the
+  wrong questions, in free text.
+- After sending: the answers as a list, *not read yet*, and **Change** until the
+  agent reads them.
+- The **budget stop** is already a question in the code (`budgets.ts`, two
+  options) and is drawn as one.
+
+### 12.4 Pull request
+
+- **Two sources.** An agent that opened a PR asks with context (*"that's the file
+  to read"*); or GitHub's own review request arrives from the collector,
+  attributed to **the person** who asked — neutral provenance, *via GitHub*.
+- **The card:** repo#number, the branch into its base, `+214 −38 · 6 files`, the
+  top three files with counts, checks. **Approve · Request Changes · Comment**,
+  and **Review Changes →** to the full window.
+- **Approve** takes an optional comment; **Request Changes** requires words. Both
+  say they post *as @mattcolf*.
+- **A thread reply** is the same type with the **thread** body: the code lines,
+  the conversation, a reply box, **Reply** and **Resolve Conversation**.
+- **Stale:** commits pushed while the card was open turn it `stale`; nothing is
+  sent, and it now shows the new head. **A card never approves a head the owner
+  didn't see.**
+- **A failing check** is shown with its name and line, not blocking.
+- **No write token:** *absent*, not failed — *Metistry can read this PR but can't
+  post to GitHub* — with **Connect GitHub** and **Open on GitHub**.
+- **The full window:** the queue on the left; the PR at reading width with the
+  agent's note, files and the diff; line comments gather as drafts and go with the
+  review; **Open on GitHub** always one click away. On a phone it pushes the file
+  list, then one file's diff, wrapped.
+- These are **the owner's acts**, through owner-only routes and a credential in
+  Resources — not an agent action, so `ACTION_KINDS` is unchanged (C107).
+
+### 12.5 The rest of the queue, as instances
+
+- **Budget stop** → question (choices). **Routine failed** → report (excerpt,
+  two timestamps, *Try Again*). **Token expired** → access (*Reconnect*).
+  **Knowledge conflict** → review (both versions, *Keep Mine · Take the Fold's*,
+  Merge in Obsidian). These are C96's events.
+- **The meeting card arrives at Stop**, not at the evening fold: notes on the
+  wash, to-dos with **proposed** due dates and people (tasks, owed facets
+  included — C102), and **Draft Follow-up** to Kessler, drafted and never sent.
+
+### 12.6 What this asks of the build
+
+1. **`requests_ask`** (or `requests_create` kind `question`) for every agent:
+   `questions[] {prompt, options[], multi, allow_other}`, `context {prose,
+   refs[]}`. The ` ```decision ` block grows to the same shape; answers are
+   stored per question, with free text accepted as *other* and as Revise (C105).
+2. **Rename the report kind `decision`** → `decided` so the word means one thing
+   (C104).
+3. **A `pull_request` request kind**, raised by an agent (`repo`, `number`,
+   `note`, `focus_files[]`) and by `github-state` for each PR marked
+   `needs_my_review`, cleared when the review lands.
+4. **`github-state` collects review threads** addressed to the owner and raises a
+   thread request on a reply (C106).
+5. **A GitHub write token held in Resources**, and owner-only routes: approve,
+   request changes, comment, line comments, reply, resolve — each checks the head
+   SHA the card was shown and refuses on a mismatch (C107).
+6. Every request payload carries `body.kind` from the closed set, so a new type
+   renders without new UI.

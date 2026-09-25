@@ -541,8 +541,8 @@ Phase 1 now includes the check route. **One click ticks**; the row strikes in
 confirmation step is **dropped**: the route changes two bytes and Undo is a
 second mechanical write, so a dialog guards nothing and taxes the most frequent
 act of the day. The 409 refusal is unchanged — a line edited in Obsidian
-meanwhile is refused in `stale` with the current line shown. *This reverses §5's
-confirm; logged as C99 for the owner to confirm.*
+meanwhile is refused in `stale` with the current line shown. **Ratified
+2026-09-25 (C99):** this reverses §5's confirm.
 
 ## 15.5 Close the Day
 
@@ -554,11 +554,31 @@ Day**:
   deleted and no note is edited.
 - **Owed to people** — from people facets and meeting to-dos.
 - **Tomorrow** — the shape of the next working day, from the preview route.
-- **Close the Day** stores the choices and folds the day to one line (*Day
-  closed at 5:14 PM · 6 done · 2 to tomorrow · 1 this week · Reopen*).
-  `plan-tomorrow` reads them at 7 PM.
-- **Where the choices live is B4**, still the owner's ruling; the reading
-  offered there (app state, owner-only route, never markdown) is what is drawn.
+- **A line for tomorrow** — optional, the owner's own words. It leads
+  tomorrow's plan and the Morning Brief.
+- **Close the Day** folds the day to one line (*Day closed at 5:14 PM · 6 done
+  · 2 to tomorrow · 1 this week · Reopen*) naming what it wrote.
+
+### 15.5.1 What closing writes (B4, ruled 2026-09-25 — C101)
+
+The owner ruled that the choices persist **into knowledge and into the next
+day's plan**, not into app state. Closing is the owner's act, so each write is
+the owner's hand, made mechanical — the same argument as the check route:
+
+| Where | What | Writer |
+| --- | --- | --- |
+| `Journal/Close/<date>.md` | done, what moved and where, owed to people, the line for tomorrow | the owner's close route; `source: user`; one writer |
+| each deferred task's own line | `⏳ <date>` — tomorrow, or the week's last working day; **Someday** adds `#someday` and drops any `⏳` | the **schedule route**, the check route's sibling: one field on one line, 409 if the line changed |
+| `Journal/Plan/<tomorrow>.md` | tomorrow's plan, **now** rather than at 7 PM, led by the line | `plan-tomorrow`, triggered by the close; reopen-and-close re-renders it |
+| knowledge | who is owed what → proposals on each person's page; what slipped → the weekly review | tonight's fold, as proposals (C79) |
+
+- **Never closed?** `plan-tomorrow` still runs at its 7 PM gate from the day as
+  it stands, and says so in the plan: *the day was not closed*.
+- **Reopen** undoes nothing already written; closing again rewrites the close
+  file and the plan, and reschedules only the lines whose choice changed.
+- `#someday` tasks leave Today and Slipping and appear in the weekly review.
+- The owner may embed the close in the daily-note template
+  (`![[Journal/Close/{{date}}]]`) — his template, so it is not a second writer.
 
 ## 15.6 Slipping, a saved view
 

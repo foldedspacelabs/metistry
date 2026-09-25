@@ -253,11 +253,16 @@ def closeday(T,*,closed=False,w=None,phone=False):
     tomorrow's plan reads it at 7 PM."""
     wd=f"width: {w}px; box-sizing: border-box;" if w else ""
     if closed:
-        return (f'<div style="{wd} display: flex; align-items: center; gap: 9px; border: 1px solid {T["border"]}; '
-                f'border-radius: 10px; background: {T["surface"]}; padding: 10px 13px; font-size: 12.5px; color: {T["ts"]};">'
+        return (f'<div style="{wd} border: 1px solid {T["border"]}; border-radius: 10px; background: {T["surface"]}; '
+                f'padding: 10px 13px; font-size: 12.5px; color: {T["ts"]};">'
+                f'<div style="display: flex; align-items: center; gap: 9px;">'
                 f'<span style="display: flex; color: {T["ok"]};">{ic(I["check"],14,2.2)}</span>'
                 f'<span><b style="color: {T["tp"]};">Day closed at 5:14 PM</b> &middot; 6 done &middot; 2 to tomorrow &middot; 1 this week</span>'
-                f'<span style="flex-grow: 1;"></span><span style="font-weight: 600; color: {T["acc"]};">Reopen</span></div>')
+                f'<span style="flex-grow: 1;"></span><span style="font-weight: 600; color: {T["acc"]};">Reopen</span></div>'
+                f'<div style="display: flex; gap: 12px; flex-wrap: wrap; margin: 6px 0 0 23px; font-size: 11.5px;">'
+                + mono(F["close_file"],T["ts"],10.5)
+                + f'<span>&middot; 3 tasks rescheduled in their notes</span>'
+                f'<span>&middot; tomorrow&rsquo;s plan written</span></div></div>')
     choice=lambda sel:segchoice(T,[(I["chevr"],"Tomorrow"),(I["cal"],"This Week"),(I["later"],"Someday")],sel)
     def openrow(title,bits,sel,last=False):
         return (f'<div style="display: flex; gap: 11px; align-items: {"flex-start" if phone else "center"}; padding: 9px 0; '
@@ -295,9 +300,15 @@ def closeday(T,*,closed=False,w=None,phone=False):
             + eyebrow(T,"STILL OPEN &middot; 3",mt=14) + opens
             + eyebrow(T,"OWED TO PEOPLE &middot; 2",mt=12) + owed
             + eyebrow(T,"TOMORROW &middot; WEDNESDAY 23 SEPTEMBER",mt=12) + tmr
+            + eyebrow(T,"A LINE FOR TOMORROW",mt=13)
+            + f'<div style="margin-top: 6px; border: 1px solid {T["bc"]}; border-radius: 9px; background: {T["surface"]}; '
+              f'padding: 8px 11px; font-size: 13px; color: {T["tp"]}; line-height: 1.45;">Kessler first &mdash; the volume '
+              f'numbers decide the renewal.</div>'
             + f'<div style="display: flex; align-items: center; gap: 10px; margin-top: 14px; flex-wrap: wrap;">'
               f'{btn(T,"Close the Day","affirm",I["check"])}'
-              f'<span style="font-size: 12px; color: {T["ts"]};">Tomorrow&rsquo;s plan is written at 7:00 PM from what you leave here.</span></div></div>')
+              f'<span style="font-size: 12px; color: {T["ts"]}; line-height: 1.45;">Saves the day to '
+              + mono(F["close_file"],T["ts"],10.5)
+              + f', reschedules 3 tasks in their notes, and writes tomorrow&rsquo;s plan.</span></div></div>')
 
 def todaywin7(T,*,at,top,spine,w=1280,dark=False,rail_at="yesterday"):
     return (f'<div style="width: {w}px; border: 1px solid {T["bc"]}; border-radius: 12px; overflow: hidden; '

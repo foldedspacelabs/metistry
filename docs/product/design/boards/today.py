@@ -6,7 +6,7 @@ moments of one day: first open, the half hour before a meeting, the end.
 from lib import *
 from lib_today import *
 
-CW,CH=2620,7320
+CW,CH=2620,7760
 
 def side(title,notes):
     return (f'<div style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 14px;">'
@@ -35,8 +35,9 @@ B_N=side("9:04 AM &mdash; NEXT UP, AND ONE VOICE AT A TIME",[
 C_N=side("5:08 PM &mdash; CLOSE THE DAY",[
   "<b>The end of the day has a screen.</b> What got done, what is still open and where it goes, what you owe people, "
   "and the shape of tomorrow.",
-  "Choices are stored as app state and read by tomorrow&rsquo;s plan at 7 PM; <b>no note is edited</b>. Where that "
-  "state lives is ruling B4, still open."])
+  "<b>Closing writes three places</b> (B4, ruled 2026-09-25): the day to <b>Journal/Close/&lt;date&gt;.md</b>, each "
+  "task&rsquo;s new date into its own line, and <b>tomorrow&rsquo;s plan</b> at once &mdash; so the Morning Brief starts "
+  "from what you decided. Tonight&rsquo;s fold reads the close into knowledge."])
 
 def comp(title,inner): return pan(L,title,inner)
 BRIEFS=comp("THE BRIEF &mdash; OPEN, FOLDED, ABSENT, FAILED",
@@ -62,6 +63,23 @@ SLIP=comp("SLIPPING &mdash; A SAVED VIEW IN ALL",
   + taskrow(L,title="Renew the parking permit",p=3,d="Yesterday",dover=True,e="10m",last=True) + '</div>'
   + nt(L,"Carried three or more times, overdue, or owed to someone &mdash; the filter language, saved. The Sunday "
          "weekly review opens here.",12))
+def dest(T,g,where,what,how,last=False):
+    return (f'<div style="display: flex; gap: 11px; padding: 10px 0;{"" if last else " border-bottom: 1px solid "+T["border"]+";"}">'
+            f'<span style="display: flex; color: {T["acc"]}; margin-top: 2px;">{ic(I[g],15,1.9)}</span>'
+            f'<div style="flex-grow: 1; min-width: 0;"><div>{mono(where,T["tp"],12)}</div>'
+            f'<div style="font-size: 12.5px; color: {T["tp"]}; margin-top: 3px; line-height: 1.45;">{what}</div>'
+            f'<div style="font-size: 11.5px; color: {T["ts"]}; margin-top: 2px;">{how}</div></div></div>')
+WRITES=comp("WHAT CLOSING WRITES (B4, RULED 2026-09-25)",
+  dest(L,"note",F["close_file"],"Done, what moved and where, what you owe people, and your line for tomorrow.",
+       "Your act, so your file: <b>source: user</b>, one writer. The fold reads it tonight.")
+  + dest(L,"check","Journal/2026-09-22.md &middot; Areas/Ops/lease.md","Each deferred task gets its date: "
+         "<b>&#9203; 2026-09-23</b> for Tomorrow, the week&rsquo;s last working day for This Week, <b>#someday</b> for Someday.",
+         "The check route&rsquo;s sibling &mdash; one field on one line, refused if the line changed.")
+  + dest(L,"spark",F["plan_file"],"Tomorrow&rsquo;s plan, written now rather than at 7 PM, and led by your line.",
+         "plan-tomorrow runs on close; a later reopen and close re-renders it. It becomes the Morning Brief&rsquo;s day.")
+  + dest(L,"know","Knowledge, via tonight&rsquo;s fold","What was owed to whom, as proposals on each person&rsquo;s page; "
+         "what slipped, for the weekly review.","Proposals, as ever (C79) &mdash; the fold never writes your pages.",last=True))
+
 NEXTS=comp("NEXT UP &mdash; A STANDUP, AND NOTHING LEFT",
   f'<div style="display: flex; flex-direction: column; gap: 12px;">' + nextup(L,kind="standup",mins=23)
   + nextup(L,kind="none") + closeday(L,closed=True) + '</div>')
@@ -71,7 +89,7 @@ body=(heading("TODAY &middot; v7","Today &mdash; one morning, Next Up, and a way
    "prepared, tasks that tick, and a close.",L)
   + row(A+A_N,20) + row(B+B_N,20) + row(C+C_N,20)
   + row(f'<div style="flex: 1.15; min-width: 0;">{BRIEFS}</div><div style="flex: 1; min-width: 0; display: flex; '
-        f'flex-direction: column; gap: 20px;">{TICKS}{SLIP}{NEXTS}</div>',20)
+        f'flex-direction: column; gap: 20px;">{TICKS}{WRITES}{SLIP}{NEXTS}</div>',20)
   + row(f'<div style="flex-grow: 1; flex-basis: 0; min-width: 0;">{CALP2}</div>'
         f'<div style="flex-grow: 1; flex-basis: 0; min-width: 0;">{POLICY}</div>',20)
   + row(f'<div style="background: {D["bg"]}; border-radius: 14px; padding: 22px;">' + sub("DARK",D["tt"])

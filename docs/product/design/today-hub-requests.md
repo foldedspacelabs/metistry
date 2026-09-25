@@ -188,7 +188,13 @@ series, `ek-helper.swift` does not return it.
 **Add:** `series_id` and `recurrence` to the event payload (part of A1), and
 resolve "the previous instance" through `vault_meeting_refs` (A3).
 
-### B4 · Where a revised day is stored, and under whose hand — needs a ruling
+### B4 · Where a revised day is stored, and under whose hand — **ruled 2026-09-25 (C101)**
+
+> **Ruling:** Close the Day's choices persist **to knowledge and to the next
+> day's plan** — `Journal/Close/<date>.md`, `⏳`/`#someday` on each line through a
+> schedule route, and `plan-tomorrow` run on close. See `screen-05-today.md`
+> §15.5.1. The reading below (app state) was not taken for the close; it still
+> stands for a *reordering* of today, which writes nothing.
 
 §10.1 says the user's drag order is authoritative and stored (C29, still open).
 This design adds a second writer to that same state: **you tell the assistant

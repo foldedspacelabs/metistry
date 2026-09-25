@@ -1,4 +1,4 @@
-"""Board: Needs You v5 — the bell opens a full view; questions step one at a time (2026-09-25)."""
+"""Board: Needs You v5 — a sidebar row while something is waiting; questions step one at a time (2026-09-25)."""
 from lib_needs5 import *
 import lib_pwa as P
 
@@ -7,17 +7,16 @@ CW,CH=2600,4560
 SELQ="Three choices before I split the settings pane"
 SELPR="Split the settings pane into one file per pane"
 A=nywin(L,SELQ,qstep(L,1,sel=(0,1,3)),h=1000)
-NOTES=pan(L,"THE BELL OPENS A VIEW, NOT A PANEL",
-  nt(L,"<b>The bell is a toggle.</b> Pressed, it fills with the accent and the main area becomes Needs You: the list on "
-       "the left, the selected request at reading width. The sidebar shows no selection &mdash; you are not in a section.")
-  + nt(L,"<b>The title bar leads back.</b> <i>&lsaquo; Today</i> names where you came from and returns you there, scrolled "
-         "where you left it. Esc or the bell again does the same. Answering the last request offers the same way back.",12)
-  + nt(L,"<b>Every way in lands here</b> &mdash; the bell, Today&rsquo;s <i>4 waiting</i>, a notification &mdash; with the "
-         "request that brought you selected.",12)
-  + nt(L,"<b>One line per request</b>, grouped Today and Earlier, filtered by type and by <b>From</b>. The detail pane has "
-         "the room the 400px panel never had: a diff, a meeting&rsquo;s notes, three questions. The panel is retired on the "
-         "Mac; the phone keeps its sheet.",12)
-  + nt(L,"<b>Keyboard-first</b>: &uarr;&darr; move, &crarr; the primary, R Revise, L Later, Esc back.",12))
+NOTES=pan(L,"NEEDS YOU IS A SIDEBAR ROW &mdash; WHILE SOMETHING IS WAITING",
+  nt(L,"<b>Above Today, with the bell.</b> The row appears when the first request arrives and carries the count &mdash; "
+       "the product&rsquo;s one badge. With nothing waiting it isn&rsquo;t there, and the sidebar is its eight rows (C110).")
+  + nt(L,"<b>Selecting it is ordinary navigation:</b> the row highlights like any other, and you leave it the way you "
+         "leave any section. The toolbar bell is gone on the Mac; &#8984;0 and a notification tap both land here with "
+         "their request selected.",12)
+  + nt(L,"<b>Answering the last request doesn&rsquo;t pull the floor out.</b> The view shows <i>Nothing needs you</i> "
+         "and the row stays until you go elsewhere; then it leaves.",12)
+  + nt(L,"<b>One line per request</b>, grouped Today and Earlier, filtered by type and by <b>From</b>; the selected "
+         "request at reading width. The phone keeps the bell in its header and its sheet.",12))
 
 def crop(inner,title,w=820):
     return (f'<div style="flex-shrink: 0;">{sub(title,L["tt"])}<div style="width: {w}px; box-sizing: border-box; border: 1px solid {L["border"]}; '
@@ -54,17 +53,19 @@ PH=pan(L,"ON A PHONE &mdash; THE SAME STEPS IN THE SHEET",
       + f'<div style="margin-top: 14px;">{btn(L,"Send Answers","affirm",I["send"])}</div>',left="&lsaquo; 10"),label="YOUR ANSWERS")
   + '</div>')
 
-TOG=pan(L,"THE TOGGLE",
-  f'<div style="display: flex; flex-direction: column; gap: 12px; width: 520px;">'
-  f'{sub("CLOSED &mdash; A COUNT",L["tt"])}<div style="border: 1px solid {L["border"]}; border-radius: 10px; overflow: hidden;">{toolbar2(L,pressed=False)}</div>'
-  f'{sub("OPEN &mdash; PRESSED, THE COUNT RIDES ALONG",L["tt"])}<div style="border: 1px solid {L["border"]}; border-radius: 10px; overflow: hidden;">{toolbar2(L)}</div>'
-  f'{sub("DARK",L["tt"])}<div style="border: 1px solid {D["border"]}; border-radius: 10px; overflow: hidden;">{toolbar2(D)}</div></div>'
-  + nt(L,"Nothing new in the sidebar, so the eight rows stand (C57). The pressed bell is the one place that says "
-         "&ldquo;you are in Needs You.&rdquo;",12))
+def sbar(T,label,**k):
+    return (f'<div style="flex-shrink: 0;">{sub(label,L["tt"])}<div style="border: 1px solid {T["border"]}; border-radius: 10px; '
+            f'overflow: hidden; width: 180px;">{sidebar8(T,**k)}</div></div>')
+TOG=pan(L,"THE ROW",
+  f'<div style="display: flex; gap: 16px; flex-wrap: wrap;">'
+  + sbar(L,"WAITING &mdash; THE ROW AND ITS COUNT",sel="Today",needs=10)
+  + sbar(L,"IN NEEDS YOU",sel="Needs You",needs=10)
+  + sbar(L,"NOTHING WAITING &mdash; EIGHT ROWS",sel="Today",needs=0)
+  + sbar(D,"DARK",sel="Needs You",needs=10) + '</div>')
 
-body=(heading("NEEDS YOU &middot; v5","The bell opens a view &mdash; and questions come one at a time",
-        "The 400px panel ran out of room. Needs You now takes the main area as a list and a detail pane, reached from "
-        "the bell and left by the way you came.",L)
+body=(heading("NEEDS YOU &middot; v5","Needs You in the sidebar &mdash; and questions come one at a time",
+        "The 400px panel ran out of room. Needs You is now a sidebar row above Today &mdash; present only while something "
+        "is waiting &mdash; that opens a list and a detail pane.",L)
   + row(A + f'<div style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 20px;">{NOTES}{TOG}</div>',20,"flex-start")
   + row(STEPS,20)
   + row(B + f'<div style="flex-grow: 1; min-width: 0;">{PH}</div>',20,"flex-start")

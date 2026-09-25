@@ -704,8 +704,7 @@ def toolbar(T):
             f'<span style="font-size: 13px; font-weight: 600; color: {T["tp"]};">Metistry</span>'
             f'<span style="flex-grow: 1;"></span>'
             f'<span style="display: flex; color: {T["acc"]};">{ic(I["plus"],18)}</span>'
-            f'{bell(T,"4",18)}'
-            f'<span style="display: flex; color: {T["ts"]};">{ic(I["gauge"],18)}</span></div>')
+            f'<span style="display: flex; color: {T["ts"]};">{ic(I["gauge"],18)}</span></div>')   # the bell moved to the sidebar (C110)
 
 def sidebar(T,sel="Work",child="Today"):
     out=[]
@@ -1519,8 +1518,22 @@ def pred2(T,label,why):
             f'<span style="font-size: 11.5px; color: {T["ts"]};">{why}</span></div>')
 
 # ============ TODAY, v5 ==================================================
-def sidebar8(T,sel="Today"):
+def sidebar8(T,sel="Today",needs="fixture"):
+    """C110 (ruled 2026-09-25): Needs You is a sidebar row, above Today, with the bell
+    glyph — present only while something is waiting. Its count is the product's one
+    badge; the toolbar bell is gone on the Mac. needs=None or 0 draws the empty sidebar."""
     out=[]
+    n=F["needs_you"] if needs=="fixture" else needs
+    if n:
+        on=(sel=="Needs You")
+        out.append(f'<div style="position: relative; display: flex; align-items: center; gap: 10px; padding: 8px 12px; '
+                   f'border-radius: 8px; background: {T["accq"] if on else "transparent"};">'
+                   + (f'<span style="position: absolute; left: 0; top: 6px; bottom: 6px; width: 3px; '
+                      f'border-radius: 0 3px 3px 0; background: {T["acc"]};"></span>' if on else "")
+                   + f'<span style="display: flex; color: {T["acc"]};">{ic(I["bell"])}</span>'
+                     f'<span style="font-size: 13px; font-weight: 600; color: {T["tp"]}; flex-grow: 1;">Needs You</span>'
+                     f'<span style="font-size: 11px; font-weight: 700; color: {T["onacc"]}; background: {T["acc"]}; '
+                     f'border-radius: 999px; padding: 0 7px; line-height: 17px;">{n}</span></div>')
     # Eight rows (ruled 2026-09-22). Routines is top-level because "what is Metistry
     # running for me every day" is a daily question a child row would bury; Agents
     # sits ABOVE it, because a routine is an assignment of an agent and the reader
@@ -4884,7 +4897,7 @@ def toolcrop(T,*,state="normal",w=250):
     ring=(f'background: {T["accq"]}; border-radius: 7px;') if state=="open" else ""
     return (f'<div style="width: {w}px; display: flex; align-items: center; gap: 14px; justify-content: flex-end; '
             f'padding: 10px 14px; background: {T["surface"]}; border: 1px solid {T["border"]}; border-radius: 10px;">'
-            f'<span style="display: flex; color: {T["acc"]};">{ic(I["plus"],18)}</span>{bell(T,"4",18)}'
+            f'<span style="display: flex; color: {T["acc"]};">{ic(I["plus"],18)}</span>'
             f'<span style="display: flex; padding: 3px; color: {gtone}; {ring}">{ic(g,18)}</span></div>')
 
 def daybars(T,vals,*,h=64,today_idx=None):

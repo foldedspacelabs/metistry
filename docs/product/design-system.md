@@ -7,7 +7,7 @@
 >
 > | Here | Now | Receipt |
 > | --- | --- | --- |
-> | P6, §3.1, §3.6, §5 — six sections, two global controls | eight rows (Today · Chat · Activity · Work ▸ · Knowledge ▸ · Agents · Routines, then Pinned); three top-right controls (`+` · bell · usage gauge) | C50, C57 |
+> | P6, §3.1, §3.6, §5 — six sections, two global controls | eight rows (Today · Chat · Activity · Work ▸ · Knowledge ▸ · Agents · Routines, then Pinned), with **Needs You** above Today while something is waiting; two top-right controls on the Mac (`+` · usage gauge) | C50, C57, C110 |
 > | §2.6 — nothing spins or pulses | motion only where it carries information words cannot; a closed list of two (the chat's waiting dots, the recording breath) | C16, C75 |
 > | P1 — the wash behind every agent body | a 2px `agent` rule inside a transcript; the wash everywhere else | C69 |
 > | P10 — title case | HIG title style: small words stay lower (*Open the File*, *Run Now*) | amendments §8 |

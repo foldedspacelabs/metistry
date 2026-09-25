@@ -473,3 +473,48 @@ review requests**.
    SHA the card was shown and refuses on a mismatch (C107).
 6. Every request payload carries `body.kind` from the closed set, so a new type
    renders without new UI.
+
+### 12.7 One hub — Metis, agents, and what the collectors pick up (2026-09-25)
+
+The owner's framing, stated after v4 was drawn: **Needs You is the hub for
+everything that needs him** — from Metis, from agents, and from incoming data
+the collectors read (GitHub, Calendar, Mail, Linear…). The pattern already
+carries it; these are the rules that make a third kind of asker safe.
+
+- **Three kinds of asker.** The header names Metis, an agent, or **a source**
+  (a badge: GitHub, Calendar, Mail, Linear), then the person there if any.
+- **A source must name you.** A collector raises a request only when the source
+  itself says it needs the owner — a review requested of him, an invitation to
+  him, an issue assigned to him. Activity that merely mentions him stays in
+  Activity (P2).
+- **Mirrors clear themselves.** A source request mirrors the source: answer here
+  and it posts there; answer there and the card clears here with a receipt
+  naming where (*Accepted in Calendar · cleared here*). The source is the truth,
+  which is how a collector raises a request without inventing state (C108).
+- **Metis may infer, and says so.** Where the source doesn't ask — an email that
+  seems to want a reply — Metis may raise it **as Metis**, with its reason and
+  *Metis thinks this needs you — Mail didn't say so*. Inferred and reported never
+  look alike (P5).
+- **One subject, one card.** An agent's review ask and GitHub's review request
+  for the same PR merge, with both askers on it.
+- **Write-back uses the source's word; no write-back means a draft or Open
+  in …** Mail is read-only (daily-flow §8.2), so a reply is **drafted in Mail,
+  never sent**.
+- **Filters:** by type, and by **From** — Everyone · Metis · Agents · GitHub ·
+  Calendar · Mail · Linear — each showing only what is present.
+
+Three new rows in §12.2's table, drawn:
+
+| Type | From | Body | Primary | Revise | Decline |
+| --- | --- | --- | --- | --- | --- |
+| invitation | Calendar | preview (who, where, overlaps, travel) | Accept | Maybe | Decline |
+| task | Linear (or any tracker) | excerpt | Add to Today | — | — (Delegate) |
+| message | Metis, from Mail | excerpt + Metis's reason | Draft Reply | — | Not Mine |
+
+**Build asks:** each collector declares its *needs-you rule* in its manifest
+(which source states raise a request, which clear it); requests carry
+`source {kind, external_ref, person}` and dedupe on the subject's
+`external_ref`; a source-state change resolves the mirror with
+`decision = 'resolved_at_source'` and a receipt; calendar RSVP is an owner-only
+write through the EventKit bridge (B10's tiers); Mail stays read-only and
+*Draft Reply* opens a draft in Mail.

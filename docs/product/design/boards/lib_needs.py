@@ -41,12 +41,12 @@ def rcontext(T,prose,refs=(),*,more=None):
             + '</div>'
             + (disclose(T,"More context",more) if more else ""))
 
-def ranswers(T,primary,*,pglyph="check",revise="Revise",decline="Decline",extra=(),disabled=False,note=None,help_=True):
+def ranswers(T,primary,*,pglyph="check",revise="Revise",decline="Decline",extra=(),disabled=False,note=None,help_=True,rglyph="pencil"):
     k=lambda x:"disabled" if disabled else x
     return ((f'<div style="font-size: 11.5px; color: {T["ts"]}; margin-top: 10px;">{note}</div>' if note else "")
             + f'<div style="display: flex; align-items: center; gap: 7px; row-gap: 8px; flex-wrap: wrap; margin-top: {6 if note else 12}px;">'
             + btn(T,primary,k("affirm"),I[pglyph] if pglyph else None)
-            + (btn(T,revise,"secondary",I["pencil"]) if revise else "")
+            + (btn(T,revise,"secondary",I[rglyph] if rglyph else None) if revise else "")
             + (btn(T,decline,"secondary",I["x"]) if decline else "")
             + "".join(extra)
             + f'<span style="flex-grow: 1;"></span>'
@@ -173,12 +173,12 @@ PRFILES=[("apps/macos/…/SettingsResources.swift",142,0),("apps/macos/…/setti
 def prcard(T,*,state="review",w=W,source="agent"):
     person=source=="github"
     who="Priya Shah" if person else "drey-dev"
-    head=rhead(T,I["pr"],"PULL REQUEST",who,"14m",person=person,
-               extra=mono("metistry#431",T["ts"],11) + (f'<span style="font-size: 11px; color: {T["ts"]};">via GitHub</span>' if person else ""))
+    head=(rhead2(T,I["pr"],"PULL REQUEST",src="github",person=who,when="14m",extra=mono("metistry#431",T["ts"],11)) if person else
+          rhead(T,I["pr"],"PULL REQUEST",who,"14m",extra=mono("metistry#431",T["ts"],11)))
     ask=rask(T,"Split the settings pane into one file per pane")
     meta=prmeta(T,"metistry","drey/settings-split &rarr; main","+214 &minus;38 &middot; 6 files")
     ctx=(rcontext(T,PRCTX) if not person else
-         f'<div style="margin-top: 9px; font-size: 12.5px; color: {T["tp"]};"><b>Priya Shah</b> requested your review on GitHub.</div>')
+         f'<div style="margin-top: 9px; font-size: 12.5px; color: {T["tp"]};"><b>Priya Shah</b> requested your review.</div>' + mirrorline(T,"github"))
     files=filesblock(T,PRFILES,more=3)
     checks=checksline(T,failing=("lint &middot; SettingsPanes.swift:88" if state=="failing" else None))
     open_gh=f'<span style="font-size: 12px; font-weight: 600; color: {T["acc"]};">Review Changes &rarr;</span>'
@@ -369,3 +369,92 @@ def prwindow(T,w=1320):
             f'<div style="width: 300px; flex-shrink: 0; border-right: 1px solid {T["border"]}; background: {T["surface"]};">'
             f'<div style="padding: 12px 14px; font-size: 15px; font-weight: 600; color: {T["tp"]}; border-bottom: 1px solid {T["border"]};">'
             f'Needs You <span style="font-size: 12px; font-weight: 400; color: {T["ts"]};">6</span></div>{lst}</div>{main}</div></div>')
+
+# ============ FROM EVERYWHERE — Metis, agents, and collectors (2026-09-25) ============
+I.setdefault("mail",'<rect x="3.5" y="5.5" width="17" height="13" rx="2"/><path d="M4 7l8 6 8-6"/>')
+I.setdefault("gh",'<circle cx="12" cy="12" r="8.2"/><path d="M9.5 18.5v-2.2c0-1 .3-1.6.9-2-2.6-.3-4-1.3-4-3.7 0-.9.3-1.7.9-2.3-.1-.6-.1-1.4.2-2.1 0 0 .8-.2 2.4.9a8 8 0 014.2 0c1.6-1.1 2.4-.9 2.4-.9.3.7.3 1.5.2 2.1.6.6.9 1.4.9 2.3 0 2.4-1.4 3.4-4 3.7.6.4.9 1 .9 2v2.2"/>')
+I.setdefault("linear",'<circle cx="12" cy="12" r="8.2"/><path d="M6 13.5l4.5 4.5M5.2 10.3l8.5 8.5M6.8 7.3l9.9 9.9M9.8 5.4l8.8 8.8"/>')
+SRC={"github":("gh","GitHub"),"calendar":("cal","Calendar"),"mail":("mail","Mail"),"linear":("linear","Linear")}
+
+def srcbadge(T,src):
+    g,n=SRC[src]
+    return (f'<span style="display: inline-flex; align-items: center; gap: 4px; padding: 1px 7px; border-radius: 999px; '
+            f'border: 1px solid {T["bc"]}; font-size: 10.5px; font-weight: 600; color: {T["ts"]};">{ic(I[g],10,2)}{n}</span>')
+
+def rhead2(T,glyph,typ,*,src=None,who=None,person=None,when,extra=""):
+    """Who asked: Metis, an agent, or a source a collector reads — then the person there, if any."""
+    ids=""
+    if src: ids+=srcbadge(T,src)
+    if person: ids+=ent(T,"person",person,I["person"])
+    if who: ids+=agentchip(T,who)
+    return (f'<div style="display: flex; align-items: center; gap: 7px; flex-wrap: wrap;">'
+            f'<span style="display: flex; color: {T["ts"]};">{ic(glyph,14,1.9)}</span>'
+            f'<span style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; color: {T["ts"]};">{typ}</span>'
+            f'{extra}<span style="flex-grow: 1;"></span>{ids}'
+            f'<span style="font-size: 11px; color: {T["tt"]};">{when}</span></div>')
+
+def mirrorline(T,src):
+    n=SRC[src][1]
+    return (f'<div style="display: flex; align-items: center; gap: 6px; margin-top: 9px; font-size: 11.5px; color: {T["ts"]};">'
+            f'{ic(I["repeat"],12,2)}Mirrors {n} &mdash; answering there clears it here</div>')
+
+def invitecard(T,*,w=W,state="open"):
+    head=rhead2(T,I["cal"],"INVITATION",src="calendar",person="Tom Reyes",when="35m")
+    ask=rask(T,"Lease walkthrough","Thu 24 Sep &middot; 3:00&ndash;4:00 PM &middot; 214 Main St")
+    if state=="cleared":
+        return rcard(T,head+ask+rreceipt(T,"Accepted in Calendar &middot; 10:02 AM &middot; cleared here",None),w=w)
+    body=(f'<div style="margin-top: 9px; background: {T["sunken"]}; border-radius: 8px; padding: 8px 10px; font-size: 12px; color: {T["tp"]}; line-height: 1.55;">'
+          f'<div>2 people &middot; you and Tom Reyes</div>'
+          f'<div style="display: flex; align-items: center; gap: 6px; margin-top: 3px; color: {T["deg"]};">{ic(I["clock"],12,2.2)}'
+          f'<span>Overlaps your 3:30 focus block by 30 min</span></div>'
+          f'<div style="color: {T["ts"]}; margin-top: 3px;">25 min travel each way</div></div>')
+    return rcard(T,head+ask+body+mirrorline(T,"calendar")
+        + ranswers(T,"Accept",revise="Maybe",decline="Decline",help_=False,rglyph=None),w=w)
+
+def mailcard(T,*,w=W):
+    head=rhead2(T,I["mail"],"MESSAGE",src="mail",person="Sam Kessler",when="2h",extra=f'{agentchip(T,"metis")}')
+    ask=rask(T,"Re: revised volume numbers","Kessler asked for them by Thursday")
+    ctx=rcontext(T,"He asked a direct question and it has sat two hours. You owe him the numbers anyway &mdash; "
+                   "<b>Send Kessler the revised volume numbers</b> is due Thursday.",[("Vendor review","note"),("due Thu","check")])
+    ex=(f'<div style="margin-top: 9px; border-left: 2px solid {T["bc"]}; padding: 1px 0 1px 10px; font-size: 12.5px; color: {T["tp"]}; line-height: 1.5;">'
+        f'&ldquo;Can you send the revised volume numbers before Thursday&rsquo;s call? We need them to hold the net-45 terms.&rdquo;</div>')
+    note=(f'<div style="font-size: 11.5px; color: {T["ts"]}; margin-top: 8px;">Metis thinks this needs you &mdash; Mail didn&rsquo;t say so.</div>')
+    return rcard(T,head+ask+ex+ctx+note
+        + ranswers(T,"Draft Reply",pglyph="spark",revise=None,decline="Not Mine",
+                   extra=(btn(T,"Open in Mail","secondary"),),help_=False),w=w)
+
+def issuecard(T,*,w=W):
+    head=rhead2(T,I["linear"],"TASK",src="linear",person="Priya Shah",when="1h",extra=mono("OPS-212",T["ts"],11))
+    ask=rask(T,"Migrate the backup job off the old host","Assigned to you &middot; due Mon &middot; P2")
+    ex=(f'<div style="margin-top: 9px; background: {T["sunken"]}; border-radius: 8px; padding: 8px 10px; font-size: 12px; color: {T["tp"]}; line-height: 1.5;">'
+        f'The old host is decommissioned on the 30th. The job needs the new bucket and a fresh key.</div>')
+    return rcard(T,head+ask+ex+mirrorline(T,"linear")
+        + ranswers(T,"Add to Today",pglyph="plus",revise=None,decline=None,
+                   extra=(btn(T,"Delegate","secondary",I["spark"]),btn(T,"Open in Linear","ghost")),help_=False),w=w)
+
+def ghcleared(T,*,w=W):
+    head=rhead2(T,I["pr"],"PULL REQUEST",src="github",person="Priya Shah",when="2h",extra=mono("drey#88",T["ts"],11))
+    return rcard(T,head+rask(T,"Add the export button to reports")
+        + rreceipt(T,"You approved it on GitHub &middot; 10:14 AM &middot; cleared here",None),w=w)
+
+def fromfilter(T):
+    items=[("Everyone",10,True),("Metis",3,False),("Agents",3,False),("GitHub",2,False),("Calendar",1,False),("Mail",1,False),("Linear",1,False)]
+    return (f'<div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 8px;">'
+            f'<span style="font-size: 11px; color: {T["ts"]}; margin-right: 2px;">From</span>'
+            + "".join(f'<span style="padding: 2px 8px; border-radius: 999px; font-size: 11px; background: {T["accq"] if s else "transparent"}; '
+                      f'color: {T["acc"] if s else T["ts"]}; border: 1px solid {"transparent" if s else T["bc"]};">{t} '
+                      f'<span style="color: {T["ts"]};">{n}</span></span>' for t,n,s in items) + '</div>')
+
+def panel5(T,w=400):
+    head=(f'<div style="padding: 14px 16px; border-bottom: 1px solid {T["border"]};">'
+          f'<div style="display: flex; align-items: baseline; gap: 8px;">'
+          f'<span style="font-size: 13px; font-weight: 600; color: {T["tp"]};">Needs You</span>'
+          f'<span style="font-size: 12px; color: {T["ts"]};">10 waiting</span></div>'
+          + chipsrow(T,[("All",10),("Questions",2),("Pull Requests",3),("Invitations",1),("Tasks",1),("Messages",1),("Meetings",1),("Access",1)],"All")
+          + fromfilter(T) + '</div>')
+    body=(f'<div style="padding: 12px; display: flex; flex-direction: column; gap: 10px; background: {T["bg"]};">'
+          + grouplabel(T,"TODAY","3") + invitecard(T) + mailcard(T) + prcard(T,source="github")
+          + grouplabel(T,"EARLIER","7") + f'<div style="font-size: 12px; color: {T["ts"]}; padding: 2px 4px;">Questions, the other pull requests, '
+            f'a task, the meeting and an access request &hellip;</div></div>')
+    return (f'<div style="width: {w}px; background: {T["elevated"]}; border: 1px solid {T["bc"]}; border-radius: 14px; '
+            f'box-shadow: 0 10px 34px rgba(26,24,21,0.16); overflow: hidden; flex-shrink: 0;">{head}{body}</div>')

@@ -7,7 +7,7 @@ C96 events and the meeting card as instances of the same five parts.
 from lib_needs import *
 import lib_pwa as P
 
-CW,CH=2600,8120
+CW,CH=2600,9500
 
 def col(*cards,gap=16):
     return f'<div style="display: flex; flex-direction: column; gap: {gap}px; flex-shrink: 0;">{"".join(cards)}</div>'
@@ -28,7 +28,10 @@ RT=[("question","choices","Send Answers","Revise","Decline"),
     ("meeting","to-dos","Accept All","Revise","Decline All"),
     ("review","before and after &middot; preview","Approve &middot; Keep Mine","Revise &middot; Take the Other","Decline"),
     ("note &middot; improvement","preview &middot; before and after","Approve","Revise","Decline"),
-    ("report","excerpt","its one act &mdash; Try Again, Reconnect","&mdash;","Dismiss")]
+    ("report","excerpt","its one act &mdash; Try Again, Reconnect","&mdash;","Dismiss"),
+    ("invitation <i>(a source)</i>","preview","Accept","Maybe","Decline"),
+    ("task <i>(a source)</i>","excerpt","Add to Today","&mdash;","&mdash; (Delegate)"),
+    ("message <i>(Metis, from a source)</i>","excerpt","Draft Reply","&mdash;","Not Mine")]
 def tbl(head,rows):
     th="".join(f'<th style="text-align: left; padding: 0 14px 7px 0; font-size: 10.5px; letter-spacing: 0.07em; color: {L["tt"]};">{h}</th>' for h in head)
     tr="".join(f'<tr style="border-top: 1px solid {L["border"]}; vertical-align: top;">'
@@ -48,8 +51,9 @@ PATTERN=pan(L,"ONE PATTERN FOR EVERYTHING AN AGENT NEEDS FROM YOU",
   + nt(L,"<b>Revise is always free text</b> and always goes back to whoever asked &mdash; the course correction when "
          "the agent didn&rsquo;t get it quite right. <b>When an answer posts to another system, the button uses that "
          "system&rsquo;s word</b>: <i>Request Changes</i> is GitHub&rsquo;s, so it is Revise&rsquo;s name on a pull request.",12)
-  + nt(L,"<b>Nine types now</b> &mdash; question &middot; pull request &middot; access &middot; action &middot; meeting "
-         "&middot; review &middot; note &middot; improvement &middot; report. The bell is still the only badge.",12))
+  + nt(L,"<b>Twelve types now</b> &mdash; question &middot; pull request &middot; access &middot; action &middot; meeting "
+         "&middot; review &middot; note &middot; improvement &middot; report &middot; invitation &middot; task &middot; message. "
+         "The bell is still the only badge.",12))
 
 Q=pan(L,"QUESTION &mdash; SEVERAL QUESTIONS, CHOICES, CONTEXT, AND A WAY TO SAY &ldquo;NOT QUITE&rdquo;",
   strip(lab("OPEN",qcard(L)),lab("2 OF 3 ANSWERED",qcard(L,state="partial")),lab("READY &mdash; ONE ANSWERED IN WORDS",qcard(L,state="ready")),
@@ -90,6 +94,32 @@ EV=pan(L,"THE SAME PATTERN, FOR WHAT C96 SENDS HERE &mdash; AND THE MEETING, MAD
          "people &mdash; tasks like any other, owed facets included &mdash; and <b>Draft Follow-up</b> writes the note to "
          "Kessler without sending it.",14))
 
+RULES=[("Three kinds of asker","<b>Metis</b>, <b>an agent</b>, or <b>a source a collector reads</b> &mdash; GitHub, "
+         "Calendar, Mail, Linear. The header says which, then the person there, if any."),
+        ("A source must name you","A collector raises a request only when the source itself says it needs you: a "
+         "review requested of you, an invitation to you, an issue assigned to you. Activity that merely mentions you "
+         "stays in Activity (P2)."),
+        ("Mirrors clear themselves","A request from a source <b>mirrors</b> it. Answer here and it posts there; answer "
+         "there and the card clears here, with a receipt saying where. The source is the truth (collectors never invent)."),
+        ("Metis may infer, and says so","Where the source doesn&rsquo;t ask &mdash; an email that seems to want a reply "
+         "&mdash; Metis may raise it, as Metis, with its reason and <i>Metis thinks this needs you</i>. Inferred and "
+         "reported never look alike (P5)."),
+        ("One subject, one card","An agent&rsquo;s review ask and GitHub&rsquo;s review request for the same PR are one "
+         "card with both askers on it."),
+        ("Write-back is the source&rsquo;s word","Accept &middot; Maybe &middot; Decline for an invitation; Approve "
+         "&middot; Request Changes for a PR. Where Metistry can&rsquo;t write back, the primary is <b>Open in &hellip;</b> "
+         "or a draft &mdash; Mail is read-only, so a reply is drafted in Mail, never sent.")]
+HUB=pan(L,"ONE HUB &mdash; METIS, AGENTS, AND WHAT THE COLLECTORS PICK UP",
+  f'<div style="display: flex; gap: 20px; align-items: flex-start;">{panel5(L)}'
+  f'<div style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 18px;">'
+  + strip(lab("A CALENDAR INVITATION &mdash; FROM THE SOURCE",invitecard(L)),lab("AN EMAIL &mdash; METIS INFERRED IT",mailcard(L)),
+          lab("A LINEAR ISSUE ASSIGNED TO YOU",issuecard(L)))
+  + strip(lab("ANSWERED IN CALENDAR &mdash; CLEARED HERE",invitecard(L,state="cleared")),lab("APPROVED ON GITHUB &mdash; CLEARED HERE",ghcleared(L)))
+  + "".join(f'<div style="display: flex; gap: 14px; padding: 8px 0; border-top: 1px solid {L["border"]};">'
+            f'<span style="width: 210px; flex-shrink: 0; font-size: 12.5px; font-weight: 600; color: {L["tp"]};">{h}</span>'
+            f'<span style="font-size: 12.5px; color: {L["ts"]}; line-height: 1.5;">{b}</span></div>' for h,b in RULES)
+  + '</div></div>')
+
 def psheet(T,title,inner,label):
     return P.phone(T,"",header=P.hdr(T,"Today",sub=F["day"]),overlay=P.sheet(T,title,inner),label=label)
 PH=pan(L,"ON A PHONE",
@@ -101,10 +131,10 @@ PH=pan(L,"ON A PHONE",
          "wrapped; line comments are a long-press.",14))
 
 body=(heading("NEEDS YOU &middot; v4","Everything an agent needs from you &mdash; one pattern",
-        "Questions with context and choices, pull requests reviewed and answered here, and the rest of the queue as "
-        "instances of the same five parts.",L)
+        "The one place for everything that needs you &mdash; from Metis, from agents, and from what the collectors pick "
+        "up in GitHub, Calendar, Mail and Linear &mdash; drawn with one pattern.",L)
   + row(panel4(L) + f'<div style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 20px;">{PATTERN}{Q}{PR}</div>',20,"flex-start")
-  + row(WIN,20) + row(EV,20) + row(PH,20)
+  + row(HUB,20) + row(WIN,20) + row(EV,20) + row(PH,20)
   + row(f'<div style="background: {D["bg"]}; border-radius: 14px; padding: 22px; display: flex; gap: 20px; align-items: flex-start;">'
         + sub("DARK",D["tt"]) + panel4(D) + col(prcard(D),threadcard(D)) + col(meetingstop(D)) + '</div>',20))
 (PROJ/"NeedsYou-v4.dc.html").write_text(page("Needs You v4",wrap(body,CW,CH,"#ece7dd",L["tp"],40),CW,CH,"#ece7dd"),encoding="utf-8")

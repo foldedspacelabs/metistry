@@ -245,7 +245,7 @@ the native iPhone app stays deferred.
 request pattern (header · ask · context · body · answers) with a closed set of
 bodies; **questions** with several multiple-choice answers, context and free text;
 **pull requests** reviewed and answered in Metistry, posted to GitHub as the
-owner; the C96 events and the meeting-at-Stop as instances. Nine request types.
+owner; the C96 events and the meeting-at-Stop as instances. **Needs You is the hub for everything that needs the owner** — Metis, agents, and sources the collectors read (§12.7, C108): source requests mirror the source and clear themselves. Twelve request types.
 
 **Next round, in order:** (1) **Routines** folded to the one Morning Brief (C97). (2) **Keyboard and
 VoiceOver** (review 01 §3.1; offline is now specified in screen 18 §4). (3)
@@ -284,7 +284,7 @@ the canvas is now generated from a module in `boards/` except `Facets`, `Plugin`
 `Voice` and `Item-Model`. `bellpanel()` is gone — it drew the *"1 snoozed"*
 header C21 killed; `panel2()` is the panel.
 
-**107 contradictions** are logged in `review-00-plan.md`. C38, C51 and C62 are closed. C40–C87 are
+**108 contradictions** are logged in `review-00-plan.md`. C38, C51 and C62 are closed. C40–C87 are
 round E's; C88–C98 are review 01's rulings. Two of them are rules the system is missing rather than faults in a
 file: **C45** (a failed consequential operation leaves the request pending) and
 **C49** (a mark that carries meaning takes an ink token, never a border token —

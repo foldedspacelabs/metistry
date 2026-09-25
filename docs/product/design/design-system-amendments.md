@@ -469,4 +469,8 @@ acceptance data, so a board that disagrees with itself ships a bug.
 - **A card never acts on something the owner didn't see**: a request whose subject
   changed while open (new commits, an edited line, a moved row) turns `stale` and
   sends nothing.
+- **Needs You is the hub for everything that needs the owner** — Metis, agents,
+  and sources the collectors read. A source request is a **mirror**: it exists
+  only while the source names the owner, and clears when answered there. Metis
+  may raise an inferred one, and says it inferred it (C108, screen 3 §12.7).
 

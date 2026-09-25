@@ -27,8 +27,10 @@ dropping it. Share sheet, Shortcuts, the **+** in the window, the floating bar,
 an agent's `capture` call: all the same door, all under five seconds.
 
 **Request** — anything that needs *you*. The bell opens **Needs You**, which
-lists requests — everything an agent needs from you, including things that are
-not questions, like a sign-in that expired. A request has one of nine types:
+lists requests — everything that needs you, whether Metis, an agent, or a
+source Metistry reads (GitHub, Calendar, Mail, Linear) is asking. A request
+from a source clears itself when you answer at the source. A request has one of
+twelve types:
 
 | Type | It is asking you to |
 |---|---|
@@ -38,6 +40,9 @@ not questions, like a sign-in that expired. A request has one of nine types:
 | **question** | answer one or more questions an agent cannot continue without — pick from its choices, or say something else |
 | **pull request** | review and approve code changes, or reply in a pull request's thread — posted to GitHub as you |
 | **meeting** | settle a recorded meeting's notes and to-dos |
+| **invitation** | accept, tentatively accept or decline a calendar invitation |
+| **task** | take on a task a tracker assigned to you |
+| **message** | reply to a message Metis thinks is waiting on you — drafted, never sent |
 | **access** | grant an agent more than it has — including when the agent asked for a named folder itself |
 | **improvement** | change how the system itself behaves |
 | **action** | do one thing on your behalf — dispatch a brief, move a card, comment, capture |

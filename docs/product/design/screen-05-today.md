@@ -491,6 +491,10 @@ first open, **9:04 AM** half an hour before a meeting, **5:08 PM** the close.
 
 ## 15.1 The Morning Brief is Today's first state (C97)
 
+> **C111 (2026-09-25):** the Standup section shows the **Standup routine's** file
+> (`Journal/Standup/<date>.md`); the brief presents it and does not draft it.
+> Schedule and wording are edited in Routines.
+
 - One wash, one voice: a serif paragraph of what matters, then **one section —
   Standup**, collapsed, with **Copy Standup** on its header. *Metistry doesn't
   post this* stays, once, inside it.

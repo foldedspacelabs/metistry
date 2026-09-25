@@ -183,6 +183,9 @@ context.
 
 ### 5.5 A built-in routine's detail
 
+> **Superseded by §10 (C111).** There is no read-only built-in: defaults are
+> attributed to Metis, tagged **default**, and editable.
+
 No agent, no prompts, no editable grant. It shows its description verbatim from
 the manifest, its schedule and silence conditions, what it writes, and its
 history — and states **built-in · deterministic · reaches no model**, which is a
@@ -234,7 +237,56 @@ Most of this screen is drawn ahead of its wire, per the owner's ruling of
 - **Metis suggests** is a proposal, so it is answered **Approve · Revise ·
   Decline** like every other (amendments §8.1); *Change The Schedule* and
   *Dismiss* are gone.
-- The 6:02 AM routine is **Morning Brief** everywhere (C55, C97). Folding
-  *Tomorrow's Plan* and *Standup Draft* into it as sections is next round's Today
-  work.
+- The 6:02 AM routine is **Morning Brief** everywhere (C55, C97). Standup and
+  Tomorrow's Plan are routines of their own that the brief presents (§10, C111).
 - A failed run carries the failed mark in the failed ink.
+
+## 10. v2 — everything scheduled, all editable (2026-09-25)
+
+Board: `Routines-v2`. Rulings C111 and C112.
+
+### 10.1 The list
+
+- Two tabs in the header: **Routines 8 · Sources 6**. The button follows the tab:
+  *New Routine* or *Connect Source*.
+- Routines stay ordered by next occurrence with day bands (§3). Rows: **Standup**
+  6:00 AM, **Morning Brief** 6:02, Vendor Sweep 7:00, **Tomorrow's Plan** 7 PM
+  (or when the day is closed), **Knowledge Fold** 10 PM, **Reply Review** 11 PM,
+  **Weekly Review** Sunday 6 PM; paused ones last.
+- A default carries a **default** tag. *Run By* names **Metis**; *Built-in* is gone.
+- A routine that feeds another says so after its name: *→ Morning Brief*.
+- Selection is a 3px accent rule on the surface, never a tinted fill (the ok
+  glyph fails on the accent wash).
+
+### 10.2 One routine — Standup
+
+Header: renamable name, **default** tag, *Run by Metis · change*, **Run Now**,
+**Pause**. Then:
+
+| Section | Holds |
+| --- | --- |
+| Schedule | weekday toggles (defaults to working days), a time, *Skip days with no standup on your calendar*, the next three runs |
+| What it's asked to do | the task in the owner's words, **Edit**; *Shape from* `Templates/Standup.md`, *voice from* `Me/Working Style.md`, Open in Obsidian |
+| Reads and writes | Reads · Writes `Journal/Standup/<date>.md` · Feeds the brief's Standup section · Never posts anywhere |
+| History | the latest run opened to its **steps** (reads, the model call with tokens, the write) with durations, and what it wrote; older runs one line each; a skipped day says why |
+
+Foot: *Shipped with Metistry; everything above is yours to change.* and **Reset
+to Default**, which restores the schedule, task and grants and asks nothing.
+
+### 10.3 Sources
+
+One row per collector: status glyph, name and collector id, what it reads and
+what it may raise, cadence, last success. A failed source shows the reason in
+failed ink (*token expired*) and is also a Needs You request (C95, C96). A source
+not connected says so and points to Settings › Resources.
+
+A source's detail: **Check Now**, **Pause**; *Checked* as a segmented cadence
+(5 min · 15 min · Hour · 6 hours) with the last result; **What reaches Needs
+You** as toggles (C108); *What it reads* — repos, the token's scope.
+
+### 10.4 Suggestions
+
+A Metis suggestion about a routine is an **improvement** request in Needs You
+(§9 of the amendments): the ask, context on the wash, a before/after body,
+Approve · Revise · Decline. Approve writes the change to the routine and the
+history records it.

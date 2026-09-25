@@ -96,8 +96,13 @@ knowledge, reading is by **Titles** (page titles and one-line descriptions) or
 **Folders** (the folders you list, in full, nothing outside them).
 
 **Routine** — work Metis runs for you on a schedule: an agent, a task and a
-time. The **Morning Brief** is one; the nightly **fold**, which reads the day
-and writes what it learned into knowledge, is another.
+time. The **Morning Brief** is one, **Standup** another; the nightly **fold**,
+which reads the day and writes what it learned into knowledge, is a third. The
+ones Metistry ships with are tagged **default** and can be changed or reset.
+
+**Source** — something Metistry checks on a schedule and reads from (GitHub,
+your inbox, AWS costs). A source never writes your notes; what it may raise in
+Needs You is yours to choose.
 
 **Usage** — what your instance spends: money, tokens, time. The gauge beside
 the bell.

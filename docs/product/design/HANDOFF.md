@@ -25,7 +25,7 @@ a Design-type artifact. Read it with the Artifact tool (`action: "read"`, and
 | --- | --- |
 | **Mac — the day** | `Today-Hub` (**Today v7**, screen 5 §15), `Chat`, `NeedsYou` (v3 cards), **`NeedsYou-v4`** (the request pattern, questions, pull requests, the hub — screen 3 §12), **`NeedsYou-v5`** (where it lives: a conditional sidebar row and a full view; questions stepped — §13), `Activity`, `CaptureBar`, `Capture` (its window still has the old sidebar) |
 | **Mac — Work** | `Board`, `CardDetail`, `Projects`, `Artifacts` (screen 16; a task's room, no Rooms list) |
-| **Mac — Knowledge, Agents, Routines** | `Knowledge`, `Agents`, `Routines`, `RunDetail` |
+| **Mac — Knowledge, Agents, Routines** | `Knowledge`, `Agents`, `Routines-v2`, `RunDetail` |
 | **Mac — Settings and Usage** | `Settings`, `Resources`, `Usage` |
 | **PWA — phone and narrow window** | `PWA-Shell`, `PWA-Today`, `PWA-NeedsYou`, `PWA-Work`, `PWA-More` (screen 18, new 2026-09-24) |
 | **The system** | `States`, `Request`, `Facets`, `Voice` |
@@ -216,7 +216,7 @@ SwiftUI's `.serif`.
 | Today | `screen-05-today.md` | done, v6 — the spine, the day bar, calendar help |
 | Board | `screen-06-board.md` | done — five columns |
 | Agents | `screen-07-agents.md` | **rewritten 2026-09-21** — roster, a local agent, a connected agent |
-| Routines | `screen-08-routines.md` | done — the schedule, one routine |
+| Routines | `screen-08-routines.md` | v2 — routines and sources, all editable (§10) |
 | Settings ▸ Resources | `screen-09-resources.md` | done — the connections, one connection, three states per tool |
 | Knowledge | `screen-10-knowledge.md` | **rebuilt 2026-09-22** — digest-led; sources folded to one line |
 | Usage | `screen-17-usage.md` | **new 2026-09-23** — the gauge's popover, three budget states |
@@ -247,8 +247,10 @@ bodies; **questions** with several multiple-choice answers, context and free tex
 **pull requests** reviewed and answered in Metistry, posted to GitHub as the
 owner; the C96 events and the meeting-at-Stop as instances. **Needs You is the hub for everything that needs the owner** — Metis, agents, and sources the collectors read (§12.7, C108): source requests mirror the source and clear themselves. Twelve request types. **v5 (same day, board `NeedsYou-v5`, §13, C109):** Needs You opens a full list-and-detail view instead of the 400px panel, reached from **a sidebar row above Today that exists only while something is waiting** (C110; the Mac toolbar bell is gone); questions step one at a time.
 
-**Next round, in order:** (1) **Routines** folded to the one Morning Brief (C97). (2) **Keyboard and
-VoiceOver** (review 01 §3.1; offline is now specified in screen 18 §4). (3)
+**Routines v2 (2026-09-25, board `Routines-v2`, screen 8 §10, C111/C112):** Standup is its own routine and the brief presents it; every scheduled thing is shown and editable — routines (defaults tagged, Reset to Default) and a **Sources** tab for the collectors with cadence and Needs You rules. A run opens to its steps; Metis's suggestions arrive as improvement requests.
+
+**Next round, in order:** (1) **Keyboard and
+VoiceOver** (review 01 §3.1; offline is now specified in screen 18 §4). (2)
 **States for screens 10–17** and the §3.3 flows, including the Mac's Compute
 pane from the PWA's. Ruled 2026-09-25: C99 (no confirm on a tick); C101/C102 (Close the Day updates
 the daily note's Metistry section, dates each deferred line and writes
@@ -284,7 +286,7 @@ the canvas is now generated from a module in `boards/` except `Facets`, `Plugin`
 `Voice` and `Item-Model`. `bellpanel()` is gone — it drew the *"1 snoozed"*
 header C21 killed; `panel2()` is the panel.
 
-**110 contradictions** are logged in `review-00-plan.md`. C38, C51 and C62 are closed. C40–C87 are
+**112 contradictions** are logged in `review-00-plan.md`. C38, C51 and C62 are closed. C40–C87 are
 round E's; C88–C98 are review 01's rulings. Two of them are rules the system is missing rather than faults in a
 file: **C45** (a failed consequential operation leaves the request pending) and
 **C49** (a mark that carries meaning takes an ink token, never a border token —

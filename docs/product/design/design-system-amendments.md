@@ -445,7 +445,11 @@ acceptance data, so a board that disagrees with itself ships a bug.
   a question: a budget stop, a failed routine, an expired credential, a
   knowledge conflict (C96).
 - **One morning brief, shown as Today** (C97). It writes its own file and the
-  **Metistry section** of the daily note (C102).
+  **Metistry section** of the daily note (C102). Standup and Tomorrow's Plan are
+  routines of their own that the brief presents (C111).
+- **Nothing scheduled is hidden.** Every routine — the defaults included — and
+  every source a collector checks is listed, editable and pausable in Routines;
+  defaults carry a **default** tag and **Reset to Default** (C111, C112).
 - **One writer per region.** In the owner's daily note Metistry writes only
   between its `metistry:day` markers; the rest is the owner's. Broken markers
   stop the write and raise a request (C102).

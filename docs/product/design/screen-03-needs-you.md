@@ -518,3 +518,47 @@ Three new rows in §12.2's table, drawn:
 `decision = 'resolved_at_source'` and a receipt; calendar RSVP is an owner-only
 write through the EventKit bridge (B10's tiers); Mail stays read-only and
 *Draft Reply* opens a draft in Mail.
+
+---
+
+## 13. v5 — the bell opens a view; questions come one at a time (2026-09-25)
+
+Board: `NeedsYou-v5`. The owner: the 400px panel made Needs You *cramped and too
+vertical*. Of the five placements offered he leaned to **a full view in the main
+area**, and ruled that it is reached by **the bell as a toggle, with no sidebar
+row** — the eight rows stand (C57).
+
+### 13.1 Where it lives
+
+- **The bell is a toggle.** Pressed, it fills with the accent (the count rides
+  along, outlined) and the main area becomes Needs You. Pressed again, or Esc,
+  returns you.
+- **The sidebar shows no selection** — you are not in a section.
+- **The title bar leads back:** *‹ Today* names where you came from and returns
+  you there, scrolled where you left it.
+- **Every way in lands here** with the request that brought you selected: the
+  bell, Today's *N waiting*, a notification.
+- **List and detail.** One line per request (type, title, who's asking, age),
+  grouped Today and Earlier, filtered by type and by **From**; the selected
+  request at reading width on the right. The §12 pattern is unchanged — only its
+  container is.
+- **The 400px panel is retired on the Mac.** The phone keeps its sheet; the
+  narrow PWA window (600–899px) shows list, then pushes detail.
+- **Keyboard:** ↑↓ move · ↵ the primary · R Revise · L Later · ⌘↵ send · Esc back.
+- **Empty:** *Nothing needs you* with **Back to Today**.
+
+### 13.2 A question, one step at a time
+
+- **One question fills the card**, with a segmented bar and *Question 2 of 3*.
+  Number keys choose; **Next** slides it away and brings the next; **Back** is
+  always there.
+- The last step, **Your Answers**, lists each answer with **Edit**, and **Send
+  Answers** (⌘↵) sends them together — one reply to the agent, not three.
+- **Revise and Decline sit under every step**, so *these are the wrong
+  questions* is never more than a click away.
+- **A single-question request skips the summary:** choosing sends.
+- After sending: the answers, *not read yet*, **Change**.
+- The same steps run in the phone's sheet.
+
+§12.3's all-at-once card remains the fallback for a narrow place that can only
+show one card (a notification's expanded view), and is otherwise superseded.

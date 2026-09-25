@@ -122,3 +122,8 @@ works.
 5. **Compute ▸ Budgets** reads and writes the instance and per-project budgets
    (review 01 R2.6).
 6. `board` returns `has_thread` and a count per card (screen 16).
+
+**Updated 2026-09-25 (C109):** questions step one at a time in the sheet, as on
+the Mac (screen 3 §13.2). The narrow window shows Needs You's list, then pushes
+the detail.
+

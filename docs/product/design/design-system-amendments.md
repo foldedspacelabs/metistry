@@ -473,4 +473,9 @@ acceptance data, so a board that disagrees with itself ships a bug.
   and sources the collectors read. A source request is a **mirror**: it exists
   only while the source names the owner, and clears when answered there. Metis
   may raise an inferred one, and says it inferred it (C108, screen 3 §12.7).
+- **The bell opens a view, not a panel (C109).** On the Mac, Needs You takes the
+  main area as list and detail; the bell is a toggle and shows pressed; the
+  sidebar shows no selection; the title bar leads back. No sidebar row.
+- **A request with several questions steps through them one at a time** and
+  sends them together from a summary.
 

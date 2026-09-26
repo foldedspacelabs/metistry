@@ -4,7 +4,7 @@
 
 import { lstat, readdir, realpath } from "node:fs/promises";
 import { join, sep } from "node:path";
-import { INSTANCE_LAYOUT, NON_VAULT_ROOTS, PROTECTED_ROOT_FILES, isProtectedPath, isUserOwnedPath } from "@foldedspacelabs/metistry-core";
+import { INSTANCE_LAYOUT, JOURNAL_DIR, NON_VAULT_ROOTS, PROTECTED_ROOT_FILES, isProtectedPath, isUserOwnedPath, type NoteSectionName } from "@foldedspacelabs/metistry-core";
 
 export type PathRefusal =
   | "invalid_request" // malformed / traversal / absolute / bad casing / control chars
@@ -237,6 +237,56 @@ export function writeAllowed(rel: string, principal: string, caller: CallerClass
   }
   if (isUserOwnedPath(rel)) return principal === USER_PRINCIPAL;
   return true;
+}
+
+// ---- one writer per REGION: the section operation (plan §2.13, C102) --------
+//
+// `Journal/<date>.md` is the owner's, and `writeAllowed` keeps refusing every
+// non-user write to it — whole-file write, delete, rename from or onto it.
+// The one exception is a REGION of it, and it is not an exception to that
+// function but a second, narrower door beside it: `POST /vault/section`
+// replaces the bytes between the section's markers and nothing else, after
+// proving the rest of the note is what the caller saw (core's
+// `writeNoteSection`). These two tables are that door's whole policy.
+
+/** `Journal/YYYY-MM-DD.md` for a real calendar day — the owner's daily note, and not `Journal/Plan/…` or `Journal/Meetings/…`. */
+export function isDailyNotePath(rel: string): boolean {
+  const m = new RegExp(`^${JOURNAL_DIR}/(\\d{4})-(\\d{2})-(\\d{2})\\.md$`).exec(rel);
+  if (!m) return false;
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const date = new Date(Date.UTC(y, mo - 1, d));
+  return date.getUTCFullYear() === y && date.getUTCMonth() === mo - 1 && date.getUTCDate() === d;
+}
+
+/** Which notes each section may live in. */
+export const SECTION_PATHS: Readonly<Record<NoteSectionName, (rel: string) => boolean>> = Object.freeze({
+  day: isDailyNotePath,
+});
+
+/**
+ * Who may write each section — plan §2.13's writer column, and nobody else:
+ * `morning-brief` at 7:00 AM (model-free: the plan, the meetings, the
+ * standup's embed) and `user` at Close the Day. Not `assistant`, not an
+ * agent, not another routine: "generated prose never enters the owner's own
+ * note" is this list, not a sentence in a prompt. A new writer is a product
+ * change landing here.
+ */
+export const SECTION_WRITERS: Readonly<Record<NoteSectionName, readonly string[]>> = Object.freeze({
+  day: Object.freeze([USER_PRINCIPAL, "morning-brief"]),
+});
+
+/**
+ * May this credential, claiming this principal, write this section of this
+ * note? The credential bounds the claim exactly as it does for every other
+ * mutation (`mayClaim`: the owner bearer is `user` and nothing else); the
+ * section's writer list bounds it again; and a protected path is never a
+ * section's home whatever the tables above ever say.
+ */
+export function sectionWriteAllowed(rel: string, section: NoteSectionName, principal: string, caller: CallerClass): boolean {
+  if (!mayClaim(caller, principal)) return false;
+  if (isProtected(rel)) return false;
+  if (!SECTION_PATHS[section](rel)) return false;
+  return SECTION_WRITERS[section].includes(principal);
 }
 
 export function validPrincipal(p: unknown): p is string {

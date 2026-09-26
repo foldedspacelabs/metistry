@@ -1187,6 +1187,12 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
           const r = await consoleCall({ method: method.toUpperCase(), path, body, idempotencyKey: str(flags, "idempotency-key"), ...consoleCommon });
           if (r.status >= 400) {
             err(`metistry console call: ${renderConsoleCallError(r)}`);
+            // --json also prints the console's own body on stdout, so a 409's
+            // `reason` and the row it names (docs/ops/console-api.md's
+            // conflictBody) survive the trip — the envelope alone is
+            // `{code, message}`. Plain mode stays exactly as it was: the
+            // envelope on stderr, nothing on stdout.
+            if (flags.json === true) out(r.raw);
             return 1;
           }
           // A replay is the ORIGINAL response, not a new write (docs/ops/console-api.md).

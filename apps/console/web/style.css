@@ -572,6 +572,15 @@ label { display: flex; flex-direction: column; gap: var(--mt-space-1);
 #agent-list li > span:first-child { flex: 1 1 220px; min-width: 0; overflow-wrap: anywhere; }
 #agent-list li > span:last-child { display: flex; gap: var(--mt-space-2); flex-wrap: wrap; }
 #agent-list li.revoked { opacity: .55; }
+/* The effective action table, as the server resolved it (app.js
+   actionTableHtml): one line per kind. WHY is in the words — "(default for
+   …)", "(asked … — …'s ceiling is …)" — and the ink only repeats it: a
+   default is secondary, a clamp (the owner's own setting overridden) is
+   degraded, exactly as `metistry agents autonomy` paints them. */
+.action-table { display: block; font-size: var(--mt-text-footnote-size); }
+.action-table > span { display: block; }
+.action-row.defaulted { color: var(--mt-color-text-secondary); }
+.action-row.clamped { color: var(--mt-color-degraded); }
 #agent-create, #agent-grants { flex-direction: column; align-items: stretch; }
 #agents select { width: 100%; }
 #agent-token {

@@ -16,7 +16,7 @@ boundaries are, and a change to any of them is a product change.
 | Origin | Where | Who changes it |
 | --- | --- | --- |
 | **product** | in the repo: `seed/`, `routines/`, `collectors/`, `packages/mcp-*` | a PR |
-| **extension** | `<instance>/.metistry/extensions/<name>/` — reserved and protected (`packages/core/src/instance-layout.ts`) | the owner's hand (`metistry extensions add`, M15 — T4-5) |
+| **extension** | `<instance>/.metistry/extensions/<name>/` — reserved and protected (`packages/core/src/instance-layout.ts`) | the owner's hand ([`metistry extensions add`](#metistry-extensions--m15), M15) |
 
 Each unit is `<dir>/<unit>/manifest.yaml`. The extensions directory holds units
 of every kind side by side; each registry takes the ones whose `type` is its
@@ -27,13 +27,13 @@ kind.
 | Kind | Unit | Contract | Registry (replaces) |
 | --- | --- | --- | --- |
 | `connection-type` | `manifest.yaml`: `provides`, `transports`, config `fields`, `capabilities`, `tools` with their group, optional `sync`, `implementation` | `check()`; the bridge wire contract when it runs as a process | connection types (new); known-service forms — the app renders fields, no per-service Swift |
-| `provider` (compute) | one YAML: base URL, auth as a secret reference, `billing`, locality, data policy, catalogue endpoint | `providers test` | `COMPUTE_TEMPLATES` (`packages/cli/src/compute.ts`) → `seed/compute-templates/` + extensions |
+| `provider` (compute) | `manifest.yaml`: `type: provider` and a `provider:` block — exactly what `compute.yaml` carries under `providers.<name>` (base URL, auth as a secret reference, locality, data policy, …) | `providers test` | `COMPUTE_TEMPLATES` → `seed/compute-templates/<name>/` + extensions (T4-5) |
 | `bridge` | `packages/mcp-*/manifest.yaml` | the wire contract, `check()`, lazy discovery, preview-then-confirm, redaction; `requires_tcc` from a closed enum | bridge discovery by manifest |
-| `routine` | manifest + code (product), or no code (an assignment in `scheduled.yaml`) | declared `config` fields, default `schedule`, declared output paths, `requires` | `routines/index.ts`'s array |
-| `collector` / sync | manifest + code | declared `needs_you` raise rules, the connection type it reads | `collectors/index.ts`'s array |
+| `routine` | manifest + code (product), or no code (an assignment in `scheduled.yaml`) | declared `config` fields, default `schedule`, declared output paths, `requires` | `routines/index.ts`'s array (T4-5) |
+| `collector` / sync | manifest + code | declared `needs_you` raise rules, the connection type it reads | `collectors/index.ts`'s array (T4-5) |
 | `agent` (actor) | `.metistry/agents/**.md` | the agent manifest | exists |
 | named query | `queries/*.yaml` | `expose`, params | exists (overlay) |
-| target | — | folds into connection type `agent` | `targetManifest.transport` enum (`manifest.ts`) |
+| target | `targets/<name>/manifest.yaml` | folds into connection type `agent` (T4-11) | the target registry (T4-5); the `transport` enum goes with T4-11 |
 
 **In this program** the registries and data-only extensions ship. Code from an
 extension never runs inside the console: an extension that needs code runs as a
@@ -62,10 +62,14 @@ The rules, each tested in `packages/core/test/registry.test.ts`:
 - **`schema: 1`.** Every manifest a registry loads carries it. A missing version
   is skipped (*schema: missing — every manifest carries schema: 1*); an unknown
   major is skipped with the version named (*schema: 2 is not a version this
-  Metistry reads*). Kinds that predate the key still validate without it through
-  `validateManifest` — so CI keeps passing — but the registry requires it: T4-5
-  adds `schema: 1` to each product manifest as it moves that kind onto a
-  registry.
+  Metistry reads*). Every product manifest carries it — collectors, routines,
+  targets, provider templates, bridges, services — and CI holds every one to it
+  (`apps/console/test/manifests.test.ts`). Kinds that predate the key still
+  validate without it through `validateManifest`, but no registry loads one.
+  **An owner's older overlay** — a `.metistry/targets/<name>/manifest.yaml`
+  written before this — is skipped until it gains the line: the product's unit
+  is then in force, and the console log, `metistry doctor`'s *registries* row
+  and `metistry extensions list` all name the file.
 - **Overlay by name (D4).** An extension with a product unit's name wins; the
   unit records what it `replaced`, so doctor can say so, and Reset to Default
   removes the extension. Origin decides, not source order. Two units of the
@@ -83,6 +87,91 @@ The rules, each tested in `packages/core/test/registry.test.ts`:
 
 `buildRegistry(kind, candidates)` is the same logic with no disk, for callers
 that already hold the manifests.
+
+### The kinds that load through a registry
+
+`REGISTRY_KINDS` (`registry.ts`) is the closed list of **kinds** — a new kind
+needs a schema and a consumer, so it is a product change. It is never a list of
+units: a new unit of any of these is a directory, and there is no line to add
+anywhere in code. `loadKind(kind, roots)` builds one from the product's
+directory and the owner's.
+
+| Kind | Product units | Loaded by | An extension may |
+| --- | --- | --- | --- |
+| `collector` | `collectors/<name>/` | the console's runner, the watchdog's silent-collector probe | **overlay** — replace a product collector's manifest |
+| `routine` | `routines/<name>/` | the same | **overlay** |
+| `target` | `targets/<name>/` (and the owner's older `.metistry/targets/`) | the console (dispatch, `GET /api/targets`) | add a target, or replace one |
+| `provider` | `seed/compute-templates/<name>/` | `metistry compute providers add --from`, the hints that name templates | add a template, or replace one |
+| `connection-type` | `seed/connection-types/<name>/` (the first ship with T4-12–T4-15) | the connections package (T4-8a) | add a type, or replace one |
+
+Not here, on purpose: `bridge` and `service` are code, so an extension one is a
+process extension (§5, after this program); `agent` lives in `.metistry/agents/`
+(M12). An extension of those kinds is reported as *unclaimed*, never loaded.
+
+**Code comes only from the product.** A collector or routine is a manifest and
+a `run.ts`. The registry says the unit exists; `collectors/index.ts` and
+`routines/index.ts` find its compiled `<name>/run.js` in their own package
+**by name** (`unitCode`, `joinCode`) — so an extension that replaces
+`github-state`'s manifest (a different schedule, say) runs the product's
+`github-state` code under it, and an extension collector with a name no
+product collector has is skipped: *no product collector is named "x" — a
+collector is product code, and code from an extension runs only as a process
+(plan §5)*. A product unit whose code is missing is skipped the same way.
+
+**Where each process looks.** The console and the watchdog read the product's
+directories from their working directory (`METISTRY_COLLECTORS_DIR`,
+`METISTRY_ROUTINES_DIR`, `METISTRY_TARGETS_DIRS` — its first entry is the
+product's, the rest the owner's) and the extensions from
+`METISTRY_INSTANCE_DIR`'s `.metistry/extensions/`. A process that cannot see
+its instance — the compose console (D5) — loads product units only, and its
+log says so. Every skip is one log line naming the file and the reason.
+
+## `metistry extensions` — M15
+
+```
+metistry extensions list [--json]
+metistry extensions add <dir> [--dry-run]
+metistry extensions remove <name> [--dry-run]
+```
+
+`.metistry/extensions/` defines what the product loads, so it is a §4.7
+protected path: every write is the owner's hand, through the reconciler with
+the owner-class bearer as `user` (the console's bearer is refused there by the
+reconciler's authority table). There is no API route.
+
+**`add <dir>`** copies one directory into `.metistry/extensions/<name>/`, where
+`<name>` is its manifest's `name`. Two tests, and a refusal from either writes
+nothing:
+
+1. **Data only.** One flat directory of `manifest.yaml` and `.yaml`, `.yml`,
+   `.md` or `.txt` files, UTF-8, at most 1 MiB. A script, an executable (any
+   name), a symbolic link or a subdirectory is refused by name. Hidden entries
+   (`.DS_Store`, `.git/`) are left behind and listed.
+2. **Would it load?** The unit is put through its kind's registry beside the
+   product's units and the owner's others, exactly as the product will load
+   it. A unit the registry would skip — no `schema: 1`, a manifest its schema
+   refuses, a kind no registry takes, a collector naming no product collector,
+   a second unit of one name — is refused with the registry's own reason.
+
+That second test is where the [closed list](#closed-on-purpose) holds at the
+door: an unknown capability, the refused `send`, an unknown field kind, a bridge
+asking for a TCC grant, a unit of a made-up kind such as `action-kind` — each is
+refused, and no vocabulary changes (the T4-5 tests,
+`packages/core/test/registry-kinds.test.ts` and
+`packages/cli/test/extensions.test.ts`).
+
+An extension already installed under that name is refused: `remove` it first.
+
+**`list`** shows every unit in `.metistry/extensions/` and what became of it:
+`loaded`, `overlay` (with the product unit it replaces), `skipped` (with the
+reason) or `unclaimed` (no registry takes its kind, with why). `metistry doctor`
+carries the same facts in one *registries* row across every kind: units per
+kind, every overlay, every skip (`degraded`, never `failed`).
+
+**`remove <name>`** deletes the directory. For an overlay that is **Reset to
+Default** — the product's unit is back in force, and the verb says which. What
+referred to a removed unit is not touched: it turns `absent`, naming the
+missing unit; nothing else is deleted.
 
 ## Connection types
 
@@ -244,20 +333,31 @@ the auth schemes and the OAuth redirect modes.
 
 ## Enums that become registries
 
-T4-5 moves each of these onto a registry, so a new one is a unit, not an edit to
-a list:
+Each of these moves onto a registry, so a new one is a unit, not an edit to a
+list. **Done (T4-5):**
 
-- `collectors/index.ts` and `routines/index.ts` (static arrays)
-- `targetManifest.transport` (`packages/core/src/manifest.ts`)
-- `CREW_MODELS` (→ compute references)
-- `COMPUTE_TEMPLATES` (`packages/cli/src/compute.ts`)
-- `DEVIN_PURPOSES` (`apps/console/src/devin.ts` → the Devin connection type)
-- `SECRET_SCOPES` (→ removed, §2.14)
+- `collectors/index.ts` and `routines/index.ts` (static arrays) → the collector
+  and routine registries, code found by name
+- `COMPUTE_TEMPLATES` (`packages/cli/src/compute.ts`) → the provider registry,
+  `seed/compute-templates/<name>/manifest.yaml` + extensions
+- targets → the target registry (the console's `TargetRegistry` loads through it)
+- connection types → the registry is ready (`loadKind("connection-type", …)`);
+  its first units and its consumer come with T4-8a and T4-12–T4-15
+
+**Still to move, each with the ticket that owns it:**
+
+- `targetManifest.transport` (`packages/core/src/manifest.ts`) and
+  `DEVIN_PURPOSES` (`apps/console/src/devin.ts`) → the `agent` connection type
+  and the Devin connection type (T4-11)
+- `CREW_MODELS` (→ compute references, T4-6)
+- `SECRET_SCOPES` (→ removed, §2.14, T4-3)
 - the proposal kind → request type mapping (→ the F-5 table, open to new types
   that pick a closed body)
-- the connection known-service list
-- `inbox.source` values (a capture-source registry)
-- Swift's per-service setting forms (→ rendered from field schemas)
+- the connection known-service list → the connection-type units that ship them
+  (T4-13, T4-15)
+- `inbox.source` values (a capture-source registry — no ticket yet)
+- Swift's per-service setting forms, and the Mac app's `ComputeTemplate` enum
+  (→ rendered from field schemas and the provider registry)
 
 ## Edge cases, decided
 

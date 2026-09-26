@@ -659,6 +659,34 @@ the Mac app and the phone at `GET /api/instances`.
 `docs/ops/instances.md` is the whole story, including why `resources:` is
 empty and what this deliberately is not.
 
+## Your own units: `metistry extensions`
+
+M15 (plan §2.7): the owner's own units in `.metistry/extensions/<name>/` — a
+provider template, a connection type, a target, or a replacement manifest for
+a product collector or routine — loaded through the same registries as the
+product's:
+
+```sh
+metistry extensions list [--json]           # every one: loaded, overlay (and what it replaces), skipped or unclaimed, with why
+metistry extensions add <dir> [--dry-run]   # copy one data-only directory in, if its registry would load it
+metistry extensions remove <name> [--dry-run]   # delete it; on an overlay, Reset to Default
+```
+
+`add` copies one flat directory of `manifest.yaml` plus `.yaml`/`.yml`/`.md`/
+`.txt` files and refuses anything that could run — a script, an executable, a
+symbolic link, a subdirectory — then puts the unit through its kind's registry
+beside the product's, and refuses a unit the registry would skip with the
+registry's own reason (no `schema: 1`, a value outside a closed vocabulary, a
+kind no registry takes, a collector naming no product collector). Nothing is
+written on a refusal. `remove` deletes the directory; what referred to the unit
+turns absent, naming it, and nothing else is deleted.
+
+A §4.7 protected path: every write and delete goes through the reconciler as
+the `user` principal, with the owner-class bearer. `list --json` is one JSON
+document: `{ dir, exists, extensions: [{ name, path, type, status, reason?,
+replaced? }] }`. `docs/ops/extensions.md` is the whole story; `metistry doctor`
+carries the same facts in its *registries* row.
+
 ## Who is registered, and what they hold: `metistry agents list`
 
 ```sh
@@ -750,7 +778,7 @@ failed, and the message names the cursor to resume from.
 exist, which model each tier and crew runs on, and what each may spend:
 
 ```sh
-metistry compute providers add --from openrouter|lmstudio|ollama|llamaserver|applefm
+metistry compute providers add --from <template>   # the product's: openrouter, lmstudio, ollama, llamaserver, applefm
 metistry compute models list [--provider <name>]
 metistry compute assign default lmstudio/google/gemma-3n-e4b
 metistry compute budget instance --monthly 60 --action stop
@@ -763,6 +791,13 @@ validate is refused rather than written. `providers add` reads the API key
 from stdin into the login Keychain (user scope) and never takes it as an
 argument. Budgets are enforced in the engine, before the call — see
 `docs/ops/compute.md`, which is the whole story including what is missing.
+
+`--from` names a **provider template** — a unit of the provider registry: the
+product's `seed/compute-templates/<name>/` and your own in
+`.metistry/extensions/` (`metistry extensions`, below). The names come from the
+registry, never from a list in code: `providers add` with no `--from`, or with a
+name that is not one, is a usage error (exit 2) that names every template in
+force — and, when a unit of that name was skipped, why.
 
 ### Local models
 
@@ -1069,6 +1104,17 @@ still correct and still passes — a passkey session is required. Then the db
 (`SELECT 1`, and `schema_migrations` vs `db/migrations/*.sql`), the launchd
 jobs behind every plist in `ops/launchd` (macOS), and `docker compose ps`
 against the services in `docker-compose.yml`.
+
+**The `registries` row** (plan §2.7). One row across every registry kind —
+collectors, routines, targets, provider templates, connection types — loaded
+exactly as the console and the CLI load them: the product's units, and, when
+`METISTRY_INSTANCE_DIR` names the instance, its `.metistry/extensions/` (and the
+older `.metistry/targets/`). `meta` carries the units per kind, every overlay
+(an extension replacing a product unit — "doctor says so") and every skip with
+its reason. A skip is `degraded`, never `failed`: the product runs without the
+unit, and the remediation names the file and what is wrong with it (most often
+a manifest without `schema: 1`). `metistry extensions list` is the same facts
+for the extensions directory alone.
 
 **The `schedules` rows.** Every collector and routine manifest also gets a
 `kind: schedule` row read from the `runs` table: when it last ran, whether

@@ -12,13 +12,22 @@ never leaves the machine" as code, not as a prompt.
 ## Adding a target
 
 1. Create `targets/<name>/manifest.yaml` (product default) — or, per
-   instance, the same path under any dir listed in `METISTRY_TARGETS_DIRS`
-   (colon-separated; later dirs override earlier ones by `name`, D4 overlay).
-   The directory name must equal the manifest's `name`.
+   instance, as an extension (`metistry extensions add <dir>`, which lands it
+   in `.metistry/extensions/<name>/`) or under any later dir listed in
+   `METISTRY_TARGETS_DIRS` (colon-separated: the FIRST entry is the product's,
+   every later one the owner's). An owner's target with a product target's
+   `name` replaces it (D4 overlay). The directory name must equal the
+   manifest's `name`.
 2. Fill in the manifest (schema: `packages/core/src/manifest.ts`,
-   `targetManifest`):
+   `targetManifest`). Targets load through the target registry (plan §2.7,
+   `docs/ops/extensions.md`): a manifest without `schema: 1`, or one that fails
+   its schema, is **skipped with the reason** — logged by the console, shown
+   by `metistry doctor`'s *registries* row — and every other target still
+   loads. An overlay written before this needs the `schema: 1` line added;
+   until then the product's target is in force.
 
 ```yaml
+schema: 1                            # every manifest carries it; a registry skips one without
 name: github-issues
 type: target
 description: Open a GitHub issue for a task

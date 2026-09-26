@@ -76,21 +76,41 @@ public struct ConsoleErrorEnvelope: Sendable, Equatable {
     /// for one (`renderConsoleCallError`), so the day the envelope grows the
     /// key both doors pick it up without a second change.
     public let field: String?
+    /// Every top-level key of the response other than `error` — where a `409`
+    /// puts its `reason` and **the row as it stands** (`decision`,
+    /// `decided_at`, `proposal`, …; docs/ops/client-api.md, "409 — the
+    /// reason, and the row as it stands"), so a caller repaints from the
+    /// refusal instead of re-fetching. Empty for the plain `{error}` envelope.
+    ///
+    /// Kept as `JSONValue` rather than a struct per route: which keys ride
+    /// along is the route's business, and a caller that wants the row decodes
+    /// it into the shape it already reads.
+    public let details: [String: JSONValue]
 
-    public init(code: String, message: String, field: String? = nil) {
+    public init(code: String, message: String, field: String? = nil, details: [String: JSONValue] = [:]) {
         self.code = code
         self.message = message
         self.field = field
+        self.details = details
     }
 
     public init?(json: JSONValue) {
         guard let error = json["error"], let code = error.string("code") else { return nil }
+        var details: [String: JSONValue] = [:]
+        if case .object(let keys) = json {
+            details = keys.filter { $0.key != "error" }
+        }
         self.init(
             code: code,
             message: error.string("message") ?? code,
-            field: error.string("field") ?? json.string("field")
+            field: error.string("field") ?? json.string("field"),
+            details: details
         )
     }
+
+    /// A `409`'s `reason` — `packages/core`'s `CONFLICT_REASONS`: `stale` or
+    /// `already_decided`. Nil on the older routes whose conflict carries none.
+    public var reason: String? { details["reason"]?.stringValue }
 }
 
 public enum ConsoleError: LocalizedError, Equatable {

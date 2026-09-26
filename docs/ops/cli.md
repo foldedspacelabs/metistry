@@ -16,6 +16,7 @@ All of them are real.
 | `connect --list [--json]` | which tools are connected: the row, the bearer, the config |
 | `console whoami [--json]` | ask the console who it thinks you are, with this install's owner token |
 | `console call <METHOD> <path> [--body @file\|-] [--idempotency-key <key>] [--json]` | one authenticated request against the console, as `whoami`'s same principal — the scripting seam |
+| `console session --stdio` | `console call`, held open: one long-lived child answering JSON request lines on stdin — the Mac app's transport |
 | `identity [--json]` | the instance's `.metistry/identity.yaml` (name, mention, voice, icon, instance_id) |
 | `--version` / `version [--json]` | this CLI's version, the resolved product dir's, the lock's pin, and a release's runtime pack |
 | `deployment [--json]` | the effective shape (D4 overlay) and the services it implies, with cheap running state |
@@ -263,6 +264,46 @@ $ metistry console call POST /capture --body @note.json --idempotency-key retry-
 {"id":42,"path":"Inbox/1757556000000-note.md","sha256":"…"}
 $ metistry console call POST /capture --body @note.json --idempotency-key retry-1 --json   # retried
 {"id":42,"path":"Inbox/1757556000000-note.md","sha256":"…","replayed":true}
+```
+
+`metistry console session --stdio` is `console call` held open, for a client
+that makes many requests — the Mac app (`SessionConsoleCallTransport`,
+`docs/ops/mac-app.md`). A one-shot `console call` is a whole process per
+request: about **141 ms** median on a scratch instance (20 runs of `GET
+/api/whoami`, 2026-09-26), almost all of it node starting and the token being
+looked up. Through one session the same request is about **1.5 ms** median.
+
+The console URL and the local owner token are resolved **once**, when the
+session starts, and the same refusals apply before a single line is read: no
+token, or a non-loopback console, prints the reason on stderr and exits 1.
+After that nothing exits but EOF on stdin, and **the token is never printed**
+— every line written is redacted against it, whatever the console sent back.
+
+Each stdin line is one JSON object; each request gets **exactly one terminal
+line** on stdout, matched by `id` (a string or an integer) — never by order,
+because requests run concurrently:
+
+| in | out |
+| --- | --- |
+| `{id, method, path, body?, idempotency_key?}` | `{id, status, body, replayed?}` — the console answered, any status; `body` is its JSON (or its text) |
+| | `{id, error: {code, message}}` — no answer: `unreachable` (the console did not answer, or the stream broke), `invalid_request` (the line was refused here, before anything went out), `duplicate_id` (that id is still in flight) |
+| `{id, method: "GET", path: "/api/events", stream: true, last_event_id?}` | `{id, event: {id, type, data}}` per Server-Sent Event, then `{id, ended: "cancelled" \| "closed"}` — or, if the console did not open a stream (a `401`, a `404` before it serves the route), an ordinary `{id, status, body}` |
+| `{id, cancel: true}` | ends that stream (its `ended` line is the answer); cancelling what already finished is not an error |
+
+`body` is a JSON value, sent as `application/json`; `idempotency_key` is
+checked exactly as `--idempotency-key` is; `last_event_id` rides as
+`Last-Event-ID` so a resubscribe resumes (design-build-plan §2.20). Only `GET
+/api/events` may be a stream. A path must be absolute on the console — the
+session refuses one that would carry the token to another host. EOF ends
+every open stream as `cancelled`, answers what is still in flight, and exits
+0.
+
+```
+$ printf '%s\n' '{"id":1,"method":"GET","path":"/api/whoami"}' \
+    '{"id":"b","method":"POST","path":"/api/proposals/999999","body":{"decision":"skip"}}' \
+  | metistry console session --stdio
+{"id":1,"status":200,"body":{"principal":"user","via":"local_owner_token","management":true,…}}
+{"id":"b","status":404,"body":{"error":{"code":"not_found","message":"not found"}}}
 ```
 
 Package-level detail (flags, resolution order, probe table) lives in

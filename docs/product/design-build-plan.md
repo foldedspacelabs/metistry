@@ -1,10 +1,14 @@
 # Design round 0 — approved spec and execution plan
 
 **Status: the approved spec**, rewritten for execution to the owner's rulings of
-2026-09-26 on #260. It is what implement agents build the final design to
-(`docs/product/design/`, merged as #263). Every question the owner has answered is
-closed here (§1); what remains is the **25 up-front questions in §4**, each with a
-default so the answer can be one word.
+2026-09-26 on #260 and to **his answers to all 25 up-front questions** (§4, the same
+day). It is what implement agents build the final design to
+(`docs/product/design/`, merged as #263). Nothing in it waits on the owner except
+the owner-hand steps scheduled in §3.4.
+
+**Agents do not read this file whole.** Each ticket is one page under
+`docs/product/tickets/`, generated from §3.3 by `ops/scripts/tickets.mjs`; the
+standing rules are `docs/ops/agent-brief.md` (§3.6).
 
 Written against `origin/main` at `0b20767` (#263's merge). Every code citation
 was re-checked there (Appendix A).
@@ -14,8 +18,9 @@ was re-checked there (Appendix A).
 ## 0. How to use this spec
 
 **Who reads what.** The coordinator reads all of it. An implement agent reads
-**§0, the §2 section its ticket cites, and its ticket in §3** — every ticket is
-written to be buildable from those three alone.
+**`docs/ops/agent-brief.md`, its ticket file under `docs/product/tickets/`, and
+the §2 section the ticket cites** — every ticket is written to be buildable from
+those three alone.
 
 **Precedence.** This spec, then `docs/product/design/DEVELOPER-HANDOFF.md` §0's
 order (the ratified C-rows, `design-system-amendments.md`, the screen and
@@ -72,7 +77,22 @@ interface: every label templates `identity.yaml`'s `name`, served by
 | 7 | **C60** do not build. **C76** build the chosen UX. **C82** Areas rename approved. **C104** accept both names | No Chat pane; Window + audio + microphone *and* Audio only; `projects_overview` becomes Areas; `decision` and `decided` both accepted as the report kind | T1-14, T2-3, T8 |
 | 8 | **Q1 — a dynamic router.** "Rather than routing to a model directly, Metis uses a DYNAMIC ROUTER that chooses the right operations and compute necessary… I'm willing to revise my statement on 'a model does not choose other models' if necessary." Tiers stay in Advanced | Rules stay the outer control; inside them a local policy picks operations and compute per request; the invariant-4 amendment is proposed for ratification; the composer wiring is gated on it | §2.8; T9 |
 | Q2–Q10 | **Q2** leave as is · **Q3** secrets **per instance only** ("no bleed between instances… simpler and easier to test") · **Q4** standup settings are the Standup routine's · **Q5** yes (`connection_call`, and 26 → 28 tools) · **Q6** capture every permission meeting capture needs · **Q7** keep audio until transcribed and ingested, acceptable until after the fold; "check the audio again" must work · **Q8** phone settings mostly read-only, decided per setting by what is unsafe remotely · **Q9** start with *Open in Calendar*, add ICS/Google later · **Q10** Decline always sends `deny` | K7 closed with a migration; K8/K13 closed by ruling 2; `connection_call` is the fifth action kind; the TCC enum gains `screen_recording`, `microphone`, `audio_capture`; retention and a re-review tool; the remote-exposure table | §2.2, §2.3, §2.14, §2.15; T4-3, T4-9, T8 |
-| 9 | **Execution.** "optimize how it's implemented so that you have the autonomy you need to oversee the sub-agents… enough parallelism and questions answered up front… several weeks… without significant oversight from me" | An interface-freeze wave, nine parallel tracks of self-contained tickets, a wave schedule with a release per wave, and the up-front questions | §3, §4 |
+| 9 | **Execution.** "optimize how it's implemented so that you have the autonomy you need to oversee the sub-agents… enough parallelism and questions answered up front… several weeks… without significant oversight from me" | An interface-freeze wave, ten parallel tracks of self-contained tickets, a wave schedule with a release per wave, and the up-front questions | §3, §4 |
+
+### 1.1a The answers of 2026-09-26, and the three additions
+
+The owner answered §4 the same day (all 25; the record is §4) and asked for three
+additions, each now a first-class part of the plan:
+
+| Addition | Owner's words | Where |
+| --- | --- | --- |
+| **A — Real-time push** | "Should we add a way for the client to subscribe to live changes on the server? Things like agent communication, working indicators, status changes…" | §2.20; T2-18, T5-7, T7-7 |
+| **B — Vault git** | "Metistry should manage this itself so changes are saved in a granular enough way to allow safe rollback… Metistry should also assume the user may commit and push themselves at any time." | §2.21; track T10 |
+| **C — Token efficiency** | "the appropriate model for each sub-agent, scoping their session/context well, and maintaining your own context window size" | §3.6; one file per ticket, the agent brief, a model per ticket, a status per ticket |
+
+Two answers moved the plan more than a yes: **Q7** (calendar replies — §2.6's
+*Resolving Q7*) and **Q22** (Linear becomes a connection type built now — §2.6,
+T4-24…T4-26). The ratified `CLAUDE.md` wording (Q1, Q3) is ticket **F-0**.
 
 ### 1.2 The decisions ledger
 
@@ -114,7 +134,7 @@ specs — with its status on main at `0b20767` and the ticket that builds it.
 | T8 | Agent prose: 2px rule in a transcript, wash elsewhere | C69 | Not started | T5-3 |
 | T9 | Serif stack (web) / `.serif` (SwiftUI) | C32, C35 | Partial — tokens merged | T5-3, T7-1 |
 | T10 | Painted-ground contrast; dimmer ink not opacity; `border-control` outlines; weight not two inks; glass floors | C49, C54, C63, C70, C73, C74 | Not started | T5-3, T8-5 |
-| T11 | Light chart chroma | C87 | Open — §4 Q21 | — |
+| T11 | Light chart chroma | C87 | **Ruled 09-26: ship as merged** | — |
 | T12 | HIG title case; values verbatim; 12-hour clocks | amendments §8.1, #12 | Not started | T5-3 |
 
 **Needs You and requests**
@@ -208,7 +228,7 @@ specs — with its status on main at `0b20767` and the ticket that builds it.
 | K-1 | Knowledge leads with the fold, then Needs your eye, Areas, one sources line | screen 10 | Not started | T1-6, T6-4 |
 | K-2 | Two timestamps on a failure; an expired credential is failed | C48, C64, C95 | Not started | T1-5 |
 | K-3 | Learned facts are proposals | C79 | Not started | T3-10 |
-| K-4 | `partial` state | C28 | Open — §4 Q20 | T5-3 |
+| K-4 | `partial` state | C28 | **Ratified 09-26** | T5-3 |
 | C1 | Capture receipt is id + path | C23 | **Done** (`server.ts:550–579`) | — |
 | C2 | Idempotency-Key minted by the composer | C24 | Partial | T5-5 |
 | C3 | App captures carry `source: app` | C25 | Not started — no migration needed | T2-1 |
@@ -224,6 +244,9 @@ specs — with its status on main at `0b20767` and the ticket that builds it.
 | X6 | Undo when reversible, confirm naming the cost when not | C136 | Not started | T5-3 |
 | X7 | No dead-end buttons | C138 | Not started | T6-5, T5-6 |
 | Q1 | PWA: tab bar Today · Chat · Work · Knowledge · More; bell and + in the header | screen 18, 09-24 | Not started | T7-2 |
+| E1 | Clients get **live changes** pushed | addition A, 09-26 | Not started — clients poll today (`app.js:153–179`) | T2-18, T5-7, T7-7 |
+| E2 | Metistry manages the vault's **commits, pushes and rollback** | addition B, 09-26 | Partial — the reconciler commits every 30 s and pushes on a schedule, but never fetches, so a push from anywhere else stalls it (§2.21) | T10 |
+| E3 | **Linear** is a connection type, built now | §4 Q22 | Not started — the task grammar already reads `linear:` refs (`task-line.ts:80`) | T4-24…T4-26 |
 | Q2 | PWA offline: one rule per verb | screen 18 §4 | Not started | T7-4 |
 | Q3 | Phone settings mostly read-only | Q8 | **Ruled 09-26** | §2.3, T7-6 |
 | Q4 | Python exempt for design tooling | owner 09-22 | Done (`CLAUDE.md:97–101`) | — |
@@ -235,7 +258,7 @@ specs — with its status on main at `0b20767` and the ticket that builds it.
 | **K1** | Eight rows, Today first, a conditional ninth | `daily-flow-spec.md` §10 "No new top-level section"; D19 | Owner 09-22 (rows accepted); the spec is bannered |
 | **K2** | Three answers + Later; Skip bulk-only | `docs/ops/reply-feedback.md` "six verbs" | C92 + Q10: F-14 rewrites `reply-feedback.md` to §2.12's table; Decline is always `deny` |
 | **K3** | Metis not on Agents | #235 lets the internal principal ask; `describeScope` renders it | A view filter; the triple stays for the CLI and the access card |
-| **K4** | A destructive connection tool may be **On** | `CLAUDE.md` Packages: every bridge does preview-then-confirm on destructive tools | Q5 ruled the mechanism; the one sentence for `CLAUDE.md` is §4 Q3 (the owner's file) |
+| **K4** | A destructive connection tool may be **On** | `CLAUDE.md` Packages: every bridge does preview-then-confirm on destructive tools | **Ratified 09-26** (§4 Q3); the sentence lands in `CLAUDE.md` through F-0 |
 | **K5** | One writer per region in the daily note | daily-flow §5.1 one writer per file; #255's `isUserOwnedPath` refusal | C102; built as a reconciler section operation that proves the rest of the file unchanged (§2.13, T2-6) |
 | **K6** | Deferring writes `⏳ <date>` / `#someday` | daily-flow D2/D3: the parser emits one form, English tokens (`task-line.ts:1–8`) | Write `do <date>` via `formatTaskLine`; add a `someday` token (T2-5) |
 | **K7** | Secrets per instance | `SECRET_SCOPES` user scope, deliberate | **Q3 ruled per instance**; migration in §2.14, T4-3 |
@@ -243,12 +266,12 @@ specs — with its status on main at `0b20767` and the ticket that builds it.
 | **K9** | The app configures connections, routines, secrets, identity | #258 §4.13 "no in-app editor"; the console may write two protected paths (`apps/reconciler/src/paths.ts:100–135`) | **Ruling 1**: one API plus enumerated management-only actions (§2.1–2.2) |
 | **K10** | *Allow sleep when the lid is closed* can be off | `power.ts` `LID_CLOSED_NOT_AVAILABLE`; "lid close must always sleep" (09-19) | **Ruling 3**: keep the value, show the administrator steps and the warning (§2.15) |
 | **K11** | Audio kept until the fold (C137) | screen 11 §8 "audio — never kept"; #253 frames dropped | **Q7**: kept until transcribed and ingested, at most until after the fold; screen 11's copy changes (§2.15) |
-| **K12** | Metis uses one model | Invariant 4; the router's tiers incl. `intent` (#257) and `routine` | **Q1**: tiers stay in Advanced; the dynamic router (§2.8) |
-| **K13** | Standup at 6:00 AM | daily-flow §7 "within the hour before `standup_time`" | **Ruling 2**: the routine's schedule decides |
+| **K12** | Metis uses one model | Invariant 4; the router's tiers incl. `intent` (#257) and `routine` | **Q1**: tiers stay in Advanced; the dynamic router (§2.8); the amended invariant 4 **ratified 09-26**, landed by F-0 |
+| **K13** | Standup at a fixed time | daily-flow §7 "within the hour before `standup_time`" | **Ruling 2**: the routine's schedule decides — 8:00 AM by default (§4 Q12) |
 | **K14** | Limits enforced | the Mac app and CLI say they are not | The engine is right; F-14 fixes the copy |
 | **K15** | Mirrors clear with their source | `morning-brief` expires every pending row after 14 days (`run.ts:15, 251–255`) | Rows with a `source` are exempt (T1-8) |
-| **K16** | Answer invitations in Metistry | EventKit cannot: `EKParticipant.participantStatus` is `readonly` and the framework has no response call — **verified in the macOS 26.5 SDK headers** | **Q9**: *Open in Calendar* first; RSVP through a calendar connection that can (§2.6) |
-| **K17** | *Draft Reply* in Mail | D17: Apple Mail bridge read-only | **Ruling 5**: a `mail` connection whose transport can draft (§2.6) |
+| **K16** | Answer invitations in Metistry | EventKit cannot: `EKParticipant.participantStatus` is `readonly` and the framework has no response call — **verified in the macOS 26.5 SDK headers** | **Q9 + §4 Q7**: *Open in Calendar* first; replies through CalDAV with an app password, then Google with Metistry's own OAuth client (§2.6) |
+| **K17** | *Draft Reply* in Mail | D17: Apple Mail bridge read-only | **Ruling 5 + §4 Q8**: an IMAP `mail` connection drafts (§2.6) |
 | **K18** | Rename `decision` → `decided` | a published tool schema | **Ruled: accept both** (T2-3) |
 | **K19** | Stale sentences in the designer's record (Rooms as a Work child, *Routines* row, the gauge "beside the bell") | C89, C113, C110 | Build the rulings; X-1 sweeps the docs |
 
@@ -260,7 +283,7 @@ specs — with its status on main at `0b20767` and the ticket that builds it.
 | Dismiss / Not Mine | banned on requests by amendments §8.1; used by screen 3 §12.2 | As drawn in §12; both send `skip` |
 | Approve as Work | folded into Approve (components-01) vs offered (glossary) | Approve sends `accept_as_work` when `payload.suggested_work` exists |
 | Projects empty state | "no New Project" vs *New Project* | Projects appear on first use; the empty state links to Board |
-| Tomorrow's Plan time | 7 PM vs the profile's evening gate | 7 PM default on the routine, the close trigger earlier (§2.5) |
+| Tomorrow's Plan time | 7 PM vs the profile's evening gate | **Answered (§4 Q12):** 11:00 PM on the eve of a working day, after the fold; the close trigger earlier (§2.5) |
 
 ---
 
@@ -300,6 +323,12 @@ passkey session. **Same routes, same bodies, same errors.**
 The gate is the existing `may(principalOf(auth), "act", {kind: "console", door:
 "console_management", route})` (`server.ts:800`) plus one check from the table:
 `reach === "local" && auth.kind !== "local_owner"` → `403 local_only` (F-13).
+
+**Live changes.** `GET /api/events` is a Server-Sent Events stream at reach
+`owner`: typed events carrying **ids, never bodies**, so a client learns *what*
+changed and refetches it through the route that already enforces who may read it
+(§2.20). `GET /api/identity` advertises it as the `events` capability; polling with
+`since` cursors stays the fallback.
 
 **Versioning.** `api_version: 1` in `GET /api/identity` and `GET /health`, and a
 `Metistry-API-Version` response header. An additive change (a route, a field, a
@@ -364,6 +393,13 @@ recorded. *New* routes cite their ticket. All `owner` unless marked.
 | `GET /api/recordings/:id` | owner | retention state | T8-4 |
 | `POST /api/github/pulls/:owner/:repo/:number/review`, `…/threads/:id/{reply,resolve}` | owner | head SHA must match | T2-13 |
 | `POST\|DELETE /api/prose/:id/feedback` | owner | | T1-12 |
+| `GET /api/events` | owner | SSE; `Last-Event-ID` resumes; ids only (§2.20) | T2-18 |
+| `GET /api/vault/status` | owner | ahead/behind, last commit, last push, conflict | T10-2 |
+| `GET /api/knowledge/history?path=`, `GET /api/knowledge/version?path=&sha=` | owner | a file's commits; one file at one commit | T10-4 |
+| `POST /api/knowledge/restore` | owner | raises a Needs You request; Approve restores as `user` (§2.21) | T10-5 |
+| `POST /api/vault/rollback` | **local** | raises a Needs You request with the preview; Approve reverts as `user` | T10-6 |
+| `POST /api/trackers/:connection/issues`, `POST /api/trackers/:connection/issues/:key/complete` | owner | through a `tracker` connection's capability (Linear first) | T4-25, T4-26 |
+| `POST /api/vault-tasks/:task_key/link` | owner | adds one `linear:` (or `gh:`) ref to one line; 409 | T4-25 |
 
 **The console writes exactly three protected paths**: the two it writes today
 (`.metistry/assistant-prompt.md`, `.metistry/compute.yaml`) and
@@ -394,6 +430,7 @@ console cannot or must not do it (credentials, the machine, code that runs):
 | M15 | Extensions | `metistry extensions add\|remove\|list` (T4-5) | `.metistry/extensions/**` — what the product loads |
 | M16 | Compute providers | `metistry compute providers add\|remove\|set` | keys and base URLs — where prompts go |
 | M17 | Models on this Mac | `metistry compute models install\|load\|unload` | this Mac's disk and memory |
+| M18 | The vault's git policy and rollback | `metistry vault settings`, `metistry vault rollback <commit\|--to date\|--file path>` (T10-2, T10-6) | the repository's history and its remote; a rollback still waits for Approve in Needs You |
 
 **Device-local, no CLI and no API:** global hot keys, the capture bar's placement
 and window preferences, the login item, reading TCC state, the instance chooser
@@ -433,6 +470,10 @@ exist. Reach (§2.1) enforces it; a client hiding a control is never the control
 | Sessions: *Let Metis learn*, retention | write | write | the session-fold and purge routines' settings, through the Scheduled doors (§2.5) |
 | Sessions: Purge Now | — | write | irreversible |
 | Live Capture, Keyboard, Advanced | — | write | this Mac |
+| Live changes (`GET /api/events`) | read | read | ids only |
+| Linear: create an issue from a task, close one, link a task | write | write | the daily acts, through the connection's own tool modes |
+| Vault: history of a file, the sync status | read | read | |
+| Vault: restore a file, roll back, the push and pull policy | — | write | history and the remote are the boundary; each rollback still waits for Approve |
 
 ### 2.4 The actor model
 
@@ -492,7 +533,7 @@ Usage Rollup, and every sync.
 # .metistry/scheduled.yaml (F-4 freezes the schema)
 routines:
   standup:
-    schedule: { days: working_days, at: ["06:00"] }   # or days: [mon, tue, …]
+    schedule: { days: working_days, at: ["08:00"] }   # or days: [mon, tue, …]
     paused: false
     config: { template: Templates/Standup.md, skip_without_calendar_event: false }
   vendor-sweep:                       # a New Routine: an assignment, no product code
@@ -507,8 +548,9 @@ syncs:
     raise: { review_requested: true, assigned: true }
 ```
 
-**Schedule shape (closed):** `{days, at, tz?}` — `days` is a list of weekdays or
-`working_days`; `at` one or more `HH:MM`; `tz` defaults to the profile's
+**Schedule shape (closed):** `{days, at, tz?}` — `days` is a list of weekdays,
+`working_days`, or `eve_of_working_days` (every day whose next day is a working
+day); `at` one or more `HH:MM`; `tz` defaults to the profile's
 timezone — or `{every: 5m|15m|1h|6h}`. Cron strings in product manifests are
 accepted for one release. The next-occurrence function is hand-rolled in
 `packages/core/src/schedule.ts` over `Intl` (U5), with DST tested.
@@ -519,16 +561,37 @@ accepted for one release. The next-occurrence function is hand-rolled in
 Metistry. A schedule whose `days` is `working_days` **follows the profile** until
 the owner sets days on the routine; Close the Day's window reads `working_hours`;
 a routine with `working_days` and no profile writes nothing and says so (§6.4's
-absent state). **`standup_days` and `standup_time` move to the Standup routine**:
-T3-4 reads them once into `scheduled.yaml` (a note records it), and doctor says
-the profile keys are no longer read. The seeded profile drops them. Today's
-code reads profile keys in one place (`routines/plan-tomorrow/run.ts`), so the
-change is small.
+absent state). **`standup_days` and `standup_time` move to the Standup routine**
+(§4 Q13): T3-4 reads them once into `scheduled.yaml`, then **raises a proposal** —
+*Tidy Me/profile.md: these two lines now live on the Standup routine* — with the
+before and after. `Me/` is the owner's alone (#255), so nothing edits it
+mechanically: Approve writes the change as `user` through the same proposal path
+the session fold uses (C79), refused if the file changed since; Decline leaves the
+keys, which are ignored, and doctor carries one info-level line naming them. The
+seeded profile drops them. Today's code reads profile keys in one place
+(`routines/plan-tomorrow/run.ts`), so the change is small.
 
-**Defaults** (§4 Q12): Standup working days 6:00 AM · Morning Brief 6:02 AM ·
-Tomorrow's Plan 7:00 PM, or at Close the Day · Knowledge Fold 10:00 PM · Reply
-Review 11:00 PM · Weekly Review Sunday 6:00 PM · Inbox Sort every 5 min · Usage
-Rollup hourly.
+**Defaults** (§4 Q12, as answered): **Morning Brief** working days 7:00 AM ·
+**Standup** working days 8:00 AM · **Knowledge Fold** 9:00 PM · **Tomorrow's Plan**
+`eve_of_working_days` 11:00 PM (and at Close the Day) · Reply Review 11:00 PM ·
+Weekly Review Sunday 6:00 PM · Inbox Sort every 5 min · Usage Rollup hourly. The
+manifests carry these (T3-2).
+
+**Two consequences of the order, designed rather than left:**
+
+- **The brief (7:00) now runs before the standup (8:00).** The brief *presents*
+  the standup (C111) by reference, never by copy: its file embeds
+  `![[Journal/Standup/<date>]]`, and Today's Standup section shows *Standup at
+  8:00 AM* until the file lands, then the file — refreshed by the
+  `routine.status` event (§2.20). Nothing is regenerated.
+- **Tomorrow's Plan (11:00 PM) now runs after the fold (9:00 PM)**, for full
+  context: it links tonight's `Journal/Fold/<date>.md` and lists the fold's
+  `decisions:` frontmatter as a section — still model-free. Its old gate
+  ("after the day end, on the eve of a working day, hourly") becomes the schedule
+  itself (`eve_of_working_days`, 23:00) plus a guard that records
+  `skipped:not_a_working_eve`. Close the Day still renders it early; the 11:00 PM
+  run supersedes that render with the fold's context. The fold's own "after
+  18:00" gate becomes the 9:00 PM schedule.
 
 **Runs.** Every routine writes `meta.outcome` — `acted`, `silent` or
 `skipped:<reason>` (D7). Activity shows `acted` and absent skips, never a silent
@@ -556,6 +619,7 @@ connection-type plugin (§2.7) that knows how to reach it.
 | `files` | a folder, a file, a web page | generated tools |
 | **`calendar`** *(ruling 5)* | events and invitations | Today, Next Up, invitation requests |
 | **`mail`** *(ruling 5)* | messages | message requests, Draft Reply |
+| **`tracker`** *(§4 Q22)* | issues and tasks another system tracks — Linear first | the Board, `task` requests, Today, a task's `linear:` ref |
 
 ```yaml
 # .metistry/connections/<name>.yaml (F-3 freezes the schema; written only by the CLI, M13)
@@ -583,16 +647,137 @@ capabilities, never provider names.
 | `eventkit` (the existing bridge) | calendar | `read`, `write_own` (preview-then-confirm) | TCC | **no reply to invitations** — `EKParticipant.participantStatus` is `readonly` and EventKit has no response call (macOS 26.5 SDK headers, checked 2026-09-26) |
 | `ics` | calendar | `read` | none, or a secret URL | a subscription feed is read-only by construction |
 | `caldav` | calendar | `read`, `write_own`, **`rsvp`** | an app-specific password | RFC 6638: an attendee changes `PARTSTAT` in their copy and "the server MUST deliver an iTIP REPLY"; requires a server that implements scheduling |
-| `google-calendar` | calendar | `read`, `write_own`, **`rsvp`** | OAuth | Calendar API v3: `attendees[].responseStatus` is writable; `attendeesOmitted` "can be used to only update the participant's response" |
+| `google-calendar` | calendar | `read`, `write_own`, **`rsvp`** | OAuth — Metistry's shipped public client, or the owner's own | Calendar API v3: `attendees[].responseStatus` is writable; `attendeesOmitted` "can be used to only update the participant's response" |
 | `apple-mail` (D17 bridge) | mail | `read` | TCC | read-only by ruling |
-| `imap` | mail | `read`, **`draft`** (APPEND to Drafts) | an app password | IMAP APPEND; no SMTP, so nothing can send |
-| `gmail` | mail | `read`, **`draft`** | OAuth (`gmail.compose` or `gmail.readonly`) | `users.drafts.create` makes a draft and does not send |
+| `imap` (§4 Q8) | mail | `read`, **`draft`** (APPEND to Drafts) | an app password | IMAP APPEND; no SMTP, so nothing can send. **Gmail over IMAP** needs 2-Step Verification and an app password — Google names app passwords as the one exception to its March 2025 end of password access for IMAP and CalDAV; confirm on the owner's account in T4-15 |
+| `linear` (§4 Q22) | tracker | `read`, **`create`**, **`complete`** | a personal API key, as a secret | GraphQL at `https://api.linear.app/graphql`; "pass the API key with header: `Authorization: <API_KEY>`" (Linear, *GraphQL*) — no `Bearer`, which OAuth tokens take |
 
 **Nothing sends mail.** No provider gets a `send` capability; the action set has
-no send (`docs/ops/actions.md`). *Draft Reply* is a draft the owner sends.
-**One risk to verify at T4-14/T4-16:** a Google OAuth client left in *Testing*
-issues refresh tokens believed to expire after seven days; the owner's client
-may need to be published (§3.5).
+no send (`docs/ops/actions.md`). *Draft Reply* is a draft the owner sends. The
+Gmail API is not built in this program (§4 Q8, §5).
+
+**Resolving Q7 — replies without making every user a Google Cloud developer.**
+The owner's question: does Google mean each user sets up their own OAuth app?
+Verified 2026-09-26:
+
+- **Google's CalDAV takes OAuth 2.0 only.** "The CalDAV server refuses to
+  authenticate a request unless it arrives over HTTPS with OAuth 2.0
+  authentication… Basic Authentication results in an HTTP 401", it requires a
+  registered Google Cloud project, and the old `google.com/calendar/dav`
+  endpoint is gone (Google CalDAV API v2 guide). So **an app password cannot
+  reach Google Calendar** — CalDAV with an app password works for iCloud,
+  Fastmail and any RFC 6638 server, not for Google.
+- **Installed apps cannot keep a secret, and Google says so**: the desktop flow
+  treats the client secret as optional, supports **PKCE**, and recommends a
+  **loopback redirect** (`http://127.0.0.1:<port>`) (Google, *OAuth 2.0 for
+  iOS & desktop apps*). So Metistry can ship **one public OAuth client id** —
+  not a secret — that every install uses, and **no user ever creates a Cloud
+  project**.
+
+**What that costs, honestly:**
+
+| Consequence | Why | What the plan does |
+| --- | --- | --- |
+| Until Google verifies Metistry, every user sees *Google hasn't verified this app* and clicks through *Advanced → Go to Metistry* | `calendar.events` is a **sensitive** scope; Google shows the warning for sensitive scopes until verification completes | the connection sheet says so before the browser opens |
+| An unverified app has a **user cap** on sensitive scopes (documented as 100 users — confirm when submitting) | Google's policy for unverified apps | fine for the owner's two instances; verification before any wider release |
+| A consent screen left in **Testing** makes refresh tokens **expire after seven days** ("Authorizations by a test user will expire seven days from the time of consent") | Google's rule for Testing | the owner publishes the consent screen to **In production** once, at creation (§3.4) |
+| Verification needs a homepage, a **privacy policy**, a verified domain and a demo | Google's verification requirements | metistry.ai (owned) — a homepage and a policy page; the maintainer submits (§3.4) |
+| The refresh token is a credential | — | stored in the Keychain as a secret of the connection (§2.14); never shown |
+
+**The order: CalDAV and ICS first, Google second.**
+
+1. **W3 — ICS feeds (read, every provider, including Google's secret iCal
+   address) and CalDAV with an app password (read + reply)** for iCloud,
+   Fastmail and any RFC 6638 server (T4-12, T4-13). No developer account
+   anywhere; a Google user has read-only Google through ICS on day one.
+2. **W4 — Google Calendar through Metistry's shipped client** (T4-10 for the PKCE
+   loopback flow, T4-14 for the provider): read, write own, reply. The **project
+   owner creates the Metistry OAuth client once**, in Folded Space Labs' Google
+   Cloud project, publishes the consent screen to production and starts
+   verification — **before W2**, because verification takes weeks (§3.4). Users
+   never touch Google Cloud.
+
+**OAuth without every user registering an app.** The owner's follow-up: should
+the maintainer run a hosted OAuth proxy on metistry.app, registered and verified
+with each provider, so no user registers anything — with the constraint that
+**the maintainer never sees user data**? Checked against each provider's current
+documentation on 2026-09-26:
+
+| Provider | Public client (no secret) with PKCE? | Redirect | So Metistry needs | Evidence |
+| --- | --- | --- | --- | --- |
+| **Google** | **yes** — "Installed apps… cannot keep secrets", the secret is optional, PKCE supported | loopback `http://127.0.0.1:<port>` recommended | **a shipped client id, no hosted component** | Google, *OAuth 2.0 for iOS & desktop apps* |
+| **Microsoft** (Entra ID) | **yes** — "Public clients… must not use secrets or certificates when redeeming an authorization code"; PKCE recommended | `http://localhost` for system-browser apps | a shipped client id, no hosted component | Microsoft identity platform, *OAuth 2.0 authorization code flow* |
+| **Linear** | **yes** — "Linear supports the PKCE flow", `client_secret` optional with it | localhost shown in the docs | nothing hosted; and **this plan uses a personal API key** (`Authorization: <API_KEY>`), so no OAuth at all | Linear, *OAuth 2.0 authentication*; *GraphQL* |
+| **Slack** | **no** — `oauth.v2.access` needs the client secret ("you have to prove… that you have your app's client secret") | "The `redirect_uri` must use HTTPS" | the broker | Slack, *Installing with OAuth* |
+| **Notion** | **no** — the token request uses HTTP Basic with `CLIENT_ID:CLIENT_SECRET`; PKCE not documented | not stated | the broker | Notion, *Authorization* |
+| **Atlassian** (Jira, Confluence) | **no** — `client_secret` "(_required_)"; PKCE not documented | not stated | the broker | Atlassian, *OAuth 2.0 (3LO) apps* |
+
+**The recommendation.**
+
+1. **Google needs no hosted proxy.** A *Desktop* OAuth client is a public client:
+   its id ships in the `google-calendar` connection type's manifest, the flow is
+   PKCE with a loopback redirect the Mac app opens, and tokens go straight from
+   Google to the instance — no Metistry server is ever in the path. The
+   maintainer registers the client **once**, publishes the consent screen to
+   **In production** (Testing expires refresh tokens after seven days), completes
+   **brand verification** with a homepage and privacy policy on metistry.ai, and
+   passes verification for Calendar's **sensitive** scope. Gmail's scopes are
+   **restricted**, which requires an **annual security assessment** ("applications
+   requesting access to restricted scopes must undergo an annual security
+   assessment", Google Cloud help) performed by a third-party lab — **avoid them**;
+   the IMAP decision (§4 Q8) already does.
+2. **Every OAuth connection accepts a bring-your-own client id** (and secret,
+   where the provider needs one), per instance, stored as a secret. Nobody is
+   forced through Metistry's registration — including anyone who distrusts it.
+3. **A hosted component is needed only for providers that require a confidential
+   secret or an https redirect** — today Slack, Notion and Atlassian, none of
+   which this program builds. For them, a **token broker** is **designed now and
+   built when the first such provider is scheduled** (§5).
+
+**The token broker, `auth.metistry.app` — designed, not built in this program.**
+
+- **What it holds:** the provider **client secrets**, nothing else. No accounts,
+  no database of users, no logs beyond error counters.
+- **What it does:** the **code → token** exchange and **refresh** exchanges, and
+  nothing more. It never calls a provider's **data** APIs.
+- **How a flow works, with no inbound path to the instance:**
+  1. The instance generates, for this flow only, a PKCE verifier and an
+     **ephemeral key pair** (ECDH P-256; Node's `crypto` and WebCrypto both have
+     it — no dependency). It opens the browser at the provider with
+     `redirect_uri = https://auth.metistry.app/cb/<provider>` and a `state` that
+     carries its public key and a hash of the verifier, sealed by the broker's own
+     key so the broker needs no storage for the redirect.
+  2. The provider redirects to the broker; the broker opens `state`, exchanges the
+     code with the secret, **encrypts the token response to the instance's
+     ephemeral public key** (HKDF + AES-256-GCM), keeps only that ciphertext for
+     five minutes keyed by the verifier's hash, and tells the browser tab it can
+     close.
+  3. The instance **polls** the broker with its verifier, receives the ciphertext,
+     decrypts it, and stores the refresh token in the Keychain. The broker deletes
+     the ciphertext on first read or at five minutes.
+  4. A **refresh** is a POST of the refresh token; the new tokens come back
+     encrypted to a fresh ephemeral key the instance sent with it.
+- **Deployment:** one small open-source file in this repository, deployed to a
+  free-tier edge worker (cost ≈ 0 at any user count); the **deployed build's hash
+  is published** beside the source so anyone can compare; anyone can run their own
+  and point their instance at it.
+- **Availability:** broker down ⇒ refreshes fail ⇒ the connection turns `failed`
+  with both timestamps and raises one access request (C95, C96) — **never data
+  loss**, and bring-your-own-client bypasses the broker entirely.
+- **What the broker CAN see — the honest privacy statement:** the caller's **IP
+  address**, **which provider** and **when**; and, **in memory during an
+  exchange or refresh, the tokens themselves** — it cannot perform the exchange
+  without handling them. It **stores and logs none of it**, never sees the
+  instance id (flows are keyed by random values), and calls no data API. What
+  stops a malicious deploy from doing otherwise is **not** cryptography but
+  openness: the source is small and public, the build hash is published, the
+  scopes requested are the minimum, and the bring-your-own-client path means
+  nobody has to trust it. The design says so where the user connects.
+- **The PWA later:** a flow started from the phone has no loopback to redirect to
+  and needs an https callback — a second use of the same broker, when the PWA
+  gains connection setup (not in this program; connection setup is Mac-only,
+  §2.3).
+
 
 **Until an `rsvp` provider is connected** an invitation request shows *Open in
 Calendar* (Q9). Invitation and message requests are **mirrors** (C108): they
@@ -653,7 +838,8 @@ in-process (reviewed product code). An extension that needs code runs as a
 **process** — a stdio or HTTP MCP child under the supervisor, behind the egress
 allowlist, speaking the bridge wire contract — and is loaded through the same
 registry. **In this program:** the registries and data-only extensions ship;
-process extensions are designed here and built after (§4 Q10).
+process extensions are designed in §5's roadmap and built after this program
+(§4 Q10).
 
 **Edge cases decided now, because each is a design problem if left:**
 
@@ -700,12 +886,12 @@ stay, in Advanced.
 (shadow) using the stage-2 shadow machinery (`assignments.default.shadow`,
 `shadow_agreement`); T9-3 runs PoC-15's confirmatory eval — at least 50 deep items
 authored independently of the rubric — against quality and cost; **T9-4 wires the
-policy into the composer only after the owner ratifies the invariant** (§4 Q1)
-and the eval passes (§4 Q2). The capture door already uses the intent tier and
+policy into the composer only after the eval clears the bar the owner accepted**
+(§4 Q2); the invariant itself is ratified (§4 Q1) and landed by F-0. The capture door already uses the intent tier and
 needs no ruling.
 
-**The amended invariant 4, proposed for the owner to ratify in `CLAUDE.md`**
-(not edited here):
+**The amended invariant 4 — ratified by the owner on 2026-09-26** (§4 Q1); F-0
+lands it in `CLAUDE.md` and in `metistry-build-plan.md` §1, which is kept in sync:
 
 > **4. Routing is bounded by rules and always audited.** Rules the owner writes
 > decide what may run — which tiers and models, what a request may cost, and
@@ -730,7 +916,9 @@ needs no ruling.
 | 0032 | `project_grants.sql` | `projects.grants jsonb` | durable | T1-13 |
 | 0033 | `capture_sessions.sql` | `capture_sessions (id, event_id, started_at, ended_at, media_bytes, transcript_capture_id, folded_at, audio_deleted_at)` — retention state; media stays on the Mac under `.metistry/state/capture/` | derived | T8-4 |
 | 0034 | `calendar_events.sql` | `calendar_events (connection, event_id, ical_uid, series_id, starts_at, ends_at, title, location, organizer, attendees jsonb, self_status, updated_at)` + `sync_state (connection, key, value, updated_at)` — **every** calendar source syncs here, so Today has one read path | derived | T2-11 |
-| 0035 | — | spare | | |
+| 0035 | `event_notify.sql` | `metistry_notify()` and `AFTER INSERT OR UPDATE` triggers on `runs`, `proposals`, `work`, `inbox`, `artifact_comments`, `outbound_messages`, `agents` — `pg_notify` with `{table, op, id}` only (§2.20) | no data | T2-18 |
+| 0036 | — | spare | | |
+| 0037 | — | spare | | |
 
 **No migration needed:** `inbox.source = 'app'` (no CHECK); `runs.kind` values
 `connection_call`, `route`, `config_write`, `access_ceiling`; `runs.meta.outcome`;
@@ -847,7 +1035,7 @@ SHA, task line text, work row `updated_at` (T2-14).
 | --- | --- | --- |
 | `Journal/Standup/<date>.md` | the assistant, `source: standup` | the routine renders a skeleton from `Templates/Standup.md`; **one** assistant turn fills the prose slots — the fold's pattern (`routines/knowledge-fold/run.ts:24–42`); the routine calls no model |
 | `Journal/Brief/<date>.md` | the assistant, `source: morning-brief` | the same pattern; the same single turn writes each meeting's Next Up line |
-| `Journal/<date>.md`, between `<!-- metistry:day -->` markers | `morning-brief` at 6:02 (model-free: plan + meetings); `user` at Close the Day | the reconciler **section operation** |
+| `Journal/<date>.md`, between `<!-- metistry:day -->` markers | `morning-brief` at 7:00 AM (model-free: plan, meetings, the standup's embed); `user` at Close the Day | the reconciler **section operation** |
 | a ticked or deferred line | `user` | the Tick and Defer doors |
 | `Journal/Plan/<tomorrow>.md` | `plan-tomorrow` | on close, or at its scheduled time |
 
@@ -942,7 +1130,8 @@ F-7 freezes one Swift protocol per domain, each method one route of §2.1, over
 `ConsoleCallTransport` (the session transport of F-12 in production, recorded
 fixtures in tests): `NeedsYouStore`, `TodayStore`, `ChatStore`, `ActivityStore`,
 `KnowledgeStore`, `AgentsStore`, `ScheduledStore`, `WorkStore`, `ArtifactsStore`,
-`UsageStore`, `SettingsStore`, `CaptureStore`; plus `ManagementRunner` for §2.2's
+`UsageStore`, `SettingsStore`, `CaptureStore`, `EventsStore` (§2.20), `VaultStore`
+(§2.21); plus `ManagementRunner` for §2.2's
 CLI verbs over the existing `CommandRunner`, and `LiveCaptureClient` for the local
 bridge. Fixtures: one recorded JSON per route under
 `apps/macos/tests/kit/fixtures/<method>-<path>.json`, generated from the
@@ -1002,26 +1191,170 @@ unused since C92 (drop them).
 
 ---
 
+### 2.20 Real-time events — the server tells the client what changed
+
+**Addition A.** Today every client polls: Chat every 1–2.5 s, Activity and Board
+every 10 s (`apps/console/web/app.js:153–179, 1540–1545`), and the Mac would spawn
+a poll per view. A working indicator, an agent's reply, a new request and a
+board move should reach the screen when they happen.
+
+**Server-Sent Events, not WebSocket.** `GET /api/events` returns
+`text/event-stream`.
+
+- **The need is one-way.** Every client *act* already has a route with its gate,
+  its 409 and its idempotency. A WebSocket would be a second, bidirectional door
+  onto the same acts, needing its own gate, its own framing and — in Node — a new
+  dependency or a hand-rolled upgrade handler (U5). Nothing in the design needs a
+  client to *send* over a live channel.
+- **It is plain HTTP.** The same credential — the passkey session cookie, or the
+  local owner token — passes the same reach gate as every other `owner` route
+  (§2.1). It works through the home gateway and every proxy that passes HTTP.
+- **Reconnect is built in.** The browser's `EventSource` reconnects on its own
+  and sends `Last-Event-ID`; the server replays from a ring buffer (the last
+  1,000 events or 10 minutes) and sends `resync` when the gap is larger. A native
+  or iPhone client uses a streaming fetch with the same headers.
+- **The Mac gets the same frames.** Through `metistry console session --stdio`
+  (F-12), a request marked `stream: true` returns `{id, event}` lines until it is
+  cancelled. One subscription per app.
+
+**Ids, never bodies.** An event says *what* changed; the client refetches
+through the route that already enforces who may read it. So the event stream
+opens no new read path (invariant 3) and can leak nothing the routes would not.
+
+**Where events come from.** Migration **0035** adds `AFTER INSERT OR UPDATE`
+triggers calling `pg_notify('metistry_events', …)` with `{table, op, id}` on
+`runs`, `proposals`, `work`, `inbox`, `artifact_comments`, `outbound_messages`
+and `agents` (`last_seen_at` throttled). The console holds one `LISTEN`, maps each
+notice to a typed event, coalesces bursts (250 ms per type), numbers it, and fans
+it out to subscribers. Other processes — the engine, the reconciler, collectors —
+need no change: they already write the tables.
+
+**The catalogue** (frozen by F-1, typed in `packages/core/src/events.ts`); every
+event's reach is `owner`, and none reaches an agent:
+
+| Event | Payload | Emitted when | The client refetches |
+| --- | --- | --- | --- |
+| `run.started`, `run.finished` | `{run_id, kind, turn_id?}` | a `runs` row starts or finishes | `GET /api/runs/:id` |
+| `turn.progress` | `{turn_id}` | a tool call in a turn starts or ends | `GET /api/turns/:turn_id/progress` — the working indicator |
+| `message.new` | `{message_id, thread}` | a reply is stored | `GET /api/messages?since=` |
+| `presence.changed` | `{agent_id}` | a claim, a lease, a heartbeat (throttled) | `GET /api/q/agent_presence` |
+| `needs_you.changed` | `{waiting}` — a count, which is not a body | a proposal is raised, decided, snoozed | `GET /api/proposals?since=` |
+| `work.changed` | `{work_id}` | a task moves or changes | `GET /api/q/board` |
+| `thread.changed` | `{work_id \| artifact_id}` | a room or thread gets a message | the thread route |
+| `capture.new` | `{inbox_id}` | a capture lands or is classified | Activity |
+| `vault.reconciled` | `{changed}` | a reconcile pass finishes with changes | Today, Knowledge |
+| `vault.sync` | `{state}` | a commit, push, pull or conflict (§2.21) | `GET /api/vault/status` |
+| `routine.status`, `sync.status` | `{name}` | a routine or sync run finishes | the Scheduled routes |
+| `connection.health` | `{connection}` | a check or a call fails or recovers | `GET /api/connections/:name` |
+| `config.changed` | `{file}` | a protected write (`config_write`) | the pane showing it |
+| `budget.state` | `{scope}` | a limit is crossed | `GET /api/compute` |
+| `release.available` | `{version}` | the daily Update Check routine finds a newer runtime | `GET /api/identity` |
+| `resync` | `{}` | the replay gap was too large | every visible screen |
+
+**Polling stays**, as the fallback: when the stream is down the clients poll with
+the `since` cursors they have today, and the PWA's offline band (§2.17) is driven
+by the stream's state. Token-by-token streaming of reply prose is **not** in v1 —
+it would put bodies in the stream; `turn.progress` at tool granularity and
+`message.new` carry the waiting states (C16).
+
+### 2.21 Vault git — commits, sync, rollback
+
+**Addition B.** What exists: the reconciler is the **sole committer** (D5,
+`docs/ops/reconciler.md`). It flushes every `METISTRY_COMMIT_INTERVAL_SEC` (30 s)
+into **one commit per `(principal, group)`** with a `Brain-Source:` trailer,
+sweeps edits made outside it (Obsidian, an editor) into one `user` commit, and
+pushes on `METISTRY_PUSH_SCHEDULE` (`@hourly`, `@daily`, `never`, `<n>[s|m|h]`).
+**What is missing:** the push is a bare `git push` (`committer.ts:153`) — nothing
+fetches — so the moment the owner pushes from another clone or edits on GitHub,
+every later push fails as non-fast-forward, `check()` says `degraded`, and
+nothing recovers. There is no rollback at all.
+
+**Commits (T10-1).** One commit per **write, turn, routine run or sweep**: the
+`group` becomes the turn or run id (the turn id already rides in `_meta`), so a
+fold, a brief or one agent turn is one commit. Message: the intent as subject;
+trailers `Brain-Source: <principal>`, `Metistry-Run: <runs.id>`,
+`Metistry-Turn: <turn_id>` where known. A sweep's subject names its files
+(*Edits from Obsidian: 3 notes*).
+
+**Sync policy (T10-2)**, in `.metistry/deployment.yaml` (M18), shown in
+Settings ▸ Instance and in doctor:
+
+```yaml
+vault:
+  push: after_commit        # after_commit | every: 15m | manual
+  pull: every: 5m           # fetch and integrate; never "never" while a remote exists
+```
+
+`METISTRY_PUSH_SCHEDULE` stays an override for one release. `GET /api/vault/status`
+reports branch, ahead/behind, last commit, last push, and any conflict.
+
+**The owner may commit and push at any time (T10-3).** The rules:
+
+1. **Never force, never rewrite published history.** No `--force`, no reset of a
+   pushed commit, ever — a test greps the argv.
+2. **Integrate before every push, and on the pull schedule:** commit pending
+   intents and sweep first, then `git fetch`; if the remote is ahead,
+   fast-forward; if both moved, **rebase only the reconciler's own unpushed
+   commits** onto the remote (they were never published), else merge. The
+   working tree is only ever touched through git.
+3. **A conflict stops, never guesses.** Abort the rebase or merge, stop pushing,
+   set `vault.state = conflict`, and raise **one** Needs You `report` naming the
+   paths and the two sides — resolved in Obsidian or a terminal; the next clean
+   integrate clears it. Writes keep committing locally meanwhile.
+4. **The owner's own commits in the working tree** are ordinary history: the
+   reconciler commits only what its intents and its sweep touch.
+5. After an integrate that changed files, **re-walk** them (the index, tasks,
+   embeddings) and emit `vault.reconciled`.
+
+**Rollback (T10-4…T10-6)** — history is preserved, always:
+
+- **History reads:** `GET /api/knowledge/history?path=` (the file's commits,
+  through the bridge's existing `GET /vault/log`) and
+  `GET /api/knowledge/version?path=&sha=` (a new reconciler `GET /vault/show`).
+- **Restore one file:** `POST /api/knowledge/restore {path, sha, seen_sha}` raises
+  a Needs You request carrying the before and after; **Approve** writes the old
+  bytes as a **new** commit as `user` (*Restore <path> to <date>*), 409 if the
+  file changed meanwhile. Knowledge shows the request inline — answering it there
+  answers it in Needs You (the drafts pattern, screen 10 §3.1).
+- **Roll back:** `metistry vault rollback <commit> | --to <date> | --file <path>`
+  (M18) or the app, through `POST /api/vault/rollback` (reach `local`), raises a
+  Needs You request with the preview (files, commits undone); **Approve** runs a
+  reconciler `POST /vault/revert` that makes **revert commits** — `git revert`
+  for a commit, or one commit restoring every changed path's content at `<date>`.
+  Undo is reverting the revert.
+- **What a rollback touches:** files only. Postgres is derived (invariant 1):
+  the re-walk rebuilds the index, tasks and embeddings from the new tree; durable
+  rows (decisions, feedback, grants) are not rolled back, and a row that points at
+  a file the rollback removed turns `absent`.
+- **Boundaries, enforced at the tool:** a console-initiated revert **refuses every
+  `.metistry/` protected path**; reverting configuration needs the CLI's owner
+  caller class and an explicit `--include-config` — the same protected-write door
+  as any other config change. **No agent principal can roll back or restore**: no
+  tool exposes it, the rollback route is `local`, and the reconciler refuses the
+  revert operation for any principal but `user`.
+
+---
+
 ## 3. Execution plan
 
 ### 3.1 Waves, tracks and the graph
 
-**Six waves, a release at the end of each, nine parallel tracks after a freeze.**
+**Six waves, a release at the end of each, ten parallel tracks after a freeze.**
 
 | Wave | Goal | Agent-days | Checkpoint, at ~12 agents |
 | --- | --- | --- | --- |
-| **W0** Freeze | every interface in §2 as documents and types; the transport; the reach gate; tokens | 37 | end of week 1 |
-| **W1** Foundations | data, the first doors, the scheduler, per-instance secrets, the actor model, the Mac shell | 99 | week 3 |
-| **W2** The day | Needs You, Today, Chat, Activity; Scheduled routes and the day's routines; connections P1 | 107 | week 4½ |
-| **W3** Work and agents | Knowledge, Agents, Scheduled, Board, Projects, Artifacts, Run detail, the Settings window; connections P2; sessions; PR reviews; the recorder | 92.5 | week 6 |
-| **W4** Reach | connections P3, calendar and mail, the remaining panes, the capture bar, the router wiring | 75 | week 7 |
-| **W5** Acceptance | the owner's walkthrough, the doc sweep, the 1.0 decision | 1 | week 7½ |
+| **W0** Freeze | every interface in §2 as documents and types; the transport; the reach gate; tokens; the ratified wording | 38 | end of week 1 |
+| **W1** Foundations | data, the first doors, the scheduler, per-instance secrets, the actor model, the Mac shell, live events, commits and sync | 114 | week 3 |
+| **W2** The day | Needs You, Today, Chat, Activity; Scheduled routes and the day's routines; connections P1; Linear; file history and rollback | 128.5 | week 5 |
+| **W3** Work and agents | Knowledge, Agents, Scheduled, Board, Projects, Artifacts, Run detail, the Settings window; connections P2; ICS and CalDAV; sessions; PR reviews; the recorder | 105 | week 6½ |
+| **W4** Reach | connections P3, Google Calendar, IMAP, the remaining panes, the capture bar, the router wiring | 65 | week 7½ |
+| **W5** Acceptance | the owner's walkthrough, the doc sweep, the 1.0 decision | 1 | week 8 |
 
 **Waves are checkpoints, not start gates.** A ticket starts the moment its
 dependencies have merged; the wave says which release it lands in. The
 **critical path** is F-3 → T4-1 → T4-2 → T4-8a → T4-8b → T4-9 → T4-10 → T4-11 —
-secrets into connections P1–P3, **35 agent-days** — and 411 agent-days over ~12
-concurrent agents is ≈ 34 working days, so the two limits agree on **≈ 7 weeks**.
+secrets into connections P1–P3, **35 agent-days** — and 452 agent-days over ~12
+concurrent agents is ≈ 38 working days, so the plan runs **≈ 8 weeks**.
 
 ```mermaid
 flowchart LR
@@ -1033,6 +1366,8 @@ flowchart LR
   W0 --> T7["T7 PWA"]
   W0 --> T8["T8 capture"]
   W0 --> T9["T9 router"]
+  W0 --> T10["T10 vault git"]
+  T10 --> T6
   T1 --> T2
   T1 --> T3
   T2 --> T6["T6 screens"]
@@ -1071,11 +1406,11 @@ agent's pass, per the PR close rule; the owner reviews at checkpoints.
 
 | Wave | Tickets (running concurrently unless a dependency says otherwise) |
 | --- | --- |
-| W0 | F-1…F-14, T1-4, T1-5, T7-1, T8-1 |
-| W1 | T1-1, T1-2, T1-3, T1-6, T1-7, T1-8, T1-9, T1-11, T1-12, T1-14, T1-15 · T2-1, T2-2, T2-4 → T2-5, T2-6, T2-15, T2-16, T2-17 · T3-1, T3-2, T3-4, T3-9 · T4-1 → T4-2, T4-3; T4-4, T4-5, T4-6, T4-20, T4-21 · T5-1, T5-2, T5-3 · T7-2 · T9-1 |
-| W2 | T1-10, T1-13 · T2-3, T2-7, T2-8, T2-9, T2-10, T2-11, T2-14 · T3-3, T3-5 → T3-6, T3-7, T3-12 · T4-7, T4-8a, T4-8b, T4-18 · T5-4a, T5-4b, T5-5, T5-6 · T6-1a, T6-1b, T6-2, T6-3 · T7-3a, T7-3b · T9-2 |
-| W3 | T2-12, T2-13 · T3-8, T3-10, T3-11 · T4-9, T4-12, T4-19, T4-22, T4-23 · T6-4…T6-11 · T7-4, T7-5 · T8-2a → T8-2b, T8-6 · T9-3 |
-| W4 | T4-10 → T4-11, T4-14; T4-13, T4-15 → T4-17; T4-16 · T6-12, T6-13a, T6-13b, T6-14, T6-15, T6-16 · T7-6 · T8-3, T8-4, T8-5, T8-7 · T9-4 (gated on §4 Q1, Q2) |
+| W0 | F-0, F-1…F-14, T1-4, T1-5, T7-1, T8-1 |
+| W1 | T1-1, T1-2, T1-3, T1-6, T1-7, T1-8, T1-9, T1-11, T1-12, T1-14, T1-15 · T2-1, T2-2, T2-4 → T2-5, T2-6, T2-15, T2-16, T2-17, T2-18 · T3-1, T3-2, T3-4, T3-9 · T4-1 → T4-2, T4-3; T4-4, T4-5, T4-6, T4-20, T4-21 · T5-1, T5-2, T5-3 · T7-2 · T9-1 · T10-1 → T10-3, T10-2 |
+| W2 | T1-10, T1-13 · T2-3, T2-7, T2-8, T2-9, T2-10, T2-11, T2-14 · T3-3, T3-5 → T3-6, T3-7, T3-12 · T4-7, T4-8a → T4-8b, T4-24; T4-18 · T5-4a, T5-4b, T5-5, T5-6, T5-7 · T6-1a, T6-1b, T6-2, T6-3 · T7-3a, T7-3b, T7-7 · T9-2 · T10-4 → T10-5, T10-6 |
+| W3 | T2-12, T2-13 · T3-8, T3-10, T3-11 · T4-9, T4-12 → T4-13, T4-19, T4-22, T4-23, T4-25, T4-26 · T6-4…T6-11 · T7-4, T7-5 · T8-2a → T8-2b, T8-6 · T9-3 · T10-7 |
+| W4 | T4-10 → T4-11, T4-14; T4-15 → T4-17 · T6-12, T6-13a, T6-13b, T6-14, T6-15, T6-16 · T7-6 · T8-3, T8-4, T8-5, T8-7 · T9-4 (merges after the eval clears its bar) |
 | W5 | X-1 |
 
 ### 3.3 The tickets
@@ -1085,15 +1420,54 @@ the XL work is split). Every ticket also meets U1–U10.
 
 #### W0 — Freeze
 
+**F-0 · Conventions: the ratified wording** · S · deps —
+*Spec:* The owner ratified two sentences on 2026-09-26 (§4 Q1, Q3). **The
+coordinator opens this PR, not an implement agent** — `CLAUDE.md` is the owner's
+file — one line per rule, nothing else in it. Invariant 4 is also stated in
+`metistry-build-plan.md` §1, which `CLAUDE.md` says is kept in sync, so the same PR
+changes both:
+```diff
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ invariants
+-4. **The router is deterministic.** No model decides which model to use.
++4. **Routing is bounded by rules and always audited.** Rules the owner writes
++   decide what may run — which tiers and models, what a request may cost, and
++   every hard limit — and they always win: commands, overrides and budgets come
++   first. Inside those bounds a local policy may choose the operations and the
++   tier for a request; it can never choose outside them, every choice is
++   recorded with its reasons, and with the policy absent or failing every
++   request takes the rules' default.
+@@ Packages
+   tools, secret redaction by default — and Swift TCC bridges implement the
+   spec, held to it by the same conformance tests.
++- Preview-then-confirm on destructive tools binds every bridge; a proxied
++  connection tool's On · Ask · Off is the owner's per-tool policy and defaults
++  to Ask.
+--- a/metistry-build-plan.md
++++ b/metistry-build-plan.md
+@@ §1 invariants
+-4. **The router is deterministic.** No model decides which model to use.
++4. **Routing is bounded by rules and always audited.** (the same text as above)
+```
+*Files:* `CLAUDE.md`, `metistry-build-plan.md`.
+*Tests:* — (prompt-lint and path-case stay green).
+*Accept:* the owner merges it; T9-4 and T4-9 cite it.
+
+
 **F-1 · Client API contract v1** · L · deps —
 *Spec:* Write `docs/ops/client-api.md` from §2.1: every route in the table with
 method, path, reach, principals, body, response, errors, idempotency, cursor and
 409 semantics; the action set; §2.2's management-only list; §2.3's table; the
-versioning rule. Move `docs/ops/console-api.md`'s sections into it and leave that
-file as a pointer. Add `packages/core/src/client-api.ts` exporting the table as
-data, and `api_version` to `GET /api/identity` and `/health`.
+versioning rule; **§2.20's event catalogue** as `packages/core/src/events.ts`
+(types and reach) and the `events` capability. Move `docs/ops/console-api.md`'s
+sections into it and leave that file as a pointer. Add
+`packages/core/src/client-api.ts` exporting the table as data — **landed in the
+first commit**, because F-7 and F-13 start from it — and `api_version` to
+`GET /api/identity` and `/health`.
 *Files:* `docs/ops/client-api.md`, `docs/ops/console-api.md`,
-`packages/core/src/client-api.ts`, `apps/console/src/server.ts`.
+`packages/core/src/client-api.ts`, `packages/core/src/events.ts`,
+`apps/console/src/server.ts`.
 *Tests:* a conformance test — every route the server dispatches is in the table
 and every table row is served; `api_version` present.
 *Accept:* the table in code and the document agree line for line.
@@ -1112,8 +1486,10 @@ change: the implementation is T4-6.
 *Spec:* §2.6 and §2.7. Add manifest schemas for `connection-type` and for a
 connection file, the closed capability and field-kind vocabularies, a generic
 `Registry<Kind>` interface (load from directories, overlay by name, validate,
-report skips), and `docs/ops/extensions.md` with the kinds table, the closed
-list and the enums-to-registries list.
+report skips), the **OAuth client model** for the `oauth` field kind
+(`{client_id, pkce, redirect: loopback | broker, bring_your_own: allowed}`,
+§2.6), and `docs/ops/extensions.md` with the kinds table, the closed list and the
+enums-to-registries list.
 *Files:* `packages/core/src/manifest.ts`, `packages/core/src/registry.ts`,
 `packages/core/src/connections.ts`, `docs/ops/extensions.md`.
 *Tests:* schema tests incl. **an unknown capability or field kind is refused**;
@@ -1190,8 +1566,10 @@ tests.
 **F-12 · The Mac session transport** · M · deps F-11 —
 *Spec:* Measure one `console call` first and record it. Add
 `metistry console session --stdio`: one long-lived child; each line
-`{id, method, path, body?, idempotency_key?}` in, `{id, status, body}` out; the
-local owner token resolved once and never printed. Implement
+`{id, method, path, body?, idempotency_key?, stream?}` in, `{id, status, body}`
+out — and, for `stream: true` (`GET /api/events`), `{id, event}` frames until a
+`{id, cancel: true}` (§2.20); the local owner token resolved once and never
+printed. Implement
 `ConsoleCallTransport` over it in MetistryKit, with restart on child exit.
 *Files:* `packages/cli/src/console-client.ts`, `packages/cli/src/main.ts`,
 `apps/macos/sources/kit/console-api.swift`.
@@ -1475,6 +1853,19 @@ protected-path write, so Activity shows it whichever door made it.
 *Tests:* U2.
 *Accept:* —
 
+**T2-18 · Live events** · L · W1 · deps F-1, F-6 —
+*Spec:* §2.20: migration 0035's notify triggers; one `LISTEN` in the console;
+`GET /api/events` (`text/event-stream`, reach `owner`) with typed events from
+`packages/core/src/events.ts`, coalescing, a ring buffer and `Last-Event-ID`
+replay, `resync`, a heartbeat; the daily **Update Check** routine emitting
+`release.available`.
+*Files:* `db/migrations/0035_event_notify.sql`, `apps/console/src/events.ts`,
+`apps/console/src/server.ts`, `routines/update-check/`.
+*Tests:* U2's four on the stream; **a payload never carries a body — only ids and
+counts; an agent bearer is refused; a reconnect with `Last-Event-ID` replays
+exactly the missed events**.
+*Accept:* a tool call in a chat turn reaches a subscriber within a second.
+
 #### T3 — Scheduled and routines
 
 **T3-1 · The scheduler** · L · W1 · deps F-4 —
@@ -1489,12 +1880,17 @@ the Mac slept.
 
 **T3-2 · The overlay** · M · W1 · deps F-4 —
 *Spec:* Load and validate `scheduled.yaml`; add it to `CALLER_AUTHORITY.console`;
-manifests gain `display_name`, `config` fields and collector `needs_you` rules;
-Inbox Sort and Usage Rollup present as routines.
+manifests gain `display_name`, `config` fields and collector `needs_you` rules,
+and carry **§2.5's default schedules as answered**: Morning Brief working days
+7:00 AM, Standup working days 8:00 AM, Knowledge Fold 9:00 PM, Tomorrow's Plan
+`eve_of_working_days` 11:00 PM, Reply Review 11:00 PM, Weekly Review Sunday
+6:00 PM, Inbox Sort 5 min, Usage Rollup hourly; Inbox Sort and Usage Rollup
+present as routines.
 *Files:* `packages/core/src/scheduled.ts`, `apps/reconciler/src/paths.ts`,
 `routines/*/manifest.yaml`, `collectors/*/manifest.yaml`.
-*Tests:* **the console still cannot write any other protected path**.
-*Accept:* —
+*Tests:* **the console still cannot write any other protected path**; each
+default resolves to its first occurrence correctly.
+*Accept:* Scheduled lists the eight defaults at those times.
 
 **T3-3 · Scheduled routes and doors** · M · W2 · deps T3-1, T3-2, F-13 —
 *Spec:* §2.1's Scheduled rows, reach as listed; Reset deletes the entry; Run Now
@@ -1504,35 +1900,48 @@ runs the runner's tick for one component under the budget preflight.
 is never written; a paused routine's Run Now says why**.
 *Accept:* F-7's Scheduled fixtures match.
 
-**T3-4 · Profile facts and the standup move** · M · W1 · deps F-4 —
-*Spec:* §2.5: `working_days` follows the profile until set; read `standup_days` /
-`standup_time` once into the Standup routine; doctor notes the keys are no longer
-read; the seeded profile drops them.
+**T3-4 · Profile facts and the standup move** · M · W1 · deps F-4, T1-8 —
+*Spec:* §2.5 (§4 Q13): `working_days` follows the profile until set; read
+`standup_days` / `standup_time` once into the Standup routine's entry; then raise
+**one proposal** — *Tidy Me/profile.md* — with the before and after removing the
+two keys; **Approve** writes it as `user` through the proposal path (refused if
+the file changed since); **Decline** leaves them, ignored, with one info-level
+doctor line. The seeded profile drops them.
 *Files:* `packages/core/src/scheduled.ts`, `routines/plan-tomorrow/run.ts`,
-`seed/vault/Me/profile.md`, `packages/cli/src/doctor.ts`.
-*Tests:* a profile with no working days → the routine is absent, not guessed.
+`seed/vault/Me/profile.md`, `packages/cli/src/doctor.ts`, `apps/console/src/server.ts`.
+*Tests:* a profile with no working days → the routine is absent, not guessed;
+**nothing edits `Me/profile.md` before Approve**; the proposal is raised once.
 *Accept:* —
 
 **T3-5 · The Standup routine** · M · W2 · deps T3-1 —
-*Spec:* §2.13: skeleton from `Templates/Standup.md`, one assistant turn, writes
-`Journal/Standup/<date>.md` as `source: standup`.
+*Spec:* §2.13: working days 8:00 AM; skeleton from `Templates/Standup.md`, one
+assistant turn, writes `Journal/Standup/<date>.md` as `source: standup`; emits
+`routine.status` so Today swaps *Standup at 8:00 AM* for the file.
 *Files:* `routines/standup/`, `routines/index.ts` (until T4-5).
 *Tests:* nothing written without working days.
 *Accept:* —
 
 **T3-6 · The Morning Brief** · L · W2 · deps T2-6, T3-5 —
-*Spec:* §2.13: `Journal/Brief/<date>.md` with Next Up lines from one turn; the
-model-free daily-note section; `Journal/Brief` in `JOURNAL_MACHINE_DIRS` and the
-seed; prose legal in `Templates/Brief.md` and `Templates/Standup.md` (C103).
+*Spec:* §2.13, §2.5: working days 7:00 AM — **before** the standup, so the brief
+presents it by embed (`![[Journal/Standup/<date>]]`), never by copy;
+`Journal/Brief/<date>.md` with Next Up lines from one turn; the model-free
+daily-note section; `Journal/Brief` in `JOURNAL_MACHINE_DIRS` and the seed; prose
+legal in `Templates/Brief.md` and `Templates/Standup.md` (C103).
 *Files:* `routines/morning-brief/`, `packages/core/src/instance-layout.ts`,
 `seed/vault/`.
-*Tests:* **no generated text is ever written between the markers**.
+*Tests:* **no generated text is ever written between the markers**; the brief
+renders correctly when the standup file does not exist yet.
 *Accept:* —
 
-**T3-7 · Tomorrow's Plan** · S · W2 · deps T3-1 —
-*Spec:* 7 PM default; the close trigger.
+**T3-7 · Tomorrow's Plan after the fold** · M · W2 · deps T3-1 —
+*Spec:* §2.5: `eve_of_working_days` at 11:00 PM, after the 9:00 PM fold; link
+tonight's `Journal/Fold/<date>.md` and list its `decisions:` frontmatter
+(model-free); the old hourly evening gate becomes a guard that records
+`skipped:not_a_working_eve`; the Close the Day trigger renders early and the
+11:00 PM run supersedes it.
 *Files:* `routines/plan-tomorrow/`.
-*Tests:* a second close re-renders.
+*Tests:* a second close re-renders; a Friday 11:00 PM run plans Monday; a Saturday
+run is skipped with its reason.
 *Accept:* —
 
 **T3-8 · Agent routines** · L · W3 · deps T4-6, T3-3 —
@@ -1662,11 +2071,15 @@ replayed confirm token is refused**.
 *Accept:* —
 
 **T4-10 · Connections P3: HTTP, OAuth, generated tools** · L · W4 · deps T4-9 —
-*Spec:* HTTP with the auth shortcuts and OAuth (browser flow driven by the CLI or
-app, never the assistant); generated tools for API, Feed, Files; the permissions
-row *Through Metistry*.
-*Files:* `packages/connections`.
-*Tests:* **the assistant cannot start an OAuth flow**.
+*Spec:* HTTP with the auth shortcuts; **OAuth as a public client** — PKCE, a
+loopback redirect the Mac app opens, the client id from the connection type's
+manifest, and a per-instance **bring-your-own client id** (and secret) override
+stored as a secret (§2.6); the broker redirect mode is modelled but not built;
+generated tools for API, Feed, Files; the permissions row *Through Metistry*.
+*Files:* `packages/connections`, `packages/cli`.
+*Tests:* **the assistant cannot start an OAuth flow; the loopback listener binds
+127.0.0.1 only and closes after one callback; `state` and the PKCE verifier are
+checked**.
 *Accept:* —
 
 **T4-11 · Targets and syncs as connections** · L · W4 · deps T4-10 —
@@ -1685,33 +2098,34 @@ move into its connection type.
 secret when it carries a token**.
 *Accept:* Today reads one table for every source.
 
-**T4-13 · Calendar: CalDAV with replies** · L · W4 · deps T4-12 —
-*Spec:* `caldav` type: read, `write_own`, `rsvp` by changing the owner's
-`PARTSTAT`.
-*Files:* `packages/connections`.
+**T4-13 · Calendar: CalDAV with replies** · L · W3 · deps T4-12 —
+*Spec:* §2.6 (§4 Q7, first): `caldav` type with an **app password** as a secret —
+iCloud, Fastmail, any RFC 6638 server: read, `write_own`, `rsvp` by changing the
+owner's `PARTSTAT`. Known-service entries for iCloud and Fastmail name the server
+URL; a Google CalDAV URL is refused with *Google needs sign-in with Google*.
+*Files:* `packages/connections`, `seed/connection-types/`.
 *Tests:* against a local CalDAV fixture server; **only the owner's own attendee
 line changes**.
-*Accept:* —
+*Accept:* the owner's iCloud or Fastmail calendar replies to an invitation.
 
-**T4-14 · Google Calendar** · L · W4 · deps T4-10, T4-12 —
-*Spec:* `google-calendar` type: read, `write_own`, `rsvp` via the self attendee's
-`responseStatus` with `attendeesOmitted`.
-*Files:* `packages/connections`.
+**T4-14 · Google Calendar through Metistry's client** · L · W4 · deps T4-10, T4-12 —
+*Spec:* §2.6 (§4 Q7, second): `google-calendar` type using the shipped public
+client id (or the owner's own): read, `write_own`, `rsvp` via the self attendee's
+`responseStatus` with `attendeesOmitted`; the sheet says *Google hasn't verified
+this app* while that is true.
+*Files:* `packages/connections`, `seed/connection-types/google-calendar/`.
 *Tests:* recorded API fixtures; **only `responseStatus` of the self attendee is
-sent**. Verify the refresh-token lifetime of the owner's client.
-*Accept:* the owner has created the OAuth client (§3.4).
+sent**; a bring-your-own client id overrides the shipped one.
+*Accept:* the maintainer's client exists and is published (§3.4).
 
 **T4-15 · Mail: IMAP** · L · W4 · deps T4-8a —
-*Spec:* `imap` type: read, `draft` by APPEND to Drafts; no SMTP.
-*Files:* `packages/connections`.
-*Tests:* **no code path can send**.
+*Spec:* §2.6 (§4 Q8): `imap` type with an app password: read, `draft` by APPEND to
+Drafts; no SMTP. A Gmail known-service entry explains the 2-Step Verification +
+app password requirement.
+*Files:* `packages/connections`, `seed/connection-types/`.
+*Tests:* **no code path can send**; confirm Gmail IMAP with an app password on the
+owner's account.
 *Accept:* —
-
-**T4-16 · Mail: Gmail** · L · W4 · deps T4-10 —
-*Spec:* `gmail` type: read, `draft` via `users.drafts.create`.
-*Files:* `packages/connections`.
-*Tests:* **`drafts.send` and `messages.send` are unreachable**.
-*Accept:* built only if §4 Q8 chooses it; otherwise its 5 days go to the buffer.
 
 **T4-17 · Invitation and message requests** · M · W4 · deps T4-12, T4-15, T1-8 —
 *Spec:* Syncs raise `invitation` (self status needs-action, organizer not the
@@ -1770,6 +2184,40 @@ one request per failed secret naming its dependents.
 *Tests:* one card for an agent ask and a GitHub request on the same PR.
 *Accept:* —
 
+**T4-24 · Linear: the connection and its sync** · L · W2 · deps T4-8a, T4-2, T1-8 —
+*Spec:* §2.6 (§4 Q22): a `tracker` connection type `linear` with a personal API
+key secret (`Authorization: <API_KEY>`, `api.linear.app` the only host); a sync
+reconciling issues assigned to the owner into `work` rows
+(`external_ref linear:<KEY>`, meta state, priority, url), as `github-state` does
+for GitHub; newly assigned issues raise `task` mirror requests that clear when
+unassigned or closed; **Add to Today** captures `- [ ] <title> do <today>
+linear:<KEY>` through the capture service (source `linear`, idempotent per issue).
+*Files:* `seed/connection-types/linear/`, `collectors/linear/`,
+`packages/connections`.
+*Tests:* recorded GraphQL fixtures; **the key never leaves for another host; a
+second Add to Today returns the first capture**.
+*Accept:* the owner's assigned issues appear on the Board and in Needs You.
+
+**T4-25 · Linear: a task becomes an issue** · M · W3 · deps T4-24, T2-5 —
+*Spec:* From a task line, *Send to Linear*: `POST /api/trackers/linear/issues`
+creates the issue (idempotent by task key), then `POST
+/api/vault-tasks/:task_key/link {ref}` writes `linear:<KEY>` on the line — two
+doors, one service each, the second 409-guarded.
+*Files:* `apps/console/src/`, `packages/connections`.
+*Tests:* **a link on a changed line is refused and the issue is not created
+twice**.
+*Accept:* —
+
+**T4-26 · Linear: completion both ways** · M · W3 · deps T4-24, T2-4 —
+*Spec:* Ticking a `linear:` task offers *Close <KEY> in Linear* (setting: ask ·
+always · never; *always* is the client making the second call);
+`POST /api/trackers/linear/issues/:key/complete`. The other way, an issue closed
+in Linear shows *Done in Linear* on its Today row with a one-click Tick — **the
+sync never writes the owner's note**.
+*Files:* `apps/console/src/`, `collectors/linear/`.
+*Tests:* **no sync path writes a vault file**.
+*Accept:* —
+
 #### T5 — MetistryKit, the shell, Needs You
 
 **T5-1 · The stores** · L · W1 · deps F-7, F-12 —
@@ -1824,6 +2272,15 @@ one-line facts, **Raise** to Settings ▸ Compute (C138).
 *Files:* `usage-view.swift`.
 *Tests:* no projection drawn.
 *Accept:* §2.18.
+
+**T5-7 · Live events on the Mac** · M · W2 · deps F-12, T2-18 —
+*Spec:* §2.20: one `EventsStore` subscription over the session transport; stores
+refetch on their events; the Needs You row, the working indicator and Today
+update live; polling resumes while the stream is down.
+*Files:* `apps/macos/sources/kit/stores/events-store.swift`.
+*Tests:* against a fixture stream: an event invalidates exactly its store; a
+dropped stream falls back to polling and recovers.
+*Accept:* §2.18 (the badge announces a change once).
 
 #### T6 — Screens
 
@@ -2038,6 +2495,15 @@ the 409; the *Can't reach Metistry* band.
 called anyway**.
 *Accept:* as above.
 
+**T7-7 · Live events in the PWA** · M · W2 · deps T2-18, T7-2 —
+*Spec:* §2.20: `EventSource` on `GET /api/events`; views refetch on events;
+polling with `since` cursors while it is down; the offline band follows the
+stream's state.
+*Files:* `apps/console/web/app.js`, `apps/console/web/sw.js`.
+*Tests:* the poll timers stop while the stream is healthy and restart when it
+drops.
+*Accept:* as T7's.
+
 #### T8 — Capture
 
 **T8-1 · The TCC enum** · S · W0 · deps —
@@ -2127,12 +2593,78 @@ rubric; quality and cost against today's router.
 *Tests:* the harness runs offline against recorded fixtures.
 *Accept:* a report the owner can read (§4 Q2).
 
-**T9-4 · Wire the composer** · M · W4 · deps T9-3, **§4 Q1 and Q2** —
+**T9-4 · Wire the composer** · M · W4 · deps T9-3, F-0 —
 *Spec:* §2.8: the policy serves `POST /message`; commands, the picker and budgets
-still win.
+still win. The invariant is ratified (F-0); what gates the merge is the eval
+clearing the bar the owner accepted (§4 Q2).
 *Files:* `apps/console/src/router.ts`, `apps/console/test/invariant4.test.ts`.
 *Tests:* the invariant tests follow the ratified wording.
-*Accept:* not merged before both answers.
+*Accept:* not merged before T9-3's report clears the bar.
+
+#### T10 — Vault git
+
+**T10-1 · One commit per act** · M · W1 · deps —
+*Spec:* §2.21: the commit `group` becomes the turn or run id, so a write, a turn,
+a routine run or a sweep is one commit; trailers `Brain-Source:`,
+`Metistry-Run:`, `Metistry-Turn:`; a sweep's subject names its files.
+*Files:* `apps/reconciler/src/committer.ts`, `packages/mcp-brain/src/knowledge-write.ts`.
+*Tests:* two turns in one flush window make two commits; trailers present.
+*Accept:* `git log` reads as a list of acts.
+
+**T10-2 · Sync policy and status** · M · W1 · deps F-6 —
+*Spec:* §2.21: the `vault:` block in `deployment.yaml` (push after_commit · every
+N · manual; pull every N), `metistry vault settings` (M18), the env override kept
+one release; `GET /api/vault/status`; a doctor row (ahead, behind, last push,
+conflict); `vault.sync` events.
+*Files:* `packages/core/src/deployment.ts`, `apps/reconciler/src/main.ts`,
+`apps/console/src/server.ts`, `packages/cli`.
+*Tests:* each policy schedules as written; U2 on the status route.
+*Accept:* Settings ▸ Instance can show it (T10-7).
+
+**T10-3 · Integrate before pushing** · L · W1 · deps T10-1 —
+*Spec:* §2.21's five rules: commit and sweep, `fetch`, fast-forward, rebase only
+the reconciler's own unpushed commits or merge, **never force**, a conflict stops
+and raises one `report`, re-walk what changed.
+*Files:* `apps/reconciler/src/{committer,git}.ts`.
+*Tests:* against a real bare remote: **the owner pushes from another clone while
+the reconciler holds unpushed commits → both histories survive; the owner commits
+in the working tree → nothing is lost; a conflicting edit → no push, one request,
+nothing overwritten; no `--force` or `reset --hard` ever appears in git's argv**.
+*Accept:* doctor never shows a permanent non-fast-forward again.
+
+**T10-4 · File history** · M · W2 · deps T10-1 —
+*Spec:* A reconciler `GET /vault/show {path, sha}`; `GET /api/knowledge/history`
+and `GET /api/knowledge/version` over it and the existing `GET /vault/log`.
+*Files:* `apps/reconciler/src/{server,vault}.ts`, `apps/console/src/knowledge-routes.ts`.
+*Tests:* **a protected or non-vault path is refused; a bad revision is refused**.
+*Accept:* —
+
+**T10-5 · Restore a file** · M · W2 · deps T10-4, T1-8 —
+*Spec:* `POST /api/knowledge/restore {path, sha, seen_sha}` raises a Needs You
+request with the before and after; Approve writes the old bytes as a new commit
+as `user`; 409 if the file changed.
+*Files:* `apps/console/src/`.
+*Tests:* **no restore happens before Approve; an agent credential is refused**.
+*Accept:* Knowledge shows the request inline.
+
+**T10-6 · Roll back** · L · W2 · deps T10-3, T10-4 —
+*Spec:* `metistry vault rollback <commit|--to date|--file path>` and
+`POST /api/vault/rollback` (reach `local`) raise a Needs You request with the
+preview; Approve runs a reconciler `POST /vault/revert` making revert commits;
+a re-walk follows; config paths only through the CLI with `--include-config`.
+*Files:* `apps/reconciler/src/`, `apps/console/src/`, `packages/cli/src/vault.ts`.
+*Tests:* **the console-initiated revert refuses every `.metistry/` protected path;
+the reconciler refuses revert for any principal but `user`; a passkey session is
+refused (`local`); history is never rewritten; reverting the revert restores the
+state**.
+*Accept:* rollback of a day of agent writes, then its undo, on a scratch instance.
+
+**T10-7 · History in the app** · M · W3 · deps T10-2, T10-4, T5-3 —
+*Spec:* Settings ▸ Instance gains *History* (sync policy, ahead/behind, last push,
+conflict, Roll Back…); a Knowledge page gains its history with *Restore*.
+*Files:* `settings-panes/instance-pane.swift`, `knowledge-view.swift`.
+*Tests:* §2.18; Roll Back names what it will undo.
+*Accept:* as T6's.
 
 #### W5 — Acceptance
 
@@ -2140,100 +2672,192 @@ still win.
 `cli.md`, `client-api.md`, the design record's stale sentences (K19) reported to
 the designer.
 
-### 3.4 What only the owner does, by wave
+### 3.4 What only the owner (and the maintainer) does, by wave
 
-| Wave | The owner |
+| When | The owner |
 | --- | --- |
-| before W0 | answers §4 (one word is enough: "defaults") |
+| **now, before W1** (maintainer) | creates the **Metistry Google OAuth client** once in Folded Space Labs' Google Cloud project — type *Desktop*, scope `calendar.events` only — publishes the consent screen to **In production**, puts a homepage and a privacy policy on **metistry.ai**, and submits brand and sensitive-scope verification; verification takes weeks, so it starts now (§2.6). No user ever repeats this |
+| end of W0 | merges F-0 (the ratified `CLAUDE.md` wording) |
 | end of every wave | reviews the checkpoint, installs the release on the live instance (agents never touch it) |
-| W1 | runs `metistry secrets migrate-scope` on each instance (Keychain prompts); checks Scheduled's migrated defaults |
-| W2 | re-grants Calendar if the eventkit helper's signature changed |
-| W3 | mints a fine-grained GitHub PAT with pull-request write on the watched repos and stores it with `metistry secrets set github_write`; reviews the session-fold prompt |
-| W4 | grants Screen Recording, Microphone and Audio Capture on each Mac; records one real meeting for the recorder; creates the Google OAuth client if §4 Q7 or Q8 chose Google (and publishes it if tokens expire in testing); makes app passwords for IMAP/CalDAV if chosen; stores them with `metistry secrets set` |
-| W5 | the acceptance walkthrough; ratifies the `CLAUDE.md` sentences (invariant 4, the bridge contract); decides 1.0 |
+| W1 | runs `metistry secrets migrate-scope` on each instance (Keychain prompts); sets the vault push policy (`metistry vault settings`) |
+| W2 | answers the *Tidy Me/profile.md* proposal; re-grants Calendar if the eventkit helper's signature changed; creates a **Linear personal API key** and stores it (`metistry secrets set linear_api_key`) on the second instance |
+| W3 | mints a fine-grained GitHub PAT with pull-request write and stores it as `github_write`; creates an **iCloud or Fastmail app password** for CalDAV; reviews the session-fold prompt |
+| W4 | grants Screen Recording, Microphone and Audio Capture on each Mac; records one real meeting; creates a **Gmail app password** (2-Step Verification on) for IMAP; connects Google Calendar through the shipped client |
+| W5 | the acceptance walkthrough; decides 1.0 |
+| when the first confidential-only provider is scheduled (after this program) | deploys the token broker to `auth.metistry.app` and publishes its build hash (§2.6, §5) |
 
 ### 3.5 Effort
 
-| Wave | Agent-days |
-| --- | --- |
-| W0 | 37 |
-| W1 | 99 |
-| W2 | 107 |
-| W3 | 92.5 |
-| W4 | 75 |
-| W5 | 1 |
-| **Total** | **≈ 411** (±30 %) |
+| Wave | Tickets | Agent-days |
+| --- | --- | --- |
+| W0 | 19 | 38 |
+| W1 | 40 | 114 |
+| W2 | 35 | 128.5 |
+| W3 | 28 | 105 |
+| W4 | 17 | 65 |
+| W5 | 1 | 1 |
+| **Total** | **140** | **≈ 452** (±30 %) |
 
-**Revised from ≈ 322.** Added by the 2026-09-26 rulings: the freeze documents
-and types (≈ 21), calendar and mail connection types (≈ 25), the dynamic router
-(12.5), the extension registries and the actor model (≈ 10), the reach gate and
-the remote table (5), retention and re-review (2.5); and ≈ 13 from splitting work
-into self-contained tickets. Nothing was removed; T4-16 (Gmail) returns 5 days if
-§4 Q8 keeps its default. **≈ 7
-weeks of calendar time at ~12 concurrent implement agents** (§3.1); more agents
-do not shorten it much, because the critical path is 35 agent-days.
+**Revised from ≈ 411.** Added by the answers and the additions: real-time events
+(10: T2-18, T5-7, T7-7), vault git (22.5: T10), Linear (10: T4-24…T4-26), Tomorrow's
+Plan after the fold (1.5), F-0 (1). Removed: the Gmail API (5, §4 Q8). **≈ 8 weeks
+of calendar time at ~12 concurrent implement agents** (452 / 12 ≈ 38 working
+days); the critical path is still **35 agent-days** — F-3 → T4-1 → T4-2 → T4-8a →
+T4-8b → T4-9 → T4-10 → T4-11, secrets into connections — so ~15 agents would bring
+it to ≈ 7.
+
+### 3.6 Execution economics — tokens, for the coordinator and every agent
+
+Addition C. The plan is nearly 2,900 lines; no implement agent should read it, and the
+coordinator should not have to hold it.
+
+1. **One file per ticket.** `ops/scripts/tickets.mjs` reads §3.3 and writes
+   `docs/product/tickets/<track>/<id>.md` — one page: the ticket, its size, wave,
+   dependencies, model, status, and the §2 sections to read — plus
+   `docs/product/tickets/schedule.json` (waves, dependencies, sizes, the critical
+   path) and `docs/product/tickets/waves.md`, the checklist. `--check` validates
+   the graph (every dependency exists, no cycle, no dependency in a later wave, every
+   ticket in exactly one wave) and fails when a ticket file's body has drifted from
+   the plan; `ops/scripts/test/tickets.test.mjs` runs it in CI. **This PR includes
+   the generated files.**
+2. **One brief, not a long prompt.** `docs/ops/agent-brief.md` holds what every
+   agent must know — the scratch database and its two variables, never the live
+   instance, a worktree and branch per ticket, the commit trailer and PR footer,
+   the wording rules, the merge rule, U1–U10. A dispatch prompt is two lines:
+   *Implement ticket T2-4. Read `docs/ops/agent-brief.md` first.*
+3. **A model per ticket, recorded on the ticket:**
+
+   | Ticket | Model |
+   | --- | --- |
+   | S | Sonnet |
+   | M | Opus |
+   | L, and any ticket marked *design-heavy* below | Opus, high effort |
+   | the review agent on every PR | Sonnet, low effort |
+
+   *Design-heavy* regardless of size, because a wrong call there is expensive:
+   F-1…F-8, T2-6 (the section operation), T2-18 (events), T4-6 (actors), T4-9
+   (`connection_call`), T9-2 (the policy), T10-3 (integrate before pushing), T10-6
+   (rollback).
+4. **A status on every ticket**, in its frontmatter — `todo`, `in-progress`,
+   `in-review`, `merged`, `blocked` — plus `pr:`. The implementing agent sets it in
+   its own PR; the generator preserves it. After a compaction the coordinator
+   rebuilds its state from `docs/product/tickets/` and `git log`, not from memory.
+5. **The wave schedule is a checklist** (`waves.md`): the generator ticks a ticket
+   when its status is `merged`; the coordinator ticks a wave's checkpoint (§3.1)
+   by hand.
+
+**§3.3's format is the generator's contract**: a ticket is a paragraph starting
+`**<id> · <title>** · <size> · <wave> · deps <ids> —`, a track is a `####` heading,
+and a track's preamble is the text between its heading and its first ticket. Edit
+the plan, run `node ops/scripts/tickets.mjs`, and commit both — CI fails on drift.
+
+**Counts, from `schedule.json`:** 140 tickets in 12 directories (`f`, `t1`…`t10`,
+`x`); **18** run on Sonnet, **63** on Opus, **59** on Opus at high effort (every L
+and the design-heavy list).
+
+**The coordinator's own context:** dispatch by ticket id, read agents' reports
+from their PR bodies (not transcripts), keep one running note per wave, and
+re-read only `waves.md` and the tickets in flight.
 
 ---
 
-## 4. The up-front questions
+## 4. The up-front questions — answered 2026-09-26
 
-Twenty-five, each with a default. **"Defaults" answers all of them.**
+All twenty-five were answered by the owner. The record, and what each answer did:
 
-1. **Invariant 4.** Ratify the wording in §2.8 for `CLAUDE.md`. *Default: ratify.*
-   (Gates T9-4 only.)
-2. **The router's go-live bar.** Shadow for at least two weeks, then PoC-15's
-   confirmatory eval (≥ 50 deep items authored independently) showing quality at
-   least today's at no more than today's cost, before it serves the composer.
-   *Default: yes.*
-3. **The bridge-contract sentence (K4)** for `CLAUDE.md`: "Preview-then-confirm on
-   destructive tools binds every bridge; a proxied connection tool's On · Ask · Off
-   is the owner's per-tool policy and defaults to Ask." *Default: ratify.*
-4. **The remote line and table (§2.3):** a remote client acts inside the
-   boundary; only the Mac changes the boundary. *Default: accept.*
-5. **Registering or rotating an external agent's bearer becomes Mac-only**
-   (`POST /api/agents`, `…/rotate`). *Default: yes.*
-6. **Audio retention:** until ingested + 7 days, never more than 30; transcripts
-   30 days. *Default: yes.*
-7. **Calendar replies first:** Google Calendar API (you create a Google Cloud
-   OAuth client) or CalDAV (iCloud/Fastmail app password)? ICS read-only feeds
-   either way. *Default: Google Calendar API.*
-8. **Mail first:** IMAP with an app password (read and drafts, no Google Cloud
-   project) or the Gmail API? *Default: IMAP; T4-16 not built this program.*
-9. **The shared-secrets migration:** `metistry update` copies each shared
-   Keychain item into every instance it runs for; the shared copies stay until
-   `metistry secrets purge-shared`. *Default: yes.*
-10. **Plugins now:** data-only extensions and registries ship; process extensions
-    (third-party code) are designed and built after this program. *Default: yes.*
-11. **Plugin trust:** an extension is the owner's hand in a protected path; no
-    signing or marketplace in v1. *Default: yes.*
-12. **Default schedules** as §2.5 lists them. *Default: yes.*
-13. **Profile vs routines:** `standup_days` / `standup_time` read once into the
-    Standup routine, then ignored; everything else in `Me/profile.md` stays, and
-    "working days" follows it. *Default: yes.*
-14. **"Same as Metis"** for an agent means Metis's default tier model, not the
-    dynamic router. *Default: yes.*
-15. **New connection defaults:** Reads On · Changes things Ask · Starts an agent
-    Ask; Offer to agents Off. *Default: yes.*
-16. **The session archive** lives in Postgres and is lost on `down -v` (a 30-day
-    cache). *Default: yes.*
-17. **The capture bar** is installed and on for both instances, switchable off.
-    *Default: yes.*
-18. **macOS 26** is required for live transcription (SpeechTranscriber; no
-    whisper.cpp). Both Macs are on 26. *Default: yes.*
-19. **Stalls and request deadlines (#262)** stay out of this program.
-    *Default: out.*
-20. **The `partial` state (C28)**: ratify. *Default: yes.*
-21. **Light chart chroma (C87):** ship the merged tokens unless the designer sends
-    values. *Default: ship.*
-22. **Tracker `task` requests (Linear and others)** stay out of this program — a
-    connection type later. *Default: out.*
-23. **Agent grants and autonomy from the phone** stay allowed, audited and
-    alerted, as today. *Default: yes.*
-24. **Merging:** the coordinator merges this spec's tickets after CI and a review
-    agent; you review at each checkpoint and install each release.
-    *Default: yes.*
-25. **Releases:** a minor per wave (0.12 … 0.17); 1.0 is your call at W5.
-    *Default: yes.*
+| # | Question | Answer | Effect |
+| --- | --- | --- | --- |
+| 1 | Ratify the invariant-4 wording (§2.8) | **Accept** | F-0 lands it; T9-4 no longer waits on it |
+| 2 | The router's go-live bar: two weeks of shadow, then PoC-15's eval | **Yes** | T9-3 → T9-4 |
+| 3 | The bridge-contract sentence (K4) | **Accept** | F-0 lands it |
+| 4 | Remote clients act inside the boundary; only the Mac changes it (§2.3) | **Accept** | F-13, T7-6 |
+| 5 | Registering or rotating an agent's bearer is Mac-only | **Yes** | F-13 |
+| 6 | Audio: until ingested + 7 days, never over 30; transcripts 30 days | **Yes** | T8-4 |
+| 7 | Calendar replies: Google OAuth or CalDAV first? | **OAuth yes, but spare users an OAuth app of their own; CalDAV with an app password may be the easier start** | §2.6 *Resolving Q7* and *OAuth without every user registering an app*: ICS + CalDAV (app password) in W3, Google through **Metistry's shipped public client** (PKCE, loopback) in W4; bring-your-own client id everywhere; a token broker designed for confidential-only providers, not built now |
+| 8 | Mail first: IMAP or the Gmail API? | **IMAP** | T4-15; the Gmail API leaves the program (§5) — which also avoids its restricted-scope assessment |
+| 9 | The shared-secrets migration | **Yes** | T4-3 |
+| 10 | Data-only extensions now, process extensions later | **Yes — "but let's plan the rest and how it fits in"** | §5's roadmap for process extensions |
+| 11 | An extension is the owner's hand; no signing in v1 | **Yes** | T4-5 |
+| 12 | Default schedules | **Standup 8:00 AM · Morning Brief 7:00 AM · Tomorrow's Plan 11:00 PM (after the fold) · Fold 9:00 PM · the rest as proposed** | §2.5 (the brief embeds the standup; the plan reads the fold), T3-2, T3-5…T3-7 |
+| 13 | `standup_*` read once into the routine | **Yes — and remove the old keys from `Me/profile.md`** | T3-4 raises a proposal; Approve removes them as `user` (`Me/` is the owner's, #255) |
+| 14 | "Same as Metis" = Metis's default tier model | **Yes** | T4-6 |
+| 15 | New connection defaults | **Yes** | T4-8a |
+| 16 | The session archive in Postgres, a 30-day cache | **Yes** | T1-11, T3-9 |
+| 17 | The capture bar on both instances | **Yes** | T8-5 |
+| 18 | macOS 26 for live transcription | **Yes** | T8-2a |
+| 19 | Stalls and request deadlines out of this program | **Defer, but keep them planned** | §5 |
+| 20 | Ratify `partial` | **Yes** | T5-3 |
+| 21 | Ship the chart tokens as merged | **Yes** | — |
+| 22 | Tracker requests out of this program | **No — make it a connection type and build it now; needed immediately on the second instance** | `tracker` type, T4-24…T4-26 in W2–W3 |
+| 23 | Agent grants and autonomy from the phone | **Yes** | as today |
+| 24 | The coordinator merges this spec's tickets after CI and review | **Yes** | §3.1 |
+| 25 | A minor release per wave; 1.0 at W5 | **Yes** | §3.1 |
+
+**Decided by this spec on the owner's behalf** — each the smallest reading of an
+answer; the coordinator reverts any on the owner's word:
+
+- `Me/profile.md`'s old keys go by **proposal**, not by a mechanical edit (#255).
+- The brief runs before the standup and **embeds** it rather than waiting for it.
+- Linear completion **never writes the owner's note** from a sync; the owner ticks.
+- **Every** rollback and file restore passes through a Needs You Approve.
+- Live changes are **Server-Sent Events**, not a WebSocket, and carry ids only.
+- Linear uses a **personal API key**, not OAuth — the simplest path, and Linear's
+  OAuth is PKCE-capable if a broker-free OAuth is ever wanted.
+
+---
+
+## 5. After this program — planned, not scheduled
+
+**Stalls and request deadlines** (#262, §4 Q19), in its own order:
+
+| Item | What | Size (#262) |
+| --- | --- | --- |
+| `meta.blocked_reason` | a typed reason on every blocked `work` row | part of ~4 days |
+| `work_stalls` | a named query: claimed rows with no tool call past a threshold | part of ~4 days |
+| stall probe | a doctor and watchdog row reporting stalls — report only, never act (#262 Q1's default) | part of ~4 days |
+| `max_concurrent` | a crew manifest cap | part of ~4 days |
+| `proposals.due_at` | a request deadline with expiry to a report the asker reads | ~1.5 days, after the owner picks the numbers (#262 Q3) |
+| `meta.acceptance` | a definition-of-done gate on a work row — a PoC, adopted only if the stall query shows rows closing with open dependencies | PoC |
+| activity-anchored leases | a lease renewed by activity rather than time — a PoC | PoC |
+
+**Process (code) extensions — the roadmap** (§4 Q10). What ships now is the
+registry and data-only extensions (§2.7); this is how code slots into the same
+places later, with no ticket in this program:
+
+- **Packaging.** An extension is a directory: `manifest.yaml` (kind, `schema: 1`,
+  `requires: {metistry: ">=x.y"}`, the entry command, and **declarations** — the
+  capabilities it implements, the hosts it may reach, the secrets it needs, the
+  MCP tools it exposes) plus its code. `metistry extensions add <path | npm spec |
+  git url>` copies it into `.metistry/extensions/<name>/` and pins version and
+  sha256 in `.metistry/extensions.lock`.
+- **Trust.** v1: the owner's hand (a protected path) and a review of the
+  declarations at install — shown as a Needs You request listing hosts, secrets and
+  tools. Later: a publisher signature checked against an owner-approved list. **An
+  update that widens a declaration is a new request**; one that narrows is not.
+- **Sandboxing.** Every process extension runs as a supervisor child under a
+  Seatbelt profile **generated from its manifest**, in the `ops/sandbox/*.sb`
+  family the reconciler already runs under: writes only its own directory and a
+  state directory, execs only its entry, **no shell**, and dials only loopback —
+  the supervisor's egress proxy (`packages/core/src/egress.ts`) whose allowlist is
+  exactly the declared hosts. In the compose shape, a container with the same
+  limits. It never sees the vault except through the MCP tools it is granted.
+- **Lifecycle.** Started on first use; health by `check()`; the supervisor's
+  backoff and crash-loop states; three failures disable it and raise one request;
+  an update installs beside the old version, switches, and keeps the old one for
+  **Roll Back**.
+- **Versioning.** `schema: 1` for the manifest; `requires.metistry` against the
+  running version; the client API's `api_version` for anything that calls back.
+- **Discovery and checks.** The registry loads `.metistry/extensions/*/manifest.yaml`
+  beside product units; doctor runs each `check()`; a connection-type, provider or
+  bridge extension must pass the same wire-contract conformance suite TypeScript
+  bridges pass (`packages/core/src/stdio-conformance.ts`) before it is enabled —
+  `metistry extensions test <name>`.
+
+**Also after this program:** the **token broker** (§2.6), built when Slack, Notion,
+Atlassian or another confidential-only provider is scheduled; **OAuth from the
+PWA**, its second use; the **Gmail API** (restricted scopes, an annual security
+assessment — IMAP covers the need); the **native iPhone app** (R2.1); a Chat pane
+(**C60 — not planned**).
 
 ---
 
@@ -2259,6 +2883,15 @@ Twenty-five, each with a default. **"Defaults" answers all of them.**
 | #262: "nothing expires" | wrong — `morning-brief/run.ts:15, 251–255` |
 | K16 EventKit replies | verified absent — macOS 26.5 SDK, `EKParticipant.h:54` `readonly participantStatus`, no response API |
 | `dataviz/scripts/validate_palette.js` | not in this repository |
+| Google CalDAV auth | OAuth 2.0 only; Basic auth → 401; a Cloud project required; `google.com/calendar/dav` retired (Google CalDAV API v2 guide) |
+| Google password access | ended for IMAP, CalDAV, CardDAV on 2025-03-14 "with the exception of app passwords" (Google Workspace, *Transition from less secure apps*) |
+| Google Testing mode | "Authorizations by a test user will expire seven days from the time of consent", refresh tokens included (Google Cloud help) |
+| Google restricted scopes | "must undergo an annual security assessment" (Google Cloud help) |
+| Google, Microsoft, Linear public clients | PKCE with no secret: Google (*OAuth for desktop apps*), Microsoft ("Public clients… must not use secrets"), Linear ("supports the PKCE flow", secret optional) |
+| Slack, Notion, Atlassian | a client secret required: Slack (`oauth.v2.access`; HTTPS redirect), Notion (Basic with `CLIENT_ID:CLIENT_SECRET`), Atlassian (`client_secret` "_required_") |
+| Linear personal key | `Authorization: <API_KEY>` at `https://api.linear.app/graphql` |
+| Reconciler push | a bare `git push` with no fetch (`apps/reconciler/src/committer.ts:153`); `METISTRY_PUSH_SCHEDULE` (`apps/reconciler/src/main.ts:49`) |
+| Task grammar refs | `EXT_REF_SCHEMES = ["linear", "gh"]` (`packages/core/src/task-line.ts:80`) |
 
 ## Appendix B — the designer's edits to merged specs (now on main)
 

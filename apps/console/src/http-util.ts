@@ -21,6 +21,28 @@ export function sendError(res: ServerResponse, code: ErrorCode, detail?: string)
 }
 
 /**
+ * The responses that were "no such route" — as opposed to a route that
+ * answered 404 for a row it could not find. Held in-process and never put on
+ * the wire: `sendUnrouted` sends exactly what `sendError(res, "not_found",
+ * detail)` would, so the mark changes nothing a caller can see. What it buys
+ * is a test that can tell the two 404s apart (the client API conformance
+ * test, docs/ops/client-api.md), which is how CI knows a route in the table
+ * is really served.
+ */
+const UNROUTED = new WeakSet<ServerResponse>();
+
+/** The one "no such route" answer. Every dispatcher's fallthrough calls this, never a bare `sendError(res, "not_found")`. */
+export function sendUnrouted(res: ServerResponse, detail?: string): void {
+  UNROUTED.add(res);
+  sendError(res, "not_found", detail);
+}
+
+/** Whether this response was `sendUnrouted`'s. For tests; the server never branches on it. */
+export function wasUnrouted(res: ServerResponse): boolean {
+  return UNROUTED.has(res);
+}
+
+/**
  * A `may()` refusal onto the wire, through core's ONE renderer
  * (`formatRefusal` — §3.2 of
  * docs/research/2026-09-19-grants-and-access-simplified.md). Never

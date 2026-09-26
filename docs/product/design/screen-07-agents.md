@@ -116,6 +116,12 @@ the owner and that.
 | approved in Needs You | *approved in Needs You · #311*, linking the request |
 | granted by a routine | *during \<routine\> only*, linking the routine |
 
+### 3.4 Compute (C128)
+
+The definition names its model and effort, picked from what Settings › Compute
+lists (local and cloud, with their tags), or **Same as Metis**. Settings no
+longer assigns models per agent.
+
 ### 3.3 Its routines, and what it did
 
 The routines that assign this agent work, each linking to Routines — the deep

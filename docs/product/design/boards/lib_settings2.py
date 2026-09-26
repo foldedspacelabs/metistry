@@ -92,66 +92,130 @@ def servicespane(T):
         f'{btn(T,"Restart All","secondary",I["repeat"])}{btn(T,"Stop All","ghost",I["stop"])}</div>'
         f'<div style="margin-top: 10px; border-top: 1px solid {T["border"]};">'
         + "".join(svcrow(T,*s,last=(i==len(SVCS)-1)) for i,s in enumerate(SVCS)) + '</div>')
-    keep=(f'<div style="display: flex; flex-direction: column; gap: 6px; margin-top: 4px;">'
-          + "".join(f'<div style="display: flex; align-items: center; gap: 8px;"><span style="width: 14px; height: 14px; border-radius: 50%; box-sizing: border-box; '
-                    f'border: {"4.5px solid "+T["acc"] if on else "1.5px solid "+T["bc"]}; background: {T["surface"]};"></span>'
-                    f'<span style="font-size: 12.5px; color: {T["tp"]};">{t}</span></div>'
-                    for t,on in (("Allow sleep on battery",True),("Always",False),("Always, even with the lid closed",False))) + '</div>')
     life=sunk(T,
         setrow(T,label="Start at Login",note="Opens Metistry when you log in",control=toggle(T,True))
         + setrow(T,label="Run in the Background",note="Services keep running when the app is closed",control=toggle(T,True))
-        + setrow(T,label="Keep this Mac Awake",note="So scheduled work runs overnight",control=toggle(T,True),last=True)
-        + f'<div style="padding-left: 2px;">{keep}</div>')
+        + awake(T,on=True,tipfor="lid"))
     return panehead(T,"Services")+body(T,block(T,"DOCTOR",doctor(T)),block(T,"SERVICES",head),block(T,"WHEN IT RUNS",life))
 
+def warnmark(T,tip=None):
+    g=f'<span style="display: flex; color: {T["deg"]};">{ic(I["warn"],13,2.1)}</span>'
+    if not tip: return f'<span style="position: relative; display: inline-flex;">{g}</span>'
+    return (f'<span style="position: relative; display: inline-flex;">{g}'
+            f'<span style="position: absolute; left: 20px; top: -8px; width: 250px; z-index: 2; padding: 7px 10px; border-radius: 8px; '
+            f'background: {T["elevated"]}; border: 1px solid {T["bc"]}; box-shadow: 0 8px 22px rgba(26,24,21,0.2); font-size: 11.5px; '
+            f'line-height: 1.45; color: {T["tp"]};">{tip}</span></span>')
+
+def awake(T,*,on=True,tipfor=None):
+    subs=[("Allow sleep on battery","battery","Off, Metistry keeps a laptop awake on battery. Scheduled work can run it flat."),
+          ("Allow sleep when the lid is closed","lid","Off, a closed laptop keeps running. In a bag it can overheat.")]
+    rows="".join(
+        f'<div style="display: flex; align-items: center; gap: 10px; padding: 9px 0 9px 22px; border-top: 1px solid {T["border"]}; opacity: {1 if on else 0.42};">'
+        f'<span style="font-size: 12.5px; color: {T["tp"]};">{lab}</span>{warnmark(T,tip if (on and tipfor==k) else None)}'
+        f'<span style="flex-grow: 1;"></span>{toggle(T,True)}</div>' for lab,k,tip in subs)
+    return (f'<div style="display: flex; align-items: center; gap: 10px; padding: 9px 0; border-top: 1px solid {T["border"]};">'
+            f'<div style="flex-grow: 1;"><div style="font-size: 12.5px; color: {T["tp"]};">Keep this Mac Awake</div>'
+            f'<div style="font-size: 11.5px; color: {T["ts"]}; margin-top: 2px;">So scheduled work runs overnight</div></div>{toggle(T,on)}</div>' + rows)
+
 # ---- Compute -------------------------------------------------------------------------------
-def provrow(T,name,where,keyv,chips,*,last=False):
-    ch="".join(f'<span style="font-size: 10.5px; color: {c}; border: 1px solid {T["bc"]}; border-radius: 999px; padding: 0 7px; line-height: 17px;">{t}</span>' for t,c in chips)
-    return (f'<div style="padding: 9px 0; {bd_(T,last)}"><div style="display: flex; align-items: center; gap: 9px;">'
-            f'<span style="font-size: 13px; font-weight: 600; color: {T["tp"]};">{name}</span>'
-            f'<span style="font-size: 11.5px; color: {T["ts"]};">{where}</span>{ch}<span style="flex-grow: 1;"></span>'
-            f'{btn(T,"Test","ghost",I["check"])}{ibtn(T,"x","Remove")}</div>'
-            + (f'<div style="display: flex; align-items: center; gap: 8px; margin-top: 6px;"><span style="font-size: 11.5px; color: {T["ts"]};">Key</span>{keyv}</div>' if keyv else "")
+def tag(T,t,*,strong=False):
+    return (f'<span style="font-size: 10.5px; font-weight: 600; color: {T["tp"] if strong else T["ts"]}; border: 1px solid {T["bc"]}; '
+            f'border-radius: 999px; padding: 0 7px; line-height: 17px; white-space: nowrap;">{t}</span>')
+def pick(T,t,w):
+    return (f'<span style="display: inline-flex; align-items: center; justify-content: space-between; width: {w}px; box-sizing: border-box; padding: 4px 9px; '
+            f'border: 1px solid {T["bc"]}; border-radius: 7px; background: {T["surface"]}; font-size: 12.5px; color: {T["tp"]};">{t}'
+            f'<span style="display: flex; color: {T["ts"]};">{ic(I["chevd"],11,2.2)}</span></span>')
+def tabbar(T,items,sel):
+    return (f'<div style="display: flex; gap: 20px; border-bottom: 1px solid {T["border"]};">'
+            + "".join(f'<span style="padding: 7px 0 8px; font-size: 13px; font-weight: {600 if n==sel else 500}; color: {T["tp"] if n==sel else T["ts"]}; '
+                      f'box-shadow: {"inset 0 -2px 0 "+T["acc"] if n==sel else "none"};">{n} <span style="font-weight: 400; color: {T["ts"]};">{c}</span></span>' for n,c in items)
             + '</div>')
-def assignrow(T,who,prov,model,effort,*,last=False):
-    sel=lambda t,w:(f'<span style="display: inline-flex; align-items: center; justify-content: space-between; width: {w}px; box-sizing: border-box; padding: 3px 8px; '
-                    f'border: 1px solid {T["bc"]}; border-radius: 6px; background: {T["surface"]}; font-size: 12px; color: {T["tp"]};">{t}'
-                    f'<span style="display: flex; color: {T["ts"]};">{ic(I["chevd"],11,2.2)}</span></span>')
-    return (f'<div style="display: grid; grid-template-columns: 112px 112px minmax(0,1fr) 82px; gap: 8px; align-items: center; padding: 6px 0; {bd_(T,last)}">'
-            f'<span style="font-size: 12.5px; color: {T["tp"]};">{who}</span>{sel(prov,112)}{sel(model,190)}{sel(effort,82)}</div>')
+def prov(T,name,tags,line,*,acts=True,last=False,extra=""):
+    return (f'<div style="padding: 10px 0; {bd_(T,last)}"><div style="display: flex; align-items: center; gap: 8px;">'
+            f'<span style="font-size: 13px; font-weight: 600; color: {T["tp"]};">{name}</span>{"".join(tags)}<span style="flex-grow: 1;"></span>'
+            + (f'{btn(T,"Test","ghost",I["check"])}{ibtn(T,"x","Remove")}' if acts else "") + '</div>'
+            f'<div style="font-size: 11.5px; color: {T["ts"]}; margin-top: 4px;">{line}</div>{extra}</div>')
+
+def metisblock(T):
+    return sunk(T,
+        f'<div style="display: flex; align-items: center; gap: 10px;"><span style="display: flex; color: {T["ag"]};">{ic(I["cpu"],16,1.9)}</span>'
+        f'<span style="font-size: 13px; font-weight: 600; color: {T["tp"]};">Metis uses</span></div>'
+        f'<div style="display: grid; grid-template-columns: 70px minmax(0,1fr); gap: 8px 10px; align-items: center; margin-top: 11px;">'
+        f'{lbl(T,"Model")}<span style="display: flex; align-items: center; gap: 8px;">{pick(T,"claude-sonnet",220)}{tag(T,"Cloud")}{tag(T,"OpenRouter")}</span>'
+        f'{lbl(T,"Effort")}<span>{seg(T,["Low","Medium","High"],"Medium")}</span>'
+        f'{lbl(T,"If it fails")}<span>{pick(T,"qwen3-coder-30b &middot; Local",220)}</span></div>'
+        + note(T,"Agents and routines choose their own model in their definitions, from what is added below."))
+
+def localtab(T):
+    provs=sunk(T,
+        prov(T,"Apple Foundation Models",[tag(T,"Local"),tag(T,"Free")],"Built into macOS &middot; ready",acts=False)
+        + prov(T,"LM Studio",[tag(T,"Local"),tag(T,"Free")],"localhost:1234 &middot; running &middot; 2 models")
+        + prov(T,"Ollama",[tag(T,"Local"),tag(T,"Free")],"Not running",last=True,
+               extra=f'<div style="margin-top: 6px;">{btn(T,"Start Ollama","secondary")}</div>')
+        + f'<div style="margin-top: 8px;">{btn(T,"Add Local Provider…","secondary",I["plus"])}</div>')
+    def mrow(name,where,size,state,*,last=False):
+        act={"loaded":btn(T,"Unload","ghost"),"installed":btn(T,"Load","secondary"),"get":btn(T,"Install","secondary",I["update"]),
+             "big":btn(T,"Install","ghost",I["update"])}[state]
+        st={"loaded":f'<span style="display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: {T["tp"]};"><span style="width: 7px; height: 7px; border-radius: 50%; background: {T["ok"]};"></span>Loaded</span>',
+            "installed":f'<span style="font-size: 11.5px; color: {T["ts"]};">Installed</span>',
+            "get":f'<span style="font-size: 11.5px; color: {T["ts"]};">Fits</span>',
+            "big":f'<span style="display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; color: {T["ts"]};"><span style="display: flex; color: {T["deg"]};">{ic(I["warn"],11,2.1)}</span>Tight fit</span>'}[state]
+        return (f'<div style="display: grid; grid-template-columns: minmax(0,1fr) 80px 56px 76px 78px; gap: 8px; align-items: center; padding: 7px 0; {bd_(T,last)}">'
+                f'{mono(name,T["tp"],11.5)}<span style="font-size: 11.5px; color: {T["ts"]};">{where}</span>'
+                f'<span style="font-size: 11.5px; color: {T["ts"]}; text-align: right; font-variant-numeric: tabular-nums;">{size}</span>{st}<span style="display: flex; justify-content: flex-end;">{act}</span></div>')
+    mem=(f'<div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;"><span style="font-size: 11.5px; color: {T["ts"]}; white-space: nowrap;">Memory</span>'
+         f'<div style="flex-grow: 1; height: 6px; border-radius: 3px; background: {T["border"]}; overflow: hidden;"><div style="width: 30%; height: 100%; background: {T["ag"]};"></div></div>'
+         f'<span style="font-size: 11.5px; color: {T["ts"]}; white-space: nowrap; font-variant-numeric: tabular-nums;">19 of 64 GB</span></div>')
+    models=sunk(T,mem
+        + f'<div style="display: flex; gap: 8px; align-items: center;"><div style="flex-grow: 1;">{rfield(T,ph(T,"Search models — gemma, qwen, llama…"))}</div>{seg(T,["Installed","Browse"],"Installed")}</div>'
+        + f'<div style="margin-top: 8px;">'
+        + mrow("qwen3-coder-30b","LM Studio","19 GB","loaded")
+        + mrow("llama-3.2-3b","LM Studio","2 GB","installed")
+        + mrow("foundation-model","Apple","&mdash;","loaded",last=True) + '</div>')
+    browse=sunk(T,
+        f'<div style="display: flex; gap: 8px; align-items: center;"><div style="flex-grow: 1;">{rfield(T,plain("gemma"),focus=True)}</div>{seg(T,["Installed","Browse"],"Browse")}</div>'
+        + f'<div style="margin-top: 8px;">' + mrow("gemma-3-27b","Ollama","17 GB","get") + mrow("gemma-3-12b","LM Studio","8 GB","get")
+        + mrow("gemma-3-27b-fp16","LM Studio","54 GB","big",last=True) + '</div>')
+    return block(T,"PROVIDERS",provs)+'<div style="height: 14px;"></div>'+block(T,"MODELS",models)+'<div style="height: 14px;"></div>'+block(T,"BROWSE &mdash; SEARCHING",browse)
+
+def cloudtab(T):
+    provs=sunk(T,
+        prov(T,"OpenRouter",[tag(T,"Cloud"),tag(T,"By token"),tag(T,"ZDR claimed")],"Key "+ref(T,"secret","openrouter_key")+" &middot; 300+ models")
+        + prov(T,"Claude",[tag(T,"Cloud"),tag(T,"Subscription")],"Max plan &middot; signed in &middot; this window 42% used, resets in 3 h")
+        + prov(T,"Groq",[tag(T,"Cloud"),tag(T,"By token"),tag(T,"No ZDR claim")],
+               f'<span style="color: {T["fail"]};">{ic(I["failed"],11,2.2)} Key not set</span> &middot; <span style="font-weight: 600; color: {T["acc"]};">Choose a secret</span>',last=True)
+        + f'<div style="margin-top: 8px;">{btn(T,"Add Cloud Provider…","secondary",I["plus"])}</div>')
+    hdr=(f'<div style="display: grid; grid-template-columns: minmax(0,1fr) 64px 64px 214px; gap: 8px; padding-bottom: 5px; font-size: 10.5px; '
+         f'font-weight: 700; letter-spacing: 0.07em; color: {T["tt"]};"><span></span><span>DAY</span><span>MONTH</span><span>THEN</span></div>')
+    limits=sunk(T,hdr + limitrow(T,"This instance","$5.00","$80","Stop") + limitrow(T,"OpenRouter","$4.00","$60","Critical only")
+        + limitrow(T,"Groq","&mdash;","$10","Stop",last=True)
+        + f'<div style="display: flex; align-items: center; gap: 8px; margin-top: 10px; padding-top: 9px; border-top: 1px solid {T["border"]};">'
+          f'<span style="font-size: 12.5px; color: {T["tp"]}; flex-grow: 1;">Claude &middot; subscription</span>'
+          f'<span style="font-size: 11.5px; color: {T["ts"]};">No dollar limit &mdash; the plan&rsquo;s window is the limit</span></div>'
+        + f'<div style="font-size: 11.5px; color: {T["ts"]}; margin-top: 8px;">Today $1.84 of $5.00 &middot; Stop pauses routines and asks in Needs You.</div>')
+    return block(T,"PROVIDERS",provs)+'<div style="height: 14px;"></div>'+block(T,"SPENDING LIMITS",limits)
+
 def limitrow(T,who,day,month,act,*,last=False):
     f_=lambda v:f'<span style="display: inline-block; width: 64px; box-sizing: border-box; padding: 3px 7px; border: 1px solid {T["bc"]}; border-radius: 6px; background: {T["surface"]}; font-size: 12px; color: {T["tp"]}; text-align: right; font-variant-numeric: tabular-nums;">{v}</span>'
     return (f'<div style="display: grid; grid-template-columns: minmax(0,1fr) 64px 64px 214px; gap: 8px; align-items: center; padding: 6px 0; {bd_(T,last)}">'
             f'<span style="font-size: 12.5px; color: {T["tp"]};">{who}</span>{f_(day)}{f_(month)}{seg(T,["Allow","Stop","Critical only"],act)}</div>')
-def computepane(T):
-    default=(f'<div style="display: flex; align-items: center; gap: 10px; padding: 11px 13px; border-radius: 10px; background: {T["agq"]};">'
-             f'<span style="display: flex; color: {T["ag"]};">{ic(I["cpu"],16,1.9)}</span><span style="font-size: 12.5px; color: {T["tp"]}; flex-grow: 1;">'
-             f'Default model: <b>OpenRouter &middot; claude-sonnet</b></span><span style="font-size: 12px; font-weight: 600; color: {T["acc"]};">Change</span></div>')
-    provs=sunk(T,
-        provrow(T,"OpenRouter","Off this Mac",ref(T,"secret","openrouter_key"),[("ZDR claimed",T["ts"])])
-        + provrow(T,"LM Studio","On this Mac &middot; localhost:1234",None,[])
-        + provrow(T,"Apple Foundation Models","On this Mac &middot; free",None,[])
-        + provrow(T,"Groq","Off this Mac",f'<span style="font-size: 11.5px; color: {T["fail"]};">{ic(I["failed"],11,2.2)} Key not set &middot; </span><span style="font-size: 11.5px; font-weight: 600; color: {T["acc"]};">Choose a secret</span>',[("No ZDR claim",T["ts"])],last=True)
-        + f'<div style="margin-top: 10px;">{btn(T,"Add Provider…","secondary",I["plus"])}</div>')
-    hdr=lambda cols,tmpl:(f'<div style="display: grid; grid-template-columns: {tmpl}; gap: 8px; padding-bottom: 5px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; color: {T["tt"]};">'
-                          + "".join(f'<span>{c}</span>' for c in cols) + '</div>')
-    assign=sunk(T,hdr(("FOR","PROVIDER","MODEL","EFFORT"),"112px 112px minmax(0,1fr) 82px")
-        + assignrow(T,"Default","OpenRouter","claude-sonnet","Medium")
-        + assignrow(T,"Quick","Groq","llama-3.1-8b","Low")
-        + assignrow(T,"Deep","OpenRouter","claude-opus","High")
-        + assignrow(T,"crew: drey-dev","LM Studio","qwen3-coder-30b","Medium",last=True))
-    limits=sunk(T,hdr(("","PER DAY","PER MONTH","THEN"),"minmax(0,1fr) 64px 64px 214px")
-        + limitrow(T,"This instance","$5.00","$80","Stop") + limitrow(T,"OpenRouter","$4.00","$60","Critical only")
-        + limitrow(T,"Groq","&mdash;","$10","Stop",last=True)
-        + f'<div style="font-size: 11.5px; color: {T["ts"]}; margin-top: 8px;">Today $1.84 of $5.00 &middot; Stop pauses routines and asks in Needs You.</div>')
-    local=sunk(T,
-        f'<div style="display: flex; align-items: center; gap: 9px; padding-bottom: 8px;">{dot(T,T["ok"])}<span style="font-size: 12.5px; font-weight: 600; color: {T["tp"]};">LM Studio</span>'
-        f'<span style="font-size: 11.5px; color: {T["ts"]}; flex-grow: 1;">qwen3-coder-30b loaded &middot; 19 GB of 64 GB</span>{btn(T,"Unload","ghost")}</div>'
-        f'<div style="display: flex; align-items: center; gap: 9px; padding-top: 8px; border-top: 1px solid {T["border"]};">{dot(T,T["ok"])}'
-        f'<span style="font-size: 12.5px; font-weight: 600; color: {T["tp"]};">Apple Foundation Models</span><span style="font-size: 11.5px; color: {T["ts"]}; flex-grow: 1;">Ready</span></div>'
-        f'<div style="display: flex; align-items: center; gap: 8px; margin-top: 10px;"><div style="flex-grow: 1;">{rfield(T,ph(T,"Model to install, e.g. llama-3.2-3b"))}</div>{btn(T,"Install","secondary",I["down"])}</div>')
-    return panehead(T,"Compute")+body(T,default,block(T,"PROVIDERS",provs),block(T,"WHO USES WHAT",assign),
-                                      block(T,"SPENDING LIMITS",limits),block(T,"LOCAL MODELS",local))
+
+def computepane(T,tab="Local"):
+    inner=localtab(T) if tab=="Local" else cloudtab(T)
+    return (panehead(T,"Compute")+body(T,block(T,"METIS",metisblock(T)),
+            tabbar(T,[("Local","3"),("Cloud","3")],tab)+f'<div style="margin-top: 14px;">{inner}</div>'))
+
+def agentcompute(T,*,w=520):
+    """In an agent's definition: its model, chosen from the compute added in Settings."""
+    return (f'<div style="width: {w}px; box-sizing: border-box; border: 1px solid {T["bc"]}; border-radius: 12px; background: {T["bg"]}; padding: 14px 16px;">'
+            f'<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px;">{agentchip(T,"collator")}'
+            f'<span style="font-size: 12px; color: {T["ts"]};">definition</span></div>'
+            + block(T,"COMPUTE",sunk(T,
+                f'<div style="display: grid; grid-template-columns: 70px minmax(0,1fr); gap: 8px 10px; align-items: center;">'
+                f'{lbl(T,"Model")}<span style="display: flex; align-items: center; gap: 8px;">{pick(T,"qwen3-coder-30b",200)}{tag(T,"Local")}{tag(T,"Free")}</span>'
+                f'{lbl(T,"Effort")}<span>{seg(T,["Low","Medium","High"],"Medium")}</span></div>'
+                + note(T,"Lists only what is added in Settings › Compute. <b>Same as Metis</b> follows Metis&rsquo;s choice.")))
+            + '</div>')
 
 # ---- Updates -------------------------------------------------------------------------------
 def updatespane(T):
@@ -165,7 +229,7 @@ def updatespane(T):
         f'<div style="font-size: 12.5px; color: {T["tp"]};">Running <b>2026.09.24</b></div>'
         f'<div style="font-size: 11.5px; color: {T["ts"]}; margin-top: 2px;">Signed release &middot; installed yesterday &middot; checksums verified</div></div></div>'
         f'<div style="display: flex; align-items: center; gap: 10px; margin-top: 10px; padding: 10px 12px; border-radius: 9px; background: {T["surface"]}; border: 1px solid {T["border"]};">'
-        f'<span style="display: flex; color: {T["acc"]};">{ic(I["down"],15,2)}</span><span style="font-size: 12.5px; color: {T["tp"]}; flex-grow: 1;"><b>2026.09.25</b> is available</span>'
+        f'<span style="display: flex; color: {T["acc"]};">{ic(I["update"],15,2)}</span><span style="font-size: 12.5px; color: {T["tp"]}; flex-grow: 1;"><b>2026.09.25</b> is available</span>'
         f'<span style="font-size: 12px; font-weight: 600; color: {T["acc"]};">What&rsquo;s New</span>{btn(T,"Update Runtime","affirm")}</div>'
         f'<div style="display: flex; align-items: center; gap: 10px; margin-top: 10px;"><span style="font-size: 12px; color: {T["ts"]}; flex-grow: 1;">'
         f'Previous: 2026.09.20 &middot; kept so you can go back</span>{btn(T,"Roll Back","ghost",I["undo"])}</div>'

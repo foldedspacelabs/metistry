@@ -10,6 +10,7 @@
 // conformance test (client-api.conformance.integration.test.ts) holds every
 // row's reach generally; this file is the ticket's own misuse tests, with
 // bodies that WOULD succeed, so a refusal here is the gate and not a 400.
+import { rmSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -50,6 +51,7 @@ describe.skipIf(!hasDb)("the reach gate: `local` routes are the owner on this Ma
   const agentId = `itest-reach-${suffix}`; // an existing row: the target of `rotate`, and the bearer the agent probes present
   const minted: string[] = [agentId];
   const passkeyIds: string[] = [];
+  const inboxDirs: string[] = [];
 
   /** A body each local route would accept — a fresh id to register, nothing for rotate. */
   function bodyFor(r: (typeof LOCAL)[number]): Record<string, unknown> {
@@ -67,9 +69,11 @@ describe.skipIf(!hasDb)("the reach gate: `local` routes are the owner on this Ma
   }
 
   async function config(extra: Partial<Parameters<typeof makeServer>[2]> = {}): Promise<Parameters<typeof makeServer>[2]> {
+    const inboxDir = await mkdtemp(join(tmpdir(), "metistry-reach-gate-"));
+    inboxDirs.push(inboxDir);
     return {
       origin: "http://127.0.0.1:0",
-      inboxDir: await mkdtemp(join(tmpdir(), "metistry-reach-gate-")),
+      inboxDir,
       policy,
       secureCookies: false,
       localOwner: { token: localOwnerToken, trusted: [] }, // loopback only, as on the launchd shape
@@ -100,6 +104,7 @@ describe.skipIf(!hasDb)("the reach gate: `local` routes are the owner on this Ma
     await pool.query(`DELETE FROM passkeys WHERE id = ANY($1)`, [passkeyIds]).catch(() => undefined);
     await new Promise<void>((r) => server.close(() => r()));
     await pool.end();
+    for (const dir of inboxDirs) rmSync(dir, { recursive: true, force: true });
   });
 
   async function post(at: string, path: string, headers: Record<string, string>, body: unknown): Promise<{ status: number; body: { error?: { code: string; message: string }; token?: string } }> {

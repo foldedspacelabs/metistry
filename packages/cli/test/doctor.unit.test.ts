@@ -12,6 +12,7 @@ import { cliShimPath, writeCliShim } from "../src/cli-shim.js";
 import { StepRunner } from "../src/steps.js";
 import { parseDotEnv } from "../src/env.js";
 import { BOOLEAN_FLAGS, main, parseArgs } from "../src/main.js";
+import { actualName } from "../src/migrate-inbox.js";
 import type { Exec } from "../src/exec.js";
 
 const PLIST = (label: string) => `<?xml version="1.0"?><plist version="1.0"><dict><key>Label</key><string>${label}</string></dict></plist>`;
@@ -456,10 +457,26 @@ describe("doctor: the pre-#156 inbox layout (docs/ops/inbox.md)", () => {
     const dir = await mkdtemp(join(tmpdir(), "metistry-doctor-inbox-"));
     await mkdir(join(dir, "inbox"), { recursive: true });
     await writeFile(join(dir, "inbox", "1757000000000-note.md"), "# an old capture\n");
+    // Exact-case lookup, not existsSync(join(dir, "inbox")) — this is the same
+    // spelling `actualName` reports, so the assertion holds whether or not the
+    // underlying filesystem itself folds case.
+    expect(await actualName(dir, "inbox")).toBe("inbox");
     const row = await inboxRow(dir);
     expect(row).toMatchObject({ status: "degraded" });
     expect(row.remediation).toMatch(/metistry migrate-inbox --dry-run/);
     expect(row.meta).toMatchObject({ entries: 1, gitignored: false });
+  });
+
+  it("ok when only the vault's TitleCase Inbox/ exists — a case-insensitive filesystem must not read it as the pre-#156 dir", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "metistry-doctor-inbox-"));
+    await mkdir(join(dir, "Inbox"), { recursive: true });
+    await writeFile(join(dir, "Inbox", "1757000000000-note.md"), "# a real capture, living in the vault\n");
+    // `actualName(dir, "inbox")` reports the entry actually on disk (`Inbox`),
+    // which is not the exact-case `inbox` the legacy check looks for. On APFS,
+    // `existsSync(join(dir, "inbox"))` would answer true for this same directory
+    // — that was the bug (every fresh macOS instance read as degraded).
+    expect(await actualName(dir, "inbox")).toBe("Inbox");
+    expect(await inboxRow(dir)).toMatchObject({ name: "inbox", kind: "instance", status: "ok" });
   });
 
   it("an empty inbox/ (just .DS_Store) is not itself a finding, but .gitignore still listing it is", async () => {

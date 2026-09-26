@@ -222,7 +222,9 @@ The URL comes from `METISTRY_CONSOLE_URL`, then `METISTRY_URL`, then
 fills `METISTRY_CONSOLE_URL` with its own console port when nothing set it —
 the same rule `doctor`, `connect` and `up` apply — so `whoami`, `call` and
 `session` with `--instance <dir>` reach that instance's console and never the
-default install's 8080. An explicit `METISTRY_CONSOLE_URL` in the environment
+default install's 8080. Every other verb that presents the owner token
+(`agents`, `runs export`, `compute cache-report|route-report`, `connect`)
+resolves it the same way. An explicit `METISTRY_CONSOLE_URL` in the environment
 or `state/.env` still wins. The token comes from the environment
 (`<instance>/.metistry/state/.env`) or the login Keychain — this instance's account
 first, the per-user one behind it — and never reaches argv, stdout or an

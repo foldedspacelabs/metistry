@@ -66,7 +66,7 @@ export async function runsExport(opts: RunsExportOptions): Promise<RunsExportRes
   const env = opts.env ?? process.env;
   const platform = opts.platform ?? process.platform;
   const exec = opts.exec ?? realExec;
-  const target: ConsoleTarget = await consoleTarget({ env, platform, exec, ...(opts.instanceId ? { instanceId: opts.instanceId } : {}) });
+  const target: ConsoleTarget = await consoleTarget({ env, platform, exec, ...(opts.instanceDir ? { instanceDir: opts.instanceDir } : {}), ...(opts.instanceId ? { instanceId: opts.instanceId } : {}) });
   const fetchFn = opts.fetchFn ?? fetch;
   const url = `${target.url}/api/runs/export${queryString(opts)}`;
 

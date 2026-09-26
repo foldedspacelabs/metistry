@@ -238,7 +238,7 @@ cleanup is done** (status in review 01 §8); **every §5 opportunity was adopted
 
 **Done 2026-09-24:** **Today v7** (screen 5 §15 — Morning Brief, Next Up, Close
 the Day, ticking tasks, Slipping) and **the PWA** (screen 18 — phone and narrow
-window, the offline rule per verb, install, enrolment, notifications, and
+window, the offline rule per verb, install, enrollment, notifications, and
 Compute ▸ Budgets drawn first). The owner reopened the PWA as a release feature;
 the native iPhone app stays deferred.
 

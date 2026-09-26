@@ -193,7 +193,7 @@ reason sends exactly what Skip sent**, which is what `SKIP_FEEDBACK` already
 means ("declined with nothing to say"). The one case Skip protected — clearing
 a card without triggering a revoke — is what **Review later** is for.
 
-*The tradeoff, honestly:* a user who wants an enrolment request off the screen
+*The tradeoff, honestly:* a user who wants an enrollment request off the screen
 *permanently* without revoking the token now has no single click for it. If
 that case matters, Skip comes back — but as a verb on a multi-selection in the
 full list, never as a fifth button on a card.

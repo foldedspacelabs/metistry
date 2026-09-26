@@ -188,9 +188,9 @@ public struct ComputeFacts: Sendable, Equatable {
 /// `budgets.instance` and `budgets.providers.<name>` as `compute show --json`
 /// reports them, and as `metistry compute budget` writes them back.
 ///
-/// Recorded, not enforced: nothing dials a provider or counts a token yet
-/// (docs/ops/compute.md), and the pane says so where the numbers are entered
-/// rather than implying a cap that exists.
+/// Enforced in the engine, before the call, against what the window has
+/// already spent (docs/ops/compute.md) — the pane names the action, not
+/// just the number, so a limit here reads as a cap that exists.
 public struct ComputeBudgetFacts: Sendable, Equatable {
     public let dailyUSD: Double?
     public let monthlyUSD: Double?

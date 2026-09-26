@@ -51,8 +51,9 @@ twelve types:
 Every request takes the same three answers, in this order
 (`docs/ops/reply-feedback.md`):
 
-- **Approve** — yes, do it / keep it. Where the request suggests work, it offers
-  **Approve as Work**: yes, and put it on the board.
+- **Approve** — yes, do it / keep it. Where the request suggests work, Approve
+  also puts it on the board (`accept_as_work`) — one button, not a second
+  answer.
 - **Revise** — nearly; here is what to change. (You say what; that reason is
   what makes the next one better.)
 - **Decline** — no. It stays searchable; nothing is deleted.
@@ -116,8 +117,8 @@ model.
 **Variable** — a shared plain value, written `{{ variable.name }}`, usable
 anywhere, an agent's instructions included.
 
-**Usage** — what your instance spends: money, tokens, time. The gauge beside
-the bell.
+**Usage** — what your instance spends: money, tokens, time. The gauge
+top-right, beside **+**.
 
 **Activity** — what has happened. The feed, and the run behind every line of it.
 Every tool call, every turn, every collector pass is one row you can read.

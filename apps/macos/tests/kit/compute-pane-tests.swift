@@ -254,9 +254,9 @@ private func paneModel(_ runner: FakeRunner, status: StatusModel? = nil) -> Comp
 // MARK: - compute budget
 
 @MainActor
-@Test func aBudgetIsTheThreeFlagsTheCliTakesAndNothingIsEnforcedYet() async {
+@Test func aBudgetIsTheThreeFlagsTheCliTakesAndEnforcedInTheEngine() async {
     let stdout = """
-    Recorded. Nothing enforces it yet — budgets are checked in the engine, before the call (docs/ops/compute.md).
+    Recorded. Enforced in the engine, before the call (docs/ops/compute.md).
     { "target": "budgets.providers.openrouter", "daily_usd": 20, "monthly_usd": 300, "action": "stop" }
     """
     let runner = FakeRunner(results: [
@@ -272,7 +272,7 @@ private func paneModel(_ runner: FakeRunner, status: StatusModel? = nil) -> Comp
     #expect(argv.contains("--monthly") && argv.contains("300"))
     #expect(argv.contains("--action") && argv.contains("stop"))
     #expect(model.lastOutcome?.ok == true)
-    #expect(model.lastOutcome?.message.contains("nothing enforces it yet") == true)
+    #expect(model.lastOutcome?.message.contains("enforced in the engine, before the call") == true)
 }
 
 @MainActor
@@ -290,6 +290,13 @@ private func paneModel(_ runner: FakeRunner, status: StatusModel? = nil) -> Comp
     #expect(!runner.calls[0].arguments.contains("--daily"))
     #expect(!runner.calls[0].arguments.contains("--monthly"))
     #expect(model.lastOutcome?.message.contains("an action with no limit never fires") == true)
+}
+
+@MainActor
+@Test func theBudgetNoteSaysEnforcedNeverRecordedNotEnforced() {
+    #expect(ComputeModel.budgetNote.contains("Enforced in the engine, before the call"))
+    #expect(!ComputeModel.budgetNote.lowercased().contains("not enforced"))
+    #expect(!ComputeModel.budgetNote.contains("Nothing dials a provider"))
 }
 
 // MARK: - compute models install / load

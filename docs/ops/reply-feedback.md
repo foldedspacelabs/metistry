@@ -5,19 +5,34 @@ you decide on**. Nothing in this loop changes how the assistant behaves on its
 own: the routine suggests, you allow, and only then is anything written —
 in your name (invariant 2, plan §4.10).
 
-## The Needs You queue's six verbs
+## The Needs You queue's answer set
 
 Every item in Needs You is a **request**, and a request has one of seven types
-(`glossary.md`). Whatever its type, these are the answers:
+(`glossary.md`). Whatever its type, one table decides what your press sends
+over the wire (plan §2.12):
 
-| Verb | Wire (`proposals.decision`) | What it does | Ends the item? |
-| --- | --- | --- | --- |
-| **Approve** | `allow` | The verb with per-kind consequences: an `improvement` writes the prompt overlay, an enrolment lets the agent in, an **`action` runs** ([actions.md](actions.md)), everything else is recorded and read by the evening fold. | yes |
-| **Revise** | `accept_with_changes` | Keeps your reason on the row. An empty reason cancels rather than sends — the assistant has nothing to change without one. | yes |
-| **Decline** | `deny` | Also per-kind: declining an enrolment **revokes** the agent's token. Your reason is kept. | yes |
-| **Approve as Work** | `allow`, plus a `work` row | Only where the row carries `payload.suggested_work`. See below. | yes |
-| **Later** | *unchanged* — `snoozed_until` is set | A snooze. The row stays `pending`, leaves the queue, and comes back by itself (`METISTRY_SNOOZE_HOURS`, default 3). | **no** |
-| **Skip** | `deny`, `feedback = 'skipped'` | Declines it with nothing to say. Fires **none** of Decline's per-kind consequences. | yes |
+| You press | Wire |
+| --- | --- |
+| Approve | `allow`, or `accept_as_work` where `payload.suggested_work` exists — see [below](#approve-as-work--the-click-is-what-creates-the-row) |
+| Revise | `accept_with_changes` + your reason. An empty reason cancels rather than sends — the assistant has nothing to change without one. |
+| Decline | `deny`, **always** — never a different wire per kind, though its consequences are per-kind (below) |
+| Later | `snoozed_until` is set. The row stays `pending`, leaves the queue, and comes back by itself (`METISTRY_SNOOZE_HOURS`, default 3). |
+| Skip | `deny` + `feedback = 'skipped'` (the fixed marker `SKIP_FEEDBACK`, `packages/core`) — the bulk list only, ≤ 100 rows "on this page" |
+| an option, *Something else…* | the option itself, or `other` + text |
+| *(the source cleared it)* | `resolved_at_source` — mirrors only |
+| *(14 days pass)* | `expired` — rows without a `source` |
+
+Approve, Revise and Decline are the three answers to the request itself.
+Later and Skip are not answers at all — Needs You once had only Approve,
+Revise and Decline, with no way to say *not now* for one row or *nothing to
+say* for many, and an item you can neither answer nor put down stays at the
+top of the queue forever
+(`docs/research/2026-09-16-taskuary-review.md` ADOPT 5).
+
+**Approve is the verb with per-kind consequences**: an `improvement` writes
+the prompt overlay, an enrolment lets the agent in, an **`action` runs**
+([actions.md](actions.md)), everything else is recorded and read by the
+evening fold.
 
 **An `action` is the second kind whose Approve *does* something**
 ([actions.md](actions.md)): the console runs it through the same service call
@@ -25,7 +40,12 @@ your own click would, and if that service refuses, the row stays pending
 carrying the error rather than settling a decision that did nothing. Only one
 at a time, for the same reason `improvement` is — see the batch note below.
 
-**Skip is not Decline.** The difference is what travels afterwards:
+**Decline is always `deny`.** The wire never varies by kind — only the
+consequences do: declining an enrolment **revokes** the agent's token, and
+your reason is kept either way.
+
+**Skip is not Decline.** The difference is what travels afterwards, and why
+Skip lives only in the bulk list:
 
 - For a **`decision`** request that is an enrolment, Decline revokes the
   agent's token. Skip does not — it settles the queue item and leaves the
@@ -48,14 +68,15 @@ the morning brief, which is the point: a `later` that still pushes at 07:00 is
 a lie. (A snoozed row still ages toward the brief's auto-expiry; a three-hour
 snooze does not outlive a fourteen-day clock.)
 
-**Multi-select.** Tick rows and apply one verb to all of them
-(`POST /api/proposals/batch`); `l` and `s` are the keys. Only `later`, `skip`
-and `deny` may be batched — the verbs that need nothing from the individual
-row. Approve, Revise and Approve as Work each *do* something per kind, so they
-stay one at a time (an `action` most of all: a batched allow would dispatch
-five briefs on one gesture). The batch is **all-or-nothing per row**: each id is its own
-statement with its own result, so one item answered on the phone thirty seconds
-ago does not refuse the other nine.
+**Multi-select is where Skip lives.** Tick rows, up to 100 "on this page,"
+and apply one verb to all of them (`POST /api/proposals/batch`); `l` and `s`
+are the keys. Only `later`, `skip` and `deny` may be batched — the verbs that
+need nothing from the individual row. Approve, Revise and Approve as Work
+each *do* something per kind, so they stay one at a time (an `action` most of
+all: a batched allow would dispatch five briefs on one gesture). The batch is
+**all-or-nothing per row**: each id is its own statement with its own result,
+so one item answered on the phone thirty seconds ago does not refuse the
+other nine.
 
 ## Approve as Work — the click is what creates the row
 

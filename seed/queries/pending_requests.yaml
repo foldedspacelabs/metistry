@@ -35,6 +35,14 @@
 # is intact: nothing here auto-creates anything, and a suggestion nobody
 # accepts stays a suggestion forever.
 #
+# **Mirrors and groups** (migration 0027, T1-8). `source` is what a mirror
+# stands for — `{kind, external_ref, person}`, a handle on a subject that
+# lives elsewhere, never payload content — and NULL for a request that is not
+# a mirror; a mirror never expires and leaves this list only when its source
+# changes (`resolved_at_source`). `group_id` is the card several rows are
+# answered as (a meeting's Accept All); NULL = its own card. Both come back
+# as stored, so a client groups and labels without a second read.
+#
 # **`expose: route`.** `GET /api/proposals` is owner-only — an agent token
 # gets the uniform `forbidden` well before it reaches that handler — so
 # serving the same rows by name on the generic door would hand every agent
@@ -54,8 +62,9 @@ description: >-
   stored kind, which agent raised it and at what trust, a title
   derived the way the morning brief derives it, whether it carries
   `suggested_work` (the Approve-as-Work answer) or an already-linked `work`
-  row, and its snooze instant. Never the payload itself. Oldest first, then
-  by id — a total order, so `limit`/`offset` page it without repeating or
+  row, its snooze instant, what it mirrors (`source`, NULL for a request
+  that is not a mirror) and the group it is answered with (`group_id`).
+  Never the payload itself. Oldest first, then by id — a total order, so `limit`/`offset` page it without repeating or
   skipping.
 params:
   kind: { type: text, default: "" } # blank = every kind; else one stored proposals.kind
@@ -83,7 +92,9 @@ sql: |
     ), 70)                                                         AS title,
     (p.payload ? 'suggested_work')                                 AS has_suggested_work,
     p.work_id,
-    p.snoozed_until
+    p.snoozed_until,
+    p.source,
+    p.group_id
   FROM proposals p
   CROSS JOIN f
   CROSS JOIN LATERAL (

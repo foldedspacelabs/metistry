@@ -11,7 +11,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { TasksService } from "@foldedspacelabs/metistry-tasks";
 import { ArtifactsService, memoryVault, staticDirectory } from "@foldedspacelabs/metistry-artifacts";
 import { ALIAS_NAMES, ARTIFACTS_TOOL_NAMES, EAGER_TOOL_NAMES, QUERIES_TOOL_NAMES, createBrainServer, TOOL_NAMES, type AgentPrincipal, type Db } from "../src/index.js";
-import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
+import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
 
 const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
 const P = "itest-brain-art";
@@ -121,13 +121,7 @@ describe.skipIf(!hasDb)("artifacts_* (real db, real MCP client)", () => {
   }
 
   beforeAll(async () => {
-    pool = new pg.Pool({
-      host: process.env.METISTRY_DB_HOST ?? "127.0.0.1",
-      port: Number(process.env.METISTRY_DB_PORT ?? 5432),
-      user: process.env.METISTRY_DB_USER ?? "metistry",
-      database: process.env.METISTRY_TEST_DB_NAME ?? "metistry_test",
-      password: process.env.METISTRY_DB_PASSWORD,
-    });
+    pool = await testDb(pg.Pool);
     await pool.query(`DELETE FROM artifact_comments WHERE artifact_id IN (SELECT id FROM artifacts WHERE project = $1)`, [P]);
     await pool.query(`DELETE FROM artifact_versions WHERE artifact_id IN (SELECT id FROM artifacts WHERE project = $1)`, [P]);
     await pool.query(`DELETE FROM artifacts WHERE project = $1`, [P]);

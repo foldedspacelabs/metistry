@@ -9,7 +9,7 @@ import { QueryStore } from "@foldedspacelabs/metistry-queries";
 import { mintToken } from "@foldedspacelabs/metistry-core";
 import { makeServer } from "../src/server.js";
 import * as store from "../src/auth-store.js";
-import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
+import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
 
 // the source of truth for the manifest/meta colours (F-9): `bg`, light scheme
 const designTokens = JSON.parse(readFileSync(new URL("../../../docs/product/design/tokens.json", import.meta.url), "utf8"));
@@ -26,12 +26,7 @@ describe.skipIf(!hasDb)("console PWA chunk", () => {
   let ownerToken: string;
 
   beforeAll(async () => {
-    pool = new pg.Pool({
-      host: process.env.METISTRY_DB_HOST ?? "127.0.0.1",
-      user: process.env.METISTRY_DB_USER ?? "metistry",
-      database: process.env.METISTRY_TEST_DB_NAME ?? "metistry_test", // scratch db (ops/scripts/test-db.sh)
-      password: process.env.METISTRY_DB_PASSWORD,
-    });
+    pool = await testDb(pg.Pool);
     server = makeServer(pool, new QueryStore(pool), {
       origin: "http://127.0.0.1:0",
       inboxDir: `/tmp/metistry-test-inbox-${Date.now()}`,

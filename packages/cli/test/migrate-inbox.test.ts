@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
+import { testDb } from "@foldedspacelabs/metistry-core/test-env";
 import { actualName, inboxTargetFor, migrateInbox, rewriteGitignore, rewritePathsSql } from "../src/migrate-inbox.js";
 import { GITIGNORE } from "../src/init.js";
 
@@ -155,15 +156,8 @@ describe("migrate-inbox (fixture instance repo)", () => {
   describe.skipIf(!hasDb)("inbox.path rewrite against the scratch db", () => {
     let pool: pg.Pool;
     const sources: string[] = [];
-    beforeAll(() => {
-      pool = new pg.Pool({
-        host: process.env.METISTRY_DB_HOST ?? "127.0.0.1",
-        port: Number(process.env.METISTRY_DB_PORT ?? 5432),
-        database: process.env.METISTRY_TEST_DB_NAME ?? "metistry_test",
-        user: process.env.METISTRY_DB_USER ?? "metistry",
-        password: process.env.METISTRY_DB_PASSWORD,
-        max: 1,
-      });
+    beforeAll(async () => {
+      pool = await testDb(pg.Pool, { max: 1 });
     });
     afterAll(async () => {
       for (const s of sources) await pool.query(`DELETE FROM inbox WHERE source = $1`, [s]).catch(() => {});

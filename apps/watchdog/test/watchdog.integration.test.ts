@@ -9,7 +9,7 @@ import pg from "pg";
 import { runProbes, type ProbeConfig } from "../src/probes.js";
 import { alertFailures } from "../src/alert.js";
 import { loadScheduled } from "../src/manifests.js";
-import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
+import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
 
 const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
 const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
@@ -33,12 +33,7 @@ describe.skipIf(!hasDb)("watchdog", () => {
   let cfg: ProbeConfig;
 
   beforeAll(async () => {
-    pool = new pg.Pool({
-      host: process.env.METISTRY_DB_HOST ?? "127.0.0.1",
-      user: process.env.METISTRY_DB_USER ?? "metistry",
-      database: process.env.METISTRY_TEST_DB_NAME ?? "metistry_test", // scratch db (ops/scripts/test-db.sh)
-      password: process.env.METISTRY_DB_PASSWORD,
-    });
+    pool = await testDb(pg.Pool);
     // park stray queue rows so drain-staleness probes see a clean world
     await pool.query(`UPDATE inbound_messages SET status='done' WHERE status IN ('new','processing')`);
     await pool.query(`UPDATE runs SET finished_at = now(), ok = false WHERE finished_at IS NULL`);

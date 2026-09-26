@@ -254,7 +254,7 @@ owner; the C96 events and the meeting-at-Stop as instances. **Needs You is the h
 
 **Keyboard and VoiceOver (2026-09-25, C119–C122, boards `Keyboard`, `VoiceOver`, `components-02-keyboard-voiceover.md`):** Mac only; every shortcut a menu item (Go ⌘0–⌘7, Capture, Item); shortcuts in any app off by default with conflict checks, Start and Stop Recording separate; a Spoken table and rules for VoiceOver; Reduce Motion and largest text.
 
-**Settings panes (2026-09-25, C123–C127, board `Settings-Panes`, screen 15 §5):** Instance names the assistant and lists linked instances; Services leads with Doctor and has per-service controls; Compute sets Metis's model then tabs Local (browse, install, load) and Cloud (by token or subscription, spending limits), and agents pick their model in their definitions (C128); Keep Awake has two sub-switches (C129); Updates updates and rolls back the runtime; Keyboard is one switch; Advanced holds the runtime source.
+**Settings panes (2026-09-25, C123–C127, board `Settings-Panes`, screen 15 §5):** Instance names the assistant and lists linked instances; Services leads with Doctor and has per-service controls; Compute is one column — Metis, Providers (switch, tags, credential), Your Models (memory and disk, on this Mac and from the cloud, one search grouped by model with a line per place), Spending limits — and agents pick a model then where it runs (C128, C130, C131); Keep Awake has two sub-switches (C129); Updates updates and rolls back the runtime; Keyboard is one switch; Advanced holds the runtime source.
 
 **Next round, in order:** (1)
 **States for screens 10–17** and the §3.3 flows, including the Mac's Compute
@@ -292,7 +292,7 @@ the canvas is now generated from a module in `boards/` except `Facets`, `Plugin`
 `Voice` and `Item-Model`. `bellpanel()` is gone — it drew the *"1 snoozed"*
 header C21 killed; `panel2()` is the panel.
 
-**129 contradictions** are logged in `review-00-plan.md`. C38, C51 and C62 are closed. C40–C87 are
+**131 contradictions** are logged in `review-00-plan.md`. C38, C51 and C62 are closed. C40–C87 are
 round E's; C88–C98 are review 01's rulings. Two of them are rules the system is missing rather than faults in a
 file: **C45** (a failed consequential operation leaves the request pending) and
 **C49** (a mark that carries meaning takes an ink token, never a border token —

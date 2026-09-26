@@ -63,18 +63,36 @@ in the Background, Keep this Mac Awake — and under it, disabled while it is of
 Allow sleep on battery and Allow sleep when the lid is closed, both on, each with
 a warning tip; C129).
 
-### 5.3 Compute (C128)
-**Metis** — model, effort, and a fallback if it fails. Then two tabs:
+### 5.3 Compute (C130; C128's tabs withdrawn)
 
-- **Local** — Apple Foundation Models, LM Studio, Ollama, each tagged *Local* ·
-  *Free*, with Test, Remove, Start; a memory bar; installed models (Load,
-  Unload); **Browse** searches and installs, marking *Fits* or *Tight fit*.
-- **Cloud** — each provider tagged *Cloud* and *By token* or *Subscription*,
-  ZDR chip, key as a secret; then **Spending limits** (per day, per month, then
-  Allow · Stop · Critical only) for by-token providers; a subscription shows its
-  window instead.
+One column, in this order:
 
-Agents and routines pick their model in their own definitions (screen 7 §3.4).
+1. **Metis** — model and where it runs (with its tags), effort, fallback if it fails.
+2. **Providers** — local and cloud together. Each row: a switch (off = not
+   searched, not offered), name, tags (*Local*/*Cloud*; *Free*/*By token*/
+   *Subscription*; ZDR), status, credential (a secret chip; *Signed in · Sign
+   Out*; or *Key not set · Choose a secret*), Test, Remove. *Add Provider…*.
+3. **Your Models** — Memory and Disk bars; the search field (*Search 6 providers
+   for models*); by default *On this Mac* (loaded state, size, Load / Unload) and
+   *From the cloud* (price or *Included in* the plan, Remove).
+4. **Spending limits** — per day, per month, then Allow · Stop · Critical only,
+   for by-token providers; a subscription's window is its limit; today's spend.
+
+#### 5.3.1 One model, several places (C131)
+
+Search results group by **model**: name, maker, context, capabilities, *N
+places*. Under it, one line per place:
+
+| Place | Shows | Action |
+| --- | --- | --- |
+| Cloud, by token | provider, ZDR, price per M tokens in / out; **Cheapest** marked | Add |
+| Cloud, subscription | provider, *Included in <plan>* | Add |
+| Local | provider, quantisation, size, memory needed; *Fits* · *Tight fit* · *Too large* | Install (disabled when too large) |
+
+Filters: Local · Cloud · Free · By token · Subscription · Fits this Mac · Tools.
+Sort: Best match · Cheapest · Largest context. A collapsed result reads *Local or
+cloud · from $0.10 per M*. An agent's definition picks a model, then where it
+runs (screen 7 §3.4).
 
 ### 5.4 Updates
 This app (version and channel, Check Now, automatic) · Metistry runtime (running

@@ -14,6 +14,7 @@
 
 import { Keychain, keychainAccount } from "./keychain.js";
 import { realExec, type Exec } from "./exec.js";
+import { applyPorts, loadNamespace } from "./namespace.js";
 import { accountFor } from "./secrets.js";
 
 /** Where the console is, from the host's vantage. The watchdog's variable, then the plugin's, then the default. */
@@ -24,6 +25,13 @@ export interface ConsoleTargetOptions {
   env?: NodeJS.ProcessEnv | undefined;
   /** this instance's `instance_id`: the Keychain account METISTRY_LOCAL_OWNER_TOKEN is filed under */
   instanceId?: string | undefined;
+  /**
+   * this instance's directory. A namespaced one (`.metistry/state/ports.yaml`)
+   * has its console on its own port, not 8080 — without this an `--instance`
+   * pointed at a second instance would send ITS owner token to the default
+   * install's console.
+   */
+  instanceDir?: string | undefined;
   exec?: Exec | undefined;
   platform?: NodeJS.Platform | undefined;
 }
@@ -40,14 +48,25 @@ function normalizeUrl(v: string): string {
 }
 
 /**
- * The console's URL and this install's owner token. The environment (which
- * is `<instance>/state/.env`, already loaded) comes first; the login
+ * The console's URL and this install's owner token.
+ *
+ * The URL: METISTRY_CONSOLE_URL, then METISTRY_URL, then the default. For a
+ * namespaced instance (`opts.instanceDir` with a `state/ports.yaml`) the
+ * namespace fills METISTRY_CONSOLE_URL when nothing set it — the same
+ * `applyPorts` rule `doctor`, `connect` and `up` apply, so an explicit URL
+ * in the environment or `state/.env` still wins and the default 8080 is
+ * never reached for an instance that has its own port. The caller's
+ * environment is copied, never mutated.
+ *
+ * The token: the environment (which is `<instance>/state/.env`, already loaded) comes first; the login
  * Keychain is the fallback, under the account the scope table files
  * METISTRY_LOCAL_OWNER_TOKEN under — the instance's, with the per-user account
  * behind it for an item that has not been migrated yet.
  */
 export async function consoleTarget(opts: ConsoleTargetOptions = {}): Promise<ConsoleTarget> {
-  const env = opts.env ?? process.env;
+  const env: NodeJS.ProcessEnv = { ...(opts.env ?? process.env) };
+  const ns = await loadNamespace(opts.instanceDir);
+  if (ns) applyPorts(env, ns);
   const platform = opts.platform ?? process.platform;
   const url = normalizeUrl(CONSOLE_URL_VARS.map((v) => env[v]).find((v) => (v ?? "").trim() !== "") ?? DEFAULT_CONSOLE_URL);
   let token = (env.METISTRY_LOCAL_OWNER_TOKEN ?? "").trim();

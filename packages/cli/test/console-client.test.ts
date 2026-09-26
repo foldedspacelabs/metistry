@@ -2,11 +2,12 @@
 // (docs/ops/auth.md). What matters here is where the token comes from,
 // that it never leaves this process except as an Authorization header, and
 // that a 401 says which of the two things went wrong.
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { consoleCall, consoleTarget, DEFAULT_CONSOLE_URL, isLoopbackConsoleUrl, renderConsoleCallError, renderWhoami, whoami } from "../src/console-client.js";
+import { portsFile } from "../src/namespace.js";
 import type { Exec } from "../src/exec.js";
 import { main } from "../src/main.js";
 
@@ -439,5 +440,120 @@ describe("metistry console call (CLI)", () => {
     expect(code).toBe(0);
     expect(JSON.parse(out.join(""))).toEqual({ id: 43 });
     expect(err).toHaveLength(0);
+  });
+});
+
+/** A scratch instance given a namespace the way `metistry up --namespace` records one: its console on 8304, not 8080. */
+async function namespacedInstance(): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), "metistry-console-ns-"));
+  await mkdir(join(dir, ".metistry", "state"), { recursive: true });
+  await writeFile(
+    portsFile(dir),
+    ["schema: 1", `instance_id: "${INSTANCE_ID}"`, 'label_suffix: "a1b2c3d4"', "base: 8304", "ports:", "  console: 8304", "  db: 8305", "  reconciler: 8306", "  eventkit: 8307", "  apple-fm: 8308", ""].join("\n"),
+  );
+  return dir;
+}
+
+/** Every URL a verb fetched — the thing under test is WHERE the owner token went. */
+function recordingConsole() {
+  const urls: string[] = [];
+  const fetchFn = (async (url: string | URL | Request) => {
+    urls.push(String(url));
+    return new Response(JSON.stringify({ principal: "user", via: "local_owner_token", management: true }), { status: 200, headers: { "content-type": "application/json" } });
+  }) as unknown as typeof fetch;
+  return { fetchFn, urls };
+}
+
+describe("a namespaced --instance: the console verbs target ITS port, never the default 8080", () => {
+  afterEach(() => {
+    delete process.env.METISTRY_LOCAL_OWNER_TOKEN;
+    delete process.env.METISTRY_CONSOLE_URL;
+    delete process.env.METISTRY_URL;
+    delete process.env.METISTRY_INSTANCE_DIR; // loadInstallEnv writes --instance back into the environment
+  });
+
+  it("console call", async () => {
+    const dir = await namespacedInstance();
+    process.env.METISTRY_LOCAL_OWNER_TOKEN = TOKEN;
+    const c = recordingConsole();
+    expect(await main(["console", "call", "GET", "/api/whoami", "--json", "--instance", dir], { out: () => {}, err: () => {}, platform: "linux", fetchFn: c.fetchFn })).toBe(0);
+    expect(c.urls).toEqual(["http://127.0.0.1:8304/api/whoami"]);
+    expect(c.urls.join()).not.toContain(":8080");
+    // the namespace is resolved on a copy: it does not leak into this process's environment
+    expect(process.env.METISTRY_CONSOLE_URL).toBeUndefined();
+  });
+
+  it("console whoami", async () => {
+    const dir = await namespacedInstance();
+    process.env.METISTRY_LOCAL_OWNER_TOKEN = TOKEN;
+    const c = recordingConsole();
+    expect(await main(["console", "whoami", "--json", "--instance", dir], { out: () => {}, err: () => {}, platform: "linux", fetchFn: c.fetchFn })).toBe(0);
+    expect(c.urls).toEqual(["http://127.0.0.1:8304/api/whoami"]);
+  });
+
+  it("console session --stdio", async () => {
+    const dir = await namespacedInstance();
+    process.env.METISTRY_LOCAL_OWNER_TOKEN = TOKEN;
+    const c = recordingConsole();
+    const lines: string[] = [];
+    const code = await main(["console", "session", "--stdio", "--instance", dir], {
+      out: (s) => lines.push(s),
+      err: () => {},
+      platform: "linux",
+      fetchFn: c.fetchFn,
+      sessionInput: (async function* () {
+        yield JSON.stringify({ id: 1, method: "GET", path: "/api/whoami" });
+      })(),
+    });
+    expect(code).toBe(0);
+    expect(c.urls).toEqual(["http://127.0.0.1:8304/api/whoami"]);
+  });
+
+  // The other verbs that present the owner token. What they do with the
+  // (whoami-shaped) answer is not the point and may fail; WHERE the token went is.
+  const onlyNamespaced = (urls: string[]) => {
+    expect(urls.length).toBeGreaterThan(0);
+    for (const u of urls) expect(u.startsWith("http://127.0.0.1:8304/")).toBe(true);
+    expect(urls.join()).not.toContain(":8080");
+  };
+
+  it("agents list and agents autonomy", async () => {
+    const dir = await namespacedInstance();
+    process.env.METISTRY_LOCAL_OWNER_TOKEN = TOKEN;
+    const c = recordingConsole();
+    const io = { out: () => {}, err: () => {}, platform: "linux" as const, fetchFn: c.fetchFn };
+    await main(["agents", "list", "--json", "--instance", dir], io);
+    await main(["agents", "autonomy", "researcher", "--json", "--instance", dir], io);
+    onlyNamespaced(c.urls);
+    expect(c.urls.some((u) => u.endsWith("/api/agents"))).toBe(true);
+  });
+
+  it("runs export", async () => {
+    const dir = await namespacedInstance();
+    process.env.METISTRY_LOCAL_OWNER_TOKEN = TOKEN;
+    const c = recordingConsole();
+    await main(["runs", "export", "--limit", "1", "--instance", dir], { out: () => {}, err: () => {}, platform: "linux", fetchFn: c.fetchFn });
+    onlyNamespaced(c.urls);
+    expect(c.urls[0]).toContain("/api/runs/export");
+  });
+
+  it("compute route-report", async () => {
+    const dir = await namespacedInstance();
+    process.env.METISTRY_LOCAL_OWNER_TOKEN = TOKEN;
+    const c = recordingConsole();
+    await main(["compute", "route-report", "--json", "--instance", dir], { out: () => {}, err: () => {}, platform: "linux", fetchFn: c.fetchFn });
+    onlyNamespaced(c.urls);
+    expect(c.urls[0]).toContain("/api/q/route_report");
+  });
+
+  it("an explicit METISTRY_CONSOLE_URL still wins over the namespace, as it does for doctor and connect", async () => {
+    const dir = await namespacedInstance();
+    const r = await consoleTarget({ env: { METISTRY_LOCAL_OWNER_TOKEN: TOKEN, METISTRY_CONSOLE_URL: "http://127.0.0.1:9999" }, platform: "linux", instanceDir: dir });
+    expect(r.url).toBe("http://127.0.0.1:9999");
+    // and with nothing set, the namespace — not the default
+    expect((await consoleTarget({ env: { METISTRY_LOCAL_OWNER_TOKEN: TOKEN }, platform: "linux", instanceDir: dir })).url).toBe("http://127.0.0.1:8304");
+    // an instance with no ports.yaml is the default install: 8080, unchanged
+    const plain = await mkdtemp(join(tmpdir(), "metistry-console-plain-"));
+    expect((await consoleTarget({ env: { METISTRY_LOCAL_OWNER_TOKEN: TOKEN }, platform: "linux", instanceDir: plain })).url).toBe(DEFAULT_CONSOLE_URL);
   });
 });

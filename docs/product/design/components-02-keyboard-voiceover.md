@@ -35,7 +35,7 @@ focus, never in a text field.
 
 ## 2. Shortcuts in any app (C120)
 
-Settings › Live Capture › **Shortcuts in any app**, **off by default**.
+Settings › **Keyboard** › **Shortcuts in any app**, **off by default** (C127 moved it from Live Capture).
 
 | Action | Suggested |
 | --- | --- |

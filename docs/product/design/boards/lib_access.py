@@ -123,9 +123,9 @@ def hotkeys(T,*,on=False,conflicts=False):
     return sunk(T,head+f'<div style="margin-top: 10px; border-top: 1px solid {T["border"]};">{rows}</div>'+foot)
 
 def hkpane(T,*,on=False,conflicts=False):
-    return (panehead(T,"Live Capture")
+    return (panehead(T,"Keyboard")
             + f'<div style="padding: 4px 18px 18px; display: flex; flex-direction: column; gap: 14px;">'
-            + block(T,"SHORTCUTS",hotkeys(T,on=on,conflicts=conflicts)) + '</div>')
+            + hotkeys(T,on=on,conflicts=conflicts) + '</div>')
 
 # ---- focus -----------------------------------------------------------------------------------
 def focusring(T,inner,*,r=8):

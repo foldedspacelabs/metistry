@@ -184,6 +184,7 @@ phone and narrow PWA.
 | Knowledge | Pages · Page · Search · Inbox | **entirely undesigned; no client read path exists yet** |
 | Agents | Agents · Agent detail · Crews/Targets | presence chips, scope and autonomy controls, destructive confirmations |
 | Insights | Spend · Runs & models | cost over time, run counts and failure streaks, shadow agreement, token and latency trends. The spend tiles exist in the PWA; nothing else is designed |
+> *Superseded by `design/screen-15-settings.md` (2026-09-25): Instance · Services · Compute · Updates; Account · Connections · Secrets · Variables; Live Capture · Sessions; Keyboard · Advanced.*
 | Settings | General · Status · Compute · Connections · Devices · Advanced | §3.3. Status and Compute are the two that exist in Swift today |
 | *chrome* | **Mac sidebar** | six rows, Work and Knowledge expandable, then **Pinned** — the one part of the navigation the user composes |
 

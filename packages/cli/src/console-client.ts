@@ -210,28 +210,66 @@ function normalizeIdempotencyKey(raw: string): string {
  */
 export async function consoleCall(opts: ConsoleCallOptions): Promise<ConsoleCallResult> {
   const idempotencyKey = opts.idempotencyKey !== undefined ? normalizeIdempotencyKey(opts.idempotencyKey) : undefined;
-  const target = await consoleTarget(opts);
-  if (!isLoopbackConsoleUrl(target.url)) {
-    throw new Error(
-      `${target.url} is not loopback — the local owner token this verb presents is minted for THIS machine only (docs/ops/auth.md) and \`console call\` refuses to send it anywhere else. Point METISTRY_CONSOLE_URL/METISTRY_URL at a loopback address, or use a passkey session for a remote console.`,
-    );
-  }
-  const fetchFn = opts.fetchFn ?? fetch;
+  const target = await loopbackConsoleTarget(opts, "`console call`");
   let res: Response;
   try {
-    res = await fetchFn(`${target.url}${opts.path}`, {
+    res = await sendConsoleRequest(target, {
       method: opts.method,
-      headers: {
-        authorization: `Bearer ${target.token}`,
-        ...(idempotencyKey !== undefined ? { "idempotency-key": idempotencyKey } : {}),
-        ...(opts.body !== undefined ? { "content-type": "application/json" } : {}),
-      },
-      ...(opts.body !== undefined ? { body: opts.body } : {}),
+      path: opts.path,
+      body: opts.body,
+      idempotencyKey,
+      fetchFn: opts.fetchFn,
       signal: AbortSignal.timeout(opts.timeoutMs ?? 30_000),
     });
   } catch (err) {
     throw new Error(`console unreachable at ${target.url}: ${redact((err as { cause?: { message?: string } })?.cause?.message ?? err, target.token)}`);
   }
+  return readConsoleResponse(res);
+}
+
+/**
+ * `consoleTarget`, refused unless it is loopback. The one gate both `console
+ * call` and `console session` pass before the token goes into any header —
+ * `verb` only names who is refusing, in the sentence.
+ */
+async function loopbackConsoleTarget(opts: ConsoleTargetOptions, verb: string): Promise<ConsoleTarget> {
+  const target = await consoleTarget(opts);
+  if (!isLoopbackConsoleUrl(target.url)) {
+    throw new Error(
+      `${target.url} is not loopback — the local owner token this verb presents is minted for THIS machine only (docs/ops/auth.md) and ${verb} refuses to send it anywhere else. Point METISTRY_CONSOLE_URL/METISTRY_URL at a loopback address, or use a passkey session for a remote console.`,
+    );
+  }
+  return target;
+}
+
+interface ConsoleRequest {
+  method: string;
+  path: string;
+  body?: string | undefined;
+  idempotencyKey?: string | undefined;
+  /** `Last-Event-ID`, for a stream resuming where it left off (design-build-plan §2.20) */
+  lastEventId?: string | undefined;
+  fetchFn?: typeof fetch | undefined;
+  signal: AbortSignal;
+}
+
+/** The one place a request to the console is built: the bearer, and the two optional headers. */
+function sendConsoleRequest(target: ConsoleTarget, req: ConsoleRequest): Promise<Response> {
+  const fetchFn = req.fetchFn ?? fetch;
+  return fetchFn(`${target.url}${req.path}`, {
+    method: req.method,
+    headers: {
+      authorization: `Bearer ${target.token}`,
+      ...(req.idempotencyKey !== undefined ? { "idempotency-key": req.idempotencyKey } : {}),
+      ...(req.lastEventId !== undefined ? { "last-event-id": req.lastEventId } : {}),
+      ...(req.body !== undefined ? { "content-type": "application/json" } : {}),
+    },
+    ...(req.body !== undefined ? { body: req.body } : {}),
+    signal: req.signal,
+  });
+}
+
+async function readConsoleResponse(res: Response): Promise<ConsoleCallResult> {
   const raw = await res.text();
   let body: unknown = raw;
   if (raw !== "") {
@@ -254,4 +292,281 @@ export function renderConsoleCallError(r: ConsoleCallResult): string {
   return [`HTTP ${r.status}`, e?.code ? String(e.code) : undefined, e?.message ? String(e.message) : undefined, field ? `(field: ${String(field)})` : undefined]
     .filter((s): s is string => s !== undefined)
     .join(" — ");
+}
+
+// ---------------------------------------------------------------------------
+// `metistry console session --stdio` — the same door, held open.
+//
+// `console call` costs a whole process per request (node's start, the env
+// load, the token lookup — ~140 ms on the scratch instance, measured for
+// F-12), which is fine for a script and wrong for an app that repaints a
+// board. The session is that verb as ONE long-lived child: the token is
+// resolved once, at start, and every request after that is a line of JSON on
+// stdin answered by a line of JSON on stdout.
+//
+//   in   {id, method, path, body?, idempotency_key?, stream?, last_event_id?}
+//        {id, cancel: true}                         — ends a stream
+//   out  {id, status, body, replayed?}              — the console answered
+//        {id, event: {id, type, data}}              — one frame of an open stream
+//        {id, ended: "cancelled" | "closed"}        — a stream's last line (or
+//                                                     a request cancelled before
+//                                                     its answer)
+//        {id, error: {code, message}}               — nothing was asked, or no
+//                                                     answer came
+//
+// Every request gets exactly ONE terminal line (`status` or `error`), so a
+// client can hold a table of what is in flight and know when an entry is
+// done. Requests run concurrently; responses match by `id`, never by order.
+//
+// What it will not do: send the token anywhere but a loopback console (it
+// refuses at start, before reading a line), stream anything but `GET
+// /api/events` (§2.20 — one subscription, ids never bodies), or print the
+// token — every line it writes is redacted against it, on the same rule as
+// every error message above.
+
+/** The one route a request may mark `stream: true` (design-build-plan §2.20). */
+export const SESSION_STREAM_PATH = "/api/events";
+const SESSION_METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE"]);
+
+export type SessionId = string | number;
+
+export interface ConsoleSessionOptions extends ConsoleTargetOptions {
+  /** the request lines, one JSON object per line — the process's stdin */
+  input: AsyncIterable<string>;
+  /** one output line, written whole — the process's stdout. Resolves once written. */
+  write: (line: string) => Promise<void> | void;
+  fetchFn?: typeof fetch | undefined;
+  /** per-request timeout for a non-stream request; a stream has none */
+  timeoutMs?: number | undefined;
+}
+
+class SessionRefusal extends Error {
+  constructor(
+    readonly code: "invalid_request" | "duplicate_id",
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+interface SessionRequest {
+  id: SessionId;
+  method: string;
+  path: string;
+  body?: string;
+  idempotencyKey?: string;
+  lastEventId?: string;
+  stream: boolean;
+}
+
+function sessionId(v: unknown): SessionId | undefined {
+  if (typeof v === "string" && v !== "" && v.length <= 200) return v;
+  if (typeof v === "number" && Number.isSafeInteger(v)) return v;
+  return undefined;
+}
+
+/** One request line, checked — every refusal is a sentence the client gets back on the same id. */
+function parseSessionRequest(o: Record<string, unknown>, id: SessionId, target: ConsoleTarget): SessionRequest {
+  const method = typeof o.method === "string" ? o.method.toUpperCase() : "";
+  if (!SESSION_METHODS.has(method)) throw new SessionRefusal("invalid_request", `method must be one of ${[...SESSION_METHODS].join(", ")}`);
+  const path = typeof o.path === "string" ? o.path : "";
+  // A path on THIS console: absolute, and the URL it makes keeps the
+  // console's own origin — the token never rides to a host a path smuggled in.
+  if (!path.startsWith("/") || path.startsWith("//") || new URL(`${target.url}${path}`).origin !== new URL(target.url).origin) {
+    throw new SessionRefusal("invalid_request", "path must be an absolute path on the console, e.g. /api/whoami");
+  }
+  const stream = o.stream === true;
+  if (stream && (method !== "GET" || path.split("?")[0] !== SESSION_STREAM_PATH)) {
+    throw new SessionRefusal("invalid_request", `only GET ${SESSION_STREAM_PATH} may be a stream`);
+  }
+  if (o.stream !== undefined && typeof o.stream !== "boolean") throw new SessionRefusal("invalid_request", "stream must be true or false");
+  const req: SessionRequest = { id, method, path, stream };
+  if (o.body !== undefined) {
+    if (method === "GET") throw new SessionRefusal("invalid_request", "a GET carries no body");
+    req.body = JSON.stringify(o.body);
+  }
+  if (o.idempotency_key !== undefined) {
+    if (typeof o.idempotency_key !== "string") throw new SessionRefusal("invalid_request", "idempotency_key must be a string");
+    try {
+      req.idempotencyKey = normalizeIdempotencyKey(o.idempotency_key);
+    } catch (e) {
+      throw new SessionRefusal("invalid_request", (e as Error).message.replace("--idempotency-key", "idempotency_key"));
+    }
+  }
+  if (o.last_event_id !== undefined) {
+    if (!stream || typeof o.last_event_id !== "string" || o.last_event_id === "" || o.last_event_id.length > 200) {
+      throw new SessionRefusal("invalid_request", "last_event_id is a non-empty string, on a stream request only");
+    }
+    req.lastEventId = o.last_event_id;
+  }
+  return req;
+}
+
+/**
+ * Server-Sent Events, framed: `id:`, `event:` and `data:` fields, a blank
+ * line dispatching (the WHATWG rule), `:` lines being comments — the
+ * console's heartbeat. `data` is parsed as JSON and left as text when it is
+ * not; an unknown `type` passes through (the client ignores types it does
+ * not know, so an additive type on a newer console breaks nothing).
+ */
+async function* sseFrames(body: ReadableStream<Uint8Array>): AsyncGenerator<{ id?: string; type: string; data: unknown }> {
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let id: string | undefined;
+  let type = "";
+  let data: string[] = [];
+  const reader = body.getReader();
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      buffer += done ? decoder.decode() : decoder.decode(value, { stream: true });
+      let nl: number;
+      while ((nl = buffer.search(/\r\n|\n|\r/)) !== -1) {
+        const line = buffer.slice(0, nl);
+        buffer = buffer.slice(nl + (buffer.startsWith("\r\n", nl) ? 2 : 1));
+        if (line === "") {
+          if (data.length > 0) {
+            const text = data.join("\n");
+            let parsed: unknown = text;
+            try {
+              parsed = JSON.parse(text);
+            } catch {
+              /* not JSON: the text stands */
+            }
+            yield { ...(id !== undefined ? { id } : {}), type: type || "message", data: parsed };
+          }
+          type = "";
+          data = [];
+          continue;
+        }
+        if (line.startsWith(":")) continue;
+        const colon = line.indexOf(":");
+        const field = colon === -1 ? line : line.slice(0, colon);
+        const value = colon === -1 ? "" : line.slice(colon + 1).replace(/^ /, "");
+        if (field === "id") id = value;
+        else if (field === "event") type = value;
+        else if (field === "data") data.push(value);
+      }
+      if (done) return;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+/**
+ * Run one session to the end of its input. Resolves the target and the token
+ * ONCE — a refusal there (no token, a non-loopback console) throws before a
+ * single line is read, and the caller prints it and exits non-zero. After
+ * that nothing throws: every failure is an `{id, error}` line.
+ */
+export async function runConsoleSession(opts: ConsoleSessionOptions): Promise<void> {
+  const target = await loopbackConsoleTarget(opts, "`console session`");
+  const clean = (s: string) => redact(s, target.token);
+  const emit = (o: Record<string, unknown>) => opts.write(clean(JSON.stringify(o)));
+  const inFlight = new Map<SessionId, { abort: AbortController; stream: boolean; cancelled: boolean }>();
+  const running = new Set<Promise<void>>();
+
+  const refuse = (id: SessionId | null, code: string, message: string) => emit({ id, error: { code, message: clean(message) } });
+
+  const handle = async (req: SessionRequest, entry: { abort: AbortController; stream: boolean; cancelled: boolean }) => {
+    // The id is free again BEFORE its terminal line goes out: a client that
+    // reuses an id the moment it has its answer must not be told it is busy.
+    const finish = (o: Record<string, unknown>) => {
+      if (inFlight.get(req.id) === entry) inFlight.delete(req.id);
+      return emit({ id: req.id, ...o });
+    };
+    let res: Response;
+    try {
+      res = await sendConsoleRequest(target, {
+        method: req.method,
+        path: req.path,
+        body: req.body,
+        idempotencyKey: req.idempotencyKey,
+        lastEventId: req.lastEventId,
+        fetchFn: opts.fetchFn,
+        signal: req.stream ? entry.abort.signal : AbortSignal.any([entry.abort.signal, AbortSignal.timeout(opts.timeoutMs ?? 30_000)]),
+      });
+    } catch (err) {
+      if (entry.cancelled) return void (await finish({ ended: "cancelled" }));
+      const why = (err as { cause?: { message?: string } })?.cause?.message ?? (err as Error)?.message ?? String(err);
+      return void (await finish({ error: { code: "unreachable", message: clean(`console unreachable at ${target.url}: ${why}`) } }));
+    }
+    const eventStream = req.stream && res.ok && (res.headers.get("content-type") ?? "").startsWith("text/event-stream") && res.body !== null;
+    if (!eventStream) {
+      // Not a stream after all — a 401, a 404 on a console that does not
+      // serve the route yet, anything — so it is an ordinary answer.
+      const r = await readConsoleResponse(res);
+      return void (await finish({ status: r.status, body: r.body, ...(r.replayed ? { replayed: true } : {}) }));
+    }
+    try {
+      for await (const frame of sseFrames(res.body as ReadableStream<Uint8Array>)) {
+        await emit({ id: req.id, event: frame });
+      }
+      await finish({ ended: entry.cancelled ? "cancelled" : "closed" });
+    } catch (err) {
+      if (entry.cancelled) return void (await finish({ ended: "cancelled" }));
+      await finish({ error: { code: "unreachable", message: clean(`the stream from ${target.url} broke: ${(err as Error)?.message ?? String(err)}`) } });
+    }
+  };
+
+  for await (const raw of opts.input) {
+    const line = raw.trim();
+    if (line === "") continue;
+    let o: Record<string, unknown>;
+    try {
+      const parsed: unknown = JSON.parse(line);
+      if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("not an object");
+      o = parsed as Record<string, unknown>;
+    } catch {
+      await refuse(null, "invalid_request", "each line is one JSON object");
+      continue;
+    }
+    const id = sessionId(o.id);
+    if (id === undefined) {
+      await refuse(null, "invalid_request", "id must be a non-empty string (at most 200 characters) or an integer");
+      continue;
+    }
+    if (o.cancel === true) {
+      const entry = inFlight.get(id);
+      // Cancelling what already finished is not an error: the terminal line
+      // for it is already on its way, and that line is the answer.
+      if (entry) {
+        entry.cancelled = true;
+        entry.abort.abort();
+      }
+      continue;
+    }
+    if (inFlight.has(id)) {
+      await refuse(id, "duplicate_id", `id ${JSON.stringify(id)} is still in flight — responses match by id, so it cannot be reused until its answer is out`);
+      continue;
+    }
+    let req: SessionRequest;
+    try {
+      req = parseSessionRequest(o, id, target);
+    } catch (e) {
+      await refuse(id, e instanceof SessionRefusal ? e.code : "invalid_request", (e as Error).message);
+      continue;
+    }
+    const entry = { abort: new AbortController(), stream: req.stream, cancelled: false };
+    inFlight.set(id, entry);
+    const p = handle(req, entry)
+      .catch((e) => {
+        if (inFlight.get(id) === entry) inFlight.delete(id);
+        return refuse(id, "unreachable", (e as Error)?.message ?? String(e));
+      })
+      // stdout itself is gone (the parent died): there is no one to tell
+      .catch(() => undefined)
+      .finally(() => running.delete(p));
+    running.add(p);
+  }
+  // Input closed: nobody is left to read a stream, so every stream ends; a
+  // plain request still gets its answer written before the process goes.
+  for (const entry of inFlight.values()) {
+    if (entry.stream) {
+      entry.cancelled = true;
+      entry.abort.abort();
+    }
+  }
+  await Promise.all([...running]);
 }

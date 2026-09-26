@@ -39,12 +39,15 @@ export interface PublicIdentity {
  *   artifacts  the vault client the artifacts module stores through (§4.21)
  *   queries    at least one named query loaded (invariant 3's read path)
  *   dispatch   at least one compute target configured (§4.18)
+ *   events     the live-changes stream is served (GET /api/events, §2.20)
  */
 export interface CapabilitySources {
   hasKnowledge: boolean;
   hasArtifacts: boolean;
   queryCount: number;
   targetCount: number;
+  /** `GET /api/events` is served (the client API table's row, §2.20). Absent = false: nothing to subscribe to. */
+  hasEvents?: boolean;
 }
 
 /**
@@ -57,6 +60,7 @@ export function capabilitiesOf(s: CapabilitySources): Capability[] {
     artifacts: s.hasArtifacts,
     capture: true,
     dispatch: s.targetCount > 0,
+    events: s.hasEvents === true,
     knowledge: s.hasKnowledge,
     queries: s.queryCount > 0,
     tasks: true,

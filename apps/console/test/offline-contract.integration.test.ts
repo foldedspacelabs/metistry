@@ -68,9 +68,10 @@ describe.skipIf(!hasDb)("offline contract (integration)", () => {
     expect(r.status).toBe(200);
     const body = await r.json();
     expect(body).toMatchObject({ instance_id: "8b6a3a2e-1111-4222-8333-444455556666", name: "Metis", icon: null, version: "0.0.0-test" });
-    // `capabilities` (S1) is the ONE field this read has taken since: coarse tool
-    // GROUP names, never a tool name and never a count (docs/ops/console-api.md).
-    expect(Object.keys(body).sort()).toEqual(["as_of", "capabilities", "icon", "instance_id", "name", "version"]);
+    // `capabilities` (S1) — coarse tool GROUP names, never a tool name and never
+    // a count — and `api_version` (F-1) are the only fields this read has taken
+    // since (docs/ops/client-api.md).
+    expect(Object.keys(body).sort()).toEqual(["api_version", "as_of", "capabilities", "icon", "instance_id", "name", "version"]);
     expect(body.capabilities).toEqual(["capture", "tasks"]); // this server wires nothing else
   });
 

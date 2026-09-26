@@ -171,7 +171,7 @@ describe.skipIf(!hasDb)("SAM adopts (integration)", () => {
     // nothing that would be an inventory: no counts, no tool names, no origins
     const text = JSON.stringify(body);
     expect(text).not.toMatch(/knowledge_read|queries_run|capture_note|tools/);
-    expect(Object.keys(body).sort()).toEqual(["as_of", "capabilities", "icon", "instance_id", "name", "version"]);
+    expect(Object.keys(body).sort()).toEqual(["api_version", "as_of", "capabilities", "icon", "instance_id", "name", "version"]);
   });
 
   it("S1: the full tool list is NOT public — /mcp still demands an agent token", async () => {

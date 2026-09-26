@@ -13,7 +13,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { ArtifactsError, contentTypeFor, type ArtifactsService, type Principal } from "@foldedspacelabs/metistry-artifacts";
 import { errorEnvelope, statusFor } from "@foldedspacelabs/metistry-core";
-import { readJson, sendError, sendJson } from "./http-util.js";
+import { readJson, sendError, sendJson, sendUnrouted } from "./http-util.js";
 
 const USER: Principal = { kind: "user", id: "user" };
 const ID = "[0-9A-HJKMNP-TV-Z]{26}";
@@ -150,7 +150,7 @@ export async function artifactRoutes(req: IncomingMessage, res: ServerResponse, 
       const r = m[3] === "resolve" ? await service.commentResolve(m[2]!, p) : await service.commentReopen(m[2]!, p);
       return r ? sendJson(res, 200, { comment: r }) : sendError(res, "not_found");
     }
-    return sendError(res, "not_found");
+    return sendUnrouted(res);
   } catch (err) {
     if (err instanceof ArtifactsError) return sendJson(res, statusFor(err.code), errorEnvelope(err.code, err.message));
     if (err instanceof SyntaxError) return sendError(res, "invalid_request", "request body is not JSON");

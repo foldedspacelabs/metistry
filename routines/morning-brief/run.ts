@@ -5,6 +5,8 @@
 // (un-acted proposals expire after EXPIRE_DAYS to decision='expired' —
 // searchable, never lost), silence-default (nothing pending = no brief).
 
+import { requestWordOf } from "@foldedspacelabs/metistry-core";
+
 export interface Db {
   query(text: string, values?: unknown[]): Promise<{ rows: any[] }>;
 }
@@ -50,30 +52,14 @@ export function pickBudget(scored: { row: PendingRow; s: number }[]): { row: Pen
   return [...base, ...extra];
 }
 
-/**
- * The six request types the user reads (docs/product/glossary.md), over the
- * stored `proposals.kind` values, which do not change. The brief and the
- * console's Needs You queue must call the same thing the same word — which
- * is why `access_request` (an agent asking for an area) and `grant_elevation`
- * are both "access": the user has one word for this, and the stored kinds are
- * the machinery's business.
- */
-const REQUEST_TYPE: Record<string, string> = {
-  decision: "question",
-  grant_elevation: "access",
-  access_request: "access",
-  improvement: "improvement",
-  knowledge: "note",
-  draft_settle: "note",
-  action: "note",
-  report: "report",
-  review: "review",
-};
-export const requestType = (kind: string): string => REQUEST_TYPE[kind] ?? kind;
-
+// The word each request is called by is the request type table's
+// (packages/core/src/requests.ts, plan §2.12) — the same word the Needs You
+// queue and `pending_requests` use, so the brief has no spelling of its own.
+// The stored kinds are the machinery's business; a kind the table does not
+// know reads as a report, never as itself.
 function title(row: PendingRow): string {
   const c = row.payload?.classification;
-  return (c?.action || c?.title || row.payload?.title || `${requestType(row.kind)} request`).slice(0, 70);
+  return (c?.action || c?.title || row.payload?.title || `${requestWordOf(row.kind)} request`).slice(0, 70);
 }
 
 // ---- sections (owner feedback 2026-09-01: actionable, question-shaped).
@@ -133,7 +119,7 @@ async function sectionRequests(db: Db, expiredCount: number): Promise<string[] |
   const picked = pickBudget((rows as PendingRow[]).map((row) => ({ row, s: score(row, now) })));
   const rest = rows.length - picked.length;
   return [
-    ...picked.map(({ row, s }) => `• #${row.id} ${title(row)}  (${requestType(row.kind)}${s >= CRITICAL_SCORE ? " ⚠" : ""})`),
+    ...picked.map(({ row, s }) => `• #${row.id} ${title(row)}  (${requestWordOf(row.kind)}${s >= CRITICAL_SCORE ? " ⚠" : ""})`),
     ...(rest > 0 ? [`…${rest} more — open Needs You to see everything`] : []),
     ...(expiredCount > 0 ? [`${expiredCount} stale item(s) auto-expired, still searchable`] : []),
   ];

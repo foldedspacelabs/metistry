@@ -16,14 +16,19 @@
 # lie in a file. So `include_snoozed` defaults false and the column is
 # returned either way.
 #
-# **The words are the user's, not the machinery's.** `requestType` in
-# `routines/morning-brief/run.ts` maps the stored `proposals.kind` values onto
-# the six the user reads (docs/product/glossary.md) — `access_request` and
-# `grant_elevation` are both *access*, because the user has one word for this.
-# The mapping is repeated here so the plan, the brief and the queue call the
-# same thing the same word; the stored kind comes back beside it, unchanged.
-# `title` is derived exactly as the brief derives it: the classification's
-# action, else its title, else the payload's, else "<type> request".
+# **The words are the user's, not the machinery's.** `request_type` is the
+# word the owner reads for the row's type — one of the twelve in
+# docs/product/glossary.md — and the stored kind comes back beside it,
+# unchanged. The mapping is NOT written here: it is the request type table,
+# `packages/core/src/requests.ts` (plan §2.12, F-5), which the morning brief
+# imports. SQL cannot import TypeScript, so the CASE below is that table's
+# `requestWordSql("p.kind")`, pasted verbatim, and
+# apps/console/test/seed-queries.test.ts refuses any other text and runs the
+# query over every stored kind against the table. To change a word, change
+# the table and paste what the test prints. A kind the table does not know
+# reads as *report* — never as the stored kind. `title` is derived exactly as
+# the brief derives it: the classification's action, else its title, else
+# the payload's, else "<word> request".
 #
 # **`suggested_work` is a flag, never a row.** A payload carrying it is what
 # puts Approve as Work under the item (docs/ops/reply-feedback.md), and §4.12
@@ -44,9 +49,9 @@ name: pending_requests
 expose: route
 description: >-
   Requests waiting on the owner — one row per pending proposal that is not
-  snoozed: its id, when it arrived and how old it is, the request type the
-  user reads (question | access | improvement | note | report | review)
-  beside the stored kind, which agent raised it and at what trust, a title
+  snoozed: its id, when it arrived and how old it is, the word the owner
+  reads for its request type (packages/core/src/requests.ts) beside the
+  stored kind, which agent raised it and at what trust, a title
   derived the way the morning brief derives it, whether it carries
   `suggested_work` (the Approve-as-Work answer) or an already-linked `work`
   row, and its snooze instant. Never the payload itself. Oldest first, then
@@ -67,37 +72,42 @@ sql: |
     p.ts,
     round(extract(epoch FROM (now() - p.ts)) / 86400.0, 1)::float8 AS age_days,
     p.kind,
-    -- the six words the user reads (docs/product/glossary.md), the same
-    -- mapping routines/morning-brief/run.ts applies
-    CASE p.kind
-      WHEN 'decision'        THEN 'question'
-      WHEN 'grant_elevation' THEN 'access'
-      WHEN 'access_request'  THEN 'access'
-      WHEN 'improvement'     THEN 'improvement'
-      WHEN 'knowledge'       THEN 'note'
-      WHEN 'draft_settle'    THEN 'note'
-      WHEN 'action'          THEN 'note'
-      WHEN 'report'          THEN 'report'
-      WHEN 'review'          THEN 'review'
-      ELSE p.kind
-    END                                                            AS request_type,
+    t.request_type,
     p.source_agent,
     p.trust,
     left(coalesce(
       p.payload->'classification'->>'action',
       p.payload->'classification'->>'title',
       p.payload->>'title',
-      CASE p.kind
-        WHEN 'decision'        THEN 'question request'
-        WHEN 'grant_elevation' THEN 'access request'
-        WHEN 'access_request'  THEN 'access request'
-        ELSE p.kind || ' request'
-      END
+      t.request_type || ' request'
     ), 70)                                                         AS title,
     (p.payload ? 'suggested_work')                                 AS has_suggested_work,
     p.work_id,
     p.snoozed_until
-  FROM proposals p, f
+  FROM proposals p
+  CROSS JOIN f
+  CROSS JOIN LATERAL (
+    SELECT
+      -- requestWordSql("p.kind") from packages/core/src/requests.ts, verbatim;
+      -- edit the table there, never this block (a test refuses a hand edit)
+      CASE p.kind
+        WHEN 'decision' THEN 'question'
+        WHEN 'pull_request' THEN 'pull request'
+        WHEN 'access_request' THEN 'access'
+        WHEN 'grant_elevation' THEN 'access'
+        WHEN 'action' THEN 'action'
+        WHEN 'connection_call' THEN 'action'
+        WHEN 'review' THEN 'review'
+        WHEN 'knowledge' THEN 'note'
+        WHEN 'draft_settle' THEN 'note'
+        WHEN 'improvement' THEN 'improvement'
+        WHEN 'report' THEN 'report'
+        WHEN 'invitation' THEN 'invitation'
+        WHEN 'task' THEN 'task'
+        WHEN 'message' THEN 'message'
+        ELSE 'report'
+      END AS request_type
+  ) t
   WHERE p.decision = 'pending'
     AND (f.include_snoozed OR p.snoozed_until IS NULL OR p.snoozed_until <= now())
     AND (f.kind IS NULL OR p.kind = f.kind)

@@ -97,6 +97,31 @@ describe("morning brief (D10 soft budget)", () => {
     expect(briefText).toContain("calendar bridge");
   });
 
+  it("calls each request by the type table's word (packages/core/src/requests.ts): action is action (C80), an unknown kind a report", async () => {
+    let briefText = "";
+    const pending = [row(1, "action", {}), row(2, "grant_elevation", {}), row(3, "invitation", {}), row(4, "sync_conflict", {})];
+    const db = {
+      async query(t: string, v?: unknown[]) {
+        if (t.startsWith("SELECT id, kind")) return { rows: pending };
+        if (t.includes("'folded'")) return { rows: [] };
+        if (t.includes("FROM runs")) return { rows: [{ runs_ok: 0, turns: 0, captures: 0, failures: 0, spend: 0 }] };
+        if (t.includes("INSERT INTO outbound_messages")) { briefText = String(v![0]); return { rows: [] }; }
+        return { rows: [] };
+      },
+    };
+    expect(await run(db)).toBe(1);
+    const needs = briefText.split("🔔 Needs you:")[1]!.split("\n\n")[0]!;
+    // the title falls back to "<word> request" and the chip is the word — never the stored kind
+    // (⚠ is the consequence score's, and ageing moves it; the word is what is pinned)
+    expect(needs).toMatch(/• #1 action request {2}\(action( ⚠)?\)/);
+    expect(needs).toMatch(/• #2 access request {2}\(access( ⚠)?\)/);
+    expect(needs).toMatch(/• #3 invitation request {2}\(invitation( ⚠)?\)/);
+    expect(needs).toMatch(/• #4 report request {2}\(report( ⚠)?\)/);
+    expect(needs).not.toContain("note");
+    expect(needs).not.toContain("sync_conflict");
+    expect(needs).not.toContain("grant_elevation");
+  });
+
   it("a budget flip to review mode (runs kind project_mode, §4.21) is enough to break the silence and is named in the system section", async () => {
     let briefText = "";
     const db = {

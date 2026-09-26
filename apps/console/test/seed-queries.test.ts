@@ -4,16 +4,20 @@
 // scratch db is available (ops/scripts/test-db.sh) — every seed query
 // actually executes against the migrated schema, so a column typo fails
 // here instead of on the dashboard.
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
+import { parse } from "yaml";
 import { QueryStore, type SqlExecutor } from "@foldedspacelabs/metistry-queries";
-import { TASK_FILTER_PARAM_SPEC, TASK_QUERY_NAME, compileTaskFilter } from "@foldedspacelabs/metistry-core";
+import { REQUEST_KINDS, TASK_FILTER_PARAM_SPEC, TASK_QUERY_NAME, compileTaskFilter, isRequestKind, requestWordOf, requestWordSql } from "@foldedspacelabs/metistry-core";
 import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
 
 loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
 
 const SEED_DIR = fileURLToPath(new URL("../../../seed/queries", import.meta.url));
+const REPO = fileURLToPath(new URL("../../../", import.meta.url));
 
 // what the PWA (app.js) and the routines lean on
 const REQUIRED = [
@@ -188,6 +192,62 @@ describe("seed queries", () => {
     // no `prefix` on the measure, deliberately: a count over a caller-supplied
     // filter is the directory listing of what was filtered
     expect(Object.keys(byName["task_ageing"]!.params).sort()).toEqual(["days", "today"]);
+  });
+
+  // F-5. The kind → word mapping is the request type table,
+  // packages/core/src/requests.ts, and a YAML file cannot import it — so the
+  // query carries the table's own rendering, and this is what makes a hand
+  // edit or a stale paste fail instead of drift (the two copies it replaced
+  // had drifted: both said *note* for `action`, C80). Whitespace is free so
+  // the YAML's indentation is; every other character is the table's.
+  it("pending_requests says the owner's word through the request type table's rendering, and has no other mapping", () => {
+    const { sql } = parse(readFileSync(join(SEED_DIR, "pending_requests.yaml"), "utf8")) as { sql: string };
+    const normal = (text: string) => text.replace(/\s+/g, " ").trim();
+    const rendered = requestWordSql("p.kind");
+    expect(normal(sql), `paste this into seed/queries/pending_requests.yaml:\n${rendered}`).toContain(normal(rendered));
+    // the old mappings are gone: the rendering is the query's only CASE, and
+    // nothing outside it compares a kind with a word
+    const rest = normal(sql).replace(normal(rendered), "");
+    expect(rest).not.toMatch(/\bCASE\b/i);
+    expect(rest).not.toMatch(/\bWHEN\b/i);
+  });
+
+  // "Every stored kind maps" means every kind the product actually WRITES, not
+  // only the ones the table happened to list: a writer the table does not
+  // know reads as a report with Dismiss its only answer, which is safe and
+  // wrong. So the writers are read here, and a kind written by a shape this
+  // cannot read (a bound parameter, a constant from another file) fails too —
+  // a kind nobody can see is a kind nobody mapped.
+  it("every kind the product writes into proposals is a kind the request type table maps", () => {
+    const sources: string[] = [];
+    const walk = (dir: string): void => {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        if (["node_modules", "dist", ".build", "test", "tests"].includes(e.name)) continue;
+        const at = join(dir, e.name);
+        if (e.isDirectory()) walk(at);
+        else if (e.name.endsWith(".ts") && !e.name.endsWith(".test.ts")) sources.push(at);
+      }
+    };
+    for (const root of ["apps", "packages", "routines", "collectors"]) walk(join(REPO, root));
+    const written = new Map<string, string>();
+    const unreadable: string[] = [];
+    for (const file of sources) {
+      const text = readFileSync(file, "utf8");
+      for (const m of text.matchAll(/INSERT INTO proposals\b([^;`]{0,400})/gi)) {
+        // `(kind, …) VALUES ('<kind>'` or `('${CONST}'` with CONST = "<kind>" in the same file; any other shape is unreadable
+        const value = /^\s*\(\s*kind\b[^)]*\)\s*VALUES\s*\(\s*([^,)]*)/i.exec(m[1]!)?.[1]?.trim() ?? "";
+        const where = `${file.slice(REPO.length)}: ${value || m[0].slice(0, 60)}`;
+        const literal = /^'([a-z_]+)'$/.exec(value);
+        const constant = /^'\$\{([A-Z_]+)\}'$/.exec(value);
+        const resolved = literal?.[1] ?? (constant ? new RegExp(`\\b${constant[1]}\\s*=\\s*"([a-z_]+)"`).exec(text)?.[1] : undefined);
+        if (resolved === undefined) unreadable.push(where);
+        else written.set(resolved, where);
+      }
+    }
+    expect(unreadable).toEqual([]);
+    // the scan is not vacuous: today's writers, the constant-named one included
+    for (const k of ["decision", "report", "review", "action", "access_request", "improvement", "knowledge"]) expect([...written.keys()], k).toContain(k);
+    for (const [kind, where] of written) expect(isRequestKind(kind), `${kind} written at ${where} is not in REQUEST_KIND_TYPE`).toBe(true);
   });
 });
 
@@ -1295,6 +1355,26 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
     expect(withSnoozed.map((r) => r.request_type)).toEqual(["report", "access", "question"]);
     expect(withSnoozed[2]!.snoozed_until).not.toBeNull();
     expect(mine((await store.run("pending_requests", { kind: "report", limit: 500 })).rows)).toHaveLength(1);
+
+    await pool.query(`DELETE FROM proposals WHERE source_agent = $1`, [tag]);
+  });
+
+  it("pending_requests: every stored kind reads as the request type table says — action as action — and a kind it does not know as a report", async () => {
+    const tag = `prk-${Date.now()}`;
+    const kinds = [...REQUEST_KINDS, "sync_conflict"];
+    for (const kind of kinds) {
+      await pool.query(`INSERT INTO proposals (kind, source_agent, trust, payload) VALUES ($1, $2, 'internal', '{}'::jsonb)`, [kind, tag]);
+    }
+    const rows = (await store.run("pending_requests", { limit: 500 })).rows.filter((r) => r.source_agent === tag);
+    expect(rows.map((r) => r.kind)).toEqual(kinds);
+    // the SQL and the table agree on every kind, and so does the title's fallback
+    for (const r of rows) expect(r, String(r.kind)).toMatchObject({ request_type: requestWordOf(String(r.kind)), title: `${requestWordOf(String(r.kind))} request` });
+    expect(rows.find((r) => r.kind === "action")).toMatchObject({ request_type: "action", title: "action request" }); // C80: not note
+    expect(rows.find((r) => r.kind === "knowledge")).toMatchObject({ request_type: "note", title: "note request" }); // the word, not the kind, in the title too
+    expect(rows.find((r) => r.kind === "sync_conflict")).toMatchObject({ request_type: "report", title: "report request" });
+    // and the `kind` filter still takes a stored kind, never a word
+    expect((await store.run("pending_requests", { kind: "action", limit: 500 })).rows.filter((r) => r.source_agent === tag)).toHaveLength(1);
+    expect((await store.run("pending_requests", { kind: "note", limit: 500 })).rows.filter((r) => r.source_agent === tag)).toHaveLength(0);
 
     await pool.query(`DELETE FROM proposals WHERE source_agent = $1`, [tag]);
   });

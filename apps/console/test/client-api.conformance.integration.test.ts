@@ -33,7 +33,7 @@ import pg from "pg";
 import { QueryStore } from "@foldedspacelabs/metistry-queries";
 import { memoryVault } from "@foldedspacelabs/metistry-artifacts";
 import { API_VERSION, API_VERSION_HEADER, CLIENT_API, matchRoute, mintToken, routeKey, servedRoute, type ClientPrincipal, type ClientRoute } from "@foldedspacelabs/metistry-core";
-import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
+import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
 import { makeServer } from "../src/server.js";
 import { wasUnrouted } from "../src/http-util.js";
 import * as store from "../src/auth-store.js";
@@ -93,13 +93,7 @@ describe.skipIf(!hasDb)("the client API table against the console that serves it
   }
 
   beforeAll(async () => {
-    pool = new pg.Pool({
-      host: process.env.METISTRY_DB_HOST ?? "127.0.0.1",
-      port: Number(process.env.METISTRY_DB_PORT ?? 5432),
-      user: process.env.METISTRY_DB_USER ?? "metistry",
-      database: process.env.METISTRY_TEST_DB_NAME ?? "metistry_test",
-      password: process.env.METISTRY_DB_PASSWORD,
-    });
+    pool = await testDb(pg.Pool);
     const queries = new QueryStore(pool);
     await queries.loadDir(fileURLToPath(new URL("../../../seed/queries", import.meta.url)));
 

@@ -1,0 +1,2152 @@
+{
+  "generated_from": "docs/product/design-build-plan.md",
+  "waves": {
+    "W0": {
+      "tickets": [
+        "F-0",
+        "F-1",
+        "F-2",
+        "F-3",
+        "F-4",
+        "F-5",
+        "F-6",
+        "F-7",
+        "F-8",
+        "F-9",
+        "F-10",
+        "F-11",
+        "F-12",
+        "F-13",
+        "F-14",
+        "T1-4",
+        "T1-5",
+        "T7-1",
+        "T8-1"
+      ],
+      "count": 19,
+      "agent_days": 38
+    },
+    "W1": {
+      "tickets": [
+        "T1-1",
+        "T1-2",
+        "T1-3",
+        "T1-6",
+        "T1-7",
+        "T1-8",
+        "T1-9",
+        "T1-11",
+        "T1-12",
+        "T1-14",
+        "T1-15",
+        "T2-1",
+        "T2-2",
+        "T2-4",
+        "T2-5",
+        "T2-6",
+        "T2-15",
+        "T2-16",
+        "T2-17",
+        "T2-18",
+        "T3-1",
+        "T3-2",
+        "T3-4",
+        "T3-9",
+        "T4-1",
+        "T4-2",
+        "T4-3",
+        "T4-4",
+        "T4-5",
+        "T4-6",
+        "T4-20",
+        "T4-21",
+        "T5-1",
+        "T5-2",
+        "T5-3",
+        "T7-2",
+        "T9-1",
+        "T10-1",
+        "T10-3",
+        "T10-2"
+      ],
+      "count": 40,
+      "agent_days": 114
+    },
+    "W2": {
+      "tickets": [
+        "T1-10",
+        "T1-13",
+        "T2-3",
+        "T2-7",
+        "T2-8",
+        "T2-9",
+        "T2-10",
+        "T2-11",
+        "T2-14",
+        "T3-3",
+        "T3-5",
+        "T3-6",
+        "T3-7",
+        "T3-12",
+        "T4-7",
+        "T4-8a",
+        "T4-8b",
+        "T4-24",
+        "T4-18",
+        "T5-4a",
+        "T5-4b",
+        "T5-5",
+        "T5-6",
+        "T5-7",
+        "T6-1a",
+        "T6-1b",
+        "T6-2",
+        "T6-3",
+        "T7-3a",
+        "T7-3b",
+        "T7-7",
+        "T9-2",
+        "T10-4",
+        "T10-5",
+        "T10-6"
+      ],
+      "count": 35,
+      "agent_days": 128.5
+    },
+    "W3": {
+      "tickets": [
+        "T2-12",
+        "T2-13",
+        "T3-8",
+        "T3-10",
+        "T3-11",
+        "T4-9",
+        "T4-12",
+        "T4-13",
+        "T4-19",
+        "T4-22",
+        "T4-23",
+        "T4-25",
+        "T4-26",
+        "T6-4",
+        "T6-5",
+        "T6-6",
+        "T6-7",
+        "T6-8",
+        "T6-9",
+        "T6-10",
+        "T6-11",
+        "T7-4",
+        "T7-5",
+        "T8-2a",
+        "T8-2b",
+        "T8-6",
+        "T9-3",
+        "T10-7"
+      ],
+      "count": 28,
+      "agent_days": 105
+    },
+    "W4": {
+      "tickets": [
+        "T4-10",
+        "T4-11",
+        "T4-14",
+        "T4-15",
+        "T4-17",
+        "T6-12",
+        "T6-13a",
+        "T6-13b",
+        "T6-14",
+        "T6-15",
+        "T6-16",
+        "T7-6",
+        "T8-3",
+        "T8-4",
+        "T8-5",
+        "T8-7",
+        "T9-4"
+      ],
+      "count": 17,
+      "agent_days": 65
+    },
+    "W5": {
+      "tickets": [
+        "X-1"
+      ],
+      "count": 1,
+      "agent_days": 1
+    }
+  },
+  "tickets": {
+    "F-0": {
+      "title": "Conventions: the ratified wording",
+      "track": "F",
+      "wave": "W0",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/f/f-0.md",
+      "status": "todo"
+    },
+    "F-1": {
+      "title": "Client API contract v1",
+      "track": "F",
+      "wave": "W0",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [],
+      "file": "docs/product/tickets/f/f-1.md",
+      "status": "todo"
+    },
+    "F-2": {
+      "title": "The actor model",
+      "track": "F",
+      "wave": "W0",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [],
+      "file": "docs/product/tickets/f/f-2.md",
+      "status": "todo"
+    },
+    "F-3": {
+      "title": "Connection and extension model",
+      "track": "F",
+      "wave": "W0",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [],
+      "file": "docs/product/tickets/f/f-3.md",
+      "status": "todo"
+    },
+    "F-4": {
+      "title": "The Scheduled model",
+      "track": "F",
+      "wave": "W0",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [],
+      "file": "docs/product/tickets/f/f-4.md",
+      "status": "todo"
+    },
+    "F-5": {
+      "title": "The request type table",
+      "track": "F",
+      "wave": "W0",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [],
+      "file": "docs/product/tickets/f/f-5.md",
+      "status": "todo"
+    },
+    "F-6": {
+      "title": "Migration numbering",
+      "track": "F",
+      "wave": "W0",
+      "size": "S",
+      "days": 1,
+      "model": "opus",
+      "effort": "high",
+      "deps": [],
+      "file": "docs/product/tickets/f/f-6.md",
+      "status": "todo"
+    },
+    "F-7": {
+      "title": "MetistryKit store interface and fixtures",
+      "track": "F",
+      "wave": "W0",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "F-1"
+      ],
+      "file": "docs/product/tickets/f/f-7.md",
+      "status": "todo"
+    },
+    "F-8": {
+      "title": "Dynamic router spec",
+      "track": "F",
+      "wave": "W0",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [],
+      "file": "docs/product/tickets/f/f-8.md",
+      "status": "todo"
+    },
+    "F-9": {
+      "title": "PWA manifest, icons, `ICON_PNG`",
+      "track": "F",
+      "wave": "W0",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/f/f-9.md",
+      "status": "todo"
+    },
+    "F-10": {
+      "title": "The `--check` extension",
+      "track": "F",
+      "wave": "W0",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/f/f-10.md",
+      "status": "todo"
+    },
+    "F-11": {
+      "title": "`console call` prints the error body",
+      "track": "F",
+      "wave": "W0",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/f/f-11.md",
+      "status": "todo"
+    },
+    "F-12": {
+      "title": "The Mac session transport",
+      "track": "F",
+      "wave": "W0",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "F-11"
+      ],
+      "file": "docs/product/tickets/f/f-12.md",
+      "status": "todo"
+    },
+    "F-13": {
+      "title": "The reach gate",
+      "track": "F",
+      "wave": "W0",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "F-1"
+      ],
+      "file": "docs/product/tickets/f/f-13.md",
+      "status": "todo"
+    },
+    "F-14": {
+      "title": "Copy and the answer set",
+      "track": "F",
+      "wave": "W0",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/f/f-14.md",
+      "status": "todo"
+    },
+    "T1-1": {
+      "title": "`work.description`",
+      "track": "T1",
+      "wave": "W1",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "F-6"
+      ],
+      "file": "docs/product/tickets/t1/t1-1.md",
+      "status": "todo"
+    },
+    "T1-2": {
+      "title": "The board query",
+      "track": "T1",
+      "wave": "W1",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/t1/t1-2.md",
+      "status": "todo"
+    },
+    "T1-3": {
+      "title": "The activity query",
+      "track": "T1",
+      "wave": "W1",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T1-4"
+      ],
+      "file": "docs/product/tickets/t1/t1-3.md",
+      "status": "todo"
+    },
+    "T1-4": {
+      "title": "Routine outcome",
+      "track": "T1",
+      "wave": "W0",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/t1/t1-4.md",
+      "status": "todo"
+    },
+    "T1-5": {
+      "title": "`collector_health`",
+      "track": "T1",
+      "wave": "W0",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/t1/t1-5.md",
+      "status": "todo"
+    },
+    "T1-6": {
+      "title": "Knowledge reads",
+      "track": "T1",
+      "wave": "W1",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/t1/t1-6.md",
+      "status": "todo"
+    },
+    "T1-7": {
+      "title": "The Needs You count",
+      "track": "T1",
+      "wave": "W1",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "F-1"
+      ],
+      "file": "docs/product/tickets/t1/t1-7.md",
+      "status": "todo"
+    },
+    "T1-8": {
+      "title": "Groups and sources",
+      "track": "T1",
+      "wave": "W1",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "F-6"
+      ],
+      "file": "docs/product/tickets/t1/t1-8.md",
+      "status": "todo"
+    },
+    "T1-9": {
+      "title": "Today's order",
+      "track": "T1",
+      "wave": "W1",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "F-6"
+      ],
+      "file": "docs/product/tickets/t1/t1-9.md",
+      "status": "todo"
+    },
+    "T1-10": {
+      "title": "Meeting refs and people emails",
+      "track": "T1",
+      "wave": "W2",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "F-6"
+      ],
+      "file": "docs/product/tickets/t1/t1-10.md",
+      "status": "todo"
+    },
+    "T1-11": {
+      "title": "The session archive table",
+      "track": "T1",
+      "wave": "W1",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "F-6"
+      ],
+      "file": "docs/product/tickets/t1/t1-11.md",
+      "status": "todo"
+    },
+    "T1-12": {
+      "title": "Prose feedback",
+      "track": "T1",
+      "wave": "W1",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "F-6"
+      ],
+      "file": "docs/product/tickets/t1/t1-12.md",
+      "status": "todo"
+    },
+    "T1-13": {
+      "title": "Project grants table",
+      "track": "T1",
+      "wave": "W2",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "F-6"
+      ],
+      "file": "docs/product/tickets/t1/t1-13.md",
+      "status": "todo"
+    },
+    "T1-14": {
+      "title": "Areas",
+      "track": "T1",
+      "wave": "W1",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/t1/t1-14.md",
+      "status": "todo"
+    },
+    "T1-15": {
+      "title": "Small queries",
+      "track": "T1",
+      "wave": "W1",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/t1/t1-15.md",
+      "status": "todo"
+    },
+    "T2-1": {
+      "title": "Captures from the apps",
+      "track": "T2",
+      "wave": "W1",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/t2/t2-1.md",
+      "status": "todo"
+    },
+    "T2-2": {
+      "title": "Access hardening",
+      "track": "T2",
+      "wave": "W1",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/t2/t2-2.md",
+      "status": "todo"
+    },
+    "T2-3": {
+      "title": "Questions v2 and both report names",
+      "track": "T2",
+      "wave": "W2",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "F-5"
+      ],
+      "file": "docs/product/tickets/t2/t2-3.md",
+      "status": "todo"
+    },
+    "T2-4": {
+      "title": "The Tick door",
+      "track": "T2",
+      "wave": "W1",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "F-13"
+      ],
+      "file": "docs/product/tickets/t2/t2-4.md",
+      "status": "todo"
+    },
+    "T2-5": {
+      "title": "The Defer door",
+      "track": "T2",
+      "wave": "W1",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T2-4"
+      ],
+      "file": "docs/product/tickets/t2/t2-5.md",
+      "status": "todo"
+    },
+    "T2-6": {
+      "title": "The section operation",
+      "track": "T2",
+      "wave": "W1",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [],
+      "file": "docs/product/tickets/t2/t2-6.md",
+      "status": "todo"
+    },
+    "T2-7": {
+      "title": "Today routes and order",
+      "track": "T2",
+      "wave": "W2",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "T1-9",
+        "T2-4",
+        "T2-11"
+      ],
+      "file": "docs/product/tickets/t2/t2-7.md",
+      "status": "todo"
+    },
+    "T2-8": {
+      "title": "Close the Day",
+      "track": "T2",
+      "wave": "W2",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T2-5",
+        "T2-6"
+      ],
+      "file": "docs/product/tickets/t2/t2-8.md",
+      "status": "todo"
+    },
+    "T2-9": {
+      "title": "Events become requests",
+      "track": "T2",
+      "wave": "W2",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T1-8",
+        "F-5"
+      ],
+      "file": "docs/product/tickets/t2/t2-9.md",
+      "status": "todo"
+    },
+    "T2-10": {
+      "title": "Resolve a conflict",
+      "track": "T2",
+      "wave": "W2",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T2-9"
+      ],
+      "file": "docs/product/tickets/t2/t2-10.md",
+      "status": "todo"
+    },
+    "T2-11": {
+      "title": "Calendar fields and the meeting note",
+      "track": "T2",
+      "wave": "W2",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "T1-10"
+      ],
+      "file": "docs/product/tickets/t2/t2-11.md",
+      "status": "todo"
+    },
+    "T2-12": {
+      "title": "Move a meeting",
+      "track": "T2",
+      "wave": "W3",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T2-11"
+      ],
+      "file": "docs/product/tickets/t2/t2-12.md",
+      "status": "todo"
+    },
+    "T2-13": {
+      "title": "Pull requests",
+      "track": "T2",
+      "wave": "W3",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "T1-8",
+        "T4-1"
+      ],
+      "file": "docs/product/tickets/t2/t2-13.md",
+      "status": "todo"
+    },
+    "T2-14": {
+      "title": "Stale requests",
+      "track": "T2",
+      "wave": "W2",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T1-8"
+      ],
+      "file": "docs/product/tickets/t2/t2-14.md",
+      "status": "todo"
+    },
+    "T2-15": {
+      "title": "C45, tested per door",
+      "track": "T2",
+      "wave": "W1",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/t2/t2-15.md",
+      "status": "todo"
+    },
+    "T2-16": {
+      "title": "Identity and the config record",
+      "track": "T2",
+      "wave": "W1",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/t2/t2-16.md",
+      "status": "todo"
+    },
+    "T2-17": {
+      "title": "Turn progress and sessions",
+      "track": "T2",
+      "wave": "W1",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "T1-11",
+        "T1-15"
+      ],
+      "file": "docs/product/tickets/t2/t2-17.md",
+      "status": "todo"
+    },
+    "T2-18": {
+      "title": "Live events",
+      "track": "T2",
+      "wave": "W1",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "F-1",
+        "F-6"
+      ],
+      "file": "docs/product/tickets/t2/t2-18.md",
+      "status": "todo"
+    },
+    "T3-1": {
+      "title": "The scheduler",
+      "track": "T3",
+      "wave": "W1",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "F-4"
+      ],
+      "file": "docs/product/tickets/t3/t3-1.md",
+      "status": "todo"
+    },
+    "T3-2": {
+      "title": "The overlay",
+      "track": "T3",
+      "wave": "W1",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "F-4"
+      ],
+      "file": "docs/product/tickets/t3/t3-2.md",
+      "status": "todo"
+    },
+    "T3-3": {
+      "title": "Scheduled routes and doors",
+      "track": "T3",
+      "wave": "W2",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T3-1",
+        "T3-2",
+        "F-13"
+      ],
+      "file": "docs/product/tickets/t3/t3-3.md",
+      "status": "todo"
+    },
+    "T3-4": {
+      "title": "Profile facts and the standup move",
+      "track": "T3",
+      "wave": "W1",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "F-4",
+        "T1-8"
+      ],
+      "file": "docs/product/tickets/t3/t3-4.md",
+      "status": "todo"
+    },
+    "T3-5": {
+      "title": "The Standup routine",
+      "track": "T3",
+      "wave": "W2",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T3-1"
+      ],
+      "file": "docs/product/tickets/t3/t3-5.md",
+      "status": "todo"
+    },
+    "T3-6": {
+      "title": "The Morning Brief",
+      "track": "T3",
+      "wave": "W2",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "T2-6",
+        "T3-5"
+      ],
+      "file": "docs/product/tickets/t3/t3-6.md",
+      "status": "todo"
+    },
+    "T3-7": {
+      "title": "Tomorrow's Plan after the fold",
+      "track": "T3",
+      "wave": "W2",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T3-1"
+      ],
+      "file": "docs/product/tickets/t3/t3-7.md",
+      "status": "todo"
+    },
+    "T3-8": {
+      "title": "Agent routines",
+      "track": "T3",
+      "wave": "W3",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "T4-6",
+        "T3-3"
+      ],
+      "file": "docs/product/tickets/t3/t3-8.md",
+      "status": "todo"
+    },
+    "T3-9": {
+      "title": "Writing the session archive",
+      "track": "T3",
+      "wave": "W1",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T1-11"
+      ],
+      "file": "docs/product/tickets/t3/t3-9.md",
+      "status": "todo"
+    },
+    "T3-10": {
+      "title": "The session fold",
+      "track": "T3",
+      "wave": "W3",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "T3-9"
+      ],
+      "file": "docs/product/tickets/t3/t3-10.md",
+      "status": "todo"
+    },
+    "T3-11": {
+      "title": "Routine suggestions",
+      "track": "T3",
+      "wave": "W3",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T3-3"
+      ],
+      "file": "docs/product/tickets/t3/t3-11.md",
+      "status": "todo"
+    },
+    "T3-12": {
+      "title": "Three strikes and a Stop limit",
+      "track": "T3",
+      "wave": "W2",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T2-9"
+      ],
+      "file": "docs/product/tickets/t3/t3-12.md",
+      "status": "todo"
+    },
+    "T4-1": {
+      "title": "Per-instance secrets",
+      "track": "T4",
+      "wave": "W1",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "F-3"
+      ],
+      "file": "docs/product/tickets/t4/t4-1.md",
+      "status": "todo"
+    },
+    "T4-2": {
+      "title": "Egress guard and redaction",
+      "track": "T4",
+      "wave": "W1",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T4-1"
+      ],
+      "file": "docs/product/tickets/t4/t4-2.md",
+      "status": "todo"
+    },
+    "T4-3": {
+      "title": "Migrating the shared scope",
+      "track": "T4",
+      "wave": "W1",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T4-1"
+      ],
+      "file": "docs/product/tickets/t4/t4-3.md",
+      "status": "todo"
+    },
+    "T4-4": {
+      "title": "Variables",
+      "track": "T4",
+      "wave": "W1",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "F-3"
+      ],
+      "file": "docs/product/tickets/t4/t4-4.md",
+      "status": "todo"
+    },
+    "T4-5": {
+      "title": "Registries",
+      "track": "T4",
+      "wave": "W1",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "F-3"
+      ],
+      "file": "docs/product/tickets/t4/t4-5.md",
+      "status": "todo"
+    },
+    "T4-6": {
+      "title": "Actors",
+      "track": "T4",
+      "wave": "W1",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "F-2"
+      ],
+      "file": "docs/product/tickets/t4/t4-6.md",
+      "status": "todo"
+    },
+    "T4-7": {
+      "title": "Project grants inherited",
+      "track": "T4",
+      "wave": "W2",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T4-6",
+        "T1-13"
+      ],
+      "file": "docs/product/tickets/t4/t4-7.md",
+      "status": "todo"
+    },
+    "T4-8a": {
+      "title": "Connections P1: registry and client",
+      "track": "T4",
+      "wave": "W2",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "T4-1",
+        "T4-2",
+        "T4-5"
+      ],
+      "file": "docs/product/tickets/t4/t4-8a.md",
+      "status": "todo"
+    },
+    "T4-8b": {
+      "title": "Connections P1: the lazy pair",
+      "track": "T4",
+      "wave": "W2",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "T4-8a"
+      ],
+      "file": "docs/product/tickets/t4/t4-8b.md",
+      "status": "todo"
+    },
+    "T4-9": {
+      "title": "Connections P2: Ask",
+      "track": "T4",
+      "wave": "W3",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "T4-8b"
+      ],
+      "file": "docs/product/tickets/t4/t4-9.md",
+      "status": "todo"
+    },
+    "T4-10": {
+      "title": "Connections P3: HTTP, OAuth, generated tools",
+      "track": "T4",
+      "wave": "W4",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "T4-9"
+      ],
+      "file": "docs/product/tickets/t4/t4-10.md",
+      "status": "todo"
+    },
+    "T4-11": {
+      "title": "Targets and syncs as connections",
+      "track": "T4",
+      "wave": "W4",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "T4-10"
+      ],
+      "file": "docs/product/tickets/t4/t4-11.md",
+      "status": "todo"
+    },
+    "T4-12": {
+      "title": "Calendar: ICS feeds",
+      "track": "T4",
+      "wave": "W3",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T2-11",
+        "T4-8a"
+      ],
+      "file": "docs/product/tickets/t4/t4-12.md",
+      "status": "todo"
+    },
+    "T4-13": {
+      "title": "Calendar: CalDAV with replies",
+      "track": "T4",
+      "wave": "W3",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "T4-12"
+      ],
+      "file": "docs/product/tickets/t4/t4-13.md",
+      "status": "todo"
+    },
+    "T4-14": {
+      "title": "Google Calendar through Metistry's client",
+      "track": "T4",
+      "wave": "W4",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "T4-10",
+        "T4-12"
+      ],
+      "file": "docs/product/tickets/t4/t4-14.md",
+      "status": "todo"
+    },
+    "T4-15": {
+      "title": "Mail: IMAP",
+      "track": "T4",
+      "wave": "W4",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "T4-8a"
+      ],
+      "file": "docs/product/tickets/t4/t4-15.md",
+      "status": "todo"
+    },
+    "T4-17": {
+      "title": "Invitation and message requests",
+      "track": "T4",
+      "wave": "W4",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T4-12",
+        "T4-15",
+        "T1-8"
+      ],
+      "file": "docs/product/tickets/t4/t4-17.md",
+      "status": "todo"
+    },
+    "T4-18": {
+      "title": "Compute",
+      "track": "T4",
+      "wave": "W2",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "T4-1"
+      ],
+      "file": "docs/product/tickets/t4/t4-18.md",
+      "status": "todo"
+    },
+    "T4-19": {
+      "title": "Spending limits data",
+      "track": "T4",
+      "wave": "W3",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T4-18"
+      ],
+      "file": "docs/product/tickets/t4/t4-19.md",
+      "status": "todo"
+    },
+    "T4-20": {
+      "title": "Keep awake and the lid",
+      "track": "T4",
+      "wave": "W1",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/t4/t4-20.md",
+      "status": "todo"
+    },
+    "T4-21": {
+      "title": "Doctor for the Services pane",
+      "track": "T4",
+      "wave": "W1",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/t4/t4-21.md",
+      "status": "todo"
+    },
+    "T4-22": {
+      "title": "Defer and report",
+      "track": "T4",
+      "wave": "W3",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T4-9"
+      ],
+      "file": "docs/product/tickets/t4/t4-22.md",
+      "status": "todo"
+    },
+    "T4-23": {
+      "title": "Mirrors and secret failures",
+      "track": "T4",
+      "wave": "W3",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T1-8",
+        "T4-1"
+      ],
+      "file": "docs/product/tickets/t4/t4-23.md",
+      "status": "todo"
+    },
+    "T4-24": {
+      "title": "Linear: the connection and its sync",
+      "track": "T4",
+      "wave": "W2",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "T4-8a",
+        "T4-2",
+        "T1-8"
+      ],
+      "file": "docs/product/tickets/t4/t4-24.md",
+      "status": "todo"
+    },
+    "T4-25": {
+      "title": "Linear: a task becomes an issue",
+      "track": "T4",
+      "wave": "W3",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T4-24",
+        "T2-5"
+      ],
+      "file": "docs/product/tickets/t4/t4-25.md",
+      "status": "todo"
+    },
+    "T4-26": {
+      "title": "Linear: completion both ways",
+      "track": "T4",
+      "wave": "W3",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T4-24",
+        "T2-4"
+      ],
+      "file": "docs/product/tickets/t4/t4-26.md",
+      "status": "todo"
+    },
+    "T5-1": {
+      "title": "The stores",
+      "track": "T5",
+      "wave": "W1",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "F-7",
+        "F-12"
+      ],
+      "file": "docs/product/tickets/t5/t5-1.md",
+      "status": "todo"
+    },
+    "T5-2": {
+      "title": "The shell",
+      "track": "T5",
+      "wave": "W1",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "F-7"
+      ],
+      "file": "docs/product/tickets/t5/t5-2.md",
+      "status": "todo"
+    },
+    "T5-3": {
+      "title": "Shared components",
+      "track": "T5",
+      "wave": "W1",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "F-7"
+      ],
+      "file": "docs/product/tickets/t5/t5-3.md",
+      "status": "todo"
+    },
+    "T5-4a": {
+      "title": "Needs You: the list",
+      "track": "T5",
+      "wave": "W2",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "T5-2",
+        "T5-3"
+      ],
+      "file": "docs/product/tickets/t5/t5-4a.md",
+      "status": "todo"
+    },
+    "T5-4b": {
+      "title": "Needs You: the bodies",
+      "track": "T5",
+      "wave": "W2",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "T5-3"
+      ],
+      "file": "docs/product/tickets/t5/t5-4b.md",
+      "status": "todo"
+    },
+    "T5-5": {
+      "title": "The capture composer",
+      "track": "T5",
+      "wave": "W2",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T5-1"
+      ],
+      "file": "docs/product/tickets/t5/t5-5.md",
+      "status": "todo"
+    },
+    "T5-6": {
+      "title": "The Usage popover",
+      "track": "T5",
+      "wave": "W2",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T5-1",
+        "T1-15"
+      ],
+      "file": "docs/product/tickets/t5/t5-6.md",
+      "status": "todo"
+    },
+    "T5-7": {
+      "title": "Live events on the Mac",
+      "track": "T5",
+      "wave": "W2",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "F-12",
+        "T2-18"
+      ],
+      "file": "docs/product/tickets/t5/t5-7.md",
+      "status": "todo"
+    },
+    "T6-1a": {
+      "title": "Today: the spine",
+      "track": "T6",
+      "wave": "W2",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "T5-3",
+        "T2-7"
+      ],
+      "file": "docs/product/tickets/t6/t6-1a.md",
+      "status": "todo"
+    },
+    "T6-1b": {
+      "title": "Today: brief, Next Up, close",
+      "track": "T6",
+      "wave": "W2",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "T5-3",
+        "T2-8",
+        "T3-6"
+      ],
+      "file": "docs/product/tickets/t6/t6-1b.md",
+      "status": "todo"
+    },
+    "T6-2": {
+      "title": "Chat",
+      "track": "T6",
+      "wave": "W2",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "T5-3",
+        "T2-17"
+      ],
+      "file": "docs/product/tickets/t6/t6-2.md",
+      "status": "todo"
+    },
+    "T6-3": {
+      "title": "Activity",
+      "track": "T6",
+      "wave": "W2",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T5-3",
+        "T1-3"
+      ],
+      "file": "docs/product/tickets/t6/t6-3.md",
+      "status": "todo"
+    },
+    "T6-4": {
+      "title": "Knowledge",
+      "track": "T6",
+      "wave": "W3",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "T1-6",
+        "T2-10",
+        "T1-5"
+      ],
+      "file": "docs/product/tickets/t6/t6-4.md",
+      "status": "todo"
+    },
+    "T6-5": {
+      "title": "Agents",
+      "track": "T6",
+      "wave": "W3",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "T4-6"
+      ],
+      "file": "docs/product/tickets/t6/t6-5.md",
+      "status": "todo"
+    },
+    "T6-6": {
+      "title": "Scheduled",
+      "track": "T6",
+      "wave": "W3",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "T3-3"
+      ],
+      "file": "docs/product/tickets/t6/t6-6.md",
+      "status": "todo"
+    },
+    "T6-7": {
+      "title": "Board and card detail",
+      "track": "T6",
+      "wave": "W3",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "T1-1",
+        "T1-2"
+      ],
+      "file": "docs/product/tickets/t6/t6-7.md",
+      "status": "todo"
+    },
+    "T6-8": {
+      "title": "Projects",
+      "track": "T6",
+      "wave": "W3",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T4-7"
+      ],
+      "file": "docs/product/tickets/t6/t6-8.md",
+      "status": "todo"
+    },
+    "T6-9": {
+      "title": "Artifacts",
+      "track": "T6",
+      "wave": "W3",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "T5-3"
+      ],
+      "file": "docs/product/tickets/t6/t6-9.md",
+      "status": "todo"
+    },
+    "T6-10": {
+      "title": "Run detail",
+      "track": "T6",
+      "wave": "W3",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T2-17"
+      ],
+      "file": "docs/product/tickets/t6/t6-10.md",
+      "status": "todo"
+    },
+    "T6-11": {
+      "title": "The Settings window",
+      "track": "T6",
+      "wave": "W3",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "T5-1",
+        "T4-20",
+        "T4-21",
+        "T2-16"
+      ],
+      "file": "docs/product/tickets/t6/t6-11.md",
+      "status": "todo"
+    },
+    "T6-12": {
+      "title": "Compute",
+      "track": "T6",
+      "wave": "W4",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "T4-18",
+        "T4-19"
+      ],
+      "file": "docs/product/tickets/t6/t6-12.md",
+      "status": "todo"
+    },
+    "T6-13a": {
+      "title": "Connections: list and detail",
+      "track": "T6",
+      "wave": "W4",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "T4-8a"
+      ],
+      "file": "docs/product/tickets/t6/t6-13a.md",
+      "status": "todo"
+    },
+    "T6-13b": {
+      "title": "Connections: add and configure",
+      "track": "T6",
+      "wave": "W4",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "T4-10"
+      ],
+      "file": "docs/product/tickets/t6/t6-13b.md",
+      "status": "todo"
+    },
+    "T6-14": {
+      "title": "Secrets and Variables",
+      "track": "T6",
+      "wave": "W4",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T4-1",
+        "T4-4"
+      ],
+      "file": "docs/product/tickets/t6/t6-14.md",
+      "status": "todo"
+    },
+    "T6-15": {
+      "title": "Live Capture and Sessions",
+      "track": "T6",
+      "wave": "W4",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T8-4",
+        "T3-9"
+      ],
+      "file": "docs/product/tickets/t6/t6-15.md",
+      "status": "todo"
+    },
+    "T6-16": {
+      "title": "Hot keys and the audit",
+      "track": "T6",
+      "wave": "W4",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T5-2"
+      ],
+      "file": "docs/product/tickets/t6/t6-16.md",
+      "status": "todo"
+    },
+    "T7-1": {
+      "title": "Stop recomputing",
+      "track": "T7",
+      "wave": "W0",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/t7/t7-1.md",
+      "status": "todo"
+    },
+    "T7-2": {
+      "title": "The shell",
+      "track": "T7",
+      "wave": "W1",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "F-9"
+      ],
+      "file": "docs/product/tickets/t7/t7-2.md",
+      "status": "todo"
+    },
+    "T7-3a": {
+      "title": "Today and Needs You",
+      "track": "T7",
+      "wave": "W2",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "T7-2"
+      ],
+      "file": "docs/product/tickets/t7/t7-3a.md",
+      "status": "todo"
+    },
+    "T7-3b": {
+      "title": "Work, Knowledge, More",
+      "track": "T7",
+      "wave": "W2",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "T7-2"
+      ],
+      "file": "docs/product/tickets/t7/t7-3b.md",
+      "status": "todo"
+    },
+    "T7-4": {
+      "title": "Offline",
+      "track": "T7",
+      "wave": "W3",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "T2-4"
+      ],
+      "file": "docs/product/tickets/t7/t7-4.md",
+      "status": "todo"
+    },
+    "T7-5": {
+      "title": "Push and enrolment",
+      "track": "T7",
+      "wave": "W3",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/t7/t7-5.md",
+      "status": "todo"
+    },
+    "T7-6": {
+      "title": "Settings",
+      "track": "T7",
+      "wave": "W4",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "F-13"
+      ],
+      "file": "docs/product/tickets/t7/t7-6.md",
+      "status": "todo"
+    },
+    "T7-7": {
+      "title": "Live events in the PWA",
+      "track": "T7",
+      "wave": "W2",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T2-18",
+        "T7-2"
+      ],
+      "file": "docs/product/tickets/t7/t7-7.md",
+      "status": "todo"
+    },
+    "T8-1": {
+      "title": "The TCC enum",
+      "track": "T8",
+      "wave": "W0",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/t8/t8-1.md",
+      "status": "todo"
+    },
+    "T8-2a": {
+      "title": "The recorder: audio",
+      "track": "T8",
+      "wave": "W3",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "T8-1"
+      ],
+      "file": "docs/product/tickets/t8/t8-2a.md",
+      "status": "todo"
+    },
+    "T8-2b": {
+      "title": "The recorder: the session",
+      "track": "T8",
+      "wave": "W3",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "T8-2a"
+      ],
+      "file": "docs/product/tickets/t8/t8-2b.md",
+      "status": "todo"
+    },
+    "T8-3": {
+      "title": "Screen and window",
+      "track": "T8",
+      "wave": "W4",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "T8-2a"
+      ],
+      "file": "docs/product/tickets/t8/t8-3.md",
+      "status": "todo"
+    },
+    "T8-4": {
+      "title": "Retention and re-review",
+      "track": "T8",
+      "wave": "W4",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T8-2b",
+        "F-6"
+      ],
+      "file": "docs/product/tickets/t8/t8-4.md",
+      "status": "todo"
+    },
+    "T8-5": {
+      "title": "The bar",
+      "track": "T8",
+      "wave": "W4",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "T8-2a",
+        "T5-5"
+      ],
+      "file": "docs/product/tickets/t8/t8-5.md",
+      "status": "todo"
+    },
+    "T8-6": {
+      "title": "The private tier",
+      "track": "T8",
+      "wave": "W3",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T4-18"
+      ],
+      "file": "docs/product/tickets/t8/t8-6.md",
+      "status": "todo"
+    },
+    "T8-7": {
+      "title": "Meeting groups and anchors",
+      "track": "T8",
+      "wave": "W4",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T1-8",
+        "T8-2b"
+      ],
+      "file": "docs/product/tickets/t8/t8-7.md",
+      "status": "todo"
+    },
+    "T9-1": {
+      "title": "Decisions, in shadow",
+      "track": "T9",
+      "wave": "W1",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "F-8"
+      ],
+      "file": "docs/product/tickets/t9/t9-1.md",
+      "status": "todo"
+    },
+    "T9-2": {
+      "title": "The policy",
+      "track": "T9",
+      "wave": "W2",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "T9-1"
+      ],
+      "file": "docs/product/tickets/t9/t9-2.md",
+      "status": "todo"
+    },
+    "T9-3": {
+      "title": "The confirmatory eval",
+      "track": "T9",
+      "wave": "W3",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T9-2"
+      ],
+      "file": "docs/product/tickets/t9/t9-3.md",
+      "status": "todo"
+    },
+    "T9-4": {
+      "title": "Wire the composer",
+      "track": "T9",
+      "wave": "W4",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T9-3",
+        "F-0"
+      ],
+      "file": "docs/product/tickets/t9/t9-4.md",
+      "status": "todo"
+    },
+    "T10-1": {
+      "title": "One commit per act",
+      "track": "T10",
+      "wave": "W1",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/t10/t10-1.md",
+      "status": "todo"
+    },
+    "T10-2": {
+      "title": "Sync policy and status",
+      "track": "T10",
+      "wave": "W1",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "F-6"
+      ],
+      "file": "docs/product/tickets/t10/t10-2.md",
+      "status": "todo"
+    },
+    "T10-3": {
+      "title": "Integrate before pushing",
+      "track": "T10",
+      "wave": "W1",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "T10-1"
+      ],
+      "file": "docs/product/tickets/t10/t10-3.md",
+      "status": "todo"
+    },
+    "T10-4": {
+      "title": "File history",
+      "track": "T10",
+      "wave": "W2",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T10-1"
+      ],
+      "file": "docs/product/tickets/t10/t10-4.md",
+      "status": "todo"
+    },
+    "T10-5": {
+      "title": "Restore a file",
+      "track": "T10",
+      "wave": "W2",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T10-4",
+        "T1-8"
+      ],
+      "file": "docs/product/tickets/t10/t10-5.md",
+      "status": "todo"
+    },
+    "T10-6": {
+      "title": "Roll back",
+      "track": "T10",
+      "wave": "W2",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "T10-3",
+        "T10-4"
+      ],
+      "file": "docs/product/tickets/t10/t10-6.md",
+      "status": "todo"
+    },
+    "T10-7": {
+      "title": "History in the app",
+      "track": "T10",
+      "wave": "W3",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T10-2",
+        "T10-4",
+        "T5-3"
+      ],
+      "file": "docs/product/tickets/t10/t10-7.md",
+      "status": "todo"
+    },
+    "X-1": {
+      "title": "The document sweep",
+      "track": "X",
+      "wave": "W5",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-1.md",
+      "status": "todo"
+    }
+  },
+  "totals": {
+    "tickets": 140,
+    "agent_days": 451.5,
+    "waves": 6
+  },
+  "critical_path": {
+    "days": 35,
+    "path": [
+      "F-3",
+      "T4-1",
+      "T4-2",
+      "T4-8a",
+      "T4-8b",
+      "T4-9",
+      "T4-10",
+      "T4-11"
+    ]
+  }
+}

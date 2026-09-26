@@ -565,6 +565,33 @@ export { parseBearer, tokenEquals, authorized, tokenHash, mintToken } from "./au
 export { sanitizeForAgent } from "./sanitize.js";
 export { parseDecisionBlock, SKIP_FEEDBACK, type DecisionBlock } from "./decision-block.js";
 export {
+  REQUEST_BODIES,
+  REQUEST_DECISIONS,
+  REQUEST_DOORS,
+  REQUEST_KIND_TYPE,
+  REQUEST_KINDS,
+  REQUEST_TYPE_TABLE,
+  REQUEST_TYPES,
+  UNKNOWN_KIND_BODY,
+  UNKNOWN_KIND_TYPE,
+  describeRequest,
+  isRequestKind,
+  requestBodyOf,
+  requestTypeOf,
+  requestWordOf,
+  requestWordSql,
+  type RequestAnswer,
+  type RequestBody,
+  type RequestBodyAnswers,
+  type RequestDecision,
+  type RequestDoor,
+  type RequestKind,
+  type RequestSend,
+  type RequestShape,
+  type RequestType,
+  type RequestTypeSpec,
+} from "./requests.js";
+export {
   startRun,
   finishRun,
   withRun,

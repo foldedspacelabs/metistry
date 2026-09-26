@@ -1,0 +1,17 @@
+{
+  "route": "POST /message",
+  "source": "recorded",
+  "ticket": null,
+  "request": {
+    "method": "POST",
+    "path": "/message",
+    "body": {
+      "text": "What's on today?"
+    },
+    "idempotency_key": null
+  },
+  "status": 202,
+  "body": {
+    "message_id": "2"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "route": "GET /api/knowledge/version",
+  "source": "contract",
+  "ticket": "T10-4",
+  "note": "one file at one commit",
+  "request": {
+    "method": "GET",
+    "path": "/api/knowledge/version?path=Projects%2FMetistry%2FRoadmap.md&sha=9ab8c7d6",
+    "body": null,
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "path": "Projects/Metistry/Roadmap.md",
+    "sha": "9ab8c7d6",
+    "content": "# Roadmap\n\nShip the store interface.\n",
+    "bytes": 38,
+    "as_of": "2026-09-28T13:05:00.000Z"
+  }
+}

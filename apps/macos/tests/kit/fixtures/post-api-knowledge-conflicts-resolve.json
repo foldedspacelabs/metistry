@@ -1,0 +1,23 @@
+{
+  "route": "POST /api/knowledge/conflicts/resolve",
+  "source": "contract",
+  "ticket": "T2-10",
+  "note": "keep one side of a conflicted file; 409 stale when it moved past seen_sha",
+  "request": {
+    "method": "POST",
+    "path": "/api/knowledge/conflicts/resolve",
+    "body": {
+      "keep": "mine",
+      "path": "Projects/Metistry/Roadmap.md",
+      "seen_sha": "4c1d2e3f"
+    },
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "ok": true,
+    "path": "Projects/Metistry/Roadmap.md",
+    "kept": "mine",
+    "sha": "5e6f7a8b"
+  }
+}

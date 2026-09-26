@@ -1,0 +1,90 @@
+{
+  "route": "GET /api/commands",
+  "source": "recorded",
+  "ticket": null,
+  "request": {
+    "method": "GET",
+    "path": "/api/commands",
+    "body": null,
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "commands": [
+      {
+        "id": "/deep",
+        "description": "run this turn on the deep tier (opus, effort high)",
+        "routes_to": "model_override",
+        "tier": "deep",
+        "model": "opus",
+        "effort": "high",
+        "query": null,
+        "takes_argument": true
+      },
+      {
+        "id": "/model",
+        "description": "run this turn on a named tier: deep, default, fast, routine (`/model <tier> <text>`)",
+        "routes_to": "model_override",
+        "tier": "default",
+        "model": "haiku",
+        "effort": "medium",
+        "query": null,
+        "takes_argument": true
+      },
+      {
+        "id": "/note",
+        "description": "capture straight to the inbox — no model, no turn, acknowledged instantly",
+        "routes_to": "note",
+        "tier": null,
+        "model": null,
+        "effort": null,
+        "query": null,
+        "takes_argument": true
+      },
+      {
+        "id": "/open",
+        "description": "Work items not yet closed, newest first",
+        "routes_to": "fast_path",
+        "tier": null,
+        "model": null,
+        "effort": null,
+        "query": "open_work",
+        "takes_argument": false
+      },
+      {
+        "id": "/status",
+        "description": "Work items not yet closed, newest first",
+        "routes_to": "fast_path",
+        "tier": null,
+        "model": null,
+        "effort": null,
+        "query": "open_work",
+        "takes_argument": false
+      }
+    ],
+    "agents": [
+      {
+        "id": "@cursor",
+        "description": "Cursor",
+        "kind": "external",
+        "present": false,
+        "last_seen_at": null
+      },
+      {
+        "id": "@old-laptop",
+        "description": "Old laptop",
+        "kind": "external",
+        "present": false,
+        "last_seen_at": null
+      },
+      {
+        "id": "@opencode",
+        "description": "OpenCode",
+        "kind": "external",
+        "present": false,
+        "last_seen_at": null
+      }
+    ],
+    "as_of": "2026-09-26T22:54:15.104Z"
+  }
+}

@@ -1,0 +1,69 @@
+{
+  "route": "GET /api/compute",
+  "source": "recorded",
+  "ticket": null,
+  "request": {
+    "method": "GET",
+    "path": "/api/compute",
+    "body": null,
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "file": "<instance>/.metistry/compute.yaml",
+    "files": [
+      "<product>/seed/compute.yaml",
+      "<instance>/.metistry/compute.yaml"
+    ],
+    "instance_file": "<instance>/.metistry/compute.yaml",
+    "providers": [
+      {
+        "name": "openrouter",
+        "kind": "openai-compatible",
+        "locality": "off_machine",
+        "base_url": "https://openrouter.ai/api/v1",
+        "zdr": true,
+        "secret": "METISTRY_OPENROUTER_API_KEY",
+        "secret_present": false,
+        "models_assigned": []
+      },
+      {
+        "name": "lmstudio",
+        "kind": "openai-compatible",
+        "locality": "on_machine",
+        "base_url": "http://127.0.0.1:1234/v1",
+        "models_assigned": [
+          "gemma"
+        ]
+      }
+    ],
+    "assignments": [
+      {
+        "target": "default",
+        "provider": "lmstudio",
+        "model": "gemma",
+        "effort": "medium",
+        "warn_non_zdr": false
+      }
+    ],
+    "assigns_nothing": false,
+    "spend": {
+      "instance": {
+        "daily": 0.0042,
+        "monthly": 0.0042
+      },
+      "providers": {
+        "openrouter": {
+          "daily": 0,
+          "monthly": 0
+        },
+        "lmstudio": {
+          "daily": 0.0042,
+          "monthly": 0.0042
+        }
+      }
+    },
+    "writable": true,
+    "as_of": "2026-09-26T22:54:15.127Z"
+  }
+}

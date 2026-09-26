@@ -1,0 +1,50 @@
+{
+  "route": "PUT /api/scheduled/syncs/:name",
+  "source": "contract",
+  "ticket": "T3-3",
+  "note": "cadence, pause and raise toggles; never the connection (§2.6)",
+  "request": {
+    "method": "PUT",
+    "path": "/api/scheduled/syncs/github-state",
+    "body": {
+      "every": "1h",
+      "raise": {
+        "review_requested": false
+      }
+    },
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "ok": true,
+    "sync": {
+      "name": "github-state",
+      "kind": "sync",
+      "connection": "github",
+      "title": "GitHub",
+      "every": {
+        "value": "1h",
+        "origin": "yours"
+      },
+      "paused": {
+        "value": false,
+        "origin": "default"
+      },
+      "raise": {
+        "review_requested": {
+          "value": false,
+          "origin": "yours"
+        }
+      },
+      "next_run": "2026-09-28T14:00:00.000Z",
+      "last_run": {
+        "run_id": "8820",
+        "at": "2026-09-28T13:00:02.000Z",
+        "ok": true,
+        "outcome": "3 pull requests",
+        "cost_usd": null
+      }
+    },
+    "as_of": "2026-09-28T13:05:00.000Z"
+  }
+}

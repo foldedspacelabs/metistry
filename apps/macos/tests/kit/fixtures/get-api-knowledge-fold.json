@@ -1,0 +1,28 @@
+{
+  "route": "GET /api/knowledge/fold",
+  "source": "contract",
+  "ticket": "T1-6",
+  "note": "knowledge_fold_latest: the newest Journal/Fold/*.md and its links; fold is null before the first fold",
+  "request": {
+    "method": "GET",
+    "path": "/api/knowledge/fold?date=2026-09-28",
+    "body": null,
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "fold": {
+      "path": "Journal/Fold/2026-09-28.md",
+      "date": "2026-09-28",
+      "title": "Fold — 28 September",
+      "links": [
+        {
+          "path": "Projects/Metistry/Roadmap.md",
+          "title": "Roadmap",
+          "kind": "wikilink"
+        }
+      ]
+    },
+    "as_of": "2026-09-28T13:05:00.000Z"
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "route": "POST /api/calendar/events/:id/move",
+  "source": "contract",
+  "ticket": "T2-12",
+  "note": "no confirm_token: the preview and a single-use token; the same body with confirm_token moves it and answers moved: true",
+  "request": {
+    "method": "POST",
+    "path": "/api/calendar/events/evt-standup-0928/move",
+    "body": {
+      "start": "2026-09-28T14:00:00.000Z",
+      "end": "2026-09-28T14:15:00.000Z"
+    },
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "preview": {
+      "event_id": "evt-standup-0928",
+      "title": "Standup",
+      "from": {
+        "start": "2026-09-28T13:30:00.000Z",
+        "end": "2026-09-28T13:45:00.000Z"
+      },
+      "to": {
+        "start": "2026-09-28T14:00:00.000Z",
+        "end": "2026-09-28T14:15:00.000Z"
+      },
+      "attendees": [
+        {
+          "name": "Dana",
+          "email": "dana@example.com",
+          "person": "People/Dana.md",
+          "self": false
+        }
+      ]
+    },
+    "confirm_token": "mv-preview-token-single-use",
+    "moved": false
+  }
+}

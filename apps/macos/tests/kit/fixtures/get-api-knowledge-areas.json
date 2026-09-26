@@ -1,0 +1,25 @@
+{
+  "route": "GET /api/knowledge/areas",
+  "source": "contract",
+  "ticket": "T1-6",
+  "note": "knowledge_areas: area → index description, count, last change, named by the fold",
+  "request": {
+    "method": "GET",
+    "path": "/api/knowledge/areas",
+    "body": null,
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "areas": [
+      {
+        "area": "Projects/Metistry",
+        "description": "The product",
+        "pages": 24,
+        "last_change": "2026-09-28T12:58:01.000Z",
+        "named_by_fold": true
+      }
+    ],
+    "as_of": "2026-09-28T13:05:00.000Z"
+  }
+}

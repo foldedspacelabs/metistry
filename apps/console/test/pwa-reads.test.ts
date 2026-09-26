@@ -231,6 +231,36 @@ describe("fills and faces are tokens", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// 12-hour clock times
+// ---------------------------------------------------------------------------
+
+describe("clock times are 12-hour with AM/PM on every device", () => {
+  const { clockTime, dateTime } = lifted<{ clockTime: (t: unknown) => string; dateTime: (t: unknown) => string }>(
+    ["clockTime", "dateTime"],
+    "{ clockTime, dateTime }",
+  );
+  const at = (h: number, m: number) => new Date(2026, 8, 26, h, m); // local time, so the test holds in any TZ
+
+  it("pins the clock whatever the locale", () => {
+    expect(clockTime(at(13, 2))).toBe("1:02 PM");
+    expect(clockTime(at(9, 4))).toBe("9:04 AM");
+    expect(clockTime(at(0, 5))).toBe("12:05 AM");
+    expect(clockTime(at(12, 0))).toBe("12:00 PM");
+    expect(clockTime(at(23, 59).toISOString())).toBe("11:59 PM");
+    expect(dateTime(at(13, 2))).toMatch(/, 1:02 PM$/);
+  });
+
+  it("says nothing rather than Invalid Date", () => {
+    expect(clockTime("not a time")).toBe("");
+    expect(dateTime(undefined)).toBe("");
+  });
+
+  it("leaves no timestamp to the locale's clock", () => {
+    expect(SRC).not.toMatch(/\.toLocaleString\(|\.toLocaleTimeString\(/);
+  });
+});
+
 // A lift evaluates one declaration at a time, so it cannot see two top-level
 // declarations of one name — which is a SyntaxError that stops the whole PWA
 // from loading. Parse the real file, as the browser will.

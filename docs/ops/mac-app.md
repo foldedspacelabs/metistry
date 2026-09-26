@@ -192,9 +192,10 @@ exists to name.
 | Type | File | What it is |
 | --- | --- | --- |
 | `ConsoleCallTransport` | `sources/kit/console-api.swift` | One authenticated request against this machine's console, behind a protocol so the store is testable with nothing spawned and no network |
-| `CLIConsoleCallTransport` | same | The only production transport: `metistry console call <METHOD> <path> [--body -] --json`. A body goes on **stdin**, never argv |
+| `SessionConsoleCallTransport` | same | The production transport: one long-lived `metistry console session --stdio` child, requests matched by id, restarted on the next call after it exits, and `events(lastEventID:)` for `GET /api/events`. The kit declares `SessionProcess`/`SessionSpawner`; `ProcessCommandRunner` (`sources/app/`) is the `Process` behind them |
+| `CLIConsoleCallTransport` | same | One process per request: `metistry console call <METHOD> <path> [--body -] --json`. A body goes on **stdin**, never argv. The session's fallback for a CLI that predates it |
 | `ConsoleAPI` | same | One method per route in `docs/ops/console-api.md` — identity, whoami, `activity_feed`, proposals (+ batch), board and the four task routes, rooms, agents and `agent_presence` (+ autonomy, approve), `/api/compute*`, `/api/knowledge/search|page|pages`, `/api/commands`, `/api/runs/:id` |
-| `ConsoleError` | `sources/kit/console-client.swift` | The standard envelope, plus `cliUnavailable` (this install's CLI predates the verb) and `notConfigured` (no token, or a non-loopback console). `namedField(among:)` attributes a refusal to a field **the caller already sent** — the envelope is `{code, message}` and names its field in prose, so nothing is inferred from the sentence's shape |
+| `ConsoleError` | `sources/kit/console-client.swift` | The standard envelope — with `details`, every key of the body beside `error` (a `409`'s `reason` and the row as it stands) — plus `cliUnavailable` (this install's CLI predates the verb) and `notConfigured` (no token, or a non-loopback console). `namedField(among:)` attributes a refusal to a field **the caller already sent** — the envelope is `{code, message}` and names its field in prose, so nothing is inferred from the sentence's shape |
 | `ConsoleReachability` | `sources/kit/console-api.swift` | reachable / degraded / unreachable, **reported not inferred** (P5). A `401` is unreachable; a `403` is not — the console answered and one route declined this credential |
 | the wire shapes | `sources/kit/console-data.swift` | `Codable` per route and per named-query row. Two tolerances live here so no call site repeats them: a Postgres `numeric` arrives as a **string**, and timestamps are text |
 | `RequestAnswer` | same | The six answers and the option form a `decision` request takes. `isBatchable` is "only Later, Skip and Decline"; `isSendable` is "Revise with an empty reason is a cancel" |
@@ -219,21 +220,48 @@ Three rules the layer encodes rather than asks for:
   answered on the phone leaves the queue instead of lingering. Both folds live
   in `merging(_:)` and are called from the store and nowhere else.
 
-**What this transport costs, and the one change that removes it.** `metistry
-console call` prints the error envelope on **stderr** for a `>= 400` and does
-not print the response body, so the extra keys on a conflict `409` — `reason`,
-`decision`, `decided_at`, and the row itself — do not survive the trip.
-Nothing phase A reads is affected (the envelope *is* `{code, message}`, so a
-400/401/403/404/503 comes back whole), and `ConsoleError.conflictBodyIsUnavailable`
-says so out loud rather than letting a caller read the absence as "the console
-sent none". The queue's `if_unchanged` repaint in phase B wants that body: the
-fix is for `console call` to print `r.raw` on stdout for a `>= 400` as well,
-**not** a second HTTP client in Swift. ~~And because `console call` sets no
-request headers, `POST /capture`'s `Idempotency-Key` is unreachable from this
-layer — which is why capture is not on it.~~ (struck 2026-09-18; `console
-call --idempotency-key <key>` shipped, and `ConsoleCallTransport.call` takes
-the key as its fourth argument. Capture is still not on `ConsoleAPI` — no
-route method calls it yet — but the transport is no longer why not.)
+**What this transport costs, and what it no longer does.** Until F-12 every
+request was a `metistry console call` process — node starting, the environment
+loading, the token being looked up — about **141 ms** median on a scratch
+instance, which is fine for a script and wrong for a board that repaints. The
+production transport is now `SessionConsoleCallTransport`: one long-lived
+`metistry console session --stdio` child per instance, a JSON line per request
+answered by a JSON line matched on `id` (`docs/ops/cli.md` has the contract),
+**~1.5 ms** median for the same request. The token is still resolved by the
+CLI, once, and never reaches this process: the request line carries a method,
+a path, a body and an idempotency key, and the source scan above holds with
+the new code in.
+
+Three things the transport promises rather than hopes for:
+
+- **A crashed child fails what is in flight; it never hangs it.** When the
+  child's stdout closes, every pending call gets the child's own reason — the
+  CLI's sentence as `notConfigured` for a missing token or a non-loopback
+  console, the last stderr line as `transport` otherwise — and an open event
+  stream finishes with the same error. The next call starts a new child; a
+  child that cannot start is not respawned in a loop nobody asked for. A call
+  that gets no answer at all fails after `callTimeout` (45 s, above the CLI's
+  own 30 s per request).
+- **An older install is slower, not broken.** A CLI that predates the verb
+  answers `console session` with `console`'s usage line (exit 2), which names
+  no `session`; the transport reads that as `cliUnavailable` and sends that
+  call and every later one through `CLIConsoleCallTransport`.
+- **A refusal arrives whole.** F-11 made `console call --json` print the
+  console's body for a `>= 400`, and the session always carries it, so a
+  conflict `409` keeps its `reason` and **the row as it stands** (`decision`,
+  `decided_at`, `proposal`, …; `docs/ops/client-api.md`). They live in
+  `ConsoleErrorEnvelope.details`, read as `ConsoleError.conflictReason` and
+  `.details` — which is what the queue's `if_unchanged` repaint draws from
+  instead of re-fetching. (`ConsoleError.conflictBodyIsUnavailable`, which said
+  out loud that the body could not be there, went with F-11.) Capture is still
+  not on `ConsoleAPI` — no route method calls it yet — but `Idempotency-Key`
+  rides the session as `idempotency_key`, so the transport is not why.
+
+The live-changes stream rides the same child: `events(lastEventID:)` is `GET
+/api/events` (design-build-plan §2.20) as `ConsoleLiveEvent` frames — ids and
+counts, never bodies — and cancelling the consuming task sends the session's
+`{id, cancel: true}`. Until the console serves the route, the stream finishes
+with a `404` and the app polls as it does today.
 
 ## What `ASAuthorization` actually says about a local origin
 

@@ -19,7 +19,11 @@
 //     module resolves `due friday` to a date and hands it back; the bytes on
 //     disk stay the user's. The one thing Metistry ever adds to a line is the
 //     `^mt-…` anchor, and its only writers are the plugin and whatever
-//     creates a line from scratch — never a routine.
+//     creates a line from scratch — never a routine. The one exception is
+//     the owner's own Tick door (design-build-plan §2.11, T2-4):
+//     `setTaskChecked` flips the box and writes or removes one `done <date>`
+//     and nothing else, refusing any line where it cannot prove that by
+//     re-parsing its own output.
 //   * A FIELD IT CANNOT READ IS NEVER GUESSED. `due nextweek` sets no date;
 //     it sets `parse_warning`, which the day's plan renders as one visible
 //     line naming the token. A wrong date is worse than no date.
@@ -41,6 +45,7 @@
 // that is the indexer's (P1-4), and `text_norm` — the dedupe key — is here
 // because it is a pure function of the text.
 
+import { createHash } from "node:crypto";
 import { optionalEnv } from "./config.js";
 
 // --- the closed vocabularies --------------------------------------------------
@@ -912,4 +917,182 @@ export function formatTaskLine(task: ParsedTaskLine): string {
   const box = task.checked ? "x" : task.dropped ? "-" : " ";
   const body = [task.text, ...fields].filter((p) => p !== "").join(" ");
   return `${task.indent}${task.marker} [${box}]${body === "" ? "" : ` ${body}`}`;
+}
+
+// --- the Tick door's one edit (design-build-plan §2.11, T2-4) ----------------
+//
+// The owner ticks a task in the app and the console writes the line as `user`
+// (daily-flow-spec §2.2, ruled Q2). What makes that the owner's hand rather
+// than a machine rewriting their note is that the edit is INCAPABLE of
+// anything else: it takes a line and a boolean, never a patch, and it can
+// produce exactly two byte changes — the box, and one `done <date>` clause at
+// the end of the trailing run (before the anchor, which Obsidian needs last).
+// Undo is the same function with `false`: the box back to a space and that
+// clause removed. Every other outcome is a refusal, and the proof is not the
+// splice below but the re-parse after it: the line must read back with every
+// field but `checked` and `done_on` exactly as it was.
+
+/** One task line in a note, keyed exactly as the reconciler's walk keys it (`apps/reconciler/src/notes.ts` `extractTasks`). */
+export interface LocatedTaskLine {
+  task_key: string;
+  /** 1-based, in the whole file (frontmatter included), as `vault_tasks.line_no` stores it. */
+  line_no: number;
+  /** The line's bytes, without its line ending. */
+  line: string;
+  parsed: ParsedTaskLine;
+}
+
+/** The walk's frontmatter fence: a leading `---` block. Its lines are never task lines. */
+const TASK_FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
+/** An opening or closing ``` / ~~~ fence, at the start of a line. */
+const TASK_FENCE_RE = /^ {0,3}(`{3,}|~{3,})/;
+
+/** `h:<sha256 of text_norm>:<ordinal>` — the key of a line that carries no anchor (daily-flow-spec §1.5). */
+export function taskHashKey(textNorm: string, ordinal: number): string {
+  return `h:${createHash("sha256").update(textNorm).digest("hex")}:${ordinal}`;
+}
+
+/** What a task key looks like: an anchor, or a hash key. Anything else names no line. */
+export const TASK_KEY_RE = /^(?:mt-[0-9a-z]{2,16}|h:[0-9a-f]{64}:\d{1,6})$/;
+
+/**
+ * Every task line in a note with the key the index gave it. This is the
+ * walk's own algorithm, restated here because the console must find a line
+ * by the same identity without importing the reconciler (the dependency arrow
+ * points one way); `apps/reconciler/test/task-keys-agree.test.ts` holds the
+ * two to the same answers. Frontmatter and fenced code are not task lines; the
+ * ordinal counts every identical line, anchored or not; a repeated anchor
+ * falls back to its hash key.
+ */
+export function taskLinesOf(content: string, opts: TaskDateOptions = {}): LocatedTaskLine[] {
+  const fm = TASK_FRONTMATTER_RE.exec(content);
+  const bodyLine = fm ? 1 + (fm[0].match(/\n/g)?.length ?? 0) : 1;
+  const body = fm ? content.slice(fm[0].length) : content;
+  const out: LocatedTaskLine[] = [];
+  const ordinals = new Map<string, number>();
+  const used = new Set<string>();
+  let fence: string | null = null;
+  const lines = body.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    const f = TASK_FENCE_RE.exec(line)?.[1];
+    if (f) {
+      if (fence === null) fence = f[0]!;
+      else if (fence === f[0]) fence = null;
+      continue;
+    }
+    if (fence !== null) continue;
+    const parsed = parseTaskLine(line, opts);
+    if (!parsed) continue;
+    const ordinal = ordinals.get(parsed.text_norm) ?? 0;
+    ordinals.set(parsed.text_norm, ordinal + 1);
+    const hashed = taskHashKey(parsed.text_norm, ordinal);
+    const key = parsed.anchor !== null && !used.has(parsed.anchor) ? parsed.anchor : hashed;
+    if (used.has(key)) continue;
+    used.add(key);
+    out.push({ task_key: key, line_no: bodyLine + i, line, parsed });
+  }
+  return out;
+}
+
+/** The line in `content` that holds `taskKey`, or null when no line does any more. */
+export function locateTaskLine(content: string, taskKey: string, opts: TaskDateOptions = {}): LocatedTaskLine | null {
+  return taskLinesOf(content, opts).find((t) => t.task_key === taskKey) ?? null;
+}
+
+/**
+ * `content` with line `lineNo` (1-based) replaced by `line`, every other byte
+ * — including each line's own ending, `\n` or `\r\n` — untouched.
+ */
+export function replaceLine(content: string, lineNo: number, line: string): string {
+  const lines = content.split("\n");
+  const i = lineNo - 1;
+  if (i < 0 || i >= lines.length) throw new RangeError(`line ${lineNo} is not in the file`);
+  const cr = lines[i]!.endsWith("\r") ? "\r" : "";
+  lines[i] = `${line}${cr}`;
+  return lines.join("\n");
+}
+
+export type TaskCheckRefusal = "not_a_task" | "dropped" | "rule" | "already" | "unsafe";
+
+export type TaskCheckEdit =
+  | { ok: true; line: string }
+  | { ok: false; reason: TaskCheckRefusal; message: string };
+
+/** `- [ ] ` up to the box character: the prefix, and where the one character to flip sits. */
+const BOX_RE = /^([ \t]*[-*+][ \t]+\[)([ xX-])\]/;
+
+/** The fields a tick may not change: everything `parseTaskLine` reads but `checked` and `done_on`. */
+function unchangedFields(p: ParsedTaskLine): string {
+  const { checked: _c, done_on: _d, ...rest } = p;
+  return JSON.stringify(rest);
+}
+
+/**
+ * Tick (`checked: true`) or untick one task line — the Tick door's whole
+ * write. Ticking sets the box to `x` and writes `done <date>` at the end of
+ * the trailing run (replacing a `done` clause already there); unticking sets
+ * it to a space and removes the `done` clause. Nothing else on the line moves.
+ *
+ * Refused, never approximated: a line that is not a task, a dropped `[-]`
+ * line, a recurrence rule (never itself a task, §4), a line already in the
+ * asked-for state, and any line where the result does not re-parse to the
+ * same task with only `checked` and `done_on` changed — a compatibility
+ * marker (`✅ …`) the door did not write, a `done` the run cannot hold.
+ */
+export function setTaskChecked(line: string, checked: boolean, date: string, opts: TaskDateOptions = {}): TaskCheckEdit {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || parseISO(date) === null) throw new RangeError(`not a calendar date: ${date}`);
+  const before = parseTaskLine(line, opts);
+  const box = BOX_RE.exec(line);
+  const m = LINE_RE.exec(line);
+  if (!before || !box || !m || line.includes("\r") || line.includes("\n")) return { ok: false, reason: "not_a_task", message: "the line is not a task line" };
+  if (before.dropped) return { ok: false, reason: "dropped", message: "the line is dropped (`[-]`): tick it in the note if it is back" };
+  if (before.recurrence) return { ok: false, reason: "rule", message: "the line is a recurrence rule, which is never itself a task — tick the day's instance instead" };
+  if (before.checked === checked) return { ok: false, reason: "already", message: checked ? "the line is already ticked" : "the line is not ticked" };
+
+  const boxAt = box[1]!.length;
+  const rest = m[4] ?? "";
+  const restAt = line.length - rest.length;
+  // The trailing run lives before the anchor; the anchor (and whatever
+  // whitespace follows the body) is the tail and is never touched.
+  const trimmed = rest.trimEnd();
+  const anchor = TRAILING_ANCHOR_RE.exec(trimmed);
+  const core = anchor ? trimmed.slice(0, anchor.index) : trimmed;
+  const tail = rest.slice(core.length);
+
+  const today = parseISO(taskToday(opts));
+  if (!today) return { ok: false, reason: "unsafe", message: "could not resolve today" };
+  const toks = tokenize(core);
+  const run = runStart(toks, core, today);
+  let done: { start: number; end: number } | null = null;
+  for (let i = run.index; i < toks.length; ) {
+    const clause = readClause(toks, i, core, today);
+    if (!clause || clause.next <= i) break;
+    if (toks[i]!.lower === "done") done = { start: toks[i]!.start, end: toks[clause.next - 1]!.end };
+    i = clause.next;
+  }
+
+  let edited: string;
+  if (checked) {
+    edited = done ? `${core.slice(0, done.start)}done ${date}${core.slice(done.end)}` : `${core}${core === "" ? "" : " "}done ${date}`;
+  } else if (done) {
+    let from = done.start;
+    while (from > 0 && (core[from - 1] === " " || core[from - 1] === "\t")) from -= 1;
+    let to = done.end;
+    if (from === 0) while (to < core.length && (core[to] === " " || core[to] === "\t")) to += 1;
+    edited = `${core.slice(0, from)}${core.slice(to)}`;
+  } else {
+    edited = core;
+  }
+
+  const next = `${line.slice(0, boxAt)}${checked ? "x" : " "}${line.slice(boxAt + 1, restAt)}${edited}${tail}`;
+  const after = parseTaskLine(next, opts);
+  const proven =
+    after !== null &&
+    after.checked === checked &&
+    !after.dropped &&
+    after.done_on === (checked ? date : null) &&
+    unchangedFields(after) === unchangedFields(before);
+  if (!proven) return { ok: false, reason: "unsafe", message: "the line would not read back as the same task with only the box and `done` changed — tick it in the note" };
+  return { ok: true, line: next };
 }

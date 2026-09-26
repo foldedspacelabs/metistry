@@ -290,7 +290,7 @@ third was not a colour fault at all.
 ## 6. Keyboard
 
 `/` focuses the composer · `⌘K` the palette · `↑` in an empty composer edits
-your last turn · `⌘↩` sends · `esc` closes the menu, then blurs · `⌘R` resets
+your last turn · `⌘↩` sends · `esc` closes the menu, then blurs · `⇧⌘N` New Conversation (was `⌘R`, C119) resets
 the tier to the router's choice · the pill is focusable and `↩` scrolls.
 
 The composer menu **inserts at the caret and never sends** (`ux-direction.md`),

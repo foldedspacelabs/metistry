@@ -92,6 +92,31 @@ function replyParagraphs(text) {
     .join("");
 }
 
+// ----- clock times: 12-hour with AM/PM, always (design-system-amendments §8.1) -----
+// Never the device locale's clock: `toLocaleString()` is 24-hour on an en-GB
+// or de-DE phone, which is how one screen came to show 13:02 beside 8:47 AM
+// (review 01). The date keeps the locale's order; only the clock is pinned.
+// Function declarations, so every renderer above and below can call them.
+function clockTime(ts) {
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return "";
+  const h = d.getHours();
+  return `${h % 12 || 12}:${String(d.getMinutes()).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
+}
+function dateTime(ts) {
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${d.toLocaleDateString()}, ${clockTime(d)}`;
+}
+
+// Agent prose is set in the serif (C32, C35 — style.css `.agent-prose`), so it
+// reads as the assistant's before a word of it is read, and it still says so
+// once quoted out of the app. Only for a body an agent wrote: the owner's own
+// comment stays in the interface face.
+function bodyClass(c) {
+  return c?.author_kind === "agent" ? "body agent-prose" : "body";
+}
+
 // The tier this message ran at — the name from the instance's `tiers:` block
 // (a model + an effort). Shown, not chosen: there is no picker in the composer
 // yet, so this is the record of what the router decided. `esc()` because a
@@ -115,7 +140,7 @@ async function loadMessages() {
   const wasAtBottom = firstPaint || atBottom;
   const keepScrollTop = list.scrollTop; // measured before the re-render, restored after
   list.innerHTML = chrono
-    .map((m) => `<li class="${m.direction}"><div class="meta">${new Date(m.ts).toLocaleString()}${m.direction === "in" ? ` · ${m.status}` : ""}${tierChip(m)}</div>${replyParagraphs(m.text)}${m.direction === "out" ? tapbacks(m) : ""}</li>`)
+    .map((m) => `<li class="${m.direction}"><div class="meta">${dateTime(m.ts)}${m.direction === "in" ? ` · ${m.status}` : ""}${tierChip(m)}</div>${replyParagraphs(m.text)}${m.direction === "out" ? tapbacks(m) : ""}</li>`)
     .join("");
   wireTapbacks();
   if (wasAtBottom) {
@@ -426,12 +451,34 @@ $("capture-form").onsubmit = async (e) => {
 };
 
 // ----- status + push -----
+// The four states of core's check() contract, each its own word and its own
+// ink (P5, design-system §3.13). `absent` is "not configured" — a fact, not a
+// fault — so it never reads as `failed`, and `degraded` (answering, not
+// healthy) never reads as either (C10). A word outside the contract is shown
+// as it came, in the neutral ink: never a guess at a colour.
+const CHECK_STATES = ["ok", "degraded", "failed", "absent"];
+const CHECK_WORD = { ok: "ok", degraded: "degraded", failed: "failed", absent: "not configured" };
+function checkRowHtml(c) {
+  const known = CHECK_STATES.includes(c.status);
+  return `<li><span>${esc(c.name)} <span class="muted">${esc(c.probe)}</span></span><span class="${known ? c.status : "absent"}">${esc(known ? CHECK_WORD[c.status] : c.status)} · ${esc(String(c.latency_ms))}ms</span></li>`;
+}
+// The line above the rows, so the page answers before it is read: "9 ok ·
+// 1 degraded · 2 not configured", or that everything is healthy.
+function checksSummary(checks) {
+  if (checks.length === 0) return "no checks reported";
+  const n = (s) => checks.filter((c) => c.status === s).length;
+  if (n("ok") === checks.length) return `all ${checks.length} healthy`;
+  const other = checks.length - CHECK_STATES.reduce((t, s) => t + n(s), 0);
+  return [...CHECK_STATES.map((s) => [n(s), CHECK_WORD[s]]), [other, "unrecognised"]]
+    .filter(([count]) => count > 0)
+    .map(([count, word]) => `${count} ${word}`)
+    .join(" · ");
+}
+
 async function loadStatus() {
   const res = await api("/api/status");
   const { checks } = await res.json();
-  $("checks").innerHTML = checks
-    .map((c) => `<li><span>${c.name} <span class="muted">${esc(c.probe)}</span></span><span class="${c.status === "ok" ? "ok" : "failed"}">${c.status} · ${c.latency_ms}ms</span></li>`)
-    .join("");
+  $("checks").innerHTML = `<li class="checks-summary">${esc(checksSummary(checks))}</li>` + checks.map(checkRowHtml).join("");
   // one review list across every configured repo (github-state → prs_for_review)
   const { rows } = await (await api("/api/q/prs_for_review")).json();
   $("reviews").innerHTML = reviewListHtml(rows); // shared with the dashboard panel
@@ -745,29 +792,40 @@ try {
 // the stored values (kind internal|external, tier none|index|areas), which do
 // not change.
 const ROLE_LABEL = { internal: "assistant", external: "external", crew: "helper" };
-// The action vocabulary, and the same resolution the server does
-// (packages/core/src/actions.ts). Duplicated here because the PWA is plain
-// modules with no bundler — the SERVER re-validates every change, so this copy
-// is a view, never a gate. The order is the enum's.
-const ACTION_KINDS = ["dispatch", "task_update", "comment", "capture"];
-const AUTONOMY_LEVELS = ["observe", "propose", "act_within_scope"];
-const LEVEL_CEILING = { observe: "deny", propose: "propose", act_within_scope: "allow" };
-const ACTION_DEFAULTS = {
-  observe: { dispatch: "deny", task_update: "deny", comment: "deny", capture: "deny" },
-  propose: { dispatch: "propose", task_update: "propose", comment: "propose", capture: "propose" },
-  act_within_scope: { dispatch: "propose", task_update: "allow", comment: "allow", capture: "allow" },
-};
-const MODE_RANK = { deny: 0, propose: 1, allow: 2 };
-const levelOf = (au) => (AUTONOMY_LEVELS.includes(au?.level) ? au.level : "observe");
-function effectiveActions(au) {
-  const level = levelOf(au);
-  const ceiling = LEVEL_CEILING[level];
-  const out = {};
-  for (const k of ACTION_KINDS) {
-    const asked = au?.actions?.[k] ?? ACTION_DEFAULTS[level][k];
-    out[k] = MODE_RANK[asked] <= MODE_RANK[ceiling] ? asked : ceiling;
-  }
-  return out;
+// **The effective action table is the SERVER's** (§2.17). Every agent row on
+// `GET /api/agents` carries `scope.autonomy` — the level, and `detailed`: each
+// kind's mode with WHY (set, defaulted, or clamped to the level's ceiling),
+// resolved once by core's `effectiveActionsDetailed`. This panel prints it and
+// computes nothing: it used to hold a copy of the defaults, the ceilings and
+// the clamp, which is a second implementation of a rule free to drift from
+// the one the tool enforces.
+//
+// What is left here is words. ACTION_MODE_LABEL is the CLI's MODE_LABEL
+// (packages/cli/src/agents.ts), and `actionEntryText` says a row the way
+// `metistry agents autonomy` does, so the phone and the terminal print the
+// same table — a test holds the two to it (apps/console/test/pwa-reads.test.ts).
+const ACTION_MODE_LABEL = { allow: "Allow", propose: "Ask First", deny: "Never" };
+const modeWord = (m) => ACTION_MODE_LABEL[m] ?? String(m ?? "");
+function actionEntryText(entry, level) {
+  const word = modeWord(entry.mode);
+  if (entry.source === "clamped") return `${word} (asked ${modeWord(entry.asked)} — ${level}'s ceiling is ${word})`;
+  if (entry.source === "defaulted") return `${word} (default for ${level})`;
+  return word;
+}
+// The table as rows, in the server's order (the enum's). `null` when the row
+// carries no table: said as unavailable, never filled in with a guess (P5).
+function actionTableRows(scope) {
+  const au = scope?.autonomy;
+  if (!au?.level || !au.detailed || typeof au.detailed !== "object") return null;
+  return Object.entries(au.detailed).map(([kind, entry]) => ({ kind, source: entry?.source, text: actionEntryText(entry ?? {}, au.level) }));
+}
+function actionTableHtml(scope) {
+  const rows = actionTableRows(scope);
+  if (!rows) return `<span class="muted">actions: unavailable</span>`;
+  return `<span class="action-table" role="list" aria-label="actions">
+    <span class="muted" role="listitem">level: ${esc(scope.autonomy.level)}</span>
+    ${rows.map((r) => `<span class="action-row ${esc(r.source ?? "")}" role="listitem"><span class="mono">${esc(r.kind)}</span> ${esc(r.text)}</span>`).join("")}
+  </span>`;
 }
 // **The scope vocabulary is the SERVER's** since P3 of
 // docs/research/2026-09-19-grants-and-access-simplified.md §3.4: every agent
@@ -811,12 +869,11 @@ async function loadAgents() {
         au.accept_from ? `accepts from ${au.accept_from.map(esc).join(", ") || "nobody"}` : "",
         au.max_open_bundles !== undefined ? `max ${Number(au.max_open_bundles) || 0} bundles` : "",
       ].filter(Boolean).join(" · ");
-      // The action table, resolved the same way the server resolves it
-      // (docs/ops/actions.md) — level as a ceiling, kinds below it. Shown for
-      // every row, including `observe`, because "this one can do nothing" is
-      // the fact worth being able to see at a glance.
-      const table = effectiveActions(au);
-      const actionLine = `level: ${esc(levelOf(au))} · ${ACTION_KINDS.map((k) => `${esc(k)} ${esc(table[k])}`).join(" · ")}`;
+      // The action table as the server resolved it (docs/ops/actions.md) —
+      // level as a ceiling, kinds below it. Shown for every row, including
+      // `observe`, because "this one can do nothing" is the fact worth being
+      // able to see at a glance.
+      const actionTable = actionTableHtml(a.scope);
       const asks = (asked.get(a.id) ?? [])
         .map((r) => `asked for ${esc(r.area)} — ${esc(String(r.reason ?? "").slice(0, 120))} (answer it in Needs You, request #${Number(r.proposal_id)})`)
         .join("<br>");
@@ -824,8 +881,8 @@ async function loadAgents() {
         ? '<span class="muted">revoked</span>'
         : `<span><button data-agent-grants="${esc(a.id)}" class="secondary">grants</button> <button data-agent-rotate="${esc(a.id)}" class="secondary">rotate</button> <button data-agent-revoke="${esc(a.id)}">revoke</button></span>`;
       return `<li class="${a.revoked ? "revoked" : ""}"><span><b>${esc(a.display_name)}</b> <span class="muted">${esc(a.id)}</span> <span class="chip">${esc(ROLE_LABEL[a.kind] ?? a.kind)}</span><br>
-        <span class="muted">access: ${scope}${projects} · ${seen}</span>${narrowing ? `<br><span class="muted">autonomy: ${narrowing}</span>` : ""}<br>
-        <span class="muted">actions: ${actionLine}</span>${from}<br>${asks ? `<span class="muted">${asks}</span><br>` : ""}
+        <span class="muted">access: ${scope}${projects} · ${seen}</span>${narrowing ? `<br><span class="muted">autonomy: ${narrowing}</span>` : ""}${from}
+        ${actionTable}${asks ? `<span class="muted">${asks}</span><br>` : ""}
         <span id="presence-${esc(a.id)}" class="presence"></span></span>${actions}</li>`;
     })
     .join("");
@@ -878,34 +935,32 @@ function openGrants(id) {
   $("agent-accept-from").value = (au.accept_from ?? []).join(", ");
   $("agent-max-bundles").value = au.max_open_bundles ?? "";
   // The action table, one select per kind, pre-set to what is STORED (not to
-  // the resolved value) so saving without touching it changes nothing. The
-  // level's ceiling is shown beside each as the effective answer.
-  $("agent-level").value = levelOf(au);
-  renderActionControls(au);
-  $("agent-level").onchange = () => renderActionControls(autonomyFromForm());
+  // the resolved value) so saving without touching it changes nothing.
+  $("agent-level").value = a.scope?.autonomy?.level ?? au.level ?? "observe";
+  renderActionControls(a);
   $("agent-grants-msg").textContent = "";
   $("agent-grants").hidden = false;
 }
 
-/** One select per action kind, plus what the level's ceiling makes of it. Rebuilt whenever the level changes, so the consequence is visible before Save. */
-function renderActionControls(au) {
-  const stored = au?.actions ?? {};
-  const table = effectiveActions(au);
-  $("agent-actions").innerHTML = ACTION_KINDS.map((k) => `<label>${esc(k)}
+/**
+ * One select per action kind, and beside each what the SERVER says that kind
+ * is now — the saved table, never a preview of this draft. What a draft
+ * resolves to is core's to compute; it shows in the list the moment Save
+ * lands. The kinds are the server's too; with no table from the server they
+ * fall back to the record's own entries, so a Save can never drop one.
+ */
+function renderActionControls(a) {
+  const stored = a.autonomy?.actions ?? {};
+  const rows = actionTableRows(a.scope);
+  const kinds = rows ? rows.map((r) => [r.kind, r.text]) : Object.keys(stored).map((k) => [k, "unavailable"]);
+  $("agent-actions").innerHTML = kinds.map(([k, saved]) => `<label>${esc(k)} <span class="muted">saved: ${esc(saved)}</span>
       <select data-action-kind="${esc(k)}">
-        <option value="">default for this level (${esc(table[k])})</option>
+        <option value="">default for the level</option>
         <option value="deny">deny — refuse it at the tool</option>
         <option value="propose">propose — ask me</option>
         <option value="allow">allow — run it (act within scope only)</option>
       </select></label>`).join("");
   for (const sel of document.querySelectorAll("[data-action-kind]")) sel.value = stored[sel.dataset.actionKind] ?? "";
-  for (const sel of document.querySelectorAll("[data-action-kind]")) sel.onchange = () => renderActionControlsKeepingValues();
-}
-
-// Re-render after a kind changes so every "default for this level (…)" label
-// stays honest, without losing what the user just picked.
-function renderActionControlsKeepingValues() {
-  renderActionControls(autonomyFromForm());
 }
 
 // Blank = the key is absent. The §4.21 keys can only narrow; `level` and
@@ -918,7 +973,7 @@ function autonomyFromForm() {
   if ($("agent-accept-from").value.trim()) out.accept_from = list("agent-accept-from");
   if ($("agent-max-bundles").value.trim()) out.max_open_bundles = Number($("agent-max-bundles").value);
   const level = $("agent-level").value;
-  if (AUTONOMY_LEVELS.includes(level)) out.level = level;
+  if (level) out.level = level; // the select's own options; the server validates it again
   const actions = {};
   for (const sel of document.querySelectorAll("[data-action-kind]")) if (sel.value) actions[sel.dataset.actionKind] = sel.value;
   if (Object.keys(actions).length) out.actions = actions;
@@ -962,7 +1017,7 @@ const fmtDay = (v) => {
 const barPct = (v, max) => (max > 0 ? Math.max(0, Math.min(100, (asNum(v) / max) * 100)) : 0);
 const barHtml = (v, max) => `<span class="bar"><span style="width:${barPct(v, max).toFixed(1)}%"></span></span>`;
 // staleness is visible, never silent: every panel stamps the envelope's as_of
-const asOfText = (as_of) => (as_of ? `as of ${new Date(as_of).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : "");
+const asOfText = (as_of) => (as_of ? `as of ${clockTime(as_of)}` : "");
 const dashStamp = (id, as_of) => { $(`dash-${id}-asof`).textContent = asOfText(as_of); };
 
 // one review list across every configured repo (github-state → prs_for_review); the status page uses it too
@@ -993,7 +1048,7 @@ function renderRuns({ rows, as_of }) {
   ];
   $("dash-runs").innerHTML = tiles.map(([label, v, cls]) => `<li class="tile"><b class="${cls}">${esc(String(v))}</b><span class="muted">${label}</span></li>`).join("");
   $("dash-runs-note").textContent = s.last_run_at
-    ? `${failed > 0 ? "check the status page — " : ""}last activity ${new Date(s.last_run_at).toLocaleString()}`
+    ? `${failed > 0 ? "check the status page — " : ""}last activity ${dateTime(s.last_run_at)}`
     : "nothing ran in the last 24h";
   dashStamp("runs", as_of);
 }
@@ -1140,7 +1195,7 @@ async function loadArtifacts() {
   $("art-empty").hidden = artifacts.length > 0;
   $("art-list").innerHTML = artifacts
     .map((a) => `<li><a href="#/artifacts/${esc(a.id)}" data-art="${esc(a.id)}"><b>${esc(a.project)}/${esc(a.slug)}</b></a>
-      <span class="muted">${esc(a.kind ?? "")} · ${esc(a.created_by ?? "")} · ${new Date(a.updated_at).toLocaleString()}</span></li>`)
+      <span class="muted">${esc(a.kind ?? "")} · ${esc(a.created_by ?? "")} · ${dateTime(a.updated_at)}</span></li>`)
     .join("");
   document.querySelectorAll("[data-art]").forEach((el) => (el.onclick = (e) => { e.preventDefault(); location.hash = `#/artifacts/${el.dataset.art}`; }));
   const r = artifactRoute();
@@ -1163,7 +1218,7 @@ async function openArtifact(id, versionId) {
   $("art-detail").hidden = false;
   $("art-title").textContent = `${artifact.project}/${artifact.slug}`;
   $("art-meta").textContent = version
-    ? `${version.author_kind === "agent" ? "agent" : "you"}: ${version.author_principal} · ${version.message} · ${new Date(version.created_at).toLocaleString()} · ${version.commit ? `rev ${version.commit.slice(0, 10)}` : "not committed yet"}${version.id === artifact.current_version ? " · current" : ""}`
+    ? `${version.author_kind === "agent" ? "agent" : "you"}: ${version.author_principal} · ${version.message} · ${dateTime(version.created_at)} · ${version.commit ? `rev ${version.commit.slice(0, 10)}` : "not committed yet"}${version.id === artifact.current_version ? " · current" : ""}`
     : "no versions";
   const sel = $("art-version");
   sel.innerHTML = versions.map((v) => `<option value="${esc(v.id)}">${esc(v.id.slice(-8))} · ${esc(v.author_principal)} · ${new Date(v.created_at).toLocaleDateString()}</option>`).join("");
@@ -1231,10 +1286,10 @@ async function loadThreads(id, ver) {
   const who = (c) => `${c.author_kind === "agent" ? "🤖 " : ""}${esc(c.author_principal)}`; // agent text is labeled agent-sourced (§4.19)
   $("art-threads").innerHTML = threads
     .map((t) => `<li class="thread ${t.state}">
-      <div class="row"><label><input type="checkbox" data-thread="${esc(t.id)}" ${t.state === "resolved" ? "disabled" : ""}> ${who(t)} <span class="muted">${t.path ? esc(t.path) + " · " : ""}${new Date(t.created_at).toLocaleString()} · ${esc(t.state)}</span></label>
+      <div class="row"><label><input type="checkbox" data-thread="${esc(t.id)}" ${t.state === "resolved" ? "disabled" : ""}> ${who(t)} <span class="muted">${t.path ? esc(t.path) + " · " : ""}${dateTime(t.created_at)} · ${esc(t.state)}</span></label>
         <button class="secondary" data-state="${esc(t.id)}" data-op="${t.state === "open" ? "resolve" : "reopen"}">${t.state === "open" ? "resolve" : "reopen"}</button></div>
-      <div class="body">${esc(t.body)}</div>
-      ${t.replies.map((r) => `<div class="reply"><span class="muted">${who(r)} · ${new Date(r.created_at).toLocaleString()}</span><div class="body">${esc(r.body)}</div></div>`).join("")}
+      <div class="${bodyClass(t)}">${esc(t.body)}</div>
+      ${t.replies.map((r) => `<div class="reply"><span class="muted">${who(r)} · ${dateTime(r.created_at)}</span><div class="${bodyClass(r)}">${esc(r.body)}</div></div>`).join("")}
       <form data-reply="${esc(t.id)}"><input type="text" placeholder="reply…" autocomplete="off"><button type="submit" class="secondary">reply</button></form>
     </li>`)
     .join("");
@@ -1328,7 +1383,7 @@ function roomCard(r) {
   return `<li class="thread ${esc(r.state)}">
     <div class="row"><a href="${esc(href)}" data-room="${esc(href)}"><b>${esc(r.title ?? "")}</b></a>
       <span class="muted">${esc(r.anchor)} · ${esc(r.state)} · ${r.messages} message${r.messages === 1 ? "" : "s"}${r.agent_tail ? ` · ${r.agent_tail}/${r.cap} agent turns` : ""}</span></div>
-    <div class="muted">${who || "—"}${r.last_at ? ` · last ${new Date(r.last_at).toLocaleString()}` : ""}</div>
+    <div class="muted">${who || "—"}${r.last_at ? ` · last ${dateTime(r.last_at)}` : ""}</div>
     ${why}
   </li>`;
 }
@@ -1346,7 +1401,7 @@ async function openRoom(workId) {
   if (why) $("room-why").textContent = WHY_LINE.ping_pong_cap();
   const who = (c) => `${c.author_kind === "agent" ? "🤖 " : ""}${esc(c.author_principal)}`; // agent text is labeled agent-sourced (§4.19)
   $("room-messages").innerHTML = t.comments.length
-    ? t.comments.map((c) => `<li class="reply"><span class="muted">${who(c)} · ${new Date(c.created_at).toLocaleString()}</span><div class="body">${esc(c.body)}</div></li>`).join("")
+    ? t.comments.map((c) => `<li class="reply"><span class="muted">${who(c)} · ${dateTime(c.created_at)}</span><div class="${bodyClass(c)}">${esc(c.body)}</div></li>`).join("")
     : `<li class="muted">nothing said yet</li>`;
   $("room-resolve").textContent = t.state === "open" ? "Resolve" : "Reopen";
   $("room-resolve").dataset.op = t.state === "open" ? "resolve" : "reopen";
@@ -1440,10 +1495,12 @@ function relTime(ts) {
 // kind, and the kind is a closed set the activity_feed query already returns.
 // A new kind is NOT title-cased until someone adds it here deliberately: the
 // safe default is to leave text alone. `turn`, `tool` and `dispatch` are
-// absent on purpose — their subjects can carry agent- or user-authored text.
+// absent on purpose — their subjects can carry agent- or user-authored text —
+// and so is `work_history`, whose subject is the task's own title (C18): "Migrate
+// the settings pane to tokens" is someone's writing, not a label we composed.
 const TITLE_CASE_KINDS = new Set([
   "collector_run", "proposal_created", "proposal_decided", "project_mode",
-  "agent_admin", "brief", "review", "alert", "task_op", "crew_run", "work_history",
+  "agent_admin", "brief", "review", "alert", "task_op", "crew_run",
 ]);
 // Short joining words stay lowercase unless they lead (P10).
 const MINOR = new Set(["a", "an", "and", "at", "by", "for", "in", "of", "on", "or", "the", "to", "via"]);
@@ -1472,7 +1529,7 @@ function feedRowHtml(r) {
       <span class="feed-subject">${esc(titleCaseSubject(r.kind, r.subject))}</span>
       ${r.detail ? `<span class="muted feed-detail">${esc(r.detail)}</span>` : ""}
     </span>
-    <span class="muted feed-time" title="${esc(new Date(r.ts).toLocaleString())}">${esc(relTime(r.ts))}</span></li>`;
+    <span class="muted feed-time" title="${esc(dateTime(r.ts))}">${esc(relTime(r.ts))}</span></li>`;
 }
 
 // Agent options come from the feed's own rows (no extra call); project
@@ -1776,7 +1833,7 @@ function openCard(c) {
   boardPopClose();
   $("board-detail-title").textContent = `#${c.id} ${c.title ?? ""}`;
   const lease = c.claimed_by
-    ? `${c.claimed_by}${c.lease_expires_at ? ` until ${new Date(c.lease_expires_at).toLocaleString()}` : ""}`
+    ? `${c.claimed_by}${c.lease_expires_at ? ` until ${dateTime(c.lease_expires_at)}` : ""}`
     : "unclaimed";
   const fields = [
     ["column", BOARD_LABEL.get(String(c.column)) ?? c.column],
@@ -1946,7 +2003,7 @@ async function loadPresence() {
   for (const p of rows) {
     const el = document.getElementById(`presence-${p.id}`);
     if (!el) continue; // the agent list may have re-rendered since this fetch started
-    const seen = p.last_seen_at ? `seen ${new Date(p.last_seen_at).toLocaleString()}` : "never seen";
+    const seen = p.last_seen_at ? `seen ${dateTime(p.last_seen_at)}` : "never seen";
     el.innerHTML = `<span class="chip state-${esc(p.state)}">${esc(p.state)}</span> <span class="muted">${esc(seen)} · $${fmtUsd(p.spend_today_usd)} today</span>`;
   }
 }

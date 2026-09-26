@@ -111,6 +111,7 @@ export { update, gitHead, hashHostJobs, trackedPathFor, writeLock, publishedPack
 export { cliShimPath, cliShimLinkHint, renderCliShim, writeCliShim } from "./cli-shim.js";
 export { runMigrations, listMigrationFiles, openMigrationSession, MIGRATION_LOCK_KEY, type MigrationSession, type MigrateResult } from "./migrate.js";
 export { parseLock, serializeLock, readLock, instanceLockPath, LOCK_FILENAME, type LockFile, type LockSource } from "./lock.js";
+export { readInstanceId, parseInstanceId } from "./instance.js";
 export { renderPlist, parsePlistTemplate, loadPlistTemplates, launchdCommands, renderSystemdUnit, labelFor, logPathFor, serviceOf, withNamespace, LABEL_PREFIX, type PlistTemplate } from "./launchd.js";
 export {
   allocateBase,

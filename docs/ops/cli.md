@@ -229,9 +229,13 @@ console, as the same `user` principal, over the same loopback door. It
 prints the response body — pretty-printed unless `--json`, which prints the
 console's own bytes verbatim — and exits non-zero on a `>=400` answer,
 naming the error envelope's `code` and `message` (and `field`, when the
-body carries one) on stderr rather than the body on stdout. A body comes
-from a file (`--body @request.json`) or stdin (`--body -`, so a value never
-sits in shell history); GET needs neither. It refuses a non-loopback
+body carries one) on stderr. With `--json`, the console's own body ALSO
+prints on stdout for a `>=400` — so a `409` conflict's `reason`, `decision`
+and the row itself (`docs/ops/console-api.md`'s `conflictBody`) survive the
+trip rather than being dropped with the envelope; plain mode is unchanged,
+the body stays off stdout on a failure. A body comes from a file
+(`--body @request.json`) or stdin (`--body -`, so a value never sits in
+shell history); GET needs neither. It refuses a non-loopback
 `METISTRY_CONSOLE_URL`/`METISTRY_URL` outright — the local owner token is
 minted for this machine only, and this verb will not carry it anywhere
 else. `docs/ops/console-api.md` is the routes it can call; the app and

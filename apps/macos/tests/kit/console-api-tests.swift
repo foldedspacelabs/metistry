@@ -507,17 +507,47 @@ import Testing
     #expect(ConsoleReachability.after(absent).allowsDecisions)
 }
 
-@Test func aConflictSaysOutLoudThatThisTransportDroppedTheRowItWouldHaveCarried() {
+@Test func aConflictDecodesTheEnvelopeFromTheBodyOnStdoutNowThatOneIsThere() {
+    // `--json` prints the console's own body for a >= 400 too (F-11), and
+    // `fromConsoleCall` decodes the envelope from THAT real JSON — the
+    // staleness/conflict shape `apps/console/src/server.ts`'s `conflictBody`
+    // sends — rather than from `renderConsoleCallError`'s rendered stderr
+    // line, which only ever carried `code` and `message`.
+    // `conflictBodyIsUnavailable` said this could not happen; it is gone
+    // because it now does.
+    let stdout = #"{"error":{"code":"conflict","message":"the proposal changed after you saw it"},"reason":"stale","decision":null,"decided_at":null,"proposal":{"id":42,"decision":"pending"}}"#
     let conflict = ConsoleError.fromConsoleCall(
         stderr: "metistry console call: HTTP 409 — conflict — the proposal changed after you saw it",
+        stdout: stdout,
         exitCode: 1
     )
     #expect(conflict.isConflict)
-    // `console call` prints the envelope and not the body, so `reason`,
-    // `decision` and the row itself did not survive. The flag is there so no
-    // caller reads their absence as "the console sent none" — the queue's
-    // repaint needs the CLI to print the body, not a second client here.
-    #expect(conflict.conflictBodyIsUnavailable)
+    #expect(conflict.code == "conflict")
+    #expect(conflict.refusal == "the proposal changed after you saw it")
+}
+
+@Test func aFailureWithNoJSONOnStdoutStillDecodesFromTheRenderedStderrLine() {
+    // An install whose CLI predates F-11 prints nothing on stdout for a >= 400
+    // — the fallback this replaces still reads the envelope off stderr.
+    let conflict = ConsoleError.fromConsoleCall(
+        stderr: "metistry console call: HTTP 409 — conflict — already decided",
+        exitCode: 1
+    )
+    #expect(conflict.isConflict)
+    #expect(conflict.code == "conflict")
+    #expect(conflict.refusal == "already decided")
+}
+
+@Test func theProductionTransportDecodesAConflictBodyFromStdoutTooWhenTheCallFails() async {
+    let stderr = "metistry console call: HTTP 409 — conflict — the proposal changed after you saw it\n"
+    let stdout = #"{"error":{"code":"conflict","message":"the proposal changed after you saw it"},"reason":"stale","decision":null,"decided_at":null,"proposal":{"id":42,"decision":"pending"}}"#
+    let runner = StubRunner(result: CommandResult(exitCode: 1, stdout: stdout, stderr: stderr))
+    let transport = CLIConsoleCallTransport(cli: stubCLI(runner))
+
+    let result = await transport.call("POST", "/api/proposals/42", body: Data(#"{"decision":"allow"}"#.utf8))
+    guard case .failure(let error) = result else { Issue.record("a 409 was read as success"); return }
+    #expect(error.isConflict)
+    #expect(error.refusal == "the proposal changed after you saw it")
 }
 
 // MARK: - The production transport, for real

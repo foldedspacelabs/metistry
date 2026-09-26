@@ -379,7 +379,10 @@ const inlinePreview = (html) => {
 //                 those (C6), and this check reads a chip once it uses one.
 //   stray hex     every hex colour in docs/product/design/*.svg and the web
 //                 CSS is a token's value. A colour that is not a token is a
-//                 colour no check has ever seen.
+//                 colour no check has ever seen. ONE EXEMPTION, named in every
+//                 run's output: docs/product/design/legacy/ — the wireframes
+//                 drawn before round B's palette, superseded by the canvas
+//                 boards and kept as history, unrepainted (its README.md).
 //   accent        `accent` is pinned (ruling 8, C11): a literal in both
 //                 schemes, mapped to no system accent in tokens.json, and read
 //                 from none in the Mac app's Swift or the web CSS. The user's
@@ -390,6 +393,11 @@ const inlinePreview = (html) => {
 const designDir = new URL("docs/product/design/", root);
 const webDir = new URL("apps/console/web/", root);
 const swiftDir = new URL("apps/macos/sources/", root);
+// The stray-hex exemption (see above). The glob is the top level of
+// docs/product/design only, so this directory is not read; it is named here and
+// counted in the summary so the exemption is a decision on the page, not an
+// accident of a non-recursive readdir.
+const legacyDir = new URL("docs/product/design/legacy/", root);
 
 /** Same length, newlines kept: offsets and line numbers survive blanking. */
 const blank = (s) => s.replace(/[^\n]/g, " ");
@@ -575,8 +583,14 @@ const lint = () => {
     }
   }
 
-  // the design SVGs: stray hex
+  // the design SVGs: stray hex (legacy/ exempt — counted, not read)
   const svgs = readdirSync(designDir).filter((f) => f.endsWith(".svg")).sort();
+  let legacy = 0;
+  try {
+    legacy = readdirSync(legacyDir).filter((f) => f.endsWith(".svg")).length;
+  } catch {
+    // no legacy directory: nothing is exempt
+  }
   let hexes = 0;
   for (const f of svgs) hexes += strayHexes(`docs/product/design/${f}`, svgValues(readFileSync(new URL(f, designDir), "utf8")));
 
@@ -599,7 +613,7 @@ const lint = () => {
       }
     }
   }
-  return { hexes, svgs: svgs.length, sheets: sheets.length, painted };
+  return { hexes, svgs: svgs.length, legacy, sheets: sheets.length, painted };
 };
 
 /** Print every failure; returns how many there were. */
@@ -652,7 +666,8 @@ if (check) {
   if (report()) process.exit(1);
   console.log(
     `design tokens: ok (${rows.length} pairs checked; ${seen.painted} painted pairs declared; ` +
-      `${seen.hexes} hex colours in ${seen.svgs} SVGs and ${seen.sheets} stylesheet(s) are tokens; accent pinned)`,
+      `${seen.hexes} hex colour(s) in ${seen.svgs} SVG(s) and ${seen.sheets} stylesheet(s) are tokens` +
+      `${seen.legacy ? ` (docs/product/design/legacy/: ${seen.legacy} pre-round-B SVGs exempt)` : ""}; accent pinned)`,
   );
 } else {
   for (const p of cssPaths) writeFileSync(p, css);

@@ -261,3 +261,8 @@ back-patch to screen 4 rather than a new screen.
 - **Times:** jots carry the clock with AM/PM (*1:02 PM*); the live counter is a
   duration and says so (*13m 42s*).
 - **Transcript retention is 30 days** from the end of the session (C91).
+
+
+## Recording through a working day (C137)
+
+See `components-03-states-and-flows.md` §4: reminders every two hours up to ten, disk watched (warn 10 GB, stop 5 GB), and each interruption handled.

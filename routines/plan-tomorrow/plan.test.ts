@@ -209,7 +209,7 @@ describe("plan-tomorrow: one plan an evening", () => {
   });
 
   it("a target date this routine has already settled is not planned twice", async () => {
-    const db = fakeDb([{ meta: { planned_for: TARGET, outcome: "wrote" } }]);
+    const db = fakeDb([{ meta: { planned_for: TARGET, outcome: "acted" } }]);
     const vault = vaultWithSeed();
     expect(await run(db, ctxWith(vault, new FakeQueries()))).toBe(0);
     expect(vault.writes).toHaveLength(0);
@@ -228,7 +228,7 @@ describe("plan-tomorrow: one plan an evening", () => {
     const db = fakeDb();
     const vault = vaultWithSeed({ [PROFILE_PATH]: "---\nsource: user\n---\n" });
     expect(await run(db, ctxWith(vault, new FakeQueries()))).toBe(0);
-    expect(db.rows()).toEqual([expect.objectContaining({ planned_for: TARGET, outcome: "no_working_days" })]);
+    expect(db.rows()).toEqual([expect.objectContaining({ planned_for: TARGET, outcome: "skipped:no_working_days" })]);
     expect(vault.writes).toHaveLength(0);
   });
 });
@@ -240,7 +240,7 @@ describe("plan-tomorrow: a template it cannot use", () => {
     const db = fakeDb();
     const vault = fakeVault({ [PROFILE_PATH]: PROFILE });
     expect(await run(db, ctxWith(vault, new FakeQueries()))).toBe(0);
-    expect(db.rows()).toEqual([expect.objectContaining({ outcome: "template_missing", template: TEMPLATE_PATH })]);
+    expect(db.rows()).toEqual([expect.objectContaining({ outcome: "skipped:template_missing", template: TEMPLATE_PATH })]);
     expect(db.proposals()).toHaveLength(0); // silent, deliberately
     expect(vault.writes).toHaveLength(0);
   });
@@ -249,7 +249,7 @@ describe("plan-tomorrow: a template it cannot use", () => {
     const db = fakeDb();
     const vault = vaultWithSeed({ [TEMPLATE_PATH]: "x".repeat(200) });
     expect(await run(db, ctxWith(vault, new FakeQueries(), { env: { ...ENV, METISTRY_TEMPLATE_MAX_BYTES: "100" } }))).toBe(0);
-    expect(db.rows()).toEqual([expect.objectContaining({ outcome: "template_unreadable" })]);
+    expect(db.rows()).toEqual([expect.objectContaining({ outcome: "skipped:template_unreadable" })]);
     const [report] = db.proposals();
     expect(report?.title).toContain(TEMPLATE_PATH);
     expect(report?.refs).toEqual([TEMPLATE_PATH]);
@@ -287,7 +287,7 @@ describe("plan-tomorrow: the file it writes", () => {
     expect(text).toContain(`<!-- rendered by ${COMPONENT} from ${TEMPLATE_PATH}`);
 
     const [row] = db.rows();
-    expect(row).toMatchObject({ planned_for: TARGET, outcome: "wrote", path: PLAN_FILE, created: true, truncated: false });
+    expect(row).toMatchObject({ planned_for: TARGET, outcome: "acted", path: PLAN_FILE, created: true, truncated: false });
     expect(row?.template_warnings).toBe(1); // the missing calendar, and only that
   });
 
@@ -324,7 +324,7 @@ describe("plan-tomorrow: the file it writes", () => {
     expect(await run(db, ctxWith(vault, queries()))).toBe(0);
     expect(vault.files.get(PLAN_FILE)).toBe(mine);
     expect(vault.writes).toHaveLength(0);
-    expect(db.rows()).toEqual([expect.objectContaining({ outcome: "user_owned", source: "user" })]);
+    expect(db.rows()).toEqual([expect.objectContaining({ outcome: "skipped:user_owned", source: "user" })]);
   });
 
   it("…and a plan file with NO source: at all is the user's too (#231), not ownerless", async () => {
@@ -333,7 +333,7 @@ describe("plan-tomorrow: the file it writes", () => {
     expect(sourceOf("# notes I dropped in here\n")).toBeNull();
     expect(await run(db, ctxWith(vault, queries()))).toBe(0);
     expect(vault.writes).toHaveLength(0);
-    expect(db.rows()).toEqual([expect.objectContaining({ outcome: "user_owned", source: null })]);
+    expect(db.rows()).toEqual([expect.objectContaining({ outcome: "skipped:user_owned", source: null })]);
   });
 
   it("no query store wired → each directive says so and the plan still lands (§6.4)", async () => {

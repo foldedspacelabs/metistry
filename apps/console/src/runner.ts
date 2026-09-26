@@ -307,7 +307,16 @@ export async function tick(db: Db, scheduled: ScheduledCollector[], ctx: Compone
     const runId = await startRun(db, { component: c.name, kind: c.runKind });
     try {
       const n = await c.run(db, c.usesModel ? { ...ctx, usesModel: c.usesModel } : ctx);
-      await finishRun(db, runId, { ok: true, meta: { processed: n } });
+      // T1-4: every routine_run row carries meta.outcome — acted or silent,
+      // from the same count the routine already returns — so the activity
+      // feed (T1-3) can tell a real event from an hourly tick that found
+      // nothing to do. A routine that skips for a specific reason (rather
+      // than finding nothing) writes ITS OWN row saying so (plan-tomorrow,
+      // knowledge-fold) — this generic per-tick row only ever knows "acted"
+      // or "silent" from the count. Collector rows are unaffected: a
+      // collector reports items processed, not an assistant-facing outcome.
+      const meta: Record<string, unknown> = c.runKind === "routine_run" ? { processed: n, outcome: n > 0 ? "acted" : "silent" } : { processed: n };
+      await finishRun(db, runId, { ok: true, meta });
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       const signature = errorSignature(c.name, error);

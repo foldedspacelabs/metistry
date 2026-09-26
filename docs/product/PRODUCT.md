@@ -9,11 +9,24 @@
 
 ## What it is
 
-A local-first personal AI operating system: a persistent assistant + knowledge
-graph that holds your context so sessions don't have to. Agents are
+A local-first personal AI operating system: a persistent assistant plus a
+knowledge vault that holds your context so sessions don't have to. Agents are
 disposable; state is durable — markdown in git (what you know) and Postgres
-(what's happening). Open source (Apache-2.0); each install is a private
-instance the user owns entirely.
+(what's happening; the index over the notes is rebuilt from them). Open source
+(Apache-2.0); each install is a private instance the user owns entirely, run
+on their own Mac, with no service operated by the maintainer anywhere in the
+path.
+
+**Current shape (2026-09-26; v0.11.0 plus `main`).** A signed Mac app that
+installs and operates the system — bundled runtime, one background item, a
+menu bar, settings, compute; the installed web app (PWA) as the daily client
+on the phone and any other computer; the `metistry` CLI; and one MCP door that
+every agent, the instance's own assistant included, works through. The app's
+daily screens — Today, Chat, Activity, Needs You, Work, Knowledge, Agents,
+Scheduled, Connections — are designed (design round 0, #263) and scheduled in
+the approved build plan (`docs/product/design-build-plan.md`, PR #260,
+approved 2026-09-26: 140 tickets in six waves, W0 freeze through W5
+acceptance). The public description is `docs/product/website-brief.md`.
 
 ## The name — roots, for later storytelling
 
@@ -37,14 +50,36 @@ naming lore in public copy stays about the *project*.
 
 - **Your context outlives any session, agent, or vendor.** The vault and
   operational state are yours, in formats (markdown, SQL) that survive tooling
-  churn.
+  churn. The instance directory *is* the vault Obsidian opens (2026-09-17);
+  the database beside it is an index and a ledger.
+- **Nothing happens without the owner's say — enforced at the tool.** One
+  decision function answers for every door; one queue, Needs You, holds
+  everything that needs a person; approving runs the same code the owner's own
+  click runs. A rule a prompt carries is not a control.
+- **Private by construction.** No maintainer-run service and no telemetry;
+  on-machine models are first-class; the confined processes — the engine and
+  the vault's committer — reach only the hosts the owner's configuration names:
+  the model provider and the backup remote (2026-09-19).
+- **Predictable cost.** Rules the owner writes decide routing and always win;
+  no-model fast paths; spending limits checked before the call. (Idle cost is
+  the #1 documented abandonment reason for personal AI in 2026 — Metistry's
+  architecture is built against it.) The router is deterministic today. The
+  owner ratified an amended invariant 4 on 2026-09-26 (it lands in `CLAUDE.md`
+  with ticket F-0): inside the rules, a local policy may choose operations and
+  tier, every choice recorded with its reasons, wired only after an evaluation
+  clears the bar he set (plan §2.8, T9).
+- **The day organised from the owner's own notes.** A todo is a `- [ ]` line in
+  any note; the plan, the fold and the standup render from templates the owner
+  edits in Obsidian; nothing rewrites a line the owner typed (daily-flow spec,
+  2026-09-20).
+- **Useful from every surface, and to every agent.** One client API for the
+  Mac app (the main and management client), the PWA and a future iPhone app
+  (plan §2.1, ruled 2026-09-26); any MCP-capable agent from any vendor, each
+  with its own revocable token.
 - **A system one person can run for years.** Every dependency is a
   maintenance obligation; recipes over frameworks; small enough to understand.
-- **Useful from any surface** — web app first, plus share sheet, Shortcuts,
-  and (later) an iOS app — and to any agent the user runs, not just its own.
-- **Predictable cost.** Deterministic routing, no-model fast paths, budgets
-  enforced at the tool. (Idle cost is the #1 documented abandonment reason
-  for personal AI in 2026 — Metistry's architecture is built against it.)
+  Eight third-party npm runtime packages across the whole product, plus
+  Sparkle in the Mac app (counted at `0b20767`, 2026-09-26).
 
 ## Benefits (proven, not aspirational — keep receipts)
 
@@ -52,11 +87,35 @@ naming lore in public copy stays about the *project*.
   cached / 24 ms uncached).
 - Free on-device classification tier (Apple FM, 2.2 items/sec measured);
   free local tier-scoring candidate (gemma4:e4b, 97.9% on eval fixtures).
-- Sessions survive restarts; knowledge survives everything (git is the
-  record — `docker compose down -v` loses nothing durable).
+- Apple's on-device model is a provider at cost 0 (PoC-19, 2026-09-16): 60 of
+  60 requests succeeded and 40 of 40 structured answers validated, at 268 ms
+  for plain text and 497 ms for a three-field classification, with 22.7 MB
+  resident against 842 MB for a comparable 4B local server.
+- Captures are triaged on the machine in ~150 ms against a closed list of
+  sixteen intents, where the JSON round trip took ~500 ms; the confidence
+  threshold is a number in the owner's own file (PoC-20, 2026-09-22, `main`).
+- The vault answers questions phrased in your own words (2026-09-07): a query
+  sharing no words with its note returns it at 0.724 against the next note's
+  0.440 in 14 ms, where keyword search returns nothing; changing the embedding
+  model is a 45-second, byte-identical rebuild.
+- Sessions survive restarts; knowledge survives everything (git is the record
+  — `docker compose down -v` loses no knowledge; tasks are indexed, never
+  stored, so a dropped database comes back from the notes, 2026-09-20). Which
+  operational rows count as durable is open decision D6.
+- A clean Mac runs from the release artifacts alone (2026-09-10): no Docker,
+  Homebrew or Xcode — bundled Node, Postgres 17.11 with pgvector and git (a
+  177 MB runtime); 13 migrations applied, doctor 23 checks healthy, the engine
+  confined the whole time.
+- A live install moves between deployment shapes with its data intact
+  (2026-09-10): rehearsed on a copy of the production database, every table's
+  row count identical afterwards, and the move reversible.
+- The assistant reads 944 fewer tokens before every reply — 19% of its tool
+  list, 19,914 → 16,140 characters — with nothing it can do removed
+  (2026-09-19); CI now refuses growth without a decision.
 - Coordinates *other* agents (any vendor, via MCP): shared knowledge with
-  scoped permissions, shared task list with atomic claims, capture from any
-  AI tool the user works in.
+  scoped permissions, shared task list with atomic claims (five concurrent
+  claims, exactly one winner), capture from any AI tool the user works in —
+  Claude Code, Cursor and OpenCode sessions dedupe across four capture doors.
 - **The door opened 2026-08-30** (Phase 2 done-when, measured): a status
   question answered inline off the deterministic fast path with a
   freshness stamp and no model call; a real model turn round-tripped
@@ -72,53 +131,188 @@ Measured basis: prompt-level guardrails failed every test in Phase 0 research
 (a local model leaked a live OTP into a "safe" field despite explicit
 instructions; input filtering missed memory-poisoning 9/10 times).
 
-- Sole-writer vault via a restricted commit tool; sub-agents and external
-  agents can propose, never write.
+**Who may do what**
+
+- **One decision function** (2026-09-20). Fourteen rules across eleven files
+  became one `may()` that every door asks and none second-guesses, with a test
+  that greps for a rule growing anywhere else. Refusals carry machine-readable
+  reasons; the whole refusal vocabulary is one reviewed file; the refusals that
+  must stay uninformative are marked so in code.
+- Agent identity stamped server-side; an agent's message can never carry
+  user authority.
+- Scoped, default-deny, user-granted read tiers for external agents — none,
+  titles, or named folders; grants server-side on tokens; every
+  grant/read/decision audit-logged. An agent can see what exists (titles and
+  one-line descriptions) without reading a byte of it (2026-09-19).
+- **One door per restricted read** (2026-09-19): a query file names the door
+  that serves it; the generic door refuses a restricted query exactly as it
+  refuses one that does not exist; no list reports a total, because a count of
+  what was withheld is itself a disclosure.
+- **Agents ask; only the owner answers** (2026-09-19): `request_access` names a
+  folder and a reason and grants nothing; Approve widens by exactly that
+  folder through the same path as the Agents panel; one escalation after a
+  decline, then the area closes at the tool.
+- **Executable actions from a closed set of four** (2026-09-16) — dispatch,
+  card update, comment, capture — each a door onto a service the console
+  already had, run as the owner with the asker as provenance; no mail,
+  messages, git, shell or credential change (invariant 10).
+- **Autonomy levels are ceilings** (2026-09-16): an absent level means nothing;
+  `dispatch` stays human at every level unless the owner says otherwise; a
+  raise writes its own audit row and alert. Every action mode shows *why* —
+  set, defaulted or clamped — computed once in core (2026-09-22, `main`).
+- Crew toolsets travel with the credential and are enforced by the server,
+  not by the dispatching program (2026-09-20); crews get per-run credentials,
+  burned after (2026-09-07).
+- Management endpoints take the owner credential only, never an agent token,
+  and every agent-authored field is output-encoded in the UI.
+- A decision on a request that changed after the owner saw it is refused with
+  the current row (2026-09-16). A room cannot address anyone — posting wakes
+  nobody (2026-09-16). The board offers no drop the service would refuse
+  (2026-09-16).
+
+**The vault and the rules**
+
+- One committer: the reconciler is the only process that runs git and holds
+  the vault; sub-agents and external agents can propose, never write; only the
+  owner's own assistant writes knowledge, through `knowledge_write`.
+- **The owner's key** (2026-09-20): the files that define behaviour — agents,
+  access rules, queries, the release pin, the assistant's instructions — are
+  writable only with a key the CLI holds as the owner; the network-facing
+  console never receives it; two enumerated exceptions (the prompt overlay on
+  an approved improvement, compute from the pane); without the key nothing
+  writes those files, the updater included.
+- **Notes the owner wrote stay the owner's** (2026-09-19): a note with no
+  `source:` is the owner's, and the assistant's whole-file write refuses it.
+  **`Me/` is the owner's** (2026-09-21, `main`): refused at the tool for the
+  assistant and every routine, the first write included.
+- The assistant refuses to start rather than answer under a placeholder
+  identity (2026-09-18).
 - Reader/writer separation: sessions that read third-party content hold no
   commit or memory-write tools (memory-poisoning defense, architectural).
 - Deterministic redaction of model *output* before it's treated as safe.
-- Scoped, default-deny, user-granted read tiers for external agents; grants
-  server-side on tokens; every grant/read/decision audit-logged.
-- Agent identity stamped server-side; an agent's message can never carry
-  user authority.
-- Preview-confirm on destructive actions shows canonicalized resolved
-  targets (defense against the GhostApproval CVE class).
-- TCC-privileged native bridges as stably-signed, single-purpose binaries;
+- Drafts are invisible to every agent at every tier.
+
+**The machine**
+
+- The engine has **no shell and no raw git** — its tools are its entire reach
+  (invariant 9) — and on the Mac-native shape it runs under a `sandbox-exec`
+  profile proven by misuse tests that launch the real process (2026-09-07).
+- **The committer is confined too** (2026-09-19): it can write the vault and a
+  scratch directory, exec node and git only, and has no shell; the push
+  credential reaches git through a 14-line askpass helper, never an argument
+  list; an SSH remote is refused under confinement, with a visible file as the
+  only opt-out.
+- **One door off the machine** (2026-09-19): confined processes reach the
+  network only through a local proxy that allows the configured model
+  provider and the vault's backup remote, refuses everything else with a
+  record of who asked, and never decrypts what passes.
+- Secrets live in the login Keychain and never reach argv, a log line, a
+  remote URL or `.git/config` — asserted negatively by test (2026-09-07).
+- Host bridges authenticate every caller (loopback is not a trust boundary).
+  TCC-privileged native bridges are stably-signed, single-purpose binaries;
   behavioral health probes (permission APIs lie; probes don't).
+- **Keep-awake only with consent** (2026-09-19): an install nobody asked holds
+  nothing; each choice states its cost; lid-closed is never faked; the
+  assertion ends when the install stops, however it stops; doctor reports a
+  night the Mac slept anyway.
+- Release integrity: an update verifies sha256 before unpacking and cannot
+  half-apply; the previous release is kept for rollback (2026-09-07).
+- Migration scripts refuse to guess which database they touch, and print the
+  target without connecting (2026-09-19, after an incident).
+
+**Money and failure**
+
+- Spending limits checked **before** each call, not reported after: a warning
+  at 80%, then record-and-continue, stop, or critical-only; a stop pauses
+  scheduled work rather than filling the queue (2026-09-16).
+- Collectors never call a billable model — CI refuses one in a collector
+  manifest, and the call throws rather than degrading into spending
+  (2026-09-16).
+- Scheduled work admits failure: preflight before a run, a stop after repeated
+  failures, one Needs You item per fault signature (2026-09-15).
 - A watchdog with zero model/API dependency that can tell the user the
   system is broken — including cost-runaway detection conventional
   monitoring can't see.
-- Contrast for positioning: the category leader's ecosystem had 40k+ exposed
-  instances, 341 malicious marketplace skills, and prompt-injection RCE in
-  2026. Metistry's answer is structural, not reactive.
+- Shadow runs of a candidate model cannot execute anything: they are handed
+  recorded answers and nothing to call (2026-09-16).
+
+**Sign-in and exposure**
+
+- **Passkeys only — no passwords anywhere** (2026-08-29). Sign-in is Face
+  ID / Touch ID; nothing for a server breach to spill, nothing to phish,
+  nothing to reset. Enrollment and recovery root in the machine the user
+  already owns (a one-time QR from `metistry init`); sessions are
+  revocable per device; lapsed sessions re-auth in one tap without ever
+  dropping a capture or silencing notifications. The Mac app's local owner
+  token is decided from the TCP socket alone and refused from any other
+  address, byte-identically to an unknown token (2026-09-10).
 - **Open-design security (invariant 8):** built assuming adversaries — human
   and AI — read the source. No security through obscurity; boring standard
   primitives; misuse tests ship with every interface; and no implicit network
   trust — every request authenticates as if internet-exposed, because the
   category leader's worst incident (40k+ exposed gateways) was exactly a
   "the network will protect us" default.
-- **Passkeys only — no passwords anywhere** (2026-08-29). Sign-in is Face
-  ID / Touch ID; nothing for a server breach to spill, nothing to phish,
-  nothing to reset. Enrollment and recovery root in the machine the user
-  already owns (a one-time QR from `metistry init`); sessions are
-  revocable per device; lapsed sessions re-auth in one tap without ever
-  dropping a capture or silencing notifications.
-- Hardened by pre-implementation review (2026-08-29): the engine has **no
-  shell and no raw git** — its tools are its entire reach (invariant 9);
-  host bridges authenticate every caller (loopback is not a trust
-  boundary); management endpoints take the owner credential only, never an
-  agent token, and every agent-authored field is output-encoded in the UI.
 - **Bring-your-own routing:** the project exposes configured ports and
   suggests exposure patterns per hosting model (local + tailnet, reverse
   proxy, cloud, Docker) but never depends on any — a user benefit (host it
   anywhere) that is also a security benefit (no assumed-safe network).
+- Preview-confirm on destructive actions shows canonicalized resolved
+  targets (defense against the GhostApproval CVE class).
+- Contrast for positioning: the category leader's ecosystem had 40k+ exposed
+  instances, 341 malicious marketplace skills, and prompt-injection RCE in
+  2026. Metistry's answer is structural, not reactive.
+
+**Planned in the approved plan** (`docs/product/design-build-plan.md`, PR #260)
+
+- Routes that change the boundary itself — minting an agent's credential, a
+  routine's actor and grants, rollback, purge — answer only the local owner
+  token on the Mac: *a remote client may act inside the boundary; only the Mac
+  may change it* (§2.3, F-13).
+- Secrets per instance only, filled in at egress against a host list,
+  redacted on the way back, never shown to a model (§2.14, W1).
+- Connections proxied to agents with per-tool On · Ask · Off; an Ask never
+  runs unattended; destructive tools default to Ask (§2.6, W2–W3).
+- The vault's git: one commit per act, never a force-push, a conflict stops
+  and raises one request, and every restore or rollback waits for Approve and
+  is refused to every agent principal (§2.21, W1–W3).
+- Pull-request reviews posted through a separate owner-only credential,
+  checked against the head commit the owner saw (T2-13, W3).
+- Live events carry ids, never bodies, so the stream opens no new read path
+  (§2.20, W1).
+- Recording is started only by the owner's hand; re-review returns text,
+  never audio, to a model on an on-machine tier; audio is deleted after
+  filing plus 7 days, never more than 30 (§2.15, W3–W4).
+- Extension code never runs inside the console: a process extension runs as a
+  sandboxed child behind the egress allowlist (§2.7, §5).
 
 ## How to use (the story, current shape)
 
-`npx metistry init` → name your assistant, get a private instance repo →
-open its web app, share to it, ask it things → it remembers, briefs you each
-morning, and coordinates your other AI tools. The knowledge is yours, in
-your git, on your machine.
+1. **Install.** Download the Mac app — a signed, notarized DMG on GitHub
+   Releases (the repository is private as of 2026-09-26; opening it is an owner
+   step before public launch). The first run copies the bundled runtime,
+   creates the instance and asks you to name your assistant, connects a private
+   GitHub repository by device flow, asks whether to keep the Mac awake, and
+   sets up compute — a cloud provider with its key typed into a secure field, a
+   local model, or none yet. From a terminal instead:
+   `npx @foldedspacelabs/metistry-cli init <dir> --name <name>`, then
+   `metistry up`.
+2. **Open the folder in Obsidian.** The instance directory is the vault.
+3. **Use it from the phone.** Install the web app to the Home Screen and
+   enroll a passkey with the one-time code: chat, Needs You, the board, and
+   notifications you can answer. On the Mac today the app shows status,
+   settings and compute; its daily screens arrive in the plan's waves.
+4. **Capture from anywhere** — the share sheet and Shortcuts, `+`, `/note` —
+   and `metistry connect cursor | claude-code | opencode | devin` so your other
+   tools capture into it and read what you grant.
+5. **It remembers.** The evening fold writes the day into the vault,
+   tomorrow's plan renders from your template, and the morning brief and
+   weekly review arrive as messages.
+
+After the approved plan (W1–W4) the Mac app is the daily surface: Today with
+the Morning Brief at 7:00 and the Standup at 8:00 on working days, Close the
+Day, the fold at 9:00 PM and Tomorrow's Plan at 11:00 PM; connections with
+per-tool On · Ask · Off; the capture bar and meeting capture. The knowledge is
+yours, in your git, on your machine.
 
 ## Premium candidates (collect; decide later)
 

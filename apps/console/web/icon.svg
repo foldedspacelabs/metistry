@@ -1,6 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-  <rect width="100" height="100" rx="22" fill="#0e1216"/>
-  <path d="M22 74 V30 l14 20 14-20 v44" fill="none" stroke="#7ea9ff" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="74" cy="34" r="7" fill="#7ea9ff"/>
-  <path d="M74 48 v26" stroke="#7ea9ff" stroke-width="9" stroke-linecap="round"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Metistry"><title>Metistry</title><rect width="512" height="512" fill="#125f6b"/><polygon points="137.125,137.125 374.875,137.125 374.875,374.875 277.512,374.875 137.125,234.488" fill="#f7f4ee"/><polygon points="176.750,176.750 335.250,176.750 335.250,335.250 293.925,335.250 176.750,218.075" fill="#125f6b"/></svg>

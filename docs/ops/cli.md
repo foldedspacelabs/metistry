@@ -12,6 +12,8 @@ All of them are real.
 | `init <dir>` | create a private instance repo, asking once whether to keep this Mac awake (`--keep-awake <value>` answers it without a terminal) |
 | `connect-repo <url>` | point the instance repo at a remote, mint credentials the reconciler can push with |
 | `secrets sync\|mint\|list [--json]` | move secrets between the Keychain and `.env` |
+| `secrets set\|replace\|remove\|hosts\|grant <name>` | owner-named secrets, per instance: the value on stdin into the Keychain, the policy into `.metistry/secrets.yaml` |
+| `secrets list --named [--json]` | the owner-named secrets: names, hosts, grants, presence — never a value |
 | `connect <tool> [--rotate]` | give one external dev tool (Cursor, OpenCode, Devin, Claude Code) its own agent token and config |
 | `connect --list [--json]` | which tools are connected: the row, the bearer, the config |
 | `console whoami [--json]` | ask the console who it thinks you are, with this install's owner token |
@@ -897,8 +899,104 @@ metistry secrets purge --instance ~/instances/test-two --yes    # deletes
 
 It only ever touches that instance's own account, and refuses outright
 when the directory has no `instance_id` or when its account somehow *is*
-the per-user account. User-scoped names are listed as kept. It does not
-remove the directory itself.
+the per-user account. User-scoped names are listed as kept. The instance's
+owner-named secrets (below) are deleted with the rest — their names come
+from its `secrets.yaml`. It does not remove the directory itself.
+
+## Owner-named secrets: `{{ secret.name }}`, per instance
+
+The secrets connections, compute providers and manifests reference as
+`{{ secret.name }}` (plan §2.14). A different store from the install's own
+variables above, and the two never share a Keychain item:
+
+| | the install's variables | owner-named secrets |
+| --- | --- | --- |
+| name | `METISTRY_<VAR>`, from `.env` / `.env.example` | lowercase snake_case, chosen by you: `github_write` |
+| Keychain item | service `metistry:<VAR>` | service `metistry:secret:<name>` |
+| account | the instance's id, or the per-user account (`SECRET_SCOPES`) | **the instance's `instance_id`, always** — no user scope, no fallback |
+| policy | none | `.metistry/secrets.yaml`: hosts, grants, expiry — never a value |
+| verbs | `sync`, `mint`, `list`, `purge` | `set`, `replace`, `remove`, `hosts`, `grant`, `list --named` |
+
+```sh
+printf %s "$TOKEN" | metistry secrets set github_write --hosts api.github.com [--expires 2026-12-31]
+printf %s "$NEW"   | metistry secrets replace github_write [--expires <date>]
+metistry secrets hosts github_write                        # show *Sent only to*
+metistry secrets hosts github_write api.github.com uploads.github.com   # replace the list
+metistry secrets hosts github_write --clear                # sent nowhere
+metistry secrets grant github_write connection:github on   # On · Ask · Off; unlisted = Off
+metistry secrets grant github_write agent:devin ask
+metistry secrets remove github_write                       # preview: what references it
+metistry secrets remove github_write --yes
+metistry secrets list --named [--json]
+```
+
+Every verb takes `--instance <dir>` (default: the resolved instance).
+
+**Per instance only** (the owner's ruling Q3, 2026-09-26: "no bleed between
+instances"). A value is filed under THIS instance's `instance_id` through
+core's `InstanceSecrets`, which is bound to that one account and has no
+method that takes another — so a second instance on the same Mac, even with
+a copy of the first's `secrets.yaml`, finds the first's item absent, and its
+`replace` and `remove` reach only its own. The Keychain itself does not
+separate the accounts (every item is readable by the same macOS user); this
+binding does, and `packages/core/test/secrets.test.ts` and
+`packages/cli/test/secrets-named.test.ts` hold it. An instance with no
+`instance_id` is refused, not filed somewhere shared.
+
+**The value.** Read from stdin — never an argument, never a flag — stored
+with `security add-generic-password -w` on the child's stdin, then read back:
+a value the Keychain did not keep whole is removed and refused. Empty values
+and values with a newline are refused. It is never printed, never written to
+`secrets.yaml`, never in a result (`--json` prints names).
+
+**The policy** goes into `.metistry/secrets.yaml`, a §4.7 protected path,
+through the reconciler as you (the same protected write `metistry compute`
+uses), edited as a YAML document so your comments survive, and the result
+is validated before anything is written:
+
+```yaml
+secrets:
+  github_write:
+    hosts: [ api.github.com ]        # *Sent only to* — host or host:port, no scheme, no wildcard
+    grants: { connection:github: on, agent:devin: ask }   # *Who may use it*
+    expires: 2026-12-31              # where the service reports one
+```
+
+The schema is strict: a file carrying anything else — a `value:` field, a
+string where a policy belongs — does not load, anywhere.
+
+- `set` refuses a name the file already has (`replace` swaps the value);
+  without `--hosts` the secret is filled in for no server until `hosts`
+  names one (a local agent you grant it still gets it as `GITHUB_WRITE`).
+- `replace` keeps the policy and clears an expiry recorded for the old
+  value, unless `--expires` gives the new one.
+- `remove` is preview-then-confirm: it names every file under `.metistry/`
+  (state excluded) that references `{{ secret.<name> }}` — what stops
+  working — and deletes nothing without `--yes`. The Keychain item goes
+  first, then the line, so an interrupted remove leaves a line that reads
+  `present: false` and a rerun finishes it.
+- `list --named` prints the rows `GET /api/secrets` serves
+  (`docs/ops/client-api.md`), from `security find-generic-password` without
+  `-w` — presence only. `last_used` is always null here: it is derived state
+  the console reads through its named query, and the CLI talks to no
+  database.
+- `--dry-run` touches neither the Keychain nor the file.
+
+A reference is `{{ secret.name }}` anywhere a value is typed; `env:NAME` is
+accepted for one release in a one-reference field (`auth.secret`). Core's
+`fillSecretRefs` fills every reference or none — a missing name or a
+malformed `{{ secret… }}` is a refusal naming it, never an empty string or
+the literal braces sent to a server. Filling happens at egress, against the
+host list, and a model never receives a value (T4-2).
+
+**The M7 row and this CLI.** Plan §2.2's M7 names `metistry secrets
+set|replace|remove|hosts|grant|migrate-scope|purge-shared`. The first five
+are the verbs above. `migrate-scope` and `purge-shared` — moving the old
+user-scoped provider, AWS and Devin keys into each instance and then
+removing the shared originals — are T4-3's. `sync|mint|list|purge` are not
+in M7's list and stay exactly as they were: they manage the install's own
+variables (`.env`, the bridge tokens, the owner door), and the Mac app's
+first run drives `sync` and `mint`.
 
 ## Importing Claude Code sessions
 

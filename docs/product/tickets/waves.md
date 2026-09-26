@@ -6,25 +6,25 @@ Generated from `docs/product/design-build-plan.md` by `ops/scripts/tickets.mjs`.
 
 ## W0 — 19 tickets, 38 agent-days
 
-- [ ] [F-0](f/f-0.md) · Conventions: the ratified wording · S · sonnet
-- [ ] [F-1](f/f-1.md) · Client API contract v1 · L · opus high
-- [ ] [F-2](f/f-2.md) · The actor model · M · opus high
-- [ ] [F-3](f/f-3.md) · Connection and extension model · M · opus high
-- [ ] [F-4](f/f-4.md) · The Scheduled model · M · opus high
-- [ ] [F-5](f/f-5.md) · The request type table · M · opus high
-- [ ] [F-6](f/f-6.md) · Migration numbering · S · opus high
+- [x] [F-0](f/f-0.md) · Conventions: the ratified wording · S · sonnet
+- [x] [F-1](f/f-1.md) · Client API contract v1 · L · opus high
+- [x] [F-2](f/f-2.md) · The actor model · M · opus high
+- [x] [F-3](f/f-3.md) · Connection and extension model · M · opus high
+- [x] [F-4](f/f-4.md) · The Scheduled model · M · opus high
+- [x] [F-5](f/f-5.md) · The request type table · M · opus high
+- [x] [F-6](f/f-6.md) · Migration numbering · S · opus high
 - [ ] [F-7](f/f-7.md) · MetistryKit store interface and fixtures · M · opus high · after F-1
-- [ ] [F-8](f/f-8.md) · Dynamic router spec · M · opus high
-- [ ] [F-9](f/f-9.md) · PWA manifest, icons, `ICON_PNG` · S · sonnet
-- [ ] [F-10](f/f-10.md) · The `--check` extension · M · opus
-- [ ] [F-11](f/f-11.md) · `console call` prints the error body · S · sonnet
+- [x] [F-8](f/f-8.md) · Dynamic router spec · M · opus high
+- [x] [F-9](f/f-9.md) · PWA manifest, icons, `ICON_PNG` · S · sonnet
+- [x] [F-10](f/f-10.md) · The `--check` extension · M · opus
+- [x] [F-11](f/f-11.md) · `console call` prints the error body · S · sonnet
 - [ ] [F-12](f/f-12.md) · The Mac session transport · M · opus · after F-11
 - [ ] [F-13](f/f-13.md) · The reach gate · M · opus · after F-1
-- [ ] [F-14](f/f-14.md) · Copy and the answer set · S · sonnet
-- [ ] [T1-4](t1/t1-4.md) · Routine outcome · S · sonnet
-- [ ] [T1-5](t1/t1-5.md) · `collector_health` · S · sonnet
-- [ ] [T7-1](t7/t7-1.md) · Stop recomputing · M · opus
-- [ ] [T8-1](t8/t8-1.md) · The TCC enum · S · sonnet
+- [x] [F-14](f/f-14.md) · Copy and the answer set · S · sonnet
+- [x] [T1-4](t1/t1-4.md) · Routine outcome · S · sonnet
+- [x] [T1-5](t1/t1-5.md) · `collector_health` · S · sonnet
+- [x] [T7-1](t7/t7-1.md) · Stop recomputing · M · opus
+- [x] [T8-1](t8/t8-1.md) · The TCC enum · S · sonnet
 
 - [ ] **W0 checkpoint** — merged, main green, scratch-instance upgrade, conformance test, Mac smoke, release
 

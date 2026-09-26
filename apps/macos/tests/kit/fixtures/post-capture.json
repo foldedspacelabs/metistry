@@ -1,0 +1,19 @@
+{
+  "route": "POST /capture",
+  "source": "recorded",
+  "ticket": "T2-1",
+  "request": {
+    "method": "POST",
+    "path": "/capture",
+    "body": {
+      "note": "Ask Dana about the fixture format on Thursday."
+    },
+    "idempotency_key": "fixture-capture-0001"
+  },
+  "status": 201,
+  "body": {
+    "id": 1,
+    "path": "Inbox/1790463255147-note-1790463255146.md",
+    "sha256": "2ee1cc953f3e84e95f504728420016ca855b0dfa91dfe947b28efd31694d6410"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "route": "POST /api/scheduled/routines/:name/run",
+  "source": "contract",
+  "ticket": "T3-3",
+  "note": "Run Now under the budget preflight; a paused routine or a stop budget answers started: false with refused naming why",
+  "request": {
+    "method": "POST",
+    "path": "/api/scheduled/routines/morning-brief/run",
+    "body": {},
+    "idempotency_key": null
+  },
+  "status": 202,
+  "body": {
+    "ok": true,
+    "name": "morning-brief",
+    "run_id": "8830",
+    "started": true,
+    "refused": null
+  }
+}

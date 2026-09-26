@@ -1,0 +1,24 @@
+{
+  "route": "POST /api/prose/:id/feedback",
+  "source": "contract",
+  "ticket": "T1-12",
+  "note": "an upsert, like a reply's; an unknown id is 404",
+  "request": {
+    "method": "POST",
+    "path": "/api/prose/brief-2026-09-28/feedback",
+    "body": {
+      "note": "too long",
+      "rating": -1
+    },
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "ok": true,
+    "feedback": {
+      "rating": -1,
+      "note": "too long",
+      "ts": "2026-09-28T13:05:00.000Z"
+    }
+  }
+}

@@ -216,6 +216,28 @@ insert away from failing, and proves nothing about this suite;
 `… WHERE source_agent = <this suite's agent>` says the same thing and cannot
 race.
 
+### Recording the Mac app's client-API fixtures
+
+`apps/console/scripts/record-client-fixtures.mjs` is not a test, and it keeps
+the same rules as one: it opens Postgres only through `testDb(pg.Pool)` after
+`loadTestEnv` has scrubbed the environment, its instance is `metistry init`
+into an `os.tmpdir()` directory run with an empty environment, and the console
+it records from is `makeServer` in-process with every outbound call faked. It
+writes one JSON per client-API route into `apps/macos/tests/kit/fixtures/`
+(`docs/ops/mac-app.md`, "The store interface"). Run it on a fresh scratch
+database, after `pnpm -r build`:
+
+```sh
+METISTRY_TEST_DB_NAME=metistry_test_<you> METISTRY_DB_NAME=metistry_test_<you> ops/scripts/test-db.sh
+node apps/console/scripts/record-client-fixtures.mjs            # every served route
+node apps/console/scripts/record-client-fixtures.mjs --check    # in memory; exit 1 where a shape moved
+```
+
+A ticket that serves a route frozen ahead of it adds the route's request to
+the script's `REQUESTS` and re-records with `--only "<METHOD> <path>"`; the
+script refuses to replace a `contract` fixture whose shape its recording does
+not match unless `--accept` is given, and the PR says why.
+
 ## Checks that are not tests
 
 Some rules are easier to enforce over the whole tree than to remember in each

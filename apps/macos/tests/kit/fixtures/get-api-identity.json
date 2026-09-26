@@ -1,0 +1,28 @@
+{
+  "route": "GET /api/identity",
+  "source": "recorded",
+  "ticket": null,
+  "request": {
+    "method": "GET",
+    "path": "/api/identity",
+    "body": null,
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "instance_id": "0fa6a518-f162-4ff2-8617-b17c51f5dec5",
+    "name": "Aide",
+    "icon": "🦉",
+    "capabilities": [
+      "artifacts",
+      "capture",
+      "dispatch",
+      "knowledge",
+      "queries",
+      "tasks"
+    ],
+    "version": "0.11.0",
+    "api_version": 1,
+    "as_of": "2026-09-26T22:54:15.086Z"
+  }
+}

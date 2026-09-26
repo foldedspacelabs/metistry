@@ -1,0 +1,93 @@
+{
+  "route": "GET /api/q/:name",
+  "source": "recorded",
+  "ticket": null,
+  "request": {
+    "method": "GET",
+    "path": "/api/q/board?project=metistry",
+    "body": null,
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "rows": [
+      {
+        "column": "backlog",
+        "id": "1",
+        "title": "Freeze the store interface (F-7)",
+        "kind": "task",
+        "project": "metistry",
+        "owner": null,
+        "claimed_by": null,
+        "lease_expires_at": null,
+        "age_hours": 0,
+        "last_report_at": null,
+        "escalated": false,
+        "external_ref": null,
+        "artifact": null,
+        "has_thread": false,
+        "status": "open",
+        "due": "2026-09-27",
+        "updated_at": "2026-09-26T22:54:15.200Z"
+      },
+      {
+        "column": "assigned",
+        "id": "4",
+        "title": "review: metistry/store-interface ver_01M3FYT8NB0W22G5J1H3A71PTY (1 thread)",
+        "kind": "review",
+        "project": "metistry",
+        "owner": "cursor",
+        "claimed_by": null,
+        "lease_expires_at": null,
+        "age_hours": 0,
+        "last_report_at": null,
+        "escalated": false,
+        "external_ref": null,
+        "artifact": "art_01M3FYT8N8HRG4S2W4Q0GN28F1",
+        "has_thread": false,
+        "status": "open",
+        "due": null,
+        "updated_at": "2026-09-26T22:54:15.233Z"
+      },
+      {
+        "column": "in_progress",
+        "id": "2",
+        "title": "Open the release checklist",
+        "kind": "task",
+        "project": "metistry",
+        "owner": null,
+        "claimed_by": "target:github-issues",
+        "lease_expires_at": null,
+        "age_hours": 0,
+        "last_report_at": null,
+        "escalated": false,
+        "external_ref": "gh:example/fixtures#41",
+        "artifact": null,
+        "has_thread": false,
+        "status": "in_progress",
+        "due": null,
+        "updated_at": "2026-09-26T22:54:15.203Z"
+      },
+      {
+        "column": "in_progress",
+        "id": "3",
+        "title": "Decide the fixture format",
+        "kind": "task",
+        "project": "metistry",
+        "owner": null,
+        "claimed_by": null,
+        "lease_expires_at": null,
+        "age_hours": 0,
+        "last_report_at": null,
+        "escalated": false,
+        "external_ref": null,
+        "artifact": null,
+        "has_thread": true,
+        "status": "in_progress",
+        "due": null,
+        "updated_at": "2026-09-26T22:54:15.067Z"
+      }
+    ],
+    "as_of": "2026-09-26T22:54:15.268Z"
+  }
+}

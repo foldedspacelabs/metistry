@@ -1,0 +1,58 @@
+{
+  "route": "GET /api/messages",
+  "source": "recorded",
+  "ticket": null,
+  "request": {
+    "method": "GET",
+    "path": "/api/messages?limit=20",
+    "body": null,
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "messages": [
+      {
+        "id": "2",
+        "ts": "2026-09-26T22:54:15.179Z",
+        "thread": "default",
+        "text": "agent cursor was given more room: level observe → propose; actions.dispatch deny → propose; actions.task_update deny → propose; actions.comment deny → propose; actions.capture deny → propose — it can now act on its own within that table (dashboard → agents, docs/ops/actions.md)",
+        "status": "alert",
+        "direction": "out",
+        "feedback": null,
+        "tier": null
+      },
+      {
+        "id": "2",
+        "ts": "2026-09-26T22:54:15.150Z",
+        "thread": "default",
+        "text": "What's on today?",
+        "status": "new",
+        "direction": "in",
+        "feedback": null,
+        "tier": "default"
+      },
+      {
+        "id": "1",
+        "ts": "2026-09-26T22:54:15.067Z",
+        "thread": "default",
+        "text": "Three things today: the store interface, the fixture recorder, and a review.",
+        "status": "reply",
+        "direction": "out",
+        "feedback": null,
+        "tier": null
+      },
+      {
+        "id": "1",
+        "ts": "2026-09-26T22:54:15.067Z",
+        "thread": "default",
+        "text": "what is on today?",
+        "status": "done",
+        "direction": "in",
+        "feedback": null,
+        "tier": null
+      }
+    ],
+    "cursor": "2026-09-26 18:54:15.179602-04|out|2",
+    "more": false
+  }
+}

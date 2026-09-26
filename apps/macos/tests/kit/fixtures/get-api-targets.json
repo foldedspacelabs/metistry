@@ -1,0 +1,132 @@
+{
+  "route": "GET /api/targets",
+  "source": "recorded",
+  "ticket": "T4-11",
+  "request": {
+    "method": "GET",
+    "path": "/api/targets",
+    "body": null,
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "targets": [
+      {
+        "name": "devin-sessions",
+        "description": "Dispatch a brief to a Devin session — debugging and knowledge research; the structured answer returns as a report proposal",
+        "transport": "http",
+        "submit": {
+          "kind": "devin-session",
+          "url": "env:METISTRY_DEVIN_API_URL",
+          "org": "env:METISTRY_DEVIN_ORG_ID",
+          "max_acu": 5
+        },
+        "result": {
+          "via": "report_queue",
+          "status_via": "devin-sessions"
+        },
+        "auth": "env:METISTRY_DEVIN_API_KEY",
+        "cost": {
+          "per_run_estimate_usd": 0
+        },
+        "data_policy": {
+          "allow": [],
+          "deny_sources": [
+            "comms",
+            "devin"
+          ],
+          "max_brief_bytes": 16384
+        },
+        "check": {
+          "name": "devin-sessions",
+          "status": "absent",
+          "latency_ms": 0,
+          "probe": "resolve auth + submit.org from environment",
+          "remediation": "set env:METISTRY_DEVIN_API_KEY (the same `cog_` key collectors/devin-knowledge reads — docs/ops/devin.md)"
+        }
+      },
+      {
+        "name": "github-issues",
+        "description": "Open a GitHub issue for a task — the external work queue (plan §6 decision 4)",
+        "transport": "github",
+        "submit": {
+          "repo": "env:METISTRY_GITHUB_DISPATCH_REPO"
+        },
+        "result": {
+          "via": "report_queue",
+          "status_via": "github-state"
+        },
+        "auth": "env:METISTRY_GITHUB_WRITE_TOKEN",
+        "cost": {
+          "per_run_estimate_usd": 0
+        },
+        "data_policy": {
+          "allow": [
+            "Projects",
+            "Resources",
+            "Techniques"
+          ],
+          "deny_sources": [
+            "comms"
+          ],
+          "max_brief_bytes": 16384
+        },
+        "check": {
+          "name": "github-issues",
+          "status": "ok",
+          "latency_ms": 0,
+          "probe": "GET /repos/example/fixtures with the write token (issue creation itself is not probed)",
+          "meta": {
+            "repo": "example/fixtures"
+          }
+        }
+      },
+      {
+        "name": "local-crew",
+        "description": "Run a manifest-defined crew locally in the assistant container — durable work row in, report queue + runs out",
+        "transport": "local",
+        "submit": {
+          "via": "work_queue",
+          "owner_prefix": "crew:"
+        },
+        "result": {
+          "via": "report_queue",
+          "runs_kind": "crew_run"
+        },
+        "cost": {
+          "per_run_estimate_usd": 0
+        },
+        "data_policy": {
+          "allow": [
+            "Areas",
+            "Projects",
+            "Resources",
+            "Techniques"
+          ],
+          "deny_sources": [
+            "comms"
+          ],
+          "max_brief_bytes": 65536
+        },
+        "check": {
+          "name": "local-crew",
+          "status": "ok",
+          "latency_ms": 0,
+          "probe": "manifest loaded; dispatch is the assistant's agents_delegate tool (runner in the assistant container, not probed here)",
+          "meta": {
+            "via": "agents_delegate",
+            "submit": {
+              "via": "work_queue",
+              "owner_prefix": "crew:"
+            },
+            "result": {
+              "via": "report_queue",
+              "runs_kind": "crew_run"
+            }
+          }
+        }
+      }
+    ],
+    "as_of": "2026-09-26T22:54:15.117Z"
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "route": "DELETE /api/scheduled/routines/:name",
+  "source": "contract",
+  "ticket": "T3-3",
+  "note": "Reset to Default: deletes the owner's entry; the routine as the lower layers now resolve it",
+  "request": {
+    "method": "DELETE",
+    "path": "/api/scheduled/routines/morning-brief",
+    "body": null,
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "ok": true,
+    "routine": {
+      "name": "morning-brief",
+      "kind": "routine",
+      "source": "product",
+      "title": "Morning Brief",
+      "schedule": {
+        "value": {
+          "days": "working_days",
+          "at": [
+            "07:00"
+          ]
+        },
+        "origin": "default"
+      },
+      "paused": {
+        "value": false,
+        "origin": "default"
+      },
+      "config": {
+        "skip_without_calendar_event": {
+          "value": false,
+          "origin": "yours"
+        }
+      },
+      "actor": null,
+      "task": null,
+      "grants": null,
+      "next_run": "2026-09-29T11:00:00.000Z",
+      "last_run": {
+        "run_id": "8812",
+        "at": "2026-09-28T11:00:04.000Z",
+        "ok": true,
+        "outcome": "wrote Journal/Brief/2026-09-28.md",
+        "cost_usd": "0.004100"
+      }
+    },
+    "reset": true,
+    "as_of": "2026-09-28T13:05:00.000Z"
+  }
+}

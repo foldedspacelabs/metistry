@@ -1,0 +1,20 @@
+{
+  "route": "POST /api/github/pulls/:owner/:repo/:number/threads/:id/resolve",
+  "source": "contract",
+  "ticket": "T2-13",
+  "note": "the same head guard",
+  "request": {
+    "method": "POST",
+    "path": "/api/github/pulls/example/metistry/281/threads/PRRT_kw1/resolve",
+    "body": {
+      "head_sha": "adf440c1"
+    },
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "ok": true,
+    "thread_id": "PRRT_kw1",
+    "resolved": true
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "route": "GET /api/knowledge/search",
+  "source": "recorded",
+  "ticket": null,
+  "request": {
+    "method": "GET",
+    "path": "/api/knowledge/search?q=store",
+    "body": null,
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "q": "store",
+    "mode": "keyword",
+    "hits": [
+      {
+        "path": "Projects/Metistry/Roadmap.md",
+        "title": "Roadmap",
+        "description": "what ships next",
+        "snippet": "…Ship the store interface, then the stores…",
+        "score": 0.82,
+        "source": "keyword"
+      }
+    ],
+    "degraded": "keyword only — the embedder is down",
+    "as_of": "2026-09-26T22:54:15.134Z"
+  }
+}

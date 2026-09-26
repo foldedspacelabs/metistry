@@ -1,0 +1,27 @@
+{
+  "route": "PUT /api/today/order",
+  "source": "contract",
+  "ticket": "T2-7",
+  "note": "a key outside the day is refused 400, naming it",
+  "request": {
+    "method": "PUT",
+    "path": "/api/today/order",
+    "body": {
+      "date": "2026-09-28",
+      "task_keys": [
+        "mt-7f3k2a",
+        "work:214"
+      ]
+    },
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "ok": true,
+    "date": "2026-09-28",
+    "order": [
+      "mt-7f3k2a",
+      "work:214"
+    ]
+  }
+}

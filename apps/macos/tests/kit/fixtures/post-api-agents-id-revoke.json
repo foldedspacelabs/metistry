@@ -1,0 +1,15 @@
+{
+  "route": "POST /api/agents/:id/revoke",
+  "source": "recorded",
+  "ticket": null,
+  "request": {
+    "method": "POST",
+    "path": "/api/agents/old-laptop/revoke",
+    "body": {},
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "revoked": true
+  }
+}

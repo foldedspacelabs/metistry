@@ -1,0 +1,31 @@
+{
+  "route": "GET /api/vault/status",
+  "source": "contract",
+  "ticket": "T10-2",
+  "note": "conflict is {paths: [...]} while a pull left one",
+  "request": {
+    "method": "GET",
+    "path": "/api/vault/status",
+    "body": null,
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "branch": "main",
+    "ahead": 2,
+    "behind": 0,
+    "last_commit": {
+      "sha": "4c1d2e3f",
+      "subject": "user: tick 1 task",
+      "author": "user",
+      "at": "2026-09-28T12:58:01.000Z"
+    },
+    "last_push": {
+      "at": "2026-09-28T12:30:00.000Z",
+      "ok": true,
+      "remote": "origin"
+    },
+    "conflict": null,
+    "as_of": "2026-09-28T13:05:00.000Z"
+  }
+}

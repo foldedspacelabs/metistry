@@ -55,6 +55,10 @@ let package = Package(
         // Only the kit is tested: it holds everything with a decision in it
         // (the wire shape, the runtime precedence, the planned argument
         // arrays). The executable target is `@main` plus a Process wrapper.
-        .testTarget(name: "MetistryKitTests", dependencies: ["MetistryKit"], path: "tests/kit"),
+        //
+        // `fixtures/` is the recorded client-API fixtures (F-7). The tests read
+        // them by `#filePath`, as the source scan reads `sources/`, so they are
+        // excluded rather than bundled.
+        .testTarget(name: "MetistryKitTests", dependencies: ["MetistryKit"], path: "tests/kit", exclude: ["fixtures"]),
     ]
 )

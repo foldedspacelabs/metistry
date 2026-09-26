@@ -1,0 +1,37 @@
+{
+  "route": "GET /api/sessions/:id",
+  "source": "contract",
+  "ticket": "T2-17",
+  "note": "the session_detail named query: Run detail's conversation",
+  "request": {
+    "method": "GET",
+    "path": "/api/sessions/7b1f2c9e-0000-4000-8000-000000000001",
+    "body": null,
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "session": {
+      "id": "7b1f2c9e-0000-4000-8000-000000000001",
+      "thread": "default",
+      "turns": 4,
+      "started_at": "2026-09-28T12:00:00.000Z",
+      "ended_at": "2026-09-28T12:20:00.000Z",
+      "folded": false
+    },
+    "turns": [
+      {
+        "turn_id": "turn-8a1c",
+        "ts": "2026-09-28T12:02:00.000Z",
+        "inbound": "What's on today?",
+        "reply": "Three things today.",
+        "tools": [
+          "tasks_list",
+          "knowledge_search"
+        ],
+        "run_id": "9001"
+      }
+    ],
+    "as_of": "2026-09-28T13:05:00.000Z"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "route": "POST /api/trackers/:connection/issues/:key/complete",
+  "source": "contract",
+  "ticket": "T4-26",
+  "note": "closes the issue through the tracker connection's own tool mode",
+  "request": {
+    "method": "POST",
+    "path": "/api/trackers/linear/issues/MET-42/complete",
+    "body": {},
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "ok": true,
+    "connection": "linear",
+    "key": "MET-42",
+    "ref": "linear:MET-42",
+    "url": "https://linear.app/example/issue/MET-42",
+    "state": "done"
+  }
+}

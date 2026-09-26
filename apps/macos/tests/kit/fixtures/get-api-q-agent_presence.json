@@ -1,0 +1,55 @@
+{
+  "route": "GET /api/q/:name",
+  "source": "recorded",
+  "ticket": null,
+  "request": {
+    "method": "GET",
+    "path": "/api/q/agent_presence",
+    "body": null,
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "rows": [
+      {
+        "id": "cursor",
+        "display_name": "Cursor",
+        "kind": "external",
+        "last_seen_at": null,
+        "projects": [
+          "metistry"
+        ],
+        "current_claims": [],
+        "interrupted_claims": [],
+        "blocked_bundles": [],
+        "spend_today_usd": 0,
+        "state": "queued"
+      },
+      {
+        "id": "devin",
+        "display_name": "Devin",
+        "kind": "external",
+        "last_seen_at": null,
+        "projects": [],
+        "current_claims": [],
+        "interrupted_claims": [],
+        "blocked_bundles": [],
+        "spend_today_usd": 0,
+        "state": "idle"
+      },
+      {
+        "id": "opencode",
+        "display_name": "OpenCode",
+        "kind": "external",
+        "last_seen_at": null,
+        "projects": [],
+        "current_claims": [],
+        "interrupted_claims": [],
+        "blocked_bundles": [],
+        "spend_today_usd": 0,
+        "state": "idle"
+      }
+    ],
+    "as_of": "2026-09-26T22:54:15.273Z"
+  }
+}

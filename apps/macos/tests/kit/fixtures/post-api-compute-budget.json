@@ -1,0 +1,32 @@
+{
+  "route": "POST /api/compute/budget",
+  "source": "recorded",
+  "ticket": null,
+  "request": {
+    "method": "POST",
+    "path": "/api/compute/budget",
+    "body": {
+      "scope": "provider:openrouter",
+      "daily": 5,
+      "monthly": 60,
+      "action": "stop"
+    },
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "ok": true,
+    "target": "budgets.providers.openrouter",
+    "daily_usd": 5,
+    "monthly_usd": 60,
+    "action": "stop",
+    "delivery": {
+      "how": "bridge",
+      "detail": ".metistry/compute.yaml written through the reconciler as user — committed on its next flush"
+    },
+    "notes": [
+      "  POST http://127.0.0.1:1/vault/write .metistry/compute.yaml (principal user, \"metistry compute budget budgets.providers.openrouter → stop\")",
+      "Recorded. Enforced in the engine, before the call (docs/ops/compute.md)."
+    ]
+  }
+}

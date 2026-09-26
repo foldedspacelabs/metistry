@@ -1,5 +1,52 @@
 # @foldedspacelabs/metistry-cli
 
+## 0.12.0
+
+### Minor Changes
+
+- 0f4892f: `metistry console session --stdio`: `console call` held open as one long-lived child. The local owner token is resolved once and never printed (every output line is redacted against it); a non-loopback console or a missing token is refused before a line is read. Each JSON request line gets exactly one terminal line matched by id; `stream: true` on `GET /api/events` writes `{id, event}` frames until `{id, cancel: true}`. The Mac app's `SessionConsoleCallTransport` runs every console request through it (~1.5 ms each instead of ~141 ms for a process per request), fails in-flight calls when the child dies and restarts it on the next call, and falls back to `console call` on a CLI that predates the verb. `ConsoleErrorEnvelope.details` now keeps a 409's `reason` and the row as it stands.
+
+### Patch Changes
+
+- d60074f: `metistry console call --json` now prints the console's error body on a non-2xx response, so a client can read the 409 conflict's `reason`/`decision` instead of a rendered summary. Plain mode is unchanged.
+- 95129a8: `metistry console whoami|call|session`, `agents list|autonomy`, `runs export` and `compute cache-report|route-report` with `--instance <dir>` now reach a namespaced instance's own console port (from `.metistry/state/ports.yaml`) instead of falling back to the default install's `http://127.0.0.1:8080` and sending it this instance's owner token. `metistry update` no longer reports a host job whose kickstart failed as kickstarted.
+- c69abc3: **The owner can now see WHY an action's mode is what it is, not just what it is.** `effectiveActions()` resolved the (kind → mode) table but dropped the reason, so `metistry agents autonomy`, the console's registry panel and MetistryKit each had to recompute it to say whether a mode was set, defaulted, or clamped to the level's ceiling — and clamped is the one case where the owner's own setting is being overridden. Core adds `effectiveActionsDetailed()` beside it (`effectiveActions` is now a projection of it, so the two cannot drift), and every surface reads that one function instead: `metistry agents autonomy` marks each row set / dimmed-default / clamped-with-ceiling and says the modes as **Allow · Ask First · Never**; `GET /api/agents`'s `scope.autonomy` carries a `detailed` table beside the plain one, so a console never re-derives it; MetistryKit's `AgentRecord` decodes the same table into `actionsDetailed`.
+- 9c9eee6: **`metistry doctor`'s inbox row no longer trips on a TitleCase `Inbox/`.** It
+  compared the legacy `<instance>/inbox/` path with `existsSync`, which a
+  case-insensitive APFS volume answers `true` for even when the only thing
+  there is the vault's own `Inbox/` — so every fresh macOS instance reported
+  `inbox degraded — pre-#156 layout`. The row now checks the directory's actual
+  on-disk spelling (the same exact-case lookup `metistry migrate-inbox` already
+  used) before reading it as the legacy layout.
+- 1edc2f7: **`Me/` and the user's own journal are refused at the tool for every non-user principal — new pages included.** `knowledge_write`'s ownership rule only ever ran against a note that already existed, so a brand-new page under `Me/` or the user's own `Journal/<date>.md` went straight through the default bare-vault grant every instance ships with — `Me/` is discovered, never assumed, and the daily journal is the user's alone (daily-flow-spec §5.1, §6.6). `core`'s `may()` now refuses the PATH itself, ahead of ownership, on both the `knowledge_write` tool and the reconciler's bridge (`writeAllowed`) — the second check exists because a routine's own commit (`plan-tomorrow`, the fold's routine half) reaches the vault directly and never asks `may()` at all. `Journal/Plan/`, `Journal/Fold/` and `Journal/Standup/` are each a routine's own reserved subdirectory and are unaffected. The seed vault also gains `Resources/README.md`, matching `People/` and `Projects/` — `seed/assistant-prompt.md` already told the fold to create entity pages there.
+- 82edf6f: **`metistry compute route-report` — where your messages actually go, as one
+  command.** PoC-20 phase 0's baseline
+  (`docs/research/2026-09-21-intent-classification-tier.md` §5.2): the share of
+  real messages the deterministic router placed as `/note`, as a `fast_path`
+  answer, as an explicit tier override, or that fell through to the default
+  model tier — and, among the fall-throughs, their length and their commonest
+  opening words, which is the shortlist to write new `fast_path` rules from.
+  The verdict is the research's own exit rule with your number in it:
+  fall-through under ~40 % and the answer is an extra regex, not a classifier.
+  
+  A new seed query, `route_report`, is the one read path into it (invariant 3);
+  `GET /api/q/route_report` answers the same rows. It is counts only — no
+  message text, no thread, no vault path, and an opening word is kept only when
+  it is a plain word or a `/command` — so it is safe on the generic door. The
+  command calls no model, dials no provider and writes nothing.
+- Updated dependencies [2080ce5]
+- Updated dependencies [7bf6db6]
+- Updated dependencies [ac8a137]
+- Updated dependencies [c69abc3]
+- Updated dependencies [aafc41a]
+- Updated dependencies [1edc2f7]
+- Updated dependencies [56be405]
+- Updated dependencies [d930fba]
+- Updated dependencies [73977f8]
+- Updated dependencies [a8ccdfc]
+- Updated dependencies [87fc443]
+  - @foldedspacelabs/metistry-core@0.12.0
+
 ## 0.11.0
 
 ### Minor Changes

@@ -1,5 +1,30 @@
 # @foldedspacelabs/metistry-mcp-apple-fm
 
+## 0.12.0
+
+### Patch Changes
+
+- 4dbd15f: **`/v1/chat/completions` refuses `logprobs`/`top_logprobs` by name instead of
+  silently ignoring them.** `docs/ops/compute.md`'s contract is that an
+  unsupported request field is refused, loudly, naming the field — `stream`,
+  `tools`, and `n` already did this, but `logprobs: true` (or a non-zero
+  `top_logprobs`) fell through and generated as if the caller had not asked,
+  which would have looked like a confidence signal the response never carried.
+  Both now return `400 logprobs_unsupported`, saying Apple Foundation Models
+  exposes no token probabilities. `logprobs: false`/absent is unaffected.
+- Updated dependencies [2080ce5]
+- Updated dependencies [7bf6db6]
+- Updated dependencies [ac8a137]
+- Updated dependencies [c69abc3]
+- Updated dependencies [aafc41a]
+- Updated dependencies [1edc2f7]
+- Updated dependencies [56be405]
+- Updated dependencies [d930fba]
+- Updated dependencies [73977f8]
+- Updated dependencies [a8ccdfc]
+- Updated dependencies [87fc443]
+  - @foldedspacelabs/metistry-core@0.12.0
+
 ## 0.11.0
 
 ### Patch Changes

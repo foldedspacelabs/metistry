@@ -594,7 +594,7 @@ describe("show", () => {
     const text = renderComputeReport(r);
     expect(text).toContain("METISTRY_CLOUD_API_KEY (in Keychain)");
     expect(text).not.toContain(KEY);
-    expect(text).toContain("Not wired yet");
+    expect(text).toContain("The engine dials these providers and enforces every budget above");
     expect(JSON.stringify(r)).not.toContain(KEY);
   });
 });

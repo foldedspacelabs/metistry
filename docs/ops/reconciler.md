@@ -173,14 +173,19 @@ write, not what you may read. Errors are the core envelope
 | `GET /embeddings/status` | what is stored: model, dim, row count, how many notes are behind, whether a rebuild is required |
 
 **Intents.** Every mutation carries
-`intent: { principal, message, group? }`. `principal` is a lowercase slug —
+`intent: { principal, message, group?, turn?, run? }`. `principal` is a lowercase slug —
 **attribution**, not authority. It becomes the commit author,
 `Metistry <principal>` (prefix from `METISTRY_GIT_AUTHOR_NAME`), stamped
 server-side; a request has never been able to name an author, and since
 2026-09-20 it cannot name its own authority either (below). The console
 stamps it from ITS credential; the engine's `brain-commit` passes
-`assistant`. `group` batches several writes into one commit; absent, the
-principal is the group.
+`assistant`. `turn` (the reply's turn handle) and `run` (a `runs.id`,
+string or integer) say which **act** the write belongs to — see "The
+committer" below; each must match `[A-Za-z0-9_-]{1,64}`, because it
+becomes a trailer line and anything else would let a body forge one
+(`invalid_request`). `group` batches several writes into one commit
+explicitly (an artifact version); absent, the turn is the act, then the
+run, then the write alone.
 
 **What the tool refuses, for everyone:** `..`, absolute paths, drive
 letters, control characters, any `.git` segment, anything under
@@ -225,22 +230,68 @@ next flush. Readers never wait on git.
 
 ## The committer
 
-The queue flushes every `METISTRY_COMMIT_INTERVAL_SEC` (default 30):
-one commit per `(principal, group)`, staged with `git add -A -- <touched
-paths>` so nothing else rides along, message from the intents (first as
-subject, the rest as bullets), a `Brain-Source: <principal>` trailer
-(§4.7 — provenance for reading history, never an authorization signal).
+**One commit per act** (plan §2.21): a write, an agent turn, a routine run,
+or a sweep is one commit, so `git log` reads as the list of things that
+happened rather than a list of flush windows:
+
+```
+$ git log --reverse --format='%an: %s'
+Metistry assistant: Morning brief
+Metistry user: Edits from Obsidian: Alpha, Beta
+Metistry assistant: Note from chat
+```
+
+The queue flushes every `METISTRY_COMMIT_INTERVAL_SEC` (default 30), and
+each intent's act is decided when it is queued, first match wins:
+
+| The intent carries | The act | So |
+| --- | --- | --- |
+| `group` | that group | a caller batching its own writes — an artifact version is one commit |
+| `turn` | the turn | every note one agent reply writes is one commit, and two replies in one window are two. A host is built per reply, so a routine run's writes are one turn too |
+| `run` | the run | a `runs` row with no turn around it |
+| none | the write itself | two writes, two commits |
+
+Acts are never mixed across principals. Two acts of **one** principal that
+touched the same path in one window fold into one commit carrying both
+messages and both sets of trailers: the working tree only holds the last
+bytes, and committing them under the first act's message while the second
+commits nothing would misattribute the edit.
+
+Each commit is staged with `git add -A -- <the act's paths>` so nothing
+else rides along. The message is the act's first intent as the subject,
+the rest as bullets, then the trailers — provenance for reading history,
+never an authorization signal:
+
+```
+Morning brief
+
+- now: briefed
+
+Brain-Source: assistant
+Metistry-Run: 101
+Metistry-Run: 102
+Metistry-Turn: turn-a
+```
+
+`Brain-Source: <principal>` is always there (§4.7); `Metistry-Run:` (one
+per distinct `runs.id`) and `Metistry-Turn:` where known.
+`git log --format='%(trailers:key=Metistry-Turn,valueonly)'` joins a
+commit back to `runs.meta.turn_id` and the activity feed. `knowledge_write`
+sends the reply's turn and its own call's `runs` row, never a group.
+
 A failed commit is unstaged and retried on later flushes; all-or-nothing
 per commit. Push runs on `METISTRY_PUSH_SCHEDULE` (`@hourly` default) only
 if a remote exists and never blocks anything; a failed push shows up in
 `check()` as `degraded`.
 
 **Edits made outside the bridge** — Obsidian on your phone, a text editor
-on the Mac — are swept by the reconcile loop into one `user` commit
-(`group: sync`), because the reconciler is the only thing that can commit
-them (PoC-12: "edit on iPhone → commits cleanly"). Paths with a pending
-bridge intent belong to that intent; conflict copies are flagged, not
-committed. Turn the sweep off with `METISTRY_COMMIT_EXTERNAL_EDITS=false`.
+on the Mac — are swept by the reconcile loop into one `user` commit per
+sweep, because the reconciler is the only thing that can commit them
+(PoC-12: "edit on iPhone → commits cleanly"). The subject names the files
+— up to two by name, more by count (*Edits from Obsidian: 3 notes*) — and
+the body lists every path. Paths with a pending bridge intent belong to
+that intent; conflict copies are flagged, not committed. Turn the sweep
+off with `METISTRY_COMMIT_EXTERNAL_EDITS=false`.
 
 Those edits are also **never overwritten**. Every caller's write is
 compare-and-swap: captures go in with `expected_sha256: ""` (must not

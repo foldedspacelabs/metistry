@@ -386,7 +386,18 @@ async function settled(db: Db, target: string): Promise<string | null> {
   return typeof meta?.outcome === "string" ? meta.outcome : rows.length > 0 ? "unknown" : null;
 }
 
-async function record(db: Db, target: string, outcome: "wrote" | PlanSkip, meta: Record<string, unknown> = {}): Promise<void> {
+/**
+ * `reason` is `"wrote"` or one of `PLAN_SKIPS` — this routine's own detailed
+ * vocabulary, kept verbatim so `no_working_days`, `user_owned` and the rest
+ * still name exactly what happened. `meta.outcome` (T1-4) is the vocabulary
+ * every routine and the runner share (`acted | silent | skipped:<reason>`),
+ * so the activity feed (T1-3) can read one field across every component:
+ * `"wrote"` becomes `acted`, every skip becomes `skipped:<reason>` — never
+ * `silent`, because a settled date is never nothing (§6.4: even doing
+ * nothing is a fact recorded).
+ */
+async function record(db: Db, target: string, reason: "wrote" | PlanSkip, meta: Record<string, unknown> = {}): Promise<void> {
+  const outcome = reason === "wrote" ? "acted" : `skipped:${reason}`;
   await db.query(
     `INSERT INTO runs (component, kind, ok, started_at, finished_at, meta)
      VALUES ($1, 'routine_run', true, now(), now(), $2)`,

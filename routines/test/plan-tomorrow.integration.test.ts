@@ -173,7 +173,7 @@ describe.skipIf(!hasDb)("plan-tomorrow (real db)", () => {
 
     // …and the ledger row the morning brief and `metistry doctor` read
     const { rows } = await pool.query(`SELECT meta FROM runs WHERE component = $1 AND kind = 'routine_run' AND ok ORDER BY ts DESC LIMIT 1`, [COMPONENT]);
-    expect(rows[0]?.meta).toMatchObject({ planned_for: TARGET, outcome: "wrote", path: PLAN_FILE, created: true, truncated: false, template_warnings: 0 });
+    expect(rows[0]?.meta).toMatchObject({ planned_for: TARGET, outcome: "acted", path: PLAN_FILE, created: true, truncated: false, template_warnings: 0 });
   });
 
   it("re-running the same evening replaces the same file under compare-and-swap — never a second one", async () => {
@@ -203,13 +203,13 @@ describe.skipIf(!hasDb)("plan-tomorrow (real db)", () => {
     expect(vault.files.get(PLAN_FILE)).toBe(mine);
     expect(vault.writes).toHaveLength(0);
     const { rows } = await pool.query(`SELECT meta FROM runs WHERE component = $1 ORDER BY ts DESC LIMIT 1`, [COMPONENT]);
-    expect(rows[0]?.meta).toMatchObject({ outcome: "user_owned", source: "user" });
+    expect(rows[0]?.meta).toMatchObject({ outcome: "skipped:user_owned", source: "user" });
   });
 
   it("an evening this routine has already settled is not planned twice", async () => {
     await pool.query(
       `INSERT INTO runs (component, kind, ok, started_at, finished_at, meta) VALUES ($1, 'routine_run', true, now(), now(), $2)`,
-      [COMPONENT, JSON.stringify({ planned_for: TARGET, outcome: "wrote" })],
+      [COMPONENT, JSON.stringify({ planned_for: TARGET, outcome: "acted" })],
     );
     const vault = fakeVault();
     expect(await planTomorrow(pool, { vault, queries, calendar, now: EVENING, env: ENV })).toBe(0);

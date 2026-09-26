@@ -1,5 +1,22 @@
 # Metistry design system (2026-09-08)
 
+> **Superseded in part — read `design/design-system-amendments.md` first.**
+> This file was not updated for v0.11.0 (C26). Tokens and component anatomy
+> still hold; the passages below do not, and each carries a one-line note where
+> it stands. Where this file and the amendments disagree, **the amendments win.**
+>
+> | Here | Now | Receipt |
+> | --- | --- | --- |
+> | P6, §3.1, §3.6, §5 — six sections, two global controls | eight rows (Today · Chat · Activity · Work ▸ · Knowledge ▸ · Agents · Routines, then Pinned), with **Needs You** above Today while something is waiting; two top-right controls on the Mac (`+` · usage gauge) | C50, C57, C110 |
+> | §2.6 — nothing spins or pulses | motion only where it carries information words cannot; a closed list of two (the chat's waiting dots, the recording breath) | C16, C75 |
+> | P1 — the wash behind every agent body | a 2px `agent` rule inside a transcript; the wash everywhere else | C69 |
+> | P10 — title case | HIG title style: small words stay lower (*Open the File*, *Run Now*) | amendments §8 |
+> | §3.9 — six answers, affirmative/destructive fills | Approve · Revise · Decline, then Later; Skip only in bulk; Approve is the one accent fill | C92 |
+> | §3.10, §3.11 — `border-strong` target, 60% opacity dimming | an ink token for any mark that means something; a dimmer ink, never opacity | C49, C63 |
+> | §3.12 — review in the blocked colour | a chosen Review mode takes weight; only a budget-forced one takes the tint; modes are **Autonomous / Review** | C83, C94 |
+> | §3.18 — "1 snoozed" in the header | gone | C21 |
+> | Auto / Supervised, Allow / Ask First / Never | Autonomous / Review; On · Ask · Off | C93, C94 |
+
 > One design language across **PWA (every platform)** and the **SwiftUI
 > multiplatform app (macOS + iOS)**. It exists so the native app copies a
 > settled interaction instead of inventing one (`desktop-app-plan.md`
@@ -30,6 +47,8 @@ Ten, each one a rule this system already has. A design decision that
 cannot be traced to one of these is a preference, and preferences lose.
 
 ### P1 — Agent text is data, never chrome
+
+> *Superseded in part:* inside a transcript the body takes a 2px `agent` rule, not the wash (C69).
 
 Every string an agent or the assistant wrote renders inside a container
 that is visibly *quoted*: the `agent` tint on the attribution, an
@@ -89,6 +108,8 @@ renders.
 the codegraff lesson "never dress a mailbox agent as working".
 
 ### P6 — One information architecture, three renderings
+
+> *Superseded in part:* eight rows, not six sections (C50, C57); the force of the rule — same rows, same order, same names — stands.
 
 Chat, Feed, Work, Knowledge, Agents, Insights — the same six sections,
 the same order, the same names on macOS, iOS and the web. **Capture and
@@ -190,6 +211,8 @@ hostile, and it is a rule rather than a preference because otherwise
 every new polled list rediscovers it.
 
 ### P10 — Title Case names things; sentence case says things
+
+> *Amended:* Title Case means **HIG title style** — articles, short conjunctions and short prepositions stay lower (amendments §8).
 
 A copy rule, about rendered strings only — the repo's path- and
 identifier-casing rules (`CLAUDE.md`) are untouched by it.
@@ -464,6 +487,8 @@ big black shadow on a near-black canvas conveys nothing.
 
 ### 2.6 Motion
 
+> *Superseded in part:* motion is a closed list of two (C16, C75) — see amendments §6.1.
+
 Motion explains a change of state and nothing else. No entrance
 animation on data that merely arrived (P2).
 
@@ -494,6 +519,8 @@ notes** (SwiftUI / HIG pattern vs PWA element). All of them are rendered
 with realistic content in `design/preview.html`.
 
 ### 3.1 Navigation
+
+> *Superseded:* eight rows (C57). The anatomy below is otherwise sound.
 
 **Anatomy.** Six sections in one fixed order: Chat · Feed · **Work ▸** ·
 **Knowledge ▸** · Agents · Insights. Each has a glyph, a label, and an
@@ -928,6 +955,8 @@ never waits on the model. It writes to the inbox and returns.
 
 ### 3.9 Request card
 
+> *Superseded in part:* Approve · Revise · Decline, then Later; Skip only in bulk; Approve is the one accent fill, Revise and Decline outlined (C92).
+
 The card in the **Needs You panel** — the popover/panel (Mac) or sheet
 (iOS) the §3.18 bell opens, over whatever screen you were on; amended
 2026-09-17 (second ruling, `app-ux-plan.md` §7.8), where it read ~~the
@@ -998,6 +1027,8 @@ ship as a `UNNotificationCategory` so a request can be answered from the push
 
 ### 3.10 Task card + drag-to-dispatch
 
+> *Superseded in part:* no `border-strong` for a mark that means something (C49); no opacity dimming (C63).
+
 **Anatomy.** Task card: id (`mono`) · title · project chip · state chip
 (ready / claimed / blocked / done) · assignee (an agent chip, §3.3) ·
 lease countdown when claimed.
@@ -1029,6 +1060,8 @@ that opens the same agent list, because a gesture that only works with a
 pointer is not a control (§6).
 
 ### 3.11 Artifact viewer
+
+> *Superseded in part:* resolved threads take a dimmer ink, not 60% opacity (C63); see `design/screen-16-artifacts-and-rooms.md`.
 
 **Anatomy.** Header (project/slug, `title-3`) · version + file selectors
 · authorship line (`footnote`: who, message, commit, "current") · the
@@ -1062,6 +1095,8 @@ same CSP for `html`; `Text(AttributedString(markdown:))` clamped to the
 same whitelist for `markdown`.
 
 ### 3.12 Project header + mode toggle
+
+> *Superseded in part:* modes are **Autonomous / Review**; a chosen Review takes weight, a budget-forced one the tint (C83, C94).
 
 **Anatomy.** Title (`title-2`) · mode chip (`review` / `autonomous`) ·
 budget and cap as `footnote` · member agent chips · a single **toggle**.
@@ -1186,6 +1221,8 @@ and an irreversible act, the tool is wrong, not the copy.
 
 ### 3.18 Needs You bell + panel
 
+> *Superseded in part:* no "snoozed" count (C21); the panel is `design/screen-03-needs-you.md`.
+
 New 2026-09-17 (second ruling, `app-ux-plan.md` §7.8). The queue used to
 be a section; it is now a control with a count and a panel behind it.
 Numbered 3.18 rather than inserted beside §3.9 so that every existing
@@ -1219,7 +1256,7 @@ inferred").
 
 - **macOS** — a `.toolbar` `ToolbarItem` with `.badge(count)`, opening a
   `.popover` anchored to the bell; over 6 cards it becomes a resizable
-  panel. `Esc` closes, `⌘9` toggles, arrow keys move between cards, and
+  panel. `Esc` closes, *(⌘9 retired — C119; ⌘0 opens Needs You)*, arrow keys move between cards, and
   the card's own `a`/`r`/`d`/`l`/`s` keys still answer. The menu-bar
   extra's "Needs You" item opens the window *and* this panel.
 - **iOS** — a navigation-bar trailing item with a badge, opening a sheet
@@ -1353,6 +1390,8 @@ those four pairs are computed now instead of argued about.
 
 ## 5. Screens
 
+> *Superseded:* the SVGs below predate v0.11.0; the current drawings are the canvas boards listed in `design/HANDOFF.md` §0.
+
 Annotated wireframes, one architecture, three renderings (P6). Numbers
 in circles are callouts; the legend is in each file.
 
@@ -1435,8 +1474,7 @@ reader is scrolled up is *spoken*, never *scrolled to* (P9).
 
 **Keyboard (macOS and PWA).** Full keyboard reachability with a visible
 2px `focus-ring` at 2px offset — `:focus-visible` on the web, never
-`outline: none`. `⌘K` palette · `⌘1`–`⌘6` destinations · `⌘9` the Needs You
-panel · `⌘N` capture · `/` focuses the composer · `Esc` closes any disclosure, menu, or dialog · `Tab` order
+`outline: none`. `⌘K` palette · `⌘0`–`⌘7` Needs You and the sidebar rows (C119; Mac only — the PWA adds no shortcuts) · `⌘N` capture · `/` focuses the composer · `Esc` closes any disclosure, menu, or dialog · `Tab` order
 follows reading order · every drag gesture has a menu equivalent (§3.10).
 `<dialog>` gives focus trapping and restoration for free; nothing in the
 system implements its own focus manager.

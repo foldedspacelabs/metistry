@@ -60,3 +60,7 @@ docs/poc/poc18-bakeoff/runs/.transcripts/
 
 # Designer session output dropped at the repo root; never product content
 Claude outputs/
+
+# python bytecode (the canvas generator is multi-module now)
+__pycache__/
+*.pyc

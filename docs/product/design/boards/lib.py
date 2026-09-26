@@ -3187,13 +3187,12 @@ def permmatrix(T,*,proxied=True,label="PERMISSIONS",note=None,routine_grant=Fals
 # The week x hour grid was seven rows to say one thing. One axis says it, and the
 # agent-versus-built-in distinction leaves with it: the Agent column below already
 # carries that, so the picture does not need to.
-TL=[("Mon",[("6:02",1),("7:00",1),("18:00",0),("22:00",0)]),
-    ("Tue",[("6:02",1),("7:00",1),("9:00",1),("18:00",0),("22:00",0)]),
-    ("Wed",[("6:02",1),("7:00",1),("18:00",0),("22:00",0)]),
-    ("Thu",[("6:02",1),("7:00",1),("18:00",0),("22:00",0)]),
-    ("Fri",[("6:02",1),("7:00",1),("18:00",0),("22:00",0)]),
-    ("Sat",[("22:00",0)]),
-    ("Sun",[("18:00",0),("22:00",0)])]
+# The week of Scheduled v3 (C111): Standup and Tomorrow's Plan on working days; Brief,
+# Vendor Sweep, Fold and Reply Review daily; Weekly Review Sunday. Throughout-the-day
+# housekeeping (Inbox Sort, Usage Rollup) is not drawn — it would be a solid bar.
+TL=[("Mon",[("6:00",1),("6:02",1),("7:00",1),("19:00",0),("22:00",0),("23:00",0)]),("Tue",[("6:00",1),("6:02",1),("7:00",1),("19:00",0),("22:00",0),("23:00",0)]),("Wed",[("6:00",1),("6:02",1),("7:00",1),("19:00",0),("22:00",0),("23:00",0)]),("Thu",[("6:00",1),("6:02",1),("7:00",1),("19:00",0),("22:00",0),("23:00",0)]),("Fri",[("6:00",1),("6:02",1),("7:00",1),("19:00",0),("22:00",0),("23:00",0)]),
+    ("Sat",[("6:02",1),("7:00",1),("22:00",0),("23:00",0)]),
+    ("Sun",[("6:02",1),("7:00",1),("18:00",0),("22:00",0),("23:00",0)])]
 
 def timeline(T,*,w=None):
     total=7*24.0
@@ -3224,9 +3223,7 @@ def timeline(T,*,w=None):
             + seg3(T,["Day","Week","Month"],"Week") + '</div>'
             f'<div style="position: relative; height: 54px;">{ticks}{marks}</div>'
             f'<div style="font-size: 11.5px; color: {T["ts"]}; line-height: 1.5; margin-top: 8px; '
-            f'padding-top: 9px; border-top: 1px solid {T["border"]};">Every mark is one run. The cluster is the '
-            f'point: <b>everything runs before 7 AM or after 6 PM</b>, and the working day is empty. The faint '
-            f'line inside each day is noon.</div></div>')
+            f'padding-top: 9px; border-top: 1px solid {T["border"]};">Every mark is one run &mdash; <b>all by 7 AM or after 6 PM</b>. The faint line is noon.</div></div>')
 
 # ---------- Resources: where a connection is defined -------------------------
 def connrow(T,*,name,kind,tools,used,state="ok",last=False):

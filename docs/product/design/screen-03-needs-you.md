@@ -109,7 +109,7 @@ nothing else is lost.
 
 ## 5. Keyboard (Mac)
 
-Panel: `⌘9` toggle · `↑ ↓` between cards · `a` approve · `r` revise · `d`
+*(Superseded: see `components-02-keyboard-voiceover.md`; ⌘9 retired, ⌘0 opens Needs You.)* Panel: `⌘9` toggle · `↑ ↓` between cards · `a` approve · `r` revise · `d`
 decline · `l` later · `esc` closes having changed nothing.
 
 List: `space` toggles a row's selection · `⌘A` selects the page · `⇧↑ ↓`

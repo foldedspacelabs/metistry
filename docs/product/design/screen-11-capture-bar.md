@@ -29,8 +29,7 @@ To-do**, then **Record**. Each is its own button. The first pass hid the acts
 behind a hover menu and a mode switch, which made every jot cost two clicks before
 a single word — ruled out 2026-09-22 as a recipe for non-use.
 
-- **Glyphs only**, with the native tooltip and its shortcut on hover (`⌘⌥N`,
-  `⌘⌥T`). The rail is thin glass (0.75), so the glyphs are `text-secondary` and
+- **Glyphs only**, with the native tooltip — and its shortcut only when *Shortcuts in any app* is on (C120: off by default; ⌃⌥⌘A N T R S, Start and Stop Recording separate). The rail is thin glass (0.75), so the glyphs are `text-secondary` and
   there are no labels: a label there would need tertiary ink, which C74 bars.
 - **No crossed-out eye, no muted speaker.** Absence is the denial (C58), and
   *cannot see* is a claim the system cannot back (C71).

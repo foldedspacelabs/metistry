@@ -252,8 +252,9 @@ owner; the C96 events and the meeting-at-Stop as instances. **Needs You is the h
 
 **Connections, Secrets, Variables (2026-09-25, C113–C117):** the sidebar row is **Scheduled** (Routines · Syncs). Resources, targets and sources are one noun, **Connection**, typed MCP · Agent · API · Feed · Files, any of which can be offered to agents through Metistry's MCP proxy. **Secrets** (Keychain, per instance, `{{ secret.name }}`, never seen by a model) and **Variables** (`{{ variable.name }}`, usable in instructions) are Settings panes. Boards `Scheduled`, `Connections`, `Secrets`; `Routines-v2` and `Resources` archived. **C118:** known services ask for named fields; custom connections are configured by how they are reached — HTTP (URL, parameters, auth, headers), Command (arguments, environment) or Path — with a masked preview of what is sent.
 
-**Next round, in order:** (1) **Keyboard and
-VoiceOver** (review 01 §3.1; offline is now specified in screen 18 §4). (2)
+**Keyboard and VoiceOver (2026-09-25, C119–C122, boards `Keyboard`, `VoiceOver`, `components-02-keyboard-voiceover.md`):** Mac only; every shortcut a menu item (Go ⌘0–⌘7, Capture, Item); shortcuts in any app off by default with conflict checks, Start and Stop Recording separate; a Spoken table and rules for VoiceOver; Reduce Motion and largest text.
+
+**Next round, in order:** (1) **Settings: Instance, Services, Compute, Updates, Advanced**. (2)
 **States for screens 10–17** and the §3.3 flows, including the Mac's Compute
 pane from the PWA's. Ruled 2026-09-25: C99 (no confirm on a tick); C101/C102 (Close the Day updates
 the daily note's Metistry section, dates each deferred line and writes
@@ -289,7 +290,7 @@ the canvas is now generated from a module in `boards/` except `Facets`, `Plugin`
 `Voice` and `Item-Model`. `bellpanel()` is gone — it drew the *"1 snoozed"*
 header C21 killed; `panel2()` is the panel.
 
-**118 contradictions** are logged in `review-00-plan.md`. C38, C51 and C62 are closed. C40–C87 are
+**122 contradictions** are logged in `review-00-plan.md`. C38, C51 and C62 are closed. C40–C87 are
 round E's; C88–C98 are review 01's rulings. Two of them are rules the system is missing rather than faults in a
 file: **C45** (a failed consequential operation leaves the request pending) and
 **C49** (a mark that carries meaning takes an ink token, never a border token —

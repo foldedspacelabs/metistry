@@ -46,7 +46,8 @@ describe("PWA shell: HTML artifacts render only in an opaque-origin sandbox (dec
   // one mutating control it has — resolve — is a POST to the work route.
   it("the Rooms panel escapes every agent-authored value and has exactly one resolve path", () => {
     expect(html).toContain('id="rooms"');
-    expect(html).toContain('data-view="rooms"');
+    // no Rooms list to navigate to (C89, T7-2): a room is a push from its card
+    expect(html).not.toContain('data-view="rooms"');
     expect(app).toContain("function roomCard(r)");
     expect(app).not.toMatch(/room-messages"\)\.innerHTML\s*=\s*[^;]*\$\{c\.body\}/); // bodies go through esc()
     expect(app).toContain("${esc(c.body)}");

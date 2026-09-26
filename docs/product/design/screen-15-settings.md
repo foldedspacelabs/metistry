@@ -59,15 +59,22 @@ Link an Instance…, Refresh, Remove).
 Doctor (Run Doctor; each problem with its fix; checks passed) · the supervisor
 (launchd or compose; Restart All, Stop All) and one row per service — state,
 uptime or reason, port, Restart · Stop · Log · When it runs (Start at Login, Run
-in the Background, Keep this Mac Awake: Allow sleep on battery · Always · Always,
-even with the lid closed).
+in the Background, Keep this Mac Awake — and under it, disabled while it is off,
+Allow sleep on battery and Allow sleep when the lid is closed, both on, each with
+a warning tip; C129).
 
-### 5.3 Compute
-Default model · Providers (where it runs, key as a secret, ZDR chip, Test,
-Remove, Add Provider…) · Who uses what (Default, Quick, Deep, crews: provider,
-model, effort) · Spending limits (per day, per month, then Allow · Stop ·
-Critical only; today's spend) · Local models (loaded, memory, Load/Unload,
-Install).
+### 5.3 Compute (C128)
+**Metis** — model, effort, and a fallback if it fails. Then two tabs:
+
+- **Local** — Apple Foundation Models, LM Studio, Ollama, each tagged *Local* ·
+  *Free*, with Test, Remove, Start; a memory bar; installed models (Load,
+  Unload); **Browse** searches and installs, marking *Fits* or *Tight fit*.
+- **Cloud** — each provider tagged *Cloud* and *By token* or *Subscription*,
+  ZDR chip, key as a secret; then **Spending limits** (per day, per month, then
+  Allow · Stop · Critical only) for by-token providers; a subscription shows its
+  window instead.
+
+Agents and routines pick their model in their own definitions (screen 7 §3.4).
 
 ### 5.4 Updates
 This app (version and channel, Check Now, automatic) · Metistry runtime (running

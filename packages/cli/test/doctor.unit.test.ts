@@ -6,7 +6,7 @@ import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { cliRow, confinementRow, doctor, hostLocal, inboxRow, parseComposePs, parseLaunchctlPrint, probeTargetFor, renderTable, walkManifests, type Db, type DoctorRow } from "../src/doctor.js";
+import { cliRow, confinementRow, doctor, hostLocal, inboxRow, parseComposePs, parseLaunchctlPrint, probeTargetFor, registriesRow, renderTable, walkManifests, type Db, type DoctorRow } from "../src/doctor.js";
 import { SANDBOX_EXEC } from "../src/sandbox.js";
 import { cliShimPath, writeCliShim } from "../src/cli-shim.js";
 import { StepRunner } from "../src/steps.js";
@@ -26,12 +26,12 @@ async function checkout(opts: { brokenManifests?: boolean } = {}): Promise<strin
   };
   await put("package.json", JSON.stringify({ name: "metistry" }));
   await put("seed/identity.yaml", "name: Seed\n");
-  await put("collectors/good/manifest.yaml", "name: good\ntype: collector\nschedule: '@hourly'\nwrites: [t]\n");
+  await put("collectors/good/manifest.yaml", "schema: 1\nname: good\ntype: collector\nschedule: '@hourly'\nwrites: [t]\n");
   await put("packages/mcp-x/manifest.yaml", "name: x\ntype: bridge\ntransport: http\nport: 7901\nruns_on: host\nexposes: [{name: a}]\n");
   await put("packages/mcp-y/manifest.yaml", "name: y\ntype: bridge\ntransport: http\nport: 7902\nruns_on: host\nexposes: [{name: a}]\n");
   await put("apps/console/manifest.yaml", "name: console\ntype: service\nruns_on: container\nport: 8080\n");
   await put("apps/watchdog/manifest.yaml", "name: watchdog\ntype: service\nruns_on: host\n");
-  await put("targets/tgt/manifest.yaml", "name: tgt\ntype: target\ntransport: local\nsubmit: {}\nresult: {via: report_queue}\ndata_policy: {allow: [], deny_sources: [], max_brief_bytes: 10}\n");
+  await put("targets/tgt/manifest.yaml", "schema: 1\nname: tgt\ntype: target\ntransport: local\nsubmit: {}\nresult: {via: report_queue}\ndata_policy: {allow: [], deny_sources: [], max_brief_bytes: 10}\n");
   await put("db/migrations/0001_a.sql", "select 1;");
   await put("db/migrations/0002_b.sql", "select 1;");
   await put("ops/launchd/com.foldedspacelabs.metistry.a.plist", PLIST("com.foldedspacelabs.metistry.a"));
@@ -115,6 +115,7 @@ describe("doctor: everything healthy", () => {
       "service:console=ok",
       "service:watchdog=ok",
       "target:tgt=ok",
+      "registry:registries=ok", // every registry kind loads; no extensions, nothing skipped
       "instance:instance layout=absent", // a bare temp dir is not an instance directory
       "instance:inbox=ok",
       "cli:cli on PATH=absent", // nothing on this fake PATH, and `metistry up` never ran here
@@ -166,7 +167,7 @@ describe("doctor: everything healthy", () => {
     // icon spelling depends on the terminal's locale, so nothing here
     // asserts on the glyph itself.
     expect(text.split("\n")[0]).toContain(`${productDir} — shape compose`);
-    expect(text).toMatch(/18 checks: 9 ok, 0 degraded, 0 failed, 9 absent — .*healthy/);
+    expect(text).toMatch(/19 checks: 10 ok, 0 degraded, 0 failed, 9 absent — .*healthy/);
     expect(text).toMatch(/^local-model$/m); // the kind is the heading, not a repeated column
     expect(text).toMatch(/^\s+\S+\s+local:llamaserver\s+absent\s+\d+ms$/m);
     expect(text).toMatch(/^\s+\S+\s+local:applefm\s+absent\s+\d+ms$/m);
@@ -179,7 +180,7 @@ describe("doctor: everything healthy", () => {
     expect(json).toHaveLength(1); // --json purity: nothing but the one document reaches stdout
     const parsed = JSON.parse(json.join("\n"));
     expect(parsed.ok).toBe(true);
-    expect(parsed.rows).toHaveLength(18);
+    expect(parsed.rows).toHaveLength(19);
     expect(parsed.shape).toBe("compose");
     expect(parsed.rows.every((r: DoctorRow) => typeof r.latency_ms === "number" && typeof r.probe === "string")).toBe(true);
   });
@@ -444,6 +445,45 @@ describe("doctor: absent (not configured / not installed) is informational", () 
     const report = await doctor({ productDir, env: {}, fetchFn: fakeFetch({ "/health": res(200), "/api/status": res(401) }), db: null, exec: fakeExec({ docker: { code: 1, stderr: "Cannot connect to the Docker daemon at unix:///var/run/docker.sock" } }), platform: "linux" });
     expect(byName(report.rows).compose).toMatchObject({ status: "failed", remediation: expect.stringMatching(/Cannot connect to the Docker daemon.*is the Docker daemon running\?/) });
     expect(report.ok).toBe(false);
+  });
+});
+
+// plan §2.7: "a name collision … the extension wins, doctor says so" — and a
+// unit a registry skipped is a finding, never a failure.
+describe("doctor: the registries row", () => {
+  async function tree(files: Record<string, string>): Promise<string> {
+    const root = await mkdtemp(join(tmpdir(), "metistry-doctor-reg-"));
+    for (const [rel, text] of Object.entries(files)) {
+      await mkdir(join(root, rel, ".."), { recursive: true });
+      await writeFile(join(root, rel), text);
+    }
+    return root;
+  }
+  const collector = (name: string, schedule = "@hourly") => `schema: 1\nname: ${name}\ntype: collector\nschedule: '${schedule}'\nwrites: [t]\n`;
+
+  it("counts every kind's units and is ok when nothing is skipped", async () => {
+    const product = await tree({ "collectors/good/manifest.yaml": collector("good") });
+    const row = await registriesRow(product, {});
+    expect(row).toMatchObject({ kind: "registry", name: "registries", status: "ok" });
+    expect(row.meta).toMatchObject({ units: { collector: 1, routine: 0, target: 0, provider: 0, "connection-type": 0 }, overlays: [], skipped: [] });
+    expect(row.probe).toContain("product units only");
+  });
+
+  it("says which extension replaces which product unit", async () => {
+    const product = await tree({ "collectors/good/manifest.yaml": collector("good") });
+    const instance = await tree({ ".metistry/extensions/good/manifest.yaml": collector("good", "@daily") });
+    const row = await registriesRow(product, { METISTRY_INSTANCE_DIR: instance });
+    expect(row.status).toBe("ok");
+    expect(row.remediation).toContain(`collector good: ${join(instance, ".metistry/extensions/good/manifest.yaml")} replaces ${join(product, "collectors/good/manifest.yaml")}`);
+    expect(row.remediation).toContain("Reset to Default");
+  });
+
+  it("is degraded, naming the file and the reason, when a registry skipped a unit", async () => {
+    const product = await tree({ "collectors/old/manifest.yaml": "name: old\ntype: collector\nschedule: '@hourly'\nwrites: [t]\n" });
+    const row = await registriesRow(product, {});
+    expect(row.status).toBe("degraded");
+    expect(row.remediation).toContain("schema: missing — every manifest carries schema: 1");
+    expect(row.remediation).toContain(join(product, "collectors/old/manifest.yaml"));
   });
 });
 

@@ -135,6 +135,9 @@ describe("protected paths (§4.7)", () => {
       ".metistry/metistry.lock",
       ".metistry/queries/knowledge_pages.yaml",
       ".metistry/agents/a/manifest.yaml",
+      // M15: installing an extension is the owner's hand — the console can never
+      // add a unit the product will load (plan §2.7)
+      ".metistry/extensions/e/manifest.yaml",
       "CLAUDE.md",
       "README.md",
     ]) {

@@ -40,11 +40,26 @@ import { validKnowledgePath, type KnowledgeReader } from "./knowledge.js";
 import { principalOf } from "./principal.js";
 import type { AgentPrincipal } from "./types.js";
 
-/** The reconciler's commit intent (apps/reconciler `parseIntent`). */
+/**
+ * The reconciler's commit intent (apps/reconciler `parseIntent`). `turn` and
+ * `run` are what make one agent reply ONE commit (§2.21): the committer's act
+ * is the explicit `group`, else the turn, else the run, else the write alone
+ * — and they ride as `Metistry-Turn:` / `Metistry-Run:` trailers.
+ */
 export interface VaultWriteIntent {
   principal: string;
   message: string;
   group?: string | undefined;
+  /** `runs.id` of the tool call that made this write. */
+  run?: string | undefined;
+  /** The reply's turn handle (turn-id.ts). */
+  turn?: string | undefined;
+}
+
+/** The act a write belongs to, as the tool wrapper knows it (server.ts `wrap`). Correlation only — never identity, never auth. */
+export interface WriteAct {
+  turnId?: string | undefined;
+  runId?: number | string | undefined;
 }
 
 export interface VaultWriteRequest {
@@ -289,9 +304,12 @@ export function sha256Text(text: string): string {
 }
 
 /**
- * `knowledge_write` for one principal. `group` is the commit-batch key
- * (`<agent id>` — a turn/run id is not on the wire, so a flush window
- * yields one commit per agent). Returns the tool wrapper's outcome shape.
+ * `knowledge_write` for one principal. The commit is keyed by the act: the
+ * reply's turn id when the call carried one (so every note one reply writes
+ * is one commit, and two replies in one flush window are two), else the
+ * call's own `runs` row (one write, one commit). No `group` is sent — a
+ * per-agent group would fold every reply in a window into one commit.
+ * Returns the tool wrapper's outcome shape.
  */
 export async function writeKnowledge(
   principal: AgentPrincipal,
@@ -300,6 +318,8 @@ export async function writeKnowledge(
   now: Date = new Date(),
   /** Vault read path (`cfg.readKnowledge`). Present → the ownership rule is enforced; a read that FAILS refuses the write (never waved through). Absent (no read path in this deployment) → only the vault's own protected-path rules apply. */
   reader?: KnowledgeReader | undefined,
+  /** The call's turn and run (server.ts `wrap`); absent → the write is its own commit. */
+  act: WriteAct = {},
 ): Promise<KnowledgeWriteOutcome> {
   const { tier, areas } = principal.grants;
   const meta: Record<string, unknown> = { kind: principal.kind ?? "external", tier, areas, path: args.path };
@@ -367,7 +387,12 @@ export async function writeKnowledge(
   const out = await writer({
     path: args.path,
     content,
-    intent: { principal: principal.id, message: args.message, group: principal.id },
+    intent: {
+      principal: principal.id,
+      message: args.message,
+      ...(act.runId !== undefined ? { run: String(act.runId) } : {}),
+      ...(act.turnId !== undefined ? { turn: act.turnId } : {}),
+    },
     expected_sha256: args.expected_sha256 ?? "",
   });
   if (!out.ok) {

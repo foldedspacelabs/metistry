@@ -50,7 +50,7 @@ import { KNOWLEDGE_FS_TOOL_NAMES, registerKnowledgeFsTools, type KnowledgeLister
 import { registerKnowledgeResources } from "./knowledge-resources.js";
 import { captureToInbox, type CaptureSink } from "./capture.js";
 import { KNOWLEDGE_MODES, knowledgeScope, readKnowledge, searchKnowledge, type KnowledgeReader, type QueryEmbedder } from "./knowledge.js";
-import { sha256Text, writeKnowledge, type KnowledgeWriter } from "./knowledge-write.js";
+import { sha256Text, writeKnowledge, type KnowledgeWriter, type WriteAct } from "./knowledge-write.js";
 import { computeNudge } from "./nudge.js";
 import { principalOf } from "./principal.js";
 import { done, fail, refuse, type Outcome } from "./outcome.js";
@@ -261,7 +261,7 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
     const server = new McpServer({ name: "metistry-brain", version }, { capabilities: { tools: {} } });
 
     /** Every tool call: one two-phase runs row (component = agent id), sanitizer, nudge. */
-    function wrap<A>(name: ToolName, body: (args: A) => Promise<Outcome>): (args: A, extra?: ToolCallExtra) => Promise<CallToolResult> {
+    function wrap<A>(name: ToolName, body: (args: A, act: WriteAct) => Promise<Outcome>): (args: A, extra?: ToolCallExtra) => Promise<CallToolResult> {
       return async (args: A, extra?: ToolCallExtra) => {
         // The turn handle rides in the call's `_meta`, never in a schema
         // (turn-id.ts): one place to find it, joinable by activity_feed, and
@@ -293,7 +293,9 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
           return render(refuse(admitted, meta), await nudge(principal));
         }
         try {
-          outcome = await body(args);
+          // the act travels to the one tool that commits (knowledge_write): its
+          // turn and this call's runs row become the commit's key and trailers
+          outcome = await body(args, { turnId: turn_id, runId });
         } catch (err) {
           if (err instanceof TasksError) {
             outcome = fail(err.code === "conflict" ? "conflict" : "invalid_request", err.message);
@@ -312,7 +314,7 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
     // handle used to be, and at 938 tokens across 25 tools it was 18.8% of the
     // whole advertised surface for a field that is not a parameter
     // (turn-id.ts, docs/research/2026-09-19-code-mode-mcp.md §2.4).
-    const reg = <S extends z.ZodRawShape>(name: ToolName, description: string, inputSchema: S, body: (args: z.infer<z.ZodObject<S>>) => Promise<Outcome>) =>
+    const reg = <S extends z.ZodRawShape>(name: ToolName, description: string, inputSchema: S, body: (args: z.infer<z.ZodObject<S>>, act: WriteAct) => Promise<Outcome>) =>
       server.registerTool(name, { description, inputSchema }, wrap(name, body) as never);
 
     reg(
@@ -545,8 +547,8 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
           .optional()
           .describe('Current sha256 from knowledge_read; "" or omitted = the note must not exist yet (create only).'),
       },
-      async (a) => {
-        const r = await writeKnowledge(principal, a, cfg.writeKnowledge, new Date(), cfg.readKnowledge);
+      async (a, act) => {
+        const r = await writeKnowledge(principal, a, cfg.writeKnowledge, new Date(), cfg.readKnowledge, act);
         return r.ok ? done(r.result, r.meta) : fail(r.code, r.message, r.meta);
       },
     );

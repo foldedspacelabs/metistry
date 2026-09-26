@@ -432,8 +432,10 @@ writes too: `knowledge_write` refuses any path outside the grant.
 `knowledge_write {path, content, message, expected_sha256?}` is a
 whole-file replace that lands on the reconciler's working tree at once
 and is committed on its next flush (~30 s), author `Metistry assistant`,
-`Brain-Source: assistant` trailer, one commit per agent per flush window
-(the intent's group is the agent id — a turn id is not on the wire).
+`Brain-Source: assistant` trailer, **one commit per reply**: the intent
+carries the reply's turn handle and the call's `runs.id`, which become the
+commit's act and its `Metistry-Turn:` / `Metistry-Run:` trailers
+(docs/ops/reconciler.md, "The committer").
 Layers, honest about which carry the load:
 
 1. **Who.** Only a `kind: internal` principal reaches the write at all;

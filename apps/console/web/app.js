@@ -1470,10 +1470,12 @@ function relTime(ts) {
 // kind, and the kind is a closed set the activity_feed query already returns.
 // A new kind is NOT title-cased until someone adds it here deliberately: the
 // safe default is to leave text alone. `turn`, `tool` and `dispatch` are
-// absent on purpose — their subjects can carry agent- or user-authored text.
+// absent on purpose — their subjects can carry agent- or user-authored text —
+// and so is `work_history`, whose subject is the task's own title (C18): "Migrate
+// the settings pane to tokens" is someone's writing, not a label we composed.
 const TITLE_CASE_KINDS = new Set([
   "collector_run", "proposal_created", "proposal_decided", "project_mode",
-  "agent_admin", "brief", "review", "alert", "task_op", "crew_run", "work_history",
+  "agent_admin", "brief", "review", "alert", "task_op", "crew_run",
 ]);
 // Short joining words stay lowercase unless they lead (P10).
 const MINOR = new Set(["a", "an", "and", "at", "by", "for", "in", "of", "on", "or", "the", "to", "via"]);

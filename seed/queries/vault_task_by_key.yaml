@@ -1,0 +1,43 @@
+# Seeded default (D4 overlay: an instance file of the same name wins).
+#
+# The row the Tick and Defer doors act on (design-build-plan §2.10, §2.11;
+# tickets T2-4, T2-5): `POST /api/vault-tasks/:task_key/check` is handed a
+# key, and this is how it learns which note to read. It never decides
+# anything — the door reads the NOTE through the vault bridge, finds the line
+# by this same key there, and judges the line as it stands, because the index
+# is up to one walk behind the file (`METISTRY_RECONCILE_INTERVAL_SEC`).
+# `line_no` is only where the line was when the walk last saw it.
+#
+# **Every row for the key, not one.** `vault_tasks`' primary key is
+# `(path, task_key)` and there is deliberately no unique index on `task_key`
+# (db/migrations/0024_vault_tasks.sql): the same sentence typed in two notes
+# has the same hash key in both, and a line copy-pasted with its anchor
+# carries it into a second note. So this returns them all, in byte order of
+# path, and the door refuses to guess between two — the client names the
+# note (`path`) or is told to.
+#
+# **`expose: route`**, on the rule `knowledge_pages.yaml` states: every row
+# carries a vault path and the text of a line the owner typed, and only the
+# owner's own door judges those. The generic `/api/q/<name>` and
+# `queries_run` answer this name with the refusal they answer an unknown name
+# with, so an agent with `queries: true` cannot read a task by key.
+name: vault_task_by_key
+expose: route
+description: >-
+  The vault_tasks rows for one task_key (an anchor or a hash key) — path, line
+  as last walked, text, box state and whether the line is a recurrence rule —
+  for the Tick and Defer doors to find the note that holds the line. Every row
+  for the key, in byte order of path; the door refuses to choose between two.
+params:
+  task_key: { type: text, default: "" } # blank matches nothing
+sql: |
+  SELECT
+    t.path, t.task_key, t.anchor, t.line_no, t.text,
+    t.checked, t.dropped,
+    (t.recur_rule IS NOT NULL) AS is_rule,
+    t.last_seen_at
+  FROM vault_tasks t
+  WHERE t.task_key = :task_key
+  ORDER BY t.path COLLATE "C"
+  LIMIT 20
+cache_ttl: 0 # a tick must see the row the last walk wrote, never a cached one

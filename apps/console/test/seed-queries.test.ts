@@ -124,7 +124,8 @@ describe("seed queries", () => {
     // caller-supplied filter to probe the tree with — which is what lets the
     // assistant read the measure through `queries_run` and keeps §1.5's "no
     // new brain tool" true.
-    expect(routeBacked.sort()).toEqual(["collector_health", "day_work", "knowledge_page_links", "knowledge_pages", "pending_requests", "vault_tasks_query", "vault_tasks_recurring"]);
+    // `vault_task_by_key` (T2-4) is the Tick door's lookup: a path and a line of the owner's own words, for the owner's door alone.
+    expect(routeBacked.sort()).toEqual(["collector_health", "day_work", "knowledge_page_links", "knowledge_pages", "pending_requests", "vault_task_by_key", "vault_tasks_query", "vault_tasks_recurring"]);
     expect(store.exposure("task_ageing")).toBe("generic");
     for (const name of REQUIRED.filter((n) => !routeBacked.includes(n))) expect(store.exposure(name), name).toBe("generic");
   });

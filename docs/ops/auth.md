@@ -11,7 +11,7 @@ one *principal*.
 
 | Credential | Presented as | Principal | Reaches |
 | --- | --- | --- | --- |
-| Passkey session | `Cookie: metistry_session=…` | `user` | everything |
+| Passkey session | `Cookie: metistry_session=…` | `user` | everything except the `local` routes — minting an agent bearer — which answer `403 local_only` ([client-api.md](client-api.md), "The `local` gate") |
 | **Local owner token** | `Authorization: Bearer $METISTRY_LOCAL_OWNER_TOKEN`, from this machine | `user` | everything except the two session-bound endpoints below |
 | Host-minted owner token | `Authorization: Bearer …` (an `owner_tokens` row) | `owner_token` | `/capture`, `/message`, `/api/status`, named queries — never management |
 | Agent token | `Authorization: Bearer …` (an `agents` row) | that agent | `/capture` and the mcp-brain mount at `/mcp`; a uniform 403 everywhere else |
@@ -19,7 +19,10 @@ one *principal*.
 
 A passkey session and the local owner token are the **same principal**, in
 the same code path — `isUser()` in `apps/console/src/server.ts` is the one
-predicate the owner surface is gated on, so the two cannot drift apart.
+predicate the owner surface is gated on, so the two cannot drift apart. The
+one place they differ is **reach**, not principal: a route the client API
+table files under `local` is the owner on this Mac, and only the local owner
+token proves that (F-13).
 
 ## One decision function
 

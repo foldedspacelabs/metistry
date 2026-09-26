@@ -266,8 +266,9 @@ them the window is refused with the variables named rather than spent. The
 eventkit bridge is deliberately **not** declared `reachable:`: blocking on it
 would mean no plan at all on an evening the calendar was down.
 
-Turning it off is the same as the fold's: remove `plan-tomorrow` from
-`routines/index.ts` (a product change, a PR) — or, without a rebuild, take
+Turning it off is the same as the fold's: remove its directory,
+`routines/plan-tomorrow/` (a product change, a PR — the routine registry is the
+directory listing, plan §2.7) — or, without a rebuild, take
 `working_days:` out of `Me/profile.md`, which is your own hand and takes effect
 at the next tick: the routine then records `no_working_days` and writes
 nothing.

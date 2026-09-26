@@ -24,13 +24,16 @@
 # one rather than producing something Gatekeeper will reject on someone else's
 # Mac. (docs/ops/apple-signing.md)
 #
+# ICON. ICON_PNG points at a real 1024pt master; unset, ops/release/
+# make-app-icon.mjs draws a placeholder instead. (docs/ops/mac-app.md)
+#
 # WHAT ENDS UP INSIDE:
 #
 #   Metistry.app/Contents/
 #     Info.plist                        apps/macos/resources/Info.plist, __VERSION__ substituted
 #     MacOS/Metistry                    swift build -c release
 #     Frameworks/Sparkle.framework      the SPM binary target, copied + signed inside-out
-#     Resources/AppIcon.icns            placeholder (ops/release/make-app-icon.mjs)
+#     Resources/AppIcon.icns            ICON_PNG, or a placeholder (ops/release/make-app-icon.mjs)
 #     Resources/metistry/               the product, laid out exactly as `metistry update`
 #       releases/<version>/             …lays out a release install (docs/ops/releases.md),
 #       current -> releases/<version>   …so the app's locator and the CLI agree,
@@ -124,10 +127,18 @@ printf 'APPL????' > "$contents/PkgInfo"
 [ -d "$bin_dir/Sparkle.framework" ] || die "Sparkle.framework is not in $bin_dir — did `swift build` resolve the package?"
 cp -R "$bin_dir/Sparkle.framework" "$contents/Frameworks/Sparkle.framework"
 
-# ---- icon (placeholder) ----
+# ---- icon: ICON_PNG (a real 1024pt master), or the placeholder generator ----
 icon_tmp="$(mktemp -d)"
 trap 'rm -rf "$icon_tmp"' EXIT
-node "$root/ops/release/make-app-icon.mjs" "$icon_tmp/icon.png" 1024
+icon_png="${ICON_PNG:-}"
+if [ -n "$icon_png" ]; then
+  [ -f "$icon_png" ] || die "ICON_PNG=$icon_png does not exist"
+  cp "$icon_png" "$icon_tmp/icon.png"
+  say "icon: $icon_png"
+else
+  node "$root/ops/release/make-app-icon.mjs" "$icon_tmp/icon.png" 1024
+  say "icon: placeholder (ops/release/make-app-icon.mjs — set ICON_PNG to a real 1024pt master to replace it)"
+fi
 iconset="$icon_tmp/AppIcon.iconset"
 mkdir -p "$iconset"
 for spec in "16 16x16" "32 16x16@2x" "32 32x32" "64 32x32@2x" "128 128x128" "256 128x128@2x" "256 256x256" "512 256x256@2x" "512 512x512" "1024 512x512@2x"; do
@@ -135,7 +146,6 @@ for spec in "16 16x16" "32 16x16@2x" "32 32x32" "64 32x32@2x" "128 128x128" "256
   sips -z "$1" "$1" "$icon_tmp/icon.png" --out "$iconset/icon_$2.png" >/dev/null
 done
 iconutil -c icns "$iconset" -o "$contents/Resources/AppIcon.icns"
-say "icon: placeholder (ops/release/make-app-icon.mjs — replace before launch)"
 
 # ---- the product runtime, if we were handed one ----
 resources_metistry="$contents/Resources/metistry"

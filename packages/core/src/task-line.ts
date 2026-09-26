@@ -2,7 +2,7 @@
 //
 // A user's todo is a `- [ ]` line in a vault note (D1), and the fields on it
 // are ENGLISH-SHAPED TRAILING TOKENS (D2): `due friday`, `p1`, `size l`,
-// `@Jim`, `every weekday`. Not Dataview's `[due:: 2026-09-22]`, which renders
+// `@Jim`, `every weekday`, `someday`. Not Dataview's `[due:: 2026-09-22]`, which renders
 // as literal bracketed text; not the Tasks plugin's emoji, whose diff is
 // unreadable and whose glyph table belongs to someone else. This file READS
 // all three and EMITS exactly one.
@@ -20,10 +20,11 @@
 //     disk stay the user's. The one thing Metistry ever adds to a line is the
 //     `^mt-…` anchor, and its only writers are the plugin and whatever
 //     creates a line from scratch — never a routine. The one exception is
-//     the owner's own Tick door (design-build-plan §2.11, T2-4):
+//     the owner's own doors (design-build-plan §2.11): the Tick door's
 //     `setTaskChecked` flips the box and writes or removes one `done <date>`
-//     and nothing else, refusing any line where it cannot prove that by
-//     re-parsing its own output.
+//     (T2-4), and the Defer door's `setTaskScheduled` writes one `do <date>`
+//     or one `someday` (T2-5, K6) — each nothing else, and each refusing any
+//     line where it cannot prove that by re-parsing its own output.
 //   * A FIELD IT CANNOT READ IS NEVER GUESSED. `due nextweek` sets no date;
 //     it sets `parse_warning`, which the day's plan renders as one visible
 //     line naming the token. A wrong date is worse than no date.
@@ -36,8 +37,8 @@
 //
 // The result maps one-to-one onto `vault_tasks` (§1.5): `due`,
 // `scheduled_for`, `start_on`, `done_on`, `priority`, `size`, `type`,
-// `assigned`, `project`, `waiting`, `ext_refs`, `work_id`, `source`,
-// `parse_warning`, `parsed_on`, and `recurrence` → (`recur_rule`,
+// `assigned`, `project`, `waiting`, `someday`, `ext_refs`, `work_id`,
+// `source`, `parse_warning`, `parsed_on`, and `recurrence` → (`recur_rule`,
 // `recur_next`). Three columns are deliberately NOT here because they are
 // facts about the index rather than about the line: `done_on_observed`,
 // `duplicate_of` and `first_seen_on`. `assigned` comes back as the person's
@@ -147,6 +148,13 @@ export interface ParsedTaskLine {
   assigned_is_wikilink: boolean;
   project: string | null;
   waiting: boolean;
+  /**
+   * The `someday` token (K6, T2-5): deliberately not for any day — deferred
+   * without a date. The one spelling written is the bare word; the Tasks
+   * plugin has no such field and a `#someday` tag is the user's own, so
+   * neither is read as this.
+   */
+  someday: boolean;
   recurrence: TaskRecurrence | null;
   source: string | null;
   ext_refs: string[];
@@ -457,6 +465,7 @@ interface Draft {
   assigned_is_wikilink: boolean;
   project: string | null;
   waiting: boolean;
+  someday: boolean;
   recurrence: Omit<TaskRecurrence, "next"> | null;
   source: string | null;
   ext_refs: string[];
@@ -467,7 +476,7 @@ interface Draft {
 
 const emptyDraft = (): Draft => ({
   due: null, scheduled_for: null, start_on: null, done_on: null, priority: null, size: null,
-  type: null, assigned: null, assigned_is_wikilink: false, project: null, waiting: false,
+  type: null, assigned: null, assigned_is_wikilink: false, project: null, waiting: false, someday: false,
   recurrence: null, source: null, ext_refs: [], work_id: null, unreadable: [], dropped: false,
 });
 
@@ -610,6 +619,8 @@ function readClause(toks: Tok[], i: number, body: string, today: Civil): ClauseR
   }
 
   if (word === "waiting") return { next: i + 1, apply: (d) => { d.waiting = true; } };
+
+  if (word === SOMEDAY_TOKEN) return { next: i + 1, apply: (d) => { d.someday = true; } };
 
   if (word === "every") {
     const read = readRecurrence(toks, i, body);
@@ -871,6 +882,7 @@ export function parseTaskLine(line: string, opts: TaskDateOptions = {}): ParsedT
     assigned_is_wikilink: draft.assigned_is_wikilink,
     project: draft.project,
     waiting: draft.waiting,
+    someday: draft.someday,
     recurrence: recurrence ? { ...recurrence, next: nextRecurrence(recurrence, parsed_on) ?? parsed_on } : null,
     source: draft.source,
     ext_refs: draft.ext_refs,
@@ -881,6 +893,12 @@ export function parseTaskLine(line: string, opts: TaskDateOptions = {}): ParsedT
     parsed_on,
   };
 }
+
+/** `someday` (K6): the bare word, never the design's `#someday` tag — a tag is the user's, and one form is emitted. */
+export const SOMEDAY_TOKEN = "someday";
+
+/** `do <date>` — the one spelling of a scheduled day, shared by `formatTaskLine` and the Defer door so the two can never write it differently. */
+const doClause = (date: string): string => `do ${date}`;
 
 /**
  * Render the canonical English trailing-token form — the ONE shape Metistry
@@ -896,7 +914,8 @@ export function formatTaskLine(task: ParsedTaskLine): string {
   if (task.assigned) fields.push(task.assigned_is_wikilink ? `@[[${task.assigned}]]` : `@${task.assigned}`);
   if (task.waiting) fields.push("waiting");
   if (task.due) fields.push(`due ${task.due}`);
-  if (task.scheduled_for) fields.push(`do ${task.scheduled_for}`);
+  if (task.scheduled_for) fields.push(doClause(task.scheduled_for));
+  if (task.someday) fields.push(SOMEDAY_TOKEN);
   if (task.start_on) fields.push(`start ${task.start_on}`);
   if (task.done_on) fields.push(`done ${task.done_on}`);
   if (task.priority) fields.push(`p${task.priority}`);
@@ -1094,5 +1113,136 @@ export function setTaskChecked(line: string, checked: boolean, date: string, opt
     after.done_on === (checked ? date : null) &&
     unchangedFields(after) === unchangedFields(before);
   if (!proven) return { ok: false, reason: "unsafe", message: "the line would not read back as the same task with only the box and `done` changed — tick it in the note" };
+  return { ok: true, line: next };
+}
+
+// --- the Defer door's one edit (design-build-plan §2.11, T2-5; K6) ----------
+//
+// The owner defers a task in the app: to a day (`do <date>`) or to no day at
+// all (`someday`). The same discipline as the Tick door's edit above: a line
+// and a deferral in, never a patch; the only bytes it can touch are the `do`
+// clauses and `someday` tokens of the trailing run, and the proof is the
+// re-parse — every field but `scheduled_for` and `someday` must read back
+// exactly as it was. `due` is never moved: it is a hard date the user set.
+//
+// K6 is why the tokens are English: the design wrote `⏳ <date>` and
+// `#someday`, and the parser emits one form (D2/D3), so the door writes
+// `formatTaskLine`'s own spelling of each (`doClause`, `SOMEDAY_TOKEN`) and has
+// no code path that can produce a glyph. A line whose day came from a Tasks
+// plugin `⏳` or a Dataview `[scheduled:: …]` is refused rather than left
+// carrying two days that disagree: the door does not rewrite someone else's
+// field, and it will not write beside one.
+
+/** A scheduled day in someone else's spelling: the Tasks plugin's `⏳`/`⌛`, Dataview's `[scheduled:: …]`/`(scheduled:: …)` — exactly what `readCompat` reads as one. */
+const COMPAT_SCHEDULED_RE = /[\u{23F3}\u{231B}]|[[(]\s*scheduled\s*::/iu;
+
+/** Defer to a day, or to someday. Exactly one. */
+export type TaskDeferral = { do: string } | { someday: true };
+
+export type TaskScheduleRefusal = "not_a_task" | "done" | "dropped" | "rule" | "already" | "compat" | "unsafe";
+
+export type TaskScheduleEdit =
+  | { ok: true; line: string }
+  | { ok: false; reason: TaskScheduleRefusal; message: string };
+
+/** The fields a deferral may not change: everything `parseTaskLine` reads but `scheduled_for` and `someday`. */
+function unscheduledFields(p: ParsedTaskLine): string {
+  const { scheduled_for: _s, someday: _d, ...rest } = p;
+  return JSON.stringify(rest);
+}
+
+/**
+ * Defer one open task line — the Defer door's whole write.
+ *
+ * `{do: date}` writes `do <date>`: in place of the run's `do` clause when
+ * there is one, else at the end of the trailing run (before the anchor, which
+ * Obsidian needs last); a `someday` token on the line goes, because a day was
+ * chosen. `{someday: true}` writes `someday` at the end of the run and takes
+ * every `do` clause off it. Nothing else on the line moves.
+ *
+ * Refused, never approximated: not a task line; a ticked line (`done` — it is
+ * finished, not waiting); a dropped `[-]` line; a recurrence rule (never
+ * itself a task, §4); a line already deferred exactly so; a line whose day
+ * came from a compatibility reader (`compat`); and any line where the result
+ * does not re-parse to the same task with only `scheduled_for` and `someday`
+ * changed (`unsafe`) — a `do` the run cannot hold, a `do` clause it could not
+ * read.
+ */
+export function setTaskScheduled(line: string, when: TaskDeferral, opts: TaskDateOptions = {}): TaskScheduleEdit {
+  const date = "do" in when ? when.do : null;
+  if (date !== null && (!/^\d{4}-\d{2}-\d{2}$/.test(date) || parseISO(date) === null)) throw new RangeError(`not a calendar date: ${date}`);
+  const before = parseTaskLine(line, opts);
+  const m = LINE_RE.exec(line);
+  if (!before || !m || line.includes("\r") || line.includes("\n")) return { ok: false, reason: "not_a_task", message: "the line is not a task line" };
+  if (before.checked) return { ok: false, reason: "done", message: "the line is ticked: it is done, not waiting for a day" };
+  if (before.dropped) return { ok: false, reason: "dropped", message: "the line is dropped (`[-]`): bring it back in the note first" };
+  if (before.recurrence) return { ok: false, reason: "rule", message: "the line is a recurrence rule, which is never itself a task — defer the day's instance instead" };
+  if (date !== null ? before.scheduled_for === date && !before.someday : before.someday && before.scheduled_for === null) {
+    return { ok: false, reason: "already", message: date !== null ? `the line is already for ${date}` : "the line is already someday" };
+  }
+
+  const rest = m[4] ?? "";
+  const restAt = line.length - rest.length;
+  const trimmed = rest.trimEnd();
+  const anchor = TRAILING_ANCHOR_RE.exec(trimmed);
+  const core = anchor ? trimmed.slice(0, anchor.index) : trimmed;
+  const tail = rest.slice(core.length);
+
+  const today = parseISO(taskToday(opts));
+  if (!today) return { ok: false, reason: "unsafe", message: "could not resolve today" };
+  const toks = tokenize(core);
+  const run = runStart(toks, core, today);
+  const dos: { start: number; end: number }[] = [];
+  const somedays: { start: number; end: number }[] = [];
+  for (let i = run.index; i < toks.length; ) {
+    const clause = readClause(toks, i, core, today);
+    if (!clause || clause.next <= i) break;
+    const span = { start: toks[i]!.start, end: toks[clause.next - 1]!.end };
+    if (toks[i]!.lower === "do") dos.push(span);
+    else if (toks[i]!.lower === SOMEDAY_TOKEN) somedays.push(span);
+    i = clause.next;
+  }
+  if (COMPAT_SCHEDULED_RE.test(core)) {
+    return { ok: false, reason: "compat", message: "the line's day is a Tasks-plugin `⏳` or a Dataview `[scheduled:: …]` field, which this door does not rewrite — defer it in the note" };
+  }
+
+  // Every span to replace or remove, applied right to left so each one's
+  // offsets still hold. A removal takes the whitespace before it (or, at the
+  // start of the core, after it) so no double space is left behind.
+  const edits: { start: number; end: number; with: string | null }[] = [];
+  let append: string | null = null;
+  if (date !== null) {
+    const last = dos.at(-1);
+    for (const s of dos) edits.push({ ...s, with: s === last ? doClause(date) : null });
+    for (const s of somedays) edits.push({ ...s, with: null });
+    if (!last) append = doClause(date);
+  } else {
+    for (const s of dos) edits.push({ ...s, with: null });
+    if (somedays.length === 0) append = SOMEDAY_TOKEN;
+  }
+  let edited = core;
+  for (const e of edits.sort((a, b) => b.start - a.start)) {
+    if (e.with !== null) {
+      edited = `${edited.slice(0, e.start)}${e.with}${edited.slice(e.end)}`;
+      continue;
+    }
+    let from = e.start;
+    while (from > 0 && (edited[from - 1] === " " || edited[from - 1] === "\t")) from -= 1;
+    let to = e.end;
+    if (from === 0) while (to < edited.length && (edited[to] === " " || edited[to] === "\t")) to += 1;
+    edited = `${edited.slice(0, from)}${edited.slice(to)}`;
+  }
+  if (append !== null) edited = `${edited}${edited === "" ? "" : " "}${append}`;
+
+  // `- [ ]` with nothing after the box has no separator yet; the grammar needs one
+  const sep = rest === "" && edited !== "" ? " " : "";
+  const next = `${line.slice(0, restAt)}${sep}${edited}${tail}`;
+  const after = parseTaskLine(next, opts);
+  const proven =
+    after !== null &&
+    after.scheduled_for === date &&
+    after.someday === (date === null) &&
+    unscheduledFields(after) === unscheduledFields(before);
+  if (!proven) return { ok: false, reason: "unsafe", message: "the line would not read back as the same task with only its day changed — defer it in the note" };
   return { ok: true, line: next };
 }

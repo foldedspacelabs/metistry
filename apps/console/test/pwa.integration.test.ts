@@ -1,6 +1,7 @@
 // PWA-chunk integration: static serving (traversal-safe), push endpoint
 // authz, message listing. Skipped without a db (CI provides one).
 import type { AddressInfo } from "node:net";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
@@ -9,6 +10,11 @@ import { mintToken } from "@foldedspacelabs/metistry-core";
 import { makeServer } from "../src/server.js";
 import * as store from "../src/auth-store.js";
 import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
+
+// the source of truth for the manifest/meta colours (F-9): `bg`, light scheme
+const designTokens = JSON.parse(readFileSync(new URL("../../../docs/product/design/tokens.json", import.meta.url), "utf8"));
+const BG_LIGHT = designTokens.color.bg.light;
+const BG_DARK = designTokens.color.bg.dark;
 
 const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
 
@@ -65,6 +71,42 @@ describe.skipIf(!hasDb)("console PWA chunk", () => {
     expect(await tokens.text()).toContain("--mt-color-bg");
     // installed-app chrome follows the appearance
     expect(html).toContain('media="(prefers-color-scheme: dark)"');
+  });
+
+  // F-9: the manifest and icons carry the current brand — decision 15
+  // (Metistry, proper case), the current tokens (not the pre-#263 `#f6f7f9`
+  // ground), and a PNG apple-touch-icon (C13 — iOS does not honour SVG).
+  it("the manifest and touch icon match the current brand — name, colours, PNG", async () => {
+    const html = await (await fetch(base + "/")).text();
+    expect(html).not.toContain("#f6f7f9"); // the pre-#263 ground, purged
+    expect(html).toContain(`content="${BG_LIGHT}"`);
+    expect(html).toContain(`content="${BG_DARK}"`);
+    expect(html).toContain('<link rel="apple-touch-icon" href="/apple-touch-icon.png" />');
+
+    const mr = await fetch(base + "/manifest.webmanifest");
+    expect(mr.status).toBe(200);
+    expect(mr.headers.get("content-type")).toContain("application/manifest+json");
+    const manifestText = await mr.text();
+    expect(manifestText).not.toContain("#f6f7f9");
+    const manifest = JSON.parse(manifestText);
+    expect(manifest.name).toBe("Metistry");
+    expect(manifest.short_name).toBe("Metistry");
+    expect(manifest.background_color).toBe(BG_LIGHT);
+    expect(manifest.theme_color).toBe(BG_LIGHT);
+    const pngIcons = manifest.icons.filter((i: { type: string }) => i.type === "image/png");
+    expect(pngIcons.length).toBeGreaterThanOrEqual(1);
+
+    for (const icon of pngIcons) {
+      const ir = await fetch(base + icon.src);
+      expect(ir.status).toBe(200);
+      expect(ir.headers.get("content-type")).toBe("image/png");
+    }
+
+    const touch = await fetch(base + "/apple-touch-icon.png");
+    expect(touch.status).toBe(200);
+    expect(touch.headers.get("content-type")).toBe("image/png");
+    const bytes = new Uint8Array(await touch.arrayBuffer());
+    expect(Array.from(bytes.slice(0, 8))).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); // PNG magic
   });
 
   // design-system.md 3.6 + P9: the chat composer is one row — a <details>

@@ -190,9 +190,10 @@ The table's **Idempotent** column is one of:
 | `natural` | the route is idempotent by its own identity — a read, a replace, an upsert, a set — and needs no key |
 | `no` | a replay is a second act, or a `409`: never replay one blindly, and never queue one offline |
 
-`POST /capture` is the route that honours the header today; the vault-task
-tick and defer doors will (T2-4, T2-5), because the PWA's offline outbox
-replays them (§2.17).
+`POST /capture` and the Tick door (`POST /api/vault-tasks/:task_key/check`)
+honour the header today; the defer door will (T2-5), because the PWA's offline
+outbox replays them (§2.17). The Tick door holds its keys in the console's
+memory — see *Tick* below for why that is enough.
 
 ### `since` cursors on the polled lists — a reconnect is one bounded pull
 
@@ -329,7 +330,7 @@ takes a `since` cursor and answers with the next one.
 | `GET /api/today` | owner | session · local_owner | natural | — | — | T2-7 | the day: tasks, work, order, events, brief, standup and plan |
 | `GET /api/vault-tasks` | owner | session · local_owner | natural | — | — | T2-7 | vault tasks by filter: Slipping, Owed, Waiting on Others |
 | `PUT /api/today/order` | owner | session · local_owner | natural | — | — | T2-7 | the owner's order for the day |
-| `POST /api/vault-tasks/:task_key/check` | owner | session · local_owner | key | stale | — | T2-4 | tick or untick one task line |
+| `POST /api/vault-tasks/:task_key/check` | owner | session · local_owner | key | stale | — | served | tick or untick one task line |
 | `POST /api/vault-tasks/:task_key/schedule` | owner | session · local_owner | key | stale | — | T2-5 | defer one task line: a `do` date or someday |
 | `POST /api/vault-tasks/:task_key/link` | owner | session · local_owner | no | stale | — | T4-25 | add one tracker ref to one task line |
 | `POST /api/today/close` | owner | session · local_owner | no | — | — | T2-8 | Close the Day: write the section, then plan tomorrow |
@@ -1569,7 +1570,7 @@ every edge; tier `none` gets nothing (`docs/ops/assistant-tools.md`).
 GET  /api/today?date=                        T2-7 — the day: vault tasks (today's preset), work, the order, events, and the brief, standup and plan paths
 GET  /api/vault-tasks?where=                 T2-7 — vault tasks by filter (`compileTaskFilter`): Slipping, Owed, Waiting on Others
 PUT  /api/today/order                        T2-7 — the owner's order for the day; a key outside the day is refused
-POST /api/vault-tasks/:task_key/check        T2-4 — {checked, seen_text}   Idempotency-Key   409 stale, with the current line
+POST /api/vault-tasks/:task_key/check        {checked, seen_text, path?}   Idempotency-Key   409 stale, with the current line
 POST /api/vault-tasks/:task_key/schedule     T2-5 — {do | someday, seen_text}   Idempotency-Key   409 stale
 POST /api/vault-tasks/:task_key/link         T4-25 — {ref}: one `linear:` (or `gh:`) ref onto one line   409 stale
 POST /api/today/close                        T2-8 — {day, line?}: Close the Day
@@ -1585,6 +1586,56 @@ is what makes both replayable from the PWA's offline outbox with an
 Day** writes the daily note's section through the reconciler's section
 operation as `user`, then enqueues `plan-tomorrow`; markers missing is a `note`
 request and no write (§2.13).
+
+#### Tick — `POST /api/vault-tasks/:task_key/check` (T2-4)
+
+```
+POST /api/vault-tasks/mt-7f3k2a/check
+Idempotency-Key: tick-0928-0001                    (optional; client-minted, ≤200 chars)
+{"checked": true, "seen_text": "Send Dana the fixture format"}
+
+200 {"ok": true,
+     "line": "- [x] Send Dana the fixture format due 2026-09-28 done 2026-09-28 ^mt-7f3k2a",
+     "task": {"path", "task_key", "anchor", "line_no", "text", "checked", "done_on"}}
+409 {"error": {"code": "conflict", …}, "reason": "stale", "line": "<as it stands>" | null, "task": {…} | null}
+```
+
+- **The key** is the row's `task_key` exactly as `GET /api/today` returns it:
+  an anchor (`mt-…`) or a hash key (`h:<sha256>:<n>`, percent-encode the
+  colons or not). Anything else is `400`. The note it names comes from the
+  named query `vault_task_by_key` (`expose: route`); the line is then found
+  **in the note**, by the same key the reconciler's walk gives it, so a line
+  that moved since the last walk is still found. Where one key names lines in
+  two notes (the same sentence typed twice, or an anchor copy-pasted), the
+  answer is `400` naming both paths, and `path` in the body says which.
+- **`seen_text`** is the row's `text` — the line minus its fields and anchor.
+  If the line is gone, its text differs, its box already says what `checked`
+  asks for, or it was dropped (`[-]`) since the client drew it, the answer is
+  `409 stale` carrying the line as it stands (`line: null` when it is gone),
+  and nothing is written. The same `409` answers a note that changed between
+  the door's read and its write (the write carries the read's hash).
+- **The write** is core's `setTaskChecked`: the box to `x` (or a space) and
+  one `done <today>` clause at the end of the trailing run, before the
+  anchor — or, for Undo, that clause removed. The door re-parses its own
+  output and refuses (`400`, nothing written) a line where anything but
+  `checked` and `done_on` would read differently — a Tasks-plugin `✅` it did
+  not write, a recurrence rule line (never itself a task). The date is today
+  in `METISTRY_TZ`. The commit is `user`'s: `complete "<text>"` or
+  `reopen "<text>"`.
+- **Refused before anything is read:** a row whose note is not a knowledge
+  note — `.metistry/`, any dot-directory, `Artifacts/`, the root `CLAUDE.md`
+  or `README.md` — is `403`. An agent bearer and the capture owner token get
+  the uniform `403` of the management gate; no credential, the uniform `401`.
+- **`Idempotency-Key`** replays the first **successful** answer, with
+  `Idempotency-Replayed: true`, for 24 hours; a second attempt still in
+  flight waits for the first. The same key with a different body is `400`.
+  Keys live in the console's memory, not the database: the note is the
+  record, so after a console restart a replay is judged against the note —
+  `409 stale` with the line, which already shows the first attempt's tick.
+  An outbox repaints from either answer the same way. Refusals are never
+  remembered; a retried refusal is judged again.
+- **`503`** when the deployment has no vault bridge
+  (`METISTRY_RECONCILER_URL`).
 
 ### Calendar and mail — through the connection that can
 

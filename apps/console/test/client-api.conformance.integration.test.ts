@@ -9,6 +9,9 @@
 //   * each served row admits exactly the credential kinds it records, and
 //     refuses the others with 401 or 403 — the reach the document states is
 //     the reach the gate enforces;
+//   * every row's reach, checked for every credential: a served `local` row
+//     answers a passkey session `403 local_only`, and no other row or
+//     credential ever gets that answer (F-13);
 //   * `api_version` is in `/health` and `/api/identity`, and the version
 //     header is on every answer.
 //
@@ -32,7 +35,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import { QueryStore } from "@foldedspacelabs/metistry-queries";
 import { memoryVault } from "@foldedspacelabs/metistry-artifacts";
-import { API_VERSION, API_VERSION_HEADER, CLIENT_API, matchRoute, mintToken, routeKey, servedRoute, type ClientPrincipal, type ClientRoute } from "@foldedspacelabs/metistry-core";
+import { API_VERSION, API_VERSION_HEADER, CLIENT_API, isLocalRoute, matchRoute, mintToken, routeKey, servedRoute, type ClientPrincipal, type ClientRoute } from "@foldedspacelabs/metistry-core";
 import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
 import { makeServer } from "../src/server.js";
 import { wasUnrouted } from "../src/http-util.js";
@@ -229,6 +232,34 @@ describe.skipIf(!hasDb)("the client API table against the console that serves it
       }
     }
     expect(wrong).toEqual([]);
+  });
+
+  it("every row's reach is the gate's: `local` refuses a passkey session with local_only, and nothing else ever answers it", async () => {
+    // For every row the table lists — served or frozen — and every credential
+    // kind. A served `local` row is the owner on this Mac: the local owner
+    // token alone, and a passkey session is told `local_only` (the credential
+    // it would need). An unserved `local` row is still "not served yet" to the
+    // owner, and the capture token and agent bearers keep their uniform 403
+    // everywhere — so `local_only` appears exactly where the table says.
+    const wrong: string[] = [];
+    let localRows = 0;
+    for (const r of CLIENT_API) {
+      if (r.served && isLocalRoute(r)) localRows++;
+      for (const cred of CREDENTIALS) {
+        const p = await probe(methodOf(r), pathOf(r), cred);
+        let code: unknown;
+        try {
+          code = (JSON.parse(p.body) as { error?: { code?: unknown } }).error?.code;
+        } catch {
+          code = undefined;
+        }
+        const want = r.served && isLocalRoute(r) && cred === "session";
+        if ((code === "local_only") !== want) wrong.push(`${routeKey(r)} (${r.reach.join(" · ")}${r.served ? "" : ", not served"}) as ${cred}: ${p.status} ${String(code)}, want ${want ? "403 local_only" : "anything but local_only"}`);
+        if (code === "local_only" && p.status !== 403) wrong.push(`${routeKey(r)} as ${cred}: local_only with ${p.status}, never 403`);
+      }
+    }
+    expect(wrong).toEqual([]);
+    expect(localRows, "the table serves at least one local row, or this test proves nothing about the gate").toBeGreaterThan(0);
   });
 
   it("the public rows answer with no credential at all", async () => {

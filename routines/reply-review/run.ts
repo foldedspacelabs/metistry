@@ -150,7 +150,10 @@ async function flagged(db: Db, since: Date): Promise<FlaggedCase[]> {
   }));
 }
 
-/** One daily pass. Returns the number of proposals emitted: 0 or 1. */
+/**
+ * One daily pass. Returns the number of proposals emitted: 0 or 1 — the
+ * runner turns that into `meta.outcome`: `acted` or `silent` (T1-4).
+ */
 export async function run(db: Db, ctx: ReplyReviewCtx = {}): Promise<number> {
   const now = ctx.now ?? new Date();
   const windowEnd = isoDay(now);

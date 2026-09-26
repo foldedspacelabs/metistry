@@ -17,6 +17,7 @@ interface RunRow {
   ts: Date;
   ok: boolean | null;
   error: string | null;
+  meta: Record<string, unknown>;
 }
 
 /** Enough of Postgres to answer the runner's five queries, and nothing more. */
@@ -35,6 +36,7 @@ class Fake {
         ts: new Date(this.now.getTime() - r.minutesAgo * 60_000),
         ok: r.ok,
         error: r.error ?? null,
+        meta: {},
       });
     }
     return this;
@@ -76,16 +78,17 @@ class Fake {
       };
     }
     if (text.startsWith("INSERT INTO runs")) {
-      const [component, kind, , tool] = values as (string | null)[];
-      const row: RunRow = { id: this.runs.length + 1, component: component!, kind: kind!, tool: tool ?? null, ts: this.now, ok: null, error: null };
+      const [component, kind, , tool, , , meta] = values as (string | null)[];
+      const row: RunRow = { id: this.runs.length + 1, component: component!, kind: kind!, tool: tool ?? null, ts: this.now, ok: null, error: null, meta: meta ? JSON.parse(meta) : {} };
       this.runs.push(row);
       return { rows: [{ id: row.id }] };
     }
     if (text.startsWith("UPDATE runs")) {
-      const [id, ok, error] = values as [number, boolean, string | null];
+      const [id, ok, error, , , , meta] = values as [number, boolean, string | null, unknown, unknown, unknown, string | undefined];
       const row = this.runs.find((r) => r.id === id)!;
       row.ok = ok;
       row.error = error;
+      if (meta) row.meta = { ...row.meta, ...JSON.parse(meta) };
       return { rows: [] };
     }
     if (text.includes("FROM outbound_messages")) {
@@ -146,6 +149,28 @@ describe("routine runner", () => {
     const failing = collector({ name: "f", dir: "collectors/f", intervalSec: 1, run: async () => { throw new Error("x"); } });
     await expect(tick(db, [failing], {}, opts())).resolves.toBeUndefined(); // failure recorded, never thrown
     expect(db.rowsFor("f")[0]).toMatchObject({ ok: false, error: "x" });
+  });
+
+  // T1-4: every routine_run row carries meta.outcome — acted | silent — so the
+  // activity feed (T1-3) can tell a real event from an hourly tick that found
+  // nothing to do. A routine that skips for a specific reason writes ITS OWN
+  // row saying so (plan-tomorrow, knowledge-fold: see their own suites) — this
+  // is the runner's generic per-tick row, which only ever knows the count.
+  it("records meta.outcome on a routine_run row — acted when it did something, silent when it did not", async () => {
+    const db = new Fake(NOW);
+    const acted = collector({ name: "morning-brief", dir: "routines/morning-brief", runKind: "routine_run", run: async () => 1 });
+    await tick(db, [acted], {}, opts());
+    expect(db.rowsFor("morning-brief")[0]).toMatchObject({ ok: true, meta: { processed: 1, outcome: "acted" } });
+
+    const silent = collector({ name: "reply-review", dir: "routines/reply-review", runKind: "routine_run", run: async () => 0 });
+    await tick(db, [silent], {}, opts());
+    expect(db.rowsFor("reply-review")[0]).toMatchObject({ ok: true, meta: { processed: 0, outcome: "silent" } });
+  });
+
+  it("never invents an outcome for a collector_run row — that vocabulary is the routines'", async () => {
+    const db = new Fake(NOW);
+    await tick(db, [collector({ run: async () => 3 })], {}, opts());
+    expect(db.rowsFor("t")[0]?.meta).toEqual({ processed: 3 });
   });
 
   it("signs the failing run so the same fault is one fact, not one per hour", async () => {

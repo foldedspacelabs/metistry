@@ -235,8 +235,10 @@ file under compare-and-swap; nothing is ever appended.
 One `runs` row per target date, written the first time a pass settles it —
 which is what keeps an hourly routine from filing twenty rows a night.
 `meta.planned_for` is the discriminator (the runner's own per-tick
-`routine_run` row carries none), and `meta.outcome` is one of `wrote`,
-`no_working_days`, `not_a_working_day`, `template_missing`,
+`routine_run` row carries none). `meta.outcome` (T1-4: every routine and the
+runner share this vocabulary — `acted | silent | skipped:<reason>`) is
+`acted` when the plan was written, or `skipped:<reason>` with `<reason>` one
+of `no_working_days`, `not_a_working_day`, `template_missing`,
 `template_unreadable`, `user_owned` or `would_materialise`:
 
 ```sql

@@ -246,7 +246,10 @@ async function sectionSystem(db: Db): Promise<{ lines: string[]; needsHelp: bool
   return { lines, needsHelp: failed > 0 || flipped > 0 };
 }
 
-/** One brief pass. Returns 1 if a brief was emitted, else 0 (silence-default). */
+/**
+ * One brief pass. Returns 1 if a brief was emitted, else 0 (silence-default)
+ * — the runner turns that into `meta.outcome`: `acted` or `silent` (T1-4).
+ */
 export async function run(db: Db, ctx: RoutineCtx = {}): Promise<number> {
   // auto-expiry first: un-acted items leave the queue but stay searchable
   const expired = await db.query(

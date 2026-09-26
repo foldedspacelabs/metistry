@@ -1,5 +1,123 @@
 # @metistry-apps/console
 
+## 0.12.0
+
+### Minor Changes
+
+- 7bf6db6: **The client API, version 1 — one contract for every client, as data and as a
+  document.** `@foldedspacelabs/metistry-core` exports the route table
+  (`CLIENT_API`: method, path, reach, principals, idempotency, `409` reasons,
+  cursor, and whether it is served yet — 120 rows: every route the console
+  serves, and every route §2.1 of the design plan freezes ahead of its ticket) with `matchRoute`, `servedRoute` and `noRouteMessage`; the live-changes
+  catalogue (`EVENT_CATALOGUE`, the payload types in `EventPayloads`, every
+  event's reach `owner`); `API_VERSION` and the `Metistry-API-Version` header
+  name; and `events` joins the `CAPABILITIES` vocabulary.
+  
+  The console answers `api_version: 1` in `GET /health` and `GET /api/identity`
+  and the version header on every response. It reads the table before it
+  dispatches anything to the owner: a route the table does not list as served is
+  a `404` that names the routes beside it, so a handler cannot become an
+  undocumented door and a route frozen ahead of its ticket stays unserved until
+  it lands. `docs/ops/client-api.md` is the contract in words (it replaces
+  `docs/ops/console-api.md`, now a pointer); a conformance test holds the table
+  to the server — every served row reaches a handler, nothing unlisted is
+  served, each row admits exactly the credentials it records — and a document
+  test holds the table to the document line for line.
+- 2bcd356: **MetistryKit's store interface, and a fixture for every route it reads (F-7).** `sources/kit/stores/` declares one protocol per domain — Needs You, Today, Chat, Activity, Knowledge, Agents, Scheduled, Work, Artifacts, Usage, Settings, Capture, Events, Vault — with one method per row of the client API table, each naming its route; `ConsoleStores` implements all of them over any `ConsoleCallTransport`, and the event stream over `ConsoleEventTransport`, which `SessionConsoleCallTransport` already satisfies. `ManagementRunner` freezes §2.2's CLI verbs (a `ManagementCommand` can only hold one of them) and `LiveCaptureClient` the local recording bridge. `apps/console/scripts/record-client-fixtures.mjs` records one JSON per served route from a scratch console (in-process server, the scratch database, a `metistry init` temp instance, every outbound call faked) into `apps/macos/tests/kit/fixtures/`; the routes frozen ahead of their tickets carry hand-written contract fixtures the recorder holds their tickets to. Swift tests drive every store method against its fixture — the exact request the console accepted, and the reply it gave — and build a view with no console running; a console test holds the fixtures to the table.
+- 56be405: **The reach gate: minting an agent bearer is the owner on this Mac.** The
+  console reads reach `local` off the client API table and enforces it before
+  any handler runs: a `local` route admits the local owner token from a loopback
+  peer and nothing else, and a passkey session — even one from `127.0.0.1` — is
+  refused `403 local_only` with a message naming the route and the Mac app, and
+  audited. `POST /api/agents` and `POST /api/agents/:id/rotate` are now `local`:
+  a new credential is a boundary change. The local owner token from any other
+  peer is the uniform `401` it always was; the capture owner token and agent
+  bearers keep their uniform `403 forbidden`. `metistry connect` mints through
+  the local owner token and is unaffected; the legacy PWA's agent panel can no
+  longer register or rotate an agent.
+  
+  `@foldedspacelabs/metistry-core` adds the `local_only` error code (`403`),
+  `isLocalRoute` and `localOnlyMessage`. The client API conformance test now
+  checks every row's reach for every credential kind.
+
+### Patch Changes
+
+- 5652446: **The design tokens drop `affirmative` / `on-affirmative`, and the token check now reads the colours that are actually painted.** Neither role has had a caller since Approve became the one accent fill (C92), so `--mt-color-affirmative` and `MetistryColorRole.affirmative` are gone from the generated CSS and Swift. `node ops/scripts/build-design-tokens.mjs --check` now also fails on a web CSS rule that paints an undeclared ink/ground pair, a hex colour in the web CSS or the design SVGs that is not a token, a quiet fill its own ink does not declare, and anything that maps the pinned accent to the system accent.
+- c69abc3: **The owner can now see WHY an action's mode is what it is, not just what it is.** `effectiveActions()` resolved the (kind → mode) table but dropped the reason, so `metistry agents autonomy`, the console's registry panel and MetistryKit each had to recompute it to say whether a mode was set, defaulted, or clamped to the level's ceiling — and clamped is the one case where the owner's own setting is being overridden. Core adds `effectiveActionsDetailed()` beside it (`effectiveActions` is now a projection of it, so the two cannot drift), and every surface reads that one function instead: `metistry agents autonomy` marks each row set / dimmed-default / clamped-with-ceiling and says the modes as **Allow · Ask First · Never**; `GET /api/agents`'s `scope.autonomy` carries a `detailed` table beside the plain one, so a console never re-derives it; MetistryKit's `AgentRecord` decodes the same table into `actionsDetailed`.
+- 3c966aa: **Captures the rules cannot place are triaged by intent, locally, with the
+  decision in `rules.yaml`.** `scoreChoice()` lands beside `completeJson()` —
+  same provider resolution, same money rule, different request fields — and
+  `inbox-drain` gains a third tier between its rules and its JSON-schema tier:
+  one scored answer token over the closed intent enum, on-device, with a
+  confidence. The model supplies a fact; a table in the collector and a threshold
+  in the owner's own `.metistry/rules.yaml` decide what happens about it. Every
+  verdict lands on the proposal and in a `runs` row, including the discarded
+  ones. Both halves must be configured — a model in `compute.yaml`, a threshold
+  in `rules.yaml` — and with either missing the drain is byte-identical to the
+  build before this existed, which is a test rather than a promise.
+  `metistry-eval intents` scores the owner's own labelled messages and **fits**
+  the threshold to the pre-registered bar instead of anybody choosing one.
+- 851bef1: **The PWA stops recomputing what the server already resolved.** The Agents panel prints the effective action table from `scope.autonomy.detailed` — the same table, in the same words, as `metistry agents autonomy` — instead of a local copy of the defaults, ceilings and clamp. The status list keeps all four check states apart: `degraded` is its own amber and `absent` reads *not configured* in grey, never *failed*, under a one-line summary. A task's own title is no longer title-cased on the feed; every tinted fill is its declared `*-quiet` token; agent prose is set in the tokens' serif stack; and every clock time is 12-hour with AM/PM, whatever the device's locale.
+- d930fba: **One request type table, in core — and `action` reads *action*.** Every
+  request in Needs You is a `proposals` row with a free-text `kind`; the owner
+  reads one of twelve types instead (`docs/product/glossary.md`).
+  `packages/core/src/requests.ts` is now the only place that says which: stored
+  kind → type, the type's body from the closed set (choices · diff · thread ·
+  before and after · preview · to-dos · excerpt), its primary verb, Revise and
+  Decline, and the decisions each stores (`describeRequest`). It replaces the
+  two copies that had drifted — the CASE in `pending_requests` and the morning
+  brief's own map, both of which called an agent's `action` a *note* (C80).
+  
+  The brief imports the table. The query cannot import TypeScript, so it
+  carries the table's `requestWordSql()` rendering verbatim, and the console's
+  seed-query tests refuse any other text, run the query over every stored kind
+  against the table, and read every `INSERT INTO proposals` in the product so a
+  new writer cannot add a kind the table does not map. A kind the table does
+  not know reads as a *report* drawn as an excerpt with Dismiss its only answer
+  — never as the raw kind, and never with an Approve whose meaning nobody
+  reviewed. `pending_requests`' title fallback now says the owner's word too
+  (*note request*, not *knowledge request*).
+- 82edf6f: **`metistry compute route-report` — where your messages actually go, as one
+  command.** PoC-20 phase 0's baseline
+  (`docs/research/2026-09-21-intent-classification-tier.md` §5.2): the share of
+  real messages the deterministic router placed as `/note`, as a `fast_path`
+  answer, as an explicit tier override, or that fell through to the default
+  model tier — and, among the fall-throughs, their length and their commonest
+  opening words, which is the shortlist to write new `fast_path` rules from.
+  The verdict is the research's own exit rule with your number in it:
+  fall-through under ~40 % and the answer is an extra regex, not a classifier.
+  
+  A new seed query, `route_report`, is the one read path into it (invariant 3);
+  `GET /api/q/route_report` answers the same rows. It is counts only — no
+  message text, no thread, no vault path, and an opening word is kept only when
+  it is a plain word or a `/command` — so it is safe on the generic door. The
+  command calls no model, dials no provider and writes nothing.
+- Updated dependencies [2080ce5]
+- Updated dependencies [7bf6db6]
+- Updated dependencies [ac8a137]
+- Updated dependencies [d60074f]
+- Updated dependencies [0f4892f]
+- Updated dependencies [95129a8]
+- Updated dependencies [c69abc3]
+- Updated dependencies [9c9eee6]
+- Updated dependencies [3c966aa]
+- Updated dependencies [aafc41a]
+- Updated dependencies [1edc2f7]
+- Updated dependencies [56be405]
+- Updated dependencies [d930fba]
+- Updated dependencies [82edf6f]
+- Updated dependencies [73977f8]
+- Updated dependencies [a8ccdfc]
+- Updated dependencies [87fc443]
+  - @foldedspacelabs/metistry-core@0.12.0
+  - @foldedspacelabs/metistry-cli@0.12.0
+  - @metistry-apps/collectors@0.12.0
+  - @foldedspacelabs/metistry-mcp-brain@0.12.0
+  - @metistry-apps/routines@0.12.0
+  - @foldedspacelabs/metistry-artifacts@0.12.0
+  - @foldedspacelabs/metistry-tasks@0.12.0
+  - @foldedspacelabs/metistry-queries@0.12.0
+
 ## 0.11.0
 
 ### Minor Changes

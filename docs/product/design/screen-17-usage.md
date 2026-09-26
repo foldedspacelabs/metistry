@@ -15,8 +15,7 @@ This is the popover the gauge opens, 400px, `elevated`, like Needs You's.
 3. **Where it went** — agents, routines and chat ranked by spend this month.
 4. **One line each:** the cache rate, AWS this month (*not compute*), and calls
    with no price (*count as $0*, from `spend`'s `cost_source`).
-5. **Budgets in Settings →** — budgets are set in Compute; this is where they are
-   read.
+5. **Spending limits in Settings →** — limits are set in Settings › Compute (C130) and enforced there (C133); this is where they are read.
 
 ## 2. The gauge — no badge
 

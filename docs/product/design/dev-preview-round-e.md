@@ -1,3 +1,5 @@
+> *Round E snapshot. Superseded names since: Resources → Connections (C114), Routines → Scheduled (C113). See HANDOFF.md.*
+
 # Design → build, early preview
 
 **Draft, 2026-09-22.** Round E is still in progress, so this is a preview rather

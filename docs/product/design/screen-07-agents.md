@@ -256,6 +256,5 @@ Three things follow from it that the design should hold to:
    tools**, and secret redaction by default. A proxied server conforming to that
    contract inherits the behaviour this screen would otherwise have to invent.
 
-The servers themselves are defined on **Resources** — `screen-09-resources.md`,
-in **Settings ▸ Resources** (C57; this first said a new top-level row). One place holds the credential; granting a server to an agent
+The servers themselves are defined in **Settings ▸ Connections** — `screen-09-resources.md` §10 (C114; it was Resources, C57). One place holds the credential; granting a server to an agent
 or a routine happens in the table above, like everything else.

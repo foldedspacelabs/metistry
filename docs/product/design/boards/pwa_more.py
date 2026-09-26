@@ -70,20 +70,21 @@ def occ(T,at,name,who,recur,*,state=None,last=False):
             f'<span style="width: 66px; flex-shrink: 0; font-size: 13px; color: {T["ts"]}; font-variant-numeric: tabular-nums; padding-top: 1px;">{at}</span>'
             f'<div style="flex-grow: 1; min-width: 0;"><div style="font-size: 15px; color: {T["tp"]};">{name}</div>'
             f'<div style="font-size: 12.5px; color: {T["ts"]}; margin-top: 2px;">{mono(who,T["ag"],11.5)} &middot; {recur}</div></div>{mark}</div>')
-rts=(group(L,[occ(L,"6:02 AM","Morning Brief","collator","Every working day",state="ok"),
-              occ(L,"9:00 AM","Inbox Triage","inbox-triage","Every working day",state="fail"),
-              occ(L,"6:00 PM","Tomorrow&rsquo;s Plan","collator","Every working day"),
-              occ(L,"10:00 PM","Knowledge Fold","built-in","Every night",last=True)],head="TODAY")
-     + group(L,[occ(L,"Sun 6 PM","Weekly Review","built-in","Every week",last=True)],head="LATER THIS WEEK"))
-R1=phone(L,rts,tab="More",header=hdr(L,"Routines",large=False,back="More"),label="MORE &#9656; ROUTINES")
+rts=(group(L,[occ(L,"6:00 AM","Standup","metis","Working days",state="ok"),
+              occ(L,"6:02 AM","Morning Brief","metis","Every day",state="ok"),
+              occ(L,"7:00 AM","Vendor Sweep","vendor-research","Every day",state="fail"),
+              occ(L,"7:00 PM","Tomorrow&rsquo;s Plan","metis","Working evenings"),
+              occ(L,"10:00 PM","Knowledge Fold","metis","Every night",last=True)],head="TODAY")
+     + group(L,[occ(L,"Sun 6 PM","Weekly Review","metis","Every week",last=True)],head="LATER THIS WEEK"))
+R1=phone(L,rts,tab="More",header=hdr(L,"Scheduled",large=False,back="More"),label="MORE &#9656; SCHEDULED")
 
 U1=phone(L,"",tab="More",header=hdr(L,"More"),overlay=sheet(L,"Usage",usagepop(L,w=CWD),top=120),label="USAGE &mdash; A SHEET")
 
-sets=(group(L,[grow(L,"Instance",glyph="folder",detail="Studio"),grow(L,"Services",glyph="gear"),
-               grow(L,"Compute",glyph="cpu",detail="$60 a month"),grow(L,"Updates",glyph="down",last=True)])
-      + group(L,[grow(L,"Account",glyph="person"),grow(L,"Resources",glyph="relay",detail="4"),
+sets=(group(L,[grow(L,"Instance",glyph="folder",detail="Studio"),grow(L,"Services",glyph="server"),
+               grow(L,"Compute",glyph="cpu",detail="$60 a month"),grow(L,"Updates",glyph="update",last=True)])
+      + group(L,[grow(L,"Account",glyph="person"),grow(L,"Connections",glyph="plug",detail="8"),
                  grow(L,"Sessions",glyph="repeat",detail="30 days",last=True)],head="ACCESS",
-              foot="Secrets and Live Capture are set on the Mac: one holds keys this browser should not, the other is the Mac&rsquo;s own bar."))
+              foot="Secrets, Variables, Live Capture and Keyboard are set on the Mac: keys stay off this browser, and the others are the Mac&rsquo;s own."))
 S1=phone(L,sets,tab="More",header=hdr(L,"Settings",large=False,back="More"),label="MORE &#9656; SETTINGS")
 
 def budrow(T,name,val,sub=None,*,last=False,over=False):

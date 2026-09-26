@@ -31,7 +31,7 @@ Knowledge · More — with the bell and + in the header.**
 ## 1. The shell
 
 - **Tabs:** Today · Chat · Work · Knowledge · More. **No tab carries a badge**;
-  the bell is still the only one (P2). More holds Activity, Agents, Routines,
+  the bell is still the only one (P2). More holds Activity, Agents, Scheduled,
   Usage and Settings, in the Mac's order.
 - **Header:** a large title that collapses to an inline one on scroll; **+** and
   the **bell** at the right. The usage gauge joins them from 600px; below that
@@ -95,7 +95,7 @@ works.
 - **Agents** are read and granted from the phone; the permissions table becomes
   one row per resource with Read and Write lines. Defining an agent stays on the
   Mac.
-- **Settings** is a grouped list. **Secrets and Live Capture are Mac-only.**
+- **Settings** is a grouped list. **Secrets, Variables, Live Capture and Keyboard are Mac-only** (C116, C117, C127); Resources is Connections (C114).
 - **Compute ▸ Budgets is drawn here first** — the monthly limit and each
   project's daily budget. Both *Raise* buttons (Usage, Projects) land here
   (review 01 R2.6); the Mac pane follows the same content.

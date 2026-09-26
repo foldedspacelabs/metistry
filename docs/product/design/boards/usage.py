@@ -22,7 +22,7 @@ POP=pan(L,"THE POPOVER — THIS MONTH AGAINST BUDGET, EACH DAY, WHERE IT WENT",
         "compute it takes the warning tint and the popover says so, with <b>Raise</b>.",12))
 
 body=(heading("ROUND E · SCREEN 17, NEW","Usage — the gauge&rsquo;s popover",
-   "What this is costing, against the budget, and where it went. Budgets are set in Settings; this is where you "
+   "What this is costing, against the spending limits, and where it went. Limits are set in Settings &#9656; Compute; this is where you "
    "read them.",L)
   + row(POP,18)
   + row(f'<div style="background: {D["bg"]}; border-radius: 14px; padding: 22px; flex-grow: 1;">'

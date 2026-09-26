@@ -2176,7 +2176,7 @@ def routinerows(T,*,last_absent=False):
     it ran (ruled 2026-09-21: a routine is an assignment, not a species of actor)."""
     ms = chr(60)+'span style="font-family: '+MONO+'; font-size: 11.5px;"'+chr(62)
     rows=(feedrow(T,glyph=I["cal"],actor="plan-tomorrow",subject="Tomorrow's Plan",
-            detail=ms+"Journal/Plan/2026-09-21.md</span> &middot; built-in &middot; 9 tasks, 2 meetings, 45m left empty",
+            detail=ms+"Journal/Plan/2026-09-21.md</span> &middot; default &middot; 9 tasks, 2 meetings, 45m left empty",
             when="6m",kind="system",spark=True,expand="what it wrote")
           + routineprose(T,PLAN_PROSE,when="6:02 AM")
           + feedrow(T,glyph=I["repeat"],actor="collator",subject="Morning Brief",
@@ -3178,7 +3178,7 @@ def permmatrix(T,*,proxied=True,label="PERMISSIONS",note=None,routine_grant=Fals
     cols=(f'<div style="display: grid; grid-template-columns: 148px minmax(0,1fr) minmax(0,1.15fr); gap: 16px; '
           f'padding-bottom: 7px; border-bottom: 1px solid {T["border"]}; font-size: 10.5px; font-weight: 700; '
           f'letter-spacing: 0.07em; color: {T["tt"]};">'
-          f'<span>RESOURCE</span><span>READ</span><span>WRITE</span></div>')
+          f'<span>REACHES</span><span>READ</span><span>WRITE</span></div>')
     nt_=(f'<div style="font-size: 11.5px; color: {T["ts"]}; line-height: 1.5; margin-top: 9px;">{note}</div>') if note else ""
     return (head + f'<div style="background: {T["sunken"]}; border-radius: 10px; padding: 14px 16px;">'
             f'{cols}<div style="margin-top: 3px;">{rows}</div>{leg}{nt_}</div>')
@@ -4956,6 +4956,6 @@ def usagepop(T,*,state="normal",w=400):
            f'<div><b style="color: {T["tp"]};">$23.40</b> AWS this month &middot; not compute</div>'
            f'<div>3 calls had no price and count as $0</div></div>')
     foot=(f'<div style="padding: 10px 16px; border-top: 1px solid {T["border"]};">'
-          f'<span style="font-size: 12px; font-weight: 600; color: {T["acc"]};">Budgets in Settings &rarr;</span></div>')
+          f'<span style="font-size: 12px; font-weight: 600; color: {T["acc"]};">Spending limits in Settings &rarr;</span></div>')
     return (f'<div style="width: {w}px; background: {T["elevated"]}; border: 1px solid {T["bc"]}; border-radius: 14px; '
             f'box-shadow: 0 10px 34px rgba(26,24,21,0.16); overflow: hidden; flex-shrink: 0;">{head}{hero}{daily}{where}{facts}{foot}</div>')

@@ -235,7 +235,7 @@ surprise, and the link is not.
 
 ### 2.7 Keyboard (Mac)
 
-`⌘9` toggle · `↑ ↓` between cards · `a` approve · `r` revise · `d` decline ·
+*(⌘9 retired, C119.)* `↑ ↓` between cards · `a` approve · `r` revise · `d` decline ·
 `l` later · `s` skip · `esc` closes having changed nothing. Every key is also a
 button; nothing is keyboard-only.
 

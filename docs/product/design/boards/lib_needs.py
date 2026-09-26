@@ -147,7 +147,7 @@ def qcard(T,*,state="open",w=W):
     if state=="partial": oth3=None
     head=rhead(T,I["ask"],"QUESTION","drey-dev","8m",extra=f'<span style="font-size: 11px; color: {T["ts"]};">3 questions</span>')
     body=(rask(T,"Three choices before I split the settings pane") + rcontext(T,QCTX,QREFS))
-    qs=(question(T,1,"Where should the Resources table live?",["Its own file, SettingsResources.swift","Inside SettingsPanes.swift"],sel=sel1)
+    qs=(question(T,1,"Where should the Connections table live?",["Its own file, SettingsConnections.swift","Inside SettingsPanes.swift"],sel=sel1)
         + question(T,2,"Which panes ship in this PR?",["Instance","Services","Compute","Account"],multi=True,sel=sel2,hint="Pick any")
         + question(T,3,"Keep the old settings-view.swift shim for one release?",["Yes, for one release","No, remove it now"],other=oth3,last=True))
     if state=="revise":
@@ -161,15 +161,15 @@ def qcard(T,*,state="open",w=W):
     ans=ranswers(T,"Send Answers",pglyph="send",disabled=(state!="ready"),
                  note=("2 of 3 answered" if state=="partial" else None if state=="ready" else "0 of 3"))
     if state=="ready":
-        qs=(question(T,1,"Where should the Resources table live?",["Its own file, SettingsResources.swift","Inside SettingsPanes.swift"],sel=(0,))
+        qs=(question(T,1,"Where should the Connections table live?",["Its own file, SettingsConnections.swift","Inside SettingsPanes.swift"],sel=(0,))
             + question(T,2,"Which panes ship in this PR?",["Instance","Services","Compute","Account"],multi=True,sel=(0,1,3),hint="Pick any")
             + question(T,3,"Keep the old settings-view.swift shim for one release?",["Yes, for one release","No, remove it now"],
                        other="Keep it, marked deprecated in its header",last=True))
     return rcard(T,head+body+f'<div style="margin-top: 4px;">{qs}</div>'+ans,w=w)
 
-PRCTX=("The split is mechanical except <b>SettingsResources.swift</b>, where the grant table moved with its selection "
+PRCTX=("The split is mechanical except <b>SettingsConnections.swift</b>, where the grant table moved with its selection "
        "state. That&rsquo;s the file to read.")
-PRFILES=[("apps/macos/…/SettingsResources.swift",142,0),("apps/macos/…/settings-view.swift",4,31),("apps/macos/…/SettingsPanes.swift",51,7)]
+PRFILES=[("apps/macos/…/SettingsConnections.swift",142,0),("apps/macos/…/settings-view.swift",4,31),("apps/macos/…/SettingsPanes.swift",51,7)]
 def prcard(T,*,state="review",w=W,source="agent"):
     person=source=="github"
     who="Priya Shah" if person else "drey-dev"
@@ -218,8 +218,8 @@ def prcard(T,*,state="review",w=W,source="agent"):
 
 def threadcard(T,*,w=W,state="open"):
     head=rhead(T,I["reply"],"PULL REQUEST","drey-dev","6m",extra=mono("metistry#431",T["ts"],11))
-    ask=rask(T,"drey-dev answered your comment","SettingsResources.swift &middot; line 42")
-    snip=[(41,"struct ResourcesPane: View {",False),(42,"  @Binding var selection: Grant.ID?",True),(43,"  let grants: [Grant]",False)]
+    ask=rask(T,"drey-dev answered your comment","SettingsConnections.swift &middot; line 42")
+    snip=[(41,"struct ConnectionsPane: View {",False),(42,"  @Binding var selection: Grant.ID?",True),(43,"  let grants: [Grant]",False)]
     th=thread(T,[("you","yesterday","Why does the selection binding move here?"),
                  ("drey-dev","6m","The table needs it to scroll the new grant into view. The alternative threads it through two views.")],snip)
     if state=="replied":
@@ -312,7 +312,7 @@ def panel4(T,w=400):
             f'box-shadow: 0 10px 34px rgba(26,24,21,0.16); overflow: hidden; flex-shrink: 0;">{head}{body}{foot}</div>')
 
 # ---- the full window: a PR at reading width ---------------------------------------
-HUNK=[(" ",38,"struct ResourcesPane: View {"),("-",39,"  var grants: [Grant]"),("+",39,"  let grants: [Grant]"),
+HUNK=[(" ",38,"struct ConnectionsPane: View {"),("-",39,"  var grants: [Grant]"),("+",39,"  let grants: [Grant]"),
       ("+",40,"  @Binding var selection: Grant.ID?"),(" ",41,""),(" ",42,"  var body: some View {"),
       ("-",43,"    List(grants) { grant in"),("+",43,"    Table(grants, selection: $selection) {"),
       (" ",44,"      TableColumn(\"Tool\", value: \\.name)"),(" ",45,"      TableColumn(\"May\") { GrantControl($0) }")]
@@ -325,7 +325,7 @@ def diffview(T):
                f'<span style="color: {ink}; width: 8px;">{k.strip()}</span><span style="color: {T["tp"]};">{c}</span></div>')
     return (f'<div style="border: 1px solid {T["border"]}; border-radius: 10px; overflow: hidden; background: {T["surface"]};">'
             f'<div style="display: flex; align-items: center; gap: 9px; padding: 8px 14px; background: {T["sunken"]}; border-bottom: 1px solid {T["border"]};">'
-            + mono("apps/macos/sources/kit/SettingsResources.swift",T["tp"],11.5)
+            + mono("apps/macos/sources/kit/SettingsConnections.swift",T["tp"],11.5)
             + f'<span style="flex-grow: 1;"></span><span style="font-family: {MONO}; font-size: 11px; color: {T["ok"]};">+142</span></div>'
             f'<div style="font-family: {MONO}; font-size: 11.5px; line-height: 1.75; padding: 6px 0;">{rows}</div>'
             f'<div style="margin: 0 14px 12px 60px; border: 1px solid {T["bc"]}; border-radius: 9px; padding: 9px 11px; background: {T["bg"]};">'
@@ -348,7 +348,7 @@ def prwindow(T,w=1320):
                   f'border-left: 2px solid {T["acc"] if s else "transparent"}; font-weight: {600 if s else 400}; color: {T["tp"]};"><span style="flex-grow: 1; overflow: hidden; '
                   f'text-overflow: ellipsis; white-space: nowrap;">{p}</span><span style="color: {T["ok"]};">+{a}</span>'
                   f'<span style="color: {T["fail"]};">&minus;{d}</span></div>'
-                  for p,a,d,s in (("SettingsResources.swift",142,0,True),("SettingsPanes.swift",51,7,False),("settings-view.swift",4,31,False),
+                  for p,a,d,s in (("SettingsConnections.swift",142,0,True),("SettingsPanes.swift",51,7,False),("settings-view.swift",4,31,False),
                                   ("SettingsInstance.swift",9,0,False),("SettingsCompute.swift",6,0,False),("Package.swift",2,0,False)))
     main=(f'<div style="flex-grow: 1; min-width: 0; padding: 18px 22px;">'
           f'<div style="display: flex; align-items: center; gap: 9px;">{mono("metistry#431",T["ts"],12)}'

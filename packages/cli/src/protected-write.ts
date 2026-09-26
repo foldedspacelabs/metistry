@@ -16,7 +16,7 @@
 // now, whatever principal it claims to be.
 
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { INSTANCE_LAYOUT, mintToken, resolveInstanceLayout, type InstancePathKey } from "@foldedspacelabs/metistry-core";
 import { hostLocal } from "./doctor.js";
@@ -208,6 +208,64 @@ export async function writeProtected(r: StepRunner, rel: string, content: string
     const path = join(dir, rel);
     await r.write(path, content, `${message}; no reconciler bridge configured, so written directly — a reconciler, once installed, sweeps it into a user commit`);
     return { how: "direct", detail: `${path} written directly (no reconciler configured)` };
+  }
+
+  return { how: "none", detail: "no instance dir" };
+}
+
+/**
+ * Delete a §4.7 protected file — the other half of `writeProtected`, on the
+ * same rules: through the reconciler as `user` when a bridge is configured
+ * (`POST /vault/delete`, the owner-class bearer), directly only when no
+ * reconciler job is running. A path that is already gone is not an error on
+ * the direct path; the bridge answers for its own.
+ */
+export async function deleteProtected(r: StepRunner, rel: string, message: string, opts: ProtectedWriteOptions): Promise<ProtectedWrite> {
+  const url = opts.env.METISTRY_RECONCILER_URL;
+  const raw = opts.instanceDir ?? opts.env.METISTRY_INSTANCE_DIR;
+  const dir = raw ? raw.replace(/\/+$/, "") : undefined;
+
+  if (url) {
+    const base = hostLocal(url);
+    if (!r.action(`POST ${base}/vault/delete ${rel} (principal user, "${message}")`)) return { how: "bridge", detail: "the reconciler commits it on its next flush (it is the instance repo's sole committer)" };
+    const owner = opts.env[OWNER_BRIDGE_TOKEN];
+    const token = owner ?? opts.env.METISTRY_BRIDGE_TOKEN_RECONCILER;
+    if (!token) throw new StepFailed(`METISTRY_RECONCILER_URL is set but neither ${OWNER_BRIDGE_TOKEN} nor METISTRY_BRIDGE_TOKEN_RECONCILER is — ${rel} cannot be deleted through the bridge`);
+    let res: Response;
+    try {
+      res = await opts.fetchFn(`${base}/vault/delete`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ path: rel, intent: { principal: "user", message } }),
+        signal: AbortSignal.timeout(10_000),
+      });
+    } catch (err) {
+      throw new StepFailed(`reconciler bridge at ${base} did not answer (${err instanceof Error ? err.message : String(err)}) — start it (launchctl kickstart -k gui/${opts.uid}/${RECONCILER_LABEL}) and rerun; ${rel} was NOT deleted`);
+    }
+    if (!res.ok) {
+      let why = `HTTP ${res.status}`;
+      try {
+        const body = (await res.json()) as { error?: { code?: string; message?: string } };
+        if (body?.error) why = `${body.error.code ?? res.status}: ${body.error.message ?? ""}`.trim();
+      } catch {
+        /* no envelope */
+      }
+      const hint = res.status === 403 && !owner ? ` — ${rel} is a §4.7 protected path the owner class alone may change; mint ${OWNER_BRIDGE_TOKEN} with \`metistry secrets sync --to env\` and restart the reconciler (docs/ops/auth.md)` : "";
+      throw new StepFailed(`reconciler refused to delete ${rel} (${why})${hint} — ${rel} was NOT deleted`);
+    }
+    return { how: "bridge", detail: `${rel} deleted through the reconciler as user — committed on its next flush` };
+  }
+
+  if (dir && existsSync(dir)) {
+    if (opts.platform === "darwin" && !r.dryRun) {
+      const probe = await r.exec("launchctl", ["print", `gui/${opts.uid}/${RECONCILER_LABEL}`]);
+      if (probe.code === 0 && /^\s*state = running/m.test(probe.stdout)) {
+        throw new StepFailed(`a reconciler job is running but METISTRY_RECONCILER_URL is unset — add it (and ${OWNER_BRIDGE_TOKEN}) to .env so this deletes ${rel} through the bridge; refusing to change files behind the sole committer`);
+      }
+    }
+    const path = join(dir, rel);
+    if (r.action(`delete ${path}  (${message}; no reconciler bridge configured, so deleted directly — a reconciler, once installed, sweeps it into a user commit)`)) await rm(path, { force: true });
+    return { how: "direct", detail: `${path} deleted directly (no reconciler configured)` };
   }
 
   return { how: "none", detail: "no instance dir" };

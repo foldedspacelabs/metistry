@@ -379,12 +379,14 @@ public final class InstanceStore {
         await mutateTask(card.id) { api in await api.updateTask(card.id, .addressing(to: owner)) }
     }
 
-    public func dispatch(_ card: BoardCard, target: String? = nil) async -> Result<TaskDispatchResult, ConsoleError> {
+    /// Send a card to a target. `TaskDispatch` carries the `brief` the route
+    /// requires — the target is told what to do, not just that there is a card.
+    public func dispatch(_ card: BoardCard, _ dispatch: TaskDispatch) async -> Result<TaskDispatchResult, ConsoleError> {
         guard let api else { return .failure(.notConfigured("no console client for this instance")) }
         guard board.allowsDecisions else {
             return .failure(.transport("the console is not answering, so nothing can be dispatched from here yet"))
         }
-        let result = await api.dispatchTask(card.id, target: target)
+        let result = await api.dispatchTask(card.id, dispatch)
         await refreshBoard(background: true)
         return result
     }

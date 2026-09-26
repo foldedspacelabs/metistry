@@ -49,6 +49,17 @@ extension KeyedDecodingContainer {
         if let s = try? decode(String.self, forKey: key) { return Int(s) }
         return nil
     }
+
+    /// An id that is TEXT on the wire — `cmt_…`, `art_…`, `ver_…` — kept as
+    /// text. A number (an older row, a hand-written fixture) is kept as its
+    /// digits rather than refused. Reading one of these with `wireInt` is the
+    /// bug this exists to end: `Int("cmt_01M…")` is nil, and every room's id
+    /// became 0.
+    func wireID(_ key: Key) -> String? {
+        if let s = try? decode(String.self, forKey: key) { return s }
+        if let i = try? decode(Int.self, forKey: key) { return String(i) }
+        return nil
+    }
 }
 
 public enum WireTime {
@@ -779,14 +790,18 @@ public struct RoomList: Codable, Sendable, Equatable {
 }
 
 public struct Room: Codable, Sendable, Equatable, Identifiable {
-    public let threadID: Int
+    /// The thread's own id — `cmt_<ULID>`, text on the wire.
+    public let threadID: String
     /// `work` or `artifact` — what this room hangs off.
     public let anchor: String
     public let project: String?
     public let title: String?
+    /// The one numeric key here: `work` is a `bigint` table.
     public let workID: Int?
-    public let artifactID: Int?
-    public let versionID: Int?
+    /// `art_<ULID>` — text, like every artifact id.
+    public let artifactID: String?
+    /// `ver_<ULID>`.
+    public let versionID: String?
     public let path: String?
     /// `open` or `resolved`.
     public let state: String?
@@ -811,7 +826,7 @@ public struct Room: Codable, Sendable, Equatable, Identifiable {
         public let kind: String?
     }
 
-    public var id: Int { threadID }
+    public var id: String { threadID }
 
     enum CodingKeys: String, CodingKey {
         case anchor, project, title, path, state, messages, participants, cap, escalated, reason
@@ -829,13 +844,13 @@ public struct Room: Codable, Sendable, Equatable, Identifiable {
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        threadID = c.wireInt(.threadID) ?? 0
+        threadID = c.wireID(.threadID) ?? ""
         anchor = try c.decodeIfPresent(String.self, forKey: .anchor) ?? "artifact"
         project = try c.decodeIfPresent(String.self, forKey: .project)
         title = try c.decodeIfPresent(String.self, forKey: .title)
         workID = c.wireInt(.workID)
-        artifactID = c.wireInt(.artifactID)
-        versionID = c.wireInt(.versionID)
+        artifactID = c.wireID(.artifactID)
+        versionID = c.wireID(.versionID)
         path = try c.decodeIfPresent(String.self, forKey: .path)
         state = try c.decodeIfPresent(String.self, forKey: .state)
         resolvedBy = try c.decodeIfPresent(String.self, forKey: .resolvedBy)

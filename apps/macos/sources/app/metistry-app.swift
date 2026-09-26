@@ -41,11 +41,14 @@ struct MetistryApp: App {
             appVersion: version ?? UpdateStatus.devBuildVersion,
             // The platform seams MetistryKit declares and does not have:
             // ServiceManagement — twice, because the app as a login item and
-            // the install's one background item are two registrations — and
-            // AuthenticationServices.
+            // the install's one background item are two registrations —
+            // AuthenticationServices…
             loginItemService: SMAppServiceLoginItem(),
             backgroundAgentService: SMAppServiceBackgroundAgent(),
-            passkeyRegistrar: ASAuthorizationPasskeyRegistrar()
+            passkeyRegistrar: ASAuthorizationPasskeyRegistrar(),
+            // …and `Process` a second time, held open: the one
+            // `metistry console session --stdio` child the stores speak through.
+            sessionSpawner: runner
         )
         _model = State(initialValue: model)
         #if os(macOS)

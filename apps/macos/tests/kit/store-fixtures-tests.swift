@@ -539,6 +539,271 @@ private struct WaitingRow: View {
     #expect(ManagementCommand(.install, []) == nil)
 }
 
+// MARK: - Every method over the session transport (T5-1)
+
+/// `metistry console session --stdio` as the CLI runs it
+/// (`packages/cli/src/console-client.ts`, `runConsoleSession`), answering from
+/// the fixtures instead of a console: one request line in, one terminal line
+/// `{id, status, body}` out, where `body` is what `readConsoleResponse` makes
+/// of the console's bytes — the parsed JSON, or the raw text when it is not
+/// JSON — and a stream is `{id, event}` frames and then `{id, ended}`.
+private final class FixtureChild: SessionProcess, @unchecked Sendable {
+    let lines: AsyncStream<String>
+    private let out: AsyncStream<String>.Continuation
+    private let console: FixtureConsole
+    private let lock = NSLock()
+    private var raw: [String] = []
+    private var ended: CommandResult?
+    private var waiters: [CheckedContinuation<CommandResult, Never>] = []
+
+    init(_ console: FixtureConsole) {
+        self.console = console
+        (lines, out) = AsyncStream<String>.makeStream()
+    }
+
+    var sent: [[String: Any]] {
+        lock.withLock { raw }.compactMap { (try? JSONSerialization.jsonObject(with: Data($0.utf8))) as? [String: Any] }
+    }
+
+    func clear() { lock.withLock { raw.removeAll() } }
+
+    func send(_ line: String) throws {
+        let dead: Bool = lock.withLock {
+            if ended != nil { return true }
+            raw.append(line)
+            return false
+        }
+        if dead { throw CocoaError(.fileWriteUnknown) }
+        guard let request = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any],
+              let id = request["id"] as? String, request["cancel"] == nil else { return }
+        let method = request["method"] as? String ?? ""
+        let path = request["path"] as? String ?? ""
+        if request["stream"] as? Bool == true {
+            let lastEventID = request["last_event_id"] as? String
+            Task {
+                do {
+                    for try await frame in await self.console.events(lastEventID: lastEventID) {
+                        let data = try JSONSerialization.jsonObject(with: JSONEncoder().encode(frame.data), options: [.fragmentsAllowed])
+                        self.emit(["id": id, "event": ["id": frame.id as Any, "type": frame.type, "data": data]])
+                    }
+                    self.emit(["id": id, "ended": "closed"])
+                } catch {
+                    self.emit(["id": id, "status": 404, "body": ["error": ["code": "not_found", "message": "no stream"]]])
+                }
+            }
+            return
+        }
+        guard let fixture = console.match(method, path) else {
+            emit(["id": id, "status": 404, "body": ["error": ["code": "not_found", "message": "no fixture for \(method) \(path)"]]])
+            return
+        }
+        // readConsoleResponse: JSON when it parses, the raw text when it does not, null when empty
+        let text = String(decoding: fixture.reply, as: UTF8.self)
+        let body: Any = text.isEmpty ? NSNull() : ((try? JSONSerialization.jsonObject(with: fixture.reply, options: [.fragmentsAllowed])) ?? text)
+        emit(["id": id, "status": fixture.status, "body": body])
+    }
+
+    private func emit(_ object: [String: Any]) {
+        out.yield(String(decoding: try! JSONSerialization.data(withJSONObject: object), as: UTF8.self))
+    }
+
+    func termination() async -> CommandResult {
+        await withCheckedContinuation { waiter in
+            let done: CommandResult? = lock.withLock {
+                if let ended { return ended }
+                waiters.append(waiter)
+                return nil
+            }
+            if let done { waiter.resume(returning: done) }
+        }
+    }
+
+    func terminate() {
+        let result = CommandResult(exitCode: 15, stdout: "", stderr: "")
+        let pending: [CheckedContinuation<CommandResult, Never>] = lock.withLock {
+            ended = result
+            defer { waiters.removeAll() }
+            return waiters
+        }
+        out.finish()
+        for w in pending { w.resume(returning: result) }
+    }
+}
+
+private struct FixtureSpawner: SessionSpawner {
+    let child: FixtureChild
+    func spawn(executable: URL, arguments: [String], environment: [String: String], currentDirectory: URL?) throws -> any SessionProcess { child }
+}
+
+@MainActor
+@Test(.timeLimit(.minutes(1)))
+func everyStoreMethodSpeaksItsRouteOverTheSessionTransport() async throws {
+    let (requirements, _) = try storeRequirements()
+    let console = try FixtureConsole.recorded()
+    let child = FixtureChild(console)
+    let cli = MetistryCLI(
+        runtime: MetistryRuntime(source: .checkout, executable: URL(fileURLWithPath: "/usr/bin/node"), leadingArguments: ["/src/packages/cli/dist/main.js"], productDir: URL(fileURLWithPath: "/src")),
+        runner: RefuseToRun()
+    )
+    // production wiring: the session child, the gate, the stores
+    let session = ConsoleSession(cli: cli, spawner: FixtureSpawner(child: child))
+    let byStem = Dictionary(uniqueKeysWithValues: console.fixtures.map { ($0.stem, $0) })
+
+    for r in requirements where r.route != "GET /api/events" {
+        guard let fixture = byStem[stem(r.route)], let drive = drives[r.route] else { continue }
+        child.clear()
+        if case .failure(let error) = await drive(session.stores, Args(fixture)) {
+            Issue.record("\(r) over the session: \(error.localizedDescription)")
+        }
+        let lines = child.sent
+        guard lines.count == 1, let line = lines.first else {
+            Issue.record("\(r) wrote \(lines.count) request lines; a store method is one route"); continue
+        }
+        let path = line["path"] as? String ?? ""
+        #expect(line["method"] as? String == fixture.method, "\(r)")
+        #expect(path.split(separator: "?").first == fixture.path.split(separator: "?").first, "\(r): sent \(path)")
+        #expect(ConsoleFixture.query(of: path) == fixture.query, "\(r): query")
+        let body = try line["body"].map { try JSONValue.parse(JSONSerialization.data(withJSONObject: $0, options: [.fragmentsAllowed])) }
+        #expect(body == fixture.body, "\(r): the body on the line is not the body the console accepted")
+        #expect(line["idempotency_key"] as? String == fixture.idempotencyKey, "\(r): Idempotency-Key")
+    }
+
+    // the reply that is not JSON — the export's NDJSON — survives the line as rows, not as one quoted string
+    let export = try await session.stores.exportRuns(since: nil, until: nil, component: nil, limit: 3).get()
+    #expect(export.rows.count == 3)
+    #expect(export.cursor?.contains("|") == true)
+
+    // and the event stream rides the same child
+    var ids: [String?] = []
+    for try await event in session.stores.events(lastEventID: "4117") { ids.append(event.id) }
+    #expect(ids == ["4118", "4119"])
+}
+
+@Test func aOneRowExportPrettyPrintedByConsoleCallIsStillOneRow() throws {
+    // `metistry console call --json` pretty-prints a body that parses as JSON, and a one-row export does
+    let pretty = Data("{\n  \"id\": 7,\n  \"cursor\": \"2026-09-26 10:00:00+00|7\"\n}".utf8)
+    let one = try RunExport(ndjson: pretty)
+    #expect(one.rows.count == 1)
+    #expect(one.cursor == "2026-09-26 10:00:00+00|7")
+    let many = try RunExport(ndjson: Data("{\"id\":1}\n{\"id\":2}\n".utf8))
+    #expect(many.rows.count == 2)
+    #expect(throws: (any Error).self) { try RunExport(ndjson: Data("{\"id\":1}\nnot json\n".utf8)) }
+}
+
+/// A runner for a session whose every request goes down the child: running anything else is the bug.
+private struct RefuseToRun: CommandRunner {
+    func run(
+        executable: URL, arguments: [String], environment: [String: String],
+        currentDirectory: URL?, standardInput: String?, onOutput: @escaping @Sendable (OutputLine) -> Void
+    ) async throws -> CommandResult {
+        Issue.record("a one-shot process was run: \(arguments)")
+        return CommandResult(exitCode: 1, stdout: "", stderr: "")
+    }
+}
+
+// MARK: - O3 over every method: unreachable → every decision refused before it is sent (T5-1)
+
+/// The fixtures behind a switch. While `down`, every request fails the way a
+/// console that is not there fails — and is still counted, so a test can tell
+/// "refused before sending" from "sent, and nothing answered".
+private final class Unplugged: ConsoleCallTransport, ConsoleEventTransport, @unchecked Sendable {
+    let console: FixtureConsole
+    private let lock = NSLock()
+    private var _down = false
+    private var _reached: [String] = []
+
+    init(_ console: FixtureConsole) {
+        self.console = console
+    }
+
+    var down: Bool {
+        get { lock.withLock { _down } }
+        set { lock.withLock { _down = newValue } }
+    }
+
+    var reached: [String] { lock.withLock { _reached } }
+    func clear() { lock.withLock { _reached.removeAll() } }
+
+    func call(_ method: String, _ path: String, body: Data?, idempotencyKey: String?) async -> Result<Data, ConsoleError> {
+        let down: Bool = lock.withLock {
+            _reached.append("\(method) \(path)")
+            return _down
+        }
+        if down { return .failure(.transport("connect ECONNREFUSED 127.0.0.1:8080")) }
+        return await console.call(method, path, body: body, idempotencyKey: idempotencyKey)
+    }
+
+    func events(lastEventID: String?) async -> AsyncThrowingStream<ConsoleLiveEvent, any Error> {
+        await console.events(lastEventID: lastEventID)
+    }
+}
+
+@Test func o3SortsEveryRouteTheKitSpeaksAndOnlyTheNamedAppendsAreAppends() throws {
+    let fixtures = try ConsoleFixture.loadAll()
+    var appends: Set<String> = []
+    for f in fixtures {
+        let act = ConsoleAct.of(f.method, f.path)
+        if f.method == "GET" { #expect(act == .read, "\(f.route) is a read") }
+        if act == .append { appends.insert(f.route) }
+    }
+    // capture, tick, defer — the table's `key` rows — and the two rating doors
+    // each way. Nothing else; and every one of them is a real route.
+    #expect(appends == Set(ConsoleAct.appends))
+    #expect(fixtures.filter { ConsoleAct.of($0.method, $0.path) == .decision }.count > 50)
+}
+
+@MainActor
+@Test func whileUnreachableEveryDecisionIsRefusedBeforeItIsSentAndReadsAndAppendsStillGo() async throws {
+    let (requirements, _) = try storeRequirements()
+    let console = try FixtureConsole.recorded()
+    let unplugged = Unplugged(console)
+    let session = ConsoleSession(transport: unplugged, management: nil)
+    let byStem = Dictionary(uniqueKeysWithValues: console.fixtures.map { ($0.stem, $0) })
+    #expect(session.allowsDecisions, "nothing has been said yet, so nothing is closed")
+
+    // The console stops answering, and a READ is what says so — no timer, no ping.
+    unplugged.down = true
+    _ = await session.stores.health()
+    #expect(!session.allowsDecisions)
+    #expect(session.reachability == .unreachable("connect ECONNREFUSED 127.0.0.1:8080"))
+    #expect(session.decisionsUnavailableReason == "the instance is unreachable — decisions are never queued — connect ECONNREFUSED 127.0.0.1:8080")
+
+    var refused = 0
+    for r in requirements where r.route != "GET /api/events" {
+        guard let fixture = byStem[stem(r.route)], let drive = drives[r.route] else {
+            Issue.record("\(r) has no fixture or no drive"); continue
+        }
+        unplugged.clear()
+        let result = await drive(session.stores, Args(fixture))
+        let held: Bool = { if case .failure(let e) = result { return e.wasHeldForReachability } else { return false } }()
+        switch ConsoleAct.of(fixture.method, fixture.path) {
+        case .decision:
+            #expect(unplugged.reached.isEmpty, "\(r): a decision reached the transport while the console was unreachable")
+            #expect(held, "\(r): refused, but not in O3's sentence")
+            refused += 1
+        case .read, .append:
+            #expect(unplugged.reached.count == 1, "\(r): not sent — only a decision waits for the connection")
+            #expect(!held, "\(r) was held like a decision")
+        }
+        // nothing it did re-opened the gate
+        #expect(!session.allowsDecisions, "\(r) re-opened decisions without an answer")
+    }
+    #expect(refused > 50)
+
+    // The console comes back; the next read notices; every decision goes again.
+    unplugged.down = false
+    _ = await session.stores.health()
+    #expect(session.allowsDecisions)
+    #expect(session.decisionsUnavailableReason == nil)
+    for r in requirements where r.route != "GET /api/events" {
+        guard let fixture = byStem[stem(r.route)], let drive = drives[r.route],
+              ConsoleAct.of(fixture.method, fixture.path) == .decision else { continue }
+        unplugged.clear()
+        _ = await drive(session.stores, Args(fixture))
+        #expect(unplugged.reached.count == 1, "\(r): still held after the console answered")
+    }
+}
+
 private extension Result {
     var failureStatus: Int? {
         if case .failure(let error) = self, let e = error as? ConsoleError { return e.httpStatus }

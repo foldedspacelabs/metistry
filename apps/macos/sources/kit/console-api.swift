@@ -459,7 +459,19 @@ public actor SessionConsoleCallTransport: ConsoleCallTransport {
             dict["replayed"] = true
             body = dict
         }
-        let data = (try? JSONSerialization.data(withJSONObject: body, options: [.fragmentsAllowed])) ?? Data()
+        // A body that is not JSON — `GET /api/runs/export`'s NDJSON — arrives
+        // as its raw TEXT (`readConsoleResponse`: "not JSON: raw text
+        // stands"), which on this line is a JSON string. Its bytes are the
+        // answer. Re-encoding it would hand the reader one quoted line
+        // instead of the rows, and an export read that way came back as a
+        // single string row with no cursor. (No route answers with a bare
+        // JSON string, which is the one body this reading would misread.)
+        let data: Data
+        if let text = body as? String {
+            data = Data(text.utf8)
+        } else {
+            data = (try? JSONSerialization.data(withJSONObject: body, options: [.fragmentsAllowed])) ?? Data()
+        }
         if (200..<300).contains(status) { return .success(data) }
         return .failure(.http(status: status, envelope: (try? JSONValue.parse(data)).flatMap(ConsoleErrorEnvelope.init(json:))))
     }
@@ -656,9 +668,16 @@ public struct ConsoleAPI: Sendable {
     }
 
     /// `POST /api/tasks/:id/dispatch` — the one task route that predates the
-    /// four above.
-    public func dispatchTask(_ id: Int, target: String? = nil) async -> Result<TaskDispatchResult, ConsoleError> {
-        await post("/api/tasks/\(id)/dispatch", target.map { ["target": $0] } ?? [:])
+    /// four above. `target` and `brief` are both required by the route (a
+    /// body without `brief` is a 400, which is all the old `target:`-only
+    /// spelling of this method could ever get back), so `TaskDispatch` makes
+    /// neither optional.
+    public func dispatchTask(_ id: Int, _ dispatch: TaskDispatch) async -> Result<TaskDispatchResult, ConsoleError> {
+        var body: [String: Any] = ["target": dispatch.target, "brief": dispatch.brief]
+        if let sources = dispatch.sources { body["sources"] = sources }
+        if let purpose = dispatch.purpose { body["purpose"] = purpose }
+        if let maxACU = dispatch.maxACU { body["max_acu"] = maxACU }
+        return await post("/api/tasks/\(id)/dispatch", body)
     }
 
     /// `GET /api/q/rooms` — threads on a card or an artifact, with participants

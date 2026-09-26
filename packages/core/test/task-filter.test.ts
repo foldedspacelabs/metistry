@@ -106,6 +106,13 @@ describe("every clause the vocabulary has", () => {
     for (const flag of TASK_FILTER_FLAGS) expect(changed(flag)).toEqual({ [flag]: true });
   });
 
+  it("`someday` (K6) is a flag, not a field: it takes no value and joins like any other", () => {
+    expect(changed("someday")).toEqual({ someday: true });
+    expect(changed("someday or waiting")).toEqual({ someday: true, waiting: true, match_any: true });
+    const r = compileTaskFilter({ where: "someday = true" }, at);
+    expect(r.ok).toBe(false);
+  });
+
   it("joins with `and` by default and says so when it is `or`", () => {
     expect(changed("due <= today and priority <= p2")).toEqual({ due_on_or_before: "2026-09-18", priority_max: 2 });
     expect(changed("due <= today or overdue")).toEqual({ due_on_or_before: "2026-09-18", overdue: true, match_any: true });
@@ -231,6 +238,7 @@ describe("misuse: a `where:` is refused, never escaped (invariant 8)", () => {
 
   it("every field and flag the spec lists is reachable, and nothing else is", () => {
     expect([...TASK_FILTER_FIELDS]).toEqual(["due", "do", "start", "done", "priority", "size", "type", "assigned", "project", "area", "source", "status"]);
-    expect([...TASK_FILTER_FLAGS]).toEqual(["overdue", "unscheduled", "waiting", "recurring", "carried", "blocking_agent", "assigned_to_me"]);
+    // §6.2's seven, and `someday` — ruled by the owner (K6) and added with the Defer door (T2-5)
+    expect([...TASK_FILTER_FLAGS]).toEqual(["overdue", "unscheduled", "waiting", "recurring", "carried", "blocking_agent", "assigned_to_me", "someday"]);
   });
 });

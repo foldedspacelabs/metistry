@@ -310,6 +310,48 @@ describe("metistry console call (CLI)", () => {
     expect(err.join("\n")).toContain("not found");
   });
 
+  it("--json prints the console's body on stdout for a >=400 too, so a 409's reason and row survive", async () => {
+    process.env.METISTRY_LOCAL_OWNER_TOKEN = TOKEN;
+    // packages/core/src/errors.ts's envelope plus apps/console/src/server.ts's
+    // `conflictBody` — the extra keys a plain `{code, message}` cannot carry.
+    const conflictBody = {
+      error: { code: "conflict", message: "the proposal changed after you saw it" },
+      reason: "stale",
+      decision: null,
+      decided_at: null,
+      proposal: { id: 42, decision: "pending" },
+    };
+    const c = fakeCallConsole(TOKEN, { "POST /api/proposals/42": { status: 409, body: conflictBody } });
+    const out: string[] = [];
+    const err: string[] = [];
+    const code = await main(["console", "call", "POST", "/api/proposals/42", "--body", "-", "--json"], {
+      out: (s) => out.push(s),
+      err: (s) => err.push(s),
+      fetchFn: c.fetchFn,
+      readStdin: async () => '{"decision":"allow","if_unchanged":{"seen_at":"2026-09-16T08:01:02.003Z"}}',
+    });
+    expect(code).toBe(1);
+    expect(err.join("\n")).toContain("conflict");
+    expect(out).toHaveLength(1);
+    expect(JSON.parse(out[0]!)).toEqual(conflictBody);
+  });
+
+  it("without --json, a >=400 answer still prints nothing on stdout — the body needs --json to be parsed back out", async () => {
+    process.env.METISTRY_LOCAL_OWNER_TOKEN = TOKEN;
+    const c = fakeCallConsole(TOKEN, { "POST /api/proposals/42": { status: 409, body: { error: { code: "conflict", message: "already decided" }, reason: "already_decided" } } });
+    const out: string[] = [];
+    const err: string[] = [];
+    const code = await main(["console", "call", "POST", "/api/proposals/42", "--body", "-"], {
+      out: (s) => out.push(s),
+      err: (s) => err.push(s),
+      fetchFn: c.fetchFn,
+      readStdin: async () => "{}",
+    });
+    expect(code).toBe(1);
+    expect(out).toHaveLength(0);
+    expect(err.join("\n")).toContain("conflict");
+  });
+
   it("refuses a non-loopback console before sending the token, and prints why", async () => {
     process.env.METISTRY_LOCAL_OWNER_TOKEN = TOKEN;
     process.env.METISTRY_CONSOLE_URL = "https://metis.example.com";

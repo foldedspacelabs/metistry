@@ -50,6 +50,72 @@ describe.skipIf(!hasDb)("… (real db)", () => { /* … */ });
 that inherited a polluted environment. It never overrides a value already set,
 which is how CI passes `METISTRY_DB_PASSWORD` in with no file on disk at all.
 
+## How to open the database
+
+**A test's only way into Postgres is `testDb()`.** Never `new pg.Pool(…)`,
+never `new pg.Client(…)`, never a product opener handed `process.env`:
+
+```ts
+import pg from "pg";
+import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
+
+const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url));
+
+describe.skipIf(!hasDb)("… (real db)", () => {
+  let pool: pg.Pool;
+  beforeAll(async () => {
+    pool = await testDb(pg.Pool); // or testDb(pg.Pool, { max: 10 })
+  });
+  afterAll(async () => pool.end());
+});
+```
+
+Why: until 2026-09-26 every suite built its own pool — most without a port,
+all with `METISTRY_TEST_DB_NAME ?? "metistry_test"`. On a Mac whose live
+install's Postgres listens on 5432, a shell with `METISTRY_DB_PASSWORD` set and
+nothing else sent a suite straight at the install. It failed on
+authentication; nothing was touched; that was luck.
+
+`testDb(pg.Pool)` **refuses — throws, before a socket opens —** when:
+
+- `METISTRY_TEST_DB_NAME` is unset. There is no default name any more: falling
+  back is how a suite ends up somewhere it did not choose. `pnpm test` sets it
+  per checkout; to run vitest directly, export it (and build it first with
+  `ops/scripts/test-db.sh`);
+- the name is not `metistry_test_` followed by lowercase letters, digits and
+  underscores (what `pnpm test` derives and `test-db.sh` creates), or is longer
+  than the 63 characters Postgres keeps;
+- the name is one an install on this machine is configured with — any
+  `METISTRY_DB_NAME` in the checkout's `.env`, in whatever `.env`
+  `loadTestEnv` read, or in the install's `.metistry/state/.env` under any
+  `METISTRY_INSTANCE_DIR` those name or the environment held before the scrub;
+- `METISTRY_DB_PASSWORD` is unset, or `METISTRY_DB_PORT` is not a port.
+
+It always connects with host, port, user and password from `METISTRY_DB_*`
+(defaults `127.0.0.1`, `5432`, `metistry`, the same as `test-db.sh`) — never
+anything the driver would pick up from `PG*` variables — and **after
+connecting it asks `SELECT current_database()`** and ends the pool rather than
+hand it over if the answer is not the scratch name. Core does not depend on
+`pg`: the caller passes the constructor in.
+
+Two more, for the tests that need them:
+
+- **`testDbEnv()`** — the same connection as `METISTRY_DB_*` variables, for a
+  test whose subject is product code that reads them (`openDbFromEnv`,
+  `openMigrationSession`). Pass it instead of `process.env`, then
+  **`assertScratchDb(opened, name)`** on what that code opened.
+- **`recreateScratchDb(pg.Pool, { suffix })` / `dropScratchDb`** — a whole
+  database of the suite's own, `<METISTRY_TEST_DB_NAME><suffix>` (the migration
+  runner's suite uses `_mig`). The maintenance connection to `postgres` never
+  leaves the helper, and a suffix is required, so the shared scratch database
+  is never one suite's to drop.
+
+`node ops/scripts/check-test-db.mjs` (CI) holds every test file to this: it
+fails on a `pg` `Pool`/`Client` constructed under any import name, and on
+`openDbFromEnv` / `openMigrationSession` / `makePool` called with anything but
+`{}` or `testDbEnv(…)`. The refusals are tested with a fake env and a fake
+pool, no database, in `packages/core/test/test-env.test.ts`.
+
 ## The guard
 
 `packages/cli` runs `test/setup.ts` for every file (that is the only reason the
@@ -96,6 +162,11 @@ there. Both scripts now refuse rather than guess:
   `.metistry/state/.env` configures — there is no legitimate reason for a
   script whose entire job is `DROP DATABASE` to be pointed at one.
 
+The test suites themselves resolve their database through `testDb()`, which
+applies the same two refusals from inside the process — scratch name set,
+never an install's — plus a prefix rule and a `current_database()` check
+(see "How to open the database" above).
+
 Either script takes `--print-target`, which resolves the target and prints
 which database it is, where that name came from, and whether the run would
 be refused — without connecting to Postgres at all. Run it first if you are
@@ -110,7 +181,8 @@ would run: yes
 
 Integration suites must therefore survive **both** a freshly created database
 and a re-run against one they have already written to (`pnpm test:unit`, or
-vitest invoked directly). Two ways to get there:
+vitest invoked directly — either with `METISTRY_TEST_DB_NAME` exported, since
+`testDb()` has no default). Two ways to get there:
 
 - **Scope by marker** — every row carries an `itest-…` id/project/component and
   the suite deletes its own in `beforeAll` and `afterAll`. This is the default

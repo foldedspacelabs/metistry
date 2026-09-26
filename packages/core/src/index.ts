@@ -294,6 +294,28 @@ export {
   type StdioConformanceResult,
   type StdoutViolation,
 } from "./stdio-conformance.js";
+export {
+  API_VERSION,
+  API_VERSION_HEADER,
+  CLIENT_API,
+  CLIENT_PRINCIPALS,
+  CONFLICT_REASONS,
+  IDEMPOTENCY,
+  REACHES,
+  REACH_PRINCIPALS,
+  ROUTE_METHODS,
+  matchRoute,
+  noRouteMessage,
+  routeKey,
+  servedRoute,
+  type ClientPrincipal,
+  type ClientRoute,
+  type ConflictReason,
+  type Idempotency,
+  type Reach,
+  type RouteMatch,
+  type RouteMethod,
+} from "./client-api.js";
 export { errorEnvelope, statusFor, type ErrorCode, type ErrorEnvelope } from "./errors.js";
 export { requireEnv, optionalEnv, intEnv } from "./config.js";
 export {

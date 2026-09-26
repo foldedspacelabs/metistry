@@ -13,13 +13,13 @@ Generated from `docs/product/design-build-plan.md` by `ops/scripts/tickets.mjs`.
 - [x] [F-4](f/f-4.md) · The Scheduled model · M · opus high
 - [x] [F-5](f/f-5.md) · The request type table · M · opus high
 - [x] [F-6](f/f-6.md) · Migration numbering · S · opus high
-- [ ] [F-7](f/f-7.md) · MetistryKit store interface and fixtures · M · opus high · after F-1
+- [x] [F-7](f/f-7.md) · MetistryKit store interface and fixtures · M · opus high · after F-1
 - [x] [F-8](f/f-8.md) · Dynamic router spec · M · opus high
 - [x] [F-9](f/f-9.md) · PWA manifest, icons, `ICON_PNG` · S · sonnet
 - [x] [F-10](f/f-10.md) · The `--check` extension · M · opus
 - [x] [F-11](f/f-11.md) · `console call` prints the error body · S · sonnet
-- [ ] [F-12](f/f-12.md) · The Mac session transport · M · opus · after F-11
-- [ ] [F-13](f/f-13.md) · The reach gate · M · opus · after F-1
+- [x] [F-12](f/f-12.md) · The Mac session transport · M · opus · after F-11
+- [x] [F-13](f/f-13.md) · The reach gate · M · opus · after F-1
 - [x] [F-14](f/f-14.md) · Copy and the answer set · S · sonnet
 - [x] [T1-4](t1/t1-4.md) · Routine outcome · S · sonnet
 - [x] [T1-5](t1/t1-5.md) · `collector_health` · S · sonnet

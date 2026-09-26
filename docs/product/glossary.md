@@ -100,9 +100,19 @@ time. The **Morning Brief** is one, **Standup** another; the nightly **fold**,
 which reads the day and writes what it learned into knowledge, is a third. The
 ones Metistry ships with are tagged **default** and can be changed or reset.
 
-**Source** — something Metistry checks on a schedule and reads from (GitHub,
-your inbox, AWS costs). A source never writes your notes; what it may raise in
-Needs You is yours to choose.
+**Connection** — anything outside Metistry it can reach for you: an MCP server,
+an agent it sends work to, an API, a feed, or files. Its tools can be offered to
+agents through Metistry, which checks and logs every call. (*Resource* and
+*source* are retired.)
+
+**Sync** — a scheduled read from one connection. It never writes back.
+
+**Secret** — a key or password, kept in the Keychain and written
+`{{ secret.name }}`. It is sent only to the hosts you list and never shown to a
+model.
+
+**Variable** — a shared plain value, written `{{ variable.name }}`, usable
+anywhere, an agent's instructions included.
 
 **Usage** — what your instance spends: money, tokens, time. The gauge beside
 the bell.

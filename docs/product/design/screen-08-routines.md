@@ -243,6 +243,8 @@ Most of this screen is drawn ahead of its wire, per the owner's ruling of
 
 ## 10. v2 — everything scheduled, all editable (2026-09-25)
 
+> **§10.3 is superseded by §11 (C113):** sources are now syncs.
+
 Board: `Routines-v2`. Rulings C111 and C112.
 
 ### 10.1 The list
@@ -290,3 +292,20 @@ A Metis suggestion about a routine is an **improvement** request in Needs You
 (§9 of the amendments): the ask, context on the wash, a before/after body,
 Approve · Revise · Decline. Approve writes the change to the routine and the
 history records it.
+
+## 11. v3 — Scheduled: Routines and Syncs (2026-09-25)
+
+Board: `Scheduled` (replaces `Routines-v2`). Ruling C113.
+
+- The sidebar row is **Scheduled**. Tabs: **Routines 10 · Syncs 5**; the button
+  is *New Routine* or *New Sync*.
+- **Routines** gain a *Throughout the day* band for the default housekeeping
+  routines: **Inbox Sort** (every 5 minutes → Needs You) and **Usage Rollup**
+  (hourly → Usage).
+- **Syncs**: status · name · **Connection** (a chip with its type glyph) · *Brings
+  in* and what it may raise · *Every* · *Last*. A sync whose connection's secret
+  failed says *key expired*.
+- **One sync**: renamable name; *Reads from* the connection *with*
+  `{{ secret.github_read }}`; **Sync Now**, **Pause**; *Every* as a segmented
+  cadence; *What it reads* (`{{ variable.work_repos }}`); *What reaches Needs You*
+  as toggles.

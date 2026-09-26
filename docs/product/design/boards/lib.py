@@ -1534,14 +1534,14 @@ def sidebar8(T,sel="Today",needs="fixture"):
                      f'<span style="font-size: 13px; font-weight: 600; color: {T["tp"]}; flex-grow: 1;">Needs You</span>'
                      f'<span style="font-size: 11px; font-weight: 700; color: {T["onacc"]}; background: {T["acc"]}; '
                      f'border-radius: 999px; padding: 0 7px; line-height: 17px;">{n}</span></div>')
-    # Eight rows (ruled 2026-09-22). Routines is top-level because "what is Metistry
+    # Eight rows (ruled 2026-09-22). Scheduled (was Routines, C113) is top-level because "what is Metistry
     # running for me every day" is a daily question a child row would bury; Agents
     # sits ABOVE it, because a routine is an assignment of an agent and the reader
     # meets the noun before the assignment. Resources went to Settings, which is why
     # this is eight and not nine — see C57.
     for n,g,kids in [("Today",I["cal"],None),("Chat",I["chat"],None),("Activity",I["activity"],None),
                      ("Work",I["work"],True),("Knowledge",I["know"],None),("Agents",I["agents"],None),
-                     ("Routines",I["repeat"],None)]:
+                     ("Scheduled",I["repeat"],None)]:
         on=(n==sel)
         out.append(f'<div style="position: relative; display: flex; align-items: center; gap: 10px; padding: 8px 12px; '
                    f'border-radius: 8px; background: {T["accq"] if on else "transparent"};">'
@@ -3312,9 +3312,10 @@ def toolblock(T):
 
 SETTINGS_W, SETTINGS_H, SETTINGS_NAV = 840, 600, 200
 SETTINGS_GROUPS=[(None,[("Instance","folder"),("Services","gear"),("Compute","cpu"),("Updates","down")]),
-                 ("ACCESS",[("Account","person"),("Resources","plug"),("Secrets","key")]),
+                 ("ACCESS",[("Account","person"),("Connections","plug"),("Secrets","key"),("Variables","brace")]),
                  ("CAPTURE",[("Live Capture","mic"),("Sessions","repeat")]),
                  (None,[("Advanced","wrench")])]
+I.setdefault("brace",'<path d="M9 4.5H8a2 2 0 00-2 2v3a2.5 2.5 0 01-2 2.5 2.5 2.5 0 012 2.5v3a2 2 0 002 2h1M15 4.5h1a2 2 0 012 2v3a2.5 2.5 0 002 2.5 2.5 2.5 0 00-2 2.5v3a2 2 0 01-2 2h-1"/>')
 I.setdefault("gear",'<circle cx="12" cy="12" r="3"/><path d="M12 3.5v2.2M12 18.3v2.2M3.5 12h2.2M18.3 12h2.2M6 6l1.6 1.6M16.4 16.4L18 18M6 18l1.6-1.6M16.4 7.6L18 6"/>')
 I.setdefault("cpu",'<rect x="7" y="7" width="10" height="10" rx="1.5"/><path d="M10 3.5v3.5M14 3.5v3.5M10 17v3.5M14 17v3.5M3.5 10H7M3.5 14H7M17 10h3.5M17 14h3.5"/>')
 I.setdefault("down",'<circle cx="12" cy="12" r="8.2"/><path d="M12 7.5v8M8.5 12.5L12 16l3.5-3.5"/>')
@@ -4172,9 +4173,9 @@ def rundetail(T,*,failed=False):
          "was written without the runway line.") if failed else None
     return (f'<div style="border: 1px solid {T["bc"]}; border-radius: 14px; overflow: hidden; background: {T["bg"]}; '
             f'flex-grow: 1; min-width: 0;">{toolbar(T)}'
-            f'<div style="display: flex; align-items: stretch;">{sidebar8(T,"Routines")}'
+            f'<div style="display: flex; align-items: stretch;">{sidebar8(T,"Scheduled")}'
             f'<div style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column;">'
-            + runheader(T,crumbs=["Routines","Morning Brief","Today, 6:02 AM"],title="Morning Brief",
+            + runheader(T,crumbs=["Scheduled","Morning Brief","Today, 6:02 AM"],title="Morning Brief",
                         when="Tuesday 22 September &middot; 6:02 AM",ok=not failed,why=why)
             + f'<div style="display: flex; align-items: stretch; flex-grow: 1;">'
             + sessionpane(T,failed=failed) + sidecol(T,failed=failed) + '</div></div></div></div>')

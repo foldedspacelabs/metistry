@@ -1,4 +1,7 @@
-# Screen 9 — Resources
+# Screen 9 — Resources, now Connections
+
+> **Superseded by §10 (2026-09-25, C114, C115).** A resource is a connection
+> offered to agents through Metistry. The pane is **Settings › Connections**.
 
 New, 2026-09-22. **Settings ▸ Resources**, in Settings' own window — it was briefly a top-level row and
 moved, because a connection is configured once and then read from the permissions
@@ -165,3 +168,45 @@ Everything on this screen is ahead of its wire.
 | **D11** | a **per-tool** grant, held beside an agent's other permissions rather than in a second place, so the matrix renders it as one more row |
 | **D12** | a proxy audit line. A call an agent makes through Metistry is Metistry acting with the owner's credential, which is exactly what `runs` exists to record |
 | **D13** | whether a resource can be granted to a **project** or a team rather than an agent. The owner raised it; it is a scoping axis nothing currently drawn has |
+
+## 10. v2 — Connections (2026-09-25)
+
+Board: `Connections`. Rulings C114, C115.
+
+### 10.1 The list
+
+Columns: status · name with its type glyph · **Type** (*MCP · API*, *Feed · RSS*)
+· **Used By** (agents, syncs, routines, Metis) · a shield when it is offered to
+agents · chevron. A connection whose secret failed shows *Key expired* in the
+failed ink before its users. *Nobody yet* stays a real value.
+
+### 10.2 Types
+
+| Type | Is | Example |
+| --- | --- | --- |
+| MCP server | a server that offers tools | GitHub's, Jira on the work network |
+| Agent | somewhere Metistry sends work — A2A, ACP | Devin, a crew on this Mac |
+| API | an HTTP service with a key | AWS Cost Explorer |
+| Feed | RSS, Atom or a calendar feed | a changelog |
+| Files | a folder, a file or a web page | a Drive folder |
+
+A connection may speak more than one (Devin: MCP and API). **Add Connection**
+starts with the type.
+
+### 10.3 One connection
+
+- **How Metistry reaches it** — each endpoint, the key as a reference
+  (`Bearer {{ secret.devin_key }}`), settings as variables
+  (`{{ variable.devin_org }}`). Typing `{{` in any field opens a picker of secrets
+  and variables; a secret row says where it may be sent.
+- **Offer to agents through Metistry** — one switch (C115). Off: Metis and syncs
+  only.
+- **Tools — by what they do** — *Reads · Changes things · Starts an agent*, each
+  On · Ask · Off. Non-MCP types show the tools Metistry made for them.
+- **Used by** — syncs, agents, routines, Metis, each a link.
+
+### 10.4 The proxy
+
+Agent → MCP → Metistry's proxy (is this agent allowed; fill in its granted
+secrets; call the service; log it) → the connection's own protocol. The agent
+never reaches the service or holds its key.

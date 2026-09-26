@@ -450,6 +450,13 @@ acceptance data, so a board that disagrees with itself ships a bug.
 - **Nothing scheduled is hidden.** Every routine — the defaults included — and
   every source a collector checks is listed, editable and pausable in Routines;
   defaults carry a **default** tag and **Reset to Default** (C111, C112).
+- **Scheduled** holds Routines and Syncs; a sync reads one connection and holds
+  no key (C113).
+- **Connection is the one noun for anything outside Metistry**, typed; what it
+  may do is per tool — Reads · Changes things · Starts an agent (C114). Any
+  connection can be offered to agents through Metistry's proxy (C115).
+- **References read as chips.** `{{ secret.name }}` carries the key glyph,
+  `{{ variable.name }}` the brace glyph; typing `{{` opens the picker (C116, C117).
 - **One writer per region.** In the owner's daily note Metistry writes only
   between its `metistry:day` markers; the rest is the owner's. Broken markers
   stop the write and raise a request (C102).

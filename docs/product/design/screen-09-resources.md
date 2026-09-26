@@ -210,3 +210,31 @@ starts with the type.
 Agent → MCP → Metistry's proxy (is this agent allowed; fill in its granted
 secrets; call the service; log it) → the connection's own protocol. The agent
 never reaches the service or holds its key.
+
+### 10.5 Configuring one — known or custom (C118)
+
+**Add Connection → type → known service or custom.** Known services are a
+searchable grid; custom is *By URL* or *By command*.
+
+- **Known service** — its named fields only (Devin: MCP, API, Key,
+  Organization), tagged *Known service*, and a closed **Extra headers and
+  parameters**.
+- **Custom** — configured by how it is reached:
+
+| Reached by | Used for | Asks for |
+| --- | --- | --- |
+| HTTP | MCP · A2A · API · Feed · a web page | URL · query parameters · authentication · headers · timeout, certificates, network |
+| Command | MCP · ACP | command · arguments · folder · environment · runs on this Mac or in a container |
+| Path | Files | folder or file · include and skip patterns · watch for changes |
+
+- **Authentication** is a shortcut (None · Bearer · Basic · API Key · OAuth) that
+  writes the header; the header list shows everything else.
+- Name/value rows: names are plain text; values take text, secrets and
+  variables. Remove with ×; *Add Header*, *Add Parameter*, *Add Variable*.
+- **What it sends** — the resolved request, secrets masked as `•••••• (name)`.
+- **Guards** — a secret bound for a host outside its *Sent only to* list shows
+  a warning on its row with *Allow <host>*, and the preview shows the header as
+  *blocked*. A secret in a URL is flagged. In a command's environment a secret
+  is *given to this command only; never written to disk*.
+- **A2A** takes the agent card URL and shows what it found (name, skills,
+  streaming). **ACP** is a command.

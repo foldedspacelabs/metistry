@@ -250,7 +250,7 @@ owner; the C96 events and the meeting-at-Stop as instances. **Needs You is the h
 
 **Routines v2 (2026-09-25, board `Routines-v2`, screen 8 §10, C111/C112):** Standup is its own routine and the brief presents it; every scheduled thing is shown and editable — routines (defaults tagged, Reset to Default) and a **Sources** tab for the collectors with cadence and Needs You rules. A run opens to its steps; Metis's suggestions arrive as improvement requests.
 
-**Connections, Secrets, Variables (2026-09-25, C113–C117):** the sidebar row is **Scheduled** (Routines · Syncs). Resources, targets and sources are one noun, **Connection**, typed MCP · Agent · API · Feed · Files, any of which can be offered to agents through Metistry's MCP proxy. **Secrets** (Keychain, per instance, `{{ secret.name }}`, never seen by a model) and **Variables** (`{{ variable.name }}`, usable in instructions) are Settings panes. Boards `Scheduled`, `Connections`, `Secrets`; `Routines-v2` and `Resources` archived.
+**Connections, Secrets, Variables (2026-09-25, C113–C117):** the sidebar row is **Scheduled** (Routines · Syncs). Resources, targets and sources are one noun, **Connection**, typed MCP · Agent · API · Feed · Files, any of which can be offered to agents through Metistry's MCP proxy. **Secrets** (Keychain, per instance, `{{ secret.name }}`, never seen by a model) and **Variables** (`{{ variable.name }}`, usable in instructions) are Settings panes. Boards `Scheduled`, `Connections`, `Secrets`; `Routines-v2` and `Resources` archived. **C118:** known services ask for named fields; custom connections are configured by how they are reached — HTTP (URL, parameters, auth, headers), Command (arguments, environment) or Path — with a masked preview of what is sent.
 
 **Next round, in order:** (1) **Keyboard and
 VoiceOver** (review 01 §3.1; offline is now specified in screen 18 §4). (2)
@@ -289,7 +289,7 @@ the canvas is now generated from a module in `boards/` except `Facets`, `Plugin`
 `Voice` and `Item-Model`. `bellpanel()` is gone — it drew the *"1 snoozed"*
 header C21 killed; `panel2()` is the panel.
 
-**117 contradictions** are logged in `review-00-plan.md`. C38, C51 and C62 are closed. C40–C87 are
+**118 contradictions** are logged in `review-00-plan.md`. C38, C51 and C62 are closed. C40–C87 are
 round E's; C88–C98 are review 01's rulings. Two of them are rules the system is missing rather than faults in a
 file: **C45** (a failed consequential operation leaves the request pending) and
 **C49** (a mark that carries meaning takes an ink token, never a border token —

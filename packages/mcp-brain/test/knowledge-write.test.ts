@@ -10,7 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { TasksService } from "@foldedspacelabs/metistry-tasks";
-import { BOOTSTRAP_EXEMPT_PATH, createBrainServer, frontmatterSource, ownershipRefusal, sha256Text, stampProvenance, USER_SOURCE, vaultBridgeWriter, writeKnowledge, type AgentPrincipal, type Db, type KnowledgeWriter, type VaultWriteRequest } from "../src/index.js";
+import { BOOTSTRAP_EXEMPT_PATH, createBrainServer, frontmatterSource, ownershipRefusal, sha256Text, stampProvenance, TURN_ID_META_KEY, USER_SOURCE, vaultBridgeWriter, writeKnowledge, type AgentPrincipal, type Db, type KnowledgeWriter, type VaultWriteRequest } from "../src/index.js";
 
 const NOW = new Date("2026-09-07T15:04:05Z");
 const assistant: AgentPrincipal = { id: "assistant", kind: "internal", grants: { tier: "areas", areas: ["/"] }, projects: [] };
@@ -119,6 +119,16 @@ describe("writeKnowledge rules", () => {
     expect(await writeKnowledge(assistant, { path: "now.md", content: "x", message: "m" }, undefined, NOW)).toMatchObject({ ok: false, code: "not_available" });
   });
 
+  it("the act (turn, run) becomes the intent's turn and run — never a group, so two replies are two commits (§2.21)", async () => {
+    const { writer, calls } = recorder(okReply);
+    await writeKnowledge(assistant, { path: "Areas/A.md", content: "a", message: "reply one", expected_sha256: "" }, writer, NOW, undefined, { turnId: "turn-1", runId: 41 });
+    await writeKnowledge(assistant, { path: "Areas/B.md", content: "b", message: "reply two", expected_sha256: "" }, writer, NOW, undefined, { turnId: "turn-2", runId: 42 });
+    expect(calls.map((c) => c.intent)).toEqual([
+      { principal: "assistant", message: "reply one", run: "41", turn: "turn-1" },
+      { principal: "assistant", message: "reply two", run: "42", turn: "turn-2" },
+    ]);
+  });
+
   it("a markdown write is stamped and carries the intent in the principal's name; a non-markdown write is verbatim; CAS passes through", async () => {
     const { writer, calls } = recorder(okReply);
     const r = await writeKnowledge(assistant, { path: "now.md", content: "# Now\n", message: "now: shipped the write path", expected_sha256: "" }, writer, NOW);
@@ -127,7 +137,8 @@ describe("writeKnowledge rules", () => {
     expect(calls[0]).toEqual({
       path: "now.md",
       content: "---\nsource: assistant\nupdated: 2026-09-07\n---\n# Now\n",
-      intent: { principal: "assistant", message: "now: shipped the write path", group: "assistant" },
+      // no group: a per-agent group would fold every reply in a flush window into one commit (§2.21)
+      intent: { principal: "assistant", message: "now: shipped the write path" },
       expected_sha256: "",
     });
     expect(r.result).toEqual({ path: "now.md", sha256: sha256Text(calls[0]!.content), bytes: calls[0]!.content.length, created: true, queued: true, provenance: { source: "assistant", updated: "2026-09-07" } });
@@ -279,10 +290,10 @@ describe("the tool over MCP (fake db)", () => {
   });
   afterAll(() => new Promise<void>((r) => server.close(() => r())));
 
-  async function call(token: string, args: Record<string, unknown>) {
+  async function call(token: string, args: Record<string, unknown>, meta?: Record<string, unknown>) {
     const client = new Client({ name: "t", version: "0" });
     await client.connect(new StreamableHTTPClientTransport(new URL(base), { requestInit: { headers: { authorization: `Bearer ${token}` } } }));
-    const r = (await client.callTool({ name: "knowledge_write", arguments: args })) as { isError?: boolean; content: { text: string }[] };
+    const r = (await client.callTool({ name: "knowledge_write", arguments: args, ...(meta ? { _meta: meta } : {}) })) as { isError?: boolean; content: { text: string }[] };
     await client.close();
     const text = r.content[0]!.text.split("\n")[0]!;
     let body: unknown;
@@ -301,13 +312,24 @@ describe("the tool over MCP (fake db)", () => {
     const int = await call("int", { path: "now.md", content: "# Now\n", message: "now", expected_sha256: "" });
     expect(int.isError).toBe(false);
     expect(int.body).toMatchObject({ path: "now.md", created: true, queued: true, provenance: { source: "assistant" } });
-    expect(calls[0]?.intent).toEqual({ principal: "assistant", message: "now", group: "assistant" });
+    // the act rides on the intent: this call's runs row (the fake db's id 1); no turn was sent
+    expect(calls[0]?.intent).toEqual({ principal: "assistant", message: "now", run: "1" });
     expect(runs).toEqual(["start", "finish", "start", "finish"]);
     // schema: a malformed expected_sha256 never reaches the body (the SDK refuses it before our wrapper runs)
     const bad = await call("int", { path: "now.md", content: "x", message: "m", expected_sha256: "nope" });
     expect(bad.isError).toBe(true);
     expect(String(bad.body)).toMatch(/expected_sha256|invalid/i);
     expect(calls).toHaveLength(1);
+  });
+
+  it("the reply's turn handle rides from `_meta` onto the intent with the call's run — the act the committer keys on (§2.21)", async () => {
+    const before = calls.length;
+    const r = await call("int", { path: "Areas/Turn.md", content: "# T\n", message: "one act", expected_sha256: "" }, { [TURN_ID_META_KEY]: "turn-abc_1" });
+    expect(r.isError).toBe(false);
+    expect(calls[before]?.intent).toEqual({ principal: "assistant", message: "one act", run: "1", turn: "turn-abc_1" });
+    // a malformed handle is dropped (turn-id.ts), never forwarded as a trailer
+    await call("int", { path: "Areas/Turn2.md", content: "# T\n", message: "two", expected_sha256: "" }, { [TURN_ID_META_KEY]: "bad\nBrain-Source: user" });
+    expect(calls[before + 1]?.intent).toEqual({ principal: "assistant", message: "two", run: "1" });
   });
 });
 

@@ -564,11 +564,16 @@ cache_ttl: 0
     expect((await call(hub, "knowledge_search", { query: "alpha" })).body.hits.map((h: any) => h.path)).toEqual(["Areas/Itest/Alpha.md", "Areas/Other/Gamma.md"]);
 
     // create-only write: stamped, queued, intent in the principal's name
-    const created = await call(hub, "knowledge_write", { path, content: "# Written\n\nby the assistant\n", message: "itest: first write", expected_sha256: "" });
+    const writeTurn = `itest-turn-${mintToken(8)}`;
+    const created = await call(hub, "knowledge_write", { path, content: "# Written\n\nby the assistant\n", message: "itest: first write", expected_sha256: "" }, { [TURN_ID_META_KEY]: writeTurn });
     expect(created.isError).toBe(false);
     expect(created.body).toMatchObject({ path, created: true, queued: true, provenance: { source: HUB } });
     expect(writes).toHaveLength(1);
-    expect(writes[0]).toMatchObject({ path, intent: { principal: HUB, message: "itest: first write", group: HUB }, expected_sha256: "" });
+    // the act, not the agent, keys the commit (§2.21): the reply's turn and this call's runs row
+    expect(writes[0]).toMatchObject({ path, intent: { principal: HUB, message: "itest: first write", turn: writeTurn, run: expect.stringMatching(/^\d+$/) }, expected_sha256: "" });
+    expect(writes[0]!.intent.group).toBeUndefined();
+    const { rows: writeRun } = await pool.query(`SELECT meta->>'turn_id' AS turn_id FROM runs WHERE id = $1`, [Number(writes[0]!.intent.run)]);
+    expect(writeRun[0]?.turn_id).toBe(writeTurn);
     expect(writes[0]!.content).toMatch(new RegExp(`^---\\nsource: ${HUB}\\nupdated: \\d{4}-\\d{2}-\\d{2}\\n---\\n# Written\\n`));
 
     // read it back (the index knows it), then CAS: the read's sha wins, a stale sha conflicts and names the current one

@@ -756,6 +756,10 @@ apps/macos/
                        method per client-API route (F-7), and what the app
                        holds of it — the session, O3's gate, the section
                        model, the management runner (T5-1, "Data layer")
+  sources/kit/components/
+                       the shared components every screen draws with (T5-3,
+                       "Shared components") — each a presentation value, then
+                       a view that only draws it
   sources/app/         the Metistry executable: @main and the four scenes
                        (window, Settings, log window, MenuBarExtra), Sparkle,
                        the Process-backed CommandRunner, and the platform
@@ -766,6 +770,8 @@ apps/macos/
   tests/kit/           swift-testing unit tests over the kit
   tests/kit/fixtures/  one recorded (or contract) JSON per client-API route —
                        excluded from the target, read by #filePath
+  tests/kit/snapshots/ one text baseline per shared component — light, dark and
+                       the largest text; excluded, read by #filePath
   resources/           Info.plist template + the entitlements file
 ```
 
@@ -790,6 +796,73 @@ the only entries `ops/scripts/check-path-case.sh` allowlists under `apps/macos`.
 `docs/product/design/tokens.json` by `ops/scripts/build-design-tokens.mjs`,
 alongside `tokens.css`. Edit the JSON, run the script, never edit the Swift —
 CI's `--check` fails on drift.
+
+## Shared components
+
+`sources/kit/components/` is what every screen draws with (design-build-plan
+T5-3): agent prose (the gutter rule in a transcript, the wash everywhere
+else), the agent chip, the facet row, the permissions table, the seven request
+body blocks, the four states plus `partial`, the stale pill and band with first
+paint, Undo and the cost-naming confirm, and 12-hour clock times. Each is built
+in two steps, and the split is the point:
+
+1. **A presentation** — a plain value: the words in order, each a `Mark`
+   naming its type step, ink, plate and the ground it sits on, and each
+   control a `ControlSpec` with the words VoiceOver says. Every rule the
+   design record makes lives here, where a test can read it.
+2. **A view** that only draws that value.
+
+What they hold to, by construction and by test:
+
+- **One word per idea.** The permission modes are `PermissionWords` and
+  nothing else — the CLI's *Allow · Ask First · Never* while the owner's
+  wording ruling (decisions-log (b); C93's *On · Ask · Off*) is open — and an
+  effective action's line is the CLI's `renderActionLine`, word for word. The
+  O3 sentence is `ReachabilityGate`'s. The assistant is its configured name:
+  the agent chip never prints the `assistant` principal id.
+- **One glyph per meaning.** Every symbol is a `MetistryGlyph` case.
+- **The ground actually painted.** Every ink is checked against its own
+  plate, or the ground under it, in both schemes — 4.5:1 for words, 3:1 for a
+  glyph or an outline. That check found `border-control` at 2.94:1 (light) and
+  2.62:1 (dark) on `stale-quiet`, so the stale band's action is a plain button.
+- **Never a bare confirmation.** A `CostConfirmation` that names no cost, or
+  whose button is not the act's own verb, cannot be made (P3). Reversible acts
+  get `UndoWindow` instead — ten seconds, no dialog.
+- **Reported, not inferred.** A facet state is the query's `row_flags`; a
+  stale pill draws what it is told. The one comparison made here is
+  `FirstPaint`'s: a reply's `as_of` against the screen's own age limit.
+- **12-hour times** (`ClockTime`) in `en_US_POSIX` with the caller's time
+  zone, whatever the Mac's 24-hour setting.
+
+**The largest text, on a Mac.** SwiftUI's semantic fonts ignore
+`dynamicTypeSize` on macOS — `Text(…).font(.body)` measures the same at
+`.large` and `.accessibility5` (macOS 26.4) — so a test at the largest size
+would pass without anything growing. `metistryFont` hands the platform's
+semantic font through at `.large` (every Mac today) and on iOS, and otherwise
+scales the Mac's point sizes by body's Dynamic Type ratios (13 pt → 41 pt at
+`.accessibility5`). Nothing on the Mac sets the size yet; whatever wires the
+owner's text size in sets `dynamicTypeSize` at the root.
+
+**The snapshots.** `tests/kit/snapshots/<component>.txt` is each component's
+presentation for every sample, walked field by field — words, type step and
+point size, ink, plate and ground as the hex each scheme ships, contrast, and
+what VoiceOver says — under `## light`, `## dark` and `## largest text`. Text,
+not PNGs: what a component decides is deterministic, while a pixel baseline
+recorded on one macOS fails on the next. The pixels are still drawn with
+`ImageRenderer` and checked for what does not depend on the font: every sample
+renders in both schemes and at both sizes, is never wider than the 480 pt
+column it is offered, is taller at the largest text, and draws differently in
+dark. The samples come from F-7's fixtures through the stores wherever a route
+serves the data (the configured name, the requests, Today's task, the agents'
+effective actions); the permissions table's rows are screen 7's, decoded
+through the `Decodable` `describePermissions()` will fill (T4-6).
+
+```sh
+# after a deliberate change: re-record, then read the diff
+METISTRY_RECORD_SNAPSHOTS=1 swift test --package-path apps/macos --filter Snapshot
+# to look at every drawing
+METISTRY_SNAPSHOT_PNG_DIR=/tmp/shots swift test --package-path apps/macos --filter Grows
+```
 
 ## Build and run it
 

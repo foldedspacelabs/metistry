@@ -92,6 +92,14 @@ function replyParagraphs(text) {
     .join("");
 }
 
+// Agent prose is set in the serif (C32, C35 — style.css `.agent-prose`), so it
+// reads as the assistant's before a word of it is read, and it still says so
+// once quoted out of the app. Only for a body an agent wrote: the owner's own
+// comment stays in the interface face.
+function bodyClass(c) {
+  return c?.author_kind === "agent" ? "body agent-prose" : "body";
+}
+
 // The tier this message ran at — the name from the instance's `tiers:` block
 // (a model + an effort). Shown, not chosen: there is no picker in the composer
 // yet, so this is the record of what the router decided. `esc()` because a
@@ -1263,8 +1271,8 @@ async function loadThreads(id, ver) {
     .map((t) => `<li class="thread ${t.state}">
       <div class="row"><label><input type="checkbox" data-thread="${esc(t.id)}" ${t.state === "resolved" ? "disabled" : ""}> ${who(t)} <span class="muted">${t.path ? esc(t.path) + " · " : ""}${new Date(t.created_at).toLocaleString()} · ${esc(t.state)}</span></label>
         <button class="secondary" data-state="${esc(t.id)}" data-op="${t.state === "open" ? "resolve" : "reopen"}">${t.state === "open" ? "resolve" : "reopen"}</button></div>
-      <div class="body">${esc(t.body)}</div>
-      ${t.replies.map((r) => `<div class="reply"><span class="muted">${who(r)} · ${new Date(r.created_at).toLocaleString()}</span><div class="body">${esc(r.body)}</div></div>`).join("")}
+      <div class="${bodyClass(t)}">${esc(t.body)}</div>
+      ${t.replies.map((r) => `<div class="reply"><span class="muted">${who(r)} · ${new Date(r.created_at).toLocaleString()}</span><div class="${bodyClass(r)}">${esc(r.body)}</div></div>`).join("")}
       <form data-reply="${esc(t.id)}"><input type="text" placeholder="reply…" autocomplete="off"><button type="submit" class="secondary">reply</button></form>
     </li>`)
     .join("");
@@ -1376,7 +1384,7 @@ async function openRoom(workId) {
   if (why) $("room-why").textContent = WHY_LINE.ping_pong_cap();
   const who = (c) => `${c.author_kind === "agent" ? "🤖 " : ""}${esc(c.author_principal)}`; // agent text is labeled agent-sourced (§4.19)
   $("room-messages").innerHTML = t.comments.length
-    ? t.comments.map((c) => `<li class="reply"><span class="muted">${who(c)} · ${new Date(c.created_at).toLocaleString()}</span><div class="body">${esc(c.body)}</div></li>`).join("")
+    ? t.comments.map((c) => `<li class="reply"><span class="muted">${who(c)} · ${new Date(c.created_at).toLocaleString()}</span><div class="${bodyClass(c)}">${esc(c.body)}</div></li>`).join("")
     : `<li class="muted">nothing said yet</li>`;
   $("room-resolve").textContent = t.state === "open" ? "Resolve" : "Reopen";
   $("room-resolve").dataset.op = t.state === "open" ? "resolve" : "reopen";

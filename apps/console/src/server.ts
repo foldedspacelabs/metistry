@@ -18,7 +18,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
-import { API_VERSION, API_VERSION_HEADER, AREA_PREFIX_REFUSAL, runCheck, startRun, finishRun, errorEnvelope, intEnv, may, parseAction, noRouteMessage, PROJECT_SLUG_RE, rollSession, statusFor, servedRoute, SKIP_FEEDBACK, validAgentAreaGrant, type CheckResult, type Compute, type ErrorEnvelope, type Principal } from "@foldedspacelabs/metistry-core";
+import { API_VERSION, API_VERSION_HEADER, AREA_PREFIX_REFUSAL, runCheck, startRun, finishRun, errorEnvelope, intEnv, may, parseAction, noRouteMessage, PROJECT_SLUG_RE, rollSession, statusFor, servedRoute, isLocalRoute, localOnlyMessage, routeKey, SKIP_FEEDBACK, validAgentAreaGrant, type CheckResult, type Compute, type ErrorEnvelope, type Principal } from "@foldedspacelabs/metistry-core";
 import { QueryError, QueryStore } from "@foldedspacelabs/metistry-queries";
 import { captureToInbox, createBrainServer, dirSink, type CaptureSink, type KnowledgeLister, type KnowledgeReader, type KnowledgeVaultSearcher, type KnowledgeWriter, type QueryEmbedder } from "@foldedspacelabs/metistry-mcp-brain";
 import { TasksError, TasksService } from "@foldedspacelabs/metistry-tasks";
@@ -607,7 +607,24 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     // uniform answers below (a 403 across a whole family, never a 403 here
     // and a 404 there). For the owner an unlisted route was already a 404;
     // it now names the routes that do exist beside it, off the same table.
-    if (isUser(auth) && servedRoute(req.method ?? "", url.pathname) === undefined) return sendUnrouted(res, noRouteMessage(req.method ?? "", url.pathname));
+    const row = isUser(auth) ? servedRoute(req.method ?? "", url.pathname) : undefined;
+    if (isUser(auth) && row === undefined) return sendUnrouted(res, noRouteMessage(req.method ?? "", url.pathname));
+
+    // ----- reach `local`: the owner on THIS Mac, by the local owner token alone (§2.1, F-13) -----
+    // Read off the same row, before any handler: a route the table files
+    // under `local` (minting a bearer, today) refuses a passkey session —
+    // even one from 127.0.0.1 — with `403 local_only` naming the Mac app.
+    // The local owner token got here only from a loopback peer
+    // (`checkLocalOwner`); from anywhere else it was already the uniform 401.
+    // Owner credentials only, deliberately: the capture token and agent
+    // bearers keep the uniform `forbidden` of the gates they meet, so this
+    // answer tells no one but the owner which routes are served. Audited,
+    // because a passkey session reaching for a credential mint is exactly
+    // what a stolen session would do.
+    if (row && isLocalRoute(row) && auth.kind !== "local_owner") {
+      await audit("auth", "local_only", false, { route: routeKey(row), via: auth.kind, reason: "a `local` route admits the local owner token alone" });
+      return sendError(res, "local_only", localOnlyMessage(row));
+    }
 
     // Who the console thinks you are. The Mac app calls this to render
     // "signed in as owner" without a passkey ceremony; it is also what

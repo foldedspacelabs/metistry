@@ -304,6 +304,8 @@ export {
   REACHES,
   REACH_PRINCIPALS,
   ROUTE_METHODS,
+  isLocalRoute,
+  localOnlyMessage,
   matchRoute,
   noRouteMessage,
   routeKey,

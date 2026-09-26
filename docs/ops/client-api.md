@@ -13,7 +13,7 @@ client for any authenticated route below, as the owner — the scripting seam.
 `packages/core/src/client-api.ts` holds the route table as data —
 `{method, path, reach, principals, idempotent, conflict, cursor}` per route,
 plus whether something serves it yet — and `packages/core/src/events.ts` holds
-the live-changes catalogue. Three tests keep the halves honest:
+the live-changes catalogue. Four tests keep the halves honest:
 
 - `apps/console/test/client-api-doc.test.ts` — this document's two tables
   agree with the code **line for line**, and every route has words of its own
@@ -21,7 +21,11 @@ the live-changes catalogue. Three tests keep the halves honest:
 - `apps/console/test/client-api.conformance.integration.test.ts` — every row
   the table serves reaches a handler; every row frozen ahead of its ticket is
   answered as no route; nothing outside the table is served, on any method;
-  each served row admits exactly the credential kinds it records.
+  each served row admits exactly the credential kinds it records; every row's
+  reach holds for every credential — `local_only` answers a passkey session on
+  a served `local` row and nowhere else.
+- `apps/console/test/reach-gate.integration.test.ts` — the `local` gate's own
+  misuse tests, with bodies that would otherwise succeed (F-13).
 - `packages/core/test/client-api.test.ts` — the table is consistent with
   itself: reach and principals agree, a `local` row admits the local owner
   token alone, no agent bearer reaches past `/mcp` and `/capture`.
@@ -79,9 +83,41 @@ the conformance test holds it there. Two such places:
 - **Push and logout admit a passkey session alone.** They act on a device
   session row, and the local owner token has none — a `403` saying so.
 
-`POST /api/agents` and `POST /api/agents/:id/rotate` are `owner` today and
-become `local` in F-13: minting a bearer is a boundary change. Their rows say
-`served · F-13`.
+### The `local` gate (F-13)
+
+The console reads `local` off the table — `isLocalRoute` in
+`packages/core/src/client-api.ts`, right after the owner's served-route check
+in `apps/console/src/server.ts` — so a row filed under `local` is enforced
+before any handler runs, with no second list in the server:
+
+- **The local owner token from a loopback peer** gets through. From any other
+  peer it is the uniform `401` an unknown token gets (and the attempt is
+  audited as `owner_token_remote`), exactly as before — the address is the
+  socket's, never a header.
+- **A passkey session is refused `403 local_only`** — even one from
+  `127.0.0.1` — with a message that names the route and the Mac app:
+
+  ```
+  403 {"error":{"code":"local_only","message":"POST /api/agents is reach `local`: only the Metistry Mac app (or the `metistry` command line) on the Mac this console runs on can do it — a passkey session cannot, even from that Mac. Open the Mac app there (docs/ops/client-api.md)"}}
+  ```
+
+  The refusal is audited (`runs`: `kind = auth`, `tool = local_only`, with
+  the route and the credential kind), because a session reaching for a
+  credential mint is what a stolen session would do.
+- **The capture owner token and agent bearers** keep the uniform
+  `403 forbidden` of the gates they already meet: `local_only` is an answer to
+  the owner alone, so it tells no one else which routes are served.
+- **A route frozen ahead of its ticket** is still "not served yet" (`404`) to
+  every owner credential — the gate asks only of served rows.
+- A request that carries a passkey cookie **and** the local owner token is a
+  passkey session (the cookie is read first), so it is refused: the gate fails
+  closed.
+
+`local_only` is `packages/core`'s error code for this answer, status `403`.
+Served `local` rows today: `POST /api/agents` and `POST /api/agents/:id/rotate`
+— minting a bearer is a boundary change. `metistry connect` mints through both
+with the local owner token, so it is unaffected; the legacy PWA's agent panel
+can no longer register or rotate an agent.
 
 ## Versioning
 
@@ -102,7 +138,8 @@ become `local` in F-13: minting a bearer is a boundary change. Their rows say
 
 `packages/core`'s envelope, `{"error":{"code","message"}}`, on every refusal.
 The codes and their statuses are `packages/core/src/errors.ts`: `invalid_request`
-400, `unauthenticated` 401, `forbidden` 403, `not_found` 404, `conflict` 409,
+400, `unauthenticated` 401, `forbidden` 403, `local_only` 403 (a `local` route,
+asked with a passkey session — "The `local` gate" above), `not_found` 404, `conflict` 409,
 `rate_limited` 429, `internal` 500, `not_available` 503 (the capability is
 absent in this deployment — degrades: absent — never a permission).
 
@@ -232,12 +269,12 @@ takes a `since` cursor and answers with the next one.
 | `POST /api/proposals/:id` | owner | session · local_owner | no | already_decided · stale | — | served · T2-3 | answer one request; `if_unchanged` refuses a stale answer |
 | `GET /api/needs-you/count` | owner | session · local_owner | natural | — | — | T1-7 | how many requests wait: the sidebar row and the Dock badge |
 | `GET /api/agents` | owner | session · local_owner | natural | — | — | served · T4-6 | the registry, each row's rendered scope, and the unanswered access requests |
-| `POST /api/agents` | owner | session · local_owner | no | 409 | — | served · F-13 | register an agent and mint its bearer (shown once) |
+| `POST /api/agents` | local | local_owner | no | 409 | — | served | register an agent and mint its bearer (shown once) |
 | `PUT /api/agents/:id/grants` | owner | session · local_owner | natural | — | — | served | replace an agent's knowledge grant |
 | `PUT /api/agents/:id/projects` | owner | session · local_owner | natural | — | — | served | replace the projects an agent may work in |
 | `PUT /api/agents/:id/autonomy` | owner | session · local_owner | natural | 409 | — | served | replace an agent's autonomy; the one route that may widen it |
 | `POST /api/agents/:id/revoke` | owner | session · local_owner | no | — | — | served | revoke an agent's bearer |
-| `POST /api/agents/:id/rotate` | owner | session · local_owner | no | — | — | served · F-13 | mint a new bearer for an agent (shown once) |
+| `POST /api/agents/:id/rotate` | local | local_owner | no | — | — | served | mint a new bearer for an agent (shown once) |
 | `POST /api/agents/:id/approve` | owner | session · local_owner | natural | — | — | served | let a pending remote enrolment in |
 | `GET /api/agents/:id/definition` | owner | session · local_owner | natural | — | — | T4-6 | an agent's definition, read-only — the write is `metistry agents define` |
 | `GET /api/projects` | owner | session · local_owner | natural | — | — | served | every project with its mode, budget and rollup |
@@ -691,7 +728,9 @@ GET  /api/agents/:id/definition       T4-6 — the definition an actor runs with
 The registry of every agent bearer: external agents, the assistant's own row,
 crews. A token crosses the wire **once**, in the answer to
 the call that minted it. Registering and rotating mint a credential, which is a
-boundary change: F-13 moves both to reach `local`. T4-6 adds permission rows to
+boundary change, so both are reach `local` (F-13): the local owner token from
+this Mac — the Mac app, `metistry connect` — and a passkey session is refused
+`403 local_only` ("The `local` gate" above). T4-6 adds permission rows to
 `GET /api/agents` and the read-only definition route; writing a definition is
 `metistry agents define` (M12).
 
@@ -703,7 +742,7 @@ enrollment PENDING until an administrator approves; invariant 2 says the
 credential surface is the user's hand, so the same rule holds here.
 
 ```
-POST /api/agents            (user principal)
+POST /api/agents            (local owner token)
 {"id":"devin","display_name":"Devin","kind":"external","remote":true}
 201 {"id":"devin","token":"…","pending":true,"proposal_id":412}
 

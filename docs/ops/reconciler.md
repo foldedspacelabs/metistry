@@ -167,7 +167,7 @@ write, not what you may read. Errors are the core envelope
 | `POST /vault/write` | `{path, content \| content_base64, intent, expected_sha256?}` — compare-and-swap on the content hash |
 | `POST /vault/delete` | `{path, intent, expected_sha256?}` |
 | `POST /vault/rename` | `{from, to, intent}` — git-mv semantics; never clobbers |
-| `POST /vault/section` | `{path, marker, body, principal, expected_outer_sha}` — replace the bytes between a section's markers in the owner's daily note and nothing else ("The section operation" below) |
+| `POST /vault/section` | `{path, marker, body, principal, expected_outer_sha, run?, turn?}` — replace the bytes between a section's markers in the owner's daily note and nothing else ("The section operation" below) |
 | `POST /flush` | commit the queue now (the interval does this every `METISTRY_COMMIT_INTERVAL_SEC`; the artifacts module calls it after every publish so one version is one commit) |
 | `POST /reconcile` | run the index cycle now (the interval does this every `METISTRY_RECONCILE_INTERVAL_SEC`); the summary carries `inbox: {added, changed, archived}` |
 | `POST /embeddings/rebuild` | forget every vector and re-embed the vault under the configured model (§6 decision 8's deterministic rebuild) |
@@ -265,7 +265,7 @@ curl -s -X POST -H "Authorization: Bearer $METISTRY_BRIDGE_TOKEN_RECONCILER" \
 | **the first write** | a note with no marker at all gets `## Today · Metistry` and the pair appended at its end (`"appended": true`); the owner's bytes are an untouched prefix. Two exceptions are `section_missing` instead: the heading is there without its markers (they were deleted — not a first write), or the note ends inside an unclosed code block (the section would be code). |
 | **`expected_outer_sha`** | required. SHA-256 of every byte of the note **except** the region — the bytes before it and after it, concatenated, marker lines included. With no section yet it is simply the file's hash, `GET /vault/read`'s `sha256`. A mismatch is `409 conflict`: the owner edited outside the section since you read it, so read again. An edit **inside** the region does not change it — the region is the writer's to replace. |
 | **`body`** | the whole new region, UTF-8; a trailing newline is added if missing so the closer stays on its own line. A body containing either marker, or one that would hide the closer (an unclosed code fence), is `400`. |
-| **the commit** | one intent in the writer's name — `Metistry morning-brief`, `update the day section of Journal/2026-09-26.md` — through the committer like any write. |
+| **the commit** | one intent in the writer's name — `Metistry morning-brief`, `update the day section of Journal/2026-09-26.md` — through the committer like any write. Optional `run` / `turn` are the act keys every write takes ("One commit per act" below): the Morning Brief passes its run, so its brief file and the section are one commit with a `Metistry-Run:` trailer. |
 
 **Computing the outer hash.** Don't reimplement the grammar: read the note
 (`GET /vault/read?path=…&encoding=base64`) and pass the bytes to

@@ -1,8 +1,11 @@
 // The macOS login Keychain as a secret store, driven through `security`
-// with argument arrays only (exec.ts — never a shell). Two item kinds:
+// with argument arrays only (exec.ts — never a shell). Three item kinds:
 //
 //   generic  service `metistry:<VAR>`   — the canonical home of every
 //            secret-shaped `.env` variable (`metistry secrets`).
+//   generic  service `metistry:secret:<name>`, account `<instance_id>` — an
+//            owner-named secret (plan §2.14; core's `InstanceSecrets` is the
+//            only thing that addresses one, bound to one instance).
 //   internet server <host>, protocol htps — a git credential, in exactly
 //            the shape `git-credential-osxkeychain` looks for, so the
 //            reconciler pushes unattended with no plaintext anywhere
@@ -14,6 +17,7 @@
 // `-w`, whose output is the value — so a caller must never log it. Nothing
 // in this module writes a value to `out`.
 
+import type { KeychainBackend } from "@foldedspacelabs/metistry-core";
 import type { Exec, ExecResult } from "./exec.js";
 
 /** Service prefix for the generic-password items `metistry secrets` owns. */
@@ -46,34 +50,72 @@ export function promptStdin(value: string): string {
   return `${value}\n${value}\n`;
 }
 
+function security(exec: Exec, args: string[], stdin?: string): Promise<ExecResult> {
+  return exec("security", args, { ...(stdin === undefined ? {} : { stdin }), timeoutMs: 20_000 });
+}
+
+/**
+ * Presence only: `find-generic-password` WITHOUT `-w`, which answers from the
+ * item's attributes and never asks for its data. The whole of what a listing
+ * gets — the console's `GET /api/secrets` is built on this and on nothing
+ * that can return a value.
+ */
+export function securityPresence(exec: Exec): (service: string, account: string) => Promise<boolean> {
+  return async (service, account) => (await security(exec, ["find-generic-password", "-a", account, "-s", service])).code === 0;
+}
+
+/**
+ * The login Keychain as core's `KeychainBackend`: generic-password items by
+ * (service, account), through `security` with argument arrays only and
+ * values on stdin. Shared by every instance on this Mac, exactly as the
+ * Keychain is — the per-instance binding is core's `InstanceSecrets`.
+ */
+export function securityKeychain(exec: Exec): KeychainBackend {
+  return {
+    async set(service, account, value) {
+      const r = await security(exec, ["add-generic-password", "-U", "-a", account, "-s", service, "-w"], promptStdin(value));
+      if (r.code !== 0) throw new Error(`security add-generic-password ${service} failed (${r.code}): ${lastLine(r)}`);
+    },
+    async get(service, account) {
+      const r = await security(exec, ["find-generic-password", "-a", account, "-s", service, "-w"]);
+      if (r.code !== 0) return undefined;
+      return r.stdout.replace(/\n$/, "");
+    },
+    has: securityPresence(exec),
+    async delete(service, account) {
+      return (await security(exec, ["delete-generic-password", "-a", account, "-s", service])).code === 0;
+    },
+  };
+}
+
 export class Keychain {
+  private readonly items: KeychainBackend;
+
   constructor(
     private readonly exec: Exec,
     /** Which account's items this handle reads and writes: the user's, or one instance's id. */
     readonly account: string = DEFAULT_ACCOUNT,
-  ) {}
+  ) {
+    this.items = securityKeychain(exec);
+  }
 
   private run(args: string[], stdin?: string): Promise<ExecResult> {
-    return this.exec("security", args, { ...(stdin === undefined ? {} : { stdin }), timeoutMs: 20_000 });
+    return security(this.exec, args, stdin);
   }
 
   /** Store (or replace) `metistry:<name>`. */
   async setSecret(name: string, value: string): Promise<void> {
-    const r = await this.run(["add-generic-password", "-U", "-a", this.account, "-s", serviceFor(name), "-w"], promptStdin(value));
-    if (r.code !== 0) throw new Error(`security add-generic-password ${serviceFor(name)} failed (${r.code}): ${lastLine(r)}`);
+    await this.items.set(serviceFor(name), this.account, value);
   }
 
   /** The stored value, or undefined when there is no such item. */
   async getSecret(name: string): Promise<string | undefined> {
-    const r = await this.run(["find-generic-password", "-a", this.account, "-s", serviceFor(name), "-w"]);
-    if (r.code !== 0) return undefined;
-    return r.stdout.replace(/\n$/, "");
+    return this.items.get(serviceFor(name), this.account);
   }
 
   /** Presence only — never asks for the value, so nothing sensitive can leak into a listing. */
   async hasSecret(name: string): Promise<boolean> {
-    const r = await this.run(["find-generic-password", "-a", this.account, "-s", serviceFor(name)]);
-    return r.code === 0;
+    return this.items.has(serviceFor(name), this.account);
   }
 
   /**
@@ -83,8 +125,7 @@ export class Keychain {
    * instance, and nothing here can reach them.
    */
   async deleteSecret(name: string): Promise<boolean> {
-    const r = await this.run(["delete-generic-password", "-a", this.account, "-s", serviceFor(name)]);
-    return r.code === 0;
+    return this.items.delete(serviceFor(name), this.account);
   }
 
   /**

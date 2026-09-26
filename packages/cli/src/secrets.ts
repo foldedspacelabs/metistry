@@ -1,12 +1,20 @@
-// `metistry secrets` — the canonical store for every secret an install
-// holds is the macOS login Keychain (`metistry:<VAR>`); `.env` is a
-// derived file, generated from it at service start and never edited by
-// hand (docs/product/desktop-app-plan.md, step 4).
+// `metistry secrets` — two stores, both in the macOS login Keychain, which
+// never share an item:
 //
-//   secrets sync --to keychain   import `.env`'s secret lines into the Keychain
-//   secrets sync --to env        regenerate `.env`'s secret lines from the Keychain
-//   secrets mint <VAR>           mint a random token into both
-//   secrets list                 names and where each one lives — never a value
+//   * the install's own variables (`metistry:<VAR>`): the canonical store for
+//     every secret-shaped `.env` line; `.env` is a derived file, generated
+//     from it at service start and never edited by hand
+//     (docs/product/desktop-app-plan.md, step 4).
+//
+//       secrets sync --to keychain   import `.env`'s secret lines into the Keychain
+//       secrets sync --to env        regenerate `.env`'s secret lines from the Keychain
+//       secrets mint <VAR>           mint a random token into both
+//       secrets list                 names and where each one lives — never a value
+//       secrets purge                one instance's items, preview-then-confirm
+//
+//   * the owner-named secrets of plan §2.14 (`metistry:secret:<name>`, per
+//     instance only): `set | replace | remove | hosts | grant`, `list
+//     --named` — the section at the end of this file.
 //
 // Rules this module exists to enforce (they are code, not advice):
 //   * A value never reaches argv, only a child's stdin (keychain.ts).
@@ -15,12 +23,38 @@
 //     blank line and ordering survives byte-for-byte, because `.env` also
 //     carries hand-written configuration this command must not own.
 
-import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { dirname } from "node:path";
-import { mintToken } from "@foldedspacelabs/metistry-core";
+import { dirname, join, relative } from "node:path";
+import { parseDocument } from "yaml";
+import {
+  InstanceSecrets,
+  SECRET_GRANT_MODES,
+  SECRET_SERVICE_PREFIX,
+  describeSecrets,
+  instanceFile,
+  instancePresence,
+  mintToken,
+  normalizeSecretHost,
+  parseSecretGrantee,
+  parseSecretsFile,
+  resolveInstanceLayout,
+  secretEnvName,
+  secretNameIssue,
+  secretRefsIn,
+  secretService,
+  secretValueIssue,
+  type KeychainBackend,
+  type SecretGrantMode,
+  type SecretPresence,
+  type SecretRow,
+  type SecretsFile,
+} from "@foldedspacelabs/metistry-core";
+import { readStdin } from "./connect-repo.js";
 import { realExec, type Exec } from "./exec.js";
-import { Keychain, keychainAccount, serviceFor } from "./keychain.js";
+import { Keychain, keychainAccount, securityKeychain, securityPresence, serviceFor } from "./keychain.js";
+import { protectedRel, writeProtected, type ProtectedWrite } from "./protected-write.js";
+import { StepFailed, StepRunner } from "./steps.js";
 
 /** A variable is a secret when its name ends in one of these… */
 export const SECRET_SUFFIXES = ["_TOKEN", "_PASSWORD", "_PRIVATE", "_SECRET", "_KEY"] as const;
@@ -374,6 +408,10 @@ export interface PurgeResult {
   deleted: string[];
   /** user-scoped names deliberately left alone */
   kept: string[];
+  /** owner-named secrets (`secrets.yaml`, §2.14) that HAVE an item under this instance's account */
+  named: string[];
+  /** which of those were actually deleted (empty without `--yes`) */
+  namedDeleted: string[];
 }
 
 /**
@@ -398,21 +436,32 @@ export async function purgeSecrets(opts: PurgeOptions): Promise<PurgeResult> {
   const kept = names.filter((n) => scopeFor(n) === "user");
   const found: string[] = [];
   for (const n of scoped) if (await instance.hasSecret(n)) found.push(n);
+  // The owner-named secrets are this instance's too, under the same
+  // account: deleting the directory must orphan them no more than the rest.
+  // Their names come from the instance's own secrets.yaml — the one list of
+  // them there is.
+  const store = new InstanceSecrets(securityKeychain(opts.exec ?? realExec), accounts.instance);
+  const named: string[] = [];
+  for (const n of await namedSecretNames(opts.instanceDir, opts.out)) if (await store.has(n)) named.push(n);
 
   opts.out(`instance: ${opts.instanceDir}`);
   opts.out(`keychain account: ${accounts.instance} (this instance's instance_id)`);
   opts.out(`${found.length} item(s) to delete: ${found.join(", ") || "(none)"}`);
+  opts.out(`${named.length} named secret(s) to delete (${SECRET_SERVICE_PREFIX}<name>): ${named.join(", ") || "(none)"}`);
   opts.out(`never touched — the per-user account ${accounts.user} keeps: ${kept.join(", ") || "(nothing user-scoped)"}`);
   if (!opts.yes) {
     opts.out("");
-    opts.out(`preview only. Nothing was deleted — rerun with --yes to delete the ${found.length} item(s) above. This does not remove ${opts.instanceDir} itself.`);
-    return { account: accounts.instance, found, deleted: [], kept };
+    opts.out(`preview only. Nothing was deleted — rerun with --yes to delete the ${found.length + named.length} item(s) above. This does not remove ${opts.instanceDir} itself.`);
+    return { account: accounts.instance, found, deleted: [], kept, named, namedDeleted: [] };
   }
   const deleted: string[] = [];
   for (const n of found) if (await instance.deleteSecret(n)) deleted.push(n);
-  opts.out(`deleted ${deleted.length} item(s) from account ${accounts.instance}: ${deleted.join(", ") || "(none)"}`);
-  if (deleted.length !== found.length) opts.out(`could not delete: ${found.filter((n) => !deleted.includes(n)).join(", ")}`);
-  return { account: accounts.instance, found, deleted, kept };
+  const namedDeleted: string[] = [];
+  for (const n of named) if (await store.remove(n)) namedDeleted.push(n);
+  opts.out(`deleted ${deleted.length + namedDeleted.length} item(s) from account ${accounts.instance}: ${[...deleted, ...namedDeleted.map((n) => `${SECRET_SERVICE_PREFIX}${n}`)].join(", ") || "(none)"}`);
+  const failed = [...found.filter((n) => !deleted.includes(n)), ...named.filter((n) => !namedDeleted.includes(n))];
+  if (failed.length) opts.out(`could not delete: ${failed.join(", ")}`);
+  return { account: accounts.instance, found, deleted, kept, named, namedDeleted };
 }
 
 export interface SecretListing {
@@ -461,6 +510,381 @@ export function renderSecretList(rows: SecretListing[]): string {
     "scope: instance = filed under this instance's instance_id; user = under the per-user account, shared by every instance (secrets.ts SECRET_SCOPES).",
     "keychain: the account an item was actually found under.",
     ...(pending.length ? [`still under the user account, copied to this instance's on the next \`metistry secrets sync --to env\`: ${pending.join(", ")}`] : []),
+    "Values are never printed.",
+  ].join("\n");
+}
+
+// ---- owner-named secrets (plan §2.14) -------------------------------------------
+//
+// The store the product's connections, providers and manifests reference as
+// `{{ secret.name }}`. Everything above this line is the install's own
+// variables (`metistry:<VAR>`, the `.env` generator); everything below is the
+// owner's secrets, and the two never share an item:
+//
+//   secrets set <name> [--hosts a,b] [--expires <date>]   the value on stdin
+//   secrets replace <name> [--expires <date>]             the value on stdin
+//   secrets remove <name> [--yes]                         preview-then-confirm
+//   secrets hosts <name> [<host> …] [--clear]             *Sent only to*
+//   secrets grant <name> <connection:x|agent:y> <on|ask|off>
+//   secrets list --named [--json]                         names — never a value
+//
+// **Per instance only** (ruling Q3): the value goes into the login Keychain
+// under this instance's `instance_id` through core's `InstanceSecrets`,
+// which is bound to that one account; there is no user scope and no
+// fallback to one. The policy goes into `.metistry/secrets.yaml` — a §4.7
+// protected path — through the reconciler as the owner (`writeProtected`),
+// edited as a YAML document so hand-written comments survive, and the
+// RESULT is validated by core's schema before anything is written.
+//
+// A value arrives on stdin only — never argv, never a flag — and is never
+// printed, logged or returned: every result below carries names.
+
+/** `.metistry/secrets.yaml` as this instance spells it. */
+export function secretsFilePath(instanceDir: string): string {
+  return instanceFile(instanceDir, "secrets");
+}
+
+const SECRETS_HEADER = [
+  "# secrets.yaml — this instance's secrets: names and policy, NEVER a value.",
+  "# The values are in the login Keychain (service metistry:secret:<name>,",
+  "# account = this instance's instance_id). Written by `metistry secrets`",
+  "# (docs/ops/cli.md); a §4.7 protected path, so only you change it.",
+  "",
+];
+
+export interface NamedSecretsOptions {
+  /** the instance repo whose `.metistry/secrets.yaml` this edits */
+  instanceDir: string;
+  /** its `instance_id` — the Keychain account, and the only one */
+  instanceId: string | undefined;
+  env: NodeJS.ProcessEnv;
+  platform: NodeJS.Platform;
+  uid: number;
+  exec?: Exec | undefined;
+  fetchFn?: typeof fetch | undefined;
+  /** test seam: the Keychain. Default: the login Keychain through `security`, on darwin. */
+  keychain?: KeychainBackend | undefined;
+  /** where a value is read — stdin, so it is never in argv or shell history */
+  readSecret?: (() => Promise<string>) | undefined;
+  /** print the plan; touch neither the Keychain nor the file */
+  dryRun?: boolean | undefined;
+  out: (line: string) => void;
+}
+
+interface EditableSecrets {
+  path: string;
+  doc: ReturnType<typeof parseDocument>;
+  file: SecretsFile;
+}
+
+/** The names `secrets.yaml` lists, for `purge`. A file that does not validate lists none, and says so. */
+async function namedSecretNames(instanceDir: string, out: (l: string) => void): Promise<string[]> {
+  const path = secretsFilePath(instanceDir);
+  if (!existsSync(path)) return [];
+  try {
+    return Object.keys(parseSecretsFile(await readFile(path, "utf8")).secrets);
+  } catch (e) {
+    out(`${path} does not validate, so its named secrets are not listed here (${e instanceof Error ? e.message : String(e)})`);
+    return [];
+  }
+}
+
+/** The instance's file as an editable document — comments and all — refusing one this command could not read back. */
+async function openSecrets(opts: Pick<NamedSecretsOptions, "instanceDir">): Promise<EditableSecrets> {
+  const path = secretsFilePath(opts.instanceDir);
+  const text = existsSync(path) ? await readFile(path, "utf8") : SECRETS_HEADER.join("\n");
+  const doc = parseDocument(text);
+  if (doc.errors.length > 0) throw new StepFailed(`${path} is not valid YAML (${doc.errors[0]?.message}) — fix it by hand; refusing to edit a file this command cannot read back`);
+  let file: SecretsFile;
+  try {
+    file = parseSecretsFile(text);
+  } catch (e) {
+    throw new StepFailed(`${path}: ${e instanceof Error ? e.message : String(e)} — fix it by hand; refusing to edit it`);
+  }
+  return { path, doc, file };
+}
+
+/** Validate the RESULT, then write it as the owner, through the reconciler. */
+async function commitSecrets(opts: NamedSecretsOptions, edit: EditableSecrets, message: string): Promise<ProtectedWrite> {
+  const content = String(edit.doc);
+  try {
+    parseSecretsFile(content);
+  } catch (e) {
+    throw new StepFailed(`refusing to write ${edit.path}: the result would be invalid — ${e instanceof Error ? e.message : String(e)}`);
+  }
+  const r = new StepRunner({ dryRun: opts.dryRun === true, out: opts.out, exec: opts.exec ?? realExec, env: opts.env });
+  const delivery = await writeProtected(r, protectedRel(opts.instanceDir, "secrets"), content, message, {
+    env: opts.env,
+    platform: opts.platform,
+    uid: opts.uid,
+    fetchFn: opts.fetchFn ?? fetch,
+    instanceDir: opts.instanceDir,
+  });
+  return delivery;
+}
+
+function has(file: SecretsFile, name: string): boolean {
+  return Object.hasOwn(file.secrets, name);
+}
+
+function requireNamed(file: SecretsFile, name: string, path: string): void {
+  if (!has(file, name)) throw new StepFailed(`no secret named ${name} in ${path} — \`metistry secrets set ${name}\` creates it`);
+}
+
+function checkName(name: string | undefined): string {
+  const issue = secretNameIssue(name);
+  if (issue || name === undefined) throw new StepFailed(issue ?? "name the secret");
+  return name;
+}
+
+/** Hosts, normalised and deduplicated — or a refusal naming the one that is not a host. */
+export function parseSecretHosts(hosts: readonly string[]): string[] {
+  const out: string[] = [];
+  for (const h of hosts) {
+    const n = normalizeSecretHost(h);
+    if (!n) throw new StepFailed(`${JSON.stringify(h)} is not a host — a host name, or host:port when the port is not 443; no scheme, no path, no wildcard (api.github.com, not https://api.github.com/)`);
+    if (!out.includes(n)) out.push(n);
+  }
+  return out;
+}
+
+function checkExpires(v: string | undefined): string | undefined {
+  if (v === undefined) return undefined;
+  // the schema is the one judge of the spelling: a one-entry file through it
+  try {
+    parseSecretsFile(`secrets:\n  probe:\n    expires: ${JSON.stringify(v)}\n`);
+  } catch {
+    throw new StepFailed(`--expires ${JSON.stringify(v)} is not an ISO date (2026-12-31) or date-time`);
+  }
+  return v;
+}
+
+/**
+ * This instance's store — or a refusal. No instance_id means no account, and
+ * there is deliberately no other account to fall back to (Q3). No Keychain
+ * (Linux, a container) means nowhere to put a value.
+ */
+function instanceStore(opts: NamedSecretsOptions): InstanceSecrets {
+  if (!opts.instanceId) {
+    throw new StepFailed(`${opts.instanceDir} has no instance_id in identity.yaml, and a secret belongs to exactly one instance — \`metistry up\` or \`metistry secrets sync --to env\` mints one`);
+  }
+  if (opts.keychain) return new InstanceSecrets(opts.keychain, opts.instanceId);
+  if (opts.platform !== "darwin") {
+    throw new StepFailed(`a secret's value lives in the macOS login Keychain, which this host (${opts.platform}) does not have — run this on the Mac that holds the instance`);
+  }
+  return new InstanceSecrets(securityKeychain(opts.exec ?? realExec), opts.instanceId);
+}
+
+async function readValue(opts: NamedSecretsOptions, name: string): Promise<string> {
+  const value = (await (opts.readSecret ?? readStdin)()).trim();
+  const issue = secretValueIssue(value);
+  if (issue) throw new StepFailed(`${issue} — pipe the value for ${name} on stdin (it is never taken as an argument)`);
+  return value;
+}
+
+export interface NamedSecretResult {
+  name: string;
+  /** the Keychain item it is filed under — names, never a value */
+  service: string;
+  account: string | undefined;
+  /** the policy after the verb, as the file now holds it */
+  hosts: string[];
+  delivery?: ProtectedWrite | undefined;
+}
+
+/** `secrets set <name>`: a NEW secret — its value from stdin into this instance's Keychain account, its policy into secrets.yaml. */
+export async function secretsSet(rawName: string | undefined, args: { hosts?: string[] | undefined; expires?: string | undefined }, opts: NamedSecretsOptions): Promise<NamedSecretResult> {
+  const name = checkName(rawName);
+  const hosts = parseSecretHosts(args.hosts ?? []);
+  const expires = checkExpires(args.expires);
+  const edit = await openSecrets(opts);
+  if (has(edit.file, name)) throw new StepFailed(`${name} is already set in ${edit.path} — \`metistry secrets replace ${name}\` swaps its value, \`secrets hosts\`/\`secrets grant\` change its policy`);
+  const store = instanceStore(opts);
+  const value = await readValue(opts, name);
+  const service = secretService(name);
+  if (opts.dryRun) {
+    opts.out(`[dry-run] would store ${name} in the login Keychain (${service}, account ${store.account}) and add it to ${edit.path}`);
+    return { name, service, account: store.account, hosts };
+  }
+  // The item first: a policy line naming a missing item shows as `present:
+  // false` wherever it is listed, while an item with no line is invisible.
+  // A rerun after a failed file write is a `set` again — the file does not
+  // name it yet — and overwrites the item it left.
+  await store.set(name, value);
+  opts.out(`stored ${name} in the login Keychain: ${service}, account ${store.account} (this instance's instance_id). The value is not printed.`);
+  edit.doc.setIn(["secrets", name], edit.doc.createNode({ hosts, grants: {}, ...(expires ? { expires } : {}) }, { flow: false }));
+  flowList(edit, name);
+  if (hosts.length === 0) opts.out(`no hosts: Metistry fills ${name} in for no server until \`metistry secrets hosts ${name} <host>\` names one (a local agent you grant it still gets it as ${secretEnvName(name)}).`);
+  const delivery = await commitSecrets(opts, edit, `secrets: set ${name}`);
+  return { name, service, account: store.account, hosts, delivery };
+}
+
+/** Keep `hosts: [a, b]` on one line — how a person writes a short list. */
+function flowList(edit: EditableSecrets, name: string): void {
+  const node = edit.doc.getIn(["secrets", name, "hosts"], true) as { flow?: boolean } | undefined;
+  if (node && typeof node === "object") node.flow = true;
+}
+
+/** `secrets replace <name>`: a new value for a secret this instance already has. An expiry recorded for the old value does not describe the new one, so it is cleared unless `--expires` gives the new one. */
+export async function secretsReplace(rawName: string | undefined, args: { expires?: string | undefined }, opts: NamedSecretsOptions): Promise<NamedSecretResult> {
+  const name = checkName(rawName);
+  const expires = checkExpires(args.expires);
+  const edit = await openSecrets(opts);
+  if (!has(edit.file, name)) throw new StepFailed(`no secret named ${name} in ${edit.path} — \`metistry secrets set ${name}\` creates it`);
+  const store = instanceStore(opts);
+  const value = await readValue(opts, name);
+  const service = secretService(name);
+  const policy = edit.file.secrets[name]!;
+  if (opts.dryRun) {
+    opts.out(`[dry-run] would replace the value of ${name} (${service}, account ${store.account})`);
+    return { name, service, account: store.account, hosts: policy.hosts };
+  }
+  await store.set(name, value);
+  opts.out(`replaced the value of ${name} in the login Keychain (${service}, account ${store.account}). The value is not printed.`);
+  let delivery: ProtectedWrite | undefined;
+  if (expires !== policy.expires) {
+    if (expires) edit.doc.setIn(["secrets", name, "expires"], expires);
+    else edit.doc.deleteIn(["secrets", name, "expires"]);
+    opts.out(expires ? `expires: ${expires}` : `cleared the old expiry (${policy.expires}) — it was the old value's`);
+    delivery = await commitSecrets(opts, edit, `secrets: replace ${name}`);
+  }
+  return { name, service, account: store.account, hosts: policy.hosts, ...(delivery ? { delivery } : {}) };
+}
+
+export interface RemoveSecretResult {
+  name: string;
+  /** files under `.metistry/` that reference `{{ secret.<name> }}` — what stops working */
+  referencedBy: string[];
+  /** false without `--yes`: the preview is the whole command */
+  removed: boolean;
+  itemDeleted: boolean;
+  delivery?: ProtectedWrite | undefined;
+}
+
+/** Every file under `.metistry/` (state excluded) that references `{{ secret.<name> }}`, instance-relative. */
+export async function secretReferences(instanceDir: string, name: string): Promise<string[]> {
+  const root = resolveInstanceLayout(instanceDir);
+  const base = root.path("metistryDir");
+  const state = root.path("stateDir");
+  const found: string[] = [];
+  const walk = async (dir: string): Promise<void> => {
+    let entries: import("node:fs").Dirent[];
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) {
+        if (p !== state) await walk(p);
+        continue;
+      }
+      if (!e.isFile() || !/\.(ya?ml|md|json)$/.test(e.name)) continue;
+      const text = await readFile(p, "utf8").catch(() => "");
+      if (secretRefsIn(text).names.includes(name)) found.push(relative(instanceDir, p));
+    }
+  };
+  if (base !== instanceDir.replace(/\/+$/, "")) await walk(base);
+  return found;
+}
+
+/** `secrets remove <name> [--yes]`: this instance's item and its policy. Preview-then-confirm; the preview names what references it. */
+export async function secretsRemove(rawName: string | undefined, args: { yes?: boolean | undefined }, opts: NamedSecretsOptions): Promise<RemoveSecretResult> {
+  const name = checkName(rawName);
+  const edit = await openSecrets(opts);
+  const store = instanceStore(opts);
+  const named = has(edit.file, name);
+  const present = await store.has(name);
+  if (!named && !present) throw new StepFailed(`this instance has no secret named ${name} — neither in ${edit.path} nor in the login Keychain under account ${store.account}`);
+  const referencedBy = await secretReferences(opts.instanceDir, name);
+  opts.out(`secret: ${name} — ${secretService(name)}, account ${store.account} (this instance only)`);
+  opts.out(`in secrets.yaml: ${named ? "yes" : "no"}; in the Keychain: ${present ? "yes" : "no"}`);
+  opts.out(referencedBy.length ? `referenced by — these stop working once it is gone: ${referencedBy.join(", ")}` : "referenced by: nothing under .metistry/");
+  if (!args.yes || opts.dryRun) {
+    opts.out("");
+    opts.out(`preview only. Nothing was removed — rerun with --yes to delete ${name}.`);
+    return { name, referencedBy, removed: false, itemDeleted: false };
+  }
+  // The item first, then the line: a line left behind reads `present: false`
+  // and a rerun finishes the job; an item left behind would be invisible.
+  const itemDeleted = present ? await store.remove(name) : false;
+  if (present && !itemDeleted) throw new StepFailed(`the login Keychain would not delete ${secretService(name)} (account ${store.account}) — nothing else was changed`);
+  let delivery: ProtectedWrite | undefined;
+  if (named) {
+    edit.doc.deleteIn(["secrets", name]);
+    delivery = await commitSecrets(opts, edit, `secrets: remove ${name}`);
+  }
+  opts.out(`removed ${name}${itemDeleted ? " — the Keychain item is deleted" : ""}${named ? " and its line in secrets.yaml" : ""}.`);
+  return { name, referencedBy, removed: true, itemDeleted, ...(delivery ? { delivery } : {}) };
+}
+
+/** `secrets hosts <name> [<host> …] [--clear]`: *Sent only to*. No hosts and no `--clear` shows the list; hosts REPLACE it; `--clear` empties it. */
+export async function secretsHosts(rawName: string | undefined, args: { hosts: string[]; clear?: boolean | undefined }, opts: NamedSecretsOptions): Promise<NamedSecretResult> {
+  const name = checkName(rawName);
+  const edit = await openSecrets(opts);
+  requireNamed(edit.file, name, edit.path);
+  const service = secretService(name);
+  const account = opts.instanceId;
+  if (args.hosts.length === 0 && !args.clear) {
+    const current = edit.file.secrets[name]!.hosts;
+    opts.out(`${name} is sent only to: ${current.join(", ") || "(no host — filled in for no server)"}`);
+    return { name, service, account, hosts: current };
+  }
+  if (args.hosts.length > 0 && args.clear) throw new StepFailed("give hosts or --clear, not both — hosts replace the list, --clear empties it");
+  const hosts = args.clear ? [] : parseSecretHosts(args.hosts);
+  edit.doc.setIn(["secrets", name, "hosts"], hosts);
+  flowList(edit, name);
+  opts.out(`${name} is sent only to: ${hosts.join(", ") || "(no host — filled in for no server)"}`);
+  const delivery = await commitSecrets(opts, edit, `secrets: hosts for ${name}`);
+  return { name, service, account, hosts, delivery };
+}
+
+/** `secrets grant <name> <grantee> <on|ask|off>`: *Who may use it*. */
+export async function secretsGrant(rawName: string | undefined, grantee: string | undefined, mode: string | undefined, opts: NamedSecretsOptions): Promise<NamedSecretResult & { grantee: string; mode: SecretGrantMode }> {
+  const name = checkName(rawName);
+  if (!grantee || !parseSecretGrantee(grantee)) throw new StepFailed(`${JSON.stringify(grantee ?? "")} is not a grantee — connection:<name> or agent:<id> (e.g. connection:github, agent:devin)`);
+  if (!mode || !(SECRET_GRANT_MODES as readonly string[]).includes(mode)) throw new StepFailed(`the mode is one of ${SECRET_GRANT_MODES.join(", ")} — not ${JSON.stringify(mode ?? "")}`);
+  const edit = await openSecrets(opts);
+  requireNamed(edit.file, name, edit.path);
+  // setIn with a key holding `:` — the yaml library quotes it where it must
+  edit.doc.setIn(["secrets", name, "grants", grantee], mode);
+  opts.out(`${grantee} may use ${name}: ${mode}${mode === "ask" ? " (each use waits for your answer in Needs You)" : mode === "off" ? " (refused)" : ""}`);
+  const delivery = await commitSecrets(opts, edit, `secrets: ${grantee} ${mode} for ${name}`);
+  return { name, service: secretService(name), account: opts.instanceId, hosts: edit.file.secrets[name]!.hosts, delivery, grantee, mode: mode as SecretGrantMode };
+}
+
+/**
+ * `secrets list --named`: the same rows `GET /api/secrets` serves, from the
+ * file and a presence probe — never a value. `last_used` is null here: it is
+ * derived state the console reads through its named query, and the CLI
+ * talks to no database (invariant 3).
+ */
+export async function secretsListNamed(opts: NamedSecretsOptions): Promise<SecretRow[]> {
+  const path = secretsFilePath(opts.instanceDir);
+  const file = existsSync(path) ? parseSecretsFile(await readFile(path, "utf8")) : parseSecretsFile("");
+  let presence: SecretPresence | undefined;
+  if (opts.instanceId && (opts.keychain || opts.platform === "darwin")) {
+    presence = instancePresence(opts.keychain ? (s, a) => opts.keychain!.has(s, a) : securityPresence(opts.exec ?? realExec), opts.instanceId);
+  }
+  return describeSecrets(file, presence);
+}
+
+export function renderNamedSecrets(rows: SecretRow[], instanceId: string | undefined): string {
+  if (rows.length === 0) return "no secrets yet — `metistry secrets set <name> --hosts <host>` (the value on stdin) adds one.";
+  const width = Math.max(4, ...rows.map((r) => r.name.length));
+  const head = `${"name".padEnd(width)}  keychain  sent only to / who may use it`;
+  const body = rows.map((r) => {
+    const where = r.present === null ? "?" : r.present ? "yes" : "MISSING";
+    const grants = r.grants.map((g) => `${g.to} ${g.mode}`).join(", ");
+    return `${r.name.padEnd(width)}  ${where.padEnd(8)}  ${r.hosts.join(", ") || "(no host)"}${grants ? ` / ${grants}` : ""}${r.expires ? ` · expires ${r.expires}` : ""}`;
+  });
+  return [
+    head,
+    "-".repeat(head.length),
+    ...body,
+    "",
+    `keychain: an item under this instance's account${instanceId ? ` (${instanceId})` : ""}; ? = no Keychain to ask. Last used is the console's: GET /api/secrets.`,
     "Values are never printed.",
   ].join("\n");
 }

@@ -14,6 +14,8 @@ import {
   REACHES,
   REACH_PRINCIPALS,
   ROUTE_METHODS,
+  isLocalRoute,
+  localOnlyMessage,
   matchRoute,
   noRouteMessage,
   routeKey,
@@ -97,6 +99,28 @@ describe("reach and principals", () => {
       expect(r.reach, key(r)).toEqual(["local"]);
       expect(r.principals, key(r)).toEqual(["local_owner"]);
     }
+  });
+
+  it("minting a bearer is `local` — registering an agent and rotating its token (F-13)", () => {
+    const local = CLIENT_API.filter((r) => r.served && isLocalRoute(r)).map(key);
+    expect(local).toEqual(["POST /api/agents", "POST /api/agents/:id/rotate"]);
+    // the rest of the agent registry stays reachable from any owner client
+    for (const k of ["GET /api/agents", "PUT /api/agents/:id/grants", "POST /api/agents/:id/revoke", "POST /api/agents/:id/approve"]) {
+      expect(CLIENT_API.find((r) => key(r) === k)!.reach, k).toEqual(["owner"]);
+    }
+  });
+
+  it("isLocalRoute is exactly the rows filed under `local`", () => {
+    for (const r of CLIENT_API) expect(isLocalRoute(r), key(r)).toBe(r.reach.includes("local"));
+    expect(isLocalRoute({ reach: ["owner", "local"] }), "a mixed row fails closed").toBe(true);
+    expect(isLocalRoute({ reach: ["owner"] })).toBe(false);
+  });
+
+  it("the local_only message names the route, the Mac app and the document", () => {
+    const m = localOnlyMessage({ method: "POST", path: "/api/agents/:id/rotate" });
+    expect(m).toContain("POST /api/agents/:id/rotate");
+    expect(m).toContain("Mac app");
+    expect(m).toContain("docs/ops/client-api.md");
   });
 
   it("no agent bearer reaches anything but the agent surface", () => {

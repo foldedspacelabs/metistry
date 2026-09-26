@@ -9,7 +9,7 @@ def keyed(T,size=44):
 
 more=(group(L,[grow(L,"Metistry on Studio",glyph="cpu",sub="Connected &middot; v0.11.0",chev=True,last=True)])
       + group(L,[grow(L,"Activity",glyph="activity"),grow(L,"Agents",glyph="agents",detail="1 waiting"),
-                 grow(L,"Routines",glyph="repeat",last=True)])
+                 grow(L,"Scheduled",glyph="repeat",last=True)])
       + group(L,[grow(L,"Usage",glyph="gauge",detail="$41.20 of $60"),grow(L,"Settings",glyph="gear",last=True)]))
 S1=phone(L,more,tab="More",header=hdr(L,"More"),label="MORE")
 
@@ -80,7 +80,7 @@ NAVP=pan(L,"THE SHELL",
          "dialogs. <b>At 900px the sidebar returns.</b>",12))
 
 nmore=narrow(L,group(L,[grow(L,"Activity",glyph="activity"),grow(L,"Agents",glyph="agents",detail="1 waiting"),
-                        grow(L,"Routines",glyph="repeat",last=True)])
+                        grow(L,"Scheduled",glyph="repeat",last=True)])
                + group(L,[grow(L,"Usage",glyph="gauge",detail="$41.20 of $60"),grow(L,"Settings",glyph="gear",last=True)]),
              tab="More",title="More",h=640)
 

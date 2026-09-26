@@ -25,7 +25,7 @@ def frow(T,g,actor,subject,detail,when,*,tone=None,last=False):
 act=(f'<div style="display: flex; gap: 6px; margin-bottom: 8px;">'
      + "".join(f'<span style="padding: 5px 11px; border-radius: 999px; font-size: 13px; background: {L["accq"] if s else "transparent"}; '
                f'color: {L["acc"] if s else L["ts"]}; border: 1px solid {"transparent" if s else L["bc"]};">{n}</span>'
-               for n,s in (("Everything",True),("Agents",False),("Routines",False),("Captures",False))) + '</div>'
+               for n,s in (("Everything",True),("Agents",False),("Scheduled",False),("Captures",False))) + '</div>'
      + frow(L,"repeat","collator","Morning Brief","ran its routine &middot; wrote the brief","2h")
      + frow(L,"board","drey-dev","Claimed #412","Rebuild the cache report","3h")
      + frow(L,"failed","collector","aws-costs","last succeeded 2 days ago &middot; token expired","3h",tone=L["fail"])

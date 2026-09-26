@@ -9,7 +9,7 @@ the window is **not resizable** — it is a fixed size chosen for its content.
 
 ```
 Instance · Services · Compute · Updates
-ACCESS    Account · Resources · Secrets
+ACCESS    Account · Connections · Secrets · Variables
 CAPTURE   Live Capture · Sessions
 Advanced
 ```
@@ -19,6 +19,9 @@ Round E added three — Resources (screen 9), Live Capture (screen 11), Sessions
 (screen 12) — and ten do not fit as tabs. **Account** is the old *Connections*:
 console sign-in and the instance repository. The old name read as a sibling of
 Resources, which holds external servers.
+
+> **2026-09-25 (C114, C116, C117):** Resources is now **Connections**; **Secrets**
+> and **Variables** are panes of their own (screen 19).
 
 The Resources board first drew an invented section list (General, Compute,
 Knowledge, Resources, Notifications, Advanced). It now draws this one.

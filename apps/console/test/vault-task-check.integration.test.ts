@@ -9,6 +9,7 @@
 // The ticket's own misuse tests, bold in its Tests line: a byte diff shows
 // only the two tokens; a changed line is refused; agent and capture tokens are
 // refused; a key under `.metistry/` is refused. Plus U2's four.
+import { rmSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -59,7 +60,13 @@ describe.skipIf(!hasDb)("the Tick door: POST /api/vault-tasks/:task_key/check", 
   const localOwnerToken = mintToken();
   const agentId = `itest-tick-${suffix}`;
   const passkeyIds: string[] = [];
+  const inboxDirs: string[] = [];
   let n = 0;
+  const inbox = async () => {
+    const dir = await mkdtemp(join(tmpdir(), "metistry-tick-"));
+    inboxDirs.push(dir);
+    return dir;
+  };
 
   const today = () => taskToday();
 
@@ -83,7 +90,7 @@ describe.skipIf(!hasDb)("the Tick door: POST /api/vault-tasks/:task_key/check", 
     };
     server = makeServer(pool, queries, {
       origin: "http://127.0.0.1:0",
-      inboxDir: await mkdtemp(join(tmpdir(), "metistry-tick-")),
+      inboxDir: await inbox(),
       policy,
       secureCookies: false,
       localOwner: { token: localOwnerToken, trusted: [] },
@@ -107,6 +114,7 @@ describe.skipIf(!hasDb)("the Tick door: POST /api/vault-tasks/:task_key/check", 
     await pool.query(`DELETE FROM passkeys WHERE id = ANY($1)`, [passkeyIds]).catch(() => undefined);
     await new Promise<void>((r) => server.close(() => r()));
     await pool.end();
+    for (const dir of inboxDirs) rmSync(dir, { recursive: true, force: true });
   });
 
   beforeEach(() => {
@@ -364,7 +372,7 @@ describe.skipIf(!hasDb)("the Tick door: POST /api/vault-tasks/:task_key/check", 
   });
 
   it("answers 503 when the deployment has no vault bridge", async () => {
-    const bare = makeServer(pool, queries, { origin: "http://127.0.0.1:0", inboxDir: await mkdtemp(join(tmpdir(), "metistry-tick-bare-")), policy, secureCookies: false, localOwner: { token: localOwnerToken, trusted: [] } });
+    const bare = makeServer(pool, queries, { origin: "http://127.0.0.1:0", inboxDir: await inbox(), policy, secureCookies: false, localOwner: { token: localOwnerToken, trusted: [] } });
     await new Promise<void>((r) => bare.listen(0, "127.0.0.1", r));
     try {
       const r = await fetch(`http://127.0.0.1:${(bare.address() as AddressInfo).port}/api/vault-tasks/mt-bare0000/check`, {

@@ -54,8 +54,8 @@ describe.skipIf(!hasDb)("console PWA chunk", () => {
     expect(r.headers.get("content-type")).toContain("text/html");
     const html = await r.text();
     expect(html).toContain("Sign In with Passkey");
-    expect(html).toContain('id="dashboard"'); // Phase 4 dashboard tab ships in the shell
-    expect(html).toContain('id="feed"'); // activity feed (home) tab ships in the shell
+    expect(html).toContain('id="today"'); // the home tab ships in the shell (T7-2)
+    expect(html).toContain('id="feed"'); // Activity (More ▸ Activity) ships in the shell
     expect((await fetch(base + "/sw.js")).status).toBe(200);
     expect((await fetch(base + "/vendor/simplewebauthn.js")).status).toBe(200);
     // design tokens load before the stylesheet (generated from
@@ -143,16 +143,19 @@ describe.skipIf(!hasDb)("console PWA chunk", () => {
   });
 
   // P10: Title Case names things — nav labels, screen titles, section headers.
+  // The shell (T7-2, screen 18 §1): five tabs, the sidebar's rows at 900px,
+  // Work's segments and More's rows; the glyph-only header controls speak
+  // their names. apps/console/test/pwa-shell.test.ts holds the shell itself.
   it("navigation labels and section headers are Title Case", async () => {
     const html = await (await fetch(base + "/")).text();
-    // "Needs You" is the triage tab's label since the reply-quality loop
-    // (docs/ops/reply-feedback.md) made it the single list — Title Case too.
-    for (const label of ["Feed", "Chat", "Board", "Dashboard", "Capture", "Needs You", "Status", "Devices", "Agents", "Artifacts", "Rooms"]) {
-      expect(html).toContain(`>${label}</button>`);
+    for (const label of ["Today", "Chat", "Work", "Knowledge", "More", "Needs You", "Activity", "Agents", "Settings", "Usage"]) {
+      expect(html).toContain(`<span class="label">${label}</span>`);
     }
+    for (const label of ["Board", "Projects", "Artifacts"]) expect(html).toContain(`>${label}</button>`);
+    for (const label of ["Capture", "Needs You", "Usage"]) expect(html).toContain(`aria-label="${label}"`);
     expect(html).toContain("<h3>Components</h3>");
     expect(html).toContain("<h3>Reviews Waiting on You</h3>");
-    expect(html).toContain('<h1 id="title">Metistry</h1>');
+    expect(html).toContain('<h1 id="title" class="large-title">Metistry</h1>');
   });
 
   // docs/ops/board.md — the board panel ships in the shell. Asserted on the

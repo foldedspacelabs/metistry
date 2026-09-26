@@ -38,10 +38,10 @@
 // real JSON, not a re-parse of the rendered stderr line — so a message that
 // itself contains " — ", or a `field` the render did not carry, still comes
 // through whole. `ConsoleError.conflictBodyIsUnavailable` is gone: the
-// transport does see the body now. The extra conflict keys still have
-// nowhere to live in `ConsoleError` (that enum is `console-client.swift`,
-// outside this ticket) — the queue's `if_unchanged` repaint that wants them
-// is later work, not a second client here.
+// transport does see the body now, and since F-12 the extra conflict keys
+// have a home — `ConsoleErrorEnvelope.details`, read as
+// `ConsoleError.conflictReason` and `.details` — for the queue's
+// `if_unchanged` repaint to draw from.
 //
 // WHAT IT CAN NOW DO (struck 2026-09-18; `console call` gained
 // `--idempotency-key <key>`). `ConsoleCallTransport.call`'s fourth argument
@@ -647,6 +647,17 @@ public extension ConsoleError {
     var isNotFound: Bool { httpStatus == 404 }
     /// 409 — already decided, or decided against a row that moved.
     var isConflict: Bool { httpStatus == 409 }
+    /// A `409`'s `reason` (`stale` | `already_decided`), when the route sends one.
+    var conflictReason: String? {
+        if case .http(409, let envelope) = self { return envelope?.reason }
+        return nil
+    }
+    /// The refusal's body beyond `{error}` — for a `409`, the row as it stands,
+    /// which is what the queue's `if_unchanged` repaint draws from.
+    var details: [String: JSONValue] {
+        if case .http(_, let envelope) = self { return envelope?.details ?? [:] }
+        return [:]
+    }
     /// 503 `not_available` — the capability is absent in this deployment, which
     /// is a fact rather than a fault (degrades: absent), and the message names
     /// the config field that would supply it.

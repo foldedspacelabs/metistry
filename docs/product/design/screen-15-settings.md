@@ -63,20 +63,29 @@ in the Background, Keep this Mac Awake — and under it, disabled while it is of
 Allow sleep on battery and Allow sleep when the lid is closed, both on, each with
 a warning tip; C129).
 
-### 5.3 Compute (C130; C128's tabs withdrawn)
+### 5.3 Compute (C130, C132)
 
 One column, in this order:
 
-1. **Metis** — model and where it runs (with its tags), effort, fallback if it fails.
-2. **Providers** — local and cloud together. Each row: a switch (off = not
-   searched, not offered), name, tags (*Local*/*Cloud*; *Free*/*By token*/
-   *Subscription*; ZDR), status, credential (a secret chip; *Signed in · Sign
-   Out*; or *Key not set · Choose a secret*), Test, Remove. *Add Provider…*.
-3. **Your Models** — Memory and Disk bars; the search field (*Search 6 providers
-   for models*); by default *On this Mac* (loaded state, size, Load / Unload) and
-   *From the cloud* (price or *Included in* the plan, Remove).
-4. **Spending limits** — per day, per month, then Allow · Stop · Critical only,
-   for by-token providers; a subscription's window is its limit; today's spend.
+1. **Metis uses** — one model dropdown and effort. No fallback.
+2. **Providers** — one line each: switch (off = not searched, not offered),
+   name, one tag (*Local* · *Cloud* · *Subscription*), an issue only when there
+   is one (*Not running*, *Key not set*), then **Test**, the **gear** and
+   **Remove**. The gear opens the provider's settings: base URL, key as a secret,
+   headers (secrets and variables allowed), data policy (ZDR only · Any), Test,
+   Save. *Add Provider…* below.
+3. **Your Models** — Memory and Disk bars; the search field with **Refresh**
+   beside it (re-reads every switched-on provider's catalogue); by default *On
+   this Mac* then *Cloud*, one line each: **name** maker · provider · tag ·
+   loaded state and size, or price / *In your plan* · Load, Unload or Remove.
+4. **Spending limits** — per day, per month, then Allow · Stop · Critical only;
+   a subscription's window is its limit.
+
+**A model is written one way everywhere**: **name** maker · provider · tag. The
+dropdown that picks one (Metis, an agent's definition) shows all of it in the
+field and in its menu, grouped *On this Mac*, *Cloud*, with price on the right.
+Tags: *Local* (free), *Cloud* (by the token), *Subscription*. There is no
+*By token* tag.
 
 #### 5.3.1 One model, several places (C131)
 
@@ -85,11 +94,11 @@ places*. Under it, one line per place:
 
 | Place | Shows | Action |
 | --- | --- | --- |
-| Cloud, by token | provider, ZDR, price per M tokens in / out; **Cheapest** marked | Add |
+| Cloud | provider, ZDR, price per M tokens in / out; **Cheapest** marked | Add |
 | Cloud, subscription | provider, *Included in <plan>* | Add |
 | Local | provider, quantisation, size, memory needed; *Fits* · *Tight fit* · *Too large* | Install (disabled when too large) |
 
-Filters: Local · Cloud · Free · By token · Subscription · Fits this Mac · Tools.
+Filters: Local · Cloud · Subscription · Fits this Mac · Tools.
 Sort: Best match · Cheapest · Largest context. A collapsed result reads *Local or
 cloud · from $0.10 per M*. An agent's definition picks a model, then where it
 runs (screen 7 §3.4).

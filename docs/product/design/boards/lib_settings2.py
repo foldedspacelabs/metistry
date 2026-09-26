@@ -136,43 +136,71 @@ def prov(T,name,tags,line,*,acts=True,last=False,extra=""):
             + (f'{btn(T,"Test","ghost",I["check"])}{ibtn(T,"x","Remove")}' if acts else "") + '</div>'
             f'<div style="font-size: 11.5px; color: {T["ts"]}; margin-top: 4px;">{line}</div>{extra}</div>')
 
-def metisblock(T):
-    return sunk(T,
-        f'<div style="display: flex; align-items: center; gap: 10px;"><span style="display: flex; color: {T["ag"]};">{ic(I["cpu"],16,1.9)}</span>'
-        f'<span style="font-size: 13px; font-weight: 600; color: {T["tp"]};">Metis uses</span></div>'
-        f'<div style="display: grid; grid-template-columns: 70px minmax(0,1fr); gap: 8px 10px; align-items: center; margin-top: 11px;">'
-        f'{lbl(T,"Model")}<span style="display: flex; align-items: center; gap: 8px;">{pick(T,"Claude Sonnet",190)}'
-        f'<span style="font-size: 11.5px; color: {T["ts"]};">via Claude</span>{tag(T,"Subscription")}</span>'
-        f'{lbl(T,"Effort")}<span>{seg(T,["Low","Medium","High"],"Medium")}</span>'
-        f'{lbl(T,"If it fails")}<span style="display: flex; align-items: center; gap: 8px;">{pick(T,"Qwen3 Coder 30B",190)}'
-        f'<span style="font-size: 11.5px; color: {T["ts"]};">on this Mac</span>{tag(T,"Local")}</span></div>'
-        + note(T,"Agents and routines choose their own model in their definitions, from Your Models below."))
+def mpick(T,model,maker,prov,tg,w=380,*,open_=False):
+    """One dropdown for a model and where it runs: name, maker, provider, and Local / Cloud / Subscription."""
+    return (f'<span style="display: inline-flex; align-items: center; gap: 7px; width: {w}px; box-sizing: border-box; padding: 4px 9px; '
+            f'border: 1px solid {T["acc"] if open_ else T["bc"]}; border-radius: 7px; background: {T["surface"]};">'
+            f'<span style="font-size: 12.5px; color: {T["tp"]}; white-space: nowrap;">{model} <span style="color: {T["ts"]};">{maker}</span></span>'
+            f'<span style="font-size: 11.5px; color: {T["ts"]}; white-space: nowrap;">&middot; {prov}</span>{tag(T,tg)}'
+            f'<span style="flex-grow: 1;"></span><span style="display: flex; color: {T["ts"]};">{ic(I["chevd"],11,2.2)}</span></span>')
 
-PROVS=[("Apple Foundation Models",["Local","Free"],"Built into macOS &middot; ready",None,True,False),
-       ("LM Studio",["Local","Free"],"localhost:1234 &middot; running",None,True,True),
-       ("Ollama",["Local","Free"],"Not running &middot; <b>Start Ollama</b>",None,True,True),
-       ("Claude",["Cloud","Subscription"],"Max plan &middot; this window 42% used, resets in 3 h","signed",True,True),
-       ("OpenRouter",["Cloud","By token","ZDR claimed"],"300+ models","openrouter_key",True,True),
-       ("Groq",["Cloud","By token","No ZDR claim"],"","groq_key",True,True),
-       ("Together AI",["Cloud","By token"],"","missing",False,True)]
-def provrow2(T,name,tags,line,cred,on,rm,*,last=False):
-    if cred=="signed": c=f'<span style="font-size: 11.5px; color: {T["ts"]};">Signed in &middot; <b style="color: {T["acc"]};">Sign Out</b></span>'
-    elif cred=="missing": c=(f'<span style="font-size: 11.5px; color: {T["fail"]};">{ic(I["failed"],11,2.2)} Key not set</span>'
-                             f'<span style="font-size: 11.5px; font-weight: 600; color: {T["acc"]};"> &middot; Choose a secret</span>')
-    elif cred: c=f'<span style="display: inline-flex; align-items: center; gap: 6px;"><span style="font-size: 11.5px; color: {T["ts"]};">Key</span>{ref(T,"secret",cred)}</span>'
-    else: c=""
-    sub_=" &middot; ".join(x for x in (line,) if x)
-    return (f'<div style="display: grid; grid-template-columns: 40px minmax(0,1fr) auto; gap: 10px; align-items: center; padding: 10px 0; {bd_(T,last)} opacity: {1 if on else 0.6};">'
-            f'{toggle(T,on)}<div><div style="display: flex; align-items: center; gap: 7px; flex-wrap: wrap;">'
-            f'<span style="font-size: 13px; font-weight: 600; color: {T["tp"]};">{name}</span>{"".join(tag(T,t) for t in tags)}</div>'
-            f'<div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 4px;">'
-            + (f'<span style="font-size: 11.5px; color: {T["ts"]};">{sub_}</span>' if sub_ else "") + (" " if sub_ and c else "") + c + '</div></div>'
-            f'<span style="display: flex; gap: 5px;">{btn(T,"Test","ghost",I["check"])}{ibtn(T,"x","Remove") if rm else ""}</span></div>')
+def mmenu(T,*,w=380):
+    """The dropdown, open: every model in Your Models, one line each, grouped local then cloud."""
+    def it(model,maker,prov,tg,right="",sel=False):
+        return (f'<div style="display: flex; align-items: center; gap: 7px; padding: 4px 10px; margin: 0 4px; border-radius: 5px; '
+                f'background: {T["acc"] if sel else "transparent"};">'
+                f'<span style="font-size: 12.5px; color: {T["onacc"] if sel else T["tp"]}; white-space: nowrap;">{model} '
+                f'<span style="color: {T["onacc"] if sel else T["ts"]};">{maker}</span></span>'
+                f'<span style="font-size: 11.5px; color: {T["onacc"] if sel else T["ts"]}; white-space: nowrap;">&middot; {prov}</span>'
+                + (tag(T,tg) if not sel else f'<span style="font-size: 10.5px; font-weight: 600; color: {T["onacc"]}; border: 1px solid {T["onacc"]}; border-radius: 999px; padding: 0 7px; line-height: 17px;">{tg}</span>')
+                + f'<span style="flex-grow: 1;"></span><span style="font-size: 11px; color: {T["onacc"] if sel else T["ts"]};">{right}</span></div>')
+    hd=lambda t:f'<div style="padding: 6px 14px 3px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; color: {T["tt"]};">{t}</div>'
+    return (f'<div style="width: {w}px; box-sizing: border-box; padding: 4px 0 6px; border-radius: 9px; background: {T["elevated"]}; '
+            f'border: 1px solid {T["bc"]}; box-shadow: 0 12px 32px rgba(26,24,21,0.2);">'
+            + hd("ON THIS MAC") + it("Qwen3 Coder 30B","Alibaba","LM Studio","Local") + it("Llama 3.2 3B","Meta","LM Studio","Local")
+            + it("Foundation Model","Apple","Apple","Local")
+            + hd("CLOUD") + it("Claude Sonnet","Anthropic","Claude","Subscription",sel=True) + it("Claude Opus","Anthropic","Claude","Subscription")
+            + it("Llama 3.3 70B","Meta","OpenRouter","Cloud","$0.13 / $0.40") + it("Llama 3.1 8B","Meta","Groq","Cloud","$0.05 / $0.08") + '</div>')
+
+def metisblock(T,*,open_=False):
+    grid=(f'<div style="display: grid; grid-template-columns: 70px minmax(0,1fr); gap: 8px 10px; align-items: center;">'
+          f'{lbl(T,"Model")}<span style="position: relative;">{mpick(T,"Claude Sonnet","Anthropic","Claude","Subscription",open_=open_)}'
+          + (f'<div style="position: absolute; left: 0; top: 34px; z-index: 3;">{mmenu(T)}</div>' if open_ else "") + '</span>'
+          f'{lbl(T,"Effort")}<span>{seg(T,["Low","Medium","High"],"Medium")}</span></div>')
+    return sunk(T,grid)
+
+PROVS=[("Apple Foundation Models","Local",None,True,False),
+       ("LM Studio","Local",None,True,True),
+       ("Ollama","Local","Not running",True,True),
+       ("Claude","Subscription",None,True,True),
+       ("OpenRouter","Cloud",None,True,True),
+       ("Groq","Cloud",None,True,True),
+       ("Together AI","Cloud","Key not set",False,True)]
+def provrow2(T,name,tg,issue,on,rm,*,last=False):
+    iss=(f'<span style="display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; color: {T["fail"] if "Key" in issue else T["ts"]};">'
+         + (ic(I["failed"],11,2.2) if "Key" in issue else "") + f'{issue}</span>') if issue else ""
+    return (f'<div style="display: flex; align-items: center; gap: 10px; padding: 7px 0; {bd_(T,last)}">'
+            f'<span style="opacity: {1 if on else 0.55};">{toggle(T,on)}</span>'
+            f'<span style="font-size: 13px; font-weight: 600; color: {T["tp"] if on else T["ts"]};">{name}</span>{tag(T,tg)}{iss}'
+            f'<span style="flex-grow: 1;"></span>'
+            f'{ibtn(T,"check","Test")}{ibtn(T,"gear","Configure")}' + (ibtn(T,"x","Remove") if rm else '<span style="width: 26px;"></span>') + '</div>')
 
 def providers2(T):
     return sunk(T,"".join(provrow2(T,*p_,last=(i==len(PROVS)-1)) for i,p_ in enumerate(PROVS))
-        + f'<div style="display: flex; align-items: center; gap: 10px; margin-top: 10px;">{btn(T,"Add Provider…","secondary",I["plus"])}'
-          f'<span style="font-size: 11.5px; color: {T["ts"]};">Switched-off providers aren&rsquo;t searched or offered.</span></div>')
+        + f'<div style="margin-top: 10px;">{btn(T,"Add Provider…","secondary",I["plus"])}</div>')
+
+def provconfig(T,*,w=440):
+    """The gear: a provider's settings, with secrets and variables anywhere a value goes."""
+    return (f'<div style="width: {w}px; box-sizing: border-box; background: {T["elevated"]}; border: 1px solid {T["bc"]}; border-radius: 12px; '
+            f'padding: 14px 16px; box-shadow: 0 14px 36px rgba(26,24,21,0.2);">'
+            f'<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;"><span style="font-size: 14px; font-weight: 600; color: {T["tp"]};">OpenRouter</span>{tag(T,"Cloud")}</div>'
+            f'<div style="display: grid; grid-template-columns: 80px minmax(0,1fr); gap: 8px 10px; align-items: center;">'
+            f'{lbl(T,"Base URL")}{rfield(T,"https://openrouter.ai/api/v1")}'
+            f'{lbl(T,"Key")}{rfield(T,ref(T,"secret","openrouter_key"),focus=True)}'
+            f'{lbl(T,"Headers")}{rfield(T,"HTTP-Referer: "+ref(T,"variable","site_url"))}'
+            f'{lbl(T,"Data policy")}<span>{seg(T,["ZDR only","Any"],"ZDR only")}</span></div>'
+            f'<div style="display: flex; align-items: center; gap: 8px; margin-top: 14px;">{btn(T,"Test","ghost",I["check"])}'
+            f'<span style="flex-grow: 1;"></span>{btn(T,"Cancel","ghost")}{btn(T,"Save","affirm")}</div></div>')
 
 def meter(T,label,used,total,frac,col):
     return (f'<div style="display: grid; grid-template-columns: 56px minmax(0,1fr) 96px; gap: 10px; align-items: center;">'
@@ -186,28 +214,31 @@ def chipsrow(T,items,on=()):
                       f'color: {T["acc"] if i in on else T["ts"]}; background: {T["accq"] if i in on else "transparent"}; font-weight: {600 if i in on else 500};">{i}</span>' for i in items)
             + '</div>')
 
-def yrow(T,name,maker,route,tags,right,act,*,last=False,loaded=False):
+def yrow(T,name,maker,prov,tg,right,act,*,last=False,loaded=False):
     st=(f'<span style="display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: {T["tp"]};">'
         f'<span style="width: 7px; height: 7px; border-radius: 50%; background: {T["ok"]};"></span>Loaded</span>' if loaded else "")
-    return (f'<div style="display: grid; grid-template-columns: minmax(0,1fr) 150px 84px; gap: 10px; align-items: center; padding: 8px 0; {bd_(T,last)}">'
-            f'<div><div style="display: flex; align-items: center; gap: 7px; flex-wrap: wrap;"><span style="font-size: 13px; font-weight: 600; color: {T["tp"]};">{name}</span>'
-            f'<span style="font-size: 11.5px; color: {T["ts"]};">{maker}</span></div>'
-            f'<div style="display: flex; align-items: center; gap: 6px; margin-top: 4px; flex-wrap: wrap;"><span style="font-size: 11.5px; color: {T["ts"]};">{route}</span>{"".join(tag(T,t) for t in tags)}</div></div>'
-            f'<div style="text-align: right;">{st}<div style="font-size: 11.5px; color: {T["ts"]}; margin-top: 2px;">{right}</div></div>'
+    return (f'<div style="display: grid; grid-template-columns: minmax(0,1fr) 92px 92px 118px 70px; gap: 8px; align-items: center; padding: 7px 0; {bd_(T,last)}">'
+            f'<span style="font-size: 12.5px; color: {T["tp"]}; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"><b style="font-weight: 600;">{name}</b> '
+            f'<span style="color: {T["ts"]};">{maker}</span></span>'
+            f'<span style="font-size: 12px; color: {T["ts"]};">{prov}</span><span>{tag(T,tg)}</span>'
+            f'<span style="font-size: 11.5px; color: {T["ts"]}; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap;">{st}{" &middot; " if st and right else ""}{right}</span>'
             f'<span style="display: flex; justify-content: flex-end;">{act}</span></div>')
+
+def searchrow(T,q=None):
+    f_=rfield(T,plain(q),focus=True) if q else rfield(T,ph(T,"Search 6 providers for models"))
+    return (f'<div style="display: flex; gap: 8px; align-items: center; margin-top: 12px;"><div style="flex-grow: 1;">{f_}</div>'
+            f'{btn(T,"Refresh","ghost",I["repeat"])}</div>')
 
 def yourmodels(T):
     head=(meter(T,"Memory","19 GB","64 GB",0.30,T["ag"]) + '<div style="height: 6px;"></div>' + meter(T,"Disk","61 GB","1 TB",0.12,T["ts"]))
-    search=(f'<div style="display: flex; gap: 8px; align-items: center; margin-top: 12px;"><div style="flex-grow: 1;">'
-            f'{rfield(T,ph(T,"Search 6 providers for models — llama, qwen, sonnet…"))}</div></div>')
-    grp=lambda t:f'<div style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; color: {T["tt"]}; margin: 14px 0 2px;">{t}</div>'
-    local=(yrow(T,"Qwen3 Coder 30B","Alibaba","LM Studio &middot; Q4_K_M",["Local","Free"],"19 GB",btn(T,"Unload","ghost"),loaded=True)
-           + yrow(T,"Llama 3.2 3B","Meta","LM Studio &middot; Q8",["Local","Free"],"3 GB",btn(T,"Load","secondary"))
-           + yrow(T,"Foundation Model","Apple","Built in",["Local","Free"],"&mdash;","",loaded=True,last=True))
-    cloud=(yrow(T,"Claude Sonnet","Anthropic","via Claude",["Cloud","Subscription"],"Included in Max",ibtn(T,"x","Remove"))
-           + yrow(T,"Claude Opus","Anthropic","via Claude",["Cloud","Subscription"],"Included in Max",ibtn(T,"x","Remove"))
-           + yrow(T,"Llama 3.1 8B","Meta","via Groq",["Cloud","By token"],"$0.05 / $0.08 per M",ibtn(T,"x","Remove"),last=True))
-    return sunk(T,head+search+grp("ON THIS MAC &middot; 3")+local+grp("FROM THE CLOUD &middot; 3")+cloud)
+    grp=lambda t:f'<div style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; color: {T["tt"]}; margin: 12px 0 0;">{t}</div>'
+    local=(yrow(T,"Qwen3 Coder 30B","Alibaba","LM Studio","Local","19 GB",btn(T,"Unload","ghost"),loaded=True)
+           + yrow(T,"Llama 3.2 3B","Meta","LM Studio","Local","3 GB",btn(T,"Load","secondary"))
+           + yrow(T,"Foundation Model","Apple","Apple","Local","",'',loaded=True,last=True))
+    cloud=(yrow(T,"Claude Sonnet","Anthropic","Claude","Subscription","In your plan",ibtn(T,"x","Remove"))
+           + yrow(T,"Claude Opus","Anthropic","Claude","Subscription","In your plan",ibtn(T,"x","Remove"))
+           + yrow(T,"Llama 3.1 8B","Meta","Groq","Cloud","$0.05 / $0.08",ibtn(T,"x","Remove"),last=True))
+    return sunk(T,head+searchrow(T)+grp("ON THIS MAC")+local+grp("CLOUD")+cloud)
 
 def offer(T,prov,tags,detail,price,act,*,best=None,last=False):
     return (f'<div style="display: grid; grid-template-columns: 110px minmax(0,1fr) 120px 76px; gap: 8px; align-items: center; padding: 7px 0 7px 12px; {bd_(T,last)}">'
@@ -220,28 +251,29 @@ def offer(T,prov,tags,detail,price,act,*,best=None,last=False):
 
 def modelsearch(T):
     head=(meter(T,"Memory","19 GB","64 GB",0.30,T["ag"]) + '<div style="height: 6px;"></div>' + meter(T,"Disk","61 GB","1 TB",0.12,T["ts"]))
-    search=(f'<div style="margin-top: 12px;">{rfield(T,plain("llama 3.3"),focus=True)}</div>'
-            f'<div style="display: flex; align-items: center; gap: 10px; margin-top: 9px;">{chipsrow(T,["Local","Cloud","Free","By token","Subscription","Fits this Mac","Tools"],on=("Tools",))}'
+    search=(searchrow(T,"llama 3.3")
+            + f'<div style="display: flex; align-items: center; gap: 10px; margin-top: 9px;">{chipsrow(T,["Local","Cloud","Subscription","Fits this Mac","Tools"],on=("Tools",))}'
             f'<span style="flex-grow: 1;"></span><span style="font-size: 11.5px; color: {T["ts"]}; white-space: nowrap;">Sort: Best match &#9662;</span></div>')
     m1=(f'<div style="margin-top: 14px; border: 1px solid {T["border"]}; border-radius: 10px; background: {T["bg"]}; padding: 10px 12px;">'
-        f'<div style="display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;"><span style="font-size: 14px; font-weight: 600; color: {T["tp"]};">Llama 3.3 70B Instruct</span>'
-        f'<span style="font-size: 11.5px; color: {T["ts"]};">Meta &middot; 128K context &middot; tools &middot; 5 places</span></div>'
+        f'<div style="display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;"><span style="font-size: 14px; font-weight: 600; color: {T["tp"]};">Llama 3.3 70B Instruct '
+        f'<span style="font-weight: 400; color: {T["ts"]};">Meta</span></span>'
+        f'<span style="font-size: 11.5px; color: {T["ts"]};">128K context &middot; tools &middot; 5 places</span></div>'
         f'<div style="margin-top: 6px;">'
-        + offer(T,"OpenRouter",["Cloud","By token"],"ZDR claimed","$0.13 / $0.40",btn(T,"Add","secondary",I["plus"]),best="CHEAPEST")
-        + offer(T,"Groq",["Cloud","By token"],"no ZDR claim","$0.59 / $0.79",btn(T,"Add","secondary",I["plus"]))
-        + offer(T,"Ollama",["Local","Free"],"Q4_K_M &middot; 43 GB &middot; needs 48 GB",f'<span style="color: {T["ts"]};">Tight fit</span>',btn(T,"Install","secondary",I["update"]))
-        + offer(T,"LM Studio",["Local","Free"],"Q3_K_L &middot; 37 GB &middot; needs 41 GB","Fits",btn(T,"Install","secondary",I["update"]))
-        + offer(T,"LM Studio",["Local","Free"],"Q8_0 &middot; 75 GB",f'<span style="color: {T["fail"]};">Too large</span>',btn(T,"Install","disabled",I["update"]),last=True)
+        + offer(T,"OpenRouter",["Cloud"],"ZDR","$0.13 / $0.40",btn(T,"Add","secondary",I["plus"]),best="CHEAPEST")
+        + offer(T,"Groq",["Cloud"],"","$0.59 / $0.79",btn(T,"Add","secondary",I["plus"]))
+        + offer(T,"Ollama",["Local"],"Q4 &middot; 43 GB",f'<span style="color: {T["ts"]};">Tight fit</span>',btn(T,"Install","secondary",I["update"]))
+        + offer(T,"LM Studio",["Local"],"Q3 &middot; 37 GB","Fits",btn(T,"Install","secondary",I["update"]))
+        + offer(T,"LM Studio",["Local"],"Q8 &middot; 75 GB",f'<span style="color: {T["fail"]};">Too large</span>',btn(T,"Install","disabled",I["update"]),last=True)
         + '</div><div style="font-size: 11px; color: {c}; margin-top: 6px;">Prices per million tokens, in / out.</div></div>'.replace("{c}",T["ts"]))
     m2=(f'<div style="margin-top: 10px; border: 1px solid {T["border"]}; border-radius: 10px; background: {T["bg"]}; padding: 10px 12px;">'
-        f'<div style="display: flex; align-items: baseline; gap: 8px;"><span style="font-size: 14px; font-weight: 600; color: {T["tp"]};">Llama 3.3 Nemotron Super 49B</span>'
-        f'<span style="font-size: 11.5px; color: {T["ts"]};">NVIDIA, from Llama 3.3 &middot; 2 places</span><span style="flex-grow: 1;"></span>'
+        f'<div style="display: flex; align-items: baseline; gap: 8px;"><span style="font-size: 14px; font-weight: 600; color: {T["tp"]};">Llama 3.3 Nemotron Super 49B <span style="font-weight: 400; color: {T["ts"]};">NVIDIA</span></span>'
+        f'<span style="font-size: 11.5px; color: {T["ts"]};">2 places</span><span style="flex-grow: 1;"></span>'
         f'<span style="font-size: 11.5px; color: {T["ts"]};">Local or cloud &middot; from $0.10 per M</span><span style="display: flex; color: {T["tt"]};">{ic(I["chevr"],12,2.2)}</span></div></div>')
     return sunk(T,head+search+m1+m2)
 
 def computepane(T,mode="default"):
-    models=yourmodels(T) if mode=="default" else modelsearch(T)
-    return (panehead(T,"Compute")+body(T,block(T,"METIS",metisblock(T)),block(T,"PROVIDERS",providers2(T)),
+    models=modelsearch(T) if mode=="search" else yourmodels(T)
+    return (panehead(T,"Compute")+body(T,block(T,"METIS USES",metisblock(T,open_=(mode=="menu"))),block(T,"PROVIDERS",providers2(T)),
             block(T,"YOUR MODELS" if mode=="default" else "YOUR MODELS &mdash; SEARCHING",models),block(T,"SPENDING LIMITS",limits2(T))))
 
 def limits2(T):
@@ -255,17 +287,14 @@ def limits2(T):
         + f'<div style="font-size: 11.5px; color: {T["ts"]}; margin-top: 8px;">Today $1.84 of $5.00 &middot; local models cost nothing &middot; Stop pauses routines and asks in Needs You.</div>')
 
 def agentcompute(T,*,w=560):
-    """In an agent's definition: a model, then where it runs."""
+    """In an agent's definition: one dropdown for the model and where it runs."""
     return (f'<div style="width: {w}px; box-sizing: border-box; border: 1px solid {T["bc"]}; border-radius: 12px; background: {T["bg"]}; padding: 14px 16px;">'
             f'<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px;">{agentchip(T,"collator")}'
             f'<span style="font-size: 12px; color: {T["ts"]};">definition</span></div>'
             + block(T,"COMPUTE",sunk(T,
                 f'<div style="display: grid; grid-template-columns: 70px minmax(0,1fr); gap: 8px 10px; align-items: center;">'
-                f'{lbl(T,"Model")}<span>{pick(T,"Llama 3.3 70B Instruct",250)}</span>'
-                f'{lbl(T,"Runs on")}<span style="display: flex; align-items: center; gap: 8px;">{pick(T,"OpenRouter",150)}{tag(T,"Cloud")}{tag(T,"By token")}'
-                f'<span style="font-size: 11.5px; color: {T["ts"]};">$0.13 / $0.40</span></span>'
-                f'{lbl(T,"Effort")}<span>{seg(T,["Low","Medium","High"],"Medium")}</span></div>'
-                + note(T,"Models come from Your Models. <b>Same as Metis</b> follows Metis&rsquo;s choice.")))
+                f'{lbl(T,"Model")}<span>{mpick(T,"Llama 3.3 70B","Meta","OpenRouter","Cloud",w=400)}</span>'
+                f'{lbl(T,"Effort")}<span>{seg(T,["Low","Medium","High"],"Medium")}</span></div>'))
             + '</div>')
 
 def limitrow(T,who,day,month,act,*,last=False):

@@ -241,6 +241,11 @@ describe("seed queries", () => {
         const literal = /^'([a-z_]+)'$/.exec(value);
         const constant = /^'\$\{([A-Z_]+)\}'$/.exec(value);
         const resolved = literal?.[1] ?? (constant ? new RegExp(`\\b${constant[1]}\\s*=\\s*"([a-z_]+)"`).exec(text)?.[1] : undefined);
+        // A kind passed as a parameter is readable only where the same file
+        // refuses, before the insert, any kind the table does not map
+        // (packages/core/src/mirrors.ts's `raiseMirror`): the guard is the
+        // table itself, so there is nothing for this scan to check.
+        if (resolved === undefined && /^\$\d+$/.test(value) && /if \(!isRequestKind\(/.test(text)) continue;
         if (resolved === undefined) unreadable.push(where);
         else written.set(resolved, where);
       }

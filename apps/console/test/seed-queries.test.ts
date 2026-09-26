@@ -168,6 +168,11 @@ describe("seed queries", () => {
     // (an agent with `queries: true` learning how many things the owner has
     // yet to decide, including about that agent's own asks, is the same
     // hole one door narrower). `GET /api/needs-you/count` is its one door.
+    // `turn_progress` (T1-15/T2-17) and `routine_history` (T1-15/T3-3) are
+    // each the owner's own endpoint too — a turn or a routine's run history
+    // is not something the generic door or an agent's `queries_run` needs a
+    // second, unscoped way to read. `spend_by_actor` stays `generic`: it is
+    // Usage's *Where it went* ranking, nothing scoped to a caller.
     expect(routeBacked.sort()).toEqual([
       "board",
       "collector_health",
@@ -180,14 +185,17 @@ describe("seed queries", () => {
       "pending_count",
       "pending_requests",
       "route_features",
+      "routine_history",
       "secret_last_used",
       "session_detail",
       "today_order",
+      "turn_progress",
       "vault_task_by_key",
       "vault_tasks_query",
       "vault_tasks_recurring",
     ]);
     expect(store.exposure("task_ageing")).toBe("generic");
+    expect(store.exposure("spend_by_actor")).toBe("generic");
     for (const name of REQUIRED.filter((n) => !routeBacked.includes(n))) expect(store.exposure(name), name).toBe("generic");
   });
 
@@ -437,6 +445,96 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
 
     // never run at all: the same absence `run_detail` gives an unknown id
     expect((await store.run("collector_health", { component: `${tag}-missing` })).rows).toHaveLength(0);
+  });
+
+  // T1-15/T2-17: the working indicator's data. The join is meta.turn_id,
+  // EXACT — the same key `run_detail` joins tool calls on — so a second turn
+  // running at the same instant never bleeds into this one's strip, and a
+  // finished_at IS NULL row is the one still in flight (the two-phase marker
+  // `collector_health` also reads).
+  it("turn_progress: joins tool calls by meta.turn_id exactly, shows the in-flight row, and a blank/unknown turn_id returns no rows", async () => {
+    const turnId = `tp-${Date.now()}`;
+    const other = `${turnId}-other`;
+    await pool.query(
+      `INSERT INTO runs (component, kind, tool, ok, started_at, finished_at, meta) VALUES
+         ($1, 'tool', 'search_notes', true, now() - interval '2 seconds', now() - interval '1 seconds', $2::jsonb),
+         ($1, 'tool', 'write_note',   NULL, now() - interval '1 seconds', NULL,                          $2::jsonb),
+         ($1, 'tool', 'unrelated',    true, now(),                       now(),                          $3::jsonb)`,
+      ["seedq-agent", JSON.stringify({ turn_id: turnId }), JSON.stringify({ turn_id: other })],
+    );
+    const rows = (await store.run("turn_progress", { turn_id: turnId })).rows;
+    expect(rows.map((r) => r.tool)).toEqual(["search_notes", "write_note"]); // oldest first, the other turn excluded
+    expect(rows[0]!.finished_at).not.toBeNull();
+    expect(rows[1]!.finished_at).toBeNull(); // still running — this is the strip's "current tool"
+    expect(rows[1]!.ok).toBeNull();
+
+    expect((await store.run("turn_progress")).rows).toHaveLength(0); // the default, blank turn_id
+    expect((await store.run("turn_progress", { turn_id: `${turnId}-nope` })).rows).toHaveLength(0);
+  });
+
+  // T1-15/T3-3: Scheduled's per-routine history. `outcome` is meta.outcome
+  // (T1-4's shared vocabulary) and `steps` is meta.processed (the runner's
+  // own per-tick count) — a routine's own detailed row carries neither the
+  // runner's `processed` key, so `steps` reads NULL rather than a false 0.
+  it("routine_history: outcome and steps from meta, newest first, scoped to one component and capped by limit", async () => {
+    const tag = `rh-${Date.now()}`;
+    await pool.query(
+      `INSERT INTO runs (component, kind, ok, cost_usd, ts, meta) VALUES
+         ($1, 'routine_run', true,  0.01, now() - interval '2 hours', $2::jsonb),
+         ($1, 'routine_run', true,  NULL, now() - interval '1 hours', $3::jsonb),
+         ($1, 'routine_run', false, NULL, now(),                      $4::jsonb),
+         -- a different component must not leak in
+         ($5, 'routine_run', true,  NULL, now(),                      $2::jsonb)`,
+      [
+        tag,
+        JSON.stringify({ processed: 3, outcome: "acted" }),
+        JSON.stringify({ outcome: "silent" }), // the runner's silent tick has no `processed` of note
+        JSON.stringify({ outcome: "skipped:template_missing" }), // a routine's own detailed skip row
+        `${tag}-other`,
+      ],
+    );
+    const rows = (await store.run("routine_history", { component: tag, limit: 50 })).rows;
+    expect(rows).toHaveLength(3);
+    expect(rows.map((r) => r.outcome)).toEqual(["skipped:template_missing", "silent", "acted"]); // newest first
+    expect(rows.map((r) => r.ok)).toEqual([false, true, true]);
+    const acted = rows.find((r) => r.outcome === "acted")!;
+    expect(Number(acted.steps)).toBe(3);
+    expect(Number(acted.cost_usd)).toBeCloseTo(0.01);
+    const silent = rows.find((r) => r.outcome === "silent")!;
+    expect(silent.steps).toBeNull(); // no `processed` recorded — NULL, never a false 0
+
+    expect((await store.run("routine_history", { component: tag, limit: 1 })).rows).toHaveLength(1);
+    expect((await store.run("routine_history", { component: `${tag}-missing` })).rows).toHaveLength(0);
+  });
+
+  // T1-15: Usage's *Where it went* — the same $0/unpriced accounting `spend`
+  // uses (invariant 3), grouped by actor instead of by day/provider/model.
+  it("spend_by_actor: totals per actor over the window, unpriced calls counted but priced at $0, excluded when there is no cost at all", async () => {
+    const tag = `sba-${Date.now()}`;
+    await pool.query(
+      `INSERT INTO runs (component, kind, ok, tokens_in, tokens_out, cost_usd, meta) VALUES
+         ($1, 'turn', true, 1000, 100, 0.02, $2::jsonb),
+         ($1, 'turn', true,  500,  50, 0.01, $2::jsonb),
+         ($1, 'turn', true,  200,  20, 0,    $3::jsonb),
+         ($1, 'tool', true, NULL, NULL, NULL, $2::jsonb)`, // no cost recorded at all — excluded entirely
+      [tag, JSON.stringify({ cost_source: "provider" }), JSON.stringify({ cost_source: "unknown" })],
+    );
+    // `cache_ttl: 60` (like `runs_summary`'s dashboard tile): every param
+    // combination below is chosen NOT to be `days: 31` — the "every seed
+    // query executes with its defaults" test above already ran this query
+    // with its default params before any fixture existed, and that empty
+    // answer is still live in the cache for its exact key.
+    const rows = (await store.run("spend_by_actor", { days: 45 })).rows;
+    const mine = rows.find((r) => r.actor === tag)!;
+    expect(mine).toBeDefined();
+    expect(Number(mine.calls)).toBe(3); // the uncosted tool call is not one of them
+    expect(Number(mine.calls_unpriced)).toBe(1);
+    expect(Number(mine.tokens_in)).toBe(1700);
+    expect(Number(mine.cost_usd)).toBeCloseTo(0.03);
+
+    // the window is a window
+    await pool.query(`UPDATE runs SET ts = now() - interval '60 days' WHERE component = $1`, [tag]);
+    expect((await store.run("spend_by_actor", { days: 10 })).rows.find((r) => r.actor === tag)).toBeUndefined();
   });
 
   // OPEN-6's measurement (docs/research/2026-09-cost-optimization.md

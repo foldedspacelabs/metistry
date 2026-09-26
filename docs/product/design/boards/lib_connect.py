@@ -105,7 +105,7 @@ def conndetail3(T,*,w=None):
     wd=f"width: {w}px;" if w else ""
     head=(f'<div style="display: flex; align-items: center; gap: 11px; padding: 13px 16px; border-bottom: 1px solid {T["border"]};">'
           f'<span style="display: flex; color: {T["ts"]}; transform: rotate(180deg);">{ic(I["chevr"],14,2.2)}</span>'
-          f'{tglyph(T,"mcp",17,T["tp"])}<div style="flex-grow: 1;"><div style="font-size: 15px; font-weight: 600; color: {T["tp"]};">Devin</div>'
+          f'{tglyph(T,"mcp",17,T["tp"])}<div style="flex-grow: 1;"><div style="display: flex; align-items: center; gap: 8px;"><span style="font-size: 15px; font-weight: 600; color: {T["tp"]};">Devin</span>{known_chip(T)}</div>'
           f'<div style="font-size: 12px; color: {T["ts"]}; margin-top: 2px;">MCP server &middot; API</div></div>'
           f'{btn(T,"Test","secondary",I["check"])}</div>')
     how=sunk(T,
@@ -116,7 +116,8 @@ def conndetail3(T,*,w=None):
         f'<div>{rfield(T,"Bearer "+ref(T,"secret","devin_key"))}'
         f'<div style="display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: {T["fail"]}; margin-top: 5px;">'
         f'{ic(I["failed"],12,2.2)}Expired 2 days ago &middot; <span style="font-weight: 600; color: {T["acc"]};">Replace in Secrets</span></div></div>'
-        f'<span style="font-size: 12px; color: {T["ts"]};">Organization</span>{rfield(T,ref(T,"variable","devin_org"))}</div>')
+        f'<span style="font-size: 12px; color: {T["ts"]};">Organization</span>{rfield(T,ref(T,"variable","devin_org"))}</div>'
+        + f'<div style="margin-top: 6px;">{devin_extra(T)}</div>')
     tools=sunk(T,
         toolgroup(T,"READS",[("list_sessions","Your sessions and their status","on"),
                              ("read_wiki","A repo&rsquo;s generated wiki","on")],first=True)
@@ -314,3 +315,152 @@ def secretfail(T,*,w=460):
     return rcard(T,rhead2(T,I["key"],"ACCESS",who="metis",when="2 days ago")
                  + rask(T,"Devin&rsquo;s key expired","devin_key &middot; used by 4 things")
                  + deps + field_ + ranswers(T,"Replace Key",pglyph="key",revise=None,decline=None,help_=False),w=w)
+
+# ==== configuring a connection: known services vs custom (2026-09-25, C118) =================
+I.setdefault("term",'<rect x="3.5" y="5" width="17" height="14" rx="2"/><path d="M7.5 10l2.5 2-2.5 2M12.5 14.5h4"/>')
+I.setdefault("globe",'<circle cx="12" cy="12" r="8.2"/><path d="M3.8 12h16.4M12 3.8c2.4 2.4 3.4 5.2 3.4 8.2s-1 5.8-3.4 8.2c-2.4-2.4-3.4-5.2-3.4-8.2s1-5.8 3.4-8.2z"/>')
+
+def known_chip(T):
+    return (f'<span style="display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 600; color: {T["ts"]}; '
+            f'border: 1px solid {T["bc"]}; border-radius: 999px; padding: 0 7px; line-height: 17px;">{ic(I["check"],10,2.4)}Known service</span>')
+
+def lbl(T,t): return f'<span style="font-size: 12px; color: {T["ts"]};">{t}</span>'
+
+def kvedit(T,rows,*,cols=("NAME","VALUE"),add="Add",namew=150):
+    """Name / value rows. Values take text, {{ secret.x }} and {{ variable.x }}; names are plain.
+    A row may carry a check line under it (ok or warn)."""
+    head=(f'<div style="display: grid; grid-template-columns: {namew}px minmax(0,1fr) 18px; gap: 8px; padding: 0 0 5px; '
+          f'font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; color: {T["tt"]};"><span>{cols[0]}</span><span>{cols[1]}</span><span></span></div>')
+    out=""
+    for r in rows:
+        n,v=r[0],r[1]; note=r[2] if len(r)>2 else None
+        out+=(f'<div style="display: grid; grid-template-columns: {namew}px minmax(0,1fr) 18px; gap: 8px; align-items: center; margin-bottom: 6px;">'
+              f'{rfield(T,n)}{rfield(T,v)}<span style="display: flex; color: {T["tt"]};">{ic(I["x"],12,2)}</span></div>')
+        if note:
+            kind,text=note
+            col={"ok":T["ok"],"warn":T["deg"],"info":T["ts"]}[kind]
+            g={"ok":I["check"],"warn":I["warn"],"info":I["lock"]}[kind]
+            out+=(f'<div style="display: flex; align-items: center; gap: 6px; margin: -1px 0 8px {namew+8}px; font-size: 11.5px; color: {T["ts"]};">'
+                  f'<span style="display: flex; color: {col};">{ic(g,12,2.1)}</span>{text}</div>')
+    return (head+out+f'<div style="font-size: 12px; font-weight: 600; color: {T["acc"]}; display: inline-flex; align-items: center; gap: 5px;">'
+            f'{ic(I["plus"],12,2.2)}{add}</div>')
+
+def seg(T,items,sel):
+    return (f'<span style="display: inline-flex; padding: 2px; border-radius: 8px; background: {T["sunken"]}; border: 1px solid {T["border"]};">'
+            + "".join(f'<span style="padding: 4px 11px; border-radius: 6px; font-size: 12px; font-weight: {600 if i==sel else 500}; '
+                      f'color: {T["tp"] if i==sel else T["ts"]}; background: {T["bg"] if i==sel else "transparent"}; '
+                      f'box-shadow: {"0 1px 2px rgba(0,0,0,0.12)" if i==sel else "none"};">{i}</span>' for i in items) + '</span>')
+
+def reqpreview(T,lines):
+    return (f'<div style="border-radius: 9px; background: {T["sunken"]}; border: 1px solid {T["border"]}; padding: 10px 12px; '
+            f'font-family: {MONO}; font-size: 11px; line-height: 1.75; color: {T["tp"]}; overflow: hidden;">{"<br>".join(lines)}</div>')
+
+def masked(T,name):
+    return (f'<span style="color: {T["ts"]};">&bull;&bull;&bull;&bull;&bull;&bull;</span>'
+            f'<span style="color: {T["ts"]};"> ({name})</span>')
+
+def chead(T,glyph,name,sub_,chip=""):
+    return (f'<div style="display: flex; align-items: center; gap: 11px; padding: 13px 16px; border-bottom: 1px solid {T["border"]};">'
+            f'<span style="display: flex; color: {T["ts"]}; transform: rotate(180deg);">{ic(I["chevr"],14,2.2)}</span>'
+            f'<span style="display: flex; color: {T["tp"]};">{ic(I[glyph],17,1.9)}</span>'
+            f'<div style="flex-grow: 1;"><div style="display: flex; align-items: center; gap: 8px;">'
+            f'<span style="font-size: 15px; font-weight: 600; color: {T["tp"]};">{name}</span>{chip}</div>'
+            f'<div style="font-size: 12px; color: {T["ts"]}; margin-top: 2px;">{sub_}</div></div>'
+            f'{btn(T,"Test","secondary",I["check"])}</div>')
+
+def pane(T,head,blocks,*,w=None):
+    wd=f"width: {w}px;" if w else ""
+    return (f'<div style="{wd} background: {T["bg"]};">{head}<div style="padding: 16px; display: flex; flex-direction: column; gap: 16px;">'
+            + "".join(blocks) + '</div></div>')
+
+# -- a custom MCP server over HTTP --------------------------------------------------------
+def custom_http(T,*,w=None):
+    reach=sunk(T,
+        f'<div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">{lbl(T,"Reached by")}{seg(T,["HTTP","Command"],"HTTP")}</div>'
+        f'<div style="display: grid; grid-template-columns: 70px minmax(0,1fr); gap: 8px 10px; align-items: center;">'
+        f'{lbl(T,"URL")}{rfield(T,"https://tools.internal/mcp")}</div>')
+    query=sunk(T,kvedit(T,[("workspace",ref(T,"variable","team")),("region","us-east")],cols=("PARAMETER","VALUE"),add="Add Parameter"))
+    auth=sunk(T,
+        f'<div style="display: flex; align-items: center; gap: 10px;">{seg(T,["None","Bearer","Basic","API Key","OAuth"],"Bearer")}</div>'
+        f'<div style="display: grid; grid-template-columns: 70px minmax(0,1fr); gap: 8px 10px; align-items: center; margin-top: 10px;">'
+        f'{lbl(T,"Token")}{rfield(T,ref(T,"secret","tools_token"))}</div>'
+        f'<div style="display: flex; align-items: center; gap: 6px; margin: 6px 0 0 80px; font-size: 11.5px; color: {T["ts"]};">'
+        f'<span style="display: flex; color: {T["ok"]};">{ic(I["check"],12,2.1)}</span>tools_token may go to tools.internal</div>')
+    headers=sunk(T,kvedit(T,[
+        ("X-Team",ref(T,"variable","team")),
+        ("X-Client","metistry/1.4"),
+        ("X-Audit-Key",ref(T,"secret","github_read"),("warn",'github_read may only go to api.github.com &middot; <span style="font-weight: 600; color: '+T["acc"]+';">Allow tools.internal</span>'))],
+        cols=("HEADER","VALUE"),add="Add Header"))
+    adv=(disclose(T,"Timeout, certificates, network",None,meta="30 s &middot; system trust &middot; direct"))
+    prev=reqpreview(T,[f'<b>POST</b> https://tools.internal/mcp?workspace=platform&amp;region=us-east',
+                       f'Authorization: Bearer {masked(T,"tools_token")}',
+                       'X-Team: platform','X-Client: metistry/1.4',
+                       f'X-Audit-Key: <span style="color: {T["deg"]};">blocked &mdash; not allowed to this host</span>'])
+    return pane(T,chead(T,"relay","Internal Tools","MCP server &middot; custom"),
+                [block(T,"HOW METISTRY REACHES IT",reach),block(T,"QUERY PARAMETERS",query),block(T,"AUTHENTICATION",auth),
+                 block(T,"HEADERS",headers),adv,block(T,"WHAT IT SENDS",prev)],w=w)
+
+# -- a custom MCP server run as a command ----------------------------------------------------
+def custom_cmd(T,*,w=None):
+    reach=sunk(T,
+        f'<div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">{lbl(T,"Reached by")}{seg(T,["HTTP","Command"],"Command")}</div>'
+        f'<div style="display: grid; grid-template-columns: 70px minmax(0,1fr); gap: 8px 10px; align-items: center;">'
+        f'{lbl(T,"Command")}{rfield(T,"github-mcp-server")}'
+        f'{lbl(T,"Arguments")}{rfield(T,"stdio --read-only")}'
+        f'{lbl(T,"Folder")}{rfield(T,ref(T,"variable","dev_root"))}'
+        f'{lbl(T,"Runs")}<span>{seg(T,["On this Mac","In a container"],"In a container")}</span></div>')
+    env=sunk(T,kvedit(T,[
+        ("GITHUB_PERSONAL_ACCESS_TOKEN",ref(T,"secret","github_read"),("info","Given to this command only; never written to disk")),
+        ("GITHUB_TOOLSETS","repos,issues,pull_requests")],cols=("VARIABLE","VALUE"),add="Add Variable",namew=210))
+    return pane(T,chead(T,"relay","GitHub Tools","MCP server &middot; custom &middot; local command"),
+                [block(T,"HOW METISTRY REACHES IT",reach),block(T,"ENVIRONMENT",env)],w=w)
+
+# -- an A2A agent: the agent card is the URL ------------------------------------------------
+def custom_a2a(T,*,w=None):
+    reach=sunk(T,
+        f'<div style="display: grid; grid-template-columns: 70px minmax(0,1fr); gap: 8px 10px; align-items: center;">'
+        f'{lbl(T,"Protocol")}<span>{seg(T,["A2A","ACP"],"A2A")}</span>'
+        f'{lbl(T,"Agent card")}{rfield(T,"https://research.fsl.dev/.well-known/agent-card.json")}</div>'
+        f'<div style="font-size: 11.5px; color: {T["ts"]}; margin: 8px 0 0 80px;">Found: <b style="color: {T["tp"]};">Research Desk</b> &middot; 3 skills &middot; streaming</div>')
+    headers=sunk(T,kvedit(T,[("Authorization","Bearer "+ref(T,"secret","research_key"))],cols=("HEADER","VALUE"),add="Add Header"))
+    return pane(T,chead(T,"agents","Research Desk","Agent &middot; A2A &middot; custom"),
+                [block(T,"HOW METISTRY REACHES IT",reach),block(T,"HEADERS",headers)],w=w)
+
+# -- the Add flow's second step: known services first, then custom -----------------------------
+def addmcp(T,*,w=560):
+    known=[("GitHub","api"),("Linear","relay"),("Sentry","relay"),("Jira","relay"),("Notion","relay"),("Google Drive","folder"),
+           ("Devin","relay"),("Slack","chat")]
+    grid="".join(f'<div style="display: flex; align-items: center; gap: 8px; padding: 9px 11px; border-radius: 9px; border: 1px solid {T["border"]}; '
+                 f'background: {T["surface"]};"><span style="display: flex; color: {T["ts"]};">{ic(I[g],15,1.9)}</span>'
+                 f'<span style="font-size: 12.5px; font-weight: 500; color: {T["tp"]};">{n}</span></div>' for n,g in known)
+    return (f'<div style="width: {w}px; box-sizing: border-box; background: {T["elevated"]}; border: 1px solid {T["bc"]}; border-radius: 14px; '
+            f'padding: 16px; box-shadow: 0 16px 40px rgba(26,24,21,0.18);">'
+            f'<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">'
+            f'<span style="display: flex; color: {T["ts"]}; transform: rotate(180deg);">{ic(I["chevr"],13,2.2)}</span>'
+            f'<span style="font-size: 15px; font-weight: 600; color: {T["tp"]};">Add an MCP server</span></div>'
+            + rfield(T,'<span style="color: '+T["ts"]+';">Search known services</span>') +
+            f'<div style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; color: {T["tt"]}; margin: 12px 0 7px;">KNOWN &mdash; METISTRY ASKS ONLY FOR WHAT IT NEEDS</div>'
+            f'<div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;">{grid}</div>'
+            f'<div style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; color: {T["tt"]}; margin: 14px 0 7px;">CUSTOM</div>'
+            f'<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">'
+            + "".join(f'<div style="display: flex; align-items: center; gap: 9px; padding: 10px 12px; border-radius: 9px; border: 1px solid {T["acc"] if i==0 else T["border"]}; '
+                      f'background: {T["surface"]}; {"box-shadow: inset 3px 0 0 "+T["acc"]+";" if i==0 else ""}"><span style="display: flex; color: {T["tp"]};">{ic(I[g],16,1.9)}</span>'
+                      f'<div><div style="font-size: 12.5px; font-weight: 600; color: {T["tp"]};">{a}</div><div style="font-size: 11.5px; color: {T["ts"]};">{b}</div></div></div>'
+                      for i,(g,a,b) in enumerate((("globe","By URL","Headers, parameters, auth"),("term","By command","Arguments, environment"))))
+            + f'</div><div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px;">{btn(T,"Cancel","ghost")}{btn(T,"Continue","affirm")}</div></div>')
+
+# -- what each way of reaching a connection asks for --------------------------------------------
+def reachtable(T):
+    rows=[("HTTP","MCP &middot; A2A &middot; API &middot; Feed &middot; a web page","URL &middot; query parameters &middot; authentication &middot; headers &middot; timeout, certificates, network"),
+          ("Command","MCP &middot; ACP","command &middot; arguments &middot; folder &middot; environment &middot; runs on this Mac or in a container"),
+          ("Path","Files","folder or file &middot; include and skip patterns &middot; watch for changes")]
+    return ('<table style="width: 100%; border-collapse: collapse; font-size: 12.5px;">'
+            + f'<tr style="color: {T["tt"]}; text-align: left; font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em;">'
+              f'<th style="padding: 0 14px 8px 0;">REACHED BY</th><th style="padding: 0 14px 8px 0;">USED FOR</th><th style="padding: 0 0 8px;">ASKS FOR</th></tr>'
+            + "".join(f'<tr style="border-top: 1px solid {T["border"]};"><td style="padding: 9px 14px 9px 0; font-weight: 600; color: {T["tp"]};">{a}</td>'
+                      f'<td style="padding: 9px 14px 9px 0; color: {T["ts"]};">{b}</td><td style="padding: 9px 0; color: {T["tp"]};">{c}</td></tr>' for a,b,c in rows)
+            + '</table>')
+
+def devin_extra(T):
+    """A known service keeps its named fields and still takes extra headers and parameters."""
+    return disclose(T,"Extra headers and parameters",None,meta="none")

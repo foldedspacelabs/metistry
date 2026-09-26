@@ -392,7 +392,7 @@ LIST=[(I["key"],"ACCESS",'Read <span style="font-family: '+MONO+'; font-size: 13
       (I["key"],"ACCESS","Write to the release notes folder","taskuary","41m","external"),
       (I["book"],"NOTE","Keep the note on lease renewal","metis","1h","internal"),
       (I["book"],"NOTE","Keep the note on Q4 compute pricing","metis","2h","internal"),
-      (I["key"],"ACCESS","Enrol a new agent on the Studio","—","3h","external")]
+      (I["key"],"ACCESS","Enroll a new agent on the Studio","—","3h","external")]
 
 def fulllist(T,mode="select",w=760):
     n=3 if mode!="plain" else 0

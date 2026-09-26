@@ -214,7 +214,7 @@ screens; the newer screens (10–17), mine, carry almost none.
   *Budgets in Settings →* point at the Compute pane, which is undrawn — and a monthly
   instance budget's relationship to per-project daily budgets is unspecified;
   *Run Now* on an agent that has no task; *+ New Agent*; the connected-agent token
-  enrolment.
+  enrollment.
 - **R2.7 Run detail is empty for every run before the archive ships** and after 30
   days. It needs an absent state that still shows cost and tool calls.
 - **R2.8 Board polls every 10s with no failure state**, so a dropped connection

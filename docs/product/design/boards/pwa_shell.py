@@ -1,4 +1,4 @@
-"""Board: PWA — the shell: tabs, More, install, enrolment, notifications, offline (screen 18)."""
+"""Board: PWA — the shell: tabs, More, install, enrollment, notifications, offline (screen 18)."""
 from lib_pwa import *
 
 CW,CH=2660,1710
@@ -27,15 +27,15 @@ install=(f'<div style="text-align: center; padding: 18px 8px 6px;">{keyed(L,52)}
 S2=phone(L,"",tab="Today",header=hdr(L,"Today",sub=F["day"]),overlay=sheet(L,"",install,right="",top=250),
          label="INSTALL &middot; IPHONE, SAFARI")
 
-enrol=(f'<div style="text-align: center; padding: 70px 18px 0;">{keyed(L,64)}'
-       f'<div style="font-size: 26px; font-weight: 700; color: {L["tp"]}; margin-top: 18px;">Enrol this device</div>'
+enroll=(f'<div style="text-align: center; padding: 70px 18px 0;">{keyed(L,64)}'
+       f'<div style="font-size: 26px; font-weight: 700; color: {L["tp"]}; margin-top: 18px;">Enroll this device</div>'
        f'<div style="font-size: 15px; color: {L["ts"]}; line-height: 1.5; margin-top: 10px;">This one-time link came from '
        f'<b style="color: {L["tp"]};">Studio</b>. Enrolling makes a passkey on this phone; the link then stops working.</div>'
        f'<div style="margin-top: 26px; display: flex; justify-content: center;">'
        f'<button style="font: inherit; font-size: 16px; font-weight: 600; padding: 13px 22px; border-radius: 12px; border: 0; '
-       f'background: {L["acc"]}; color: {L["onacc"]}; width: 100%;">Enrol with a Passkey</button></div>'
+       f'background: {L["acc"]}; color: {L["onacc"]}; width: 100%;">Enroll with a Passkey</button></div>'
        f'<div style="font-size: 13px; color: {L["ts"]}; margin-top: 16px;">Name this device <b style="color: {L["tp"]};">Matt&rsquo;s iPhone</b> &middot; Change</div></div>')
-S3=phone(L,enrol,tabs=False,label="FIRST OPEN &middot; A ONE-TIME LINK")
+S3=phone(L,enroll,tabs=False,label="FIRST OPEN &middot; A ONE-TIME LINK")
 
 ask=(f'<div style="border: 1px solid {L["bc"]}; border-radius: 12px; background: {L["elevated"]}; padding: 13px 14px;">'
      f'<div style="display: flex; gap: 10px; align-items: flex-start;"><span style="display: flex; color: {L["acc"]};">{ic(I["bell"],19)}</span>'
@@ -84,7 +84,7 @@ nmore=narrow(L,group(L,[grow(L,"Activity",glyph="activity"),grow(L,"Agents",glyp
                + group(L,[grow(L,"Usage",glyph="gauge",detail="$41.20 of $60"),grow(L,"Settings",glyph="gear",last=True)]),
              tab="More",title="More",h=640)
 
-body=(heading("PWA &middot; SCREEN 18","The shell &mdash; tabs, More, install, enrolment, notifications, offline",
+body=(heading("PWA &middot; SCREEN 18","The shell &mdash; tabs, More, install, enrollment, notifications, offline",
         "Everything the phone has that the Mac does not, and the one rule that decides what works without a connection.",L)
   + row(S1+S2+S3+S4+f'<div style="flex-grow: 1; min-width: 0;">{NAVP}</div>',24)
   + row(nmore + f'<div style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 20px;">{OFF}</div>',24))

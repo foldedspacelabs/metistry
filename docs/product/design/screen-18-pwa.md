@@ -25,7 +25,7 @@ Knowledge · More — with the bell and + in the header.**
 - **The manifest is stale:** `name: "metistry"` (decision 15 says *Metistry*),
   theme and background `#f6f7f9` (the ground is `#f7f4ee`), and one SVG icon —
   which iOS does not honour (C13).
-- **Enrolment** is a one-time-code link opened on the device (`#enroll=`), then a
+- **Enrollment** is a one-time-code link opened on the device (`#enroll=`), then a
   passkey. Drawn as a wall, not an alert.
 
 ## 1. The shell
@@ -118,7 +118,7 @@ works.
    ticks, replaying with `Idempotency-Key` and the check route's 409.
 3. **Manifest:** `name: "Metistry"`, theme and background from the tokens per
    scheme, and PNG icons with `apple-touch-icon` (C13).
-4. **Push and enrolment without `alert()`** — the sheets drawn here.
+4. **Push and enrollment without `alert()`** — the sheets drawn here.
 5. **Compute ▸ Budgets** reads and writes the instance and per-project budgets
    (review 01 R2.6).
 6. `board` returns `has_thread` and a count per card (screen 16).

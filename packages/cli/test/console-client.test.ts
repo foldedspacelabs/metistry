@@ -509,6 +509,43 @@ describe("a namespaced --instance: the console verbs target ITS port, never the 
     expect(c.urls).toEqual(["http://127.0.0.1:8304/api/whoami"]);
   });
 
+  // The other verbs that present the owner token. What they do with the
+  // (whoami-shaped) answer is not the point and may fail; WHERE the token went is.
+  const onlyNamespaced = (urls: string[]) => {
+    expect(urls.length).toBeGreaterThan(0);
+    for (const u of urls) expect(u.startsWith("http://127.0.0.1:8304/")).toBe(true);
+    expect(urls.join()).not.toContain(":8080");
+  };
+
+  it("agents list and agents autonomy", async () => {
+    const dir = await namespacedInstance();
+    process.env.METISTRY_LOCAL_OWNER_TOKEN = TOKEN;
+    const c = recordingConsole();
+    const io = { out: () => {}, err: () => {}, platform: "linux" as const, fetchFn: c.fetchFn };
+    await main(["agents", "list", "--json", "--instance", dir], io);
+    await main(["agents", "autonomy", "researcher", "--json", "--instance", dir], io);
+    onlyNamespaced(c.urls);
+    expect(c.urls.some((u) => u.endsWith("/api/agents"))).toBe(true);
+  });
+
+  it("runs export", async () => {
+    const dir = await namespacedInstance();
+    process.env.METISTRY_LOCAL_OWNER_TOKEN = TOKEN;
+    const c = recordingConsole();
+    await main(["runs", "export", "--limit", "1", "--instance", dir], { out: () => {}, err: () => {}, platform: "linux", fetchFn: c.fetchFn });
+    onlyNamespaced(c.urls);
+    expect(c.urls[0]).toContain("/api/runs/export");
+  });
+
+  it("compute route-report", async () => {
+    const dir = await namespacedInstance();
+    process.env.METISTRY_LOCAL_OWNER_TOKEN = TOKEN;
+    const c = recordingConsole();
+    await main(["compute", "route-report", "--json", "--instance", dir], { out: () => {}, err: () => {}, platform: "linux", fetchFn: c.fetchFn });
+    onlyNamespaced(c.urls);
+    expect(c.urls[0]).toContain("/api/q/route_report");
+  });
+
   it("an explicit METISTRY_CONSOLE_URL still wins over the namespace, as it does for doctor and connect", async () => {
     const dir = await namespacedInstance();
     const r = await consoleTarget({ env: { METISTRY_LOCAL_OWNER_TOKEN: TOKEN, METISTRY_CONSOLE_URL: "http://127.0.0.1:9999" }, platform: "linux", instanceDir: dir });

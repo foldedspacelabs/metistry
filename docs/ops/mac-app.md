@@ -185,9 +185,9 @@ for now~~ (struck 2026-09-18; the verb shipped and `ConsoleAPI` is its client).
 
 Phase A's non-visual half (`docs/product/app-ux-plan.md` §6): the typed client
 and the store the seven sections read. **Views never call `URLSession` and
-never run a verb** — a view reads an `InstanceStore` section and calls a method
-on it, and a screen that reached past the store would be the bug this section
-exists to name.
+never run a verb** — a view reads a section (`InstanceStore`'s, or a
+`SectionModel`) and calls a store method through `AppModel.console`, and a
+screen that reached past the store would be the bug this section exists to name.
 
 | Type | File | What it is |
 | --- | --- | --- |
@@ -202,7 +202,11 @@ exists to name.
 | `TaskPatch` | same | `PATCH /api/tasks/:id`'s two arms. A body mixing them is refused **here**, because the route's own refusal names both fields and discovering that on submit is worse |
 | `LoadState` · `Section<Value>` | `sources/kit/instance-store.swift` | loading / loaded / failed / stale, with the console's `as_of` beside the value. A failed refresh over data already on screen goes **stale and keeps it** — never a blank pane |
 | `RefreshPolicy` | same | The intervals, and a backoff that changes how often the app *asks* and never what it *claims*. No timer is started here: a view owns its `.task` and the policy says whether it is too soon |
-| `InstanceStore` | same | One `@Observable` store per instance, a `Section` per section, and the only thing that holds a `ConsoleAPI`. `adopt` drops every section on an instance switch |
+| `InstanceStore` | same | The Phase-A sections — feed, queue, board, rooms, agents, presence, compute, commands, knowledge — one `@Observable` store per instance, a `Section` per section. `adopt` drops every section on an instance switch |
+| `ConsoleSession` | `sources/kit/stores/console-session.swift` | **What the app holds** (`AppModel.console`, T5-1): per instance, the one `console session` child, `ReachabilityGate` in front of it, `ConsoleStores` over the gate, the `InstanceStore` over the same stores, and `management` (`CLIManagementRunner`). The child starts on the first request. `adopt` — every instance switch and every re-resolved runtime — ends the old child, drops every section built on the session and moves `generation`, so an answer still in flight for the previous instance is discarded when it lands |
+| `ReachabilityGate` · `ConsoleAct` | `sources/kit/stores/reachability-gate.swift` | **O3 at the tool.** Every store request passes through it: the newest request's answer is recorded as the connection's reachability (a `401`, no process, no token → unreachable; any answer at all → reachable), and a **decision** is refused before it is sent while unreachable. `ConsoleAct` sorts a request by screen-18 §4's one rule per verb: a read always goes; an **append** — capture, tick, defer (the table's `key` rows) and a 👍/👎 — goes and may be kept by its composer; everything else is a decision, including any route the file does not name |
+| `SectionModel<Value>` | `sources/kit/stores/section-model.swift` | One section of a screen built on the §2.16 stores: `Section`'s state machine, the store read that fills it, `refreshIfDue` (a redraw is never a request), `invalidate()` for the live-changes stream (T5-7), and registration with its session so an instance switch drops it |
+| `CLIManagementRunner` | `sources/kit/stores/management-runner.swift` | §2.2's verbs (M1–M18) as one `metistry` invocation each through `MetistryCLI`: the argument array `plannedArguments` shows is exactly what runs, a value rides stdin and never argv, and a command may not name its own `--product-dir`. **Not behind the gate** — M5 restarts a console that is down |
 | `PinnedItem` · `PinnedItems` | `sources/kit/pinned-items.swift` | The sidebar's Pinned area: project · board · page · search · agent, reorderable and removable, filed in app preferences under `pinnedItems.<instance_id>` |
 
 Three rules the layer encodes rather than asks for:
@@ -210,10 +214,16 @@ Three rules the layer encodes rather than asks for:
 - **`isRefreshing` is not a state.** P2 wants calm, so a background refresh is
   a flag beside `.loaded` rather than a fifth case — there is nothing for a
   view to draw a spinner from. Only `.loading` with no value yet earns one.
-- **`allowsDecisions` is O3, in one place.** The Mac app is local-only (§7.3)
-  and the rule still holds: while a section is unreachable, `answer`,
-  `answerMany`, `move`, `address` and `dispatch` refuse **before sending**, in
-  a sentence, rather than as a request that fails where nobody can see it.
+- **O3 is enforced at the transport, for every route.** The Mac app is
+  local-only (§7.3) and the rule still holds: while the console is unreachable,
+  every decision — all of the §2.16 stores' mutating methods except the appends
+  — is refused by `ReachabilityGate` **before sending**, in components-01
+  §1.3's sentence ("the instance is unreachable — decisions are never
+  queued"), rather than as a request that fails where nobody can see it. A
+  control binds `ConsoleSession.allowsDecisions` and prints
+  `decisionsUnavailableReason` under itself. `InstanceStore`'s own per-section
+  guards on `answer`, `answerMany`, `move`, `address` and `dispatch` stay as a
+  second line; they are no longer the only one.
 - **The two cursors are not the same mechanism.** The feed's `since` is an
   inclusive timestamp and de-duplicates on `(ref, ts, kind)`; the request
   queue's is an opaque cursor whose page is *everything that changed*, so a row
@@ -232,7 +242,7 @@ CLI, once, and never reaches this process: the request line carries a method,
 a path, a body and an idempotency key, and the source scan above holds with
 the new code in.
 
-Three things the transport promises rather than hopes for:
+Four things the transport promises rather than hopes for:
 
 - **A crashed child fails what is in flight; it never hangs it.** When the
   child's stdout closes, every pending call gets the child's own reason — the
@@ -257,6 +267,15 @@ Three things the transport promises rather than hopes for:
   not on `ConsoleAPI` — no route method calls it yet — but `Idempotency-Key`
   rides the session as `idempotency_key`, so the transport is not why.
 
+- **A body that is not JSON arrives as its bytes.** The CLI hands a
+  non-JSON reply over as its raw text (`readConsoleResponse`), which on the
+  session line is a JSON string; the transport returns that text's bytes
+  rather than re-encoding it, so `GET /api/runs/export`'s NDJSON reaches
+  `RunExport` as rows (T5-1 — before, an export over the session came back as
+  one quoted string with no cursor). The one-shot fallback pretty-prints a
+  body that parses as JSON, so a one-row export spans several lines there;
+  `RunExport` reads a whole body that is one object as that one row.
+
 The live-changes stream rides the same child: `events(lastEventID:)` is `GET
 /api/events` (design-build-plan §2.20) as `ConsoleLiveEvent` frames — ids and
 counts, never bodies — and cancelling the consuming task sends the session's
@@ -279,7 +298,8 @@ ceremony, logout and push, all bound to a device session the Mac does not hold,
 and `/mcp` — are listed with their reasons in
 `apps/console/scripts/client-fixtures.mjs`. Two interfaces sit beside the
 stores: `ManagementRunner`, whose `ManagementCommand` can only hold one of
-§2.2's verbs (M1–M18 — the set is closed at the type), and `LiveCaptureClient`
+§2.2's verbs (M1–M18 — the set is closed at the type; `CLIManagementRunner`
+runs it, T5-1), and `LiveCaptureClient`
 for the local live-capture bridge (T8).
 
 The routes `ConsoleAPI` already spoke keep their names and typed replies. A
@@ -733,7 +753,9 @@ apps/macos/
                        No AppKit, no Process, no platform frameworks — an iOS
                        target shares it as is.
   sources/kit/stores/  the store interface: one protocol per domain, one
-                       method per client-API route (F-7, "Data layer")
+                       method per client-API route (F-7), and what the app
+                       holds of it — the session, O3's gate, the section
+                       model, the management runner (T5-1, "Data layer")
   sources/app/         the Metistry executable: @main and the four scenes
                        (window, Settings, log window, MenuBarExtra), Sparkle,
                        the Process-backed CommandRunner, and the platform

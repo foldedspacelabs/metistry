@@ -283,7 +283,7 @@ public final class ComputeModel {
         if let monthly { verb += ["--monthly", ComputeBudgetFacts.money(monthly)] }
         verb += ["--action", action.rawValue, "--json"]
         await perform(verb, naming: "compute budget", key: Self.budgetKey(target)) { _ in
-            "\(target): \(ComputeBudgetFacts(dailyUSD: daily, monthlyUSD: monthly, action: action).summary) — recorded; nothing enforces it yet, budgets are checked in the engine before the call"
+            "\(target): \(ComputeBudgetFacts(dailyUSD: daily, monthlyUSD: monthly, action: action).summary) — enforced in the engine, before the call"
         }
         await refresh()
     }

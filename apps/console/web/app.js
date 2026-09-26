@@ -92,6 +92,23 @@ function replyParagraphs(text) {
     .join("");
 }
 
+// ----- clock times: 12-hour with AM/PM, always (design-system-amendments §8.1) -----
+// Never the device locale's clock: `toLocaleString()` is 24-hour on an en-GB
+// or de-DE phone, which is how one screen came to show 13:02 beside 8:47 AM
+// (review 01). The date keeps the locale's order; only the clock is pinned.
+// Function declarations, so every renderer above and below can call them.
+function clockTime(ts) {
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return "";
+  const h = d.getHours();
+  return `${h % 12 || 12}:${String(d.getMinutes()).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
+}
+function dateTime(ts) {
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${d.toLocaleDateString()}, ${clockTime(d)}`;
+}
+
 // Agent prose is set in the serif (C32, C35 — style.css `.agent-prose`), so it
 // reads as the assistant's before a word of it is read, and it still says so
 // once quoted out of the app. Only for a body an agent wrote: the owner's own
@@ -123,7 +140,7 @@ async function loadMessages() {
   const wasAtBottom = firstPaint || atBottom;
   const keepScrollTop = list.scrollTop; // measured before the re-render, restored after
   list.innerHTML = chrono
-    .map((m) => `<li class="${m.direction}"><div class="meta">${new Date(m.ts).toLocaleString()}${m.direction === "in" ? ` · ${m.status}` : ""}${tierChip(m)}</div>${replyParagraphs(m.text)}${m.direction === "out" ? tapbacks(m) : ""}</li>`)
+    .map((m) => `<li class="${m.direction}"><div class="meta">${dateTime(m.ts)}${m.direction === "in" ? ` · ${m.status}` : ""}${tierChip(m)}</div>${replyParagraphs(m.text)}${m.direction === "out" ? tapbacks(m) : ""}</li>`)
     .join("");
   wireTapbacks();
   if (wasAtBottom) {
@@ -1000,7 +1017,7 @@ const fmtDay = (v) => {
 const barPct = (v, max) => (max > 0 ? Math.max(0, Math.min(100, (asNum(v) / max) * 100)) : 0);
 const barHtml = (v, max) => `<span class="bar"><span style="width:${barPct(v, max).toFixed(1)}%"></span></span>`;
 // staleness is visible, never silent: every panel stamps the envelope's as_of
-const asOfText = (as_of) => (as_of ? `as of ${new Date(as_of).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : "");
+const asOfText = (as_of) => (as_of ? `as of ${clockTime(as_of)}` : "");
 const dashStamp = (id, as_of) => { $(`dash-${id}-asof`).textContent = asOfText(as_of); };
 
 // one review list across every configured repo (github-state → prs_for_review); the status page uses it too
@@ -1031,7 +1048,7 @@ function renderRuns({ rows, as_of }) {
   ];
   $("dash-runs").innerHTML = tiles.map(([label, v, cls]) => `<li class="tile"><b class="${cls}">${esc(String(v))}</b><span class="muted">${label}</span></li>`).join("");
   $("dash-runs-note").textContent = s.last_run_at
-    ? `${failed > 0 ? "check the status page — " : ""}last activity ${new Date(s.last_run_at).toLocaleString()}`
+    ? `${failed > 0 ? "check the status page — " : ""}last activity ${dateTime(s.last_run_at)}`
     : "nothing ran in the last 24h";
   dashStamp("runs", as_of);
 }
@@ -1178,7 +1195,7 @@ async function loadArtifacts() {
   $("art-empty").hidden = artifacts.length > 0;
   $("art-list").innerHTML = artifacts
     .map((a) => `<li><a href="#/artifacts/${esc(a.id)}" data-art="${esc(a.id)}"><b>${esc(a.project)}/${esc(a.slug)}</b></a>
-      <span class="muted">${esc(a.kind ?? "")} · ${esc(a.created_by ?? "")} · ${new Date(a.updated_at).toLocaleString()}</span></li>`)
+      <span class="muted">${esc(a.kind ?? "")} · ${esc(a.created_by ?? "")} · ${dateTime(a.updated_at)}</span></li>`)
     .join("");
   document.querySelectorAll("[data-art]").forEach((el) => (el.onclick = (e) => { e.preventDefault(); location.hash = `#/artifacts/${el.dataset.art}`; }));
   const r = artifactRoute();
@@ -1201,7 +1218,7 @@ async function openArtifact(id, versionId) {
   $("art-detail").hidden = false;
   $("art-title").textContent = `${artifact.project}/${artifact.slug}`;
   $("art-meta").textContent = version
-    ? `${version.author_kind === "agent" ? "agent" : "you"}: ${version.author_principal} · ${version.message} · ${new Date(version.created_at).toLocaleString()} · ${version.commit ? `rev ${version.commit.slice(0, 10)}` : "not committed yet"}${version.id === artifact.current_version ? " · current" : ""}`
+    ? `${version.author_kind === "agent" ? "agent" : "you"}: ${version.author_principal} · ${version.message} · ${dateTime(version.created_at)} · ${version.commit ? `rev ${version.commit.slice(0, 10)}` : "not committed yet"}${version.id === artifact.current_version ? " · current" : ""}`
     : "no versions";
   const sel = $("art-version");
   sel.innerHTML = versions.map((v) => `<option value="${esc(v.id)}">${esc(v.id.slice(-8))} · ${esc(v.author_principal)} · ${new Date(v.created_at).toLocaleDateString()}</option>`).join("");
@@ -1269,10 +1286,10 @@ async function loadThreads(id, ver) {
   const who = (c) => `${c.author_kind === "agent" ? "🤖 " : ""}${esc(c.author_principal)}`; // agent text is labeled agent-sourced (§4.19)
   $("art-threads").innerHTML = threads
     .map((t) => `<li class="thread ${t.state}">
-      <div class="row"><label><input type="checkbox" data-thread="${esc(t.id)}" ${t.state === "resolved" ? "disabled" : ""}> ${who(t)} <span class="muted">${t.path ? esc(t.path) + " · " : ""}${new Date(t.created_at).toLocaleString()} · ${esc(t.state)}</span></label>
+      <div class="row"><label><input type="checkbox" data-thread="${esc(t.id)}" ${t.state === "resolved" ? "disabled" : ""}> ${who(t)} <span class="muted">${t.path ? esc(t.path) + " · " : ""}${dateTime(t.created_at)} · ${esc(t.state)}</span></label>
         <button class="secondary" data-state="${esc(t.id)}" data-op="${t.state === "open" ? "resolve" : "reopen"}">${t.state === "open" ? "resolve" : "reopen"}</button></div>
       <div class="${bodyClass(t)}">${esc(t.body)}</div>
-      ${t.replies.map((r) => `<div class="reply"><span class="muted">${who(r)} · ${new Date(r.created_at).toLocaleString()}</span><div class="${bodyClass(r)}">${esc(r.body)}</div></div>`).join("")}
+      ${t.replies.map((r) => `<div class="reply"><span class="muted">${who(r)} · ${dateTime(r.created_at)}</span><div class="${bodyClass(r)}">${esc(r.body)}</div></div>`).join("")}
       <form data-reply="${esc(t.id)}"><input type="text" placeholder="reply…" autocomplete="off"><button type="submit" class="secondary">reply</button></form>
     </li>`)
     .join("");
@@ -1366,7 +1383,7 @@ function roomCard(r) {
   return `<li class="thread ${esc(r.state)}">
     <div class="row"><a href="${esc(href)}" data-room="${esc(href)}"><b>${esc(r.title ?? "")}</b></a>
       <span class="muted">${esc(r.anchor)} · ${esc(r.state)} · ${r.messages} message${r.messages === 1 ? "" : "s"}${r.agent_tail ? ` · ${r.agent_tail}/${r.cap} agent turns` : ""}</span></div>
-    <div class="muted">${who || "—"}${r.last_at ? ` · last ${new Date(r.last_at).toLocaleString()}` : ""}</div>
+    <div class="muted">${who || "—"}${r.last_at ? ` · last ${dateTime(r.last_at)}` : ""}</div>
     ${why}
   </li>`;
 }
@@ -1384,7 +1401,7 @@ async function openRoom(workId) {
   if (why) $("room-why").textContent = WHY_LINE.ping_pong_cap();
   const who = (c) => `${c.author_kind === "agent" ? "🤖 " : ""}${esc(c.author_principal)}`; // agent text is labeled agent-sourced (§4.19)
   $("room-messages").innerHTML = t.comments.length
-    ? t.comments.map((c) => `<li class="reply"><span class="muted">${who(c)} · ${new Date(c.created_at).toLocaleString()}</span><div class="${bodyClass(c)}">${esc(c.body)}</div></li>`).join("")
+    ? t.comments.map((c) => `<li class="reply"><span class="muted">${who(c)} · ${dateTime(c.created_at)}</span><div class="${bodyClass(c)}">${esc(c.body)}</div></li>`).join("")
     : `<li class="muted">nothing said yet</li>`;
   $("room-resolve").textContent = t.state === "open" ? "Resolve" : "Reopen";
   $("room-resolve").dataset.op = t.state === "open" ? "resolve" : "reopen";
@@ -1512,7 +1529,7 @@ function feedRowHtml(r) {
       <span class="feed-subject">${esc(titleCaseSubject(r.kind, r.subject))}</span>
       ${r.detail ? `<span class="muted feed-detail">${esc(r.detail)}</span>` : ""}
     </span>
-    <span class="muted feed-time" title="${esc(new Date(r.ts).toLocaleString())}">${esc(relTime(r.ts))}</span></li>`;
+    <span class="muted feed-time" title="${esc(dateTime(r.ts))}">${esc(relTime(r.ts))}</span></li>`;
 }
 
 // Agent options come from the feed's own rows (no extra call); project
@@ -1816,7 +1833,7 @@ function openCard(c) {
   boardPopClose();
   $("board-detail-title").textContent = `#${c.id} ${c.title ?? ""}`;
   const lease = c.claimed_by
-    ? `${c.claimed_by}${c.lease_expires_at ? ` until ${new Date(c.lease_expires_at).toLocaleString()}` : ""}`
+    ? `${c.claimed_by}${c.lease_expires_at ? ` until ${dateTime(c.lease_expires_at)}` : ""}`
     : "unclaimed";
   const fields = [
     ["column", BOARD_LABEL.get(String(c.column)) ?? c.column],
@@ -1986,7 +2003,7 @@ async function loadPresence() {
   for (const p of rows) {
     const el = document.getElementById(`presence-${p.id}`);
     if (!el) continue; // the agent list may have re-rendered since this fetch started
-    const seen = p.last_seen_at ? `seen ${new Date(p.last_seen_at).toLocaleString()}` : "never seen";
+    const seen = p.last_seen_at ? `seen ${dateTime(p.last_seen_at)}` : "never seen";
     el.innerHTML = `<span class="chip state-${esc(p.state)}">${esc(p.state)}</span> <span class="muted">${esc(seen)} · $${fmtUsd(p.spend_today_usd)} today</span>`;
   }
 }

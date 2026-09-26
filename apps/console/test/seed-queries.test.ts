@@ -41,6 +41,7 @@ const REQUIRED = [
   "rooms",
   "knowledge_pages", // GET /api/knowledge/pages — a page LIST is derived state, so invariant 3 sends it through here and the route holds no SQL of its own
   "knowledge_page_links", // GET /api/knowledge/links — so is the link graph, which the reconciler parses out of the notes on every walk
+  "secret_last_used", // GET /api/secrets — *last used*, from the names the egress fill stamps on its run (never a value)
 ];
 
 // The daily flow's five (docs/product/daily-flow-spec.md §11, P1-5). Listed
@@ -125,7 +126,9 @@ describe("seed queries", () => {
     // assistant read the measure through `queries_run` and keeps §1.5's "no
     // new brain tool" true.
     // `vault_task_by_key` (T2-4) is the Tick door's lookup: a path and a line of the owner's own words, for the owner's door alone.
-    expect(routeBacked.sort()).toEqual(["collector_health", "day_work", "knowledge_page_links", "knowledge_pages", "pending_requests", "vault_task_by_key", "vault_tasks_query", "vault_tasks_recurring"]);
+    // `secret_last_used` says which credentials this instance used and when:
+    // the Secrets screen's to read through `GET /api/secrets`, not an agent's.
+    expect(routeBacked.sort()).toEqual(["collector_health", "day_work", "knowledge_page_links", "knowledge_pages", "pending_requests", "secret_last_used", "vault_task_by_key", "vault_tasks_query", "vault_tasks_recurring"]);
     expect(store.exposure("task_ageing")).toBe("generic");
     for (const name of REQUIRED.filter((n) => !routeBacked.includes(n))) expect(store.exposure(name), name).toBe("generic");
   });

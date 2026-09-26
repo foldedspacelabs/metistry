@@ -9,6 +9,7 @@ import {
   EmbedClient,
   firstOnMachineBaseUrl,
   INSTANCE_LAYOUT,
+  instancePresence,
   overlayFilesFromEnv,
   resolveInstanceLayout,
   intEnv,
@@ -35,6 +36,8 @@ import { ASSISTANT_DEFAULT_AREAS, INTERNAL_ASSISTANT_ID, ensureInternalAgent, re
 import { httpVaultClient } from "./vault-client.js";
 import { vaultBridgeSearch } from "./knowledge-routes.js";
 import type { ComputeAdmin } from "./compute-routes.js";
+import type { SecretsView } from "./secrets-route.js";
+import { readInstanceId, securityPresence, realExec } from "@foldedspacelabs/metistry-cli";
 import { CrewRegistry } from "./crews.js";
 import { readFile } from "node:fs/promises";
 import { existsSync, readFileSync } from "node:fs";
@@ -257,8 +260,29 @@ console.log(
     : "compute admin absent: METISTRY_INSTANCE_DIR is unset or not readable — /api/compute* answers 503; `metistry compute` still works (degrades: absent)",
 );
 
+// GET /api/secrets (plan §2.14): the instance's `.metistry/secrets.yaml`, and
+// — where there is a login Keychain — a PRESENCE probe bound to this
+// instance's instance_id: `security find-generic-password` without `-w`,
+// which answers from the item's attributes and never reads its data. That
+// probe is the whole of the console's Keychain access; nothing here can
+// return a value. No instance directory (the compose shape) → 503. No
+// instance_id → the file is still listed, presence unknown.
+const secretsInstanceId = computeAdmin ? await readInstanceId(computeAdmin.instanceDir) : undefined;
+const secrets: SecretsView | undefined = computeAdmin
+  ? {
+      file: resolveInstanceLayout(computeAdmin.instanceDir).path("secrets"),
+      ...(secretsInstanceId && process.platform === "darwin" ? { presence: instancePresence(securityPresence(realExec), secretsInstanceId) } : {}),
+    }
+  : undefined;
+console.log(
+  secrets
+    ? `secrets: ${secrets.file} (presence ${secrets.presence ? `from the login Keychain, account ${secretsInstanceId}` : "unknown — no Keychain or no instance_id"})`
+    : "secrets absent: METISTRY_INSTANCE_DIR is unset or not readable — GET /api/secrets answers 503; `metistry secrets list --named` still works (degrades: absent)",
+);
+
 const server = makeServer(pool, queries, {
   origin,
+  ...(secrets ? { secrets } : {}),
   origins,
   ...(identity ? { identity } : {}),
   ...(instancesFiles ? { instancesFiles } : {}),

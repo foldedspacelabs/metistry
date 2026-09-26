@@ -34,7 +34,7 @@ const CLEAN_SVG = `<svg xmlns="http://www.w3.org/2000/svg">
 /** A throwaway tree with the script in place, so it resolves its root the way CI does. */
 function fixture({ tokens = realTokens, css = CLEAN_CSS, svgs = { "mac-x.svg": CLEAN_SVG }, swift = {} } = {}) {
   const root = mkdtempSync(join(tmpdir(), "design-tokens-"));
-  for (const d of ["ops/scripts", "docs/product/design", "apps/console/web", "apps/macos/sources/kit"]) {
+  for (const d of ["ops/scripts", "docs/product/design/legacy", "apps/console/web", "apps/macos/sources/kit"]) {
     mkdirSync(join(root, d), { recursive: true });
   }
   cpSync(scriptSrc, join(root, "ops/scripts/build-design-tokens.mjs"));
@@ -67,7 +67,7 @@ const tokensWith = (edit) => {
 test("a clean tree passes; selectors, anchors, url() references, entities and prose are not colours", () => {
   const r = check();
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /^design tokens: ok \(\d+ pairs checked; 2 painted pairs declared; 6 hex colours in 1 SVGs and 1 stylesheet\(s\) are tokens; accent pinned\)$/m);
+  assert.match(r.stdout, /^design tokens: ok \(\d+ pairs checked; 2 painted pairs declared; 6 hex colour\(s\) in 1 SVG\(s\) and 1 stylesheet\(s\) are tokens; accent pinned\)$/m);
 });
 
 test("a stray hex in a design SVG fails the check — attribute, style=\"\" and <style> alike", () => {
@@ -81,6 +81,17 @@ test("a stray hex in a design SVG fails the check — attribute, style=\"\" and 
   assert.equal(r.status, 1);
   assert.match(r.stderr, /\[stray hex\] docs\/product\/design\/mac-x\.svg: 3 colour\(s\) that are not a token's value — #f6f7f9 \(line 2\), #123456 \(line 3\), #abcdef \(line 4\)/);
   assert.doesNotMatch(r.stderr, /#fffdf8/);
+});
+
+test("docs/product/design/legacy/ is exempt, and the exemption is named in the output", () => {
+  const stale = '<svg><style>.win { fill: #f6f7f9 }</style><rect fill="#2b5fd0"/></svg>\n';
+  const r = check({ svgs: { "mac-x.svg": CLEAN_SVG, "legacy/mac-old.svg": stale, "legacy/iphone-old.svg": stale } });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /in 1 SVG\(s\) and 1 stylesheet\(s\) are tokens \(docs\/product\/design\/legacy\/: 2 pre-round-B SVGs exempt\); accent pinned\)$/m);
+  // the exemption is that directory, not "anywhere a legacy wireframe lands"
+  const moved = check({ svgs: { "mac-old.svg": stale } });
+  assert.equal(moved.status, 1);
+  assert.match(moved.stderr, /\[stray hex\] docs\/product\/design\/mac-old\.svg: 2 colour\(s\)/);
 });
 
 test("a stray hex in the web CSS fails the check; an id selector does not", () => {

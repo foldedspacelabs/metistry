@@ -64,7 +64,7 @@ import {
   type ComputeOptions,
 } from "@foldedspacelabs/metistry-cli";
 import type { QueryStore } from "@foldedspacelabs/metistry-queries";
-import { readJson, sendError, sendJson } from "./http-util.js";
+import { readJson, sendError, sendJson, sendUnrouted } from "./http-util.js";
 
 /**
  * What the console needs to drive the verbs: where the instance repo is, and
@@ -206,7 +206,7 @@ export async function computeRoutes(
   url: URL,
   deps: { admin: ComputeAdmin | undefined; queries: QueryStore; audit: Audit },
 ): Promise<void> {
-  if (!ROUTES.has(key)) return sendError(res, "not_found");
+  if (!ROUTES.has(key)) return sendUnrouted(res);
   const { admin } = deps;
   if (!admin) return sendError(res, "not_available", NOT_AVAILABLE);
   const notes: string[] = [];

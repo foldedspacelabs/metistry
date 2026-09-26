@@ -7,7 +7,6 @@ import { renderMarkdown } from "./md.js";
 const { startRegistration, startAuthentication } = window.SimpleWebAuthnBrowser;
 
 const $ = (id) => document.getElementById(id);
-const views = ["feed", "chat", "board", "dashboard", "capture", "triage", "status", "devices", "agents", "artifacts", "rooms"];
 const enrollCode = new URLSearchParams(location.hash.slice(1)).get("enroll");
 
 async function api(path, opts = {}) {
@@ -16,20 +15,244 @@ async function api(path, opts = {}) {
   return res;
 }
 
+// ===== the shell (screen 18 §1; design-build-plan §2.17) =====
+// Under 900px: five tabs — Today · Chat · Work · Knowledge · More — with + and
+// the bell in the header, and the usage gauge beside them from 600px. At 900px
+// the PWA is the Mac layout: the sidebar in the Mac's order, + and the gauge,
+// and the Needs You row in place of the bell (C110).
+//
+// Every view names its tab, its title, the sections it shows and how it
+// arrives: in place, as a push (`back` names where the back button returns),
+// or in the sheet. Nothing conditional is a tab, so no tab carries a badge;
+// the count lives on the bell and the Needs You row and nowhere else (P2).
+const TABS = ["today", "chat", "work", "knowledge", "more"];
+const HOME = "today";
+const VIEWS = {
+  today: { tab: "today", title: "Today", sections: ["today"] },
+  chat: { tab: "chat", title: "Chat", sections: ["chat"] },
+  board: { tab: "work", title: "Work", sections: ["board"], segment: true },
+  projects: { tab: "work", title: "Work", sections: ["projects"], segment: true },
+  artifacts: { tab: "work", title: "Work", sections: ["artifacts"], segment: true },
+  rooms: { tab: "work", title: "Room", sections: ["rooms"], back: "board" },
+  knowledge: { tab: "knowledge", title: "Knowledge", sections: ["knowledge"] },
+  more: { tab: "more", title: "More", sections: ["more"] },
+  feed: { tab: "more", title: "Activity", sections: ["feed"], back: "more" },
+  agents: { tab: "more", title: "Agents", sections: ["agents"], back: "more" },
+  settings: { tab: "more", title: "Settings", sections: ["status", "devices"], back: "more" },
+  // The bell's sheet under 900px; at 900px a view, reached from its sidebar row.
+  triage: { tab: null, title: "Needs You", sections: ["triage"], sheet: "narrow" },
+  capture: { tab: null, title: "Capture", sections: ["capture"], sheet: "always" },
+  usage: { tab: null, title: "Usage", sections: ["usage"], sheet: "always" },
+};
+const SECTIONS = [...new Set(Object.values(VIEWS).flatMap((v) => v.sections))];
+
+const WIDE = window.matchMedia("(min-width: 900px)");
+let current = null; // the view in place; a sheet sits over it
+let beneath = HOME; // the last view in place that was not Needs You
+let sheetView = null; // the view the sheet has borrowed, while it is open
+let lastWork = "board"; // the Work tab and row return to the child left open
+let signedIn = false;
+
+/** `work` is the Work tab or row: the child last open. An unknown name is home. */
+const resolveView = (view) => (view === "work" ? lastWork : Object.hasOwn(VIEWS, view) ? view : HOME);
+/** Whether a view arrives in the sheet at this width. */
+const inSheet = (v, wide) => v.sheet === "always" || (v.sheet === "narrow" && !wide);
+/**
+ * Where the back button goes, if anywhere. At 900px More is the sidebar, so
+ * its rows are places of their own and nothing pushes back to it.
+ */
+const backFor = (v, wide) => (v.back && !(wide && v.back === "more") ? v.back : null);
+
+/** Go to a view: in place, or in the sheet. Every door in the shell calls this. */
 function show(view) {
-  $("nav").hidden = false; $("auth").hidden = true;
-  for (const v of views) $(v).hidden = v !== view;
-  document.querySelectorAll("nav button").forEach((b) => b.classList.toggle("active", b.dataset.view === view));
-  ({ feed: loadFeedView, chat: loadMessages, board: loadBoardView, dashboard: loadDashboard, status: loadStatus, devices: loadDevices, triage: loadTriage, agents: loadAgents, artifacts: loadArtifacts, rooms: loadRooms }[view] ?? (() => {}))();
+  view = resolveView(view);
+  const v = VIEWS[view];
+  if (inSheet(v, WIDE.matches)) return openSheet(view);
+  closeSheet();
+  signedIn = true;
+  chrome(true);
+  const moved = view !== current;
+  current = view;
+  if (view !== "triage") beneath = view;
+  if (v.segment) lastWork = view;
+  $("auth").hidden = true;
+  for (const id of SECTIONS) $(id).hidden = !v.sections.includes(id);
+  dropRouteHash(view);
+  paintShell();
+  if (moved) window.scrollTo(0, 0);
+  loadView(view);
+}
+
+function loadView(view) {
+  ({ today: loadToday, feed: loadFeedView, chat: loadMessages, board: loadBoardView, projects: loadProjects, artifacts: loadArtifacts, rooms: loadRooms, settings: loadSettings, triage: loadTriage, agents: loadAgents, usage: loadUsage }[view] ?? (() => {}))();
+}
+
+// A room or an artifact link lives in the hash; leaving that view drops it, so
+// the same card opens its room again the next time it is tapped.
+function dropRouteHash(view) {
+  const h = location.hash;
+  if ((h.startsWith("#/rooms/") && view !== "rooms") || (h.startsWith("#/artifacts/") && view !== "artifacts")) {
+    history.replaceState(null, "", location.pathname + location.search);
+  }
+}
+
+/** The chrome follows the view in place: tabs, sidebar, segments, titles, back. */
+function paintShell() {
+  const v = VIEWS[current];
+  if (!v) return;
+  for (const b of document.querySelectorAll("#tabs [data-tab]")) mark(b, b.dataset.tab === v.tab);
+  // the page is marked; the Work row is open over its children, not the page itself
+  for (const b of document.querySelectorAll("#sidebar [data-view]")) mark(b, b.dataset.view === current);
+  $("side-work-row").setAttribute("aria-expanded", String(v.tab === "work"));
+  for (const b of document.querySelectorAll("#work-seg [data-view]")) b.setAttribute("aria-pressed", String(b.dataset.view === current));
+  $("side-work").classList.toggle("open", v.tab === "work");
+  $("work-seg").hidden = !v.segment;
+  $("title").textContent = v.title;
+  $("bar-title").textContent = v.title;
+  const back = backFor(v, WIDE.matches);
+  $("back").hidden = !back;
+  if (back) {
+    $("back").dataset.view = back;
+    $("back-label").textContent = VIEWS[back].title;
+    $("back").setAttribute("aria-label", `Back to ${VIEWS[back].title}`);
+  }
+  paintNeeds(true);
+}
+
+function mark(b, on) {
+  if (on) b.setAttribute("aria-current", "page");
+  else b.removeAttribute("aria-current");
+}
+
+function chrome(on) {
+  for (const id of ["tabs", "sidebar", "bar-actions"]) $(id).hidden = !on;
 }
 
 function showAuth() {
-  $("nav").hidden = true;
-  for (const v of views) $(v).hidden = true;
+  signedIn = false;
+  closeSheet();
+  current = null;
+  chrome(false);
+  for (const id of SECTIONS) $(id).hidden = true;
+  $("work-seg").hidden = true;
+  $("back").hidden = true;
+  $("title").textContent = "Metistry";
+  $("bar-title").textContent = "";
   $("auth").hidden = false;
   $("enroll-btn").hidden = !enrollCode;
   if (enrollCode) $("auth-msg").textContent = "enroll this device (one-time code detected)";
 }
+
+// ----- the sheet: the bell's Needs You, Capture and Usage (screen 18 §1) -----
+// One native modal <dialog>, which borrows the view's own section while it is
+// open and puts it back in <main> when it closes — Done, Esc or a tap on the
+// scrim. The section keeps its ids and handlers wherever it sits.
+function openSheet(view) {
+  if (sheetView === view) return;
+  restoreSheet();
+  const v = VIEWS[view];
+  const section = $(v.sections[0]);
+  sheetView = view;
+  $("sheet-title").textContent = v.title;
+  $("sheet-body").append(section);
+  section.hidden = false;
+  if (!$("sheet").open) $("sheet").showModal();
+  loadView(view);
+}
+
+function restoreSheet() {
+  if (!sheetView) return;
+  const section = $(VIEWS[sheetView].sections[0]);
+  section.hidden = true;
+  $("main").append(section);
+  sheetView = null;
+}
+
+function closeSheet() {
+  restoreSheet();
+  if ($("sheet").open) $("sheet").close();
+}
+
+// Esc closes the dialog natively; the section goes home either way. The event
+// is queued, so a sheet opened again before it fires is left where it is.
+$("sheet").addEventListener("close", () => { if (!$("sheet").open) restoreSheet(); });
+$("sheet").addEventListener("click", (e) => { if (e.target === $("sheet")) closeSheet(); });
+$("sheet-done").onclick = () => closeSheet();
+
+// ----- the one count (P2, C110) -----
+// The number of requests waiting: on the bell under 900px, on the Needs You
+// row at 900px, and on no tab at any width. The row exists while something
+// waits; with the count at zero it leaves on the next navigation, never while
+// the owner is on it.
+let needsCount = null; // null until the server has answered once
+function needsBadge(count) {
+  const n = Math.max(0, Math.trunc(Number(count)) || 0);
+  return { n, text: n ? String(n) : "", label: n ? `Needs You, ${n} waiting` : "Needs You" };
+}
+
+function paintNeeds(navigating = false) {
+  const b = needsBadge(needsCount ?? 0);
+  for (const el of document.querySelectorAll("[data-needs-count]")) {
+    el.textContent = b.text;
+    el.hidden = !b.n;
+  }
+  $("bell").setAttribute("aria-label", b.label);
+  const row = $("side-needs");
+  row.setAttribute("aria-label", b.label);
+  if (b.n) row.hidden = false;
+  else if (navigating && current !== "triage") row.hidden = true;
+}
+
+/** A new count. The badge announces a change once, and not while the owner is on it. */
+function setNeeds(count) {
+  const n = needsBadge(count).n;
+  const changed = needsCount !== null && n !== needsCount;
+  needsCount = n;
+  paintNeeds();
+  if (changed && current !== "triage" && sheetView !== "triage") $("needs-announce").textContent = needsBadge(n).label;
+}
+
+// The count is the queue's length — T1-7's count route is accepted against
+// exactly this, and replaces the read here when it is served.
+async function refreshNeeds() {
+  const { proposals } = await (await api("/api/proposals")).json();
+  setNeeds(proposals.length);
+}
+
+let needsTimer = null;
+function watchNeeds(intervalMs = 30000) {
+  refreshNeeds().catch(() => {});
+  if (needsTimer) return;
+  needsTimer = setInterval(() => {
+    if (signedIn && document.visibilityState === "visible") refreshNeeds().catch(() => {});
+  }, intervalMs);
+}
+document.addEventListener("visibilitychange", () => {
+  if (signedIn && document.visibilityState === "visible") refreshNeeds().catch(() => {});
+});
+
+// Crossing 900px moves Needs You between the sheet and a view in place.
+WIDE.addEventListener("change", () => {
+  if (!signedIn || !current) return;
+  if (WIDE.matches && sheetView === "triage") show("triage");
+  else if (!WIDE.matches && current === "triage") { show(beneath); show("triage"); }
+  else paintShell();
+});
+
+// The large title collapses into the header once it scrolls under it.
+if ("IntersectionObserver" in window) {
+  new IntersectionObserver(
+    ([e]) => document.body.classList.toggle("title-collapsed", !e.isIntersecting),
+    { rootMargin: `-${$("bar").offsetHeight}px 0px 0px 0px` },
+  ).observe($("title"));
+}
+
+for (const b of document.querySelectorAll("#tabs [data-tab]")) b.onclick = () => show(b.dataset.tab);
+for (const b of document.querySelectorAll("#sidebar [data-view], #work-seg [data-view], #more [data-view]")) b.onclick = () => show(b.dataset.view);
+$("back").onclick = () => show($("back").dataset.view);
+$("capture-btn").onclick = () => show("capture");
+$("bell").onclick = () => show("triage");
+$("usage-btn").onclick = () => show("usage");
 
 // ----- auth -----
 $("enroll-btn").onclick = async () => {
@@ -39,7 +262,7 @@ $("enroll-btn").onclick = async () => {
   const response = await startRegistration({ optionsJSON: options });
   const label = prompt("name this device (e.g. Matt's iPhone)", "device") ?? "device";
   const fin = await fetch("/auth/enroll/finish", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: enrollCode, label, response }) });
-  if (fin.ok) { history.replaceState(null, "", "/"); show("chat"); } else alert("enrollment failed");
+  if (fin.ok) { history.replaceState(null, "", "/"); show(HOME); watchNeeds(); } else alert("enrollment failed");
 };
 
 $("login-btn").onclick = async () => {
@@ -47,7 +270,7 @@ $("login-btn").onclick = async () => {
   const { key, options } = await start.json();
   const response = await startAuthentication({ optionsJSON: options });
   const fin = await fetch("/auth/login/finish", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ key, response }) });
-  if (fin.ok) { show("chat"); replayDraft(); } else alert("sign-in failed");
+  if (fin.ok) { show(hasDraft() ? "chat" : HOME); replayDraft(); watchNeeds(); } else alert("sign-in failed");
 };
 
 // ----- chat -----
@@ -433,6 +656,9 @@ $("composer-actions").addEventListener("toggle", async () => {
 function replayDraft() {
   try { const d = localStorage.getItem("draft"); if (d) $("send-text").value = d; } catch {}
 }
+function hasDraft() {
+  try { return Boolean(localStorage.getItem("draft")); } catch { return false; }
+}
 
 // ----- capture -----
 $("capture-form").onsubmit = async (e) => {
@@ -606,8 +832,7 @@ async function loadTriage() {
   const res = await api("/api/proposals");
   const { proposals } = await res.json();
   $("triage-empty").hidden = proposals.length > 0;
-  const tab = document.querySelector('nav button[data-view="triage"]');
-  if (tab) tab.textContent = proposals.length ? `Needs You (${proposals.length})` : "Needs You";
+  setNeeds(proposals.length); // the bell and the Needs You row — never a tab (P2)
   const live = new Set(proposals.map((p) => String(p.id)));
   for (const id of [...picked]) if (!live.has(id)) picked.delete(id); // a row that left the queue leaves the selection
   seenAt.clear();
@@ -774,15 +999,7 @@ async function loadDevices() {
   }));
 }
 
-document.querySelectorAll("nav button").forEach((b) => (b.onclick = () => show(b.dataset.view)));
 function esc(s) { const d = document.createElement("div"); d.textContent = s ?? ""; return d.innerHTML; }
-
-// ----- boot -----
-if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {}); // push degrades absent
-try {
-  const probe = await fetch("/api/status");
-  if (probe.ok) { show(artifactRoute() ? "artifacts" : roomRoute() ? "rooms" : "feed"); replayDraft(); pollChat(); } else showAuth(); // a #/artifacts/… or #/rooms/work/… link (what a proposal carries) opens straight there; feed is the home tab
-} catch { showAuth(); }
 
 // ----- agents (external-agent registry; every agent-authored field output-encoded — CRIT-7) -----
 // The token is shown exactly once, at mint/rotate; the list never carries it.
@@ -1002,7 +1219,7 @@ $("agent-grants").onsubmit = async (e) => {
   $("agent-grants").hidden = true;
   loadAgents();
 };
-// ===== dashboard (Phase 4 visibility: one place instead of four) =====
+// ===== Today, Projects and Usage (the Phase 4 dashboard, placed by the shell) =====
 // Every server value is output-encoded via esc() before it touches the DOM
 // (CRIT-7); only a https://github.com/ url may become a link. pg returns
 // count()/numeric/bigint as strings, so numbers pass through asNum() first —
@@ -1048,7 +1265,7 @@ function renderRuns({ rows, as_of }) {
   ];
   $("dash-runs").innerHTML = tiles.map(([label, v, cls]) => `<li class="tile"><b class="${cls}">${esc(String(v))}</b><span class="muted">${label}</span></li>`).join("");
   $("dash-runs-note").textContent = s.last_run_at
-    ? `${failed > 0 ? "check the status page — " : ""}last activity ${dateTime(s.last_run_at)}`
+    ? `${failed > 0 ? "check Settings — " : ""}last activity ${dateTime(s.last_run_at)}`
     : "nothing ran in the last 24h";
   dashStamp("runs", as_of);
 }
@@ -1083,7 +1300,7 @@ function renderProjectRows({ projects, as_of }) {
     if (!confirm(warn)) return;
     const r = await api(`/api/projects/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify({ mode: to }) });
     $("dash-projects-msg").textContent = r.ok ? `${id} is now ${modeLabel(to).toLowerCase()}` : `could not switch ${id} (${r.status})`;
-    loadDashboard();
+    loadProjects();
   }));
   dashStamp("projects", as_of);
 }
@@ -1156,18 +1373,38 @@ function renderAws(daily, recent) {
   dashStamp("aws", daily.as_of);
 }
 
-async function loadDashboard() {
-  // panels load independently: one absent collector never blanks the page
-  const panels = {
-    runs: async () => renderRuns(await dashQuery("runs_summary", { hours: 24 })),
-    reviews: async () => { const r = await dashQuery("prs_for_review"); $("dash-reviews").innerHTML = reviewListHtml(r.rows); dashStamp("reviews", r.as_of); },
-    projects: async () => { renderProjectRows(await (await api("/api/projects")).json()); renderProjects(await dashQuery("projects_overview")); },
-    spend: async () => renderSpend(await dashQuery("claude_usage_daily", { days: 30 })),
-    aws: async () => renderAws(...(await Promise.all([dashQuery("aws_costs_daily", { days: 30 }), dashQuery("aws_costs_recent", { days: 30 })]))),
-  };
+/** Panels load independently: one absent collector never blanks the page. */
+async function loadPanels(panels) {
   await Promise.all(Object.entries(panels).map(async ([id, load]) => {
     try { await load(); } catch { $(`dash-${id}-asof`).textContent = "unavailable"; }
   }));
+}
+
+// The old dashboard, in the three places the shell gives it: Today holds the
+// last 24 hours and the reviews waiting on you, Work ▸ Projects the project
+// rows, and the Usage sheet the spend.
+function loadToday() {
+  return loadPanels({
+    runs: async () => renderRuns(await dashQuery("runs_summary", { hours: 24 })),
+    reviews: async () => { const r = await dashQuery("prs_for_review"); $("dash-reviews").innerHTML = reviewListHtml(r.rows); dashStamp("reviews", r.as_of); },
+  });
+}
+
+function loadProjects() {
+  return loadPanels({
+    projects: async () => { renderProjectRows(await (await api("/api/projects")).json()); renderProjects(await dashQuery("projects_overview")); },
+  });
+}
+
+function loadUsage() {
+  return loadPanels({
+    spend: async () => renderSpend(await dashQuery("claude_usage_daily", { days: 30 })),
+    aws: async () => renderAws(...(await Promise.all([dashQuery("aws_costs_daily", { days: 30 }), dashQuery("aws_costs_recent", { days: 30 })]))),
+  });
+}
+
+async function loadSettings() {
+  await Promise.all([loadStatus(), loadDevices()]);
 }
 
 // ===== artifacts (§4.21) =====
@@ -2007,3 +2244,15 @@ async function loadPresence() {
     el.innerHTML = `<span class="chip state-${esc(p.state)}">${esc(p.state)}</span> <span class="muted">${esc(seen)} · $${fmtUsd(p.spend_today_usd)} today</span>`;
   }
 }
+
+// ----- boot -----
+// Last, so that everything above exists before the first view loads. Booting
+// from the middle of the module loaded a view into constants the module had
+// not reached yet — the feed's chips were in their temporal dead zone, and the
+// home tab never painted on first load.
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {}); // push degrades absent
+try {
+  const probe = await fetch("/api/status");
+  // a #/artifacts/… or #/rooms/work/… link (what a proposal carries) opens straight there; Today is home
+  if (probe.ok) { show(artifactRoute() ? "artifacts" : roomRoute() ? "rooms" : HOME); replayDraft(); pollChat(); watchNeeds(); } else showAuth();
+} catch { showAuth(); }

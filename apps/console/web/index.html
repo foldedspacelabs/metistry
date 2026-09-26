@@ -17,31 +17,86 @@
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
 </head>
 <body>
-  <header>
-    <h1 id="title">Metistry</h1>
-    <nav id="nav" hidden>
-      <button data-view="feed">Feed</button>
-      <button data-view="chat">Chat</button>
-      <button data-view="board">Board</button>
-      <button data-view="dashboard">Dashboard</button>
-      <button data-view="capture">Capture</button>
-      <button data-view="triage">Needs You</button>
-      <button data-view="status">Status</button>
-      <button data-view="devices">Devices</button>
-      <button data-view="agents">Agents</button>
-      <button data-view="artifacts">Artifacts</button>
-      <button data-view="rooms">Rooms</button>
-    </nav>
+  <!-- The glyphs (screen 18 §1, "glyphs, not emoji"): one inline sprite drawn in
+       currentColor, so every glyph takes its control's ink. The paths are the
+       design boards' own (docs/product/design/boards/lib.py `I`, lib_pwa.py);
+       on Apple platforms the native app uses the SF Symbols brand-kit.md names. -->
+  <svg class="sprite" aria-hidden="true" focusable="false">
+    <symbol id="g-today" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="6" width="16" height="14" rx="2"/><path d="M4 10.5h16M8.5 4v4M15.5 4v4"/></symbol>
+    <symbol id="g-chat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 5.5h15v9.5h-9l-4 3.5v-3.5h-2z"/></symbol>
+    <symbol id="g-work" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 5.5h15v13h-15z"/><path d="M8 12l2.6 2.6L16 9.6"/></symbol>
+    <symbol id="g-knowledge" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4.5h9.5a2.5 2.5 0 012.5 2.5v12.5H8.5A2.5 2.5 0 016 17z"/><path d="M6 15.5h12"/></symbol>
+    <symbol id="g-more" viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="6" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="18" cy="12" r="1.4"/></symbol>
+    <symbol id="g-activity" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12.5h3.5l2.2-6 3.2 11.5 2.6-8 1.7 2.5H21"/></symbol>
+    <symbol id="g-agents" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9.5" cy="9" r="2.8"/><path d="M4.5 18.5a5 5 0 0110 0"/><path d="M16 7.4a2.6 2.6 0 010 5.2"/><path d="M16.8 14.4a4.6 4.6 0 013.2 4.1"/></symbol>
+    <symbol id="g-usage" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 17a8 8 0 0116 0"/><path d="M12 17l4.2-4.6"/><circle cx="12" cy="17" r="1.1" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="g-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 00-2 2v.18a2 2 0 01-1 1.73l-.43.25a2 2 0 01-2 0l-.15-.08a2 2 0 00-2.73.73l-.22.38a2 2 0 00.73 2.73l.15.1a2 2 0 011 1.72v.51a2 2 0 01-1 1.74l-.15.09a2 2 0 00-.73 2.73l.22.38a2 2 0 002.73.73l.15-.08a2 2 0 012 0l.43.25a2 2 0 011 1.73V20a2 2 0 002 2h.44a2 2 0 002-2v-.18a2 2 0 011-1.73l.43-.25a2 2 0 012 0l.15.08a2 2 0 002.73-.73l.22-.39a2 2 0 00-.73-2.73l-.15-.08a2 2 0 01-1-1.74v-.5a2 2 0 011-1.74l.15-.09a2 2 0 00.73-2.73l-.22-.38a2 2 0 00-2.73-.73l-.15.08a2 2 0 01-2 0l-.43-.25a2 2 0 01-1-1.73V4a2 2 0 00-2-2z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="g-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5.5v13M5.5 12h13"/></symbol>
+    <symbol id="g-bell" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10.5a5 5 0 0110 0c0 4 1.4 5.2 1.4 5.2H5.6S7 14.5 7 10.5z"/><path d="M10.4 18.6a1.9 1.9 0 003.2 0"/></symbol>
+    <symbol id="g-back" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 5.5L8 12l6.5 6.5"/></symbol>
+    <symbol id="g-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></symbol>
+    <symbol id="g-mark" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="11" stroke-linejoin="miter"><path d="M12 12 H52 V52 H38 L12 26 Z"/></symbol>
+  </svg>
+
+  <!-- The header (screen 18 §1): a back button on a push, the title once the
+       large one has scrolled away, then + and the bell. The usage gauge joins
+       them from 600px. At 900px this is the Mac's toolbar — the mark and
+       Metistry, + and the gauge — and the bell gives way to the sidebar's
+       Needs You row (C110). The count lives in [data-needs-count] and nowhere
+       else: the bell and that row are its only two homes, and no tab carries
+       one (P2). -->
+  <header id="bar">
+    <button id="back" type="button" class="bar-back" hidden><svg class="glyph" aria-hidden="true" focusable="false"><use href="#g-back"/></svg><span id="back-label"></span></button>
+    <span class="brand"><svg class="mark" aria-hidden="true" focusable="false"><use href="#g-mark"/></svg>Metistry</span>
+    <span id="bar-title" class="bar-title" aria-hidden="true"></span>
+    <span id="bar-actions" class="bar-actions" hidden>
+      <button id="capture-btn" type="button" class="glyph-btn plus" aria-label="Capture"><svg class="glyph" aria-hidden="true" focusable="false"><use href="#g-plus"/></svg></button>
+      <button id="bell" type="button" class="glyph-btn bell" aria-label="Needs You"><svg class="glyph" aria-hidden="true" focusable="false"><use href="#g-bell"/></svg><span class="badge" data-needs-count aria-hidden="true" hidden></span></button>
+      <button id="usage-btn" type="button" class="glyph-btn gauge" aria-label="Usage"><svg class="glyph" aria-hidden="true" focusable="false"><use href="#g-usage"/></svg></button>
+    </span>
   </header>
 
-  <main>
+  <!-- At 900px the PWA is the Mac layout (screen 18 §1): the sidebar in the
+       Mac's order — Needs You while something waits (C110), Today, Chat,
+       Activity, Work with its children, Knowledge, Agents. A browser has no
+       app menu, so Settings sits at the foot. Scheduled and Pinned are not
+       listed until the PWA has them to open. -->
+  <nav id="sidebar" aria-label="Sections" hidden>
+    <button type="button" id="side-needs" data-view="triage" aria-label="Needs You" hidden><svg class="glyph" aria-hidden="true" focusable="false"><use href="#g-bell"/></svg><span class="label">Needs You</span><span class="badge" data-needs-count aria-hidden="true" hidden></span></button>
+    <button type="button" data-view="today"><svg class="glyph" aria-hidden="true" focusable="false"><use href="#g-today"/></svg><span class="label">Today</span></button>
+    <button type="button" data-view="chat"><svg class="glyph" aria-hidden="true" focusable="false"><use href="#g-chat"/></svg><span class="label">Chat</span></button>
+    <button type="button" data-view="feed"><svg class="glyph" aria-hidden="true" focusable="false"><use href="#g-activity"/></svg><span class="label">Activity</span></button>
+    <button type="button" id="side-work-row" data-view="work" aria-expanded="false" aria-controls="side-work"><svg class="glyph" aria-hidden="true" focusable="false"><use href="#g-work"/></svg><span class="label">Work</span></button>
+    <div id="side-work" class="side-kids" role="group" aria-label="Work">
+      <button type="button" data-view="board">Board</button>
+      <button type="button" data-view="projects">Projects</button>
+      <button type="button" data-view="artifacts">Artifacts</button>
+    </div>
+    <button type="button" data-view="knowledge"><svg class="glyph" aria-hidden="true" focusable="false"><use href="#g-knowledge"/></svg><span class="label">Knowledge</span></button>
+    <button type="button" data-view="agents"><svg class="glyph" aria-hidden="true" focusable="false"><use href="#g-agents"/></svg><span class="label">Agents</span></button>
+    <div class="side-foot">
+      <button type="button" data-view="settings"><svg class="glyph" aria-hidden="true" focusable="false"><use href="#g-settings"/></svg><span class="label">Settings</span></button>
+    </div>
+  </nav>
+
+  <main id="main">
+    <!-- The large title collapses into the header as it scrolls away. -->
+    <h1 id="title" class="large-title">Metistry</h1>
+    <!-- Work's children, a segmented control at the top of the tab. No Rooms
+         (C89): a room is a push from its card. At 900px the sidebar holds them. -->
+    <div id="work-seg" class="segmented" role="group" aria-label="Work" hidden>
+      <button type="button" data-view="board">Board</button>
+      <button type="button" data-view="projects">Projects</button>
+      <button type="button" data-view="artifacts">Artifacts</button>
+    </div>
     <section id="auth" hidden>
       <p id="auth-msg">sign in to your instance</p>
       <button id="login-btn">Sign In with Passkey</button>
       <button id="enroll-btn" hidden>Enroll This Device</button>
     </section>
 
-    <!-- feed (home): docs/product/desktop-app-plan.md "The window" — activity_feed
+    <!-- Activity (the feed's name since 09-18, N1; its id stays `feed`), under
+         More. docs/product/desktop-app-plan.md "The window" — activity_feed
          seed query, time-ordered across captures/runs/proposals/work.history/
          outbound_messages. THE TIMELINE (docs/research/2026-09-16-taskuary-review.md
          ADOPT 1): a capture appears the instant it lands, wearing its status,
@@ -137,6 +192,8 @@
       <p id="triage-empty" hidden>nothing needs you 🎉</p>
     </section>
 
+    <!-- Status and Devices are Settings (More ▸ Settings; the sidebar's foot at
+         900px) until Settings is §2.3's grouped list. -->
     <section id="status" hidden>
       <h3>Reviews Waiting on You</h3>
       <ul id="reviews" class="reviews"><li class="muted">none</li></ul>
@@ -147,6 +204,7 @@
     </section>
 
     <section id="devices" hidden>
+      <h3>Devices</h3>
       <ul id="device-list"></ul>
     </section>
 
@@ -195,22 +253,31 @@
       </form>
     </section>
 
-    <!-- dashboard (Phase 4 visibility): one place instead of four. Every
-         panel is a named query; panels degrade independently. -->
-    <section id="dashboard" hidden>
+    <!-- Today. Until the day itself reaches the phone (the brief, Next Up and
+         the spine — screen 18 §2), Today holds the two day-shaped panels of
+         the old dashboard: the last 24 hours and the reviews waiting on you.
+         Every panel is a named query; panels degrade independently. -->
+    <section id="today" hidden>
       <h3>Last 24h <span id="dash-runs-asof" class="muted"></span></h3>
       <ul id="dash-runs" class="tiles"></ul>
       <p id="dash-runs-note" class="muted"></p>
 
       <h3>Reviews Waiting on You <span id="dash-reviews-asof" class="muted"></span></h3>
       <ul id="dash-reviews" class="reviews dash-list"><li class="muted">none</li></ul>
+    </section>
 
-      <h3>Projects <span id="dash-projects-asof" class="muted"></span></h3>
-      <!-- §4.19 project rollup + §4.21 kill switch: one row per project, a mode chip, one toggle -->
+    <!-- Work ▸ Projects: §4.19 project rollup + §4.21 kill switch — one row per
+         project, a mode chip, one toggle. -->
+    <section id="projects" hidden>
+      <p class="muted"><span id="dash-projects-asof"></span></p>
       <ul id="dash-project-rows" class="dash-list"></ul>
       <p id="dash-projects-msg" class="muted"></p>
       <ul id="dash-projects" class="dash-list"></ul>
+    </section>
 
+    <!-- Usage: a sheet from the header's gauge (600px and up) or More. What the
+         provider billed, as the engine recorded it, and the AWS bill. -->
+    <section id="usage" hidden>
       <h3>Assistant Spend by Tier · 30d <span id="dash-spend-asof" class="muted"></span></h3>
       <p class="muted">What the provider billed for these turns, as the engine recorded it.</p>
       <p id="dash-spend-total"></p>
@@ -225,6 +292,25 @@
       <p id="dash-aws-total"></p>
       <ul id="dash-aws" class="dash-list"></ul>
       <ul id="dash-aws-services" class="dash-list"></ul>
+    </section>
+
+    <!-- Knowledge. The fold, then Needs Your Eye, then Areas (screen 18 §5)
+         arrive with the Knowledge view; until then the tab says so plainly. -->
+    <section id="knowledge" hidden>
+      <p class="empty">Knowledge isn’t in this app yet — the fold, Needs Your Eye and Areas arrive here next.</p>
+    </section>
+
+    <!-- More (screen 18 §1): what the tab bar has no room for, in the Mac's
+         order. Every row is a push, except Usage, which is a sheet. -->
+    <section id="more" hidden>
+      <ul class="group">
+        <li><button type="button" class="row" data-view="feed"><svg class="glyph" aria-hidden="true" focusable="false"><use href="#g-activity"/></svg><span class="label">Activity</span><svg class="chev" aria-hidden="true" focusable="false"><use href="#g-chevron"/></svg></button></li>
+        <li><button type="button" class="row" data-view="agents"><svg class="glyph" aria-hidden="true" focusable="false"><use href="#g-agents"/></svg><span class="label">Agents</span><svg class="chev" aria-hidden="true" focusable="false"><use href="#g-chevron"/></svg></button></li>
+      </ul>
+      <ul class="group">
+        <li><button type="button" class="row" data-view="usage"><svg class="glyph" aria-hidden="true" focusable="false"><use href="#g-usage"/></svg><span class="label">Usage</span><svg class="chev" aria-hidden="true" focusable="false"><use href="#g-chevron"/></svg></button></li>
+        <li><button type="button" class="row" data-view="settings"><svg class="glyph" aria-hidden="true" focusable="false"><use href="#g-settings"/></svg><span class="label">Settings</span><svg class="chev" aria-hidden="true" focusable="false"><use href="#g-chevron"/></svg></button></li>
+      </ul>
     </section>
 
     <!-- board (docs/ops/board.md): the Kanban over the tasks module's work
@@ -341,6 +427,36 @@
       </div>
     </section>
   </main>
+
+  <!-- The tab bar (screen 18 §1, ruled 2026-09-24): five tabs and nothing
+       conditional, so no tab ever carries a badge — the bell does (P2). At
+       900px the sidebar replaces it. -->
+  <nav id="tabs" aria-label="Tabs" hidden>
+    <button type="button" data-tab="today"><svg class="glyph" aria-hidden="true" focusable="false"><use href="#g-today"/></svg><span class="label">Today</span></button>
+    <button type="button" data-tab="chat"><svg class="glyph" aria-hidden="true" focusable="false"><use href="#g-chat"/></svg><span class="label">Chat</span></button>
+    <button type="button" data-tab="work"><svg class="glyph" aria-hidden="true" focusable="false"><use href="#g-work"/></svg><span class="label">Work</span></button>
+    <button type="button" data-tab="knowledge"><svg class="glyph" aria-hidden="true" focusable="false"><use href="#g-knowledge"/></svg><span class="label">Knowledge</span></button>
+    <button type="button" data-tab="more"><svg class="glyph" aria-hidden="true" focusable="false"><use href="#g-more"/></svg><span class="label">More</span></button>
+  </nav>
+
+  <!-- One sheet, borrowed by a view: the bell's Needs You, Capture and Usage
+       (screen 18 §1). A page sheet on a phone, a centred dialog from 600px.
+       A native modal <dialog>: Esc and Done close it, focus stays inside it
+       while it is open and returns to the control that opened it. -->
+  <dialog id="sheet" aria-labelledby="sheet-title">
+    <div class="sheet-panel">
+      <div class="sheet-head">
+        <span></span>
+        <h2 id="sheet-title"></h2>
+        <button id="sheet-done" type="button">Done</button>
+      </div>
+      <div id="sheet-body"></div>
+    </div>
+  </dialog>
+
+  <!-- The one badge announces a change once, and not while the owner is on it
+       (components-02 §3). -->
+  <p id="needs-announce" class="visually-hidden" role="status" aria-live="polite"></p>
 
   <script src="/vendor/simplewebauthn.js"></script>
   <script type="module" src="/app.js"></script>

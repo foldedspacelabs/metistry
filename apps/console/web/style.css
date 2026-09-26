@@ -21,8 +21,6 @@ body {
   font-size: var(--mt-text-body-size);
   line-height: var(--mt-text-body-line);
   -webkit-text-size-adjust: 100%;
-  padding: env(safe-area-inset-top) max(var(--mt-space-4), env(safe-area-inset-right))
-           0 max(var(--mt-space-4), env(safe-area-inset-left));
 }
 
 ul { list-style: none; padding: 0; }
@@ -43,30 +41,54 @@ b { font-weight: 600; }
 }
 
 /* -------------------------------------------------------------- layout ---- */
-/* Narrow: a sticky title, content, and #nav as a bottom tab bar.
-   Wide (>= 900px): the same markup as a sidebar beside the content — one
-   media query, no JavaScript, no markup change. */
+/* The shell (screen 18 §1; design-build-plan §2.17), in three widths:
+ *
+ *   under 600px   a header bar with + and the bell, a large title that
+ *                 collapses into the bar on scroll, five tabs at the bottom,
+ *                 sheets from the bottom edge.
+ *   600–899px     the same, with the usage gauge in the header, content
+ *                 capped at the reading measure, the board's columns
+ *                 scrolling sideways, and sheets as centred dialogs.
+ *   900px and up  the Mac layout: a toolbar (the mark, +, the gauge), the
+ *                 sidebar in the Mac's order, and no bell — the Needs You row
+ *                 carries the count (C110).
+ *
+ * 44pt rows, 16pt gutters, the tokens' type scale in rem, so the browser's
+ * text size is respected. */
 
-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--mt-space-3);
-  padding: var(--mt-space-3) 0;
+:root {
+  --shell-gutter: var(--mt-space-4);
+  --shell-tabs: calc(var(--mt-size-touch-target) + var(--mt-space-3));
+}
+
+
+#bar {
   position: sticky;
   top: 0;
   z-index: var(--mt-z-nav);
+  display: flex;
+  align-items: center;
+  gap: var(--mt-space-2);
+  min-height: calc(var(--mt-size-touch-target) + env(safe-area-inset-top));
+  padding: env(safe-area-inset-top) max(var(--mt-space-2), env(safe-area-inset-right)) 0 max(var(--mt-space-2), env(safe-area-inset-left));
   background: var(--mt-color-bg);
 }
 
-h1 {
-  font-size: var(--mt-text-title-3-size);
-  font-weight: var(--mt-text-title-3-weight);
-  letter-spacing: var(--mt-text-title-3-tracking);
+main {
+  padding: 0 max(var(--shell-gutter), env(safe-area-inset-right))
+           calc(var(--shell-tabs) + env(safe-area-inset-bottom) + var(--mt-space-6))
+           max(var(--shell-gutter), env(safe-area-inset-left));
 }
-
-main { padding-bottom: calc(var(--mt-space-16) + var(--mt-space-6) + env(safe-area-inset-bottom)); }
 section { padding: var(--mt-space-2) 0; }
+
+.large-title {
+  font-size: var(--mt-text-large-title-size);
+  font-weight: var(--mt-text-large-title-weight);
+  line-height: var(--mt-text-large-title-line);
+  letter-spacing: var(--mt-text-large-title-tracking);
+  padding: var(--mt-space-1) 0 var(--mt-space-2);
+  overflow-wrap: anywhere;
+}
 
 h3 {
   font-size: var(--mt-text-headline-size);
@@ -74,105 +96,325 @@ h3 {
   margin-top: var(--mt-space-6);
 }
 
-/* ------ navigation: bottom tab bar (narrow) ------ */
-nav {
+/* The glyphs: drawn in currentColor from the sprite in index.html. */
+.sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+.glyph { width: var(--mt-size-icon-lg); height: var(--mt-size-icon-lg); flex: none; }
+.chev { width: var(--mt-size-icon-sm); height: var(--mt-size-icon-sm); flex: none; }
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip-path: inset(50%); white-space: nowrap;
+}
+
+/* ------ the header: back · title · + · bell · gauge ------ */
+.bar-back {
+  display: inline-flex; align-items: center; gap: 2px;
+  background: none; border: 0; border-radius: var(--mt-radius-sm);
+  padding: 0 var(--mt-space-2) 0 0;
+  color: var(--mt-color-accent);
+  font-size: var(--mt-text-body-size);
+}
+.bar-back:hover, .bar-back:active { background: none; }
+.bar-back .glyph { width: var(--mt-size-icon-md); height: var(--mt-size-icon-md); }
+
+/* The title appears in the bar once the large one has scrolled under it. */
+.bar-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: center;
+  font-size: var(--mt-text-headline-size);
+  font-weight: var(--mt-text-headline-weight);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+  transition: opacity var(--mt-motion-duration-fast) var(--mt-motion-ease-standard);
+}
+body.title-collapsed .bar-title { opacity: 1; }
+.brand { display: none; }
+
+.bar-actions { display: inline-flex; align-items: center; gap: 2px; margin-left: auto; }
+.glyph-btn {
+  position: relative;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: var(--mt-size-touch-target); min-height: var(--mt-size-touch-target);
+  padding: 0;
+  background: none; border: 0; border-radius: var(--mt-radius-pill);
+  color: var(--mt-color-text-secondary);
+}
+.glyph-btn:hover { background: none; color: var(--mt-color-text-primary); }
+.glyph-btn:active { background: none; }
+.glyph-btn.plus { color: var(--mt-color-accent); }
+/* The gauge joins + and the bell from 600px; below that Usage is under More. */
+#usage-btn { display: none; }
+
+/* The one badge (P2): the bell's, and the Needs You row's at 900px. Never a tab's. */
+.badge {
+  display: inline-block;
+  min-width: calc(var(--mt-space-4) + 2px);
+  padding: 0 var(--mt-space-1);
+  border-radius: var(--mt-radius-pill);
+  background: var(--mt-color-accent);
+  color: var(--mt-color-on-accent);
+  font-size: var(--mt-text-caption-2-size);
+  font-weight: 700;
+  line-height: 1.5;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.bell .badge { position: absolute; top: var(--mt-space-1); right: 0; }
+
+/* ------ the tab bar (under 900px): five tabs, none with a badge ------ */
+#tabs {
   position: fixed;
   left: 0; right: 0; bottom: 0;
   z-index: var(--mt-z-nav);
   display: flex;
-  gap: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
   background: var(--mt-color-surface);
   border-top: 1px solid var(--mt-color-border);
-  padding: var(--mt-space-1) max(var(--mt-space-1), env(safe-area-inset-left))
-           calc(var(--mt-space-1) + env(safe-area-inset-bottom)) max(var(--mt-space-1), env(safe-area-inset-right));
+  padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
 }
-nav::-webkit-scrollbar { display: none; }
-nav[hidden] { display: none; }
-
-nav button {
-  flex: 1 0 auto;
-  min-width: 64px;
-  min-height: var(--mt-size-touch-target);
+#tabs button {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: var(--shell-tabs);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 2px;
+  padding: var(--mt-space-1) 0;
   background: none;
   border: 0;
-  border-radius: var(--mt-radius-sm);
-  color: var(--mt-color-text-tertiary);
-  font: inherit;
+  border-radius: 0;
+  color: var(--mt-color-text-secondary);
   font-size: var(--mt-text-caption-2-size);
   font-weight: var(--mt-text-caption-2-weight);
   letter-spacing: var(--mt-text-caption-2-tracking);
-  padding: var(--mt-space-1) var(--mt-space-2);
-  cursor: pointer;
 }
-nav button.active { color: var(--mt-color-accent); }
+#tabs button:hover, #tabs button:active { background: none; }
+#tabs button[aria-current="page"] { color: var(--mt-color-accent); font-weight: 600; }
+#tabs .label { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* Glyphs come from CSS so the markup (and its test hooks) stays as it is.
-   On Apple platforms the native app uses the SF Symbol named in §3.2. */
-nav button::before { content: "•"; font-size: var(--mt-text-callout-size); line-height: 1.1; }
-nav button[data-view="feed"]::before      { content: "◈"; }
-nav button[data-view="chat"]::before      { content: "💬"; }
-nav button[data-view="board"]::before     { content: "🗂"; }
-nav button[data-view="dashboard"]::before { content: "📊"; }
-nav button[data-view="capture"]::before   { content: "📥"; }
-nav button[data-view="triage"]::before    { content: "📝"; }
-nav button[data-view="status"]::before    { content: "🩺"; }
-nav button[data-view="devices"]::before   { content: "🔑"; }
-nav button[data-view="agents"]::before    { content: "🤖"; }
-nav button[data-view="artifacts"]::before { content: "📄"; }
+/* ------ Work's children: a segmented control at the top of the tab ------ */
+.segmented {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  margin-bottom: var(--mt-space-2);
+  background: var(--mt-color-sunken);
+  color: var(--mt-color-text-secondary);
+  border-radius: var(--mt-radius-md);
+}
+.segmented button {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: var(--mt-space-1) var(--mt-space-2);
+  background: none;
+  border: 0;
+  border-radius: var(--mt-radius-sm);
+  color: inherit;
+}
+.segmented button:hover { background: none; }
+.segmented button[aria-pressed="true"] {
+  background: var(--mt-color-surface);
+  color: var(--mt-color-text-primary);
+  box-shadow: var(--mt-elevation-1);
+  font-weight: 600;
+}
 
-/* ------ navigation: sidebar (wide) ------ */
+/* ------ a grouped list: More ------ */
+.group {
+  background: var(--mt-color-surface);
+  color: var(--mt-color-text-primary);
+  border: 1px solid var(--mt-color-border);
+  border-radius: var(--mt-radius-lg);
+  overflow: hidden;
+  margin-bottom: var(--mt-space-5);
+}
+.group li + li { border-top: 1px solid var(--mt-color-border); }
+.group .row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--mt-space-3);
+  min-height: var(--mt-size-touch-target);
+  padding: var(--mt-space-2) var(--mt-space-4);
+  background: none;
+  border: 0;
+  border-radius: 0;
+  color: inherit;
+  font-size: var(--mt-text-body-size);
+  text-align: left;
+}
+.group .row .glyph { width: var(--mt-size-icon-md); height: var(--mt-size-icon-md); color: var(--mt-color-accent); }
+.group .row .label { flex: 1 1 auto; min-width: 0; }
+.group .row .chev { color: var(--mt-color-text-tertiary); }
+
+.empty { color: var(--mt-color-text-secondary); padding: var(--mt-space-6) 0; max-width: var(--mt-size-reading-measure); }
+
+/* ------ the sidebar: only at 900px ------ */
+#sidebar { display: none; }
+
+/* ------ the sheet ------ */
+/* The dialog fills the viewport and paints the scrim itself, so the scrim is
+   a token everywhere (not every browser lets ::backdrop read one); the panel
+   inside is the sheet. */
+#sheet {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: var(--mt-color-scrim);
+  z-index: var(--mt-z-sheet);
+  overflow: hidden;
+}
+#sheet::backdrop { background: transparent; }
+#sheet[open] { display: flex; flex-direction: column; justify-content: flex-end; }
+body:has(#sheet[open]) { overflow: hidden; }
+.sheet-panel {
+  display: flex;
+  flex-direction: column;
+  height: calc(100% - env(safe-area-inset-top) - var(--mt-space-10));
+  background: var(--mt-color-bg);
+  color: var(--mt-color-text-primary);
+  border-radius: var(--mt-radius-lg) var(--mt-radius-lg) 0 0;
+  box-shadow: var(--mt-elevation-3);
+  overflow: hidden;
+  animation: sheet-up var(--mt-motion-duration-sheet) var(--mt-motion-ease-out);
+}
+.sheet-head {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: var(--mt-space-2);
+  padding: var(--mt-space-2) var(--mt-space-4);
+}
+.sheet-head h2 {
+  font-size: var(--mt-text-headline-size);
+  font-weight: var(--mt-text-headline-weight);
+  text-align: center;
+}
+#sheet-done {
+  justify-self: end;
+  background: none;
+  border: 0;
+  padding: 0 var(--mt-space-1);
+  color: var(--mt-color-accent);
+  font-weight: 600;
+}
+#sheet-done:hover, #sheet-done:active { background: none; }
+#sheet-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0 max(var(--shell-gutter), env(safe-area-inset-right)) calc(var(--mt-space-10) + env(safe-area-inset-bottom)) max(var(--shell-gutter), env(safe-area-inset-left));
+}
+@keyframes sheet-up { from { transform: translateY(100%); } }
+@keyframes sheet-in { from { opacity: 0; transform: scale(0.98); } }
+@keyframes sheet-fade { from { opacity: 0; } }
+/* Reduce Motion: the sheet cross-fades rather than travelling. */
+@media (prefers-reduced-motion: reduce) { .sheet-panel { animation-name: sheet-fade; } }
+
+/* ------ 600px and up: the narrow window ------ */
+@media (min-width: 600px) {
+  :root { --shell-gutter: var(--mt-space-6); }
+  #usage-btn { display: inline-flex; }
+  /* one column, capped at the reading measure (in main's own text size); the
+     board's columns scroll sideways inside it */
+  main { max-width: calc(var(--mt-size-reading-measure) + 2 * var(--shell-gutter)); margin-inline: auto; }
+  /* the tab bar keeps to a phone's width in the middle */
+  #tabs { padding-inline: max(env(safe-area-inset-left), calc((100% - 560px) / 2)); }
+  /* sheets become centred dialogs */
+  #sheet[open] { justify-content: center; align-items: center; }
+  .sheet-panel {
+    width: min(560px, calc(100% - 2 * var(--mt-space-8)));
+    height: auto;
+    max-height: min(85dvh, 760px);
+    border-radius: var(--mt-radius-xl);
+    animation-name: sheet-in;
+  }
+}
+@media (min-width: 600px) and (prefers-reduced-motion: reduce) { .sheet-panel { animation-name: sheet-fade; } }
+
+/* ------ 900px and up: the Mac layout ------ */
 @media (min-width: 900px) {
   body {
     display: grid;
     grid-template-columns: var(--mt-size-sidebar) minmax(0, 1fr);
-    column-gap: var(--mt-space-8);
-    align-items: start;
-    max-width: 1200px;
-    margin: 0 auto;
-    padding-bottom: var(--mt-space-10);
+    grid-template-rows: auto 1fr;
+    grid-template-areas: "bar bar" "side main";
+    min-height: 100dvh;
   }
-  header {
-    flex-direction: column;
-    align-items: stretch;
-    position: sticky;
-    top: env(safe-area-inset-top);
-    padding-top: var(--mt-space-6);
+  #bar {
+    grid-area: bar;
+    padding-inline: var(--mt-space-4);
+    background: var(--mt-color-surface);
+    border-bottom: 1px solid var(--mt-color-border);
   }
-  h1 { font-size: var(--mt-text-title-2-size); padding: 0 var(--mt-space-3) var(--mt-space-3); }
-  nav {
-    position: static;
+  .brand {
+    display: inline-flex; align-items: center; gap: var(--mt-space-2);
+    font-size: var(--mt-text-subhead-size); font-weight: 600;
+  }
+  .brand .mark { width: var(--mt-size-icon-sm); height: var(--mt-size-icon-sm); color: var(--mt-color-accent); }
+  .bar-title { display: none; }
+  #bell, #tabs { display: none; }
+
+  #sidebar {
+    grid-area: side;
+    display: flex;
     flex-direction: column;
-    overflow: visible;
-    background: none;
-    border-top: 0;
-    padding: 0;
     gap: 2px;
+    position: sticky;
+    top: var(--mt-size-touch-target);
+    align-self: start;
+    height: calc(100dvh - var(--mt-size-touch-target));
+    overflow-y: auto;
+    padding: var(--mt-space-3) var(--mt-space-2);
+    border-right: 1px solid var(--mt-color-border);
   }
-  nav button {
-    flex-direction: row;
-    justify-content: flex-start;
-    gap: var(--mt-space-2);
+  #sidebar button {
+    display: flex;
+    align-items: center;
+    gap: var(--mt-space-3);
+    width: 100%;
     min-height: var(--mt-size-pointer-target);
-    font-size: var(--mt-text-subhead-size);
-    font-weight: 400;
-    letter-spacing: 0;
     padding: var(--mt-space-2) var(--mt-space-3);
+    background: none;
+    border: 0;
+    border-radius: var(--mt-radius-sm);
     color: var(--mt-color-text-primary);
+    font-size: var(--mt-text-subhead-size);
+    font-weight: 500;
+    text-align: left;
   }
-  nav button:hover { background: var(--mt-color-sunken); }
-  nav button.active {
+  #sidebar button .glyph { width: var(--mt-size-icon-md); height: var(--mt-size-icon-md); color: var(--mt-color-text-secondary); }
+  #sidebar button .label { flex: 1 1 auto; min-width: 0; }
+  #sidebar button:hover { background: var(--mt-color-sunken); color: var(--mt-color-text-primary); }
+  #sidebar button[aria-current="page"] {
     background: var(--mt-color-accent-quiet);
-    color: var(--mt-color-accent);
+    color: var(--mt-color-text-primary);
     font-weight: 600;
   }
-  main { padding: var(--mt-space-6) 0 var(--mt-space-10); }
+  #sidebar button[aria-current="page"] .glyph, #side-needs .glyph { color: var(--mt-color-accent); }
+  #sidebar button[aria-expanded="true"] { font-weight: 600; }
+  #side-needs { font-weight: 600; }
+  /* Work's children, under Work while a Work view is open */
+  .side-kids { display: none; flex-direction: column; gap: 2px; }
+  .side-kids.open { display: flex; }
+  #sidebar .side-kids button {
+    padding-left: calc(var(--mt-space-3) + var(--mt-size-icon-md) + var(--mt-space-3));
+    font-size: var(--mt-text-footnote-size);
+  }
+  .side-foot { margin-top: auto; padding-top: var(--mt-space-3); border-top: 1px solid var(--mt-color-border); }
+
+  main { grid-area: main; max-width: none; margin-inline: 0; padding: var(--mt-space-6) var(--mt-space-8) var(--mt-space-10); }
+  main > :not(#board) { max-width: var(--mt-size-content-max); }
+  .segmented { display: none; }
   #messages { max-height: calc(100dvh - 260px); }
 }
 
@@ -556,7 +798,7 @@ label { display: flex; flex-direction: column; gap: var(--mt-space-1);
 #proposal-list li > span:first-child { flex: 1 1 220px; font-size: var(--mt-text-headline-size);
   font-weight: var(--mt-text-headline-weight); overflow-wrap: anywhere; }
 #proposal-list li > span:first-child .muted { display: block; font-weight: 400; }
-#proposal-list li > span:last-child { display: flex; gap: var(--mt-space-2); }
+#proposal-list li > span:last-child { display: flex; flex-wrap: wrap; gap: var(--mt-space-2); }
 #triage-empty { color: var(--mt-color-text-secondary); text-align: center;
   border: 1px dashed var(--mt-color-border-strong); border-radius: var(--mt-radius-lg);
   padding: var(--mt-space-8) var(--mt-space-4); }
@@ -700,8 +942,9 @@ label { display: flex; flex-direction: column; gap: var(--mt-space-1);
   border-left: 2px solid var(--mt-color-failed); }
 
 /* One popover shape for move / assign / detail — a panel, not a modal: the
-   board stays readable behind it and Esc closes it. */
-.board-pop { position: fixed; left: 50%; bottom: var(--mt-space-4); transform: translateX(-50%);
+   board stays readable behind it and Esc closes it. Under 900px it sits above
+   the tab bar, never behind it. */
+.board-pop { position: fixed; left: 50%; bottom: calc(var(--shell-tabs) + env(safe-area-inset-bottom) + var(--mt-space-4)); transform: translateX(-50%);
   z-index: 10; width: min(420px, calc(100vw - 2 * var(--mt-space-4)));
   background: var(--mt-color-surface); border-radius: var(--mt-radius-lg);
   box-shadow: var(--mt-elevation-3); padding: var(--mt-space-4);
@@ -713,9 +956,15 @@ label { display: flex; flex-direction: column; gap: var(--mt-space-1);
 .board-pop dt { color: var(--mt-color-text-tertiary); }
 .board-pop dd { margin: 0; overflow-wrap: anywhere; }
 
+/* From 600px the columns sit side by side, scroll sideways and snap. */
+@media (min-width: 600px) {
+  .board { grid-auto-flow: column; grid-auto-columns: minmax(230px, 1fr); align-items: start; overflow-x: auto;
+    scroll-snap-type: x mandatory; }
+  .board-col { scroll-snap-align: start; }
+}
 @media (min-width: 900px) {
-  .board { grid-auto-flow: column; grid-auto-columns: minmax(230px, 1fr); align-items: start; overflow-x: auto; }
   .board-hint { display: inline; }
+  .board-pop { bottom: var(--mt-space-4); }
 }
 
 /* ------------------------------------------------------------- artifacts -- */

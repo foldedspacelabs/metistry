@@ -6,6 +6,7 @@ import { z } from "zod";
 import { VAULT_ROOT_AREA, isVaultPath } from "./instance-layout.js";
 
 import { actionTableSchema, AUTONOMY_LEVELS } from "./actions.js";
+import { connectionTypeShape, refineConnectionType } from "./connections.js";
 import { modelRefIssue } from "./model-ref.js";
 import { EFFORTS } from "./tiers.js";
 
@@ -20,9 +21,34 @@ const name = z
   .string()
   .regex(/^[a-z][a-z0-9-]*$/, "names are lowercase kebab-case (casing rule: only the vault is TitleCase)");
 
+/**
+ * The manifest format version (§2.7, Versioning). Every manifest carries
+ * `schema: 1`; an unknown major is refused with the version named, so a unit
+ * written for a newer Metistry is skipped with a reason rather than read as
+ * something it is not. Optional on the kinds that predate it (their manifests
+ * still validate without it); required on `connection-type` and by the
+ * registry (registry.ts), which every extension loads through.
+ */
+export const MANIFEST_SCHEMA_VERSION = 1;
+
+/** What is wrong with a `schema` value, without the key (a zod issue carries its path). */
+function versionProblem(value: unknown): string {
+  return value === undefined
+    ? `missing — every manifest carries schema: ${MANIFEST_SCHEMA_VERSION}`
+    : `${JSON.stringify(value)} is not a version this Metistry reads (it reads schema ${MANIFEST_SCHEMA_VERSION})`;
+}
+
+const manifestVersion = z.literal(MANIFEST_SCHEMA_VERSION, { error: (iss) => versionProblem(iss.input) });
+
+/** Why a manifest's `schema` value is not one this Metistry reads (`schema: …`), or undefined when it is. */
+export function schemaVersionIssue(value: unknown): string | undefined {
+  return value === MANIFEST_SCHEMA_VERSION ? undefined : `schema: ${versionProblem(value)}`;
+}
+
 const base = z.object({
   name,
   description: z.string().optional(),
+  schema: manifestVersion.optional(),
 });
 
 // TCC permissions a bridge may declare. Behavioral probes, not permission
@@ -374,6 +400,27 @@ export const serviceManifest = base.extend({
   port: z.number().int().min(1).max(65535).optional(),
 });
 
+// --- connection types (§2.6, §2.7) -------------------------------------------
+//
+// A provider of a connection type: Google Calendar, CalDAV, IMAP, Linear, a
+// known MCP service. Its `type` is `connection-type` — the kind marker every
+// manifest carries — and `provides` names the connection type it provides,
+// because `agent` is both a manifest type and a connection type and one key
+// cannot mean both. The vocabularies it names values from are closed and live
+// in connections.ts; `strict`, because a typo'd key in a unit that declares
+// what an integration may do must fail loudly.
+
+export const connectionTypeManifest = base
+  .extend({
+    type: z.literal("connection-type"),
+    schema: manifestVersion,
+    ...connectionTypeShape,
+  })
+  .strict()
+  .superRefine(refineConnectionType);
+
+export type ConnectionTypeManifest = z.infer<typeof connectionTypeManifest>;
+
 export const manifestSchema = z.discriminatedUnion("type", [
   bridgeManifest,
   collectorManifest,
@@ -381,7 +428,11 @@ export const manifestSchema = z.discriminatedUnion("type", [
   routineManifest,
   targetManifest,
   serviceManifest,
+  connectionTypeManifest,
 ]);
+
+/** Every manifest kind — the `type` values `manifestSchema` discriminates on. */
+export type ManifestType = Manifest["type"];
 
 export type Manifest = z.infer<typeof manifestSchema>;
 

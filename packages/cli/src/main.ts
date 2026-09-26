@@ -515,18 +515,19 @@ const USAGE = `metistry — Metistry command line
       the reconciler as the "user" principal, and an edit that would not
       validate is refused rather than written. "providers add" reads the API
       key from stdin into the login Keychain (user scope) and never takes it
-      as an argument. Nothing dials a provider or enforces a budget yet.
-      "cache-report" and "route-report" are the two that read rather than
-      write. cache-report: prompt-cache effectiveness per provider, model and
-      tier over the last --since days (7d, 2w, 3m, or a bare number of days),
-      from the runs ledger through the console — turns, cache reads and
-      writes, hit ratio, what it cost and what the cache saved where
-      compute.yaml names a rate (OPEN-6's measurement). route-report: how the
-      deterministic router placed real messages over the same kind of window
-      (default 30d) — note, fast_path, override and the fall-through to the
-      default tier, the tiers and rules that fired, and the length and first
-      word of the fall-throughs, with PoC-20 phase 0's exit rule as the
-      verdict. Neither calls a model or changes anything (docs/ops/compute.md).
+      as an argument. Budgets are enforced in the engine, before the call
+      (docs/ops/compute.md). "cache-report" and "route-report" are the two
+      that read rather than write. cache-report: prompt-cache effectiveness
+      per provider, model and tier over the last --since days (7d, 2w, 3m,
+      or a bare number of days), from the runs ledger through the console —
+      turns, cache reads and writes, hit ratio, what it cost and what the
+      cache saved where compute.yaml names a rate (OPEN-6's measurement).
+      route-report: how the deterministic router placed real messages over
+      the same kind of window (default 30d) — note, fast_path, override and
+      the fall-through to the default tier, the tiers and rules that fired,
+      and the length and first word of the fall-throughs, with PoC-20 phase
+      0's exit rule as the verdict. Neither calls a model or changes
+      anything (docs/ops/compute.md).
 
   metistry deployment [--json] [--product-dir <checkout>]
       The effective shape (deployment.yaml's D4 overlay) and the services it

@@ -292,6 +292,13 @@ private func paneModel(_ runner: FakeRunner, status: StatusModel? = nil) -> Comp
     #expect(model.lastOutcome?.message.contains("an action with no limit never fires") == true)
 }
 
+@MainActor
+@Test func theBudgetNoteSaysEnforcedNeverRecordedNotEnforced() {
+    #expect(ComputeModel.budgetNote.contains("Enforced in the engine, before the call"))
+    #expect(!ComputeModel.budgetNote.lowercased().contains("not enforced"))
+    #expect(!ComputeModel.budgetNote.contains("Nothing dials a provider"))
+}
+
 // MARK: - compute models install / load
 
 @MainActor

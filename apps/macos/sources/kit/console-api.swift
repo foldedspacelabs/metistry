@@ -28,16 +28,20 @@
 // (tests/kit/console-api-tests.swift). It is the same seam `CommandRunner` is,
 // one level up: `CommandRunner` fakes a process, this fakes a console.
 //
-// WHAT THIS LAYER COSTS, SAID PLAINLY. `metistry console call` prints the error
-// ENVELOPE (`code`, `message`) on stderr for a >= 400 and does not print the
-// response BODY, so the extra keys on the staleness/conflict 409 —
-// `reason`, `decision`, `decided_at`, `proposal` — do not survive the trip.
-// Everything phase A reads is unaffected (the envelope IS `{code, message}`);
-// the queue's `if_unchanged` repaint in phase B needs the body, which is one
-// change in `packages/cli/src/main.ts` — print `r.raw` on stdout for a >= 400
-// too — and not a second client here. `ConsoleError.http` carries the status
-// and the envelope; `ConsoleError.conflictBodyIsUnavailable` says so out loud
-// rather than letting a caller believe it asked and got nothing.
+// WHAT THIS LAYER COST, SAID PLAINLY (struck 2026-09-26; F-11). `metistry
+// console call` used to print the error ENVELOPE (`code`, `message`) on
+// stderr for a >= 400 and nothing of the response BODY, so the extra keys on
+// the staleness/conflict 409 — `reason`, `decision`, `decided_at`,
+// `proposal` — did not survive the trip. `--json` now prints the console's
+// own body on stdout for a >= 400 too (`packages/cli/src/main.ts`), and
+// `ConsoleError.fromConsoleCall` decodes `ConsoleErrorEnvelope` from THAT —
+// real JSON, not a re-parse of the rendered stderr line — so a message that
+// itself contains " — ", or a `field` the render did not carry, still comes
+// through whole. `ConsoleError.conflictBodyIsUnavailable` is gone: the
+// transport does see the body now. The extra conflict keys still have
+// nowhere to live in `ConsoleError` (that enum is `console-client.swift`,
+// outside this ticket) — the queue's `if_unchanged` repaint that wants them
+// is later work, not a second client here.
 //
 // WHAT IT CAN NOW DO (struck 2026-09-18; `console call` gained
 // `--idempotency-key <key>`). `ConsoleCallTransport.call`'s fourth argument
@@ -165,7 +169,7 @@ public struct CLIConsoleCallTransport: ConsoleCallTransport {
             }
             return .success(data)
         }
-        return .failure(ConsoleError.fromConsoleCall(stderr: result.stderr, exitCode: result.exitCode))
+        return .failure(ConsoleError.fromConsoleCall(stderr: result.stderr, stdout: result.stdout, exitCode: result.exitCode))
     }
 }
 
@@ -547,15 +551,17 @@ public struct ConsoleAPI: Sendable {
 // MARK: - `metistry console call`'s failures, read back into the envelope
 
 public extension ConsoleError {
-    /// What the CLI prints on stderr when a request did not come back 2xx.
+    /// What the CLI prints when a request did not come back 2xx.
     ///
     /// Three shapes, and they mean different things:
     ///
-    ///   * `HTTP 409 — conflict — already decided` — `renderConsoleCallError`'s
-    ///     render of the console's own envelope. The status and the envelope are
-    ///     recovered verbatim; `code` and `message` are the whole envelope
-    ///     (`packages/core/src/errors.ts`), so nothing is lost for a 400, 401,
-    ///     403, 404 or 503.
+    ///   * `HTTP 409 — conflict — already decided` on stderr —
+    ///     `renderConsoleCallError`'s render of the console's own envelope. The
+    ///     status is read from here, always; the envelope itself is decoded
+    ///     from `stdout` when `--json` put real JSON there (F-11), and from
+    ///     this same rendered line otherwise — so nothing is lost for a 400,
+    ///     401, 403, 404 or 503 either way, and a message containing " — " or
+    ///     a `field` key the render did not carry now comes through intact.
     ///   * `METISTRY_LOCAL_OWNER_TOKEN is not set …` / `… is not loopback …` —
     ///     the door is not configured on this install. The CLI's own sentence,
     ///     verbatim, because it already names the fix.
@@ -564,12 +570,16 @@ public extension ConsoleError {
     /// Matching is on phrases, not on the variable's name: the secret has been
     /// renamed once already and must not be load-bearing here
     /// (console-sign-in.swift holds the same line).
-    static func fromConsoleCall(stderr: String, exitCode: Int32) -> ConsoleError {
+    static func fromConsoleCall(stderr: String, stdout: String = "", exitCode: Int32) -> ConsoleError {
         let text = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
         let line = text.split(separator: "\n").last.map(String.init) ?? text
         let detail = line.replacingOccurrences(of: "metistry console call: ", with: "")
         if let http = HTTPRender(detail) {
-            return .http(status: http.status, envelope: http.envelope)
+            // The real body, when `--json` printed one for this >= 400
+            // (`packages/cli/src/main.ts`) — decoded straight from JSON rather
+            // than re-parsed out of the rendered stderr line above.
+            let decoded = stdout.data(using: .utf8).flatMap { try? JSONValue.parse($0) }.flatMap(ConsoleErrorEnvelope.init(json:))
+            return .http(status: http.status, envelope: decoded ?? http.envelope)
         }
         if detail.contains("is not set (") || detail.contains("is not loopback") {
             return .notConfigured(detail)
@@ -641,13 +651,6 @@ public extension ConsoleError {
     /// is a fact rather than a fault (degrades: absent), and the message names
     /// the config field that would supply it.
     var isNotAvailable: Bool { httpStatus == 503 }
-
-    /// True where a caller wanted the 409's extra keys and this transport
-    /// cannot supply them. See the file header: `console call` puts the
-    /// envelope on stderr and does not print the body, so `reason`, `decision`
-    /// and the row itself do not survive a conflict. Said out loud so no caller
-    /// reads their absence as "the console sent none".
-    var conflictBodyIsUnavailable: Bool { isConflict }
 
     /// The field this refusal is about.
     ///

@@ -144,6 +144,65 @@ describe("the PWA prints the effective action table the CLI prints (§2.17)", ()
   });
 });
 
+// ---------------------------------------------------------------------------
+// The four check states (C10)
+// ---------------------------------------------------------------------------
+
+const status = lifted<{
+  checkRowHtml: (c: Record<string, unknown>) => string;
+  checksSummary: (checks: { status: string }[]) => string;
+}>(["CHECK_STATES", "CHECK_WORD", "checkRowHtml", "checksSummary"], "{ checkRowHtml, checksSummary }");
+
+const check = (s: string, name = "github-state") => ({ name, status: s, latency_ms: 12, probe: "listed 1 open PR" });
+/** The state span: its class and its word. */
+const stateOf = (html: string) => {
+  const m = /<span class="([^"]*)">([^<·]*) · /.exec(html);
+  return { cls: m?.[1], word: m?.[2]?.trim() };
+};
+/** The declarations of a top-level rule in style.css, e.g. `.degraded { … }`. */
+const ruleOf = (selector: string) => new RegExp(`^${selector.replace(/[.[\]]/g, "\\$&")}\\s*\\{([^}]*)\\}`, "m").exec(CSS)?.[1] ?? "";
+
+describe("the status list keeps the four states apart (C10)", () => {
+  it("`degraded` and `absent` render distinctly — class, word and ink — and neither as `failed`", () => {
+    const degraded = stateOf(status.checkRowHtml(check("degraded")));
+    const absent = stateOf(status.checkRowHtml(check("absent")));
+    expect(degraded).toEqual({ cls: "degraded", word: "degraded" });
+    expect(absent).toEqual({ cls: "absent", word: "not configured" });
+    expect(ruleOf(".degraded")).toContain("var(--mt-color-degraded)");
+    expect(ruleOf(".absent")).toContain("var(--mt-color-absent)");
+    expect(ruleOf(".degraded")).not.toBe(ruleOf(".absent"));
+    for (const s of ["degraded", "absent"]) expect(status.checkRowHtml(check(s))).not.toContain("failed");
+  });
+
+  it("keeps ok and failed as they were", () => {
+    expect(stateOf(status.checkRowHtml(check("ok")))).toEqual({ cls: "ok", word: "ok" });
+    expect(stateOf(status.checkRowHtml(check("failed")))).toEqual({ cls: "failed", word: "failed" });
+    expect(ruleOf(".failed")).toContain("var(--mt-color-failed)");
+  });
+
+  it("shows a word outside the contract as it came, in the neutral ink — never guessed to be a failure", () => {
+    expect(stateOf(status.checkRowHtml(check("checking")))).toEqual({ cls: "absent", word: "checking" });
+  });
+
+  it("escapes the component name as well as the probe", () => {
+    const html = status.checkRowHtml({ ...check("ok", "<img src=x onerror=alert(1)>"), probe: "<b>x</b>" });
+    expect(html).not.toContain("<img");
+    expect(html).not.toContain("<b>");
+  });
+
+  it("answers before it is read: a summary line in the same words", () => {
+    const checks = [...Array(9).fill("ok"), "degraded", "absent", "absent"].map((s) => ({ status: s }));
+    expect(status.checksSummary(checks)).toBe("9 ok · 1 degraded · 2 not configured");
+    expect(status.checksSummary([{ status: "ok" }, { status: "ok" }, { status: "ok" }])).toBe("all 3 healthy");
+    expect(status.checksSummary([{ status: "ok" }, { status: "failed" }])).toBe("1 ok · 1 failed");
+    expect(status.checksSummary([])).toBe("no checks reported");
+  });
+
+  it("no longer collapses the states in the source", () => {
+    expect(SRC).not.toContain('c.status === "ok" ? "ok" : "failed"');
+  });
+});
+
 // A lift evaluates one declaration at a time, so it cannot see two top-level
 // declarations of one name — which is a SyntaxError that stops the whole PWA
 // from loading. Parse the real file, as the browser will.

@@ -248,8 +248,13 @@ label { display: flex; flex-direction: column; gap: var(--mt-space-1);
 
 /* ------------------------------------------------------------- typography - */
 .muted { color: var(--mt-color-text-secondary); font-size: var(--mt-text-footnote-size); }
+/* The four states of a check (P5, §3.13), each its own ink AND its own word
+   (app.js checkRowHtml) — `absent` is "not configured", a fact and not a
+   fault, so it never borrows `failed`'s red or `degraded`'s amber (C10). */
 .ok { color: var(--mt-color-ok); }
+.degraded { color: var(--mt-color-degraded); font-weight: 500; }
 .failed { color: var(--mt-color-failed); font-weight: 500; }
+.absent { color: var(--mt-color-absent); }
 
 /* ------------------------------------------------------------------ auth -- */
 #auth {
@@ -552,6 +557,7 @@ label { display: flex; flex-direction: column; gap: var(--mt-space-1);
   border-bottom: 1px solid var(--mt-color-border);
 }
 #checks li:last-child, #device-list li:last-child { border-bottom: 0; }
+#checks li.checks-summary { color: var(--mt-color-text-secondary); font-size: var(--mt-text-footnote-size); }
 #checks, #device-list { background: var(--mt-color-surface); border-radius: var(--mt-radius-lg);
   box-shadow: var(--mt-elevation-1); padding: 0 var(--mt-space-4); margin-top: var(--mt-space-2); }
 #status button { margin: var(--mt-space-3) var(--mt-space-2) 0 0; }

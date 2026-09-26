@@ -193,10 +193,10 @@ The table's **Idempotent** column is one of:
 | `natural` | the route is idempotent by its own identity — a read, a replace, an upsert, a set — and needs no key |
 | `no` | a replay is a second act, or a `409`: never replay one blindly, and never queue one offline |
 
-`POST /capture` and the Tick door (`POST /api/vault-tasks/:task_key/check`)
-honour the header today; the defer door will (T2-5), because the PWA's offline
-outbox replays them (§2.17). The Tick door holds its keys in the console's
-memory — see *Tick* below for why that is enough.
+`POST /capture`, the Tick door (`POST /api/vault-tasks/:task_key/check`) and
+the Defer door (`…/schedule`) honour the header, because the PWA's offline
+outbox replays them (§2.17). The two vault-task doors hold their keys in the
+console's memory — see *Tick* below for why that is enough.
 
 ### `since` cursors on the polled lists — a reconnect is one bounded pull
 
@@ -334,7 +334,7 @@ takes a `since` cursor and answers with the next one.
 | `GET /api/vault-tasks` | owner | session · local_owner | natural | — | — | T2-7 | vault tasks by filter: Slipping, Owed, Waiting on Others |
 | `PUT /api/today/order` | owner | session · local_owner | natural | — | — | T2-7 | the owner's order for the day |
 | `POST /api/vault-tasks/:task_key/check` | owner | session · local_owner | key | stale | — | served | tick or untick one task line |
-| `POST /api/vault-tasks/:task_key/schedule` | owner | session · local_owner | key | stale | — | T2-5 | defer one task line: a `do` date or someday |
+| `POST /api/vault-tasks/:task_key/schedule` | owner | session · local_owner | key | stale | — | served | defer one task line: a `do` date or someday |
 | `POST /api/vault-tasks/:task_key/link` | owner | session · local_owner | no | stale | — | T4-25 | add one tracker ref to one task line |
 | `POST /api/today/close` | owner | session · local_owner | no | — | — | T2-8 | Close the Day: write the section, then plan tomorrow |
 | `POST /api/meetings/:event_id/note` | owner | session · local_owner | natural | — | — | T2-11 | the meeting note for one event; a second call returns the first |
@@ -1574,7 +1574,7 @@ GET  /api/today?date=                        T2-7 — the day: vault tasks (toda
 GET  /api/vault-tasks?where=                 T2-7 — vault tasks by filter (`compileTaskFilter`): Slipping, Owed, Waiting on Others
 PUT  /api/today/order                        T2-7 — the owner's order for the day; a key outside the day is refused
 POST /api/vault-tasks/:task_key/check        {checked, seen_text, path?}   Idempotency-Key   409 stale, with the current line
-POST /api/vault-tasks/:task_key/schedule     T2-5 — {do | someday, seen_text}   Idempotency-Key   409 stale
+POST /api/vault-tasks/:task_key/schedule     {do | someday, seen_text, path?}   Idempotency-Key   409 stale, with the current line
 POST /api/vault-tasks/:task_key/link         T4-25 — {ref}: one `linear:` (or `gh:`) ref onto one line   409 stale
 POST /api/today/close                        T2-8 — {day, line?}: Close the Day
 ```
@@ -1639,6 +1639,50 @@ Idempotency-Key: tick-0928-0001                    (optional; client-minted, ≤
   remembered; a retried refusal is judged again.
 - **`503`** when the deployment has no vault bridge
   (`METISTRY_RECONCILER_URL`).
+
+#### Defer — `POST /api/vault-tasks/:task_key/schedule` (T2-5)
+
+```
+POST /api/vault-tasks/mt-7f3k2a/schedule
+Idempotency-Key: defer-0928-0001                   (optional; client-minted, ≤200 chars)
+{"do": "2026-09-30", "seen_text": "Send Dana the fixture format"}
+{"someday": true, "seen_text": "Send Dana the fixture format"}
+
+200 {"ok": true,
+     "line": "- [ ] Send Dana the fixture format due 2026-09-28 p2 size s do 2026-09-30 ^mt-7f3k2a",
+     "task": {"path", "task_key", "anchor", "line_no", "text", "checked", "due", "scheduled_for", "someday"}}
+409 {"error": {"code": "conflict", …}, "reason": "stale", "line": "<as it stands>" | null, "task": {…} | null}
+```
+
+Everything *Tick* says about the key, `path`, `seen_text`, the refusals before
+any read, the read's hash, `Idempotency-Key` and `503` holds here word for
+word. What differs is the one edit, core's `setTaskScheduled`:
+
+- **The body** is exactly one of `do` — a calendar day, `YYYY-MM-DD`; the
+  client resolves *Tomorrow* or *Next Week* in the owner's zone before it
+  sends — or `someday: true`. Both, neither, or anything else is `400`.
+- **`do`** writes `do <date>`: in place of the line's `do` clause when it has
+  one, else at the end of the trailing run, before the anchor. A `someday`
+  token on the line goes, because a day was chosen. **`someday`** writes the
+  bare word `someday` at the end of the run and takes every `do` clause off.
+  `due` is never moved — it is a date the owner set. Commit: `defer "<text>"
+  to <date>` or `… to someday`, as `user`.
+- **English, never a glyph** (K6). The tokens are `formatTaskLine`'s own
+  spelling; the door has no code path that writes a Tasks-plugin `⏳` or a
+  `#someday` tag. A line whose day is already a `⏳`/`⌛` or a Dataview
+  `[scheduled:: …]` is refused `400` and nothing is written: the door does
+  not rewrite someone else's field, and will not write a second day beside
+  it. Defer that one in the note.
+- **Stale** (`409`, with the line): the text changed, the line is gone, or
+  since the client drew it the line was ticked, dropped (`[-]`), or already
+  deferred exactly so.
+- **Refused** (`400`, nothing written): a recurrence rule line (defer the
+  day's instance), and any line that would not re-parse as the same task with
+  only its day changed.
+- **One row at a time.** There is no bulk defer and no Skip here: Skip is
+  bulk-only and belongs to Needs You (K2).
+- **Finding them again:** the filter vocabulary's `someday` flag
+  (`where: "someday"`) — `vault_tasks.someday`, written by the walk.
 
 ### Calendar and mail — through the connection that can
 

@@ -36,11 +36,7 @@ a Design-type artifact. Read it with the Artifact tool (`action: "read"`, and
 A new board goes in its section's row, 80px after the last one; a row's title is
 a `title1` note 300px above it. Rows are 420px apart below the tallest board.
 
-`Facets`, `Plugin`, `Voice` and `Item-Model` are **not yet modules** in
-`boards/` — they were built from earlier snapshots of the library. Every *screen*
-board is now a module. Port each the
-next time it changes. Everything else is a module: round E ported `States`,
-`Request`, `Chat`, `Activity` and `NeedsYou`, and added `Agents`.
+**Every Mac, PWA and system board is now a module** (2026-09-25): `capture`, `facets`, `plugin` and `voice` were reassembled from the round-D components in `lib.py` (Capture's Mac frame redrawn with today's toolbar and sidebar; Voice's samples carry the configured name). The archived `Theme` and `Item-Model` are frozen copies in `boards/legacy/`, copied out by `legacy.py`, so an archive stays a record. The brand boards (`Direction-C`, `Wordmark`, `Icon-App`, `Icon-Web`, `Colour`, `Kit`, `Main`, `Direction-B`) were never in this generator.
 
 **The assembly of a board is not recoverable from lib.py.** The generator landed
 in one commit holding only `lib.py`, `today.py` and `board.py`; the five round-C
@@ -258,7 +254,7 @@ owner; the C96 events and the meeting-at-Stop as instances. **Needs You is the h
 
 **States and flows (2026-09-25, C135–C138, boards `States-Screens`, `States-Settings`, `Flows`, `components-03-states-and-flows.md`):** first paint is the last data with a stale band; Undo when reversible, confirm naming the cost otherwise; recording up to ten hours with two-hourly reminders and a disk watch; New Agent and Run Now lead somewhere.
 
-**Next round, in order:** (1) Port the legacy boards (Capture, Theme, Facets, Plugin, Voice, Item-Model) to modules. Ruled 2026-09-25: C99 (no confirm on a tick); C101/C102 (Close the Day updates
+**Next round, in order:** (1) Owner's call — the queue from review 01 is closed. Ruled 2026-09-25: C99 (no confirm on a tick); C101/C102 (Close the Day updates
 the daily note's Metistry section, dates each deferred line and writes
 tomorrow's plan — no close file; owed items are tasks); C103 (prose allowed
 outside a fold).
@@ -288,8 +284,7 @@ are drawn: the `access_request` card (`screen-03-needs-you.md` §9, board
 
 **The back-patch is complete.** `Chat` and `Request` were ported in round E
 along with `States`, `Activity`, `NeedsYou` and the new `Agents`. Every board on
-the canvas is now generated from a module in `boards/` except `Facets`, `Plugin`,
-`Voice` and `Item-Model`. `bellpanel()` is gone — it drew the *"1 snoozed"*
+the canvas is now generated from a module in `boards/` (the brand boards excepted; archives frozen in `boards/legacy/`). `bellpanel()` is gone — it drew the *"1 snoozed"*
 header C21 killed; `panel2()` is the panel.
 
 **138 contradictions** are logged in `review-00-plan.md`. C38, C51 and C62 are closed. C40–C87 are

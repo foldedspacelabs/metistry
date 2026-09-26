@@ -23,6 +23,7 @@ artifact is a separate step.
 | `today.py` | the Today board's assembly |
 | `board.py` | the Board's components and assembly |
 | `build.py` | imports each board module listed in `BOARDS` |
+| `legacy/` + `legacy.py` | archived boards, stored as published and copied out unchanged — an archive must not re-render with today's components |
 
 `lib.py` is the stable part. A normal change touches a board module or one
 function in `lib.py`; it should almost never mean rewriting either.

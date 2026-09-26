@@ -1,14 +1,13 @@
 {
   "route": "POST /api/vault-tasks/:task_key/schedule",
-  "source": "contract",
-  "ticket": "T2-5",
-  "note": "{do: <date>} or {someday: true}; 409 stale as check",
+  "source": "recorded",
+  "ticket": null,
   "request": {
     "method": "POST",
-    "path": "/api/vault-tasks/mt-7f3k2a/schedule",
+    "path": "/api/vault-tasks/mt-4q8r2d/schedule",
     "body": {
       "do": "2026-09-30",
-      "seen_text": "Send Dana the fixture format"
+      "seen_text": "Draft the Q4 plan"
     },
     "idempotency_key": "defer-0928-0001"
   },
@@ -17,45 +16,15 @@
     "ok": true,
     "task": {
       "path": "Journal/2026-09-28.md",
-      "task_key": "mt-7f3k2a",
-      "anchor": "mt-7f3k2a",
-      "line_no": 12,
-      "text": "Send Dana the fixture format",
-      "text_norm": "send dana the fixture format",
+      "task_key": "mt-4q8r2d",
+      "anchor": "mt-4q8r2d",
+      "line_no": 5,
+      "text": "Draft the Q4 plan",
       "checked": false,
-      "dropped": false,
-      "waiting": false,
-      "due": "2026-09-28",
+      "due": "2026-10-01",
       "scheduled_for": "2026-09-30",
-      "start_on": null,
-      "done_on": null,
-      "done_on_observed": false,
-      "priority": 2,
-      "priority_effective": 2,
-      "size": "s",
-      "type": null,
-      "assigned": null,
-      "project": "metistry",
-      "area": "Projects/Metistry",
-      "recur_parent": null,
-      "source": null,
-      "ext_refs": [],
-      "work_id": null,
-      "work_title": null,
-      "work_status": null,
-      "blocks_work_id": null,
-      "blocks_work_title": null,
-      "blocks_work_status": null,
-      "duplicate_of": null,
-      "places": 1,
-      "parse_warning": null,
-      "parsed_on": "2026-09-28",
-      "first_seen_on": "2026-09-25",
-      "last_seen_at": "2026-09-28T12:58:01.000Z",
-      "age_days": 3,
-      "carried_days": 0,
-      "row_flags": []
+      "someday": false
     },
-    "line": "- [ ] Send Dana the fixture format due 2026-09-28 do 2026-09-30 ^mt-7f3k2a"
+    "line": "- [ ] Draft the Q4 plan due 2026-10-01 p1 do 2026-09-30 ^mt-4q8r2d"
   }
 }

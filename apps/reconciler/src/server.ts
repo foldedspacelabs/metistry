@@ -10,9 +10,11 @@
 // `runs` row — never silently downgraded to something it did not ask for.
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { authorized, errorEnvelope, finishRun, INSTANCE_LAYOUT, isVaultPath, runCheck, startRun, statusFor, type ErrorCode } from "@foldedspacelabs/metistry-core";
+import { authorized, errorEnvelope, finishRun, INSTANCE_LAYOUT, isNoteSectionName, isVaultPath, NOTE_SECTION_NAMES, runCheck, startRun, statusFor, type ErrorCode } from "@foldedspacelabs/metistry-core";
 import type { Vault, Outcome } from "./vault.js";
 import { parseIntent } from "./vault.js";
+import { validPrincipal } from "./paths.js";
+import { validActId } from "./committer.js";
 import type { Committer } from "./committer.js";
 import type { Db, Indexer } from "./indexer.js";
 import type { Embeddings } from "./embeddings.js";
@@ -295,6 +297,32 @@ export function makeBridge(deps: BridgeDeps, cfg: BridgeConfig): Server {
           return reply(res, out, 200, (v) => ({ ...v, deleted: true, queued: true }));
         }
         const out = await refused(await vault.rename(body.from, body.to, intent.value, caller), "vault_rename", `${String(body.from)} → ${String(body.to)}`);
+        return reply(res, out, 200, (v) => ({ ...v, queued: true }));
+      }
+
+      // One writer per REGION (plan §2.13): the bytes between a section's
+      // markers in the owner's daily note, and nothing else. The body names
+      // `principal` directly — attribution, bounded by this bearer exactly as
+      // `intent.principal` is on the routes above — and the commit message is
+      // the bridge's own, so the history of the owner's note reads the same
+      // whoever wrote the section.
+      if (key === "POST /vault/section") {
+        const body = await readJson(req, cfg.maxBodyBytes);
+        if (!body) return fail(res, "invalid_request", "JSON object body required (within the size cap)");
+        if (!isNoteSectionName(body.marker)) return fail(res, "invalid_request", `marker must be one of: ${NOTE_SECTION_NAMES.join(", ")}`);
+        if (typeof body.body !== "string") return fail(res, "invalid_request", "body (utf8 text) required");
+        if (!validPrincipal(body.principal)) return fail(res, "invalid_request", "principal must be a lowercase slug");
+        const outer = body.expected_outer_sha;
+        if (typeof outer !== "string" || !/^[0-9a-f]{64}$/.test(outer)) return fail(res, "invalid_request", "expected_outer_sha (64 hex chars) required — the hash of the note outside the section, as you read it");
+        // The §2.21 act, optional and validated exactly as `intent.run` /
+        // `intent.turn` are: each becomes a trailer line.
+        const run = typeof body.run === "number" && Number.isSafeInteger(body.run) && body.run > 0 ? String(body.run) : body.run;
+        if (run !== undefined && !validActId(run)) return fail(res, "invalid_request", "run must be a runs id");
+        if (body.turn !== undefined && !validActId(body.turn)) return fail(res, "invalid_request", "turn must be a turn id");
+        const out = await vault.section(body.path, body.marker, body.body, body.principal, caller, outer, { run: run as string | undefined, turn: body.turn as string | undefined });
+        if (!out.ok && out.code === "forbidden") {
+          await auditRefusal(deps.db, { caller, tool: "vault_section", code: out.code, path: typeof body.path === "string" ? body.path : String(body.path), principal: body.principal });
+        }
         return reply(res, out, 200, (v) => ({ ...v, queued: true }));
       }
 

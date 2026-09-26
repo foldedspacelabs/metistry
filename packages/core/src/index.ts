@@ -874,6 +874,20 @@ export {
 } from "./task-filter.js";
 export { addTaskDays } from "./task-line.js";
 export {
+  NOTE_SECTIONS,
+  NOTE_SECTION_NAMES,
+  SECTION_MISSING_REASONS,
+  isNoteSectionName,
+  scanNoteSection,
+  sectionMissingMessage,
+  writeNoteSection,
+  type NoteSectionName,
+  type NoteSectionScan,
+  type NoteSectionSpec,
+  type NoteSectionWrite,
+  type SectionMissingReason,
+} from "./note-section.js";
+export {
   DEFAULT_RECURRING_MAX_PER_DAY,
   DEFAULT_TEMPLATE_MAX_BYTES,
   FOLD_SOURCE,

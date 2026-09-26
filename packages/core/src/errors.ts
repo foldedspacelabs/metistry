@@ -9,6 +9,7 @@ export type ErrorCode =
   | "not_found"       // 404
   | "invalid_request" // 400
   | "conflict"        // 409
+  | "section_missing" // 409 — a note's Metistry section is not there to write: broken, doubled, or quoted in code (the vault bridge's section operation, plan §2.13)
   | "rate_limited"    // 429
   | "not_available"   // 503 — the capability is absent in this deployment (degrades: absent); not a permission
   | "internal";       // 500 — no detail crosses the wire; detail goes to runs
@@ -24,6 +25,7 @@ const httpStatus: Record<ErrorCode, number> = {
   not_found: 404,
   invalid_request: 400,
   conflict: 409,
+  section_missing: 409,
   rate_limited: 429,
   not_available: 503,
   internal: 500,
@@ -37,6 +39,7 @@ const canonicalMessage: Record<ErrorCode, string> = {
   not_found: "not found",
   invalid_request: "invalid request",
   conflict: "conflict",
+  section_missing: "the note's section could not be found — nothing was written",
   rate_limited: "rate limited",
   not_available: "not available",
   internal: "internal error",

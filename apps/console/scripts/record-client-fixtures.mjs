@@ -151,10 +151,11 @@ const vault = memoryVault();
 const PAGE = "Projects/Metistry/Roadmap.md";
 await vault.write(PAGE, Buffer.from("# Roadmap\n\nShip the store interface, then the stores. See [[Projects/Metistry/Design]].\n"), { principal: "user", message: "fixture" });
 
-// a day note with one task on it, for the Tick door (T2-4) to write
+// a day note with tasks on it, for the Tick door (T2-4) and the Defer door (T2-5) to write — one each, so neither sees the other's edit
 const DAY = "Journal/2026-09-28.md";
 const TASK_TEXT = "Send Dana the fixture format";
-await vault.write(DAY, Buffer.from(`# 2026-09-28\n\n- [ ] ${TASK_TEXT} due 2026-09-28 p2 size s ^mt-7f3k2a\n- [ ] Book the room for Thursday\n`), { principal: "user", message: "fixture" });
+const DEFER_TEXT = "Draft the Q4 plan";
+await vault.write(DAY, Buffer.from(`# 2026-09-28\n\n- [ ] ${TASK_TEXT} due 2026-09-28 p2 size s ^mt-7f3k2a\n- [ ] Book the room for Thursday\n- [ ] ${DEFER_TEXT} due 2026-10-01 p1 ^mt-4q8r2d\n`), { principal: "user", message: "fixture" });
 
 const queries = new QueryStore(pool);
 await queries.loadDir(join(REPO_ROOT, "seed/queries"));
@@ -243,6 +244,12 @@ await pool.query(
    VALUES ($1, 'mt-7f3k2a', 'mt-7f3k2a', 3, $2, lower($2), false, '2026-09-28', 2, 's', $3, 'Projects/Metistry', '2026-09-28', '2026-09-25', now())
    ON CONFLICT (path, task_key) DO UPDATE SET checked = false`,
   [DAY, TASK_TEXT, P],
+);
+await pool.query(
+  `INSERT INTO vault_tasks (path, task_key, anchor, line_no, text, text_norm, checked, due, priority, project, area, parsed_on, first_seen_on, last_seen_at)
+   VALUES ($1, 'mt-4q8r2d', 'mt-4q8r2d', 5, $2, lower($2), false, '2026-10-01', 1, $3, 'Projects/Metistry', '2026-09-28', '2026-09-25', now())
+   ON CONFLICT (path, task_key) DO UPDATE SET checked = false, scheduled_for = NULL`,
+  [DAY, DEFER_TEXT, P],
 );
 
 // devices: two sessions on one passkey — one to list, one to revoke
@@ -333,6 +340,7 @@ const REQUESTS = [
   ["POST /api/compute/providers/test", () => ({ path: "/api/compute/providers/test", body: { name: "lmstudio" } })],
 
   ["POST /api/vault-tasks/:task_key/check", () => ({ path: "/api/vault-tasks/mt-7f3k2a/check", body: { checked: true, seen_text: TASK_TEXT }, key: "tick-0928-0001" })],
+  ["POST /api/vault-tasks/:task_key/schedule", () => ({ path: "/api/vault-tasks/mt-4q8r2d/schedule", body: { do: "2026-09-30", seen_text: DEFER_TEXT }, key: "defer-0928-0001" })],
 
 
   // the reads that show the writes above: a room with a comment, a feed with a capture in it

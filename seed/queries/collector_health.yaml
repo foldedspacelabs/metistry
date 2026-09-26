@@ -1,0 +1,83 @@
+# Seeded default (D4 overlay: an instance file of the same name wins).
+#
+# One collector's health, by name — §2.10's row (`component` → last ok, last
+# failure, last error, streak) and screen 10's request C1
+# (`docs/product/design/screen-10-knowledge.md` §6, echoed at C48/C64/C95 in
+# `docs/product/design/HANDOFF.md`): *"the standing request: nothing in the
+# wire can answer 'is this current'."* Derived entirely from `runs` — no
+# migration — the same `component = 'collector_run'` rows the runner writes
+# (`apps/console/src/runner.ts`) and `failureStreaks`
+# (`packages/core/src/failure.ts`) already reads for the streak the runner
+# acts on; this is the read-only twin of that logic, scoped to one component
+# instead of every one that has ever failed, and with the timestamps a status
+# line needs that the runner's own gate does not.
+#
+# **Two timestamps, not one, and neither replaces the other.** `last_ok` is
+# the most recent successful run; `last_failure`/`last_error` are the most
+# recent FAILING run's time and message, whether or not it is still the
+# current state. A component that failed twice and then recovered still
+# carries the old `last_failure` and `last_error` — that is what lets the
+# owner see *last succeeded 2 days ago · token expired* even after a fix, and
+# it is `streak` (0 once the most recent run is ok) that says the fault is no
+# longer current. Reading `streak = 0` as "healthy" and either timestamp as
+# "why" is the whole of what the sources line needs.
+#
+# **`streak` is the run of consecutive failures since `last_ok`** — the same
+# definition `failureStreaks` uses for the runner's own stop-after-N gate, so
+# this query and that one can never disagree about what "still broken" means.
+# A component with no `last_ok` at all (it has never once succeeded) streaks
+# from its very first row.
+#
+# **`kind = 'collector_run'` only.** A routine's `routine_run` rows are a
+# different question (`routine_history`, §2.10) — a routine that decided
+# nothing this hour is `outcome: silent`, not a failure, and mixing the two
+# kinds here would make a quiet routine look like a dead collector.
+#
+# **An in-flight row counts as neither.** The runner writes `ok = NULL` at
+# `startRun` and fills it in at `finishRun`
+# (`packages/core/src/runs.ts`); `WHERE ok` and `WHERE NOT ok` both exclude a
+# NULL by SQL's own rules, so a collector mid-run is invisible to this query
+# exactly as long as it takes to finish, never counted as a failure it has
+# not yet had a chance to avoid.
+#
+# **A component with no matching row returns no row at all** — the same
+# answer `run_detail` gives an unknown id — because "never ran" and "typed
+# the wrong name" are the same absence from here, and a client asking about a
+# name it already trusts (a manifest, a fixed list) will only ever see the
+# empty case on a fresh install.
+#
+# **`expose: route`.** No door reads this yet (that is the screen-10 ticket's
+# job); marked ahead of it so the generic `/api/q/collector_health` and
+# `queries_run` never become a second, unscoped way to ask "is X current" —
+# one endpoint per necessary operation, same rule `knowledge_pages` states.
+name: collector_health
+expose: route
+description: >-
+  One component's collector health: `last_ok` (most recent successful
+  `collector_run`), `last_failure` and `last_error` (the most recent failing
+  run's time and message, kept even after a recovery), and `streak` (the run
+  of consecutive failures since `last_ok` — 0 once the most recent run
+  succeeded, the same definition the runner's own stop-after-N gate uses). An
+  in-flight run (`ok IS NULL`) counts as neither ok nor failed. A component
+  with no matching `collector_run` row returns no row.
+params:
+  component: { type: text, default: "" } # blank matches no row, so the default is the empty case, not every collector
+sql: |
+  WITH c AS (
+    SELECT
+      r.ts,
+      r.ok,
+      r.error,
+      max(r.ts) FILTER (WHERE r.ok) OVER () AS last_ok
+    FROM runs r
+    WHERE r.kind = 'collector_run' AND r.component = (:component)::text
+  )
+  SELECT
+    (:component)::text                                                    AS component,
+    max(c.last_ok)                                                        AS last_ok,
+    max(c.ts) FILTER (WHERE NOT c.ok)                                     AS last_failure,
+    (array_agg(c.error ORDER BY c.ts DESC) FILTER (WHERE NOT c.ok))[1]    AS last_error,
+    count(*) FILTER (WHERE NOT c.ok AND (c.last_ok IS NULL OR c.ts > c.last_ok)) AS streak
+  FROM c
+  HAVING count(*) > 0
+cache_ttl: 0 # a status line that says "current" from a minute-old cache is exactly the inferred ok P5 forbids

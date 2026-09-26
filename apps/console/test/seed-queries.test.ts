@@ -120,7 +120,7 @@ describe("seed queries", () => {
     // caller-supplied filter to probe the tree with — which is what lets the
     // assistant read the measure through `queries_run` and keeps §1.5's "no
     // new brain tool" true.
-    expect(routeBacked.sort()).toEqual(["day_work", "knowledge_page_links", "knowledge_pages", "pending_requests", "vault_tasks_query", "vault_tasks_recurring"]);
+    expect(routeBacked.sort()).toEqual(["collector_health", "day_work", "knowledge_page_links", "knowledge_pages", "pending_requests", "vault_tasks_query", "vault_tasks_recurring"]);
     expect(store.exposure("task_ageing")).toBe("generic");
     for (const name of REQUIRED.filter((n) => !routeBacked.includes(n))) expect(store.exposure(name), name).toBe("generic");
   });
@@ -254,6 +254,47 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
     expect(Number(s.turns)).toBeGreaterThanOrEqual(1);
     expect(Number(s.captures)).toBeGreaterThanOrEqual(1);
     expect(Number(s.spend_usd)).toBeGreaterThanOrEqual(0.25);
+  });
+
+  // Screen 10's request C1 (docs/product/design/screen-10-knowledge.md §6,
+  // echoed at C48/C64/C95): the per-collector last-ok time the sources line
+  // needs before it can say "current" instead of "freshness unknown". Two
+  // timestamps, and neither replaces the other on a recovery — `last_failure`
+  // and `last_error` stay put after a fresh success, which is what lets a
+  // client draw "last succeeded 2 days ago · token expired" honestly.
+  it("collector_health: a failing sync shows last ok and last error, a recovery clears the streak without erasing the failure, and an unrun component returns no row", async () => {
+    const tag = `colh-${Date.now()}`;
+    await pool.query(
+      `INSERT INTO runs (component, kind, ok, error, ts) VALUES
+         ($1, 'collector_run', true,  NULL,            now() - interval '4 hours'),
+         ($1, 'collector_run', true,  NULL,            now() - interval '3 hours'),
+         ($1, 'collector_run', false, 'token expired', now() - interval '2 hours'),
+         ($1, 'collector_run', false, 'rate limited',  now() - interval '1 hours'),
+         -- a routine_run for the SAME name is a different question and must not leak in
+         ($1, 'routine_run',   false, 'unrelated',     now() - interval '30 minutes')`,
+      [tag],
+    );
+    const failing = (await store.run("collector_health", { component: tag })).rows[0]!;
+    expect(new Date(failing.last_ok as string).getTime()).toBeLessThan(new Date(failing.last_failure as string).getTime());
+    expect(failing.last_error).toBe("rate limited"); // the most recent failure's message, not the first
+    expect(Number(failing.streak)).toBe(2); // both failures are since the last ok
+
+    // recovered: the two old failures are still on the row, but the streak is 0
+    const recovered = `${tag}-recovered`;
+    await pool.query(
+      `INSERT INTO runs (component, kind, ok, error, ts) VALUES
+         ($1, 'collector_run', false, 'boom', now() - interval '3 hours'),
+         ($1, 'collector_run', false, 'boom', now() - interval '2 hours'),
+         ($1, 'collector_run', true,  NULL,   now() - interval '1 hours')`,
+      [recovered],
+    );
+    const healthyAgain = (await store.run("collector_health", { component: recovered })).rows[0]!;
+    expect(healthyAgain.last_failure).not.toBeNull();
+    expect(healthyAgain.last_error).toBe("boom");
+    expect(Number(healthyAgain.streak)).toBe(0);
+
+    // never run at all: the same absence `run_detail` gives an unknown id
+    expect((await store.run("collector_health", { component: `${tag}-missing` })).rows).toHaveLength(0);
   });
 
   // OPEN-6's measurement (docs/research/2026-09-cost-optimization.md

@@ -1,3 +1,4 @@
+schema: 1
 name: watchdog
 type: service
 description: Model-free health + cost-runaway monitor (invariant-3 exception; §4.9 alert path)

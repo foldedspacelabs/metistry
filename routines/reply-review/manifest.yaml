@@ -1,3 +1,4 @@
+schema: 1
 name: reply-review
 type: routine
 description: Daily self-heal pass over reply quality (docs/ops/reply-feedback.md) — looks at 👎 replies since the last `improvement` proposal it emitted (or the last 7 days, if it has never emitted one), with the user's note, the prompt, the reply and that turn's tool calls, and emits ONE `improvement` proposal with a deterministic suggested edit to the assistant prompt overlay. Model-free (invariant 4); nothing is applied until the user allows it in triage, and only then does the console write the overlay as principal `user`. Silent when there is no new 👎 since the last proposal.

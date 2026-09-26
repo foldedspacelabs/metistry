@@ -1,3 +1,4 @@
+schema: 1
 name: assistant
 type: service
 description: Agent SDK engine — drains inbound messages, resumes sessions by thread (§4.18.C reference engine)

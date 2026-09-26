@@ -1,3 +1,4 @@
+schema: 1
 name: brain
 type: bridge
 description: The one MCP surface every agent uses — capture/requests in, scoped tasks + knowledge out, and the assistant's own write path (§4.11, §4.19, §4.20)

@@ -1,3 +1,4 @@
+schema: 1
 name: aws-costs
 type: collector
 description: Daily AWS spend per service from Cost Explorer into metrics (name aws.cost_usd). One signed request per run; degrades absent without credentials.

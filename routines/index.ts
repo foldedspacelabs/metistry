@@ -1,23 +1,48 @@
-// Routine registry — same shape as collectors; the runner schedules both.
+// The routine registry (plan §2.7) — the collectors' shape, built from
+// manifests rather than a list in code. A product routine is a directory with
+// a manifest and a `run.ts`; the console's runner loads every
+// `routines/*/manifest.yaml` through core's `Registry`, overlays the owner's
+// extensions by name (D4), and finds each unit's code here by its NAME.
+// Adding a routine is adding its directory — there is no line to add here.
+//
+// An extension may replace a routine's manifest, and the product's `run`
+// still runs under it; one naming no product routine is skipped with that
+// reason (code from an extension runs only as a process, plan §5). A routine
+// with no code at all is an assignment in `scheduled.yaml` (§2.5), not a unit
+// of this registry.
+
+import { joinCode, loadKind, unitCode, type CodedUnit, type KindRoots, type Manifest, type MissingCode, type RegistrySkip } from "@foldedspacelabs/metistry-core";
 import type { Db, RoutineCtx } from "./morning-brief/run.js";
-import { run as morningBrief } from "./morning-brief/run.js";
-import { run as weeklyReview } from "./weekly-review/run.js";
-import { run as replyReview } from "./reply-review/run.js";
-import { run as knowledgeFold } from "./knowledge-fold/run.js";
-import { run as planTomorrow } from "./plan-tomorrow/run.js";
+
+export type RoutineRun = (db: Db, ctx?: RoutineCtx) => Promise<number>;
+export type RoutineManifest = Extract<Manifest, { type: "routine" }>;
 
 export interface RegisteredRoutine {
   name: string;
   run(db: Db, ctx?: RoutineCtx): Promise<number>;
 }
 
-export const routines: RegisteredRoutine[] = [
-  { name: "morning-brief", run: morningBrief },
-  { name: "weekly-review", run: weeklyReview },
-  { name: "reply-review", run: replyReview },
-  { name: "knowledge-fold", run: knowledgeFold },
-  { name: "plan-tomorrow", run: planTomorrow },
-];
+/** This package's compiled tree (or its source, under its own tests): where `<name>/run.js` is. */
+const CODE_BASE = new URL(".", import.meta.url);
+
+/** The product's `run` for the routine `name`, or why there is none. */
+export function routineCode(name: string): Promise<RoutineRun | MissingCode> {
+  return unitCode<RoutineRun>(CODE_BASE, name);
+}
+
+export interface LoadedRoutines {
+  /** Every routine that loaded, with its manifest and code, sorted by name. */
+  routines: CodedUnit<RoutineManifest, RoutineRun>[];
+  /** Every one that did not, with why. */
+  skipped: RegistrySkip[];
+}
+
+/** Load the routine registry from these roots and join each unit to its product code. Never throws. */
+export async function loadRoutines(roots: KindRoots): Promise<LoadedRoutines> {
+  const { units, skipped } = await joinCode(await loadKind("routine", roots), routineCode);
+  return { routines: units, skipped };
+}
+
 export type { Db, RoutineCtx };
 // What `plan-tomorrow` needs and no collector does — the named-query store and
 // the vault bridge. Exported so the console's runner can widen the ctx it

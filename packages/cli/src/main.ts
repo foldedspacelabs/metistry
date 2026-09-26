@@ -23,7 +23,8 @@ import {
   parseBudgetAction,
   parseBudgetTarget,
   parseEffort,
-  parseTemplate,
+  computeTemplates,
+  templateChoices,
   providerTest,
   providersAdd,
   providersRemove,
@@ -35,7 +36,6 @@ import {
   renderRouteReport,
   routeReport,
   setBudget,
-  COMPUTE_TEMPLATES,
   type ComputeOptions,
 } from "./compute.js";
 import { buildDeploymentReport, renderDeploymentReport, setDeploymentShape, setKeepAwake } from "./deployment-report.js";
@@ -509,7 +509,7 @@ const USAGE = `metistry — Metistry command line
 
   metistry compute show [--json]
   metistry compute providers list [--json]
-  metistry compute providers add --from <${COMPUTE_TEMPLATES.join("|")}>
+  metistry compute providers add --from <template>
                                  [--name <n>] [--base-url <url>] [--secret <NAME>] [--skip-test]
   metistry compute providers remove <name>
   metistry compute providers test <name> [--complete] [--model <id>]
@@ -525,9 +525,12 @@ const USAGE = `metistry — Metistry command line
       tier and crew runs on, and what each may spend (docs/ops/compute.md).
       A §4.7 protected path like deployment.yaml — every write goes through
       the reconciler as the "user" principal, and an edit that would not
-      validate is refused rather than written. "providers add" reads the API
-      key from stdin into the login Keychain (user scope) and never takes it
-      as an argument. Budgets are enforced in the engine, before the call
+      validate is refused rather than written. "providers add --from" copies
+      a provider template — a unit of the provider registry: the product's
+      seed/compute-templates/ and your own in .metistry/extensions/ (metistry
+      extensions list); "providers add" with no --from names them — and reads
+      the API key from stdin into the login Keychain (user scope), never
+      taking it as an argument. Budgets are enforced in the engine, before the call
       (docs/ops/compute.md). "cache-report" and "route-report" are the two
       that read rather than write. cache-report: prompt-cache effectiveness
       per provider, model and tier over the last --since days (7d, 2w, 3m,
@@ -1650,12 +1653,16 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
         out: json ? err : out,
         ...(io.exec ? { exec: io.exec } : {}),
       };
+      // The provider templates in force (the registry, plan §2.7) — every
+      // hint and usage line that names them reads this, never a list in code.
+      const templates = await computeTemplates(computeOpts);
+      const templateNames = (): string[] => templates.names();
       try {
         switch (positional[0]) {
           case undefined:
           case "show": {
             const report = await computeReport(computeOpts);
-            out(json ? JSON.stringify(report, null, 2) : renderComputeReport(report));
+            out(json ? JSON.stringify(report, null, 2) : renderComputeReport(report, templateNames()));
             return 0;
           }
           case "providers": {
@@ -1663,13 +1670,18 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
               case undefined:
               case "list": {
                 const report = await computeReport(computeOpts);
-                out(json ? JSON.stringify({ providers: report.providers }, null, 2) : renderComputeReport(report));
+                out(json ? JSON.stringify({ providers: report.providers }, null, 2) : renderComputeReport(report, templateNames()));
                 return 0;
               }
               case "add": {
-                const template = parseTemplate(str(flags, "from"));
-                if (!template) {
-                  err(`usage: metistry compute providers add --from ${COMPUTE_TEMPLATES.join("|")} [--name <n>] [--base-url <url>] [--secret <NAME>] [--skip-test]`);
+                // a template is a unit of the provider registry (plan §2.7):
+                // the product's and this instance's own
+                const template = str(flags, "from");
+                if (!template || !templates.has(template)) {
+                  // a typo, never a guess: name what exists, and why a unit of that name did not load
+                  const skipped = templates.skipped.filter((s) => s.name === template).map((s) => `${s.path} was skipped: ${s.reason}`);
+                  if (template) err(`no provider template named ${JSON.stringify(template)}${skipped.length > 0 ? ` (${skipped.join("; ")})` : ""}`);
+                  err(`usage: metistry compute providers add --from ${templateChoices(templateNames())} [--name <n>] [--base-url <url>] [--secret <NAME>] [--skip-test]`);
                   return 2;
                 }
                 const r = await providersAdd({
@@ -1717,7 +1729,7 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
                 }
               }
               default:
-                err(`usage: metistry compute providers list | add --from ${COMPUTE_TEMPLATES.join("|")} | remove <name> | test <name> [--complete] [--model <id>]`);
+                err(`usage: metistry compute providers list | add --from ${templateChoices(templateNames())} | remove <name> | test <name> [--complete] [--model <id>]`);
                 return 2;
             }
           }
@@ -1726,7 +1738,7 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
               case undefined:
               case "list": {
                 const r = await modelsList({ ...computeOpts, provider: str(flags, "provider") });
-                out(json ? JSON.stringify(r, null, 2) : renderModelsList(r));
+                out(json ? JSON.stringify(r, null, 2) : renderModelsList(r, templateNames()));
                 return r.providers.every((p) => p.ok) ? 0 : 1;
               }
               case "install": {

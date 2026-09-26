@@ -39,7 +39,7 @@ export const API_VERSION_HEADER = "Metistry-API-Version";
 
 /** The four reach classes, enforced at the gate (§2.1). */
 export const REACHES = ["public", "agent", "owner", "local"] as const;
-export type Reach = (typeof REACHES)[number];
+export type ClientReach = (typeof REACHES)[number];
 
 /**
  * The credential kinds a request can arrive with. `anyone` stands for "no
@@ -50,7 +50,7 @@ export const CLIENT_PRINCIPALS = ["anyone", "session", "local_owner", "owner_tok
 export type ClientPrincipal = (typeof CLIENT_PRINCIPALS)[number];
 
 /** Which credential kinds each reach class stands for. A row's `principals` is the truth; this is the class it is filed under. */
-export const REACH_PRINCIPALS: Readonly<Record<Reach, readonly ClientPrincipal[]>> = {
+export const REACH_PRINCIPALS: Readonly<Record<ClientReach, readonly ClientPrincipal[]>> = {
   public: ["anyone"],
   agent: ["agent", "owner_token"],
   owner: ["session", "local_owner"],
@@ -80,7 +80,7 @@ export interface ClientRoute {
   /** A template: literal segments and `:name` parameters, one path segment each. */
   readonly path: string;
   /** Non-empty. More than one only where a route is a door for two classes (`POST /capture`). */
-  readonly reach: readonly Reach[];
+  readonly reach: readonly ClientReach[];
   readonly principals: readonly ClientPrincipal[];
   readonly idempotent: Idempotency;
   /** `null`: this route never answers 409. An array: it may, and these are the `reason`s the 409 carries — empty where it carries none yet (the message names what would permit it). */

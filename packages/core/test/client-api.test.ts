@@ -71,6 +71,10 @@ describe("every row", () => {
     }
   });
 
+  it("serves exactly 70 rows — a ticket flipping a row to served/unserved must update this number", () => {
+    expect(CLIENT_API.filter((r) => r.served).length).toBe(70);
+  });
+
   it("takes a cursor only on a read, and an Idempotency-Key only on a write", () => {
     for (const r of CLIENT_API) {
       if (r.cursor) expect(r.method, key(r)).toBe("GET");

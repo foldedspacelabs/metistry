@@ -426,12 +426,34 @@ $("capture-form").onsubmit = async (e) => {
 };
 
 // ----- status + push -----
+// The four states of core's check() contract, each its own word and its own
+// ink (P5, design-system §3.13). `absent` is "not configured" — a fact, not a
+// fault — so it never reads as `failed`, and `degraded` (answering, not
+// healthy) never reads as either (C10). A word outside the contract is shown
+// as it came, in the neutral ink: never a guess at a colour.
+const CHECK_STATES = ["ok", "degraded", "failed", "absent"];
+const CHECK_WORD = { ok: "ok", degraded: "degraded", failed: "failed", absent: "not configured" };
+function checkRowHtml(c) {
+  const known = CHECK_STATES.includes(c.status);
+  return `<li><span>${esc(c.name)} <span class="muted">${esc(c.probe)}</span></span><span class="${known ? c.status : "absent"}">${esc(known ? CHECK_WORD[c.status] : c.status)} · ${esc(String(c.latency_ms))}ms</span></li>`;
+}
+// The line above the rows, so the page answers before it is read: "9 ok ·
+// 1 degraded · 2 not configured", or that everything is healthy.
+function checksSummary(checks) {
+  if (checks.length === 0) return "no checks reported";
+  const n = (s) => checks.filter((c) => c.status === s).length;
+  if (n("ok") === checks.length) return `all ${checks.length} healthy`;
+  const other = checks.length - CHECK_STATES.reduce((t, s) => t + n(s), 0);
+  return [...CHECK_STATES.map((s) => [n(s), CHECK_WORD[s]]), [other, "unrecognised"]]
+    .filter(([count]) => count > 0)
+    .map(([count, word]) => `${count} ${word}`)
+    .join(" · ");
+}
+
 async function loadStatus() {
   const res = await api("/api/status");
   const { checks } = await res.json();
-  $("checks").innerHTML = checks
-    .map((c) => `<li><span>${c.name} <span class="muted">${esc(c.probe)}</span></span><span class="${c.status === "ok" ? "ok" : "failed"}">${c.status} · ${c.latency_ms}ms</span></li>`)
-    .join("");
+  $("checks").innerHTML = `<li class="checks-summary">${esc(checksSummary(checks))}</li>` + checks.map(checkRowHtml).join("");
   // one review list across every configured repo (github-state → prs_for_review)
   const { rows } = await (await api("/api/q/prs_for_review")).json();
   $("reviews").innerHTML = reviewListHtml(rows); // shared with the dashboard panel

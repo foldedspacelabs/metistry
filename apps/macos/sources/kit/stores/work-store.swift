@@ -90,18 +90,17 @@ public struct TaskDispatch: Sendable, Equatable {
     public var brief: String
     public var sources: [String]?
     public var purpose: String?
-    public var maxACU: Double?
+    /// The ACU ceiling for this dispatch — a positive INTEGER; the route
+    /// refuses anything else (`max_acu must be a positive integer`). Nil takes
+    /// the target manifest's.
+    public var maxACU: Int?
 
-    public init(target: String, brief: String, sources: [String]? = nil, purpose: String? = nil, maxACU: Double? = nil) {
+    public init(target: String, brief: String, sources: [String]? = nil, purpose: String? = nil, maxACU: Int? = nil) {
         self.target = target
         self.brief = brief
         self.sources = sources
         self.purpose = purpose
         self.maxACU = maxACU
-    }
-
-    var json: JSONValue {
-        .fields(["target": .string(target), "brief": .string(brief), "sources": .texts(sources), "purpose": .text(purpose), "max_acu": .double(maxACU)])
     }
 }
 
@@ -154,10 +153,8 @@ extension ConsoleStores: WorkStore {
 
     public func targets() async -> Result<TargetList, ConsoleError> { await get("/api/targets") }
 
-    /// Not `ConsoleAPI.dispatchTask`, which sends `target` alone — the route
-    /// refuses a dispatch without a `brief`, so that one can only ever be a 400.
     public func dispatchTask(_ id: Int, _ dispatch: TaskDispatch) async -> Result<TaskDispatchResult, ConsoleError> {
-        await perform("POST", "/api/tasks/\(id)/dispatch", dispatch.json)
+        await api.dispatchTask(id, dispatch)
     }
 
     public func updateTask(_ id: Int, _ patch: TaskPatch) async -> Result<TaskMutation, ConsoleError> { await api.updateTask(id, patch) }

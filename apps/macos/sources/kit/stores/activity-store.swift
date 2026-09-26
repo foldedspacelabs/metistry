@@ -31,7 +31,16 @@ public struct RunExport: Sendable, Equatable {
     /// Every non-empty line is one JSON object; a line that is not is a
     /// contract disagreement, and the whole export is refused rather than
     /// silently shortened.
+    ///
+    /// One exception, read for what it is: a whole body that is ONE object,
+    /// however many lines it spans. `metistry console call --json` (the
+    /// fallback transport) pretty-prints any body that parses as JSON, and a
+    /// one-row export does — so that row arrives over several lines.
     public init(ndjson data: Data) throws {
+        if let whole = try? JSONDecoder().decode(JSONValue.self, from: data), case .object = whole {
+            self.rows = [whole]
+            return
+        }
         let text = String(decoding: data, as: UTF8.self)
         var rows: [JSONValue] = []
         for line in text.split(separator: "\n", omittingEmptySubsequences: true) where !line.allSatisfy(\.isWhitespace) {

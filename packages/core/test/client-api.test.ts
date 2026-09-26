@@ -73,8 +73,8 @@ describe("every row", () => {
     }
   });
 
-  it("serves exactly 70 rows — a ticket flipping a row to served/unserved must update this number", () => {
-    expect(CLIENT_API.filter((r) => r.served).length).toBe(70);
+  it("serves exactly 71 rows — a ticket flipping a row to served/unserved must update this number", () => {
+    expect(CLIENT_API.filter((r) => r.served).length).toBe(71);
   });
 
   it("takes a cursor only on a read, and an Idempotency-Key only on a write", () => {
@@ -200,7 +200,7 @@ describe("noRouteMessage", () => {
 
   it("says a frozen route is not served yet, rather than that it does not exist", () => {
     expect(noRouteMessage("GET", "/api/today")).toBe("GET /api/today is in the client API but this console does not serve it yet (docs/ops/client-api.md)");
-    expect(noRouteMessage("POST", "/api/vault-tasks/abc/check")).toContain("POST /api/vault-tasks/:task_key/check is in the client API");
+    expect(noRouteMessage("POST", "/api/vault-tasks/abc/link")).toContain("POST /api/vault-tasks/:task_key/link is in the client API");
   });
 
   it("falls back to the document when nothing is near", () => {

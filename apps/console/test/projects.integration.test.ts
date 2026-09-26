@@ -13,7 +13,7 @@ import { makeServer } from "../src/server.js";
 import * as store from "../src/auth-store.js";
 import * as agents from "../src/agents.js";
 import { validateProjectPatch } from "../src/projects.js";
-import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
+import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
 
 const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
 const policy = { idleDays: 30, maxDays: 365 };
@@ -54,13 +54,7 @@ describe.skipIf(!hasDb)("projects routes (integration)", () => {
     fetch(base + path, { method, headers: { "content-type": "application/json", ...headers }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
 
   beforeAll(async () => {
-    pool = new pg.Pool({
-      host: process.env.METISTRY_DB_HOST ?? "127.0.0.1",
-      port: Number(process.env.METISTRY_DB_PORT ?? 5432),
-      user: process.env.METISTRY_DB_USER ?? "metistry",
-      database: process.env.METISTRY_TEST_DB_NAME ?? "metistry_test",
-      password: process.env.METISTRY_DB_PASSWORD,
-    });
+    pool = await testDb(pg.Pool);
     const queries = new QueryStore(pool);
     await queries.loadDir(SEED_DIR); // exactly what main.ts does: the rollup is a seed query (invariant 3)
     server = makeServer(pool, queries, { origin: "https://console.test", inboxDir: `/tmp/metistry-test-inbox-proj-${Date.now()}`, policy, secureCookies: false });

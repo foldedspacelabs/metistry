@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import { TasksService } from "@foldedspacelabs/metistry-tasks";
 import { ArtifactsService, memoryVault, staticDirectory, type MemoryVault, type Principal, type Thread } from "../src/index.js";
-import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
+import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
 
 const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
 const P = "itest-art"; // project scope keeps this suite's rows apart
@@ -33,13 +33,7 @@ describe.skipIf(!hasDb)("artifacts (real db, memory vault)", () => {
   const files = (body: string) => [{ path: "plan.md", content: body }, { path: "notes/why.txt", content: "because\n" }];
 
   beforeAll(async () => {
-    pool = new pg.Pool({
-      host: process.env.METISTRY_DB_HOST ?? "127.0.0.1",
-      port: Number(process.env.METISTRY_DB_PORT ?? 5432),
-      user: process.env.METISTRY_DB_USER ?? "metistry",
-      database: process.env.METISTRY_TEST_DB_NAME ?? "metistry_test",
-      password: process.env.METISTRY_DB_PASSWORD,
-    });
+    pool = await testDb(pg.Pool);
     await pool.query(`DELETE FROM artifact_comments WHERE artifact_id IN (SELECT id FROM artifacts WHERE project IN ($1, $2, $3))`, [P, P2, P3]);
     await pool.query(`DELETE FROM artifact_versions WHERE artifact_id IN (SELECT id FROM artifacts WHERE project IN ($1, $2, $3))`, [P, P2, P3]);
     await pool.query(`DELETE FROM artifacts WHERE project IN ($1, $2, $3)`, [P, P2, P3]);

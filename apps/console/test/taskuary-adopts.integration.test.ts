@@ -15,7 +15,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import { QueryStore } from "@foldedspacelabs/metistry-queries";
 import { mintToken, SKIP_FEEDBACK } from "@foldedspacelabs/metistry-core";
-import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
+import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
 import { makeServer, parseSeenAt, suggestedWorkOf } from "../src/server.js";
 import * as store from "../src/auth-store.js";
 
@@ -88,13 +88,7 @@ describe.skipIf(!hasDb)("Taskuary adopts (integration)", () => {
   }
 
   beforeAll(async () => {
-    pool = new pg.Pool({
-      host: process.env.METISTRY_DB_HOST ?? "127.0.0.1",
-      port: Number(process.env.METISTRY_DB_PORT ?? 5432),
-      user: process.env.METISTRY_DB_USER ?? "metistry",
-      database: process.env.METISTRY_TEST_DB_NAME ?? "metistry_test", // scratch db (ops/scripts/test-db.sh)
-      password: process.env.METISTRY_DB_PASSWORD,
-    });
+    pool = await testDb(pg.Pool);
     dir = await mkdtemp(join(tmpdir(), "metistry-tq-"));
     const queries = new QueryStore(pool);
     await queries.loadDir(new URL("../../../seed/queries", import.meta.url).pathname);

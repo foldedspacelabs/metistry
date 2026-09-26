@@ -14,7 +14,7 @@ import { Committer } from "../src/committer.js";
 import { Vault } from "../src/vault.js";
 import { Indexer } from "../src/indexer.js";
 import { tempRepo, type TempRepo } from "./helpers.js";
-import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
+import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
 
 const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only (docs/ops/testing.md)
 
@@ -74,13 +74,7 @@ describe.skipIf(!hasDb)("the vault's tasks are indexed from the walk (real db)",
   };
 
   beforeAll(async () => {
-    pool = new pg.Pool({
-      host: process.env.METISTRY_DB_HOST ?? "127.0.0.1",
-      port: Number(process.env.METISTRY_DB_PORT ?? 5432),
-      user: process.env.METISTRY_DB_USER ?? "metistry",
-      database: process.env.METISTRY_TEST_DB_NAME ?? "metistry_test", // scratch db (ops/scripts/test-db.sh)
-      password: process.env.METISTRY_DB_PASSWORD,
-    });
+    pool = await testDb(pg.Pool);
     await clean();
     repo = await tempRepo(MARKER);
     const committer = new Committer(repo.git, { authorPrefix: "Metistry", authorEmail: "metistry@test" });

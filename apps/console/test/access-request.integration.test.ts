@@ -17,7 +17,7 @@ import { ACCESS_REQUEST_KIND } from "@foldedspacelabs/metistry-mcp-brain";
 import { makeServer } from "../src/server.js";
 import * as store from "../src/auth-store.js";
 import * as agents from "../src/agents.js";
-import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
+import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
 
 const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url));
 const policy = { idleDays: 30, maxDays: 365 };
@@ -65,13 +65,7 @@ describe.skipIf(!hasDb)("access requests, agent to owner and back (integration)"
     (await pool.query(`SELECT id FROM proposals WHERE kind = $1 AND source_agent = $2 AND payload->>'area' = $3 AND decision = 'pending'`, [ACCESS_REQUEST_KIND, id, area])).rows[0];
 
   beforeAll(async () => {
-    pool = new pg.Pool({
-      host: process.env.METISTRY_DB_HOST ?? "127.0.0.1",
-      port: Number(process.env.METISTRY_DB_PORT ?? 5432),
-      user: process.env.METISTRY_DB_USER ?? "metistry",
-      database: process.env.METISTRY_TEST_DB_NAME ?? "metistry_test",
-      password: process.env.METISTRY_DB_PASSWORD,
-    });
+    pool = await testDb(pg.Pool);
     server = makeServer(pool, new QueryStore(pool), {
       origin: "http://127.0.0.1:0",
       inboxDir: `/tmp/metistry-test-inbox-access-${Date.now()}`,

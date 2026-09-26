@@ -14,7 +14,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
 import { QueryStore } from "@foldedspacelabs/metistry-queries";
-import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
+import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
 import { COMPONENT, PLAN_DIR, PROFILE_PATH, TEMPLATE_PATH, run as planTomorrow, type PlanVault } from "../plan-tomorrow/run.js";
 
 const { hasDb } = loadTestEnv(new URL("../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
@@ -93,13 +93,7 @@ describe.skipIf(!hasDb)("plan-tomorrow (real db)", () => {
   };
 
   beforeAll(async () => {
-    pool = new pg.Pool({
-      host: process.env.METISTRY_DB_HOST ?? "127.0.0.1",
-      port: Number(process.env.METISTRY_DB_PORT ?? 5432),
-      user: process.env.METISTRY_DB_USER ?? "metistry",
-      database: process.env.METISTRY_TEST_DB_NAME ?? "metistry_test",
-      password: process.env.METISTRY_DB_PASSWORD,
-    });
+    pool = await testDb(pg.Pool);
     // The real seeded queries, loaded the way the console loads them (D4
     // overlay, seed first) — `vault_tasks_query` is what the template's
     // `where:` compiles into, and nothing here writes SQL of its own.

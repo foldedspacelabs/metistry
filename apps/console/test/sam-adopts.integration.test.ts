@@ -9,6 +9,7 @@ import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
+import { testDb } from "@foldedspacelabs/metistry-core/test-env";
 import { QueryStore } from "@foldedspacelabs/metistry-queries";
 import { mintToken, qualifyAgentId } from "@foldedspacelabs/metistry-core";
 import { makeServer } from "../src/server.js";
@@ -124,13 +125,7 @@ describe.skipIf(!hasDb)("SAM adopts (integration)", () => {
     });
 
   beforeAll(async () => {
-    pool = new pg.Pool({
-      host: process.env.METISTRY_DB_HOST ?? "127.0.0.1",
-      port: Number(process.env.METISTRY_DB_PORT ?? 5432),
-      user: process.env.METISTRY_DB_USER ?? "metistry",
-      database: process.env.METISTRY_TEST_DB_NAME ?? "metistry_test", // scratch db (ops/scripts/test-db.sh)
-      password: process.env.METISTRY_DB_PASSWORD,
-    });
+    pool = await testDb(pg.Pool);
     dir = await mkdtemp(join(tmpdir(), "metistry-sam-"));
     const queries = new QueryStore(pool);
     await queries.loadDir(new URL("../../../seed/queries", import.meta.url).pathname);

@@ -34,6 +34,11 @@ jobs:
       # A migration number is reserved to one file in db/migrations/README.md
       # before anyone writes it, so parallel tickets cannot collide on one (F-6).
       - run: node ops/scripts/check-migration-numbers.mjs
+      # A test's only way into Postgres is testDb() (core/test-env), which
+      # refuses anything but a metistry_test_* scratch database and checks
+      # current_database(). A suite building its own pool walks around that,
+      # so no test file may (docs/ops/testing.md).
+      - run: node ops/scripts/check-test-db.mjs
       - name: ops/scripts unit tests
         run: node --test 'ops/scripts/test/*.test.mjs'
       # tokens.css, preview.html and the Mac app's design-tokens.swift are all

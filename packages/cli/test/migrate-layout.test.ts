@@ -21,6 +21,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
+import { testDb } from "@foldedspacelabs/metistry-core/test-env";
 import { INSTANCE_GITIGNORE, VAULT_ROOT_AREA } from "@foldedspacelabs/metistry-core";
 import { DB_REWRITES, LayoutCollision, migrateLayout, planMigration, rewriteEnvFile, rewriteEnvValue, rewriteGitignore, rewriteManifestAreas } from "../src/migrate-layout.js";
 
@@ -470,15 +471,8 @@ describe.skipIf(!hasDb)("stored paths, against the scratch db", () => {
   const token = `mig-layout-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const dirs: string[] = [];
 
-  beforeAll(() => {
-    pool = new pg.Pool({
-      host: process.env.METISTRY_DB_HOST ?? "127.0.0.1",
-      port: Number(process.env.METISTRY_DB_PORT ?? 5432),
-      database: process.env.METISTRY_TEST_DB_NAME ?? "metistry_test",
-      user: process.env.METISTRY_DB_USER ?? "metistry",
-      password: process.env.METISTRY_DB_PASSWORD,
-      max: 2,
-    });
+  beforeAll(async () => {
+    pool = await testDb(pg.Pool, { max: 2 });
   });
   afterAll(async () => {
     await pool.query(`DELETE FROM inbox WHERE source = $1`, [token]).catch(() => {});

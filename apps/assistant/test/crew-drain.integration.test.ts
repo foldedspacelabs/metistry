@@ -10,7 +10,7 @@ import { mintToken, tokenHash } from "@foldedspacelabs/metistry-core";
 import { emptyCompute, parseCompute, type ResolvedAssignment } from "@foldedspacelabs/metistry-core";
 import { briefThreadBlock, claimCrewRow, drainCrewOne, issueRunToken } from "../src/crew-drain.js";
 import { crewSystemPrompt, crewToolNames, type CrewRunInput, type CrewRunResult, type CrewSnapshot } from "../src/crew.js";
-import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
+import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
 
 const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
 const suffix = mintToken(4).toLowerCase().replaceAll(/[^a-z0-9]/g, "").slice(0, 6) || "x";
@@ -49,13 +49,7 @@ describe.skipIf(!hasDb)("crew drain (integration)", () => {
   const cfg = { brainUrl: "http://console:8080/mcp", identity: { name: "Tester" }, leaseSeconds: 60, maxAttempts: 2, retryBackoffSeconds: 120, compute: () => computeFile };
 
   beforeAll(async () => {
-    pool = new pg.Pool({
-      host: process.env.METISTRY_DB_HOST ?? "127.0.0.1",
-      port: Number(process.env.METISTRY_DB_PORT ?? 5432),
-      user: process.env.METISTRY_DB_USER ?? "metistry",
-      database: process.env.METISTRY_TEST_DB_NAME ?? "metistry_test",
-      password: process.env.METISTRY_DB_PASSWORD,
-    });
+    pool = await testDb(pg.Pool);
     // the console's registration, minimally: a crew row whose hash is of a token nobody holds
     await pool.query(`INSERT INTO agents (id, display_name, kind, token_hash, grants, projects) VALUES ($1, 'itest crew', 'crew', $2, '{"tier":"areas","areas":["Projects"]}', '{}')`, [crewId, tokenHash(mintToken(32))]);
     // park other suites' crew rows so this suite drains only its own

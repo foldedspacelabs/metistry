@@ -1,0 +1,10 @@
+{
+  "//": "Type-level tests: compiled by test/actor.test.ts, never emitted. vitest does not type-check, and the package's own tsconfig covers src/ only, so without this a @ts-expect-error below would be checked by nothing.",
+  "extends": "../../../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "declaration": false,
+    "sourceMap": false
+  },
+  "files": ["actor.types.ts"]
+}

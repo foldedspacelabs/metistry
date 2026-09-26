@@ -8,7 +8,7 @@ from lib import *
 from lib_access import *
 
 CW,CH=2720,2210
-def sw(T,inner): return settingswindow(T,inner,sel="Live Capture",full=True)
+def sw(T,inner): return settingswindow(T,inner,sel="Keyboard",full=True)
 
 NOTES=pan(L,"WHAT CHANGED",
   nt(L,"<b>Mac only.</b> The PWA keeps the platform&rsquo;s own keys and adds none (C119).")
@@ -36,7 +36,7 @@ body=(heading("ROUND F · KEYBOARD","Keyboard — the Mac&rsquo;s shortcuts live
   + row(menushow(L),18)
   + row(f'<div>{sub("HELP ▸ KEYBOARD SHORTCUTS &nbsp;⌘/",L["tt"])}{kbsheet(L,w=1040)}</div>'
         + f'<div style="flex-grow: 1; min-width: 0;">{NOTES}</div>',32,align="flex-start")
-  + row(f'<div>{sub("SETTINGS ▸ LIVE CAPTURE &mdash; OFF (DEFAULT)",L["tt"])}{sw(L,hkpane(L,on=False))}</div>'
+  + row(f'<div>{sub("SETTINGS ▸ KEYBOARD &mdash; OFF (DEFAULT)",L["tt"])}{sw(L,hkpane(L,on=False))}</div>'
         + f'<div>{sub("ON &mdash; TWO CONFLICTS, ONE BEING RECORDED",L["tt"])}{sw(L,hkpane(L,on=True,conflicts=True))}</div>'
         + f'<div style="flex-grow: 1; min-width: 0;">{CONF}</div>',32,align="flex-start")
   + row(f'<div style="background: {D["bg"]}; border-radius: 14px; padding: 22px; flex-grow: 1;">'

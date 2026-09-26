@@ -11,7 +11,7 @@ the window is **not resizable** — it is a fixed size chosen for its content.
 Instance · Services · Compute · Updates
 ACCESS    Account · Connections · Secrets · Variables
 CAPTURE   Live Capture · Sessions
-Advanced
+Keyboard · Advanced
 ```
 
 The app today has seven sections as toolbar tabs (`SettingsModel.Section`).
@@ -46,3 +46,38 @@ That is how a fixed window stays accessible without being resizable.
    840 × 600, with each pane in a vertical `ScrollView`.
 2. `SettingsModel.Section`: rename `connections` → `account` (title *Account*),
    add `resources`, `liveCapture`, `sessions`, and group them.
+
+## 5. The panes (2026-09-25, board `Settings-Panes`, C123–C127)
+
+### 5.1 Instance
+The Assistant (Name, Mention, Mark, Instance ID; a protected write shown in
+Activity) · This instance (path, Choose…, Open in Finder, namespace and ports) ·
+Recent (up to 8, Forget) · Linked instances (origin, capabilities, last seen;
+Link an Instance…, Refresh, Remove).
+
+### 5.2 Services
+Doctor (Run Doctor; each problem with its fix; checks passed) · the supervisor
+(launchd or compose; Restart All, Stop All) and one row per service — state,
+uptime or reason, port, Restart · Stop · Log · When it runs (Start at Login, Run
+in the Background, Keep this Mac Awake: Allow sleep on battery · Always · Always,
+even with the lid closed).
+
+### 5.3 Compute
+Default model · Providers (where it runs, key as a secret, ZDR chip, Test,
+Remove, Add Provider…) · Who uses what (Default, Quick, Deep, crews: provider,
+model, effort) · Spending limits (per day, per month, then Allow · Stop ·
+Critical only; today's spend) · Local models (loaded, memory, Load/Unload,
+Install).
+
+### 5.4 Updates
+This app (version and channel, Check Now, automatic) · Metistry runtime (running
+version, available version with What's New and Update Runtime, previous kept
+with Roll Back).
+
+### 5.5 Keyboard
+One switch, *Shortcuts in any app*, off by default; the five shortcuts under it.
+In-app shortcuts are always on — *Show All* ⌘/.
+
+### 5.6 Advanced
+Runtime from (Releases · Git checkout), command, product folder · Developer
+override · Versions · Diagnostics (Logs, Passkeys). Doctor moved to Services.

@@ -941,7 +941,9 @@ whatever exists and covers all of it in `checksums.txt`.
 system's `accent` with a white M — and `build-app.sh` runs it through `sips` and
 `iconutil` at build time. Generated rather than committed on purpose: a binary
 blob nobody remembers is the kind of placeholder that ships forever. Replacing
-it means saving a real 1024pt master and pointing `build-app.sh` at it instead.
+it means saving a real 1024pt master and pointing `build-app.sh`'s `ICON_PNG`
+at it (`ICON_PNG=/path/to/icon-1024.png ops/release/build-app.sh …`); unset, the
+generator still runs.
 
 ## Open, and worth settling before launch
 

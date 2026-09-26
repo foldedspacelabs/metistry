@@ -26,8 +26,12 @@ export const INSTANCES_FILENAME = "instances.yaml";
  * enabled so a phone switcher or a second instance can name what it offers
  * before signing in; nothing here says how many of anything there is, and
  * nothing names a tool. Alphabetical, because the wire order is stable.
+ *
+ * `events` is the one that is not a tool group: it says the console streams
+ * live changes on `GET /api/events` (§2.20, `events.ts`), so a client knows to
+ * subscribe rather than poll. Same rule — advertised only while it is served.
  */
-export const CAPABILITIES = ["artifacts", "capture", "dispatch", "knowledge", "queries", "tasks"] as const;
+export const CAPABILITIES = ["artifacts", "capture", "dispatch", "events", "knowledge", "queries", "tasks"] as const;
 export type Capability = (typeof CAPABILITIES)[number];
 
 /** Sort + dedupe into the canonical order, dropping anything outside the vocabulary (a peer may be a newer version than this one). */

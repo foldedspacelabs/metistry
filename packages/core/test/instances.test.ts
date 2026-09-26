@@ -60,7 +60,7 @@ describe("qualifyAgentId (misuse)", () => {
 
 describe("capabilities vocabulary", () => {
   it("is coarse group names only — nothing that could be a tool name or a count", () => {
-    expect([...CAPABILITIES]).toEqual(["artifacts", "capture", "dispatch", "knowledge", "queries", "tasks"]);
+    expect([...CAPABILITIES]).toEqual(["artifacts", "capture", "dispatch", "events", "knowledge", "queries", "tasks"]);
     for (const c of CAPABILITIES) expect(c).toMatch(/^[a-z]+$/);
   });
 

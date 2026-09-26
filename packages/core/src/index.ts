@@ -316,6 +316,21 @@ export {
   type RouteMatch,
   type RouteMethod,
 } from "./client-api.js";
+export {
+  EVENTS_CAPABILITY,
+  EVENTS_ROUTE,
+  EVENT_CATALOGUE,
+  EVENT_REACH,
+  EVENT_TYPES,
+  VAULT_SYNC_STATES,
+  isEventType,
+  type ClientEvent,
+  type EventDefinition,
+  type EventPayloads,
+  type EventType,
+  type RunEvent,
+  type VaultSyncState,
+} from "./events.js";
 export { errorEnvelope, statusFor, type ErrorCode, type ErrorEnvelope } from "./errors.js";
 export { requireEnv, optionalEnv, intEnv } from "./config.js";
 export {

@@ -16,7 +16,15 @@ path.
 
 **Real:**
 
-- **Status.** Runs `metistry doctor --json` and renders the rows to the design
+- **The shell** (T5-2, "The shell" below): the window's sidebar — Needs You
+  while something waits, then Today · Chat · Activity · Work ▸ · Knowledge ·
+  Agents · Scheduled, then Pinned — the toolbar's + and Usage gauge, the title
+  *Metistry* on every screen, the Go · Capture · Item menus with every
+  shortcut in them, Help ▸ Keyboard Shortcuts, and the Needs You count on the
+  Dock. The screens behind the rows are their own tickets; until one lands its
+  detail says so and offers the web app.
+- **Status.** Its own window now (Window ▸ Status), no longer a sidebar row.
+  Runs `metistry doctor --json` and renders the rows to the design
   system's §3.13 — grouped by doctor's own `kind`, `absent` shown in absent
   grey and labelled "not configured", a summary line first ("26 ok · 1 degraded
   · 1 not configured") so the panel answers before it is read. The remediation
@@ -102,7 +110,8 @@ path.
 | `connect-repo --auth token` | it reads the PAT from **stdin**, and the app gives every child an empty stdin on purpose so no verb can hang a progress view waiting for a paste | the wizard shows the option, disabled, with that reason; run it in a terminal |
 | **Minting an enrolment code** | there is no HTTP route that mints one, deliberately — whoever can run the host command already controls Postgres and the vault, so shell access is the root of trust for a first passkey (plan §4.2) — and `metistry enroll` is on the CLI's own "not yet" list | step 6 shows the exact `scripts/enroll.mjs` command and takes the code you paste back |
 | **A QR code** for the phone | nothing in this product renders one yet; `apps/console/scripts/enroll.mjs` says the same about itself ("QR rendering arrives with `packages/cli`"), and an encoder is a dependency nobody has asked for | step 6 shows the enrolment URL, selectable, to type or hand over |
-| **The other eight destinations** | Feed, Chat, Agents, Projects, Artifacts, Capture, Needs You, Devices (design-system P6) | the PWA — "Add to Dock" in Safari |
+| **The screens behind the sidebar's rows** | the shell has the rows (T5-2); each screen is its own ticket (T5-4a Needs You, T6-1 Today, T6-2 Chat, …), and until it lands the row's detail names the gap and offers the web app | the PWA — "Add to Dock" in Safari, or the detail's **Open in Browser** |
+| **New Capture** (the toolbar's + and ⌘N) | the composer is T5-5; until then both are dimmed, with the reason in the tooltip | the PWA's + |
 | **The keep-awake control** (Services) | the model half is shipped — `KeepAwakeSetting` (four values, each with what it costs), `KeepAwakeFacts` (doctor's row) and `deploymentSetKeepAwake` — and the pane is a switch with a radio pair under it, which is the designer's. First run can pass `--keep-awake` and does not ask on its own | a terminal: `metistry deployment set-keep-awake <value> --yes`, or `metistry init --keep-awake <value>` |
 | **An iOS target** | `MetistryKit` is already free of AppKit and of `Process` so it can be shared; there is no iOS target in `Package.swift` | — |
 
@@ -713,6 +722,84 @@ and `SecretListing` in `packages/cli/src/secrets.ts` is camelCase (`inKeychain`,
 guessing one and blanking a pane over a convention. That is a reader-side
 tolerance, not a wire contract: the shape is the CLI's.
 
+## The shell
+
+`sources/kit/root-view.swift` is the window; `shell-model.swift` is its state;
+`shell-commands.swift` is every menu; `keyboard-shortcuts-view.swift` is Help ▸
+Keyboard Shortcuts. The design is `docs/product/design/` (DEVELOPER-HANDOFF
+§2.1, screen-03 §13.3, components-02) and the acceptance is design-build-plan
+§2.18.
+
+**The sidebar.** Needs You (only while something waits), then Today · Chat ·
+Activity · Work ▸ (Board · Projects · Artifacts — no Rooms, C89) · Knowledge ·
+Agents · Scheduled, then Pinned (`pinned-items.swift`, filed under the identity's
+instance id). No row but Needs You carries a count (C15). Work's disclosure is
+held in memory only: the app persists pointers and nothing else.
+
+**The Needs You row (C110).** It appears with the first waiting request and
+carries the product's one badge — nothing at zero, the number to 99, then
+`99+`; VoiceOver says *Needs You, 10 waiting*. It leaves **on the next
+navigation after the count reaches zero**, never before: answering the last
+request leaves the owner on *Nothing needs you* with the row still there, and a
+count that drops while they are elsewhere does not shift the sidebar under the
+pointer. A count that cannot be read is not zero — the row, the badge and the
+Dock keep the console's last answer. The Dock tile carries the same label
+(`NSApp.dockTile.badgeLabel`, set from the app target). A change is announced
+to VoiceOver once, and not while the owner is on Needs You. Under Reduce Motion
+the row appears without sliding.
+
+**Where it reads from.** `ShellModel` holds no client: it reads
+`NeedsYouStore.waitingCount()` (`GET /api/needs-you/count`),
+`SettingsStore.identity()` (the configured name, and the instance id pins are
+filed under) and `UsageStore.compute()` (the gauge), over `AppModel.console`'s
+stores — the same session child and O3 gate every screen uses; an instance
+switch adopts the new session's. It polls on `RefreshPolicy`'s intervals for
+the app's lifetime rather than a window's, because the Dock is read with every
+window closed, so the first poll is what starts the session child; T5-7's event
+stream replaces the poll.
+
+**The toolbar.** The mark and the title *Metistry* (the same on every screen —
+the highlighted row says where you are); **+** (New Capture, ⌘N — dimmed until
+T5-5's composer registers in `ShellModel.captureActions`); the **Usage gauge**,
+`gauge.medium` in secondary ink, `gauge.high` in primary ink over 90% of a
+spending limit, the warning tint at it, speaking *Usage, $1.84 today, 37% of
+the day's budget*. Its popover is a stand-in with those facts and a way to
+Settings until screen 17 (T5-6). There is no bell (C110).
+
+**The menus (C119).** Every shortcut is a menu item, and every menu item is one
+case of `ShellCommand` — the menus, the Keyboard Shortcuts page and the tests
+all read that one table. Go: Needs You ⌘0 (while shown), Today ⌘1 … Scheduled
+⌘7, Back ⌘[, Forward ⌘], Command Palette ⌘K, Filter ⌘F. Capture: New Capture
+⌘N, Ask *<name>*, Note, To-do, Start/Stop Recording, Hide Capture Bar, Shortcuts
+in Any App…. Item: Open ↩, Open in Obsidian ⌘O, Approve A, Revise R, Decline D,
+Later L, Complete Space, Move… M, Hand to an Agent… ⇧⌘P, Run Now ⌘R, Pause ⌥⌘P.
+View: Today / All ⌥⌘T, Show Sidebar ⌃⌘S. File: New Conversation ⇧⌘N (the
+window group's New Window gives up ⌘N). Help: Keyboard Shortcuts ⌘/. ⌘9 is
+bound to nothing.
+
+Who answers an item: the shell answers Go and Capture; the focused screen
+answers its own four by publishing `shellScreenActions`, and the selection
+answers Item through `shellItemActions`. A table can only light a command of
+its own kind, so a screen can never add a menu item. An item nobody answers is
+dimmed. The single keys (↩ A R D L Space M) are **attached only while a list
+publishes `shellListFocus()`** — a bare key in the main menu is taken before a
+text field sees it, and even a dimmed item swallows its key, so the key is not
+there at all otherwise.
+
+**Words.** Labels template the configured name from `GET /api/identity`; with
+no name known yet, *Ask* stands alone. No label anywhere says "assistant" —
+`shell-commands-tests.swift` checks every label the shell can produce and every
+string literal in its source.
+
+**Accessibility tests.** `shell-accessibility-tests.swift` puts each view in a
+real window, asks AppKit for SwiftUI's accessibility tree the way an assistive
+app does, and walks it: every control must say something, nothing may say
+"assistant", and the Spoken rows are checked word for word. An SF Symbol is
+never "unlabeled" to VoiceOver — the system names it for its glyph, so `plus`
+says *Add* — which is why the shell's glyph controls are held to their exact
+names, not merely to saying something. macOS's text size is the system's: the
+shell uses semantic text styles only and fixes no height a label must fit in.
+
 ## The menu bar
 
 Grouped by doctor's own `kind`, so a new component kind appears without a change
@@ -748,8 +835,10 @@ apps/macos/
   package.json         name and version only, private. It ships no JavaScript:
                        it exists so changesets versions the app with the product
                        and gives it a CHANGELOG line (docs/ops/releases.md)
-  sources/kit/         MetistryKit: the models and the views — Settings, the
-                       wizard, the menu bar, the Status panel, the log window.
+  sources/kit/         MetistryKit: the models and the views — the shell
+                       (root-view, shell-model, shell-commands,
+                       keyboard-shortcuts-view), Settings, the wizard, the menu
+                       bar, the Status panel, the log window.
                        No AppKit, no Process, no platform frameworks — an iOS
                        target shares it as is.
   sources/kit/stores/  the store interface: one protocol per domain, one
@@ -760,8 +849,9 @@ apps/macos/
                        the shared components every screen draws with (T5-3,
                        "Shared components") — each a presentation value, then
                        a view that only draws it
-  sources/app/         the Metistry executable: @main and the four scenes
-                       (window, Settings, log window, MenuBarExtra), Sparkle,
+  sources/app/         the Metistry executable: @main and the six scenes
+                       (window, Settings, log window, Status, Keyboard
+                       Shortcuts, MenuBarExtra), the menus, the Dock badge, Sparkle,
                        the Process-backed CommandRunner, and the platform
                        seams the kit declares and does not have: SMAppService
                        (twice — the app, and the install's background item),

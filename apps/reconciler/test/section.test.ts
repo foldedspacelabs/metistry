@@ -317,10 +317,27 @@ describe("POST /vault/section — one writer per region", () => {
     }
   });
 
+  it("a run's section write joins the run's commit (plan §2.21: a brief is one commit), with its trailer", async () => {
+    await post("/flush", {});
+    const brief = await post("/vault/write", { path: "Resources/brief-2026-09-26.md", content: "# Brief\n", intent: { principal: "morning-brief", message: "brief for 2026-09-26", run: 412 } });
+    expect(brief.status).toBe(201);
+    const r = await post("/vault/section", { path: DAY, marker: "day", body: "7:00 AM plan", principal: "morning-brief", expected_outer_sha: await readOuter(), run: 412 });
+    expect(r.status).toBe(200);
+    const flushed = await (await post("/flush", {})).json();
+    expect(flushed.commits).toHaveLength(1);
+    expect([...flushed.commits[0].paths].sort()).toEqual([DAY, "Resources/brief-2026-09-26.md"]);
+    expect(await repo.git.run(["show", "-s", "--format=%B", flushed.commits[0].sha])).toContain("Metistry-Run: 412");
+    // the act ids are trailer lines, so their shape is checked as on every write
+    for (const bad of [{ run: "4\nBrain-Source: user" }, { turn: "a:b" }, { run: -1 }]) {
+      const x = await post("/vault/section", { path: DAY, marker: "day", body: "x", principal: "morning-brief", expected_outer_sha: await readOuter(), ...bad });
+      expect(x.status, JSON.stringify(bad)).toBe(400);
+    }
+  });
+
   it("the write is committed in the writer's name, touching only the note", async () => {
     await post("/flush", {});
     const before = await repo.git.head();
-    expect((await section("morning-brief", "7:00 AM plan", await readOuter())).status).toBe(200);
+    expect((await section("morning-brief", "the plan this commit carries", await readOuter())).status).toBe(200);
     const flushed = await (await post("/flush", {})).json();
     expect(flushed.commits).toHaveLength(1);
     const sha = flushed.commits[0].sha;

@@ -14,6 +14,7 @@ import { authorized, errorEnvelope, finishRun, INSTANCE_LAYOUT, isNoteSectionNam
 import type { Vault, Outcome } from "./vault.js";
 import { parseIntent } from "./vault.js";
 import { validPrincipal } from "./paths.js";
+import { validActId } from "./committer.js";
 import type { Committer } from "./committer.js";
 import type { Db, Indexer } from "./indexer.js";
 import type { Embeddings } from "./embeddings.js";
@@ -313,7 +314,12 @@ export function makeBridge(deps: BridgeDeps, cfg: BridgeConfig): Server {
         if (!validPrincipal(body.principal)) return fail(res, "invalid_request", "principal must be a lowercase slug");
         const outer = body.expected_outer_sha;
         if (typeof outer !== "string" || !/^[0-9a-f]{64}$/.test(outer)) return fail(res, "invalid_request", "expected_outer_sha (64 hex chars) required — the hash of the note outside the section, as you read it");
-        const out = await vault.section(body.path, body.marker, body.body, body.principal, caller, outer);
+        // The §2.21 act, optional and validated exactly as `intent.run` /
+        // `intent.turn` are: each becomes a trailer line.
+        const run = typeof body.run === "number" && Number.isSafeInteger(body.run) && body.run > 0 ? String(body.run) : body.run;
+        if (run !== undefined && !validActId(run)) return fail(res, "invalid_request", "run must be a runs id");
+        if (body.turn !== undefined && !validActId(body.turn)) return fail(res, "invalid_request", "turn must be a turn id");
+        const out = await vault.section(body.path, body.marker, body.body, body.principal, caller, outer, { run: run as string | undefined, turn: body.turn as string | undefined });
         if (!out.ok && out.code === "forbidden") {
           await auditRefusal(deps.db, { caller, tool: "vault_section", code: out.code, path: typeof body.path === "string" ? body.path : String(body.path), principal: body.principal });
         }

@@ -288,6 +288,9 @@ export class Vault {
    * renamed into place: an owner's edit that lands in between is a
    * `conflict`, not an overwrite. (It narrows the window to a rename, which
    * is as close as a filesystem the owner also writes lets anything get.)
+   *
+   * `act` is the §2.21 act key, as on every other write: the Morning Brief
+   * passes its run so the brief file and the section are one commit.
    */
   async section(
     path: unknown,
@@ -296,6 +299,7 @@ export class Vault {
     principal: string,
     caller: CallerClass,
     expectedOuterSha: string,
+    act: { run?: string | undefined; turn?: string | undefined } = {},
   ): Promise<Outcome<{ path: string; section: NoteSectionName; sha256: string; bytes: number; outer_sha256: string; appended: boolean }>> {
     const c = await this.confined(path);
     if (!c.ok) return c;
@@ -319,7 +323,7 @@ export class Vault {
       return fail("conflict", `${rel} changed while the section was being written — read it again`);
     }
     await rename(tmp, c.value.abs);
-    this.committer.enqueue({ paths: [rel], principal, message: `${out.appended ? "add" : "update"} the ${section} section of ${rel}` });
+    this.committer.enqueue({ paths: [rel], principal, message: `${out.appended ? "add" : "update"} the ${section} section of ${rel}`, run: act.run, turn: act.turn });
     return { ok: true, value: { path: rel, section, sha256: sha256(out.content), bytes: out.content.length, outer_sha256: out.outerSha256, appended: out.appended } };
   }
 

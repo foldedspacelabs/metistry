@@ -92,6 +92,20 @@ describe("manifest schema", () => {
     expect(r.ok).toBe(false);
   });
 
+  // §2.15 (T8-1, Q6): the enum stays closed at seven values, and a bridge
+  // declaring the live-capture grants is held to the same PoC-1 rule as
+  // every other TCC bridge.
+  it("accepts the live-capture TCC grants, held to PoC-1 like any other", () => {
+    const liveCapture = {
+      ...eventkit,
+      name: "live-capture",
+      requires_tcc: ["screen_recording", "microphone", "audio_capture"],
+    };
+    expect(validateManifest(liveCapture).ok).toBe(true);
+    expect(validateManifest({ ...liveCapture, transport: "stdio", port: undefined }).ok).toBe(false);
+    expect(validateManifest({ ...liveCapture, runs_on: "container" }).ok).toBe(false);
+  });
+
   it("rejects an http bridge without a port", () => {
     const { port: _p, ...noPort } = eventkit;
     expect(validateManifest(noPort).ok).toBe(false);

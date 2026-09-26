@@ -2,7 +2,7 @@
 
 Generated from `docs/product/design-build-plan.md` by `ops/scripts/tickets.mjs`. A ticket is ticked when its file says `status: merged`; the coordinator ticks each checkpoint (§3.1) by hand below the generated list.
 
-**140 tickets · 6 waves · ≈ 451.5 agent-days · critical path 35 agent-days** (F-3 → T4-1 → T4-2 → T4-8a → T4-8b → T4-9 → T4-10 → T4-11)
+**144 tickets · 6 waves · ≈ 457 agent-days · critical path 35 agent-days** (F-3 → T4-1 → T4-2 → T4-8a → T4-8b → T4-9 → T4-10 → T4-11)
 
 ## W0 — 19 tickets, 38 agent-days
 
@@ -28,7 +28,7 @@ Generated from `docs/product/design-build-plan.md` by `ops/scripts/tickets.mjs`.
 
 - [ ] **W0 checkpoint** — merged, main green, scratch-instance upgrade, conformance test, Mac smoke, release
 
-## W1 — 40 tickets, 114 agent-days
+## W1 — 44 tickets, 119.5 agent-days
 
 - [ ] [T1-1](t1/t1-1.md) · `work.description` · M · opus · after F-6
 - [ ] [T1-2](t1/t1-2.md) · The board query · M · opus
@@ -51,7 +51,7 @@ Generated from `docs/product/design-build-plan.md` by `ops/scripts/tickets.mjs`.
 - [ ] [T2-17](t2/t2-17.md) · Turn progress and sessions · S · sonnet · after T1-11, T1-15
 - [ ] [T2-18](t2/t2-18.md) · Live events · L · opus high · after F-1, F-6
 - [ ] [T3-1](t3/t3-1.md) · The scheduler · L · opus high · after F-4
-- [ ] [T3-2](t3/t3-2.md) · The overlay · M · opus · after F-4
+- [ ] [T3-2](t3/t3-2.md) · The overlay · M · opus · after F-4, T3-1
 - [ ] [T3-4](t3/t3-4.md) · Profile facts and the standup move · M · opus · after F-4, T1-8
 - [ ] [T3-9](t3/t3-9.md) · Writing the session archive · M · opus · after T1-11
 - [ ] [T4-1](t4/t4-1.md) · Per-instance secrets · L · opus high · after F-3
@@ -70,6 +70,10 @@ Generated from `docs/product/design-build-plan.md` by `ops/scripts/tickets.mjs`.
 - [ ] [T10-1](t10/t10-1.md) · One commit per act · M · opus
 - [ ] [T10-3](t10/t10-3.md) · Integrate before pushing · L · opus high · after T10-1
 - [ ] [T10-2](t10/t10-2.md) · Sync policy and status · M · opus · after F-6
+- [ ] [X-2](x/x-2.md) · `hasDb` needs the scratch name · S · sonnet
+- [ ] [X-3](x/x-3.md) · A password test that a path can break · S · sonnet
+- [ ] [X-4](x/x-4.md) · PWA maskable icon and dark manifest colours · S · sonnet
+- [ ] [X-5](x/x-5.md) · The PWA reads F-5's table · M · opus · after F-5, F-14
 
 - [ ] **W1 checkpoint** — merged, main green, scratch-instance upgrade, conformance test, Mac smoke, release
 

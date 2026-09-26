@@ -26,7 +26,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { TasksService } from "@foldedspacelabs/metistry-tasks";
 import { QueryStore } from "@foldedspacelabs/metistry-queries";
 import { createBrainServer, KNOWLEDGE_LINKS_QUERY, KNOWLEDGE_PAGES_QUERY, type AgentPrincipal, type VaultListEntry } from "../src/index.js";
-import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
+import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
 
 const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url));
 
@@ -79,13 +79,7 @@ describe.skipIf(!hasDb)("knowledge scope on /mcp (real db, real MCP client, real
   }
 
   beforeAll(async () => {
-    pool = new pg.Pool({
-      host: process.env.METISTRY_DB_HOST ?? "127.0.0.1",
-      port: Number(process.env.METISTRY_DB_PORT ?? 5432),
-      user: process.env.METISTRY_DB_USER ?? "metistry",
-      database: process.env.METISTRY_TEST_DB_NAME ?? "metistry_test",
-      password: process.env.METISTRY_DB_PASSWORD,
-    });
+    pool = await testDb(pg.Pool);
 
     await pool.query(`DELETE FROM knowledge_links WHERE from_path LIKE 'Areas/Scope%' OR from_path LIKE 'Areas/Elsewhere%' OR to_path LIKE 'Areas/Scope%' OR to_path LIKE 'Areas/Elsewhere%'`);
     await pool.query(`DELETE FROM knowledge_files WHERE path LIKE 'Areas/Scope%' OR path LIKE 'Areas/Elsewhere%'`);

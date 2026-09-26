@@ -15,7 +15,7 @@ import { Embeddings } from "../src/embeddings.js";
 import { Indexer } from "../src/indexer.js";
 import { searchVault } from "../src/search.js";
 import { tempRepo, type TempRepo } from "./helpers.js";
-import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
+import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
 
 const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
 const MODEL = "itest-embed";
@@ -88,13 +88,7 @@ describe.skipIf(!hasDb)("reconciler embeddings (real db, stub embedder)", () => 
   };
 
   beforeAll(async () => {
-    pool = new pg.Pool({
-      host: process.env.METISTRY_DB_HOST ?? "127.0.0.1",
-      port: Number(process.env.METISTRY_DB_PORT ?? 5432),
-      user: process.env.METISTRY_DB_USER ?? "metistry",
-      database: process.env.METISTRY_TEST_DB_NAME ?? "metistry_test",
-      password: process.env.METISTRY_DB_PASSWORD,
-    });
+    pool = await testDb(pg.Pool);
     await clean();
     repo = await tempRepo(MARKER);
     // a note long enough to chunk, so batching is real and not one-per-file

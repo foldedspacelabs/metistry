@@ -15,7 +15,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { TasksService } from "@foldedspacelabs/metistry-tasks";
 import { ACCESS_REQUEST_KIND, createBrainServer, EAGER_TOOL_NAMES, type AgentPrincipal } from "../src/index.js";
-import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
+import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
 
 const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url));
 
@@ -61,13 +61,7 @@ describe.skipIf(!hasDb)("request_access on /mcp (real db, real MCP client)", () 
     (await pool.query(`SELECT id, kind, trust, decision, payload FROM proposals WHERE kind = $2 AND source_agent = $1 ORDER BY id`, [agent, ACCESS_REQUEST_KIND])).rows;
 
   beforeAll(async () => {
-    pool = new pg.Pool({
-      host: process.env.METISTRY_DB_HOST ?? "127.0.0.1",
-      port: Number(process.env.METISTRY_DB_PORT ?? 5432),
-      user: process.env.METISTRY_DB_USER ?? "metistry",
-      database: process.env.METISTRY_TEST_DB_NAME ?? "metistry_test",
-      password: process.env.METISTRY_DB_PASSWORD,
-    });
+    pool = await testDb(pg.Pool);
     await pool.query(`DELETE FROM proposals WHERE source_agent = ANY($1::text[])`, [[AGENT, OTHER, ASSISTANT]]);
 
     const authenticate = async (req: { headers: Record<string, unknown> }) => {

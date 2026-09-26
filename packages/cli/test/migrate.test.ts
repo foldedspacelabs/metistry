@@ -1,6 +1,6 @@
 // The migration runner against a real Postgres: its own scratch database
-// (derived from the per-checkout METISTRY_TEST_DB_NAME, so the doctor
-// integration test's schema_migrations is never touched), idempotency, the
+// (`<METISTRY_TEST_DB_NAME>_mig`, made and dropped by the guarded helper, so
+// the doctor integration test's schema_migrations is never touched), idempotency, the
 // advisory-lock race between two runners on two pools, and a failing file
 // that leaves no row and no half-applied objects behind. Skipped without a
 // db (no METISTRY_DB_PASSWORD).
@@ -10,18 +10,10 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import { listMigrationFiles, MIGRATION_LOCK_KEY, openMigrationSession, runMigrations } from "../src/migrate.js";
-import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
+import { assertScratchDb, dropScratchDb, loadTestEnv, recreateScratchDb, testDb, testDbEnv } from "@foldedspacelabs/metistry-core/test-env";
 
 const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
-const DB = `${process.env.METISTRY_TEST_DB_NAME ?? "metistry_test"}_mig`;
-const cfg = (database: string) => ({
-  host: process.env.METISTRY_DB_HOST ?? "127.0.0.1",
-  port: Number(process.env.METISTRY_DB_PORT ?? 5432),
-  database,
-  user: process.env.METISTRY_DB_USER ?? "metistry",
-  password: process.env.METISTRY_DB_PASSWORD,
-  max: 1,
-});
+const OWN = { suffix: "_mig" } as const; // a database of this suite's own: <METISTRY_TEST_DB_NAME>_mig
 
 async function dir(files: Record<string, string>): Promise<string> {
   const d = await mkdtemp(join(tmpdir(), "metistry-migrations-"));
@@ -30,21 +22,18 @@ async function dir(files: Record<string, string>): Promise<string> {
 }
 
 describe.skipIf(!hasDb)("migration runner against a scratch db", () => {
-  let admin: pg.Pool;
+  let DB: string;
   let a: pg.Pool;
   let b: pg.Pool;
   beforeAll(async () => {
-    admin = new pg.Pool(cfg("postgres"));
-    await admin.query(`DROP DATABASE IF EXISTS ${DB}`);
-    await admin.query(`CREATE DATABASE ${DB}`);
-    a = new pg.Pool(cfg(DB));
-    b = new pg.Pool(cfg(DB));
+    DB = await recreateScratchDb(pg.Pool, OWN);
+    a = await testDb(pg.Pool, { ...OWN, max: 1 });
+    b = await testDb(pg.Pool, { ...OWN, max: 1 });
   });
   afterAll(async () => {
     await a?.end();
     await b?.end();
-    await admin.query(`DROP DATABASE IF EXISTS ${DB}`);
-    await admin.end();
+    if (DB) await dropScratchDb(pg.Pool, OWN);
   });
 
   it("applies each file once, in order, in its own transaction; a second run finds nothing to do", async () => {
@@ -130,8 +119,9 @@ describe.skipIf(!hasDb)("migration runner against a scratch db", () => {
 
   it("openMigrationSession: one pg.Client from METISTRY_DB_*; null without a password", async () => {
     expect(await openMigrationSession({})).toBeNull();
-    const s = await openMigrationSession({ ...process.env, METISTRY_DB_NAME: DB });
+    const s = await openMigrationSession(testDbEnv(OWN));
     expect(s).not.toBeNull();
+    await assertScratchDb(s!, DB);
     // session-scoped: asked of the session itself (pid = pg_backend_pid()),
     // never a cluster-wide count — another process can hold this same
     // MIGRATION_LOCK_KEY on a database of its own at the same moment

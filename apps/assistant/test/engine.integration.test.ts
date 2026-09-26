@@ -13,6 +13,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
+import { testDb } from "@foldedspacelabs/metistry-core/test-env";
 import { QueryStore } from "@foldedspacelabs/metistry-queries";
 import { checkBudgets, finishRun, parseCompute, resolveAssignment, rollSession, spentFrom, startRun, SPEND_QUERY, type SpendRow } from "@foldedspacelabs/metistry-core";
 import { makeOpenAiEngine } from "../src/engine-openai.js";
@@ -49,12 +50,7 @@ describe.skipIf(!hasDb)("engine against the scratch db", () => {
   const component = `engine-it-${Date.now()}`;
 
   beforeAll(async () => {
-    pool = new pg.Pool({
-      host: process.env.METISTRY_DB_HOST ?? "127.0.0.1",
-      user: process.env.METISTRY_DB_USER ?? "metistry",
-      database: process.env.METISTRY_TEST_DB_NAME ?? "metistry_test",
-      password: process.env.METISTRY_DB_PASSWORD,
-    });
+    pool = await testDb(pg.Pool);
   });
   afterAll(async () => pool.end());
 

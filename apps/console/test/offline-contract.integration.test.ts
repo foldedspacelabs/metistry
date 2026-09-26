@@ -10,7 +10,7 @@ import { mintToken } from "@foldedspacelabs/metistry-core";
 import { makeServer } from "../src/server.js";
 import { parsePublicIdentity } from "../src/identity.js";
 import * as store from "../src/auth-store.js";
-import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
+import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
 
 const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
 const policy = { idleDays: 30, maxDays: 365 };
@@ -36,12 +36,7 @@ describe.skipIf(!hasDb)("offline contract (integration)", () => {
   const json = { "content-type": "application/json" };
 
   beforeAll(async () => {
-    pool = new pg.Pool({
-      host: process.env.METISTRY_DB_HOST ?? "127.0.0.1",
-      user: process.env.METISTRY_DB_USER ?? "metistry",
-      database: process.env.METISTRY_TEST_DB_NAME ?? "metistry_test",
-      password: process.env.METISTRY_DB_PASSWORD,
-    });
+    pool = await testDb(pg.Pool);
     server = makeServer(pool, new QueryStore(pool), {
       origin: "http://127.0.0.1:0",
       inboxDir: `/tmp/metistry-test-inbox-offline-${Date.now()}`,

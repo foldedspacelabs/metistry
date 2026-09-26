@@ -1,0 +1,22 @@
+{
+  "route": "POST /api/agents",
+  "source": "recorded",
+  "ticket": null,
+  "request": {
+    "method": "POST",
+    "path": "/api/agents",
+    "body": {
+      "id": "devin",
+      "display_name": "Devin",
+      "remote": true
+    },
+    "idempotency_key": null
+  },
+  "status": 201,
+  "body": {
+    "id": "devin",
+    "token": "fixture-token-not-a-secret",
+    "pending": true,
+    "proposal_id": 4
+  }
+}

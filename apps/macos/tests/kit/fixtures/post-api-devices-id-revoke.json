@@ -1,0 +1,15 @@
+{
+  "route": "POST /api/devices/:id/revoke",
+  "source": "recorded",
+  "ticket": null,
+  "request": {
+    "method": "POST",
+    "path": "/api/devices/2/revoke",
+    "body": {},
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "revoked": true
+  }
+}

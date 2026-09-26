@@ -1,0 +1,30 @@
+{
+  "route": "GET /api/instances",
+  "source": "recorded",
+  "ticket": null,
+  "request": {
+    "method": "GET",
+    "path": "/api/instances",
+    "body": null,
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "instances": [
+      {
+        "instance_id": "0a1b2c3d-4e5f-4a6b-8c9d-0e1f2a3b4c5d",
+        "name": "Second",
+        "origin": "https://second.example.com",
+        "last_seen": "2026-09-16T01:00:00.000Z",
+        "capabilities": [
+          "capture",
+          "knowledge",
+          "queries",
+          "tasks"
+        ],
+        "resources": []
+      }
+    ],
+    "as_of": "2026-09-26T22:54:15.096Z"
+  }
+}

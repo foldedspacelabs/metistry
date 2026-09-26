@@ -1,0 +1,21 @@
+{
+  "route": "POST /api/tasks/:id/dispatch",
+  "source": "recorded",
+  "ticket": "T4-11",
+  "request": {
+    "method": "POST",
+    "path": "/api/tasks/2/dispatch",
+    "body": {
+      "target": "github-issues",
+      "brief": "Open the release checklist for 0.12.0 under Projects/Metistry."
+    },
+    "idempotency_key": null
+  },
+  "status": 201,
+  "body": {
+    "ok": true,
+    "ref": "gh:example/fixtures#41",
+    "url": "https://github.com/example/fixtures/issues/41",
+    "run_id": 33
+  }
+}

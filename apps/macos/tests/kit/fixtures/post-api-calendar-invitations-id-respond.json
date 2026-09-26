@@ -1,0 +1,21 @@
+{
+  "route": "POST /api/calendar/invitations/:id/respond",
+  "source": "contract",
+  "ticket": "T4-17",
+  "note": "through the connection's rsvp capability; 503 names Open in Calendar where no connection can",
+  "request": {
+    "method": "POST",
+    "path": "/api/calendar/invitations/evt-review-0929/respond",
+    "body": {
+      "response": "accepted"
+    },
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "ok": true,
+    "event_id": "evt-review-0929",
+    "response": "accepted",
+    "connection": "calendar"
+  }
+}

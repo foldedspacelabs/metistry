@@ -1,0 +1,53 @@
+{
+  "route": "POST /api/scheduled/routines/:name/resume",
+  "source": "contract",
+  "ticket": "T3-3",
+  "note": "idempotent",
+  "request": {
+    "method": "POST",
+    "path": "/api/scheduled/routines/morning-brief/resume",
+    "body": {},
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "ok": true,
+    "routine": {
+      "name": "morning-brief",
+      "kind": "routine",
+      "source": "product",
+      "title": "Morning Brief",
+      "schedule": {
+        "value": {
+          "days": "working_days",
+          "at": [
+            "07:00"
+          ]
+        },
+        "origin": "default"
+      },
+      "paused": {
+        "value": false,
+        "origin": "default"
+      },
+      "config": {
+        "skip_without_calendar_event": {
+          "value": false,
+          "origin": "yours"
+        }
+      },
+      "actor": null,
+      "task": null,
+      "grants": null,
+      "next_run": "2026-09-29T11:00:00.000Z",
+      "last_run": {
+        "run_id": "8812",
+        "at": "2026-09-28T11:00:04.000Z",
+        "ok": true,
+        "outcome": "wrote Journal/Brief/2026-09-28.md",
+        "cost_usd": "0.004100"
+      }
+    },
+    "as_of": "2026-09-28T13:05:00.000Z"
+  }
+}

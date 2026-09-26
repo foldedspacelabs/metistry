@@ -1,0 +1,16 @@
+{
+  "route": "POST /api/agents/:id/rotate",
+  "source": "recorded",
+  "ticket": null,
+  "request": {
+    "method": "POST",
+    "path": "/api/agents/opencode/rotate",
+    "body": {},
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "id": "opencode",
+    "token": "fixture-token-not-a-secret"
+  }
+}

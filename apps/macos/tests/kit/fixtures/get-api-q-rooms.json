@@ -1,0 +1,71 @@
+{
+  "route": "GET /api/q/:name",
+  "source": "recorded",
+  "ticket": null,
+  "request": {
+    "method": "GET",
+    "path": "/api/q/rooms",
+    "body": null,
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "rows": [
+      {
+        "thread_id": "cmt_01M3FYT8PDPMAX22C9X769GV7Q",
+        "anchor": "work",
+        "project": "metistry",
+        "title": "work #3 — Decide the fixture format",
+        "work_id": "3",
+        "artifact_id": null,
+        "version_id": null,
+        "path": null,
+        "state": "open",
+        "resolved_by": null,
+        "resolved_at": null,
+        "messages": 1,
+        "participants": [
+          {
+            "kind": "human",
+            "principal": "user"
+          }
+        ],
+        "agent_tail": 0,
+        "cap": 10,
+        "last_at": "2026-09-26T22:54:15.245Z",
+        "last_author": "user",
+        "escalated": false,
+        "reason": null,
+        "proposal_id": null
+      },
+      {
+        "thread_id": "cmt_01M3FYT8NVNX3ZGBZH481KTHGE",
+        "anchor": "artifact",
+        "project": "metistry",
+        "title": "metistry/store-interface",
+        "work_id": null,
+        "artifact_id": "art_01M3FYT8N8HRG4S2W4Q0GN28F1",
+        "version_id": "ver_01M3FYT8NB0W22G5J1H3A71PTY",
+        "path": "notes.md",
+        "state": "open",
+        "resolved_by": null,
+        "resolved_at": null,
+        "messages": 1,
+        "participants": [
+          {
+            "kind": "human",
+            "principal": "user"
+          }
+        ],
+        "agent_tail": 0,
+        "cap": 10,
+        "last_at": "2026-09-26T22:54:15.227Z",
+        "last_author": "user",
+        "escalated": false,
+        "reason": null,
+        "proposal_id": null
+      }
+    ],
+    "as_of": "2026-09-26T22:54:15.271Z"
+  }
+}

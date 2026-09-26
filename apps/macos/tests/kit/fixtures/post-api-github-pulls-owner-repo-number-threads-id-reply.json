@@ -1,0 +1,22 @@
+{
+  "route": "POST /api/github/pulls/:owner/:repo/:number/threads/:id/reply",
+  "source": "contract",
+  "ticket": "T2-13",
+  "note": "the same head guard",
+  "request": {
+    "method": "POST",
+    "path": "/api/github/pulls/example/metistry/281/threads/PRRT_kw1/reply",
+    "body": {
+      "body": "Fixed in the next push.",
+      "head_sha": "adf440c1"
+    },
+    "idempotency_key": null
+  },
+  "status": 201,
+  "body": {
+    "ok": true,
+    "comment_id": 5512,
+    "thread_id": "PRRT_kw1",
+    "url": "https://github.com/example/metistry/pull/281#discussion_r5512"
+  }
+}

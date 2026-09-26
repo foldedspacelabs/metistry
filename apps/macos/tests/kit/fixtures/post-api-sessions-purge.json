@@ -1,0 +1,26 @@
+{
+  "route": "POST /api/sessions/purge",
+  "source": "contract",
+  "ticket": "T3-9",
+  "note": "reach local; confirm: false previews and names the unfolded sessions (Fold First); confirm: true purges and answers purged: n",
+  "request": {
+    "method": "POST",
+    "path": "/api/sessions/purge",
+    "body": {
+      "confirm": false
+    },
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "purged": 0,
+    "would_purge": 12,
+    "unfolded": [
+      {
+        "id": "7b1f2c9e-0000-4000-8000-000000000001",
+        "started_at": "2026-09-28T12:00:00.000Z"
+      }
+    ],
+    "confirm_required": true
+  }
+}

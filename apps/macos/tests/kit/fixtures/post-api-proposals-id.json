@@ -1,0 +1,17 @@
+{
+  "route": "POST /api/proposals/:id",
+  "source": "recorded",
+  "ticket": "T2-3",
+  "request": {
+    "method": "POST",
+    "path": "/api/proposals/1",
+    "body": {
+      "decision": "one file per route"
+    },
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "ok": true
+  }
+}

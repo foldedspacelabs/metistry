@@ -1,0 +1,22 @@
+{
+  "route": "POST /api/mail/messages/:id/draft",
+  "source": "contract",
+  "ticket": "T4-17",
+  "note": "a draft through the connection's draft capability; never sends",
+  "request": {
+    "method": "POST",
+    "path": "/api/mail/messages/msg-5521/draft",
+    "body": {
+      "body": "Thanks — Thursday works."
+    },
+    "idempotency_key": null
+  },
+  "status": 201,
+  "body": {
+    "ok": true,
+    "message_id": "msg-5521",
+    "draft_id": "draft-8812",
+    "connection": "mail",
+    "sent": false
+  }
+}

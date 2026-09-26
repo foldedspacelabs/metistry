@@ -1,0 +1,218 @@
+{
+  "route": "GET /api/agents",
+  "source": "recorded",
+  "ticket": "T4-6",
+  "request": {
+    "method": "GET",
+    "path": "/api/agents",
+    "body": null,
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "agents": [
+      {
+        "id": "cursor",
+        "display_name": "Cursor",
+        "kind": "external",
+        "grants": {
+          "tier": "none",
+          "areas": []
+        },
+        "projects": [],
+        "autonomy": {},
+        "created_at": "2026-09-26T22:54:15.073Z",
+        "last_seen_at": null,
+        "revoked": false,
+        "remote": false,
+        "approved_at": "2026-09-26T22:54:15.073Z",
+        "grant_source": "registry",
+        "pending": false,
+        "scope": {
+          "id": "cursor",
+          "role": "agent",
+          "who": "an agent",
+          "tier": "none",
+          "access": "none",
+          "areas": [],
+          "scope": "none",
+          "queries": false,
+          "projects": [],
+          "uses": null,
+          "autonomy": {
+            "level": "observe",
+            "actions": {
+              "dispatch": "deny",
+              "task_update": "deny",
+              "comment": "deny",
+              "capture": "deny"
+            },
+            "detailed": {
+              "dispatch": {
+                "mode": "deny",
+                "source": "defaulted",
+                "ceiling": "deny"
+              },
+              "task_update": {
+                "mode": "deny",
+                "source": "defaulted",
+                "ceiling": "deny"
+              },
+              "comment": {
+                "mode": "deny",
+                "source": "defaulted",
+                "ceiling": "deny"
+              },
+              "capture": {
+                "mode": "deny",
+                "source": "defaulted",
+                "ceiling": "deny"
+              }
+            }
+          },
+          "source": "registry",
+          "from": "the registry — the owner's own hand, durable",
+          "extras": [
+            "autonomy: observe"
+          ],
+          "line": "an agent · none · autonomy: observe"
+        }
+      },
+      {
+        "id": "old-laptop",
+        "display_name": "Old laptop",
+        "kind": "external",
+        "grants": {
+          "tier": "none",
+          "areas": []
+        },
+        "projects": [],
+        "autonomy": {},
+        "created_at": "2026-09-26T22:54:15.074Z",
+        "last_seen_at": null,
+        "revoked": false,
+        "remote": false,
+        "approved_at": "2026-09-26T22:54:15.074Z",
+        "grant_source": "registry",
+        "pending": false,
+        "scope": {
+          "id": "old-laptop",
+          "role": "agent",
+          "who": "an agent",
+          "tier": "none",
+          "access": "none",
+          "areas": [],
+          "scope": "none",
+          "queries": false,
+          "projects": [],
+          "uses": null,
+          "autonomy": {
+            "level": "observe",
+            "actions": {
+              "dispatch": "deny",
+              "task_update": "deny",
+              "comment": "deny",
+              "capture": "deny"
+            },
+            "detailed": {
+              "dispatch": {
+                "mode": "deny",
+                "source": "defaulted",
+                "ceiling": "deny"
+              },
+              "task_update": {
+                "mode": "deny",
+                "source": "defaulted",
+                "ceiling": "deny"
+              },
+              "comment": {
+                "mode": "deny",
+                "source": "defaulted",
+                "ceiling": "deny"
+              },
+              "capture": {
+                "mode": "deny",
+                "source": "defaulted",
+                "ceiling": "deny"
+              }
+            }
+          },
+          "source": "registry",
+          "from": "the registry — the owner's own hand, durable",
+          "extras": [
+            "autonomy: observe"
+          ],
+          "line": "an agent · none · autonomy: observe"
+        }
+      },
+      {
+        "id": "opencode",
+        "display_name": "OpenCode",
+        "kind": "external",
+        "grants": {
+          "tier": "none",
+          "areas": []
+        },
+        "projects": [],
+        "autonomy": {},
+        "created_at": "2026-09-26T22:54:15.076Z",
+        "last_seen_at": null,
+        "revoked": false,
+        "remote": false,
+        "approved_at": "2026-09-26T22:54:15.076Z",
+        "grant_source": "registry",
+        "pending": false,
+        "scope": {
+          "id": "opencode",
+          "role": "agent",
+          "who": "an agent",
+          "tier": "none",
+          "access": "none",
+          "areas": [],
+          "scope": "none",
+          "queries": false,
+          "projects": [],
+          "uses": null,
+          "autonomy": {
+            "level": "observe",
+            "actions": {
+              "dispatch": "deny",
+              "task_update": "deny",
+              "comment": "deny",
+              "capture": "deny"
+            },
+            "detailed": {
+              "dispatch": {
+                "mode": "deny",
+                "source": "defaulted",
+                "ceiling": "deny"
+              },
+              "task_update": {
+                "mode": "deny",
+                "source": "defaulted",
+                "ceiling": "deny"
+              },
+              "comment": {
+                "mode": "deny",
+                "source": "defaulted",
+                "ceiling": "deny"
+              },
+              "capture": {
+                "mode": "deny",
+                "source": "defaulted",
+                "ceiling": "deny"
+              }
+            }
+          },
+          "source": "registry",
+          "from": "the registry — the owner's own hand, durable",
+          "extras": [
+            "autonomy: observe"
+          ],
+          "line": "an agent · none · autonomy: observe"
+        }
+      }
+    ],
+    "access_requests": []
+  }
+}

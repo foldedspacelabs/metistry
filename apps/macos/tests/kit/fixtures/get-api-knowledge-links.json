@@ -1,0 +1,29 @@
+{
+  "route": "GET /api/knowledge/links",
+  "source": "recorded",
+  "ticket": null,
+  "request": {
+    "method": "GET",
+    "path": "/api/knowledge/links?path=Projects%2FMetistry%2FRoadmap.md",
+    "body": null,
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "path": "Projects/Metistry/Roadmap.md",
+    "links": [
+      {
+        "direction": "outgoing",
+        "path": "Projects/Metistry/Design.md",
+        "kind": "wikilink",
+        "title": "Design",
+        "description": "the store interface",
+        "status": "clean",
+        "resolved": true
+      }
+    ],
+    "limit": 100,
+    "offset": 0,
+    "as_of": "2026-09-26T22:54:15.142Z"
+  }
+}

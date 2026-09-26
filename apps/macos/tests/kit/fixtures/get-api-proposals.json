@@ -1,0 +1,68 @@
+{
+  "route": "GET /api/proposals",
+  "source": "recorded",
+  "ticket": null,
+  "request": {
+    "method": "GET",
+    "path": "/api/proposals",
+    "body": null,
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "proposals": [
+      {
+        "id": "3",
+        "ts": "2026-09-26T22:54:15.069Z",
+        "kind": "report",
+        "source_agent": "assistant",
+        "trust": "internal",
+        "payload": {
+          "title": "Nightly fold finished",
+          "summary": "12 pages touched"
+        },
+        "decision": "pending",
+        "decided_at": null,
+        "work_id": null,
+        "snoozed_until": null
+      },
+      {
+        "id": "2",
+        "ts": "2026-09-26T22:54:15.069Z",
+        "kind": "knowledge",
+        "source_agent": "assistant",
+        "trust": "internal",
+        "payload": {
+          "path": "Projects/Metistry/Roadmap.md",
+          "title": "Add the store list to the roadmap",
+          "summary": "fourteen domain stores, one per screen family"
+        },
+        "decision": "pending",
+        "decided_at": null,
+        "work_id": null,
+        "snoozed_until": null
+      },
+      {
+        "id": "1",
+        "ts": "2026-09-26T22:54:15.068Z",
+        "kind": "decision",
+        "source_agent": "assistant",
+        "trust": "internal",
+        "payload": {
+          "title": "Which fixture format?",
+          "thread": "fixtures-triage",
+          "options": [
+            "one file per route",
+            "one file per store"
+          ]
+        },
+        "decision": "pending",
+        "decided_at": null,
+        "work_id": null,
+        "snoozed_until": null
+      }
+    ],
+    "cursor": "2026-09-26 18:54:15.069554-04|3",
+    "more": false
+  }
+}

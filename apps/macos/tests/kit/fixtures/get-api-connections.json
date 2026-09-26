@@ -1,0 +1,54 @@
+{
+  "route": "GET /api/connections",
+  "source": "contract",
+  "ticket": "T4-8a",
+  "note": "read-only: status, tools (On · Ask · Off per tool), used by; every write is metistry connections (M13)",
+  "request": {
+    "method": "GET",
+    "path": "/api/connections",
+    "body": null,
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "connections": [
+      {
+        "name": "github",
+        "type": "github",
+        "title": "GitHub",
+        "status": "ok",
+        "check": {
+          "status": "ok",
+          "latency_ms": 212,
+          "probe": "GET /user",
+          "at": "2026-09-28T13:00:00.000Z"
+        },
+        "tools": [
+          {
+            "name": "issues_create",
+            "mode": "ask"
+          },
+          {
+            "name": "pulls_list",
+            "mode": "on"
+          }
+        ],
+        "used_by": [
+          {
+            "kind": "sync",
+            "name": "github-state"
+          },
+          {
+            "kind": "agent",
+            "name": "researcher"
+          }
+        ],
+        "offered_to_agents": false,
+        "secrets": [
+          "github_write"
+        ]
+      }
+    ],
+    "as_of": "2026-09-28T13:05:00.000Z"
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "route": "POST /api/compute/assign",
+  "source": "recorded",
+  "ticket": null,
+  "request": {
+    "method": "POST",
+    "path": "/api/compute/assign",
+    "body": {
+      "tier": "deep",
+      "model": "openrouter/anthropic/claude-opus-4",
+      "effort": "high"
+    },
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "ok": true,
+    "target": "assignments.tiers.deep",
+    "provider": "openrouter",
+    "model": "anthropic/claude-opus-4",
+    "effort": "high",
+    "warn_non_zdr": false,
+    "delivery": {
+      "how": "bridge",
+      "detail": ".metistry/compute.yaml written through the reconciler as user — committed on its next flush"
+    },
+    "notes": [
+      "  POST http://127.0.0.1:1/vault/write .metistry/compute.yaml (principal user, \"metistry compute assign assignments.tiers.deep → openrouter/anthropic/claude-opus-4\")"
+    ]
+  }
+}

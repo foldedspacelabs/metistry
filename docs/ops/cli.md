@@ -708,7 +708,7 @@ A §4.7 protected path like `.metistry/deployment.yaml`: every write goes throug
 reconciler as the `user` principal, and an edit whose RESULT would not
 validate is refused rather than written. `providers add` reads the API key
 from stdin into the login Keychain (user scope) and never takes it as an
-argument. Nothing dials a provider or enforces a budget yet — see
+argument. Budgets are enforced in the engine, before the call — see
 `docs/ops/compute.md`, which is the whole story including what is missing.
 
 ### Local models

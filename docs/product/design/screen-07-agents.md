@@ -118,7 +118,7 @@ the owner and that.
 
 ### 3.4 Compute (C128)
 
-The definition names its **model**, then **where it runs** (one of that model's places, with its tags and price), and its effort — all from Your Models in Settings › Compute (C131), or **Same as Metis**. Settings no
+The definition names its **model and where it runs in one dropdown** (name, maker, provider, tag — C132) and its effort — all from Your Models in Settings › Compute (C131), or **Same as Metis**. Settings no
 longer assigns models per agent.
 
 ### 3.3 Its routines, and what it did

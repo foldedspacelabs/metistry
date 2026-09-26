@@ -154,7 +154,7 @@ is not a trust boundary — CRIT-9). Which one you present decides what you may
 write, not what you may read. Errors are the core envelope
 `{ "error": { "code", "message" } }` with the usual status mapping
 (401 unauthenticated, 403 forbidden, 404 not_found, 400 invalid_request,
-409 conflict, 503 not_available).
+409 conflict, 409 section_missing, 503 not_available).
 
 | Route | What it does |
 | --- | --- |
@@ -167,6 +167,7 @@ write, not what you may read. Errors are the core envelope
 | `POST /vault/write` | `{path, content \| content_base64, intent, expected_sha256?}` — compare-and-swap on the content hash |
 | `POST /vault/delete` | `{path, intent, expected_sha256?}` |
 | `POST /vault/rename` | `{from, to, intent}` — git-mv semantics; never clobbers |
+| `POST /vault/section` | `{path, marker, body, principal, expected_outer_sha}` — replace the bytes between a section's markers in the owner's daily note and nothing else ("The section operation" below) |
 | `POST /flush` | commit the queue now (the interval does this every `METISTRY_COMMIT_INTERVAL_SEC`; the artifacts module calls it after every publish so one version is one commit) |
 | `POST /reconcile` | run the index cycle now (the interval does this every `METISTRY_RECONCILE_INTERVAL_SEC`); the summary carries `inbox: {added, changed, archived}` |
 | `POST /embeddings/rebuild` | forget every vector and re-embed the vault under the configured model (§6 decision 8's deterministic rebuild) |
@@ -227,6 +228,54 @@ means "must not exist yet". Omit it to overwrite unconditionally.
 **Visibility vs. commit latency.** A write lands on the working tree
 atomically and is readable by the next request; the commit happens on the
 next flush. Readers never wait on git.
+
+### The section operation — one writer per region
+
+`Journal/<date>.md` is the owner's note, and no principal but `user` may
+write, delete or rename it (`writeAllowed`, above — unchanged). Metistry
+keeps exactly one **region** of it, between two marker lines (plan §2.13,
+C102):
+
+```markdown
+## Today · Metistry
+
+<!-- metistry:day -->
+…the section: written whole by each writer…
+<!-- /metistry:day -->
+```
+
+`POST /vault/section` is the only way into that region, and it cannot touch
+anything outside it:
+
+```sh
+curl -s -X POST -H "Authorization: Bearer $METISTRY_BRIDGE_TOKEN_RECONCILER" \
+  -H 'content-type: application/json' http://127.0.0.1:7812/vault/section \
+  -d '{"path":"Journal/2026-09-26.md","marker":"day","principal":"morning-brief",
+       "body":"- Plan: [[Journal/Plan/2026-09-26]]\n- 9:00 Standup",
+       "expected_outer_sha":"<sha256 of the note outside the section>"}'
+# 200 {"path":"Journal/2026-09-26.md","section":"day","sha256":"…","bytes":412,
+#      "outer_sha256":"…","appended":false,"queued":true}
+```
+
+| | |
+| --- | --- |
+| **where** | `Journal/YYYY-MM-DD.md` for a real calendar day — not `Journal/Plan/`, a meeting note or anything else (`400`). The note must exist (`404`): the section never creates the owner's note, whose template is theirs to apply. |
+| **who** | the section's writers and nobody else: `morning-brief` (7:00 AM, model-free) and `user` (Close the Day) — `SECTION_WRITERS` in `apps/reconciler/src/paths.ts`. `principal` is attribution bounded by the bearer exactly as `intent.principal` is: the console's bearer may claim either, the owner's bearer only `user`. Anyone else — `assistant`, an agent, another routine — is `403`, recorded in `runs` like every refused mutation. |
+| **the markers** | `<!-- metistry:day -->` and `<!-- /metistry:day -->`, each alone on its own line, exactly as written, **once**, outside any code block and outside the frontmatter. Anything else that looks like a marker anywhere in the note — a second pair, a lone one, one quoted in a code block, an annotated or indented or mis-cased one — is `409 section_missing` with a sentence naming what and on which line, and **nothing is written**. The bridge never guesses where the owner's text ends. |
+| **the first write** | a note with no marker at all gets `## Today · Metistry` and the pair appended at its end (`"appended": true`); the owner's bytes are an untouched prefix. Two exceptions are `section_missing` instead: the heading is there without its markers (they were deleted — not a first write), or the note ends inside an unclosed code block (the section would be code). |
+| **`expected_outer_sha`** | required. SHA-256 of every byte of the note **except** the region — the bytes before it and after it, concatenated, marker lines included. With no section yet it is simply the file's hash, `GET /vault/read`'s `sha256`. A mismatch is `409 conflict`: the owner edited outside the section since you read it, so read again. An edit **inside** the region does not change it — the region is the writer's to replace. |
+| **`body`** | the whole new region, UTF-8; a trailing newline is added if missing so the closer stays on its own line. A body containing either marker, or one that would hide the closer (an unclosed code fence), is `400`. |
+| **the commit** | one intent in the writer's name — `Metistry morning-brief`, `update the day section of Journal/2026-09-26.md` — through the committer like any write. |
+
+**Computing the outer hash.** Don't reimplement the grammar: read the note
+(`GET /vault/read?path=…&encoding=base64`) and pass the bytes to
+`scanNoteSection(bytes, "day")` from `@foldedspacelabs/metistry-core` — its
+`outerSha256` is exactly what the bridge checks, and its `state: "missing"`
+tells you, before any request, that the write would be refused and why. The
+bridge runs the same function (`writeNoteSection`), then re-scans its own
+output and refuses anything that moved a byte outside the region; the file is
+re-read just before the rename, so an owner's edit landing mid-write is a
+`409 conflict`, not an overwrite.
 
 ## The committer
 

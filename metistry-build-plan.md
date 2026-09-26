@@ -231,7 +231,13 @@ against these.
    **watchdog** probes liveness directly, because it must be able to report
    the console itself dead.
 
-4. **The router is deterministic.** No model decides which model to use.
+4. **Routing is bounded by rules and always audited.** Rules the owner writes
+   decide what may run — which tiers and models, what a request may cost, and
+   every hard limit — and they always win: commands, overrides and budgets come
+   first. Inside those bounds a local policy may choose the operations and the
+   tier for a request; it can never choose outside them, every choice is
+   recorded with its reasons, and with the policy absent or failing every
+   request takes the rules' default.
    Prefix, regex, and explicit commands only.
 
 5. **Everything is a directory with a manifest.** Bridges, collectors, agents,

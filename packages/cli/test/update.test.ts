@@ -152,6 +152,26 @@ describe("metistry update", () => {
     expect(lines.join("\n")).toContain("migrations: 2 applied, 2 total");
   });
 
+  it("a kickstart that fails is tolerated but never reported as kickstarted", async () => {
+    const P = await checkout({ git: true });
+    const inst = await mkdtemp(join(tmpdir(), "mi-"));
+    const exec = fakeExec({
+      git: (args) => (args[0] === "rev-parse" ? { stdout: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n" } : undefined),
+      pnpm: async (args) => {
+        if (args[0] === "-r") await put(P, "apps/watchdog/dist/lib/util.js", "v2");
+      },
+      launchctl: (args) => (args[0] === "kickstart" ? { code: 5, stderr: "Could not find service" } : undefined),
+    });
+    const lines: string[] = [];
+    const r = await update({ ...base(P, { METISTRY_INSTANCE_DIR: inst, ...BRIDGE }), out: (l) => lines.push(l), exec, fetchFn: fakeFetch().fn, openSession: async () => fakeSession(), doctorFn: okDoctor });
+    expect(r.code).toBe(0);
+    expect(exec.calls.map(shown)).toContain(`launchctl kickstart -k gui/501/${WATCHDOG}`);
+    expect(r.restarted).toEqual([]);
+    const text = lines.join("\n");
+    expect(text).toContain(`${WATCHDOG}: kickstart exited 5 — not restarted`);
+    expect(text).not.toContain("job(s) kickstarted");
+  });
+
   it("a second run finds nothing to migrate and nothing to restart", async () => {
     const P = await checkout({ git: true });
     const session = fakeSession();

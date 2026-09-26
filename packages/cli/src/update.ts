@@ -427,8 +427,12 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
           await r.run("launchctl", ["kickstart", "-k", `gui/${uid}/${t.label}`], { comment: tracked.length ? `only if ${tracked.join(", ")} changed` : "no product code of its own — never kickstarted by update" });
         }
         else if (changed) {
-          await r.run("launchctl", ["kickstart", "-k", `gui/${uid}/${t.label}`], { tolerateFailure: true, comment: "code changed" });
-          restarted.push(t.label);
+          // tolerated so one job cannot stop the update, but only a kickstart
+          // that SUCCEEDED counts: `restarted` is what the summary reports as
+          // "kickstarted", and a job that failed was not
+          const k = await r.run("launchctl", ["kickstart", "-k", `gui/${uid}/${t.label}`], { tolerateFailure: true, comment: "code changed" });
+          if (k.code === 0) restarted.push(t.label);
+          else r.note(`${t.label}: kickstart exited ${k.code} — not restarted; \`metistry doctor\` shows its state`);
         }
       }
       // A freshly minted owner bearer is only real once the reconciler has
@@ -438,8 +442,9 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
       if (!r.dryRun && ownerBearer.minted) {
         const label = labelFor(deployment.shape === "launchd" ? SUPERVISOR_SERVICE : "reconciler", labelSuffix);
         if (!restarted.includes(label)) {
-          await r.run("launchctl", ["kickstart", "-k", `gui/${uid}/${label}`], { tolerateFailure: true, comment: `so it reads the freshly minted ${OWNER_BRIDGE_TOKEN}` });
-          restarted.push(label);
+          const k = await r.run("launchctl", ["kickstart", "-k", `gui/${uid}/${label}`], { tolerateFailure: true, comment: `so it reads the freshly minted ${OWNER_BRIDGE_TOKEN}` });
+          if (k.code === 0) restarted.push(label);
+          else r.note(`${label}: kickstart exited ${k.code} — not restarted, so it has not read ${OWNER_BRIDGE_TOKEN} yet`);
         }
       }
       if (!r.dryRun && restarted.length === 0) r.note("no host job's code changed — nothing kickstarted");

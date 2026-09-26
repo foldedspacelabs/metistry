@@ -1,5 +1,122 @@
 # @foldedspacelabs/metistry-core
 
+## 0.12.0
+
+### Minor Changes
+
+- 2080ce5: **One type for everything that acts.** Core adds the actor model (`actor.ts`, plan §2.4): `Actor` — the instance's assistant, a crew it delegates to, or an external agent — with its definition, permissions, tools, compute and limits, plus `PermissionRow` (the permissions table's Resource × Read × Write, provenance per entry), the `agents.kind` → actor mapping table, and the `ResolveActor` signature. Types only; nothing resolves yet. The shape makes the rules that matter unrepresentable rather than merely tested: a crew's or an external agent's Knowledge row has no write cell, only the assistant has the Agents (delegate) row, a crew never has a Queries row, and an external actor carries no definition or compute. `docs/ops/actors.md` is the source mapping, field by field.
+- 7bf6db6: **The client API, version 1 — one contract for every client, as data and as a
+  document.** `@foldedspacelabs/metistry-core` exports the route table
+  (`CLIENT_API`: method, path, reach, principals, idempotency, `409` reasons,
+  cursor, and whether it is served yet — 120 rows: every route the console
+  serves, and every route §2.1 of the design plan freezes ahead of its ticket) with `matchRoute`, `servedRoute` and `noRouteMessage`; the live-changes
+  catalogue (`EVENT_CATALOGUE`, the payload types in `EventPayloads`, every
+  event's reach `owner`); `API_VERSION` and the `Metistry-API-Version` header
+  name; and `events` joins the `CAPABILITIES` vocabulary.
+  
+  The console answers `api_version: 1` in `GET /health` and `GET /api/identity`
+  and the version header on every response. It reads the table before it
+  dispatches anything to the owner: a route the table does not list as served is
+  a `404` that names the routes beside it, so a handler cannot become an
+  undocumented door and a route frozen ahead of its ticket stays unserved until
+  it lands. `docs/ops/client-api.md` is the contract in words (it replaces
+  `docs/ops/console-api.md`, now a pointer); a conformance test holds the table
+  to the server — every served row reaches a handler, nothing unlisted is
+  served, each row admits exactly the credentials it records — and a document
+  test holds the table to the document line for line.
+- ac8a137: **The connection and extension model (§2.6, §2.7).** A `connection-type`
+  manifest joins `manifestSchema` — `provides` one of eight connection types,
+  config `fields` from a closed field-kind vocabulary, `capabilities` from each
+  type's closed vocabulary (`send` on mail is refused by name), tools by group,
+  and an `implementation`. An `oauth` field carries the OAuth client model: a
+  public `client_id`, PKCE required on a loopback redirect, `bring_your_own:
+  allowed`, https-only endpoints and declared scopes — and a `client_secret` is
+  refused. `connectionFileSchema` validates `.metistry/connections/<name>.yaml`
+  (secrets and variables by name only; a tool's mode defaults to Ask), and
+  `connectionIssues` joins a connection to its type. `Registry<Kind>`
+  (`loadRegistry`, `buildRegistry`, `manifestKind`) loads units from
+  directories, overlays an extension over a product unit by name, skips a unit
+  that fails with its reason, and requires `schema: 1`. Every manifest may now
+  carry `schema: 1`; any other value is refused with the version named.
+- c69abc3: **The owner can now see WHY an action's mode is what it is, not just what it is.** `effectiveActions()` resolved the (kind → mode) table but dropped the reason, so `metistry agents autonomy`, the console's registry panel and MetistryKit each had to recompute it to say whether a mode was set, defaulted, or clamped to the level's ceiling — and clamped is the one case where the owner's own setting is being overridden. Core adds `effectiveActionsDetailed()` beside it (`effectiveActions` is now a projection of it, so the two cannot drift), and every surface reads that one function instead: `metistry agents autonomy` marks each row set / dimmed-default / clamped-with-ceiling and says the modes as **Allow · Ask First · Never**; `GET /api/agents`'s `scope.autonomy` carries a `detailed` table beside the plain one, so a console never re-derives it; MetistryKit's `AgentRecord` decodes the same table into `actionsDetailed`.
+- aafc41a: **An intent enum and answer-token scoring, both closed and both decided in
+  code.** `INTENTS` joins `ACTION_KINDS` as a closed list a reviewer can read —
+  sixteen things a message can *say*, each with the description the model is
+  actually shown, and one-token letter codes GENERATED from the list rather than
+  written down beside it. `choice.ts` adds the technique: constrain the answer to
+  one token, ask for `top_logprobs`, renormalise over the closed alphabet, and
+  compute TypeSafe's published confidence statistic `(n·peak − 1)/(n − 1)`. It
+  decides nothing — no tier, no model, no field that could hold one — and the
+  per-server request shapes it builds were each measured rather than read off a
+  README. Also here: `intentGuard`, a deterministic out-of-distribution check
+  that runs *before* any request (an English classifier has been measured at
+  0.000 accuracy and 0.952 confidence on out-of-script input, so confidence
+  gating cannot catch it), `rules.yaml`'s `intent:` schema, which fails at LOAD
+  on a threshold outside [0,1] or an intent this build does not know, and
+  `assignments.intent` in `compute.yaml`, which is refused at load unless its
+  provider is on-machine and never falls back to `assignments.default`.
+- 56be405: **The reach gate: minting an agent bearer is the owner on this Mac.** The
+  console reads reach `local` off the client API table and enforces it before
+  any handler runs: a `local` route admits the local owner token from a loopback
+  peer and nothing else, and a passkey session — even one from `127.0.0.1` — is
+  refused `403 local_only` with a message naming the route and the Mac app, and
+  audited. `POST /api/agents` and `POST /api/agents/:id/rotate` are now `local`:
+  a new credential is a boundary change. The local owner token from any other
+  peer is the uniform `401` it always was; the capture owner token and agent
+  bearers keep their uniform `403 forbidden`. `metistry connect` mints through
+  the local owner token and is unaffected; the legacy PWA's agent panel can no
+  longer register or rotate an agent.
+  
+  `@foldedspacelabs/metistry-core` adds the `local_only` error code (`403`),
+  `isLocalRoute` and `localOnlyMessage`. The client API conformance test now
+  checks every row's reach for every credential kind.
+- d930fba: **One request type table, in core — and `action` reads *action*.** Every
+  request in Needs You is a `proposals` row with a free-text `kind`; the owner
+  reads one of twelve types instead (`docs/product/glossary.md`).
+  `packages/core/src/requests.ts` is now the only place that says which: stored
+  kind → type, the type's body from the closed set (choices · diff · thread ·
+  before and after · preview · to-dos · excerpt), its primary verb, Revise and
+  Decline, and the decisions each stores (`describeRequest`). It replaces the
+  two copies that had drifted — the CASE in `pending_requests` and the morning
+  brief's own map, both of which called an agent's `action` a *note* (C80).
+  
+  The brief imports the table. The query cannot import TypeScript, so it
+  carries the table's `requestWordSql()` rendering verbatim, and the console's
+  seed-query tests refuse any other text, run the query over every stored kind
+  against the table, and read every `INSERT INTO proposals` in the product so a
+  new writer cannot add a kind the table does not map. A kind the table does
+  not know reads as a *report* drawn as an excerpt with Dismiss its only answer
+  — never as the raw kind, and never with an Approve whose meaning nobody
+  reviewed. `pending_requests`' title fallback now says the owner's word too
+  (*note request*, not *knowledge request*).
+- 73977f8: **The Scheduled model's schema, frozen: `scheduled.yaml`, a closed schedule
+  shape, field origins, and the next-occurrence signature.** A schedule is
+  `{days, at, tz?}` or `{every: 5m|15m|1h|6h}` and nothing else — `every`
+  outside the four, a cron string, `8:00`, a UTC offset and the two forms mixed
+  are each refused with one line naming the field (`scheduleSchema`). `days`
+  takes weekdays or two sets that follow the profile, `working_days` and
+  `eve_of_working_days`, defined once in `resolveDays`; with no working days in
+  the profile a set resolves to `null`, never to a guessed Monday–Friday.
+  `scheduledSchema` / `parseScheduled` validate `.metistry/scheduled.yaml`:
+  routine overrides, New Routine assignments (actor, task, per-run grants that
+  are vault prefixes an agent may hold, a required schedule, no config) and
+  syncs. Parsing rewrites nothing, and an invalid file returns `value: null`
+  — never an empty overlay, which would un-pause a paused routine.
+  `FIELD_ORIGINS` (`default` · `profile` · `yours`) and `Sourced<T>` carry where
+  a resolved value came from. `NextOccurrence` is a type only — its body is
+  T3-1's — and `manifestScheduleSchema` accepts a legacy cron string in a
+  product manifest for one release. Nothing reads the file yet.
+- a8ccdfc: **The TCC enum gains three grants for live capture.** `screen_recording`,
+  `microphone`, `audio_capture` join `tccGrant` (§2.15, Q6) alongside the
+  existing five; the enum stays closed, and a bridge declaring any of the new
+  grants is held to the same PoC-1 rule as every other TCC bridge — `transport:
+  http`, `runs_on: host` only.
+
+### Patch Changes
+
+- 1edc2f7: **`Me/` and the user's own journal are refused at the tool for every non-user principal — new pages included.** `knowledge_write`'s ownership rule only ever ran against a note that already existed, so a brand-new page under `Me/` or the user's own `Journal/<date>.md` went straight through the default bare-vault grant every instance ships with — `Me/` is discovered, never assumed, and the daily journal is the user's alone (daily-flow-spec §5.1, §6.6). `core`'s `may()` now refuses the PATH itself, ahead of ownership, on both the `knowledge_write` tool and the reconciler's bridge (`writeAllowed`) — the second check exists because a routine's own commit (`plan-tomorrow`, the fold's routine half) reaches the vault directly and never asks `may()` at all. `Journal/Plan/`, `Journal/Fold/` and `Journal/Standup/` are each a routine's own reserved subdirectory and are unaffected. The seed vault also gains `Resources/README.md`, matching `People/` and `Projects/` — `seed/assistant-prompt.md` already told the fold to create entity pages there.
+- 87fc443: **`@foldedspacelabs/metistry-core/test-env` gains `testDb()` — the one guarded way a test opens Postgres.** `await testDb(pg.Pool)` refuses, before a socket opens, unless `METISTRY_TEST_DB_NAME` is set, names a `metistry_test_*` database, and is not a `METISTRY_DB_NAME` any install's `.env` on the machine is configured with; it connects with host/port/user/password from `METISTRY_DB_*` only, then checks `SELECT current_database()` and ends the pool rather than hand over the wrong one. Companions: `testDbConfig`, `testDbEnv` + `assertScratchDb` (for code under test that reads `METISTRY_DB_*`), `recreateScratchDb` / `dropScratchDb` (a suffixed database of a suite's own), `installDbNames`. Core still does not depend on `pg` — the caller passes the constructor. Every product test now goes through it; previously a shell with only `METISTRY_DB_PASSWORD` set could send a suite at the live install's Postgres on 5432.
+
 ## 0.11.0
 
 ### Minor Changes

@@ -441,13 +441,17 @@ export async function run(db: Db, ctx: FoldCtx = {}): Promise<FoldResult> {
   // The routine's own runs row: the anchor for the next pass AND the counts
   // the morning brief reads back. `folded: true` is what makes it an anchor —
   // the runner's own routine_run row (written for every tick, skips included)
-  // deliberately is not one.
+  // deliberately is not one. This row exists only when the fold enqueued a
+  // turn, so its `meta.outcome` (T1-4) is always `acted` — the too-early,
+  // already-folded and nothing-new passes below write no row of their own,
+  // leaving the runner's generic `silent` row as the only trace of that tick.
   await db.query(
     `INSERT INTO runs (component, kind, ok, started_at, finished_at, meta)
      VALUES ($1, 'routine_run', true, now(), now(), $2)`,
     [
       COMPONENT,
       JSON.stringify({
+        outcome: "acted",
         folded: true,
         thread: THREAD,
         inbound_id: Number(inbound.rows[0]?.id),

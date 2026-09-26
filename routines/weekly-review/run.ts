@@ -361,7 +361,11 @@ export function monthlyWindow(now: Date): { from: string; to: string; label: str
   return { from: localDate(from), to: localDate(to), label: from.toLocaleDateString([], { month: "long", year: "numeric" }) };
 }
 
-/** One weekly pass. Always emits exactly one review; returns 1. */
+/**
+ * One weekly pass. Always emits exactly one review; returns 1 — never
+ * `silent` in the runner's `meta.outcome` (T1-4), because the user asked for
+ * a cadence and always gets one.
+ */
 export async function run(db: Db, ctx: WeeklyCtx = {}): Promise<number> {
   const now = ctx.now ?? new Date();
   const since = new Date(now.getTime() - WINDOW_DAYS * 86_400_000);

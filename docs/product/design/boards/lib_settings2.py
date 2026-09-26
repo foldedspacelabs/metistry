@@ -74,7 +74,7 @@ def svcrow(T,name,st,line,rs,port,*,last=False):
             f'<span style="display: flex; gap: 4px; justify-content: flex-end;">{ibtn(T,"repeat","Restart")}{ibtn(T,"stop","Stop")}{ibtn(T,"note","Log")}</span></div>')
 
 def doctor(T,*,w=None):
-    probs=[("failed",T["fail"],"assistant can&rsquo;t start: <b>groq_key</b> is not set","Open Secrets"),
+    probs=[("failed",T["fail"],"assistant can&rsquo;t start: it needs <b>db</b>, which was restarting","Restart assistant"),
            ("warn",T["deg"],"eventkit needs Calendar access","Open System Settings")]
     return sunk(T,
         f'<div style="display: flex; align-items: center; gap: 10px;"><span style="font-size: 12.5px; font-weight: 600; color: {T["tp"]}; flex-grow: 1;">2 problems</span>'
@@ -141,81 +141,137 @@ def metisblock(T):
         f'<div style="display: flex; align-items: center; gap: 10px;"><span style="display: flex; color: {T["ag"]};">{ic(I["cpu"],16,1.9)}</span>'
         f'<span style="font-size: 13px; font-weight: 600; color: {T["tp"]};">Metis uses</span></div>'
         f'<div style="display: grid; grid-template-columns: 70px minmax(0,1fr); gap: 8px 10px; align-items: center; margin-top: 11px;">'
-        f'{lbl(T,"Model")}<span style="display: flex; align-items: center; gap: 8px;">{pick(T,"claude-sonnet",220)}{tag(T,"Cloud")}{tag(T,"OpenRouter")}</span>'
+        f'{lbl(T,"Model")}<span style="display: flex; align-items: center; gap: 8px;">{pick(T,"Claude Sonnet",190)}'
+        f'<span style="font-size: 11.5px; color: {T["ts"]};">via Claude</span>{tag(T,"Subscription")}</span>'
         f'{lbl(T,"Effort")}<span>{seg(T,["Low","Medium","High"],"Medium")}</span>'
-        f'{lbl(T,"If it fails")}<span>{pick(T,"qwen3-coder-30b &middot; Local",220)}</span></div>'
-        + note(T,"Agents and routines choose their own model in their definitions, from what is added below."))
+        f'{lbl(T,"If it fails")}<span style="display: flex; align-items: center; gap: 8px;">{pick(T,"Qwen3 Coder 30B",190)}'
+        f'<span style="font-size: 11.5px; color: {T["ts"]};">on this Mac</span>{tag(T,"Local")}</span></div>'
+        + note(T,"Agents and routines choose their own model in their definitions, from Your Models below."))
 
-def localtab(T):
-    provs=sunk(T,
-        prov(T,"Apple Foundation Models",[tag(T,"Local"),tag(T,"Free")],"Built into macOS &middot; ready",acts=False)
-        + prov(T,"LM Studio",[tag(T,"Local"),tag(T,"Free")],"localhost:1234 &middot; running &middot; 2 models")
-        + prov(T,"Ollama",[tag(T,"Local"),tag(T,"Free")],"Not running",last=True,
-               extra=f'<div style="margin-top: 6px;">{btn(T,"Start Ollama","secondary")}</div>')
-        + f'<div style="margin-top: 8px;">{btn(T,"Add Local Provider…","secondary",I["plus"])}</div>')
-    def mrow(name,where,size,state,*,last=False):
-        act={"loaded":btn(T,"Unload","ghost"),"installed":btn(T,"Load","secondary"),"get":btn(T,"Install","secondary",I["update"]),
-             "big":btn(T,"Install","ghost",I["update"])}[state]
-        st={"loaded":f'<span style="display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: {T["tp"]};"><span style="width: 7px; height: 7px; border-radius: 50%; background: {T["ok"]};"></span>Loaded</span>',
-            "installed":f'<span style="font-size: 11.5px; color: {T["ts"]};">Installed</span>',
-            "get":f'<span style="font-size: 11.5px; color: {T["ts"]};">Fits</span>',
-            "big":f'<span style="display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; color: {T["ts"]};"><span style="display: flex; color: {T["deg"]};">{ic(I["warn"],11,2.1)}</span>Tight fit</span>'}[state]
-        return (f'<div style="display: grid; grid-template-columns: minmax(0,1fr) 80px 56px 76px 78px; gap: 8px; align-items: center; padding: 7px 0; {bd_(T,last)}">'
-                f'{mono(name,T["tp"],11.5)}<span style="font-size: 11.5px; color: {T["ts"]};">{where}</span>'
-                f'<span style="font-size: 11.5px; color: {T["ts"]}; text-align: right; font-variant-numeric: tabular-nums;">{size}</span>{st}<span style="display: flex; justify-content: flex-end;">{act}</span></div>')
-    mem=(f'<div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;"><span style="font-size: 11.5px; color: {T["ts"]}; white-space: nowrap;">Memory</span>'
-         f'<div style="flex-grow: 1; height: 6px; border-radius: 3px; background: {T["border"]}; overflow: hidden;"><div style="width: 30%; height: 100%; background: {T["ag"]};"></div></div>'
-         f'<span style="font-size: 11.5px; color: {T["ts"]}; white-space: nowrap; font-variant-numeric: tabular-nums;">19 of 64 GB</span></div>')
-    models=sunk(T,mem
-        + f'<div style="display: flex; gap: 8px; align-items: center;"><div style="flex-grow: 1;">{rfield(T,ph(T,"Search models — gemma, qwen, llama…"))}</div>{seg(T,["Installed","Browse"],"Installed")}</div>'
-        + f'<div style="margin-top: 8px;">'
-        + mrow("qwen3-coder-30b","LM Studio","19 GB","loaded")
-        + mrow("llama-3.2-3b","LM Studio","2 GB","installed")
-        + mrow("foundation-model","Apple","&mdash;","loaded",last=True) + '</div>')
-    browse=sunk(T,
-        f'<div style="display: flex; gap: 8px; align-items: center;"><div style="flex-grow: 1;">{rfield(T,plain("gemma"),focus=True)}</div>{seg(T,["Installed","Browse"],"Browse")}</div>'
-        + f'<div style="margin-top: 8px;">' + mrow("gemma-3-27b","Ollama","17 GB","get") + mrow("gemma-3-12b","LM Studio","8 GB","get")
-        + mrow("gemma-3-27b-fp16","LM Studio","54 GB","big",last=True) + '</div>')
-    return block(T,"PROVIDERS",provs)+'<div style="height: 14px;"></div>'+block(T,"MODELS",models)+'<div style="height: 14px;"></div>'+block(T,"BROWSE &mdash; SEARCHING",browse)
+PROVS=[("Apple Foundation Models",["Local","Free"],"Built into macOS &middot; ready",None,True,False),
+       ("LM Studio",["Local","Free"],"localhost:1234 &middot; running",None,True,True),
+       ("Ollama",["Local","Free"],"Not running &middot; <b>Start Ollama</b>",None,True,True),
+       ("Claude",["Cloud","Subscription"],"Max plan &middot; this window 42% used, resets in 3 h","signed",True,True),
+       ("OpenRouter",["Cloud","By token","ZDR claimed"],"300+ models","openrouter_key",True,True),
+       ("Groq",["Cloud","By token","No ZDR claim"],"","groq_key",True,True),
+       ("Together AI",["Cloud","By token"],"","missing",False,True)]
+def provrow2(T,name,tags,line,cred,on,rm,*,last=False):
+    if cred=="signed": c=f'<span style="font-size: 11.5px; color: {T["ts"]};">Signed in &middot; <b style="color: {T["acc"]};">Sign Out</b></span>'
+    elif cred=="missing": c=(f'<span style="font-size: 11.5px; color: {T["fail"]};">{ic(I["failed"],11,2.2)} Key not set</span>'
+                             f'<span style="font-size: 11.5px; font-weight: 600; color: {T["acc"]};"> &middot; Choose a secret</span>')
+    elif cred: c=f'<span style="display: inline-flex; align-items: center; gap: 6px;"><span style="font-size: 11.5px; color: {T["ts"]};">Key</span>{ref(T,"secret",cred)}</span>'
+    else: c=""
+    sub_=" &middot; ".join(x for x in (line,) if x)
+    return (f'<div style="display: grid; grid-template-columns: 40px minmax(0,1fr) auto; gap: 10px; align-items: center; padding: 10px 0; {bd_(T,last)} opacity: {1 if on else 0.6};">'
+            f'{toggle(T,on)}<div><div style="display: flex; align-items: center; gap: 7px; flex-wrap: wrap;">'
+            f'<span style="font-size: 13px; font-weight: 600; color: {T["tp"]};">{name}</span>{"".join(tag(T,t) for t in tags)}</div>'
+            f'<div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 4px;">'
+            + (f'<span style="font-size: 11.5px; color: {T["ts"]};">{sub_}</span>' if sub_ else "") + (" " if sub_ and c else "") + c + '</div></div>'
+            f'<span style="display: flex; gap: 5px;">{btn(T,"Test","ghost",I["check"])}{ibtn(T,"x","Remove") if rm else ""}</span></div>')
 
-def cloudtab(T):
-    provs=sunk(T,
-        prov(T,"OpenRouter",[tag(T,"Cloud"),tag(T,"By token"),tag(T,"ZDR claimed")],"Key "+ref(T,"secret","openrouter_key")+" &middot; 300+ models")
-        + prov(T,"Claude",[tag(T,"Cloud"),tag(T,"Subscription")],"Max plan &middot; signed in &middot; this window 42% used, resets in 3 h")
-        + prov(T,"Groq",[tag(T,"Cloud"),tag(T,"By token"),tag(T,"No ZDR claim")],
-               f'<span style="color: {T["fail"]};">{ic(I["failed"],11,2.2)} Key not set</span> &middot; <span style="font-weight: 600; color: {T["acc"]};">Choose a secret</span>',last=True)
-        + f'<div style="margin-top: 8px;">{btn(T,"Add Cloud Provider…","secondary",I["plus"])}</div>')
+def providers2(T):
+    return sunk(T,"".join(provrow2(T,*p_,last=(i==len(PROVS)-1)) for i,p_ in enumerate(PROVS))
+        + f'<div style="display: flex; align-items: center; gap: 10px; margin-top: 10px;">{btn(T,"Add Provider…","secondary",I["plus"])}'
+          f'<span style="font-size: 11.5px; color: {T["ts"]};">Switched-off providers aren&rsquo;t searched or offered.</span></div>')
+
+def meter(T,label,used,total,frac,col):
+    return (f'<div style="display: grid; grid-template-columns: 56px minmax(0,1fr) 96px; gap: 10px; align-items: center;">'
+            f'<span style="font-size: 11.5px; color: {T["ts"]};">{label}</span>'
+            f'<div style="height: 6px; border-radius: 3px; background: {T["border"]}; overflow: hidden;"><div style="width: {int(frac*100)}%; height: 100%; background: {col};"></div></div>'
+            f'<span style="font-size: 11.5px; color: {T["ts"]}; text-align: right; font-variant-numeric: tabular-nums;">{used} of {total}</span></div>')
+
+def chipsrow(T,items,on=()):
+    return ('<div style="display: flex; gap: 6px; flex-wrap: wrap;">'
+            + "".join(f'<span style="font-size: 11.5px; padding: 2px 9px; border-radius: 999px; border: 1px solid {T["acc"] if i in on else T["bc"]}; '
+                      f'color: {T["acc"] if i in on else T["ts"]}; background: {T["accq"] if i in on else "transparent"}; font-weight: {600 if i in on else 500};">{i}</span>' for i in items)
+            + '</div>')
+
+def yrow(T,name,maker,route,tags,right,act,*,last=False,loaded=False):
+    st=(f'<span style="display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: {T["tp"]};">'
+        f'<span style="width: 7px; height: 7px; border-radius: 50%; background: {T["ok"]};"></span>Loaded</span>' if loaded else "")
+    return (f'<div style="display: grid; grid-template-columns: minmax(0,1fr) 150px 84px; gap: 10px; align-items: center; padding: 8px 0; {bd_(T,last)}">'
+            f'<div><div style="display: flex; align-items: center; gap: 7px; flex-wrap: wrap;"><span style="font-size: 13px; font-weight: 600; color: {T["tp"]};">{name}</span>'
+            f'<span style="font-size: 11.5px; color: {T["ts"]};">{maker}</span></div>'
+            f'<div style="display: flex; align-items: center; gap: 6px; margin-top: 4px; flex-wrap: wrap;"><span style="font-size: 11.5px; color: {T["ts"]};">{route}</span>{"".join(tag(T,t) for t in tags)}</div></div>'
+            f'<div style="text-align: right;">{st}<div style="font-size: 11.5px; color: {T["ts"]}; margin-top: 2px;">{right}</div></div>'
+            f'<span style="display: flex; justify-content: flex-end;">{act}</span></div>')
+
+def yourmodels(T):
+    head=(meter(T,"Memory","19 GB","64 GB",0.30,T["ag"]) + '<div style="height: 6px;"></div>' + meter(T,"Disk","61 GB","1 TB",0.12,T["ts"]))
+    search=(f'<div style="display: flex; gap: 8px; align-items: center; margin-top: 12px;"><div style="flex-grow: 1;">'
+            f'{rfield(T,ph(T,"Search 6 providers for models — llama, qwen, sonnet…"))}</div></div>')
+    grp=lambda t:f'<div style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; color: {T["tt"]}; margin: 14px 0 2px;">{t}</div>'
+    local=(yrow(T,"Qwen3 Coder 30B","Alibaba","LM Studio &middot; Q4_K_M",["Local","Free"],"19 GB",btn(T,"Unload","ghost"),loaded=True)
+           + yrow(T,"Llama 3.2 3B","Meta","LM Studio &middot; Q8",["Local","Free"],"3 GB",btn(T,"Load","secondary"))
+           + yrow(T,"Foundation Model","Apple","Built in",["Local","Free"],"&mdash;","",loaded=True,last=True))
+    cloud=(yrow(T,"Claude Sonnet","Anthropic","via Claude",["Cloud","Subscription"],"Included in Max",ibtn(T,"x","Remove"))
+           + yrow(T,"Claude Opus","Anthropic","via Claude",["Cloud","Subscription"],"Included in Max",ibtn(T,"x","Remove"))
+           + yrow(T,"Llama 3.1 8B","Meta","via Groq",["Cloud","By token"],"$0.05 / $0.08 per M",ibtn(T,"x","Remove"),last=True))
+    return sunk(T,head+search+grp("ON THIS MAC &middot; 3")+local+grp("FROM THE CLOUD &middot; 3")+cloud)
+
+def offer(T,prov,tags,detail,price,act,*,best=None,last=False):
+    return (f'<div style="display: grid; grid-template-columns: 110px minmax(0,1fr) 120px 76px; gap: 8px; align-items: center; padding: 7px 0 7px 12px; {bd_(T,last)}">'
+            f'<span style="font-size: 12.5px; font-weight: 600; color: {T["tp"]};">{prov}</span>'
+            f'<div style="display: flex; align-items: center; gap: 5px; flex-wrap: wrap;">{"".join(tag(T,t) for t in tags)}'
+            f'<span style="font-size: 11.5px; color: {T["ts"]};">{detail}</span></div>'
+            f'<div style="text-align: right;"><div style="font-size: 12px; color: {T["tp"]}; font-variant-numeric: tabular-nums;">{price}</div>'
+            + (f'<div style="font-size: 10.5px; font-weight: 700; letter-spacing: 0.04em; color: {T["ok"]};">{best}</div>' if best else "")
+            + f'</div><span style="display: flex; justify-content: flex-end;">{act}</span></div>')
+
+def modelsearch(T):
+    head=(meter(T,"Memory","19 GB","64 GB",0.30,T["ag"]) + '<div style="height: 6px;"></div>' + meter(T,"Disk","61 GB","1 TB",0.12,T["ts"]))
+    search=(f'<div style="margin-top: 12px;">{rfield(T,plain("llama 3.3"),focus=True)}</div>'
+            f'<div style="display: flex; align-items: center; gap: 10px; margin-top: 9px;">{chipsrow(T,["Local","Cloud","Free","By token","Subscription","Fits this Mac","Tools"],on=("Tools",))}'
+            f'<span style="flex-grow: 1;"></span><span style="font-size: 11.5px; color: {T["ts"]}; white-space: nowrap;">Sort: Best match &#9662;</span></div>')
+    m1=(f'<div style="margin-top: 14px; border: 1px solid {T["border"]}; border-radius: 10px; background: {T["bg"]}; padding: 10px 12px;">'
+        f'<div style="display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;"><span style="font-size: 14px; font-weight: 600; color: {T["tp"]};">Llama 3.3 70B Instruct</span>'
+        f'<span style="font-size: 11.5px; color: {T["ts"]};">Meta &middot; 128K context &middot; tools &middot; 5 places</span></div>'
+        f'<div style="margin-top: 6px;">'
+        + offer(T,"OpenRouter",["Cloud","By token"],"ZDR claimed","$0.13 / $0.40",btn(T,"Add","secondary",I["plus"]),best="CHEAPEST")
+        + offer(T,"Groq",["Cloud","By token"],"no ZDR claim","$0.59 / $0.79",btn(T,"Add","secondary",I["plus"]))
+        + offer(T,"Ollama",["Local","Free"],"Q4_K_M &middot; 43 GB &middot; needs 48 GB",f'<span style="color: {T["ts"]};">Tight fit</span>',btn(T,"Install","secondary",I["update"]))
+        + offer(T,"LM Studio",["Local","Free"],"Q3_K_L &middot; 37 GB &middot; needs 41 GB","Fits",btn(T,"Install","secondary",I["update"]))
+        + offer(T,"LM Studio",["Local","Free"],"Q8_0 &middot; 75 GB",f'<span style="color: {T["fail"]};">Too large</span>',btn(T,"Install","disabled",I["update"]),last=True)
+        + '</div><div style="font-size: 11px; color: {c}; margin-top: 6px;">Prices per million tokens, in / out.</div></div>'.replace("{c}",T["ts"]))
+    m2=(f'<div style="margin-top: 10px; border: 1px solid {T["border"]}; border-radius: 10px; background: {T["bg"]}; padding: 10px 12px;">'
+        f'<div style="display: flex; align-items: baseline; gap: 8px;"><span style="font-size: 14px; font-weight: 600; color: {T["tp"]};">Llama 3.3 Nemotron Super 49B</span>'
+        f'<span style="font-size: 11.5px; color: {T["ts"]};">NVIDIA, from Llama 3.3 &middot; 2 places</span><span style="flex-grow: 1;"></span>'
+        f'<span style="font-size: 11.5px; color: {T["ts"]};">Local or cloud &middot; from $0.10 per M</span><span style="display: flex; color: {T["tt"]};">{ic(I["chevr"],12,2.2)}</span></div></div>')
+    return sunk(T,head+search+m1+m2)
+
+def computepane(T,mode="default"):
+    models=yourmodels(T) if mode=="default" else modelsearch(T)
+    return (panehead(T,"Compute")+body(T,block(T,"METIS",metisblock(T)),block(T,"PROVIDERS",providers2(T)),
+            block(T,"YOUR MODELS" if mode=="default" else "YOUR MODELS &mdash; SEARCHING",models),block(T,"SPENDING LIMITS",limits2(T))))
+
+def limits2(T):
     hdr=(f'<div style="display: grid; grid-template-columns: minmax(0,1fr) 64px 64px 214px; gap: 8px; padding-bottom: 5px; font-size: 10.5px; '
          f'font-weight: 700; letter-spacing: 0.07em; color: {T["tt"]};"><span></span><span>DAY</span><span>MONTH</span><span>THEN</span></div>')
-    limits=sunk(T,hdr + limitrow(T,"This instance","$5.00","$80","Stop") + limitrow(T,"OpenRouter","$4.00","$60","Critical only")
+    return sunk(T,hdr + limitrow(T,"This instance","$5.00","$80","Stop") + limitrow(T,"OpenRouter","$4.00","$60","Critical only")
         + limitrow(T,"Groq","&mdash;","$10","Stop",last=True)
         + f'<div style="display: flex; align-items: center; gap: 8px; margin-top: 10px; padding-top: 9px; border-top: 1px solid {T["border"]};">'
           f'<span style="font-size: 12.5px; color: {T["tp"]}; flex-grow: 1;">Claude &middot; subscription</span>'
-          f'<span style="font-size: 11.5px; color: {T["ts"]};">No dollar limit &mdash; the plan&rsquo;s window is the limit</span></div>'
-        + f'<div style="font-size: 11.5px; color: {T["ts"]}; margin-top: 8px;">Today $1.84 of $5.00 &middot; Stop pauses routines and asks in Needs You.</div>')
-    return block(T,"PROVIDERS",provs)+'<div style="height: 14px;"></div>'+block(T,"SPENDING LIMITS",limits)
+          f'<span style="font-size: 11.5px; color: {T["ts"]};">The plan&rsquo;s window is its limit</span></div>'
+        + f'<div style="font-size: 11.5px; color: {T["ts"]}; margin-top: 8px;">Today $1.84 of $5.00 &middot; local models cost nothing &middot; Stop pauses routines and asks in Needs You.</div>')
 
-def limitrow(T,who,day,month,act,*,last=False):
-    f_=lambda v:f'<span style="display: inline-block; width: 64px; box-sizing: border-box; padding: 3px 7px; border: 1px solid {T["bc"]}; border-radius: 6px; background: {T["surface"]}; font-size: 12px; color: {T["tp"]}; text-align: right; font-variant-numeric: tabular-nums;">{v}</span>'
-    return (f'<div style="display: grid; grid-template-columns: minmax(0,1fr) 64px 64px 214px; gap: 8px; align-items: center; padding: 6px 0; {bd_(T,last)}">'
-            f'<span style="font-size: 12.5px; color: {T["tp"]};">{who}</span>{f_(day)}{f_(month)}{seg(T,["Allow","Stop","Critical only"],act)}</div>')
-
-def computepane(T,tab="Local"):
-    inner=localtab(T) if tab=="Local" else cloudtab(T)
-    return (panehead(T,"Compute")+body(T,block(T,"METIS",metisblock(T)),
-            tabbar(T,[("Local","3"),("Cloud","3")],tab)+f'<div style="margin-top: 14px;">{inner}</div>'))
-
-def agentcompute(T,*,w=520):
-    """In an agent's definition: its model, chosen from the compute added in Settings."""
+def agentcompute(T,*,w=560):
+    """In an agent's definition: a model, then where it runs."""
     return (f'<div style="width: {w}px; box-sizing: border-box; border: 1px solid {T["bc"]}; border-radius: 12px; background: {T["bg"]}; padding: 14px 16px;">'
             f'<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px;">{agentchip(T,"collator")}'
             f'<span style="font-size: 12px; color: {T["ts"]};">definition</span></div>'
             + block(T,"COMPUTE",sunk(T,
                 f'<div style="display: grid; grid-template-columns: 70px minmax(0,1fr); gap: 8px 10px; align-items: center;">'
-                f'{lbl(T,"Model")}<span style="display: flex; align-items: center; gap: 8px;">{pick(T,"qwen3-coder-30b",200)}{tag(T,"Local")}{tag(T,"Free")}</span>'
+                f'{lbl(T,"Model")}<span>{pick(T,"Llama 3.3 70B Instruct",250)}</span>'
+                f'{lbl(T,"Runs on")}<span style="display: flex; align-items: center; gap: 8px;">{pick(T,"OpenRouter",150)}{tag(T,"Cloud")}{tag(T,"By token")}'
+                f'<span style="font-size: 11.5px; color: {T["ts"]};">$0.13 / $0.40</span></span>'
                 f'{lbl(T,"Effort")}<span>{seg(T,["Low","Medium","High"],"Medium")}</span></div>'
-                + note(T,"Lists only what is added in Settings › Compute. <b>Same as Metis</b> follows Metis&rsquo;s choice.")))
+                + note(T,"Models come from Your Models. <b>Same as Metis</b> follows Metis&rsquo;s choice.")))
             + '</div>')
+
+def limitrow(T,who,day,month,act,*,last=False):
+    f_=lambda v:f'<span style="display: inline-block; width: 64px; box-sizing: border-box; padding: 3px 7px; border: 1px solid {T["bc"]}; border-radius: 6px; background: {T["surface"]}; font-size: 12px; color: {T["tp"]}; text-align: right; font-variant-numeric: tabular-nums;">{v}</span>'
+    return (f'<div style="display: grid; grid-template-columns: minmax(0,1fr) 64px 64px 214px; gap: 8px; align-items: center; padding: 6px 0; {bd_(T,last)}">'
+            f'<span style="font-size: 12.5px; color: {T["tp"]};">{who}</span>{f_(day)}{f_(month)}{seg(T,["Allow","Stop","Critical only"],act)}</div>')
 
 # ---- Updates -------------------------------------------------------------------------------
 def updatespane(T):

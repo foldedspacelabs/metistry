@@ -740,7 +740,7 @@ export interface MainIo {
   platform?: NodeJS.Platform;
   uid?: number;
   home?: string;
-  /** test seam: `console whoami`/`console call`/`connect`'s request to the console */
+  /** test seam: the console request of `console whoami|call|session`, `connect`, `agents` and `runs export` */
   fetchFn?: typeof fetch;
   /** test seam: `console call --body -` reads this instead of the real stdin */
   readStdin?: () => Promise<string>;
@@ -1155,6 +1155,7 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
           ...(instanceId ? { instanceId } : {}),
           ...(io.exec ? { exec: io.exec } : {}),
           ...(io.platform ? { platform: io.platform } : {}),
+          ...(io.fetchFn ? { fetchFn: io.fetchFn } : {}),
         });
         err(renderRunsExport(r));
         return 0;
@@ -1175,7 +1176,8 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
       }
       const loaded = loadEnv();
       const consoleCommon = {
-        ...(loaded.instanceDir ? { instanceId: await readInstanceId(loaded.instanceDir) } : {}),
+        // instanceDir: a namespaced instance's console is on its own port (state/ports.yaml), never the default 8080
+        ...(loaded.instanceDir ? { instanceDir: loaded.instanceDir, instanceId: await readInstanceId(loaded.instanceDir) } : {}),
         ...(io.exec ? { exec: io.exec } : {}),
         ...(io.platform ? { platform: io.platform } : {}),
         ...(io.fetchFn ? { fetchFn: io.fetchFn } : {}),
@@ -1267,9 +1269,11 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
       const common = () => {
         const loaded = loadEnv();
         return (async () => ({
-          ...(loaded.instanceDir ? { instanceId: await readInstanceId(loaded.instanceDir) } : {}),
+          // instanceDir: a namespaced instance's console is on its own port (state/ports.yaml), never the default 8080
+          ...(loaded.instanceDir ? { instanceDir: loaded.instanceDir, instanceId: await readInstanceId(loaded.instanceDir) } : {}),
           ...(io.exec ? { exec: io.exec } : {}),
           ...(io.platform ? { platform: io.platform } : {}),
+          ...(io.fetchFn ? { fetchFn: io.fetchFn } : {}),
         }))();
       };
       // `list` is READ-ONLY, and deliberately renders nothing of its own: the
@@ -1298,9 +1302,10 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
       const loaded = loadEnv();
       try {
         const view = await agentAutonomy(positional[1], parseAutonomyFlags(argv), {
-          ...(loaded.instanceDir ? { instanceId: await readInstanceId(loaded.instanceDir) } : {}),
+          ...(loaded.instanceDir ? { instanceDir: loaded.instanceDir, instanceId: await readInstanceId(loaded.instanceDir) } : {}),
           ...(io.exec ? { exec: io.exec } : {}),
           ...(io.platform ? { platform: io.platform } : {}),
+          ...(io.fetchFn ? { fetchFn: io.fetchFn } : {}),
         });
         out(flags.json === true ? JSON.stringify(view, null, 2) : renderAutonomy(view, ui));
         return 0;

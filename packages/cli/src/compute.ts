@@ -1075,6 +1075,8 @@ export async function cacheReport(opts: CacheReportOptions): Promise<CacheReport
     platform: opts.platform,
     ...(opts.exec ? { exec: opts.exec } : {}),
     ...(opts.fetchFn ? { fetchFn: opts.fetchFn } : {}),
+    // a namespaced instance's console is on its own port (state/ports.yaml), never the default 8080
+    instanceDir: opts.instanceDir,
     ...(opts.instanceId ? { instanceId: opts.instanceId } : {}),
     ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
   });
@@ -1378,6 +1380,8 @@ export async function routeReport(opts: RouteReportOptions): Promise<RouteReport
     platform: opts.platform,
     ...(opts.exec ? { exec: opts.exec } : {}),
     ...(opts.fetchFn ? { fetchFn: opts.fetchFn } : {}),
+    // a namespaced instance's console is on its own port (state/ports.yaml), never the default 8080
+    instanceDir: opts.instanceDir,
     ...(opts.instanceId ? { instanceId: opts.instanceId } : {}),
     ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
   });

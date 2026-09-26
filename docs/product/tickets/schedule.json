@@ -279,7 +279,7 @@
         "F-1"
       ],
       "file": "docs/product/tickets/f/f-7.md",
-      "status": "todo"
+      "status": "merged"
     },
     "F-8": {
       "title": "Dynamic router spec",
@@ -341,7 +341,7 @@
         "F-11"
       ],
       "file": "docs/product/tickets/f/f-12.md",
-      "status": "todo"
+      "status": "merged"
     },
     "F-13": {
       "title": "The reach gate",
@@ -355,7 +355,7 @@
         "F-1"
       ],
       "file": "docs/product/tickets/f/f-13.md",
-      "status": "todo"
+      "status": "merged"
     },
     "F-14": {
       "title": "Copy and the answer set",

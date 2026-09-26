@@ -3308,11 +3308,13 @@ def toolblock(T):
 
 
 SETTINGS_W, SETTINGS_H, SETTINGS_NAV = 840, 600, 200
-SETTINGS_GROUPS=[(None,[("Instance","folder"),("Services","gear"),("Compute","cpu"),("Updates","update")]),
+SETTINGS_GROUPS=[(None,[("Instance","folder"),("Services","server"),("Compute","cpu"),("Updates","update")]),
                  ("ACCESS",[("Account","person"),("Connections","plug"),("Secrets","key"),("Variables","brace")]),
                  ("CAPTURE",[("Live Capture","mic"),("Sessions","repeat")]),
                  (None,[("Keyboard","keyboard"),("Advanced","wrench")])]
 I.setdefault("brace",'<path d="M9 4.5H8a2 2 0 00-2 2v3a2.5 2.5 0 01-2 2.5 2.5 2.5 0 012 2.5v3a2 2 0 002 2h1M15 4.5h1a2 2 0 012 2v3a2.5 2.5 0 002 2.5 2.5 2.5 0 00-2 2.5v3a2 2 0 01-2 2h-1"/>')
+I["gear"]='<path d="M12.22 2h-.44a2 2 0 00-2 2v.18a2 2 0 01-1 1.73l-.43.25a2 2 0 01-2 0l-.15-.08a2 2 0 00-2.73.73l-.22.38a2 2 0 00.73 2.73l.15.1a2 2 0 011 1.72v.51a2 2 0 01-1 1.74l-.15.09a2 2 0 00-.73 2.73l.22.38a2 2 0 002.73.73l.15-.08a2 2 0 012 0l.43.25a2 2 0 011 1.73V20a2 2 0 002 2h.44a2 2 0 002-2v-.18a2 2 0 011-1.73l.43-.25a2 2 0 012 0l.15.08a2 2 0 002.73-.73l.22-.39a2 2 0 00-.73-2.73l-.15-.08a2 2 0 01-1-1.74v-.5a2 2 0 011-1.74l.15-.09a2 2 0 00.73-2.73l-.22-.38a2 2 0 00-2.73-.73l-.15.08a2 2 0 01-2 0l-.43-.25a2 2 0 01-1-1.73V4a2 2 0 00-2-2z"/><circle cx="12" cy="12" r="3"/>'  # a real cog (was a sun-like mark)
+I.setdefault("server",'<rect x="3.5" y="4.5" width="17" height="6.5" rx="1.8"/><rect x="3.5" y="13" width="17" height="6.5" rx="1.8"/><path d="M7 7.75h.01M7 16.25h.01"/>')
 I.setdefault("update",'<path d="M12 3.5v10.5M7.8 10l4.2 4.2 4.2-4.2"/><path d="M4.5 15.5v2.5a2 2 0 002 2h11a2 2 0 002-2v-2.5"/>')
 I.setdefault("keyboard",'<rect x="3" y="6.5" width="18" height="11" rx="2"/><path d="M7 10h.01M10 10h.01M13 10h.01M16 10h.01M7 13.5h10"/>')
 I.setdefault("gear",'<circle cx="12" cy="12" r="3"/><path d="M12 3.5v2.2M12 18.3v2.2M3.5 12h2.2M18.3 12h2.2M6 6l1.6 1.6M16.4 16.4L18 18M6 18l1.6-1.6M16.4 7.6L18 6"/>')

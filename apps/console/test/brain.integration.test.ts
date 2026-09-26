@@ -11,7 +11,7 @@ import { EAGER_TOOL_NAMES } from "@foldedspacelabs/metistry-mcp-brain";
 import { makeServer } from "../src/server.js";
 import * as store from "../src/auth-store.js";
 import * as agents from "../src/agents.js";
-import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
+import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
 
 const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
 const policy = { idleDays: 30, maxDays: 365 };
@@ -36,13 +36,7 @@ describe.skipIf(!hasDb)("POST /mcp (integration)", () => {
   const initParams = { protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "itest", version: "0" } };
 
   beforeAll(async () => {
-    pool = new pg.Pool({
-      host: process.env.METISTRY_DB_HOST ?? "127.0.0.1",
-      port: Number(process.env.METISTRY_DB_PORT ?? 5432),
-      user: process.env.METISTRY_DB_USER ?? "metistry",
-      database: process.env.METISTRY_TEST_DB_NAME ?? "metistry_test",
-      password: process.env.METISTRY_DB_PASSWORD,
-    });
+    pool = await testDb(pg.Pool);
     server = makeServer(pool, new QueryStore(pool), {
       origin: "http://127.0.0.1:0",
       inboxDir: `/tmp/metistry-test-inbox-mcp-${Date.now()}`,

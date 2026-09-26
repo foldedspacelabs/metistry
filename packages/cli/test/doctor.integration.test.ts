@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import { dbRows, openDbFromEnv, type Db } from "../src/doctor.js";
-import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
+import { assertScratchDb, loadTestEnv, testDb, testDbEnv } from "@foldedspacelabs/metistry-core/test-env";
 
 const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
 const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
@@ -15,15 +15,8 @@ const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
 describe.skipIf(!hasDb)("doctor: db + migrations against the scratch db", () => {
   let pool: pg.Pool;
   let db: Db;
-  beforeAll(() => {
-    pool = new pg.Pool({
-      host: process.env.METISTRY_DB_HOST ?? "127.0.0.1",
-      port: Number(process.env.METISTRY_DB_PORT ?? 5432),
-      database: process.env.METISTRY_TEST_DB_NAME ?? "metistry_test",
-      user: process.env.METISTRY_DB_USER ?? "metistry",
-      password: process.env.METISTRY_DB_PASSWORD,
-      max: 1,
-    });
+  beforeAll(async () => {
+    pool = await testDb(pg.Pool, { max: 1 });
     db = { query: (t, v) => pool.query(t, v as any[]) };
   });
   afterAll(async () => {
@@ -40,8 +33,9 @@ describe.skipIf(!hasDb)("doctor: db + migrations against the scratch db", () => 
 
   it("openDbFromEnv builds a working pool from METISTRY_DB_* (and none without a password)", async () => {
     expect(await openDbFromEnv({})).toBeNull();
-    const opened = await openDbFromEnv({ ...process.env, METISTRY_DB_NAME: process.env.METISTRY_TEST_DB_NAME ?? "metistry_test" });
+    const opened = await openDbFromEnv(testDbEnv());
     expect(opened).not.toBeNull();
+    await assertScratchDb(opened!, testDbEnv().METISTRY_DB_NAME);
     const { rows } = await opened!.query("SELECT count(*)::int AS n FROM schema_migrations");
     expect(rows[0].n).toBeGreaterThan(0);
     await opened!.end?.();

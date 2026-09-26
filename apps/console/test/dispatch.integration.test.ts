@@ -13,7 +13,7 @@ import { collectors } from "@metistry-apps/collectors";
 import { makeServer } from "../src/server.js";
 import { TargetRegistry } from "../src/dispatch.js";
 import * as store from "../src/auth-store.js";
-import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
+import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
 
 const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
 const policy = { idleDays: 30, maxDays: 365 };
@@ -51,12 +51,7 @@ describe.skipIf(!hasDb)("dispatch (integration)", () => {
   const fetchFn = githubFake(gh);
 
   beforeAll(async () => {
-    pool = new pg.Pool({
-      host: process.env.METISTRY_DB_HOST ?? "127.0.0.1",
-      user: process.env.METISTRY_DB_USER ?? "metistry",
-      database: process.env.METISTRY_TEST_DB_NAME ?? "metistry_test",
-      password: process.env.METISTRY_DB_PASSWORD,
-    });
+    pool = await testDb(pg.Pool);
     const targets = new TargetRegistry({ env: { METISTRY_GITHUB_WRITE_TOKEN: "write-t", METISTRY_GITHUB_DISPATCH_REPO: REPO }, fetchFn });
     await targets.loadDir(`${root}targets`);
     server = makeServer(pool, new QueryStore(pool), {

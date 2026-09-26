@@ -6,7 +6,7 @@ import pg from "pg";
 import { drainOne } from "../src/drain.js";
 import type { Engine } from "../src/engine.js";
 import type { TierMap } from "@foldedspacelabs/metistry-core";
-import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
+import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
 
 // The tier map the drain resolves against — (model, effort) pairs, as
 // seed/rules.yaml ships them.
@@ -35,12 +35,7 @@ describe.skipIf(!hasDb)("assistant drain", () => {
   });
 
   beforeAll(async () => {
-    pool = new pg.Pool({
-      host: process.env.METISTRY_DB_HOST ?? "127.0.0.1",
-      user: process.env.METISTRY_DB_USER ?? "metistry",
-      database: process.env.METISTRY_TEST_DB_NAME ?? "metistry_test", // scratch db (ops/scripts/test-db.sh)
-      password: process.env.METISTRY_DB_PASSWORD,
-    });
+    pool = await testDb(pg.Pool);
     // park other suites' leftovers so this suite drains only its own rows
     await pool.query(`UPDATE inbound_messages SET status = 'done' WHERE status = 'new'`);
   });

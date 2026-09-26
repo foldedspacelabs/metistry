@@ -8,7 +8,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import { TasksService, check, ensureSchema } from "../src/index.js";
-import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
+import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
 
 const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
 const P = "itest-tasks"; // project scope keeps this suite's rows apart from everything else in the scratch db
@@ -18,14 +18,7 @@ describe.skipIf(!hasDb)("tasks (real db)", () => {
   let pool: pg.Pool;
   let svc: TasksService;
   beforeAll(async () => {
-    pool = new pg.Pool({
-      host: process.env.METISTRY_DB_HOST ?? "127.0.0.1",
-      port: Number(process.env.METISTRY_DB_PORT ?? 5432),
-      user: process.env.METISTRY_DB_USER ?? "metistry",
-      database: process.env.METISTRY_TEST_DB_NAME ?? "metistry_test",
-      password: process.env.METISTRY_DB_PASSWORD,
-      max: 10, // the race test needs ≥5 simultaneous connections
-    });
+    pool = await testDb(pg.Pool, { max: 10 }); // the race test needs ≥5 simultaneous connections
     await pool.query(`DELETE FROM work WHERE project = $1`, [P]);
     await pool.query(`DELETE FROM runs WHERE kind = 'task_op' AND component LIKE 'itest-%'`);
     await pool.query(`DELETE FROM work WHERE project = $1`, [P2]);

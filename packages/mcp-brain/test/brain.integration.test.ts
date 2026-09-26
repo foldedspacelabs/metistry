@@ -12,7 +12,7 @@ import { TasksService } from "@foldedspacelabs/metistry-tasks";
 import { EmbedUnavailableError, mintToken } from "@foldedspacelabs/metistry-core";
 import { QueryStore } from "@foldedspacelabs/metistry-queries";
 import { createBrainServer, EAGER_TOOL_NAMES, sha256Text, TURN_ID_META_KEY, type AgentPrincipal, type VaultWriteRequest } from "../src/index.js";
-import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
+import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
 
 const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
 const PA = "itest-brain-a";
@@ -71,13 +71,7 @@ describe.skipIf(!hasDb)("mcp-brain (real db, real MCP client)", () => {
   }
 
   beforeAll(async () => {
-    pool = new pg.Pool({
-      host: process.env.METISTRY_DB_HOST ?? "127.0.0.1",
-      port: Number(process.env.METISTRY_DB_PORT ?? 5432),
-      user: process.env.METISTRY_DB_USER ?? "metistry",
-      database: process.env.METISTRY_TEST_DB_NAME ?? "metistry_test",
-      password: process.env.METISTRY_DB_PASSWORD,
-    });
+    pool = await testDb(pg.Pool);
     await pool.query(`DELETE FROM work WHERE project IN ($1, $2)`, [PA, PB]);
     await pool.query(`DELETE FROM proposals WHERE source_agent IN ($1, $2, $3)`, [ALICE, BOB, HUB]);
     await pool.query(`DELETE FROM runs WHERE component IN ($1, $2, $3)`, [ALICE, BOB, HUB]);

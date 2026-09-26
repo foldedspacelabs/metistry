@@ -17,7 +17,7 @@ import { createHash } from "node:crypto";
 import { makeServer } from "../src/server.js";
 import { applyImprovement, OVERLAY_PATH } from "../src/prompt-overlay.js";
 import * as store from "../src/auth-store.js";
-import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
+import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
 
 const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
 const policy = { idleDays: 30, maxDays: 365 };
@@ -121,13 +121,7 @@ describe.skipIf(!hasDb)("reply feedback + Needs You (integration)", () => {
     (await pool.query(`INSERT INTO outbound_messages (thread, text) VALUES ($1, $2) RETURNING id`, [thread, text])).rows[0].id as number;
 
   beforeAll(async () => {
-    pool = new pg.Pool({
-      host: process.env.METISTRY_DB_HOST ?? "127.0.0.1",
-      port: Number(process.env.METISTRY_DB_PORT ?? 5432),
-      user: process.env.METISTRY_DB_USER ?? "metistry",
-      database: process.env.METISTRY_TEST_DB_NAME ?? "metistry_test",
-      password: process.env.METISTRY_DB_PASSWORD,
-    });
+    pool = await testDb(pg.Pool);
     vault = fakeVault({ [OVERLAY_PATH]: "You are {{name}}.\n" });
     server = makeServer(pool, new QueryStore(pool), {
       origin: "http://127.0.0.1:0",

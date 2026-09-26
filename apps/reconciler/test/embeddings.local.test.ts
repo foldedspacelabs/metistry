@@ -20,7 +20,7 @@ import { Embeddings } from "../src/embeddings.js";
 import { Indexer } from "../src/indexer.js";
 import { searchVault } from "../src/search.js";
 import { tempRepo, type TempRepo } from "./helpers.js";
-import { loadTestEnv } from "@foldedspacelabs/metistry-core/test-env";
+import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
 
 loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
 
@@ -99,13 +99,7 @@ describe.skipIf(!hasDb || !embedderReady)("reconciler embeddings (real db, a rea
   };
 
   beforeAll(async () => {
-    pool = new pg.Pool({
-      host: process.env.METISTRY_DB_HOST ?? "127.0.0.1",
-      port: Number(process.env.METISTRY_DB_PORT ?? 5432),
-      user: process.env.METISTRY_DB_USER ?? "metistry",
-      database: process.env.METISTRY_TEST_DB_NAME ?? "metistry_test",
-      password: process.env.METISTRY_DB_PASSWORD,
-    });
+    pool = await testDb(pg.Pool);
     await clean();
     repo = await tempRepo(MARKER);
     for (const [path, body] of Object.entries(NOTES)) await writeFile(join(repo.root, path), `${body}\n`);

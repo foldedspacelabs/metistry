@@ -19,6 +19,9 @@ ticket, and the §2 sections your ticket names** — not the whole plan.
   test may inherit exactly two things from the environment — `METISTRY_DB_*` and
   `METISTRY_TEST_DB_NAME` — through `loadTestEnv` (`docs/ops/testing.md`). A
   temporary instance lives under `os.tmpdir()`.
+  A test opens Postgres **only** with `await testDb(pg.Pool)` from
+  `@foldedspacelabs/metistry-core/test-env` — never `new pg.Pool(…)`; CI's
+  `check-test-db.mjs` fails the PR otherwise.
 - **A scratch instance** for anything end to end: `metistry init <tmp dir>` with
   `--namespace`, never a real one.
 - **GitHub CLI** as `env -u GH_TOKEN gh …`.

@@ -236,7 +236,11 @@ import Testing
     let api = ConsoleAPI(transport: StubConsole(["GET /api/q/rooms": Fixtures.rooms]))
     let rooms = try! (await api.rooms()).get()
     let room = rooms.rows[0]
-    #expect(room.threadID == 41)
+    // The thread's id is TEXT on the wire (`cmt_…`), and stays text — it was
+    // read as a number once, and every room's id was 0.
+    #expect(room.threadID == "cmt_01M3FYT8PDPMAX22C9X769GV7Q")
+    #expect(room.id == room.threadID)
+    #expect(room.workID == 214)
     #expect(room.anchor == "work")
     #expect(room.messages == 7)
     #expect(room.agentTail == 3)
@@ -877,7 +881,7 @@ enum Fixtures {
 
     static let rooms = bytes("""
     {"rows":[
-      {"thread_id":41,"anchor":"work","project":"ops","title":"work #214 — renew the wildcard cert",
+      {"thread_id":"cmt_01M3FYT8PDPMAX22C9X769GV7Q","anchor":"work","project":"ops","title":"work #214 — renew the wildcard cert",
        "work_id":214,"artifact_id":null,"version_id":null,"path":null,"state":"open",
        "resolved_by":null,"resolved_at":null,"messages":7,
        "participants":[{"principal":"drey","kind":"agent"},{"principal":"user","kind":"user"}],

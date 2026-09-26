@@ -745,29 +745,40 @@ try {
 // the stored values (kind internal|external, tier none|index|areas), which do
 // not change.
 const ROLE_LABEL = { internal: "assistant", external: "external", crew: "helper" };
-// The action vocabulary, and the same resolution the server does
-// (packages/core/src/actions.ts). Duplicated here because the PWA is plain
-// modules with no bundler — the SERVER re-validates every change, so this copy
-// is a view, never a gate. The order is the enum's.
-const ACTION_KINDS = ["dispatch", "task_update", "comment", "capture"];
-const AUTONOMY_LEVELS = ["observe", "propose", "act_within_scope"];
-const LEVEL_CEILING = { observe: "deny", propose: "propose", act_within_scope: "allow" };
-const ACTION_DEFAULTS = {
-  observe: { dispatch: "deny", task_update: "deny", comment: "deny", capture: "deny" },
-  propose: { dispatch: "propose", task_update: "propose", comment: "propose", capture: "propose" },
-  act_within_scope: { dispatch: "propose", task_update: "allow", comment: "allow", capture: "allow" },
-};
-const MODE_RANK = { deny: 0, propose: 1, allow: 2 };
-const levelOf = (au) => (AUTONOMY_LEVELS.includes(au?.level) ? au.level : "observe");
-function effectiveActions(au) {
-  const level = levelOf(au);
-  const ceiling = LEVEL_CEILING[level];
-  const out = {};
-  for (const k of ACTION_KINDS) {
-    const asked = au?.actions?.[k] ?? ACTION_DEFAULTS[level][k];
-    out[k] = MODE_RANK[asked] <= MODE_RANK[ceiling] ? asked : ceiling;
-  }
-  return out;
+// **The effective action table is the SERVER's** (§2.17). Every agent row on
+// `GET /api/agents` carries `scope.autonomy` — the level, and `detailed`: each
+// kind's mode with WHY (set, defaulted, or clamped to the level's ceiling),
+// resolved once by core's `effectiveActionsDetailed`. This panel prints it and
+// computes nothing: it used to hold a copy of the defaults, the ceilings and
+// the clamp, which is a second implementation of a rule free to drift from
+// the one the tool enforces.
+//
+// What is left here is words. ACTION_MODE_LABEL is the CLI's MODE_LABEL
+// (packages/cli/src/agents.ts), and `actionEntryText` says a row the way
+// `metistry agents autonomy` does, so the phone and the terminal print the
+// same table — a test holds the two to it (apps/console/test/pwa-reads.test.ts).
+const ACTION_MODE_LABEL = { allow: "Allow", propose: "Ask First", deny: "Never" };
+const modeWord = (m) => ACTION_MODE_LABEL[m] ?? String(m ?? "");
+function actionEntryText(entry, level) {
+  const word = modeWord(entry.mode);
+  if (entry.source === "clamped") return `${word} (asked ${modeWord(entry.asked)} — ${level}'s ceiling is ${word})`;
+  if (entry.source === "defaulted") return `${word} (default for ${level})`;
+  return word;
+}
+// The table as rows, in the server's order (the enum's). `null` when the row
+// carries no table: said as unavailable, never filled in with a guess (P5).
+function actionTableRows(scope) {
+  const au = scope?.autonomy;
+  if (!au?.level || !au.detailed || typeof au.detailed !== "object") return null;
+  return Object.entries(au.detailed).map(([kind, entry]) => ({ kind, source: entry?.source, text: actionEntryText(entry ?? {}, au.level) }));
+}
+function actionTableHtml(scope) {
+  const rows = actionTableRows(scope);
+  if (!rows) return `<span class="muted">actions: unavailable</span>`;
+  return `<span class="action-table" role="list" aria-label="actions">
+    <span class="muted" role="listitem">level: ${esc(scope.autonomy.level)}</span>
+    ${rows.map((r) => `<span class="action-row ${esc(r.source ?? "")}" role="listitem"><span class="mono">${esc(r.kind)}</span> ${esc(r.text)}</span>`).join("")}
+  </span>`;
 }
 // **The scope vocabulary is the SERVER's** since P3 of
 // docs/research/2026-09-19-grants-and-access-simplified.md §3.4: every agent
@@ -811,12 +822,11 @@ async function loadAgents() {
         au.accept_from ? `accepts from ${au.accept_from.map(esc).join(", ") || "nobody"}` : "",
         au.max_open_bundles !== undefined ? `max ${Number(au.max_open_bundles) || 0} bundles` : "",
       ].filter(Boolean).join(" · ");
-      // The action table, resolved the same way the server resolves it
-      // (docs/ops/actions.md) — level as a ceiling, kinds below it. Shown for
-      // every row, including `observe`, because "this one can do nothing" is
-      // the fact worth being able to see at a glance.
-      const table = effectiveActions(au);
-      const actionLine = `level: ${esc(levelOf(au))} · ${ACTION_KINDS.map((k) => `${esc(k)} ${esc(table[k])}`).join(" · ")}`;
+      // The action table as the server resolved it (docs/ops/actions.md) —
+      // level as a ceiling, kinds below it. Shown for every row, including
+      // `observe`, because "this one can do nothing" is the fact worth being
+      // able to see at a glance.
+      const actionTable = actionTableHtml(a.scope);
       const asks = (asked.get(a.id) ?? [])
         .map((r) => `asked for ${esc(r.area)} — ${esc(String(r.reason ?? "").slice(0, 120))} (answer it in Needs You, request #${Number(r.proposal_id)})`)
         .join("<br>");
@@ -824,8 +834,8 @@ async function loadAgents() {
         ? '<span class="muted">revoked</span>'
         : `<span><button data-agent-grants="${esc(a.id)}" class="secondary">grants</button> <button data-agent-rotate="${esc(a.id)}" class="secondary">rotate</button> <button data-agent-revoke="${esc(a.id)}">revoke</button></span>`;
       return `<li class="${a.revoked ? "revoked" : ""}"><span><b>${esc(a.display_name)}</b> <span class="muted">${esc(a.id)}</span> <span class="chip">${esc(ROLE_LABEL[a.kind] ?? a.kind)}</span><br>
-        <span class="muted">access: ${scope}${projects} · ${seen}</span>${narrowing ? `<br><span class="muted">autonomy: ${narrowing}</span>` : ""}<br>
-        <span class="muted">actions: ${actionLine}</span>${from}<br>${asks ? `<span class="muted">${asks}</span><br>` : ""}
+        <span class="muted">access: ${scope}${projects} · ${seen}</span>${narrowing ? `<br><span class="muted">autonomy: ${narrowing}</span>` : ""}${from}
+        ${actionTable}${asks ? `<span class="muted">${asks}</span><br>` : ""}
         <span id="presence-${esc(a.id)}" class="presence"></span></span>${actions}</li>`;
     })
     .join("");
@@ -878,34 +888,32 @@ function openGrants(id) {
   $("agent-accept-from").value = (au.accept_from ?? []).join(", ");
   $("agent-max-bundles").value = au.max_open_bundles ?? "";
   // The action table, one select per kind, pre-set to what is STORED (not to
-  // the resolved value) so saving without touching it changes nothing. The
-  // level's ceiling is shown beside each as the effective answer.
-  $("agent-level").value = levelOf(au);
-  renderActionControls(au);
-  $("agent-level").onchange = () => renderActionControls(autonomyFromForm());
+  // the resolved value) so saving without touching it changes nothing.
+  $("agent-level").value = a.scope?.autonomy?.level ?? au.level ?? "observe";
+  renderActionControls(a);
   $("agent-grants-msg").textContent = "";
   $("agent-grants").hidden = false;
 }
 
-/** One select per action kind, plus what the level's ceiling makes of it. Rebuilt whenever the level changes, so the consequence is visible before Save. */
-function renderActionControls(au) {
-  const stored = au?.actions ?? {};
-  const table = effectiveActions(au);
-  $("agent-actions").innerHTML = ACTION_KINDS.map((k) => `<label>${esc(k)}
+/**
+ * One select per action kind, and beside each what the SERVER says that kind
+ * is now — the saved table, never a preview of this draft. What a draft
+ * resolves to is core's to compute; it shows in the list the moment Save
+ * lands. The kinds are the server's too; with no table from the server they
+ * fall back to the record's own entries, so a Save can never drop one.
+ */
+function renderActionControls(a) {
+  const stored = a.autonomy?.actions ?? {};
+  const rows = actionTableRows(a.scope);
+  const kinds = rows ? rows.map((r) => [r.kind, r.text]) : Object.keys(stored).map((k) => [k, "unavailable"]);
+  $("agent-actions").innerHTML = kinds.map(([k, saved]) => `<label>${esc(k)} <span class="muted">saved: ${esc(saved)}</span>
       <select data-action-kind="${esc(k)}">
-        <option value="">default for this level (${esc(table[k])})</option>
+        <option value="">default for the level</option>
         <option value="deny">deny — refuse it at the tool</option>
         <option value="propose">propose — ask me</option>
         <option value="allow">allow — run it (act within scope only)</option>
       </select></label>`).join("");
   for (const sel of document.querySelectorAll("[data-action-kind]")) sel.value = stored[sel.dataset.actionKind] ?? "";
-  for (const sel of document.querySelectorAll("[data-action-kind]")) sel.onchange = () => renderActionControlsKeepingValues();
-}
-
-// Re-render after a kind changes so every "default for this level (…)" label
-// stays honest, without losing what the user just picked.
-function renderActionControlsKeepingValues() {
-  renderActionControls(autonomyFromForm());
 }
 
 // Blank = the key is absent. The §4.21 keys can only narrow; `level` and
@@ -918,7 +926,7 @@ function autonomyFromForm() {
   if ($("agent-accept-from").value.trim()) out.accept_from = list("agent-accept-from");
   if ($("agent-max-bundles").value.trim()) out.max_open_bundles = Number($("agent-max-bundles").value);
   const level = $("agent-level").value;
-  if (AUTONOMY_LEVELS.includes(level)) out.level = level;
+  if (level) out.level = level; // the select's own options; the server validates it again
   const actions = {};
   for (const sel of document.querySelectorAll("[data-action-kind]")) if (sel.value) actions[sel.dataset.actionKind] = sel.value;
   if (Object.keys(actions).length) out.actions = actions;

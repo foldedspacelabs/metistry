@@ -221,7 +221,7 @@ button.secondary:hover { background: var(--mt-color-border); }
   color: var(--mt-color-failed);
 }
 [data-d="deny"]:hover, [data-agent-revoke]:hover, [data-revoke]:hover {
-  background: color-mix(in srgb, var(--mt-color-failed) 10%, transparent);
+  background: var(--mt-color-failed-quiet);
 }
 
 input[type="text"], input[type="number"], input[type="file"], textarea, select {
@@ -256,6 +256,18 @@ label { display: flex; flex-direction: column; gap: var(--mt-space-1);
 .failed { color: var(--mt-color-failed); font-weight: 500; }
 .absent { color: var(--mt-color-absent); }
 
+/* Agent prose is set in the serif (C32, C35): the assistant's reply in Chat
+   and any body an agent wrote. The stack is tokens.json's `type.$meta.serif`
+   character for character (a test holds it) — screen-first faces that stop
+   at Georgia, never `ui-serif`, which falls through to Times in a browser.
+   tokens.css does not emit it as a property yet, so it is the fallback of the
+   one it will be; no webfont is loaded (P7). Meta lines and code keep their
+   own faces. */
+#messages li.out, .agent-prose {
+  font-family: var(--mt-font-serif, Charter, Sitka, 'Sitka Text', Constantia, Georgia, serif);
+}
+#messages li.out .meta { font-family: var(--mt-font-sans); }
+
 /* ------------------------------------------------------------------ auth -- */
 #auth {
   display: flex;
@@ -286,20 +298,22 @@ label { display: flex; flex-direction: column; gap: var(--mt-space-1);
   white-space: nowrap;
   vertical-align: middle;
 }
-/* project mode (§3.12): the word carries the meaning; the tint only helps. */
-.chip.review { background: color-mix(in srgb, var(--mt-color-presence-blocked) 14%, transparent); color: var(--mt-color-presence-blocked); }
-.chip.autonomous { background: color-mix(in srgb, var(--mt-color-ok) 14%, transparent); color: var(--mt-color-ok); }
+/* project mode (§3.12): the word carries the meaning; the tint only helps.
+   Every tinted fill below is a declared `*-quiet` token, never a mix computed
+   here (C6): the build checks each ink against the fill that is painted. */
+.chip.review { background: var(--mt-color-presence-blocked-quiet); color: var(--mt-color-presence-blocked); }
+.chip.autonomous { background: var(--mt-color-ok-quiet); color: var(--mt-color-ok); }
 /* an agent-authored actor name is tinted as agent-sourced data (§3.2, P1) */
 .chip.feed-actor { background: var(--mt-color-agent-quiet); color: var(--mt-color-agent); font-family: var(--mt-font-mono); }
 
 /* presence (§3.3) — six states, exhaustive, each with its own word */
 .presence { display: inline-flex; align-items: center; gap: var(--mt-space-2); margin-top: var(--mt-space-1); flex-wrap: wrap; }
-.chip.state-working     { background: color-mix(in srgb, var(--mt-color-presence-working) 14%, transparent);     color: var(--mt-color-presence-working); }
-.chip.state-queued      { background: color-mix(in srgb, var(--mt-color-presence-queued) 14%, transparent);      color: var(--mt-color-presence-queued); }
-.chip.state-idle        { background: color-mix(in srgb, var(--mt-color-presence-idle) 14%, transparent);        color: var(--mt-color-presence-idle); }
-.chip.state-interrupted { background: color-mix(in srgb, var(--mt-color-presence-interrupted) 14%, transparent); color: var(--mt-color-presence-interrupted); }
-.chip.state-over-cap    { background: color-mix(in srgb, var(--mt-color-presence-over-cap) 14%, transparent);    color: var(--mt-color-presence-over-cap); }
-.chip.state-blocked     { background: color-mix(in srgb, var(--mt-color-presence-blocked) 14%, transparent);     color: var(--mt-color-presence-blocked); }
+.chip.state-working     { background: var(--mt-color-presence-working-quiet);     color: var(--mt-color-presence-working); }
+.chip.state-queued      { background: var(--mt-color-presence-queued-quiet);      color: var(--mt-color-presence-queued); }
+.chip.state-idle        { background: var(--mt-color-presence-idle-quiet);        color: var(--mt-color-presence-idle); }
+.chip.state-interrupted { background: var(--mt-color-presence-interrupted-quiet); color: var(--mt-color-presence-interrupted); }
+.chip.state-over-cap    { background: var(--mt-color-presence-over-cap-quiet);    color: var(--mt-color-presence-over-cap); }
+.chip.state-blocked     { background: var(--mt-color-presence-blocked-quiet);     color: var(--mt-color-presence-blocked); }
 
 /* ------------------------------------------------------- feed (home) ------ */
 #feed-filter { flex-direction: row; }

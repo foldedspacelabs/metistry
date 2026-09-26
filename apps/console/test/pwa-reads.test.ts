@@ -203,6 +203,34 @@ describe("the status list keeps the four states apart (C10)", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Tokens: quiet fills (C6) and the serif stack (C35)
+// ---------------------------------------------------------------------------
+
+describe("fills and faces are tokens", () => {
+  it("paints no fill of its own: every tint is a declared *-quiet token (C6)", () => {
+    expect(CSS).not.toContain("color-mix(");
+    const quiet = [...CSS.matchAll(/var\((--mt-color-[a-z-]+-quiet)\)/g)].map((m) => m[1]!);
+    expect(quiet.length).toBeGreaterThan(0);
+    for (const t of new Set(quiet)) expect(TOKENS_CSS, `${t} is not in tokens.css`).toContain(`${t}:`);
+  });
+
+  it("sets agent prose in tokens.json's serif stack, never ui-serif (C32, C35)", () => {
+    const stack = TOKENS.type.$meta.serif.split(" — ")[0]!.trim();
+    const m = /font-family: var\(--mt-font-serif, ([^)]*)\);/.exec(CSS);
+    expect(m?.[1]).toBe(stack);
+    expect(CSS).not.toMatch(/font-family:[^;]*ui-serif/);
+    expect(CSS).toMatch(/#messages li\.out, \.agent-prose \{/);
+  });
+
+  it("marks only a body an agent wrote as agent prose", () => {
+    const bodyClass = lifted<(c: unknown) => string>(["bodyClass"], "bodyClass");
+    expect(bodyClass({ author_kind: "agent" })).toBe("body agent-prose");
+    expect(bodyClass({ author_kind: "user" })).toBe("body");
+    expect(bodyClass(undefined)).toBe("body");
+  });
+});
+
 // A lift evaluates one declaration at a time, so it cannot see two top-level
 // declarations of one name — which is a SyntaxError that stops the whole PWA
 // from loading. Parse the real file, as the browser will.

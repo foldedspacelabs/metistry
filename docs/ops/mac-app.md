@@ -263,6 +263,58 @@ counts, never bodies — and cancelling the consuming task sends the session's
 `{id, cancel: true}`. Until the console serves the route, the stream finishes
 with a `404` and the app polls as it does today.
 
+### The store interface, and the fixtures every view is built against (F-7)
+
+`sources/kit/stores/` is the interface the screens are written against
+(design-build-plan §2.16): **one protocol per domain, one method per route** of
+the client API table (`packages/core/src/client-api.ts`) — `NeedsYouStore`,
+`TodayStore`, `ChatStore`, `ActivityStore`, `KnowledgeStore`, `AgentsStore`,
+`ScheduledStore`, `WorkStore`, `ArtifactsStore`, `UsageStore`, `SettingsStore`,
+`CaptureStore`, `EventsStore`, `VaultStore` — each requirement carrying a
+`/// route: METHOD /path` line naming its row. `ConsoleStores` implements all
+fourteen over any `ConsoleCallTransport` (the session transport in production)
+and the event stream over a `ConsoleEventTransport`, which
+`SessionConsoleCallTransport` already is. The rows with no method — the passkey
+ceremony, logout and push, all bound to a device session the Mac does not hold,
+and `/mcp` — are listed with their reasons in
+`apps/console/scripts/client-fixtures.mjs`. Two interfaces sit beside the
+stores: `ManagementRunner`, whose `ManagementCommand` can only hold one of
+§2.2's verbs (M1–M18 — the set is closed at the type), and `LiveCaptureClient`
+for the local live-capture bridge (T8).
+
+The routes `ConsoleAPI` already spoke keep their names and typed replies. A
+reply the contract spells out field by field is typed; every other reply is a
+**`ConsoleBody`** — a named type holding the console's JSON whole, which the
+ticket that renders it types in place, so no protocol signature moves when it
+does.
+
+**The fixtures** — `tests/kit/fixtures/<method>-<path>.json`, one per route
+(`GET /api/runs/:id` → `get-api-runs-id.json`; the named queries one per query,
+`get-api-q-board.json`) — come from two places, and each file says which:
+
+- `recorded`: every row the console serves, recorded from a **scratch console**
+  by `node apps/console/scripts/record-client-fixtures.mjs` — the real server
+  in-process, the scratch database (`testDb()`), a `metistry init` instance
+  under `os.tmpdir()`, every outbound call faked (`docs/ops/testing.md`).
+  `--check` re-records in memory and fails where a served shape moved;
+  `--only "<METHOD> <path>"` writes just those routes.
+- `contract`: a row frozen ahead of its ticket, written from the contract so
+  its view is built before the route lands (U9), naming the ticket that serves
+  it. That ticket re-records it, and the recorder **refuses a recording whose
+  shape differs from the contract fixture** unless run with `--accept` — which
+  is how "F-7's Today fixture matches" (T2-7) is checked by the tool.
+
+`tests/kit/fixture-console.swift`'s `FixtureConsole` is the fake transport:
+it routes a request to its fixture the way the console's table routes it and
+records what was sent. `store-fixtures-tests.swift` parses the protocols and
+holds them to the fixtures both ways, then drives every method with the
+arguments its fixture's request was made with — so a method must send exactly
+the path, query, body and `Idempotency-Key` the real console accepted, and
+decode exactly what it answered — and builds a view from them with no console
+running. `apps/console/test/client-fixtures.test.ts` holds the fixtures to the
+table: a row gained, a row that became served, a fixture left behind — each
+fails CI.
+
 ## What `ASAuthorization` actually says about a local origin
 
 Measured on 2026-09-10, because "passkeys don't work locally" is not an answer
@@ -680,6 +732,8 @@ apps/macos/
                        wizard, the menu bar, the Status panel, the log window.
                        No AppKit, no Process, no platform frameworks — an iOS
                        target shares it as is.
+  sources/kit/stores/  the store interface: one protocol per domain, one
+                       method per client-API route (F-7, "Data layer")
   sources/app/         the Metistry executable: @main and the four scenes
                        (window, Settings, log window, MenuBarExtra), Sparkle,
                        the Process-backed CommandRunner, and the platform
@@ -688,6 +742,8 @@ apps/macos/
                        ASAuthorization, a terminal opener, and the AppKit calls
                        (reveal in Finder, quit, Sparkle's own UI)
   tests/kit/           swift-testing unit tests over the kit
+  tests/kit/fixtures/  one recorded (or contract) JSON per client-API route —
+                       excluded from the target, read by #filePath
   resources/           Info.plist template + the entitlements file
 ```
 

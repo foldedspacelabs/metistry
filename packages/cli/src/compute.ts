@@ -27,7 +27,9 @@ import {
   DEFAULT_CACHE_READ_MULTIPLIER,
   DEFAULT_CACHE_WRITE_MULTIPLIER,
   DEFAULT_CACHING,
+  extensionsDirFor,
   instanceFile,
+  loadKind,
   PROVIDER_NAME_RE,
   SECRET_NAME_RE,
   loadCompute,
@@ -40,6 +42,8 @@ import {
   type Compute,
   type Effort,
   type Provider,
+  type ProviderManifest,
+  type Registry,
 } from "@foldedspacelabs/metistry-core";
 import { readStdin } from "./connect-repo.js";
 import { consoleCall, renderConsoleCallError } from "./console-client.js";
@@ -67,16 +71,22 @@ import { StepFailed, StepRunner } from "./steps.js";
 import { defaultUi, type Ui } from "./ui.js";
 
 /**
- * The provider blocks `seed/compute-templates/` ships. A name that is not one
- * of these is a typo, never a guess. **One cloud template only** (OPEN-7,
- * ruled 2026-09-17): every other OpenAI-compatible cloud — OpenCode Zen
- * included — is reached with `--base-url`, or by writing the block by hand.
+ * The provider templates (plan §2.7): the `provider` registry, built from
+ * manifests rather than a list in code — the product's
+ * `seed/compute-templates/<name>/manifest.yaml`, then this instance's own in
+ * `.metistry/extensions/` (an owner's template of the same name wins, D4). A
+ * name that is not one of them is a typo, never a guess. **One cloud template
+ * only** among the product's (OPEN-7, ruled 2026-09-17): every other
+ * OpenAI-compatible cloud — OpenCode Zen included — is reached with
+ * `--base-url`, by writing the block by hand, or as the owner's own template.
  */
-export const COMPUTE_TEMPLATES = ["openrouter", "lmstudio", "ollama", "llamaserver", "applefm"] as const;
-export type ComputeTemplate = (typeof COMPUTE_TEMPLATES)[number];
+export function computeTemplates(opts: Pick<ComputeOptions, "seedDir" | "instanceDir">): Promise<Registry<ProviderManifest>> {
+  return loadKind("provider", { seedDir: opts.seedDir, extensionsDir: extensionsDirFor(opts.instanceDir) });
+}
 
-export function parseTemplate(v: string | undefined): ComputeTemplate | undefined {
-  return (COMPUTE_TEMPLATES as readonly string[]).includes(v ?? "") ? (v as ComputeTemplate) : undefined;
+/** The template names, for a hint or a usage line: `a|b|c`, or a pointer when there are none. */
+export function templateChoices(names: readonly string[]): string {
+  return names.length > 0 ? names.join("|") : "<template>";
 }
 
 /** `--action allow|stop|critical_only` — strict, because a typo must not silently weaken a budget. */
@@ -317,7 +327,8 @@ function table(head: string[], body: string[][]): string[] {
 
 const money = (n: number | undefined): string => (n === undefined ? "-" : `$${n}`);
 
-export function renderComputeReport(r: ComputeReport): string {
+/** `templates`: the provider registry's names, for the no-providers hint (`computeTemplates`). */
+export function renderComputeReport(r: ComputeReport, templates: readonly string[] = []): string {
   const lines: string[] = [];
   lines.push(r.file ? `compute: ${r.file} (overlay: ${r.files.join(" → ")}, last existing wins)` : `compute: none of ${r.files.join(", ")} exists yet`);
   lines.push(`this instance's file: ${r.instance_file}`);
@@ -335,7 +346,7 @@ export function renderComputeReport(r: ComputeReport): string {
       ]),
     ),
   );
-  if (r.providers.length === 0) lines.push(`(no providers — \`metistry compute providers add --from ${COMPUTE_TEMPLATES.join("|")}\`)`);
+  if (r.providers.length === 0) lines.push(`(no providers — \`metistry compute providers add --from ${templateChoices(templates)}\`)`);
   lines.push("");
   if (r.assignments.length === 0) {
     lines.push("assignments: none — rules.yaml's `tiers:` is still the live map (`metistry compute assign default <provider/model>` moves it here).");
@@ -354,7 +365,8 @@ export function renderComputeReport(r: ComputeReport): string {
 // ---- providers add / remove --------------------------------------------------
 
 export interface ProvidersAddOptions extends ComputeOptions {
-  template: ComputeTemplate;
+  /** a provider template's name — the provider registry's (`computeTemplates`) */
+  template: string;
   /** the name this provider gets in the file; default = the template's own */
   name?: string | undefined;
   baseUrl?: string | undefined;
@@ -375,18 +387,30 @@ export interface ProvidersAddResult {
   delivery: ProtectedWrite;
 }
 
-/** One template file: a map of exactly one provider name → block. */
-export async function readTemplate(seedDir: string, template: ComputeTemplate): Promise<{ name: string; block: Record<string, unknown> }> {
-  const path = join(seedDir, "compute-templates", `${template}.yaml`);
-  if (!existsSync(path)) throw new StepFailed(`no template at ${path} — set METISTRY_PRODUCT_DIR to a Metistry checkout (or pass --product-dir)`);
-  const parsed = (parseYaml(await readFile(path, "utf8")) ?? {}) as Record<string, unknown>;
-  const [name, block] = Object.entries(parsed)[0] ?? [];
-  if (!name || typeof block !== "object" || block === null) throw new StepFailed(`${path} is not a provider template (one top-level <name>: block expected)`);
-  return { name, block: block as Record<string, unknown> };
+/**
+ * One template, through the provider registry: its name and its `provider:`
+ * block exactly as the manifest writes it (the raw YAML, not the parsed form,
+ * so nothing a default fills in is written into the owner's file). An
+ * unknown name is refused with the names that exist — and, when a unit of
+ * that name was skipped, why.
+ */
+export async function readTemplate(opts: Pick<ComputeOptions, "seedDir" | "instanceDir">, template: string): Promise<{ name: string; block: Record<string, unknown>; origin: "product" | "extension"; path: string }> {
+  const reg = await computeTemplates(opts);
+  const unit = reg.get(template);
+  if (!unit) {
+    const skipped = reg.skipped.filter((s) => s.name === template).map((s) => `${s.path} was skipped: ${s.reason}`);
+    const known = reg.names();
+    throw new StepFailed(
+      `no provider template named ${JSON.stringify(template)}${skipped.length > 0 ? ` (${skipped.join("; ")})` : ""} — ${known.length > 0 ? `one of ${known.join(", ")}` : `none found under ${join(opts.seedDir, "compute-templates")}; set METISTRY_PRODUCT_DIR to a Metistry checkout (or pass --product-dir)`}`,
+    );
+  }
+  const raw = parseYaml(await readFile(unit.path, "utf8")) as { provider?: unknown };
+  if (typeof raw?.provider !== "object" || raw.provider === null) throw new StepFailed(`${unit.path} has no provider: block`);
+  return { name: unit.name, block: raw.provider as Record<string, unknown>, origin: unit.origin, path: unit.path };
 }
 
 export async function providersAdd(opts: ProvidersAddOptions): Promise<ProvidersAddResult> {
-  const { name: templateName, block } = await readTemplate(opts.seedDir, opts.template);
+  const { name: templateName, block } = await readTemplate(opts, opts.template);
   const name = opts.name ?? templateName;
   if (!PROVIDER_NAME_RE.test(name)) throw new StepFailed(`--name ${JSON.stringify(name)} is not a provider name (lowercase, digits, - and _, starting with a letter)`);
   if (opts.baseUrl !== undefined) block.base_url = opts.baseUrl;
@@ -678,10 +702,11 @@ export async function modelsList(opts: ComputeOptions & { provider?: string | un
   return { providers, detected };
 }
 
-export function renderModelsList(r: ModelsListResult): string {
+/** `templates`: the provider registry's names, for the no-providers hint (`computeTemplates`). */
+export function renderModelsList(r: ModelsListResult, templates: readonly string[] = []): string {
   const lines: string[] = [];
   if (r.providers.length === 0) {
-    lines.push(`no providers declared — \`metistry compute providers add --from ${COMPUTE_TEMPLATES.join("|")}\``);
+    lines.push(`no providers declared — \`metistry compute providers add --from ${templateChoices(templates)}\``);
   }
   for (const p of r.providers) {
     lines.push(`${p.name}: ${p.detail}`);

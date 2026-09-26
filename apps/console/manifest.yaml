@@ -1,3 +1,4 @@
+schema: 1
 name: console
 type: service
 description: Web door API + PWA + router module + routine runner (Phase 2+)

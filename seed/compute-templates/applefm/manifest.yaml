@@ -25,7 +25,12 @@
 #     --base-url http://host.docker.internal:7810/v1
 # A namespaced instance (`metistry up --namespace`) moves the port; use
 # --base-url and edit serve.port to match.
-applefm:
+schema: 1
+name: applefm
+type: provider
+description: Apple Foundation Models through the apple-fm bridge — on this Mac, no cost
+# the block `metistry compute providers add --from applefm` writes into compute.yaml
+provider:
   kind: openai-compatible
   base_url: http://127.0.0.1:7810/v1
   locality: on_machine

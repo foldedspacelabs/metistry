@@ -13,7 +13,12 @@
 #
 # model_path is filled in for you by:
 #   metistry compute models install llamaserver/<owner>/<repo>/<file>.gguf
-llamaserver:
+schema: 1
+name: llamaserver
+type: provider
+description: llama-server, the local model server Metistry brings and runs itself
+# the block `metistry compute providers add --from llamaserver` writes into compute.yaml
+provider:
   kind: openai-compatible
   base_url: http://127.0.0.1:7813/v1
   locality: on_machine

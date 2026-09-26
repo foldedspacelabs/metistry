@@ -13,7 +13,6 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { parseCompute } from "@foldedspacelabs/metistry-core";
 import {
-  COMPUTE_TEMPLATES,
   STABLE_PREFIX_HIT_RATIO,
   apiRoot,
   assign,
@@ -26,7 +25,7 @@ import {
   parseBudgetAction,
   parseBudgetTarget,
   parseEffort,
-  parseTemplate,
+  computeTemplates,
   providerTest,
   providersAdd,
   providersRemove,
@@ -151,7 +150,7 @@ describe("argument parsing: strict, never a guess", () => {
     expect(() => parseAssignmentTarget(undefined)).toThrow(/default.*crew:/s);
   });
 
-  it("budget targets, actions, efforts and templates", () => {
+  it("budget targets, actions and efforts (templates are the provider registry's — see providers add)", () => {
     expect(parseBudgetTarget("instance")).toEqual({ kind: "instance" });
     expect(parseBudgetTarget("provider:openrouter")).toEqual({ kind: "provider", name: "openrouter" });
     expect(() => parseBudgetTarget("openrouter")).toThrow(/instance.*provider:/s);
@@ -159,8 +158,6 @@ describe("argument parsing: strict, never a guess", () => {
     expect(parseBudgetAction("warn")).toBeUndefined(); // the old spelling is not silently accepted
     expect(parseEffort(undefined)).toBeUndefined();
     expect(() => parseEffort("extreme")).toThrow(/low, medium or high/);
-    expect(parseTemplate("openrouter")).toBe("openrouter");
-    expect(parseTemplate("anthropic")).toBeUndefined();
   });
 
   it("apiRoot tolerates a trailing slash so `${root}/models` is always right", () => {
@@ -222,10 +219,45 @@ describe("providers add", () => {
     expect(text).toContain("base_url: http://10.0.0.4:11434/v1");
   });
 
-  it("every shipped template is one named provider block", async () => {
-    for (const name of COMPUTE_TEMPLATES) {
-      expect((await readTemplate(SEED, name)).name).toBe(name);
+  it("the templates are the provider registry: every seed/compute-templates/ unit, none skipped, one named provider block each", async () => {
+    const dir = await instance();
+    const reg = await computeTemplates({ seedDir: SEED, instanceDir: dir });
+    expect(reg.skipped).toEqual([]);
+    expect(reg.names()).toEqual(["applefm", "llamaserver", "lmstudio", "ollama", "openrouter"]);
+    for (const name of reg.names()) {
+      const t = await readTemplate({ seedDir: SEED, instanceDir: dir }, name);
+      expect(t).toMatchObject({ name, origin: "product" });
+      expect(t.block.kind).toBe("openai-compatible");
     }
+    // one cloud template only among the product's (OPEN-7)
+    expect(reg.units().filter((u) => u.manifest.provider.locality === "off_machine").map((u) => u.name)).toEqual(["openrouter"]);
+  });
+
+  it("an unknown template is refused with the names that exist — a typo, never a guess", async () => {
+    const dir = await instance();
+    const { o } = harness(dir, { platform: "linux" });
+    await expect(providersAdd({ ...o, template: "olama", skipTest: true })).rejects.toThrow(/no provider template named "olama" — one of applefm, llamaserver, lmstudio, ollama, openrouter/);
+    expect(existsSync(file(dir))).toBe(false);
+  });
+
+  // An owner's own template is an extension (plan §2.7, M15): the same
+  // registry, so `--from` reaches it and a name collision overlays (D4).
+  it("an owner's template in .metistry/extensions/ is a template: new names add, a product name is overlaid", async () => {
+    const dir = await instance();
+    const ext = join(dir, ".metistry", "extensions");
+    await mkdir(join(ext, "vllm-box"), { recursive: true });
+    await writeFile(join(ext, "vllm-box", "manifest.yaml"), "schema: 1\nname: vllm-box\ntype: provider\nprovider:\n  kind: openai-compatible\n  base_url: http://10.0.0.9:8000/v1\n  locality: on_machine\n");
+    await mkdir(join(ext, "ollama"), { recursive: true });
+    await writeFile(join(ext, "ollama", "manifest.yaml"), "schema: 1\nname: ollama\ntype: provider\nprovider:\n  kind: openai-compatible\n  base_url: http://10.0.0.4:11434/v1\n  locality: on_machine\n");
+    const reg = await computeTemplates({ seedDir: SEED, instanceDir: dir });
+    expect(reg.names()).toContain("vllm-box");
+    expect(reg.get("ollama")).toMatchObject({ origin: "extension", replaced: { origin: "product" } });
+    const { o } = harness(dir, { platform: "linux" });
+    await providersAdd({ ...o, template: "vllm-box", skipTest: true });
+    await providersAdd({ ...o, template: "ollama", skipTest: true });
+    const text = await readFile(file(dir), "utf8");
+    expect(text).toContain("base_url: http://10.0.0.9:8000/v1");
+    expect(text).toContain("base_url: http://10.0.0.4:11434/v1");
   });
 
   // The Apple FM provider IS one of Metistry's own bridges, so its
@@ -577,8 +609,10 @@ describe("show", () => {
     expect(renderComputeReport(empty)).toContain("rules.yaml's `tiers:` is still the live map");
     // the no-providers hint names every template — a stale, partial list here
     // is exactly the drift the 2026-09-17 second-instance guide caught in
-    // main.ts's --help (docs/product/record/2026-09-17-second-instance-guide.md)
-    for (const t of COMPUTE_TEMPLATES) expect(renderComputeReport(empty), t).toContain(t);
+    // main.ts's --help (docs/product/record/2026-09-17-second-instance-guide.md);
+    // the names now come from the provider registry, never a list in code
+    const names = (await computeTemplates(o)).names();
+    for (const t of names) expect(renderComputeReport(empty, names), t).toContain(t);
 
     await writeFile(file(await withMetistryDir(dir)), HANDWRITTEN_CLOUD);
     await assign({ ...o, target: parseAssignmentTarget("default"), model: "cloud/example-model" });
@@ -678,10 +712,13 @@ describe("metistry compute (the command)", () => {
     expect(existsSync(file(dir))).toBe(false);
   });
 
-  it("the --help text for `providers add --from` names every template — it must derive from COMPUTE_TEMPLATES, not a copy of it", async () => {
-    const r = await run(["help"]);
-    expect(r.code).toBe(0);
-    for (const t of COMPUTE_TEMPLATES) expect(r.out, t).toContain(t);
+  it("`providers add` with no --from names every template the registry holds — derived from it, not a copy of it", async () => {
+    const dir = await instance();
+    const r = await run(["compute", "providers", "add", "--instance", dir, "--product-dir", REPO]);
+    expect(r.code).toBe(2);
+    const names = (await computeTemplates({ seedDir: SEED, instanceDir: dir })).names();
+    expect(names.length).toBeGreaterThan(0);
+    for (const t of names) expect(r.err, t).toContain(t);
   });
 });
 

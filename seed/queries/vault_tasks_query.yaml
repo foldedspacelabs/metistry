@@ -65,12 +65,12 @@
 #     children and `source: meeting` finds every `meeting:<path>`. Matched
 #     with `left(…)`, never `LIKE`, so a `_` in a slug is a `_` and not a
 #     wildcard.
-#   * **The seven flags of §6.2 are seven BOOLEANS**, one per flag, not a
+#   * **The flags are BOOLEANS** — §6.2's seven and K6's `someday` — one per flag, not a
 #     comma-separated set. A set param is shorter to declare and worse to
 #     use: it is a second little language inside a bind param, nothing can
 #     typecheck a member of it, and the parser already has a field per flag.
-#     An eighth flag is a product decision either way (§6.2's vocabulary is
-#     closed), so the set bought nothing.
+#     A new flag is a product decision either way (§6.2's vocabulary is
+#     closed; `someday` was ruled, K6), so the set bought nothing.
 #   * `match_any` is how the clauses join — false is `and`, true is `or`. It
 #     is the honest limit of a fixed param shape: `due <= today or overdue`
 #     compiles, and so does every all-`and` predicate, but a predicate that
@@ -193,7 +193,7 @@ params:
   area_prefix: { type: text, default: "" } # the value, or the value followed by `/`
   source_prefix: { type: text, default: "" } # the value, or the value followed by `:`
   status: { type: text, default: "" } # SCOPE: open | done | dropped | waiting | any; blank = open
-  # the seven flags of §6.2, one boolean each
+  # the seven flags of §6.2, and `someday` (K6, T2-5), one boolean each
   overdue: { type: boolean, default: false }
   unscheduled: { type: boolean, default: false }
   waiting: { type: boolean, default: false }
@@ -201,6 +201,7 @@ params:
   carried: { type: boolean, default: false }
   blocking_agent: { type: boolean, default: false }
   assigned_to_me: { type: boolean, default: false }
+  someday: { type: boolean, default: false } # the `someday` token: deferred by the owner to no day
   # order: three slots, then the total-order tie-break. Blank = the vault's own order.
   order_1: { type: text, default: "" }
   order_1_desc: { type: boolean, default: false }
@@ -266,8 +267,8 @@ sql: |
             ELSE NOT t.checked AND NOT t.dropped
           END
   ),
-  -- What the row IS, before what the caller asked for: the seven flags of
-  -- §6.2 computed ONCE (the boolean param below judges the same column the
+  -- What the row IS, before what the caller asked for: every flag (§6.2's
+  -- seven and `someday`) computed ONCE (the boolean param below judges the same column the
   -- `row_flags` output is built from, so the chip and the filter can never
   -- disagree), the work on either side of it (§3), and the size of its
   -- duplicate group (§2.3).
@@ -290,6 +291,7 @@ sql: |
                AND NOT s.checked AND NOT s.dropped, false)                    AS is_carried,
       (b.id IS NOT NULL)                                                      AS is_blocking_agent,
       (s.assigned IS NULL OR (f.me IS NOT NULL AND s.assigned = f.me))        AS is_assigned_to_me,
+      s.someday                                                               AS is_someday,
       b.id                                                                    AS blocks_work_id,
       b.title                                                                 AS blocks_work_title,
       b.status                                                                AS blocks_work_status,
@@ -328,7 +330,8 @@ sql: |
         CASE WHEN m.is_recurring      THEN 'recurring' END,
         CASE WHEN m.is_carried        THEN 'carried' END,
         CASE WHEN m.is_blocking_agent THEN 'blocking_agent' END,
-        CASE WHEN m.is_assigned_to_me THEN 'assigned_to_me' END
+        CASE WHEN m.is_assigned_to_me THEN 'assigned_to_me' END,
+        CASE WHEN m.is_someday        THEN 'someday' END
       ], NULL) AS row_flags,
       jsonb_build_object(
         'priority', lpad(coalesce(m.priority, 3)::text, 2, '0'),
@@ -399,7 +402,8 @@ sql: |
       CASE WHEN (:recurring)::boolean      THEN g.is_recurring END,
       CASE WHEN (:carried)::boolean        THEN g.is_carried END,
       CASE WHEN (:blocking_agent)::boolean THEN g.is_blocking_agent END,
-      CASE WHEN (:assigned_to_me)::boolean THEN g.is_assigned_to_me END
+      CASE WHEN (:assigned_to_me)::boolean THEN g.is_assigned_to_me END,
+      CASE WHEN (:someday)::boolean        THEN g.is_someday END
     ], NULL) AS clauses
     FROM flagged g, f
   ),
@@ -416,7 +420,7 @@ sql: |
   )
   SELECT
     k.path, k.task_key, k.anchor, k.line_no, k.text, k.text_norm,
-    k.checked, k.dropped, k.waiting,
+    k.checked, k.dropped, k.waiting, k.someday,
     k.due::text           AS due,
     k.scheduled_for::text AS scheduled_for,
     k.start_on::text      AS start_on,

@@ -8,6 +8,7 @@
 
 import { realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { createInterface } from "node:readline";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { KEEP_AWAKE_VALUES, parseKeepAwake, type DeploymentShape, type KeepAwake } from "@foldedspacelabs/metistry-core";
@@ -43,7 +44,7 @@ import { loadInstallEnv, productVersion, resolveProductDir, resolveSeedDir, type
 import { realExec, type Exec } from "./exec.js";
 import { AUTH_MODES, connectRepo, readStdin, type AuthMode } from "./connect-repo.js";
 import { connect, connectList, CONNECT_TOOLS, parseTool, renderConnect, renderConnectList } from "./connect.js";
-import { consoleCall, renderConsoleCallError, renderWhoami, whoami } from "./console-client.js";
+import { consoleCall, renderConsoleCallError, renderWhoami, runConsoleSession, whoami } from "./console-client.js";
 import { agentAutonomy, agentsList, parseAutonomyFlags, renderAgents, renderAutonomy } from "./agents.js";
 import { importSessions } from "./import-sessions.js";
 import { askKeepAwake, init, type Ask } from "./init.js";
@@ -90,7 +91,7 @@ export interface ParsedArgs {
  * `--version <x.y.z>` silently installed the latest release instead
  * (#198, "not fixed here" #2).
  */
-export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "dry-run", "allow-dirty", "no-launchd", "no-compose", "no-color", "skip-build", "skip-migrate", "rollback", "allow-legacy", "yes", "follow", "namespace", "rotate", "list", "complete", "skip-test", "remote", "json-lines"]);
+export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "dry-run", "allow-dirty", "no-launchd", "no-compose", "no-color", "skip-build", "skip-migrate", "rollback", "allow-legacy", "yes", "follow", "namespace", "rotate", "list", "complete", "skip-test", "remote", "json-lines", "stdio"]);
 
 /** `--channel git|release` — anything else is a typo, not a guess (the lock parser is strict for the same reason). */
 export function parseChannel(v: string | undefined): LockSource | undefined {
@@ -316,6 +317,17 @@ const USAGE = `metistry — Metistry command line
       on the wire if empty or over 200 characters. A replay (the console's
       idempotency-replayed header) folds "replayed": true into the --json
       body; in plain mode it is a one-line note on stderr instead.
+
+  metistry console session --stdio [--instance <dir>] [--env-file <path>]
+      console call, held open: one long-lived process for a client that makes
+      many requests (the Mac app). The token is resolved once, at start, and
+      never printed; a non-loopback console is refused before a line is read.
+      Each stdin line is {id, method, path, body?, idempotency_key?, stream?,
+      last_event_id?} and gets exactly one terminal stdout line, matched by id
+      and in any order: {id, status, body, replayed?} when the console
+      answered, {id, error: {code, message}} when it did not. stream: true
+      (GET /api/events only) writes {id, event} frames until {id, cancel: true}
+      or the console closes it, then {id, ended}. EOF on stdin ends the session.
 
   metistry identity [--json] [--instance <dir>]
       The instance's identity.yaml (name, mention, voice, icon, instance_id) —
@@ -685,7 +697,7 @@ export const HELP_GROUPS: Array<{ title: string; verbs: Array<[string, string]> 
     title: "reach in",
     verbs: [
       ["connect <tool> | --list", "give Cursor, OpenCode, Devin or Claude Code its own way in"],
-      ["console whoami | call", "one authenticated request against the console, as you"],
+      ["console whoami | call | session", "authenticated requests against the console, as you"],
       ["runs export", "the audit ledger as NDJSON, oldest first, resumable"],
       ["import-sessions", "summarise this machine's Claude Code sessions into /capture"],
     ],
@@ -732,6 +744,8 @@ export interface MainIo {
   fetchFn?: typeof fetch;
   /** test seam: `console call --body -` reads this instead of the real stdin */
   readStdin?: () => Promise<string>;
+  /** test seam: `console session --stdio` reads its request lines from this instead of the real stdin */
+  sessionInput?: AsyncIterable<string>;
   /**
    * test seam: the one interactive question this CLI asks (`init`'s
    * keep-awake choice). Absent and no tty = the question is not asked and
@@ -1153,8 +1167,9 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
       const printConsoleUsage = () => {
         err("usage: metistry console whoami [--json] [--instance <dir>] [--env-file <path>]");
         err("       metistry console call <METHOD> <path> [--body @file|-] [--idempotency-key <key>] [--json] [--instance <dir>] [--env-file <path>]");
+        err("       metistry console session --stdio [--instance <dir>] [--env-file <path>]");
       };
-      if (positional[0] !== "whoami" && positional[0] !== "call") {
+      if (positional[0] !== "whoami" && positional[0] !== "call" && positional[0] !== "session") {
         printConsoleUsage();
         return 2;
       }
@@ -1165,6 +1180,28 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
         ...(io.platform ? { platform: io.platform } : {}),
         ...(io.fetchFn ? { fetchFn: io.fetchFn } : {}),
       };
+      if (positional[0] === "session") {
+        // --stdio is the only transport today, and it is spelled out so a
+        // second one (a socket) is a new flag rather than a changed default.
+        if (flags.stdio !== true || positional.length > 1) {
+          printConsoleUsage();
+          return 2;
+        }
+        try {
+          await runConsoleSession({
+            ...consoleCommon,
+            input: io.sessionInput ?? createInterface({ input: process.stdin, crlfDelay: Infinity }),
+            // A line is written whole and awaited: stdout to a pipe is
+            // asynchronous on macOS, and the last answer must not be lost to
+            // the exit that follows it.
+            write: io.out ? (line) => io.out?.(line) : (line) => new Promise<void>((resolve) => process.stdout.write(`${line}\n`, () => resolve())),
+          });
+          return 0;
+        } catch (e) {
+          err(`metistry console session: ${e instanceof Error ? e.message : String(e)}`);
+          return 1;
+        }
+      }
       if (positional[0] === "call") {
         const method = positional[1];
         const path = positional[2];

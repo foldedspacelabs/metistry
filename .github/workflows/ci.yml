@@ -31,6 +31,9 @@ jobs:
       # annotated `// limit: fixed — <reason>`.
       - run: node ops/scripts/audit-limits.mjs
       - run: node ops/scripts/fold-product-record.mjs --check
+      # A migration number is reserved to one file in db/migrations/README.md
+      # before anyone writes it, so parallel tickets cannot collide on one (F-6).
+      - run: node ops/scripts/check-migration-numbers.mjs
       - name: ops/scripts unit tests
         run: node --test 'ops/scripts/test/*.test.mjs'
       # tokens.css, preview.html and the Mac app's design-tokens.swift are all

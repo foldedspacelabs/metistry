@@ -141,7 +141,10 @@ The codes and their statuses are `packages/core/src/errors.ts`: `invalid_request
 400, `unauthenticated` 401, `forbidden` 403, `local_only` 403 (a `local` route,
 asked with a passkey session — "The `local` gate" above), `not_found` 404, `conflict` 409,
 `rate_limited` 429, `internal` 500, `not_available` 503 (the capability is
-absent in this deployment — degrades: absent — never a permission).
+absent in this deployment — degrades: absent — never a permission), and
+`section_missing` 409 — the vault bridge's answer when the daily note's
+`metistry:day` markers are not exactly one clean pair (docs/ops/reconciler.md,
+"The section operation"); no console route answers it yet.
 
 #### A refusal names the field that would permit it — except on the door
 

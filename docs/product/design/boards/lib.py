@@ -1180,7 +1180,7 @@ def menurow(T,label,shorthand,glyph,sel=False,last=False):
             f'<span style="font-family: {MONO}; font-size: 11.5px; color: {T["ts"]};">{shorthand}</span></div>')
 
 def picker(T,w=290):
-    rows=[("Due","due …",I["cal"],True),("Scheduled","do …",I["clock"],False),
+    rows=[("Due","due …",I["cal"],True),("Planned","do …",I["clock"],False),
           ("Priority","p1–p4",I["warn"],False),("Assign","@…",I["person"],False),
           ("Size","size s/m/l",I["board"],False),("Project","+…",I["note"],False),
           ("Repeat","every …",I["undo"],False),("Link","work 418",I["agents"],False)]

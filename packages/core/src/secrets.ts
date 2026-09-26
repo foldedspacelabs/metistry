@@ -41,7 +41,7 @@
 // `memoryKeychain()` and never the real login Keychain).
 
 import { z } from "zod";
-import { parse as parseYaml } from "yaml";
+import { parseDocument } from "yaml";
 import { TOOL_MODES, type ToolMode } from "./connections.js";
 import { parseEgressEntry } from "./egress.js";
 import { AGENT_NAME_RE, INSTANCE_ID_RE } from "./instances.js";
@@ -171,9 +171,17 @@ export const secretsFileSchema = z
 export type SecretPolicy = z.infer<typeof policySchema>;
 export type SecretsFile = z.infer<typeof secretsFileSchema>;
 
-/** Parse `.metistry/secrets.yaml`. Empty text is the empty file; anything the schema refuses throws, naming the field. */
+/**
+ * Parse `.metistry/secrets.yaml`. Empty text is the empty file; anything the
+ * schema refuses throws, naming the field. A YAML error is reported by its
+ * code and line only — never the parser's quoted snippet of the source, which
+ * would echo a value pasted in the wrong place into whatever shows the error.
+ */
 export function parseSecretsFile(text: string): SecretsFile {
-  const raw = text.trim() === "" ? {} : (parseYaml(text) as unknown);
+  const doc = parseDocument(text);
+  const bad = doc.errors[0];
+  if (bad) throw new Error(`secrets.yaml is not valid YAML — ${bad.code}${bad.linePos?.[0] ? ` at line ${bad.linePos[0].line}` : ""}`);
+  const raw = text.trim() === "" ? {} : (doc.toJS() as unknown);
   const r = secretsFileSchema.safeParse(raw ?? {});
   if (!r.success) {
     const issues = r.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`);

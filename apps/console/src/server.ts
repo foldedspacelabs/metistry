@@ -46,6 +46,7 @@ import { crewDispatcher, type CrewRegistry } from "./crews.js";
 import { runAction, type ActionServices } from "./actions.js";
 import { computeRoutes, isComputeRoute, type ComputeAdmin } from "./compute-routes.js";
 import { isKnowledgeRoute, knowledgeRoutes, type KnowledgeSearcher } from "./knowledge-routes.js";
+import { isVaultTaskRoute, ReplayCache, vaultTaskRoutes } from "./vault-task-routes.js";
 import { agentList, commandList } from "./commands.js";
 import { createRequire } from "node:module";
 
@@ -357,6 +358,8 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
   const tasks = new TasksService(db);
   // artifacts (§4.21): one service, adapted twice — the routes below for the user's session, the mcp-brain tools for agents
   const artifacts = cfg.vault ? new ArtifactsService(db, cfg.vault, { origin: cfg.origin, tasks }) : undefined;
+  /** `Idempotency-Key` replays for the vault-task doors — per server, in memory (vault-task-routes.ts says why that is enough). */
+  const vaultTaskReplays = new ReplayCache();
   /** The services one action may reach. Read per call: `cfg.targets` and the vault bridge are hot-reloaded, and an action must follow the file rather than the process's startup. */
   const actionServices = (): ActionServices => ({ db, tasks, inbox, ...(cfg.targets ? { targets: cfg.targets } : {}), ...(artifacts ? { artifacts } : {}) });
 
@@ -862,7 +865,9 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         isComputeRoute(url.pathname) ||
         isKnowledgeRoute(url.pathname) ||
         isTaskOpRoute(key) ||
-        isArtifactRoute(url.pathname)
+        isArtifactRoute(url.pathname) ||
+        // the Tick door writes the owner's own note as `user`: the owner's hand, no one else's
+        isVaultTaskRoute(key)
       ) {
         return sendRefusal(res, management);
       }
@@ -998,6 +1003,12 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     // A thin adapter over TasksService and nothing else: every refusal comes
     // out of a WHERE clause in packages/tasks, never from a rule written here.
     if (isTaskOpRoute(key)) return taskRoutes(req, res, key, tasks, audit);
+
+    // ----- the vault's tasks: the Tick door (design-build-plan §2.11, T2-4; owner only) -----
+    // Exactly `[x]` and `done <date>` on one line of the owner's note, or the
+    // reverse, written as `user` with the note's hash — never a patch, never
+    // an action a proposal can reach (vault-task-routes.ts).
+    if (isVaultTaskRoute(key)) return vaultTaskRoutes(req, res, key, { queries, vault: cfg.vault, audit, replays: vaultTaskReplays });
 
     // ----- artifacts + review dispatch (§4.21; owner session only) -----
     if (isArtifactRoute(url.pathname)) return artifactRoutes(req, res, url, artifacts);

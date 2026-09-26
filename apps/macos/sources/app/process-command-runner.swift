@@ -155,3 +155,136 @@ private final class StreamCollector: @unchecked Sendable {
         return full[stream] ?? ""
     }
 }
+
+// MARK: - A long-lived child: `metistry console session --stdio` (F-12)
+
+extension ProcessCommandRunner: SessionSpawner {
+    /// Start a child that stays up, with the same environment and PATH a
+    /// one-shot gets. Unlike `run`, stdin stays open — it is the request
+    /// channel — and stdout is handed over line by line as it arrives.
+    func spawn(executable: URL, arguments: [String], environment: [String: String], currentDirectory: URL?) throws -> any SessionProcess {
+        guard FileManager.default.isExecutableFile(atPath: executable.path) else {
+            throw CommandRunnerError.notExecutable(executable)
+        }
+        let process = Process()
+        process.executableURL = executable
+        process.arguments = arguments
+        if let currentDirectory { process.currentDirectoryURL = currentDirectory }
+        process.environment = childEnvironment(executable: executable, overrides: environment)
+        let child = ProcessSession(process: process)
+        do {
+            try process.run()
+        } catch {
+            child.detach()
+            throw CommandRunnerError.launchFailed(executable, underlying: error.localizedDescription)
+        }
+        return child
+    }
+}
+
+/// `Process` as a `SessionProcess`. Every mutable field is behind a lock:
+/// the pipes' handlers and the termination handler fire on arbitrary queues.
+private final class ProcessSession: SessionProcess, @unchecked Sendable {
+    let lines: AsyncStream<String>
+    private let process: Process
+    private let stdin = Pipe()
+    private let stdout = Pipe()
+    private let stderr = Pipe()
+    private let continuation: AsyncStream<String>.Continuation
+    private let lock = NSLock()
+    private var partial = Data()
+    private var errText = ""
+    private var ended: CommandResult?
+    private var waiters: [CheckedContinuation<CommandResult, Never>] = []
+
+    init(process: Process) {
+        self.process = process
+        (lines, continuation) = AsyncStream<String>.makeStream()
+        process.standardInput = stdin
+        process.standardOutput = stdout
+        process.standardError = stderr
+        // A write to a child that has died must be an error to report, not a
+        // SIGPIPE that takes the app down with it.
+        _ = fcntl(stdin.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
+        stdout.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            if data.isEmpty {
+                handle.readabilityHandler = nil
+                self?.finishLines()
+            } else {
+                self?.consume(data)
+            }
+        }
+        stderr.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            if data.isEmpty { handle.readabilityHandler = nil; return }
+            self?.lock.withLock { self?.errText += String(decoding: data, as: UTF8.self) }
+        }
+        process.terminationHandler = { [weak self] process in
+            self?.exited(process.terminationStatus)
+        }
+    }
+
+    func send(_ line: String) throws {
+        try stdin.fileHandleForWriting.write(contentsOf: Data((line + "\n").utf8))
+    }
+
+    func terminate() {
+        if process.isRunning { process.terminate() }
+    }
+
+    func termination() async -> CommandResult {
+        await withCheckedContinuation { waiter in
+            let done: CommandResult? = lock.withLock {
+                if let ended { return ended }
+                waiters.append(waiter)
+                return nil
+            }
+            if let done { waiter.resume(returning: done) }
+        }
+    }
+
+    /// The process never started: nothing will ever arrive.
+    func detach() {
+        stdout.fileHandleForReading.readabilityHandler = nil
+        stderr.fileHandleForReading.readabilityHandler = nil
+        continuation.finish()
+        exited(-1)
+    }
+
+    private func consume(_ data: Data) {
+        var emit: [String] = []
+        lock.withLock {
+            partial.append(data)
+            while let newline = partial.firstIndex(of: 0x0A) {
+                emit.append(String(decoding: partial[partial.startIndex..<newline], as: UTF8.self))
+                partial.removeSubrange(partial.startIndex...newline)
+            }
+        }
+        for line in emit { continuation.yield(line) }
+    }
+
+    private func finishLines() {
+        let rest: String? = lock.withLock {
+            defer { partial.removeAll() }
+            return partial.isEmpty ? nil : String(decoding: partial, as: UTF8.self)
+        }
+        if let rest { continuation.yield(rest) }
+        continuation.finish()
+    }
+
+    private func exited(_ status: Int32) {
+        // stderr may still hold bytes its handler has not been called for.
+        stderr.fileHandleForReading.readabilityHandler = nil
+        let tail = (try? stderr.fileHandleForReading.readToEnd()).flatMap { $0 }.map { String(decoding: $0, as: UTF8.self) } ?? ""
+        let waiting: [CheckedContinuation<CommandResult, Never>] = lock.withLock {
+            if ended != nil { return [] }
+            errText += tail
+            ended = CommandResult(exitCode: status, stdout: "", stderr: errText)
+            defer { waiters.removeAll() }
+            return waiters
+        }
+        guard let result = lock.withLock({ ended }) else { return }
+        for waiter in waiting { waiter.resume(returning: result) }
+    }
+}

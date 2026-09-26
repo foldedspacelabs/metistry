@@ -7,9 +7,11 @@
 // entirely, which a token-printing verb would not." That verb shipped, and
 // docs/ops/cli.md says what to do with it — "the app and
 // docs/ops/second-instance.md use it rather than a second HTTP client". So the
-// authenticated surface is one CLI invocation per request:
+// authenticated surface is the CLI — held open as one long-lived child since
+// F-12, with the one-shot verb as the fallback for an install that predates it:
 //
-//     metistry console call <METHOD> <path> [--body -] --json
+//     metistry console session --stdio              (SessionConsoleCallTransport)
+//     metistry console call <METHOD> <path> [--body -] --json   (CLIConsoleCallTransport)
 //
 // The CLI resolves the local owner token (environment, then this instance's
 // login-Keychain account, then the user's — `packages/cli/src/console-client.ts`),
@@ -20,8 +22,9 @@
 // scan — one file uses URLSession, no file sets a credential header, no file
 // names a keychain API, no file opens a file — still holds with this layer in.
 //
-// A request body goes in on STDIN (`--body -`), never argv: the same rule
-// `metistry compute providers add` follows, for the same reason.
+// A request body goes in on STDIN (`--body -`, or inside the session's request
+// line), never argv: the same rule `metistry compute providers add` follows,
+// for the same reason.
 //
 // WHAT THE SEAM IS FOR. `ConsoleCallTransport` is a protocol so the store can
 // be driven against recorded fixtures with nothing spawned and no network
@@ -129,7 +132,9 @@ extension ConsoleCallTransport {
     }
 }
 
-/// `metistry console call` — the production transport, and the only one.
+/// `metistry console call` — one process per request. The fallback
+/// `SessionConsoleCallTransport` uses for an install whose CLI predates
+/// `console session`, and still the simplest transport for a one-off.
 public struct CLIConsoleCallTransport: ConsoleCallTransport {
     /// Named once so the screens that print "here is what was run" and the code
     /// that runs it cannot drift, exactly as `ConsoleClient.whoamiVerb` is.
@@ -173,6 +178,332 @@ public struct CLIConsoleCallTransport: ConsoleCallTransport {
     }
 }
 
+// MARK: - The session transport: the same door, held open (F-12)
+
+/// A long-lived child as MetistryKit sees it: lines out, lines in, and how it
+/// ended. The kit is free of `Process` (Package.swift) — the app target's
+/// `ProcessCommandRunner` is the one implementation, and a test is another.
+public protocol SessionProcess: Sendable {
+    /// stdout, one line per element, in order, finishing when stdout closes —
+    /// which is when the child exits.
+    var lines: AsyncStream<String> { get }
+    /// One line to stdin; the newline is appended. Throws once the pipe is gone.
+    func send(_ line: String) throws
+    /// How it ended — the exit code and what it said on stderr (stdout is the
+    /// `lines` above, already consumed). Awaited after `lines` finishes.
+    func termination() async -> CommandResult
+    func terminate()
+}
+
+/// Starts a `SessionProcess`. `ProcessCommandRunner` conforms in the app target.
+public protocol SessionSpawner: Sendable {
+    func spawn(executable: URL, arguments: [String], environment: [String: String], currentDirectory: URL?) throws -> any SessionProcess
+}
+
+/// One frame of `GET /api/events` (design-build-plan §2.20; `packages/core/src/events.ts`):
+/// what changed, as ids and counts — never a body. The client refetches the
+/// thing itself through the route that already decides who may read it.
+public struct ConsoleLiveEvent: Sendable, Equatable {
+    /// The SSE `id:` — opaque and increasing; what a resubscribe hands back as `lastEventID`.
+    public let id: String?
+    /// `work.changed`, `needs_you.changed`, … — passed through as sent, so an
+    /// additive type on a newer console reaches a caller that can ignore it.
+    public let type: String
+    public let data: JSONValue
+
+    public init(id: String?, type: String, data: JSONValue) {
+        self.id = id
+        self.type = type
+        self.data = data
+    }
+}
+
+/// `metistry console session --stdio` — `console call` as ONE long-lived
+/// child instead of a process per request (~141 ms each on the scratch
+/// instance, measured for F-12; ~1.5 ms through a session).
+///
+/// The contract is the CLI's (`packages/cli/src/console-client.ts`,
+/// docs/ops/cli.md): a line of JSON per request on stdin, exactly one
+/// terminal line per request on stdout, **matched by id** — never by order.
+/// The token is resolved once, by the child, and never reaches this process:
+/// the lines carry a method, a path and a body, and nothing here sets a
+/// header or opens a keychain (the source scan in console-sign-in-tests.swift
+/// still holds).
+///
+/// **A crashed child fails what is in flight — it never hangs it.** When stdout
+/// closes, every pending call gets the child's own reason (its last stderr
+/// line, classified the way `fromConsoleCall` classifies a one-shot's) and
+/// every open event stream finishes with it. The next call starts a new child:
+/// that is the restart, and it is lazy on purpose — a child that cannot start
+/// (no token, a non-loopback console) is not respawned in a loop nobody asked
+/// for. A call that gets no answer at all within `callTimeout` fails too.
+///
+/// **An install whose CLI predates the verb** answers the first call through
+/// `fallback` — `CLIConsoleCallTransport`, one process per request — and every
+/// call after it, so an older install is slower rather than broken.
+public actor SessionConsoleCallTransport: ConsoleCallTransport {
+    /// Named once, like `CLIConsoleCallTransport.verb`.
+    public static let verb = ["console", "session", "--stdio"]
+
+    private let start: @Sendable () throws -> any SessionProcess
+    private let fallback: (any ConsoleCallTransport)?
+    private let callTimeout: Duration
+
+    private var child: (any SessionProcess)?
+    private var generation = 0
+    private var nextID = 0
+    private var pending: [String: CheckedContinuation<Result<Data, ConsoleError>, Never>] = [:]
+    private var streams: [String: AsyncThrowingStream<ConsoleLiveEvent, any Error>.Continuation] = [:]
+    /// Set once the install's CLI turned out not to have the verb.
+    private var predatesSession = false
+
+    /// The production transport: the install's own CLI, spawned through the app's `Process` runner.
+    public init(cli: MetistryCLI, spawner: any SessionSpawner, callTimeout: Duration = .seconds(45)) {
+        self.init(fallback: CLIConsoleCallTransport(cli: cli), callTimeout: callTimeout) {
+            try spawner.spawn(
+                executable: cli.runtime.executable,
+                arguments: cli.arguments(for: Self.verb),
+                environment: cli.baseEnvironment,
+                currentDirectory: cli.runtime.productDir
+            )
+        }
+    }
+
+    /// The seam: anything that produces a `SessionProcess` — a test's scripted child.
+    public init(
+        fallback: (any ConsoleCallTransport)? = nil,
+        callTimeout: Duration = .seconds(45),
+        start: @escaping @Sendable () throws -> any SessionProcess
+    ) {
+        self.start = start
+        self.fallback = fallback
+        self.callTimeout = callTimeout
+    }
+
+    public func call(_ method: String, _ path: String, body: Data?, idempotencyKey: String?) async -> Result<Data, ConsoleError> {
+        if predatesSession, let fallback {
+            return await fallback.call(method, path, body: body, idempotencyKey: idempotencyKey)
+        }
+        var request: [String: Any] = ["method": method, "path": path]
+        if let body {
+            // The line is JSON, so the body rides as a JSON value inside it.
+            guard let value = try? JSONSerialization.jsonObject(with: body, options: [.fragmentsAllowed]) else {
+                return .failure(.undecodable("the request body is not JSON"))
+            }
+            request["body"] = value
+        }
+        if let idempotencyKey { request["idempotency_key"] = idempotencyKey }
+        let result = await send(request)
+        if case .failure(.cliUnavailable) = result, let fallback {
+            predatesSession = true
+            return await fallback.call(method, path, body: body, idempotencyKey: idempotencyKey)
+        }
+        return result
+    }
+
+    /// `GET /api/events` as a stream of frames — one subscription per app
+    /// (§2.20). Cancelling the consuming task sends `{id, cancel: true}`; a
+    /// console that closes the stream finishes it; a console that does not
+    /// serve the route (a 404 before T2-18 lands) or a child that dies
+    /// finishes it with the error, and the caller falls back to polling.
+    public func events(lastEventID: String? = nil) -> AsyncThrowingStream<ConsoleLiveEvent, any Error> {
+        let (stream, continuation) = AsyncThrowingStream<ConsoleLiveEvent, any Error>.makeStream()
+        let process: any SessionProcess
+        switch ensureChild() {
+        case .failure(let error):
+            continuation.finish(throwing: error)
+            return stream
+        case .success(let p):
+            process = p
+        }
+        let id = mintID("e")
+        var request: [String: Any] = ["id": id, "method": "GET", "path": "/api/events", "stream": true]
+        if let lastEventID { request["last_event_id"] = lastEventID }
+        streams[id] = continuation
+        continuation.onTermination = { [weak self] reason in
+            guard case .cancelled = reason else { return }
+            Task { await self?.cancelStream(id) }
+        }
+        do {
+            try process.send(Self.encode(request))
+        } catch {
+            streams[id] = nil
+            continuation.finish(throwing: ConsoleError.transport("could not write to `metistry console session`: \(error.localizedDescription)"))
+        }
+        return stream
+    }
+
+    /// Ends the child. The next call starts a new one.
+    public func shutdown() {
+        child?.terminate()
+    }
+
+    // MARK: the child
+
+    private func ensureChild() -> Result<any SessionProcess, ConsoleError> {
+        if let child { return .success(child) }
+        let process: any SessionProcess
+        do {
+            process = try start()
+        } catch {
+            return .failure(.transport("could not run `metistry console session`: \(error.localizedDescription)"))
+        }
+        generation += 1
+        let current = generation
+        child = process
+        Task { [weak self] in
+            for await line in process.lines {
+                await self?.receive(line)
+            }
+            let ended = await process.termination()
+            await self?.childEnded(current, ended)
+        }
+        return .success(process)
+    }
+
+    private func mintID(_ prefix: String) -> String {
+        nextID += 1
+        return "\(prefix)\(nextID)"
+    }
+
+    private static func encode(_ request: [String: Any]) throws -> String {
+        let data = try JSONSerialization.data(withJSONObject: request, options: [.fragmentsAllowed])
+        guard let line = String(data: data, encoding: .utf8) else { throw ConsoleError.undecodable("the request is not UTF-8") }
+        return line
+    }
+
+    private func send(_ request: [String: Any]) async -> Result<Data, ConsoleError> {
+        let process: any SessionProcess
+        switch ensureChild() {
+        case .failure(let error): return .failure(error)
+        case .success(let p): process = p
+        }
+        let id = mintID("r")
+        var line = request
+        line["id"] = id
+        let text: String
+        do {
+            text = try Self.encode(line)
+        } catch {
+            return .failure(.undecodable("could not encode the request: \(error.localizedDescription)"))
+        }
+        let timeout = callTimeout
+        return await withCheckedContinuation { (continuation: CheckedContinuation<Result<Data, ConsoleError>, Never>) in
+            pending[id] = continuation
+            do {
+                try process.send(text)
+            } catch {
+                pending[id] = nil
+                continuation.resume(returning: .failure(.transport("could not write to `metistry console session`: \(error.localizedDescription)")))
+                return
+            }
+            Task { [weak self] in
+                try? await Task.sleep(for: timeout)
+                await self?.timeOut(id, after: timeout)
+            }
+        }
+    }
+
+    private func timeOut(_ id: String, after timeout: Duration) {
+        guard let continuation = pending.removeValue(forKey: id) else { return }
+        continuation.resume(returning: .failure(.transport("`metistry console session` gave no answer in \(timeout) — the request may or may not have reached the console")))
+    }
+
+    private func cancelStream(_ id: String) {
+        guard streams.removeValue(forKey: id) != nil, let child else { return }
+        try? child.send((try? Self.encode(["id": id, "cancel": true])) ?? "")
+    }
+
+    /// One stdout line. Its `id` is the only thing that says what it answers.
+    private func receive(_ line: String) {
+        guard let data = line.data(using: .utf8),
+              let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let id = object["id"] as? String
+        else { return } // a line with no id of ours answers nothing we asked
+        if let event = object["event"] as? [String: Any] {
+            let payload = event["data"].flatMap { try? JSONSerialization.data(withJSONObject: $0, options: [.fragmentsAllowed]) }
+            streams[id]?.yield(ConsoleLiveEvent(
+                id: event["id"] as? String,
+                type: event["type"] as? String ?? "message",
+                data: payload.flatMap { try? JSONValue.parse($0) } ?? .null
+            ))
+            return
+        }
+        let outcome = Self.outcome(of: object)
+        if let continuation = pending.removeValue(forKey: id) {
+            continuation.resume(returning: outcome)
+        } else if let stream = streams.removeValue(forKey: id) {
+            switch outcome {
+            case .success: stream.finish() // `ended`: cancelled, or the console closed it
+            case .failure(let error): stream.finish(throwing: error)
+            }
+        }
+    }
+
+    /// A terminal line, as the `Result` `ConsoleCallTransport` promises —
+    /// the same bytes-and-errors contract `CLIConsoleCallTransport` keeps.
+    static func outcome(of object: [String: Any]) -> Result<Data, ConsoleError> {
+        if let error = object["error"] as? [String: Any] {
+            let message = error["message"] as? String ?? "no message"
+            if error["code"] as? String == "unreachable" { return .failure(.transport(message)) }
+            return .failure(.undecodable("`metistry console session` refused the request: \(message)"))
+        }
+        if object["ended"] != nil { return .success(Data()) }
+        guard let status = object["status"] as? Int else {
+            return .failure(.undecodable("`metistry console session` printed a line with no status"))
+        }
+        var body: Any = object["body"] ?? NSNull()
+        // `console call --json`'s fold, kept: a replay is the ORIGINAL
+        // response, and a decoder that reads `replayed` finds it in the body.
+        if object["replayed"] as? Bool == true, var dict = body as? [String: Any] {
+            dict["replayed"] = true
+            body = dict
+        }
+        let data = (try? JSONSerialization.data(withJSONObject: body, options: [.fragmentsAllowed])) ?? Data()
+        if (200..<300).contains(status) { return .success(data) }
+        return .failure(.http(status: status, envelope: (try? JSONValue.parse(data)).flatMap(ConsoleErrorEnvelope.init(json:))))
+    }
+
+    private func childEnded(_ ended: Int, _ result: CommandResult) {
+        guard ended == generation else { return }
+        child = nil
+        let error = ConsoleError.fromSessionExit(result)
+        let calls = pending
+        pending = [:]
+        for continuation in calls.values { continuation.resume(returning: .failure(error)) }
+        let open = streams
+        streams = [:]
+        for stream in open.values { stream.finish(throwing: error) }
+    }
+}
+
+extension ConsoleError {
+    /// Why a session child stopped, from its exit code and stderr — the same
+    /// reading `fromConsoleCall` gives a one-shot, plus the one thing only a
+    /// session can be: a CLI that predates the verb. Such a CLI answers
+    /// `console session` with `console`'s usage (exit 2), which names no
+    /// `session`; a CLI with no `console` at all says "unknown command".
+    static func fromSessionExit(_ result: CommandResult) -> ConsoleError {
+        if result.exitCode == 2
+            && (result.stderr.contains("unknown command")
+                || (result.stderr.contains("usage: metistry console") && !result.stderr.contains("console session")))
+        {
+            return .cliUnavailable(CLIDegradation.message(verb: "console session"))
+        }
+        let text = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+        let line = text.split(separator: "\n").last.map(String.init) ?? text
+        let detail = line.replacingOccurrences(of: "metistry console session: ", with: "")
+        if detail.contains("is not set (") || detail.contains("is not loopback") {
+            return .notConfigured(detail)
+        }
+        return .transport(
+            detail.isEmpty
+                ? "`metistry console session` exited \(result.exitCode) and said nothing"
+                : "`metistry console session` exited \(result.exitCode): \(detail)"
+        )
+    }
+}
+
 // MARK: - The client
 
 /// The typed client. One method per route in `docs/ops/console-api.md`, each
@@ -187,6 +518,12 @@ public struct ConsoleAPI: Sendable {
 
     public init(cli: MetistryCLI) {
         self.init(transport: CLIConsoleCallTransport(cli: cli))
+    }
+
+    /// Every request down one long-lived `metistry console session --stdio`
+    /// child — the transport a screen that refreshes should use.
+    public init(cli: MetistryCLI, spawner: any SessionSpawner) {
+        self.init(transport: SessionConsoleCallTransport(cli: cli, spawner: spawner))
     }
 
     // MARK: identity

@@ -65,7 +65,8 @@ Nothing about your installation is registered with us.
 
 ### What the software sends, and where
 
-Only where you've set it up to, directly from your Mac:
+In these cases and no others, directly from your Mac — all but the update
+check happen only because you set them up:
 
 | When | What is sent | To |
 | --- | --- | --- |
@@ -153,7 +154,7 @@ does, this policy will be updated first, and the helper will:
 - see your IP address, which service and when, and — in memory, during an
   exchange — the tokens themselves, which it encrypts to your Mac and holds for
   at most five minutes until your Mac collects them;
-- store and log none of that;
+- keep nothing once your Mac has collected it, and log none of it;
 - be optional: you can always use your own sign-in client instead.
 
 > Source: plan §2.6, "The token broker, auth.metistry.app — designed, not
@@ -166,8 +167,8 @@ there is nothing for us to look up, correct or delete. Your data is on your
 Mac: deleting your installation's folder removes your vault and, on the
 standard Mac install, its database; `metistry secrets purge --instance
 <folder>` removes its Keychain items; and your backup repository is yours to
-delete wherever you host it. For
-services you connect, their own policies and controls apply.
+delete wherever you host it. For services you connect, their own policies and
+controls apply.
 
 If you are in the EU or UK: the only personal data we process is the website
 host's request logs, on the basis of our legitimate interest in running a

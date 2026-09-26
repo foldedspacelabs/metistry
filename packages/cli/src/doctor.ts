@@ -56,6 +56,7 @@ import { engineStatus, loadDeployment } from "./deployment.js";
 import { localServerRows } from "./local-models.js";
 import { realExec, type Exec } from "./exec.js";
 import { labelFor, loadPlistTemplates, logPathFor, parseRegistrar, registrarPhrase, SUPERVISED_SERVICES, type RegistrarFinding } from "./launchd.js";
+import { actualName } from "./migrate-inbox.js";
 import { readSupervisorConfig, supervisorConfigPath, controlRequest, SUPERVISOR_SERVICE } from "./supervisor.js";
 import { SANDBOX_EXEC, UNCONFINED_PROFILE_REL } from "./sandbox.js";
 import { applyPorts, loadNamespace, type Namespace } from "./namespace.js";
@@ -373,8 +374,13 @@ export async function inboxRow(instanceDir: string): Promise<DoctorRow> {
   return {
     kind: "instance",
     ...(await runCheck("inbox", `${instanceDir}/inbox/ absent, and .gitignore does not list it — captures live at ${INSTANCE_LAYOUT.inboxDir}/`, async () => {
+      // Exact-case only: on case-insensitive APFS, `existsSync(join(instanceDir, "inbox"))`
+      // also answers true for the vault's TitleCase `Inbox/`, so every fresh macOS
+      // instance would read as the pre-#156 layout. `actualName` reads the directory
+      // and compares entries with `===`, which reports what is actually on disk.
       const legacyDir = join(instanceDir, "inbox");
-      const entries = existsSync(legacyDir) ? (await readdir(legacyDir)).filter((e) => e !== ".DS_Store") : [];
+      const isLegacy = (await actualName(instanceDir, "inbox")) === "inbox";
+      const entries = isLegacy ? (await readdir(legacyDir)).filter((e) => e !== ".DS_Store") : [];
       const gitignorePath = join(instanceDir, ".gitignore");
       const gitignored = existsSync(gitignorePath) && (await readFile(gitignorePath, "utf8")).split("\n").some((l) => LEGACY_INBOX_GITIGNORE_LINE.test(l.trim()));
       if (entries.length === 0 && !gitignored) return;

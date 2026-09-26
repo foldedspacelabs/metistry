@@ -25,6 +25,7 @@
 // `METISTRY_*` but the scratch database's (docs/ops/testing.md), the inbox is
 // a temp directory, and every probe body is one the route refuses before it
 // writes anything.
+import { rmSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -84,6 +85,7 @@ describe.skipIf(!hasDb)("the client API table against the console that serves it
   const localOwnerToken = mintToken();
   const agentId = `itest-capi-${mintToken(6).toLowerCase().replaceAll(/[^a-z0-9]/g, "").slice(0, 6) || "x"}`;
   const passkeyIds: string[] = [];
+  const inboxDirs: string[] = [];
   /** probe id → whether the server answered "no such route" */
   const unrouted = new Map<string, boolean>();
   let probes = 0;
@@ -104,9 +106,11 @@ describe.skipIf(!hasDb)("the client API table against the console that serves it
     // blanket answer for the whole family: a vault for the artifacts module
     // (without one every /api/artifacts path is the same 503) and a push
     // config (without one every /api/push path is the same 200).
+    const inboxDir = await mkdtemp(join(tmpdir(), "metistry-client-api-"));
+    inboxDirs.push(inboxDir);
     server = makeServer(pool, queries, {
       origin: "http://127.0.0.1:0",
-      inboxDir: await mkdtemp(join(tmpdir(), "metistry-client-api-")),
+      inboxDir,
       policy,
       secureCookies: false,
       localOwner: { token: localOwnerToken, trusted: [] },
@@ -134,6 +138,7 @@ describe.skipIf(!hasDb)("the client API table against the console that serves it
     await pool.query(`DELETE FROM passkeys WHERE id = ANY($1)`, [passkeyIds]).catch(() => undefined);
     await new Promise<void>((r) => server.close(() => r()));
     await pool.end();
+    for (const dir of inboxDirs) rmSync(dir, { recursive: true, force: true });
   });
 
   async function headersFor(cred: ClientPrincipal, fresh: boolean): Promise<Record<string, string>> {
@@ -289,9 +294,10 @@ describe.skipIf(!hasDb)("the client API table against the console that serves it
     // table was read at dispatch, made `GET /api/push/anything` a 200. The
     // check in server.ts is what stops a spelling the table never had from
     // reaching a handler at all.
+    const bareInboxDir = await mkdtemp(join(tmpdir(), "metistry-client-api-bare-"));
     const bare = makeServer(pool, new QueryStore(pool), {
       origin: "http://127.0.0.1:0",
-      inboxDir: await mkdtemp(join(tmpdir(), "metistry-client-api-bare-")),
+      inboxDir: bareInboxDir,
       policy,
       secureCookies: false,
       localOwner: { token: localOwnerToken, trusted: [] },
@@ -313,6 +319,7 @@ describe.skipIf(!hasDb)("the client API table against the console that serves it
       expect(seen.get("/api/push/anything")).toBe(true);
     } finally {
       await new Promise<void>((r) => bare.close(() => r()));
+      rmSync(bareInboxDir, { recursive: true, force: true });
     }
   });
 

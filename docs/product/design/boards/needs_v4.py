@@ -29,8 +29,8 @@ RT=[("question","choices","Send Answers","Revise","Decline"),
     ("review","before and after &middot; preview","Approve &middot; Keep Mine","Revise &middot; Take the Other","Decline"),
     ("note &middot; improvement","preview &middot; before and after","Approve","Revise","Decline"),
     ("report","excerpt","its one act &mdash; Try Again, Reconnect","&mdash;","Dismiss"),
-    ("invitation <i>(a source)</i>","preview","Accept","Maybe","Decline"),
-    ("task <i>(a source)</i>","excerpt","Add to Today","&mdash;","&mdash; (Delegate)"),
+    ("invitation <i>(a sync)</i>","preview","Accept","Maybe","Decline"),
+    ("task <i>(a sync)</i>","excerpt","Add to Today","&mdash;","&mdash; (Delegate)"),
     ("message <i>(Metis, from a source)</i>","excerpt","Draft Reply","&mdash;","Not Mine")]
 def tbl(head,rows):
     th="".join(f'<th style="text-align: left; padding: 0 14px 7px 0; font-size: 10.5px; letter-spacing: 0.07em; color: {L["tt"]};">{h}</th>' for h in head)

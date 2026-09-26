@@ -280,7 +280,7 @@ to Default**, which restores the schedule, task and grants and asks nothing.
 One row per collector: status glyph, name and collector id, what it reads and
 what it may raise, cadence, last success. A failed source shows the reason in
 failed ink (*token expired*) and is also a Needs You request (C95, C96). A source
-not connected says so and points to Settings › Resources.
+not connected says so and points to Settings › Connections.
 
 A source's detail: **Check Now**, **Pause**; *Checked* as a segmented cadence
 (5 min · 15 min · Hour · 6 hours) with the last result; **What reaches Needs

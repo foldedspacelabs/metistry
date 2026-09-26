@@ -73,7 +73,7 @@ ROUT=pan(L,"ROUTINES — THE DAY'S PLAN AND THE STANDUP DRAFT",
        "rather than being folded into one of the seven. What it produces is <b>prose an agent wrote</b>, so the "
        "row carries the spark and expands into the one prose component — not a diff, and never something that "
        "looks like a control (P1).")
-  + nt(L,"<b>Two rows, two actors.</b> A <b>built-in</b> routine is the system on a schedule, so its actor is "
+  + nt(L,"<b>Two rows, two actors.</b> A <b>default</b> routine is the system on a schedule, so its actor is "
         "neutral. A routine that assigns work to one of your agents has <b>that agent</b> as its actor, with the "
         "routine named as the reason it ran — because a routine is an assignment, not a species of actor "
         "(ruled 2026-09-21). The first draft of this board made both neutral, which read as though nothing the "

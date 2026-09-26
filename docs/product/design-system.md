@@ -1256,7 +1256,7 @@ inferred").
 
 - **macOS** — a `.toolbar` `ToolbarItem` with `.badge(count)`, opening a
   `.popover` anchored to the bell; over 6 cards it becomes a resizable
-  panel. `Esc` closes, `⌘9` toggles, arrow keys move between cards, and
+  panel. `Esc` closes, *(⌘9 retired — C119; ⌘0 opens Needs You)*, arrow keys move between cards, and
   the card's own `a`/`r`/`d`/`l`/`s` keys still answer. The menu-bar
   extra's "Needs You" item opens the window *and* this panel.
 - **iOS** — a navigation-bar trailing item with a badge, opening a sheet
@@ -1474,8 +1474,7 @@ reader is scrolled up is *spoken*, never *scrolled to* (P9).
 
 **Keyboard (macOS and PWA).** Full keyboard reachability with a visible
 2px `focus-ring` at 2px offset — `:focus-visible` on the web, never
-`outline: none`. `⌘K` palette · `⌘1`–`⌘6` destinations · `⌘9` the Needs You
-panel · `⌘N` capture · `/` focuses the composer · `Esc` closes any disclosure, menu, or dialog · `Tab` order
+`outline: none`. `⌘K` palette · `⌘0`–`⌘7` Needs You and the sidebar rows (C119; Mac only — the PWA adds no shortcuts) · `⌘N` capture · `/` focuses the composer · `Esc` closes any disclosure, menu, or dialog · `Tab` order
 follows reading order · every drag gesture has a menu equivalent (§3.10).
 `<dialog>` gives focus trapping and restoration for free; nothing in the
 system implements its own focus manager.

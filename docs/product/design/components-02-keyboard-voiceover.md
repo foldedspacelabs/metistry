@@ -78,8 +78,8 @@ Rules:
 | Record · Stop | Start recording. Screen and microphone · Stop recording | button |
 | Recording | Recording, 4 minutes. Screen and microphone | status, once |
 | Needs You row | Needs You, 10 waiting | button, selected |
-| Question | Question 1 of 3. Where should the Resources table live? | heading |
-| An answer | Its own file, SettingsResources.swift. 1 of 3 | radio button |
+| Question | Question 1 of 3. Where should the Connections table live? | heading |
+| An answer | Its own file, SettingsConnections.swift. 1 of 3 | radio button |
 | Send Answers | Send answers, dimmed. 1 question unanswered | button |
 | Usage gauge | Usage, $1.84 today, 37% of the day's budget | button |
 | A task | Send Jim the revised Q4 scope. Priority 2, 30 minutes, third day | checkbox |

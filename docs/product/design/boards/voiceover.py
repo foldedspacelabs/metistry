@@ -30,8 +30,8 @@ NY=card("NEEDS YOU AND A STEPPED QUESTION",
   f'<div style="width: 250px; border: 1px solid {L["bc"]}; border-radius: 12px; overflow: hidden;">{sidebar8(L,"Needs You")}</div>',
   spoken(L,[("Needs You row","Needs You, 10 waiting","button, selected"),
             ("When the count changes","11 waiting","announcement, not repeated while you&rsquo;re on it"),
-            ("Question header","Question 1 of 3. Where should the Resources table live?","heading"),
-            ("An answer","Its own file, SettingsResources.swift. 1 of 3","radio button"),
+            ("Question header","Question 1 of 3. Where should the Connections table live?","heading"),
+            ("An answer","Its own file, SettingsConnections.swift. 1 of 3","radio button"),
             ("Next","Next question. 2 of 3 answered after this","button"),
             ("Send Answers, not ready","Send answers, dimmed. 1 question unanswered","button")])
   + f'<div style="margin-top: 16px; zoom: 0.8;">{qstep(L,0,sel=(0,))}</div>',vw=250)

@@ -79,7 +79,7 @@ One column, in this order:
    this Mac* then *Cloud*, one line each: **name** maker · provider · tag ·
    loaded state and size, or price / *In your plan* · Load, Unload or Remove.
 4. **Spending limits** — per day, per month, then Allow · Stop · Critical only;
-   a subscription's window is its limit.
+   a subscription's window is its limit. **Enforced** before every call (C133).
 
 **A model is written one way everywhere**: **name** maker · provider · tag. The
 dropdown that picks one (Metis, an agent's definition) shows all of it in the

@@ -92,7 +92,7 @@ def nywin(T,sel,detail,*,w=1440,h=None,back="Today"):
             f'<div style="flex-grow: 1; min-width: 0; padding: 22px 28px 26px;">{detail}</div></div>{keys(T)}</div></div></div>')
 
 # ---------- detail: a question, one at a time ---------------------------------------------
-QS=[("Where should the Resources table live?",False,["Its own file, SettingsResources.swift","Inside SettingsPanes.swift"],None),
+QS=[("Where should the Connections table live?",False,["Its own file, SettingsConnections.swift","Inside SettingsPanes.swift"],None),
     ("Which panes ship in this PR?",True,["Instance","Services","Compute","Account"],"Pick any"),
     ("Keep the old settings-view.swift shim for one release?",False,["Yes, for one release","No, remove it now"],None)]
 ANS=[(0,),(0,1,3),None]
@@ -142,7 +142,7 @@ def qstep(T,cur,*,sel=(),other=None):
     return qhead(T)+body+foot
 
 def qsummary(T,*,sent=False):
-    rows=[("1","Where should the Resources table live?","Its own file, SettingsResources.swift",0),
+    rows=[("1","Where should the Connections table live?","Its own file, SettingsConnections.swift",0),
           ("2","Which panes ship in this PR?","Instance, Services, Account",1),
           ("3","Keep the old settings-view.swift shim for one release?",f'<i>{OTHER3}</i>',2)]
     lst="".join(f'<div style="display: flex; gap: 12px; padding: 11px 0; border-top: 1px solid {T["border"]}; align-items: baseline;">'
@@ -167,7 +167,7 @@ def prdetail(T):
                   f'border-left: 2px solid {T["acc"] if s else "transparent"}; font-weight: {600 if s else 400}; color: {T["tp"]};">'
                   f'<span style="flex-grow: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{p}</span>'
                   f'<span style="color: {T["ok"]};">+{a}</span><span style="color: {T["fail"]};">&minus;{d}</span></div>'
-                  for p,a,d,s in (("SettingsResources.swift",142,0,True),("SettingsPanes.swift",51,7,False),("settings-view.swift",4,31,False),
+                  for p,a,d,s in (("SettingsConnections.swift",142,0,True),("SettingsPanes.swift",51,7,False),("settings-view.swift",4,31,False),
                                   ("SettingsInstance.swift",9,0,False),("SettingsCompute.swift",6,0,False),("Package.swift",2,0,False)))
     return (rhead(T,I["pr"],"PULL REQUEST","drey-dev","14m",extra=mono("metistry#431",T["ts"],11))
           + f'<div style="font-size: 22px; font-weight: 650; color: {T["tp"]}; margin-top: 10px;">Split the settings pane into one file per pane</div>'
@@ -186,6 +186,6 @@ def emptydetail(T):
     return (f'<div style="max-width: 520px; margin: 80px auto 0; text-align: center;">'
             f'<div style="display: inline-flex; color: {T["tt"]};">{ic(I["bell"],28,1.6)}</div>'
             f'<div style="font-size: 18px; font-weight: 600; color: {T["tp"]}; margin-top: 10px;">Nothing needs you.</div>'
-            f'<div style="font-size: 13.5px; color: {T["ts"]}; margin-top: 6px; line-height: 1.5;">When Metis, an agent or a source '
+            f'<div style="font-size: 13.5px; color: {T["ts"]}; margin-top: 6px; line-height: 1.5;">When Metis, an agent or a sync '
             f'you connected asks for something, it lands here &mdash; and only then does the bell show a number.</div>'
             f'<div style="font-size: 12.5px; color: {T["ts"]}; margin-top: 10px;">This row leaves the sidebar when you go elsewhere.</div></div>')

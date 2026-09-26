@@ -6,8 +6,9 @@ triangle; the owner rejected it. Metis is off the roster entirely: it is
 unscoped because it IS the user (C52).
 """
 from lib import *
+from lib_settings2 import agentcompute
 
-CW,CH=2440,4260
+CW,CH=2440,4480
 
 def win(T,inner,*,w=None):
     wd=f"width: {w}px; flex-shrink: 0;" if w else "flex-grow: 1; min-width: 0;"
@@ -98,10 +99,10 @@ DEFP=pan(L,"THE DEFINITION IS A FILE, AND ONLY YOUR HAND MAY WRITE IT",
         "and a textarea that hides its own headings would teach the user this is configuration rather than "
         "writing. It shows the path, and it says <i>versioned in the vault</i> rather than <i>saved</i>.",12))
 
-PERMP=pan(L,"ONE LINE PER RESOURCE, AND ABSENCE IS THE DENIAL",
+PERMP=pan(L,"ONE LINE PER THING IT REACHES, AND ABSENCE IS THE DENIAL",
   permmatrix(L)
   + nt(L,"The previous pass gave every verb its own row and a control in each one, so <b>Knowledge</b> appeared "
-        "twice and the table was mostly furniture. One line per resource, <b>Read</b> and <b>Write</b> as columns, "
+        "twice and the table was mostly furniture. One line per thing it can reach, <b>Read</b> and <b>Write</b> as columns, "
         "and the cell says what the verb covers.",14)
   + nt(L,"<b>The On / Ask / Off control is gone from this table.</b> Anything not listed is not granted, which is the "
         "same information in none of the space — and it is the honest shape, because the list of things an agent "
@@ -123,7 +124,7 @@ MCPP=pan(L,"AND THE ROWS THAT ARE NOT METISTRY AT ALL",
         "reading your own vault, while commenting on a Jira issue is <b>acting as you in a system other people "
         "watch</b>. That is why Comment is <b>Ask</b> there and Read is <b>On</b> — and it is the reason "
         "a per-server grant cannot be one switch.",12)
-  + nt(L,"The servers themselves are defined in <b>Settings &#9656; Resources</b> — one place holds the "
+  + nt(L,"The servers themselves are defined in <b>Settings &#9656; Connections</b> — one place holds the "
         "credential, and it is not this screen. Granting one to an agent or a routine happens here, in the table "
         "above, like everything else.",12))
 
@@ -139,6 +140,9 @@ body=(heading("ROUND E · SCREEN 7, REWRITTEN","Agents — what Metis delegates 
         + f'<div style="flex-grow: 1; flex-basis: 0; min-width: 0;">{sub("A CONNECTED AGENT",L["tt"])}'
         + f'<div style="border: 1px solid {L["bc"]}; border-radius: 12px; overflow: hidden;">{conndetail(L)}</div></div>'
         + '</div>',18)
+  + row(f'<div>{sub("COMPUTE &mdash; IN THE DEFINITION (C128, C132)",L["tt"])}{agentcompute(L,w=560)}</div>'
+        + pan(L,"THE MODEL IS PART OF THE DEFINITION",nt(L,"An agent names its model and where it runs in one dropdown &mdash; "
+              "name, maker, provider, one tag &mdash; chosen from <b>Your Models</b> in Settings &#9656; Compute, or <b>Same as Metis</b>.")),32,align="flex-start")
   + row(DEFP+PROV,18)
   + row(PRES+PERMP,18)
   + row(MCPP,18)

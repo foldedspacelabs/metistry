@@ -3,9 +3,16 @@
 // console cannot or must not do it — credentials, the machine, code that
 // runs. Everything else goes through a store and the console's gate.
 //
-// F-7 freezes the interface; T5-1 implements it over the existing
-// `CommandRunner` (through `MetistryCLI`, so the runtime and the instance
-// resolve exactly as every other verb's do).
+// F-7 froze the interface; T5-1 implements it — `CLIManagementRunner`, below —
+// over the existing `CommandRunner` (through `MetistryCLI`, so the runtime and
+// the instance resolve exactly as every other verb's do: the same executable,
+// `--product-dir`, `METISTRY_INSTANCE_DIR`, and an empty stdin unless the
+// command carries a value for it).
+//
+// NOT BEHIND O3. A management verb talks to this Mac — the supervisor's
+// socket, the Keychain, the files the CLI owns — never to the console, so it
+// does not go through `ReachabilityGate`. Restarting a console that is down is
+// exactly when the owner reaches for M5.
 //
 // THE SET IS CLOSED AT THE TYPE. A `ManagementCommand` is built from a row and
 // an argument array, and it refuses — returns nil — unless the arguments
@@ -93,13 +100,19 @@ public struct ManagementCommand: Sendable, Equatable {
     public let arguments: [String]
     public let standardInput: String?
 
-    /// Nil unless `arguments` begin with one of the row's verbs.
+    /// Nil unless `arguments` begin with one of the row's verbs — and nil for
+    /// a `--product-dir` among them: which product runs a verb is the runtime
+    /// locator's answer (runtime-locator.swift), appended by the runner, and a
+    /// command that named its own would be a second answer to that question.
     public init?(_ row: ManagementRow, _ arguments: [String], standardInput: String? = nil) {
         guard row.verbs.contains(where: { arguments.starts(with: $0) }) else { return nil }
+        guard !arguments.contains(where: { $0 == Self.productDirFlag || $0.hasPrefix(Self.productDirFlag + "=") }) else { return nil }
         self.row = row
         self.arguments = arguments
         self.standardInput = standardInput
     }
+
+    static let productDirFlag = "--product-dir"
 }
 
 /// Runs §2.2's verbs, and nothing else — a `ManagementCommand` cannot hold any other.
@@ -110,4 +123,30 @@ public protocol ManagementRunner: Sendable {
     /// Streams the CLI's own lines as they arrive, and returns its exit and
     /// both streams. Throws only when the process could not be started.
     func run(_ command: ManagementCommand, onOutput: @escaping @Sendable (OutputLine) -> Void) async throws -> CommandResult
+}
+
+// MARK: - Over this install's CLI
+
+/// `ManagementRunner` as the Mac runs it: each command is one `metistry`
+/// invocation through `MetistryCLI` — an argument array, never a shell string,
+/// and a value (a pasted key) on stdin, never on the command line.
+public struct CLIManagementRunner: ManagementRunner {
+    public let cli: MetistryCLI
+
+    public init(cli: MetistryCLI) {
+        self.cli = cli
+    }
+
+    /// `[executable, leading…, verb…, --product-dir, <dir>]` — exactly what
+    /// `run` executes. The standard input is not in it, and cannot be.
+    public func plannedArguments(_ command: ManagementCommand) -> [String] {
+        cli.plannedArguments(for: command.arguments)
+    }
+
+    /// The CLI's exit and both streams, handed back whole: a refusal is shown
+    /// in the CLI's own words (§3.16), and a CLI older than the verb is
+    /// `CLIDegradation.isUnknownVerb(result)`, said once, in cli-facts.swift.
+    public func run(_ command: ManagementCommand, onOutput: @escaping @Sendable (OutputLine) -> Void) async throws -> CommandResult {
+        try await cli.run(command.arguments, standardInput: command.standardInput, onOutput: onOutput)
+    }
 }

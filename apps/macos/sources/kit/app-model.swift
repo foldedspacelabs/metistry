@@ -49,6 +49,11 @@ public final class AppModel {
     /// instance switch, by `metistry console whoami --json` and nothing else
     /// (console-sign-in.swift).
     public let consoleSignIn: ConsoleSignInModel
+    /// The active instance's console: the §2.16 stores over one long-lived
+    /// `metistry console session` child, O3's gate in front of them, and §2.2's
+    /// management verbs beside them (stores/console-session.swift). The child
+    /// starts on the first request a screen makes, not here.
+    public let console: ConsoleSession
 
     public init(
         bundleResourceURL: URL?,
@@ -57,7 +62,8 @@ public final class AppModel {
         appVersion: String = UpdateStatus.devBuildVersion,
         loginItemService: (any LoginItemService)? = nil,
         backgroundAgentService: (any BackgroundAgentService)? = nil,
-        passkeyRegistrar: (any PasskeyRegistrar)? = nil
+        passkeyRegistrar: (any PasskeyRegistrar)? = nil,
+        sessionSpawner: (any SessionSpawner)? = nil
     ) {
         let instances = InstanceBookmarks(defaults: defaults)
         let developerProductDir = Self.loadDeveloperProductDir(defaults)
@@ -91,6 +97,7 @@ public final class AppModel {
         self.status = status
         self.consoleSignIn = consoleSignIn
         self.firstRun = firstRun
+        self.console = ConsoleSession(cli: cli, spawner: sessionSpawner, defaults: defaults)
         self.settings = SettingsModel(status: status, cli: cli, instanceDir: instances.active, consoleSignIn: consoleSignIn)
         self.wizard = WizardModel(steps: firstRun)
         self.menu = MenuBarModel(status: status, cli: cli)
@@ -180,5 +187,8 @@ public final class AppModel {
         // because "on instance switch" is exactly when the answer changes.
         consoleSignIn.adopt(cli: cli, shape: status.report?.shape)
         Task { await consoleSignIn.refresh() }
+        // The same line for the console itself: the old instance's child is
+        // ended and every section built on it is dropped.
+        console.adopt(cli: cli, defaults: defaults)
     }
 }

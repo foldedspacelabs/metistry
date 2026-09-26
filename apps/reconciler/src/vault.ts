@@ -8,7 +8,7 @@ import { mkdir, readdir, readFile, realpath, rename, rm, stat, unlink, writeFile
 import { dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
 import { NON_VAULT_ROOTS, isVaultPath, type ErrorCode } from "@foldedspacelabs/metistry-core";
-import { Committer } from "./committer.js";
+import { Committer, validActId } from "./committer.js";
 import { Git } from "./git.js";
 import { confine, isProtected, validPrincipal, writeAllowed, type CallerClass, type Confined } from "./paths.js";
 import { basenameTitle, isConflictFile, isMarkdown, parseFrontmatter, sha256 } from "./notes.js";
@@ -24,6 +24,10 @@ export interface Intent {
   principal: string;
   message: string;
   group?: string | undefined;
+  /** `runs.id` of the run behind this write — the `Metistry-Run:` trailer and, with no turn, the act. */
+  run?: string | undefined;
+  /** The turn handle — the `Metistry-Turn:` trailer and the act (committer.ts `actOf`). */
+  turn?: string | undefined;
 }
 
 export type Outcome<T> = { ok: true; value: T } | { ok: false; code: ErrorCode; message?: string };
@@ -50,7 +54,22 @@ export function parseIntent(input: unknown): Outcome<Intent> {
   if (i.group !== undefined && (typeof i.group !== "string" || !/^[a-z0-9][a-z0-9._:-]{0,79}$/i.test(i.group))) {
     return fail("invalid_request", "intent.group must be a short slug");
   }
-  return { ok: true, value: { principal: i.principal, message: i.message.trim(), group: typeof i.group === "string" ? i.group : undefined } };
+  // `run` / `turn` become trailer lines, so their shape is the whole defence
+  // against a forged trailer: no newline, no colon, nothing but an id. A
+  // bigint `runs.id` may arrive as a JSON number.
+  const run = typeof i.run === "number" && Number.isSafeInteger(i.run) && i.run > 0 ? String(i.run) : i.run;
+  if (run !== undefined && !validActId(run)) return fail("invalid_request", "intent.run must be a runs id");
+  if (i.turn !== undefined && !validActId(i.turn)) return fail("invalid_request", "intent.turn must be a turn id");
+  return {
+    ok: true,
+    value: {
+      principal: i.principal,
+      message: i.message.trim(),
+      group: typeof i.group === "string" ? i.group : undefined,
+      run: run as string | undefined,
+      turn: i.turn as string | undefined,
+    },
+  };
 }
 
 export class Vault {
@@ -248,7 +267,7 @@ export class Vault {
     const tmp = join(dirname(c.value.abs), `.${randomBytes(6).toString("hex")}.tmp`);
     await writeFile(tmp, content);
     await rename(tmp, c.value.abs);
-    this.committer.enqueue({ paths: [c.value.rel], principal: intent.principal, message: intent.message, group: intent.group });
+    this.committer.enqueue({ paths: [c.value.rel], principal: intent.principal, message: intent.message, group: intent.group, run: intent.run, turn: intent.turn });
     return { ok: true, value: { path: c.value.rel, sha256: sha256(content), bytes: content.length, created: cur === null } };
   }
 
@@ -261,7 +280,7 @@ export class Vault {
     if (expectedSha !== undefined && cur.sha256 !== expectedSha) return fail("conflict");
     await unlink(c.value.abs);
     await pruneEmptyDirs(this.root, dirname(c.value.abs));
-    this.committer.enqueue({ paths: [c.value.rel], principal: intent.principal, message: intent.message, group: intent.group });
+    this.committer.enqueue({ paths: [c.value.rel], principal: intent.principal, message: intent.message, group: intent.group, run: intent.run, turn: intent.turn });
     return { ok: true, value: { path: c.value.rel } };
   }
 
@@ -280,7 +299,7 @@ export class Vault {
     await mkdir(dirname(b.value.abs), { recursive: true });
     await rename(a.value.abs, b.value.abs);
     await pruneEmptyDirs(this.root, dirname(a.value.abs));
-    this.committer.enqueue({ paths: [a.value.rel, b.value.rel], principal: intent.principal, message: intent.message, group: intent.group });
+    this.committer.enqueue({ paths: [a.value.rel, b.value.rel], principal: intent.principal, message: intent.message, group: intent.group, run: intent.run, turn: intent.turn });
     return { ok: true, value: { from: a.value.rel, to: b.value.rel } };
   }
 }

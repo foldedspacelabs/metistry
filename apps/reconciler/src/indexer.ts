@@ -334,7 +334,7 @@ export class Indexer {
       if (touched.size > 0) {
         const paths = [...touched].sort();
         externalEdits = paths.length;
-        this.committer.enqueue({ paths, principal: "user", group: "sync", message: `Vault edits from sync (${paths.length} file${paths.length === 1 ? "" : "s"})` });
+        this.committer.enqueueSweep(paths); // one `user` commit whose subject names the files (§2.21)
       }
     }
 

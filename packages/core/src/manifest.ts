@@ -26,13 +26,19 @@ const base = z.object({
 });
 
 // TCC permissions a bridge may declare. Behavioral probes, not permission
-// APIs, verify these at runtime (Phase 0 hard requirement 3).
+// APIs, verify these at runtime (Phase 0 hard requirement 3). The enum stays
+// closed: `screen_recording`, `microphone`, `audio_capture` join it for the
+// live-capture bridge (§2.15, Q6) — every TCC-requiring bridge, this one
+// included, is still held to PoC-1 (transport: http, runs_on: host) below.
 const tccGrant = z.enum([
   "full_disk_access",
   "automation",
   "calendars",
   "reminders",
   "contacts",
+  "screen_recording",
+  "microphone",
+  "audio_capture",
 ]);
 
 export const bridgeManifest = base.extend({

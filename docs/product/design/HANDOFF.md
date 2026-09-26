@@ -1,3 +1,5 @@
+> **Building from this design?** Start with [`DEVELOPER-HANDOFF.md`](DEVELOPER-HANDOFF.md) — every decision, what to build, and where it is specified.
+
 # Design engagement — handoff
 
 **You are the designer for Metistry.** This file is everything a new session

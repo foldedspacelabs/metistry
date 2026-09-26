@@ -312,7 +312,7 @@ export {
   type ClientRoute,
   type ConflictReason,
   type Idempotency,
-  type Reach,
+  type ClientReach,
   type RouteMatch,
   type RouteMethod,
 } from "./client-api.js";

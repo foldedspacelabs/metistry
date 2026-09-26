@@ -15,7 +15,7 @@
 // is one `owner` route in the client API table (`client-api.ts`); an agent
 // learns about changes through its own tools, never through this.
 
-import type { Reach } from "./client-api.js";
+import type { ClientReach } from "./client-api.js";
 
 /** The capability `GET /api/identity` advertises while `GET /api/events` is served. */
 export const EVENTS_CAPABILITY = "events" as const;
@@ -24,7 +24,7 @@ export const EVENTS_CAPABILITY = "events" as const;
 export const EVENTS_ROUTE = "GET /api/events" as const;
 
 /** Every event's reach (§2.20). One value, on purpose: a type an agent could subscribe to would be a second door. */
-export const EVENT_REACH: Reach = "owner";
+export const EVENT_REACH: ClientReach = "owner";
 
 /** The event types, in the catalogue's order. */
 export const EVENT_TYPES = [
@@ -110,7 +110,7 @@ export interface EventDefinition {
   readonly when: string;
   /** Where the client goes for the thing itself. Every route named here is a row in the client API table (a test holds it). */
   readonly refetch: string;
-  readonly reach: Reach;
+  readonly reach: ClientReach;
 }
 
 function event(type: EventType, payload: string, when: string, refetch: string): EventDefinition {

@@ -217,7 +217,13 @@ origin     https://your-hostname.example
 ```
 
 The URL comes from `METISTRY_CONSOLE_URL`, then `METISTRY_URL`, then
-`http://127.0.0.1:8080`. The token comes from the environment
+`http://127.0.0.1:8080`. A namespaced instance (one with
+`<instance>/.metistry/state/ports.yaml`, written by `metistry up --namespace`)
+fills `METISTRY_CONSOLE_URL` with its own console port when nothing set it —
+the same rule `doctor`, `connect` and `up` apply — so `whoami`, `call` and
+`session` with `--instance <dir>` reach that instance's console and never the
+default install's 8080. An explicit `METISTRY_CONSOLE_URL` in the environment
+or `state/.env` still wins. The token comes from the environment
 (`<instance>/.metistry/state/.env`) or the login Keychain — this instance's account
 first, the per-user one behind it — and never reaches argv, stdout or an
 error message. A 401 is one of exactly two things and the error names both:

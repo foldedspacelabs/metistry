@@ -3,7 +3,8 @@
 // critical; link to the full queue, never hard-truncate), consequence
 // ranking (deterministic — no model ranks your attention), auto-expiry
 // (un-acted proposals expire after EXPIRE_DAYS to decision='expired' —
-// searchable, never lost), silence-default (nothing pending = no brief).
+// searchable, never lost; a mirror never does, K15), silence-default
+// (nothing pending = no brief).
 
 import { requestWordOf } from "@foldedspacelabs/metistry-core";
 
@@ -237,10 +238,14 @@ async function sectionSystem(db: Db): Promise<{ lines: string[]; needsHelp: bool
  * — the runner turns that into `meta.outcome`: `acted` or `silent` (T1-4).
  */
 export async function run(db: Db, ctx: RoutineCtx = {}): Promise<number> {
-  // auto-expiry first: un-acted items leave the queue but stay searchable
+  // auto-expiry first: un-acted items leave the queue but stay searchable.
+  // A MIRROR never expires (K15, migration 0027): a row with a `source`
+  // stands for something that lives elsewhere — a PR still waiting on the
+  // owner's review is still owed on day 15 — and it leaves the queue only
+  // when its source changes (`resolved_at_source`, packages/core/src/mirrors.ts).
   const expired = await db.query(
     `UPDATE proposals SET decision = 'expired', decided_at = now()
-     WHERE decision = 'pending' AND ts < now() - make_interval(days => $1) RETURNING id`,
+     WHERE decision = 'pending' AND source IS NULL AND ts < now() - make_interval(days => $1) RETURNING id`,
     [EXPIRE_DAYS],
   );
 

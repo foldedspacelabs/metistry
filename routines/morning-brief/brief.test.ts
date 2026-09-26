@@ -50,6 +50,18 @@ describe("morning brief (D10 soft budget)", () => {
     expect(await run(db, { ekUrl: "http://ek", ekToken: "t", fetchFn: deadFetch })).toBe(0); // nothing else pending → silent
   });
 
+  it("the 14-day expiry never touches a mirror — only rows without a source (K15; proved on Postgres in test/mirrors.integration.test.ts)", async () => {
+    const q: string[] = [];
+    const db = { async query(t: string) {
+      q.push(t);
+      if (t.includes("FROM runs") && !t.includes("'folded'")) return { rows: [{ runs_ok: 0, turns: 0, captures: 0, failures: 0, spend: 0 }] };
+      return { rows: [] };
+    } };
+    await run(db);
+    const expiry = q.find((t) => t.includes("SET decision = 'expired'"));
+    expect(expiry?.replace(/\s+/g, " ")).toContain("WHERE decision = 'pending' AND source IS NULL AND ts <");
+  });
+
   it("silence-default: nothing pending, nothing due, nothing failing emits nothing", async () => {
     const q: string[] = [];
     const db = { async query(t: string) {

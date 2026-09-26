@@ -7,10 +7,10 @@
 import { mkdir, readdir, readFile, realpath, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
-import { NON_VAULT_ROOTS, isVaultPath, type ErrorCode } from "@foldedspacelabs/metistry-core";
+import { NON_VAULT_ROOTS, isVaultPath, sectionMissingMessage, writeNoteSection, type ErrorCode, type NoteSectionName } from "@foldedspacelabs/metistry-core";
 import { Committer, validActId } from "./committer.js";
 import { Git } from "./git.js";
-import { confine, isProtected, validPrincipal, writeAllowed, type CallerClass, type Confined } from "./paths.js";
+import { SECTION_PATHS, confine, isProtected, sectionWriteAllowed, validPrincipal, writeAllowed, type CallerClass, type Confined } from "./paths.js";
 import { basenameTitle, isConflictFile, isMarkdown, parseFrontmatter, sha256 } from "./notes.js";
 
 export interface Intent {
@@ -269,6 +269,62 @@ export class Vault {
     await rename(tmp, c.value.abs);
     this.committer.enqueue({ paths: [c.value.rel], principal: intent.principal, message: intent.message, group: intent.group, run: intent.run, turn: intent.turn });
     return { ok: true, value: { path: c.value.rel, sha256: sha256(content), bytes: content.length, created: cur === null } };
+  }
+
+  /**
+   * The section operation (plan §2.13): replace the bytes between a note's
+   * section markers and prove every other byte is what the caller saw.
+   *
+   * Refuses, in this order: a path this section does not live in
+   * (`invalid_request`); a principal the credential may not claim or the
+   * section does not list (`forbidden` — `sectionWriteAllowed`); a note that
+   * does not exist (`not_found` — the section never creates the owner's
+   * note, whose template is theirs to apply); a note without exactly one
+   * clean pair (`section_missing`); an outer hash that is not
+   * `expectedOuterSha` (`conflict`); a body that carries a marker or would
+   * hide one (`invalid_request`); and a result over the size cap.
+   *
+   * The file is re-read after the new bytes are staged and before they are
+   * renamed into place: an owner's edit that lands in between is a
+   * `conflict`, not an overwrite. (It narrows the window to a rename, which
+   * is as close as a filesystem the owner also writes lets anything get.)
+   *
+   * `act` is the §2.21 act key, as on every other write: the Morning Brief
+   * passes its run so the brief file and the section are one commit.
+   */
+  async section(
+    path: unknown,
+    section: NoteSectionName,
+    body: string,
+    principal: string,
+    caller: CallerClass,
+    expectedOuterSha: string,
+    act: { run?: string | undefined; turn?: string | undefined } = {},
+  ): Promise<Outcome<{ path: string; section: NoteSectionName; sha256: string; bytes: number; outer_sha256: string; appended: boolean }>> {
+    const c = await this.confined(path);
+    if (!c.ok) return c;
+    const rel = c.value.rel;
+    if (!SECTION_PATHS[section](rel)) return fail("invalid_request", `the ${section} section lives only in Journal/<date>.md`);
+    if (!sectionWriteAllowed(rel, section, principal, caller)) return fail("forbidden");
+    const cur = await this.current(c.value.abs);
+    if (!cur) return fail("not_found", `${rel} does not exist — the section operation never creates the owner's note`);
+    const out = writeNoteSection(cur.bytes, section, body, expectedOuterSha);
+    if (!out.ok) {
+      if (out.code === "section_missing") return fail("section_missing", sectionMissingMessage(rel, section, out.reason, out.line));
+      if (out.code === "conflict") return fail("conflict", `${rel} changed outside its ${section} section since it was read — read it again`);
+      return fail("invalid_request", out.message);
+    }
+    if (out.content.length > this.cfg.maxBytes) return fail("invalid_request", `the note would exceed ${this.cfg.maxBytes} bytes`);
+    const tmp = join(dirname(c.value.abs), `.${randomBytes(6).toString("hex")}.tmp`);
+    await writeFile(tmp, out.content);
+    const again = await this.current(c.value.abs);
+    if (!again || again.sha256 !== cur.sha256) {
+      await unlink(tmp).catch(() => {});
+      return fail("conflict", `${rel} changed while the section was being written — read it again`);
+    }
+    await rename(tmp, c.value.abs);
+    this.committer.enqueue({ paths: [rel], principal, message: `${out.appended ? "add" : "update"} the ${section} section of ${rel}`, run: act.run, turn: act.turn });
+    return { ok: true, value: { path: rel, section, sha256: sha256(out.content), bytes: out.content.length, outer_sha256: out.outerSha256, appended: out.appended } };
   }
 
   async delete(path: unknown, intent: Intent, caller: CallerClass, expectedSha?: string): Promise<Outcome<{ path: string }>> {

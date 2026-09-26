@@ -314,6 +314,16 @@ principal it did not ask for — and every refusal is a `runs` row
 (`component=reconciler, kind=auth`) carrying the caller class, the claimed
 principal and the path.
 
+**The section operation** (`POST /vault/section`, plan §2.13) is the same
+rule with one more table beside it. `principal` is bounded by the bearer
+exactly as above — the owner bearer is `user` and nothing else — and then by
+`SECTION_WRITERS`: the owner's daily note's `metistry:day` region may be
+written by `morning-brief` and `user`, and by no one else, whatever the
+console claims. It is a second door beside `writeAllowed`, not a hole in it:
+every other non-user write to `Journal/<date>.md` is still refused, and the
+section cannot change a byte outside its markers (docs/ops/reconciler.md,
+"The section operation").
+
 **Who holds which.**
 
 - **`owner`** — `packages/cli`'s protected-path writer, and only it:

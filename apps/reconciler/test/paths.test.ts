@@ -8,7 +8,7 @@
 import { mkdir, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { confine, isProtected, mayClaim, parseVaultPath, writeAllowed } from "../src/paths.js";
+import { SECTION_WRITERS, confine, isDailyNotePath, isProtected, mayClaim, parseVaultPath, sectionWriteAllowed, writeAllowed } from "../src/paths.js";
 import { tempRepo, type TempRepo } from "./helpers.js";
 
 describe("parseVaultPath (syntactic)", () => {
@@ -209,6 +209,50 @@ describe("Me/ and the user's own journal are the owner's, whatever the caller (i
     for (const p of ["Journal/Plan/2026-09-22.md", "Journal/Fold/2026-09-21.md", "Journal/Standup/2026-09-21.md"]) {
       expect(writeAllowed(p, "plan-tomorrow", "console"), p).toBe(true);
       expect(writeAllowed(p, "assistant", "console"), p).toBe(true);
+    }
+  });
+});
+
+// One writer per REGION (plan §2.13, T2-6): the section operation is a second,
+// narrower door beside `writeAllowed`, not a hole in it.
+describe("the section operation's policy (sectionWriteAllowed)", () => {
+  const DAY = "Journal/2026-09-26.md";
+
+  it("its writers are plan §2.13's two, and nobody else", () => {
+    expect([...SECTION_WRITERS.day].sort()).toEqual(["morning-brief", "user"]);
+    expect(sectionWriteAllowed(DAY, "day", "morning-brief", "console")).toBe(true);
+    expect(sectionWriteAllowed(DAY, "day", "user", "console")).toBe(true);
+    expect(sectionWriteAllowed(DAY, "day", "user", "owner")).toBe(true);
+    for (const p of ["assistant", "agent-seven", "plan-tomorrow", "knowledge-fold", "standup-draft", "capture"]) {
+      expect(sectionWriteAllowed(DAY, "day", p, "console"), p).toBe(false);
+    }
+  });
+
+  it("the credential still bounds the claim: the owner bearer may not be the Morning Brief", () => {
+    expect(sectionWriteAllowed(DAY, "day", "morning-brief", "owner")).toBe(false);
+  });
+
+  it("**a non-user principal cannot write the note any other way**: writeAllowed is unchanged for the whole file", () => {
+    expect(writeAllowed(DAY, "morning-brief", "console")).toBe(false);
+    expect(writeAllowed(DAY, "user", "console")).toBe(true);
+  });
+
+  it("its only home is the owner's daily note, on a real day", () => {
+    for (const p of [DAY, "Journal/2024-02-29.md"]) expect(isDailyNotePath(p), p).toBe(true);
+    for (const p of [
+      "Journal/2026-02-30.md",
+      "Journal/2025-02-29.md",
+      "Journal/2026-13-01.md",
+      "Journal/2026-9-26.md",
+      "Journal/2026-09-26.markdown",
+      "Journal/Plan/2026-09-26.md",
+      "Journal/Meetings/2026-09-26-sync.md",
+      "journal/2026-09-26.md",
+      "Areas/Journal/2026-09-26.md",
+      ".metistry/2026-09-26.md",
+    ]) {
+      expect(isDailyNotePath(p), p).toBe(false);
+      expect(sectionWriteAllowed(p, "day", "user", "owner"), p).toBe(false);
     }
   });
 });

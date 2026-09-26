@@ -256,9 +256,9 @@ owner; the C96 events and the meeting-at-Stop as instances. **Needs You is the h
 
 **Settings panes (2026-09-25, C123–C127, board `Settings-Panes`, screen 15 §5):** Instance names the assistant and lists linked instances; Services leads with Doctor and has per-service controls; Compute is one column — Metis, Providers (switch, tags, credential), Your Models (memory and disk, on this Mac and from the cloud, one search grouped by model with a line per place), Spending limits — and a model is written one way everywhere — name, maker, provider, one tag — with one-line providers (Test, gear, Remove) and models, and Refresh (C128, C130–C132); Keep Awake has two sub-switches (C129); Updates updates and rolls back the runtime; Keyboard is one switch; Advanced holds the runtime source.
 
-**Next round, in order:** (1)
-**States for screens 10–17** and the §3.3 flows, including the Mac's Compute
-pane from the PWA's. Ruled 2026-09-25: C99 (no confirm on a tick); C101/C102 (Close the Day updates
+**States and flows (2026-09-25, C135–C138, boards `States-Screens`, `States-Settings`, `Flows`, `components-03-states-and-flows.md`):** first paint is the last data with a stale band; Undo when reversible, confirm naming the cost otherwise; recording up to ten hours with two-hourly reminders and a disk watch; New Agent and Run Now lead somewhere.
+
+**Next round, in order:** (1) Port the legacy boards (Capture, Theme, Facets, Plugin, Voice, Item-Model) to modules. Ruled 2026-09-25: C99 (no confirm on a tick); C101/C102 (Close the Day updates
 the daily note's Metistry section, dates each deferred line and writes
 tomorrow's plan — no close file; owed items are tasks); C103 (prose allowed
 outside a fold).
@@ -292,7 +292,7 @@ the canvas is now generated from a module in `boards/` except `Facets`, `Plugin`
 `Voice` and `Item-Model`. `bellpanel()` is gone — it drew the *"1 snoozed"*
 header C21 killed; `panel2()` is the panel.
 
-**134 contradictions** are logged in `review-00-plan.md`. C38, C51 and C62 are closed. C40–C87 are
+**138 contradictions** are logged in `review-00-plan.md`. C38, C51 and C62 are closed. C40–C87 are
 round E's; C88–C98 are review 01's rulings. Two of them are rules the system is missing rather than faults in a
 file: **C45** (a failed consequential operation leaves the request pending) and
 **C49** (a mark that carries meaning takes an ink token, never a border token —

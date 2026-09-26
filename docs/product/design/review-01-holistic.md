@@ -175,6 +175,8 @@ that every board draws from, checked by the build.
 
 ### 3.2 States coverage
 
+> **Closed 2026-09-25 by C135–C138** — `components-03-states-and-flows.md`, boards `States-Screens`, `States-Settings`, `Flows`.
+
 ✓ designed · ~ partly · ✗ missing · – not applicable
 
 | Screen | empty | absent / loading | failed | stale |

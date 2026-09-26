@@ -91,8 +91,20 @@ export {
   type SyncDirection,
   type SyncResult,
   type SecretListing,
+  secretsFilePath,
+  secretsListNamed,
+  secretsSet,
+  secretsReplace,
+  secretsRemove,
+  secretsHosts,
+  secretsGrant,
+  secretReferences,
+  renderNamedSecrets,
+  type NamedSecretsOptions,
+  type NamedSecretResult,
+  type RemoveSecretResult,
 } from "./secrets.js";
-export { Keychain, serviceFor, keychainAccount, promptStdin, SERVICE_PREFIX } from "./keychain.js";
+export { Keychain, serviceFor, keychainAccount, promptStdin, SERVICE_PREFIX, securityKeychain, securityPresence } from "./keychain.js";
 export { type Exec, type ExecOptions, type ExecResult, realExec, formatCommand } from "./exec.js";
 export { up, productSource, composeUp, installLaunchd, type UpOptions, type UpResult } from "./up.js";
 export { update, gitHead, hashHostJobs, trackedPathFor, writeLock, publishedPackages, type UpdateOptions, type UpdateResult } from "./update.js";

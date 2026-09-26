@@ -283,7 +283,7 @@ public final class ComputeModel {
         if let monthly { verb += ["--monthly", ComputeBudgetFacts.money(monthly)] }
         verb += ["--action", action.rawValue, "--json"]
         await perform(verb, naming: "compute budget", key: Self.budgetKey(target)) { _ in
-            "\(target): \(ComputeBudgetFacts(dailyUSD: daily, monthlyUSD: monthly, action: action).summary) — recorded; nothing enforces it yet, budgets are checked in the engine before the call"
+            "\(target): \(ComputeBudgetFacts(dailyUSD: daily, monthlyUSD: monthly, action: action).summary) — enforced in the engine, before the call"
         }
         await refresh()
     }
@@ -448,6 +448,6 @@ public final class ComputeModel {
         + "is badged and never blocked (C13): the engine records one warning per run and the turn goes through. Nothing here verifies the claim — no client can."
 
     public static let budgetNote =
-        "Recorded, not enforced. Nothing dials a provider or counts a token yet, so a limit here is a decision written down in compute.yaml for the engine to read "
-        + "before the call (docs/ops/compute.md). It is worth setting now for the same reason a seatbelt is worth fastening before the engine starts."
+        "Enforced in the engine, before the call, against what this window has already spent (docs/ops/compute.md); what happens at the limit is the action "
+        + "below. Set it for the same reason a seatbelt is worth fastening before the engine starts."
 }

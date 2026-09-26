@@ -347,7 +347,7 @@ export function renderComputeReport(r: ComputeReport): string {
     lines.push(`instance budget: ${money(r.instance_budget.daily_usd)}/day ${money(r.instance_budget.monthly_usd)}/month, action ${r.instance_budget.action}`);
   }
   lines.push("");
-  lines.push("Not wired yet: nothing dials a provider, counts a token or enforces a budget — that is the engine (docs/ops/compute.md).");
+  lines.push("The engine dials these providers and enforces every budget above, before the call (docs/ops/compute.md).");
   return lines.join("\n");
 }
 
@@ -904,7 +904,7 @@ export async function setBudget(
   }
   edit.doc.setIn(path, { ...(daily === undefined ? {} : { daily_usd: daily }), ...(monthly === undefined ? {} : { monthly_usd: monthly }), action: opts.action });
   const { delivery } = await commit(opts, edit, `metistry compute budget ${path.join(".")} → ${opts.action}`);
-  opts.out("Recorded. Nothing enforces it yet — budgets are checked in the engine, before the call (docs/ops/compute.md).");
+  opts.out("Recorded. Enforced in the engine, before the call (docs/ops/compute.md).");
   return { target: path.join("."), ...(daily === undefined ? {} : { daily_usd: daily }), ...(monthly === undefined ? {} : { monthly_usd: monthly }), action: opts.action, delivery };
 }
 

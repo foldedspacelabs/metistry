@@ -1175,7 +1175,8 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
       }
       const loaded = loadEnv();
       const consoleCommon = {
-        ...(loaded.instanceDir ? { instanceId: await readInstanceId(loaded.instanceDir) } : {}),
+        // instanceDir: a namespaced instance's console is on its own port (state/ports.yaml), never the default 8080
+        ...(loaded.instanceDir ? { instanceDir: loaded.instanceDir, instanceId: await readInstanceId(loaded.instanceDir) } : {}),
         ...(io.exec ? { exec: io.exec } : {}),
         ...(io.platform ? { platform: io.platform } : {}),
         ...(io.fetchFn ? { fetchFn: io.fetchFn } : {}),

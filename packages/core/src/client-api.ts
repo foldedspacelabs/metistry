@@ -262,7 +262,7 @@ export const CLIENT_API: readonly ClientRoute[] = [
   planned("GET", "/api/today", "T2-7", "the day: tasks, work, order, events, brief, standup and plan"),
   planned("GET", "/api/vault-tasks", "T2-7", "vault tasks by filter: Slipping, Owed, Waiting on Others"),
   planned("PUT", "/api/today/order", "T2-7", "the owner's order for the day", { idempotent: "natural" }),
-  planned("POST", "/api/vault-tasks/:task_key/check", "T2-4", "tick or untick one task line", { idempotent: "key", conflict: ["stale"] }),
+  route("POST", "/api/vault-tasks/:task_key/check", "tick or untick one task line", { idempotent: "key", conflict: ["stale"] }),
   planned("POST", "/api/vault-tasks/:task_key/schedule", "T2-5", "defer one task line: a `do` date or someday", { idempotent: "key", conflict: ["stale"] }),
   planned("POST", "/api/vault-tasks/:task_key/link", "T4-25", "add one tracker ref to one task line", { conflict: ["stale"] }),
   planned("POST", "/api/today/close", "T2-8", "Close the Day: write the section, then plan tomorrow"),

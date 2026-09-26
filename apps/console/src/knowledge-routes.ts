@@ -51,7 +51,7 @@ import { KNOWLEDGE_LINKS_QUERY, KNOWLEDGE_PAGES_QUERY } from "@foldedspacelabs/m
 export { NO_SCOPE, OWNER_SCOPE, canSee, filterHits, filterPages, grantedScope, type KnowledgeScope } from "@foldedspacelabs/metistry-core";
 import { VaultError, type VaultClient } from "@foldedspacelabs/metistry-artifacts";
 import { QueryError, type QueryStore } from "@foldedspacelabs/metistry-queries";
-import { sendError, sendJson, sendRefusal } from "./http-util.js";
+import { sendError, sendJson, sendRefusal, sendUnrouted } from "./http-util.js";
 
 export const KNOWLEDGE_MODES = ["keyword", "semantic", "hybrid"] as const;
 export type KnowledgeSearchMode = (typeof KNOWLEDGE_MODES)[number];
@@ -357,10 +357,9 @@ export async function knowledgeRoutes(
   }
 
   // Anything else under /api/knowledge/.
-  return sendError(
+  return sendUnrouted(
     res,
-    "not_found",
-    "the knowledge read path is GET /api/knowledge/search, GET /api/knowledge/page, GET /api/knowledge/pages and GET /api/knowledge/links (docs/ops/console-api.md)",
+    "the knowledge read path is GET /api/knowledge/search, GET /api/knowledge/page, GET /api/knowledge/pages and GET /api/knowledge/links (docs/ops/client-api.md)",
   );
 }
 

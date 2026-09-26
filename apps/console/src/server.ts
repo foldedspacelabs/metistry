@@ -18,7 +18,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
-import { AREA_PREFIX_REFUSAL, runCheck, startRun, finishRun, errorEnvelope, intEnv, may, parseAction, PROJECT_SLUG_RE, rollSession, statusFor, SKIP_FEEDBACK, validAgentAreaGrant, type CheckResult, type Compute, type ErrorEnvelope, type Principal } from "@foldedspacelabs/metistry-core";
+import { API_VERSION, API_VERSION_HEADER, AREA_PREFIX_REFUSAL, runCheck, startRun, finishRun, errorEnvelope, intEnv, may, parseAction, noRouteMessage, PROJECT_SLUG_RE, rollSession, statusFor, servedRoute, SKIP_FEEDBACK, validAgentAreaGrant, type CheckResult, type Compute, type ErrorEnvelope, type Principal } from "@foldedspacelabs/metistry-core";
 import { QueryError, QueryStore } from "@foldedspacelabs/metistry-queries";
 import { captureToInbox, createBrainServer, dirSink, type CaptureSink, type KnowledgeLister, type KnowledgeReader, type KnowledgeVaultSearcher, type KnowledgeWriter, type QueryEmbedder } from "@foldedspacelabs/metistry-mcp-brain";
 import { TasksError, TasksService } from "@foldedspacelabs/metistry-tasks";
@@ -29,7 +29,7 @@ import type { Db } from "./auth-store.js";
 import * as store from "./auth-store.js";
 import * as agents from "./agents.js";
 import type { SessionPolicy } from "./session-policy.js";
-import { parseCookies, readBody, readJson, sendError, sendJson, sendRefusal, sessionCookie } from "./http-util.js";
+import { parseCookies, readBody, readJson, sendError, sendJson, sendRefusal, sendUnrouted, sessionCookie } from "./http-util.js";
 import * as wa from "./webauthn.js";
 import { checkLocalOwner, type LocalOwnerConfig } from "./local-owner.js";
 import { serveStatic } from "./static.js";
@@ -100,7 +100,7 @@ export interface ConsoleConfig {
   instancesFiles?: string | undefined;
 }
 
-// ----- since-cursors (docs/ops/console-api.md) -----
+// ----- since-cursors (docs/ops/client-api.md) -----
 // A cursor is an opaque string the server minted: Postgres's own text form
 // of a timestamptz (it round-trips microseconds; a JS Date does not), then
 // the row's tiebreakers, `|`-joined — two rows written in one transaction
@@ -110,7 +110,7 @@ export interface ConsoleConfig {
 // without one (a fresh paint), and the response always carries the cursor
 // for the next call — the newest row seen, or the caller's own when there
 // was nothing new.
-const MAX_LIST = 100;  // limit: fixed — the API's own page ceiling, documented in docs/ops/console-api.md
+const MAX_LIST = 100;  // limit: fixed — the API's own page ceiling, documented in docs/ops/client-api.md
 function listArgs(url: URL, dflt: number): { limit: number; since: string | null } {
   const raw = Number(url.searchParams.get("limit") ?? dflt);
   const limit = Number.isFinite(raw) && raw > 0 ? Math.min(Math.floor(raw), MAX_LIST) : dflt;
@@ -424,6 +424,11 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
   async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? "/", cfg.origin);
     const key = `${req.method} ${url.pathname}`;
+    // Every answer says which contract it speaks (docs/ops/client-api.md
+    // "Versioning"), refusals included: a client reads the version off a 401
+    // as easily as off a 200, and refuses a console below its minimum with a
+    // sentence rather than a decode failure.
+    res.setHeader(API_VERSION_HEADER, String(API_VERSION));
 
     // ----- public: the PWA shell (login page must render unauthenticated) -----
     if (req.method === "GET" && cfg.webRoot && !url.pathname.startsWith("/api/") && url.pathname !== "/health") {
@@ -455,17 +460,21 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
           hasArtifacts: artifacts !== undefined,
           queryCount: queries.names().length,
           targetCount: cfg.targets ? cfg.targets.names().length : 0,
+          // `events` while the table says the stream is served — T2-18 flips
+          // that row, and the conformance test holds the row to the server.
+          hasEvents: servedRoute("GET", "/api/events") !== undefined,
         }),
         version: cfg.version ?? null,
+        api_version: API_VERSION,
         as_of: new Date().toISOString(),
       });
     }
     if (key === "GET /health") {
       try {
         await db.query("SELECT 1");
-        return sendJson(res, 200, { ok: true });
+        return sendJson(res, 200, { ok: true, api_version: API_VERSION });
       } catch {
-        return sendJson(res, 503, { ok: false });
+        return sendJson(res, 503, { ok: false, api_version: API_VERSION });
       }
     }
 
@@ -551,7 +560,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       // Tier 0 (§4.11): a capture-only agent needs nothing more than this
       // endpoint. Provenance is stamped from the credential (§4.19).
       const sourceAgent = auth.kind === "agent" ? auth.agent.id : null;
-      // Idempotency-Key (docs/ops/console-api.md): scoped to the credential
+      // Idempotency-Key (docs/ops/client-api.md): scoped to the credential
       // CLASS the server derived, never to anything in the request. Owner
       // tokens share one scope — they are all the owner's hand.
       const rawKey = req.headers["idempotency-key"];
@@ -587,6 +596,18 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     // ----- agent tokens stop here: uniform 403 on everything else, never 404 -----
     const onConsole = may(principalOf(auth), "act", { kind: "console", door: "console_agent", route: key });
     if (!onConsole.ok) return sendRefusal(res, onConsole);
+
+    // ----- the contract: the owner is served what the client API table lists, and nothing else -----
+    // `packages/core/src/client-api.ts` is the route table every client is
+    // written against (docs/ops/client-api.md). Asked here, before anything
+    // below dispatches, so a handler added without its row is unreachable
+    // rather than an undocumented door — and a row frozen ahead of its
+    // ticket stays unserved until that ticket marks it served. Owner only,
+    // and deliberately: the capture token and agent bearers keep their
+    // uniform answers below (a 403 across a whole family, never a 403 here
+    // and a 404 there). For the owner an unlisted route was already a 404;
+    // it now names the routes that do exist beside it, off the same table.
+    if (isUser(auth) && servedRoute(req.method ?? "", url.pathname) === undefined) return sendUnrouted(res, noRouteMessage(req.method ?? "", url.pathname));
 
     // Who the console thinks you are. The Mac app calls this to render
     // "signed in as owner" without a passkey ceremony; it is also what
@@ -828,7 +849,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       ) {
         return sendRefusal(res, management);
       }
-      return sendError(res, "not_found");
+      return sendUnrouted(res);
     }
 
     // ----- the peer registry (S4): instances.yaml, as the app and the phone read it -----
@@ -891,7 +912,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       return sendJson(res, 200, { run: row, as_of: result.as_of.toISOString() });
     }
 
-    // ----- the composer's command list, GENERATED (docs/ops/console-api.md) -----
+    // ----- the composer's command list, GENERATED (docs/ops/client-api.md) -----
     // rules.yaml's routes plus the agent registry — never a hand-maintained
     // array, which is what docs/product/ux-direction.md rules out. `tiers` is
     // the LIVE map: compute.yaml's assignments when it has any, else
@@ -1081,7 +1102,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     if (agentOp) {
       const [, method, id, op] = agentOp as unknown as [string, string, string, string];
       const verbOk = method === "PUT" ? op === "grants" || op === "projects" || op === "autonomy" : op === "revoke" || op === "rotate" || op === "approve";
-      if (!verbOk) return sendError(res, "not_found");
+      if (!verbOk) return sendUnrouted(res);
       try {
         if (op === "grants") {
           const { ok, grants } = await writeGrants(id, await readJson(req), "console");
@@ -1156,7 +1177,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       return sendJson(res, 200, { ok: true });
     }
 
-    return sendError(res, "not_found");
+    return sendUnrouted(res);
   }
 
   function formatFastPath(query: string, rows: Record<string, unknown>[], asOf: Date): string {
@@ -1210,7 +1231,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     // Already decided — from another device, or this one before it went
     // offline. 409 with the winner, so a client that queued an answer can
     // show what actually happened rather than "failed"
-    // (docs/ops/console-api.md). No re-triage, ever.
+    // (docs/ops/client-api.md). No re-triage, ever.
     if (row.decision !== "pending") return { status: 409, body: conflictBody("already_decided", "already decided", row) };
 
     // Decide-time staleness (ADOPT 3). The client sends the `ts`/cursor of the

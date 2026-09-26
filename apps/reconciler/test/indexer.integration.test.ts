@@ -144,7 +144,7 @@ describe.skipIf(!hasDb)("reconciler index loop (real db)", () => {
     const first = await committer.flush();
     const swept = first.commits.find((c) => c.principal === "user");
     expect(swept).toBeTruthy();
-    expect(swept!.group).toBe("sync");
+    expect(swept!.group).toMatch(/^sync:/); // each sweep is its own act (§2.21)
     expect(swept!.paths).toContain(`${PREFIX}Moved/Alpha.md`);
     expect(swept!.paths.some((p) => p.includes("(conflict"))).toBe(false); // flagged, not committed
     expect((await repo.git.run(["show", "-s", "--format=%an", swept!.sha])).trim()).toBe("Metistry user");
@@ -157,6 +157,8 @@ describe.skipIf(!hasDb)("reconciler index loop (real db)", () => {
     const r = await committer.flush();
     const user = r.commits.find((c) => c.principal === "user");
     expect(user!.paths).toEqual([`${PREFIX}Phone.md`]); // not Bridge.md (the assistant's), not the conflict copy
+    // the sweep's subject names its file (§2.21)
+    expect((await repo.git.run(["show", "-s", "--format=%s", user!.sha])).trim()).toBe("Edits from Obsidian: Phone");
     expect(r.commits.find((c) => c.principal === "assistant")!.paths).toEqual([`${PREFIX}Bridge.md`]);
     // a quiet cycle sweeps nothing
     const again = await indexer.reconcile("test");

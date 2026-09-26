@@ -51,5 +51,6 @@ describe("uniform error envelope (invariant 8)", () => {
   it("maps codes to http statuses", () => {
     expect(statusFor("unauthenticated")).toBe(401);
     expect(statusFor("rate_limited")).toBe(429);
+    expect(statusFor("local_only")).toBe(403);
   });
 });

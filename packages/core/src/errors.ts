@@ -5,6 +5,7 @@
 export type ErrorCode =
   | "unauthenticated" // 401 — missing/invalid credential (uniform; never says which)
   | "forbidden"       // 403 — authenticated but not permitted (no existence leak)
+  | "local_only"      // 403 — the owner, but not on this Mac: a `local` route admits the local owner token alone (client API §2.1)
   | "not_found"       // 404
   | "invalid_request" // 400
   | "conflict"        // 409
@@ -19,6 +20,7 @@ export interface ErrorEnvelope {
 const httpStatus: Record<ErrorCode, number> = {
   unauthenticated: 401,
   forbidden: 403,
+  local_only: 403,
   not_found: 404,
   invalid_request: 400,
   conflict: 409,
@@ -31,6 +33,7 @@ const httpStatus: Record<ErrorCode, number> = {
 const canonicalMessage: Record<ErrorCode, string> = {
   unauthenticated: "authentication required",
   forbidden: "not granted",
+  local_only: "only the Mac app on this console's Mac can do this",
   not_found: "not found",
   invalid_request: "invalid request",
   conflict: "conflict",

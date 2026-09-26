@@ -126,7 +126,7 @@ Every field, its typed forms, and what the index stores.
 | Field | Typed | Stored | Notes |
 | --- | --- | --- | --- |
 | **due** | `due 2026-09-22`, `due friday`, `due tomorrow`, `due 22 sep` | `due date` | A hard date the user set. Never moved by anything. |
-| **scheduled** | `do 2026-09-22`, `do monday` | `scheduled_for date` | The day the user means to *do* it, as distinct from the day it is owed. |
+| **scheduled** | `do 2026-09-22`, `do monday` | `scheduled_for date` | The day the user means to *do* it, as distinct from the day it is owed. Shown as **Planned** in the app (C134); *Scheduled* is the sidebar row. |
 | **start** | `start 2026-10-01` | `start_on date` | Not actionable before this. Suppressed from Today until then. |
 | **done** | (added by the plugin on tick) `done 2026-09-19` | `done_on date` + `done_on_observed bool` | If the line is `[x]` with no `done`, the index records the first day it *saw* it checked and sets `done_on_observed`. Honest, and it is what makes yesterday's standup work before the plugin exists. |
 | **priority** | `p1`…`p4`; aliases `critical`, `high`, `normal`, `low` | `priority smallint` | **D5.** See below. |

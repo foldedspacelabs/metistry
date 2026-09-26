@@ -95,6 +95,8 @@ each set **On**, **Ask** or **Off**. Anything not listed is not granted. For
 knowledge, reading is by **Titles** (page titles and one-line descriptions) or
 **Folders** (the folders you list, in full, nothing outside them).
 
+**Planned** — the day you mean to work on a task (typed `do friday`), as distinct from **Due**, the day it is owed.
+
 **Routine** — work Metis runs for you on a schedule: an agent, a task and a
 time. The **Morning Brief** is one, **Standup** another; the nightly **fold**,
 which reads the day and writes what it learned into knowledge, is a third. The

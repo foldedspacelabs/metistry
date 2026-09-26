@@ -3,11 +3,12 @@
 // and prints the WCAG contrast table that design-system.md quotes.
 //
 //   node ops/scripts/build-design-tokens.mjs          # write tokens.css + print the table
-//   node ops/scripts/build-design-tokens.mjs --check  # fail if tokens.css is stale or a pair is below AA
+//   node ops/scripts/build-design-tokens.mjs --check  # fail if an output is stale, a pair is below AA,
+//                                                     # or a decision-19 check fails (see below)
 //
 // One source of truth: tokens.json. tokens.css is a build artifact that is
 // committed so the PWA and the preview page can load it with no build step.
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const root = new URL("../../", import.meta.url);
@@ -51,14 +52,41 @@ const contrast = (a, b) => {
 // near-white ground — steps four and five land within 0.03 of each other and
 // stop being distinguishable, which is the opposite of accessible.
 const NON_TEXT = new Set(["focus-ring", "border-control", "chart-1", "chart-2", "chart-3", "chart-4", "chart-5"]);
+
+// A `contrast` entry names a ground the role is painted on. A string is the
+// role as text (4.5:1, or 3:1 for a NON_TEXT role). `{ "on": …, "as": "glyph" }`
+// is the role as a non-text mark only — a dot, a status glyph — held to
+// WCAG 1.4.11's 3:1: for a ground where it is legal as a mark and not as words
+// (a selected row's `accent-quiet` re-inks every state colour inside it, and
+// only some of them clear 4.5:1 there).
+const grounds = (def) =>
+  (def.contrast ?? []).map((e) => (typeof e === "string" ? { on: e, as: "text" } : { on: e.on, as: e.as ?? "text" }));
+
+// Every problem is collected rather than thrown, so one run reports all of
+// them and CI prints them together: { kind, where, message }.
+const findings = [];
+const finding = (kind, where, message) => findings.push({ kind, where, message });
+
 const rows = [];
 for (const [name, def] of Object.entries(T.color)) {
-  for (const on of def.contrast ?? []) {
+  for (const { on, as } of grounds(def)) {
     const bg = T.color[on];
+    if (bg === undefined) {
+      finding("contrast", "tokens.json", `${name} declares a ground \`${on}\` that is not a colour role`);
+      continue;
+    }
+    if (as !== "text" && as !== "glyph") {
+      finding("contrast", "tokens.json", `${name} on ${on}: \`as\` is ${JSON.stringify(as)}; it is "text" or "glyph"`);
+      continue;
+    }
     for (const mode of ["light", "dark"]) {
+      if (!hex(def[mode]) || !hex(bg[mode])) {
+        finding("contrast", "tokens.json", `${name} on ${on} (${mode}): both sides must be #rrggbb to be checked`);
+        continue;
+      }
       const ratio = contrast(def[mode], bg[mode]);
-      const min = NON_TEXT.has(name) ? 3 : 4.5;
-      rows.push({ fg: name, bg: on, mode, ratio, min, pass: ratio >= min });
+      const min = NON_TEXT.has(name) || as === "glyph" ? 3 : 4.5;
+      rows.push({ fg: name, bg: on, as, mode, ratio, min, pass: ratio >= min });
     }
   }
 }
@@ -68,7 +96,7 @@ const table = [
   "| --- | --- | --- | ---: | ---: | --- |",
   ...rows.map(
     (r) =>
-      `| \`${r.fg}\` | \`${r.bg}\` | ${r.mode} | ${r.ratio.toFixed(2)}:1 | ${r.min}:1 | ${r.pass ? "pass" : "**FAIL**"} |`,
+      `| \`${r.fg}\`${r.as === "glyph" ? " (glyph)" : ""} | \`${r.bg}\` | ${r.mode} | ${r.ratio.toFixed(2)}:1 | ${r.min}:1 | ${r.pass ? "pass" : "**FAIL**"} |`,
   ),
 ].join("\n");
 
@@ -334,8 +362,275 @@ const inlinePreview = (html) => {
   return `${html.slice(0, a + BEGIN.length)}\n${css}\n${html.slice(b)}`;
 };
 
+// ----- decision 19: the painted ground, the stray literal, the pinned accent -----
+// The contrast table is only as honest as the pairs tokens.json declares, and
+// nearly every colour fault in the design engagement was a colour used on a
+// ground nobody had declared (review-00 §3.4, C6–C8; amendments §1.7). Four
+// checks close the ways that has happened; both modes run them.
+//
+//   quiet fill    every `*-quiet` fill is declared, as text, as the ground of
+//                 the ink it exists for — so a chip is checked on the fill it
+//                 is painted on, not on `surface`, which nothing is drawn on.
+//   painted pair  a web CSS rule that paints a token ink on a token ground
+//                 (`color:` and `background:` in one rule) names a declared
+//                 pair; a ground declared for a glyph only does not cover text.
+//                 A computed ground — a `color-mix()` tint — is no token and
+//                 has no pair to declare: the quiet fills exist to replace
+//                 those (C6), and this check reads a chip once it uses one.
+//   stray hex     every hex colour in docs/product/design/*.svg and the web
+//                 CSS is a token's value. A colour that is not a token is a
+//                 colour no check has ever seen. ONE EXEMPTION, named in every
+//                 run's output: docs/product/design/legacy/ — the wireframes
+//                 drawn before round B's palette, superseded by the canvas
+//                 boards and kept as history, unrepainted (its README.md).
+//   accent        `accent` is pinned (ruling 8, C11): a literal in both
+//                 schemes, mapped to no system accent in tokens.json, and read
+//                 from none in the Mac app's Swift or the web CSS. The user's
+//                 accent setting would otherwise repaint the one colour every
+//                 declared accent pair describes — and a purple setting makes
+//                 it `agent`. Apple's own controls keep controlAccentColor;
+//                 nothing we draw reads it.
+const designDir = new URL("docs/product/design/", root);
+const webDir = new URL("apps/console/web/", root);
+const swiftDir = new URL("apps/macos/sources/", root);
+// The stray-hex exemption (see above). The glob is the top level of
+// docs/product/design only, so this directory is not read; it is named here and
+// counted in the summary so the exemption is a decision on the page, not an
+// accident of a non-recursive readdir.
+const legacyDir = new URL("docs/product/design/legacy/", root);
+
+/** Same length, newlines kept: offsets and line numbers survive blanking. */
+const blank = (s) => s.replace(/[^\n]/g, " ");
+/** 1-based line of a character offset. */
+const lineAt = (text, index) => {
+  let n = 1;
+  for (let i = text.indexOf("\n"); i !== -1 && i < index; i = text.indexOf("\n", i + 1)) n++;
+  return n;
+};
+
+/**
+ * Every declaration in a stylesheet: { block, selector, prop, value, line }.
+ * Only innermost `{…}` bodies are read, so a selector (`#feed-list`) or an
+ * at-rule's prelude is never mistaken for a value.
+ */
+const declarations = (text) => {
+  const src = text.replace(/\/\*[\s\S]*?\*\//g, blank);
+  const out = [];
+  let block = 0;
+  for (const m of src.matchAll(/([^{}]*)\{([^{}]*)\}/g)) {
+    block++;
+    const selector = m[1].split(";").pop().trim().replace(/\s+/g, " ");
+    let at = m.index + m[1].length + 1;
+    for (const part of m[2].split(";")) {
+      const colon = part.indexOf(":");
+      if (colon !== -1) {
+        const prop = part.slice(0, colon).trim().toLowerCase();
+        out.push({ block, selector, prop, value: part.slice(colon + 1).trim(), line: lineAt(src, at + part.search(/\S/)) });
+      }
+      at += part.length + 1;
+    }
+  }
+  return out;
+};
+
+/**
+ * Every colour-bearing value in an SVG: presentation attributes, `style=""`,
+ * and `<style>` sheets. Text content is prose — "PR #418" is not a colour —
+ * and `href="#feed"` is not a colour attribute.
+ */
+const COLOUR_ATTR = /\s(fill|stroke|stop-color|flood-color|lighting-color|color)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
+const STYLE_ATTR = /\sstyle\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
+const STYLE_EL = /(<style\b[^>]*>)([\s\S]*?)(<\/style>)/g;
+const svgValues = (text) => {
+  const out = [];
+  // The sheets, read as CSS where they stand: everything else blanked.
+  let sheets = "";
+  let last = 0;
+  for (const m of text.matchAll(STYLE_EL)) {
+    const start = m.index + m[1].length;
+    sheets += blank(text.slice(last, start)) + m[2].replace(/<!\[CDATA\[|\]\]>/g, blank);
+    last = start + m[2].length;
+  }
+  sheets += blank(text.slice(last));
+  for (const d of declarations(sheets)) out.push({ value: d.value, line: d.line });
+  // The tags, with the sheets blanked so a `>` in a selector cannot end a tag.
+  const tags = text.replace(STYLE_EL, (_, open, body, close) => open + blank(body) + close);
+  for (const t of tags.matchAll(/<[A-Za-z][^>]*>/g)) {
+    for (const a of t[0].matchAll(COLOUR_ATTR)) out.push({ value: a[2] ?? a[3], line: lineAt(tags, t.index + a.index) });
+    for (const a of t[0].matchAll(STYLE_ATTR)) {
+      for (const part of (a[1] ?? a[2]).split(";")) {
+        const colon = part.indexOf(":");
+        if (colon !== -1) out.push({ value: part.slice(colon + 1), line: lineAt(tags, t.index + a.index) });
+      }
+    }
+  }
+  return out;
+};
+
+// `&#123;` is an entity and `url(#abc)` a reference, not colours.
+const HEX = /(?<!&)#(?:[0-9a-f]{8}|[0-9a-f]{6}|[0-9a-f]{3,4})(?![0-9a-z_-])/gi;
+const hexesIn = (value) => [...value.replace(/url\([^)]*\)/gi, "").matchAll(HEX)].map((m) => m[0]);
+/** `#ABC` → `#aabbcc`; `#rrggbbff` → `#rrggbb`. A hex with real alpha stays as written: a composite is never a token. */
+const normHex = (h) => {
+  let s = h.slice(1).toLowerCase();
+  if (s.length <= 4) s = [...s].map((c) => c + c).join("");
+  if (s.length === 8 && s.endsWith("ff")) s = s.slice(0, 6);
+  return `#${s}`;
+};
+const tokenHexes = new Set(
+  Object.values(T.color)
+    .flatMap((d) => [d.light, d.dark])
+    .filter((v) => typeof v === "string" && hex(v))
+    .map(normHex),
+);
+
+/** Report every hex in `values` that is not a token, one finding per file. Returns how many hexes were read. */
+const strayHexes = (where, values) => {
+  const bad = new Map();
+  let seen = 0;
+  for (const { value, line } of values) {
+    for (const h of hexesIn(value)) {
+      seen++;
+      const n = normHex(h);
+      if (tokenHexes.has(n)) continue;
+      const b = bad.get(n) ?? { line, count: 0 };
+      b.count++;
+      bad.set(n, b);
+    }
+  }
+  if (bad.size) {
+    const total = [...bad.values()].reduce((a, b) => a + b.count, 0);
+    const list = [...bad].map(([h, b]) => `${h} (line ${b.line}${b.count > 1 ? `, ×${b.count}` : ""})`).join(", ");
+    finding("stray hex", where, `${total} colour(s) that are not a token's value — ${list}`);
+  }
+  return seen;
+};
+
+const TOKEN_VAR = /^var\(\s*--mt-color-([a-z0-9-]+)\s*(?:,[^)]*)?\)$/;
+const tokenOf = (value) => TOKEN_VAR.exec(value.replace(/!important\s*$/i, "").trim())?.[1] ?? null;
+
+/** Every rule that sets a token `color` and a token `background` must name a declared pair. Returns how many were read. */
+const paintedPairs = (where, decls) => {
+  const blocks = new Map();
+  for (const d of decls) {
+    if (!blocks.has(d.block)) blocks.set(d.block, []);
+    blocks.get(d.block).push(d);
+  }
+  let n = 0;
+  for (const ds of blocks.values()) {
+    const fg = ds.findLast((d) => d.prop === "color");
+    const bg = ds.findLast((d) => d.prop === "background" || d.prop === "background-color");
+    if (!fg || !bg) continue;
+    const [ink, ground] = [tokenOf(fg.value), tokenOf(bg.value)];
+    // Not a token pair (a color-mix(), a literal, `transparent`), or an unknown role — reported on its own.
+    if (!ink || !ground || !T.color[ink] || !T.color[ground]) continue;
+    n++;
+    const declared = grounds(T.color[ink]).find((g) => g.on === ground);
+    if (!declared) {
+      finding("painted pair", `${where}:${fg.line}`, `\`${fg.selector}\` paints ${ink} on ${ground}, a pair tokens.json does not declare — add "${ground}" to ${ink}'s contrast, or repaint`);
+    } else if (declared.as === "glyph" && !NON_TEXT.has(ink)) {
+      finding("painted pair", `${where}:${fg.line}`, `\`${fg.selector}\` paints ${ink} as text on ${ground}, which is declared for a glyph only (3:1); text needs 4.5:1`);
+    }
+  }
+  return n;
+};
+
+/** Swift with string literals and comments blanked: a role's description may say "controlAccentColor"; code may not. */
+const swiftCode = (src) =>
+  src
+    .replace(/"""[\s\S]*?"""/g, blank)
+    .replace(/"(?:[^"\\\n]|\\.)*"/g, blank)
+    .replace(/\/\*[\s\S]*?\*\//g, blank)
+    .replace(/\/\/[^\n]*/g, blank);
+const SYSTEM_ACCENT = /\b(?:controlAccentColor|accentColor)\b/i;
+
+/** Runs every decision-19 check against the tree on disk. Returns counts for the summary line. */
+const lint = () => {
+  // quiet fill
+  for (const name of Object.keys(T.color).filter((n) => n.endsWith("-quiet"))) {
+    const ink = name.slice(0, -"-quiet".length);
+    if (T.color[ink]) {
+      const g = grounds(T.color[ink]).find((x) => x.on === name);
+      if (!g || g.as !== "text") {
+        finding("quiet fill", "tokens.json", `${name} is the fill ${ink} is painted on, but ${ink}'s contrast does not declare "${name}" as text — the check would be reading a ground that never ships`);
+      }
+    } else if (!Object.values(T.color).some((d) => grounds(d).some((x) => x.on === name))) {
+      finding("quiet fill", "tokens.json", `${name} is a quiet fill that no role declares as its ground`);
+    }
+  }
+
+  // accent, in the tokens
+  const accent = T.color.accent;
+  if (!accent) finding("accent", "tokens.json", "there is no `accent` role");
+  else {
+    for (const mode of ["light", "dark"]) {
+      if (typeof accent[mode] !== "string" || !hex(accent[mode])) {
+        finding("accent", "tokens.json", `accent.${mode} is ${JSON.stringify(accent[mode])}; the pinned accent is a #rrggbb literal`);
+      }
+    }
+  }
+  for (const [name, def] of Object.entries(T.color)) {
+    if (SYSTEM_ACCENT.test(String(def.apple ?? ""))) {
+      finding("accent", "tokens.json", `${name}.apple maps to the system accent (${JSON.stringify(def.apple)}); the brand colour is pinned, and controlAccentColor drives only the controls Apple draws itself`);
+    }
+  }
+
+  // accent, in the Mac app
+  for (const f of readdirSync(swiftDir, { recursive: true }).filter((p) => p.endsWith(".swift")).sort()) {
+    const code = swiftCode(readFileSync(new URL(f, swiftDir), "utf8"));
+    for (const m of code.matchAll(/\bcontrolAccentColor\b|\.accentColor\b/g)) {
+      finding("accent", `apps/macos/sources/${f}:${lineAt(code, m.index)}`, `${m[0].replace(/^\./, "")} reads the system accent; draw with the pinned role (MetistryColorRole.accent)`);
+    }
+  }
+
+  // the design SVGs: stray hex (legacy/ exempt — counted, not read)
+  const svgs = readdirSync(designDir).filter((f) => f.endsWith(".svg")).sort();
+  let legacy = 0;
+  try {
+    legacy = readdirSync(legacyDir).filter((f) => f.endsWith(".svg")).length;
+  } catch {
+    // no legacy directory: nothing is exempt
+  }
+  let hexes = 0;
+  for (const f of svgs) hexes += strayHexes(`docs/product/design/${f}`, svgValues(readFileSync(new URL(f, designDir), "utf8")));
+
+  // the web CSS: stray hex, painted pair, unknown role, accent. tokens.css is
+  // this generator's own output (its staleness is checked above), so it is
+  // the tokens by construction and is not read again here.
+  const sheets = readdirSync(webDir).filter((f) => f.endsWith(".css") && f !== "tokens.css").sort();
+  let painted = 0;
+  for (const f of sheets) {
+    const where = `apps/console/web/${f}`;
+    const decls = declarations(readFileSync(new URL(f, webDir), "utf8"));
+    hexes += strayHexes(where, decls);
+    painted += paintedPairs(where, decls);
+    for (const d of decls) {
+      for (const m of d.value.matchAll(/var\(\s*--mt-color-([a-z0-9-]+)/g)) {
+        if (!T.color[m[1]]) finding("unknown role", `${where}:${d.line}`, `--mt-color-${m[1]} is not a colour role in tokens.json`);
+      }
+      if (/\baccentcolor(?:text)?\b/i.test(d.value)) {
+        finding("accent", `${where}:${d.line}`, `\`${d.selector}\` paints with the system AccentColor; use var(--mt-color-accent)`);
+      }
+    }
+  }
+  return { hexes, svgs: svgs.length, legacy, sheets: sheets.length, painted };
+};
+
+/** Print every failure; returns how many there were. */
+const report = () => {
+  const failures = rows.filter((r) => !r.pass);
+  if (failures.length) {
+    console.error(`${failures.length} colour pair(s) below the minimum:`);
+    for (const f of failures) console.error(`  ${f.fg}${f.as === "glyph" ? " (glyph)" : ""} on ${f.bg} (${f.mode}) = ${f.ratio.toFixed(2)}:1, needs ${f.min}:1`);
+  }
+  if (findings.length) {
+    console.error(`${findings.length} design-token problem(s):`);
+    for (const f of findings) console.error(`  [${f.kind}] ${f.where}: ${f.message}`);
+  }
+  return failures.length + findings.length;
+};
+
 const check = process.argv.includes("--check");
-const failures = rows.filter((r) => !r.pass);
 
 if (check) {
   for (const p of cssPaths) {
@@ -367,20 +662,23 @@ if (check) {
     console.error(`${fileURLToPath(swiftPath)} is stale — run: node ops/scripts/build-design-tokens.mjs`);
     process.exit(1);
   }
-  if (failures.length) {
-    console.error(`${failures.length} colour pair(s) below the minimum:`);
-    for (const f of failures) console.error(`  ${f.fg} on ${f.bg} (${f.mode}) = ${f.ratio.toFixed(2)}:1`);
-    process.exit(1);
-  }
-  console.log(`design tokens: ok (${rows.length} pairs checked)`);
+  const seen = lint();
+  if (report()) process.exit(1);
+  console.log(
+    `design tokens: ok (${rows.length} pairs checked; ${seen.painted} painted pairs declared; ` +
+      `${seen.hexes} hex colour(s) in ${seen.svgs} SVG(s) and ${seen.sheets} stylesheet(s) are tokens` +
+      `${seen.legacy ? ` (docs/product/design/legacy/: ${seen.legacy} pre-round-B SVGs exempt)` : ""}; accent pinned)`,
+  );
 } else {
   for (const p of cssPaths) writeFileSync(p, css);
   writeFileSync(previewPath, inlinePreview(readFileSync(previewPath, "utf8")));
   writeFileSync(swiftPath, swiftFile);
   console.log(`wrote ${[...cssPaths, swiftPath].map((p) => fileURLToPath(p)).join(", ")} and inlined the CSS into preview.html`);
   console.log(table);
-  if (failures.length) {
-    console.error(`\n${failures.length} pair(s) below the minimum — fix tokens.json before committing.`);
+  lint();
+  const n = report();
+  if (n) {
+    console.error(`\n${n} problem(s) — fix them before committing.`);
     process.exit(1);
   }
 }

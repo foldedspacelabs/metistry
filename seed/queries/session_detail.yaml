@@ -1,0 +1,53 @@
+# Seeded default (D4 overlay: an instance file of the same name wins).
+#
+# Run detail's conversation (docs/product/design/screen-12-run-detail.md):
+# the working conversation itself, straight from the session archive
+# (migration 0030) — never a reconstruction of the prompt from files. One row
+# per turn: the system prompt as it was sent, the messages, and the tool
+# calls with their arguments and results (redacted before they ever reach
+# this table — T3-9).
+#
+# `expose: route` (plan §2.10) — a session's transcript is the owner's own
+# conversation, so this is reachable only through its own door
+# (`GET /api/sessions/:id`, T2-17), never the generic `/api/q/session_detail`
+# an agent's `queries: true` could otherwise reach.
+#
+# `turn_id` blank (the default) means every turn of the session, oldest
+# first — what the session summary and the conversation view both start
+# from. Set it to fetch one turn's full record. `session_id` blank names no
+# session (the `run_detail` pattern: 0/empty is an honest empty result, not
+# a special case), so a call with no params compiles and returns nothing.
+#
+# Expiry is enforced HERE, not left to the caller to filter: a session past
+# its `expires_at` is exactly the one the purge routine (T3-9) may delete out
+# from under a slow reader, so nothing this query returns can be a row a
+# concurrent purge is about to remove.
+name: session_detail
+description: >-
+  One archived session's turns in full — the system prompt as sent, the
+  messages, and the tool calls with arguments and results (redacted) — oldest
+  first. `turn_id` narrows to one turn; blank returns every turn of the
+  session. A `session_id` with no matching session, or one only expired rows
+  remain for, returns no rows.
+params:
+  session_id: { type: text, default: "" }
+  turn_id:    { type: text, default: "" }
+sql: |
+  SELECT
+    id,
+    session_id,
+    thread,
+    turn_id,
+    ts,
+    system_prompt,
+    messages,
+    tool_calls,
+    folded_at,
+    expires_at
+  FROM session_archive
+  WHERE session_id = NULLIF(:session_id, '')::uuid
+    AND (:turn_id = '' OR turn_id = :turn_id)
+    AND expires_at > now()
+  ORDER BY ts
+expose: route
+cache_ttl: 0

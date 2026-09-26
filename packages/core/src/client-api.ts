@@ -20,6 +20,11 @@
 //   owner   the owner from any client — a passkey session or the local owner token
 //   local   the owner on THIS Mac — the local owner token only, from a loopback peer
 //
+// The console's gate reads `local` off this table (`isLocalRoute`, F-13): a
+// served `local` row refuses every owner credential but the local owner token
+// with `403 local_only` (`localOnlyMessage`), before any handler runs — so a
+// row turned `local` here is enforced with no second list in the server.
+//
 // **Principals** are the credential kinds that actually get through, spelled
 // as the console's own `Auth` kinds (`apps/console/src/server.ts`) so a gate
 // can compare them directly. They are recorded, not aspired to: where an
@@ -178,12 +183,13 @@ export const CLIENT_API: readonly ClientRoute[] = [
 
   // ----- agents -----
   route("GET", "/api/agents", "the registry, each row's rendered scope, and the unanswered access requests", { ticket: "T4-6" }),
-  route("POST", "/api/agents", "register an agent and mint its bearer (shown once)", { conflict: [], ticket: "F-13" }),
+  // minting a bearer is a boundary change: the owner on this Mac, never a passkey session (F-13)
+  route("POST", "/api/agents", "register an agent and mint its bearer (shown once)", { reach: ["local"], conflict: [] }),
   route("PUT", "/api/agents/:id/grants", "replace an agent's knowledge grant", { idempotent: "natural" }),
   route("PUT", "/api/agents/:id/projects", "replace the projects an agent may work in", { idempotent: "natural" }),
   route("PUT", "/api/agents/:id/autonomy", "replace an agent's autonomy; the one route that may widen it", { idempotent: "natural", conflict: [] }),
   route("POST", "/api/agents/:id/revoke", "revoke an agent's bearer"),
-  route("POST", "/api/agents/:id/rotate", "mint a new bearer for an agent (shown once)", { ticket: "F-13" }),
+  route("POST", "/api/agents/:id/rotate", "mint a new bearer for an agent (shown once)", { reach: ["local"] }),
   route("POST", "/api/agents/:id/approve", "let a pending remote enrolment in", { idempotent: "natural" }),
   planned("GET", "/api/agents/:id/definition", "T4-6", "an agent's definition, read-only — the write is `metistry agents define`"),
 
@@ -361,6 +367,26 @@ export function matchRoute(method: string, pathname: string, routes: readonly Cl
 }
 
 const SERVED: readonly ClientRoute[] = CLIENT_API.filter((r) => r.served);
+
+/**
+ * A `local` row: the owner on THIS Mac, proved by the local owner token alone
+ * (§2.1). The table never mixes `local` with another class (a core test holds
+ * that), so "includes" and "is" are the same question — asked as "includes"
+ * so a row that ever did mix them would fail closed.
+ */
+export function isLocalRoute(r: Pick<ClientRoute, "reach">): boolean {
+  return r.reach.includes("local");
+}
+
+/**
+ * The `403 local_only` answer's message: which route, why it is refused, and
+ * what would permit it (R3) — the Mac app, on the Mac this console runs on.
+ * Sent only to an owner credential (a passkey session), after the owner gate,
+ * so it names nothing the published table does not.
+ */
+export function localOnlyMessage(r: Pick<ClientRoute, "method" | "path">): string {
+  return `${routeKey(r)} is reach \`local\`: only the Metistry Mac app (or the \`metistry\` command line) on the Mac this console runs on can do it — a passkey session cannot, even from that Mac. Open the Mac app there (docs/ops/client-api.md)`;
+}
 
 /** The served row a request is for, or undefined — what the console's gate asks before it dispatches anything to the owner. */
 export function servedRoute(method: string, pathname: string): ClientRoute | undefined {

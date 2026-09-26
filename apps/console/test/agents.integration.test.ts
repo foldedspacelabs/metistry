@@ -5,7 +5,7 @@ import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import { QueryStore } from "@foldedspacelabs/metistry-queries";
-import { mintToken, tokenHash } from "@foldedspacelabs/metistry-core";
+import { isLocalRoute, matchRoute, mintToken, tokenHash } from "@foldedspacelabs/metistry-core";
 import { makeServer } from "../src/server.js";
 import * as store from "../src/auth-store.js";
 import * as agents from "../src/agents.js";
@@ -134,10 +134,19 @@ describe.skipIf(!hasDb)("agent registry (integration)", () => {
   const agentId = `itest-${suffix}`;
   let agentToken: string;
 
+  // METISTRY_LOCAL_OWNER_TOKEN, as `metistry init` mints it: the owner on
+  // this Mac. A route the client API files under `local` (minting a bearer,
+  // F-13) is sent with it — a passkey session is refused there — and every
+  // other owner route with the passkey session, as the PWA sends it.
+  const localOwnerToken = mintToken();
+  const ownerCredential = (method: string, path: string): Record<string, string> => {
+    const row = matchRoute(method, path.split("?")[0]!)?.route;
+    return row && isLocalRoute(row) ? { authorization: `Bearer ${localOwnerToken}` } : { cookie };
+  };
   const json = (method: string, path: string, body?: unknown, headers: Record<string, string> = {}) =>
     fetch(base + path, {
       method,
-      headers: { cookie, "content-type": "application/json", ...headers },
+      headers: { ...ownerCredential(method, path), "content-type": "application/json", ...headers },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
 
@@ -148,6 +157,7 @@ describe.skipIf(!hasDb)("agent registry (integration)", () => {
       inboxDir: `/tmp/metistry-test-inbox-agents-${Date.now()}`,
       policy,
       secureCookies: false,
+      localOwner: { token: localOwnerToken, trusted: [] },
     });
     await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;

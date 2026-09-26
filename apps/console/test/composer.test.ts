@@ -62,6 +62,13 @@ describe("feed subjects: Title Case at render, and only for kinds we compose", (
     expect(titleCase("some_new_kind", "a brand new event")).toBe("a brand new event");
   });
 
+  // C18: a work_history subject is the task's own title — someone's writing,
+  // not a label the console composed — so it is not on the allow-list.
+  it("leaves a task's own title exactly as written (C18)", () => {
+    expect(titleCase("work_history", "Migrate the settings pane to tokens")).toBe("Migrate the settings pane to tokens");
+    expect(titleCase("work_history", "fix the flaky test")).toBe("fix the flaky test");
+  });
+
   it("never rewrites an identifier inside a subject", () => {
     expect(titleCase("collector_run", "github-state run failed")).toBe("github-state Run Failed");
     expect(titleCase("alert", "budget over the cap for aws-costs")).toBe("Budget Over the Cap for aws-costs");

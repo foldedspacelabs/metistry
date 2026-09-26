@@ -1,8 +1,11 @@
 // The Metistry Mac app.
 //
-// Four scenes: the window, the `Settings` scene (⌘, and the app menu — every
+// Six scenes: the window, the `Settings` scene (⌘, and the app menu — every
 // configuration the app has, and each one a front for a file the CLI owns), a
-// log window the menu bar opens, and the menu-bar item itself. Everything the
+// log window the menu bar opens, the Status window (doctor's panel, which left
+// the sidebar when the eight rows arrived — T5-2), Help ▸ Keyboard Shortcuts,
+// and the menu-bar item itself. The menus are `ShellCommands` (MetistryKit):
+// every shortcut in the app is one of its items (C119). Everything the
 // app knows how to do, it does by running a `metistry` verb — it opens no
 // database connection and shells out to no git of its own (invariant 3;
 // invariant 9's spirit applied to the client).
@@ -51,6 +54,10 @@ struct MetistryApp: App {
             sessionSpawner: runner
         )
         _model = State(initialValue: model)
+        // The shell polls for the app's lifetime, not a window's, and the Dock
+        // tile carries the Needs You badge (N9) — the same label as the row,
+        // nothing at zero.
+        model.startShell(dockBadge: { label in NSApplication.shared.dockTile.badgeLabel = label })
         #if os(macOS)
         // Sparkle fills in the kit's plain UpdateStatus box: the kit stays free
         // of the framework, and the Updates pane and the menu read one type.
@@ -59,7 +66,8 @@ struct MetistryApp: App {
     }
 
     var body: some Scene {
-        WindowGroup(id: Self.mainWindowID) {
+        // The title is the product's on every screen (brand-kit, 2026-09-19).
+        WindowGroup(ShellTitle.window, id: Self.mainWindowID) {
             RootView(model: model)
                 .frame(minWidth: 720, minHeight: 460)
                 .sheet(isPresented: Binding(get: { model.wizard.isPresented }, set: { model.wizard.isPresented = $0 })) {
@@ -80,6 +88,7 @@ struct MetistryApp: App {
             CommandGroup(after: .appInfo) {
                 CheckForUpdatesCommand(updater: updater)
             }
+            ShellCommands(shell: model.shell)
         }
         #endif
 
@@ -96,6 +105,20 @@ struct MetistryApp: App {
             LogWindowView(model: model.logs)
         }
         .defaultSize(width: 760, height: 520)
+
+        // Doctor's panel, reached from the Window menu. Settings' Services pane
+        // says "Run doctor from the Status window", and this is that window.
+        Window("Status", id: ShellWindowID.status) {
+            StatusPanel(model: model.status, signIn: model.consoleSignIn, runtime: model.runtime)
+                .frame(minWidth: 560, minHeight: 420)
+        }
+        .defaultSize(width: 760, height: 600)
+
+        // Help ▸ Keyboard Shortcuts (⌘/): the menus' own table, on one page.
+        Window("Keyboard Shortcuts", id: ShellWindowID.keyboardShortcuts) {
+            KeyboardShortcutsView(shell: model.shell)
+        }
+        .defaultSize(width: 560, height: 640)
 
         MenuBarExtra {
             // MenuBarContent's own summary item carries the open/close hook, so
@@ -121,6 +144,6 @@ struct MetistryApp: App {
         #endif
     }
 
-    static let mainWindowID = "main"
+    static let mainWindowID = ShellWindowID.main
     static let logWindowID = "log"
 }

@@ -40,7 +40,8 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pg from "pg";
-import { CLIENT_API, INSTANCE_LAYOUT, mintToken, resolveInstanceLayout } from "@foldedspacelabs/metistry-core";
+import { CLIENT_API, INSTANCE_LAYOUT, InstanceSecrets, SECRET_USE_META_KEY, memoryKeychain, mintToken, resolveInstanceLayout } from "@foldedspacelabs/metistry-core";
+import { readInstanceId } from "@foldedspacelabs/metistry-cli";
 import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
 import { QueryStore } from "@foldedspacelabs/metistry-queries";
 import { memoryVault } from "@foldedspacelabs/metistry-artifacts";
@@ -114,6 +115,22 @@ await writeFile(
 `,
 );
 
+// the Secrets list (§2.14): a policy file, and a Keychain in memory — never the
+// login Keychain — holding this instance's item, so `present` reads true
+await writeFile(
+  layout.path("secrets"),
+  `secrets:
+  github_write:
+    hosts: [api.github.com]
+    grants:
+      connection:github: on
+      agent:devin: ask
+`,
+);
+const fixtureKeychain = memoryKeychain();
+const instanceSecrets = new InstanceSecrets(fixtureKeychain, await readInstanceId(instanceDir));
+await instanceSecrets.set("github_write", "fixture-value-never-recorded");
+
 // ---- the outside world, faked in-process ------------------------------------------
 
 /** The reconciler's bridge, GitHub, a provider's /models: every outbound call the console could make lands here. */
@@ -161,6 +178,7 @@ const server = makeServer(pool, queries, {
   identity: await loadPublicIdentity(layout.path("identity")),
   version: JSON.parse(readFileSync(join(REPO_ROOT, "apps/console/package.json"), "utf8")).version,
   instancesFiles: layout.path("instances"),
+  secrets: { file: layout.path("secrets"), presence: instanceSecrets.presence() },
   computeAdmin: {
     instanceDir,
     seedDir: join(REPO_ROOT, "seed"),
@@ -207,6 +225,8 @@ ids.run = Number((await one(
   [turnId],
 )).id);
 await pool.query(`INSERT INTO runs (component, kind, tool, ok, duration_ms, meta) VALUES ('assistant', 'tool', 'knowledge_search', true, 12, jsonb_build_object('turn_id', $1::text)), ('assistant', 'tool', 'tasks_update', true, 30, jsonb_build_object('turn_id', $1::text))`, [turnId]);
+// the egress fill's stamp: the NAMES a run filled in, which is where *last used* comes from
+await pool.query(`INSERT INTO runs (ts, component, kind, ok, meta) VALUES ('2026-09-28T13:00:02.000Z', 'egress-proxy', 'egress', true, jsonb_build_object($1::text, jsonb_build_array('github_write')))`, [SECRET_USE_META_KEY]);
 
 await pool.query(
   `INSERT INTO knowledge_files (path, title, description, draft, status, mtime, indexed_at) VALUES
@@ -251,6 +271,7 @@ const REQUESTS = [
   ["GET /api/status", () => ({ path: "/api/status" })],
   ["GET /api/devices", () => ({ path: "/api/devices" })],
   ["GET /api/instances", () => ({ path: "/api/instances" })],
+  ["GET /api/secrets", () => ({ path: "/api/secrets" })],
   ["GET /api/commands", () => ({ path: "/api/commands" })],
   ["GET /api/proposals", () => ({ path: "/api/proposals" })],
   ["GET /api/agents", () => ({ path: "/api/agents" })],

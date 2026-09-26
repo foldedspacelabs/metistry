@@ -35,6 +35,7 @@ import { checkLocalOwner, type LocalOwnerConfig } from "./local-owner.js";
 import { serveStatic } from "./static.js";
 import { capabilitiesOf, type PublicIdentity } from "./identity.js";
 import { loadInstances } from "./instances.js";
+import { listSecrets, SECRETS_NOT_AVAILABLE, type SecretsView } from "./secrets-route.js";
 import { NDJSON_CONTENT_TYPE, RUNS_EXPORT_QUERY, parseExportParams, streamRunsExport } from "./runs-export.js";
 import { route as routeMessage, type Rules } from "./router.js";
 import { sendToSession, storeSubscription, type PushConfig } from "./push.js";
@@ -99,6 +100,12 @@ export interface ConsoleConfig {
    * all and the route answers 503 (degrades: absent).
    */
   instancesFiles?: string | undefined;
+  /**
+   * `GET /api/secrets` (secrets-route.ts, plan §2.14): the instance's
+   * `secrets.yaml` and a PRESENCE probe bound to its instance_id — never
+   * anything that reads a value. Absent = the route answers 503.
+   */
+  secrets?: SecretsView | undefined;
 }
 
 // ----- since-cursors (docs/ops/client-api.md) -----
@@ -856,6 +863,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         key === "GET /api/runs/export" ||
         RUN_DETAIL_ROUTE.test(key) ||
         key === "GET /api/instances" ||
+        key === "GET /api/secrets" ||
         key === "GET /api/commands" ||
         // `/api/compute*` is owner-only CONFIGURATION, not an invariant-10
         // action: it changes how the system behaves, so it is the user's
@@ -886,6 +894,22 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         return sendJson(res, statusFor("invalid_request"), errorEnvelope("invalid_request", `instances.yaml does not validate: ${r.errors.join("; ")}`));
       }
       return sendJson(res, 200, { instances: r.value.instances, as_of: new Date().toISOString() });
+    }
+
+    // ----- the Secrets list (§2.14): names and policy, NEVER a value -----
+    // The file, a presence probe and a named query; nothing handed to this
+    // door can read a Keychain item's data (secrets-route.ts). Every write is
+    // `metistry secrets` on the Mac (M7).
+    if (key === "GET /api/secrets") {
+      if (!cfg.secrets) return sendError(res, "not_available", SECRETS_NOT_AVAILABLE);
+      const r = await listSecrets(cfg.secrets, queries);
+      if (!r.ok) {
+        // the ledger records THAT it failed, not the parser's words: a
+        // pasted value in the wrong place could be quoted in them
+        await audit("secrets", "read", false, { reason: "secrets.yaml does not validate" });
+        return sendJson(res, statusFor("invalid_request"), errorEnvelope("invalid_request", r.message));
+      }
+      return sendJson(res, 200, { secrets: r.secrets, as_of: new Date().toISOString() });
     }
 
     // ----- the runs audit export (S5): NDJSON, streamed, through the named query -----

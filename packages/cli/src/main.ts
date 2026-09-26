@@ -66,7 +66,22 @@ import {
 import { renderRunsExport, runsExport } from "./runs.js";
 import type { LockSource } from "./lock.js";
 import { installRuntime } from "./runtime-install.js";
-import { listSecrets, mintSecret, purgeSecrets, renderSecretList, syncSecrets, type SyncDirection } from "./secrets.js";
+import {
+  listSecrets,
+  mintSecret,
+  purgeSecrets,
+  renderNamedSecrets,
+  renderSecretList,
+  secretsGrant,
+  secretsHosts,
+  secretsListNamed,
+  secretsRemove,
+  secretsReplace,
+  secretsSet,
+  syncSecrets,
+  type NamedSecretsOptions,
+  type SyncDirection,
+} from "./secrets.js";
 import { controlServices, downAll, renderDown, renderServiceResults, serviceLogs, UnknownServiceError, type ServiceAction } from "./service-control.js";
 import { StepRunner } from "./steps.js";
 import { renderTemplatesCheck, templatesCheck } from "./templates.js";
@@ -91,7 +106,10 @@ export interface ParsedArgs {
  * `--version <x.y.z>` silently installed the latest release instead
  * (#198, "not fixed here" #2).
  */
-export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "dry-run", "allow-dirty", "no-launchd", "no-compose", "no-color", "skip-build", "skip-migrate", "rollback", "allow-legacy", "yes", "follow", "namespace", "rotate", "list", "complete", "skip-test", "remote", "json-lines", "stdio"]);
+export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "dry-run", "allow-dirty", "no-launchd", "no-compose", "no-color", "skip-build", "skip-migrate", "rollback", "allow-legacy", "yes", "follow", "namespace", "rotate", "list", "complete", "skip-test", "remote", "json-lines", "stdio", "named", "clear"]);
+
+/** The §2.14 verbs over owner-named secrets (M7). `list --named` joins them; `sync|mint|list|purge` are the install's own variables. */
+export const NAMED_SECRET_VERBS = new Set(["set", "replace", "remove", "hosts", "grant"]);
 
 /** `--channel git|release` — anything else is a typo, not a guess (the lock parser is strict for the same reason). */
 export function parseChannel(v: string | undefined): LockSource | undefined {
@@ -289,8 +307,29 @@ const USAGE = `metistry — Metistry command line
       Items are scoped by account: instance-scoped ones under the instance's
       instance_id, user-scoped ones (your compute provider keys, your AWS keys)
       under the shared per-user account — secrets.ts SECRET_SCOPES is the table.
-      purge deletes one instance's items and nothing else; without --yes it only
-      previews.
+      purge deletes one instance's items and nothing else — its owner-named
+      secrets included; without --yes it only previews.
+
+  metistry secrets set <name> [--hosts <host>,…] [--expires <date>] [--instance <dir>]
+  metistry secrets replace <name> [--expires <date>] [--instance <dir>]
+  metistry secrets remove <name> [--yes] [--instance <dir>]
+  metistry secrets hosts <name> [<host> …] [--clear] [--instance <dir>]
+  metistry secrets grant <name> <connection:<name>|agent:<id>> <on|ask|off>
+  metistry secrets list --named [--json] [--instance <dir>]
+      Owner-named secrets (plan §2.14), referenced as {{ secret.<name> }} in
+      connection files, compute providers and manifests. A name is lowercase
+      snake_case. The value is read from STDIN — never an argument — and goes
+      into the login Keychain as metistry:secret:<name> under THIS instance's
+      instance_id: per instance only, never shared with another instance on
+      this Mac. The policy — the hosts it is sent only to, who may use it (On
+      · Ask · Off; unlisted = Off), an expiry — goes into
+      .metistry/secrets.yaml through the reconciler as you; never a value.
+      set refuses a name the file already has (replace swaps the value and
+      clears an old expiry); remove previews what references the secret and
+      deletes nothing without --yes; hosts with no host shows the list, with
+      hosts replaces it, --clear empties it. list --named prints names,
+      hosts, grants and whether the Keychain holds an item (--json: the rows
+      GET /api/secrets serves). Values are never printed.
 
   metistry console whoami [--json] [--instance <dir>] [--env-file <path>]
       Ask the console who it thinks you are, using this install's
@@ -662,6 +701,7 @@ export const HELP_GROUPS: Array<{ title: string; verbs: Array<[string, string]> 
       ["init <dir>", "create a private instance repo from the product's seed/"],
       ["connect-repo <url>", "point it at a private remote, with credentials to push with"],
       ["secrets sync|mint|list|purge", "the login Keychain is the store; .env is generated from it"],
+      ["secrets set|replace|remove|hosts|grant", "owner-named secrets, per instance: the value in the Keychain, the policy in secrets.yaml"],
       ["runtime install --from <bundle>", "seed a writable product dir from a signed app bundle"],
       ["up", "containers and host jobs, then doctor"],
       ["down", "stop everything this instance runs, then confirm by looking"],
@@ -961,6 +1001,57 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
     }
     case "secrets": {
       const sub = positional[0];
+      if ((sub !== undefined && NAMED_SECRET_VERBS.has(sub)) || (sub === "list" && flags.named === true)) {
+        // An owner-named secret needs the instance, not a `.env`: its value
+        // is in the Keychain under the instance's id, its policy in the
+        // instance's secrets.yaml.
+        const loadedNamed = loadEnv();
+        const instanceDir = str(flags, "instance") ?? loadedNamed.instanceDir;
+        if (!instanceDir) {
+          err("secrets needs the instance repo: pass --instance <dir> or set METISTRY_INSTANCE_DIR (docs/ops/cli.md) — secrets.yaml lives there");
+          return 2;
+        }
+        const instanceId = await readInstanceId(instanceDir);
+        const json = flags.json === true;
+        const namedOpts: NamedSecretsOptions = {
+          instanceDir,
+          instanceId,
+          env: process.env,
+          platform: io.platform ?? process.platform,
+          uid: io.uid ?? (typeof process.getuid === "function" ? process.getuid() : 0),
+          fetchFn: io.fetchFn ?? fetch,
+          dryRun: flags["dry-run"] === true,
+          out: json ? err : out,
+          ...(io.exec ? { exec: io.exec } : {}),
+          ...(io.readStdin ? { readSecret: io.readStdin } : {}),
+        };
+        try {
+          const done = (r: unknown): number => {
+            if (json) out(JSON.stringify(r, null, 2));
+            return 0;
+          };
+          switch (sub) {
+            case "set":
+              return done(await secretsSet(positional[1], { hosts: csv(str(flags, "hosts")), expires: str(flags, "expires") }, namedOpts));
+            case "replace":
+              return done(await secretsReplace(positional[1], { expires: str(flags, "expires") }, namedOpts));
+            case "remove":
+              return done(await secretsRemove(positional[1], { yes: flags.yes === true }, namedOpts));
+            case "hosts":
+              return done(await secretsHosts(positional[1], { hosts: positional.slice(2), clear: flags.clear === true }, namedOpts));
+            case "grant":
+              return done(await secretsGrant(positional[1], positional[2], positional[3], namedOpts));
+            default: {
+              const rows = await secretsListNamed(namedOpts);
+              out(json ? JSON.stringify({ secrets: rows }, null, 2) : renderNamedSecrets(rows, instanceId));
+              return 0;
+            }
+          }
+        } catch (e) {
+          err(`metistry secrets ${sub}: ${e instanceof Error ? e.message : String(e)}`);
+          return 1;
+        }
+      }
       const loaded = loadEnv();
       const paths = loaded.paths;
       if (!paths) {
@@ -1022,10 +1113,12 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
               return 2;
             }
             const r = await purgeSecrets({ ...secretsOpts, instanceDir: dir, yes: flags.yes === true });
-            return r.found.length > 0 && r.deleted.length !== r.found.length && flags.yes === true ? 1 : 0;
+            const incomplete = r.deleted.length !== r.found.length || r.namedDeleted.length !== r.named.length;
+            return r.found.length + r.named.length > 0 && incomplete && flags.yes === true ? 1 : 0;
           }
           default:
-            err("usage: metistry secrets sync --to env|keychain | metistry secrets mint <VAR> | metistry secrets list | metistry secrets purge --instance <dir> [--yes]");
+            err("usage: metistry secrets sync --to env|keychain | mint <VAR> | list [--named] | purge --instance <dir> [--yes]");
+            err("       metistry secrets set|replace|remove|hosts|grant <name> … (owner-named secrets — docs/ops/cli.md)");
             return 2;
         }
       } catch (e) {

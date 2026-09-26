@@ -352,7 +352,7 @@ takes a `since` cursor and answers with the next one.
 | `POST /api/scheduled/syncs/:name/run` | owner | session · local_owner | no | — | — | T3-3 | run a sync now |
 | `GET /api/connections` | owner | session · local_owner | natural | — | — | T4-8a | the connections: status, tools, used by |
 | `GET /api/connections/:name` | owner | session · local_owner | natural | — | — | T4-8a | one connection |
-| `GET /api/secrets` | owner | session · local_owner | natural | — | — | T4-1 | secret names, hosts, grants, last used — never a value |
+| `GET /api/secrets` | owner | session · local_owner | natural | — | — | served | secret names, hosts, grants, last used — never a value |
 | `GET /api/variables` | owner | session · local_owner | natural | — | — | T4-4 | the variables agents read |
 | `GET /api/recordings/:id` | owner | session · local_owner | natural | — | — | T8-4 | one recording's retention state |
 | `POST /api/github/pulls/:owner/:repo/:number/review` | owner | session · local_owner | no | stale | — | T2-13 | post a review; the head SHA must match the one shown |
@@ -1681,7 +1681,7 @@ new routine, are `local`.
 ```
 GET /api/connections           T4-8a — status, tools, used by
 GET /api/connections/:name     T4-8a
-GET /api/secrets               T4-1 — names, hosts, grants, last used: never a value
+GET /api/secrets               served — names, hosts, grants, last used: never a value
 GET /api/variables             T4-4
 GET /api/recordings/:id        T8-4 — a recording's retention state
 ```
@@ -1689,6 +1689,42 @@ GET /api/recordings/:id        T8-4 — a recording's retention state
 Every write here is a CLI verb with the owner caller class (M7, M13, M14 below):
 hosts, commands, credentials and the offer switch are the boundary, and a
 secret's value never crosses the API in either direction.
+
+#### `GET /api/secrets` — the Secrets list (`user` principal)
+
+```
+GET /api/secrets
+200 {"secrets":[{"name":"github_write",
+                 "hosts":["api.github.com"],
+                 "grants":[{"to":"connection:github","mode":"on"},
+                           {"to":"agent:devin","mode":"ask"}],
+                 "expires":null,
+                 "present":true,
+                 "last_used":"2026-09-28T13:00:02.000Z"}],
+     "as_of":"2026-09-28T13:05:00.000Z"}
+400 secrets.yaml does not validate — the message names the field
+503 no instance directory in this deployment (degrades: absent)
+```
+
+One row per secret in the instance's `.metistry/secrets.yaml`, sorted by
+name (plan §2.14): `hosts` is *Sent only to*; `grants` is *Who may use it*,
+each `{to: "connection:<name>" | "agent:<id>", mode: "on" | "ask" | "off"}` —
+a grantee not listed is Off; `expires` is where the service says the value
+stops working, or null. `present` is whether **this instance's** Keychain
+account holds an item for the name, and `null` where the console has no
+Keychain to ask (a container, Linux, or no `instance_id`). `last_used` is the
+newest run that filled the secret in (the `secret_last_used` named query over
+`runs.meta.secrets`, which the egress fill stamps with names — never values),
+or null for never.
+
+**Never a value, by construction.** The file's schema is strict, so a
+`secrets.yaml` that tries to carry one does not load (the 400); the console
+is handed a presence probe — `security find-generic-password` without `-w`,
+bound to its own `instance_id` — and nothing that can read an item's data;
+and a row is built field by field. Every write is `metistry secrets
+set|replace|remove|hosts|grant` on the Mac (M7, `docs/ops/cli.md`). The
+Keychain account is the instance's own, so a second instance's console —
+even with the same file — reports the first's secret absent.
 
 ### Outbound doors through a connection
 

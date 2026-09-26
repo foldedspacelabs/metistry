@@ -539,7 +539,7 @@ routines:
   vendor-sweep:                       # a New Routine: an assignment, no product code
     actor: vendor-research
     task: "Summarise everything added to Areas/Finance since yesterday…"
-    grants: { read: [Areas/Finance], write: [Journal/Digest/] }
+    grants: { read: [Areas/Finance], write: [Journal/Digest/] }   # write is inert: per-run grants are read-only until the owner rules (decisions-log.md (a))
     schedule: { days: [mon, tue, wed, thu, fri], at: ["07:00"] }
 syncs:
   github-state:
@@ -1344,7 +1344,7 @@ reports branch, ahead/behind, last commit, last push, and any conflict.
 | Wave | Goal | Agent-days | Checkpoint, at ~12 agents |
 | --- | --- | --- | --- |
 | **W0** Freeze | every interface in §2 as documents and types; the transport; the reach gate; tokens; the ratified wording | 38 | end of week 1 |
-| **W1** Foundations | data, the first doors, the scheduler, per-instance secrets, the actor model, the Mac shell, live events, commits and sync | 114 | week 3 |
+| **W1** Foundations | data, the first doors, the scheduler, per-instance secrets, the actor model, the Mac shell, live events, commits and sync; the W0 freeze fixes | 119.5 | week 3 |
 | **W2** The day | Needs You, Today, Chat, Activity; Scheduled routes and the day's routines; connections P1; Linear; file history and rollback | 128.5 | week 5 |
 | **W3** Work and agents | Knowledge, Agents, Scheduled, Board, Projects, Artifacts, Run detail, the Settings window; connections P2; ICS and CalDAV; sessions; PR reviews; the recorder | 105 | week 6½ |
 | **W4** Reach | connections P3, Google Calendar, IMAP, the remaining panes, the capture bar, the router wiring | 65 | week 7½ |
@@ -1353,7 +1353,7 @@ reports branch, ahead/behind, last commit, last push, and any conflict.
 **Waves are checkpoints, not start gates.** A ticket starts the moment its
 dependencies have merged; the wave says which release it lands in. The
 **critical path** is F-3 → T4-1 → T4-2 → T4-8a → T4-8b → T4-9 → T4-10 → T4-11 —
-secrets into connections P1–P3, **35 agent-days** — and 452 agent-days over ~12
+secrets into connections P1–P3, **35 agent-days** — and 457 agent-days over ~12
 concurrent agents is ≈ 38 working days, so the plan runs **≈ 8 weeks**.
 
 ```mermaid
@@ -1407,7 +1407,7 @@ agent's pass, per the PR close rule; the owner reviews at checkpoints.
 | Wave | Tickets (running concurrently unless a dependency says otherwise) |
 | --- | --- |
 | W0 | F-0, F-1…F-14, T1-4, T1-5, T7-1, T8-1 |
-| W1 | T1-1, T1-2, T1-3, T1-6, T1-7, T1-8, T1-9, T1-11, T1-12, T1-14, T1-15 · T2-1, T2-2, T2-4 → T2-5, T2-6, T2-15, T2-16, T2-17, T2-18 · T3-1, T3-2, T3-4, T3-9 · T4-1 → T4-2, T4-3; T4-4, T4-5, T4-6, T4-20, T4-21 · T5-1, T5-2, T5-3 · T7-2 · T9-1 · T10-1 → T10-3, T10-2 |
+| W1 | T1-1, T1-2, T1-3, T1-6, T1-7, T1-8, T1-9, T1-11, T1-12, T1-14, T1-15 · T2-1, T2-2, T2-4 → T2-5, T2-6, T2-15, T2-16, T2-17, T2-18 · T3-1, T3-2, T3-4, T3-9 · T4-1 → T4-2, T4-3; T4-4, T4-5, T4-6, T4-20, T4-21 · T5-1, T5-2, T5-3 · T7-2 · T9-1 · T10-1 → T10-3, T10-2 · X-2, X-3, X-4, X-5 |
 | W2 | T1-10, T1-13 · T2-3, T2-7, T2-8, T2-9, T2-10, T2-11, T2-14 · T3-3, T3-5 → T3-6, T3-7, T3-12 · T4-7, T4-8a → T4-8b, T4-24; T4-18 · T5-4a, T5-4b, T5-5, T5-6, T5-7 · T6-1a, T6-1b, T6-2, T6-3 · T7-3a, T7-3b, T7-7 · T9-2 · T10-4 → T10-5, T10-6 |
 | W3 | T2-12, T2-13 · T3-8, T3-10, T3-11 · T4-9, T4-12 → T4-13, T4-19, T4-22, T4-23, T4-25, T4-26 · T6-4…T6-11 · T7-4, T7-5 · T8-2a → T8-2b, T8-6 · T9-3 · T10-7 |
 | W4 | T4-10 → T4-11, T4-14; T4-15 → T4-17 · T6-12, T6-13a, T6-13b, T6-14, T6-15, T6-16 · T7-6 · T8-3, T8-4, T8-5, T8-7 · T9-4 (merges after the eval clears its bar) |
@@ -1622,7 +1622,9 @@ add `thread_count`; five columns with `reported` a flag on Done; labels *Blocked
 
 **T1-3 · The activity query** · M · W1 · deps T1-4 —
 *Spec:* Add `ok`; admit `routine_run` with group `routine` and exclude
-`meta.outcome = 'silent'`; a `turn_id` param; `config_write` rows in group `run`;
+`meta.outcome = 'silent'`, reading both `ok`/`error` and `meta.outcome` (a failed
+run carries no `meta.outcome`, T1-4); a `turn_id` param; `config_write` rows in
+group `run`;
 drop `work_history` from the PWA's title-case allow-list (`app.js:1446`).
 *Files:* `seed/queries/activity_feed.yaml`, `apps/console/web/app.js`.
 *Tests:* a silent tick has no row; a failed routine shows `ok = false`.
@@ -1733,11 +1735,14 @@ refusal writes a `runs` row `access_ceiling`, shown on Agents.
 hand-rolled and bounded like v1; agents raise questions through `requests_create`
 kind `question` (no new tool — the brain stays at its budget); answers stored per
 question, free text as `other`; Revise on a question is `accept_with_changes`;
-`decided` accepted alongside `decision` (C104).
+`decided` accepted alongside `decision` (C104). `decideProposal` (`server.ts`) stops
+building its own option list — today a report can take `allow` — and reads the
+decisions from F-5's table (`describeRequest(kind, payload).decisions`, `later`
+aside).
 *Files:* `packages/core/src/decision-block.ts`,
 `packages/mcp-brain/src/report.ts`, `apps/console/src/server.ts`.
 *Tests:* **an answer outside the options without `other` is refused; free text
-never executes; the tool-surface check holds**.
+never executes; a report cannot take `allow`; the tool-surface check holds**.
 *Accept:* a three-question request round-trips.
 
 **T2-4 · The Tick door** · M · W1 · deps F-13 —
@@ -1878,7 +1883,7 @@ drop their hourly gates (the working-day guard stays).
 the Mac slept.
 *Accept:* the default schedules fire once, at their time.
 
-**T3-2 · The overlay** · M · W1 · deps F-4 —
+**T3-2 · The overlay** · M · W1 · deps F-4, T3-1 —
 *Spec:* Load and validate `scheduled.yaml`; add it to `CALLER_AUTHORITY.console`;
 manifests gain `display_name`, `config` fields and collector `needs_you` rules,
 and carry **§2.5's default schedules as answered**: Morning Brief working days
@@ -1889,7 +1894,7 @@ present as routines.
 *Files:* `packages/core/src/scheduled.ts`, `apps/reconciler/src/paths.ts`,
 `routines/*/manifest.yaml`, `collectors/*/manifest.yaml`.
 *Tests:* **the console still cannot write any other protected path**; each
-default resolves to its first occurrence correctly.
+default resolves to its first occurrence correctly, through T3-1's `nextOccurrence`.
 *Accept:* Scheduled lists the eight defaults at those times.
 
 **T3-3 · Scheduled routes and doors** · M · W2 · deps T3-1, T3-2, F-13 —
@@ -1940,14 +1945,17 @@ tonight's `Journal/Fold/<date>.md` and list its `decisions:` frontmatter
 `skipped:not_a_working_eve`; the Close the Day trigger renders early and the
 11:00 PM run supersedes it.
 *Files:* `routines/plan-tomorrow/`.
-*Tests:* a second close re-renders; a Friday 11:00 PM run plans Monday; a Saturday
-run is skipped with its reason.
+*Tests:* a second close re-renders; with Monday–Friday working days, a Sunday
+11:00 PM run plans Monday and a Thursday one plans Friday; a Friday or Saturday run
+is skipped with its reason (`eve_of_working_days`, §2.5).
 *Accept:* —
 
 **T3-8 · Agent routines** · L · W3 · deps T4-6, T3-3 —
 *Spec:* §2.5's New Routine: actor + task + per-run grants; the runner composes the
 definition and the task, grants for the run only, enqueues one crew run;
-`POST /api/scheduled/routines` (local).
+`POST /api/scheduled/routines` (local). Per-run grants are **read-only** (F-2) until
+the owner rules on a crew routine's `write:` (`decisions-log.md` (a)) — the ruling
+comes before this ticket starts.
 *Files:* `apps/console/src/runner.ts`, `apps/assistant/src/crew-drain.ts`.
 *Tests:* **a per-run grant is gone after the run; outside it the actor cannot read
 the area**.
@@ -2018,7 +2026,8 @@ variables` (M14), `GET /api/variables`.
 
 **T4-5 · Registries** · L · W1 · deps F-3 —
 *Spec:* §2.7's enums-to-registries: collectors, routines, provider templates,
-connection types and targets load through `Registry`; data-only extensions load
+connection types and targets load through `Registry`; every product manifest carries
+`schema: 1`, which `Registry<Kind>` requires (F-3); data-only extensions load
 from `.metistry/extensions/`; `metistry extensions add|remove|list` (M15).
 *Files:* `collectors/index.ts`, `routines/index.ts`, `packages/core/src/registry.ts`,
 `packages/cli`.
@@ -2030,11 +2039,15 @@ capability, a TCC grant or a field kind**.
 *Spec:* `resolveActor` over §2.4's sources; `describePermissions()` beside
 `describeScope`; `GET /api/agents` carries permission rows; crew `model:` as a
 compute reference, legacy values through `assignments.crews`;
-`GET /api/agents/:id/definition`; `metistry agents define` (M12).
+`GET /api/agents/:id/definition`; `metistry agents define` (M12); `POST /api/agents`
+refuses `kind: internal`; the tool→cell mapping of `docs/ops/actors.md` is encoded
+beside `RULED_TOOLS`.
 *Files:* `packages/core/src/{actor,access,manifest}.ts`, `apps/console/src/crews.ts`,
 `packages/cli`.
 *Tests:* **Knowledge Write never appears for a non-assistant role; `null` and `[]`
-scopes render differently; the assistant never renders as a grant**.
+scopes render differently; the assistant never renders as a grant; `POST /api/agents`
+with `kind: internal` is refused and nothing is written; every ruled tool maps to
+exactly one cell (an enumeration test)**.
 *Accept:* the CLI, the console and MetistryKit print one table.
 
 **T4-7 · Project grants inherited** · M · W2 · deps T4-6, T1-13 —
@@ -2075,7 +2088,9 @@ replayed confirm token is refused**.
 loopback redirect the Mac app opens, the client id from the connection type's
 manifest, and a per-instance **bring-your-own client id** (and secret) override
 stored as a secret (§2.6); the broker redirect mode is modelled but not built;
-generated tools for API, Feed, Files; the permissions row *Through Metistry*.
+generated tools for API, Feed, Files; the permissions row *Through Metistry*; a
+client model for OAuth on a **custom** connection (C118), where no connection type's
+manifest supplies the client id.
 *Files:* `packages/connections`, `packages/cli`.
 *Tests:* **the assistant cannot start an OAuth flow; the loopback listener binds
 127.0.0.1 only and closes after one callback; `state` and the PKCE verifier are
@@ -2121,7 +2136,8 @@ sent**; a bring-your-own client id overrides the shipped one.
 **T4-15 · Mail: IMAP** · L · W4 · deps T4-8a —
 *Spec:* §2.6 (§4 Q8): `imap` type with an app password: read, `draft` by APPEND to
 Drafts; no SMTP. A Gmail known-service entry explains the 2-Step Verification +
-app password requirement.
+app password requirement. IMAP fits none of `REACH_CLASSES` (`http | command |
+path`), so the ticket adds a fourth reach class for it, with its host guard.
 *Files:* `packages/connections`, `seed/connection-types/`.
 *Tests:* **no code path can send**; confirm Gmail IMAP with an app password on the
 owner's account.
@@ -2572,32 +2588,41 @@ turns in a capture session run on it.
 #### T9 — The dynamic router
 
 **T9-1 · Decisions, in shadow** · M · W1 · deps F-8 —
-*Spec:* §2.8: compute the policy's choice beside the real route on every turn and
-write `runs` `kind: route`; extend `route-report`.
-*Files:* `apps/console/src/router.ts`, `seed/queries/route_report.yaml`.
+*Spec:* §2.8 (`docs/ops/dynamic-router.md` is the spec, §7.1 and §8): compute
+the policy's choice beside the real route on every turn and write `runs`
+`kind: route`; extend `route-report`.
+*Files:* `apps/console/src/router.ts`, `seed/queries/route_report.yaml`,
+`apps/console/src/server.ts` (the call site), `seed/queries/route_features.yaml`,
+`packages/cli/src/compute.ts`.
 *Tests:* **the served route is byte-identical to today's**.
 *Accept:* —
 
 **T9-2 · The policy** · L · W2 · deps T9-1 —
-*Spec:* §2.8: the table in `rules.yaml` over the features, clamped to the
-allow-list and the caps; the closed operation vocabulary.
+*Spec:* §2.8 (`docs/ops/dynamic-router.md` is the spec): the table in
+`rules.yaml` over the features, clamped to the allow-list and the caps; the
+closed operation vocabulary. `scoreChoice` moves from `collectors/compute-client.ts` into
+`packages/core`, its off-machine refusal intact — moved, not copied.
 *Files:* `packages/core/src/router-policy.ts`, `apps/console/src/router.ts`.
 *Tests:* **no output outside the allow-list; a failure or timeout takes the
 default**.
 *Accept:* —
 
 **T9-3 · The confirmatory eval** · M · W3 · deps T9-2 —
-*Spec:* §2.8: PoC-15's bar — ≥ 50 deep items authored independently of the
-rubric; quality and cost against today's router.
+*Spec:* §2.8 (`docs/ops/dynamic-router.md` is the spec, §7.2): PoC-15's bar —
+≥ 50 deep items authored independently of the rubric; quality and cost against
+today's router.
 *Files:* `packages/eval/`.
 *Tests:* the harness runs offline against recorded fixtures.
 *Accept:* a report the owner can read (§4 Q2).
 
 **T9-4 · Wire the composer** · M · W4 · deps T9-3, F-0 —
-*Spec:* §2.8: the policy serves `POST /message`; commands, the picker and budgets
-still win. The invariant is ratified (F-0); what gates the merge is the eval
-clearing the bar the owner accepted (§4 Q2).
-*Files:* `apps/console/src/router.ts`, `apps/console/test/invariant4.test.ts`.
+*Spec:* §2.8 (`docs/ops/dynamic-router.md` is the spec, §7.3): the policy
+serves `POST /message`; commands, the picker and budgets still win. The invariant
+is ratified (F-0); what gates the merge is the eval clearing the bar the owner
+accepted (§4 Q2).
+*Files:* `apps/console/src/router.ts`, `apps/console/test/invariant4.test.ts`,
+`apps/console/src/server.ts`, `apps/assistant/src/{drain,engine,engine-openai}.ts`,
+`collectors/test/invariant4.test.ts` (its "composer door is not wired" block retires).
 *Tests:* the invariant tests follow the ratified wording.
 *Accept:* not merged before T9-3's report clears the bar.
 
@@ -2666,6 +2691,44 @@ conflict, Roll Back…); a Knowledge page gains its history with *Restore*.
 *Tests:* §2.18; Roll Back names what it will undo.
 *Accept:* as T6's.
 
+#### X — Fixes found at the W0 freeze
+
+Small defects the coordinator recorded while merging W0
+(`docs/product/decisions-log.md`); each is its own PR, outside any track's files.
+
+**X-2 · `hasDb` needs the scratch name** · S · W1 —
+*Spec:* `loadTestEnv`'s `hasDb` is true on `METISTRY_DB_PASSWORD` alone, so a bare
+`vitest` with an install password but no `METISTRY_TEST_DB_NAME` fails every
+DB-backed suite at `testDb()` instead of skipping it. `hasDb` requires both.
+*Files:* `packages/core/src/test-env.ts`, `docs/ops/testing.md`.
+*Tests:* **a password without a scratch name skips, and never reaches Postgres**.
+*Accept:* —
+
+**X-3 · A password test that a path can break** · S · W1 —
+*Spec:* `packages/cli/test/migrate-shape.test.ts`'s "never puts a password in an
+argv" asserts the rendered command lacks the literal `pw`, so a tmpdir containing
+`pw` fails it. The fixture password becomes an unguessable token.
+*Files:* `packages/cli/test/migrate-shape.test.ts`.
+*Tests:* as spec.
+*Accept:* —
+
+**X-4 · PWA maskable icon and dark manifest colours** · S · W1 —
+*Spec:* what `docs/product/design/brand-kit.md` ("What the build needs") still
+asks after F-9: a `"purpose": "maskable"` icon (the master geometry at 44 %, full
+bleed), and a dark counterpart for `background_color` / `theme_color`, so an
+installed dark-mode PWA does not flash light on launch.
+*Files:* `apps/console/web/manifest.webmanifest`, `apps/console/web/`.
+*Tests:* the PWA test covers the maskable entry.
+*Accept:* —
+
+**X-5 · The PWA reads F-5's table** · M · W1 · deps F-5, F-14 —
+*Spec:* `app.js`'s `DEFER` still renders a per-row Skip where K2 says Skip is
+bulk-only, and its `REQUEST_TYPE` map duplicates the request-type mapping F-5
+centralised. Both read F-5's table instead.
+*Files:* `apps/console/web/app.js`.
+*Tests:* **no row offers Skip; every kind renders the table's word**.
+*Accept:* —
+
 #### W5 — Acceptance
 
 **X-1 · The document sweep** · S · W5 — glossary, `reply-feedback.md`, `board.md`,
@@ -2691,17 +2754,17 @@ the designer.
 | Wave | Tickets | Agent-days |
 | --- | --- | --- |
 | W0 | 19 | 38 |
-| W1 | 40 | 114 |
+| W1 | 44 | 119.5 |
 | W2 | 35 | 128.5 |
 | W3 | 28 | 105 |
 | W4 | 17 | 65 |
 | W5 | 1 | 1 |
-| **Total** | **140** | **≈ 452** (±30 %) |
+| **Total** | **144** | **≈ 457** (±30 %) |
 
 **Revised from ≈ 411.** Added by the answers and the additions: real-time events
 (10: T2-18, T5-7, T7-7), vault git (22.5: T10), Linear (10: T4-24…T4-26), Tomorrow's
-Plan after the fold (1.5), F-0 (1). Removed: the Gmail API (5, §4 Q8). **≈ 8 weeks
-of calendar time at ~12 concurrent implement agents** (452 / 12 ≈ 38 working
+Plan after the fold (1.5), F-0 (1), the W0 freeze fixes (5.5: X-2…X-5). Removed: the Gmail API (5, §4 Q8). **≈ 8 weeks
+of calendar time at ~12 concurrent implement agents** (457 / 12 ≈ 38 working
 days); the critical path is still **35 agent-days** — F-3 → T4-1 → T4-2 → T4-8a →
 T4-8b → T4-9 → T4-10 → T4-11, secrets into connections — so ~15 agents would bring
 it to ≈ 7.
@@ -2751,8 +2814,8 @@ coordinator should not have to hold it.
 and a track's preamble is the text between its heading and its first ticket. Edit
 the plan, run `node ops/scripts/tickets.mjs`, and commit both — CI fails on drift.
 
-**Counts, from `schedule.json`:** 140 tickets in 12 directories (`f`, `t1`…`t10`,
-`x`); **18** run on Sonnet, **63** on Opus, **59** on Opus at high effort (every L
+**Counts, from `schedule.json`:** 144 tickets in 12 directories (`f`, `t1`…`t10`,
+`x`); **21** run on Sonnet, **64** on Opus, **59** on Opus at high effort (every L
 and the design-heavy list).
 
 **The coordinator's own context:** dispatch by ticket id, read agents' reports

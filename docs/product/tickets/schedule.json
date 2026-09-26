@@ -67,10 +67,14 @@
         "T9-1",
         "T10-1",
         "T10-3",
-        "T10-2"
+        "T10-2",
+        "X-2",
+        "X-3",
+        "X-4",
+        "X-5"
       ],
-      "count": 40,
-      "agent_days": 114
+      "count": 44,
+      "agent_days": 119.5
     },
     "W2": {
       "tickets": [
@@ -835,7 +839,8 @@
       "model": "opus",
       "effort": "default",
       "deps": [
-        "F-4"
+        "F-4",
+        "T3-1"
       ],
       "file": "docs/product/tickets/t3/t3-2.md",
       "status": "todo"
@@ -2118,6 +2123,57 @@
       "file": "docs/product/tickets/t10/t10-7.md",
       "status": "todo"
     },
+    "X-2": {
+      "title": "`hasDb` needs the scratch name",
+      "track": "X",
+      "wave": "W1",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-2.md",
+      "status": "todo"
+    },
+    "X-3": {
+      "title": "A password test that a path can break",
+      "track": "X",
+      "wave": "W1",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-3.md",
+      "status": "todo"
+    },
+    "X-4": {
+      "title": "PWA maskable icon and dark manifest colours",
+      "track": "X",
+      "wave": "W1",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-4.md",
+      "status": "todo"
+    },
+    "X-5": {
+      "title": "The PWA reads F-5's table",
+      "track": "X",
+      "wave": "W1",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "F-5",
+        "F-14"
+      ],
+      "file": "docs/product/tickets/x/x-5.md",
+      "status": "todo"
+    },
     "X-1": {
       "title": "The document sweep",
       "track": "X",
@@ -2132,8 +2188,8 @@
     }
   },
   "totals": {
-    "tickets": 140,
-    "agent_days": 451.5,
+    "tickets": 144,
+    "agent_days": 457,
     "waves": 6
   },
   "critical_path": {

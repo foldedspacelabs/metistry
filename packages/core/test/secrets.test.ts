@@ -240,6 +240,18 @@ secrets:
     expect(() => parseSecretsFile("secrets: {}\nk: sk-live-123\n")).toThrow(/does not validate/);
   });
 
+  it("a YAML error names its code and line, never the source it quotes", () => {
+    const text = `secrets:\n  k: { hosts: [] }\n  k: ${VALUE_A}\n`;
+    let message = "";
+    try {
+      parseSecretsFile(text);
+    } catch (e) {
+      message = (e as Error).message;
+    }
+    expect(message).toMatch(/not valid YAML — DUPLICATE_KEY at line 3/);
+    expect(message).not.toContain(VALUE_A);
+  });
+
   it("refuses a host with a scheme, a path, a wildcard or capitals; a bad grantee or mode; a bad name; a bad date", () => {
     for (const host of ["https://api.github.com", "api.github.com/v3", "*.github.com", "API.github.com", "api..github.com", ""]) {
       expect(() => parseSecretsFile(`secrets:\n  k: { hosts: ["${host}"] }\n`), host).toThrow(/does not validate/);

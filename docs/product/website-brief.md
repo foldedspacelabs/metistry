@@ -1038,6 +1038,7 @@ in the plan:
 7. **Stale product copy outside this brief's scope**, noted not edited:
    `README.md`'s Status section still says Phase 1 is partly built;
    `PRODUCT.md`'s "Premium candidates" section predates the 2026-09-07
-   fully-open-source ruling; `docs/plan-refresh-2026-09-13.md` Q3 still
+   fully-open-source ruling, and its preamble still says to add a line to the
+   file rather than a record fragment; `docs/plan-refresh-2026-09-13.md` Q3 still
    defers the website until the apps are designed — the owner's 2026-09-26 ask
    supersedes it.

@@ -1,0 +1,152 @@
+{
+  "route": "GET /api/events",
+  "source": "contract",
+  "ticket": "T2-18",
+  "note": "text/event-stream: one frame per catalogue type (packages/core/src/events.ts), ids and counts only; Last-Event-ID resumes",
+  "request": {
+    "method": "GET",
+    "path": "/api/events",
+    "body": null,
+    "idempotency_key": null,
+    "last_event_id": null
+  },
+  "status": 200,
+  "stream": [
+    {
+      "id": "4101",
+      "event": "run.started",
+      "data": {
+        "run_id": 9001,
+        "kind": "turn",
+        "turn_id": "turn-8a1c"
+      }
+    },
+    {
+      "id": "4102",
+      "event": "turn.progress",
+      "data": {
+        "turn_id": "turn-8a1c"
+      }
+    },
+    {
+      "id": "4103",
+      "event": "run.finished",
+      "data": {
+        "run_id": 9001,
+        "kind": "turn",
+        "turn_id": "turn-8a1c"
+      }
+    },
+    {
+      "id": "4104",
+      "event": "message.new",
+      "data": {
+        "message_id": 512,
+        "thread": "default"
+      }
+    },
+    {
+      "id": "4105",
+      "event": "presence.changed",
+      "data": {
+        "agent_id": "cursor"
+      }
+    },
+    {
+      "id": "4106",
+      "event": "needs_you.changed",
+      "data": {
+        "waiting": 3
+      }
+    },
+    {
+      "id": "4107",
+      "event": "work.changed",
+      "data": {
+        "work_id": 214
+      }
+    },
+    {
+      "id": "4108",
+      "event": "thread.changed",
+      "data": {
+        "work_id": 214
+      }
+    },
+    {
+      "id": "4109",
+      "event": "thread.changed",
+      "data": {
+        "artifact_id": "art_01M3FY9WJ7M4N2ZAJFNZBVH8KK"
+      }
+    },
+    {
+      "id": "4110",
+      "event": "capture.new",
+      "data": {
+        "inbox_id": 77
+      }
+    },
+    {
+      "id": "4111",
+      "event": "vault.reconciled",
+      "data": {
+        "changed": 4
+      }
+    },
+    {
+      "id": "4112",
+      "event": "vault.sync",
+      "data": {
+        "state": "push"
+      }
+    },
+    {
+      "id": "4113",
+      "event": "routine.status",
+      "data": {
+        "name": "morning-brief"
+      }
+    },
+    {
+      "id": "4114",
+      "event": "sync.status",
+      "data": {
+        "name": "github-state"
+      }
+    },
+    {
+      "id": "4115",
+      "event": "connection.health",
+      "data": {
+        "connection": "github"
+      }
+    },
+    {
+      "id": "4116",
+      "event": "config.changed",
+      "data": {
+        "file": ".metistry/compute.yaml"
+      }
+    },
+    {
+      "id": "4117",
+      "event": "budget.state",
+      "data": {
+        "scope": "instance"
+      }
+    },
+    {
+      "id": "4118",
+      "event": "release.available",
+      "data": {
+        "version": "0.12.0"
+      }
+    },
+    {
+      "id": "4119",
+      "event": "resync",
+      "data": {}
+    }
+  ]
+}

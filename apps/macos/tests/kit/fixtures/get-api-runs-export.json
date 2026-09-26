@@ -1,0 +1,81 @@
+{
+  "route": "GET /api/runs/export",
+  "source": "recorded",
+  "ticket": null,
+  "request": {
+    "method": "GET",
+    "path": "/api/runs/export?limit=3",
+    "body": null,
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body_ndjson": [
+    {
+      "instance_id": "0fa6a518-f162-4ff2-8617-b17c51f5dec5",
+      "id": "1",
+      "ts": {},
+      "component": "assistant",
+      "kind": "turn",
+      "session_id": null,
+      "tool": null,
+      "model": "gemma",
+      "tokens_in": "***REDACTED***",
+      "tokens_out": "***REDACTED***",
+      "cost_usd": "0.004200",
+      "duration_ms": 2300,
+      "started_at": null,
+      "finished_at": null,
+      "ok": true,
+      "error": null,
+      "meta": {
+        "tier": "default",
+        "turn_id": "turn-Us27wk3"
+      },
+      "cursor": "2026-09-26 18:54:15.070052-04|1"
+    },
+    {
+      "instance_id": "0fa6a518-f162-4ff2-8617-b17c51f5dec5",
+      "id": "2",
+      "ts": {},
+      "component": "assistant",
+      "kind": "tool",
+      "session_id": null,
+      "tool": "knowledge_search",
+      "model": null,
+      "tokens_in": null,
+      "tokens_out": null,
+      "cost_usd": null,
+      "duration_ms": 12,
+      "started_at": null,
+      "finished_at": null,
+      "ok": true,
+      "error": null,
+      "meta": {
+        "turn_id": "turn-Us27wk3"
+      },
+      "cursor": "2026-09-26 18:54:15.070798-04|2"
+    },
+    {
+      "instance_id": "0fa6a518-f162-4ff2-8617-b17c51f5dec5",
+      "id": "3",
+      "ts": {},
+      "component": "assistant",
+      "kind": "tool",
+      "session_id": null,
+      "tool": "tasks_update",
+      "model": null,
+      "tokens_in": null,
+      "tokens_out": null,
+      "cost_usd": null,
+      "duration_ms": 30,
+      "started_at": null,
+      "finished_at": null,
+      "ok": true,
+      "error": null,
+      "meta": {
+        "turn_id": "turn-Us27wk3"
+      },
+      "cursor": "2026-09-26 18:54:15.070798-04|3"
+    }
+  ]
+}

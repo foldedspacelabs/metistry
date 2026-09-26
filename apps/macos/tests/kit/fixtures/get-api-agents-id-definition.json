@@ -1,0 +1,30 @@
+{
+  "route": "GET /api/agents/:id/definition",
+  "source": "contract",
+  "ticket": "T4-6",
+  "note": "packages/core/src/actor.ts' definition; null for an external agent; the write is metistry agents define (M12)",
+  "request": {
+    "method": "GET",
+    "path": "/api/agents/researcher/definition",
+    "body": null,
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "id": "researcher",
+    "definition": {
+      "kind": "crew",
+      "area": "research",
+      "description": "Finds and summarises sources for a question",
+      "prompt": "You research one question at a time and cite every source.",
+      "files": [
+        {
+          "path": ".metistry/agents/research/researcher.md",
+          "origin": "instance",
+          "sha256": "0f3c000000000000000000000000000000000000000000000000000000000000"
+        }
+      ]
+    },
+    "as_of": "2026-09-28T13:05:00.000Z"
+  }
+}

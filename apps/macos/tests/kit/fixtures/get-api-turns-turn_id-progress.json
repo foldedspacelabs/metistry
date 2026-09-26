@@ -1,0 +1,34 @@
+{
+  "route": "GET /api/turns/:turn_id/progress",
+  "source": "contract",
+  "ticket": "T2-17",
+  "note": "the turn_progress named query: tool names only, never arguments or results",
+  "request": {
+    "method": "GET",
+    "path": "/api/turns/turn-8a1c/progress",
+    "body": null,
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "turn_id": "turn-8a1c",
+    "running": [
+      "knowledge_search"
+    ],
+    "calls": [
+      {
+        "tool": "tasks_list",
+        "ok": true,
+        "started_at": "2026-09-28T13:04:57.100Z",
+        "finished_at": "2026-09-28T13:04:57.180Z"
+      },
+      {
+        "tool": "knowledge_search",
+        "ok": null,
+        "started_at": "2026-09-28T13:04:58.020Z",
+        "finished_at": null
+      }
+    ],
+    "as_of": "2026-09-28T13:05:00.000Z"
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "route": "PUT /api/agents/:id/grants",
+  "source": "recorded",
+  "ticket": null,
+  "request": {
+    "method": "PUT",
+    "path": "/api/agents/cursor/grants",
+    "body": {
+      "tier": "areas",
+      "areas": [
+        "Projects"
+      ],
+      "queries": true
+    },
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "ok": true,
+    "grants": {
+      "tier": "areas",
+      "areas": [
+        "Projects"
+      ],
+      "queries": true
+    }
+  }
+}

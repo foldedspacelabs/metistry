@@ -1,0 +1,26 @@
+{
+  "route": "POST /api/proposals/batch",
+  "source": "recorded",
+  "ticket": null,
+  "request": {
+    "method": "POST",
+    "path": "/api/proposals/batch",
+    "body": {
+      "ids": [
+        3
+      ],
+      "decision": "later"
+    },
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "results": [
+      {
+        "id": 3,
+        "ok": true,
+        "snoozed_until": "2026-09-27T01:54:15.163Z"
+      }
+    ]
+  }
+}

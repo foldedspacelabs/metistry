@@ -1,0 +1,61 @@
+{
+  "route": "POST /api/artifacts",
+  "source": "recorded",
+  "ticket": null,
+  "request": {
+    "method": "POST",
+    "path": "/api/artifacts",
+    "body": {
+      "project": "metistry",
+      "slug": "store-interface",
+      "idempotency_key": "fixture-store-interface-1",
+      "message": "first cut",
+      "files": [
+        {
+          "path": "notes.md",
+          "content": "# Store interface\n\nOne protocol per domain.\n"
+        }
+      ],
+      "expected_current_version": null
+    },
+    "idempotency_key": null
+  },
+  "status": 201,
+  "body": {
+    "artifact": {
+      "id": "art_01M3FYT8N8HRG4S2W4Q0GN28F1",
+      "project": "metistry",
+      "slug": "store-interface",
+      "kind": "markdown",
+      "current_version": "ver_01M3FYT8N761CDC5HKE1J3H2NZ",
+      "visibility": "project",
+      "created_by": "user",
+      "created_at": "2026-09-26T22:54:15.208Z",
+      "updated_at": "2026-09-26T22:54:15.208Z"
+    },
+    "version": {
+      "id": "ver_01M3FYT8N761CDC5HKE1J3H2NZ",
+      "artifact_id": "art_01M3FYT8N8HRG4S2W4Q0GN28F1",
+      "commit": null,
+      "path_prefix": "Artifacts/metistry/store-interface",
+      "manifest": {
+        "notes.md": {
+          "kind": "markdown",
+          "bytes": 44,
+          "sha256": "7e01f6443cf33077be180ec506f0532ba7d503618a5e9f4be1dd6d571001cd5f"
+        }
+      },
+      "author_principal": "user",
+      "author_kind": "user",
+      "message": "first cut (ver_01M3FYT8N761CDC5HKE1J3H2NZ)",
+      "idempotency_key": "fixture-store-interface-1",
+      "created_at": "2026-09-26T22:54:15.208Z"
+    },
+    "links": {
+      "artifact": "http://127.0.0.1:8080/#/artifacts/art_01M3FYT8N8HRG4S2W4Q0GN28F1",
+      "version": "http://127.0.0.1:8080/#/artifacts/art_01M3FYT8N8HRG4S2W4Q0GN28F1/ver_01M3FYT8N761CDC5HKE1J3H2NZ",
+      "review": "http://127.0.0.1:8080/#/artifacts/art_01M3FYT8N8HRG4S2W4Q0GN28F1/ver_01M3FYT8N761CDC5HKE1J3H2NZ/review"
+    },
+    "deduplicated": false
+  }
+}

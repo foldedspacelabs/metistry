@@ -1,0 +1,28 @@
+{
+  "route": "POST /api/vault/rollback",
+  "source": "contract",
+  "ticket": "T10-6",
+  "note": "reach local; {commit} | {to: <date>} | {file: <path>}; raises a Needs You request with the preview, never rewrites history",
+  "request": {
+    "method": "POST",
+    "path": "/api/vault/rollback",
+    "body": {
+      "commit": "4c1d2e3f"
+    },
+    "idempotency_key": null
+  },
+  "status": 202,
+  "body": {
+    "ok": true,
+    "proposal_id": "62",
+    "preview": {
+      "reverts": [
+        "4c1d2e3f"
+      ],
+      "files": [
+        "Projects/Metistry/Roadmap.md"
+      ],
+      "skipped_config": []
+    }
+  }
+}

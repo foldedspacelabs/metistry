@@ -1,0 +1,18 @@
+{
+  "route": "POST /api/agents/:id/approve",
+  "source": "recorded",
+  "ticket": null,
+  "request": {
+    "method": "POST",
+    "path": "/api/agents/devin/approve",
+    "body": {},
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "approved": true,
+    "proposals": [
+      4
+    ]
+  }
+}

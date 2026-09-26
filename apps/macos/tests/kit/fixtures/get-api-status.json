@@ -1,0 +1,29 @@
+{
+  "route": "GET /api/status",
+  "source": "recorded",
+  "ticket": null,
+  "request": {
+    "method": "GET",
+    "path": "/api/status",
+    "body": null,
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "checks": [
+      {
+        "name": "db",
+        "status": "ok",
+        "latency_ms": 0,
+        "probe": "SELECT 1 round-trip"
+      },
+      {
+        "name": "inbox",
+        "status": "ok",
+        "latency_ms": 0,
+        "probe": "reach the capture sink (vault bridge Inbox/)"
+      }
+    ],
+    "as_of": "2026-09-26T22:54:15.090Z"
+  }
+}

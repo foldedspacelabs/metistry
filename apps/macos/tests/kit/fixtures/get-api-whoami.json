@@ -1,0 +1,19 @@
+{
+  "route": "GET /api/whoami",
+  "source": "recorded",
+  "ticket": null,
+  "request": {
+    "method": "GET",
+    "path": "/api/whoami",
+    "body": null,
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "principal": "user",
+    "via": "local_owner_token",
+    "management": true,
+    "origin": "http://127.0.0.1:8080",
+    "as_of": "2026-09-26T22:54:15.088Z"
+  }
+}

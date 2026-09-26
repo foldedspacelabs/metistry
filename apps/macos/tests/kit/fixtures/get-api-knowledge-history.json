@@ -1,0 +1,31 @@
+{
+  "route": "GET /api/knowledge/history",
+  "source": "contract",
+  "ticket": "T10-4",
+  "note": "a file's commits, newest first",
+  "request": {
+    "method": "GET",
+    "path": "/api/knowledge/history?path=Projects%2FMetistry%2FRoadmap.md",
+    "body": null,
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "path": "Projects/Metistry/Roadmap.md",
+    "commits": [
+      {
+        "sha": "4c1d2e3f",
+        "subject": "assistant: fold",
+        "author": "assistant",
+        "at": "2026-09-28T03:00:00.000Z"
+      },
+      {
+        "sha": "9ab8c7d6",
+        "subject": "user: edit",
+        "author": "user",
+        "at": "2026-09-27T18:10:00.000Z"
+      }
+    ],
+    "as_of": "2026-09-28T13:05:00.000Z"
+  }
+}

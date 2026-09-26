@@ -1,0 +1,60 @@
+{
+  "route": "GET /api/connections/:name",
+  "source": "contract",
+  "ticket": "T4-8a",
+  "note": "one connection, with its recent calls (connection_calls)",
+  "request": {
+    "method": "GET",
+    "path": "/api/connections/github",
+    "body": null,
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "connection": {
+      "name": "github",
+      "type": "github",
+      "title": "GitHub",
+      "status": "ok",
+      "check": {
+        "status": "ok",
+        "latency_ms": 212,
+        "probe": "GET /user",
+        "at": "2026-09-28T13:00:00.000Z"
+      },
+      "tools": [
+        {
+          "name": "issues_create",
+          "mode": "ask"
+        },
+        {
+          "name": "pulls_list",
+          "mode": "on"
+        }
+      ],
+      "used_by": [
+        {
+          "kind": "sync",
+          "name": "github-state"
+        },
+        {
+          "kind": "agent",
+          "name": "researcher"
+        }
+      ],
+      "offered_to_agents": false,
+      "secrets": [
+        "github_write"
+      ]
+    },
+    "calls": [
+      {
+        "tool": "pulls_list",
+        "principal": "sync:github-state",
+        "ok": true,
+        "at": "2026-09-28T13:00:02.000Z"
+      }
+    ],
+    "as_of": "2026-09-28T13:05:00.000Z"
+  }
+}

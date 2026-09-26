@@ -1,0 +1,19 @@
+{
+  "route": "GET /api/knowledge/page",
+  "source": "recorded",
+  "ticket": null,
+  "request": {
+    "method": "GET",
+    "path": "/api/knowledge/page?path=Projects%2FMetistry%2FRoadmap.md",
+    "body": null,
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "path": "Projects/Metistry/Roadmap.md",
+    "content": "# Roadmap\n\nShip the store interface, then the stores. See [[Projects/Metistry/Design]].\n",
+    "sha256": "c31a1846c78fc9467423d751eb50c09895c3fcead1f3a6abdf2548453c86d901",
+    "bytes": 88,
+    "as_of": "2026-09-26T22:54:15.136Z"
+  }
+}

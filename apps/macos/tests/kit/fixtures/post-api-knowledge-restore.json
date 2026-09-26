@@ -1,0 +1,23 @@
+{
+  "route": "POST /api/knowledge/restore",
+  "source": "contract",
+  "ticket": "T10-5",
+  "note": "raises a Needs You request; Approve restores as user; 409 stale when the file moved past seen_sha",
+  "request": {
+    "method": "POST",
+    "path": "/api/knowledge/restore",
+    "body": {
+      "path": "Projects/Metistry/Roadmap.md",
+      "seen_sha": "4c1d2e3f",
+      "sha": "9ab8c7d6"
+    },
+    "idempotency_key": null
+  },
+  "status": 202,
+  "body": {
+    "ok": true,
+    "proposal_id": "61",
+    "path": "Projects/Metistry/Roadmap.md",
+    "sha": "9ab8c7d6"
+  }
+}

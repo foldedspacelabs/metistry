@@ -1,0 +1,39 @@
+{
+  "route": "GET /api/knowledge/pages",
+  "source": "recorded",
+  "ticket": null,
+  "request": {
+    "method": "GET",
+    "path": "/api/knowledge/pages?prefix=Projects",
+    "body": null,
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "pages": [
+      {
+        "path": "Projects/Metistry/Design.md",
+        "area": "Projects",
+        "title": "Design",
+        "description": "the store interface",
+        "status": "clean",
+        "modified": "2026-09-26T22:54:15.071Z",
+        "indexed_at": "2026-09-26T22:54:15.071Z"
+      },
+      {
+        "path": "Projects/Metistry/Roadmap.md",
+        "area": "Projects",
+        "title": "Roadmap",
+        "description": "what ships next",
+        "status": "clean",
+        "modified": "2026-09-26T22:54:15.071Z",
+        "indexed_at": "2026-09-26T22:54:15.071Z"
+      }
+    ],
+    "area": null,
+    "prefix": "Projects",
+    "limit": 100,
+    "offset": 0,
+    "as_of": "2026-09-26T22:54:15.138Z"
+  }
+}

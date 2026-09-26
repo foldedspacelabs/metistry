@@ -1,0 +1,63 @@
+{
+  "route": "GET /api/vault-tasks",
+  "source": "contract",
+  "ticket": "T2-7",
+  "note": "rows are vault_tasks_query rows for the compiled filter; a filter outside the grammar is a 400 naming the token",
+  "request": {
+    "method": "GET",
+    "path": "/api/vault-tasks?where=due%20%3C%3D%20today",
+    "body": null,
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "where": "due <= today",
+    "rows": [
+      {
+        "path": "Journal/2026-09-28.md",
+        "task_key": "mt-7f3k2a",
+        "anchor": "mt-7f3k2a",
+        "line_no": 12,
+        "text": "Send Dana the fixture format",
+        "text_norm": "send dana the fixture format",
+        "checked": false,
+        "dropped": false,
+        "waiting": false,
+        "due": "2026-09-28",
+        "scheduled_for": null,
+        "start_on": null,
+        "done_on": null,
+        "done_on_observed": false,
+        "priority": 2,
+        "priority_effective": 2,
+        "size": "s",
+        "type": null,
+        "assigned": null,
+        "project": "metistry",
+        "area": "Projects/Metistry",
+        "recur_parent": null,
+        "source": null,
+        "ext_refs": [],
+        "work_id": null,
+        "work_title": null,
+        "work_status": null,
+        "blocks_work_id": null,
+        "blocks_work_title": null,
+        "blocks_work_status": null,
+        "duplicate_of": null,
+        "places": 1,
+        "parse_warning": null,
+        "parsed_on": "2026-09-28",
+        "first_seen_on": "2026-09-25",
+        "last_seen_at": "2026-09-28T12:58:01.000Z",
+        "age_days": 3,
+        "carried_days": 0,
+        "row_flags": [
+          "due"
+        ]
+      }
+    ],
+    "more": false,
+    "as_of": "2026-09-28T13:05:00.000Z"
+  }
+}

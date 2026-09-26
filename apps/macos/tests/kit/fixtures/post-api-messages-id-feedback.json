@@ -1,0 +1,23 @@
+{
+  "route": "POST /api/messages/:id/feedback",
+  "source": "recorded",
+  "ticket": null,
+  "request": {
+    "method": "POST",
+    "path": "/api/messages/1/feedback",
+    "body": {
+      "rating": 1,
+      "note": "exactly the three"
+    },
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "ok": true,
+    "feedback": {
+      "rating": 1,
+      "note": "exactly the three",
+      "ts": "2026-09-26T22:54:15.153Z"
+    }
+  }
+}

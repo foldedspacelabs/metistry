@@ -1,0 +1,33 @@
+{
+  "route": "PUT /api/agents/:id/autonomy",
+  "source": "recorded",
+  "ticket": null,
+  "request": {
+    "method": "PUT",
+    "path": "/api/agents/cursor/autonomy",
+    "body": {
+      "level": "propose"
+    },
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "ok": true,
+    "autonomy": {
+      "level": "propose"
+    },
+    "actions": {
+      "dispatch": "propose",
+      "task_update": "propose",
+      "comment": "propose",
+      "capture": "propose"
+    },
+    "widened": [
+      "level observe → propose",
+      "actions.dispatch deny → propose",
+      "actions.task_update deny → propose",
+      "actions.comment deny → propose",
+      "actions.capture deny → propose"
+    ]
+  }
+}

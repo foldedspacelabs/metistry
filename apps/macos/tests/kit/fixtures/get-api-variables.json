@@ -1,0 +1,25 @@
+{
+  "route": "GET /api/variables",
+  "source": "contract",
+  "ticket": "T4-4",
+  "note": "text agents read; set and unset are metistry variables (M14)",
+  "request": {
+    "method": "GET",
+    "path": "/api/variables",
+    "body": null,
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "variables": [
+      {
+        "name": "team_name",
+        "value": "Platform",
+        "read_by": [
+          "researcher"
+        ]
+      }
+    ],
+    "as_of": "2026-09-28T13:05:00.000Z"
+  }
+}

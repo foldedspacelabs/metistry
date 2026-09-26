@@ -1,0 +1,22 @@
+{
+  "route": "PUT /api/agents/:id/projects",
+  "source": "recorded",
+  "ticket": null,
+  "request": {
+    "method": "PUT",
+    "path": "/api/agents/cursor/projects",
+    "body": {
+      "projects": [
+        "metistry"
+      ]
+    },
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "ok": true,
+    "projects": [
+      "metistry"
+    ]
+  }
+}

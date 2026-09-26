@@ -1,0 +1,16 @@
+{
+  "route": "DELETE /api/messages/:id/feedback",
+  "source": "recorded",
+  "ticket": null,
+  "request": {
+    "method": "DELETE",
+    "path": "/api/messages/1/feedback",
+    "body": null,
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "ok": true,
+    "feedback": null
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "route": "PUT /api/scheduled/routines/:name/assignment",
+  "source": "contract",
+  "ticket": "T3-3",
+  "note": "reach local: a passkey session is refused 403 local_only; per-run grants are read-only (F-2 ruling)",
+  "request": {
+    "method": "PUT",
+    "path": "/api/scheduled/routines/weekly-digest/assignment",
+    "body": {
+      "actor": "researcher",
+      "grants": {
+        "read": [
+          "Projects"
+        ]
+      },
+      "schedule": {
+        "at": [
+          "16:00"
+        ],
+        "days": [
+          "fri"
+        ]
+      },
+      "task": "Summarise the week's Projects/ changes."
+    },
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "ok": true,
+    "routine": {
+      "name": "weekly-digest",
+      "kind": "routine",
+      "source": "assignment",
+      "title": "Weekly Digest",
+      "schedule": {
+        "value": {
+          "days": [
+            "fri"
+          ],
+          "at": [
+            "16:00"
+          ]
+        },
+        "origin": "yours"
+      },
+      "paused": {
+        "value": false,
+        "origin": "default"
+      },
+      "config": {},
+      "actor": "researcher",
+      "task": "Summarise the week's Projects/ changes.",
+      "grants": {
+        "read": [
+          "Projects"
+        ]
+      },
+      "next_run": "2026-10-02T20:00:00.000Z",
+      "last_run": null
+    },
+    "as_of": "2026-09-28T13:05:00.000Z"
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "route": "GET /api/scheduled/syncs/:name",
+  "source": "contract",
+  "ticket": "T3-3",
+  "note": "as the routine",
+  "request": {
+    "method": "GET",
+    "path": "/api/scheduled/syncs/github-state",
+    "body": null,
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "sync": {
+      "name": "github-state",
+      "kind": "sync",
+      "connection": "github",
+      "title": "GitHub",
+      "every": {
+        "value": "15m",
+        "origin": "default"
+      },
+      "paused": {
+        "value": false,
+        "origin": "default"
+      },
+      "raise": {
+        "review_requested": {
+          "value": true,
+          "origin": "default"
+        }
+      },
+      "next_run": "2026-09-28T13:15:00.000Z",
+      "last_run": {
+        "run_id": "8820",
+        "at": "2026-09-28T13:00:02.000Z",
+        "ok": true,
+        "outcome": "3 pull requests",
+        "cost_usd": null
+      }
+    },
+    "history": [
+      {
+        "run_id": "8820",
+        "at": "2026-09-28T13:00:02.000Z",
+        "ok": true,
+        "outcome": "3 pull requests",
+        "cost_usd": null,
+        "steps": 1
+      }
+    ],
+    "as_of": "2026-09-28T13:05:00.000Z"
+  }
+}

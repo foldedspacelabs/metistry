@@ -1,0 +1,16 @@
+{
+  "route": "GET /health",
+  "source": "recorded",
+  "ticket": null,
+  "request": {
+    "method": "GET",
+    "path": "/health",
+    "body": null,
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "ok": true,
+    "api_version": 1
+  }
+}

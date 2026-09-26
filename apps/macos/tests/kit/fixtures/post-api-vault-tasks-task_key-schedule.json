@@ -1,0 +1,61 @@
+{
+  "route": "POST /api/vault-tasks/:task_key/schedule",
+  "source": "contract",
+  "ticket": "T2-5",
+  "note": "{do: <date>} or {someday: true}; 409 stale as check",
+  "request": {
+    "method": "POST",
+    "path": "/api/vault-tasks/mt-7f3k2a/schedule",
+    "body": {
+      "do": "2026-09-30",
+      "seen_text": "Send Dana the fixture format"
+    },
+    "idempotency_key": "defer-0928-0001"
+  },
+  "status": 200,
+  "body": {
+    "ok": true,
+    "task": {
+      "path": "Journal/2026-09-28.md",
+      "task_key": "mt-7f3k2a",
+      "anchor": "mt-7f3k2a",
+      "line_no": 12,
+      "text": "Send Dana the fixture format",
+      "text_norm": "send dana the fixture format",
+      "checked": false,
+      "dropped": false,
+      "waiting": false,
+      "due": "2026-09-28",
+      "scheduled_for": "2026-09-30",
+      "start_on": null,
+      "done_on": null,
+      "done_on_observed": false,
+      "priority": 2,
+      "priority_effective": 2,
+      "size": "s",
+      "type": null,
+      "assigned": null,
+      "project": "metistry",
+      "area": "Projects/Metistry",
+      "recur_parent": null,
+      "source": null,
+      "ext_refs": [],
+      "work_id": null,
+      "work_title": null,
+      "work_status": null,
+      "blocks_work_id": null,
+      "blocks_work_title": null,
+      "blocks_work_status": null,
+      "duplicate_of": null,
+      "places": 1,
+      "parse_warning": null,
+      "parsed_on": "2026-09-28",
+      "first_seen_on": "2026-09-25",
+      "last_seen_at": "2026-09-28T12:58:01.000Z",
+      "age_days": 3,
+      "carried_days": 0,
+      "row_flags": []
+    },
+    "line": "- [ ] Send Dana the fixture format due 2026-09-28 do 2026-09-30 ^mt-7f3k2a"
+  }
+}

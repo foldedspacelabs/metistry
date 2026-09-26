@@ -1,0 +1,85 @@
+{
+  "route": "GET /api/scheduled",
+  "source": "contract",
+  "ticket": "T3-3",
+  "note": "every routine and sync; each field is {value, origin} with origin default | profile | yours (packages/core/src/scheduled.ts FIELD_ORIGINS)",
+  "request": {
+    "method": "GET",
+    "path": "/api/scheduled",
+    "body": null,
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "routines": [
+      {
+        "name": "morning-brief",
+        "kind": "routine",
+        "source": "product",
+        "title": "Morning Brief",
+        "schedule": {
+          "value": {
+            "days": "working_days",
+            "at": [
+              "07:00"
+            ]
+          },
+          "origin": "default"
+        },
+        "paused": {
+          "value": false,
+          "origin": "default"
+        },
+        "config": {
+          "skip_without_calendar_event": {
+            "value": false,
+            "origin": "yours"
+          }
+        },
+        "actor": null,
+        "task": null,
+        "grants": null,
+        "next_run": "2026-09-29T11:00:00.000Z",
+        "last_run": {
+          "run_id": "8812",
+          "at": "2026-09-28T11:00:04.000Z",
+          "ok": true,
+          "outcome": "wrote Journal/Brief/2026-09-28.md",
+          "cost_usd": "0.004100"
+        }
+      }
+    ],
+    "syncs": [
+      {
+        "name": "github-state",
+        "kind": "sync",
+        "connection": "github",
+        "title": "GitHub",
+        "every": {
+          "value": "15m",
+          "origin": "default"
+        },
+        "paused": {
+          "value": false,
+          "origin": "default"
+        },
+        "raise": {
+          "review_requested": {
+            "value": true,
+            "origin": "default"
+          }
+        },
+        "next_run": "2026-09-28T13:15:00.000Z",
+        "last_run": {
+          "run_id": "8820",
+          "at": "2026-09-28T13:00:02.000Z",
+          "ok": true,
+          "outcome": "3 pull requests",
+          "cost_usd": null
+        }
+      }
+    ],
+    "timezone": "America/New_York",
+    "as_of": "2026-09-28T13:05:00.000Z"
+  }
+}

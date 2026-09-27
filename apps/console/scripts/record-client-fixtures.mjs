@@ -143,8 +143,34 @@ await writeFile(
 // the Variables list (§2.14): the file, and a connection that declares one —
 // so `read_by` and `used_in` have something to say
 await writeFile(layout.path("variables"), `variables:\n  team_name: Platform\n  company: Acme\n`);
+// the Connections list (§2.6, T4-8a): a stdio MCP server whose token is the
+// github_write secret above (granted to connection:github, and held), with a
+// tool at each mode; and a sync in scheduled.yaml that reads it, for *used by*.
+// Nothing dials it: a read of the list never starts the command.
 await mkdir(join(layout.path("metistryDir"), "connections"), { recursive: true });
-await writeFile(join(layout.path("metistryDir"), "connections", "github.yaml"), `name: github\ntype: mcp\nvariables: [team_name]\n`);
+await writeFile(
+  join(layout.path("metistryDir"), "connections", "github.yaml"),
+  `name: github
+type: mcp
+provider: custom
+description: GitHub's MCP server
+reach:
+  command:
+    command: npx
+    args: [-y, "@modelcontextprotocol/server-github"]
+    env:
+      GITHUB_PERSONAL_ACCESS_TOKEN: "{{ secret.github_write }}"
+      GITHUB_TEAM: "{{ variable.team_name }}"
+secrets: [github_write]
+variables: [team_name]
+tools:
+  search_issues: { group: reads, mode: on }
+  create_issue: { group: changes, mode: ask }
+  delete_issue: { group: changes, mode: off }
+offer_to_agents: false
+`,
+);
+await writeFile(join(layout.path("metistryDir"), "scheduled.yaml"), `syncs:\n  github-state:\n    connection: github\n`);
 
 const fixtureKeychain = memoryKeychain();
 const instanceSecrets = new InstanceSecrets(fixtureKeychain, await readInstanceId(instanceDir));
@@ -255,6 +281,7 @@ const server = makeServer(pool, queries, {
   instancesFiles: layout.path("instances"),
   secrets: { file: layout.path("secrets"), presence: instanceSecrets.presence() },
   variables: { instanceDir, file: layout.path("variables") },
+  connections: { instanceDir, seedDir: join(REPO_ROOT, "seed"), presence: instanceSecrets.presence() },
   // the reconciler's GET /vault/status, as a week of use leaves it: two
   // commits not yet pushed under after_commit (the remote was unreachable
   // for the last attempt), nothing new on the remote, no conflict
@@ -483,6 +510,8 @@ const REQUESTS = [
   ["GET /api/instances", () => ({ path: "/api/instances" })],
   ["GET /api/secrets", () => ({ path: "/api/secrets" })],
   ["GET /api/variables", () => ({ path: "/api/variables" })],
+  ["GET /api/connections", () => ({ path: "/api/connections" })],
+  ["GET /api/connections/:name", () => ({ path: "/api/connections/github" })],
   ["GET /api/vault/status", () => ({ path: "/api/vault/status" })],
   ["GET /api/commands", () => ({ path: "/api/commands" })],
   ["GET /api/proposals", () => ({ path: "/api/proposals" })],

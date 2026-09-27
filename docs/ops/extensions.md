@@ -238,8 +238,10 @@ never provider names.
 | `mcp` · `agent` · `api` · `feed` · `files` | none — consumed through their tools |
 
 **Tool groups:** `reads` · `changes` · `starts_agent` (*Reads · Changes things ·
-Starts an agent*). **Modes:** `on` · `ask` · `off`, the owner's per-tool policy,
-defaulting to **Ask** (CLAUDE.md).
+Starts an agent*). **Modes:** `on` · `ask` · `off` — drawn *Allow · Ask First ·
+Never* (the owner's words, ruled 2026-09-26) — the owner's per-tool policy,
+defaulting to **Ask First** (CLAUDE.md). A new connection starts at Reads Allow,
+Changes things Ask First, Starts an agent Ask First (Q15; `docs/ops/connections.md`).
 
 **Native handlers and their reach.** `native` runs a connection through the
 type's own handler, which speaks: `mcp` and `agent` — `http`, `command`; `api`
@@ -266,8 +268,11 @@ instance with no Metistry server in the path.
 
 ## Connection files
 
-`.metistry/connections/<name>.yaml`, written only by the CLI (M13 — T4-8a).
-Schema: `connectionFileSchema` in `packages/core/src/connections.ts`.
+`.metistry/connections/<name>.yaml`, written only by the CLI (`metistry
+connections`, M13). Schema: `connectionFileSchema` in
+`packages/core/src/connections.ts`; how a file is read, listed and dialled —
+and the rules `packages/connections` adds to the schema — is
+[`docs/ops/connections.md`](connections.md).
 
 ```yaml
 name: work-calendar

@@ -3,7 +3,8 @@
 // module imports these, and so does a test, as they are (no lifting).
 //
 // app.js is the shell; each view that has its own file (today.js,
-// needs-you.js — screen 18 §2–§3, split per view by T7-3a) imports from here
+// needs-you.js — screen 18 §2–§3, split per view by T7-3a; work.js,
+// knowledge.js, more.js — screen 18 §5, T7-3b) imports from here
 // and receives the shell's doors (`$`, `api`, `show`, …) when it is mounted,
 // so the import graph stays a tree: app.js → a view → lib.js.
 
@@ -45,6 +46,12 @@ export function age(ts, now = Date.now()) {
   return h < 24 ? `${h}h` : `${Math.floor(h / 24)}d`;
 }
 
+/** The same, as a phrase: *12m ago*, *just now* — never "now ago". Empty for a time that is not one. */
+export function ago(ts, now = Date.now()) {
+  const a = age(ts, now);
+  return a === "now" ? "just now" : a ? `${a} ago` : "";
+}
+
 // ----- an agent's access, in the owner's words (glossary.md) -----
 // The stored tiers are none|index|areas; the owner reads none / titles /
 // folders. `GET /api/agents` sends the rendered scope as `view.scope`; the
@@ -55,3 +62,24 @@ export const ACCESS_LABEL = { none: "none", index: "titles", areas: "folders" };
 export const accessLabel = (t) => ACCESS_LABEL[t] ?? t;
 export const scopeOf = (view, tier, areas) =>
   view?.scope ?? (tier === "areas" ? `folders: ${(areas ?? []).join(", ") || "nothing"}` : accessLabel(tier ?? "none"));
+
+// ----- numbers off the wire -----
+// pg returns count()/numeric/bigint as strings, so a number passes through
+// asNum() before it is compared, added or drawn — a bar's width is a number
+// computed here, never server text.
+export const asNum = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+export const fmtUsd = (v) => asNum(v).toFixed(2);
+export const barPct = (v, max) => (max > 0 ? Math.max(0, Math.min(100, (asNum(v) / max) * 100)) : 0);
+export const barHtml = (v, max) => `<span class="bar"><span style="width:${barPct(v, max).toFixed(1)}%"></span></span>`;
+
+// Agent prose is set in the serif (C32, C35 — style.css `.agent-prose`), so it
+// reads as the assistant's before a word of it is read, and it still says so
+// once quoted out of the app. Only for a body an agent wrote: the owner's own
+// comment stays in the interface face. Chat, a room and an artifact's thread
+// all print bodies through it.
+export function bodyClass(c) {
+  return c?.author_kind === "agent" ? "body agent-prose" : "body";
+}
+
+/** A glyph from the sprite in index.html, in its control's ink; decorative, so hidden from VoiceOver (the control names itself). */
+export const glyph = (id, cls = "glyph") => `<svg class="${cls}" aria-hidden="true" focusable="false"><use href="#g-${id}"/></svg>`;

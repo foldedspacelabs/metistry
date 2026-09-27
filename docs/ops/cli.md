@@ -1783,6 +1783,17 @@ at the instance root — the signal to run `metistry migrate-layout` above.
 It is a status check, not a probe: no network, no bridge, just which
 directories exist.
 
+**The `app` row** (macOS, launchd shape). The installed Mac app's
+`CFBundleShortVersionString` — from `--app-path`'s same lookup:
+`METISTRY_APP_PATH`, `/Applications/Metistry.app`, `~/Applications/Metistry.app`
+— against `.metistry/metistry.lock`'s version. `ok` when they match or the app
+is ahead (Sparkle got there first); **`degraded` when the app is behind**,
+with `metistry update` as the fix (and as the row's `run_verb` action) on a
+release install, or Sparkle's Check for Updates… on a checkout, whose update
+does not move the app. No app at all is `absent`: a Mac that drives the
+product from the terminal is not broken. It reads a plist; nothing is
+launched or opened.
+
 **What is probed, generically.** Doctor knows no component by name. It
 walks every `manifest.yaml` under `collectors/ routines/ packages/ apps/
 targets/`, validates it with `core`'s schema, and for anything that
@@ -2206,6 +2217,7 @@ install forward, in this order:
 | step | git mode (the product is a checkout) | release mode (`.metistry/metistry.lock`: `source: release`, or `--channel release`) |
 | --- | --- | --- |
 | product | `git fetch` + `git pull --ff-only` — a diverged checkout stops the update (exit code git's) | resolve the release, download its runtime pack + `checksums.txt`, **verify the sha256**, unpack to `releases/<version>/`, point `current` at it (`docs/ops/releases.md`) |
+| app | — (a checkout's app is Sparkle's or a local build's) | **macOS, launchd shape:** `Metistry-<version>.dmg` from the same release, sha256-verified the same way, swapped into `/Applications/Metistry.app` with the old one kept as `Metistry.app.previous` (below) |
 | build | `pnpm install --frozen-lockfile` + `pnpm -r build` (`--skip-build` to reuse `dist/`) | no build — the pack is compiled output |
 | migrations | `db/migrations/*.sql` not yet in `schema_migrations`, in filename order, one transaction each, under `pg_advisory_lock` (below); `--skip-migrate` leaves them to doctor to report | same, read from `current` |
 | restart | `docker compose up -d --build`; `launchctl kickstart -k` for each host job whose code changed | `docker compose pull` + `up -d --no-build` in `current`, with the versioned ghcr images; same kickstart rule |
@@ -2334,9 +2346,52 @@ pre-update code's, and a standalone `metistry doctor` afterwards is the
 truth. The first update onto a release with this fix still runs the old
 release's `update` (and so its in-process doctor) once.
 
+**Moving the Mac app with the release.** On a Mac whose shape is `launchd`,
+release mode moves the app the owner actually looks at, not just the
+product under it — right after the runtime pack, from the **same release**:
+
+1. **Find it.** `--app-path <path>`, else `METISTRY_APP_PATH`, else
+   `/Applications/Metistry.app`, else `~/Applications/Metistry.app`. A bundle
+   there whose `CFBundleIdentifier` is not `com.foldedspacelabs.metistry` is
+   left untouched; no bundle at all is a note (`--app-path` to a path that
+   does not exist yet installs it there fresh). `--no-app` skips all of it.
+2. **Already there?** The installed `CFBundleShortVersionString` equal to the
+   release → `app already 0.14.0`, nothing downloaded. Newer than the release
+   (Sparkle got there first) → left as it is; `update` never downgrades the app.
+3. **Download and verify** `Metistry-<version>.dmg` against the release's
+   `checksums.txt` — the same function the runtime pack goes through
+   (`downloadVerified`, `release.ts`). A mismatch discards it; nothing is
+   mounted.
+4. **Mount read-only** — `hdiutil attach -nobrowse -readonly -noautoopen
+   -mountpoint <private temp dir>` — and `ditto` the bundle to
+   `.Metistry.app.incoming` **beside** the installed one (the same volume, so
+   the swap is two renames). The copy is checked, not the image: bundle id,
+   `CFBundleShortVersionString` == the release, and, when it is signed,
+   `codesign --verify --deep --strict` **and** `spctl --assess --type execute`.
+   An unsigned bundle (a local build with no Developer ID) is installed with
+   the assessment skipped and a line saying so — but never over a signed one.
+5. **Swap.** `Metistry.app` → `Metistry.app.previous` (one kept; the one
+   before is removed), the new bundle into place. Detach, always.
+6. **A running app** (a process whose executable is *this* bundle's) is told
+   to quit and reopen. It is never quit for you unless you pass
+   `--relaunch`, which sends it `SIGTERM`, waits for it to go and `open`s
+   the new one.
+
+It **never escalates**: when the folder is not writable by you (a standard
+account's `/Applications`), the app is left alone and the exact sudo-free
+alternative is printed — `metistry update --app-path
+~/Applications/Metistry.app`, then drag the old one to the Trash in Finder.
+And it **never fails the update**: the product has already moved, so every
+refusal above is a note and a line in the summary (`app not updated (…)`),
+not an exit code. `--rollback` swaps `Metistry.app.previous` back in the
+same way, keeping the newer one as the previous, so a second rollback rolls
+forward. Doctor's `app` row (below) says whether the app matches the lock.
+Under the compose shape, on Linux and in git mode the app is not touched.
+
 `--dry-run` prints the whole plan — including the migration step as one
-line and the kickstarts annotated with the path each one depends on —
-and opens no db session, calls no bridge, runs no doctor.
+line, the kickstarts annotated with the path each one depends on, and the
+app's download and swap — and opens no db session, calls no bridge, runs
+no doctor, downloads and mounts nothing.
 
 ## `.metistry/metistry.lock`
 

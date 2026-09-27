@@ -97,15 +97,22 @@ await writeFile(
     kind: openai-compatible
     base_url: https://openrouter.ai/api/v1
     locality: off_machine
-    auth: { secret: METISTRY_OPENROUTER_API_KEY }
+    auth: { secret: "{{ secret.openrouter_api_key }}" }
     zdr: true
     data_policy: { allow: [Projects], deny_sources: [comms], max_brief_bytes: 65536 }
   lmstudio:
     kind: openai-compatible
     base_url: http://127.0.0.1:1234/v1
     locality: on_machine
+  ollama:
+    kind: openai-compatible
+    base_url: http://127.0.0.1:11434/v1
+    locality: on_machine
+    enabled: false
 assignments:
   default: { model: lmstudio/gemma, effort: medium }
+  tiers:
+    fast: { model: lmstudio/qwen, effort: low }
 `,
 );
 await writeFile(
@@ -150,7 +157,19 @@ const fakeFetch = async (input, init) => {
   const url = String(input);
   outbound.push(url);
   if (url.endsWith("/vault/write")) return new Response(JSON.stringify({ path: INSTANCE_LAYOUT.compute, sha256: "0".repeat(64), bytes: 1, created: false }), { status: 200 });
-  if (url.includes("/models")) return new Response(JSON.stringify({ data: [{ id: "gemma" }, { id: "qwen" }] }), { status: 200 });
+  // OpenRouter's catalogue carries names, context and prices; a local server's carries ids (T4-18's catalogue groups both by model)
+  if (url === "https://openrouter.ai/api/v1/models") {
+    return new Response(
+      JSON.stringify({
+        data: [
+          { id: "google/gemma-3-4b-it", name: "Google: Gemma 3 4B", context_length: 131072, pricing: { prompt: "0.00000002", completion: "0.00000004" } },
+          { id: "anthropic/claude-sonnet-5", name: "Anthropic: Claude Sonnet 5", context_length: 200000, pricing: { prompt: "0.000003", completion: "0.000015" }, supported_parameters: ["tools"] },
+        ],
+      }),
+      { status: 200 },
+    );
+  }
+  if (url.includes("/models")) return new Response(JSON.stringify({ data: [{ id: "gemma" }, { id: "qwen" }, { id: "google/gemma-3-4b" }] }), { status: 200 });
   if (url.startsWith("https://api.github.com/repos/example/fixtures/issues") && init?.method === "POST") {
     return new Response(JSON.stringify({ number: 41, html_url: "https://github.com/example/fixtures/issues/41" }), { status: 201 });
   }
@@ -236,8 +255,9 @@ const server = makeServer(pool, queries, {
   computeAdmin: {
     instanceDir,
     seedDir: join(REPO_ROOT, "seed"),
-    env: { METISTRY_RECONCILER_URL: "http://127.0.0.1:1", METISTRY_BRIDGE_TOKEN_RECONCILER: "fixture-not-a-token" },
-    platform: "linux", // keeps the Keychain out of it: secret presence reads as false, honestly
+    // the provider key as a service receives it (T4-18): its delivery variable, never the Keychain
+    env: { METISTRY_RECONCILER_URL: "http://127.0.0.1:1", METISTRY_BRIDGE_TOKEN_RECONCILER: "fixture-not-a-token", METISTRY_SECRET_OPENROUTER_API_KEY: "fixture-not-a-key" },
+    platform: "linux", // keeps the Keychain out of it: presence reads from the delivery variable
     uid: 501,
     fetchFn: fakeFetch,
   },
@@ -450,6 +470,8 @@ const REQUESTS = [
   ["GET /api/sessions/:id", () => ({ path: "/api/sessions/7b1f2c9e-0000-4000-8000-000000000001" })],
   ["GET /api/compute", () => ({ path: "/api/compute" })],
   ["GET /api/compute/models", () => ({ path: "/api/compute/models" })],
+  // T4-18: grouped by model, the switched-off ollama skipped, every listing read now
+  ["GET /api/compute/catalogue", () => ({ path: "/api/compute/catalogue?q=gemma&refresh=true" })],
   ["GET /api/knowledge/search", () => ({ path: "/api/knowledge/search?q=store" })],
   ["GET /api/knowledge/page", () => ({ path: `/api/knowledge/page?path=${encodeURIComponent(PAGE)}` })],
   ["GET /api/knowledge/pages", () => ({ path: "/api/knowledge/pages?prefix=Projects" })],
@@ -506,6 +528,7 @@ const REQUESTS = [
   ["POST /api/work/:id/thread/reopen", () => ({ path: `/api/work/${ids.roomTask}/thread/reopen`, body: {} })],
 
   ["POST /api/compute/assign", () => ({ path: "/api/compute/assign", body: { tier: "deep", model: "openrouter/anthropic/claude-opus-4", effort: "high" } })],
+  ["POST /api/compute/unassign", () => ({ path: "/api/compute/unassign", body: { tier: "fast" } })],
   ["POST /api/compute/budget", () => ({ path: "/api/compute/budget", body: { scope: "provider:openrouter", daily: 5, monthly: 60, action: "stop" } })],
   ["POST /api/compute/providers/test", () => ({ path: "/api/compute/providers/test", body: { name: "lmstudio" } })],
 

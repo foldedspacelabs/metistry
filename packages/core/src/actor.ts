@@ -22,7 +22,8 @@
 import { describePermissions, type GrantSource, type GrantTier, type Principal, type Role, type Scope } from "./access.js";
 import type { ActionAutonomy } from "./actions.js";
 import type { Compute } from "./compute.js";
-import { CREW_TOOL_GROUPS, crewGroupOf, crewModelIssue, isLegacyCrewModel, SAME_AS_ASSISTANT, type AgentManifest, type CrewToolGroup } from "./manifest.js";
+import { crewModelIssue, isLegacyCrewModel, SAME_AS_ASSISTANT } from "./crew-model.js";
+import { CREW_TOOL_GROUPS, crewGroupOf, type AgentManifest, type CrewToolGroup } from "./manifest.js";
 import { modelRefIssue } from "./model-ref.js";
 import type { Effort } from "./tiers.js";
 

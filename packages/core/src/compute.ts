@@ -25,7 +25,7 @@ import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { INSTANCE_LAYOUT } from "./instance-layout.js";
 import { dataPolicySchema } from "./data-policy.js";
-import { isLegacyCrewModel, SAME_AS_ASSISTANT } from "./manifest.js";
+import { isLegacyCrewModel, SAME_AS_ASSISTANT } from "./crew-model.js";
 import { PROVIDER_NAME_RE, modelRefIssue, parseModelRef, type ModelRef } from "./model-ref.js";
 import { DEFAULT_TIER, EFFORTS, type Effort, type TierMap } from "./tiers.js";
 

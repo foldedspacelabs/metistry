@@ -368,11 +368,15 @@ describe("the doctor row: presence only", () => {
     expect(before?.status).toBe("degraded");
     expect(before?.remediation).toContain(`metistry secrets migrate-scope --instance ${dir}`);
     expect(kc.ops.filter((o) => o.op !== "has")).toEqual([]);
+    // T4-21: argv the app can run directly, without needing --instance (the
+    // CLI reads METISTRY_INSTANCE_DIR the same way every other verb does)
+    expect(before?.action).toEqual({ kind: "run_verb", command: ["metistry", "secrets", "migrate-scope"], label: "Run secrets migrate-scope" });
 
     await migrateScope(opts(dir, ID_A, kc));
     const copied = await sharedScopeRow({ instanceDir: dir, productDir: product, env: {}, probe });
     expect(copied?.status).toBe("degraded");
     expect(copied?.remediation).toContain("metistry secrets purge-shared");
+    expect(copied?.action).toEqual({ kind: "run_verb", command: ["metistry", "secrets", "purge-shared"], label: "Preview secrets purge-shared" });
 
     await purgeShared({ instanceDir: dir, env: {}, platform: "linux", keychain: kc, instances: [dir], out: () => {}, yes: true });
     expect((await sharedScopeRow({ instanceDir: dir, productDir: product, env: {}, probe }))?.status).toBe("ok");

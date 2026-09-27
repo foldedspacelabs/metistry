@@ -1464,7 +1464,8 @@ terminal's locale is not UTF-8, come from `docs/ops/cli-style.md`;
 
 One row per thing that can be wrong; every row is a `core` `CheckResult`
 (`name`, `status`, `latency_ms`, `probe`, `remediation`, `meta`) plus a
-`kind`. Statuses mean what they mean everywhere else in the product:
+`kind`, and — additively, T4-21 — an optional `action`. Statuses mean what
+they mean everywhere else in the product:
 
 | status | meaning | exit code |
 | --- | --- | --- |
@@ -1477,6 +1478,40 @@ One row per thing that can be wrong; every row is a `core` `CheckResult`
 how optional bridges are designed to behave (a Linux box has no apple-fm).
 Something you rely on that shows `absent` is still a finding — read the
 column, not just the exit code.
+
+**`action`** (T4-21, `packages/cli/src/doctor.ts`). The Mac app's Services
+pane reads `doctor --json` and wants a button beside a red row, not a
+sentence to re-derive one from — so a row that is not `ok`, and for which
+doctor can name the fix without guessing, carries a structured `action`
+next to its free-text `remediation`:
+
+```json
+{ "kind": "run_verb", "command": ["metistry", "up"], "label": "Run metistry up" }
+{ "kind": "open_secrets", "label": "Add METISTRY_BRIDGE_TOKEN_EVENTKIT in Secrets" }
+{ "kind": "open_system_settings", "label": "Open System Settings" }
+```
+
+`run_verb.command` is **argv, never a shell string** — the same contract
+`ProcessCommandRunner` already holds every CLI verb to — and it never
+carries `--yes`: a mutating verb's own preview-then-confirm still sits
+between the button and the write, exactly as it would typed by hand. Doctor
+only ever sets `action` from facts it already has (which env var is unset,
+which state a supervisor child reports, which verb a migration needs) —
+never by parsing its own `remediation` sentence, with the one narrow
+exception of `open_system_settings`, which fires when a TCC bridge's own
+`check()` names that pane in words (there is no verb that grants a Calendar
+permission). Most rows carry no `action` at all — restart/stop/start/logs
+per `kind` is the generic control every row already has (`docs/ops/mac-app.md`);
+`action` exists only for the fixes that generic menu cannot express.
+
+**Uptime, on every row that is a running process.** `meta.uptime_sec`:
+`ps -o etimes=` for a launchd job (keyed off the pid `launchctl print`
+already reported — no second process lookup), `docker compose ps`'s own
+`Status` text parsed back into seconds for a container, and a supervisor
+child's `uptimeMs` (already tracked, `apps/watchdog/src/supervisor.ts`)
+divided down to match. Best-effort throughout, like every add-on fact in
+this report: an unparseable `Status` or a `ps` that fails reports no
+`uptime_sec` rather than failing the row.
 
 **`instance layout`** is its own row, reported as `flat` or `legacy`:
 `flat` when the vault root holds the vault and `.metistry/` holds

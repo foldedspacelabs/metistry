@@ -207,6 +207,8 @@ describe("doctor's keep-awake row", () => {
     expect(row.status).toBe("absent");
     expect(row.remediation).toContain("set-keep-awake allow_sleep_on_battery");
     expect(row.meta).toEqual({ mode: "never" });
+    // T4-21: the same verb as argv, minus --yes — the app's own preview-then-confirm adds it
+    expect(row.action).toEqual({ kind: "run_verb", command: ["metistry", "deployment", "set-keep-awake", "allow_sleep_on_battery"], label: "Turn on keep-awake" });
   });
 
   it("compose: absent, because there is no supervisor to hold it", async () => {
@@ -243,12 +245,14 @@ describe("doctor's keep-awake row", () => {
     }))!;
     expect(row.status).toBe("ok");
     expect(row.meta).toMatchObject({ holding: false, power_source: "battery" });
+    expect(row.action).toBeUndefined(); // released BY POLICY is success — nothing to fix
   });
 
   it("configured but nothing has written the file: degraded", async () => {
     const row = (await keepAwakeRow({ deployment: { ...launchd, keep_awake: "always" }, instanceDir: await withState(undefined), exec: pmset(), platform: "darwin" }))!;
     expect(row.status).toBe("degraded");
     expect(row.remediation).toContain("nothing has written");
+    expect(row.action).toEqual({ kind: "run_verb", command: ["metistry", "up"], label: "Run metistry up" });
   });
 
   it("the fourth value: degraded, with the exact administrator sentence — offered, not faked", async () => {
@@ -262,6 +266,9 @@ describe("doctor's keep-awake row", () => {
     expect(row.remediation).toContain("not available on this Mac without an administrator change");
     expect(row.remediation).toContain("pmset -a disablesleep 1");
     expect(row.meta!.holding).toBe(true); // it still holds everything it can
+    // T4-21: never a button for the one repair that is a system-wide `sudo`
+    // command Metistry itself refuses to run — the sentence stays the whole story
+    expect(row.action).toBeUndefined();
   });
 
   it("ruling E: the Mac slept anyway — degraded, with when, for how long, and the repair", async () => {
@@ -273,6 +280,7 @@ describe("doctor's keep-awake row", () => {
     expect(row.remediation).toContain("about 41m");
     expect(row.remediation).toContain("set-keep-awake always --yes");
     expect(row.remediation).toContain("costs battery");
+    expect(row.action).toEqual({ kind: "run_verb", command: ["metistry", "deployment", "set-keep-awake", "always"], label: "Hold awake on battery too" });
   });
 
   it("…and offers no repair when the strongest setting was already in force — that would be noise dressed as advice", async () => {
@@ -282,6 +290,7 @@ describe("doctor's keep-awake row", () => {
     const row = (await keepAwakeRow({ deployment: { ...launchd, keep_awake: "always" }, instanceDir: dir, exec: pmset(), platform: "darwin" }))!;
     expect(row.status).toBe("degraded");
     expect(row.remediation).not.toContain("set-keep-awake always --yes");
+    expect(row.action).toBeUndefined(); // "nothing further to turn on" — no button dressed up as advice
     expect(row.remediation).toContain("already the strongest setting");
   });
 

@@ -20,6 +20,7 @@ All of them are real.
 | `console call <METHOD> <path> [--body @file\|-] [--idempotency-key <key>] [--json]` | one authenticated request against the console, as `whoami`'s same principal — the scripting seam |
 | `console session --stdio` | `console call`, held open: one long-lived child answering JSON request lines on stdin — the Mac app's transport |
 | `identity [--json]` | the instance's `.metistry/identity.yaml` (name, mention, voice, icon, instance_id) |
+| `identity set [--name] [--mention] [--mark] [--dry-run] [--json]` | change the assistant's name, mention and mark through the protected write (M10); an invalid field is refused and nothing is written |
 | `--version` / `version [--json]` | this CLI's version, the resolved product dir's, the lock's pin, and a release's runtime pack |
 | `deployment [--json]` | the effective shape (D4 overlay) and the services it implies, with cheap running state |
 | `deployment set-shape <compose\|launchd>` | write the instance's `.metistry/deployment.yaml` through the reconciler, preview-then-confirm |
@@ -117,8 +118,35 @@ app needs is a CLI change first" rule as `doctor --json` and the
 `metistry identity [--json] [--instance <dir>]` prints `.metistry/identity.yaml` as the
 CLI already understands it — `name`, `mention`, `voice`, `icon`,
 `instance_id` — resolving `--instance`/`METISTRY_INSTANCE_DIR` like every
-other instance verb. Read-only: `.metistry/identity.yaml` is a §4.7 protected path, so
-there is no field here to change it.
+other instance verb.
+
+`metistry identity set [--name <name>] [--mention <@slug>] [--mark <glyph>]
+[--dry-run] [--json] [--instance <dir>]` is the one way to change it (M10 —
+the Settings pane's *The Assistant* fronts this verb). `.metistry/identity.yaml`
+is a §4.7 protected path, so the write takes the same door as `metistry.lock`:
+through the reconciler as `user`, with the owner bearer
+(`protected-write.ts`), or straight to disk when no reconciler is configured.
+The reconciler records every protected write it accepts as a `config_write`
+run, so the change shows in Activity (`activity_feed`) whichever door made it.
+
+- **The mark is `icon:`.** The design's *mark* (C123) is the file's existing
+  `icon:` key; the key is not renamed, so `GET /api/identity`'s `icon` and
+  every existing instance keep reading it.
+- **Validated before anything is written**, and a refusal writes nothing (exit
+  1): a name is one line, trimmed, at most 40 characters, with no `{{`/`}}`; a
+  mention is `@` plus lowercase letters, digits and single hyphens (at most 41
+  characters); a mark is exactly one character or emoji. The edited text is
+  read back before it is sent — what was asked for landed, and `voice` and
+  `instance_id` did not move.
+- **The mention follows the name** when it was the one `init` derived from the
+  old name (`Metis` → `@metis`); a mention set on its own stays until
+  `--mention` moves it. A name that yields no mention (`李`) needs `--mention`.
+- Only the lines that change are rewritten; comments and `voice: >` keep every
+  byte. Setting what the file already says writes nothing.
+- The console and the assistant read `identity.yaml` when they start:
+  `metistry restart` shows the new identity.
+- `--json` prints `{changes: [{field, from, to}], mention_followed_name,
+  identity, delivery}`; progress goes to stderr.
 
 `metistry --version` / `metistry version [--json]` prints every version
 number an install can be asked about, each only as far as it resolves:

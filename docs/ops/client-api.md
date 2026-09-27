@@ -345,18 +345,18 @@ takes a `since` cursor and answers with the next one.
 | `POST /api/calendar/events/:id/move` | owner | session · local_owner | no | — | — | T2-12 | move an event: preview, then confirm with a single-use token |
 | `POST /api/calendar/invitations/:id/respond` | owner | session · local_owner | no | — | — | T4-17 | answer an invitation through the connection that can |
 | `POST /api/mail/messages/:id/draft` | owner | session · local_owner | no | — | — | T4-17 | draft a reply through the connection that can; never sends |
-| `GET /api/scheduled` | owner | session · local_owner | natural | — | — | T3-3 | every routine and sync with its schedule and last run |
-| `GET /api/scheduled/routines/:name` | owner | session · local_owner | natural | — | — | T3-3 | one routine |
-| `GET /api/scheduled/syncs/:name` | owner | session · local_owner | natural | — | — | T3-3 | one sync |
-| `PUT /api/scheduled/routines/:name/schedule` | owner | session · local_owner | natural | — | — | T3-3 | set a routine's schedule |
-| `POST /api/scheduled/routines/:name/pause` | owner | session · local_owner | natural | — | — | T3-3 | pause a routine |
-| `POST /api/scheduled/routines/:name/resume` | owner | session · local_owner | natural | — | — | T3-3 | resume a routine |
-| `POST /api/scheduled/routines/:name/run` | owner | session · local_owner | no | — | — | T3-3 | Run Now, under the budget preflight |
-| `DELETE /api/scheduled/routines/:name` | owner | session · local_owner | natural | — | — | T3-3 | Reset to Default: delete the owner's entry |
-| `PUT /api/scheduled/routines/:name/assignment` | local | local_owner | natural | — | — | T3-3 | a routine's actor, task and per-run grants |
+| `GET /api/scheduled` | owner | session · local_owner | natural | — | — | served | every routine and sync with its schedule and last run |
+| `GET /api/scheduled/routines/:name` | owner | session · local_owner | natural | — | — | served | one routine |
+| `GET /api/scheduled/syncs/:name` | owner | session · local_owner | natural | — | — | served | one sync |
+| `PUT /api/scheduled/routines/:name/schedule` | owner | session · local_owner | natural | — | — | served | set a routine's schedule |
+| `POST /api/scheduled/routines/:name/pause` | owner | session · local_owner | natural | — | — | served | pause a routine |
+| `POST /api/scheduled/routines/:name/resume` | owner | session · local_owner | natural | — | — | served | resume a routine |
+| `POST /api/scheduled/routines/:name/run` | owner | session · local_owner | no | — | — | served | Run Now, under the budget preflight |
+| `DELETE /api/scheduled/routines/:name` | owner | session · local_owner | natural | — | — | served | Reset to Default: delete the owner's entry |
+| `PUT /api/scheduled/routines/:name/assignment` | local | local_owner | natural | — | — | served | a routine's actor, task and per-run grants |
 | `POST /api/scheduled/routines` | local | local_owner | no | — | — | T3-8 | New Routine: an actor, a task and per-run grants |
-| `PUT /api/scheduled/syncs/:name` | owner | session · local_owner | natural | — | — | T3-3 | a sync's cadence, pause and raise toggles |
-| `POST /api/scheduled/syncs/:name/run` | owner | session · local_owner | no | — | — | T3-3 | run a sync now |
+| `PUT /api/scheduled/syncs/:name` | owner | session · local_owner | natural | — | — | served | a sync's cadence, pause and raise toggles |
+| `POST /api/scheduled/syncs/:name/run` | owner | session · local_owner | no | — | — | served | run a sync now |
 | `GET /api/connections` | owner | session · local_owner | natural | — | — | served | the connections: status, reach, tools and modes, used by — names, never a value |
 | `GET /api/connections/:name` | owner | session · local_owner | natural | — | — | served | one connection, with its file and its provider's unit |
 | `GET /api/secrets` | owner | session · local_owner | natural | — | — | served | secret names, hosts, grants, last used — never a value |
@@ -2426,18 +2426,18 @@ the client offers *Open in Calendar* instead.
 ### Scheduled — routines and syncs
 
 ```
-GET    /api/scheduled                                T3-3 — every routine and sync, with its schedule and last run
-GET    /api/scheduled/routines/:name                 T3-3
-GET    /api/scheduled/syncs/:name                    T3-3
-PUT    /api/scheduled/routines/:name/schedule        T3-3 — {days, at}
-POST   /api/scheduled/routines/:name/pause           T3-3
-POST   /api/scheduled/routines/:name/resume          T3-3
-POST   /api/scheduled/routines/:name/run             T3-3 — Run Now: the runner's tick for one component, under the budget preflight
-DELETE /api/scheduled/routines/:name                 T3-3 — Reset to Default: deletes the owner's entry
-PUT    /api/scheduled/routines/:name/assignment      T3-3 — reach local: the actor, the task and the per-run grants
+GET    /api/scheduled                                served — every routine and sync, with its schedule and last run
+GET    /api/scheduled/routines/:name                 served — one routine and its history
+GET    /api/scheduled/syncs/:name                    served — one sync and its history
+PUT    /api/scheduled/routines/:name/schedule        served — {days, at, tz?} | {every}
+POST   /api/scheduled/routines/:name/pause           served
+POST   /api/scheduled/routines/:name/resume          served
+POST   /api/scheduled/routines/:name/run             served — Run Now: the runner's tick for one component, under the budget preflight
+DELETE /api/scheduled/routines/:name                 served — Reset to Default: deletes the owner's entry
+PUT    /api/scheduled/routines/:name/assignment      served — reach local: the actor, the task and the per-run grants
 POST   /api/scheduled/routines                       T3-8 — reach local: New Routine
-PUT    /api/scheduled/syncs/:name                    T3-3 — cadence, pause, raise toggles
-POST   /api/scheduled/syncs/:name/run                T3-3
+PUT    /api/scheduled/syncs/:name                    served — cadence, pause, raise toggles
+POST   /api/scheduled/syncs/:name/run                served
 ```
 
 Everything recurring lives under Scheduled (§2.5), layered manifest → `Me/profile.md`
@@ -2445,7 +2445,96 @@ Everything recurring lives under Scheduled (§2.5), layered manifest → `Me/pro
 third and last protected path the console writes, schema-validated, and never
 a product manifest. **Timing is inside the boundary** (a phone may change it);
 **what runs is not**: a routine's actor, its task and its per-run grants, and a
-new routine, are `local`.
+new routine, are `local`. The code is `apps/console/src/scheduled-routes.ts`;
+the file's rules are `docs/ops/scheduled.md`.
+
+#### The shapes (the `user` principal)
+
+Every field that has layers is `{value, origin}`, `origin` one of `default` (the
+manifest) · `profile` (`Me/profile.md`) · `yours` (`scheduled.yaml`) — core's
+`FIELD_ORIGINS`; a client renders the label and never works the layer out.
+
+```
+GET /api/scheduled
+200 {"routines":[Routine…], "syncs":[Sync…],
+     "timezone":"America/New_York",            the profile's zone, else METISTRY_TZ, else null
+     "problems":[{name, field, message, holds}],  entries that do not fit their manifest (checkScheduled)
+     "errors":[],                              the file's own errors when it does not validate — then it is not applied
+     "as_of":"…"}
+
+Routine = {"name":"morning-brief", "kind":"routine",
+           "source":"product" | "extension" | "assignment",   an assignment is a New Routine
+           "title":"Morning Brief",
+           "schedule":{"value":{"days":"working_days","at":["07:00"]},"origin":"default"},
+           "paused":{"value":false,"origin":"default"},
+           "config":{"<key>":{"value":…,"origin":…}},          every key the manifest declares
+           "actor":null, "task":null, "grants":null,           a New Routine's assignment
+           "days":{"value":["mon",…],"origin":"profile"},      a time of day's weekdays; null for an interval
+           "time_zone":{"value":"America/New_York","origin":"profile"},
+           "next_run":"2026-09-29T11:00:00.000Z" | null,       null while paused or held
+           "next_refused":{"reason":"no_working_days","why":"…"} | null,
+           "last_run":{"run_id","at","ok","outcome","cost_usd","error"} | null,
+           "is_default":true,                                  no entry — the **default** tag
+           "held":null | "why the runner does not run it",
+           "describe":"working days at 07:00"}
+Sync    = {"name":"github-state", "kind":"sync", "connection":"github" | null, "title":"GitHub",
+           "every":{"value":"15m","origin":"default"}, "paused":…, "raise":{"<rule>":{"value":true,"origin":…}},
+           "next_run", "next_refused", "last_run", "is_default", "held", "describe"}
+
+GET /api/scheduled/routines/:name   200 {"routine":Routine, "history":[{…last_run, "steps", "trigger"}], "as_of"}
+GET /api/scheduled/syncs/:name      200 {"sync":Sync, "history":[…], "as_of"}
+                                    404 nothing by that name here, or it is the other kind (the message names its door)
+```
+
+History is the named query `routine_history` — the component's own
+`routine_run` or `collector_run` rows, newest first, 50; `trigger` is `run_now`
+for a run the owner asked for.
+
+```
+PUT    /api/scheduled/routines/:name/schedule   {days, at, tz?} | {every}     → 200 {"ok":true, "routine":Routine, "as_of"}
+POST   /api/scheduled/routines/:name/pause      {}                           → 200, as above
+POST   /api/scheduled/routines/:name/resume     {}                           → 200; the entry goes when nothing is left in it
+DELETE /api/scheduled/routines/:name                                         → 200 {…, "reset":true|false}  false: it had no entry
+PUT    /api/scheduled/routines/:name/assignment {actor, task, grants?:{read}, schedule, paused?}  (local) → 200
+PUT    /api/scheduled/syncs/:name               {every?, paused?, raise?:{rule: bool}}   null returns a field to its default → 200 {"ok":true, "sync":Sync, "as_of"}
+```
+
+- **Written once, as you, or not at all.** Each is one edit of the file as a
+  YAML document — comments and every other entry stay — through the reconciler
+  as `user`, compare-and-swapped on the bytes read (a concurrent edit is
+  re-read and re-applied, three times). A change that changes nothing writes
+  nothing, so each door is idempotent by its own identity.
+- **Validated first.** The result must parse under the closed schema and fit
+  the component (a change that would hold it is refused). `400` names the
+  field; nothing is written. An invalid file is never rewritten: every write
+  answers `400` until it is fixed.
+- **Never a manifest.** A routine with a manifest has no assignment door: `PUT
+  …/assignment` on one is `400`. A New Routine has no default: `DELETE` on one
+  is `400` (pause it). Per-run grants are read-only: `grants.write` is `400`.
+  The actor must be a live agent (`GET /api/agents`).
+- **A sync's connection is never set here** (`connection` in the body is
+  `400`), and a sync whose entry names no connection yet cannot be given one
+  here either — `400`, saying so.
+- `503 not_available` when this console has no runner wired in, or — for a
+  write — cannot write the file (no vault bridge; no instance directory;
+  `METISTRY_SCHEDULED_FILE` naming a file other than the instance's). The
+  message names which.
+
+```
+POST /api/scheduled/routines/:name/run   {}
+POST /api/scheduled/syncs/:name/run      {}
+202 {"ok":true, "name", "run_id":"8830", "started":true, "refused":null}
+200 {"ok":false, "name", "run_id":null, "started":false, "refused":{"reason":"paused"|"held"|"running"|"blocked", "message"}}
+404 nothing by that name here, or it is the other kind
+```
+
+**Run Now** is the runner's tick for one component (`runNow`,
+`apps/console/src/runner.ts`), answered before the run finishes: the owner's
+pause and a held entry apply (it says why — Resume first), a run already going
+is not doubled, and the preflight runs, budget included (`blocked`, with the
+fix). It does not wait for the component to be due, and it does not honour
+the failure streak — it is how a fix is checked. The row carries
+`meta.trigger: "run_now"`. A New Routine answers `held` until T3-8 runs it.
 
 ### Connections, secrets, variables, recordings — read here, written by the CLI
 

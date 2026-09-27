@@ -1,8 +1,7 @@
 {
   "route": "DELETE /api/scheduled/routines/:name",
-  "source": "contract",
-  "ticket": "T3-3",
-  "note": "Reset to Default: deletes the owner's entry; the routine as the lower layers now resolve it",
+  "source": "recorded",
+  "ticket": null,
   "request": {
     "method": "DELETE",
     "path": "/api/scheduled/routines/morning-brief",
@@ -14,9 +13,26 @@
     "ok": true,
     "routine": {
       "name": "morning-brief",
+      "title": "Morning Brief",
+      "paused": {
+        "value": false,
+        "origin": "default"
+      },
+      "next_run": "2026-09-28T11:00:00.000Z",
+      "next_refused": null,
+      "last_run": {
+        "run_id": "67",
+        "at": "2026-09-27T04:18:49.931Z",
+        "ok": true,
+        "outcome": "acted",
+        "cost_usd": null,
+        "error": null
+      },
+      "is_default": true,
+      "held": null,
+      "describe": "working days at 07:00",
       "kind": "routine",
       "source": "product",
-      "title": "Morning Brief",
       "schedule": {
         "value": {
           "days": "working_days",
@@ -26,29 +42,26 @@
         },
         "origin": "default"
       },
-      "paused": {
-        "value": false,
-        "origin": "default"
-      },
-      "config": {
-        "skip_without_calendar_event": {
-          "value": false,
-          "origin": "yours"
-        }
-      },
+      "config": {},
       "actor": null,
       "task": null,
       "grants": null,
-      "next_run": "2026-09-29T11:00:00.000Z",
-      "last_run": {
-        "run_id": "8812",
-        "at": "2026-09-28T11:00:04.000Z",
-        "ok": true,
-        "outcome": "wrote Journal/Brief/2026-09-28.md",
-        "cost_usd": "0.004100"
+      "days": {
+        "value": [
+          "mon",
+          "tue",
+          "wed",
+          "thu",
+          "fri"
+        ],
+        "origin": "profile"
+      },
+      "time_zone": {
+        "value": "America/New_York",
+        "origin": "profile"
       }
     },
     "reset": true,
-    "as_of": "2026-09-28T13:05:00.000Z"
+    "as_of": "2026-09-27T04:18:49.940Z"
   }
 }

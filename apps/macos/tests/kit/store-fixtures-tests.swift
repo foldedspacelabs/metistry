@@ -205,7 +205,11 @@ private let drives: [String: Drive] = [
     "POST /api/sessions/purge": { s, a in done(await s.purgeSessions(SessionPurge(confirm: a.bBool("confirm") ?? false))) },
     // Needs You
     "GET /api/proposals": { s, a in done(await s.requests(limit: a.qInt("limit"), since: a.q("since"))) },
-    "POST /api/proposals/:id": { s, a in done(await s.answer(a.pInt("id"), .option(a.b("decision") ?? ""), seenAt: nil)) },
+    "POST /api/proposals/:id": { s, a in
+        // Send Answers (T2-3) carries one answer per question; any other decision is the answer itself
+        let answers = a.fixture.body?["answers"]?.arrayValue?.map { QuestionAnswer(choices: $0["choices"]?.arrayValue?.compactMap(\.stringValue) ?? [], other: $0["other"]?.stringValue) }
+        return done(await s.answer(a.pInt("id"), answers.map(RequestAnswer.answers) ?? .option(a.b("decision") ?? ""), seenAt: nil))
+    },
     "POST /api/proposals/batch": { s, a in done(await s.answerMany(a.bInts("ids"), a.b("decision") == "later" ? .later : .skip)) },
     "GET /api/needs-you/count": { s, _ in done(await s.waitingCount()) },
     // Today
@@ -428,7 +432,7 @@ private let drives: [String: Drive] = [
     #expect(export.cursor?.contains("|") == true)
 
     let count = try await stores.waitingCount().get()
-    #expect(count.waiting == 3)
+    #expect(count.waiting == 4) // the queue at the moment it was recorded: three requests and T2-3's three-question one
 }
 
 @Test func noFixtureIsReadAsAnAnswerForARouteItDoesNotServe() async throws {
@@ -521,8 +525,8 @@ private struct WaitingRow: View {
 
     let renderer = ImageRenderer(content: view)
     #expect(renderer.cgImage != nil, "the view rendered")
-    #expect(count.waiting == 3)
-    #expect(!page.proposals.isEmpty)
+    #expect(count.waiting == 4)
+    #expect(count.waiting == page.proposals.count) // T1-7's acceptance: the count is the list, at one moment
     // everything came from the fixtures: two requests, both answered by one
     #expect(console.calls.map(\.servedBy) == ["get-api-needs-you-count", "get-api-proposals"])
 }

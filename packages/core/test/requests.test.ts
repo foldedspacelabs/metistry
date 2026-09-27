@@ -146,10 +146,33 @@ describe("request types — a row", () => {
     expect(suggested.decisions).toEqual(["allow", "accept_as_work", "accept_with_changes", "deny"]);
 
     // a question answers with its answers; a report has no Approve to fold into
-    expect(describeRequest("decision", { suggested_work: {} }).decisions).toEqual(["answers", "accept_with_changes", "deny"]);
+    expect(describeRequest("decision", { options: ["a", "b"], suggested_work: {} }).decisions).toEqual(["answers", "accept_with_changes", "deny"]);
     expect(describeRequest("report", { suggested_work: {} }).decisions).toEqual(["skip"]);
     // the table itself is untouched by a row's payload
     expect(REQUEST_TYPE_TABLE.note.bodies[0].primary?.sends).toEqual({ decision: "allow" });
+  });
+
+  it("a question carries its questions — v2's, or a v1 row's options as one — and with none it has no Send Answers (T2-3)", () => {
+    const questions = [
+      { prompt: "Which repo?", options: ["metistry", "metistry-instance"], multi: false, allow_other: true },
+      { prompt: "Which labels?", options: ["bug", "docs"], multi: true, allow_other: false },
+    ];
+    expect(describeRequest("decision", { title: "Two things", questions })).toMatchObject({
+      type: "question",
+      body: "choices",
+      primary: { label: "Send Answers", sends: { decision: "answers" } },
+      decisions: ["answers", "accept_with_changes", "deny"],
+      questions,
+    });
+    expect(describeRequest("decision", { title: "Let devin in?", options: ["approve", "deny"] }).questions).toEqual([
+      { prompt: "Let devin in?", options: ["approve", "deny"], multi: false, allow_other: false },
+    ]);
+    // nothing to answer: Revise and Decline only — never a Send Answers that cannot send
+    const empty = describeRequest("decision", { title: "Enrol this agent?" });
+    expect(empty).toMatchObject({ primary: null, questions: [], decisions: ["accept_with_changes", "deny"] });
+    // only a question carries the field
+    expect(describeRequest("knowledge", { questions })).not.toHaveProperty("questions");
+    expect(describeRequest("report", { questions })).not.toHaveProperty("questions");
   });
 
   it("a type answered at another system's door stores no decision on the row but its skip", () => {

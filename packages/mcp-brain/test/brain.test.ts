@@ -101,7 +101,12 @@ describe("definition size (docs/research/2026-08-tool-discovery.md's other axis)
     // 4,264): one optional boolean and a clause. It bought the sentence the
     // tool says after a decline, which is the difference between an agent
     // that stops asking and one that keeps filing the same row.
-    expect(tokens).toBeLessThan(4300);
+    //
+    // Questions v2 (T2-3, the approved spec) cost 64 more (4,267 → 4,331):
+    // `requests_create` takes kind `question` and a `questions` list instead of
+    // a new tool — the count stays at 26 — and its description got shorter to
+    // pay for part of it. The ratchet moves by that and a rounding margin.
+    expect(tokens).toBeLessThan(4350);
   });
 
   it("no tool advertises `turn_id` — it is a correlation handle, not a parameter (turn-id.ts)", async () => {
@@ -128,8 +133,9 @@ describe("definition size (docs/research/2026-08-tool-discovery.md's other axis)
     // tool_index/execute/batch index would. The bound is a ceiling on the one
     // definition, so the tool cannot grow unnoticed. Since the `turn_id` trim
     // this surface no longer crosses 5k at all (5,243 → 4,262); the ceiling
-    // moves with it rather than leaving 1.1k of unwatched room.
-    expect(tokens).toBeLessThan(4500);
+    // moves with it rather than leaving 1.1k of unwatched room. T2-3's
+    // questions moved it with the eager ceiling above (4,494 → 4,558).
+    expect(tokens).toBeLessThan(4575);
     // a level that admits nothing is exactly alice again — the refusal is the absence
     const observer: AgentPrincipal = { ...alice, id: "observer", autonomy: { level: "observe", actions: { comment: "allow" } } };
     expect((await listedFor(observer)).names).not.toContain("propose_action");

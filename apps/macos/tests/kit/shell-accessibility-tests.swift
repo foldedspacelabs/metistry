@@ -34,7 +34,7 @@ import Testing
     // the sidebar: the Needs You row first, then the eight in order
     let rows = tree.sidebarRows
     #expect(rows == [
-        "Needs You, 3 waiting", "Today", "Chat", "Activity", "Work", "Knowledge", "Agents", "Scheduled",
+        "Needs You, 4 waiting", "Today", "Chat", "Activity", "Work", "Knowledge", "Agents", "Scheduled",
         "Pinned", "Lease Renewal",
     ], "sidebar: \(rows)")
     // the toolbar's two glyph-only controls say their names (and the shortcut the + has)

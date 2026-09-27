@@ -12,29 +12,40 @@
   "body": {
     "rows": [
       {
-        "ts": "2026-09-27T00:36:49.811Z",
+        "ts": "2026-09-27T03:19:35.153Z",
         "kind": "task_op",
         "group": "work",
         "actor": "user",
         "subject": "work:4",
         "detail": "create work #4",
-        "ref": "runs:44",
+        "ref": "runs:51",
         "turn_id": null,
         "ok": true
       },
       {
-        "ts": "2026-09-27T00:36:49.811Z",
+        "ts": "2026-09-27T03:19:35.153Z",
         "kind": "work_history",
         "group": "work",
         "actor": "user",
-        "subject": "review: metistry/store-interface ver_01M3G4P2ZY03X20PGSRGYA105A (1 thread)",
+        "subject": "review: metistry/store-interface ver_01M3GE03EWVD62GN18CBCKMW02 (1 thread)",
         "detail": "create",
         "ref": "work:4",
         "turn_id": null,
         "ok": null
       },
       {
-        "ts": "2026-09-27T00:36:49.782Z",
+        "ts": "2026-09-27T03:19:35.123Z",
+        "kind": "dispatch",
+        "group": "run",
+        "actor": "console",
+        "subject": "github-issues",
+        "detail": "dispatched to github-issues ok",
+        "ref": "runs:46",
+        "turn_id": null,
+        "ok": true
+      },
+      {
+        "ts": "2026-09-27T03:19:35.123Z",
         "kind": "work_history",
         "group": "work",
         "actor": "owner",
@@ -45,29 +56,18 @@
         "ok": null
       },
       {
-        "ts": "2026-09-27T00:36:49.781Z",
-        "kind": "dispatch",
-        "group": "run",
-        "actor": "console",
-        "subject": "github-issues",
-        "detail": "dispatched to github-issues ok",
-        "ref": "runs:39",
-        "turn_id": null,
-        "ok": true
-      },
-      {
-        "ts": "2026-09-27T00:36:49.780Z",
+        "ts": "2026-09-27T03:19:35.120Z",
         "kind": "task_op",
         "group": "work",
         "actor": "user",
         "subject": "work:1",
         "detail": "release work #1",
-        "ref": "runs:37",
+        "ref": "runs:44",
         "turn_id": null,
         "ok": true
       },
       {
-        "ts": "2026-09-27T00:36:49.780Z",
+        "ts": "2026-09-27T03:19:35.120Z",
         "kind": "work_history",
         "group": "work",
         "actor": "user",
@@ -78,18 +78,18 @@
         "ok": null
       },
       {
-        "ts": "2026-09-27T00:36:49.777Z",
+        "ts": "2026-09-27T03:19:35.118Z",
         "kind": "task_op",
         "group": "work",
         "actor": "user",
         "subject": "work:1",
         "detail": "heartbeat work #1",
-        "ref": "runs:35",
+        "ref": "runs:42",
         "turn_id": null,
         "ok": true
       },
       {
-        "ts": "2026-09-27T00:36:49.777Z",
+        "ts": "2026-09-27T03:19:35.118Z",
         "kind": "work_history",
         "group": "work",
         "actor": "user",
@@ -100,7 +100,7 @@
         "ok": null
       },
       {
-        "ts": "2026-09-27T00:36:49.775Z",
+        "ts": "2026-09-27T03:19:35.115Z",
         "kind": "work_history",
         "group": "work",
         "actor": "user",
@@ -111,29 +111,29 @@
         "ok": null
       },
       {
-        "ts": "2026-09-27T00:36:49.774Z",
+        "ts": "2026-09-27T03:19:35.114Z",
         "kind": "task_op",
         "group": "work",
         "actor": "user",
         "subject": "work:1",
         "detail": "claim work #1",
-        "ref": "runs:33",
+        "ref": "runs:40",
         "turn_id": null,
         "ok": true
       },
       {
-        "ts": "2026-09-27T00:36:49.771Z",
+        "ts": "2026-09-27T03:19:35.111Z",
         "kind": "task_op",
         "group": "work",
         "actor": "user",
         "subject": "work:1",
         "detail": "update work #1",
-        "ref": "runs:31",
+        "ref": "runs:38",
         "turn_id": null,
         "ok": true
       },
       {
-        "ts": "2026-09-27T00:36:49.771Z",
+        "ts": "2026-09-27T03:19:35.111Z",
         "kind": "work_history",
         "group": "work",
         "actor": "user",
@@ -144,150 +144,183 @@
         "ok": null
       },
       {
-        "ts": "2026-09-27T00:36:49.766Z",
+        "ts": "2026-09-27T03:19:35.106Z",
         "kind": "agent_admin",
         "group": "run",
         "actor": "console",
         "subject": "old-laptop",
         "detail": "revoke old-laptop",
-        "ref": "runs:29",
+        "ref": "runs:36",
         "turn_id": null,
         "ok": true
       },
       {
-        "ts": "2026-09-27T00:36:49.764Z",
+        "ts": "2026-09-27T03:19:35.103Z",
         "kind": "agent_admin",
         "group": "run",
         "actor": "console",
         "subject": "opencode",
         "detail": "rotate opencode",
-        "ref": "runs:28",
+        "ref": "runs:35",
         "turn_id": null,
         "ok": true
       },
       {
-        "ts": "2026-09-27T00:36:49.761Z",
+        "ts": "2026-09-27T03:19:35.101Z",
         "kind": "agent_admin",
         "group": "run",
         "actor": "console",
         "subject": "devin",
         "detail": "approve devin",
-        "ref": "runs:27",
+        "ref": "runs:34",
         "turn_id": null,
         "ok": true
       },
       {
-        "ts": "2026-09-27T00:36:49.761Z",
+        "ts": "2026-09-27T03:19:35.100Z",
         "kind": "proposal_decided",
         "group": "decision",
         "actor": "devin",
         "subject": "decision",
         "detail": "you decided approve",
-        "ref": "proposals:4",
+        "ref": "proposals:6",
         "turn_id": null,
         "ok": null
       },
       {
-        "ts": "2026-09-27T00:36:49.759Z",
+        "ts": "2026-09-27T03:19:35.098Z",
         "kind": "alert",
         "group": "message",
         "actor": "assistant",
         "subject": "alert",
-        "detail": "agent cursor was given more room: level observe → propose; actions.dispatch deny → propose; actions.task_update deny → propose; actions.comment deny → propose; actions.capture deny → propose",
+        "detail": "agent cursor was given more room: level observe → propose; actions.dispatch deny → propose; actions.task_update deny → propose; actions.comment deny → propose; actions.capture deny → propose — it can ",
         "ref": "outbound_messages:2",
         "turn_id": null,
         "ok": null
       },
       {
-        "ts": "2026-09-27T00:36:49.759Z",
+        "ts": "2026-09-27T03:19:35.097Z",
         "kind": "agent_admin",
         "group": "run",
         "actor": "console",
         "subject": "cursor",
         "detail": "autonomy_widened cursor",
-        "ref": "runs:26",
+        "ref": "runs:33",
         "turn_id": null,
         "ok": true
       },
       {
-        "ts": "2026-09-27T00:36:49.758Z",
+        "ts": "2026-09-27T03:19:35.097Z",
         "kind": "agent_admin",
         "group": "run",
         "actor": "console",
         "subject": "cursor",
         "detail": "autonomy cursor",
-        "ref": "runs:25",
+        "ref": "runs:32",
         "turn_id": null,
         "ok": true
       },
       {
-        "ts": "2026-09-27T00:36:49.755Z",
+        "ts": "2026-09-27T03:19:35.094Z",
         "kind": "agent_admin",
         "group": "run",
         "actor": "console",
         "subject": "cursor",
         "detail": "projects cursor",
-        "ref": "runs:24",
+        "ref": "runs:31",
         "turn_id": null,
         "ok": true
       },
       {
-        "ts": "2026-09-27T00:36:49.753Z",
+        "ts": "2026-09-27T03:19:35.090Z",
         "kind": "agent_admin",
         "group": "run",
         "actor": "console",
         "subject": "cursor",
         "detail": "grant cursor",
-        "ref": "runs:23",
+        "ref": "runs:30",
         "turn_id": null,
         "ok": true
       },
       {
-        "ts": "2026-09-27T00:36:49.750Z",
+        "ts": "2026-09-27T03:19:35.087Z",
         "kind": "agent_admin",
         "group": "run",
         "actor": "console",
         "subject": "devin",
         "detail": "mint devin",
-        "ref": "runs:22",
+        "ref": "runs:29",
         "turn_id": null,
         "ok": true
       },
       {
-        "ts": "2026-09-27T00:36:49.750Z",
+        "ts": "2026-09-27T03:19:35.087Z",
         "kind": "proposal_created",
         "group": "proposal",
         "actor": "devin",
         "subject": "decision",
         "detail": "Let Devin (devin) in? It will present its token from another machine.",
-        "ref": "proposals:4",
+        "ref": "proposals:6",
         "turn_id": null,
         "ok": null
       },
       {
-        "ts": "2026-09-27T00:36:49.744Z",
+        "ts": "2026-09-27T03:19:35.080Z",
         "kind": "proposal_decided",
         "group": "decision",
         "actor": "assistant",
         "subject": "decision",
-        "detail": "you decided one file per route",
-        "ref": "proposals:1",
+        "detail": "you decided answered: Which store should the fixtures land under? — NeedsYouStore; Who should review it? — Dana, the assistant, and whoever owns F-7; Open it as a draft? — yes",
+        "ref": "proposals:5",
         "turn_id": null,
         "ok": null
       },
       {
-        "ts": "2026-09-27T00:36:49.732Z",
+        "ts": "2026-09-27T03:19:35.058Z",
         "kind": "capture",
         "group": "capture",
-        "actor": "http",
+        "actor": "app",
         "subject": "Ask Dana about the fixture format on Thursday.",
-        "detail": "http · new",
+        "detail": "app · new",
         "ref": "inbox:1",
         "turn_id": null,
         "ok": null
       },
       {
-        "ts": "2026-09-27T00:36:49.655Z",
+        "ts": "2026-09-27T03:19:34.955Z",
+        "kind": "agent_admin",
+        "group": "run",
+        "actor": "console",
+        "subject": "researcher",
+        "detail": "register researcher",
+        "ref": "runs:10",
+        "turn_id": null,
+        "ok": true
+      },
+      {
+        "ts": "2026-09-27T03:19:34.951Z",
+        "kind": "proposal_created",
+        "group": "proposal",
+        "actor": "cursor",
+        "subject": "access_request",
+        "detail": "the runbooks live there",
+        "ref": "proposals:4",
+        "turn_id": null,
+        "ok": null
+      },
+      {
+        "ts": "2026-09-27T03:19:34.951Z",
+        "kind": "proposal_decided",
+        "group": "decision",
+        "actor": "cursor",
+        "subject": "access_request",
+        "detail": "you decided allow",
+        "ref": "proposals:4",
+        "turn_id": null,
+        "ok": null
+      },
+      {
+        "ts": "2026-09-27T03:19:34.946Z",
         "kind": "crew_run",
         "group": "run",
         "actor": "crew:fixtures",
@@ -298,18 +331,7 @@
         "ok": true
       },
       {
-        "ts": "2026-09-27T00:36:49.653Z",
-        "kind": "routine_run",
-        "group": "routine",
-        "actor": "plan-tomorrow",
-        "subject": "plan-tomorrow",
-        "detail": "Journal/Plan/2026-09-29.md",
-        "ref": "runs:6",
-        "turn_id": null,
-        "ok": true
-      },
-      {
-        "ts": "2026-09-27T00:36:49.653Z",
+        "ts": "2026-09-27T03:19:34.942Z",
         "kind": "routine_run",
         "group": "routine",
         "actor": "knowledge-fold",
@@ -320,7 +342,18 @@
         "ok": false
       },
       {
-        "ts": "2026-09-27T00:36:49.653Z",
+        "ts": "2026-09-27T03:19:34.942Z",
+        "kind": "routine_run",
+        "group": "routine",
+        "actor": "plan-tomorrow",
+        "subject": "plan-tomorrow",
+        "detail": "Journal/Plan/2026-09-29.md",
+        "ref": "runs:6",
+        "turn_id": null,
+        "ok": true
+      },
+      {
+        "ts": "2026-09-27T03:19:34.942Z",
         "kind": "config_write",
         "group": "run",
         "actor": "user",
@@ -331,40 +364,40 @@
         "ok": true
       },
       {
-        "ts": "2026-09-27T00:36:49.652Z",
+        "ts": "2026-09-27T03:19:34.942Z",
         "kind": "tool",
         "group": "run",
         "actor": "assistant",
         "subject": "tasks_update",
         "detail": "called tasks_update",
         "ref": "runs:3",
-        "turn_id": "turn-bsQSk3pb",
+        "turn_id": "turn-izC79FgJ",
         "ok": true
       },
       {
-        "ts": "2026-09-27T00:36:49.652Z",
+        "ts": "2026-09-27T03:19:34.942Z",
         "kind": "tool",
         "group": "run",
         "actor": "assistant",
         "subject": "knowledge_search",
         "detail": "called knowledge_search",
         "ref": "runs:2",
-        "turn_id": "turn-bsQSk3pb",
+        "turn_id": "turn-izC79FgJ",
         "ok": true
       },
       {
-        "ts": "2026-09-27T00:36:49.652Z",
+        "ts": "2026-09-27T03:19:34.941Z",
         "kind": "turn",
         "group": "run",
         "actor": "assistant",
         "subject": "turn",
         "detail": "turn gemma $0.004200",
         "ref": "runs:1",
-        "turn_id": "turn-bsQSk3pb",
+        "turn_id": "turn-izC79FgJ",
         "ok": true
       },
       {
-        "ts": "2026-09-27T00:36:49.651Z",
+        "ts": "2026-09-27T03:19:34.940Z",
         "kind": "proposal_created",
         "group": "proposal",
         "actor": "assistant",
@@ -375,7 +408,7 @@
         "ok": null
       },
       {
-        "ts": "2026-09-27T00:36:49.651Z",
+        "ts": "2026-09-27T03:19:34.940Z",
         "kind": "proposal_created",
         "group": "proposal",
         "actor": "assistant",
@@ -386,7 +419,7 @@
         "ok": null
       },
       {
-        "ts": "2026-09-27T00:36:49.650Z",
+        "ts": "2026-09-27T03:19:34.939Z",
         "kind": "proposal_created",
         "group": "proposal",
         "actor": "assistant",
@@ -395,8 +428,19 @@
         "ref": "proposals:1",
         "turn_id": null,
         "ok": null
+      },
+      {
+        "ts": "2026-09-27T03:18:34.952Z",
+        "kind": "proposal_created",
+        "group": "proposal",
+        "actor": "assistant",
+        "subject": "decision",
+        "detail": "Three things before I open the fixtures PR",
+        "ref": "proposals:5",
+        "turn_id": null,
+        "ok": null
       }
     ],
-    "as_of": "2026-09-27T00:36:49.870Z"
+    "as_of": "2026-09-27T03:19:35.215Z"
   }
 }

@@ -215,8 +215,11 @@ describe.skipIf(!hasDb)("reply feedback + Needs You (integration)", () => {
     );
     const id = rows[0].id;
     expect((await json("POST", `/api/proposals/${id}`, { decision: "allow" })).status).toBe(400); // not one of its options
-    expect((await json("POST", `/api/proposals/${id}`, { decision: "ship" })).status).toBe(200);
-    expect((await pool.query(`SELECT decision FROM proposals WHERE id = $1`, [id])).rows[0].decision).toBe("ship");
+    expect((await json("POST", `/api/proposals/${id}`, { decision: "ship" })).status).toBe(200); // v1's wire: the option itself
+    // stored as every answered question is (T2-3): `answered`, the answer per question, and its words
+    const row = (await pool.query(`SELECT decision, feedback, payload FROM proposals WHERE id = $1`, [id])).rows[0];
+    expect(row).toMatchObject({ decision: "answered", feedback: "ship" });
+    expect(row.payload.answers).toEqual([{ choices: ["ship"] }]);
   });
 
   it("allowing an improvement writes the prompt overlay through the vault as `user`", async () => {

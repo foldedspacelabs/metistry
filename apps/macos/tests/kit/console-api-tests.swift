@@ -189,6 +189,38 @@ import Testing
     #expect(json["if_unchanged"]?.string("seen_at") == "2026-09-16T08:01:02.003Z")
 }
 
+@Test func sendAnswersCarriesOneAnswerPerQuestionAndNothingElse() async {
+    // T2-3: a question's answers go together, each the question's own options
+    // and/or the owner's words — the console checks them against the stored row
+    let stub = StubConsole(["POST /api/proposals/31": Data(#"{"ok":true}"#.utf8)])
+    let api = ConsoleAPI(transport: stub)
+    let answer = RequestAnswer.answers([
+        QuestionAnswer(choices: ["metistry"]),
+        QuestionAnswer(choices: ["bug", "ui"], other: "and perf"),
+        QuestionAnswer(other: "tomorrow, after the release"),
+    ])
+    #expect(answer.wire == "answers")
+    #expect(answer.label == "Send Answers")
+    #expect(answer.isSendable)
+    #expect(!answer.isBatchable)
+    #expect(answer.feedback == nil) // the owner's words ride in `other`, never as feedback
+    _ = await api.answer(31, answer, seenAt: "2026-09-16T08:01:02.003Z")
+    let json = try! JSONValue.parse(await stub.bodies["POST /api/proposals/31"]!)
+    #expect(json.string("decision") == "answers")
+    #expect(json["feedback"] == nil)
+    let sent = json["answers"]?.arrayValue ?? []
+    #expect(sent.count == 3)
+    #expect(sent[0]["choices"]?.arrayValue?.compactMap(\.stringValue) == ["metistry"])
+    #expect(sent[0]["other"] == nil)
+    #expect(sent[1]["other"]?.stringValue == "and perf")
+    #expect(sent[2]["choices"]?.arrayValue?.isEmpty == true)
+    #expect(sent[2]["other"]?.stringValue == "tomorrow, after the release")
+
+    // an unanswered question — nothing chosen, no words — is not sendable
+    #expect(!RequestAnswer.answers([QuestionAnswer(choices: ["metistry"]), QuestionAnswer(other: "  ")]).isSendable)
+    #expect(!RequestAnswer.answers([]).isSendable)
+}
+
 @Test func aBatchIsAlwaysTwoHundredAndEachRowCarriesItsOwnOutcome() async {
     let api = ConsoleAPI(transport: StubConsole(["POST /api/proposals/batch": Fixtures.batch]))
     let result = try! (await api.answerMany([17, 18, 19], .skip)).get()

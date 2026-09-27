@@ -1,12 +1,31 @@
 {
   "route": "POST /api/proposals/:id",
   "source": "recorded",
-  "ticket": "T2-3",
+  "ticket": "T2-14",
   "request": {
     "method": "POST",
-    "path": "/api/proposals/1",
+    "path": "/api/proposals/5",
     "body": {
-      "decision": "one file per route"
+      "decision": "answers",
+      "answers": [
+        {
+          "choices": [
+            "NeedsYouStore"
+          ]
+        },
+        {
+          "choices": [
+            "Dana",
+            "the assistant"
+          ],
+          "other": "and whoever owns F-7"
+        },
+        {
+          "choices": [
+            "yes"
+          ]
+        }
+      ]
     },
     "idempotency_key": null
   },

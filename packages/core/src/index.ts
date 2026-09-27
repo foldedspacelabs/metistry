@@ -888,7 +888,25 @@ export {
 } from "./redact.js";
 export { parseBearer, tokenEquals, authorized, tokenHash, mintToken } from "./auth.js";
 export { sanitizeForAgent } from "./sanitize.js";
-export { parseDecisionBlock, SKIP_FEEDBACK, type DecisionBlock } from "./decision-block.js";
+export {
+  QUESTION_MAX_OPTION,
+  QUESTION_MAX_OPTIONS,
+  QUESTION_MAX_OTHER,
+  QUESTION_MAX_PROMPT,
+  QUESTION_MAX_COUNT,
+  QUESTION_MAX_TITLE,
+  QUESTION_MIN_OPTIONS,
+  SKIP_FEEDBACK,
+  answersText,
+  checkAnswers,
+  checkQuestions,
+  parseDecisionBlock,
+  questionsOf,
+  v1Options,
+  type DecisionBlock,
+  type Question,
+  type QuestionAnswer,
+} from "./decision-block.js";
 export {
   REQUEST_BODIES,
   REQUEST_DECISIONS,

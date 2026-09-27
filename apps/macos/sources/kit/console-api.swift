@@ -610,6 +610,7 @@ public struct ConsoleAPI: Sendable {
         var body: [String: Any] = ["decision": answer.wire]
         if let feedback = answer.feedback { body["feedback"] = feedback }
         if let area = answer.area { body["area"] = area } // Revise on an access request grants THIS folder instead
+        if let answers = answer.questionAnswers { body["answers"] = answers.map(\.wire) } // Send Answers: one per question, in order
         if let seenAt { body["if_unchanged"] = ["seen_at": seenAt] }
         return await post("/api/proposals/\(id)", body)
     }

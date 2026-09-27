@@ -27,6 +27,8 @@ export const RUNNER_KIND = "runner";
 export const SKIPPED_STREAK = "skipped_streak";
 /** `tool` on the row recording that a window was not started because a prerequisite was missing. */
 export const PREFLIGHT_FAILED = "preflight_failed";
+/** `tool` on the row recording that a component was not run because `.metistry/scheduled.yaml` could not be applied to it (docs/ops/scheduled.md). */
+export const SCHEDULE_HELD = "schedule_held";
 
 /** The run kinds the runner schedules, and the only kinds a streak is computed over. */
 export const SCHEDULED_KINDS = ["collector_run", "routine_run"] as const;

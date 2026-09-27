@@ -14,24 +14,32 @@ Each field resolves from three layers, and shows which one it came from:
 3. **`.metistry/scheduled.yaml`** — your changes. **Reset to Default** deletes
    an entry.
 
-The schema is `packages/core/src/scheduled.ts`; the schedule shape and the
-next-occurrence signature are `packages/core/src/schedule.ts`.
+The schema is `packages/core/src/scheduled.ts`; the schedule shape, the
+next-occurrence function and the runner's question `dueOccurrence` are
+`packages/core/src/schedule.ts`; the runner is `apps/console/src/runner.ts`.
 
-## What is not wired yet
+## What is wired, and what is not yet
 
-F-4 freezes the schema and the types. **Nothing reads the file yet**, and
-until something does, what runs is the product manifests' cron strings, read
-when the console starts. Each missing piece is a ticket in the plan's §3.3:
+**The runner reads this file on every tick** (T3-1): each component's
+`schedule` and `paused` from `routines.<name>` or `syncs.<name>` over its
+manifest's default, and — when a time of day follows it — the two facts in
+`Me/profile.md` a schedule may follow. See "How the runner fires", below. The
+routine manifests carry §2.5's default schedules in the closed shape
+("Defaults", below). Each remaining piece is a ticket in the plan's §3.3:
 
-- **Loading it and merging the layers**, and the console's authority to write
-  it (`CALLER_AUTHORITY.console`) — T3-2. The manifests move to the closed
-  shape and carry §2.5's default schedules there too.
-- **The next-occurrence function** and the runner that reads manifests ⊕ this
-  file on every tick — T3-1.
-- **The Scheduled doors**, the file's only writer — T3-3. Agent routines run
-  through T3-8.
-- **Reading `Me/profile.md`**, and moving `standup_days` / `standup_time` onto
-  the Standup routine — T3-4.
+- **Resolving every field with its origin** (`Sourced<T>`, for the app),
+  checking an entry's names and `config` against the manifests, and the
+  console's authority to write the file (`CALLER_AUTHORITY.console`) — T3-2.
+  The collector manifests move to the closed shape there too (they still
+  carry cron strings, read as intervals), and gain `display_name`, `config`
+  and their Needs You rules.
+- **The Scheduled doors**, the file's only writer — T3-3. Agent routines —
+  a New Routine's actor, task and grants — run through T3-8; until then the
+  runner schedules only components that have code.
+- **`Me/profile.md` as a layer with origins**, and moving `standup_days` /
+  `standup_time` onto the Standup routine — T3-4. The runner already reads
+  `timezone` and `working_days` from it (below), through the same readers
+  `plan-tomorrow`'s working-day guard uses.
 
 ## The file
 
@@ -87,7 +95,8 @@ A schedule is one of exactly two forms:
   `every`.
 - **`tz`** — an IANA zone name (`America/New_York`, `Etc/UTC`). Absent, it is
   your profile's `timezone`, then the zone the runner is configured with
-  (`METISTRY_TZ`, then `TZ`). A UTC offset such as `+05:00` is refused: it has
+  (`METISTRY_TZ` — not `TZ`, which both deployment shapes set to `UTC` when
+  `METISTRY_TZ` is unset). A UTC offset such as `+05:00` is refused: it has
   no daylight-saving rules, so 08:00 in it is 08:00 on your clock for only
   half the year.
 - **`every`** — `5m`, `15m`, `1h` or `6h`, and nothing else. The set is
@@ -105,8 +114,9 @@ Refused, each with one line naming the field:
 | `days: [mon, mon]`, `at: ["08:00", "08:00"]` | the same day or time twice |
 
 **Cron strings** are accepted in a *product manifest's* `schedule:` for one
-release (`manifestScheduleSchema`), read as an interval by
-`scheduleToSeconds` exactly as today. They are never accepted in this file.
+release (`manifestScheduleSchema`, which `manifest.ts` now validates every
+collector and routine against), read as an interval by `scheduleToSeconds`
+exactly as before. They are never accepted in this file.
 
 ## Routines
 
@@ -171,15 +181,15 @@ produces them is T3-2's, and T3-4's for the profile.
 
 ## The next occurrence
 
-`schedule.ts` freezes the signature; T3-1 writes the function, hand-rolled
-over `Intl`:
+`schedule.ts` froze the signature (F-4); `nextOccurrence` is its body (T3-1),
+hand-rolled over `Intl`:
 
 ```ts
 type NextOccurrence = (schedule: Schedule, after: Date, ctx: OccurrenceContext) => Occurrence;
 
 interface OccurrenceContext {
   profile: { timezone?: string; working_days?: Weekday[] };  // Me/profile.md, read only
-  fallbackTimeZone: string | null;                           // METISTRY_TZ, then TZ; null = none
+  fallbackTimeZone: string | null;                           // METISTRY_TZ (configuredTimeZone); null = none
 }
 
 type Occurrence =
@@ -199,7 +209,94 @@ type Occurrence =
 - **Daylight saving** follows Temporal's `compatible` rule: a time the clocks
   skip runs shifted forward by the gap (02:30 on a night that jumps from 02:00
   to 03:00 runs at 03:30); a time that happens twice runs at the first. Each
-  day's `at` runs at most once.
+  day's `at` runs at most once. Tested on both New York nights of 2026,
+  London's, Sydney's, and Lord Howe's half-hour jump
+  (`packages/core/test/next-occurrence.test.ts`).
+- **An empty `timezone`** is the profile not saying, not a zone; a present
+  but unknown one (`Mars/Olympus_Mons`, `+05:00`) is refused.
+
+## How the runner fires
+
+The console's runner ticks once a minute (`METISTRY_RUNNER_TICK_MS`). On every
+tick, for every collector and routine:
+
+1. **This file**, read afresh. `paused: true` → not run, and no row a tick —
+   the choice is yours and the file says it. An entry the runner cannot apply
+   **holds** the component rather than being ignored: a New Routine named like
+   a product routine, a `syncs:` entry naming a routine, or one component
+   under both `routines:` and `syncs:`. A held component is not run; one
+   `runs` row a day says why (`kind: runner`, `tool: schedule_held`) and one
+   alert names it.
+2. **An invalid file is never applied** — and never replaced by the defaults
+   either, because a routine you paused would run again. Every component the
+   broken file names is held; when it is too broken to say which (a YAML
+   error, or a top-level key that is not `routines` or `syncs`, which might be
+   a typo of one), **every** component is. One alert per distinct error, once
+   a day while it lasts; the next tick after you fix the file picks it up.
+3. **The schedule**: the entry's, else the manifest's. `syncs.<name>.every`
+   is a collector's cadence; `routines.<name>` applies to any component,
+   because a collector may present as a routine (§2.5).
+4. **Is it due?**
+   - **An interval** (`{every}`, or a manifest's cron string): once that long
+     has passed since the last run. A component that has never run is due at
+     once.
+   - **A time of day**: once one of its slots has passed since the last run —
+     **once, at its time** (within the minute's tick). The slot rides on the
+     run's row (`meta.scheduled_for`, `meta.time_zone`) and in the routine's
+     context (`ctx.scheduledFor`, `ctx.timeZone`), so a late run still dates
+     and plans from its slot. The last run is the later of the row's `ts`
+     and its `scheduled_for`, so a Postgres clock that drifted behind this
+     process's (a Docker VM after sleep) cannot fire one slot twice.
+   - **Missed while the Mac slept**: the slots are coalesced into **one**
+     run on waking, for the **latest** of them — launchd's own rule for
+     `StartCalendarInterval`. Tomorrow's Plan, asleep from Friday to Monday
+     07:30, runs once at 07:30 for Sunday 23:00 and plans Monday.
+   - **Never run**: its slots count from when the runner started, so a fresh
+     install at 10:00 does not fire the 07:00 brief at 10:01; the next
+     working day's 07:00 is its first.
+5. **`Me/profile.md`** is read at most once a tick, through the vault
+   bridge, and only when a time of day follows it — a day set, or no `tz`.
+   A read that fails (the bridge is down) is not "the profile says nothing":
+   those components **wait**, and run late, once, when it can be read.
+6. **A schedule the runner cannot place** — `no_working_days`,
+   `no_timezone`, `unknown_timezone` — is not run and says so once a day, on
+   the component's own row (`ok`, `meta.schedule_refused`, and for a routine
+   `meta.outcome = skipped:<reason>` — D7's vocabulary, so Activity shows the
+   absent skip). No alert: it is a fact about the profile, not a fault.
+   `metistry doctor` reports it `absent`, in the runner's own words.
+7. Then the failure streak, preflight and the run itself, exactly as
+   `docs/ops/automation.md` describes — one marker row per slot, not per tick.
+
+A **timezone change** takes effect on the next tick: the next slot is the new
+zone's wall clock, counted from the last run, so none fires twice (moving
+west, the day's remaining slot in the new zone is still ahead, and runs).
+
+**Where the runner looks.** This file is
+`$METISTRY_INSTANCE_DIR/.metistry/scheduled.yaml`, or
+`METISTRY_SCHEDULED_FILE` when set; with neither, there is no overlay and
+every component runs on its manifest's defaults. The console logs, at start,
+each component's schedule, the overlay path, whether the profile is readable,
+and the fallback zone — or that there is none, and what that refuses.
+
+## Defaults
+
+§2.5's defaults, as answered (§4 Q12; the owner's times of 2026-09-26), in
+each routine's manifest:
+
+| Routine | Default |
+| --- | --- |
+| Morning Brief (`morning-brief`) | working days at 07:00 — before the standup, which it embeds |
+| Standup | working days at 08:00 — the routine is T3-5's |
+| Knowledge Fold (`knowledge-fold`) | every day at 21:00 |
+| Tomorrow's Plan (`plan-tomorrow`) | `eve_of_working_days` at 23:00 — after the fold |
+| Reply Review (`reply-review`) | every day at 23:00 |
+| Weekly Review (`weekly-review`) | Sunday at 18:00 |
+| Inbox Sort, Usage Rollup | every 5 min, hourly — the collectors `inbox-drain` and `claude-usage`, still on their cron strings until T3-2 |
+
+A routine on `working_days` or `eve_of_working_days` runs only once
+`Me/profile.md` says which days you work — the seeded profile says nothing,
+on purpose, so on a fresh install they record `skipped:no_working_days` until
+you fill it in.
 
 ## Validation
 

@@ -25,30 +25,29 @@
 //     `vault_tasks_recurring`, `day_work`, `pending_requests` — and this file
 //     holds no SQL but its own `runs` bookkeeping.
 //
-// SCHEDULE. `@hourly` with the gate in the routine, for the reason
-// `knowledge-fold` states: the runner has no notion of time of day and marks a
-// routine due from its last `routine_run` row, so an `@daily` routine that
-// skipped at 09:00 would be due again at 09:00 tomorrow and never reach the
-// evening. Hourly ticks plus the gate give one plan an evening, retried until
-// it lands.
+// SCHEDULE (§2.5): `eve_of_working_days` at 23:00, from the manifest — every
+// evening whose next day is a working day, after the 21:00 fold. The
+// console's runner fires it once, at its time (T3-1), so the clock gates the
+// hourly schedule needed — "not before noon", "not before the day end
+// Me/profile.md states" — are gone. What stays is the WORKING-DAY GUARD
+// below: a run nobody scheduled for an eve (Run Now, an owner's own `days:`)
+// still plans only a working day. A run the runner fired late — the Mac
+// slept through 23:00 and woke at 07:30 — plans the day after its SLOT
+// (`ctx.scheduledFor`, in `ctx.timeZone`), which is today, not tomorrow.
 //
-// THE GATE, in order, and what each costs:
+// THE GUARD, in order, and what each costs:
 //
-//   before noon local          → nothing at all: no query, no vault read
 //   already settled for that   → one indexed `runs` read
 //     target date
-//   before the day end         → one small vault read (`Me/profile.md`)
-//     `Me/profile.md` states
-//   tomorrow is not a working  → recorded, and the evening goes quiet
-//     day
+//   tomorrow is not a working  → one small vault read (`Me/profile.md`),
+//     day                        recorded, and the evening goes quiet
 //
 // DEGRADING HONESTLY (§6.4, §6.6). No `working_days` in `Me/` → nothing is
 // written and the run says `no_working_days`, rather than guessing
-// Monday-to-Friday. No `working_hours` → the plan is written from 19:00 local
-// (§7's own floor) and SAYS SO in one visible line at the top of the file,
-// because a default nobody chose should not be invisible. No calendar bridge,
-// no query store, a `where:` the vocabulary refuses — each renders one line
-// and the plan still lands.
+// Monday-to-Friday (the runner says it first, and does not run this at all
+// on a day set it cannot resolve). No calendar bridge, no query store, a
+// `where:` the vocabulary refuses — each renders one line and the plan still
+// lands.
 
 import { parse as parseYaml } from "yaml";
 import {
@@ -77,18 +76,6 @@ export const PROFILE_PATH = "Me/profile.md";
 /** The `intent.principal` every write carries, and the `source:` the rendered file declares — the string `ownershipRefusal` reads later. */
 export const PRINCIPAL = COMPONENT;
 
-/** §7's floor, in minutes past local midnight, used only when `Me/profile.md` does not say when the day ends — and the plan then says it was used. */
-const DEFAULT_DAY_END_MINUTES = 19 * 60;
-export const DEFAULT_DAY_END = hhmm(DEFAULT_DAY_END_MINUTES);
-/**
- * Nothing happens before this hour, whatever `working_hours` says. A day that
- * ends at 06:00 is still a day, and "tomorrow's plan" written over breakfast
- * would be a plan for a day that had not happened yet — it would miss
- * everything the day produced. It is also what keeps a quiet night quiet: the
- * twelve ticks before noon touch neither Postgres nor the vault.
- */
-export const EARLIEST_PLAN_HOUR = 12;
-
 const EK_TIMEOUT_MS = 15_000; // limit: fixed — the eventkit bridge is on this Mac; morning-brief gives its own /events call the same 15s
 const EK_MAX_DAYS = 31; // limit: fixed — `GET /events` clamps `days` to 31 (packages/mcp-eventkit/src/index.ts); asking for more is asking for a clamp
 
@@ -98,7 +85,6 @@ const EK_MAX_DAYS = 31; // limit: fixed — `GET /events` clamps `days` to 31 (p
  * `metistry doctor` reads the same table.
  */
 export const PLAN_SKIPS = [
-  "too_early", // before the day end Me/profile.md states (or 19:00 local) — the schedule working, not a skip worth a row
   "already_planned", // this target date is settled, whichever way it went
   "no_working_days", // §6.6: Me/ does not say which days you work, and nothing guesses
   "not_a_working_day", // tomorrow is not one of them
@@ -207,18 +193,6 @@ export function parseProfile(text: string | null): WorkingProfile {
 
 export const zoneOf = (env: NodeJS.ProcessEnv): string => env["METISTRY_TZ"] || env["TZ"] || "UTC";
 
-/** Minutes past local midnight, in the instance's zone — the same zone every date in the plan is read against. */
-export function localMinutes(now: Date, timeZone: string): number {
-  const parts = new Intl.DateTimeFormat("en-GB", { timeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(now);
-  const get = (t: string): number => Number(parts.find((p) => p.type === t)?.value ?? "0");
-  return get("hour") * 60 + get("minute");
-}
-
-/** A function declaration, not an arrow: `DEFAULT_DAY_END` is built from it at module load, above. */
-function hhmm(minutes: number): string {
-  return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
-}
-
 /** The weekday of a calendar date, as civil arithmetic — no zone, because `2026-09-22` is a Tuesday everywhere. */
 export function weekdayOf(date: string): number | null {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
@@ -240,30 +214,22 @@ export function daysBetween(from: string, to: string): number | null {
 // --- the gate ------------------------------------------------------------------
 
 export interface GateInput {
-  now: Date;
-  timeZone: string;
-  /** The day being planned — tomorrow, in the instance's zone. */
+  /** The day being planned — the day after the slot, in the slot's zone. */
   target: string;
   profile: WorkingProfile;
 }
 
-export type GateVerdict =
-  | { ok: true; /** §6.4's visible line when a fact `Me/` should state was defaulted. */ note: string | null }
-  | { ok: false; reason: PlanSkip; why: string };
+export type GateVerdict = { ok: true } | { ok: false; reason: PlanSkip; why: string };
 
 /**
- * Everything the clock and `Me/` decide, as one pure function — which is what
- * makes "too early", "not a working day" and "no `Me/`" unit-testable without
- * a database, a vault or a clock.
+ * The working-day guard (§2.5: the schedule says WHEN; this says whether the
+ * day planned is one you work), as one pure function — which is what makes
+ * "not a working day" and "no `Me/`" unit-testable without a database, a
+ * vault or a clock. There is no clock in it any more: the runner fires the
+ * routine at its time.
  */
 export function gate(input: GateInput): GateVerdict {
-  const { now, timeZone, target, profile } = input;
-  const defaulted = profile.dayEnd === null;
-  const dayEnd = Math.max(profile.dayEnd ?? DEFAULT_DAY_END_MINUTES, EARLIEST_PLAN_HOUR * 60);
-  const minutes = localMinutes(now, timeZone);
-  if (minutes < dayEnd) {
-    return { ok: false, reason: "too_early", why: `${hhmm(minutes)} local is before ${hhmm(dayEnd)}, when your day ends — nothing is planned until the day it plans from is over` };
-  }
+  const { target, profile } = input;
   if (profile.workingDays === null) {
     return {
       ok: false,
@@ -275,12 +241,7 @@ export function gate(input: GateInput): GateVerdict {
   if (weekday === null || !profile.workingDays.includes(weekday)) {
     return { ok: false, reason: "not_a_working_day", why: `${target} is not one of your working days (${profile.workingDays.map((d) => WEEKDAYS[d]).join(", ")})` };
   }
-  return {
-    ok: true,
-    note: defaulted
-      ? `> ⚠️ metistry: \`${PROFILE_PATH}\` has no \`working_hours\` — this plan was written from ${DEFAULT_DAY_END} local, which is a default nobody chose (docs/product/daily-flow-spec.md §6.6)`
-      : null,
-  };
+  return { ok: true };
 }
 
 // --- the seams -----------------------------------------------------------------
@@ -288,8 +249,8 @@ export function gate(input: GateInput): GateVerdict {
 /**
  * A vault file as text, or null when the vault does not hold it. A bridge
  * that REFUSES is not "absent": the error propagates, the runner records the
- * failed run and alerts once (docs/ops/automation.md), and the next hourly
- * tick tries again — which is the difference between "Me/ says nothing" and
+ * failed run and alerts once (docs/ops/automation.md), and the next slot
+ * tries again — which is the difference between "Me/ says nothing" and
  * "the vault could not be asked", and it is why the evening is not settled
  * with the wrong reason.
  */
@@ -347,13 +308,6 @@ function sameLocalDay(iso: string | undefined, day: string, timeZone: string): b
 
 // --- the file ------------------------------------------------------------------
 
-/** The degradation note goes under the frontmatter, where the user reads first — never inside it. */
-export function withNote(markdown: string, note: string | null): string {
-  if (note === null) return markdown;
-  const m = FRONTMATTER_RE.exec(markdown);
-  return m ? `${m[0]}${note}\n\n${markdown.slice(m[0].length)}` : `${note}\n\n${markdown}`;
-}
-
 const MATERIALISED_RE = /^- \[[ x-]\] .*\^mt-[0-9a-z]{8}\s*$/im;
 
 /**
@@ -369,11 +323,11 @@ export const refuseMaterialised = (markdown: string): boolean => MATERIALISED_RE
 
 /**
  * One `runs` row per target date, written the first time a pass settles that
- * date — either because it wrote the file or because it decided not to. Every
- * later tick that evening finds it and stays silent, which is what keeps an
- * hourly routine from filing twenty rows a night. `meta.planned_for` is the
- * discriminator: the runner writes its own `routine_run` row for every tick
- * and that one deliberately carries none.
+ * date — either because it wrote the file or because it decided not to. A
+ * later pass for the same date (Run Now, or a late run and its slot) finds it
+ * and stays silent — superseding an early render with the 23:00 one is
+ * T3-7's. `meta.planned_for` is the discriminator: the runner writes its own
+ * `routine_run` row for every run and that one deliberately carries none.
  */
 async function settled(db: Db, target: string): Promise<string | null> {
   const { rows } = await db.query(
@@ -419,19 +373,19 @@ async function reportUnreadable(db: Db, target: string, maxBytes: number): Promi
 
 // --- the pass ------------------------------------------------------------------
 
-/** One pass. Returns 1 when tomorrow's plan was written, 0 otherwise — every 0 is a fact recorded or a gate doing its job. */
+/** One pass. Returns 1 when tomorrow's plan was written, 0 otherwise — every 0 is a fact recorded or the guard doing its job. */
 export async function run(db: Db, ctx: PlanCtx = {}): Promise<number> {
   const env = ctx.env ?? process.env;
-  const timeZone = zoneOf(env);
+  // The slot's zone when the runner fired it (the schedule's tz, then
+  // Me/profile.md's timezone, then METISTRY_TZ), so "tomorrow" is the same
+  // day the schedule meant; otherwise the instance's zone.
+  const timeZone = ctx.timeZone ?? zoneOf(env);
   const now = ctx.now ?? new Date();
-  const today = calendarDate(now, timeZone);
+  // The evening this plan is FOR: the slot, when the runner fired it late.
+  const evening = ctx.scheduledFor ?? now;
+  const today = calendarDate(evening, timeZone);
   const target = addTaskDays(today, 1);
   if (target === null) return 0; // unreachable: `today` came from calendarDate
-
-  // The cheap half of the clock gate, before any IO at all. A day end earlier
-  // than noon still waits for noon (EARLIEST_PLAN_HOUR), so this can never
-  // skip an evening the full gate would have allowed.
-  if (localMinutes(now, timeZone) < EARLIEST_PLAN_HOUR * 60) return 0;
 
   const already = await settled(db, target);
   if (already !== null) {
@@ -449,12 +403,10 @@ export async function run(db: Db, ctx: PlanCtx = {}): Promise<number> {
   }
 
   const profile = parseProfile(await readText(vault, PROFILE_PATH));
-  const verdict = gate({ now, timeZone, target, profile });
+  const verdict = gate({ target, profile });
   if (!verdict.ok) {
     console.log(`${COMPONENT}: ${verdict.why}`);
-    // `too_early` is the schedule working, not news: it would be a row an hour
-    // every evening, and the pass that lands writes the only row that matters.
-    if (verdict.reason !== "too_early") await record(db, target, verdict.reason, { why: verdict.why });
+    await record(db, target, verdict.reason, { why: verdict.why });
     return 0;
   }
 
@@ -492,7 +444,8 @@ export async function run(db: Db, ctx: PlanCtx = {}): Promise<number> {
     calendar: ctx.calendar === undefined ? eventkitCalendar(ctx, timeZone, now) : ctx.calendar,
     reader: vaultReader(vault),
     ...(ctx.me !== undefined ? { me: ctx.me } : {}),
-    now,
+    // the template's "tomorrow" is the evening's: a late run still plans `target`
+    now: evening,
     timeZone,
     env,
     renderedAt: now,
@@ -506,7 +459,7 @@ export async function run(db: Db, ctx: PlanCtx = {}): Promise<number> {
     return 0;
   }
 
-  const markdown = withNote(render.markdown, verdict.note);
+  const markdown = render.markdown;
   if (refuseMaterialised(markdown)) {
     const why = `the render produced a task line with a minted \`^mt-\` anchor, which no routine may write (D4) — refusing to write ${path}`;
     console.warn(`${COMPONENT}: ${why}`);
@@ -528,7 +481,6 @@ export async function run(db: Db, ctx: PlanCtx = {}): Promise<number> {
     template_warnings: render.warnings.length,
     ...(render.warnings.length > 0 ? { warnings: render.warnings.map((w) => `${TEMPLATE_PATH}:${w.line} ${w.message}`) } : {}),
     truncated: render.truncated,
-    ...(verdict.note !== null ? { degraded: ["working_hours"] } : {}),
   });
   console.log(`${COMPONENT}: wrote ${path} (${written.bytes} bytes${render.warnings.length > 0 ? `, ${render.warnings.length} template warning(s)` : ""}${render.truncated ? ", truncated" : ""})`);
   return 1;

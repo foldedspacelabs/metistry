@@ -1,6 +1,6 @@
 // knowledge-fold against a fake db: the anchor (a skipped pass must not move
-// the window), the two gates that make an hourly routine an evening one, the
-// silence-default, the 4 KB cap on the brief, the exclusion of the fold's own
+// the window), no clock gate of its own (the runner fires it at 21:00, §2.5,
+// T3-1) and a late run dated from its slot, the silence-default, the 4 KB cap on the brief, the exclusion of the fold's own
 // output, and — since ticket P1-9 — the fold's own file at its new path,
 // rendered from `Templates/Fold.md` when one is available and falling back to
 // the pre-template freeform note, at the SAME new path, when it is not. The
@@ -66,18 +66,27 @@ function fakeQueries(tables: Record<string, Record<string, unknown>[]>): Templat
 
 const someProposal = [{ id: 41, kind: "knowledge", source_agent: "assistant", payload: { title: "Drey rebrand starts Oct 1" } }];
 
-describe("knowledge-fold gates", () => {
-  it("before 18:00 local it folds nothing — the runner has no time of day, so the gate is in the routine", async () => {
+describe("knowledge-fold: no clock gate — the runner fires it at its time", () => {
+  it("a run is a fold, whatever the hour: the evening gate went with the hourly schedule", async () => {
     const db = fakeDb({ proposals: someProposal });
-    expect(await run(db, { now: morning })).toBe(0);
-    expect(db.inbound()).toHaveLength(0);
-    expect(db.runsRows()).toHaveLength(0);
+    expect(await run(db, { now: morning })).toBe(1);
+    expect(db.inbound()).toHaveLength(1);
   });
 
-  it("a fold that already happened today is not repeated (hourly schedule, one fold a night)", async () => {
+  it("a second run the same day folds what is new since the first — the once-a-day guard went with the hourly schedule", async () => {
     const db = fakeDb({ anchor: [{ ts: new Date(2026, 8, 9, 18, 2, 0) }], proposals: someProposal });
-    expect(await run(db, { now: evening })).toBe(0);
-    expect(db.inbound()).toHaveLength(0);
+    expect(await run(db, { now: evening })).toBe(1);
+    expect(db.inbound()).toHaveLength(1);
+  });
+
+  it("a late run is dated from its slot: Sunday's 21:00 caught up on Monday morning writes Sunday's file", async () => {
+    const db = fakeDb({ proposals: someProposal });
+    const sunday2100 = new Date("2026-09-21T01:00:00Z"); // Sun 20 Sep, 21:00 EDT
+    const mondayMorning = new Date("2026-09-21T12:00:00Z"); // Mon 08:00 EDT
+    expect(await run(db, { now: mondayMorning, scheduledFor: sunday2100, timeZone: "America/New_York" })).toBe(1);
+    const [runsRow] = db.runsRows();
+    expect(JSON.parse(String(runsRow!.values[1]))).toMatchObject({ fold_path: "Journal/Fold/2026-09-20.md", window_end: mondayMorning.toISOString() });
+    expect(String(db.inbound()[0]!.values[1])).toContain(`${BRIEF_PREFIX} — 2026-09-20`);
   });
 
   it("silence-default: nothing new since the anchor → no turn, no runs row", async () => {

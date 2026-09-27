@@ -42,17 +42,19 @@
 // new path, with a visible note saying why — rather than losing the fold
 // outright on an instance that has not stamped `Templates/Fold.md` yet.
 //
-// SCHEDULE (deviation, documented in docs/ops/knowledge-fold.md): the runner
-// has no notion of time of day, and it gates the next run on the LAST
-// `routine_run` row for the component — so an `@daily` routine that skips
-// because it is 09:00 would be due again at 09:00 tomorrow and never reach
-// the evening. So: `@hourly`, with the evening gate here (local hour ≥
-// EVENING_HOUR — the container's TZ is METISTRY_TZ) and a once-per-local-day
-// guard off the same anchor. One fold a night, retried hourly until it lands.
+// SCHEDULE (§2.5, docs/ops/knowledge-fold.md): every day at 21:00, from the
+// manifest — the console's runner fires it once, at its time (T3-1), so the
+// routine keeps no clock gate of its own. The hourly schedule, the "not
+// before 18:00" gate and the once-a-local-day guard it needed are gone: a
+// run is a fold. A run the runner fired late (the Mac slept through 21:00)
+// is still dated from its slot (`ctx.scheduledFor`, in `ctx.timeZone`), so
+// catching up Sunday's fold on Monday morning writes Sunday's file and
+// leaves Monday's for Monday night.
 
 import {
   DEFAULT_TEMPLATE_MAX_BYTES,
   FOLD_SOURCE,
+  calendarDate,
   ROUTINE_TIER,
   TEMPLATES_DIR,
   TEMPLATE_MISSING,
@@ -92,7 +94,6 @@ export const COMPONENT = "knowledge-fold";
 export const THREAD = "fold";
 /** The prompt keys on this prefix — `inbound_messages` has no `kind` column, so meta.kind AND a recognisable first line. */
 export const BRIEF_PREFIX = "🌙 evening fold";
-export const EVENING_HOUR = 18;
 export const FALLBACK_DAYS = 7;
 export const MAX_BRIEF_BYTES = 4096; // limit: fixed — the brief is handles, not payloads (docs/ops/knowledge-fold.md); the assistant fetches content itself
 export const PER_GROUP_LIMIT = 25; // limit: fixed — a per-group query bound; MAX_BRIEF_BYTES trims further if every group's 25 is still too much
@@ -214,6 +215,9 @@ async function renderFoldWrite(ctx: FoldCtx, now: Date, date: string): Promise<F
     queries: ctx.queries ?? NO_QUERIES,
     reader: ctx.reader,
     now,
+    // the slot's zone when the runner fired it, so `{{ date }}` names the
+    // same night the file does; otherwise the engine's own default (METISTRY_TZ)
+    ...(ctx.timeZone ? { timeZone: ctx.timeZone } : {}),
     env,
   });
   return { mode: "skeleton", path, skeleton: rendered.markdown, proseRequests: rendered.proseRequests };
@@ -246,9 +250,9 @@ function skeletonBlock(write: FoldWrite): string {
  * skeleton trails uncapped by that same budget (it is the file, not a
  * handle, and the engine already bounds its own size).
  */
-export function renderBrief(handles: Handle[], window: { start: Date; end: Date }, write: FoldWrite): RenderedBrief {
+export function renderBrief(handles: Handle[], window: { start: Date; end: Date; /** the fold's own date, when it is not `end`'s — a late run is dated from its slot */ date?: string }, write: FoldWrite): RenderedBrief {
   const header = [
-    `${BRIEF_PREFIX} — ${localDate(window.end)}`,
+    `${BRIEF_PREFIX} — ${window.date ?? localDate(window.end)}`,
     "",
     `New since the last fold (${stamp(window.start)}).`,
     ...writeInstructionLines(write),
@@ -384,30 +388,24 @@ async function newHandles(db: Db, since: Date): Promise<Handle[]> {
 export type FoldResult = 0 | 1;
 
 /**
- * One pass. Returns 1 when a fold turn was enqueued, 0 otherwise (too early,
- * already folded today, or nothing new — silence-default either way).
+ * One pass. Returns 1 when a fold turn was enqueued, 0 when there was nothing
+ * new since the last fold (silence-default). No clock gate: the runner fires
+ * it at its slot (§2.5), and a run is a fold.
  */
 export async function run(db: Db, ctx: FoldCtx = {}): Promise<FoldResult> {
   const now = ctx.now ?? new Date();
   const last = await anchor(db);
-
-  if (now.getHours() < EVENING_HOUR) {
-    // The fold is an evening job; the runner has no time of day, so the gate
-    // is here. Nothing is lost — the next hourly tick re-checks.
-    console.log(`${COMPONENT}: before ${EVENING_HOUR}:00 local (${stamp(now)}) — not folding yet`);
-    return 0;
-  }
-  if (last && localDate(last) === localDate(now)) {
-    console.log(`${COMPONENT}: already folded today (${stamp(last)})`);
-    return 0;
-  }
+  // The night this fold is FOR: its slot when the runner fired it (late, if
+  // the Mac slept), in the zone the slot was read in; otherwise now, local.
+  const slot = ctx.scheduledFor ?? now;
+  const date = ctx.timeZone ? calendarDate(slot, ctx.timeZone) : localDate(slot);
 
   const since = last ?? new Date(now.getTime() - FALLBACK_DAYS * 86_400_000);
   const handles = await newHandles(db, since);
   if (handles.length === 0) return 0; // silence-default: nothing new, no turn, no runs row
 
-  const write = await renderFoldWrite(ctx, now, localDate(now));
-  const brief = renderBrief(handles, { start: since, end: now }, write);
+  const write = await renderFoldWrite(ctx, slot, date);
+  const brief = renderBrief(handles, { start: since, end: now, date }, write);
   const counts = GROUP_ORDER.reduce<Record<string, number>>((acc, g) => {
     const n = brief.included.filter((h) => h.group === g).length;
     if (n > 0) acc[g] = n;
@@ -440,11 +438,11 @@ export async function run(db: Db, ctx: FoldCtx = {}): Promise<FoldResult> {
 
   // The routine's own runs row: the anchor for the next pass AND the counts
   // the morning brief reads back. `folded: true` is what makes it an anchor —
-  // the runner's own routine_run row (written for every tick, skips included)
-  // deliberately is not one. This row exists only when the fold enqueued a
-  // turn, so its `meta.outcome` (T1-4) is always `acted` — the too-early,
-  // already-folded and nothing-new passes below write no row of their own,
-  // leaving the runner's generic `silent` row as the only trace of that tick.
+  // the runner's own routine_run row (written for every run, silent ones
+  // included) deliberately is not one. This row exists only when the fold
+  // enqueued a turn, so its `meta.outcome` (T1-4) is always `acted` — a
+  // nothing-new pass writes no row of its own, leaving the runner's generic
+  // `silent` row as the only trace of that run.
   await db.query(
     `INSERT INTO runs (component, kind, ok, started_at, finished_at, meta)
      VALUES ($1, 'routine_run', true, now(), now(), $2)`,

@@ -55,6 +55,7 @@ import { loadRules } from "../dist/router.js";
 import { TargetRegistry } from "../dist/dispatch.js";
 import { loadPublicIdentity } from "../dist/identity.js";
 import { EventHub, startEventFeed } from "../dist/events.js";
+import { parseVaultStatus } from "../dist/vault-status.js";
 import { FIXTURE_DIR, REPO_ROOT, expectedFixtures, fixtureBody, shapeDiff } from "./client-fixtures.mjs";
 
 // ---- arguments -------------------------------------------------------------------
@@ -210,6 +211,22 @@ const server = makeServer(pool, queries, {
   instancesFiles: layout.path("instances"),
   secrets: { file: layout.path("secrets"), presence: instanceSecrets.presence() },
   variables: { instanceDir, file: layout.path("variables") },
+  // the reconciler's GET /vault/status, as a week of use leaves it: two
+  // commits not yet pushed under after_commit (the remote was unreachable
+  // for the last attempt), nothing new on the remote, no conflict
+  vaultStatus: async () =>
+    parseVaultStatus({
+      branch: "main",
+      remote: "origin",
+      ahead: 2,
+      behind: 0,
+      last_commit: { sha: "4c1d2e3f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d", subject: "Tick 1 task", author: "user", at: "2026-09-28T12:58:01.000Z" },
+      last_push: { at: "2026-09-28T12:58:31.000Z", ok: false, remote: "origin", error: "fatal: unable to access 'https://github.com/example/vault.git/': Could not resolve host: github.com" },
+      last_pull: { at: "2026-09-28T13:00:00.000Z", ok: true, remote: "origin" },
+      conflict: null,
+      policy: { push: "after_commit", pull: { every: "5m" } },
+      as_of: "2026-09-28T13:05:00.000Z",
+    }),
   computeAdmin: {
     instanceDir,
     seedDir: join(REPO_ROOT, "seed"),
@@ -377,6 +394,7 @@ const REQUESTS = [
   ["GET /api/instances", () => ({ path: "/api/instances" })],
   ["GET /api/secrets", () => ({ path: "/api/secrets" })],
   ["GET /api/variables", () => ({ path: "/api/variables" })],
+  ["GET /api/vault/status", () => ({ path: "/api/vault/status" })],
   ["GET /api/commands", () => ({ path: "/api/commands" })],
   ["GET /api/proposals", () => ({ path: "/api/proposals" })],
   // recorded alongside `GET /api/proposals`, before anything below answers

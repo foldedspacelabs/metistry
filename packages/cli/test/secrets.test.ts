@@ -9,9 +9,10 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { Exec, ExecOptions } from "../src/exec.js";
-import { promptStdin } from "../src/keychain.js";
+import { interactiveLine } from "../src/keychain.js";
 import { main } from "../src/main.js";
 import { accountFor, isSecretVar, listSecrets, mintSecret, purgeSecrets, renderSecretList, rewriteEnv, serviceAnswers, sharedScopeSecretName, syncSecrets, wasSharedScope } from "../src/secrets.js";
+import { decodeSecurity } from "./fake-security.js";
 
 /** One instance's id — the account its own secrets are filed under. */
 const INSTANCE_ID = "11111111-2222-4333-8444-555555555555";
@@ -41,17 +42,17 @@ const key = (account: string, name: string) => `${account}/metistry:${name}`;
 const USER = "metistry";
 
 /** A Keychain in a Map, keyed by account AND service. Records every call so the tests can prove argv never carried a value. */
-function fakeSecurity(seed: Record<string, string> = {}): { exec: Exec; store: Map<string, string>; calls: Array<{ args: string[]; opts: ExecOptions }> } {
+function fakeSecurity(seed: Record<string, string> = {}): { exec: Exec; store: Map<string, string>; calls: Array<{ args: string[]; argv: string[]; opts: ExecOptions }> } {
   const store = new Map(Object.entries(seed));
-  const calls: Array<{ args: string[]; opts: ExecOptions }> = [];
-  const exec: Exec = async (cmd, args, opts = {}) => {
-    calls.push({ args, opts });
+  const calls: Array<{ args: string[]; argv: string[]; opts: ExecOptions }> = [];
+  const exec: Exec = async (cmd, argv, opts = {}) => {
+    const { args, value } = cmd === "security" ? decodeSecurity(argv, opts) : { args: argv, value: undefined };
+    calls.push({ args, argv, opts });
     if (cmd !== "security") return { code: 127, stdout: "", stderr: "not security" };
     const at = `${args[args.indexOf("-a") + 1] ?? ""}/${args[args.indexOf("-s") + 1] ?? ""}`;
     if (args[0] === "add-generic-password") {
-      const [a, b] = String(opts.stdin ?? "").split("\n");
-      if (a === undefined || a !== b) return { code: 1, stdout: "", stderr: "passwords don't match" };
-      store.set(at, a);
+      if (value === undefined) return { code: 1, stdout: "", stderr: "add-generic-password: no -w value on the security -i line" };
+      store.set(at, value);
       return { code: 0, stdout: "", stderr: "" };
     }
     if (args[0] === "find-generic-password") {
@@ -106,7 +107,7 @@ describe("metistry secrets sync", () => {
     // importing never touches the file
     expect(readFileSync(file, "utf8")).toBe(ENV_TEXT);
     // and never puts a value on a command line
-    for (const c of kc.calls) for (const a of c.args) expect(a).not.toContain("change-me");
+    for (const c of kc.calls) for (const a of c.argv) expect(a).not.toContain("change-me");
 
     // now rotate one in the Keychain and regenerate .env from it
     kc.store.set(key(USER, "METISTRY_DB_PASSWORD"), "rotated-in-the-keychain");
@@ -157,7 +158,7 @@ describe("metistry secrets sync", () => {
     expect(readFileSync(file, "utf8")).toBe("METISTRY_DB_HOST=127.0.0.1\nMETISTRY_LOCAL_OWNER_TOKEN=MINTED-OWNER-TOKEN\n");
     expect(out.join("\n")).toContain("minted METISTRY_LOCAL_OWNER_TOKEN");
     expect(out.join("\n")).not.toContain("MINTED-OWNER-TOKEN"); // a value is never printed
-    for (const c of kc.calls) for (const a of c.args) expect(a).not.toContain("MINTED-OWNER-TOKEN");
+    for (const c of kc.calls) for (const a of c.argv) expect(a).not.toContain("MINTED-OWNER-TOKEN");
 
     // idempotent: a second run reads the item back rather than rotating it
     const again = await syncSecrets("env", { envFile: file, instanceId: INSTANCE_ID, exec: kc.exec, out: () => {}, platform: "darwin", env: {}, mint: () => "SECOND" });
@@ -218,7 +219,7 @@ describe("metistry secrets sync", () => {
     expect(said).not.toContain("minted");
     expect(said).not.toContain("running-console-token");
     expect(said).not.toContain("running-owner-bearer");
-    for (const c of kc.calls) for (const a of c.args) expect(a).not.toMatch(/running-(console-token|owner-bearer)/);
+    for (const c of kc.calls) for (const a of c.argv) expect(a).not.toMatch(/running-(console-token|owner-bearer)/);
 
     // and the next run reads the adopted item back: still no mint, still no change
     const again = await syncSecrets("env", { envFile: file, instanceId: INSTANCE_ID, exec: kc.exec, out: () => {}, platform: "darwin", env: {}, mint: () => `MINTED-${++mints}` });
@@ -318,9 +319,9 @@ describe("metistry secrets sync", () => {
     await writeFile(file, 'METISTRY_DB_PASSWORD="quoted in .env"\n');
     await syncSecrets("keychain", { envFile: file, exec: kc.exec, out: () => {}, platform: "darwin", env: {} });
     expect(kc.store.get(key(USER, "METISTRY_DB_PASSWORD"))).toBe("quoted in .env");
-    // `security ... -w` prompts twice, a line at a time: a newline cannot survive it
-    expect(() => promptStdin("two\nlines")).toThrow(/newline/);
-    expect(promptStdin("one")).toBe("one\none\n");
+    // `security -i` reads its command a line at a time: a newline cannot survive it
+    expect(() => interactiveLine(["add-generic-password", "-w", "two\nlines"])).toThrow(/newline/);
+    expect(interactiveLine(["add-generic-password", "-w", "one"])).toBe('"add-generic-password" "-w" "one"\n');
   });
 
   it("tells a Linux host what to do instead of pretending there is a Keychain", async () => {
@@ -342,7 +343,7 @@ describe("metistry secrets mint", () => {
     expect(readFileSync(file, "utf8")).toBe("METISTRY_DB_HOST=127.0.0.1\nMETISTRY_ASSISTANT_TOKEN=MINTED-VALUE\n");
     expect(statSync(file).mode & 0o777).toBe(0o600);
     for (const l of lines) expect(l).not.toContain("MINTED-VALUE");
-    for (const c of kc.calls) for (const a of c.args) expect(a).not.toContain("MINTED-VALUE");
+    for (const c of kc.calls) for (const a of c.argv) expect(a).not.toContain("MINTED-VALUE");
 
     await expect(mintSecret("METISTRY_GITHUB_REPOS", { envFile: file, exec: kc.exec, out: () => {}, platform: "darwin", env: {} })).rejects.toThrow(/not a secret-shaped name/);
   });

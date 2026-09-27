@@ -21,6 +21,7 @@ import { knownInstanceDirs, migrateScope, purgeShared, sharedScopeStatus, type M
 import { update, updateSharedScope } from "../src/update.js";
 import { StepRunner } from "../src/steps.js";
 import { checkout, fakeExec, okDoctor } from "./fixtures.js";
+import { decodeSecurity } from "./fake-security.js";
 
 const ID_A = "11111111-2222-4333-8444-555555555555";
 const ID_B = "66666666-7777-4888-9999-aaaaaaaaaaaa";
@@ -488,15 +489,15 @@ describe("metistry update runs it, and can never be failed by it", () => {
 /** A fake `security`, for the verbs driven through `main()` exactly as a terminal would. */
 function fakeSecurity(seed: Record<string, string>) {
   const store = new Map(Object.entries(seed));
-  const calls: Array<{ args: string[] }> = [];
-  const exec: Exec = async (cmd, args, o: ExecOptions = {}) => {
-    calls.push({ args });
+  const calls: Array<{ args: string[]; argv: string[] }> = [];
+  const exec: Exec = async (cmd, argv, o: ExecOptions = {}) => {
+    const { args, value } = cmd === "security" ? decodeSecurity(argv, o) : { args: argv, value: undefined };
+    calls.push({ args, argv });
     if (cmd !== "security") return { code: 127, stdout: "", stderr: `${cmd}: not faked` };
     const at = `${args[args.indexOf("-a") + 1] ?? ""}/${args[args.indexOf("-s") + 1] ?? ""}`;
     if (args[0] === "add-generic-password") {
-      const [x, y] = String(o.stdin ?? "").split("\n");
-      if (x === undefined || x !== y) return { code: 1, stdout: "", stderr: "mismatch" };
-      store.set(at, x);
+      if (value === undefined) return { code: 1, stdout: "", stderr: "add-generic-password: no -w value on the security -i line" };
+      store.set(at, value);
       return { code: 0, stdout: "", stderr: "" };
     }
     if (args[0] === "find-generic-password") {

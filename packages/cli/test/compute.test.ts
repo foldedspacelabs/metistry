@@ -53,6 +53,7 @@ import {
 import { createUi, strip } from "../src/ui.js";
 import type { Exec, ExecOptions } from "../src/exec.js";
 import { main } from "../src/main.js";
+import { decodeSecurity } from "./fake-security.js";
 
 // A product checkout these tests may safely hand to `main()`: seed/ copied out
 // of the real one, and — the whole point — no `.env`. Passing the real
@@ -67,15 +68,15 @@ await cp(fileURLToPath(new URL("../../../seed", import.meta.url)), SEED, { recur
 /** A login Keychain in a Map, keyed by (account, service). Records calls so a test can prove a value never reached argv. */
 function fakeSecurity(seed: Record<string, string> = {}) {
   const store = new Map(Object.entries(seed));
-  const calls: Array<{ args: string[]; opts: ExecOptions }> = [];
-  const exec: Exec = async (cmd, args, opts = {}) => {
-    calls.push({ args, opts });
+  const calls: Array<{ args: string[]; argv: string[]; opts: ExecOptions }> = [];
+  const exec: Exec = async (cmd, argv, opts = {}) => {
+    const { args, value } = cmd === "security" ? decodeSecurity(argv, opts) : { args: argv, value: undefined };
+    calls.push({ args, argv, opts });
     if (cmd !== "security") return { code: 1, stdout: "", stderr: "not security" };
     const at = `${args[args.indexOf("-a") + 1] ?? ""}/${args[args.indexOf("-s") + 1] ?? ""}`;
     if (args[0] === "add-generic-password") {
-      const [a, b] = String(opts.stdin ?? "").split("\n");
-      if (a === undefined || a !== b) return { code: 1, stdout: "", stderr: "passwords don't match" };
-      store.set(at, a);
+      if (value === undefined) return { code: 1, stdout: "", stderr: "add-generic-password: no -w value on the security -i line" };
+      store.set(at, value);
       return { code: 0, stdout: "", stderr: "" };
     }
     if (args[0] === "find-generic-password") {
@@ -208,7 +209,7 @@ describe("providers add", () => {
     // the retired per-user account is neither read nor written (Q3)
     expect([...kc.store.keys()].filter((k) => k.startsWith(`${ACCOUNT}/`))).toEqual([]);
     for (const c of kc.calls) expect(c.args).not.toContain(ACCOUNT);
-    for (const c of kc.calls) expect(c.args.join(" ")).not.toContain(KEY); // stdin only
+    for (const c of kc.calls) expect(c.argv.join(" ")).not.toContain(KEY); // stdin only
     const text = await readFile(file(dir), "utf8");
     expect(text).toContain("{{ secret.openrouter_api_key }}");
     expect(text).not.toContain(KEY);

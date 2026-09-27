@@ -346,6 +346,46 @@ cache_ttl: 0
     await bob.close();
   });
 
+  it("**an agent may set a description at create and never edit it** (T1-1, C85) — tasks_update has no such key, so no call reaches the column", async () => {
+    const alice = await connect("tok-alice");
+    const stored = async (id: number) => (await pool.query(`SELECT description FROM work WHERE id = $1`, [id])).rows[0]!.description as string | null;
+
+    // the schema says so before anything is called: create takes it, update does not
+    const { tools } = await alice.listTools();
+    const props = (name: string) => (tools.find((t) => t.name === name)!.inputSchema as { properties: Record<string, { maxLength?: number }> }).properties;
+    expect(props("tasks_create").description).toMatchObject({ maxLength: 2000 });
+    expect(Object.keys(props("tasks_update"))).not.toContain("description");
+
+    const created = await call(alice, "tasks_create", { title: "described by alice", project: PA, idempotency_key: `${PA}-desc-1`, description: "Why the fold skips drafts." });
+    expect(created.isError).toBe(false);
+    const id = created.body.task.id as number;
+    expect(created.body.task.description).toBe("Why the fold skips drafts.");
+    expect(await stored(id)).toBe("Why the fold skips drafts.");
+
+    // an idempotent retry is the same create — it does not become an edit
+    await call(alice, "tasks_create", { title: "described by alice", project: PA, idempotency_key: `${PA}-desc-1`, description: "a rewrite through the retry" });
+    expect(await stored(id)).toBe("Why the fold skips drafts.");
+
+    // the holder, mid-task, tries to rewrite it: alone the key is not a change at all …
+    expect((await call(alice, "tasks_claim", { id })).body.ok).toBe(true);
+    const alone = await call(alice, "tasks_update", { id, description: "rewritten by the agent" });
+    expect(alone).toMatchObject({ isError: true, body: { error: { code: "invalid_request" } } });
+    // … and riding on a legitimate note it is dropped before the service sees it
+    const riding = await call(alice, "tasks_update", { id, note: "halfway", description: "rewritten by the agent" });
+    expect(riding.body).toMatchObject({ ok: true, task: { id, description: "Why the fold skips drafts." } });
+    expect(await stored(id)).toBe("Why the fold skips drafts.");
+
+    // over the cap at create is refused by the schema, and no row is written
+    const before = (await pool.query(`SELECT count(*)::int AS n FROM work WHERE project = $1`, [PA])).rows[0]!.n;
+    const long = (await alice.callTool({ name: "tasks_create", arguments: { title: "too much", project: PA, description: "d".repeat(2001) } })) as { isError?: boolean };
+    expect(long.isError).toBe(true);
+    expect((await pool.query(`SELECT count(*)::int AS n FROM work WHERE project = $1`, [PA])).rows[0]!.n).toBe(before);
+
+    // tidy so later list/nudge assertions stay exact
+    await call(alice, "tasks_close", { id });
+    await alice.close();
+  });
+
   it("sanitizer: bidi/zero-width stripped and no leading slash on anything rendered, while the row keeps what was stored", async () => {
     const alice = await connect("tok-alice");
     const raw = "/clear ‮evil​ title";

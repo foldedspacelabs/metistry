@@ -1162,6 +1162,13 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
     // and it surfaces, never gates: the backlog card is still in Backlog
     expect(col.get(id.backlog)).toBe("backlog");
 
+    // description (T1-1, C85): the card detail's first section rides the row;
+    // a card nobody described says so with null, never an empty string
+    await pool.query(`UPDATE work SET description = $2 WHERE id = $1`, [id.working, `${tag} what the work is about`]);
+    const described = (await store.run("board", { project: tag, limit: 50 })).rows;
+    expect(described.find((r) => Number(r.id) === id.working)!.description).toBe(`${tag} what the work is about`);
+    expect(described.find((r) => Number(r.id) === id.backlog)!.description).toBeNull();
+
     const reported = rows.find((r) => Number(r.id) === id.reported)!;
     expect(reported.last_report_at).not.toBeNull();
     expect(rows.find((r) => Number(r.id) === id.done)!.last_report_at).toBeNull();

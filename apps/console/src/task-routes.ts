@@ -16,6 +16,11 @@
 // assign verb, `crossKindRefusal(compute, caller, crew)` is the guard it
 // needs, and this comment is the reason it is not called yet.
 //
+// `description` (C85, T1-1) is the same shape: whoever creates a row may
+// describe it (`tasks_create` takes the key), but only the owner rewrites it
+// — this route is the one adapter that passes it to the board arm, and
+// `tasks_update` has no such key.
+//
 // The board offers no drop the service would refuse: `dropsFor()` in the PWA
 // derives its targets from the same rules the statements enforce. When the
 // two disagree the STATEMENT wins and the card snaps back carrying the
@@ -32,7 +37,7 @@ const USER = "user";
 const PATCH_TASK = /^PATCH \/api\/tasks\/(\d{1,12})$/;
 const TASK_OP = /^POST \/api\/tasks\/(\d{1,12})\/(claim|release|renew)$/;
 /** The fields PATCH accepts. Anything else is refused BY NAME rather than ignored — a silently dropped field is a lie about what happened. */
-export const PATCH_FIELDS = ["status", "owner", "project", "title"] as const;
+export const PATCH_FIELDS = ["status", "owner", "project", "title", "description"] as const;
 const STATUSES = ["open", "in_progress", "blocked", "closed"] as const;
 
 /**
@@ -92,13 +97,15 @@ function optionalLease(body: Record<string, unknown>): number | undefined {
   return v as number;
 }
 
-/** `{status?, owner?, project?, title?}` — validated here, gated in the service. */
-function patchBody(raw: unknown): { status?: (typeof STATUSES)[number]; owner?: string | null; project?: string | null; title?: string } {
+type PatchBody = { status?: (typeof STATUSES)[number]; owner?: string | null; project?: string | null; title?: string; description?: string | null };
+
+/** `{status?, owner?, project?, title?, description?}` — validated here, gated (and capped) in the service. */
+function patchBody(raw: unknown): PatchBody {
   if (raw === null || typeof raw !== "object" || Array.isArray(raw)) throw new TasksError("invalid_input", "request body must be a JSON object");
   const body = raw as Record<string, unknown>;
   const unknown = Object.keys(body).filter((k) => !(PATCH_FIELDS as readonly string[]).includes(k));
   if (unknown.length > 0) throw new TasksError("invalid_input", `unknown field(s) ${unknown.join(", ")} — PATCH takes ${PATCH_FIELDS.join(", ")}`);
-  const out: { status?: (typeof STATUSES)[number]; owner?: string | null; project?: string | null; title?: string } = {};
+  const out: PatchBody = {};
   if ("status" in body) {
     if (typeof body.status !== "string" || !(STATUSES as readonly string[]).includes(body.status)) {
       throw new TasksError("invalid_input", `status must be one of ${STATUSES.join(", ")} — "open" is the unblock (blocked rows only) and the rest need the claim`);
@@ -116,6 +123,10 @@ function patchBody(raw: unknown): { status?: (typeof STATUSES)[number]; owner?: 
   if ("title" in body) {
     if (typeof body.title !== "string" || body.title.trim() === "") throw new TasksError("invalid_input", "title must be a non-empty string");
     out.title = body.title;
+  }
+  if ("description" in body) {
+    if (body.description !== null && typeof body.description !== "string") throw new TasksError("invalid_input", "description must be a string, or null (or \"\") to clear it");
+    out.description = body.description as string | null;
   }
   if (Object.keys(out).length === 0) throw new TasksError("invalid_input", `PATCH needs at least one of ${PATCH_FIELDS.join(", ")}`);
   return out;

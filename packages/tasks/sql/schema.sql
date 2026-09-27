@@ -25,7 +25,8 @@ CREATE TABLE IF NOT EXISTS work (
     idempotency_key  text,
     history          jsonb       NOT NULL DEFAULT '[]',     -- append-only [{ts, agent, op, note?, status?}]
     created_by       text,
-    closed_at        timestamptz
+    closed_at        timestamptz,
+    description      text                                   -- what the task is about (0026): set at create, edited by the owner only
 );
 ALTER TABLE work ADD COLUMN IF NOT EXISTS claimed_by       text;
 ALTER TABLE work ADD COLUMN IF NOT EXISTS lease_expires_at timestamptz;
@@ -36,6 +37,7 @@ ALTER TABLE work ADD COLUMN IF NOT EXISTS idempotency_key  text;
 ALTER TABLE work ADD COLUMN IF NOT EXISTS history          jsonb NOT NULL DEFAULT '[]';
 ALTER TABLE work ADD COLUMN IF NOT EXISTS created_by       text;
 ALTER TABLE work ADD COLUMN IF NOT EXISTS closed_at        timestamptz;
+ALTER TABLE work ADD COLUMN IF NOT EXISTS description      text;
 
 CREATE INDEX        IF NOT EXISTS work_status_idx           ON work (status, updated_at DESC);
 CREATE INDEX        IF NOT EXISTS work_ready_idx            ON work (status, lease_expires_at);

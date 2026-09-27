@@ -644,6 +644,10 @@ public struct BoardCard: Codable, Sendable, Equatable, Identifiable {
     public let id: Int
     public let column: String
     public let title: String
+    /// What the card is about (C85) — the card detail's first section. Set by
+    /// whoever created the row; only the owner edits it (`TaskPatch`). Nil
+    /// when nobody described it.
+    public let description: String?
     /// `task` or `review`.
     public let kind: String?
     public let project: String?
@@ -681,7 +685,7 @@ public struct BoardCard: Codable, Sendable, Equatable, Identifiable {
     public let updatedAt: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, column, title, kind, project, owner, escalated, artifact, status, due, reported
+        case id, column, title, description, kind, project, owner, escalated, artifact, status, due, reported
         case claimedBy = "claimed_by"
         case leaseExpiresAt = "lease_expires_at"
         case ageHours = "age_hours"
@@ -700,6 +704,7 @@ public struct BoardCard: Codable, Sendable, Equatable, Identifiable {
         id = c.wireInt(.id) ?? 0
         column = try c.decodeIfPresent(String.self, forKey: .column) ?? "backlog"
         title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
+        description = try c.decodeIfPresent(String.self, forKey: .description)
         kind = try c.decodeIfPresent(String.self, forKey: .kind)
         project = try c.decodeIfPresent(String.self, forKey: .project)
         owner = try c.decodeIfPresent(String.self, forKey: .owner)
@@ -733,7 +738,7 @@ public struct BoardCard: Codable, Sendable, Equatable, Identifiable {
 /// cannot be sent by accident.
 ///
 /// The route has **two arms and the fields pick which**:
-/// `owner`/`title`/`project` need no claim; `in_progress | blocked | closed`
+/// `owner`/`title`/`project`/`description` need no claim; `in_progress | blocked | closed`
 /// are the lease-holder's; `open` is the unblock and is legal from `blocked`
 /// only. Mixing the arms in one body is a 400 naming both fields — "because
 /// the looser gate must never carry the stricter arm's write" — so this type
@@ -743,15 +748,25 @@ public struct TaskPatch: Sendable, Equatable {
     public var owner: String?
     public var project: String?
     public var title: String?
+    /// What the card is about (C85) — the owner's to rewrite; no agent verb
+    /// has the key. An empty string clears it: the route stores blank as none.
+    public var description: String?
 
     public static let statuses = ["open", "in_progress", "blocked", "closed"]
-    public static let mixedArmsRefusal = "a status change and an owner/title/project change are two different arms of PATCH /api/tasks/:id and cannot travel in one body — send them as two requests"
+    public static let mixedArmsRefusal = "a status change and an owner/title/project/description change are two different arms of PATCH /api/tasks/:id and cannot travel in one body — send them as two requests"
 
-    public init(status: String? = nil, owner: String? = nil, project: String? = nil, title: String? = nil) {
+    public init(status: String? = nil, owner: String? = nil, project: String? = nil, title: String? = nil, description: String? = nil) {
         self.status = status
         self.owner = owner
         self.project = project
         self.title = title
+        self.description = description
+    }
+
+    /// The card detail's edit: rewrite what the card says it is about, or
+    /// clear it with an empty string.
+    public static func describing(_ description: String) -> TaskPatch {
+        TaskPatch(description: description)
     }
 
     /// The drag a board column makes: one status, nothing else. The column
@@ -766,18 +781,19 @@ public struct TaskPatch: Sendable, Equatable {
         TaskPatch(owner: owner)
     }
 
-    public var isEmpty: Bool { status == nil && owner == nil && project == nil && title == nil }
+    public var isEmpty: Bool { status == nil && owner == nil && project == nil && title == nil && description == nil }
 
     /// Nil when the patch mixes the two arms, or says nothing.
     public var wireBody: [String: Any]? {
         if isEmpty { return nil }
-        let carriesAttributes = owner != nil || project != nil || title != nil
+        let carriesAttributes = owner != nil || project != nil || title != nil || description != nil
         if status != nil && carriesAttributes { return nil }
         var body: [String: Any] = [:]
         if let status { body["status"] = status }
         if let owner { body["owner"] = owner }
         if let project { body["project"] = project }
         if let title { body["title"] = title }
+        if let description { body["description"] = description }
         return body
     }
 }

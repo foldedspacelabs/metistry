@@ -108,6 +108,16 @@ any other backlog card.
 only proposals, and a suggestion nobody accepts stays a suggestion.
 `docs/ops/reply-feedback.md` has the verb.
 
+## What a card is about
+
+`description` (T1-1, C85) is what the task is about — the card detail's first
+section, and on every `board` row. **Whoever creates the row may set it; only
+the owner edits it afterwards.** `tasks_create` takes it (at most 2,000
+characters); `tasks_update` has no such key, so an agent that wrote a card can
+never rewrite what it says it is about. The owner edits it with `PATCH
+/api/tasks/:id {"description": …}` — a board-arm field, so no claim is needed
+and a card a crew holds can still be described; `null` or blank clears it.
+
 ## `escalated` — and one thing it is not
 
 `escalated` is a boolean on every card. It is true when the row is not closed

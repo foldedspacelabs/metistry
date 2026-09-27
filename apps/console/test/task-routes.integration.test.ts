@@ -24,6 +24,7 @@ describe.skipIf(!hasDb)("task routes — the board's drags (integration)", () =>
   let session: string;
   let ownerToken: string;
   let agentToken: string;
+  const localOwnerToken = mintToken();
 
   beforeAll(async () => {
     pool = await testDb(pg.Pool);
@@ -33,6 +34,7 @@ describe.skipIf(!hasDb)("task routes — the board's drags (integration)", () =>
       inboxDir: `/tmp/metistry-test-inbox-${Date.now()}`,
       policy,
       secureCookies: false,
+      localOwner: { token: localOwnerToken, trusted: [] },
     });
     await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -212,6 +214,56 @@ describe.skipIf(!hasDb)("task routes — the board's drags (integration)", () =>
     expect(res.status).toBe(400);
     expect((await res.json()).error.message).toMatch(/kind "issue" — a row a collector reconciles/);
     expect((await row(id)).owner).toBeNull();
+  });
+
+  // ----- description (T1-1, C85): set by the creator, edited by the owner -----
+
+  it("description: no credential → 401, a capture owner token or an agent token → 403, and the row keeps what it said", async () => {
+    const id = await newTask("described by its creator", "description", ["what the creator wrote"]);
+    const path = `/api/tasks/${id}`;
+    const body = { description: "rewritten by someone who may not" };
+    expect((await send("PATCH", path, body, {})).status).toBe(401);
+    expect((await send("PATCH", path, body, { authorization: `Bearer ${ownerToken}` })).status).toBe(403);
+    expect((await send("PATCH", path, body, { authorization: `Bearer ${agentToken}` })).status).toBe(403);
+    expect((await pool.query(`SELECT description FROM work WHERE id = $1`, [id])).rows[0].description).toBe("what the creator wrote");
+  });
+
+  it("description: the owner writes, rewrites and clears it — the local owner token and a passkey session both reach it — on a card nobody need hold", async () => {
+    const id = await newTask("to describe");
+    const local = await send("PATCH", `/api/tasks/${id}`, { description: "Why the fixtures redact tokens, and what the Mac needs from them." }, { authorization: `Bearer ${localOwnerToken}` });
+    expect(local.status).toBe(200);
+    expect((await local.json()).task).toMatchObject({ id, description: "Why the fixtures redact tokens, and what the Mac needs from them.", status: "open", claimed_by: null });
+    expect(await auditFor(id, "patch")).toMatchObject({ ok: true, meta: { fields: ["description"] } });
+    // the audit names the FIELD, never the text: a description is the owner's words, not a log line
+    expect(JSON.stringify((await auditFor(id, "patch"))!.meta)).not.toContain("redact tokens");
+
+    // a card a crew is working on is still the owner's to describe — the board arm needs no claim
+    await pool.query(`UPDATE work SET status = 'in_progress', claimed_by = 'crew:someone', lease_expires_at = now() + interval '1 hour' WHERE id = $1`, [id]);
+    const rewritten = await asUser("PATCH", `/api/tasks/${id}`, { description: "Narrowed: only the run export." });
+    expect(rewritten.status).toBe(200);
+    expect((await rewritten.json()).task).toMatchObject({ description: "Narrowed: only the run export.", claimed_by: "crew:someone", status: "in_progress" });
+
+    // null and blank both clear it, to the one spelling of "none"
+    expect((await (await asUser("PATCH", `/api/tasks/${id}`, { description: "   " })).json()).task.description).toBeNull();
+    await asUser("PATCH", `/api/tasks/${id}`, { description: "back again" });
+    expect((await (await asUser("PATCH", `/api/tasks/${id}`, { description: null })).json()).task.description).toBeNull();
+  });
+
+  it("description: a wrong type, an over-cap text and a mix with a holder status are named, and nothing is written", async () => {
+    const id = await newTask("capped", "description", ["as created"]);
+    const cases: [unknown, RegExp][] = [
+      [{ description: 7 }, /description must be a string, or null/],
+      [{ description: "x".repeat(2001) }, /description exceeds 2000 characters/],
+      [{ status: "closed", description: "done, and here is why" }, /status: closed is claim-gated and description is not/],
+    ];
+    for (const [body, msg] of cases) {
+      const res = await asUser("PATCH", `/api/tasks/${id}`, body);
+      expect(res.status, JSON.stringify(body).slice(0, 60)).toBe(400);
+      expect((await res.json()).error.message, JSON.stringify(body).slice(0, 60)).toMatch(msg);
+    }
+    expect((await pool.query(`SELECT description, status FROM work WHERE id = $1`, [id])).rows[0]).toEqual({ description: "as created", status: "open" });
+    // exactly at the cap is accepted
+    expect((await asUser("PATCH", `/api/tasks/${id}`, { description: "y".repeat(2000) })).status).toBe(200);
   });
 
   it("a task that does not exist is a 404 to the user, never a silent success", async () => {

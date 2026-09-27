@@ -74,6 +74,10 @@ public final class AppModel {
     /// being watched — and the sidebar's dot keeps its word — after the owner
     /// walks away from the screen (screen-01 §5.1).
     public let chat: ChatModel
+    /// The capture composer behind the toolbar's + and ⌘N (capture-view.swift).
+    /// Held here, not by the popover, so Esc keeps the draft and a queued
+    /// capture keeps resending with every window closed.
+    public let composer: CaptureComposerModel
 
     public init(
         bundleResourceURL: URL?,
@@ -132,6 +136,11 @@ public final class AppModel {
         // not at the shell's next tick.
         needsYou.onQueueChanged = { [weak shell] in await shell?.refreshCount() }
         self.activity = ActivityModel(session: console)
+        let composer = CaptureComposerModel(session: console)
+        self.composer = composer
+        // The one door the composer opens by: Capture ▸ New Capture, the
+        // toolbar's + and ⌘N are all this entry.
+        shell.captureActions[.newCapture] = { [weak composer] in composer?.present() }
 
         // The wizard's step 2 hands the folder back the moment it is known, so
         // every later verb runs against it.

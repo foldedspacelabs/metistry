@@ -7,7 +7,7 @@
 import { describe, expect, it } from "vitest";
 import { errorSignature, parseCompute } from "@foldedspacelabs/metistry-core";
 import type { PlanVault } from "@metistry-apps/routines";
-import { routineCapabilities, scheduleToSeconds, tick, type ScheduledCollector } from "../src/runner.js";
+import { routineCapabilities, scheduleToSeconds, tick, type RoutineFailure, type RunnerRequests, type ScheduledCollector, type SecretFailure } from "../src/runner.js";
 import { FakeRuns as Fake } from "./runs-fake.js";
 
 const NOW = new Date("2026-09-15T12:00:00Z");
@@ -29,7 +29,8 @@ const fetchNever = (async () => {
   throw new Error("no network in these tests");
 }) as unknown as typeof fetch;
 
-const opts = (over: Record<string, unknown> = {}) => ({ now: NOW, env: {}, fetchFn: fetchNever, ...over });
+// runs-fake models `runs` alone: the Needs You requests (T2-9) are off here, and recorded below
+const opts = (over: Record<string, unknown> = {}) => ({ now: NOW, env: {}, fetchFn: fetchNever, requests: null, ...over });
 
 describe("routine runner", () => {
   it("parses the narrow cron dialect and refuses the rest loudly", () => {
@@ -130,7 +131,7 @@ describe("routine runner", () => {
     expect(db.outbound).toHaveLength(1);
 
     // next window: one more row, and the alert stays quiet inside its own window
-    await tick(db, [c], {}, { now: new Date(NOW.getTime() + 6 * 60_000), env: {}, fetchFn: fetchNever, maxStreak: 5 });
+    await tick(db, [c], {}, { now: new Date(NOW.getTime() + 6 * 60_000), env: {}, fetchFn: fetchNever, maxStreak: 5, requests: null });
     expect(skips()).toHaveLength(2);
     expect(db.outbound).toHaveLength(1);
 
@@ -226,6 +227,104 @@ assignments:
 
     await tick(new Fake(NOW), [fold], {}, opts({ compute: () => compute, env: { METISTRY_OPENROUTER_API_KEY: "sk-or-x" } }));
     expect(ran).toBe(1);
+  });
+});
+
+/** Records what the tick hands the requests seam — the decisions; event-requests.integration.test.ts proves the rows. */
+function recordingRequests() {
+  const calls = {
+    failed: [] as RoutineFailure[],
+    succeeded: [] as string[],
+    secrets: [] as SecretFailure[][],
+    restoredChecks: [] as ((name: string) => boolean)[],
+  };
+  const requests: RunnerRequests = {
+    routineFailed: async (f) => void calls.failed.push(f),
+    routineSucceeded: async (c) => void calls.succeeded.push(c),
+    secretsFailed: async (fs) => void calls.secrets.push([...fs]),
+    secretsRestored: async (isSet) => void calls.restoredChecks.push(isSet),
+  };
+  return { calls, requests };
+}
+
+describe("events become requests (C96, T2-9) — what the tick raises", () => {
+  it("a failed ROUTINE raises one report with its signature and the time it failed; a collector's failure does not (T3-12's)", async () => {
+    const db = new Fake(NOW);
+    const { calls, requests } = recordingRequests();
+    const brief = collector({ name: "morning-brief", dir: "routines/morning-brief", runKind: "routine_run", run: async () => { throw new Error("vault bridge 503 at 06:00"); } });
+    const sync = collector({ name: "github-state", dir: "collectors/github-state", run: async () => { throw new Error("401 Bad credentials"); } });
+    await tick(db, [brief, sync], {}, opts({ requests }));
+    expect(calls.failed).toEqual([
+      {
+        component: "morning-brief",
+        title: "morning-brief",
+        runId: db.rowsFor("morning-brief")[0]!.id,
+        error: "vault bridge 503 at 06:00",
+        signature: errorSignature("morning-brief", "vault bridge 503 at 06:00"),
+        failedAt: NOW,
+      },
+    ]);
+  });
+
+  it("a routine that runs clears its reports; a collector's run asks nothing", async () => {
+    const db = new Fake(NOW);
+    const { calls, requests } = recordingRequests();
+    const brief = collector({ name: "morning-brief", dir: "routines/morning-brief", runKind: "routine_run" });
+    await tick(db, [brief, collector()], {}, opts({ requests }));
+    expect(calls.succeeded).toEqual(["morning-brief"]);
+    expect(calls.failed).toEqual([]);
+  });
+
+  it("a missing secret is ONE failure naming every component it stopped; a URL, the compute file and a budget are not secrets", async () => {
+    const db = new Fake(NOW);
+    const { calls, requests } = recordingRequests();
+    const key = { env: ["METISTRY_DEVIN_API_KEY"], reachable: [], engine: false };
+    const a = collector({ name: "devin-sessions", dir: "collectors/devin-sessions", requires: key });
+    const b = collector({ name: "devin-knowledge", dir: "collectors/devin-knowledge", requires: key });
+    const url = collector({ name: "ek", dir: "collectors/ek", requires: { env: [], reachable: ["METISTRY_EK_URL"], engine: false } });
+    const fold = collector({ name: "knowledge-fold", dir: "routines/knowledge-fold", runKind: "routine_run", requires: { env: [], reachable: [], engine: true } });
+    await tick(db, [a, b, url, fold], {}, opts({ requests }));
+    expect(calls.secrets).toEqual([[{ name: "METISTRY_DEVIN_API_KEY", why: "METISTRY_DEVIN_API_KEY is unset", stopped: ["devin-knowledge", "devin-sessions"] }]]);
+
+    // the engine's own key is a secret like any other
+    const compute = parseCompute(`
+providers:
+  openrouter:
+    kind: openai-compatible
+    base_url: https://openrouter.ai/api/v1
+    locality: off_machine
+    auth: { secret: METISTRY_OPENROUTER_API_KEY }
+    data_policy: { allow: [Projects], deny_sources: [comms], max_brief_bytes: 65536 }
+assignments:
+  default: { model: openrouter/anthropic/claude-sonnet-5 }
+`);
+    const engine = recordingRequests();
+    await tick(new Fake(NOW), [fold], {}, opts({ requests: engine.requests, compute: () => compute, budget: async () => ({ name: "budgets.stop", why: "stopped", fix: "raise it" }) }));
+    expect(engine.calls.secrets.flat().map((f) => [f.name, f.stopped])).toEqual([["METISTRY_OPENROUTER_API_KEY", ["knowledge-fold"]]]);
+  });
+
+  it("every tick asks whether a waiting secret is set again — against the install's environment", async () => {
+    const { calls, requests } = recordingRequests();
+    await tick(new Fake(NOW), [], {}, opts({ requests, env: { METISTRY_DEVIN_API_KEY: "cog_x", BLANK: "  " } }));
+    const [isSet] = calls.restoredChecks;
+    expect(isSet?.("METISTRY_DEVIN_API_KEY")).toBe(true);
+    expect(isSet?.("BLANK")).toBe(false);
+    expect(isSet?.("METISTRY_OTHER")).toBe(false);
+    expect(calls.secrets).toEqual([]); // nothing missing, nothing raised
+  });
+
+  it("a queue that cannot be written never costs the tick: the run, its row and the alert still happen", async () => {
+    const db = new Fake(NOW);
+    const broken: RunnerRequests = {
+      routineFailed: async () => { throw new Error("proposals is gone"); },
+      routineSucceeded: async () => { throw new Error("proposals is gone"); },
+      secretsFailed: async () => { throw new Error("proposals is gone"); },
+      secretsRestored: async () => { throw new Error("proposals is gone"); },
+    };
+    const failing = collector({ name: "morning-brief", dir: "routines/morning-brief", runKind: "routine_run", run: async () => { throw new Error("x"); } });
+    await expect(tick(db, [failing], {}, opts({ requests: broken }))).resolves.toBeUndefined();
+    expect(db.rowsFor("morning-brief")[0]).toMatchObject({ ok: false, error: "x" });
+    expect(db.outbound).toHaveLength(1);
   });
 });
 

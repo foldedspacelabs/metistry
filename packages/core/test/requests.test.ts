@@ -38,6 +38,7 @@ describe("request types — the table", () => {
       pull_request: "pull request",
       access_request: "access",
       grant_elevation: "access",
+      secret_failure: "access",
       action: "action",
       connection_call: "action",
       review: "review",

@@ -106,6 +106,7 @@ sql: |
         WHEN 'pull_request' THEN 'pull request'
         WHEN 'access_request' THEN 'access'
         WHEN 'grant_elevation' THEN 'access'
+        WHEN 'secret_failure' THEN 'access'
         WHEN 'action' THEN 'action'
         WHEN 'connection_call' THEN 'action'
         WHEN 'review' THEN 'review'

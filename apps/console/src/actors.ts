@@ -35,6 +35,7 @@ import type { Db } from "./auth-store.js";
 import { ACCESS_REQUEST_KIND, INTERNAL_ASSISTANT_ID, type AgentRow } from "./agents.js";
 import type { CrewRegistry } from "./crews.js";
 import { parseAssistantIdentity } from "./identity.js";
+import { listProjectGrants } from "./projects.js";
 
 /** The assistant's definition: who it is, and the files that make it so. */
 export interface AssistantDefinitionSource {
@@ -166,6 +167,8 @@ export async function consoleActorSources(db: Db, input: ConsoleActorInputs): Pr
     // F-3 / T4-8: the connections an actor may reach. None exist yet.
     connections: () => [],
     grantHistory: (id) => ({ approved: (byId.get(id)?.kind === "internal" ? overrides : asks).get(id) ?? [], routines: [] }),
+    // T4-7: a member inherits its projects' grants; resolveActor draws them "via project"
+    projectGrants: await listProjectGrants(db),
   };
 }
 

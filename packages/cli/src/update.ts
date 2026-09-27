@@ -15,7 +15,7 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join, relative } from "node:path";
-import { INSTANCE_LAYOUT, LEGACY_VAULT_DIR, detectLayout, usesCompose, type Deployment, type InstanceLayoutShape } from "@foldedspacelabs/metistry-core";
+import { INSTANCE_LAYOUT, LEGACY_VAULT_DIR, detectLayout, usesCompose, type Deployment, type InstanceLayoutShape, type KeychainBackend } from "@foldedspacelabs/metistry-core";
 import { writeCliShim } from "./cli-shim.js";
 import { loadDeployment } from "./deployment.js";
 import { doctor, type DoctorDeps, type DoctorReport } from "./doctor.js";
@@ -30,6 +30,7 @@ import { ensureOwnerBridgeToken, OWNER_BRIDGE_TOKEN, protectedRel, writeProtecte
 import { listMigrationFiles, MIGRATION_LOCK_KEY, openMigrationSession, runMigrations, type MigrateResult, type MigrationSession } from "./migrate.js";
 import { currentVersion, installRelease, rollbackRelease, releaseTarget, runtimePackCommit, type InstallReleaseResult } from "./release.js";
 import { installRuntimeDeps, runtimeDepsEnabled, RUNTIME_DIRNAME, type InstallRuntimeDepsResult } from "./runtime-deps.js";
+import { MIGRATE_SCOPE_COMMAND, migrateScope, type MigrateScopeResult } from "./secrets.js";
 import { StepFailed, StepRunner } from "./steps.js";
 import { type Ui } from "./ui.js";
 import { closingDoctor, composeUp, COMPOSE_TIMEOUT_MS, runDirFor } from "./up.js";
@@ -66,6 +67,8 @@ export interface UpdateOptions {
   doctorDeps?: Partial<DoctorDeps> | undefined;
   /** test seam: the vault bridge's owner bearer, minted once for an install that has none */
   mintOwnerToken?: (() => string) | undefined;
+  /** test seam: the login Keychain the shared-scope migration reads and writes (default: `security`, on darwin) */
+  keychain?: KeychainBackend | undefined;
   /** default true; `false` is a test seam — see `up`'s `cliShim` (cli-shim.ts). `update` writes the same shim `up` does: it shares nothing else with `up`, but a checkout that only ever runs `update` still gets one. */
   cliShim?: boolean | undefined;
 }
@@ -85,6 +88,8 @@ export interface UpdateResult {
   runtimeDeps?: InstallRuntimeDepsResult;
   /** the directory the rest of the update ran against (`<product-dir>/current` in release mode) */
   runDir: string;
+  /** the shared-scope migration (plan §2.14), when it ran — names only */
+  sharedScope?: MigrateScopeResult;
 }
 
 export { RECONCILER_LABEL } from "./protected-write.js";
@@ -284,6 +289,7 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
   let failure: StepFailed | undefined;
   let release: InstallReleaseResult | undefined;
   let runtimeDeps: InstallRuntimeDepsResult | undefined;
+  let sharedScope: MigrateScopeResult | undefined;
   // release mode swings this to `<product-dir>/current` once the switch is done
   let runDir = runDirFor(productDir, source);
   let releaseVersion = version;
@@ -464,6 +470,14 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
     const delivery = await writeLock(r, lock, { env, platform, uid, fetchFn });
     r.note(delivery.detail);
 
+    // After the lock, because it writes secrets.yaml through the same
+    // reconciler as the owner, which the restart above has just given the
+    // owner bearer. It can never fail the update: an instance that has not
+    // migrated keeps running exactly as before (its .env still carries the
+    // values), and every way it can stop short ends in the one command.
+    r.section("secrets");
+    sharedScope = await updateSharedScope(r, { instanceDir: instanceDir.instanceDir, envFile, exampleFile: join(runDir, ".env.example"), env, platform, uid, fetchFn, exec: opts.exec, keychain: opts.keychain });
+
     // `update` shares no code path with `up` (it never renders a plist or
     // touches the supervisor), so a checkout that only ever runs `update`
     // still needs this written — but, like everything else in this block,
@@ -483,7 +497,59 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
   const code = failure ? failure.code || 1 : doctorCode;
   r.out("");
   r.out(updateSummary({ ui: r.ui, dryRun: r.dryRun, failure, code, source, version: lock?.product.version ?? releaseVersion, migrations, restarted }));
-  return { code, source, runDir, commands: r.commands, ...(lock ? { lock } : {}), restarted, ...(migrations ? { migrations } : {}), ...(release ? { release } : {}), ...(runtimeDeps ? { runtimeDeps } : {}) };
+  return { code, source, runDir, commands: r.commands, ...(lock ? { lock } : {}), restarted, ...(migrations ? { migrations } : {}), ...(release ? { release } : {}), ...(runtimeDeps ? { runtimeDeps } : {}), ...(sharedScope ? { sharedScope } : {}) };
+}
+
+// ---- the shared scope (plan §2.14, T4-3) ---------------------------------------------
+
+/**
+ * `metistry secrets migrate-scope`, run by `update` — never able to fail it.
+ * A dry run reaches no Keychain; an instance with no id, a host with no
+ * Keychain, or a migration that stops short each print why and the exact
+ * command to finish it by hand.
+ */
+export async function updateSharedScope(
+  r: StepRunner,
+  o: { instanceDir: string | undefined; envFile: string | undefined; exampleFile: string; env: NodeJS.ProcessEnv; platform: NodeJS.Platform; uid: number; fetchFn: typeof fetch; exec?: Exec | undefined; keychain?: KeychainBackend | undefined },
+): Promise<MigrateScopeResult | undefined> {
+  if (!o.instanceDir) {
+    r.note("shared scope: no METISTRY_INSTANCE_DIR — no instance to migrate");
+    return undefined;
+  }
+  const command = `${MIGRATE_SCOPE_COMMAND} --instance ${o.instanceDir}`;
+  if (r.dryRun) {
+    r.note(`shared scope: would run \`${command}\` — copy the per-user originals into this instance (nothing deleted); a dry run asks the Keychain nothing`);
+    return undefined;
+  }
+  const instanceId = await readInstanceId(o.instanceDir).catch(() => undefined);
+  if (!instanceId) {
+    r.note(`shared scope: ${o.instanceDir} has no instance_id yet, so there is no account to copy into — once it has one, run \`${command}\``);
+    return undefined;
+  }
+  if (o.platform !== "darwin" && !o.keychain) {
+    r.note(`shared scope: no login Keychain on ${o.platform} — nothing to migrate`);
+    return undefined;
+  }
+  try {
+    const res = await migrateScope({
+      instanceDir: o.instanceDir,
+      instanceId,
+      envFile: o.envFile,
+      exampleFile: o.exampleFile,
+      env: o.env,
+      platform: o.platform,
+      uid: o.uid,
+      fetchFn: o.fetchFn,
+      exec: o.exec,
+      keychain: o.keychain,
+      out: (l) => r.note(l),
+    });
+    if (res.unreadable.length > 0) r.note(`shared scope: ${res.unreadable.map((u) => u.from).join(", ")} not copied — run \`${command}\` from Terminal and allow the Keychain prompt`);
+    return res;
+  } catch (err) {
+    r.note(`shared scope: not migrated (${err instanceof Error ? err.message : String(err)}) — the update is unaffected; run \`${command}\``);
+    return undefined;
+  }
 }
 
 /**

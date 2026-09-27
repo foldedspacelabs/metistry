@@ -119,7 +119,7 @@ describe.skipIf(!hasDb)("task routes — the board's drags (integration)", () =>
     const id = await newTask("to assign");
     const res = await asUser("PATCH", `/api/tasks/${id}`, { owner: "helper-a" });
     expect(res.status).toBe(200);
-    expect((await res.json()).task).toMatchObject({ owner: "helper-a", status: "open" }); // the "Addressed to" column = open + owner
+    expect((await res.json()).task).toMatchObject({ owner: "helper-a", status: "open" }); // the Assigned column = open + owner
     expect((await row(id)).history.at(-1)).toMatchObject({ agent: "user", op: "update", owner: "helper-a" });
     expect(await auditFor(id, "patch")).toMatchObject({ ok: true, meta: { owner: "helper-a", fields: ["owner"] } });
 
@@ -148,7 +148,7 @@ describe.skipIf(!hasDb)("task routes — the board's drags (integration)", () =>
     expect((await asUser("POST", `/api/tasks/${id}/claim`, {})).status).toBe(200);
     const res = await asUser("POST", `/api/tasks/${id}/release`, { note: "not mine after all" });
     expect(res.status).toBe(200);
-    expect(await row(id)).toMatchObject({ status: "open", claimed_by: null, owner: "helper-a" }); // owner survives: it lands back in "Addressed to"
+    expect(await row(id)).toMatchObject({ status: "open", claimed_by: null, owner: "helper-a" }); // owner survives: it lands back in Assigned
     expect((await row(id)).history.at(-1)).toMatchObject({ op: "release", agent: "user", note: "not mine after all" });
 
     await pool.query(`UPDATE work SET status = 'in_progress', claimed_by = 'helper-a', lease_expires_at = now() + interval '1 hour' WHERE id = $1`, [id]);
@@ -157,7 +157,7 @@ describe.skipIf(!hasDb)("task routes — the board's drags (integration)", () =>
     expect((await refused.json()).error.message).toMatch(/held by helper-a, not by user .* claim it first/);
   });
 
-  it("needs_you → backlog: PATCH status open is the unblock — it works on a row a crew still holds, and refuses on a row that is not blocked", async () => {
+  it("blocked → backlog: PATCH status open is the unblock — it works on a row a crew still holds, and refuses on a row that is not blocked", async () => {
     const id = await newTask("stuck");
     await pool.query(`UPDATE work SET status = 'blocked', claimed_by = 'helper-a', lease_expires_at = now() + interval '1 hour' WHERE id = $1`, [id]);
     const res = await asUser("PATCH", `/api/tasks/${id}`, { status: "open" });

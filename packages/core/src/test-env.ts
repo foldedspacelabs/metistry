@@ -92,7 +92,14 @@ export function scrubTestEnv(env: NodeJS.ProcessEnv = process.env): string[] {
 }
 
 export interface TestEnvResult {
-  /** true when the scratch database is reachable — suites gate on this with `describe.skipIf(!hasDb)` */
+  /**
+   * true when the scratch database is reachable — suites gate on this with
+   * `describe.skipIf(!hasDb)`. Requires both `METISTRY_DB_PASSWORD` and a
+   * `METISTRY_TEST_DB_NAME` that looks like a scratch name: a password alone
+   * (an install's, inherited from a shell that never exported the scratch
+   * name) is not enough — `testDb()` would refuse it, and a suite gated on
+   * the password alone would fail instead of skip.
+   */
   hasDb: boolean;
   /** allowlisted names taken from the dotenv file */
   loaded: string[];
@@ -116,7 +123,7 @@ export function loadTestEnv(file: string | URL, env: NodeJS.ProcessEnv = process
     env[name] = value;
     loaded.push(name);
   }
-  return { hasDb: !!env.METISTRY_DB_PASSWORD, loaded: loaded.sort(), removed };
+  return { hasDb: !!env.METISTRY_DB_PASSWORD && SCRATCH_DB.test(env.METISTRY_TEST_DB_NAME ?? ""), loaded: loaded.sort(), removed };
 }
 
 /** dotenv text → its assignments, in order: `export` allowed, one layer of matching quotes stripped, comments and junk skipped. */

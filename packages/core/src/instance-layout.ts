@@ -44,6 +44,8 @@ export const INSTANCE_LAYOUT = Object.freeze({
   sources: ".metistry/sources.yaml",
   /** Secret NAMES and their policy — hosts, grants, expiry; never a value (plan §2.14). The values are in the login Keychain. */
   secrets: ".metistry/secrets.yaml",
+  /** Plain shared values, `{{ variable.name }}` — never a secret, never a schedule (plan §2.14, ruling 2). Written by `metistry variables` (M14). */
+  variables: ".metistry/variables.yaml",
   /** The D4 system-prompt overlay. Not the same file as the root CLAUDE.md. */
   assistantPrompt: ".metistry/assistant-prompt.md",
   lock: ".metistry/metistry.lock",
@@ -361,6 +363,8 @@ export const LEGACY_INSTANCE_LAYOUT = Object.freeze({
   // and `metistry update` refuses to carry a legacy instance this far. Spelled
   // for the table's completeness, and deliberately not a machinery root.
   secrets: "secrets.yaml",
+  // likewise `variables.yaml` (T4-4): it postdates the flat layout
+  variables: "variables.yaml",
   assistantPrompt: "assistant-prompt.md",
   lock: "metistry.lock",
 

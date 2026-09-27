@@ -33,7 +33,7 @@ import { pushConfigFromEnv, startNotifier } from "./push.js";
 import { loadCollectors } from "@metistry-apps/collectors";
 import { loadRoutines } from "@metistry-apps/routines";
 import { PROFILE_PATH, loadSchedules, profileFacts, readOverlay, routineCapabilities, startRunner } from "./runner.js";
-import { loadRules } from "./router.js";
+import { loadRules, makeRoutePolicy } from "./router.js";
 import { watchCompute } from "./compute.js";
 import { TargetRegistry } from "./dispatch.js";
 import { dirSink, vaultSink, DEFAULT_MAX_TRACKED_BYTES, INBOX_PREFIX, vaultBridgeLister, vaultBridgeSearcher, vaultBridgeWriter } from "@foldedspacelabs/metistry-mcp-brain";
@@ -332,6 +332,25 @@ const events = hubFromEnv();
 startEventFeed({ hub: events, db: pool, connect: () => pool.connect() });
 const consoleVersion: string = require_("../package.json").version;
 
+// The router's policy (T9-2, docs/ops/dynamic-router.md): the owner's
+// `rules.yaml` `policy:` table, consulted IN SHADOW after the 202 on every
+// fall-through and override. It reads the live tier map and `compute.yaml`
+// (the session rule, and `assignments.intent` for its one local scorer), and
+// checks a chosen query or crew against what is loaded now. No block, no
+// policy: every route row reads `absent`, the shipped behaviour.
+const routePolicy = makeRoutePolicy({
+  rules,
+  compute: () => compute.store.current,
+  secretEnv: process.env,
+  hasQuery: (name) => queries.names().includes(name),
+  hasCrew: (name) => crews.get(name) !== undefined,
+});
+console.log(
+  rules.policy
+    ? `route policy: ${rules.policy.mode}, ${rules.policy.table.length} row(s), tiers ${rules.policy.tiers.join(" < ")}, deadline ${rules.policy.timeout_ms} ms`
+    : "route policy: absent — no policy: block in rules.yaml (every route row reads `absent`)",
+);
+
 const server = makeServer(pool, queries, {
   origin,
   ...(secrets ? { secrets } : {}),
@@ -351,6 +370,7 @@ const server = makeServer(pool, queries, {
   secureCookies: origin.startsWith("https:"),
   webRoot: fileURLToPath(new URL("../web", import.meta.url)),
   rules,
+  routePolicy,
   targets,
   ...(push ? { push } : {}),
   ...(readKnowledge ? { readKnowledge } : {}),

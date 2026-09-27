@@ -1,5 +1,8 @@
 // X-5 — the PWA reads F-5's request type table (design-build-plan §2.12)
-// instead of holding its own copy, and Skip is bulk-only (K2).
+// instead of holding its own copy, and Skip is bulk-only (K2). T2-3 — and
+// draws each type's OWN answers from it: Send Answers on a question with its
+// questions as the body, Dismiss on a report, Approve as Work folded into
+// Approve, and nothing for an answer whose door is not served yet.
 //
 // The PWA cannot import core, so GET /api/proposals serves each row's reading
 // as `request` (`withRequestShape` → core's `describeRequest`), and app.js
@@ -47,7 +50,7 @@ const pwa = new Function(
   `${[
     "requestWord",
     "requestHeading",
-    "DECISIONS",
+    "DECLINE_STYLE",
     "DEFER",
     "attr",
     "ACTION_NOISE",
@@ -58,15 +61,19 @@ const pwa = new Function(
     "accessLabel",
     "scopeOf",
     "accessDetail",
+    "questionDetail",
+    "collectAnswers",
+    "requestAnswers",
     "proposalRow",
   ]
     .map(lift)
-    .join("\n")}\nreturn { requestWord, requestHeading, DEFER, proposalRow };`,
+    .join("\n")}\nreturn { requestWord, requestHeading, DEFER, proposalRow, collectAnswers };`,
 )(esc) as {
   requestWord: (p: unknown) => string;
   requestHeading: (word: string) => string;
   DEFER: { d: string; label: string }[];
   proposalRow: (p: unknown) => string;
+  collectAnswers: (p: unknown, find: (sel: string) => unknown[]) => { answers?: unknown[]; missing?: number };
 };
 
 /** A row as GET /api/proposals serves it — the stored columns, then the server's own `withRequestShape`. */
@@ -125,21 +132,28 @@ describe("every kind renders the table's word (F-5, §2.12)", () => {
   });
 });
 
-describe("no row offers Skip — Skip is bulk-only (K2)", () => {
-  const payloads: Record<string, Record<string, unknown>> = {
-    decision: { options: ["ship", "hold"] },
-    access_request: { area: "Areas/Health", current_tier: "index" },
-    action: { action: { kind: "vault.move", args: { from: "a", to: "b" } }, reason: "tidy" },
-    knowledge: { suggested_work: { title: "write it up" } },
-    report: { suggested_work: { title: "look into it" } },
-  };
+const payloads: Record<string, Record<string, unknown>> = {
+  decision: { options: ["ship", "hold"] },
+  access_request: { area: "Areas/Health", current_tier: "index" },
+  action: { action: { kind: "vault.move", args: { from: "a", to: "b" } }, reason: "tidy" },
+  knowledge: { suggested_work: { title: "write it up" } },
+  report: { suggested_work: { title: "look into it" } },
+};
 
+/** The buttons a rendered row offers, as [word, decision]. */
+const buttons = (html: string) =>
+  [...html.matchAll(/<button data-(?:triage|answers)="[^"]*" data-d="([^"]*)"[^>]*>([^<]*)<\/button>/g)].map((m) => [m[2], m[1]]);
+
+describe("no row offers Skip — Skip is bulk-only (K2)", () => {
   for (const kind of [...REQUEST_KINDS, "sync_conflict"]) {
     it(`${kind}: Later is the one verb beside the answers, and there is no Skip`, () => {
-      const html = pwa.proposalRow(served(kind, payloads[kind] ?? {}));
-      expect(html).not.toMatch(/data-d="skip"/);
+      const row = served(kind, payloads[kind] ?? {});
+      const html = pwa.proposalRow(row);
       expect(html).not.toMatch(/>\s*Skip\s*</);
       expect(html).toMatch(/data-d="later"[^>]*>Later</);
+      // `skip` rides only as the type's own Decline — a report's Dismiss, a message's Not Mine — never under Skip's name
+      const skips = buttons(html).filter(([, d]) => d === "skip");
+      expect(skips.map(([word]) => word), kind).toEqual(row.request.decline && "decision" in row.request.decline.sends && row.request.decline.sends.decision === "skip" ? [row.request.decline.label] : []);
     });
   }
 
@@ -151,5 +165,97 @@ describe("no row offers Skip — Skip is bulk-only (K2)", () => {
     expect(HTML).toMatch(/id="triage-skip"[^>]*>Skip</);
     expect(SRC).toContain(`$("triage-skip").onclick = () => batchDecide("skip");`);
     expect(SRC).toMatch(/e\.key === "s"\) \{ e\.preventDefault\(\); batchDecide\("skip"\);/);
+  });
+});
+
+describe("each type draws its own answers from the table (T2-3)", () => {
+  for (const kind of [...REQUEST_KINDS, "sync_conflict"]) {
+    it(`${kind}: exactly the table's answers that store a decision, in its words, then Later`, () => {
+      const row = served(kind, payloads[kind] ?? {});
+      const want = [row.request.primary, row.request.revise, row.request.decline]
+        .filter((a): a is NonNullable<typeof a> => a !== null && a.label !== null && "decision" in a.sends)
+        .map((a) => [a.label, (a.sends as { decision: string }).decision]);
+      expect(buttons(pwa.proposalRow(row)), kind).toEqual([...want, ["Later", "later"]]);
+    });
+  }
+
+  it("a report offers Dismiss and Later — never Approve, and never a button for an act its door does not serve yet", () => {
+    const html = pwa.proposalRow(served("report", { title: "Nightly fold finished", suggested_work: { title: "look into it" } }));
+    expect(buttons(html)).toEqual([["Dismiss", "skip"], ["Later", "later"]]);
+    expect(html).not.toMatch(/data-d="allow"|Approve/);
+  });
+
+  it("Approve is Approve as Work where the row suggests work (§1.4), and says what it creates", () => {
+    const html = pwa.proposalRow(served("knowledge", { title: "t", suggested_work: { title: "write it up" } }));
+    expect(buttons(html)[0]).toEqual(["Approve", "accept_as_work"]);
+    expect(html).toContain("creates the task “write it up”, unassigned");
+    expect(buttons(pwa.proposalRow(served("knowledge", { title: "t" })))[0]).toEqual(["Approve", "allow"]);
+  });
+
+  it("an access request's Revise carries the area; everyone else's carries words", () => {
+    expect(pwa.proposalRow(served("access_request", payloads.access_request!))).toMatch(/data-d="accept_with_changes" data-carries="area"[^>]*>Revise</);
+    expect(pwa.proposalRow(served("knowledge", {}))).toMatch(/data-d="accept_with_changes" data-carries="feedback"[^>]*>Revise</);
+  });
+
+  it("a question draws every question it asks — pick one, pick any, Something else… — and Send Answers", () => {
+    const row = served("decision", {
+      title: "Three things",
+      questions: [
+        { prompt: "Which repo?", options: ["metistry", "metistry-instance"], multi: false, allow_other: true },
+        { prompt: "Which labels?", options: ["bug", "docs"], multi: true, allow_other: true },
+        { prompt: "Ship <it>?", options: ["yes", "not yet"], multi: false, allow_other: false },
+      ],
+      context: { prose: "The fold drops drafts." },
+    });
+    const html = pwa.proposalRow(row);
+    expect(buttons(html)).toEqual([["Send Answers", "answers"], ["Revise", "accept_with_changes"], ["Decline", "deny"], ["Later", "later"]]);
+    expect(html.match(new RegExp(`type="radio" name="q-${row.id}-0"`, "g"))).toHaveLength(3); // two options + Something else…
+    expect(html.match(new RegExp(`type="checkbox" name="q-${row.id}-1"`, "g"))).toHaveLength(3);
+    expect(html.match(new RegExp(`type="radio" name="q-${row.id}-2"`, "g"))).toHaveLength(2); // no Something else…: its options only
+    expect(html.match(/data-other-text=/g)).toHaveLength(2);
+    expect(html).toContain('role="radiogroup" aria-label="Ship &lt;it&gt;?"');
+    expect(html).toContain("<b>Ship &lt;it&gt;?</b>"); // agent-authored: output-encoded (CRIT-7)
+    expect(html).toContain("why: The fold drops drafts.");
+    // a row from before v2 is served as its one question: the same body, the same Send Answers
+    const v1 = pwa.proposalRow(served("decision", { title: "Ship it?", options: ["ship", "hold"] }));
+    expect(buttons(v1)[0]).toEqual(["Send Answers", "answers"]);
+    expect(v1).not.toContain("data-other-text"); // v1's options are its only answers
+  });
+
+  it("Send Answers sends one answer per question, in order — and names the first one left unanswered", () => {
+    const row = served("decision", {
+      title: "Two things",
+      questions: [
+        { prompt: "Which repo?", options: ["metistry", "metistry-instance"], multi: false, allow_other: true },
+        { prompt: "Which labels?", options: ["bug", "docs"], multi: true, allow_other: true },
+      ],
+    });
+    type Input = { name?: string; value: string; checked?: boolean; other?: boolean };
+    const form = (inputs: Input[]) => (sel: string) => {
+      const name = /name="([^"]+)"/.exec(sel)?.[1];
+      const text = /data-other-text="([^"]+)"/.exec(sel)?.[1];
+      return inputs
+        .filter((i) => (name !== undefined && i.name === name && i.checked !== undefined) || (text !== undefined && i.name === `text:${text}`))
+        .map((i) => ({ value: i.value, checked: i.checked ?? false, hasAttribute: (a: string) => a === "data-other" && i.other === true }));
+    };
+    const q0 = `q-${row.id}-0`;
+    const q1 = `q-${row.id}-1`;
+    expect(
+      pwa.collectAnswers(row, form([
+        { name: q0, value: "metistry-instance", checked: true },
+        { name: q1, value: "bug", checked: true },
+        { name: q1, value: "docs", checked: false },
+        { name: q1, value: "", checked: true, other: true },
+        { name: `text:${q1}`, value: "  and perf " },
+      ])),
+    ).toEqual({ answers: [{ choices: ["metistry-instance"] }, { choices: ["bug"], other: "and perf" }] });
+    expect(pwa.collectAnswers(row, form([{ name: q0, value: "metistry", checked: true }]))).toEqual({ missing: 1 });
+    // Something else… with no words is not an answer
+    expect(pwa.collectAnswers(row, form([{ name: q0, value: "", checked: true, other: true }, { name: `text:${q0}`, value: " " }]))).toEqual({ missing: 0 });
+  });
+
+  it("app.js sends a question's answers as `answers`, never an option as a verb", () => {
+    expect(SRC).toContain(`await decide(b.dataset.answers, { decision: b.dataset.d, answers: got.answers });`);
+    expect(SRC).not.toMatch(/data-d="\$\{attr\(o\)\}"/);
   });
 });

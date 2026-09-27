@@ -464,8 +464,10 @@ struct ChatActivityView: View {
     var body: some View {
         if activity.state == .working {
             // The waiting line counts seconds, so it redraws each second — on its own.
-            TimelineView(.periodic(from: .now, by: 1)) { context in
-                working(now: max(context.date, model.now()))
+            TimelineView(.periodic(from: .now, by: 1)) { _ in
+                // the tick redraws; the clock is the model's, so a test's frozen
+                // now stays frozen and the wall clock never leaks into the words
+                working(now: model.now())
             }
         } else {
             ChatToolStrip(activity: activity, model: model)

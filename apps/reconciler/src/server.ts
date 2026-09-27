@@ -440,7 +440,10 @@ export function makeBridge(deps: BridgeDeps, cfg: BridgeConfig): Server {
         }
         if (body.include_config !== undefined && typeof body.include_config !== "boolean") return fail(res, "invalid_request", "include_config is true or false");
         const includeConfig = body.include_config === true;
-        if (includeConfig && caller !== "owner") {
+        // A PREVIEW that names configuration changes nothing, so either bearer
+        // may ask for one (the Needs You request for `--include-config` shows
+        // it); the revert itself is the owner-class bearer's alone.
+        if (includeConfig && caller !== "owner" && body.dry_run !== true) {
           return refuse("reverting configuration needs the owner's own hand — `metistry vault rollback --include-config` on the Mac, never a route");
         }
         if (!target.ok) return fail(res, target.code, target.message);

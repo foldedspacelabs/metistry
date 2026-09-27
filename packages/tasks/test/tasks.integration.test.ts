@@ -206,6 +206,32 @@ describe.skipIf(!hasDb)("tasks (real db)", () => {
     expect((await pool.query(`SELECT 1 FROM projects WHERE id = $1`, [P2])).rows).toHaveLength(1);
   });
 
+  it("description (0026): stored at create, untouched by an idempotent retry, rewritten and cleared by the board arm, closed rows refuse it", async () => {
+    const key = `itest-desc-${Date.now()}`;
+    const t = await svc.create({ title: "described", project: P, idempotency_key: key, description: "the creator's account of it" }, "itest-alice");
+    expect(t.description).toBe("the creator's account of it");
+    // the retry is the SAME create: the earlier row wins, description and all
+    const again = await svc.create({ title: "described", project: P, idempotency_key: key, description: "a second opinion" }, "itest-alice");
+    expect(again).toMatchObject({ id: t.id, description: "the creator's account of it" });
+    // an undescribed row reads null
+    expect((await svc.create({ title: "bare", project: P }, "itest-alice")).description).toBeNull();
+
+    // held by someone else: the board arm still reaches it, and the holder keeps the claim
+    expect((await svc.claim(t.id, "itest-holder")).ok).toBe(true);
+    const rewritten = await svc.update(t.id, "user", { description: "the owner's account of it" });
+    expect(rewritten.ok && rewritten.task).toMatchObject({ description: "the owner's account of it", claimed_by: "itest-holder", status: "in_progress" });
+    const cleared = await svc.update(t.id, "user", { description: null });
+    expect(cleared.ok && cleared.task.description).toBeNull();
+    // leaving the field out leaves the column alone
+    await svc.update(t.id, "user", { description: "kept" });
+    await svc.update(t.id, "user", { title: "described, renamed" });
+    expect((await svc.get(t.id))?.description).toBe("kept");
+
+    expect((await svc.update(t.id, "itest-holder", { status: "closed" })).ok).toBe(true);
+    expect(await svc.update(t.id, "user", { description: "after the fact" })).toMatchObject({ ok: false, reason: "closed" });
+    expect((await svc.get(t.id))?.description).toBe("kept");
+  });
+
   it("renew with a note lands on history; renew without one leaves history alone", async () => {
     const t = await svc.create({ title: "long job", project: P }, "itest-alice");
     expect((await svc.claim(t.id, "itest-holder")).ok).toBe(true);

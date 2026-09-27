@@ -148,11 +148,10 @@ export const CLIENT_API: readonly ClientRoute[] = [
 
   // ----- the agent surface -----
   route("*", "/mcp", "the MCP bridge: the tools an agent bearer's grants allow", { reach: ["agent"], principals: ["agent"] }),
-  route("POST", "/capture", "a note or a file into `Inbox/`", {
+  route("POST", "/capture", "a note or a file into `Inbox/`; `source: \"app\"` for an owner credential (T2-1)", {
     reach: ["agent", "owner"],
     principals: ["session", "local_owner", "owner_token", "agent"],
     idempotent: "key",
-    ticket: "T2-1",
   }),
 
   // ----- who you are, and your devices -----

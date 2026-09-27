@@ -296,6 +296,7 @@ export function scopeRequired(path: string): { message: string; expose: { reason
 // invariant 10 forbids (§5).
 
 import {
+  ACTION_KINDS,
   admitsAnyAction,
   effectiveActions,
   effectiveActionsDetailed,
@@ -308,6 +309,8 @@ import {
   type EffectiveActionEntry,
 } from "./actions.js";
 import { crewToolsFor } from "./manifest.js";
+import type { ActorGrantHistory, PermissionEntry, PermissionProvenance, PermissionResourceKind, PermissionRow } from "./actor.js";
+import type { ToolGroup, ToolMode } from "./connections.js";
 import { errorEnvelope, type ErrorCode } from "./errors.js";
 
 /**
@@ -857,6 +860,121 @@ export const RULED_TOOLS: ReadonlySet<string> = new Set([
   "propose_action",
 ]);
 
+// ===========================================================================
+// The permissions table's cells — where each ruled tool lands (T4-6)
+// ===========================================================================
+//
+// docs/ops/actors.md's *Tool or action → Row · column* table, as data, beside
+// the set it has to cover. Every name in `RULED_TOOLS` and every action kind
+// has exactly ONE placement here — an enumeration test holds this record to
+// that set and to the document's table — so a tool added later cannot be
+// missing from the permissions table by accident: it fails CI until someone
+// decides which cell it fills, or says why it fills none.
+//
+// A placement says WHERE a power is drawn and never WHETHER it is held. That
+// is `may()`'s answer, asked by `describePermissions` below for every tool,
+// so the table cannot say something the door does not do.
+
+/** A column of the table: Resource × Read × Write. */
+export type PermissionColumn = "read" | "write";
+
+/**
+ * What an admitted tool puts in its cell:
+ *
+ * - `areas` — one entry per knowledge area the scope holds (tier `index`:
+ *   *Titles only*; the bare vault: *The whole vault*).
+ * - `projects` — one entry per project slug the scope holds; every project
+ *   (`null`) is one `*` entry.
+ * - a verb — one fixed entry, `{ key, label }`.
+ */
+export type PermissionCellEntries = "areas" | "projects" | { readonly key: string; readonly label: string };
+
+export interface PermissionCell {
+  readonly resource: PermissionResourceKind;
+  readonly column: PermissionColumn;
+  readonly entries: PermissionCellEntries;
+}
+
+/** Where one ruled tool is drawn. */
+export type ToolPlacement =
+  /**
+   * One cell. `projectScoped`: the tool reaches rows by project membership
+   * decided per row (`access.ts`: "sees the tools and finds nothing"), so it
+   * is drawn only when the scope holds a project at all.
+   */
+  | { readonly placement: "cell"; readonly cell: PermissionCell; readonly projectScoped: boolean }
+  /** `propose_action`: no cell of its own — it gates the action kinds (`ACTION_PERMISSION_CELLS`). */
+  | { readonly placement: "actions" }
+  /** Deliberately in no cell, and why. */
+  | { readonly placement: "none"; readonly why: string };
+
+const verb = (key: string, label: string): PermissionCellEntries => Object.freeze({ key, label });
+const V = Object.freeze({
+  create: verb("create", "Create"),
+  update: verb("update", "Update"),
+  comment: verb("comment", "Comment"),
+  publish: verb("publish", "Publish"),
+  review: verb("review", "Review"),
+  capture: verb("capture", "Capture"),
+  named: verb("named", "Named queries"),
+  delegate: verb("delegate", "Delegate"),
+  dispatch: verb("dispatch", "Dispatch"),
+});
+const cell = (resource: PermissionResourceKind, column: PermissionColumn, entries: PermissionCellEntries): PermissionCell => Object.freeze({ resource, column, entries });
+const at = (resource: PermissionResourceKind, column: PermissionColumn, entries: PermissionCellEntries, projectScoped = false): ToolPlacement =>
+  Object.freeze({ placement: "cell" as const, cell: cell(resource, column, entries), projectScoped });
+const ASKING_IS_NOT_A_POWER = "asking is not a power: every credential may ask, and asking grants nothing (mayUseTool)";
+
+/**
+ * **Every ruled tool → its one placement**, in docs/ops/actors.md's order.
+ * Keys are exactly `RULED_TOOLS` (the enumeration test in
+ * `packages/core/test/permissions.test.ts`).
+ */
+export const TOOL_PERMISSION_CELLS: Readonly<Record<string, ToolPlacement>> = Object.freeze({
+  knowledge_search: at("knowledge", "read", "areas"),
+  knowledge_list: at("knowledge", "read", "areas"),
+  knowledge_read: at("knowledge", "read", "areas"),
+  knowledge_grep: at("knowledge", "read", "areas"),
+  // "writes never exceed reads": the same area entries. Only the assistant reaches it.
+  knowledge_write: at("knowledge", "write", "areas"),
+  tasks_list: at("work", "read", "projects", true),
+  tasks_thread: at("work", "read", "projects", true),
+  tasks_create: at("work", "write", V.create, true),
+  tasks_claim: at("work", "write", V.update, true),
+  tasks_renew: at("work", "write", V.update, true),
+  tasks_release: at("work", "write", V.update, true),
+  tasks_update: at("work", "write", V.update, true),
+  tasks_close: at("work", "write", V.update, true),
+  tasks_comment: at("work", "write", V.comment, true),
+  artifacts_get: at("artifacts", "read", "projects", true),
+  artifacts_list: at("artifacts", "read", "projects", true),
+  artifacts_publish: at("artifacts", "write", V.publish, true),
+  artifacts_comment: at("artifacts", "write", V.comment, true),
+  artifacts_resolve: at("artifacts", "write", V.comment, true),
+  artifacts_review: at("artifacts", "write", V.review, true),
+  capture: at("inbox", "write", V.capture),
+  queries_list: at("queries", "read", V.named),
+  queries_run: at("queries", "read", V.named),
+  agents_delegate: at("agents", "write", V.delegate),
+  propose_action: Object.freeze({ placement: "actions" as const }),
+  requests_create: Object.freeze({ placement: "none" as const, why: ASKING_IS_NOT_A_POWER }),
+  request_access: Object.freeze({ placement: "none" as const, why: ASKING_IS_NOT_A_POWER }),
+});
+
+/**
+ * **Every action kind → the cells it fills** when `propose_action` is
+ * admitted and the kind is not `deny`. An action runs as the owner's own
+ * click (apps/console/src/actions.ts), so the proposer's project scope is not
+ * its gate — autonomy is. `comment` fills two cells: its schema takes a
+ * `work_id` or an `artifact_id` (C53).
+ */
+export const ACTION_PERMISSION_CELLS: Readonly<Record<ActionKind, readonly PermissionCell[]>> = Object.freeze({
+  dispatch: Object.freeze([cell("work", "write", V.dispatch)]),
+  task_update: Object.freeze([cell("work", "write", V.update)]),
+  comment: Object.freeze([cell("work", "write", V.comment), cell("artifacts", "write", V.comment)]),
+  capture: Object.freeze([cell("inbox", "write", V.capture)]),
+});
+
 function mayUseTool(p: Principal, name: string): Decision {
   const { tier, queries } = p.scope;
   // The run's allowlist first: a tool outside it is refused whatever the
@@ -1145,6 +1263,238 @@ export function describeScope(p: Principal): ScopeView {
     extras,
     line: `${ROLE_LABEL[p.role]} · ${scope} · ${extras.join(", ")}`,
   };
+}
+
+// ===========================================================================
+// describePermissions() — Resource × Read × Write (T4-6)
+// ===========================================================================
+//
+// The permissions table (screen 7 §4.1, C58): one line per resource, an empty
+// cell is `—`, and **absence is the denial** — the legend says "anything not
+// listed is not granted", so every power a principal holds has a line, and
+// nothing without one is held. docs/ops/actors.md is the rule for every cell.
+//
+// **The table renders `may()`; it never repeats it.** A tool fills its cell
+// only when `may(principal, "act", {kind: "tool"})` admits it — which already
+// includes a crew's `uses`, the tier gates, the assistant-only tools and
+// `CREW_NEVER_TOOLS` — and an action verb only when `may` admits the action.
+// Pure, like `describeScope`: the CLI, the console and MetistryKit print the
+// rows this returns, in these words.
+
+/** The resource in words — the row label every surface prints. Key order IS the table's row order (a test pins it to `PERMISSION_RESOURCES`). */
+export const PERMISSION_RESOURCE_LABEL: Readonly<Record<PermissionResourceKind, string>> = Object.freeze({
+  knowledge: "Knowledge",
+  work: "Work",
+  artifacts: "Artifacts",
+  inbox: "Inbox",
+  queries: "Queries",
+  agents: "Agents",
+});
+
+/** Every project, said per resource. */
+const PROJECTS_ALL_LABEL: Readonly<Partial<Record<PermissionResourceKind, string>>> = Object.freeze({ work: "All tasks", artifacts: "All" });
+/** The bare vault — `areas: null`, or `/` in the list — said as what it is, never as a folder named `/` (C52). */
+export const WHOLE_VAULT_LABEL = "The whole vault";
+/** Tier `index`: the titles, anywhere, and no content. */
+export const TITLES_ONLY_LABEL = "Titles only";
+
+/** A connection this principal may reach, as far as the table needs it (F-3 owns the file). `tools` absent = none known yet. */
+export interface PermissionConnection {
+  readonly name: string;
+  readonly tools?: readonly { readonly name: string; readonly group: ToolGroup; readonly mode: ToolMode }[] | undefined;
+}
+
+export interface DescribePermissionsOptions {
+  /** Connections reachable through the proxy (§2.6), by name or with their tools. One row each, after the six. */
+  readonly connections?: readonly (string | PermissionConnection)[] | undefined;
+  /** Where lines came from that the scope does not say: approvals, and per-run routine grants. */
+  readonly history?: ActorGrantHistory | undefined;
+}
+
+/** Each cell's verb keys, in the order the mapping first names them — so a cell reads the same whichever way its verbs were reached. */
+const VERB_ORDER: ReadonlyMap<string, number> = (() => {
+  const seen: string[] = [];
+  const note = (c: PermissionCell) => {
+    if (typeof c.entries !== "object") return;
+    const k = `${c.resource}.${c.column}.${c.entries.key}`;
+    if (!seen.includes(k)) seen.push(k);
+  };
+  for (const pl of Object.values(TOOL_PERMISSION_CELLS)) if (pl.placement === "cell") note(pl.cell);
+  for (const kind of ACTION_KINDS) for (const c of ACTION_PERMISSION_CELLS[kind]) note(c);
+  return new Map(seen.map((k, i) => [k, i]));
+})();
+
+/**
+ * **One principal's permissions, as the table's rows.** Rows come in
+ * `PERMISSION_RESOURCE_LABEL` order, then one per connection by name; a row
+ * with both cells empty is left out, so `[]` means the principal holds
+ * nothing. Within a cell there is one entry per key, and where a verb is
+ * reachable two ways (`tasks_update` directly and the `task_update` action)
+ * it `asks` only if every way asks.
+ *
+ * `null` and `[]` render differently, on purpose: `areas: null` is *The
+ * whole vault* and an empty area list is no Knowledge entry; `projects:
+ * null` is *All tasks* and `projects: []` is no Work entry.
+ */
+export function describePermissions(p: Principal, opts: DescribePermissionsOptions = {}): PermissionRow[] {
+  const base: PermissionProvenance = { kind: "base", source: p.source };
+  const admits = (name: string): boolean => may(p, "act", { kind: "tool", name }).ok;
+  const { scope } = p;
+  const projectsHeld = scope.projects === null || scope.projects.length > 0;
+  const approved = new Map<string, number | null>();
+  for (const a of opts.history?.approved ?? []) if (!approved.has(a.area)) approved.set(a.area, a.proposalId);
+
+  const cells = new Map<string, PermissionEntry[]>();
+  const cellOf = (resource: PermissionResourceKind, column: PermissionColumn): PermissionEntry[] => {
+    const k = `${resource}.${column}`;
+    let c = cells.get(k);
+    if (!c) cells.set(k, (c = []));
+    return c;
+  };
+  /** Add, merging the same entry reached a second way (four read tools, a tool and an action): one entry per key, and it asks only if every way asks. */
+  const put = (resource: PermissionResourceKind, column: PermissionColumn, e: PermissionEntry): void => {
+    const c = cellOf(resource, column);
+    const same = c.find((x) => x.key === e.key && JSON.stringify(x.provenance) === JSON.stringify(e.provenance));
+    if (same) {
+      c[c.indexOf(same)] = { ...same, asks: same.asks && e.asks };
+      return;
+    }
+    c.push(e);
+  };
+
+  const areaEntry = (area: string, provenance: PermissionProvenance): PermissionEntry =>
+    area === VAULT_ROOT_AREA ? { key: VAULT_ROOT_AREA, label: WHOLE_VAULT_LABEL, asks: false, provenance } : { key: area, label: area, asks: false, provenance };
+  /** The areas the scope holds, as entries: the whole vault once, or each area verbatim. Approved areas carry their request. */
+  const areaEntries = (): PermissionEntry[] => {
+    if (scope.tier === "index") return [{ key: "titles", label: TITLES_ONLY_LABEL, asks: false, provenance: base }];
+    if (scope.tier !== "areas") return [];
+    if (scope.areas === null || scope.areas.includes(VAULT_ROOT_AREA)) {
+      return [areaEntry(VAULT_ROOT_AREA, approved.has(VAULT_ROOT_AREA) ? { kind: "approved", proposalId: approved.get(VAULT_ROOT_AREA)! } : base)];
+    }
+    return scope.areas.map((a) => areaEntry(a, approved.has(a) ? { kind: "approved", proposalId: approved.get(a)! } : base));
+  };
+  const projectEntries = (resource: PermissionResourceKind): PermissionEntry[] =>
+    scope.projects === null
+      ? [{ key: "*", label: PROJECTS_ALL_LABEL[resource] ?? "All", asks: false, provenance: base }]
+      : scope.projects.map((slug) => ({ key: slug, label: slug, asks: false, provenance: base }));
+
+  // ---- the ruled tools, each through may() ----------------------------------
+  for (const [name, pl] of Object.entries(TOOL_PERMISSION_CELLS)) {
+    if (pl.placement !== "cell") continue;
+    if (pl.projectScoped && !projectsHeld) continue;
+    if (!admits(name)) continue;
+    const { resource, column, entries } = pl.cell;
+    // Knowledge write needs a tier that reaches content at all (the write door's own first gate).
+    if (entries === "areas" && column === "write" && scope.tier !== "areas") continue;
+    const add =
+      entries === "areas"
+        ? // writes never exceed reads — and an area the write door refuses outright (`Me/`, the owner's own journal) is not drawn as writable
+          column === "write"
+          ? areaEntries().filter((e) => may(p, "write", { kind: "knowledge", door: "write", path: e.key === VAULT_ROOT_AREA ? "probe.md" : `${e.key}/probe.md` }).ok)
+          : areaEntries()
+        : entries === "projects"
+          ? projectEntries(resource)
+          : [{ key: entries.key, label: entries.label, asks: false, provenance: base }];
+    for (const e of add) put(resource, column, e);
+  }
+
+  // ---- the actions: propose_action admitted, the kind not `deny` --------------
+  if (admits("propose_action")) {
+    const table = effectiveActions(scope.autonomy);
+    for (const kind of ACTION_KINDS) {
+      if (!may(p, "act", { kind: "action", door: "propose_action", action: kind }).ok) continue;
+      for (const c of ACTION_PERMISSION_CELLS[kind]) {
+        if (typeof c.entries !== "object") continue;
+        put(c.resource, c.column, { key: c.entries.key, label: c.entries.label, asks: table[kind] === "propose", provenance: base });
+      }
+    }
+  }
+
+  // ---- per-run routine grants: Knowledge · Read, as if applied ------------------
+  //
+  // Not in the scope (which is the base): each (area, routine) is its own
+  // entry, drawn only when the read tools would admit this principal with
+  // that grant applied — for a crew, `knowledge` must be in its `uses` — and
+  // only where the base does not already cover it.
+  for (const r of opts.history?.routines ?? []) {
+    for (const area of r.areas) {
+      if (scope.tier === "areas" && (scope.areas === null || underAreas(area, scope.areas))) continue;
+      const widened: Principal = { ...p, scope: { ...scope, tier: "areas", areas: [...(scope.tier === "areas" ? (scope.areas ?? []) : []), area] } };
+      const readable = Object.entries(TOOL_PERMISSION_CELLS).some(
+        ([name, pl]) => pl.placement === "cell" && pl.cell.resource === "knowledge" && pl.cell.column === "read" && may(widened, "act", { kind: "tool", name }).ok,
+      );
+      if (readable) cellOf("knowledge", "read").push(areaEntry(area, { kind: "routine", routine: r.routine }));
+    }
+  }
+
+  const ordered = (resource: PermissionResourceKind, column: PermissionColumn): PermissionEntry[] => {
+    const c = cells.get(`${resource}.${column}`) ?? [];
+    const rank = (e: PermissionEntry) => VERB_ORDER.get(`${resource}.${column}.${e.key}`);
+    // verbs in the mapping's order; areas and projects as the scope lists them
+    return c.every((e) => rank(e) !== undefined) ? [...c].sort((a, b) => rank(a)! - rank(b)!) : c;
+  };
+
+  const rows: PermissionRow[] = [];
+  for (const kind of Object.keys(PERMISSION_RESOURCE_LABEL) as PermissionResourceKind[]) {
+    const read = ordered(kind, "read");
+    const write = ordered(kind, "write");
+    if (read.length === 0 && write.length === 0) continue;
+    rows.push({ resource: { kind }, label: PERMISSION_RESOURCE_LABEL[kind], read, write });
+  }
+
+  // ---- connections: one row per name, tools by group and mode -----------------
+  const connections = (opts.connections ?? []).map((c) => (typeof c === "string" ? { name: c } : c));
+  for (const c of [...connections].sort((a, b) => a.name.localeCompare(b.name))) {
+    const read: PermissionEntry[] = [];
+    const write: PermissionEntry[] = [];
+    for (const t of c.tools ?? []) {
+      if (t.mode === "off") continue;
+      (t.group === "reads" ? read : write).push({ key: t.name, label: t.name, asks: t.mode === "ask", provenance: base });
+    }
+    if (read.length === 0 && write.length === 0) continue;
+    rows.push({ resource: { kind: "connection", name: c.name }, label: c.name, read, write });
+  }
+  return rows;
+}
+
+// ---- the table, in words: what the CLI, the console and MetistryKit print ----------------
+//
+// The rows above are data; these are the ONE way a cell is said. The CLI
+// calls them; the PWA (a browser script, which cannot import core) and
+// MetistryKit (Swift) each carry a copy that a test holds to these on the
+// same recorded rows (apps/console/test/pwa-reads.test.ts,
+// apps/macos/tests/kit/permissions-table-tests.swift) — so the three surfaces
+// print one table, not three.
+
+/** An empty cell. Absence is the denial, and it is drawn, never left blank. */
+export const PERMISSION_EMPTY_CELL = "—";
+/** The owner answers first: an action at `propose`, a connection tool at `ask`. */
+export const PERMISSION_ASKS_MARK = "⏱";
+/** A connection's row (§2.6). */
+export const PERMISSION_CONNECTION_MARK = "⧉";
+
+/** Where an entry came from, in words — nothing for `base`: a marker on everything is a marker on nothing. */
+export function permissionProvenanceText(p: PermissionProvenance): string | null {
+  if (p.kind === "approved") return p.proposalId === null ? "approved in Needs You" : `approved in Needs You · #${p.proposalId}`;
+  if (p.kind === "routine") return `during ${p.routine} only`;
+  return null;
+}
+
+/** One entry: its label, ⏱ when the owner answers first, and its provenance when it is not the base. */
+export function permissionEntryText(e: PermissionEntry): string {
+  const why = permissionProvenanceText(e.provenance);
+  return `${e.label}${e.asks ? ` ${PERMISSION_ASKS_MARK}` : ""}${why === null ? "" : ` (${why})`}`;
+}
+
+/** One cell: its entries, comma-separated, or the dash. */
+export function permissionCellText(entries: readonly PermissionEntry[]): string {
+  return entries.length === 0 ? PERMISSION_EMPTY_CELL : entries.map(permissionEntryText).join(", ");
+}
+
+/** One row as the table prints it: resource · read · write. A connection is marked ⧉. */
+export function permissionRowText(row: PermissionRow): readonly [string, string, string] {
+  const label = row.resource.kind === "connection" ? `${row.label} ${PERMISSION_CONNECTION_MARK}` : row.label;
+  return [label, permissionCellText(row.read), permissionCellText(row.write)];
 }
 
 /** The §3.2 envelope: the uniform `error` every surface already answers with, plus the two additive fields. */

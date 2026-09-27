@@ -364,6 +364,50 @@ import Testing
     #expect(model.isEmpty(waiting: 3), "the queue answered: nothing waits, whatever the count last said")
 }
 
+// 0.14.1, as Activity's: the window's minimum is SwiftUI's answer for the
+// whole window at no size at all, and Needs You answered with its content's
+// at no width — 878–1,078 pt — so opening it grew the window, or slid the
+// sidebar's rows off the top of one that could not grow. Its minimum is the
+// shell's, in every panel.
+@MainActor
+@Test func openingNeedsYouNeverRaisesTheWindowsMinimum() async throws {
+    let (model, _, session) = try await fixtureModel()
+    defer { withExtendedLifetime(session) {} }
+    func screen(_ model: NeedsYouModel, waiting: Int?) -> some View {
+        NeedsYouView(model: model, waiting: waiting, assistantName: "Aide", onGoToToday: {}) { row in
+            ScrollView { NeedsYouRequestSummary(row, assistantName: "Aide", consoleURL: nil, now: fixtureNow, calendar: model.calendar) }
+        }
+    }
+
+    let window = try await ShellProbe.acrossTheSwitch { screen(model, waiting: 4) }
+    #expect(window.after.minimum.height <= max(window.before.minimum.height, 460), "opening Needs You raised the window's minimum to \(window.after.minimum)")
+    #expect(window.after.frame == window.before.frame, "the window moved: \(window.before.frame) → \(window.after.frame)")
+
+    // every panel: waiting, the list, one request, several, failed, nothing waiting
+    let down = QueueConsole(rows: [])
+    down.down = "connect ECONNREFUSED 127.0.0.1:1"
+    let (failed, failedSession) = queueModel(down)
+    let (empty, emptySession) = queueModel(QueueConsole(rows: []))
+    let (waiting, waitingSession) = queueModel(QueueConsole(rows: try recordedRows()))
+    defer { withExtendedLifetime([failedSession, emptySession, waitingSession]) {} }
+    await failed.refresh()
+    await empty.refresh()
+    let probe = MinimumProbe()
+    var sizes = [
+        ("waiting", probe.minimum(of: screen(waiting, waiting: 4))),
+        ("list", probe.minimum(of: screen(model, waiting: 4))),
+        ("failed", probe.minimum(of: screen(failed, waiting: 4))),
+        ("nothing waiting", probe.minimum(of: screen(empty, waiting: 0))),
+    ]
+    model.selection = [model.rows[0].id]
+    sizes.append(("one", probe.minimum(of: screen(model, waiting: 4))))
+    model.selection = [model.rows[0].id, model.rows[1].id]
+    sizes.append(("several", probe.minimum(of: screen(model, waiting: 4))))
+    for (name, size) in sizes {
+        #expect(size.height <= 460, "\(name) asks for \(size) at the least")
+    }
+}
+
 // MARK: - Glyphs and words
 
 @Test func aTypesGlyphIsNeverOneAComponentAlreadyGivesAMeaning() {

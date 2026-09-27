@@ -542,12 +542,22 @@ public final class ChatModel {
     /// run one after another — the screen's clock, the background watch and a
     /// send's own read never interleave — and a tick that waited still asks
     /// only what is due by then.
+    ///
+    /// Each tick is chained behind the one before it and awaits it ONCE. It
+    /// must never loop until `tickInFlight` is nil: awaiting a task that has
+    /// already finished returns without suspending, so a waiter that is resumed
+    /// before the tick's own caller has cleared the field spins on the main
+    /// actor and that caller never runs again (0.14.1: the watch started by a
+    /// tick, a send and its watch, or any two overlapping ticks hung the window).
     public func tick() async {
-        while let other = tickInFlight { await other.value }
-        let task = Task { @MainActor in await self.runTick() }
+        let previous = tickInFlight
+        let task = Task { @MainActor in
+            await previous?.value
+            await self.runTick()
+        }
         tickInFlight = task
         await task.value
-        tickInFlight = nil
+        if tickInFlight == task { tickInFlight = nil }
     }
 
     private func runTick() async {

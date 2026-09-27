@@ -390,6 +390,40 @@ import Testing
     }
 }
 
+// 0.14.1: the window's minimum is SwiftUI's answer for the whole window at no
+// size at all, and Activity answered with its chips a character per line —
+// 1,117 pt — so opening it grew the window, or slid the sidebar's rows off the
+// top of one that could not grow. Its minimum is the shell's, in every panel.
+@MainActor
+@Test func openingActivityNeverRaisesTheWindowsMinimum() async throws {
+    var rows = [feedRow("2026-09-27T03:19:00.000Z", "turn", ref: "runs:1", turnID: "t1")]
+    rows += (0..<30).map { feedRow(String(format: "2026-09-27T03:19:%02d.000Z", $0 + 1), "tool", subject: "knowledge_search", ref: "runs:\($0 + 2)", turnID: "t1", ok: $0 % 9 != 4) }
+    rows += (0..<40).map { feedRow(String(format: "2026-09-2%dT%02d:10:00.000Z", 6 + $0 % 2, $0 % 24), "capture", subject: "A thought long enough to wrap its row", ref: "inbox:\($0 + 1)") }
+    let (model, session) = activityModel(ActivityConsole(rows: rows))
+    defer { withExtendedLifetime(session) {} }
+    await model.load()
+    #expect(model.rows.count == rows.count)
+
+    let window = try await ShellProbe.acrossTheSwitch { ActivityView(model: model, assistantName: "Aide", tick: .seconds(3600)) }
+    #expect(window.after.minimum.height <= max(window.before.minimum.height, 460), "opening Activity raised the window's minimum to \(window.after.minimum)")
+    #expect(window.after.frame == window.before.frame, "the window moved: \(window.before.frame) → \(window.after.frame)")
+
+    // every other panel too: waiting, failed, empty
+    let probe = MinimumProbe()
+    let down = ActivityConsole(rows: [])
+    down.down = "connect ECONNREFUSED 127.0.0.1:1"
+    let (failed, failedSession) = activityModel(down)
+    let (empty, emptySession) = activityModel(ActivityConsole(rows: []))
+    let (waiting, waitingSession) = activityModel(ActivityConsole(rows: []))
+    defer { withExtendedLifetime([failedSession, emptySession, waitingSession]) {} }
+    await failed.load()
+    await empty.load()
+    for (name, panelModel) in [("list", model), ("failed", failed), ("empty", empty), ("waiting", waiting)] {
+        let size = probe.minimum(of: ActivityView(model: panelModel, assistantName: "Aide", tick: .seconds(3600)))
+        #expect(size.height <= 460, "\(name): \(panelModel.panel) asks for \(size) at the least")
+    }
+}
+
 @Test func noStringInTheScreensSourceSaysAssistantOrNamesOne() throws {
     let file = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         .appendingPathComponent("sources/kit/activity-view.swift")
@@ -456,6 +490,77 @@ private func run(id: Int, kind: String, toolCallsTotal: Int = 0, meta: [String: 
 private extension ActivityModel {
     /// The `since` the scripted console was last asked with.
     func feedCallsSince(_ console: ActivityConsole) -> String? { console.feedCalls.last?["since"] }
+}
+
+/// The shell's shape, as small as it gets: a sidebar and a detail that is the
+/// screen under test once `shown` is set. Shared with Needs You's and Today's
+/// tests, as `MinimumProbe` is.
+@MainActor
+@Observable
+final class ShellProbe {
+    var shown = false
+}
+
+struct ShellProbeView<Screen: View>: View {
+    let probe: ShellProbe
+    @ViewBuilder let screen: () -> Screen
+
+    var body: some View {
+        NavigationSplitView {
+            List { ForEach(["Today", "Chat", "Activity", "Knowledge", "Agents", "Scheduled"], id: \.self) { Text(verbatim: $0) } }
+        } detail: {
+            if probe.shown {
+                screen()
+            } else {
+                Text(verbatim: "Elsewhere")
+            }
+        }
+    }
+}
+
+extension ShellProbe {
+    /// Mounts `screen` in the shell's shape in a 980 × 640 window, switches to
+    /// it, and answers the window's frame and minimum on either side.
+    static func acrossTheSwitch<Screen: View>(@ViewBuilder to screen: @escaping () -> Screen) async throws -> (before: (frame: NSRect, minimum: NSSize), after: (frame: NSRect, minimum: NSSize)) {
+        let probe = ShellProbe()
+        let host = NSHostingView(rootView: ShellProbeView(probe: probe, screen: screen))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 980, height: 640), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        window.orderFront(nil)
+        defer { window.orderOut(nil); window.close() }
+        try await Task.sleep(for: .milliseconds(300))
+        let before = (frame: window.frame, minimum: window.contentMinSize)
+        probe.shown = true
+        try await Task.sleep(for: .milliseconds(500))
+        return (before, (frame: window.frame, minimum: window.contentMinSize))
+    }
+}
+
+/// What a view answers when asked for no size at all — the question a
+/// hosting view asks to set its window's minimum.
+@MainActor
+final class MinimumProbe {
+    private final class Box: @unchecked Sendable { var size: CGSize? }
+
+    private struct Measure: Layout {
+        let box: Box
+        func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+            if box.size == nil { box.size = subviews.first?.sizeThatFits(.zero) }
+            return subviews.first?.sizeThatFits(proposal) ?? .zero
+        }
+        func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+            subviews.first?.place(at: bounds.origin, proposal: ProposedViewSize(bounds.size))
+        }
+    }
+
+    func minimum<V: View>(of view: V) -> CGSize {
+        let box = Box()
+        let host = NSHostingView(rootView: Measure(box: box) { view })
+        host.frame = NSRect(x: 0, y: 0, width: 900, height: 700)
+        host.layoutSubtreeIfNeeded()
+        return box.size ?? .zero
+    }
 }
 
 /// A console that serves the rows it holds the way `activity_feed` does —

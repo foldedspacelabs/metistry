@@ -40,7 +40,8 @@ const REQUIRED = [
   "claude_usage_daily",
   "aws_costs_daily",
   "aws_costs_recent",
-  "projects_overview",
+  "areas_overview",
+  "projects_overview", // C82: kept loaded as an alias for one release — the PWA calls `areas_overview` now
   "projects_rollup",
   "runs_summary",
   "activity_feed",
@@ -372,7 +373,7 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
     }
   });
 
-  it("projects_overview rolls up per area like the brief; runs_summary counts the last 24h", async () => {
+  it("areas_overview rolls up per area like the brief; projects_overview is the same rows under its old name (C82); runs_summary counts the last 24h", async () => {
     const tag = `seedq-${Date.now()}`;
     await pool.query(
       `INSERT INTO work (title, area, kind, status, external_ref) VALUES
@@ -388,7 +389,7 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
          ($1, 'turn', true, 0.25), ($1, 'capture', true, NULL)`,
       [tag],
     );
-    const { rows } = await store.run("projects_overview", { limit: 100 });
+    const { rows } = await store.run("areas_overview", { limit: 100 });
     const area = rows.find((r) => r.area === tag)!;
     expect(area).toBeDefined();
     expect(Number(area.open)).toBe(3);
@@ -396,6 +397,10 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
     expect(Number(area.blocked)).toBe(1);
     expect(Number(area.closed_7d)).toBe(1);
     expect(area.latest).toHaveLength(3);
+
+    // C82: the old name is an alias for one release — same SQL, same rows.
+    const aliasRows = (await store.run("projects_overview", { limit: 100 })).rows;
+    expect(aliasRows).toEqual(rows);
 
     const s = (await store.run("runs_summary", { hours: 1 })).rows[0]!;
     expect(Number(s.runs_ok)).toBeGreaterThanOrEqual(1);

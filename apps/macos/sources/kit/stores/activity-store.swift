@@ -6,7 +6,7 @@ import Foundation
 
 public protocol ActivityStore: Sendable {
     /// route: GET /api/q/activity_feed
-    func activityFeed(hours: Int?, limit: Int?, kind: String?, project: String?, agent: String?, since: String?) async -> Result<ActivityFeed, ConsoleError>
+    func activityFeed(hours: Int?, limit: Int?, kind: String?, project: String?, agent: String?, since: String?, turnID: String?) async -> Result<ActivityFeed, ConsoleError>
     /// route: GET /api/runs/:id
     func run(_ id: Int) async -> Result<RunDetailReply, ConsoleError>
     /// route: GET /api/runs/export
@@ -15,7 +15,13 @@ public protocol ActivityStore: Sendable {
 
 public extension ActivityStore {
     func activityFeed(hours: Int? = nil) async -> Result<ActivityFeed, ConsoleError> {
-        await activityFeed(hours: hours, limit: nil, kind: nil, project: nil, agent: nil, since: nil)
+        await activityFeed(hours: hours, limit: nil, kind: nil, project: nil, agent: nil, since: nil, turnID: nil)
+    }
+
+    /// The calls one reply made (`turn_id`), inside the window — a turn's
+    /// disclosure, whole, however many of them fell past the list's `limit`.
+    func activityTurn(_ turnID: String, hours: Int?) async -> Result<ActivityFeed, ConsoleError> {
+        await activityFeed(hours: hours, limit: nil, kind: nil, project: nil, agent: nil, since: nil, turnID: turnID)
     }
 }
 
@@ -51,8 +57,8 @@ public struct RunExport: Sendable, Equatable {
 }
 
 extension ConsoleStores: ActivityStore {
-    public func activityFeed(hours: Int?, limit: Int?, kind: String?, project: String?, agent: String?, since: String?) async -> Result<ActivityFeed, ConsoleError> {
-        await api.activityFeed(hours: hours, limit: limit, kind: kind, project: project, agent: agent, since: since)
+    public func activityFeed(hours: Int?, limit: Int?, kind: String?, project: String?, agent: String?, since: String?, turnID: String?) async -> Result<ActivityFeed, ConsoleError> {
+        await api.activityFeed(hours: hours, limit: limit, kind: kind, project: project, agent: agent, since: since, turnID: turnID)
     }
 
     public func run(_ id: Int) async -> Result<RunDetailReply, ConsoleError> { await api.run(id) }

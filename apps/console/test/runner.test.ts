@@ -7,7 +7,7 @@
 import { describe, expect, it } from "vitest";
 import { errorSignature, parseCompute } from "@foldedspacelabs/metistry-core";
 import type { PlanVault } from "@metistry-apps/routines";
-import { routineCapabilities, scheduleToSeconds, tick, type RoutineFailure, type RunnerRequests, type ScheduledCollector, type SecretFailure } from "../src/runner.js";
+import { budgetStopKey, routineCapabilities, scheduleToSeconds, tick, type BudgetStop, type ComponentStop, type RoutineFailure, type RunnerRequests, type ScheduledCollector, type SecretFailure } from "../src/runner.js";
 import { FakeRuns as Fake } from "./runs-fake.js";
 
 const NOW = new Date("2026-09-15T12:00:00Z");
@@ -235,14 +235,22 @@ function recordingRequests() {
   const calls = {
     failed: [] as RoutineFailure[],
     succeeded: [] as string[],
+    collected: [] as string[],
+    stopped: [] as ComponentStop[],
     secrets: [] as SecretFailure[][],
     restoredChecks: [] as ((name: string) => boolean)[],
+    budgets: [] as BudgetStop[][],
+    resumed: [] as (() => Promise<string | null | undefined>)[],
   };
   const requests: RunnerRequests = {
     routineFailed: async (f) => void calls.failed.push(f),
     routineSucceeded: async (c) => void calls.succeeded.push(c),
+    collectorSucceeded: async (c) => void calls.collected.push(c),
+    componentStopped: async (s) => void calls.stopped.push(s),
     secretsFailed: async (fs) => void calls.secrets.push([...fs]),
     secretsRestored: async (isSet) => void calls.restoredChecks.push(isSet),
+    budgetStopped: async (bs) => void calls.budgets.push([...bs]),
+    budgetResumed: async (current) => void calls.resumed.push(current),
   };
   return { calls, requests };
 }
@@ -266,13 +274,15 @@ describe("events become requests (C96, T2-9) — what the tick raises", () => {
     ]);
   });
 
-  it("a routine that runs clears its reports; a collector's run asks nothing", async () => {
+  it("a routine that runs clears its reports; a collector that runs clears its stop (T3-12)", async () => {
     const db = new Fake(NOW);
     const { calls, requests } = recordingRequests();
     const brief = collector({ name: "morning-brief", dir: "routines/morning-brief", runKind: "routine_run" });
     await tick(db, [brief, collector()], {}, opts({ requests }));
     expect(calls.succeeded).toEqual(["morning-brief"]);
+    expect(calls.collected).toEqual(["t"]);
     expect(calls.failed).toEqual([]);
+    expect(calls.stopped).toEqual([]);
   });
 
   it("a missing secret is ONE failure naming every component it stopped; a URL, the compute file and a budget are not secrets", async () => {
@@ -315,16 +325,131 @@ assignments:
 
   it("a queue that cannot be written never costs the tick: the run, its row and the alert still happen", async () => {
     const db = new Fake(NOW);
+    const gone = async (): Promise<void> => { throw new Error("proposals is gone"); };
     const broken: RunnerRequests = {
-      routineFailed: async () => { throw new Error("proposals is gone"); },
-      routineSucceeded: async () => { throw new Error("proposals is gone"); },
-      secretsFailed: async () => { throw new Error("proposals is gone"); },
-      secretsRestored: async () => { throw new Error("proposals is gone"); },
+      routineFailed: gone,
+      routineSucceeded: gone,
+      collectorSucceeded: gone,
+      componentStopped: gone,
+      secretsFailed: gone,
+      secretsRestored: gone,
+      budgetStopped: gone,
+      budgetResumed: gone,
     };
     const failing = collector({ name: "morning-brief", dir: "routines/morning-brief", runKind: "routine_run", run: async () => { throw new Error("x"); } });
     await expect(tick(db, [failing], {}, opts({ requests: broken }))).resolves.toBeUndefined();
     expect(db.rowsFor("morning-brief")[0]).toMatchObject({ ok: false, error: "x" });
     expect(db.outbound).toHaveLength(1);
+  });
+});
+
+describe("three strikes and a Stop limit (C135, C133, T3-12) — what the tick raises", () => {
+  const FIVE = 5 * 60_000;
+  const later = (db: Fake, windows: number, over: Record<string, unknown> = {}) => {
+    db.now = new Date(NOW.getTime() + windows * FIVE);
+    return opts({ now: db.now, ...over });
+  };
+
+  it("stops at the THIRD failure by default — no METISTRY_RUNNER_MAX_STREAK set", async () => {
+    const db = new Fake(NOW);
+    let ran = 0;
+    const c = collector({ run: async () => { ran++; throw new Error("401 Bad credentials"); } });
+    for (let w = 0; w < 5; w++) await tick(db, [c], {}, later(db, w));
+    expect(ran).toBe(3); // the fourth and fifth windows cost nothing
+    expect(db.rowsFor("t", "skipped_streak")).toHaveLength(2);
+    expect(db.rowsFor("t", "skipped_streak")[0]?.error).toContain("METISTRY_RUNNER_MAX_STREAK = 3");
+  });
+
+  it("the failure that stops a component raises its stop, with the streak and the run", async () => {
+    const db = new Fake(NOW);
+    const { calls, requests } = recordingRequests();
+    let n = 0;
+    const c = collector({ name: "github-state", dir: "collectors/github-state", run: async () => { throw new Error(`401 Bad credentials (request ${++n})`); } });
+    await tick(db, [c], {}, later(db, 0, { requests }));
+    await tick(db, [c], {}, later(db, 1, { requests }));
+    expect(calls.stopped).toEqual([]); // two strikes: not yet
+    await tick(db, [c], {}, later(db, 2, { requests }));
+    const runs = db.rowsFor("github-state").filter((r) => r.kind === "collector_run");
+    expect(calls.stopped).toEqual([
+      {
+        component: "github-state",
+        title: "github-state",
+        runKind: "collector_run",
+        failures: 3,
+        limit: 3,
+        since: runs[0]!.ts,
+        error: "401 Bad credentials (request 3)",
+        signature: errorSignature("github-state", "401 Bad credentials (request 3)"),
+        runId: runs[2]!.id,
+        stoppedAt: db.now,
+      },
+    ]);
+  });
+
+  it("a skipped window names the same stop again — the seam's dedupe makes it one request — and a routine's stop follows its failure report", async () => {
+    const db = new Fake(NOW);
+    const { calls, requests } = recordingRequests();
+    const brief = collector({ name: "morning-brief", dir: "routines/morning-brief", runKind: "routine_run", run: async () => { throw new Error("vault bridge 503"); } });
+    for (let w = 0; w < 4; w++) await tick(db, [brief], {}, later(db, w, { requests }));
+    expect(calls.failed).toHaveLength(3); // each failure is handed on; the seam keeps one per signature
+    expect(calls.stopped.map((s) => [s.failures, s.runId === null])).toEqual([
+      [3, false], // the third failure
+      [3, true], // the first skipped window: no run to name
+    ]);
+    const signature = errorSignature("morning-brief", "vault bridge 503");
+    expect(new Set(calls.stopped.map((s) => s.signature))).toEqual(new Set([signature]));
+    expect(calls.failed[2]?.signature).toBe(signature); // the same key the report was raised under
+  });
+
+  it("a Stop limit is ONE budget stop per window naming every routine it paused; a collector and a model-free routine are not paused", async () => {
+    const db = new Fake(NOW);
+    const { calls, requests } = recordingRequests();
+    const compute = parseCompute(`
+providers:
+  openrouter:
+    kind: openai-compatible
+    base_url: https://openrouter.ai/api/v1
+    locality: off_machine
+    auth: { secret: METISTRY_OPENROUTER_API_KEY }
+    data_policy: { allow: [Projects], deny_sources: [comms], max_brief_bytes: 65536 }
+assignments:
+  default: { model: openrouter/anthropic/claude-sonnet-5 }
+`);
+    const engine = { env: [], reachable: [], engine: true };
+    const ran: string[] = [];
+    const routine = (name: string, requires = engine) =>
+      collector({ name, dir: `routines/${name}`, runKind: "routine_run", requires, run: async () => (ran.push(name), 1) });
+    const hit = { scope: "instance", window: "monthly" as const, field: "budgets.instance.monthly_usd", limit: 60, spent: 61.2, fraction: 1.02, over: true, action: "stop" as const };
+    let over = true;
+    const budget = async () => (over ? { name: hit.field, why: "the instance monthly budget is spent", fix: "raise it", hit } : null);
+    const all = [routine("knowledge-fold"), routine("morning-brief"), routine("update-check", NOTHING), collector({ run: async () => (ran.push("t"), 1) })];
+    await tick(db, all, {}, opts({ requests, budget, compute: () => compute, env: { METISTRY_OPENROUTER_API_KEY: "sk-or-x" } }));
+
+    expect(ran.sort()).toEqual(["t", "update-check"]); // paused: only the two that would enqueue a turn
+    const key = budgetStopKey(hit, NOW);
+    expect(key).toBe("instance:monthly:2026-09@60");
+    expect(calls.budgets).toEqual([[{ key, hit, paused: ["knowledge-fold", "morning-brief"], at: NOW }]]);
+    expect(calls.secrets).toEqual([]); // a budget is not a secret
+
+    // every tick asks, while one waits, which budget stops routines NOW
+    expect(await calls.resumed[0]!()).toBe(key);
+    over = false;
+    expect(await calls.resumed[0]!()).toBeNull();
+    // a budget miss that cannot say which budget clears nothing
+    const vague = recordingRequests();
+    await tick(new Fake(NOW), [], {}, opts({ requests: vague.requests, budget: async () => ({ name: "budgets", why: "spend cannot be read", fix: "load it" }) }));
+    expect(await vague.calls.resumed[0]!()).toBeUndefined();
+    // no budget option at all: nothing to ask
+    const none = recordingRequests();
+    await tick(new Fake(NOW), [], {}, opts({ requests: none.requests }));
+    expect(none.calls.resumed).toEqual([]);
+  });
+
+  it("a raised limit spent again is a new key; the next calendar window is too", () => {
+    const hit = { scope: "provider:openrouter", window: "daily" as const, field: "budgets.providers.openrouter.daily_usd", limit: 5, spent: 5, fraction: 1, over: true, action: "stop" as const };
+    expect(budgetStopKey(hit, NOW)).toBe("provider:openrouter:daily:2026-09-15@5");
+    expect(budgetStopKey({ ...hit, limit: 8 }, NOW)).toBe("provider:openrouter:daily:2026-09-15@8");
+    expect(budgetStopKey(hit, new Date("2026-09-16T00:00:01Z"))).toBe("provider:openrouter:daily:2026-09-16@5");
   });
 });
 

@@ -216,6 +216,85 @@ func aWorkingTurnIsWatchedOffScreenUntilItsMessageSaysDone() async throws {
     #expect(model.activities[7]?.state == .finished)
 }
 
+// 0.14.1 hung the window at 100 % CPU: the screen's clock was the first to
+// see a working turn, its tick started the background watch, and the watch's
+// first tick found the screen's tick still recorded as in flight — already
+// finished, so `await` on it returned without ever suspending, and the loop
+// that waited for it never let the main actor run the line that cleared it.
+// Each test below is that shape. A regression spins forever, so none of them
+// could fail on its own: the watchdog turns a main actor that has not answered
+// for 20 s (other suites share it, and hold it for a second or two at most)
+// into a crash naming the test, rather than a run that never ends.
+
+@MainActor
+@Test(.timeLimit(.minutes(1)))
+func aWorkingTurnFirstSeenByTheScreensClockIsWatchedWithoutSpinning() async throws {
+    let console = ChatConsole(messages: [ChatConsole.message(7, .yours, "what changed?", at: 0, status: "processing")])
+    let session = ConsoleSession(transport: console, management: nil)
+    let model = ChatModel(session: session, now: { Date() })
+    model.announce = { _ in }
+    defer { withExtendedLifetime(session) {} }
+    let watchdog = MainActorWatchdog("a working turn first seen by the screen's clock")
+    defer { watchdog.stop() }
+
+    // ChatView's clock: the first read, and the turn is working
+    await model.tick()
+    #expect(model.isWorking, "the sidebar's dot")
+    // the watch runs beside the screen's clock, and a tick asks only what is
+    // due: a working turn costs a read set per in-flight interval, however
+    // many ticks there are
+    let asked = console.paths.count
+    let started = ContinuousClock.now
+    for _ in 0..<6 {
+        await model.tick()
+        try await Task.sleep(for: .milliseconds(500))
+    }
+    let seconds = Double((ContinuousClock.now - started).components.seconds) + 1
+    let reads = Array(console.paths[asked...])
+    let routes = Set(reads.map { String($0.split(separator: "?").first ?? "") }).count
+    #expect(reads.count <= (routes + 1) * (Int(seconds / ChatModel.inFlightInterval) + 1), "\(reads.count) reads in \(seconds) s: \(reads)")
+    // walking away: the watch alone carries the turn to done
+    console.setStatus(7, "done")
+    try await waitUntil(seconds: 10) { !model.isWorking }
+    #expect(model.activities[7]?.state == .finished)
+}
+
+@MainActor
+@Test(.timeLimit(.minutes(1)))
+func aSendsOwnTickAndTheWatchItStartsTakeTurnsWithoutSpinning() async throws {
+    let console = ChatConsole(messages: [])
+    let session = ConsoleSession(transport: console, management: nil)
+    let model = ChatModel(session: session, now: { Date() })
+    model.announce = { _ in }
+    defer { withExtendedLifetime(session) {} }
+    let watchdog = MainActorWatchdog("a send and the watch it starts")
+    defer { watchdog.stop() }
+    await model.refresh()
+
+    // the send starts the watch, then ticks itself: two ticks, one after the other
+    model.draft = "what changed?"
+    await model.send()
+    #expect(model.isWorking)
+    try await Task.sleep(for: .seconds(2))
+    console.setStatus(console.lastInboundID, "done")
+    try await waitUntil(seconds: 10) { !model.isWorking }
+}
+
+@MainActor
+@Test(.timeLimit(.minutes(1)))
+func ticksThatPileUpRunOneAfterAnotherAndAllReturn() async throws {
+    let console = ChatConsole(messages: [ChatConsole.message(7, .yours, "what changed?", at: 0, status: "processing")])
+    let (model, session) = chatModel(console)
+    defer { withExtendedLifetime(session) {} }
+    let watchdog = MainActorWatchdog("ticks that pile up")
+    defer { watchdog.stop() }
+    await model.refresh()
+    // three callers at once — the screen's clock, a send's read, the watch
+    let ticks = (0..<3).map { _ in Task { await model.tick() } }
+    for tick in ticks { await tick.value }
+    #expect(model.isWorking)
+}
+
 @MainActor
 @Test func aLiveRunStartedBindsTheTurnWithoutWaitingForTheFeed() async throws {
     let console = ChatConsole(messages: [ChatConsole.message(7, .yours, "what changed?", at: 0, status: "processing")])
@@ -692,6 +771,39 @@ private func waitUntil(seconds: Double = 2, _ condition: @escaping () -> Bool) a
         try await Task.sleep(for: .milliseconds(10))
     }
     Issue.record("timed out waiting")
+}
+
+/// Watches the main actor from a thread of its own. A main actor that has not
+/// answered for `limit` is spinning, and the process stops there, naming the
+/// test, rather than hanging the run — nothing on the main actor could report it.
+private final class MainActorWatchdog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var lastBeat = ContinuousClock.now
+    private var running = true
+
+    @MainActor
+    init(_ what: String, limit: Duration = .seconds(20)) {
+        Task { @MainActor [weak self] in
+            while let self, self.isRunning {
+                self.beat()
+                try? await Task.sleep(for: .milliseconds(20))
+            }
+        }
+        let thread = Thread { [weak self] in
+            while let self, self.isRunning {
+                let stalled = self.sinceLastBeat
+                if stalled > limit { fatalError("the main actor stalled for \(stalled) — \(what)") }
+                Thread.sleep(forTimeInterval: 0.05)
+            }
+        }
+        thread.start()
+    }
+
+    func stop() { lock.withLock { running = false } }
+
+    private var isRunning: Bool { lock.withLock { running } }
+    private var sinceLastBeat: Duration { lock.withLock { ContinuousClock.now - lastBeat } }
+    private func beat() { lock.withLock { lastBeat = ContinuousClock.now } }
 }
 
 /// A console with a thread it holds: it answers the reads Chat makes, accepts

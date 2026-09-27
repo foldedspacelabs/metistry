@@ -31,13 +31,41 @@
 // it: the third ask is refused with "ask the owner directly", because a
 // mechanism that can be worked indefinitely is not a control. All of it is
 // enforced HERE, at the tool — never by telling a model to be considerate.
+//
+// **The ceiling leaves a record** (C42, T2-2). That third refusal writes no
+// proposal — it is not a question the owner has not answered — so without
+// more it was invisible: an agent that had hit the ceiling looked exactly
+// like one that had stopped asking. Every ceiling refusal now writes one
+// `runs` row, kind `access_ceiling` (`ACCESS_CEILING_KIND`), naming the agent,
+// the area and the declines behind it, and the console's Agents panel lists
+// them beside the grant they are about (`GET /api/agents`'
+// `access_ceilings`). It is the record, never a second queue: the owner acts
+// on it on Agents, where the whole credential is in view.
 
-import { AREA_PREFIX_REFUSAL, describeScope, redactSecrets, SKIP_FEEDBACK, validAgentAreaGrant, type ErrorCode, type ScopeView } from "@foldedspacelabs/metistry-core";
+import { AREA_PREFIX_REFUSAL, describeScope, finishRun, redactSecrets, SKIP_FEEDBACK, startRun, validAgentAreaGrant, type ErrorCode, type ScopeView } from "@foldedspacelabs/metistry-core";
 import { principalOf } from "./principal.js";
 import type { AgentPrincipal, Db, Tier } from "./types.js";
 
 /** The `proposals.kind` this writes. Recognised by the console's triage branch and by nothing else. */
 export const ACCESS_REQUEST_KIND = "access_request";
+
+/**
+ * The `runs.kind` a ceiling refusal writes (C42). Read by the console's
+ * Agents panel (`accessCeilings` in apps/console/src/agents.ts) — imported
+ * there, never respelled. No migration: `runs.kind` is free text.
+ */
+export const ACCESS_CEILING_KIND = "access_ceiling";
+
+/** What an `access_ceiling` row's `meta` carries — everything the Agents panel shows, read off the record rather than the caller. */
+export interface AccessCeilingMeta {
+  agent: string;
+  area: string;
+  /** The consecutive declines that closed it — `MAX_DECLINES` or more. */
+  declines: number;
+  /** The newest decline: the row the owner answered, and when. */
+  last_proposal: number;
+  last_declined_at: string | null;
+}
 
 export interface AccessRequestInput {
   area: string;
@@ -131,6 +159,7 @@ export async function requestAccess(db: Db, principal: AgentPrincipal, input: Ac
   const declines = await consecutiveDeclines(db, principal.id, area);
   const last = declines[0];
   if (declines.length >= MAX_DECLINES && last) {
+    await recordCeiling(db, principal.id, { agent: principal.id, area, declines: declines.length, last_proposal: last.id, last_declined_at: last.decidedAt });
     return {
       ok: false,
       code: "rate_limited",
@@ -176,6 +205,25 @@ export async function requestAccess(db: Db, principal: AgentPrincipal, input: Ac
   const again = await pendingFor(db, principal.id, area);
   if (again === null) throw new Error("access request insert returned no row and no pending match"); // unreachable unless the row was decided mid-flight
   return { ok: true, id: again, area, replayed: true, escalated: false };
+}
+
+/**
+ * One `access_ceiling` row per ceiling refusal (C42): complete on insert —
+ * `ok: false`, because the ask was refused, with the refusal's own reason as
+ * the error. `component` is the agent, as it is on the `tool` row the same
+ * call writes, so an agent's history reads as one list.
+ *
+ * Best-effort, like the reconciler's `auditRefusal`: the refusal is the
+ * control and it stands whether or not its record lands. A record that could
+ * not be written must not turn a refusal into a 500 the agent retries.
+ */
+async function recordCeiling(db: Db, agentId: string, meta: AccessCeilingMeta): Promise<void> {
+  try {
+    const id = await startRun(db, { component: agentId, kind: ACCESS_CEILING_KIND, tool: "request_access", meta: { ...meta } });
+    await finishRun(db, id, { ok: false, error: "declined_twice" });
+  } catch (err) {
+    console.error("mcp-brain: could not record the access ceiling:", err instanceof Error ? err.message : err);
+  }
 }
 
 async function pendingFor(db: Db, agentId: string, area: string): Promise<number | null> {

@@ -14,7 +14,7 @@ import pg from "pg";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { TasksService } from "@foldedspacelabs/metistry-tasks";
-import { ACCESS_REQUEST_KIND, createBrainServer, EAGER_TOOL_NAMES, type AgentPrincipal } from "../src/index.js";
+import { ACCESS_CEILING_KIND, ACCESS_REQUEST_KIND, createBrainServer, EAGER_TOOL_NAMES, type AgentPrincipal } from "../src/index.js";
 import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
 
 const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url));
@@ -63,6 +63,7 @@ describe.skipIf(!hasDb)("request_access on /mcp (real db, real MCP client)", () 
   beforeAll(async () => {
     pool = await testDb(pg.Pool);
     await pool.query(`DELETE FROM proposals WHERE source_agent = ANY($1::text[])`, [[AGENT, OTHER, ASSISTANT]]);
+    await pool.query(`DELETE FROM runs WHERE kind = $1 AND component = ANY($2::text[])`, [ACCESS_CEILING_KIND, [AGENT, OTHER, ASSISTANT]]);
 
     const authenticate = async (req: { headers: Record<string, unknown> }) => {
       const m = /^Bearer\s+(\S+)$/.exec(String(req.headers.authorization ?? ""));
@@ -85,6 +86,7 @@ describe.skipIf(!hasDb)("request_access on /mcp (real db, real MCP client)", () 
   afterAll(async () => {
     await new Promise<void>((r) => server.close(() => r()));
     await pool.query(`DELETE FROM proposals WHERE source_agent = ANY($1::text[])`, [[AGENT, OTHER, ASSISTANT]]);
+    await pool.query(`DELETE FROM runs WHERE kind = $1 AND component = ANY($2::text[])`, [ACCESS_CEILING_KIND, [AGENT, OTHER, ASSISTANT]]);
     await pool.end();
   });
 
@@ -189,6 +191,21 @@ describe.skipIf(!hasDb)("request_access on /mcp (real db, real MCP client)", () 
       expect(r.body.error.message).toContain("requests_create"); // the way left is words, to the owner
     }
     expect((await rowsFor(AGENT)).filter((x) => x.payload.area === AREA)).toHaveLength(before);
+
+    // C42: no proposal, but not no trace — one `access_ceiling` run per
+    // refusal, naming the area and the declines behind it, which is what the
+    // console's Agents panel lists. Complete on insert, and a refusal (ok false).
+    const lastDecline = (await rowsFor(AGENT)).filter((x) => x.payload.area === AREA && x.decision === "deny").at(-1)!;
+    const ceiling = await pool.query(
+      `SELECT component, tool, ok, error, finished_at IS NOT NULL AS finished, meta FROM runs WHERE kind = $1 AND component = $2 ORDER BY id`,
+      [ACCESS_CEILING_KIND, AGENT],
+    );
+    expect(ceiling.rows).toHaveLength(2);
+    for (const row of ceiling.rows) {
+      expect(row).toMatchObject({ component: AGENT, tool: "request_access", ok: false, error: "declined_twice", finished: true });
+      expect(row.meta).toMatchObject({ agent: AGENT, area: AREA, declines: 2, last_proposal: Number(lastDecline.id) });
+      expect(typeof row.meta.last_declined_at).toBe("string");
+    }
   });
 
   it("an `escalate` with nothing declined behind it is an ordinary ask — the flag comes from the record, never the caller", async () => {
@@ -262,5 +279,14 @@ describe.skipIf(!hasDb)("request_access on /mcp (real db, real MCP client)", () 
     expect(rows.some((r) => r.ok === true)).toBe(true);
     expect(rows.some((r) => r.ok === false)).toBe(true);
     expect(rows.some((r) => r.area === "..")).toBe(true); // the crafted ask is on the record as a crafted ask
+  });
+
+  it("only the ceiling writes an `access_ceiling` run: a first ask, a replay, a decline answered and an escalation write none", async () => {
+    // OTHER asked once (the dedupe case) and ASSISTANT once; neither is at the ceiling
+    const { rows } = await pool.query(`SELECT count(*)::int AS n FROM runs WHERE kind = $1 AND component = ANY($2::text[])`, [ACCESS_CEILING_KIND, [OTHER, ASSISTANT]]);
+    expect(rows[0]!.n).toBe(0);
+    // …and every one of AGENT's is about the one area it was declined twice
+    const agentRows = await pool.query(`SELECT DISTINCT meta->>'area' AS area FROM runs WHERE kind = $1 AND component = $2`, [ACCESS_CEILING_KIND, AGENT]);
+    expect(agentRows.rows).toEqual([{ area: AREA }]);
   });
 });

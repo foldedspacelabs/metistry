@@ -234,6 +234,25 @@ export function isConflictFile(path: string): boolean {
   return CONFLICT_RE.test(path.replace(/^.*\//, ""));
 }
 
+/**
+ * The note a conflict copy is a copy OF — the same folder, the name with the
+ * sync tool's marker taken out: `Note (conflict 2026-09-06 12-00-00).md` and
+ * `Note.sync-conflict-20260906-120000-ABCDEFG.md` are both copies of
+ * `Note.md`. Null for a path that is not a conflict copy, or whose name is
+ * nothing but the marker. Whether that note still exists is the caller's to
+ * check: a copy can outlive its original.
+ */
+export function conflictOriginal(path: string): string | null {
+  if (!isConflictFile(path)) return null;
+  const slash = path.lastIndexOf("/");
+  const dir = path.slice(0, slash + 1);
+  const name = path
+    .slice(slash + 1)
+    .replace(/\.sync-conflict-[^.]*/i, "")
+    .replace(/\s*\((sync-)?conflict\b[^)]*\)/i, "");
+  return name === "" || name.startsWith(".") ? null : `${dir}${name}`;
+}
+
 export function isMarkdown(path: string): boolean {
   return /\.md$/i.test(path);
 }

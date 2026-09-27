@@ -1,8 +1,8 @@
 // The reconcile loop (§4.13): walk the vault (the instance root), hash CONTENT (sync churns
 // mtime, so mtime decides nothing), upsert `knowledge_files` +
-// `knowledge_links`, detect renames by hash, flag Obsidian/Syncthing
-// conflict files exactly once as a `proposals` report, and record one
-// `runs` row per cycle. Also the sweep that commits edits made outside the
+// `knowledge_links`, detect renames by hash, raise each Obsidian/Syncthing
+// conflict copy once as a Needs You `review` holding both versions (C96,
+// T2-9), and record one `runs` row per cycle. Also the sweep that commits edits made outside the
 // bridge (Obsidian on any device) as the `user` principal — the reconciler
 // is the sole committer, so nobody else can (PoC-12).
 //
@@ -21,13 +21,14 @@
 
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { finishRun, nextRecurrence, startRun, taskToday, type RunExecutor, type TaskDateOptions } from "@foldedspacelabs/metistry-core";
+import { finishRun, lastMirror, nextRecurrence, raiseMirror, resolveAtSource, RESOLVED_AT_SOURCE, startRun, taskToday, type RequestSource, type RunExecutor, type TaskDateOptions } from "@foldedspacelabs/metistry-core";
 import type { Committer } from "./committer.js";
 import { EMPTY_SUMMARY, type Embeddings, type EmbedSummary } from "./embeddings.js";
 import type { Vault } from "./vault.js";
 import {
   areaForPath,
   basenameTitle,
+  conflictOriginal,
   emptyNoteMeta,
   extractLinks,
   extractTaskRefs,
@@ -137,6 +138,26 @@ interface Scanned {
   refs: NoteTaskRef[];
   /** kept only for `Inbox/` files, where the triage row wants a one-line note */
   bytes?: Buffer;
+}
+
+// ---- knowledge conflicts (C96, T2-9) -------------------------------------------
+
+/** What raises a conflict's request — this process, never an agent. */
+export const CONFLICT_AGENT = "reconciler";
+/** A knowledge conflict is a `review` (§2.12): both versions, Keep Mine · Take the Other (the `resolve_conflict` door, T2-10) · Decline. */
+export const CONFLICT_KIND = "review";
+/** `payload.event` on a conflict's request — what raised it, for a client drawing the body and for T2-10 finding it. */
+export const CONFLICT_EVENT = "knowledge_conflict";
+/** The mirror's source system: the subject lives in this instance's own vault. */
+export const CONFLICT_SOURCE_KIND = "metistry";
+/** `source.external_ref` is this prefix and the copy's vault path — the same key the pre-T2-9 report used, so the two can be told apart and never doubled. */
+export const CONFLICT_REF_PREFIX = "conflict:";
+/** Each side's text in the request is capped; the files are the record and the door reads them again. */
+export const CONFLICT_TEXT_MAX = 32_000; // limit: fixed — a request is read on a phone; a note longer than this is compared in Obsidian, and `truncated` says so
+
+/** The subject a conflict copy's request mirrors. */
+export function conflictSource(path: string): RequestSource {
+  return { kind: CONFLICT_SOURCE_KIND, external_ref: `${CONFLICT_REF_PREFIX}${path}` };
 }
 
 export class Indexer {
@@ -309,28 +330,8 @@ export class Indexer {
       }
     }
 
-    // conflict files: one proposal per file, ever (idempotency key = the path)
-    let conflicts = 0;
-    let conflictsNew = 0;
-    for (const s of scanned.values()) {
-      if (!s.conflict) continue;
-      conflicts++;
-      const payload = {
-        title: `Conflict file: ${s.path.replace(/^.*\//, "")}`,
-        body: `A sync conflict copy exists at ${s.path}. It is not indexed and not served to agents. Merge what matters into the original note, then delete this file.`,
-        kind: "conflict_file",
-        refs: [s.path],
-        idempotency_key: `conflict:${s.path}`,
-        provenance: { component: "reconciler", run_id: runId, sha256: s.hash },
-      };
-      const ins = await this.db.query(
-        `INSERT INTO proposals (kind, source_agent, trust, payload) VALUES ('report', 'reconciler', 'internal', $1::jsonb)
-         ON CONFLICT (source_agent, (payload->>'idempotency_key')) WHERE kind = 'report' AND payload->>'idempotency_key' IS NOT NULL DO NOTHING
-         RETURNING id`,
-        [JSON.stringify(payload)],
-      );
-      if (ins.rows[0]) conflictsNew++;
-    }
+    // conflict files: one `review` per copy, with both versions (C96, T2-9)
+    const { conflicts, conflictsNew } = await this.raiseConflicts(scanned, runId);
 
     // the vault inbox: a file that appears or changes under
     // `Inbox/` without a capture call is triage material too
@@ -386,6 +387,94 @@ export class Indexer {
       ...(embeddings ? { embeddings } : {}),
       duration_ms: Date.now() - started,
     };
+  }
+
+  /**
+   * Knowledge conflicts become requests (C96, T2-9). Every conflict copy the
+   * walk found is ONE `review` in Needs You holding both versions — the note
+   * as it stands (*Mine*) and the copy (*the Other*) — with the hashes the
+   * Resolve a conflict door (T2-10) checks before it writes either.
+   *
+   * The request is a MIRROR of the copy (`conflictSource`): it waits while
+   * the file is there and clears itself (`resolved_at_source`) the cycle the
+   * file is gone — merged in Obsidian, deleted, or settled at the door.
+   * Raised once: a copy whose request is waiting or was answered is not
+   * raised again, so a Decline stays a Decline for as long as the copy
+   * stays; only a copy that went away and came back is asked about anew.
+   */
+  private async raiseConflicts(scanned: Map<string, Scanned>, runId: number): Promise<{ conflicts: number; conflictsNew: number }> {
+    let conflicts = 0;
+    let conflictsNew = 0;
+    const present = new Set<string>();
+    for (const s of scanned.values()) {
+      if (!s.conflict) continue;
+      conflicts++;
+      present.add(s.path);
+      const source = conflictSource(s.path);
+      const last = await lastMirror(this.db, source);
+      if (last !== null && last.decision !== RESOLVED_AT_SOURCE) continue;
+      // Before T2-9 a copy was raised as a `report` keyed `conflict:<path>`,
+      // once ever. The owner has been told about that copy; a review beside
+      // the report would be the same fact twice in one queue.
+      const legacy = await this.db.query(
+        `SELECT 1 FROM proposals WHERE kind = 'report' AND source_agent = $1 AND payload->>'idempotency_key' = $2 LIMIT 1`,
+        [CONFLICT_AGENT, `${CONFLICT_REF_PREFIX}${s.path}`],
+      );
+      if (legacy.rows.length > 0) continue;
+      const raised = await raiseMirror(this.db, {
+        kind: CONFLICT_KIND,
+        source_agent: CONFLICT_AGENT,
+        trust: "internal",
+        payload: await this.conflictPayload(s.path, scanned, runId),
+        source,
+      });
+      if (raised.raised) conflictsNew++;
+    }
+    // A copy that is gone takes its request with it.
+    const { rows } = await this.db.query(
+      `SELECT DISTINCT source->>'external_ref' AS ref FROM proposals
+       WHERE decision = 'pending' AND source->>'kind' = $1 AND left(source->>'external_ref', $2) = $3`,
+      [CONFLICT_SOURCE_KIND, CONFLICT_REF_PREFIX.length, CONFLICT_REF_PREFIX],
+    );
+    for (const r of rows) {
+      const ref = String(r.ref);
+      if (!present.has(ref.slice(CONFLICT_REF_PREFIX.length))) await resolveAtSource(this.db, { kind: CONFLICT_SOURCE_KIND, external_ref: ref });
+    }
+    return { conflicts, conflictsNew };
+  }
+
+  /** The review's payload: both versions as a before-and-after body, and the paths and hashes the door will check. */
+  private async conflictPayload(path: string, scanned: Map<string, Scanned>, runId: number): Promise<Record<string, unknown>> {
+    const original = conflictOriginal(path);
+    const other = await this.readSide(path);
+    const mine = original !== null && scanned.has(original) ? await this.readSide(original) : null;
+    const name = (original ?? path).replace(/^.*\//, "");
+    return {
+      title: `Sync conflict: ${name}`,
+      event: CONFLICT_EVENT,
+      body: {
+        kind: "before_after",
+        heading: original ?? path,
+        before: { label: "Mine", path: original, ...(mine ?? { text: "", sha256: null, truncated: false }) },
+        after: { label: "The Other", path, ...(other ?? { text: "", sha256: null, truncated: false }) },
+      },
+      conflict: { path, original, sha256: other?.sha256 ?? null, original_sha256: mine?.sha256 ?? null },
+      refs: original !== null ? [path, original] : [path],
+      provenance: { component: CONFLICT_AGENT, run_id: runId },
+    };
+  }
+
+  /** One side of a conflict, capped for the request — the file itself is the record. Null when it vanished since the walk. */
+  private async readSide(path: string): Promise<{ text: string; sha256: string; truncated: boolean } | null> {
+    let bytes: Buffer;
+    try {
+      bytes = await readFile(join(this.vault.root, path));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException)?.code === "ENOENT") return null;
+      throw err;
+    }
+    const text = bytes.toString("utf8");
+    return { text: text.slice(0, CONFLICT_TEXT_MAX), sha256: sha256(bytes), truncated: text.length > CONFLICT_TEXT_MAX };
   }
 
   /**

@@ -31,6 +31,7 @@ import { rollbackApp, updateApp, type UpdateAppResult } from "./mac-app.js";
 import { labelFor, loadPlistTemplates, loadSupervisedTemplates, type PlistTemplate } from "./launchd.js";
 import { jobFilesFor, legacyEnvReport, RETIRE_LEGACY_ENV_COMMAND } from "./legacy-env.js";
 import { SUPERVISOR_SERVICE } from "./supervisor.js";
+import { restartSupervisorChild } from "./service-control.js";
 import { instanceLockPath, readLock, serializeLock, type LockFile, type LockSource } from "./lock.js";
 import { ensureOwnerBridgeToken, OWNER_BRIDGE_TOKEN, OWNER_BRIDGE_TOKEN_FIX, OwnerTokenMintFailed, protectedRel, writeProtected, type EnsureOwnerTokenResult, type ProtectedWrite } from "./protected-write.js";
 import { listMigrationFiles, MIGRATION_LOCK_KEY, openMigrationSession, runMigrations, type MigrateResult, type MigrationSession } from "./migrate.js";
@@ -95,8 +96,8 @@ export interface UpdateOptions {
   relaunch?: boolean | undefined;
   /** test seam: the wait between polls after `--relaunch` quits the app */
   appSleep?: ((ms: number) => Promise<void>) | undefined;
-  /** test seam: how long, and how often, the lock write waits for a reconciler this run restarted (default: METISTRY_RECONCILER_READY_TIMEOUT_MS, every 500 ms) */
-  reconcilerReady?: { timeoutMs?: number | undefined; intervalMs?: number | undefined } | undefined;
+  /** test seam: how long, and how often, the lock write waits for a reconciler this run restarted (default: METISTRY_RECONCILER_READY_TIMEOUT_MS, from every 500 ms backing off to every 5 s) */
+  reconcilerReady?: { timeoutMs?: number | undefined; intervalMs?: number | undefined; maxIntervalMs?: number | undefined } | undefined;
   /** default true; `false` is a test seam — see `up`'s `cliShim` (cli-shim.ts). `update` writes the same shim `up` does: it shares nothing else with `up`, but a checkout that only ever runs `update` still gets one. */
   cliShim?: boolean | undefined;
   /**
@@ -620,9 +621,29 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
       // and one that 401s on its own lock write. Nothing else is restarted for
       // it: the reconciler is the only service that holds this bearer.
       if (!r.dryRun && ownerBearer.changed) {
-        const label = labelFor(deployment.shape === "launchd" ? SUPERVISOR_SERVICE : "reconciler", labelSuffix);
-        if (!restarted.includes(label)) {
-          const k = await r.run("launchctl", ["kickstart", "-k", `gui/${uid}/${label}`], { tolerateFailure: true, comment: `so it reads the ${ownerBearer.minted ? "freshly minted" : "newly written"} ${OWNER_BRIDGE_TOKEN}` });
+        const why = `so it reads the ${ownerBearer.minted ? "freshly minted" : "newly written"} ${OWNER_BRIDGE_TOKEN}`;
+        const label = labelFor("reconciler", labelSuffix);
+        const supervisor = labelFor(SUPERVISOR_SERVICE, labelSuffix);
+        if (deployment.shape === "launchd") {
+          // Under this shape the reconciler is a CHILD of the supervisor, and
+          // kickstarting the supervisor's agent for it took the console, the
+          // assistant, both bridges and Postgres down mid-update (the owner's
+          // 0.14.1 run). The one child that reads the bearer is restarted
+          // over the control socket — `metistry restart reconciler`'s path;
+          // it sources `.env` itself at start. A supervisor this run already
+          // kickstarted for changed code restarted it with everything else.
+          if (!restarted.includes(supervisor) && !restarted.includes(label)) {
+            const res = await restartSupervisorChild(r, { runDir, env, name: "reconciler" });
+            if (res.ok) {
+              restarted.push(label);
+              r.note(`reconciler: restarted through the supervisor (${res.detail}) ${why} — nothing else was touched`);
+            } else {
+              kickFailed.push({ label, code: 1 });
+              r.note(`reconciler: not restarted (${res.detail}), so it has not read ${OWNER_BRIDGE_TOKEN} yet — \`metistry restart reconciler\``);
+            }
+          }
+        } else if (!restarted.includes(label)) {
+          const k = await r.run("launchctl", ["kickstart", "-k", `gui/${uid}/${label}`], { tolerateFailure: true, comment: why });
           if (k.code === 0) restarted.push(label);
           else {
             kickFailed.push({ label, code: k.code });
@@ -657,13 +678,23 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
     } else {
       // A reconciler this run restarted (itself, or the supervisor it is a
       // child of) is not listening the moment `kickstart` returns; the lock
-      // write waits for it to answer rather than racing its start.
+      // write waits for it to answer rather than racing its start. One that
+      // never answers defers the lock rather than failing the update: the
+      // product has moved and the jobs are restarted, and a write that could
+      // only fail would also skip the templates, secrets and shim below.
       const reconcilerJobs = [labelFor(SUPERVISOR_SERVICE, labelSuffix), labelFor("reconciler", labelSuffix)];
-      if (!r.dryRun && env.METISTRY_RECONCILER_URL && restarted.some((l) => reconcilerJobs.includes(l))) {
-        await waitForReconciler(r, { url: env.METISTRY_RECONCILER_URL, fetchFn, timeoutMs: opts.reconcilerReady?.timeoutMs ?? RECONCILER_READY_TIMEOUT_MS, intervalMs: opts.reconcilerReady?.intervalMs ?? RECONCILER_READY_POLL_MS });
+      const ready =
+        !r.dryRun && env.METISTRY_RECONCILER_URL && restarted.some((l) => reconcilerJobs.includes(l))
+          ? await waitForReconciler(r, { url: env.METISTRY_RECONCILER_URL, fetchFn, timeoutMs: opts.reconcilerReady?.timeoutMs ?? RECONCILER_READY_TIMEOUT_MS, intervalMs: opts.reconcilerReady?.intervalMs ?? RECONCILER_READY_POLL_MS, maxIntervalMs: opts.reconcilerReady?.maxIntervalMs ?? RECONCILER_READY_MAX_POLL_MS })
+          : true;
+      if (!ready) {
+        const rel = protectedRel(instanceDir.instanceDir ?? env.METISTRY_INSTANCE_DIR, "lock");
+        r.note(`${rel} NOT written — the reconciler it goes through did not answer; ${prior ? `it still pins ${prior.product.version}` : "there is none yet"} while this install runs ${releaseVersion}`);
+        deferred.push({ what: rel, why: `not moved to ${releaseVersion} — the reconciler did not answer at ${hostLocal(env.METISTRY_RECONCILER_URL!)} after its restart (\`metistry logs reconciler\` says why)`, fix: ["metistry update"] });
+      } else {
+        const delivery = await writeLock(r, lock, { env, platform, uid, fetchFn });
+        r.note(delivery.detail);
       }
-      const delivery = await writeLock(r, lock, { env, platform, uid, fetchFn });
-      r.note(delivery.detail);
     }
 
     // A template a release adds (Templates/Brief.md in 0.14) reached only a
@@ -878,10 +909,17 @@ export async function childClosingDoctor(
 
 // ---- waiting for a restarted reconciler --------------------------------------------------
 
-/** How long the lock write waits for a reconciler this run just restarted to answer again. A slow machine raises METISTRY_RECONCILER_READY_TIMEOUT_MS. */
-export const RECONCILER_READY_TIMEOUT_MS = intEnv("METISTRY_RECONCILER_READY_TIMEOUT_MS", 60_000);
-/** How often it asks. */
+/**
+ * How long the lock write waits for a reconciler this run just restarted to
+ * answer again. 60 s was not enough for the owner's 0.14.1 run — a confined
+ * reconciler whose supervisor also brought Postgres back up — so it is three
+ * minutes now; a slow machine raises METISTRY_RECONCILER_READY_TIMEOUT_MS.
+ */
+export const RECONCILER_READY_TIMEOUT_MS = intEnv("METISTRY_RECONCILER_READY_TIMEOUT_MS", 180_000);
+/** How often it asks at first… */
 export const RECONCILER_READY_POLL_MS = 500; // limit: fixed — a poll interval, not a policy
+/** …doubling each time up to this, so three minutes is ~40 requests rather than 360. */
+export const RECONCILER_READY_MAX_POLL_MS = 5_000; // limit: fixed — a poll interval, not a policy
 
 /**
  * `launchctl kickstart -k` returns once the job has been restarted, not once
@@ -890,25 +928,29 @@ export const RECONCILER_READY_POLL_MS = 500; // limit: fixed — a poll interval
  * that followed the kickstart raced that start (rehearsed 0.12.0 → 0.14.x:
  * "reconciler bridge … did not answer (fetch failed)"), so it waits here until
  * the bridge answers anything at all — a 401 included: the write that follows
- * reports its own refusal. True when it answered; false after the timeout, and
- * the write then fails with its usual remediation.
+ * reports its own refusal. It asks every `intervalMs` at first, doubling up to
+ * `maxIntervalMs`. True when it answered; false after the timeout, and the
+ * caller then defers the lock write rather than trying a call that can only
+ * fail.
  */
-export async function waitForReconciler(r: StepRunner, o: { url: string; fetchFn: typeof fetch; timeoutMs: number; intervalMs: number }): Promise<boolean> {
+export async function waitForReconciler(r: StepRunner, o: { url: string; fetchFn: typeof fetch; timeoutMs: number; intervalMs: number; maxIntervalMs?: number | undefined }): Promise<boolean> {
   const base = hostLocal(o.url);
   const until = Date.now() + o.timeoutMs;
   let tries = 0;
+  let wait = o.intervalMs;
   for (;;) {
     tries++;
     try {
-      await o.fetchFn(`${base}/check`, { signal: AbortSignal.timeout(Math.max(o.intervalMs, 1000)) });
+      await o.fetchFn(`${base}/check`, { signal: AbortSignal.timeout(Math.max(wait, 1000)) });
       if (tries > 1) r.note(`reconciler: answering again at ${base} after its restart`);
       return true;
     } catch {
       if (Date.now() >= until) {
-        r.note(`reconciler: not answering at ${base} ${Math.round(o.timeoutMs / 1000)}s after its restart (METISTRY_RECONCILER_READY_TIMEOUT_MS) — writing anyway`);
+        r.note(`reconciler: not answering at ${base} ${Math.round(o.timeoutMs / 1000)}s after its restart (METISTRY_RECONCILER_READY_TIMEOUT_MS) — the lock write is deferred`);
         return false;
       }
-      await new Promise((res) => setTimeout(res, o.intervalMs));
+      await new Promise((res) => setTimeout(res, Math.min(wait, Math.max(0, until - Date.now()))));
+      wait = Math.min(wait * 2, o.maxIntervalMs ?? wait);
     }
   }
 }

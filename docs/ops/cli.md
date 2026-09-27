@@ -2392,7 +2392,15 @@ sure this install holds `METISTRY_BRIDGE_TOKEN_RECONCILER_USER`
 (`docs/ops/auth.md`): already in the environment → nothing; in this
 instance's Keychain item but not `.env` → copied into `.env`, nothing minted;
 in neither → minted into both. Either of the last two restarts the
-reconciler (the supervisor, under the launchd shape) so it reads it. When the
+reconciler — and only the reconciler, the one service that reads that
+bearer — so it reads it: a `launchctl kickstart -k` of its own job under
+the compose shape, and under the launchd shape `supervisor restart
+reconciler` over the control socket (`.metistry/state/run/supervisor.sock`,
+the path `metistry restart reconciler` takes), never a kickstart of the
+supervisor's agent, which took the console, the reconciler and both bridges
+down mid-update on the owner's 0.14.1 run. A supervisor this run already
+kickstarted because its children's code moved has restarted it already; one
+that is not answering is named, with `metistry restart reconciler`. When the
 Keychain refuses the write, **the restart still runs**: every job whose code
 changed is kickstarted on the tokens the install has, because leaving them on
 the release just left — against the schema just migrated — is the worse
@@ -2445,12 +2453,18 @@ D5) — so `update` writes it as a bridge call, never as a file:
 allowed to write it, and the commit lands on the reconciler's next flush.
 A bridge that is configured but not answering, or that refuses, fails
 the update (exit 1) with the reason — the lock is then simply not moved;
-rerun after fixing. When this run kickstarted the reconciler — or the supervisor it is a
+rerun after fixing. When this run restarted the reconciler — or the supervisor it is a
 child of — the write first waits for it to answer again (any HTTP answer on
-`/check`; up to `METISTRY_RECONCILER_READY_TIMEOUT_MS`, default 60 s), because
-`kickstart` returns before the restarted process listens: the lock POST that
-followed at once was refused with "did not answer (fetch failed)" in the
-0.12.0 → 0.14.x rehearsal. Only when **no** bridge is configured
+`/check`, asked every 0.5 s and backing off to every 5 s, for up to
+`METISTRY_RECONCILER_READY_TIMEOUT_MS`, default 180 s), because a restart
+returns before the restarted process listens: the lock POST that followed at
+once was refused with "did not answer (fetch failed)" in the 0.12.0 → 0.14.x
+rehearsal, and the 60 s this used to wait was not enough on the owner's
+0.14.1 run. A reconciler that still has not answered **defers** the lock
+rather than failing the update: the write is not tried, the templates,
+secrets and shim steps still run, and the run ends exit 1 under `✗ not done`
+with `metistry update` — which, rerun, finds the release already installed
+and writes the lock. Only when **no** bridge is configured
 (`METISTRY_RECONCILER_URL` unset) *and* `METISTRY_INSTANCE_DIR` is a
 local directory does `update` write the file directly — and even then it
 first checks that no reconciler launchd job is running, because a

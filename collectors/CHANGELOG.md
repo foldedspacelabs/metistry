@@ -1,5 +1,80 @@
 # @metistry-apps/collectors
 
+## 0.13.0
+
+### Minor Changes
+
+- c38dc4e: **Registries, not lists (§2.7).** Collectors, routines, targets, provider
+  templates and connection types load through `Registry` — built from
+  manifests, never from a list in code. Core adds `REGISTRY_KINDS` (the closed
+  list of kinds, and what an extension may do with each), `loadKind`,
+  `kindSources`, `extensionsDirFor`/`extensionsDirFromEnv`, `describeExtensions`,
+  and `unitCode`/`joinCode`: a collector's or routine's code is found in its own
+  package **by name**, so an extension may replace a product unit's manifest but
+  never supplies code, and one naming no product unit is skipped with the reason.
+  A new `provider` manifest kind (`type: provider` and a `provider:` block that is
+  `providerSchema` itself) turns `seed/compute-templates/<name>.yaml` into
+  `seed/compute-templates/<name>/manifest.yaml`; `COMPUTE_TEMPLATES` and
+  `parseTemplate` are gone — `computeTemplates()` is the registry, and
+  `readTemplate` takes `{ seedDir, instanceDir }`. `collectors` and `routines`
+  arrays are replaced by `loadCollectors`/`loadRoutines` and
+  `collectorCode`/`routineCode`; the console's `loadSchedules` takes loaded units,
+  `TargetRegistry.load(sources)` skips a bad manifest instead of throwing, and the
+  watchdog's `loadScheduled` reads the same registries. Every product manifest
+  now carries `schema: 1`. New verb: `metistry extensions list | add | remove`
+  (M15) — data-only, owner's hand, refused when its registry would skip the unit.
+  Doctor gains a `registries` row. **Upgrade note:** an owner's
+  `.metistry/targets/<name>/manifest.yaml` overlay without `schema: 1` is now
+  skipped (the product's target is in force) until the line is added.
+- a927e61: **The overlay: `scheduled.yaml` checked against the manifests, every field
+  resolved with its origin.** Routine and collector manifests gain
+  `display_name`, `config` (fields from a closed five kinds — text, path,
+  number, boolean, choice — each with a default of its kind), and, for a
+  collector, `needs_you` (its Needs You rules) and `presents_as`. Core's
+  `entryProblems` / `checkScheduled` check each entry against its manifest —
+  its section, its config keys and values, its raise rules — and the runner
+  HOLDS a component whose entry does not fit, rather than ignoring the change;
+  `resolveScheduled` resolves every routine and sync over manifest ⊕
+  `Me/profile.md` ⊕ `scheduled.yaml` into `Sourced` fields (*default* · *from
+  your profile* · *yours*) with the next run. The reconciler admits
+  `.metistry/scheduled.yaml` as the console's third protected door — and still
+  no other. Every collector moves to §2.5's closed shape (no shipped cron
+  string is left); Inbox Sort (`inbox-drain`, every 5 min) and Usage Rollup
+  (`claude-usage`, hourly) present as routines; GitHub declares
+  `review_requested` and `assigned`. Manifest errors now name a bad record key
+  by its rule rather than "Invalid key in record".
+
+### Patch Changes
+
+- Updated dependencies [42021b1]
+- Updated dependencies [152022a]
+- Updated dependencies [942372e]
+- Updated dependencies [95fb504]
+- Updated dependencies [df37d39]
+- Updated dependencies [3d2e818]
+- Updated dependencies [4451f77]
+- Updated dependencies [3a1ff8c]
+- Updated dependencies [6592f91]
+- Updated dependencies [bf33ee1]
+- Updated dependencies [bd29463]
+- Updated dependencies [9ac7949]
+- Updated dependencies [739564d]
+- Updated dependencies [3f9d719]
+- Updated dependencies [4cba65a]
+- Updated dependencies [be25ade]
+- Updated dependencies [c38dc4e]
+- Updated dependencies [a927e61]
+- Updated dependencies [06c854e]
+- Updated dependencies [ec21783]
+- Updated dependencies [a1f1113]
+- Updated dependencies [24a9ddb]
+- Updated dependencies [8c9dde6]
+- Updated dependencies [8217e01]
+- Updated dependencies [37f0ed2]
+- Updated dependencies [5e8f8d1]
+  - @foldedspacelabs/metistry-mcp-brain@0.13.0
+  - @foldedspacelabs/metistry-core@0.13.0
+
 ## 0.12.0
 
 ### Patch Changes

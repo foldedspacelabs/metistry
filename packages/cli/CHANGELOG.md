@@ -1,5 +1,245 @@
 # @foldedspacelabs/metistry-cli
 
+## 0.13.0
+
+### Minor Changes
+
+- 2275d5d: **The activity query (T1-3).** `activity_feed` returns `ok` on every row:
+  `false` where a run failed, `true` where it did not, and `null` where the
+  source cannot fail. Failure is now a column instead of English inside
+  `detail`. Routines are in the feed as a seventh group, `routine` (C43). A
+  `routine_run` row appears once it has settled, dated by when it did. Its
+  failure comes from `ok`/`error`, because a failed run carries no
+  `meta.outcome` (T1-4), and its skip or what it wrote comes from
+  `meta.outcome`. A `silent` tick is never a row. A new `turn_id` param returns
+  every call one reply made. A request closed because its source changed reads
+  *resolved at its source — nobody decided it here*, not *you decided
+  resolved_at_source*. The PWA's chips are eight (Routines added), and the glyph
+  takes `failed` from `ok`. MetistryKit's `ActivityFeedRow` decodes `ok`.
+- 152022a: **Actors, resolved (T4-6).** Core implements the actor model F-2 froze: `resolveActor` composes the assistant, a crew or an external agent from its registry row, manifest, `identity.yaml` and `compute.yaml`; `describePermissions()` (beside `describeScope`) draws the permissions table — Resource × Read × Write, provenance per entry — by asking `may()` for every tool, so a line is a door that says yes; and `TOOL_PERMISSION_CELLS` encodes docs/ops/actors.md's tool→cell table beside `RULED_TOOLS`, with an enumeration test that parses the document. A crew's `model:` is now a compute reference (`<provider>/<model-id>`) or `same_as_assistant`; the legacy `haiku | sonnet | opus` resolve through `assignments.crews` for one release, and the crew runner resolves all three with the rule the actor states (`resolveCrewAssignment`). The console carries `permissions` on every `GET /api/agents` row, serves `GET /api/agents/:id/definition` (definition, compute, limits — read-only), and `POST /api/agents` refuses `kind: internal` before anything is written. `metistry agents list` prints the table and `metistry agents define <id>` (M12) edits a crew's prompt, model, effort and description, validated the way the console reads the file and refused when stale (`--if-sha256`). MetistryKit decodes the rows into the shared `PermissionRow` wire types and prints them with `PermissionRowText` — the CLI, the console and the Mac print one table.
+- 8d71dfc: The board has five columns (T1-2). `board.yaml`'s `column` is `backlog`,
+  `assigned`, `in_progress`, `blocked` or `done`, and each label is the word its
+  value says: Assigned (no longer "Addressed to") and Blocked. **`needs_you` is
+  now `blocked`** and the `reported` column is gone. A Done card whose crew
+  reported back carries `reported: true` instead. Each card also gains
+  `thread_count`, the message count of its room, and `blocked_by`,
+  `blocked_by_task` and `blocked_by_task_open`, the human todo it waits on,
+  ported from `day_work`. `board_projects` counts the same five columns.
+  `board` is now `expose: route`, because `blocked_by_task` is a line of the
+  owner's own notes. The owner still reads it at `GET /api/q/board`. An agent's
+  `queries_run` and the capture owner token get the unknown-query answer.
+- b89bb73: **Doctor for the Services pane (T4-21).** `metistry doctor --json` rows gain
+  two additive fields for the Mac app's Services pane: an optional `action` —
+  `run_verb` (argv, never a shell string, and never `--yes`: the app's own
+  preview-then-confirm still stands between the button and the write),
+  `open_secrets`, or `open_system_settings` — on the rows where doctor can name
+  the fix without guessing (a bridge token, `metistry up`, `metistry update`,
+  `migrate-inbox`/`migrate-layout`/`migrate-scope`/`purge-shared`,
+  `set-keep-awake`); and `meta.uptime_sec` on every running-process row — a
+  launchd job (`ps -o etimes=` off the pid `launchctl print` already reported),
+  a compose container (parsed from `docker compose ps`'s own `Status` text), and
+  a supervisor child (from its already-tracked `uptimeMs`). Most rows still
+  carry neither: restart/stop/start/logs per `kind` remains the generic control
+  every row has, and `action` exists only for the fixes that menu cannot
+  express. `docs/ops/cli.md` documents the shape.
+- 3a1ff8c: **The assistant's identity is the owner's to change, and every protected write is on the record (T2-16).** `metistry identity set [--name] [--mention] [--mark] [--dry-run] [--json]` (M10) changes `.metistry/identity.yaml` through the protected write — the reconciler as `user`, with the owner bearer. Every field is validated before anything is read or sent (a one-line name of at most 40 characters with no `{{`/`}}`, an `@kebab` mention, a single-glyph mark), the edited text is read back before it goes, and a refusal writes nothing. Only the changed lines are rewritten, so comments and `voice: >` keep every byte. The mark is the file's existing `icon:` key; a new name brings its mention along when the mention was the one `init` derived. The reconciler now records every protected-path write, delete and rename it accepts as a finished `config_write` run (`meta {path, op, from?, caller, principal, message}`), whichever door made it, and `activity_feed` shows those rows in the `run` group with the principal as actor — so a rename appears in Activity. The fixture recorder seeds one, and `get-api-q-activity_feed.json` is re-recorded.
+- 6592f91: **Keep awake as a switch and two sub-switches, and the lid as the owner's administrator setting (T4-20).** `deployment.yaml`'s `keep_awake` also takes the object form `{ enabled, sleep_on_battery, sleep_lid_closed }` beside the four values, which all still load and mean what they meant; missing sub-switches take the safe answer (sleep on battery, sleep with the lid closed) and `enabled` is required. Core adds `keepAwakeSetting`/`keepAwakeValue`/`keepAwakeSettingOf`, the lid dialog's words (`LID_CLOSED_DIALOG_TITLE`, `LID_CLOSED_COMMAND`, `LID_CLOSED_UNDO`, `LID_CLOSED_WARNING`), `parseSleepDisabled` and `PMSET_READS`/`isPmsetRead`. `metistry deployment set-keep-awake` takes `--enabled`, `--sleep-on-battery` and `--sleep-lid-closed` (`true|false` only), each changing only what it names and writing the object form; choosing the lid prints the administrator command, how to undo it and the warning, stores the answer, and runs nothing. `metistry doctor`'s `keep-awake` row reads `pmset -g` and reports the lid half as in effect, not in effect or unknown (`meta.lid_closed`), and its early-cutoff repair keeps the lid answer. `metistry deployment --json` gains `keep_awake_setting`. A test sweeps every package, app and the Mac app for a `pmset` started with arguments that write.
+- ff95350: **The shared secrets scope is retired (plan §2.14, T4-3).** Every Keychain
+  item an instance reads or writes is filed under its own `instance_id`; the
+  per-user account third-party credentials were shared through
+  (`SECRET_SCOPES`, deleted with `scopeFor`, `scopeReason`, `DEFAULT_SCOPE`)
+  is only ever asked about by presence, and read from by the migration alone.
+  
+  `metistry secrets migrate-scope` copies each shared-scope original
+  (`METISTRY_*_API_KEY`, `METISTRY_DEVIN_API_KEY`, the AWS keys) into this
+  instance as an owner-named secret under its lowercase name
+  (`METISTRY_DEVIN_API_KEY` → `devin_api_key`) and records it in
+  `secrets.yaml`; an item the instance already holds wins; it rewrites
+  `auth.secret` and `requires.env` to `{{ secret.name }}` only into a file
+  that still validates with it; it is idempotent and deletes nothing.
+  `metistry update` runs it and can never be failed by it.
+  `metistry secrets purge-shared` removes an original only once every
+  instance this Mac knows has its copy, preview-then-confirm. Doctor gains a
+  `shared scope` row (presence only, never `failed`).
+  
+  `secrets sync --to env` fills a shared-scope variable's line from the
+  owner-named secret and no longer falls back to, or copies from, the
+  per-user account; `--to keychain` and `mint` refuse to handle a third-party
+  credential (it is set with `secrets set`). `secrets list --json` rows drop
+  `scope` and gain `secret` and `sharedOriginal` for a shared-scope variable.
+  `accountFor` is the instance's account for every name.
+- 3f9d719: **Per-instance secrets (plan §2.14).** A secret is an owner-chosen lowercase
+  name, a value in the login Keychain under service `metistry:secret:<name>`
+  and account `<instance_id>` — one instance, one account, no shared scope —
+  and a policy in `.metistry/secrets.yaml`: the hosts it is sent only to, who
+  may use it (On · Ask · Off per connection and actor), and an expiry. It is
+  referenced as `{{ secret.name }}`.
+  
+  `@foldedspacelabs/metistry-core` adds the store and its contract:
+  `InstanceSecrets` (bound to one `instance_id`; nothing on it takes an
+  account), the `KeychainBackend` seam and `memoryKeychain()` for tests,
+  `secretService`/`secretAccount`, the strict `secrets.yaml` schema
+  (`parseSecretsFile`, `secretGrant`), the resolver (`fillSecretRefs`, all or
+  nothing; `parseSecretReference`, with `env:NAME` for one release),
+  `describeSecrets` over a presence-only probe, and `INSTANCE_LAYOUT.secrets`.
+  
+  `@foldedspacelabs/metistry-cli` adds `metistry secrets set | replace | remove
+  | hosts | grant` and `list --named`: the value on stdin into this instance's
+  Keychain account, the policy through the reconciler as the owner.
+  `sync | mint | list | purge` are unchanged, except that `purge` now also
+  deletes the instance's named items. `securityKeychain`/`securityPresence`
+  drive `security` for the new store; `Keychain` delegates to them with the
+  same argv.
+  
+  `@metistry-apps/console` serves `GET /api/secrets` (reach owner): names,
+  hosts, grants, expiry, presence and last used — never a value; the console
+  holds a presence probe and nothing that can read an item. *Last used* comes
+  from the new `secret_last_used` named query (`expose: route`) over
+  `runs.meta.secrets`.
+- 4cba65a: **Profile facts and the standup move (T3-4).** `Me/profile.md` is read in one place: core's `profileFacts` (the two facts a schedule follows), `profileFrontmatter` and `profileWeekdays`, which `plan-tomorrow`'s guard and the console's runner now use too; `resolveScheduleDays` gives a schedule's days with their origin, and a profile with no working days is refused `no_working_days`, never guessed. `standup_days`/`standup_time` move to the Standup routine: the console reads them once into `routines.standup.schedule` in `.metistry/scheduled.yaml` (as `user`; refused until the console holds that authority, T3-2) and raises one *Tidy Me/profile.md* request with the before and after. Approving it writes exactly the "after" as `user`, and is refused `409 stale` if the file changed since; Decline leaves the lines, ignored, and `metistry doctor` names them in one info line (an ok row may now carry `meta.info`). `lastMirror` (core) says whether a subject was ever raised. The seeded profile drops the two keys.
+- c38dc4e: **Registries, not lists (§2.7).** Collectors, routines, targets, provider
+  templates and connection types load through `Registry` — built from
+  manifests, never from a list in code. Core adds `REGISTRY_KINDS` (the closed
+  list of kinds, and what an extension may do with each), `loadKind`,
+  `kindSources`, `extensionsDirFor`/`extensionsDirFromEnv`, `describeExtensions`,
+  and `unitCode`/`joinCode`: a collector's or routine's code is found in its own
+  package **by name**, so an extension may replace a product unit's manifest but
+  never supplies code, and one naming no product unit is skipped with the reason.
+  A new `provider` manifest kind (`type: provider` and a `provider:` block that is
+  `providerSchema` itself) turns `seed/compute-templates/<name>.yaml` into
+  `seed/compute-templates/<name>/manifest.yaml`; `COMPUTE_TEMPLATES` and
+  `parseTemplate` are gone — `computeTemplates()` is the registry, and
+  `readTemplate` takes `{ seedDir, instanceDir }`. `collectors` and `routines`
+  arrays are replaced by `loadCollectors`/`loadRoutines` and
+  `collectorCode`/`routineCode`; the console's `loadSchedules` takes loaded units,
+  `TargetRegistry.load(sources)` skips a bad manifest instead of throwing, and the
+  watchdog's `loadScheduled` reads the same registries. Every product manifest
+  now carries `schema: 1`. New verb: `metistry extensions list | add | remove`
+  (M15) — data-only, owner's hand, refused when its registry would skip the unit.
+  Doctor gains a `registries` row. **Upgrade note:** an owner's
+  `.metistry/targets/<name>/manifest.yaml` overlay without `schema: 1` is now
+  skipped (the product's target is in force) until the line is added.
+- b5ed326: The route record, in shadow (T9-1, docs/ops/dynamic-router.md §6). Every
+  `POST /message` the console routes now writes one `runs` row of kind `route`
+  AFTER the 202: the served kind, the cheap features (`words`, `attachments`,
+  `thread_turns`, `recent_failures`, `reask` — never the text), and what a local
+  policy would have chosen beside what the rules served. No policy ships yet, so
+  every consultation reads `absent`; the seam (`routePolicy` on the console's
+  config) is consulted under a 400 ms deadline, and a policy that answers,
+  throws or never resolves leaves the served route, the 202 body and the reply
+  byte-identical. New named query `route_features` (`expose: route`) supplies the
+  thread facts. `route_report` gains the fifth kind `policy` (0 until T9-4) and
+  the `policy_*` rows; `metistry compute route-report` renders them under the
+  baseline's verdict and carries them as `policy` in `--json`.
+- 49579af: The session archive table (migration `0030_session_archive.sql`, ephemeral — a
+  30-day cache in Postgres, lost on `docker compose down -v`): one row per turn
+  of every session, chat included — the system prompt as sent, the messages,
+  and the tool calls with arguments and results, redacted (the writer is
+  T3-9). The seed gains `session_detail` (`expose: route`): a session's turns
+  in full, oldest first, filterable to one `turn_id`, with expired rows never
+  returned — Run detail's conversation (`GET /api/sessions/:id`, T2-17).
+- 8217e01: **Variables (plan §2.14, M14).** Plain shared values in
+  `.metistry/variables.yaml`, referenced as `{{ variable.name }}` in connection
+  files and agents' instructions. Core adds `parseVariablesFile`,
+  `fillVariableRefs` (all or nothing, one pass, `{{ secret.x }}` left for the
+  egress fill), `describeVariables` and the refusals: a key-shaped value (*Store
+  as Secret*), a secret's name, a value that templates, and — ruling 2 — a
+  schedule or a time, by name or by value. They hold at the parse, so a
+  hand-edited file carrying one does not load anywhere, and a refusal names the
+  variable, never the value. The CLI adds `metistry variables set|unset|list`
+  (set also refuses a value equal to one of the instance's own secrets); the
+  console serves `GET /api/variables` — name, value, read by, used in — to the
+  owner. `INSTANCE_LAYOUT.variables` and redact's `isSecretKeyName` are new.
+- 37f0ed2: **The vault's sync policy and status (T10-2, plan §2.21).** `deployment.yaml` gains a `vault:` block — `push: after_commit | manual | {every: N}`, `pull: {every: N}` (1m…24h; no pull "never"), default after_commit and 5m — merged per key over the D4 overlay (core's `vault-sync.ts`). The reconciler schedules the committer's sync (T10-3) on it and re-reads the file when it changes: after_commit pushes after a flush that made commits and retries only what is unpushed, every N pushes on the interval when something is unpushed, manual never pushes; pull integrates every N; a standing conflict stops scheduled pushes. The committer already records push, pull and conflict; the schedule adds `commit` — one `vault_sync` run per flush that made commits, `meta.state = commit` — so `vault.sync` fires for all four states. The bridge serves `GET /vault/status`; the console serves it to the owner as `GET /api/vault/status`, strictly parsed. `metistry vault settings [--push …] [--pull …] [--yes]` shows and writes the policy (M18, a protected write through the reconciler as `user`), and doctor gains a *vault sync* row (ahead, behind, last push, conflict). `METISTRY_PUSH_SCHEDULE` still overrides `push` for this release, and says so everywhere it applies; `.env.example` no longer sets it.
+- 5e8f8d1: A work row says what it is about (T1-1, C85). Migration `0026_work_description.sql` adds `work.description` (nullable text, durable). `TasksService.create` takes `description` and `update` takes it on the board arm, capped at `DESCRIPTION_MAX` (2,000 characters); blank is stored as none, and `Task.description` is `null` when nobody wrote one. `tasks_create` accepts it. `tasks_update` has no `description` key, so an agent sets a description at create and never edits it. The owner edits it with `PATCH /api/tasks/:id {"description": …}`, without a claim; `null` or blank clears it, and it cannot ride with a holder status. Every task route's `task`, the `board` query's rows and MetistryKit's `BoardCard` carry it; `TaskPatch` gains `description` and `TaskPatch.describing(_:)`.
+
+### Patch Changes
+
+- 732039b: `metistry console session --stdio` attaches to stdin before it resolves the console target and token, so a request line written the moment the process is spawned (the Mac app's `SessionConsoleCallTransport`) is held and answered instead of being lost and left to time out. A refusal (no token, a non-loopback console) still sends none of the held lines, writes nothing to stdout and never prints the token.
+- 06c854e: **The scheduler: routines run once, at their time.** Core implements the
+  next-occurrence function F-4 froze (`nextOccurrence`, hand-rolled over `Intl`,
+  Temporal's `compatible` rule on both daylight-saving nights) and the runner's
+  question `dueOccurrence` — the latest slot owed since the last run, so slots
+  missed while the Mac slept coalesce into one run. A time of day is read in the
+  schedule's `tz`, then `Me/profile.md`'s `timezone`, then `METISTRY_TZ` — never
+  `TZ`, which both deployment shapes default to UTC — and with none is refused
+  `no_timezone`. Manifests now validate `schedule:` against §2.5's closed shape
+  (cron strings still accepted for one release), and the five routines carry
+  §2.5's defaults: Morning Brief working days 07:00, Knowledge Fold 21:00,
+  Tomorrow's Plan `eve_of_working_days` 23:00, Reply Review 23:00, Weekly
+  Review Sunday 18:00. The console's runner reads each manifest ⊕
+  `.metistry/scheduled.yaml` on every tick — schedule and pause by name; an
+  entry it cannot apply, or a file that does not validate, HOLDS what it names
+  rather than falling back to defaults — reads `timezone` / `working_days` from
+  `Me/profile.md` through the vault bridge, stamps each run with the slot it is
+  for (`meta.scheduled_for`, `ctx.scheduledFor`, `ctx.timeZone`), and records a
+  schedule it cannot place once a day as `skipped:<reason>`. `knowledge-fold`
+  and `plan-tomorrow` drop their hourly clock gates (`plan-tomorrow` keeps its
+  working-day guard) and date a late run from its slot. `metistry doctor` and
+  the watchdog bound a time of day by the widest gap of its week
+  (`longestGapSeconds`), and doctor reports a refused schedule as `absent` in
+  the runner's own words.
+- ed8f802: `metistry secrets sync --to env` no longer re-mints `METISTRY_LOCAL_OWNER_TOKEN` or `METISTRY_BRIDGE_TOKEN_RECONCILER_USER` over a running install: when one is missing from the Keychain but `.env` already holds a value — the one the running console or reconciler was started with — it is adopted into the Keychain and the `.env` line is left byte-for-byte; a token is minted only when neither store has one. Whenever a run does change a token a running service holds (a mint, or the Keychain's value replacing a differing line), it probes whether the console/reconciler is up and says `RESTART NEEDED … run \`metistry restart console|reconciler\``, never silently. `metistry doctor`'s console row, on a 401 with `.env`'s owner token, now names the restart as the fix rather than another sync.
+- 336778b: **`metistry update`'s closing doctor runs the updated CLI** (W1 checkpoint
+  D1). It used to run in-process — in the pre-update code — so an update that
+  changed the manifest schema validated the new manifests with the old schema
+  and ended `[!] updated, and doctor is not happy` with exit 1, although a
+  standalone `metistry doctor` was clean. It now runs `node
+  <run-dir>/packages/cli/dist/main.js doctor --json` from the product it just
+  installed (`current/` in release mode) and takes that report's verdict, with
+  the same exit codes; when that CLI is missing, cannot be spawned or prints no
+  report, it falls back to the in-process doctor and says so on a
+  `closing doctor:` line.
+  
+  **Release note — the 0.12.0 → 0.13.0 update will still say "doctor is not
+  happy" once.** That hop runs 0.12.0's `update`, which has the old in-process
+  doctor, so if the release changes the manifest schema you will see
+  `updated, and doctor is not happy` and exit 1 one last time. Run `metistry
+  doctor` afterwards: its answer is the truth. Every update after that is
+  judged by the code it installed.
+  
+  Doctor and update messages tell the truth (D2–D5):
+  
+  - **A `no_working_days` skip is history once `Me/profile.md` has
+    `working_days`.** Doctor reads the profile now; while the condition holds
+    the row is still `absent` with the runner's words, and once it does not the
+    row is ok and says it *was skipped … nothing to do until the next run at
+    <time>* (or names the refusal that holds instead, such as no timezone).
+  - **A failed kickstart is not "nothing changed".** `update` said *no host
+    job's code changed — nothing kickstarted* right after a changed job's
+    kickstart failed; it now says *kickstart of <job> failed (exit N)*, and the
+    summary counts failed kickstarts.
+  - **The shared-scope migration counts what it did** — *copied N secret(s)*,
+    or *nothing to copy* — instead of *copied for <dir>* when nothing was.
+  - **An explicit `keep_awake: never` is configured.** Doctor reports it as
+    your choice (ok, no suggestion); only a deployment.yaml that never answered
+    the question is *not configured* with the verb that turns it on.
+- Updated dependencies [152022a]
+- Updated dependencies [942372e]
+- Updated dependencies [95fb504]
+- Updated dependencies [df37d39]
+- Updated dependencies [3d2e818]
+- Updated dependencies [4451f77]
+- Updated dependencies [3a1ff8c]
+- Updated dependencies [6592f91]
+- Updated dependencies [bf33ee1]
+- Updated dependencies [bd29463]
+- Updated dependencies [9ac7949]
+- Updated dependencies [3f9d719]
+- Updated dependencies [4cba65a]
+- Updated dependencies [be25ade]
+- Updated dependencies [c38dc4e]
+- Updated dependencies [a927e61]
+- Updated dependencies [06c854e]
+- Updated dependencies [ec21783]
+- Updated dependencies [a1f1113]
+- Updated dependencies [24a9ddb]
+- Updated dependencies [8c9dde6]
+- Updated dependencies [8217e01]
+- Updated dependencies [37f0ed2]
+- Updated dependencies [5e8f8d1]
+  - @foldedspacelabs/metistry-core@0.13.0
+
 ## 0.12.0
 
 ### Minor Changes

@@ -1,5 +1,78 @@
 # @metistry-apps/reconciler
 
+## 0.13.0
+
+### Minor Changes
+
+- 95fb504: The Defer door: `POST /api/vault-tasks/:task_key/schedule {do | someday, seen_text, path?}` writes one `do <date>` or one `someday` on one line of the owner's note through the vault bridge as `user`, with the note's hash — the English spelling `formatTaskLine` emits, never a Tasks-plugin glyph (K6). It is the Tick door's discipline throughout: the line found in the note by the walk's own key, `409 stale` with the line as it stands when the text moved or the line was ticked, dropped or already deferred so, refusals before any read for `.metistry/`, dot-directories and `Artifacts/`, and `Idempotency-Key` replays. A line whose day is a `⏳` or a Dataview `scheduled::` is refused rather than given a second day. Core gains `setTaskScheduled` (proved by re-parsing its own output), the `someday` token in the task grammar (`ParsedTaskLine.someday`, `SOMEDAY_TOKEN`) and a `someday` flag in the filter vocabulary; migration `0036_vault_tasks_someday.sql` adds the derived `vault_tasks.someday` column, which the reconciler's walk writes and `vault_tasks_query` filters and flags on.
+- 3a1ff8c: **The assistant's identity is the owner's to change, and every protected write is on the record (T2-16).** `metistry identity set [--name] [--mention] [--mark] [--dry-run] [--json]` (M10) changes `.metistry/identity.yaml` through the protected write — the reconciler as `user`, with the owner bearer. Every field is validated before anything is read or sent (a one-line name of at most 40 characters with no `{{`/`}}`, an `@kebab` mention, a single-glyph mark), the edited text is read back before it goes, and a refusal writes nothing. Only the changed lines are rewritten, so comments and `voice: >` keep every byte. The mark is the file's existing `icon:` key; a new name brings its mention along when the mention was the one `init` derived. The reconciler now records every protected-path write, delete and rename it accepts as a finished `config_write` run (`meta {path, op, from?, caller, principal, message}`), whichever door made it, and `activity_feed` shows those rows in the `run` group with the principal as actor — so a rename appears in Activity. The fixture recorder seeds one, and `get-api-q-activity_feed.json` is re-recorded.
+- f932415: **Integrate before pushing (T10-3, plan §2.21).** The scheduled push is no longer a bare `git push`: it flushes and sweeps, fetches, and integrates first — a fast-forward when only the remote moved; a rebase when every local-only commit is the reconciler's own never-published act (each keeps its author, date, message and trailers); otherwise a merge as `Metistry reconciler`, so the owner's commits keep their shas. The result is computed off the working tree with `git merge-tree --write-tree` and `git commit-tree` (git ≥ 2.38) and the tree moves in one refusing step (`merge --ff-only` / `reset --keep`), with bridge writes held for that step. A conflict — both sides changed the same lines, an uncommitted edit in the way, unrelated histories — pushes nothing and touches nothing, sets `vault.state = conflict` (`check()` degrades and names the paths) and raises one Needs You `report` per episode; the next clean sync clears it. While the owner has a merge or rebase in progress in the working tree the committer stages, commits and syncs nothing. Every sync act is a `runs` row of kind `vault_sync` (`meta.state` `pull` / `push` / `conflict`), an integrate that changed files is followed by a fresh reconcile walk, and `Committer.pull()` exists for the pull schedule. `git.ts` now refuses, before exec, every argv that forces or rewrites history (`--force*`, `-f`, `--hard`, `+`/`:` refspecs, non-`--keep` resets, non-`--ff-only` merges, `rebase`, `checkout`, `branch`, `stash`, `update-ref`, …).
+- 739564d: **One commit per act (T10-1, plan §2.21).** The reconciler's committer keys each commit by the act that made it instead of by `(principal, group)` per flush window: an explicit `group`, else the intent's `turn`, else its `run`, else the write alone. A commit carries `Brain-Source: <principal>` plus `Metistry-Run: <runs.id>` and `Metistry-Turn: <turn id>` trailers where known; two acts of one principal on the same path in one window fold into one commit carrying both. The bridge's intent gains `turn` and `run` (ids only — anything else is `invalid_request`, so a body cannot forge a trailer). The sweep of out-of-band edits is one `user` commit per sweep whose subject names its files (*Edits from Obsidian: 3 notes*). `knowledge_write` now sends the reply's turn handle and its call's `runs.id` instead of a per-agent group, so two replies in one flush window are two commits.
+- 36d484d: **A remote commit touching a protected path is refused at integrate and reported (owner's ruling 2026-09-26, "refuse and report").** Integrate-before-pushing (T10-3) integrated the whole fetched tree, so a commit on the vault remote that changed `.metistry/**`, the root `CLAUDE.md` or `README.md` fast-forwarded or merged straight into the instance's configuration — the remote was a write path into how the system behaves. Now, before anything is computed or moved, the fetched commits are diffed against the merge base (`git diff --name-only <base> <remote>`); if any path is protected from the remote (`isProtectedFromRemote`: the §4.7 set, plus all of `.metistry/` including the gitignored `state/`, which git would overwrite silently, and case-folded spellings such as `claude.md` that land on the protected file on macOS), nothing is integrated and nothing is pushed. The sync state becomes `conflict` with reason `protected_path_from_remote` naming the paths and the offending commits (bounded: 50 paths, 20 commits), the `vault_sync` runs row carries `meta.state: conflict` and the reason, and ONE Needs You `report` is raised per offending remote commit (keyed `vault-sync-protected:<sha>`, so retries and restarts add nothing). The fetch is refused whole — a vault note riding in the same push waits too. Local commits keep landing and are pushed once the owner reverts the change on the remote or takes it by hand in a terminal. Vault-only remote commits integrate as before.
+- a927e61: **The overlay: `scheduled.yaml` checked against the manifests, every field
+  resolved with its origin.** Routine and collector manifests gain
+  `display_name`, `config` (fields from a closed five kinds — text, path,
+  number, boolean, choice — each with a default of its kind), and, for a
+  collector, `needs_you` (its Needs You rules) and `presents_as`. Core's
+  `entryProblems` / `checkScheduled` check each entry against its manifest —
+  its section, its config keys and values, its raise rules — and the runner
+  HOLDS a component whose entry does not fit, rather than ignoring the change;
+  `resolveScheduled` resolves every routine and sync over manifest ⊕
+  `Me/profile.md` ⊕ `scheduled.yaml` into `Sourced` fields (*default* · *from
+  your profile* · *yours*) with the next run. The reconciler admits
+  `.metistry/scheduled.yaml` as the console's third protected door — and still
+  no other. Every collector moves to §2.5's closed shape (no shipped cron
+  string is left); Inbox Sort (`inbox-drain`, every 5 min) and Usage Rollup
+  (`claude-usage`, hourly) present as routines; GitHub declares
+  `review_requested` and `assigned`. Manifest errors now name a bad record key
+  by its rule rather than "Invalid key in record".
+- ec21783: **The section operation: one writer per region in the owner's daily note
+  (plan §2.13, T2-6).** The reconciler serves `POST /vault/section {path,
+  marker, body, principal, expected_outer_sha}`: it replaces the bytes between
+  `<!-- metistry:day -->` and `<!-- /metistry:day -->` in `Journal/<date>.md`
+  and nothing else, appending `## Today · Metistry` with the markers the first
+  time. It refuses `section_missing` (409) unless the note has exactly one
+  clean pair outside any code block or frontmatter — two pairs, a lone marker,
+  a marker quoted in code, an annotated one — and `conflict` unless the bytes
+  outside the region hash to `expected_outer_sha`. Its writers are enumerated
+  (`morning-brief`, `user`) and bounded by the bearer as every mutation is;
+  every other non-user write to the note is still refused by `writeAllowed`.
+  Optional `run` / `turn` make the section part of its run's commit, so a
+  Morning Brief's brief file and section are one commit (plan §2.21).
+  
+  `@foldedspacelabs/metistry-core` adds the grammar callers hash with —
+  `scanNoteSection`, `writeNoteSection`, `NOTE_SECTIONS`,
+  `sectionMissingMessage` — and the `section_missing` error code (`409`).
+- 37f0ed2: **The vault's sync policy and status (T10-2, plan §2.21).** `deployment.yaml` gains a `vault:` block — `push: after_commit | manual | {every: N}`, `pull: {every: N}` (1m…24h; no pull "never"), default after_commit and 5m — merged per key over the D4 overlay (core's `vault-sync.ts`). The reconciler schedules the committer's sync (T10-3) on it and re-reads the file when it changes: after_commit pushes after a flush that made commits and retries only what is unpushed, every N pushes on the interval when something is unpushed, manual never pushes; pull integrates every N; a standing conflict stops scheduled pushes. The committer already records push, pull and conflict; the schedule adds `commit` — one `vault_sync` run per flush that made commits, `meta.state = commit` — so `vault.sync` fires for all four states. The bridge serves `GET /vault/status`; the console serves it to the owner as `GET /api/vault/status`, strictly parsed. `metistry vault settings [--push …] [--pull …] [--yes]` shows and writes the policy (M18, a protected write through the reconciler as `user`), and doctor gains a *vault sync* row (ahead, behind, last push, conflict). `METISTRY_PUSH_SCHEDULE` still overrides `push` for this release, and says so everywhere it applies; `.env.example` no longer sets it.
+
+### Patch Changes
+
+- Updated dependencies [152022a]
+- Updated dependencies [942372e]
+- Updated dependencies [95fb504]
+- Updated dependencies [df37d39]
+- Updated dependencies [3d2e818]
+- Updated dependencies [4451f77]
+- Updated dependencies [3a1ff8c]
+- Updated dependencies [6592f91]
+- Updated dependencies [bf33ee1]
+- Updated dependencies [bd29463]
+- Updated dependencies [9ac7949]
+- Updated dependencies [3f9d719]
+- Updated dependencies [4cba65a]
+- Updated dependencies [be25ade]
+- Updated dependencies [c38dc4e]
+- Updated dependencies [a927e61]
+- Updated dependencies [06c854e]
+- Updated dependencies [ec21783]
+- Updated dependencies [a1f1113]
+- Updated dependencies [24a9ddb]
+- Updated dependencies [8c9dde6]
+- Updated dependencies [8217e01]
+- Updated dependencies [37f0ed2]
+- Updated dependencies [5e8f8d1]
+  - @foldedspacelabs/metistry-core@0.13.0
+
 ## 0.12.0
 
 ### Patch Changes

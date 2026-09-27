@@ -66,6 +66,10 @@ function sample(path: string): string {
       const name = seg.slice(1);
       if (path.startsWith("/api/agents/")) return "probe-agent";
       if (path.startsWith("/api/artifacts/")) return ({ id: `art_${ULID0}`, version: `ver_${ULID0}`, comment: `cmt_${ULID0}` } as Record<string, string>)[name] ?? "probe";
+      // `session_archive.session_id` is a uuid (T2-17): a numeric probe would
+      // never match `SESSION_DETAIL_ROUTE`'s shape and read as unrouted
+      // rather than the handler's own 404 for a session nothing seeded.
+      if (path.startsWith("/api/sessions/") && name === "id") return "00000000-0000-4000-8000-000000000000";
       if (name === "id") return "999999999999";
       if (name === "slug") return "probe-project";
       return "probe";

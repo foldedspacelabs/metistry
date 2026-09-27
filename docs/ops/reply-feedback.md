@@ -30,7 +30,10 @@ top of the queue forever
 (`docs/research/2026-09-16-taskuary-review.md` ADOPT 5).
 
 **Approve is the verb with per-kind consequences**: an `improvement` writes
-the prompt overlay, an enrolment lets the agent in, an **`action` runs**
+the prompt overlay — or, when it carries an edit to a file under `Me/`
+(*Tidy Me/profile.md*), writes exactly the "after" you were shown, as you, and
+is refused `stale` if the file changed since (`client-api.md`) — an enrolment
+lets the agent in, an **`action` runs**
 ([actions.md](actions.md)), everything else is recorded and read by the
 evening fold.
 

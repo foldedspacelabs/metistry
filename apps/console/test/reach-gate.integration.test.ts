@@ -37,7 +37,9 @@ const external = Object.values(networkInterfaces())
 
 /** The served `local` rows, with a path a handler would accept for `agentId`. */
 const LOCAL = CLIENT_API.filter((r) => r.served && isLocalRoute(r));
-const pathFor = (path: string, agentId: string) => path.replace(":id", agentId);
+const pathFor = (path: string, agentId: string) => path.replace(":id", agentId).replace(":name", ROUTINE);
+/** A New Routine the scratch overlay holds, so the assignment door has one to change (T3-3). */
+const ROUTINE = "probe-digest";
 
 describe.skipIf(!hasDb)("the reach gate: `local` routes are the owner on this Mac", () => {
   let pool: pg.Pool;
@@ -52,9 +54,13 @@ describe.skipIf(!hasDb)("the reach gate: `local` routes are the owner on this Ma
   const minted: string[] = [agentId];
   const passkeyIds: string[] = [];
   const inboxDirs: string[] = [];
+  let overlay: Buffer = Buffer.from(`routines:\n  ${ROUTINE}:\n    actor: someone-else\n    task: "Draft the digest"\n    schedule: { days: [mon], at: ["09:00"] }\n`);
 
-  /** A body each local route would accept — a fresh id to register, nothing for rotate. */
+  /** A body each local route would accept — a fresh id to register, nothing for rotate, an assignment for the Scheduled door. */
   function bodyFor(r: (typeof LOCAL)[number]): Record<string, unknown> {
+    if (routeKey(r) === "PUT /api/scheduled/routines/:name/assignment") {
+      return { actor: agentId, task: "Summarise the week's Projects/ changes.", grants: { read: ["Projects"] }, schedule: { days: ["fri"], at: ["16:00"] } };
+    }
     if (routeKey(r) === "POST /api/agents") {
       const id = `itest-reach-new-${suffix}-${minted.length}`;
       minted.push(id);
@@ -77,6 +83,15 @@ describe.skipIf(!hasDb)("the reach gate: `local` routes are the owner on this Ma
       policy,
       secureCookies: false,
       localOwner: { token: localOwnerToken, trusted: [] }, // loopback only, as on the launchd shape
+      // a scratch overlay holding one New Routine, in memory — the assignment door's target
+      scheduled: {
+        components: [],
+        overlay: {
+          read: async () => overlay,
+          write: async (content) => void (overlay = content),
+        },
+        timeZone: "Etc/UTC",
+      },
       ...extra,
     };
   }
@@ -107,13 +122,13 @@ describe.skipIf(!hasDb)("the reach gate: `local` routes are the owner on this Ma
     for (const dir of inboxDirs) rmSync(dir, { recursive: true, force: true });
   });
 
-  async function post(at: string, path: string, headers: Record<string, string>, body: unknown): Promise<{ status: number; body: { error?: { code: string; message: string }; token?: string } }> {
-    const r = await fetch(at + path, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
+  async function post(at: string, path: string, headers: Record<string, string>, body: unknown, method = "POST"): Promise<{ status: number; body: { error?: { code: string; message: string }; token?: string } }> {
+    const r = await fetch(at + path, { method, headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
     return { status: r.status, body: (await r.json()) as { error?: { code: string; message: string }; token?: string } };
   }
 
   it("the table files minting a bearer under `local` — and Purge Now, which cannot be undone (T3-9)", () => {
-    expect(LOCAL.map(routeKey)).toEqual(["POST /api/agents", "POST /api/agents/:id/rotate", "POST /api/sessions/purge"]);
+    expect(LOCAL.map(routeKey)).toEqual(["POST /api/agents", "POST /api/agents/:id/rotate", "POST /api/sessions/purge", "PUT /api/scheduled/routines/:name/assignment"]);
   });
 
   it("**a passkey session from 127.0.0.1 is refused on every local route** — 403 local_only, naming the Mac app, and nothing is minted", async () => {
@@ -123,8 +138,10 @@ describe.skipIf(!hasDb)("the reach gate: `local` routes are the owner on this Ma
     const since = Number((await pool.query(`SELECT coalesce(max(id), 0) AS id FROM runs`)).rows[0].id);
     for (const r of LOCAL) {
       const before = await storedHash(agentId);
+      const overlayBefore = overlay;
       const body = bodyFor(r);
-      const p = await post(base, pathFor(r.path, agentId), { cookie: sessionCookie }, body);
+      const p = await post(base, pathFor(r.path, agentId), { cookie: sessionCookie }, body, r.method);
+      expect(overlay, `${routeKey(r)}: the assignment was not written`).toBe(overlayBefore);
       expect(p.status, routeKey(r)).toBe(403);
       expect(p.body.error?.code, routeKey(r)).toBe("local_only");
       expect(p.body.error?.message, routeKey(r)).toContain("Mac app");
@@ -157,11 +174,11 @@ describe.skipIf(!hasDb)("the reach gate: `local` routes are the owner on this Ma
   it("U2: no credential is the uniform 401; an agent bearer and the capture owner token are the uniform 403 — never local_only", async () => {
     for (const r of LOCAL) {
       const path = pathFor(r.path, agentId);
-      const none = await post(base, path, {}, bodyFor(r));
+      const none = await post(base, path, {}, bodyFor(r), r.method);
       expect(none.status, routeKey(r)).toBe(401);
       expect(none.body).toEqual({ error: { code: "unauthenticated", message: "authentication required" } });
       for (const bearer of [agentToken, ownerToken]) {
-        const p = await post(base, path, { authorization: `Bearer ${bearer}` }, bodyFor(r));
+        const p = await post(base, path, { authorization: `Bearer ${bearer}` }, bodyFor(r), r.method);
         expect(p.status, routeKey(r)).toBe(403);
         expect(p.body, routeKey(r)).toEqual({ error: { code: "forbidden", message: "not granted" } });
       }
@@ -171,10 +188,12 @@ describe.skipIf(!hasDb)("the reach gate: `local` routes are the owner on this Ma
   it("U2: the local owner token from a loopback peer reaches every local route", async () => {
     for (const r of LOCAL) {
       const before = await storedHash(agentId);
-      const p = await post(base, pathFor(r.path, agentId), { authorization: `Bearer ${localOwnerToken}` }, bodyFor(r));
+      const p = await post(base, pathFor(r.path, agentId), { authorization: `Bearer ${localOwnerToken}` }, bodyFor(r), r.method);
       expect([200, 201], `${routeKey(r)}: ${JSON.stringify(p.body)}`).toContain(p.status);
-      // the two mint routes answer a bearer; Purge Now's empty body is its preview (sessions-purge.integration.test.ts)
-      if (routeKey(r) !== "POST /api/sessions/purge") expect(typeof p.body.token, routeKey(r)).toBe("string");
+      // the two mint routes answer a bearer; Purge Now's empty body is its preview (sessions-purge.integration.test.ts);
+      // the assignment door answers the routine as it now stands (scheduled-routes.integration.test.ts)
+      if (routeKey(r) === "PUT /api/scheduled/routines/:name/assignment") expect(overlay.toString("utf8")).toContain(`actor: ${agentId}`);
+      else if (routeKey(r) !== "POST /api/sessions/purge") expect(typeof p.body.token, routeKey(r)).toBe("string");
       if (routeKey(r) === "POST /api/agents/:id/rotate") {
         expect(await storedHash(agentId)).toBe(tokenHash(p.body.token!));
         expect(await storedHash(agentId)).not.toBe(before);
@@ -199,9 +218,9 @@ describe.skipIf(!hasDb)("the reach gate: `local` routes are the owner on this Ma
       for (const r of LOCAL) {
         const before = await storedHash(agentId);
         const body = bodyFor(r);
-        const stolen = await post(remote, pathFor(r.path, agentId), { authorization: `Bearer ${localOwnerToken}` }, body);
-        const spoofed = await post(remote, pathFor(r.path, agentId), { authorization: `Bearer ${localOwnerToken}`, "x-forwarded-for": "127.0.0.1", "x-real-ip": "127.0.0.1" }, body);
-        const unknown = await post(remote, pathFor(r.path, agentId), { authorization: `Bearer ${mintToken()}` }, body);
+        const stolen = await post(remote, pathFor(r.path, agentId), { authorization: `Bearer ${localOwnerToken}` }, body, r.method);
+        const spoofed = await post(remote, pathFor(r.path, agentId), { authorization: `Bearer ${localOwnerToken}`, "x-forwarded-for": "127.0.0.1", "x-real-ip": "127.0.0.1" }, body, r.method);
+        const unknown = await post(remote, pathFor(r.path, agentId), { authorization: `Bearer ${mintToken()}` }, body, r.method);
         for (const p of [stolen, spoofed, unknown]) {
           expect(p.status, routeKey(r)).toBe(401);
           expect(p.body, routeKey(r)).toEqual(unknown.body); // indistinguishable from a token nobody minted

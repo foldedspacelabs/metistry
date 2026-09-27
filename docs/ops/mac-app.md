@@ -22,8 +22,9 @@ path.
   *Metistry* on every screen, the Go · Capture · Item menus with every
   shortcut in them, Help ▸ Keyboard Shortcuts, and the Needs You count on the
   Dock. The screens behind the rows are their own tickets; until one lands its
-  detail says so and offers the web app. Needs You, Activity, Chat and Today's top
-  (the brief, Next Up, Close the Day — "Today" below) have landed.
+  detail says so and offers the web app. Needs You, Activity, Chat and Today
+  (the brief, Next Up, Close the Day, and the day's spine and All — "Today"
+  below) have landed.
 - **Status.** Its own window now (Window ▸ Status), no longer a sidebar row.
   Runs `metistry doctor --json` and renders the rows to the design
   system's §3.13 — grouped by doctor's own `kind`, `absent` shown in absent
@@ -1191,14 +1192,14 @@ menu (P8); Bad asks for an optional note. The Chat row in the sidebar carries
 one `agent` dot while a turn works — presence, not a badge — and the model keeps
 watching a working turn after the owner walks away.
 
-## Today: the brief, Next Up, Close the Day
+## Today: the brief, Next Up, Close the Day, the spine and All
 
-`sources/kit/today-view.swift` is the Today row's screen, and
+`sources/kit/today-view.swift` is the Today row's screen and its spine,
 `today-brief-view.swift` its top (T6-1b, screen-05-today.md §15.1–15.3,
-§15.5). `AppModel.today` holds the model, so a folded brief, a closed day and
-a dismissed offer outlive a trip elsewhere; an instance switch drops it. The
-spine, NOW and the day bar are T6-1a's; until then the day under the top is
-its meetings and tasks as plain rows.
+§15.5), and `today-model.swift` the model under both (T6-1a, §12–§15.4,
+§15.6–15.7). `AppModel.today` holds the model, so a folded brief, a closed
+day, a dismissed offer and the All box outlive a trip elsewhere; an instance
+switch drops it.
 
 - **What it reads.** `GET /api/today` (T2-7) for the day; the brief
   (`Journal/Brief/<date>.md`, T3-6) and the Standup routine's file (C111)
@@ -1245,6 +1246,51 @@ its meetings and tasks as plain rows.
   section_missing` is shown as the request it raised — *Today's Note Wasn't
   Updated*, why, and **Open the Request** — never as a success; `409 stale`
   and `404` keep the panel open and say why.
+- **The header** is the title and day, **Today / All** (a segmented
+  control; View ▸ Today / All ⌥⌘T), *Close the Day…* before the window, and
+  on Today the **day bar**: Meetings · Travel · Focus Blocked · Tasks That
+  Fit · Doesn't Fit against `working_hours`, `chart-1`…`chart-4` and
+  `degraded`, a 2px gap between segments, every category in the legend
+  (hollow at 0m), *5h 2m committed of 9h · everything planned fits* — one
+  spoken sentence and an `AXChartDescriptor` for the rotor. Overlapping
+  meetings count once; a focus block is an event with nobody else in it.
+  Travel is 0m until the calendar serves a travel time (A1 carries
+  `location`, not the drive). No `working_hours`: no bar, and a line says
+  why.
+- **The spine** (§12.2, §14.4): meetings at their time and the owner's rows
+  in the gaps — `GET /api/today`'s `tasks` and `work` in its `order`, the
+  rest as served. A row goes in the first gap, from the one the row above
+  it went in, that has room for its estimate (`task_size_minutes` from the
+  profile, `s 15 · m 45 · l 90` until it says; a line with no size counts
+  none, and its gap says so); a row too long for any gap left is shown
+  under *Doesn't fit before 5:30 PM* — never refused, and never holding up
+  the rows after it. Focus blocks take rows; gaps under ten minutes do not.
+  NOW is a section header pinned under the header; above it the morning is
+  one line — *Earlier today — 3 done · 1 meeting · 2 carried forward* —
+  expanding in place, folded on every open, so the page opens at now. A
+  meeting in Next Up says *in Next Up ↑*. With no timed meeting on the day
+  there is no NOW: the spine is the plain list, in the owner's order
+  (§12.4). The *keep the morning open* setting (§14.4) is not built.
+- **Work rows** (`day_work`) carry the board glyph in `agent` and no
+  checkbox, with *Work #41 · blocked · waiting on you: <line>*.
+- **Ticking** is one click (C99): struck, *Ticked in <file>* with Undo, and
+  Edit ▸ Undo (⌘Z) through the window's undo manager — the same door the
+  other way. `409 stale` shows the line as it now stands under *This line
+  changed in your note since it was shown. Nothing was written.* — one
+  call, no retry, no reload. A line ticked here keeps its place until the
+  next open, when it joins the morning's line.
+- **Drag order**: a row is draggable onto another's place; Move Up and Move
+  Down are VoiceOver actions and the context menu. The whole order goes to
+  `PUT /api/today/order` and is drawn at once; the console's stored order
+  is the day's from the next load; a refusal puts the rows back with *Not
+  moved — why*.
+- **All** (§8, §15.6): the `where:` box — monospaced, editable, **Copy**
+  beside it (⌘F focuses it) — runs `GET /api/vault-tasks?where=` exactly as
+  typed; a `400` shows the parser's own message under *Couldn't read this
+  filter. Nothing was guessed.* Rows tick through the same door. Saved
+  views: **Waiting on Others** is `where: waiting`; **Slipping** and
+  **Owed** are drawn dimmed with why — the grammar has no carry count and
+  no "names a person" yet (T2-7's open item), so neither is approximated.
 
 ## Build and run it
 

@@ -522,7 +522,7 @@ Then `pnpm -r build && metistry up` — containers, every launchd job,
 doctor (below). Add a private remote to the instance repo whenever you
 like — `metistry connect-repo <url>`, the next section; the reconciler
 pushes on the vault sync policy (`metistry vault settings`, below) and never blocks on it. Point Obsidian
-at `<dir>/Knowledge` as the vault root.
+at `<dir>` itself — the instance directory is the vault root.
 
 `init` finds `seed/` in the checkout it runs from (`--product-dir`,
 `METISTRY_PRODUCT_DIR`, the workspace it is installed in, or the current

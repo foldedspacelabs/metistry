@@ -191,7 +191,7 @@ specs — with its status on main at `0b20767` and the ticket that builds it.
 | # | Decision | Recorded | Main today | Built by |
 | --- | --- | --- | --- | --- |
 | P1 | **Connection**, typed; *resource / target / source* retired | C114; ruling 5 adds calendar and mail | Not started | T4-8 |
-| P2 | Per-tool **On · Ask · Off**, grouped Reads · Changes things · Starts an agent | C114, C93 | Not started | T4-8, T4-9 |
+| P2 | Per-tool **Allow · Ask First · Never**, grouped Reads · Changes things · Starts an agent | C114, C93 | Not started | T4-8, T4-9 |
 | P3 | **Offer to agents** through the proxy; generated tools for non-MCP types | C115 | Not started | T4-10 |
 | P4 | Known fields or HTTP / Command / Path; *What it sends*; host guards | C118 | Not started | T4-10, T6-13 |
 | P5 | Ask = pause interactive, defer unattended; destructive defaults to Ask, may be On | C59, C61 | Not started (K4) | T4-9, T4-22 |
@@ -539,7 +539,7 @@ routines:
   vendor-sweep:                       # a New Routine: an assignment, no product code
     actor: vendor-research
     task: "Summarise everything added to Areas/Finance since yesterday…"
-    grants: { read: [Areas/Finance], write: [Journal/Digest/] }   # write is inert: per-run grants are read-only until the owner rules (decisions-log.md (a))
+    grants: { read: [Areas/Finance] }   # per-run grants are read-only; Journal/Digest/ is the routine's own subfolder — ownership, not a grant (below)
     schedule: { days: [mon, tue, wed, thu, fri], at: ["07:00"] }
 syncs:
   github-state:
@@ -602,7 +602,12 @@ assistant as its actor (*run by Metis*). A **New Routine** is an actor + a task 
 per-run grants + a schedule, with no code: the generic agent-routine runner (T3-8)
 composes the actor's definition and the task (appended, never replacing), grants
 the run its `grants` for that run only, and enqueues one crew run — the shape
-`knowledge-fold` already uses for the assistant.
+`knowledge-fold` already uses for the assistant. **Per-run grants are read-only.**
+A routine's reserved subfolder — `Journal/Plan/` for `plan-tomorrow`,
+`Journal/Digest/` for a Digest routine — is an **ownership** fact about the
+routine, not a grant: the routine writes there through the reconciler under its
+own principal, and nothing a run is granted widens it (owner ruling, W1,
+`decisions-log.md`).
 
 ### 2.6 The connection model — including calendar and mail
 
@@ -1052,8 +1057,8 @@ to the file. Generated prose never enters the owner's own note.
 **Model.** A secret has an owner-chosen lowercase **name**, a value in the login
 Keychain under service `metistry:secret:<name>`, account `<instance_id>` — **one
 instance, one account, no shared scope** (Q3) — and a policy in
-`.metistry/secrets.yaml`: *Sent only to* hosts, *Who may use it* (On · Ask · Off
-per connection and actor), expiry where the service reports it. It is referenced
+`.metistry/secrets.yaml`: *Sent only to* hosts, *Who may use it* (Allow · Ask First ·
+Never per connection and actor), expiry where the service reports it. It is referenced
 as `{{ secret.name }}` in connection files, compute providers and manifests
 (`env:NAME` accepted for one release). **Filled at egress**, checked against the
 host list (`packages/core/src/egress.ts`), **redacted on the way back**
@@ -1259,15 +1264,18 @@ it would put bodies in the stream; `turn.progress` at tool granularity and
 
 ### 2.21 Vault git — commits, sync, rollback
 
-**Addition B.** What exists: the reconciler is the **sole committer** (D5,
-`docs/ops/reconciler.md`). It flushes every `METISTRY_COMMIT_INTERVAL_SEC` (30 s)
-into **one commit per `(principal, group)`** with a `Brain-Source:` trailer,
-sweeps edits made outside it (Obsidian, an editor) into one `user` commit, and
-pushes on `METISTRY_PUSH_SCHEDULE` (`@hourly`, `@daily`, `never`, `<n>[s|m|h]`).
-**What is missing:** the push is a bare `git push` (`committer.ts:153`) — nothing
-fetches — so the moment the owner pushes from another clone or edits on GitHub,
-every later push fails as non-fast-forward, `check()` says `degraded`, and
-nothing recovers. There is no rollback at all.
+**Addition B.** What exists (after W1): the reconciler is the **sole committer**
+(D5, `docs/ops/reconciler.md`). It flushes every `METISTRY_COMMIT_INTERVAL_SEC`
+(30 s) into **one commit per act** — a write, an agent turn, a routine run or a
+sweep (T10-1) — with `Brain-Source:`, `Metistry-Run:` and `Metistry-Turn:`
+trailers; edits made outside it (Obsidian, an editor) are swept into one `user`
+commit, *Edits from Obsidian: …*. It **integrates before every push** and on the
+pull schedule (T10-3): fetch, then fast-forward, or replay its own unpushed
+commits off the working tree (`git merge-tree --write-tree` + `commit-tree`,
+git ≥ 2.38); a conflict holds the push and raises one report, and a remote commit
+touching a protected path is refused and reported (#324). Push and pull follow
+`.metistry/deployment.yaml`'s `vault:` policy (T10-2). **What is missing:**
+rollback — file history, restore and roll back (T10-4…T10-6).
 
 **Commits (T10-1).** One commit per **write, turn, routine run or sweep**: the
 `group` becomes the turn or run id (the turn id already rides in `_meta`), so a
@@ -1774,7 +1782,8 @@ cannot write the note any other way; a mismatched outer hash is refused**.
 *Spec:* `GET /api/today?date=` composes `vault_tasks_query` (today preset),
 `day_work`, `today_order`, `day_events`, and the brief, standup and plan paths;
 `GET /api/vault-tasks?where=` via `compileTaskFilter` with Slipping · Owed ·
-Waiting on Others; `PUT /api/today/order`.
+Waiting on Others; `PUT /api/today/order`. Note: `vault_tasks_query`'s `unscheduled`
+flag also counts `someday` lines (T2-5) — a someday line carries no date.
 *Files:* `apps/console/src/`, `seed/queries/`.
 *Tests:* U2; **order keys outside the day are refused**.
 *Accept:* F-7's Today fixture matches.
@@ -1953,9 +1962,10 @@ is skipped with its reason (`eve_of_working_days`, §2.5).
 **T3-8 · Agent routines** · L · W3 · deps T4-6, T3-3 —
 *Spec:* §2.5's New Routine: actor + task + per-run grants; the runner composes the
 definition and the task, grants for the run only, enqueues one crew run;
-`POST /api/scheduled/routines` (local). Per-run grants are **read-only** (F-2) until
-the owner rules on a crew routine's `write:` (`decisions-log.md` (a)) — the ruling
-comes before this ticket starts.
+`POST /api/scheduled/routines` (local). Build to the owner's W1 ruling
+(`decisions-log.md`): per-run grants are **read-only**; a routine's reserved
+subfolder (`Journal/Digest/`) is a routine ownership fact, written through the
+reconciler under the routine's own principal — never a per-run grant.
 *Files:* `apps/console/src/runner.ts`, `apps/assistant/src/crew-drain.ts`.
 *Tests:* **a per-run grant is gone after the run; outside it the actor cannot read
 the area**.
@@ -2157,7 +2167,10 @@ where none.
 **T4-18 · Compute** · L · W2 · deps T4-1 —
 *Spec:* Providers gain `enabled` and `billing`; keys as secret references;
 `seed/model-identities.yaml`; catalogue search grouped by model with Refresh;
-tiers editable under Advanced (Q1).
+tiers editable under Advanced (Q1). Left by T4-1/T4-3: compute's `auth.secret` still
+takes an env-var name (so `migrate-scope`'s step 2 rewrites none yet), and
+`metistry compute providers add` still stores a key under the shared per-user
+account — both become instance secret references here.
 *Files:* `packages/core/src/compute.ts`, `packages/cli/src/compute.ts`,
 `apps/console/src/compute-routes.ts`.
 *Tests:* unmapped ids stay separate rows.
@@ -2195,7 +2208,9 @@ skipped, a request is raised; the interactive bit rides in `_meta` beside
 
 **T4-23 · Mirrors and secret failures** · M · W3 · deps T1-8, T4-1 —
 *Spec:* A source change resolves its mirror with a receipt; one subject, one card;
-one request per failed secret naming its dependents.
+one request per failed secret naming its dependents. The weekly review counts
+`resolved_at_source` rows as decisions (T1-8, #301) — a mirror its source resolved
+is not the owner's decision.
 *Files:* `collectors/`, `apps/console/src/`.
 *Tests:* one card for an agent ask and a GitHub request on the same PR.
 *Accept:* —
@@ -2356,7 +2371,8 @@ appears in an agent-facing fixture**.
 C52), a local agent (definition editor through `metistry agents define`, Esc keeps
 a draft, the permissions table, one model dropdown, routines, runs), a connected
 agent (connection facts, ceiling, revoke cascade), New Agent's chooser, Run Now's
-reason (C138).
+reason (C138). The ceiling reads `access_ceilings` on `GET /api/agents` (T2-2,
+#317; C42).
 *Files:* `agents-view.swift`, `agent-detail-view.swift`.
 *Tests:* **a widening confirms with `autonomyWidenings`' own strings; the
 definition editor is absent on a remote client**.
@@ -2375,7 +2391,9 @@ Default), syncs (cadence, raise toggles, Sync Now).
 **T6-7 · Board and card detail** · L · W3 · deps T1-1, T1-2 —
 *Spec:* `screen-06-board.md`, `screen-14-card-detail.md`, `screen-16` §2: five
 columns, one route per drop, Has Thread, the popover for a work row and a markdown
-task, the description, the room pane over Board.
+task, the description, the room pane over Board. A drop on Done sends `closed`:
+`TaskPatch.moving(to: "done")` today builds `status: "done"`, which is not a task
+status.
 *Files:* `board-view.swift`, `card-detail-view.swift`, `room-view.swift`.
 *Tests:* **no drop target the service would refuse**; a refused move reverts and
 says why.
@@ -2406,6 +2424,9 @@ column (what Metis took, the run, tool calls), the route decision (T9-1).
 *Spec:* `screen-15-settings.md` §1–§5.2, §5.4–§5.6 + §2.2, §2.15: 840 × 600, a
 sidebar, every pane scrolling; Instance, Services (Doctor first, services, When it
 runs with Keep Awake and **the lid dialog**), Updates, Account, Keyboard, Advanced.
+The Swift `keep-awake.swift` mirror still knows only the four legacy values —
+bring it to the object form (#320); the lid dialog shows the `pmset` command the
+CLI prints and runs nothing.
 *Files:* `settings-view.swift`, `settings-model.swift`, `settings-panes/`.
 *Tests:* **the lid dialog never runs a command**; largest text grows panes longer,
 never wider.
@@ -2421,7 +2442,8 @@ with project budgets, **Advanced: tiers** (Q1).
 
 **T6-13a · Connections: list and detail** · L · W4 · deps T4-8a —
 *Spec:* `screen-09-resources.md` §10.1–§10.4 + §2.6: status, type, used by, the
-offer mark; tools grouped with On · Ask · Off; used by.
+offer mark; tools grouped with Allow · Ask First · Never (C93's On · Ask · Off,
+superseded by the owner's W1 ruling); used by.
 *Files:* `connections-view.swift`.
 *Tests:* **a secret headed for an unlisted host blocks the preview**.
 *Accept:* as above.
@@ -2435,7 +2457,9 @@ HTTP / Command / Path; *What it sends*; host guards; calendar and mail.
 *Accept:* as above.
 
 **T6-14 · Secrets and Variables** · M · W4 · deps T4-1, T4-4 —
-*Spec:* `screen-19-secrets-variables.md` + §2.14.
+*Spec:* `screen-19-secrets-variables.md` + §2.14. A key-shaped value is refused
+with *Store as Secret* and **no** *Save as Variable* override — screen 19 §2 offers
+one; the plan and T4-4 (#313) do not.
 *Files:* `secrets-view.swift`, `variables-view.swift`.
 *Tests:* **a value is never rendered after save**; deleting a secret in use names
 what stops.

@@ -13,7 +13,7 @@
     "proposals": [
       {
         "id": "3",
-        "ts": "2026-09-26T22:54:15.069Z",
+        "ts": "2026-09-27T02:32:12.911Z",
         "kind": "report",
         "source_agent": "assistant",
         "trust": "internal",
@@ -24,11 +24,33 @@
         "decision": "pending",
         "decided_at": null,
         "work_id": null,
-        "snoozed_until": null
+        "snoozed_until": null,
+        "request": {
+          "type": "report",
+          "word": "report",
+          "body": "excerpt",
+          "primary": {
+            "label": null,
+            "sends": {
+              "door": "act"
+            }
+          },
+          "revise": null,
+          "decline": {
+            "label": "Dismiss",
+            "sends": {
+              "decision": "skip"
+            }
+          },
+          "grouped": false,
+          "decisions": [
+            "skip"
+          ]
+        }
       },
       {
         "id": "2",
-        "ts": "2026-09-26T22:54:15.069Z",
+        "ts": "2026-09-27T02:32:12.910Z",
         "kind": "knowledge",
         "source_agent": "assistant",
         "trust": "internal",
@@ -40,11 +62,41 @@
         "decision": "pending",
         "decided_at": null,
         "work_id": null,
-        "snoozed_until": null
+        "snoozed_until": null,
+        "request": {
+          "type": "note",
+          "word": "note",
+          "body": "preview",
+          "primary": {
+            "label": "Approve",
+            "sends": {
+              "decision": "allow"
+            }
+          },
+          "revise": {
+            "label": "Revise",
+            "sends": {
+              "decision": "accept_with_changes"
+            },
+            "carries": "feedback"
+          },
+          "decline": {
+            "label": "Decline",
+            "sends": {
+              "decision": "deny"
+            }
+          },
+          "grouped": false,
+          "decisions": [
+            "allow",
+            "accept_with_changes",
+            "deny"
+          ]
+        }
       },
       {
         "id": "1",
-        "ts": "2026-09-26T22:54:15.068Z",
+        "ts": "2026-09-27T02:32:12.910Z",
         "kind": "decision",
         "source_agent": "assistant",
         "trust": "internal",
@@ -59,10 +111,40 @@
         "decision": "pending",
         "decided_at": null,
         "work_id": null,
-        "snoozed_until": null
+        "snoozed_until": null,
+        "request": {
+          "type": "question",
+          "word": "question",
+          "body": "choices",
+          "primary": {
+            "label": "Send Answers",
+            "sends": {
+              "decision": "answers"
+            }
+          },
+          "revise": {
+            "label": "Revise",
+            "sends": {
+              "decision": "accept_with_changes"
+            },
+            "carries": "feedback"
+          },
+          "decline": {
+            "label": "Decline",
+            "sends": {
+              "decision": "deny"
+            }
+          },
+          "grouped": false,
+          "decisions": [
+            "answers",
+            "accept_with_changes",
+            "deny"
+          ]
+        }
       }
     ],
-    "cursor": "2026-09-26 18:54:15.069554-04|3",
+    "cursor": "2026-09-26 22:32:12.911337-04|3",
     "more": false
   }
 }

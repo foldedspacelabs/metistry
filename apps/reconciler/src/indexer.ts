@@ -15,7 +15,7 @@
 
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { finishRun, isVaultPath, nextRecurrence, startRun, taskToday, type RunExecutor, type TaskDateOptions } from "@foldedspacelabs/metistry-core";
+import { finishRun, nextRecurrence, startRun, taskToday, type RunExecutor, type TaskDateOptions } from "@foldedspacelabs/metistry-core";
 import type { Committer } from "./committer.js";
 import { EMPTY_SUMMARY, type Embeddings, type EmbedSummary } from "./embeddings.js";
 import type { Vault } from "./vault.js";
@@ -148,6 +148,18 @@ export class Indexer {
     if (this.running) return this.running;
     this.running = this.reconcileNow(trigger).finally(() => (this.running = null));
     return this.running;
+  }
+
+  /**
+   * A walk that STARTS after now — for a caller that has just changed the
+   * tree (an integrate, §2.21 rule 5) and must not join a walk that read it
+   * before the change. Two such calls during one running walk share the
+   * one that follows it.
+   */
+  reconcileAfter(trigger: string): Promise<ReconcileSummary> {
+    const running = this.running;
+    if (!running) return this.reconcile(trigger);
+    return running.catch(() => undefined).then(() => this.reconcile(trigger));
   }
 
   private async reconcileNow(trigger: string): Promise<ReconcileSummary> {
@@ -317,25 +329,12 @@ export class Indexer {
     // external edits: Obsidian (any device) writes straight to the tree;
     // nothing else can commit them. Paths with a pending bridge intent are
     // that principal's; conflict copies are flagged, not committed.
+    // The filter — vault paths only, `.metistry/` never, no pending intent's
+    // path, no conflict copy — lives with the committer, which runs the same
+    // sweep before every integrate (§2.21).
     let externalEdits = 0;
     if (this.cfg.commitExternalEdits) {
-      const pending = this.committer.pendingPaths();
-      // the whole working tree, filtered to vault paths: `.metistry/` is
-      // the user's hand (invariant 2) and must never ride along in a sweep
-      // commit, and `Artifacts/` is not knowledge
-      const entries = await this.vault.git.status(["."]);
-      const touched = new Set<string>();
-      for (const e of entries) {
-        if (e.code === "!!") continue;
-        for (const p of [e.path, e.from]) {
-          if (p && isVaultPath(p) && !pending.has(p) && !isConflictFile(p)) touched.add(p);
-        }
-      }
-      if (touched.size > 0) {
-        const paths = [...touched].sort();
-        externalEdits = paths.length;
-        this.committer.enqueueSweep(paths); // one `user` commit whose subject names the files (§2.21)
-      }
+      externalEdits = (await this.committer.sweepExternalEdits()).length; // one `user` commit whose subject names the files (§2.21)
     }
 
     // Vectors last: they read the index this cycle just settled, and nothing

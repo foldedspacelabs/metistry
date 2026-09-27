@@ -11,7 +11,7 @@ import type { AgentPrincipal } from "@foldedspacelabs/metistry-mcp-brain";
 import type { TasksService } from "@foldedspacelabs/metistry-tasks";
 import { TargetRegistry } from "../src/dispatch.js";
 import { emptyCompute, parseCompute, type Compute } from "@foldedspacelabs/metistry-core";
-import { CrewRegistry, crewPolicy, dispatchCrew, intersectAllow, loadCrews, LOCAL_CREW_TARGET, parseCrewFile, readCrewVault, snapshotOf } from "../src/crews.js";
+import { CrewRegistry, crewPolicy, definitionFileOf, dispatchCrew, intersectAllow, loadCrews, LOCAL_CREW_TARGET, parseCrewFile, readCrewVault, snapshotOf } from "../src/crews.js";
 
 const root = fileURLToPath(new URL("../../../", import.meta.url));
 const seed = readFileSync(`${root}seed/agents/example/researcher.md`, "utf8");
@@ -101,6 +101,35 @@ describe("crew manifest files", () => {
     const disk = await loadCrews([`${root}seed/agents`, "agents"]);
     expect(disk.sources.agents).toBe("absent");
     expect([...disk.crews.keys()]).toEqual(["researcher"]);
+  });
+});
+
+describe("a loaded crew file, named the way an actor's definition names it (T4-6)", () => {
+  const sha = "f".repeat(64);
+  it("a vault entry is the instance's, relative to the instance", () => {
+    expect(definitionFileOf(".metistry/agents", "research/scout.md", "vault", sha)).toEqual({ path: ".metistry/agents/research/scout.md", origin: "instance", sha256: sha });
+    expect(definitionFileOf("./agents/", "research/scout.md", "vault", sha).path).toBe("agents/research/scout.md");
+  });
+
+  it("a disk entry is shipped unless it sits under the instance directory — and is never absolute (invariant 7)", () => {
+    const origins = { productDir: "/opt/metistry", instanceDir: "/Users/o/inst" };
+    expect(definitionFileOf("seed/agents", "example/researcher.md", "disk", sha, origins)).toEqual({ path: "seed/agents/example/researcher.md", origin: "product", sha256: sha });
+    expect(definitionFileOf("/opt/metistry/seed/agents", "example/researcher.md", "disk", sha, origins).path).toBe("seed/agents/example/researcher.md");
+    expect(definitionFileOf("/Users/o/inst/.metistry/agents", "ops/scout.md", "disk", sha, origins)).toEqual({ path: ".metistry/agents/ops/scout.md", origin: "instance", sha256: sha });
+    // a sibling that merely shares a prefix is not inside the instance
+    expect(definitionFileOf("/Users/o/inst2/agents", "ops/scout.md", "disk", sha, origins).origin).toBe("product");
+  });
+
+  it("the registry hands resolveActor a source with the file, and nothing for a crew it did not load", async () => {
+    const vault = memoryVault();
+    await vault.write(".metistry/agents/example/researcher.md", Buffer.from(seed), { principal: "user", message: "t" });
+    const db = { query: async () => ({ rows: [] as any[] }) };
+    const registry = new CrewRegistry(db, [".metistry/agents"], vault);
+    await registry.refresh();
+    const src = registry.actorSource("researcher");
+    expect(src?.file).toEqual({ path: ".metistry/agents/example/researcher.md", origin: "instance", sha256: registry.get("researcher")!.sha256 });
+    expect(src?.manifest.name).toBe("researcher");
+    expect(registry.actorSource("nobody")).toBeUndefined();
   });
 });
 
@@ -273,6 +302,20 @@ describe("cross-kind delegation (collaboration rule 4)", () => {
     const [finish] = db.finishes();
     expect(String(finish![2])).toMatch(/^collaboration_rule: /);
     expect(JSON.parse(String(db.q[0]!.values[6]))).toMatchObject({ from_kind: FUTURE_KIND, to_kind: "openai-compatible" });
+  });
+
+  it("follows the crew's OWN model when its definition names one (T4-6): the guard, the runner and the actor read one rule", async () => {
+    const targets = new TargetRegistry({ env: {} });
+    await targets.loadDir(`${root}targets`);
+    const brief = { crew: "researcher", brief: "Summarize Projects/Ios.md" };
+    // pinned to provider `a` — the caller's own kind — so the push is allowed, whatever assignments.crews says
+    const same = await registryWith(withFrontmatter({ model: "a/pinned" }));
+    expect(await dispatchCrew(fakeDb(), fakeTasks(), same, targets, brief, assistant, withKinds(FUTURE_KIND, "openai-compatible"))).toMatchObject({ ok: true });
+    // pinned to provider `b` — the other kind — refused, naming the definition's model rather than a compute.yaml line
+    const other = await registryWith(withFrontmatter({ model: "b/pinned" }));
+    const r = await dispatchCrew(fakeDb(), fakeTasks(), other, targets, brief, assistant, withKinds("openai-compatible", FUTURE_KIND));
+    expect(r).toMatchObject({ ok: false, code: "invalid_request" });
+    if (!r.ok) expect(r.message).toContain("the crew's model: (b/pinned)");
   });
 
   it("allows it when both sides are the same kind — which is every valid compute.yaml today, and an install with none", async () => {

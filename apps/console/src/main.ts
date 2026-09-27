@@ -44,6 +44,7 @@ import type { ComputeAdmin } from "./compute-routes.js";
 import type { SecretsView } from "./secrets-route.js";
 import { readInstanceId, securityPresence, realExec } from "@foldedspacelabs/metistry-cli";
 import { CrewRegistry } from "./crews.js";
+import { assistantPromptFiles, loadAssistantDefinition } from "./actors.js";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
@@ -231,7 +232,11 @@ console.log(`embeddings: ${localModel.url}/embeddings (from ${localModel.from}),
 // D4 overlay — an entry not on disk is read through the vault bridge (that
 // is how the instance repo's protected `agents/` reaches this container).
 // Loaded now and re-synced on an interval; the registry rows are kind=crew.
-const crews = new CrewRegistry(pool, optionalEnv("METISTRY_AGENTS_DIRS", `seed/agents:${INSTANCE_LAYOUT.agentsDir}`).split(":"), vault);
+const crews = new CrewRegistry(pool, optionalEnv("METISTRY_AGENTS_DIRS", `seed/agents:${INSTANCE_LAYOUT.agentsDir}`).split(":"), vault, {
+  // so an actor's definition names each file relative to where it lives (docs/ops/actors.md)
+  instanceDir: process.env.METISTRY_INSTANCE_DIR?.trim() || undefined,
+  productDir: process.cwd(),
+});
 const logCrewSync = (s: Awaited<ReturnType<CrewRegistry["refresh"]>>) => {
   const changes = [`registered ${s.registered.length}`, `resynced ${s.resynced.length}`, `revoked ${s.revoked.length}`, ...(s.conflicts.length ? [`CONFLICTS ${s.conflicts.join(",")}`] : [])];
   console.log(`crews: ${crews.names().join(", ") || "(none)"} [${changes.join(", ")}] sources ${JSON.stringify(crews.sources)}`);
@@ -331,6 +336,14 @@ const server = makeServer(pool, queries, {
   ...(vault ? { vault } : {}),
   crews,
   compute: () => compute.store.current,
+  // the assistant's definition (T4-6): the same overlays the engine composes its prompt from
+  assistantDefinition: () =>
+    loadAssistantDefinition({
+      identityFiles,
+      promptFiles: assistantPromptFiles(process.env),
+      instanceDir: process.env.METISTRY_INSTANCE_DIR?.trim() || undefined,
+      productDir: process.cwd(),
+    }),
 });
 if (push) startNotifier(pool, push);
 

@@ -843,6 +843,12 @@ label { display: flex; flex-direction: column; gap: var(--mt-space-1);
 .action-table > span { display: block; }
 .action-row.defaulted { color: var(--mt-color-text-secondary); }
 .action-row.clamped { color: var(--mt-color-degraded); }
+/* The permissions table (T4-6): Resource × Read × Write, each cell in the
+   server's words; an empty cell is the dash, never blank. */
+table.permissions { border-collapse: collapse; margin: var(--mt-space-1) 0; font-size: var(--mt-text-footnote-size); }
+table.permissions th, table.permissions td { text-align: left; vertical-align: top; padding: 0 var(--mt-space-2) 0 0; }
+table.permissions thead th { color: var(--mt-color-text-tertiary); font-weight: 400; }
+table.permissions tbody th { font-weight: 400; color: var(--mt-color-text-secondary); white-space: nowrap; }
 #agent-create, #agent-grants { flex-direction: column; align-items: stretch; }
 #agents select { width: 100%; }
 #agent-token {

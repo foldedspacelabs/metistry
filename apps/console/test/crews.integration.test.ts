@@ -5,6 +5,7 @@
 // assistant's alone, refuses a brief outside scope with NO work row, and
 // queues a clean one as the durable row the assistant container drains.
 // Skipped without a db.
+import { createHash } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -47,6 +48,9 @@ describe.skipIf(!hasDb)("crews (integration)", () => {
   // this suite's own internal principal: agents_delegate gates on kind=internal, not on the id, and the
   // shared INTERNAL_ASSISTANT_ID row is upserted by other suites running in parallel (a token race)
   const assistantId = `itest-asst-${suffix}`;
+  // the owner on this Mac, for the registry's reads (GET /api/agents, …/definition)
+  const localOwnerToken = mintToken();
+  const owner = (path: string) => fetch(`${base}${path}`, { headers: { authorization: `Bearer ${localOwnerToken}` } });
 
   const rpc = (method: string, params: unknown, token: string) =>
     fetch(`${base}/mcp`, {
@@ -69,7 +73,7 @@ describe.skipIf(!hasDb)("crews (integration)", () => {
     registry = new CrewRegistry(pool, ["agents"], vault);
     const targets = new TargetRegistry({ env: {} });
     await targets.loadDir(`${root}targets`);
-    server = makeServer(pool, new QueryStore(pool), { origin: "http://127.0.0.1:0", inboxDir: `/tmp/metistry-test-inbox-crews-${Date.now()}`, policy, secureCookies: false, targets, crews: registry });
+    server = makeServer(pool, new QueryStore(pool), { origin: "http://127.0.0.1:0", inboxDir: `/tmp/metistry-test-inbox-crews-${Date.now()}`, policy, secureCookies: false, targets, crews: registry, localOwner: { token: localOwnerToken, trusted: [] } });
     await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     ({ token: externalToken } = await agents.createAgent(pool, { id: externalId, display_name: "ext" }));
@@ -109,6 +113,52 @@ describe.skipIf(!hasDb)("crews (integration)", () => {
     expect(s).toEqual({ registered: [], resynced: [], revoked: [], conflicts: [] });
     expect(await rowsOf()).toEqual(before);
     expect((await adminRuns()).length).toBe(runsBefore);
+  });
+
+  // T4-6: a crew is an actor — its definition is its manifest, its compute
+  // its `model:`, its permissions the row the door reads, drawn by core.
+  it("GET /api/agents draws each crew's permissions, and …/definition serves its manifest, compute and limits (T4-6)", async () => {
+    const { agents: rows } = await (await owner("/api/agents")).json();
+    const lines = (id: string) => rows.find((a: any) => a.id === id).permissions.map((r: any) => [r.label, r.read.map((e: any) => e.key), r.write.map((e: any) => e.key)]);
+    // `uses: [brain-read, brain-report]`: the knowledge group reads its scope; `requests` is asking, which is not a power
+    expect(lines(crewA)).toEqual([["Knowledge", ["Projects"], []]]);
+    expect(lines(crewB)).toEqual([["Knowledge", ["Resources"], []]]);
+    const provenance = rows.find((a: any) => a.id === crewA).permissions[0].read[0].provenance;
+    expect(provenance).toEqual({ kind: "base", source: { manifest: `agents/itest/${crewA}.md` } });
+    // an internal row is drawn as the assistant: the whole vault, the one writer — and as configuration, never as a grant
+    const asst = rows.find((a: any) => a.id === assistantId).permissions;
+    expect(asst[0]).toMatchObject({ label: "Knowledge", read: [{ key: "/", label: "The whole vault" }], write: [{ key: "/", label: "The whole vault" }] });
+    for (const r of asst) for (const e of [...r.read, ...r.write]) expect(e.provenance, `${r.label} ${e.key}`).toEqual({ kind: "base", source: "environment" });
+
+    const def = await owner(`/api/agents/${crewA}/definition`);
+    expect(def.status).toBe(200);
+    const body = await def.json();
+    const text = crewFile(crewA);
+    expect(body).toMatchObject({
+      id: crewA,
+      definition: {
+        kind: "crew",
+        area: "itest",
+        description: DESCRIBED,
+        prompt: "You work for {{name}}. Report what you find.",
+        // read through the vault bridge, so the owner's own file, named relative to the instance
+        files: [{ path: `agents/itest/${crewA}.md`, origin: "instance", sha256: createHash("sha256").update(text).digest("hex") }],
+      },
+      // `model: haiku` with no assignments.crews entry: what an unassigned crew always ran on
+      compute: { kind: "same_as_assistant" },
+      limits: { maxTurns: 12, budgetUsdPerRun: 0.5 },
+    });
+
+    // a crew row whose manifest is not loaded is no actor: 404, and no lines
+    const orphan = `${crewA}-orphan`;
+    await pool.query(`INSERT INTO agents (id, display_name, kind, token_hash, grants, grant_source) VALUES ($1, 'orphan', 'crew', $2, $3::jsonb, 'manifest')`, [orphan, tokenHash(mintToken(32)), JSON.stringify({ tier: "areas", areas: ["Projects"] })]);
+    try {
+      expect((await owner(`/api/agents/${orphan}/definition`)).status).toBe(404);
+      const again = await (await owner("/api/agents")).json();
+      expect(again.agents.find((a: any) => a.id === orphan).permissions).toEqual([]);
+    } finally {
+      await pool.query(`DELETE FROM agents WHERE id = $1`, [orphan]);
+    }
   });
 
   it("a changed manifest re-syncs grants/projects only (hash untouched); a removed one is revoked; a foreign id is a conflict, never overwritten", async () => {

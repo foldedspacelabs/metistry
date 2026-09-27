@@ -177,7 +177,7 @@ to violate it with.
 Two gates, both outside the code. The Metistry origin must be **reachable from
 Devin's cloud** — a tailnet address will not do, which is invariant 8's "the
 network is not a boundary" arriving as a bill rather than a principle; the
-example.com gateway is the candidate. And a mandatory **Security Profile**
+a home gateway is the candidate. And a mandatory **Security Profile**
 MCP allowlist (§1e) can make this impossible without an admin.
 
 ## 5. Proposal B — Devin as a compute target

@@ -14,7 +14,7 @@ the view, the panel, and the drags.
 | --- | --- |
 | The cards | `seed/queries/board.yaml` (`GET /api/q/board`) |
 | The cross-project counts | `seed/queries/board_projects.yaml` (`GET /api/q/board_projects`) |
-| The panel | the **Board** tab in `apps/console/web` |
+| The panel | Work ▸ **Board** in `apps/console/web` (`work.js`) |
 | The write routes | `apps/console/src/task-routes.ts` (`docs/ops/console-api.md`) |
 | The service the routes adapt | `packages/tasks` (`update`'s two arms, `claim`, `release`, `heartbeat`) |
 | The tests | `apps/console/test/seed-queries.test.ts`, `apps/console/test/pwa.integration.test.ts`, `apps/console/test/task-routes.integration.test.ts`, `packages/tasks/test/` |
@@ -158,12 +158,16 @@ The panel labels the flag from fields on the wire (`lease lapsed` / `blocked`
 - **A card waiting on your todo** says *waiting on you: …* with the line's
   text, while that line is open.
 - **A Done card whose crew reported back** says *reported 2h ago*.
-- **Clicking a card** opens its **room** (`#/rooms/work/<id>`) when one
-  exists — the card's room *is* the conversation about it
-  (`docs/ops/threads.md`), and `board.yaml`'s `has_thread` says so on the wire
-  so the panel never asks a second endpoint. A card with no room opens a
-  detail popover instead: title, owner, lease, external ref, last activity,
-  and the artifact a review bundle was cut from.
+- **Every tap opens the card** (C84; screen 18 §5), pushed full-screen: what
+  it is about (`description`), where it is and who holds it, the artifact a
+  review bundle was cut from, and its **room** — a push from the card
+  (`#/rooms/work/<id>`, `docs/ops/threads.md`). `board.yaml`'s `has_thread`
+  and `thread_count` put the room's message count on the card itself, so the
+  panel never asks a second endpoint.
+- **On a phone the board is one column at a time**, picked by chips that
+  carry each column's count (from `board_projects`, never the capped cards).
+  From 600px the columns sit side by side and snap; at 900px it is the Mac's
+  board.
 - **It polls every 10 s** while the tab is visible, like the feed. Both
   queries are `cache_ttl: 0`: a board that lags lies about who holds a lease.
 
@@ -179,13 +183,20 @@ The two queries repeat the same `CASE` verbatim rather than approximating each
 other, and a test asserts the counts match the cards — if they ever drift, the
 filter's labels start lying.
 
-## Drags
+## Drags, and Move to…
 
-The rule that keeps invariant 8 honest: **the board offers no drop the service
-would refuse.** `dropsFor()` in `app.js` draws a target only where a statement
-in `packages/tasks` would succeed — and when the two disagree the *statement*
-wins: the card snaps back carrying the server's own sentence, never one the
-panel invented.
+The rule that keeps invariant 8 honest: **the board offers no move the service
+would refuse.** `movesFor()` in `apps/console/web/work.js` reads each card's
+row against the statements in `packages/tasks` — claim takes an unclaimed card
+that is open or in progress; release, close and "blocked" are the holder's;
+assign, unassign and the unblock are the board arm's — and gives every other
+column either the one route that lands the card there or the reason none does.
+A drag draws a target only on the first kind. On a phone a drag becomes **Move
+to…** (screen 18 §5): an action sheet listing every other column, where a move
+the service would refuse is **listed disabled with its reason** (*nothing claims
+a blocked card — unblock it first*), never hidden. When the two still disagree
+(a dependency still open, a claim that raced in) the *statement* wins: the move
+is undone and the server's own sentence is shown, never one the panel invented.
 
 **Each drop is exactly one route.** Anything needing two calls is not a drop.
 
@@ -194,9 +205,9 @@ panel invented.
 | Backlog → **Assigned** | `PATCH /api/tasks/:id {owner}` | the user, to **any** crew | A picker of agent names from `GET /api/agents`, plus *me*. The one drop that needs a value. |
 | Assigned → **Backlog** | `PATCH /api/tasks/:id {owner: null}` | the user | Clears the assignee; the row stays `open`. |
 | Backlog/Assigned → **In Progress** | `POST /api/tasks/:id/claim` | the user | The user claims *as themselves* (`claimed_by = user`). Nobody drags another agent into a lease. |
-| In Progress → **Assigned / Backlog** | `POST /api/tasks/:id/release` | the **holder** | Hermes's `reclaimed`, which we already had: never orphaned. Which column it lands in is `owner`'s to decide, so the board offers the one it will actually land in. |
+| In Progress → **Assigned / Backlog** | `POST /api/tasks/:id/release` | the **holder** | Hermes's `reclaimed`, which we already had: never orphaned. Which column it lands in is `owner`'s to decide, so the board offers the one it will actually land in — and only on a card you hold; another's claim is listed disabled, *only the holder hands a card back*. |
 | Blocked → **Backlog / Assigned** | `PATCH /api/tasks/:id {status: "open"}` | the user | The unblock. Legal from `blocked` only, and it hands the row back the way `release()` does — so a row a stuck crew still holds comes free without the crew's hand. |
-| any open column → **Done** | `PATCH /api/tasks/:id {status: "closed"}` | the **holder** | Offered everywhere and decided by the service: close a card you do not hold and it refuses `held by X, not by user — claim it first`. |
+| any open column → **Done** | `PATCH /api/tasks/:id {status: "closed"}` | the **holder** | Offered on a card you hold. On any other, Move to… lists Done disabled — *only the one holding a card closes it* — because the holder arm's `WHERE claimed_by = user` would refuse it (T7-3b; until then it was offered everywhere and refused by the service). |
 | a **closed** card | — | nobody | Not draggable. `update()` refuses a closed row, so it gets no grab cursor either. |
 
 Two things are *not* here on purpose. **Nobody drags a card onto another
@@ -209,7 +220,7 @@ agent cannot assign one. With one engine kind configured the check would be a
 no-op today anyway; when an agent verb gains assignment, that guard is what it
 needs.
 
-**Keyboard.** Focus a card, press `m`, choose a column — the same targets, the
+**Keyboard.** Focus a card, press `m`, and Move to… opens — the same list, the
 same routes, the same refusals. A board that needs a mouse is a board you
 cannot use half the time. `Esc` closes any picker; `Enter` opens the card.
 

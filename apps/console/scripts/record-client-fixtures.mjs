@@ -291,6 +291,16 @@ ids.blockedTask = Number((await one(
 ids.reportedTask = Number((await one(`INSERT INTO work (id, title, project, kind, status, created_by, closed_at) OVERRIDING SYSTEM VALUE VALUES (42, 'Measure the recorder run time', $1, 'task', 'closed', 'user', now()) RETURNING id`, [P])).id);
 await pool.query(`INSERT INTO runs (component, kind, ok, started_at, finished_at, meta) VALUES ('crew:fixtures', 'crew_run', true, now(), now(), jsonb_build_object('work_id', $1::bigint, 'reports', 1))`, [ids.reportedTask]);
 
+// the session archive (T3-9): one session the fold has not read yet, one it
+// has — what Purge Now's preview names, and what it leaves unnamed
+await pool.query(
+  `INSERT INTO session_archive (session_id, thread, turn_id, ts, system_prompt, messages, tool_calls, folded_at, expires_at) VALUES
+     ('7b1f2c9e-0000-4000-8000-000000000001', 'default', 'turn-fixture-1', '2026-09-28T12:00:00Z', 'you are Aide', '[{"role":"user","content":"what is on today?"}]', '[]', NULL,  now() + interval '30 days'),
+     ('7b1f2c9e-0000-4000-8000-000000000001', 'default', 'turn-fixture-2', '2026-09-28T12:04:00Z', 'you are Aide', '[{"role":"user","content":"and tomorrow?"}]',     '[]', NULL,  now() + interval '30 days'),
+     ('7b1f2c9e-0000-4000-8000-000000000002', 'fold',    'turn-fixture-3', '2026-09-27T21:00:00Z', 'you are Aide', '[{"role":"user","content":"fold the day"}]',      '[]', now(), now() + interval '30 days')
+   ON CONFLICT (session_id, turn_id) DO NOTHING`,
+);
+
 // devices: two sessions on one passkey — one to list, one to revoke
 const pkId = `fixture-${mintToken(6)}`;
 await authStore.storePasskey(pool, { id: pkId, publicKey: new Uint8Array([1]), signCount: 0, transports: ["internal"], origin: "http://127.0.0.1:8080", label: "iPhone" });
@@ -393,6 +403,9 @@ const REQUESTS = [
   ["POST /api/compute/assign", () => ({ path: "/api/compute/assign", body: { tier: "deep", model: "openrouter/anthropic/claude-opus-4", effort: "high" } })],
   ["POST /api/compute/budget", () => ({ path: "/api/compute/budget", body: { scope: "provider:openrouter", daily: 5, monthly: 60, action: "stop" } })],
   ["POST /api/compute/providers/test", () => ({ path: "/api/compute/providers/test", body: { name: "lmstudio" } })],
+
+  // Purge Now's first step: the preview, which deletes nothing (a confirmed purge would empty what later fixtures read)
+  ["POST /api/sessions/purge", () => ({ path: "/api/sessions/purge", body: { confirm: false } })],
 
   ["POST /api/vault-tasks/:task_key/check", () => ({ path: "/api/vault-tasks/mt-7f3k2a/check", body: { checked: true, seen_text: TASK_TEXT }, key: "tick-0928-0001" })],
   ["POST /api/vault-tasks/:task_key/schedule", () => ({ path: "/api/vault-tasks/mt-4q8r2d/schedule", body: { do: "2026-09-30", seen_text: DEFER_TEXT }, key: "defer-0928-0001" })],

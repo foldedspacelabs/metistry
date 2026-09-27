@@ -115,7 +115,8 @@ before any handler runs, with no second list in the server:
 
 `local_only` is `packages/core`'s error code for this answer, status `403`.
 Served `local` rows today: `POST /api/agents` and `POST /api/agents/:id/rotate`
-— minting a bearer is a boundary change. `metistry connect` mints through both
+— minting a bearer is a boundary change — and `POST /api/sessions/purge`, which
+is irreversible. `metistry connect` mints through the first two
 with the local owner token, so it is unaffected; the legacy PWA's agent panel
 can no longer register or rotate an agent.
 
@@ -310,7 +311,7 @@ takes a `since` cursor and answers with the next one.
 | `GET /api/runs/:id` | owner | session · local_owner | natural | — | — | served | one run in full, with the tool calls of its turn |
 | `GET /api/turns/:turn_id/progress` | owner | session · local_owner | natural | — | — | T2-17 | a turn's tool calls so far: the working indicator |
 | `GET /api/sessions/:id` | owner | session · local_owner | natural | — | — | T2-17 | one archived session |
-| `POST /api/sessions/purge` | local | local_owner | no | — | — | T3-9 | purge the session archive now; the confirm names unfolded sessions |
+| `POST /api/sessions/purge` | local | local_owner | no | — | — | served | purge the session archive now; the confirm names unfolded sessions |
 | `GET /api/instances` | owner | session · local_owner | natural | — | — | served | the linked instances (`instances.yaml`) |
 | `GET /api/commands` | owner | session · local_owner | natural | — | — | served | the composer's commands and agents, generated from the rules and the registry |
 | `GET /api/compute` | owner | session · local_owner | natural | — | — | served | providers, assignments, budgets and spend |
@@ -1149,14 +1150,34 @@ GET  /api/runs/export?since=&until=&component=&limit=   200 application/x-ndjson
 GET  /api/runs/:id                                      200 {"run":{…},"as_of":"…"}
 GET  /api/turns/:turn_id/progress                       T2-17 — the `turn_progress` named query: running tool names, the working indicator
 GET  /api/sessions/:id                                  T2-17 — the `session_detail` named query: Run detail's conversation
-POST /api/sessions/purge                                T3-9 — reach local: purge the session archive now
+POST /api/sessions/purge   {confirm?, as_of?}           200 {"purged":false,"sessions","turns","sessions_unfolded","unfolded":[…],"as_of"}
+                           {confirm: true, as_of?}      200 {"purged":true,"sessions","turns","sessions_unfolded","as_of"}
+400 — `confirm` is not true/false, or `as_of` is not a timestamp
 ```
 
 The timeline itself is the `activity_feed` and `runs_summary` named queries
-through `GET /api/q/:name`; there is no `runs` list route. **Purge Now** is
-irreversible, so it is `local`: its confirm names the sessions not yet folded
-into knowledge and offers *Fold First*; the retention the purge routine keeps
-is its Scheduled configuration (§2.5).
+through `GET /api/q/:name`; there is no `runs` list route.
+
+**The session archive** (migration 0030, T3-9) is written by the engine, not
+by any route: every finished turn — chat and machine-enqueued alike — is
+appended with the system prompt as sent, the messages that turn added, and
+each tool call's arguments and result, all through `core/redact.ts` before the
+row is written (`apps/assistant/src/archive.ts`). Each row expires 30 days
+after it is written and starts unfolded (`folded_at` NULL — the session fold's
+queue). The scheduled `session-purge` routine deletes what has expired, and
+anything older than its `retention_days` (Scheduled config, 1–30, default 30).
+
+**Purge Now** is irreversible, so it is `local`, and it is two steps on one
+door. A body without `confirm: true` deletes **nothing** and answers what a
+purge would cost: every archived session and turn, the exact count of sessions
+the fold has not read yet (`sessions_unfolded`), and the newest fifty of them
+by name (`unfolded`: `session_id`, `thread`, `turns`, `unfolded_turns`,
+`first_ts`, `last_ts`) — what the confirm names before it offers *Fold First*.
+`{confirm: true}` deletes every archived turn, folded or not; pass the
+preview's `as_of` back and it deletes exactly what was counted, so a turn
+archived while the confirm was open is kept. The purge is audited (`runs`:
+`kind = sessions`, `tool = purge`, with the counts). The retention the purge
+routine keeps is its Scheduled configuration (§2.5).
 
 #### `GET /api/runs/export` — the audit ledger as NDJSON (S5)
 

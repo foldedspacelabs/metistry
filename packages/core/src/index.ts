@@ -389,6 +389,8 @@ export {
   INSTANCE_GITIGNORE_LINES,
   JOURNAL_DIR,
   JOURNAL_MACHINE_DIRS,
+  JOURNAL_ROUTINE_DIRS,
+  journalRoutineOf,
   LEGACY_INSTANCE_LAYOUT,
   LEGACY_MACHINERY_ROOTS,
   LEGACY_VAULT_DIR,
@@ -1220,9 +1222,22 @@ export {
   type SectionMissingReason,
 } from "./note-section.js";
 export {
+  MAX_PROSE_LINE_CHARS,
+  PROSE_PENDING,
+  fillProseSlots,
+  pendingProseSlots,
+  proseLineProblem,
+  proseMarker,
+  writtenMarker,
+  type ProseFill,
+  type ProseSlot,
+} from "./prose-slots.js";
+export {
   DEFAULT_RECURRING_MAX_PER_DAY,
   DEFAULT_TEMPLATE_MAX_BYTES,
   FOLD_SOURCE,
+  PROSE_REFUSAL,
+  PROSE_SOURCES,
   RECURRING_QUERY,
   REQUESTS_QUERY,
   SECTION_EMPTY_MODES,

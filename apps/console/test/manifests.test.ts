@@ -189,6 +189,7 @@ describe("shipped manifests schedule through the runner", () => {
     const said = Object.fromEntries(r.map((x) => [x.name, describeSchedule(x.schedule)]));
     expect(said).toEqual({
       "morning-brief": "working days at 07:00",
+      standup: "working days at 08:00", // T3-5: an hour after the brief, which embeds it
       "knowledge-fold": "every day at 21:00",
       "plan-tomorrow": "the eve of working days at 23:00",
       "reply-review": "every day at 23:00",
@@ -203,8 +204,8 @@ describe("shipped manifests schedule through the runner", () => {
   // T3-2's acceptance: Scheduled lists §2.5's defaults at their times — the
   // listing the Scheduled routes serve (T3-3), resolved from the SHIPPED
   // manifests through their registries, each first occurrence through
-  // T3-1's `nextOccurrence`. Standup is the eighth default; its routine (and
-  // the manifest that carries working days 08:00) is T3-5's.
+  // T3-1's `nextOccurrence`. Standup is the eighth default, working days at
+  // 08:00 (T3-5).
   it("Scheduled lists §2.5's defaults at those times, each resolving to its first occurrence", async () => {
     const units = [
       ...(await loadCollectors({ home: `${root}collectors` })).collectors,
@@ -222,11 +223,17 @@ describe("shipped manifests schedule through the runner", () => {
       ["Tomorrow's Plan", "the eve of working days at 23:00", "2026-09-20 23:00", true], // Sunday plans Monday
       ["Reply Review", "every day at 23:00", "2026-09-20 23:00", true],
       ["Session Purge", "every day at 04:00", "2026-09-21 04:00", true], // T3-9's archive retention; Monday 04:00 is the next 04:00 after Sunday noon
+      ["Standup", "working days at 08:00", "2026-09-21 08:00", true], // T3-5; Monday — Sunday is not a working day
       ["Update Check", "every day at 06:00", "2026-09-21 06:00", true], // T2-18's release check; Monday 06:00 is the next 06:00 after Sunday noon
       ["Weekly Review", "sun at 18:00", "2026-09-20 18:00", true],
     ]);
     // Session Purge's retention_days is declared, so the owner's value applies rather than holding it
     expect(listing.routines.find((r) => r.name === "session-purge")?.config).toEqual({ retention_days: { value: 30, origin: "default" } });
+    // …and so are Standup's two (§2.5's example entry names both)
+    expect(listing.routines.find((r) => r.name === "standup")?.config).toEqual({
+      template: { value: "Templates/Standup.md", origin: "default" },
+      skip_without_calendar_event: { value: false, origin: "default" },
+    });
     // Inbox Sort and Usage Rollup are collectors that present as routines; everything else a collector is, is a sync
     expect(listing.routines.filter((r) => ["inbox-drain", "claude-usage"].includes(r.name)).map((r) => r.section)).toEqual(["routines", "routines"]);
     expect(listing.syncs.map((s) => [s.name, s.displayName, s.describe])).toEqual([

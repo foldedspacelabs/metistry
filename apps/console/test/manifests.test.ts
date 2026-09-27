@@ -240,6 +240,7 @@ describe("shipped manifests schedule through the runner", () => {
       ["aws-costs", "AWS Costs", "every 6h"],
       ["devin-knowledge", "Devin Knowledge", "every 1h"],
       ["devin-sessions", "Devin Sessions", "every 5m"],
+      ["eventkit-calendar", "Calendar", "every 5m"], // T2-11: the owner's calendars on this Mac into calendar_events
       ["github-state", "GitHub", "every 15m"],
       ["linear", "Linear", "every 15m"],
     ]);

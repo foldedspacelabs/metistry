@@ -222,7 +222,8 @@ const one = async (sql, params = []) => (await pool.query(sql, params)).rows[0];
 await pool.query(`INSERT INTO projects (id, title, area, mode) VALUES ($1, 'Metistry', 'Projects/Metistry', 'review') ON CONFLICT (id) DO NOTHING`, [P]);
 ids.task = Number((await one(`INSERT INTO work (title, project, kind, status, created_by, due) VALUES ('Freeze the store interface', $1, 'task', 'open', 'user', current_date + 1) RETURNING id`, [P])).id);
 ids.dispatchTask = Number((await one(`INSERT INTO work (title, project, kind, status, created_by) VALUES ('Open the release checklist', $1, 'task', 'open', 'user') RETURNING id`, [P])).id);
-ids.roomTask = Number((await one(`INSERT INTO work (title, project, kind, status, created_by) VALUES ('Decide the fixture format', $1, 'task', 'in_progress', 'user') RETURNING id`, [P])).id);
+// a card its creator described (T1-1, C85) — the board's `description`, set at create
+ids.roomTask = Number((await one(`INSERT INTO work (title, project, kind, status, created_by, description) VALUES ('Decide the fixture format', $1, 'task', 'in_progress', 'user', 'One JSON per route, recorded from a scratch console; the views are built against them.') RETURNING id`, [P])).id);
 
 const outboundMessage = async (text) => Number((await one(`INSERT INTO outbound_messages (thread, text, kind) VALUES ('default', $1, 'reply') RETURNING id`, [text])).id);
 await pool.query(`INSERT INTO inbound_messages (thread, text, status) VALUES ('default', 'what is on today?', 'done')`);
@@ -356,7 +357,7 @@ const REQUESTS = [
   ["POST /api/agents/:id/revoke", () => ({ path: `/api/agents/${ids.revokeAgent}/revoke`, body: {} })],
 
   ["PUT /api/projects/:slug", () => ({ path: `/api/projects/${P}`, body: { mode: "review", daily_budget_usd: 5 } })],
-  ["PATCH /api/tasks/:id", () => ({ path: `/api/tasks/${ids.task}`, body: { title: "Freeze the store interface (F-7)" } })],
+  ["PATCH /api/tasks/:id", () => ({ path: `/api/tasks/${ids.task}`, body: { title: "Freeze the store interface (F-7)", description: "One protocol per store, and every method answers from a fixture before its route is served." } })],
   ["POST /api/tasks/:id/claim", () => ({ path: `/api/tasks/${ids.task}/claim`, body: { lease_seconds: 3600 } })],
   ["POST /api/tasks/:id/renew", () => ({ path: `/api/tasks/${ids.task}/renew`, body: { note: "halfway", lease_seconds: 3600 } })],
   ["POST /api/tasks/:id/release", () => ({ path: `/api/tasks/${ids.task}/release`, body: { note: "back to the board" } })],

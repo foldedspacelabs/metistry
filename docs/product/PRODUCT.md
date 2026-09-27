@@ -625,7 +625,7 @@ yours, in your git, on your machine.
   images/PDF natively under `no-store`. 53 new tests across package,
   mcp-brain, and console.
 - 2026-09-07 — Proxy/routing-layer research (Quotio, CLIProxyAPI,
-  LiteLLM; `docs/research/2026-09-agent-proxy-routing.md`): "support any
+  LiteLLM; the note was withdrawn before the repo went public): "support any
   agent" is already true through the one MCP door — no adapters, ever;
   the product-facing addition is `metistry connect <client>`. Provider
   gateways stay declarative config that can pool accounts but never pick

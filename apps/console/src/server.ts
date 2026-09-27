@@ -18,7 +18,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
-import { API_VERSION, API_VERSION_HEADER, AREA_PREFIX_REFUSAL, runCheck, startRun, finishRun, errorEnvelope, intEnv, may, parseAction, noRouteMessage, PROJECT_SLUG_RE, rollSession, statusFor, servedRoute, isLocalRoute, localOnlyMessage, routeKey, SKIP_FEEDBACK, validAgentAreaGrant, type CheckResult, type Compute, type ErrorEnvelope, type Principal } from "@foldedspacelabs/metistry-core";
+import { API_VERSION, API_VERSION_HEADER, AREA_PREFIX_REFUSAL, runCheck, startRun, finishRun, errorEnvelope, intEnv, may, parseAction, noRouteMessage, PROJECT_SLUG_RE, rollSession, statusFor, servedRoute, isLocalRoute, localOnlyMessage, routeKey, SKIP_FEEDBACK, validAgentAreaGrant, type CheckResult, type Compute, type ErrorCode, type ErrorEnvelope, type Principal } from "@foldedspacelabs/metistry-core";
 import { QueryError, QueryStore } from "@foldedspacelabs/metistry-queries";
 import { captureToInbox, createBrainServer, dirSink, type CaptureSink, type KnowledgeLister, type KnowledgeReader, type KnowledgeVaultSearcher, type KnowledgeWriter, type QueryEmbedder } from "@foldedspacelabs/metistry-mcp-brain";
 import { TasksError, TasksService } from "@foldedspacelabs/metistry-tasks";
@@ -1266,6 +1266,40 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
   }
 
   /**
+   * **C45** (design-system amendments §2.4): an answer whose consequence
+   * fails leaves the request PENDING and says why on the row itself —
+   * `payload.error = {code, message, decision, at, …details}` — before the
+   * refusal goes back. Every device that draws the row then shows a failure
+   * rather than a decision, and the owner still has one to make; there is
+   * deliberately no retry. Guarded on `decision = 'pending'` so a failure can
+   * never annotate a row somebody else settled in the meantime, and it does
+   * not move `changed_at` (a payload write is not a change to the question),
+   * so answering again with the same `if_unchanged` is not refused as stale.
+   *
+   * Every consequential branch of `decideProposal` refuses through here, and
+   * apps/console/test/c45.integration.test.ts holds each one to it.
+   */
+  async function refuseAnswer(id: string, verb: string, code: ErrorCode, message: string, details: Record<string, unknown> = {}): Promise<DecisionOutcome> {
+    await db.query(
+      `UPDATE proposals SET payload = payload || jsonb_build_object('error', $2::jsonb) WHERE id = $1 AND decision = 'pending'`,
+      [id, JSON.stringify({ code, message, decision: verb, at: new Date().toISOString(), ...details })],
+    );
+    return { status: statusFor(code), body: { ...errorEnvelope(code, message), ...details } };
+  }
+
+  /**
+   * A consequence that THREW rather than refused: the same C45 record, but
+   * `internal` and with no detail — `payload.error` crosses the wire on
+   * `GET /api/proposals`, and an internal error's detail goes to the log and
+   * `runs` only (core's errors.ts). The throw continues to the route's own
+   * uniform 500.
+   */
+  async function failedAnswer(id: string, verb: string, err: unknown): Promise<never> {
+    await refuseAnswer(id, verb, "internal", "the answer could not be carried out; the detail is in the console log").catch(() => {});
+    throw err;
+  }
+
+  /**
    * One answer to one proposal. Extracted so the single route and the batch
    * route cannot drift: a verb must not mean two things depending on which
    * door it came through — the same reason answering an enrolment from Needs
@@ -1344,16 +1378,16 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     // pending instead of silently dropping the change.
     let applied: { path: string; created: boolean } | undefined;
     if (row.kind === "improvement" && verb === "allow") {
-      if (!cfg.vault) return { status: statusFor("not_available"), body: errorEnvelope("not_available", "applying an improvement proposal writes assistant-prompt.md, and no vault bridge is configured in this deployment — METISTRY_RECONCILER_URL + METISTRY_BRIDGE_TOKEN_RECONCILER (docs/ops/reconciler.md)") };
+      if (!cfg.vault) return refuseAnswer(id, verb, "not_available", "applying an improvement proposal writes assistant-prompt.md, and no vault bridge is configured in this deployment — METISTRY_RECONCILER_URL + METISTRY_BRIDGE_TOKEN_RECONCILER (docs/ops/reconciler.md)");
       try {
         const r = await applyImprovement(cfg.vault, row.payload, row.id);
         applied = { path: r.path, created: r.created };
       } catch (err) {
         if (err instanceof VaultError) {
           await audit("triage", "improvement", false, { proposal: row.id, error: err.code });
-          return { status: statusFor(err.code), body: errorEnvelope(err.code, err.message) };
+          return refuseAnswer(id, verb, err.code, err.message);
         }
-        throw err;
+        return failedAnswer(id, verb, err);
       }
     }
 
@@ -1369,17 +1403,13 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       const parsed = parseAction((row.payload as { action?: unknown } | null)?.action);
       if (!parsed.ok) {
         await audit("triage", "action", false, { proposal: row.id, error: parsed.error });
-        return { status: statusFor("invalid_request"), body: errorEnvelope("invalid_request", `this proposal does not carry a valid action — ${parsed.error}`) };
+        return refuseAnswer(id, verb, "invalid_request", `this proposal does not carry a valid action — ${parsed.error}`);
       }
-      const r = await runAction(actionServices(), parsed.action, { proposalId: Number(row.id), onBehalfOf: String(row.source_agent) });
+      const r = await runAction(actionServices(), parsed.action, { proposalId: Number(row.id), onBehalfOf: String(row.source_agent) }).catch((err: unknown) => failedAnswer(id, verb, err));
       if (!r.ok) {
         // the row stays pending, carrying why: the user still has a decision
-        await db.query(
-          `UPDATE proposals SET payload = payload || jsonb_build_object('error', $2::jsonb) WHERE id = $1 AND decision = 'pending'`,
-          [id, JSON.stringify({ code: r.code, message: r.message, at: new Date().toISOString(), ...(r.details ?? {}) })],
-        );
         await audit("triage", `action:${parsed.action.kind}`, false, { proposal: row.id, action: parsed.action.kind, on_behalf_of: row.source_agent, error: r.code });
-        return { status: statusFor(r.code), body: { ...errorEnvelope(r.code, r.message), ...(r.details ?? {}) } };
+        return refuseAnswer(id, verb, r.code, r.message, r.details ?? {});
       }
       acted = { kind: parsed.action.kind, ...r.result };
       await db.query(
@@ -1415,9 +1445,9 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       } catch (err) {
         if (err instanceof TasksError) {
           await audit("triage", "accept_as_work", false, { proposal: row.id, error: err.code });
-          return { status: statusFor(err.code === "conflict" ? "conflict" : "invalid_request"), body: errorEnvelope(err.code === "conflict" ? "conflict" : "invalid_request", err.message) };
+          return refuseAnswer(id, verb, err.code === "conflict" ? "conflict" : "invalid_request", err.message);
         }
-        throw err;
+        return failedAnswer(id, verb, err);
       }
     }
 
@@ -1434,6 +1464,13 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       const approved = verb === "approve";
       const ok = approved ? await agents.approveAgent(db, enrollAgent) : await agents.revokeAgent(db, enrollAgent);
       await audit("agent_admin", approved ? "approve" : "revoke", ok, { agent: enrollAgent, op: approved ? "approve" : "revoke", via: "triage", proposal: row.id });
+      // An approval that let nobody in (the agent was revoked, or is gone,
+      // since it asked) is a failed consequence, not an answer: C45 keeps the
+      // row pending with the reason. A `deny` that finds the agent already
+      // revoked is different — its consequence, nobody gets in, already holds.
+      if (approved && !ok) {
+        return refuseAnswer(id, verb, "not_found", `${enrollAgent} is revoked or no longer registered — there is nothing to let in. Decline or Skip this request.`);
+      }
       enrolled = { agent: enrollAgent, approved };
     }
 
@@ -1454,14 +1491,14 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       const asked = agents.accessArea(row.payload);
       if (asked === undefined) {
         await audit("triage", "access_request", false, { proposal: row.id, error: "no_area" });
-        return { status: statusFor("invalid_request"), body: errorEnvelope("invalid_request", "this request does not name a vault area this console would grant — Decline it (the asking tool validates the prefix, so a row without one was not written by request_access)") };
+        return refuseAnswer(id, verb, "invalid_request", "this request does not name a vault area this console would grant — Decline it (the asking tool validates the prefix, so a row without one was not written by request_access)");
       }
       // Revise carries the prefix the owner is granting INSTEAD. It is
       // validated here with the grant validator's own rule, so the narrowing
       // gesture cannot smuggle in a shape the form would have refused.
       const area = verb === "accept_with_changes" ? (typeof body.area === "string" ? body.area.trim() : "") : asked;
       if (verb === "accept_with_changes" && !validAgentAreaGrant(area)) {
-        return { status: statusFor("invalid_request"), body: errorEnvelope("invalid_request", `revising an access request means granting a different area: send {"area": "…"} with it — ${AREA_PREFIX_REFUSAL}. To refuse it outright, Decline.`) };
+        return refuseAnswer(id, verb, "invalid_request", `revising an access request means granting a different area: send {"area": "…"} with it — ${AREA_PREFIX_REFUSAL}. To refuse it outright, Decline.`);
       }
       const target = String(row.source_agent);
       const current = (await agents.listAgents(db)).find((a) => a.id === target && !a.revoked);
@@ -1482,10 +1519,12 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       // where ITS scope comes from.
       if (current && current.kind !== "external" && current.kind !== "internal") {
         await audit("triage", "access_request", false, { proposal: row.id, agent: target, error: "configured_scope" });
-        return {
-          status: statusFor("forbidden"),
-          body: errorEnvelope("forbidden", `${target}'s scope is configuration, not a grant: it is re-synced from its manifest (\`scope:\` in agents/<area>/${target}.md), so approving this would be undone at the next crew sync. Decline this request and edit that file (docs/ops/actions.md).`),
-        };
+        return refuseAnswer(
+          id,
+          verb,
+          "forbidden",
+          `${target}'s scope is configuration, not a grant: it is re-synced from its manifest (\`scope:\` in agents/<area>/${target}.md), so approving this would be undone at the next crew sync. Decline this request and edit that file (docs/ops/actions.md).`,
+        );
       }
       if (!current) {
         // A revoked (or vanished) agent cannot be granted anything: its token
@@ -1495,12 +1534,12 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         // — agents.ts's `settleAccessRequests` — so this is the row that
         // predates that, or a race with it.)
         await audit("triage", "access_request", false, { proposal: row.id, agent: target, error: "revoked" });
-        return { status: statusFor("not_found"), body: errorEnvelope("not_found", `${target} is revoked or no longer registered — there is nothing to widen. Decline or Skip this request.`) };
+        return refuseAnswer(id, verb, "not_found", `${target} is revoked or no longer registered — there is nothing to widen. Decline or Skip this request.`);
       }
       try {
         const widened = agents.widenedGrants(current.grants, area);
         const { ok, grants } = await writeGrants(target, widened, "triage", { proposal: row.id, area, ...(area === asked ? {} : { asked }) });
-        if (!ok) return { status: statusFor("not_found"), body: errorEnvelope("not_found", `${target} is revoked or no longer registered — there is nothing to widen. Decline or Skip this request.`) };
+        if (!ok) return refuseAnswer(id, verb, "not_found", `${target} is revoked or no longer registered — there is nothing to widen. Decline or Skip this request.`);
         // For a row whose grants come back from configuration at every start,
         // the write above holds until the next restart and no further: the
         // approval itself is the durable record (0023), merged on top of the
@@ -1513,9 +1552,9 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       } catch (err) {
         if (err instanceof agents.AgentError) {
           await audit("triage", "access_request", false, { proposal: row.id, agent: target, error: err.code });
-          return { status: statusFor(err.code), body: errorEnvelope(err.code, err.message) };
+          return refuseAnswer(id, verb, err.code, err.message);
         }
-        throw err;
+        return failedAnswer(id, verb, err);
       }
       // The outcome rides on the row, as the action path's does: what was
       // granted, to whom, by whom, and what was asked for when they differ.

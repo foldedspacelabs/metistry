@@ -39,6 +39,7 @@ import { memoryVault } from "@foldedspacelabs/metistry-artifacts";
 import { API_VERSION, API_VERSION_HEADER, CLIENT_API, isLocalRoute, matchRoute, mintToken, routeKey, servedRoute, type ClientPrincipal, type ClientRoute } from "@foldedspacelabs/metistry-core";
 import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
 import { makeServer } from "../src/server.js";
+import { EventHub } from "../src/events.js";
 import { wasUnrouted } from "../src/http-util.js";
 import * as store from "../src/auth-store.js";
 import * as agents from "../src/agents.js";
@@ -338,7 +339,25 @@ describe.skipIf(!hasDb)("the client API table against the console that serves it
     const body = await r.json();
     expect(body.api_version).toBe(API_VERSION);
     expect(r.headers.get(API_VERSION_HEADER)).toBe(String(API_VERSION));
-    expect(body.capabilities.includes("events")).toBe(servedRoute("GET", "/api/events") !== undefined);
+    // this console has no events hub, so its GET /api/events is a 503 — and it does not advertise one
+    expect(body.capabilities.includes("events")).toBe(false);
+    // the same console with a hub advertises it exactly while the table serves the route
+    const wired = makeServer(pool, new QueryStore(pool), {
+      origin: "http://127.0.0.1:0",
+      inboxDir: await mkdtemp(join(tmpdir(), "metistry-client-api-events-")),
+      policy,
+      secureCookies: false,
+      identity: { instance_id: "8b6a3a2e-1111-4222-8333-444455556666", name: "Probe", icon: null },
+      events: new EventHub(),
+    });
+    await new Promise<void>((res) => wired.listen(0, "127.0.0.1", res));
+    try {
+      const w = await (await fetch(`http://127.0.0.1:${(wired.address() as AddressInfo).port}/api/identity`)).json();
+      expect(w.capabilities.includes("events")).toBe(servedRoute("GET", "/api/events") !== undefined);
+      expect(servedRoute("GET", "/api/events")).toBeDefined();
+    } finally {
+      await new Promise<void>((res) => wired.close(() => res()));
+    }
   });
 
   it("every answer carries the version header — refusals and no-route answers included", async () => {

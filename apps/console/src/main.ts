@@ -43,6 +43,7 @@ import { ASSISTANT_DEFAULT_AREAS, INTERNAL_ASSISTANT_ID, ensureInternalAgent, li
 import { httpVaultClient } from "./vault-client.js";
 import { SCHEDULED_PATH, STANDUP_MOVE_RETRY_MS, fileOverlay, startStandupMove } from "./profile-tidy.js";
 import { httpVaultStatus } from "./vault-status.js";
+import { httpVaultReverter } from "./vault-rollback.js";
 import { vaultBridgeHistory, vaultBridgeSearch } from "./knowledge-routes.js";
 import type { ComputeAdmin } from "./compute-routes.js";
 import type { SecretsView } from "./secrets-route.js";
@@ -544,6 +545,7 @@ const server = makeServer(pool, queries, {
   ...(planTomorrow ? { planTomorrow } : {}),
   // GET /api/vault/status: the reconciler's sync status over the same bridge (T10-2)
   ...(reconcilerUrl && reconcilerToken ? { vaultStatus: httpVaultStatus({ url: reconcilerUrl, token: reconcilerToken }) } : {}),
+  ...(reconcilerUrl && reconcilerToken ? { vaultRevert: httpVaultReverter({ url: reconcilerUrl, token: reconcilerToken }) } : {}),
   crews,
   scheduled: scheduledAdmin,
   compute: () => compute.store.current,

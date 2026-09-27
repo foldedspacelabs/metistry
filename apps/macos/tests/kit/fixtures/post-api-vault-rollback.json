@@ -1,28 +1,128 @@
 {
   "route": "POST /api/vault/rollback",
-  "source": "contract",
-  "ticket": "T10-6",
-  "note": "reach local; {commit} | {to: <date>} | {file: <path>}; raises a Needs You request with the preview, never rewrites history",
+  "source": "recorded",
+  "ticket": null,
   "request": {
     "method": "POST",
     "path": "/api/vault/rollback",
     "body": {
-      "commit": "4c1d2e3f"
+      "commit": "9ab8c7d6"
     },
     "idempotency_key": null
   },
   "status": 202,
   "body": {
     "ok": true,
-    "proposal_id": "62",
+    "proposal_id": "7",
+    "raised": true,
     "preview": {
       "reverts": [
-        "4c1d2e3f"
+        "9ab8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0"
       ],
       "files": [
         "Projects/Metistry/Roadmap.md"
       ],
-      "skipped_config": []
+      "skipped_config": [
+        ".metistry/compute.yaml"
+      ],
+      "config": [],
+      "include_config": false,
+      "head": "4c1d2e3f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d",
+      "base": {
+        "sha": "1f2e3d4c5b6a79880706a5b4c3d2e1f0a9b8c7d6",
+        "subject": "Start the plan",
+        "author": "user",
+        "date": "2026-09-27T14:10:00-04:00"
+      },
+      "revert_count": 1,
+      "commits": [
+        {
+          "sha": "9ab8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0",
+          "subject": "Fold: the store interface",
+          "author": "assistant",
+          "date": "2026-09-27T23:00:00-04:00"
+        }
+      ],
+      "changes": [
+        {
+          "path": "Projects/Metistry/Roadmap.md",
+          "change": "modified"
+        }
+      ]
+    },
+    "proposal": {
+      "id": "7",
+      "ts": "2026-09-27T04:47:50.725Z",
+      "kind": "improvement",
+      "source_agent": "console",
+      "trust": "user",
+      "payload": {
+        "body": {
+          "kind": "before_after",
+          "after": {
+            "text": "Projects/Metistry/Roadmap.md — goes back\n\nLeft as they are (configuration): .metistry/compute.yaml",
+            "label": "Put back as of 2026-09-27"
+          },
+          "before": {
+            "text": "9ab8c7d Fold: the store interface — assistant, 2026-09-27",
+            "label": "The commit it undoes"
+          },
+          "heading": "What Approve Undoes"
+        },
+        "title": "Undo “Fold: the store interface” (9ab8c7d)",
+        "summary": "Undo “Fold: the store interface” (9ab8c7d) — 1 commit undone, 1 file put back. Approve makes one new commit, as you; the history keeps every commit it undoes, and undoing it is rolling back that commit. Configuration is left as it is (.metistry/compute.yaml). Revise and Decline change nothing.",
+        "rollback": {
+          "head": "4c1d2e3f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d",
+          "files": [
+            "Projects/Metistry/Roadmap.md"
+          ],
+          "config": [],
+          "target": {
+            "commit": "9ab8c7d6"
+          },
+          "reverts": [
+            "9ab8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0"
+          ],
+          "include_config": false,
+          "skipped_config": [
+            ".metistry/compute.yaml"
+          ]
+        }
+      },
+      "decision": "pending",
+      "decided_at": null,
+      "work_id": null,
+      "snoozed_until": null,
+      "request": {
+        "type": "improvement",
+        "word": "improvement",
+        "body": "before_after",
+        "primary": {
+          "label": "Approve",
+          "sends": {
+            "decision": "allow"
+          }
+        },
+        "revise": {
+          "label": "Revise",
+          "sends": {
+            "decision": "accept_with_changes"
+          },
+          "carries": "feedback"
+        },
+        "decline": {
+          "label": "Decline",
+          "sends": {
+            "decision": "deny"
+          }
+        },
+        "grouped": false,
+        "decisions": [
+          "allow",
+          "accept_with_changes",
+          "deny"
+        ]
+      }
     }
   }
 }

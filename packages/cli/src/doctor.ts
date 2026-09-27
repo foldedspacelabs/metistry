@@ -64,6 +64,9 @@ import { readSupervisorConfig, supervisorConfigPath, controlRequest, SUPERVISOR_
 import { SANDBOX_EXEC, UNCONFINED_PROFILE_REL } from "./sandbox.js";
 import { applyPorts, loadNamespace, type Namespace } from "./namespace.js";
 import { defaultUi, padTo, statusName, visibleWidth, type Ui } from "./ui.js";
+import { envPaths, readInstanceId } from "./instance.js";
+import { securityPresence } from "./keychain.js";
+import { MIGRATE_SCOPE_COMMAND, sharedScopeStatus } from "./secrets.js";
 
 export interface Db {
   query(text: string, values?: unknown[]): Promise<{ rows: any[] }>;
@@ -97,6 +100,8 @@ export interface DoctorDeps {
   platform?: NodeJS.Platform;
   uid?: number;
   timeoutMs?: number;
+  /** test seam: the Keychain presence probe the shared-scope row asks (default: `security` without -w, on darwin) — never a value */
+  keychainProbe?: (service: string, account: string) => Promise<boolean>;
 }
 
 // ---- manifests ------------------------------------------------------------
@@ -435,6 +440,44 @@ export async function inboxRow(instanceDir: string): Promise<DoctorRow> {
         status: "degraded",
         remediation: "the pre-#156 layout: run `metistry migrate-inbox --dry-run` to see the plan, then `metistry migrate-inbox` to move captures into the vault inbox (docs/ops/inbox.md)",
         meta: { dir: legacyDir, entries: entries.length, gitignored },
+      };
+    })),
+  };
+}
+
+// ---- the retired shared scope (plan §2.14, T4-3) --------------------------------
+//
+// One row, and only for an instance with an id on a Mac: whether a
+// third-party credential this instance uses is still only under the per-user
+// account (run migrate-scope), or copied with the shared original left
+// behind (purge-shared). Presence probes only — never a value, never a
+// prompt — and never `failed`: an unmigrated instance runs exactly as before.
+
+export async function sharedScopeRow(o: { instanceDir: string; productDir: string; env: NodeJS.ProcessEnv; probe: (service: string, account: string) => Promise<boolean> }): Promise<DoctorRow | undefined> {
+  const instanceId = await readInstanceId(o.instanceDir).catch(() => undefined);
+  if (!instanceId) return undefined;
+  const envFile = envPaths({ instanceDir: o.instanceDir, productDir: o.productDir })?.read[0];
+  return {
+    kind: "instance",
+    ...(await runCheck("shared scope", "no third-party credential left in the retired per-user Keychain account", async () => {
+      let status;
+      try {
+        status = await sharedScopeStatus({ instanceDir: o.instanceDir, instanceId, envFile, exampleFile: join(o.productDir, ".env.example"), env: o.env, probe: o.probe });
+      } catch (err) {
+        return { status: "degraded", remediation: `could not ask the Keychain (${err instanceof Error ? err.message : String(err)}) — \`${MIGRATE_SCOPE_COMMAND} --instance ${o.instanceDir}\` says what is left` };
+      }
+      if (!status || status.originals.length === 0) return;
+      if (status.unmigrated.length > 0) {
+        return {
+          status: "degraded",
+          remediation: `${status.unmigrated.join(", ")} still only in the retired shared scope — this instance reads them from .env until you run \`${MIGRATE_SCOPE_COMMAND} --instance ${o.instanceDir}\` (it copies them in and deletes nothing; \`metistry update\` runs it too)`,
+          meta: { unmigrated: status.unmigrated, originals: status.originals },
+        };
+      }
+      return {
+        status: "degraded",
+        remediation: `copied into this instance; the shared originals of ${status.originals.join(", ")} remain — \`metistry secrets purge-shared\` previews removing each one every instance on this Mac has copied`,
+        meta: { unmigrated: [], originals: status.originals },
       };
     })),
   };
@@ -1232,7 +1275,7 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
   // model servers. Concurrently it is the slowest single probe. Nothing about
   // any one check changes — no timeout was shortened to buy this, because a
   // slow-but-healthy bridge reported as down would be a worse table.
-  const [componentRows, registries, layout, inbox, cli, dbAndSchedules, launchd, keepAwake, supervisor, containers, localModels] = await Promise.all([
+  const [componentRows, registries, layout, inbox, cli, dbAndSchedules, launchd, keepAwake, supervisor, containers, localModels, sharedScope] = await Promise.all([
     (async () => Promise.all((await walkManifests(deps.productDir)).map((m) => componentRow(m, { env, fetchFn, timeoutMs, shape, labelSuffix, compute }))))(),
     // the registries over product + extensions: overlays and skips (plan §2.7)
     registriesRow(deps.productDir, env),
@@ -1266,8 +1309,13 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
     // the local model servers. Absent is the common case and never a
     // failure, so these rows can only add information, never a red run.
     localServerRows({ compute, fetchFn, timeoutMs: Math.min(timeoutMs, 2_000) }),
+    // the retired shared scope: an instance with an id, on a Mac (or a probe
+    // a test hands in) — presence only, so it can never prompt
+    env.METISTRY_INSTANCE_DIR && (deps.keychainProbe || platform === "darwin")
+      ? sharedScopeRow({ instanceDir, productDir: deps.productDir, env, probe: deps.keychainProbe ?? securityPresence(exec) })
+      : Promise.resolve(undefined),
   ]);
-  rows.push(...componentRows, registries, layout, inbox, cli, ...dbAndSchedules, ...launchd, ...(keepAwake ? [keepAwake] : []), ...supervisor, ...containers, ...localModels);
+  rows.push(...componentRows, registries, layout, inbox, cli, ...dbAndSchedules, ...launchd, ...(keepAwake ? [keepAwake] : []), ...supervisor, ...containers, ...localModels, ...(sharedScope ? [sharedScope] : []));
 
   return { as_of: new Date().toISOString(), product_dir: deps.productDir, shape, ok: !rows.some((r) => r.status === "failed"), rows };
 }

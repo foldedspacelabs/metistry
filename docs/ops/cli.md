@@ -1451,6 +1451,95 @@ Core's `fillVariableRefs` fills every `{{ variable.name }}` or none — a
 missing name or a malformed reference is a refusal naming it — in one pass,
 leaving `{{ secret.x }}` for the egress fill.
 
+## Connections: `metistry connections`
+
+M13 (plan §2.2, §2.6): servers Metistry reaches for you, one file each in
+`.metistry/connections/<name>.yaml` (`docs/ops/connections.md` is the whole
+contract). This release dials **MCP servers**, by URL or by command.
+
+```sh
+metistry connections add github --type mcp \
+    --env 'GITHUB_PERSONAL_ACCESS_TOKEN={{ secret.github_read }}' \
+    -- npx -y @modelcontextprotocol/server-github         # dial once, list what it offers, write it
+metistry connections add linear --type mcp --url https://mcp.linear.app/mcp \
+    --auth bearer --secret linear_key                      # an HTTP server; the key by name
+metistry connections list [--json]                        # every connection: status, reach, tools, used by
+metistry connections show github [--json]                 # one, in full
+metistry connections policy github                        # the tool table, by group
+metistry connections policy github search_issues allow --group reads
+metistry connections policy github delete_issue never
+metistry connections policy github --offer on             # offer it to agents through Metistry
+metistry connections set github --env 'LOG_LEVEL=warn' [--unset-env K] [--header K=V] [--unset-header K] [--url …] [-- <command…>]
+metistry connections test github [--json]                 # dial it: does it answer, and does it still offer every listed tool?
+metistry connections remove github [--dry-run]
+```
+
+Every verb takes `--instance <dir>` (default: the resolved instance); the
+writing ones take `--dry-run`. `--env` and `--header` repeat. The command and
+its arguments go after `--`.
+
+**Names, never values.** A secret is written as `{{ secret.<name> }}` and a
+variable as `{{ variable.<name> }}`; the file lists every name it uses under
+`secrets:` / `variables:`, which `add` and `set` keep up to date. Refused,
+before anything is written and without repeating the value:
+
+- a value that **looks like a key** anywhere (an `--env` value, a header, an
+  argument, the description) — *store it as a secret* (`metistry secrets
+  set <name>`) and reference it;
+- a `{{ secret.x }}` in a **URL** or its query (a URL lands in logs), on a
+  **command line** or in a working directory (every process on the Mac can read
+  another's argv) — a secret goes in a header or in `env:`;
+- `--auth basic` and `--auth oauth` (they arrive with T4-10); this release sends
+  none, a bearer (`--auth bearer --secret <name>`) or an API-key header (`--auth
+  api_key --auth-header <Header> --secret <name>`);
+- a name already taken; a provider (`--provider`) that no connection type
+  installed provides.
+
+**`add` dials once** — `initialize` and `tools/list`, through the same pool and
+egress door the console uses, calling no tool — and writes nothing if the
+server does not answer (`--no-discover` writes it without dialling). A secret
+the dial needs must already be granted to `connection:<name>` — `metistry
+secrets grant <secret> connection:<name> on` first, or add it with
+`--no-discover`, grant, then `test`. The owner's defaults (Q15, 2026-09-26): a tool the connection type declares keeps
+its group; one a custom server offers is filed under **Changes things**, because
+a server's own *read-only* hint is a hint, not a control — `add` shows it and
+`policy <name> <tool> allow --group reads` acts on it. Modes start at **Reads
+Allow · Changes things Ask First · Starts an agent Ask First**, and **offer to
+agents off**.
+
+**`policy`** is the owner's per-tool policy, in the owner's words: `allow`,
+`ask` (Ask First) or `never` (the file keeps `on | ask | off`). A tool that is
+not listed is refused before anything is dialled, so listing one is how it
+becomes callable; one not listed yet needs `--group reads|changes|starts_agent`
+unless its connection type declares it, and a declared tool keeps its type's
+group. `--offer on|off` is the switch that lets agents reach it through
+Metistry (C115; their grants arrive with T4-8b).
+
+**`test`** is the connection's `check()`: `ok` (it answered and offers every
+listed tool), `degraded` (a listed tool is gone), `absent` (the command is not
+on this Mac, a secret has no item, a variable is unset, its connection type is
+not installed), `failed` (the credential is refused at the door — not granted
+to `connection:<name>`, or its host is not on the secret's *Sent only to* list —
+or the server cannot be reached). It lists what the server offers that is not
+listed, and what it marks read-only. `metistry doctor` runs the same check for
+every connection (never `failed` there: a connection is someone else's
+server, so its outage does not fail the install).
+
+**`remove`** deletes the file. What referred to it — a sync in
+`scheduled.yaml`, a secret's grant to `connection:<name>` — is named and left
+as it is; it turns absent.
+
+A command is started with **only the environment the file names** (plus the
+SDK's six: `HOME`, `LOGNAME`, `PATH`, `SHELL`, `TERM`, `USER`) — never this
+process's — and a granted secret there is given to that command only. It is not
+network-confined in this release (`docs/ops/connections.md`).
+
+The file is a §4.7 protected path: every write goes through the reconciler as
+the `user` principal, edited as a YAML document so your comments survive, and
+judged exactly as the reader will before anything is written. `list --json`
+prints the rows `GET /api/connections` serves; `show --json` the body of `GET
+/api/connections/:name` (`docs/ops/client-api.md`).
+
 ## Importing Claude Code sessions
 
 ```

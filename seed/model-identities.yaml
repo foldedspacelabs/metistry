@@ -1,0 +1,83 @@
+# model-identities.yaml — one model, several places (C131; docs/ops/compute.md
+# "Finding a model").
+#
+# The same model is served by several providers under several ids, billed
+# differently at each. This table says which ids are ONE model, so the
+# catalogue search (`metistry compute models search`, the Compute pane) shows
+# one row per model with one line per place it runs.
+#
+# Rules the file is checked against (packages/core/src/model-identities.ts):
+#   * `ids` are EXACT — each provider's id as its own /v1/models lists it,
+#     compared without case. No patterns: a guess at similarity would merge
+#     two different models that happen to share a spelling.
+#   * An id belongs to ONE key. Listing it under two is refused.
+#   * An id nobody lists here is not an error: it stays its own row, under the
+#     provider that served it.
+#   * `capabilities` is a closed list: tools, vision, reasoning, embeddings.
+#
+# Yours: `.metistry/model-identities.yaml` in the instance (same shape,
+# `schema: 1`) overlays this BY KEY — your entry replaces the product's entry
+# of that key, a new key adds one, and an id you list moves to your entry.
+#
+# The product's table is a starter, not a catalogue of everything: the models
+# this project's own docs, templates and bake-off name, plus C131's own
+# example of one model under three ids.
+schema: 1
+models:
+  claude-sonnet-5:
+    name: Claude Sonnet 5
+    maker: Anthropic
+    capabilities: [tools, vision]
+    ids: [anthropic/claude-sonnet-5]
+  claude-opus-4:
+    name: Claude Opus 4
+    maker: Anthropic
+    context: 200000
+    capabilities: [tools, vision]
+    ids: [anthropic/claude-opus-4]
+  claude-haiku-4.5:
+    name: Claude Haiku 4.5
+    maker: Anthropic
+    context: 200000
+    capabilities: [tools, vision]
+    ids: [anthropic/claude-haiku-4.5]
+  llama-3.3-70b:
+    name: Llama 3.3 70B
+    maker: Meta
+    context: 131072
+    capabilities: [tools]
+    # OpenRouter, Groq, Ollama — C131's example of one model under three ids
+    ids: [meta-llama/llama-3.3-70b-instruct, llama-3.3-70b-versatile, "llama3.3:70b"]
+  gemma-3-4b:
+    name: Gemma 3 4B
+    maker: Google
+    context: 131072
+    capabilities: [vision]
+    # OpenRouter, Ollama, LM Studio, and the bundled llama-server's alias for
+    # the GGUF docs/ops/compute.md installs (the file's basename)
+    ids: [google/gemma-3-4b-it, "gemma3:4b", google/gemma-3-4b, gemma-3-4b-it-Q4_K_M]
+  gemma-3n-e4b:
+    name: Gemma 3n E4B
+    maker: Google
+    ids: [google/gemma-3n-e4b, google/gemma-3n-e4b-it, "gemma3n:e4b"]
+  qwen3-coder-30b:
+    name: Qwen3 Coder 30B
+    maker: Qwen
+    capabilities: [tools]
+    ids: [qwen/qwen3-coder-30b, qwen/qwen3-coder-30b-a3b-instruct, "qwen3-coder:30b"]
+  deepseek-v3.2:
+    name: DeepSeek V3.2
+    maker: DeepSeek
+    capabilities: [tools]
+    ids: [deepseek/deepseek-v3.2]
+  apple-foundation-model:
+    name: Apple Foundation Model
+    maker: Apple
+    context: 4096
+    # the apple-fm bridge serves exactly one id (docs/ops/compute.md)
+    ids: [foundation-model]
+  nomic-embed-text-v1.5:
+    name: Nomic Embed Text v1.5
+    maker: Nomic
+    capabilities: [embeddings]
+    ids: [nomic-embed-text, text-embedding-nomic-embed-text-v1.5]

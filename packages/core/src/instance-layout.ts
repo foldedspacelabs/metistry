@@ -46,6 +46,8 @@ export const INSTANCE_LAYOUT = Object.freeze({
   secrets: ".metistry/secrets.yaml",
   /** Plain shared values, `{{ variable.name }}` — never a secret, never a schedule (plan §2.14, ruling 2). Written by `metistry variables` (M14). */
   variables: ".metistry/variables.yaml",
+  /** The owner's additions to the product's model identity table (`seed/model-identities.yaml`), overlaid by key (plan §2.9, C131; T4-18). */
+  modelIdentities: ".metistry/model-identities.yaml",
   /** The D4 system-prompt overlay. Not the same file as the root CLAUDE.md. */
   assistantPrompt: ".metistry/assistant-prompt.md",
   lock: ".metistry/metistry.lock",
@@ -365,6 +367,8 @@ export const LEGACY_INSTANCE_LAYOUT = Object.freeze({
   secrets: "secrets.yaml",
   // likewise `variables.yaml` (T4-4): it postdates the flat layout
   variables: "variables.yaml",
+  // likewise `model-identities.yaml` (T4-18)
+  modelIdentities: "model-identities.yaml",
   assistantPrompt: "assistant-prompt.md",
   lock: "metistry.lock",
 

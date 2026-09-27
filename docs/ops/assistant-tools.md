@@ -237,7 +237,10 @@ are two ways to have none, and they are the two halves of one answer
 1. **`assignments.default` is not set** — nothing says which provider and
    model a turn runs on.
 2. **It is set, but the key its provider names is not** — `providers.<name>.
-   auth.secret` names a variable that is unset in this install's environment.
+   auth.secret` references a key that has not reached this install's
+   environment: `{{ secret.<name> }}` arrives as `METISTRY_SECRET_<NAME>`
+   once `metistry secrets sync --to env` has written it, an `env:` variable as
+   itself (docs/ops/compute.md "Secrets").
 
 Under the launchd shape `metistry up` leaves the assistant out of the
 supervisor's children rather than starting a process that can only

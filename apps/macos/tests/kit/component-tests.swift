@@ -178,7 +178,8 @@ private func kinds(_ f: TaskFacets) -> [String] {
     #expect(facets.due == TaskDay("2026-09-28"))
     #expect(facets.estimateMinutes == 15, "size s is ~15 minutes")
     #expect(facets.links == [.project("metistry")])
-    #expect(kinds(facets) == ["P2", "Today", "~15m", "metistry"])
+    // recorded (T2-7): the Blocked card on the Board waits on this line, so the row says so
+    #expect(kinds(facets) == ["P2", "Today", "~15m", "metistry", "Blocking an Agent"])
 }
 
 // MARK: - The permissions table (C58; amendments §3; decisions-log ruling (b))

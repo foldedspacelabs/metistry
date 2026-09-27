@@ -1,28 +1,28 @@
 {
   "route": "GET /api/vault-tasks",
-  "source": "contract",
-  "ticket": "T2-7",
-  "note": "rows are vault_tasks_query rows for the compiled filter; a filter outside the grammar is a 400 naming the token",
+  "source": "recorded",
+  "ticket": null,
   "request": {
     "method": "GET",
-    "path": "/api/vault-tasks?where=due%20%3C%3D%20today",
+    "path": "/api/vault-tasks?where=due%20%3C%3D%202026-09-28",
     "body": null,
     "idempotency_key": null
   },
   "status": 200,
   "body": {
-    "where": "due <= today",
+    "where": "due <= 2026-09-28",
     "rows": [
       {
         "path": "Journal/2026-09-28.md",
         "task_key": "mt-7f3k2a",
         "anchor": "mt-7f3k2a",
-        "line_no": 12,
+        "line_no": 3,
         "text": "Send Dana the fixture format",
         "text_norm": "send dana the fixture format",
         "checked": false,
         "dropped": false,
         "waiting": false,
+        "someday": false,
         "due": "2026-09-28",
         "scheduled_for": null,
         "start_on": null,
@@ -41,23 +41,24 @@
         "work_id": null,
         "work_title": null,
         "work_status": null,
-        "blocks_work_id": null,
-        "blocks_work_title": null,
-        "blocks_work_status": null,
+        "blocks_work_id": "41",
+        "blocks_work_title": "Pick the fixture redaction",
+        "blocks_work_status": "blocked",
         "duplicate_of": null,
         "places": 1,
         "parse_warning": null,
         "parsed_on": "2026-09-28",
         "first_seen_on": "2026-09-25",
-        "last_seen_at": "2026-09-28T12:58:01.000Z",
-        "age_days": 3,
-        "carried_days": 0,
+        "last_seen_at": "2026-09-27T18:43:42.022Z",
+        "age_days": 2,
+        "carried_days": null,
         "row_flags": [
-          "due"
+          "blocking_agent",
+          "assigned_to_me"
         ]
       }
     ],
     "more": false,
-    "as_of": "2026-09-28T13:05:00.000Z"
+    "as_of": "2026-09-27T18:43:42.301Z"
   }
 }

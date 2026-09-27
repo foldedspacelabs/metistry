@@ -334,9 +334,9 @@ takes a `since` cursor and answers with the next one.
 | `GET /api/knowledge/version` | owner | session · local_owner | natural | — | — | served | one file at one commit |
 | `POST /api/knowledge/restore` | owner | session · local_owner | no | stale | — | served | raise a Needs You request to restore a file; Approve restores as `user` |
 | `GET /api/q/:name` | owner | session · local_owner · owner_token | natural | — | — | served | run a named query exposed `generic` |
-| `GET /api/today` | owner | session · local_owner | natural | — | — | T2-7 | the day: tasks, work, order, events, brief, standup and plan |
-| `GET /api/vault-tasks` | owner | session · local_owner | natural | — | — | T2-7 | vault tasks by filter: Slipping, Owed, Waiting on Others |
-| `PUT /api/today/order` | owner | session · local_owner | natural | — | — | T2-7 | the owner's order for the day |
+| `GET /api/today` | owner | session · local_owner | natural | — | — | served | the day: tasks, work, order, events, brief, standup and plan |
+| `GET /api/vault-tasks` | owner | session · local_owner | natural | — | — | served | vault tasks by filter: Slipping, Owed, Waiting on Others |
+| `PUT /api/today/order` | owner | session · local_owner | natural | — | — | served | the owner's order for the day |
 | `POST /api/vault-tasks/:task_key/check` | owner | session · local_owner | key | stale | — | served | tick or untick one task line |
 | `POST /api/vault-tasks/:task_key/schedule` | owner | session · local_owner | key | stale | — | served | defer one task line: a `do` date or someday |
 | `POST /api/vault-tasks/:task_key/link` | owner | session · local_owner | no | stale | — | T4-25 | add one tracker ref to one task line |
@@ -2266,9 +2266,9 @@ every edge; tier `none` gets nothing (`docs/ops/assistant-tools.md`).
 ### Today and the vault's tasks
 
 ```
-GET  /api/today?date=                        T2-7 — the day: vault tasks (today's preset), work, the order, events, and the brief, standup and plan paths
-GET  /api/vault-tasks?where=                 T2-7 — vault tasks by filter (`compileTaskFilter`): Slipping, Owed, Waiting on Others
-PUT  /api/today/order                        T2-7 — the owner's order for the day; a key outside the day is refused
+GET  /api/today?date=                        the day: vault tasks (Today's preset), work, the order, events, and the brief, standup and plan paths
+GET  /api/vault-tasks?where=&order=&limit=&offset=   vault tasks by any filter (`compileTaskFilter`) — All, and its saved views
+PUT  /api/today/order                        {date, task_keys}: the owner's order for the day; a key outside the day is 400
 POST /api/vault-tasks/:task_key/check        {checked, seen_text, path?}   Idempotency-Key   409 stale, with the current line
 POST /api/vault-tasks/:task_key/schedule     {do | someday, seen_text, path?}   Idempotency-Key   409 stale, with the current line
 POST /api/vault-tasks/:task_key/link         T4-25 — {ref}: one `linear:` (or `gh:`) ref onto one line   409 stale
@@ -2442,6 +2442,83 @@ POST /api/today/close
   management gate's uniform `403`, no credential the uniform `401`. Not an
   action: no proposal can close the day. **`503`** with no vault bridge
   (`METISTRY_RECONCILER_URL`).
+
+#### Today — `GET /api/today`, `GET /api/vault-tasks`, `PUT /api/today/order` (T2-7)
+
+```
+GET /api/today?date=2026-09-28
+
+200 {"date": "2026-09-28",
+     "tasks":  [<vault_tasks_query row>, …],
+     "work":   [<day_work row>, …],
+     "order":  ["mt-7f3k2a", "work:214"],
+     "events": [<day_events row>, …],
+     "brief": "Journal/Brief/2026-09-28.md" | null,
+     "standup": "Journal/Standup/2026-09-28.md" | null,
+     "plan": "Journal/Plan/2026-09-28.md" | null,
+     "as_of": "<ISO instant>"}
+
+GET /api/vault-tasks?where=due%20%3C%3D%20today&order=priority,%20due&limit=50&offset=0
+
+200 {"where": "due <= today", "rows": [<vault_tasks_query row>, …], "more": false, "as_of": "<ISO instant>"}
+400 {"error": {"code": "invalid_request", "message": "<the parser's refusal, naming the token>"}}
+
+PUT /api/today/order
+{"date": "2026-09-28", "task_keys": ["mt-7f3k2a", "work:214"]}
+
+200 {"ok": true, "date": "2026-09-28", "order": ["mt-7f3k2a", "work:214"]}
+400 {"error": {"code": "invalid_request", "message": "this key is not on 2026-09-28: mt-zz99 — …"}, "outside": ["mt-zz99"]}
+```
+
+- **Every row comes from a named query**, each `expose: route` so this
+  owner-only door is the only one onto it: `vault_tasks_query`, `day_work`,
+  `today_order`, `day_events`. Rows are those queries' rows unchanged — a
+  task row is exactly what `GET /api/vault-tasks` returns, and carries
+  `someday` and `row_flags`.
+- **The day** is `date`, or — left out — today in `METISTRY_TZ` (never `TZ`;
+  with no `METISTRY_TZ` set, today in UTC). The calendar is read in the same
+  zone. A `date` that is not a calendar day is `400`; any other parameter is
+  `400`.
+- **Today's preset**, in the one `where:` language (compiled by
+  `compileTaskFilter`, like every other task filter): the open lines owed on
+  or before the day — `due <= <date> or do <= <date>`, so what is overdue or
+  was planned for an earlier day carries forward — ordered `priority, due`;
+  then the lines ticked on the day (`done = <date> and status = done`), so a
+  line ticked a moment ago is still there after the next walk, struck. A
+  `#someday` line leaves the open list even when it still has a `due`.
+- **`work`** is `day_work` for the day with the flags `waiting_on_me`
+  (an agent is waiting on a line of yours), `blocked` (only your hand leaves
+  it), `due`, `overdue` and `closed` (closed on the day), joined by `or`.
+- **`order`** is the owner's drag order (`today_order`): a `task_key` or
+  `work:<id>` each. Only keys the day still holds are served — a key whose
+  line moved off the day is dropped, and the next drag clears it. Rows not
+  in the order follow, in the order served.
+- **`brief`, `standup`, `plan`** are the paths of the day's machine-written
+  files, each named for the day it is *for* (`Journal/Plan/<date>.md` is
+  that day's plan, written the evening before); `null` when the file is not
+  there yet — or when the deployment has no vault bridge to ask. Read them
+  with `GET /api/knowledge/page`.
+- **`GET /api/vault-tasks`** compiles `where` and `order` (both optional; at
+  most 500 characters each) with `compileTaskFilter` against today in
+  `METISTRY_TZ`, over the whole vault. A filter outside the grammar is `400`
+  with the parser's own message, which names the token — nothing is guessed
+  or passed through. `limit` is 1–500 (default 50); `more` says whether
+  `offset + limit` has another page. **The saved views** of All are stored
+  `where:` strings; *Waiting on Others* is `where=waiting`. *Slipping* and
+  *Owed* are not yet expressible in the grammar as screen-05 §15.6 defines
+  them (open — see T2-7's PR).
+- **`PUT /api/today/order`** takes `{date, task_keys}` — the whole order for
+  the day, and nothing else (another field is `400`). Each key is a task key
+  or `work:<id>`, at most 1000, none twice. **Every key must be one
+  `GET /api/today` serves for that date**; otherwise the answer is `400`
+  naming the keys (`outside`, the first ten) and nothing is written. On
+  success the day's order is replaced whole — keys left out lose their
+  place — in one statement. `[]` clears the day. The same body twice stores
+  the same order (idempotent by nature). The write is audited (`runs` kind
+  `today_order`, the day and the count — never the keys).
+- The index is up to one walk behind the notes
+  (`METISTRY_RECONCILE_INTERVAL_SEC`), so a line added in Obsidian a moment
+  ago is not yet on the day, and its key is refused until it is.
 
 ### Calendar and mail — through the connection that can
 

@@ -212,11 +212,12 @@ function setNeeds(count) {
   if (changed && current !== "triage" && sheetView !== "triage") $("needs-announce").textContent = needsBadge(n).label;
 }
 
-// The count is the queue's length — T1-7's count route is accepted against
-// exactly this, and replaces the read here when it is served.
+// T1-7's own route: `waiting`, the same pending-and-not-snoozed filter as
+// the queue itself, without paging the whole thing in on a 30s poll (or on
+// every tab regaining focus) just to learn its length.
 async function refreshNeeds() {
-  const { proposals } = await (await api("/api/proposals")).json();
-  setNeeds(proposals.length);
+  const { waiting } = await (await api("/api/needs-you/count")).json();
+  setNeeds(waiting);
 }
 
 let needsTimer = null;

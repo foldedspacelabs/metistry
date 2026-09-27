@@ -31,6 +31,7 @@
 //     pick the thread over the diff, and cannot give an access request some
 //     other type's answers.
 
+import { createHash } from "node:crypto";
 import { questionsOf, type Question } from "./decision-block.js";
 
 /** The twelve types the owner reads, in §2.12's order. Closed: a new type is a product change that picks a body from `REQUEST_BODIES` (plan §2.7). */
@@ -333,6 +334,96 @@ export function describeRequest(kind: string, payload?: unknown): RequestShape {
     decisions: REQUEST_DECISIONS.filter((d) => decisions.has(d)),
     ...(questions !== null ? { questions } : {}),
   };
+}
+
+// ----- the subject: what a request is ABOUT, and whether it moved (T2-14) -----
+//
+// A card never acts on something the owner didn't see (design-system
+// amendments §9; plan §2.12, *Stale*). Most requests are about something that
+// lives outside their row — a pull request's head, a task's line, the work row
+// an action would change — and that thing can move while the card is open. So
+// every row is served with a FINGERPRINT of its subject as it stands, the
+// client sends back the one it rendered (`if_unchanged.subject`), and an answer
+// whose fingerprint is not the subject's now is refused `409 stale` before
+// anything is sent or settled (apps/console/src/server.ts, `decideProposal`).
+//
+// One basis per type, where the row can supply it:
+//
+//   pull_request → `head_sha`   the head the card shows: a new commit is a new question
+//   task         → `line_text`  the task's own words, not its facets
+//   any other    → `work_updated_at`, when the row names a work row (`work_id`)
+//
+// A pull request or a task whose own basis the row cannot supply falls back to
+// its work row, and a row with neither has no subject: nothing to go stale.
+// The narrow bases are deliberate — a comment on a PR moves its work row but
+// not its head, and approving what the owner read is still approving it.
+//
+// WHERE each basis is read is the console's (the dependency arrow: no Postgres
+// here). This file decides only which basis a row is judged by and what its
+// fingerprint is.
+
+/** The closed set of things a request's subject is fingerprinted by. */
+export const REQUEST_SUBJECT_BASES = ["head_sha", "line_text", "work_updated_at"] as const;
+export type RequestSubjectBasis = (typeof REQUEST_SUBJECT_BASES)[number];
+
+/** A type's own basis (plan §2.12: PR head SHA, task line text). Every other type is judged by its work row, where it has one. */
+export const REQUEST_TYPE_SUBJECT: { readonly [T in RequestType]?: Exclude<RequestSubjectBasis, "work_updated_at"> } = {
+  pull_request: "head_sha",
+  task: "line_text",
+};
+
+/**
+ * The subject as the console read it, basis by basis. `undefined`: this row
+ * cannot supply that basis (no work row, no head recorded). `null`: the row
+ * names it and it is GONE — a deleted task line — which is a change like any
+ * other, never a pass.
+ */
+export interface SubjectReading {
+  readonly head_sha?: string | null;
+  readonly line_text?: string | null;
+  readonly work_updated_at?: string | null;
+}
+
+export interface RequestSubject {
+  readonly basis: RequestSubjectBasis;
+  /** Opaque to a client: rendered, sent back as `if_unchanged.subject`, compared — never parsed. */
+  readonly fingerprint: string;
+}
+
+const GONE = "gone";
+
+/** `<basis>:<32 hex>` — a hash, so a line's words and a head's SHA cross the wire only where the row already carries them — or `<basis>:gone`. */
+export function subjectFingerprint(basis: RequestSubjectBasis, value: string | null): string {
+  if (value === null) return `${basis}:${GONE}`;
+  return `${basis}:${createHash("sha256").update(`${basis}\0${value}`).digest("hex").slice(0, 32)}`;
+}
+
+/** The subject a stored kind is judged by, from what the console read of it now; null when the row has none. */
+export function requestSubjectOf(kind: string, reading: SubjectReading): RequestSubject | null {
+  const own = REQUEST_TYPE_SUBJECT[requestTypeOf(kind)];
+  const bases: RequestSubjectBasis[] = own === undefined ? ["work_updated_at"] : [own, "work_updated_at"];
+  for (const basis of bases) {
+    const value = reading[basis];
+    if (value !== undefined) return { basis, fingerprint: subjectFingerprint(basis, value) };
+  }
+  return null;
+}
+
+const FINGERPRINT_RE = new RegExp(`^(${REQUEST_SUBJECT_BASES.join("|")}):([0-9a-f]{32}|${GONE})$`);
+
+/**
+ * `if_unchanged.subject` as a client may send it: a fingerprint this server
+ * serves, or `null` for a row that was rendered with no subject. Anything else
+ * is `undefined` — the caller's 400, never a comparison that happens to fail.
+ */
+export function parseSubjectFingerprint(v: unknown): string | null | undefined {
+  if (v === null) return null;
+  return typeof v === "string" && FINGERPRINT_RE.test(v) ? v : undefined;
+}
+
+/** Is the subject the client rendered (`seen`) still the subject now? A row that gained or lost one has changed too. */
+export function subjectUnchanged(seen: string | null, now: RequestSubject | null): boolean {
+  return seen === (now === null ? null : now.fingerprint);
 }
 
 const SQL_COLUMN = /^[a-z_][a-z0-9_]*(\.[a-z_][a-z0-9_]*)?$/;

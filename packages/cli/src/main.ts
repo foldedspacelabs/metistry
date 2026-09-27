@@ -73,6 +73,8 @@ import {
   purgeSecrets,
   renderNamedSecrets,
   renderSecretList,
+  migrateScope,
+  purgeShared,
   secretsGrant,
   secretsHosts,
   secretsListNamed,
@@ -109,8 +111,8 @@ export interface ParsedArgs {
  */
 export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "dry-run", "allow-dirty", "no-launchd", "no-compose", "no-color", "skip-build", "skip-migrate", "rollback", "allow-legacy", "yes", "follow", "namespace", "rotate", "list", "complete", "skip-test", "remote", "json-lines", "stdio", "named", "clear"]);
 
-/** The §2.14 verbs over owner-named secrets (M7). `list --named` joins them; `sync|mint|list|purge` are the install's own variables. */
-export const NAMED_SECRET_VERBS = new Set(["set", "replace", "remove", "hosts", "grant"]);
+/** The §2.14 verbs over owner-named secrets (M7), and the shared scope's migration (T4-3). `list --named` joins them; `sync|mint|list|purge` are the install's own variables. */
+export const NAMED_SECRET_VERBS = new Set(["set", "replace", "remove", "hosts", "grant", "migrate-scope", "purge-shared"]);
 
 /** `--channel git|release` — anything else is a typo, not a guess (the lock parser is strict for the same reason). */
 export function parseChannel(v: string | undefined): LockSource | undefined {
@@ -303,13 +305,26 @@ const USAGE = `metistry — Metistry command line
       _SECRET _KEY); --to env rewrites just those
       lines in place (0600; every comment and non-secret line preserved) and
       moves a product-checkout .env into the instance the first time. mint makes
-      a new random token in both. list prints names and scopes, never values
-      (--json: the same rows as an array).
-      Items are scoped by account: instance-scoped ones under the instance's
-      instance_id, user-scoped ones (your compute provider keys, your AWS keys)
-      under the shared per-user account — secrets.ts SECRET_SCOPES is the table.
+      a new random token in both. list prints names and where each lives, never
+      values (--json: the same rows as an array).
+      Every item is filed under ONE account: this instance's instance_id. A
+      third-party credential (a METISTRY_*_API_KEY, your AWS keys) is an
+      owner-named secret of the instance now: --to env fills its line from
+      {{ secret.<name> }} and never reads the retired shared per-user account.
       purge deletes one instance's items and nothing else — its owner-named
       secrets included; without --yes it only previews.
+
+  metistry secrets migrate-scope [--dry-run] [--instance <dir>]
+  metistry secrets purge-shared [--yes] [--instance <dir>]
+      The retired shared scope (plan §2.14). migrate-scope copies each original
+      under the per-user account into THIS instance as an owner-named secret
+      (METISTRY_DEVIN_API_KEY → devin_api_key) and records it in secrets.yaml;
+      an item the instance already has wins. It rewrites auth.secret and
+      requires.env to {{ secret.<name> }} only where the file still validates
+      with it, and deletes nothing. metistry update runs it; rerun it any
+      time. purge-shared removes an original only when every instance this
+      Mac knows (this one and each METISTRY_INSTANCE_DIR a LaunchAgent names)
+      has its own copy; without --yes it only previews.
 
   metistry secrets set <name> [--hosts <host>,…] [--expires <date>] [--instance <dir>]
   metistry secrets replace <name> [--expires <date>] [--instance <dir>]
@@ -731,6 +746,7 @@ export const HELP_GROUPS: Array<{ title: string; verbs: Array<[string, string]> 
       ["connect-repo <url>", "point it at a private remote, with credentials to push with"],
       ["secrets sync|mint|list|purge", "the login Keychain is the store; .env is generated from it"],
       ["secrets set|replace|remove|hosts|grant", "owner-named secrets, per instance: the value in the Keychain, the policy in secrets.yaml"],
+      ["secrets migrate-scope|purge-shared", "copy the retired shared scope into this instance; remove originals every instance has copied"],
       ["runtime install --from <bundle>", "seed a writable product dir from a signed app bundle"],
       ["up", "containers and host jobs, then doctor"],
       ["down", "stop everything this instance runs, then confirm by looking"],
@@ -1071,6 +1087,30 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
               return done(await secretsHosts(positional[1], { hosts: positional.slice(2), clear: flags.clear === true }, namedOpts));
             case "grant":
               return done(await secretsGrant(positional[1], positional[2], positional[3], namedOpts));
+            case "migrate-scope": {
+              const r = await migrateScope({
+                ...namedOpts,
+                envFile: loadedNamed.paths?.read[0] ?? loadedNamed.paths?.write,
+                exampleFile: productDir ? join(productDir, ".env.example") : undefined,
+              });
+              done(r);
+              // an original the Keychain would not hand over is a failure;
+              // a reference waiting on a schema that reads {{ secret.name }} is not
+              return r.unreadable.length > 0 ? 1 : 0;
+            }
+            case "purge-shared": {
+              const r = await purgeShared({
+                instanceDir,
+                env: process.env,
+                platform: namedOpts.platform,
+                yes: flags.yes === true,
+                out: namedOpts.out,
+                exampleFile: productDir ? join(productDir, ".env.example") : undefined,
+                ...(io.exec ? { exec: io.exec } : {}),
+              });
+              done(r);
+              return flags.yes === true && r.deleted.length !== r.removable.length ? 1 : 0;
+            }
             default: {
               const rows = await secretsListNamed(namedOpts);
               out(json ? JSON.stringify({ secrets: rows }, null, 2) : renderNamedSecrets(rows, instanceId));
@@ -1149,6 +1189,7 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
           default:
             err("usage: metistry secrets sync --to env|keychain | mint <VAR> | list [--named] | purge --instance <dir> [--yes]");
             err("       metistry secrets set|replace|remove|hosts|grant <name> … (owner-named secrets — docs/ops/cli.md)");
+            err("       metistry secrets migrate-scope [--dry-run] | purge-shared [--yes] (the retired shared scope)");
             return 2;
         }
       } catch (e) {

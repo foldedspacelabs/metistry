@@ -170,9 +170,12 @@ verbs refuse a tier or a crew until it exists.
 `providers add` asks for the key **on stdin** and puts it in the login
 Keychain. It is never an argument, never echoed, never written to the repo,
 and no `--json` result or rendered line can carry one. Provider credentials
-are **user scope** — the account with the provider is yours, not one
-instance's, so every instance on this Mac shares it and
-`metistry secrets purge` never touches it (`secrets.ts` `SECRET_SCOPES`).
+are **per instance** since the owner's ruling Q3 (plan §2.14): `providers
+add` still stores the key under the retired per-user account until compute
+reads `{{ secret.name }}` (T4-18), so run `metistry secrets migrate-scope`
+after it — that copies the key into this instance under its lowercase
+name (`METISTRY_OPENROUTER_API_KEY` → `{{ secret.openrouter_api_key }}`), and `metistry secrets sync --to env`
+then fills the `.env` line from the copy (docs/ops/cli.md).
 
 `providers test` is a real `GET <base_url>/models` with that credential;
 `--complete` adds a one-token `POST <base_url>/chat/completions`, carrying

@@ -60,3 +60,11 @@ Three rules hold the fold honest:
 3. **A refusal is not a retry.** `forbidden` ("owned by …") means that note is someone else's: `report` the change and move on. `conflict` means re-read and redo that one edit. Either way, keep going with the rest of the fold.
 
 End with a short summary — how many items you folded, which notes you wrote, anything you reported instead. No decision block: a fold does not block on the user.
+
+## A routine's prose slots
+
+A message that begins with `✍️ prose slots` is a routine's turn — the Morning Brief's or the Standup's — not the user's: nobody is waiting on a reply. The routine has already written its file (`Journal/Brief/<date>.md`, `Journal/Standup/<date>.md`) with every list and link filled; what it cannot write is the lines it numbered for you, each marked `<!-- metistry:prose N --> _pending…_`.
+
+`knowledge_read` the file, read what each slot needs (`queries_run`, `knowledge_read` — the brief's slots name the day's meetings and last night's fold), then `knowledge_write` the file back with its `sha256`, each marker line replaced by **one line** of your own — the text after any bullet or indent that was already there. Keep every other line exactly as it was: the tool compares your file with the one on disk and refuses anything else, nothing written. A slot's line cannot start a heading, a list item, a task box, a quote or a fence, and cannot hold a line break or an HTML comment. Leave a slot as it was if you have nothing true to say — a guessed line on a briefing is worse than none.
+
+These lines are written, not retrieved, and the file says so for you. End with one line: how many slots you filled. No decision block.

@@ -1,0 +1,5 @@
+---
+"@metistry-apps/macos": minor
+---
+
+**The capture composer on the Mac (T5-5).** The toolbar's + and ⌘N now open the composer: one field (`note…`), **Capture** (⌘↩) and a receipt line. It does not wait for the console — ⌘↩ moves the words into a pending capture (*capturing… you can close this*) and closing cancels nothing — and Esc closes it keeping the draft until it is sent. Each capture mints one `Idempotency-Key` when Capture is pressed and every resend carries it, so a reply lost after the write replays as the same capture with the same id: *captured → inbox #418 · Inbox/….md*, the id and path the console returned. A capture that gets no answer is queued (*queued — will send when the instance is reachable*) and resent on a backoff, when the composer opens, and as soon as the console is heard from again; a refusal shows the console's words, puts the text back in the field and offers Retry with the same key. An instance switch returns unsent words to the field rather than sending them to the other instance. Text only: attachments and live capture wait for the designer's action bar (#253).

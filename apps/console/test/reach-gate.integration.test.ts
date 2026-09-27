@@ -66,6 +66,7 @@ describe.skipIf(!hasDb)("the reach gate: `local` routes are the owner on this Ma
       minted.push(id);
       return { id, display_name: "reach gate probe", kind: "external" };
     }
+    if (routeKey(r) === "POST /api/vault/rollback") return { to: "2026-09-26" };
     return {};
   }
 
@@ -92,6 +93,19 @@ describe.skipIf(!hasDb)("the reach gate: `local` routes are the owner on this Ma
         },
         timeZone: "Etc/UTC",
       },
+      // Roll back's preview (T10-6): the reconciler's dry run, in-process
+      vaultRevert: async (ask) => ({
+        dry_run: true,
+        target: ask.target,
+        head: "a".repeat(40),
+        base: null,
+        reverts: [{ sha: "b".repeat(40), subject: "reach gate probe", author: "assistant", date: "2026-09-27T08:00:00-04:00" }],
+        revert_count: 1,
+        files: [{ path: `Areas/${MARK}.md`, change: "deleted" }],
+        config: [],
+        skipped_config: [],
+        message: "Roll back\n",
+      }),
       ...extra,
     };
   }
@@ -114,6 +128,7 @@ describe.skipIf(!hasDb)("the reach gate: `local` routes are the owner on this Ma
 
   afterAll(async () => {
     await pool.query(`DELETE FROM agents WHERE id = ANY($1) OR id = 'devin'`, [minted]);
+    await pool.query(`DELETE FROM proposals WHERE source->>'kind' = 'metistry' AND source->>'external_ref' = $1`, [`rollback:to=2026-09-26@${"a".repeat(40)}`]);
     await pool.query(`DELETE FROM owner_tokens WHERE label = $1`, [MARK]).catch(() => undefined);
     await pool.query(`DELETE FROM auth_sessions WHERE passkey_id = ANY($1)`, [passkeyIds]).catch(() => undefined);
     await pool.query(`DELETE FROM passkeys WHERE id = ANY($1)`, [passkeyIds]).catch(() => undefined);
@@ -127,8 +142,8 @@ describe.skipIf(!hasDb)("the reach gate: `local` routes are the owner on this Ma
     return { status: r.status, body: (await r.json()) as { error?: { code: string; message: string }; token?: string } };
   }
 
-  it("the table files minting a bearer under `local` — and Purge Now, which cannot be undone (T3-9)", () => {
-    expect(LOCAL.map(routeKey)).toEqual(["POST /api/agents", "POST /api/agents/:id/rotate", "POST /api/sessions/purge", "PUT /api/scheduled/routines/:name/assignment"]);
+  it("the table files minting a bearer under `local` — and Purge Now, which cannot be undone (T3-9), and Roll Back (T10-6)", () => {
+    expect(LOCAL.map(routeKey)).toEqual(["POST /api/agents", "POST /api/agents/:id/rotate", "POST /api/sessions/purge", "PUT /api/scheduled/routines/:name/assignment", "POST /api/vault/rollback"]);
   });
 
   it("**a passkey session from 127.0.0.1 is refused on every local route** — 403 local_only, naming the Mac app, and nothing is minted", async () => {
@@ -189,11 +204,11 @@ describe.skipIf(!hasDb)("the reach gate: `local` routes are the owner on this Ma
     for (const r of LOCAL) {
       const before = await storedHash(agentId);
       const p = await post(base, pathFor(r.path, agentId), { authorization: `Bearer ${localOwnerToken}` }, bodyFor(r), r.method);
-      expect([200, 201], `${routeKey(r)}: ${JSON.stringify(p.body)}`).toContain(p.status);
+      expect([200, 201, 202], `${routeKey(r)}: ${JSON.stringify(p.body)}`).toContain(p.status);
       // the two mint routes answer a bearer; Purge Now's empty body is its preview (sessions-purge.integration.test.ts);
-      // the assignment door answers the routine as it now stands (scheduled-routes.integration.test.ts)
+      // the assignment door answers the routine as it now stands (scheduled-routes.integration.test.ts); Roll Back raises a request (vault-rollback.integration.test.ts)
       if (routeKey(r) === "PUT /api/scheduled/routines/:name/assignment") expect(overlay.toString("utf8")).toContain(`actor: ${agentId}`);
-      else if (routeKey(r) !== "POST /api/sessions/purge") expect(typeof p.body.token, routeKey(r)).toBe("string");
+      else if (routeKey(r) !== "POST /api/sessions/purge" && routeKey(r) !== "POST /api/vault/rollback") expect(typeof p.body.token, routeKey(r)).toBe("string");
       if (routeKey(r) === "POST /api/agents/:id/rotate") {
         expect(await storedHash(agentId)).toBe(tokenHash(p.body.token!));
         expect(await storedHash(agentId)).not.toBe(before);

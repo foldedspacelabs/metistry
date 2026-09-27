@@ -273,7 +273,7 @@ export async function connectRepo(opts: ConnectRepoOptions): Promise<ConnectRepo
   const branch = (await git(["symbolic-ref", "--short", "-q", "HEAD"])).stdout.trim() || "main";
   const push = await git(["push", "-u", "origin", branch], 180_000);
   if (push.code !== 0) throw new Error(`git push -u origin ${branch} failed (${push.code}): ${(push.stderr || push.stdout).trim().split("\n").slice(-2).join(" ")}`);
-  out(`pushed ${branch} to origin; the reconciler pushes from here on its METISTRY_PUSH_SCHEDULE (docs/ops/reconciler.md)`);
+  out(`pushed ${branch} to origin; the reconciler pushes and pulls from here on the vault sync policy (metistry vault settings)`);
 
   return { remote, branch, credential, pushed: true, flushed };
 }

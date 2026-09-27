@@ -11,7 +11,7 @@ import { readFile } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { KEEP_AWAKE_VALUES, parseKeepAwake, type DeploymentShape, type Effort, type KeepAwake } from "@foldedspacelabs/metistry-core";
+import { KEEP_AWAKE_VALUES, parseKeepAwake, parsePullArg, parsePushArg, type DeploymentShape, type Effort, type KeepAwake } from "@foldedspacelabs/metistry-core";
 import {
   assign,
   cacheReport,
@@ -40,6 +40,7 @@ import {
 } from "./compute.js";
 import { buildDeploymentReport, renderDeploymentReport, setDeploymentShape, setKeepAwake, type KeepAwakeFlags } from "./deployment-report.js";
 import { loadDeployment } from "./deployment.js";
+import { loadVaultSettings, renderVaultSettings, setVaultSettings, VAULT_VERBS } from "./vault.js";
 import { EXTENSION_VERBS, extensionsAdd, extensionsList, extensionsRemove, parseExtensionVerb, renderExtensions, type ExtensionsOptions } from "./extensions.js";
 import { doctor, renderTable, type DoctorDeps } from "./doctor.js";
 import { VARIABLE_VERBS, parseVariableVerb, renderVariables, variablesList, variablesSet, variablesUnset, type VariablesOptions } from "./variables.js";
@@ -716,6 +717,18 @@ const USAGE = `metistry — Metistry command line
       is not recommended, and never runs it. doctor reads pmset -g and says
       whether it is in effect (docs/ops/deployment-shapes.md).
 
+  metistry vault settings [--push <after_commit|manual|<n>m|<n>h>] [--pull <n>m|<n>h]
+                          [--yes] [--json] [--product-dir <checkout>] [--instance <dir>]
+      The vault's git sync policy (M18): when the reconciler pushes the
+      instance repo to its remote — after_commit (once a flush has made
+      commits), manual (never on its own), or on an interval — and how often
+      it pulls (there is no "never"). With no flag it shows the policy in
+      force and where each answer came from; with --push/--pull it previews
+      the new vault: block of deployment.yaml, and --yes writes it — the same
+      protected write as set-shape. The reconciler re-reads the file: no
+      restart. METISTRY_PUSH_SCHEDULE still overrides push for this release,
+      and this verb says so (docs/ops/reconciler.md).
+
   metistry migrate-inbox [--instance <dir>] [--dry-run]
       Move an existing instance's inbox into the vault: inbox/* (or a
       differently-cased vault inbox, renamed through a temp name because
@@ -839,6 +852,7 @@ export const HELP_GROUPS: Array<{ title: string; verbs: Array<[string, string]> 
       ["compute route-report", "where real messages went — the router's fall-through rate, PoC-20 phase 0"],
       ["deployment [set-shape]", "the effective shape (D4 overlay) and its services"],
       ["deployment set-keep-awake", "whether this install holds the Mac awake, and on which power"],
+      ["vault settings", "when the reconciler pushes the vault to its remote, and pulls from it"],
       ["agents list", "every registered agent and what it holds"],
       ["agents autonomy <id>", "how much room one agent has with an action"],
       ["agents define <id>", "a crew's definition: its prompt, model and effort"],
@@ -1409,6 +1423,57 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
         return 0;
       } catch (e) {
         err(`metistry instances ${verb}: ${e instanceof Error ? e.message : String(e)}`);
+        return 1;
+      }
+    }
+    case "vault": {
+      // M18 (plan §2.21): the vault's git policy. The write is a §4.7
+      // protected write through the reconciler as `user`, like set-shape.
+      if (positional[0] === undefined || !(VAULT_VERBS as readonly string[]).includes(positional[0])) {
+        err(`usage: metistry vault ${VAULT_VERBS.join(" | ")} [--push <after_commit|manual|15m>] [--pull <5m>] [--yes]   (metistry --help)`);
+        return 2;
+      }
+      if (!productDir) {
+        err("vault settings needs a Metistry checkout: pass --product-dir or set METISTRY_PRODUCT_DIR — the seed's deployment.yaml is half of the policy");
+        return 2;
+      }
+      const loadedVault = loadEnv();
+      const instanceDir = str(flags, "instance") ?? loadedVault.instanceDir;
+      const push = str(flags, "push");
+      const pull = str(flags, "pull");
+      if (flags.push === true || flags.pull === true) {
+        err("--push and --pull each take a value: --push after_commit|manual|15m, --pull 5m");
+        return 2;
+      }
+      const env = { ...process.env, ...(instanceDir ? { METISTRY_INSTANCE_DIR: instanceDir } : {}) };
+      try {
+        if (push === undefined && pull === undefined) {
+          const settings = await loadVaultSettings(productDir, env);
+          out(flags.json === true ? JSON.stringify(settings, null, 2) : renderVaultSettings(settings));
+          return 0;
+        }
+        if (!instanceDir) {
+          err("vault settings needs the instance repo: pass --instance <dir> or set METISTRY_INSTANCE_DIR (docs/ops/cli.md) — deployment.yaml lives there");
+          return 2;
+        }
+        const r = await setVaultSettings({
+          productDir,
+          instanceDir,
+          ...(push !== undefined ? { push: parsePushArg(push) } : {}),
+          ...(pull !== undefined ? { pull: parsePullArg(pull) } : {}),
+          yes: flags.yes === true,
+          env,
+          platform: io.platform ?? process.platform,
+          uid: io.uid ?? (typeof process.getuid === "function" ? process.getuid() : 0),
+          fetchFn: io.fetchFn ?? fetch,
+          ...(io.exec ? { exec: io.exec } : {}),
+          out,
+        });
+        if (flags.json === true) out(JSON.stringify(r, null, 2));
+        if (flags.yes !== true) out("preview only — pass --yes to write this.");
+        return 0;
+      } catch (e) {
+        err(`metistry vault settings: ${e instanceof Error ? e.message : String(e)}`);
         return 1;
       }
     }

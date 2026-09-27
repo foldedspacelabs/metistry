@@ -273,7 +273,7 @@ Walked from 7am to the evening across the boards as drawn.
 9. **Say a fact once.** "Comparables came back 4% under" is regenerated in Chat,
    Today, the fold, Run detail and a lesson; later surfaces should cite the first
    (*from last night's fold*) instead of rewriting it.
-10. **Two contexts, one day** *(partly unverified)*. His work calendar and mail live
+10. **Two contexts, one day** *(partly unverified)*. Its calendar and mail live
     on the second instance; every Today mock shows one calendar. Decide app-ux-plan
     Q3; if Today merges both, each meeting names its context in text, not hue.
 

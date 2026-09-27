@@ -22,7 +22,7 @@ import {
   ROUTINE_TIER,
   SCHEDULED_FILENAME,
   SPEND_QUERY,
-  type PreflightMiss,
+  type BudgetMiss,
   type RegistrySkip,
   type SpendRow,
 } from "@foldedspacelabs/metistry-core";
@@ -489,8 +489,10 @@ if (push) startNotifier(pool, push);
 // The routine pause (C5): a routine that declares `requires.engine` is not
 // started at all when the tier its turn would run on is over a `stop` budget
 // — the same verdict the engine's guard reaches, from the same `spend` query
-// (invariant 3), so the scheduler and the engine can never disagree.
-const routineBudget = async (): Promise<PreflightMiss | null> => {
+// (invariant 3), so the scheduler and the engine can never disagree. The miss
+// carries the budget it hit, which is what the runner keys the one Stop-limit
+// request on (C133, T3-12): one per budget window, cleared when it resets.
+const routineBudget = async (): Promise<BudgetMiss | null> => {
   const cfg = compute.store.current;
   if (!cfg.budgets || !queries.names().includes(SPEND_QUERY)) return null;
   const { rows } = await queries.run(SPEND_QUERY);

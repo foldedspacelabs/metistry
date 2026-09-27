@@ -765,6 +765,7 @@ export {
   spentFrom,
   type BudgetCheckInput,
   type BudgetHit,
+  type BudgetMiss,
   type BudgetVerdict,
   type BudgetWindow,
   type SpendRow,

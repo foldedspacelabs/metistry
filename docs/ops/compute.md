@@ -809,7 +809,10 @@ window (so once today, again tomorrow; once this month for a monthly one).
   manifest is the declaration that its run would enqueue a billable turn; the
   runner's preflight asks the same budget question first and records
   `blocked_config` instead of spending the window (C5 — a stopped engine
-  behind a running scheduler just fills the queue with refusals).
+  behind a running scheduler just fills the queue with refusals). The pause
+  raises ONE Needs You `report` per budget window (C133) naming every routine
+  it paused, with *Raise* — cleared on its own once the budget no longer
+  stops them (`docs/ops/client-api.md`, *Events become requests*).
 - **a crew** fails with `budget_exceeded` and its work row parks as `blocked`
   with the reason. Retrying would re-run the check and land in the same place.
 

@@ -15,8 +15,12 @@
 import { createHash } from "node:crypto";
 import type { RunExecutor } from "./runs.js";
 
-/** Consecutive failures after which the runner stops running a component (METISTRY_RUNNER_MAX_STREAK). */
-export const DEFAULT_MAX_STREAK = 5;
+/**
+ * Consecutive failures after which the runner stops running a component
+ * (METISTRY_RUNNER_MAX_STREAK) and raises one request — three strikes
+ * (C135, ruled 2026-09-25: "anything that fails three times stops retrying").
+ */
+export const DEFAULT_MAX_STREAK = 3;
 
 /** Hours one (component, error signature) stays silent after it has alerted once (METISTRY_ALERT_DEDUPE_H). */
 export const DEFAULT_ALERT_DEDUPE_HOURS = 24;

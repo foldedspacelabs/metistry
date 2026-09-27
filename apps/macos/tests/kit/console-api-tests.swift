@@ -68,6 +68,11 @@ import Testing
     #expect(feed.rows[0].runID == 9001)
     #expect(feed.rows[1].runID == nil)
     #expect(feed.rows[0].turnID == "t-77")
+    // `ok` is a state, not prose: false where the run failed, nil where the
+    // source cannot fail (T1-3, C19) — and a row without the key still decodes
+    #expect(feed.rows[0].ok == false)
+    #expect(feed.rows[1].ok == nil)
+    #expect(feed.rows[2].ok == nil)
     #expect(feed.cursor == "2026-09-18T09:00:02.000Z")
     #expect(WireTime.date(feed.asOf) != nil)
 }
@@ -817,13 +822,13 @@ enum Fixtures {
     """)
 
     /// `{rows, as_of}` with activity_feed's own `SELECT` list: ts, kind,
-    /// "group", actor, subject, detail, ref, turn_id.
+    /// "group", actor, subject, detail, ref, turn_id, ok.
     static let feed = bytes("""
     {"rows":[
       {"ts":"2026-09-18T09:00:02.000Z","kind":"turn","group":"run","actor":"assistant",
-       "subject":"turn","detail":"turn anthropic/claude-opus-4 $0.001234","ref":"runs:9001","turn_id":"t-77"},
+       "subject":"turn","detail":"turn anthropic/claude-opus-4 $0.001234","ref":"runs:9001","turn_id":"t-77","ok":false},
       {"ts":"2026-09-18T09:00:01.000Z","kind":"capture","group":"capture","actor":"shortcut",
-       "subject":"renew the wildcard cert","detail":"shortcut · new","ref":"inbox:42","turn_id":null},
+       "subject":"renew the wildcard cert","detail":"shortcut · new","ref":"inbox:42","turn_id":null,"ok":null},
       {"ts":"2026-09-18T09:00:00.000Z","kind":"proposal","group":"proposal","actor":"inbox-drain",
        "subject":"knowledge","detail":"proposed a page","ref":"proposals:18","turn_id":null}
      ],"as_of":"2026-09-18T09:00:02.500Z"}

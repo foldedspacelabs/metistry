@@ -303,7 +303,7 @@ async function probeCheck(name: string, url: string, token: string | undefined, 
     return { status: "failed", remediation: `${name} down at ${url} (${why}) — ${restart}`, cause: "unreachable" };
   }
   if (res.status === 401 || res.status === 403) {
-    return { status: "failed", remediation: `${name} rejected the token (HTTP ${res.status}) — the METISTRY_BRIDGE_TOKEN_* in .env differs from the one the bridge was started with`, cause: "token_rejected" };
+    return { status: "failed", remediation: `${name} rejected the token (HTTP ${res.status}) — the METISTRY_BRIDGE_TOKEN_* in .env differs from the one the bridge was started with; it reads .env only at start, so restart it: ${restart}`, cause: "token_rejected" };
   }
   let body: unknown;
   try {

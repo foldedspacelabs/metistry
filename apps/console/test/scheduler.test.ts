@@ -122,18 +122,14 @@ describe("the default schedules fire once, at their time (T3-1's acceptance)", (
     expect(ats(fired["reply-review"])).toEqual(everyDay.map((d) => `${d} 23:00`));
     expect(ats(fired["weekly-review"])).toEqual(["2026-09-20 18:00"]);
     expect(ats(fired["session-purge"])).toEqual(everyDay.map((d) => `${d} 04:00`)); // T3-9: the session archive's retention
-    // §2.20's Update Check is an interval (@daily), not a time of day: due at
-    // the first tick (it has never run), then once every 24 hours after
-    expect(ats(fired["update-check"])).toEqual(everyDay.map((d) => `${d} 00:00`));
+    // §2.20's Update Check (T2-18): every day at 06:00, in the profile's zone
+    expect(ats(fired["update-check"])).toEqual(everyDay.map((d) => `${d} 06:00`));
 
-    // each time-of-day run is handed its slot and zone, and its row carries the slot
-    const slotted = Object.entries(fired).filter(([name]) => name !== "update-check");
-    for (const f of slotted.flatMap(([, v]) => v)) expect(f).toMatchObject({ scheduledFor: f.at, timeZone: NY });
+    // each run is handed its slot and zone, and its row carries the slot
+    for (const f of Object.values(fired).flat()) expect(f).toMatchObject({ scheduledFor: f.at, timeZone: NY });
     const rows = db.runs.filter((r) => r.kind === "routine_run");
-    const slotRows = rows.filter((r) => r.component !== "update-check");
-    expect(slotRows).toHaveLength(5 + 7 + 5 + 7 + 1 + 7);
-    expect(rows).toHaveLength(slotRows.length + 7);
-    for (const r of slotRows) expect(r.meta).toMatchObject({ scheduled_for: r.ts.toISOString(), time_zone: NY, outcome: "silent" });
+    expect(rows).toHaveLength(5 + 7 + 5 + 7 + 1 + 7 + 7);
+    for (const r of rows) expect(r.meta).toMatchObject({ scheduled_for: r.ts.toISOString(), time_zone: NY, outcome: "silent" });
   }, 60_000); // ten thousand ticks: ~3 s alone, more beside every other suite
 });
 

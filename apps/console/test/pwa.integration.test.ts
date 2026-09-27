@@ -104,6 +104,28 @@ describe.skipIf(!hasDb)("console PWA chunk", () => {
     expect(Array.from(bytes.slice(0, 8))).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); // PNG magic
   });
 
+  // X-4: brand-kit.md "What the build needs" #5 — a maskable icon (so
+  // Android does not crop the mark against its own shape) and a dark
+  // counterpart for background_color/theme_color (so an installed dark-mode
+  // PWA does not flash light on launch, C12's manifest half).
+  it("ships a maskable icon and a dark manifest colour scheme", async () => {
+    const manifest = await (await fetch(base + "/manifest.webmanifest")).json();
+
+    const maskable = manifest.icons.find((i: { purpose?: string }) => i.purpose === "maskable");
+    expect(maskable).toBeDefined();
+    expect(maskable.type).toBe("image/png");
+    expect(maskable.sizes).toBe("512x512");
+    const mr = await fetch(base + maskable.src);
+    expect(mr.status).toBe(200);
+    expect(mr.headers.get("content-type")).toBe("image/png");
+
+    // manifest.json has no top-level media query, so the dark counterpart
+    // rides the "user preference media features" member browsers read
+    // (color_scheme_dark) rather than a second static manifest.
+    expect(manifest.user_preferences.color_scheme_dark.theme_color).toBe(BG_DARK);
+    expect(manifest.user_preferences.color_scheme_dark.background_color).toBe(BG_DARK);
+  });
+
   // design-system.md 3.6 + P9: the chat composer is one row — a <details>
   // actions menu collapsed by default, the field, and send — and the arriving
   // reply raises a pill instead of scrolling the transcript. Asserted on the

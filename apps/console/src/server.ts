@@ -1149,11 +1149,15 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       // Write rows (core's `describePermissions`, which asks `may()`). The
       // CLI, the console's panel and MetistryKit print these rows and
       // nothing of their own, so the three cannot draw three tables.
+      // `access_ceilings` (C42): the (agent, area) pairs whose third ask
+      // `request_access` refused after two declines — a refusal that writes
+      // no proposal, so this panel is where the owner learns of it.
       const rows = await agents.listAgents(db, (id) => cfg.crews?.toolset(id));
       const sources = await actorSourcesFor(rows);
       return sendJson(res, 200, {
         agents: rows.map((r) => ({ ...r, permissions: actors.permissionLines(r.id, sources) })),
         access_requests: await agents.pendingAccessRequests(db),
+        access_ceilings: await agents.accessCeilings(db, rows),
       });
     }
 
@@ -1556,7 +1560,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     // Like the improvement and action paths above it, this runs BEFORE the
     // row is settled, so a refusal leaves the request pending with the reason
     // rather than closing a decision that granted nothing.
-    let granted: { agent: string; area: string; grants: agents.Grants } | undefined;
+    let granted: { agent: string; area: string; grants: agents.Grants; prior_tier: agents.Grants["tier"] } | undefined;
     if (row.kind === agents.ACCESS_REQUEST_KIND && (verb === "allow" || verb === "accept_with_changes")) {
       const asked = agents.accessArea(row.payload);
       if (asked === undefined) {
@@ -1569,6 +1573,18 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       const area = verb === "accept_with_changes" ? (typeof body.area === "string" ? body.area.trim() : "") : asked;
       if (verb === "accept_with_changes" && !validAgentAreaGrant(area)) {
         return refuseAnswer(id, verb, "invalid_request", `revising an access request means granting a different area: send {"area": "…"} with it — ${AREA_PREFIX_REFUSAL}. To refuse it outright, Decline.`);
+      }
+      // …and it can only grant LESS (C40, ruled 2026-09-20): the asked prefix
+      // is the ceiling, and a revision must be it or a folder under it. A
+      // wider or sibling area is refused here, before anything reads the
+      // registry, and NOTHING is written — not the grant, not an override,
+      // not the row's `payload.error`: this is the request being malformed
+      // (the control cannot express it), not a consequence that failed
+      // (C45), so the card stays exactly as the owner last saw it. The
+      // refusal is audited like its siblings below.
+      if (verb === "accept_with_changes" && !agents.revisionWithin(asked, area)) {
+        await audit("triage", "access_request", false, { proposal: row.id, agent: String(row.source_agent), error: "wider_than_asked", asked, area });
+        return { status: 400, body: { ...errorEnvelope("invalid_request", agents.revisionRefusal(asked, area)), asked } };
       }
       const target = String(row.source_agent);
       const current = (await agents.listAgents(db)).find((a) => a.id === target && !a.revoked);
@@ -1618,7 +1634,13 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         // not an approval to carry forward, it is a no-op.
         const added = widened.areas.length > (current.grants.tier === "areas" ? current.grants.areas.length : 0);
         if (current.kind === "internal" && added) await agents.recordGrantOverride(db, target, area, Number(row.id));
-        granted = { agent: target, area, grants };
+        // `prior_tier` (C41): what the credential held before this answer.
+        // An area grant IS tier `areas`, so for a row at `index` Approve is
+        // also a loss — vault-wide titles for titles inside its folders — and
+        // the answer says so in data, from the registry as it stood, rather
+        // than leaving each client to derive the trade from a payload
+        // snapshot that may be older than the row.
+        granted = { agent: target, area, grants, prior_tier: current.grants.tier };
       } catch (err) {
         if (err instanceof agents.AgentError) {
           await audit("triage", "access_request", false, { proposal: row.id, agent: target, error: err.code });
@@ -1630,7 +1652,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       // granted, to whom, by whom, and what was asked for when they differ.
       await db.query(
         `UPDATE proposals SET payload = payload || jsonb_build_object('granted', $2::jsonb) WHERE id = $1 AND decision = 'pending'`,
-        [id, JSON.stringify({ area, grants: granted.grants, at: new Date().toISOString(), by: "user" })],
+        [id, JSON.stringify({ area, grants: granted.grants, prior_tier: granted.prior_tier, at: new Date().toISOString(), by: "user" })],
       );
     }
 

@@ -74,6 +74,18 @@ describe("agent grants validation (pure)", () => {
     expect(agents.validateGrants(agents.widenedGrants({ tier: "none", areas: [] }, "Areas/Fsl"))).toEqual({ tier: "areas", areas: ["Areas/Fsl"] });
   });
 
+  // C40 (ruled 2026-09-20): Revise can only grant less. The asked prefix is a
+  // ceiling — inclusive, and a FOLDER prefix, never a string one.
+  it("revisionWithin admits the asked area and folders under it, and nothing wider, beside or merely string-prefixed", () => {
+    expect(agents.revisionWithin("Areas/Health", "Areas/Health")).toBe(true);
+    expect(agents.revisionWithin("Areas/Health", "Areas/Health/Sleep")).toBe(true);
+    expect(agents.revisionWithin("Areas/Health", "Areas/Health/Sleep/Notes")).toBe(true);
+    for (const wider of ["Areas", "Areas/Finance", "Areas/HealthX", "Areas/Healt", "Projects/Health", "Me"]) {
+      expect(agents.revisionWithin("Areas/Health", wider), wider).toBe(false);
+    }
+    expect(agents.revisionRefusal("Areas/Health", "Areas")).toContain("only grant less");
+  });
+
   it("accessArea reads the area off a payload and re-validates it — a row is data, not a decision", () => {
     expect(agents.accessArea({ area: "Areas/Fsl" })).toBe("Areas/Fsl");
     for (const payload of [{ area: "areas/fsl" }, { area: "../etc" }, { area: "/" }, { area: ".metistry/state" }, { area: "Artifacts/X" }, { area: 7 }, {}, null, "Areas/Fsl"]) {

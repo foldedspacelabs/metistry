@@ -6,14 +6,17 @@
 // The point of the suite is the half that must NOT happen. An agent cannot
 // answer its own request; a crafted area is refused at both doors; Approve
 // widens exactly the prefix that was asked for and nothing beside it; Revise
-// grants the owner's prefix instead; Decline, Later and Skip grant nothing at
-// all; and a revoked credential cannot be granted anything by any route.
+// grants the owner's prefix instead — and only ever one at or under the one
+// asked for (C40); Decline, Later and Skip grant nothing at all; and a revoked
+// credential cannot be granted anything by any route. The answer carries the
+// tier the credential held before it (C41), and an agent that has hit the
+// escalation ceiling shows on Agents rather than nowhere (C42).
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import { QueryStore } from "@foldedspacelabs/metistry-queries";
 import { mintToken } from "@foldedspacelabs/metistry-core";
-import { ACCESS_REQUEST_KIND } from "@foldedspacelabs/metistry-mcp-brain";
+import { ACCESS_CEILING_KIND, ACCESS_REQUEST_KIND } from "@foldedspacelabs/metistry-mcp-brain";
 import { makeServer } from "../src/server.js";
 import * as store from "../src/auth-store.js";
 import * as agents from "../src/agents.js";
@@ -24,7 +27,7 @@ const policy = { idleDays: 30, maxDays: 365 };
 
 const AREA = "Areas/AccessIt";
 const PAGE = `${AREA}/Page.md`;
-const NARROWED = "Projects/Narrowed";
+const NARROWED = "Areas/Narrowed";
 
 describe.skipIf(!hasDb)("access requests, agent to owner and back (integration)", () => {
   let pool: pg.Pool;
@@ -36,6 +39,10 @@ describe.skipIf(!hasDb)("access requests, agent to owner and back (integration)"
   const goneId = `itest-gone-${suffix}`;
   let agentToken: string;
   let goneToken: string;
+  /** The capture owner token — an owner credential that is refused everywhere but capture (U2). */
+  let captureToken: string;
+  const localOwnerToken = mintToken(32);
+  const MARK = `itest-access-${suffix}`;
   let nextId = 1;
 
   /** The owner's session — the only credential the management surface and triage answer to. */
@@ -71,6 +78,7 @@ describe.skipIf(!hasDb)("access requests, agent to owner and back (integration)"
       inboxDir: `/tmp/metistry-test-inbox-access-${Date.now()}`,
       policy,
       secureCookies: false,
+      localOwner: { token: localOwnerToken, trusted: [] },
       // stands in for the reconciler's vault bridge: one page, inside the area that is asked for
       readKnowledge: async (path) => (path === PAGE ? "# Page\n\nthe content behind the grant\n" : null),
     });
@@ -84,6 +92,7 @@ describe.skipIf(!hasDb)("access requests, agent to owner and back (integration)"
     const pkId = `access-${mintToken(8)}`;
     await store.storePasskey(pool, { id: pkId, publicKey: new Uint8Array([1]), signCount: 0, transports: [], origin: "t", label: "access-test" });
     cookie = `metistry_session=${await store.issueSession(pool, pkId, policy)}`;
+    captureToken = await store.mintOwnerToken(pool, MARK);
     ({ token: agentToken } = await agents.createAgent(pool, { id: agentId, display_name: "access itest" }));
     ({ token: goneToken } = await agents.createAgent(pool, { id: goneId, display_name: "about to be revoked" }));
     // tier index + a `queries` grant: the second axis, which nothing here may widen
@@ -95,6 +104,8 @@ describe.skipIf(!hasDb)("access requests, agent to owner and back (integration)"
     await new Promise<void>((r) => server.close(() => r()));
     await pool.query(`DELETE FROM proposals WHERE source_agent = ANY($1::text[])`, [[agentId, goneId]]);
     await pool.query(`DELETE FROM knowledge_files WHERE path = $1`, [PAGE]);
+    await pool.query(`DELETE FROM runs WHERE kind = $1 AND meta->>'agent' LIKE $2`, [ACCESS_CEILING_KIND, `itest-%-${suffix}`]);
+    await pool.query(`DELETE FROM owner_tokens WHERE label = $1`, [MARK]);
     await pool.end();
   });
 
@@ -138,14 +149,17 @@ describe.skipIf(!hasDb)("access requests, agent to owner and back (integration)"
     //    through, with the same `agent_admin` audit row, `via: triage`.
     const allow = await owner("POST", `/api/proposals/${id}`, { decision: "allow" });
     expect(allow.status).toBe(200);
-    expect((await allow.json()).granted).toMatchObject({ agent: agentId, area: AREA, grants: { tier: "areas", areas: [AREA], queries: true } });
+    // C41: the answer carries the tier the credential held BEFORE it — here
+    // `index`, so Approve was also a trade (vault-wide titles for one folder),
+    // and a client states it from this field rather than re-deriving it.
+    expect((await allow.json()).granted).toMatchObject({ agent: agentId, area: AREA, grants: { tier: "areas", areas: [AREA], queries: true }, prior_tier: "index" });
     expect(await grantsOf(agentId)).toEqual({ tier: "areas", areas: [AREA], queries: true });
     const audit = await pool.query(
       `SELECT ok, meta FROM runs WHERE kind = 'agent_admin' AND tool = 'grant' AND meta->>'agent' = $1 AND meta->>'via' = 'triage' ORDER BY id DESC LIMIT 1`,
       [agentId],
     );
     expect(audit.rows[0]).toMatchObject({ ok: true, meta: expect.objectContaining({ op: "grant", area: AREA, proposal: String(id) }) });
-    expect(await proposal(id)).toMatchObject({ decision: "allow", payload: expect.objectContaining({ granted: expect.objectContaining({ area: AREA, by: "user" }) }) });
+    expect(await proposal(id)).toMatchObject({ decision: "allow", payload: expect.objectContaining({ granted: expect.objectContaining({ area: AREA, by: "user", prior_tier: "index" }) }) });
 
     // 5. …and the read the agent was refused now answers.
     const read = await tool(agentToken, "knowledge_read", { path: PAGE });
@@ -205,12 +219,155 @@ describe.skipIf(!hasDb)("access requests, agent to owner and back (integration)"
 
     const revised = await owner("POST", `/api/proposals/${id}`, { decision: "accept_with_changes", area: NARROWED });
     expect(revised.status).toBe(200);
-    expect((await revised.json()).granted).toMatchObject({ area: NARROWED });
+    // already at `areas`: no trade this time, and the answer says that too
+    expect((await revised.json()).granted).toMatchObject({ area: NARROWED, prior_tier: "areas" });
     // exactly the owner's prefix, beside what was already held — never `Areas`
     expect(await grantsOf(agentId)).toEqual({ tier: "areas", areas: [AREA, NARROWED], queries: true });
     expect(await proposal(id)).toMatchObject({ decision: "accept_with_changes" });
     const audit = await pool.query(`SELECT meta FROM runs WHERE kind = 'agent_admin' AND tool = 'grant' AND meta->>'proposal' = $1::text ORDER BY id DESC LIMIT 1`, [String(id)]);
     expect(audit.rows[0]!.meta).toMatchObject({ area: NARROWED, asked: "Areas" }); // what was asked for is on the record beside what was given
+  });
+
+  // C40 (ruled 2026-09-20): the asked prefix is a CEILING. Granting more
+  // than was asked, or something beside it, is a different decision about a
+  // scope nobody asked for — it belongs on Agents — so the door refuses it,
+  // and refuses it BEFORE anything is written: not the grant, not an
+  // override, not an error on the card.
+  it("C40: a wider or sibling area is refused and nothing is written", async () => {
+    const asked = "Areas/Ceiling/Inner";
+    const ask = await tool(agentToken, "request_access", { area: asked, reason: "one folder, deep down" });
+    const id = Number(ask.body.id);
+    const snapshot = async () => (await pool.query(`SELECT decision, feedback, payload, decided_at, snoozed_until FROM proposals WHERE id = $1`, [id])).rows[0];
+    const grantRows = async () => (await pool.query(`SELECT count(*)::int AS n FROM runs WHERE kind = 'agent_admin' AND tool = 'grant' AND meta->>'proposal' = $1`, [String(id)])).rows[0]!.n;
+    const beforeRow = await snapshot();
+    const beforeGrants = await grantsOf(agentId);
+
+    for (const wider of [
+      "Areas/Ceiling", //            the parent: wider
+      "Areas", //                    wider still
+      "Areas/Ceiling/Other", //      a sibling
+      "Areas/Ceiling/InnerX", //     a string prefix that is not a folder under it
+      "Projects/Elsewhere", //       somewhere else entirely
+    ]) {
+      const r = await owner("POST", `/api/proposals/${id}`, { decision: "accept_with_changes", area: wider });
+      expect(r.status, wider).toBe(400);
+      const body = await r.json();
+      expect(body.error.code, wider).toBe("invalid_request");
+      expect(body.error.message, wider).toContain("only grant less");
+      expect(body.asked, wider).toBe(asked);
+      expect(await snapshot(), wider).toEqual(beforeRow); // no decision, no payload.error, no snooze
+      expect(await grantsOf(agentId), wider).toEqual(beforeGrants);
+      expect(await grantRows(), wider).toBe(0);
+    }
+    // the refusal is on the record, as its sibling refusals are
+    const audit = await pool.query(`SELECT ok, meta FROM runs WHERE kind = 'triage' AND tool = 'access_request' AND meta->>'proposal' = $1 ORDER BY id`, [String(id)]);
+    expect(audit.rows).toHaveLength(5);
+    expect(audit.rows[0]).toMatchObject({ ok: false, meta: expect.objectContaining({ error: "wider_than_asked", asked, area: "Areas/Ceiling" }) });
+
+    // at or under the ceiling is a revision: the folder asked for, or one inside it
+    const deeper = `${asked}/Deeper`;
+    const ok = await owner("POST", `/api/proposals/${id}`, { decision: "accept_with_changes", area: deeper });
+    expect(ok.status).toBe(200);
+    expect((await ok.json()).granted).toMatchObject({ area: deeper });
+    expect((await grantsOf(agentId)).areas).toEqual([...beforeGrants.areas, deeper]);
+  });
+
+  it("C40: the ceiling holds for an INTERNAL row too — a refused widening records no override", async () => {
+    const id = `itest-cint-${suffix}`;
+    await agents.ensureInternalAgent(pool, id, { token: mintToken(32), grants: agents.validateGrants({ tier: "areas", areas: ["Me"] }, { kind: "internal" }) });
+    const planted = await pool.query(
+      `INSERT INTO proposals (kind, source_agent, trust, payload) VALUES ($1, $2, 'external', $3::jsonb) RETURNING id`,
+      [ACCESS_REQUEST_KIND, id, JSON.stringify({ title: `${id} asks to read Areas/Small`, area: "Areas/Small", reason: "one folder" })],
+    );
+    const proposalId = Number(planted.rows[0]!.id);
+    for (const wider of ["Areas", "Areas/Big"]) {
+      const r = await owner("POST", `/api/proposals/${proposalId}`, { decision: "accept_with_changes", area: wider });
+      expect(r.status, wider).toBe(400);
+    }
+    expect(await grantsOf(id)).toEqual({ tier: "areas", areas: ["Me"] });
+    expect((await pool.query(`SELECT count(*)::int AS n FROM agent_grant_overrides WHERE agent_id = $1`, [id])).rows[0]!.n).toBe(0);
+    expect(await proposal(proposalId)).toMatchObject({ decision: "pending" });
+    // exactly the asked area is still a revision (the ceiling is inclusive)
+    const same = await owner("POST", `/api/proposals/${proposalId}`, { decision: "accept_with_changes", area: "Areas/Small" });
+    expect(same.status).toBe(200);
+    expect((await same.json()).granted).toMatchObject({ area: "Areas/Small", prior_tier: "areas" });
+    await pool.query(`DELETE FROM agent_grant_overrides WHERE agent_id = $1`, [id]);
+    await pool.query(`DELETE FROM proposals WHERE source_agent = $1`, [id]);
+    await pool.query(`DELETE FROM agents WHERE id = $1`, [id]);
+  });
+
+  // C42: the third ask after two declines is refused at the tool and writes
+  // no proposal, so the owner used to never learn of it. It writes an
+  // `access_ceiling` run now, and Agents lists it beside the credential.
+  it("C42: an agent at the escalation ceiling shows on Agents, and stops showing once the owner grants it there", async () => {
+    const id = `itest-ceil-${suffix}`;
+    const { token } = await agents.createAgent(pool, { id, display_name: "hits the ceiling" });
+    expect((await owner("PUT", `/api/agents/${id}/grants`, { tier: "index" })).status).toBe(200);
+    const closed = "Areas/Closed";
+
+    const first = await tool(token, "request_access", { area: closed, reason: "first ask" });
+    expect((await owner("POST", `/api/proposals/${Number(first.body.id)}`, { decision: "deny", feedback: "no" })).status).toBe(200);
+    const second = await tool(token, "request_access", { area: closed, reason: "second ask, with more", escalate: true });
+    expect((await owner("POST", `/api/proposals/${Number(second.body.id)}`, { decision: "deny" })).status).toBe(200);
+
+    const listed = async () => (await (await owner("GET", "/api/agents")).json()).access_ceilings as any[];
+    expect((await listed()).filter((c) => c.agent === id)).toEqual([]); // two declines are not the ceiling; the third ask is
+
+    for (const reason of ["third ask", "fourth ask"]) {
+      const r = await tool(token, "request_access", { area: closed, reason, escalate: true });
+      expect(r).toMatchObject({ isError: true, body: { reason: "declined_twice" } });
+    }
+    const row = (await listed()).find((c) => c.agent === id);
+    expect(row).toMatchObject({ agent: id, area: closed, declines: 2, last_proposal: Number(second.body.id), hits: 2 });
+    expect(typeof row.last_declined_at).toBe("string");
+    expect(row.last_at >= row.first_at).toBe(true);
+
+    // resolved on Agents — where the ceiling sends the owner — it is history, not a live fact
+    expect((await owner("PUT", `/api/agents/${id}/grants`, { tier: "areas", areas: [closed] })).status).toBe(200);
+    expect((await listed()).filter((c) => c.agent === id)).toEqual([]);
+    // …and a revoked credential has nothing left to decide either
+    expect((await owner("PUT", `/api/agents/${id}/grants`, { tier: "index" })).status).toBe(200);
+    expect((await listed()).filter((c) => c.agent === id)).toHaveLength(1);
+    expect((await owner("POST", `/api/agents/${id}/revoke`)).status).toBe(200);
+    expect((await listed()).filter((c) => c.agent === id)).toEqual([]);
+    await pool.query(`DELETE FROM proposals WHERE source_agent = $1`, [id]);
+  });
+
+  // U2 for the two doors this ticket touched: the answer route (C40/C41) and
+  // the registry read that now carries `access_ceilings` (C42).
+  it("U2: the triage door and GET /api/agents are 401 without a credential, 403 for an agent bearer and the capture token, and reached by the local owner token", async () => {
+    const ask = await tool(agentToken, "request_access", { area: "Areas/Uu", reason: "for the U2 sweep" });
+    const id = Number(ask.body.id);
+    const before = await grantsOf(agentId);
+    const doors = [
+      ["POST", `/api/proposals/${id}`, { decision: "accept_with_changes", area: "Areas/Uu" }],
+      ["GET", "/api/agents", undefined],
+    ] as const;
+    const call = (method: string, path: string, body: unknown, headers: Record<string, string>) =>
+      fetch(base + path, { method, headers: { "content-type": "application/json", ...headers }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+
+    for (const [method, path, body] of doors) {
+      const none = await call(method, path, body, {});
+      expect(none.status, `${method} ${path}`).toBe(401);
+      expect(await none.json()).toEqual({ error: { code: "unauthenticated", message: "authentication required" } });
+      for (const bearer of [agentToken, captureToken]) {
+        const r = await call(method, path, body, { authorization: `Bearer ${bearer}` });
+        expect(r.status, `${method} ${path}`).toBe(403);
+        expect(await r.json()).toEqual({ error: { code: "forbidden", message: "not granted" } });
+      }
+    }
+    expect(await proposal(id)).toMatchObject({ decision: "pending" });
+    expect(await grantsOf(agentId)).toEqual(before);
+
+    const reg = await call("GET", "/api/agents", undefined, { authorization: `Bearer ${localOwnerToken}` });
+    expect(reg.status).toBe(200);
+    expect(Array.isArray((await reg.json()).access_ceilings)).toBe(true);
+    // the local owner may answer, and is held to the same ceiling as a session
+    const wider = await call("POST", `/api/proposals/${id}`, { decision: "accept_with_changes", area: "Areas" }, { authorization: `Bearer ${localOwnerToken}` });
+    expect(wider.status).toBe(400);
+    const answered = await call("POST", `/api/proposals/${id}`, { decision: "accept_with_changes", area: "Areas/Uu" }, { authorization: `Bearer ${localOwnerToken}` });
+    expect(answered.status).toBe(200);
+    expect((await answered.json()).granted).toMatchObject({ area: "Areas/Uu", prior_tier: before.tier });
   });
 
   it("Decline and Later grant nothing", async () => {

@@ -80,9 +80,31 @@ export interface Db {
   end?(): Promise<void>;
 }
 
+/**
+ * A structured fix for the Services pane to offer as a button, next to the
+ * free-text `remediation` a person reads in a terminal (plan §3.3, T4-21).
+ * Present only when doctor can NAME the fix without guessing — never derived
+ * by parsing `remediation` prose ("enforce at the tool, never by prompting":
+ * a regex over a sentence meant for a human is not a control). `command` is
+ * argv, never a shell string — the Mac app already runs every CLI verb this
+ * way (`ProcessCommandRunner`), and a `run_verb` action is refused the same
+ * `--yes` gate as running it by hand: doctor never appends one, so the app's
+ * own preview-then-confirm still stands between a button and a mutation.
+ */
+export type DoctorAction =
+  | { kind: "open_secrets"; label: string }
+  | { kind: "open_system_settings"; label: string }
+  | { kind: "run_verb"; command: string[]; label: string };
+
 export interface DoctorRow extends CheckResult {
   kind: string;
+  /** absent when the row is `ok`, or when doctor has nothing more specific to offer than the remediation text. */
+  action?: DoctorAction;
 }
+
+const runVerb = (command: string[], label: string): DoctorAction => ({ kind: "run_verb", command, label });
+const openSecrets = (label: string): DoctorAction => ({ kind: "open_secrets", label });
+const openSystemSettings = (label: string): DoctorAction => ({ kind: "open_system_settings", label });
 
 export interface DoctorReport {
   as_of: string;
@@ -167,7 +189,8 @@ export async function walkManifests(productDir: string): Promise<FoundManifest[]
 export async function registriesRow(productDir: string, env: NodeJS.ProcessEnv): Promise<DoctorRow> {
   const instanceDir = env.METISTRY_INSTANCE_DIR?.trim().replace(/\/+$/, "") || undefined;
   const seedDir = env.METISTRY_SEED_DIR?.trim() || join(productDir, "seed");
-  return {
+  let action: DoctorAction | undefined;
+  const result = {
     kind: "registry",
     ...(await runCheck("registries", `every registry kind loads (${Object.keys(REGISTRY_KINDS).join(", ")})${instanceDir ? "" : "; no METISTRY_INSTANCE_DIR, so product units only"}`, async () => {
       const units: Record<string, number> = {};
@@ -186,6 +209,7 @@ export async function registriesRow(productDir: string, env: NodeJS.ProcessEnv):
       }
       const meta = { units, overlays, skipped };
       if (skipped.length > 0) {
+        action = runVerb(["metistry", "extensions", "list"], "List extensions");
         return {
           status: "degraded" as const,
           remediation: `${skipped.length} unit(s) not loaded — ${skipped.slice(0, 3).map((x) => `${x.path}: ${x.reason}`).join("; ")}${skipped.length > 3 ? "; …" : ""} (\`metistry extensions list\`, docs/ops/extensions.md)`,
@@ -195,6 +219,7 @@ export async function registriesRow(productDir: string, env: NodeJS.ProcessEnv):
       return overlays.length > 0 ? { remediation: `extensions replace ${overlays.length} product unit(s): ${overlays.join("; ")} — \`metistry extensions remove <name>\` restores one (Reset to Default)`, meta } : { meta };
     })),
   };
+  return action ? { ...result, action } : result;
 }
 
 // ---- network probes (the same URL/token env conventions the watchdog and console use) ----
@@ -245,17 +270,24 @@ export function logHint(service: string, shape: DeploymentShape, labelSuffix?: s
 
 type Outcome = Pick<CheckResult, "status" | "remediation" | "meta">;
 
+/**
+ * Why a probe came back the way it did — read by `actionForBridgeOutcome`
+ * below to pick the button, never by parsing the human `remediation`
+ * sentence (that stays free text; a fifth reason is simply "no action").
+ */
+type ProbeCause = "unreachable" | "token_rejected" | "bad_body" | "bridge_reported";
+
 /** GET <url>/check with the bearer; the bridge's own status and remediation ride through (watchdog bridges.ts, same split: down vs degraded). */
-async function probeCheck(name: string, url: string, token: string | undefined, restart: string, fetchFn: typeof fetch, timeoutMs: number): Promise<Outcome> {
+async function probeCheck(name: string, url: string, token: string | undefined, restart: string, fetchFn: typeof fetch, timeoutMs: number): Promise<Outcome & { cause?: ProbeCause }> {
   let res: Response;
   try {
     res = await fetchFn(`${url}/check`, { headers: token ? { authorization: `Bearer ${token}` } : {}, signal: AbortSignal.timeout(timeoutMs) });
   } catch (err) {
     const why = err instanceof Error ? err.message : String(err);
-    return { status: "failed", remediation: `${name} down at ${url} (${why}) — ${restart}` };
+    return { status: "failed", remediation: `${name} down at ${url} (${why}) — ${restart}`, cause: "unreachable" };
   }
   if (res.status === 401 || res.status === 403) {
-    return { status: "failed", remediation: `${name} rejected the token (HTTP ${res.status}) — the METISTRY_BRIDGE_TOKEN_* in .env differs from the one the bridge was started with` };
+    return { status: "failed", remediation: `${name} rejected the token (HTTP ${res.status}) — the METISTRY_BRIDGE_TOKEN_* in .env differs from the one the bridge was started with`, cause: "token_rejected" };
   }
   let body: unknown;
   try {
@@ -264,11 +296,32 @@ async function probeCheck(name: string, url: string, token: string | undefined, 
     body = undefined;
   }
   const parsed = checkResultSchema.safeParse(body);
-  if (!parsed.success) return { status: "failed", remediation: `${name} answered HTTP ${res.status} without a check() body at ${url} — wrong port, or a bridge mid-crash; ${restart}` };
+  if (!parsed.success) return { status: "failed", remediation: `${name} answered HTTP ${res.status} without a check() body at ${url} — wrong port, or a bridge mid-crash; ${restart}`, cause: "bad_body" };
   const r = parsed.data;
   const meta = { probe: r.probe, ...(r.meta ? { bridge_meta: r.meta } : {}) };
   if (r.status === "ok") return { status: "ok", meta };
-  return { status: r.status, ...(r.remediation ? { remediation: r.remediation } : { remediation: r.probe }), meta };
+  return { status: r.status, ...(r.remediation ? { remediation: r.remediation } : { remediation: r.probe }), meta, cause: "bridge_reported" };
+}
+
+/**
+ * `cause` — set by doctor itself two lines above each of `probeCheck`'s
+ * returns — decides "wrong token" vs "everything else"; that much is never a
+ * guess. The one exception is `bridge_reported`: a TCC bridge's OWN
+ * `check()` names the System Settings pane in its `remediation` because
+ * doctor cannot fix a Calendar grant with any verb at all, and that phrase
+ * is the only signal doctor has for it. Every other bridge-reported problem
+ * (a stale calendar, a rate limit) gets no action — the bridge's remediation
+ * text is still the whole story, read in the terminal or the app alike.
+ */
+function actionForBridgeOutcome(o: Outcome & { cause?: ProbeCause }, tokenVar: string): DoctorAction | undefined {
+  switch (o.cause) {
+    case "token_rejected":
+      return openSecrets(`Fix ${tokenVar} in Secrets`);
+    case "bridge_reported":
+      return /system settings/i.test(o.remediation ?? "") ? openSystemSettings("Open System Settings") : undefined;
+    default:
+      return undefined;
+  }
 }
 
 /** One component row: manifest validity first; then the network probe for anything that declares an http surface. */
@@ -298,7 +351,8 @@ async function componentRow(
     const probe = token
       ? `GET ${url}/health ok; /api/status authenticates with METISTRY_LOCAL_OWNER_TOKEN`
       : `GET ${url}/health ok; /api/status answers (401 = a passkey session is required)`;
-    return {
+    let action: DoctorAction | undefined;
+    const row = {
       kind,
       ...(await runCheck(man.name, probe, async () => {
         const health = await deps.fetchFn(`${url}/health`, { signal: AbortSignal.timeout(deps.timeoutMs) }).catch((err) => {
@@ -313,6 +367,7 @@ async function componentRow(
         // METISTRY_TRUSTED_LOOPBACK_PROXY missing — but the console itself
         // is up and serving, so this degrades rather than fails.
         if (token && status.status === 401) {
+          action = runVerb(["metistry", "secrets", "sync", "--to", "env"], "Sync secrets to .env");
           return {
             status: "degraded" as const,
             remediation: `${url} refused METISTRY_LOCAL_OWNER_TOKEN (401): the console was started with a different value (\`metistry secrets sync --to env\` then ${restartHint("console", deps.shape, deps.labelSuffix)}), or the request did not reach it from this machine — under compose it needs METISTRY_TRUSTED_LOOPBACK_PROXY (docs/ops/auth.md)`,
@@ -322,6 +377,7 @@ async function componentRow(
         return { meta };
       })),
     };
+    return action ? { ...row, action } : row;
   }
 
   if (man.type === "bridge" && man.name === "brain") {
@@ -366,6 +422,7 @@ async function componentRow(
     if (!configured) {
       return {
         kind,
+        action: openSecrets(`Add ${t.tokenVar} in Secrets`),
         ...(await runCheck(man.name, `${t.urlVar} set → GET /check`, async () => ({
           status: "absent",
           remediation: `not configured: set ${t.urlVar}${port ? ` (default ${deps.shape === "launchd" ? `http://127.0.0.1:${port}` : `http://host.docker.internal:${port}`})` : ""} and ${t.tokenVar} in .env — degrades ${"degrades" in man ? man.degrades : "absent"} meanwhile`,
@@ -374,10 +431,16 @@ async function componentRow(
     }
     const url = hostLocal(configured, deps.shape);
     const restart = restartHint(t.launchdService ?? man.name, t.launchdService ? "launchd" : deps.shape, deps.labelSuffix);
-    return {
+    let action: DoctorAction | undefined;
+    const row = {
       kind,
-      ...(await runCheck(man.name, `GET ${url}/check answers status ok`, () => probeCheck(man.name, url, deps.env[t.tokenVar], restart, deps.fetchFn, deps.timeoutMs))),
+      ...(await runCheck(man.name, `GET ${url}/check answers status ok`, async () => {
+        const outcome = await probeCheck(man.name, url, deps.env[t.tokenVar], restart, deps.fetchFn, deps.timeoutMs);
+        action = actionForBridgeOutcome(outcome, t.tokenVar);
+        return outcome;
+      })),
     };
+    return action ? { ...row, action } : row;
   }
 
   const via =
@@ -408,7 +471,8 @@ const LEGACY_INBOX_GITIGNORE_LINE = /^\/?inbox\/?$/;
  * the verb that moves it.
  */
 export async function layoutRow(instanceDir: string): Promise<DoctorRow> {
-  return {
+  let action: DoctorAction | undefined;
+  const row = {
     kind: "instance",
     ...(await runCheck("instance layout", `${instanceDir} is the flat layout — the directory is the Obsidian vault, machinery under ${INSTANCE_LAYOUT.metistryDir}/`, async () => {
       const shape = detectLayout(instanceDir);
@@ -420,6 +484,7 @@ export async function layoutRow(instanceDir: string): Promise<DoctorRow> {
           meta: { layout: "unknown" },
         };
       }
+      action = runVerb(["metistry", "migrate-layout", "--dry-run"], "Preview migrate-layout");
       return {
         status: "degraded",
         remediation: `the vault still lives in ${LEGACY_VAULT_DIR}/ and the config files at the instance root — \`metistry migrate-layout --dry-run\` prints the whole plan, \`metistry migrate-layout\` runs it (docs/ops/instance-layout.md)`,
@@ -427,6 +492,7 @@ export async function layoutRow(instanceDir: string): Promise<DoctorRow> {
       };
     })),
   };
+  return action ? { ...row, action } : row;
 }
 
 /**
@@ -458,7 +524,8 @@ export async function profileRow(instanceDir: string): Promise<DoctorRow | null>
 }
 
 export async function inboxRow(instanceDir: string): Promise<DoctorRow> {
-  return {
+  let action: DoctorAction | undefined;
+  const row = {
     kind: "instance",
     ...(await runCheck("inbox", `${instanceDir}/inbox/ absent, and .gitignore does not list it — captures live at ${INSTANCE_LAYOUT.inboxDir}/`, async () => {
       // Exact-case only: on case-insensitive APFS, `existsSync(join(instanceDir, "inbox"))`
@@ -471,6 +538,7 @@ export async function inboxRow(instanceDir: string): Promise<DoctorRow> {
       const gitignorePath = join(instanceDir, ".gitignore");
       const gitignored = existsSync(gitignorePath) && (await readFile(gitignorePath, "utf8")).split("\n").some((l) => LEGACY_INBOX_GITIGNORE_LINE.test(l.trim()));
       if (entries.length === 0 && !gitignored) return;
+      action = runVerb(["metistry", "migrate-inbox", "--dry-run"], "Preview migrate-inbox");
       return {
         status: "degraded",
         remediation: "the pre-#156 layout: run `metistry migrate-inbox --dry-run` to see the plan, then `metistry migrate-inbox` to move captures into the vault inbox (docs/ops/inbox.md)",
@@ -478,6 +546,7 @@ export async function inboxRow(instanceDir: string): Promise<DoctorRow> {
       };
     })),
   };
+  return action ? { ...row, action } : row;
 }
 
 // ---- the retired shared scope (plan §2.14, T4-3) --------------------------------
@@ -492,7 +561,8 @@ export async function sharedScopeRow(o: { instanceDir: string; productDir: strin
   const instanceId = await readInstanceId(o.instanceDir).catch(() => undefined);
   if (!instanceId) return undefined;
   const envFile = envPaths({ instanceDir: o.instanceDir, productDir: o.productDir })?.read[0];
-  return {
+  let action: DoctorAction | undefined;
+  const row = {
     kind: "instance",
     ...(await runCheck("shared scope", "no third-party credential left in the retired per-user Keychain account", async () => {
       let status;
@@ -503,12 +573,14 @@ export async function sharedScopeRow(o: { instanceDir: string; productDir: strin
       }
       if (!status || status.originals.length === 0) return;
       if (status.unmigrated.length > 0) {
+        action = runVerb(MIGRATE_SCOPE_COMMAND.split(" "), "Run secrets migrate-scope");
         return {
           status: "degraded",
           remediation: `${status.unmigrated.join(", ")} still only in the retired shared scope — this instance reads them from .env until you run \`${MIGRATE_SCOPE_COMMAND} --instance ${o.instanceDir}\` (it copies them in and deletes nothing; \`metistry update\` runs it too)`,
           meta: { unmigrated: status.unmigrated, originals: status.originals },
         };
       }
+      action = runVerb(["metistry", "secrets", "purge-shared"], "Preview secrets purge-shared");
       return {
         status: "degraded",
         remediation: `copied into this instance; the shared originals of ${status.originals.join(", ")} remain — \`metistry secrets purge-shared\` previews removing each one every instance on this Mac has copied`,
@@ -516,6 +588,7 @@ export async function sharedScopeRow(o: { instanceDir: string; productDir: strin
       };
     })),
   };
+  return action ? { ...row, action } : row;
 }
 
 // ---- the cli shim -----------------------------------------------------------
@@ -536,21 +609,26 @@ export async function cliRow(productDir: string, env: NodeJS.ProcessEnv): Promis
   const shim = cliShimPath(productDir, instanceDir);
   const dirs = [...(env.PATH ?? "").split(":").filter(Boolean), ...(env.HOME ? [join(env.HOME, ".local", "bin")] : []), ...CLI_ON_PATH_DIRS];
   const found = dirs.map((d) => join(d, "metistry")).find((p) => existsSync(p));
-  return {
+  let action: DoctorAction | undefined;
+  const row = {
     kind: "cli",
     ...(await runCheck(
       "cli on PATH",
       found ? `${found} resolves \`metistry\`` : `search PATH, ~/.local/bin and ${dirname(shim)} for a \`metistry\` executable`,
       async () => {
         if (found) return { meta: { path: found } };
-        return {
-          status: "absent",
-          remediation: existsSync(shim) ? cliShimLinkHint(shim) + "  (or add its directory to PATH)" : `no cli shim yet at ${shim} — \`metistry up\` writes one`,
-          meta: { shim },
-        };
+        if (existsSync(shim)) {
+          // argv, not the `~`-shorthand `cliShimLinkHint` prints for a
+          // terminal — `ln` never sees a shell to expand it for
+          if (env.HOME) action = runVerb(["ln", "-s", shim, join(env.HOME, ".local", "bin", "metistry")], "Link metistry onto PATH");
+          return { status: "absent", remediation: cliShimLinkHint(shim) + "  (or add its directory to PATH)", meta: { shim } };
+        }
+        action = runVerb(["metistry", "up"], "Run metistry up");
+        return { status: "absent", remediation: `no cli shim yet at ${shim} — \`metistry up\` writes one`, meta: { shim } };
       },
     )),
   };
+  return action ? { ...row, action } : row;
 }
 
 // ---- db -------------------------------------------------------------------
@@ -576,7 +654,7 @@ export async function dbRows(db: Db | null, productDir: string, shape: Deploymen
 
   if (!db) {
     return [
-      { kind: "db", ...(await runCheck("db", "SELECT 1 round-trip", async () => ({ status: "absent", remediation: "METISTRY_DB_PASSWORD is unset — copy .env.example to .env and fill in METISTRY_DB_*" }))) },
+      { kind: "db", action: openSecrets("Add METISTRY_DB_PASSWORD in Secrets"), ...(await runCheck("db", "SELECT 1 round-trip", async () => ({ status: "absent", remediation: "METISTRY_DB_PASSWORD is unset — copy .env.example to .env and fill in METISTRY_DB_*" }))) },
       { kind: "db", ...(await runCheck("migrations", `schema_migrations rows = ${files.length} files in db/migrations`, async () => ({ status: "absent", remediation: "not checked — no db configured" }))) },
     ];
   }
@@ -594,23 +672,30 @@ export async function dbRows(db: Db | null, productDir: string, shape: Deploymen
     })),
   };
 
+  let migAction: DoctorAction | undefined;
   const migRow: DoctorRow = {
     kind: "db",
     ...(await runCheck("migrations", `schema_migrations rows = ${files.length} files in db/migrations`, async () => {
       if (!reachable) return { status: "absent", remediation: "not checked — db unreachable" };
       const exists = await db.query("SELECT to_regclass('public.schema_migrations') AS t");
-      if (!exists.rows[0]?.t) return { status: "degraded", remediation: `no schema_migrations table — run pnpm db:migrate (${files.length} migrations pending)`, meta: { applied: 0, files: files.length } };
+      if (!exists.rows[0]?.t) {
+        migAction = runVerb(["metistry", "update"], "Run metistry update");
+        return { status: "degraded", remediation: `no schema_migrations table — run pnpm db:migrate (${files.length} migrations pending)`, meta: { applied: 0, files: files.length } };
+      }
       const { rows } = await db.query("SELECT filename FROM schema_migrations ORDER BY filename");
       const applied = rows.map((r) => String(r.filename));
       const pending = files.filter((f) => !applied.includes(f));
       const unknown = applied.filter((f) => !files.includes(f));
       const meta = { applied: applied.length, files: files.length, pending, unknown };
-      if (pending.length > 0) return { status: "degraded", remediation: `${pending.length} migration(s) not applied (${pending.join(", ")}) — run pnpm db:migrate`, meta };
+      if (pending.length > 0) {
+        migAction = runVerb(["metistry", "update"], "Run metistry update");
+        return { status: "degraded", remediation: `${pending.length} migration(s) not applied (${pending.join(", ")}) — run pnpm db:migrate`, meta };
+      }
       if (unknown.length > 0) return { status: "degraded", remediation: `db has migration(s) this checkout lacks (${unknown.join(", ")}) — is the checkout older than the database?`, meta };
       return { meta };
     })),
   };
-  return [dbRow, migRow];
+  return [dbRow, migAction ? { ...migRow, action: migAction } : migRow];
 }
 
 // ---- schedules -------------------------------------------------------------
@@ -762,10 +847,13 @@ export async function scheduleRows(
       schedule_refused: lastRun?.refused?.reason ?? null,
     };
 
-    out.push({
+    let action: DoctorAction | undefined;
+    const viewConsoleLogs = runVerb(["metistry", "logs", "console"], "View console logs");
+    const row = {
       kind: "schedule",
       ...(await runCheck(s.name, `${s.schedule} (${s.timeOfDay ? "at most" : "every"} ${humanSec(intervalSec)}${s.timeOfDay ? " apart" : ""}): ran inside ${OVERDUE_FACTOR}× that, last run ok, no open failure streak`, async () => {
         if (fresh(skipped)) {
+          action = viewConsoleLogs;
           return {
             status: "failed" as const,
             remediation: `the runner has stopped running ${s.name}: ${meta.streak} failures in a row reached METISTRY_RUNNER_MAX_STREAK (${maxStreak}) — ${skipped?.error ?? "see the runner rows"}; the next successful run clears it, or raise METISTRY_RUNNER_MAX_STREAK, or remove \`schedule\` from ${s.dir}/manifest.yaml`,
@@ -773,6 +861,7 @@ export async function scheduleRows(
           };
         }
         if (fresh(blocked)) {
+          action = viewConsoleLogs;
           return {
             status: "failed" as const,
             remediation: `${blocked?.error ?? `${s.name} is blocked_config`} (declared in \`requires\` in ${s.dir}/manifest.yaml)`,
@@ -793,6 +882,7 @@ export async function scheduleRows(
           return { status: "absent" as const, remediation: `not scheduled: ${lastRun.refused.why}`, meta };
         }
         if (intervalSec > 0 && now.getTime() - lastRun.ts.getTime() > intervalSec * OVERDUE_FACTOR * 1000) {
+          action = viewConsoleLogs;
           return {
             status: "failed" as const,
             remediation: `${s.name} last ran ${humanSec(Math.floor((now.getTime() - lastRun.ts.getTime()) / 1000))} ago, over ${OVERDUE_FACTOR}× its "${s.schedule}" interval — the console's runner is not running it: metistry logs console`,
@@ -800,6 +890,7 @@ export async function scheduleRows(
           };
         }
         if ((streak?.count ?? 0) > 0) {
+          action = viewConsoleLogs;
           return {
             status: "degraded" as const,
             remediation: `${streak?.count} failed run(s) in a row since ${streak?.since.toISOString()}: ${streak?.lastError ?? "(no error text)"} — at METISTRY_RUNNER_MAX_STREAK (${maxStreak}) the runner stops running it`,
@@ -808,7 +899,8 @@ export async function scheduleRows(
         }
         return { meta };
       })),
-    });
+    };
+    out.push(action ? { ...row, action } : row);
   }
   return out;
 }
@@ -882,11 +974,14 @@ export async function keepAwakeRow(deps: { deployment: Deployment; instanceDir: 
     : {};
   // the early-cutoff repair keeps the lid answer: `always` would reset it
   const alwaysVerb = setting.sleep_lid_closed ? "`metistry deployment set-keep-awake always --yes`" : "`metistry deployment set-keep-awake --sleep-on-battery false --yes`";
+  const viewSupervisorLogs = runVerb(["metistry", "logs", "supervisor"], "View supervisor logs");
+  let action: DoctorAction | undefined;
 
-  return {
+  const row = {
     kind: KEEP_AWAKE_KIND,
     ...(await runCheck(KEEP_AWAKE_KIND, `deployment.yaml says keep_awake: ${mode}; ${statePath} and pmset -g assertions agree`, async () => {
       if (mode === "never") {
+        action = runVerb(["metistry", "deployment", "set-keep-awake", "allow_sleep_on_battery"], "Turn on keep-awake");
         return {
           status: "absent",
           remediation:
@@ -914,6 +1009,7 @@ export async function keepAwakeRow(deps: { deployment: Deployment; instanceDir: 
         }
       })();
       if (!state) {
+        action = runVerb(["metistry", "up"], "Run metistry up");
         return {
           status: "degraded",
           remediation: `keep_awake: ${mode}, but nothing has written ${statePath} — the supervisor is not running, or has not started since the setting changed: \`metistry up\`${lidNote ? `. ${lidNote}` : ""}`,
@@ -950,6 +1046,10 @@ export async function keepAwakeRow(deps: { deployment: Deployment; instanceDir: 
         // sleep came from something no assertion stops — offering the verb
         // that sets what is already set would be noise dressed as advice.
         const stronger = cutoff.mode === "allow_sleep_on_battery";
+        // "there is nothing further to turn on" (below) means exactly that —
+        // no verb belongs on this row when the strongest setting is already
+        // in force and slept anyway
+        if (stronger) action = runVerb(["metistry", "deployment", "set-keep-awake", "always"], "Hold awake on battery too");
         return {
           status: "degraded",
           remediation:
@@ -964,6 +1064,7 @@ export async function keepAwakeRow(deps: { deployment: Deployment; instanceDir: 
       }
 
       if (state.stopped_at !== undefined) {
+        action = runVerb(["metistry", "up"], "Run metistry up");
         return {
           status: "degraded",
           remediation: `released at ${state.stopped_at} when the supervisor stopped — nothing holds this Mac awake until it is running again: \`metistry up\``,
@@ -972,6 +1073,7 @@ export async function keepAwakeRow(deps: { deployment: Deployment; instanceDir: 
       }
 
       if (now() - Date.parse(state.heartbeat_at) > state.interval_ms * KEEP_AWAKE_CUTOFF_FACTOR) {
+        action = viewSupervisorLogs;
         return {
           status: "degraded",
           remediation:
@@ -984,6 +1086,7 @@ export async function keepAwakeRow(deps: { deployment: Deployment; instanceDir: 
       if (!state.holding) {
         // released BY POLICY is the setting working, and must read as success
         if (!shouldHold(mode, state.power_source)) return { ...(lidNote ? { status: "degraded" as const, remediation: lidNote } : {}), meta };
+        action = viewSupervisorLogs;
         return {
           status: "degraded",
           remediation: `keep_awake: ${mode} and this Mac is drawing from '${powerSourceLabel(state.power_source)}', but nothing is held — \`metistry logs supervisor\``,
@@ -992,6 +1095,7 @@ export async function keepAwakeRow(deps: { deployment: Deployment; instanceDir: 
       }
 
       if (!ours) {
+        action = viewSupervisorLogs;
         return {
           status: "degraded",
           remediation:
@@ -1003,6 +1107,7 @@ export async function keepAwakeRow(deps: { deployment: Deployment; instanceDir: 
       return { ...(lidNote ? { status: "degraded" as const, remediation: lidNote } : {}), meta };
     })),
   };
+  return action ? { ...row, action } : row;
 }
 
 // ---- launchd (macOS) ----------------------------------------------------------
@@ -1029,6 +1134,24 @@ export function parseLaunchctlPrint(text: string): { state: string; pid?: number
   return { state, ...(pid ? { pid: Number(pid) } : {}), ...(lastExit ? { lastExit: Number(lastExit) } : {}) };
 }
 
+/**
+ * How long a pid has been running, from `ps -o etimes=` (elapsed seconds —
+ * no `HH:MM:SS` to parse, unlike `etime`). Best-effort only: a `ps` that
+ * fails or a pid `ps` no longer knows about (it exited between `launchctl
+ * print` and here) reports `undefined` rather than failing the row — this is
+ * an add-on fact for the Services pane, never the thing a status turns on.
+ */
+export async function processUptimeSec(exec: Exec, pid: number): Promise<number | undefined> {
+  try {
+    const r = await exec("ps", ["-o", "etimes=", "-p", String(pid)]);
+    if (r.code !== 0) return undefined;
+    const n = Number.parseInt(r.stdout.trim(), 10);
+    return Number.isFinite(n) ? n : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function launchdRows(
   productDir: string,
   exec: Exec,
@@ -1048,6 +1171,7 @@ export async function launchdRows(
     // "Two registrars"). Reported on the supervisor's row only: the TCC
     // helpers are never the app's.
     let found: RegistrarFinding | undefined;
+    let action: DoctorAction | undefined;
     const row: DoctorRow = {
       kind: "launchd",
       ...(await runCheck(`launchd:${label}`, `launchctl print gui/${uid}/${label} reports state = running`, async () => {
@@ -1055,6 +1179,7 @@ export async function launchdRows(
         if (r.code === 127) return { status: "absent", remediation: "launchctl not found — not macOS?" };
         if (service === SUPERVISOR_SERVICE) found = parseRegistrar(r.code, r.stdout);
         if (r.code !== 0) {
+          action = runVerb(["metistry", "up"], "Run metistry up");
           return {
             status: "absent",
             // the shaped jobs carry an EnvironmentVariables dict rendered
@@ -1065,7 +1190,10 @@ export async function launchdRows(
           };
         }
         const p = parseLaunchctlPrint(r.stdout);
-        if (p.state === "running") return { meta: { pid: p.pid } };
+        if (p.state === "running") {
+          const uptimeSec = p.pid !== undefined ? await processUptimeSec(exec, p.pid) : undefined;
+          return { meta: { pid: p.pid, uptime_sec: uptimeSec } };
+        }
         return {
           status: "failed",
           remediation: `state = ${p.state}${p.lastExit !== undefined ? `, last exit code ${p.lastExit}` : ""} — launchctl kickstart -k gui/$(id -u)/${label}; log: ${logPathFor(service, labelSuffix)}`,
@@ -1073,6 +1201,7 @@ export async function launchdRows(
         };
       })),
     };
+    if (action) row.action = action;
     if (found && found.registrar !== "none") {
       // the probe is what the table prints for a row that is not ok, and what
       // the Mac app's Services pane prints for one that is (docs/ops/mac-app.md)
@@ -1107,6 +1236,33 @@ export function parseComposePs(text: string): ComposeEntry[] {
       .filter(Boolean)
       .map((l) => JSON.parse(l) as ComposeEntry);
   }
+}
+
+const COMPOSE_UPTIME_UNIT_SECONDS: Record<string, number> = {
+  second: 1,
+  minute: 60,
+  hour: 3600,
+  day: 86400,
+  week: 604800,
+  month: 2592000,
+  year: 31536000,
+};
+
+/**
+ * `docker compose ps`'s `Status` column (`go-units.HumanDuration`, e.g. "Up
+ * 3 hours", "Up About a minute", "Up 51 seconds (healthy)") parsed back into
+ * seconds. Best-effort, like `processUptimeSec`: an unrecognised phrasing —
+ * a future compose version, a non-English locale — reports `undefined`
+ * rather than guessing.
+ */
+export function parseComposeUptimeSec(status: string | undefined): number | undefined {
+  if (!status) return undefined;
+  const m = /^Up\s+(?:About\s+)?(a|an|\d+)?\s*([a-zA-Z]+?)s?(?:\s|$)/.exec(status.trim());
+  if (!m) return undefined;
+  const unit = COMPOSE_UPTIME_UNIT_SECONDS[m[2]!.toLowerCase()];
+  if (!unit) return undefined;
+  const count = m[1] === undefined || m[1] === "a" || m[1] === "an" ? 1 : Number.parseInt(m[1], 10);
+  return Number.isFinite(count) ? count * unit : undefined;
 }
 
 /** The container names docker-compose.yml declares under `services:` — what `up` builds, what doctor probes, what `metistry restart|stop|start` acts on under the compose shape. */
@@ -1144,7 +1300,7 @@ export async function composeRows(productDir: string, exec: Exec): Promise<Docto
       kind: "container",
       ...(await runCheck(`compose:${svc}`, `docker compose ps: ${svc} running${e?.Health ? " and healthy" : ""}`, async () => {
         if (!e) return { status: "absent", remediation: `no container — docker compose up -d ${svc}` };
-        const meta = { state: e.State, health: e.Health || undefined, status: e.Status };
+        const meta = { state: e.State, health: e.Health || undefined, status: e.Status, uptime_sec: e.State === "running" ? parseComposeUptimeSec(e.Status) : undefined };
         if (e.State !== "running") return { status: "failed", remediation: `container ${e.State ?? "?"} (${e.Status ?? ""}) — docker compose up -d ${svc}; docker compose logs ${svc}`, meta };
         if (e.Health && e.Health !== "healthy") return { status: "degraded", remediation: `running but ${e.Health} — docker compose logs ${svc}`, meta };
         return { meta };
@@ -1193,11 +1349,22 @@ export async function supervisorRows(stateRoot: string): Promise<DoctorRow[]> {
   rows.push(await confinementRow(config));
   for (const spec of config.children) {
     const st = children?.find((c) => c.name === spec.name);
+    let action: DoctorAction | undefined;
     rows.push({
       kind: "child",
       ...(await runCheck(`child:${spec.name}`, `the supervisor reports ${spec.name} running`, async () => {
         if (!st) return { status: "absent", remediation: `the supervisor did not report ${spec.name} — metistry logs supervisor` };
-        if (st.state === "running") return { meta: { pid: st.pid, uptime_ms: st.uptimeMs, restarts: st.restarts } };
+        if (st.state === "running") return { meta: { pid: st.pid, uptime_ms: st.uptimeMs, uptime_sec: st.uptimeMs !== undefined ? Math.round(st.uptimeMs / 1000) : undefined, restarts: st.restarts } };
+        // "stopped" was a deliberate `metistry stop` — the next verb is
+        // start, not restart (there is nothing running to restart); a
+        // crash-loop's own remediation already reads `metistry restart`, but
+        // the more useful button is the log a restart-and-hope skips reading
+        action =
+          st.state === "stopped"
+            ? runVerb(["metistry", "start", spec.name], `Start ${spec.name}`)
+            : st.state === "crash-looping"
+              ? runVerb(["metistry", "logs", spec.name], `View ${spec.name} logs`)
+              : undefined;
         return {
           status: st.state === "stopped" ? "degraded" : "failed",
           remediation: `state = ${st.state}${st.lastExit ? ` (last exit code ${st.lastExit.code ?? "null"}${st.lastExit.signal ? `, signal ${st.lastExit.signal}` : ""} at ${st.lastExit.at})` : ""} — metistry restart ${spec.name}; log: ${st.log}`,
@@ -1205,6 +1372,7 @@ export async function supervisorRows(stateRoot: string): Promise<DoctorRow[]> {
         };
       })),
     });
+    if (action) rows[rows.length - 1]!.action = action;
   }
   return rows;
 }

@@ -1,0 +1,5 @@
+---
+"@foldedspacelabs/metistry-cli": patch
+---
+
+**One `metistry update` is enough: the rest of a release update runs on the release it installed.** The `metistry` shim runs `current`'s CLI — the release an update is leaving — so migrations, the restart, the owner bearer, the lock and everything after the switch ran the old release's code, and 0.14.1's fixes took three runs to land. Once `current` points at the new release (pack verified, bundled runtime unpacked), `update` now re-executes that release's own CLI with `--continue-from=switched`, the same flags and environment plus `METISTRY_UPDATE_REEXEC=1`, streams its output and exits with its code. The marker refuses a second hand-over; a release whose CLI predates it is not handed to; a new CLI that never starts (told apart from one that started and failed by a handshake file, not the exit code) is survived loudly — the running code finishes, exit 1, with the previous release's `update --rollback` by path. `--rollback`, git checkouts and `--no-reexec` (a debugging switch) finish on the running code. The update onto 0.14.2 is still run by 0.14.1; from 0.14.2 on, one run is enough.

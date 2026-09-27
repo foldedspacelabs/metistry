@@ -12,9 +12,12 @@ import { instanceLockPath, parseLock, readLock, serializeLock, type LockFile } f
 import { main } from "../src/main.js";
 import { MIGRATION_LOCK_KEY, type MigrationSession } from "../src/migrate.js";
 import { realExec, type Exec } from "../src/exec.js";
-import { hashHostJobs, legacyLayoutRefusal, parseDoctorJson, pastLegacyLayoutSupport, publishedPackages, trackedPathFor, update } from "../src/update.js";
+import { hashHostJobs, legacyLayoutRefusal, parseDoctorJson, pastLegacyLayoutSupport, publishedPackages, RECONCILER_READY_TIMEOUT_MS, trackedPathFor, update, waitForReconciler } from "../src/update.js";
+import { StepRunner } from "../src/steps.js";
+import { supervisorConfig, supervisorConfigPath, writeSupervisorConfig } from "../src/supervisor.js";
+import { createServer } from "node:net";
 import { loadPlistTemplates } from "../src/launchd.js";
-import { checkout, failDoctor, fakeExec, HELPER, okDoctor, put, RECONCILER, shown, WATCHDOG } from "./fixtures.js";
+import { checkout, failDoctor, fakeExec, HELPER, okDoctor, put, RECONCILER, shown, SUPERVISOR, WATCHDOG } from "./fixtures.js";
 
 const NOW = new Date("2026-09-07T15:00:00Z");
 // Both bearers: the console's (which the CLI no longer uses for a protected
@@ -280,15 +283,89 @@ describe("metistry update", () => {
     expect(calls).toEqual([...Array(4).fill("http://127.0.0.1:7812/check"), "http://127.0.0.1:7812/vault/write"]);
     expect(lines.join("\n")).toContain("reconciler: answering again at http://127.0.0.1:7812 after its restart");
 
-    // one that never comes back: the wait ends, the write is still tried, and fails with its own remediation
+    // one that never comes back (the owner's 0.14.1 run gave up at 60 s,
+    // then failed the whole update on a write that could only fail): the
+    // lock is DEFERRED — not tried — and the rest of the update still runs
     const never = (async (url: string | URL | Request) => {
+      calls2.push(String(url));
       throw new TypeError(`fetch failed ${String(url)}`);
     }) as unknown as typeof fetch;
+    const calls2: string[] = [];
     const lines2: string[] = [];
     const r2 = await update({ ...base(P, noOwner()), out: (l) => lines2.push(l), exec: fakeExec(), skipBuild: true, skipMigrate: true, fetchFn: never, mintOwnerToken: () => "fresh-owner", doctorFn: okDoctor, reconcilerReady: { intervalMs: 1, timeoutMs: 20 } });
     expect(r2.code).toBe(1);
-    expect(lines2.join("\n")).toContain("reconciler: not answering at http://127.0.0.1:7812 0s after its restart (METISTRY_RECONCILER_READY_TIMEOUT_MS) — writing anyway");
-    expect(lines2.join("\n")).toContain("did not answer (fetch failed http://127.0.0.1:7812/vault/write)");
+    const text2 = lines2.join("\n");
+    expect(text2).toContain("reconciler: not answering at http://127.0.0.1:7812 0s after its restart (METISTRY_RECONCILER_READY_TIMEOUT_MS) — the lock write is deferred");
+    expect(calls2.filter((u) => u.endsWith("/vault/write"))).toEqual([]);
+    expect(r2.deferred).toEqual([{ what: ".metistry/metistry.lock", why: expect.stringContaining("the reconciler did not answer at http://127.0.0.1:7812 after its restart"), fix: ["metistry update"] }]);
+    expect(r2.lock?.product.source).toBe("git"); // the lock it WOULD have written is still the result's
+    expect(text2).toContain("update incomplete");
+    expect(text2).not.toContain("did not answer (fetch failed http://127.0.0.1:7812/vault/write)");
+  });
+
+  // The owner's 0.14.1 run: after minting the owner bearer, update ran
+  // `launchctl kickstart -k gui/501/com.foldedspacelabs.metistry` — the
+  // SUPERVISOR — and the console, the reconciler and both bridges went down
+  // mid-update, for a bearer only the reconciler reads.
+  it("launchd shape: a new owner bearer restarts ONLY the reconciler, through the supervisor's control socket — never the supervisor's agent", async () => {
+    const P = await checkout({ git: true });
+    await put(P, "seed/deployment.yaml", "shape: launchd\nservices: {}\n");
+    const inst = await mkdtemp(join(tmpdir(), "mi-"));
+    await mkdir(join(inst, ".metistry"), { recursive: true }); // a self-contained instance, so its state is under .metistry/
+    const socket = join(inst, "s.sock");
+    const requests: Array<Record<string, unknown>> = [];
+    const server = createServer((c) => {
+      c.once("data", (d) => {
+        requests.push(JSON.parse(d.toString("utf8").trim()) as Record<string, unknown>);
+        c.end(JSON.stringify({ ok: true, children: [{ name: "reconciler", state: "running", pid: 4242 }] }) + "\n");
+      });
+    });
+    await new Promise<void>((res) => server.listen(socket, res));
+    try {
+      await writeSupervisorConfig(supervisorConfigPath(inst), supervisorConfig({ label: SUPERVISOR, socket, token: "sup-tok-0123456789abcdef", env: {}, children: [] }));
+      const exec = fakeExec({ security: (args) => (args[0] === "find-generic-password" ? { code: 44, stderr: "could not be found" } : undefined) });
+      const f = fakeFetch();
+      const lines: string[] = [];
+      const env = (): NodeJS.ProcessEnv => ({ METISTRY_INSTANCE_DIR: inst, METISTRY_RECONCILER_URL: BRIDGE.METISTRY_RECONCILER_URL, METISTRY_BRIDGE_TOKEN_RECONCILER: "tok" });
+      const r = await update({ ...base(P, env()), out: (l) => lines.push(l), exec, skipBuild: true, skipMigrate: true, fetchFn: f.fn, mintOwnerToken: () => "fresh-owner", doctorFn: okDoctor, reconcilerReady: { intervalMs: 1, timeoutMs: 1_000 } });
+
+      expect(r.code).toBe(0);
+      expect(requests).toEqual([{ op: "restart", token: "sup-tok-0123456789abcdef", service: "reconciler" }]);
+      expect(exec.calls.filter((c) => c.cmd === "launchctl" && c.args[0] === "kickstart")).toEqual([]);
+      expect(r.restarted).toEqual([RECONCILER]);
+      expect(lines.join("\n")).toContain("reconciler: restarted through the supervisor (supervisor restart reconciler → running (pid 4242)) so it reads the freshly minted METISTRY_BRIDGE_TOKEN_RECONCILER_USER — nothing else was touched");
+      // and the lock waited for it, then went through it with the new bearer
+      expect((f.calls.find((c) => c.url.endsWith("/vault/write"))!.init.headers as Record<string, string>).authorization).toBe("Bearer fresh-owner");
+
+      // no supervisor config (it was never `up`ed): still never the agent — the one command instead
+      const bare = await mkdtemp(join(tmpdir(), "mi-"));
+      const lines2: string[] = [];
+      const exec2 = fakeExec({ security: (args) => (args[0] === "find-generic-password" ? { code: 44, stderr: "could not be found" } : undefined) });
+      const r2 = await update({ ...base(P, { ...env(), METISTRY_INSTANCE_DIR: bare }), out: (l) => lines2.push(l), exec: exec2, skipBuild: true, skipMigrate: true, fetchFn: fakeFetch().fn, mintOwnerToken: () => "fresh-owner", doctorFn: okDoctor });
+      expect(exec2.calls.filter((c) => c.cmd === "launchctl" && c.args[0] === "kickstart")).toEqual([]);
+      expect(r2.restarted).toEqual([]);
+      expect(lines2.join("\n")).toContain("reconciler: not restarted (no supervisor config for this install — metistry up first");
+      expect(lines2.join("\n")).toContain("`metistry restart reconciler`");
+    } finally {
+      await new Promise<void>((res) => server.close(() => res()));
+    }
+  });
+
+  it("the wait backs off: from every intervalMs, doubling, never past maxIntervalMs", async () => {
+    const r = new StepRunner({ dryRun: false, out: () => {}, exec: fakeExec(), env: {} });
+    const at: number[] = [];
+    const t0 = Date.now();
+    const fetchFn = (async () => {
+      at.push(Date.now() - t0);
+      if (at.length < 6) throw new TypeError("fetch failed");
+      return new Response("{}", { status: 200 });
+    }) as unknown as typeof fetch;
+    expect(await waitForReconciler(r, { url: "http://127.0.0.1:7812", fetchFn, timeoutMs: 10_000, intervalMs: 10, maxIntervalMs: 40 })).toBe(true);
+    const gaps = at.slice(1).map((v, i) => v - at[i]!);
+    // 10, 20, 40, 40, 40 — timers are at-least, so only the floor is asserted, and the cap from above with slack
+    expect(gaps.map((g, i) => g >= [10, 20, 40, 40, 40][i]! - 2)).toEqual([true, true, true, true, true]);
+    expect(Math.max(...gaps)).toBeLessThan(40 + 60);
+    expect(RECONCILER_READY_TIMEOUT_MS).toBe(180_000);
   });
 
   // The 0.12.0 → 0.14.0 upgrade: the mint failed, the step threw, and every

@@ -7,7 +7,7 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { cp, mkdir, mkdtemp, readFile, readlink, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, readlink, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,8 +29,12 @@ import {
   runtimePackCommit,
   switchCurrent,
 } from "../src/release.js";
+import { realExec, type Exec } from "../src/exec.js";
+import { parseArgs } from "../src/main.js";
+import type { MigrationSession } from "../src/migrate.js";
 import { StepFailed, StepRunner } from "../src/steps.js";
 import { update } from "../src/update.js";
+import { parseContinueFrom, REEXEC_CAPABILITY_FILE, UPDATE_REEXEC_ACK_ENV, UPDATE_REEXEC_ENV } from "../src/update-reexec.js";
 import { checkout, fakeExec, okDoctor, put, WATCHDOG } from "./fixtures.js";
 
 const NOW = new Date("2026-09-07T15:00:00Z");
@@ -620,6 +624,7 @@ describe("metistry update --channel release", () => {
     expect(r.commands[0]).toContain("resolve release <latest> of foldedspacelabs/metistry");
     expect(r.commands[0]).toContain(`metistry-runtime-<latest>-${TARGET}.tar.gz`);
     expect(r.commands[1]).toContain(`unpack to ${P}/releases/<latest>/ and point current at it`);
+    expect(r.commands.join("\n")).toContain("hand the rest to <latest>'s own CLI");
   });
 
   it("--rollback is refused in git mode, where git is the rollback", async () => {
@@ -635,5 +640,203 @@ describe("StepFailed", () => {
   it("carries an exit code the update surfaces", () => {
     expect(new StepFailed("x").code).toBe(1);
     expect(new StepFailed("x", 7).code).toBe(7);
+  });
+});
+
+// The owner's 0.14.1 update needed three runs: the `metistry` shim runs
+// `current`'s CLI, which is the release an update LEAVES, so every step after
+// the switch ran the old code. From here on the update hands the rest to the
+// release it just installed (update-reexec.ts).
+describe("metistry update hands over to the release it installed", () => {
+  const base = (P: string, env: NodeJS.ProcessEnv = {}) => ({ productDir: P, env, platform: "darwin" as const, uid: 501, version: "0.1.0", now: NOW, out: () => {}, doctorFn: okDoctor, cliShim: false });
+
+  /**
+   * Two releases: 0.1.0 installed and current, and a 0.2.0 pack to install
+   * whose watchdog changed, which carries one more migration, and whose CLI
+   * (`newMain`) understands the hand-over unless `capable: false`.
+   */
+  async function twoReleases(opts: { newMain?: string; capable?: boolean } = {}) {
+    const P = await mkdtemp(join(tmpdir(), "metistry-rel-"));
+    const inst = await mkdtemp(join(tmpdir(), "mi-"));
+    const old = await checkout();
+    await cp(old, join(P, "releases", "0.1.0"), { recursive: true });
+    await switchCurrent(P, "0.1.0");
+    const src = await checkout();
+    await put(src, "apps/watchdog/dist/lib/util.js", "v2");
+    await put(src, "db/migrations/0003_c.sql", "select 'only in 0.2.0';");
+    await put(src, "packages/cli/dist/main.js", opts.newMain ?? "process.exit(0);\n");
+    if (opts.capable !== false) await put(src, `packages/cli/dist/${REEXEC_CAPABILITY_FILE}`, "export {};\n");
+    const prior: LockFile = { product: { version: "0.1.0", commit: "unknown", source: "release" }, updated_at: "2026-09-01T00:00:00.000Z", migrations_applied: [] };
+    await mkdir(join(inst, ".metistry"), { recursive: true });
+    await writeFile(join(inst, ".metistry", "metistry.lock"), serializeLock(prior));
+    // an install that already holds the owner bearer, so only a code change restarts anything
+    const env = { METISTRY_INSTANCE_DIR: inst, METISTRY_BRIDGE_TOKEN_RECONCILER_USER: "owner" };
+    return { P, inst, src, env, lockFile: join(inst, ".metistry", "metistry.lock") };
+  }
+
+  /** The fake for everything but node; node itself goes to `node`. */
+  function withNode(fake: Exec & { calls: Array<{ cmd: string; args: string[] }> }, node: Exec): Exec & { calls: Array<{ cmd: string; args: string[] }> } {
+    const exec = (async (cmd, args, o) => {
+      if (cmd === process.execPath) {
+        fake.calls.push({ cmd, args });
+        return node(cmd, args, o);
+      }
+      return fake(cmd, args, o);
+    }) as Exec & { calls: Array<{ cmd: string; args: string[] }> };
+    exec.calls = fake.calls;
+    return exec;
+  }
+
+  function fakeSession(): MigrationSession & { end(): Promise<void>; queries: string[] } {
+    const applied: string[] = [];
+    const s = {
+      queries: [] as string[],
+      async query(text: string, values?: unknown[]) {
+        s.queries.push(text);
+        if (text.startsWith("INSERT INTO schema_migrations")) applied.push(String(values?.[0]));
+        if (text.startsWith("SELECT filename")) return { rows: [...applied].sort().map((filename) => ({ filename })) };
+        return { rows: [] };
+      },
+      async end() {},
+    };
+    return s;
+  }
+
+  it("really starts the new release's CLI, from releases/<new>/, with the marker — and exits with its code, running no post-switch step itself", async () => {
+    const newMain = [
+      'const fs = require("node:fs");',
+      "const e = process.env;",
+      `fs.writeFileSync(e.${UPDATE_REEXEC_ACK_ENV}, "started\\n");`,
+      `fs.writeFileSync(e.RECORD, JSON.stringify({ file: fs.realpathSync(__filename), argv: process.argv.slice(2), marker: e.${UPDATE_REEXEC_ENV} ?? null }));`,
+      "process.exit(7);",
+      "",
+    ].join("\n");
+    const t = await twoReleases({ newMain });
+    const record = join(t.inst, "record.json");
+    const fake = await tarInto(t.src);
+    const exec = withNode(fake, realExec);
+
+    const r = await update({ ...base(t.P, { ...t.env, RECORD: record }), exec, fetchFn: releaseServer({ versions: ["0.2.0"] }).fn, target: TARGET, openSession: async () => fakeSession(), forwardFlags: { "skip-build": true } });
+
+    expect(r.code).toBe(7);
+    expect(r.reexec).toMatchObject({ status: "continued", code: 7 });
+    const seen = JSON.parse(await readFile(record, "utf8")) as { file: string; argv: string[]; marker: string | null };
+    expect(seen.file).toBe(join(await realpath(t.P), "releases", "0.2.0", "packages", "cli", "dist", "main.js"));
+    expect(seen.argv).toEqual(["update", "--skip-build", "--continue-from=switched", "--channel=release", `--product-dir=${t.P}`]);
+    expect(seen.marker).toBe("1");
+    // the parent did none of it: no kickstart, no compose, no lock
+    expect(fake.calls.filter((c) => c.cmd === "launchctl" || c.cmd === "docker")).toEqual([]);
+    expect(await readFile(t.lockFile, "utf8")).toContain('version: "0.1.0"');
+    expect(r.lock).toBeUndefined();
+  });
+
+  it("the post-switch steps run in the new release's CLI, against the new release: its migrations, its restart, its lock", async () => {
+    const t = await twoReleases();
+    const fake = await tarInto(t.src);
+    const session = fakeSession();
+    const childLines: string[] = [];
+    let child: Awaited<ReturnType<typeof update>> | undefined;
+    // "node <new main> update …" is answered by update() itself, in-process,
+    // with exactly the argv and environment the parent handed it — the child
+    // code under test is this checkout's, standing in for the new release's
+    const exec = withNode(fake, async (_cmd, args, o) => {
+      const { flags } = parseArgs(args.slice(1));
+      child = await update({
+        productDir: String(flags["product-dir"]),
+        env: o!.env!,
+        continueFrom: parseContinueFrom(flags["continue-from"]),
+        channel: flags.channel === "release" ? "release" : undefined,
+        exec: fake,
+        fetchFn: (async () => {
+          throw new Error("the child reached GitHub — it must not download anything");
+        }) as unknown as typeof fetch,
+        openSession: async () => session,
+        platform: "darwin",
+        uid: 501,
+        now: NOW,
+        version: "0.2.0",
+        doctorFn: okDoctor,
+        cliShim: false,
+        out: (l) => childLines.push(l),
+      });
+      return { code: child.code, stdout: "", stderr: "" };
+    });
+    const parentLines: string[] = [];
+
+    const r = await update({ ...base(t.P, t.env), out: (l) => parentLines.push(l), exec, fetchFn: releaseServer({ versions: ["0.2.0"] }).fn, target: TARGET, openSession: async () => {
+      throw new Error("the parent opened the database — migrations are the new release's to run");
+    } });
+
+    expect(r.reexec).toMatchObject({ status: "continued", code: 0 });
+    expect(r.code).toBe(0);
+    expect(child).toBeDefined();
+    // the child's "before" is the release it was switched FROM, so the changed watchdog is owed and kickstarted — once
+    expect(child!.restart).toMatchObject({ reached: true, completed: true, owed: [WATCHDOG] });
+    expect(fake.calls.filter((c) => c.cmd === "launchctl" && c.args[0] === "kickstart").map((c) => c.args.at(-1))).toEqual([`gui/501/${WATCHDOG}`]);
+    // the migration only 0.2.0 carries was applied, read from current
+    expect(child!.migrations?.applied).toEqual(["0001_a.sql", "0002_b.sql", "0003_c.sql"]);
+    expect(session.queries).toContain("select 'only in 0.2.0';");
+    // the lock is the child's, pinned to the release it is
+    expect(child!.lock?.product.version).toBe("0.2.0");
+    expect(await readFile(t.lockFile, "utf8")).toContain('version: "0.2.0"');
+    expect(childLines.join("\n")).toContain("current -> releases/0.2.0 (was 0.1.0) — this is 0.2.0's own CLI");
+    expect(parentLines.join("\n")).toContain("handing over to 0.2.0's own CLI");
+    // and nothing after the switch in the parent's own transcript
+    expect(parentLines.join("\n")).not.toMatch(/== (migrations|restart|lock)/);
+  });
+
+  it("a new CLI that never starts (a bad pack) is survived: the running code finishes the update, loudly, exit 1, with the way back", async () => {
+    const t = await twoReleases({ newMain: "this is not javascript (\n" });
+    const fake = await tarInto(t.src);
+    const lines: string[] = [];
+    const r = await update({ ...base(t.P, t.env), out: (l) => lines.push(l), exec: withNode(fake, realExec), fetchFn: releaseServer({ versions: ["0.2.0"] }).fn, target: TARGET, skipMigrate: true, openSession: async () => null });
+
+    expect(r.reexec?.status).toBe("fell-back");
+    expect(lines.join("\n")).toMatch(/0\.2\.0's CLI did not start \(exit \d+\) — the rest of this update runs on 0\.1\.0's code instead/);
+    // …and the rest DID run, here
+    expect(r.restarted).toEqual([WATCHDOG]);
+    expect(r.lock?.product.version).toBe("0.2.0");
+    expect(r.code).toBe(1);
+    expect(r.deferred[0]).toMatchObject({ what: "0.2.0's CLI" });
+    expect(r.deferred[0]!.fix[0]).toBe(`node ${join(t.P, "releases", "0.1.0", "packages", "cli", "dist", "main.js")} update --rollback --product-dir ${t.P}`);
+  });
+
+  it("the loop guard and --no-reexec both finish on the running code; a release that predates the hand-over is not handed to", async () => {
+    for (const c of [{ env: { [UPDATE_REEXEC_ENV]: "1" } }, { noReexec: true }, { capable: false }] as const) {
+      const t = await twoReleases({ capable: !("capable" in c) });
+      const fake = await tarInto(t.src);
+      const exec = withNode(fake, async () => {
+        throw new Error("handed over when it must not");
+      });
+      const r = await update({ ...base(t.P, { ...t.env, ...("env" in c ? c.env : {}) }), exec, fetchFn: releaseServer({ versions: ["0.2.0"] }).fn, target: TARGET, skipMigrate: true, openSession: async () => null, ...("noReexec" in c ? { noReexec: true } : {}) });
+      expect(r.reexec?.status).toBe("skipped");
+      expect(r.restarted).toEqual([WATCHDOG]);
+      expect(r.lock?.product.version).toBe("0.2.0");
+    }
+  });
+
+  it("a rollback never hands over — the running code is the newer one", async () => {
+    const t = await twoReleases();
+    const fake = await tarInto(t.src);
+    const handed: string[][] = [];
+    const exec = withNode(fake, async (_c, args) => {
+      handed.push(args);
+      return { code: 0, stdout: "", stderr: "" };
+    });
+    const opts = { ...base(t.P, t.env), fetchFn: releaseServer({ versions: ["0.2.0"] }).fn, target: TARGET, skipMigrate: true, openSession: async () => null };
+    await update({ ...opts, exec, noReexec: true });
+    expect(await currentVersion(t.P)).toBe("0.2.0");
+    const back = await update({ ...opts, exec, rollback: true });
+    expect(await currentVersion(t.P)).toBe("0.1.0");
+    expect(back.reexec).toBeUndefined();
+    expect(handed).toEqual([]);
+  });
+
+  it("--continue-from=switched refuses a git install — it only means something after a release switch", async () => {
+    const P = await checkout({ git: true });
+    const lines: string[] = [];
+    const r = await update({ ...base(P), out: (l) => lines.push(l), exec: fakeExec(), continueFrom: "switched", skipMigrate: true, openSession: async () => null });
+    expect(r.code).toBe(1);
+    expect(lines.join("\n")).toContain("--continue-from=switched is release mode only");
   });
 });

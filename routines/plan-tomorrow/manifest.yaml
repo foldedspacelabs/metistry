@@ -1,6 +1,7 @@
 schema: 1
 name: plan-tomorrow
 type: routine
+display_name: "Tomorrow's Plan"
 description: >
   Renders tomorrow's plan from Templates/Plan.md (daily-flow-spec §7) — the
   day's events, the tasks the template asks for in the order it asks for,

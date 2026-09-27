@@ -32,7 +32,8 @@ import { makeServer } from "./server.js";
 import { pushConfigFromEnv, startNotifier } from "./push.js";
 import { loadCollectors } from "@metistry-apps/collectors";
 import { loadRoutines } from "@metistry-apps/routines";
-import { PROFILE_PATH, loadSchedules, profileFacts, readOverlay, routineCapabilities, startRunner } from "./runner.js";
+import { PROFILE_PATH, loadSchedules, profileFacts, readOverlay, routineCapabilities, startRunner, type ComponentCtx } from "./runner.js";
+import { PLAN_ROUTINE, RoutineTrigger, closeTriggeredPass } from "./close-day.js";
 import { loadRules, makeRoutePolicy } from "./router.js";
 import { watchCompute } from "./compute.js";
 import { TargetRegistry } from "./dispatch.js";
@@ -351,52 +352,6 @@ console.log(
     : "route policy: absent — no policy: block in rules.yaml (every route row reads `absent`)",
 );
 
-const server = makeServer(pool, queries, {
-  origin,
-  ...(secrets ? { secrets } : {}),
-  ...(variables ? { variables } : {}),
-  origins,
-  ...(identity ? { identity } : {}),
-  ...(instancesFiles ? { instancesFiles } : {}),
-  version: consoleVersion,
-  events,
-  ...(localOwner ? { localOwner } : {}),
-  inboxDir,
-  inbox,
-  policy: {
-    idleDays: intEnv("METISTRY_SESSION_IDLE_DAYS", 30),
-    maxDays: intEnv("METISTRY_SESSION_MAX_DAYS", 365),
-  },
-  secureCookies: origin.startsWith("https:"),
-  webRoot: fileURLToPath(new URL("../web", import.meta.url)),
-  rules,
-  routePolicy,
-  targets,
-  ...(push ? { push } : {}),
-  ...(readKnowledge ? { readKnowledge } : {}),
-  ...(embedder ? { embedder } : {}),
-  ...(writeKnowledge ? { writeKnowledge } : {}),
-  ...(listKnowledge ? { listKnowledge } : {}),
-  ...(searchVaultKeyword ? { searchVaultKeyword } : {}),
-  ...(searchKnowledge ? { searchKnowledge } : {}),
-  ...(knowledgeHistory ? { knowledgeHistory } : {}),
-  ...(computeAdmin ? { computeAdmin } : {}),
-  ...(vault ? { vault } : {}),
-  // GET /api/vault/status: the reconciler's sync status over the same bridge (T10-2)
-  ...(reconcilerUrl && reconcilerToken ? { vaultStatus: httpVaultStatus({ url: reconcilerUrl, token: reconcilerToken }) } : {}),
-  crews,
-  compute: () => compute.store.current,
-  // the assistant's definition (T4-6): the same overlays the engine composes its prompt from
-  assistantDefinition: () =>
-    loadAssistantDefinition({
-      identityFiles,
-      promptFiles: assistantPromptFiles(process.env),
-      instanceDir: process.env.METISTRY_INSTANCE_DIR?.trim() || undefined,
-      productDir: process.cwd(),
-    }),
-});
-if (push) startNotifier(pool, push);
-
 // routine runner (SHOULD-8): collectors and routines scheduled from their
 // manifests, each loaded through its registry (plan §2.7) — the product's
 // directory, then the owner's extensions — and joined to its product code.
@@ -405,32 +360,10 @@ const loadedRoutines = await loadRoutines({ home: optionalEnv("METISTRY_ROUTINES
 logSkips("collector", loadedCollectors.skipped);
 logSkips("routine", loadedRoutines.skipped);
 const scheduled = [...(await loadSchedules(loadedCollectors.collectors)), ...(await loadSchedules(loadedRoutines.routines))];
-// The routine pause (C5): a routine that declares `requires.engine` is not
-// started at all when the tier its turn would run on is over a `stop` budget
-// — the same verdict the engine's guard reaches, from the same `spend` query
-// (invariant 3), so the scheduler and the engine can never disagree.
-const routineBudget = async (): Promise<PreflightMiss | null> => {
-  const cfg = compute.store.current;
-  if (!cfg.budgets || !queries.names().includes(SPEND_QUERY)) return null;
-  const { rows } = await queries.run(SPEND_QUERY);
-  return budgetMiss(cfg, rows as SpendRow[], ROUTINE_TIER);
-};
-
-// The owner's two layers over every manifest's schedule (§2.5), both read on
-// EVERY tick so a change lands on the next one: `.metistry/scheduled.yaml`
-// (the schedule and pause they set; absent = the defaults), and the facts in
-// `Me/profile.md` a time of day follows — `working_days` and `timezone`,
-// through the vault bridge like every other vault read here. No instance
-// directory, no overlay; no bridge, a profile that says nothing (and a
-// routine on `working_days` then says `no_working_days`, never guesses).
-const scheduledFile = optionalEnv(
-  "METISTRY_SCHEDULED_FILE",
-  instanceDir ? join(instanceDir, resolveInstanceLayout(instanceDir).layout.metistryDir, SCHEDULED_FILENAME) : "",
-);
-const readProfile = vault ? async () => profileFacts((await vault.read(PROFILE_PATH))?.content.toString("utf8") ?? null) : undefined;
-const runnerZone = configuredTimeZone(process.env);
-
-startRunner(pool, scheduled, {
+// What the runner hands every component (runner.ts `ComponentCtx`), built
+// once here so Close the Day's on-demand pass of `plan-tomorrow` gets exactly
+// what the 11:00 PM one does.
+const componentCtx: ComponentCtx = {
   // Which model a collector may call is `compute.yaml`'s to say, not an
   // environment variable's: a GETTER, so an edit to the file reaches the
   // next pass without a restart, plus the install's environment, because
@@ -480,7 +413,89 @@ startRunner(pool, scheduled, {
   // the Update Check routine compares the newest release with THIS runtime —
   // the console's own version, which is the one `metistry update` replaces
   runtimeVersion: consoleVersion,
-}, intEnv("METISTRY_RUNNER_TICK_MS", 60_000), {
+};
+
+// Close the Day (T2-8, close-day.ts) enqueues `plan-tomorrow` with the day
+// it closed (`closedDay`, the routine's close shape): one pass at a time, recorded as a `routine_run` like a
+// scheduled one. Not loaded here (a trimmed routines directory) → the close
+// still writes the section and says the plan was not enqueued.
+const planRoutine = scheduled.find((c) => c.name === PLAN_ROUTINE && c.runKind === "routine_run");
+const planTomorrow = planRoutine ? new RoutineTrigger(PLAN_ROUTINE, closeTriggeredPass(pool, planRoutine, componentCtx as Record<string, unknown>)) : undefined;
+if (!planTomorrow) console.warn(`${PLAN_ROUTINE} is not loaded: Close the Day writes the section but cannot render tomorrow's plan early`);
+
+const server = makeServer(pool, queries, {
+  origin,
+  ...(secrets ? { secrets } : {}),
+  ...(variables ? { variables } : {}),
+  origins,
+  ...(identity ? { identity } : {}),
+  ...(instancesFiles ? { instancesFiles } : {}),
+  version: consoleVersion,
+  events,
+  ...(localOwner ? { localOwner } : {}),
+  inboxDir,
+  inbox,
+  policy: {
+    idleDays: intEnv("METISTRY_SESSION_IDLE_DAYS", 30),
+    maxDays: intEnv("METISTRY_SESSION_MAX_DAYS", 365),
+  },
+  secureCookies: origin.startsWith("https:"),
+  webRoot: fileURLToPath(new URL("../web", import.meta.url)),
+  rules,
+  routePolicy,
+  targets,
+  ...(push ? { push } : {}),
+  ...(readKnowledge ? { readKnowledge } : {}),
+  ...(embedder ? { embedder } : {}),
+  ...(writeKnowledge ? { writeKnowledge } : {}),
+  ...(listKnowledge ? { listKnowledge } : {}),
+  ...(searchVaultKeyword ? { searchVaultKeyword } : {}),
+  ...(searchKnowledge ? { searchKnowledge } : {}),
+  ...(knowledgeHistory ? { knowledgeHistory } : {}),
+  ...(computeAdmin ? { computeAdmin } : {}),
+  ...(vault ? { vault } : {}),
+  ...(planTomorrow ? { planTomorrow } : {}),
+  // GET /api/vault/status: the reconciler's sync status over the same bridge (T10-2)
+  ...(reconcilerUrl && reconcilerToken ? { vaultStatus: httpVaultStatus({ url: reconcilerUrl, token: reconcilerToken }) } : {}),
+  crews,
+  compute: () => compute.store.current,
+  // the assistant's definition (T4-6): the same overlays the engine composes its prompt from
+  assistantDefinition: () =>
+    loadAssistantDefinition({
+      identityFiles,
+      promptFiles: assistantPromptFiles(process.env),
+      instanceDir: process.env.METISTRY_INSTANCE_DIR?.trim() || undefined,
+      productDir: process.cwd(),
+    }),
+});
+if (push) startNotifier(pool, push);
+
+// The routine pause (C5): a routine that declares `requires.engine` is not
+// started at all when the tier its turn would run on is over a `stop` budget
+// — the same verdict the engine's guard reaches, from the same `spend` query
+// (invariant 3), so the scheduler and the engine can never disagree.
+const routineBudget = async (): Promise<PreflightMiss | null> => {
+  const cfg = compute.store.current;
+  if (!cfg.budgets || !queries.names().includes(SPEND_QUERY)) return null;
+  const { rows } = await queries.run(SPEND_QUERY);
+  return budgetMiss(cfg, rows as SpendRow[], ROUTINE_TIER);
+};
+
+// The owner's two layers over every manifest's schedule (§2.5), both read on
+// EVERY tick so a change lands on the next one: `.metistry/scheduled.yaml`
+// (the schedule and pause they set; absent = the defaults), and the facts in
+// `Me/profile.md` a time of day follows — `working_days` and `timezone`,
+// through the vault bridge like every other vault read here. No instance
+// directory, no overlay; no bridge, a profile that says nothing (and a
+// routine on `working_days` then says `no_working_days`, never guesses).
+const scheduledFile = optionalEnv(
+  "METISTRY_SCHEDULED_FILE",
+  instanceDir ? join(instanceDir, resolveInstanceLayout(instanceDir).layout.metistryDir, SCHEDULED_FILENAME) : "",
+);
+const readProfile = vault ? async () => profileFacts((await vault.read(PROFILE_PATH))?.content.toString("utf8") ?? null) : undefined;
+const runnerZone = configuredTimeZone(process.env);
+
+startRunner(pool, scheduled, componentCtx, intEnv("METISTRY_RUNNER_TICK_MS", 60_000), {
   budget: routineBudget,
   compute: () => compute.store.current,
   scheduled: () => readOverlay(scheduledFile || null),

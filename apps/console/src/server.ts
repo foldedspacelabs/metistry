@@ -54,6 +54,8 @@ import { runAction, type ActionServices } from "./actions.js";
 import { computeRoutes, isComputeRoute, type ComputeAdmin } from "./compute-routes.js";
 import { isKnowledgeRoute, knowledgeRoutes, type KnowledgeHistory, type KnowledgeSearcher } from "./knowledge-routes.js";
 import { isVaultTaskRoute, ReplayCache, vaultTaskRoutes } from "./vault-task-routes.js";
+import { closeDayRoute, isCloseDayRoute, type RoutineTrigger } from "./close-day.js";
+import type { ConsoleVaultClient } from "./vault-client.js";
 import { agentList, commandList } from "./commands.js";
 import { purgeArchive, purgePreview } from "@metistry-apps/routines";
 import type { EventHub } from "./events.js";
@@ -101,8 +103,10 @@ export interface ConsoleConfig {
   searchKnowledge?: KnowledgeSearcher | undefined;
   /** What `/api/compute*` may edit: the instance repo whose `.metistry/compute.yaml` the verbs open. Absent = compute is not reachable from this console and every one of those routes answers not_available (compute-routes.ts). */
   computeAdmin?: ComputeAdmin | undefined;
-  /** The vault client the artifacts module (§4.21) stores content through; absent = artifacts degrade to not_available. */
-  vault?: VaultClient;
+  /** The vault client the artifacts module (§4.21) stores content through; absent = artifacts degrade to not_available. With `section` (the reconciler's `POST /vault/section`), Close the Day can write the daily note's section; without it that door answers not_available. */
+  vault?: ConsoleVaultClient;
+  /** `plan-tomorrow`, run on demand by Close the Day (close-day.ts). Absent = the close still writes the section and says the plan was not enqueued. */
+  planTomorrow?: RoutineTrigger | undefined;
   /** A note's git history for `GET /api/knowledge/history` and `GET /api/knowledge/version` — the reconciler's `/vault/log` and `/vault/show` (§2.21, T10-4); absent = both answer not_available. */
   knowledgeHistory?: KnowledgeHistory | undefined;
   /** Loaded crew manifests (crews.ts); absent = agents_delegate answers not_available. */
@@ -1086,7 +1090,9 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         isTaskOpRoute(key) ||
         isArtifactRoute(url.pathname) ||
         // the Tick door writes the owner's own note as `user`: the owner's hand, no one else's
-        isVaultTaskRoute(key)
+        isVaultTaskRoute(key) ||
+        // so does Close the Day, into the note's section
+        isCloseDayRoute(key)
       ) {
         return sendRefusal(res, management);
       }
@@ -1351,6 +1357,12 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     // reverse, written as `user` with the note's hash — never a patch, never
     // an action a proposal can reach (vault-task-routes.ts).
     if (isVaultTaskRoute(key)) return vaultTaskRoutes(req, res, key, { queries, vault: cfg.vault, audit, replays: vaultTaskReplays });
+
+    // ----- Close the Day (§2.11, §2.13; T2-8) -----
+    // The daily note's section through the reconciler's section operation as
+    // `user`, then `plan-tomorrow` enqueued; broken markers are a `note`
+    // request and no write (close-day.ts).
+    if (isCloseDayRoute(key)) return closeDayRoute(req, res, { db, queries, vault: cfg.vault, audit, plan: cfg.planTomorrow });
 
     // ----- artifacts + review dispatch (§4.21; owner session only) -----
     if (isArtifactRoute(url.pathname)) return artifactRoutes(req, res, url, artifacts);

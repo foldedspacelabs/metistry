@@ -151,6 +151,22 @@ describe("manifest schema", () => {
     ).toBe(false);
   });
 
+  // §2.5 (T3-1): a manifest carries its default schedule in the closed shape
+  // — the time of day the runner fires it at — and is held to the same closed
+  // set scheduled.yaml is. A missing schedule is still refused.
+  it("accepts §2.5's closed shape as a schedule, refuses what the closed set refuses, and still requires one", () => {
+    const fold = { name: "knowledge-fold", type: "routine" };
+    expect(validateManifest({ ...fold, schedule: { days: "working_days", at: ["07:00"] } }).ok).toBe(true);
+    expect(validateManifest({ ...fold, schedule: { days: ["sun"], at: ["18:00"], tz: "Europe/London" } }).ok).toBe(true);
+    expect(validateManifest({ name: "inbox-drain", type: "collector", schedule: { every: "5m" }, writes: ["proposals"] }).ok).toBe(true);
+
+    const every10 = validateManifest({ ...fold, schedule: { every: "10m" } });
+    expect(every10.ok).toBe(false);
+    if (!every10.ok) expect(every10.errors.join(" ")).toContain("schedule.every: every must be one of 5m, 15m, 1h, 6h");
+    expect(validateManifest({ ...fold, schedule: { days: "working_days", at: ["7:00"] } }).ok).toBe(false);
+    expect(validateManifest(fold).ok).toBe(false);
+  });
+
   it("never throws on garbage", () => {
     expect(validateManifest(null).ok).toBe(false);
     expect(validateManifest(42).ok).toBe(false);

@@ -1385,6 +1385,184 @@ public struct ComputeSpend: Sendable, Equatable {
     }
 }
 
+// MARK: - Usage (screen 17)
+//
+// Three named queries the popover reads beside `/api/compute`'s windows: the
+// month's days, who spent it, and AWS, which is not compute. Every column is
+// the query's `SELECT` list, read tolerantly (numeric arrives as a string).
+
+/// `GET /api/q/spend` — cost per day × provider × model × tier × crew, from the
+/// runs ledger. `is_today` and `is_this_month` are Postgres's clock, so the
+/// month a bar falls in is the month the budget window counted it in.
+public struct SpendRows: Decodable, Sendable, Equatable {
+    public let rows: [SpendRow]
+    public let asOf: String?
+
+    enum CodingKeys: String, CodingKey {
+        case rows
+        case asOf = "as_of"
+    }
+
+    public init(rows: [SpendRow], asOf: String? = nil) {
+        self.rows = rows
+        self.asOf = asOf
+    }
+}
+
+public struct SpendRow: Decodable, Sendable, Equatable {
+    /// A `date` column: `pg` hands it back as local midnight, so it arrives as
+    /// an instant (`2026-09-26T04:00:00.000Z`) — or as `2026-09-26` from an
+    /// overlay that casts it to text. `UsageReport.calendarDay` reads both.
+    public let day: String
+    public let isToday: Bool?
+    public let isThisMonth: Bool?
+    public let provider: String?
+    public let model: String?
+    public let tier: String?
+    public let crew: String?
+    public let calls: Int?
+    public let tokensIn: Double?
+    public let tokensOut: Double?
+    public let cacheRead: Double?
+    public let costUSD: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case day, provider, model, tier, crew, calls
+        case isToday = "is_today"
+        case isThisMonth = "is_this_month"
+        case tokensIn = "tokens_in"
+        case tokensOut = "tokens_out"
+        case cacheRead = "cache_read"
+        case costUSD = "cost_usd"
+    }
+
+    public init(
+        day: String, isToday: Bool? = nil, isThisMonth: Bool? = nil, provider: String? = nil, model: String? = nil,
+        tier: String? = nil, crew: String? = nil, calls: Int? = nil, tokensIn: Double? = nil, tokensOut: Double? = nil,
+        cacheRead: Double? = nil, costUSD: Double? = nil
+    ) {
+        self.day = day
+        self.isToday = isToday
+        self.isThisMonth = isThisMonth
+        self.provider = provider
+        self.model = model
+        self.tier = tier
+        self.crew = crew
+        self.calls = calls
+        self.tokensIn = tokensIn
+        self.tokensOut = tokensOut
+        self.cacheRead = cacheRead
+        self.costUSD = costUSD
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        day = (try? c.decode(String.self, forKey: .day)) ?? ""
+        isToday = try? c.decode(Bool.self, forKey: .isToday)
+        isThisMonth = try? c.decode(Bool.self, forKey: .isThisMonth)
+        provider = try? c.decode(String.self, forKey: .provider)
+        model = try? c.decode(String.self, forKey: .model)
+        tier = try? c.decode(String.self, forKey: .tier)
+        crew = try? c.decode(String.self, forKey: .crew)
+        calls = c.wireInt(.calls)
+        tokensIn = c.wireDouble(.tokensIn)
+        tokensOut = c.wireDouble(.tokensOut)
+        cacheRead = c.wireDouble(.cacheRead)
+        costUSD = c.wireDouble(.costUSD)
+    }
+}
+
+/// `GET /api/q/spend_by_actor` — *Where it went*: cost by actor (the run's
+/// component), highest first, and the calls nothing could price.
+public struct SpendByActorList: Decodable, Sendable, Equatable {
+    public let rows: [SpendByActor]
+    public let asOf: String?
+
+    enum CodingKeys: String, CodingKey {
+        case rows
+        case asOf = "as_of"
+    }
+
+    public init(rows: [SpendByActor], asOf: String? = nil) {
+        self.rows = rows
+        self.asOf = asOf
+    }
+}
+
+public struct SpendByActor: Decodable, Sendable, Equatable {
+    /// The run's `component`: `assistant` for chat, `crew:<name>` or an
+    /// agent's id, a routine's name.
+    public let actor: String
+    public let calls: Int?
+    /// Calls priced `unknown` — recorded at $0 and counted here, never read as free.
+    public let callsUnpriced: Int?
+    public let tokensIn: Double?
+    public let tokensOut: Double?
+    public let costUSD: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case actor, calls
+        case callsUnpriced = "calls_unpriced"
+        case tokensIn = "tokens_in"
+        case tokensOut = "tokens_out"
+        case costUSD = "cost_usd"
+    }
+
+    public init(actor: String, calls: Int? = nil, callsUnpriced: Int? = nil, tokensIn: Double? = nil, tokensOut: Double? = nil, costUSD: Double? = nil) {
+        self.actor = actor
+        self.calls = calls
+        self.callsUnpriced = callsUnpriced
+        self.tokensIn = tokensIn
+        self.tokensOut = tokensOut
+        self.costUSD = costUSD
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        actor = (try? c.decode(String.self, forKey: .actor)) ?? ""
+        calls = c.wireInt(.calls)
+        callsUnpriced = c.wireInt(.callsUnpriced)
+        tokensIn = c.wireDouble(.tokensIn)
+        tokensOut = c.wireDouble(.tokensOut)
+        costUSD = c.wireDouble(.costUSD)
+    }
+}
+
+/// `GET /api/q/aws_costs_daily` — AWS's own bill per day, from the AWS sync.
+/// Not compute, and never added to it.
+public struct AwsCostDays: Decodable, Sendable, Equatable {
+    public let rows: [AwsCostDay]
+    public let asOf: String?
+
+    enum CodingKeys: String, CodingKey {
+        case rows
+        case asOf = "as_of"
+    }
+
+    public init(rows: [AwsCostDay], asOf: String? = nil) {
+        self.rows = rows
+        self.asOf = asOf
+    }
+}
+
+public struct AwsCostDay: Decodable, Sendable, Equatable {
+    public let day: String
+    public let usd: Double?
+
+    enum CodingKeys: String, CodingKey { case day, usd }
+
+    public init(day: String, usd: Double?) {
+        self.day = day
+        self.usd = usd
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        day = (try? c.decode(String.self, forKey: .day)) ?? ""
+        usd = c.wireDouble(.usd)
+    }
+}
+
 /// Exactly one of `tier` or `crew`: two targets in one body is a request nobody
 /// can mean, and the route says so by name.
 public enum ComputeAssignTarget: Sendable, Equatable {

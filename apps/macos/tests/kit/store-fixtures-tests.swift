@@ -361,6 +361,9 @@ private let drives: [String: Drive] = [
         done(await s.setComputeBudget(scope: a.b("scope") ?? "", daily: a.bDouble("daily"), monthly: a.bDouble("monthly"), action: a.b("action") ?? ""))
     },
     "POST /api/compute/providers/test": { s, a in done(await s.testComputeProvider(a.b("name") ?? "", complete: a.bBool("complete") ?? false)) },
+    "GET /api/q/spend": { s, a in done(await s.spend(days: a.qInt("days"))) },
+    "GET /api/q/spend_by_actor": { s, a in done(await s.spendByActor(days: a.qInt("days"))) },
+    "GET /api/q/aws_costs_daily": { s, a in done(await s.awsCostsDaily(days: a.qInt("days"))) },
     // Capture
     "POST /capture": { s, a in done(await s.capture(.note(a.b("note") ?? ""), idempotencyKey: a.key)) },
     "GET /api/recordings/:id": { s, a in done(await s.recording(a.p("id"))) },

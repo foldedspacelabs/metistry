@@ -170,14 +170,28 @@ private func paneModel(_ runner: FakeRunner, status: StatusModel? = nil) -> Comp
 @Test func aProviderTestThatFailedIsStillAnAnswerAndNotACrash() async {
     // `providerTest` exits 1 when the provider did not answer, having printed a
     // perfectly good report. Reading `ok` from the exit code alone would turn
-    // that into "the command broke".
-    let json = #"{"name":"openrouter","ok":false,"url":"https://openrouter.ai/api/v1","models":[],"detail":"https://openrouter.ai/api/v1/models → HTTP 401"}"#
+    // that into "the command broke". Pretty-printed, exactly as
+    // `JSON.stringify(r, null, 2)` puts it on stdout — the shape that used to
+    // leave the pane showing the closing `}` instead of the reason.
+    let json = """
+    {
+      "name": "openrouter",
+      "ok": false,
+      "url": "https://openrouter.ai/api/v1",
+      "models": [],
+      "detail": "https://openrouter.ai/api/v1/models → HTTP 401"
+    }
+    """
     let model = paneModel(FakeRunner(results: [CommandResult(exitCode: 1, stdout: json, stderr: "")]))
     await model.testProvider("openrouter")
 
     #expect(model.tests["openrouter"]?.ok == false)
     #expect(model.tests["openrouter"]?.detail.contains("HTTP 401") == true)
     #expect(model.lastOutcome?.ok == false)
+    // The outcome the pane actually prints: the CLI's `detail`, never just
+    // the closing brace of the pretty-printed object it came from.
+    #expect(model.lastOutcome?.message == "https://openrouter.ai/api/v1/models → HTTP 401")
+    #expect(model.lastOutcome?.message != "}")
 }
 
 @MainActor

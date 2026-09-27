@@ -45,6 +45,43 @@ public enum CLIDegradation {
     public static func isUnknownVerb(_ result: CommandResult) -> Bool {
         result.exitCode == 2 && result.stderr.contains("unknown command")
     }
+
+    /// What a refusal says, when the CLI's answer might be a `--json` result
+    /// rather than a line of prose.
+    ///
+    /// Most `metistry compute …` verbs print their `--json` object even when
+    /// `ok` is false: `providers test`, `models list` and `models
+    /// install|load` all answer a failure as `{"ok": false, …, "detail":
+    /// "<why>"}` on STDOUT, pretty-printed, with exit 1
+    /// (`packages/cli/src/compute.ts`). The LAST LINE of that is the closing
+    /// `}` of `JSON.stringify(_, null, 2)` — never the reason — so a caller
+    /// that took "the last line of stdout" as its fallback showed exactly
+    /// that brace and nothing else.
+    ///
+    /// This tries the trailing JSON object first: `error.message` (with
+    /// `error.code` alongside it, for the envelope shape `{ok:false,
+    /// error:{code,message}}`), else the bare `detail` (or `error`) string
+    /// these verbs actually print, before falling back to the last
+    /// non-empty line of stderr, then of stdout — a plain-text refusal
+    /// (`metistry compute: <message>` on stderr, for a verb that threw
+    /// rather than returned) reads exactly as it did before.
+    public static func refusalMessage(_ result: CommandResult, verb: String) -> String {
+        if let json = JSONValue.parseTrailing(in: result.stdout), json.bool("ok") == false {
+            if let message = json["error"]?.string("message") {
+                let code = json["error"]?.string("code")
+                return code.map { "\(message) (\($0))" } ?? message
+            }
+            if let detail = json.string("detail", "error") {
+                return detail
+            }
+        }
+        let line = lastNonEmptyLine(result.stderr) ?? lastNonEmptyLine(result.stdout)
+        return line ?? "`metistry \(verb)` exited \(result.exitCode) with no output"
+    }
+
+    private static func lastNonEmptyLine(_ text: String) -> String? {
+        text.split(separator: "\n").last { !$0.trimmingCharacters(in: .whitespaces).isEmpty }.map(String.init)
+    }
 }
 
 /// Why a read did not produce a value. Every case is a sentence the pane prints

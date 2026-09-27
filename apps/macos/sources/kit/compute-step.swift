@@ -324,8 +324,6 @@ public final class ComputeStepModel {
         + "and everything the app knows about it afterwards is whether it is there."
 
     private nonisolated static func reason(_ result: CommandResult, verb: String) -> String {
-        let last = result.stderr.split(separator: "\n").last.map(String.init)
-            ?? result.stdout.split(separator: "\n").last.map(String.init)
-        return "`metistry \(verb)` exited \(result.exitCode): \(last ?? "no output")"
+        "`metistry \(verb)` exited \(result.exitCode): \(CLIDegradation.refusalMessage(result, verb: verb))"
     }
 }

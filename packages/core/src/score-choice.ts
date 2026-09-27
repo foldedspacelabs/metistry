@@ -30,7 +30,7 @@
 //     caller's own option keys; the one textual thing a server can hand back —
 //     an error body, which may echo the prompt — is scrubbed.
 
-import { collectorProviderIssue, type Compute, type Provider } from "./compute.js";
+import { collectorProviderIssue, credentialEnvNames, credentialFromEnv, providerCredential, providerEnabled, type Compute, type Provider } from "./compute.js";
 import { parseModelRef, type ModelRef } from "./model-ref.js";
 import { scrubModelOutput } from "./redact.js";
 import { choiceServerOf, scoreChoiceOver, type ChoiceFetch, type ChoiceMessage, type ChoiceOption, type ChoiceServer } from "./choice.js";
@@ -80,10 +80,19 @@ export function resolveOnMachineCall(access: ModelAccess, caller: string, modelR
     );
   }
 
-  const secret = provider.auth?.secret;
-  const bearer = secret ? access.secretEnv?.[secret] : undefined;
-  if (secret && !bearer) {
-    return skip(`providers.${ref.provider}.auth.secret names ${secret}, which is not in this process's environment — \`metistry secrets sync --to env\` and restart`);
+  // Switched off (C130) is "not offered", and an unattended caller is the
+  // last thing that should keep using one: it degrades exactly as an
+  // undeclared provider does.
+  if (!providerEnabled(provider)) {
+    return skip(`providers.${ref.provider} is switched off, so ${caller} has no on-device tier — \`metistry compute providers set ${ref.provider} --enabled on\``);
+  }
+
+  // Read from this process's environment through the one resolver the
+  // engine uses (`credentialFromEnv`) — never the Keychain.
+  const cred = providerCredential(provider);
+  const bearer = cred ? credentialFromEnv(cred, access.secretEnv ?? {}) : undefined;
+  if (cred && !bearer) {
+    return skip(`providers.${ref.provider}.auth.secret is ${cred.ref}, which is not in this process's environment (${credentialEnvNames(cred).join(" or ")}) — \`metistry secrets sync --to env\` and restart`);
   }
 
   return { ref, provider, url: `${provider.base_url.replace(/\/+$/, "")}/chat/completions`, bearer };

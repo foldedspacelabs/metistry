@@ -119,6 +119,32 @@ providers:
     expect(server.sent).toHaveLength(0);
   });
 
+  it("a {{ secret.x }} key is read from its delivery variable, and a switched-off provider degrades like an absent one (T4-18)", async () => {
+    const named = parseCompute(`
+providers:
+  ollama:
+    kind: openai-compatible
+    base_url: http://127.0.0.1:11434/v1
+    locality: on_machine
+    auth: { secret: "{{ secret.ollama_key }}" }
+`);
+    const missing = fake(scored("A"));
+    const r = await scoreChoice(ctx(named, missing.fn), { collector: "inbox-drain", modelRef: "ollama/m", options, codes, messages });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.why).toContain("METISTRY_SECRET_OLLAMA_KEY");
+    expect(missing.sent).toHaveLength(0);
+
+    const off = parseCompute(`
+providers:
+  ollama: { kind: openai-compatible, base_url: http://127.0.0.1:11434/v1, locality: on_machine, enabled: false }
+`);
+    const server = fake(scored("A"));
+    const r2 = await scoreChoice(ctx(off, server.fn), { collector: "inbox-drain", modelRef: "ollama/m", options, codes, messages });
+    expect(r2.ok).toBe(false);
+    if (!r2.ok) expect(r2.why).toContain("switched off");
+    expect(server.sent).toHaveLength(0);
+  });
+
   it("THROWS on the money rule, before any request is built, and sends nothing", async () => {
     const server = fake(scored("A"));
     await expect(

@@ -9,4 +9,8 @@
   test: an environment marker refuses a second hand-over, a release whose CLI
   predates it is never handed to, and a new CLI that cannot start is told
   apart from one that failed by a handshake file — the old code then
-  finishes the update, exit 1, with the exact rollback command.
+  finishes the update, exit 1, with the exact rollback command. The same run's
+  other two surprises are gone too: a newly minted owner bearer restarts
+  only the reconciler that reads it (over the supervisor's control socket,
+  never the supervisor itself), and a reconciler slow to come back defers
+  the lock write with the one command instead of failing the update.

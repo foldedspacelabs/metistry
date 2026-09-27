@@ -171,6 +171,10 @@ describe("metistry update", () => {
     const text = lines.join("\n");
     expect(text).toContain(`${WATCHDOG}: kickstart exited 5 — not restarted`);
     expect(text).not.toContain("job(s) kickstarted");
+    // W1 checkpoint D3: a job whose code changed and whose kickstart failed is not "nothing changed"
+    expect(text).not.toContain("no host job's code changed");
+    expect(text).toContain(`nothing kickstarted — kickstart of ${WATCHDOG} failed (exit 5)`);
+    expect(text).toContain("nothing kickstarted, 1 kickstart(s) failed");
   });
 
   it("a second run finds nothing to migrate and nothing to restart", async () => {

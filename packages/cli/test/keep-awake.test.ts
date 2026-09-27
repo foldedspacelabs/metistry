@@ -211,6 +211,19 @@ describe("doctor's keep-awake row", () => {
     expect(row.action).toEqual({ kind: "run_verb", command: ["metistry", "deployment", "set-keep-awake", "allow_sleep_on_battery"], label: "Turn on keep-awake" });
   });
 
+  it("an explicit never is configured: ok, said as the owner's choice, with no verb suggesting otherwise (W1 checkpoint D5)", async () => {
+    for (const keep_awake of ["never", { enabled: false, sleep_on_battery: true, sleep_lid_closed: false }] as const) {
+      const row = (await keepAwakeRow({ deployment: { ...launchd, keep_awake }, instanceDir: await withState(undefined), exec: pmset(), platform: "darwin" }))!;
+      expect(row.status).toBe("ok");
+      expect(row.remediation).toBeUndefined();
+      expect(row.action).toBeUndefined();
+      expect(row.meta).toMatchObject({ mode: "never", configured: true });
+      expect(String(row.meta?.["info"])).toContain("keep_awake: never — your choice");
+      expect(String(row.meta?.["info"])).not.toContain("not configured");
+      expect(String(row.meta?.["info"])).not.toContain("set-keep-awake");
+    }
+  });
+
   it("compose: absent, because there is no supervisor to hold it", async () => {
     const row = (await keepAwakeRow({
       deployment: { shape: "compose", services: {}, keep_awake: "always" },

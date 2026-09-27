@@ -214,10 +214,9 @@ export class SyncScheduler {
     if (r.attempted && (r.pushed === true || !r.ok)) this.lastPush = { at: this.now(), result: r };
   }
 
-  /** The interval main.ts runs; `before` re-reads the policy file. */
-  start(everyMs = SYNC_TICK_MS, before?: () => void): () => void {
+  /** The interval main.ts runs. */
+  start(everyMs = SYNC_TICK_MS): () => void {
     const t = setInterval(() => {
-      before?.();
       this.tick().catch((err) => console.error("reconciler: sync tick failed:", err instanceof Error ? err.message : err));
     }, everyMs);
     return () => clearInterval(t);

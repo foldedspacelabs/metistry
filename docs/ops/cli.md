@@ -26,6 +26,7 @@ All of them are real.
 | `deployment set-shape <compose\|launchd>` | write the instance's `.metistry/deployment.yaml` through the reconciler, preview-then-confirm |
 | `deployment set-keep-awake [<never\|allow_sleep_on_battery\|always\|always_lid_closed>] [--enabled\|--sleep-on-battery\|--sleep-lid-closed true\|false]` | whether this install holds the Mac awake, on which power, and whether a closed lid should stay awake (macOS); the same protected write; the lid setting is stored and never applied — only an administrator's `pmset` delivers it |
 | `vault settings [--push <after_commit\|manual\|<n>m\|<n>h>] [--pull <n>m\|<n>h] [--yes] [--json]` | the vault's git sync policy (M18): when the reconciler pushes and pulls; the same protected write |
+| `vault rollback <commit> \| --to <date> \| --file <path> [--to <date>] [--include-config] \| --request <id>` | roll the vault back (M18): a Needs You request with the preview; Approve makes one new commit as `user`; configuration only with `--include-config` |
 | `migrate-layout [--dry-run] [--json] [--allow-dirty]` | carry an instance from the legacy layout to the flat one: the directory becomes the vault, the machinery moves under `.metistry/`, stored paths lose `Knowledge/` |
 | `migrate-inbox [--dry-run]` | move a pre-#156 `inbox/` into the vault inbox and rewrite `inbox.path` |
 | `migrate-shape <launchd\|compose>` | move a LIVE install between the shapes, with its data: dump, stop, flip, up, restore, verify, doctor |
@@ -669,6 +670,48 @@ policy here.
 Where sync stands — branch, ahead and behind, last commit, last push and
 pull, any conflict, the policy — is `GET /api/vault/status`
 (`docs/ops/client-api.md`) and doctor's *vault sync* row.
+
+## Rolling back: `metistry vault rollback`
+
+History is preserved, always (plan §2.21, M18, T10-6). A rollback is a **new
+commit** that puts files back, made by the reconciler as `user` — never a
+reset, a rebase or a force — and undoing it is rolling back that commit.
+
+```sh
+metistry vault rollback 4c1d2e3f                         # undo one commit
+metistry vault rollback --to 2026-09-26                   # the vault as that day left it
+metistry vault rollback --file Areas/Health/sleep.md      # one file, before its last change
+metistry vault rollback --file Areas/Health/sleep.md --to 2026-09-20
+metistry vault rollback --to 2026-09-26 --include-config  # configuration too — waits, then makes it here
+metistry vault rollback --request 62                      # resume an --include-config wait
+```
+
+**It never happens on the spot.** The verb asks the console
+(`POST /api/vault/rollback`, reach `local`, with this Mac's local owner token)
+for a preview — the commits it undoes, the files it puts back — and raises one
+Needs You request carrying it. Nothing changes until you Approve it (the app,
+or the phone); Approve makes the commit, pinned to the history the preview was
+computed on and refused `stale` if the change is no longer the one you saw.
+Revise and Decline change nothing. `--to <day>` is sent as the end of that
+day on this Mac's clock; a full ISO timestamp is sent as given.
+
+**Configuration is left as it is** — every `.metistry/` path, `CLAUDE.md`,
+`README.md` — and the preview names what it left alone. The console's bearer
+cannot revert configuration at all (the reconciler refuses it). With
+`--include-config` the request says so, Approve in Needs You records your
+answer and reverts nothing, and **this terminal** waits for it (up to 30
+minutes; Ctrl-C stops waiting and `--request <id>` resumes) and then makes the
+revert itself with the owner-class bearer
+(`METISTRY_BRIDGE_TOKEN_RECONCILER_USER`) — the same protected-write door as
+every other configuration change. `.metistry/state/` and
+`.metistry/instance-migrations/` are never rolled back by anyone.
+
+A rollback touches files only. Postgres is derived (invariant 1): the
+reconciler re-walks what it changed, so the index, tasks and embeddings follow;
+decisions, feedback and grants are not rolled back. An uncommitted edit in the
+way, a later edit to the same lines, or an operation you have in progress in
+the working tree refuses it — nothing is overwritten. `--json` prints the
+result for a script.
 
 ## Connecting an external dev tool: `metistry connect <tool>`
 

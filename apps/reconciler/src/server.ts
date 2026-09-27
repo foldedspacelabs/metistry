@@ -10,7 +10,7 @@
 // `runs` row — never silently downgraded to something it did not ask for.
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { authorized, errorEnvelope, finishRun, INSTANCE_LAYOUT, isNoteSectionName, isVaultPath, NOTE_SECTION_NAMES, runCheck, startRun, statusFor, type ErrorCode } from "@foldedspacelabs/metistry-core";
+import { authorized, errorEnvelope, finishRun, INSTANCE_LAYOUT, isNoteSectionName, isProtectedPath, isVaultPath, NOTE_SECTION_NAMES, runCheck, startRun, statusFor, type ErrorCode } from "@foldedspacelabs/metistry-core";
 import type { Vault, Outcome } from "./vault.js";
 import { parseIntent } from "./vault.js";
 import { validPrincipal } from "./paths.js";
@@ -81,6 +81,36 @@ async function auditRefusal(db: Db | undefined, r: { caller: CallerClass; tool: 
     await finishRun(db, id, { ok: false, error: line });
   } catch (err) {
     console.error("reconciler: could not record the refusal:", err instanceof Error ? err.message : err);
+  }
+}
+
+/**
+ * The other half of the record: every protected-path change this bridge
+ * ACCEPTED, as a `config_write` run (plan §2.9, T2-16). The bridge is the one
+ * door every protected write passes through — `metistry identity set`,
+ * `metistry update`, the console's two compute writes, the prompt overlay —
+ * so recording it HERE is what makes Activity show a change "whichever door
+ * made it", with no door able to forget. `meta.path` is the file (the live
+ * stream's `config.changed {file}` reads it, §2.20); the caller class and the
+ * claimed principal are on it exactly as they are on a refusal.
+ *
+ * Same discipline as `auditRefusal`: a record that cannot be written never
+ * fails the write it describes — the change is already queued for the sole
+ * committer, and git is the record (invariant 1).
+ */
+export type ConfigOp = "write" | "delete" | "rename";
+
+async function recordConfigWrite(
+  db: Db | undefined,
+  r: { caller: CallerClass; op: ConfigOp; tool: string; path: string; from?: string | undefined; principal: string; message: string },
+): Promise<void> {
+  if (!db) return;
+  try {
+    const meta = { path: r.path, op: r.op, ...(r.from !== undefined ? { from: r.from } : {}), caller: r.caller, principal: r.principal, message: r.message };
+    const id = await startRun(db, { component: "reconciler", kind: "config_write", tool: r.tool, meta });
+    await finishRun(db, id, { ok: true });
+  } catch (err) {
+    console.error("reconciler: could not record the config write:", err instanceof Error ? err.message : err);
   }
 }
 
@@ -288,6 +318,8 @@ export function makeBridge(deps: BridgeDeps, cfg: BridgeConfig): Server {
         // a console bearer asking to be the user on `.metistry/rules.yaml` is
         // the shape this PR exists to refuse, and a refusal nobody can see
         // afterwards is half a control.
+        const config = (op: ConfigOp, tool: string, path: string, from?: string) =>
+          recordConfigWrite(deps.db, { caller, op, tool, path, from, principal: intent.value.principal, message: intent.value.message });
         const refused = async <T>(out: Outcome<T>, tool: string, path: unknown): Promise<Outcome<T>> => {
           if (!out.ok && out.code === "forbidden") {
             await auditRefusal(deps.db, { caller, tool, code: out.code, path: typeof path === "string" ? path : String(path), principal: intent.value.principal });
@@ -299,13 +331,23 @@ export function makeBridge(deps: BridgeDeps, cfg: BridgeConfig): Server {
           const content = bodyContent(body);
           if (!content) return fail(res, "invalid_request", "exactly one of content (utf8) or content_base64");
           const out = await refused(await vault.write(body.path, content, intent.value, caller, exp.sha), "vault_write", body.path);
+          if (out.ok && isProtectedPath(out.value.path)) await config("write", "vault_write", out.value.path);
           return reply(res, out, out.ok && out.value.created ? 201 : 200, (v) => ({ ...v, queued: true }));
         }
         if (key === "POST /vault/delete") {
           const out = await refused(await vault.delete(body.path, intent.value, caller, exp.sha), "vault_delete", body.path);
+          if (out.ok && isProtectedPath(out.value.path)) await config("delete", "vault_delete", out.value.path);
           return reply(res, out, 200, (v) => ({ ...v, deleted: true, queued: true }));
         }
         const out = await refused(await vault.rename(body.from, body.to, intent.value, caller), "vault_rename", `${String(body.from)} → ${String(body.to)}`);
+        // A rename is one row per protected side: moving a file INTO
+        // `.metistry/` changes behaviour at `to`, moving one OUT changes it
+        // at `from`, and each is a file a pane may be showing.
+        if (out.ok) {
+          for (const side of [out.value.from, out.value.to]) {
+            if (isProtectedPath(side)) await config("rename", "vault_rename", side, out.value.from);
+          }
+        }
         return reply(res, out, 200, (v) => ({ ...v, queued: true }));
       }
 

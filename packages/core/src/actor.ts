@@ -79,7 +79,7 @@ export interface AssistantIdentity {
   readonly name: string;
   /** The `@handle` the owner addresses it by; null when the file names none. */
   readonly mention: string | null;
-  /** The assistant's mark (C123) — the `icon:` key today; T2-16 owns whether the key is renamed. Null when unset. */
+  /** The assistant's mark (C123) — the `icon:` key, which T2-16 kept (`metistry identity set --mark` writes it). Null when unset. */
   readonly mark: string | null;
 }
 

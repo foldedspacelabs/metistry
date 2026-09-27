@@ -223,6 +223,19 @@ A body claiming more than its bearer allows is `forbidden` — never downgraded
 `METISTRY_BRIDGE_TOKEN_RECONCILER_USER` unset, **no** caller may write a
 protected path and `check()` is `degraded` with the command that mints one.
 
+**Every accepted protected write is on the record too** (T2-16). A write,
+delete or rename of a protected path that the bridge accepts leaves a
+finished `runs` row — `component=reconciler, kind=config_write`, `tool`
+`vault_write|vault_delete|vault_rename`, `meta {path, op, from?, caller,
+principal, message}`, one row per protected side of a rename — so Activity
+(`activity_feed`, group `run`, the principal as actor) shows the change
+whichever door made it: `metistry identity set`, `metistry update`, the
+Compute pane, the prompt overlay. `meta.path` is what the live stream's
+`config.changed {file}` carries (§2.20). A refusal keeps its `auth` row and
+gets no `config_write`; a row that cannot be written never fails the write.
+A hand edit swept in as an out-of-band change is not a bridge write and is
+not recorded here — git has it.
+
 **Compare-and-swap.** Send `expected_sha256` (from a prior read) to refuse
 a write over content you have not seen (`409 conflict`); the empty string
 means "must not exist yet". Omit it to overwrite unconditionally.

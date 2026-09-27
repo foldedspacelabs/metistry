@@ -181,28 +181,28 @@ describe.skipIf(!hasDb)("console PWA chunk", () => {
   });
 
   // docs/ops/board.md — the board panel ships in the shell. Asserted on the
-  // served markup (there is no DOM harness here): app.js wires #board-project
-  // and #board-columns at module scope, so if either id disappears the whole
-  // shell throws on load.
-  it("ships the board panel and the three popovers the drags need", async () => {
+  // served markup: work.js binds its ids when the shell mounts it, so if one
+  // disappears the whole shell throws on load. Since T7-3b (screen 18 §5) the
+  // three popovers are gone: a tap opens the card (C84), and a move is the
+  // Move to… sheet — both views of their own.
+  it("ships the board panel, the card and the Move to… sheet", async () => {
     const html = await (await fetch(base + "/")).text();
     expect(html).toContain('<section id="board" hidden>');
-    expect(html).toContain('id="board-project"'); // the project filter app.js binds [ and ] to
+    expect(html).toContain('id="board-project"'); // the project filter work.js binds [ and ] to
     expect(html).toContain('id="board-columns"');
     expect(html).toContain('id="board-asof"'); // staleness is visible, never silent
-    expect(html).toContain('id="board-empty"');
-    const board = /<section id="board" hidden>[\s\S]*?<p id="board-empty"[^>]*>[^<]*<\/p>/.exec(html)?.[0] ?? "";
-    expect(board).not.toBe("");
-    // every id app.js binds at module scope — a missing one throws on load
-    for (const id of [
-      "board-msg", "board-move", "board-move-card", "board-move-targets", "board-move-cancel",
-      "board-assign", "board-assign-card", "board-assign-to", "board-assign-cancel",
-      "board-detail", "board-detail-title", "board-detail-fields", "board-detail-link", "board-detail-close",
-    ]) {
+    expect(html).toContain('id="board-chips"'); // one column at a time on a phone
+    for (const id of ["board-state", "board-msg", "card", "card-body", "card-msg", "card-move", "card-release", "move", "move-for", "move-list"]) {
       expect(html, id).toContain(`id="${id}"`);
     }
-    // the refusal line is a live region: a snapped-back card must announce why
+    for (const id of ["board-move", "board-assign", "board-detail", "board-empty"]) expect(html, id).not.toContain(`id="${id}"`);
+    // the refusal line is a live region: a move that is undone must announce why
     expect(html).toMatch(/id="board-msg"[^>]*aria-live="polite"/);
+    expect(html).toMatch(/id="card-msg"[^>]*aria-live="polite"/);
+    // and the module that draws it is served
+    const js = await fetch(base + "/work.js");
+    expect(js.status).toBe(200);
+    expect(js.headers.get("content-type")).toMatch(/^text\/javascript/);
   });
 
   // T1-2 (C2, C38, C39): five columns, and every label is the word its key
@@ -210,7 +210,7 @@ describe.skipIf(!hasDb)("console PWA chunk", () => {
   // reverted (C38), "Needs You" is the request queue's name and not a
   // column's (C2), and Reported is a flag on Done rather than a column (C39).
   it("the board draws five columns, each labelled with the word its key says", async () => {
-    const js = await (await fetch(base + "/app.js")).text();
+    const js = await (await fetch(base + "/work.js")).text();
     const cols = /const BOARD_COLUMNS = \[[\s\S]*?\n\];/.exec(js)?.[0] ?? "";
     expect(cols).not.toBe("");
     const pairs = [...cols.matchAll(/\["([a-z_]+)", "([^"]+)"/g)].map((m) => [m[1], m[2]]);
@@ -223,41 +223,28 @@ describe.skipIf(!hasDb)("console PWA chunk", () => {
     ]);
     // the accept line: no "Addressed to" anywhere the owner reads
     const html = await (await fetch(base + "/")).text();
-    for (const [name, src] of [["app.js", js], ["index.html", html]] as const) expect(src, name).not.toMatch(/addressed to/i);
+    for (const [name, src] of [["work.js", js], ["index.html", html]] as const) expect(src, name).not.toMatch(/addressed to/i);
     expect(cols).not.toContain("Needs You");
   });
 
-  // The drags (docs/ops/board.md "Drags"). There is no DOM harness here, so
-  // this asserts the SHAPE of the handlers in the served app.js: every drop
-  // the table names maps to exactly one route, and a closed card has no
-  // drops at all.
-  it("the board's drag handlers are present, and each drop maps to exactly one route", async () => {
-    const js = await (await fetch(base + "/app.js")).text();
-    for (const handler of ["ondragstart", "ondragover", "ondragleave", "ondrop", "ondragend"]) {
-      expect(js, handler).toContain(handler);
-    }
-    // the §6c policy table, as it stands in the panel
-    const drops = /function dropsFor\(c\) \{[\s\S]*?\n\}/.exec(js)?.[0] ?? "";
-    expect(drops).not.toBe("");
-    expect(drops).toContain('if (c.status === "closed") return d;'); // Done is terminal, reported or not
-    expect(drops).toContain('d.assigned = "assign"');
-    expect(drops).toContain('d.in_progress = "claim"');
-    expect(drops).toContain('d.backlog = "unassign"');
-    expect(drops).toContain('d[boardHome(c)] = "release"');
-    expect(drops).toContain('c.column === "blocked") { d[boardHome(c)] = "unblock"');
-    expect(drops).toContain('d.done = "close"');
-    expect(drops).not.toContain("reported"); // nothing you can drag makes a report exist
+  // The drags (docs/ops/board.md "Drags"), as served. The rule itself —
+  // which move is legal, and the reason for one that is not — is driven with
+  // the recorded board in pwa-work.test.ts; this holds the served module to
+  // the same routes: every move maps to exactly one, and the drags are wired.
+  it("the board's drag handlers are present, and each move maps to exactly one route", async () => {
+    const js = await (await fetch(base + "/work.js")).text();
+    for (const ev of ["dragstart", "dragover", "dragleave", "drop", "dragend"]) expect(js, ev).toContain(`addEventListener("${ev}"`);
     // one op, one route — and the two POST verbs are the only POSTs
-    const routes = /function boardRoute\(op, card, extra\) \{[\s\S]*?\n\}/.exec(js)?.[0] ?? "";
+    const routes = /export function boardRoute\(op, card, extra\) \{[\s\S]*?\n\}/.exec(js)?.[0] ?? "";
     expect(routes).toContain('method: "PATCH"');
     expect(routes).toContain("`/api/tasks/${id}/${op}`");
-    expect(routes).toContain('return patch({ owner: extra.owner })');
-    expect(routes).toContain('return patch({ owner: null })');
+    expect(routes).toContain("return patch({ owner: extra.owner })");
+    expect(routes).toContain("return patch({ owner: null })");
     expect(routes).toContain('return patch({ status: "open" })');
     expect(routes).toContain('return patch({ status: "closed" })');
-    // the keyboard alternative, and the room link a card opens when it has one
+    // the keyboard alternative, and the room — a push from the card
     expect(js).toContain('e.key === "m"');
-    expect(js).toContain("`#/rooms/work/${Number(c.id)}`");
+    expect(js).toContain("`#/rooms/work/${room.work_id}`");
   });
 
   // docs/research/2026-09-16-taskuary-review.md ADOPT 1 + 5 — the two new

@@ -381,7 +381,7 @@
         "F-6"
       ],
       "file": "docs/product/tickets/t1/t1-1.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T1-2": {
       "title": "The board query",
@@ -393,7 +393,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/t1/t1-2.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T1-3": {
       "title": "The activity query",
@@ -407,7 +407,7 @@
         "T1-4"
       ],
       "file": "docs/product/tickets/t1/t1-3.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T1-4": {
       "title": "Routine outcome",
@@ -443,7 +443,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/t1/t1-6.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T1-7": {
       "title": "The Needs You count",
@@ -457,7 +457,7 @@
         "F-1"
       ],
       "file": "docs/product/tickets/t1/t1-7.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T1-8": {
       "title": "Groups and sources",
@@ -471,7 +471,7 @@
         "F-6"
       ],
       "file": "docs/product/tickets/t1/t1-8.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T1-9": {
       "title": "Today's order",
@@ -485,7 +485,7 @@
         "F-6"
       ],
       "file": "docs/product/tickets/t1/t1-9.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T1-10": {
       "title": "Meeting refs and people emails",
@@ -513,7 +513,7 @@
         "F-6"
       ],
       "file": "docs/product/tickets/t1/t1-11.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T1-12": {
       "title": "Prose feedback",
@@ -527,7 +527,7 @@
         "F-6"
       ],
       "file": "docs/product/tickets/t1/t1-12.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T1-13": {
       "title": "Project grants table",
@@ -553,7 +553,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/t1/t1-14.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T1-15": {
       "title": "Small queries",
@@ -565,7 +565,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/t1/t1-15.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T2-1": {
       "title": "Captures from the apps",
@@ -577,7 +577,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/t2/t2-1.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T2-2": {
       "title": "Access hardening",
@@ -589,7 +589,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/t2/t2-2.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T2-3": {
       "title": "Questions v2 and both report names",
@@ -617,7 +617,7 @@
         "F-13"
       ],
       "file": "docs/product/tickets/t2/t2-4.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T2-5": {
       "title": "The Defer door",
@@ -631,7 +631,7 @@
         "T2-4"
       ],
       "file": "docs/product/tickets/t2/t2-5.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T2-6": {
       "title": "The section operation",
@@ -643,7 +643,7 @@
       "effort": "high",
       "deps": [],
       "file": "docs/product/tickets/t2/t2-6.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T2-7": {
       "title": "Today routes and order",
@@ -772,7 +772,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/t2/t2-15.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T2-16": {
       "title": "Identity and the config record",
@@ -784,7 +784,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/t2/t2-16.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T2-17": {
       "title": "Turn progress and sessions",
@@ -814,7 +814,7 @@
         "F-6"
       ],
       "file": "docs/product/tickets/t2/t2-18.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T3-1": {
       "title": "The scheduler",
@@ -828,7 +828,7 @@
         "F-4"
       ],
       "file": "docs/product/tickets/t3/t3-1.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T3-2": {
       "title": "The overlay",
@@ -843,7 +843,7 @@
         "T3-1"
       ],
       "file": "docs/product/tickets/t3/t3-2.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T3-3": {
       "title": "Scheduled routes and doors",
@@ -874,7 +874,7 @@
         "T1-8"
       ],
       "file": "docs/product/tickets/t3/t3-4.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T3-5": {
       "title": "The Standup routine",
@@ -946,7 +946,7 @@
         "T1-11"
       ],
       "file": "docs/product/tickets/t3/t3-9.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T3-10": {
       "title": "The session fold",
@@ -1002,7 +1002,7 @@
         "F-3"
       ],
       "file": "docs/product/tickets/t4/t4-1.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T4-2": {
       "title": "Egress guard and redaction",
@@ -1016,7 +1016,7 @@
         "T4-1"
       ],
       "file": "docs/product/tickets/t4/t4-2.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T4-3": {
       "title": "Migrating the shared scope",
@@ -1030,7 +1030,7 @@
         "T4-1"
       ],
       "file": "docs/product/tickets/t4/t4-3.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T4-4": {
       "title": "Variables",
@@ -1044,7 +1044,7 @@
         "F-3"
       ],
       "file": "docs/product/tickets/t4/t4-4.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T4-5": {
       "title": "Registries",
@@ -1058,7 +1058,7 @@
         "F-3"
       ],
       "file": "docs/product/tickets/t4/t4-5.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T4-6": {
       "title": "Actors",
@@ -1072,7 +1072,7 @@
         "F-2"
       ],
       "file": "docs/product/tickets/t4/t4-6.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T4-7": {
       "title": "Project grants inherited",
@@ -1273,7 +1273,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/t4/t4-20.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T4-21": {
       "title": "Doctor for the Services pane",
@@ -1285,7 +1285,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/t4/t4-21.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T4-22": {
       "title": "Defer and report",
@@ -1375,7 +1375,7 @@
         "F-12"
       ],
       "file": "docs/product/tickets/t5/t5-1.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T5-2": {
       "title": "The shell",
@@ -1389,7 +1389,7 @@
         "F-7"
       ],
       "file": "docs/product/tickets/t5/t5-2.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T5-3": {
       "title": "Shared components",
@@ -1403,7 +1403,7 @@
         "F-7"
       ],
       "file": "docs/product/tickets/t5/t5-3.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T5-4a": {
       "title": "Needs You: the list",
@@ -1768,7 +1768,7 @@
         "F-9"
       ],
       "file": "docs/product/tickets/t7/t7-2.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T7-3a": {
       "title": "Today and Needs You",
@@ -1978,7 +1978,7 @@
         "F-8"
       ],
       "file": "docs/product/tickets/t9/t9-1.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T9-2": {
       "title": "The policy",
@@ -2033,7 +2033,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/t10/t10-1.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T10-2": {
       "title": "Sync policy and status",
@@ -2047,7 +2047,7 @@
         "F-6"
       ],
       "file": "docs/product/tickets/t10/t10-2.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T10-3": {
       "title": "Integrate before pushing",
@@ -2061,7 +2061,7 @@
         "T10-1"
       ],
       "file": "docs/product/tickets/t10/t10-3.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T10-4": {
       "title": "File history",
@@ -2133,7 +2133,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/x/x-2.md",
-      "status": "todo"
+      "status": "merged"
     },
     "X-3": {
       "title": "A password test that a path can break",
@@ -2145,7 +2145,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/x/x-3.md",
-      "status": "todo"
+      "status": "merged"
     },
     "X-4": {
       "title": "PWA maskable icon and dark manifest colours",
@@ -2157,7 +2157,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/x/x-4.md",
-      "status": "todo"
+      "status": "merged"
     },
     "X-5": {
       "title": "The PWA reads F-5's table",
@@ -2172,7 +2172,7 @@
         "F-14"
       ],
       "file": "docs/product/tickets/x/x-5.md",
-      "status": "todo"
+      "status": "merged"
     },
     "X-1": {
       "title": "The document sweep",

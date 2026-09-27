@@ -246,6 +246,34 @@ describe.skipIf(!hasDb)("crew drain (integration)", () => {
     expect(rows[0]).toEqual({ work_id: String(id), title: "found a thing" });
   });
 
+  // T4-6 (C128): the definition names the model. A pinned reference runs as
+  // written — over assignments.crews — with the crew's own effort; `same_as_
+  // assistant` runs the default tier, model AND effort; a pinned reference to
+  // a provider compute.yaml does not declare parks, never runs elsewhere.
+  it("a crew's own `model:` decides what it runs on: pinned, same_as_assistant, or a provider that does not exist (parked)", async () => {
+    const seen: ResolvedAssignment[] = [];
+    const run = async (_input: CrewRunInput, assignment: ResolvedAssignment) => {
+      seen.push(assignment);
+      return ok;
+    };
+    const pinned = await enqueue("pinned", {}, { ...snapshot, model: "testbench/pinned-model", effort: "high" });
+    await drainCrewOne(pool, { ...cfg, runAssigned: run });
+    expect((await workRow(pinned)).status).toBe("closed");
+    const same = await enqueue("same", {}, { ...snapshot, model: "same_as_assistant", effort: "high" });
+    await drainCrewOne(pool, { ...cfg, runAssigned: run });
+    expect((await workRow(same)).status).toBe("closed");
+    expect(seen.map((a) => [a.ref, a.effort, a.from])).toEqual([
+      ["testbench/pinned-model", "high", `crew:${crewId}`], // not assignments.crews' testbench/sonnet
+      ["testbench/generalist", "medium", "default"], // the default tier's pair: its effort (the schema default), not the crew's high
+    ]);
+    const nowhere = await enqueue("nowhere", {}, { ...snapshot, model: "elsewhere/some-model" });
+    await drainCrewOne(pool, { ...cfg, runAssigned: run });
+    const parked = await workRow(nowhere);
+    expect(parked.status).toBe("blocked");
+    expect(parked.history.at(-1).note).toMatch(/runs on elsewhere\/some-model, but compute.yaml declares no provider 'elsewhere'/);
+    expect(seen).toHaveLength(2); // nothing ran for it
+  });
+
   it("a crew compute.yaml assigns nothing to parks as blocked naming the line to write — no engine, so no run (C2/C3)", async () => {
     const id = await enqueue("unassigned");
     const calls: string[] = [];

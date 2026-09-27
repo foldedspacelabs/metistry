@@ -1093,6 +1093,17 @@ export async function keepAwakeRow(deps: { deployment: Deployment; instanceDir: 
   const row = {
     kind: KEEP_AWAKE_KIND,
     ...(await runCheck(KEEP_AWAKE_KIND, `deployment.yaml says keep_awake: ${mode}; ${statePath} and pmset -g assertions agree`, async () => {
+      // an explicit `never` is the owner's answer, not a missing one: it is
+      // configured, and nothing here second-guesses it with a suggestion
+      if (mode === "never" && deps.deployment.keep_awake !== undefined) {
+        return {
+          meta: {
+            mode,
+            configured: true,
+            info: "keep_awake: never — your choice: this Mac may idle-sleep, and the install pauses with it (captures, collectors and the assistant's queue wait until it wakes)",
+          },
+        };
+      }
       if (mode === "never") {
         action = runVerb(["metistry", "deployment", "set-keep-awake", "allow_sleep_on_battery"], "Turn on keep-awake");
         return {

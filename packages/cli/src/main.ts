@@ -143,7 +143,7 @@ export interface ParsedArgs {
  * `--version <x.y.z>` silently installed the latest release instead
  * (#198, "not fixed here" #2).
  */
-export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "dry-run", "allow-dirty", "no-launchd", "no-compose", "no-color", "skip-build", "skip-migrate", "rollback", "allow-legacy", "yes", "follow", "namespace", "rotate", "list", "complete", "skip-test", "remote", "json-lines", "stdio", "named", "clear", "no-discover", "include-config"]);
+export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "dry-run", "allow-dirty", "no-launchd", "no-compose", "no-color", "skip-build", "skip-migrate", "rollback", "allow-legacy", "yes", "follow", "namespace", "rotate", "list", "complete", "skip-test", "remote", "json-lines", "stdio", "named", "clear", "no-discover", "include-config", "no-app", "relaunch"]);
 
 /** The §2.14 verbs over owner-named secrets (M7), and the shared scope's migration (T4-3). `list --named` joins them; `sync|mint|list|purge` are the install's own variables. */
 export const NAMED_SECRET_VERBS = new Set(["set", "replace", "remove", "hosts", "grant", "migrate-scope", "purge-shared"]);
@@ -672,7 +672,7 @@ const USAGE = `metistry — Metistry command line
 
   metistry update [--skip-build] [--skip-migrate] [--dry-run] [--product-dir <dir>]
                   [--channel git|release] [--version <x.y.z>] [--rollback]
-                  [--allow-legacy]
+                  [--allow-legacy] [--app-path <path>] [--no-app] [--relaunch]
       Move an install forward: git fetch + pull --ff-only, pnpm install + build,
       db/migrations under a Postgres advisory lock, rebuild containers and
       kickstart the host jobs whose code changed, write metistry.lock into the
@@ -683,6 +683,13 @@ const USAGE = `metistry — Metistry command line
       it; the pinned container images are pulled, never built. --version installs
       a specific release instead of the latest; --rollback flips current back to
       the previous one (migrations are additive and are not reverted).
+      On a Mac under the launchd shape, release mode also moves the Mac app:
+      Metistry-<version>.dmg from the same release, sha256-verified, mounted
+      read-only, its version and signature checked, swapped into
+      /Applications/Metistry.app (or ~/Applications, or --app-path) with the
+      old one kept as Metistry.app.previous for --rollback. Never sudo; a
+      running app is told to relaunch, and only quit with --relaunch.
+      --no-app leaves the app alone.
       An instance still on the legacy layout (the vault in Knowledge/, the config
       files at the instance root) is REFUSED past 0.8.x before anything is
       fetched, with the "metistry migrate-layout" line to run; --allow-legacy
@@ -2190,6 +2197,8 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
         releaseVersion: str(flags, "version"),
         rollback: flags.rollback === true,
         allowLegacy: flags["allow-legacy"] === true,
+        appPath: flags["no-app"] === true ? null : str(flags, "app-path"),
+        relaunch: flags.relaunch === true,
         doctorDeps: io.doctorDeps,
       });
       return r.code;

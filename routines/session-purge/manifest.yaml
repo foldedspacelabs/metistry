@@ -1,0 +1,4 @@
+name: session-purge
+type: routine
+description: Keeps the session archive (migration 0030) the 30-day cache §4 Q16 rules it is — deletes every archived turn past its `expires_at`, and every turn older than the routine's `retention_days` (its Scheduled config, 1–30, default 30). Model-free; never reads or writes the vault or git. Unfolded turns are not spared — the session fold must read a session before it expires — and the run says how many it cut. Purge Now (`POST /api/sessions/purge`, Mac only) is the same delete on demand.
+schedule: "@daily"

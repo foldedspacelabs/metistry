@@ -52,3 +52,7 @@ export type { PlanCtx, PlanVault } from "./plan-tomorrow/run.js";
 // SAME `ctx.reader` every routine gets rather than reimplementing it —
 // `knowledge-fold`'s `FoldCtx` has no `vault` field of its own, only `reader`.
 export { vaultReader, type VaultReadable } from "./vault-reader.js";
+// Purge Now (`POST /api/sessions/purge`, T3-9) is the scheduled
+// `session-purge` routine's own delete on demand — the console's door calls
+// these rather than holding a second copy of what "purge" means.
+export { purgeArchive, purgePreview, type PurgeCounts, type PurgePreview, type UnfoldedSession } from "./session-purge/run.js";

@@ -1022,7 +1022,8 @@ accepted for one release in a one-reference field (`auth.secret`). Core's
 `fillSecretRefs` fills every reference or none — a missing name or a
 malformed `{{ secret… }}` is a refusal naming it, never an empty string or
 the literal braces sent to a server. Filling happens at egress, against the
-host list, and a model never receives a value (T4-2).
+host list, and a model never receives a value — core's `guardedFetch`
+(docs/ops/deployment-shapes.md, "The secret fill").
 
 **The M7 row and this CLI.** Plan §2.2's M7 names `metistry secrets
 set|replace|remove|hosts|grant|migrate-scope|purge-shared`. The first five

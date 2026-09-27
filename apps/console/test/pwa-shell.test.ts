@@ -217,11 +217,11 @@ describe("the bell carries the count", () => {
     expect(c.byId.bell!.attrs["aria-label"]).toBe("Needs You");
   });
 
-  it("the count is the queue's length — what T1-7's count route is accepted against", async () => {
+  it("the count comes from T1-7's own route, not a fetch of the whole queue", async () => {
     let got: unknown;
     const api = async (path: string) => {
-      expect(path).toBe("/api/proposals");
-      return { json: async () => ({ proposals: [{ id: 1 }, { id: 2 }, { id: 3 }] }) };
+      expect(path).toBe("/api/needs-you/count");
+      return { json: async () => ({ waiting: 3, oldest_ts: "2026-09-27T00:00:00.000Z", as_of: "2026-09-27T00:00:05.000Z" }) };
     };
     const refreshNeeds = new Function("api", "setNeeds", `${lift("refreshNeeds")}\nreturn refreshNeeds;`)(api, (n: unknown) => { got = n; });
     await refreshNeeds();

@@ -1,8 +1,7 @@
 {
   "route": "GET /api/needs-you/count",
-  "source": "contract",
-  "ticket": "T1-7",
-  "note": "the pending_count named query; a snoozed row is not counted",
+  "source": "recorded",
+  "ticket": null,
   "request": {
     "method": "GET",
     "path": "/api/needs-you/count",
@@ -12,7 +11,7 @@
   "status": 200,
   "body": {
     "waiting": 3,
-    "oldest_ts": "2026-09-27T21:14:00.000Z",
-    "as_of": "2026-09-28T13:05:00.000Z"
+    "oldest_ts": "2026-09-27T00:54:37.942Z",
+    "as_of": "2026-09-27T00:54:37.997Z"
   }
 }

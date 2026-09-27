@@ -1250,6 +1250,26 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
     await pool.query(`DELETE FROM vault_tasks WHERE path LIKE $1`, [`${tag}%`]);
   });
 
+  it("vault_tasks_query: the `someday` flag (K6, T2-5) — `where: \"someday\"` finds exactly the lines the owner deferred to no day", async () => {
+    const tag = `vtq-someday-${Date.now()}`;
+    await task(pool, { path: `${tag}/s.md`, task_key: "s1", line_no: 1, text: "Learn the cello", text_norm: "learn the cello", someday: true });
+    await task(pool, { path: `${tag}/s.md`, task_key: "s2", line_no: 2, text: "Pay rent", text_norm: "pay rent", scheduled_for: "2026-09-19" });
+    await task(pool, { path: `${tag}/s.md`, task_key: "s3", line_no: 3, text: "Nobody has looked at this", text_norm: "nobody has looked at this" });
+
+    const out = compileTaskFilter({ where: "someday" }, { now: new Date(`${DAY}T12:00:00Z`), timeZone: "UTC" });
+    if (!out.ok) throw new Error(out.error);
+    const r = await store.run(TASK_QUERY_NAME, { ...out.params, today: DAY, path_prefix: tag });
+    expect(r.rows.map((x) => x.task_key)).toEqual(["s1"]);
+    expect(r.rows[0]).toMatchObject({ someday: true, scheduled_for: null });
+    // the chip and the filter judge the same column
+    expect(r.rows[0]!.row_flags).toContain("someday");
+    // and it does not change what `unscheduled` means: a someday line with no date is both
+    const unscheduled = await store.run(TASK_QUERY_NAME, { today: DAY, path_prefix: tag, unscheduled: true });
+    expect(unscheduled.rows.map((x) => x.task_key)).toEqual(["s1", "s3"]);
+    const all = await store.run(TASK_QUERY_NAME, { today: DAY, path_prefix: tag });
+    expect(all.rows.find((x) => x.task_key === "s3")!.row_flags).not.toContain("someday");
+  });
+
   it("vault_tasks_recurring: rule lines only, the still-open instance beside each, and a rule that could not be read comes back first", async () => {
     const tag = `vtr-${Date.now()}`;
     await task(pool, { path: `${tag}/r.md`, task_key: "rule-week", line_no: 1, text: "Water the plants", text_norm: "water the plants", recur_rule: "every week", recur_next: DAY, size: "S" });

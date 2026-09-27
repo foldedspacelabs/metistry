@@ -40,6 +40,7 @@
 //   source_prefix | status                              text
 //   overdue | unscheduled | waiting | recurring         boolean
 //   carried | blocking_agent | assigned_to_me           boolean
+//   someday                                             boolean
 //   order_1 | order_2 | order_3                         text (a field name)
 //   order_1_desc | order_2_desc | order_3_desc          boolean
 //   limit                                               int
@@ -133,6 +134,12 @@
 //   blocking_agent  a `work` row names this task as `meta.blocked_by` (§3)
 //   assigned_to_me  `assigned` is null, or it is the instance owner's own
 //                   `People/` page (`me`)
+//   someday         the line carries the `someday` token (K6, T2-5): the
+//                   owner deferred it to no day. A flag and not a field —
+//                   it has no value to compare. It does not change what
+//                   `unscheduled` means: a someday line with no date is
+//                   both, because `task_ageing` counts `unscheduled` the
+//                   same way and the two must not drift
 // `status` is `open` (not checked, not dropped) | `done` | `dropped` |
 // `waiting` | `any`; `''` means the query's own default, which is open tasks.
 // It SCOPES rather than joining the predicate (see `path_prefix` above).
@@ -190,7 +197,7 @@ export type TaskFilterField = (typeof TASK_FILTER_FIELDS)[number];
 
 /** §6.2's `flag` list, closed. Each one is a predicate the query owns; the chips and the plugin offer exactly these. */
 export const TASK_FILTER_FLAGS = [
-  "overdue", "unscheduled", "waiting", "recurring", "carried", "blocking_agent", "assigned_to_me",
+  "overdue", "unscheduled", "waiting", "recurring", "carried", "blocking_agent", "assigned_to_me", "someday",
 ] as const;
 export type TaskFilterFlag = (typeof TASK_FILTER_FLAGS)[number];
 
@@ -262,6 +269,7 @@ export interface TaskFilterParams {
   carried: boolean;
   blocking_agent: boolean;
   assigned_to_me: boolean;
+  someday: boolean;
 
   order_1: string;
   order_1_desc: boolean;
@@ -333,7 +341,7 @@ export function taskFilterParams(): TaskFilterParams {
     size: "", size_rank_max: 0, size_rank_min: 0,
     type: "", assigned: "", project: "", area_prefix: "", source_prefix: "", status: "",
     overdue: false, unscheduled: false, waiting: false, recurring: false,
-    carried: false, blocking_agent: false, assigned_to_me: false,
+    carried: false, blocking_agent: false, assigned_to_me: false, someday: false,
     order_1: "", order_1_desc: false, order_2: "", order_2_desc: false, order_3: "", order_3_desc: false,
     limit: DEFAULT_TASK_LIMIT,
     today: "", me: "", path_prefix: "", offset: 0,

@@ -629,6 +629,7 @@ export class Indexer {
          checked = EXCLUDED.checked,
          dropped = EXCLUDED.dropped,
          waiting = EXCLUDED.waiting,
+         someday = EXCLUDED.someday,
          due = EXCLUDED.due,
          scheduled_for = EXCLUDED.scheduled_for,
          start_on = EXCLUDED.start_on,
@@ -755,7 +756,7 @@ const WORK_REF_KIND = "blocked_by";
 const REF_SEP = "\t";
 
 /** Rows per statement. Both tables are derived and a vault is small, so this is about staying well inside Postgres's 65535 bind parameters, not about throughput. */
-const TASK_UPSERT_ROWS = 200; // limit: fixed — 200 × 29 bind parameters is under a tenth of the per-statement ceiling
+const TASK_UPSERT_ROWS = 200; // limit: fixed — 200 × 30 bind parameters is under a tenth of the per-statement ceiling
 
 /** `parse_warning` is one column and one rendered line in the day's plan, never a report (§1.4). */
 const TASK_WARNING_CHARS = 200; // limit: fixed — the same bound `packages/core`'s parser applies to the warning it produces
@@ -763,7 +764,7 @@ const TASK_WARNING_CHARS = 200; // limit: fixed — the same bound `packages/cor
 /** Every column the walk derives. `duplicate_of` and `recur_parent` are deliberately absent: they are facts about OTHER rows, and each is a pass of its own. */
 const TASK_COLUMNS = [
   "path", "task_key", "anchor", "line_no", "text", "text_norm",
-  "checked", "dropped", "waiting",
+  "checked", "dropped", "waiting", "someday",
   "due", "scheduled_for", "start_on", "done_on", "done_on_observed",
   "priority", "size", "type", "assigned", "project", "area",
   "recur_rule", "recur_next", "source", "ext_refs", "work_id",
@@ -809,6 +810,7 @@ function buildTaskRow(
     checked: p.checked,
     dropped: p.dropped,
     waiting: p.waiting,
+    someday: p.someday,
     due: p.due,
     scheduled_for: p.scheduled_for,
     start_on: p.start_on,

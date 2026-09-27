@@ -178,6 +178,16 @@ describe.skipIf(!hasDb)("the vault's tasks are indexed from the walk (real db)",
     expect(await taskAt(`${PREFIX}Loose.md`, 1)).toMatchObject({ project: null, area: `Areas/${MARKER}` });
   });
 
+  it("the `someday` token (K6, T2-5) lands in `vault_tasks.someday`, and goes when the line gets a day", async () => {
+    const someday = async () => (await pool.query(`SELECT someday, scheduled_for::text AS scheduled_for FROM vault_tasks WHERE path = $1 AND line_no = 1`, [`${PREFIX}Someday.md`])).rows[0];
+    await write(`${PREFIX}Someday.md`, ["- [ ] Learn the cello someday"]);
+    await indexer.reconcile("test");
+    expect(await someday()).toEqual({ someday: true, scheduled_for: null });
+    await write(`${PREFIX}Someday.md`, ["- [ ] Learn the cello do 2026-10-02"]);
+    await indexer.reconcile("test");
+    expect(await someday()).toEqual({ someday: false, scheduled_for: "2026-10-02" });
+  });
+
   it("a field edit keeps the key and `first_seen_on`; a text edit mints a new key and starts the clock again", async () => {
     await pool.query(`UPDATE vault_tasks SET first_seen_on = '2026-01-05' WHERE path = $1`, [`${PREFIX}Loose.md`]);
     const before = (await keysIn(`${PREFIX}Loose.md`))[0]!;

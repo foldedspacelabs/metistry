@@ -256,7 +256,7 @@ takes a `since` cursor and answers with the next one.
 | `POST /auth/login/start` | public | anyone | no | — | — | served | begin a passkey sign-in |
 | `POST /auth/login/finish` | public | anyone | no | — | — | served | finish a passkey sign-in; sets the session cookie |
 | `* /mcp` | agent | agent | no | — | — | served | the MCP bridge: the tools an agent bearer's grants allow |
-| `POST /capture` | agent · owner | session · local_owner · owner_token · agent | key | — | — | served · T2-1 | a note or a file into `Inbox/` |
+| `POST /capture` | agent · owner | session · local_owner · owner_token · agent | key | — | — | served | a note or a file into `Inbox/`; `source: "app"` for an owner credential (T2-1) |
 | `GET /api/whoami` | owner | session · local_owner · owner_token | natural | — | — | served | which credential this is and whether it reaches management |
 | `POST /auth/logout` | owner | session | no | — | — | served | end this device's session |
 | `GET /api/devices` | owner | session · local_owner | natural | — | — | served | the enrolled passkeys and their sessions |
@@ -483,7 +483,11 @@ inventory `GET /api/identity` deliberately does not publish.
 **`POST /capture`** is the one door an agent and the owner share: a note, or a
 file, into the vault's `Inbox/` through the one capture sink every door uses
 (`docs/ops/inbox.md`). Provenance is stamped from the credential, never the
-body. T2-1 records `source: "app"` for an owner credential's capture.
+body. An owner credential — a passkey session or the local owner token, i.e.
+the Mac app and the PWA, never a request field — records `source: "app"`
+(T2-1), so Activity can tell the owner's own captures apart from the
+Shortcut's (`owner_token`, still `"http"`) and an agent bearer's (still
+`"http"`; the bridge's own `capture` tool still records `"mcp"`).
 
 #### `Idempotency-Key` on `POST /capture` — a retry is not a second note
 

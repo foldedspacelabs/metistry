@@ -649,8 +649,11 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
           bytes = await readBody(req);
           filename = String(req.headers["x-metistry-filename"] ?? `capture-${Date.now()}.bin`);
         }
-        // one write path for every capture door (the brain bridge's `capture` tool uses the same function)
-        const r = await captureToInbox(db, inbox, { bytes, filename, mime: req.headers["content-type"] ?? null, note, source: "http", sourceAgent, idempotency });
+        // one write path for every capture door (the brain bridge's `capture` tool uses the same function).
+        // An owner credential (a passkey session or the local owner token — the Mac app and the PWA) is
+        // captured "from the apps" (T2-1); the Shortcut's owner_token and an agent bearer are unchanged.
+        const source = isUser(auth) ? "app" : "http";
+        const r = await captureToInbox(db, inbox, { bytes, filename, mime: req.headers["content-type"] ?? null, note, source, sourceAgent, idempotency });
         await finishRun(db, runId, { ok: true, meta: { inbox_id: r.id, bytes: bytes.length, ...(r.replayed ? { replayed: true } : {}) } });
         // a replay is the ORIGINAL response — same status, same id — with one header saying so
         if (r.replayed) res.setHeader("idempotency-replayed", "true");

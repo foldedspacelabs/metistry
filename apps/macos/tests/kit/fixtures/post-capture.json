@@ -1,7 +1,7 @@
 {
   "route": "POST /capture",
   "source": "recorded",
-  "ticket": "T2-1",
+  "ticket": null,
   "request": {
     "method": "POST",
     "path": "/capture",
@@ -13,7 +13,7 @@
   "status": 201,
   "body": {
     "id": 1,
-    "path": "Inbox/1790463255147-note-1790463255146.md",
+    "path": "Inbox/1790472834107-note-1790472834105.md",
     "sha256": "2ee1cc953f3e84e95f504728420016ca855b0dfa91dfe947b28efd31694d6410"
   }
 }

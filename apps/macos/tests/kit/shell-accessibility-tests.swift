@@ -86,15 +86,56 @@ import Testing
 }
 
 @MainActor
-@Test func theGaugesPopoverSpeaksAndLeadsToTheLimits() async throws {
-    let gauge = UsageGauge(today: 1.84, month: 20, dailyLimit: 5, monthlyLimit: 60)
-    let tree = try await AccessibilityProbe.snapshot(UsageGaugeSummary(gauge: gauge))
+@Test func theUsagePopoverSpeaksEachSectionAndLeadsToTheLimits() async throws {
+    let report = try await UsageFixture.report()
+    let tree = try await AccessibilityProbe.snapshot(UsageView(report: report, showLimits: {}))
     defer { tree.close() }
 
     #expect(tree.unlabeledControls.isEmpty, "unlabeled: \(tree.unlabeledControls)")
-    #expect(tree.texts.contains("$1.84 today"), "texts: \(tree.texts)")
-    #expect(tree.texts.contains("37% of the day's budget"))
-    #expect(tree.controlNames.contains("Spending Limits in Settings…"), "controls: \(tree.controlNames)")
+    #expect(tree.saysAssistant.isEmpty, "says assistant: \(tree.saysAssistant)")
+    for heading in ["This month", "Each day", "Where it went"] {
+        #expect(tree.headings.contains(heading), "headings: \(tree.headings)")
+    }
+    // the chart is one element that speaks one sentence (its table is the rotor's)
+    #expect(tree.labels.contains("Spend each day, Sep 1 to today: highest $0.02 on Sep 1"), "labels: \(tree.labels)")
+    // a ranked row is one element: its name and its amount
+    #expect(tree.labels.contains("fixtures, $0.02"), "labels: \(tree.labels)")
+    #expect(tree.labels.contains("Chat, $0.00"))
+    #expect(tree.controlNames == [UsageView.limitsLinkTitle], "controls: \(tree.controlNames)")
+    // no projection, anywhere it could be said (screen 17 §1.1; P5)
+    let said = (tree.texts + tree.labels).joined(separator: " ").lowercased()
+    for word in ["pace", "projected", "forecast", "expected", "by the end of"] {
+        #expect(!said.contains(word), "says \(word): \(said)")
+    }
+    #expect(!said.contains("budget"), "C130: spending limits, never budgets — \(said)")
+}
+
+@MainActor
+@Test func atTheLimitThePopoverSaysWhatStoppedAndRaiseIsAControl() async throws {
+    let report = UsageReport(
+        gauge: UsageGauge(today: 1.84, month: 60.2, dailyLimit: nil, monthlyLimit: 60),
+        action: .stop, spend: .waiting, actors: .waiting, aws: .waiting,
+        now: UsageFixture.now, calendar: UsageFixture.calendar, locale: UsageFixture.locale
+    )
+    let tree = try await AccessibilityProbe.snapshot(UsageView(report: report, showLimits: {}))
+    defer { tree.close() }
+
+    #expect(tree.unlabeledControls.isEmpty, "unlabeled: \(tree.unlabeledControls)")
+    #expect(tree.texts.contains("Compute stopped at the $60 monthly spending limit"), "texts: \(tree.texts)")
+    #expect(tree.controlNames.contains("Raise"), "controls: \(tree.controlNames)")
+    #expect(tree.texts.contains("Reading each day's spend…"), "waiting says what it waits for: \(tree.texts)")
+}
+
+@MainActor
+@Test func computeUnreadableSaysWhyAndOffersTryAgain() async throws {
+    let report = UsageReport(gauge: .unknown, action: nil, spend: .waiting, actors: .waiting, aws: .waiting, now: UsageFixture.now, calendar: UsageFixture.calendar)
+    let tree = try await AccessibilityProbe.snapshot(UsageView(report: report, failure: "could not reach the console: refused", showLimits: {}))
+    defer { tree.close() }
+
+    #expect(tree.unlabeledControls.isEmpty, "unlabeled: \(tree.unlabeledControls)")
+    #expect(tree.headings.contains("Couldn't Read Spend"), "headings: \(tree.headings)")
+    #expect(tree.texts.contains("could not reach the console: refused"), "the reason, verbatim: \(tree.texts)")
+    #expect(tree.controlNames.contains("Try Again"), "controls: \(tree.controlNames)")
 }
 
 // MARK: - The probe fails when it should
@@ -161,6 +202,7 @@ struct AXTree {
     var unlabeledControls: [AXNode] { controls.filter { $0.name.trimmingCharacters(in: .whitespaces).isEmpty } }
     var labels: [String] { nodes.map(\.label).filter { !$0.isEmpty } }
     var texts: [String] { nodes.filter { $0.role == "AXStaticText" }.map(\.name) }
+    var headings: [String] { nodes.filter { $0.role == "AXHeading" }.map(\.name) }
     var saysAssistant: [AXNode] { nodes.filter { $0.name.localizedCaseInsensitiveContains("assistant") } }
 
     /// What each sidebar row says, in order.

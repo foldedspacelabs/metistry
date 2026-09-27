@@ -174,6 +174,9 @@ describe("seed queries", () => {
     // is not something the generic door or an agent's `queries_run` needs a
     // second, unscoped way to read. `spend_by_actor` stays `generic`: it is
     // Usage's *Where it went* ranking, nothing scoped to a caller.
+    // `people_by_email` (T1-10) maps an address to a page naming someone the
+    // owner knows: Today's to read, never an agent's way to probe who the
+    // owner knows by address.
     expect(routeBacked.sort()).toEqual([
       "board",
       "collector_health",
@@ -185,6 +188,7 @@ describe("seed queries", () => {
       "knowledge_pages",
       "pending_count",
       "pending_requests",
+      "people_by_email",
       "route_features",
       "routine_history",
       "secret_last_used",
@@ -450,6 +454,43 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
 
     // never run at all: the same absence `run_detail` gives an unknown id
     expect((await store.run("collector_health", { component: `${tag}-missing` })).rows).toHaveLength(0);
+  });
+
+  // T1-10: an attendee's address → the one People page that claims it. The
+  // rows are inserted the way the reconciler's walk writes them (lowercased,
+  // `apps/reconciler/test/meeting-refs.integration.test.ts` proves that half);
+  // this is the read half — normalisation of the ASKED address, and the
+  // refusal to choose.
+  it("people_by_email: one claimant resolves, case and mailto: aside; two claimants and an unknown address resolve to nothing (never guessed)", async () => {
+    const tag = `pbe${Date.now()}`;
+    const jim = `People/${tag} Jim Fallon.md`;
+    const twinA = `People/${tag} Sam A.md`;
+    const twinB = `People/${tag} Sam B.md`;
+    await pool.query(
+      `INSERT INTO knowledge_files (path, mtime, content_hash, title) VALUES ($1, now(), 'h1', $4), ($2, now(), 'h2', NULL), ($3, now(), 'h3', NULL)`,
+      [jim, twinA, twinB, `${tag} Jim Fallon`],
+    );
+    await pool.query(
+      `INSERT INTO people_emails (email, path) VALUES ($1, $2), ($3, $4), ($3, $5)`,
+      [`jim@${tag}.example`, jim, `sam@${tag}.example`, twinA, twinB],
+    );
+    try {
+      const one = (await store.run("people_by_email", { email: `jim@${tag}.example` })).rows;
+      expect(one).toEqual([{ email: `jim@${tag}.example`, path: jim, title: `${tag} Jim Fallon` }]);
+      // the calendar's spelling, not the page's: EventKit hands a mailto: URL, and case varies by sender
+      expect((await store.run("people_by_email", { email: ` MAILTO:Jim@${tag.toUpperCase()}.Example ` })).rows.map((r) => r.path)).toEqual([jim]);
+
+      // two pages claim one address: neither is the person
+      expect((await store.run("people_by_email", { email: `sam@${tag}.example` })).rows).toHaveLength(0);
+      // an attendee no page claims is a plain name — no fallback on a name or a prefix
+      expect((await store.run("people_by_email", { email: `jim.fallon@${tag}.example` })).rows).toHaveLength(0);
+      expect((await store.run("people_by_email", { email: `jim@${tag}` })).rows).toHaveLength(0);
+      expect((await store.run("people_by_email", { email: "%" })).rows).toHaveLength(0);
+      expect((await store.run("people_by_email")).rows).toHaveLength(0); // the default, blank
+    } finally {
+      await pool.query(`DELETE FROM people_emails WHERE path = ANY($1::text[])`, [[jim, twinA, twinB]]);
+      await pool.query(`DELETE FROM knowledge_files WHERE path = ANY($1::text[])`, [[jim, twinA, twinB]]);
+    }
   });
 
   // T1-15/T2-17: the working indicator's data. The join is meta.turn_id,

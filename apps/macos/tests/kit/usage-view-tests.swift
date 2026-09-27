@@ -246,8 +246,14 @@ private final class FlakyUsageStore: UsageStore, @unchecked Sendable {
 
     func compute() async -> Result<ConsoleCompute, ConsoleError> { await gate { await inner.compute() } }
     func computeModels(provider: String?) async -> Result<ComputeModelsReply, ConsoleError> { await gate { await inner.computeModels(provider: provider) } }
+    func computeCatalogue(query: String?, provider: String?, refresh: Bool) async -> Result<ComputeCatalogueReply, ConsoleError> {
+        await gate { await inner.computeCatalogue(query: query, provider: provider, refresh: refresh) }
+    }
     func assignCompute(_ target: ComputeAssignTarget, model: String, effort: String?) async -> Result<ComputeWriteResult, ConsoleError> {
         await gate { await inner.assignCompute(target, model: model, effort: effort) }
+    }
+    func unassignCompute(_ target: ComputeAssignTarget) async -> Result<ComputeWriteResult, ConsoleError> {
+        await gate { await inner.unassignCompute(target) }
     }
     func setComputeBudget(scope: String, daily: Double?, monthly: Double?, action: String) async -> Result<ComputeWriteResult, ConsoleError> {
         await gate { await inner.setComputeBudget(scope: scope, daily: daily, monthly: monthly, action: action) }

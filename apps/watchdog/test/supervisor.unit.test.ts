@@ -149,6 +149,28 @@ describe("graceful stop", () => {
   });
 });
 
+describe("status() reports uptime", () => {
+  // T4-21: the Services pane reads uptime per service from doctor's
+  // `child:<name>` rows, which pass `uptimeMs` straight through — so a
+  // regression here is silent everywhere else until someone notices the
+  // pane just stopped showing an age.
+  it("uptimeMs grows from a running child's own startedAt, and is absent before it starts", async () => {
+    let clock = 1_000_000;
+    const config = parseSupervisorConfig({ schema: 1, label: "com.foldedspacelabs.metistry", socket: "/tmp/x.sock", token: "t".repeat(32), children: [child("console")] });
+    const sup = new Supervisor(config, {
+      spawn: () => new FakeChild() as unknown as ChildProcess,
+      openLog: () => "ignore",
+      log: () => {},
+      probe: async () => true,
+      now: () => clock,
+    });
+    expect(sup.status()[0]!.uptimeMs).toBeUndefined();
+    await sup.start();
+    clock += 5_000;
+    expect(sup.status()[0]).toMatchObject({ state: "running", uptimeMs: 5_000 });
+  });
+});
+
 describe("a child's environment", () => {
   it("is the spec's, whole: nothing of the supervisor's leaks in", async () => {
     // the supervisor's own environment carries the install's secrets (the db

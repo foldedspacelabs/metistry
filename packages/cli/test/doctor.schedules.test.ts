@@ -103,6 +103,7 @@ describe("doctor: schedules", () => {
     expect(r.gh?.status).toBe("absent");
     expect(r.gh?.remediation).toContain("no run recorded yet");
     expect(r.gh?.meta).toMatchObject({ last_run_at: null, streak: 0 });
+    expect(r.gh?.action).toBeUndefined(); // a fresh install is not a problem to hand a button to
   });
 
   it("overdue by more than 2× the interval is a finding, and names where to look", async () => {
@@ -111,6 +112,8 @@ describe("doctor: schedules", () => {
     expect(r.gh?.remediation).toContain("over 2×");
     expect(r.gh?.remediation).toContain("metistry logs console");
     expect(r.gh?.meta).toMatchObject({ overdue_sec: 185 * 60 - 3600 });
+    // T4-21: the same next step the remediation names, as a button
+    expect(r.gh?.action).toEqual({ kind: "run_verb", command: ["metistry", "logs", "console"], label: "View console logs" });
   });
 
   it("an open streak below the limit degrades and names the limit's variable", async () => {

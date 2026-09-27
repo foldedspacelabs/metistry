@@ -1,8 +1,10 @@
 schema: 1
 name: aws-costs
 type: collector
+display_name: AWS Costs
 description: Daily AWS spend per service from Cost Explorer into metrics (name aws.cost_usd). One signed request per run; degrades absent without credentials.
-schedule: "0 */6 * * *"
+# A sync, every six hours (§2.5's closed shape; was "0 */6 * * *").
+schedule: { every: 6h }
 writes: [metrics]
 reads: []
 requires: [aws-credentials]

@@ -65,7 +65,7 @@ const seededDb = (rows: Seed[]): Db => ({
     const tools = values[1] as string[];
     const markers = rows.filter((r) => r.kind === values[0] && r.tool && tools.includes(r.tool));
     return {
-      rows: markers.map((m) => ({ component: m.component, tool: m.tool, ts: m.at, error: m.error ?? null })),
+      rows: markers.map((m) => ({ component: m.component, tool: m.tool, ts: m.at, error: m.error ?? null, meta: m.meta ?? null })),
     };
   },
 });
@@ -142,6 +142,30 @@ describe("doctor: schedules", () => {
     expect(r.gh?.remediation).toContain("the runner has stopped running gh");
     expect(r.gh?.remediation).toContain("METISTRY_RUNNER_MAX_STREAK (7)"); // the env value, not the default
     expect(r.gh?.remediation).toContain("collectors/gh/manifest.yaml");
+  });
+
+  // the owner's 0.14.1 doctor: "5 failures in a row reached
+  // METISTRY_RUNNER_MAX_STREAK (3) — … (limit METISTRY_RUNNER_MAX_STREAK = 5)"
+  // — doctor's own limit beside the runner's, in one sentence
+  it("the numbers a stopped schedule is described with are the runner's own, from its skip row — one limit, not two", async () => {
+    const r = await rowsFor([
+      { component: "gh", kind: "collector_run", at: ago(200), ok: false, error: "401 Bad credentials" },
+      { component: "gh", kind: "collector_run", at: ago(90), ok: false, error: "401 Bad credentials" },
+      {
+        component: "gh",
+        kind: "runner",
+        tool: "skipped_streak",
+        at: ago(20),
+        ok: false,
+        error: "gh skipped: 5 consecutive failed runs since 2026-09-15T08:00:00.000Z (limit METISTRY_RUNNER_MAX_STREAK = 5) — last error: 401 Bad credentials",
+        meta: { streak: 5, max_streak: 5 },
+      },
+    ]); // doctor's own environment has no METISTRY_RUNNER_MAX_STREAK: its default is 3
+    expect(r.gh?.status).toBe("failed");
+    expect(r.gh?.remediation).toContain("the runner has stopped running gh: 5 failures in a row reached METISTRY_RUNNER_MAX_STREAK (5) — last error: 401 Bad credentials;");
+    expect(r.gh?.remediation).not.toContain("(3)");
+    expect(r.gh?.remediation).not.toContain("= 5"); // the row's sentence is not quoted beside it
+    expect(r.gh?.meta).toMatchObject({ max_streak: 5 });
   });
 
   it("a stale marker is history, not a finding", async () => {

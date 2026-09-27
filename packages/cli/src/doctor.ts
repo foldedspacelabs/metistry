@@ -812,6 +812,22 @@ export function recheckRefusal(
 }
 
 /**
+ * The count and limit a `skipped_streak` row stopped at, from the row's own
+ * meta (the runner writes `streak` and `max_streak`); a row from before that
+ * meta falls back to the current streak and doctor's own limit. The last
+ * error is read off the row's sentence ("… — last error: <text>").
+ */
+export function streakStop(row: { error: string | null; meta: Record<string, unknown> | null }, streakNow: number, limitHere: number): { count: number; limit: number; lastError: string | undefined } {
+  const n = (v: unknown): number | undefined => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
+  const at = row.error?.indexOf("— last error: ") ?? -1;
+  return {
+    count: n(row.meta?.streak) ?? streakNow,
+    limit: n(row.meta?.max_streak) ?? limitHere,
+    lastError: at >= 0 ? row.error!.slice(at + "— last error: ".length) : undefined,
+  };
+}
+
+/**
  * One row per schedulable manifest: when it last ran, whether that run
  * succeeded, its open failure streak, when it is next due, and whether the
  * runner has stopped running it (`skipped_streak`) or never started it
@@ -866,7 +882,7 @@ export async function scheduleRows(
 
   const maxStreak = intEnv("METISTRY_RUNNER_MAX_STREAK", DEFAULT_MAX_STREAK, env);
   const last = new Map<string, LastRun>();
-  const markers = new Map<string, { ts: Date; error: string | null }>();
+  const markers = new Map<string, { ts: Date; error: string | null; meta: Record<string, unknown> | null }>();
   let streaks: Awaited<ReturnType<typeof failureStreaks>> = [];
   try {
     streaks = await failureStreaks(db);
@@ -881,11 +897,11 @@ export async function scheduleRows(
       last.set(`${r.component}/${r.kind}`, { ts: new Date(r.ts), ok: r.ok === null ? null : Boolean(r.ok), error: r.error ?? null, refused, templateMissing });
     }
     const { rows: markerRows } = await db.query(
-      `SELECT component, tool, max(ts) AS ts, (array_agg(error ORDER BY ts DESC))[1] AS error
+      `SELECT component, tool, max(ts) AS ts, (array_agg(error ORDER BY ts DESC))[1] AS error, (array_agg(meta ORDER BY ts DESC))[1] AS meta
        FROM runs WHERE kind = $1 AND tool = ANY($2) GROUP BY component, tool`,
       [RUNNER_KIND, [SKIPPED_STREAK, PREFLIGHT_FAILED]],
     );
-    for (const r of markerRows) markers.set(`${r.component}/${r.tool}`, { ts: new Date(r.ts), error: r.error ?? null });
+    for (const r of markerRows) markers.set(`${r.component}/${r.tool}`, { ts: new Date(r.ts), error: r.error ?? null, meta: r.meta && typeof r.meta === "object" ? (r.meta as Record<string, unknown>) : null });
   } catch (err) {
     // the db answered SELECT 1 but not this: an un-migrated schema, most
     // likely. One honest row beats an exception that takes the whole report
@@ -948,10 +964,16 @@ export async function scheduleRows(
       ...(await runCheck(s.name, `${s.schedule} (${s.timeOfDay ? "at most" : "every"} ${humanSec(intervalSec)}${s.timeOfDay ? " apart" : ""}): ran inside ${OVERDUE_FACTOR}× that, last run ok, no open failure streak`, async () => {
         if (fresh(skipped)) {
           action = viewConsoleLogs;
+          // One source for the numbers: the runner's own skip row. It is the
+          // runner that stopped, at ITS limit — doctor's environment may not
+          // be the console's, and quoting the row's sentence beside doctor's
+          // own numbers printed two different limits in one line
+          // ("reached … (3) — … (limit … = 5)").
+          const stop = streakStop(skipped!, meta.streak, maxStreak);
           return {
             status: "failed" as const,
-            remediation: `the runner has stopped running ${s.name}: ${meta.streak} failures in a row reached METISTRY_RUNNER_MAX_STREAK (${maxStreak}) — ${skipped?.error ?? "see the runner rows"}; the next successful run clears it, or raise METISTRY_RUNNER_MAX_STREAK, or remove \`schedule\` from ${s.dir}/manifest.yaml`,
-            meta,
+            remediation: `the runner has stopped running ${s.name}: ${stop.count} failures in a row reached METISTRY_RUNNER_MAX_STREAK (${stop.limit}) — last error: ${streak?.lastError ?? stop.lastError ?? "see the runner rows"}; the next successful run clears it, or raise METISTRY_RUNNER_MAX_STREAK, or remove \`schedule\` from ${s.dir}/manifest.yaml`,
+            meta: { ...meta, max_streak: stop.limit },
           };
         }
         if (fresh(blocked)) {
@@ -998,7 +1020,7 @@ export async function scheduleRows(
           action = viewConsoleLogs;
           return {
             status: "degraded" as const,
-            remediation: `${streak?.count} failed run(s) in a row since ${streak?.since.toISOString()}: ${streak?.lastError ?? "(no error text)"} — at METISTRY_RUNNER_MAX_STREAK (${maxStreak}) the runner stops running it`,
+            remediation: `${streak?.count} failed run(s) in a row since ${streak?.since.toISOString()}: ${streak?.lastError ?? "(no error text)"} — at METISTRY_RUNNER_MAX_STREAK (${skipped?.meta && typeof skipped.meta.max_streak === "number" ? skipped.meta.max_streak : maxStreak}) the runner stops running it`,
             meta,
           };
         }

@@ -502,7 +502,8 @@ promise about the machine is unmet, so it never fails a run:
 
 | state | status |
 | --- | --- |
-| `never` | `absent` — "not configured", with the verb that turns it on |
+| `never`, never asked (the key is absent) | `absent` — "not configured", with the verb that turns it on |
+| `never`, set explicitly | `ok` — "keep_awake: never — your choice", no suggestion: an answer is configured |
 | holding | `ok`, with the pid, since, and the power source. The pid is cross-checked against the **"Listed by owning process"** block of `pmset -g assertions` — never the summary block, which is a *level* (a maximum) and reads 1 while four processes hold it, and never a name, because under `caffeinate` the name is Apple's on every holder |
 | released on battery under `allow_sleep_on_battery` | `ok` — this is the setting working, and it reads as success |
 | configured, but nothing has written the state file, or its heartbeat is stale | `degraded` — the supervisor is not running, or has not restarted since the setting changed |

@@ -18,7 +18,7 @@ import { join, relative } from "node:path";
 import { INSTANCE_LAYOUT, LEGACY_VAULT_DIR, detectLayout, usesCompose, type Deployment, type InstanceLayoutShape, type KeychainBackend } from "@foldedspacelabs/metistry-core";
 import { writeCliShim } from "./cli-shim.js";
 import { loadDeployment } from "./deployment.js";
-import { doctor, type DoctorDeps, type DoctorReport } from "./doctor.js";
+import { doctor, renderTable, type DoctorDeps, type DoctorReport } from "./doctor.js";
 import { productVersion } from "./env.js";
 import { envPaths, readInstanceId } from "./instance.js";
 import { applyPorts, loadNamespace } from "./namespace.js";
@@ -33,7 +33,7 @@ import { installRuntimeDeps, runtimeDepsEnabled, RUNTIME_DIRNAME, type InstallRu
 import { MIGRATE_SCOPE_COMMAND, migrateScope, type MigrateScopeResult } from "./secrets.js";
 import { StepFailed, StepRunner } from "./steps.js";
 import { type Ui } from "./ui.js";
-import { closingDoctor, composeUp, COMPOSE_TIMEOUT_MS, runDirFor } from "./up.js";
+import { closingDoctor, composeUp, COMPOSE_TIMEOUT_MS, nodeFor, runDirFor } from "./up.js";
 
 export interface UpdateOptions {
   productDir: string;
@@ -65,6 +65,15 @@ export interface UpdateOptions {
   openSession?: ((env: NodeJS.ProcessEnv) => Promise<(MigrationSession & { end(): Promise<void> }) | null>) | undefined;
   doctorFn?: ((deps: DoctorDeps) => Promise<DoctorReport>) | undefined;
   doctorDeps?: Partial<DoctorDeps> | undefined;
+  /**
+   * How the closing doctor runs. `child` (the default) runs the UPDATED
+   * product's own CLI — `node <run-dir>/packages/cli/dist/main.js doctor
+   * --json` — so the new manifests are validated by the new schema;
+   * `in-process` runs this process's `doctorFn`, which is the PRE-update code.
+   * Injecting `doctorFn` or `doctorDeps` (a test's fakes, which a child
+   * process cannot receive) selects `in-process` unless this says otherwise.
+   */
+  closingDoctor?: "child" | "in-process" | undefined;
   /** test seam: the vault bridge's owner bearer, minted once for an install that has none */
   mintOwnerToken?: (() => string) | undefined;
   /** test seam: the login Keychain the shared-scope migration reads and writes (default: `security`, on darwin) */
@@ -493,11 +502,90 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
     r.out(`${r.ui.paint("failed", `${r.ui.icon("fail")} metistry update`)}: ${err.message}`);
   }
 
-  const doctorCode = await closingDoctor(r, runDir, opts.doctorDeps, opts.doctorFn ?? doctor);
+  const mode = opts.closingDoctor ?? (opts.doctorFn || opts.doctorDeps ? "in-process" : "child");
+  const doctorCode =
+    mode === "child"
+      ? await childClosingDoctor(r, { productDir, runDir, envFile: opts.envFile, doctorDeps: opts.doctorDeps, doctorFn: opts.doctorFn ?? doctor })
+      : await closingDoctor(r, runDir, opts.doctorDeps, opts.doctorFn ?? doctor);
   const code = failure ? failure.code || 1 : doctorCode;
   r.out("");
   r.out(updateSummary({ ui: r.ui, dryRun: r.dryRun, failure, code, source, version: lock?.product.version ?? releaseVersion, migrations, restarted }));
   return { code, source, runDir, commands: r.commands, ...(lock ? { lock } : {}), restarted, ...(migrations ? { migrations } : {}), ...(release ? { release } : {}), ...(runtimeDeps ? { runtimeDeps } : {}), ...(sharedScope ? { sharedScope } : {}) };
+}
+
+// ---- the closing doctor, run by the NEW code ------------------------------------------
+
+/** Doctor probes every bridge, job and container; the default exec timeout (15 s) is not enough for that. */
+export const CHILD_DOCTOR_TIMEOUT_MS = 5 * 60 * 1000;
+
+/** The updated product's CLI entry point — the same file the `metistry` shim execs (cli-shim.ts). */
+export function updatedCliMain(runDir: string): string {
+  return join(runDir, "packages", "cli", "dist", "main.js");
+}
+
+/** A `doctor --json` document, or undefined when `stdout` is not one — never a guess at a half-written report. */
+export function parseDoctorJson(stdout: string): DoctorReport | undefined {
+  try {
+    const v = JSON.parse(stdout) as Partial<DoctorReport> | null;
+    if (!v || typeof v !== "object" || typeof v.ok !== "boolean" || !Array.isArray(v.rows)) return undefined;
+    return v as DoctorReport;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * `update`'s closing doctor, run as a child process of the UPDATED product's
+ * CLI. This process is the pre-update code: its manifest schema, its row
+ * set, its idea of what a healthy install looks like are all the version the
+ * update just moved AWAY from. Run in-process, an update that changes the
+ * manifest schema validates the new manifests with the old schema and ends
+ * "updated, and doctor is not happy" although a standalone `metistry doctor`
+ * is clean (W1 checkpoint, 0.12.0 → 0.13.0).
+ *
+ * Same exit semantics as the in-process doctor: 0 when the report is ok, 1
+ * otherwise. When there is no CLI to run (nothing built at `runDir`), or it
+ * cannot be spawned, or it does not print a report, this falls back to the
+ * in-process doctor — and says so, because that answer comes from the old
+ * code.
+ */
+export async function childClosingDoctor(
+  r: StepRunner,
+  o: { productDir: string; runDir: string; envFile?: string | undefined; doctorDeps?: Partial<DoctorDeps> | undefined; doctorFn: (d: DoctorDeps) => Promise<DoctorReport>; exists?: ((p: string) => boolean) | undefined },
+): Promise<number> {
+  const exists = o.exists ?? existsSync;
+  const main = updatedCliMain(o.runDir);
+  const inProcess = async (why: string): Promise<number> => {
+    r.note(`closing doctor: ${why} — running this process's doctor instead, which is the PRE-update code; if it disagrees with the new release, a standalone \`metistry doctor\` is the truth`);
+    const report = await o.doctorFn({ productDir: o.runDir, exec: r.exec, env: r.env, ...o.doctorDeps });
+    r.out(renderTable(report, r.ui));
+    return report.ok ? 0 : 1;
+  };
+
+  r.section("doctor");
+  if (r.dryRun) {
+    r.action("metistry doctor");
+    return 0;
+  }
+  if (!exists(main)) return inProcess(`no updated CLI at ${main}`);
+  // the bundled runtime's node when there is one — a release may have just
+  // brought a newer one — else the node on PATH, else this one
+  const { node } = nodeFor(o.productDir, r.env, exists);
+  const args = [main, "doctor", "--json", "--product-dir", o.runDir, ...(o.envFile ? ["--env-file", o.envFile] : [])];
+  let res: { code: number; stdout: string; stderr: string };
+  try {
+    // exit 1 is "doctor is not happy", a verdict — not a failed step
+    res = await r.run(node, args, { tolerateFailure: true, timeoutMs: CHILD_DOCTOR_TIMEOUT_MS, comment: "the updated CLI's doctor: the new manifests, read by the new schema" });
+  } catch (err) {
+    return inProcess(`could not run the updated CLI (${err instanceof Error ? err.message : String(err)})`);
+  }
+  const report = parseDoctorJson(res.stdout);
+  if (!report) {
+    const detail = (res.stderr || res.stdout).trim().split("\n").slice(-1)[0] ?? "";
+    return inProcess(`the updated CLI's doctor exited ${res.code} without a report${detail ? ` (${detail.slice(0, 200)})` : ""}`);
+  }
+  r.out(renderTable(report, r.ui));
+  return report.ok ? 0 : 1;
 }
 
 // ---- the shared scope (plan §2.14, T4-3) ---------------------------------------------

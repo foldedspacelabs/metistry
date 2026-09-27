@@ -2033,7 +2033,7 @@ install forward, in this order:
 | migrations | `db/migrations/*.sql` not yet in `schema_migrations`, in filename order, one transaction each, under `pg_advisory_lock` (below); `--skip-migrate` leaves them to doctor to report | same, read from `current` |
 | restart | `docker compose up -d --build`; `launchctl kickstart -k` for each host job whose code changed | `docker compose pull` + `up -d --no-build` in `current`, with the versioned ghcr images; same kickstart rule |
 | lock | write `.metistry/metistry.lock` into the instance repo | same, pinned to the release actually installed |
-| doctor | the verdict, as for `up` | same, against `current` |
+| doctor | the verdict, as for `up` — run by the **updated** CLI (below) | same, against `current` |
 
 **A legacy instance is refused past 0.8.x.** Before the product step —
 before anything is fetched, built or migrated — `update` reads the instance
@@ -2121,6 +2121,23 @@ running reconciler with no URL in `.env` is a misconfiguration to fix,
 not to write around. (A reconciler installed later sweeps that direct
 write into a `user` commit like any other out-of-band edit.) No instance
 dir at all → nothing is written, and `update` says so.
+
+**The closing doctor is the new code's.** The process running `update` is
+the version the update is moving *away* from, so its doctor would validate
+the new release's manifests with the old manifest schema — and an update
+that changed the schema would end "updated, and doctor is not happy" (exit 1)
+while a standalone `metistry doctor` is clean. So the closing doctor runs as
+a child of the updated product's own CLI: `node
+<run-dir>/packages/cli/dist/main.js doctor --json --product-dir <run-dir>`
+(`<run-dir>` is the checkout, or `current` in release mode; `node` is the
+bundled runtime's when there is one, as for the `metistry` shim), and its
+report is the verdict — exit 0 when it is ok, 1 when not, exactly as
+before. When there is no built CLI there, it cannot be spawned, or it
+exits without printing a report, `update` falls back to its own in-process
+doctor and says so on a `closing doctor:` line — that answer is the
+pre-update code's, and a standalone `metistry doctor` afterwards is the
+truth. The first update onto a release with this fix still runs the old
+release's `update` (and so its in-process doctor) once.
 
 `--dry-run` prints the whole plan — including the migration step as one
 line and the kickstarts annotated with the path each one depends on —

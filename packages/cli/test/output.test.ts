@@ -105,6 +105,7 @@ describe("deployment", () => {
           shape: "launchd",
           from: ".metistry/deployment.yaml",
           keep_awake: "always",
+          keep_awake_setting: { enabled: true, sleep_on_battery: false, sleep_lid_closed: true },
           services: [
             { name: "db", shape: "launchd", enabled: true, running: true },
             { name: "console", shape: "launchd", enabled: true, running: false },

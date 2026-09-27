@@ -12,16 +12,26 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   DEPLOYMENT_FILENAME,
+  LID_CLOSED_COMMAND,
+  LID_CLOSED_DIALOG_TITLE,
   LID_CLOSED_NOT_AVAILABLE,
+  LID_CLOSED_UNDO,
+  LID_CLOSED_WARNING,
   SHAPED_SERVICES,
   instanceFile,
   keepAwakeChoice,
-  keepAwakeOf,
+  keepAwakeSetting,
+  keepAwakeSettingOf,
+  keepAwakeValue,
+  sameKeepAwake,
   servicePlan,
   usesCompose,
+  wantsLidClosedAwake,
   type Deployment,
   type DeploymentShape,
   type KeepAwake,
+  type KeepAwakeConfig,
+  type KeepAwakeSetting,
   type ServiceName,
 } from "@foldedspacelabs/metistry-core";
 import { applyKeepAwakeToYaml, applyShapeToYaml, loadDeployment } from "./deployment.js";
@@ -45,6 +55,11 @@ export interface DeploymentReport {
   from: string;
   /** this install's power policy; `never` when the question has not been answered (docs/ops/deployment-shapes.md) */
   keep_awake: KeepAwake;
+  /**
+   * The same setting as its switch and two sub-switches (T4-20) — exact where
+   * `keep_awake` is the nearest value: the lid sub-switch is only here.
+   */
+  keep_awake_setting: KeepAwakeSetting;
   /**
    * Said here as well as in doctor, because `metistry deployment` is the cheap
    * read the app and the wizard make before offering to change anything: the
@@ -102,23 +117,50 @@ export async function buildDeploymentReport(opts: BuildDeploymentReportOptions):
   const platform = opts.platform ?? process.platform;
   const uid = opts.uid ?? (typeof process.getuid === "function" ? process.getuid() : 0);
   const services = await deploymentServiceRows(opts.productDir, loaded.deployment, { exec, uid, platform });
-  const keepAwake = keepAwakeOf(loaded.deployment);
+  const setting = keepAwakeSettingOf(loaded.deployment);
+  const note = keepAwakeNote(setting, loaded.deployment.shape, platform);
   return {
     shape: loaded.deployment.shape,
     from: loaded.from,
-    keep_awake: keepAwake,
-    ...(keepAwakeNote(keepAwake, loaded.deployment.shape, platform) ? { keep_awake_note: keepAwakeNote(keepAwake, loaded.deployment.shape, platform)! } : {}),
+    keep_awake: keepAwakeValue(setting),
+    keep_awake_setting: setting,
+    ...(note ? { keep_awake_note: note } : {}),
     services,
   };
 }
 
-/** The one sentence this install's power policy needs beyond its own name, or nothing. */
-export function keepAwakeNote(keepAwake: KeepAwake, shape: DeploymentShape, platform: NodeJS.Platform): string | undefined {
-  if (platform !== "darwin") return keepAwake === "never" ? undefined : "keep_awake is a macOS setting; nothing on this platform holds a power assertion";
-  if (keepAwake === "never") return undefined;
+/**
+ * The one sentence this install's power policy needs beyond its own name, or
+ * nothing. Takes either spelling. The lid sentence stays until doctor — which
+ * reads `pmset -g`, this cheap read does not — finds the administrator setting
+ * in effect.
+ */
+export function keepAwakeNote(keepAwake: KeepAwakeConfig | KeepAwakeSetting, shape: DeploymentShape, platform: NodeJS.Platform): string | undefined {
+  const s = keepAwakeSetting(keepAwake);
+  if (platform !== "darwin") return s.enabled ? "keep_awake is a macOS setting; nothing on this platform holds a power assertion" : undefined;
+  if (!s.enabled) return undefined;
   if (shape === "compose") return "the compose shape has no supervisor to hold the assertion, so nothing is held (docs/ops/deployment-shapes.md)";
-  if (keepAwake === "always_lid_closed") return LID_CLOSED_NOT_AVAILABLE;
+  if (wantsLidClosedAwake(s)) return `${LID_CLOSED_NOT_AVAILABLE} \`metistry doctor\` says whether it is in effect.`;
   return undefined;
+}
+
+/**
+ * The lid dialog (plan §2.15, ruling 3) as lines a terminal prints: the
+ * title, the command with how to run it, how to undo it, and the warning.
+ * The CLI prints it BEFORE it stores `sleep_lid_closed: false`, the same way
+ * it prints what any other choice costs — and runs nothing.
+ */
+export function lidClosedDialog(setting: KeepAwakeSetting): string[] {
+  return [
+    `${LID_CLOSED_DIALOG_TITLE}.`,
+    `  to turn it on, in Terminal as an administrator: ${LID_CLOSED_COMMAND}`,
+    `  to undo it: ${LID_CLOSED_UNDO}`,
+    `  ${LID_CLOSED_WARNING}`,
+    // SleepDisabled is not a lid switch: it stops every sleep, so it overrides
+    // the battery sub-switch too — said here, not discovered on a train
+    ...(setting.sleep_on_battery ? ["  With it on, this Mac does not sleep on battery either: the administrator setting overrides sleep_on_battery."] : []),
+    "Metistry stores your answer and never runs either command; `metistry doctor` says whether the setting is in effect.",
+  ];
 }
 
 /**
@@ -136,7 +178,7 @@ export function renderDeploymentReport(report: DeploymentReport, ui: Ui = defaul
     ui.kv(
       [
         ["shape", `${report.shape}  ${ui.dim(`(from ${report.from})`)}`],
-        ["keep_awake", `${report.keep_awake}${report.keep_awake_note ? `  ${ui.dim(`— ${report.keep_awake_note}`)}` : ""}`],
+        ["keep_awake", `${report.keep_awake}${lidSuffix(report.keep_awake_setting)}${report.keep_awake_note ? `  ${ui.dim(`— ${report.keep_awake_note}`)}` : ""}`],
       ],
       { indent: 0 },
     ),
@@ -226,10 +268,26 @@ export async function setDeploymentShape(opts: SetShapeOptions): Promise<SetShap
 
 // ---- set-keep-awake ---------------------------------------------------------
 
+/** `allow_sleep_on_battery` is the nearest value for the one object no value names — say its lid half beside it. */
+function lidSuffix(s: KeepAwakeSetting): string {
+  return wantsLidClosedAwake(s) && keepAwakeValue(s) !== "always_lid_closed" ? " (and awake with the lid closed)" : "";
+}
+
+/** The sub-switches a `set-keep-awake` flag may set; `undefined` = leave it as it is. */
+export type KeepAwakeFlags = Partial<KeepAwakeSetting>;
+
 export interface SetKeepAwakeOptions {
   productDir: string;
   instanceDir: string;
-  keepAwake: KeepAwake;
+  /** one of the four values; written as itself when no flag is given */
+  keepAwake?: KeepAwake | undefined;
+  /**
+   * `--enabled` / `--sleep-on-battery` / `--sleep-lid-closed`: applied over
+   * `keepAwake` when it is given, else over the setting already in effect, and
+   * written as the object form (T4-20). The Services pane's switch and its
+   * two sub-switches, each one call that changes only what it names.
+   */
+  set?: KeepAwakeFlags | undefined;
   /** without it nothing is written — the preview is the whole command */
   yes?: boolean | undefined;
   env: NodeJS.ProcessEnv;
@@ -241,7 +299,10 @@ export interface SetKeepAwakeOptions {
 }
 
 export interface SetKeepAwakeResult {
+  /** the nearest named value — what the holder is told */
   keep_awake: KeepAwake;
+  /** exactly what is stored, as the one shape */
+  keep_awake_setting: KeepAwakeSetting;
   applied: boolean;
   detail: string;
   /** the honest sentence for this value on this install, when there is one */
@@ -249,7 +310,7 @@ export interface SetKeepAwakeResult {
 }
 
 /**
- * `metistry deployment set-keep-awake <never|allow_sleep_on_battery|always|always_lid_closed>`.
+ * `metistry deployment set-keep-awake [<value>] [--enabled|--sleep-on-battery|--sleep-lid-closed true|false]`.
  *
  * The same path `set-shape` takes, for the same reason: `deployment.yaml` is a
  * §4.7 protected path, so the write goes through the reconciler as the `user`
@@ -262,28 +323,46 @@ export interface SetKeepAwakeResult {
  * nothing that is already running. It takes effect at the supervisor's next
  * start, and says so — the value reaches the holder through `supervisor.json`,
  * which `metistry up` writes.
+ *
+ * THE LID. `sleep_lid_closed: false` is stored as asked (ruling 3), and the
+ * administrator steps and the warning are printed before it is — this verb
+ * runs no `pmset` at all, let alone the one that writes.
  */
 export async function setKeepAwake(opts: SetKeepAwakeOptions): Promise<SetKeepAwakeResult> {
   const exec = opts.exec ?? realExec;
   const r = new StepRunner({ dryRun: opts.yes !== true, out: opts.out, exec, env: opts.env });
   const current = await loadDeployment(opts.productDir, opts.env);
-  const note = keepAwakeNote(opts.keepAwake, current.deployment.shape, opts.platform);
+  const flags = Object.fromEntries(Object.entries(opts.set ?? {}).filter(([, v]) => v !== undefined)) as KeepAwakeFlags;
+  const flagged = Object.keys(flags).length > 0;
+  if (opts.keepAwake === undefined && !flagged) throw new Error("name a value or at least one of --enabled, --sleep-on-battery, --sleep-lid-closed");
 
-  if (keepAwakeOf(current.deployment) === opts.keepAwake && current.deployment.keep_awake !== undefined) {
-    const detail = `already keep_awake: ${opts.keepAwake} (from ${current.from}) — nothing to change`;
+  const base = opts.keepAwake !== undefined ? keepAwakeSetting(opts.keepAwake) : keepAwakeSettingOf(current.deployment);
+  const target: KeepAwakeSetting = { ...base, ...flags };
+  // a value alone is written as itself, so a file that only ever used the
+  // four values keeps reading that way; a flag writes the object
+  const config: KeepAwakeConfig = flagged ? target : opts.keepAwake!;
+  const value = keepAwakeValue(target);
+  const note = keepAwakeNote(target, current.deployment.shape, opts.platform);
+  const said = flagged ? `{ enabled: ${target.enabled}, sleep_on_battery: ${target.sleep_on_battery}, sleep_lid_closed: ${target.sleep_lid_closed} }` : value;
+
+  if (current.deployment.keep_awake !== undefined && sameKeepAwake(keepAwakeSettingOf(current.deployment), target)) {
+    const detail = `already keep_awake: ${said} (from ${current.from}) — nothing to change`;
     r.note(detail);
-    return { keep_awake: opts.keepAwake, applied: false, detail, ...(note ? { note } : {}) };
+    return { keep_awake: value, keep_awake_setting: target, applied: false, detail, ...(note ? { note } : {}) };
   }
 
   // What this choice costs, printed BEFORE it is written — the informed half
   // of informed consent, in the same words the onboarding question uses.
-  r.note(`${keepAwakeChoice(opts.keepAwake).label}: ${keepAwakeChoice(opts.keepAwake).consequence}`);
-  if (note) r.note(note);
+  r.note(`${keepAwakeChoice(value).label}${lidSuffix(target)}: ${keepAwakeChoice(value).consequence}`);
+  const lidDialog = wantsLidClosedAwake(target) && opts.platform === "darwin";
+  if (lidDialog) for (const line of lidClosedDialog(target)) r.note(line);
+  // on a launchd install the note IS the lid sentence, which the dialog just said
+  if (note && !(lidDialog && current.deployment.shape !== "compose")) r.note(note);
 
   const path = instanceFile(opts.instanceDir, "deployment");
   const existing = existsSync(path) ? await readFile(path, "utf8") : undefined;
-  const content = applyKeepAwakeToYaml(existing, opts.keepAwake, current.deployment.shape);
-  const delivery = await writeProtected(r, protectedRel(opts.instanceDir, "deployment"), content, `metistry deployment set-keep-awake → ${opts.keepAwake}`, {
+  const content = applyKeepAwakeToYaml(existing, config, current.deployment.shape);
+  const delivery = await writeProtected(r, protectedRel(opts.instanceDir, "deployment"), content, `metistry deployment set-keep-awake → ${said}`, {
     env: opts.env,
     platform: opts.platform,
     uid: opts.uid,
@@ -291,5 +370,5 @@ export async function setKeepAwake(opts: SetKeepAwakeOptions): Promise<SetKeepAw
     instanceDir: opts.instanceDir,
   });
   r.note("it takes effect when the supervisor next starts: `metistry up` (which rewrites supervisor.json) — nothing running changes underneath you");
-  return { keep_awake: opts.keepAwake, applied: !r.dryRun && delivery.how !== "none", detail: delivery.detail, ...(note ? { note } : {}) };
+  return { keep_awake: value, keep_awake_setting: target, applied: !r.dryRun && delivery.how !== "none", detail: delivery.detail, ...(note ? { note } : {}) };
 }

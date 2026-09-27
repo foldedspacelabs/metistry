@@ -24,7 +24,7 @@ import {
   type Compute,
   type Deployment,
   type DeploymentShape,
-  type KeepAwake,
+  type KeepAwakeConfig,
 } from "@foldedspacelabs/metistry-core";
 
 async function readYaml(path: string): Promise<unknown | undefined> {
@@ -111,7 +111,8 @@ export function applyShapeToYaml(existing: string | undefined, shape: Deployment
  * defaulted to compose and would silently move a launchd install. The one
  * value in the file is never a new decision.
  */
-export function applyKeepAwakeToYaml(existing: string | undefined, keepAwake: KeepAwake, shape: DeploymentShape): string {
+export function applyKeepAwakeToYaml(existing: string | undefined, config: KeepAwakeConfig, shape: DeploymentShape): string {
+  const keepAwake = keepAwakeYaml(config);
   if (existing === undefined) {
     return [
       "# deployment.yaml — this instance's deployment shape and power policy",
@@ -126,12 +127,24 @@ export function applyKeepAwakeToYaml(existing: string | undefined, keepAwake: Ke
       "",
     ].join("\n");
   }
-  if (/^keep_awake:.*$/m.test(existing)) return existing.replace(/^keep_awake:.*$/m, `keep_awake: ${keepAwake}`);
+  // the key's own line plus any indented lines under it, so a block-style
+  // object someone wrote by hand is replaced whole rather than orphaned
+  if (/^keep_awake:.*$/m.test(existing)) return existing.replace(/^keep_awake:[^\n]*(?:\n[ \t]+[^\n]*)*/m, `keep_awake: ${keepAwake}`);
   // no key yet: put it directly under `shape:` where a reader expects it,
   // falling back to the top of the file for one that has no shape line either
   if (/^shape:.*$/m.test(existing)) return existing.replace(/^(shape:.*)$/m, `$1\nkeep_awake: ${keepAwake}`);
   const sep = existing === "" || existing.endsWith("\n") ? "" : "\n";
   return `keep_awake: ${keepAwake}\n${sep}${existing}`;
+}
+
+/**
+ * The value as it is written: a value as itself, the object in flow style on
+ * one line with every key said — one line, so the surgery above stays one
+ * line, and every key, so a reader never has to know a default.
+ */
+export function keepAwakeYaml(config: KeepAwakeConfig): string {
+  if (typeof config === "string") return config;
+  return `{ enabled: ${config.enabled}, sleep_on_battery: ${config.sleep_on_battery ?? true}, sleep_lid_closed: ${config.sleep_lid_closed ?? true} }`;
 }
 
 // ---- the environment each host job runs with -------------------------------

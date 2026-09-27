@@ -473,15 +473,19 @@ overwrites a file that is already there — the journal tree, the six
 templates and `Me/` are stamped once, so a template you have since edited
 in Obsidian survives a re-run; only a file genuinely missing gets filled in.
 
-**This is `init`-only, deliberately: `metistry update` never re-stamps the
-vault.** §6.1 of the daily-flow spec ties the journal tree, `Templates/`
-and `Me/` to `metistry init` and says nothing about `update`, and `update`'s
-own steps (above) touch the product checkout, migrations and the running
-services — never vault content, which is invariant 2's territory, not a
-product update's. An instance created before this tree existed gets it by
-hand: copy `seed/vault/{Journal,Templates,Me,People,Projects}` out of a
-current checkout into the instance directory and commit it yourself, the
-same way you would add any other note.
+**Re-stamping is `init`-only: `metistry update` never re-stamps the
+vault — with one narrow exception, seed templates the vault lacks.** §6.1
+of the daily-flow spec ties the journal tree, `Templates/` and `Me/` to
+`metistry init`, and vault content is invariant 2's territory, not a
+product update's. But a template a release adds (`Templates/Brief.md`, which
+the Morning Brief reads) would otherwise reach only fresh installs, and the
+routine that reads it would skip every morning on an upgraded one (W2
+checkpoint D1). So `update`'s **templates** step (Updating, below) copies
+each `seed/vault/Templates/*.md` that is **absent** from the vault — never
+one that is there, edited or not. Everything else — the journal tree, `Me/`,
+`People/`, `Projects/` — an instance created before it existed gets by hand:
+copy it out of `seed/vault/` in a current checkout into the instance
+directory and commit it yourself, the same way you would add any other note.
 
 What it prints at the end is the next step —
 six lines for `<dir>/.metistry/state/.env`, this instance's own environment,
@@ -2206,6 +2210,7 @@ install forward, in this order:
 | migrations | `db/migrations/*.sql` not yet in `schema_migrations`, in filename order, one transaction each, under `pg_advisory_lock` (below); `--skip-migrate` leaves them to doctor to report | same, read from `current` |
 | restart | `docker compose up -d --build`; `launchctl kickstart -k` for each host job whose code changed | `docker compose pull` + `up -d --no-build` in `current`, with the versioned ghcr images; same kickstart rule |
 | lock | write `.metistry/metistry.lock` into the instance repo | same, pinned to the release actually installed |
+| templates | copy each `seed/vault/Templates/*.md` the vault **lacks** — create-only, never over a file that is there (below) | same, from `current`'s seed |
 | doctor | the verdict, as for `up` — run by the **updated** CLI (below) | same, against `current` |
 
 **A legacy instance is refused past 0.8.x.** Before the product step —
@@ -2294,6 +2299,23 @@ running reconciler with no URL in `.env` is a misconfiguration to fix,
 not to write around. (A reconciler installed later sweeps that direct
 write into a `user` commit like any other out-of-band edit.) No instance
 dir at all → nothing is written, and `update` says so.
+
+**Seeding the templates the vault lacks.** After the lock, `update` lists
+`seed/vault/Templates/*.md` and, for each one **absent** from the vault's
+`Templates/`, writes it the same way it writes the lock: through the
+reconciler as `user` when a bridge is configured — create-only
+(`expected_sha256: ""`), so a file that appeared between the look and the
+write is refused by the reconciler's compare-and-swap and kept — else
+directly into a local vault. A file that is there is never read, compared or
+rewritten: your templates are yours (invariant 2). Each copy is one log line
+naming the file (`templates: seeded Templates/Brief.md — …`); a second run
+finds nothing missing and copies nothing. A legacy-layout or absent instance
+is a note, not a copy, and a refused write is named with the rerun — this
+step never fails the update. A template you deleted on purpose comes back on
+the next `update`; a routine you do not want is retired by its manifest's
+`schedule`, not by removing its template. **Doctor** reads the other side: a
+routine whose last run recorded `skipped:template_missing` is a degraded
+schedule row naming the template and this fix.
 
 **The closing doctor is the new code's.** The process running `update` is
 the version the update is moving *away* from, so its doctor would validate

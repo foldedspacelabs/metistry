@@ -13,33 +13,35 @@
     "providers": [
       {
         "name": "openrouter",
-        "ok": false,
-        "detail": "METISTRY_OPENROUTER_API_KEY is not in this environment and there is no login Keychain on linux — export it before running this",
-        "models": []
+        "ok": true,
+        "detail": "https://openrouter.ai/api/v1/models → 2 model(s)",
+        "models": [
+          "anthropic/claude-sonnet-5",
+          "google/gemma-3-4b-it"
+        ]
       },
       {
         "name": "lmstudio",
         "ok": true,
-        "detail": "http://127.0.0.1:1234/v1/models → 2 model(s)",
+        "detail": "http://127.0.0.1:1234/v1/models → 3 model(s)",
         "models": [
           "gemma",
+          "google/gemma-3-4b",
+          "qwen"
+        ]
+      },
+      {
+        "name": "ollama",
+        "ok": true,
+        "detail": "http://127.0.0.1:11434/v1/models → 3 model(s)",
+        "models": [
+          "gemma",
+          "google/gemma-3-4b",
           "qwen"
         ]
       }
     ],
     "detected": [
-      {
-        "server": "ollama",
-        "label": "Ollama",
-        "url": "http://127.0.0.1:11434/v1",
-        "ok": true,
-        "models": [
-          "gemma",
-          "qwen"
-        ],
-        "detail": "http://127.0.0.1:11434/v1/models → 2 model(s)",
-        "hint": "answering, but no provider in compute.yaml dials it — `metistry compute providers add --from ollama`"
-      },
       {
         "server": "llamaserver",
         "label": "llama-server (bundled)",
@@ -47,9 +49,10 @@
         "ok": true,
         "models": [
           "gemma",
+          "google/gemma-3-4b",
           "qwen"
         ],
-        "detail": "http://127.0.0.1:7813/v1/models → 2 model(s)",
+        "detail": "http://127.0.0.1:7813/v1/models → 3 model(s)",
         "hint": "answering, but no provider in compute.yaml dials it — `metistry compute providers add --from llamaserver`"
       },
       {
@@ -59,12 +62,13 @@
         "ok": true,
         "models": [
           "gemma",
+          "google/gemma-3-4b",
           "qwen"
         ],
-        "detail": "http://127.0.0.1:7810/v1/models → 2 model(s)",
+        "detail": "http://127.0.0.1:7810/v1/models → 3 model(s)",
         "hint": "answering, but no provider in compute.yaml dials it — `metistry compute providers add --from applefm`"
       }
     ],
-    "as_of": "2026-09-26T22:54:15.130Z"
+    "as_of": "2026-09-27T03:23:35.606Z"
   }
 }

@@ -737,6 +737,19 @@ public struct ConsoleAPI: Sendable {
         await get("/api/compute/models", ["provider": provider])
     }
 
+    /// `GET /api/compute/catalogue` (T4-18) — every switched-on provider's
+    /// catalogue grouped by model. The console keeps the listings between
+    /// searches; `refresh` re-reads every one of them now (C132's Refresh).
+    public func computeCatalogue(query: String? = nil, provider: String? = nil, refresh: Bool = false) async -> Result<ComputeCatalogueReply, ConsoleError> {
+        await get("/api/compute/catalogue", ["q": query, "provider": provider, "refresh": refresh ? "true" : nil])
+    }
+
+    /// `POST /api/compute/unassign` (T4-18) — remove a tier's or a crew's
+    /// assignment. `default` is refused: it is reassigned, never removed.
+    public func unassignCompute(_ target: ComputeAssignTarget) async -> Result<ComputeWriteResult, ConsoleError> {
+        await post("/api/compute/unassign", [target.key: target.name])
+    }
+
     /// `POST /api/compute/assign` — exactly one of `tier` or `crew`.
     public func assignCompute(_ target: ComputeAssignTarget, model: String, effort: String? = nil) async -> Result<ComputeWriteResult, ConsoleError> {
         var body: [String: Any] = [target.key: target.name, "model": model]

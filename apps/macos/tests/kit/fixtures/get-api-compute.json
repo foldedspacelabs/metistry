@@ -23,8 +23,12 @@
         "locality": "off_machine",
         "base_url": "https://openrouter.ai/api/v1",
         "zdr": true,
-        "secret": "METISTRY_OPENROUTER_API_KEY",
-        "secret_present": false,
+        "enabled": true,
+        "tag": "cloud",
+        "secret": "{{ secret.openrouter_api_key }}",
+        "secret_kind": "secret",
+        "secret_name": "openrouter_api_key",
+        "secret_present": true,
         "models_assigned": []
       },
       {
@@ -32,9 +36,21 @@
         "kind": "openai-compatible",
         "locality": "on_machine",
         "base_url": "http://127.0.0.1:1234/v1",
+        "enabled": true,
+        "tag": "local",
         "models_assigned": [
-          "gemma"
+          "gemma",
+          "qwen"
         ]
+      },
+      {
+        "name": "ollama",
+        "kind": "openai-compatible",
+        "locality": "on_machine",
+        "base_url": "http://127.0.0.1:11434/v1",
+        "enabled": false,
+        "tag": "local",
+        "models_assigned": []
       }
     ],
     "assignments": [
@@ -43,6 +59,13 @@
         "provider": "lmstudio",
         "model": "gemma",
         "effort": "medium",
+        "warn_non_zdr": false
+      },
+      {
+        "target": "fast",
+        "provider": "lmstudio",
+        "model": "qwen",
+        "effort": "low",
         "warn_non_zdr": false
       }
     ],
@@ -60,10 +83,14 @@
         "lmstudio": {
           "daily": 0.0042,
           "monthly": 0.0042
+        },
+        "ollama": {
+          "daily": 0,
+          "monthly": 0
         }
       }
     },
     "writable": true,
-    "as_of": "2026-09-26T22:54:15.127Z"
+    "as_of": "2026-09-27T03:23:35.603Z"
   }
 }

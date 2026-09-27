@@ -1,0 +1,110 @@
+{
+  "route": "GET /api/compute/catalogue",
+  "source": "recorded",
+  "ticket": "T4-18",
+  "request": {
+    "method": "GET",
+    "path": "/api/compute/catalogue?q=gemma&refresh=true",
+    "body": null,
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "query": "gemma",
+    "providers": [
+      {
+        "name": "openrouter",
+        "tag": "cloud",
+        "ok": true,
+        "detail": "https://openrouter.ai/api/v1/models → 2 model(s)",
+        "count": 2,
+        "read_at": "2026-09-27T03:23:35.612Z"
+      },
+      {
+        "name": "lmstudio",
+        "tag": "local",
+        "ok": true,
+        "detail": "http://127.0.0.1:1234/v1/models → 3 model(s)",
+        "count": 3,
+        "read_at": "2026-09-27T03:23:35.612Z"
+      }
+    ],
+    "skipped": [
+      {
+        "name": "ollama",
+        "why": "switched off — `metistry compute providers set ollama --enabled on`"
+      }
+    ],
+    "rows": [
+      {
+        "kind": "unmapped",
+        "key": "lmstudio/gemma",
+        "name": "gemma",
+        "maker": null,
+        "context": null,
+        "capabilities": [],
+        "places": [
+          {
+            "provider": "lmstudio",
+            "model": "gemma",
+            "ref": "lmstudio/gemma",
+            "tag": "local",
+            "zdr": null,
+            "in_per_m": null,
+            "out_per_m": null,
+            "price_source": null,
+            "included": false,
+            "cheapest": false
+          }
+        ],
+        "summary": {
+          "local": true,
+          "cloud": false,
+          "from_in_per_m": null
+        }
+      },
+      {
+        "kind": "model",
+        "key": "gemma-3-4b",
+        "name": "Gemma 3 4B",
+        "maker": "Google",
+        "context": 131072,
+        "capabilities": [
+          "vision"
+        ],
+        "places": [
+          {
+            "provider": "lmstudio",
+            "model": "google/gemma-3-4b",
+            "ref": "lmstudio/google/gemma-3-4b",
+            "tag": "local",
+            "zdr": null,
+            "in_per_m": null,
+            "out_per_m": null,
+            "price_source": null,
+            "included": false,
+            "cheapest": false
+          },
+          {
+            "provider": "openrouter",
+            "model": "google/gemma-3-4b-it",
+            "ref": "openrouter/google/gemma-3-4b-it",
+            "tag": "cloud",
+            "zdr": true,
+            "in_per_m": 0.02,
+            "out_per_m": 0.04,
+            "price_source": "listing",
+            "included": false,
+            "cheapest": false
+          }
+        ],
+        "summary": {
+          "local": true,
+          "cloud": true,
+          "from_in_per_m": 0.02
+        }
+      }
+    ],
+    "as_of": "2026-09-27T03:23:35.613Z"
+  }
+}

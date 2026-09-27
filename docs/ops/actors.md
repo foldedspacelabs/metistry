@@ -273,9 +273,10 @@ ceiling (C42).
    already gives it the assistant's role) with the assistant's definition and
    the router. The plan has exactly one assistant. Closing that door belongs to
    T4-6 or F-13.
-3. **`mark` versus `icon`.** The plan and C123 say *mark*, but `identity.yaml`'s
-   key is `icon:`. `AssistantIdentity.mark` reads the `icon:` key until T2-16
-   decides.
+3. **`mark` versus `icon`.** Decided by T2-16: the plan and C123 say *mark*,
+   and `identity.yaml`'s key stays `icon:`. `AssistantIdentity.mark` reads it;
+   `metistry identity set --mark` writes it; `GET /api/identity` keeps
+   serving it as `icon`.
 4. **`CLAUDE.md` in the definition.** §2.4 lists the root `CLAUDE.md` as part
    of the assistant's definition. The engine currently composes
    `identity.yaml` + `assistant-prompt.md` only (`apps/assistant/src/prompt.ts`).

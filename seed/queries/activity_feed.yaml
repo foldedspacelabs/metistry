@@ -18,7 +18,7 @@
 # the second of them forever. The caller de-duplicates on (ref, ts, kind),
 # which is cheap; losing an event is not.
 name: activity_feed
-description: Time-ordered "what happened" across the system (docs/product/desktop-app-plan.md "The window" — home panel) — a union of inbox captures, runs (tool/turn/crew_run/dispatch/task_op/agent_admin/project_mode, plus collector_run failures only), proposals (created + decided), work.history entries, and outbound_messages (brief/review/alert). Filterable by agent/project/kind; `since` returns only what is at or after a timestamp already seen. The weekly review is this feed summarised. `turn_id` (mcp-brain tool calls only; null elsewhere) groups the calls one reply made.
+description: Time-ordered "what happened" across the system (docs/product/desktop-app-plan.md "The window" — home panel) — a union of inbox captures, runs (tool/turn/crew_run/dispatch/task_op/agent_admin/project_mode/config_write, plus collector_run failures only), proposals (created + decided), work.history entries, and outbound_messages (brief/review/alert). Filterable by agent/project/kind; `since` returns only what is at or after a timestamp already seen. The weekly review is this feed summarised. `turn_id` (mcp-brain tool calls only; null elsewhere) groups the calls one reply made.
 params:
   hours:   { type: int,  default: 24 }
   limit:   { type: int,  default: 100 }
@@ -52,9 +52,12 @@ sql: |
     SELECT
       r.ts,
       r.kind                                                                            AS kind,
-      r.component                                                                        AS actor,
+      -- a config write is the principal's act, not the bridge's: the
+      -- reconciler records it (T2-16), `user` made it
+      CASE WHEN r.kind = 'config_write' THEN coalesce(r.meta->>'principal', r.component) ELSE r.component END AS actor,
       CASE
         WHEN r.kind IN ('tool', 'dispatch')  THEN r.tool
+        WHEN r.kind = 'config_write'         THEN r.meta->>'path'
         WHEN r.kind = 'task_op'              THEN 'work:' || (r.meta->>'id')
         WHEN r.kind = 'agent_admin'          THEN r.meta->>'agent'
         WHEN r.kind = 'project_mode'         THEN r.meta->>'project'
@@ -69,6 +72,7 @@ sql: |
         WHEN r.kind = 'agent_admin'   THEN concat_ws(' ', r.meta->>'op', r.meta->>'agent')
         WHEN r.kind = 'project_mode'  THEN concat_ws(' ', r.meta->>'from', '->', r.meta->>'to', coalesce(r.meta->>'reason', ''))
         WHEN r.kind = 'collector_run' THEN concat_ws(' ', 'collector failed', coalesce(r.error, ''))
+        WHEN r.kind = 'config_write'  THEN coalesce(r.meta->>'message', concat_ws(' ', r.meta->>'op', r.meta->>'path'))
         ELSE coalesce(r.error, '')
       END                                                                                 AS detail,
       'runs:' || r.id                                                                     AS ref,
@@ -78,7 +82,7 @@ sql: |
     FROM runs r
     WHERE r.ts > now() - make_interval(hours => (:hours)::int)
       AND (
-        r.kind IN ('tool', 'turn', 'crew_run', 'dispatch', 'task_op', 'agent_admin', 'project_mode')
+        r.kind IN ('tool', 'turn', 'crew_run', 'dispatch', 'task_op', 'agent_admin', 'project_mode', 'config_write')
         OR (r.kind = 'collector_run' AND r.ok = false)
       )
 

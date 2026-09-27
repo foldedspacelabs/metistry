@@ -18,7 +18,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
-import { API_VERSION, API_VERSION_HEADER, AREA_PREFIX_REFUSAL, runCheck, startRun, finishRun, errorEnvelope, intEnv, may, parseAction, noRouteMessage, PROJECT_SLUG_RE, rollSession, statusFor, servedRoute, isLocalRoute, localOnlyMessage, routeKey, resolveActor, SKIP_FEEDBACK, validAgentAreaGrant, type CheckResult, type Compute, type ErrorCode, type ErrorEnvelope, type Principal } from "@foldedspacelabs/metistry-core";
+import { API_VERSION, API_VERSION_HEADER, AREA_PREFIX_REFUSAL, runCheck, startRun, finishRun, errorEnvelope, intEnv, may, parseAction, noRouteMessage, PROJECT_SLUG_RE, rollSession, statusFor, servedRoute, isLocalRoute, localOnlyMessage, routeKey, resolveActor, SKIP_FEEDBACK, describeRequest, validAgentAreaGrant, type RequestShape, type CheckResult, type Compute, type ErrorCode, type ErrorEnvelope, type Principal } from "@foldedspacelabs/metistry-core";
 import { QueryError, QueryStore } from "@foldedspacelabs/metistry-queries";
 import { captureToInbox, createBrainServer, dirSink, type CaptureSink, type KnowledgeLister, type KnowledgeReader, type KnowledgeVaultSearcher, type KnowledgeWriter, type QueryEmbedder } from "@foldedspacelabs/metistry-mcp-brain";
 import { TasksError, TasksService } from "@foldedspacelabs/metistry-tasks";
@@ -344,6 +344,17 @@ function conflictBody(reason: "already_decided" | "stale", message: string, row:
     decided_at: row.decided_at ?? null,
     proposal: row,
   };
+}
+
+/**
+ * A `proposals` row as `GET /api/proposals` serves it: the stored row plus
+ * `request`, its reading from F-5's type table (`describeRequest` — type,
+ * word, body, answers, grouped, decisions). Additive: nothing stored is
+ * renamed or dropped. A kind the table does not know reads as a report, never
+ * as its stored kind.
+ */
+export function withRequestShape<R extends Record<string, unknown>>(row: R): R & { request: RequestShape } {
+  return { ...row, request: describeRequest(String(row.kind ?? ""), row.payload) };
 }
 
 /** `{title, project?, kind?}` off a proposal payload, or undefined — the ONLY thing `accept_as_work` will build a row from, validated here rather than trusted. */
@@ -1217,7 +1228,11 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         since === null ? [limit + 1] : [limit + 1, c![1], c![2]],
       );
       const { page, cursor, more } = pageOf(rows as ({ cursor: string } & Record<string, unknown>)[], limit, since);
-      return sendJson(res, 200, { proposals: page, cursor, more });
+      // Each row carries its reading from F-5's table (core's `describeRequest`):
+      // the word the owner reads, the body, and the answers its type offers.
+      // A client draws that and holds no kind → word map of its own — the
+      // PWA cannot import core, so this is how it reads the one table.
+      return sendJson(res, 200, { proposals: page.map(withRequestShape), cursor, more });
     }
 
     // One verb to many rows (docs/ops/reply-feedback.md). All-or-nothing PER

@@ -356,7 +356,8 @@ describe("GET /vault/status's body, against a real remote and the real committer
     await sh(repo.root, "checkout", "-q", "main");
     await writeFile(join(repo.root, "now.md"), "# Now\n\nmain\n");
     await commitAs(repo.root, "main");
-    await sh(repo.root, "merge", "-q", "side").catch(() => undefined);
+    // an identity, or a CI box with none refuses the merge before it ever conflicts
+    await sh(repo.root, "-c", "user.name=owner", "-c", "user.email=o@test", "merge", "-q", "side").catch(() => undefined);
     expect(await unmergedPaths(repo.git)).toEqual({ paths: ["now.md"] });
     expect((await status()).conflict).toEqual({ paths: ["now.md"] });
     await sh(repo.root, "merge", "--abort");

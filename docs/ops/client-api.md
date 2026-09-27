@@ -271,7 +271,7 @@ takes a `since` cursor and answers with the next one.
 | `GET /api/status` | owner | session · local_owner · owner_token | natural | — | — | served | the console's own checks: the database and the capture sink |
 | `GET /api/proposals` | owner | session · local_owner | natural | — | since | served | the queue; with `since`, everything that changed |
 | `POST /api/proposals/batch` | owner | session · local_owner | no | — | — | served | one verb (`later`, `skip`, `deny`) to many requests; per-row results |
-| `POST /api/proposals/:id` | owner | session · local_owner | no | already_decided · stale | — | served · T2-14 | answer one request with an answer its type takes; `if_unchanged` refuses a stale answer |
+| `POST /api/proposals/:id` | owner | session · local_owner | no | already_decided · stale | — | served | answer one request with an answer its type takes; `if_unchanged` refuses a stale answer |
 | `GET /api/needs-you/count` | owner | session · local_owner | natural | — | — | served | how many requests wait: the sidebar row and the Dock badge |
 | `GET /api/agents` | owner | session · local_owner | natural | — | — | served | the registry, each row's rendered scope and permission rows, and the unanswered access requests |
 | `POST /api/agents` | local | local_owner | no | 409 | — | served | register an agent and mint its bearer (shown once) |
@@ -591,9 +591,9 @@ local probes, are `metistry doctor` on the Mac (M6).
 ### Needs You — requests and their answers
 
 ```
-GET  /api/proposals[?since=&limit=]   200 {"proposals":[{…the stored row…, "request":{type, word, body, primary, revise, decline, grouped, decisions, questions?}}],"cursor":"…","more":false}
+GET  /api/proposals[?since=&limit=]   200 {"proposals":[{…the stored row…, "request":{type, word, body, primary, revise, decline, grouped, decisions, questions?}, "subject":{basis, fingerprint} | null}],"cursor":"…","more":false}
 POST /api/proposals/batch             {ids, decision: later | skip | deny, feedback?}   200 {"results":[…]}
-POST /api/proposals/:id               {decision, feedback?, area?, answers?, if_unchanged?: {seen_at}}
+POST /api/proposals/:id               {decision, feedback?, area?, answers?, if_unchanged?: {seen_at?, subject?}}
                                       200 {"ok":true, …}   409 already_decided | stale   404   400
 GET  /api/needs-you/count             200 {"waiting":3,"oldest_ts":"…","as_of":"…"}, through the `pending_count` named query
 ```
@@ -828,6 +828,50 @@ Approving a thing is approving *that* thing. A payload rewritten by a re-drain,
 a linked task that moved, a negotiation that continued in the room — any of
 them means the answer was to a different question
 (`docs/research/2026-09-16-taskuary-review.md` ADOPT 3).
+
+#### `if_unchanged.subject` — the thing the request is about (T2-14)
+
+```
+GET  /api/proposals → {…, "id":41, "kind":"pull_request", "work_id":88,
+                        "subject":{"basis":"head_sha","fingerprint":"head_sha:5f0c…(32 hex)"}}
+POST /api/proposals/41  {"decision":"later","if_unchanged":{"subject":"head_sha:5f0c…"}}
+409 {"error":{"code":"conflict","message":"what this request is about changed after you saw it"},
+     "reason":"stale","decision":"pending","decided_at":null,
+     "proposal":{…, "subject":{"basis":"head_sha","fingerprint":"head_sha:9a1e…"}}}
+400 when `subject` is not a fingerprint this server serves, or null
+```
+
+A card never acts on something the owner didn't see (plan §2.12 *Stale*,
+design-system amendments §9). Every row the queue serves carries **`subject`**:
+what the request is about, fingerprinted **as it stands** — or `null` for a row
+about nothing outside itself. One basis per type (core's `requestSubjectOf`):
+
+| Basis | For | Read from |
+| --- | --- | --- |
+| `head_sha` | a pull request | its work row's `meta.head_sha` (what the GitHub sync last saw), else the head the row was raised with |
+| `line_text` | a task | the vault line `payload.task_line = {path, task_key}` names (`gone` when it was deleted), else its work row's title — a tracker item's one line |
+| `work_updated_at` | every other row with a `work_id` — and a pull request or task that cannot supply its own | the work row's `updated_at` |
+
+Send back the `subject.fingerprint` you **rendered** (or `null` if the row had
+none) as `if_unchanged.subject`. If the subject is no longer that — a new
+commit, an edited or deleted line, a moved work row, a row that gained or lost a
+subject — the answer is refused `409 stale` **before anything is sent**: no
+consequence runs (no action, no grant, no write), the row stays pending, and
+nothing is written on it (not `payload.error` — the question was not answered,
+so nothing failed). The `409` carries the row with its subject as it stands:
+repaint, and answer again against what it says now.
+
+- **Opaque.** A fingerprint is compared and sent back, never parsed; the value
+  it hashes crosses the wire only where the row already carries it.
+- **Narrow on purpose.** A comment on a pull request moves its work row but not
+  its head, so it does not make a review stale; a task's facets are not its words.
+- **With `seen_at`.** Both may ride one answer. When `subject` is sent, the work
+  row is judged by the fingerprint and left out of `seen_at`'s comparison — so a
+  client that renders the row's `ts` is not refused forever once the work row
+  has moved since the row was raised. `seen_at` alone keeps exactly its old
+  meaning; `if_unchanged` with neither field is a `400`.
+- **Opt-in**, like `seen_at` (Versioning): omit it and the route behaves as it
+  did. The PWA sends it on every single-row answer.
 
 #### `accept_as_work` — one extra verb, where the row carries a suggestion
 

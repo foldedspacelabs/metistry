@@ -46,7 +46,8 @@
           "decisions": [
             "skip"
           ]
-        }
+        },
+        "subject": null
       },
       {
         "id": "2",
@@ -92,7 +93,8 @@
             "accept_with_changes",
             "deny"
           ]
-        }
+        },
+        "subject": null
       },
       {
         "id": "1",
@@ -152,7 +154,8 @@
               "allow_other": false
             }
           ]
-        }
+        },
+        "subject": null
       },
       {
         "id": "5",
@@ -267,7 +270,8 @@
               "allow_other": false
             }
           ]
-        }
+        },
+        "subject": null
       }
     ],
     "cursor": "2026-09-26 23:19:34.940543-04|3",

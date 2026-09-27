@@ -498,7 +498,13 @@ export function mountNeedsYou({ $, api, setNeeds, show }) {
     $("triage-selected").textContent = picked.size ? `${picked.size} selected` : "";
   }
 
-  /** The one decision call. `if_unchanged` rides every single-row answer; a 409 repaints instead of alerting. */
+  /**
+   * The one decision call. `if_unchanged` rides every single-row answer: the
+   * row's `ts` and its subject's fingerprint as painted (T2-14 — the PR's
+   * head, the task's line, the work row), so an answer to something that
+   * moved while it was on screen is refused and nothing is sent; a 409
+   * repaints instead of alerting.
+   */
   async function decide(id, body, label) {
     const p = rows.get(id);
     if (!p || busy.has(id)) return;
@@ -510,9 +516,13 @@ export function mountNeedsYou({ $, api, setNeeds, show }) {
     let out = {};
     try {
       const seen = seenAt.get(id);
+      const ifUnchanged = {
+        ...(seen ? { seen_at: seen } : {}),
+        ...("subject" in p ? { subject: p.subject ? p.subject.fingerprint : null } : {}),
+      };
       res = await api(`/api/proposals/${encodeURIComponent(id)}`, {
         method: "POST",
-        body: JSON.stringify({ ...body, ...(seen ? { if_unchanged: { seen_at: seen } } : {}) }),
+        body: JSON.stringify({ ...body, ...(Object.keys(ifUnchanged).length ? { if_unchanged: ifUnchanged } : {}) }),
       });
       out = await res.json().catch(() => ({}));
     } catch (e) {

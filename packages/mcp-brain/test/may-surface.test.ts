@@ -60,7 +60,7 @@ const NARROWEST: Record<Role, Principal> = Object.fromEntries(
 ) as Record<Role, Principal>;
 
 describe("every tool × every role is decided by may(), and by nothing else", () => {
-  it("decides all 27 × 5 pairs without throwing, with a reason from the enum", () => {
+  it("decides all 29 × 5 pairs without throwing, with a reason from the enum", () => {
     const undecided: string[] = [];
     for (const name of TOOL_NAMES) {
       for (const role of ROLES) {
@@ -73,7 +73,49 @@ describe("every tool × every role is decided by may(), and by nothing else", ()
       }
     }
     expect(undecided).toEqual([]);
-    expect(TOOL_NAMES.length * ROLES.length).toBe(27 * 5);
+    expect(TOOL_NAMES.length * ROLES.length).toBe(29 * 5);
+  });
+
+  // --- the connections proxy (T4-8b) ---------------------------------------
+  //
+  // The lazy pair is admitted at the tool for everyone (no tool-level gate,
+  // like the task tools); which connection a caller reaches is the
+  // `{kind:"connection"}` door, decided for every role here.
+
+  it("decides the connection door for every role, both doors, offered or not, granted or not", () => {
+    for (const role of ROLES) {
+      for (const door of ["connections_list", "connections_call"] as const) {
+        for (const offered of [true, false]) {
+          for (const connections of [undefined, ["github"]]) {
+            const who: Principal = { ...WIDEST[role], scope: { ...WIDEST[role].scope, ...(connections ? { connections } : {}) } };
+            const d = may(who, "act", { kind: "connection", door, name: "github", offered });
+            const expected = role === "owner" || role === "assistant" || (role !== "tool" && offered && connections !== undefined);
+            expect(d.ok, `${role} ${door} offered=${offered} granted=${connections !== undefined}`).toBe(expected);
+            if (!d.ok) expect(REASONS).toContain(d.reason);
+          }
+        }
+      }
+    }
+  });
+
+  it("a crew needs both `uses: [connections]` and a grant — and a refusal for the grant is the answer a missing connection gets", () => {
+    const base: Principal = { ...WIDEST.crew, uses: ["knowledge"], scope: { ...WIDEST.crew.scope, connections: [] } };
+    const cases: [readonly string[], readonly string[], boolean][] = [
+      [["knowledge"], [], false],
+      [["knowledge"], ["github"], false],
+      [["connections"], [], false],
+      [["connections"], ["github"], true],
+    ];
+    for (const [uses, connections, ok] of cases) {
+      const who: Principal = { ...base, uses, scope: { ...base.scope, connections } };
+      expect(may(who, "act", { kind: "connection", door: "connections_call", name: "github", offered: true }).ok, `${uses} × ${connections}`).toBe(ok);
+    }
+    const ungranted = may({ ...base, uses: ["connections"] }, "act", { kind: "connection", door: "connections_call", name: "github", offered: true });
+    const nonexistent = may({ ...base, uses: ["connections"] }, "act", { kind: "connection", door: "connections_call", name: "nope", offered: false });
+    expect(ungranted.ok || nonexistent.ok).toBe(false);
+    if (ungranted.ok || nonexistent.ok) return;
+    expect([ungranted.code, ungranted.tell, ungranted.message.replace("github", "X")]).toEqual([nonexistent.code, nonexistent.tell, nonexistent.message.replace("nope", "X")]);
+    expect(ungranted.tell).toBe("hide");
   });
 
   // The fail-closed default in `mayUseTool` refuses EVERY role, so a tool
@@ -173,6 +215,14 @@ describe("every tool × every role is decided by may(), and by nothing else", ()
       expect(viaTool.ok, name).toBe(false);
       if (!viaTool.ok) expect(viaTool.reason, name).toBe("not_in_uses");
     }
+  });
+
+  it("carries a connection grant onto the principal as a copy, and absent as absent", () => {
+    const connections = ["github"];
+    const p = principalOf({ id: "scout", grants: { tier: "none", areas: [], connections }, projects: [] });
+    connections.push("work-jira");
+    expect(p.scope.connections).toEqual(["github"]);
+    expect(principalOf({ id: "scout", grants: { tier: "none", areas: [] }, projects: [] }).scope.connections).toBeUndefined();
   });
 
   it("maps this bridge's credential onto the principal may() decides on", () => {

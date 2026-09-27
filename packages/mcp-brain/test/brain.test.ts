@@ -44,14 +44,15 @@ describe("manifest", () => {
     if (parsed.manifest.type !== "bridge") return;
     expect(parsed.manifest.discovery).toBe("eager");
     expect(parsed.manifest.exposes.map((t) => t.name)).toEqual([...TOOL_NAMES]);
-    // 27 DECLARED, 26 of them eager: `propose_action` is registered only for a
+    // 29 DECLARED, 28 of them eager: `propose_action` is registered only for a
     // credential the owner has given room (docs/ops/actions.md), which is what
     // keeps the eager budget below where it was. Both numbers are asserted, so
     // a tool added without a discovery decision fails here first — as
     // `request_access` did on 2026-09-19, which is why the ceiling in
-    // `ops/scripts/check-tool-surface.mjs` moved with it rather than silently.
-    expect(TOOL_NAMES.length).toBeLessThanOrEqual(27);
-    expect(TOOL_NAMES.filter((n) => n !== "propose_action").length).toBeLessThanOrEqual(26);
+    // `ops/scripts/check-tool-surface.mjs` moved with it rather than silently —
+    // and as the connections proxy's lazy pair did on 2026-09-27 (26 → 28, T4-8b).
+    expect(TOOL_NAMES.length).toBeLessThanOrEqual(29);
+    expect(TOOL_NAMES.filter((n) => n !== "propose_action").length).toBeLessThanOrEqual(28);
     expect(parsed.manifest.exposes.map((t) => t.name).filter((n) => Object.hasOwn(TOOL_ALIASES, n))).toEqual([]); // deprecated spellings never reach the listed surface
     expect(parsed.manifest.exposes.every((t) => !t.destructive)).toBe(true); // nothing here mutates the user's world irreversibly: rows, not calendars
   });
@@ -82,7 +83,7 @@ describe("definition size (docs/research/2026-08-tool-discovery.md's other axis)
   it("the EAGER definition stays under the >5k-token line that would make discovery: lazy worth its +1-turn cost", async () => {
     const { names, tokens } = await listedFor(alice);
     expect(names).not.toContain("propose_action"); // alice has no autonomy record: the group is not offered at all
-    expect(names.length).toBe(26);
+    expect(names.length).toBe(28);
     expect(tokens).toBeLessThan(5000);
     // …and it stays under the RATCHET as well. Trimming `turn_id` out of all
     // 25 schemas recovered 3,774 chars ≈ 944 tokens (4,979 → 4,035, 19.0% of
@@ -106,7 +107,13 @@ describe("definition size (docs/research/2026-08-tool-discovery.md's other axis)
     // `requests_create` takes kind `question` and a `questions` list instead of
     // a new tool — the count stays at 26 — and its description got shorter to
     // pay for part of it. The ratchet moves by that and a rounding margin.
-    expect(tokens).toBeLessThan(4350);
+    //
+    // The connections proxy's lazy pair (T4-8b, the approved spec §2.6 and
+    // Q5) cost 234 more (4,331 → 4,565): two eager tools that stand in front
+    // of every connection the owner adds, whose own definitions are fetched on
+    // demand and never listed here. The count ceiling moved 26 → 28 with it,
+    // reasoned in `ops/scripts/check-tool-surface.mjs`.
+    expect(tokens).toBeLessThan(4600);
   });
 
   it("no tool advertises `turn_id` — it is a correlation handle, not a parameter (turn-id.ts)", async () => {
@@ -126,7 +133,7 @@ describe("definition size (docs/research/2026-08-tool-discovery.md's other axis)
     const actor: AgentPrincipal = { ...alice, id: "actor", autonomy: { level: "propose" } };
     const { names, tokens } = await listedFor(actor);
     expect(names).toContain("propose_action");
-    expect(names.length).toBe(27);
+    expect(names.length).toBe(29);
     // Crossing the 5k line here is the KNOWN cost of opting in, not a
     // regression: the eager surface above is what every other agent pays, and
     // deferring by credential costs none of the +1 discovery turn a
@@ -134,8 +141,9 @@ describe("definition size (docs/research/2026-08-tool-discovery.md's other axis)
     // definition, so the tool cannot grow unnoticed. Since the `turn_id` trim
     // this surface no longer crosses 5k at all (5,243 → 4,262); the ceiling
     // moves with it rather than leaving 1.1k of unwatched room. T2-3's
-    // questions moved it with the eager ceiling above (4,494 → 4,558).
-    expect(tokens).toBeLessThan(4575);
+    // questions moved it with the eager ceiling above (4,494 → 4,558), and
+    // T4-8b's lazy pair with it again (+234).
+    expect(tokens).toBeLessThan(4825);
     // a level that admits nothing is exactly alice again — the refusal is the absence
     const observer: AgentPrincipal = { ...alice, id: "observer", autonomy: { level: "observe", actions: { comment: "allow" } } };
     expect((await listedFor(observer)).names).not.toContain("propose_action");

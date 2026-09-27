@@ -48,7 +48,14 @@ export interface AgentPrincipal {
    * "this scope is configuration, not a grant" (§2.7). Nothing decides on it.
    */
   manifest?: string | undefined;
-  grants: { tier: Tier; areas: string[]; queries?: boolean };
+  /**
+   * `connections` (T4-8b): the connection names this credential is lent
+   * through the proxy (`connections_list`, `connections_call`), attached by
+   * the host beside the other grants — never asserted by the caller. Absent
+   * is none. The assistant reaches every connection without one (core's
+   * `mayConnection`).
+   */
+  grants: { tier: Tier; areas: string[]; queries?: boolean; connections?: string[] | undefined };
   /** Project membership — the collaboration boundary for every tasks_* tool (scope.ts holds the internal rule). */
   projects: string[];
   /**

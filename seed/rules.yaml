@@ -63,3 +63,53 @@ commands:
 #     # a card you re-label, so it can sit lower than one that puts a task
 #     # button under a capture.
 #     task_create: 0.90
+
+# The router's policy (docs/ops/dynamic-router.md). Commented out, and absent
+# means OFF — which is the shipped behaviour and a supported install.
+#
+# What it does: the rules above always run first and always win. Only a
+# message they leave on the default tier (and, as a counterfactual, one you
+# sent with /deep, /model or the picker) is shown to this table, which picks
+# an operation and a tier from lists YOU wrote, inside the caps YOU set. Every
+# choice is recorded (`metistry compute route-report`), with no message text.
+#
+# It runs in SHADOW: it records what it would have chosen and serves nothing.
+# `mode: serve` is refused until the confirmatory eval clears the bar you
+# accepted — two weeks of shadow first, then the eval.
+#
+# `tiers:` is the allow-list, cheapest first, each a key of the `tiers:` block
+# above. The table names tiers, never models. First matching row wins; a
+# condition on a feature nobody could compute is false, so a row that reads
+# `intent` or `complexity` simply skips while the local scorer is down. Rows
+# reading `intent` need the `intent:` block above; rows reading `complexity`
+# need `complexity.min_confidence`. Both are scored on-device by the model
+# compute.yaml names in `assignments.intent`, and only when some row reads
+# them. The numbers below are illustrations, not defaults — `caps` and
+# `min_confidence` have none on purpose.
+#
+# policy:
+#   mode: shadow
+#   tiers: [fast, default, deep]
+#   timeout_ms: 400
+#   caps:
+#     tool_calls: 12
+#     tokens: 150000
+#     cost_usd: 0.50
+#   complexity:
+#     min_confidence: 0.70     # fit it with the eval; do not guess it
+#   table:
+#     - id: status
+#       when: { intent: [status_open_work, task_list], words: { max: 15 } }
+#       then: { operation: "fast_path:open_work" }
+#     - id: small-talk
+#       when: { intent: smalltalk }
+#       then: { operation: answer, tier: fast }
+#     - id: the-record
+#       when: { intent: knowledge_search }
+#       then: { operation: "retrieve:knowledge", tier: default, tool_calls: 4 }
+#     - id: struggling
+#       when: { reask: true }
+#       then: { operation: tools, tier: deep }
+#     - id: by-complexity
+#       when: { complexity: [simple, moderate, demanding] }
+#       then: { operation: tools, tier: { simple: fast, moderate: default, demanding: deep } }

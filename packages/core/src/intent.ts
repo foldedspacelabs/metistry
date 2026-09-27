@@ -18,8 +18,12 @@
 //
 //   * **A verdict is a FACT, never a destination** (§3.2 P1). Nothing in this
 //     file names a tier, a model or an effort, and nothing in it can hold one.
-//     `Route` is not extended and the router does not read this module —
-//     `apps/console/test/invariant4.test.ts` greps for exactly that.
+//     `Route` is not extended and `route()` does not read this module —
+//     `collectors/test/invariant4.test.ts` greps for exactly that. Since
+//     invariant 4 was ratified (2026-09-26), the router's POLICY reads a
+//     verdict as one feature among several, outside `route()` and in shadow,
+//     and the owner's table decides what it means (`router-policy.ts`,
+//     docs/ops/dynamic-router.md §2).
 //   * **The codes are GENERATED from the list** (`codesFor`, choice.ts). A
 //     hand-maintained letter table and a list drift, and the drift is silent:
 //     the model answers `C`, the table says `task_update`, and the list has

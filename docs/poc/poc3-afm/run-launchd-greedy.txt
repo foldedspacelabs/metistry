@@ -1,5 +1,5 @@
 === AFM classifier ===
-pid=24760 mode=fresh host=matts-mac-studio.local
+pid=24760 mode=fresh host=example-mac.local
 SESSION_TYPE env: metistry.poc3
 TERM: <none>
 availability: available  isAvailable: true

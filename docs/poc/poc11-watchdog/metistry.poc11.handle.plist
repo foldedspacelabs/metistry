@@ -4,10 +4,10 @@
   <key>Label</key><string>metistry.poc11.handle</string>
   <key>ProgramArguments</key><array>
     <string>/opt/homebrew/bin/node</string>
-    <string>/Users/mattcolf/Development/Metistry/.claude/worktrees/metistry-phase-0-poc-12cdbc/poc/poc11-watchdog/own_handle.mjs</string>
+    <string>/Users/example/Development/Metistry/.claude/worktrees/metistry-phase-0-poc-12cdbc/poc/poc11-watchdog/own_handle.mjs</string>
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><false/>
-  <key>StandardOutPath</key><string>/private/tmp/claude-501/-Users-mattcolf-Development-Metistry--claude-worktrees-metistry-phase-0-poc-12cdbc/3daa1fa7-6368-4d64-85d3-4af8b9ceffeb/scratchpad/poc11handle.out</string>
-  <key>StandardErrorPath</key><string>/private/tmp/claude-501/-Users-mattcolf-Development-Metistry--claude-worktrees-metistry-phase-0-poc-12cdbc/3daa1fa7-6368-4d64-85d3-4af8b9ceffeb/scratchpad/poc11handle.err</string>
+  <key>StandardOutPath</key><string>/private/tmp/claude-501/-Users-example-Development-Metistry--claude-worktrees-metistry-phase-0-poc-12cdbc/3daa1fa7-6368-4d64-85d3-4af8b9ceffeb/scratchpad/poc11handle.out</string>
+  <key>StandardErrorPath</key><string>/private/tmp/claude-501/-Users-example-Development-Metistry--claude-worktrees-metistry-phase-0-poc-12cdbc/3daa1fa7-6368-4d64-85d3-4af8b9ceffeb/scratchpad/poc11handle.err</string>
 </dict></plist>

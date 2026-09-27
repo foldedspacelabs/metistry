@@ -1,7 +1,7 @@
 === ekpoc test-events @ 2026-08-28T02:58:57Z ===
 INFO pid 38480
 INFO ppid 1
-INFO binary /Users/mattcolf/Development/Metistry/.claude/worktrees/metistry-phase-0-poc-12cdbc/poc/poc9-eventkit/ekpoc
+INFO binary /Users/example/Development/Metistry/.claude/worktrees/metistry-phase-0-poc-12cdbc/poc/poc9-eventkit/ekpoc
 INFO uid 501
 INFO env.XPC_SERVICE_NAME metistry.poc9
 INFO env.TERM <unset>

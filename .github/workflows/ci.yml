@@ -4,7 +4,16 @@ name: ci
 on:
   push:
     branches: [main]
+  # pull_request, never pull_request_target: a fork's PR runs with a
+  # read-only token and no secrets. No paths-ignore either — the checks job
+  # reads docs/ (the path-case check covers every tracked path, and the
+  # product-record check reads docs/product/record/), so a docs-only PR is
+  # still checked.
   pull_request:
+
+# Least privilege: CI only reads the repository.
+permissions:
+  contents: read
 
 # One run per PR (or per main push) at a time: a new push cancels the run it
 # supersedes. Rebases and fix-ups were costing a full run each (2026-09-27:

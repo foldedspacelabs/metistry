@@ -62,10 +62,10 @@ describe.skipIf(!hasDb)("linear sync (real db)", () => {
     expect((await pass(["assigned-1a.json", "assigned-1b.json"])).n).toBe(4);
     expect((await pass(["assigned-1a.json", "assigned-1b.json"])).n).toBe(4); // rerun: the same four rows
     expect(await work()).toEqual([
-      { external_ref: "linear:ENG-101", title: "Tighten the egress allowlist", kind: "issue", status: "open", owner: "Matt Colf", area: "ENG", due: null, state: "In Progress", priority: "High", url: "https://linear.app/fsl/issue/eng-101/tighten-the-egress-allowlist", connection: "linear", closed_reason: null },
-      { external_ref: "linear:ENG-102", title: "Write the Linear sync docs", kind: "issue", status: "open", owner: "Matt Colf", area: "ENG", due: "2026-10-02", state: "Todo", priority: "Medium", url: "https://linear.app/fsl/issue/eng-102/write-the-linear-sync-docs", connection: "linear", closed_reason: null },
-      { external_ref: "linear:ENG-103", title: "Review the capture retention policy", kind: "issue", status: "open", owner: "Matt Colf", area: "ENG", due: null, state: "Backlog", priority: "No priority", url: "https://linear.app/fsl/issue/eng-103/review-the-capture-retention-p", connection: "linear", closed_reason: null },
-      { external_ref: "linear:OPS-7", title: "Rotate the backup key", kind: "issue", status: "open", owner: "Matt Colf", area: "OPS", due: null, state: "Triage", priority: "Urgent", url: "https://linear.app/fsl/issue/ops-7/rotate-the-backup-key", connection: "linear", closed_reason: null },
+      { external_ref: "linear:ENG-101", title: "Tighten the egress allowlist", kind: "issue", status: "open", owner: "Sam Rivera", area: "ENG", due: null, state: "In Progress", priority: "High", url: "https://linear.app/fsl/issue/eng-101/tighten-the-egress-allowlist", connection: "linear", closed_reason: null },
+      { external_ref: "linear:ENG-102", title: "Write the Linear sync docs", kind: "issue", status: "open", owner: "Sam Rivera", area: "ENG", due: "2026-10-02", state: "Todo", priority: "Medium", url: "https://linear.app/fsl/issue/eng-102/write-the-linear-sync-docs", connection: "linear", closed_reason: null },
+      { external_ref: "linear:ENG-103", title: "Review the capture retention policy", kind: "issue", status: "open", owner: "Sam Rivera", area: "ENG", due: null, state: "Backlog", priority: "No priority", url: "https://linear.app/fsl/issue/eng-103/review-the-capture-retention-p", connection: "linear", closed_reason: null },
+      { external_ref: "linear:OPS-7", title: "Rotate the backup key", kind: "issue", status: "open", owner: "Sam Rivera", area: "OPS", due: null, state: "Triage", priority: "Urgent", url: "https://linear.app/fsl/issue/ops-7/rotate-the-backup-key", connection: "linear", closed_reason: null },
     ]);
     // one subject, one row: the rerun raised nothing new
     expect(await mirrors()).toEqual([

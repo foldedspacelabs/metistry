@@ -1,6 +1,6 @@
 // PoC-13 scratch — metrics + crude body-leak detector over stage2.jsonl.
 import { readFileSync, writeFileSync } from 'node:fs';
-const D = '/Users/mattcolf/Development/Metistry/.claude/worktrees/metistry-phase-0-poc-12cdbc/poc/poc13-comms';
+const D = '/Users/example/Development/Metistry/.claude/worktrees/metistry-phase-0-poc-12cdbc/poc/poc13-comms';
 const src = new Map();
 for (const l of readFileSync(`${D}/messages-200.jsonl`, 'utf8').split('\n').filter(Boolean)) {
   const o = JSON.parse(l); src.set(o.rowid, o);

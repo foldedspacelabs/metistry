@@ -1,0 +1,14 @@
+metistry@mattcolf.dev==>metistry@example.com
+https://mattcolf.dev==>https://example.com
+mattcolf.dev==>example.com
+mac-studio.tailee85c6.ts.net==>mac-studio.example.ts.net
+tailee85c6==>example
+matts-mac-studio.local==>example-mac.local
+mattsmacstudio.default.internal==>examplemac.default.internal
+/Users/mattcolf==>/Users/example
+-Users-mattcolf-==>-Users-example-
+kCGSSessionUserNameKey = mattcolf==>kCGSSessionUserNameKey = example
+America/Detroit==>America/New_York
+claude@accounts.mattcolf.com==>1252810+mattcolf@users.noreply.github.com
+regex:\*\*missed the single\s+highest-stakes human item in the corpus\*\*\s+\(a long outgoing message working\s+through\s+a\s+job\s+offer\s+with\s+an\s+explicit\s+ask\)\.==>**missed the highest-stakes\nhuman message in the corpus**.
+regex:(?s)\*\*COMPLETED 2026-08-28\*\* with a real `claude\s+setup-token` credential.*?PoC-11's\s+domain\.\n\n==>

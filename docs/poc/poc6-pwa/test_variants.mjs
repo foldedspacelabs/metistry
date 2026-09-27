@@ -17,11 +17,11 @@ const aud = new URL(sub.endpoint).origin;
 const now = Math.floor(Date.now()/1000);
 
 const variants = [
-  ['baseline 12h mailto:mattcolf.dev, space', async () => `vapid t=${await jwt({aud, exp: now+43200, sub:'mailto:metistry@mattcolf.dev'})}, k=${vapid.publicKey}`],
-  ['no space after comma',                    async () => `vapid t=${await jwt({aud, exp: now+43200, sub:'mailto:metistry@mattcolf.dev'})},k=${vapid.publicKey}`],
-  ['exp 2h',                                  async () => `vapid t=${await jwt({aud, exp: now+7200, sub:'mailto:metistry@mattcolf.dev'})},k=${vapid.publicKey}`],
-  ['sub https url',                           async () => `vapid t=${await jwt({aud, exp: now+7200, sub:'https://mattcolf.dev'})},k=${vapid.publicKey}`],
-  ['legacy WebPush + Crypto-Key',             async () => ['WebPush ' + await jwt({aud, exp: now+7200, sub:'mailto:metistry@mattcolf.dev'}), `p256ecdsa=${vapid.publicKey}`]],
+  ['baseline 12h mailto:example.com, space', async () => `vapid t=${await jwt({aud, exp: now+43200, sub:'mailto:metistry@example.com'})}, k=${vapid.publicKey}`],
+  ['no space after comma',                    async () => `vapid t=${await jwt({aud, exp: now+43200, sub:'mailto:metistry@example.com'})},k=${vapid.publicKey}`],
+  ['exp 2h',                                  async () => `vapid t=${await jwt({aud, exp: now+7200, sub:'mailto:metistry@example.com'})},k=${vapid.publicKey}`],
+  ['sub https url',                           async () => `vapid t=${await jwt({aud, exp: now+7200, sub:'https://example.com'})},k=${vapid.publicKey}`],
+  ['legacy WebPush + Crypto-Key',             async () => ['WebPush ' + await jwt({aud, exp: now+7200, sub:'mailto:metistry@example.com'}), `p256ecdsa=${vapid.publicKey}`]],
 ];
 
 for (const [name, build] of variants) {

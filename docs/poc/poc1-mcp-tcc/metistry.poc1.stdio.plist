@@ -3,10 +3,10 @@
 <plist version="1.0"><dict>
   <key>Label</key><string>metistry.poc1.stdio</string>
   <key>ProgramArguments</key><array>
-    <string>/Users/mattcolf/.local/share/claude/versions/2.1.241</string>
+    <string>/Users/example/.local/share/claude/versions/2.1.241</string>
     <string>-p</string>
     <string>Call the list_recent_messages tool with limit 3 and report exactly what it returns. If it returned message rows, summarize each as timestamp + first few words. Include any error text verbatim.</string>
-    <string>--mcp-config</string><string>/Users/mattcolf/Development/Metistry/.claude/worktrees/metistry-phase-0-poc-12cdbc/poc/poc1-mcp-tcc/mcp.json</string>
+    <string>--mcp-config</string><string>/Users/example/Development/Metistry/.claude/worktrees/metistry-phase-0-poc-12cdbc/poc/poc1-mcp-tcc/mcp.json</string>
     <string>--strict-mcp-config</string>
     <string>--allowedTools</string><string>mcp__messages__list_recent_messages</string>
     <string>--model</string><string>haiku</string>
@@ -15,9 +15,9 @@
   <key>EnvironmentVariables</key><dict>
     <key>PATH</key><string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>
-  <key>WorkingDirectory</key><string>/Users/mattcolf/Development/Metistry/.claude/worktrees/metistry-phase-0-poc-12cdbc</string>
+  <key>WorkingDirectory</key><string>/Users/example/Development/Metistry/.claude/worktrees/metistry-phase-0-poc-12cdbc</string>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><false/>
-  <key>StandardOutPath</key><string>/private/tmp/claude-501/-Users-mattcolf-Development-Metistry--claude-worktrees-metistry-phase-0-poc-12cdbc/3daa1fa7-6368-4d64-85d3-4af8b9ceffeb/scratchpad/stdio.out</string>
-  <key>StandardErrorPath</key><string>/private/tmp/claude-501/-Users-mattcolf-Development-Metistry--claude-worktrees-metistry-phase-0-poc-12cdbc/3daa1fa7-6368-4d64-85d3-4af8b9ceffeb/scratchpad/stdio.err</string>
+  <key>StandardOutPath</key><string>/private/tmp/claude-501/-Users-example-Development-Metistry--claude-worktrees-metistry-phase-0-poc-12cdbc/3daa1fa7-6368-4d64-85d3-4af8b9ceffeb/scratchpad/stdio.out</string>
+  <key>StandardErrorPath</key><string>/private/tmp/claude-501/-Users-example-Development-Metistry--claude-worktrees-metistry-phase-0-poc-12cdbc/3daa1fa7-6368-4d64-85d3-4af8b9ceffeb/scratchpad/stdio.err</string>
 </dict></plist>

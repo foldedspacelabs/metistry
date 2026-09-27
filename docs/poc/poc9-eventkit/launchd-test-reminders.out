@@ -1,7 +1,7 @@
 === ekpoc test-reminders @ 2026-08-28T03:37:09Z ===
 INFO pid 52861
 INFO ppid 1
-INFO binary /Users/mattcolf/Development/Metistry/.claude/worktrees/metistry-phase-0-poc-12cdbc/poc/poc9-eventkit/ekpoc
+INFO binary /Users/example/Development/Metistry/.claude/worktrees/metistry-phase-0-poc-12cdbc/poc/poc9-eventkit/ekpoc
 INFO uid 501
 INFO env.XPC_SERVICE_NAME metistry.poc9
 INFO env.TERM <unset>
@@ -16,7 +16,7 @@ INFO source type=2 title=iCloud calendars(reminder)=12
 INFO calendar.reused 1E3D7B2A-9AAD-43C7-9D9D-DB9A71E49480 source=iCloud
 STEP 1 reminders.list OK title=Metistry PoC id=1E3D7B2A-9AAD-43C7-9D9D-DB9A71E49480 source=iCloud allowsMod=true
 STEP 2 reminders.create OK id=C63FB785-6A2A-4113-9897-41C448B70B79 due=2026-08-28 14:00:00 +0000
-STEP 3 reminders.read OK count=2 title=PoC-9 test reminder due=Optional(calendar: gregorian (gregorian) locale:  time zone: America/Detroit firstWeekday: 1 minDaysInFirstWeek: 1 era: 1 year: 2026 month: 8 day: 28 hour: 10 minute: 0 second: 0 )
+STEP 3 reminders.read OK count=2 title=PoC-9 test reminder due=Optional(calendar: gregorian (gregorian) locale:  time zone: America/New_York firstWeekday: 1 minDaysInFirstWeek: 1 era: 1 year: 2026 month: 8 day: 28 hour: 10 minute: 0 second: 0 )
 STEP 4 reminders.update OK title=PoC-9 test reminder (updated)
 STEP 5 reminders.complete OK isCompleted=Optional(true) completionDate=Optional(2026-08-28 03:37:09 +0000)
 STEP 6 reminders.delete OK remaining=1 stillPresent=false

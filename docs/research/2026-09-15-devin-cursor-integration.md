@@ -2,8 +2,8 @@
 
 The owner is standing up a second instance for a separate context. Knowledge is arriving that needs organising;
 three agents (Devin, Claude Code, Cursor) need access to it; Devin is already
-connected to almost everything in that context and holds context on the code, culture,
-process and tech that Metistry will need. Devin is currently organising the
+connected to almost everything in that context and holds context on the second
+instance's repositories that Metistry will need. Devin is currently organising the
 docs by hand, which is the thing to replace.
 
 This note verifies what Devin and Cursor actually expose (official docs,
@@ -177,7 +177,7 @@ to violate it with.
 Two gates, both outside the code. The Metistry origin must be **reachable from
 Devin's cloud** — a tailnet address will not do, which is invariant 8's "the
 network is not a boundary" arriving as a bill rather than a principle; the
-mattcolf.dev gateway is the candidate. And a mandatory **Security Profile**
+a home gateway is the candidate. And a mandatory **Security Profile**
 MCP allowlist (§1e) can make this impossible without an admin.
 
 ## 5. Proposal B — Devin as a compute target
@@ -267,7 +267,7 @@ hand to *Claude Code and Cursor* — see §8 — just not to Metis.)
   repo the owner lists (over REST or the MCP server as a plain HTTP client from
   the collector, which is not the assistant and so not bound by the one-server
   rule). One capture per wiki page, `source: devin`, `devin_repo`. This is
-  "learn my new team's repositories", and it is the piece that pays off fastest.
+  "learn the second instance's repositories", and it is the piece that pays off fastest.
 - **Do not** pull `ask_question` output on a schedule; it spends and it is
   synthesis, not source. If the owner wants a question answered, that is a
   dispatch (proposal B), not a collector.

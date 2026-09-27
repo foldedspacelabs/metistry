@@ -1,6 +1,6 @@
 # PoC-6 — iPhone steps
 
-**URL:** `https://mac-studio.tailee85c6.ts.net/`
+**URL:** `https://mac-studio.example.ts.net/`
 
 ---
 
@@ -19,7 +19,7 @@ To enable, visit:
 
          https://login.tailscale.com/f/serve?node=nmvFTd2KLM11CNTRL
 
-$ /usr/local/bin/tailscale cert mac-studio.tailee85c6.ts.net
+$ /usr/local/bin/tailscale cert mac-studio.example.ts.net
 HTTPS cert support is not enabled/configured for your tailnet.
 ```
 
@@ -35,12 +35,12 @@ Do this:
    /usr/local/bin/tailscale serve status
    ```
 
-   `serve status` should then show `https://mac-studio.tailee85c6.ts.net/ → http://127.0.0.1:8093`.
+   `serve status` should then show `https://mac-studio.example.ts.net/ → http://127.0.0.1:8093`.
 
 4. Verify from the Mac before touching the iPhone:
 
    ```sh
-   curl -sS -o /dev/null -w '%{http_code} %{content_type}\n' https://mac-studio.tailee85c6.ts.net/
+   curl -sS -o /dev/null -w '%{http_code} %{content_type}\n' https://mac-studio.example.ts.net/
    ```
 
    Expect `200 text/html; charset=utf-8`. The first request may take a few seconds while the
@@ -56,7 +56,7 @@ Make sure the iPhone is on the tailnet (Tailscale app connected).
 Open Safari and go to:
 
 ```
-https://mac-studio.tailee85c6.ts.net/
+https://mac-studio.example.ts.net/
 ```
 
 The page shows a badge reading **"Safari tab - install to Home Screen for push"**. That is expected.
@@ -83,7 +83,7 @@ the icon.
 2. iOS shows the system permission prompt → tap **Allow**.
 
 The status log should show, in order:
-- `service worker ready, scope=https://mac-studio.tailee85c6.ts.net/`
+- `service worker ready, scope=https://mac-studio.example.ts.net/`
 - `permission = granted`
 - `VAPID public key (87 chars): BLy0gRyA-BPqPRrBs8nw...`
 - `subscribed. endpoint host = web.push.apple.com`
@@ -105,7 +105,7 @@ This is the part that proves background push works.
 2. On the **Mac**, run:
 
    ```sh
-   curl -X POST https://mac-studio.tailee85c6.ts.net/push-test
+   curl -X POST https://mac-studio.example.ts.net/push-test
    ```
 
    (equivalently `curl -X POST http://127.0.0.1:8093/push-test` from the Mac itself)
@@ -119,7 +119,7 @@ This is the part that proves background push works.
 ## The push-trigger command
 
 ```sh
-curl -X POST https://mac-studio.tailee85c6.ts.net/push-test
+curl -X POST https://mac-studio.example.ts.net/push-test
 ```
 
 It reads every stored subscription from `subscriptions.json`, builds a fresh ES256 VAPID JWT per
@@ -130,10 +130,10 @@ Useful companions:
 
 ```sh
 # what is currently subscribed
-curl -s https://mac-studio.tailee85c6.ts.net/subscriptions
+curl -s https://mac-studio.example.ts.net/subscriptions
 
 # the VAPID public key the page uses
-curl -s https://mac-studio.tailee85c6.ts.net/vapid-public-key
+curl -s https://mac-studio.example.ts.net/vapid-public-key
 
 # server log (includes the VAPID JWT header/claims shape, never the private key)
 tail -f poc/poc6-pwa/server.log
@@ -178,7 +178,7 @@ It runs as a plain background `node` process (started with `nohup`, logging to `
 It does **not** survive a reboot. To restart:
 
 ```sh
-cd /Users/mattcolf/Development/Metistry/.claude/worktrees/metistry-phase-0-poc-12cdbc/poc/poc6-pwa
+cd /Users/example/Development/Metistry/.claude/worktrees/metistry-phase-0-poc-12cdbc/poc/poc6-pwa
 nohup /opt/homebrew/bin/node server.mjs > server.log 2>&1 &
 ```
 

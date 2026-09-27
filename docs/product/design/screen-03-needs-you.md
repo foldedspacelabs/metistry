@@ -429,7 +429,7 @@ review requests**.
   top three files with counts, checks. **Approve · Request Changes · Comment**,
   and **Review Changes →** to the full window.
 - **Approve** takes an optional comment; **Request Changes** requires words. Both
-  say they post *as @mattcolf*.
+  say they post *as @samrivera*.
 - **A thread reply** is the same type with the **thread** body: the code lines,
   the conversation, a reply box, **Reply** and **Resolve Conversation**.
 - **Stale:** commits pushed while the card was open turn it `stale`; nothing is

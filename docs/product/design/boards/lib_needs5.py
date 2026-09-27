@@ -179,7 +179,7 @@ def prdetail(T):
             f'<div style="flex-grow: 1; min-width: 0;">{diffview(T)}</div></div>'
           + f'<div style="display: flex; align-items: center; gap: 8px; margin-top: 14px;">'
             f'{btn(T,"Approve","affirm",I["check"])}{btn(T,"Request Changes","secondary",I["pencil"])}{btn(T,"Comment","secondary",I["chat"])}'
-            f'<span style="font-size: 12px; color: {T["ts"]};">1 draft comment goes with your review &middot; posts as @mattcolf</span>'
+            f'<span style="font-size: 12px; color: {T["ts"]};">1 draft comment goes with your review &middot; posts as @samrivera</span>'
             f'<span style="flex-grow: 1;"></span><span style="font-size: 12px; font-weight: 600; color: {T["acc"]};">Open on GitHub &rarr;</span></div>')
 
 def emptydetail(T):

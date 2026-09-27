@@ -1,5 +1,5 @@
 === AFM classifier ===
-pid=24141 mode=fresh host=matts-mac-studio.local
+pid=24141 mode=fresh host=example-mac.local
 SESSION_TYPE env: 0
 TERM: <none>
 availability: available  isAvailable: true

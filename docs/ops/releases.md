@@ -69,7 +69,7 @@ rather than in every PR that touches it (`docs/product/record/README.md`).
 | `Metistry-<version>.dmg` | the **Mac app**: the SwiftUI front end for the CLI, with both packs above embedded as `Contents/Resources/metistry/`, Developer ID signed with the hardened runtime, notarized and stapled — `docs/ops/mac-app.md` |
 | `appcast.xml` | the EdDSA-signed **Sparkle feed** an installed app polls. `latest/download/appcast.xml` is the URL in the app's `Info.plist`, so it always resolves to the newest release |
 | `checksums.txt` | `sha256sum` of every asset, the DMG and the appcast included; `metistry update` verifies the runtime packs against it |
-| npm `@foldedspacelabs/metistry-*@<version>` | published via Trusted Publishing (provenance once the repo is public — see below) |
+| npm `@foldedspacelabs/metistry-*@<version>` | published via Trusted Publishing, with npm provenance (see below) |
 | `ghcr.io/foldedspacelabs/metistry-{console,assistant,reconciler}:<version>` | the app images compose pulls — multi-arch (`linux/amd64` + `linux/arm64`, so Docker Desktop on Apple silicon pulls the native image) |
 
 The **runtime pack** (`ops/release/pack-runtime.sh`) is the product as an
@@ -198,8 +198,8 @@ see both to switch between them.
 Set `METISTRY_RELEASE_REPO` to consume a fork's releases, and
 `METISTRY_IMAGE_PREFIX` to pull its images. `METISTRY_GITHUB_TOKEN` (the
 read-only PAT the github-state collector already uses) lifts GitHub's
-anonymous rate limit — and on a **private** repo it is the only way to see
-releases at all, but only if the fine-grained PAT carries **Contents:
+anonymous rate limit — and for a fork kept **private** it is the only way to
+see releases at all, but only if the fine-grained PAT carries **Contents:
 read**; Issues/Pull requests/Metadata is not enough and gets a 403 the CLI
 reports separately from an exhausted rate limit. Missing that scope,
 `metistry update` falls back to the `gh` CLI (resolve and download both)
@@ -224,8 +224,14 @@ still `metistry update`, by hand.
 
 ## Secrets
 
-Repo secrets, set in GitHub → Settings → Secrets → Actions. None of them
-are in the repo, and none reach a build log.
+The signing secrets — `APPLE_*` and `SPARKLE_PRIVATE_KEY` — live in the
+**`release` environment** (GitHub → Settings → Environments → `release`),
+whose required reviewer is the owner. Only the four jobs that sign or
+notarize (`runtime`, `runtime-deps`, `macos-app`, `appcast`) declare
+`environment: release`, so only they can read those secrets, and each waits
+for the owner's approval on the run. None of them are in the repo, and none
+reach a build log. (Repo-level secrets of the same names also still work, for
+a fork that has not made the environment.)
 
 | secret | used by | needed for |
 | --- | --- | --- |
@@ -296,12 +302,11 @@ name — none in this repo are private):
 - `@foldedspacelabs/metistry-queries`
 - `@foldedspacelabs/metistry-tasks`
 
-**Provenance and the private repo.** npm provenance attests that a package
-was built by a specific public CI run; npm does not generate it for a
-private repository, even for a package published as `public`. `release.yml`
-only passes `--provenance` when `github.event.repository.private == false`,
-so today it's silently omitted — the moment this repo goes public, the next
-release starts attaching it with no workflow change needed.
+**Provenance.** npm provenance attests that a package was built by a
+specific public CI run. `release.yml` passes `--provenance` when
+`github.event.repository.private == false`, which holds for this public
+repository; npm does not generate provenance for a private repository, so a
+private fork's publish silently omits it rather than failing.
 
 Until a package is configured, or on a fork that doesn't own the
 `foldedspacelabs` scope, npm answers the publish with a 404/403; the job

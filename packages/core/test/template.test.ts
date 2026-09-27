@@ -175,18 +175,18 @@ describe("{{ tasks }}", () => {
 
   it("fills the context params the query leaves to the caller — never the `where:` text", async () => {
     const q = new FakeQueries();
-    await render('{{ tasks where: "assigned_to_me" }}', { queries: q, me: "People/Matt Colf.md" });
+    await render('{{ tasks where: "assigned_to_me" }}', { queries: q, me: "People/Sam Rivera.md" });
     // `overdue`/`carried` are measured against a DAY, and the day is the
     // instance's zone rather than whatever the cluster's current_date is
     expect(q.paramsFor(TASK_QUERY)["today"]).toBe(TODAY);
-    expect(q.paramsFor(TASK_QUERY)["me"]).toBe("People/Matt Colf.md");
+    expect(q.paramsFor(TASK_QUERY)["me"]).toBe("People/Sam Rivera.md");
   });
 
   it("binds nothing `vault_tasks_query` has not declared — the seed YAML is the contract", async () => {
     const yaml = readFileSync(fileURLToPath(new URL("../../../seed/queries/vault_tasks_query.yaml", import.meta.url)), "utf8");
     const declared = new Set(Object.keys((parseYaml(yaml) as { params: Record<string, unknown> }).params));
     const q = new FakeQueries();
-    await render('{{ tasks where: "overdue" order: "due" limit: 5 }}', { queries: q, me: "People/Matt Colf.md" });
+    await render('{{ tasks where: "overdue" order: "due" limit: 5 }}', { queries: q, me: "People/Sam Rivera.md" });
     for (const key of Object.keys(q.paramsFor(TASK_QUERY))) expect([key, declared.has(key)]).toEqual([key, true]);
     for (const key of Object.keys(TASK_FILTER_PARAM_SPEC)) expect([key, declared.has(key)]).toEqual([key, true]);
   });

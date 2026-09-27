@@ -1,16 +1,16 @@
 ### screen lock state (must be 0) ###
 kCGSSessionOnConsoleKey = 1
 CGSSessionScreenIsLocked = 1
-kCGSSessionUserNameKey = mattcolf
+kCGSSessionUserNameKey = example
 kCGSSessionLoginDoneKey = <absent>
 
 ### requesting consent via launchd job (click Allow twice) ###
 === launchctl print (post-run) ===
-=== stdout (/Users/mattcolf/Development/Metistry/.claude/worktrees/metistry-phase-0-poc-12cdbc/poc/poc9-eventkit/launchd-request.out) ===
+=== stdout (/Users/example/Development/Metistry/.claude/worktrees/metistry-phase-0-poc-12cdbc/poc/poc9-eventkit/launchd-request.out) ===
 === ekpoc request @ 2026-08-27T04:00:19Z ===
 INFO pid 5621
 INFO ppid 1
-INFO binary /Users/mattcolf/Development/Metistry/.claude/worktrees/metistry-phase-0-poc-12cdbc/poc/poc9-eventkit/ekpoc
+INFO binary /Users/example/Development/Metistry/.claude/worktrees/metistry-phase-0-poc-12cdbc/poc/poc9-eventkit/ekpoc
 INFO uid 501
 INFO env.XPC_SERVICE_NAME metistry.poc9
 INFO env.TERM <unset>
@@ -21,7 +21,7 @@ INFO auth.event.before notDetermined(0)
 INFO auth.reminder.before notDetermined(0)
 INFO waitSeconds 900.0
 INFO calling requestFullAccessToEvents
-=== stderr (/Users/mattcolf/Development/Metistry/.claude/worktrees/metistry-phase-0-poc-12cdbc/poc/poc9-eventkit/launchd-request.err) ===
+=== stderr (/Users/example/Development/Metistry/.claude/worktrees/metistry-phase-0-poc-12cdbc/poc/poc9-eventkit/launchd-request.err) ===
 === booted out ===
 
 ### resulting authorization status ###

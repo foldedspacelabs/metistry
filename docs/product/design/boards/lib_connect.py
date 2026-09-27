@@ -269,7 +269,7 @@ VARS=[("standup_time","9:15 AM","Standup &middot; Morning Brief"),
       ("work_repos","metistry, metistry-instance, drey, fsl-site","GitHub sync &middot; 2 agents"),
       ("devin_org","org-7f3a92c1","Devin"),
       ("company","Folded Space Labs","3 agents&rsquo; instructions"),
-      ("timezone","America/Detroit","Everywhere a time is shown")]
+      ("timezone","America/New_York","Everywhere a time is shown")]
 def variablespane(T):
     head=panehead(T,"Variables",btn(T,"Add Variable","secondary",I["plus"]))
     lede=(f'<div style="padding: 0 18px 10px; font-size: 12px; color: {T["ts"]};">Shared values, readable anywhere &mdash; '

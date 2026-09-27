@@ -6,20 +6,20 @@
     <string>metistry.poc3</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/mattcolf/Development/Metistry/.claude/worktrees/metistry-phase-0-poc-12cdbc/poc/poc3-afm/afm_classify_greedy</string>
-        <string>/Users/mattcolf/Development/Metistry/.claude/worktrees/metistry-phase-0-poc-12cdbc/poc/poc3-afm/inbox-50.txt</string>
+        <string>/Users/example/Development/Metistry/.claude/worktrees/metistry-phase-0-poc-12cdbc/poc/poc3-afm/afm_classify_greedy</string>
+        <string>/Users/example/Development/Metistry/.claude/worktrees/metistry-phase-0-poc-12cdbc/poc/poc3-afm/inbox-50.txt</string>
         <string>fresh</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>/Users/mattcolf/Development/Metistry/.claude/worktrees/metistry-phase-0-poc-12cdbc/poc/poc3-afm</string>
+    <string>/Users/example/Development/Metistry/.claude/worktrees/metistry-phase-0-poc-12cdbc/poc/poc3-afm</string>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
     <false/>
     <key>StandardOutPath</key>
-    <string>/Users/mattcolf/Development/Metistry/.claude/worktrees/metistry-phase-0-poc-12cdbc/poc/poc3-afm/run-launchd-greedy.txt</string>
+    <string>/Users/example/Development/Metistry/.claude/worktrees/metistry-phase-0-poc-12cdbc/poc/poc3-afm/run-launchd-greedy.txt</string>
     <key>StandardErrorPath</key>
-    <string>/Users/mattcolf/Development/Metistry/.claude/worktrees/metistry-phase-0-poc-12cdbc/poc/poc3-afm/run-launchd-greedy.err.txt</string>
+    <string>/Users/example/Development/Metistry/.claude/worktrees/metistry-phase-0-poc-12cdbc/poc/poc3-afm/run-launchd-greedy.err.txt</string>
     <key>ProcessType</key>
     <string>Standard</string>
 </dict>

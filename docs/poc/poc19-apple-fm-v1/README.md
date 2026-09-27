@@ -258,7 +258,7 @@ residency (`runs/footprint.txt`):
     22.7 MB  pid 11628  ./afm-v1
 
 ### LM Studio serving google/gemma-4-e4b on :1234 — the model backend process
-   842.5 MB  pid 39539  /Users/mattcolf/.lmstudio/.internal/utils/node
+   842.5 MB  pid 39539  /Users/example/.lmstudio/.internal/utils/node
 (GGUF weights are mmapped, so RSS understates true residency.)
 ```
 

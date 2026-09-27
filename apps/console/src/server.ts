@@ -59,6 +59,7 @@ import { isVaultTaskRoute, ReplayCache, vaultTaskRoutes } from "./vault-task-rou
 import { closeDayRoute, isCloseDayRoute, type RoutineTrigger } from "./close-day.js";
 import type { ConsoleVaultClient } from "./vault-client.js";
 import { isScheduledRoute, scheduledRoutes, type ScheduledAdmin } from "./scheduled-routes.js";
+import { isMeetingNoteRoute, meetingNoteRoute, MeetingNotes } from "./meeting-note-route.js";
 import { agentList, commandList } from "./commands.js";
 import { purgeArchive, purgePreview } from "@metistry-apps/routines";
 import type { EventHub } from "./events.js";
@@ -556,6 +557,8 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
   const artifacts = cfg.vault ? new ArtifactsService(db, cfg.vault, { origin: cfg.origin, tasks }) : undefined;
   /** `Idempotency-Key` replays for the vault-task doors — per server, in memory (vault-task-routes.ts says why that is enough). */
   const vaultTaskReplays = new ReplayCache();
+  /** The meeting-note door's per-event queue and the notes it wrote ahead of the walk — per server, in memory (meeting-note-route.ts says why that is enough). */
+  const meetingNotes = new MeetingNotes();
   /** The services one action may reach. Read per call: `cfg.targets` and the vault bridge are hot-reloaded, and an action must follow the file rather than the process's startup. */
   const actionServices = (): ActionServices => ({ db, tasks, inbox, ...(cfg.targets ? { targets: cfg.targets } : {}), ...(artifacts ? { artifacts } : {}) });
 
@@ -1121,7 +1124,9 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         // the Tick door writes the owner's own note as `user`: the owner's hand, no one else's
         isVaultTaskRoute(key) ||
         // so does Close the Day, into the note's section
-        isCloseDayRoute(key)
+        isCloseDayRoute(key) ||
+        // …and so does the meeting-note door (T2-11)
+        isMeetingNoteRoute(key)
       ) {
         return sendRefusal(res, management);
       }
@@ -1435,6 +1440,8 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     // reverse, written as `user` with the note's hash — never a patch, never
     // an action a proposal can reach (vault-task-routes.ts).
     if (isVaultTaskRoute(key)) return vaultTaskRoutes(req, res, key, { queries, vault: cfg.vault, audit, replays: vaultTaskReplays });
+    // ----- the meeting-note door: one note per event, from the owner's template, as `user` (T2-11) -----
+    if (isMeetingNoteRoute(key)) return meetingNoteRoute(req, res, key, { queries, vault: cfg.vault, audit, notes: meetingNotes });
 
     // ----- Close the Day (§2.11, §2.13; T2-8) -----
     // The daily note's section through the reconciler's section operation as

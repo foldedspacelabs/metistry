@@ -1,0 +1,20 @@
+schema: 1
+name: eventkit-calendar
+type: collector
+display_name: Calendar
+description: >-
+  The owner's calendars on this Mac, through the eventkit bridge, into
+  calendar_events under the connection `eventkit` — today and the next two
+  weeks, every occurrence with its attendees (address and answer), organizer,
+  series and the owner's own answer, so Today and the meeting-note door read
+  one table for every calendar source (design-build-plan §2.9, T2-11). A
+  meeting cancelled inside the window is removed; the past is left as it was
+  last seen. Never the invite body — the bridge does not serve it and the
+  table has no column for it. Degrades absent without METISTRY_EK_URL and
+  METISTRY_BRIDGE_TOKEN_EVENTKIT.
+# A sync (§2.5's closed shape): Today should show a meeting added a few
+# minutes ago, and the read is local — the helper asks EventKit on this Mac.
+schedule: { every: 5m }
+writes: [calendar_events, sync_state]
+reads: []
+requires: [eventkit-bridge]

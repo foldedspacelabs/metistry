@@ -60,7 +60,7 @@ import {
   type Manifest,
   type SupervisorConfig,
 } from "@foldedspacelabs/metistry-core";
-import { COMPUTE_FILENAME, INSTANCE_LAYOUT, LEGACY_VAULT_DIR, PROFILE_PATH, REGISTRY_KINDS, detectLayout, readStandupKeys, emptyCompute, extensionsDirFor, instanceFile, loadCompute, loadKind, resolveInstanceLayout, type Compute, type RegistryKindName } from "@foldedspacelabs/metistry-core";
+import { COMPUTE_FILENAME, INSTANCE_LAYOUT, LEGACY_VAULT_DIR, PROFILE_PATH, REGISTRY_KINDS, describeVaultSync, detectLayout, pushOverrideNote, readStandupKeys, emptyCompute, extensionsDirFor, instanceFile, loadCompute, loadKind, resolveInstanceLayout, vaultStatusSchema, type Compute, type RegistryKindName, type VaultStatus } from "@foldedspacelabs/metistry-core";
 import { cliShimLinkHint, cliShimPath } from "./cli-shim.js";
 import { engineStatus, loadDeployment } from "./deployment.js";
 import { localServerRows } from "./local-models.js";
@@ -909,6 +909,62 @@ export async function scheduleRows(
   return out;
 }
 
+// ---- the vault's git sync (§2.21, T10-2) -----------------------------------------
+
+export const VAULT_SYNC_KIND = "vault";
+
+/** One status in words: the probe line, and what an ok row is read for in `--json`. */
+export function vaultSyncSummary(v: VaultStatus): string {
+  const counts = v.remote === null ? "no remote" : `${v.ahead ?? "?"} ahead, ${v.behind ?? "?"} behind ${v.remote}`;
+  const push = v.last_push ? `last push ${v.last_push.at} ${v.last_push.ok ? "ok" : "FAILED"}` : "never pushed";
+  const conflict = v.conflict ? `conflict in ${v.conflict.paths.length} path(s)` : "no conflict";
+  return `${counts}; ${push}; ${conflict}; ${describeVaultSync(v.policy)}`;
+}
+
+/**
+ * The vault's sync, as the reconciler reports it (`GET /vault/status`):
+ * ahead, behind, last push, conflict and the policy in force. Never `failed`
+ * — commits are safe locally whatever the remote does, and the reconciler's
+ * own row already fails when the reconciler is down.
+ */
+export async function vaultSyncRow(deps: { env: NodeJS.ProcessEnv; shape: DeploymentShape; fetchFn: typeof fetch; timeoutMs: number }): Promise<DoctorRow> {
+  const url = deps.env.METISTRY_RECONCILER_URL?.trim();
+  const token = deps.env.METISTRY_BRIDGE_TOKEN_RECONCILER?.trim();
+  const base = url ? hostLocal(url, deps.shape) : undefined;
+  return {
+    kind: VAULT_SYNC_KIND,
+    ...(await runCheck("vault sync", base ? `GET ${base}/vault/status: ahead, behind, last push, conflict, policy` : "the reconciler's GET /vault/status", async () => {
+      if (!base || !token) {
+        return { status: "absent" as const, remediation: "no reconciler bridge configured (METISTRY_RECONCILER_URL + METISTRY_BRIDGE_TOKEN_RECONCILER) — the vault's sync status comes from it" };
+      }
+      let res: Response;
+      try {
+        res = await deps.fetchFn(`${base}/vault/status`, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(deps.timeoutMs) });
+      } catch {
+        return { status: "absent" as const, remediation: "the reconciler did not answer — its own row above says why" };
+      }
+      if (res.status === 404) return { status: "degraded" as const, remediation: "this reconciler predates GET /vault/status — `metistry restart reconciler` after an update" };
+      if (!res.ok) return { status: "absent" as const, remediation: `the reconciler answered HTTP ${res.status} for /vault/status — its own row above says why` };
+      const parsed = vaultStatusSchema.safeParse(await res.json().catch(() => undefined));
+      if (!parsed.success) return { status: "degraded" as const, remediation: "the reconciler's /vault/status did not match the status schema — a reconciler and CLI from different releases; `metistry update`" };
+      const v = parsed.data;
+      const meta = { ...v, summary: vaultSyncSummary(v) };
+      if (v.conflict) {
+        const shown = v.conflict.paths.slice(0, 3).join(", ") + (v.conflict.paths.length > 3 ? ", …" : "");
+        return { status: "degraded" as const, remediation: `conflict: a pull could not integrate ${shown} — resolve it in Obsidian or a terminal; commits keep landing locally and pushing waits until the next clean pull (docs/ops/reconciler.md)`, meta };
+      }
+      if (v.remote === null) return { status: "absent" as const, remediation: "no remote — commits stay on this Mac. `metistry connect-repo <url>` gives the vault a private remote (docs/ops/cli.md)", meta };
+      if (v.last_push && !v.last_push.ok) {
+        return { status: "degraded" as const, remediation: `last push failed (${v.last_push.error ?? "no detail"}) — ${v.ahead ?? "some"} commit(s) wait, safe locally; check the remote and its credentials`, meta };
+      }
+      if (v.last_pull && !v.last_pull.ok) return { status: "degraded" as const, remediation: `last pull failed (${v.last_pull.error ?? "no detail"}) — check the remote and its credentials`, meta };
+      if (v.policy.error) return { status: "degraded" as const, remediation: `deployment.yaml's vault: block does not validate, so the last good policy is running (${v.policy.error}) — fix it with \`metistry vault settings\``, meta };
+      if (v.policy.push_override !== undefined) return { status: "degraded" as const, remediation: pushOverrideNote(v.policy.push_override), meta };
+      return { meta };
+    })),
+  };
+}
+
 // ---- keeping the Mac awake (macOS) --------------------------------------------
 
 /**
@@ -1515,7 +1571,7 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
   // model servers. Concurrently it is the slowest single probe. Nothing about
   // any one check changes — no timeout was shortened to buy this, because a
   // slow-but-healthy bridge reported as down would be a worse table.
-  const [componentRows, registries, layout, inbox, profile, cli, dbAndSchedules, launchd, keepAwake, supervisor, containers, localModels, sharedScope] = await Promise.all([
+  const [componentRows, registries, layout, inbox, profile, cli, dbAndSchedules, launchd, keepAwake, supervisor, containers, localModels, sharedScope, vaultSync] = await Promise.all([
     (async () => Promise.all((await walkManifests(deps.productDir)).map((m) => componentRow(m, { env, fetchFn, timeoutMs, shape, labelSuffix, compute }))))(),
     // the registries over product + extensions: overlays and skips (plan §2.7)
     registriesRow(deps.productDir, env),
@@ -1555,8 +1611,11 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
     env.METISTRY_INSTANCE_DIR && (deps.keychainProbe || platform === "darwin")
       ? sharedScopeRow({ instanceDir, productDir: deps.productDir, env, probe: deps.keychainProbe ?? securityPresence(exec) })
       : Promise.resolve(undefined),
+    // the vault's sync: ahead, behind, last push, conflict (§2.21) — never
+    // `failed`, since commits are safe locally whatever the remote does
+    vaultSyncRow({ env, shape, fetchFn, timeoutMs }),
   ]);
-  rows.push(...componentRows, registries, layout, inbox, ...(profile ? [profile] : []), cli, ...dbAndSchedules, ...launchd, ...(keepAwake ? [keepAwake] : []), ...supervisor, ...containers, ...localModels, ...(sharedScope ? [sharedScope] : []));
+  rows.push(...componentRows, registries, layout, inbox, ...(profile ? [profile] : []), cli, ...dbAndSchedules, ...launchd, ...(keepAwake ? [keepAwake] : []), ...supervisor, ...containers, ...localModels, ...(sharedScope ? [sharedScope] : []), vaultSync);
 
   return { as_of: new Date().toISOString(), product_dir: deps.productDir, shape, ok: !rows.some((r) => r.status === "failed"), rows };
 }

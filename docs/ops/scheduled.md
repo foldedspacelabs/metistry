@@ -379,7 +379,7 @@ each routine's manifest:
 
 | Routine | Default |
 | --- | --- |
-| Morning Brief (`morning-brief`) | working days at 07:00 — before the standup, which it embeds |
+| Morning Brief (`morning-brief`) | working days at 07:00 — writes `Journal/Brief/<date>.md` from `Templates/Brief.md` and the daily note's section; embeds the standup, which lands at 08:00 (T3-6) |
 | Standup (`standup`) | working days at 08:00 — writes `Journal/Standup/<date>.md` from `Templates/Standup.md` (T3-5) |
 | Knowledge Fold (`knowledge-fold`) | every day at 21:00 |
 | Tomorrow's Plan (`plan-tomorrow`) | `eve_of_working_days` at 23:00 — after the fold |
@@ -399,15 +399,17 @@ a cron string any more.
 **Standup** is §2.5's eighth default, working days at 08:00. It renders
 its template into `Journal/Standup/<date>.md` — its own reserved subfolder,
 written through the reconciler as principal `standup`, so the file says
-`source: standup` — and never over a file it does not own. It calls no model:
-`prose` is not legal in a standup template yet (C103 lands with the Morning
-Brief, T3-6). Its row landing is the `routine.status` that swaps Today's
+`source: standup` — and never over a file it does not own. The routine calls
+no model; a `prose` line in its template (legal since C103) is filled by one
+assistant turn, as the Morning Brief's are (`docs/ops/automation.md`). Its row
+landing is the `routine.status` that swaps Today's
 *Standup at 8:00 AM* for the file. With no working days in `Me/profile.md`
 nothing is written — the runner does not start it, and a Run Now asks the
 same question and records `skipped:no_working_days`.
 
-Two shipped routines declare `config`. Session Purge: `retention_days` (a
-number, default 30; the run refuses anything outside 1–30). Standup:
+Three shipped routines declare `config`. Session Purge: `retention_days` (a
+number, default 30; the run refuses anything outside 1–30). Morning Brief:
+`template` (a path, default `Templates/Brief.md`). Standup:
 `template` (a path, default `Templates/Standup.md`) and
 `skip_without_calendar_event` (a boolean, default off — when on, a day whose
 calendar has no event titled like *standup* gets no file,

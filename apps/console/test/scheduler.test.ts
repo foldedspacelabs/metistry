@@ -343,6 +343,28 @@ describe("a component that has never run, and one the runner cannot place", () =
 
 // ---------------------------------------------------- preflight at a slot
 
+describe("the run's own row is handed to the run (§2.21's act key, T3-6)", () => {
+  it("ctx.runId is the runs row the runner opened for this run — so a routine's writes can be one commit", async () => {
+    const db = new FakeRuns(new Date("2026-09-21T04:00:00Z"));
+    const seen: (number | undefined)[] = [];
+    const brief: ScheduledCollector = {
+      name: "morning-brief",
+      dir: "routines/morning-brief",
+      schedule: { days: "working_days", at: ["07:00"] },
+      runKind: "routine_run",
+      requires: NOTHING,
+      run: async (_db: unknown, ctx?: ComponentCtx) => {
+        seen.push(ctx?.runId);
+        return 0;
+      },
+    };
+    await runClock(db, [brief], { from: "2026-09-21T10:59:00Z", to: "2026-09-21T11:01:00Z" });
+    const rows = db.rowsFor("morning-brief");
+    expect(rows).toHaveLength(1);
+    expect(seen).toEqual([rows[0]!.id]);
+  });
+});
+
 describe("the hardening gates, per slot", () => {
   it("preflight blocks a slot: one row for that slot however many ticks, then a late run once it is fixed", async () => {
     const db = new FakeRuns(new Date("2026-09-21T04:00:00Z"));

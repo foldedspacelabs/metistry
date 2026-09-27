@@ -344,10 +344,12 @@ Scheduled working days at 08:00 (§2.5), an hour after the Morning Brief, which
 embeds it. It renders `Templates/Standup.md` (or the path its `template`
 config names) into `Journal/Standup/<date>.md` — its own reserved subfolder —
 through the reconciler's bridge as `principal: standup`, so the file says
-`source: standup`. It is `plan-tomorrow`'s shape, a morning later: no model at
-any tier (`prose` is not legal in a standup template until C103, T3-6), one
-file, never over one it does not own (`user_owned`), no minted anchor
-(`would_materialise`), and a late run dated from its slot.
+`source: standup`. It is `plan-tomorrow`'s shape, a morning later: the routine
+calls no model, one file, never over one it does not own (`user_owned`), no
+minted anchor (`would_materialise`), and a late run dated from its slot. A
+`prose` line in its template (legal since C103, T3-6; the seeded template has
+none) is left as a pending slot, and the routine enqueues ONE assistant turn to
+fill it — the Morning Brief's mechanism, below.
 
 - **Nothing is written without working days.** The runner does not start it
   (`skipped:no_working_days` on the runner's row), and a Run Now asks the same
@@ -368,6 +370,82 @@ file, never over one it does not own (`user_owned`), no minted anchor
 SELECT ts, meta->>'standup_for' AS for_day, meta->>'outcome' AS outcome, meta
 FROM runs WHERE component = 'standup' AND kind = 'routine_run' AND ok
   AND meta ? 'standup_for'
+ORDER BY ts DESC LIMIT 7;
+```
+
+## `morning-brief` — the morning's one surface
+
+Scheduled working days at 07:00 (§2.5), an hour **before** the standup. One
+run does three things, then sends the chat message it always sent:
+
+1. **Its own file**, `Journal/Brief/<date>.md`: `Templates/Brief.md` (or the
+   path its `template` config names) rendered through the reconciler as
+   `principal: morning-brief`, so the file says `source: morning-brief`.
+   `Journal/Brief/` is its reserved subfolder (owner ruling (a), W1). The
+   seeded template embeds the standup **by reference** —
+   `![[Journal/Standup/<date>]]` — so at 7:00 the embed is empty and it fills
+   the moment the standup lands at 8:00; nothing is regenerated. Under its
+   `## Next Up` heading (appended at the end when the template has none) the
+   routine lists today's **timed** meetings in start order, at most 12, each
+   followed by one pending prose slot. Calendar text is someone else's: every
+   title, place and name is made one bounded line with no comment delimiters
+   before it is written anywhere.
+2. **The daily note's section** — the bytes between `<!-- metistry:day -->` and
+   `<!-- /metistry:day -->` in `Journal/<date>.md`, through `POST /vault/section`
+   (`docs/ops/reconciler.md`): a stamped line, the plan embedded (or *No plan
+   was written for today*), the meetings, the standup embedded. **Model-free
+   by construction**: the body is built from calendar rows and paths alone
+   (`daySectionBody`), and the section's writer list admits `morning-brief` and
+   `user` — never `assistant`. It is the same act as the file (the runner's
+   `runs.id` rides as `run` on both), so the two are **one commit**.
+   - **No note yet** (the owner has not opened the day — the usual 7:00 AM):
+     nothing is written and nothing is created; the run says
+     `day_section: no_daily_note`, and Close the Day writes the section later.
+   - **No markers yet**: the heading and the pair are appended at the end;
+     the owner's bytes are an untouched prefix. `Templates/Daily.md` places
+     them.
+   - **Broken markers**: nothing is written into the note, and ONE `note`
+     request (stored kind `knowledge`) names the file, the reason and the
+     line — deduped while it is pending (C102).
+   - **The owner typed in between**: one fresh read and a retry; a second
+     conflict leaves the note alone (`day_section: conflict`).
+3. **ONE assistant turn** for the file's prose slots — the template's
+   `{{ prose }}` lines (C103) and each meeting's Next Up line — on thread
+   `morning-brief`, `meta.kind: prose`, the `routine` tier, a fresh session.
+   No slot, no turn: a template with no `prose` and a day with no meetings
+   asks no model. The routine never calls one itself (invariant 4).
+
+**How the slots are filled, and why the assistant can do nothing else.** The
+turn tells the assistant to `knowledge_read` the file and `knowledge_write` it
+back with each `<!-- metistry:prose N --> _pending…_` replaced by one line. In
+a routine's own folder (`Journal/Brief/`, `Journal/Standup/`; core's
+`JOURNAL_ROUTINE_DIRS`) `knowledge_write` accepts exactly that: it compares
+the content with the file on disk (`fillProseSlots`) and refuses any other
+changed byte, any slot text that is not one line of prose (no heading, list
+item, task box, quote, fence, table, HTML comment, control character), any
+file that is not the routine's, any create, and any stale hash. What it writes
+is built from the checked lines, in the **routine's** name with the reply's
+turn as the act — a second commit, touching the brief only. Each filled line
+keeps `<!-- metistry:written N -->` at its end: the file says which words were
+written, not retrieved (C103). `Journal/Plan/` takes no fill at all —
+Tomorrow's Plan is model-free.
+
+Then the chat message: the D10 soft budget over Needs You, reviews, areas and
+system, opening with `📄 Journal/Brief/<date>.md` when the file was written
+(C97: the message links there). It keeps its silence-default; the **file** is
+written every working day, because it is Today's first state.
+
+The routine's own row carries `brief_for`, `outcome` (`acted`, or
+`skipped:<reason>` — `no_working_days`, `template_missing`,
+`template_unreadable`, `user_owned`, `would_materialise`), `day_section`,
+`next_up` (meetings listed, or null when the calendar could not be asked),
+`prose_slots` and `inbound_id`. Only a write settles a morning.
+
+```sql
+SELECT ts, meta->>'brief_for' AS for_day, meta->>'outcome' AS outcome,
+       meta->>'day_section' AS section, meta->>'prose_slots' AS slots
+FROM runs WHERE component = 'morning-brief' AND kind = 'routine_run' AND ok
+  AND meta ? 'brief_for'
 ORDER BY ts DESC LIMIT 7;
 ```
 

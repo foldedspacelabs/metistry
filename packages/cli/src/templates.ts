@@ -26,10 +26,10 @@ import type { Ui } from "./ui.js";
 
 /**
  * Who renders which seeded template (§5.1's one-writer table and §7's
- * routines). It matters for exactly one check: `prose` is legal only where
- * the assistant owns the output (§6.3.3, D14), so a `{{ prose }}` in
- * `Plan.md` is an ERROR here rather than a note — found at the keyboard
- * instead of in tomorrow's plan.
+ * routines). It matters for exactly one check: `prose` is legal only in the
+ * fold's, the Morning Brief's and the Standup's renders (§6.3.3, C103), so a
+ * `{{ prose }}` in `Plan.md` is an ERROR here rather than a note — found at
+ * the keyboard instead of in tomorrow's plan.
  *
  * A template not named here has no known writer, so `prose` in it is reported
  * as a note: the check declines to guess who will render a file it has never
@@ -41,6 +41,7 @@ export const TEMPLATE_SOURCES: Readonly<Record<string, string>> = Object.freeze(
   "Weekly.md": USER_SOURCE,
   "Plan.md": "plan-tomorrow",
   "Standup.md": "standup",
+  "Brief.md": "morning-brief",
   "Fold.md": FOLD_SOURCE,
 });
 

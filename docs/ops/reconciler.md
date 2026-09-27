@@ -43,7 +43,7 @@ the index. The only hand that edits a task line is yours (§1.4, D3).
 | | |
 | --- | --- |
 | **which notes** | every markdown note the knowledge walk sees, except `Templates/` (a template *describes* tasks, it does not hold them) and except a note whose frontmatter `source:` is somebody else's. A note with `source: user`, or with no `source:` at all, is yours. |
-| **which notes are skipped, and why** | `Journal/Plan/…`, `Journal/Fold/…` and `Journal/Standup/…` are machine files with one writer each (§5.1). What they show is a generated list today and a transclusion once anchors exist — a **view**, never a second canonical line — so indexing them would double every todo they mention and re-date it to the day the plan was written. The test is the file's own `source:`, the same ownership vocabulary `knowledge_write` refuses on, so a plan you keep somewhere else is still indexed and a routine that writes somewhere new is still skipped, with nothing to keep in sync. |
+| **which notes are skipped, and why** | `Journal/Plan/…`, `Journal/Fold/…`, `Journal/Standup/…` and `Journal/Brief/…` are machine files with one writer each (§5.1). What they show is a generated list today and a transclusion once anchors exist — a **view**, never a second canonical line — so indexing them would double every todo they mention and re-date it to the day the plan was written. The test is the file's own `source:`, the same ownership vocabulary `knowledge_write` refuses on, so a plan you keep somewhere else is still indexed and a routine that writes somewhere new is still skipped, with nothing to keep in sync. |
 | **identity** | the `^mt-…` block anchor when the line carries one — so the line keeps its identity when it moves to another note. Without one it is `h:<sha256 of the normalised text>:<ordinal among identical lines in that file>`: stable across a field edit, and deliberately not across a text edit. Change `due friday` to `due 2026-09-25` and it is the same task; re-type the words and it is a new one with a fresh ageing clock. |
 | **when a row is re-derived** | when the note's bytes change (or when the table and the vault disagree, which is how a half-emptied table heals itself). Not on every cycle, and that is the point: `due friday` is resolved against the day the walk **read** the line, `parsed_on` records which day that was, and a row re-derived every five minutes would slide a Friday task onto the next Friday the moment that one passed. |
 | **`first_seen_on`** | survives a re-walk, an edit that keeps the key, and a rename. It is the ageing clock and the only column that is not a pure projection of the current bytes — recoverable from git, and a rebuild that resets it loses a nudge, not a task. |
@@ -307,6 +307,13 @@ curl -s -X POST -H "Authorization: Bearer $METISTRY_BRIDGE_TOKEN_RECONCILER" \
 | **`expected_outer_sha`** | required. SHA-256 of every byte of the note **except** the region — the bytes before it and after it, concatenated, marker lines included. With no section yet it is simply the file's hash, `GET /vault/read`'s `sha256`. A mismatch is `409 conflict`: the owner edited outside the section since you read it, so read again. An edit **inside** the region does not change it — the region is the writer's to replace. |
 | **`body`** | the whole new region, UTF-8; a trailing newline is added if missing so the closer stays on its own line. A body containing either marker, or one that would hide the closer (an unclosed code fence), is `400`. |
 | **the commit** | one intent in the writer's name — `Metistry morning-brief`, `update the day section of Journal/2026-09-26.md` — through the committer like any write. Optional `run` / `turn` are the act keys every write takes ("One commit per act" below): the Morning Brief passes its run, so its brief file and the section are one commit with a `Metistry-Run:` trailer. |
+
+**The console's client.** `httpVaultClient(…).section(path, "day", body,
+principal, expectedOuterSha, {run?, turn?})` (`apps/console/src/vault-client.ts`)
+is this route for the console's own callers — Close the Day (`close-day.ts`)
+and the Morning Brief through the runner's `ctx.vault`
+(`docs/ops/automation.md`). A refusal throws `VaultError`
+with the bridge's own code, `section_missing` included.
 
 **Computing the outer hash.** Don't reimplement the grammar: read the note
 (`GET /vault/read?path=…&encoding=base64`) and pass the bytes to

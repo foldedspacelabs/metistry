@@ -1,12 +1,75 @@
-// morning-brief — the daily review, spec'd per the ratified decisions:
-// D10 SOFT budget (surface the most impactful ~5, +1-2 extra only if also
-// critical; link to the full queue, never hard-truncate), consequence
-// ranking (deterministic — no model ranks your attention), auto-expiry
-// (un-acted proposals expire after EXPIRE_DAYS to decision='expired' —
-// searchable, never lost; a mirror never does, K15), silence-default
-// (nothing pending = no brief).
+// morning-brief — the one morning surface (design-build-plan §2.13, §2.5;
+// C97, C102, C103, C111; ticket T3-6). It does three things, in this order:
+//
+//  1. **The brief's own file**, `Journal/Brief/<date>.md` — rendered from
+//     `Templates/Brief.md` (the owner's, in their vault) and written through
+//     the reconciler as principal `morning-brief`, so it carries
+//     `source: morning-brief`. `Journal/Brief/` is this routine's reserved
+//     subfolder: an OWNERSHIP fact (owner ruling (a), W1), not a grant. It
+//     presents the standup BY REFERENCE — `![[Journal/Standup/<date>]]` in the
+//     seeded template — never by copy: the brief runs at 7:00 and the standup
+//     at 8:00, so the embed is empty until that file lands, and nothing is
+//     regenerated when it does (§2.5). Under its `## Next Up` heading (added
+//     at the end when the template has none) the routine lists today's timed
+//     meetings, each with one prose slot.
+//  2. **The daily note's section** — the bytes between `<!-- metistry:day -->`
+//     markers in `Journal/<date>.md`, through the reconciler's section
+//     operation (`POST /vault/section`, T2-6): today's plan, meetings and the
+//     standup's embed. MODEL-FREE by construction: `daySectionBody` is built
+//     from calendar rows and paths alone and takes no prose, and the section's
+//     writer list (`SECTION_WRITERS`, `apps/reconciler/src/paths.ts`) admits
+//     `morning-brief` and `user` — never `assistant`. Before the owner opens
+//     the day (no note yet) the section is not written: the section operation
+//     never creates the owner's note, and neither does this routine; the run
+//     says `day_section: no_daily_note` and Close the Day writes it later.
+//     Broken markers write nothing and raise one `note` request (C102).
+//  3. **ONE assistant turn** for the file's prose slots — the template's
+//     `{{ prose }}` lines (C103) and each meeting's Next Up line. The routine
+//     calls no model (invariant 4); the turn fills the slots through
+//     `knowledge_write`, which accepts a change to a pending slot's line in
+//     this folder and nothing else (`fillProseSlots`, core). No slot, no turn.
+//
+// Then the chat message it always sent — the D10 soft budget over Needs You,
+// the reviews, the areas, the system — now opening with the brief's file
+// ("the message links there", C97). It keeps its own rules, spec'd per the
+// ratified decisions: D10 SOFT budget (surface the most impactful ~5, +1-2
+// extra only if also critical; link to the full queue, never hard-truncate),
+// consequence ranking (deterministic — no model ranks your attention),
+// auto-expiry (un-acted proposals expire after EXPIRE_DAYS to
+// decision='expired' — searchable, never lost; a mirror never does, K15),
+// silence-default (nothing pending = no message; the FILE is written every
+// working day, because it is Today's first state).
+//
+// SCHEDULE (§2.5): working days at 07:00, from the manifest. With no working
+// days in `Me/profile.md` the runner never fires it; a run nobody scheduled
+// (Run Now) asks the same question and writes no file, recording
+// `skipped:no_working_days`. A late run is dated from its slot.
 
-import { requestWordOf } from "@foldedspacelabs/metistry-core";
+import {
+  DEFAULT_TEMPLATE_MAX_BYTES,
+  PROFILE_PATH,
+  TEMPLATE_MISSING,
+  TEMPLATE_UNREADABLE,
+  calendarDate,
+  configuredTimeZone,
+  intEnv,
+  profileFacts,
+  renderTemplate,
+  requestWordOf,
+  scanNoteSection,
+  sectionMissingMessage,
+  templateSkip,
+  NOTE_SECTIONS,
+  PROSE_PENDING,
+  proseMarker,
+  type CalendarEvent,
+  type CalendarProvider,
+  type ProseRequest,
+  type SectionMissingReason,
+} from "@foldedspacelabs/metistry-core";
+import { NO_QUERIES, eventkitCalendar, refuseMaterialised, sourceOf, type PlanCtx, type PlanVault } from "../plan-tomorrow/run.js";
+import { enqueueProseTurn } from "../prose-turn.js";
+import { vaultReader } from "../vault-reader.js";
 
 export interface Db {
   query(text: string, values?: unknown[]): Promise<{ rows: any[] }>;
@@ -30,6 +93,7 @@ const KIND_WEIGHT: Record<string, number> = {
   decision: 100, // the assistant asked and cannot continue — a waiting assistant is blocked
   grant_elevation: 100, // a waiting agent is blocked; also security-relevant
   access_request: 100,  // the same fact, asked by the agent itself (request_access): it is stuck until you answer
+  secret_failure: 100,  // the third kind of access (T2-9): a secret that failed — whatever needs it is stopped until you act
   action: 70,
   report: 45,
   knowledge: 30,
@@ -140,6 +204,14 @@ export interface RoutineCtx {
   scheduledFor?: Date | undefined;
   /** The zone that slot was read in — the schedule's `tz`, then `Me/profile.md`'s `timezone`, then METISTRY_TZ. */
   timeZone?: string | undefined;
+  /**
+   * The runner's own `runs` row for this run (apps/console/src/runner.ts).
+   * The §2.21 act key: a routine that passes it on each of its vault writes
+   * gets them as ONE commit with a `Metistry-Run:` trailer — the Morning
+   * Brief's file and its daily-note section are one act. Absent (a direct
+   * call, a test): each write is its own commit.
+   */
+  runId?: number | undefined;
 }
 
 interface EkEvent {
@@ -245,11 +317,481 @@ async function sectionSystem(db: Db): Promise<{ lines: string[]; needsHelp: bool
   return { lines, needsHelp: failed > 0 || flipped > 0 };
 }
 
+// ============================================================================
+// The brief's own file, the daily note's section, and the one turn (T3-6)
+// ============================================================================
+
+export const COMPONENT = "morning-brief";
+/** The `intent.principal` every write carries, the `source:` the file declares, and the section writer `SECTION_WRITERS` names. */
+export const PRINCIPAL = COMPONENT;
+/** §2.13: `Journal/Brief/<date>.md` — this routine's reserved subfolder (`JOURNAL_ROUTINE_DIRS`), one writer, and this is it. */
+export const BRIEF_DIR = "Journal/Brief";
+export const briefPath = (date: string): string => `${BRIEF_DIR}/${date}.md`;
+/** The owner's daily note — the section lives in it, and nothing else of it is ours. */
+export const dailyNotePath = (date: string): string => `Journal/${date}.md`;
+/** The manifest's default for `config.template`. */
+export const DEFAULT_TEMPLATE = "Templates/Brief.md";
+export const TEMPLATE_KEY = "template";
+/** Where the Next Up list goes: under the template's own heading of this text, or appended at the end with it. */
+export const NEXT_UP_HEADING = "## Next Up";
+export const MAX_NEXT_UP = 12; // limit: fixed — a working day's meetings; past that the day has bigger problems than a prep line each
+const MAX_EVENT_TEXT = 120; // limit: fixed — a title or a location, one line; the prompt that carries it is bounded too (≤200, like a template's)
+const MAX_PROMPT_CHARS = 200; // limit: fixed — the same bound a template's `prose` prompt has
+
 /**
- * One brief pass. Returns 1 if a brief was emitted, else 0 (silence-default)
- * — the runner turns that into `meta.outcome`: `acted` or `silent` (T1-4).
+ * Why a pass wrote no file. Each is a fact about the install or the day,
+ * never a fault: the run is `ok`, the reason is on the row as
+ * `skipped:<reason>` (D7).
  */
-export async function run(db: Db, ctx: RoutineCtx = {}): Promise<number> {
+export const BRIEF_SKIPS = [
+  "no_working_days", // §2.5 / §6.4: Me/profile.md does not say which days you work — the absent state Today draws
+  TEMPLATE_MISSING,
+  TEMPLATE_UNREADABLE, // one report request names the file
+  "user_owned", // the file on disk is not this routine's; §5.1's ownership rule wins
+  "would_materialise", // the belt behind D4
+] as const;
+export type BriefSkip = (typeof BRIEF_SKIPS)[number];
+
+/**
+ * What became of the daily note's section — `meta.day_section` on the run.
+ * `written` is the only one that touched the note; `no_daily_note` is the
+ * ordinary 7:00 AM answer before the owner has opened the day.
+ */
+export const DAY_SECTION_STATES = ["written", "no_daily_note", "section_missing", "conflict", "no_section_door"] as const;
+export type DaySectionState = (typeof DAY_SECTION_STATES)[number];
+
+/** `PlanVault` plus the one door into a region of the owner's note. `section` is optional so a vault without it degrades to `no_section_door`, never a crash. */
+export interface BriefVault extends PlanVault {
+  write(
+    path: string,
+    content: Buffer,
+    intent: { principal: string; message: string; group?: string | undefined; run?: string | undefined },
+    expectedSha256?: string,
+  ): Promise<{ path: string; sha256: string; bytes: number; created: boolean }>;
+  /** `POST /vault/section` (the reconciler, T2-6). Throws the bridge's error — its `code` is the envelope's. */
+  section?(
+    path: string,
+    marker: "day",
+    body: string,
+    principal: string,
+    expectedOuterSha: string,
+    act?: { run?: string | undefined },
+  ): Promise<{ path: string; sha256: string; appended: boolean }>;
+}
+
+export interface BriefCtx extends PlanCtx {
+  vault?: BriefVault | undefined;
+  /** The resolved Scheduled config (manifest ⊕ `.metistry/scheduled.yaml`): `template`. Absent → the manifest's default. */
+  config?: Record<string, unknown> | undefined;
+}
+
+/** The template setting, from the resolved config or the default. A wrong kind is refused, never coerced. */
+export function briefConfig(config?: Record<string, unknown>): { template: string } {
+  const template = config?.[TEMPLATE_KEY] ?? DEFAULT_TEMPLATE;
+  if (typeof template !== "string" || template === "") {
+    throw new Error(`${COMPONENT}: config.${TEMPLATE_KEY} is ${JSON.stringify(template)} — it must be a vault path (routines.morning-brief.config in .metistry/scheduled.yaml); nothing was written`);
+  }
+  return { template };
+}
+
+// --- text from outside ---------------------------------------------------------
+
+/**
+ * A calendar string made safe to put on ONE line of markdown this routine
+ * writes: an invitation's title is someone else's text. No line breaks (a
+ * title cannot add a line — a task, a heading — to the owner's note), no HTML
+ * comment delimiters (it cannot forge a section or a prose marker), bounded.
+ */
+export function oneLine(value: unknown, max = MAX_EVENT_TEXT): string {
+  const text = String(value ?? "")
+    .replace(/<!--|-->/g, " ")
+    .replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
+/** A meeting as the brief and the section show it — retrieved facts only. */
+export interface Meeting {
+  start: string;
+  end: string;
+  /** "9:30 AM–10:00 AM", in the day's zone. */
+  when: string;
+  title: string;
+  location: string;
+  attendees: string[];
+}
+
+function clock(iso: string, timeZone: string): string | null {
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return null;
+  return new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone }).format(at);
+}
+
+/** Today's timed events, in start order and bounded — an all-day event has no "next up". */
+export function meetingsOf(events: readonly CalendarEvent[], timeZone: string): Meeting[] {
+  const out: Meeting[] = [];
+  for (const e of events) {
+    if (e.all_day === true || typeof e.start !== "string" || typeof e.end !== "string") continue;
+    const from = clock(e.start, timeZone);
+    const to = clock(e.end, timeZone);
+    if (from === null || to === null) continue;
+    const attendees = Array.isArray(e.attendees) ? e.attendees.map((a) => oneLine(a, 60)).filter(Boolean).slice(0, 6) : [];
+    out.push({ start: e.start, end: e.end, when: `${from}–${to}`, title: oneLine(e.title) || "(untitled)", location: oneLine(String(e.location ?? "").split("\n")[0]), attendees });
+  }
+  return out.sort((a, b) => a.start.localeCompare(b.start)).slice(0, MAX_NEXT_UP);
+}
+
+const meetingLine = (m: Meeting): string =>
+  `- ${m.when} · ${m.title}${m.location ? ` · ${m.location}` : ""}${m.attendees.length > 0 ? ` · with ${m.attendees.join(", ")}` : ""}`;
+
+const NO_CALENDAR = "_No calendar — the eventkit bridge is not reachable._";
+const NOTHING_TODAY = "_Nothing on your calendar today._";
+
+/** The prompt one meeting's slot carries (bounded like a template's). */
+export function nextUpPrompt(m: Meeting): string {
+  const who = m.attendees.length > 0 ? ` with ${m.attendees.join(", ")}` : "";
+  const prompt = `One line to prepare for "${m.title}" at ${m.when.split("–")[0]}${who}: what to bring, ask or follow up`;
+  return prompt.length > MAX_PROMPT_CHARS ? `${prompt.slice(0, MAX_PROMPT_CHARS - 1)}…` : prompt;
+}
+
+/**
+ * The Next Up list: each timed meeting, and under it ONE pending prose slot,
+ * numbered after the template's own. Returns the markdown and the slots.
+ */
+export function nextUpBlock(meetings: readonly Meeting[] | null, firstIndex: number, line: number): { markdown: string; requests: ProseRequest[] } {
+  if (meetings === null) return { markdown: NO_CALENDAR, requests: [] };
+  if (meetings.length === 0) return { markdown: NOTHING_TODAY, requests: [] };
+  const requests: ProseRequest[] = [];
+  const lines: string[] = [];
+  meetings.forEach((m, i) => {
+    const index = firstIndex + i;
+    const marker = proseMarker(index);
+    requests.push({ index, prompt: nextUpPrompt(m), using: null, marker, line });
+    lines.push(meetingLine(m), `  - ${marker} ${PROSE_PENDING}`);
+  });
+  return { markdown: lines.join("\n"), requests };
+}
+
+/**
+ * Put the Next Up block under the rendered file's `## Next Up` heading — or,
+ * when the template has none, at the end with the heading, above the
+ * provenance footer (which `renderTemplate` always writes as the last line).
+ */
+export function placeNextUp(markdown: string, block: string): string {
+  const lines = markdown.split("\n");
+  const at = lines.findIndex((l) => l.trim() === NEXT_UP_HEADING);
+  if (at !== -1) {
+    lines.splice(at + 1, 0, "", block);
+    return lines.join("\n").replace(/\n{3,}/g, "\n\n");
+  }
+  const footer = markdown.lastIndexOf("\n<!-- rendered by ");
+  const [head, tail] = footer === -1 ? [markdown.replace(/\n+$/, ""), "\n"] : [markdown.slice(0, footer).replace(/\n+$/, ""), markdown.slice(footer)];
+  return `${head}\n\n${NEXT_UP_HEADING}\n\n${block}\n${tail}`;
+}
+
+// --- the daily note's section ---------------------------------------------------
+
+export interface DaySectionInput {
+  date: string;
+  /** "7:00 AM" — each write stamps its time (screen 05 §15.5.1). */
+  at: string;
+  /** Whether `Journal/Plan/<date>.md` exists — embedded when it does, said when it does not. */
+  plan: boolean;
+  /** Today's meetings; null when the calendar could not be asked. */
+  meetings: readonly Meeting[] | null;
+}
+
+/**
+ * The section's whole body, model-free by construction: its inputs are a
+ * date, a clock time, one existence bit and the calendar's rows (each already
+ * `oneLine`d) — there is no parameter a model's words could arrive through.
+ * The standup is embedded, never copied (§2.5): at 7:00 it does not exist
+ * yet, and the embed shows it the moment it lands at 8:00.
+ */
+export function daySectionBody(input: DaySectionInput): string {
+  const { date } = input;
+  const meetings = input.meetings === null ? [NO_CALENDAR] : input.meetings.length === 0 ? [NOTHING_TODAY] : input.meetings.map(meetingLine);
+  return [
+    `_Morning Brief · ${input.at} · [[${briefPath(date).replace(/\.md$/, "")}|the brief]]_`,
+    "",
+    "### Plan",
+    "",
+    input.plan ? `![[Journal/Plan/${date}]]` : "_No plan was written for today._",
+    "",
+    "### Meetings",
+    "",
+    ...meetings,
+    "",
+    "### Standup",
+    "",
+    `![[Journal/Standup/${date}]]`,
+    "",
+  ].join("\n");
+}
+
+const codeOf = (err: unknown): string | undefined => {
+  const code = (err as { code?: unknown } | null)?.code;
+  return typeof code === "string" ? code : undefined;
+};
+
+/** One `note` request per broken note (deduped while one is pending) — C102: broken markers stop the write and raise a request, never a guess. */
+async function raiseSectionMissing(db: Db, path: string, date: string, reason: SectionMissingReason, line: number | null, body: string): Promise<void> {
+  const message = sectionMissingMessage(path, "day", reason, line);
+  const payload = {
+    title: `Today's section in ${path} could not be found`,
+    summary:
+      `${message} The Morning Brief wrote nothing into the note — Metistry never guesses where your text ends — and the brief itself is in ${briefPath(date)}. ` +
+      `Put the two markers back around the section (or delete both, and the heading \`${NOTE_SECTIONS.day.heading}\`, to have it added at the end).`,
+    refs: [path, briefPath(date)],
+    preview: body,
+    day_section: { day: date, path, reason, at_line: line },
+  };
+  // One while it waits: a routine runs once a morning, so a read before the
+  // insert is the whole dedupe (no second writer races it).
+  const open = await db.query(
+    `SELECT 1 FROM proposals WHERE kind = 'knowledge' AND decision = 'pending' AND source_agent = $1 AND payload->'day_section'->>'path' = $2 LIMIT 1`,
+    [COMPONENT, path],
+  );
+  if (open.rows.length > 0) return;
+  await db.query(`INSERT INTO proposals (kind, source_agent, trust, payload) VALUES ('knowledge', $1, 'internal', $2)`, [COMPONENT, JSON.stringify(payload)]);
+}
+
+/**
+ * Write the section, or say why not. Reads the note, computes the outer hash
+ * core's grammar computes (`scanNoteSection`), and hands the body to the
+ * section door with it — the reconciler checks the same hash and refuses an
+ * owner's edit that lands in between (`conflict`), which is retried ONCE from
+ * a fresh read and then left alone.
+ */
+export async function writeDaySection(db: Db, vault: BriefVault, date: string, body: string, runId?: number): Promise<{ state: DaySectionState; reason?: SectionMissingReason }> {
+  if (typeof vault.section !== "function") return { state: "no_section_door" };
+  const path = dailyNotePath(date);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const note = await vault.read(path);
+    if (note === null) return { state: "no_daily_note" };
+    const scan = scanNoteSection(note.content, "day");
+    if (scan.state === "missing") {
+      await raiseSectionMissing(db, path, date, scan.reason, scan.line, body);
+      return { state: "section_missing", reason: scan.reason };
+    }
+    try {
+      await vault.section(path, "day", body, PRINCIPAL, scan.outerSha256, runId !== undefined ? { run: String(runId) } : {});
+      return { state: "written" };
+    } catch (err) {
+      const code = codeOf(err);
+      if (code === "not_found") return { state: "no_daily_note" };
+      if (code === "conflict") continue; // the owner typed in between: read again, once
+      if (code === "section_missing") {
+        // the note changed shape between the read and the write; the next read names why
+        continue;
+      }
+      throw err;
+    }
+  }
+  return { state: "conflict" };
+}
+
+// --- bookkeeping ---------------------------------------------------------------
+
+/** Has a pass already written this date's brief? Only a write settles a date; a skip is recorded and the next run tries again. `meta.brief_for` is the discriminator — the runner's own row carries none. */
+async function written(db: Db, date: string): Promise<boolean> {
+  const { rows } = await db.query(
+    `SELECT 1 FROM runs
+     WHERE component = $1 AND kind = 'routine_run' AND ok AND meta->>'brief_for' = $2 AND meta->>'outcome' = 'acted'
+     LIMIT 1`,
+    [COMPONENT, date],
+  );
+  return rows.length > 0;
+}
+
+async function record(db: Db, date: string, reason: "wrote" | BriefSkip, meta: Record<string, unknown> = {}): Promise<void> {
+  const outcome = reason === "wrote" ? "acted" : `skipped:${reason}`;
+  await db.query(
+    `INSERT INTO runs (component, kind, ok, started_at, finished_at, meta)
+     VALUES ($1, 'routine_run', true, now(), now(), $2)`,
+    [COMPONENT, JSON.stringify({ brief_for: date, outcome, ...meta })],
+  );
+}
+
+async function reportUnreadable(db: Db, template: string, date: string, maxBytes: number): Promise<void> {
+  await db.query(`INSERT INTO proposals (kind, source_agent, trust, payload) VALUES ('report', $1, 'internal', $2)`, [
+    COMPONENT,
+    JSON.stringify({
+      title: `${template} could not be read — no Morning Brief for ${date}`,
+      summary: `The template is not readable text, or is larger than METISTRY_TEMPLATE_MAX_BYTES (${maxBytes} bytes). Nothing was written. Open it in Obsidian, or run \`metistry templates check\`.`,
+      refs: [template],
+    }),
+  ]);
+}
+
+function knownZone(tz: string | undefined): string | undefined {
+  if (tz === undefined) return undefined;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return tz;
+  } catch {
+    return undefined;
+  }
+}
+
+/** A calendar asked once per day however many directives and lists ask it — the template's `{{ calendar }}` and the Next Up list see the same rows. */
+function onceADay(calendar: CalendarProvider | null): CalendarProvider | null {
+  if (calendar === null) return null;
+  const asked = new Map<string, Promise<CalendarEvent[]>>();
+  return {
+    events(day: string): Promise<CalendarEvent[]> {
+      let p = asked.get(day);
+      if (p === undefined) {
+        p = calendar.events(day);
+        asked.set(day, p);
+      }
+      return p;
+    },
+  };
+}
+
+export interface BriefFileResult {
+  date: string;
+  path: string;
+  /** True only when this pass wrote the file. */
+  wrote: boolean;
+  /** True when today's file is there to link — written now, or by an earlier run this morning. */
+  exists: boolean;
+}
+
+/**
+ * The file pass: the brief's own file, the daily note's section, and the one
+ * turn. Returns what it did for the chat message to link, or null when there
+ * is no vault to do it in.
+ */
+export async function briefFile(db: Db, ctx: BriefCtx = {}): Promise<BriefFileResult | null> {
+  const vault = ctx.vault;
+  if (!vault) return null;
+  const env = ctx.env ?? process.env;
+  const now = ctx.now ?? new Date();
+  const { template } = briefConfig(ctx.config);
+  const readText = async (p: string): Promise<string | null> => (await vault.read(p))?.content.toString("utf8") ?? null;
+
+  const facts = profileFacts(await readText(PROFILE_PATH));
+  const timeZone = ctx.timeZone ?? knownZone(facts.timezone) ?? configuredTimeZone(env) ?? "UTC";
+  const morning = ctx.scheduledFor ?? now;
+  const date = calendarDate(morning, timeZone);
+  const path = briefPath(date);
+  const done = (wrote: boolean, exists = wrote): BriefFileResult => ({ date, path, wrote, exists });
+
+  if (await written(db, date)) {
+    console.log(`${COMPONENT}: ${path} is already written`);
+    return done(false, true);
+  }
+  if (facts.working_days === undefined) {
+    const why = `${PROFILE_PATH} does not say which days you work (\`working_days: [mon, tue, wed, thu, fri]\`) — Metistry discovers that from you and never assumes it, so no brief was written`;
+    console.log(`${COMPONENT}: ${why}`);
+    await record(db, date, "no_working_days", { why });
+    return done(false);
+  }
+
+  const maxBytes = intEnv("METISTRY_TEMPLATE_MAX_BYTES", DEFAULT_TEMPLATE_MAX_BYTES, env);
+  const templateText = await readText(template);
+  const skip = templateSkip(templateText, maxBytes);
+  if (skip !== null || templateText === null) {
+    const reason = skip ?? TEMPLATE_MISSING;
+    console.log(`${COMPONENT}: ${template} — ${reason}; no brief for ${date}`);
+    if (reason === TEMPLATE_UNREADABLE) await reportUnreadable(db, template, date, maxBytes);
+    await record(db, date, reason, { template, max_bytes: maxBytes });
+    return done(false);
+  }
+
+  const existing = await vault.read(path);
+  const owner = existing === null ? null : sourceOf(existing.content.toString("utf8"));
+  if (existing !== null && owner !== PRINCIPAL) {
+    const why = `${path} says \`source: ${owner ?? "(none — yours)"}\`, not \`${PRINCIPAL}\` — one writer per file, and this one is not mine`;
+    console.log(`${COMPONENT}: ${why}`);
+    await record(db, date, "user_owned", { path, source: owner, why });
+    return done(false);
+  }
+
+  // undefined = build one from the environment; null = the caller says there is none
+  const calendar = onceADay(ctx.calendar === undefined ? eventkitCalendar(ctx, timeZone, now) : ctx.calendar);
+  let meetings: Meeting[] | null = null;
+  if (calendar !== null) {
+    try {
+      meetings = meetingsOf(await calendar.events(date), timeZone);
+    } catch {
+      meetings = null; // §6.4: the brief still goes out, and says the calendar could not be asked
+    }
+  }
+
+  const render = await renderTemplate(templateText, {
+    templatePath: template,
+    source: PRINCIPAL,
+    queries: ctx.queries ?? NO_QUERIES,
+    calendar,
+    reader: vaultReader(vault),
+    ...(ctx.me !== undefined ? { me: ctx.me } : {}),
+    now: morning,
+    timeZone,
+    env,
+    renderedAt: now,
+    maxBytes,
+  });
+  if (render.skipped !== undefined) {
+    await record(db, date, render.skipped, { template });
+    return done(false);
+  }
+  const nextUp = nextUpBlock(meetings, render.proseRequests.length + 1, render.markdown.split("\n").length);
+  const markdown = placeNextUp(render.markdown, nextUp.markdown);
+  if (refuseMaterialised(markdown)) {
+    const why = `the render produced a task line with a minted \`^mt-\` anchor, which no routine may write (D4) — refusing to write ${path}`;
+    console.warn(`${COMPONENT}: ${why}`);
+    await record(db, date, "would_materialise", { path, why });
+    return done(false);
+  }
+
+  const run = ctx.runId !== undefined ? String(ctx.runId) : undefined;
+  const out = await vault.write(
+    path,
+    Buffer.from(markdown, "utf8"),
+    { principal: PRINCIPAL, message: `morning brief for ${date}`, ...(run !== undefined ? { run } : {}) },
+    existing?.sha256 ?? "",
+  );
+
+  // The section: model-free, the same act as the file (its run), and never
+  // the reason the brief itself fails — a note the owner has not opened is
+  // the ordinary 7:00 AM case.
+  const plan = (await vault.read(`Journal/Plan/${date}.md`)) !== null;
+  const at = clock(now.toISOString(), timeZone) ?? "";
+  const body = daySectionBody({ date, at, plan, meetings });
+  const section = await writeDaySection(db, vault, date, body, ctx.runId);
+
+  // ONE turn for every slot the file has; none, and no model is asked.
+  const requests = [...render.proseRequests, ...nextUp.requests];
+  const inboundId = requests.length > 0 ? await enqueueProseTurn(db, { component: COMPONENT, path, date, requests }) : undefined;
+
+  await record(db, date, "wrote", {
+    path,
+    bytes: out.bytes,
+    created: out.created,
+    template,
+    day_section: section.state,
+    ...(section.reason !== undefined ? { day_section_reason: section.reason } : {}),
+    next_up: meetings === null ? null : meetings.length,
+    prose_slots: requests.length,
+    ...(inboundId !== undefined ? { inbound_id: inboundId } : {}),
+    template_warnings: render.warnings.length,
+    ...(render.warnings.length > 0 ? { warnings: render.warnings.map((w) => `${template}:${w.line} ${w.message}`) } : {}),
+    truncated: render.truncated,
+  });
+  console.log(`${COMPONENT}: wrote ${path} (${out.bytes} bytes, ${requests.length} prose slot(s)); day section: ${section.state}`);
+  return done(true);
+}
+
+/**
+ * One brief pass: the file pass (when there is a vault), then the chat
+ * message. Returns 1 if either wrote the file or sent the message, else 0 —
+ * the runner turns that into `meta.outcome`: `acted` or `silent` (T1-4).
+ */
+export async function run(db: Db, ctx: BriefCtx = {}): Promise<number> {
   // auto-expiry first: un-acted items leave the queue but stay searchable.
   // A MIRROR never expires (K15, migration 0027): a row with a `source`
   // stands for something that lives elsewhere — a PR still waiting on the
@@ -261,8 +803,15 @@ export async function run(db: Db, ctx: RoutineCtx = {}): Promise<number> {
     [EXPIRE_DAYS],
   );
 
+  const file = await briefFile(db, ctx);
+  const sent = await message(db, ctx, expired.rows.length, file);
+  return file?.wrote === true || sent ? 1 : 0;
+}
+
+/** The chat message — the brief as it always was, opening with the file when there is one (C97: the message links there). Silence-default: nothing needs the user, no message. */
+async function message(db: Db, ctx: RoutineCtx, expiredCount: number, file: BriefFileResult | null): Promise<boolean> {
   const schedule = await sectionSchedule(ctx);
-  const requests = await sectionRequests(db, expired.rows.length);
+  const requests = await sectionRequests(db, expiredCount);
   const today = await sectionToday(db);
   const reviews = await sectionReviews(db);
   const areas = await sectionAreas(db);
@@ -271,9 +820,10 @@ export async function run(db: Db, ctx: RoutineCtx = {}): Promise<number> {
   // silence-default: emit only when something needs the user (a calendar
   // with events counts — the day needs planning)
   const hasEvents = !!schedule && !schedule[0]!.includes("nothing on the calendar");
-  if (!requests && !today && !reviews && !hasEvents && !system?.needsHelp) return 0;
+  if (!requests && !today && !reviews && !hasEvents && !system?.needsHelp) return false;
 
   const parts: string[] = ["☀️ morning brief"];
+  if (file?.exists) parts.push(`📄 ${file.path}`);
   if (schedule) parts.push("", "📅 Schedule:", ...schedule);
   if (today) parts.push("", "✅ Today:", ...today);
   if (reviews) parts.push("", "👀 Reviews waiting on you:", ...reviews);
@@ -282,8 +832,6 @@ export async function run(db: Db, ctx: RoutineCtx = {}): Promise<number> {
   if (system) parts.push("", "⚙️ What I've been doing:", ...system.lines);
   if (!schedule) parts.push("", "📅 Schedule & meeting prep arrive once the calendar bridge is connected.");
 
-  await db.query(`INSERT INTO outbound_messages (thread, text, kind) VALUES ('default', $1, 'brief')`, [
-    parts.join("\n"),
-  ]);
-  return 1;
+  await db.query(`INSERT INTO outbound_messages (thread, text, kind) VALUES ('default', $1, 'brief')`, [parts.join("\n")]);
+  return true;
 }

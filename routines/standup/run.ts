@@ -11,14 +11,17 @@
 //
 // The rules around that one write are mechanisms, not intentions:
 //
-//  1. **No model, anywhere in it** (invariant 4). §2.13 names the fold's
+//  1. **No model in the routine** (invariant 4). §2.13 names the fold's
 //     pattern — a skeleton, and ONE assistant turn for the `prose` slots —
-//     but `prose` renders only where the render's `source` is the fold's
-//     (`renderProse`, packages/core/src/template.ts), so a standup render
-//     has no slot to fill: every directive is filled here, and a `prose` line
-//     in the template renders §6.3.3's refusal note. Making `prose` legal in
-//     `Templates/Standup.md` is C103 (T3-6); until then there is no turn to
-//     take, and the manifest declares no `engine`.
+//     and C103 (T3-6) makes `prose` legal in a standup render: every other
+//     directive is filled here, each `prose` line is left as a pending
+//     marker, and when there is at least one the routine enqueues one turn
+//     (`enqueueProseTurn`, routines/prose-turn.ts). The assistant fills the
+//     slots through `knowledge_write`, which in this folder accepts a change
+//     to a pending slot's line and nothing else (`fillProseSlots`, core) —
+//     the file stays this routine's, written under its principal. The seeded
+//     `Templates/Standup.md` has no `prose` line, so the default standup
+//     still asks no model at all.
 //  2. **One writer per file, and never a note the owner owns** (§5.1). A
 //     standup file whose frontmatter `source:` is not this routine's —
 //     including one with no `source:` at all, which is the owner's (#231) —
@@ -61,6 +64,7 @@ import {
 } from "@foldedspacelabs/metistry-core";
 import type { Db } from "../morning-brief/run.js";
 import { NO_QUERIES, eventkitCalendar, refuseMaterialised, sourceOf, type PlanCtx, type PlanVault } from "../plan-tomorrow/run.js";
+import { enqueueProseTurn } from "../prose-turn.js";
 import { vaultReader } from "../vault-reader.js";
 
 export const COMPONENT = "standup";
@@ -306,11 +310,15 @@ export async function run(db: Db, ctx: StandupCtx = {}): Promise<number> {
     { principal: PRINCIPAL, message: `standup for ${date}` },
     existing?.sha256 ?? "", // "" = must not exist; otherwise compare-and-swap on what we just read
   );
+  // ONE turn for the file's prose slots (C103); none, and no model is asked.
+  const inboundId = render.proseRequests.length > 0 ? await enqueueProseTurn(db, { component: COMPONENT, path, date, requests: render.proseRequests }) : undefined;
   await record(db, date, "wrote", {
     path,
     bytes: out.bytes,
     created: out.created,
     template,
+    prose_slots: render.proseRequests.length,
+    ...(inboundId !== undefined ? { inbound_id: inboundId } : {}),
     ...(onCalendar !== undefined ? { on_calendar: onCalendar } : {}),
     template_warnings: render.warnings.length,
     ...(render.warnings.length > 0 ? { warnings: render.warnings.map((w) => `${template}:${w.line} ${w.message}`) } : {}),

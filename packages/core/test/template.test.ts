@@ -19,9 +19,12 @@ import { join } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { describe, expect, it } from "vitest";
 import { TASK_FILTER_PARAM_SPEC } from "../src/task-filter.js";
+import { PROSE_PENDING } from "../src/prose-slots.js";
 import {
   DEFAULT_RECURRING_MAX_PER_DAY,
   FOLD_SOURCE,
+  PROSE_REFUSAL,
+  PROSE_SOURCES,
   RECURRING_QUERY,
   REQUESTS_QUERY,
   TEMPLATE_ENGINE_VERSION,
@@ -355,9 +358,29 @@ describe("{{ prose }}", () => {
 
   it("is refused outside a fold template, every time, and the file still renders", async () => {
     const out = await render(`# Plan\n\n${template}\n\ntail`, { source: "plan-tomorrow" });
-    expect(out.markdown).toContain("> ⚠️ metistry: `prose` is only available in a fold template (§6.3) (Templates/Plan.md:3)");
+    expect(out.markdown).toContain("> ⚠️ metistry: `prose` is only available in the fold's, the Morning Brief's and the Standup's templates (§6.3, C103) (Templates/Plan.md:3)");
     expect(out.markdown).toContain("tail");
     expect(out.proseRequests).toEqual([]);
+  });
+
+  it("C103: legal in the Morning Brief's and the Standup's renders too — a pending slot each, never a model call here", async () => {
+    for (const source of ["morning-brief", "standup"]) {
+      const out = await render(`# ${source}\n\n{{ prose "what matters today" }}\n`, { source });
+      expect(out.proseRequests, source).toEqual([{ index: 1, prompt: "what matters today", using: null, marker: "<!-- metistry:prose 1 -->", line: 3 }]);
+      expect(out.markdown, source).toContain(`<!-- metistry:prose 1 --> ${PROSE_PENDING}`);
+      expect(out.warnings, source).toEqual([]);
+      expect(validateTemplate('{{ prose "x" }}\n', { ...at, source }).ok, source).toBe(true);
+    }
+    expect([...PROSE_SOURCES]).toEqual([FOLD_SOURCE, "standup", "morning-brief"]);
+  });
+
+  it("…and still refused for every other writer: Tomorrow's Plan and the owner's own note stay model-free", async () => {
+    for (const source of ["plan-tomorrow", USER_SOURCE, "standup-draft", "weekly-review"]) {
+      const out = await render('{{ prose "anything" }}\ntail', { source });
+      expect(out.proseRequests, source).toEqual([]);
+      expect(out.markdown, source).toContain(PROSE_REFUSAL);
+      expect(validateTemplate('{{ prose "x" }}\n', { ...at, source }).ok, source).toBe(false);
+    }
   });
 
   it("bounds the prompt — a slot is a sentence, not a brief", async () => {
@@ -454,7 +477,7 @@ describe("§6.4 — every failure renders a visible note, and none is fatal", ()
 
   it("row 5 — `prose` in a template the assistant may not write", async () => {
     const out = await render('{{ prose "anything" }}\ntail', { source: "standup-draft" });
-    expect(out.markdown).toContain("`prose` is only available in a fold template (§6.3)");
+    expect(out.markdown).toContain("`prose` is only available in the fold's, the Morning Brief's and the Standup's templates (§6.3, C103)");
     expect(out.markdown).toContain("tail");
   });
 
@@ -558,12 +581,13 @@ describe("validateTemplate", () => {
   });
 });
 
-describe("the six seeded templates (the contract with #237)", () => {
+describe("the seven seeded templates (the contract with #237)", () => {
   const names = readdirSync(SEED).filter((f) => f.endsWith(".md")).sort();
-  const sourceOf = (name: string): string => (name === "Fold.md" ? FOLD_SOURCE : name === "Daily.md" || name === "Meeting.md" || name === "Weekly.md" ? USER_SOURCE : "plan-tomorrow");
+  const WRITERS: Record<string, string> = { "Fold.md": FOLD_SOURCE, "Brief.md": "morning-brief", "Standup.md": "standup", "Plan.md": "plan-tomorrow" };
+  const sourceOf = (name: string): string => WRITERS[name] ?? USER_SOURCE;
 
-  it("ships six", () => {
-    expect(names).toEqual(["Daily.md", "Fold.md", "Meeting.md", "Plan.md", "Standup.md", "Weekly.md"]);
+  it("ships seven", () => {
+    expect(names).toEqual(["Brief.md", "Daily.md", "Fold.md", "Meeting.md", "Plan.md", "Standup.md", "Weekly.md"]);
   });
 
   for (const name of names) {

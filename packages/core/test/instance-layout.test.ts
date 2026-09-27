@@ -19,6 +19,8 @@ import {
   isUserOwnedPath,
   isVaultPath,
   JOURNAL_MACHINE_DIRS,
+  JOURNAL_ROUTINE_DIRS,
+  journalRoutineOf,
   MAX_AREA_PREFIX_LEN,
   validAgentAreaGrant,
   validAreaPrefix,
@@ -147,12 +149,24 @@ describe("isUserOwnedPath (daily-flow-spec §5.1 D10, §6.6: discovered, never a
     }
   });
 
-  it("Journal/Plan, Journal/Fold and Journal/Standup are each a routine's own reserved subdirectory, not the user's", () => {
-    expect([...JOURNAL_MACHINE_DIRS]).toEqual(["Plan", "Fold", "Standup"]);
+  it("Journal/Plan, Journal/Fold, Journal/Standup and Journal/Brief are each a machine's own reserved subdirectory, not the user's", () => {
+    expect([...JOURNAL_MACHINE_DIRS]).toEqual(["Plan", "Fold", "Standup", "Brief"]);
     for (const dir of JOURNAL_MACHINE_DIRS) {
       expect(isUserOwnedPath(`Journal/${dir}/2026-09-21.md`), dir).toBe(false);
       expect(isUserOwnedPath(`Journal/${dir}`), dir).toBe(false);
     }
+  });
+
+  it("names the routine that owns each folder a routine writes — and none for the fold's, which the assistant writes (ruling (a), W1)", () => {
+    expect({ ...JOURNAL_ROUTINE_DIRS }).toEqual({ Plan: "plan-tomorrow", Standup: "standup", Brief: "morning-brief" });
+    expect(journalRoutineOf("Journal/Brief/2026-09-28.md")).toBe("morning-brief");
+    expect(journalRoutineOf("Journal/Standup/2026-09-28.md")).toBe("standup");
+    expect(journalRoutineOf("Journal/Plan/2026-09-29.md")).toBe("plan-tomorrow");
+    expect(journalRoutineOf("Journal/Brief/Old/2026-09-28.md")).toBe("morning-brief"); // anywhere under it
+    for (const p of ["Journal/Fold/2026-09-28.md", "Journal/2026-09-28.md", "Journal/Brief", "journal/Brief/x.md", "Journal/brief/x.md", "Areas/Brief/x.md", "Journal/toString/x.md", "Journal/__proto__/x.md", ""]) {
+      expect(journalRoutineOf(p), p).toBeNull();
+    }
+    for (const dir of Object.keys(JOURNAL_ROUTINE_DIRS)) expect(JOURNAL_MACHINE_DIRS as readonly string[]).toContain(dir);
   });
 
   it("leaves everything else alone — Areas/, People/, now.md, the machinery", () => {

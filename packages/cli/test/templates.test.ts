@@ -28,9 +28,10 @@ describe("templatesCheck", () => {
   it("reads every template `metistry init` stamps, and finds no error in any of them", async () => {
     const report = await templatesCheck({ instanceDir: await instance() });
     expect(report.absent).toBeNull();
-    expect(report.checked).toBe(6);
+    expect(report.checked).toBe(7);
     expect(report.errors).toBe(0);
     expect(report.templates.map((t) => t.path).sort()).toEqual([
+      "Templates/Brief.md",
       "Templates/Daily.md",
       "Templates/Fold.md",
       "Templates/Meeting.md",
@@ -43,6 +44,7 @@ describe("templatesCheck", () => {
   it("knows which routine renders which seeded template, because `prose`'s legality turns on it", () => {
     expect(TEMPLATE_SOURCES["Plan.md"]).toBe("plan-tomorrow");
     expect(TEMPLATE_SOURCES["Fold.md"]).toBe("knowledge-fold");
+    expect(TEMPLATE_SOURCES["Brief.md"]).toBe("morning-brief");
     expect(TEMPLATE_SOURCES["Daily.md"]).toBe("user");
   });
 
@@ -64,7 +66,18 @@ describe("templatesCheck", () => {
     await writeFile(join(dir, "Templates", "Plan.md"), '---\nsource: user\n---\n# Plan\n\n{{ prose "summarise today" }}\n');
     const report = await templatesCheck({ instanceDir: dir, file: "Plan.md" });
     expect(report.errors).toBe(1);
-    expect(report.templates[0]?.findings[0]?.message).toContain("only available in a fold template");
+    expect(report.templates[0]?.findings[0]?.message).toContain("only available in the fold's, the Morning Brief's and the Standup's templates");
+  });
+
+  it("C103: the Morning Brief's and the Standup's `prose` is legal — a note, never an error", async () => {
+    const dir = await instance();
+    await writeFile(join(dir, "Templates", "Standup.md"), '---\nsource: user\n---\n# Standup\n\n{{ prose "say what is blocked" }}\n');
+    for (const file of ["Brief.md", "Standup.md"]) {
+      const report = await templatesCheck({ instanceDir: dir, file });
+      expect(report.errors, file).toBe(0);
+      expect(report.templates[0]?.source, file).toBe(file === "Brief.md" ? "morning-brief" : "standup");
+      expect(report.templates[0]?.findings.filter((f) => f.message.includes("prose")).every((f) => f.severity === "note"), file).toBe(true);
+    }
   });
 
   it("calls the same directive a note in the fold's own template", async () => {
@@ -97,7 +110,7 @@ describe("renderTemplatesCheck", () => {
     expect(text).toContain("Templates/Broken.md");
     expect(text).toContain("Templates/Broken.md:4");
     expect(text).toContain("unknown directive `nope`");
-    expect(text).toContain("7 templates, 1 error");
+    expect(text).toContain("8 templates, 1 error");
   });
 });
 
@@ -115,7 +128,7 @@ describe("metistry templates check", () => {
   it("exits 0 on a vault whose templates read", async () => {
     const r = await run(["templates", "check"], await instance());
     expect(r.code).toBe(0);
-    expect(r.out).toContain("6 templates, 0 errors");
+    expect(r.out).toContain("7 templates, 0 errors");
   });
 
   it("exits 1 when a template has an error, and names it", async () => {
@@ -135,7 +148,7 @@ describe("metistry templates check", () => {
   it("--json is the same report as a document", async () => {
     const r = await run(["templates", "check", "--json"], await instance());
     const report = JSON.parse(r.out) as { checked: number; errors: number; templates: { path: string; source: string | null }[] };
-    expect(report.checked).toBe(6);
+    expect(report.checked).toBe(7);
     expect(report.errors).toBe(0);
     expect(report.templates.find((t) => t.path === "Templates/Fold.md")?.source).toBe("knowledge-fold");
   });

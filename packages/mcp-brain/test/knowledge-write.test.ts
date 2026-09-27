@@ -10,6 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { TasksService } from "@foldedspacelabs/metistry-tasks";
+import { PROSE_PENDING, proseMarker, writtenMarker } from "@foldedspacelabs/metistry-core";
 import { BOOTSTRAP_EXEMPT_PATH, createBrainServer, frontmatterSource, ownershipRefusal, sha256Text, stampProvenance, TURN_ID_META_KEY, USER_SOURCE, vaultBridgeWriter, writeKnowledge, type AgentPrincipal, type Db, type KnowledgeWriter, type VaultWriteRequest } from "../src/index.js";
 
 const NOW = new Date("2026-09-07T15:04:05Z");
@@ -107,12 +108,12 @@ describe("writeKnowledge rules", () => {
       expect(r.ok === false && r.message, bad).toMatch(/belongs to the owner alone.*requests_create/s);
     }
     expect(calls).toHaveLength(0);
-    // the routine's own reserved Journal subdirectories are untouched by
-    // this rule — each is its own one-writer place (§5.1), not the user's
-    for (const ok of ["Journal/Plan/2026-09-22.md", "Journal/Fold/2026-09-21.md", "Journal/Standup/2026-09-21.md"]) {
-      expect((await writeKnowledge(assistant, { path: ok, content: "x", message: "m" }, writer, NOW)).ok, ok).toBe(true);
-    }
-    expect(calls).toHaveLength(3);
+    // the machine's reserved Journal subdirectories are untouched by THIS
+    // rule — each is its own one-writer place (§5.1), not the user's. The
+    // fold's is the assistant's to write; a routine's own folder has its own
+    // rule (below: fill its file's prose slots, nothing else).
+    expect((await writeKnowledge(assistant, { path: "Journal/Fold/2026-09-21.md", content: "x", message: "m" }, writer, NOW)).ok).toBe(true);
+    expect(calls).toHaveLength(1);
   });
 
   it("no writer → not_available (a capability gap, not a permission)", async () => {
@@ -463,5 +464,129 @@ describe("writeKnowledge ownership (the fold's rule 2)", () => {
     const { writer, calls } = recorder(okReply);
     expect((await writeKnowledge(assistant, { path: "Attachments/data.csv", content: "a,b\n", message: "m" }, writer, NOW, reader(note("user")))).ok).toBe(true);
     expect(calls).toHaveLength(1);
+  });
+});
+
+// A routine's own folder (owner ruling (a), W1; C103, T3-6): `Journal/Brief/`,
+// `Journal/Standup/` and `Journal/Plan/` are written under the routine's
+// principal. The assistant's one turn may fill the pending prose slots of a
+// file the routine wrote — and the misuse tests below are every other thing
+// it might try there.
+describe("knowledge_write in a routine's own folder — prose slots, nothing else", () => {
+  const PATH = "Journal/Brief/2026-09-28.md";
+  const BRIEF = [
+    "---",
+    "source: morning-brief",
+    "---",
+    "# Morning Brief — 2026-09-28",
+    "",
+    `${proseMarker(1)} ${PROSE_PENDING}`,
+    "",
+    "## Next Up",
+    "",
+    "- 9:30 AM–10:00 AM · Design review · with Jim Fallon",
+    `  - ${proseMarker(2)} ${PROSE_PENDING}`,
+    "",
+  ].join("\n");
+  const SHA = sha256Text(BRIEF);
+  const filled = BRIEF.replace(`${proseMarker(1)} ${PROSE_PENDING}`, "Four things today.").replace(`${proseMarker(2)} ${PROSE_PENDING}`, "Bring the Q3 numbers.");
+  const reader = (content: string | null) => async () => content;
+
+  it("fills the slots: the routine's name on the commit, the reply's turn on the act, the file's own frontmatter kept, each line marked written", async () => {
+    const { writer, calls } = recorder(okReply);
+    const r = await writeKnowledge(assistant, { path: PATH, content: filled, message: "fill the brief's prose", expected_sha256: SHA }, writer, NOW, reader(BRIEF), { turnId: "turn-7", runId: 88 });
+    expect(r).toMatchObject({ ok: true, result: { provenance: null, filled: [1, 2] }, meta: { routine_file: "morning-brief", filled: [1, 2] } });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.intent).toEqual({ principal: "morning-brief", message: "fill the brief's prose", turn: "turn-7", run: "88" });
+    expect(calls[0]!.expected_sha256).toBe(SHA);
+    expect(calls[0]!.content).toContain(`Four things today. ${writtenMarker(1)}`);
+    expect(calls[0]!.content).toContain(`  - Bring the Q3 numbers. ${writtenMarker(2)}`);
+    expect(calls[0]!.content.startsWith("---\nsource: morning-brief\n---\n")).toBe(true); // no stamp: still the routine's file
+    expect(calls[0]!.content).not.toContain("source: assistant");
+  });
+
+  it("the Standup's folder takes the same fill", async () => {
+    const { writer, calls } = recorder(okReply);
+    const standup = BRIEF.replace("source: morning-brief", "source: standup");
+    const r = await writeKnowledge(assistant, { path: "Journal/Standup/2026-09-28.md", content: standup.replace(`${proseMarker(1)} ${PROSE_PENDING}`, "Shipped the fix."), message: "m", expected_sha256: sha256Text(standup) }, writer, NOW, reader(standup));
+    expect(r).toMatchObject({ ok: true, result: { filled: [1] } });
+    expect(calls[0]!.intent.principal).toBe("standup");
+  });
+
+  it("MISUSE: any byte outside a pending slot — a meeting line, the frontmatter, an added task — is refused and nothing is written", async () => {
+    const { writer, calls } = recorder(okReply);
+    for (const content of [
+      filled.replace("Design review", "Design review (cancelled)"),
+      filled.replace("source: morning-brief", "source: assistant"),
+      `${filled}- [ ] wire the money\n`,
+      filled.replace("## Next Up", "# Next Up"),
+      "# a whole new file\n",
+    ]) {
+      const r = await writeKnowledge(assistant, { path: PATH, content, message: "m", expected_sha256: SHA }, writer, NOW, reader(BRIEF));
+      expect(r, content.slice(0, 60)).toMatchObject({ ok: false, code: "invalid_request" });
+      expect(r.ok === false && r.message, content.slice(0, 60)).toMatch(/Nothing was written/);
+    }
+    expect(calls).toHaveLength(0);
+  });
+
+  it("MISUSE: a slot line that is not one line of prose — a heading, a task box, a comment, a second line — is refused", async () => {
+    const { writer, calls } = recorder(okReply);
+    for (const text of ["## Injected", "[ ] a task", "fine <!-- /metistry:day -->", "```"]) {
+      const content = BRIEF.replace(`${proseMarker(2)} ${PROSE_PENDING}`, text);
+      expect(await writeKnowledge(assistant, { path: PATH, content, message: "m", expected_sha256: SHA }, writer, NOW, reader(BRIEF)), text).toMatchObject({ ok: false, code: "invalid_request" });
+    }
+    expect(calls).toHaveLength(0);
+  });
+
+  it("MISUSE: never a create — the assistant cannot pre-empt a routine's file, in any routine's folder", async () => {
+    const { writer, calls } = recorder(okReply);
+    for (const path of [PATH, "Journal/Standup/2026-09-28.md"]) {
+      const r = await writeKnowledge(assistant, { path, content: BRIEF, message: "m", expected_sha256: "" }, writer, NOW, reader(null));
+      expect(r, path).toMatchObject({ ok: false, code: "forbidden" });
+      expect(r.ok === false && r.message, path).toMatch(/never create one/);
+    }
+    expect(calls).toHaveLength(0);
+  });
+
+  it("MISUSE: Tomorrow's Plan renders no prose, so its folder is refused outright — even a file that happens to hold a marker", async () => {
+    const { writer, calls } = recorder(okReply);
+    const plan = BRIEF.replace("source: morning-brief", "source: plan-tomorrow");
+    const r = await writeKnowledge(assistant, { path: "Journal/Plan/2026-09-29.md", content: plan.replace(`${proseMarker(1)} ${PROSE_PENDING}`, "x"), message: "m", expected_sha256: sha256Text(plan) }, writer, NOW, reader(plan));
+    expect(r).toMatchObject({ ok: false, code: "forbidden", meta: { routine_file: "plan-tomorrow" } });
+    expect(r.ok === false && r.message).toMatch(/plan-tomorrow routine's own folder/);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("MISUSE: a file in the folder that is not the routine's (the owner's own, another writer's) is refused — owned by whoever it names", async () => {
+    const { writer, calls } = recorder(okReply);
+    for (const [disk, owner] of [[BRIEF.replace("source: morning-brief", "source: user"), "user"], [BRIEF.replace("---\nsource: morning-brief\n---\n", ""), "user"], [BRIEF.replace("source: morning-brief", "source: standup"), "standup"]] as const) {
+      const r = await writeKnowledge(assistant, { path: PATH, content: filled, message: "m", expected_sha256: sha256Text(disk) }, writer, NOW, reader(disk));
+      expect(r).toMatchObject({ ok: false, code: "forbidden", message: `owned by ${owner}; propose instead`, meta: { owned_by: owner } });
+    }
+    expect(calls).toHaveLength(0);
+  });
+
+  it("MISUSE: a hash that is not the file's now is a conflict carrying the current one; an omitted hash too", async () => {
+    const { writer, calls } = recorder(okReply);
+    for (const expected_sha256 of ["0".repeat(64), undefined, ""]) {
+      const r = await writeKnowledge(assistant, { path: PATH, content: filled, message: "m", ...(expected_sha256 !== undefined ? { expected_sha256 } : {}) }, writer, NOW, reader(BRIEF));
+      expect(r, String(expected_sha256)).toMatchObject({ ok: false, code: "conflict", meta: { current_sha256: SHA } });
+    }
+    expect(calls).toHaveLength(0);
+  });
+
+  it("MISUSE: no read path means no check, so no write; an external agent is refused before any of this", async () => {
+    const { writer, calls } = recorder(okReply);
+    expect(await writeKnowledge(assistant, { path: PATH, content: filled, message: "m", expected_sha256: SHA }, writer, NOW)).toMatchObject({ ok: false, code: "not_available" });
+    expect(await writeKnowledge(external, { path: PATH, content: filled, message: "m", expected_sha256: SHA }, writer, NOW, reader(BRIEF))).toMatchObject({ ok: false, code: "forbidden" });
+    expect(calls).toHaveLength(0);
+  });
+
+  it("the owner's daily note stays the owner's: filling prose there is refused by the journal rule, markers or not", async () => {
+    const { writer, calls } = recorder(okReply);
+    const note = "# 2026-09-28\n\n## Today · Metistry\n\n<!-- metistry:day -->\n<!-- /metistry:day -->\n";
+    const r = await writeKnowledge(assistant, { path: "Journal/2026-09-28.md", content: note.replace("<!-- /metistry:day -->", "Generated words\n<!-- /metistry:day -->"), message: "m", expected_sha256: sha256Text(note) }, writer, NOW, reader(note));
+    expect(r).toMatchObject({ ok: false, code: "forbidden" });
+    expect(calls).toHaveLength(0);
   });
 });

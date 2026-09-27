@@ -19,9 +19,7 @@ tags: [template]
 ## Meetings
 
 <!--
-  Once Journal/Plan, Journal/Standup and Journal/Fold hold today's files,
-  embed them here so this page is the one you open (§5.1):
-  ![[Journal/Plan/<today>]]
-  ![[Journal/Standup/<today>]]
-  ![[Journal/Fold/<today>]]
+  The "Today · Metistry" section above is Metistry's: the Morning Brief fills
+  it with the day's plan, meetings and standup, and Close the Day with what
+  happened. Move it anywhere; everything outside the two markers is yours.
 -->

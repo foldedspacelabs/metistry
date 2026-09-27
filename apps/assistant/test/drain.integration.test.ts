@@ -69,6 +69,25 @@ describe.skipIf(!hasDb)("assistant drain", () => {
     expect(run.rows[0]).toMatchObject({ ok: true, tokens_in: 10, tokens_out: 5, cost_usd: 0.001, tools_used: { mcp__brain__capture: 1 }, cache_read: 40, cache_write: 6, thread, finished: true });
   });
 
+  it("the turn row carries the turn handle the engine was given, from the in-flight insert on, and the session it ran in — the session archive's two keys (T3-9)", async () => {
+    const id = await enqueue("which handle?", { route: { kind: "model", tier: "default", model: "haiku", text: "which handle?", routed_by: "rule" } });
+    const specs: string[] = [];
+    let inFlight: string | undefined;
+    const engine: Engine = async (prompt, spec) => {
+      specs.push(String(spec.turnId));
+      // the row exists before the engine answers, and already names the turn
+      const r = await pool.query(`SELECT meta->>'turn_id' AS turn_id FROM runs WHERE component='assistant' AND kind='turn' AND (meta->>'message_id')::bigint = $1`, [id]);
+      inFlight = r.rows[0]?.turn_id;
+      return fakeEngine(prompt, spec);
+    };
+    expect(await drainOne(pool, engine, tiers)).toBe(true);
+    const run = await pool.query(`SELECT meta->>'turn_id' AS turn_id, meta->>'session_id' AS session_id FROM runs WHERE component='assistant' AND kind='turn' AND (meta->>'message_id')::bigint = $1`, [id]);
+    expect(specs).toHaveLength(1);
+    expect(specs[0]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(inFlight).toBe(specs[0]);
+    expect(run.rows[0]).toEqual({ turn_id: specs[0], session_id: sdkSession });
+  });
+
   it("second turn on the thread resumes the session", async () => {
     const id = await enqueue("again");
     await drainOne(pool, fakeEngine, tiers);

@@ -6,6 +6,7 @@ import { DEFAULT_BRIEF_THREAD_BYTES, drainCrewOne } from "./crew-drain.js";
 import { makeEngine } from "./engine.js";
 import { makeBudgetGuard } from "./budgets.js";
 import { pgSessionStore } from "./sessions.js";
+import { pgSessionArchive } from "./archive.js";
 import { mcpToolHost, NO_TOOLS } from "./tools.js";
 import { brainConfigFromEnv, brainToolNames } from "./brain.js";
 import { loadSystemPrompt } from "./prompt.js";
@@ -126,7 +127,11 @@ const engine = makeEngine({
   systemPrompt: loaded?.prompt,
   guard,
   sessions: pgSessionStore(pool),
-  tools: () => (brain ? mcpToolHost({ url: brain.url, token: brain.token, allow: brainToolNames() }) : NO_TOOLS),
+  // Every turn, chat and machine-enqueued alike, lands in the session archive
+  // (archive.ts): redacted, 30 days, unfolded until the session fold reads it.
+  archive: pgSessionArchive(pool),
+  // The turn's own handle, so its calls and its archived row share one id.
+  tools: (spec) => (brain ? mcpToolHost({ url: brain.url, token: brain.token, allow: brainToolNames(), turnId: spec.turnId }) : NO_TOOLS),
   ...(process.env.METISTRY_MAX_TURNS ? { maxTurns: intEnv("METISTRY_MAX_TURNS", 12) } : {}),
 });
 const shown = engineReady.assignment!;

@@ -49,6 +49,15 @@ with no new row kind and nothing new for the PWA to render. One
 
 `[sig:…]` is the dedupe key and the handle a future `ack` would name.
 
+The alert is a push; what the owner **answers** is a request (C96, T2-9). A
+failed **routine** also raises one `report` in the Needs You queue per
+signature — when it last ran cleanly, when it failed, and *Try Again* — and
+it clears itself the next time the routine succeeds. A preflight miss on a
+**secret** (a `requires.env` variable, or the engine's `auth.secret`) raises
+one `secret_failure` request naming every component it stopped, cleared once
+the variable is set. Neither is raised again after an answer until what it
+was about has recovered (`docs/ops/client-api.md`, *Events become requests*).
+
 ## 3. Preflight before spend
 
 A collector or routine may declare what it needs, and the runner checks it

@@ -327,6 +327,10 @@ export function renderConsoleCallError(r: ConsoleCallResult): string {
 //        {id, cancel: true}                         — ends a stream
 //   out  {id, status, body, replayed?}              — the console answered
 //        {id, event: {id, type, data}}              — one frame of an open stream
+//        {id, event: {id}}                          — the stream's position with
+//                                                     nothing to dispatch (the
+//                                                     console's cursor for a
+//                                                     fresh subscriber)
 //        {id, ended: "cancelled" | "closed"}        — a stream's last line (or
 //                                                     a request cancelled before
 //                                                     its answer)
@@ -427,13 +431,25 @@ function parseSessionRequest(o: Record<string, unknown>, id: SessionId, target: 
  * console's heartbeat. `data` is parsed as JSON and left as text when it is
  * not; an unknown `type` passes through (the client ignores types it does
  * not know, so an additive type on a newer console breaks nothing).
+ *
+ * A block with an `id:` and no `data:` dispatches nothing, but it still moves
+ * the stream's position (WHATWG: the last event ID is set before the empty
+ * data buffer returns). The console sends exactly that to a fresh subscriber
+ * — its cursor, so a client that hears nothing before a reconnect resumes
+ * from there rather than from nothing — and it is passed on as `{id}` alone:
+ * no `type`, no `data`, nothing to refetch, only an id to hand back as
+ * `last_event_id`. Dropping it left a session client with no cursor at all
+ * until the first real event.
  */
-async function* sseFrames(body: ReadableStream<Uint8Array>): AsyncGenerator<{ id?: string; type: string; data: unknown }> {
+type SseFrame = { id?: string; type: string; data: unknown } | { id: string };
+
+async function* sseFrames(body: ReadableStream<Uint8Array>): AsyncGenerator<SseFrame> {
   const decoder = new TextDecoder();
   let buffer = "";
   let id: string | undefined;
   let type = "";
   let data: string[] = [];
+  let sawId = false; // this block carried an `id:` line
   const reader = body.getReader();
   try {
     for (;;) {
@@ -453,16 +469,22 @@ async function* sseFrames(body: ReadableStream<Uint8Array>): AsyncGenerator<{ id
               /* not JSON: the text stands */
             }
             yield { ...(id !== undefined ? { id } : {}), type: type || "message", data: parsed };
+          } else if (sawId && id !== undefined && id !== "") {
+            yield { id }; // the cursor: a position with nothing to dispatch
           }
           type = "";
           data = [];
+          sawId = false;
           continue;
         }
         if (line.startsWith(":")) continue;
         const colon = line.indexOf(":");
         const field = colon === -1 ? line : line.slice(0, colon);
         const value = colon === -1 ? "" : line.slice(colon + 1).replace(/^ /, "");
-        if (field === "id") id = value;
+        if (field === "id") {
+          id = value;
+          sawId = true;
+        }
         else if (field === "event") type = value;
         else if (field === "data") data.push(value);
       }

@@ -174,6 +174,16 @@ public struct RefreshPolicy: Sendable, Equatable {
     /// Configuration, not activity: asked when a pane opens, not on a clock.
     public static let configuration = RefreshPolicy(interval: 600)
 
+    /// The clock of a read the event stream speaks for, while it is live
+    /// (§2.20, T5-7): the events say when to ask, and this slow check catches
+    /// the one kind of change no table write announces — a snoozed request
+    /// coming due, a clock rolling over a day.
+    public var whileLive: RefreshPolicy {
+        RefreshPolicy(interval: max(interval, Self.liveCheck), backoffCeiling: max(backoffCeiling, Self.liveCheck))
+    }
+
+    static let liveCheck: TimeInterval = 300
+
     public func nextDelay(consecutiveFailures: Int) -> TimeInterval {
         guard consecutiveFailures > 0 else { return interval }
         let doubled = interval * pow(2, Double(min(consecutiveFailures, 8)))

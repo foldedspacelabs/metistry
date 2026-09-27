@@ -318,6 +318,10 @@ public final class ShellModel {
     @ObservationIgnored private var countFailures = 0
     @ObservationIgnored private var lastIdentityAttempt: Date?
     @ObservationIgnored private var lastUsageAttempt: Date?
+    /// The live-changes subscription, once `follow` is called (T5-7).
+    @ObservationIgnored private weak var events: LiveEvents?
+    /// A resync said the count may have moved: ask at the next tick.
+    @ObservationIgnored private var countInvalidated = false
 
     /// Usage moves at the pace of spend, not of a queue.
     static let usagePolicy = RefreshPolicy(interval: 60)
@@ -364,6 +368,7 @@ public final class ShellModel {
         forwardStack.removeAll()
         lastCountAttempt = nil
         countFailures = 0
+        countInvalidated = false
         lastIdentityAttempt = nil
         lastUsageAttempt = nil
     }
@@ -469,6 +474,39 @@ public final class ShellModel {
         }
     }
 
+    // MARK: Live changes (T5-7)
+
+    /// Take the count, the name and the gauge from the stream. The session's
+    /// subscription outlives an instance switch, so this is called once.
+    public func follow(_ events: LiveEvents) {
+        self.events = events
+        events.watch([.needsYou, .usage, .identity]) { [weak self] event in
+            guard let self else { return false }
+            self.receive(event)
+            return true
+        }
+    }
+
+    /// `needs_you.changed` carries the count the badge shows — the same
+    /// filter `GET /api/needs-you/count` applies — so it is applied as it
+    /// stands, with no refetch. Anything else marks its read due.
+    func receive(_ event: ConsoleEvent) {
+        if case .needsYouChanged(let count) = event.change {
+            countFailures = 0
+            countInvalidated = false
+            apply(waiting: count)
+            return
+        }
+        let topics = event.change.topics
+        if topics.contains(.needsYou) { countInvalidated = true }
+        if topics.contains(.identity) { lastIdentityAttempt = nil }
+        if topics.contains(.usage) { lastUsageAttempt = nil }
+    }
+
+    /// Whether the count comes from the stream right now. While it does, the
+    /// count is asked only on `whileLive`'s slow clock.
+    public var countIsLive: Bool { events?.isLive == true }
+
     // MARK: Reading the console
 
     public func refreshCount() async {
@@ -513,16 +551,20 @@ public final class ShellModel {
         await refreshUsage()
     }
 
-    /// One tick of the poll: each read when its policy says it is due. Until
-    /// T5-7's event stream lands, this is how the row and the Dock move.
+    /// One tick of the poll: each read when its policy says it is due. While
+    /// the event stream is live the count comes from `needs_you.changed` and
+    /// is asked only on the slow `whileLive` clock; while it is down, this is
+    /// how the row and the Dock move.
     public func refreshDue(now: Date = Date()) async {
         let identityPolicy = identity == nil ? Self.identityRetryPolicy : .configuration
         if identityPolicy.isDue(lastAttemptAt: lastIdentityAttempt, now: now) {
             lastIdentityAttempt = now
             await refreshIdentity()
         }
-        if RefreshPolicy.requests.isDue(lastAttemptAt: lastCountAttempt, consecutiveFailures: countFailures, now: now) {
+        let countPolicy = countIsLive ? RefreshPolicy.requests.whileLive : .requests
+        if countInvalidated || countPolicy.isDue(lastAttemptAt: lastCountAttempt, consecutiveFailures: countFailures, now: now) {
             lastCountAttempt = now
+            countInvalidated = false
             await refreshCount()
         }
         if Self.usagePolicy.isDue(lastAttemptAt: lastUsageAttempt, now: now) {

@@ -37,6 +37,11 @@ public final class ConsoleSession {
     public private(set) var management: (any ManagementRunner)?
     /// The Phase-A sections, over the same gate and the same child.
     public let instance: InstanceStore
+    /// The one live-changes subscription (§2.20, T5-7): `GET /api/events` over
+    /// the same child, feeding every `SectionModel` with topics and the shell.
+    /// Started by the app (`AppModel.startShell`); it survives `adopt` and
+    /// reopens against the new instance.
+    public let events: LiveEvents
     /// Moves on every `adopt`. A read that started before the switch compares
     /// it when it returns, and drops an answer that belongs to the other instance.
     public private(set) var generation = 0
@@ -77,7 +82,8 @@ public final class ConsoleSession {
         management: (any ManagementRunner)?,
         initially: ConsoleReachability = .reachable,
         instanceID: String? = nil,
-        defaults: UserDefaults = .standard
+        defaults: UserDefaults = .standard,
+        eventTiming: LiveEvents.Timing = .standard
     ) {
         let gate = ReachabilityGate(transport, initially: initially)
         let stores = ConsoleStores(transport: gate, stream: stream ?? (transport as? any ConsoleEventTransport))
@@ -85,6 +91,7 @@ public final class ConsoleSession {
         self.stores = stores
         self.management = management
         self.instance = InstanceStore(api: stores.api, instanceID: instanceID, defaults: defaults)
+        self.events = LiveEvents(stores: stores, timing: eventTiming)
     }
 
     // MARK: - What a view reads
@@ -132,6 +139,7 @@ public final class ConsoleSession {
         self.stores = stores
         self.management = management
         instance.adopt(api: stores.api, instanceID: instanceID, defaults: defaults)
+        events.adopt(stores)
         dependents = dependents.filter { $0() }
     }
 

@@ -418,6 +418,35 @@ describe("console session: the event stream", () => {
     expect(s.out.lines.filter((l) => l.id === 2)).toEqual([{ id: 2, status: 404, body: { error: { code: "not_found", message: "not found" } } }]);
   });
 
+  it("a fresh subscriber's cursor — an id with no data — reaches the client as {id} alone, so it can resume from an empty stream", async () => {
+    let sse!: ReturnType<typeof sseResponse>;
+    const s = start((_req, signal) => {
+      sse = sseResponse(signal);
+      return sse.response;
+    });
+    s.send({ id: "ev", method: "GET", path: "/api/events", stream: true });
+    await new Promise((r) => setTimeout(r, 5));
+    // exactly what the console's serve() writes to a subscriber with no Last-Event-ID
+    sse.push("retry: 3000\n\n");
+    sse.push("id: 1790000000000007\n\n");
+    sse.push(": heartbeat\n\n");
+    // a later frame with no id: line keeps the last id (WHATWG), and is an event, not a second cursor
+    sse.push('id: 1790000000000008\nevent: work.changed\ndata: {"work_id":7}\n\n');
+    sse.push('event: needs_you.changed\ndata: {"waiting":1}\n\n');
+    await s.out.next((o) => o.id === "ev" && (o.event as { type?: string } | undefined)?.type === "needs_you.changed");
+    s.send({ id: "ev", cancel: true });
+    await s.out.next(terminal("ev"));
+    s.end();
+    await s.done;
+    expect(s.seen[0]?.headers["last-event-id"]).toBeUndefined();
+    expect(s.out.lines).toEqual([
+      { id: "ev", event: { id: "1790000000000007" } },
+      { id: "ev", event: { id: "1790000000000008", type: "work.changed", data: { work_id: 7 } } },
+      { id: "ev", event: { id: "1790000000000008", type: "needs_you.changed", data: { waiting: 1 } } },
+      { id: "ev", ended: "cancelled" },
+    ]);
+  });
+
   it("EOF on stdin ends an open stream as cancelled rather than hanging", async () => {
     const s = start((_req, signal) => sseResponse(signal).response);
     s.send({ id: 1, method: "GET", path: "/api/events", stream: true });

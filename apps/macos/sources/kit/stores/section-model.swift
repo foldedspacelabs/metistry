@@ -6,14 +6,16 @@
 // Phase-A sections; a screen built on the §2.16 stores declares one of these
 // per read instead of re-implementing the state machine:
 //
-//     let waiting = SectionModel(session: session, policy: .requests) { stores in
+//     let waiting = SectionModel(session: session, policy: .requests, topics: [.needsYou]) { stores in
 //         await stores.waitingCount().map { ($0, nil) }
 //     }
 //
 // and gets, for nothing: a first load that is the only thing a spinner may
 // draw from, a failed refresh that goes STALE and keeps what was on screen,
 // the backoff that changes how often it asks and never what it claims,
-// `invalidate()` for the live-changes stream to mark it due (§2.20, T5-7), and
+// live changes (§2.20, T5-7) — an event naming one of its `topics` marks it
+// due, and while the session's stream is live a loaded section stops asking
+// on its own clock and waits to be told — and
 // — because it is registered with its session — being dropped when the
 // instance changes, including an answer that was in flight at the time.
 //
@@ -33,6 +35,9 @@ public final class SectionModel<Value: Sendable & Equatable> {
     /// the next `refreshIfDue` asks whatever the clock says.
     public private(set) var isInvalidated = false
     public let policy: RefreshPolicy
+    /// What the stream says about this read (events-store.swift). Empty: no
+    /// event names it, and it polls whether the stream is live or not.
+    public let topics: Set<EventTopic>
 
     @ObservationIgnored private weak var session: ConsoleSession?
     @ObservationIgnored private let read: @Sendable (ConsoleStores) async -> Result<(Value, Date?), ConsoleError>
@@ -44,16 +49,23 @@ public final class SectionModel<Value: Sendable & Equatable> {
     public init(
         session: ConsoleSession,
         policy: RefreshPolicy,
+        topics: Set<EventTopic> = [],
         degraded: @escaping @Sendable (Value) -> String? = { _ in nil },
         read: @escaping @Sendable (ConsoleStores) async -> Result<(Value, Date?), ConsoleError>
     ) {
         self.session = session
         self.policy = policy
+        self.topics = topics
         self.read = read
         self.degraded = degraded
         session.register { [weak self] in
             guard let self else { return false }
             self.reset()
+            return true
+        }
+        session.events.watch(topics) { [weak self] _ in
+            guard let self else { return false }
+            self.invalidate()
             return true
         }
     }
@@ -84,10 +96,18 @@ public final class SectionModel<Value: Sendable & Equatable> {
     }
 
     /// What a view's `.task` calls on every tick: asks only when invalidated,
-    /// never asked, or `policy` says it is time — so a redraw is never a request.
+    /// never asked, or its clock says it is time — so a redraw is never a request.
     public func refreshIfDue(now: Date = Date()) async {
-        guard isInvalidated || policy.isDue(lastAttemptAt: section.lastAttemptAt, consecutiveFailures: consecutiveFailures, now: now) else { return }
+        guard isInvalidated || clock.isDue(lastAttemptAt: section.lastAttemptAt, consecutiveFailures: consecutiveFailures, now: now) else { return }
         await refresh(background: section.hasValue)
+    }
+
+    /// `policy` — or, while the stream is live and this section has an answer
+    /// the stream can speak for, `policy.whileLive`: the events say when to
+    /// ask. A section that failed keeps its own clock, stream or not.
+    public var clock: RefreshPolicy {
+        guard !topics.isEmpty, session?.events.isLive == true, section.state == .loaded else { return policy }
+        return policy.whileLive
     }
 
     /// Mark due. Changes nothing on screen — the value stays until the next

@@ -498,7 +498,8 @@ public final class NeedsYouModel {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = timeZone
         self.calendar = calendar
-        queue = SectionModel(session: session, policy: .requests) { stores in
+        // `needs_you.changed` marks it due; while the stream is live it waits to be told (T5-7).
+        queue = SectionModel(session: session, policy: .requests, topics: [.needsYou]) { stores in
             await stores.requests().map { ($0, Date()) }
         }
         session.register { [weak self] in

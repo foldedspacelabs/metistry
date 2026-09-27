@@ -216,6 +216,19 @@ public struct ConsoleLiveEvent: Sendable, Equatable {
         self.type = type
         self.data = data
     }
+
+    /// The stream's position with nothing to dispatch — an SSE `id:` with no
+    /// `data:`. The console sends one to a fresh subscriber so that a stream
+    /// which hears nothing before it drops still resumes from where it
+    /// opened; `console session` passes it on as `{id, event: {id}}`. No type,
+    /// no data: nothing changed, and there is nothing to refetch.
+    public static func cursor(_ id: String) -> ConsoleLiveEvent {
+        ConsoleLiveEvent(id: id, type: "", data: .null)
+    }
+
+    /// A cursor, not an event. SSE's default type is `message`, so a real
+    /// frame is never typeless.
+    public var isCursor: Bool { type.isEmpty }
 }
 
 /// `metistry console session --stdio` — `console call` as ONE long-lived
@@ -421,6 +434,13 @@ public actor SessionConsoleCallTransport: ConsoleCallTransport {
               let id = object["id"] as? String
         else { return } // a line with no id of ours answers nothing we asked
         if let event = object["event"] as? [String: Any] {
+            // `{id, event: {id}}`: the console's cursor. Kept, not dropped —
+            // it is the only id a stream that is quiet from the start has to
+            // resume from (T2-18 found it lost here; T5-7).
+            if event["type"] == nil, event["data"] == nil {
+                if let cursor = event["id"] as? String, !cursor.isEmpty { streams[id]?.yield(.cursor(cursor)) }
+                return
+            }
             let payload = event["data"].flatMap { try? JSONSerialization.data(withJSONObject: $0, options: [.fragmentsAllowed]) }
             streams[id]?.yield(ConsoleLiveEvent(
                 id: event["id"] as? String,

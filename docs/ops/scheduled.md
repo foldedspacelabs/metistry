@@ -370,7 +370,7 @@ each routine's manifest:
 | Routine | Default |
 | --- | --- |
 | Morning Brief (`morning-brief`) | working days at 07:00 — before the standup, which it embeds |
-| Standup | working days at 08:00 — the routine is T3-5's |
+| Standup (`standup`) | working days at 08:00 — writes `Journal/Standup/<date>.md` from `Templates/Standup.md` (T3-5) |
 | Knowledge Fold (`knowledge-fold`) | every day at 21:00 |
 | Tomorrow's Plan (`plan-tomorrow`) | `eve_of_working_days` at 23:00 — after the fold |
 | Reply Review (`reply-review`) | every day at 23:00 |
@@ -386,13 +386,25 @@ raises themselves land with T2-13 and T4-23); Devin Sessions every 5 min;
 Devin Knowledge hourly; AWS Costs every 6 hours. No shipped manifest carries
 a cron string any more.
 
-**Standup** is §2.5's eighth default, working days at 08:00; its routine and
-manifest are T3-5's.
+**Standup** is §2.5's eighth default, working days at 08:00. It renders
+its template into `Journal/Standup/<date>.md` — its own reserved subfolder,
+written through the reconciler as principal `standup`, so the file says
+`source: standup` — and never over a file it does not own. It calls no model:
+`prose` is not legal in a standup template yet (C103 lands with the Morning
+Brief, T3-6). Its row landing is the `routine.status` that swaps Today's
+*Standup at 8:00 AM* for the file. With no working days in `Me/profile.md`
+nothing is written — the runner does not start it, and a Run Now asks the
+same question and records `skipped:no_working_days`.
 
-Session Purge is the one shipped routine that declares `config`:
-`retention_days` (a number, default 30; the run refuses anything outside
-1–30). Every other key in a routine's `config:` is held (Standup's
-`template` and `skip_without_calendar_event` come with T3-5).
+Two shipped routines declare `config`. Session Purge: `retention_days` (a
+number, default 30; the run refuses anything outside 1–30). Standup:
+`template` (a path, default `Templates/Standup.md`) and
+`skip_without_calendar_event` (a boolean, default off — when on, a day whose
+calendar has no event titled like *standup* gets no file,
+`skipped:no_standup_event`; a calendar that cannot be asked is not a reason to
+skip). Every other key in a routine's `config:` is held. The runner does not
+yet hand a routine its resolved config (`ctx.config`), so until it does both
+run on their manifests' defaults whatever `scheduled.yaml` says.
 
 A routine on `working_days` or `eve_of_working_days` runs only once
 `Me/profile.md` says which days you work — the seeded profile says nothing,

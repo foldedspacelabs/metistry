@@ -108,7 +108,7 @@ describe("the default schedules fire once, at their time (T3-1's acceptance)", (
     const { routines, skipped } = await loadRoutines({ home: `${root}routines` });
     expect(skipped).toEqual([]);
     const loaded = await loadSchedules(routines.map((u) => ({ ...u, run: recorder(db, fired, u.name) })));
-    expect(loaded.map((r) => r.name).sort()).toEqual(["knowledge-fold", "morning-brief", "plan-tomorrow", "reply-review", "session-purge", "update-check", "weekly-review"]);
+    expect(loaded.map((r) => r.name).sort()).toEqual(["knowledge-fold", "morning-brief", "plan-tomorrow", "reply-review", "session-purge", "standup", "update-check", "weekly-review"]);
 
     // Sunday 00:00 to Saturday 23:59, New York
     await runClock(db, loaded, { from: "2026-09-20T04:00:00Z", to: "2026-09-27T03:59:00Z" });
@@ -116,6 +116,7 @@ describe("the default schedules fire once, at their time (T3-1's acceptance)", (
     const weekdays = ["2026-09-21", "2026-09-22", "2026-09-23", "2026-09-24", "2026-09-25"];
     const everyDay = ["2026-09-20", ...weekdays, "2026-09-26"];
     expect(ats(fired["morning-brief"])).toEqual(weekdays.map((d) => `${d} 07:00`));
+    expect(ats(fired["standup"])).toEqual(weekdays.map((d) => `${d} 08:00`)); // T3-5: an hour after the brief
     expect(ats(fired["knowledge-fold"])).toEqual(everyDay.map((d) => `${d} 21:00`));
     // Sunday to Thursday evenings plan Monday to Friday; Friday and Saturday are skipped
     expect(ats(fired["plan-tomorrow"])).toEqual(["2026-09-20", "2026-09-21", "2026-09-22", "2026-09-23", "2026-09-24"].map((d) => `${d} 23:00`));
@@ -128,7 +129,7 @@ describe("the default schedules fire once, at their time (T3-1's acceptance)", (
     // each run is handed its slot and zone, and its row carries the slot
     for (const f of Object.values(fired).flat()) expect(f).toMatchObject({ scheduledFor: f.at, timeZone: NY });
     const rows = db.runs.filter((r) => r.kind === "routine_run");
-    expect(rows).toHaveLength(5 + 7 + 5 + 7 + 1 + 7 + 7);
+    expect(rows).toHaveLength(5 + 5 + 7 + 5 + 7 + 1 + 7 + 7);
     for (const r of rows) expect(r.meta).toMatchObject({ scheduled_for: r.ts.toISOString(), time_zone: NY, outcome: "silent" });
   }, 60_000); // ten thousand ticks: ~3 s alone, more beside every other suite
 });
@@ -275,6 +276,29 @@ describe("a component that has never run, and one the runner cannot place", () =
     expect(String(rows[0]?.meta.why)).toContain("Me/profile.md");
     expect(db.outbound).toHaveLength(0); // a fact about the profile, not a fault
   });
+
+  // T3-5's test, through the runner: the SHIPPED Standup routine, as the
+  // registry loads it, is never started on a profile that does not say which
+  // days you work — so nothing can be written — and says so once a day. The
+  // routine asks the same question itself for a run nobody scheduled
+  // (routines/standup/standup.test.ts).
+  it("the Standup routine without working days: a whole week, never run, nothing written — `skipped:no_working_days` once a day", async () => {
+    const db = new FakeRuns(new Date("2026-09-20T04:00:00Z"));
+    const { routines } = await loadRoutines({ home: `${root}routines` });
+    let started = 0;
+    const [standup] = await loadSchedules(routines.filter((u) => u.name === "standup").map((u) => ({ ...u, run: async () => ++started })));
+    expect(standup?.schedule).toEqual({ days: "working_days", at: ["08:00"] });
+    await runClock(db, [standup!], { from: "2026-09-20T04:00:00Z", to: "2026-09-27T03:59:00Z", profileAt: () => ({ timezone: NY }) });
+    expect(started).toBe(0);
+    const rows = db.rowsFor("standup");
+    expect(rows).toHaveLength(7); // once a day, never once a tick
+    for (const r of rows) expect(r).toMatchObject({ kind: "routine_run", ok: true, meta: { schedule_refused: "no_working_days", outcome: "skipped:no_working_days" } });
+    expect(db.outbound).toHaveLength(0);
+
+    // …and the Monday the profile says Monday to Friday, it runs at 08:00
+    await runClock(db, [standup!], { from: "2026-09-28T04:00:00Z", to: "2026-09-28T13:00:00Z", profileAt: () => PROFILE });
+    expect(started).toBe(1);
+  }, 60_000);
 
   it("no timezone anywhere: refused `no_timezone`, never run in UTC", async () => {
     const db = new FakeRuns(new Date("2026-09-21T04:00:00Z"));
@@ -439,11 +463,11 @@ describe(".metistry/scheduled.yaml, read every tick", () => {
     });
   });
 
-  // T3-4 moves standup_days / standup_time into `routines.standup` before
-  // T3-5 ships the Standup routine. That entry must not invalidate the file
-  // or hold anything: it names nothing installed yet, so it waits, said once
-  // as applying to nothing, and applies the moment the routine lands.
-  it("routines.standup before the Standup routine exists: accepted, holds nothing, applies to nothing yet", async () => {
+  // T3-4 moved standup_days / standup_time into `routines.standup` before
+  // T3-5 shipped the Standup routine; until then the entry applied to
+  // nothing. Now it is the routine's: the moved time is the one in force, and
+  // the file carries no problem at all.
+  it("routines.standup, as T3-4 writes it, applies to the Standup routine: the moved time wins, nothing is held", async () => {
     const all = await loadSchedules([
       ...(await loadCollectors({ home: `${root}collectors` })).collectors,
       ...(await loadRoutines({ home: `${root}routines` })).routines,
@@ -454,10 +478,10 @@ describe(".metistry/scheduled.yaml, read every tick", () => {
     const read = await readOverlay(join(dir, "scheduled.yaml"));
     expect(read.ok).toBe(true);
     for (const c of all) expect(effectiveSchedule(c, read), c.name).toMatchObject({ held: false, paused: false });
+    const standup = all.find((c) => c.name === "standup")!;
+    expect(effectiveSchedule(standup, read)).toEqual({ held: false, paused: false, schedule: { days: "working_days", at: ["09:15"] } });
     if (!read.ok) return;
-    expect(checkScheduled(read.value, all.map((c) => c.unit!))).toEqual([
-      { name: "standup", field: "routines.standup", message: "routines.standup names no routine here — it applies to nothing until one by that name is installed", holds: false },
-    ]);
+    expect(checkScheduled(read.value, all.map((c) => c.unit!))).toEqual([]);
   });
 
   it("an undeclared config key holds the routine for the ticks it lasts: not run on defaults, one row a day, one alert", async () => {

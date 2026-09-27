@@ -29,7 +29,7 @@ import {
 } from "../src/release.js";
 import { StepFailed, StepRunner } from "../src/steps.js";
 import { update } from "../src/update.js";
-import { checkout, fakeExec, okDoctor, put } from "./fixtures.js";
+import { checkout, fakeExec, okDoctor, put, WATCHDOG } from "./fixtures.js";
 
 const NOW = new Date("2026-09-07T15:00:00Z");
 const REPO = "foldedspacelabs/metistry";
@@ -494,6 +494,31 @@ describe("metistry update --channel release", () => {
     const r = await update({ ...base(P, { METISTRY_INSTANCE_DIR: inst }), exec, fetchFn: s.fn, target: TARGET, skipMigrate: true, openSession: async () => null });
 
     expect(r.lock).toEqual({ product: { version: "0.2.0", commit: "prior-sha", source: "release" }, updated_at: NOW.toISOString(), migrations_applied: [] });
+  });
+
+  // 0.12.0 → 0.14.0: `before` was re-hashed AFTER `current` moved, so it
+  // hashed the new release twice, found nothing changed, and a release-mode
+  // update never kickstarted a job for new code.
+  it("kickstarts the jobs whose code differs between the release it left and the one it installed", async () => {
+    const P = await mkdtemp(join(tmpdir(), "metistry-rel-"));
+    const inst = await mkdtemp(join(tmpdir(), "mi-"));
+    const old = await checkout();
+    await cp(old, join(P, "releases", "0.1.0"), { recursive: true });
+    await switchCurrent(P, "0.1.0");
+    const src = await checkout();
+    await put(src, "apps/watchdog/dist/lib/util.js", "v2"); // the new release changed the watchdog, and only it
+    const prior: LockFile = { product: { version: "0.1.0", commit: "unknown", source: "release" }, updated_at: "2026-09-01T00:00:00.000Z", migrations_applied: [] };
+    await mkdir(join(inst, ".metistry"), { recursive: true });
+    await writeFile(join(inst, ".metistry", "metistry.lock"), serializeLock(prior));
+    const exec = await tarInto(src);
+    const lines: string[] = [];
+    // an install that already holds the owner bearer, so nothing but the code change can restart anything
+    const r = await update({ ...base(P, { METISTRY_INSTANCE_DIR: inst, METISTRY_BRIDGE_TOKEN_RECONCILER_USER: "owner" }), out: (l) => lines.push(l), exec, fetchFn: releaseServer({ versions: ["0.2.0"] }).fn, target: TARGET, skipMigrate: true, openSession: async () => null });
+
+    expect(r.release).toMatchObject({ version: "0.2.0", installed: true });
+    expect(r.restarted).toEqual([WATCHDOG]);
+    expect(exec.calls.filter((c) => c.cmd === "launchctl" && c.args[0] === "kickstart").map((c) => c.args.at(-1))).toEqual([`gui/501/${WATCHDOG}`]);
+    expect(lines.join("\n")).toContain("1 job(s) kickstarted");
   });
 
   it("--version pins a specific release; --rollback flips back without downloading anything", async () => {

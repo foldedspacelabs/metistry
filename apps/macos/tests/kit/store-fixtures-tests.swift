@@ -678,10 +678,12 @@ func everyStoreMethodSpeaksItsRouteOverTheSessionTransport() async throws {
     #expect(export.rows.count == 3)
     #expect(export.cursor?.contains("|") == true)
 
-    // and the event stream rides the same child
+    // and the event stream rides the same child — the recording's ids, read off
+    // the fixture: a resume after the third-from-last replays the last two
+    let recorded = try #require(byStem["get-api-events"]?.stream).map(\.id)
     var ids: [String?] = []
-    for try await event in session.stores.events(lastEventID: "4117") { ids.append(event.id) }
-    #expect(ids == ["4118", "4119"])
+    for try await event in session.stores.events(lastEventID: recorded[recorded.count - 3]) { ids.append(event.id) }
+    #expect(ids == Array(recorded.suffix(2)))
 }
 
 @Test func aOneRowExportPrettyPrintedByConsoleCallIsStillOneRow() throws {

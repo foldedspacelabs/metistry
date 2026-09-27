@@ -40,6 +40,7 @@ import {
   type TemplateContext,
   type TemplateQueries,
 } from "../src/template.js";
+import { NOTE_SECTIONS, scanNoteSection } from "../src/note-section.js";
 
 const TASK_QUERY = "vault_tasks_query";
 const SEED = fileURLToPath(new URL("../../../seed/vault/Templates/", import.meta.url));
@@ -630,6 +631,16 @@ describe("the six seeded templates (the contract with #237)", () => {
     expect(out.markdown).toContain(`# ${TODAY}`);
     expect(out.markdown).toContain("- [ ] Water the plants source template:recurring ^mt-9k4p0000");
     expect(out.markdown).toContain("source: user");
+  });
+
+  it("Daily.md places the day section's markers — one clean pair, so Close the Day and the Morning Brief write between them (T2-8)", async () => {
+    const out = await renderTemplate(readFileSync(join(SEED, "Daily.md"), "utf8"), ctx({
+      templatePath: "Templates/Daily.md",
+      source: USER_SOURCE,
+      queries: new FakeQueries({ [RECURRING_QUERY]: [] }),
+    }));
+    expect(scanNoteSection(Buffer.from(out.markdown), "day").state).toBe("present");
+    expect(out.markdown).toContain(`${NOTE_SECTIONS.day.heading}\n\n${NOTE_SECTIONS.day.open}\n${NOTE_SECTIONS.day.close}\n`);
   });
 
   it("Fold.md is the one template whose `prose` slots are legal", async () => {

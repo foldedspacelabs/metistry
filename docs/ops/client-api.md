@@ -371,7 +371,7 @@ takes a `since` cursor and answers with the next one.
 | `DELETE /api/prose/:id/feedback` | owner | session · local_owner | natural | — | — | served | clear a prose rating |
 | `GET /api/events` | owner | session · local_owner | natural | — | — | served | Server-Sent Events: what changed, as ids; `Last-Event-ID` resumes |
 | `GET /api/vault/status` | owner | session · local_owner | natural | — | — | served | branch, ahead and behind, last commit, last push, conflict |
-| `POST /api/vault/rollback` | local | local_owner | no | — | — | T10-6 | raise a Needs You request to roll back, with the preview |
+| `POST /api/vault/rollback` | local | local_owner | no | — | — | served | raise a Needs You request to roll back, with the preview |
 <!-- client-api:routes:end -->
 
 The **console writes exactly three protected paths**: `.metistry/assistant-prompt.md`
@@ -2854,7 +2854,7 @@ an additive change and keeps the version.
 
 ```
 GET  /api/vault/status     served — branch, ahead and behind, last commit, last push, any conflict
-POST /api/vault/rollback   T10-6 — reach local: raises a Needs You request with the preview
+POST /api/vault/rollback   served — reach local: raises a Needs You request with the preview
 ```
 
 #### `GET /api/vault/status` — where sync stands (`user` principal)
@@ -2902,10 +2902,49 @@ running. The policy is set with `metistry vault settings` on the Mac (M18,
 brought something, and conflict is a `vault.sync` event; a client refetches
 here.
 
-A rollback touches files only, never rewrites history — Approve runs revert
-commits as `user` — and a console-initiated revert refuses every `.metistry/`
-path; reverting configuration is `metistry vault rollback --include-config`
-(M18). The route is `local`: history and the remote are the boundary (§2.21).
+#### `POST /api/vault/rollback` — roll back, through Needs You (reach `local`)
+
+```
+POST /api/vault/rollback
+{"commit":"4c1d2e3f"}  |  {"to":"2026-09-26"}  |  {"file":"Areas/Plan.md"}  |  {"file":"Areas/Plan.md","to":"2026-09-20T08:00:00-04:00"}
+     + "include_config": true   (the CLI's --include-config; see below)
+202 {"ok":true, "proposal_id":"62", "raised":true,
+     "preview":{"reverts":["9ab8c7d6…"], "files":["Projects/Metistry/Roadmap.md"],
+                "skipped_config":[".metistry/compute.yaml"], "config":[], "include_config":false,
+                "head":"4c1d2e3f…", "base":{"sha":"1f2e3d4c…","subject":"Start the plan","author":"user","date":"…"},
+                "revert_count":1, "commits":[{"sha","subject","author","date"}], "changes":[{"path","change"}]},
+     "proposal":{…the row, as GET /api/proposals serves it…}}
+400 not one target; a commit that is not 7–64 hex; a `to` that is not a day or an ISO timestamp;
+    nothing to roll back (or nothing but configuration)
+403 local_only for a passkey session (the owner's too); forbidden for the capture token and an agent;
+    forbidden for a `file` that is configuration without include_config
+404 a commit not in this vault's history      409 the preview could not be computed cleanly
+503 no vault bridge in this deployment
+```
+
+Changes nothing. The console asks the reconciler for a **preview**
+(`POST /vault/revert` with `dry_run`, `docs/ops/reconciler.md`) and raises one
+Needs You request — an `improvement` raised by `console`, trust `user`, a
+before and after naming the commits it undoes and the files it puts back —
+one per target and history (asking twice answers `raised: false` and the same
+id). `head` is the history the preview was computed on; `reverts` and `files`
+are what Approve will undo and change; `skipped_config` is configuration the
+history would change and the rollback leaves alone.
+
+**Approve** (`POST /api/proposals/:id`, `allow`) runs the revert as `user`:
+one NEW commit, pinned to `head` and held to the previewed change set — a
+change set that moved is `409 stale`, nothing reverted, the request still
+waiting. The answer carries `rolled_back: {runs_in: "console", sha, files}`.
+Revise and Decline change nothing. A rollback touches files only and never
+rewrites history; undo is rolling back the rollback's commit.
+
+**Configuration** — every `.metistry/` path, `CLAUDE.md`, `README.md` — is
+never reverted by the console: its bearer cannot. A request raised with
+`include_config: true` (by `metistry vault rollback --include-config`)
+previews configuration as `config`, and its Approve answers
+`rolled_back: {runs_in: "cli"}` and reverts nothing — the waiting CLI makes
+the change with the owner-class bearer (M18, `docs/ops/cli.md`). The route is
+`local`: history and the remote are the boundary (§2.21).
 
 ## The closed action set
 

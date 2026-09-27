@@ -74,7 +74,7 @@ describe("every row", () => {
   });
 
   it("serves exactly N rows — a ticket flipping a row to served/unserved must update this number", () => {
-    expect(CLIENT_API.filter((r) => r.served).length).toBe(105); // T4-8a: GET /api/connections, GET /api/connections/:name; T4-18: GET /api/compute/catalogue, POST /api/compute/unassign; T4-1: GET /api/secrets; T2-5: the Defer door; T4-6: GET /api/agents/:id/definition; T4-4: GET /api/variables; T3-9: POST /api/sessions/purge; T2-18: GET /api/events; T1-7: GET /api/needs-you/count; T1-6: the fold, the drafts, the areas; T10-2: GET /api/vault/status; T1-12: POST|DELETE /api/prose/:id/feedback; T2-17: GET /api/turns/:turn_id/progress, GET /api/sessions/:id; T10-4: GET /api/knowledge/history, GET /api/knowledge/version; T3-3: the eleven Scheduled rows
+    expect(CLIENT_API.filter((r) => r.served).length).toBe(106); // T4-8a: GET /api/connections, GET /api/connections/:name; T4-18: GET /api/compute/catalogue, POST /api/compute/unassign; T4-1: GET /api/secrets; T2-5: the Defer door; T4-6: GET /api/agents/:id/definition; T4-4: GET /api/variables; T3-9: POST /api/sessions/purge; T2-18: GET /api/events; T1-7: GET /api/needs-you/count; T1-6: the fold, the drafts, the areas; T10-2: GET /api/vault/status; T1-12: POST|DELETE /api/prose/:id/feedback; T2-17: GET /api/turns/:turn_id/progress, GET /api/sessions/:id; T10-4: GET /api/knowledge/history, GET /api/knowledge/version; T10-6: POST /api/vault/rollback
   });
 
   it("takes a cursor only on a read, and an Idempotency-Key only on a write", () => {
@@ -101,9 +101,9 @@ describe("reach and principals", () => {
     }
   });
 
-  it("minting a bearer is `local` — registering an agent and rotating its token (F-13) — and so is Purge Now, which cannot be undone (T3-9), and what a routine runs (T3-3)", () => {
+  it("minting a bearer is `local` — registering an agent and rotating its token (F-13) — and so is Purge Now, which cannot be undone (T3-9), and what a routine runs (T3-3), and a rollback of the vault's history (T10-6)", () => {
     const local = CLIENT_API.filter((r) => r.served && isLocalRoute(r)).map(key);
-    expect(local).toEqual(["POST /api/agents", "POST /api/agents/:id/rotate", "POST /api/sessions/purge", "PUT /api/scheduled/routines/:name/assignment"]);
+    expect(local).toEqual(["POST /api/agents", "POST /api/agents/:id/rotate", "POST /api/sessions/purge", "PUT /api/scheduled/routines/:name/assignment", "POST /api/vault/rollback"]);
     // a routine's timing stays reachable from any owner client; what it runs does not
     for (const k of ["PUT /api/scheduled/routines/:name/schedule", "POST /api/scheduled/routines/:name/pause", "POST /api/scheduled/routines/:name/run", "PUT /api/scheduled/syncs/:name"]) {
       expect(CLIENT_API.find((r) => key(r) === k)!.reach, k).toEqual(["owner"]);

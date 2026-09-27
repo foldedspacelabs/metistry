@@ -311,7 +311,7 @@ export const CLIENT_API: readonly ClientRoute[] = [
 
   // ----- the vault's git -----
   route("GET", "/api/vault/status", "branch, ahead and behind, last commit, last push, conflict"),
-  planned("POST", "/api/vault/rollback", "T10-6", "raise a Needs You request to roll back, with the preview", { reach: ["local"] }),
+  route("POST", "/api/vault/rollback", "raise a Needs You request to roll back, with the preview", { reach: ["local"] }),
 ];
 
 /** `GET /api/agents/:id` — the row's identity, and how the document spells it. */

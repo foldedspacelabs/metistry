@@ -404,20 +404,9 @@ import Testing
     await model.load()
     #expect(model.rows.count == rows.count)
 
-    let shown = ActivityShellProbe()
-    let host = NSHostingView(rootView: ActivityShellProbeView(shown: shown, model: model))
-    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 980, height: 640), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
-    window.isReleasedWhenClosed = false
-    window.contentView = host
-    window.orderFront(nil)
-    defer { window.orderOut(nil); window.close() }
-    try await Task.sleep(for: .milliseconds(300))
-    let before = (frame: window.frame, minimum: window.contentMinSize)
-
-    shown.activity = true
-    try await Task.sleep(for: .milliseconds(500))
-    #expect(window.contentMinSize.height <= max(before.minimum.height, 460), "opening Activity raised the window's minimum to \(window.contentMinSize)")
-    #expect(window.frame == before.frame, "the window moved: \(before.frame) → \(window.frame)")
+    let window = try await ShellProbe.acrossTheSwitch { ActivityView(model: model, assistantName: "Aide", tick: .seconds(3600)) }
+    #expect(window.after.minimum.height <= max(window.before.minimum.height, 460), "opening Activity raised the window's minimum to \(window.after.minimum)")
+    #expect(window.after.frame == window.before.frame, "the window moved: \(window.before.frame) → \(window.after.frame)")
 
     // every other panel too: waiting, failed, empty
     let probe = MinimumProbe()
@@ -503,38 +492,55 @@ private extension ActivityModel {
     func feedCallsSince(_ console: ActivityConsole) -> String? { console.feedCalls.last?["since"] }
 }
 
-/// A console that serves the rows it holds the way `activity_feed` does —
-/// `since` inclusive, `kind` by kind or group, `turn_id` — plus the runs and
-/// pages a test gives it; everything else from the recorded fixtures.
-/// The shell's shape, as small as it gets: a sidebar and a detail that is
-/// Activity once `activity` is set.
+/// The shell's shape, as small as it gets: a sidebar and a detail that is the
+/// screen under test once `shown` is set. Shared with Needs You's and Today's
+/// tests, as `MinimumProbe` is.
 @MainActor
 @Observable
-private final class ActivityShellProbe {
-    var activity = false
+final class ShellProbe {
+    var shown = false
 }
 
-private struct ActivityShellProbeView: View {
-    let shown: ActivityShellProbe
-    let model: ActivityModel
+struct ShellProbeView<Screen: View>: View {
+    let probe: ShellProbe
+    @ViewBuilder let screen: () -> Screen
 
     var body: some View {
         NavigationSplitView {
             List { ForEach(["Today", "Chat", "Activity", "Knowledge", "Agents", "Scheduled"], id: \.self) { Text(verbatim: $0) } }
         } detail: {
-            if shown.activity {
-                ActivityView(model: model, assistantName: "Aide", tick: .seconds(3600))
+            if probe.shown {
+                screen()
             } else {
-                Text(verbatim: "Today")
+                Text(verbatim: "Elsewhere")
             }
         }
+    }
+}
+
+extension ShellProbe {
+    /// Mounts `screen` in the shell's shape in a 980 × 640 window, switches to
+    /// it, and answers the window's frame and minimum on either side.
+    static func acrossTheSwitch<Screen: View>(@ViewBuilder to screen: @escaping () -> Screen) async throws -> (before: (frame: NSRect, minimum: NSSize), after: (frame: NSRect, minimum: NSSize)) {
+        let probe = ShellProbe()
+        let host = NSHostingView(rootView: ShellProbeView(probe: probe, screen: screen))
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 980, height: 640), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        window.orderFront(nil)
+        defer { window.orderOut(nil); window.close() }
+        try await Task.sleep(for: .milliseconds(300))
+        let before = (frame: window.frame, minimum: window.contentMinSize)
+        probe.shown = true
+        try await Task.sleep(for: .milliseconds(500))
+        return (before, (frame: window.frame, minimum: window.contentMinSize))
     }
 }
 
 /// What a view answers when asked for no size at all — the question a
 /// hosting view asks to set its window's minimum.
 @MainActor
-private final class MinimumProbe {
+final class MinimumProbe {
     private final class Box: @unchecked Sendable { var size: CGSize? }
 
     private struct Measure: Layout {
@@ -557,6 +563,9 @@ private final class MinimumProbe {
     }
 }
 
+/// A console that serves the rows it holds the way `activity_feed` does —
+/// `since` inclusive, `kind` by kind or group, `turn_id` — plus the runs and
+/// pages a test gives it; everything else from the recorded fixtures.
 private final class ActivityConsole: ConsoleCallTransport, @unchecked Sendable {
     private let lock = NSLock()
     private var _rows: [ActivityFeedRow]

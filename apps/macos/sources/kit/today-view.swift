@@ -111,7 +111,11 @@ public struct TodayView: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        // Flexible down to nothing, as Activity is: the page scrolls, and the
+        // window's minimum is the shell's to set. Without the zeros the
+        // screen's minimum was its content's at no width at all: 1,127–1,440
+        // pt tall with a day on screen, 1,841 when the console did not answer.
+        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .topLeading)
         .background(p[.surface])
         // View ▸ Today / All (⌥⌘T); Go ▸ Filter (⌘F) is All's box. Menu items, never a bare key (C119).
         .shellScreenActions([

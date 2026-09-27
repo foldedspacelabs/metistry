@@ -623,6 +623,48 @@ than re-fetches) ride the same envelope as the staleness `409` below — one
 shape, two reasons, and the client branches on the field rather than on the
 message.
 
+#### A failed answer leaves the request pending — `payload.error` (C45)
+
+```
+POST /api/proposals/31  {"decision":"allow"}
+409 {"error":{"code":"conflict","message":"task 6 is held by nobody, not by user — …"}}
+
+GET /api/proposals   → {…, "id":31, "decision":"pending",
+                        "payload":{…, "error":{"code":"conflict","message":"task 6 is held by nobody, …",
+                                               "decision":"allow","at":"2026-09-26T20:11:52.004Z"}}}
+```
+
+Some answers *do* something before the row is settled — Approve on an
+`improvement` (the prompt overlay write), on an `action` (one service call),
+`accept_as_work` (the `work` row), `approve` on an enrolment (letting the agent
+in), Approve and Revise on an `access_request` (the grants write). When that
+consequence is refused or fails, the refusal comes back as usual **and** the
+row stays `pending`, carrying why: `payload.error = {code, message, decision,
+at, …details}`, where `decision` is the answer that was refused and `details`
+are the refusal's own extra fields (an action's `violations`, `refused`). It is
+never settled as if the answer had worked, and there is deliberately no retry —
+the owner decides again, and a later answer replaces the error rather than
+clearing the record of it (design-system amendments §2.4: a screen must not
+draw a refusal as a decision).
+
+- **A failure that threw** rather than refused answers the uniform `500` and
+  stores `code: internal` with a fixed message — `payload.error` crosses the
+  wire on this list, and an internal error's detail stays in the log and `runs`.
+- **Refusing the request itself is not this.** A verb the row does not offer
+  (`400`), an answer to a row that already moved (`409 stale`) or was already
+  decided (`409 already_decided`) write nothing on the row: the question was
+  not answered, so nothing about it failed.
+- **The agent's own run** (`propose_action` at `act_within_scope`) that fails
+  lands the same way — pending, with `payload.error` (no `decision`: the owner
+  gave none), in this queue rather than decided `auto`.
+- `if_unchanged` is unaffected: writing `payload.error` does not move the row's
+  `changed_at`, so answering again with the `ts` you rendered is not stale.
+
+`apps/console/test/c45.integration.test.ts` holds each of these doors to it,
+one failure at a time; a door added later (the ones that answer through another
+system — `pr_review`, `rsvp`, `draft`, `resolve_conflict`, `act`, `today`,
+`delegate`) adds its own case there.
+
 #### `if_unchanged` — a decision is an answer to the row you were shown
 
 ```
@@ -652,6 +694,7 @@ them means the answer was to a different question
 POST /api/proposals/17  {"decision":"accept_as_work"}
 200 {"ok":true,"work":{"id":214,"title":"renew the wildcard cert","project":null}}
 400 when the row carries no valid `payload.suggested_work`, or is not kind knowledge|report
+409 / 400 / 500 the tasks service refused or failed: the proposal stays pending, carrying payload.error
 ```
 
 Offered only on a `knowledge` or `report` proposal whose payload carries
@@ -669,8 +712,9 @@ rest, including why this leaves §4.12 intact.
 POST /api/proposals/31  {"decision":"allow"}
 200 {"ok":true,"action":{"kind":"dispatch","ref":"gh:owner/repo#41","url":"…","run_id":9001}}
 400 the stored payload.action does not validate — the message names the field
-409 / 422 / 503 the SERVICE refused (a lease, a data policy, no vault bridge):
-    the proposal stays pending, carrying payload.error, and you decide again
+409 / 422 / 503 the SERVICE refused (a lease, a data policy, no vault bridge)
+500 the service threw
+    — every one of them leaves the proposal pending, carrying payload.error, and you decide again
 ```
 
 An `action` proposal carries a closed `payload.action = {kind, args}`
@@ -770,7 +814,10 @@ POST /api/agents/devin/approve   (user principal)
   the two buttons it already knows how to render. Answering it does exactly
   what the route does — `approve` lets the row in, `deny` **revokes** it —
   and the route settles the item in the same breath, so the two doors onto
-  one answer cannot drift.
+  one answer cannot drift. An `approve` that finds the agent revoked since it
+  asked lets nobody in, so it is a `404` and the item stays pending with
+  `payload.error` (C45); a `deny` in the same case settles, because its
+  consequence — nobody gets in — already holds.
 - `GET /api/agents` carries `remote`, `approved_at` and a derived
   `pending`. `metistry connect <tool> --remote` sets the flag; `metistry
   connect --list` shows `pending`. Loopback tools stay immediate, and
@@ -865,7 +912,9 @@ POST /api/proposals/412 {"decision":"allow"}
 POST /api/proposals/412 {"decision":"accept_with_changes","area":"Areas/Health/Sleep"}
 200 {"ok":true,"granted":{"agent":"devin","area":"Areas/Health/Sleep","grants":{…}}}
 400 `accept_with_changes` with no `area` (there is nothing to grant), or an area the validator refuses
-404 the agent is revoked or gone — the row stays pending for you to Decline
+403 a crew's scope is its manifest — Decline and edit that file
+404 the agent is revoked or gone
+    — every refusal leaves the row pending, carrying payload.error, for you to Decline
 ```
 
 `deny`, `later` and `skip` grant nothing at all, and neither does a revoked

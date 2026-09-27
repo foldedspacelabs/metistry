@@ -30,7 +30,7 @@ jobs:
     outputs:
       macos: ${{ steps.diff.outputs.macos }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - id: diff
@@ -65,7 +65,7 @@ jobs:
           --health-timeout 5s
           --health-retries 12
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: ops/scripts/check-path-case.sh
       - run: node ops/scripts/prompt-lint.mjs
       # R4: a cap that lives only as a literal is a decision nobody can change
@@ -87,8 +87,8 @@ jobs:
       # generated from tokens.json. This is what stops one of them drifting —
       # and it re-checks every declared colour pair against WCAG AA.
       - run: node ops/scripts/build-design-tokens.mjs --check
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
@@ -144,8 +144,8 @@ jobs:
     if: needs.changes.outputs.macos == 'true'
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/cache@v4
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
         with:
           path: apps/macos/.build
           key: swiftpm-macos-15-${{ hashFiles('apps/macos/Package.resolved') }}-${{ hashFiles('apps/macos/sources/**', 'apps/macos/tests/**') }}

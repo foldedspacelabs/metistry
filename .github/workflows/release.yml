@@ -67,7 +67,7 @@ jobs:
           --health-timeout 5s
           --health-retries 12
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: v
         name: the version is the tag, and every package.json must already carry it
         run: |
@@ -81,8 +81,8 @@ jobs:
           fi
       - run: ops/scripts/check-path-case.sh
       - run: node ops/scripts/fold-product-record.mjs --check
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
@@ -119,9 +119,9 @@ jobs:
           - { os: macos-26, target: darwin-arm64 }
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
@@ -145,7 +145,7 @@ jobs:
         run: pnpm -r --if-present run build:helper
       - name: pack the runtime
         run: ops/release/pack-runtime.sh "${{ needs.verify.outputs.version }}" "${{ matrix.target }}" "$GITHUB_WORKSPACE/dist-release"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: runtime-${{ matrix.target }}
           path: dist-release/metistry-runtime-${{ needs.verify.outputs.version }}-${{ matrix.target }}.tar.gz
@@ -165,9 +165,9 @@ jobs:
     environment: release   # signs the bundled binaries (APPLE_CERTIFICATE_*)
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: cache the Postgres, git and llama.cpp source builds, keyed on the pinned versions
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .runtime-build/cache
           key: runtime-deps-darwin-arm64-${{ hashFiles('ops/release/runtime-versions.env') }}
@@ -196,7 +196,7 @@ jobs:
           ( cd dist-release && shasum -a 256 "$asset" > "$asset.sha256" && cat "$asset.sha256" )
           ls -lh dist-release
           cat runtime/manifest.json | head -20
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: runtime-deps-darwin-arm64
           path: dist-release/metistry-runtime-deps-*
@@ -219,9 +219,9 @@ jobs:
     outputs:
       published: ${{ steps.publish.outputs.published }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
         with:
           # Trusted Publishing needs Node >= 22.14 and npm CLI >= 11.5.1
           # (the latter installed explicitly below — the npm bundled with
@@ -287,19 +287,19 @@ jobs:
     outputs:
       published: ${{ steps.login.outcome == 'success' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # linux/arm64 is the Mac (Apple silicon) host under Docker Desktop and
       # the arm64 cloud shapes; amd64 is everything else. Without QEMU the
       # build is host-arch only and `docker compose pull` on a Mac fails with
       # "no matching manifest for linux/arm64/v8".
-      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-qemu-action@v4
         with:
           platforms: arm64
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
       - id: login
         name: log in to ghcr (skipped without packages:write)
         continue-on-error: true
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -307,7 +307,7 @@ jobs:
       - if: steps.login.outcome != 'success'
         run: echo "::notice::could not log in to ghcr.io — skipping the ${{ matrix.app }} image (a fork without packages:write still gets a complete release)"
       - if: steps.login.outcome == 'success'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: apps/${{ matrix.app }}/Dockerfile
@@ -340,7 +340,7 @@ jobs:
     env:
       VERSION: ${{ needs.verify.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: gate
         uses: ./.github/actions/apple-keychain
         with:
@@ -352,12 +352,12 @@ jobs:
       # The packs this run already built — the app embeds them rather than
       # rebuilding the product a second time.
       - if: steps.gate.outputs.ok == 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: runtime-darwin-arm64
           path: packs
       - if: steps.gate.outputs.ok == 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: runtime-deps-darwin-arm64
           path: packs
@@ -387,7 +387,7 @@ jobs:
           ops/release/notarize.sh "dist-app/Metistry-$VERSION.dmg"
 
       - if: steps.gate.outputs.ok == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: macos-app
           path: dist-app/Metistry-*.dmg
@@ -410,7 +410,7 @@ jobs:
     env:
       VERSION: ${{ needs.verify.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: gate
         env:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
@@ -422,7 +422,7 @@ jobs:
             echo "::notice::SPARKLE_PRIVATE_KEY is not set — no appcast.xml this run, so installed apps will not see this version as an update. The DMG is still published (docs/ops/apple-signing.md §5)."
           fi
       - if: steps.gate.outputs.ok == 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: macos-app
           path: dist-app
@@ -452,7 +452,7 @@ jobs:
             --notes "https://github.com/${{ github.repository }}/releases/tag/v$VERSION" > appcast.xml
           cat appcast.xml
       - if: steps.gate.outputs.ok == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: appcast
           path: appcast.xml
@@ -466,10 +466,10 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with: { node-version: 22 }
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: assets
           pattern: runtime-*
@@ -477,13 +477,13 @@ jobs:
       # The DMG and the appcast, when this run produced them. Both jobs skip
       # cleanly without their secrets, so a missing artifact is a normal
       # outcome, not a failure — `continue-on-error` is what says that.
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         continue-on-error: true
         with:
           path: assets
           pattern: macos-app
           merge-multiple: true
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         continue-on-error: true
         with:
           path: assets

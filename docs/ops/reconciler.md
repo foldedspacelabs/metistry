@@ -102,11 +102,13 @@ curl -s -H "Authorization: Bearer $METISTRY_BRIDGE_TOKEN_RECONCILER" http://127.
 
 `check()` probes behaviour, not configuration: the repo is present, git
 runs, `HEAD` is readable, `.metistry/` lists, and it reports the commit
-queue depth plus the last flush / push / reconcile, and which bearers it
-holds (`principal_from_credential`, `owner_bearer`). `degraded` with a
+queue depth plus the last flush / push / pull / reconcile, the vault's sync
+state (`vault_sync`), and which bearers it holds
+(`principal_from_credential`, `owner_bearer`). `degraded` with a
 remediation string means "it runs but something needs your hand" (no owner
 bearer, so no protected path is writable by anyone; no commits yet;
-`.metistry/` missing; last push failed).
+`.metistry/` missing; a sync stopped by a conflict, naming its paths; last
+push failed).
 
 Restart the console (`docker compose up -d console`) so it picks up
 `METISTRY_RECONCILER_URL`; `mcp-brain`'s `knowledge_read` then serves note
@@ -330,8 +332,9 @@ sends the reply's turn and its own call's `runs` row, never a group.
 
 A failed commit is unstaged and retried on later flushes; all-or-nothing
 per commit. Push runs on `METISTRY_PUSH_SCHEDULE` (`@hourly` default) only
-if a remote exists and never blocks anything; a failed push shows up in
-`check()` as `degraded`.
+if a remote exists, integrates whatever the remote has first ("Sync with
+the remote" below), and never blocks anything; a failed push or a stopped
+sync shows up in `check()` as `degraded`.
 
 **Edits made outside the bridge** — Obsidian on your phone, a text editor
 on the Mac — are swept by the reconcile loop into one `user` commit per
@@ -349,6 +352,101 @@ create-only — so a note that changed under an agent comes back `409
 conflict` rather than being replaced by bytes the agent never read
 (`docs/ops/inbox.md`, `docs/ops/assistant-tools.md`).
 
+
+## Sync with the remote
+
+**You may commit and push at any time** — from another clone, on GitHub,
+in a terminal in this very working tree (plan §2.21, T10-3). Until
+2026-09-26 the scheduled push was a bare `git push` with no fetch, so the
+first push from anywhere else made every later one fail as
+non-fast-forward, forever. Now every push is a sync, in this order:
+
+1. **Commit and sweep first.** The queue is flushed and edits made outside
+   the bridge are swept into their `user` commit (unless
+   `METISTRY_COMMIT_EXTERNAL_EDITS=false`), so an Obsidian edit merges as a
+   commit instead of blocking as a dirty file.
+2. **Fetch** `refs/heads/<branch>` from the remote (`origin`, else the
+   first) — through the same egress door and askpass shim as the push when
+   confined.
+3. **Integrate** (`apps/reconciler/src/integrate.ts`):
+
+   | The remote has… | Local has… | So |
+   | --- | --- | --- |
+   | nothing new | anything | push if there is something to push |
+   | new commits | nothing unpushed | **fast-forward** |
+   | new commits | only the reconciler's own acts — single-parent, never published | **rebase** them onto the remote: history stays one line of acts, each keeping its author, date, message and trailers |
+   | new commits | anything else — your commit made in this working tree, an act that was already pushed, a merge | **merge**, as `Metistry reconciler` with `Brain-Source: reconciler`: your commits keep their shas |
+
+   "Ours" is the identity the committer stamps (`<prefix> <principal>` at
+   `METISTRY_GIT_AUTHOR_EMAIL`, author and committer both). "Published"
+   is anything the remote-tracking ref reached before this fetch — so an
+   act the remote once had and has since lost (you force-pushed over it)
+   is merged back, never replayed: the reconciler never drops a commit it
+   has. Revert, don't force-push, to take something out.
+
+4. **Push** — a plain `branch:branch` fast-forward. If the remote moved
+   between the fetch and the push, git rejects it and the sync goes round
+   again (three rounds at most, then the next schedule).
+5. **Re-walk.** An integrate that changed files is followed by a reconcile
+   walk that *starts after it* (never one already reading the old tree), so
+   the index, tasks and embeddings catch up and `vault.reconciled` follows.
+
+**Nothing is computed in the working tree.** The merge, and each rebased
+act, is built with `git merge-tree --write-tree` and `git commit-tree` —
+plumbing that writes objects and touches neither the index nor a file —
+so a conflict is known before anything moves and there is never a rebase
+or merge to abort. The tree then moves in **one** git command that refuses
+rather than overwrite a local change: `merge --ff-only` for a
+fast-forward or a merge commit, `reset --keep` for a rebase. While it runs,
+bridge writes wait (and it waits for the ones in flight), so a write can
+never land between git's "is this file clean?" and git's write. Needs git
+2.38 or later (`merge-tree --write-tree`); the rebase deliberately avoids
+2.40's `--merge-base`, because a Debian-based image may carry 2.39.
+
+**A conflict stops, never guesses.** When both sides changed the same
+lines, when an edit nobody has committed is in the way (a `.metistry/`
+file is never swept — it is your hand), or when the remote shares no
+history with the vault:
+
+- nothing is pushed and nothing in the working tree is touched;
+- `vault.state` is `conflict` — `check()` is `degraded` and names the
+  paths, `meta.vault_sync` carries both sides;
+- **one** Needs You `report` is raised (`kind: vault_conflict`): the
+  paths, and for each the latest commit on either side. One per
+  *episode* — its key is the commit where the two histories last agreed,
+  which does not move while the conflict stands, so the hourly retries
+  (and a restart) add nothing, and a report you dismissed stays dismissed;
+- writes keep committing locally.
+
+Resolve it in a terminal in the instance directory (`git pull`, fix,
+commit) or make the note match the remote's in Obsidian; the next sync
+that integrates cleanly clears `vault.state`.
+
+**Your operation in progress is yours.** While the working tree has a
+merge, rebase, cherry-pick, revert or bisect in progress (git's own
+`MERGE_HEAD`, `rebase-merge/`, …), the committer stages nothing, commits
+nothing and syncs nothing — staging a path mid-merge would mark your
+conflict resolved with whatever is on disk. Bridge writes still land and
+queue; the queue commits when you finish.
+
+**Every sync act is on the record**: a `runs` row, `component
+reconciler`, `kind vault_sync`, `meta.state` `pull` (commits came in, or
+the fetch failed), `push` or `conflict` — the source of the `vault.sync`
+event (plan §2.20). A sync with nothing to do writes nothing.
+
+**What git may never be asked to do.** `git.ts` refuses, before anything
+is exec'd, any argv that forces or rewrites (`refusedGitArgs`): `--force*`
+and `-f`, `--hard`, `--mirror`, a `+` or `:` refspec on push or fetch,
+`push --delete`/`--prune`/`--all`, a `reset` that moves the branch other
+than `--keep`, a `merge` that is not `--ff-only`, and `rebase`,
+`checkout`, `switch`, `restore`, `branch`, `stash`, `update-ref`,
+`reflog`, `gc`, `prune`, `clean`, `filter-branch`, `replace` outright.
+`apps/reconciler/test/sync.test.ts` records every argv the committer runs
+across its scenarios and checks the same list.
+
+`push()` is the scheduled act; `pull()` — fetch and integrate without
+pushing — is there for the pull schedule (`vault.pull` in
+`deployment.yaml`, T10-2).
 
 ## Confinement (the `launchd` shape)
 
@@ -408,7 +506,9 @@ absolute path, with no shell** — the exec allowlist is its only gate. So:
 Proven end to end by `packages/cli/test/reconciler-push.test.ts`: a real
 push to a real bare repository over real HTTPS, through the CONNECT tunnel,
 under `sandbox-exec` — and the same push, without the reset, failing on
-`osxkeychain`.
+`osxkeychain`. The same file runs the sync's whole argv confined: a fetch
+through the tunnel after someone else pushed, `merge-tree`, `commit-tree`,
+`merge --ff-only` and the push that follows.
 
 If the supervisor finds no keychain item it says so in its log and the child
 starts anyway; the push then fails with `could not read Username`, and

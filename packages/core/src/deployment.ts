@@ -18,7 +18,7 @@
 // filesystem or YAML dependency.
 
 import { z } from "zod";
-import { KEEP_AWAKE_DEFAULT, KEEP_AWAKE_VALUES, type KeepAwake } from "./power.js";
+import { keepAwakeConfigSchema, keepAwakeSetting, keepAwakeValue, type KeepAwake, type KeepAwakeSetting } from "./power.js";
 
 export const DEPLOYMENT_FILENAME = "deployment.yaml";
 
@@ -66,8 +66,13 @@ export const deploymentSchema = z
      * lets the D4 overlay treat it the way it treats a new per-service
      * default — an instance file written before the key existed inherits the
      * seed's answer instead of silently overriding it with `never`.
+     *
+     * Two spellings, one meaning (T4-20): one of the four values, or the
+     * object `{ enabled, sleep_on_battery, sleep_lid_closed }` the Services
+     * pane's switch and sub-switches write. Every file written before the
+     * object existed still loads; `keepAwakeSettingOf` reads either.
      */
-    keep_awake: z.enum(KEEP_AWAKE_VALUES).optional(),
+    keep_awake: keepAwakeConfigSchema.optional(),
     services: z.record(z.string(), serviceOverrideSchema).default({}),
   })
   .strict();
@@ -106,9 +111,18 @@ export function overlayDeployment(seed: Deployment, instance: Deployment | undef
   return { shape: instance.shape, ...(keepAwake !== undefined ? { keep_awake: keepAwake } : {}), services };
 }
 
-/** The setting as a value, with "the user was never asked" spelled as the value that holds nothing. */
+/** The setting as the one shape, with "the user was never asked" spelled as the switch off. */
+export function keepAwakeSettingOf(d: Deployment): KeepAwakeSetting {
+  return keepAwakeSetting(d.keep_awake);
+}
+
+/**
+ * The setting as a value, with "the user was never asked" spelled as the value
+ * that holds nothing — what the holder is told and doctor's `meta.mode` says
+ * (`keepAwakeValue` names the one object no value names).
+ */
 export function keepAwakeOf(d: Deployment): KeepAwake {
-  return d.keep_awake ?? KEEP_AWAKE_DEFAULT;
+  return keepAwakeValue(keepAwakeSettingOf(d));
 }
 
 /** The shape one service runs in: its own override, else the install's. */

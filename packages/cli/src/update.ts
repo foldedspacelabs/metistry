@@ -9,7 +9,10 @@
 // release's runtime pack is downloaded, sha256-verified, unpacked under
 // `releases/<version>/` and pointed at by `current` (release.ts), the
 // versioned images are pulled, never built, and everything after the
-// switch runs against `current` — so `--rollback` is a symlink flip.
+// switch runs against `current` — so `--rollback` is a symlink flip. And
+// everything after the switch runs ON `current`'s code too: the process
+// running this is the release being left, so it hands the rest of the update
+// to the new release's own CLI (update-reexec.ts).
 
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -31,11 +34,12 @@ import { SUPERVISOR_SERVICE } from "./supervisor.js";
 import { instanceLockPath, readLock, serializeLock, type LockFile, type LockSource } from "./lock.js";
 import { ensureOwnerBridgeToken, OWNER_BRIDGE_TOKEN, OWNER_BRIDGE_TOKEN_FIX, OwnerTokenMintFailed, protectedRel, writeProtected, type EnsureOwnerTokenResult, type ProtectedWrite } from "./protected-write.js";
 import { listMigrationFiles, MIGRATION_LOCK_KEY, openMigrationSession, runMigrations, type MigrateResult, type MigrationSession } from "./migrate.js";
-import { currentVersion, installRelease, rollbackRelease, releaseTarget, runtimePackCommit, type InstallReleaseResult } from "./release.js";
+import { CURRENT_LINK, currentVersion, installRelease, previousVersion, releaseDir, RELEASES_DIRNAME, rollbackRelease, releaseTarget, runtimePackCommit, type InstallReleaseResult } from "./release.js";
 import { installRuntimeDeps, runtimeDepsEnabled, RUNTIME_DIRNAME, type InstallRuntimeDepsResult } from "./runtime-deps.js";
 import { MIGRATE_SCOPE_COMMAND, migrateScope, type MigrateScopeResult } from "./secrets.js";
 import { StepFailed, StepRunner } from "./steps.js";
 import { type Ui } from "./ui.js";
+import { acknowledgeContinuation, reexecIntoRelease, releaseCliMain, type ContinueFrom, type ReexecOutcome } from "./update-reexec.js";
 import { closingDoctor, composeUp, COMPOSE_TIMEOUT_MS, nodeFor, runDirFor } from "./up.js";
 
 export interface UpdateOptions {
@@ -95,6 +99,19 @@ export interface UpdateOptions {
   reconcilerReady?: { timeoutMs?: number | undefined; intervalMs?: number | undefined } | undefined;
   /** default true; `false` is a test seam — see `up`'s `cliShim` (cli-shim.ts). `update` writes the same shim `up` does: it shares nothing else with `up`, but a checkout that only ever runs `update` still gets one. */
   cliShim?: boolean | undefined;
+  /**
+   * `--continue-from=switched`: this process is the NEW release's CLI, run by
+   * an update that has already switched `current` (update-reexec.ts). The
+   * product step is skipped — download, switch, runtime, app — and the rest
+   * runs here, on this release's code.
+   */
+  continueFrom?: ContinueFrom | undefined;
+  /** `--no-reexec`: finish on this process's code after the switch instead of handing over (debugging) */
+  noReexec?: boolean | undefined;
+  /** the owner's own flags, forwarded to the new release's CLI when this update hands over to it */
+  forwardFlags?: Record<string, string | true> | undefined;
+  /** test seam: where the hand-over's handshake file is made (default: os.tmpdir()) */
+  reexecTmpDir?: string | undefined;
 }
 
 export interface UpdateResult {
@@ -122,6 +139,8 @@ export interface UpdateResult {
   restart: RestartProgress;
   /** what the run could not do and carried on without — each with the commands that finish it */
   deferred: DeferredFailure[];
+  /** release mode, after a switch: whether the new release's CLI finished the update (and then `code` is its exit code) */
+  reexec?: ReexecOutcome;
 }
 
 /**
@@ -327,6 +346,10 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
   const fetchFn = opts.fetchFn ?? fetch;
   const openSession = opts.openSession ?? openMigrationSession;
   const productDir = opts.productDir;
+  const continuing = opts.continueFrom === "switched";
+  // the handshake, before anything can fail: the parent reads "started" from
+  // this file, and a child that started is never re-run by it
+  if (continuing) await acknowledgeContinuation(env);
 
   // compose interpolates from `./.env` unless told otherwise, and this
   // install's environment now lives in the instance (`state/.env`)
@@ -346,6 +369,7 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
   let release: InstallReleaseResult | undefined;
   let runtimeDeps: InstallRuntimeDepsResult | undefined;
   let app: UpdateAppResult | undefined;
+  let reexec: ReexecOutcome | undefined;
   let sharedScope: MigrateScopeResult | undefined;
   let seededTemplates: SeedTemplatesResult | undefined;
   /** how far the restart step got, and what it owed — the summary is written from this, so an interrupted restart is never "nothing kickstarted" */
@@ -371,8 +395,14 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
   if (ns) applyPorts(env, ns);
   // hashed before the build/switch and again after: only jobs whose code moved
   // are kickstarted. In release mode `runDir` is `current`, which still points
-  // at the release being LEFT here — that is the "before".
-  const before = await hashHostJobs(runDir, await templatesForRestart(runDir, deployment.shape, labelSuffix, env));
+  // at the release being LEFT here — that is the "before". A continued update
+  // starts after the switch, when `current` is already the new release, so
+  // its "before" is the release `current` pointed at before it
+  // (`releases/.previous`) — hashed by THIS code, so both sides of the
+  // comparison are the same algorithm. None on disk: every job counts as moved.
+  const switchedFrom = continuing ? await previousVersion(productDir) : undefined;
+  const beforeDir = !continuing ? runDir : switchedFrom && existsSync(releaseDir(productDir, switchedFrom)) ? releaseDir(productDir, switchedFrom) : undefined;
+  const before = beforeDir ? await hashHostJobs(beforeDir, await templatesForRestart(beforeDir, deployment.shape, labelSuffix, env)) : {};
 
   // The legacy-layout gate, asked with whatever version is knowable at the
   // time. In release mode that is `--version` (or "latest", which is not a
@@ -403,12 +433,25 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
   };
 
   try {
-    gate(opts.releaseVersion ?? version);
+    if (!continuing) gate(opts.releaseVersion ?? version);
 
     r.section("product");
-    r.note(`${productDir} — ${source === "git" ? "git checkout: fast-forward to the remote" : "release: download the pinned runtime pack"}${prior ? ` (lock: ${prior.product.version} @ ${prior.product.commit.slice(0, 7)}, ${prior.updated_at})` : " (no metistry.lock yet)"}`);
+    r.note(`${productDir} — ${continuing ? "release: continuing after the switch" : source === "git" ? "git checkout: fast-forward to the remote" : "release: download the pinned runtime pack"}${prior ? ` (lock: ${prior.product.version} @ ${prior.product.commit.slice(0, 7)}, ${prior.updated_at})` : " (no metistry.lock yet)"}`);
     r.note(`shape: ${deployment.shape} — from ${loaded.from}`);
-    if (source === "git") {
+    if (continuing) {
+      // Everything the product step does has been done by the process that
+      // ran this one: download, verify, switch, the bundled runtime, the app.
+      // What is left is to say where things stand and carry on.
+      if (source !== "release") throw new StepFailed("--continue-from=switched is release mode only — it is how an update hands over to the release it just installed (metistry.lock says source: release, or --channel release)");
+      if (opts.rollback) throw new StepFailed("--continue-from=switched and --rollback do not go together — a rollback never hands over");
+      const cur = await currentVersion(productDir);
+      if (!cur) throw new StepFailed(`--continue-from=switched: ${productDir}/${CURRENT_LINK} points at no release — there is nothing to continue from`);
+      gate(cur);
+      r.note(`${CURRENT_LINK} -> ${RELEASES_DIRNAME}/${cur}${switchedFrom ? ` (was ${switchedFrom})` : ""} — this is ${cur}'s own CLI; every step from here runs the release just installed`);
+      release = { version: cur, dir: releaseDir(productDir, cur), installed: true, ...(switchedFrom ? { previous: switchedFrom } : {}) };
+      releaseVersion = cur;
+      runDir = runDirFor(productDir, source);
+    } else if (source === "git") {
       if (opts.rollback) throw new StepFailed("--rollback is release mode only — a checkout rolls back with git (git -C <checkout> checkout <tag> && metistry update --skip-migrate)");
       if (existsSync(join(productDir, ".git"))) {
         await r.run("git", ["fetch", "--quiet"], { cwd: productDir, timeoutMs: 120_000 });
@@ -439,6 +482,7 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
         r.action(`download metistry-runtime-deps-${want}-${opts.target ?? releaseTarget(platform)}.tar.gz the same way and unpack it to ${productDir}/${RUNTIME_DIRNAME}/ (Node, Postgres + pgvector, git)`);
       }
       app = await macApp(want);
+      if (!opts.rollback && !opts.noReexec) r.action(`hand the rest to ${want}'s own CLI (node ${productDir}/${CURRENT_LINK}/packages/cli/dist/main.js update --continue-from=switched …): build, migrations, restart, lock and doctor run on the release just installed`);
     } else {
       release = opts.rollback ? await rollbackRelease(r, productDir) : await installRelease(r, { productDir, fetchFn, env, version: opts.releaseVersion, ...(opts.target ? { target: opts.target } : {}) });
       releaseVersion = release.version;
@@ -456,6 +500,23 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
         if (!runtimeDeps.installed) r.note(`${RUNTIME_DIRNAME}/: unchanged — ${runtimeDeps.reason}`);
       }
       app = await macApp(releaseVersion);
+      // The rest of this update belongs to the release just installed: this
+      // process is the one being left, and a fix to a step below would
+      // otherwise take effect only on the NEXT update (update-reexec.ts). A
+      // rollback never hands over — the running code is the newer one.
+      if (!opts.rollback && release.installed) {
+        reexec = await reexecIntoRelease(r, { productDir, runDir, version: releaseVersion, runningVersion: version, flags: opts.forwardFlags ?? {}, env, disabled: opts.noReexec, tmpDir: opts.reexecTmpDir });
+        if (reexec.status === "continued") {
+          return { code: reexec.code ?? 1, source, runDir, commands: r.commands, restarted, restart, deferred, reexec, release, ...(runtimeDeps ? { runtimeDeps } : {}), ...(app ? { app } : {}) };
+        }
+        if (reexec.status === "fell-back") {
+          // Loud, and not a pass: the install now runs a release whose own CLI
+          // does not start — and the `metistry` shim runs that same CLI, so the
+          // way back is the previous release's, by path.
+          const back = release.previous ? [`node ${releaseCliMain(releaseDir(productDir, release.previous))} update --rollback --product-dir ${productDir}`] : [];
+          deferred.push({ what: `${releaseVersion}'s CLI`, why: `${reexec.reason}; \`node ${releaseCliMain(runDir)} doctor\` shows why it does not start`, fix: [...back, "metistry update"] });
+        }
+      }
     }
 
     const templates = await templatesForRestart(runDir, deployment.shape, labelSuffix, env);
@@ -657,7 +718,7 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
   }
   r.out("");
   r.out(updateSummary({ ui: r.ui, dryRun: r.dryRun, failure, code, source, version: lock?.product.version ?? releaseVersion, migrations, restarted, kickstartFailed: kickFailed.length, app, restart, deferred }));
-  return { code, source, runDir, commands: r.commands, ...(lock ? { lock } : {}), restarted, restart, deferred, ...(migrations ? { migrations } : {}), ...(release ? { release } : {}), ...(runtimeDeps ? { runtimeDeps } : {}), ...(app ? { app } : {}), ...(sharedScope ? { sharedScope } : {}), ...(seededTemplates ? { seededTemplates } : {}) };
+  return { code, source, runDir, commands: r.commands, ...(lock ? { lock } : {}), restarted, restart, deferred, ...(reexec ? { reexec } : {}), ...(migrations ? { migrations } : {}), ...(release ? { release } : {}), ...(runtimeDeps ? { runtimeDeps } : {}), ...(app ? { app } : {}), ...(sharedScope ? { sharedScope } : {}), ...(seededTemplates ? { seededTemplates } : {}) };
 }
 
 // ---- seed templates the vault lacks ---------------------------------------------------
@@ -747,7 +808,7 @@ export const CHILD_DOCTOR_TIMEOUT_MS = intEnv("METISTRY_CHILD_DOCTOR_TIMEOUT_MS"
 
 /** The updated product's CLI entry point — the same file the `metistry` shim execs (cli-shim.ts). */
 export function updatedCliMain(runDir: string): string {
-  return join(runDir, "packages", "cli", "dist", "main.js");
+  return releaseCliMain(runDir);
 }
 
 /** A `doctor --json` document, or undefined when `stdout` is not one — never a guess at a half-written report. */

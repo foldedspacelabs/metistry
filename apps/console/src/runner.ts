@@ -107,6 +107,7 @@ import {
   type BudgetMiss,
   type Compute,
   type ComponentStreak,
+  type ConfigValue,
   type Manifest,
   type ManifestSchedule,
   type OccurrenceRefusal,
@@ -136,7 +137,19 @@ export { scheduleToSeconds }; // one import path for the runner's callers and te
  * composes the capabilities it already built for the server and hands them
  * on; a component takes the fields it declares and ignores the rest.
  */
-export type ComponentCtx = CollectorCtx & PlanCtx & UpdateCheckCtx & { reader?: TemplateReader };
+export type ComponentCtx = CollectorCtx &
+  PlanCtx &
+  UpdateCheckCtx & {
+    reader?: TemplateReader;
+    /**
+     * A routine's resolved Scheduled config — every key its manifest
+     * declares, the owner's value from `routines.<name>.config` in
+     * `.metistry/scheduled.yaml` over the manifest's default (§2.5). Handed
+     * on per run, from the same overlay read that decided the run was due;
+     * absent for a component that declares no config.
+     */
+    config?: Readonly<Record<string, ConfigValue>>;
+  };
 
 /**
  * The routine-only slice of `ComponentCtx`, built ONCE here from the objects
@@ -184,6 +197,8 @@ export interface ScheduledCollector extends RegisteredCollector {
    * `syncs`, declaring nothing.
    */
   unit?: ScheduledUnit;
+  /** Where its manifest came from (plan §2.7): the product's, or the owner's extension. Absent = product. */
+  origin?: "product" | "extension";
 }
 
 // ---- the owner's layers: scheduled.yaml and Me/profile.md -------------------
@@ -238,16 +253,27 @@ export async function readOverlay(path: string | null | undefined): Promise<Over
     if ((err as NodeJS.ErrnoException)?.code === "ENOENT") return { ok: true, value: emptyScheduled };
     return { ok: false, errors: [`(file): cannot read ${path}: ${err instanceof Error ? err.message : String(err)}`], held: "all" };
   }
+  return overlayFromText(text);
+}
+
+/** The overlay as the runner applies it, from the file's text — one reading for the runner and the Scheduled doors (scheduled-routes.ts). */
+export function overlayFromText(text: string): OverlayRead {
   const r = parseScheduled(text);
   return r.ok ? { ok: true, value: r.value } : { ok: false, errors: r.errors, held: namedIn(text) };
 }
 
 type Effective =
-  | { readonly held: false; readonly schedule: ManifestSchedule; readonly paused: boolean }
+  | {
+      readonly held: false;
+      readonly schedule: ManifestSchedule;
+      readonly paused: boolean;
+      /** The resolved config — each declared key, the owner's value over the manifest's default. Empty when the component declares none. */
+      readonly config: Readonly<Record<string, ConfigValue>>;
+    }
   | { readonly held: true; readonly why: string; /** alert per component — false when the file-level alert already covers it */ readonly alert: boolean };
 
 /** The unit this component is under Scheduled — its manifest's, or, for one built by hand, its kind's section with nothing declared. */
-function unitOf(c: ScheduledCollector): ScheduledUnit {
+export function unitOf(c: ScheduledCollector): ScheduledUnit {
   return c.unit ?? { name: c.name, section: c.runKind === "routine_run" ? "routines" : "syncs", displayName: c.name, schedule: c.schedule, config: {}, raise: {} };
 }
 
@@ -263,7 +289,7 @@ function unitOf(c: ScheduledCollector): ScheduledUnit {
  */
 export function effectiveSchedule(c: ScheduledCollector, overlay: OverlayRead): Effective {
   if (!overlay.ok) {
-    if (overlay.held !== "all" && !overlay.held.includes(c.name)) return { held: false, schedule: c.schedule, paused: false };
+    if (overlay.held !== "all" && !overlay.held.includes(c.name)) return { held: false, schedule: c.schedule, paused: false, config: resolvedConfig(unitOf(c), undefined) };
     const which = overlay.held === "all" ? "it cannot be read well enough to say which components it changes" : `it names ${c.name}`;
     return { held: true, alert: false, why: `.metistry/scheduled.yaml does not validate, and ${which} — held until it does: ${overlay.errors.join("; ")}` };
   }
@@ -275,9 +301,25 @@ export function effectiveSchedule(c: ScheduledCollector, overlay: OverlayRead): 
   const routine = unit.section === "routines" && routines !== undefined && Object.hasOwn(routines, c.name) ? routines[c.name] : undefined;
   const sync = unit.section === "syncs" && syncs !== undefined && Object.hasOwn(syncs, c.name) ? syncs[c.name] : undefined;
   // entryProblems has refused a New Routine under this name, so a routine entry here is an override
-  if (routine !== undefined && !isAssignment(routine)) return { held: false, schedule: routine.schedule ?? c.schedule, paused: routine.paused ?? false };
-  if (sync !== undefined) return { held: false, schedule: sync.every !== undefined ? { every: sync.every } : c.schedule, paused: sync.paused ?? false };
-  return { held: false, schedule: c.schedule, paused: false };
+  if (routine !== undefined && !isAssignment(routine)) {
+    return { held: false, schedule: routine.schedule ?? c.schedule, paused: routine.paused ?? false, config: resolvedConfig(unit, routine.config) };
+  }
+  if (sync !== undefined) return { held: false, schedule: sync.every !== undefined ? { every: sync.every } : c.schedule, paused: sync.paused ?? false, config: resolvedConfig(unit, undefined) };
+  return { held: false, schedule: c.schedule, paused: false, config: resolvedConfig(unit, undefined) };
+}
+
+/**
+ * Every config key the manifest declares, the owner's value over its
+ * default. `entryProblems` has already held a component whose entry names
+ * an undeclared key or a value of the wrong kind, so what is here applies
+ * as written.
+ */
+function resolvedConfig(unit: ScheduledUnit, mine: Readonly<Record<string, ConfigValue>> | undefined): Readonly<Record<string, ConfigValue>> {
+  const out: Record<string, ConfigValue> = {};
+  for (const [key, field] of Object.entries(unit.config)) {
+    out[key] = mine !== undefined && Object.hasOwn(mine, key) ? mine[key]! : field.default;
+  }
+  return out;
 }
 
 // ---- options ------------------------------------------------------------------
@@ -389,6 +431,8 @@ export interface ComponentUnit {
   /** the manifest file in force, so a refusal can name the file you would edit */
   path: string;
   run: RegisteredCollector["run"];
+  /** Where the manifest came from — the registry's `origin`. Absent = product. */
+  origin?: "product" | "extension";
 }
 
 /**
@@ -417,6 +461,7 @@ export async function loadSchedules(units: readonly ComponentUnit[]): Promise<Sc
         requires: requirementsOf(m),
         runKind: m.type === "routine" ? "routine_run" : "collector_run",
         ...(unit ? { unit } : {}),
+        ...(u.origin ? { origin: u.origin } : {}),
         ...(m.type === "collector" && m.uses_model ? { usesModel: m.uses_model } : {}),
       });
     } catch (e) {
@@ -713,45 +758,11 @@ export async function tick(db: Db, scheduled: ScheduledCollector[], ctx: Compone
     const slotMeta = slot.scheduledFor ? { scheduled_for: slot.scheduledFor.toISOString(), time_zone: slot.timeZone } : undefined;
     const runId = await startRun(db, { component: c.name, kind: c.runKind, ...(slotMeta ? { meta: slotMeta } : {}) });
     const runCtx: ComponentCtx = {
-      ...ctx,
-      ...(c.usesModel ? { usesModel: c.usesModel } : {}),
+      ...componentCtx(c, ctx, eff.config),
       ...(slot.scheduledFor ? { scheduledFor: slot.scheduledFor } : {}),
       ...(slot.timeZone ? { timeZone: slot.timeZone } : {}),
     };
-    try {
-      const n = await c.run(db, runCtx);
-      // T1-4: every routine_run row carries meta.outcome — acted or silent,
-      // from the same count the routine already returns — so the activity
-      // feed (T1-3) can tell a real event from a run that found nothing to
-      // do. A routine that skips for a specific reason (rather than finding
-      // nothing) writes ITS OWN row saying so (plan-tomorrow, knowledge-fold)
-      // — this generic row only ever knows "acted" or "silent" from the
-      // count. Collector rows are unaffected: a collector reports items
-      // processed, not an assistant-facing outcome.
-      const meta: Record<string, unknown> = c.runKind === "routine_run" ? { processed: n, outcome: n > 0 ? "acted" : "silent" } : { processed: n };
-      await finishRun(db, runId, { ok: true, meta });
-      await tell(opts, (r) => (c.runKind === "routine_run" ? r.routineSucceeded(c.name) : r.collectorSucceeded(c.name)));
-    } catch (err) {
-      const error = err instanceof Error ? err.message : String(err);
-      const signature = errorSignature(c.name, error);
-      await finishRun(db, runId, { ok: false, error, meta: { error_signature: signature } });
-      const count = (streak?.count ?? 0) + 1;
-      await raiseAlert(db, opts, {
-        signature,
-        streakSince: streak?.since ?? opts.now,
-        text:
-          `${c.name} failed ${count} run(s) in a row: ${clip(error, 100)}. ` +
-          `Fix it, or remove \`schedule\` from ${c.dir}/manifest.yaml to retire it; ` +
-          `after METISTRY_RUNNER_MAX_STREAK (${opts.maxStreak}) failures in a row the runner stops running it`,
-      });
-      if (c.runKind === "routine_run") {
-        await tell(opts, (r) => r.routineFailed({ component: c.name, title: unitOf(c).displayName, runId, error, signature, failedAt: opts.now }));
-      }
-      // three strikes (C135): this failure is the one that stops it
-      if (count >= opts.maxStreak) {
-        await tell(opts, (r) => r.componentStopped(stopOf(c, count, streak?.since ?? opts.now, error, signature, runId, opts)));
-      }
-    }
+    await execute(db, c, runId, runCtx, streak, opts);
   }
 
   if (secretMisses.size > 0) {
@@ -1174,6 +1185,115 @@ function secretStopped(name: string, stopped: readonly string[]): Record<string,
       after: { label: `Once ${name} is set`, text: "Each runs again on its next window." },
     },
   };
+}
+
+/** What one component is handed for a run: the shared ctx, its pinned model, and its resolved config. */
+function componentCtx(c: ScheduledCollector, ctx: ComponentCtx, config: Readonly<Record<string, ConfigValue>>): ComponentCtx {
+  return {
+    ...ctx,
+    ...(c.usesModel ? { usesModel: c.usesModel } : {}),
+    ...(Object.keys(config).length > 0 ? { config } : {}),
+  };
+}
+
+/**
+ * The run itself, under a runs row already started — the ONE place a
+ * component's code is called, for a scheduled slot and for Run Now alike:
+ * finish the row with what it did, or with its error, a streak-aware alert
+ * and the signature the streak and the dedupe key on.
+ */
+async function execute(db: Db, c: ScheduledCollector, runId: number, runCtx: ComponentCtx, streak: ComponentStreak | undefined, opts: ResolvedOptions): Promise<void> {
+  try {
+    const n = await c.run(db, runCtx);
+    // T1-4: every routine_run row carries meta.outcome — acted or silent,
+    // from the same count the routine already returns — so the activity
+    // feed (T1-3) can tell a real event from a run that found nothing to
+    // do. A routine that skips for a specific reason (rather than finding
+    // nothing) writes ITS OWN row saying so (plan-tomorrow, knowledge-fold)
+    // — this generic row only ever knows "acted" or "silent" from the
+    // count. Collector rows are unaffected: a collector reports items
+    // processed, not an assistant-facing outcome.
+    const meta: Record<string, unknown> = c.runKind === "routine_run" ? { processed: n, outcome: n > 0 ? "acted" : "silent" } : { processed: n };
+    await finishRun(db, runId, { ok: true, meta });
+    await tell(opts, (r) => (c.runKind === "routine_run" ? r.routineSucceeded(c.name) : r.collectorSucceeded(c.name)));
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    const signature = errorSignature(c.name, error);
+    await finishRun(db, runId, { ok: false, error, meta: { error_signature: signature } });
+    const count = (streak?.count ?? 0) + 1;
+    await raiseAlert(db, opts, {
+      signature,
+      streakSince: streak?.since ?? opts.now,
+      text:
+        `${c.name} failed ${count} run(s) in a row: ${clip(error, 100)}. ` +
+        `Fix it, or remove \`schedule\` from ${c.dir}/manifest.yaml to retire it; ` +
+        `after METISTRY_RUNNER_MAX_STREAK (${opts.maxStreak}) failures in a row the runner stops running it`,
+    });
+    if (c.runKind === "routine_run") {
+      await tell(opts, (r) => r.routineFailed({ component: c.name, title: unitOf(c).displayName, runId, error, signature, failedAt: opts.now }));
+    }
+    // three strikes (C135): this failure is the one that stops it
+    if (count >= opts.maxStreak) {
+      await tell(opts, (r) => r.componentStopped(stopOf(c, count, streak?.since ?? opts.now, error, signature, runId, opts)));
+    }
+  }
+}
+
+// ---- Run Now: the tick, for one component, on the owner's word ------------------
+
+/** Why Run Now did not start a run — a closed set a client branches on (docs/ops/client-api.md). */
+export const RUN_NOW_REFUSALS = ["not_found", "paused", "held", "running", "blocked"] as const;
+export type RunNowRefusal = (typeof RUN_NOW_REFUSALS)[number];
+
+export type RunNowResult =
+  | {
+      readonly started: true;
+      readonly runId: string;
+      /** Settles when the run has finished and its row says so — never rejects. The console answers 202 without waiting. */
+      readonly done: Promise<void>;
+    }
+  | { readonly started: false; readonly reason: RunNowRefusal; readonly message: string };
+
+/** How long an unfinished row of the same component counts as a run still going — longer than any run takes; a crashed process's row stops blocking after it. */
+const IN_FLIGHT_MS = 60 * 60_000; // limit: fixed — an hour: longer than any routine or sync run, short enough that a row a crash left open unblocks by itself
+
+/**
+ * **Run Now** (§2.1, T3-3): what the tick does for one component, when the
+ * owner asks rather than when it is due. The owner's layer is read afresh
+ * and applies exactly as on a tick — a PAUSED component is not run (Resume
+ * is the owner's other door, and Run Now does not quietly override a pause),
+ * a HELD one is not run (its entry does not fit its manifest) — and then
+ * the same preflight, budget included (C5: a `stop` budget pauses routines
+ * too), before one runs row is started and the component's code is called
+ * through the same `execute`.
+ *
+ * What it does NOT share with the tick: the due-gate (the owner asked now),
+ * and the failure streak — Run Now is how a fix is checked, and the success
+ * it produces is what clears the streak. A run already going (an unfinished
+ * row of the same kind in the last hour) refuses rather than doubling it.
+ * The row carries `meta.trigger = "run_now"`, so history tells the two apart.
+ */
+export async function runNow(db: Db, scheduled: readonly ScheduledCollector[], name: string, ctx: ComponentCtx = {}, options: RunnerOptions = {}): Promise<RunNowResult> {
+  const c = scheduled.find((x) => x.name === name);
+  if (!c) return { started: false, reason: "not_found", message: `nothing named ${name} is scheduled here` };
+  const opts = resolve(db, options);
+  const label = c.unit?.displayName ?? c.name;
+  const eff = effectiveSchedule(c, await opts.scheduled());
+  if (eff.held) return { started: false, reason: "held", message: `${label} is held, so Run Now did not start it: ${eff.why}` };
+  if (eff.paused) return { started: false, reason: "paused", message: `${label} is paused, so Run Now did not start it — Resume it first (the pause is yours, in .metistry/scheduled.yaml)` };
+  const { rows } = await db.query(
+    `SELECT id FROM runs WHERE component = $1 AND kind = $2 AND finished_at IS NULL AND ts > $3 ORDER BY id DESC LIMIT 1`,
+    [c.name, c.runKind, new Date(opts.now.getTime() - IN_FLIGHT_MS)],
+  );
+  if (rows[0]) return { started: false, reason: "running", message: `${label} is already running (run ${String(rows[0].id)}) — Run Now waits for it to finish rather than start a second` };
+  const pre = await preflight(c.requires, { env: opts.env, compute: opts.compute(), fetchFn: opts.fetchFn, ...(opts.budget ? { budget: opts.budget } : {}) });
+  if (!pre.ok) return { started: false, reason: "blocked", message: blockedConfigMessage(c.name, c.dir, pre) };
+  const runId = await startRun(db, { component: c.name, kind: c.runKind, meta: { trigger: "run_now" } });
+  const streak = streakFor(await failureStreaks(db), c.name, c.runKind);
+  const done = execute(db, c, runId, componentCtx(c, ctx, eff.config), streak, opts).catch((err: unknown) => {
+    console.error(`runner: Run Now of ${c.name} (run ${String(runId)}) could not be recorded:`, err);
+  });
+  return { started: true, runId: String(runId), done };
 }
 
 /**

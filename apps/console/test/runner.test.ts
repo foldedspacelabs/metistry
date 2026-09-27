@@ -483,3 +483,36 @@ describe("routineCapabilities", () => {
     expect(await ctx.reader?.read("Templates/Plan.md")).toBeNull();
   });
 });
+
+// T3-3: the resolved Scheduled config reaches the component's ctx — the
+// owner's value from `routines.<name>.config` over the manifest's default, for
+// every key the manifest declares — so `routines.standup.config` is no longer
+// a line nothing reads.
+describe("a routine's resolved config", () => {
+  const unit = {
+    name: "cfg",
+    section: "routines" as const,
+    displayName: "Configured",
+    schedule: { every: "5m" as const },
+    config: {
+      template: { kind: "path" as const, label: "Template", default: "Templates/Standup.md" },
+      skip_without_calendar_event: { kind: "boolean" as const, label: "Skip", default: false },
+    },
+    raise: {},
+  };
+
+  it("hands the owner's value over the default, key by key", async () => {
+    const seen: unknown[] = [];
+    const c = collector({ name: "cfg", runKind: "routine_run", unit, run: async (_db, ctx) => (seen.push((ctx as { config?: unknown }).config), 1) });
+    const db = new Fake(NOW);
+    await tick(db, [c], {}, opts({ scheduled: async () => ({ ok: true, value: { routines: { cfg: { config: { skip_without_calendar_event: true } } } } }) }));
+    expect(seen).toEqual([{ template: "Templates/Standup.md", skip_without_calendar_event: true }]);
+  });
+
+  it("hands the defaults with no entry, and nothing to a component that declares no config", async () => {
+    const seen: unknown[] = [];
+    const record = async (_db: unknown, ctx: unknown) => (seen.push((ctx as { config?: unknown }).config), 1);
+    await tick(new Fake(NOW), [collector({ name: "cfg", runKind: "routine_run", unit, run: record }), collector({ run: record })], {}, opts());
+    expect(seen).toEqual([{ template: "Templates/Standup.md", skip_without_calendar_event: false }, undefined]);
+  });
+});

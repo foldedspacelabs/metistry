@@ -711,6 +711,7 @@ export {
   profileWeekdays,
   readStandupKeys,
   resolveScheduleDays,
+  timeOfDayFields,
   withRoutineSchedule,
   withoutProfileKeys,
   routineAssignmentSchema,

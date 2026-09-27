@@ -1,23 +1,88 @@
 {
   "route": "POST /api/knowledge/restore",
-  "source": "contract",
-  "ticket": "T10-5",
-  "note": "raises a Needs You request; Approve restores as user; 409 stale when the file moved past seen_sha",
+  "source": "recorded",
+  "ticket": null,
   "request": {
     "method": "POST",
     "path": "/api/knowledge/restore",
     "body": {
       "path": "Projects/Metistry/Roadmap.md",
-      "seen_sha": "4c1d2e3f",
-      "sha": "9ab8c7d6"
+      "sha": "4c1d2e3f",
+      "seen_sha": "c31a1846c78fc9467423d751eb50c09895c3fcead1f3a6abdf2548453c86d901"
     },
     "idempotency_key": null
   },
   "status": 202,
   "body": {
     "ok": true,
-    "proposal_id": "61",
+    "proposal_id": "6",
+    "raised": true,
     "path": "Projects/Metistry/Roadmap.md",
-    "sha": "9ab8c7d6"
+    "sha": "4c1d2e3f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d",
+    "date": "2026-09-28T09:10:00-04:00",
+    "proposal": {
+      "id": "6",
+      "ts": "2026-09-27T04:15:56.757Z",
+      "kind": "improvement",
+      "source_agent": "console",
+      "trust": "user",
+      "payload": {
+        "body": {
+          "kind": "before_after",
+          "after": {
+            "text": "# Roadmap\n\nShip the store interface, then the stores.\n",
+            "label": "Projects/Metistry/Roadmap.md as of 2026-09-28"
+          },
+          "before": {
+            "text": "# Roadmap\n\nShip the store interface, then the stores. See [[Projects/Metistry/Design]].\n",
+            "label": "Projects/Metistry/Roadmap.md now"
+          },
+          "heading": "What Approve Does"
+        },
+        "title": "Restore Projects/Metistry/Roadmap.md",
+        "restore": {
+          "sha": "4c1d2e3f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d",
+          "date": "2026-09-28T09:10:00-04:00",
+          "path": "Projects/Metistry/Roadmap.md",
+          "base_sha256": "c31a1846c78fc9467423d751eb50c09895c3fcead1f3a6abdf2548453c86d901",
+          "version_sha256": "2c640c233b16b2dda4e168df9a3bb5242536eb97a518a0efefb96d205961d916"
+        },
+        "summary": "Restore Projects/Metistry/Roadmap.md to 2026-09-28 — the version from “Rename the plan to the roadmap” (4c1d2e3). Approve writes it back as a new commit, as you; the history keeps every version, including the one it replaces. Revise and Decline change nothing."
+      },
+      "decision": "pending",
+      "decided_at": null,
+      "work_id": null,
+      "snoozed_until": null,
+      "request": {
+        "type": "improvement",
+        "word": "improvement",
+        "body": "before_after",
+        "primary": {
+          "label": "Approve",
+          "sends": {
+            "decision": "allow"
+          }
+        },
+        "revise": {
+          "label": "Revise",
+          "sends": {
+            "decision": "accept_with_changes"
+          },
+          "carries": "feedback"
+        },
+        "decline": {
+          "label": "Decline",
+          "sends": {
+            "decision": "deny"
+          }
+        },
+        "grouped": false,
+        "decisions": [
+          "allow",
+          "accept_with_changes",
+          "deny"
+        ]
+      }
+    }
   }
 }

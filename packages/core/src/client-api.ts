@@ -254,7 +254,7 @@ export const CLIENT_API: readonly ClientRoute[] = [
   planned("POST", "/api/knowledge/conflicts/resolve", "T2-10", "settle a conflicted file: keep one side", { conflict: ["stale"] }),
   route("GET", "/api/knowledge/history", "a file's commits"),
   route("GET", "/api/knowledge/version", "one file at one commit"),
-  planned("POST", "/api/knowledge/restore", "T10-5", "raise a Needs You request to restore a file; Approve restores as `user`", { conflict: ["stale"] }),
+  route("POST", "/api/knowledge/restore", "raise a Needs You request to restore a file; Approve restores as `user`", { conflict: ["stale"] }),
 
   // ----- the named queries -----
   route("GET", "/api/q/:name", "run a named query exposed `generic`", { principals: OWNER_AND_CAPTURE_TOKEN }),

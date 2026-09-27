@@ -719,6 +719,8 @@ export {
   redactSecrets,
   scrubModelOutput,
   containsRedactedPlaceholder,
+  SecretRedactor,
+  redactedSecret,
 } from "./redact.js";
 export { parseBearer, tokenEquals, authorized, tokenHash, mintToken } from "./auth.js";
 export { sanitizeForAgent } from "./sanitize.js";

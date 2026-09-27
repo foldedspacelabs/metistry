@@ -8,6 +8,9 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { randomUUID } from "node:crypto";
 import { authorized, errorEnvelope, statusFor, runCheck, type ErrorCode } from "@foldedspacelabs/metistry-core";
 import type { Helper } from "./helper.js";
+import { bridgeEvent, type HelperEvent } from "./events.js";
+
+export { bridgeEvent, eventKey, selfStatus, PARTICIPANT_STATUSES, type BridgeEvent, type HelperEvent, type HelperParticipant, type Participant } from "./events.js";
 
 export interface BridgeConfig {
   token: string;
@@ -71,10 +74,21 @@ export function makeBridge(helper: Helper, cfg: BridgeConfig): Server {
         return send(res, result.status === "ok" ? 200 : 503, result);
       }
 
+      // Every event with its occurrence key, participants, organizer and the
+      // owner's own answer (events.ts). Never the invite body: the helper is
+      // not asked for `notes`, and `bridgeEvent` drops the field if one comes
+      // anyway — no reader of this route can hand one on (T2-11). `window` is
+      // the span the helper read, so a sync can tell an event that was
+      // cancelled from one that is simply outside what it asked for; an older
+      // helper sends none and the response says so by omitting it.
       if (key === "GET /events") {
         const days = Math.min(Math.max(Number(url.searchParams.get("days") ?? 1), 1), 31);
         const r = await helper.request({ op: "list_events", days });
-        return r.ok ? send(res, 200, { events: r.events, as_of: new Date().toISOString() }) : fail(res, "internal");
+        if (!r.ok) return fail(res, "internal");
+        const events = (Array.isArray(r.events) ? (r.events as HelperEvent[]) : []).map(bridgeEvent);
+        const w = r.window as { start?: unknown; end?: unknown } | undefined;
+        const window = w && typeof w.start === "string" && typeof w.end === "string" ? { start: w.start, end: w.end } : undefined;
+        return send(res, 200, { events, ...(window ? { window } : {}), as_of: new Date().toISOString() });
       }
 
       if (key === "GET /reminders") {

@@ -10,7 +10,7 @@ discovery: eager         # 4 tools — under the PoC-17 lazy threshold
 degrades: absent         # router stops offering calendar when the Mac is away
 exposes:
   - name: list_events
-    description: Events from today for N days (title, times, location, attendees)
+    description: Events from today for N days — title, times, location, attendees with address and answer, organizer, series and the occurrence key; never the invite body
   - name: list_reminders
     description: Incomplete reminders across lists
   - name: create_event

@@ -113,8 +113,8 @@ private func present(_ model: RequestAnswering, allowsDecisions: Bool = true) ->
 
 @Test func everyFixtureRowCarriesItsReadingAndTheCardDrawsTheWordItIsGiven() async throws {
     let rows = try await ConsoleStores(transport: try FixtureConsole.recorded()).requests().get().proposals
-    #expect(rows.map { $0.request?.word } == ["report", "note", "question"])
-    #expect(rows.map { $0.shape.bodyKind } == [.excerpt, .preview, .choices])
+    #expect(rows.map { $0.request?.word } == ["report", "note", "question", "question"])
+    #expect(rows.map { $0.shape.bodyKind } == [.excerpt, .preview, .choices, .choices])
     for row in rows {
         let reading = RequestReading(row, assistantName: assistantName)
         // the word the owner reads is served — never the stored kind

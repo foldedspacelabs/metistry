@@ -454,3 +454,33 @@ describe("answering from the mounted view", () => {
     expect(b.$("triage-detail").innerHTML).toContain(`data-card="${p.id}"`);
   });
 });
+
+// ---------------------------------------------------------------------------
+// T2-14: an answer carries the subject it was given to
+// ---------------------------------------------------------------------------
+
+describe("an answer sends back the subject the row was painted with (T2-14)", () => {
+  const drag = async (b: ReturnType<typeof fakeBrowser>, p: { id: number }) => {
+    const list = b.$("proposal-list");
+    const li = new FakeEl();
+    li.dataset = { id: String(p.id) };
+    li.querySelector = (() => new FakeEl()) as FakeEl["querySelector"];
+    await list.fire("pointerdown", { pointerType: "touch", target: target({ ".req-row": li }), clientX: 20, clientY: 300, pointerId: 9 });
+    for (const x of [30, 200, 380]) await list.fire("pointermove", { pointerId: 9, clientX: x, clientY: 302 });
+    await list.fire("pointerup", { pointerId: 9 });
+  };
+
+  it("its fingerprint, or null for a row served with none — beside `seen_at`", async () => {
+    const fingerprint = `work_updated_at:${"a".repeat(32)}`;
+    const about = { ...served("action", { action: { kind: "comment", args: { ref: "gh:o/r#5", body: "ok" } } }), subject: { basis: "work_updated_at", fingerprint } };
+    const none = { ...served("action", { action: { kind: "comment", args: { ref: "gh:o/r#6", body: "ok" } } }), subject: null };
+    const b = fakeBrowser({ wide: true, respond: (c) => (c.method === "GET" ? { body: { proposals: [about, none] } } : { body: { ok: true } }) });
+    await mountNeedsYou({ $: b.$, api: b.api, setNeeds: () => {}, show: () => {} }).load();
+    await drag(b, about);
+    await drag(b, none);
+    expect(b.writes().map((w) => w.body)).toEqual([
+      { decision: "allow", if_unchanged: { seen_at: about.ts, subject: fingerprint } },
+      { decision: "allow", if_unchanged: { seen_at: none.ts, subject: null } },
+    ]);
+  });
+});

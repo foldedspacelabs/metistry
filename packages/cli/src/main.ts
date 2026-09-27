@@ -125,6 +125,7 @@ import { renderTemplatesCheck, templatesCheck } from "./templates.js";
 import { configureUi, createUi, defaultUi, type Ui } from "./ui.js";
 import { up } from "./up.js";
 import { gitHead, update } from "./update.js";
+import { jobFilesFor, retireLegacyEnv } from "./legacy-env.js";
 import { collectVersionInfo, renderVersionInfo } from "./version.js";
 
 export interface ParsedArgs {
@@ -354,6 +355,7 @@ const USAGE = `metistry — Metistry command line
   metistry secrets mint <VAR> [--instance <dir>] [--env-file <path>]
   metistry secrets list [--json] [--instance <dir>] [--env-file <path>]
   metistry secrets purge --instance <dir> [--yes]
+  metistry secrets retire-legacy-env [--yes] [--instance <dir>]
       The macOS login Keychain (service metistry:<VAR>) is the canonical store;
       .env is generated from it, at <instance>/state/.env. --to keychain imports
       .env's secret-shaped variables (names ending _TOKEN _PASSWORD _PRIVATE
@@ -373,6 +375,12 @@ const USAGE = `metistry — Metistry command line
       sync fills at the egress door for the secret's listed hosts only.
       purge deletes one instance's items and nothing else — its owner-named
       secrets included; without --yes it only previews.
+      retire-legacy-env ends the "still being read as a fallback" notice: it
+      lists the variables only the product checkout's .env still has (names,
+      never values), and with --yes appends them to <instance>/state/.env —
+      never over a line it already has — and deletes the old file. It keeps
+      the file while a job still sources it (run metistry up first) or
+      while it is how this CLI finds the instance (use the shim).
 
   metistry secrets migrate-scope [--dry-run] [--instance <dir>]
   metistry secrets purge-shared [--yes] [--instance <dir>]
@@ -919,6 +927,7 @@ export const HELP_GROUPS: Array<{ title: string; verbs: Array<[string, string]> 
       ["init <dir>", "create a private instance repo from the product's seed/"],
       ["connect-repo <url>", "point it at a private remote, with credentials to push with"],
       ["secrets sync|mint|list|purge", "the login Keychain is the store; .env is generated from it"],
+      ["secrets retire-legacy-env", "move what only the product checkout's .env still has into the instance, then delete it"],
       ["secrets set|replace|remove|hosts|grant", "owner-named secrets, per instance: the value in the Keychain, the policy in secrets.yaml"],
       ["secrets migrate-scope|purge-shared", "copy the retired shared scope into this instance; remove originals every instance has copied"],
       ["runtime install --from <bundle>", "seed a writable product dir from a signed app bundle"],
@@ -1307,6 +1316,32 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
         err("secrets needs a .env to read or generate: pass --env-file, --instance <dir>, or run inside a checkout (--product-dir / METISTRY_PRODUCT_DIR)");
         return 2;
       }
+      // No Keychain involved — it moves plain lines between two files — so it
+      // runs on every platform, before anything below asks for an instance_id.
+      if (sub === "retire-legacy-env") {
+        if (!loaded.instanceDir) {
+          err("metistry secrets retire-legacy-env: no instance — until one exists, the product checkout's .env IS this install's environment (--instance <dir>)");
+          return 2;
+        }
+        if (!paths.legacy) {
+          out(`no product-checkout .env is being read — ${paths.write} is already this install's whole environment; nothing to retire.`);
+          return 0;
+        }
+        try {
+          const r = await retireLegacyEnv({
+            legacy: paths.legacy,
+            target: paths.write,
+            jobFiles: await jobFilesFor({ instanceDir: loaded.instanceDir, home: io.home ?? process.env.HOME }),
+            yes: flags.yes === true,
+            pointerOnlyInLegacy: loaded.instanceFrom === "legacy-env",
+            out,
+          });
+          return r.kept ? 1 : 0;
+        } catch (e) {
+          err(`metistry secrets retire-legacy-env: ${e instanceof Error ? e.message : String(e)}`);
+          return 1;
+        }
+      }
       // read the highest-precedence file that exists (the product checkout's
       // while an install predates the move); write where it now belongs
       const envFile = paths.read[0] ?? paths.write;
@@ -1394,7 +1429,7 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
             return r.found.length + r.named.length > 0 && incomplete && flags.yes === true ? 1 : 0;
           }
           default:
-            err("usage: metistry secrets sync --to env|keychain | mint <VAR> | list [--named] | purge --instance <dir> [--yes]");
+            err("usage: metistry secrets sync --to env|keychain | mint <VAR> | list [--named] | purge --instance <dir> [--yes] | retire-legacy-env [--yes]");
             err("       metistry secrets set|replace|remove|hosts|grant <name> … (owner-named secrets — docs/ops/cli.md)");
             err("       metistry secrets migrate-scope [--dry-run] | purge-shared [--yes] (the retired shared scope)");
             return 2;

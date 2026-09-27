@@ -112,7 +112,7 @@ export function envNotices(paths: EnvPaths): string[] {
   if (!paths.legacy) return [];
   return paths.pendingMove
     ? [`${paths.legacy} is the product checkout's — an instance's environment belongs at ${paths.write}. \`metistry secrets sync --to env\` moves it (the old file is left in place, never deleted).`]
-    : [`${paths.legacy} is still being read as a fallback and is deprecated — everything an install needs is now in ${paths.write}; delete it once nothing reports it missing.`];
+    : [`${paths.legacy} is still being read as a fallback and is deprecated — everything an install needs is now in ${paths.write}. \`metistry secrets retire-legacy-env\` lists what only it still has; \`--yes\` moves that and deletes it.`];
 }
 
 // ---- instance_id ---------------------------------------------------------------

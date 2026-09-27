@@ -79,6 +79,8 @@ export interface LoadedEnv {
   applied: number;
   /** the instance this install serves, once known */
   instanceDir?: string;
+  /** where that came from: `--instance`/the environment, or ONLY the product checkout's deprecated `.env` (its METISTRY_INSTANCE_DIR) */
+  instanceFrom?: "flag-or-env" | "legacy-env";
   /** where `.env` now belongs, and what is still being read from the old place */
   paths?: EnvPaths;
   /** deprecation lines worth printing once, at the top of a command's output */
@@ -96,11 +98,15 @@ export interface LoadedEnv {
 export function loadInstallEnv(opts: { productDir?: string | undefined; env?: NodeJS.ProcessEnv | undefined; instanceDir?: string | undefined; envFile?: string | undefined } = {}): LoadedEnv {
   const env = opts.env ?? process.env;
   let instanceDir = resolveInstanceDir(env, opts.instanceDir);
+  let instanceFrom: LoadedEnv["instanceFrom"] = instanceDir ? "flag-or-env" : undefined;
   if (!instanceDir && opts.productDir) {
     const product = productEnvFile(opts.productDir);
     if (existsSync(product)) {
       const pointer = parseDotEnv(readFileSync(product, "utf8")).METISTRY_INSTANCE_DIR;
-      if (pointer) instanceDir = resolveInstanceDir({}, pointer);
+      if (pointer) {
+        instanceDir = resolveInstanceDir({}, pointer);
+        instanceFrom = "legacy-env";
+      }
     }
   }
   // downstream (`up`, the lock path, `stateRoot`) reads the variable, not our
@@ -114,7 +120,7 @@ export function loadInstallEnv(opts: { productDir?: string | undefined; env?: No
     files.push(f);
     applied += n;
   }
-  return { files, applied, ...(instanceDir ? { instanceDir } : {}), ...(paths ? { paths } : {}), notices: paths ? envNotices(paths) : [] };
+  return { files, applied, ...(instanceDir ? { instanceDir } : {}), ...(instanceFrom ? { instanceFrom } : {}), ...(paths ? { paths } : {}), notices: paths ? envNotices(paths) : [] };
 }
 
 /** A product checkout is the directory holding both `seed/identity.yaml` and the workspace `package.json` named "metistry". */

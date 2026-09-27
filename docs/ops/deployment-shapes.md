@@ -813,6 +813,57 @@ should not grow a listener.
 Under `compose` there is no proxy and no profile: the container is the
 boundary.
 
+## The secret fill: `{{ secret.name }}` at egress
+
+The door above sees a host and a port and never a header, so it cannot fill
+— or keep — a secret. That happens one step earlier, in the process making
+the call, just before TLS: core's **`guardedFetch`**
+(`packages/core/src/egress.ts`, plan §2.14, T4-2). It is a `fetch`, so it
+goes wherever a caller already takes a fetch seam — a connection's client,
+the MCP SDK's HTTP transport, a compute provider's chat client. The caller
+writes the request with `{{ secret.name }}` still in it and gets back a
+Response that is already redacted; the filled request never exists outside
+the function. The proxy stays the second wall: the host must also be on the
+install's allowlist to be dialled at all.
+
+Every check runs before the Keychain is read or a byte is sent, and each
+refusal is an `EgressRefused` with a code, naming secrets and the host,
+never a value:
+
+| code | refused when |
+|---|---|
+| `host_not_listed` | a secret the request references — or already carries as a known value — does not list the exact destination in `hosts:` (host, plus `:port` when not 443; no suffix match, no trailing-dot or address spelling). A secret `secrets.yaml` does not describe is listed for nowhere. |
+| `secret_in_url` | a reference, a known value in any encoding, or userinfo in the URL — URLs land in logs and histories |
+| `secret_in_model_body` | `purpose: "model"` and a reference or known value in the body. The body is the model's context; the provider key goes in a header. |
+| `cleartext` | a secret over plain http to anything but loopback |
+| `not_granted` · `needs_approval` | the caller's grant (`connection:<name>` or `agent:<id>`) is Off, or Ask without the owner's approval of this call |
+| `missing_secret` · `malformed_reference` | all or nothing: one missing item or one bad `{{ secret… }}` and nothing is filled or sent |
+| `uninspectable_body` | a body the door cannot read (a stream, a Blob, FormData) |
+| `bad_url` | not an http(s) URL |
+
+A request that carries a secret is sent with `redirect: "manual"`: a 3xx
+comes back to the caller, and following it is a new call through the door,
+checked against the new host.
+
+**On the way back** the `SecretRedactor` — which learned each value the
+moment it was filled, or up front with `prime()` — replaces it in the
+response body (streamed, holding back one form's length so a value split
+across chunks is still caught), every response header, and any error (a new
+`Error`, with no `cause` to carry the request). It knows the raw,
+JSON-escaped, URL-encoded and base64 spellings. What a transcript shows is
+`***REDACTED secret.<name>***` — the name, and deliberately not a
+`{{ secret.name }}` the fill would expand again.
+
+**Last used.** Each call that sent a secret reports its names to `onUse`;
+the caller stamps them on its `runs` row with `recordSecretUse(db, runId,
+names)`, which merges them into `meta.secrets` as a sorted set. The
+`secret_last_used` named query reads that back for `GET /api/secrets`
+(docs/ops/client-api.md).
+
+`planEgress` runs the same checks with no store — what an Ask preview uses
+to say "sends `github_write` to `api.github.com`" without touching the
+Keychain.
+
 ## Secrets in plists
 
 The console's and the assistant's environments are rendered into their

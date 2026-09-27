@@ -15,8 +15,8 @@ that, all derived from the `runs` table, no new schema
 ## 1. Failure streak — it stops trying
 
 A component's **streak** is its run of consecutive `ok = false` rows since its
-last `ok = true` one. At `METISTRY_RUNNER_MAX_STREAK` (default **5**) the
-runner stops running it: no call, no spend, no new failure row. One
+last `ok = true` one. At `METISTRY_RUNNER_MAX_STREAK` (default **3** — three
+strikes, C135) the runner stops running it: no call, no spend, no new failure row. One
 `runs` row per skipped window records the fact — `kind: runner`,
 `tool: skipped_streak`, `ok: false`, `meta: {streak, max_streak, error_signature, since}` —
 and **one per window, not one per tick**: the runner ticks every 60 s, so a
@@ -57,6 +57,22 @@ it clears itself the next time the routine succeeds. A preflight miss on a
 one `secret_failure` request naming every component it stopped, cleared once
 the variable is set. Neither is raised again after an answer until what it
 was about has recovered (`docs/ops/client-api.md`, *Events become requests*).
+
+**Three strikes** (C135, T3-12): the failure that stops a component raises
+ONE request per (component, signature) per streak. A routine's waiting
+failure report *becomes* the stop — its title says *stopped after 3
+failures* and it gains `stopped: {failures, limit, since, at}` — rather than
+a second request about the same fault; a collector, which raises nothing for
+one failure, raises its stop as a `report` of its own. An answer sticks while
+the streak lasts; the next clean run (after the fix, *Try Again*, or a raised
+limit) clears it at its source.
+
+**A Stop limit** (C133, T3-12): a budget whose action is `stop` pauses every
+routine that would enqueue a turn (§3's preflight) and raises ONE `report`
+per budget window — naming every routine it paused, and *Raise*, which opens
+Settings › Compute › Spending limits. It clears itself when the budget no
+longer stops them (the window reset, the limit or action changed); a limit
+raised and spent again is a new request.
 
 ## 3. Preflight before spend
 
@@ -119,7 +135,7 @@ imports no collector and knows what none of them do (invariant 5):
 
 ```
 name   kind      status    ms  remediation
-gh     schedule  degraded   1  3 failed run(s) in a row since 2026-09-15T09:00:00Z: 401 Bad credentials — at METISTRY_RUNNER_MAX_STREAK (5) the runner stops running it
+gh     schedule  degraded   1  2 failed run(s) in a row since 2026-09-15T09:00:00Z: 401 Bad credentials — at METISTRY_RUNNER_MAX_STREAK (3) the runner stops running it
 fold   schedule  ok         0
 ```
 
@@ -182,7 +198,7 @@ system, and the `schedules` section is where you go to read why.
 
 | variable | default | what it does |
 | --- | --- | --- |
-| `METISTRY_RUNNER_MAX_STREAK` | `5` | consecutive failures before a component stops being run |
+| `METISTRY_RUNNER_MAX_STREAK` | `3` | consecutive failures before a component stops being run (and raises one request) |
 | `METISTRY_ALERT_DEDUPE_H` | `24` | hours one (component, error signature) stays quiet |
 
 Both are read by the console. Every refusal, skip and doctor remediation in

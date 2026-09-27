@@ -11,7 +11,29 @@
   "status": 200,
   "body_ndjson": [
     {
-      "instance_id": "0fa6a518-f162-4ff2-8617-b17c51f5dec5",
+      "instance_id": "aaa6dc35-5b12-4dc7-bc12-fb965ae9f707",
+      "id": "9",
+      "ts": {},
+      "component": "crew:fixtures",
+      "kind": "crew_run",
+      "session_id": null,
+      "tool": null,
+      "model": "anthropic/claude-sonnet-4",
+      "tokens_in": "***REDACTED***",
+      "tokens_out": "***REDACTED***",
+      "cost_usd": "0.018400",
+      "duration_ms": null,
+      "started_at": {},
+      "finished_at": {},
+      "ok": true,
+      "error": null,
+      "meta": {
+        "tier": "deep"
+      },
+      "cursor": "2026-09-01 12:00:00-04|9"
+    },
+    {
+      "instance_id": "aaa6dc35-5b12-4dc7-bc12-fb965ae9f707",
       "id": "1",
       "ts": {},
       "component": "assistant",
@@ -29,12 +51,12 @@
       "error": null,
       "meta": {
         "tier": "default",
-        "turn_id": "turn-Us27wk3"
+        "turn_id": "turn-fvwkBMzs"
       },
-      "cursor": "2026-09-26 18:54:15.070052-04|1"
+      "cursor": "2026-09-27 15:30:28.761975-04|1"
     },
     {
-      "instance_id": "0fa6a518-f162-4ff2-8617-b17c51f5dec5",
+      "instance_id": "aaa6dc35-5b12-4dc7-bc12-fb965ae9f707",
       "id": "2",
       "ts": {},
       "component": "assistant",
@@ -51,31 +73,9 @@
       "ok": true,
       "error": null,
       "meta": {
-        "turn_id": "turn-Us27wk3"
+        "turn_id": "turn-fvwkBMzs"
       },
-      "cursor": "2026-09-26 18:54:15.070798-04|2"
-    },
-    {
-      "instance_id": "0fa6a518-f162-4ff2-8617-b17c51f5dec5",
-      "id": "3",
-      "ts": {},
-      "component": "assistant",
-      "kind": "tool",
-      "session_id": null,
-      "tool": "tasks_update",
-      "model": null,
-      "tokens_in": null,
-      "tokens_out": null,
-      "cost_usd": null,
-      "duration_ms": 30,
-      "started_at": null,
-      "finished_at": null,
-      "ok": true,
-      "error": null,
-      "meta": {
-        "turn_id": "turn-Us27wk3"
-      },
-      "cursor": "2026-09-26 18:54:15.070798-04|3"
+      "cursor": "2026-09-27 15:30:28.762506-04|2"
     }
   ]
 }

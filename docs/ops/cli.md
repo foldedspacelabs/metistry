@@ -359,7 +359,7 @@ because requests run concurrently:
 | --- | --- |
 | `{id, method, path, body?, idempotency_key?}` | `{id, status, body, replayed?}` — the console answered, any status; `body` is its JSON (or its text) |
 | | `{id, error: {code, message}}` — no answer: `unreachable` (the console did not answer, or the stream broke), `invalid_request` (the line was refused here, before anything went out), `duplicate_id` (that id is still in flight) |
-| `{id, method: "GET", path: "/api/events", stream: true, last_event_id?}` | `{id, event: {id, type, data}}` per Server-Sent Event, then `{id, ended: "cancelled" \| "closed"}` — or, if the console did not open a stream (a `401`, a `404` before it serves the route), an ordinary `{id, status, body}` |
+| `{id, method: "GET", path: "/api/events", stream: true, last_event_id?}` | `{id, event: {id, type, data}}` per Server-Sent Event, then `{id, ended: "cancelled" \| "closed"}` — or, if the console did not open a stream (a `401`, a `404` before it serves the route), an ordinary `{id, status, body}`. An `id:` with no `data:` — the cursor the console sends a fresh subscriber — arrives as `{id, event: {id}}`: nothing happened, but it is the id to resume from |
 | `{id, cancel: true}` | ends that stream (its `ended` line is the answer); cancelling what already finished is not an error |
 
 `body` is a JSON value, sent as `application/json`; `idempotency_key` is

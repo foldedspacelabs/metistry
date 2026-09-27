@@ -42,6 +42,15 @@
 // `CLAUDE.md`/`README.md`. Same predicate `mcp-brain`'s `validKnowledgePath`
 // applies to agents and the indexer applies to the walk, so the three cannot
 // drift.
+//
+// **One door here writes** (design-build-plan §2.11, T2-10): Resolve a
+// conflict — `POST /api/knowledge/conflicts/resolve` keeps one side of a
+// sync-conflict copy, through the reconciler's `POST /vault/conflicts/resolve`
+// as `user`, for a path the reconciler has in `conflict` and nothing else.
+// The owner's alone, like the history it writes into. Its Undo is the
+// client's: the client holds the act for ten seconds before sending it
+// (C136), so nothing here un-settles a conflict — and the side given up is
+// committed before it is discarded, so history still has it after that.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { canSee, errorEnvelope, filterHits, filterPages, may, readableAreas, type ErrorCode, type KnowledgeScope, type MirrorExecutor, type Principal } from "@foldedspacelabs/metistry-core";
@@ -145,7 +154,108 @@ export interface KnowledgeDeps {
   history?: KnowledgeHistory | undefined;
   /** Where `POST /api/knowledge/restore` raises its Needs You request (T10-5); absent → `not_available` */
   requests?: MirrorExecutor | undefined;
+  /** Resolve a conflict — the reconciler's `POST /vault/conflicts/resolve` (§2.11, T2-10); absent → `not_available` */
+  conflicts?: KnowledgeConflicts | undefined;
+  /**
+   * C45 for this door: a settle that was refused or failed says so on the
+   * conflict's waiting review (`payload.error`), so every device that draws
+   * the card shows a failure rather than a decision. server.ts owns the SQL;
+   * absent in unit tests that have no queue.
+   */
+  conflictRefused?: ((refusal: ConflictRefusal) => Promise<void>) | undefined;
 }
+
+// ----- Resolve a conflict (design-build-plan §2.11, T2-10) -----
+//
+// A sync tool that finds two edits of one note keeps both: the note, and a
+// copy beside it (`Note.sync-conflict-….md`, `Note (conflict ….).md`). The
+// reconciler indexes the copy as `conflict` and raises ONE `review` holding
+// both versions (T2-9). This door is that review's Keep Mine and Take the
+// Other: `path` is the COPY — the one path the index has in `conflict`, and
+// `payload.conflict.path` on the review — and `keep` says which side stays.
+//
+// `seen_sha` is the side being GIVEN UP, as the review showed it: the copy's
+// hash (`conflict.sha256`, the body's `after.sha256`) to keep mine, the
+// note's (`conflict.original_sha256`, `before.sha256`) to take the other, and
+// `""` when that side does not exist. What the owner discards must be what
+// the owner saw; anything else is `409 stale` carrying the conflict as it
+// stands, and nothing is written.
+
+/** Which side stays: `mine` is the note as it stands, `theirs` the copy (*the Other*). The Mac app's `ConflictSide`. */
+export const CONFLICT_SIDES = ["mine", "theirs"] as const;
+export type ConflictSide = (typeof CONFLICT_SIDES)[number];
+
+/** A conflict as it stands — the review's `payload.conflict`, fresh: the copy, the note it copies, and each file's hash (null: not there). */
+export interface ConflictState {
+  path: string;
+  original: string | null;
+  sha256: string | null;
+  original_sha256: string | null;
+}
+
+/** What the bridge settled. */
+export interface ConflictSettled {
+  /** The note that remains. */
+  path: string;
+  /** The copy, gone. */
+  copy: string;
+  kept: ConflictSide;
+  /** The remaining note's content hash. */
+  sha256: string;
+  bytes: number;
+  /** The commit that put the discarded side into history first; null when history already held it. */
+  recorded: string | null;
+}
+
+/** What the owner saw is not what is there: `current` is the conflict now, null when the path is not in conflict at all (settled from another device, or never a conflict). */
+export class ConflictMoved extends Error {
+  constructor(
+    message: string,
+    readonly current: ConflictState | null,
+  ) {
+    super(message);
+    this.name = "ConflictMoved";
+  }
+}
+
+export interface KnowledgeConflicts {
+  /** Settle one copy. Throws `ConflictMoved` for a stale or settled one, `VaultError` with the bridge's code for any other refusal. */
+  resolve(path: string, keep: ConflictSide, seenSha: string): Promise<ConflictSettled>;
+}
+
+/** A refused settle, for the review's `payload.error` (C45). */
+export interface ConflictRefusal {
+  path: string;
+  keep: ConflictSide;
+  code: ErrorCode;
+  message: string;
+}
+
+/** A `KnowledgeConflicts` over the reconciler's `POST /vault/conflicts/resolve` (mirrors `vaultBridgeHistory`). */
+export function vaultBridgeConflicts(opts: KnowledgeBridgeOptions): KnowledgeConflicts {
+  const base = opts.url.replace(/\/+$/, "");
+  const doFetch = opts.fetch ?? fetch;
+  const timeout = opts.timeoutMs ?? 30_000; // a settle may commit the discarded side first: one flush, not one read
+  return {
+    async resolve(path, keep, seenSha) {
+      const r = await doFetch(`${base}/vault/conflicts/resolve`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${opts.token}`, "content-type": "application/json" },
+        body: JSON.stringify({ path, keep, expected_sha256: seenSha }),
+        signal: AbortSignal.timeout(timeout),
+      });
+      if (!r.ok) {
+        const j = (await body(r)) as ({ error?: { code?: string; message?: string }; current?: ConflictState | null } | null);
+        if (r.status === 409 && j && "current" in j) throw new ConflictMoved(j.error?.message ?? "the conflict changed after you saw it", j.current ?? null);
+        throw new VaultError(codeOf(j, r.status), j?.error?.message ?? `vault bridge /vault/conflicts/resolve returned ${r.status}`);
+      }
+      return (await r.json()) as ConflictSettled;
+    },
+  };
+}
+
+/** A content hash as a review carries one, or `""` for a side that is not there. */
+const SEEN_SHA = /^(?:[0-9a-f]{64})?$/;
 
 // ----- file history (design-build-plan §2.21, T10-4) -----
 //
@@ -585,10 +695,12 @@ export async function knowledgeRoutes(
     return sendJson(res, 200, { areas, as_of: result.as_of.toISOString() });
   }
 
+  if (key === "POST /api/knowledge/conflicts/resolve") return resolveConflict(req, res, key, deps, principal, audit);
+
   // Anything else under /api/knowledge/.
   return sendUnrouted(
     res,
-    "the knowledge read path is GET /api/knowledge/search, GET /api/knowledge/page, GET /api/knowledge/pages, GET /api/knowledge/links, GET /api/knowledge/fold, GET /api/knowledge/drafts, GET /api/knowledge/areas, GET /api/knowledge/history and GET /api/knowledge/version, and POST /api/knowledge/restore (docs/ops/client-api.md)",
+    "the knowledge read path is GET /api/knowledge/search, GET /api/knowledge/page, GET /api/knowledge/pages, GET /api/knowledge/links, GET /api/knowledge/fold, GET /api/knowledge/drafts, GET /api/knowledge/areas, GET /api/knowledge/history and GET /api/knowledge/version; its writes are POST /api/knowledge/restore and POST /api/knowledge/conflicts/resolve (docs/ops/client-api.md)",
   );
 }
 
@@ -648,6 +760,82 @@ async function restoreRoute(req: IncomingMessage, res: ServerResponse, key: stri
   }
   await audit("knowledge", "restore", true, { proposal: out.id, raised: out.raised, sha: out.sha });
   return sendJson(res, 202, { ok: true, proposal_id: String(out.id), raised: out.raised, path: out.path, sha: out.sha, date: out.date, proposal: out.proposal });
+}
+
+/**
+ * `POST /api/knowledge/conflicts/resolve {path, keep, seen_sha}` — see
+ * "Resolve a conflict" above. Refuses, before the bridge is asked: every
+ * principal but the owner (the console's uniform 403), a body that is not
+ * `{path, keep, seen_sha}`, and a path that is not knowledge (the owner's
+ * classification, as on the page route). The bridge refuses the rest: a path
+ * not in `conflict` and a `seen_sha` that is not the side given up are both
+ * `409 stale` with `conflict` as it stands (null: nothing to settle).
+ */
+async function resolveConflict(req: IncomingMessage, res: ServerResponse, key: string, deps: KnowledgeDeps, principal: Principal, audit: Audit): Promise<void> {
+  // A code path, not a sentence (U3): whatever server.ts's gate did first,
+  // no credential but the owner's settles the owner's note.
+  const owner = may(principal, "act", { kind: "console", door: "console_management", route: key });
+  if (!owner.ok) {
+    await audit("knowledge", "resolve_conflict", false, { refused: owner.reason });
+    return sendRefusal(res, owner);
+  }
+  let raw: unknown;
+  try {
+    raw = await readJson(req);
+  } catch {
+    return sendError(res, "invalid_request", "the body must be JSON: {path, keep, seen_sha}");
+  }
+  const b = (raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>;
+  const path = typeof b.path === "string" ? b.path.trim() : "";
+  if (path === "") return sendError(res, "invalid_request", "path is required — the conflict copy, as the review names it (payload.conflict.path)");
+  if (!(CONFLICT_SIDES as readonly unknown[]).includes(b.keep)) return sendError(res, "invalid_request", `keep must be one of ${CONFLICT_SIDES.join(" | ")} — mine keeps the note as it stands, theirs takes the copy`);
+  const keep = b.keep as ConflictSide;
+  if (typeof b.seen_sha !== "string" || !SEEN_SHA.test(b.seen_sha)) {
+    return sendError(
+      res,
+      "invalid_request",
+      'seen_sha must be the sha256 of the side you are giving up, as the review showed it — conflict.sha256 to keep mine, conflict.original_sha256 to take theirs, or "" when that side does not exist',
+    );
+  }
+  const seenSha = b.seen_sha;
+  // `.metistry/`, `Artifacts/`, the root CLAUDE.md: not knowledge, so not a
+  // conflict this door settles — the owner's classification, before the bridge.
+  const seen = may(principal, "write", { kind: "knowledge", door: "console_page", path });
+  if (!seen.ok) {
+    await audit("knowledge", "resolve_conflict", false, { refused: seen.reason });
+    return sendRefusal(res, seen);
+  }
+  // C45: a settle that did not happen for a reason other than staleness is on
+  // the review itself, so the card says "couldn't" rather than looking unanswered.
+  const refused = async (code: ErrorCode, message: string) => {
+    await audit("knowledge", "resolve_conflict", false, { keep, error: code });
+    await deps.conflictRefused?.({ path, keep, code, message });
+  };
+  if (!deps.conflicts) {
+    await refused("not_available", NOT_AVAILABLE);
+    return sendError(res, "not_available", NOT_AVAILABLE);
+  }
+  let settled: ConflictSettled;
+  try {
+    settled = await deps.conflicts.resolve(path, keep, seenSha);
+  } catch (err) {
+    if (err instanceof ConflictMoved) {
+      // Stale is not a failed answer (C45): the owner answered a conflict
+      // that is not the one there now, so nothing is written on the row —
+      // the body carries the conflict as it stands, and the client repaints.
+      await audit("knowledge", "resolve_conflict", false, { keep, stale: true, in_conflict: err.current !== null });
+      return sendJson(res, 409, { ...errorEnvelope("conflict", err.message), reason: "stale", conflict: err.current });
+    }
+    if (err instanceof VaultError) {
+      await refused(err.code, err.message);
+      return sendError(res, err.code, err.message);
+    }
+    // Threw: the row says `internal` and nothing more; the detail is the log's.
+    await refused("internal", "the conflict could not be settled; the detail is in the console log").catch(() => {});
+    throw err;
+  }
+  await audit("knowledge", "resolve_conflict", true, { keep, path: settled.path, copy: settled.copy, recorded: settled.recorded });
+  return sendJson(res, 200, { ok: true, path: settled.path, kept: settled.kept, sha: settled.sha256 });
 }
 
 /**

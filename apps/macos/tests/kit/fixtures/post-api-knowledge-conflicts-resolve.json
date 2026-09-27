@@ -1,15 +1,14 @@
 {
   "route": "POST /api/knowledge/conflicts/resolve",
-  "source": "contract",
-  "ticket": "T2-10",
-  "note": "keep one side of a conflicted file; 409 stale when it moved past seen_sha",
+  "source": "recorded",
+  "ticket": null,
   "request": {
     "method": "POST",
     "path": "/api/knowledge/conflicts/resolve",
     "body": {
+      "path": "Projects/Metistry/Roadmap.sync-conflict-20260928-091200-7QX2LMA.md",
       "keep": "mine",
-      "path": "Projects/Metistry/Roadmap.md",
-      "seen_sha": "4c1d2e3f"
+      "seen_sha": "3775057f4cdf89d8224aba1bd23149460526548316146818040518c6048ca0c5"
     },
     "idempotency_key": null
   },
@@ -18,6 +17,6 @@
     "ok": true,
     "path": "Projects/Metistry/Roadmap.md",
     "kept": "mine",
-    "sha": "5e6f7a8b"
+    "sha": "c31a1846c78fc9467423d751eb50c09895c3fcead1f3a6abdf2548453c86d901"
   }
 }

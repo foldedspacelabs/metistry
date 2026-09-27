@@ -1046,8 +1046,11 @@ export {
   type SubjectReading,
 } from "./requests.js";
 export {
+  KNOWLEDGE_CONFLICT_REF_PREFIX,
+  KNOWLEDGE_CONFLICT_SOURCE_KIND,
   RESOLVED_AT_SOURCE,
   REQUEST_TRUSTS,
+  knowledgeConflictSource,
   lastMirror,
   parseRequestSource,
   raiseMirror,

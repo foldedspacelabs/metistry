@@ -71,10 +71,158 @@ export const KEEP_AWAKE_STATE_FILENAME = "keep-awake.json";
  *     must be run as root in order to modify any settings".
  *
  * So the value is accepted, it behaves as `always`, and every surface says
- * this rather than pretending.
+ * this rather than pretending — until the owner has made that change
+ * themselves: doctor reads `pmset -g` (`parseSleepDisabled`) and reports the
+ * lid half as in effect once it is (ruling 3, plan §2.15).
  */
 export const LID_CLOSED_NOT_AVAILABLE =
   "keeping this Mac awake with the lid closed is not available on this Mac without an administrator change: an idle-sleep assertion does not survive lid close (IOPMLib.h), and the only switch that does — `sudo pmset -a disablesleep 1` — is a system-wide setting Metistry will not make for you.";
+
+// ---- the object form (plan §2.15, G3; ruling 3 of 2026-09-26) ---------------
+
+/**
+ * The Services pane's switch and its two sub-switches, as `deployment.yaml`
+ * stores them:
+ *
+ *   keep_awake: { enabled: true, sleep_on_battery: true, sleep_lid_closed: false }
+ *
+ * It sits BESIDE the four values, never instead of them: every file written
+ * before it still loads and means what it meant (`keepAwakeSetting` maps each
+ * value to exactly this shape). The two sub-switches default to the safe
+ * answer — sleep on battery, sleep with the lid closed — because neither is a
+ * cost anything may impose on the owner's behalf: a missing key never keeps a
+ * laptop awake on battery or in a bag. `enabled` has no default; an object that
+ * does not say whether the switch is on is a typo, not a guess.
+ */
+export const keepAwakeObjectSchema = z
+  .object({
+    /** the switch: false holds nothing, whatever the two below say (they are remembered, not applied) */
+    enabled: z.boolean(),
+    /** true = released on battery and on a UPS (`allow_sleep_on_battery`); false = held on any power */
+    sleep_on_battery: z.boolean().default(true),
+    /**
+     * true = a closed lid sleeps, which is what every Mac does. false = the
+     * owner WANTS a closed Mac kept awake — stored as asked, and delivered only
+     * by an administrator setting the owner makes by hand
+     * (`LID_CLOSED_COMMAND`); nothing in Metistry runs it. Doctor reads
+     * `pmset -g` and says whether it is in effect.
+     */
+    sleep_lid_closed: z.boolean().default(true),
+  })
+  .strict();
+
+/** What the key may hold: one of the four values, or the object. */
+export const keepAwakeConfigSchema = z.union([z.enum(KEEP_AWAKE_VALUES), keepAwakeObjectSchema]);
+export type KeepAwakeConfig = z.infer<typeof keepAwakeConfigSchema>;
+
+/** The object form with every key said — what everything below the parse reads. */
+export interface KeepAwakeSetting {
+  enabled: boolean;
+  sleep_on_battery: boolean;
+  sleep_lid_closed: boolean;
+}
+
+/**
+ * Either spelling, as the one shape. Absent means the owner was never asked,
+ * which is `never` (`KEEP_AWAKE_DEFAULT`), which is the switch off with both
+ * sub-switches at their safe answer.
+ */
+export function keepAwakeSetting(config: KeepAwakeConfig | undefined): KeepAwakeSetting {
+  const v = config ?? KEEP_AWAKE_DEFAULT;
+  if (typeof v !== "string") return { enabled: v.enabled, sleep_on_battery: v.sleep_on_battery ?? true, sleep_lid_closed: v.sleep_lid_closed ?? true };
+  switch (v) {
+    case "never":
+      return { enabled: false, sleep_on_battery: true, sleep_lid_closed: true };
+    case "allow_sleep_on_battery":
+      return { enabled: true, sleep_on_battery: true, sleep_lid_closed: true };
+    case "always":
+      return { enabled: true, sleep_on_battery: false, sleep_lid_closed: true };
+    case "always_lid_closed":
+      return { enabled: true, sleep_on_battery: false, sleep_lid_closed: false };
+  }
+}
+
+/**
+ * The named value a setting reads as — what the holder is told
+ * (`METISTRY_KEEP_AWAKE`), what the state file records and what doctor's
+ * `meta.mode` says, so neither the watchdog nor the app's reading of the row
+ * changes. Exact for every setting a value names; the one setting no value
+ * names (switch on, sleep on battery, lid closed wanted) reads as
+ * `allow_sleep_on_battery`, which is everything a process can hold for it —
+ * the lid half is the administrator's setting, reported beside the value
+ * (`wantsLidClosedAwake`), never through it.
+ */
+export function keepAwakeValue(s: KeepAwakeSetting): KeepAwake {
+  if (!s.enabled) return "never";
+  if (s.sleep_on_battery) return "allow_sleep_on_battery";
+  return s.sleep_lid_closed ? "always" : "always_lid_closed";
+}
+
+/** Is the lid-closed half asked for — the switch on and its lid sub-switch off? */
+export function wantsLidClosedAwake(s: KeepAwakeSetting): boolean {
+  return s.enabled && !s.sleep_lid_closed;
+}
+
+/** The same setting? Compared as the one shape, so `always` and its object spelling are equal. */
+export function sameKeepAwake(a: KeepAwakeSetting, b: KeepAwakeSetting): boolean {
+  return a.enabled === b.enabled && a.sleep_on_battery === b.sleep_on_battery && a.sleep_lid_closed === b.sleep_lid_closed;
+}
+
+// ---- the lid: the administrator setting, its dialog, and the one read ---------
+
+/**
+ * The lid dialog's words, in one place every surface reads (the CLI prints
+ * them before it stores `sleep_lid_closed: false`; doctor carries them while
+ * the setting is not in effect; the Mac app mirrors them — T6-11). Ruling 3:
+ * the app explains how, warns, and keeps the value. NOTHING RUNS THESE
+ * COMMANDS: they are text for a person to copy, and the test that no code
+ * path runs `pmset` with arguments that write is what holds that.
+ */
+export const LID_CLOSED_DIALOG_TITLE = "Keeping a closed Mac awake needs an administrator setting Metistry will not change for you";
+/** What the owner runs, in Terminal, as an administrator — the Copy button's text. */
+export const LID_CLOSED_COMMAND = "sudo pmset -a disablesleep 1";
+/** How to undo it. */
+export const LID_CLOSED_UNDO = "sudo pmset -a disablesleep 0";
+/** The warning, said every time the command is. */
+export const LID_CLOSED_WARNING =
+  "Not recommended: it applies to the whole Mac and every app, not only Metistry; it persists across restarts; and it can overheat a laptop in a bag and run the battery flat.";
+
+/**
+ * Every `pmset` argument list anything in Metistry may pass — reads, all of
+ * them. `pmset(1)`: "pmset must be run as root in order to modify any
+ * settings", and a setting is only ever changed with `-a`/`-b`/`-c`/`-u`, a
+ * subcommand such as `sleepnow`, or a schedule; `-g` is the only read. A
+ * caller names one of these rather than writing its own argv, so there is no
+ * argument list to get wrong.
+ */
+export const PMSET_READS = Object.freeze({
+  /** the live settings — `SleepDisabled` is here when an administrator set it */
+  settings: Object.freeze(["-g"] as const),
+  /** who holds which assertion, per process */
+  assertions: Object.freeze(["-g", "assertions"] as const),
+  /** which power source the Mac is drawing from */
+  power_source: Object.freeze(["-g", "ps"] as const),
+});
+
+/** True only for an argument list `PMSET_READS` names. Anything else — a write, a schedule, a typo — is false. */
+export function isPmsetRead(args: readonly string[]): boolean {
+  return Object.values(PMSET_READS).some((read) => read.length === args.length && read.every((a, i) => a === args[i]));
+}
+
+/**
+ * Is the administrator setting in effect, from `pmset -g`'s output?
+ *
+ * `pmset -a disablesleep 1` shows as a `SleepDisabled 1` line in the
+ * "System-wide power settings:" block; undone, the line reads 0 or is absent
+ * (this Mac Studio, 2026-09-26: absent). Output that is not `pmset -g`'s at all
+ * — empty, an error — is `undefined`: doctor then says it could not tell,
+ * never that the setting is off.
+ */
+export function parseSleepDisabled(pmsetSettings: string): boolean | undefined {
+  const m = /^\s*SleepDisabled\s+(\d+)/m.exec(pmsetSettings);
+  if (m) return m[1] !== "0";
+  return /power settings:/i.test(pmsetSettings) ? false : undefined;
+}
 
 export interface KeepAwakeChoice {
   value: KeepAwake;

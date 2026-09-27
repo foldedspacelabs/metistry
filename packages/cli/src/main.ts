@@ -46,7 +46,7 @@ import {
 } from "./compute.js";
 import { buildDeploymentReport, renderDeploymentReport, setDeploymentShape, setKeepAwake, type KeepAwakeFlags } from "./deployment-report.js";
 import { loadDeployment } from "./deployment.js";
-import { loadVaultSettings, renderVaultSettings, setVaultSettings, VAULT_VERBS } from "./vault.js";
+import { loadVaultSettings, renderVaultSettings, rollbackVault, setVaultSettings, VAULT_VERBS } from "./vault.js";
 import { EXTENSION_VERBS, extensionsAdd, extensionsList, extensionsRemove, parseExtensionVerb, renderExtensions, type ExtensionsOptions } from "./extensions.js";
 import { doctor, renderTable, type DoctorDeps } from "./doctor.js";
 import { VARIABLE_VERBS, parseVariableVerb, renderVariables, variablesList, variablesSet, variablesUnset, type VariablesOptions } from "./variables.js";
@@ -143,7 +143,7 @@ export interface ParsedArgs {
  * `--version <x.y.z>` silently installed the latest release instead
  * (#198, "not fixed here" #2).
  */
-export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "dry-run", "allow-dirty", "no-launchd", "no-compose", "no-color", "skip-build", "skip-migrate", "rollback", "allow-legacy", "yes", "follow", "namespace", "rotate", "list", "complete", "skip-test", "remote", "json-lines", "stdio", "named", "clear", "no-discover"]);
+export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "dry-run", "allow-dirty", "no-launchd", "no-compose", "no-color", "skip-build", "skip-migrate", "rollback", "allow-legacy", "yes", "follow", "namespace", "rotate", "list", "complete", "skip-test", "remote", "json-lines", "stdio", "named", "clear", "no-discover", "include-config"]);
 
 /** The §2.14 verbs over owner-named secrets (M7), and the shared scope's migration (T4-3). `list --named` joins them; `sync|mint|list|purge` are the install's own variables. */
 export const NAMED_SECRET_VERBS = new Set(["set", "replace", "remove", "hosts", "grant", "migrate-scope", "purge-shared"]);
@@ -801,6 +801,20 @@ const USAGE = `metistry — Metistry command line
       restart. METISTRY_PUSH_SCHEDULE still overrides push for this release,
       and this verb says so (docs/ops/reconciler.md).
 
+  metistry vault rollback <commit> | --to <date> | --file <path> [--to <date>]
+                          [--include-config] [--json] [--instance <dir>]
+  metistry vault rollback --request <id>
+      Roll the vault back — undo one commit, put everything back as it was
+      at a date (a day means as that day left it), or one file as it was
+      before its last change (or at --to). Never on the spot: it raises a
+      Needs You request with the preview (the commits it undoes, the files
+      it puts back) and Approve makes ONE new commit, as you; history keeps
+      everything, and undo is rolling back that commit. Configuration
+      (.metistry/, CLAUDE.md, README.md) is left as it is and named, unless
+      --include-config: then Approve is carried out by this terminal, which
+      waits for it (up to 30 minutes; --request <id> resumes the wait) and
+      reverts with the owner-class bearer (docs/ops/cli.md).
+
   metistry migrate-inbox [--instance <dir>] [--dry-run]
       Move an existing instance's inbox into the vault: inbox/* (or a
       differently-cased vault inbox, renamed through a temp name because
@@ -925,6 +939,7 @@ export const HELP_GROUPS: Array<{ title: string; verbs: Array<[string, string]> 
       ["deployment [set-shape]", "the effective shape (D4 overlay) and its services"],
       ["deployment set-keep-awake", "whether this install holds the Mac awake, and on which power"],
       ["vault settings", "when the reconciler pushes the vault to its remote, and pulls from it"],
+      ["vault rollback", "undo a commit, a day or a file — a Needs You request, then one new commit"],
       ["agents list", "every registered agent and what it holds"],
       ["agents autonomy <id>", "how much room one agent has with an action"],
       ["agents define <id>", "a crew's definition: its prompt, model and effort"],
@@ -1525,8 +1540,48 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
       // M18 (plan §2.21): the vault's git policy. The write is a §4.7
       // protected write through the reconciler as `user`, like set-shape.
       if (positional[0] === undefined || !(VAULT_VERBS as readonly string[]).includes(positional[0])) {
-        err(`usage: metistry vault ${VAULT_VERBS.join(" | ")} [--push <after_commit|manual|15m>] [--pull <5m>] [--yes]   (metistry --help)`);
+        err(`usage: metistry vault settings [--push <after_commit|manual|15m>] [--pull <5m>] [--yes]`);
+        err(`       metistry vault rollback <commit> | --to <date> | --file <path> [--to <date>] [--include-config] | --request <id>   (metistry --help)`);
         return 2;
+      }
+      if (positional[0] === "rollback") {
+        // M18 (plan §2.21, T10-6): a Needs You request, never a revert on
+        // the spot; with --include-config this process carries out the
+        // approved revert as the owner class.
+        const loadedRb = loadEnv();
+        const instanceDir = str(flags, "instance") ?? loadedRb.instanceDir;
+        const commit = positional[1];
+        const to = str(flags, "to");
+        const file = str(flags, "file");
+        const request = str(flags, "request");
+        if (flags.to === true || flags.file === true || flags.request === true || positional.length > 2) {
+          err("usage: metistry vault rollback <commit> | --to <date> | --file <path> [--to <date>] [--include-config] | --request <id>");
+          return 2;
+        }
+        const named = [commit !== undefined, file !== undefined, to !== undefined && file === undefined, request !== undefined].filter(Boolean).length;
+        if (named !== 1) {
+          err("name exactly one thing to roll back: <commit>, --to <date>, --file <path> (optionally with --to), or --request <id> to resume a wait");
+          return 2;
+        }
+        const target = commit !== undefined ? { commit } : file !== undefined ? { file, ...(to !== undefined ? { to } : {}) } : to !== undefined ? { to } : undefined;
+        try {
+          const r = await rollbackVault({
+            target,
+            includeConfig: flags["include-config"] === true || request !== undefined,
+            request,
+            env: { ...process.env, ...(instanceDir ? { METISTRY_INSTANCE_DIR: instanceDir } : {}) },
+            platform: io.platform ?? process.platform,
+            ...(instanceDir ? { instanceDir, instanceId: await readInstanceId(instanceDir) } : {}),
+            fetchFn: io.fetchFn ?? fetch,
+            ...(io.exec ? { exec: io.exec } : {}),
+            out: flags.json === true ? () => {} : out,
+          });
+          if (flags.json === true) out(JSON.stringify(r, null, 2));
+          return 0;
+        } catch (e) {
+          err(`metistry vault rollback: ${e instanceof Error ? e.message : String(e)}`);
+          return 1;
+        }
       }
       if (!productDir) {
         err("vault settings needs a Metistry checkout: pass --product-dir or set METISTRY_PRODUCT_DIR — the seed's deployment.yaml is half of the policy");

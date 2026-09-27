@@ -168,6 +168,12 @@ const server = makeBridge(
     db: pool,
     vaultStatus: () =>
       readVaultStatus({ git, policy: () => vaultPolicy.current(), lastPush: () => sync.lastPush, lastPull: () => committer.lastPull, conflict: () => committer.vault.conflict }),
+    // a rollback's commit (T10-6): a walk that starts after it, as after an
+    // integrate, and the push policy's answer to one new commit
+    reverted: () => {
+      indexer.reconcileAfter("revert").catch((err) => console.error("reconciler: re-walk after a rollback failed:", err instanceof Error ? err.message : err));
+      sync.afterFlush(1).catch((err) => console.error("reconciler: push after a rollback failed:", err instanceof Error ? err.message : err));
+    },
   },
   { token, ...(ownerToken ? { ownerToken } : {}), maxBodyBytes: intEnv("METISTRY_VAULT_MAX_BYTES", 2 * 1024 * 1024) + 64 * 1024 },
 );

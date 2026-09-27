@@ -33,6 +33,13 @@ export interface GitOptions {
   committer?: GitIdentity;
   /** Written to git's stdin (a commit message for `commit-tree`, verbatim). */
   input?: string;
+  /**
+   * An absolute path to a SCRATCH index (`GIT_INDEX_FILE`): a tree built
+   * with `read-tree` / `update-index` / `write-tree` off the owner's real
+   * index and working tree — how a rollback leaves a configuration path as
+   * it is (revert.ts). Never the repo's own index.
+   */
+  indexFile?: string;
   timeoutMs?: number;
 }
 
@@ -207,6 +214,7 @@ export class Git {
       GIT_CONFIG_NOSYSTEM: "1",
       ...(process.env.SSH_AUTH_SOCK ? { SSH_AUTH_SOCK: process.env.SSH_AUTH_SOCK } : {}),
       ...gitCredentialEnv(),
+      ...(opts.indexFile ? { GIT_INDEX_FILE: opts.indexFile } : {}),
     };
     const author: GitAuthor | undefined = opts.author ?? opts.identity;
     const committer = opts.committer ?? opts.identity;

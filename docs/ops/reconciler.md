@@ -195,6 +195,7 @@ write, not what you may read. Errors are the core envelope
 | `POST /vault/delete` | `{path, intent, expected_sha256?}` |
 | `POST /vault/rename` | `{from, to, intent}` — git-mv semantics; never clobbers |
 | `POST /vault/section` | `{path, marker, body, principal, expected_outer_sha, run?, turn?}` — replace the bytes between a section's markers in the owner's daily note and nothing else ("The section operation" below) |
+| `POST /vault/revert` | roll back (§2.21, T10-6): `{intent: {principal: "user", message}, commit \| to \| file [+ to], include_config?, dry_run?, head?, expect?}` — one NEW commit that undoes a commit, restores every changed path to a moment, or puts one file back ("Roll back" below). `dry_run` previews (`200`), otherwise `201` with the new `sha` |
 | `POST /flush` | commit the queue now (the interval does this every `METISTRY_COMMIT_INTERVAL_SEC`; the artifacts module calls it after every publish so one version is one commit) |
 | `POST /reconcile` | run the index cycle now (the interval does this every `METISTRY_RECONCILE_INTERVAL_SEC`); the summary carries `inbox: {added, changed, archived}` |
 | `POST /embeddings/rebuild` | forget every vector and re-embed the vault under the configured model (§6 decision 8's deterministic rebuild) |
@@ -395,6 +396,43 @@ principal), the last push that went out or failed and the last pull (both
 since the reconciler started), the conflict that stopped the last integrate
 or unmerged paths the owner left, and the policy in force; the console
 serves it to the owner as `GET /api/vault/status`.
+
+### Roll back
+
+`POST /vault/revert` is the whole of rollback (§2.21, T10-6), and history is
+preserved, always: the answer is a NEW commit, made as `user`
+(`Metistry user`, `Brain-Source: user`), never a reset or a rewrite — git.ts
+refuses those argvs for every caller. Three targets: `{commit}` is `git
+revert` of that commit (a merge is reverted against its first parent; the
+vault's first commit is refused); `{to}` puts every path that changed since
+the last commit at that moment back as it was (`YYYY-MM-DD` is the end of
+that day in the reconciler's time zone — the CLI sends the owner's own end of
+day as a timestamp); `{file}` puts one file back as it was before its last
+change, or `{file, to}` as of a moment. Undo is `{commit: <the rollback's
+sha>}`.
+
+The result is computed off the working tree — `git merge-tree --write-tree`
+over scaffold commits, a scratch `GIT_INDEX_FILE` for the one tree edit,
+`commit-tree` — and applied by `merge --ff-only`, holding the committer's
+queue (pending acts are committed first; no write lands meanwhile). An
+uncommitted edit to a file it changes, an operation the owner has in
+progress, or a three-way conflict is `409`, and nothing moves. `head` pins
+the history a preview was computed on: the same change is replayed on top of
+whatever landed since, and `expect` — `{files, reverts, skipped_config}` as
+the preview answered — makes it `409 stale` unless the change set is still
+the one approved. After the commit the changed files are re-walked and the
+push policy runs, as after any flush.
+
+Refused at the tool, each audited as a `runs` row of `kind = auth`: any
+`intent.principal` but `user`, from either bearer (`403`); `include_config`
+on a real revert from anything but the owner-class bearer (`403` — a dry run
+may name configuration, it changes nothing). Without `include_config` every
+`.metistry/` path, the root `CLAUDE.md` and `README.md` (case-folded, as the
+remote check reads them) is left as it is and listed in `skipped_config`; a
+rollback that would change nothing else is `400`. `.metistry/state/` and
+`.metistry/instance-migrations/` are never reverted by anyone. Configuration
+a rollback does change is recorded as a `config_write` run, like any other
+protected write.
 
 **Edits made outside the bridge** — Obsidian on your phone, a text editor
 on the Mac — are swept by the reconcile loop into one `user` commit per

@@ -1,8 +1,7 @@
 {
   "route": "PUT /api/scheduled/syncs/:name",
-  "source": "contract",
-  "ticket": "T3-3",
-  "note": "cadence, pause and raise toggles; never the connection (§2.6)",
+  "source": "recorded",
+  "ticket": null,
   "request": {
     "method": "PUT",
     "path": "/api/scheduled/syncs/github-state",
@@ -19,32 +18,34 @@
     "ok": true,
     "sync": {
       "name": "github-state",
-      "kind": "sync",
-      "connection": "github",
       "title": "GitHub",
-      "every": {
-        "value": "1h",
-        "origin": "yours"
-      },
       "paused": {
         "value": false,
         "origin": "default"
+      },
+      "next_run": "2026-09-27T04:18:49.950Z",
+      "next_refused": null,
+      "last_run": null,
+      "is_default": false,
+      "held": null,
+      "describe": "every 1h",
+      "kind": "sync",
+      "connection": "github",
+      "every": {
+        "value": "1h",
+        "origin": "yours"
       },
       "raise": {
         "review_requested": {
           "value": false,
           "origin": "yours"
+        },
+        "assigned": {
+          "value": true,
+          "origin": "default"
         }
-      },
-      "next_run": "2026-09-28T14:00:00.000Z",
-      "last_run": {
-        "run_id": "8820",
-        "at": "2026-09-28T13:00:02.000Z",
-        "ok": true,
-        "outcome": "3 pull requests",
-        "cost_usd": null
       }
     },
-    "as_of": "2026-09-28T13:05:00.000Z"
+    "as_of": "2026-09-27T04:18:49.950Z"
   }
 }

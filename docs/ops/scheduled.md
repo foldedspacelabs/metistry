@@ -31,13 +31,23 @@ routine and collector manifest carries §2.5's default schedule in the closed
 shape, a `display_name`, and what it declares for this file ("Defaults").
 `resolveScheduled` (`scheduled.ts`) resolves every field with its origin
 (`Sourced<T>`) for the app, and the console may write the file
-(`CALLER_AUTHORITY.console`, `apps/reconciler/src/paths.ts`). Each remaining
-piece is a ticket in the plan's §3.3:
+(`CALLER_AUTHORITY.console`, `apps/reconciler/src/paths.ts`).
 
-- **The Scheduled doors**, the file's only writer — T3-3. They serve
-  `resolveScheduled`'s listing. Agent routines —
-  a New Routine's actor, task and grants — run through T3-8; until then the
-  runner schedules only components that have code.
+**The Scheduled doors** (T3-3, `apps/console/src/scheduled-routes.ts`;
+`docs/ops/client-api.md`, "Scheduled") are the file's only writer and serve
+`resolveScheduled`'s listing: a routine's schedule, pause and Reset to
+Default, a sync's cadence, pause and raise toggles, and — from the Mac alone —
+a New Routine's actor, task and per-run grants (read-only). Each writes the
+file as a YAML document, so your comments survive, only after the result
+validates and fits the component it names; an invalid file is never
+rewritten. **Run Now** runs one component through the runner, under your
+pause and the preflight, budget included. **Each run is handed its resolved
+config** (`ctx.config`: every key the manifest declares, your value over the
+default).
+
+Still to come, each a ticket in the plan's §3.3: agent routines — a New
+Routine is kept and listed, but the runner starts only components that have
+code until T3-8; creating a New Routine (`POST /api/scheduled/routines`, T3-8).
 
 ## The file
 
@@ -402,9 +412,9 @@ number, default 30; the run refuses anything outside 1–30). Standup:
 `skip_without_calendar_event` (a boolean, default off — when on, a day whose
 calendar has no event titled like *standup* gets no file,
 `skipped:no_standup_event`; a calendar that cannot be asked is not a reason to
-skip). Every other key in a routine's `config:` is held. The runner does not
-yet hand a routine its resolved config (`ctx.config`), so until it does both
-run on their manifests' defaults whatever `scheduled.yaml` says.
+skip). Every other key in a routine's `config:` is held. The runner hands
+each run its resolved config (`ctx.config`) — your value over the manifest's
+default, key by key.
 
 A routine on `working_days` or `eve_of_working_days` runs only once
 `Me/profile.md` says which days you work — the seeded profile says nothing,

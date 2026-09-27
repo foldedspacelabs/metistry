@@ -263,6 +263,8 @@ syncs:
 );
 const readScheduled = async () => (await vault.read(SCHEDULED_PATH))?.content ?? null;
 const runsStarted = [];
+// the owner's meeting template (T2-11), as `metistry init` seeds it — what the meeting-note door renders
+await vault.write("Templates/Meeting.md", readFileSync(join(REPO_ROOT, "seed/vault/Templates/Meeting.md")), { principal: "user", message: "fixture" });
 
 const queries = new QueryStore(pool);
 await queries.loadDir(join(REPO_ROOT, "seed/queries"));
@@ -488,6 +490,18 @@ await pool.query(
   [DAY, DEFER_TEXT, P],
 );
 
+// the day's standup (T2-11): one occurrence of a series, as the eventkit sync
+// leaves it in calendar_events — the event the meeting-note door opens a note for
+await pool.query(
+  `INSERT INTO calendar_events (connection, event_id, ical_uid, series_id, starts_at, ends_at, title, organizer, attendees, self_status)
+   VALUES ('eventkit', 'evt-standup-0928', 'standup@example.com', 'evt-standup', '2026-09-28T13:30:00Z', '2026-09-28T13:45:00Z', 'Standup', 'dana@example.com', $1::jsonb, 'accepted')
+   ON CONFLICT (connection, event_id) DO NOTHING`,
+  [JSON.stringify([
+    { name: "Dana", email: "dana@example.com", status: "accepted", role: "chair", type: "person", self: false },
+    { name: "Me", email: "me@example.com", status: "accepted", role: "required", type: "person", self: true },
+  ])],
+);
+
 // the board's other two shapes (T1-2): a Blocked card waiting on that todo
 // (`meta.blocked_by`, resolved to its text), and a Done card whose crew
 // reported back — the `reported` facet, from the one work→runs join. Ids
@@ -664,6 +678,8 @@ const REQUESTS = [
   ["POST /api/vault-tasks/:task_key/check", () => ({ path: "/api/vault-tasks/mt-7f3k2a/check", body: { checked: true, seen_text: TASK_TEXT }, key: "tick-0928-0001" })],
   ["POST /api/vault-tasks/:task_key/schedule", () => ({ path: "/api/vault-tasks/mt-4q8r2d/schedule", body: { do: "2026-09-30", seen_text: DEFER_TEXT }, key: "defer-0928-0001" })],
   ["POST /api/today/close", () => ({ path: "/api/today/close", body: { day: CLOSE_DAY, line: "Store interface frozen; recorder next." } })],
+  // Open notes on the day's standup (T2-11): the first call, which writes the note
+  ["POST /api/meetings/:event_id/note", () => ({ path: "/api/meetings/evt-standup-0928/note", body: {} })],
 
 
   // the reads that show the writes above: a room with a comment, a feed with a capture in it

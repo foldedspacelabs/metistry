@@ -1,8 +1,7 @@
 {
   "route": "POST /api/meetings/:event_id/note",
-  "source": "contract",
-  "ticket": "T2-11",
-  "note": "idempotent per event: a second call answers 200 with the first note's path and created: false",
+  "source": "recorded",
+  "ticket": null,
   "request": {
     "method": "POST",
     "path": "/api/meetings/evt-standup-0928/note",
@@ -13,7 +12,7 @@
   "body": {
     "ok": true,
     "event_id": "evt-standup-0928",
-    "path": "Journal/Meetings/2026-09-28 Standup.md",
+    "path": "Journal/Meetings/2026-09-28-standup.md",
     "created": true
   }
 }

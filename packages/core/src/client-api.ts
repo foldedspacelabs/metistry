@@ -269,7 +269,7 @@ export const CLIENT_API: readonly ClientRoute[] = [
   route("POST", "/api/today/close", "Close the Day: write the section, then plan tomorrow", { conflict: ["stale"] }),
 
   // ----- calendar and mail -----
-  planned("POST", "/api/meetings/:event_id/note", "T2-11", "the meeting note for one event; a second call returns the first", { idempotent: "natural" }),
+  route("POST", "/api/meetings/:event_id/note", "the meeting note for one event; a second call returns the first", { idempotent: "natural" }),
   planned("POST", "/api/calendar/events/:id/move", "T2-12", "move an event: preview, then confirm with a single-use token"),
   planned("POST", "/api/calendar/invitations/:id/respond", "T4-17", "answer an invitation through the connection that can"),
   planned("POST", "/api/mail/messages/:id/draft", "T4-17", "draft a reply through the connection that can; never sends"),

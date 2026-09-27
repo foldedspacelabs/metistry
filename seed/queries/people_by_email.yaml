@@ -1,0 +1,48 @@
+# Seeded default (D4 overlay: an instance file of the same name wins).
+#
+# An attendee → a person page (design-build-plan §2.10; today-hub-requests A4;
+# ticket T1-10). A calendar hands Today an attendee as an ADDRESS; a person in
+# the vault is a PAGE. This is the one map between them, and it is only ever
+# the owner's own word: `people_emails` holds an address because a People page
+# the user owns says `email:` in its frontmatter (db/migrations/
+# 0029_meeting_refs.sql, apps/reconciler/src/indexer.ts `personEmailPairs`).
+#
+# **Never guessed.** At most one row, and none unless exactly ONE page claims
+# the address: two pages that both say `email: jim@x.com` resolve to neither,
+# the same refusal the Tick door makes between two lines (vault_task_by_key).
+# No fallback on a name, a display name or a basename — an unmatched attendee
+# is a plain name on the card, because a wrong person page on a briefing is
+# worse than none.
+#
+# The address is normalised exactly as the walk stored it — trimmed, a
+# `mailto:` dropped (EventKit hands a participant as a `mailto:` URL),
+# lowercased — so `Jim@X.com` and `mailto:jim@x.com` find the same page.
+#
+# **`expose: route`**, on `knowledge_pages.yaml`'s rule: every row carries a
+# vault path and names a person the owner knows. It is the owner's to read
+# through Today's own routes; the generic `/api/q/<name>` and `queries_run`
+# answer this name with the refusal they answer an unknown name with, so an
+# agent with `queries: true` cannot use it to probe who the owner knows by
+# address.
+name: people_by_email
+expose: route
+description: >-
+  The one People page that claims an email address in its frontmatter — path
+  and title — or no row when none does or when more than one does. Addresses
+  are matched lowercased, with any mailto: prefix dropped.
+params:
+  email: { type: text, default: "" } # blank matches nothing
+sql: |
+  SELECT
+    e.email,
+    e.path,
+    COALESCE(k.title, e.path) AS title
+  FROM people_emails e
+  LEFT JOIN knowledge_files k ON k.path = e.path
+  WHERE e.email = regexp_replace(lower(btrim(:email)), '^mailto:', '')
+    AND NOT EXISTS (
+      SELECT 1 FROM people_emails o
+       WHERE o.email = e.email AND o.path <> e.path
+    )
+  LIMIT 1
+cache_ttl: 0 # a page the owner just gave an address must link on the next render

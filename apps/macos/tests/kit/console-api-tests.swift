@@ -197,20 +197,34 @@ import Testing
     #expect(lost.error?.code == "conflict")
 }
 
-@Test func theBoardGroupsIntoTheSixColumnsInTheQuerysOwnOrder() async {
+@Test func theBoardGroupsIntoTheFiveColumnsInTheQuerysOwnOrder() async {
     let api = ConsoleAPI(transport: StubConsole(["GET /api/q/board": Fixtures.board]))
     let board = try! (await api.board()).get()
-    #expect(board.columns.map(\.key) == ["backlog", "assigned", "in_progress", "needs_you", "done", "reported"])
-    // "Addressed to" is the label; `assigned` is the key every drop carries.
-    #expect(Board.label(for: "assigned") == "Addressed to")
+    #expect(board.columns.map(\.key) == ["backlog", "assigned", "in_progress", "blocked", "done"])
+    // Each label is the word its key says (C2, C38).
+    #expect(board.columns.map(\.label) == ["Backlog", "Assigned", "In Progress", "Blocked", "Done"])
     // An empty column is a fact about the board, not a reason to hide it.
-    #expect(board.columns.first { $0.key == "reported" }?.cards.isEmpty == true)
+    #expect(Board(rows: []).columns.map(\.key) == Board.columnOrder)
+    #expect(Board(rows: []).columns.allSatisfy { $0.cards.isEmpty })
+    // Reported is a facet of a Done card, not a column (C39).
+    let done = board.columns.first { $0.key == "done" }!.cards
+    #expect(done.map(\.reported) == [true, false])
+
+    // blocked-by: the owner's todo, resolved beside the card; it surfaces and never gates
+    let blocked = board.columns.first { $0.key == "blocked" }!.cards[0]
+    #expect(blocked.blockedBy == "vault:Journal/2026-09-18.md#^mt-7f3k2a")
+    #expect(blocked.blockedByTask == "Send the icon brief")
+    #expect(blocked.blockedByTaskOpen == true)
+    let unblocked = board.columns.first { $0.key == "backlog" }!.cards[0]
+    #expect(unblocked.blockedBy == nil && unblocked.blockedByTask == nil && unblocked.blockedByTaskOpen == nil)
 
     let card = board.columns.first { $0.key == "in_progress" }!.cards[0]
     #expect(card.id == 214)
     #expect(card.claimedBy == "drey")
     #expect(card.ageHours == 4.5)
     #expect(card.hasThread)
+    #expect(card.threadCount == 7)
+    #expect(unblocked.threadCount == 0)
     #expect(card.escalated)
     // A lease in the past is not a lease that is held — which is what
     // `interrupted` reads on the presence chip.
@@ -222,7 +236,7 @@ import Testing
     // never carry the stricter arm's write". So the type will not build one.
     #expect(TaskPatch(status: "closed", owner: "drey").wireBody == nil)
     #expect(TaskPatch().wireBody == nil)
-    #expect(TaskPatch.moving(to: "needs_you").status == "blocked")
+    #expect(TaskPatch.moving(to: "blocked").status == "blocked")
     #expect(TaskPatch.addressing(to: "drey").wireBody?["owner"] as? String == "drey")
 
     let api = ConsoleAPI(transport: StubConsole([:]))
@@ -852,29 +866,43 @@ enum Fixtures {
     """)
 
     /// board.yaml's final `SELECT`: "column", id, title, kind, project, owner,
-    /// claimed_by, lease_expires_at, age_hours, last_report_at, escalated,
-    /// external_ref, artifact, has_thread, status, due, updated_at.
+    /// claimed_by, lease_expires_at, age_hours, last_report_at, reported,
+    /// escalated, external_ref, artifact, has_thread, thread_count,
+    /// blocked_by, blocked_by_task, blocked_by_task_open, status, due,
+    /// updated_at.
     static let board = bytes("""
     {"rows":[
       {"column":"backlog","id":301,"title":"write the release note","kind":"task","project":"metistry",
        "owner":null,"claimed_by":null,"lease_expires_at":null,"age_hours":1.0,"last_report_at":null,
-       "escalated":false,"external_ref":null,"artifact":null,"has_thread":false,
+       "escalated":false,"external_ref":null,"artifact":null,"has_thread":false,"thread_count":0,
+       "reported":false,"blocked_by":null,"blocked_by_task":null,"blocked_by_task_open":null,
        "status":"open","due":null,"updated_at":"2026-09-18T08:00:00.000Z"},
       {"column":"assigned","id":302,"title":"review the wireframes","kind":"review","project":"metistry",
        "owner":"drey","claimed_by":null,"lease_expires_at":null,"age_hours":12.5,"last_report_at":null,
-       "escalated":false,"external_ref":null,"artifact":"metistry/app-ux","has_thread":false,
+       "escalated":false,"external_ref":null,"artifact":"metistry/app-ux","has_thread":false,"thread_count":0,
+       "reported":false,"blocked_by":null,"blocked_by_task":null,"blocked_by_task_open":null,
        "status":"open","due":null,"updated_at":"2026-09-18T07:00:00.000Z"},
       {"column":"in_progress","id":214,"title":"renew the wildcard cert","kind":"task","project":"ops",
        "owner":"drey","claimed_by":"drey","lease_expires_at":"2026-09-18T10:00:00.000Z","age_hours":4.5,
        "last_report_at":null,"escalated":true,"external_ref":"gh:owner/repo#41","artifact":null,
-       "has_thread":true,"status":"in_progress","due":"2026-09-17","updated_at":"2026-09-18T09:00:00.000Z"},
-      {"column":"needs_you","id":215,"title":"decide the icon","kind":"task","project":"metistry",
+       "has_thread":true,"thread_count":7,"reported":false,
+       "blocked_by":null,"blocked_by_task":null,"blocked_by_task_open":null,
+       "status":"in_progress","due":"2026-09-17","updated_at":"2026-09-18T09:00:00.000Z"},
+      {"column":"blocked","id":215,"title":"decide the icon","kind":"task","project":"metistry",
        "owner":null,"claimed_by":null,"lease_expires_at":null,"age_hours":30.0,"last_report_at":null,
-       "escalated":true,"external_ref":null,"artifact":null,"has_thread":false,
+       "escalated":true,"external_ref":null,"artifact":null,"has_thread":false,"thread_count":0,
+       "reported":false,"blocked_by":"vault:Journal/2026-09-18.md#^mt-7f3k2a",
+       "blocked_by_task":"Send the icon brief","blocked_by_task_open":true,
        "status":"blocked","due":null,"updated_at":"2026-09-17T09:00:00.000Z"},
+      {"column":"done","id":217,"title":"measure the cache hit rate","kind":"task","project":"metistry",
+       "owner":null,"claimed_by":null,"lease_expires_at":null,"age_hours":80.0,"last_report_at":"2026-09-16T10:00:00.000Z",
+       "escalated":false,"external_ref":null,"artifact":null,"has_thread":false,"thread_count":0,
+       "reported":true,"blocked_by":null,"blocked_by_task":null,"blocked_by_task_open":null,
+       "status":"closed","due":null,"updated_at":"2026-09-16T10:00:00.000Z"},
       {"column":"done","id":216,"title":"ship the compute routes","kind":"task","project":"metistry",
        "owner":null,"claimed_by":null,"lease_expires_at":null,"age_hours":72.0,"last_report_at":null,
-       "escalated":false,"external_ref":null,"artifact":null,"has_thread":false,
+       "escalated":false,"external_ref":null,"artifact":null,"has_thread":false,"thread_count":0,
+       "reported":false,"blocked_by":null,"blocked_by_task":null,"blocked_by_task_open":null,
        "status":"closed","due":null,"updated_at":"2026-09-16T09:00:00.000Z"}
      ],"as_of":"2026-09-18T09:00:03.000Z"}
     """)

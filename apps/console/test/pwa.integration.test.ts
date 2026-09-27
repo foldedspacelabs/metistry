@@ -183,21 +183,32 @@ describe.skipIf(!hasDb)("console PWA chunk", () => {
     expect(html).toMatch(/id="board-msg"[^>]*aria-live="polite"/);
   });
 
-  // The drags (docs/ops/board.md "Drags"). There is no DOM harness here, so
-  // this asserts the SHAPE of the handlers in the served app.js: every drop
-  // the table names maps to exactly one route, `reported` is never a target,
-  // and a closed card has no drops at all.
-  // Ruled 2026-09-17: `work.owner` is a name on the card, not a lease, so the
-  // column is read "Addressed to". The KEY stays `assigned` (board.yaml's
-  // derived value, every route above), which is exactly what this pins apart.
-  it("the `assigned` column is labelled “Addressed to”, and the key it is drawn from is unchanged", async () => {
+  // T1-2 (C2, C38, C39): five columns, and every label is the word its key
+  // says — `assigned` is Assigned, `blocked` is Blocked. "Addressed To"
+  // reverted (C38), "Needs You" is the request queue's name and not a
+  // column's (C2), and Reported is a flag on Done rather than a column (C39).
+  it("the board draws five columns, each labelled with the word its key says", async () => {
     const js = await (await fetch(base + "/app.js")).text();
     const cols = /const BOARD_COLUMNS = \[[\s\S]*?\n\];/.exec(js)?.[0] ?? "";
     expect(cols).not.toBe("");
-    expect(cols).toContain('["assigned", "Addressed to"');
-    expect(cols).not.toContain('"Assigned"');
+    const pairs = [...cols.matchAll(/\["([a-z_]+)", "([^"]+)"/g)].map((m) => [m[1], m[2]]);
+    expect(pairs).toEqual([
+      ["backlog", "Backlog"],
+      ["assigned", "Assigned"],
+      ["in_progress", "In Progress"],
+      ["blocked", "Blocked"],
+      ["done", "Done"],
+    ]);
+    // the accept line: no "Addressed to" anywhere the owner reads
+    const html = await (await fetch(base + "/")).text();
+    for (const [name, src] of [["app.js", js], ["index.html", html]] as const) expect(src, name).not.toMatch(/addressed to/i);
+    expect(cols).not.toContain("Needs You");
   });
 
+  // The drags (docs/ops/board.md "Drags"). There is no DOM harness here, so
+  // this asserts the SHAPE of the handlers in the served app.js: every drop
+  // the table names maps to exactly one route, and a closed card has no
+  // drops at all.
   it("the board's drag handlers are present, and each drop maps to exactly one route", async () => {
     const js = await (await fetch(base + "/app.js")).text();
     for (const handler of ["ondragstart", "ondragover", "ondragleave", "ondrop", "ondragend"]) {
@@ -206,12 +217,12 @@ describe.skipIf(!hasDb)("console PWA chunk", () => {
     // the §6c policy table, as it stands in the panel
     const drops = /function dropsFor\(c\) \{[\s\S]*?\n\}/.exec(js)?.[0] ?? "";
     expect(drops).not.toBe("");
-    expect(drops).toContain('if (c.status === "closed") return d;'); // done/reported are terminal
+    expect(drops).toContain('if (c.status === "closed") return d;'); // Done is terminal, reported or not
     expect(drops).toContain('d.assigned = "assign"');
     expect(drops).toContain('d.in_progress = "claim"');
     expect(drops).toContain('d.backlog = "unassign"');
     expect(drops).toContain('d[boardHome(c)] = "release"');
-    expect(drops).toContain('d[boardHome(c)] = "unblock"');
+    expect(drops).toContain('c.column === "blocked") { d[boardHome(c)] = "unblock"');
     expect(drops).toContain('d.done = "close"');
     expect(drops).not.toContain("reported"); // nothing you can drag makes a report exist
     // one op, one route — and the two POST verbs are the only POSTs

@@ -96,9 +96,15 @@ async function instance(opts: { release?: boolean } = {}): Promise<string> {
   return I;
 }
 
+// unguessable on purpose: a real tmpdir can legitimately contain short,
+// common substrings (the old fixture password was "pw", and a random tmpdir
+// occasionally contains "pw" too — see the "never puts a password in an
+// argv" test below, which flaked on exactly that collision)
+const DB_PASSWORD = "zQ9vTr4mK7wPfXe2";
+
 const env = (I: string): NodeJS.ProcessEnv => ({
   METISTRY_INSTANCE_DIR: I,
-  METISTRY_DB_PASSWORD: "pw",
+  METISTRY_DB_PASSWORD: DB_PASSWORD,
   METISTRY_ORIGIN: "https://studio.ts.net",
   // both bridges configured: without a URL an install HAS no calendar bridge
   // and neither its helper agent nor its child is installed at all
@@ -299,7 +305,7 @@ describe("metistry migrate-shape launchd --dry-run", () => {
     const P = await productTree();
     const I = await instance();
     const r = await run({ productDir: P, env: env(I), exec: liveCompose(), dryRun: true, exists: ready(P) });
-    expect(r.commands.join("\n")).not.toContain("pw");
+    expect(r.commands.join("\n")).not.toContain(DB_PASSWORD);
   });
 });
 

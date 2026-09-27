@@ -27,15 +27,18 @@ const policy = { idleDays: 30, maxDays: 365 };
 const P = "itest-console-art";
 
 describe("PWA shell: HTML artifacts render only in an opaque-origin sandbox (decision #14)", () => {
-  const app = readFileSync(new URL("../web/app.js", import.meta.url), "utf8");
+  // Work ▸ Artifacts and a task's room live in work.js since T7-3b
+  const app = readFileSync(new URL("../web/work.js", import.meta.url), "utf8");
   const html = readFileSync(new URL("../web/index.html", import.meta.url), "utf8");
-  it("the iframe gets sandbox with NO tokens and a CSP meta in the srcdoc; allow-same-origin never appears; text goes through textContent", () => {
+  it("the iframe gets sandbox with NO tokens and a CSP meta in the srcdoc; allow-same-origin never appears; text is escaped a line at a time", () => {
     expect(app).toContain('frame.setAttribute("sandbox", "")');
     expect(app).not.toContain("allow-same-origin");
     expect(app).not.toContain("allow-scripts");
     expect(app).toContain("frame.srcdoc = ART_CSP + body.content");
     expect(app).toMatch(/ART_CSP = '<meta http-equiv="Content-Security-Policy" content="default-src \\'none\\';/);
-    expect(app).toContain("pre.textContent = body.content");
+    // a text file is drawn a line at a time so a thread can sit on its line — every line through esc()
+    expect(app).toContain('`<span class="art-ln">${esc(text)}</span>`');
+    expect(app).toContain("annotatedTextHtml(body.content");
     expect(app).not.toMatch(/innerHTML\s*=\s*body\.content/);
     expect(html).toContain('id="artifacts"');
     expect(html).toContain('data-view="artifacts"');
@@ -48,7 +51,7 @@ describe("PWA shell: HTML artifacts render only in an opaque-origin sandbox (dec
     expect(html).toContain('id="rooms"');
     // no Rooms list to navigate to (C89, T7-2): a room is a push from its card
     expect(html).not.toContain('data-view="rooms"');
-    expect(app).toContain("function roomCard(r)");
+    expect(app).toContain("function loadRoom()");
     expect(app).not.toMatch(/room-messages"\)\.innerHTML\s*=\s*[^;]*\$\{c\.body\}/); // bodies go through esc()
     expect(app).toContain("${esc(c.body)}");
     expect(app).toMatch(/\/thread\/\$\{op\}/); // resolve/reopen: the console route, nothing else

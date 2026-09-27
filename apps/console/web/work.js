@@ -469,7 +469,9 @@ const STORE_COLUMN = "metistry.board.column";
  * what it shows has been read (a link opened straight from a hash). Returns
  * each view's `load` for the shell's `loadView`.
  */
-export function mountWork({ $, api, show, closeSheet, retitle = () => {} }) {
+// `poll(fn, ms)` is the shell's door onto live.js: the board's fallback timer,
+// which runs only while the live-changes stream is down (T7-7).
+export function mountWork({ $, api, show, closeSheet, retitle = () => {}, poll: registerPoll = () => {} }) {
   const store = {
     get: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
     set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* private mode: the chip is simply not remembered */ } },
@@ -489,7 +491,6 @@ export function mountWork({ $, api, show, closeSheet, retitle = () => {} }) {
   let shown = BOARD_COLUMNS.some(([k]) => k === store.get(STORE_COLUMN)) ? store.get(STORE_COLUMN) : "in_progress";
   let dragging = null;
   let retry = null; // the move a failed network call would run again
-  let timer = null;
   let failed = null;
 
   async function loadBoard() {
@@ -708,12 +709,12 @@ export function mountWork({ $, api, show, closeSheet, retitle = () => {} }) {
     loadBoard().catch(() => {});
   });
 
-  // A board that lags lies about who holds the lease: every 10s while it is in
-  // view — never under a drag or an open sheet, which a repaint would cancel.
+  // A board that lags lies about who holds the lease: `work.changed` while the
+  // stream is up; while it is down, every 10s while it is in view — never
+  // under a drag or an open sheet, which a repaint would cancel.
   const busy = () => dragging !== null || Boolean($("sheet").open);
   function poll(intervalMs = 10000) {
-    if (timer) clearInterval(timer);
-    timer = setInterval(() => {
+    registerPoll(() => {
       if ((!$("board").hidden || !$("card").hidden) && document.visibilityState === "visible" && !busy()) refresh().catch(() => {});
     }, intervalMs);
   }
@@ -1007,6 +1008,19 @@ export function mountWork({ $, api, show, closeSheet, retitle = () => {} }) {
     $("art-others").innerHTML = otherThreadsHtml(threads, path, drawn ? byLine : new Map());
   }
 
+  // `thread.changed` on the artifact on screen: its threads again, on the
+  // file — and, apart, in an open sheet, so the shell can hold that one back
+  // while a reply is being typed in it.
+  async function refreshThreads() {
+    if (!art?.path) return loadArtifact();
+    await openFile(art.path);
+  }
+  async function refreshThreadSheet() {
+    if (!art || !sheetThreads) return;
+    await loadThreads();
+    loadThreadSheet();
+  }
+
   // The thread sheet: the comments on one line (or one thread), with reply and Resolve.
   let sheetThreads = null; // { lines, ids }
   function openThreads(title, ids) {
@@ -1102,6 +1116,14 @@ export function mountWork({ $, api, show, closeSheet, retitle = () => {} }) {
     thread: loadThreadSheet,
     openCard,
     openMove,
+    // for the shell's live refetches (T7-7): the board and its card again, the
+    // open artifact's threads (on the file; in the sheet), whether a repaint would cancel a gesture, and
+    // which artifact is open — so another artifact's threads never refetch it
+    refresh,
+    refreshThreads,
+    refreshThreadSheet,
+    busy,
+    get artifactId() { return art?.id; },
     get shown() { return shown; },
     get rows() { return rows; },
   };

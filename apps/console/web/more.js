@@ -65,7 +65,7 @@ export function actionTableHtml(scope) {
 export const PERMISSION_EMPTY_CELL = "—";
 export function permissionEntryText(e) {
   const p = e?.provenance ?? {};
-  const why = p.kind === "approved" ? (p.proposalId === null || p.proposalId === undefined ? "approved in Needs You" : `approved in Needs You · #${p.proposalId}`) : p.kind === "routine" ? `during ${p.routine} only` : null;
+  const why = p.kind === "approved" ? (p.proposalId === null || p.proposalId === undefined ? "approved in Needs You" : `approved in Needs You · #${p.proposalId}`) : p.kind === "routine" ? `during ${p.routine} only` : p.kind === "project" ? `via project ${p.project}` : null;
   return `${e?.label ?? ""}${e?.asks ? " ⏱" : ""}${why === null ? "" : ` (${why})`}`;
 }
 export function permissionCellText(entries) {
@@ -293,5 +293,11 @@ export function mountMore({ $, api, show }) {
     paintAgent();
   });
 
-  return { agents: loadAgents, agent: loadAgent };
+  // A live refetch (T7-7): the list and the open agent again, leaving an open grants editor where it is.
+  async function refresh() {
+    if (!$("agents").hidden) return loadAgents();
+    if (open && !$("agent").hidden) { await load().catch(() => {}); paintAgent(); }
+  }
+
+  return { agents: loadAgents, agent: loadAgent, refresh };
 }

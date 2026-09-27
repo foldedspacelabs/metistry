@@ -60,25 +60,26 @@ export function viewsFor(type, data = {}, open = {}) {
     case "message.new":
       return ["chat"];
     case "presence.changed":
-      return ["agents", "today"];
+      return ["agents", "agent", "today"];
     case "needs_you.changed":
       return ["triage"];
     case "work.changed":
-      return ["board", "rooms", "projects", "today"];
+      return ["board", "card", "rooms", "projects", "project", "today"];
     case "thread.changed":
-      if (data.artifact_id !== undefined) return data.artifact_id === open.artifact_id ? ["artifacts"] : [];
+      // the artifact pushed, and the sheet of its comments over it (T7-3b)
+      if (data.artifact_id !== undefined) return data.artifact_id === open.artifact_id ? ["artifact", "thread"] : [];
       return ["rooms"];
     case "capture.new":
       return ["feed", "today"];
     case "vault.reconciled":
-      return ["today", "knowledge"];
+      return ["today", "knowledge", "area", "page"];
     case "connection.health":
     case "release.available":
       return ["settings"];
     case "config.changed":
-      return ["settings", "usage", "projects"];
+      return ["settings", "usage", "projects", "project"];
     case "budget.state":
-      return ["usage", "projects"];
+      return ["usage", "projects", "project"];
     default:
       return []; // vault.sync, routine.status, sync.status: no PWA view reads their routes yet; resync is every visible view
   }

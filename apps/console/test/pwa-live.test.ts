@@ -402,7 +402,7 @@ describe("the catalogue (packages/core/src/events.ts)", () => {
   });
 
   it("an artifact's thread refetches only that artifact's threads; a task's thread refetches its room", () => {
-    expect(viewsFor("thread.changed", { artifact_id: "art_A" }, { artifact_id: "art_A" })).toEqual(["artifacts"]);
+    expect(viewsFor("thread.changed", { artifact_id: "art_A" }, { artifact_id: "art_A" })).toEqual(["artifact", "thread"]);
     expect(viewsFor("thread.changed", { artifact_id: "art_B" }, { artifact_id: "art_A" })).toEqual([]);
     expect(viewsFor("thread.changed", { artifact_id: "art_B" }, {})).toEqual([]);
     expect(viewsFor("thread.changed", { work_id: 7 }, {})).toEqual(["rooms"]);

@@ -238,7 +238,9 @@ describe("doctor: the console row with the local owner token", () => {
     const r = byName(report.rows);
     expect(r.console?.status).toBe("degraded");
     expect(r.console?.meta).toMatchObject({ api_status: 401, authenticated: false });
-    expect(r.console?.remediation).toMatch(/secrets sync --to env/);
+    // a mismatch between .env and the running console: the fix is a restart, not another sync
+    expect(r.console?.remediation).toMatch(/the running console holds a different one — restart the console \(docker compose up -d console\)/);
+    expect(r.console?.remediation).not.toMatch(/secrets sync/);
     expect(r.console?.remediation).toMatch(/METISTRY_TRUSTED_LOOPBACK_PROXY/);
     expect(r.console?.remediation).not.toContain("owner-token"); // the value never reaches a report
     expect(r.console?.action).toEqual({ kind: "run_verb", command: ["metistry", "secrets", "sync", "--to", "env"], label: "Sync secrets to .env" });

@@ -39,6 +39,7 @@ import {
   type ComputeOptions,
 } from "./compute.js";
 import { buildDeploymentReport, renderDeploymentReport, setDeploymentShape, setKeepAwake, type KeepAwakeFlags } from "./deployment-report.js";
+import { loadDeployment } from "./deployment.js";
 import { EXTENSION_VERBS, extensionsAdd, extensionsList, extensionsRemove, parseExtensionVerb, renderExtensions, type ExtensionsOptions } from "./extensions.js";
 import { doctor, renderTable, type DoctorDeps } from "./doctor.js";
 import { VARIABLE_VERBS, parseVariableVerb, renderVariables, variablesList, variablesSet, variablesUnset, type VariablesOptions } from "./variables.js";
@@ -87,6 +88,8 @@ import {
   secretsReplace,
   secretsSet,
   syncSecrets,
+  serviceAnswers,
+  type TokenService,
   type NamedSecretsOptions,
   type SyncDirection,
 } from "./secrets.js";
@@ -1223,6 +1226,12 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
         ...(io.exec ? { exec: io.exec } : {}),
         // the Keychain exists only on darwin; CI runs this suite on Linux, so tests pin the platform
         ...(io.platform ? { platform: io.platform } : {}),
+        // `--to env`: a changed token's service is probed (its port answering
+        // at all), so the restart it now needs is said, never discovered
+        serviceRunning: async (service: TokenService) => {
+          const shape = productDir ? await loadDeployment(productDir).then((d) => d.deployment.shape, () => undefined) : undefined;
+          return serviceAnswers(service, { env: process.env, shape, fetchFn: io.fetchFn ?? fetch });
+        },
       };
       try {
         switch (sub) {

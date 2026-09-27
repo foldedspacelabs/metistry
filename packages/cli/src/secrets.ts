@@ -47,12 +47,14 @@ import {
   parseSecretGrantee,
   parseSecretsFile,
   resolveInstanceLayout,
+  resolveUrl,
   secretEnvName,
   secretNameIssue,
   secretRefsIn,
   secretService,
   secretValueIssue,
   validateManifest,
+  type DeploymentShape,
   type KeychainBackend,
   type SecretGrantMode,
   type SecretPresence,
@@ -124,6 +126,44 @@ export const GENERATED_SECRETS: Readonly<Record<string, string>> = {
   METISTRY_BRIDGE_TOKEN_RECONCILER_USER:
     "the vault bridge's OWNER bearer — the only credential that may write .metistry/ (docs/ops/auth.md); restart the reconciler once it is minted",
 };
+
+/**
+ * The long-running service that holds each generated secret in memory from
+ * the moment it starts. A running service never re-reads `.env`, so when
+ * `sync --to env` writes a DIFFERENT value for one of these, that service
+ * refuses the new value (401 / `unauthenticated`) until it is restarted —
+ * which the sync must say, never leave to be discovered.
+ */
+export const GENERATED_SECRET_READERS: Readonly<Record<string, TokenService>> = {
+  METISTRY_LOCAL_OWNER_TOKEN: "console",
+  METISTRY_BRIDGE_TOKEN_RECONCILER_USER: "reconciler",
+};
+
+export type TokenService = "console" | "reconciler";
+
+/**
+ * Whether a service is up right now, by whether its port answers at all —
+ * any HTTP status counts, because the question is "is a process holding the
+ * old token", not "is it healthy". Undefined = this install names no URL
+ * for it, so the caller cannot tell and says so conditionally.
+ */
+export async function serviceAnswers(
+  service: TokenService,
+  opts: { env: NodeJS.ProcessEnv; shape?: DeploymentShape | undefined; fetchFn?: typeof fetch; timeoutMs?: number },
+): Promise<boolean | undefined> {
+  const configured =
+    service === "console"
+      ? opts.env.METISTRY_CONSOLE_URL || `http://127.0.0.1:${Number.parseInt(opts.env.METISTRY_CONSOLE_PORT ?? "", 10) || 8080}`
+      : opts.env.METISTRY_RECONCILER_URL;
+  if (!configured) return undefined;
+  const url = resolveUrl(configured, { shape: opts.shape ?? "compose", vantage: "host" }).replace(/\/+$/, "");
+  try {
+    await (opts.fetchFn ?? fetch)(`${url}/health`, { signal: AbortSignal.timeout(opts.timeoutMs ?? 1500) });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export interface Accounts {
   /** the per-user account (`keychainAccount()`): the retired shared scope, and an install with no instance_id */
@@ -233,6 +273,8 @@ export interface SecretsOptions {
   platform?: NodeJS.Platform | undefined;
   out: (line: string) => void;
   mint?: (() => string) | undefined;
+  /** `--to env`: whether a service that holds a token is running now (`serviceAnswers` in the CLI). Absent = unknown, so a changed token's restart hint is conditional. */
+  serviceRunning?: ((service: TokenService) => Promise<boolean | undefined>) | undefined;
 }
 
 export type SyncDirection = "keychain" | "env";
@@ -248,6 +290,12 @@ export interface SyncResult {
   named?: string[];
   /** `--to env`: GENERATED_SECRETS names that existed nowhere and were created by this run */
   minted?: string[];
+  /** `--to env`: GENERATED_SECRETS names missing from the Keychain but live in `.env` — copied INTO the Keychain, never re-minted, so a running service keeps working */
+  adopted?: string[];
+  /** `--to env`: secret names whose `.env` value this run changed (a service started before it holds the old one) */
+  rotated?: string[];
+  /** `--to env`: services seen running with a value this run changed — each needs `metistry restart <service>` */
+  restart?: TokenService[];
   /** `--to env`: the file that was written, which may not be the one that was read (the move) */
   wrote?: string;
 }
@@ -356,6 +404,10 @@ export async function syncSecrets(direction: SyncDirection, opts: SecretsOptions
   // read — only asked whether it exists, so the owner is told to migrate.
   const values = new Map<string, string>();
   const minted: string[] = [];
+  const adopted: string[] = [];
+  // what `.env` holds NOW — the values every running service was started with
+  const seed = await readText(opts.envFile);
+  const before = liveValues(seed);
   for (const name of names) {
     let v: string | undefined;
     if (wasSharedScope(name)) {
@@ -364,13 +416,25 @@ export async function syncSecrets(direction: SyncDirection, opts: SecretsOptions
       if (v === undefined && accounts.instance && (await user.hasSecret(name))) unmigrated.push(name);
     } else {
       v = await own.getSecret(name);
-      // Nowhere yet, and one of the few whose value only ever means "this
-      // install": mint it into the Keychain now, so an instance that predates
-      // the variable gains it on the next sync rather than needing a verb.
       if (v === undefined && GENERATED_SECRETS[name]) {
-        v = (opts.mint ?? mintToken)();
-        await own.setSecret(name, v);
-        minted.push(name);
+        const inEnv = before.get(name);
+        if (inEnv) {
+          // Not in the Keychain, but `.env` has one — and the running console
+          // or reconciler was started with exactly that value. Adopt it: the
+          // Keychain gains it and nothing a service holds changes. Minting
+          // here would lock every running service out of its own install.
+          v = inEnv;
+          await own.setSecret(name, v);
+          adopted.push(name);
+        } else {
+          // Nowhere yet, and one of the few whose value only ever means "this
+          // install": mint it into the Keychain now, so an instance that
+          // predates the variable gains it on the next sync rather than
+          // needing a verb.
+          v = (opts.mint ?? mintToken)();
+          await own.setSecret(name, v);
+          minted.push(name);
+        }
       }
     }
     if (v === undefined) skipped.push(name);
@@ -380,20 +444,46 @@ export async function syncSecrets(direction: SyncDirection, opts: SecretsOptions
   // the move: an instance's `.env` belongs under its own state/, and the
   // file being read may still be the product checkout's
   const target = opts.envTarget ?? opts.envFile;
-  const seed = await readText(opts.envFile);
   if (target !== opts.envFile) {
     opts.out(`moving the environment: ${opts.envFile} → ${target} (every line is carried over; the old file is LEFT IN PLACE, so a running install keeps working — delete it yourself once ${target} is proven)`);
   }
-  const { text, missing } = rewriteEnv(seed, values);
-  await writeEnvFile(target, appendEnv(text, values, missing));
+  // a line that already holds its value is left byte-for-byte as it is
+  const toWrite = new Map([...values].filter(([n, v]) => before.get(n) !== v));
+  const { text, missing } = rewriteEnv(seed, toWrite);
+  await writeEnvFile(target, appendEnv(text, toWrite, missing));
   changed.push(...values.keys());
   opts.out(`wrote ${changed.length} secret line(s) into ${target} from the Keychain (0600; every other line preserved): ${changed.join(", ") || "(none)"}`);
+  for (const n of adopted) opts.out(`adopted ${n} from ${opts.envFile} into the Keychain — it was not in the Keychain, and the value the running services hold is kept (nothing to restart)`);
   for (const n of minted) opts.out(`minted ${n} — it was in neither the Keychain nor ${opts.envFile}: ${GENERATED_SECRETS[n]}`);
-  if (minted.length) opts.out(`restart the service that reads a freshly minted secret for it to take effect — \`metistry restart console\`, and \`metistry restart reconciler\` for ${Object.keys(GENERATED_SECRETS).filter((n) => n.startsWith("METISTRY_BRIDGE_TOKEN_")).join(", ")}.`);
+  // Every value this run CHANGED in `.env` — minted, or the Keychain's
+  // differing from the file's — is one a service started earlier does not
+  // hold. Never silent: name the service, whether it is running, and the
+  // exact command.
+  const rotated = [...values.keys()].filter((n) => (before.get(n) ?? "") !== values.get(n));
+  const restart: TokenService[] = [];
+  const byService = new Map<TokenService, string[]>();
+  for (const n of rotated) {
+    const svc = GENERATED_SECRET_READERS[n];
+    if (svc) byService.set(svc, [...(byService.get(svc) ?? []), n]);
+  }
+  for (const [svc, vars] of byService) {
+    const running = opts.serviceRunning ? await opts.serviceRunning(svc) : undefined;
+    const cmd = `\`metistry restart ${svc}\``;
+    if (running === true) {
+      restart.push(svc);
+      opts.out(`RESTART NEEDED: the ${svc} is running with the previous ${vars.join(", ")} and will refuse the new value until restarted — run ${cmd}`);
+    } else if (running === false) {
+      opts.out(`the ${svc} is not running; it reads the new ${vars.join(", ")} when it next starts`);
+    } else {
+      opts.out(`${vars.join(", ")} changed — if the ${svc} is running it still holds the previous value: run ${cmd}`);
+    }
+  }
+  const others = rotated.filter((n) => !GENERATED_SECRET_READERS[n] && before.has(n));
+  if (others.length) opts.out(`changed in ${target} from the Keychain: ${others.join(", ")} — a service started before this run holds the previous value until it is restarted (\`metistry restart <service>\`)`);
   if (missing.length) opts.out(`appended (no line existed): ${missing.join(", ")}`);
   if (skipped.length) opts.out(`not in this instance's Keychain, left as they are: ${skipped.join(", ")}`);
   if (unmigrated.length) opts.out(`still only in the retired shared scope, so not read: ${unmigrated.join(", ")} — \`${MIGRATE_SCOPE_COMMAND}\` copies them into this instance`);
-  return { direction, changed, skipped, unmigrated, minted, wrote: target };
+  return { direction, changed, skipped, unmigrated, minted, adopted, rotated, restart, wrote: target };
 }
 
 /** Mint a fresh random token into the Keychain and into `.env` — the only place a new secret is created. */

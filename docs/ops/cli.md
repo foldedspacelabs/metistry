@@ -340,8 +340,13 @@ request: about **141 ms** median on a scratch instance (20 runs of `GET
 looked up. Through one session the same request is about **1.5 ms** median.
 
 The console URL and the local owner token are resolved **once**, when the
-session starts, and the same refusals apply before a single line is read: no
-token, or a non-loopback console, prints the reason on stderr and exits 1.
+session starts, and the same refusals apply before a single line is sent: no
+token, or a non-loopback console, prints the reason on stderr and exits 1,
+with nothing on stdout. Stdin is attached **before** that resolution, so a
+client may write its first request the moment it spawns the process: the
+line is held and answered once the target is known (through 0.12.0 it was
+lost, and that call waited out its timeout). A refusal discards every held
+line — none is sent anywhere, and the token is never printed.
 After that nothing exits but EOF on stdin, and **the token is never printed**
 — every line written is redacted against it, whatever the console sent back.
 
@@ -1067,16 +1072,37 @@ exception is `GENERATED_SECRETS` (`packages/cli/src/secrets.ts`): a secret
 whose value means nothing outside this install, so minting one can never be
 the wrong guess and nobody has to paste it anywhere. `metistry up`'s
 generated `METISTRY_DB_PASSWORD` is the precedent; `METISTRY_LOCAL_OWNER_TOKEN`
-(`docs/ops/auth.md`) is the current list. An install that predates the
-variable gains one on the next sync — restart the console for it to take
-effect:
+(the console's) and `METISTRY_BRIDGE_TOKEN_RECONCILER_USER` (the
+reconciler's owner bearer) are the current list (`docs/ops/auth.md`).
+
+**It adopts before it mints.** When one of them is missing from the
+Keychain but `.env` already has a value, that value is the one the running
+console or reconciler was started with, so `sync` copies it **into** the
+Keychain and leaves the `.env` line byte-for-byte as it was — nothing a
+running service holds changes. It mints only when neither store has one.
+(Through 0.12.0 it minted over `.env`'s value, which rotated both tokens behind
+the running services: every Mac app write then failed with `reconciler
+refused … unauthenticated`, and every console call with `refused the owner
+token (401)`. The cure for an install already in that state is `metistry
+restart console` and `metistry restart reconciler`; `metistry doctor`'s
+console row names the first.)
+
+**A changed token is never silent.** Whenever the run changes the `.env`
+value of a token a long-running service holds — a mint, or the Keychain's
+value replacing a differing line — `sync` asks whether that service is up
+(does its port answer at all) and says so, with the exact command:
 
 ```
 $ metistry secrets sync --to env
 minted METISTRY_LOCAL_OWNER_TOKEN — it was in neither the Keychain nor …/.metistry/state/.env:
   the console's local owner door — an install that predates it gets one here
-restart the console for a freshly minted secret to take effect (`metistry restart console`).
+RESTART NEEDED: the console is running with the previous METISTRY_LOCAL_OWNER_TOKEN and will
+  refuse the new value until restarted — run `metistry restart console`
 ```
+
+A service that is not running is told it reads the new value when it next
+starts; one with no URL configured gets the command conditionally ("if the
+reconciler is running …"). An adopted token needs nothing.
 
 ### `secrets purge --instance <dir>`
 

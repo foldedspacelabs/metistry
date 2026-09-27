@@ -10,7 +10,7 @@ import { describe, expect, it } from "vitest";
 import type { Exec, ExecOptions } from "../src/exec.js";
 import { promptStdin } from "../src/keychain.js";
 import { main } from "../src/main.js";
-import { accountFor, isSecretVar, listSecrets, mintSecret, purgeSecrets, renderSecretList, rewriteEnv, sharedScopeSecretName, syncSecrets, wasSharedScope } from "../src/secrets.js";
+import { accountFor, isSecretVar, listSecrets, mintSecret, purgeSecrets, renderSecretList, rewriteEnv, serviceAnswers, sharedScopeSecretName, syncSecrets, wasSharedScope } from "../src/secrets.js";
 
 /** One instance's id — the account its own secrets are filed under. */
 const INSTANCE_ID = "11111111-2222-4333-8444-555555555555";
@@ -180,6 +180,110 @@ describe("metistry secrets sync", () => {
     expect(readFileSync(file, "utf8")).toBe("METISTRY_BRIDGE_TOKEN_RECONCILER=\nMETISTRY_BRIDGE_TOKEN_RECONCILER_USER=MINTED-OWNER-BEARER\n");
     expect(out.join("\n")).not.toContain("MINTED-OWNER-BEARER");
     expect(out.join("\n")).toContain("restart");
+  });
+
+  // The 0.12.0 lock-out: an install whose `.env` already held both tokens —
+  // the values the running console and reconciler were started with — but
+  // whose Keychain did not. Minting there rotated both behind the running
+  // services, and every Mac app write came back 401 / `unauthenticated`.
+  it("**adopts a generated token .env already holds into the Keychain — never mints over it, .env byte-for-byte unchanged**", async () => {
+    const text = "METISTRY_DB_HOST=127.0.0.1\nMETISTRY_LOCAL_OWNER_TOKEN=running-console-token\n# the reconciler's owner bearer\nMETISTRY_BRIDGE_TOKEN_RECONCILER_USER='running-owner-bearer'\n";
+    const file = await envFile(text);
+    const kc = fakeSecurity();
+    const out: string[] = [];
+    let mints = 0;
+    const probed: string[] = [];
+    const r = await syncSecrets("env", {
+      envFile: file,
+      instanceId: INSTANCE_ID,
+      exec: kc.exec,
+      out: (l) => out.push(l),
+      platform: "darwin",
+      env: {},
+      mint: () => `MINTED-${++mints}`,
+      serviceRunning: async (svc) => (probed.push(svc), true),
+    });
+    expect(mints).toBe(0);
+    expect(r.minted).toEqual([]);
+    expect(r.adopted).toEqual(["METISTRY_LOCAL_OWNER_TOKEN", "METISTRY_BRIDGE_TOKEN_RECONCILER_USER"]);
+    expect(r.rotated).toEqual([]);
+    expect(r.restart).toEqual([]);
+    expect(probed).toEqual([]); // nothing changed, so nothing to ask about
+    expect(kc.store.get(key(INSTANCE_ID, "METISTRY_LOCAL_OWNER_TOKEN"))).toBe("running-console-token");
+    expect(kc.store.get(key(INSTANCE_ID, "METISTRY_BRIDGE_TOKEN_RECONCILER_USER"))).toBe("running-owner-bearer");
+    expect(readFileSync(file, "utf8")).toBe(text);
+    const said = out.join("\n");
+    expect(said).toContain("adopted METISTRY_LOCAL_OWNER_TOKEN");
+    expect(said).not.toContain("minted");
+    expect(said).not.toContain("running-console-token");
+    expect(said).not.toContain("running-owner-bearer");
+    for (const c of kc.calls) for (const a of c.args) expect(a).not.toMatch(/running-(console-token|owner-bearer)/);
+
+    // and the next run reads the adopted item back: still no mint, still no change
+    const again = await syncSecrets("env", { envFile: file, instanceId: INSTANCE_ID, exec: kc.exec, out: () => {}, platform: "darwin", env: {}, mint: () => `MINTED-${++mints}` });
+    expect(mints).toBe(0);
+    expect(again.adopted).toEqual([]);
+    expect(again.rotated).toEqual([]);
+  });
+
+  it("mints a generated token exactly once when neither the Keychain nor .env has it", async () => {
+    const file = await envFile("METISTRY_LOCAL_OWNER_TOKEN=\n");
+    const kc = fakeSecurity();
+    let mints = 0;
+    const r = await syncSecrets("env", { envFile: file, instanceId: INSTANCE_ID, exec: kc.exec, out: () => {}, platform: "darwin", env: {}, mint: () => `MINTED-${++mints}`, serviceRunning: async () => false });
+    expect(mints).toBe(1);
+    expect(r.minted).toEqual(["METISTRY_LOCAL_OWNER_TOKEN"]);
+    expect(r.adopted).toEqual([]);
+    expect(readFileSync(file, "utf8")).toBe("METISTRY_LOCAL_OWNER_TOKEN=MINTED-1\n");
+    await syncSecrets("env", { envFile: file, instanceId: INSTANCE_ID, exec: kc.exec, out: () => {}, platform: "darwin", env: {}, mint: () => `MINTED-${++mints}` });
+    expect(mints).toBe(1);
+  });
+
+  it("the Keychain is canonical: its value replaces a differing .env line", async () => {
+    const file = await envFile("X=1\nMETISTRY_LOCAL_OWNER_TOKEN=stale-env-value\n");
+    const kc = fakeSecurity({ [key(INSTANCE_ID, "METISTRY_LOCAL_OWNER_TOKEN")]: "keychain-value" });
+    const r = await syncSecrets("env", { envFile: file, instanceId: INSTANCE_ID, exec: kc.exec, out: () => {}, platform: "darwin", env: {}, mint: () => "NEVER", serviceRunning: async () => false });
+    expect(r.minted).toEqual([]);
+    expect(r.adopted).toEqual([]);
+    expect(r.rotated).toEqual(["METISTRY_LOCAL_OWNER_TOKEN"]);
+    expect(readFileSync(file, "utf8")).toBe("X=1\nMETISTRY_LOCAL_OWNER_TOKEN=keychain-value\n");
+  });
+
+  it("**a changed token with its service running is never silent: RESTART NEEDED and the exact command**", async () => {
+    const file = await envFile("METISTRY_LOCAL_OWNER_TOKEN=console-was-started-with-this\nMETISTRY_BRIDGE_TOKEN_RECONCILER_USER=\n");
+    const kc = fakeSecurity({ [key(INSTANCE_ID, "METISTRY_LOCAL_OWNER_TOKEN")]: "the-keychain-differs" });
+    const out: string[] = [];
+    const running = { console: true, reconciler: true } as const;
+    const r = await syncSecrets("env", { envFile: file, instanceId: INSTANCE_ID, exec: kc.exec, out: (l) => out.push(l), platform: "darwin", env: {}, mint: () => "FRESH", serviceRunning: async (svc) => running[svc] });
+    expect(r.rotated).toEqual(["METISTRY_LOCAL_OWNER_TOKEN", "METISTRY_BRIDGE_TOKEN_RECONCILER_USER"]);
+    expect(r.restart).toEqual(["console", "reconciler"]);
+    const said = out.join("\n");
+    expect(said).toMatch(/RESTART NEEDED: the console is running with the previous METISTRY_LOCAL_OWNER_TOKEN .* `metistry restart console`/);
+    expect(said).toMatch(/RESTART NEEDED: the reconciler is running with the previous METISTRY_BRIDGE_TOKEN_RECONCILER_USER .* `metistry restart reconciler`/);
+    for (const v of ["console-was-started-with-this", "the-keychain-differs", "FRESH"]) expect(said).not.toContain(v);
+
+    // not running: said, but no restart owed; unknown: the command, conditionally
+    const quiet: string[] = [];
+    const file2 = await envFile("METISTRY_LOCAL_OWNER_TOKEN=\n");
+    const r2 = await syncSecrets("env", { envFile: file2, instanceId: INSTANCE_ID, exec: fakeSecurity().exec, out: (l) => quiet.push(l), platform: "darwin", env: {}, mint: () => "FRESH", serviceRunning: async () => false });
+    expect(r2.restart).toEqual([]);
+    expect(quiet.join("\n")).toContain("the console is not running; it reads the new METISTRY_LOCAL_OWNER_TOKEN when it next starts");
+    const unknown: string[] = [];
+    const file3 = await envFile("METISTRY_LOCAL_OWNER_TOKEN=\n");
+    await syncSecrets("env", { envFile: file3, instanceId: INSTANCE_ID, exec: fakeSecurity().exec, out: (l) => unknown.push(l), platform: "darwin", env: {}, mint: () => "FRESH" });
+    expect(unknown.join("\n")).toContain("if the console is running it still holds the previous value: run `metistry restart console`");
+  });
+
+  it("serviceAnswers: any HTTP answer is running, a refused connection is not, no URL is unknown", async () => {
+    const seen: string[] = [];
+    const answering = (async (url: string | URL | Request) => (seen.push(String(url)), new Response("", { status: 401 }))) as unknown as typeof fetch;
+    const refusing = (async () => {
+      throw new TypeError("fetch failed");
+    }) as unknown as typeof fetch;
+    expect(await serviceAnswers("console", { env: { METISTRY_CONSOLE_URL: "http://127.0.0.1:18080/" }, shape: "launchd", fetchFn: answering })).toBe(true);
+    expect(seen).toEqual(["http://127.0.0.1:18080/health"]);
+    expect(await serviceAnswers("reconciler", { env: { METISTRY_RECONCILER_URL: "http://127.0.0.1:18081" }, shape: "launchd", fetchFn: refusing })).toBe(false);
+    expect(await serviceAnswers("reconciler", { env: {}, fetchFn: answering })).toBeUndefined();
   });
 
   it("mints only the generated names — a missing third-party secret is still reported, never invented", async () => {

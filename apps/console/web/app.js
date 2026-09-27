@@ -804,7 +804,7 @@ function actionTableHtml(scope) {
 const PERMISSION_EMPTY_CELL = "—";
 function permissionEntryText(e) {
   const p = e?.provenance ?? {};
-  const why = p.kind === "approved" ? (p.proposalId === null || p.proposalId === undefined ? "approved in Needs You" : `approved in Needs You · #${p.proposalId}`) : p.kind === "routine" ? `during ${p.routine} only` : null;
+  const why = p.kind === "approved" ? (p.proposalId === null || p.proposalId === undefined ? "approved in Needs You" : `approved in Needs You · #${p.proposalId}`) : p.kind === "routine" ? `during ${p.routine} only` : p.kind === "project" ? `via project ${p.project}` : null;
   return `${e?.label ?? ""}${e?.asks ? " ⏱" : ""}${why === null ? "" : ` (${why})`}`;
 }
 function permissionCellText(entries) {

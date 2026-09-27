@@ -7,7 +7,7 @@
 // the last mode change from `runs` and the one write, which is always
 // the user's hand (passkey session only) and always a `runs` row.
 
-import { PROJECT_COLS, PROJECT_MODES, PROJECT_SLUG_RE, ensureProject, finishRun, startRun, toProjectRow, type ProjectMode, type ProjectRow } from "@foldedspacelabs/metistry-core";
+import { PROJECT_COLS, PROJECT_MODES, PROJECT_SLUG_RE, ensureProject, finishRun, startRun, toProjectRow, type ProjectGrant, type ProjectMode, type ProjectRow } from "@foldedspacelabs/metistry-core";
 import { QueryError, type QueryStore } from "@foldedspacelabs/metistry-queries";
 import type { Db } from "./auth-store.js";
 import { AgentError, validateGrants, type Grants } from "./agents.js";
@@ -100,9 +100,9 @@ export interface ProjectPatch {
    * queries?}, the same envelope an agent's own grant already is. Validated
    * by the identical function `PUT /api/agents/:id/grants` uses
    * (`validateGrants`), with the external rules: the bare vault ("/") and
-   * anything outside the vault's CONTENT are refused. A member's effective
-   * reach unions this with its own grants, "via project" (T4-7); nothing
-   * reads it before then.
+   * anything outside the vault's CONTENT are refused. Every member inherits
+   * it (T4-7): its effective reach is its own grant ∪ its projects', each
+   * inherited line marked "via project" — see `listProjectGrants`.
    */
   grants?: Grants;
 }
@@ -197,4 +197,22 @@ export async function updateProject(db: Db, id: string, patch: ProjectPatch, pri
     await finishRun(db, runId, { ok: false, error: err instanceof Error ? err.message : String(err) });
     throw err;
   }
+}
+
+/**
+ * **Every project's own read grant** (0032), for the permissions table:
+ * core's `resolveActor` unions a crew's or an external agent's row with the
+ * grants of the projects it is a member of (`inheritGrants`, T4-7) and marks
+ * each inherited line "via project". The door does the same union from the
+ * same column when it resolves a bearer (`authenticateAgent`, one statement),
+ * so what the table draws is what the door grants.
+ *
+ * The stored value is handed over as it is: `inheritGrants` re-checks it
+ * fail-closed (an unknown tier is none; an area an agent could not be granted
+ * is dropped), so a row edited by hand cannot inherit into more than the PUT
+ * would have let the owner write.
+ */
+export async function listProjectGrants(db: Db): Promise<ProjectGrant[]> {
+  const { rows } = await db.query(`SELECT id, grants FROM projects ORDER BY id`);
+  return rows.map((r) => ({ project: String(r.id), grants: r.grants }));
 }

@@ -173,7 +173,10 @@ run with `--channel release`.
    `METISTRY_CONSOLE_IMAGE` / `METISTRY_ASSISTANT_IMAGE` set to the
    versioned ghcr images,
 6. kickstarts the launchd jobs whose code changed, writes `metistry.lock`
-   through the reconciler, and runs `doctor`.
+   through the reconciler, copies each `seed/vault/Templates/*.md` the vault
+   **lacks** (create-only — a template that is there is never touched;
+   `docs/ops/cli.md`, "Seeding the templates the vault lacks"), and runs
+   `doctor`.
 
 Because everything after the switch runs against `current`, going back is
 a symlink flip:

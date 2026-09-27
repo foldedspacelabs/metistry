@@ -134,6 +134,8 @@ export interface SyncHooks {
 
 const MAX_MESSAGE = 4000;  // limit: fixed — a commit message, not a document; git's own conventions bound it
 
+/** The principal trailer main.ts configures (§4.7 commit hygiene) — and the one file history reads back (vault.ts `log`). */
+export const SOURCE_TRAILER = "Brain-Source";
 /** The trailer names for the act's ids. Fixed: history is read by tools that grep for them. */
 export const RUN_TRAILER = "Metistry-Run";
 export const TURN_TRAILER = "Metistry-Turn";

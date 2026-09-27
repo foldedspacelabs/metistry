@@ -178,9 +178,25 @@ export class Git {
   ) {}
 
   /** Run git; resolves with the exit code (never throws on non-zero). A refused argv (`refusedGitArgs`) never reaches git: it resolves as exit 128. */
-  raw(args: string[], opts: GitOptions = {}): Promise<GitResult> {
+  async raw(args: string[], opts: GitOptions = {}): Promise<GitResult> {
+    const r = await this.exec(args, opts);
+    return { code: r.code, stdout: r.stdout.toString("utf8"), stderr: r.stderr };
+  }
+
+  /**
+   * Run git and keep stdout as BYTES — a blob read out of history must come
+   * back exactly as it was committed (an image, a PDF, a note with a stray
+   * invalid sequence), which a string decode would silently mangle. Same
+   * refusal check, same environment, same `-c` flags as `raw`.
+   */
+  rawBytes(args: string[], opts: GitOptions = {}): Promise<{ code: number; stdout: Buffer; stderr: string }> {
+    return this.exec(args, opts);
+  }
+
+  /** The one exec: stdout always arrives as bytes, and `raw` decodes it (what `String(stdout)` did before). */
+  private exec(args: string[], opts: GitOptions): Promise<{ code: number; stdout: Buffer; stderr: string }> {
     const refused = refusedGitArgs(args);
-    if (refused) return Promise.resolve({ code: 128, stdout: "", stderr: `refused: ${refused}` });
+    if (refused) return Promise.resolve({ code: 128, stdout: Buffer.alloc(0), stderr: `refused: ${refused}` });
     const env: NodeJS.ProcessEnv = {
       // a minimal, explicit environment: no user config, no prompts, no hooks surprises
       PATH: process.env.PATH ?? "/usr/bin:/bin",
@@ -208,10 +224,11 @@ export class Git {
       const child = execFile(
         "git",
         argv,
-        { cwd: this.root, env, timeout: opts.timeoutMs ?? this.timeoutMs, maxBuffer: 64 * 1024 * 1024, windowsHide: true },
+        { cwd: this.root, env, timeout: opts.timeoutMs ?? this.timeoutMs, maxBuffer: 64 * 1024 * 1024, windowsHide: true, encoding: "buffer" },
         (err, stdout, stderr) => {
           const code = err && typeof (err as any).code === "number" ? (err as any).code : err ? 1 : 0;
-          resolve({ code, stdout: String(stdout), stderr: String(stderr) + (err && (err as any).killed ? " (timed out)" : "") });
+          const out = Buffer.isBuffer(stdout) ? stdout : Buffer.from(String(stdout));
+          resolve({ code, stdout: out, stderr: String(stderr) + (err && (err as any).killed ? " (timed out)" : "") });
         },
       );
       if (opts.input !== undefined) child.stdin?.end(opts.input);

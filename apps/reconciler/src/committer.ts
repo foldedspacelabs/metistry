@@ -13,7 +13,9 @@
 // fetches, integrates (integrate.ts: fast-forward, rebase only our own
 // never-published acts, else merge — never force), and only then pushes; a
 // conflict stops everything but local commits, sets `vault.state =
-// conflict` and hands one Needs You report to `hooks.record`. While the
+// conflict` and hands one Needs You report to `hooks.record`. So does a
+// remote that changed a protected path (`protected_path_from_remote`):
+// refused whole, one report per offending commit. While the
 // OWNER has a merge or rebase in progress in the working tree, nothing here
 // stages, commits or integrates — the tree is theirs until they finish.
 //
@@ -442,7 +444,7 @@ export class Committer {
           this.vault = { state: "conflict", conflict };
           const error = conflictSummary(conflict);
           console.error(`reconciler: sync with ${remoteRef} stopped: ${error}`);
-          await this.record({ state: "conflict", ok: false, error, remote, branch, conflict, meta: { reason: c.reason, paths: c.paths, base: c.base, ahead: c.local.ahead, behind: c.remote.behind } });
+          await this.record({ state: "conflict", ok: false, error, remote, branch, conflict, meta: { reason: c.reason, paths: c.paths, base: c.base, ahead: c.local.ahead, behind: c.remote.behind, ...(c.commits ? { commits: c.commits.map((x) => x.sha), commit_count: c.commit_count } : {}) } });
           return { attempted: true, ok: false, remote, error: `conflict: ${error}`, integrated: "conflict", ahead: c.local.ahead, behind: c.remote.behind, pushed: false };
         }
         if (this.vault.state === "conflict") console.log(`reconciler: sync with ${remoteRef} is clean again`);
@@ -501,6 +503,7 @@ export function conflictSummary(c: Pick<SyncConflict, "reason" | "paths" | "path
   const named = c.paths.slice(0, 3).join(", ") + (c.path_count > 3 ? ` and ${c.path_count - 3} more` : "");
   if (c.reason === "unrelated") return `${where} shares no history with this vault`;
   if (c.reason === "local_changes") return `uncommitted edits to ${named} are in the way of ${where}`;
+  if (c.reason === "protected_path_from_remote") return `${where} changed protected configuration (${named}), which only your hand may change`;
   return `${named} changed both here and on ${where}`;
 }
 

@@ -4,7 +4,7 @@
 
 import { lstat, readdir, realpath } from "node:fs/promises";
 import { join, sep } from "node:path";
-import { INSTANCE_LAYOUT, JOURNAL_DIR, NON_VAULT_ROOTS, PROTECTED_ROOT_FILES, isProtectedPath, isUserOwnedPath, type NoteSectionName } from "@foldedspacelabs/metistry-core";
+import { INSTANCE_LAYOUT, JOURNAL_DIR, LEGACY_MACHINERY_ROOTS, NON_VAULT_ROOTS, PROTECTED_ROOT_FILES, isProtectedPath, isUserOwnedPath, type NoteSectionName } from "@foldedspacelabs/metistry-core";
 
 export type PathRefusal =
   | "invalid_request" // malformed / traversal / absolute / bad casing / control chars
@@ -166,6 +166,33 @@ export function parseVaultPath(input: unknown): { ok: true; segments: string[]; 
 /** True iff `rel` is in the §4.7 protected set. One rule, stated in core. */
 export function isProtected(rel: string): boolean {
   return isProtectedPath(rel);
+}
+
+/** Protected root names, lowercased → as core spells them: the case-folded spelling a remote tree could use to land on them. */
+const PROTECTED_ROOTS_FOLDED = new Map<string, string>([...PROTECTED_ROOT_FILES, ...LEGACY_MACHINERY_ROOTS].map((n) => [n.toLowerCase(), n]));
+
+/**
+ * May a commit FETCHED FROM THE REMOTE change this path? No, when it is the
+ * owner's configuration (ruling 2026-09-26: "refuse and report") — the
+ * remote is not a write path into how the system behaves. Stricter than
+ * `isProtected` in two ways, both because a tree from the remote is checked
+ * out by git, not written through `confine`:
+ *
+ *   - ALL of `.metistry/`, `state/` included: `state/` is derived and
+ *     gitignored, and git overwrites an ignored file without a word — a
+ *     remote commit adding `.metistry/state/.env` would replace the
+ *     instance's secrets on the next fast-forward;
+ *   - the root is matched case-insensitively: on macOS `.Metistry/rules.yaml`
+ *     or `claude.md` in the remote's tree IS the protected file once
+ *     checked out.
+ */
+export function isProtectedFromRemote(rel: string): boolean {
+  if (isProtected(rel)) return true;
+  const segments = rel.split("/");
+  const first = (segments[0] ?? "").toLowerCase();
+  if (first === PROTECTED_ROOT.toLowerCase()) return true;
+  const canonical = PROTECTED_ROOTS_FOLDED.get(first);
+  return canonical !== undefined && isProtected([canonical, ...segments.slice(1)].join("/"));
 }
 
 /**

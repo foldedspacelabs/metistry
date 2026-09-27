@@ -14,7 +14,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { describeRequest } from "@foldedspacelabs/metistry-core";
 import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
 import { Committer, type SyncConflict } from "../src/committer.js";
-import { conflictKey, recordSync, syncRecorder, SYNC_RUN_KIND } from "../src/sync-record.js";
+import { conflictKey, protectedKey, recordSync, syncRecorder, SYNC_RUN_KIND } from "../src/sync-record.js";
 import { tempRepo, type TempRepo } from "./helpers.js";
 
 const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url));
@@ -95,6 +95,80 @@ describe.skipIf(!hasDb)("vault sync on the record (real db)", () => {
     runIds.push(fourth.runId);
     expect(fourth.reported).toBe(true);
     expect(((await reports(conflictKey(other)))[0]!.payload as { body: string }).body).toContain("a `.metistry/` file is yours to commit");
+  });
+
+  it("a remote that changed protected configuration → ONE report per offending commit, none added by the next tick", async () => {
+    const [a, b] = [fakeBase(), fakeBase()];
+    const c: SyncConflict = {
+      ...conflict(fakeBase(), [".metistry/deployment.yaml", "CLAUDE.md"]),
+      reason: "protected_path_from_remote",
+      commits: [
+        { sha: a, author: "Someone", subject: "Change the deployment", paths: [".metistry/deployment.yaml"] },
+        { sha: b, author: "Someone", subject: "Rewrite the instructions", paths: ["CLAUDE.md"] },
+      ],
+      commit_count: 2,
+    };
+    keys.push(protectedKey({ sha: a }), protectedKey({ sha: b }), conflictKey(c));
+    const first = await recordSync(pool, { state: "conflict", ok: false, remote: "origin", branch: "main", meta: { reason: c.reason }, conflict: c });
+    const second = await recordSync(pool, { state: "conflict", ok: false, remote: "origin", branch: "main", meta: { reason: c.reason }, conflict: c });
+    runIds.push(first.runId, second.runId);
+    expect([first.reported, second.reported]).toEqual([true, false]);
+    expect(await reports(conflictKey(c))).toHaveLength(0); // per commit, never per episode
+
+    const ra = await reports(protectedKey({ sha: a }));
+    const rb = await reports(protectedKey({ sha: b }));
+    expect([ra.length, rb.length]).toEqual([1, 1]);
+    const pa = ra[0]!.payload as Record<string, any>;
+    expect(pa).toMatchObject({ kind: "vault_conflict", reason: "protected_path_from_remote", paths: [".metistry/deployment.yaml"], commit: { sha: a, subject: "Change the deployment" } });
+    expect(pa.title).toBe("Vault sync refused: origin/main changed protected configuration (1 file)");
+    expect(pa.body).toContain("Nothing was integrated and nothing was pushed");
+    expect(pa.body).toContain(`git revert ${a.slice(0, 12)}`);
+    expect(describeRequest("report", pa)).toMatchObject({ type: "report", body: "excerpt", decline: { label: "Dismiss" } });
+    const runs = (await pool.query(`SELECT meta FROM runs WHERE id = ANY($1::bigint[]) ORDER BY id`, [[first.runId, second.runId]])).rows;
+    expect(runs.map((r) => r.meta)).toMatchObject([
+      { state: "conflict", reason: "protected_path_from_remote" },
+      { state: "conflict", reason: "protected_path_from_remote" },
+    ]);
+  });
+
+  it("end to end: a remote commit to `.metistry/deployment.yaml`, two scheduled pushes → one report, nothing moved", async () => {
+    const repo: TempRepo = await tempRepo();
+    const scratch = await mkdtemp(join(tmpdir(), "metistry-syncdb-"));
+    try {
+      const env = { ...process.env, GIT_CONFIG_NOSYSTEM: "1", HOME: scratch };
+      const asOwner = (cwd: string, args: string[]) => exec("git", ["-c", "user.name=Owner", "-c", "user.email=owner@example.test", ...args], { cwd, env });
+      const bare = join(scratch, "remote.git");
+      await exec("git", ["init", "-q", "--bare", "-b", "main", bare]);
+      await exec("git", ["remote", "add", "origin", bare], { cwd: repo.root });
+      const committer = new Committer(repo.git, { authorPrefix: "Metistry", authorEmail: "metistry@test", sourceTrailer: "Brain-Source" });
+      committer.hooks = { record: syncRecorder(pool) };
+      const before = Number((await pool.query(`SELECT coalesce(max(id), 0) AS id FROM runs`)).rows[0]!.id);
+      await committer.push();
+      const clone = join(scratch, "owner");
+      await exec("git", ["clone", "-q", bare, clone], { env });
+      await writeFile(join(clone, ".metistry", "deployment.yaml"), "shape: hostile\n");
+      await asOwner(clone, ["add", "-A"]);
+      await asOwner(clone, ["commit", "-qm", "Change the deployment"]);
+      await asOwner(clone, ["push", "-q", "origin", "main"]);
+      const sha = (await asOwner(clone, ["rev-parse", "HEAD"])).stdout.trim();
+      keys.push(protectedKey({ sha }));
+      const head = await repo.git.head();
+
+      expect(await committer.push()).toMatchObject({ ok: false, integrated: "conflict" });
+      expect(await committer.push()).toMatchObject({ ok: false, integrated: "conflict" });
+      expect(await repo.git.head()).toBe(head);
+      expect(await reports(protectedKey({ sha }))).toHaveLength(1);
+      const rows = (await pool.query(`SELECT id, meta->>'state' AS state, meta->>'reason' AS reason FROM runs WHERE id > $1 AND kind = $2 ORDER BY id`, [before, SYNC_RUN_KIND])).rows;
+      runIds.push(...rows.map((r) => Number(r.id)));
+      expect(rows.map((r) => [r.state, r.reason])).toEqual([
+        ["push", null],
+        ["conflict", "protected_path_from_remote"],
+        ["conflict", "protected_path_from_remote"],
+      ]);
+    } finally {
+      await repo.cleanup();
+      await rm(scratch, { recursive: true, force: true });
+    }
   });
 
   it("a pull and a push are `vault_sync` rows with their state — what `vault.sync {state}` is mapped from", async () => {

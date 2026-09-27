@@ -1,11 +1,10 @@
 {
   "route": "DELETE /api/prose/:id/feedback",
-  "source": "contract",
-  "ticket": "T1-12",
-  "note": "clears the rating",
+  "source": "recorded",
+  "ticket": null,
   "request": {
     "method": "DELETE",
-    "path": "/api/prose/brief-2026-09-28/feedback",
+    "path": "/api/prose/1/feedback",
     "body": null,
     "idempotency_key": null
   },

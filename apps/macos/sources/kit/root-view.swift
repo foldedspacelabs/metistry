@@ -79,7 +79,9 @@ public struct RootView: View {
         ToolbarItemGroup(placement: .primaryAction) {
             let canCapture = shell.canPerform(.newCapture)
             // Glyph-only, so the name is the accessibility label and not the
-            // symbol's own ("plus" says "Add").
+            // symbol's own ("plus" says "Add"). It opens the composer
+            // (capture-view.swift) anchored under itself; Esc closes it and
+            // keeps the draft.
             Button {
                 shell.perform(.newCapture)
             } label: {
@@ -88,6 +90,9 @@ public struct RootView: View {
             .accessibilityLabel(ShellCommand.newCapture.spokenLabel(assistantName: shell.assistantName))
             .help(canCapture ? "New Capture (⌘N)" : "New Capture (⌘N) isn't in this build yet")
             .disabled(!canCapture)
+            .popover(isPresented: Bindable(model.composer).isPresented, arrowEdge: .bottom) {
+                CaptureComposerView(model: model.composer)
+            }
 
             Button {
                 isUsagePresented.toggle()

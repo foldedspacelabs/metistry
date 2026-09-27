@@ -176,9 +176,11 @@ async function sectionSchedule(ctx: RoutineCtx): Promise<string[] | null> {
   }
 }
 
-// 📂 Projects: status rollup from the work table by area (fed by the
-// github-state collector today; more collectors → richer status).
-async function sectionProjects(db: Db): Promise<string[] | null> {
+// 📂 Areas: status rollup from the work table by area (fed by the
+// github-state collector today; more collectors → richer status). C82
+// renamed this section from Projects — "Projects" now names the per-project
+// rollup with modes, budgets and a cap (`projects_rollup`).
+async function sectionAreas(db: Db): Promise<string[] | null> {
   const { rows } = await db.query(
     `SELECT area,
             count(*) FILTER (WHERE status <> 'closed') AS open,
@@ -263,7 +265,7 @@ export async function run(db: Db, ctx: RoutineCtx = {}): Promise<number> {
   const requests = await sectionRequests(db, expired.rows.length);
   const today = await sectionToday(db);
   const reviews = await sectionReviews(db);
-  const projects = await sectionProjects(db);
+  const areas = await sectionAreas(db);
   const system = await sectionSystem(db);
 
   // silence-default: emit only when something needs the user (a calendar
@@ -276,7 +278,7 @@ export async function run(db: Db, ctx: RoutineCtx = {}): Promise<number> {
   if (today) parts.push("", "✅ Today:", ...today);
   if (reviews) parts.push("", "👀 Reviews waiting on you:", ...reviews);
   if (requests) parts.push("", "🔔 Needs you:", ...requests);
-  if (projects) parts.push("", "📂 Projects:", ...projects);
+  if (areas) parts.push("", "📂 Areas:", ...areas);
   if (system) parts.push("", "⚙️ What I've been doing:", ...system.lines);
   if (!schedule) parts.push("", "📅 Schedule & meeting prep arrive once the calendar bridge is connected.");
 

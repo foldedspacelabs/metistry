@@ -336,8 +336,10 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
   const ns = await loadNamespace(env.METISTRY_INSTANCE_DIR);
   const labelSuffix = ns?.labelSuffix;
   if (ns) applyPorts(env, ns);
-  // hashed before the build/switch and again after: only jobs whose code moved are kickstarted
-  let before = await hashHostJobs(runDir, await templatesForRestart(runDir, deployment.shape, labelSuffix, env));
+  // hashed before the build/switch and again after: only jobs whose code moved
+  // are kickstarted. In release mode `runDir` is `current`, which still points
+  // at the release being LEFT here — that is the "before".
+  const before = await hashHostJobs(runDir, await templatesForRestart(runDir, deployment.shape, labelSuffix, env));
 
   // The legacy-layout gate, asked with whatever version is knowable at the
   // time. In release mode that is `--version` (or "latest", which is not a
@@ -407,8 +409,12 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
     } else {
       release = opts.rollback ? await rollbackRelease(r, productDir) : await installRelease(r, { productDir, fetchFn, env, version: opts.releaseVersion, ...(opts.target ? { target: opts.target } : {}) });
       releaseVersion = release.version;
+      // `before` is NOT re-hashed here. It was taken through `current` while
+      // that still pointed at the release being left; hashing again after the
+      // switch hashed the NEW release twice, so every release-mode update found
+      // no code changed and kickstarted nothing — the jobs kept running the old
+      // release until something else restarted them (0.12.0 → 0.14.0).
       runDir = runDirFor(productDir, source);
-      before = await hashHostJobs(runDir, await templatesForRestart(runDir, deployment.shape, labelSuffix, env));
       // the bundled runtime moves with the release — a new Node, Postgres or
       // git arrives inside its deps pack (docs/ops/bundled-runtime.md). A
       // rollback keeps the runtime it has: it is a superset, not a downgrade.

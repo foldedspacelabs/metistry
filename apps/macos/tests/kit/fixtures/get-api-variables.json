@@ -1,8 +1,7 @@
 {
   "route": "GET /api/variables",
-  "source": "contract",
-  "ticket": "T4-4",
-  "note": "text agents read; set and unset are metistry variables (M14)",
+  "source": "recorded",
+  "ticket": null,
   "request": {
     "method": "GET",
     "path": "/api/variables",
@@ -13,13 +12,22 @@
   "body": {
     "variables": [
       {
+        "name": "company",
+        "value": "Acme",
+        "read_by": [],
+        "used_in": []
+      },
+      {
         "name": "team_name",
         "value": "Platform",
         "read_by": [
-          "researcher"
+          "connection:github"
+        ],
+        "used_in": [
+          ".metistry/connections/github.yaml"
         ]
       }
     ],
-    "as_of": "2026-09-28T13:05:00.000Z"
+    "as_of": "2026-09-27T00:18:33.048Z"
   }
 }

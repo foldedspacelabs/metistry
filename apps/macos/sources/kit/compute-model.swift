@@ -425,15 +425,18 @@ public final class ComputeModel {
         }
     }
 
-    /// The CLI's own last line, unedited. `metistry compute` wraps every
+    /// The CLI's own reason, unedited. `metistry compute` wraps a thrown
     /// `StepFailed` as `metistry compute: <message>` on stderr, and that
     /// message names the field — `assignments.default`,
     /// `budgets.providers.x`, `providers.<name>.auth.secret` — which is the
-    /// thing a person needs and the thing a paraphrase would lose.
+    /// thing a person needs and the thing a paraphrase would lose. A verb
+    /// that instead RETURNS `{"ok": false, …}` (`providers test`, `models
+    /// list`, `models install|load`) prints that on stdout with exit 1, so
+    /// this reads the `--json` object first rather than falling back
+    /// straight to "the last line of stdout", which is just `}`
+    /// (`CLIDegradation.refusalMessage`).
     nonisolated static func refusal(_ result: CommandResult, verb: String) -> String {
-        let line = result.stderr.split(separator: "\n").last { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-            ?? result.stdout.split(separator: "\n").last { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-        return line.map(String.init) ?? "`metistry \(verb)` exited \(result.exitCode) with no output"
+        CLIDegradation.refusalMessage(result, verb: verb)
     }
 
     // MARK: - The sentences the pane prints

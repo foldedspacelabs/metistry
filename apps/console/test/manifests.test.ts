@@ -11,7 +11,19 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { parse as parseYaml } from "yaml";
-import { collectorProviderIssue, joinCode, loadKind, MANIFEST_SCHEMA_VERSION, providerSchema, validateManifest } from "@foldedspacelabs/metistry-core";
+import {
+  collectorProviderIssue,
+  describeSchedule,
+  isLegacyCron,
+  joinCode,
+  loadKind,
+  longestGapSeconds,
+  MANIFEST_SCHEMA_VERSION,
+  nextOccurrence,
+  providerSchema,
+  validateManifest,
+  type Weekday,
+} from "@foldedspacelabs/metistry-core";
 import { loadCollectors } from "@metistry-apps/collectors";
 import { loadRoutines } from "@metistry-apps/routines";
 import { loadSchedules, scheduleToSeconds, type ComponentUnit } from "../src/runner.js";
@@ -141,7 +153,13 @@ describe("shipped manifests schedule through the runner", () => {
     const r = await loadSchedules(lr.routines);
     expect(c.map((x) => x.name).sort()).toEqual(lc.collectors.map((x) => x.name));
     expect(r.map((x) => x.name).sort()).toEqual(lr.routines.map((x) => x.name));
-    for (const s of [...c, ...r]) expect(s.intervalSec).toBeGreaterThan(0);
+    // every schedule is one the runner can place: an interval it can read, or
+    // a time of day that resolves against a Monday–Friday profile
+    const profile = { profile: { timezone: "America/New_York", working_days: ["mon", "tue", "wed", "thu", "fri"] as Weekday[] }, fallbackTimeZone: null };
+    for (const s of [...c, ...r]) {
+      if (isLegacyCron(s.schedule)) expect(scheduleToSeconds(s.schedule)).toBeGreaterThan(0);
+      else expect(nextOccurrence(s.schedule, new Date("2026-09-21T12:00:00Z"), profile).ok).toBe(true);
+    }
     // the manifest's pin reaches the collector through the runner, so the
     // manifest stays the single statement of what a component may call
     expect(c.find((x) => x.name === "inbox-drain")?.usesModel).toBe("applefm/foundation-model");
@@ -150,10 +168,26 @@ describe("shipped manifests schedule through the runner", () => {
 
   it("a tick runs the most frequent components first (inbox-drain among them, as at the head of the old list), then by name", async () => {
     const c = await loadSchedules((await loadCollectors({ home: `${root}collectors` })).collectors);
-    const first = c.filter((x) => x.intervalSec === c[0]!.intervalSec).map((x) => x.name);
+    const gap = (x: (typeof c)[number]) => longestGapSeconds(x.schedule);
+    const first = c.filter((x) => gap(x) === gap(c[0]!)).map((x) => x.name);
     expect(first).toContain("inbox-drain");
     expect(first).toEqual([...first].sort());
-    for (let i = 1; i < c.length; i++) expect(c[i]!.intervalSec).toBeGreaterThanOrEqual(c[i - 1]!.intervalSec);
+    for (let i = 1; i < c.length; i++) expect(gap(c[i]!)).toBeGreaterThanOrEqual(gap(c[i - 1]!));
+  });
+
+  // §2.5's defaults, as answered (§4 Q12; the owner's times of 2026-09-26),
+  // carried by the routine manifests — the schedules T3-1's runner fires
+  // once, at their time (scheduler.test.ts proves the firing).
+  it("the routines carry §2.5's default schedules", async () => {
+    const r = await loadSchedules((await loadRoutines({ home: `${root}routines` })).routines);
+    const said = Object.fromEntries(r.map((x) => [x.name, describeSchedule(x.schedule)]));
+    expect(said).toEqual({
+      "morning-brief": "working days at 07:00",
+      "knowledge-fold": "every day at 21:00",
+      "plan-tomorrow": "the eve of working days at 23:00",
+      "reply-review": "every day at 23:00",
+      "weekly-review": "sun at 18:00",
+    });
   });
 
   it("cron subset", () => {
@@ -186,7 +220,8 @@ describe("an unparseable schedule is skipped, not fatal", () => {
   it("@monthly — the schedule the manifest regex admits and the old parser rejected — now schedules", async () => {
     const dir = await checkout({ m: "schema: 1\nname: m\ntype: collector\nschedule: '@monthly'\nwrites: [work]\n" });
     const [s] = await loadSchedules((await units(dir)).units);
-    expect(s?.intervalSec).toBe(2592000);
+    expect(s?.schedule).toBe("@monthly");
+    expect(scheduleToSeconds(s!.schedule as string)).toBe(2592000);
   });
 
   it("a manifest whose schedule cannot be parsed is skipped and logged, not thrown", async () => {

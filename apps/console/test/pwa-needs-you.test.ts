@@ -43,10 +43,11 @@ let nextId = 100;
 const served = (kind: string, payload: Record<string, unknown> = {}, ts = "2026-09-27T08:00:00.000Z") =>
   withRequestShape({ id: nextId++, ts, kind, source_agent: "collator", trust: "internal", payload, decision: "pending" });
 
-/** Every stored kind whose served reading draws Before and after — access, improvement, and a review that names the body. */
+/** Every stored kind whose served reading draws Before and after — the three kinds of access (T2-9's `secret_failure` included), improvement, and a review that names the body. */
 const BEFORE_AFTER = [
   served("access_request", { area: "Areas/Finance", current_tier: "index" }),
   served("grant_elevation", { area: "Areas/Health" }),
+  served("secret_failure", { event: "secret_failed", variable: "GITHUB_TOKEN", why: "unset", stopped: ["github-notifications"] }),
   served("improvement", { body: { kind: "before_after", before: { label: "Now", text: "a" }, after: { label: "After", text: "b" } }, edit: { path: "Me/profile.md" } }),
   served("review", { body: { kind: "before_after", before: { text: "mine" }, after: { text: "the fold's" } } }),
 ];
@@ -60,7 +61,7 @@ afterEach(() => vi.unstubAllGlobals());
 describe("a card with Before and after cannot be swiped (screen 18 §3)", () => {
   it("every kind the table draws as Before and after is covered here", () => {
     const drawn = REQUEST_KINDS.filter((k) => describeRequest(k, {}).body === "before_after");
-    expect(drawn.sort()).toEqual(["access_request", "grant_elevation", "improvement"]);
+    expect(drawn.sort()).toEqual(["access_request", "grant_elevation", "improvement", "secret_failure"]);
     for (const p of BEFORE_AFTER) expect(p.request.body, p.kind).toBe("before_after");
   });
 

@@ -58,3 +58,7 @@ export { vaultReader, type VaultReadable } from "./vault-reader.js";
 // `session-purge` routine's own delete on demand — the console's door calls
 // these rather than holding a second copy of what "purge" means.
 export { purgeArchive, purgePreview, type PurgeCounts, type PurgePreview, type UnfoldedSession } from "./session-purge/run.js";
+// What the Standup routine takes beyond `PlanCtx`: its resolved Scheduled
+// config (`template`, `skip_without_calendar_event`). Absent until the runner
+// hands config on, and then the manifest's defaults apply.
+export type { StandupCtx } from "./standup/run.js";

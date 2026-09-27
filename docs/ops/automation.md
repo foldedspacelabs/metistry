@@ -78,8 +78,9 @@ records an `ok` run, which is a supported install, not a fault. Declaring
 You item every day. The older `requires: [aws-credentials]` label list stays
 valid and is documentation only, checked by nothing.
 
-**One shipped manifest declares the structured form**, and it is the shape the
-rule admits: `routines/plan-tomorrow` names
+**Two shipped manifests declare the structured form**, and they are the shape
+the rule admits: `routines/plan-tomorrow` (and `routines/standup`, for the same
+reason) names
 `METISTRY_RECONCILER_URL` and `METISTRY_BRIDGE_TOKEN_RECONCILER` under
 `requires.env`, because without the vault bridge there is no template to read
 and nowhere to write the plan — there is nothing left to degrade *to*. What it
@@ -290,6 +291,39 @@ Turning it off: `paused: true` on its entry in `.metistry/scheduled.yaml`
 directory listing, plan §2.7) — or take `working_days:` out of
 `Me/profile.md`, which is your own hand and also takes effect at the next
 tick: the runner then records `no_working_days` and runs nothing.
+
+## `standup` — the morning's one file
+
+Scheduled working days at 08:00 (§2.5), an hour after the Morning Brief, which
+embeds it. It renders `Templates/Standup.md` (or the path its `template`
+config names) into `Journal/Standup/<date>.md` — its own reserved subfolder —
+through the reconciler's bridge as `principal: standup`, so the file says
+`source: standup`. It is `plan-tomorrow`'s shape, a morning later: no model at
+any tier (`prose` is not legal in a standup template until C103, T3-6), one
+file, never over one it does not own (`user_owned`), no minted anchor
+(`would_materialise`), and a late run dated from its slot.
+
+- **Nothing is written without working days.** The runner does not start it
+  (`skipped:no_working_days` on the runner's row), and a Run Now asks the same
+  question and records the same reason on its own. Which days it runs is the
+  schedule's: there is no working-day guard beyond "the profile says some".
+- **A skip does not settle the morning.** Only a write does
+  (`meta.standup_for` + `outcome: acted`), so a Run Now after the owner fills
+  in the profile writes the file; a second run for a written morning writes
+  nothing.
+- **`skip_without_calendar_event`** (off by default): on, a day whose calendar
+  has no event titled like *standup* is `skipped:no_standup_event`; a calendar
+  that cannot be asked writes the file anyway (`meta.on_calendar: unknown`).
+- **Today's swap.** The routine's own `routine_run` row is written after the
+  vault write returns, and the event stream turns it into
+  `routine.status {name: "standup"}` — the refresh arrives after the file.
+
+```sql
+SELECT ts, meta->>'standup_for' AS for_day, meta->>'outcome' AS outcome, meta
+FROM runs WHERE component = 'standup' AND kind = 'routine_run' AND ok
+  AND meta ? 'standup_for'
+ORDER BY ts DESC LIMIT 7;
+```
 
 ## What this is not
 

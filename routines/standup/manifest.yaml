@@ -1,0 +1,39 @@
+schema: 1
+name: standup
+type: routine
+display_name: Standup
+description: >
+  The morning standup (design-build-plan §2.13) — renders Templates/Standup.md
+  (or the template its config names) into Journal/Standup/<date>.md, written
+  through the reconciler as principal `standup` and carrying `source: standup`:
+  yesterday's done lines, today's, and what is blocked. Model-free
+  (invariant 4) — `prose` is not legal in the standup template yet, so nothing
+  here reaches an engine and no assistant turn is needed. Writes exactly one
+  machine-owned file, its own reserved subfolder's, and never a note the owner
+  owns. Working days at 08:00; the runner fires it at its time
+  (docs/ops/scheduled.md) and records `skipped:no_working_days` when
+  Me/profile.md does not say which days you work. The file landing is the
+  run's `routine.status`, which is when Today swaps "Standup at 8:00 AM" for it.
+# §2.5's default, as answered (§4 Q12): working days at 08:00 — an hour after
+# the 07:00 Morning Brief, which embeds this file by reference. `working_days`
+# follows Me/profile.md; `.metistry/scheduled.yaml` may change it (T3-4 moves
+# an old profile's `standup_days` / `standup_time` there once).
+schedule: { days: working_days, at: ["08:00"] }
+config:
+  template:
+    kind: path
+    label: Shape From
+    description: The vault template the standup is rendered from.
+    default: Templates/Standup.md
+  skip_without_calendar_event:
+    kind: boolean
+    label: Skip Days With No Standup on Your Calendar
+    description: When on, a day whose calendar has no event titled like "standup" gets no file. A calendar that cannot be asked is not a reason to skip.
+    default: false
+requires:
+  # The vault bridge is the whole job: the template in, the standup file out.
+  # Without it the window is refused with the variables named rather than
+  # spent (docs/ops/automation.md). The eventkit bridge is NOT required: only
+  # `skip_without_calendar_event` asks it, and an unreachable calendar still
+  # writes the standup (§6.4).
+  env: [METISTRY_RECONCILER_URL, METISTRY_BRIDGE_TOKEN_RECONCILER]

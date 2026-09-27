@@ -53,6 +53,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { defaultGatewayFrom, parseTrustedProxies } from "./local-owner.js";
 import { canonicalOrigin } from "./webauthn.js";
 import { loadPublicIdentity } from "./identity.js";
+import { hubFromEnv, startEventFeed } from "./events.js";
 
 const require_ = createRequire(import.meta.url);
 
@@ -320,6 +321,13 @@ console.log(
     : "variables absent: METISTRY_INSTANCE_DIR is unset or not readable — GET /api/variables answers 503; `metistry variables list` still works (degrades: absent)",
 );
 
+// Live changes (§2.20): one hub, fed by ONE `LISTEN` on a connection of its
+// own (migration 0035's triggers), streamed by `GET /api/events`. The feed
+// re-establishes a dropped LISTEN by itself and tells subscribers to resync.
+const events = hubFromEnv();
+startEventFeed({ hub: events, db: pool, connect: () => pool.connect() });
+const consoleVersion: string = require_("../package.json").version;
+
 const server = makeServer(pool, queries, {
   origin,
   ...(secrets ? { secrets } : {}),
@@ -327,7 +335,8 @@ const server = makeServer(pool, queries, {
   origins,
   ...(identity ? { identity } : {}),
   ...(instancesFiles ? { instancesFiles } : {}),
-  version: require_("../package.json").version,
+  version: consoleVersion,
+  events,
   ...(localOwner ? { localOwner } : {}),
   inboxDir,
   inbox,
@@ -441,6 +450,9 @@ startRunner(pool, scheduled, {
   ...(process.env.METISTRY_DEVIN_SESSION_TIMEOUT_HOURS ? { devinSessionTimeoutHours: intEnv("METISTRY_DEVIN_SESSION_TIMEOUT_HOURS", 24) } : {}),
   inboxDir,
   inboxSink: inbox,
+  // the Update Check routine compares the newest release with THIS runtime —
+  // the console's own version, which is the one `metistry update` replaces
+  runtimeVersion: consoleVersion,
 }, intEnv("METISTRY_RUNNER_TICK_MS", 60_000), {
   budget: routineBudget,
   compute: () => compute.store.current,

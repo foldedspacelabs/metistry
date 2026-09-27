@@ -366,52 +366,6 @@ console.log(
     : "connections absent: METISTRY_INSTANCE_DIR is unset or not readable — GET /api/connections answers 503; `metistry connections list` still works (degrades: absent)",
 );
 
-const server = makeServer(pool, queries, {
-  origin,
-  ...(secrets ? { secrets } : {}),
-  ...(variables ? { variables } : {}),
-  ...(connections ? { connections } : {}),
-  origins,
-  ...(identity ? { identity } : {}),
-  ...(instancesFiles ? { instancesFiles } : {}),
-  version: consoleVersion,
-  events,
-  ...(localOwner ? { localOwner } : {}),
-  inboxDir,
-  inbox,
-  policy: {
-    idleDays: intEnv("METISTRY_SESSION_IDLE_DAYS", 30),
-    maxDays: intEnv("METISTRY_SESSION_MAX_DAYS", 365),
-  },
-  secureCookies: origin.startsWith("https:"),
-  webRoot: fileURLToPath(new URL("../web", import.meta.url)),
-  rules,
-  routePolicy,
-  targets,
-  ...(push ? { push } : {}),
-  ...(readKnowledge ? { readKnowledge } : {}),
-  ...(embedder ? { embedder } : {}),
-  ...(writeKnowledge ? { writeKnowledge } : {}),
-  ...(listKnowledge ? { listKnowledge } : {}),
-  ...(searchVaultKeyword ? { searchVaultKeyword } : {}),
-  ...(searchKnowledge ? { searchKnowledge } : {}),
-  ...(knowledgeHistory ? { knowledgeHistory } : {}),
-  ...(computeAdmin ? { computeAdmin } : {}),
-  ...(vault ? { vault } : {}),
-  // GET /api/vault/status: the reconciler's sync status over the same bridge (T10-2)
-  ...(reconcilerUrl && reconcilerToken ? { vaultStatus: httpVaultStatus({ url: reconcilerUrl, token: reconcilerToken }) } : {}),
-  crews,
-  compute: () => compute.store.current,
-  // the assistant's definition (T4-6): the same overlays the engine composes its prompt from
-  assistantDefinition: () =>
-    loadAssistantDefinition({
-      identityFiles,
-      promptFiles: assistantPromptFiles(process.env),
-      instanceDir: process.env.METISTRY_INSTANCE_DIR?.trim() || undefined,
-      productDir: process.cwd(),
-    }),
-});
-if (push) startNotifier(pool, push);
 
 // routine runner (SHOULD-8): collectors and routines scheduled from their
 // manifests, each loaded through its registry (plan §2.7) — the product's
@@ -488,6 +442,7 @@ const server = makeServer(pool, queries, {
   origin,
   ...(secrets ? { secrets } : {}),
   ...(variables ? { variables } : {}),
+  ...(connections ? { connections } : {}),
   origins,
   ...(identity ? { identity } : {}),
   ...(instancesFiles ? { instancesFiles } : {}),

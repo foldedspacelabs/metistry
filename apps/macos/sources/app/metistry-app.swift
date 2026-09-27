@@ -58,6 +58,11 @@ struct MetistryApp: App {
         // tile carries the Needs You badge (N9) — the same label as the row,
         // nothing at zero.
         model.startShell(dockBadge: { label in NSApplication.shared.dockTile.badgeLabel = label })
+        // Copy Standup: the pasteboard is AppKit's, so the kit is handed it.
+        model.today.copyText = { text in
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+        }
         #if os(macOS)
         // Sparkle fills in the kit's plain UpdateStatus box: the kit stays free
         // of the framework, and the Updates pane and the menu read one type.

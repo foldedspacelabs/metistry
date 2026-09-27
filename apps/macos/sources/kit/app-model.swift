@@ -78,6 +78,11 @@ public final class AppModel {
     /// Held here, not by the popover, so Esc keeps the draft and a queued
     /// capture keeps resending with every window closed.
     public let composer: CaptureComposerModel
+    /// Today's top — the brief's fold, Next Up, calendar help, Close the Day —
+    /// and the day under it (today-view.swift). Held here so a closed day and a
+    /// dismissed offer outlive a trip to another screen; dropped with
+    /// everything else on an instance switch.
+    public let today: TodayModel
 
     public init(
         bundleResourceURL: URL?,
@@ -141,6 +146,7 @@ public final class AppModel {
         // The one door the composer opens by: Capture ▸ New Capture, the
         // toolbar's + and ⌘N are all this entry.
         shell.captureActions[.newCapture] = { [weak composer] in composer?.present() }
+        self.today = TodayModel(session: console, defaults: defaults)
 
         // The wizard's step 2 hands the folder back the moment it is known, so
         // every later verb runs against it.

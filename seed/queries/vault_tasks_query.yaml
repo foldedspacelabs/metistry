@@ -297,7 +297,9 @@ sql: |
       b.status                                                                AS blocks_work_status,
       w.title                                                                 AS work_title,
       w.status                                                                AS work_status,
-      (SELECT count(*) FROM vault_tasks d
+      -- `::int`: a bare count(*) is bigint, which node-pg hands over as a
+      -- STRING — and the client contract (F-7) says a number
+      (SELECT count(*)::int FROM vault_tasks d
         WHERE d.text_norm = s.text_norm AND NOT d.checked AND NOT d.dropped)  AS places
     FROM scoped s
     CROSS JOIN f

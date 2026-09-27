@@ -1524,7 +1524,8 @@ not listed is refused before anything is dialled, so listing one is how it
 becomes callable; one not listed yet needs `--group reads|changes|starts_agent`
 unless its connection type declares it, and a declared tool keeps its type's
 group. `--offer on|off` is the switch that lets agents reach it through
-Metistry (C115; their grants arrive with T4-8b).
+Metistry (C115) — an agent also needs the connection granted to it
+(`docs/ops/connections.md`, *The lazy pair*).
 
 **`test`** is the connection's `check()`: `ok` (it answered and offers every
 listed tool), `degraded` (a listed tool is gone), `absent` (the command is not

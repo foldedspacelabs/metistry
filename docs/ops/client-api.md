@@ -2243,9 +2243,11 @@ remote has not got — every commit, when the remote has never had the branch;
 `last_commit.author` is the principal the reconciler stamped (`Brain-Source:`),
 or git's author for a commit made outside it. `last_push` and `last_pull` are
 the last attempt (`ok: false` carries git's last error line, any
-`user:secret@` in a URL masked); `last_push` survives a reconciler restart
-through the remote-tracking ref's reflog, `last_pull` does not. `conflict` is
-`{paths}` while a pull could not integrate (T10-3) or git holds unmerged paths,
+`user:secret@` in a URL masked). `last_push` is the last push that went out
+or failed — a sync that found nothing to send is not one — and both are since
+the reconciler last started (null before the first). `conflict` is `{paths}`
+while a conflict stops the sync (§2.21 rule 3: no push until a later pull
+integrates cleanly) or the owner has a merge in progress with unmerged paths,
 else null.
 
 `policy` is the sync policy in force — `deployment.yaml`'s `vault:` block over

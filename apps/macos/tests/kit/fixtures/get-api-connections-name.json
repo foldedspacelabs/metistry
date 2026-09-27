@@ -1,8 +1,7 @@
 {
   "route": "GET /api/connections/:name",
-  "source": "contract",
-  "ticket": "T4-8a",
-  "note": "one connection, with its recent calls (connection_calls)",
+  "source": "recorded",
+  "ticket": null,
   "request": {
     "method": "GET",
     "path": "/api/connections/github",
@@ -13,48 +12,58 @@
   "body": {
     "connection": {
       "name": "github",
-      "type": "github",
-      "title": "GitHub",
+      "type": "mcp",
+      "provider": "custom",
+      "description": "GitHub's MCP server",
       "status": "ok",
-      "check": {
-        "status": "ok",
-        "latency_ms": 212,
-        "probe": "GET /user",
-        "at": "2026-09-28T13:00:00.000Z"
+      "issues": [],
+      "reach": {
+        "class": "command",
+        "command": "npx",
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-github"
+        ],
+        "cwd": null,
+        "env": [
+          "GITHUB_PERSONAL_ACCESS_TOKEN",
+          "GITHUB_TEAM"
+        ],
+        "runs_on": "host"
       },
+      "secrets": [
+        "github_write"
+      ],
+      "variables": [
+        "team_name"
+      ],
       "tools": [
         {
-          "name": "issues_create",
+          "name": "create_issue",
+          "group": "changes",
           "mode": "ask"
         },
         {
-          "name": "pulls_list",
+          "name": "delete_issue",
+          "group": "changes",
+          "mode": "off"
+        },
+        {
+          "name": "search_issues",
+          "group": "reads",
           "mode": "on"
         }
       ],
+      "offer_to_agents": false,
       "used_by": [
         {
           "kind": "sync",
           "name": "github-state"
-        },
-        {
-          "kind": "agent",
-          "name": "researcher"
         }
       ],
-      "offered_to_agents": false,
-      "secrets": [
-        "github_write"
-      ]
+      "file": ".metistry/connections/github.yaml",
+      "provider_unit": null
     },
-    "calls": [
-      {
-        "tool": "pulls_list",
-        "principal": "sync:github-state",
-        "ok": true,
-        "at": "2026-09-28T13:00:02.000Z"
-      }
-    ],
-    "as_of": "2026-09-28T13:05:00.000Z"
+    "as_of": "2026-09-27T03:25:06.379Z"
   }
 }

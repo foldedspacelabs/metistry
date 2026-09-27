@@ -265,8 +265,11 @@ export class Committer {
    * pending intent claims, queued as one `user` act. `.metistry/` is the
    * owner's hand (invariant 2) and never rides along; `Artifacts/` is not
    * knowledge; a sync-conflict copy is flagged by the index, never
-   * committed. Returns how many paths were queued. Run by the reconcile
-   * walk, and before every integrate (§2.21 rule 2).
+   * committed — except its deletion, once history holds it: Resolve a
+   * conflict (T2-10) commits a copy before discarding it, and a copy that is
+   * tracked and then deleted outside the door would otherwise leave the
+   * tree dirty for good. Returns how many paths were queued. Run by the
+   * reconcile walk, and before every integrate (§2.21 rule 2).
    */
   async sweepExternalEdits(): Promise<string[]> {
     const pending = this.pendingPaths();
@@ -274,7 +277,8 @@ export class Committer {
     for (const e of await this.git.status(["."])) {
       if (e.code === "!!") continue;
       for (const p of [e.path, e.from]) {
-        if (p && isVaultPath(p) && !pending.has(p) && !isConflictFile(p)) touched.add(p);
+        const trackedCopyGone = p === e.path && e.code.includes("D");
+        if (p && isVaultPath(p) && !pending.has(p) && (!isConflictFile(p) || trackedCopyGone)) touched.add(p);
       }
     }
     const paths = [...touched].sort();

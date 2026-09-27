@@ -10,9 +10,9 @@
 // `runs` row — never silently downgraded to something it did not ask for.
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { authorized, errorEnvelope, finishRun, INSTANCE_LAYOUT, isNoteSectionName, isProtectedPath, isVaultPath, NOTE_SECTION_NAMES, runCheck, startRun, statusFor, type ErrorCode } from "@foldedspacelabs/metistry-core";
+import { authorized, errorEnvelope, finishRun, INSTANCE_LAYOUT, isNoteSectionName, isProtectedPath, isVaultPath, knowledgeConflictSource, NOTE_SECTION_NAMES, resolveAtSource, runCheck, startRun, statusFor, type ErrorCode } from "@foldedspacelabs/metistry-core";
 import type { Vault, Outcome } from "./vault.js";
-import { parseIntent } from "./vault.js";
+import { CONFLICT_SIDES, parseIntent, type ConflictSide } from "./vault.js";
 import { USER_PRINCIPAL, mayClaim, validPrincipal } from "./paths.js";
 import { parseRevertTarget, revert, targetBody, type RevertExpect } from "./revert.js";
 import { COMMIT_ID } from "./vault.js";
@@ -384,6 +384,37 @@ export function makeBridge(deps: BridgeDeps, cfg: BridgeConfig): Server {
           }
         }
         return reply(res, out, 200, (v) => ({ ...v, queued: true }));
+      }
+
+      // Resolve a conflict (plan §2.11, T2-10): keep the note or take the
+      // sync tool's copy, as `user`, for a path the index has in `conflict`
+      // and nothing else. `expected_sha256` is the side being DISCARDED as
+      // the caller saw it; a mismatch — or a path no longer in conflict — is
+      // a 409 carrying the conflict as it stands (`current`, null when there
+      // is none), so the console can answer `stale` without a second read.
+      // Vault.resolveConflict holds the rules; this is the index's half: the
+      // row says "in conflict", and a settled copy takes its request (the
+      // mirror, indexer.ts) and its row with it now rather than next walk.
+      if (key === "POST /vault/conflicts/resolve") {
+        const body = await readJson(req, cfg.maxBodyBytes);
+        if (!body) return fail(res, "invalid_request", "JSON object body required (within the size cap)");
+        if (!(CONFLICT_SIDES as readonly unknown[]).includes(body.keep)) return fail(res, "invalid_request", `keep must be one of: ${CONFLICT_SIDES.join(", ")}`);
+        const exp = body.expected_sha256;
+        if (typeof exp !== "string" || !(exp === "" || /^[0-9a-f]{64}$/.test(exp))) {
+          return fail(res, "invalid_request", 'expected_sha256 required — the sha256 of the side being discarded as you saw it (64 hex chars), or "" when that side does not exist');
+        }
+        const db = deps.db;
+        if (!db) return fail(res, "not_available", "no database — the conflict index is what says a path is in conflict");
+        const inConflict = async (rel: string) => (await db.query(`SELECT 1 FROM knowledge_files WHERE path = $1 AND status = 'conflict'`, [rel])).rows.length > 0;
+        const out = await vault.resolveConflict(body.path, body.keep as ConflictSide, exp, caller, inConflict);
+        if (!out.ok) {
+          if (out.code === "forbidden") await auditRefusal(db, { caller, tool: "vault_resolve_conflict", code: out.code, path: typeof body.path === "string" ? body.path : String(body.path), principal: "user" });
+          if ("current" in out) return send(res, 409, { ...errorEnvelope("conflict", out.message), current: out.current });
+          return fail(res, out.code, out.message);
+        }
+        await resolveAtSource(db, knowledgeConflictSource(out.value.copy));
+        await db.query(`DELETE FROM knowledge_files WHERE path = $1 AND status = 'conflict'`, [out.value.copy]);
+        return send(res, 200, { ...out.value, queued: true });
       }
 
       // One writer per REGION (plan §2.13): the bytes between a section's

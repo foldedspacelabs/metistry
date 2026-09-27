@@ -1370,6 +1370,43 @@ export interface RouteReport {
   /** the line the verdict is drawn at, so `--json` does not have to guess it */
   threshold: number;
   verdict: { status: "ok" | "degraded" | "n/a"; line: string };
+  /** the route record: what a local policy WOULD have chosen, in shadow (T9-1, docs/ops/dynamic-router.md §6) */
+  policy: RoutePolicyReport;
+}
+
+/**
+ * The policy's rows of `route_report` (docs/ops/dynamic-router.md §6): one
+ * `runs` row of kind `route` per routed message, and what the policy did with
+ * it. Every share here carries its own denominator, and they differ on
+ * purpose — see each field.
+ */
+export interface RoutePolicyReport {
+  /** false when the console's `route_report.yaml` predates the route record (no `policy_*` rows at all) — `metistry update` lands it */
+  recorded: boolean;
+  /** finished route rows in the window: one per routed message, /note and the fast path included */
+  rows: number;
+  /** of those, the ones the policy was (or, with no `policy:` block, would have been) consulted on — every row but /note and the fast path */
+  consultations: number;
+  /** the eight outcomes of §5, over `rows` — always all eight */
+  outcomes: RouteShare[];
+  /** which `table[].id` decided, plus `(no match)`, over chosen + no_match */
+  table_rows: RouteShare[];
+  /** each operation chosen, over `chosen` */
+  operations: RouteShare[];
+  /** `<served tier> → <chosen tier>`, over `chosen` — the disagreement matrix */
+  tiers: RouteShare[];
+  /** each `bounded_by` value, over `rows` */
+  bounded_by: RouteShare[];
+  /** on counterfactuals: did the policy pick the tier the owner picked */
+  override: RouteShare[];
+  /** `duration_ms` over the consultations that finished; null where there were none */
+  latency: { p50_ms: number | null; p95_ms: number | null; over: number };
+  /** per chosen tier, the stage-2 shadow runs on those messages and their mean agreement */
+  shadow: Array<{ tier: string; turns: number; mean_agreement: number | null }>;
+  /** policy-served turns followed within 10 minutes by an override to a higher tier or a re-ask — meaningful from T9-4 */
+  miss: RouteShare | null;
+  /** fewer than `MIN_ROUTED_FOR_A_READING` consultations: the section says widen --since */
+  thin: boolean;
 }
 
 export interface RouteReportOptions extends ComputeOptions {
@@ -1437,6 +1474,7 @@ export async function routeReport(opts: RouteReportOptions): Promise<RouteReport
   return {
     since_days: days,
     ...(typeof body.as_of === "string" ? { as_of: body.as_of } : {}),
+    policy: policyOf(rows),
     totals,
     kinds: sharesOf(rows, "kind"),
     tiers: sharesOf(rows, "tier"),
@@ -1445,6 +1483,38 @@ export async function routeReport(opts: RouteReportOptions): Promise<RouteReport
     first_words: sharesOf(rows, "first_word"),
     threshold: CLASSIFIER_FALL_THROUGH_THRESHOLD,
     verdict: routeVerdict(totals, days),
+  };
+}
+
+/** The policy's rows, read off the same answer — no second request, no second source. */
+function policyOf(rows: Record<string, unknown>[]): RoutePolicyReport {
+  const outcomes = sharesOf(rows, "policy_outcome");
+  const total = outcomes[0]?.denominator ?? 0;
+  const notConsulted = outcomes.find((o) => o.label === "not_consulted")?.n ?? 0;
+  const consultations = total - notConsulted;
+  const latencyRows = rows.filter((r) => String(r.row_kind ?? "") === "policy_latency");
+  const over = latencyRows.length > 0 ? numberOf(latencyRows[0]!.denominator) : 0;
+  const ms = (label: string): number | null => {
+    const r = latencyRows.find((x) => String(x.label ?? "") === label);
+    return r && over > 0 ? numberOf(r.n) : null;
+  };
+  return {
+    recorded: outcomes.length > 0,
+    rows: total,
+    consultations,
+    outcomes,
+    table_rows: sharesOf(rows, "policy_row"),
+    operations: sharesOf(rows, "policy_operation"),
+    tiers: sharesOf(rows, "policy_tier"),
+    bounded_by: sharesOf(rows, "policy_bounded_by"),
+    override: sharesOf(rows, "policy_override"),
+    latency: { p50_ms: ms("p50"), p95_ms: ms("p95"), over },
+    // `share` on these rows is the MEAN agreement, not n / denominator (route_report.yaml)
+    shadow: rows
+      .filter((r) => String(r.row_kind ?? "") === "policy_shadow")
+      .map((r) => ({ tier: String(r.label ?? ""), turns: numberOf(r.n), mean_agreement: ratioOf(r.share) })),
+    miss: sharesOf(rows, "policy_miss")[0] ?? null,
+    thin: consultations < MIN_ROUTED_FOR_A_READING,
   };
 }
 
@@ -1505,6 +1575,76 @@ function routeVerdict(totals: RouteReport["totals"], days: number): RouteReport[
 const sharePct = (s: number | null): string => (s === null ? "-" : `${Math.round(s * 1000) / 10}%`);
 
 /**
+ * The route record's half of the report (T9-1): what a local policy would
+ * have done, beside what the rules did. Until T9-2 there is no `policy:`
+ * block, so every consultation reads `absent` and the section says exactly
+ * that rather than printing seven tables of zeroes. A window with fewer than
+ * `MIN_ROUTED_FOR_A_READING` consultations says "widen --since", as the
+ * fall-through reading does.
+ */
+function renderPolicy(
+  r: RouteReport,
+  ui: Ui,
+  lines: string[],
+  section: (title: string, over: string, rows: RouteShare[], firstCol: string) => void,
+): void {
+  const p = r.policy;
+  lines.push("");
+  lines.push(ui.heading(`the policy, in shadow ${ui.dim("— docs/ops/dynamic-router.md")}`));
+  if (!p.recorded) {
+    lines.push(ui.wrap("This console's route_report predates the route record, so there is nothing to read here yet — `metistry update` lands it.", { indent: 2 }));
+    return;
+  }
+  if (p.rows === 0) {
+    lines.push(ui.wrap(`No route rows in the last ${r.since_days}d. The console writes one per routed message; messages filed before it did carry none.`, { indent: 2 }));
+    return;
+  }
+  const absent = p.outcomes.find((o) => o.label === "absent")?.n ?? 0;
+  const thin = p.thin ? ` Only ${p.consultations} consultation${p.consultations === 1 ? "" : "s"} — widen --since before reading a share off this.` : "";
+  if (absent === p.consultations) {
+    lines.push(
+      ui.wrap(
+        `${p.rows} route rows, ${p.consultations} of them consultations, and no \`policy:\` block in rules.yaml: every consultation is \`absent\` and the rules' default was served. ` +
+          `The record is being kept; the table that would choose is not configured.${thin}`,
+        { indent: 2 },
+      ),
+    );
+    section("outcomes", "route rows", p.outcomes.filter((o) => o.n > 0), "outcome");
+    return;
+  }
+  if (thin) lines.push(ui.wrap(thin.trim(), { indent: 2 }));
+  section("outcomes", "route rows", p.outcomes, "outcome");
+  section("table rows that decided", "chosen + no match", p.table_rows, "row");
+  section("operations chosen", "chosen", p.operations, "operation");
+  section("served tier → chosen tier", "chosen", p.tiers, "tiers");
+  section("held by", "route rows", p.bounded_by, "bounded by");
+  section("on the owner's overrides", "counterfactuals", p.override, "policy's tier");
+  if (p.shadow.length > 0) {
+    lines.push("");
+    lines.push(ui.heading(`stage-2 shadow on the chosen tier ${ui.dim("— mean shadow_agreement")}`));
+    lines.push(
+      ui.table(
+        ["chosen tier", "shadowed turns", "agreement"],
+        p.shadow.map((s) => [s.tier, String(s.turns), s.mean_agreement === null ? "-" : s.mean_agreement.toFixed(3)]),
+        { indent: 2, ragged: [] },
+      ),
+    );
+  }
+  lines.push("");
+  lines.push(
+    ui.kv(
+      [
+        ["latency", p.latency.p50_ms === null ? "-" : `p50 ${p.latency.p50_ms} ms, p95 ${p.latency.p95_ms} ms ${ui.dim(`(over ${p.latency.over} consultations)`)}`],
+        ...(p.miss && p.miss.denominator > 0
+          ? ([["misses", `${p.miss.n} of ${p.miss.denominator} policy-served turns ${ui.dim(`(${sharePct(p.miss.share)})`)}`]] as Array<[string, string]>)
+          : []),
+      ],
+      { indent: 2 },
+    ),
+  );
+}
+
+/**
  * Five small tables rather than one wide one, because they are answers to
  * five different questions and three of them are taken over a different
  * population. Every table's header says what its share is OVER, so no
@@ -1562,5 +1702,8 @@ export function renderRouteReport(r: RouteReport, ui: Ui = defaultUi()): string 
   );
   lines.push("");
   lines.push(`${ui.statusIcon(r.verdict.status)} ${ui.wrap(r.verdict.line, { hanging: 2 }).trimStart()}`);
+  // the route record's half, after the baseline's verdict: that verdict is
+  // about the RULES, and nothing below changes it
+  renderPolicy(r, ui, lines, section);
   return lines.join("\n");
 }

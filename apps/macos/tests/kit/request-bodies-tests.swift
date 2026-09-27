@@ -496,9 +496,9 @@ private let threeQuestions = #"{"title":"Three things about the Connections pane
     let body = try #require(transport.calls.first?.body)
     #expect(body["decision"] == .string("answers"))
     #expect(body["answers"] == .array([
-        .object(["options": .array([.string("Its own file, SettingsConnections.swift")])]),
-        .object(["options": .array([.string("Name"), .string("Last used")])]),
-        .object(["options": .array([.string("No")])]),
+        .object(["choices": .array([.string("Its own file, SettingsConnections.swift")])]),
+        .object(["choices": .array([.string("Name"), .string("Last used")])]),
+        .object(["choices": .array([.string("No")])]),
     ]))
     #expect(model.phase == .settled(RequestReceipt("3 answers sent", glyph: .approve)))
 }
@@ -514,7 +514,7 @@ private let threeQuestions = #"{"title":"Three things about the Connections pane
     #expect(send.disabledBecause == "1 question unanswered", "no words yet")
     model.steps?.type("one file per route, grouped by store")
     await model.press(.primary)
-    #expect(transport.calls.first?.body?["answers"] == .array([.object(["options": .array([]), "other": .string("one file per route, grouped by store")])]))
+    #expect(transport.calls.first?.body?["answers"] == .array([.object(["choices": .array([]), "other": .string("one file per route, grouped by store")])]))
 }
 
 @MainActor

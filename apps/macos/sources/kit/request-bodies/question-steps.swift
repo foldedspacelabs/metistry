@@ -162,7 +162,7 @@ public struct QuestionSteps: Sendable, Equatable {
         let q = questions[index]
         let picked = chosen[index].filter { $0 < q.options.count }.sorted().map { q.options[$0] }
         let typing = q.otherIndex.map { chosen[index].contains($0) } ?? false
-        return QuestionAnswer(options: picked, other: typing ? other[index] : nil)
+        return QuestionAnswer(choices: picked, other: typing ? other[index] : nil)
     }
 
     /// Send Answers' answer — nil until every question has one. A v1
@@ -172,8 +172,8 @@ public struct QuestionSteps: Sendable, Equatable {
     public var answer: RequestAnswer? {
         guard canSend else { return nil }
         let all = questions.indices.map { answer(for: $0) }
-        if optionIsTheDecision, let only = all.first, only.other == nil, only.options.count == 1 {
-            return .option(only.options[0])
+        if optionIsTheDecision, let only = all.first, only.other == nil, only.choices.count == 1 {
+            return .option(only.choices[0])
         }
         return .answers(all)
     }
@@ -197,7 +197,7 @@ public struct QuestionSteps: Sendable, Equatable {
     public var summary: [SummaryLine] {
         questions.indices.map { i in
             let a = answer(for: i)
-            var parts = a.options
+            var parts = a.choices
             if let words = a.other?.trimmingCharacters(in: .whitespacesAndNewlines), !words.isEmpty { parts.append("“\(words)”") }
             return SummaryLine(index: i, prompt: questions[i].prompt, answer: a.isAnswered ? parts.joined(separator: ", ") : nil)
         }

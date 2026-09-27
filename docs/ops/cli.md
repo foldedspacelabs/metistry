@@ -1230,6 +1230,69 @@ kept METISTRY_OPENROUTER_API_KEY: no copy yet in ~/instances/second — `metistr
 preview only. Nothing was deleted — rerun with --yes to delete the 1 original(s) above.
 ```
 
+## Variables: `{{ variable.name }}`, plain values agents read
+
+M14 (plan §2.2, §2.14): plain shared values in `.metistry/variables.yaml`,
+referenced as `{{ variable.name }}` anywhere a value is typed — a connection
+file, an agent's instructions.
+
+```sh
+metistry variables set team_name Platform [--dry-run]   # add or change one
+metistry variables unset team_name [--dry-run]          # remove it, naming what still references it
+metistry variables list [--json]                        # name, value, and where each is used
+```
+
+Every verb takes `--instance <dir>` (default: the resolved instance).
+
+**Agents read them, so a variable is never a secret.** `set` refuses:
+
+- a value that **looks like a key** — a provider prefix (`sk-`, `ghp_`,
+  `lin_api_`, `AKIA…`, …), a JWT, a private key block, an `Authorization`
+  value, a URL with a password or a token parameter, a long random-looking
+  run — with *This looks like a key. Variables can be read by agents — Store as
+  Secret: `metistry secrets set <name>`*;
+- a value that **is one of this instance's secrets** — equal to one, or
+  containing one of eight characters or more. The CLI reads this instance's
+  secrets (the names in `secrets.yaml`, under its own `instance_id`) and
+  compares in memory; the refusal names the secret, never the value. With no
+  Keychain on the host there is nothing to compare, and only the shape check
+  applies;
+- a **secret's name** (`api_key`, `github_token`, `db_password`, `ssh_key`):
+  redaction would blank its value anyway;
+- a value holding `{{` or `}}` — a variable cannot template, so no
+  `{{ secret.x }}` can ride in one to a later egress fill;
+- a **schedule or a time** (ruling 2, K8) — by name (`standup_time`,
+  `timezone`, `working_days`, `*_schedule`, `*_cron`) or by value (`09:15`,
+  `09:00-17:30`, `0 8 * * 1-5`, `@daily`, `America/New_York`, `mon, tue`). A
+  routine's timing is its own schedule (Scheduled); facts about you are
+  `Me/profile.md`.
+
+A value is one line of text, at most 1024 characters. Every refusal names the
+variable and the reason, **never the value**, and nothing is written.
+
+The file is a §4.7 protected path: every write goes through the reconciler as
+the `user` principal, edited as a YAML document so your comments survive, and
+the result is validated before anything is written:
+
+```yaml
+variables:
+  team_name: Platform
+  company: Acme          # your comments stay
+```
+
+The same checks run whenever the file is **read**, so a hand-edited file
+carrying a key-shaped value does not load anywhere — `list`, `GET
+/api/variables` and the resolver all refuse it, naming the variable. `list
+--json` prints the rows `GET /api/variables` serves (`docs/ops/client-api.md`):
+`{variables: [{name, value, read_by, used_in}]}`, where `used_in` is every file
+under `.metistry/` (state excluded) that references the variable — or, for a
+connection file, lists it under `variables:` — and `read_by` is who those
+files stand for (`agent:<id>`, `connection:<name>`).
+
+Core's `fillVariableRefs` fills every `{{ variable.name }}` or none — a
+missing name or a malformed reference is a refusal naming it — in one pass,
+leaving `{{ secret.x }}` for the egress fill.
+
 ## Importing Claude Code sessions
 
 ```

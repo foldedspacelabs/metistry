@@ -293,6 +293,8 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
   const prior = lockPath ? await readLock(lockPath) : undefined;
   const source = opts.channel ?? prior?.product.source ?? "git";
   const restarted: string[] = [];
+  /** jobs whose kickstart was tried and failed — never counted as restarted (#287), and never as "nothing changed" either */
+  const kickFailed: Array<{ label: string; code: number }> = [];
   let migrations: MigrateResult | undefined;
   let lock: LockFile | undefined;
   let failure: StepFailed | undefined;
@@ -447,7 +449,10 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
           // "kickstarted", and a job that failed was not
           const k = await r.run("launchctl", ["kickstart", "-k", `gui/${uid}/${t.label}`], { tolerateFailure: true, comment: "code changed" });
           if (k.code === 0) restarted.push(t.label);
-          else r.note(`${t.label}: kickstart exited ${k.code} — not restarted; \`metistry doctor\` shows its state`);
+          else {
+            kickFailed.push({ label: t.label, code: k.code });
+            r.note(`${t.label}: kickstart exited ${k.code} — not restarted; \`metistry doctor\` shows its state`);
+          }
         }
       }
       // A freshly minted owner bearer is only real once the reconciler has
@@ -459,10 +464,15 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
         if (!restarted.includes(label)) {
           const k = await r.run("launchctl", ["kickstart", "-k", `gui/${uid}/${label}`], { tolerateFailure: true, comment: `so it reads the freshly minted ${OWNER_BRIDGE_TOKEN}` });
           if (k.code === 0) restarted.push(label);
-          else r.note(`${label}: kickstart exited ${k.code} — not restarted, so it has not read ${OWNER_BRIDGE_TOKEN} yet`);
+          else {
+            kickFailed.push({ label, code: k.code });
+            r.note(`${label}: kickstart exited ${k.code} — not restarted, so it has not read ${OWNER_BRIDGE_TOKEN} yet`);
+          }
         }
       }
-      if (!r.dryRun && restarted.length === 0) r.note("no host job's code changed — nothing kickstarted");
+      // "nothing changed" only when nothing was TRIED: a job whose code moved
+      // and whose kickstart failed is the opposite of nothing changing
+      if (!r.dryRun && restarted.length === 0) r.note(kickFailed.length === 0 ? "no host job's code changed — nothing kickstarted" : `nothing kickstarted — ${kickFailed.map((f) => `kickstart of ${f.label} failed (exit ${f.code})`).join("; ")}`);
     } else r.note(`no launchd on ${platform}: restart the host units yourself (systemctl --user restart <unit>)${ownerBearer.minted ? ` — the reconciler must be restarted for ${OWNER_BRIDGE_TOKEN} to take effect, or the lock write below is refused` : ""}`);
 
     r.section("lock");
@@ -509,7 +519,7 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
       : await closingDoctor(r, runDir, opts.doctorDeps, opts.doctorFn ?? doctor);
   const code = failure ? failure.code || 1 : doctorCode;
   r.out("");
-  r.out(updateSummary({ ui: r.ui, dryRun: r.dryRun, failure, code, source, version: lock?.product.version ?? releaseVersion, migrations, restarted }));
+  r.out(updateSummary({ ui: r.ui, dryRun: r.dryRun, failure, code, source, version: lock?.product.version ?? releaseVersion, migrations, restarted, kickstartFailed: kickFailed.length }));
   return { code, source, runDir, commands: r.commands, ...(lock ? { lock } : {}), restarted, ...(migrations ? { migrations } : {}), ...(release ? { release } : {}), ...(runtimeDeps ? { runtimeDeps } : {}), ...(sharedScope ? { sharedScope } : {}) };
 }
 
@@ -654,6 +664,8 @@ export function updateSummary(s: {
   version: string;
   migrations?: { applied: string[] } | undefined;
   restarted: string[];
+  /** kickstarts that were tried and failed */
+  kickstartFailed?: number | undefined;
 }): string {
   const { ui } = s;
   if (s.dryRun) return `${ui.paint("skipped", `${ui.icon("off")} dry run`)} ${ui.dim(`— ${s.source} ${s.version}, nothing was changed`)}`;
@@ -666,6 +678,7 @@ export function updateSummary(s: {
     `${s.source} ${s.version}`,
     s.migrations ? `${s.migrations.applied.length} migration(s) applied` : "no migrations",
     s.restarted.length > 0 ? `${s.restarted.length} job(s) kickstarted` : "nothing kickstarted",
+    ...((s.kickstartFailed ?? 0) > 0 ? [`${s.kickstartFailed} kickstart(s) failed`] : []),
   ];
   return `${verdict} ${ui.dim(`— ${parts.join(", ")}`)}`;
 }

@@ -5,10 +5,11 @@
 //
 // Three properties carry the file:
 //
-//  1. **The gate is pure** — `gate()` takes a clock, a zone, a target date and
-//     what `Me/profile.md` says, and returns a verdict. Too early, already
-//     planned, not a working day and no `Me/` are four assertions with no
-//     database, no vault and no clock of their own.
+//  1. **The guard is pure** — `gate()` takes a target date and what
+//     `Me/profile.md` says, and returns a verdict. Not a working day and no
+//     `Me/` are assertions with no database, no vault and no clock. There is
+//     no clock gate at all any more: the console's runner fires the routine
+//     at its slot (§2.5, T3-1), and a late run plans from that slot.
 //  2. **It never writes a file it does not own** (§5.1). The plan file's own
 //     frontmatter is the question asked, and a file with no `source:` at all
 //     is the user's (#231).
@@ -23,8 +24,6 @@ import { describe, expect, it } from "vitest";
 import type { TemplateQueries } from "@foldedspacelabs/metistry-core";
 import {
   COMPONENT,
-  DEFAULT_DAY_END,
-  EARLIEST_PLAN_HOUR,
   PLAN_DIR,
   PROFILE_PATH,
   TEMPLATE_PATH,
@@ -158,54 +157,55 @@ describe("plan-tomorrow: what Me/ says, and what it does not", () => {
   });
 
   it("no working_days → nothing is written and the run says so, rather than guessing Monday-to-Friday (§6.6)", () => {
-    const verdict = gate({ now: EVENING, timeZone: TZ, target: TARGET, profile: parseProfile(null) });
+    const verdict = gate({ target: TARGET, profile: parseProfile(null) });
     expect(verdict).toMatchObject({ ok: false, reason: "no_working_days" });
     if (!verdict.ok) expect(verdict.why).toContain(PROFILE_PATH);
   });
 
-  it("before the day end Me/ states, nothing is planned — the day it plans from is not over", () => {
-    const afternoon = new Date("2026-09-21T20:30:00Z"); // 16:30 New York, an hour before 17:30
-    const verdict = gate({ now: afternoon, timeZone: TZ, target: TARGET, profile: parseProfile(PROFILE) });
-    expect(verdict).toMatchObject({ ok: false, reason: "too_early" });
-    if (!verdict.ok) expect(verdict.why).toContain("17:30");
-  });
-
-  it(`a day that ends before ${EARLIEST_PLAN_HOUR}:00 still waits for it — a plan written over breakfast is a plan for a day that has not happened`, () => {
-    const early = `---\nworking_days: [mon, tue, wed, thu, fri]\nworking_hours: "01:00-06:00"\n---\n`;
-    const breakfast = new Date("2026-09-21T14:00:00Z"); // 10:00 New York, past 06:00 and before noon
-    expect(gate({ now: breakfast, timeZone: TZ, target: TARGET, profile: parseProfile(early) })).toMatchObject({ ok: false, reason: "too_early" });
-  });
-
-  it("the eve of a day you do not work is silent", () => {
-    const friday = new Date("2026-09-25T23:30:00Z"); // Friday 19:30 New York → target Saturday
-    const verdict = gate({ now: friday, timeZone: TZ, target: "2026-09-26", profile: parseProfile(PROFILE) });
+  it("the working-day guard stays: the eve of a day you do not work is silent", () => {
+    const verdict = gate({ target: "2026-09-26", profile: parseProfile(PROFILE) }); // Friday's run → Saturday
     expect(weekdayOf("2026-09-26")).toBe(6);
     expect(verdict).toMatchObject({ ok: false, reason: "not_a_working_day" });
   });
 
-  it("no working_hours → the plan is written from the default hour and SAYS which (§6.4 visible, never silent)", () => {
-    const noHours = `---\nworking_days: [mon, tue, wed, thu, fri]\n---\n`;
-    const sevenPm = new Date("2026-09-21T23:30:00Z");
-    const verdict = gate({ now: sevenPm, timeZone: TZ, target: TARGET, profile: parseProfile(noHours) });
-    expect(verdict.ok).toBe(true);
-    if (verdict.ok) {
-      expect(verdict.note).toContain("working_hours");
-      expect(verdict.note).toContain(DEFAULT_DAY_END);
-    }
-    // …and at 18:00, before that default, it is still too early
-    expect(gate({ now: new Date("2026-09-21T22:00:00Z"), timeZone: TZ, target: TARGET, profile: parseProfile(noHours) })).toMatchObject({ ok: false, reason: "too_early" });
+  it("no clock in the guard: a working day is planned whatever the hour, and with no working_hours nothing is defaulted", () => {
+    expect(gate({ target: TARGET, profile: parseProfile(PROFILE) })).toEqual({ ok: true });
+    expect(gate({ target: TARGET, profile: parseProfile(`---\nworking_days: [mon, tue, wed, thu, fri]\n---\n`) })).toEqual({ ok: true });
   });
 });
 
 // ------------------------------------------------------------ one per night
 
 describe("plan-tomorrow: one plan an evening", () => {
-  it("before noon it touches nothing at all — no query, no vault read", async () => {
+  // T3-1: the runner fires it at 23:00 on the eve of a working day and hands
+  // it the slot. A run the Mac slept through is fired on waking, and plans
+  // the day after its SLOT — not the day after the moment it woke.
+  it("a late run plans the day after its slot, in the slot's zone — Sunday 23:00 caught up on Monday morning plans Monday", async () => {
     const db = fakeDb();
     const vault = vaultWithSeed();
-    expect(await run(db, ctxWith(vault, new FakeQueries(), { now: new Date("2026-09-21T13:00:00Z") }))).toBe(0);
-    expect(db.calls).toHaveLength(0);
-    expect(vault.writes).toHaveLength(0);
+    const sunday2300 = new Date("2026-09-21T03:00:00Z"); // Sun 23:00 EDT
+    const mondayMorning = new Date("2026-09-21T11:30:00Z"); // Mon 07:30 EDT, when the Mac woke
+    const ctx = ctxWith(vault, new FakeQueries(), { now: mondayMorning, scheduledFor: sunday2300, timeZone: TZ });
+    expect(await run(db, ctx)).toBe(1);
+    expect(vault.writes.map((w) => w.path)).toEqual([`${PLAN_DIR}/2026-09-21.md`]);
+    expect(vault.writes[0]?.text).toContain("# Plan — 2026-09-21"); // the template's "tomorrow" is the slot's
+    expect(db.rows()).toEqual([expect.objectContaining({ planned_for: "2026-09-21", outcome: "acted" })]);
+  });
+
+  it("no clock gate: a run in the morning is a plan, not a silent tick", async () => {
+    const db = fakeDb();
+    const vault = vaultWithSeed();
+    expect(await run(db, ctxWith(vault, new FakeQueries(), { now: new Date("2026-09-21T13:00:00Z") }))).toBe(1); // Mon 09:00 EDT
+    expect(vault.writes.map((w) => w.path)).toEqual([PLAN_FILE]);
+  });
+
+  it("the slot's zone decides which day is tomorrow — not METISTRY_TZ", async () => {
+    const db = fakeDb();
+    const vault = vaultWithSeed();
+    // 23:30 Monday in New York is already Tuesday in Tokyo
+    const ctx = ctxWith(vault, new FakeQueries(), { now: EVENING, scheduledFor: new Date("2026-09-22T03:30:00Z"), timeZone: "Asia/Tokyo" });
+    expect(await run(db, ctx)).toBe(1);
+    expect(vault.writes.map((w) => w.path)).toEqual([`${PLAN_DIR}/2026-09-23.md`]);
   });
 
   it("a target date this routine has already settled is not planned twice", async () => {
@@ -214,14 +214,6 @@ describe("plan-tomorrow: one plan an evening", () => {
     expect(await run(db, ctxWith(vault, new FakeQueries()))).toBe(0);
     expect(vault.writes).toHaveLength(0);
     expect(db.rows()).toHaveLength(0); // the settled row is the record; a second is noise
-  });
-
-  it("too early writes no row — it is the schedule working, not news", async () => {
-    const db = fakeDb();
-    const vault = vaultWithSeed();
-    expect(await run(db, ctxWith(vault, new FakeQueries(), { now: new Date("2026-09-21T20:30:00Z") }))).toBe(0);
-    expect(db.rows()).toHaveLength(0);
-    expect(vault.writes).toHaveLength(0);
   });
 
   it("a night it decides NOT to plan is recorded once, with the reason", async () => {
@@ -346,15 +338,13 @@ describe("plan-tomorrow: the file it writes", () => {
     expect(db.rows()[0]?.template_warnings).toBeGreaterThan(1);
   });
 
-  it("the honest note about a defaulted day end lands in the file, under the frontmatter", async () => {
+  it("no working_hours defaults nothing: the plan is written at its slot, with no note about a day end", async () => {
     const db = fakeDb();
     const vault = vaultWithSeed({ [PROFILE_PATH]: `---\nworking_days: [mon, tue, wed, thu, fri]\n---\n` });
     expect(await run(db, ctxWith(vault, queries()))).toBe(1);
     const text = vault.files.get(PLAN_FILE) ?? "";
-    const body = text.slice(text.indexOf("---", 3) + 4);
-    expect(body.trimStart().startsWith("> ⚠️ metistry:")).toBe(true);
-    expect(text).toContain("has no `working_hours`");
-    expect(db.rows()[0]?.degraded).toEqual(["working_hours"]);
+    expect(text).not.toContain("working_hours");
+    expect(db.rows()[0]).not.toHaveProperty("degraded");
   });
 });
 

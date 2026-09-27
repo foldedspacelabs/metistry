@@ -52,3 +52,8 @@ export type { PlanCtx, PlanVault } from "./plan-tomorrow/run.js";
 // SAME `ctx.reader` every routine gets rather than reimplementing it —
 // `knowledge-fold`'s `FoldCtx` has no `vault` field of its own, only `reader`.
 export { vaultReader, type VaultReadable } from "./vault-reader.js";
+// `Me/profile.md`'s readers — the runner reads the facts a schedule follows
+// (`working_days`, `timezone`) through the SAME two functions
+// `plan-tomorrow`'s working-day guard does, so the scheduler and the guard
+// can never disagree about which days you work.
+export { frontmatterOf, workingDaysOf } from "./plan-tomorrow/run.js";

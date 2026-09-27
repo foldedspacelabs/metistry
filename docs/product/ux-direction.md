@@ -118,21 +118,3 @@ that makes leakage structurally impossible rather than policy-forbidden —
 the same enforce-at-the-tool bar as everything else. Launch-blocking for
 the relay, not a nice-to-have.
 
-## Hosting & monetization tiers — SUPERSEDED 2026-09-07
-
-The three-tier plan below was replaced by a single strategy: **fully
-open source, everything free.** The Mac app is the primary distribution
-channel (it installs, configures, connects, and updates the system —
-`desktop-app-plan.md`), shipped through GitHub Releases with auto-update;
-the iOS app is free too; there is no hosted plan. The privacy claim
-stays the through-line: the open-source core proves the design, and the
-payload-free push relay — now a small free community service with its
-code in the repo, self-hostable by anyone with an Apple developer
-account — proves infrastructure can be blind.
-
-<details><summary>Original (2026-09-01) for the record</summary>
-
-1. Self-host, free. 2. Self-host + premium iOS app. 3. FSL-hosted
-instance with usage limits as a separate premium plan.
-
-</details>

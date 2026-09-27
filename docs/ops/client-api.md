@@ -309,8 +309,8 @@ takes a `since` cursor and answers with the next one.
 | `POST /api/work/:id/thread/reopen` | owner | session · local_owner | no | — | — | served | reopen a task's room |
 | `GET /api/runs/export` | owner | session · local_owner | natural | — | since | served | the audit ledger as NDJSON, oldest first |
 | `GET /api/runs/:id` | owner | session · local_owner | natural | — | — | served | one run in full, with the tool calls of its turn |
-| `GET /api/turns/:turn_id/progress` | owner | session · local_owner | natural | — | — | T2-17 | a turn's tool calls so far: the working indicator |
-| `GET /api/sessions/:id` | owner | session · local_owner | natural | — | — | T2-17 | one archived session |
+| `GET /api/turns/:turn_id/progress` | owner | session · local_owner | natural | — | — | served | a turn's tool calls so far: the working indicator |
+| `GET /api/sessions/:id` | owner | session · local_owner | natural | — | — | served | one archived session |
 | `POST /api/sessions/purge` | local | local_owner | no | — | — | served | purge the session archive now; the confirm names unfolded sessions |
 | `GET /api/instances` | owner | session · local_owner | natural | — | — | served | the linked instances (`instances.yaml`) |
 | `GET /api/commands` | owner | session · local_owner | natural | — | — | served | the composer's commands and agents, generated from the rules and the registry |
@@ -1215,12 +1215,28 @@ and nowhere else: no tool, no sweep, no timer resolves a room.
 ```
 GET  /api/runs/export?since=&until=&component=&limit=   200 application/x-ndjson, oldest first
 GET  /api/runs/:id                                      200 {"run":{…},"as_of":"…"}
-GET  /api/turns/:turn_id/progress                       T2-17 — the `turn_progress` named query: running tool names, the working indicator
-GET  /api/sessions/:id                                  T2-17 — the `session_detail` named query: Run detail's conversation
+GET  /api/turns/:turn_id/progress                       200 {"turn_id","calls":[{"id","tool","started_at","finished_at","ok","error","duration_ms"}],"as_of"}
+GET  /api/sessions/:id      ?turn_id=                   200 {"session_id","turns":[{"id","session_id","thread","turn_id","ts","system_prompt","messages","tool_calls","folded_at","expires_at"}],"as_of"}
+                                                         404 — no session with that id, or every row for it has expired or been purged
 POST /api/sessions/purge   {confirm?, as_of?}           200 {"purged":false,"sessions","turns","sessions_unfolded","unfolded":[…],"as_of"}
                            {confirm: true, as_of?}      200 {"purged":true,"sessions","turns","sessions_unfolded","as_of"}
 400 — `confirm` is not true/false, or `as_of` is not a timestamp
 ```
+
+Chat's working indicator (T2-17) reads `turn_progress`: every tool call one
+assistant turn has made so far, oldest first, exact-joined on `meta.turn_id`
+(never a time window) — the same key `run_detail` joins on. A `finished_at`
+of `null` on a row is the still-running call; the count and the elapsed
+seconds are cheap enough that the client computes them rather than the wire
+carrying a second, redundant shape of the same answer. An unknown or blank
+`turn_id` is not a lookup failure — it answers `calls: []`.
+
+Run detail's conversation (T2-17) reads `session_detail` — one row per turn
+of the session, oldest first, straight from the session archive below (never
+a reconstruction from files). `?turn_id=` narrows to one turn's full record;
+omitted, every turn of the session comes back. Expiry is enforced by the
+query itself, so a purged or expired session reads exactly like one that
+never existed — `404`.
 
 The timeline itself is the `activity_feed` and `runs_summary` named queries
 through `GET /api/q/:name`; there is no `runs` list route.

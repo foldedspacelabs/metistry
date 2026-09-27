@@ -283,6 +283,21 @@ const RUN_DETAIL_ROUTE = /^GET \/api\/runs\/(\d{1,12})$/;
 const RUN_DETAIL_QUERY = "run_detail";
 /** The named query `GET /api/needs-you/count` is served from (T1-7, §2.10): the same pending-and-not-snoozed filter `GET /api/proposals` applies, so the sidebar row and the Dock badge can never disagree with the queue's own length. */
 const PENDING_COUNT_QUERY = "pending_count";
+// Chat's working indicator (T2-17, §2.10): the tool calls one assistant turn
+// has made so far, read through `turn_progress` — the same `meta.turn_id` join
+// `run_detail` uses. `validTurnId`'s shape (packages/mcp-brain/src/turn-id.ts):
+// a turn_id is a bookkeeping label, never itself a lookup key into anything
+// secret, so an id shaped like no turn anyone ever ran is simply zero rows,
+// never a refusal.
+const TURN_PROGRESS_ROUTE = /^GET \/api\/turns\/([A-Za-z0-9_-]{1,64})\/progress$/;
+const TURN_PROGRESS_QUERY = "turn_progress";
+// One archived session, in full — Run detail's conversation (T2-17, T1-11,
+// §2.10), through `session_detail`. `session_id` is `session_archive`'s own
+// column, a uuid; a path segment that is not shaped like one matches no served
+// route below and falls through to the uniform 404, exactly as a non-numeric
+// `/api/runs/:id` does today.
+const SESSION_DETAIL_ROUTE = /^GET \/api\/sessions\/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$/;
+const SESSION_DETAIL_QUERY = "session_detail";
 
 // ----- the two verbs that are not answers (docs/ops/reply-feedback.md) -----
 //
@@ -967,6 +982,8 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         PROJECT_ROUTE.test(key) ||
         key === "GET /api/runs/export" ||
         RUN_DETAIL_ROUTE.test(key) ||
+        TURN_PROGRESS_ROUTE.test(key) ||
+        SESSION_DETAIL_ROUTE.test(key) ||
         key === "POST /api/sessions/purge" ||
         key === "GET /api/instances" ||
         key === "GET /api/secrets" ||
@@ -1119,6 +1136,38 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       const row = result.rows[0];
       if (!row) return sendError(res, "not_found", `no run ${runDetail[1]} in the ledger`);
       return sendJson(res, 200, { run: row, as_of: result.as_of.toISOString() });
+    }
+
+    // ----- a turn's tool calls so far: Chat's working indicator (T2-17) -----
+    // No "still working" verdict is computed here (seed/queries/turn_progress.yaml):
+    // `finished_at IS NULL` on a row IS the running call, and the count and
+    // elapsed seconds are cheap enough on the client that the wire does not
+    // carry a second, redundant shape of the same answer. An unknown or blank
+    // turn_id is not a lookup failure — it is simply a turn with no calls yet.
+    const turnProgress = TURN_PROGRESS_ROUTE.exec(key);
+    if (turnProgress) {
+      if (!queries.names().includes(TURN_PROGRESS_QUERY)) {
+        return sendError(res, "not_available", `the named query ${TURN_PROGRESS_QUERY} is not loaded (seed/queries/${TURN_PROGRESS_QUERY}.yaml, METISTRY_QUERIES_DIRS)`);
+      }
+      const result = await queries.run(TURN_PROGRESS_QUERY, { turn_id: turnProgress[1]! });
+      return sendJson(res, 200, { turn_id: turnProgress[1], calls: result.rows, as_of: result.as_of.toISOString() });
+    }
+
+    // ----- one archived session, in full: Run detail's conversation (T2-17, T1-11) -----
+    // `session_detail` already enforces expiry (a purged or expired session
+    // reads as no rows, never a stale one slipping out from under the T3-9
+    // purge routine), so an empty result here means the same thing a missing
+    // run does: `404 not_found`. `?turn_id=` narrows to one turn's full
+    // record, as the query itself supports; blank (the default) is every turn.
+    const sessionDetail = SESSION_DETAIL_ROUTE.exec(key);
+    if (sessionDetail) {
+      if (!queries.names().includes(SESSION_DETAIL_QUERY)) {
+        return sendError(res, "not_available", `the named query ${SESSION_DETAIL_QUERY} is not loaded (seed/queries/${SESSION_DETAIL_QUERY}.yaml, METISTRY_QUERIES_DIRS)`);
+      }
+      const turnId = url.searchParams.get("turn_id") ?? "";
+      const result = await queries.run(SESSION_DETAIL_QUERY, { session_id: sessionDetail[1]!, turn_id: turnId });
+      if (result.rows.length === 0) return sendError(res, "not_found", `no session ${sessionDetail[1]} in the archive (expired, purged, or never existed)`);
+      return sendJson(res, 200, { session_id: sessionDetail[1], turns: result.rows, as_of: result.as_of.toISOString() });
     }
 
     // ----- live changes (§2.20, T2-18): what changed, as ids — the owner's, and nobody else's -----

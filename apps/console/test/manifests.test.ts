@@ -218,8 +218,11 @@ describe("shipped manifests schedule through the runner", () => {
       ["Morning Brief", "working days at 07:00", "2026-09-21 07:00", true], // Monday — Sunday is not a working day
       ["Tomorrow's Plan", "the eve of working days at 23:00", "2026-09-20 23:00", true], // Sunday plans Monday
       ["Reply Review", "every day at 23:00", "2026-09-20 23:00", true],
+      ["Session Purge", "every day at 04:00", "2026-09-21 04:00", true], // T3-9's archive retention; Monday 04:00 is the next 04:00 after Sunday noon
       ["Weekly Review", "sun at 18:00", "2026-09-20 18:00", true],
     ]);
+    // Session Purge's retention_days is declared, so the owner's value applies rather than holding it
+    expect(listing.routines.find((r) => r.name === "session-purge")?.config).toEqual({ retention_days: { value: 30, origin: "default" } });
     // Inbox Sort and Usage Rollup are collectors that present as routines; everything else a collector is, is a sync
     expect(listing.routines.filter((r) => ["inbox-drain", "claude-usage"].includes(r.name)).map((r) => r.section)).toEqual(["routines", "routines"]);
     expect(listing.syncs.map((s) => [s.name, s.displayName, s.describe])).toEqual([

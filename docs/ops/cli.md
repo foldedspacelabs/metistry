@@ -340,8 +340,13 @@ request: about **141 ms** median on a scratch instance (20 runs of `GET
 looked up. Through one session the same request is about **1.5 ms** median.
 
 The console URL and the local owner token are resolved **once**, when the
-session starts, and the same refusals apply before a single line is read: no
-token, or a non-loopback console, prints the reason on stderr and exits 1.
+session starts, and the same refusals apply before a single line is sent: no
+token, or a non-loopback console, prints the reason on stderr and exits 1,
+with nothing on stdout. Stdin is attached **before** that resolution, so a
+client may write its first request the moment it spawns the process: the
+line is held and answered once the target is known (through 0.12.0 it was
+lost, and that call waited out its timeout). A refusal discards every held
+line — none is sent anywhere, and the token is never printed.
 After that nothing exits but EOF on stdin, and **the token is never printed**
 — every line written is redacted against it, whatever the console sent back.
 

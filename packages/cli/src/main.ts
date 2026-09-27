@@ -69,6 +69,7 @@ import {
   type ConnectionsOptions,
 } from "./connections.js";
 import { loadInstallEnv, productVersion, resolveProductDir, resolveSeedDir, type LoadedEnv } from "./env.js";
+import { loadInstanceCatalog, syncSecretNames } from "@foldedspacelabs/metistry-connections";
 import { realExec, type Exec } from "./exec.js";
 import { AUTH_MODES, connectRepo, readStdin, type AuthMode } from "./connect-repo.js";
 import { connect, connectList, CONNECT_TOOLS, parseTool, renderConnect, renderConnectList } from "./connect.js";
@@ -367,7 +368,9 @@ const USAGE = `metistry — Metistry command line
       {{ secret.<name> }} and never reads the retired shared per-user account.
       --to env also delivers every {{ secret.<name> }} compute.yaml's providers
       reference as METISTRY_SECRET_<NAME>, from this instance's item — how a
-      key reaches the engine, which never reads the Keychain.
+      key reaches the engine, which never reads the Keychain — and every
+      secret a sync-read connection lists (Linear's key), which the console's
+      sync fills at the egress door for the secret's listed hosts only.
       purge deletes one instance's items and nothing else — its owner-named
       secrets included; without --yes it only previews.
 
@@ -1311,6 +1314,15 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
           deliver = providerSecretNames((await loadCompute(instanceFile(loaded.instanceDir, "compute"))).compute);
         } catch (e) {
           out(`compute.yaml does not validate, so no provider key is delivered this run (${e instanceof Error ? e.message : String(e)})`);
+        }
+        // ...and every secret a sync-read connection lists (T4-24: the Linear
+        // key), so the console's sync can be filled at the egress door — for
+        // the secret's listed hosts only; the console never reads the Keychain
+        try {
+          const syncSecrets = syncSecretNames(await loadInstanceCatalog({ instanceDir: loaded.instanceDir, seedDir: resolveSeedDir(productDir) }));
+          deliver = [...new Set([...deliver, ...syncSecrets])];
+        } catch (e) {
+          out(`the connection types could not be read, so no sync's secret is delivered this run (${e instanceof Error ? e.message : String(e)})`);
         }
       }
       const secretsOpts = {

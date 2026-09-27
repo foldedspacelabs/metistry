@@ -5,7 +5,8 @@
 > material can be written from a record instead of reconstructed from memory.
 > Convention (see `CLAUDE.md`): when a decision in the build has product
 > significance — a goal sharpened, a benefit proven, a safety mechanism
-> shipped, a premium candidate identified — add a line here in the same PR.
+> shipped — add a fragment under `docs/product/record/` in the same PR; the
+> release folds it into the log below.
 
 ## What it is
 
@@ -288,8 +289,7 @@ instructions; input filtering missed memory-poisoning 9/10 times).
 ## How to use (the story, current shape)
 
 1. **Install.** Download the Mac app — a signed, notarized DMG on GitHub
-   Releases (the repository is private as of 2026-09-26; opening it is an owner
-   step before public launch). The first run copies the bundled runtime,
+   Releases. The first run copies the bundled runtime,
    creates the instance and asks you to name your assistant, connects a private
    GitHub repository by device flow, asks whether to keep the Mac awake, and
    sets up compute — a cloud provider with its key typed into a secure field, a
@@ -313,22 +313,6 @@ the Morning Brief at 7:00 and the Standup at 8:00 on working days, Close the
 Day, the fold at 9:00 PM and Tomorrow's Plan at 11:00 PM; connections with
 per-tool On · Ask · Off; the capture bar and meeting capture. The knowledge is
 yours, in your git, on your machine.
-
-## Premium candidates (collect; decide later)
-
-- **Native iOS app** (named by the user as the likely paid addition): share
-  extension, real push, offline queue, widgets — against the same open API.
-  Planning doc: `docs/product/ios-app-plan.md` (2026-09-01) — notably, the
-  APNs relay a self-hosted instance needs is itself the first natural
-  *hosted* premium component: the premium story funds its own infra.
-- (speculative, unvalidated — record as they arise:) hosted/cloud profile
-  management, premium coordination dashboards, managed signing/notarized
-  bridge binaries.
-- **Hosting tier matrix (owner direction, 2026-09-01):** (1) self-host
-  free — the whole system, nothing withheld; (2) self-host + paid iOS
-  app; (3) FSL-hosted instance with usage limits as a separate plan.
-  E2E-encrypted throughout — even FSL's relay/hosting cannot read user
-  content. "Hosted never means readable" is the positioning line.
 
 ## Log
 
@@ -625,7 +609,7 @@ yours, in your git, on your machine.
   images/PDF natively under `no-store`. 53 new tests across package,
   mcp-brain, and console.
 - 2026-09-07 — Proxy/routing-layer research (Quotio, CLIProxyAPI,
-  LiteLLM; `docs/research/2026-09-agent-proxy-routing.md`): "support any
+  LiteLLM; the note was withdrawn before the repo went public): "support any
   agent" is already true through the one MCP door — no adapters, ever;
   the product-facing addition is `metistry connect <client>`. Provider
   gateways stay declarative config that can pool accounts but never pick

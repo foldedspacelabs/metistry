@@ -53,8 +53,8 @@ the labels are the index to which decision sits where.
 <https://claude.ai/artifact/LiSuLrq2PQjfds8DM3Tp4Z> — the same content as
 `review-00-plan.md`, which is the version to edit.
 
-Three other Design-System artifacts exist on this account (*Folded Space Labs*,
-*Drey*, *Matt Colf*). **None of them governs Metistry** — Metistry's system is
+Three other Design-System artifacts exist on this account, for other
+projects. **None of them governs Metistry** — Metistry's system is
 `tokens.json` plus the specs in this directory.
 
 ---

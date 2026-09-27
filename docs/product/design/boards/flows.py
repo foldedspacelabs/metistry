@@ -60,7 +60,7 @@ CONF=(f'<div style="display: flex; gap: 20px; align-items: flex-start; flex-wrap
             [("rec","Vendor review &middot; 42 min &middot; not folded"),("rec","1:1 with Dana &middot; 28 min &middot; not folded"),("rec","Standup &middot; 9 min &middot; not folded")],
             "Purge Anyway",alt="Fold First")
   + confirm(L,"Sign out everywhere?","Each of these must sign in again with a passkey.",
-            [("person","iPhone &middot; last seen 4 min ago"),("person","Chrome on the work laptop &middot; yesterday")],"Sign Out")
+            [("person","iPhone &middot; last seen 4 min ago"),("person","Chrome on the laptop &middot; yesterday")],"Sign Out")
   + confirm(L,"Delete github_read?","Four things use it and will stop working.",
             [("relay","GitHub &middot; connection"),("repeat","GitHub &middot; sync"),("agents","collator"),("agents","drey-dev")],"Delete Secret")
   + '</div>')

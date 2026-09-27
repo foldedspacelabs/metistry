@@ -4667,7 +4667,7 @@ def accountpane(T):
                                               + setrow(T,label="Sign Out Everywhere",control=btn(T,"Sign Out","dest"),last=True)))
             + block(T,"INSTANCE REPOSITORY",sunk(T,kv(T,"Status","clean &mdash; nothing waiting to sync")
                                                   + kv(T,"Last synced","4 minutes ago")
-                                                  + kv(T,"Remote","github.com/mattcolf/metistry-home",mono_=True,last=True)))
+                                                  + kv(T,"Remote","github.com/samrivera/metistry-home",mono_=True,last=True)))
             + '</div>')
 
 

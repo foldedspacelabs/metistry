@@ -1,0 +1,22 @@
+# Weekly, grouped: one PR per ecosystem per week rather than one per package.
+# A new dependency is still decided in an issue (CONTRIBUTING.md); these are
+# updates to what is already here.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-and-patch:
+        update-types: [minor, patch]
+      npm-major:
+        update-types: [major]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns: ["*"]

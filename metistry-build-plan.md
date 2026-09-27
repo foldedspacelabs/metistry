@@ -2181,8 +2181,8 @@ block (owner ruling; the counter-proposal to send `data_collection: "deny"` is
 open, `docs/research/2026-09-12-hermes-agent-review-2.md`).
 
 **E. The gateway seam and the agent seam (added 2026-09-07).** Research
-in `docs/research/2026-09-agent-proxy-routing.md` (Quotio, CLIProxyAPI,
-LiteLLM) separated two questions that "an AI-agent proxy layer" blurs:
+(Quotio, CLIProxyAPI, LiteLLM; the note was withdrawn before the repo went
+public) separated two questions that "an AI-agent proxy layer" blurs:
 - *Agents reaching Metistry* is solved by MCP alone (§4.11's one door).
   No per-agent adapter is ever written; the only addition is onboarding
   sugar, **`metistry connect <client>`** — mint an agent token, write the

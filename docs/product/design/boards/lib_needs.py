@@ -202,7 +202,7 @@ def prcard(T,*,state="review",w=W,source="agent"):
             + composer1(T,"Add a comment (optional)",typed="The grant table move reads well. Ship it.")
             + f'<div style="display: flex; align-items: center; gap: 8px; margin-top: 9px; flex-wrap: wrap;">'
               f'{btn(T,"Approve on GitHub","affirm",I["check"])}{btn(T,"Cancel","secondary")}'
-              f'<span style="font-size: 11.5px; color: {T["ts"]};">Posts a review as @mattcolf</span></div>',w=w)
+              f'<span style="font-size: 11.5px; color: {T["ts"]};">Posts a review as @samrivera</span></div>',w=w)
     if state=="changes":
         return rcard(T,head+ask+meta+checks
             + composer1(T,"What needs to change",typed="Keep settings-view.swift as a shim for one release &mdash; the Mac app&rsquo;s "
@@ -211,7 +211,7 @@ def prcard(T,*,state="review",w=W,source="agent"):
               f'{btn(T,"Request Changes","affirm",I["pencil"])}{btn(T,"Cancel","secondary")}'
               f'<span style="font-size: 11.5px; color: {T["ts"]};">drey-dev picks this up from the PR</span></div>',w=w)
     if state=="approved":
-        return rcard(T,head+ask+rreceipt(T,"Approved on GitHub as @mattcolf &middot; 9:20 AM","Open on GitHub"),w=w)
+        return rcard(T,head+ask+rreceipt(T,"Approved on GitHub as @samrivera &middot; 9:20 AM","Open on GitHub"),w=w)
     return rcard(T,head+ask+meta+ctx+files+checks
         + ranswers(T,"Approve",revise="Request Changes",decline=None,extra=(btn(T,"Comment","secondary",I["chat"]),))
         + f'<div style="margin-top: 9px;">{open_gh}</div>',w=w)
@@ -363,7 +363,7 @@ def prwindow(T,w=1320):
             f'<div style="flex-grow: 1; min-width: 0;">{diffview(T)}</div></div>'
           + f'<div style="display: flex; align-items: center; gap: 8px; margin-top: 14px; padding-top: 12px; border-top: 1px solid {T["border"]};">'
             f'{btn(T,"Approve","affirm",I["check"])}{btn(T,"Request Changes","secondary",I["pencil"])}{btn(T,"Comment","secondary",I["chat"])}'
-            f'<span style="font-size: 12px; color: {T["ts"]};">1 draft comment goes with your review &middot; posts as @mattcolf</span></div></div>')
+            f'<span style="font-size: 12px; color: {T["ts"]};">1 draft comment goes with your review &middot; posts as @samrivera</span></div></div>')
     return (f'<div style="width: {w}px; border: 1px solid {T["bc"]}; border-radius: 12px; overflow: hidden; background: {T["bg"]}; flex-shrink: 0;">'
             f'{toolbar(T)}<div style="display: flex;">'
             f'<div style="width: 300px; flex-shrink: 0; border-right: 1px solid {T["border"]}; background: {T["surface"]};">'

@@ -8,8 +8,8 @@ author could resolve blind. Changesets solves the same problem for
 one; this directory does the same thing for the product record.
 
 **The rule:** a PR with product significance — a goal sharpened, a benefit
-proven with numbers, a safety mechanism shipped, a premium candidate
-identified — adds exactly one file here, never edits `PRODUCT.md` directly:
+proven with numbers, a safety mechanism shipped — adds exactly one file here,
+never edits `PRODUCT.md` directly:
 
 ```
 docs/product/record/<YYYY-MM-DD>-<slug>.md

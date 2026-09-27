@@ -413,7 +413,13 @@ three are idempotent:
 - **`metistry update`** — at the top of its restart step, for the same
   reason, and it kickstarts the reconciler itself if nothing else in the run
   did. This is why an update needs no instructions: the owner runs the verb
-  they were going to run.
+  they were going to run. It reads before it mints: when this instance's
+  Keychain item already exists, that value is copied into `.env` and nothing
+  new is minted. And a Keychain that refuses the write does not stop the
+  update's restart — the jobs whose code changed still come back on the new
+  release, the lock (which needs this bearer) waits, and the run ends, exit 1,
+  naming `metistry secrets mint METISTRY_BRIDGE_TOKEN_RECONCILER_USER` and
+  `metistry restart reconciler` (`docs/ops/cli.md`, "Updating").
 - **`metistry secrets sync --to env`** — it is in `GENERATED_SECRETS`, like
   `METISTRY_LOCAL_OWNER_TOKEN`. Follow it with `metistry restart reconciler`.
 

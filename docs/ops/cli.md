@@ -1141,11 +1141,26 @@ A commented declaration (`# METISTRY_GITHUB_TOKEN=`) is uncommented in
 place; a secret the file never named is appended under one marker
 comment. The file is written `0600`.
 
-**Values never travel in argv.** `security ... -w` given as the last
-option prompts, and the prompt reads stdin when there is no tty, so the
-value goes down the child's stdin and never appears in `ps`. `secrets
-list` checks presence *without* `-w`, so there is no code path in it that
-can read a value, let alone print one.
+**Values never travel in argv.** Every Keychain write is `security -i`
+(its interactive mode) with the one command line — value included — on the
+child's stdin, so the process's argv is `-i` and nothing else, and the value
+never appears in `ps`. Each argument is double-quoted with `\` and `"`
+escaped, the way the tool's own tokenizer reads it back; a value with a
+newline or NUL is refused, and so is a line longer than the 4095 bytes
+`security -i` reads whole (a longer one is split and its tail run as a
+command). `secrets list` checks presence *without* `-w`, so there is no code
+path in it that can read a value, let alone print one.
+
+Until 0.14.x a write was `add-generic-password … -w` as the last option with
+the value piped in. That reads the value with getpass(3), which opens the
+terminal first and reads stdin only when there is none: every test and agent
+session passed, and the owner's `metistry update` in Terminal printed
+`password data for new item:`, waited on the keyboard with the value unread
+in the pipe, and was killed by the exec timeout (exit 1, nothing on stderr).
+getpass(3) also keeps only the first 128 characters, so a longer secret — an
+OpenAI project key, an AWS session token — was stored truncated. A value
+written that way is worth writing again (`metistry secrets replace <name>`,
+or `sync --to keychain` for an install variable).
 
 `--env-file <path>` targets a `.env` other than the resolved one, and
 `--instance <dir>` says which instance this is. On Linux `secrets` refuses
@@ -2325,7 +2340,44 @@ node bridges, the bare binary for the EventKit helper. After the build it
 hashes again and kickstarts only the jobs whose digest moved. A change to
 a `src/` file that produced no `dist/` change restarts nothing; a rebuilt
 helper binary restarts the helper. Containers are always `up -d --build`
-— compose's own cache decides whether anything rebuilds.
+— compose's own cache decides whether anything rebuilds. In release mode
+"before" is the release being left — hashed through `current` before the
+switch — and "after" the one installed. (Through 0.14.0 the "before" was
+taken again after the switch, so both hashes were of the new release and a
+release-mode update never kickstarted anything for new code.)
+
+**The owner bearer, and a mint that fails.** The restart step first makes
+sure this install holds `METISTRY_BRIDGE_TOKEN_RECONCILER_USER`
+(`docs/ops/auth.md`): already in the environment → nothing; in this
+instance's Keychain item but not `.env` → copied into `.env`, nothing minted;
+in neither → minted into both. Either of the last two restarts the
+reconciler (the supervisor, under the launchd shape) so it reads it. When the
+Keychain refuses the write, **the restart still runs**: every job whose code
+changed is kickstarted on the tokens the install has, because leaving them on
+the release just left — against the schema just migrated — is the worse
+failure. The lock is a protected path the bridge refuses without the owner
+bearer, so it is not attempted; the templates, secrets and shim steps still
+run; and the run ends with what was not done and the commands, in order:
+
+```
+✗ not done — this update carried on without them; run these, in order:
+  METISTRY_BRIDGE_TOKEN_RECONCILER_USER: not minted — security add-generic-password … failed (1): …
+  .metistry/metistry.lock: not moved to 0.14.1 — it needs METISTRY_BRIDGE_TOKEN_RECONCILER_USER
+    metistry secrets mint METISTRY_BRIDGE_TOKEN_RECONCILER_USER
+    metistry restart reconciler
+    metistry update
+
+✗ update incomplete — release 0.14.1, 10 migration(s) applied, 1 job(s) kickstarted, not done: …
+```
+
+Exit code 1 — decided there, at the end, not by stopping. (`metistry up`
+still stops on a failed mint: it has not started anything yet.)
+
+**The summary says how far the restart got.** `nothing kickstarted` means the
+step ran and no job's code had changed. A run that stopped before the step
+says `nothing restarted — the update stopped before its restart step`; one
+that stopped inside it says `restart interrupted — kickstarted …; NOT
+kickstarted (code changed): …`, naming each job still on the old code.
 
 **Migrations under the advisory lock.** The runner is
 `ops/scripts/migrate.sh` ported to the CLI, and the two share one

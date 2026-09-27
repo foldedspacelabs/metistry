@@ -66,6 +66,8 @@ import type { ChatMessage, SessionStore } from "./sessions.js";
 import { toolCallKey, type ToolHost, type ToolSpec } from "./tools.js";
 import type { Engine, TurnGuard, TurnResult, TurnSpec } from "./engine.js";
 import { runShadow, shouldShadow, type ShadowRubric, type ShadowRun } from "./shadow.js";
+import type { ArchivedToolCall, SessionArchive } from "./archive.js";
+import { newTurnId } from "./brain.js";
 
 /** Turns in a row with no new information before the loop nudges, and before it stops using tools (Atomic ADOPT 4). */
 export const UNPRODUCTIVE_WARN = 3;
@@ -352,9 +354,18 @@ export interface OpenAiEngineConfig {
   systemPrompt?: string | undefined;
   /** Agentic turns per message. */
   maxTurns?: number | undefined;
-  /** The tool surface for this turn — a per-run host, so a crew presents its own bearer and its own `uses` list. */
+  /** The tool surface for this turn — a per-run host, so a crew presents its own bearer and its own `uses` list. The spec it is handed always carries the turn's `turnId`. */
   tools: (spec: TurnSpec) => ToolHost;
   sessions: SessionStore;
+  /**
+   * The session archive (archive.ts, T3-9): every finished turn is appended
+   * — system prompt as sent, this turn's messages, each tool call with its
+   * arguments and result, redacted by the store. Absent = nothing archived
+   * (tests, and a crew run, whose brief and report are already on its work
+   * row). A failed append never fails the turn: the reply is delivered and
+   * the miss lands in `notes`.
+   */
+  archive?: SessionArchive | undefined;
   env?: NodeJS.ProcessEnv | undefined;
   fetchFn?: typeof fetch | undefined;
   sleep?: ((ms: number) => Promise<void>) | undefined;
@@ -399,13 +410,23 @@ export function makeOpenAiEngine(cfg: OpenAiEngineConfig): Engine {
       backoffMs: cfg.backoffMs,
       timeoutMs: cfg.timeoutMs,
     });
-    const host = cfg.tools(spec);
+    // One handle per reply: the tool host stamps it on every call's `_meta`,
+    // and the archive keys the turn by it — the same id, so a turn's calls
+    // and its archived conversation line up with no time-window guessing.
+    const turnId = spec.turnId ?? newTurnId();
+    const host = cfg.tools({ ...spec, turnId });
     const maxTurns = spec.maxTurns ?? cfg.maxTurns ?? DEFAULT_MAX_TURNS;
     const thread = spec.thread ?? "default";
 
     const resumed = spec.resume ? await cfg.sessions.load(spec.resume, assignment.provider, assignment.model) : null;
     const sessionId = resumed?.id ?? cfg.sessions.newId();
     const history: ChatMessage[] = [...(resumed?.messages ?? []), { role: "user", content: prompt }];
+    /** Where this turn's own messages start: everything before is replayed history, already archived with the turn that wrote it. */
+    const turnStart = resumed?.messages.length ?? 0;
+    /** The closing instruction, when the loop had to ask for an answer with tools off — sent, but never kept in the replayed history. */
+    let closing: { at: number; message: ChatMessage } | undefined;
+    /** Each tool call with its arguments and result, in call order — the archive's `tool_calls` (redacted by the store). */
+    const calls: ArchivedToolCall[] = [];
     /** The turn as it STARTED, kept so a shadow re-runs the same turn rather than a summary of it. */
     const opening: ChatMessage[] = [...history];
 
@@ -467,6 +488,7 @@ export function makeOpenAiEngine(cfg: OpenAiEngineConfig): Engine {
           toolsUsed[call.name] = (toolsUsed[call.name] ?? 0) + 1;
           toolSequence.push(call.name);
           const out = await host.call(call.name, call.args);
+          calls.push({ id: call.id, tool: call.name, args: call.args, result: out.text, is_error: out.isError });
           const key = callKey(call);
           const before = seen.get(key);
           if (before === undefined || before !== out.text) learned = true;
@@ -492,22 +514,17 @@ export function makeOpenAiEngine(cfg: OpenAiEngineConfig): Engine {
       // ends in an answer rather than a stack trace (ADOPT 4's graceful reply).
       if (!text) {
         if (!stopped) stopped = "max_turns";
-        const final = await client.chat(
-          [
-            ...system,
-            ...history,
-            {
-              role: "user",
-              content:
-                stopped === "veto"
-                  ? "Stop using tools. Answer now with what you already know, and say plainly what you could not find out."
-                  : stopped === "max_budget"
-                    ? "This run has reached its cost limit. Answer now with what you have, and say what is still open."
-                    : "You have run out of tool turns. Answer now with what you have, and say what is still open.",
-            },
-          ],
-          { toolChoice: "none" },
-        );
+        const ask: ChatMessage = {
+          role: "user",
+          content:
+            stopped === "veto"
+              ? "Stop using tools. Answer now with what you already know, and say plainly what you could not find out."
+              : stopped === "max_budget"
+                ? "This run has reached its cost limit. Answer now with what you have, and say what is still open."
+                : "You have run out of tool turns. Answer now with what you have, and say what is still open.",
+        };
+        closing = { at: history.length, message: ask };
+        const final = await client.chat([...system, ...history, ask], { toolChoice: "none" });
         account(final);
         history.push(final.message);
         text = final.text;
@@ -517,6 +534,26 @@ export function makeOpenAiEngine(cfg: OpenAiEngineConfig): Engine {
     }
 
     await cfg.sessions.save({ id: sessionId, thread, provider: assignment.provider, model: assignment.model, messages: history });
+
+    // ---- the session archive (archive.ts, T3-9) ----------------------------
+    //
+    // After the session is saved and before the shadow: the archive is the
+    // REAL turn as sent, so the shadow's experiment never lands in it. The
+    // messages are this turn's own — the replayed history is already in the
+    // rows of the turns that wrote it — with the closing instruction put
+    // back where it was sent. Caught on purpose, like the shadow's record: a
+    // cache that failed to write must not turn a delivered reply into a
+    // failed message.
+    const notes: string[] = [];
+    if (cfg.archive) {
+      const own = history.slice(turnStart);
+      const messages = closing ? [...own.slice(0, closing.at - turnStart), closing.message, ...own.slice(closing.at - turnStart)] : own;
+      try {
+        await cfg.archive.append({ session_id: sessionId, thread, turn_id: turnId, system_prompt: cfg.systemPrompt ?? "", messages, tool_calls: calls });
+      } catch (err) {
+        notes.push(`session archive not written: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
 
     // ---- stage-2 shadow mode (shadow.ts) -----------------------------------
     //
@@ -570,9 +607,11 @@ export function makeOpenAiEngine(cfg: OpenAiEngineConfig): Engine {
       }
     }
 
+    if (costSource === "unknown" && assignment.config.locality === "off_machine") notes.unshift(unpricedNote(assignment.provider, assignment.model));
     const result: TurnResult = {
       text: text || "(the model returned no text)",
       session_id: sessionId,
+      turn_id: turnId,
       tokens_in: usage.tokens_in,
       tokens_out: usage.tokens_out,
       cost_usd: Math.round(cost * 1e6) / 1e6,
@@ -589,9 +628,7 @@ export function makeOpenAiEngine(cfg: OpenAiEngineConfig): Engine {
       ...(Object.keys(toolsUsed).length > 0 ? { tools_used: toolsUsed } : {}),
       ...(stopped ? { stopped } : {}),
       ...(shadow ? { shadow } : {}),
-      ...(costSource === "unknown" && assignment.config.locality === "off_machine"
-        ? { notes: [unpricedNote(assignment.provider, assignment.model)] }
-        : {}),
+      ...(notes.length > 0 ? { notes } : {}),
     };
     return result;
   };

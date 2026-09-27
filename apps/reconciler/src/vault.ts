@@ -247,12 +247,29 @@ export class Vault {
     return { ok: true, value: { diff: r.stdout, from: f ?? "HEAD", to: t ?? "worktree" } };
   }
 
+  // Every mutation runs inside the committer's tree gate: never while an
+  // integrate is moving the working tree (§2.21), so the compare-and-swap
+  // below and git's own "is this file clean?" can never interleave.
+
   /**
    * Compare-and-swap write: `expectedSha` (hex) must equal the current
    * content hash, or "" to require absence; undefined skips the check.
    * Lands atomically (temp + rename) and enqueues the intent.
    */
-  async write(path: unknown, content: Buffer, intent: Intent, caller: CallerClass, expectedSha?: string): Promise<Outcome<{ path: string; sha256: string; bytes: number; created: boolean }>> {
+  write(path: unknown, content: Buffer, intent: Intent, caller: CallerClass, expectedSha?: string): Promise<Outcome<{ path: string; sha256: string; bytes: number; created: boolean }>> {
+    return this.committer.withTree(() => this.writeNow(path, content, intent, caller, expectedSha));
+  }
+
+  delete(path: unknown, intent: Intent, caller: CallerClass, expectedSha?: string): Promise<Outcome<{ path: string }>> {
+    return this.committer.withTree(() => this.deleteNow(path, intent, caller, expectedSha));
+  }
+
+  /** git-mv semantics: the move lands on disk; the commit stages both sides so git records a rename. */
+  rename(from: unknown, to: unknown, intent: Intent, caller: CallerClass): Promise<Outcome<{ from: string; to: string }>> {
+    return this.committer.withTree(() => this.renameNow(from, to, intent, caller));
+  }
+
+  private async writeNow(path: unknown, content: Buffer, intent: Intent, caller: CallerClass, expectedSha?: string): Promise<Outcome<{ path: string; sha256: string; bytes: number; created: boolean }>> {
     const c = await this.confined(path);
     if (!c.ok) return c;
     if (!writeAllowed(c.value.rel, intent.principal, caller)) return fail("forbidden");
@@ -292,7 +309,19 @@ export class Vault {
    * `act` is the §2.21 act key, as on every other write: the Morning Brief
    * passes its run so the brief file and the section are one commit.
    */
-  async section(
+  section(
+    path: unknown,
+    section: NoteSectionName,
+    body: string,
+    principal: string,
+    caller: CallerClass,
+    expectedOuterSha: string,
+    act: { run?: string | undefined; turn?: string | undefined } = {},
+  ): Promise<Outcome<{ path: string; section: NoteSectionName; sha256: string; bytes: number; outer_sha256: string; appended: boolean }>> {
+    return this.committer.withTree(() => this.sectionNow(path, section, body, principal, caller, expectedOuterSha, act));
+  }
+
+  private async sectionNow(
     path: unknown,
     section: NoteSectionName,
     body: string,
@@ -327,7 +356,7 @@ export class Vault {
     return { ok: true, value: { path: rel, section, sha256: sha256(out.content), bytes: out.content.length, outer_sha256: out.outerSha256, appended: out.appended } };
   }
 
-  async delete(path: unknown, intent: Intent, caller: CallerClass, expectedSha?: string): Promise<Outcome<{ path: string }>> {
+  private async deleteNow(path: unknown, intent: Intent, caller: CallerClass, expectedSha?: string): Promise<Outcome<{ path: string }>> {
     const c = await this.confined(path);
     if (!c.ok) return c;
     if (!writeAllowed(c.value.rel, intent.principal, caller)) return fail("forbidden");
@@ -340,8 +369,7 @@ export class Vault {
     return { ok: true, value: { path: c.value.rel } };
   }
 
-  /** git-mv semantics: the move lands on disk; the commit stages both sides so git records a rename. */
-  async rename(from: unknown, to: unknown, intent: Intent, caller: CallerClass): Promise<Outcome<{ from: string; to: string }>> {
+  private async renameNow(from: unknown, to: unknown, intent: Intent, caller: CallerClass): Promise<Outcome<{ from: string; to: string }>> {
     const a = await this.confined(from);
     if (!a.ok) return a;
     const b = await this.confined(to);

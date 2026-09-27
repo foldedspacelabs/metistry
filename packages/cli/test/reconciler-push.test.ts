@@ -181,6 +181,37 @@ describe.skipIf(process.platform !== "darwin" || !existsSync(SANDBOX_EXEC) || !G
       expect(server.seen.at(-1)).toBe("Basic " + Buffer.from(`${USER}:${TOKEN}`).toString("base64"));
     }, 180_000);
 
+    it("integrate before pushing, confined: fetch through the same door, merge off the tree, fast-forward, push (§2.21)", async () => {
+      // the owner pushes from another clone — straight into the bare repo, as GitHub would hold it
+      const bare = join(root, "remotes", "vault.git");
+      const other = join(root, "other");
+      const plain = (args: string[], cwd?: string) =>
+        run(GIT!, ["-c", "user.name=Owner", "-c", "user.email=owner@example.test", "-c", "commit.gpgsign=false", ...args], { cwd, env: { ...process.env, HOME: home, GIT_CONFIG_NOSYSTEM: "1" } });
+      await plain(["clone", "-q", bare, other]);
+      await writeFile(join(other, "Journal", "from-elsewhere.md"), "pushed from another clone\n");
+      await plain(["add", "-A"], other);
+      await plain(["commit", "-qm", "the owner, elsewhere"], other);
+      await plain(["push", "-q", "origin", "HEAD:main"], other);
+      // …while the sole committer holds a commit of its own
+      await writeFile(join(instance, "Journal", "2026-09-26.md"), "the reconciler's act\n");
+      await plain(["-C", instance, "add", "--", "Journal/2026-09-26.md"]);
+      await plain(["-C", instance, "commit", "-qm", "the reconciler's act"]);
+
+      const creds = { GIT_ASKPASS: askpassPath(instance), METISTRY_GIT_ASKPASS_USER: USER, METISTRY_GIT_ASKPASS_TOKEN: TOKEN };
+      // the argv apps/reconciler/src/{committer,integrate}.ts runs, confined, in order
+      await confine(confinedGit(["-C", instance, "fetch", "-q", "--no-tags", "--write-fetch-head", "origin", "refs/heads/main"]), creds);
+      const tree = (await confine(confinedGit(["-C", instance, "merge-tree", "--write-tree", "--name-only", "--no-messages", "-z", "HEAD", "FETCH_HEAD"]))).stdout.split("\0")[0]!;
+      expect(tree).toMatch(/^[0-9a-f]{40}$/);
+      const merge = (await confine(confinedGit(["-C", instance, "commit-tree", tree, "-p", "HEAD", "-p", "FETCH_HEAD", "-m", "Merge origin/main"]), { GIT_AUTHOR_NAME: "Metistry reconciler", GIT_AUTHOR_EMAIL: "m@test", GIT_COMMITTER_NAME: "Metistry reconciler", GIT_COMMITTER_EMAIL: "m@test" })).stdout.trim();
+      await confine(confinedGit(["-C", instance, "merge", "--ff-only", "-q", merge]));
+      await confine(confinedGit(["-C", instance, "push", "-q", "origin", "main:main"]), creds);
+
+      const log = (await run(GIT!, ["-C", bare, "log", "--format=%s", "main"])).stdout;
+      expect(log).toContain("the owner, elsewhere");
+      expect(log).toContain("the reconciler's act");
+      expect((await run(GIT!, ["-C", bare, "rev-parse", "main"])).stdout.trim()).toBe(merge);
+    }, 180_000);
+
     it("the credential is never in argv — it travels in the environment and nowhere else", async () => {
       // the argv the confined push actually runs, whole: the sandbox
       // parameters, git's flags, the refspec. `ps` shows this to every

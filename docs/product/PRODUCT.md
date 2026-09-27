@@ -289,8 +289,7 @@ instructions; input filtering missed memory-poisoning 9/10 times).
 ## How to use (the story, current shape)
 
 1. **Install.** Download the Mac app — a signed, notarized DMG on GitHub
-   Releases (the repository is private as of 2026-09-26; opening it is an owner
-   step before public launch). The first run copies the bundled runtime,
+   Releases. The first run copies the bundled runtime,
    creates the instance and asks you to name your assistant, connects a private
    GitHub repository by device flow, asks whether to keep the Mac awake, and
    sets up compute — a cloud provider with its key typed into a secure field, a

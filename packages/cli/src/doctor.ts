@@ -23,8 +23,11 @@ import {
   humanGap,
   instanceStatePath,
   intEnv,
-  keepAwakeOf,
+  keepAwakeSettingOf,
+  keepAwakeValue,
   parseKeepAwakeState,
+  parseSleepDisabled,
+  wantsLidClosedAwake,
   powerSourceLabel,
   resolveUrl,
   shouldHold,
@@ -41,7 +44,11 @@ import {
   KEEP_AWAKE_CUTOFF_FACTOR,
   KEEP_AWAKE_KIND,
   KEEP_AWAKE_STATE_FILENAME,
+  LID_CLOSED_COMMAND,
   LID_CLOSED_NOT_AVAILABLE,
+  LID_CLOSED_UNDO,
+  LID_CLOSED_WARNING,
+  PMSET_READS,
   PREFLIGHT_FAILED,
   RUNNER_KIND,
   SCHEDULED_KINDS,
@@ -825,6 +832,29 @@ export function assertionHolders(pmsetAssertions: string): number[] {
 }
 
 /**
+ * The lid half (ruling 3, plan §2.15): is the administrator setting in effect?
+ * One `pmset -g` — a read, from `PMSET_READS`, like every `pmset` this product
+ * runs — and `undefined` when pmset did not answer or said something that is
+ * not its settings list, so doctor says "could not tell" rather than "off".
+ */
+export async function sleepDisabledInEffect(exec: Exec): Promise<boolean | undefined> {
+  try {
+    const r = await exec("pmset", [...PMSET_READS.settings]);
+    return r.code === 0 ? parseSleepDisabled(r.stdout) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** What the row says while the lid half is asked for and not (known to be) in effect: the dialog, as one sentence. */
+export function lidClosedRemediation(inEffect: boolean | undefined): string {
+  const unknown = inEffect === undefined ? "`pmset -g` did not answer, so whether it is in effect is unknown. " : "";
+  // the sentence already names the command; this adds how to undo it and the
+  // warning, so the row carries the whole dialog (plan §2.15)
+  return `${unknown}${LID_CLOSED_NOT_AVAILABLE} Run \`${LID_CLOSED_COMMAND}\` yourself only if you accept the risk; undo it with \`${LID_CLOSED_UNDO}\`. ${LID_CLOSED_WARNING}`;
+}
+
+/**
  * One row, macOS only, never `failed`: the install is running and correct even
  * when a promise about the machine is unmet, and `metistry up` ends with
  * doctor deciding the exit code.
@@ -839,9 +869,19 @@ export async function keepAwakeRow(deps: { deployment: Deployment; instanceDir: 
   // no assertions, so there is no row rather than a row that always says no
   if (deps.platform !== "darwin") return undefined;
   const now = deps.now ?? Date.now;
-  const mode = keepAwakeOf(deps.deployment);
+  const setting = keepAwakeSettingOf(deps.deployment);
+  const mode = keepAwakeValue(setting);
   const statePath = instanceStatePath(deps.instanceDir, "run", KEEP_AWAKE_STATE_FILENAME);
-  const lidNote = mode === "always_lid_closed" ? LID_CLOSED_NOT_AVAILABLE : undefined;
+  // the lid half is the administrator's setting, not ours: read it (never
+  // write it), and say it is not in effect until pmset says it is
+  const wantsLid = wantsLidClosedAwake(setting);
+  const sleepDisabled = wantsLid ? await sleepDisabledInEffect(deps.exec) : undefined;
+  const lidNote = wantsLid && sleepDisabled !== true ? lidClosedRemediation(sleepDisabled) : undefined;
+  const lidMeta: Record<string, unknown> = wantsLid
+    ? { lid_closed: sleepDisabled === true ? "in effect" : sleepDisabled === false ? "not in effect" : "unknown", sleep_lid_closed: false }
+    : {};
+  // the early-cutoff repair keeps the lid answer: `always` would reset it
+  const alwaysVerb = setting.sleep_lid_closed ? "`metistry deployment set-keep-awake always --yes`" : "`metistry deployment set-keep-awake --sleep-on-battery false --yes`";
 
   return {
     kind: KEEP_AWAKE_KIND,
@@ -859,7 +899,7 @@ export async function keepAwakeRow(deps: { deployment: Deployment; instanceDir: 
         return {
           status: "absent",
           remediation: `keep_awake: ${mode}, but the compose shape installs no supervisor, and that is the process whose lifetime the assertion is tied to — nothing is held (docs/ops/deployment-shapes.md)`,
-          meta: { mode, shape: "compose" },
+          meta: { mode, shape: "compose", ...lidMeta },
         };
       }
 
@@ -877,11 +917,11 @@ export async function keepAwakeRow(deps: { deployment: Deployment; instanceDir: 
         return {
           status: "degraded",
           remediation: `keep_awake: ${mode}, but nothing has written ${statePath} — the supervisor is not running, or has not started since the setting changed: \`metistry up\`${lidNote ? `. ${lidNote}` : ""}`,
-          meta: { mode, state_file: statePath },
+          meta: { mode, state_file: statePath, ...lidMeta },
         };
       }
 
-      const held = await deps.exec("pmset", ["-g", "assertions"]);
+      const held = await deps.exec("pmset", [...PMSET_READS.assertions]);
       const holders = held.code === 0 ? assertionHolders(held.stdout) : [];
       const ours = state.pid !== undefined && holders.includes(state.pid);
       const others = holders.filter((p) => p !== state.pid);
@@ -898,7 +938,7 @@ export async function keepAwakeRow(deps: { deployment: Deployment; instanceDir: 
         // the same assertion is Apple's designed model, we cannot release
         // another's, and we must never take credit for one
         other_holders: others.length,
-        ...(lidNote ? { lid_closed: "not available without an administrator change" } : {}),
+        ...lidMeta,
       };
 
       // the owner's ruling E: it slept anyway. Said first, because it is the
@@ -916,7 +956,7 @@ export async function keepAwakeRow(deps: { deployment: Deployment; instanceDir: 
             `this Mac slept at ${cutoff.at} for about ${humanGap(cutoff.gap_ms)} while keep_awake: ${cutoff.mode} was set — an idle-sleep assertion does not stop lid close, ` +
             `a scheduled sleep, the Apple menu or low battery, and another policy may have won. ` +
             (stronger
-              ? `If that is not what you want, \`metistry deployment set-keep-awake always --yes\` holds on battery too, which costs battery on a laptop; a closed lid still sleeps`
+              ? `If that is not what you want, ${alwaysVerb} holds on battery too, which costs battery on a laptop${wantsLid ? "" : "; a closed lid still sleeps"}`
               : `keep_awake: ${cutoff.mode} is already the strongest setting there is, so there is nothing further to turn on: the cause is outside what a power assertion can reach`) +
             `${lidNote ? ` — ${lidNote}` : ""}`,
           meta: { ...meta, last_cutoff: cutoff },

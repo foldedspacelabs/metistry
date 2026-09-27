@@ -397,6 +397,11 @@ public struct RequestShape: Codable, Sendable, Equatable {
     public let word: String
     /// The body block, from screen 3 §12.2's closed set.
     public let body: String
+    /// The type's three answers at this body — the request card's to read
+    /// (request-bodies/request-shape.swift). Nil: the type has no such answer.
+    public let primary: Answer?
+    public let revise: Answer?
+    public let decline: Answer?
     /// A meeting: the answers apply to every row of the group, in order.
     public let grouped: Bool
     /// What this row's answers may store on it, `later` aside.
@@ -407,12 +412,16 @@ public struct RequestShape: Codable, Sendable, Equatable {
         type = try c.decode(String.self, forKey: .type)
         word = try c.decode(String.self, forKey: .word)
         body = try c.decode(String.self, forKey: .body)
+        primary = try c.decodeIfPresent(Answer.self, forKey: .primary)
+        revise = try c.decodeIfPresent(Answer.self, forKey: .revise)
+        decline = try c.decodeIfPresent(Answer.self, forKey: .decline)
         grouped = try c.decodeIfPresent(Bool.self, forKey: .grouped) ?? false
         decisions = try c.decodeIfPresent([String].self, forKey: .decisions) ?? []
     }
 
     enum CodingKeys: String, CodingKey {
         case type, word, body, grouped, decisions
+        case primary, revise, decline
     }
 }
 
@@ -627,6 +636,16 @@ public struct RequestAnswerResult: Codable, Sendable, Equatable {
         public let agent: String
         public let area: String
         public let grants: Grant?
+        /// C41: the tier the credential held BEFORE this answer, read from the
+        /// registry at the write. `index` means Approve was also a trade —
+        /// vault-wide titles for titles inside its folders — and the receipt
+        /// says so from this field, never from the ask's older snapshot.
+        public let priorTier: String?
+
+        enum CodingKeys: String, CodingKey {
+            case agent, area, grants
+            case priorTier = "prior_tier"
+        }
 
         public struct Grant: Codable, Sendable, Equatable {
             public let tier: String

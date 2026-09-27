@@ -490,6 +490,7 @@ public final class NeedsYouModel {
     @ObservationIgnored private weak var session: ConsoleSession?
     @ObservationIgnored private var didFirstSelect = false
     @ObservationIgnored private var anchor: Int?
+    @ObservationIgnored private var requestCards: (name: String, generation: Int, cards: RequestCards)?
 
     public init(session: ConsoleSession, timeZone: TimeZone = .current, now: @escaping @MainActor () -> Date = { Date() }) {
         self.session = session
@@ -725,6 +726,28 @@ public final class NeedsYouModel {
         return selectedRow.map(row) ?? [:]
     }
 
+    // MARK: One request (T5-4b)
+
+    /// One card per request (`RequestCards`), so the detail and the Item menu
+    /// act on the same one and a draft survives the list refreshing around
+    /// it. Rebuilt for another instance or another name; nil with no session.
+    public func cards(assistantName: String) -> RequestCards? {
+        guard let session else { return nil }
+        if let held = requestCards, held.name == assistantName, held.generation == session.generation {
+            held.cards.keep(only: Set(rows.map(\.id)))
+            return held.cards
+        }
+        let cards = RequestCards(store: session.stores, assistantName: assistantName)
+        requestCards = (assistantName, session.generation, cards)
+        return cards
+    }
+
+    /// The owner's day, for the dates a card's body prints.
+    public var today: TaskDay {
+        let d = calendar.dateComponents([.year, .month, .day], from: now())
+        return TaskDay(String(format: "%04d-%02d-%02d", d.year ?? 1970, d.month ?? 1, d.day ?? 1))!
+    }
+
     // MARK: Paint
 
     /// Nothing waits: the queue said so, or — before it has — the count did.
@@ -749,6 +772,7 @@ public final class NeedsYouModel {
         isAnswering = false
         didFirstSelect = false
         anchor = nil
+        requestCards = nil
     }
 }
 

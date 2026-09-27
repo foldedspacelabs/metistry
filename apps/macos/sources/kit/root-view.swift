@@ -206,14 +206,33 @@ struct ShellDetail: View {
         if destination == .needsYou {
             // C110: answering the last request leaves the owner here, on
             // *Nothing needs you*, with the row still in the sidebar until they
-            // go elsewhere. One request's body and answers are T5-4b's.
+            // go elsewhere. One request is its card (T5-4b): the detail draws
+            // it and the Item menu answers through it — the same card, so the
+            // menu and the button never disagree.
             NeedsYouView(
                 model: needsYou,
                 waiting: shell.waiting,
                 assistantName: shell.assistantName,
-                onGoToToday: { shell.go(to: .today) }
+                onGoToToday: { shell.go(to: .today) },
+                rowActions: { row in
+                    guard let name = shell.assistantName, let cards = needsYou.cards(assistantName: name) else { return [:] }
+                    return cards.card(for: row).itemActions(allowsDecisions: needsYou.allowsDecisions)
+                }
             ) { row in
-                NeedsYouRequestSummary(row, assistantName: shell.assistantName, consoleURL: consoleURL, calendar: needsYou.calendar)
+                if let name = shell.assistantName, let cards = needsYou.cards(assistantName: name) {
+                    let card = cards.card(for: row)
+                    ScrollView {
+                        RequestCardView(card, allowsDecisions: needsYou.allowsDecisions, today: needsYou.today)
+                            .frame(maxWidth: MetistrySize.contentMax, alignment: .leading)
+                            .padding(MetistrySpace.s5)
+                    }
+                    .id(row.id)
+                    // An answer changed the queue: the shell's count asks again.
+                    .task(id: card.isSettled) { if card.isSettled { await needsYou.onQueueChanged?() } }
+                } else {
+                    // The name is not known yet; the card would print none.
+                    NeedsYouRequestSummary(row, assistantName: shell.assistantName, consoleURL: consoleURL, calendar: needsYou.calendar)
+                }
             }
         } else {
             ContentUnavailableView {

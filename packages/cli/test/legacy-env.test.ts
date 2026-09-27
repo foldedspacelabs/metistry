@@ -154,6 +154,7 @@ describe("through main(), as the owner runs it", () => {
     const done = await run(["secrets", "retire-legacy-env", "--yes", "--instance", i.inst, "--product-dir", i.product], i.home);
     expect(done.code).toBe(0);
     expect(existsSync(i.legacy)).toBe(false);
+    expect(done.err).not.toContain("still being read as a fallback"); // not about a file this run deleted
     expect(`${done.out}${done.err}`).not.toContain(SECRET);
   });
 

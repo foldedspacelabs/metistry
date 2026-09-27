@@ -1336,6 +1336,8 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
             pointerOnlyInLegacy: loaded.instanceFrom === "legacy-env",
             out,
           });
+          // the file this run deleted is not "still being read": drop the notice collected before it went
+          if (r.deleted) for (let i = notices.length - 1; i >= 0; i--) if (notices[i]!.includes(paths.legacy)) notices.splice(i, 1);
           return r.kept ? 1 : 0;
         } catch (e) {
           err(`metistry secrets retire-legacy-env: ${e instanceof Error ? e.message : String(e)}`);

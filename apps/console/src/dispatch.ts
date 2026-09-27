@@ -15,15 +15,16 @@
 // webhook, so the return is a poll, and the answer lands as a `report`
 // proposal rather than as a status change.
 
-import { readdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
-import { parse as parseYaml } from "yaml";
 import {
   finishRun,
+  loadRegistry,
+  manifestKind,
   runCheck,
   startRun,
   validateManifest,
   type CheckResult,
+  type RegistrySkip,
+  type RegistrySource,
   type DataPolicy,
   type ErrorCode,
   type TargetManifest,
@@ -165,7 +166,12 @@ export class TargetRegistry {
     this.fetchFn = opts.fetchFn ?? fetch;
   }
 
-  /** Validate and register one manifest; a later add with the same name replaces (D4 overlay). Throws on an invalid manifest. */
+  /**
+   * Validate and register one manifest inline; a later add with the same
+   * name replaces. Throws on an invalid manifest. For a caller that already
+   * holds the manifest (tests, fixtures) — a deployment loads through
+   * `load()`, which is the registry's rules.
+   */
   add(input: unknown, where = "(inline)"): TargetManifest {
     const r = validateManifest(input);
     if (!r.ok) throw new Error(`${where}: invalid manifest: ${r.errors.join("; ")}`);
@@ -174,30 +180,26 @@ export class TargetRegistry {
     return r.manifest;
   }
 
-  /** Load every `<dir>/<name>/manifest.yaml`. A missing dir is skipped (instance overlay dirs are optional). Returns the names loaded. */
+  /** Every target manifest `load()` refused, with why — skipped, never fatal (plan §2.7). */
+  readonly skipped: RegistrySkip[] = [];
+
+  /**
+   * Load targets through core's `Registry` (plan §2.7): the product's
+   * `targets/`, then the owner's — the legacy `.metistry/targets/` overlay and
+   * `.metistry/extensions/` — overlaid by name, origin deciding (D4). A
+   * manifest that fails, or lacks `schema: 1`, is skipped with its reason in
+   * `skipped` rather than taking the console down. Returns the names in force.
+   */
+  async load(sources: readonly RegistrySource[]): Promise<string[]> {
+    const reg = await loadRegistry(manifestKind("target"), sources);
+    for (const u of reg.units()) this.targets.set(u.name, u.manifest);
+    this.skipped.push(...reg.skipped);
+    return reg.names();
+  }
+
+  /** `load()` of one product directory: `<dir>/<name>/manifest.yaml`, each named for its directory. A missing dir loads nothing. */
   async loadDir(dir: string): Promise<string[]> {
-    let entries: string[];
-    try {
-      entries = (await readdir(dir, { withFileTypes: true })).filter((e) => e.isDirectory()).map((e) => e.name);
-    } catch (err) {
-      if ((err as { code?: string }).code === "ENOENT") return [];
-      throw err;
-    }
-    const loaded: string[] = [];
-    for (const name of entries.sort()) {
-      const file = join(dir, name, "manifest.yaml");
-      let text: string;
-      try {
-        text = await readFile(file, "utf8");
-      } catch (err) {
-        if ((err as { code?: string }).code === "ENOENT") continue; // a directory without a manifest is not a target
-        throw err;
-      }
-      const m = this.add(parseYaml(text), file);
-      if (m.name !== name) throw new Error(`${file}: manifest name "${m.name}" must match its directory "${name}"`);
-      loaded.push(m.name);
-    }
-    return loaded;
+    return this.load([{ dir, origin: "product" }]);
   }
 
   names(): string[] {

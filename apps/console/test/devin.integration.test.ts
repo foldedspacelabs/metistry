@@ -11,7 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import { QueryStore } from "@foldedspacelabs/metistry-queries";
 import { mintToken } from "@foldedspacelabs/metistry-core";
-import { collectors } from "@metistry-apps/collectors";
+import { collectorCode } from "@metistry-apps/collectors";
 import { makeServer } from "../src/server.js";
 import { TargetRegistry } from "../src/dispatch.js";
 import * as store from "../src/auth-store.js";
@@ -20,7 +20,9 @@ import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
 const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
 const policy = { idleDays: 30, maxDays: 365 };
 const root = fileURLToPath(new URL("../../../", import.meta.url));
-const pollDevin = collectors.find((c) => c.name === "devin-sessions")!.run;
+const pollCode = await collectorCode("devin-sessions"); // the registry's lookup: the product's code, by name
+if (typeof pollCode !== "function") throw new Error(pollCode.missing);
+const pollDevin = pollCode;
 // unique per run: external_ref is unique, and a verbose re-run reuses the scratch db
 const RUN = Date.now().toString(36);
 

@@ -3,10 +3,12 @@
 // validate against this, so the schema is the contract.
 
 import { z } from "zod";
-import { VAULT_ROOT_AREA, isVaultPath } from "./instance-layout.js";
+import { VAULT_ROOT_AREA } from "./instance-layout.js";
+import { dataPolicySchema, knowledgePrefix } from "./data-policy.js";
 
 import { actionTableSchema, AUTONOMY_LEVELS } from "./actions.js";
 import { connectionTypeShape, refineConnectionType } from "./connections.js";
+import { providerSchema } from "./compute.js";
 import { modelRefIssue } from "./model-ref.js";
 import { EFFORTS } from "./tiers.js";
 
@@ -173,34 +175,10 @@ const envRef = z
   .string()
   .regex(/^env:[A-Z][A-Z0-9_]*$/, "must be an environment reference (env:VAR) — never a literal secret");
 
-// A vault-relative path prefix the brief may reference (plan §4.15: scopes
-// are prefix matches, so `Areas/Fsl` covers every sub-area). The vault root
-// is the instance directory, so a prefix has no `Knowledge/` to anchor on;
-// what anchors it instead is the casing rule — the FIRST segment is
-// TitleCase, exactly as Obsidian renders it, which is also why `.metistry/`
-// can never be named here. `isVaultPath` carries the rest: no traversal, no
-// dot-directory, not `Artifacts/`.
-const knowledgePrefix = z
-  .string()
-  .regex(
-    /^[A-Z][A-Za-z0-9 _.'-]*(\/[A-Za-z0-9_.'-][A-Za-z0-9 _.'-]*)*$/,
-    "allow entries are vault path prefixes with a TitleCase first segment (no leading slash, no '..', no trailing slash)",
-  )
-  .refine((p) => isVaultPath(p), "allow entries must name vault content — not .metistry/, not Artifacts/, no traversal");
-
-// What a brief bound for this target may carry (§4.18.B). Every field is
-// required so the policy is a declaration, not a default nobody chose. The
-// dispatch tool enforces it — a manifest is the contract, the tool is the
-// control.
-export const dataPolicySchema = z.object({
-  /** Vault path prefixes a brief may reference; empty = no vault references at all. */
-  allow: z.array(knowledgePrefix),
-  /** Provenance classes that may never leave the machine via this target, e.g. `comms` (§4.12). */
-  deny_sources: z.array(z.string().regex(/^[a-z][a-z0-9_-]*$/, "source names are lowercase kebab-case")),
-  max_brief_bytes: z.number().int().positive(),
-});
-
-export type DataPolicy = z.infer<typeof dataPolicySchema>;
+// `knowledgePrefix` and `dataPolicySchema` live in data-policy.ts so that
+// compute.ts (a provider's data policy) and this file (a target's, and the
+// `provider` manifest kind) can both use them without importing each other.
+export { dataPolicySchema, type DataPolicy } from "./data-policy.js";
 
 // --- agents (crews) -----------------------------------------------------------
 //
@@ -421,6 +399,28 @@ export const connectionTypeManifest = base
 
 export type ConnectionTypeManifest = z.infer<typeof connectionTypeManifest>;
 
+// --- compute provider templates (§2.7) --------------------------------------
+//
+// A provider template: a `compute.yaml` provider block with a name, which
+// `metistry compute providers add --from <name>` copies into the instance's
+// compute.yaml. The product's ship in `seed/compute-templates/<name>/`; an
+// owner's own is an extension (`.metistry/extensions/<name>/`), loaded
+// through the same registry. The block IS `providerSchema`, so a template can
+// never say anything a provider written into compute.yaml could not — and a
+// new kind of provider (a new `kind`, a new locality) stays a product change.
+// A new kind, so `schema: 1` is required and unknown keys are refused.
+
+export const providerManifest = base
+  .extend({
+    type: z.literal("provider"),
+    schema: manifestVersion,
+    /** The block `providers add --from` writes under `providers.<name>` in compute.yaml. */
+    provider: providerSchema,
+  })
+  .strict();
+
+export type ProviderManifest = z.infer<typeof providerManifest>;
+
 export const manifestSchema = z.discriminatedUnion("type", [
   bridgeManifest,
   collectorManifest,
@@ -429,6 +429,7 @@ export const manifestSchema = z.discriminatedUnion("type", [
   targetManifest,
   serviceManifest,
   connectionTypeManifest,
+  providerManifest,
 ]);
 
 /** Every manifest kind — the `type` values `manifestSchema` discriminates on. */

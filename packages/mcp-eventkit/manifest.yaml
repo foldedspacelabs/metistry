@@ -1,3 +1,4 @@
+schema: 1
 name: eventkit
 type: bridge
 description: Calendar + Reminders read/write via EventKit (PoC-9)

@@ -10,7 +10,12 @@
 #
 # `metistry compute providers add --from openrouter` writes this block into
 # the instance's compute.yaml and asks for the key on stdin.
-openrouter:
+schema: 1
+name: openrouter
+type: provider
+description: OpenRouter — one key, most models, off this machine and billed
+# the block `metistry compute providers add --from openrouter` writes into compute.yaml
+provider:
   kind: openai-compatible
   base_url: https://openrouter.ai/api/v1
   locality: off_machine

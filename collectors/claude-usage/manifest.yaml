@@ -1,3 +1,4 @@
+schema: 1
 name: claude-usage
 type: collector
 description: Roll the assistant's per-turn runs rows up into daily token/cost metrics by model tier (claude.tokens_in / claude.tokens_out / claude.cost_usd), so the dashboard and the monthly headroom check read a small series instead of scanning runs. Derived from local data only — no external credential.

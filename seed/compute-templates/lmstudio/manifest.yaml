@@ -2,7 +2,12 @@
 # port. on_machine: nothing leaves, so there is no data policy to declare
 # and no cost to count. Load a model in LM Studio first; `metistry compute
 # models list --provider lmstudio` then shows what it will serve.
-lmstudio:
+schema: 1
+name: lmstudio
+type: provider
+description: LM Studio's local server — on this Mac, no cost
+# the block `metistry compute providers add --from lmstudio` writes into compute.yaml
+provider:
   kind: openai-compatible
   base_url: http://127.0.0.1:1234/v1
   locality: on_machine

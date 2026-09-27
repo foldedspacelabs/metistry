@@ -24,6 +24,8 @@ export interface ProbeConfig {
   hourlyCostUsd: number; // cost-runaway line
   collectorsDir: string; // manifests the console's runner schedules from (repo paths — the watchdog is on the host)
   routinesDir: string;
+  /** the instance's `.metistry/extensions/` — an owner's overlay moves a schedule for the watchdog too (plan §2.7) */
+  extensionsDir?: string | undefined;
   silenceFactor: number; // a collector is silent after this × its manifest interval with no runs row
   startedAt: Date; // "never ran" is measured from watchdog start, so a fresh install doesn't alert on cycle one
   bridges: BridgeTarget[]; // configured host bridges (bridges.ts: bridgesFromEnv)
@@ -162,8 +164,9 @@ export async function runProbes(db: Db, cfg: ProbeConfig, fetchFn = fetch): Prom
     // died, or a collector that throws before startRun, leaves the data
     // quietly stale while every other probe stays green.
     await runCheck("silent-collector", `every scheduled collector/routine has a runs row within ${cfg.silenceFactor}× its manifest interval`, async () => {
-      const scheduled = [...(await loadScheduled(cfg.collectorsDir)), ...(await loadScheduled(cfg.routinesDir))];
-      if (scheduled.length === 0) return { status: "absent", meta: { scheduled: 0 } };
+      const { scheduled, skipped } = await loadScheduled(cfg);
+      const skips = skipped.length > 0 ? { skipped: Object.fromEntries(skipped.map((s) => [s.name ?? s.path, s.reason])) } : {};
+      if (scheduled.length === 0) return { status: "absent", meta: { scheduled: 0, ...skips } };
       const { rows } = await db.query(
         `SELECT component, kind, max(ts) AS last FROM runs
          WHERE kind IN ('collector_run', 'routine_run') GROUP BY component, kind`,
@@ -175,7 +178,7 @@ export async function runProbes(db: Db, cfg: ProbeConfig, fetchFn = fetch): Prom
         cfg.startedAt,
         cfg.silenceFactor,
       );
-      const meta = { scheduled: scheduled.length, silent: Object.fromEntries(silent.map((s) => [s.name, s.silentSec])) };
+      const meta = { scheduled: scheduled.length, silent: Object.fromEntries(silent.map((s) => [s.name, s.silentSec])), ...skips };
       if (silent.length === 0) return { meta };
       const who = silent
         .map((s) => (s.neverRan ? `${s.name} (never ran since watchdog start; schedule "${s.schedule}")` : `${s.name} (no run in >${humanSec(s.limitSec)}; schedule "${s.schedule}")`))

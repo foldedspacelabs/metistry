@@ -7,6 +7,7 @@
 # `allow`, carries a `deny_sources` provenance marker, or exceeds
 # `max_brief_bytes` never leaves the machine. Instances overlay this file
 # (METISTRY_TARGETS_DIRS, D4) to widen `allow` to their own areas.
+schema: 1
 name: github-issues
 type: target
 description: Open a GitHub issue for a task — the external work queue (plan §6 decision 4)

@@ -197,7 +197,8 @@ your version (`docs/ops/inbox.md`).
 
 ## Turning it off
 
-Remove `knowledge-fold` from `routines/index.ts` (product change, a PR) — or,
+Remove its directory, `routines/knowledge-fold/` (a product change, a PR — the
+routine registry is the directory listing, plan §2.7) — or,
 without a rebuild, set the evening gate past the end of the day. The safest
 instance-side switch is to revoke the assistant's write path
 (`METISTRY_BRIDGE_TOKEN_RECONCILER` unset → `knowledge_write` answers

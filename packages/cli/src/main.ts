@@ -23,7 +23,8 @@ import {
   parseBudgetAction,
   parseBudgetTarget,
   parseEffort,
-  parseTemplate,
+  computeTemplates,
+  templateChoices,
   providerTest,
   providersAdd,
   providersRemove,
@@ -35,10 +36,10 @@ import {
   renderRouteReport,
   routeReport,
   setBudget,
-  COMPUTE_TEMPLATES,
   type ComputeOptions,
 } from "./compute.js";
 import { buildDeploymentReport, renderDeploymentReport, setDeploymentShape, setKeepAwake } from "./deployment-report.js";
+import { EXTENSION_VERBS, extensionsAdd, extensionsList, extensionsRemove, parseExtensionVerb, renderExtensions, type ExtensionsOptions } from "./extensions.js";
 import { doctor, renderTable, type DoctorDeps } from "./doctor.js";
 import { loadInstallEnv, productVersion, resolveProductDir, resolveSeedDir, type LoadedEnv } from "./env.js";
 import { realExec, type Exec } from "./exec.js";
@@ -402,6 +403,25 @@ const USAGE = `metistry — Metistry command line
       What an instance exposes as a "resource" is OPEN-7 and is not designed
       here — the file's "resources:" key stays empty.
 
+  metistry extensions list [--json] [--instance <dir>] [--product-dir <checkout>]
+  metistry extensions add <dir> [--dry-run]
+  metistry extensions remove <name> [--dry-run]
+      Your own units, in .metistry/extensions/<name>/ (docs/ops/extensions.md):
+      a provider template, a connection type, a target, or a replacement
+      manifest for a product collector or routine. Each loads through the
+      SAME registry as the product's, and one with a product unit's name
+      replaces it (D4). "list" shows every one — in force, an overlay and what
+      it replaces, or skipped/unclaimed with the reason. "add" copies one flat
+      directory of data — manifest.yaml and .yaml/.yml/.md/.txt beside it —
+      and refuses anything that could run (a script, an executable, a link, a
+      nested tree), and any unit its registry would skip, naming why; an
+      extension names values from Metistry's closed vocabularies (action
+      kinds, capabilities, TCC grants, field kinds) and can never add one.
+      "remove" deletes it; for an overlay that is Reset to Default. What
+      referred to a removed unit turns absent, naming it; nothing else is
+      deleted. A §4.7 protected path: every write goes through the reconciler
+      as the "user" principal.
+
   metistry runs export [--since <cursor|timestamp>] [--until <timestamp>]
                        [--component <name>] [--limit N] [--json-lines]
       The runs audit ledger as NDJSON on stdout, oldest first, one JSON object
@@ -548,7 +568,7 @@ const USAGE = `metistry — Metistry command line
 
   metistry compute show [--json]
   metistry compute providers list [--json]
-  metistry compute providers add --from <${COMPUTE_TEMPLATES.join("|")}>
+  metistry compute providers add --from <template>
                                  [--name <n>] [--base-url <url>] [--secret <NAME>] [--skip-test]
   metistry compute providers remove <name>
   metistry compute providers test <name> [--complete] [--model <id>]
@@ -564,9 +584,12 @@ const USAGE = `metistry — Metistry command line
       tier and crew runs on, and what each may spend (docs/ops/compute.md).
       A §4.7 protected path like deployment.yaml — every write goes through
       the reconciler as the "user" principal, and an edit that would not
-      validate is refused rather than written. "providers add" reads the API
-      key from stdin into the login Keychain (user scope) and never takes it
-      as an argument. Budgets are enforced in the engine, before the call
+      validate is refused rather than written. "providers add --from" copies
+      a provider template — a unit of the provider registry: the product's
+      seed/compute-templates/ and your own in .metistry/extensions/ (metistry
+      extensions list); "providers add" with no --from names them — and reads
+      the API key from stdin into the login Keychain (user scope), never
+      taking it as an argument. Budgets are enforced in the engine, before the call
       (docs/ops/compute.md). "cache-report" and "route-report" are the two
       that read rather than write. cache-report: prompt-cache effectiveness
       per provider, model and tier over the last --since days (7d, 2w, 3m,
@@ -731,6 +754,7 @@ export const HELP_GROUPS: Array<{ title: string; verbs: Array<[string, string]> 
       ["identity", "identity.yaml — the one place the assistant is named"],
       ["templates check [<file>]", "does the vault's Templates/ read, before the next run reads it"],
       ["instances list|add|remove|refresh", "the peer registry: which other instances this one knows"],
+      ["extensions list|add|remove", "your own units — templates, connection types, targets, overlays"],
     ],
   },
   {
@@ -1226,6 +1250,77 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
         return 0;
       } catch (e) {
         err(`metistry instances ${verb}: ${e instanceof Error ? e.message : String(e)}`);
+        return 1;
+      }
+    }
+    case "extensions": {
+      // M15 (plan §2.7): the owner's own units. Every write is a §4.7
+      // protected write through the reconciler as the `user`, like compute.
+      const loadedExt = loadEnv();
+      const instanceDir = str(flags, "instance") ?? loadedExt.instanceDir;
+      if (!instanceDir) {
+        err("extensions needs the instance repo: pass --instance <dir> or set METISTRY_INSTANCE_DIR (docs/ops/cli.md) — .metistry/extensions/ lives there");
+        return 2;
+      }
+      const verb = parseExtensionVerb(positional[0]);
+      if (!verb) {
+        err(`usage: metistry extensions ${EXTENSION_VERBS.join(" | ")}   (metistry --help)`);
+        return 2;
+      }
+      let seedDir: string | undefined;
+      try {
+        seedDir = resolveSeedDir(productDir);
+      } catch {
+        seedDir = undefined; // no seed: only product units under the checkout, if any, are compared against
+      }
+      const json = flags.json === true;
+      const extOpts: ExtensionsOptions = {
+        instanceDir,
+        ...(productDir ? { productDir } : {}),
+        ...(seedDir ? { seedDir } : {}),
+        env: process.env,
+        platform: io.platform ?? process.platform,
+        uid: io.uid ?? (typeof process.getuid === "function" ? process.getuid() : 0),
+        fetchFn: io.fetchFn ?? fetch,
+        ...(io.exec ? { exec: io.exec } : {}),
+        dryRun: flags["dry-run"] === true,
+        // --json is a wire contract (docs/ops/cli.md): progress to stderr
+        out: json ? err : out,
+      };
+      try {
+        if (verb === "list") {
+          const r = await extensionsList(extOpts);
+          out(json ? JSON.stringify(r, null, 2) : renderExtensions(r));
+          return 0;
+        }
+        if (verb === "add") {
+          const source = positional[1];
+          if (!source) {
+            err("usage: metistry extensions add <dir>   (a directory holding the unit's manifest.yaml — docs/ops/extensions.md)");
+            return 2;
+          }
+          const r = await extensionsAdd({ ...extOpts, source });
+          out(
+            json
+              ? JSON.stringify(r, null, 2)
+              : `${extOpts.dryRun ? "would add" : "added"} ${r.kind} ${r.name} (${r.files.join(", ")})${r.replaced ? ` — replaces the product's ${r.replaced}` : ""}${r.ignored.length > 0 ? `; not copied: ${r.ignored.join(", ")}` : ""} — ${r.deliveries.at(-1)?.detail ?? ""}`,
+          );
+          return 0;
+        }
+        const name = positional[1];
+        if (!name) {
+          err("usage: metistry extensions remove <name>   (`metistry extensions list` names them)");
+          return 2;
+        }
+        const r = await extensionsRemove({ ...extOpts, name });
+        out(
+          json
+            ? JSON.stringify(r, null, 2)
+            : `${extOpts.dryRun ? "would remove" : "removed"} ${r.kind ?? "extension"} ${r.name}${r.restored ? ` — the product's ${r.restored} is back in force` : ""} — ${r.deliveries.at(-1)?.detail ?? "nothing to delete"}`,
+        );
+        return 0;
+      } catch (e) {
+        err(`metistry extensions ${verb}: ${e instanceof Error ? e.message : String(e)}`);
         return 1;
       }
     }
@@ -1743,12 +1838,16 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
         out: json ? err : out,
         ...(io.exec ? { exec: io.exec } : {}),
       };
+      // The provider templates in force (the registry, plan §2.7) — every
+      // hint and usage line that names them reads this, never a list in code.
+      const templates = await computeTemplates(computeOpts);
+      const templateNames = (): string[] => templates.names();
       try {
         switch (positional[0]) {
           case undefined:
           case "show": {
             const report = await computeReport(computeOpts);
-            out(json ? JSON.stringify(report, null, 2) : renderComputeReport(report));
+            out(json ? JSON.stringify(report, null, 2) : renderComputeReport(report, templateNames()));
             return 0;
           }
           case "providers": {
@@ -1756,13 +1855,18 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
               case undefined:
               case "list": {
                 const report = await computeReport(computeOpts);
-                out(json ? JSON.stringify({ providers: report.providers }, null, 2) : renderComputeReport(report));
+                out(json ? JSON.stringify({ providers: report.providers }, null, 2) : renderComputeReport(report, templateNames()));
                 return 0;
               }
               case "add": {
-                const template = parseTemplate(str(flags, "from"));
-                if (!template) {
-                  err(`usage: metistry compute providers add --from ${COMPUTE_TEMPLATES.join("|")} [--name <n>] [--base-url <url>] [--secret <NAME>] [--skip-test]`);
+                // a template is a unit of the provider registry (plan §2.7):
+                // the product's and this instance's own
+                const template = str(flags, "from");
+                if (!template || !templates.has(template)) {
+                  // a typo, never a guess: name what exists, and why a unit of that name did not load
+                  const skipped = templates.skipped.filter((s) => s.name === template).map((s) => `${s.path} was skipped: ${s.reason}`);
+                  if (template) err(`no provider template named ${JSON.stringify(template)}${skipped.length > 0 ? ` (${skipped.join("; ")})` : ""}`);
+                  err(`usage: metistry compute providers add --from ${templateChoices(templateNames())} [--name <n>] [--base-url <url>] [--secret <NAME>] [--skip-test]`);
                   return 2;
                 }
                 const r = await providersAdd({
@@ -1810,7 +1914,7 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
                 }
               }
               default:
-                err(`usage: metistry compute providers list | add --from ${COMPUTE_TEMPLATES.join("|")} | remove <name> | test <name> [--complete] [--model <id>]`);
+                err(`usage: metistry compute providers list | add --from ${templateChoices(templateNames())} | remove <name> | test <name> [--complete] [--model <id>]`);
                 return 2;
             }
           }
@@ -1819,7 +1923,7 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
               case undefined:
               case "list": {
                 const r = await modelsList({ ...computeOpts, provider: str(flags, "provider") });
-                out(json ? JSON.stringify(r, null, 2) : renderModelsList(r));
+                out(json ? JSON.stringify(r, null, 2) : renderModelsList(r, templateNames()));
                 return r.providers.every((p) => p.ok) ? 0 : 1;
               }
               case "install": {

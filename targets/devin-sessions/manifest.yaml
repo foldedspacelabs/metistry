@@ -9,6 +9,7 @@
 #
 # The data policy below is ENFORCED by the console's dispatch tool
 # (apps/console/src/dispatch.ts `checkBrief`) before a single byte leaves.
+schema: 1
 name: devin-sessions
 type: target
 description: Dispatch a brief to a Devin session — debugging and knowledge research; the structured answer returns as a report proposal

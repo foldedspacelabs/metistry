@@ -1,3 +1,4 @@
+schema: 1
 name: github-state
 type: collector
 description: Reconcile open issues/PRs from configured repos into the work table (§4.8 — collectors reconcile status from the source; nothing invents it)

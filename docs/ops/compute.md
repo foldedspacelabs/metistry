@@ -243,7 +243,12 @@ starting from a bare header and overwriting the real one.
 
 ## Templates
 
-`seed/compute-templates/<name>.yaml` is one provider block each:
+A template is a unit of the **provider registry** (plan §2.7,
+`docs/ops/extensions.md`): `seed/compute-templates/<name>/manifest.yaml` —
+`schema: 1`, `type: provider`, and a `provider:` block that is exactly what
+`providers add --from <name>` writes under `providers.<name>` in
+`compute.yaml`. The block is `providerSchema` itself, so a template can say
+nothing a provider in `compute.yaml` could not. The product ships these:
 
 | template | what it is |
 | --- | --- |
@@ -252,6 +257,24 @@ starting from a bare header and overwriting the real one.
 | `ollama` | Ollama's OpenAI-compatible surface on port 11434 |
 | `llamaserver` | the **bundled** `llama-server` on port 7813 — Metistry starts it |
 | `applefm` | **Apple Foundation Models**, through the `apple-fm` bridge on port 7810. Cost 0, and the weights are already resident for the OS — see below |
+
+**Your own template** is an extension: a directory holding such a manifest,
+installed with `metistry extensions add <dir>` into
+`.metistry/extensions/<name>/`. It is a template like the product's — `--from`
+reaches it, and the hints that name templates list it — and one with a product
+template's name replaces it (D4) until `metistry extensions remove <name>`.
+
+```yaml
+# ~/my-templates/vllm-box/manifest.yaml
+schema: 1
+name: vllm-box
+type: provider
+description: the vLLM server on the box under the desk
+provider:
+  kind: openai-compatible
+  base_url: http://10.0.0.9:8000/v1
+  locality: on_machine
+```
 
 `--name` and `--base-url` rewrite the block on the way in, so a second
 machine's Ollama is `--from ollama --name box --base-url http://10.0.0.4:11434/v1`.
@@ -926,7 +949,8 @@ whatever it lists first.
 
 Two checks, on purpose:
 
-- **CI** resolves the provider against `seed/compute-templates/<name>.yaml`
+- **CI** resolves the provider against the provider registry's
+  `seed/compute-templates/<name>/manifest.yaml`
   and fails if it is not `locality: on_machine`
   (`apps/console/test/manifests.test.ts`). That catches the shipped default.
 - **`completeJson()`** resolves the same name against the `compute.yaml`

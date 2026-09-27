@@ -84,7 +84,7 @@ describe("Registry — skip with a reason, never fatal", () => {
     const reg = buildRegistry(connectionTypes, [extension(collector), extension("just a string", "str"), extension(null, "empty")]);
     expect(reg.names()).toEqual([]);
     expect(reg.skipped).toEqual([]);
-    expect(buildRegistry(manifestKind("collector"), [extension(collector)]).names()).toEqual(["github-state"]);
+    expect(buildRegistry(manifestKind("collector"), [product(collector)]).names()).toEqual(["github-state"]);
   });
 });
 

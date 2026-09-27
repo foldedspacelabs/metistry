@@ -50,7 +50,7 @@ import {
   type Manifest,
   type SupervisorConfig,
 } from "@foldedspacelabs/metistry-core";
-import { COMPUTE_FILENAME, INSTANCE_LAYOUT, LEGACY_VAULT_DIR, detectLayout, emptyCompute, instanceFile, loadCompute, type Compute } from "@foldedspacelabs/metistry-core";
+import { COMPUTE_FILENAME, INSTANCE_LAYOUT, LEGACY_VAULT_DIR, REGISTRY_KINDS, detectLayout, emptyCompute, extensionsDirFor, instanceFile, loadCompute, loadKind, resolveInstanceLayout, type Compute, type RegistryKindName } from "@foldedspacelabs/metistry-core";
 import { cliShimLinkHint, cliShimPath } from "./cli-shim.js";
 import { engineStatus, loadDeployment } from "./deployment.js";
 import { localServerRows } from "./local-models.js";
@@ -136,6 +136,50 @@ export async function walkManifests(productDir: string): Promise<FoundManifest[]
     }
   }
   return out;
+}
+
+// ---- registries (plan §2.7) ----------------------------------------------------
+
+/**
+ * One row for every registry kind: how many units each holds, which of the
+ * owner's extensions replace a product unit (D4 — "doctor says so"), and
+ * every unit a registry skipped, with why. The same `loadKind` the console
+ * and the CLI load through, over the product checkout and — when this install
+ * names its instance — the instance's `.metistry/extensions/` and legacy
+ * `.metistry/targets/`. A skip is `degraded`, never `failed`: the product
+ * runs without the unit, and the row says what to fix.
+ */
+export async function registriesRow(productDir: string, env: NodeJS.ProcessEnv): Promise<DoctorRow> {
+  const instanceDir = env.METISTRY_INSTANCE_DIR?.trim().replace(/\/+$/, "") || undefined;
+  const seedDir = env.METISTRY_SEED_DIR?.trim() || join(productDir, "seed");
+  return {
+    kind: "registry",
+    ...(await runCheck("registries", `every registry kind loads (${Object.keys(REGISTRY_KINDS).join(", ")})${instanceDir ? "" : "; no METISTRY_INSTANCE_DIR, so product units only"}`, async () => {
+      const units: Record<string, number> = {};
+      const overlays: string[] = [];
+      const skipped: Array<{ kind: string; name?: string; path: string; reason: string }> = [];
+      for (const kind of Object.keys(REGISTRY_KINDS) as RegistryKindName[]) {
+        const reg = await loadKind(kind, {
+          productDir,
+          seedDir,
+          ...(instanceDir ? { extensionsDir: extensionsDirFor(instanceDir) } : {}),
+          ...(instanceDir && kind === "target" ? { overlays: [resolveInstanceLayout(instanceDir).path("targetsDir")] } : {}),
+        });
+        units[kind] = reg.names().length;
+        for (const u of reg.overlaid()) overlays.push(`${kind} ${u.name}: ${u.path} replaces ${u.replaced?.path}`);
+        for (const sk of reg.skipped) skipped.push({ kind, ...(sk.name ? { name: sk.name } : {}), path: sk.path, reason: sk.reason });
+      }
+      const meta = { units, overlays, skipped };
+      if (skipped.length > 0) {
+        return {
+          status: "degraded" as const,
+          remediation: `${skipped.length} unit(s) not loaded — ${skipped.slice(0, 3).map((x) => `${x.path}: ${x.reason}`).join("; ")}${skipped.length > 3 ? "; …" : ""} (\`metistry extensions list\`, docs/ops/extensions.md)`,
+          meta,
+        };
+      }
+      return overlays.length > 0 ? { remediation: `extensions replace ${overlays.length} product unit(s): ${overlays.join("; ")} — \`metistry extensions remove <name>\` restores one (Reset to Default)`, meta } : { meta };
+    })),
+  };
 }
 
 // ---- network probes (the same URL/token env conventions the watchdog and console use) ----
@@ -1159,8 +1203,10 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
   // model servers. Concurrently it is the slowest single probe. Nothing about
   // any one check changes — no timeout was shortened to buy this, because a
   // slow-but-healthy bridge reported as down would be a worse table.
-  const [componentRows, layout, inbox, cli, dbAndSchedules, launchd, keepAwake, supervisor, containers, localModels] = await Promise.all([
+  const [componentRows, registries, layout, inbox, cli, dbAndSchedules, launchd, keepAwake, supervisor, containers, localModels] = await Promise.all([
     (async () => Promise.all((await walkManifests(deps.productDir)).map((m) => componentRow(m, { env, fetchFn, timeoutMs, shape, labelSuffix, compute }))))(),
+    // the registries over product + extensions: overlays and skips (plan §2.7)
+    registriesRow(deps.productDir, env),
     layoutRow(instanceDir),
     inboxRow(instanceDir),
     // whether typing `metistry` finds this install's shim: a filesystem
@@ -1192,7 +1238,7 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
     // failure, so these rows can only add information, never a red run.
     localServerRows({ compute, fetchFn, timeoutMs: Math.min(timeoutMs, 2_000) }),
   ]);
-  rows.push(...componentRows, layout, inbox, cli, ...dbAndSchedules, ...launchd, ...(keepAwake ? [keepAwake] : []), ...supervisor, ...containers, ...localModels);
+  rows.push(...componentRows, registries, layout, inbox, cli, ...dbAndSchedules, ...launchd, ...(keepAwake ? [keepAwake] : []), ...supervisor, ...containers, ...localModels);
 
   return { as_of: new Date().toISOString(), product_dir: deps.productDir, shape, ok: !rows.some((r) => r.status === "failed"), rows };
 }

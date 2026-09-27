@@ -42,7 +42,7 @@ describe.skipIf(!hasDb)("watchdog", () => {
 
     const root = await mkdtemp(join(tmpdir(), "wd-int-"));
     await mkdir(join(root, "collectors", component), { recursive: true });
-    await writeFile(join(root, "collectors", component, "manifest.yaml"), `name: ${component}\ntype: collector\nschedule: "*/5 * * * *"\nwrites: [x]\n`);
+    await writeFile(join(root, "collectors", component, "manifest.yaml"), `schema: 1\nname: ${component}\ntype: collector\nschedule: "*/5 * * * *"\nwrites: [x]\n`);
     await mkdir(join(root, "routines"), { recursive: true });
     cfg = {
       consoleUrl: "http://test",
@@ -80,8 +80,9 @@ describe.skipIf(!hasDb)("watchdog", () => {
   });
 
   it("every shipped collector/routine manifest loads through the watchdog's own discovery", async () => {
-    const names = [...(await loadScheduled(`${repoRoot}collectors`)), ...(await loadScheduled(`${repoRoot}routines`))].map((s) => s.name);
-    expect(names).toEqual(expect.arrayContaining(["inbox-drain", "github-state", "aws-costs", "claude-usage", "morning-brief", "weekly-review"]));
+    const { scheduled, skipped } = await loadScheduled({ collectorsDir: `${repoRoot}collectors`, routinesDir: `${repoRoot}routines` });
+    expect(scheduled.map((s) => s.name)).toEqual(expect.arrayContaining(["inbox-drain", "github-state", "aws-costs", "claude-usage", "morning-brief", "weekly-review"]));
+    expect(skipped).toEqual([]);
   });
 
   it("dead console fails its probe with remediation, never throws", async () => {

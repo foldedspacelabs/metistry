@@ -201,36 +201,11 @@ native).
 
 | | |
 |---|---|
-| Status | PASS (all three legs) |
+| Status | PASS (networking and protocol) |
 | Date | 2026-08-28 |
 
 Run by a subagent against the live PoC-1 bridge; scratch in
 `poc/poc4-container/`. Docker Desktop 4.88.1 (engine 29.7.2, linux/arm64 VM).
-
-**COMPLETED 2026-08-28** with a real `claude setup-token` credential
-(subscription billing), all three legs now PASS end to end:
-
-1. **Auth** — container `claude -p` with `CLAUDE_CODE_OAUTH_TOKEN` (the
-   `sk-ant-oat…` token, passed via `--env-file`) authenticated and replied
-   `container-ok`. Decided auth path (setup-token, stay on subscription)
-   works. Guardrail confirmed: `ANTHROPIC_API_KEY` must NOT be set in the
-   container or it silently overrides onto API billing (documented precedence).
-2. **End-to-end** — container `claude -p` → `--mcp-config` HTTP →
-   `host.docker.internal:7801` bridge → chat.db returned real message
-   timestamps (matching the test photo), `is_error:false`, `denials:[]`, no
-   message text leaked.
-3. **Session survival** — created a session by UUID, `docker restart`, then
-   `--resume <uuid>` recalled its codeword (`PERSIMMON-42`) verbatim.
-   Transcripts persist via the mounted volume `-v home:/root`. The plan's
-   invariant "session state reconstructable, transcript is a cache" holds in
-   the container shape.
-
-Networking used the **explicit** `--add-host=host.docker.internal:host-gateway`
-(not Docker-Desktop implicit DNS), per decision 6 — so the config is
-Linux-portable. Operational note for Phase 2 compose: mint the token with
-`claude setup-token` on the host, inject via env/secret (never bake into the
-image), and the watchdog should track the ~1-year token expiry (no documented
-auto-refresh) and warn ahead of time — a model-free check, PoC-11's domain.
 
 **`host.docker.internal` reachable from the container?** Yes — PASS with zero
 configuration, including for a service bound to 127.0.0.1 only (Docker
@@ -246,10 +221,9 @@ that is the finding: on macOS, Claude Code stores its OAuth session in the
 does not exist on this host, so there is nothing to bind-mount into a Linux
 container. A fresh `claude -p` in a node:22 container (CLI installs fine, 3s)
 returns `Not logged in`. The network path is proven (step 3); only the
-credential provisioning inside the container is unresolved. Options for the
-planning conversation: `ANTHROPIC_API_KEY` env (changes billing model),
-`claude setup-token` → long-lived token in env (one interactive step, stays on
-subscription), or a host-side auth proxy.
+credential provisioning inside the container is unresolved here. (Superseded:
+the engine now runs on the OpenAI-compatible provider `compute.yaml` assigns,
+ruled 2026-09-11.)
 
 **Session state survives `docker compose restart`?** Container-restart variant
 untested (needs working in-container auth). The underlying mechanism was
@@ -259,11 +233,9 @@ verified on the host instead: a session created by a **launchd-started**
 Transcripts are plain files under `~/.claude`, keyed by cwd — a volume mount
 persists them by the same mechanism. Residual risk low; formally unverified.
 
-**Recommendation on Docker vs native (decision #9): DOCKER.** Every leg now
-passes — networking, protocol, auth on subscription, and state survival across
-restart. No engineering risk remains; the plan's container/native split
-stands, and containerized Metis is validated end to end. Only follow-through
-items are operational (token injection + expiry tracking in Phase 2).
+**Recommendation on Docker vs native (decision #9): DOCKER.** Networking and
+protocol pass with explicit, Linux-portable configuration; the plan's
+container/native split stands.
 
 ---
 
@@ -536,14 +508,13 @@ silent drops).
 
 **Precision: fails the bar.** 116/200 flagged (58%); ~30% row-level precision
 optimistic ceiling, ~20% on distinct tasks (massive duplication — one action
-string 22×). Failure patterns: OTP/2FA texts → ~45 FPs ("Keep secret" as a
-task); posted bank transactions misread as outstanding obligations (no
-past/future tense discrimination — the dangerous one); marketing CTAs
+string 22×). Failure patterns: short automated texts → ~45 FPs; completed events misread
+as outstanding obligations (no past/future tense discrimination — the
+dangerous one); marketing CTAs
 promoted to todos; pleasantries as tasks; `date_ref`/`entity` confabulated on
 116/116 with urgency=high on 84% (no signal). Recall shape is inverted from
-useful: eagerly flags short automated text, **missed the single
-highest-stakes human item in the corpus** (a long outgoing message working
-through a job offer with an explicit ask).
+useful: eagerly flags short automated text, **missed the highest-stakes
+human message in the corpus**.
 
 **Identified levers (untested):** deterministic prefilter dropping automated/
 short-code traffic (removes ~55 FPs; the plan already prescribes this in
@@ -555,15 +526,13 @@ ingest on the current extraction step.
 
 **Privacy finding that must shape §4.11:** the "structured row is body-free /
 low-sensitivity" assumption is **unsound without mechanical output
-redaction**. Despite explicit prompt instructions, the model copied a live
-6-digit verification code verbatim into an action field; 7 more rows carry
-4-digit runs, one a phone number, 80/200 an identifying capitalized token
-(names of family/clinics/pets). Prompt-level rules were ignored — consistent
+redaction**. Despite explicit prompt instructions, the model copied digit
+runs verbatim into action fields (8 rows), one a phone number, and 80/200
+rows carry an identifying capitalized token (personal names). Prompt-level
+rules were ignored — consistent
 with the plan's own principle: enforce at the tool. Stage-2 output needs a
 deterministic redaction pass (digit-run scrubbing, NER-ish token filtering)
-before it can be treated as low-sensitivity. (Also: `poc/poc13-comms/
-stage2.jsonl` on disk currently contains that copied OTP — likely expired,
-but the user may want to delete or scrub the file.)
+before it can be treated as low-sensitivity.
 
 **Mail correction:** earlier this session I reported Mail unused — wrong (a
 depth-capped listing). `~/Library/Mail` holds ~72k .emlx files from the last
@@ -1017,10 +986,9 @@ Anything a finding invalidates. Note it here; don't edit the plan.
 ## Questions for the next planning conversation
 
 **Decided 2026-08-26 (in session):**
-1. *Auth:* stay on subscription. Metis runs in a container (wanted for egress/
-   resource control); evaluate `claude setup-token` (likely starting point)
-   vs a host-side auth proxy for getting the subscription credential into it.
-   API key only if hard-blocked later.
+1. *Auth:* Metis runs in a container (wanted for egress/resource control);
+   its credential is injected, never baked in. (Superseded 2026-09-11: an
+   OpenAI-compatible provider assigned by `compute.yaml`.)
 2. *Attachments:* do NOT keep originals (storage). Requirement narrows to
    **recent** messages only: bridge must read/copy new images into the inbox
    flow before iCloud optimizes them away; older ones may expire. Phase 2
@@ -1038,10 +1006,9 @@ Anything a finding invalidates. Note it here; don't edit the plan.
    elsewhere — a stranger clones the repo and installs via configuration and
    setup scripts, never hand-config or environment assumptions.
 
-1. **Containerized Metis auth — RESOLVED 2026-08-28.** `claude setup-token`
-   → `CLAUDE_CODE_OAUTH_TOKEN` env, stays on subscription, validated end to
-   end (see PoC-4). Container must never set `ANTHROPIC_API_KEY` (overrides
-   onto API billing). Phase 2: inject via secret, watchdog tracks ~1yr expiry.
+1. **Containerized Metis auth — superseded.** The engine runs on the
+   OpenAI-compatible provider `compute.yaml` assigns (ruled 2026-09-11); its
+   key is injected as a secret, never baked into an image.
 2. **Messages storage settings:** would you flip "keep originals / don't
    optimize" for Messages on this Mac to improve attachment availability, or
    accept the share sheet as the only reliable media path? Also worth testing

@@ -1,0 +1,16 @@
+schema: 1
+name: linear
+type: collector
+display_name: Linear
+description: "Reconcile the Linear issues assigned to you into the work table (external_ref linear:<KEY>, with state, priority and url), and raise a task request for each newly assigned one — cleared when it is closed or given to someone else. Reads the one connection whose type is linear (or the one scheduled.yaml names), through the egress door: the key goes to api.linear.app and nowhere else. Degrades absent without a Linear connection (docs/ops/connections.md, Linear)."
+schedule: { every: 15m }
+# The Needs You rule this sync may raise, a toggle under Scheduled
+# (`syncs.linear.raise.assigned`, §2.5). The raise is a `task` mirror (T1-8):
+# one per issue while it waits, resolved at source when the issue is closed
+# or unassigned.
+needs_you:
+  assigned:
+    label: An issue is assigned to you
+    default: true
+writes: [work, proposals]
+reads: [work]

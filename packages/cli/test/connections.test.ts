@@ -90,6 +90,27 @@ describe("metistry connections add", () => {
     expect(t.echo).toEqual({ group: "changes", mode: "ask" });
   });
 
+  it("the Linear recipe (docs/ops/connections.md) writes an ok tracker connection the linear sync reads, with no dial (T4-24)", async () => {
+    const dir = await instance("linear");
+    const r = await run([
+      "connections", "add", "linear", "--type", "tracker", "--provider", "linear", "--url", "https://api.linear.app/graphql",
+      "--auth", "api_key", "--auth-header", "Authorization", "--secret", "linear_api_key", "--no-discover", "--instance", dir,
+    ]);
+    expect(r.code, r.all).toBe(0);
+    expect(yamlOf(dir, "linear")).toMatchObject({
+      type: "tracker",
+      provider: "linear",
+      reach: { http: { url: "https://api.linear.app/graphql", auth: { scheme: "api_key", header: "Authorization", secret: "linear_api_key" } } },
+      secrets: ["linear_api_key"],
+    });
+    const show = await run(["connections", "show", "linear", "--json", "--instance", dir]);
+    expect(show.code, show.all).toBe(0);
+    const shown = JSON.parse(show.out).connection;
+    expect(shown).toMatchObject({ provider_unit: { provides: "tracker", implementation: "builtin", sync: "linear" }, used_by: [{ kind: "sync", name: "linear" }] });
+    // not granted yet: the listing says what the egress door would refuse, before any request
+    expect(shown.issues.join(" ")).toContain("does not grant linear_api_key to connection:linear");
+  });
+
   it("**a key pasted where a name belongs** is refused — nothing written, nothing dialled, the value never echoed", async () => {
     const dir = await instance("key");
     const r = await run(["connections", "add", "gh", "--type", "mcp", "--env", `GITHUB_TOKEN=${KEY}`, "--instance", dir, "--", "npx", "-y", "@modelcontextprotocol/server-github"]);

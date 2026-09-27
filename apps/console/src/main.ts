@@ -48,6 +48,7 @@ import type { ComputeAdmin } from "./compute-routes.js";
 import type { SecretsView } from "./secrets-route.js";
 import type { VariablesView } from "./variables-route.js";
 import type { ConnectionsView } from "./connections-route.js";
+import { instanceSyncOpener } from "@foldedspacelabs/metistry-connections";
 import { readInstanceId, securityPresence, realExec } from "@foldedspacelabs/metistry-cli";
 import { CrewRegistry } from "./crews.js";
 import { assistantPromptFiles, loadAssistantDefinition } from "./actors.js";
@@ -450,6 +451,12 @@ const componentCtx: ComponentCtx = {
   ...(process.env.METISTRY_EK_URL ? { ekUrl: process.env.METISTRY_EK_URL } : {}),
   ...(process.env.METISTRY_BRIDGE_TOKEN_EVENTKIT ? { ekToken: process.env.METISTRY_BRIDGE_TOKEN_EVENTKIT } : {}),
   ...(process.env.METISTRY_GITHUB_TOKEN ? { githubToken: process.env.METISTRY_GITHUB_TOKEN } : {}),
+  // A sync reading its connection (T4-24, packages/connections `sync.ts`):
+  // the instance's catalog, read afresh per run, and the secrets `metistry
+  // secrets sync --to env` delivered for sync-read connections — filled at
+  // the egress door for each secret's listed hosts, never put on a request
+  // here. The `linear` collector is the first reader. No instance: absent.
+  ...(connections ? { openSync: instanceSyncOpener({ instanceDir: connections.instanceDir, seedDir: connections.seedDir, env: process.env }) } : {}),
   ...(process.env.METISTRY_AWS_ACCESS_KEY_ID && process.env.METISTRY_AWS_SECRET_ACCESS_KEY
     ? { aws: { accessKeyId: process.env.METISTRY_AWS_ACCESS_KEY_ID, secretAccessKey: process.env.METISTRY_AWS_SECRET_ACCESS_KEY, ...(process.env.METISTRY_AWS_SESSION_TOKEN ? { sessionToken: process.env.METISTRY_AWS_SESSION_TOKEN } : {}) } }
     : {}),

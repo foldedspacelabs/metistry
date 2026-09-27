@@ -103,6 +103,14 @@ export {
   type NamedSecretsOptions,
   type NamedSecretResult,
   type RemoveSecretResult,
+  migrateScope,
+  purgeShared,
+  wasSharedScope,
+  sharedScopeSecretName,
+  type MigrateScopeOptions,
+  type MigrateScopeResult,
+  type PurgeSharedOptions,
+  type PurgeSharedResult,
 } from "./secrets.js";
 export { Keychain, serviceFor, keychainAccount, promptStdin, SERVICE_PREFIX, securityKeychain, securityPresence } from "./keychain.js";
 export { type Exec, type ExecOptions, type ExecResult, realExec, formatCommand } from "./exec.js";

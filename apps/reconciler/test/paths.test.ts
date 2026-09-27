@@ -8,7 +8,7 @@
 import { mkdir, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { SECTION_WRITERS, confine, isDailyNotePath, isProtected, mayClaim, parseVaultPath, sectionWriteAllowed, writeAllowed } from "../src/paths.js";
+import { SECTION_WRITERS, confine, isDailyNotePath, isProtected, isProtectedFromRemote, mayClaim, parseVaultPath, sectionWriteAllowed, writeAllowed } from "../src/paths.js";
 import { tempRepo, type TempRepo } from "./helpers.js";
 
 describe("parseVaultPath (syntactic)", () => {
@@ -196,6 +196,19 @@ describe("protected paths (§4.7)", () => {
 // `write` door states for `knowledge_write`, for a write that reaches the
 // vault straight from a routine (`plan-tomorrow`, the fold's routine half)
 // and never goes through `may()` at all.
+describe("what a commit from the remote may not change (isProtectedFromRemote, ruling 2026-09-26)", () => {
+  it("refuses every protected path, all of `.metistry/` including `state/`, and the case-folded spellings a macOS checkout would land on", () => {
+    for (const p of [".metistry/deployment.yaml", ".metistry/rules.yaml", ".metistry/agents/x.yaml", ".metistry/state/.env", ".metistry/state/pg/x", "CLAUDE.md", "README.md", "claude.md", "Readme.md", ".Metistry/rules.yaml", ".METISTRY/state/.env", "rules.yaml", "Rules.yaml", "queries/x.yaml", "Queries/x.yaml"]) {
+      expect(isProtectedFromRemote(p), p).toBe(true);
+    }
+  });
+  it("lets the vault through", () => {
+    for (const p of ["now.md", "Areas/Alpha.md", "Journal/2026-09-26.md", "Me/About.md", "Inbox/x.md", "Areas/.metistry/x", "Areas/CLAUDE.md", ".gitignore"]) {
+      expect(isProtectedFromRemote(p), p).toBe(false);
+    }
+  });
+});
+
 describe("Me/ and the user's own journal are the owner's, whatever the caller (isUserOwnedPath)", () => {
   it("refuses every non-user principal, whichever caller class is asking", () => {
     for (const p of ["Me/New.md", "Me/profile.md", "Journal/2026-09-21.md", "Journal/Meetings/2026-09-21-standup.md"]) {

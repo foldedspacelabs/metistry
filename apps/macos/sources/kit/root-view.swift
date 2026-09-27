@@ -19,7 +19,7 @@
 //
 // ACCESSIBILITY (§2.18). Every control speaks its name, and a glyph-only one its
 // shortcut too; the Needs You row says *Needs You, 10 waiting*; the gauge says
-// *Usage, $1.84 today, 37% of the day's budget*; the sidebar and the detail are
+// *Usage, $1.84 today, 37% of the daily spending limit*; the sidebar and the detail are
 // the two landmarks; under Reduce Motion the Needs You row appears without
 // sliding. Text is semantic styles only, so the system's text size reaches
 // every label, and nothing here fixes a height a label has to fit in.
@@ -35,6 +35,9 @@ public struct RootView: View {
     @Environment(\.colorScheme) private var scheme
     private let model: AppModel
     @State private var isUsagePresented = false
+    #if os(macOS)
+    @Environment(\.openSettings) private var openSettings
+    #endif
 
     public init(model: AppModel) {
         self.model = model
@@ -95,9 +98,24 @@ public struct RootView: View {
             .accessibilityLabel(shell.gauge.spokenLabel)
             .help(shell.gauge.spokenLabel)
             .popover(isPresented: $isUsagePresented, arrowEdge: .bottom) {
-                UsageGaugeSummary(gauge: shell.gauge)
+                UsagePopover(shell: shell, showLimits: showSpendingLimits)
             }
         }
+    }
+
+    /// **Raise** and the popover's last line both lead here (C138): Settings,
+    /// on Compute, where the spending limits are set.
+    private func showSpendingLimits() {
+        isUsagePresented = false
+        Self.showSpendingLimits(in: model.settings)
+        #if os(macOS)
+        openSettings()
+        #endif
+    }
+
+    /// The pane Settings opens on for the limits.
+    static func showSpendingLimits(in settings: SettingsModel) {
+        settings.section = .compute
     }
 }
 
@@ -261,47 +279,6 @@ struct ShellDetail: View {
             return "\(waiting) waiting. \(screen)"
         }
         return screen
-    }
-}
-
-// MARK: - The gauge's popover, until Usage (screen 17) replaces it
-
-/// What the gauge already knows, and the way to the limits. Screen 17 — the
-/// month, the day chart, *Where it went* — is T5-6's `usage-view.swift`.
-struct UsageGaugeSummary: View {
-    @Environment(\.colorScheme) private var scheme
-    let gauge: UsageGauge
-
-    var body: some View {
-        let p = Palette(scheme)
-        VStack(alignment: .leading, spacing: MetistrySpace.s2) {
-            Text("Usage")
-                .metistryText(.headline, p)
-                .accessibilityAddTraits(.isHeader)
-            if let today = gauge.today {
-                Text("\(UsageGauge.dollars(today)) today")
-                    .metistryText(.body, p)
-            } else {
-                Text("Spend hasn't been reported yet.")
-                    .metistryText(.body, p, .textSecondary)
-            }
-            if let fraction = gauge.dailyFraction {
-                Text("\(UsageGauge.percent(fraction)) of the day's budget")
-                    .metistryText(.callout, p, gauge.level == .reached ? .degraded : .textSecondary)
-            }
-            if let fraction = gauge.monthlyFraction {
-                Text("\(UsageGauge.percent(fraction)) of the month's budget")
-                    .metistryText(.callout, p, gauge.level == .reached ? .degraded : .textSecondary)
-            }
-            #if os(macOS)
-            SettingsLink {
-                Text("Spending Limits in Settings…")
-            }
-            #endif
-        }
-        .fixedSize(horizontal: false, vertical: true)
-        .padding(MetistrySpace.s4)
-        .frame(width: 280, alignment: .leading)
     }
 }
 

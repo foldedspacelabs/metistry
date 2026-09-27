@@ -278,7 +278,7 @@ import Testing
     #expect(within.level == .within)
     #expect(within.symbolName == "gauge.medium")
     #expect(within.inkRole == .textSecondary)
-    #expect(within.spokenLabel == "Usage, $1.84 today, 37% of the day's budget")
+    #expect(within.spokenLabel == "Usage, $1.84 today, 37% of the daily spending limit")
 
     let high = UsageGauge(today: 1, month: 55, dailyLimit: 5, monthlyLimit: 60)
     #expect(high.level == .high, "over 90% of the month moves the needle")
@@ -290,7 +290,7 @@ import Testing
     #expect(reached.inkRole == .degraded)
 
     let monthOnly = UsageGauge(today: 2, month: 30, dailyLimit: nil, monthlyLimit: 60)
-    #expect(monthOnly.spokenLabel == "Usage, $2.00 today, 50% of the month's budget")
+    #expect(monthOnly.spokenLabel == "Usage, $2.00 today, 50% of the monthly spending limit")
 
     // a limit of zero is no limit, not a division
     #expect(UsageGauge(today: 1, month: 1, dailyLimit: 0, monthlyLimit: nil).level == .within)

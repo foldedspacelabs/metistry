@@ -100,7 +100,11 @@ describe.skipIf(!hasDb)("POST /mcp (integration)", () => {
 
   it("the agent surface is otherwise unchanged: the same token still captures over HTTP and is 403 on management", async () => {
     const auth = { authorization: `Bearer ${agentToken}`, "content-type": "application/json" };
-    expect((await fetch(`${base}/capture`, { method: "POST", headers: auth, body: JSON.stringify({ note: "http" }) })).status).toBe(201);
+    const cap = await fetch(`${base}/capture`, { method: "POST", headers: auth, body: JSON.stringify({ note: "http" }) });
+    expect(cap.status).toBe(201);
+    // T2-1: an owner credential's capture is "app" — an agent bearer still records its own source
+    const { id } = await cap.json();
+    expect((await pool.query(`SELECT source, source_agent FROM inbox WHERE id = $1`, [id])).rows[0]).toEqual({ source: "http", source_agent: agentId });
     expect((await fetch(`${base}/api/agents`, { headers: auth })).status).toBe(403);
   });
 

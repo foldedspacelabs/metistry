@@ -268,6 +268,13 @@ const DISPATCH_ROUTE = /^POST \/api\/tasks\/(\d{1,12})\/dispatch$/;
 // A thumbs up/down on one reply (docs/ops/reply-feedback.md). Session only —
 // this is the user's own judgement, not something a script speaks for.
 const FEEDBACK_ROUTE = /^(POST|DELETE) \/api\/messages\/(\d{1,12})\/feedback$/;
+// A thumbs up/down on any OTHER piece of generated prose — a meeting
+// briefing, a plan rationale, a revision explanation (T1-12; B7 of
+// `today-hub-requests.md`). `:id` is a `runs.id`: the one id already stable
+// wherever prose is produced (0031_prose_feedback.sql says why). Session
+// only, exactly like `FEEDBACK_ROUTE` — the owner token speaks for nothing
+// here either.
+const PROSE_FEEDBACK_ROUTE = /^(POST|DELETE) \/api\/prose\/(\d{1,12})\/feedback$/;
 // One row of the ledger, in full — what a tap on an activity-feed `runs:<id>`
 // opens (docs/product/app-ux-plan.md §6 phase B). Read-only, `user` principal,
 // through the `run_detail` named query like every other read (invariant 3).
@@ -951,6 +958,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         /^POST \/api\/proposals\/\d+$/.test(key) ||
         key === "GET /api/needs-you/count" ||
         FEEDBACK_ROUTE.test(key) ||
+        PROSE_FEEDBACK_ROUTE.test(key) ||
         key === "GET /api/agents" ||
         key === "POST /api/agents" ||
         AGENT_ROUTE.test(key) ||
@@ -1311,6 +1319,35 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         [id, body.rating, note],
       );
       await audit("feedback", body.rating === 1 ? "up" : "down", true, { message_id: id, rating: body.rating, has_note: note !== null });
+      return sendJson(res, 200, { ok: true, feedback: rows[0] });
+    }
+
+    // ----- prose feedback: 👍/👎 on any other generated prose (docs/ops/client-api.md § Prose feedback; T1-12) -----
+    // `:id` is a `runs.id` — the one id already stable wherever prose is
+    // produced, so "unknown id" is exactly `reply_feedback`'s check, one
+    // table over (0031_prose_feedback.sql says why).
+    const pf = PROSE_FEEDBACK_ROUTE.exec(key);
+    if (pf) {
+      const id = Number(pf[2]);
+      const exists = await db.query(`SELECT id FROM runs WHERE id = $1`, [id]);
+      if (exists.rows.length === 0) return sendError(res, "not_found");
+      if (pf[1] === "DELETE") {
+        await db.query(`DELETE FROM prose_feedback WHERE prose_id = $1`, [id]);
+        await audit("feedback", "clear", true, { prose_id: id });
+        return sendJson(res, 200, { ok: true, feedback: null });
+      }
+      const body = (await readJson(req)) as { rating?: unknown; note?: unknown };
+      if (body.rating !== 1 && body.rating !== -1) return sendError(res, "invalid_request");
+      if (body.note !== undefined && body.note !== null && typeof body.note !== "string") return sendError(res, "invalid_request");
+      const note = typeof body.note === "string" && body.note.trim() !== "" ? body.note.trim().slice(0, 500) : null;
+      // upsert: the runs row stays immutable, the judgement is revisable
+      const { rows } = await db.query(
+        `INSERT INTO prose_feedback (prose_id, rating, note) VALUES ($1, $2, $3)
+         ON CONFLICT (prose_id) DO UPDATE SET rating = EXCLUDED.rating, note = EXCLUDED.note, ts = now()
+         RETURNING rating, note, ts`,
+        [id, body.rating, note],
+      );
+      await audit("feedback", body.rating === 1 ? "up" : "down", true, { prose_id: id, rating: body.rating, has_note: note !== null });
       return sendJson(res, 200, { ok: true, feedback: rows[0] });
     }
 

@@ -2,9 +2,14 @@
 // over the reconciler's HTTP bridge (D5) — bearer per call, the uniform
 // envelope mapped to VaultError, bytes moved as base64 both ways so binary
 // artifacts survive. No filesystem, no git, no mount (invariant 7).
+//
+// Plus the one verb the artifacts contract does not have: `section()`, the
+// reconciler's `POST /vault/section` (plan §2.13) — the only way anything
+// writes between a daily note's `metistry:day` markers. Close the Day
+// (close-day.ts) is its console caller.
 
 import { VaultError, type VaultClient } from "@foldedspacelabs/metistry-artifacts";
-import type { ErrorCode } from "@foldedspacelabs/metistry-core";
+import type { ErrorCode, NoteSectionName } from "@foldedspacelabs/metistry-core";
 
 export interface VaultHttpConfig {
   url: string; // METISTRY_RECONCILER_URL
@@ -12,9 +17,38 @@ export interface VaultHttpConfig {
   timeoutMs?: number;
 }
 
-const CODES = new Set<ErrorCode>(["unauthenticated", "forbidden", "not_found", "invalid_request", "conflict", "rate_limited", "not_available", "internal"]);
+// Every code the bridge's envelope may carry. `section_missing` is here so a
+// broken-markers refusal reaches the caller as itself (a 409 it can act on),
+// never as the `not_available` an unknown code falls back to.
+const CODES = new Set<ErrorCode>(["unauthenticated", "forbidden", "local_only", "not_found", "invalid_request", "conflict", "section_missing", "rate_limited", "not_available", "internal"]);
 
-export function httpVaultClient(cfg: VaultHttpConfig): VaultClient {
+/** What `POST /vault/section` answers (docs/ops/reconciler.md, "The section operation"). */
+export interface NoteSectionWritten {
+  path: string;
+  section: NoteSectionName;
+  sha256: string;
+  bytes: number;
+  outer_sha256: string;
+  appended: boolean;
+}
+
+/**
+ * The section operation, as a caller holds it. `principal` is attribution
+ * the bridge bounds by the bearer (the console's may claim `user` or
+ * `morning-brief`); `expectedOuterSha` is `scanNoteSection(bytes).outerSha256`
+ * of the note as the caller read it. Refusals are `VaultError`s carrying the
+ * bridge's code: `not_found` (no such note), `section_missing`, `conflict`
+ * (the owner edited outside the section since the read), `forbidden`,
+ * `invalid_request`.
+ */
+export interface NoteSectionClient {
+  section(path: string, marker: NoteSectionName, body: string, principal: string, expectedOuterSha: string, act?: { run?: string; turn?: string }): Promise<NoteSectionWritten>;
+}
+
+/** The console's vault: the artifacts contract, and — where the deployment has it — the section operation. */
+export type ConsoleVaultClient = VaultClient & Partial<NoteSectionClient>;
+
+export function httpVaultClient(cfg: VaultHttpConfig): VaultClient & NoteSectionClient {
   const base = cfg.url.replace(/\/+$/, "");
   const timeout = cfg.timeoutMs ?? 15_000;
 
@@ -81,6 +115,12 @@ export function httpVaultClient(cfg: VaultHttpConfig): VaultClient {
       const r = await request("POST", "/flush");
       if (!r.ok) return refuse(r);
       return r.json();
+    },
+    async section(path, marker, body, principal, expectedOuterSha, act = {}) {
+      const r = await request("POST", "/vault/section", undefined, { path, marker, body, principal, expected_outer_sha: expectedOuterSha, ...(act.run !== undefined ? { run: act.run } : {}), ...(act.turn !== undefined ? { turn: act.turn } : {}) });
+      if (!r.ok) return refuse(r);
+      const j = (await r.json()) as NoteSectionWritten;
+      return { path: j.path, section: j.section, sha256: j.sha256, bytes: j.bytes, outer_sha256: j.outer_sha256, appended: j.appended };
     },
   };
 }

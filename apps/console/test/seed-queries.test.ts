@@ -60,6 +60,7 @@ const REQUIRED = [
   "knowledge_drafts", // GET /api/knowledge/drafts — the owner's drafts, the other half of the column every agent door filters out
   "knowledge_areas", // GET /api/knowledge/areas — the area rollup the Knowledge screen lists
   "secret_last_used", // GET /api/secrets — *last used*, from the names the egress fill stamps on its run (never a value)
+  "day_close", // POST /api/today/close — what the day did to the owner's tasks, the section Close the Day writes
 ];
 
 // The daily flow's five (docs/product/daily-flow-spec.md §11, P1-5). Listed
@@ -177,9 +178,13 @@ describe("seed queries", () => {
     // `people_by_email` (T1-10) maps an address to a page naming someone the
     // owner knows: Today's to read, never an agent's way to probe who the
     // owner knows by address.
+    // `day_close` (T2-8) is what the day did to the owner's tasks — paths
+    // and the text of their own lines — composed into their daily note by
+    // Close the Day, the owner's door alone.
     expect(routeBacked.sort()).toEqual([
       "board",
       "collector_health",
+      "day_close",
       "day_work",
       "knowledge_areas",
       "knowledge_drafts",

@@ -1,5 +1,91 @@
 # @metistry-apps/macos
 
+## 0.14.0
+
+### Minor Changes
+
+- 8c5a871: **Activity on the Mac (T6-3).** The Activity row now opens the timeline: time bands (*Just now*, *Earlier today*, …), one glyph column, and who did it — the assistant by its configured name, an agent in its hue, anything else neutral. Eight chips (All and the query's seven groups) beside the window, agent and project controls. New rows are held behind a *↓ 12 new* pill and never inserted under the reader. A reply's tool calls fold under its turn, which reads its model, time, cost and tokens from its run and, opened, fetches every call by `turn_id`. A routine that wrote a file carries the spark and opens the prose; one that could not run is drawn absent, not failed. Failure is drawn on the glyph only, from `ok`. Empty, filtered-empty and failed are three different panels. `ActivityStore.activityFeed` gains a `turnID` parameter.
+- 3feeb6f: **The capture composer on the Mac (T5-5).** The toolbar's + and ⌘N now open the composer: one field (`note…`), **Capture** (⌘↩) and a receipt line. It does not wait for the console — ⌘↩ moves the words into a pending capture (*capturing… you can close this*) and closing cancels nothing — and Esc closes it keeping the draft until it is sent. Each capture mints one `Idempotency-Key` when Capture is pressed and every resend carries it, so a reply lost after the write replays as the same capture with the same id: *captured → inbox #418 · Inbox/….md*, the id and path the console returned. A capture that gets no answer is queued (*queued — will send when the instance is reachable*) and resent on a backoff, when the composer opens, and as soon as the console is heard from again; a refusal shows the console's words, puts the text back in the field and offers Retry with the same key. An instance switch returns unsent words to the field rather than sending them to the other instance. Text only: attachments and live capture wait for the designer's action bar (#253).
+- f8f9b4b: **Chat on the Mac (T6-2).** The Chat row opens the conversation as screen 1 draws it: one capped column (620pt at the reply's 16pt, growing with the text size) centred so a resize never rewraps a line; the owner's turns on `accent-quiet`, the assistant's with a 2px `agent` rule in the gutter (C69); day separators; 12-hour times. The transcript is `GET /api/messages?limit=30`, merged by direction and id. A turn's state is its own message's `status`. Its tool strip is joined exactly — the recent `turn` runs, read once for the `meta.message_id` the drain stamps, then `GET /api/turns/:turn_id/progress` — never by adjacency or time; `▸ 4 tools · 6.2s · $0.031` on `sunken`, open by itself only when a call failed. Waiting shows the dots, then the running tool with its count and seconds, then *nothing back for 62s* on `degraded-quiet`; the dots hold flat under Reduce Motion (C16). A reply that arrives while the reader is scrolled up never moves the viewport: it is announced once and waits behind *↓ New Reply* (P9). Send is a decision (O3) — off while unreachable with the gate's sentence, and a send that fails stays as *Not sent* with Try Again; Stop is drawn and off, saying the console has no cancel route. The tier chip pins a tier from `GET /api/commands` for this turn or the conversation and sends it as `tier`; ⇧⌘N resets it. A reply's pending question is Needs You's own card inside the turn; its `[[wikilinks]]` are chips that open the page in a pane beside the column, or a sheet when the window is narrow. Tapbacks: the two thumbs and the right-click menu, Bad with an optional note. The sidebar's Chat row carries a dot while a turn works.
+- 339d465: **Live events on the Mac (T5-7).** The app holds one subscription to `GET /api/events` per instance (`ConsoleSession.events`, `LiveEvents`) over the `console session` child, and hands each event to the readers of the store it names — the catalogue's "the client refetches" column as `EventTopic`s. A `SectionModel` built with topics is marked due by exactly its events; `needs_you.changed`'s count drives the Needs You row, the badge and the Dock directly (announced once per change). While the stream is live those readers stop polling on their clocks (a five-minute check stays, for a snooze coming due); while it is down they poll as before, and it reopens on a 3 s → 1 min backoff with `Last-Event-ID`. A `resync`, an unreadable frame or a subscription with nothing to resume from marks every reader due. `metistry console session --stdio` now passes on the console's cursor — the id-only frame a fresh subscriber gets first — as `{id, event: {id}}`; it was dropped, so a stream that was quiet from the start could not resume.
+- 0771fee: **Needs You: the bodies (T5-4b).** A request's detail is one card, drawn from the reading the server serves on every `GET /api/proposals` row (`request`, X-5) — the Mac keeps no kind → word map of its own, and a row from a console that predates it reads as core's unknown kind: a report with Dismiss. `RequestReading` fills the one body block the type draws from the payload — `payload.body` field for field where a producer sends it, else the fields each producer actually writes — and says `partial` when a block cannot be filled rather than inventing it. The answers are the type's own (`RequestAnswering`): the primary verb filled, Revise and Decline outlined, Later as a glyph that says *Later, L*; a decision goes through `POST /api/proposals/:id` with `if_unchanged.seen_at`, a door onto another system through `RequestDoorHandling` (none wired in this build, each control saying so). Questions step one at a time with a segmented bar and end on Your Answers with Edit and Send Answers (⌘↩); one question sends on the choice; *Something else…* sends the owner's words; `allow_other: false` is honoured. A `409 stale` sends nothing, repaints the row the refusal carries, keeps the owner's words and says so; `409 already_decided` shows the winner; any other refusal — C40's wider-than-asked, a C45 consequence — is shown verbatim and the card stays answerable; `payload.error` draws as failed with its reason. Access Revise composes `<asked>/<folder>` so it cannot name a wider or sibling area, and the receipt states the tier trade from `prior_tier`. A meeting's Accept All and Decline All are held ten seconds behind Undo, then sent one per part in order, and a partial result reads *4 of 5 accepted* with why. `RequestCards` keeps one card per request so the detail and the Item menu (`itemActions`) act on the same one. `RequestRow` decodes `request` and `source`; `AnsweredGrant` decodes `prior_tier`; `RequestAnswer.answers` carries per-question answers; `MetistryGlyph` gains Approve's check and Decline's cross; `ChoicesBody` takes `allowsOther`.
+- a28793b: **Needs You on the Mac: the list (T5-4a).** The Needs You row now opens a list and a detail: one line per request — the type's word as the console gives it (X-5's `request`, so a stored kind is never shown), what it asks, who asked (the configured name for the assistant, an agent's id, or the source a mirror lives in, with `external` / `you` as a neutral chip) and how old it is — grouped *Today* and *Earlier*, newest first, filtered by type (only the types present, with counts) and by **From** (Everyone · the assistant · Agents · each source present). One selected request is drawn beside the list; its body and answers arrive with T5-4b. Selecting several — ⌘-click, ⇧-click, ⇧↑↓, ⌘A or *Select All on This Page*, capped at the batch's 100 — gives the bulk list: **Later · Skip · Decline**, never Approve (`BulkVerb` cannot express one), with Decline's one reason given once. The batch's result is a band above the list — *2 of 3 declined*, what happened to the rest, the still-pending row kept selected and **Retry** re-sending exactly it. While the console is unreachable every verb, Retry and the Item menu's L and D are disabled with the reason under them, and nothing is sent. `RequestRow` reads `request` and `source` off each row.
+- 9dcc405: **Project grants inherited (T4-7).** A crew's or external agent's effective reach is now its own grant ∪ the own grant (0032) of every project its row lists — core's new `inheritGrants` (the widest tier; its own areas first, then each project area its own do not cover; `queries` if any holds it), with the added reach reported as `via`. The console's door resolves it per request (`authenticateAgent` reads the membership and the projects' grants in one statement) and never writes it into the agent's row, so leaving a project removes what it gave on the next request. `resolveActor` takes `projectGrants` (`listProjectGrants`) and the permissions table marks each inherited entry with the new provenance `{kind: "project", project}` — *via project <slug>* in `permissionRowText`, the console's panel and MetistryKit (`PermissionProvenance.project`). A project's stored grant is re-checked fail closed; the assistant inherits nothing.
+- fce1f33: Questions v2 and both report names (T2-3). **A request can ask several
+  questions** (1–5, each pick one or pick any, 2–8 options, and — unless it says
+  `other: no` — ending in *Something else…*): the assistant's ```` ```decision ````
+  block grows a `question:` / `pick:` / `other:` grammar beside v1's (core's
+  `parseDecisionBlock`, still hand-rolled and bounded), and every agent asks the
+  same way through `requests_create` kind `question` with `questions` — no new
+  tool; the brain's eager surface grows 64 tokens (4,267 → 4,331) and stays at 26
+  tools. **Answers are stored per question**: `POST /api/proposals/:id
+  {decision: "answers", answers: [{choices, other?}, …]}` is checked against the
+  questions as stored (`checkAnswers`) and settles the row `answered`, with
+  `payload.answers` and the answers' words in `feedback`; free text is `other`
+  and never executes. Revise on a question is `accept_with_changes`. v1's wire —
+  the option itself as `decision` — still answers a one-question request.
+  **`decideProposal` reads F-5's table** (`describeRequest(kind, payload).decisions`)
+  instead of building its own list: a report is Dismissed (`skip`) and can no
+  longer be approved, revised or declined; Skip on one row is only a type's own
+  Decline (Dismiss, Not Mine) — elsewhere it is the batch's (K2). `GET
+  /api/proposals` serves a question's `request.questions`. **`decided`** is the
+  report kind for a decision made (C104); `decision` is accepted and stored as
+  `decided`. The PWA draws each type's own answers from the table, and a
+  question's questions as its body. MetistryKit sends Send Answers
+  (`RequestAnswer.answers`).
+- 2a34dfe: **Today's spine on the Mac (T6-1a).** Under the top, the day is one time-ordered column: meetings at their time, your rows in the gaps between them in your order (a focus block is a place for rows; a row too long for any gap left is shown under *Doesn't fit*, never refused), a NOW rule pinned under the header, and the morning folded to one line above it — *Earlier today — 3 done · 1 meeting · 2 carried forward* — so the page opens at now. With no meeting on the day it is the plain list. The Board's rows on the day carry the board glyph and no checkbox. Drag a row, or Move Up / Move Down, and the whole order is stored (`PUT /api/today/order`); a refusal puts the rows back and says so. One click ticks with a receipt and Undo, and Edit ▸ Undo; a line changed in Obsidian shows as it now stands and nothing is written. The header's day bar measures Meetings · Travel · Focus Blocked · Tasks That Fit · Doesn't Fit against `working_hours`, speaks one sentence and carries its table. **Today / All** (⌥⌘T): All is the vault's open lines through the `where:` box, copyable, with the parser's own words on a refusal (⌘F focuses it); *Waiting on Others* is `where: waiting`, and *Slipping* and *Owed* are drawn dimmed with why until the language can say them. Estimates read `task_size_minutes` from `Me/profile.md`.
+- 307dbbc: **Today's top on the Mac (T6-1b).** The Today row now opens the day. The Morning Brief is its first state — one serif paragraph with the configured name and *written, not retrieved*, the Standup collapsed with Copy Standup — and folds to its first sentence on the next open. From thirty minutes before a meeting, Next Up shows who is in it, what you owe them (tickable), the brief's line for it, Open Notes, Record (dimmed until the capture bar) and Draft the Agenda. When no focus block is left, calendar help offers one move, and a meeting with other people in it warns first, naming who the calendar will tell and the new time. From thirty minutes before the working day ends, Close the Day: done, still open and owed lines each with Tomorrow · This Week · Someday, tomorrow's shape, a line for tomorrow, and a folded *Day closed at…* line — or, when the daily note's markers are broken, the request, never a success.
+- 8f85ece: **Usage on the Mac: the gauge's popover (T5-6, screen 17).** The toolbar gauge now opens Usage, 400 points wide: *This month* — the amount, *of $60 this month*, a meter and *$1.84 today · 8 days left*, and at a limit what the engine is doing about it (*Compute stopped at the $60 monthly spending limit* for Stop; Critical only and Allow say theirs) with **Raise**; *Each day* — one bar per day from the 1st to today, the peak on the heading, hover for a day's amount, one spoken sentence with the table in the rotor; *Where it went* — who spent this month, highest first (the chat turns read *Chat*); one line each for the cache rate, AWS this month (*not compute*) and the calls with no price (*count as $0*); then **Spending Limits in Settings**. Raise and that link open Settings on Compute. Nothing projects where the month is heading. The popover reads `GET /api/compute` — the gauge's own read — and the `spend`, `spend_by_actor` and `aws_costs_daily` named queries (three new `UsageStore` methods, with recorded fixtures); it opens on the last answer and keeps it when a refresh fails. The gauge speaks *37% of the daily spending limit* — C130's word, not *budget*.
+
+### Patch Changes
+
+- 2fc0ef0: **Compute (T4-18): provider keys are this instance's secrets, providers gain a
+  switch and billing, and the catalogue is searched by model.**
+  
+  - `compute.yaml`'s `auth.secret` is a reference: `{{ secret.<name> }}` (one of
+    this instance's secrets), `env:<NAME>` (an install variable), or — so every
+    older file loads — the bare `<NAME>`. A pasted key still cannot match any of
+    them. Core gains `credentialOf`, `providerCredential`, `credentialEnvNames`,
+    `credentialFromEnv` and `providerSecretNames`; the reference spelling moved
+    to a leaf module (`secret-ref.ts`, re-exported by `secrets.ts`) so
+    `compute.ts` can read it without a load-time cycle.
+  - A service reads a key from its environment, never the Keychain:
+    `{{ secret.x }}` arrives as `METISTRY_SECRET_X` (core's `secretDeliveryVar`),
+    which `metistry secrets sync --to env` now writes for every secret the
+    providers reference, from this instance's item only; `metistry up`'s engine
+    allowlist passes exactly those names. For one release a `*_api_key` secret is
+    also read from the `METISTRY_<NAME>` line T4-3 filled, so `migrate-scope`
+    rewriting the reference cannot cut a running engine off.
+  - `metistry compute providers add` stores the key through `secrets set`'s own
+    code — this instance's Keychain account, recorded in `secrets.yaml` sent only
+    to the provider's host — and writes the reference. The `openrouter` template
+    references `{{ secret.openrouter_api_key }}`. Nothing in `metistry compute`
+    reads or writes the retired per-user account any more. `--secret` takes a
+    secret's name; the old UPPER_SNAKE spelling is refused with the name it
+    became.
+  - Providers gain `enabled` (off = neither searched nor offered; an assignment
+    naming a switched-off provider is refused by the schema) and `billing:
+    token | subscription` (off this machine only). The report carries `enabled`,
+    `billing`, `tag` (`local` · `cloud` · `subscription`), `secret_kind`,
+    `secret_name` and presence from this instance's account.
+  - `seed/model-identities.yaml` and core's `groupCatalogue`: provider model id →
+    one model, overlaid by key by the instance's `.metistry/model-identities.yaml`
+    (a new `INSTANCE_LAYOUT.modelIdentities`). An id it cannot map stays its own
+    row under its provider.
+  - New verbs: `compute providers set <name> [--enabled on|off] [--billing …]
+    [--base-url …] [--secret …]`, `compute models search [<query>]`,
+    `compute unassign <tier|crew:name>`. New owner routes:
+    `GET /api/compute/catalogue[?q=&provider=&refresh=true]` (listings kept
+    15 minutes in memory; `refresh` re-reads them) and
+    `POST /api/compute/unassign {tier|crew}`; MetistryKit's `UsageStore` gains
+    `computeCatalogue` and `unassignCompute`.
+  - `migrate-scope` now rewrites `compute.yaml`'s `auth.secret` (its schema reads
+    references), and still counts a rewritten reference's original as this
+    instance's, so reruns stay idempotent and `purge-shared` can find it.
+    `METISTRY_SECRET_*` is never taken for a retired shared-scope original.
+  - `fetchModels` keeps what a listing says beyond the id (name, context,
+    per-million price, tools) as `details`.
+
 ## 0.13.0
 
 ### Minor Changes

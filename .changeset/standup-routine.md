@@ -1,6 +1,0 @@
----
-"@metistry-apps/routines": minor
-"@foldedspacelabs/metistry-cli": patch
----
-
-**The Standup routine (T3-5).** `routines/standup` renders `Templates/Standup.md` (or the path its `template` config names) into `Journal/Standup/<date>.md` on working days at 08:00 — its own reserved subfolder, written through the reconciler as principal `standup`, so the file says `source: standup`. Model-free: `prose` is not legal in a standup render until C103 (T3-6). It never overwrites a file it does not own (`skipped:user_owned`), writes a morning once (`meta.standup_for`), dates a late run from its slot, and writes nothing without working days in `Me/profile.md` — the runner does not start it, and a Run Now records `skipped:no_working_days` itself. `skip_without_calendar_event` (off by default) skips a day whose calendar has no standup; a calendar that cannot be asked never causes a skip. Its row landing is the `routine.status {name: "standup"}` that swaps Today's placeholder for the file. `routines.standup` in `.metistry/scheduled.yaml` (T3-4's move) now applies to it. The seeded `Templates/Standup.md`'s Yesterday list asks for `status = done` — without it the list was always empty, because a task query scopes to open tasks by default — and `metistry templates check` knows the template's writer as `standup`.

@@ -1,5 +1,301 @@
 # @foldedspacelabs/metistry-core
 
+## 0.14.0
+
+### Minor Changes
+
+- f01606b: **Close the Day (T2-8).** `POST /api/today/close {day, line?}` writes the daily note's `metistry:day` section through the reconciler's section operation as `user` — when the day closed, what was done, what moved and to when, and the owner's line for tomorrow, facts only and written whole on every close — then enqueues `plan-tomorrow` with the day it closed (`closedDay`, the routine's close shape from T3-7), one pass at a time, recorded as a `routine_run` with `meta.trigger: "close"`. The note is scanned with core's `scanNoteSection` before anything is sent: markers deleted, doubled or quoted in code are `409 section_missing` with the reason, nothing is written into the note, one `note` request (kind `knowledge`, from `console`) says why and is brought up to date rather than stacked on a second close, and the plan is still made. A `day` that is not today in `METISTRY_TZ` is `409 stale`; a missing `Journal/<day>.md` is `404` (the door never creates the owner's note). The console's vault client gains `section()` over `POST /vault/section` and now passes `section_missing` (and `local_only`) through as themselves instead of `not_available`. New named query `day_close` (`expose: route`): done from the index's `done_on` plus the Tick door's own record, moved from the Defer door's record, which now stores `to` (the day or `someday`) on its audit row. Core marks the route served. The seeded `Templates/Daily.md` places the markers under `## Today · Metistry`; existing instances keep their own template (the first close appends the heading and markers to a note that has none).
+- 2fc0ef0: **Compute (T4-18): provider keys are this instance's secrets, providers gain a
+  switch and billing, and the catalogue is searched by model.**
+  
+  - `compute.yaml`'s `auth.secret` is a reference: `{{ secret.<name> }}` (one of
+    this instance's secrets), `env:<NAME>` (an install variable), or — so every
+    older file loads — the bare `<NAME>`. A pasted key still cannot match any of
+    them. Core gains `credentialOf`, `providerCredential`, `credentialEnvNames`,
+    `credentialFromEnv` and `providerSecretNames`; the reference spelling moved
+    to a leaf module (`secret-ref.ts`, re-exported by `secrets.ts`) so
+    `compute.ts` can read it without a load-time cycle.
+  - A service reads a key from its environment, never the Keychain:
+    `{{ secret.x }}` arrives as `METISTRY_SECRET_X` (core's `secretDeliveryVar`),
+    which `metistry secrets sync --to env` now writes for every secret the
+    providers reference, from this instance's item only; `metistry up`'s engine
+    allowlist passes exactly those names. For one release a `*_api_key` secret is
+    also read from the `METISTRY_<NAME>` line T4-3 filled, so `migrate-scope`
+    rewriting the reference cannot cut a running engine off.
+  - `metistry compute providers add` stores the key through `secrets set`'s own
+    code — this instance's Keychain account, recorded in `secrets.yaml` sent only
+    to the provider's host — and writes the reference. The `openrouter` template
+    references `{{ secret.openrouter_api_key }}`. Nothing in `metistry compute`
+    reads or writes the retired per-user account any more. `--secret` takes a
+    secret's name; the old UPPER_SNAKE spelling is refused with the name it
+    became.
+  - Providers gain `enabled` (off = neither searched nor offered; an assignment
+    naming a switched-off provider is refused by the schema) and `billing:
+    token | subscription` (off this machine only). The report carries `enabled`,
+    `billing`, `tag` (`local` · `cloud` · `subscription`), `secret_kind`,
+    `secret_name` and presence from this instance's account.
+  - `seed/model-identities.yaml` and core's `groupCatalogue`: provider model id →
+    one model, overlaid by key by the instance's `.metistry/model-identities.yaml`
+    (a new `INSTANCE_LAYOUT.modelIdentities`). An id it cannot map stays its own
+    row under its provider.
+  - New verbs: `compute providers set <name> [--enabled on|off] [--billing …]
+    [--base-url …] [--secret …]`, `compute models search [<query>]`,
+    `compute unassign <tier|crew:name>`. New owner routes:
+    `GET /api/compute/catalogue[?q=&provider=&refresh=true]` (listings kept
+    15 minutes in memory; `refresh` re-reads them) and
+    `POST /api/compute/unassign {tier|crew}`; MetistryKit's `UsageStore` gains
+    `computeCatalogue` and `unassignCompute`.
+  - `migrate-scope` now rewrites `compute.yaml`'s `auth.secret` (its schema reads
+    references), and still counts a rewritten reference's original as this
+    instance's, so reruns stay idempotent and `purge-shared` can find it.
+    `METISTRY_SECRET_*` is never taken for a retired shared-scope original.
+  - `fetchModels` keeps what a listing says beyond the id (name, context,
+    per-million price, tools) as `details`.
+- 211b408: **Connections through the proxy: the lazy pair (T4-8b).** `/mcp` gains `connections_list` and `connections_call` — the one way an agent reaches the owner's connections (plan §2.6, C115). `connections_list` names the connections lent to the caller and the tools it may call without dialling anything; `connections_list { connection }` fetches those tools' own definitions on demand, so no upstream tool is ever on the eager surface. `connections_call` runs one through an injected `ConnectionsProxy` (the host's pooled client): secrets filled only at egress, the caller's bearer handed over solely so a call carrying it is refused, the answer redacted and sanitized. This release runs a connection's Reads set to Allow; Never and unlisted tools are "no such tool", Ask First and Changes things are refused with the reason. Every call — refusals included — is one `runs` row of kind `connection_call`, read back by the new route-only `connection_calls` named query.
+  
+  Core: `Resource` gains `{kind: "connection", door, name, offered}` and `may()` decides it (`mayConnection`): the assistant reaches every connection; an agent needs the connection offered to agents **and** named in `scope.connections`; a crew needs that **and** the new `connections` tool group in `uses`. A miss hides as "no such connection" (new reason `connection_required`). `RULED_TOOLS` and `TOOL_PERMISSION_CELLS` carry the two tools. The eager count moves 26 → 28 with its reason beside `COUNT_ACKNOWLEDGED` in `ops/scripts/check-tool-surface.mjs`; the assistant's `BRAIN_TOOLS` follows the manifest.
+- 851e08a: **Connections P1: the files, the pooled client, `metistry connections` and the
+  read routes (plan §2.6, M13, T4-8a).** A new package,
+  `@foldedspacelabs/metistry-connections`, reads `.metistry/connections/<name>.yaml`
+  against the connection-type registry — `ok`, `absent` (provider not installed;
+  nothing deleted) or `failed`, never fatal — and adds four rules to F-3's
+  schema: no key-shaped literal anywhere a value is typed, no `{{ secret.x }}` in a
+  URL, on a command line or in a path. Its `ConnectionPool` holds one MCP client
+  per connection (stdio or Streamable HTTP), and refuses before dialling a tool
+  the file does not list, one at Never, one at Ask First without an approval, and
+  a call whose arguments carry the caller's own bearer; a command gets only the
+  environment its file names, never the host process's; every HTTP request goes
+  through core's `guardedFetch` with `connection:<name>` as the grantee and is
+  pinned to the connection's origin (no redirect followed); every answer is
+  redacted. `checkConnection` is its `check()` (ok · degraded · absent · failed).
+  The CLI adds `metistry connections list|show|add|set|policy|remove|test`
+  (protected writes through the reconciler; `add` dials once and applies the
+  owner's Q15 defaults) and one doctor row per connection, never `failed`. The
+  console serves `GET /api/connections` and `GET /api/connections/:name` to the
+  owner — names, never values, and no dial. Core adds
+  `INSTANCE_LAYOUT.connectionsDir`.
+- 23b963a: Events become requests (T2-9, C96). **A failed routine** raises one `report`
+  per error signature, carrying when it last ran cleanly and when it failed and
+  a *Try Again* act; it clears as `resolved_at_source` the next time the routine
+  succeeds. **A missing secret** — a `requires.env` variable or the engine's
+  `auth.secret` — raises one request of the new stored kind `secret_failure`
+  (read as access) naming every component it stopped, cleared once the variable
+  is set. **A sync conflict copy** is now a `review` holding both versions (the
+  note as it stands and the copy, with their hashes) instead of a path-only
+  report, and clears when the copy is gone. All three are core mirrors: one row
+  per subject while it waits, and an answer is not asked again until what it was
+  about has recovered. The runner takes `requests` (default `runnerRequests`
+  over its own db; `null` raises none).
+- ed7f5c2: **File history (T10-4): `GET /api/knowledge/history`, `GET /api/knowledge/version`,
+  and the reconciler's `GET /vault/show`.** F-1's two frozen rows are served. History
+  is a note's commits, newest first, followed across renames — each naming the file
+  as it was called then, what the commit did to it, and the committer's
+  `Brain-Source:`/`Metistry-Run:`/`Metistry-Turn:` trailers (T10-1) as provenance.
+  Version is the note's bytes at one commit, from the bridge's new `GET /vault/show`
+  (`git cat-file blob`, base64 on the bridge). Both are the owner's alone and notes
+  only: a protected or non-vault path is refused at the console and again at the
+  bridge, for either bearer, and a `sha` that is not 7–64 hex characters is refused
+  at both before it can reach git's argv; a commit not on the vault's branch is
+  `404`. `GET /vault/log` gains the trailers on every entry and, with a path,
+  `path` and `change` — additive. Both fixtures are re-recorded from their contract
+  shape (a superset of it).
+- ea2e876: **Restore a file (T10-5): `POST /api/knowledge/restore {path, sha, seen_sha}`.** F-1's
+  frozen row is served. The door never writes: it raises one Needs You request — an
+  improvement drawn as a before and after (the note now, the note at `sha`) — and
+  answers `202` with the request as `GET /api/proposals` serves it, so Knowledge can
+  show it inline. Only Approve restores: the version's bytes, re-read from the
+  bridge's `GET /vault/show` and checked against what the request showed, are written
+  back as `user` — a new commit, *Restore <path> to <date>* — compare-and-swap on the
+  file as the request showed it. `seen_sha` is the file's content hash as rendered
+  (`""` for a note that is gone); a file that moved is `409 stale` at the raise and
+  again at Approve (nothing written, the request still waiting). Notes only — a
+  protected or non-vault path is refused for the owner too — and the owner's alone:
+  every other principal is refused in the route, and Approve restores only a request
+  this console raised whose `source` (`restore:<path>@<sha>`, one per note and
+  commit) names the same path and commit; a restore-shaped payload on any other row
+  restores nothing and is never read as a prompt improvement. `POST /api/proposals/:id`
+  answers with `restored`, and its decision SELECT now carries `source` (additive).
+- ac377ed: The Morning Brief (T3-6; plan §2.13, §2.5; C97, C102, C103, C111). At 07:00 on
+  a working day `morning-brief` renders `Templates/Brief.md` (seeded) into
+  `Journal/Brief/<date>.md` as principal `morning-brief` — the standup embedded
+  by reference, today's timed meetings under **Next Up**, what is waiting on you
+  — writes the daily note's `metistry:day` section model-free through
+  `POST /vault/section` (never creating the note; broken markers raise one
+  `note` request), and enqueues ONE assistant turn for the file's prose slots.
+  File and section are one commit: the runner now hands every run its
+  `ctx.runId`. The chat message stays, opening with the file.
+  
+  **C103 — prose outside fold templates.** Core's `PROSE_SOURCES`
+  (`knowledge-fold`, `standup`, `morning-brief`) is where `{{ prose }}` renders a
+  slot; every other writer still gets the refusal note, now `PROSE_REFUSAL`. New
+  `prose-slots.ts`: `fillProseSlots` accepts a change to a pending slot's line —
+  one line of prose, no block, no comment — and nothing else, and marks each
+  filled line `<!-- metistry:written N -->`. `JOURNAL_MACHINE_DIRS` gains
+  `Brief`; `JOURNAL_ROUTINE_DIRS` / `journalRoutineOf` name the routine that owns
+  each folder it writes. `CalendarEvent` gains `attendees`.
+  
+  **`knowledge_write` in a routine's own folder** (`Journal/Brief/`,
+  `Journal/Standup/`, `Journal/Plan/`) now does exactly one thing: fill the
+  pending prose slots of a file the routine wrote, in the routine's name with the
+  reply's turn. A create there, `Journal/Plan/` at all, a file the routine does
+  not own, a stale hash, or any other changed byte is refused — before this, the
+  assistant could create a file in those folders and pre-empt the routine's own.
+  
+  The Standup enqueues the same one turn when its template has `prose` (the
+  seeded one has none). The console's vault client gains `section`, surfacing
+  `section_missing` by code. `metistry templates check` knows `Brief.md` renders
+  as `morning-brief`.
+- 9dcc405: **Project grants inherited (T4-7).** A crew's or external agent's effective reach is now its own grant ∪ the own grant (0032) of every project its row lists — core's new `inheritGrants` (the widest tier; its own areas first, then each project area its own do not cover; `queries` if any holds it), with the added reach reported as `via`. The console's door resolves it per request (`authenticateAgent` reads the membership and the projects' grants in one statement) and never writes it into the agent's row, so leaving a project removes what it gave on the next request. `resolveActor` takes `projectGrants` (`listProjectGrants`) and the permissions table marks each inherited entry with the new provenance `{kind: "project", project}` — *via project <slug>* in `permissionRowText`, the console's panel and MetistryKit (`PermissionProvenance.project`). A project's stored grant is re-checked fail closed; the assistant inherits nothing.
+- fcfbadf: **Project grants table (T1-13).** `PUT /api/projects/:slug` takes a `grants`
+  field — `{tier, areas, queries?}`, migration `0032_project_grants.sql` — a
+  project's own read grant, validated by the identical `validateGrants` an
+  agent's own `PUT /api/agents/:id/grants` already uses (external rules: the
+  bare vault is refused, and every area must be vault CONTENT — `.metistry/`,
+  `Artifacts/…` and a traversal are refused). Nothing reads the column yet: a
+  member's effective reach unioning its own grants with its projects', "via
+  project" provenance, is T4-7.
+- fce1f33: Questions v2 and both report names (T2-3). **A request can ask several
+  questions** (1–5, each pick one or pick any, 2–8 options, and — unless it says
+  `other: no` — ending in *Something else…*): the assistant's ```` ```decision ````
+  block grows a `question:` / `pick:` / `other:` grammar beside v1's (core's
+  `parseDecisionBlock`, still hand-rolled and bounded), and every agent asks the
+  same way through `requests_create` kind `question` with `questions` — no new
+  tool; the brain's eager surface grows 64 tokens (4,267 → 4,331) and stays at 26
+  tools. **Answers are stored per question**: `POST /api/proposals/:id
+  {decision: "answers", answers: [{choices, other?}, …]}` is checked against the
+  questions as stored (`checkAnswers`) and settles the row `answered`, with
+  `payload.answers` and the answers' words in `feedback`; free text is `other`
+  and never executes. Revise on a question is `accept_with_changes`. v1's wire —
+  the option itself as `decision` — still answers a one-question request.
+  **`decideProposal` reads F-5's table** (`describeRequest(kind, payload).decisions`)
+  instead of building its own list: a report is Dismissed (`skip`) and can no
+  longer be approved, revised or declined; Skip on one row is only a type's own
+  Decline (Dismiss, Not Mine) — elsewhere it is the batch's (K2). `GET
+  /api/proposals` serves a question's `request.questions`. **`decided`** is the
+  report kind for a decision made (C104); `decision` is accepted and stored as
+  `decided`. The PWA draws each type's own answers from the table, and a
+  question's questions as its body. MetistryKit sends Send Answers
+  (`RequestAnswer.answers`).
+- 406bacb: Resolve a conflict (T2-10, plan §2.11). `POST /api/knowledge/conflicts/resolve
+  {path, keep, seen_sha}` is served: the owner keeps the note as it stands
+  (`mine`) or takes the sync tool's copy (`theirs`), written as `user` through
+  the reconciler's new `POST /vault/conflicts/resolve`, for a copy the index has
+  in `conflict` and nothing else. `seen_sha` is the side being given up, as the
+  review showed it; a mismatch, or a path not in conflict, is `409 stale` with
+  the conflict as it stands (`null` when there is none). The side given up is
+  committed before it is discarded, so history keeps it after the client's
+  ten-second Undo (C136); a settle refused for any other reason is written on the
+  conflict's review as `payload.error` (C45). The review clears at its source and
+  the copy's index row goes at once. The reconcile sweep now commits the deletion
+  of a conflict copy that history holds. Core gains `knowledgeConflictSource`
+  (and its two constants), the conflict mirror's subject, which the console and
+  the reconciler now share.
+- 448857f: The router's policy, in shadow (T9-2, docs/ops/dynamic-router.md §2–§5). An
+  optional `rules.yaml` `policy:` block — the owner's table over the features,
+  first match wins — picks an operation from a closed vocabulary
+  (`ROUTE_OPERATIONS`: `answer`, `fast_path:<query>`, `retrieve:knowledge`,
+  `retrieve:queries`, `delegate:<crew>`, `tools`) and a tier from the owner's
+  allow-list, inside the owner's caps. Core gains `router-policy.ts`:
+  `validateRoutePolicy` (every load-time refusal names its field; `mode: serve`
+  is refused until T9-4), the pure `decide()`, `boundDecision()` (the session
+  rule and the registries, at run time), the planner's closed `COMPLEXITY`
+  classes, and `scoreRouteFeatures` — `intent` and `complexity` on the one
+  on-machine scorer (`assignments.intent`), only when a row reads them,
+  concurrently, each inside the consultation's deadline. `scoreChoice` moves
+  from the collectors into core (`score-choice.ts`) with its off-machine refusal
+  intact, and `completeJson` resolves through the same `resolveOnMachineCall`.
+  The console wires the table as `routePolicy`: every fall-through and override
+  is consulted after the 202 and recorded on the `route` row with the features
+  it read; the served route is unchanged. Fixes T9-1's answer check, which
+  refused every `fast_path:<query>` choice as garbage.
+- 7028e37: **The Scheduled doors (T3-3).** F-1's eleven Scheduled rows are served:
+  `GET /api/scheduled` lists every routine and sync with each field's origin
+  (`default` · `profile` · `yours`), its next and last run, the **default** tag and
+  why a component is held; `GET …/{routines,syncs}/:name` adds its history (the
+  `routine_history` query, now covering a sync's `collector_run` rows and marking
+  Run Now by `trigger`). The owner sets a routine's schedule, pauses and resumes it,
+  resets it to default, and sets a sync's cadence, pause and raise toggles — each one
+  edit of `.metistry/scheduled.yaml` through the reconciler as `user`, comments kept,
+  validated against the closed schema and the component's manifest before it is
+  written, never a manifest and never an invalid file. A New Routine's actor, task and
+  read-only per-run grants are reach `local` (`403 local_only` for a passkey session).
+  Run Now runs one component through the runner under the owner's pause and the
+  preflight, budget included. The runner now hands each run its resolved config
+  (`ctx.config`). Core exports `timeOfDayFields`. All eleven fixtures are re-recorded
+  (a superset of their contract shapes).
+- 66ef5c7: Stale requests (T2-14). A card never acts on something the owner didn't see:
+  every row `GET /api/proposals` serves carries `subject` — `{basis,
+  fingerprint}` of what the request is about as it stands (a pull request's head
+  SHA, a task's line text, the work row's `updated_at`; core's
+  `requestSubjectOf`) — and `POST /api/proposals/:id` with
+  `if_unchanged.subject` refuses an answer whose subject has moved: `409 stale`,
+  before any consequence runs, nothing written on the row, the row repainted in
+  the body. Opt-in like `seen_at`; the PWA sends it on every single-row answer.
+  With a subject, `seen_at` no longer counts the work row, so a render's `ts` is
+  not refused forever once the work row has moved since the row was raised.
+- 440d0d1: Three strikes and a Stop limit (T3-12, C135, C133). **A component that fails
+  three times in a row stops** — `DEFAULT_MAX_STREAK` is now 3
+  (`METISTRY_RUNNER_MAX_STREAK` still overrides it; `metistry doctor` reads the
+  same default) — and raises ONE Needs You `report` per (component, error
+  signature) per streak: a routine's waiting failure report is turned into the
+  stop (`title` *stopped after 3 failures*, plus `stopped: {failures, limit,
+  since, at}`) rather than joined by a second row, and a collector raises its
+  stop as `collector-failed:<name>#<signature>`. Both clear at their source on
+  the next clean run. **A Stop limit** that pauses routines raises ONE `report`
+  per budget window (`budget-stop:<scope>:<window>:<stamp>@<limit>`), naming
+  every routine it paused, with *Raise* — cleared once the budget no longer
+  stops them. Core's `budgetMiss` now returns the `BudgetMiss` it hit (a
+  `PreflightMiss` with `hit`); the runner's requests seam gains
+  `collectorSucceeded`, `componentStopped`, `budgetStopped` and `budgetResumed`.
+- 61d9546: **Today's routes (T2-7).** `GET /api/today?date=` composes one day from four route-only named queries — `vault_tasks_query` under Today's preset (the open lines owed on or before the day, `due <= <date> or do <= <date>`, then the lines ticked on it; `#someday` lines leave the open list), `day_work` (waiting on you, blocked, due, overdue, closed on the day), `today_order` and `day_events` — plus the paths of the day's brief, standup and plan, `null` until written. `GET /api/vault-tasks?where=&order=&limit=&offset=` compiles any filter with `compileTaskFilter` over the whole vault and answers `400` with the parser's own refusal, naming the token, for anything outside the grammar. `PUT /api/today/order {date, task_keys}` replaces one day's drag order in one statement and refuses — `400`, naming them, nothing written — any key `GET /api/today` does not serve for that date. The day is `METISTRY_TZ`'s, never `TZ`'s (UTC when unset). All three are owner-only (`session · local_owner`); core's client-API table marks them served. `vault_tasks_query`'s `places` is now a number (it was a bigint string).
+- 935901e: **Roll back (T10-6): `metistry vault rollback`, `POST /api/vault/rollback` and the
+  reconciler's `POST /vault/revert`.** History is preserved, always: a rollback is ONE
+  new commit, made as `user`, that undoes a commit (`git revert`), puts every path back
+  as it was at a moment (`--to <date>`), or puts one file back (`--file`, before its
+  last change or `--to` a moment) — computed off the working tree with `merge-tree`
+  and a scratch index, applied by `merge --ff-only`, never a reset or a force. Undo is
+  rolling back that commit. A re-walk and the push policy follow.
+  
+  Every rollback waits for Approve in Needs You. The route (F-1's frozen row, now
+  served; reach `local`, so a passkey session is `403 local_only`) asks the reconciler
+  for a preview and raises one request carrying it — the commits it undoes, the files
+  it puts back; Approve runs the revert pinned to the previewed history and held to
+  the previewed change set (`409 stale` otherwise). The reconciler refuses the revert
+  for any principal but `user`, from either bearer. Configuration — every
+  `.metistry/` path, `CLAUDE.md`, `README.md` — is left as it is and named
+  (`skipped_config`) unless `include_config`, which a real revert admits only from the
+  owner-class bearer: `metistry vault rollback --include-config` raises the request,
+  waits for Approve and makes the change itself (`--request <id>` resumes the wait).
+  `POST /api/proposals/:id` answers a rollback with `rolled_back`; its decision SELECT
+  now carries `source` (additive, as T10-5's). `Git` takes an `indexFile` option (a
+  scratch `GIT_INDEX_FILE`), and the committer a `holdHistory` hold.
+
+### Patch Changes
+
+- d92ea0c: **Calendar fields and the meeting note (T2-11).** The eventkit helper's
+  `list_events` now reads each event's participants (name, address, answer, role,
+  kind, whether it is the owner), organizer, iCalendar UID and recurrence, and
+  the window it read; the invite body only when a request asks for it, which the
+  bridge never does. `GET /events` keeps every existing field (`attendees` is
+  still the list of names) and adds `event_id` — one occurrence: the identifier,
+  plus the occurrence's original date when the event recurs — `series_id`,
+  `ical_uid`, `participants`, `organizer`, `self_status` and `window`; it never
+  carries `notes`, even from a helper that sends them. **The helper's binary
+  changed: rebuild and re-sign it (`build:helper`), restart the calendar service,
+  and re-grant Calendar if macOS asks.**
+  
+  Migration `0034_calendar_events.sql` adds `calendar_events` (one row per
+  occurrence, every source, no invite-body column) and `sync_state`, both
+  derived. A new sync, `eventkit-calendar` (every 5 min, today and the next two
+  weeks, connection `eventkit`), fills it and removes a meeting cancelled inside
+  the window. Two route-only named queries read it: `day_events` (one day in the
+  owner's zone, every source, each attendee's one People page or none, the
+  meeting note) and `calendar_event` (one event by id).
+  `POST /api/meetings/:event_id/note` is served: it renders the owner's
+  `Templates/Meeting.md` as `user` into `Journal/Meetings/<date>-<topic>.md` with
+  `event_id:` in the frontmatter, once per event — every later call answers the
+  first note's path.
+
 ## 0.13.0
 
 ### Minor Changes

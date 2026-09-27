@@ -1,5 +1,142 @@
 # @metistry-apps/collectors
 
+## 0.14.0
+
+### Minor Changes
+
+- d92ea0c: **Calendar fields and the meeting note (T2-11).** The eventkit helper's
+  `list_events` now reads each event's participants (name, address, answer, role,
+  kind, whether it is the owner), organizer, iCalendar UID and recurrence, and
+  the window it read; the invite body only when a request asks for it, which the
+  bridge never does. `GET /events` keeps every existing field (`attendees` is
+  still the list of names) and adds `event_id` — one occurrence: the identifier,
+  plus the occurrence's original date when the event recurs — `series_id`,
+  `ical_uid`, `participants`, `organizer`, `self_status` and `window`; it never
+  carries `notes`, even from a helper that sends them. **The helper's binary
+  changed: rebuild and re-sign it (`build:helper`), restart the calendar service,
+  and re-grant Calendar if macOS asks.**
+  
+  Migration `0034_calendar_events.sql` adds `calendar_events` (one row per
+  occurrence, every source, no invite-body column) and `sync_state`, both
+  derived. A new sync, `eventkit-calendar` (every 5 min, today and the next two
+  weeks, connection `eventkit`), fills it and removes a meeting cancelled inside
+  the window. Two route-only named queries read it: `day_events` (one day in the
+  owner's zone, every source, each attendee's one People page or none, the
+  meeting note) and `calendar_event` (one event by id).
+  `POST /api/meetings/:event_id/note` is served: it renders the owner's
+  `Templates/Meeting.md` as `user` into `Journal/Meetings/<date>-<topic>.md` with
+  `event_id:` in the frontmatter, once per event — every later call answers the
+  first note's path.
+- 50a455d: **Linear: the connection and its sync (plan §2.6, §4 Q22, T4-24).** The
+  product ships its first `tracker` connection type, `seed/connection-types/linear/`
+  — a personal API key, sent as `Authorization: <API_KEY>` to
+  `https://api.linear.app` and nowhere else, capability `read`.
+  `@foldedspacelabs/metistry-connections` adds what a sync opens to read a
+  builtin provider's connection (`openSyncHttp`, `instanceSyncOpener`): the
+  connection `scheduled.yaml` names, else the one its provider's sync reads; a
+  `fetch` pinned to the provider's origin that follows no redirect; every
+  request through core's `guardedFetch` as `connection:<name>`, the key filled
+  only for a host on its *Sent only to* list; and the `linear` provider's
+  read-only GraphQL client (a document that is not a `query` is refused before
+  it leaves). *Used by* now names the sync a provider declares. The new `linear`
+  collector reconciles the issues assigned to the owner into `work`
+  (`external_ref linear:<KEY>`, state, priority and url in `meta`), closes the
+  ones that leave with why, and raises one `task` mirror per assigned issue that
+  clears at source; `addIssueToToday` captures `- [ ] <title> do <today>
+  linear:<KEY>` through the capture service, idempotent per issue. The console
+  hands collectors the opener; `metistry secrets sync --to env` delivers a
+  sync-read connection's secrets as `METISTRY_SECRET_<NAME>`.
+
+### Patch Changes
+
+- 2fc0ef0: **Compute (T4-18): provider keys are this instance's secrets, providers gain a
+  switch and billing, and the catalogue is searched by model.**
+  
+  - `compute.yaml`'s `auth.secret` is a reference: `{{ secret.<name> }}` (one of
+    this instance's secrets), `env:<NAME>` (an install variable), or — so every
+    older file loads — the bare `<NAME>`. A pasted key still cannot match any of
+    them. Core gains `credentialOf`, `providerCredential`, `credentialEnvNames`,
+    `credentialFromEnv` and `providerSecretNames`; the reference spelling moved
+    to a leaf module (`secret-ref.ts`, re-exported by `secrets.ts`) so
+    `compute.ts` can read it without a load-time cycle.
+  - A service reads a key from its environment, never the Keychain:
+    `{{ secret.x }}` arrives as `METISTRY_SECRET_X` (core's `secretDeliveryVar`),
+    which `metistry secrets sync --to env` now writes for every secret the
+    providers reference, from this instance's item only; `metistry up`'s engine
+    allowlist passes exactly those names. For one release a `*_api_key` secret is
+    also read from the `METISTRY_<NAME>` line T4-3 filled, so `migrate-scope`
+    rewriting the reference cannot cut a running engine off.
+  - `metistry compute providers add` stores the key through `secrets set`'s own
+    code — this instance's Keychain account, recorded in `secrets.yaml` sent only
+    to the provider's host — and writes the reference. The `openrouter` template
+    references `{{ secret.openrouter_api_key }}`. Nothing in `metistry compute`
+    reads or writes the retired per-user account any more. `--secret` takes a
+    secret's name; the old UPPER_SNAKE spelling is refused with the name it
+    became.
+  - Providers gain `enabled` (off = neither searched nor offered; an assignment
+    naming a switched-off provider is refused by the schema) and `billing:
+    token | subscription` (off this machine only). The report carries `enabled`,
+    `billing`, `tag` (`local` · `cloud` · `subscription`), `secret_kind`,
+    `secret_name` and presence from this instance's account.
+  - `seed/model-identities.yaml` and core's `groupCatalogue`: provider model id →
+    one model, overlaid by key by the instance's `.metistry/model-identities.yaml`
+    (a new `INSTANCE_LAYOUT.modelIdentities`). An id it cannot map stays its own
+    row under its provider.
+  - New verbs: `compute providers set <name> [--enabled on|off] [--billing …]
+    [--base-url …] [--secret …]`, `compute models search [<query>]`,
+    `compute unassign <tier|crew:name>`. New owner routes:
+    `GET /api/compute/catalogue[?q=&provider=&refresh=true]` (listings kept
+    15 minutes in memory; `refresh` re-reads them) and
+    `POST /api/compute/unassign {tier|crew}`; MetistryKit's `UsageStore` gains
+    `computeCatalogue` and `unassignCompute`.
+  - `migrate-scope` now rewrites `compute.yaml`'s `auth.secret` (its schema reads
+    references), and still counts a rewritten reference's original as this
+    instance's, so reruns stay idempotent and `purge-shared` can find it.
+    `METISTRY_SECRET_*` is never taken for a retired shared-scope original.
+  - `fetchModels` keeps what a listing says beyond the id (name, context,
+    per-million price, tools) as `details`.
+- 448857f: The router's policy, in shadow (T9-2, docs/ops/dynamic-router.md §2–§5). An
+  optional `rules.yaml` `policy:` block — the owner's table over the features,
+  first match wins — picks an operation from a closed vocabulary
+  (`ROUTE_OPERATIONS`: `answer`, `fast_path:<query>`, `retrieve:knowledge`,
+  `retrieve:queries`, `delegate:<crew>`, `tools`) and a tier from the owner's
+  allow-list, inside the owner's caps. Core gains `router-policy.ts`:
+  `validateRoutePolicy` (every load-time refusal names its field; `mode: serve`
+  is refused until T9-4), the pure `decide()`, `boundDecision()` (the session
+  rule and the registries, at run time), the planner's closed `COMPLEXITY`
+  classes, and `scoreRouteFeatures` — `intent` and `complexity` on the one
+  on-machine scorer (`assignments.intent`), only when a row reads them,
+  concurrently, each inside the consultation's deadline. `scoreChoice` moves
+  from the collectors into core (`score-choice.ts`) with its off-machine refusal
+  intact, and `completeJson` resolves through the same `resolveOnMachineCall`.
+  The console wires the table as `routePolicy`: every fall-through and override
+  is consulted after the 202 and recorded on the `route` row with the features
+  it read; the served route is unchanged. Fixes T9-1's answer check, which
+  refused every `fast_path:<query>` choice as garbage.
+- Updated dependencies [d92ea0c]
+- Updated dependencies [f01606b]
+- Updated dependencies [2fc0ef0]
+- Updated dependencies [211b408]
+- Updated dependencies [851e08a]
+- Updated dependencies [23b963a]
+- Updated dependencies [ed7f5c2]
+- Updated dependencies [ea2e876]
+- Updated dependencies [50a455d]
+- Updated dependencies [ac377ed]
+- Updated dependencies [9dcc405]
+- Updated dependencies [fcfbadf]
+- Updated dependencies [fce1f33]
+- Updated dependencies [406bacb]
+- Updated dependencies [448857f]
+- Updated dependencies [7028e37]
+- Updated dependencies [66ef5c7]
+- Updated dependencies [440d0d1]
+- Updated dependencies [61d9546]
+- Updated dependencies [935901e]
+  - @foldedspacelabs/metistry-core@0.14.0
+  - @foldedspacelabs/metistry-mcp-brain@0.14.0
+  - @foldedspacelabs/metistry-connections@0.14.0
+
 ## 0.13.0
 
 ### Minor Changes

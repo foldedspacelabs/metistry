@@ -1,5 +1,79 @@
 # @metistry-apps/routines
 
+## 0.14.0
+
+### Minor Changes
+
+- ac377ed: The Morning Brief (T3-6; plan §2.13, §2.5; C97, C102, C103, C111). At 07:00 on
+  a working day `morning-brief` renders `Templates/Brief.md` (seeded) into
+  `Journal/Brief/<date>.md` as principal `morning-brief` — the standup embedded
+  by reference, today's timed meetings under **Next Up**, what is waiting on you
+  — writes the daily note's `metistry:day` section model-free through
+  `POST /vault/section` (never creating the note; broken markers raise one
+  `note` request), and enqueues ONE assistant turn for the file's prose slots.
+  File and section are one commit: the runner now hands every run its
+  `ctx.runId`. The chat message stays, opening with the file.
+  
+  **C103 — prose outside fold templates.** Core's `PROSE_SOURCES`
+  (`knowledge-fold`, `standup`, `morning-brief`) is where `{{ prose }}` renders a
+  slot; every other writer still gets the refusal note, now `PROSE_REFUSAL`. New
+  `prose-slots.ts`: `fillProseSlots` accepts a change to a pending slot's line —
+  one line of prose, no block, no comment — and nothing else, and marks each
+  filled line `<!-- metistry:written N -->`. `JOURNAL_MACHINE_DIRS` gains
+  `Brief`; `JOURNAL_ROUTINE_DIRS` / `journalRoutineOf` name the routine that owns
+  each folder it writes. `CalendarEvent` gains `attendees`.
+  
+  **`knowledge_write` in a routine's own folder** (`Journal/Brief/`,
+  `Journal/Standup/`, `Journal/Plan/`) now does exactly one thing: fill the
+  pending prose slots of a file the routine wrote, in the routine's name with the
+  reply's turn. A create there, `Journal/Plan/` at all, a file the routine does
+  not own, a stale hash, or any other changed byte is refused — before this, the
+  assistant could create a file in those folders and pre-empt the routine's own.
+  
+  The Standup enqueues the same one turn when its template has `prose` (the
+  seeded one has none). The console's vault client gains `section`, surfacing
+  `section_missing` by code. `metistry templates check` knows `Brief.md` renders
+  as `morning-brief`.
+- ece2585: **Tomorrow's Plan after the fold (T3-7).** `plan-tomorrow` now ends with a
+  `## Tonight's fold` section: a link to tonight's `Journal/Fold/<date>.md` and
+  its `decisions:` frontmatter as a list, verbatim and model-free (newlines
+  collapse, a leading `[` is escaped so no decision can become a task line).
+  The working-day guard records `skipped:not_a_working_eve` (was
+  `not_a_working_day`) — Sunday to Thursday evenings plan the next working day,
+  Friday and Saturday are skipped. `PlanCtx.closedDay` is Close the Day's early
+  render (T2-8): it plans the day after the day closed, never asks whether the
+  date is settled, and records `meta.trigger: "close"`; every row now carries
+  `meta.trigger` (`close | schedule | manual`), and only a non-close row settles
+  a date — so a second close re-renders, the 23:00 run supersedes the early
+  render under compare-and-swap, and a second scheduled pass stays silent.
+  The instance zone is `METISTRY_TZ` only (then `Me/profile.md`'s `timezone`),
+  never `TZ`.
+- 0cba4a2: **The Standup routine (T3-5).** `routines/standup` renders `Templates/Standup.md` (or the path its `template` config names) into `Journal/Standup/<date>.md` on working days at 08:00 — its own reserved subfolder, written through the reconciler as principal `standup`, so the file says `source: standup`. Model-free: `prose` is not legal in a standup render until C103 (T3-6). It never overwrites a file it does not own (`skipped:user_owned`), writes a morning once (`meta.standup_for`), dates a late run from its slot, and writes nothing without working days in `Me/profile.md` — the runner does not start it, and a Run Now records `skipped:no_working_days` itself. `skip_without_calendar_event` (off by default) skips a day whose calendar has no standup; a calendar that cannot be asked never causes a skip. Its row landing is the `routine.status {name: "standup"}` that swaps Today's placeholder for the file. `routines.standup` in `.metistry/scheduled.yaml` (T3-4's move) now applies to it. The seeded `Templates/Standup.md`'s Yesterday list asks for `status = done` — without it the list was always empty, because a task query scopes to open tasks by default — and `metistry templates check` knows the template's writer as `standup`.
+
+### Patch Changes
+
+- 5855540: **`metistry update` seeds the templates the vault lacks (W2 checkpoint D1).** A template a release adds (`Templates/Brief.md`) reached only a fresh `init`, so an upgraded vault's Morning Brief skipped every morning with `skipped:template_missing` and doctor stayed ok. `update` now has a **templates** step after the lock: each `seed/vault/Templates/*.md` absent from the vault is copied — through the reconciler as `user`, create-only (`expected_sha256: ""`), else directly — and a file that is there is never touched; a second run copies nothing. `writeProtected` gains `createOnly`. Doctor's schedule row for a routine whose last run recorded `skipped:template_missing` is degraded, names the template and offers `metistry update`. The Morning Brief raises one `report` request for a missing template, as it does for an unreadable one, deduped per template while one is pending.
+- Updated dependencies [d92ea0c]
+- Updated dependencies [f01606b]
+- Updated dependencies [2fc0ef0]
+- Updated dependencies [211b408]
+- Updated dependencies [851e08a]
+- Updated dependencies [23b963a]
+- Updated dependencies [ed7f5c2]
+- Updated dependencies [ea2e876]
+- Updated dependencies [ac377ed]
+- Updated dependencies [9dcc405]
+- Updated dependencies [fcfbadf]
+- Updated dependencies [fce1f33]
+- Updated dependencies [406bacb]
+- Updated dependencies [448857f]
+- Updated dependencies [7028e37]
+- Updated dependencies [66ef5c7]
+- Updated dependencies [440d0d1]
+- Updated dependencies [61d9546]
+- Updated dependencies [935901e]
+  - @foldedspacelabs/metistry-core@0.14.0
+
 ## 0.13.0
 
 ### Minor Changes

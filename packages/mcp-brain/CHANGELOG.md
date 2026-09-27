@@ -1,5 +1,91 @@
 # @foldedspacelabs/metistry-mcp-brain
 
+## 0.14.0
+
+### Minor Changes
+
+- 211b408: **Connections through the proxy: the lazy pair (T4-8b).** `/mcp` gains `connections_list` and `connections_call` — the one way an agent reaches the owner's connections (plan §2.6, C115). `connections_list` names the connections lent to the caller and the tools it may call without dialling anything; `connections_list { connection }` fetches those tools' own definitions on demand, so no upstream tool is ever on the eager surface. `connections_call` runs one through an injected `ConnectionsProxy` (the host's pooled client): secrets filled only at egress, the caller's bearer handed over solely so a call carrying it is refused, the answer redacted and sanitized. This release runs a connection's Reads set to Allow; Never and unlisted tools are "no such tool", Ask First and Changes things are refused with the reason. Every call — refusals included — is one `runs` row of kind `connection_call`, read back by the new route-only `connection_calls` named query.
+  
+  Core: `Resource` gains `{kind: "connection", door, name, offered}` and `may()` decides it (`mayConnection`): the assistant reaches every connection; an agent needs the connection offered to agents **and** named in `scope.connections`; a crew needs that **and** the new `connections` tool group in `uses`. A miss hides as "no such connection" (new reason `connection_required`). `RULED_TOOLS` and `TOOL_PERMISSION_CELLS` carry the two tools. The eager count moves 26 → 28 with its reason beside `COUNT_ACKNOWLEDGED` in `ops/scripts/check-tool-surface.mjs`; the assistant's `BRAIN_TOOLS` follows the manifest.
+- ac377ed: The Morning Brief (T3-6; plan §2.13, §2.5; C97, C102, C103, C111). At 07:00 on
+  a working day `morning-brief` renders `Templates/Brief.md` (seeded) into
+  `Journal/Brief/<date>.md` as principal `morning-brief` — the standup embedded
+  by reference, today's timed meetings under **Next Up**, what is waiting on you
+  — writes the daily note's `metistry:day` section model-free through
+  `POST /vault/section` (never creating the note; broken markers raise one
+  `note` request), and enqueues ONE assistant turn for the file's prose slots.
+  File and section are one commit: the runner now hands every run its
+  `ctx.runId`. The chat message stays, opening with the file.
+  
+  **C103 — prose outside fold templates.** Core's `PROSE_SOURCES`
+  (`knowledge-fold`, `standup`, `morning-brief`) is where `{{ prose }}` renders a
+  slot; every other writer still gets the refusal note, now `PROSE_REFUSAL`. New
+  `prose-slots.ts`: `fillProseSlots` accepts a change to a pending slot's line —
+  one line of prose, no block, no comment — and nothing else, and marks each
+  filled line `<!-- metistry:written N -->`. `JOURNAL_MACHINE_DIRS` gains
+  `Brief`; `JOURNAL_ROUTINE_DIRS` / `journalRoutineOf` name the routine that owns
+  each folder it writes. `CalendarEvent` gains `attendees`.
+  
+  **`knowledge_write` in a routine's own folder** (`Journal/Brief/`,
+  `Journal/Standup/`, `Journal/Plan/`) now does exactly one thing: fill the
+  pending prose slots of a file the routine wrote, in the routine's name with the
+  reply's turn. A create there, `Journal/Plan/` at all, a file the routine does
+  not own, a stale hash, or any other changed byte is refused — before this, the
+  assistant could create a file in those folders and pre-empt the routine's own.
+  
+  The Standup enqueues the same one turn when its template has `prose` (the
+  seeded one has none). The console's vault client gains `section`, surfacing
+  `section_missing` by code. `metistry templates check` knows `Brief.md` renders
+  as `morning-brief`.
+- fce1f33: Questions v2 and both report names (T2-3). **A request can ask several
+  questions** (1–5, each pick one or pick any, 2–8 options, and — unless it says
+  `other: no` — ending in *Something else…*): the assistant's ```` ```decision ````
+  block grows a `question:` / `pick:` / `other:` grammar beside v1's (core's
+  `parseDecisionBlock`, still hand-rolled and bounded), and every agent asks the
+  same way through `requests_create` kind `question` with `questions` — no new
+  tool; the brain's eager surface grows 64 tokens (4,267 → 4,331) and stays at 26
+  tools. **Answers are stored per question**: `POST /api/proposals/:id
+  {decision: "answers", answers: [{choices, other?}, …]}` is checked against the
+  questions as stored (`checkAnswers`) and settles the row `answered`, with
+  `payload.answers` and the answers' words in `feedback`; free text is `other`
+  and never executes. Revise on a question is `accept_with_changes`. v1's wire —
+  the option itself as `decision` — still answers a one-question request.
+  **`decideProposal` reads F-5's table** (`describeRequest(kind, payload).decisions`)
+  instead of building its own list: a report is Dismissed (`skip`) and can no
+  longer be approved, revised or declined; Skip on one row is only a type's own
+  Decline (Dismiss, Not Mine) — elsewhere it is the batch's (K2). `GET
+  /api/proposals` serves a question's `request.questions`. **`decided`** is the
+  report kind for a decision made (C104); `decision` is accepted and stored as
+  `decided`. The PWA draws each type's own answers from the table, and a
+  question's questions as its body. MetistryKit sends Send Answers
+  (`RequestAnswer.answers`).
+
+### Patch Changes
+
+- Updated dependencies [d92ea0c]
+- Updated dependencies [f01606b]
+- Updated dependencies [2fc0ef0]
+- Updated dependencies [211b408]
+- Updated dependencies [851e08a]
+- Updated dependencies [23b963a]
+- Updated dependencies [ed7f5c2]
+- Updated dependencies [ea2e876]
+- Updated dependencies [ac377ed]
+- Updated dependencies [9dcc405]
+- Updated dependencies [fcfbadf]
+- Updated dependencies [fce1f33]
+- Updated dependencies [406bacb]
+- Updated dependencies [448857f]
+- Updated dependencies [7028e37]
+- Updated dependencies [66ef5c7]
+- Updated dependencies [440d0d1]
+- Updated dependencies [61d9546]
+- Updated dependencies [935901e]
+  - @foldedspacelabs/metistry-core@0.14.0
+  - @foldedspacelabs/metistry-artifacts@0.14.0
+  - @foldedspacelabs/metistry-tasks@0.14.0
+  - @foldedspacelabs/metistry-queries@0.14.0
+
 ## 0.13.0
 
 ### Minor Changes

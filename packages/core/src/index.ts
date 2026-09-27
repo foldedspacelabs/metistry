@@ -461,10 +461,24 @@ export {
   isLoopbackHost,
   parseConnectTarget,
   parseEgressEntry,
+  EGRESS_REFUSAL_CODES,
+  SECRET_EGRESS_PURPOSES,
+  EgressRefused,
+  egressDestination,
+  guardedFetch,
+  planEgress,
+  recordSecretUse,
   type Egress,
+  type EgressCall,
   type EgressDenial,
+  type EgressDestination,
   type EgressInput,
+  type EgressPlan,
+  type EgressRefusalCode,
   type EgressTarget,
+  type SecretEgressPolicy,
+  type SecretEgressPurpose,
+  type SecretEgressRules,
 } from "./egress.js";
 export {
   CREDENTIAL_HELPER_RESET,
@@ -719,6 +733,8 @@ export {
   redactSecrets,
   scrubModelOutput,
   containsRedactedPlaceholder,
+  SecretRedactor,
+  redactedSecret,
 } from "./redact.js";
 export { parseBearer, tokenEquals, authorized, tokenHash, mintToken } from "./auth.js";
 export { sanitizeForAgent } from "./sanitize.js";

@@ -21,13 +21,15 @@
 //     configuration, gated on the `user` principal, and no agent, no
 //     prompt and no proposal can reach them. `runAction` has no compute
 //     kind, which is that statement in code.
-//   * **A secret never crosses this boundary.** `providers add` and
-//     `providers remove` are absent on purpose: adding a provider takes a
-//     key, and a key belongs on stdin into the login Keychain, from the
-//     hand of the person at the machine. What the read route reports is
-//     the NAME of the secret a provider authenticates with and whether an
-//     item of that name exists — presence, never a value, and nothing
-//     here can print one.
+//   * **A secret never crosses this boundary.** `providers add`, `set`
+//     and `remove` are absent on purpose (§2.2 M16): adding a provider takes
+//     a key, and a key belongs on stdin into this instance's Keychain
+//     account, from the hand of the person at the machine; the switch, the
+//     base URL and which secret a provider uses are where prompts and keys
+//     go, which the Q8 table keeps to the Mac. What the read route reports
+//     is the REFERENCE a provider authenticates with (`{{ secret.x }}`) and
+//     whether this instance holds that item — presence, never a value, and
+//     nothing here can print one.
 //
 // It degrades absent, like every other optional surface: with no
 // `METISTRY_INSTANCE_DIR` the console cannot see the file these verbs edit,
@@ -54,14 +56,17 @@ import {
   computeReport,
   instanceComputeFile,
   modelsList,
+  modelsSearch,
   parseAssignmentTarget,
   parseBudgetTarget,
   providerTest,
   setBudget,
   StepFailed,
+  unassign,
   type AssignmentTarget,
   type BudgetTarget,
   type ComputeOptions,
+  type ListingCache,
 } from "@foldedspacelabs/metistry-cli";
 import type { QueryStore } from "@foldedspacelabs/metistry-queries";
 import { readJson, sendError, sendJson, sendUnrouted } from "./http-util.js";
@@ -96,10 +101,46 @@ export function isComputeRoute(pathname: string): boolean {
 const ROUTES = new Set([
   "GET /api/compute",
   "GET /api/compute/models",
+  "GET /api/compute/catalogue",
   "POST /api/compute/assign",
+  "POST /api/compute/unassign",
   "POST /api/compute/budget",
   "POST /api/compute/providers/test",
 ]);
+
+/**
+ * How long a provider's catalogue is answered from memory before the next
+ * search reads it again. Search-as-you-type must not be a round of
+ * `/v1/models` per keystroke; **Refresh** (C132, `?refresh=true`) re-reads
+ * every switched-on provider at once, whatever the age.
+ */
+const CATALOGUE_TTL_MS = 15 * 60_000; // limit: fixed — a freshness window for a listing, not an owner's policy; Refresh is the owner's control
+
+/** One console's listings, per admin (an instance directory), kept in memory only — derived, lost on restart, and never a file. */
+const catalogues = new WeakMap<ComputeAdmin, Map<string, { probe: Parameters<ListingCache["set"]>[1]["probe"]; at: string }>>();
+
+function listingCache(admin: ComputeAdmin, now: () => number = Date.now): ListingCache {
+  let map = catalogues.get(admin);
+  if (!map) {
+    map = new Map();
+    catalogues.set(admin, map);
+  }
+  const held = map;
+  return {
+    get(key) {
+      const hit = held.get(key);
+      if (!hit) return undefined;
+      if (now() - Date.parse(hit.at) > CATALOGUE_TTL_MS) {
+        held.delete(key);
+        return undefined;
+      }
+      return hit;
+    },
+    set(key, value) {
+      held.set(key, value);
+    },
+  };
+}
 
 const NOT_AVAILABLE =
   "compute configuration is not reachable from this deployment — the console needs METISTRY_INSTANCE_DIR pointing at the instance repo it should read `.metistry/compute.yaml` from " +
@@ -192,7 +233,8 @@ function money(body: Record<string, unknown>, field: string): { ok: true; value:
 type Audit = (kind: string, tool: string, ok: boolean, meta: Record<string, unknown>) => Promise<void>;
 
 /**
- * GET /api/compute · GET /api/compute/models · POST /api/compute/assign ·
+ * GET /api/compute · GET /api/compute/models · GET /api/compute/catalogue ·
+ * POST /api/compute/assign · POST /api/compute/unassign ·
  * POST /api/compute/budget · POST /api/compute/providers/test
  *
  * server.ts has already established the `user` principal. One `runs` row per
@@ -232,6 +274,19 @@ export async function computeRoutes(
       return sendJson(res, 200, { ...r, as_of: new Date().toISOString() });
     }
 
+    if (key === "GET /api/compute/catalogue") {
+      const q = url.searchParams.get("q") ?? "";
+      if (q.length > 200) return sendError(res, "invalid_request", "q is a search of at most 200 characters — a model's name, maker or id"); // limit: fixed — a search box, not a document
+      const provider = url.searchParams.get("provider");
+      if (provider !== null && provider.trim() === "") return sendError(res, "invalid_request", "provider must be a declared provider name, or omitted for every switched-on one");
+      const refresh = url.searchParams.get("refresh");
+      if (refresh !== null && refresh !== "true" && refresh !== "false") return sendError(res, "invalid_request", "refresh is true or false — true re-reads every switched-on provider's catalogue now");
+      const r = await modelsSearch({ ...opts, query: q, ...(provider ? { provider: provider.trim() } : {}), refresh: refresh === "true", cache: listingCache(admin) });
+      // the identity files are this Mac's paths — the wire needs neither them nor where the product lives
+      const { identity_files: _files, ...body } = r;
+      return sendJson(res, 200, { ...body, as_of: new Date().toISOString() });
+    }
+
     if (key === "POST /api/compute/providers/test") {
       const body = (await readJson(req)) as Record<string, unknown>;
       if (typeof body.name !== "string" || body.name.trim() === "") return sendError(res, "invalid_request", "name must be a provider declared in compute.yaml (GET /api/compute lists them)");
@@ -241,11 +296,20 @@ export async function computeRoutes(
       return sendJson(res, 200, { ...r, notes, as_of: new Date().toISOString() });
     }
 
-    // ----- the two writes -----
+    // ----- the three writes -----
     const issue = writeTargetIssue(opts);
     if (issue) {
-      await deps.audit("compute_admin", key.endsWith("/assign") ? "assign" : "budget", false, { refused: "write_target" });
+      await deps.audit("compute_admin", key.slice(key.lastIndexOf("/") + 1), false, { refused: "write_target" });
       return sendError(res, "invalid_request", issue);
+    }
+
+    if (key === "POST /api/compute/unassign") {
+      const body = (await readJson(req)) as Record<string, unknown>;
+      const target = assignTargetOf(body);
+      if (!target.ok) return sendError(res, "invalid_request", target.message);
+      const r = await unassign({ ...opts, target: target.target });
+      await deps.audit("compute_admin", "unassign", true, { target: r.target });
+      return sendJson(res, 200, { ok: true, ...r, notes });
     }
 
     if (key === "POST /api/compute/assign") {

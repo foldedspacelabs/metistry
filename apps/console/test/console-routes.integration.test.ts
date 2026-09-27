@@ -45,6 +45,11 @@ providers:
     kind: openai-compatible
     base_url: http://127.0.0.1:1234/v1
     locality: on_machine
+  ollama:
+    kind: openai-compatible
+    base_url: http://127.0.0.1:11434/v1
+    locality: on_machine
+    enabled: false   # switched off (C130): never searched
 assignments:
   default: { model: lmstudio/gemma, effort: medium }
 `;
@@ -246,7 +251,9 @@ describe.skipIf(!hasDb)("the console's compute, knowledge, commands and run-deta
   const EVERY_ROUTE = [
     "GET /api/compute",
     "GET /api/compute/models",
+    "GET /api/compute/catalogue?q=gemma",
     "POST /api/compute/assign",
+    "POST /api/compute/unassign",
     "POST /api/compute/budget",
     "POST /api/compute/providers/test",
     "GET /api/knowledge/search?q=x",
@@ -303,6 +310,7 @@ describe.skipIf(!hasDb)("the console's compute, knowledge, commands and run-deta
   it("the LOCAL owner token reaches all of them — the Mac app and the CLI are the same principal", async () => {
     const auth = { authorization: `Bearer ${localOwnerToken}` };
     expect((await get("/api/compute", auth)).status).toBe(200);
+    expect((await get("/api/compute/catalogue?q=gemma", auth)).status).toBe(200);
     expect((await get("/api/commands", auth)).status).toBe(200);
     expect((await get("/api/knowledge/search?q=sleep", auth)).status).toBe(200);
     expect((await get("/api/knowledge/pages", auth)).status).toBe(200);
@@ -402,6 +410,81 @@ describe.skipIf(!hasDb)("the console's compute, knowledge, commands and run-deta
     const r = await fetch(`${base}/api/compute/assign`, { method: "POST", headers: { ...owner(), "content-type": "application/json" }, body: "{oops" });
     expect(r.status).toBe(400);
     expect((await r.json()).error.message).toBe("request body is not JSON");
+  });
+
+  // ---------------------------------------------- T4-18: the catalogue and unassign
+
+  it("the catalogue groups every SWITCHED-ON provider's listing by model, keeps an unmapped id its own row, and reports a provider it could not read", async () => {
+    bridgeCalls.length = 0;
+    const r = await get("/api/compute/catalogue?q=gemma&refresh=true");
+    expect(r.status).toBe(200);
+    const body = await r.json();
+    expect(body.query).toBe("gemma");
+    // ollama is switched off: skipped, never dialled
+    expect(body.skipped).toEqual([{ name: "ollama", why: expect.stringContaining("switched off") }]);
+    expect(bridgeCalls.some((c) => c.url.includes(":11434"))).toBe(false);
+    // openrouter's key is not in this console's environment: reported, not thrown
+    const or = body.providers.find((p: any) => p.name === "openrouter");
+    expect(or).toMatchObject({ ok: false, tag: "cloud", count: 0 });
+    expect(or.detail).toContain("METISTRY_OPENROUTER_API_KEY"); // names the reference, never a value
+    expect(body.providers.find((p: any) => p.name === "lmstudio")).toMatchObject({ ok: true, tag: "local", count: 2 });
+    // "gemma" is in no identity table: one unmapped row, under its provider
+    expect(body.rows).toEqual([expect.objectContaining({ kind: "unmapped", key: "lmstudio/gemma", name: "gemma", places: [expect.objectContaining({ ref: "lmstudio/gemma", tag: "local", zdr: null })] })]);
+    expect(body).not.toHaveProperty("identity_files"); // this Mac's paths stay off the wire
+    expect(JSON.stringify(body)).not.toContain(instanceDir);
+  });
+
+  it("the catalogue answers from memory until Refresh — and refresh=true re-reads every switched-on provider", async () => {
+    await get("/api/compute/catalogue?refresh=true");
+    bridgeCalls.length = 0;
+    expect((await get("/api/compute/catalogue?q=qwen")).status).toBe(200);
+    expect(bridgeCalls.filter((c) => c.url.includes("/models"))).toEqual([]);
+    expect((await get("/api/compute/catalogue?q=qwen&refresh=true")).status).toBe(200);
+    expect(bridgeCalls.filter((c) => c.url.includes("127.0.0.1:1234/v1/models"))).toHaveLength(1);
+  });
+
+  it("unassign removes a tier through the same YAML-document write as `user` — and refuses default, an absent tier and a bad body", async () => {
+    const file = instancePath(instanceDir, "compute");
+    await writeFile(file, `${COMPUTE_YAML}  tiers:\n    deep: { model: lmstudio/gemma, effort: high }   # the owner's tier\n`);
+    try {
+      bridgeCalls.length = 0;
+      const r = await post("/api/compute/unassign", { tier: "deep" });
+      expect(r.status).toBe(200);
+      expect(await r.json()).toMatchObject({ ok: true, target: "assignments.tiers.deep" });
+      const write = bridgeCalls.find((c) => c.url.endsWith("/vault/write"))!;
+      expect(write.body.intent).toMatchObject({ principal: "user" });
+      const written = String(write.body.content);
+      expect(written).not.toContain("deep:");
+      expect(written).toContain("# hand-written, and it must survive every edit");
+
+      bridgeCalls.length = 0;
+      for (const [body, needle] of [
+        [{ tier: "default" }, "cannot be removed"],
+        [{ tier: "nope" }, "not assigned"],
+        [{}, "neither"],
+        [{ tier: "deep", crew: "x" }, "tier and crew"],
+      ] as const) {
+        const bad = await post("/api/compute/unassign", body);
+        expect(bad.status, JSON.stringify(body)).toBe(400);
+        expect((await bad.json()).error.message, JSON.stringify(body)).toContain(needle);
+      }
+      expect(bridgeCalls.filter((c) => c.url.endsWith("/vault/write"))).toEqual([]);
+    } finally {
+      await writeFile(file, COMPUTE_YAML);
+    }
+  });
+
+  it("the catalogue refuses a query it cannot mean: an empty provider, an undeclared one, a refresh that is not a boolean", async () => {
+    for (const [path, needle] of [
+      ["/api/compute/catalogue?provider=", "declared provider"],
+      ["/api/compute/catalogue?provider=nope", "providers.nope is not declared"],
+      ["/api/compute/catalogue?refresh=maybe", "true or false"],
+      [`/api/compute/catalogue?q=${"x".repeat(201)}`, "at most 200"],
+    ] as const) {
+      const r = await get(path);
+      expect(r.status, path).toBe(400);
+      expect((await r.json()).error.message, path).toContain(needle);
+    }
   });
 
   it("404 on an unknown verb under the prefix, never a 405 or a silent 200", async () => {

@@ -765,7 +765,7 @@ const needsYou = mountNeedsYou({ $, api, setNeeds, show });
 
 // ----- Work, Knowledge and More ▸ Agents: their own files (T7-3b; screen 18 §5) -----
 // Each returns its views' `load`s by view name, for `loadView`.
-const work = mountWork({ $, api, show, closeSheet, retitle });
+const work = mountWork({ $, api, show, closeSheet, retitle, poll: (fn, ms) => live.poll("board", fn, ms) });
 const knowledge = mountKnowledge({ $, api, show, retitle });
 const more = mountMore({ $, api, show });
 
@@ -1086,13 +1086,19 @@ const LIVE_REFRESH = {
   triage: () => needsYou.load(),
   feed: () => loadFeed(),
   // Work, Knowledge and More ▸ Agents refetch through their modules' loads (T7-3b)
-  board: () => work.board(),
-  card: () => work.card(),
+  board: () => work.refresh(),
+  card: () => work.refresh(),
   rooms: () => work.rooms(),
   projects: () => work.projects(),
+  project: () => work.projects(), // repaints the project pushed
   artifacts: () => work.artifacts(),
+  artifact: () => work.refreshThreads(),
+  thread: () => work.refreshThreadSheet(),
   knowledge: () => knowledge.knowledge(),
-  agents: () => more.agents(),
+  area: () => knowledge.area(),
+  page: () => knowledge.page(),
+  agents: () => more.refresh(),
+  agent: () => more.refresh(),
   usage: () => loadUsage(),
   settings: () => loadSettings(),
 };
@@ -1109,7 +1115,7 @@ const liveRefresher = createRefresher({
   refreshers: LIVE_REFRESH,
   visible: () => (signedIn ? [current, sheetView].filter(Boolean) : []),
   // chat and a room repaint their messages, never the field being typed in
-  busy: (view) => view !== "chat" && view !== "rooms" && typingIn(VIEWS[view].sections),
+  busy: (view) => ((view === "board" || view === "card") && work.busy()) || (view !== "chat" && view !== "rooms" && typingIn(VIEWS[view].sections)),
   hidden: () => document.visibilityState !== "visible",
 });
 
@@ -1120,7 +1126,7 @@ const live = createLive({
       if (Number.isFinite(data.waiting)) setNeeds(data.waiting);
       else refreshNeeds().catch(() => {});
     }
-    liveRefresher.queue(viewsFor(type, data, {}));
+    liveRefresher.queue(viewsFor(type, data, { artifact_id: work.artifactId }));
   },
   // `resync`, or a fresh stream after the browser gave up: what changed in between is unknown
   onReload() {

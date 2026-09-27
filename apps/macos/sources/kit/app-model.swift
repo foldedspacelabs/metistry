@@ -69,6 +69,11 @@ public final class AppModel {
     /// the list the owner left is the list they come back to; dropped with
     /// everything else on an instance switch.
     public let activity: ActivityModel
+    /// Chat: the transcript, what each message set working, the composer and
+    /// its tier (chat-model.swift). Held here, not by its view, so a turn keeps
+    /// being watched — and the sidebar's dot keeps its word — after the owner
+    /// walks away from the screen (screen-01 §5.1).
+    public let chat: ChatModel
 
     public init(
         bundleResourceURL: URL?,
@@ -122,6 +127,7 @@ public final class AppModel {
         self.shell = shell
         let needsYou = NeedsYouModel(session: console)
         self.needsYou = needsYou
+        self.chat = ChatModel(session: console)
         // An answer here moves the count: the row and the Dock hear it now,
         // not at the shell's next tick.
         needsYou.onQueueChanged = { [weak shell] in await shell?.refreshCount() }

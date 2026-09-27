@@ -13,9 +13,9 @@
 // THE SCREENS ARE NOT HERE YET. Each destination's view is its own ticket
 // (T6-*). Until one lands, its detail says so in a sentence and offers the web
 // app — a labelled "not yet", never an empty pane pretending to be a screen
-// (mac-app.md, "Not yet, and labelled as such on screen"). Needs You is the
-// first that has landed (needs-you-view.swift, T5-4a);
-// Activity is another (activity-view.swift, T6-3).
+// (mac-app.md, "Not yet, and labelled as such on screen"). Needs You
+// (needs-you-view.swift, T5-4a), Activity (activity-view.swift, T6-3) and
+// Chat (chat-view.swift, T6-2) have landed.
 //
 // ACCESSIBILITY (§2.18). Every control speaks its name, and a glyph-only one its
 // shortcut too; the Needs You row says *Needs You, 10 waiting*; the gauge says
@@ -44,10 +44,10 @@ public struct RootView: View {
         let p = Palette(scheme)
         let shell = model.shell
         NavigationSplitView {
-            ShellSidebar(shell: shell)
+            ShellSidebar(shell: shell, chatIsWorking: model.chat.isWorking)
                 .navigationSplitViewColumnWidth(min: 180, ideal: MetistrySize.sidebar, max: 320)
         } detail: {
-            ShellDetail(shell: shell, needsYou: model.needsYou, activity: model.activity, consoleURL: PasskeyRouting.consoleURL(in: model.status.report).flatMap(URL.init(string:)))
+            ShellDetail(shell: shell, needsYou: model.needsYou, activity: model.activity, chat: model.chat, consoleURL: PasskeyRouting.consoleURL(in: model.status.report).flatMap(URL.init(string:)))
                 // The detail landmark, named for where the owner is.
                 .accessibilityElement(children: .contain)
                 .accessibilityLabel(shell.selection.title)
@@ -105,6 +105,9 @@ public struct RootView: View {
 
 struct ShellSidebar: View {
     let shell: ShellModel
+    /// A turn is working: one `agent` dot on Chat — presence, not a badge; it
+    /// carries no count (screen-01 §5.1, P2).
+    var chatIsWorking = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -119,7 +122,7 @@ struct ShellSidebar: View {
             }
             ForEach(ShellSection.allCases) { section in
                 if section.children.isEmpty {
-                    DestinationRow(destination: section.landing)
+                    DestinationRow(destination: section.landing, working: section == .chat && chatIsWorking ? shell.assistantName.map { "\($0) is working" } ?? "working" : nil)
                         .tag(section.landing)
                 } else {
                     // Work has no screen of its own, so its label is not a
@@ -154,10 +157,23 @@ struct ShellSidebar: View {
 }
 
 struct DestinationRow: View {
+    @Environment(\.colorScheme) private var scheme
     let destination: Destination
+    /// Set while something on the screen works: the dot, and what it means in words.
+    var working: String? = nil
 
     var body: some View {
-        Label(destination.title, systemImage: destination.symbolName)
+        if let working {
+            HStack(spacing: MetistrySpace.s2) {
+                Label(destination.title, systemImage: destination.symbolName)
+                Spacer(minLength: MetistrySpace.s1)
+                Circle().fill(Palette(scheme)[.agent]).frame(width: 6, height: 6)
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text(verbatim: "\(destination.title), \(working)"))
+        } else {
+            Label(destination.title, systemImage: destination.symbolName)
+        }
     }
 }
 
@@ -202,6 +218,7 @@ struct ShellDetail: View {
     let shell: ShellModel
     let needsYou: NeedsYouModel
     let activity: ActivityModel
+    let chat: ChatModel
     let consoleURL: URL?
 
     var body: some View {
@@ -242,6 +259,8 @@ struct ShellDetail: View {
                     NeedsYouRequestSummary(row, assistantName: shell.assistantName, consoleURL: consoleURL, calendar: needsYou.calendar)
                 }
             }
+        } else if destination == .chat {
+            ChatView(model: chat, assistantName: shell.assistantName)
         } else {
             ContentUnavailableView {
                 Label(destination.title, systemImage: destination.symbolName)

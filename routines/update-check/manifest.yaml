@@ -1,6 +1,7 @@
 schema: 1
 name: update-check
 type: routine
+display_name: Update Check
 description: >
   The daily Update Check (design-build-plan §2.20) — asks the release feed for
   the product's newest release and compares it with the runtime this console
@@ -13,4 +14,4 @@ description: >
   GET to the GitHub API (METISTRY_GITHUB_TOKEN rides along when set, which
   lifts the anonymous rate limit). METISTRY_RELEASE_REPO and
   METISTRY_GITHUB_API point it elsewhere, as they do `metistry update`.
-schedule: "@daily"
+schedule: { days: [sun, mon, tue, wed, thu, fri, sat], at: ["06:00"] }

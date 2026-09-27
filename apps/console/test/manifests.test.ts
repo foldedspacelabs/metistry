@@ -194,9 +194,9 @@ describe("shipped manifests schedule through the runner", () => {
       "reply-review": "every day at 23:00",
       "weekly-review": "sun at 18:00",
       "session-purge": "every day at 04:00",
-      // not a §2.5 default: §2.20's daily Update Check (T2-18), an interval —
-      // once a day since the last one, at no particular time of day
-      "update-check": "@daily",
+      // not a §2.5 default: §2.20's daily Update Check (T2-18), in the same
+      // closed time-of-day shape — every day at 06:00
+      "update-check": "every day at 06:00",
     });
   });
 
@@ -222,6 +222,7 @@ describe("shipped manifests schedule through the runner", () => {
       ["Tomorrow's Plan", "the eve of working days at 23:00", "2026-09-20 23:00", true], // Sunday plans Monday
       ["Reply Review", "every day at 23:00", "2026-09-20 23:00", true],
       ["Session Purge", "every day at 04:00", "2026-09-21 04:00", true], // T3-9's archive retention; Monday 04:00 is the next 04:00 after Sunday noon
+      ["Update Check", "every day at 06:00", "2026-09-21 06:00", true], // T2-18's release check; Monday 06:00 is the next 06:00 after Sunday noon
       ["Weekly Review", "sun at 18:00", "2026-09-20 18:00", true],
     ]);
     // Session Purge's retention_days is declared, so the owner's value applies rather than holding it

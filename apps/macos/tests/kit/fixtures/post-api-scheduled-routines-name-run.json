@@ -1,8 +1,7 @@
 {
   "route": "POST /api/scheduled/routines/:name/run",
-  "source": "contract",
-  "ticket": "T3-3",
-  "note": "Run Now under the budget preflight; a paused routine or a stop budget answers started: false with refused naming why",
+  "source": "recorded",
+  "ticket": null,
   "request": {
     "method": "POST",
     "path": "/api/scheduled/routines/morning-brief/run",
@@ -13,7 +12,7 @@
   "body": {
     "ok": true,
     "name": "morning-brief",
-    "run_id": "8830",
+    "run_id": "67",
     "started": true,
     "refused": null
   }

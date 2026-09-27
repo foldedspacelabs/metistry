@@ -58,6 +58,10 @@ import { loadPublicIdentity } from "../dist/identity.js";
 import { EventHub, startEventFeed } from "../dist/events.js";
 import { parseVaultStatus } from "../dist/vault-status.js";
 import { RoutineTrigger } from "../dist/close-day.js";
+import { loadSchedules, overlayFromText, runNow } from "../dist/runner.js";
+import { SCHEDULED_PATH } from "../dist/profile-tidy.js";
+import { loadCollectors } from "@metistry-apps/collectors";
+import { loadRoutines } from "@metistry-apps/routines";
 import { FIXTURE_DIR, REPO_ROOT, expectedFixtures, fixtureBody, shapeDiff } from "./client-fixtures.mjs";
 
 // ---- arguments -------------------------------------------------------------------
@@ -234,6 +238,31 @@ vault.section = async (path, marker, body, principal, outer) => {
 };
 const CLOSE_DAY = calendarDate(new Date(), process.env.METISTRY_TZ || "UTC");
 await vault.write(`Journal/${CLOSE_DAY}.md`, Buffer.from(`# ${CLOSE_DAY}\n\n## Today\n\n## Today · Metistry\n\n<!-- metistry:day -->\n<!-- /metistry:day -->\n\n## Notes\n`), { principal: "user", message: "fixture" });
+// Scheduled (T3-3): the product's own routines and collectors, loaded as the
+// console loads them — their code swapped for a no-op, so Run Now's run is the
+// real door and the real runner around a component that touches nothing — and
+// `.metistry/scheduled.yaml` in the in-memory vault standing in for the
+// reconciler: a sync's entry naming its connection, and one New Routine.
+const scheduledComponents = [
+  ...(await loadSchedules((await loadCollectors({ home: join(REPO_ROOT, "collectors") })).collectors)),
+  ...(await loadSchedules((await loadRoutines({ home: join(REPO_ROOT, "routines") })).routines)),
+].map((c) => ({ ...c, run: async () => 1 }));
+await vault.write(
+  SCHEDULED_PATH,
+  Buffer.from(`# the owner's changes (docs/ops/scheduled.md)
+routines:
+  weekly-digest:
+    actor: researcher
+    task: "Summarise the week's Areas/ changes."
+    schedule: { days: [fri], at: ["15:00"] }
+syncs:
+  github-state:
+    connection: github
+`),
+  { principal: "user", message: "fixture" },
+);
+const readScheduled = async () => (await vault.read(SCHEDULED_PATH))?.content ?? null;
+const runsStarted = [];
 
 const queries = new QueryStore(pool);
 await queries.loadDir(join(REPO_ROOT, "seed/queries"));
@@ -306,6 +335,21 @@ const server = makeServer(pool, queries, {
     platform: "linux", // keeps the Keychain out of it: presence reads from the delivery variable
     uid: 501,
     fetchFn: fakeFetch,
+  },
+  scheduled: {
+    components: scheduledComponents,
+    overlay: {
+      read: readScheduled,
+      write: (content, expected, message) => vault.write(SCHEDULED_PATH, content, { principal: "user", message }, expected).then(() => undefined),
+    },
+    profile: async () => ({ timezone: "America/New_York", working_days: ["mon", "tue", "wed", "thu", "fri"] }),
+    timeZone: "America/New_York",
+    runNow: async (name) => {
+      const r = await runNow(pool, scheduledComponents, name, {}, { env: {}, scheduled: async () => overlayFromText((await readScheduled())?.toString("utf8") ?? "") });
+      if (r.started) runsStarted.push(r.done);
+      return r;
+    },
+    actorExists: async (id) => (await agents.listAgents(pool)).some((a) => a.id === id && !a.revoked),
   },
   searchKnowledge: async (q, mode, limit) => ({
     q,
@@ -615,6 +659,21 @@ const REQUESTS = [
   ["GET /api/q/aws_costs_daily", () => ({ path: "/api/q/aws_costs_daily?days=31" })],
   ["GET /api/messages", () => ({ path: "/api/messages?limit=20" })],
 
+  // Scheduled (T3-3): the reads, then one routine through every door it has — a
+  // schedule, a pause and a resume, Run Now, and Reset to Default last — then the
+  // New Routine's assignment and the sync's cadence and raise toggle
+  ["GET /api/scheduled", () => ({ path: "/api/scheduled" })],
+  ["GET /api/scheduled/routines/:name", () => ({ path: "/api/scheduled/routines/morning-brief" })],
+  ["GET /api/scheduled/syncs/:name", () => ({ path: "/api/scheduled/syncs/github-state" })],
+  ["PUT /api/scheduled/routines/:name/schedule", () => ({ path: "/api/scheduled/routines/morning-brief/schedule", body: { days: ["mon", "tue", "wed", "thu", "fri"], at: ["06:30"] } })],
+  ["POST /api/scheduled/routines/:name/pause", () => ({ path: "/api/scheduled/routines/morning-brief/pause", body: {} })],
+  ["POST /api/scheduled/routines/:name/resume", () => ({ path: "/api/scheduled/routines/morning-brief/resume", body: {} })],
+  ["POST /api/scheduled/routines/:name/run", () => ({ path: "/api/scheduled/routines/morning-brief/run", body: {} })],
+  ["DELETE /api/scheduled/routines/:name", () => ({ path: "/api/scheduled/routines/morning-brief" })],
+  ["PUT /api/scheduled/routines/:name/assignment", () => ({ path: "/api/scheduled/routines/weekly-digest/assignment", body: { actor: "researcher", task: "Summarise the week's Projects/ changes.", grants: { read: ["Projects"] }, schedule: { days: ["fri"], at: ["16:00"] } } })],
+  ["PUT /api/scheduled/syncs/:name", () => ({ path: "/api/scheduled/syncs/github-state", body: { every: "1h", raise: { review_requested: false } } })],
+  ["POST /api/scheduled/syncs/:name/run", () => ({ path: "/api/scheduled/syncs/github-state/run", body: {} })],
+
   ["POST /api/devices/:id/revoke", () => ({ path: `/api/devices/${ids.session}/revoke`, body: {} })],
 ];
 
@@ -691,6 +750,9 @@ for (const [key, make, tag] of REQUESTS) {
   };
   recorded.set(f.stem, fixture);
 }
+// Run Now answers before its run finishes; every one settles here, before the stream opens, so none lands in it
+await Promise.all(runsStarted);
+
 // ---- the event stream: one frame of every catalogue type, from the real triggers -----
 //
 // A console that has just started listening; a subscriber resuming from an id

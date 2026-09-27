@@ -1,8 +1,7 @@
 {
   "route": "GET /api/scheduled",
-  "source": "contract",
-  "ticket": "T3-3",
-  "note": "every routine and sync; each field is {value, origin} with origin default | profile | yours (packages/core/src/scheduled.ts FIELD_ORIGINS)",
+  "source": "recorded",
+  "ticket": null,
   "request": {
     "method": "GET",
     "path": "/api/scheduled",
@@ -13,10 +12,143 @@
   "body": {
     "routines": [
       {
-        "name": "morning-brief",
+        "name": "claude-usage",
+        "title": "Usage Rollup",
+        "paused": {
+          "value": false,
+          "origin": "default"
+        },
+        "next_run": "2026-09-27T04:18:49.902Z",
+        "next_refused": null,
+        "last_run": null,
+        "is_default": true,
+        "held": null,
+        "describe": "every 1h",
         "kind": "routine",
         "source": "product",
+        "schedule": {
+          "value": {
+            "every": "1h"
+          },
+          "origin": "default"
+        },
+        "config": {},
+        "actor": null,
+        "task": null,
+        "grants": null,
+        "days": null,
+        "time_zone": null
+      },
+      {
+        "name": "inbox-drain",
+        "title": "Inbox Sort",
+        "paused": {
+          "value": false,
+          "origin": "default"
+        },
+        "next_run": "2026-09-27T04:18:49.902Z",
+        "next_refused": null,
+        "last_run": null,
+        "is_default": true,
+        "held": null,
+        "describe": "every 5m",
+        "kind": "routine",
+        "source": "product",
+        "schedule": {
+          "value": {
+            "every": "5m"
+          },
+          "origin": "default"
+        },
+        "config": {},
+        "actor": null,
+        "task": null,
+        "grants": null,
+        "days": null,
+        "time_zone": null
+      },
+      {
+        "name": "knowledge-fold",
+        "title": "Knowledge Fold",
+        "paused": {
+          "value": false,
+          "origin": "default"
+        },
+        "next_run": "2026-09-28T01:00:00.000Z",
+        "next_refused": null,
+        "last_run": {
+          "run_id": "7",
+          "at": "2026-09-27T04:18:49.512Z",
+          "ok": false,
+          "outcome": null,
+          "cost_usd": null,
+          "error": "vault bridge unreachable"
+        },
+        "is_default": true,
+        "held": null,
+        "describe": "every day at 21:00",
+        "kind": "routine",
+        "source": "product",
+        "schedule": {
+          "value": {
+            "days": [
+              "sun",
+              "mon",
+              "tue",
+              "wed",
+              "thu",
+              "fri",
+              "sat"
+            ],
+            "at": [
+              "21:00"
+            ]
+          },
+          "origin": "default"
+        },
+        "config": {},
+        "actor": null,
+        "task": null,
+        "grants": null,
+        "days": {
+          "value": [
+            "sun",
+            "mon",
+            "tue",
+            "wed",
+            "thu",
+            "fri",
+            "sat"
+          ],
+          "origin": "default"
+        },
+        "time_zone": {
+          "value": "America/New_York",
+          "origin": "profile"
+        }
+      },
+      {
+        "name": "morning-brief",
         "title": "Morning Brief",
+        "paused": {
+          "value": false,
+          "origin": "default"
+        },
+        "next_run": "2026-09-28T11:00:00.000Z",
+        "next_refused": null,
+        "last_run": {
+          "run_id": "8",
+          "at": "2026-09-27T04:18:49.512Z",
+          "ok": true,
+          "outcome": "silent",
+          "cost_usd": null,
+          "error": null
+        },
+        "is_default": true,
+        "held": null,
+        "describe": "working days at 07:00",
+        "kind": "routine",
+        "source": "product",
         "schedule": {
           "value": {
             "days": "working_days",
@@ -26,60 +158,472 @@
           },
           "origin": "default"
         },
+        "config": {},
+        "actor": null,
+        "task": null,
+        "grants": null,
+        "days": {
+          "value": [
+            "mon",
+            "tue",
+            "wed",
+            "thu",
+            "fri"
+          ],
+          "origin": "profile"
+        },
+        "time_zone": {
+          "value": "America/New_York",
+          "origin": "profile"
+        }
+      },
+      {
+        "name": "plan-tomorrow",
+        "title": "Tomorrow's Plan",
         "paused": {
           "value": false,
           "origin": "default"
         },
+        "next_run": "2026-09-28T03:00:00.000Z",
+        "next_refused": null,
+        "last_run": {
+          "run_id": "6",
+          "at": "2026-09-27T04:18:49.512Z",
+          "ok": true,
+          "outcome": "acted",
+          "cost_usd": null,
+          "error": null
+        },
+        "is_default": true,
+        "held": null,
+        "describe": "the eve of working days at 23:00",
+        "kind": "routine",
+        "source": "product",
+        "schedule": {
+          "value": {
+            "days": "eve_of_working_days",
+            "at": [
+              "23:00"
+            ]
+          },
+          "origin": "default"
+        },
+        "config": {},
+        "actor": null,
+        "task": null,
+        "grants": null,
+        "days": {
+          "value": [
+            "sun",
+            "mon",
+            "tue",
+            "wed",
+            "thu"
+          ],
+          "origin": "profile"
+        },
+        "time_zone": {
+          "value": "America/New_York",
+          "origin": "profile"
+        }
+      },
+      {
+        "name": "reply-review",
+        "title": "Reply Review",
+        "paused": {
+          "value": false,
+          "origin": "default"
+        },
+        "next_run": "2026-09-28T03:00:00.000Z",
+        "next_refused": null,
+        "last_run": null,
+        "is_default": true,
+        "held": null,
+        "describe": "every day at 23:00",
+        "kind": "routine",
+        "source": "product",
+        "schedule": {
+          "value": {
+            "days": [
+              "sun",
+              "mon",
+              "tue",
+              "wed",
+              "thu",
+              "fri",
+              "sat"
+            ],
+            "at": [
+              "23:00"
+            ]
+          },
+          "origin": "default"
+        },
+        "config": {},
+        "actor": null,
+        "task": null,
+        "grants": null,
+        "days": {
+          "value": [
+            "sun",
+            "mon",
+            "tue",
+            "wed",
+            "thu",
+            "fri",
+            "sat"
+          ],
+          "origin": "default"
+        },
+        "time_zone": {
+          "value": "America/New_York",
+          "origin": "profile"
+        }
+      },
+      {
+        "name": "session-purge",
+        "title": "Session Purge",
+        "paused": {
+          "value": false,
+          "origin": "default"
+        },
+        "next_run": "2026-09-27T08:00:00.000Z",
+        "next_refused": null,
+        "last_run": null,
+        "is_default": true,
+        "held": null,
+        "describe": "every day at 04:00",
+        "kind": "routine",
+        "source": "product",
+        "schedule": {
+          "value": {
+            "days": [
+              "sun",
+              "mon",
+              "tue",
+              "wed",
+              "thu",
+              "fri",
+              "sat"
+            ],
+            "at": [
+              "04:00"
+            ]
+          },
+          "origin": "default"
+        },
         "config": {
-          "skip_without_calendar_event": {
-            "value": false,
-            "origin": "yours"
+          "retention_days": {
+            "value": 30,
+            "origin": "default"
           }
         },
         "actor": null,
         "task": null,
         "grants": null,
-        "next_run": "2026-09-29T11:00:00.000Z",
-        "last_run": {
-          "run_id": "8812",
-          "at": "2026-09-28T11:00:04.000Z",
-          "ok": true,
-          "outcome": "wrote Journal/Brief/2026-09-28.md",
-          "cost_usd": "0.004100"
+        "days": {
+          "value": [
+            "sun",
+            "mon",
+            "tue",
+            "wed",
+            "thu",
+            "fri",
+            "sat"
+          ],
+          "origin": "default"
+        },
+        "time_zone": {
+          "value": "America/New_York",
+          "origin": "profile"
+        }
+      },
+      {
+        "name": "standup",
+        "title": "Standup",
+        "paused": {
+          "value": false,
+          "origin": "default"
+        },
+        "next_run": "2026-09-28T12:00:00.000Z",
+        "next_refused": null,
+        "last_run": null,
+        "is_default": true,
+        "held": null,
+        "describe": "working days at 08:00",
+        "kind": "routine",
+        "source": "product",
+        "schedule": {
+          "value": {
+            "days": "working_days",
+            "at": [
+              "08:00"
+            ]
+          },
+          "origin": "default"
+        },
+        "config": {
+          "template": {
+            "value": "Templates/Standup.md",
+            "origin": "default"
+          },
+          "skip_without_calendar_event": {
+            "value": false,
+            "origin": "default"
+          }
+        },
+        "actor": null,
+        "task": null,
+        "grants": null,
+        "days": {
+          "value": [
+            "mon",
+            "tue",
+            "wed",
+            "thu",
+            "fri"
+          ],
+          "origin": "profile"
+        },
+        "time_zone": {
+          "value": "America/New_York",
+          "origin": "profile"
+        }
+      },
+      {
+        "name": "update-check",
+        "title": "Update Check",
+        "paused": {
+          "value": false,
+          "origin": "default"
+        },
+        "next_run": "2026-09-27T10:00:00.000Z",
+        "next_refused": null,
+        "last_run": null,
+        "is_default": true,
+        "held": null,
+        "describe": "every day at 06:00",
+        "kind": "routine",
+        "source": "product",
+        "schedule": {
+          "value": {
+            "days": [
+              "sun",
+              "mon",
+              "tue",
+              "wed",
+              "thu",
+              "fri",
+              "sat"
+            ],
+            "at": [
+              "06:00"
+            ]
+          },
+          "origin": "default"
+        },
+        "config": {},
+        "actor": null,
+        "task": null,
+        "grants": null,
+        "days": {
+          "value": [
+            "sun",
+            "mon",
+            "tue",
+            "wed",
+            "thu",
+            "fri",
+            "sat"
+          ],
+          "origin": "default"
+        },
+        "time_zone": {
+          "value": "America/New_York",
+          "origin": "profile"
+        }
+      },
+      {
+        "name": "weekly-digest",
+        "title": "Weekly Digest",
+        "kind": "routine",
+        "source": "assignment",
+        "schedule": {
+          "value": {
+            "days": [
+              "fri"
+            ],
+            "at": [
+              "15:00"
+            ]
+          },
+          "origin": "yours"
+        },
+        "paused": {
+          "value": false,
+          "origin": "default"
+        },
+        "config": {},
+        "actor": "researcher",
+        "task": "Summarise the week's Areas/ changes.",
+        "grants": null,
+        "days": {
+          "value": [
+            "fri"
+          ],
+          "origin": "yours"
+        },
+        "time_zone": {
+          "value": "America/New_York",
+          "origin": "profile"
+        },
+        "next_run": null,
+        "next_refused": null,
+        "last_run": null,
+        "is_default": false,
+        "held": "a New Routine is an assignment the runner does not start yet — agent routines (T3-8) run it; until then it is kept, listed, and not run",
+        "describe": "fri at 15:00"
+      },
+      {
+        "name": "weekly-review",
+        "title": "Weekly Review",
+        "paused": {
+          "value": false,
+          "origin": "default"
+        },
+        "next_run": "2026-09-27T22:00:00.000Z",
+        "next_refused": null,
+        "last_run": null,
+        "is_default": true,
+        "held": null,
+        "describe": "sun at 18:00",
+        "kind": "routine",
+        "source": "product",
+        "schedule": {
+          "value": {
+            "days": [
+              "sun"
+            ],
+            "at": [
+              "18:00"
+            ]
+          },
+          "origin": "default"
+        },
+        "config": {},
+        "actor": null,
+        "task": null,
+        "grants": null,
+        "days": {
+          "value": [
+            "sun"
+          ],
+          "origin": "default"
+        },
+        "time_zone": {
+          "value": "America/New_York",
+          "origin": "profile"
         }
       }
     ],
     "syncs": [
       {
-        "name": "github-state",
-        "kind": "sync",
-        "connection": "github",
-        "title": "GitHub",
-        "every": {
-          "value": "15m",
-          "origin": "default"
-        },
+        "name": "devin-sessions",
+        "title": "Devin Sessions",
         "paused": {
           "value": false,
+          "origin": "default"
+        },
+        "next_run": "2026-09-27T04:18:49.902Z",
+        "next_refused": null,
+        "last_run": null,
+        "is_default": true,
+        "held": null,
+        "describe": "every 5m",
+        "kind": "sync",
+        "connection": null,
+        "every": {
+          "value": "5m",
+          "origin": "default"
+        },
+        "raise": {}
+      },
+      {
+        "name": "github-state",
+        "title": "GitHub",
+        "paused": {
+          "value": false,
+          "origin": "default"
+        },
+        "next_run": "2026-09-27T04:18:49.902Z",
+        "next_refused": null,
+        "last_run": null,
+        "is_default": false,
+        "held": null,
+        "describe": "every 15m",
+        "kind": "sync",
+        "connection": "github",
+        "every": {
+          "value": "15m",
           "origin": "default"
         },
         "raise": {
           "review_requested": {
             "value": true,
             "origin": "default"
+          },
+          "assigned": {
+            "value": true,
+            "origin": "default"
           }
-        },
-        "next_run": "2026-09-28T13:15:00.000Z",
-        "last_run": {
-          "run_id": "8820",
-          "at": "2026-09-28T13:00:02.000Z",
-          "ok": true,
-          "outcome": "3 pull requests",
-          "cost_usd": null
         }
+      },
+      {
+        "name": "devin-knowledge",
+        "title": "Devin Knowledge",
+        "paused": {
+          "value": false,
+          "origin": "default"
+        },
+        "next_run": "2026-09-27T04:18:49.902Z",
+        "next_refused": null,
+        "last_run": null,
+        "is_default": true,
+        "held": null,
+        "describe": "every 1h",
+        "kind": "sync",
+        "connection": null,
+        "every": {
+          "value": "1h",
+          "origin": "default"
+        },
+        "raise": {}
+      },
+      {
+        "name": "aws-costs",
+        "title": "AWS Costs",
+        "paused": {
+          "value": false,
+          "origin": "default"
+        },
+        "next_run": "2026-09-27T04:18:49.902Z",
+        "next_refused": null,
+        "last_run": null,
+        "is_default": true,
+        "held": null,
+        "describe": "every 6h",
+        "kind": "sync",
+        "connection": null,
+        "every": {
+          "value": "6h",
+          "origin": "default"
+        },
+        "raise": {}
       }
     ],
     "timezone": "America/New_York",
-    "as_of": "2026-09-28T13:05:00.000Z"
+    "problems": [],
+    "errors": [],
+    "as_of": "2026-09-27T04:18:49.905Z"
   }
 }

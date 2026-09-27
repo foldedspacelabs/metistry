@@ -18,11 +18,12 @@ const agents = AGENTS.body.agents as { id: string; kind: string; revoked: boolea
 afterEach(() => vi.unstubAllGlobals());
 
 describe("the More list", () => {
-  it("Activity and Agents, then Usage and Settings — Scheduled joins when the PWA has it to open (T3-3's route)", () => {
+  it("Activity and Agents, then Usage and Settings — Scheduled joins when the PWA has a view for T3-3's route", () => {
     const more = /<section id="more" hidden>[\s\S]*?<\/section>/.exec(HTML)?.[0] ?? "";
     expect([...more.matchAll(/data-view="([^"]+)"/g)].map((m) => m[1])).toEqual(["feed", "agents", "usage", "settings"]);
-    // the client-api table still lists GET /api/scheduled as T3-3's, not served: no row to a view that cannot load
-    expect(read("../../../docs/ops/client-api.md")).toMatch(/\| `GET \/api\/scheduled` \|[^\n]*\| T3-3 \|/);
+    // T3-3 serves GET /api/scheduled now; the PWA's Scheduled view is its own ticket, so the list has no row to a view that does not exist yet
+    expect(read("../../../docs/ops/client-api.md")).toMatch(/\| `GET \/api\/scheduled` \|[^\n]*\| served \|/);
+    expect(HTML).not.toMatch(/data-view="scheduled"/);
   });
 });
 

@@ -57,6 +57,7 @@ import { isKnowledgeRoute, knowledgeRoutes, type KnowledgeHistory, type Knowledg
 import { isVaultTaskRoute, ReplayCache, vaultTaskRoutes } from "./vault-task-routes.js";
 import { closeDayRoute, isCloseDayRoute, type RoutineTrigger } from "./close-day.js";
 import type { ConsoleVaultClient } from "./vault-client.js";
+import { isScheduledRoute, scheduledRoutes, type ScheduledAdmin } from "./scheduled-routes.js";
 import { agentList, commandList } from "./commands.js";
 import { purgeArchive, purgePreview } from "@metistry-apps/routines";
 import type { EventHub } from "./events.js";
@@ -160,6 +161,13 @@ export interface ConsoleConfig {
    * route answers 503.
    */
   vaultStatus?: VaultStatusReader | undefined;
+  /**
+   * The Scheduled doors (scheduled-routes.ts, §2.1/§2.5, T3-3): the runner's
+   * components, `.metistry/scheduled.yaml` as the runner reads it and as the
+   * reconciler writes it, and Run Now bound to the runner. Absent = every
+   * `/api/scheduled*` route answers 503.
+   */
+  scheduled?: ScheduledAdmin | undefined;
 }
 
 // ----- since-cursors (docs/ops/client-api.md) -----
@@ -1095,6 +1103,8 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         // owner's read path into their own vault; an agent reaches knowledge
         // under its grants on the `/mcp` mount, never here.
         isComputeRoute(url.pathname) ||
+        // Scheduled changes when things run and what runs — the owner's hand (§2.5)
+        isScheduledRoute(url.pathname) ||
         isKnowledgeRoute(url.pathname) ||
         isTaskOpRoute(key) ||
         isArtifactRoute(url.pathname) ||
@@ -1317,6 +1327,11 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         agents: agentList(await agents.listAgents(db)),
         as_of: new Date().toISOString(),
       });
+    }
+
+    // ----- Scheduled (§2.5, T3-3): the owner's timing, and — reach `local`, gated above — what runs -----
+    if (isScheduledRoute(url.pathname)) {
+      return scheduledRoutes(req, res, key, { admin: cfg.scheduled, queries, audit });
     }
 
     // ----- compute (C1): owner-only configuration, never an action -----

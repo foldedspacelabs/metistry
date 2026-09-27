@@ -23,18 +23,19 @@ next-occurrence function and the runner's question `dueOccurrence` are
 **The runner reads this file on every tick** (T3-1): each component's
 `schedule` and `paused` from `routines.<name>` or `syncs.<name>` over its
 manifest's default, and — when a time of day follows it — the two facts in
-`Me/profile.md` a schedule may follow. See "How the runner fires", below. The
-routine manifests carry §2.5's default schedules in the closed shape
-("Defaults", below). Each remaining piece is a ticket in the plan's §3.3:
+`Me/profile.md` a schedule may follow. See "How the runner fires", below.
+**Every entry is checked against its manifest** (T3-2): the section it
+lives in, the config keys and Needs You rules it names — an entry that does
+not fit holds its component ("What a manifest declares", below). Every
+routine and collector manifest carries §2.5's default schedule in the closed
+shape, a `display_name`, and what it declares for this file ("Defaults").
+`resolveScheduled` (`scheduled.ts`) resolves every field with its origin
+(`Sourced<T>`) for the app, and the console may write the file
+(`CALLER_AUTHORITY.console`, `apps/reconciler/src/paths.ts`). Each remaining
+piece is a ticket in the plan's §3.3:
 
-- **Resolving every field with its origin** (`Sourced<T>`, for the app),
-  checking an entry's names and `config` against the manifests, and the
-  console's authority to write the file (`CALLER_AUTHORITY.console`) — T3-2.
-  The collector manifests move to the closed shape there too (they still
-  carry cron strings, read as intervals), and gain `display_name`, `config`
-  and their Needs You rules. Until the console may write the file, the
-  standup move (below) is refused at the overlay write and does nothing.
-- **The Scheduled doors**, the file's only writer — T3-3. Agent routines —
+- **The Scheduled doors**, the file's only writer — T3-3. They serve
+  `resolveScheduled`'s listing. Agent routines —
   a New Routine's actor, task and grants — run through T3-8; until then the
   runner schedules only components that have code.
 
@@ -63,9 +64,14 @@ That is §2.5's example, unedited, and a test holds it valid
 (`packages/core/test/scheduled.test.ts`) — as it does every example on this
 page that starts with the file's name.
 
-`.metistry/scheduled.yaml` is a protected path. The console writes it, through
-the Scheduled doors only, after validating what it writes against this
-schema; the assistant cannot write it at all (invariant 2).
+`.metistry/scheduled.yaml` is a protected path, and the **one** the console
+gained on 2026-09-26: the reconciler lets the console's credential write it
+as `user` beside `assistant-prompt.md` and `compute.yaml`, and nothing else
+under `.metistry/` (`CALLER_AUTHORITY.console`; the misuse test is *the
+console still cannot write any other protected path*,
+`apps/reconciler/test/paths.test.ts`). The console writes it through the
+Scheduled doors only, after validating what it writes against this schema
+and the manifests; the assistant cannot write it at all (invariant 2).
 
 ## Schedules — the closed shape
 
@@ -110,10 +116,11 @@ Refused, each with one line naming the field:
 | `days: weekdays`, `days: [monday]`, `days: []` | not a set, not the weekday tokens, or empty |
 | `days: [mon, mon]`, `at: ["08:00", "08:00"]` | the same day or time twice |
 
-**Cron strings** are accepted in a *product manifest's* `schedule:` for one
-release (`manifestScheduleSchema`, which `manifest.ts` now validates every
-collector and routine against), read as an interval by `scheduleToSeconds`
-exactly as before. They are never accepted in this file.
+**Cron strings** are accepted in a manifest's `schedule:` for one release
+(`manifestScheduleSchema`, which `manifest.ts` validates every collector and
+routine against), read as an interval by `scheduleToSeconds` exactly as
+before — for an extension that still carries one; every product manifest
+has moved to the closed shape. They are never accepted in this file.
 
 ## Routines
 
@@ -127,7 +134,7 @@ field and leaves the rest to the layers below:
 | --- | --- |
 | `schedule` | a schedule, as above |
 | `paused` | `true` or `false` |
-| `config` | `snake_case` keys, each a string, a number, `true`/`false`, or a list of those. Which keys a routine takes is its manifest's `config` schema, checked when the file loads (T3-2) |
+| `config` | `snake_case` keys, each a string, a number, `true`/`false`, or a list of those. Which keys a routine takes, and of what kind, is its manifest's `config` — a key it does not declare, or a value of the wrong kind, holds the routine |
 
 **A New Routine — an assignment**, with no product code (ruling 4). It names
 an `actor`, `task` or `grants`, and then it needs:
@@ -160,7 +167,38 @@ here, never in the connection's file (§2.6):
 | `connection` | **required** — the connection's name |
 | `every` | the cadence, from the same closed four. A sync has no time of day |
 | `paused` | `true` or `false` |
-| `raise` | the collector's declared Needs You rules, each `true` or `false` (`review_requested: true`) |
+| `raise` | the collector's declared Needs You rules (`needs_you` in its manifest), each `true` or `false` (`review_requested: true`). A rule it does not declare holds the sync |
+
+## What a manifest declares
+
+A routine or collector manifest is the first layer, and it says what this
+file may name for it (`manifest.ts`; `scheduledUnitOf` in `scheduled.ts`
+reads it):
+
+| Field | |
+| --- | --- |
+| `display_name` | what a person reads — *Morning Brief*, not `morning-brief`. The `name` stays the stable handle, and the key in this file (C55) |
+| `schedule` | the default, in the closed shape |
+| `config` | a routine's config fields, each `{kind, label, default, description?, options?}`. `kind` is one of a closed five — `text`, `path` (a TitleCase vault path, never `.metistry/`), `number`, `boolean`, `choice` (with `options`) — and the default must be a value of its kind. None declared: it takes no config |
+| `needs_you` | a collector's Needs You rules, each `{label, default, description?}` — the toggles `syncs.<name>.raise` switches |
+| `presents_as` | a collector's section: `sync` (the default) or `routine` — housekeeping with no connection. Inbox Sort (`inbox-drain`) and Usage Rollup (`claude-usage`) present as routines, so their changes live under `routines.<name>` |
+
+Each entry is checked against its component (`entryProblems`), and every
+problem names its field. One that **holds** the component — it is not run,
+one `schedule_held` row a day says why, one alert names it:
+
+| In the file | Why it holds |
+| --- | --- |
+| `routines.github-state: …` | `github-state` is a sync — its changes live under `syncs.github-state` |
+| `syncs.inbox-drain: …` | `inbox-drain` presents as a routine |
+| the same name under `routines:` and `syncs:` | one entry per component |
+| a New Routine named like a routine or sync with a manifest | give it a name of its own |
+| `routines.standup.config.voice` | a key `standup` does not declare, or a value not of its kind |
+| `syncs.github-state.raise.merged` | a rule `github-state` does not declare |
+
+An entry naming nothing installed — an extension since removed — holds
+nothing (there is nothing to hold) and is reported as applying to nothing;
+nothing deletes it (§2.7).
 
 ## Where a field came from
 
@@ -173,8 +211,25 @@ it (`FIELD_ORIGINS`, `FIELD_ORIGIN_LABELS` in `scheduled.ts`):
 | `profile` | *from your profile* | `Me/profile.md` — the days behind `working_days`, the zone behind an absent `tz` |
 | `yours` | *yours* | this file |
 
-A resolved field is a `Sourced<T>` — `{ value, origin }`. The resolver that
-produces them is T3-2's, and T3-4's for the profile.
+A resolved field is a `Sourced<T>` — `{ value, origin }`. `resolveScheduled`
+(`scheduled.ts`) resolves every routine and sync — pure, over the manifests,
+a **valid** file and the profile's facts — into what the Scheduled pane
+shows:
+
+| Field | |
+| --- | --- |
+| `displayName`, `section` | from the manifest |
+| `isDefault` | no entry in this file — the **default** tag; Reset to Default returns here |
+| `schedule`, `describe` | the schedule in force and its origin; `working days at 07:00` |
+| `days` | a time of day's weekdays — `profile` when a day set follows `Me/profile.md`; `null` when it has no working days to follow |
+| `timeZone` | the schedule's `tz`, then the profile's `timezone` (`profile`), then `METISTRY_TZ` (`default`) |
+| `paused`, `config`, `raise` | every declared field, the owner's value or the manifest's default |
+| `connection` | a sync's, as its entry names it |
+| `held` | why the runner holds it — its entries do not fit its manifest; a held component shows its manifest's values |
+| `next` | when it runs next (`nextOccurrence`); an interval counts from its last run, and a never-run one is due now; `null` while paused or held |
+
+An invalid file is never resolved — it is shown as its errors. The
+profile's facts come in through `profileFacts` (below).
 
 ## `Me/profile.md`, and the standup move
 
@@ -261,9 +316,10 @@ tick, for every collector and routine:
    error, or a top-level key that is not `routines` or `syncs`, which might be
    a typo of one), **every** component is. One alert per distinct error, once
    a day while it lasts; the next tick after you fix the file picks it up.
-3. **The schedule**: the entry's, else the manifest's. `syncs.<name>.every`
-   is a collector's cadence; `routines.<name>` applies to any component,
-   because a collector may present as a routine (§2.5).
+3. **The schedule**: the entry's, else the manifest's — `routines.<name>`
+   for a routine or a collector that presents as one, `syncs.<name>.every`
+   for a sync. An entry that does not fit its manifest holds the component
+   ("What a manifest declares", above).
 4. **Is it due?**
    - **An interval** (`{every}`, or a manifest's cron string): once that long
      has passed since the last run. A component that has never run is due at
@@ -320,7 +376,22 @@ each routine's manifest:
 | Reply Review (`reply-review`) | every day at 23:00 |
 | Weekly Review (`weekly-review`) | Sunday at 18:00 |
 | Session Purge (`session-purge`) | every day at 04:00 — the session archive's retention (`retention_days`, 1–30, default 30; T3-9) |
-| Inbox Sort, Usage Rollup | every 5 min, hourly — the collectors `inbox-drain` and `claude-usage`, still on their cron strings until T3-2 |
+| Inbox Sort (`inbox-drain`) | every 5 min — a collector that presents as a routine |
+| Usage Rollup (`claude-usage`) | hourly — likewise |
+
+The syncs: GitHub (`github-state`) every 15 min, raising *A pull request
+asks for your review* and *An issue is assigned to you* (both on — the
+raises themselves land with T2-13 and T4-23); Devin Sessions every 5 min;
+Devin Knowledge hourly; AWS Costs every 6 hours. No shipped manifest carries
+a cron string any more.
+
+**Standup** is §2.5's eighth default, working days at 08:00; its routine and
+manifest are T3-5's.
+
+Session Purge is the one shipped routine that declares `config`:
+`retention_days` (a number, default 30; the run refuses anything outside
+1–30). Every other key in a routine's `config:` is held (Standup's
+`template` and `skip_without_calendar_event` come with T3-5).
 
 A routine on `working_days` or `eve_of_working_days` runs only once
 `Me/profile.md` says which days you work — the seeded profile says nothing,

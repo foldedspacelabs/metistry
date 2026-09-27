@@ -144,8 +144,10 @@ describe("step 1 — copy into this instance, record the name", () => {
     expect(Object.keys(parseSecretsFile(file).secrets).sort()).toEqual(["aws_secret_access_key", "devin_api_key", "local_api_key"]);
     expect(parseSecretsFile(file).secrets.devin_api_key).toEqual({ hosts: [], grants: {} });
     expect(r.recorded.sort()).toEqual(["aws_secret_access_key", "devin_api_key", "local_api_key"]);
-    // the closing line counts what it did (W1 checkpoint D4)
-    expect(o.lines.at(-1)).toBe(`shared scope: copied 3 secret(s) for ${dir}; 1 reference(s) keep their environment name until a release reads {{ secret.name }} there.`);
+    // the closing line counts what it did (W1 checkpoint D4) — and since
+    // T4-18 compute.yaml reads {{ secret.name }}, so its reference is
+    // rewritten rather than left waiting
+    expect(o.lines.at(-1)).toBe(`shared scope: copied 3 secret(s), 1 reference(s) rewritten for ${dir}.`);
     for (const v of ["devin-SHARED-original", "local-SHARED-original", "aws-SHARED-original"]) {
       expect(file).not.toContain(v);
       expect(o.lines.join("\n")).not.toContain(v);

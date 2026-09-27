@@ -144,6 +144,8 @@ describe("step 1 — copy into this instance, record the name", () => {
     expect(Object.keys(parseSecretsFile(file).secrets).sort()).toEqual(["aws_secret_access_key", "devin_api_key", "local_api_key"]);
     expect(parseSecretsFile(file).secrets.devin_api_key).toEqual({ hosts: [], grants: {} });
     expect(r.recorded.sort()).toEqual(["aws_secret_access_key", "devin_api_key", "local_api_key"]);
+    // the closing line counts what it did (W1 checkpoint D4)
+    expect(o.lines.at(-1)).toBe(`shared scope: copied 3 secret(s) for ${dir}; 1 reference(s) keep their environment name until a release reads {{ secret.name }} there.`);
     for (const v of ["devin-SHARED-original", "local-SHARED-original", "aws-SHARED-original"]) {
       expect(file).not.toContain(v);
       expect(o.lines.join("\n")).not.toContain(v);
@@ -172,8 +174,12 @@ describe("step 1 — copy into this instance, record the name", () => {
     const items = await snapshot(kc);
     kc.ops.length = 0;
 
-    const again = await migrateScope(opts(dir, ID_A, kc));
+    const o2 = opts(dir, ID_A, kc);
+    const again = await migrateScope(o2);
     expect(again.copied).toEqual([]);
+    // never "copied" when nothing was (W1 checkpoint D4)
+    expect(o2.lines.at(-1)).toMatch(new RegExp(`^shared scope: nothing to copy, 3 already here for ${dir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[;.]`));
+    expect(o2.lines.join("\n")).not.toContain("shared scope: copied");
     expect(again.recorded).toEqual([]);
     expect(again.kept.map((k) => k.to).sort()).toEqual(["aws_secret_access_key", "devin_api_key", "local_api_key"]);
     expect(kc.ops.filter((o) => o.op === "get" || o.op === "set" || o.op === "delete")).toEqual([]);

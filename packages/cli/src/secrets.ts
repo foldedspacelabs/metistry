@@ -1282,9 +1282,15 @@ export async function migrateScope(opts: MigrateScopeOptions): Promise<MigrateSc
   if (res.originals.length) out(`left in the shared scope — this migration deletes nothing: ${res.originals.join(", ")}. \`metistry secrets purge-shared\` removes an original once every instance on this Mac has its copy.`);
   res.complete = res.unreadable.length === 0 && res.unmappable.length === 0;
   const waiting = res.pending.length ? `; ${res.pending.length} reference(s) keep their environment name until a release reads {{ secret.name }} there` : "";
+  // what actually happened, counted — "copied" when nothing was is a claim
+  const did = [
+    res.copied.length > 0 ? `${dry ? "would copy" : "copied"} ${res.copied.length} secret(s)` : "nothing to copy",
+    ...(res.kept.length > 0 ? [`${res.kept.length} already here`] : []),
+    ...(res.rewritten.length > 0 ? [`${res.rewritten.length} reference(s) ${dry ? "would be " : ""}rewritten`] : []),
+  ].join(", ");
   out(
     res.complete
-      ? `shared scope: copied for ${opts.instanceDir}${waiting}${dry ? " (dry run — nothing changed)" : ""}.`
+      ? `shared scope: ${did} for ${opts.instanceDir}${waiting}${dry ? " (dry run — nothing changed)" : ""}.`
       : `shared scope: not finished for ${opts.instanceDir} — deal with the lines above, then rerun \`${MIGRATE_SCOPE_COMMAND} --instance ${opts.instanceDir}\`.`,
   );
   return res;

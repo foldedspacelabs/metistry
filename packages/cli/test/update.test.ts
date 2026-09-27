@@ -11,7 +11,8 @@ import { describe, expect, it } from "vitest";
 import { instanceLockPath, parseLock, readLock, serializeLock, type LockFile } from "../src/lock.js";
 import { main } from "../src/main.js";
 import { MIGRATION_LOCK_KEY, type MigrationSession } from "../src/migrate.js";
-import { hashHostJobs, legacyLayoutRefusal, pastLegacyLayoutSupport, publishedPackages, trackedPathFor, update } from "../src/update.js";
+import { realExec, type Exec } from "../src/exec.js";
+import { hashHostJobs, legacyLayoutRefusal, parseDoctorJson, pastLegacyLayoutSupport, publishedPackages, trackedPathFor, update } from "../src/update.js";
 import { loadPlistTemplates } from "../src/launchd.js";
 import { checkout, failDoctor, fakeExec, HELPER, okDoctor, put, RECONCILER, shown, WATCHDOG } from "./fixtures.js";
 
@@ -170,6 +171,10 @@ describe("metistry update", () => {
     const text = lines.join("\n");
     expect(text).toContain(`${WATCHDOG}: kickstart exited 5 — not restarted`);
     expect(text).not.toContain("job(s) kickstarted");
+    // W1 checkpoint D3: a job whose code changed and whose kickstart failed is not "nothing changed"
+    expect(text).not.toContain("no host job's code changed");
+    expect(text).toContain(`nothing kickstarted — kickstart of ${WATCHDOG} failed (exit 5)`);
+    expect(text).toContain("nothing kickstarted, 1 kickstart(s) failed");
   });
 
   it("a second run finds nothing to migrate and nothing to restart", async () => {
@@ -479,5 +484,104 @@ describe("the legacy instance layout", () => {
     const r = await update({ ...base(P, { METISTRY_INSTANCE_DIR: I, ...BRIDGE }), version: "0.9.0", exec: fakeExec(), fetchFn: fakeFetch().fn, out: (l) => lines.push(l), doctorFn: okDoctor, openSession: async () => fakeSession() });
     expect(r.code).toBe(0);
     expect(lines.join("\n")).not.toContain("migrate-layout");
+  });
+});
+
+// W1 checkpoint D1: an update that changes the manifest schema must not be
+// judged by the pre-update code's schema. The closing doctor is the UPDATED
+// CLI's, run as a child; these tests stand a fake CLI where the new build
+// would be and run it for real.
+describe("update's closing doctor runs the updated CLI", () => {
+  /** A fake `packages/cli/dist/main.js`: prints a report naming its own argv, exits like doctor does. */
+  const fakeCli = async (P: string, body: string) => {
+    await mkdir(join(P, "packages", "cli", "dist"), { recursive: true });
+    await writeFile(join(P, "packages", "cli", "dist", "main.js"), body);
+  };
+  const reporting = (ok: boolean) =>
+    `const report = { as_of: "now", product_dir: "x", shape: "compose", ok: ${ok}, rows: [{ kind: "manifest", name: "new-schema", status: "${ok ? "ok" : "failed"}", latency_ms: 0, probe: process.argv.slice(2).join(" "), remediation: "from the child" }] };\n` +
+    `process.stdout.write(JSON.stringify(report, null, 2) + "\\n");\nprocess.exit(report.ok ? 0 : 1);\n`;
+  /** Every other subprocess stays fake; only the fake CLI really runs. */
+  const hybrid = (): Exec & { calls: ReturnType<typeof fakeExec>["calls"] } => {
+    const fake = fakeExec();
+    const exec = (async (cmd, args, o) => (args[0]?.endsWith("dist/main.js") ? (fake.calls.push({ cmd, args, cwd: o?.cwd }), realExec(cmd, args, o)) : fake(cmd, args, o))) as Exec & { calls: typeof fake.calls };
+    exec.calls = fake.calls;
+    return exec;
+  };
+  /** `fallbackOk`: what the in-process (pre-update) doctor would say, were it asked */
+  const run = async (P: string, extra: Partial<Parameters<typeof update>[0]> = {}, fallbackOk = false) => {
+    const lines: string[] = [];
+    let inProcess = false;
+    const r = await update({
+      ...base(P, BRIDGE),
+      out: (l) => lines.push(l),
+      exec: hybrid(),
+      skipBuild: true,
+      skipMigrate: true,
+      fetchFn: fakeFetch().fn,
+      closingDoctor: "child",
+      doctorFn: async (d) => ((inProcess = true), fallbackOk ? okDoctor(d) : failDoctor(d)),
+      ...extra,
+    });
+    return { r, text: lines.join("\n"), inProcess: () => inProcess };
+  };
+
+  it("runs `node <run-dir>/packages/cli/dist/main.js doctor --json` and takes ITS verdict, not this process's", async () => {
+    const P = await checkout({ git: true });
+    await fakeCli(P, reporting(true));
+    const { r, text, inProcess } = await run(P);
+    expect(inProcess()).toBe(false); // the in-process doctor would have said FAILED
+    expect(r.code).toBe(0);
+    expect(r.commands.some((c) => c.endsWith(`${join(P, "packages", "cli", "dist", "main.js")} doctor --json --product-dir ${P}`))).toBe(true);
+    expect(text).toContain("new-schema");
+    expect(text).toContain("update ok");
+  });
+
+  it("a child that is not happy keeps the same exit semantics: 1, and the summary says so", async () => {
+    const P = await checkout({ git: true });
+    await fakeCli(P, reporting(false));
+    const { r, text, inProcess } = await run(P, {}, true);
+    expect(inProcess()).toBe(false);
+    expect(r.code).toBe(1);
+    expect(text).toContain("from the child");
+    expect(text).toContain("updated, and doctor is not happy");
+  });
+
+  it("passes --env-file through, so the child reads the same environment", async () => {
+    const P = await checkout({ git: true });
+    await fakeCli(P, reporting(true));
+    const { r } = await run(P, { envFile: join(P, "custom.env") });
+    expect(r.commands.some((c) => c.endsWith(`doctor --json --product-dir ${P} --env-file ${join(P, "custom.env")}`))).toBe(true);
+  });
+
+  it("no updated CLI on disk: falls back to the in-process doctor, and says the answer is the pre-update code's", async () => {
+    const P = await checkout({ git: true });
+    const { r, text, inProcess } = await run(P);
+    expect(inProcess()).toBe(true);
+    expect(r.code).toBe(1);
+    expect(text).toContain(`closing doctor: no updated CLI at ${join(P, "packages", "cli", "dist", "main.js")} — running this process's doctor instead`);
+    expect(text).toContain("a standalone `metistry doctor` is the truth");
+  });
+
+  it("a child that crashes without a report: falls back, naming its exit code and last line", async () => {
+    const P = await checkout({ git: true });
+    await fakeCli(P, `process.stderr.write("SyntaxError: the new build is broken\\n");\nprocess.exit(3);\n`);
+    const { r, text, inProcess } = await run(P, {}, true);
+    expect(r.code).toBe(0); // the fallback's verdict
+    expect(inProcess()).toBe(true);
+    expect(text).toContain("closing doctor: the updated CLI's doctor exited 3 without a report (SyntaxError: the new build is broken)");
+  });
+
+  it("a dry run spawns nothing and lists the doctor as before", async () => {
+    const P = await checkout({ git: true });
+    await fakeCli(P, reporting(true));
+    const exec = hybrid();
+    const r = await update({ ...base(P, BRIDGE), exec, dryRun: true, fetchFn: fakeFetch().fn, closingDoctor: "child" });
+    expect(exec.calls).toEqual([]);
+    expect(r.commands.at(-1)).toBe("metistry doctor");
+  });
+
+  it("parseDoctorJson takes a report and nothing else", () => {
+    expect(parseDoctorJson('{"ok":true,"rows":[],"as_of":"x","product_dir":"p","shape":"compose"}')?.ok).toBe(true);
+    for (const bad of ["", "not json", "null", '{"ok":"yes","rows":[]}', '{"ok":true}', '{"ok":true,"rows":[]'] as const) expect(parseDoctorJson(bad)).toBeUndefined();
   });
 });

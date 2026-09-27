@@ -185,6 +185,52 @@ describe("doctor: schedules", () => {
     expect(r.brief?.meta).toMatchObject({ schedule_refused: "no_working_days" });
   });
 
+  // W1 checkpoint D2: the refusal is the LAST RUN's; the profile is read now
+  describe("a no_working_days skip, once Me/profile.md has working_days", () => {
+    const why = "the schedule runs on working_days, and Me/profile.md does not say which days you work";
+    const refused = [{ component: "brief", kind: "routine_run", at: ago(30), ok: true, meta: { schedule_refused: "no_working_days", why, outcome: "skipped:no_working_days" } }];
+    const withProfile = async (frontmatter: string) => {
+      const inst = await mkdtemp(join(tmpdir(), "metistry-profile-"));
+      await mkdir(join(inst, "Me"), { recursive: true });
+      await writeFile(join(inst, "Me", "profile.md"), `---\n${frontmatter}---\n\n# Me\n`);
+      return inst;
+    };
+
+    it("is history: ok, saying it was skipped and when it next runs — no refusal reported", async () => {
+      const inst = await withProfile("timezone: America/New_York\nworking_days: [mon, tue, wed, thu, fri]\n");
+      const r = await rowsFor(refused, { METISTRY_INSTANCE_DIR: inst });
+      expect(r.brief?.status).toBe("ok");
+      expect(r.brief?.remediation).toBeUndefined();
+      // NOW is Tue 08:00 in New York, past 07:00 — so Wednesday's slot
+      expect(r.brief?.meta).toMatchObject({ schedule_refused: "no_working_days", schedule_refused_now: null, next_due_at: "2026-09-16T11:00:00.000Z" });
+      expect(r.brief?.meta?.["info"]).toBe(
+        "was skipped at 2026-09-15T11:30Z (no_working_days) — Me/profile.md has working_days now, so it is scheduled again: nothing to do until the next run at 2026-09-16 07:00 America/New_York",
+      );
+    });
+
+    it("takes the zone from METISTRY_TZ when the profile names none", async () => {
+      const inst = await withProfile("working_days: [mon, wed]\n");
+      const r = await rowsFor(refused, { METISTRY_INSTANCE_DIR: inst, METISTRY_TZ: "Europe/London" });
+      expect(r.brief?.status).toBe("ok");
+      expect(String(r.brief?.meta?.["info"])).toContain("until the next run at 2026-09-16 07:00 Europe/London");
+    });
+
+    it("still absent while the profile has no working_days — the runner's own words", async () => {
+      const inst = await withProfile("timezone: America/New_York\n");
+      const r = await rowsFor(refused, { METISTRY_INSTANCE_DIR: inst });
+      expect(r.brief?.status).toBe("absent");
+      expect(r.brief?.remediation).toBe(`not scheduled: ${why}`);
+    });
+
+    it("says the refusal that holds NOW when another one has taken its place (no timezone anywhere)", async () => {
+      const inst = await withProfile("working_days: [mon, tue, wed, thu, fri]\n");
+      const r = await rowsFor(refused, { METISTRY_INSTANCE_DIR: inst });
+      expect(r.brief?.status).toBe("absent");
+      expect(r.brief?.remediation).toMatch(/^not scheduled: no timezone/);
+      expect(r.brief?.meta).toMatchObject({ schedule_refused: "no_working_days", schedule_refused_now: "no_timezone" });
+    });
+  });
+
   it("a marker a later run has answered is history, even inside its window", async () => {
     const r = await rowsFor([
       { component: "fold", kind: "runner", tool: "preflight_failed", at: ago(120), ok: false, error: "blocked_config: fixed since" },

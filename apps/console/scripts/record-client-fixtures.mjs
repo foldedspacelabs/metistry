@@ -408,6 +408,10 @@ const REQUESTS = [
   ["GET /api/targets", () => ({ path: "/api/targets" })],
   ["GET /api/runs/:id", () => ({ path: `/api/runs/${ids.run}` })],
   ["GET /api/runs/export", () => ({ path: "/api/runs/export?limit=3", ndjson: true })],
+  // Chat's working indicator (T2-17): the same turn_id `run_detail`'s tool calls above carry.
+  ["GET /api/turns/:turn_id/progress", () => ({ path: `/api/turns/${turnId}/progress` })],
+  // Run detail's conversation (T2-17): the unfolded session seeded below, two turns.
+  ["GET /api/sessions/:id", () => ({ path: "/api/sessions/7b1f2c9e-0000-4000-8000-000000000001" })],
   ["GET /api/compute", () => ({ path: "/api/compute" })],
   ["GET /api/compute/models", () => ({ path: "/api/compute/models" })],
   ["GET /api/knowledge/search", () => ({ path: "/api/knowledge/search?q=store" })],

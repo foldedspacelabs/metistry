@@ -1,5 +1,189 @@
 # @foldedspacelabs/metistry-cli
 
+## 0.14.0
+
+### Minor Changes
+
+- 2fc0ef0: **Compute (T4-18): provider keys are this instance's secrets, providers gain a
+  switch and billing, and the catalogue is searched by model.**
+  
+  - `compute.yaml`'s `auth.secret` is a reference: `{{ secret.<name> }}` (one of
+    this instance's secrets), `env:<NAME>` (an install variable), or — so every
+    older file loads — the bare `<NAME>`. A pasted key still cannot match any of
+    them. Core gains `credentialOf`, `providerCredential`, `credentialEnvNames`,
+    `credentialFromEnv` and `providerSecretNames`; the reference spelling moved
+    to a leaf module (`secret-ref.ts`, re-exported by `secrets.ts`) so
+    `compute.ts` can read it without a load-time cycle.
+  - A service reads a key from its environment, never the Keychain:
+    `{{ secret.x }}` arrives as `METISTRY_SECRET_X` (core's `secretDeliveryVar`),
+    which `metistry secrets sync --to env` now writes for every secret the
+    providers reference, from this instance's item only; `metistry up`'s engine
+    allowlist passes exactly those names. For one release a `*_api_key` secret is
+    also read from the `METISTRY_<NAME>` line T4-3 filled, so `migrate-scope`
+    rewriting the reference cannot cut a running engine off.
+  - `metistry compute providers add` stores the key through `secrets set`'s own
+    code — this instance's Keychain account, recorded in `secrets.yaml` sent only
+    to the provider's host — and writes the reference. The `openrouter` template
+    references `{{ secret.openrouter_api_key }}`. Nothing in `metistry compute`
+    reads or writes the retired per-user account any more. `--secret` takes a
+    secret's name; the old UPPER_SNAKE spelling is refused with the name it
+    became.
+  - Providers gain `enabled` (off = neither searched nor offered; an assignment
+    naming a switched-off provider is refused by the schema) and `billing:
+    token | subscription` (off this machine only). The report carries `enabled`,
+    `billing`, `tag` (`local` · `cloud` · `subscription`), `secret_kind`,
+    `secret_name` and presence from this instance's account.
+  - `seed/model-identities.yaml` and core's `groupCatalogue`: provider model id →
+    one model, overlaid by key by the instance's `.metistry/model-identities.yaml`
+    (a new `INSTANCE_LAYOUT.modelIdentities`). An id it cannot map stays its own
+    row under its provider.
+  - New verbs: `compute providers set <name> [--enabled on|off] [--billing …]
+    [--base-url …] [--secret …]`, `compute models search [<query>]`,
+    `compute unassign <tier|crew:name>`. New owner routes:
+    `GET /api/compute/catalogue[?q=&provider=&refresh=true]` (listings kept
+    15 minutes in memory; `refresh` re-reads them) and
+    `POST /api/compute/unassign {tier|crew}`; MetistryKit's `UsageStore` gains
+    `computeCatalogue` and `unassignCompute`.
+  - `migrate-scope` now rewrites `compute.yaml`'s `auth.secret` (its schema reads
+    references), and still counts a rewritten reference's original as this
+    instance's, so reruns stay idempotent and `purge-shared` can find it.
+    `METISTRY_SECRET_*` is never taken for a retired shared-scope original.
+  - `fetchModels` keeps what a listing says beyond the id (name, context,
+    per-million price, tools) as `details`.
+- 851e08a: **Connections P1: the files, the pooled client, `metistry connections` and the
+  read routes (plan §2.6, M13, T4-8a).** A new package,
+  `@foldedspacelabs/metistry-connections`, reads `.metistry/connections/<name>.yaml`
+  against the connection-type registry — `ok`, `absent` (provider not installed;
+  nothing deleted) or `failed`, never fatal — and adds four rules to F-3's
+  schema: no key-shaped literal anywhere a value is typed, no `{{ secret.x }}` in a
+  URL, on a command line or in a path. Its `ConnectionPool` holds one MCP client
+  per connection (stdio or Streamable HTTP), and refuses before dialling a tool
+  the file does not list, one at Never, one at Ask First without an approval, and
+  a call whose arguments carry the caller's own bearer; a command gets only the
+  environment its file names, never the host process's; every HTTP request goes
+  through core's `guardedFetch` with `connection:<name>` as the grantee and is
+  pinned to the connection's origin (no redirect followed); every answer is
+  redacted. `checkConnection` is its `check()` (ok · degraded · absent · failed).
+  The CLI adds `metistry connections list|show|add|set|policy|remove|test`
+  (protected writes through the reconciler; `add` dials once and applies the
+  owner's Q15 defaults) and one doctor row per connection, never `failed`. The
+  console serves `GET /api/connections` and `GET /api/connections/:name` to the
+  owner — names, never values, and no dial. Core adds
+  `INSTANCE_LAYOUT.connectionsDir`.
+- 50a455d: **Linear: the connection and its sync (plan §2.6, §4 Q22, T4-24).** The
+  product ships its first `tracker` connection type, `seed/connection-types/linear/`
+  — a personal API key, sent as `Authorization: <API_KEY>` to
+  `https://api.linear.app` and nowhere else, capability `read`.
+  `@foldedspacelabs/metistry-connections` adds what a sync opens to read a
+  builtin provider's connection (`openSyncHttp`, `instanceSyncOpener`): the
+  connection `scheduled.yaml` names, else the one its provider's sync reads; a
+  `fetch` pinned to the provider's origin that follows no redirect; every
+  request through core's `guardedFetch` as `connection:<name>`, the key filled
+  only for a host on its *Sent only to* list; and the `linear` provider's
+  read-only GraphQL client (a document that is not a `query` is refused before
+  it leaves). *Used by* now names the sync a provider declares. The new `linear`
+  collector reconciles the issues assigned to the owner into `work`
+  (`external_ref linear:<KEY>`, state, priority and url in `meta`), closes the
+  ones that leave with why, and raises one `task` mirror per assigned issue that
+  clears at source; `addIssueToToday` captures `- [ ] <title> do <today>
+  linear:<KEY>` through the capture service, idempotent per issue. The console
+  hands collectors the opener; `metistry secrets sync --to env` delivers a
+  sync-read connection's secrets as `METISTRY_SECRET_<NAME>`.
+- 935901e: **Roll back (T10-6): `metistry vault rollback`, `POST /api/vault/rollback` and the
+  reconciler's `POST /vault/revert`.** History is preserved, always: a rollback is ONE
+  new commit, made as `user`, that undoes a commit (`git revert`), puts every path back
+  as it was at a moment (`--to <date>`), or puts one file back (`--file`, before its
+  last change or `--to` a moment) — computed off the working tree with `merge-tree`
+  and a scratch index, applied by `merge --ff-only`, never a reset or a force. Undo is
+  rolling back that commit. A re-walk and the push policy follow.
+  
+  Every rollback waits for Approve in Needs You. The route (F-1's frozen row, now
+  served; reach `local`, so a passkey session is `403 local_only`) asks the reconciler
+  for a preview and raises one request carrying it — the commits it undoes, the files
+  it puts back; Approve runs the revert pinned to the previewed history and held to
+  the previewed change set (`409 stale` otherwise). The reconciler refuses the revert
+  for any principal but `user`, from either bearer. Configuration — every
+  `.metistry/` path, `CLAUDE.md`, `README.md` — is left as it is and named
+  (`skipped_config`) unless `include_config`, which a real revert admits only from the
+  owner-class bearer: `metistry vault rollback --include-config` raises the request,
+  waits for Approve and makes the change itself (`--request <id>` resumes the wait).
+  `POST /api/proposals/:id` answers a rollback with `rolled_back`; its decision SELECT
+  now carries `source` (additive, as T10-5's). `Git` takes an `indexFile` option (a
+  scratch `GIT_INDEX_FILE`), and the committer a `holdHistory` hold.
+
+### Patch Changes
+
+- f01606b: **Close the Day (T2-8).** `POST /api/today/close {day, line?}` writes the daily note's `metistry:day` section through the reconciler's section operation as `user` — when the day closed, what was done, what moved and to when, and the owner's line for tomorrow, facts only and written whole on every close — then enqueues `plan-tomorrow` with the day it closed (`closedDay`, the routine's close shape from T3-7), one pass at a time, recorded as a `routine_run` with `meta.trigger: "close"`. The note is scanned with core's `scanNoteSection` before anything is sent: markers deleted, doubled or quoted in code are `409 section_missing` with the reason, nothing is written into the note, one `note` request (kind `knowledge`, from `console`) says why and is brought up to date rather than stacked on a second close, and the plan is still made. A `day` that is not today in `METISTRY_TZ` is `409 stale`; a missing `Journal/<day>.md` is `404` (the door never creates the owner's note). The console's vault client gains `section()` over `POST /vault/section` and now passes `section_missing` (and `local_only`) through as themselves instead of `not_available`. New named query `day_close` (`expose: route`): done from the index's `done_on` plus the Tick door's own record, moved from the Defer door's record, which now stores `to` (the day or `someday`) on its audit row. Core marks the route served. The seeded `Templates/Daily.md` places the markers under `## Today · Metistry`; existing instances keep their own template (the first close appends the heading and markers to a note that has none).
+- 339d465: **Live events on the Mac (T5-7).** The app holds one subscription to `GET /api/events` per instance (`ConsoleSession.events`, `LiveEvents`) over the `console session` child, and hands each event to the readers of the store it names — the catalogue's "the client refetches" column as `EventTopic`s. A `SectionModel` built with topics is marked due by exactly its events; `needs_you.changed`'s count drives the Needs You row, the badge and the Dock directly (announced once per change). While the stream is live those readers stop polling on their clocks (a five-minute check stays, for a snooze coming due); while it is down they poll as before, and it reopens on a 3 s → 1 min backoff with `Last-Event-ID`. A `resync`, an unreadable frame or a subscription with nothing to resume from marks every reader due. `metistry console session --stdio` now passes on the console's cursor — the id-only frame a fresh subscriber gets first — as `{id, event: {id}}`; it was dropped, so a stream that was quiet from the start could not resume.
+- ac377ed: The Morning Brief (T3-6; plan §2.13, §2.5; C97, C102, C103, C111). At 07:00 on
+  a working day `morning-brief` renders `Templates/Brief.md` (seeded) into
+  `Journal/Brief/<date>.md` as principal `morning-brief` — the standup embedded
+  by reference, today's timed meetings under **Next Up**, what is waiting on you
+  — writes the daily note's `metistry:day` section model-free through
+  `POST /vault/section` (never creating the note; broken markers raise one
+  `note` request), and enqueues ONE assistant turn for the file's prose slots.
+  File and section are one commit: the runner now hands every run its
+  `ctx.runId`. The chat message stays, opening with the file.
+  
+  **C103 — prose outside fold templates.** Core's `PROSE_SOURCES`
+  (`knowledge-fold`, `standup`, `morning-brief`) is where `{{ prose }}` renders a
+  slot; every other writer still gets the refusal note, now `PROSE_REFUSAL`. New
+  `prose-slots.ts`: `fillProseSlots` accepts a change to a pending slot's line —
+  one line of prose, no block, no comment — and nothing else, and marks each
+  filled line `<!-- metistry:written N -->`. `JOURNAL_MACHINE_DIRS` gains
+  `Brief`; `JOURNAL_ROUTINE_DIRS` / `journalRoutineOf` name the routine that owns
+  each folder it writes. `CalendarEvent` gains `attendees`.
+  
+  **`knowledge_write` in a routine's own folder** (`Journal/Brief/`,
+  `Journal/Standup/`, `Journal/Plan/`) now does exactly one thing: fill the
+  pending prose slots of a file the routine wrote, in the routine's name with the
+  reply's turn. A create there, `Journal/Plan/` at all, a file the routine does
+  not own, a stale hash, or any other changed byte is refused — before this, the
+  assistant could create a file in those folders and pre-empt the routine's own.
+  
+  The Standup enqueues the same one turn when its template has `prose` (the
+  seeded one has none). The console's vault client gains `section`, surfacing
+  `section_missing` by code. `metistry templates check` knows `Brief.md` renders
+  as `morning-brief`.
+- 0cba4a2: **The Standup routine (T3-5).** `routines/standup` renders `Templates/Standup.md` (or the path its `template` config names) into `Journal/Standup/<date>.md` on working days at 08:00 — its own reserved subfolder, written through the reconciler as principal `standup`, so the file says `source: standup`. Model-free: `prose` is not legal in a standup render until C103 (T3-6). It never overwrites a file it does not own (`skipped:user_owned`), writes a morning once (`meta.standup_for`), dates a late run from its slot, and writes nothing without working days in `Me/profile.md` — the runner does not start it, and a Run Now records `skipped:no_working_days` itself. `skip_without_calendar_event` (off by default) skips a day whose calendar has no standup; a calendar that cannot be asked never causes a skip. Its row landing is the `routine.status {name: "standup"}` that swaps Today's placeholder for the file. `routines.standup` in `.metistry/scheduled.yaml` (T3-4's move) now applies to it. The seeded `Templates/Standup.md`'s Yesterday list asks for `status = done` — without it the list was always empty, because a task query scopes to open tasks by default — and `metistry templates check` knows the template's writer as `standup`.
+- 440d0d1: Three strikes and a Stop limit (T3-12, C135, C133). **A component that fails
+  three times in a row stops** — `DEFAULT_MAX_STREAK` is now 3
+  (`METISTRY_RUNNER_MAX_STREAK` still overrides it; `metistry doctor` reads the
+  same default) — and raises ONE Needs You `report` per (component, error
+  signature) per streak: a routine's waiting failure report is turned into the
+  stop (`title` *stopped after 3 failures*, plus `stopped: {failures, limit,
+  since, at}`) rather than joined by a second row, and a collector raises its
+  stop as `collector-failed:<name>#<signature>`. Both clear at their source on
+  the next clean run. **A Stop limit** that pauses routines raises ONE `report`
+  per budget window (`budget-stop:<scope>:<window>:<stamp>@<limit>`), naming
+  every routine it paused, with *Raise* — cleared once the budget no longer
+  stops them. Core's `budgetMiss` now returns the `BudgetMiss` it hit (a
+  `PreflightMiss` with `hit`); the runner's requests seam gains
+  `collectorSucceeded`, `componentStopped`, `budgetStopped` and `budgetResumed`.
+- 5855540: **`metistry update` seeds the templates the vault lacks (W2 checkpoint D1).** A template a release adds (`Templates/Brief.md`) reached only a fresh `init`, so an upgraded vault's Morning Brief skipped every morning with `skipped:template_missing` and doctor stayed ok. `update` now has a **templates** step after the lock: each `seed/vault/Templates/*.md` absent from the vault is copied — through the reconciler as `user`, create-only (`expected_sha256: ""`), else directly — and a file that is there is never touched; a second run copies nothing. `writeProtected` gains `createOnly`. Doctor's schedule row for a routine whose last run recorded `skipped:template_missing` is degraded, names the template and offers `metistry update`. The Morning Brief raises one `report` request for a missing template, as it does for an unreadable one, deduped per template while one is pending.
+- Updated dependencies [d92ea0c]
+- Updated dependencies [f01606b]
+- Updated dependencies [2fc0ef0]
+- Updated dependencies [211b408]
+- Updated dependencies [851e08a]
+- Updated dependencies [23b963a]
+- Updated dependencies [ed7f5c2]
+- Updated dependencies [ea2e876]
+- Updated dependencies [50a455d]
+- Updated dependencies [ac377ed]
+- Updated dependencies [9dcc405]
+- Updated dependencies [fcfbadf]
+- Updated dependencies [fce1f33]
+- Updated dependencies [406bacb]
+- Updated dependencies [448857f]
+- Updated dependencies [7028e37]
+- Updated dependencies [66ef5c7]
+- Updated dependencies [440d0d1]
+- Updated dependencies [61d9546]
+- Updated dependencies [935901e]
+  - @foldedspacelabs/metistry-core@0.14.0
+  - @foldedspacelabs/metistry-connections@0.14.0
+
 ## 0.13.0
 
 ### Minor Changes

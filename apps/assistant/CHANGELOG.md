@@ -1,5 +1,105 @@
 # @metistry-apps/assistant
 
+## 0.14.0
+
+### Minor Changes
+
+- 2fc0ef0: **Compute (T4-18): provider keys are this instance's secrets, providers gain a
+  switch and billing, and the catalogue is searched by model.**
+  
+  - `compute.yaml`'s `auth.secret` is a reference: `{{ secret.<name> }}` (one of
+    this instance's secrets), `env:<NAME>` (an install variable), or — so every
+    older file loads — the bare `<NAME>`. A pasted key still cannot match any of
+    them. Core gains `credentialOf`, `providerCredential`, `credentialEnvNames`,
+    `credentialFromEnv` and `providerSecretNames`; the reference spelling moved
+    to a leaf module (`secret-ref.ts`, re-exported by `secrets.ts`) so
+    `compute.ts` can read it without a load-time cycle.
+  - A service reads a key from its environment, never the Keychain:
+    `{{ secret.x }}` arrives as `METISTRY_SECRET_X` (core's `secretDeliveryVar`),
+    which `metistry secrets sync --to env` now writes for every secret the
+    providers reference, from this instance's item only; `metistry up`'s engine
+    allowlist passes exactly those names. For one release a `*_api_key` secret is
+    also read from the `METISTRY_<NAME>` line T4-3 filled, so `migrate-scope`
+    rewriting the reference cannot cut a running engine off.
+  - `metistry compute providers add` stores the key through `secrets set`'s own
+    code — this instance's Keychain account, recorded in `secrets.yaml` sent only
+    to the provider's host — and writes the reference. The `openrouter` template
+    references `{{ secret.openrouter_api_key }}`. Nothing in `metistry compute`
+    reads or writes the retired per-user account any more. `--secret` takes a
+    secret's name; the old UPPER_SNAKE spelling is refused with the name it
+    became.
+  - Providers gain `enabled` (off = neither searched nor offered; an assignment
+    naming a switched-off provider is refused by the schema) and `billing:
+    token | subscription` (off this machine only). The report carries `enabled`,
+    `billing`, `tag` (`local` · `cloud` · `subscription`), `secret_kind`,
+    `secret_name` and presence from this instance's account.
+  - `seed/model-identities.yaml` and core's `groupCatalogue`: provider model id →
+    one model, overlaid by key by the instance's `.metistry/model-identities.yaml`
+    (a new `INSTANCE_LAYOUT.modelIdentities`). An id it cannot map stays its own
+    row under its provider.
+  - New verbs: `compute providers set <name> [--enabled on|off] [--billing …]
+    [--base-url …] [--secret …]`, `compute models search [<query>]`,
+    `compute unassign <tier|crew:name>`. New owner routes:
+    `GET /api/compute/catalogue[?q=&provider=&refresh=true]` (listings kept
+    15 minutes in memory; `refresh` re-reads them) and
+    `POST /api/compute/unassign {tier|crew}`; MetistryKit's `UsageStore` gains
+    `computeCatalogue` and `unassignCompute`.
+  - `migrate-scope` now rewrites `compute.yaml`'s `auth.secret` (its schema reads
+    references), and still counts a rewritten reference's original as this
+    instance's, so reruns stay idempotent and `purge-shared` can find it.
+    `METISTRY_SECRET_*` is never taken for a retired shared-scope original.
+  - `fetchModels` keeps what a listing says beyond the id (name, context,
+    per-million price, tools) as `details`.
+- fce1f33: Questions v2 and both report names (T2-3). **A request can ask several
+  questions** (1–5, each pick one or pick any, 2–8 options, and — unless it says
+  `other: no` — ending in *Something else…*): the assistant's ```` ```decision ````
+  block grows a `question:` / `pick:` / `other:` grammar beside v1's (core's
+  `parseDecisionBlock`, still hand-rolled and bounded), and every agent asks the
+  same way through `requests_create` kind `question` with `questions` — no new
+  tool; the brain's eager surface grows 64 tokens (4,267 → 4,331) and stays at 26
+  tools. **Answers are stored per question**: `POST /api/proposals/:id
+  {decision: "answers", answers: [{choices, other?}, …]}` is checked against the
+  questions as stored (`checkAnswers`) and settles the row `answered`, with
+  `payload.answers` and the answers' words in `feedback`; free text is `other`
+  and never executes. Revise on a question is `accept_with_changes`. v1's wire —
+  the option itself as `decision` — still answers a one-question request.
+  **`decideProposal` reads F-5's table** (`describeRequest(kind, payload).decisions`)
+  instead of building its own list: a report is Dismissed (`skip`) and can no
+  longer be approved, revised or declined; Skip on one row is only a type's own
+  Decline (Dismiss, Not Mine) — elsewhere it is the batch's (K2). `GET
+  /api/proposals` serves a question's `request.questions`. **`decided`** is the
+  report kind for a decision made (C104); `decision` is accepted and stored as
+  `decided`. The PWA draws each type's own answers from the table, and a
+  question's questions as its body. MetistryKit sends Send Answers
+  (`RequestAnswer.answers`).
+
+### Patch Changes
+
+- 211b408: **Connections through the proxy: the lazy pair (T4-8b).** `/mcp` gains `connections_list` and `connections_call` — the one way an agent reaches the owner's connections (plan §2.6, C115). `connections_list` names the connections lent to the caller and the tools it may call without dialling anything; `connections_list { connection }` fetches those tools' own definitions on demand, so no upstream tool is ever on the eager surface. `connections_call` runs one through an injected `ConnectionsProxy` (the host's pooled client): secrets filled only at egress, the caller's bearer handed over solely so a call carrying it is refused, the answer redacted and sanitized. This release runs a connection's Reads set to Allow; Never and unlisted tools are "no such tool", Ask First and Changes things are refused with the reason. Every call — refusals included — is one `runs` row of kind `connection_call`, read back by the new route-only `connection_calls` named query.
+  
+  Core: `Resource` gains `{kind: "connection", door, name, offered}` and `may()` decides it (`mayConnection`): the assistant reaches every connection; an agent needs the connection offered to agents **and** named in `scope.connections`; a crew needs that **and** the new `connections` tool group in `uses`. A miss hides as "no such connection" (new reason `connection_required`). `RULED_TOOLS` and `TOOL_PERMISSION_CELLS` carry the two tools. The eager count moves 26 → 28 with its reason beside `COUNT_ACKNOWLEDGED` in `ops/scripts/check-tool-surface.mjs`; the assistant's `BRAIN_TOOLS` follows the manifest.
+- Updated dependencies [d92ea0c]
+- Updated dependencies [f01606b]
+- Updated dependencies [2fc0ef0]
+- Updated dependencies [211b408]
+- Updated dependencies [851e08a]
+- Updated dependencies [23b963a]
+- Updated dependencies [ed7f5c2]
+- Updated dependencies [ea2e876]
+- Updated dependencies [ac377ed]
+- Updated dependencies [9dcc405]
+- Updated dependencies [fcfbadf]
+- Updated dependencies [fce1f33]
+- Updated dependencies [406bacb]
+- Updated dependencies [448857f]
+- Updated dependencies [7028e37]
+- Updated dependencies [66ef5c7]
+- Updated dependencies [440d0d1]
+- Updated dependencies [61d9546]
+- Updated dependencies [935901e]
+  - @foldedspacelabs/metistry-core@0.14.0
+  - @foldedspacelabs/metistry-queries@0.14.0
+
 ## 0.13.0
 
 ### Minor Changes

@@ -115,7 +115,7 @@ Generated from `docs/product/design-build-plan.md` by `ops/scripts/tickets.mjs`.
 - [x] [T10-5](t10/t10-5.md) · Restore a file · M · opus · after T10-4, T1-8
 - [x] [T10-6](t10/t10-6.md) · Roll back · L · opus high · after T10-3, T10-4
 
-- [ ] **W2 checkpoint** — merged, main green, scratch-instance upgrade, conformance test, Mac smoke, release
+- [x] **W2 checkpoint** — merged, main green, scratch-instance upgrade, conformance test, Mac smoke, release
 
 ## W3 — 28 tickets, 105 agent-days
 

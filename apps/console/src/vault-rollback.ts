@@ -30,7 +30,7 @@
 //     (`source_agent` is stamped server-side), and a rollback-shaped payload
 //     on any other row is refused — never read as a prompt improvement.
 
-import { raiseMirror, describeRequest, type ErrorCode, type MirrorExecutor, type RequestSource } from "@foldedspacelabs/metistry-core";
+import { raiseMirror, describeRequest, requestSubjectOf, type ErrorCode, type MirrorExecutor, type RequestSource } from "@foldedspacelabs/metistry-core";
 import { VaultError } from "@foldedspacelabs/metistry-artifacts";
 
 /** The stored kind: an improvement is a before and after with Approve / Revise / Decline (§2.12) — the same row a restore is (T10-5). */
@@ -348,7 +348,8 @@ export async function raiseRollback(deps: { revert: VaultReverter; db: MirrorExe
   const source = rollbackSource(preview.target, preview.head, ask.include_config);
   const raised = await raiseMirror(deps.db, { kind: ROLLBACK_KIND, source_agent: ROLLBACK_AGENT, trust: ROLLBACK_TRUST, payload, source });
   const row = (await deps.db.query(PROPOSAL_ROW_SQL, [raised.id])).rows[0];
-  return { ok: true, id: raised.id, raised: raised.raised, preview: previewBody(preview, edit), proposal: row ? { ...row, request: describeRequest(String(row.kind), row.payload) } : null };
+  return { ok: true, id: raised.id, raised: raised.raised, preview: previewBody(preview, edit), // as GET /api/proposals serves it: the reading, and the subject (T2-14) — none, for a row with no work row behind it
+    proposal: row ? { ...row, request: describeRequest(String(row.kind), row.payload), subject: requestSubjectOf(String(row.kind), {}) } : null };
 }
 
 /** The commit message's note: which request approved it. */

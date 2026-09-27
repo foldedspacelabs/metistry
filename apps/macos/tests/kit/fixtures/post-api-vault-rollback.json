@@ -52,7 +52,7 @@
     },
     "proposal": {
       "id": "7",
-      "ts": "2026-09-27T04:47:50.725Z",
+      "ts": "2026-09-27T04:56:58.409Z",
       "kind": "improvement",
       "source_agent": "console",
       "trust": "user",
@@ -122,7 +122,8 @@
           "accept_with_changes",
           "deny"
         ]
-      }
+      },
+      "subject": null
     }
   }
 }

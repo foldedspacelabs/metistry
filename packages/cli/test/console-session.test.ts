@@ -3,8 +3,11 @@
 // console is refused before a line is read, every request gets exactly one
 // terminal line matched by id (never by order), and a stream is frames until
 // it is cancelled.
+import { createInterface } from "node:readline";
+import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
 import { runConsoleSession, type SessionId } from "../src/console-client.js";
+import type { Exec } from "../src/exec.js";
 import { main } from "../src/main.js";
 
 const TOKEN = "session-owner-token-never-printed";
@@ -206,6 +209,55 @@ describe("console session: the door", () => {
     expect(all).toContain("[redacted]");
     // every one of the four echoes was caught, not just the first
     expect(s.out.raw.filter((l) => l.includes("[redacted]"))).toHaveLength(4);
+  });
+});
+
+// The Mac app's transport writes its first request the instant it spawns
+// the process. Real stdin is a readline interface, whose async iterator only
+// sees lines that arrive after the iterator exists — so a session that
+// awaited the target first lost that line, and the call hung to its timeout.
+describe("console session: lines written at spawn", () => {
+  /** a real readline over a pipe, with lines already written before the session starts */
+  function stdinWith(lines: unknown[]) {
+    const pipe = new PassThrough();
+    for (const l of lines) pipe.write(`${JSON.stringify(l)}\n`);
+    return { pipe, rl: createInterface({ input: pipe, crlfDelay: Infinity }) };
+  }
+
+  /** the token comes from the (fake) login Keychain, and takes real time to — the Mac app's case, where `.env` does not carry it */
+  const slowKeychain: Exec = async (cmd, args) => {
+    await new Promise((r) => setTimeout(r, 25));
+    return cmd === "security" && args[0] === "find-generic-password" ? { code: 0, stdout: `${TOKEN}\n`, stderr: "" } : { code: 44, stdout: "", stderr: "not found" };
+  };
+
+  it("answers a line written synchronously at spawn, before the target resolved", async () => {
+    const { pipe, rl } = stdinWith([{ id: "first", method: "GET", path: "/api/whoami" }, { id: "second", method: "GET", path: "/api/status" }]);
+    const o = output();
+    const f = fakeFetch(() => json({ ok: true }));
+    const done = runConsoleSession({ env: { METISTRY_CONSOLE_URL: LOOPBACK.METISTRY_CONSOLE_URL }, platform: "darwin", exec: slowKeychain, input: rl, write: o.write, fetchFn: f.fetchFn });
+    await Promise.all([o.next(terminal("first")), o.next(terminal("second"))]);
+    pipe.end();
+    await done;
+    expect(f.seen.map((r) => r.url)).toEqual(["http://127.0.0.1:18080/api/whoami", "http://127.0.0.1:18080/api/status"]);
+    for (const r of f.seen) expect(r.headers.authorization).toBe(`Bearer ${TOKEN}`);
+    expect(o.lines.map((l) => [l.id, l.status])).toEqual([
+      ["first", 200],
+      ["second", 200],
+    ]);
+  });
+
+  it("a non-loopback console still refuses: no held line is sent or answered, and the token is never printed", async () => {
+    const { pipe, rl } = stdinWith([{ id: 1, method: "GET", path: "/api/whoami" }, { id: 2, method: "POST", path: "/api/work", body: {} }]);
+    const o = output();
+    const f = fakeFetch(() => json({}));
+    const refused = runConsoleSession({ env: { METISTRY_CONSOLE_URL: "https://metis.example" }, platform: "darwin", exec: slowKeychain, input: rl, write: o.write, fetchFn: f.fetchFn });
+    await expect(refused).rejects.toThrow(/is not loopback.*`console session` refuses/);
+    await expect(refused).rejects.not.toThrow(TOKEN);
+    pipe.write(`${JSON.stringify({ id: 3, method: "GET", path: "/api/whoami" })}\n`); // a line after the refusal: still nothing
+    pipe.end();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(f.seen).toEqual([]);
+    expect(o.raw).toEqual([]);
   });
 });
 

@@ -132,7 +132,7 @@ export async function whoami(opts: WhoamiOptions = {}): Promise<Whoami> {
   }
   if (res.status === 401) {
     throw new Error(
-      `${target.url} refused the owner token (401). Either METISTRY_LOCAL_OWNER_TOKEN here is not the one the console was started with (restart it after a \`metistry secrets sync --to env\`), or the request did not reach it from this machine — under compose the console needs METISTRY_TRUSTED_LOOPBACK_PROXY (docs/ops/auth.md).`,
+      `${target.url} refused the owner token (401). Either METISTRY_LOCAL_OWNER_TOKEN here is not the one the console was started with (\`metistry restart console\` makes it read .env's value), or the request did not reach it from this machine — under compose the console needs METISTRY_TRUSTED_LOOPBACK_PROXY (docs/ops/auth.md).`,
     );
   }
   if (!res.ok) throw new Error(`${target.url}/api/whoami returned HTTP ${res.status}`);
@@ -474,13 +474,79 @@ async function* sseFrames(body: ReadableStream<Uint8Array>): AsyncGenerator<{ id
 }
 
 /**
- * Run one session to the end of its input. Resolves the target and the token
- * ONCE — a refusal there (no token, a non-loopback console) throws before a
- * single line is read, and the caller prints it and exits non-zero. After
- * that nothing throws: every failure is an `{id, error}` line.
+ * Start consuming `input` NOW, before the caller's first await, and hold
+ * every line until it is asked for. A readline interface emits a line the
+ * moment stdin has one, and its async iterator only receives the lines that
+ * arrive after the iterator exists — so a session that awaited anything
+ * (the target, the Keychain) before starting its `for await` silently lost
+ * whatever the parent wrote at spawn, and that call hung until its own
+ * timeout. `close()` stops reading and discards what is held.
+ */
+function bufferedLines(input: AsyncIterable<string>): AsyncIterable<string> & { close: () => void } {
+  const it = input[Symbol.asyncIterator]();
+  const queue: string[] = [];
+  let done = false;
+  let closed = false;
+  let failure: { error: unknown } | undefined;
+  let wake: (() => void) | undefined;
+  const poke = () => {
+    const w = wake;
+    wake = undefined;
+    w?.();
+  };
+  void (async () => {
+    try {
+      for (;;) {
+        const r = await it.next();
+        if (r.done || closed) break;
+        queue.push(r.value);
+        poke();
+      }
+    } catch (error) {
+      failure = { error };
+    } finally {
+      done = true;
+      poke();
+    }
+  })();
+  return {
+    close: () => {
+      closed = true;
+      queue.length = 0;
+      void Promise.resolve(it.return?.()).catch(() => undefined);
+    },
+    async *[Symbol.asyncIterator]() {
+      for (;;) {
+        if (queue.length > 0) {
+          yield queue.shift() as string;
+          continue;
+        }
+        if (failure) throw failure.error;
+        if (done || closed) return;
+        await new Promise<void>((resolve) => (wake = resolve));
+      }
+    },
+  };
+}
+
+/**
+ * Run one session to the end of its input. Stdin is attached before
+ * anything is awaited, so a line the parent writes at spawn is held, not
+ * lost. Then the target and the token are resolved ONCE — a refusal there
+ * (no token, a non-loopback console) throws before any held line is sent
+ * anywhere, every held line is discarded unanswered, and the caller prints
+ * the reason and exits non-zero. After that nothing throws: every failure
+ * is an `{id, error}` line.
  */
 export async function runConsoleSession(opts: ConsoleSessionOptions): Promise<void> {
-  const target = await loopbackConsoleTarget(opts, "`console session`");
+  const input = bufferedLines(opts.input);
+  let target: ConsoleTarget;
+  try {
+    target = await loopbackConsoleTarget(opts, "`console session`");
+  } catch (e) {
+    input.close();
+    throw e;
+  }
   const clean = (s: string) => redact(s, target.token);
   const emit = (o: Record<string, unknown>) => opts.write(clean(JSON.stringify(o)));
   const inFlight = new Map<SessionId, { abort: AbortController; stream: boolean; cancelled: boolean }>();
@@ -529,7 +595,7 @@ export async function runConsoleSession(opts: ConsoleSessionOptions): Promise<vo
     }
   };
 
-  for await (const raw of opts.input) {
+  for await (const raw of input) {
     const line = raw.trim();
     if (line === "") continue;
     let o: Record<string, unknown>;

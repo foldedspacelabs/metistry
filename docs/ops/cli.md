@@ -927,6 +927,22 @@ gives it a supervisor child called `llamaserver`, so `metistry logs
 llamaserver` and `metistry restart llamaserver` work like any other service.
 Details, and what the schema refuses, in `docs/ops/compute.md`.
 
+### The two reads
+
+```sh
+metistry compute cache-report [--since 7d] [--json]
+metistry compute route-report [--since 30d] [--json]
+```
+
+Neither writes, calls a model or dials a provider; both read one named query
+through the console's generic door. `route-report` is where messages went —
+the rules' baseline (note, fast path, override, the fall-through) and, below
+its verdict, **the policy, in shadow**: the console's `runs` rows of kind
+`route` (docs/ops/dynamic-router.md §6), with what a local policy would have
+chosen beside what the rules served. Until a `policy:` block exists that
+section says every consultation was `absent`; `--json` carries it as
+`policy`. Details in `docs/ops/compute.md`.
+
 ## Secrets: the Keychain is the store, `.env` is generated
 
 `metistry secrets` makes the macOS login Keychain the canonical home of

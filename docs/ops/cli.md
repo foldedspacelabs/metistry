@@ -2308,6 +2308,47 @@ the first place. A checksum mismatch aborts before anything restarts and
 leaves `current` and the lock untouched. Full runbook, layout and secrets:
 **`docs/ops/releases.md`**.
 
+**The rest of a release update runs on the release it installed.** The
+`metistry` shim runs `current`'s CLI — the release an update is about to
+*leave* — so every step after the switch used to run the old release's
+code, and a fix to any of them landed one update late (0.14.1's fixes took
+the owner three runs). Now, once `current` points at the new release, its
+pack is verified and its bundled runtime unpacked (and the app step has
+run), `update` re-executes the new release's own CLI:
+
+```
+node <product-dir>/current/packages/cli/dist/main.js update --continue-from=switched \
+  <your flags> --channel=release --product-dir=<product-dir>
+```
+
+on the bundled runtime's `node`, with the same environment plus
+`METISTRY_UPDATE_REEXEC=1`, streams its output and exits with its code. The
+child skips the product step and runs build, migrations, restart, lock,
+templates, secrets, the shim and doctor on the new code; its "what changed"
+baseline is the release `current` pointed at before (`releases/.previous`).
+Guards, each with a test (`update-reexec.test.ts`, `release.test.ts`):
+
+- **Loop:** an update whose environment already has
+  `METISTRY_UPDATE_REEXEC` never re-executes again.
+- **Capability:** a release whose CLI predates this (no
+  `packages/cli/dist/update-reexec.js`) is not handed to — it would ignore
+  `--continue-from` and run a second full update. A downgrade onto one
+  finishes on the running code, as before.
+- **A new CLI that never starts** (a bad pack) is told apart from one that
+  started and failed by a handshake file the child writes before its first
+  step (`METISTRY_UPDATE_REEXEC_ACK`), not by guessing from the exit code.
+  One that never started did nothing, so the running code finishes the
+  update and says so loudly; the run ends exit 1 with the previous
+  release's own `update --rollback`, by path — the shim runs the broken CLI
+  too. One that started and failed is never re-run: its exit code is the
+  answer.
+- `--rollback` never hands over (the running code is the newer one), a
+  git checkout is unchanged, and `--no-reexec` finishes on the running
+  code — a debugging switch. `--dry-run` prints the hand-over as a step.
+
+One run is enough from 0.14.2 on. The update *onto* 0.14.2 is still run by
+the release before it, which does not hand over.
+
 Resolving a release needs to read GitHub's Releases API; on a **private**
 repo, `METISTRY_GITHUB_TOKEN` must be a fine-grained PAT with **Contents:
 read** on that repo — Issues/Pull requests/Metadata (what the github-state
@@ -2449,8 +2490,9 @@ before. When there is no built CLI there, it cannot be spawned, or it
 exits without printing a report, `update` falls back to its own in-process
 doctor and says so on a `closing doctor:` line — that answer is the
 pre-update code's, and a standalone `metistry doctor` afterwards is the
-truth. The first update onto a release with this fix still runs the old
-release's `update` (and so its in-process doctor) once.
+truth. In release mode the whole post-switch half now runs in the new
+release's CLI (above), so this child doctor is that CLI starting its own
+doctor — kept, because it is also what a git checkout's update relies on.
 
 **Moving the Mac app with the release.** On a Mac whose shape is `launchd`,
 release mode moves the app the owner actually looks at, not just the

@@ -697,7 +697,7 @@ public final class ChatModel {
     func bindTurns() async {
         guard let session, activities.values.contains(where: { $0.state == .working && $0.turnID == nil }) else { return }
         let generation = session.generation
-        if case .success(let feed) = await session.stores.activityFeed(hours: 1, limit: 20, kind: "turn", project: nil, agent: nil, since: nil) {
+        if case .success(let feed) = await session.stores.activityFeed(hours: 1, limit: 20, kind: "turn", project: nil, agent: nil, since: nil, turnID: nil) {
             guard session.generation == generation else { return }
             for row in feed.rows where row.kind == "turn" {
                 guard let runID = row.runID, !examinedRuns.contains(runID), !runsToExamine.contains(runID) else { continue }

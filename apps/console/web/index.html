@@ -35,6 +35,13 @@
     <symbol id="g-bell" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10.5a5 5 0 0110 0c0 4 1.4 5.2 1.4 5.2H5.6S7 14.5 7 10.5z"/><path d="M10.4 18.6a1.9 1.9 0 003.2 0"/></symbol>
     <symbol id="g-back" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 5.5L8 12l6.5 6.5"/></symbol>
     <symbol id="g-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></symbol>
+    <!-- the answers' glyphs (components-01 §2.4: Approve's check and Decline's
+         cross carry the pair in greyscale; Revise's pencil) and the board's,
+         which leads a work row on Today (screen 5 §2) -->
+    <symbol id="g-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+    <symbol id="g-x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 6.5l11 11M17.5 6.5l-11 11"/></symbol>
+    <symbol id="g-pencil" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 19.5h4L19 9a2.5 2.5 0 00-3.5-3.5L5 16z"/><path d="M14 7l3 3"/></symbol>
+    <symbol id="g-board" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M10 5v14M15.5 5v14"/></symbol>
     <symbol id="g-mark" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="11" stroke-linejoin="miter"><path d="M12 12 H52 V52 H38 L12 26 Z"/></symbol>
   </svg>
 
@@ -177,19 +184,31 @@
       <p id="capture-result"></p>
     </section>
 
-    <!-- Needs You. Five answers now, not three: Approve / Revise / Decline,
-         plus Later (a snooze — the row stays pending and comes back) and Skip
-         (declined, with nothing to learn from it). Multi-select applies the
-         two of them to many rows at once; `l` and `s` are the keys. -->
+    <!-- Needs You (screen 18 §3; needs-you.js). The bell's sheet on a phone:
+         the Mac panel's cards, each answered with its type's own verbs —
+         the primary · Revise · Decline, then Later (C92). Select switches to
+         a compact list where swipe right approves and swipe left declines; a
+         card with Before and after opens instead. From 600px the list comes
+         first and pushes the card (C109); at 900px they sit side by side.
+         Skip is bulk-only (K2): the selection bar and its `s` key. -->
     <section id="triage" hidden>
-      <p id="triage-batch" hidden>
-        <span id="triage-selected" class="muted"></span>
-        <button id="triage-later" type="button">Later</button>
-        <button id="triage-skip" type="button">Skip</button>
-        <button id="triage-clear" type="button">Clear</button>
-      </p>
-      <ul id="proposal-list"></ul>
-      <p id="triage-empty" hidden>nothing needs you 🎉</p>
+      <div id="triage-tools" class="triage-tools" hidden>
+        <button id="triage-select" type="button" class="secondary" aria-pressed="false">Select</button>
+        <p id="triage-batch" hidden>
+          <span id="triage-selected" class="muted"></span>
+          <button id="triage-later" type="button">Later</button>
+          <button id="triage-skip" type="button">Skip</button>
+          <button id="triage-clear" type="button">Clear</button>
+        </p>
+      </div>
+      <!-- what the last answer did, said once (components-01 §2.5) -->
+      <p id="triage-receipt" class="receipt" role="status" aria-live="polite"></p>
+      <ul id="proposal-list" aria-label="Requests"></ul>
+      <div id="triage-detail" class="triage-detail" hidden></div>
+      <div id="triage-empty" class="empty" hidden>
+        <p>Nothing needs you.</p>
+        <button type="button" class="secondary" data-act="today">Back to Today</button>
+      </div>
     </section>
 
     <!-- Status and Devices are Settings (More ▸ Settings; the sidebar's foot at
@@ -253,17 +272,24 @@
       </form>
     </section>
 
-    <!-- Today. Until the day itself reaches the phone (the brief, Next Up and
-         the spine — screen 18 §2), Today holds the two day-shaped panels of
-         the old dashboard: the last 24 hours and the reviews waiting on you.
-         Every panel is a named query; panels degrade independently. -->
+    <!-- Today (screen 18 §2; today.js): one column in the Mac's order — the
+         Morning Brief or its folded line, Next Up, then the spine — and the
+         rail last: Agents, Since You Last Looked. No Needs You line: the bell
+         is in the header. -->
     <section id="today" hidden>
-      <h3>Last 24h <span id="dash-runs-asof" class="muted"></span></h3>
-      <ul id="dash-runs" class="tiles"></ul>
-      <p id="dash-runs-note" class="muted"></p>
-
-      <h3>Reviews Waiting on You <span id="dash-reviews-asof" class="muted"></span></h3>
-      <ul id="dash-reviews" class="reviews dash-list"><li class="muted">none</li></ul>
+      <div id="today-brief" class="brief" hidden></div>
+      <div id="today-next" class="next-up" role="region" aria-label="Next Up" hidden></div>
+      <div id="today-state" class="panel-state" hidden></div>
+      <p id="today-receipt" class="receipt" role="status" aria-live="polite"></p>
+      <ol id="today-spine" class="spine" aria-label="The day"></ol>
+      <p id="today-asof" class="muted"></p>
+      <div id="today-rail" class="rail">
+        <h3>Agents</h3>
+        <ul id="today-agents" class="dash-list"></ul>
+        <h3>Since You Last Looked</h3>
+        <ul id="today-since" class="dash-list"></ul>
+        <p><button type="button" class="secondary" data-act="feed">Open Activity</button></p>
+      </div>
     </section>
 
     <!-- Work ▸ Projects: §4.19 project rollup + §4.21 kill switch — one row per

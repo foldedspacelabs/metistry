@@ -434,15 +434,17 @@ button {
 @media (pointer: fine) { button { min-height: var(--mt-size-pointer-target); } }
 button:hover { background: var(--mt-color-sunken); }
 button:active { background: var(--mt-color-border); }
+/* Deciding, or not yet possible: the control at 55% and nothing spins (components-01 §2.5). */
+button:disabled { opacity: .55; cursor: not-allowed; }
 
 /* Primary: the one action a form exists for. */
-button[type="submit"], #login-btn, #enroll-btn, [data-d="allow"] {
+button[type="submit"], #login-btn, #enroll-btn, .answer.primary {
   background: var(--mt-color-accent);
   border-color: transparent;
   color: var(--mt-color-on-accent);
   font-weight: 600;
 }
-button[type="submit"]:hover, #login-btn:hover, #enroll-btn:hover, [data-d="allow"]:hover {
+button[type="submit"]:hover, #login-btn:hover, #enroll-btn:hover, .answer.primary:hover {
   background: var(--mt-color-accent-hover);
 }
 
@@ -456,13 +458,15 @@ button.secondary {
 button.secondary:hover { background: var(--mt-color-border); }
 
 /* Destructive: outlined, never filled, and app.js confirms first with the
-   consequence named (design-system §3.17 — the dialog is not the control). */
-[data-d="deny"], [data-agent-revoke], [data-revoke] {
+   consequence named (design-system §3.17 — the dialog is not the control).
+   A request's Decline is not this: it is outlined in the neutral surface
+   (C92, screen 18 §3) — see Needs You below. */
+[data-agent-revoke], [data-revoke] {
   background: var(--mt-color-surface);
   border-color: var(--mt-color-failed);
   color: var(--mt-color-failed);
 }
-[data-d="deny"]:hover, [data-agent-revoke]:hover, [data-revoke]:hover {
+[data-agent-revoke]:hover, [data-revoke]:hover {
   background: var(--mt-color-failed-quiet);
 }
 
@@ -593,14 +597,6 @@ label { display: flex; flex-direction: column; gap: var(--mt-space-1);
   border-color: var(--mt-color-accent);
 }
 
-/* ------------------------------------------------- Needs You (triage) ----- */
-/* Later and Skip are not answers to the request, so they do not compete with
-   the three that are: same size, quieter surface (§3.2 — weight carries
-   meaning before colour does). */
-#proposal-list button.quiet { background: transparent; color: var(--mt-color-text-secondary); }
-#proposal-list button.quiet:hover { background: var(--mt-color-sunken); }
-#proposal-list input[type="checkbox"] { margin-right: var(--mt-space-2); vertical-align: middle; }
-#triage-batch { display: flex; align-items: center; gap: var(--mt-space-2); flex-wrap: wrap; }
 
 /* ------------------------------------------------------------------ chat -- */
 /* Reply text (design-system.md §4). A reply is the longest text in the product
@@ -782,25 +778,136 @@ label { display: flex; flex-direction: column; gap: var(--mt-space-1);
 #capture-result { margin-top: var(--mt-space-3); color: var(--mt-color-text-secondary);
   font-size: var(--mt-text-footnote-size); }
 
-/* ---------------------------------------------------------------- triage -- */
-#proposal-list li {
+/* ------------------------------------------------------------ Needs You -- */
+/* screen 18 §3, screen 3 §12–§13, components-01 §2 — needs-you.js writes all
+   of it. Cards under 600px; the compact list (Select, and the narrow window)
+   with swipe; the detail pushed from the list, beside it at 900px. */
+.triage-tools { display: flex; align-items: center; gap: var(--mt-space-2); flex-wrap: wrap; margin-bottom: var(--mt-space-3); }
+#triage-batch { display: flex; align-items: center; gap: var(--mt-space-2); flex-wrap: wrap; }
+.receipt { color: var(--mt-color-text-secondary); font-size: var(--mt-text-footnote-size); margin: var(--mt-space-1) 0; }
+.receipt:empty { display: none; }
+#proposal-list .group-head {
+  padding: var(--mt-space-3) var(--mt-space-1) var(--mt-space-2);
+  color: var(--mt-color-text-secondary);
+  font-size: var(--mt-text-caption-1-size);
+  font-weight: 600;
+}
+
+/* the card: header · the ask · context · body · answers */
+.card {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--mt-space-3);
+  flex-direction: column;
+  gap: var(--mt-space-2);
   background: var(--mt-color-surface);
+  border: 1px solid transparent;
   border-radius: var(--mt-radius-lg);
   box-shadow: var(--mt-elevation-1);
   padding: var(--mt-space-4);
   margin-bottom: var(--mt-space-3);
 }
-#proposal-list li > span:first-child { flex: 1 1 220px; font-size: var(--mt-text-headline-size);
-  font-weight: var(--mt-text-headline-weight); overflow-wrap: anywhere; }
-#proposal-list li > span:first-child .muted { display: block; font-weight: 400; }
-#proposal-list li > span:last-child { display: flex; flex-wrap: wrap; gap: var(--mt-space-2); }
-#triage-empty { color: var(--mt-color-text-secondary); text-align: center;
-  border: 1px dashed var(--mt-color-border-strong); border-radius: var(--mt-radius-lg);
+.card.stale { border-color: var(--mt-color-stale); }
+.card-head { display: flex; align-items: center; gap: var(--mt-space-2); flex-wrap: wrap;
+  color: var(--mt-color-text-secondary); font-size: var(--mt-text-caption-1-size); }
+.card-type { font-size: var(--mt-text-caption-2-size); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.card-age { margin-left: auto; }
+/* the one tinted pill: who asked is agent-sourced data (amendments §8.3, P1) */
+.chip.asker { background: var(--mt-color-agent-quiet); color: var(--mt-color-agent); font-family: var(--mt-font-mono); }
+.card-ask { margin: 0; font-size: var(--mt-text-headline-size); font-weight: var(--mt-text-headline-weight); overflow-wrap: anywhere; }
+/* the agent's own words, on the agent wash, in the serif (C69, C32) */
+.card-context { background: var(--mt-color-agent-quiet); color: var(--mt-color-text-primary);
+  border-radius: var(--mt-radius-md); padding: var(--mt-space-2) var(--mt-space-3); overflow-wrap: anywhere; }
+.card-stale { background: var(--mt-color-stale-quiet); color: var(--mt-color-text-primary);
+  border-radius: var(--mt-radius-sm); padding: var(--mt-space-2) var(--mt-space-3); font-size: var(--mt-text-footnote-size); }
+.card-error { color: var(--mt-color-failed); font-size: var(--mt-text-footnote-size); overflow-wrap: anywhere; }
+.card-body { display: flex; flex-direction: column; gap: var(--mt-space-2); }
+/* a path or a ref is one long word: it wraps rather than widen the sheet at the largest text size */
+.card-body .mono, .brief-foot .mono, .stale-note .mono { overflow-wrap: anywhere; }
+.preview { background: var(--mt-color-sunken); color: var(--mt-color-text-primary);
+  border-radius: var(--mt-radius-md); padding: var(--mt-space-2) var(--mt-space-3); overflow-wrap: anywhere; white-space: pre-wrap; }
+/* before and after: the consequence, both halves, to be read — never swiped */
+.ba { display: grid; gap: var(--mt-space-2); }
+.ba-side { background: var(--mt-color-sunken); border-radius: var(--mt-radius-md); padding: var(--mt-space-2) var(--mt-space-3); min-width: 0; }
+.ba-label { display: block; color: var(--mt-color-text-secondary); font-size: var(--mt-text-caption-2-size);
+  font-weight: 600; letter-spacing: .04em; text-transform: uppercase; margin-bottom: var(--mt-space-1); }
+.ba-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--mt-font-mono);
+  font-size: var(--mt-text-footnote-size); max-height: 40vh; overflow: auto; }
+.ba-heading { font-weight: 600; }
+@media (min-width: 600px) { .ba { grid-template-columns: 1fr 1fr; } }
+
+/* the answers (C92): the primary is the one accent fill (with submit, above);
+   Revise and Decline outlined in the neutral surface — Decline is never red;
+   Later quiet, after the spacer */
+.answers { display: flex; flex-wrap: wrap; align-items: center; gap: var(--mt-space-2); }
+.answers .spacer { flex: 1 1 auto; }
+.answer { display: inline-flex; align-items: center; gap: var(--mt-space-1); }
+.answer .glyph { width: var(--mt-size-icon-sm); height: var(--mt-size-icon-sm); }
+.answer.revise, .answer.decline { background: var(--mt-color-surface); border-color: var(--mt-color-border-strong); color: var(--mt-color-text-primary); }
+.answer.revise:hover, .answer.decline:hover { background: var(--mt-color-sunken); }
+.answer.later { background: transparent; border-color: transparent; color: var(--mt-color-text-secondary); }
+.answer.later:hover { background: var(--mt-color-sunken); }
+.revise-form { flex-direction: column; align-items: stretch; margin-top: 0; }
+button.link { background: none; border: 0; min-height: 0; padding: 0 var(--mt-space-1); color: var(--mt-color-accent); font-size: inherit; }
+button.link:hover, button.link:active { background: none; text-decoration: underline; }
+
+/* a question, one step at a time (screen 3 §13.2) */
+.q-steps { display: flex; flex-direction: column; gap: var(--mt-space-2); }
+.q-bar { display: flex; gap: var(--mt-space-1); }
+.q-bar span { flex: 1 1 0; height: 4px; border-radius: var(--mt-radius-pill); background: var(--mt-color-border); }
+.q-bar .done, .q-bar .on { background: var(--mt-color-accent); }
+.q-count { color: var(--mt-color-text-secondary); font-size: var(--mt-text-footnote-size); }
+fieldset.q { border: 0; padding: 0; margin: 0; min-width: 0; display: flex; flex-direction: column; gap: var(--mt-space-2);
+  animation: q-in var(--mt-motion-duration-base) var(--mt-motion-ease-out); }
+fieldset.q legend { padding: 0; margin-bottom: var(--mt-space-2); font-weight: 600; overflow-wrap: anywhere; }
+.q-option { justify-content: flex-start; text-align: left; overflow-wrap: anywhere; }
+label.q-option { flex-direction: row; align-items: center; gap: var(--mt-space-2); min-height: var(--mt-size-touch-target);
+  padding: var(--mt-space-2) var(--mt-space-3); border: 1px solid var(--mt-color-border-strong); border-radius: var(--mt-radius-md);
+  color: var(--mt-color-text-primary); font-size: var(--mt-text-subhead-size); }
+.q-option input { width: auto; min-height: 0; accent-color: var(--mt-color-accent); }
+.q-other { color: var(--mt-color-text-secondary); }
+.q-nav { display: flex; gap: var(--mt-space-2); justify-content: flex-end; }
+.q-summary { padding: 0; }
+.q-summary li { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--mt-space-1) var(--mt-space-2);
+  padding: var(--mt-space-2) 0; border-bottom: 1px solid var(--mt-color-border); }
+.q-prompt { flex-basis: 100%; color: var(--mt-color-text-secondary); font-size: var(--mt-text-footnote-size); }
+.q-answer { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+@keyframes q-in { from { opacity: 0; transform: translateX(var(--mt-space-6)); } }
+@keyframes q-fade { from { opacity: 0; } }
+/* Reduce Motion: questions cross-fade (plan §2.18) */
+@media (prefers-reduced-motion: reduce) { fieldset.q { animation-name: q-fade; } }
+
+/* the compact list: one line per request; right approves, left declines */
+#triage[data-mode="list"] #proposal-list { background: var(--mt-color-surface); border-radius: var(--mt-radius-lg);
+  box-shadow: var(--mt-elevation-1); overflow: hidden; }
+#triage[data-mode="list"] .group-head { padding-inline: var(--mt-space-3); }
+.req-row { position: relative; overflow: hidden; border-top: 1px solid var(--mt-color-border); touch-action: pan-y; }
+.swipe-under { position: absolute; inset: 0; display: flex; align-items: center; justify-content: space-between;
+  padding: 0 var(--mt-space-4); font-weight: 600; }
+.under-right, .under-left { visibility: hidden; }
+.req-row[data-dir="right"] .swipe-under { background: var(--mt-color-accent); color: var(--mt-color-on-accent); }
+.req-row[data-dir="left"] .swipe-under { background: var(--mt-color-sunken); color: var(--mt-color-text-primary); }
+.req-row[data-dir="right"] .under-right, .req-row[data-dir="left"] .under-left { visibility: visible; }
+.req-slide { position: relative; display: flex; align-items: center; gap: var(--mt-space-2); padding-left: var(--mt-space-3);
+  background: var(--mt-color-surface); transition: transform var(--mt-motion-duration-fast) var(--mt-motion-ease-standard); }
+.req-slide input[type="checkbox"] { flex: none; }
+.req-open { flex: 1 1 auto; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 var(--mt-space-2);
+  text-align: left; background: none; border: 0; border-radius: 0; padding: var(--mt-space-2) var(--mt-space-3) var(--mt-space-2) 0; }
+.req-open:hover, .req-open:active { background: none; }
+.req-type { grid-column: 1 / -1; color: var(--mt-color-text-secondary); font-size: var(--mt-text-caption-2-size); font-weight: 600; text-transform: uppercase; }
+.req-title { font-weight: 600; overflow-wrap: anywhere; }
+.req-meta { color: var(--mt-color-text-secondary); font-size: var(--mt-text-footnote-size); white-space: nowrap; align-self: end; }
+@media (prefers-reduced-motion: reduce) { .req-slide { transition: none; } }
+
+/* the detail: pushed from the list, with its way back; at 900px beside it */
+.triage-detail .detail-back { margin-bottom: var(--mt-space-2); }
+#triage.has-detail #proposal-list { display: none; }
+@media (min-width: 900px) {
+  #triage.has-detail { display: grid; grid-template-columns: minmax(240px, 320px) minmax(0, 1fr); gap: 0 var(--mt-space-6); align-items: start; }
+  #triage.has-detail > :not(#proposal-list):not(#triage-detail) { grid-column: 1 / -1; }
+  #triage.has-detail #proposal-list { display: block; }
+  .triage-detail .detail-back { display: none; }
+}
+#triage-empty { display: flex; flex-direction: column; align-items: center; gap: var(--mt-space-3); text-align: center;
+  color: var(--mt-color-text-secondary); border: 1px dashed var(--mt-color-border-strong); border-radius: var(--mt-radius-lg);
   padding: var(--mt-space-8) var(--mt-space-4); }
 
 /* --------------------------------------------------- status / doctor rows - */
@@ -868,17 +975,80 @@ table.permissions tbody th { font-weight: 400; color: var(--mt-color-text-second
 #dashboard h3 .muted { font-weight: 400; }
 #dashboard p { margin: var(--mt-space-1) 0; }
 
-.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); gap: var(--mt-space-2); }
-.tiles .tile {
-  background: var(--mt-color-surface);
-  border-radius: var(--mt-radius-lg);
-  box-shadow: var(--mt-elevation-1);
-  padding: var(--mt-space-3);
-  display: flex;
-  flex-direction: column;
-  gap: var(--mt-space-1);
+/* ---------------------------------------------------------------- Today -- */
+/* screen 18 §2, screen 5 §12–§15 — today.js writes all of it. One column:
+   the brief, Next Up, the spine; the rail last. From 760px the rail returns
+   as a second column, the one the Mac has (screen 18 §1). */
+:root { --today-rail: 240px; }
+.brief { margin-bottom: var(--mt-space-4); }
+.brief-head { font-weight: 600; margin-bottom: var(--mt-space-2); }
+.brief-body { background: var(--mt-color-agent-quiet); color: var(--mt-color-text-primary);
+  border-radius: var(--mt-radius-lg); padding: var(--mt-space-3) var(--mt-space-4); overflow-wrap: anywhere; }
+.brief-body > * + * { margin-top: var(--mt-space-2); }
+.brief-body ul, .brief-body ol, .standup ul, .standup ol { padding-left: var(--mt-space-6); list-style: disc; }
+.brief-foot { margin-top: var(--mt-space-2); }
+.brief-state { color: var(--mt-color-text-secondary); }
+.brief-fold { width: 100%; justify-content: flex-start; text-align: left; overflow-wrap: anywhere;
+  background: var(--mt-color-agent-quiet); color: var(--mt-color-text-primary); border-color: transparent; }
+.brief-fold:hover { background: var(--mt-color-sunken); }
+.standup { margin-top: var(--mt-space-2); }
+/* a summary keeps its disclosure marker: it is how the fold says it opens */
+.standup summary, .spine-fold summary { cursor: pointer; padding: var(--mt-space-3) 0; }
+.standup summary { font-weight: 600; }
+.standup > * + * { margin-top: var(--mt-space-2); }
+
+/* Next Up sticks under the header from 30 minutes before (screen 5 §15.2) */
+.next-up { position: sticky; top: calc(var(--mt-size-touch-target) + env(safe-area-inset-top)); z-index: var(--mt-z-sticky);
+  background: var(--mt-color-surface); color: var(--mt-color-text-primary); border-radius: var(--mt-radius-lg);
+  box-shadow: var(--mt-elevation-2); padding: var(--mt-space-3) var(--mt-space-4); margin-bottom: var(--mt-space-4); }
+.next-label { color: var(--mt-color-accent); font-size: var(--mt-text-caption-1-size); font-weight: 600; }
+.next-title { font-size: var(--mt-text-headline-size); font-weight: var(--mt-text-headline-weight); overflow-wrap: anywhere; }
+
+.panel-state { padding: var(--mt-space-4) 0; }
+.state-title { font-weight: 600; }
+.reason { background: var(--mt-color-sunken); color: var(--mt-color-text-primary); border-radius: var(--mt-radius-sm);
+  padding: var(--mt-space-1) var(--mt-space-2); margin-top: var(--mt-space-2); overflow-wrap: anywhere; }
+
+/* the spine: past folded, a Now rule, a line above each item */
+.spine { padding: 0; list-style: none; }
+.spine-fold { color: var(--mt-color-text-secondary); font-size: var(--mt-text-footnote-size); }
+.spine-fold .spine { font-size: var(--mt-text-body-size); }
+.spine-line { padding: var(--mt-space-3) 0 var(--mt-space-1); color: var(--mt-color-text-secondary);
+  font-size: var(--mt-text-footnote-size); font-variant-numeric: tabular-nums; }
+.spine-now { display: flex; align-items: center; gap: var(--mt-space-2); padding: var(--mt-space-2) 0;
+  color: var(--mt-color-accent); font-size: var(--mt-text-footnote-size); font-weight: 600; }
+.spine-now::after { content: ""; flex: 1 1 auto; height: 2px; border-radius: var(--mt-radius-pill); background: var(--mt-color-accent); }
+.spine-item { display: flex; align-items: flex-start; gap: var(--mt-space-3); background: var(--mt-color-surface);
+  border-radius: var(--mt-radius-md); box-shadow: var(--mt-elevation-1); padding: var(--mt-space-3); margin-bottom: var(--mt-space-2); }
+.spine-item input[type="checkbox"] { flex: none; width: var(--mt-size-icon-md); height: var(--mt-size-icon-md); margin-top: 2px; }
+.spine-item .lead { width: var(--mt-size-icon-md); height: var(--mt-size-icon-md); color: var(--mt-color-text-secondary); margin-top: 2px; }
+.spine-item.work .lead { color: var(--mt-color-agent); }
+.item-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: var(--mt-space-1); }
+.item-title { display: block; color: var(--mt-color-text-primary); font-size: var(--mt-text-body-size); overflow-wrap: anywhere; }
+.spine-item.p1 .item-title { font-weight: 600; }
+.spine-item.done .item-title { color: var(--mt-color-text-tertiary); text-decoration: line-through; }
+.item-meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--mt-space-1) var(--mt-space-2);
+  color: var(--mt-color-text-secondary); font-size: var(--mt-text-footnote-size); }
+.item-acts, .defer-choices { display: flex; flex-wrap: wrap; gap: var(--mt-space-2); }
+button.quiet { background: transparent; border-color: transparent; color: var(--mt-color-text-secondary); padding-inline: var(--mt-space-2); }
+button.quiet:hover { background: var(--mt-color-sunken); }
+.chip.degraded-chip { background: var(--mt-color-degraded-quiet); color: var(--mt-color-degraded); }
+.stale-note { background: var(--mt-color-stale-quiet); color: var(--mt-color-text-primary); border-radius: var(--mt-radius-sm);
+  padding: var(--mt-space-2); font-size: var(--mt-text-footnote-size); overflow-wrap: anywhere; }
+
+/* the rail: what is true now, regardless of the clock */
+.rail { margin-top: var(--mt-space-6); }
+#today-agents li, #today-since li { display: flex; justify-content: space-between; align-items: baseline; gap: var(--mt-space-3); }
+#today-agents li > span, #today-since li > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+#today-since .when { flex: none; white-space: nowrap; }
+@media (min-width: 760px) {
+  main:has(> #today:not([hidden])) { max-width: calc(var(--mt-size-reading-measure) + var(--today-rail) + var(--mt-space-6) + 2 * var(--shell-gutter)); }
+  #today:not([hidden]) { display: grid; grid-template-columns: minmax(0, 1fr) var(--today-rail); column-gap: var(--mt-space-6); align-items: start; }
+  #today > * { grid-column: 1; }
+  #today > #today-rail { grid-column: 2; grid-row: 1 / span 6; margin-top: 0; }
+  #today-rail > h3:first-child { margin-top: 0; }
 }
-.tiles .tile b { font-size: var(--mt-text-title-1-size); font-weight: var(--mt-text-title-1-weight); line-height: 1.1; }
+@media (min-width: 900px) { main > #today { max-width: calc(var(--mt-size-content-max) + var(--today-rail)); } }
 
 .dash-list { background: var(--mt-color-surface); border-radius: var(--mt-radius-lg);
   box-shadow: var(--mt-elevation-1); padding: 0 var(--mt-space-4); margin-top: var(--mt-space-2); }

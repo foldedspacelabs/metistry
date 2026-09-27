@@ -14,6 +14,8 @@ import { describe, expect, it } from "vitest";
 
 const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
 const SRC = read("../web/app.js");
+// Needs You's own file since T7-3a: it is what reads the queue and hands the shell the count
+const NEEDS_YOU = read("../web/needs-you.js");
 // the markup without its comments, which talk about the hooks they sit beside
 const HTML = read("../web/index.html").replace(/<!--[\s\S]*?-->/g, "");
 const CSS = read("../web/style.css");
@@ -180,9 +182,12 @@ describe("no badge on a tab (P2)", () => {
     for (const b of c.badges) expect(["bell", "side-needs"]).toContain(b.id);
     expect(c.badges.every((b) => b.textContent === "4" && !b.hidden)).toBe(true);
     // the old strip wrote "Needs You (4)" into its triage button; nothing writes into a tab now
-    expect(SRC).not.toMatch(/Needs You \(\$\{/);
-    expect(SRC).not.toMatch(/#tabs[^\n]*(textContent|innerHTML)/);
-    expect(SRC).toContain("setNeeds(proposals.length); // the bell and the Needs You row — never a tab (P2)");
+    for (const src of [SRC, NEEDS_YOU]) {
+      expect(src).not.toMatch(/Needs You \(\$\{/);
+      expect(src).not.toMatch(/#tabs[^\n]*(textContent|innerHTML)/);
+    }
+    expect(NEEDS_YOU).toContain("setNeeds(proposals.length); // the bell and the Needs You row — never a tab (P2)");
+    expect(SRC).toContain("mountNeedsYou({ $, api, setNeeds, show })");
   });
 
   it("no stylesheet draws one either", () => {
@@ -378,6 +383,24 @@ describe("glyphs, not emoji", () => {
     for (const g of used) expect(symbols, g).toContain(g);
     // each tab wears one
     for (const b of TAB_BAR.matchAll(/<button\b[\s\S]*?<\/button>/g)) expect(b[0]).toMatch(/<svg class="glyph" aria-hidden="true" focusable="false"><use href="#g-/);
+  });
+});
+
+describe("the views split out of app.js (T7-3a)", () => {
+  it("every element a module binds by id ships in index.html — a missing one throws on load and stops the shell", () => {
+    for (const m of ["app.js", "today.js", "needs-you.js"]) {
+      const src = read(`../web/${m}`);
+      const ids = [...new Set([...src.matchAll(/\$\("([^"]+)"\)/g)].map((x) => x[1]!))];
+      expect(ids.length, m).toBeGreaterThan(5);
+      for (const id of ids) expect(HTML, `${m} binds #${id}`).toContain(`id="${id}"`);
+    }
+  });
+
+  it("the shell imports the views; a view never imports the shell", () => {
+    expect(SRC).toContain('import { mountNeedsYou } from "./needs-you.js";');
+    expect(SRC).toContain('import { mountToday } from "./today.js";');
+    for (const m of ["today.js", "needs-you.js", "lib.js"]) expect(read(`../web/${m}`), m).not.toMatch(/from "\.\/app\.js"/);
+    expect(read("../web/lib.js")).not.toMatch(/\bdocument\.|\bwindow\./); // DOM-free: a test imports it as it is
   });
 });
 

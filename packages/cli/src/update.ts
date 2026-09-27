@@ -15,7 +15,7 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join, relative } from "node:path";
-import { INSTANCE_LAYOUT, LEGACY_VAULT_DIR, detectLayout, usesCompose, type Deployment, type InstanceLayoutShape, type KeychainBackend } from "@foldedspacelabs/metistry-core";
+import { INSTANCE_LAYOUT, LEGACY_VAULT_DIR, detectLayout, intEnv, usesCompose, type Deployment, type InstanceLayoutShape, type KeychainBackend } from "@foldedspacelabs/metistry-core";
 import { writeCliShim } from "./cli-shim.js";
 import { loadDeployment } from "./deployment.js";
 import { doctor, renderTable, type DoctorDeps, type DoctorReport } from "./doctor.js";
@@ -525,8 +525,8 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
 
 // ---- the closing doctor, run by the NEW code ------------------------------------------
 
-/** Doctor probes every bridge, job and container; the default exec timeout (15 s) is not enough for that. */
-export const CHILD_DOCTOR_TIMEOUT_MS = 5 * 60 * 1000;
+/** Doctor probes every bridge, job and container; the default exec timeout (15 s) is not enough for that. A slow machine raises METISTRY_CHILD_DOCTOR_TIMEOUT_MS. */
+export const CHILD_DOCTOR_TIMEOUT_MS = intEnv("METISTRY_CHILD_DOCTOR_TIMEOUT_MS", 5 * 60 * 1000);
 
 /** The updated product's CLI entry point — the same file the `metistry` shim execs (cli-shim.ts). */
 export function updatedCliMain(runDir: string): string {

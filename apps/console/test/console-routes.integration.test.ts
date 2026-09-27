@@ -242,6 +242,9 @@ describe.skipIf(!hasDb)("the console's compute, knowledge, commands and run-deta
     "GET /api/knowledge/page?path=Areas/Health/sleep.md",
     "GET /api/knowledge/pages",
     "GET /api/knowledge/links?path=Areas/Health/sleep.md",
+    "GET /api/knowledge/fold",
+    "GET /api/knowledge/drafts",
+    "GET /api/knowledge/areas",
     "GET /api/commands",
   ];
 
@@ -290,6 +293,7 @@ describe.skipIf(!hasDb)("the console's compute, knowledge, commands and run-deta
     expect((await get("/api/commands", auth)).status).toBe(200);
     expect((await get("/api/knowledge/search?q=sleep", auth)).status).toBe(200);
     expect((await get("/api/knowledge/pages", auth)).status).toBe(200);
+    for (const door of ["fold", "drafts", "areas"]) expect((await get(`/api/knowledge/${door}`, auth)).status, door).toBe(200);
     expect((await get(`/api/runs/${turnRunId}`, auth)).status).toBe(200);
   });
 
@@ -671,7 +675,7 @@ describe.skipIf(!hasDb)("the console's compute, knowledge, commands and run-deta
     const r = await get("/api/knowledge/backlinks");
     expect(r.status).toBe(404);
     const message = (await r.json()).error.message;
-    for (const door of ["/api/knowledge/search", "/api/knowledge/page", "/api/knowledge/pages", "/api/knowledge/links"]) {
+    for (const door of ["/api/knowledge/search", "/api/knowledge/page", "/api/knowledge/pages", "/api/knowledge/links", "/api/knowledge/fold", "/api/knowledge/drafts", "/api/knowledge/areas"]) {
       expect(message, door).toContain(door);
     }
   });
@@ -803,6 +807,9 @@ describe.skipIf(!hasDb)("degrades absent: nothing configured, and every route sa
       ["/api/knowledge/search?q=x", "METISTRY_RECONCILER_URL"],
       ["/api/knowledge/page?path=Areas/x.md", "METISTRY_RECONCILER_URL"],
       ["/api/knowledge/pages", "knowledge_pages"], // no bridge to name: the list's dependency is the named query, and it says so
+      ["/api/knowledge/fold", "knowledge_fold_latest"],
+      ["/api/knowledge/drafts", "knowledge_drafts"],
+      ["/api/knowledge/areas", "knowledge_areas"],
       ["/api/commands", "METISTRY_RULES_FILES"],
       ["/api/runs/1", "run_detail"],
     ];

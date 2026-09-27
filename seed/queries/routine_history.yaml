@@ -1,0 +1,50 @@
+# Seeded default (D4 overlay: an instance file of the same name wins).
+#
+# One routine's runs, newest first (§2.10; T3-3's Scheduled screen reads it as
+# `GET /api/scheduled/routines/:name`). Every row the runner or a routine
+# itself wrote as `kind = 'routine_run'` for that component name — the
+# runner's own per-tick row (every tick, skips included, `apps/console/src/
+# runner.ts`) alongside a routine's own detailed row where it writes one
+# (`plan-tomorrow`, `knowledge-fold`: "a settled date is never nothing").
+#
+# `outcome` is `meta.outcome` (T1-4's shared vocabulary — acted | silent |
+# skipped:<reason> — every routine and the runner write it the same way, so
+# this reads it exactly as `activity_feed` does, never a second mapping).
+#
+# `steps` is `meta.processed` — the generic count the runner's own tick
+# already carries (`runner.ts`: `{ processed: n, outcome: n > 0 ? "acted" :
+# "silent" }`). A routine's own detailed row (plan-tomorrow, knowledge-fold)
+# carries no `processed` and reports `steps: NULL` — an honest "not counted",
+# never a false zero.
+#
+# `expose: route`. A routine's history is the owner's Scheduled screen; there
+# is no reason for the generic `/api/q/routine_history` or an agent's
+# `queries_run` to read another routine's run history by name.
+name: routine_history
+expose: route
+description: >-
+  One routine's runs, newest first: when it ran, what it decided
+  (meta.outcome — acted | silent | skipped:<reason>, T1-4), whether it
+  failed and why, what it cost, and how many steps it took (meta.processed —
+  the count the runner's own tick already writes; a routine's own detailed
+  row carries no count and reports NULL rather than a false zero). Scheduled's
+  per-routine history.
+params:
+  component: { type: text, default: "" } # blank matches no row, so the default is the empty case
+  limit:     { type: int,  default: 50 }
+sql: |
+  SELECT
+    r.id,
+    r.ts,
+    r.started_at,
+    r.finished_at,
+    r.ok,
+    r.error,
+    r.cost_usd,
+    r.meta ->> 'outcome'            AS outcome,
+    (r.meta ->> 'processed')::int   AS steps
+  FROM runs r
+  WHERE r.kind = 'routine_run' AND r.component = (:component)::text
+  ORDER BY r.ts DESC
+  LIMIT (:limit)::int
+cache_ttl: 0

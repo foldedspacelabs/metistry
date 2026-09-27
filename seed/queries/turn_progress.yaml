@@ -1,0 +1,50 @@
+# Seeded default (D4 overlay: an instance file of the same name wins).
+#
+# The working indicator's data (screen-01-chat.md §3/§3b, T2-17's
+# `GET /api/turns/:turn_id/progress`): every tool call one assistant turn has
+# made so far, oldest first. The join is the same EXACT key `run_detail`
+# joins tool calls on — `meta.turn_id` (`packages/mcp-brain/src/turn-id.ts`,
+# stamped by every `wrap()`ed tool call) — never a time window, so a second
+# turn running at the same moment can never bleed into this one's strip.
+#
+# What the client does with these rows is deliberately left to the client:
+# the query hands back facts (a tool name, whether it has finished, how it
+# went, how long it took) and never a computed "still working" verdict. The
+# strip's running tool name is the row with `finished_at IS NULL` (the same
+# two-phase in-flight marker `collector_health` and `run_detail` read); the
+# count and the elapsed seconds are `count(*)` and `now() - min(started_at)`
+# over these same rows, both cheap enough on the client that the wire need
+# not carry a second, redundant shape of the same answer.
+#
+# `expose: route` — `GET /api/turns/:turn_id/progress` is the only door onto
+# this: a `turn_id` is not a secret, but there is no reason for the generic
+# `/api/q/turn_progress` or an agent's `queries_run` to be a second way to
+# watch a turn that may not be theirs.
+#
+# A blank or unknown `turn_id` returns no rows — `meta.turn_id` is always a
+# non-empty handle once it exists, so the default (`""`) can never match a
+# real one; there is no special case to write for "no such turn" beyond that.
+name: turn_progress
+expose: route
+description: >-
+  Every tool call belonging to one assistant turn (joined on meta.turn_id,
+  exact, never a time window), oldest first: the tool name, whether it is
+  still running (finished_at IS NULL), its outcome and duration once it has
+  one. Chat's working indicator and tool strip. An unknown or blank turn_id
+  returns no rows.
+params:
+  turn_id: { type: text, default: "" }
+sql: |
+  SELECT
+    r.id,
+    r.tool,
+    r.started_at,
+    r.finished_at,
+    r.ok,
+    r.error,
+    r.duration_ms
+  FROM runs r
+  WHERE r.kind = 'tool'
+    AND r.meta ->> 'turn_id' = (:turn_id)::text
+  ORDER BY r.started_at, r.id
+cache_ttl: 0

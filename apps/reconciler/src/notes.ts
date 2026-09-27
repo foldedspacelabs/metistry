@@ -4,7 +4,7 @@
 
 import { createHash } from "node:crypto";
 import { parse as parseYaml } from "yaml";
-import { INSTANCE_LAYOUT, parseTaskLine, validAreaPrefix, type ParsedTaskLine, type TaskDateOptions } from "@foldedspacelabs/metistry-core";
+import { INSTANCE_LAYOUT, JOURNAL_DIR, isUserOwnedPath, parseTaskLine, validAreaPrefix, type ParsedTaskLine, type TaskDateOptions } from "@foldedspacelabs/metistry-core";
 
 export interface NoteMeta {
   title: string | null;
@@ -20,6 +20,20 @@ export interface NoteMeta {
   source: string | null;
   /** The frontmatter `area:`, wikilink brackets stripped — `area: "[[Drey]]"` is the schema's spelling (`metistry-build-plan.md`). */
   area: string | null;
+  /**
+   * The frontmatter `event_id:` — the calendar event a meeting note is FOR
+   * (today-hub-requests A3, plan §2.9 `vault_meeting_refs`). Verbatim, never
+   * truncated: an id that is not one whole id is not an id (`meetingEventId`).
+   * The walk reads it only from a meeting note (`isMeetingNotePath`).
+   */
+  event_id: string | null;
+  /**
+   * The frontmatter `email:` — one address or a list, normalised and
+   * validated by `personEmails`; anything that is not plainly an address is
+   * dropped rather than repaired. The walk reads it only from a People page
+   * the user owns (`isPersonPath` + `ownedByUser`).
+   */
+  emails: string[];
 }
 
 export interface NoteLink {
@@ -49,7 +63,7 @@ const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
  */
 export function parseFrontmatter(text: string): { meta: NoteMeta; body: string; bodyLine: number } {
   const m = FRONTMATTER_RE.exec(text);
-  const none: NoteMeta = { title: null, description: null, draft: false, source: null, area: null };
+  const none: NoteMeta = emptyNoteMeta();
   if (!m) return { meta: none, body: text, bodyLine: 1 };
   const bodyLine = 1 + (m[0].match(/\n/g)?.length ?? 0);
   let fm: unknown;
@@ -70,10 +84,74 @@ export function parseFrontmatter(text: string): { meta: NoteMeta; body: string; 
       draft: status === "draft" || o.draft === true,
       source: str(o.source),
       area: area === null ? null : unwikilink(area),
+      event_id: meetingEventId(o.event_id),
+      emails: personEmails(o.email),
     },
     body: text.slice(m[0].length),
     bodyLine,
   };
+}
+
+/** A note with no frontmatter the index reads. */
+export function emptyNoteMeta(): NoteMeta {
+  return { title: null, description: null, draft: false, source: null, area: null, event_id: null, emails: [] };
+}
+
+/** Longer than any calendar's event id (EventKit's, Google's, an iCalendar UID); a longer value is refused, never cut to fit. */
+const EVENT_ID_MAX = 1024; // limit: fixed — a sanity bound on one frontmatter scalar, not a policy anyone tunes
+
+/**
+ * `event_id:` as the walk stores it: a string (or a number — YAML reads a
+ * bare numeric id as one) with its ends trimmed and NOTHING else changed.
+ * Event ids are case-sensitive and opaque, so this never lowercases,
+ * truncates or "cleans" one: a value with a control character, or one over
+ * `EVENT_ID_MAX`, is no id at all, and a meeting with no id links to no note.
+ */
+export function meetingEventId(value: unknown): string | null {
+  const raw = typeof value === "string" ? value.trim() : typeof value === "number" && Number.isFinite(value) ? String(value) : null;
+  if (raw === null || raw === "" || raw.length > EVENT_ID_MAX) return null;
+  return /[\u0000-\u001f\u007f]/.test(raw) ? null : raw;
+}
+
+/** RFC 5321's path limit; nothing longer is a deliverable address. */
+const EMAIL_MAX = 254; // limit: fixed — the protocol's own ceiling
+/** Addresses read from one People page. A person has a few; a list of hundreds is not a person. */
+const EMAILS_PER_PAGE_MAX = 16; // limit: fixed — a bound on one page's frontmatter, so one note cannot flood the table
+
+/**
+ * Deliberately plain: one `@`, no whitespace, no brackets, quotes or
+ * separators anywhere, a dot in the domain. It is not RFC 5322 and does not
+ * try to be — an attendee address from a calendar is always this shape, and
+ * anything that is not (`Jim <jim@x.com>`, `jim at x dot com`) is dropped,
+ * not parsed: a person is never guessed (A4).
+ */
+const EMAIL_RE = /^[^\s@<>()[\]{},;:"'\\]+@[^\s@<>()[\]{},;:"'\\.]+(?:\.[^\s@<>()[\]{},;:"'\\.]+)+$/;
+
+/**
+ * `email:` as the walk stores it — the key `people_by_email` looks an
+ * attendee up by. One string or a YAML list of strings; each trimmed, a
+ * `mailto:` prefix dropped (Obsidian users paste links), then LOWERCASED
+ * whole: calendars do not agree on the case of an address, and a lookup that
+ * missed `Jim@X.com` because the page said `jim@x.com` would be a person
+ * silently lost. Invalid entries are dropped; duplicates collapse.
+ */
+export function personEmails(value: unknown): string[] {
+  const items = typeof value === "string" ? [value] : Array.isArray(value) ? value : [];
+  const out = new Set<string>();
+  for (const item of items) {
+    if (out.size >= EMAILS_PER_PAGE_MAX) break;
+    if (typeof item !== "string") continue;
+    const email = normaliseEmail(item);
+    if (email !== null) out.add(email);
+  }
+  return [...out];
+}
+
+/** One address, normalised the way the table and `people_by_email` both read it, or null when it is not plainly an address. */
+export function normaliseEmail(value: string): string | null {
+  const email = value.trim().replace(/^mailto:/i, "").toLowerCase();
+  if (email.length === 0 || email.length > EMAIL_MAX) return null;
+  return EMAIL_RE.test(email) ? email : null;
 }
 
 /** `[[Drey]]` → `Drey`, `[[Areas/Drey|Drey]]` → `Areas/Drey`. The frontmatter schema says an `area:` is always a wikilink; the index stores the target. */
@@ -308,6 +386,11 @@ const USER_SOURCE = "user";
  * is still skipped, with nothing to keep in sync.
  */
 export function ownsTaskLines(meta: NoteMeta): boolean {
+  return ownedByUser(meta);
+}
+
+/** The note is the user's own: no `source:`, or `source: user` (#231). An assistant-created note carries its creator's id and is never this. */
+export function ownedByUser(meta: NoteMeta): boolean {
   return meta.source === null || meta.source === USER_SOURCE;
 }
 
@@ -440,6 +523,28 @@ export function resolveAssignee(
   const hits = people.filter((p) => basenameTitle(p).toLowerCase().startsWith(needle));
   if (hits.length === 1) return { assigned: hits[0]!, warning: null };
   return { assigned: name, warning: `@${name} (${hits.length === 0 ? `no ${PEOPLE_PREFIX}/ page` : `${hits.length} ${PEOPLE_PREFIX}/ pages`})` };
+}
+
+/**
+ * Where meeting notes live: `Journal/Meetings/<date>-<topic>.md`, archived
+ * to `Journal/Meetings/<year>/<month>/` (daily-flow-spec §5.1, §5.2).
+ */
+export const MEETINGS_PREFIX = `${JOURNAL_DIR}/Meetings`;
+
+/**
+ * A note whose `event_id:` the walk believes. Only under `Journal/Meetings/`,
+ * and that directory is the user's AT THE TOOL (`isUserOwnedPath`: every
+ * principal but `user` is refused a write there, `core`'s `may()` and the
+ * bridge's `writeAllowed` alike) — so no agent can mint a note that claims
+ * the owner's meeting, and "Open notes" (T2-11) can never open one.
+ */
+export function isMeetingNotePath(path: string): boolean {
+  return isMarkdown(path) && path.startsWith(`${MEETINGS_PREFIX}/`) && isUserOwnedPath(path);
+}
+
+/** A person page: any markdown under `People/`, the directory `peoplePages` reads. */
+export function isPersonPath(path: string): boolean {
+  return isMarkdown(path) && path.startsWith(`${PEOPLE_PREFIX}/`);
 }
 
 /** Every `People/*.md` in the vault, for `resolveAssignee`. Built once per walk, not once per task. */

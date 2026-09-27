@@ -11,11 +11,21 @@
 //            reconciler pushes unattended with no plaintext anywhere
 //            (`metistry connect-repo`).
 //
-// Values NEVER travel in argv: `security ... -w` given as the last option
-// prompts, and the prompt reads stdin when there is no tty, so the secret
-// goes down the child's stdin and is invisible to `ps`. Reading back uses
-// `-w`, whose output is the value — so a caller must never log it. Nothing
-// in this module writes a value to `out`.
+// Values NEVER travel in argv. A write is `security -i` — its interactive
+// mode — with the one command line on the child's stdin, so the value is in
+// no process's argv and invisible to `ps`. Reading back uses `-w`, whose
+// output is the value — so a caller must never log it. Nothing in this module
+// writes a value to `out`.
+//
+// Not `add-generic-password … -w` as the last option with the value piped in:
+// that form reads the value with getpass(3), which opens /dev/tty FIRST and
+// reads stdin only when there is no terminal. No test and no agent session
+// has one, so it passed; the owner's `metistry update` in Terminal did —
+// `security` printed "password data for new item:" on the terminal, waited on
+// the keyboard while the value sat unread in the pipe, and was killed by the
+// exec timeout (exit 1, nothing on stderr: the 0.12.0 → 0.14.0 upgrade,
+// 2026-09-27). getpass(3) also keeps only the first 128 characters, so a
+// longer secret was stored truncated without a word.
 
 import type { KeychainBackend } from "@foldedspacelabs/metistry-core";
 import type { Exec, ExecResult } from "./exec.js";
@@ -41,13 +51,37 @@ export function keychainAccount(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 /**
- * `security`'s prompt asks twice ("retype"), so the value is written twice.
- * A value carrying a newline cannot survive that round trip — refuse it
- * here rather than silently store its first line.
+ * The longest command line `security -i` reads whole, newline included. Its
+ * line buffer is SecurityTool's MAX_LINE_LEN (4096); a longer line is read in
+ * two pieces and the SECOND runs as a command of its own, so the tail of a
+ * secret would come back on stderr as `unknown command "…"` (measured against
+ * a scratch keychain: a 4097-byte line stored whole, 4098 split).
  */
-export function promptStdin(value: string): string {
-  if (/[\r\n]/.test(value)) throw new Error("a secret containing a newline cannot be stored in the Keychain (`security` reads it a line at a time)");
-  return `${value}\n${value}\n`;
+export const SECURITY_LINE_MAX = 4095; // limit: fixed — security(1)'s interactive line buffer, not a policy
+
+/**
+ * One argument the way `security -i`'s tokenizer reads it back: always
+ * double-quoted, `\` and `"` backslash-escaped, everything else literal
+ * (spaces, `'`, `$`, backticks, non-ASCII). A newline or NUL cannot be carried
+ * at all — the tool reads a line at a time — so it is refused here rather
+ * than letting the first line be stored and the rest run as a command.
+ */
+export function securityQuote(arg: string): string {
+  if (/[\r\n\0]/.test(arg)) throw new Error("a secret containing a newline cannot be stored in the Keychain (`security` reads it a line at a time)");
+  return `"${arg.replace(/[\\"]/g, (c) => `\\${c}`)}"`;
+}
+
+/**
+ * The stdin of a `security -i` write: one quoted command line. A line the
+ * tool would split is refused, naming its length — never a byte of it.
+ */
+export function interactiveLine(args: readonly string[]): string {
+  const line = `${args.map(securityQuote).join(" ")}\n`;
+  const bytes = Buffer.byteLength(line, "utf8");
+  if (bytes > SECURITY_LINE_MAX) {
+    throw new Error(`this secret is too long for the Keychain's command line (${bytes} bytes with its command; \`security -i\` reads at most ${SECURITY_LINE_MAX})`);
+  }
+  return line;
 }
 
 function security(exec: Exec, args: string[], stdin?: string): Promise<ExecResult> {
@@ -67,14 +101,15 @@ export function securityPresence(exec: Exec): (service: string, account: string)
 /**
  * The login Keychain as core's `KeychainBackend`: generic-password items by
  * (service, account), through `security` with argument arrays only and
- * values on stdin. Shared by every instance on this Mac, exactly as the
- * Keychain is — the per-instance binding is core's `InstanceSecrets`.
+ * values on stdin (`security -i`, above). Shared by every instance on this
+ * Mac, exactly as the Keychain is — the per-instance binding is core's
+ * `InstanceSecrets`.
  */
 export function securityKeychain(exec: Exec): KeychainBackend {
   return {
     async set(service, account, value) {
-      const r = await security(exec, ["add-generic-password", "-U", "-a", account, "-s", service, "-w"], promptStdin(value));
-      if (r.code !== 0) throw new Error(`security add-generic-password ${service} failed (${r.code}): ${lastLine(r)}`);
+      const r = await security(exec, ["-i"], interactiveLine(["add-generic-password", "-U", "-a", account, "-s", service, "-w", value]));
+      if (r.code !== 0) throw new Error(`security add-generic-password ${service} failed (${r.code}): ${reason(r)}`);
     },
     async get(service, account) {
       const r = await security(exec, ["find-generic-password", "-a", account, "-s", service, "-w"]);
@@ -138,8 +173,8 @@ export class Keychain {
    * as this user already holds `.env` (docs/ops/cli.md records the trade).
    */
   async setGitCredential(host: string, account: string, token: string): Promise<void> {
-    const r = await this.run(["add-internet-password", "-U", "-a", account, "-s", host, "-r", "htps", "-A", "-w"], promptStdin(token));
-    if (r.code !== 0) throw new Error(`security add-internet-password ${host} failed (${r.code}): ${lastLine(r)}`);
+    const r = await this.run(["-i"], interactiveLine(["add-internet-password", "-U", "-a", account, "-s", host, "-r", "htps", "-A", "-w", token]));
+    if (r.code !== 0) throw new Error(`security add-internet-password ${host} failed (${r.code}): ${reason(r)}`);
   }
 
   async hasGitCredential(host: string, account: string): Promise<boolean> {
@@ -148,6 +183,17 @@ export class Keychain {
   }
 }
 
-function lastLine(r: ExecResult): string {
-  return (r.stderr || r.stdout).trim().split("\n").slice(-1)[0] ?? "";
+/**
+ * Why a write failed, in `security`'s own words. Interactive mode ends every
+ * failure with `<command>: returned <status>`, which says less than the line
+ * before it, so that one is preferred. A quoted, length-checked line never
+ * echoes its value (interactiveLine), so neither line can carry one.
+ */
+function reason(r: ExecResult): string {
+  const lines = (r.stderr || r.stdout)
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const said = lines.filter((l) => !/: returned -?\d+$/.test(l));
+  return (said.at(-1) ?? lines.at(-1) ?? "no message — a locked keychain, or a timeout").slice(0, 300);
 }

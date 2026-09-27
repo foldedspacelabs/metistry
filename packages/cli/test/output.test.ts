@@ -21,6 +21,7 @@ import { renderDown } from "../src/service-control.js";
 import { renderTable, type DoctorReport } from "../src/doctor.js";
 import { main, renderHelp } from "../src/main.js";
 import { updateSummary } from "../src/update.js";
+import { StepFailed } from "../src/steps.js";
 import { renderVersionInfo } from "../src/version.js";
 import { createUi, strip } from "../src/ui.js";
 
@@ -241,6 +242,33 @@ describe("update's closing summary", () => {
     expect(updateSummary({ ...base, migrations: { applied: ["0007_x.sql"] } })).toBe("✓ update ok — git 0.9.0, 1 migration(s) applied, 1 job(s) kickstarted");
     expect(updateSummary({ ...base, dryRun: true, restarted: [] })).toBe("○ dry run — git 0.9.0, nothing was changed");
     expect(updateSummary({ ...base, code: 1, restarted: [] })).toBe("⚠ updated, and doctor is not happy — git 0.9.0, no migrations, nothing kickstarted");
+  });
+
+  // "nothing kickstarted" reads as "nothing needed it"; the 0.12.0 → 0.14.0
+  // run printed it after its restart step aborted with three jobs owed
+  it("an interrupted or unreached restart is said to be exactly that", () => {
+    const base = { ui: plain, dryRun: false, code: 1, source: "release" as const, version: "0.14.0", migrations: { applied: ["0026_a.sql"] }, failure: new StepFailed("compose failed") };
+    expect(updateSummary({ ...base, restarted: [], restart: { reached: false, completed: false, owed: [] } })).toBe(
+      "✗ update failed — release 0.14.0, 1 migration(s) applied, nothing restarted — the update stopped before its restart step",
+    );
+    expect(updateSummary({ ...base, restarted: ["a"], restart: { reached: true, completed: false, owed: ["a", "b"] } })).toBe(
+      "✗ update failed — release 0.14.0, 1 migration(s) applied, restart interrupted — kickstarted a; NOT kickstarted (code changed): b",
+    );
+    expect(updateSummary({ ...base, restarted: [], restart: { reached: true, completed: false, owed: [] } })).toBe("✗ update failed — release 0.14.0, 1 migration(s) applied, restart interrupted — none kickstarted");
+  });
+
+  it("what was left undone makes the verdict \"incomplete\" and is named", () => {
+    const s = updateSummary({
+      ui: plain,
+      dryRun: false,
+      code: 1,
+      source: "release",
+      version: "0.14.0",
+      restarted: ["com.foldedspacelabs.metistry"],
+      restart: { reached: true, completed: true, owed: ["com.foldedspacelabs.metistry"] },
+      deferred: [{ what: "METISTRY_BRIDGE_TOKEN_RECONCILER_USER", why: "not minted", fix: ["metistry secrets mint METISTRY_BRIDGE_TOKEN_RECONCILER_USER"] }],
+    });
+    expect(s).toBe("✗ update incomplete — release 0.14.0, no migrations, 1 job(s) kickstarted, not done: METISTRY_BRIDGE_TOKEN_RECONCILER_USER (the commands are above)");
   });
 });
 

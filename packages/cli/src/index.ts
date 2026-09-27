@@ -112,7 +112,7 @@ export {
   type PurgeSharedOptions,
   type PurgeSharedResult,
 } from "./secrets.js";
-export { Keychain, serviceFor, keychainAccount, promptStdin, SERVICE_PREFIX, securityKeychain, securityPresence } from "./keychain.js";
+export { Keychain, serviceFor, keychainAccount, interactiveLine, securityQuote, SECURITY_LINE_MAX, SERVICE_PREFIX, securityKeychain, securityPresence } from "./keychain.js";
 export { type Exec, type ExecOptions, type ExecResult, realExec, formatCommand } from "./exec.js";
 export { up, productSource, composeUp, installLaunchd, type UpOptions, type UpResult } from "./up.js";
 export { update, gitHead, hashHostJobs, trackedPathFor, writeLock, publishedPackages, type UpdateOptions, type UpdateResult } from "./update.js";

@@ -17,6 +17,7 @@ import { parseSecretsFile } from "@foldedspacelabs/metistry-core";
 import type { Exec, ExecOptions } from "../src/exec.js";
 import { main } from "../src/main.js";
 import { parseSecretHosts, purgeSecrets, secretReferences, secretsListNamed, secretsSet } from "../src/secrets.js";
+import { decodeSecurity } from "./fake-security.js";
 
 const ID_A = "11111111-2222-4333-8444-555555555555";
 const ID_B = "66666666-7777-4888-9999-aaaaaaaaaaaa";
@@ -26,15 +27,15 @@ const VALUE_B = "ghp_B-other-instance";
 /** A Keychain in a Map keyed `<account>/<service>`, answering `security` the way the real one does. Records every call. */
 function fakeSecurity(seed: Record<string, string> = {}) {
   const store = new Map(Object.entries(seed));
-  const calls: Array<{ args: string[]; opts: ExecOptions }> = [];
-  const exec: Exec = async (cmd, args, opts = {}) => {
-    calls.push({ args, opts });
+  const calls: Array<{ args: string[]; argv: string[]; opts: ExecOptions }> = [];
+  const exec: Exec = async (cmd, argv, opts = {}) => {
+    const { args, value } = cmd === "security" ? decodeSecurity(argv, opts) : { args: argv, value: undefined };
+    calls.push({ args, argv, opts });
     if (cmd !== "security") return { code: 127, stdout: "", stderr: `${cmd}: not faked` };
     const at = `${args[args.indexOf("-a") + 1] ?? ""}/${args[args.indexOf("-s") + 1] ?? ""}`;
     if (args[0] === "add-generic-password") {
-      const [a, b] = String(opts.stdin ?? "").split("\n");
-      if (a === undefined || a !== b) return { code: 1, stdout: "", stderr: "passwords don't match" };
-      store.set(at, a);
+      if (value === undefined) return { code: 1, stdout: "", stderr: "add-generic-password: no -w value on the security -i line" };
+      store.set(at, value);
       return { code: 0, stdout: "", stderr: "" };
     }
     if (args[0] === "find-generic-password") {
@@ -127,10 +128,12 @@ describe("metistry secrets set", () => {
     expect(secretsYaml(a)).not.toContain(VALUE_A);
     expect(r.all).not.toContain(VALUE_A);
     expect(r.all).toContain("metistry:secret:github_write");
-    for (const c of kc.calls) expect(c.args.join(" ")).not.toContain(VALUE_A);
+    for (const c of kc.calls) expect(c.argv.join(" ")).not.toContain(VALUE_A);
     const add = kc.calls.find((c) => c.args[0] === "add-generic-password")!;
-    expect(add.args).toEqual(["add-generic-password", "-U", "-a", ID_A, "-s", "metistry:secret:github_write", "-w"]);
-    expect(add.opts.stdin).toBe(`${VALUE_A}\n${VALUE_A}\n`);
+    // `security -i`: the process argv is that one flag, and the whole command — value included — is the line on stdin
+    expect(add.argv).toEqual(["-i"]);
+    expect(add.args).toEqual(["add-generic-password", "-U", "-a", ID_A, "-s", "metistry:secret:github_write", "-w", VALUE_A]);
+    expect(add.opts.stdin).toBe(`"add-generic-password" "-U" "-a" "${ID_A}" "-s" "metistry:secret:github_write" "-w" "${VALUE_A}"\n`);
   });
 
   it("--json prints the result — names, never the value", async () => {

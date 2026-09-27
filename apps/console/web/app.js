@@ -1712,7 +1712,8 @@ $("room-resolve").onclick = async () => {
 const FEED_ICONS = {
   capture: "📥",
   tool: "🔧", turn: "💬", crew_run: "🧑‍🤝‍🧑", dispatch: "📨", task_op: "🗂️",
-  agent_admin: "🛡️", project_mode: "🎛️", collector_run: "⚠️",
+  agent_admin: "🛡️", project_mode: "🎛️", collector_run: "⚠️", config_write: "⚙️",
+  routine_run: "⏰",
   proposal_created: "📝", proposal_decided: "✅", work_history: "🧾",
   brief: "📰", review: "🔍", alert: "🚨",
 };
@@ -1722,6 +1723,8 @@ const feedIcon = (kind) => FEED_ICONS[kind] ?? "•";
 // param, which matches an exact row kind OR the `group` column
 // activity_feed.yaml derives — so this list names groups and the SQL owns
 // what is in each one. Adding a kind to the feed does not mean editing here.
+// Eight chips (screen-02-activity.md §3): All and the seven groups —
+// `routine` the seventh (C43): a routine ran because the clock said so.
 const FEED_CHIPS = [
   ["", "All"],
   ["capture", "Captures"],
@@ -1730,6 +1733,7 @@ const FEED_CHIPS = [
   ["work", "Work"],
   ["run", "Runs"],
   ["message", "Messages"],
+  ["routine", "Routines"],
 ];
 let feedKind = "";
 // The incremental refresh. `feedSince` is the newest `ts` already painted;
@@ -1764,9 +1768,11 @@ function relTime(ts) {
 // absent on purpose — their subjects can carry agent- or user-authored text —
 // and so is `work_history`, whose subject is the task's own title (C18): "Migrate
 // the settings pane to tokens" is someone's writing, not a label we composed.
+// `routine_run` is in: its subject is the routine's component name, which the
+// system chose (an identifier like `plan-tomorrow` is left as it is anyway).
 const TITLE_CASE_KINDS = new Set([
   "collector_run", "proposal_created", "proposal_decided", "project_mode",
-  "agent_admin", "brief", "review", "alert", "task_op", "crew_run",
+  "agent_admin", "brief", "review", "alert", "task_op", "crew_run", "routine_run",
 ]);
 // Short joining words stay lowercase unless they lead (P10).
 const MINOR = new Set(["a", "an", "and", "at", "by", "for", "in", "of", "on", "or", "the", "to", "via"]);
@@ -1788,8 +1794,12 @@ function titleCaseSubject(kind, subject) {
     .join("");
 }
 
+// The glyph, not the row, takes `failed` (design-system.md §3.2) — read from
+// the query's `ok` column (false only where a run failed; null where the
+// source cannot fail), never from the English in `detail` (C19).
 function feedRowHtml(r) {
-  return `<li class="feed-row"><span class="feed-icon" title="${esc(r.kind)}">${feedIcon(r.kind)}</span>
+  const failed = r.ok === false;
+  return `<li class="feed-row"><span class="feed-icon" title="${esc(failed ? `${r.kind} — failed` : r.kind)}">${failed ? "⛔" : feedIcon(r.kind)}</span>
     <span class="feed-body">
       <span class="chip feed-actor">${esc(r.actor ?? "system")}</span>
       <span class="feed-subject">${esc(titleCaseSubject(r.kind, r.subject))}</span>

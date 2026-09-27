@@ -54,7 +54,16 @@ export interface Task {
   created_at: Date;
   updated_at: Date;
   meta: Record<string, unknown>;
+  /** What the task is about (0026, C85): set by whoever creates the row, edited by the owner only. `null` = none. */
+  description: string | null;
 }
+
+/**
+ * A description is SHORT (C85: "a short description" — the card detail's
+ * first section, not a document). Beside `title`'s 500 and `note`'s 4000.
+ * The cap is here, not a CHECK in 0026, so it can move without DDL.
+ */
+export const DESCRIPTION_MAX = 2000; // limit: fixed — the wire contract (tasks_create advertises it as maxLength); a card, not a document (C85)
 
 export interface CreateInput {
   title: string;
@@ -80,6 +89,12 @@ export interface CreateInput {
    */
   status?: "open" | "blocked";
   note?: string;
+  /**
+   * What the task is about, at most `DESCRIPTION_MAX` characters; blank is
+   * none. The creator's one chance to set it: after create only the board
+   * arm of `update` changes it, and no agent surface reaches that field.
+   */
+  description?: string;
 }
 
 /**
@@ -88,7 +103,7 @@ export interface CreateInput {
  *
  * - **the holder arm** (`status` ∈ `in_progress | blocked | closed`, and/or a
  *   bare `note`) is claim-gated exactly as it always was;
- * - **the board arm** (`owner`, `title`, `project`, and `status: 'open'` —
+ * - **the board arm** (`owner`, `title`, `project`, `description`, and `status: 'open'` —
  *   the unblock) is not. Addressing, renaming and re-filing a card are
  *   gestures on a row nobody need hold, and the unblock is by definition a
  *   row whose holder is stuck: `blocked` is the state nothing but a human
@@ -113,6 +128,14 @@ export interface UpdateInput {
   title?: string;
   /** BOARD: move the card to another project; `null` takes it out of every project. */
   project?: string | null;
+  /**
+   * BOARD: rewrite what the card says it is about; `null` or blank clears it.
+   * The OWNER's field (C85): the console's PATCH route passes it and
+   * `tasks_update` has no such key, so an agent sets a description at create
+   * and never edits one — the same absence that keeps `owner` off every
+   * agent verb.
+   */
+  description?: string | null;
 }
 
 export type ClaimFailure =
@@ -143,7 +166,7 @@ export class TasksError extends Error {
 /** Every column, normalized: dates as text so the wire shape is stable across pg type parsers. */
 const COLS = `id, title, project, area, kind, status, external_ref, owner, due::text AS due,
   claimed_by, lease_expires_at, depends_on, idempotency_key, history, created_by, closed_at,
-  created_at, updated_at, meta`;
+  created_at, updated_at, meta, description`;
 
 /**
  * "Every id in depends_on is closed." A dangling id (deleted row) blocks
@@ -171,6 +194,7 @@ function toTask(row: Record<string, unknown>): Task {
     depends_on: ((row.depends_on as unknown[] | null) ?? []).map(Number),
     history: (row.history as HistoryEntry[] | null) ?? [],
     meta: (row.meta as Record<string, unknown> | null) ?? {},
+    description: (row.description as string | null | undefined) ?? null,
   };
 }
 
@@ -205,6 +229,12 @@ function optionalText(name: string, v: unknown, max = 4000): string | null {
   if (typeof v !== "string") throw new TasksError("invalid_input", `${name} must be a string`);
   if (v.length > max) throw new TasksError("invalid_input", `${name} exceeds ${max} characters`);
   return v;
+}
+
+/** A description, capped; blank (or only whitespace) is stored as none, so "cleared" has one spelling. */
+function optionalDescription(v: unknown): string | null {
+  const d = optionalText("description", v, DESCRIPTION_MAX);
+  return d === null || d.trim() === "" ? null : d;
 }
 
 // --- service ----------------------------------------------------------------
@@ -260,6 +290,7 @@ export class TasksService {
     const status: TaskStatus = input.status ?? "open";
     if (status !== "open" && status !== "blocked") throw new TasksError("invalid_input", "status must be open or blocked at create");
     const note = optionalText("note", input.note);
+    const description = optionalDescription(input.description);
 
     return this.recorded(agent, "create", null, async () => {
       // the project row exists from the first use of its slug (0011); free-text projects predate the table and get no row
@@ -270,12 +301,12 @@ export class TasksService {
         const missing = dependsOn.filter((d) => !found.has(d));
         if (missing.length > 0) throw new TasksError("unknown_dependency", `depends_on references unknown task(s): ${missing.join(", ")}`);
       }
-      const values = [title, project, area, dependsOn, due, key, externalRef, agent, entry(agent, "create", { ...(note !== null ? { note } : {}), ...(status !== "open" ? { status } : {}) }), kind, owner, meta, status];
+      const values = [title, project, area, dependsOn, due, key, externalRef, agent, entry(agent, "create", { ...(note !== null ? { note } : {}), ...(status !== "open" ? { status } : {}) }), kind, owner, meta, status, description];
       let rows: Record<string, unknown>[];
       try {
         ({ rows } = await this.db.query(
-          `INSERT INTO work (title, project, area, kind, status, depends_on, due, idempotency_key, external_ref, created_by, history, owner, meta)
-           VALUES ($1, $2, $3, $10, $13, $4::bigint[], $5::date, $6, $7, $8, $9::jsonb, $11, $12::jsonb)
+          `INSERT INTO work (title, project, area, kind, status, depends_on, due, idempotency_key, external_ref, created_by, history, owner, meta, description)
+           VALUES ($1, $2, $3, $10, $13, $4::bigint[], $5::date, $6, $7, $8, $9::jsonb, $11, $12::jsonb, $14)
            ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
            RETURNING ${COLS}`,
           values,
@@ -386,7 +417,7 @@ export class TasksService {
    *   keeps it (the holder is waiting on something and should keep
    *   heartbeating). The holder keeps its authority after lease expiry until
    *   someone else claims the task, so late work can still land.
-   * - BOARD — `owner`, `title`, `project`, and the unblock (`open`, legal
+   * - BOARD — `owner`, `title`, `project`, `description`, and the unblock (`open`, legal
    *   from `blocked` only). No claim required; a closed row is refused, and
    *   a row the list does not own (a collected issue/pr/event) is refused
    *   too — its source of truth, not the board, decides what it says.
@@ -407,8 +438,10 @@ export class TasksService {
     if (titleGiven && (title === null || title.trim() === "")) throw new TasksError("invalid_input", "title must be a non-empty string");
     const projectGiven = change.project !== undefined;
     const project = projectGiven ? optionalText("project", change.project, 200) : null;
+    const descriptionGiven = change.description !== undefined;
+    const description = descriptionGiven ? optionalDescription(change.description) : null;
 
-    const boardFields = [ownerGiven && "owner", titleGiven && "title", projectGiven && "project"].filter((f): f is string => typeof f === "string");
+    const boardFields = [ownerGiven && "owner", titleGiven && "title", projectGiven && "project", descriptionGiven && "description"].filter((f): f is string => typeof f === "string");
     const board = boardFields.length > 0 || status === "open";
     // Never both in one call: the board arm's WHERE has no claim in it, so a
     // mixed change would let it carry a holder-only write past the gate.
@@ -419,7 +452,7 @@ export class TasksService {
       );
     }
     if (status === null && note === null && !board) {
-      throw new TasksError("invalid_input", "update needs a status, a note, or one of owner, title, project");
+      throw new TasksError("invalid_input", "update needs a status, a note, or one of owner, title, project, description");
     }
     const hist = entry(agent, "update", {
       ...(note !== null ? { note } : {}),
@@ -451,13 +484,14 @@ export class TasksService {
              owner = CASE WHEN $3::boolean THEN $4::text ELSE w.owner END,
              title = COALESCE($5::text, w.title),
              project = CASE WHEN $6::boolean THEN $7::text ELSE w.project END,
+             description = CASE WHEN $9::boolean THEN $10::text ELSE w.description END,
              claimed_by = CASE WHEN $2::text = 'open' THEN NULL ELSE w.claimed_by END,
              lease_expires_at = CASE WHEN $2::text = 'open' THEN NULL ELSE w.lease_expires_at END,
              updated_at = now(), history = history || $8::jsonb
          WHERE w.id = $1 AND ${CLAIMABLE} AND w.status <> 'closed'
            AND ($2::text IS DISTINCT FROM 'open' OR w.status = 'blocked')
          RETURNING ${COLS}`,
-        [id, status, ownerGiven, owner, title, projectGiven, project, hist],
+        [id, status, ownerGiven, owner, title, projectGiven, project, hist, descriptionGiven, description],
       );
       if (rows[0]) return { ok: true as const, task: toTask(rows[0]) };
       return this.explainBoardFailure(id, status === "open");

@@ -1,0 +1,39 @@
+-- 0026_work_description — what a work row is about (design-build-plan §2.9,
+-- ticket T1-1; review C85, ruled 2026-09-22; screen 14 §2.1).
+--
+-- Why: `work` carried a title, status, owner, due, lease, `depends_on`, `meta`
+-- and an append-only `history`, but nowhere to say what the task is ABOUT, so
+-- context ended up crammed into titles. A markdown task has its note around
+-- it; a work row had nothing. The card detail's first section is this column.
+--
+-- Who writes it — enforced at the tool, not here (packages/tasks,
+-- packages/mcp-brain, apps/console/src/task-routes.ts):
+--   * whoever CREATES the row may set it — `TasksService.create`, and so
+--     `tasks_create` for an agent;
+--   * only the OWNER edits it afterwards — the board arm of
+--     `TasksService.update`, reached by `PATCH /api/tasks/:id` as `user`.
+--     `tasks_update` has no `description` key, so no agent surface can
+--     rewrite what a card says it is (the same absence that keeps `owner`
+--     off every agent verb).
+-- The length cap (2000 characters) is the service's, beside `title`'s 500 and
+-- `note`'s 4000, not a CHECK here: a cap that moves should not need DDL, and a
+-- row written before the cap existed must stay readable.
+--
+-- DURABLE where the owner wrote it (invariant 1). A description lives only in
+-- this row — no file, collector or walk rebuilds it — so it is in the durable
+-- set with the rest of `work` and rides the same dump. Where an agent wrote
+-- it at create, it is exactly as durable as the row it came with.
+--
+-- ADDITIVE: one nullable column, no default, no row rewritten, no existing
+-- column touched. NULL is "no description", which is what every row had
+-- before this file. `IF NOT EXISTS`, so applying the file twice is a no-op.
+--
+-- ROLLBACK NOTE: `ALTER TABLE work DROP COLUMN IF EXISTS description;` — after
+-- reverting the service's read and write of it (packages/tasks `COLS`,
+-- `create`, `update`) and the `board` query's select. It loses every
+-- description the owner wrote, so dump the column first
+-- (`COPY (SELECT id, description FROM work WHERE description IS NOT NULL) TO …`).
+-- No index, constraint, view or other table references it.
+
+ALTER TABLE work
+    ADD COLUMN IF NOT EXISTS description text; -- durable: what the task is about; set at create, edited by the owner only (C85)

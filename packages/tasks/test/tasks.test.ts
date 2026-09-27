@@ -3,7 +3,7 @@
 // a bind value, a runs row around every change. Only Postgres can prove the
 // SQL itself; that lives in tasks.integration.test.ts.
 import { describe, expect, it } from "vitest";
-import { TasksError, TasksService, check, type Db } from "../src/index.js";
+import { DESCRIPTION_MAX, TasksError, TasksService, check, type Db } from "../src/index.js";
 
 interface Call {
   text: string;
@@ -178,6 +178,44 @@ describe("TasksService", () => {
     await expect(new TasksService(db).update(7, "user", { status: "closed", owner: "helper-a" })).rejects.toMatchObject({ code: "invalid_input" });
     await expect(new TasksService(db).update(7, "user", { status: "closed", owner: "helper-a" })).rejects.toThrow(/status: closed is claim-gated and owner is not/);
     expect(calls).toEqual([]); // refused before the database
+  });
+
+  it("description (C85) is set at create as a bind value, capped, and blank means none", async () => {
+    const { db, work } = fakeDb([[{ ...ROW, description: "what it is about" }]]);
+    const t = await new TasksService(db).create({ title: "x", description: "what it is about" }, "a");
+    expect(t.description).toBe("what it is about");
+    expect(work()[0]?.text).toMatch(/INSERT INTO work \(.*\bdescription\)/s);
+    expect(work()[0]?.values[13]).toBe("what it is about");
+
+    const blank = fakeDb([[ROW]]);
+    expect((await new TasksService(blank.db).create({ title: "x", description: "  \n " }, "a")).description).toBeNull(); // a row without the column's value reads null, never undefined
+    expect(blank.work()[0]?.values[13]).toBeNull();
+
+    const over = fakeDb();
+    await expect(new TasksService(over.db).create({ title: "x", description: "d".repeat(DESCRIPTION_MAX + 1) }, "a")).rejects.toThrow(`description exceeds ${DESCRIPTION_MAX} characters`);
+    await expect(new TasksService(over.db).create({ title: "x", description: 7 as never }, "a")).rejects.toMatchObject({ code: "invalid_input" });
+    expect(over.calls).toEqual([]); // refused before the database
+  });
+
+  it("description is a BOARD-arm field: no claim in its WHERE, null clears it, and it cannot ride with a holder status", async () => {
+    const { db, work } = fakeDb([[{ ...ROW, description: "rewritten" }]]);
+    expect((await new TasksService(db).update(7, "user", { description: "rewritten" })).ok).toBe(true);
+    const sql = work()[0]?.text ?? "";
+    expect(sql).not.toContain("w.claimed_by = $");
+    expect(sql).toContain("description = CASE WHEN $9::boolean THEN $10::text ELSE w.description END");
+    expect(work()[0]?.values.slice(8)).toEqual([true, "rewritten"]);
+
+    const clear = fakeDb([[ROW]]);
+    await new TasksService(clear.db).update(7, "user", { description: null });
+    expect(clear.work()[0]?.values.slice(8)).toEqual([true, null]); // given, as none
+
+    const untouched = fakeDb([[ROW]]);
+    await new TasksService(untouched.db).update(7, "user", { title: "t2" });
+    expect(untouched.work()[0]?.values.slice(8)).toEqual([false, null]); // not given → the column keeps its value
+
+    const mixed = fakeDb();
+    await expect(new TasksService(mixed.db).update(7, "a", { status: "blocked", description: "because" })).rejects.toThrow(/status: blocked is claim-gated and description is not/);
+    expect(mixed.calls).toEqual([]);
   });
 
   it("renew carries a note onto history — and appends NOTHING without one", async () => {

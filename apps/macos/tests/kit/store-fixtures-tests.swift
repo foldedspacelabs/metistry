@@ -296,7 +296,7 @@ private let drives: [String: Drive] = [
     "GET /api/targets": { s, _ in done(await s.targets()) },
     "POST /api/tasks/:id/dispatch": { s, a in done(await s.dispatchTask(a.pInt("id"), TaskDispatch(target: a.b("target") ?? "", brief: a.b("brief") ?? ""))) },
     "PATCH /api/tasks/:id": { s, a in
-        done(await s.updateTask(a.pInt("id"), TaskPatch(status: a.b("status"), owner: a.b("owner"), project: a.b("project"), title: a.b("title"))))
+        done(await s.updateTask(a.pInt("id"), TaskPatch(status: a.b("status"), owner: a.b("owner"), project: a.b("project"), title: a.b("title"), description: a.b("description"))))
     },
     "POST /api/tasks/:id/claim": { s, a in done(await s.claimTask(a.pInt("id"), leaseSeconds: a.bInt("lease_seconds"))) },
     "POST /api/tasks/:id/release": { s, a in done(await s.releaseTask(a.pInt("id"), note: a.b("note"))) },

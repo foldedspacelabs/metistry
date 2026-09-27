@@ -9,7 +9,7 @@
 //   <instance>/
 //     .metistry/
 //       identity.yaml  rules.yaml  compute.yaml  deployment.yaml  metistry.lock
-//       agents/  routines/  queries/  targets/  extensions/  instance-migrations/
+//       agents/  routines/  queries/  targets/  extensions/  connections/  instance-migrations/
 //       state/            gitignored: .env, models/, sockets, everything runtime
 //     .obsidian/          workspace* gitignored
 //     Inbox/              captures (Inbox/.large/ gitignored)
@@ -57,6 +57,8 @@ export const INSTANCE_LAYOUT = Object.freeze({
   routinesDir: ".metistry/routines",
   targetsDir: ".metistry/targets",
   extensionsDir: ".metistry/extensions",
+  /** One file per connection, `<name>.yaml` (plan §2.6). Written only by `metistry connections` (M13); read by `packages/connections`. */
+  connectionsDir: ".metistry/connections",
   instanceMigrationsDir: ".metistry/instance-migrations",
 
   /** Captures, as ordinary vault content (docs/ops/inbox.md). */
@@ -377,6 +379,9 @@ export const LEGACY_INSTANCE_LAYOUT = Object.freeze({
   routinesDir: "routines",
   targetsDir: "targets",
   extensionsDir: "extensions",
+  // likewise connection files (T4-8a): they postdate the flat layout, so no
+  // legacy instance has the directory and it is not a machinery root
+  connectionsDir: "connections",
   instanceMigrationsDir: "instance-migrations",
 
   inboxDir: `${LEGACY_VAULT_DIR}/Inbox`,

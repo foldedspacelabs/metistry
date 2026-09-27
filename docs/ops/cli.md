@@ -2404,7 +2404,12 @@ D5) — so `update` writes it as a bridge call, never as a file:
 allowed to write it, and the commit lands on the reconciler's next flush.
 A bridge that is configured but not answering, or that refuses, fails
 the update (exit 1) with the reason — the lock is then simply not moved;
-rerun after fixing. Only when **no** bridge is configured
+rerun after fixing. When this run kickstarted the reconciler — or the supervisor it is a
+child of — the write first waits for it to answer again (any HTTP answer on
+`/check`; up to `METISTRY_RECONCILER_READY_TIMEOUT_MS`, default 60 s), because
+`kickstart` returns before the restarted process listens: the lock POST that
+followed at once was refused with "did not answer (fetch failed)" in the
+0.12.0 → 0.14.x rehearsal. Only when **no** bridge is configured
 (`METISTRY_RECONCILER_URL` unset) *and* `METISTRY_INSTANCE_DIR` is a
 local directory does `update` write the file directly — and even then it
 first checks that no reconciler launchd job is running, because a

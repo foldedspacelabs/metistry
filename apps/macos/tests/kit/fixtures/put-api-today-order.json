@@ -1,8 +1,7 @@
 {
   "route": "PUT /api/today/order",
-  "source": "contract",
-  "ticket": "T2-7",
-  "note": "a key outside the day is refused 400, naming it",
+  "source": "recorded",
+  "ticket": null,
   "request": {
     "method": "PUT",
     "path": "/api/today/order",
@@ -10,7 +9,7 @@
       "date": "2026-09-28",
       "task_keys": [
         "mt-7f3k2a",
-        "work:214"
+        "work:41"
       ]
     },
     "idempotency_key": null
@@ -21,7 +20,7 @@
     "date": "2026-09-28",
     "order": [
       "mt-7f3k2a",
-      "work:214"
+      "work:41"
     ]
   }
 }

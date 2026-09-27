@@ -100,6 +100,9 @@ jobs:
       # bridge's real `tools/list` through the `toolSurface()` it ships, and
       # prints the per-bridge numbers so the headroom is visible on every run.
       - run: node ops/scripts/check-tool-surface.mjs
+      # The built doctor validates every manifest in the tree — the same check
+      # pack-runtime.sh runs on a staged pack before it becomes a release asset.
+      - run: node ops/release/check-pack-manifests.mjs .
       - run: pnpm typecheck
       - name: migrations apply cleanly, twice (idempotence)
         env:

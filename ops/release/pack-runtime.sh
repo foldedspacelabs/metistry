@@ -104,8 +104,12 @@ JSON
 #    bundles it as a resource: no Homebrew, no pnpm install on first run)
 if [ "${METISTRY_PACK_DEPS:-1}" = "1" ]; then
   ( cd "$stage" && pnpm install --prod --frozen-lockfile --ignore-scripts --reporter=silent )
+  # 6. the pack's own doctor validates the pack's own manifests — the packed
+  #    core's schema against the packed collectors/, routines/ and targets/ —
+  #    before it can become a release asset (check-pack-manifests.mjs)
+  node "$root/ops/release/check-pack-manifests.mjs" "$stage"
 else
-  echo "pack-runtime: METISTRY_PACK_DEPS=0 — no node_modules in the pack" >&2
+  echo "pack-runtime: METISTRY_PACK_DEPS=0 — no node_modules in the pack, so its manifests are not validated here" >&2
 fi
 
 tarball="$outdir/metistry-runtime-$version-$target.tar.gz"

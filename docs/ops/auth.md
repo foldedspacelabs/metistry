@@ -131,6 +131,31 @@ rendered scope, so the sentence you read while deciding is the sentence the
 panel shows), and the tool descriptions on `/mcp`
 ([assistant-tools.md](assistant-tools.md)).
 
+## Widening from the queue is bounded at the door
+
+An agent's `request_access` is the one way a grant can be asked for, and the
+answer in Needs You is the second door onto `writeGrants` (the first is
+`PUT /api/agents/:id/grants`). Three rules hold at the doors, never in a
+prompt or a client (T2-2):
+
+- **Revise can only grant less** (C40). `accept_with_changes {area}` is
+  refused unless the area is the one asked for or a folder under it. A wider
+  or sibling area is a `400` that writes nothing — no grant, no override, no
+  `payload.error` — because granting more than was asked is a different
+  decision, and it is made on Agents with the whole credential in view. The
+  owner's session and the local owner token are held to it alike.
+- **The answer carries the prior tier** (C41): `granted.prior_tier`, from the
+  registry at the moment of the write, so a client says "this trades
+  vault-wide titles for one folder" from data rather than inference.
+- **The escalation ceiling is on the record** (C42). Two declines close an
+  area; the third ask is refused by the tool and writes no proposal. It writes
+  a `runs` row, kind `access_ceiling`, and `GET /api/agents` lists those
+  beside the credential (`access_ceilings`), so an agent at the ceiling is
+  visible rather than silent.
+
+The details are [actions.md](actions.md) ("Access requests") and
+[client-api.md](client-api.md).
+
 ## Five roles, and the one that carries a toolset
 
 A credential maps onto one of five roles — `owner`, `assistant`, `agent`,

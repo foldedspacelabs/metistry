@@ -464,12 +464,32 @@ Layers, honest about which carry the load:
    needed with `requests_create`" — **before** the ownership check below
    ever runs, so a brand-new page is refused exactly like an existing one;
    no area grant, not even the assistant's own default bare-vault one,
-   reaches them. `Journal/Plan/`, `Journal/Fold/` and `Journal/Standup/` are
-   each a routine's own reserved subdirectory and are untouched by this
-   rule. The same check runs a second time at the reconciler's bridge
+   reaches them. `Journal/Plan/`, `Journal/Fold/`, `Journal/Standup/` and
+   `Journal/Brief/` are each a machine's own reserved subdirectory and are
+   untouched by this rule (the next one governs three of them). The same
+   check runs a second time at the reconciler's bridge
    (`apps/reconciler/src/paths.ts`'s `writeAllowed`), because a routine's own
    commit (`plan-tomorrow`, the fold's routine half) reaches the vault
    directly and never asks `may()` at all.
+3a. **A routine's own folder** — `Journal/Brief/` (`morning-brief`),
+   `Journal/Standup/` (`standup`), `Journal/Plan/` (`plan-tomorrow`); core's
+   `JOURNAL_ROUTINE_DIRS`. The folder is written under the routine's principal
+   (owner ruling (a), W1), and the assistant's one move there is to fill the
+   pending `prose` slots of a file the routine already wrote (C103, T3-6):
+   the content must equal the file on disk except each
+   `<!-- metistry:prose N -->` line, which becomes one line of prose
+   (`fillProseSlots`). Refused: `Journal/Plan/` outright (Tomorrow's Plan is
+   model-free — `forbidden`); a create (`forbidden` — the assistant can never
+   pre-empt a routine's file); a file whose `source` is not the folder's
+   routine (`forbidden`, owned by whoever it names); a hash that is not the
+   file's now, omitted included (`conflict`, with the hash); any other changed
+   byte, or a slot line that would start a block, hold a comment or a line
+   break (`invalid_request`, naming the line, nothing written). The write
+   carries the routine's name and the reply's turn, is never stamped (the
+   `source` stays the routine's), and each filled line keeps
+   `<!-- metistry:written N -->` so the file says it was written, not
+   retrieved. `Journal/Fold/` is not one of these: the fold's file is the
+   assistant's own write.
 4. **Ownership** (one writer, but not one owner — docs/ops/knowledge-fold.md
    "The guardrail at the tool"). An existing markdown note is refused
    (`forbidden`, "owned by \<source\>; propose instead") unless its

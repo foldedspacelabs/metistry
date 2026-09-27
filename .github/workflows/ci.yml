@@ -6,7 +6,40 @@ on:
     branches: [main]
   pull_request:
 
+# One run per PR (or per main push) at a time: a new push cancels the run it
+# supersedes. Rebases and fix-ups were costing a full run each (2026-09-27:
+# 100 runs in a day tripped the org's Actions spending limit).
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  # Which parts of the tree this push touches. The macOS job bills at 10x the
+  # Linux rate, so it runs only when something it compiles or tests changed.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      macos: ${{ steps.diff.outputs.macos }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: diff
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+          else
+            base="${{ github.event.before }}"
+          fi
+          if ! git cat-file -e "$base" 2>/dev/null; then echo "macos=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          changed=$(git diff --name-only "$base" "${{ github.sha }}")
+          echo "$changed" | sed 's/^/  /'
+          if echo "$changed" | grep -qE '^(apps/macos/|\.github/workflows/ci\.yml|docs/product/design/tokens|ops/scripts/build-design-tokens)'; then
+            echo "macos=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "macos=false" >> "$GITHUB_OUTPUT"
+          fi
+
   checks:
     runs-on: ubuntu-latest
     services:
@@ -84,6 +117,8 @@ jobs:
   # The app itself still targets macOS 14 (Package.swift's `platforms:` sets
   # minos 14.0); this is the toolchain that builds it, not the floor it runs on.
   macos-app:
+    needs: changes
+    if: needs.changes.outputs.macos == 'true'
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4

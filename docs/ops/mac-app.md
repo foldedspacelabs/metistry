@@ -804,8 +804,30 @@ the highlighted row says where you are); **+** (New Capture, ⌘N — dimmed unt
 T5-5's composer registers in `ShellModel.captureActions`); the **Usage gauge**,
 `gauge.medium` in secondary ink, `gauge.high` in primary ink over 90% of a
 spending limit, the warning tint at it, speaking *Usage, $1.84 today, 37% of
-the day's budget*. Its popover is a stand-in with those facts and a way to
-Settings until screen 17 (T5-6). There is no bell (C110).
+the daily spending limit* (components-02 §3's row in C130's words: budgets are
+spending limits). Its popover is Usage (screen 17, below). There is no bell
+(C110).
+
+**Usage — the gauge's popover (screen 17, T5-6; `usage-view.swift`).** 400
+points on `elevated`: *This month* — the amount, *of $60 this month*, a meter,
+*$1.84 today · 8 days left*, and at a limit what the engine is doing about it
+(*Compute stopped at the $60 monthly spending limit* for Stop, C133) with
+**Raise**; *Each day* — one bar per day from the 1st to today in `chart-3`
+(light) / `chart-2` (dark), the peak on the heading, hover for a day's amount,
+one spoken sentence and an `AXChartDescriptor` table for the rotor; *Where it
+went* — actors ranked by this month's spend (the chat turns read *Chat*, a crew
+its name), five then *N more*; one line each for the cache rate, AWS this month
+(*not compute*) and the calls with no price (*count as $0*); then **Spending
+Limits in Settings**. Raise and that link both open Settings on Compute (C138).
+**No projection**: nothing says or draws where the month is heading. It reads
+`UsageStore.compute()` — the gauge's own read, so the two cannot disagree —
+and three named queries through `GET /api/q/:name`: `spend` (the days and the
+cache rate), `spend_by_actor` (*Where it went*, unpriced calls) and
+`aws_costs_daily`, each over the trailing days back to the 1st. It opens on the
+last answer (the toolbar's gauge on first open), asks again every time it
+opens, and keeps an answer a later read fails to replace (C135). Nothing spent
+says *Nothing Spent This Month*; compute unreadable with nothing known says
+*Couldn't Read Spend* with the console's reason and Try Again.
 
 **The menus (C119).** Every shortcut is a menu item, and every menu item is one
 case of `ShellCommand` — the menus, the Keyboard Shortcuts page and the tests

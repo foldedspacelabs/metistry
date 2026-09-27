@@ -49,7 +49,7 @@ export const NOT_IN_THE_KIT = Object.freeze({
 });
 
 /** The named queries the kit reads through `GET /api/q/:name`, one fixture each. */
-export const KIT_QUERIES = Object.freeze(["activity_feed", "agent_presence", "board", "rooms"]);
+export const KIT_QUERIES = Object.freeze(["activity_feed", "agent_presence", "aws_costs_daily", "board", "rooms", "spend", "spend_by_actor"]);
 
 export const Q_ROUTE = "GET /api/q/:name";
 

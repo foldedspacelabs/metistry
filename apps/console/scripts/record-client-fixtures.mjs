@@ -347,6 +347,20 @@ await pool.query(
      ('knowledge-fold', 'routine_run', false, 'vault bridge unreachable', now(), now(), '{"error_signature":"fixture"}'),
      ('morning-brief', 'routine_run', true, NULL, now(), now(), '{"processed":0,"outcome":"silent"}')`,
 );
+// Usage (T5-6, screen 17): what `spend`, `spend_by_actor` and
+// `aws_costs_daily` read. A crew's call on the 1st of this month (so the day
+// chart has two bars whatever day the recorder runs), a routine's, one call
+// nothing could price (`cost_source: unknown`, recorded at $0 — the popover's
+// *count as $0* line), and two days of AWS spend, which is not compute.
+await pool.query(
+  `INSERT INTO runs (ts, component, kind, provider, model, tokens_in, tokens_out, cache_read_tokens, cost_usd, ok, started_at, finished_at, meta) VALUES
+     (date_trunc('month', now()) + interval '12 hours', 'crew:fixtures', 'crew_run', 'openrouter', 'anthropic/claude-sonnet-4', 4200, 610, 3100, 0.018400, true, now(), now(), '{"tier":"deep"}'),
+     (now(), 'standup', 'routine_run', 'lmstudio', 'gemma', 1800, 240, 0, 0.001900, true, now(), now(), '{"outcome":"acted","tier":"default"}'),
+     (now(), 'assistant', 'turn', 'openrouter', 'mistralai/unpriced-fixture', 600, 80, NULL, 0, true, now(), now(), '{"cost_source":"unknown","tier":"default"}')`,
+);
+await pool.query(
+  `INSERT INTO metrics (ts, name, value) VALUES (date_trunc('month', now()) + interval '12 hours', 'aws.cost_usd', 1.37), (now(), 'aws.cost_usd', 0.41)`,
+);
 
 await pool.query(
   `INSERT INTO knowledge_files (path, title, description, draft, status, mtime, indexed_at) VALUES
@@ -566,6 +580,10 @@ const REQUESTS = [
   ["GET /api/q/rooms", () => ({ path: "/api/q/rooms" })],
   ["GET /api/q/agent_presence", () => ({ path: "/api/q/agent_presence" })],
   ["GET /api/q/activity_feed", () => ({ path: "/api/q/activity_feed?hours=24" })],
+  // Usage (T5-6): the month's days, who spent it, and AWS beside it
+  ["GET /api/q/spend", () => ({ path: "/api/q/spend?days=31" })],
+  ["GET /api/q/spend_by_actor", () => ({ path: "/api/q/spend_by_actor?days=31" })],
+  ["GET /api/q/aws_costs_daily", () => ({ path: "/api/q/aws_costs_daily?days=31" })],
   ["GET /api/messages", () => ({ path: "/api/messages?limit=20" })],
 
   ["POST /api/devices/:id/revoke", () => ({ path: `/api/devices/${ids.session}/revoke`, body: {} })],

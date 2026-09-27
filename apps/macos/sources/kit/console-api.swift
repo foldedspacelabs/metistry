@@ -735,6 +735,24 @@ public struct ConsoleAPI: Sendable {
         await get("/api/q/agent_presence", ["limit": limit.map(String.init)])
     }
 
+    // MARK: Usage
+
+    /// `GET /api/q/spend` — the ledger's cost per day, for Usage's day chart
+    /// and cache rate. `days` is the trailing window (the query's default 31).
+    public func spend(days: Int? = nil) async -> Result<SpendRows, ConsoleError> {
+        await get("/api/q/spend", ["days": days.map(String.init)])
+    }
+
+    /// `GET /api/q/spend_by_actor` — *Where it went*.
+    public func spendByActor(days: Int? = nil) async -> Result<SpendByActorList, ConsoleError> {
+        await get("/api/q/spend_by_actor", ["days": days.map(String.init)])
+    }
+
+    /// `GET /api/q/aws_costs_daily` — AWS this month, which is not compute.
+    public func awsCostsDaily(days: Int? = nil) async -> Result<AwsCostDays, ConsoleError> {
+        await get("/api/q/aws_costs_daily", ["days": days.map(String.init)])
+    }
+
     /// `PUT /api/agents/:id/autonomy` — "the one route that may widen". The body
     /// **replaces** the record, so a caller reads, merges and writes; the reply
     /// carries `widened`, which is what a §3.17 confirmation has to quote.

@@ -1150,6 +1150,17 @@ engine without the engine touching the Keychain. For one release the engine
 also reads the older `METISTRY_<NAME>` line T4-3 filled from the same secret,
 so `migrate-scope`'s rewrite never cuts off a running engine.
 
+It delivers the same way **every secret a sync-read connection lists** (T4-24)
+— a connection whose type's provider is product code a sync reads, like
+Linear's `linear_api_key` — so the console's sync can use it. Delivering it is
+not sending it: the sync never puts the value on a request itself; core's
+egress door fills `{{ secret.<name> }}` for a host on the secret's *Sent only
+to* list, when the owner granted it to `connection:<name>`, or refuses
+(`docs/ops/connections.md`, *A sync reading its connection*). An MCP
+connection's secrets are never delivered: the pool fills them in the process
+that dials. Run `sync --to env` again after adding such a connection, then
+restart the console.
+
 **`sync --to env` mints the generated ones.** A secret that exists in
 neither the Keychain nor `.env` is normally reported ("not in the Keychain,
 left as they are") — inventing a GitHub PAT would be nonsense. The

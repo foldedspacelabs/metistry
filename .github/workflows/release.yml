@@ -193,10 +193,11 @@ jobs:
   # npm, via Trusted Publishing (OIDC) — no token anywhere, repo or run log.
   # Each package is configured once on npmjs.com (Settings -> Trusted
   # Publishing: org/user foldedspacelabs, repo metistry, workflow
-  # release.yml — docs/ops/owner-actions.md has the one-time bootstrap a
-  # package needs before that page will let you). Skipped (not failed) for
-  # a package that isn't configured yet, or on a fork: the registry 404s/403s
-  # the publish and this job says so rather than failing the release.
+  # release.yml — docs/ops/releases.md, "Publishing to npm", has the
+  # one-time bootstrap a package needs before that page will let you).
+  # Skipped (not failed) for a package that isn't configured yet, or on a
+  # fork: the registry 404s/403s the publish and this job says so rather
+  # than failing the release.
   npm:
     needs: verify
     runs-on: ubuntu-latest
@@ -247,7 +248,7 @@ jobs:
             set -e
             if [ "$status" -ne 0 ]; then
               if grep -qE 'code E40[0-9]|HTTP 4[0-9]{2}' /tmp/npm-publish.log; then
-                echo "::notice::npm publish skipped for $name — trusted publishing isn't configured for it yet, or the registry otherwise rejected it with a 4xx (see the log above; docs/ops/owner-actions.md has the setup). The release's other assets are unaffected."
+                echo "::notice::npm publish skipped for $name — trusted publishing isn't configured for it yet, or the registry otherwise rejected it with a 4xx (see the log above; docs/ops/releases.md, "Publishing to npm", has the setup). The release's other assets are unaffected."
                 continue
               fi
               exit "$status"

@@ -799,5 +799,89 @@
       "message": "\"mcp__brain__tasks_comment\" is not in this run's tool list",
       "at": "apps/assistant/src/tools.ts:149 — the CALLER, never the door"
     }
+  },
+  {
+    "id": "connections_call.not_granted",
+    "door": "connections_call",
+    "who": "agent",
+    "verb": "act",
+    "resource": {
+      "kind": "connection",
+      "door": "connections_call",
+      "name": "github",
+      "offered": true
+    },
+    "code": "not_found",
+    "reason": "connection_required",
+    "tell": "hide",
+    "message": "no such connection: github",
+    "before": {
+      "code": "not_found",
+      "message": "no such connection: github",
+      "at": "new door (T4-8b) — the proxy's lazy pair did not exist; an un-lent connection answers as a name that was never configured"
+    }
+  },
+  {
+    "id": "connections_call.not_offered",
+    "door": "connections_call",
+    "who": "lent",
+    "verb": "act",
+    "resource": {
+      "kind": "connection",
+      "door": "connections_call",
+      "name": "work-jira",
+      "offered": false
+    },
+    "code": "not_found",
+    "reason": "connection_required",
+    "tell": "hide",
+    "message": "no such connection: work-jira",
+    "before": {
+      "code": "not_found",
+      "message": "no such connection: work-jira",
+      "at": "new door (T4-8b) — granted, but the owner has not offered it to agents: the same answer as absence"
+    }
+  },
+  {
+    "id": "connections_list.crew_not_in_uses",
+    "door": "connections_list",
+    "who": "crew",
+    "verb": "act",
+    "resource": {
+      "kind": "connection",
+      "door": "connections_list",
+      "name": "github",
+      "offered": true
+    },
+    "code": "forbidden",
+    "reason": "not_in_uses",
+    "tell": "refuse",
+    "message": "connections_list is not in this crew's toolset — writer holds knowledge, requests (`uses:` in its manifest, a protected path in the user's hand: docs/ops/crews.md). Report what you needed instead of retrying.",
+    "before": {
+      "code": "forbidden",
+      "message": "connections_list is not in this crew's toolset — writer holds knowledge, requests (`uses:` in its manifest, a protected path in the user's hand: docs/ops/crews.md). Report what you needed instead of retrying.",
+      "at": "new door (T4-8b) — a crew without the `connections` group, refused in the P2 toolset sentence"
+    }
+  },
+  {
+    "id": "connections_call.capture_token",
+    "door": "connections_call",
+    "who": "tool",
+    "verb": "act",
+    "resource": {
+      "kind": "connection",
+      "door": "connections_call",
+      "name": "github",
+      "offered": true
+    },
+    "code": "forbidden",
+    "reason": "role_required",
+    "tell": "hide",
+    "message": "",
+    "before": {
+      "code": "forbidden",
+      "message": null,
+      "at": "new door (T4-8b) — the capture token is not an agent and reaches no connection"
+    }
   }
 ]

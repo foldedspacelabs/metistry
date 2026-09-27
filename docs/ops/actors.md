@@ -214,6 +214,7 @@ the door does not do.
 | action `comment` | Work · Write **and** Artifacts · Write | `comment` → *Comment*. Its schema takes a `work_id` or an `artifact_id` (C53). |
 | action `capture` | Inbox · Write | `capture` → *Capture* |
 | `requests_create`, `request_access` | **not in the table** | Asking is not a power. Every credential may ask, and asking grants nothing (`mayUseTool`). |
+| `connections_list`, `connections_call` | **not in the table** as tools | The proxy's lazy pair (§2.6, T4-8b) is the door, not a power: what it reaches is drawn as **one row per connection**, its tools by group and mode (Reads → Read, Changes things and Starts an agent → Write, Ask First ⏱) — `describePermissions`' connection rows. |
 
 Every name in `RULED_TOOLS` and every `ACTION_KINDS` kind appears exactly once
 above. The table is data beside `RULED_TOOLS` — `TOOL_PERMISSION_CELLS` and

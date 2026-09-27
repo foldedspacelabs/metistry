@@ -122,7 +122,19 @@ const captureTool: Principal = {
   source: "registry",
 };
 
-const WHO: Record<string, Principal> = { owner, assistant, narrowed, agent, browser, crew, ungranted, tool: captureTool };
+/**
+ * An agent the owner has lent two connections (T4-8b): `github`, offered to
+ * agents, and `work-jira`, which the owner has NOT offered — so the grant
+ * alone reaches it no more than no grant would.
+ */
+const lent: Principal = {
+  id: "scout",
+  role: "agent",
+  scope: { tier: "none", areas: [], queries: false, projects: [], connections: ["github", "work-jira"] },
+  source: "registry",
+};
+
+const WHO: Record<string, Principal> = { owner, assistant, narrowed, agent, browser, crew, ungranted, lent, tool: captureTool };
 
 describe("the refusal catalogue is the committed golden file", () => {
   const golden = JSON.parse(readFileSync(GOLDEN, "utf8")) as GoldenEntry[];

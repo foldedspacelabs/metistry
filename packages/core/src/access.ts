@@ -347,6 +347,16 @@ export interface Scope {
   /** `null` = every project (the internal rule: hub assistant, empty list). */
   readonly projects: readonly string[] | null;
   readonly autonomy?: ActionAutonomy | undefined;
+  /**
+   * **The connections this credential is granted**, by name (§2.6, T4-8b):
+   * what an agent or a crew may reach through the proxy (`connections_list`,
+   * `connections_call`), beside its other grants and resolved by the host at
+   * authentication — never from a request. Absent is the empty list: a grant
+   * is something the owner wrote down. The assistant needs none (C115: a
+   * connection that is not offered to agents is the assistant's and the
+   * syncs'), and the owner has everything.
+   */
+  readonly connections?: readonly string[] | undefined;
 }
 
 export interface Principal {
@@ -386,6 +396,11 @@ export interface Principal {
  *   a refusal (§3.2): `role_required` is "your kind of principal may never
  *   do this", while this one is "the manifest that defines this crew did not
  *   name the group", which the user changes by editing that file.
+ * - `connection_required` (T4-8b) — a connection this credential was not
+ *   granted, or one the owner has not offered to agents (§2.6). It HIDES:
+ *   the answer is the door's own "no such connection", because a refusal
+ *   that could be told from absence would say which connections the owner
+ *   holds to a caller that was never lent them.
  */
 export type Reason =
   | "scope_required"
@@ -397,7 +412,8 @@ export type Reason =
   | "not_member"
   | "not_exposed"
   | "not_knowledge"
-  | "not_in_uses";
+  | "not_in_uses"
+  | "connection_required";
 
 export const REASONS: readonly Reason[] = [
   "scope_required",
@@ -410,6 +426,7 @@ export const REASONS: readonly Reason[] = [
   "not_exposed",
   "not_knowledge",
   "not_in_uses",
+  "connection_required",
 ];
 
 /**
@@ -491,13 +508,15 @@ export type KnowledgeDoor = "read" | "list" | "grep" | "links" | "write" | "reso
 export type QueryDoor = "queries_run" | "console_query";
 export type ProjectDoor = "task" | "task_create";
 export type ConsoleDoor = "console_agent" | "console_management";
+/** The proxy's two doors (§2.6's lazy pair on `/mcp`). */
+export type ConnectionDoor = "connections_list" | "connections_call";
 
 export type Resource =
   /**
    * May this principal use this tool AT ALL, before any argument is read —
    * the argument-free half of every gate. `propose_action`'s conditional
    * registration already works this way (SEP-1881's scope-filtered
-   * discovery); this makes the same question askable of all 27 tools, which
+   * discovery); this makes the same question askable of every tool, which
    * is what the enumeration test in `packages/mcp-brain` walks.
    */
   | { readonly kind: "tool"; readonly name: string }
@@ -520,7 +539,18 @@ export type Resource =
   | { readonly kind: "query"; readonly door: QueryDoor; readonly name: string; readonly exposure: "generic" | "route" }
   | { readonly kind: "project"; readonly door: ProjectDoor; readonly slug: string | null }
   | { readonly kind: "action"; readonly door: "propose_action"; readonly action: ActionKind }
-  | { readonly kind: "console"; readonly door: ConsoleDoor; readonly route: string };
+  | { readonly kind: "console"; readonly door: ConsoleDoor; readonly route: string }
+  /**
+   * **One connection, through the proxy** (§2.6, C115; T4-8b). `offered` is
+   * the connection file's `offer_to_agents` — the owner's one switch — and,
+   * like `settled`, the one fact `may` cannot know: the door reads it from
+   * the file and passes it in. An agent or a crew reaches a connection only
+   * when it is offered AND named in the credential's `scope.connections`; a
+   * crew must also hold the `connections` group. What a single TOOL of the
+   * connection may do (Allow · Ask First · Never, and its group) is the
+   * connection file's per-tool policy, held by the proxy itself.
+   */
+  | { readonly kind: "connection"; readonly door: ConnectionDoor; readonly name: string; readonly offered: boolean };
 
 const OK: Decision = { ok: true };
 
@@ -865,6 +895,8 @@ export function may(p: Principal, verb: Verb, r: Resource): Decision {
       if (mode !== "deny") return OK;
       return no("forbidden", "autonomy_required", REFUSAL.autonomy_required(p.id, r.action), { autonomy: { action: r.action, mode: "propose" } });
     }
+    case "connection":
+      return mayConnection(p, r.door, r.name, r.offered);
     case "console":
       // Door B, and both halves HIDE: the console's answer to a credential
       // outside the owner surface is uniform across every route it covers
@@ -965,6 +997,8 @@ export const RULED_TOOLS: ReadonlySet<string> = new Set([
   "agents_delegate",
   "queries_list",
   "queries_run",
+  "connections_list",
+  "connections_call",
   "propose_action",
 ]);
 
@@ -1032,6 +1066,7 @@ const cell = (resource: PermissionResourceKind, column: PermissionColumn, entrie
 const at = (resource: PermissionResourceKind, column: PermissionColumn, entries: PermissionCellEntries, projectScoped = false): ToolPlacement =>
   Object.freeze({ placement: "cell" as const, cell: cell(resource, column, entries), projectScoped });
 const ASKING_IS_NOT_A_POWER = "asking is not a power: every credential may ask, and asking grants nothing (mayUseTool)";
+const A_CONNECTION_IS_ITS_OWN_ROW = "a connection is drawn as its own row, one per connection the actor reaches, its tools by group and mode (describePermissions' connection rows) — the proxy's two tools are the door, not a power of their own";
 
 /**
  * **Every ruled tool → its one placement**, in docs/ops/actors.md's order.
@@ -1064,6 +1099,8 @@ export const TOOL_PERMISSION_CELLS: Readonly<Record<string, ToolPlacement>> = Ob
   queries_list: at("queries", "read", V.named),
   queries_run: at("queries", "read", V.named),
   agents_delegate: at("agents", "write", V.delegate),
+  connections_list: Object.freeze({ placement: "none" as const, why: A_CONNECTION_IS_ITS_OWN_ROW }),
+  connections_call: Object.freeze({ placement: "none" as const, why: A_CONNECTION_IS_ITS_OWN_ROW }),
   propose_action: Object.freeze({ placement: "actions" as const }),
   requests_create: Object.freeze({ placement: "none" as const, why: ASKING_IS_NOT_A_POWER }),
   request_access: Object.freeze({ placement: "none" as const, why: ASKING_IS_NOT_A_POWER }),
@@ -1148,6 +1185,15 @@ function mayUseTool(p: Principal, name: string): Decision {
       // grant.
       return p.role === "assistant" || queries ? OK : no("forbidden", "queries_required", REFUSAL.queries_required(p.id));
 
+    // The proxy's lazy pair (§2.6, T4-8b). No tool-level gate, like the
+    // task tools: which connections a credential reaches is decided per
+    // connection (`mayConnection`), so a principal granted none sees the two
+    // tools and finds nothing behind them. A crew still needs the
+    // `connections` group — `mayToolset` above has already asked.
+    case "connections_list":
+    case "connections_call":
+      return OK;
+
     case "propose_action":
       // Lazy by credential: nothing to offer, nothing listed. The door uses
       // `.ok` to decide whether to REGISTER, so this refusal is never
@@ -1163,6 +1209,36 @@ function mayUseTool(p: Principal, name: string): Decision {
       return hidden("forbidden", "role_required");
   }
 }
+
+/**
+ * **May this principal reach this connection through the proxy?** (§2.6,
+ * C115; T4-8b.) Three things, in order, each a rule rather than a sentence:
+ *
+ * 1. **The run's own allowlist.** A crew holds the lazy pair only when its
+ *    manifest's `uses` names the `connections` group — asked here as well as
+ *    at the door, so the answer cannot depend on which question was asked.
+ * 2. **The assistant reaches every connection.** C115: with the offer
+ *    switch off, "only Metistry uses the connection (Metis, syncs)" — so the
+ *    switch is about lending, and the assistant is not borrowing.
+ * 3. **Everyone else needs two things the owner wrote down**: the
+ *    connection offered to agents (`offer_to_agents`, the file) AND its name
+ *    in this credential's `scope.connections` (the grant). Either missing is
+ *    the same answer as a connection that does not exist — it HIDES, because
+ *    which connections the owner holds is not a borrower's to learn.
+ *
+ * The capture token is not an agent and reaches none.
+ */
+function mayConnection(p: Principal, door: ConnectionDoor, name: string, offered: boolean): Decision {
+  const inToolset = mayToolset(p, door);
+  if (!inToolset.ok) return inToolset;
+  if (p.role === "assistant") return OK;
+  if (p.role === "tool") return hidden("forbidden", "role_required");
+  if (offered && (p.scope.connections ?? []).includes(name)) return OK;
+  return hidden("not_found", "connection_required", NO_SUCH_CONNECTION(name));
+}
+
+/** The proxy's one answer for a connection the caller cannot reach — whatever the reason, and the same as a name that was never configured. */
+export const NO_SUCH_CONNECTION = (name: string): string => `no such connection: ${name}`;
 
 /**
  * **The one rule about naming an area** (ruled 2026-09-19 B, and the

@@ -2,6 +2,7 @@
 // One discriminated union over `type`; CI and `metistry doctor` both
 // validate against this, so the schema is the contract.
 
+import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { VAULT_ROOT_AREA } from "./instance-layout.js";
 import { dataPolicySchema, knowledgePrefix } from "./data-policy.js";
@@ -10,6 +11,7 @@ import { actionTableSchema, AUTONOMY_LEVELS } from "./actions.js";
 import { connectionTypeShape, refineConnectionType } from "./connections.js";
 import { providerSchema } from "./compute.js";
 import { modelRefIssue } from "./model-ref.js";
+import { crewModelIssue } from "./crew-model.js";
 import { manifestScheduleSchema } from "./schedule.js";
 import { EFFORTS } from "./tiers.js";
 
@@ -267,7 +269,14 @@ const crewUse = z.string().superRefine((u, ctx) => {
   });
 });
 
-export const CREW_MODELS = ["haiku", "sonnet", "opus"] as const;
+// The crew `model:` forms live in `crew-model.ts` (compute.ts needs them and
+// this module imports compute.ts); re-exported so callers keep one import.
+export { CREW_MODELS, SAME_AS_ASSISTANT, crewModelIssue, isLegacyCrewModel, type CrewModelAlias } from "./crew-model.js";
+
+const crewModel = z.string().superRefine((v, ctx) => {
+  const why = crewModelIssue(v);
+  if (why) ctx.addIssue({ code: "custom", message: why });
+});
 
 // An agent id, agent-manifest-side: same shape the console's registry uses
 // for `agents.id` (AGENT_ID_RE) — a crew name, or another agent this one may
@@ -309,7 +318,14 @@ export const agentManifest = base
     type: z.literal("agent"),
     /** Grouping only (`agents/<area>/`); hierarchy is `manages`, not depth (plan Terminology). */
     area: name.optional(),
-    model: z.enum(CREW_MODELS),
+    /**
+     * `<provider>/<model-id>` (a model from Your Models, pinned to where it
+     * runs — C128, C132), `same_as_assistant`, or a legacy alias read for one
+     * release (`crewModelIssue`). What a run resolves it to is
+     * `resolveCrewAssignment` (compute.ts); what the actor says it is,
+     * `crewCompute` (actor.ts) — one rule, two readers.
+     */
+    model: crewModel,
     /**
      * Reasoning effort per run (the SDK's `effort`), the other half of the
      * tier pair (core's `tiers.ts`). Default **low**: the crew shape that
@@ -339,6 +355,58 @@ export const agentManifest = base
   .strict();
 
 export type AgentManifest = z.infer<typeof agentManifest>;
+
+// --- a crew's definition FILE ------------------------------------------------
+//
+// `agents/<area>/<name>.md`: YAML frontmatter (the manifest above), then the
+// operating prompt. Parsed here — not in the console that loads it — because
+// two hands write and read the same file: the console's crew registry, and
+// `metistry agents define` (M12), which must refuse exactly what the console
+// would refuse BEFORE it writes, or the owner's edit would land and then be
+// dropped at the next sync with a log line nobody reads.
+
+/** Frontmatter, then the body. */
+export const CREW_FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)([\s\S]*)$/;
+/** The longest operating prompt a crew file may carry. */
+export const MAX_CREW_PROMPT_CHARS = 32_000; // limit: fixed — a crew manifest longer than this is a malformed file; refusing it whole is the point
+
+export interface ParsedCrewDefinition {
+  readonly manifest: AgentManifest;
+  /** The body below the frontmatter, trimmed: the crew's operating prompt. */
+  readonly prompt: string;
+}
+
+/**
+ * Parse one crew definition file. Throws with `where:` on any miss — a
+ * malformed manifest is refused whole, never partially read. `expected`
+ * (from the path) must agree with the frontmatter: the name IS the filename,
+ * and an `area` key, when present, IS the directory (absent, it is filled
+ * from the directory).
+ */
+export function parseCrewDefinition(text: string, where: string, expected?: { readonly name: string; readonly area: string }): ParsedCrewDefinition {
+  const m = CREW_FRONTMATTER.exec(text);
+  if (!m) throw new Error(`${where}: expected YAML frontmatter (--- … ---) followed by the operating prompt`);
+  let raw: unknown;
+  try {
+    raw = parseYaml(m[1]!);
+  } catch (err) {
+    throw new Error(`${where}: frontmatter is not YAML: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) throw new Error(`${where}: frontmatter must be a mapping`);
+  const withArea = expected && (raw as { area?: unknown }).area === undefined ? { ...(raw as object), area: expected.area } : raw;
+  const r = validateManifest(withArea);
+  if (!r.ok) throw new Error(`${where}: invalid manifest: ${r.errors.join("; ")}`);
+  if (r.manifest.type !== "agent") throw new Error(`${where}: type must be agent (got ${r.manifest.type})`);
+  const manifest = r.manifest;
+  if (expected) {
+    if (manifest.name !== expected.name) throw new Error(`${where}: manifest name "${manifest.name}" must match the filename "${expected.name}"`);
+    if (manifest.area !== expected.area) throw new Error(`${where}: manifest area "${manifest.area}" must match the directory "${expected.area}"`);
+  }
+  const prompt = m[2]!.trim();
+  if (!prompt) throw new Error(`${where}: the body below the frontmatter is the crew's operating prompt and may not be empty`);
+  if (prompt.length > MAX_CREW_PROMPT_CHARS) throw new Error(`${where}: operating prompt exceeds ${MAX_CREW_PROMPT_CHARS} characters`);
+  return { manifest, prompt };
+}
 
 export const targetManifest = base
   .extend({

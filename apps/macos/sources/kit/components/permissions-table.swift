@@ -88,7 +88,7 @@ public enum PermissionWords {
 
 // MARK: - The actor model's rows, as the wire carries them (F-2)
 
-public struct PermissionResource: Decodable, Sendable, Equatable {
+public struct PermissionResource: Codable, Sendable, Equatable {
     /// `knowledge · work · artifacts · inbox · queries · agents`, or `connection`.
     public let kind: String
     /// A connection's name.
@@ -102,22 +102,52 @@ public struct PermissionResource: Decodable, Sendable, Equatable {
     public var isConnection: Bool { kind == "connection" }
 }
 
-public enum PermissionProvenance: Decodable, Sendable, Equatable {
-    /// How the actor holds it by default — unmarked.
-    case base(source: String)
+public enum PermissionProvenance: Codable, Sendable, Equatable {
+    /// How the actor holds it by default — unmarked. `source` is `registry`,
+    /// `environment` (the assistant's configuration, never a grant — C52) or
+    /// `manifest`, with the crew manifest's path in `manifest` (core's
+    /// `GrantSource`: `{manifest: <path>}` on the wire).
+    case base(source: String, manifest: String? = nil)
     /// Approved in Needs You; the request, when there is one.
     case approved(proposalID: Int?)
     /// Held only while this routine runs.
     case routine(String)
 
     enum CodingKeys: String, CodingKey { case kind, source, proposalId, routine }
+    private enum ManifestKeys: String, CodingKey { case manifest }
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         switch try c.decode(String.self, forKey: .kind) {
         case "approved": self = .approved(proposalID: try c.decodeIfPresent(Int.self, forKey: .proposalId))
         case "routine": self = .routine(try c.decode(String.self, forKey: .routine))
-        default: self = .base(source: try c.decodeIfPresent(String.self, forKey: .source) ?? "")
+        default:
+            if let manifest = try? c.nestedContainer(keyedBy: ManifestKeys.self, forKey: .source) {
+                self = .base(source: "manifest", manifest: try manifest.decode(String.self, forKey: .manifest))
+            } else {
+                self = .base(source: try c.decodeIfPresent(String.self, forKey: .source) ?? "")
+            }
+        }
+    }
+
+    /// The wire's shape back (`AgentRecord` is `Codable`, and carries these rows).
+    public func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .base(let source, let manifest):
+            try c.encode("base", forKey: .kind)
+            if let manifest {
+                var m = c.nestedContainer(keyedBy: ManifestKeys.self, forKey: .source)
+                try m.encode(manifest, forKey: .manifest)
+            } else {
+                try c.encode(source, forKey: .source)
+            }
+        case .approved(let id):
+            try c.encode("approved", forKey: .kind)
+            try c.encode(id, forKey: .proposalId)
+        case .routine(let name):
+            try c.encode("routine", forKey: .kind)
+            try c.encode(name, forKey: .routine)
         }
     }
 
@@ -131,7 +161,7 @@ public enum PermissionProvenance: Decodable, Sendable, Equatable {
     }
 }
 
-public struct PermissionEntry: Decodable, Sendable, Equatable {
+public struct PermissionEntry: Codable, Sendable, Equatable {
     /// What a client matches on; never shown.
     public let key: String
     /// The words every surface prints.
@@ -148,7 +178,7 @@ public struct PermissionEntry: Decodable, Sendable, Equatable {
     }
 }
 
-public struct PermissionRow: Decodable, Sendable, Equatable {
+public struct PermissionRow: Codable, Sendable, Equatable {
     public let resource: PermissionResource
     /// The resource in words: *Knowledge*, or the connection's name.
     public let label: String

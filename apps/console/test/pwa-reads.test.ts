@@ -18,7 +18,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { listAgents } from "../src/agents.js";
-import { agentAutonomy, MODE_LABEL as CLI_MODE_LABEL, renderAutonomy } from "../../../packages/cli/src/agents.js";
+import { permissionRowText, type PermissionRow } from "@foldedspacelabs/metistry-core";
+import { agentAutonomy, MODE_LABEL as CLI_MODE_LABEL, renderAutonomy, renderPermissions } from "../../../packages/cli/src/agents.js";
 import { createUi } from "../../../packages/cli/src/ui.js";
 
 const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
@@ -141,6 +142,81 @@ describe("the PWA prints the effective action table the CLI prints (§2.17)", ()
     expect(pwa.actionTableRows(undefined)).toBeNull();
     expect(pwa.actionTableRows({ autonomy: { level: "propose" } })).toBeNull();
     expect(pwa.actionTableHtml({})).toContain("actions: unavailable");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The permissions table (T4-6): the CLI, the console and MetistryKit print one table
+// ---------------------------------------------------------------------------
+
+/**
+ * The table each agent in the recorded `GET /api/agents` fixture prints —
+ * identical to `oneTable` in apps/macos/tests/kit/permissions-table-tests.swift,
+ * which holds MetistryKit to the same fixture in the same strings.
+ */
+const ONE_TABLE: Record<string, string[][]> = {
+  cursor: [
+    ["Knowledge", "Projects, Areas/Ops (approved in Needs You · #4)", "—"],
+    ["Work", "metistry", "Create, Update, Comment"],
+    ["Artifacts", "metistry", "Publish, Comment, Review"],
+    ["Inbox", "—", "Capture"],
+    ["Queries", "Named queries", "—"],
+  ],
+  "old-laptop": [["Inbox", "—", "Capture"]],
+  opencode: [
+    ["Work", "—", "Update ⏱, Comment ⏱, Dispatch ⏱"],
+    ["Artifacts", "—", "Comment ⏱"],
+    ["Inbox", "—", "Capture"],
+  ],
+  assistant: [
+    ["Knowledge", "The whole vault", "The whole vault"],
+    ["Work", "All tasks", "Create, Update, Comment"],
+    ["Artifacts", "All", "Publish, Comment, Review"],
+    ["Inbox", "—", "Capture"],
+    ["Queries", "Named queries", "—"],
+    ["Agents", "—", "Delegate"],
+  ],
+  researcher: [["Knowledge", "Projects, Resources", "—"]],
+};
+
+const perms = lifted<{ permissionRowText: (row: unknown) => string[]; permissionsTableHtml: (rows: unknown) => string }>(
+  ["PERMISSION_EMPTY_CELL", "permissionEntryText", "permissionCellText", "permissionRowText", "permissionsTableHtml"],
+  "{ permissionRowText, permissionsTableHtml }",
+);
+
+describe("the permissions table: the CLI, the console and MetistryKit print one table (T4-6)", () => {
+  const fixture = JSON.parse(read("../../macos/tests/kit/fixtures/get-api-agents.json")) as { body: { agents: { id: string; revoked: boolean; permissions: PermissionRow[] }[] } };
+
+  it("core, the console's panel and `metistry agents list` say every recorded row in the same words — the strings the Kit's test holds it to", () => {
+    expect(fixture.body.agents.map((a) => a.id).sort()).toEqual(Object.keys(ONE_TABLE).sort());
+    const ui = createUi({ noColor: true, env: { NO_COLOR: "1" } });
+    for (const a of fixture.body.agents) {
+      const core = a.permissions.map((r) => [...permissionRowText(r)]);
+      expect(core, a.id).toEqual(ONE_TABLE[a.id]);
+      expect(a.permissions.map(perms.permissionRowText), a.id).toEqual(core);
+      // the CLI prints each row's cells, padded into columns, in these words
+      const cli = renderPermissions(a.permissions, ui).split("\n").slice(2);
+      expect(cli.map((l) => l.trim().split(/\s{2,}/)), a.id).toEqual(core);
+      // and the panel's markup carries each cell, escaped
+      const html = perms.permissionsTableHtml(a.permissions);
+      for (const [label, readCell, writeCell] of core) expect(html, a.id).toContain(`<tr><th scope="row">${esc(label)}</th><td>${esc(readCell)}</td><td>${esc(writeCell)}</td></tr>`);
+    }
+  });
+
+  it("says holding nothing, and a console too old to send rows, rather than drawing an empty table", () => {
+    expect(perms.permissionsTableHtml([])).toContain("holds nothing");
+    expect(perms.permissionsTableHtml(undefined)).toContain("permissions: unavailable");
+  });
+
+  it("reads the rows from the server rather than deriving them — no tier, grant or tool rule in the panel", () => {
+    expect(SRC).toContain("permissionsTableHtml(a.permissions)");
+    const code = SRC.replace(/^\s*\/\/.*$/gm, ""); // what the panel RUNS; its comments may name core's functions
+    expect(code).not.toMatch(/\b(RULED_TOOLS|TOOL_PERMISSION_CELLS|CREW_NEVER_TOOLS|describePermissions|mayUseTool)\b/);
+  });
+
+  it("escapes what an agent could have written into a label", () => {
+    const html = perms.permissionsTableHtml([{ resource: { kind: "connection", name: "x" }, label: "<img src=x onerror=alert(1)>", read: [], write: [] }]);
+    expect(html).not.toContain("<img");
   });
 });
 

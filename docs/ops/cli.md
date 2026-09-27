@@ -728,12 +728,23 @@ metistry agents list --json
 
 ```
 ✓ Researcher  researcher   seen 2026-09-20
-    scope  an agent · folders: Areas/Health · queries, projects: alpha, autonomy: propose
+    scope  an agent · folders: Areas/Health, Areas/Ops · queries, projects: alpha, autonomy: propose
     from   the registry — the owner's own hand, durable
+               Read                                                  Write
+    ─────────  ────────────────────────────────────────────────────  ───────────────────────────────────
+    Knowledge  Areas/Health, Areas/Ops (approved in Needs You · #4)  —
+    Work       alpha                                                 Create, Update, Comment, Dispatch ⏱
+    Artifacts  alpha                                                 Publish, Comment, Review
+    Inbox      —                                                     Capture
+    Queries    Named queries                                         —
     asked  Areas/Finance — answer it in Needs You (request #42)
 ⚠ Devin       devin        pending
     scope  an agent · titles · autonomy: observe
     from   the registry — the owner's own hand, durable
+               Read         Write
+    ─────────  ───────────  ───────
+    Knowledge  Titles only  —
+    Inbox      —            Capture
 ```
 
 Every registered agent and what its credential holds, as one **triple** —
@@ -754,6 +765,61 @@ that widen one are the console's Agents panel and answering an
 
 An agent waiting on an answer shows what it asked for and which request to
 answer. `--json` prints the rows as the console sent them, colour off.
+
+**The permissions table** (T4-6) is each agent's `permissions` from `GET
+/api/agents` — Resource × Read × Write, drawn by `describePermissions` in `core`,
+which asks the same `may()` every door asks — printed in core's words
+(`permissionRowText`): an empty cell is `—` and **anything not listed is not
+granted**. `⏱` is an action the owner answers first; an area approved in Needs
+You says so, with its request. The console's Agents panel and the Mac app print
+the same strings, held to it by a test ([actors.md](actors.md)). A revoked row
+draws no table: it holds nothing.
+
+## A crew's definition: `metistry agents define`
+
+```sh
+metistry agents define scout                                   # where it is, what it runs on, its sha256
+metistry agents define scout --model openrouter/anthropic/claude-sonnet-5 --effort medium
+metistry agents define scout --prompt-file scout.md --if-sha256 "$SHA"
+echo "You triage the inbox." | metistry agents define triage --area ops --model same_as_assistant --prompt-file -
+metistry agents define researcher --model same_as_assistant    # a shipped crew: writes the instance's own copy
+```
+
+**M12** (§2.2 of the plan): a crew's definition is one file,
+`.metistry/agents/<area>/<id>.md` — its frontmatter and its operating prompt —
+and it says how an actor behaves, so it is a §4.7 protected path in **your hand
+alone**. The assistant can never write it (A4), and the console only reads it
+(`GET /api/agents/:id/definition`); this verb is the write, and the Mac app's
+definition editor is a client of it.
+
+- It edits what the editor edits: `--prompt-file` (the operating prompt; `-`
+  reads stdin), `--model` and `--effort` (one dropdown, C128), and
+  `--description`. **Every other line of the file is kept as it was**, comments
+  included — `uses`, `scope`, `projects` and `autonomy` are what the crew may
+  reach, and widening an actor is an edit to the file by hand, never a flag.
+- `--model` is `<provider>/<model-id>` or `same_as_assistant` (the assistant's
+  default tier, model and effort — never the router). The legacy `haiku |
+  sonnet | opus` are still read, through `compute.yaml`'s `assignments.crews`,
+  for one release; this verb never writes one ([actors.md](actors.md), *Crew
+  compute*).
+- A **shipped** crew (`seed/agents/<area>/<id>.md`) is the base an edit starts
+  from, and the result is the instance's own copy, which then wins by name. A
+  **new** crew needs `--area`, `--model` and `--prompt-file`, and starts holding
+  no tools and no scope.
+- The result is read the way the console reads it (core's
+  `parseCrewDefinition`) **before** anything is written: an edit the console
+  would refuse — an empty prompt, a model that is not one, a name that is not
+  the filename — is refused here, whole, and nothing is written.
+- `--if-sha256 <hex>` is the stale check: the hash `GET
+  /api/agents/:id/definition` answered with. A file that changed since is
+  refused (`stale: …`) rather than overwritten.
+- `assistant` is refused: its definition is `identity.yaml` (`metistry identity
+  set`), the root `CLAUDE.md` and `.metistry/assistant-prompt.md`.
+- With no edit flags it is a read. It writes through the reconciler as `user`
+  (the instance repo's sole committer), or directly when no reconciler is
+  configured; the console re-reads crews every `METISTRY_CREWS_SYNC_S` (five
+  minutes) and at its next start. `--dry-run` prints the plan; `--json` prints
+  `{id, area, path, from, sha256_before, sha256, model, effort, changed}`.
 
 ## How much room an agent has: `metistry agents autonomy`
 

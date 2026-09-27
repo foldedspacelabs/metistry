@@ -49,6 +49,8 @@ import { INBOX_PREFIX, vaultSink } from "@foldedspacelabs/metistry-mcp-brain";
 import { makeServer } from "../dist/server.js";
 import * as authStore from "../dist/auth-store.js";
 import * as agents from "../dist/agents.js";
+import { CrewRegistry } from "../dist/crews.js";
+import { assistantPromptFiles, loadAssistantDefinition } from "../dist/actors.js";
 import { loadRules } from "../dist/router.js";
 import { TargetRegistry } from "../dist/dispatch.js";
 import { loadPublicIdentity } from "../dist/identity.js";
@@ -162,6 +164,11 @@ await queries.loadDir(join(REPO_ROOT, "seed/queries"));
 const targets = new TargetRegistry({ env: { METISTRY_GITHUB_WRITE_TOKEN: "fixture-not-a-token", METISTRY_GITHUB_DISPATCH_REPO: "example/fixtures" }, fetchFn: fakeFetch });
 await targets.loadDir(join(REPO_ROOT, "targets"));
 
+// the shipped crew, loaded as the console loads it: an actor with a definition
+// (T4-6). Synced after the seeded rows below, so its audit rows come after them
+// in the ledger and the runs export still opens on the turn.
+const crews = new CrewRegistry(pool, [join(REPO_ROOT, "seed/agents")], undefined, { productDir: REPO_ROOT, instanceDir });
+
 const localOwnerToken = mintToken();
 const policy = { idleDays: 30, maxDays: 365 };
 const server = makeServer(pool, queries, {
@@ -177,6 +184,14 @@ const server = makeServer(pool, queries, {
   targets,
   vault,
   identity: await loadPublicIdentity(layout.path("identity")),
+  crews,
+  assistantDefinition: () =>
+    loadAssistantDefinition({
+      identityFiles: `${join(REPO_ROOT, "seed/identity.yaml")}:${layout.path("identity")}`,
+      promptFiles: assistantPromptFiles({ METISTRY_INSTANCE_DIR: instanceDir, METISTRY_SEED_DIR: join(REPO_ROOT, "seed") }),
+      instanceDir,
+      productDir: REPO_ROOT,
+    }),
   version: JSON.parse(readFileSync(join(REPO_ROOT, "apps/console/package.json"), "utf8")).version,
   instancesFiles: layout.path("instances"),
   secrets: { file: layout.path("secrets"), presence: instanceSecrets.presence() },
@@ -281,6 +296,20 @@ const agent = async (id, name, extra = {}) => (await agents.createAgent(pool, { 
 ids.agent = await agent("cursor", "Cursor");
 ids.revokeAgent = await agent("old-laptop", "Old laptop");
 ids.rotateAgent = await agent("opencode", "OpenCode");
+// …and what a week leaves on two of them, so the permission rows have something
+// to say (T4-6): two folders — one of them approved in Needs You — a project and
+// named queries on one; room to propose (⏱) on the other. (The PUTs below still
+// change something: they narrow cursor's grant, and raise cursor's autonomy.)
+await agents.setGrants(pool, ids.agent, { tier: "areas", areas: ["Projects", "Areas/Ops"], queries: true });
+await agents.setProjects(pool, ids.agent, [P]);
+await agents.setAutonomy(pool, ids.rotateAgent, { level: "propose" }, { allowWidening: true });
+await pool.query(
+  `INSERT INTO proposals (kind, source_agent, trust, payload, decision, decided_at) VALUES ('access_request', $1, 'external', $2::jsonb, 'allow', now())`,
+  [ids.agent, JSON.stringify({ area: "Areas/Ops", reason: "the runbooks live there", granted: { area: "Areas/Ops", by: "user" } })],
+);
+// the instance's own assistant, registered from its configuration as the console does at start
+await agents.ensureInternalAgent(pool, agents.INTERNAL_ASSISTANT_ID, { token: mintToken(32) });
+await crews.refresh();
 
 // ---- the requests: one per served route the kit reads ------------------------------
 //
@@ -299,6 +328,7 @@ const REQUESTS = [
   ["GET /api/commands", () => ({ path: "/api/commands" })],
   ["GET /api/proposals", () => ({ path: "/api/proposals" })],
   ["GET /api/agents", () => ({ path: "/api/agents" })],
+  ["GET /api/agents/:id/definition", () => ({ path: "/api/agents/researcher/definition" })],
   ["GET /api/projects", () => ({ path: "/api/projects" })],
   ["GET /api/targets", () => ({ path: "/api/targets" })],
   ["GET /api/runs/:id", () => ({ path: `/api/runs/${ids.run}` })],

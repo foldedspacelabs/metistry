@@ -25,6 +25,7 @@ import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 import { INSTANCE_LAYOUT } from "./instance-layout.js";
 import { dataPolicySchema } from "./data-policy.js";
+import { isLegacyCrewModel, SAME_AS_ASSISTANT } from "./crew-model.js";
 import { PROVIDER_NAME_RE, modelRefIssue, parseModelRef, type ModelRef } from "./model-ref.js";
 import { DEFAULT_TIER, EFFORTS, type Effort, type TierMap } from "./tiers.js";
 
@@ -627,6 +628,53 @@ export function resolveAssignment(cfg: Compute, tierOrCrew?: string | null): Res
   };
 }
 
+/** What a crew run resolves to: the assignment it runs on, or why nothing runs it. */
+export type CrewAssignment = { readonly ok: true; readonly assignment: ResolvedAssignment } | { readonly ok: false; readonly reason: string };
+
+/**
+ * **The model a crew RUNS on**, from its definition (C128, ruling 4). The
+ * rule docs/ops/actors.md writes down as *Crew compute*, for the runner:
+ *
+ *   `<provider>/<model-id>`   that model on that provider, with the crew's own `effort`
+ *   `same_as_assistant`        `assignments.default` — the assistant's default tier, model AND effort (§4 Q14), never the router
+ *   legacy `haiku|sonnet|opus` `assignments.crews.<name>`, else `assignments.default` — exactly `resolveAssignment(cfg, "crew:<name>")`,
+ *                              which is what every crew ran on before, read for one release
+ *
+ * `crewCompute` (actor.ts) says the same thing to a person, without the
+ * provider block; this is the half a run needs. A pinned reference whose
+ * provider this file does not declare is refused with the two lines that
+ * would fix it, never run on something else.
+ */
+export function resolveCrewAssignment(cfg: Compute, crew: string, def: { readonly model: string; readonly effort: Effort }): CrewAssignment {
+  const ownModel = `or name the crew's own model: \`metistry agents define ${crew} --model <provider/model>\` (docs/ops/compute.md, docs/ops/actors.md)`;
+  if (def.model === SAME_AS_ASSISTANT) {
+    const a = resolveAssignment(cfg, DEFAULT_TIER);
+    if (a) return { ok: true, assignment: a };
+    return { ok: false, reason: `crew '${crew}' has no compute: its model is ${SAME_AS_ASSISTANT} and compute.yaml assigns no assignments.default — \`metistry compute assign default <provider/model>\`, ${ownModel}` };
+  }
+  if (isLegacyCrewModel(def.model)) {
+    const a = resolveAssignment(cfg, `crew:${crew}`);
+    if (a) return { ok: true, assignment: a };
+    return {
+      ok: false,
+      reason: `crew '${crew}' has no compute: compute.yaml assigns neither assignments.crews.${crew} nor assignments.default — \`metistry compute assign crew:${crew} <provider/model>\`, ${ownModel}`,
+    };
+  }
+  const why = modelRefIssue(def.model);
+  if (why !== undefined) return { ok: false, reason: `crew '${crew}' names model ${JSON.stringify(def.model)}: ${why}` };
+  const ref = parseModelRef(def.model);
+  const config = Object.hasOwn(cfg.providers, ref.provider) ? cfg.providers[ref.provider] : undefined;
+  if (!config) {
+    return {
+      ok: false,
+      reason:
+        `crew '${crew}' runs on ${ref.ref}, but compute.yaml declares no provider '${ref.provider}' — ` +
+        `add it (\`metistry compute providers add --from <template> --name ${ref.provider}\`) or change the crew's model (\`metistry agents define ${crew} --model <provider/model>\`)`,
+    };
+  }
+  return { ok: true, assignment: { ...ref, effort: def.effort, from: `crew:${crew}`, config, critical: false } };
+}
+
 /** The intent tier's model, as (provider, model) with the provider's block. */
 export interface ResolvedIntentTier extends ModelRef {
   config: Provider;
@@ -936,15 +984,28 @@ export interface CrossKindRefusal {
  * Undefined when the push is allowed. The message names the field that
  * would permit it (R3): both sides are one line of `compute.yaml`.
  */
-export function crossKindRefusal(cfg: Compute, caller: string | null | undefined, crew: string): CrossKindRefusal | undefined {
+export function crossKindRefusal(
+  cfg: Compute,
+  caller: string | null | undefined,
+  crew: string,
+  /** The crew's definition (T4-6): its own `model:` decides its engine, as it does for the runner (`resolveCrewAssignment`). Absent = `assignments.crews`, as before. */
+  def?: { readonly model: string; readonly effort: Effort } | undefined,
+): CrossKindRefusal | undefined {
   const from = engineKindFor(cfg, caller ?? DEFAULT_TIER);
-  const to = engineKindFor(cfg, `crew:${crew}`);
+  const own = def ? resolveCrewAssignment(cfg, crew, def) : undefined;
+  const to = own ? (own.ok ? own.assignment.config.kind : undefined) : engineKindFor(cfg, `crew:${crew}`);
   // `assignments.default` is required whenever `assignments:` exists, so
   // `undefined` here means the file assigns NOTHING — both sides at once,
-  // and a turn that never runs rather than a push to refuse.
+  // and a turn that never runs rather than a push to refuse. (A crew whose
+  // own model cannot be resolved is parked by the runner, with the reason.)
   if (from === to || from === undefined || to === undefined) return undefined;
-  const assigned = resolveAssignment(cfg, `crew:${crew}`);
-  const where = assigned?.from === `crew:${crew}` ? `assignments.crews.${crew}` : "assignments.default";
+  const assigned = own?.ok ? own.assignment : resolveAssignment(cfg, `crew:${crew}`);
+  const where =
+    def && !isLegacyCrewModel(def.model) && def.model !== SAME_AS_ASSISTANT
+      ? `the crew's model: (${def.model})`
+      : assigned?.from === `crew:${crew}`
+        ? `assignments.crews.${crew}`
+        : "assignments.default";
   return {
     from,
     to,

@@ -4,7 +4,7 @@
 // them by hand is refused with the reason — before any registry, dispatcher,
 // or prompt sees the manifest.
 import { describe, expect, it } from "vitest";
-import { CREW_NEVER_TOOLS, CREW_TOOL_GROUPS, crewGroupOf, crewToolsFor, validateManifest } from "../src/index.js";
+import { CREW_NEVER_TOOLS, CREW_TOOL_GROUPS, SAME_AS_ASSISTANT, crewGroupOf, crewModelIssue, crewToolsFor, isLegacyCrewModel, parseCrewDefinition, validateManifest } from "../src/index.js";
 
 const researcher = {
   name: "researcher",
@@ -47,10 +47,19 @@ describe("crew manifest schema", () => {
     expect(errorsOf({ ...researcher, uses: ["shell"] })).toMatch(/unknown tool group/);
   });
 
-  it("model is one of the three tiers", () => {
-    for (const m of ["haiku", "sonnet", "opus"]) expect(errorsOf({ ...researcher, model: m })).toBe("");
-    expect(errorsOf({ ...researcher, model: "gpt-5" })).toMatch(/model/);
+  it("model is a compute reference, same_as_assistant, or — for one release — a legacy alias (T4-6, C128)", () => {
+    for (const m of ["openrouter/anthropic/claude-sonnet-5", "lmstudio/gemma", SAME_AS_ASSISTANT]) expect(errorsOf({ ...researcher, model: m }), m).toBe("");
+    for (const m of ["haiku", "sonnet", "opus"]) {
+      expect(errorsOf({ ...researcher, model: m }), m).toBe("");
+      expect(isLegacyCrewModel(m)).toBe(true);
+    }
+    // a bare id names no provider; an auto-router hands the choice to a model (invariant 4)
+    expect(errorsOf({ ...researcher, model: "gpt-5" })).toMatch(/^model: "gpt-5" is not `<provider>\/<model-id>`.*same_as_assistant/);
+    expect(errorsOf({ ...researcher, model: "openrouter/auto" })).toMatch(/model: .*auto-router/);
+    expect(errorsOf({ ...researcher, model: "Same_As_Assistant" })).toMatch(/model/);
     expect(errorsOf({ ...researcher, model: undefined })).toMatch(/model/);
+    expect(crewModelIssue(7)).toMatch(/provider/);
+    expect(isLegacyCrewModel(SAME_AS_ASSISTANT)).toBe(false);
   });
 
   it("scope is TitleCase vault prefixes, no bare vault, no traversal, no trailing slash", () => {
@@ -113,5 +122,27 @@ describe("tool groups → allowlist", () => {
       for (const never of CREW_NEVER_TOOLS) expect(tools as readonly string[], group).not.toContain(never);
     }
     expect(crewToolsFor(Object.keys(CREW_TOOL_GROUPS))).not.toContain("knowledge_write");
+  });
+});
+
+describe("parseCrewDefinition — the one reading of agents/<area>/<name>.md (the console and `metistry agents define`)", () => {
+  const file = (front: string, body = "You research one question.") => `---\n${front}\n---\n\n${body}\n`;
+  const front = "name: scout\ntype: agent\nmodel: lmstudio/gemma";
+
+  it("reads the manifest and the trimmed prompt, filling the area from the directory", () => {
+    const d = parseCrewDefinition(file(front), "agents/research/scout.md", { name: "scout", area: "research" });
+    expect(d.manifest).toMatchObject({ name: "scout", area: "research", model: "lmstudio/gemma", effort: "low" });
+    expect(d.prompt).toBe("You research one question.");
+  });
+
+  it("refuses the file whole, naming where: no frontmatter, a name that is not the filename, an area that is not the directory, an empty prompt, a bad model", () => {
+    const where = "agents/research/scout.md";
+    const expected = { name: "scout", area: "research" };
+    expect(() => parseCrewDefinition("no frontmatter", where, expected)).toThrow(/agents\/research\/scout.md: expected YAML frontmatter/);
+    expect(() => parseCrewDefinition(file(front.replace("scout", "other")), where, expected)).toThrow(/must match the filename "scout"/);
+    expect(() => parseCrewDefinition(file(`${front}\narea: ops`), where, expected)).toThrow(/must match the directory "research"/);
+    expect(() => parseCrewDefinition(file(front, "   "), where, expected)).toThrow(/operating prompt and may not be empty/);
+    expect(() => parseCrewDefinition(file(front.replace("lmstudio/gemma", "gemma")), where, expected)).toThrow(/invalid manifest: model:/);
+    expect(() => parseCrewDefinition(file("- a list"), where, expected)).toThrow(/must be a mapping/);
   });
 });

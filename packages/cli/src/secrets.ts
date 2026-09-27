@@ -14,7 +14,13 @@
 //
 //   * the owner-named secrets of plan §2.14 (`metistry:secret:<name>`, per
 //     instance only): `set | replace | remove | hosts | grant`, `list
-//     --named` — the section at the end of this file.
+//     --named` — the section after the install's variables.
+//
+// Both are filed under ONE account: this instance's `instance_id`. The
+// shared per-user scope every instance on this Mac once read
+// (`SECRET_SCOPES`) is retired (plan §2.14, ruling Q3): `migrate-scope`
+// copies its items into the instance, and `purge-shared` removes an original
+// once every instance this Mac knows has its copy — the last section.
 //
 // Rules this module exists to enforce (they are code, not advice):
 //   * A value never reaches argv, only a child's stdin (keychain.ts).
@@ -25,6 +31,7 @@
 
 import { chmod, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { parseDocument } from "yaml";
 import {
@@ -36,6 +43,7 @@ import {
   instancePresence,
   mintToken,
   normalizeSecretHost,
+  parseCompute,
   parseSecretGrantee,
   parseSecretsFile,
   resolveInstanceLayout,
@@ -44,6 +52,7 @@ import {
   secretRefsIn,
   secretService,
   secretValueIssue,
+  validateManifest,
   type KeychainBackend,
   type SecretGrantMode,
   type SecretPresence,
@@ -52,7 +61,9 @@ import {
 } from "@foldedspacelabs/metistry-core";
 import { readStdin } from "./connect-repo.js";
 import { realExec, type Exec } from "./exec.js";
+import { envPaths, readInstanceId } from "./instance.js";
 import { Keychain, keychainAccount, securityKeychain, securityPresence, serviceFor } from "./keychain.js";
+import { launchAgentsDir, LABEL_PREFIX } from "./launchd.js";
 import { protectedRel, writeProtected, type ProtectedWrite } from "./protected-write.js";
 import { StepFailed, StepRunner } from "./steps.js";
 
@@ -75,49 +86,21 @@ export function isSecretVar(name: string): boolean {
   return SECRET_NAMES.has(name) || SECRET_SUFFIXES.some((s) => name.endsWith(s)) || SECRET_INFIXES.some((s) => name.includes(s));
 }
 
-// ---- the scope table ---------------------------------------------------------
+// ---- one account: this instance's ---------------------------------------------
 //
-// An instance directory is self-contained (owner-ratified 2026-09-09):
-// nothing about an instance may persist outside its directory EXCEPT
-// per-user secrets. So every secret is filed under one of two Keychain
-// accounts, and this is the only table that says which:
+// An instance directory is self-contained (owner-ratified 2026-09-09), and
+// since ruling Q3 (plan §2.14) so are its secrets: every item this command
+// reads or writes is filed under the instance's `instance_id`. Deleting the
+// instance directory orphans nothing (`metistry secrets purge`).
 //
-//   instance  account = the instance's `instance_id`. Deleting the instance
-//             directory should orphan nothing (`metistry secrets purge`).
-//   user      account = `keychainAccount()`. Belongs to the person and is
-//             deliberately SHARED by every instance on this Mac; a purge
-//             must never touch it.
-//
-// The default is `instance`, because self-containment is the rule and
-// user-scope is the enumerated exception. `METISTRY_SIGN_IDENTITY` and
-// `METISTRY_GITHUB_OAUTH_CLIENT_ID` are not secrets at all and never reach
-// here — they stay plain `.env`/config values.
-
-export type SecretScope = "instance" | "user";
-
-export interface ScopeRule {
-  scope: SecretScope;
-  /** an exact name, or a pattern for a family */
-  match: string | RegExp;
-  why: string;
-}
-
-/** First match wins, so the user-scoped exceptions are listed first. */
-export const SECRET_SCOPES: readonly ScopeRule[] = [
-  { scope: "user", match: /^METISTRY_AWS_(SECRET_ACCESS_KEY|SESSION_TOKEN)$/, why: "the person's own AWS credentials (aws-costs), not this instance's" },
-  { scope: "user", match: /^METISTRY_DEVIN_API_KEY$/, why: "the person's own Devin (Cognition) credential (devin-knowledge) — one per Mac, shared by every instance, and it outlives any one instance directory" },
-  { scope: "user", match: /^METISTRY_[A-Z0-9_]*_API_KEY$/, why: "a compute provider credential (compute.yaml `auth.secret`) — the person's own account with that provider, shared by every instance on this Mac (docs/ops/compute.md)" },
-  { scope: "instance", match: /^METISTRY_DB_PASSWORD$/, why: "this instance's Postgres, in its own state/pg" },
-  { scope: "instance", match: /^METISTRY_LOCAL_OWNER_TOKEN$/, why: "the local owner door into THIS instance's console (docs/ops/auth.md) — a second instance must not open the first's" },
-  { scope: "instance", match: /^METISTRY_BRIDGE_TOKEN_/, why: "a bearer this instance's bridges were started with" },
-  { scope: "instance", match: /^METISTRY_ASSISTANT_TOKEN$/, why: "the internal agent's bearer, registered in this instance's console" },
-  { scope: "instance", match: /^METISTRY_AGENT_TOKEN_/, why: "an external tool's bearer, minted by THIS instance's console (`metistry connect <tool>`) — a second instance mints its own" },
-  { scope: "instance", match: /^METISTRY_VAPID_/, why: "push keys bound to this instance's origin and subscriptions" },
-  { scope: "instance", match: /^METISTRY_GITHUB_/, why: "a PAT scoped to the repos this instance watches or dispatches to" },
-];
-
-/** What an unlisted secret gets: self-containment is the rule. */
-export const DEFAULT_SCOPE: SecretScope = "instance";
+// There used to be a second, per-user account every instance on this Mac
+// shared (`SECRET_SCOPES` put third-party credentials there). It is retired:
+// `migrate-scope` copies its items in, and nothing here resolves a value
+// from it any more. The one fallback left is for an install with no
+// `instance_id` at all — there is no instance account to use until
+// `metistry up` or `secrets sync` mints one — and it is the install's own
+// variables' only. `METISTRY_SIGN_IDENTITY` and `METISTRY_GITHUB_OAUTH_CLIENT_ID`
+// are not secrets and never reach here.
 
 /**
  * Secrets this command may CREATE on sight rather than report missing.
@@ -142,30 +125,51 @@ export const GENERATED_SECRETS: Readonly<Record<string, string>> = {
     "the vault bridge's OWNER bearer — the only credential that may write .metistry/ (docs/ops/auth.md); restart the reconciler once it is minted",
 };
 
-function ruleFor(name: string): ScopeRule | undefined {
-  return SECRET_SCOPES.find((r) => (typeof r.match === "string" ? r.match === name : r.match.test(name)));
-}
-
-export function scopeFor(name: string): SecretScope {
-  return ruleFor(name)?.scope ?? DEFAULT_SCOPE;
-}
-
-/** Why it is scoped that way — printed by `secrets list --why`, and the reason a reviewer can check the table against. */
-export function scopeReason(name: string): string {
-  return ruleFor(name)?.why ?? "not named in SECRET_SCOPES, so it is treated as this instance's (the default)";
-}
-
 export interface Accounts {
-  /** the user-scoped account (`keychainAccount()`) */
+  /** the per-user account (`keychainAccount()`): the retired shared scope, and an install with no instance_id */
   user: string;
   /** the instance's `instance_id`; absent when no instance directory is configured, or it has no id yet */
   instance?: string | undefined;
 }
 
-/** The account a name's items belong under. Falls back to the user account when there is no instance id to use. */
-export function accountFor(name: string, accounts: Accounts): string {
-  return scopeFor(name) === "instance" && accounts.instance ? accounts.instance : accounts.user;
+/**
+ * The account an install variable's item is filed under: the instance's,
+ * always — the user account only while the install has no instance_id yet.
+ * `name` no longer decides anything (the scope table is retired); it stays
+ * in the signature so every caller keeps asking per variable.
+ */
+export function accountFor(_name: string, accounts: Accounts): string {
+  return accounts.instance ?? accounts.user;
 }
+
+// ---- the retired shared scope (plan §2.14, T4-3) --------------------------------
+//
+// What is left of `SECRET_SCOPES`: the names it filed under the per-user
+// account. They are used for exactly two things — to FIND the originals
+// `migrate-scope` copies, and to decide which of them `purge-shared` may
+// remove. Each is now an owner-named secret of every instance that uses it,
+// under its lowercase name (`METISTRY_DEVIN_API_KEY` → `devin_api_key`).
+
+export const RETIRED_SHARED_SCOPE: readonly { match: RegExp; what: string }[] = [
+  { match: /^METISTRY_AWS_(SECRET_ACCESS_KEY|SESSION_TOKEN)$/, what: "your AWS credentials (aws-costs)" },
+  { match: /^METISTRY_DEVIN_API_KEY$/, what: "your Devin (Cognition) credential" },
+  { match: /^METISTRY_[A-Z0-9_]*_API_KEY$/, what: "a compute provider credential (compute.yaml `auth.secret`)" },
+];
+
+/** Whether the retired shared scope filed this variable under the per-user account. */
+export function wasSharedScope(varName: string): boolean {
+  return RETIRED_SHARED_SCOPE.some((r) => r.match.test(varName));
+}
+
+/** The owner-named secret a shared-scope variable becomes: `METISTRY_DEVIN_API_KEY` → `devin_api_key`. Undefined when it is not one, or the result is not a secret name. */
+export function sharedScopeSecretName(varName: string): string | undefined {
+  if (!wasSharedScope(varName)) return undefined;
+  const name = varName.replace(/^METISTRY_/, "").toLowerCase();
+  return secretNameIssue(name) === undefined ? name : undefined;
+}
+
+/** The command the doctor row, `update` and `sync` hand the owner. */
+export const MIGRATE_SCOPE_COMMAND = "metistry secrets migrate-scope";
 
 /** An assignment line, live (`NAME=…`) or commented out (`# NAME=`). The commented form names a variable without setting it. */
 const ASSIGNMENT = /^(\s*)(#\s*)?(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$/;
@@ -220,7 +224,7 @@ export interface SecretsOptions {
   envFile: string;
   /** Where an instance's `.env` belongs; when it differs from `envFile`, `--to env` MOVES it there. */
   envTarget?: string | undefined;
-  /** The instance's `instance_id`: the account instance-scoped items are filed under. Absent = everything falls back to the user account. */
+  /** The instance's `instance_id`: the account every item is filed under. Absent = the install's own variables fall back to the user account until one is minted. */
   instanceId?: string | undefined;
   /** `.env.example` — the canonical list of variable names, so a fresh install still knows what a secret is called. */
   exampleFile?: string | undefined;
@@ -238,8 +242,10 @@ export interface SyncResult {
   /** names only — a result object must never be able to carry a value into a log */
   changed: string[];
   skipped: string[];
-  /** instance-scoped names that were found only under the user account and have now been COPIED to the instance's (never deleted) */
-  migrated: string[];
+  /** shared-scope variables whose original is still only under the per-user account — not read; `migrate-scope` copies them (presence only, never a value) */
+  unmigrated: string[];
+  /** `--to keychain`: shared-scope variables not imported — each is an owner-named secret now, set with `secrets set` */
+  named?: string[];
   /** `--to env`: GENERATED_SECRETS names that existed nowhere and were created by this run */
   minted?: string[];
   /** `--to env`: the file that was written, which may not be the one that was read (the move) */
@@ -258,7 +264,7 @@ async function readText(path: string): Promise<string> {
 }
 
 /** Every secret-shaped name this install knows about: declared in `.env`, then any extra from `.env.example`. */
-async function knownSecretNames(opts: SecretsOptions): Promise<string[]> {
+async function knownSecretNames(opts: Pick<SecretsOptions, "envFile" | "exampleFile">): Promise<string[]> {
   const names = declaredVars(await readText(opts.envFile)).filter(isSecretVar);
   for (const n of declaredVars(await readText(opts.exampleFile ?? "")).filter(isSecretVar)) if (!names.includes(n)) names.push(n);
   return names;
@@ -288,65 +294,84 @@ async function writeEnvFile(path: string, text: string): Promise<void> {
   await chmod(path, 0o600);
 }
 
-/** The two handles a run needs: the user's account, and this instance's when there is one. */
-function keychains(opts: SecretsOptions): { user: Keychain; instance?: Keychain; accounts: Accounts } {
+/**
+ * The handles a run needs. `own` is the ONE account this install's items
+ * are read from and written to — the instance's, or the user's only while
+ * there is no instance_id. `user` is kept for presence probes of the
+ * retired shared scope (never a value) and for purge's refusal.
+ */
+function keychains(opts: SecretsOptions): { own: Keychain; user: Keychain; named?: InstanceSecrets; accounts: Accounts } {
   const exec = opts.exec ?? realExec;
   const accounts: Accounts = { user: keychainAccount(opts.env ?? process.env), instance: opts.instanceId };
-  return { user: new Keychain(exec, accounts.user), ...(accounts.instance ? { instance: new Keychain(exec, accounts.instance) } : {}), accounts };
+  const user = new Keychain(exec, accounts.user);
+  return {
+    own: accounts.instance ? new Keychain(exec, accounts.instance) : user,
+    user,
+    ...(accounts.instance ? { named: new InstanceSecrets(securityKeychain(exec), accounts.instance) } : {}),
+    accounts,
+  };
 }
 
 export async function syncSecrets(direction: SyncDirection, opts: SecretsOptions): Promise<SyncResult> {
   const platform = opts.platform ?? process.platform;
   requireDarwin(platform, opts.out);
-  const { user, instance, accounts } = keychains(opts);
-  const forName = (name: string) => (scopeFor(name) === "instance" && instance ? instance : user);
+  const { own, user, named, accounts } = keychains(opts);
   const names = await knownSecretNames(opts);
   const changed: string[] = [];
   const skipped: string[] = [];
-  const migrated: string[] = [];
-  opts.out(accounts.instance ? `keychain accounts: instance ${accounts.instance}, user ${accounts.user} (scopes: secrets.ts SECRET_SCOPES)` : `keychain account: ${accounts.user} only — no instance_id, so every secret stays user-scoped`);
+  const unmigrated: string[] = [];
+  opts.out(accounts.instance ? `keychain account: ${accounts.instance} (this instance's instance_id)` : `keychain account: ${accounts.user} — this install has no instance_id yet, so its own variables are filed there until one is minted`);
 
   if (direction === "keychain") {
     const values = liveValues(await readText(opts.envFile));
+    const notImported: string[] = [];
     for (const name of names) {
       const v = values.get(name);
       if (v === undefined || v === "") {
         skipped.push(name);
         continue;
       }
-      await forName(name).setSecret(name, v);
+      // A third-party credential is an owner-named secret now, and its
+      // policy (where it may be sent, who may use it) is the owner's to
+      // write — so it is set by `secrets set`, never swept in from `.env`.
+      if (wasSharedScope(name)) {
+        notImported.push(name);
+        continue;
+      }
+      await own.setSecret(name, v);
       changed.push(name);
     }
-    const shown = changed.map((n) => `${n} (${scopeFor(n)})`).join(", ");
-    opts.out(`imported ${changed.length} secret(s) into the login Keychain as ${serviceFor("<VAR>")}: ${shown || "(none)"}`);
+    opts.out(`imported ${changed.length} secret(s) into the login Keychain as ${serviceFor("<VAR>")}: ${changed.join(", ") || "(none)"}`);
     if (skipped.length) opts.out(`unset in ${opts.envFile}, so not imported: ${skipped.join(", ")}`);
+    if (notImported.length) {
+      opts.out(`not imported — each is an owner-named secret of this instance now (plan §2.14), stored with its value on stdin: ${notImported.map((n) => `${n} → \`metistry secrets set ${sharedScopeSecretName(n) ?? "<name>"}\``).join(", ")}`);
+    }
     opts.out(`${opts.envFile} was NOT changed — run \`metistry secrets sync --to env\` once you are ready for it to be generated.`);
-    return { direction, changed, skipped, migrated };
+    return { direction, changed, skipped, unmigrated, named: notImported };
   }
 
-  // Resolution order: the scoped account, then the user account as a
-  // fallback — and a value found only there for an instance-scoped variable
-  // is COPIED to the instance's account (never deleted, so a rollback to an
-  // older CLI still finds it).
+  // One account, no fallback: an item is this instance's or it is not in
+  // the Keychain. A shared-scope variable is filled from the owner-named
+  // secret it became, and its original under the per-user account is never
+  // read — only asked whether it exists, so the owner is told to migrate.
   const values = new Map<string, string>();
   const minted: string[] = [];
   for (const name of names) {
-    const own = forName(name);
-    let v = await own.getSecret(name);
-    if (v === undefined && own !== user) {
-      v = await user.getSecret(name);
-      if (v !== undefined) {
+    let v: string | undefined;
+    if (wasSharedScope(name)) {
+      const secret = sharedScopeSecretName(name);
+      v = named && secret ? await named.value(secret) : undefined;
+      if (v === undefined && accounts.instance && (await user.hasSecret(name))) unmigrated.push(name);
+    } else {
+      v = await own.getSecret(name);
+      // Nowhere yet, and one of the few whose value only ever means "this
+      // install": mint it into the Keychain now, so an instance that predates
+      // the variable gains it on the next sync rather than needing a verb.
+      if (v === undefined && GENERATED_SECRETS[name]) {
+        v = (opts.mint ?? mintToken)();
         await own.setSecret(name, v);
-        migrated.push(name);
+        minted.push(name);
       }
-    }
-    // Nowhere yet, and one of the few whose value only ever means "this
-    // install": mint it into the Keychain now, so an instance that predates
-    // the variable gains it on the next sync rather than needing a verb.
-    if (v === undefined && GENERATED_SECRETS[name]) {
-      v = (opts.mint ?? mintToken)();
-      await own.setSecret(name, v);
-      minted.push(name);
     }
     if (v === undefined) skipped.push(name);
     else values.set(name, v);
@@ -363,31 +388,32 @@ export async function syncSecrets(direction: SyncDirection, opts: SecretsOptions
   await writeEnvFile(target, appendEnv(text, values, missing));
   changed.push(...values.keys());
   opts.out(`wrote ${changed.length} secret line(s) into ${target} from the Keychain (0600; every other line preserved): ${changed.join(", ") || "(none)"}`);
-  if (migrated.length) opts.out(`copied from the user account to this instance's (${accounts.instance}), the old items left alone: ${migrated.join(", ")}`);
   for (const n of minted) opts.out(`minted ${n} — it was in neither the Keychain nor ${opts.envFile}: ${GENERATED_SECRETS[n]}`);
   if (minted.length) opts.out(`restart the service that reads a freshly minted secret for it to take effect — \`metistry restart console\`, and \`metistry restart reconciler\` for ${Object.keys(GENERATED_SECRETS).filter((n) => n.startsWith("METISTRY_BRIDGE_TOKEN_")).join(", ")}.`);
   if (missing.length) opts.out(`appended (no line existed): ${missing.join(", ")}`);
-  if (skipped.length) opts.out(`not in the Keychain, left as they are: ${skipped.join(", ")}`);
-  return { direction, changed, skipped, migrated, minted, wrote: target };
+  if (skipped.length) opts.out(`not in this instance's Keychain, left as they are: ${skipped.join(", ")}`);
+  if (unmigrated.length) opts.out(`still only in the retired shared scope, so not read: ${unmigrated.join(", ")} — \`${MIGRATE_SCOPE_COMMAND}\` copies them into this instance`);
+  return { direction, changed, skipped, unmigrated, minted, wrote: target };
 }
 
 /** Mint a fresh random token into the Keychain and into `.env` — the only place a new secret is created. */
 export async function mintSecret(name: string, opts: SecretsOptions): Promise<void> {
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new Error(`${JSON.stringify(name)} is not a variable name`);
   if (!isSecretVar(name)) throw new Error(`${name} is not a secret-shaped name (it must end in ${SECRET_SUFFIXES.join(", ")} or be one of ${[...SECRET_NAMES].join(", ")})`);
+  // a third-party credential is issued by the third party; a random string is never it
+  if (wasSharedScope(name)) throw new Error(`${name} is a credential another service issues, not a token to mint — store it with \`metistry secrets set ${sharedScopeSecretName(name) ?? "<name>"}\` (the value on stdin)`);
   const platform = opts.platform ?? process.platform;
   requireDarwin(platform, opts.out);
-  const { user, instance, accounts } = keychains(opts);
-  const kc = scopeFor(name) === "instance" && instance ? instance : user;
+  const { own, accounts } = keychains(opts);
   const value = (opts.mint ?? mintToken)();
-  await kc.setSecret(name, value);
+  await own.setSecret(name, value);
   const values = new Map([[name, value]]);
   const target = opts.envTarget ?? opts.envFile;
   const { text, missing } = rewriteEnv(await readText(target === opts.envFile ? opts.envFile : target), values);
   await writeEnvFile(target, appendEnv(text, values, missing));
-  opts.out(`minted ${name} (${scopeFor(name)}-scoped: ${scopeReason(name)}) into the login Keychain under account ${kc.account} and ${target}.`);
-  opts.out(`The value is not printed — read it with \`security find-generic-password -a ${kc.account} -s ${serviceFor(name)} -w\` if a service needs it pasted elsewhere.`);
-  if (!instance && scopeFor(name) === "instance") opts.out(`(no instance_id available, so it went to the user account ${accounts.user}; the next \`secrets sync --to env\` with an instance copies it across)`);
+  opts.out(`minted ${name} into the login Keychain under account ${own.account}${accounts.instance ? " (this instance's instance_id)" : ""} and ${target}.`);
+  opts.out(`The value is not printed — read it with \`security find-generic-password -a ${own.account} -s ${serviceFor(name)} -w\` if a service needs it pasted elsewhere.`);
+  if (!accounts.instance) opts.out(`(no instance_id available, so it went to the user account ${accounts.user}; \`metistry up\` or \`metistry secrets sync\` mints one)`);
 }
 
 // ---- purge -------------------------------------------------------------------
@@ -402,11 +428,11 @@ export interface PurgeOptions extends SecretsOptions {
 export interface PurgeResult {
   /** the account whose items were listed/deleted — always the instance's, never the user's */
   account: string;
-  /** instance-scoped names that HAVE an item under that account */
+  /** install variables that HAVE an item under that account */
   found: string[];
   /** what was actually deleted (empty without `--yes`) */
   deleted: string[];
-  /** user-scoped names deliberately left alone */
+  /** shared-scope variables, whose originals under the per-user account this never touches (`purge-shared` is theirs) */
   kept: string[];
   /** owner-named secrets (`secrets.yaml`, §2.14) that HAVE an item under this instance's account */
   named: string[];
@@ -418,28 +444,27 @@ export interface PurgeResult {
  * Delete one instance's Keychain items, so removing a test instance
  * directory does not orphan them. Preview-then-confirm: without `--yes`
  * nothing is touched. Two refusals make it incapable of reaching the
- * person's own secrets — no instance_id, or an instance account that is
+ * per-user account — no instance_id, or an instance account that is
  * somehow the user account — rather than trusting the caller.
  */
 export async function purgeSecrets(opts: PurgeOptions): Promise<PurgeResult> {
   const platform = opts.platform ?? process.platform;
   requireDarwin(platform, opts.out);
-  const { instance, accounts } = keychains(opts);
-  if (!instance || !accounts.instance) {
+  const { own, accounts } = keychains(opts);
+  if (!accounts.instance) {
     throw new Error(`${opts.instanceDir} has no instance_id in identity.yaml, so it owns no Keychain account — there is nothing to purge (an instance gets one from \`metistry init\`, or from the next \`metistry secrets sync\`/\`metistry up\`)`);
   }
   if (accounts.instance === accounts.user) {
     throw new Error(`refusing to purge: this instance's account (${accounts.instance}) is the per-user account, and purging it would delete secrets that belong to you rather than to ${opts.instanceDir}`);
   }
   const names = await knownSecretNames(opts);
-  const scoped = names.filter((n) => scopeFor(n) === "instance");
-  const kept = names.filter((n) => scopeFor(n) === "user");
+  const kept = names.filter(wasSharedScope);
   const found: string[] = [];
-  for (const n of scoped) if (await instance.hasSecret(n)) found.push(n);
+  for (const n of names.filter((x) => !wasSharedScope(x))) if (await own.hasSecret(n)) found.push(n);
   // The owner-named secrets are this instance's too, under the same
   // account: deleting the directory must orphan them no more than the rest.
   // Their names come from the instance's own secrets.yaml — the one list of
-  // them there is.
+  // them there is — and that list includes every migrated shared-scope copy.
   const store = new InstanceSecrets(securityKeychain(opts.exec ?? realExec), accounts.instance);
   const named: string[] = [];
   for (const n of await namedSecretNames(opts.instanceDir, opts.out)) if (await store.has(n)) named.push(n);
@@ -448,14 +473,14 @@ export async function purgeSecrets(opts: PurgeOptions): Promise<PurgeResult> {
   opts.out(`keychain account: ${accounts.instance} (this instance's instance_id)`);
   opts.out(`${found.length} item(s) to delete: ${found.join(", ") || "(none)"}`);
   opts.out(`${named.length} named secret(s) to delete (${SECRET_SERVICE_PREFIX}<name>): ${named.join(", ") || "(none)"}`);
-  opts.out(`never touched — the per-user account ${accounts.user} keeps: ${kept.join(", ") || "(nothing user-scoped)"}`);
+  opts.out(`never touched — the retired shared scope (account ${accounts.user}) keeps its originals of: ${kept.join(", ") || "(none)"}; \`metistry secrets purge-shared\` is theirs`);
   if (!opts.yes) {
     opts.out("");
     opts.out(`preview only. Nothing was deleted — rerun with --yes to delete the ${found.length + named.length} item(s) above. This does not remove ${opts.instanceDir} itself.`);
     return { account: accounts.instance, found, deleted: [], kept, named, namedDeleted: [] };
   }
   const deleted: string[] = [];
-  for (const n of found) if (await instance.deleteSecret(n)) deleted.push(n);
+  for (const n of found) if (await own.deleteSecret(n)) deleted.push(n);
   const namedDeleted: string[] = [];
   for (const n of named) if (await store.remove(n)) namedDeleted.push(n);
   opts.out(`deleted ${deleted.length + namedDeleted.length} item(s) from account ${accounts.instance}: ${[...deleted, ...namedDeleted.map((n) => `${SECRET_SERVICE_PREFIX}${n}`)].join(", ") || "(none)"}`);
@@ -466,50 +491,61 @@ export async function purgeSecrets(opts: PurgeOptions): Promise<PurgeResult> {
 
 export interface SecretListing {
   name: string;
-  /** which account it BELONGS under, from the scope table */
-  scope: SecretScope;
+  /** this instance holds it — for a shared-scope variable, the owner-named secret it became */
   inKeychain: boolean;
-  /** which account an item was actually found under — "instance", "user", or none */
+  /** the account an item was found under: the instance's, or the user's only while there is no instance_id */
   foundUnder?: "instance" | "user";
   inEnv: boolean;
+  /** a shared-scope variable: the owner-named secret it is now (`{{ secret.<name> }}`) */
+  secret?: string;
+  /** a shared-scope variable whose original still sits under the per-user account (presence only) */
+  sharedOriginal?: boolean;
 }
 
-/** Names, scopes, and where each one lives. There is no code path here that can read a value. */
+/** Names and where each one lives. Every Keychain question here is presence only — there is no code path that can read a value. */
 export async function listSecrets(opts: SecretsOptions): Promise<SecretListing[]> {
   const platform = opts.platform ?? process.platform;
-  const { user, instance } = keychains(opts);
+  const { own, user, accounts } = keychains(opts);
+  const probe = securityPresence(opts.exec ?? realExec);
   const set = liveValues(await readText(opts.envFile));
   const rows: SecretListing[] = [];
   for (const name of await knownSecretNames(opts)) {
-    const scope = scopeFor(name);
-    let foundUnder: "instance" | "user" | undefined;
-    if (platform === "darwin") {
-      if (scope === "instance" && instance && (await instance.hasSecret(name))) foundUnder = "instance";
-      else if (await user.hasSecret(name)) foundUnder = "user";
+    const inEnv = (set.get(name) ?? "") !== "";
+    if (wasSharedScope(name)) {
+      const secret = sharedScopeSecretName(name);
+      const mine = platform === "darwin" && accounts.instance && secret ? await probe(secretService(secret), accounts.instance) : false;
+      const original = platform === "darwin" ? await user.hasSecret(name) : false;
+      rows.push({ name, inKeychain: mine, ...(mine ? { foundUnder: "instance" as const } : {}), inEnv, ...(secret ? { secret } : {}), sharedOriginal: original });
+      continue;
     }
-    rows.push({ name, scope, inKeychain: foundUnder !== undefined, ...(foundUnder ? { foundUnder } : {}), inEnv: (set.get(name) ?? "") !== "" });
+    const found = platform === "darwin" && (await own.hasSecret(name));
+    rows.push({ name, inKeychain: found, ...(found ? { foundUnder: accounts.instance ? ("instance" as const) : ("user" as const) } : {}), inEnv });
   }
   return rows;
 }
 
 /**
- * The listing. `scope` is where a secret BELONGS; `keychain` is the account
- * an item was actually found under — so `instance / user` reads "this one
- * has not been migrated yet", which the next `sync --to env` fixes.
+ * The listing: one account, so `keychain` is yes or no. A shared-scope
+ * variable shows the owner-named secret it became, and whether its old
+ * original is still under the per-user account.
  */
 export function renderSecretList(rows: SecretListing[]): string {
   const width = Math.max(4, ...rows.map((r) => r.name.length));
-  const head = `${"name".padEnd(width)}  scope     keychain  .env`;
-  const body = rows.map((r) => `${r.name.padEnd(width)}  ${r.scope.padEnd(8)}  ${(r.foundUnder ?? "-").padEnd(8)}  ${r.inEnv ? "set" : "-"}`);
-  const pending = rows.filter((r) => r.scope === "instance" && r.foundUnder === "user").map((r) => r.name);
+  const head = `${"name".padEnd(width)}  keychain  .env`;
+  const body = rows.map((r) => {
+    const line = `${r.name.padEnd(width)}  ${(r.inKeychain ? (r.foundUnder === "user" ? "user" : "yes") : "-").padEnd(8)}  ${r.inEnv ? "set" : "-"}`;
+    return r.secret ? `${line.padEnd(width + 17)}  → {{ secret.${r.secret} }}${r.sharedOriginal ? " (original still in the shared scope)" : ""}` : line;
+  });
+  const unmigrated = rows.filter((r) => r.secret && !r.inKeychain && r.sharedOriginal).map((r) => r.name);
+  const leftover = rows.filter((r) => r.secret && r.inKeychain && r.sharedOriginal).map((r) => r.name);
   return [
     head,
     "-".repeat(head.length),
     ...body,
     "",
-    "scope: instance = filed under this instance's instance_id; user = under the per-user account, shared by every instance (secrets.ts SECRET_SCOPES).",
-    "keychain: the account an item was actually found under.",
-    ...(pending.length ? [`still under the user account, copied to this instance's on the next \`metistry secrets sync --to env\`: ${pending.join(", ")}`] : []),
+    "keychain: an item under this instance's instance_id (user = the per-user account, only while the install has no instance_id).",
+    ...(unmigrated.length ? [`still only in the retired shared scope: ${unmigrated.join(", ")} — \`${MIGRATE_SCOPE_COMMAND}\` copies them into this instance`] : []),
+    ...(leftover.length ? [`copied, with the shared original left: ${leftover.join(", ")} — \`metistry secrets purge-shared\` removes an original once every instance on this Mac has its copy`] : []),
     "Values are never printed.",
   ].join("\n");
 }
@@ -887,4 +923,409 @@ export function renderNamedSecrets(rows: SecretRow[], instanceId: string | undef
     `keychain: an item under this instance's account${instanceId ? ` (${instanceId})` : ""}; ? = no Keychain to ask. Last used is the console's: GET /api/secrets.`,
     "Values are never printed.",
   ].join("\n");
+}
+
+// ---- migrating the shared scope (plan §2.14's four steps, T4-3) -----------------
+//
+//   secrets migrate-scope [--dry-run]   steps 1–2, re-runnable; `metistry update` runs it
+//   secrets purge-shared [--yes]        step 4's cleanup, preview-then-confirm
+//
+// 1. Every shared-scope original this instance knows of (its `.env`,
+//    `.env.example`, the `auth.secret` names in compute.yaml, `requires.env`
+//    in its own manifests) is COPIED from the per-user account into this
+//    instance's account under its new name, and the name is recorded in
+//    secrets.yaml. An item the instance already holds wins: the original is
+//    not even read.
+// 2. References to it (`auth.secret`, `requires.env`) are rewritten to
+//    `{{ secret.name }}` through the protected write, as YAML documents so
+//    comments survive — but only when the file still VALIDATES with the
+//    reference in it. A schema that does not read secret references yet
+//    keeps the environment name, and the rewrite waits for the release that
+//    reads them: rerunning finishes it. Never a file its own reader refuses.
+// 3. Nothing resolves a value from the per-user account any more — that is
+//    `syncSecrets` above, not a runtime step.
+// 4. The originals are LEFT. This migration has no code path that deletes a
+//    Keychain item; `purge-shared` is the only one, and it removes only an
+//    original every instance this Mac knows has its own copy of.
+
+/** Where a shared-scope variable is referenced, and by which field. */
+interface ReferenceSite {
+  /** instance-relative */
+  file: string;
+  kind: "compute" | "manifest";
+  path: (string | number)[];
+  field: string;
+  from: string;
+}
+
+/** `auth.secret` in compute.yaml and `requires.env` in the instance's own manifests that name a shared-scope variable. A file that does not parse names none. */
+async function sharedReferenceSites(instanceDir: string): Promise<ReferenceSite[]> {
+  const sites: ReferenceSite[] = [];
+  const load = async (abs: string): Promise<unknown> => {
+    const doc = parseDocument(await readText(abs));
+    return doc.errors.length ? undefined : (doc.toJS() as unknown);
+  };
+  const computeRel = protectedRel(instanceDir, "compute");
+  const compute = (await load(join(instanceDir, computeRel))) as { providers?: Record<string, { auth?: { secret?: unknown } } | null> } | undefined;
+  for (const [p, cfg] of Object.entries(compute?.providers ?? {})) {
+    const from = cfg?.auth?.secret;
+    if (typeof from === "string" && wasSharedScope(from)) sites.push({ file: computeRel, kind: "compute", path: ["providers", p, "auth", "secret"], field: `providers.${p}.auth.secret`, from });
+  }
+  const root = resolveInstanceLayout(instanceDir);
+  const base = root.path("metistryDir");
+  const state = root.path("stateDir");
+  const walk = async (dir: string): Promise<void> => {
+    let entries: import("node:fs").Dirent[];
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) {
+        if (p !== state) await walk(p);
+        continue;
+      }
+      if (!e.isFile() || e.name !== "manifest.yaml") continue;
+      const m = (await load(p)) as { requires?: { env?: unknown } | unknown[] } | undefined;
+      const env = m?.requires && !Array.isArray(m.requires) ? m.requires.env : undefined;
+      if (!Array.isArray(env)) continue;
+      env.forEach((from, i) => {
+        if (typeof from === "string" && wasSharedScope(from)) sites.push({ file: relative(instanceDir, p), kind: "manifest", path: ["requires", "env", i], field: `requires.env[${i}]`, from });
+      });
+    }
+  };
+  if (base !== instanceDir.replace(/\/+$/, "")) await walk(base);
+  return sites;
+}
+
+/** Every shared-scope variable an instance knows of: its `.env`, `.env.example`, and the files that reference one. */
+async function sharedScopeCandidates(instanceDir: string, files: { envFile?: string | undefined; exampleFile?: string | undefined }): Promise<string[]> {
+  const names: string[] = [];
+  const add = (n: string): void => {
+    if (wasSharedScope(n) && !names.includes(n)) names.push(n);
+  };
+  for (const f of [files.envFile, files.exampleFile]) if (f) for (const n of declaredVars(await readText(f))) add(n);
+  for (const s of await sharedReferenceSites(instanceDir)) add(s.from);
+  return names;
+}
+
+/** Whether a file still validates with a reference rewritten into it: undefined when it does, else why not. Core's own schema for the file is the judge. */
+export type ReferenceGate = (kind: ReferenceSite["kind"], text: string) => string | undefined;
+
+export const acceptsSecretReference: ReferenceGate = (kind, text) => {
+  try {
+    if (kind === "compute") {
+      parseCompute(text);
+      return undefined;
+    }
+    const r = validateManifest(parseDocument(text).toJS());
+    return r.ok ? undefined : r.errors.join("; ");
+  } catch (e) {
+    return e instanceof Error ? e.message : String(e);
+  }
+};
+
+export interface MigrateScopeOptions extends NamedSecretsOptions {
+  /** this instance's `.env` — where the names of the originals are found (never their values: those come from the Keychain) */
+  envFile?: string | undefined;
+  /** `.env.example`: the names a fresh install knows */
+  exampleFile?: string | undefined;
+  /** step 2's gate — test seam; default: core's schema for the file */
+  accepts?: ReferenceGate | undefined;
+}
+
+export interface ScopeCopy {
+  /** the shared-scope variable, e.g. METISTRY_DEVIN_API_KEY */
+  from: string;
+  /** the owner-named secret, e.g. devin_api_key */
+  to: string;
+}
+
+export interface ScopeRewrite extends ScopeCopy {
+  file: string;
+  field: string;
+}
+
+export interface MigrateScopeResult {
+  instanceId: string;
+  /** the retired per-user account the originals are under */
+  sharedAccount: string;
+  /** step 1: copied into this instance (in a dry run: would be) */
+  copied: ScopeCopy[];
+  /** step 1: this instance already had one — it wins, the original was not read */
+  kept: ScopeCopy[];
+  /** step 1: an original the Keychain would not hand over (a declined prompt, a locked keychain) */
+  unreadable: Array<ScopeCopy & { why: string }>;
+  /** a shared-scope variable whose lowercase name is not a secret name — left for the owner */
+  unmappable: string[];
+  /** step 1: names added to secrets.yaml */
+  recorded: string[];
+  /** step 2: references now `{{ secret.name }}` */
+  rewritten: ScopeRewrite[];
+  /** step 2: references left as the environment name, and why */
+  pending: Array<ScopeRewrite & { why: string }>;
+  /** step 4: originals still under the per-user account — the migration never deletes one */
+  originals: string[];
+  /** every original is in this instance: nothing is left for the owner to do. A `pending` reference waits on a release, not on the owner — `metistry update` reruns this and finishes it. */
+  complete: boolean;
+  deliveries: ProtectedWrite[];
+}
+
+function keychainBackend(opts: Pick<NamedSecretsOptions, "keychain" | "platform" | "exec">, what: string): KeychainBackend {
+  if (opts.keychain) return opts.keychain;
+  if (opts.platform !== "darwin") throw new StepFailed(`${what} works on the macOS login Keychain, which this host (${opts.platform}) does not have — there is no shared scope here to migrate`);
+  return securityKeychain(opts.exec ?? realExec);
+}
+
+/**
+ * `metistry secrets migrate-scope`: §2.14 steps 1–2 for ONE instance,
+ * idempotent. **Deletes nothing**: the backend's `delete` is never called
+ * from here, and the tests hold it to that.
+ */
+export async function migrateScope(opts: MigrateScopeOptions): Promise<MigrateScopeResult> {
+  const store = instanceStore(opts);
+  const backend = keychainBackend(opts, "migrate-scope");
+  const sharedAccount = keychainAccount(opts.env);
+  if (sharedAccount === store.account) {
+    throw new StepFailed(`refusing to migrate: this instance's account (${store.account}) is the per-user account itself (METISTRY_KEYCHAIN_ACCOUNT), so there is nothing to copy from`);
+  }
+  // Refuse a secrets.yaml this command could not read back BEFORE copying
+  // anything: a copy with no line to record it is invisible.
+  const edit = await openSecrets(opts);
+  const accepts = opts.accepts ?? acceptsSecretReference;
+  const out = opts.out;
+  const dry = opts.dryRun === true;
+
+  const res: MigrateScopeResult = { instanceId: store.account, sharedAccount, copied: [], kept: [], unreadable: [], unmappable: [], recorded: [], rewritten: [], pending: [], originals: [], complete: false, deliveries: [] };
+  out(`shared scope: account ${sharedAccount} → this instance's ${store.account} (${opts.instanceDir})`);
+
+  // ---- step 1: copy, instance wins -----------------------------------------------
+  for (const from of await sharedScopeCandidates(opts.instanceDir, opts)) {
+    const to = sharedScopeSecretName(from);
+    const original = await backend.has(serviceFor(from), sharedAccount);
+    if (original) res.originals.push(from);
+    if (!to) {
+      if (original) {
+        res.unmappable.push(from);
+        out(`left ${from}: ${from.replace(/^METISTRY_/, "").toLowerCase()} is not a secret name — \`metistry secrets set <name>\` stores it under one you choose`);
+      }
+      continue;
+    }
+    if (await store.has(to)) {
+      res.kept.push({ from, to });
+      out(`kept ${to}: this instance already has one, and it wins${original ? ` — ${from} was not read` : ""}`);
+      continue;
+    }
+    if (!original) continue;
+    if (dry) {
+      res.copied.push({ from, to });
+      out(`[dry-run] would copy ${from} → ${to} (${secretService(to)}, account ${store.account})`);
+      continue;
+    }
+    let why: string | undefined;
+    try {
+      const value = await backend.get(serviceFor(from), sharedAccount);
+      if (value === undefined || value === "") why = "the Keychain did not hand it over — a prompt declined, or the keychain locked; run this from Terminal and allow it";
+      else await store.set(to, value);
+    } catch (e) {
+      why = e instanceof Error ? e.message : String(e);
+    }
+    if (why) {
+      res.unreadable.push({ from, to, why });
+      out(`could not copy ${from}: ${why}`);
+      continue;
+    }
+    res.copied.push({ from, to });
+    out(`copied ${from} → ${to} (${secretService(to)}, account ${store.account}). The value is not printed.`);
+  }
+
+  for (const { to } of [...res.copied, ...res.kept]) {
+    if (has(edit.file, to) || res.recorded.includes(to)) continue;
+    edit.doc.setIn(["secrets", to], edit.doc.createNode({ hosts: [], grants: {} }, { flow: false }));
+    flowList(edit, to);
+    res.recorded.push(to);
+  }
+  if (res.recorded.length) {
+    out(`recording in secrets.yaml: ${res.recorded.join(", ")} — sent to no host and granted to no one until you say (\`metistry secrets hosts <name> <host>\`, \`metistry secrets grant\`)`);
+    res.deliveries.push(await commitSecrets(opts, edit, `secrets: migrate-scope — ${res.recorded.join(", ")}`));
+  }
+
+  // ---- step 2: rewrite references, only into a file that still validates -----------
+  const held = new Set([...res.copied, ...res.kept].map((c) => c.to));
+  const byFile = new Map<string, ReferenceSite[]>();
+  for (const s of await sharedReferenceSites(opts.instanceDir)) {
+    const to = sharedScopeSecretName(s.from);
+    if (!to || !held.has(to)) continue;
+    byFile.set(s.file, [...(byFile.get(s.file) ?? []), s]);
+  }
+  for (const [file, sites] of byFile) {
+    const text = await readText(join(opts.instanceDir, file));
+    const doc = parseDocument(text);
+    for (const s of sites) doc.setIn(s.path, `{{ secret.${sharedScopeSecretName(s.from)} }}`);
+    const next = String(doc);
+    const broken = accepts(sites[0]!.kind, text);
+    const refused = broken ?? accepts(sites[0]!.kind, next);
+    if (refused) {
+      // the issue about the field being rewritten, not the whole report
+      const issues = refused.replace(/^invalid [^:]+: /, "").split("; ");
+      const about = issues.filter((i) => sites.some((x) => i.startsWith(x.field.replace(/\[(\d+)\]/g, ".$1")))).join("; ") || issues[0];
+      const why = broken ? `${file} does not validate as it stands — fix it first (${about})` : `this release's schema does not read {{ secret.name }} there yet (${about}), so it keeps the environment name until one does — \`metistry update\` then finishes it`;
+      for (const s of sites) {
+        const to = sharedScopeSecretName(s.from)!;
+        res.pending.push({ file, field: s.field, from: s.from, to, why });
+        out(`left ${file} ${s.field} as ${s.from}: ${why}`);
+      }
+      continue;
+    }
+    const r = new StepRunner({ dryRun: dry, out, exec: opts.exec ?? realExec, env: opts.env });
+    res.deliveries.push(await writeProtected(r, file, next, `secrets: migrate-scope — references in ${file}`, { env: opts.env, platform: opts.platform, uid: opts.uid, fetchFn: opts.fetchFn ?? fetch, instanceDir: opts.instanceDir }));
+    for (const s of sites) {
+      const to = sharedScopeSecretName(s.from)!;
+      res.rewritten.push({ file, field: s.field, from: s.from, to });
+      out(`rewrote ${file} ${s.field}: ${s.from} → {{ secret.${to} }}`);
+    }
+  }
+
+  // ---- step 4: the originals stay --------------------------------------------------------
+  if (res.originals.length) out(`left in the shared scope — this migration deletes nothing: ${res.originals.join(", ")}. \`metistry secrets purge-shared\` removes an original once every instance on this Mac has its copy.`);
+  res.complete = res.unreadable.length === 0 && res.unmappable.length === 0;
+  const waiting = res.pending.length ? `; ${res.pending.length} reference(s) keep their environment name until a release reads {{ secret.name }} there` : "";
+  out(
+    res.complete
+      ? `shared scope: copied for ${opts.instanceDir}${waiting}${dry ? " (dry run — nothing changed)" : ""}.`
+      : `shared scope: not finished for ${opts.instanceDir} — deal with the lines above, then rerun \`${MIGRATE_SCOPE_COMMAND} --instance ${opts.instanceDir}\`.`,
+  );
+  return res;
+}
+
+// ---- the doctor row's question: presence only ---------------------------------------
+
+export interface SharedScopeStatus {
+  /** originals under the per-user account that this instance has no copy of yet */
+  unmigrated: string[];
+  /** every original still under the per-user account */
+  originals: string[];
+}
+
+/**
+ * What doctor says about the shared scope, from presence probes only — never
+ * a value, never a prompt. Undefined when there is nothing to ask: no
+ * instance_id means no account to compare against.
+ */
+export async function sharedScopeStatus(opts: { instanceDir: string; instanceId: string | undefined; envFile?: string | undefined; exampleFile?: string | undefined; env: NodeJS.ProcessEnv; probe: (service: string, account: string) => Promise<boolean> }): Promise<SharedScopeStatus | undefined> {
+  if (!opts.instanceId) return undefined;
+  const shared = keychainAccount(opts.env);
+  if (shared === opts.instanceId) return undefined;
+  const status: SharedScopeStatus = { unmigrated: [], originals: [] };
+  for (const from of await sharedScopeCandidates(opts.instanceDir, opts)) {
+    if (!(await opts.probe(serviceFor(from), shared))) continue;
+    status.originals.push(from);
+    const to = sharedScopeSecretName(from);
+    if (!to || !(await opts.probe(secretService(to), opts.instanceId))) status.unmigrated.push(from);
+  }
+  return status;
+}
+
+// ---- purge-shared -----------------------------------------------------------------------
+
+/** Instance directories a Metistry LaunchAgent on this Mac runs (their METISTRY_INSTANCE_DIR), plus `current` — "every instance this Mac knows". */
+export async function knownInstanceDirs(current: string, home: string): Promise<string[]> {
+  const dirs = [current.replace(/\/+$/, "")];
+  const agents = launchAgentsDir(home);
+  let files: string[] = [];
+  try {
+    files = (await readdir(agents)).filter((f) => f.startsWith(LABEL_PREFIX.replace(/\.$/, "")) && f.endsWith(".plist")).sort();
+  } catch {
+    return dirs;
+  }
+  for (const f of files) {
+    const text = await readText(join(agents, f));
+    const m = /<key>METISTRY_INSTANCE_DIR<\/key>\s*<string>([^<]*)<\/string>/.exec(text);
+    const dir = m?.[1]?.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, "&").replace(/\/+$/, "");
+    if (dir && !dirs.includes(dir)) dirs.push(dir);
+  }
+  return dirs;
+}
+
+export interface PurgeSharedOptions {
+  /** the instance running the verb */
+  instanceDir: string;
+  env: NodeJS.ProcessEnv;
+  platform: NodeJS.Platform;
+  exec?: Exec | undefined;
+  /** test seam: the Keychain */
+  keychain?: KeychainBackend | undefined;
+  /** the instance directories to count; default: `knownInstanceDirs` */
+  instances?: string[] | undefined;
+  home?: string | undefined;
+  exampleFile?: string | undefined;
+  /** without it nothing is deleted: the preview is the whole command */
+  yes?: boolean | undefined;
+  out: (line: string) => void;
+}
+
+export interface PurgeSharedResult {
+  sharedAccount: string;
+  /** the instances counted; `instanceId: null` = none, which keeps every original */
+  instances: Array<{ dir: string; instanceId: string | null }>;
+  /** originals every counted instance has its own copy of */
+  removable: string[];
+  /** originals kept, and the instances still without a copy */
+  kept: Array<{ name: string; missingIn: string[] }>;
+  /** what was deleted (empty without `--yes`) */
+  deleted: string[];
+}
+
+/**
+ * `metistry secrets purge-shared`: step 4's cleanup. An original under the
+ * per-user account is removable only when EVERY instance this Mac knows has
+ * its own copy — so no instance can lose the one it still reads. An instance
+ * with no instance_id has no copy of anything, so it keeps every original.
+ * Presence probes only; preview-then-confirm.
+ */
+export async function purgeShared(opts: PurgeSharedOptions): Promise<PurgeSharedResult> {
+  const backend = keychainBackend(opts, "purge-shared");
+  const sharedAccount = keychainAccount(opts.env);
+  const dirs = opts.instances ?? (await knownInstanceDirs(opts.instanceDir, opts.home ?? homedir()));
+  const instances: PurgeSharedResult["instances"] = [];
+  const names: string[] = [];
+  for (const dir of dirs) {
+    if (!existsSync(dir)) {
+      opts.out(`skipped ${dir}: a LaunchAgent names it, but the directory is gone`);
+      continue;
+    }
+    const id = (await readInstanceId(dir).catch(() => undefined)) ?? null;
+    if (id === sharedAccount) throw new StepFailed(`refusing: ${dir}'s instance_id is the per-user account itself (METISTRY_KEYCHAIN_ACCOUNT) — its items and the shared originals cannot be told apart`);
+    instances.push({ dir, instanceId: id });
+    const envFile = envPaths({ instanceDir: dir })?.read[0];
+    for (const n of await sharedScopeCandidates(dir, { envFile, exampleFile: opts.exampleFile })) if (!names.includes(n)) names.push(n);
+  }
+  const removable: string[] = [];
+  const kept: PurgeSharedResult["kept"] = [];
+  for (const name of names) {
+    if (!(await backend.has(serviceFor(name), sharedAccount))) continue;
+    const to = sharedScopeSecretName(name);
+    const missingIn: string[] = [];
+    for (const i of instances) if (!to || !i.instanceId || !(await backend.has(secretService(to), i.instanceId))) missingIn.push(i.dir);
+    if (missingIn.length === 0 && instances.length > 0) removable.push(name);
+    else kept.push({ name, missingIn });
+  }
+
+  opts.out(`shared scope: account ${sharedAccount}`);
+  opts.out(`instances this Mac knows: ${instances.map((i) => `${i.dir} (${i.instanceId ?? "no instance_id"})`).join(", ") || "(none)"}`);
+  opts.out(`${removable.length} original(s) every one of them has copied — removable: ${removable.join(", ") || "(none)"}`);
+  for (const k of kept) opts.out(`kept ${k.name}: no copy yet in ${k.missingIn.join(", ")} — \`${MIGRATE_SCOPE_COMMAND} --instance <dir>\` there first`);
+  if (!opts.yes) {
+    opts.out("");
+    opts.out(`preview only. Nothing was deleted — rerun with --yes to delete the ${removable.length} original(s) above.`);
+    return { sharedAccount, instances, removable, kept, deleted: [] };
+  }
+  const deleted: string[] = [];
+  for (const n of removable) if (await backend.delete(serviceFor(n), sharedAccount)) deleted.push(n);
+  opts.out(`deleted ${deleted.length} original(s) from account ${sharedAccount}: ${deleted.join(", ") || "(none)"}`);
+  const failed = removable.filter((n) => !deleted.includes(n));
+  if (failed.length) opts.out(`could not delete: ${failed.join(", ")}`);
+  return { sharedAccount, instances, removable, kept, deleted };
 }

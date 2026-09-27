@@ -206,11 +206,14 @@ public struct WorkingProfile: Sendable, Equatable {
     /// Minutes past local midnight. Nil: `working_hours` absent or unreadable.
     public var dayStart: Int?
     public var dayEnd: Int?
+    /// `task_size_minutes` — `s`, `m`, `l` to minutes (T6-1a). Nil: the profile does not say.
+    public var sizeMinutes: [String: Int]?
 
-    public init(workingDays: [String]? = nil, dayStart: Int? = nil, dayEnd: Int? = nil) {
+    public init(workingDays: [String]? = nil, dayStart: Int? = nil, dayEnd: Int? = nil, sizeMinutes: [String: Int]? = nil) {
         self.workingDays = workingDays
         self.dayStart = dayStart
         self.dayEnd = dayEnd
+        self.sizeMinutes = sizeMinutes
     }
 
     public static let path = "Me/profile.md"
@@ -244,6 +247,24 @@ public struct WorkingProfile: Sendable, Equatable {
                 }
                 let known = days.map { String($0.lowercased().prefix(3)) }.filter(dayNames.contains)
                 profile.workingDays = known.isEmpty ? nil : known
+            } else if line.hasPrefix("task_size_minutes:") {
+                // `{ s: 15, m: 45, l: 90 }`, or the same as an indented block
+                let value = String(line.dropFirst("task_size_minutes:".count)).trimmingCharacters(in: .whitespaces)
+                var pairs: [String] = []
+                if value.hasPrefix("{") {
+                    pairs = value.trimmingCharacters(in: CharacterSet(charactersIn: "{} ")).components(separatedBy: ",")
+                } else if value.isEmpty {
+                    for next in all[(i + 1)...] {
+                        guard next.hasPrefix(" "), next.contains(":") else { break }
+                        pairs.append(next)
+                    }
+                }
+                var sizes: [String: Int] = [:]
+                for pair in pairs {
+                    let kv = pair.split(separator: ":", maxSplits: 1).map { Self.unquote(String($0)).lowercased() }
+                    if kv.count == 2, ["s", "m", "l"].contains(kv[0]), let n = Int(kv[1]), n > 0 { sizes[kv[0]] = n }
+                }
+                profile.sizeMinutes = sizes.isEmpty ? nil : sizes
             }
         }
         return profile
@@ -841,6 +862,9 @@ struct TodayTaskRow: View {
     let note: TodayTaskNote?
     let onTick: (Bool) -> Void
     let onUndo: () -> Void
+    /// Move Up and Move Down in the day's order (T6-1a); nil where the row has no place to move.
+    var onMoveUp: (() -> Void)? = nil
+    var onMoveDown: (() -> Void)? = nil
 
     var body: some View {
         let p = Palette(scheme)
@@ -856,6 +880,7 @@ struct TodayTaskRow: View {
                 .toggleStyle(.checkbox)
                 #endif
                 .accessibilityLabel(Text(verbatim: task.spoken(today: today, note: note)))
+                .todayMoveActions(up: onMoveUp, down: onMoveDown)
             }
             if let day = TaskDay(today) {
                 FacetRow(TaskFacets(vaultTask: task.row), today: day)

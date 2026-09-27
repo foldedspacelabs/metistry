@@ -901,6 +901,13 @@ names)`, which merges them into `meta.secrets` as a sorted set. The
 to say "sends `github_write` to `api.github.com`" without touching the
 Keychain.
 
+**Not yet on a compute provider's chat client.** Since T4-18 a provider's
+key is a `{{ secret.name }}`, but the engine sends the key it was delivered
+(`METISTRY_SECRET_<NAME>`, docs/ops/compute.md "Secrets") rather than
+filling it here: a provider key has no grantee in `secrets.yaml`'s
+vocabulary, and the engine's sandbox does not read `secrets.yaml`. The
+proxy above still refuses any host `compute.yaml` does not name.
+
 ## Secrets in plists
 
 The console's and the assistant's environments are rendered into their

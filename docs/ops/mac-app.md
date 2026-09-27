@@ -539,8 +539,9 @@ and a test asserts both halves: the key appears in no argument of any call, and
 the runner was handed it as `standardInput`.
 
 Everything the app knows afterwards is what `metistry compute show --json`
-reports: the provider's `auth.secret` **name**, and whether an item of that name
-is in the Keychain. The verb has no code path that can print a value, and
+reports: the provider's `auth.secret` — a **reference**, `{{ secret.openrouter_api_key }}`
+since T4-18, the key being one of this instance's secrets — and whether this
+instance holds that item. The verb has no code path that can print a value, and
 `ComputeProviderFacts` has no field that could hold one.
 
 **Skipping is a supported install, and says so.** With no `assignments.default`

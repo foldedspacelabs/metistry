@@ -56,7 +56,7 @@ providers:
     kind: openai-compatible
     base_url: https://openrouter.ai/api/v1
     locality: off_machine
-    auth: { secret: METISTRY_OPENROUTER_API_KEY }   # a NAME. The value is in the Keychain.
+    auth: { secret: "{{ secret.openrouter_api_key }}" }   # a REFERENCE to one of this instance's secrets
     zdr: true
     caching: auto                            # send its automatic prompt-caching field on every call
     request: { provider: { order: [anthropic], allow_fallbacks: false } }
@@ -85,7 +85,9 @@ so a validation error tells you what to edit.
 | `model` is one `<provider>/<model-id>`; the provider must be declared in the same file | A reference says where it runs. The overlay replaces a file whole, so there is no other file it could mean. |
 | Everything after the first `/` is the id, verbatim | LM Studio and OpenRouter ids contain slashes (`google/gemma-3n-e4b`). |
 | No `/auto`, no list of fallbacks | The router is deterministic (invariant 4): no model decides which model runs. An auto-router hands that choice to the provider. |
-| `auth.secret` is an UPPER_SNAKE_CASE **name** | A pasted `sk-…` cannot match it. The value lives in the login Keychain, never in the repo. |
+| `auth.secret` is a **reference**: `{{ secret.<name> }}`, or `env:<NAME>` (and, so every older file loads, a bare `<NAME>`) | A pasted `sk-…` cannot match any of the three. The value is one of this instance's secrets in the login Keychain, never in the repo ("Secrets" below). |
+| `enabled: false` means nothing may be assigned to that provider | Switched off is "neither searched nor offered" (C130), and an assignment is the strongest offer there is — so a default, tier, crew, shadow or intent line naming it is refused by name, and "off" can never quietly mean "still answering turns". |
+| `billing:` is `token` or `subscription`, and only off this machine | How a cloud provider charges (C128); a local server bills nothing, so a billing mode there would be a line that says something untrue. |
 | `locality: off_machine` requires `data_policy` | What may leave this machine is a declaration, not a default. It is the §4.18 target policy schema, reused. |
 | A budget needs `daily_usd` or `monthly_usd` | An action with no limit never fires, so it is not a control. |
 | Unknown keys are errors | A typo must fail loudly rather than silently do nothing. |
@@ -127,13 +129,17 @@ restart. The degradation is deliberate:
 metistry compute show [--json]
 metistry compute providers list [--json]
 metistry compute providers add --from openrouter|lmstudio|ollama|llamaserver|applefm \
-        [--name <n>] [--base-url <url>] [--secret <NAME>] [--skip-test]
+        [--name <n>] [--base-url <url>] [--secret <name>] [--skip-test]
+metistry compute providers set <name> [--enabled on|off] [--billing token|subscription] \
+        [--base-url <url>] [--secret <name>]
 metistry compute providers remove <name>
 metistry compute providers test <name> [--complete] [--model <id>]
 metistry compute models list [--provider <name>] [--json]
+metistry compute models search [<query>] [--provider <name>] [--json]
 metistry compute models install <provider>/<model> [--json]
 metistry compute models load|unload <provider>/<model> [--ttl <seconds>] [--json]
 metistry compute assign <default|<tier>|crew:<name>> <provider/model> [--effort low|medium|high]
+metistry compute unassign <tier|crew:<name>>
 metistry compute budget <instance|provider:<name>> [--daily <usd>] [--monthly <usd>] \
         --action allow|stop|critical_only
 metistry compute cache-report [--since 7d] [--json]
@@ -141,8 +147,8 @@ metistry compute route-report [--since 30d] [--json]
 ```
 
 Every verb takes `--json` (the app's surface) and `--dry-run` (print the
-plan, write nothing) — except `cache-report` and `route-report`, which write
-nothing to begin with: they are the two READS here, over the `runs` ledger
+plan, write nothing) — except `models search`, `cache-report` and
+`route-report`, which write nothing to begin with: the last two are READS over the `runs` ledger
 ("Measuring it (OPEN-6)") and over `inbound_messages` and the route record
 ("The router's baseline"). Every write goes through the reconciler as `user`, and
 the **result is validated before it is written** — an edit that would produce
@@ -165,17 +171,69 @@ metistry compute show
 `assign default` comes first: it is where every unknown tier lands, so the
 verbs refuse a tier or a crew until it exists.
 
+**Tiers are edited here, under Advanced (Q1).** `assignments.tiers` stays — as
+the allow-list the dynamic router chooses from (docs/ops/dynamic-router.md,
+plan §2.4) — and Settings ▸ Compute ▸ Advanced is where it is edited: `assign
+<tier>` adds or changes one, `unassign <tier>` removes it. `default` is
+reassigned, never removed; a turn that still names a removed tier runs on
+`default`, the rule `resolveAssignment` has always followed. **Metis uses** in
+Compute is `assignments.default`.
+
 ### Secrets
 
-`providers add` asks for the key **on stdin** and puts it in the login
-Keychain. It is never an argument, never echoed, never written to the repo,
-and no `--json` result or rendered line can carry one. Provider credentials
-are **per instance** since the owner's ruling Q3 (plan §2.14): `providers
-add` still stores the key under the retired per-user account until compute
-reads `{{ secret.name }}` (T4-18), so run `metistry secrets migrate-scope`
-after it — that copies the key into this instance under its lowercase
-name (`METISTRY_OPENROUTER_API_KEY` → `{{ secret.openrouter_api_key }}`), and `metistry secrets sync --to env`
-then fills the `.env` line from the copy (docs/ops/cli.md).
+A provider's key is **one of this instance's secrets** (plan §2.14, the
+owner's Q3: per instance only). `providers add` asks for it **on stdin** and
+hands it to `metistry secrets set`'s own code: the value goes into the login
+Keychain under this instance's account (`metistry:secret:<name>`, account =
+its `instance_id`), the name into `.metistry/secrets.yaml` sent only to the
+provider's host (`openrouter.ai`) and granted to no one, and `compute.yaml`
+gets a **reference**:
+
+```yaml
+auth: { secret: "{{ secret.openrouter_api_key }}" }
+```
+
+It is never an argument, never echoed, never written to the repo, and no
+`--json` result or rendered line can carry one. `--secret <name>` picks which
+secret (a name, or `{{ secret.<name> }}`); the old UPPER_SNAKE spelling is
+refused with the name it became, because the flag that stored a key under the
+per-user account is exactly what Q3 retired. A key this instance already holds
+is not asked for again. `providers set <name> --secret <name>` repoints a
+provider at another secret; the key itself goes in with `metistry secrets
+set`.
+
+`auth.secret` takes three spellings, each a shape a pasted key cannot take:
+
+| spelling | what it is |
+| --- | --- |
+| `{{ secret.<name> }}` | one of this instance's secrets — what `providers add` writes |
+| `env:<NAME>` | a variable of this install's environment — a bridge bearer Metistry minted (`applefm`'s `METISTRY_BRIDGE_TOKEN_APPLE_FM`), a key a container is handed. Accepted for one release (§2.14) |
+| `<NAME>` | the pre-T4-18 spelling of `env:<NAME>`, so every existing file loads. `metistry secrets migrate-scope` (run by every `metistry update`) rewrites the retired provider keys among them — `METISTRY_OPENROUTER_API_KEY` → `{{ secret.openrouter_api_key }}` — keeping your comments |
+
+**How a service gets the value — never from the Keychain.** The engine has no
+shell and no `security` (invariant 9), runs sandboxed, and is started by the
+supervisor with an allowlisted environment. So a secret reaches it the way
+every credential already does, from the owner's hand: `metistry secrets sync
+--to env` reads this instance's Keychain account and writes each secret the
+providers reference into `.metistry/state/.env` (0600) as
+`METISTRY_SECRET_<NAME>` — a namespace no install variable is in, so
+`{{ secret.db_password }}` can never be answered by `METISTRY_DB_PASSWORD` —
+and `metistry up` passes exactly those names to the assistant
+(`credentialEnvNames`, `packages/core/src/compute.ts`). For one release the
+engine also reads the `METISTRY_<NAME>` line T4-3 filled from the same secret,
+so `migrate-scope` rewriting the reference under a running engine does not cut
+it off before the next `metistry up`. The console's collectors read the same
+names through the same resolver. The rejected alternative was a console door
+that handed the engine a value: §2.2 M7 says a value never crosses the API.
+
+**Not wired yet: the egress guard on compute calls.** §2.14 fills a secret at
+egress, checked against its *Sent only to* hosts (core's `guardedFetch`, T4-2).
+The engine does not call through it yet — it sends the key it was delivered —
+because a provider key has no grantee in `secrets.yaml`'s vocabulary
+(`connection:<name>` or `agent:<id>`; per-actor grants would mean granting every
+crew the key) and the engine's sandbox does not read `secrets.yaml`. The
+install's egress proxy still refuses any host `compute.yaml` does not name.
+`providers add` records the host so the policy is truthful for the day it is.
 
 `providers test` is a real `GET <base_url>/models` with that credential;
 `--complete` adds a one-token `POST <base_url>/chat/completions`, carrying
@@ -199,7 +257,7 @@ itself having failed.
 
 ### From the console
 
-Five of the verbs above are also console routes, so compute is not Mac-only
+Seven of the verbs above are also console routes, so compute is not Mac-only
 and the Compute pane works from the phone (`docs/ops/console-api.md`
 `/api/compute*`, `docs/product/app-ux-plan.md` §6 phase D):
 
@@ -207,7 +265,9 @@ and the Compute pane works from the phone (`docs/ops/console-api.md`
 | --- | --- |
 | `GET /api/compute` | `compute show --json`, plus `spend` (both budget windows, from the `spend` named query) and `writable` |
 | `GET /api/compute/models[?provider=]` | `compute models list --json` |
+| `GET /api/compute/catalogue[?q=&provider=&refresh=true]` | `compute models search --json` — the listings kept in memory between searches, `refresh=true` re-reading every one (C132's Refresh) |
 | `POST /api/compute/assign` `{tier\|crew, model, effort?}` | `compute assign` |
+| `POST /api/compute/unassign` `{tier\|crew}` | `compute unassign` |
 | `POST /api/compute/budget` `{scope, daily?, monthly?, action}` | `compute budget` |
 | `POST /api/compute/providers/test` `{name, complete?}` | `compute providers test` |
 
@@ -216,15 +276,17 @@ same YAML-document edit, the same re-validation of the result before anything
 is written, the same write through the reconciler as `user`. A refusal reads
 identically on both doors because it *is* the same refusal.
 
-**Two verbs are deliberately not there: `providers add` and `providers
-remove`.** Adding a provider takes a key, and a key goes on stdin into the
-login Keychain from the hand of the person at the machine — a *user*-scoped
-credential shared by every instance on that Mac is not one instance's to
-accept over HTTP. So **adding or removing a provider, and anything that takes
-a secret, stays CLI/app-only.** `GET /api/compute` reports the secret's NAME
-and whether an item of that name exists (`secret_present`), never a value;
-where there is no login Keychain — a container — it reports the honest
-`false`.
+**Three verbs are deliberately not there: `providers add`, `set` and
+`remove`** (§2.2 M16). Adding a provider takes a key, and a key goes on stdin
+into this instance's Keychain account from the hand of the person at the
+machine; the switch, the base URL and which secret a provider uses are where
+prompts and keys go, which the Q8 table keeps to the Mac. So **adding,
+configuring or removing a provider, and anything that takes a secret, stays
+CLI/app-only.** `GET /api/compute` reports the reference (`secret`, with
+`secret_kind` and `secret_name`) and whether this instance holds it
+(`secret_present`), never a value — and each provider's `enabled`, `billing`
+and its one `tag` (`local` · `cloud` · `subscription`). Where there is no login
+Keychain — a container — presence reads the delivery variable instead.
 
 **They are owner-only configuration, not console "actions".** Invariant 10
 closes the console's *action* surface: a closed, enumerated set, each entry a
@@ -244,6 +306,72 @@ there every route answers `503` naming `METISTRY_INSTANCE_DIR` while
 other than that file the write is refused with both paths named, rather than
 starting from a bare header and overwriting the real one.
 
+## Finding a model — `models search` (C131)
+
+```sh
+metistry compute models search gemma
+```
+
+Every **switched-on** provider's catalogue, grouped by **model**: one row per
+model — name, maker, context, capabilities — and under it one line per place
+it runs, each `<provider>/<id>` exactly as an assignment takes it.
+
+```
+✓ openrouter (cloud) — https://openrouter.ai/api/v1/models → 312 model(s)
+✓ lmstudio (local) — http://127.0.0.1:1234/v1/models → 3 model(s)
+○ ollama — switched off — `metistry compute providers set ollama --enabled on`
+
+Gemma 3 4B Google — 2 places, local or cloud · from $0.02 per M
+    lmstudio/google/gemma-3-4b  local  free
+    openrouter/google/gemma-3-4b-it  cloud  $0.02 in / $0.04 out per M
+```
+
+- **Which ids are one model** is `seed/model-identities.yaml`: provider id →
+  one identity, ids EXACT (compared without case), one id to one model. The
+  instance's own `.metistry/model-identities.yaml` overlays it **by key** —
+  replacing an entry, adding one, or taking an id — rather than D4's
+  whole-file rule, because the product's table grows every release.
+- **An id the table cannot map stays its own row**, under the provider that
+  served it: the same unknown id on two providers is two rows, because
+  nothing but the table may say two ids are one model.
+- **Prices** come from the listing where it carries them (OpenRouter's
+  per-token `pricing`, a router's `-1` read as no price) and otherwise from
+  the provider's `pricing:`; a `subscription` place reads *Included*, a local
+  one is free. The cheapest of two or more priced places is marked. Nothing is
+  invented where both are silent.
+- **A switched-off provider is never dialled** — it is listed as skipped.
+- **Refresh.** The CLI reads every listing live. The console
+  (`GET /api/compute/catalogue`) keeps them in memory for 15 minutes so a
+  search-as-you-type is not a round of `/v1/models` per keystroke;
+  `refresh=true` re-reads every switched-on provider now.
+
+Fit against this Mac's memory, a local model's size and quantisation, and the
+filters (Local · Cloud · Subscription · Fits this Mac · Tools) are the pane's
+(T6-12) over what this carries.
+
+## The switch and billing (C128, C130)
+
+```yaml
+providers:
+  ollama: { kind: openai-compatible, base_url: http://127.0.0.1:11434/v1, locality: on_machine, enabled: false }
+  plan:
+    kind: openai-compatible
+    base_url: https://cloud.example/v1      # a subscription cloud you write by hand
+    locality: off_machine
+    billing: subscription
+    auth: { secret: "{{ secret.plan_key }}" }
+    data_policy: { allow: [Projects], deny_sources: [comms], max_brief_bytes: 65536 }
+```
+
+`enabled: false` (`providers set <name> --enabled off`) switches a provider
+off: neither searched nor offered, never the embedder's default, a
+collector's call on it degrades as if it were absent, and nothing may be
+assigned to it — switching off one an assignment still names is refused,
+naming the assignment. Absent is on. `billing: subscription` marks a plan
+whose own window is its limit (T4-19 enforces that); absent is `token`. The
+one tag a provider shows follows: `local` on this machine, else
+`subscription` or `cloud` (C132 — there is no "By token" tag).
+
 ## Templates
 
 A template is a unit of the **provider registry** (plan §2.7,
@@ -255,7 +383,7 @@ nothing a provider in `compute.yaml` could not. The product ships these:
 
 | template | what it is |
 | --- | --- |
-| `openrouter` | one key, most models; pins `provider: { order: [anthropic], allow_fallbacks: false }` so a router in front of a model does not become a second router, and is the one template that ships `caching: auto` |
+| `openrouter` | one key, most models — `{{ secret.openrouter_api_key }}`; pins `provider: { order: [anthropic], allow_fallbacks: false }` so a router in front of a model does not become a second router, and is the one template that ships `caching: auto` |
 | `lmstudio` | LM Studio's local server on port 1234 |
 | `ollama` | Ollama's OpenAI-compatible surface on port 11434 |
 | `llamaserver` | the **bundled** `llama-server` on port 7813 — Metistry starts it |
@@ -284,7 +412,7 @@ machine's Ollama is `--from ollama --name box --base-url http://10.0.0.4:11434/v
 Any OpenAI-compatible endpoint works without a template — write the block by
 hand, or start from the nearest one. **One cloud template ships** (OPEN-7,
 ruled 2026-09-17): OpenCode Zen and every other OpenAI-compatible cloud are
-reached by writing the block — a base URL, a secret NAME, `data_policy`, and
+reached by writing the block — a base URL, a secret reference, `data_policy`, and
 `pricing:` when the response carries no cost (the commented example in
 `seed/compute.yaml` is the shape) — rather than by a seeded file whose base URL,
 prices and retention we would be promising to keep true. Copy `openrouter` only

@@ -969,8 +969,11 @@ exist, which model each tier and crew runs on, and what each may spend:
 
 ```sh
 metistry compute providers add --from <template>   # the product's: openrouter, lmstudio, ollama, llamaserver, applefm
+metistry compute providers set <name> [--enabled on|off] [--billing token|subscription] [--base-url <url>] [--secret <name>]
 metistry compute models list [--provider <name>]
+metistry compute models search [<query>] [--provider <name>]
 metistry compute assign default lmstudio/google/gemma-3n-e4b
+metistry compute unassign <tier|crew:<name>>
 metistry compute budget instance --monthly 60 --action stop
 metistry compute show [--json]
 ```
@@ -978,10 +981,29 @@ metistry compute show [--json]
 A §4.7 protected path like `.metistry/deployment.yaml`: every write goes through the
 reconciler as the `user` principal, and an edit whose RESULT would not
 validate is refused rather than written. `providers add` reads the API key
-from stdin into the login Keychain (still the per-user account until compute
-reads `{{ secret.name }}` — run `metistry secrets migrate-scope` after it) and
-never takes it as an argument. Budgets are enforced in the engine, before the call — see
+from stdin into **one of this instance's secrets** — the login Keychain under
+the instance's own account, its name recorded in `secrets.yaml` sent only to
+the provider's host (`secrets set`'s own code) — and writes
+`auth.secret: "{{ secret.<name> }}"`, a reference; it never takes the key as an
+argument (`--secret <name>` picks which secret; an UPPER_SNAKE name is refused
+with the name it became). `secrets sync --to env` then delivers it to the
+engine as `METISTRY_SECRET_<NAME>` — the engine reads its environment, never the
+Keychain. Budgets are enforced in the engine, before the call — see
 `docs/ops/compute.md`, which is the whole story including what is missing.
+
+`providers set` is the provider's gear (M16 — the Mac's and the CLI's, never a
+console route): its **switch** (`--enabled off` = neither searched nor
+offered, and nothing may be assigned to it — switching off a provider an
+assignment names is refused, naming the assignment), its `billing`
+(`subscription` is a cloud plan whose window is its limit; refused on a local
+server), its base URL, and which secret its key is. `models search` groups every
+switched-on provider's catalogue by **model** through
+`seed/model-identities.yaml` (overlaid by the instance's own
+`.metistry/model-identities.yaml`, by key) — one row per model, one line per
+place it runs, priced from the listing or `pricing:`, the cheapest of two or
+more marked; an id the table cannot map stays its own row under its provider.
+`unassign` removes a tier or a crew — the other half of editing the tiers the
+dynamic router chooses from (Q1); `default` is reassigned, never removed.
 
 `--from` names a **provider template** — a unit of the provider registry: the
 product's `seed/compute-templates/<name>/` and your own in
@@ -1119,10 +1141,14 @@ and:
   under the per-user account copied across by `sync` — is gone with the
   table.
 
-`metistry compute providers add` still stores a new provider key under the
-per-user account until compute reads `{{ secret.name }}` (T4-18); run
-`metistry secrets migrate-scope` after it, and `secrets sync --to env` then
-fills the line.
+`metistry compute providers add` stores a new provider key as one of this
+instance's secrets (T4-18), and `compute.yaml` references it as
+`{{ secret.<name> }}`. `sync --to env` **delivers** every secret compute.yaml's
+providers reference as `METISTRY_SECRET_<NAME>` — from this instance's item and
+no other, and no secret nothing references — which is how a key reaches the
+engine without the engine touching the Keychain. For one release the engine
+also reads the older `METISTRY_<NAME>` line T4-3 filled from the same secret,
+so `migrate-scope`'s rewrite never cuts off a running engine.
 
 **`sync --to env` mints the generated ones.** A secret that exists in
 neither the Keychain nor `.env` is normally reported ("not in the Keychain,
@@ -1298,11 +1324,14 @@ metistry secrets purge-shared [--yes] [--instance <dir>] [--json]
    `{{ secret.<name> }}`, through the protected write, edited as YAML
    documents so your comments survive — **but only into a file that still
    validates with the reference in it**, judged by core's own schema for that
-   file. Today's `compute.yaml` and manifest schemas take an environment
-   name, so each reference is left as it is and reported; the release whose
-   schema reads `{{ secret.name }}` there lets the next `metistry update`
+   file. `compute.yaml` reads `{{ secret.name }}` since T4-18, so its
+   `auth.secret` is rewritten; a manifest's `requires.env` still takes an
+   environment name, so that reference is left as it is and reported, and
+   the release whose schema reads it there lets the next `metistry update`
    finish it. A reference to a secret the instance does not hold is never
-   rewritten.
+   rewritten. A rewritten `{{ secret.openrouter_api_key }}` still counts its
+   original (`METISTRY_OPENROUTER_API_KEY`) as this instance's, so a rerun
+   keeps it and `purge-shared` can find it.
 3. **Stop reading the per-user account** — `sync`, above.
 4. **Leave the originals.** The migration has no code path that deletes a
    Keychain item (a test hands it a Keychain whose `delete` throws). It
@@ -1314,9 +1343,9 @@ shared scope: account metistry → this instance's 11111111-2222-4333-8444-55555
 copied METISTRY_DEVIN_API_KEY → devin_api_key (metistry:secret:devin_api_key, account 11111111-…). The value is not printed.
 copied METISTRY_OPENROUTER_API_KEY → openrouter_api_key (metistry:secret:openrouter_api_key, account 11111111-…). The value is not printed.
 recording in secrets.yaml: devin_api_key, openrouter_api_key — sent to no host and granted to no one until you say (`metistry secrets hosts <name> <host>`, `metistry secrets grant`)
-left .metistry/compute.yaml providers.openrouter.auth.secret as METISTRY_OPENROUTER_API_KEY: this release's schema does not read {{ secret.name }} there yet (…), so it keeps the environment name until one does — `metistry update` then finishes it
+rewrote .metistry/compute.yaml providers.openrouter.auth.secret: METISTRY_OPENROUTER_API_KEY → {{ secret.openrouter_api_key }}
 left in the shared scope — this migration deletes nothing: METISTRY_DEVIN_API_KEY, METISTRY_OPENROUTER_API_KEY. `metistry secrets purge-shared` removes an original once every instance on this Mac has its copy.
-shared scope: copied for ~/instances/second; 1 reference(s) keep their environment name until a release reads {{ secret.name }} there.
+shared scope: copied for ~/instances/second.
 ```
 
 The Keychain may ask once per original the first time — run it from

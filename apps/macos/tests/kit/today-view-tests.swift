@@ -264,7 +264,7 @@ import Testing
 
     // the note: asked of the console, which names the file
     let path = await model.meetingNote(card.event)
-    #expect(path == "Journal/Meetings/2026-09-28 Standup.md", "the recorded note fixture answers")
+    #expect(path == "Journal/Meetings/2026-09-28-standup.md", "the recorded note fixture answers — the door slugs the topic (T2-11)")
     #expect(console.calls.contains { $0.method == "POST" && $0.path == "/api/meetings/evt-lease/note" })
 
     // Draft the Agenda: one message, naming the meeting and what is owed

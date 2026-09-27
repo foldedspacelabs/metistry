@@ -213,7 +213,8 @@ screen that reached past the store would be the bug this section exists to name.
 | `InstanceStore` | same | The Phase-A sections — feed, queue, board, rooms, agents, presence, compute, commands, knowledge — one `@Observable` store per instance, a `Section` per section. `adopt` drops every section on an instance switch |
 | `ConsoleSession` | `sources/kit/stores/console-session.swift` | **What the app holds** (`AppModel.console`, T5-1): per instance, the one `console session` child, `ReachabilityGate` in front of it, `ConsoleStores` over the gate, the `InstanceStore` over the same stores, and `management` (`CLIManagementRunner`). The child starts on the first request. `adopt` — every instance switch and every re-resolved runtime — ends the old child, drops every section built on the session and moves `generation`, so an answer still in flight for the previous instance is discarded when it lands |
 | `ReachabilityGate` · `ConsoleAct` | `sources/kit/stores/reachability-gate.swift` | **O3 at the tool.** Every store request passes through it: the newest request's answer is recorded as the connection's reachability (a `401`, no process, no token → unreachable; any answer at all → reachable), and a **decision** is refused before it is sent while unreachable. `ConsoleAct` sorts a request by screen-18 §4's one rule per verb: a read always goes; an **append** — capture, tick, defer (the table's `key` rows) and a 👍/👎 — goes and may be kept by its composer; everything else is a decision, including any route the file does not name |
-| `SectionModel<Value>` | `sources/kit/stores/section-model.swift` | One section of a screen built on the §2.16 stores: `Section`'s state machine, the store read that fills it, `refreshIfDue` (a redraw is never a request), `invalidate()` for the live-changes stream (T5-7), and registration with its session so an instance switch drops it |
+| `SectionModel<Value>` | `sources/kit/stores/section-model.swift` | One section of a screen built on the §2.16 stores: `Section`'s state machine, the store read that fills it, `refreshIfDue` (a redraw is never a request), `topics` — the `EventTopic`s an event may name to mark it due (`invalidate()`), and while the stream is live a loaded section with topics waits to be told rather than asking on its clock — and registration with its session so an instance switch drops it |
+| `LiveEvents` · `EventTopic` | `sources/kit/stores/events-store.swift` | **The one live-changes subscription** (`ConsoleSession.events`, T5-7): `GET /api/events` held open over the session child, the last id heard (the console's cursor included), each event handed to the watchers of its topics — the catalogue's "the client refetches" column, one topic per store. `off` · `connecting` · `live` · `down(why)` · `unavailable(why)`; reopened on a backoff (3 s doubling to a minute) with `Last-Event-ID`; a `resync`, an unreadable frame, or a subscription with no cursor to resume from marks every watcher due |
 | `CLIManagementRunner` | `sources/kit/stores/management-runner.swift` | §2.2's verbs (M1–M18) as one `metistry` invocation each through `MetistryCLI`: the argument array `plannedArguments` shows is exactly what runs, a value rides stdin and never argv, and a command may not name its own `--product-dir`. **Not behind the gate** — M5 restarts a console that is down |
 | `PinnedItem` · `PinnedItems` | `sources/kit/pinned-items.swift` | The sidebar's Pinned area: project · board · page · search · agent, reorderable and removable, filed in app preferences under `pinnedItems.<instance_id>` |
 
@@ -287,8 +288,19 @@ Four things the transport promises rather than hopes for:
 The live-changes stream rides the same child: `events(lastEventID:)` is `GET
 /api/events` (design-build-plan §2.20) as `ConsoleLiveEvent` frames — ids and
 counts, never bodies — and cancelling the consuming task sends the session's
-`{id, cancel: true}`. Until the console serves the route, the stream finishes
-with a `404` and the app polls as it does today.
+`{id, cancel: true}`. The console's cursor (an id with no data, sent to a
+fresh subscriber) arrives as `{id, event: {id}}` and is kept as the id to
+resume from. A console that does not serve the route finishes the stream with
+a `404`; `LiveEvents` reports `down`, every reader polls on its own clock, and
+the stream is asked again on the backoff.
+
+**Live vs polling, in one rule.** A reader the stream speaks for (a
+`SectionModel` with topics, the shell's count) polls on its `RefreshPolicy`
+while the stream is anything but `live`. While it is live, it asks when an
+event names it, and otherwise only on `RefreshPolicy.whileLive` — every five
+minutes — which catches the one kind of change no table write announces (a
+snoozed request coming due). A section that failed keeps its own clock either
+way.
 
 ### The store interface, and the fixtures every view is built against (F-7)
 
@@ -775,8 +787,16 @@ filed under) and `UsageStore.compute()` (the gauge), over `AppModel.console`'s
 stores — the same session child and O3 gate every screen uses; an instance
 switch adopts the new session's. It polls on `RefreshPolicy`'s intervals for
 the app's lifetime rather than a window's, because the Dock is read with every
-window closed, so the first poll is what starts the session child; T5-7's event
-stream replaces the poll.
+window closed, so the first poll is what starts the session child. Once
+`AppModel.startShell` has called `follow(console.events)` and started the
+stream, `needs_you.changed` carries the count itself (the same filter as
+`GET /api/needs-you/count`) and is applied as it stands; while the stream is
+live the count is asked only on the five-minute `whileLive` clock, and while
+it is down the 30 s poll resumes. `budget.state` and `release.available` (and a
+`config.changed` naming `compute.yaml` or `identity.yaml`) make the gauge or
+the name due at the next tick. The badge announces a change once — never the
+first reading, never a repeat of the same count, whether the event or the poll
+said it.
 
 **The toolbar.** The mark and the title *Metistry* (the same on every screen —
 the highlighted row says where you are); **+** (New Capture, ⌘N — dimmed until

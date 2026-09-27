@@ -145,12 +145,14 @@ public final class AppModel {
         }
     }
 
-    /// Starts the shell's poll and keeps `apply` fed with the Dock badge's
-    /// label. Called once by the app, never from `init`: a model built by a
-    /// test starts nothing.
+    /// Starts the shell's poll and the live-changes stream it follows, and
+    /// keeps `apply` fed with the Dock badge's label. Called once by the app,
+    /// never from `init`: a model built by a test starts nothing.
     public func startShell(dockBadge apply: @escaping @MainActor (String?) -> Void) {
         shell.observeBadge(apply)
+        shell.follow(console.events)
         shell.start()
+        console.events.start()
     }
 
     public var runtime: MetistryRuntime? { resolution.runtime }

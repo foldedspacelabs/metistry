@@ -31,7 +31,7 @@ recipient.
 | The agent tools | `packages/mcp-brain/src/thread-tools.ts` (`tasks_comment`, `tasks_thread`) |
 | The console routes | `apps/console/src/artifacts-routes.ts` (`/api/work/:id/thread`, `…/comments`, `…/thread/resolve`) |
 | The room list | `seed/queries/rooms.yaml` (`GET /api/q/rooms`) |
-| The panel | the **Rooms** tab in `apps/console/web` |
+| The panel | a task's room, pushed from its card in `apps/console/web/work.js` (no Rooms list — C89) |
 | The prior-work block | `apps/assistant/src/crew-drain.ts` `briefThreadBlock()` |
 
 ## The schema, and why it is one table
@@ -169,10 +169,11 @@ to revisit.
 
 ## The Rooms panel
 
-One tab, one query (`/api/q/rooms`) — invariant 3 holds; the panel calls
-nothing else to build its list. Per row: the anchor (artifact or work),
-participants, message count, the agent tail against the cap, and — the reason
-the panel exists — the **"why this came to you"** line.
+The PWA has no Rooms list since C89 (T7-2, T7-3b): a task's room is a push from
+its card, and an artifact's threads sit on their lines in the artifact. The
+`rooms` query (`/api/q/rooms`) still answers for the Mac app. A room shows the
+agent tail against the cap and — the reason the panel exists — the **"why
+this came to you"** line.
 
 `payload.reason` has been stored since the ping-pong cap shipped and was never
 rendered as a sentence. Now it is:
@@ -180,9 +181,8 @@ rendered as a sentence. Now it is:
 > Ten agent turns went by without a human. The next agent message was not
 > stored — this is where it came to you. Answer, or resolve the room.
 
-Clicking a work room opens it with a composer (posting as `user`, which resets
-the agent-only run) and the single Resolve button. Clicking an artifact thread
-goes to the version it was about. Every value on the page came out of the
+A work room opens with a composer (posting as `user`, which resets the
+agent-only run) and the single Resolve button. Every value on the page came out of the
 database and may be agent-authored, so all of it goes through `esc()`; a test
 asserts it.
 

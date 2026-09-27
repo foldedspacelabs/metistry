@@ -269,7 +269,7 @@ entries that are not `base`:
 `⧉`), then each cell's entries comma-separated, each its `label`, `⏱` when it
 asks, and `(approved in Needs You · #n)`, `(during <routine> only)` or
 `(via project <slug>)` when it is not the base. An empty cell is `—`. `metistry agents list` calls it; the
-console's panel (`apps/console/web/app.js`) and MetistryKit (`PermissionRowText`,
+console's panel (`apps/console/web/more.js`) and MetistryKit (`PermissionRowText`,
 over the `PermissionRow` wire types its `PermissionsTable` component draws)
 carry copies that `apps/console/test/pwa-reads.test.ts` and
 `apps/macos/tests/kit/permissions-table-tests.swift` hold to the recorded

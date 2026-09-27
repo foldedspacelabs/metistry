@@ -461,16 +461,16 @@ button.secondary:hover { background: var(--mt-color-border); }
    consequence named (design-system §3.17 — the dialog is not the control).
    A request's Decline is not this: it is outlined in the neutral surface
    (C92, screen 18 §3) — see Needs You below. */
-[data-agent-revoke], [data-revoke] {
+button.destructive, [data-revoke] {
   background: var(--mt-color-surface);
   border-color: var(--mt-color-failed);
   color: var(--mt-color-failed);
 }
-[data-agent-revoke]:hover, [data-revoke]:hover {
+button.destructive:hover, [data-revoke]:hover {
   background: var(--mt-color-failed-quiet);
 }
 
-input[type="text"], input[type="number"], input[type="file"], textarea, select {
+input[type="text"], input[type="search"], input[type="number"], input[type="file"], textarea, select {
   font: inherit;
   font-size: var(--mt-text-body-size);
   width: 100%;
@@ -926,48 +926,30 @@ label.q-option { flex-direction: row; align-items: center; gap: var(--mt-space-2
 #status button { margin: var(--mt-space-3) var(--mt-space-2) 0 0; }
 
 /* ---------------------------------------------------------------- agents -- */
-#agent-list li {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: var(--mt-space-3);
-  background: var(--mt-color-surface);
-  border-radius: var(--mt-radius-lg);
-  box-shadow: var(--mt-elevation-1);
-  padding: var(--mt-space-4);
-  margin-bottom: var(--mt-space-3);
-}
-#agent-list li > span:first-child { flex: 1 1 220px; min-width: 0; overflow-wrap: anywhere; }
-#agent-list li > span:last-child { display: flex; gap: var(--mt-space-2); flex-wrap: wrap; }
-#agent-list li.revoked { opacity: .55; }
-/* The effective action table, as the server resolved it (app.js
-   actionTableHtml): one line per kind. WHY is in the words — "(default for
-   …)", "(asked … — …'s ceiling is …)" — and the ink only repeats it: a
-   default is secondary, a clamp (the owner's own setting overridden) is
-   degraded, exactly as `metistry agents autonomy` paints them. */
-.action-table { display: block; font-size: var(--mt-text-footnote-size); }
-.action-table > span { display: block; }
+/* More ▸ Agents (more.js): grouped rows, each a push. */
+.agent-row .agent-name { color: var(--mt-color-agent); font-weight: 600; }
+.agent-row.revoked { opacity: .55; }
+.agent-head { display: flex; align-items: center; gap: var(--mt-space-2); flex-wrap: wrap; }
+/* The one table as a list (screen 18 §5): a row per resource, its Read and
+   Write lines under it, each cell in the server's words; an empty cell is the
+   dash, never blank. */
+.group .perm { display: flex; flex-direction: column; gap: 2px; padding: var(--mt-space-3) var(--mt-space-4);
+  font-size: var(--mt-text-subhead-size); overflow-wrap: anywhere; }
+.perm-res { font-weight: 600; }
+.perm-line { display: flex; gap: var(--mt-space-2); font-size: var(--mt-text-footnote-size); }
+.perm-k { flex: none; min-width: 3.5em; color: var(--mt-color-text-secondary); }
+/* The effective action table, as the server resolved it: one line per kind.
+   WHY is in the words — "(default for …)", "(asked … — …'s ceiling is …)" —
+   and the ink only repeats it: a default is secondary, a clamp (the owner's
+   own setting overridden) is degraded, as `metistry agents autonomy` paints. */
 .action-row.defaulted { color: var(--mt-color-text-secondary); }
 .action-row.clamped { color: var(--mt-color-degraded); }
-/* The permissions table (T4-6): Resource × Read × Write, each cell in the
-   server's words; an empty cell is the dash, never blank. */
-table.permissions { border-collapse: collapse; margin: var(--mt-space-1) 0; font-size: var(--mt-text-footnote-size); }
-table.permissions th, table.permissions td { text-align: left; vertical-align: top; padding: 0 var(--mt-space-2) 0 0; }
-table.permissions thead th { color: var(--mt-color-text-tertiary); font-weight: 400; }
-table.permissions tbody th { font-weight: 400; color: var(--mt-color-text-secondary); white-space: nowrap; }
-#agent-create, #agent-grants { flex-direction: column; align-items: stretch; }
-#agents select { width: 100%; }
-#agent-token {
-  margin-top: var(--mt-space-4);
-  padding: var(--mt-space-4);
-  border: 1px solid var(--mt-color-accent);
-  border-radius: var(--mt-radius-lg);
-  background: var(--mt-color-accent-quiet);
-}
-#agent-token code { display: block; word-break: break-all; user-select: all;
-  -webkit-user-select: all; margin-top: var(--mt-space-2); }
-#agents-empty, #art-empty, #feed-empty { color: var(--mt-color-text-secondary); }
+#agent-grants { flex-direction: column; align-items: stretch; }
+#agent-grants label.check { flex-direction: row; align-items: center; gap: var(--mt-space-2); }
+#agent select { width: 100%; }
+.acts { display: flex; flex-wrap: wrap; gap: var(--mt-space-2); margin: var(--mt-space-4) 0; }
+.foot { margin: calc(-1 * var(--mt-space-3)) var(--mt-space-1) var(--mt-space-5); }
+#feed-empty { color: var(--mt-color-text-secondary); }
 
 /* ------------------------------------------------------------- dashboard -- */
 #dashboard h3 { display: flex; justify-content: space-between; align-items: baseline;
@@ -1060,8 +1042,6 @@ button.quiet:hover { background: var(--mt-color-sunken); }
 .reviews { background: var(--mt-color-surface); border-radius: var(--mt-radius-lg);
   box-shadow: var(--mt-elevation-1); padding: 0 var(--mt-space-4); margin-top: var(--mt-space-2); }
 .reviews li:last-child { border-bottom: 0; }
-#dash-project-rows button { min-height: var(--mt-size-pointer-target); padding: var(--mt-space-1) var(--mt-space-3);
-  font-size: var(--mt-text-footnote-size); }
 
 .bar { display: block; height: 6px; background: var(--mt-color-sunken);
   border-radius: 3px; margin: var(--mt-space-1) 0; overflow: hidden; }
@@ -1077,84 +1057,113 @@ button.quiet:hover { background: var(--mt-color-sunken); }
 #dashboard summary { cursor: pointer; margin-top: var(--mt-space-2); min-height: var(--mt-size-pointer-target); }
 
 /* ----------------------------------------------------------------- board -- */
-/* Read-only Kanban (docs/ops/board.md). Phone: the columns STACK, because a
-   horizontally scrolling board on a phone hides the column that matters.
-   Wide: lanes side by side, the strip scrolling if six do not fit. Tokens
-   only — every value below comes from tokens.json. */
-#board-filter { flex-direction: row; align-items: center; }
+/* Work ▸ Board (screen 18 §5; work.js). A phone shows ONE column, picked by
+   the chips with their counts — a stack of five hides the column that
+   matters under four that do not. From 600px the columns sit side by side,
+   scroll sideways and snap; at 900px it is the Mac's board. Escalation is
+   `degraded`, never red (screen 6 §5, C36). Tokens only. */
+.board-chips { display: flex; gap: var(--mt-space-2); overflow-x: auto; padding: var(--mt-space-1) 0 var(--mt-space-2); }
+.board-chips .col-chip {
+  min-height: var(--mt-size-touch-target); padding: 0 var(--mt-space-3);
+  border: 1px solid var(--mt-color-border-strong); background: none; color: var(--mt-color-text-secondary);
+  font-size: var(--mt-text-subhead-size);
+}
+.board-chips .col-chip.on { background: var(--mt-color-accent-quiet); color: var(--mt-color-accent); border-color: transparent; font-weight: 600; }
+.board-chips .count { color: var(--mt-color-text-secondary); font-weight: 400; font-variant-numeric: tabular-nums; }
+#board-filter { flex-direction: row; align-items: center; margin-top: 0; }
 #board-filter select { width: auto; min-width: 140px; flex: 0 1 auto;
   border-radius: var(--mt-radius-pill); padding: var(--mt-space-2) var(--mt-space-4);
   font-size: var(--mt-text-subhead-size); }
 .board-hint { display: none; }
 
 .board { display: grid; gap: var(--mt-space-3); margin-top: var(--mt-space-3); }
-.board-col { background: var(--mt-color-surface); border-radius: var(--mt-radius-lg);
-  box-shadow: var(--mt-elevation-1); padding: var(--mt-space-3) var(--mt-space-4); }
-.board-col h3 { display: flex; justify-content: space-between; align-items: baseline; gap: var(--mt-space-3); }
+.board-col h3 { display: flex; justify-content: space-between; align-items: baseline; gap: var(--mt-space-3); margin-top: 0; }
 .board-count { font-size: var(--mt-text-subhead-size); font-weight: 400; color: var(--mt-color-text-secondary); }
-.board-why { margin-top: var(--mt-space-1); }
-.board-cards { margin-top: var(--mt-space-2); }
-.board-cards li { padding: var(--mt-space-3) 0; border-bottom: 1px solid var(--mt-color-border); }
-.board-cards li:last-child { border-bottom: 0; }
-.board-cards .row { display: flex; justify-content: space-between; align-items: baseline; gap: var(--mt-space-3); }
-.board-cards .card-title { font-size: var(--mt-text-callout-size); }
-.board-cards .card.escalated { border-left: 2px solid var(--mt-color-failed);
-  padding-left: var(--mt-space-3); margin-left: calc(-1 * var(--mt-space-3)); }
-/* only a card with somewhere to go looks like it has somewhere to go */
-.board-cards .card.linked { cursor: pointer; }
-.board-cards .card.linked .card-title { color: var(--mt-color-accent); }
+.board-why { margin: var(--mt-space-1) 0 var(--mt-space-2); }
+.board-cards .card { gap: var(--mt-space-1); padding: var(--mt-space-3); margin-bottom: var(--mt-space-2); cursor: pointer; }
+.board-cards .card:hover { background: var(--mt-color-sunken); }
+.board-cards .card.escalated { border-color: var(--mt-color-degraded); }
+.board-cards .card.placeholder { min-height: calc(2 * var(--mt-size-touch-target)); background: var(--mt-color-sunken); box-shadow: none; cursor: default; }
+.card-line { display: flex; align-items: flex-start; gap: var(--mt-space-2); }
+.card-line .lead { width: var(--mt-size-icon-sm); height: var(--mt-size-icon-sm); margin-top: 2px; color: var(--mt-color-text-tertiary); }
+.card-title { flex: 1 1 auto; min-width: 0; font-size: var(--mt-text-callout-size); overflow-wrap: anywhere; }
+.thread-mark { display: inline-flex; align-items: center; gap: 2px; color: var(--mt-color-text-secondary); font-size: var(--mt-text-caption-1-size); }
+.thread-mark .glyph { width: var(--mt-size-icon-sm); height: var(--mt-size-icon-sm); }
+.card-meta { margin-left: calc(var(--mt-size-icon-sm) + var(--mt-space-2)); overflow-wrap: anywhere; }
 .board-none { padding: var(--mt-space-3) 0; }
 
-/* The drags. A card that can move says so by grabbing; a closed card gets no
-   grab cursor, because it is not draggable and a cursor that lies is worse
-   than none. `.drop` is painted only on the columns THIS card may land in —
-   the board offers no drop the service would refuse. */
+/* One column under 600px: the chips pick it, so its heading would say the same thing twice. */
+@media (max-width: 599px) {
+  .board-col { display: none; }
+  .board-col h3 { display: none; }
+  .board[data-show="backlog"] .board-col[data-column="backlog"],
+  .board[data-show="assigned"] .board-col[data-column="assigned"],
+  .board[data-show="in_progress"] .board-col[data-column="in_progress"],
+  .board[data-show="blocked"] .board-col[data-column="blocked"],
+  .board[data-show="done"] .board-col[data-column="done"] { display: block; }
+}
+
+/* The drags. A card that can move says so by grabbing; `.drop` is painted
+   only on the columns THIS card may land in. */
 .board-cards .card[draggable="true"] { cursor: grab; }
 .board-cards .card.dragging { opacity: .55; cursor: grabbing; }
 .board-col.drop { outline: 2px dashed var(--mt-color-accent); outline-offset: var(--mt-space-1); }
-.board-col.drop-over { background: var(--mt-color-sunken); }
+.board-col.drop-over { background: var(--mt-color-accent-quiet); }
 .board-msg { margin-top: var(--mt-space-3); padding: var(--mt-space-3) var(--mt-space-4);
   background: var(--mt-color-surface); border-radius: var(--mt-radius-md);
-  border-left: 2px solid var(--mt-color-failed); }
-
-/* One popover shape for move / assign / detail — a panel, not a modal: the
-   board stays readable behind it and Esc closes it. Under 900px it sits above
-   the tab bar, never behind it. */
-.board-pop { position: fixed; left: 50%; bottom: calc(var(--shell-tabs) + env(safe-area-inset-bottom) + var(--mt-space-4)); transform: translateX(-50%);
-  z-index: 10; width: min(420px, calc(100vw - 2 * var(--mt-space-4)));
-  background: var(--mt-color-surface); border-radius: var(--mt-radius-lg);
-  box-shadow: var(--mt-elevation-3); padding: var(--mt-space-4);
-  display: flex; flex-direction: column; gap: var(--mt-space-2); }
-.board-pop[hidden] { display: none; }
-.board-pop-row { display: flex; flex-wrap: wrap; gap: var(--mt-space-2); align-items: center; }
-.board-pop dl { display: grid; grid-template-columns: auto 1fr; gap: var(--mt-space-1) var(--mt-space-3);
-  font-size: var(--mt-text-footnote-size); margin: 0; }
-.board-pop dt { color: var(--mt-color-text-tertiary); }
-.board-pop dd { margin: 0; overflow-wrap: anywhere; }
+  border-left: 2px solid var(--mt-color-degraded); overflow-wrap: anywhere; }
 
 /* From 600px the columns sit side by side, scroll sideways and snap. */
 @media (min-width: 600px) {
+  .board-chips { display: none; }
   .board { grid-auto-flow: column; grid-auto-columns: minmax(230px, 1fr); align-items: start; overflow-x: auto;
     scroll-snap-type: x mandatory; }
-  .board-col { scroll-snap-align: start; }
+  .board-col { scroll-snap-align: start; background: var(--mt-color-sunken); border-radius: var(--mt-radius-lg);
+    padding: var(--mt-space-3); }
 }
 @media (min-width: 900px) {
   .board-hint { display: inline; }
-  .board-pop { bottom: var(--mt-space-4); }
 }
+
+/* ------------------------------------------------ the card, and Move to… -- */
+.card-chips { display: flex; gap: var(--mt-space-2); flex-wrap: wrap; margin-bottom: var(--mt-space-3); }
+.chip.agent { background: var(--mt-color-agent-quiet); color: var(--mt-color-agent); font-family: var(--mt-font-mono); }
+.card-desc { max-width: var(--mt-size-reading-measure); overflow-wrap: anywhere; }
+dl.fields { display: grid; grid-template-columns: auto 1fr; gap: var(--mt-space-1) var(--mt-space-4);
+  margin: var(--mt-space-4) 0; font-size: var(--mt-text-subhead-size); }
+dl.fields dt { color: var(--mt-color-text-secondary); }
+dl.fields dd { margin: 0; overflow-wrap: anywhere; }
+.card-note { padding: var(--mt-space-3) var(--mt-space-4); margin-bottom: var(--mt-space-3);
+  background: var(--mt-color-sunken); border-radius: var(--mt-radius-md); }
+.card-note button { margin-left: var(--mt-space-2); }
+/* The bar under a card: Move To… (and Release) above the tab bar, never behind it. */
+.card-bar { position: sticky; bottom: calc(var(--shell-tabs) + env(safe-area-inset-bottom)); display: flex; gap: var(--mt-space-2);
+  padding: var(--mt-space-3) 0; background: var(--mt-color-bg); border-top: 1px solid var(--mt-color-border); margin-top: var(--mt-space-4); }
+@media (min-width: 900px) { .card-bar { bottom: 0; } }
+/* Move to…: a legal move says what it does; an illegal one is the same row,
+   disabled, with its reason in words (never a tooltip). */
+.action-list .row.move { flex-direction: column; align-items: flex-start; gap: 2px; }
+.action-list .row.move .label { color: var(--mt-color-accent); font-weight: 600; }
+.action-list .row.move:disabled .label { color: var(--mt-color-text-tertiary); font-weight: 400; }
+.action-list .row.move:disabled { opacity: 1; }
+.group .row .sub { display: block; color: var(--mt-color-text-secondary); font-size: var(--mt-text-footnote-size); font-weight: 400; overflow-wrap: anywhere; }
+.group .row .label b { font-weight: 600; }
+.group .row.static { cursor: default; }
+.group .row[aria-current="true"] .label { font-weight: 600; }
+
+/* ------------------------------------------------------------- projects -- */
+.project-row .label { display: flex; flex-direction: column; gap: 2px; }
+.project-head { display: flex; align-items: center; gap: var(--mt-space-2); flex-wrap: wrap; }
+.spend { display: block; }
+.spend.over .bar span { background: var(--mt-color-degraded); }
+.chip.review.over { background: var(--mt-color-degraded-quiet); color: var(--mt-color-degraded); }
 
 /* ------------------------------------------------------------- artifacts -- */
 #art-filter { flex-direction: row; flex-wrap: nowrap; align-items: center; }
 #art-filter input { flex: 1 1 auto; width: auto; min-width: 0; }
 #art-filter button { flex: 0 0 auto; }
-#art-list { background: var(--mt-color-surface); border-radius: var(--mt-radius-lg);
-  box-shadow: var(--mt-elevation-1); padding: 0 var(--mt-space-4); margin-top: var(--mt-space-2); }
-#art-list li { display: flex; flex-direction: column; gap: 2px;
-  padding: var(--mt-space-3) 0; border-bottom: 1px solid var(--mt-color-border); }
-#art-list li:last-child { border-bottom: 0; }
-#art-list a { color: var(--mt-color-text-primary); text-decoration: none;
-  font-size: var(--mt-text-headline-size); font-weight: var(--mt-text-headline-weight); }
-#artifacts select { width: auto; max-width: 100%; }
+#art-list { margin-top: var(--mt-space-3); }
+#artifact select { width: auto; max-width: 100%; }
 .art-row { display: flex; gap: var(--mt-space-3); margin: var(--mt-space-3) 0; flex-wrap: wrap; }
 #art-viewer { margin: var(--mt-space-3) 0; }
 #art-viewer img { max-width: 100%; border-radius: var(--mt-radius-md); }
@@ -1179,34 +1188,49 @@ button.quiet:hover { background: var(--mt-color-sunken); }
   border-radius: var(--mt-radius-md);
   background: #ffffff;
 }
-#art-comment, #art-dispatch { flex-direction: column; align-items: stretch; }
+/* A thread is a count on its line — the margin does not fit (screen 18 §5).
+   The line it is on is highlighted in the accent's quiet fill. */
+.art-block.has-thread, .art-ln.has-thread { background: var(--mt-color-accent-quiet); border-radius: var(--mt-radius-xs); }
+.art-block { position: relative; }
+.thread-count {
+  display: inline-flex; align-items: center; gap: 2px; vertical-align: 1px;
+  min-height: 0; padding: 0 var(--mt-space-2); margin-left: var(--mt-space-1);
+  border: 1px solid var(--mt-color-border-strong); border-radius: var(--mt-radius-pill);
+  background: var(--mt-color-surface); color: var(--mt-color-accent);
+  font-family: var(--mt-font-sans); font-size: var(--mt-text-caption-1-size); font-weight: 600;
+}
+.thread-count .glyph { width: var(--mt-size-icon-sm); height: var(--mt-size-icon-sm); }
+@media (pointer: coarse) { .thread-count { min-height: var(--mt-size-pointer-target); } }
+#art-comment, #art-dispatch, #room-comment { flex-direction: column; align-items: stretch; }
 
-#art-threads li.thread { padding: var(--mt-space-3) 0; border-bottom: 1px solid var(--mt-color-border); }
-#art-threads li.thread.open { border-left: 2px solid var(--mt-color-accent); padding-left: var(--mt-space-3); }
-#art-threads li.resolved { opacity: .6; }
-#art-threads .row { display: flex; justify-content: space-between; align-items: center; gap: var(--mt-space-3); }
-#art-threads .row label { flex-direction: row; align-items: center; gap: var(--mt-space-2);
-  color: var(--mt-color-text-primary); font-size: var(--mt-text-subhead-size); }
-#art-threads .body { white-space: pre-wrap; overflow-wrap: anywhere;
-  margin: var(--mt-space-1) 0 0 var(--mt-space-6); }
-#art-threads .reply { margin: var(--mt-space-2) 0 0 var(--mt-space-6);
-  padding-left: var(--mt-space-2); border-left: 2px solid var(--mt-color-border); }
-#art-threads form { margin: var(--mt-space-2) 0 0 var(--mt-space-6); flex-wrap: nowrap; }
+.threads li.thread { padding: var(--mt-space-3) 0; border-bottom: 1px solid var(--mt-color-border); }
+.threads li.thread.resolved { opacity: .7; }
+.threads .body { white-space: pre-wrap; overflow-wrap: anywhere; margin: var(--mt-space-1) 0 0 0; }
+.threads .reply { margin: var(--mt-space-2) 0 0 0; padding-left: var(--mt-space-3); border-left: 2px solid var(--mt-color-border); }
+.threads .reply-form { flex-wrap: nowrap; }
+.threads .reply-form input { flex: 1 1 auto; width: auto; min-width: 0; }
 
 /* ------------------------------------------------------------ rooms (0016) - */
-/* The room list reuses the thread shapes; what it adds is the escalation
-   line — the one sentence saying why a conversation reached the owner. */
-#room-list li.thread { padding: var(--mt-space-3) 0; border-bottom: 1px solid var(--mt-color-border); }
-#room-list li.thread.open { border-left: 2px solid var(--mt-color-accent); padding-left: var(--mt-space-3); }
-#room-list li.resolved { opacity: .6; }
-#room-list .row { display: flex; justify-content: space-between; align-items: center; gap: var(--mt-space-3); }
-#room-messages .reply { margin: var(--mt-space-2) 0 0 0;
-  padding-left: var(--mt-space-2); border-left: 2px solid var(--mt-color-border); }
-#room-messages .body { white-space: pre-wrap; overflow-wrap: anywhere; margin: var(--mt-space-1) 0 0 0; }
+/* A task's room — a push from its card. What it adds over a thread is the
+   escalation line: the one sentence saying why it reached the owner. */
+.room-title { font-size: var(--mt-text-headline-size); font-weight: var(--mt-text-headline-weight); overflow-wrap: anywhere; }
+#room-messages li.reply { margin: var(--mt-space-3) 0 0 0; padding-left: var(--mt-space-3); border-left: 2px solid var(--mt-color-border); }
 .room-why { margin: var(--mt-space-2) 0 0 0; padding: var(--mt-space-2) var(--mt-space-3);
-  border-left: 2px solid var(--mt-color-accent); background: var(--mt-color-surface);
-  border-radius: var(--mt-radius-md); font-size: var(--mt-text-subhead-size); }
-#room-comment { flex-direction: column; align-items: stretch; }
+  background: var(--mt-color-sunken); border-radius: var(--mt-radius-md); font-size: var(--mt-text-subhead-size); }
+
+/* ------------------------------------------------------------- knowledge -- */
+#kn-search { flex-wrap: nowrap; align-items: center; margin-bottom: var(--mt-space-3); }
+#kn-search input { flex: 1 1 auto; width: auto; min-width: 0; }
+#kn-search button { flex: 0 0 auto; }
+/* The fold is the assistant's prose: the agent wash, and the serif when it is read (screen 10 §2). */
+.agent-wash { background: var(--mt-color-agent-quiet); color: var(--mt-color-text-primary); }
+.fold-card { border-radius: var(--mt-radius-lg); padding: var(--mt-space-4); margin-bottom: var(--mt-space-4); }
+.fold-card .mono { overflow-wrap: anywhere; }
+.eyebrow { font-size: var(--mt-text-caption-1-size); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--mt-color-text-secondary); }
+.fold-title { font-size: var(--mt-text-headline-size); font-weight: var(--mt-text-headline-weight); margin: var(--mt-space-1) 0; }
+.degraded-note { color: var(--mt-color-degraded); margin-bottom: var(--mt-space-2); }
+#page-meta { overflow-wrap: anywhere; margin-bottom: var(--mt-space-3); }
+.page-body.art-md { max-height: none; }
 
 /* ----------------------------------------------- rendered markdown (md.js) - */
 .art-md {

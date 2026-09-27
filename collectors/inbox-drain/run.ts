@@ -30,6 +30,7 @@
 // before it is correct governance.
 
 import type { CaptureSink } from "@foldedspacelabs/metistry-mcp-brain";
+import type { SyncOpener } from "@foldedspacelabs/metistry-connections";
 import { finishRun, intentStage, resolveIntentTier, startRun, type IntentRules } from "@foldedspacelabs/metistry-core";
 import { completeJson, type ComputeAccess } from "../compute-client.js";
 import { intentMeta, intentPlacement, scoreIntent, type IntentOutcome } from "./intent-tier.js";
@@ -196,6 +197,13 @@ export interface CollectorCtx extends ComputeAccess {
   inboxDir?: string; // fallback capture directory when no sink is injected
   inboxSink?: CaptureSink; // where devin-knowledge's captures land: the vault inbox over the reconciler's bridge (docs/ops/inbox.md)
   fetchFn?: typeof fetch;
+  /**
+   * How a sync opens the connection it reads (packages/connections
+   * `instanceSyncOpener`): the console builds one from the instance, and it
+   * hands back a `fetch` pinned to the provider's host with secrets filled at
+   * the egress door. The `linear` collector reads its connection through it.
+   */
+  openSync?: SyncOpener;
 }
 
 export interface FmResult {

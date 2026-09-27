@@ -173,6 +173,9 @@ importers:
 
   collectors:
     dependencies:
+      '@foldedspacelabs/metistry-connections':
+        specifier: workspace:*
+        version: link:../packages/connections
       '@foldedspacelabs/metistry-core':
         specifier: workspace:*
         version: link:../packages/core

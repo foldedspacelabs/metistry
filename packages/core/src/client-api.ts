@@ -177,7 +177,7 @@ export const CLIENT_API: readonly ClientRoute[] = [
   // ----- Needs You -----
   route("GET", "/api/proposals", "the queue; with `since`, everything that changed", { cursor: true }),
   route("POST", "/api/proposals/batch", "one verb (`later`, `skip`, `deny`) to many requests; per-row results"),
-  route("POST", "/api/proposals/:id", "answer one request with an answer its type takes; `if_unchanged` refuses a stale answer", { conflict: ["already_decided", "stale"], ticket: "T2-14" }),
+  route("POST", "/api/proposals/:id", "answer one request with an answer its type takes; `if_unchanged` refuses a stale answer", { conflict: ["already_decided", "stale"] }),
   route("GET", "/api/needs-you/count", "how many requests wait: the sidebar row and the Dock badge"),
 
   // ----- agents -----

@@ -13,7 +13,7 @@
     "proposals": [
       {
         "id": "3",
-        "ts": "2026-09-27T03:19:34.940Z",
+        "ts": "2026-09-27T04:17:02.766Z",
         "kind": "report",
         "source_agent": "assistant",
         "trust": "internal",
@@ -46,11 +46,12 @@
           "decisions": [
             "skip"
           ]
-        }
+        },
+        "subject": null
       },
       {
         "id": "2",
-        "ts": "2026-09-27T03:19:34.940Z",
+        "ts": "2026-09-27T04:17:02.764Z",
         "kind": "knowledge",
         "source_agent": "assistant",
         "trust": "internal",
@@ -92,11 +93,12 @@
             "accept_with_changes",
             "deny"
           ]
-        }
+        },
+        "subject": null
       },
       {
         "id": "1",
-        "ts": "2026-09-27T03:19:34.939Z",
+        "ts": "2026-09-27T04:17:02.762Z",
         "kind": "decision",
         "source_agent": "assistant",
         "trust": "internal",
@@ -152,11 +154,12 @@
               "allow_other": false
             }
           ]
-        }
+        },
+        "subject": null
       },
       {
         "id": "5",
-        "ts": "2026-09-27T03:18:34.952Z",
+        "ts": "2026-09-27T04:16:02.795Z",
         "kind": "decision",
         "source_agent": "assistant",
         "trust": "external",
@@ -267,10 +270,11 @@
               "allow_other": false
             }
           ]
-        }
+        },
+        "subject": null
       }
     ],
-    "cursor": "2026-09-26 23:19:34.940543-04|3",
+    "cursor": "2026-09-27 00:17:02.766224-04|3",
     "more": false
   }
 }

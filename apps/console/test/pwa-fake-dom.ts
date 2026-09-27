@@ -1,5 +1,6 @@
 // Just enough of a browser to mount one of the PWA's view modules
-// (apps/console/web/today.js, needs-you.js) and drive it the way a finger
+// (apps/console/web/today.js, needs-you.js, work.js, knowledge.js, more.js)
+// and drive it the way a finger
 // does: elements that hold what the view writes and dispatch what the test
 // sends, `matchMedia`, and a recording `api`. No DOM library — none is a
 // dependency here (CLAUDE.md), and the views only touch what is below.
@@ -66,9 +67,15 @@ export function fakeBrowser({ wide = false, respond }: { wide?: boolean; respond
     return els.get(id)!;
   };
   const doc = new FakeEl("document");
+  const windowListeners: Record<string, Listener[]> = {};
   vi.stubGlobal("window", {
-    matchMedia: (q: string) => ({ matches: q.includes("reduced-motion") ? false : wide, addEventListener() {} }),
+    matchMedia: (q: string) => ({ matches: q.includes("reduced-motion") ? false : q.includes("max-width") ? !wide : wide, addEventListener() {} }),
+    addEventListener: (type: string, fn: Listener) => { (windowListeners[type] ??= []).push(fn); },
   });
+  // a hash route (#/artifacts/…, #/rooms/work/…) is read from `location` and written through `history`
+  const loc = { hash: "", pathname: "/", search: "" };
+  vi.stubGlobal("location", loc);
+  vi.stubGlobal("history", { replaceState: (_s: unknown, _t: string, url: string) => { loc.hash = url.includes("#") ? url.slice(url.indexOf("#")) : ""; } });
   vi.stubGlobal("document", Object.assign(doc, { activeElement: null }));
   vi.stubGlobal("CSS", { escape: (s: string) => s });
   const stored = new Map<string, string>();
@@ -80,7 +87,13 @@ export function fakeBrowser({ wide = false, respond }: { wide?: boolean; respond
     const { status = 200, body } = respond(call);
     return { ok: status >= 200 && status < 300, status, json: async () => body };
   };
-  return { $, api, calls, stored, writes: () => calls.filter((c) => c.method !== "GET") };
+  /** Follow a link: set the hash, then tell whoever listens for it, as the browser would. */
+  const go = async (hash: string) => {
+    loc.hash = hash;
+    await Promise.all((windowListeners.hashchange ?? []).map((fn) => fn({})));
+    await settle();
+  };
+  return { $, api, calls, stored, loc, go, writes: () => calls.filter((c) => c.method !== "GET") };
 }
 
 /** A target whose `closest(selector)` answers from a table: what a click on a control inside a row looks like. */

@@ -227,23 +227,25 @@
       <ul id="device-list"></ul>
     </section>
 
-    <!-- agents: external-agent registry (§4.2 management surface) -->
+    <!-- More ▸ Agents (screen 18 §5; more.js): Yours and Connected, each a
+         push. Defining an agent — and minting or rotating its token — is
+         reach `local` (F-13), so it stays on the Mac and nothing here offers it. -->
     <section id="agents" hidden>
-      <ul id="agent-list"></ul>
-      <p id="agents-empty" class="muted" hidden>no agents registered</p>
-      <h3>Register an Agent</h3>
-      <form id="agent-create">
-        <input id="agent-id" type="text" placeholder="id (slug, e.g. drey-dev)" autocomplete="off" autocapitalize="none" />
-        <input id="agent-name" type="text" placeholder="display name" autocomplete="off" />
-        <select id="agent-kind"><option value="external">external</option></select>
-        <button type="submit">Register</button>
-      </form>
-      <div id="agent-token" hidden>
-        <p class="muted">token for <b id="agent-token-for"></b> — copy it now, this will not be shown again</p>
-        <code id="agent-token-value"></code>
-      </div>
+      <div id="agent-list"></div>
+      <p class="muted foot">New agents are defined on the Mac.</p>
+    </section>
+
+    <!-- An agent, pushed: the one table as a list — a row per resource with
+         its Read and Write lines — its actions, and Edit Permissions. -->
+    <section id="agent" hidden>
+      <div id="agent-body"></div>
+      <p id="agent-msg" class="receipt" role="status" aria-live="polite"></p>
+      <p id="agent-acts" class="acts">
+        <button type="button" class="secondary" data-act="edit">Edit Permissions</button>
+        <button type="button" class="destructive" data-act="revoke">Revoke</button>
+      </p>
       <form id="agent-grants" hidden>
-        <h3>Grants for <span id="agent-grants-for"></span></h3>
+        <h3>Edit Permissions</h3>
         <label>Access
           <select id="agent-tier">
             <option value="none">none — capture only</option>
@@ -251,14 +253,14 @@
             <option value="areas">folders — read the folders below</option>
           </select>
         </label>
-        <textarea id="agent-areas" placeholder="Knowledge/Areas/… one folder per line (access: folders)"></textarea>
-        <label><input id="agent-queries" type="checkbox" /> queries — may call queries_list / queries_run (named queries, invariant 3)</label>
-        <input id="agent-projects" type="text" placeholder="projects, comma-separated (slugs)" autocomplete="off" autocapitalize="none" />
-        <p class="muted">autonomy — optional narrowing below "project members" (§4.21); blank = no narrowing</p>
-        <input id="agent-may-dispatch-to" type="text" placeholder="may dispatch to: agent ids, comma-separated" autocomplete="off" autocapitalize="none" />
-        <input id="agent-accept-from" type="text" placeholder="accept bundles from: agent ids and/or user, comma-separated" autocomplete="off" autocapitalize="none" />
-        <input id="agent-max-bundles" type="number" min="0" max="1000" placeholder="max open bundles (default 3)" autocomplete="off" />
-        <p class="muted">actions — what this agent may do on your behalf. The level is a ceiling: "run it" only takes effect at act within scope. Raising anything is recorded and alerted (docs/ops/actions.md)</p>
+        <label>Folders <textarea id="agent-areas" placeholder="Areas/… one folder per line (access: folders)"></textarea></label>
+        <label class="check"><input id="agent-queries" type="checkbox" /> Queries — may call queries_list and queries_run (named queries, invariant 3)</label>
+        <label>Projects <input id="agent-projects" type="text" placeholder="slugs, comma-separated" autocomplete="off" autocapitalize="none" /></label>
+        <p class="muted">Autonomy — optional narrowing below "project members" (§4.21); blank means no narrowing.</p>
+        <label>May dispatch to <input id="agent-may-dispatch-to" type="text" placeholder="agent ids, comma-separated" autocomplete="off" autocapitalize="none" /></label>
+        <label>Accepts bundles from <input id="agent-accept-from" type="text" placeholder="agent ids and/or user, comma-separated" autocomplete="off" autocapitalize="none" /></label>
+        <label>Max open bundles <input id="agent-max-bundles" type="number" min="0" max="1000" placeholder="default 3" autocomplete="off" /></label>
+        <p class="muted">Actions — what it may do on your behalf. The level is a ceiling: Allow only takes effect at act within scope. Raising anything is recorded and alerted (docs/ops/actions.md).</p>
         <label>Level
           <select id="agent-level">
             <option value="observe">observe — no actions at all (the default)</option>
@@ -267,7 +269,7 @@
           </select>
         </label>
         <div id="agent-actions"></div>
-        <p id="agent-grants-msg" class="muted"></p>
+        <p id="agent-grants-msg" class="muted" role="status" aria-live="polite"></p>
         <span><button type="submit">Save</button> <button type="button" id="agent-grants-cancel" class="secondary">Cancel</button></span>
       </form>
     </section>
@@ -292,17 +294,23 @@
       </div>
     </section>
 
-    <!-- Work ▸ Projects: §4.19 project rollup + §4.21 kill switch — one row per
-         project, a mode chip, one toggle. The per-area work rollup below is a
+    <!-- Work ▸ Projects (screen 18 §5; work.js): one row per project, the mode
+         chip and the spend bar carrying it, as on the Mac; a tap pushes the
+         project, where the one switch is. The per-area work rollup below is a
          second thing that used to share the name "Projects" (C82) — it is
-         now labelled Areas so the two never read as the same list. -->
+         Areas, so the two never read as the same list. -->
     <section id="projects" hidden>
-      <h3>Projects</h3>
-      <ul id="dash-project-rows" class="dash-list"></ul>
-      <p id="dash-projects-msg" class="muted"></p>
+      <ul id="project-rows" class="group"></ul>
+      <p id="projects-asof" class="muted"></p>
+      <h3>Areas <span id="areas-asof" class="muted"></span></h3>
+      <ul id="area-rollup" class="dash-list"></ul>
+    </section>
 
-      <h3>Areas <span id="dash-projects-asof" class="muted"></span></h3>
-      <ul id="dash-projects" class="dash-list"></ul>
+    <!-- A project, pushed: why it is in its mode, the kill switch (§4.21),
+         its spend, its members and its work. -->
+    <section id="project" hidden>
+      <div id="project-body"></div>
+      <p id="project-msg" class="receipt" role="status" aria-live="polite"></p>
     </section>
 
     <!-- Usage: a sheet from the header's gauge (600px and up) or More. What the
@@ -324,10 +332,29 @@
       <ul id="dash-aws-services" class="dash-list"></ul>
     </section>
 
-    <!-- Knowledge. The fold, then Needs Your Eye, then Areas (screen 18 §5)
-         arrive with the Knowledge view; until then the tab says so plainly. -->
+    <!-- Knowledge (screen 18 §5; screen 10; knowledge.js): the fold first, then
+         Needs Your Eye, then Areas, with search above them. An area pushes
+         its pages; a page pushes its note and its links. Nothing here writes. -->
     <section id="knowledge" hidden>
-      <p class="empty">Knowledge isn’t in this app yet — the fold, Needs Your Eye and Areas arrive here next.</p>
+      <form id="kn-search" role="search">
+        <input id="kn-q" type="search" aria-label="Search knowledge" placeholder="Search knowledge" autocomplete="off" />
+        <button type="submit" class="secondary">Search</button>
+        <button type="button" id="kn-clear" class="secondary" hidden>Clear</button>
+      </form>
+      <div id="kn-results" hidden></div>
+      <div id="kn-fold"></div>
+      <div id="kn-eye"></div>
+      <div id="kn-areas"></div>
+    </section>
+
+    <section id="area" hidden>
+      <div id="area-pages"></div>
+    </section>
+
+    <section id="page" hidden>
+      <p id="page-meta" class="mono muted"></p>
+      <div id="page-body" class="page-body art-md"></div>
+      <div id="page-links"></div>
     </section>
 
     <!-- More (screen 18 §1): what the tab bar has no room for, in the Mac's
@@ -343,116 +370,106 @@
       </ul>
     </section>
 
-    <!-- board (docs/ops/board.md): the Kanban over the tasks module's work
-         rows. Columns are derived SERVER-SIDE by the `board` seed query
-         (invariant 3) — this panel never decides which column a card belongs
-         to, so the Mac app renders the same rows unchanged.
-         The drags (phase 3 of docs/research/2026-09-12-hermes-agent-review.md)
-         are HTML5 drag-and-drop, no library: every drop maps to exactly ONE
-         route on the console's thin adapter over TasksService, and the board
-         offers no drop the service would refuse. A refused drop snaps the card
-         back carrying the server's own sentence. `m` on a focused card is the
-         keyboard alternative — a board that needs a mouse is a board half the
-         time you cannot use. Every server value is output-encoded via esc()
-         (CRIT-7). -->
+    <!-- Work ▸ Board (screen 18 §5; screen 6; work.js). Columns are derived
+         SERVER-SIDE by the `board` seed query (invariant 3) — nothing here
+         decides which column a card belongs to. On a phone one column shows,
+         picked by the chips with their counts; from 600px the columns sit
+         side by side and snap; at 900px it is the Mac's board, drags and all.
+         Every tap opens the card (C84). A drag becomes Move to… — an action
+         sheet with every other column: a move the service would accept is a
+         button, one it would refuse is listed disabled with its reason. `m` on
+         a focused card opens it. Every server value goes through esc(). -->
     <section id="board" hidden>
+      <div id="board-chips" class="board-chips" role="group" aria-label="Column"></div>
       <form id="board-filter">
-        <select id="board-project" aria-label="Project"><option value="">all projects</option></select>
+        <select id="board-project" aria-label="Project"><option value="">All Projects</option></select>
         <span id="board-asof" class="muted"></span>
         <span class="muted board-hint">[ and ] move the project filter · drag a card, or press m on one</span>
       </form>
-      <div id="board-columns" class="board"></div>
-      <p id="board-empty" class="muted" hidden>no tasks yet — one appears when an agent calls tasks_create or a crew is delegated work</p>
+      <div id="board-state" class="panel-state" hidden></div>
       <p id="board-msg" class="board-msg" role="status" aria-live="polite" hidden></p>
-
-      <!-- move (the keyboard alternative to a drag): the LEGAL targets for
-           the focused card only, built from the same rules the statements in
-           packages/tasks enforce. -->
-      <div id="board-move" class="board-pop" hidden role="dialog" aria-modal="false" aria-labelledby="board-move-title">
-        <h3 id="board-move-title">Move this card</h3>
-        <p id="board-move-card" class="muted"></p>
-        <div id="board-move-targets" class="board-pop-row"></div>
-        <button type="button" id="board-move-cancel" class="secondary">Cancel</button>
-      </div>
-
-      <!-- assign: the one drop that needs a value. Crew and agent names come
-           from GET /api/agents; "me" is the user's own hand. A HUMAN may
-           assign a card to any crew (collaboration rule 4) — no agent
-           surface can assign one at all. -->
-      <form id="board-assign" class="board-pop" hidden aria-labelledby="board-assign-title">
-        <h3 id="board-assign-title">Assign this card to</h3>
-        <p id="board-assign-card" class="muted"></p>
-        <select id="board-assign-to" aria-label="Owner"></select>
-        <div class="board-pop-row">
-          <button type="submit">Assign</button>
-          <button type="button" id="board-assign-cancel" class="secondary">Cancel</button>
-        </div>
-      </form>
-
-      <!-- detail: what a card click opens when there is no room to open. -->
-      <div id="board-detail" class="board-pop" hidden role="dialog" aria-modal="false" aria-labelledby="board-detail-title">
-        <h3 id="board-detail-title"></h3>
-        <dl id="board-detail-fields"></dl>
-        <div class="board-pop-row">
-          <a id="board-detail-link" href="#" hidden>Open the artifact</a>
-          <button type="button" id="board-detail-close" class="secondary">Close</button>
-        </div>
-      </div>
+      <div id="board-columns" class="board"></div>
     </section>
 
-    <!-- artifacts (§4.21): versioned, commentable agent output. Every server
-         value is output-encoded (CRIT-7); HTML artifacts render ONLY inside an
+    <!-- A card, pushed full-screen from every tap (C84): what it is about
+         (T1-1), where it is and who holds it, and its room — a push from here.
+         Move to… is the one door onto a move; Release the quick one when the
+         card is yours to hand back. -->
+    <section id="card" hidden>
+      <div id="card-note" class="card-note" role="status" aria-live="polite" hidden></div>
+      <div id="card-body"></div>
+      <p id="card-msg" class="board-msg" role="status" aria-live="polite" hidden></p>
+      <p id="card-bar" class="card-bar">
+        <button type="button" id="card-move" class="secondary" data-act="move">Move to…</button>
+        <button type="button" id="card-release" class="secondary" data-act="release" hidden>Release</button>
+      </p>
+    </section>
+
+    <!-- Move to… — the sheet's body: every other column, legal or not. -->
+    <section id="move" hidden>
+      <p id="move-for" class="muted"></p>
+      <ul id="move-list" class="group action-list" aria-label="Move to"></ul>
+    </section>
+
+    <!-- Work ▸ Artifacts (§4.21; screen 16; work.js): versioned, commentable
+         agent output. A tap pushes the artifact. Every server value is
+         output-encoded (CRIT-7); an HTML artifact renders ONLY inside an
          opaque-origin sandboxed iframe (decision #14). -->
     <section id="artifacts" hidden>
       <form id="art-filter">
-        <input id="art-project" type="text" placeholder="project (blank = all)" autocomplete="off" autocapitalize="none" />
+        <input id="art-project" type="text" aria-label="Project" placeholder="Project (blank for all)" autocomplete="off" autocapitalize="none" />
         <button type="submit" class="secondary">List</button>
       </form>
-      <ul id="art-list"></ul>
-      <p id="art-empty" class="muted" hidden>no artifacts yet — an agent publishes one with artifacts_publish</p>
-      <div id="art-detail" hidden>
-        <h3 id="art-title"></h3>
+      <ul id="art-list" class="group"></ul>
+      <p id="art-empty" class="empty" hidden>No artifacts yet — an agent publishes one with artifacts_publish.</p>
+    </section>
+
+    <!-- An artifact, pushed. Its threads become counts on their lines — the
+         margin does not fit — and a count opens the thread sheet. -->
+    <section id="artifact" hidden>
+      <p id="artifact-state" class="muted" hidden></p>
+      <div id="artifact-detail">
         <p id="art-meta" class="muted"></p>
         <div class="art-row">
           <label>Version <select id="art-version"></select></label>
           <label>File <select id="art-file"></select></label>
         </div>
         <div id="art-viewer"></div>
-        <h3>Threads <span id="art-thread-count" class="muted"></span></h3>
-        <ul id="art-threads"></ul>
+        <div id="art-others"></div>
         <form id="art-comment">
-          <textarea id="art-comment-body" placeholder="comment on this version…"></textarea>
+          <label>Comment on this version <textarea id="art-comment-body"></textarea></label>
           <span><button type="submit">Comment</button></span>
         </form>
         <form id="art-dispatch">
-          <p class="muted">send the checked threads to an agent as one review task</p>
-          <input id="art-dispatch-to" type="text" placeholder="agent id" autocomplete="off" autocapitalize="none" />
+          <label>Send the open comments to an agent as one review task
+            <input id="art-dispatch-to" type="text" placeholder="agent id" autocomplete="off" autocapitalize="none" /></label>
           <span><button type="submit" class="secondary">Send for Review</button></span>
-          <p id="art-dispatch-msg" class="muted"></p>
+          <p id="art-dispatch-msg" class="muted" role="status" aria-live="polite"></p>
         </form>
       </div>
     </section>
+
+    <!-- An artifact's thread — the sheet's body. -->
+    <section id="art-thread" hidden>
+      <ul id="art-thread-list" class="threads"></ul>
+      <p id="art-thread-msg" class="receipt" role="status" aria-live="polite"></p>
+    </section>
+    <!-- A task's room (docs/ops/threads.md) — a push from its card, never a
+         list of its own (C89). Every value may be agent-authored: esc(). -->
     <section id="rooms" hidden>
-      <p class="muted">Every conversation in the system — threads on artifact versions and rooms on tasks. Nobody is addressed here: agents read a room, they are never woken by one.</p>
-      <form id="room-filter">
-        <input id="room-project" type="text" placeholder="project (blank = all)" autocomplete="off" autocapitalize="none" />
-        <label><input id="room-open-only" type="checkbox" checked /> open only</label>
-        <button type="submit" class="secondary">List</button>
-      </form>
-      <ul id="room-list"></ul>
-      <p id="room-empty" class="muted" hidden>no conversations yet — an agent starts one with tasks_comment or artifacts_comment</p>
+      <p id="room-state" class="muted" hidden></p>
       <div id="room-detail" hidden>
-        <h3 id="room-title"></h3>
+        <h2 id="room-title" class="room-title"></h2>
         <p id="room-meta" class="muted"></p>
         <p id="room-why" class="room-why" hidden></p>
-        <ul id="room-messages"></ul>
+        <ul id="room-messages" class="threads"></ul>
         <form id="room-comment">
-          <textarea id="room-comment-body" placeholder="say something in this room…"></textarea>
+          <label>Add to the room <textarea id="room-comment-body"></textarea></label>
           <span>
-            <button type="submit">Comment</button>
+            <button type="submit">Send</button>
             <button type="button" id="room-resolve" class="secondary">Resolve</button>
           </span>
-          <p id="room-msg" class="muted"></p>
+          <p id="room-msg" class="muted" role="status" aria-live="polite"></p>
         </form>
       </div>
     </section>

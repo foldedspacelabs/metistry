@@ -9,12 +9,13 @@
 //   - clock times: 12-hour with AM/PM on every device.
 //
 // apps/console/web/app.js is a browser script and cannot be imported, so, as
-// in composer.test.ts, the pure top-level declarations are lifted out of the
-// source by name and evaluated. A rename makes the lift throw rather than
-// letting a test pass vacuously — and `node --check` on app.js (last test)
-// catches what a lift cannot see: a clash with a name declared elsewhere.
-// The helpers every view shares moved to lib.js (T7-3a), a module with no DOM
-// in it, so those are imported as they are.
+// in composer.test.ts, the pure top-level declarations still in it are lifted
+// out of the source by name and evaluated. A rename makes the lift throw
+// rather than letting a test pass vacuously — and `node --check` on every
+// module (last test) catches what a lift cannot see: a clash with a name
+// declared elsewhere. The helpers every view shares moved to lib.js (T7-3a),
+// and Agents to more.js (T7-3b) — modules with no DOM at import time — so
+// those are imported as they are.
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -23,12 +24,15 @@ import { listAgents } from "../src/agents.js";
 import { permissionRowText, type PermissionRow } from "@foldedspacelabs/metistry-core";
 import { agentAutonomy, MODE_LABEL as CLI_MODE_LABEL, renderAutonomy, renderPermissions } from "../../../packages/cli/src/agents.js";
 import { createUi } from "../../../packages/cli/src/ui.js";
-import { clockTime, dateTime, esc as libEsc } from "../web/lib.js";
+import { bodyClass, clockTime, dateTime, esc as libEsc } from "../web/lib.js";
+import { ACTION_MODE_LABEL, actionTableHtml, actionTableRows, permissionRowText as pwaPermissionRowText, permissionsListHtml, refusalText } from "../web/more.js";
 
 const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
 const SRC = read("../web/app.js");
-/** Every module the PWA loads: the shell and the views split out of it (T7-3a). */
-const MODULES = ["app.js", "lib.js", "today.js", "needs-you.js", "live.js", "md.js"];
+/** Every module the PWA loads: the shell and the views split out of it (T7-3a, T7-3b). */
+const MODULES = ["app.js", "lib.js", "today.js", "needs-you.js", "work.js", "knowledge.js", "more.js", "live.js", "md.js"];
+/** Agents' own file since T7-3b: what prints the two tables. */
+const MORE = read("../web/more.js");
 const ALL_SRC = MODULES.map((m) => read(`../web/${m}`)).join("\n");
 const CSS = read("../web/style.css");
 const TOKENS_CSS = read("../web/tokens.css");
@@ -57,14 +61,11 @@ const lifted = <T>(names: string[], expr: string): T =>
   new Function("esc", `${names.map(lift).join("\n")}\nreturn (${expr});`)(esc) as T;
 
 interface Row { kind: string; source: string | undefined; text: string }
-const pwa = lifted<{
+const pwa = { ACTION_MODE_LABEL, actionTableRows, actionTableHtml } as {
   ACTION_MODE_LABEL: Record<string, string>;
   actionTableRows: (scope: unknown) => Row[] | null;
   actionTableHtml: (scope: unknown) => string;
-}>(
-  ["ACTION_MODE_LABEL", "modeWord", "actionEntryText", "actionTableRows", "actionTableHtml"],
-  "{ ACTION_MODE_LABEL, actionTableRows, actionTableHtml }",
-);
+};
 
 // ---------------------------------------------------------------------------
 // The effective action table
@@ -120,7 +121,7 @@ describe("the PWA prints the effective action table the CLI prints (§2.17)", ()
       // and the markup carries each line, escaped, with its level
       const html = pwa.actionTableHtml(row.scope);
       expect(html).toContain(`level: ${cli.level}`);
-      for (const [kind, text] of cli.rows) expect(html).toContain(`<span class="mono">${kind}</span> ${esc(text)}`);
+      for (const [kind, text] of cli.rows) expect(html).toContain(`<span class="mono">${kind}</span> ${esc(text)}</li>`);
     });
   }
 
@@ -139,15 +140,15 @@ describe("the PWA prints the effective action table the CLI prints (§2.17)", ()
 
   it("reads the table from the server rather than holding a copy of the arithmetic", () => {
     // The defaults, the ceilings and the clamp live in core (packages/core/src/actions.ts) only.
-    expect(SRC).not.toMatch(/\b(ACTION_DEFAULTS|LEVEL_CEILING|MODE_RANK|AUTONOMY_LEVELS|ACTION_KINDS)\b/);
-    expect(SRC).not.toMatch(/function effectiveActions\b|\blevelOf\(/);
-    expect(SRC).toContain("actionTableHtml(a.scope)");
+    expect(ALL_SRC).not.toMatch(/\b(ACTION_DEFAULTS|LEVEL_CEILING|MODE_RANK|AUTONOMY_LEVELS|ACTION_KINDS)\b/);
+    expect(ALL_SRC).not.toMatch(/function effectiveActions\b|\blevelOf\(/);
+    expect(MORE).toContain("actionTableHtml(a.scope)");
   });
 
   it("says unavailable when a row carries no table — it never fills one in", () => {
     expect(pwa.actionTableRows(undefined)).toBeNull();
     expect(pwa.actionTableRows({ autonomy: { level: "propose" } })).toBeNull();
-    expect(pwa.actionTableHtml({})).toContain("actions: unavailable");
+    expect(pwa.actionTableHtml({})).toContain("Actions: unavailable");
   });
 });
 
@@ -185,10 +186,7 @@ const ONE_TABLE: Record<string, string[][]> = {
   researcher: [["Knowledge", "Projects, Resources", "—"]],
 };
 
-const perms = lifted<{ permissionRowText: (row: unknown) => string[]; permissionsTableHtml: (rows: unknown) => string }>(
-  ["PERMISSION_EMPTY_CELL", "permissionEntryText", "permissionCellText", "permissionRowText", "permissionsTableHtml"],
-  "{ permissionRowText, permissionsTableHtml }",
-);
+const perms = { permissionRowText: pwaPermissionRowText, permissionsListHtml } as { permissionRowText: (row: unknown) => string[]; permissionsListHtml: (rows: unknown) => string };
 
 describe("the permissions table: the CLI, the console and MetistryKit print one table (T4-6)", () => {
   const fixture = JSON.parse(read("../../macos/tests/kit/fixtures/get-api-agents.json")) as { body: { agents: { id: string; revoked: boolean; permissions: PermissionRow[] }[] } };
@@ -203,9 +201,11 @@ describe("the permissions table: the CLI, the console and MetistryKit print one 
       // the CLI prints each row's cells, padded into columns, in these words
       const cli = renderPermissions(a.permissions, ui).split("\n").slice(2);
       expect(cli.map((l) => l.trim().split(/\s{2,}/)), a.id).toEqual(core);
-      // and the panel's markup carries each cell, escaped
-      const html = perms.permissionsTableHtml(a.permissions);
-      for (const [label, readCell, writeCell] of core) expect(html, a.id).toContain(`<tr><th scope="row">${esc(label)}</th><td>${esc(readCell)}</td><td>${esc(writeCell)}</td></tr>`);
+      // and the phone's list carries each cell, escaped: a row per resource, its Read and Write lines (screen 18 §5)
+      const html = perms.permissionsListHtml(a.permissions);
+      for (const [label, readCell, writeCell] of core) {
+        expect(html, a.id).toContain(`<li class="perm"><span class="perm-res">${esc(label)}</span><span class="perm-line"><span class="perm-k">Read</span> <span>${esc(readCell)}</span></span><span class="perm-line"><span class="perm-k">Write</span> <span>${esc(writeCell)}</span></span></li>`);
+      }
     }
   });
 
@@ -224,18 +224,18 @@ describe("the permissions table: the CLI, the console and MetistryKit print one 
   });
 
   it("says holding nothing, and a console too old to send rows, rather than drawing an empty table", () => {
-    expect(perms.permissionsTableHtml([])).toContain("holds nothing");
-    expect(perms.permissionsTableHtml(undefined)).toContain("permissions: unavailable");
+    expect(perms.permissionsListHtml([])).toContain("Holds nothing");
+    expect(perms.permissionsListHtml(undefined)).toContain("Permissions: unavailable");
   });
 
   it("reads the rows from the server rather than deriving them — no tier, grant or tool rule in the panel", () => {
-    expect(SRC).toContain("permissionsTableHtml(a.permissions)");
-    const code = SRC.replace(/^\s*\/\/.*$/gm, ""); // what the panel RUNS; its comments may name core's functions
+    expect(MORE).toContain("permissionsListHtml(a.permissions)");
+    const code = ALL_SRC.replace(/^\s*\/\/.*$/gm, ""); // what the panel RUNS; its comments may name core's functions
     expect(code).not.toMatch(/\b(RULED_TOOLS|TOOL_PERMISSION_CELLS|CREW_NEVER_TOOLS|describePermissions|mayUseTool)\b/);
   });
 
   it("escapes what an agent could have written into a label", () => {
-    const html = perms.permissionsTableHtml([{ resource: { kind: "connection", name: "x" }, label: "<img src=x onerror=alert(1)>", read: [], write: [] }]);
+    const html = perms.permissionsListHtml([{ resource: { kind: "connection", name: "x" }, label: "<img src=x onerror=alert(1)>", read: [], write: [] }]);
     expect(html).not.toContain("<img");
   });
 });
@@ -320,7 +320,6 @@ describe("fills and faces are tokens", () => {
   });
 
   it("marks only a body an agent wrote as agent prose", () => {
-    const bodyClass = lifted<(c: unknown) => string>(["bodyClass"], "bodyClass");
     expect(bodyClass({ author_kind: "agent" })).toBe("body agent-prose");
     expect(bodyClass({ author_kind: "user" })).toBe("body");
     expect(bodyClass(undefined)).toBe("body");
@@ -354,25 +353,26 @@ describe("clock times are 12-hour with AM/PM on every device", () => {
 });
 
 // ---------------------------------------------------------------------------
-// F-13: register and rotate are reach `local` — the refusal is shown as it came
+// F-13: register and rotate are reach `local` — the phone does not offer them
 // ---------------------------------------------------------------------------
 
-describe("a local-only refusal is surfaced in the server's words (F-13)", () => {
+describe("a local-only door is not on the phone (F-13, screen 18 §5)", () => {
   const LOCAL_ONLY = "POST /api/agents is reach `local`: only the Metistry Mac app (or the `metistry` command line) on the Mac this console runs on can do it — a passkey session cannot, even from that Mac. Open the Mac app there (docs/ops/client-api.md)";
-  // `lift` reads plain functions; this one is async, so it is cut out whole by its own shape
-  const decl = /^async function refusalText\([\s\S]*?\n\}$/m.exec(SRC)?.[0];
-  if (!decl) throw new Error("app.js no longer declares refusalText — update this test with the rename");
-  const refusalText = new Function(`${decl}\nreturn refusalText;`)() as (r: unknown, fallback: string) => Promise<string>;
 
-  it("says what the envelope says, and only falls back when there is nothing to say", async () => {
-    expect(await refusalText({ json: async () => ({ error: { code: "local_only", message: LOCAL_ONLY } }) }, "rotate failed")).toBe(LOCAL_ONLY);
-    expect(await refusalText({ json: async () => { throw new Error("not json"); } }, "rotate failed")).toBe("rotate failed");
-    expect(await refusalText({ json: async () => ({}) }, "rotate failed")).toBe("rotate failed");
+  it("no module registers an agent or rotates a token: defining an agent stays on the Mac", () => {
+    expect(ALL_SRC).not.toMatch(/\/rotate`/);
+    expect(ALL_SRC).not.toMatch(/api\("\/api\/agents", \{ method: "POST"/);
+    const html = read("../web/index.html");
+    for (const id of ["agent-create", "agent-token", "agent-id", "agent-name", "agent-kind"]) expect(html, id).not.toContain(`id="${id}"`);
+    expect(html).toContain("New agents are defined on the Mac.");
   });
 
-  it("both doors the passkey session can no longer use go through it", () => {
-    expect(SRC).toContain('else alert(await refusalText(r, "rotate failed"));');
-    expect(SRC).toMatch(/if \(!r\.ok\) return alert\(await refusalText\(r, "invalid/);
+  it("a refusal on the doors it does offer is said in the server's words, and only falls back when there is nothing to say", async () => {
+    expect(await refusalText({ json: async () => ({ error: { code: "local_only", message: LOCAL_ONLY } }) }, "not saved")).toBe(LOCAL_ONLY);
+    expect(await refusalText({ json: async () => { throw new Error("not json"); } }, "not saved")).toBe("not saved");
+    expect(await refusalText({ json: async () => ({}) }, "not saved")).toBe("not saved");
+    // grants, projects, autonomy and revoke all go through it
+    expect(MORE.match(/await refusalText\(/g)?.length).toBeGreaterThanOrEqual(4);
   });
 });
 

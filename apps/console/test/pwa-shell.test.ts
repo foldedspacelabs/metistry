@@ -96,8 +96,9 @@ describe("five tabs — Today · Chat · Work · Knowledge · More (ruled 2026-0
     const seg = element("div", "work-seg");
     expect([...seg.matchAll(/data-view="([^"]+)"/g)].map((m) => m[1])).toEqual(["board", "projects", "artifacts"]);
     expect(HTML).not.toContain('data-view="rooms"');
-    // a room is still a push — from its card, back to the Board
-    expect(shell.VIEWS.rooms).toMatchObject({ tab: "work", back: "board" });
+    // a room is still a push — from its card, which is a push from the Board (C84, T7-3b)
+    expect(shell.VIEWS.rooms).toMatchObject({ tab: "work", back: "card" });
+    expect(shell.VIEWS.card).toMatchObject({ tab: "work", back: "board" });
   });
 
   it("More holds Activity and Agents, then Usage and Settings, in the Mac's order", () => {
@@ -318,7 +319,8 @@ describe("sheets for the bell, Capture and Usage", () => {
   it("pushes go back to where they came from; at 900px More is the sidebar, so its rows are places of their own", () => {
     expect(shell.backFor(shell.VIEWS.agents!, false)).toBe("more");
     expect(shell.backFor(shell.VIEWS.agents!, true)).toBeNull();
-    expect(shell.backFor(shell.VIEWS.rooms!, true)).toBe("board");
+    expect(shell.backFor(shell.VIEWS.rooms!, true)).toBe("card");
+    expect(shell.backFor(shell.VIEWS.card!, true)).toBe("board");
     expect(shell.backFor(shell.VIEWS.today!, false)).toBeNull();
   });
 });
@@ -388,7 +390,7 @@ describe("glyphs, not emoji", () => {
 
 describe("the views split out of app.js (T7-3a)", () => {
   it("every element a module binds by id ships in index.html — a missing one throws on load and stops the shell", () => {
-    for (const m of ["app.js", "today.js", "needs-you.js"]) {
+    for (const m of ["app.js", "today.js", "needs-you.js", "work.js", "knowledge.js", "more.js"]) {
       const src = read(`../web/${m}`);
       const ids = [...new Set([...src.matchAll(/\$\("([^"]+)"\)/g)].map((x) => x[1]!))];
       expect(ids.length, m).toBeGreaterThan(5);
@@ -399,7 +401,10 @@ describe("the views split out of app.js (T7-3a)", () => {
   it("the shell imports the views; a view never imports the shell", () => {
     expect(SRC).toContain('import { mountNeedsYou } from "./needs-you.js";');
     expect(SRC).toContain('import { mountToday } from "./today.js";');
-    for (const m of ["today.js", "needs-you.js", "lib.js"]) expect(read(`../web/${m}`), m).not.toMatch(/from "\.\/app\.js"/);
+    expect(SRC).toContain('import { artifactRoute, mountWork, roomRoute } from "./work.js";');
+    expect(SRC).toContain('import { mountKnowledge } from "./knowledge.js";');
+    expect(SRC).toContain('import { mountMore } from "./more.js";');
+    for (const m of ["today.js", "needs-you.js", "work.js", "knowledge.js", "more.js", "lib.js"]) expect(read(`../web/${m}`), m).not.toMatch(/from "\.\/app\.js"/);
     expect(read("../web/lib.js")).not.toMatch(/\bdocument\.|\bwindow\./); // DOM-free: a test imports it as it is
   });
 });
@@ -409,6 +414,6 @@ describe("boot", () => {
     const boot = SRC.lastIndexOf("// ----- boot -----");
     expect(boot).toBeGreaterThan(SRC.lastIndexOf("\nconst "));
     expect(boot).toBeGreaterThan(SRC.lastIndexOf("\nfunction "));
-    expect(SRC.slice(boot)).toContain('show(artifactRoute() ? "artifacts" : roomRoute() ? "rooms" : HOME)');
+    expect(SRC.slice(boot)).toContain('show(artifactRoute(location.hash) ? "artifact" : roomRoute(location.hash) ? "rooms" : HOME)');
   });
 });

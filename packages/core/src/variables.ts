@@ -81,7 +81,7 @@ export function variableNameIssue(name: unknown): VariableIssue | undefined {
 // ---- values: plain text, never a key, never a time ------------------------------------
 
 /** A value is one line of at most this many characters: a plain shared value, not a document. */
-export const VARIABLE_VALUE_MAX = 1024;
+export const VARIABLE_VALUE_MAX = 1024; // limit: fixed — a variable is a plain shared value inlined into instructions; a longer text is a document, not a variable
 
 /**
  * Credential shapes that are unambiguous wherever they appear in a value.

@@ -12,326 +12,391 @@
   "body": {
     "rows": [
       {
-        "ts": "2026-09-27T00:14:12.154Z",
-        "kind": "work_history",
-        "group": "work",
-        "actor": "user",
-        "subject": "review: metistry/store-interface ver_01M3G3CN559NZE73ANMDKBJ8SB (1 thread)",
-        "detail": "create",
-        "ref": "work:4",
-        "turn_id": null
-      },
-      {
-        "ts": "2026-09-27T00:14:12.153Z",
+        "ts": "2026-09-27T00:36:49.811Z",
         "kind": "task_op",
         "group": "work",
         "actor": "user",
         "subject": "work:4",
         "detail": "create work #4",
-        "ref": "runs:40",
-        "turn_id": null
+        "ref": "runs:44",
+        "turn_id": null,
+        "ok": true
       },
       {
-        "ts": "2026-09-27T00:14:12.126Z",
-        "kind": "dispatch",
-        "group": "run",
-        "actor": "console",
-        "subject": "github-issues",
-        "detail": "dispatched to github-issues ok",
-        "ref": "runs:35",
-        "turn_id": null
+        "ts": "2026-09-27T00:36:49.811Z",
+        "kind": "work_history",
+        "group": "work",
+        "actor": "user",
+        "subject": "review: metistry/store-interface ver_01M3G4P2ZY03X20PGSRGYA105A (1 thread)",
+        "detail": "create",
+        "ref": "work:4",
+        "turn_id": null,
+        "ok": null
       },
       {
-        "ts": "2026-09-27T00:14:12.126Z",
+        "ts": "2026-09-27T00:36:49.782Z",
         "kind": "work_history",
         "group": "work",
         "actor": "owner",
         "subject": "Open the release checklist",
         "detail": "dispatch github-issues → gh:example/fixtures#41",
         "ref": "work:2",
-        "turn_id": null
+        "turn_id": null,
+        "ok": null
       },
       {
-        "ts": "2026-09-27T00:14:12.123Z",
+        "ts": "2026-09-27T00:36:49.781Z",
+        "kind": "dispatch",
+        "group": "run",
+        "actor": "console",
+        "subject": "github-issues",
+        "detail": "dispatched to github-issues ok",
+        "ref": "runs:39",
+        "turn_id": null,
+        "ok": true
+      },
+      {
+        "ts": "2026-09-27T00:36:49.780Z",
         "kind": "task_op",
         "group": "work",
         "actor": "user",
         "subject": "work:1",
         "detail": "release work #1",
-        "ref": "runs:33",
-        "turn_id": null
+        "ref": "runs:37",
+        "turn_id": null,
+        "ok": true
       },
       {
-        "ts": "2026-09-27T00:14:12.123Z",
+        "ts": "2026-09-27T00:36:49.780Z",
         "kind": "work_history",
         "group": "work",
         "actor": "user",
         "subject": "Freeze the store interface (F-7)",
         "detail": "release back to the board",
         "ref": "work:1",
-        "turn_id": null
+        "turn_id": null,
+        "ok": null
       },
       {
-        "ts": "2026-09-27T00:14:12.121Z",
+        "ts": "2026-09-27T00:36:49.777Z",
+        "kind": "task_op",
+        "group": "work",
+        "actor": "user",
+        "subject": "work:1",
+        "detail": "heartbeat work #1",
+        "ref": "runs:35",
+        "turn_id": null,
+        "ok": true
+      },
+      {
+        "ts": "2026-09-27T00:36:49.777Z",
         "kind": "work_history",
         "group": "work",
         "actor": "user",
         "subject": "Freeze the store interface (F-7)",
         "detail": "heartbeat halfway",
         "ref": "work:1",
-        "turn_id": null
+        "turn_id": null,
+        "ok": null
       },
       {
-        "ts": "2026-09-27T00:14:12.120Z",
-        "kind": "task_op",
-        "group": "work",
-        "actor": "user",
-        "subject": "work:1",
-        "detail": "heartbeat work #1",
-        "ref": "runs:31",
-        "turn_id": null
-      },
-      {
-        "ts": "2026-09-27T00:14:12.118Z",
-        "kind": "task_op",
-        "group": "work",
-        "actor": "user",
-        "subject": "work:1",
-        "detail": "claim work #1",
-        "ref": "runs:29",
-        "turn_id": null
-      },
-      {
-        "ts": "2026-09-27T00:14:12.118Z",
+        "ts": "2026-09-27T00:36:49.775Z",
         "kind": "work_history",
         "group": "work",
         "actor": "user",
         "subject": "Freeze the store interface (F-7)",
         "detail": "claim",
         "ref": "work:1",
-        "turn_id": null
+        "turn_id": null,
+        "ok": null
       },
       {
-        "ts": "2026-09-27T00:14:12.115Z",
+        "ts": "2026-09-27T00:36:49.774Z",
+        "kind": "task_op",
+        "group": "work",
+        "actor": "user",
+        "subject": "work:1",
+        "detail": "claim work #1",
+        "ref": "runs:33",
+        "turn_id": null,
+        "ok": true
+      },
+      {
+        "ts": "2026-09-27T00:36:49.771Z",
         "kind": "task_op",
         "group": "work",
         "actor": "user",
         "subject": "work:1",
         "detail": "update work #1",
-        "ref": "runs:27",
-        "turn_id": null
+        "ref": "runs:31",
+        "turn_id": null,
+        "ok": true
       },
       {
-        "ts": "2026-09-27T00:14:12.115Z",
+        "ts": "2026-09-27T00:36:49.771Z",
         "kind": "work_history",
         "group": "work",
         "actor": "user",
         "subject": "Freeze the store interface (F-7)",
         "detail": "update",
         "ref": "work:1",
-        "turn_id": null
+        "turn_id": null,
+        "ok": null
       },
       {
-        "ts": "2026-09-27T00:14:12.110Z",
+        "ts": "2026-09-27T00:36:49.766Z",
         "kind": "agent_admin",
         "group": "run",
         "actor": "console",
         "subject": "old-laptop",
         "detail": "revoke old-laptop",
-        "ref": "runs:25",
-        "turn_id": null
+        "ref": "runs:29",
+        "turn_id": null,
+        "ok": true
       },
       {
-        "ts": "2026-09-27T00:14:12.107Z",
+        "ts": "2026-09-27T00:36:49.764Z",
         "kind": "agent_admin",
         "group": "run",
         "actor": "console",
         "subject": "opencode",
         "detail": "rotate opencode",
-        "ref": "runs:24",
-        "turn_id": null
+        "ref": "runs:28",
+        "turn_id": null,
+        "ok": true
       },
       {
-        "ts": "2026-09-27T00:14:12.105Z",
+        "ts": "2026-09-27T00:36:49.761Z",
         "kind": "agent_admin",
         "group": "run",
         "actor": "console",
         "subject": "devin",
         "detail": "approve devin",
-        "ref": "runs:23",
-        "turn_id": null
+        "ref": "runs:27",
+        "turn_id": null,
+        "ok": true
       },
       {
-        "ts": "2026-09-27T00:14:12.104Z",
+        "ts": "2026-09-27T00:36:49.761Z",
         "kind": "proposal_decided",
         "group": "decision",
         "actor": "devin",
         "subject": "decision",
         "detail": "you decided approve",
         "ref": "proposals:4",
-        "turn_id": null
+        "turn_id": null,
+        "ok": null
       },
       {
-        "ts": "2026-09-27T00:14:12.102Z",
+        "ts": "2026-09-27T00:36:49.759Z",
         "kind": "alert",
         "group": "message",
         "actor": "assistant",
         "subject": "alert",
         "detail": "agent cursor was given more room: level observe → propose; actions.dispatch deny → propose; actions.task_update deny → propose; actions.comment deny → propose; actions.capture deny → propose",
         "ref": "outbound_messages:2",
-        "turn_id": null
+        "turn_id": null,
+        "ok": null
       },
       {
-        "ts": "2026-09-27T00:14:12.102Z",
+        "ts": "2026-09-27T00:36:49.759Z",
         "kind": "agent_admin",
         "group": "run",
         "actor": "console",
         "subject": "cursor",
         "detail": "autonomy_widened cursor",
-        "ref": "runs:22",
-        "turn_id": null
+        "ref": "runs:26",
+        "turn_id": null,
+        "ok": true
       },
       {
-        "ts": "2026-09-27T00:14:12.101Z",
+        "ts": "2026-09-27T00:36:49.758Z",
         "kind": "agent_admin",
         "group": "run",
         "actor": "console",
         "subject": "cursor",
         "detail": "autonomy cursor",
-        "ref": "runs:21",
-        "turn_id": null
+        "ref": "runs:25",
+        "turn_id": null,
+        "ok": true
       },
       {
-        "ts": "2026-09-27T00:14:12.099Z",
+        "ts": "2026-09-27T00:36:49.755Z",
         "kind": "agent_admin",
         "group": "run",
         "actor": "console",
         "subject": "cursor",
         "detail": "projects cursor",
-        "ref": "runs:20",
-        "turn_id": null
+        "ref": "runs:24",
+        "turn_id": null,
+        "ok": true
       },
       {
-        "ts": "2026-09-27T00:14:12.097Z",
+        "ts": "2026-09-27T00:36:49.753Z",
         "kind": "agent_admin",
         "group": "run",
         "actor": "console",
         "subject": "cursor",
         "detail": "grant cursor",
-        "ref": "runs:19",
-        "turn_id": null
+        "ref": "runs:23",
+        "turn_id": null,
+        "ok": true
       },
       {
-        "ts": "2026-09-27T00:14:12.093Z",
+        "ts": "2026-09-27T00:36:49.750Z",
         "kind": "agent_admin",
         "group": "run",
         "actor": "console",
         "subject": "devin",
         "detail": "mint devin",
-        "ref": "runs:18",
-        "turn_id": null
+        "ref": "runs:22",
+        "turn_id": null,
+        "ok": true
       },
       {
-        "ts": "2026-09-27T00:14:12.093Z",
+        "ts": "2026-09-27T00:36:49.750Z",
         "kind": "proposal_created",
         "group": "proposal",
         "actor": "devin",
         "subject": "decision",
         "detail": "Let Devin (devin) in? It will present its token from another machine.",
         "ref": "proposals:4",
-        "turn_id": null
+        "turn_id": null,
+        "ok": null
       },
       {
-        "ts": "2026-09-27T00:14:12.088Z",
+        "ts": "2026-09-27T00:36:49.744Z",
         "kind": "proposal_decided",
         "group": "decision",
         "actor": "assistant",
         "subject": "decision",
         "detail": "you decided one file per route",
         "ref": "proposals:1",
-        "turn_id": null
+        "turn_id": null,
+        "ok": null
       },
       {
-        "ts": "2026-09-27T00:14:12.079Z",
+        "ts": "2026-09-27T00:36:49.732Z",
         "kind": "capture",
         "group": "capture",
         "actor": "http",
         "subject": "Ask Dana about the fixture format on Thursday.",
         "detail": "http · new",
         "ref": "inbox:1",
-        "turn_id": null
+        "turn_id": null,
+        "ok": null
       },
       {
-        "ts": "2026-09-27T00:14:12.001Z",
+        "ts": "2026-09-27T00:36:49.655Z",
+        "kind": "crew_run",
+        "group": "run",
+        "actor": "crew:fixtures",
+        "subject": "crew_run",
+        "detail": "crew run ok",
+        "ref": "runs:9",
+        "turn_id": null,
+        "ok": true
+      },
+      {
+        "ts": "2026-09-27T00:36:49.653Z",
+        "kind": "routine_run",
+        "group": "routine",
+        "actor": "plan-tomorrow",
+        "subject": "plan-tomorrow",
+        "detail": "Journal/Plan/2026-09-29.md",
+        "ref": "runs:6",
+        "turn_id": null,
+        "ok": true
+      },
+      {
+        "ts": "2026-09-27T00:36:49.653Z",
+        "kind": "routine_run",
+        "group": "routine",
+        "actor": "knowledge-fold",
+        "subject": "knowledge-fold",
+        "detail": "routine failed vault bridge unreachable",
+        "ref": "runs:7",
+        "turn_id": null,
+        "ok": false
+      },
+      {
+        "ts": "2026-09-27T00:36:49.653Z",
         "kind": "config_write",
         "group": "run",
         "actor": "user",
         "subject": ".metistry/identity.yaml",
         "detail": "metistry identity set: name Iris → Ada, mention @iris → @ada",
         "ref": "runs:5",
-        "turn_id": null
+        "turn_id": null,
+        "ok": true
       },
       {
-        "ts": "2026-09-27T00:14:12.001Z",
+        "ts": "2026-09-27T00:36:49.652Z",
         "kind": "tool",
         "group": "run",
         "actor": "assistant",
         "subject": "tasks_update",
         "detail": "called tasks_update",
         "ref": "runs:3",
-        "turn_id": "turn-ETZLKsLc"
+        "turn_id": "turn-bsQSk3pb",
+        "ok": true
       },
       {
-        "ts": "2026-09-27T00:14:12.001Z",
+        "ts": "2026-09-27T00:36:49.652Z",
         "kind": "tool",
         "group": "run",
         "actor": "assistant",
         "subject": "knowledge_search",
         "detail": "called knowledge_search",
         "ref": "runs:2",
-        "turn_id": "turn-ETZLKsLc"
+        "turn_id": "turn-bsQSk3pb",
+        "ok": true
       },
       {
-        "ts": "2026-09-27T00:14:12.000Z",
+        "ts": "2026-09-27T00:36:49.652Z",
         "kind": "turn",
         "group": "run",
         "actor": "assistant",
         "subject": "turn",
         "detail": "turn gemma $0.004200",
         "ref": "runs:1",
-        "turn_id": "turn-ETZLKsLc"
+        "turn_id": "turn-bsQSk3pb",
+        "ok": true
       },
       {
-        "ts": "2026-09-27T00:14:12.000Z",
+        "ts": "2026-09-27T00:36:49.651Z",
         "kind": "proposal_created",
         "group": "proposal",
         "actor": "assistant",
         "subject": "report",
         "detail": "Nightly fold finished",
         "ref": "proposals:3",
-        "turn_id": null
+        "turn_id": null,
+        "ok": null
       },
       {
-        "ts": "2026-09-27T00:14:11.999Z",
+        "ts": "2026-09-27T00:36:49.651Z",
         "kind": "proposal_created",
         "group": "proposal",
         "actor": "assistant",
         "subject": "knowledge",
         "detail": "Add the store list to the roadmap",
         "ref": "proposals:2",
-        "turn_id": null
+        "turn_id": null,
+        "ok": null
       },
       {
-        "ts": "2026-09-27T00:14:11.999Z",
+        "ts": "2026-09-27T00:36:49.650Z",
         "kind": "proposal_created",
         "group": "proposal",
         "actor": "assistant",
         "subject": "decision",
         "detail": "Which fixture format?",
         "ref": "proposals:1",
-        "turn_id": null
+        "turn_id": null,
+        "ok": null
       }
     ],
-    "as_of": "2026-09-27T00:14:12.203Z"
+    "as_of": "2026-09-27T00:36:49.870Z"
   }
 }

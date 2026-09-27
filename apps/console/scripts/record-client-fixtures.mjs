@@ -255,6 +255,15 @@ await pool.query(`INSERT INTO runs (ts, component, kind, ok, meta) VALUES ('2026
 await pool.query(`INSERT INTO runs (component, kind, tool, ok, finished_at, duration_ms, meta) VALUES ('reconciler', 'config_write', 'vault_write', true, now(), 3, $1::jsonb)`, [
   JSON.stringify({ path: INSTANCE_LAYOUT.identity, op: "write", caller: "owner", principal: "user", message: "metistry identity set: name Iris → Ada, mention @iris → @ada" }),
 ]);
+// routines on Activity (T1-3, C43): the plan a routine wrote, one that threw
+// (`ok = false`, no `meta.outcome` — the runner's catch, T1-4) and a silent
+// tick, which the feed must leave out
+await pool.query(
+  `INSERT INTO runs (component, kind, ok, error, started_at, finished_at, meta) VALUES
+     ('plan-tomorrow', 'routine_run', true, NULL, now(), now(), '{"planned_for":"2026-09-29","outcome":"acted","path":"Journal/Plan/2026-09-29.md"}'),
+     ('knowledge-fold', 'routine_run', false, 'vault bridge unreachable', now(), now(), '{"error_signature":"fixture"}'),
+     ('morning-brief', 'routine_run', true, NULL, now(), now(), '{"processed":0,"outcome":"silent"}')`,
+);
 
 await pool.query(
   `INSERT INTO knowledge_files (path, title, description, draft, status, mtime, indexed_at) VALUES

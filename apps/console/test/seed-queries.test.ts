@@ -12,13 +12,26 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import { parse } from "yaml";
 import { QueryStore, type SqlExecutor } from "@foldedspacelabs/metistry-queries";
-import { REQUEST_KINDS, TASK_FILTER_PARAM_SPEC, TASK_QUERY_NAME, compileTaskFilter, isRequestKind, requestWordOf, requestWordSql } from "@foldedspacelabs/metistry-core";
+import { REQUEST_KINDS, TASK_FILTER_PARAM_SPEC, TASK_QUERY_NAME, compileTaskFilter, finishRun, isRequestKind, requestWordOf, requestWordSql, startRun } from "@foldedspacelabs/metistry-core";
 import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
 
 loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
 
 const SEED_DIR = fileURLToPath(new URL("../../../seed/queries", import.meta.url));
 const REPO = fileURLToPath(new URL("../../../", import.meta.url));
+
+// The closed `group` vocabulary activity_feed.yaml derives (screen-02-activity.md
+// §3): six, plus `routine` (C43, ruled 2026-09-20). With All, the eight chips.
+const FEED_GROUPS = ["capture", "proposal", "decision", "run", "work", "message", "routine"];
+
+// The chips the PWA actually draws, read out of app.js rather than copied —
+// so a chip added there that the query has no group for fails a test.
+const FEED_CHIP_VALUES = (() => {
+  const src = readFileSync(join(REPO, "apps/console/web/app.js"), "utf8");
+  const m = /^const FEED_CHIPS = (\[[\s\S]*?\n\]);/m.exec(src);
+  if (!m) throw new Error("FEED_CHIPS not found in app.js");
+  return (new Function(`return ${m[1]};`)() as [string, string][]).map(([value]) => value);
+})();
 
 // what the PWA (app.js) and the routines lean on
 const REQUIRED = [
@@ -216,6 +229,26 @@ describe("seed queries", () => {
     // no `prefix` on the measure, deliberately: a count over a caller-supplied
     // filter is the directory listing of what was filtered
     expect(Object.keys(byName["task_ageing"]!.params).sort()).toEqual(["days", "today"]);
+  });
+
+  // T1-3: the Activity screen's contract with its query. The params are the
+  // controls (screen-02-activity.md §3 + §6 fault 6), the columns are the row
+  // (§2.1 + `ok`, C19), and the chips are All plus the query's closed `group`
+  // vocabulary — read out of app.js, so a chip the SQL cannot resolve fails
+  // here (the DB half below proves each one resolves to rows).
+  it("activity_feed: the Activity screen's params, columns and eight chips are pinned (T1-3)", async () => {
+    const store = new QueryStore({
+      async query() {
+        return { rows: [] };
+      },
+    });
+    await store.loadDir(SEED_DIR);
+    const spec = store.list().find((q) => q.name === "activity_feed")!;
+    expect(Object.keys(spec.params).sort()).toEqual(["agent", "hours", "kind", "limit", "project", "since", "turn_id"]);
+    for (const [k, p] of Object.entries(spec.params)) expect(p.default, k).toBeDefined();
+    const doc = parse(readFileSync(join(SEED_DIR, "activity_feed.yaml"), "utf8")) as { sql: string };
+    expect(doc.sql).toContain(`SELECT ts, kind, "group", actor, subject, left(detail, 200) AS detail, ref, turn_id, ok\n`);
+    expect([...FEED_CHIP_VALUES].sort()).toEqual(["", ...FEED_GROUPS].sort());
   });
 
   // F-5. The kind → word mapping is the request type table,
@@ -677,7 +710,7 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
 
     // every row carries a group, and the groups are the closed set the chips read
     const all = (await store.run("activity_feed", { hours: 1, limit: 500 })).rows;
-    for (const r of all) expect(["capture", "proposal", "decision", "run", "work", "message"]).toContain(r.group);
+    for (const r of all) expect(FEED_GROUPS).toContain(r.group);
 
     // `kind` matches an exact kind OR a group name
     const byGroup = (await store.run("activity_feed", { hours: 1, limit: 500, kind: "capture" })).rows;
@@ -706,6 +739,123 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
     expect((await store.run("activity_feed", { hours: 1, limit: 500, agent: tag, since: future })).rows).toHaveLength(0);
     // the default (blank) is the whole window — casting '' must never throw
     expect((await store.run("activity_feed", { hours: 1, limit: 500, agent: tag, since: "" })).rows).toHaveLength(2);
+  });
+
+  // T1-3 (C43): a routine is its own group, and a row is what the run SAYS
+  // happened — read from `ok`/`error` AND `meta.outcome`, because the
+  // runner's catch writes a failure with no outcome at all (T1-4). The rows
+  // are written through core's startRun/finishRun with the runner's own meta
+  // shapes (apps/console/src/runner.ts), so this is the runner's ledger.
+  it("activity_feed: a silent tick has no row; a failed routine shows ok = false", async () => {
+    const tag = `rt-${Date.now()}`;
+    const settle = async (f: Parameters<typeof finishRun>[2], meta: Record<string, unknown> = {}) => {
+      const id = await startRun(pool, { component: tag, kind: "routine_run", meta: { scheduled_for: new Date().toISOString(), time_zone: "UTC", ...meta } });
+      await finishRun(pool, id, f);
+      return id;
+    };
+    const rowsOf = async () => (await store.run("activity_feed", { hours: 1, limit: 500, agent: tag })).rows;
+
+    // the tick that found nothing to do — the runner's generic row, `silent`
+    const silent = await settle({ ok: true, meta: { processed: 0, outcome: "silent" } });
+    expect(await rowsOf()).toHaveLength(0);
+    expect((await store.run("activity_feed", { hours: 1, limit: 500, kind: "routine" })).rows.map((r) => r.ref)).not.toContain(`runs:${silent}`);
+
+    // the tick that threw: `ok = false`, `error`, and NO `meta.outcome`
+    const failed = await settle({ ok: false, error: "vault bridge unreachable", meta: { error_signature: "abc123" } });
+    // a schedule the runner could not place, and one that acted and wrote a file
+    await settle({ ok: true }, { schedule_refused: "no_working_days", why: "Me/profile.md lists no working days", outcome: "skipped:no_working_days" });
+    await settle({ ok: true, meta: { processed: 1, outcome: "acted" } }, { path: "Journal/Plan/2026-09-27.md" });
+    // a row from before T1-4, with no outcome: shown, not silently dropped by a NULL comparison
+    await settle({ ok: true, meta: { processed: 2 } });
+
+    const rows = await rowsOf();
+    expect(rows).toHaveLength(4);
+    for (const r of rows) expect(r).toMatchObject({ kind: "routine_run", group: "routine", actor: tag, subject: tag });
+    const f = rows.find((r) => r.ref === `runs:${failed}`)!;
+    expect(f.ok).toBe(false);
+    expect(f.detail).toBe("routine failed vault bridge unreachable");
+    expect(rows.filter((r) => r.ok !== false).every((r) => r.ok === true)).toBe(true);
+    expect(rows.map((r) => r.detail).sort()).toEqual(
+      ["Journal/Plan/2026-09-27.md", "ran · 2 processed", "routine failed vault bridge unreachable", "skipped: no_working_days — Me/profile.md lists no working days"].sort(),
+    );
+
+    // in flight is no row — it would vanish again if it settled silent — and
+    // a routine row is dated by when it settled, so a long run that finishes
+    // after newer rows were painted still arrives through `since`
+    const inFlight = await startRun(pool, { component: tag, kind: "routine_run", meta: {} });
+    expect((await rowsOf()).map((r) => r.ref)).not.toContain(`runs:${inFlight}`);
+    await pool.query(`UPDATE runs SET ts = now() - interval '10 minutes', started_at = now() - interval '10 minutes' WHERE id = $1`, [inFlight]);
+    // a cursor painted AFTER the run started (it started ten minutes ago)
+    const cursor = new Date(Date.now() - 5 * 60_000).toISOString();
+    await finishRun(pool, inFlight, { ok: true, meta: { processed: 3, outcome: "acted" } });
+    const late = (await store.run("activity_feed", { hours: 1, limit: 500, agent: tag, since: cursor })).rows;
+    expect(late.map((r) => r.ref)).toContain(`runs:${inFlight}`);
+  });
+
+  it("activity_feed: `ok` is on every row — the run's own for a run, NULL where the source cannot fail", async () => {
+    const tag = `ok-${Date.now()}`;
+    await pool.query(`INSERT INTO runs (component, kind, ok, tool, error) VALUES ($1, 'tool', false, 'knowledge_search', 'timeout'), ($1, 'tool', true, 'tasks_update', NULL)`, [tag]);
+    await pool.query(`INSERT INTO inbox (source, path, note, status) VALUES ($1, $2, 'a capture', 'new')`, [tag, `Inbox/${tag}.md`]);
+    const rows = (await store.run("activity_feed", { hours: 1, limit: 500, agent: tag })).rows;
+    expect(rows.find((r) => r.subject === "knowledge_search")!.ok).toBe(false);
+    expect(rows.find((r) => r.subject === "tasks_update")!.ok).toBe(true);
+    expect(rows.find((r) => r.kind === "capture")!.ok).toBeNull();
+    for (const r of rows) expect(Object.keys(r)).toContain("ok");
+  });
+
+  it("activity_feed: `turn_id` returns the calls one reply made, whatever the window's limit left out", async () => {
+    const tag = `tid-${Date.now()}`;
+    const [mine, other] = [`turn-${tag}-a`, `turn-${tag}-b`];
+    await pool.query(
+      `INSERT INTO runs (component, kind, ok, tool, meta) VALUES
+         ($1, 'tool', true, 'knowledge_search', jsonb_build_object('turn_id', $2::text)),
+         ($1, 'tool', true, 'tasks_update',     jsonb_build_object('turn_id', $2::text)),
+         ($1, 'tool', true, 'knowledge_search', jsonb_build_object('turn_id', $3::text))`,
+      [tag, mine, other],
+    );
+    const rows = (await store.run("activity_feed", { hours: 1, limit: 500, turn_id: mine })).rows;
+    expect(rows).toHaveLength(2);
+    for (const r of rows) expect(r.turn_id).toBe(mine);
+    // blank is every row, never an error
+    expect((await store.run("activity_feed", { hours: 1, limit: 500, agent: tag, turn_id: "" })).rows).toHaveLength(3);
+  });
+
+  // The acceptance line: the eight chips resolve. Every chip the PWA draws
+  // (read out of app.js) is passed as `kind` exactly as the console passes it,
+  // and each answers rows of its own group and no other.
+  it("activity_feed: the eight chips resolve — each returns rows, and only its own group's", async () => {
+    const tag = `chips-${Date.now()}`;
+    await pool.query(`INSERT INTO inbox (source, path, note, status) VALUES ($1, $2, 'chip capture', 'new')`, [tag, `Inbox/${tag}.md`]);
+    const { rows: prop } = await pool.query(`INSERT INTO proposals (kind, source_agent, trust, payload) VALUES ('knowledge', $1, 'internal', '{}'::jsonb) RETURNING id`, [tag]);
+    await pool.query(`UPDATE proposals SET decision = 'allow', decided_at = now() WHERE id = $1`, [prop[0]!.id]);
+    await pool.query(`INSERT INTO runs (component, kind, ok, tool) VALUES ($1, 'tool', true, 'chip-tool')`, [tag]);
+    await pool.query(`INSERT INTO runs (component, kind, ok, meta) VALUES ('reconciler', 'config_write', true, jsonb_build_object('principal', $1::text, 'path', '.metistry/identity.yaml'))`, [tag]);
+    await pool.query(`INSERT INTO work (title, kind, status, history) VALUES ($1, 'task', 'open', $2::jsonb)`, [`${tag} task`, JSON.stringify([{ ts: new Date().toISOString(), agent: tag, op: "create" }])]);
+    await pool.query(`INSERT INTO outbound_messages (thread, text, kind) VALUES ('default', $1, 'brief')`, [`${tag} brief`]);
+    await pool.query(`INSERT INTO runs (component, kind, ok, started_at, finished_at, meta) VALUES ($1, 'routine_run', true, now(), now(), '{"outcome":"acted"}')`, [tag]);
+
+    expect(FEED_CHIP_VALUES).toHaveLength(8);
+    for (const chip of FEED_CHIP_VALUES) {
+      const rows = (await store.run("activity_feed", { hours: 1, limit: 10000, kind: chip })).rows;
+      expect(rows.length, `chip "${chip}"`).toBeGreaterThan(0);
+      if (chip !== "") for (const r of rows) expect(r.group, `chip "${chip}"`).toBe(chip);
+    }
+    // a config write is a run (T2-16), under the `run` chip
+    const runs = (await store.run("activity_feed", { hours: 1, limit: 10000, kind: "run", agent: tag })).rows;
+    expect(runs.map((r) => r.kind).sort()).toEqual(["config_write", "tool"]);
+  });
+
+  // T1-8: a mirror closed because its source changed was nobody's decision
+  // here — never "you decided resolved_at_source".
+  it("activity_feed labels a request resolved at its source as nobody's decision", async () => {
+    const tag = `ras-${Date.now()}`;
+    await pool.query(
+      `INSERT INTO proposals (kind, source_agent, trust, payload, source, decision, decided_at) VALUES ('report', $1, 'internal', '{}'::jsonb, $2::jsonb, 'resolved_at_source', now())`,
+      [tag, JSON.stringify({ kind: "github", external_ref: `gh:${tag}#1` })],
+    );
+    const rows = (await store.run("activity_feed", { hours: 1, limit: 500, agent: tag, kind: "decision" })).rows;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.detail).toBe("resolved at its source (github) — nobody decided it here");
   });
 
   // docs/product/desktop-app-plan.md "The window" — Agents panel: the state

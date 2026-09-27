@@ -10,8 +10,11 @@ actor.
 actor is *composed*, by one pure resolver, from what already exists: the
 `agents` registry row, a crew's manifest, `identity.yaml` and `compute.yaml`.
 This document is that composition, field by field. The types are
-`packages/core/src/actor.ts`. F-2 froze them; T4-6 implements `resolveActor`
-and `describePermissions()`.
+`packages/core/src/actor.ts`. F-2 froze them; T4-6 implemented them:
+`resolveActor` in `actor.ts`, `describePermissions()` beside `describeScope` in
+`access.ts`, and the console's half — loading the sources, and serving
+`permissions` on `GET /api/agents` and `GET /api/agents/:id/definition` — in
+`apps/console/src/actors.ts` (docs/ops/client-api.md).
 
 ## The type
 
@@ -136,8 +139,13 @@ triple.
 
 ### Crew compute
 
-The frontmatter's `model:` takes three forms. T4-6 widens the schema, which
-today admits only the legacy aliases (`CREW_MODELS`):
+The frontmatter's `model:` takes three forms (T4-6 widened the schema, which
+admitted only the legacy aliases, `CREW_MODELS`; `crewModelIssue` is the rule).
+`crewCompute` (`actor.ts`) is what the actor says; `resolveCrewAssignment`
+(`compute.ts`) is the same rule for the runner (`apps/assistant/src/crew-drain.ts`),
+and a test holds the two together — an actor never claims one model while its
+run uses another. A pinned reference whose provider `compute.yaml` does not
+declare parks the run with the fix named; it never runs on something else.
 
 | `model:` | `compute` |
 | --- | --- |
@@ -193,13 +201,21 @@ the door does not do.
 | `requests_create`, `request_access` | **not in the table** | Asking is not a power. Every credential may ask, and asking grants nothing (`mayUseTool`). |
 
 Every name in `RULED_TOOLS` and every `ACTION_KINDS` kind appears exactly once
-above. T4-6 should encode this table as data beside `RULED_TOOLS`, with an
-enumeration test, the same way `may-surface.test.ts` pins `RULED_TOOLS` to the
-bridge's `TOOL_NAMES`. Then a tool added later cannot be missing from the table
-by accident.
+above. The table is data beside `RULED_TOOLS` — `TOOL_PERMISSION_CELLS` and
+`ACTION_PERMISSION_CELLS` in `packages/core/src/access.ts` — and
+`packages/core/test/permissions.test.ts` holds it to `RULED_TOOLS`, to
+`ACTION_KINDS` and to **this table, parsed**, the same way `may-surface.test.ts`
+pins `RULED_TOOLS` to the bridge's `TOOL_NAMES`. A tool added later cannot be
+missing from the table by accident, and this document cannot drift from the
+code.
 
 Rules for filling the cells:
 
+- **Knowledge Write** holds the same area entries as Read ("writes never
+  exceed reads"), less any area the write door refuses outright — `Me/` and
+  the owner's own journal (`isUserOwnedPath`), whose only writer is the owner.
+  The table asks `may(…, "write", knowledge)` for each, rather than drawing a
+  power the door would not honour.
 - **Project-scoped tool verbs** (the Work and Artifacts tools) appear only when
   the project scope is not empty (`null`, or a non-empty list). `tasks_*` have
   no tool-level gate beyond a crew's `uses`, and membership is decided per row,
@@ -219,7 +235,9 @@ Rules for filling the cells:
   with the name and marked ⧉ by the renderer. There is one entry per tool whose
   mode is `on` or `ask` (`asks` for `ask`). A tool in group `reads` goes in Read,
   one in `changes` goes in Write, and `off` is absent. The connection file's
-  schema is F-3's; this table fixes only where connections land.
+  schema is F-3's; this table fixes only where connections land. (A
+  `starts_agent` tool — the third of `TOOL_GROUPS` — acts, so it is drawn in
+  Write; F-3 / T4-8 may rule otherwise.)
 
 **Provenance** is carried on each entry. The screen puts a marker only on
 entries that are not `base`:
@@ -229,6 +247,16 @@ entries that are not `base`:
 | `{ kind: "base", source }` | how the actor holds it by default: every verb, project and query entry, and every area not listed below. `source` is `permissions.source`. | nothing. For the assistant, `source: "environment"` reads as *configuration, not a grant* (C52, `sourceLabel`). |
 | `{ kind: "approved", proposalId }` | an area in `grantHistory.approved`. For an internal row that is `agent_grant_overrides` (0023). For an external row it is an approved `access_request` proposal's `payload.granted.area` that the row still holds. | *approved in Needs You · #n* |
 | `{ kind: "routine", routine }` | an area a routine's per-run grant adds (`grantHistory.routines`). It is shown as an extra Knowledge · Read entry, computed as if that grant were applied, and only when the knowledge read tools would then be admitted (for a crew, `knowledge` ∈ `uses`). One entry per (area, routine). It is not in `permissions.scope`, which is the base. | *during \<routine\> only* |
+
+**In words.** The rows are data; one function says a cell —
+`permissionRowText` (`access.ts`): the row's label (a connection's marked
+`⧉`), then each cell's entries comma-separated, each its `label`, `⏱` when it
+asks, and `(approved in Needs You · #n)` or `(during <routine> only)` when it is
+not the base. An empty cell is `—`. `metistry agents list` calls it; the
+console's panel (`apps/console/web/app.js`) and MetistryKit (`PermissionsTable`)
+carry copies that `apps/console/test/pwa-reads.test.ts` and
+`apps/macos/tests/kit/permissions-table-tests.swift` hold to the recorded
+`GET /api/agents` fixture in the same strings — one table, three surfaces.
 
 ## Made impossible by the types
 
@@ -268,11 +296,11 @@ ceiling (C42).
    rules that a routine's `write:` is the runner writing on the crew's behalf,
    nothing here changes. If the ruling is that the crew itself writes, then
    `CrewPermissionRow` and the door change together.
-2. **A second `internal` row.** `POST /api/agents` still accepts
-   `kind: internal`. Such a row resolves as an `AssistantActor` (the door
-   already gives it the assistant's role) with the assistant's definition and
-   the router. The plan has exactly one assistant. Closing that door belongs to
-   T4-6 or F-13.
+2. **A second `internal` row — closed by T4-6.** `POST /api/agents` now mints
+   `external` rows only and refuses `kind: internal` before anything is written
+   (`AGENT_KIND_REFUSAL`). A row that predates this still resolves as an
+   `AssistantActor` (the door gives it the assistant's role), with the
+   assistant's definition and the router.
 3. **`mark` versus `icon`.** Decided by T2-16: the plan and C123 say *mark*,
    and `identity.yaml`'s key stays `icon:`. `AssistantIdentity.mark` reads it;
    `metistry identity set --mark` writes it; `GET /api/identity` keeps

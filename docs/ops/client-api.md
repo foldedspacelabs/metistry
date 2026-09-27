@@ -283,7 +283,7 @@ takes a `since` cursor and answers with the next one.
 | `POST /api/agents/:id/approve` | owner | session · local_owner | natural | — | — | served | let a pending remote enrolment in |
 | `GET /api/agents/:id/definition` | owner | session · local_owner | natural | — | — | served | an agent's definition, compute and limits, read-only — the write is `metistry agents define` |
 | `GET /api/projects` | owner | session · local_owner | natural | — | — | served | every project with its mode, budget and rollup |
-| `PUT /api/projects/:slug` | owner | session · local_owner | natural | — | — | served | set a project's mode, daily budget and caps |
+| `PUT /api/projects/:slug` | owner | session · local_owner | natural | — | — | served · T1-13 | set a project's mode, daily budget, caps and its own read grant |
 | `GET /api/targets` | owner | session · local_owner | natural | — | — | served · T4-11 | the compute targets a task may be dispatched to |
 | `POST /api/tasks/:id/dispatch` | owner | session · local_owner | no | 409 | — | served · T4-11 | dispatch a task to a compute target |
 | `PATCH /api/tasks/:id` | owner | session · local_owner | no | 409 | — | served · T1-1 | edit a task: status, owner, project, title, description |
@@ -1097,13 +1097,23 @@ record; `metistry agents autonomy` does the read-merge for you.
 
 ```
 GET /api/projects          200 {"projects":[…],"as_of":"…"}
-PUT /api/projects/:slug    {mode?, daily_budget_usd?, max_open_bundles?, title?, area?}   200 {"ok":true,"project":{…}}
-400 — an unknown key, a mode that is not autonomous | review, a budget out of range
+PUT /api/projects/:slug    {mode?, daily_budget_usd?, max_open_bundles?, title?, area?, grants?}   200 {"ok":true,"project":{…}}
+400 — an unknown key, a mode that is not autonomous | review, a budget out of range, a malformed grant
 ```
 
 The project panel (§4.19) and its controls (§4.21): the kill switch (`mode`),
 the daily budget and the caps. Every change records a `project_admin` run
 (`docs/ops/projects.md`).
+
+**`grants`** (T1-13, migration 0032) is the project's own read grant —
+`{tier: none|index|areas, areas: [...], queries?}`, the same envelope
+`PUT /api/agents/:id/grants` takes, validated by the identical function
+(`validateGrants`) with the external rules: the bare vault (`/`) is refused
+(that spelling is the internal assistant row's alone), and every area must be
+vault CONTENT — a grant naming `.metistry/`, `Artifacts/…`, or anything else
+outside the vault is refused. A member's effective reach unions a project's
+grant with its own, "via project" (T4-7); nothing reads this field before
+then.
 
 ### Work — the board and dispatch
 

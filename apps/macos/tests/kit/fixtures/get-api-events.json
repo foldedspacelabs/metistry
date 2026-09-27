@@ -1,152 +1,293 @@
 {
   "route": "GET /api/events",
-  "source": "contract",
-  "ticket": "T2-18",
-  "note": "text/event-stream: one frame per catalogue type (packages/core/src/events.ts), ids and counts only; Last-Event-ID resumes",
+  "source": "recorded",
+  "ticket": null,
   "request": {
     "method": "GET",
     "path": "/api/events",
     "body": null,
     "idempotency_key": null,
-    "last_event_id": null
+    "last_event_id": "4000"
   },
   "status": 200,
   "stream": [
     {
+      "id": "4100",
+      "event": "resync",
+      "data": {}
+    },
+    {
       "id": "4101",
       "event": "run.started",
       "data": {
-        "run_id": 9001,
-        "kind": "turn",
-        "turn_id": "turn-8a1c"
+        "run_id": 48,
+        "kind": "tool",
+        "turn_id": "turn-fixture-stream"
       }
     },
     {
       "id": "4102",
       "event": "turn.progress",
       "data": {
-        "turn_id": "turn-8a1c"
+        "turn_id": "turn-fixture-stream"
       }
     },
     {
       "id": "4103",
       "event": "run.finished",
       "data": {
-        "run_id": 9001,
-        "kind": "turn",
-        "turn_id": "turn-8a1c"
+        "run_id": 48,
+        "kind": "tool",
+        "turn_id": "turn-fixture-stream"
       }
     },
     {
       "id": "4104",
-      "event": "message.new",
+      "event": "turn.progress",
       "data": {
-        "message_id": 512,
-        "thread": "default"
+        "turn_id": "turn-fixture-stream"
       }
     },
     {
       "id": "4105",
+      "event": "message.new",
+      "data": {
+        "message_id": 3,
+        "thread": "default"
+      }
+    },
+    {
+      "id": "4106",
       "event": "presence.changed",
       "data": {
         "agent_id": "cursor"
       }
     },
     {
-      "id": "4106",
+      "id": "4107",
       "event": "needs_you.changed",
       "data": {
-        "waiting": 3
-      }
-    },
-    {
-      "id": "4107",
-      "event": "work.changed",
-      "data": {
-        "work_id": 214
+        "waiting": 2
       }
     },
     {
       "id": "4108",
-      "event": "thread.changed",
+      "event": "work.changed",
       "data": {
-        "work_id": 214
+        "work_id": 5
       }
     },
     {
       "id": "4109",
       "event": "thread.changed",
       "data": {
-        "artifact_id": "art_01M3FY9WJ7M4N2ZAJFNZBVH8KK"
+        "work_id": 5
       }
     },
     {
       "id": "4110",
-      "event": "capture.new",
+      "event": "thread.changed",
       "data": {
-        "inbox_id": 77
+        "artifact_id": "art_01M3G22X6ASSMR35XGBHVPMWAM"
       }
     },
     {
       "id": "4111",
+      "event": "capture.new",
+      "data": {
+        "inbox_id": 2
+      }
+    },
+    {
+      "id": "4112",
+      "event": "run.started",
+      "data": {
+        "run_id": 49,
+        "kind": "collector_run"
+      }
+    },
+    {
+      "id": "4113",
+      "event": "run.finished",
+      "data": {
+        "run_id": 49,
+        "kind": "collector_run"
+      }
+    },
+    {
+      "id": "4114",
       "event": "vault.reconciled",
       "data": {
         "changed": 4
       }
     },
     {
-      "id": "4112",
+      "id": "4115",
+      "event": "run.started",
+      "data": {
+        "run_id": 50,
+        "kind": "vault_sync"
+      }
+    },
+    {
+      "id": "4116",
+      "event": "run.finished",
+      "data": {
+        "run_id": 50,
+        "kind": "vault_sync"
+      }
+    },
+    {
+      "id": "4117",
       "event": "vault.sync",
       "data": {
         "state": "push"
       }
     },
     {
-      "id": "4113",
+      "id": "4118",
+      "event": "run.started",
+      "data": {
+        "run_id": 51,
+        "kind": "routine_run"
+      }
+    },
+    {
+      "id": "4119",
+      "event": "run.finished",
+      "data": {
+        "run_id": 51,
+        "kind": "routine_run"
+      }
+    },
+    {
+      "id": "4120",
       "event": "routine.status",
       "data": {
         "name": "morning-brief"
       }
     },
     {
-      "id": "4114",
+      "id": "4121",
+      "event": "run.started",
+      "data": {
+        "run_id": 52,
+        "kind": "collector_run"
+      }
+    },
+    {
+      "id": "4122",
+      "event": "run.finished",
+      "data": {
+        "run_id": 52,
+        "kind": "collector_run"
+      }
+    },
+    {
+      "id": "4123",
       "event": "sync.status",
       "data": {
         "name": "github-state"
       }
     },
     {
-      "id": "4115",
+      "id": "4124",
+      "event": "run.started",
+      "data": {
+        "run_id": 53,
+        "kind": "connection_call"
+      }
+    },
+    {
+      "id": "4125",
+      "event": "run.finished",
+      "data": {
+        "run_id": 53,
+        "kind": "connection_call"
+      }
+    },
+    {
+      "id": "4126",
       "event": "connection.health",
       "data": {
         "connection": "github"
       }
     },
     {
-      "id": "4116",
+      "id": "4127",
+      "event": "run.started",
+      "data": {
+        "run_id": 54,
+        "kind": "config_write"
+      }
+    },
+    {
+      "id": "4128",
+      "event": "run.finished",
+      "data": {
+        "run_id": 54,
+        "kind": "config_write"
+      }
+    },
+    {
+      "id": "4129",
       "event": "config.changed",
       "data": {
         "file": ".metistry/compute.yaml"
       }
     },
     {
-      "id": "4117",
+      "id": "4130",
+      "event": "run.started",
+      "data": {
+        "run_id": 55,
+        "kind": "budget"
+      }
+    },
+    {
+      "id": "4131",
+      "event": "run.finished",
+      "data": {
+        "run_id": 55,
+        "kind": "budget"
+      }
+    },
+    {
+      "id": "4132",
       "event": "budget.state",
       "data": {
         "scope": "instance"
       }
     },
     {
-      "id": "4118",
+      "id": "4133",
+      "event": "run.started",
+      "data": {
+        "run_id": 56,
+        "kind": "routine_run"
+      }
+    },
+    {
+      "id": "4134",
+      "event": "run.finished",
+      "data": {
+        "run_id": 56,
+        "kind": "routine_run"
+      }
+    },
+    {
+      "id": "4135",
+      "event": "routine.status",
+      "data": {
+        "name": "update-check"
+      }
+    },
+    {
+      "id": "4136",
       "event": "release.available",
       "data": {
         "version": "0.12.0"
       }
-    },
-    {
-      "id": "4119",
-      "event": "resync",
-      "data": {}
     }
   ]
 }

@@ -54,6 +54,7 @@ import { isKnowledgeRoute, knowledgeRoutes, type KnowledgeSearcher } from "./kno
 import { isVaultTaskRoute, ReplayCache, vaultTaskRoutes } from "./vault-task-routes.js";
 import { agentList, commandList } from "./commands.js";
 import { purgeArchive, purgePreview } from "@metistry-apps/routines";
+import type { EventHub } from "./events.js";
 import { createRequire } from "node:module";
 
 const require_ = createRequire(import.meta.url);
@@ -132,6 +133,12 @@ export interface ConsoleConfig {
    * route answers 503.
    */
   variables?: VariablesView | undefined;
+  /**
+   * The live-changes hub `GET /api/events` streams from (events.ts, §2.20):
+   * `main.ts` builds it and starts the one `LISTEN` that feeds it. Absent =
+   * the route answers 503 (degrades: absent) and clients keep polling.
+   */
+  events?: EventHub | undefined;
 }
 
 // ----- since-cursors (docs/ops/client-api.md) -----
@@ -500,9 +507,10 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
           hasArtifacts: artifacts !== undefined,
           queryCount: queries.names().length,
           targetCount: cfg.targets ? cfg.targets.names().length : 0,
-          // `events` while the table says the stream is served — T2-18 flips
-          // that row, and the conformance test holds the row to the server.
-          hasEvents: servedRoute("GET", "/api/events") !== undefined,
+          // `events` while the table says the stream is served AND this
+          // console has a hub to stream from — never a capability the route
+          // would then answer 503 for. The conformance test holds both halves.
+          hasEvents: cfg.events !== undefined && servedRoute("GET", "/api/events") !== undefined,
         }),
         version: cfg.version ?? null,
         api_version: API_VERSION,
@@ -932,6 +940,9 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         key === "GET /api/secrets" ||
         key === "GET /api/variables" ||
         key === "GET /api/commands" ||
+        // the live-changes stream is the owner's alone: an agent learns what
+        // changed through its own tools, and the capture token captures (§2.20)
+        key === "GET /api/events" ||
         // `/api/compute*` is owner-only CONFIGURATION, not an invariant-10
         // action: it changes how the system behaves, so it is the user's
         // hand and nothing else's (invariant 2). `/api/knowledge/*` is the
@@ -1062,6 +1073,23 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       const row = result.rows[0];
       if (!row) return sendError(res, "not_found", `no run ${runDetail[1]} in the ledger`);
       return sendJson(res, 200, { run: row, as_of: result.as_of.toISOString() });
+    }
+
+    // ----- live changes (§2.20, T2-18): what changed, as ids — the owner's, and nobody else's -----
+    // Past the management gate, so an agent bearer and the capture token have
+    // already had their uniform 403. The stream carries ids and counts only
+    // (events.ts refuses anything else at `publish`), and the client
+    // refetches through the route that decides who may read the thing — so
+    // it opens no read path the routes do not. A stream outlives the request
+    // that opened it, so the credential is asked again at every heartbeat:
+    // a revoked session stops hearing within one.
+    if (key === "GET /api/events") {
+      if (!cfg.events) return sendError(res, "not_available", "this console streams no live changes — the events hub is not wired in this deployment; poll with since cursors (docs/ops/client-api.md \"Live changes\")");
+      const lastEventId = req.headers["last-event-id"];
+      return cfg.events.serve(req, res, {
+        lastEventId: typeof lastEventId === "string" ? lastEventId : undefined,
+        stillAllowed: async () => isUser(await authenticate(req)),
+      });
     }
 
     // ----- the composer's command list, GENERATED (docs/ops/client-api.md) -----

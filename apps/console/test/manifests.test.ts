@@ -188,6 +188,9 @@ describe("shipped manifests schedule through the runner", () => {
       "reply-review": "every day at 23:00",
       "weekly-review": "sun at 18:00",
       "session-purge": "every day at 04:00",
+      // not a §2.5 default: §2.20's daily Update Check (T2-18), an interval —
+      // once a day since the last one, at no particular time of day
+      "update-check": "@daily",
     });
   });
 

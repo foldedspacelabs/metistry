@@ -39,7 +39,7 @@ import { TargetRegistry } from "./dispatch.js";
 import { dirSink, vaultSink, DEFAULT_MAX_TRACKED_BYTES, INBOX_PREFIX, vaultBridgeLister, vaultBridgeSearcher, vaultBridgeWriter } from "@foldedspacelabs/metistry-mcp-brain";
 import { ASSISTANT_DEFAULT_AREAS, INTERNAL_ASSISTANT_ID, ensureInternalAgent, revokeAgent, validateGrants } from "./agents.js";
 import { httpVaultClient } from "./vault-client.js";
-import { STANDUP_MOVE_RETRY_MS, instanceOverlay, startStandupMove } from "./profile-tidy.js";
+import { SCHEDULED_PATH, STANDUP_MOVE_RETRY_MS, fileOverlay, startStandupMove } from "./profile-tidy.js";
 import { vaultBridgeSearch } from "./knowledge-routes.js";
 import type { ComputeAdmin } from "./compute-routes.js";
 import type { SecretsView } from "./secrets-route.js";
@@ -438,5 +438,6 @@ server.listen(port, host, () => console.log(`console listening on ${host}:${port
 // edits Me/. Needs the vault bridge (the profile, and the overlay write as
 // `user`) and the instance directory (the overlay read); without either it
 // says so once and does nothing.
-if (vault) startStandupMove({ vault, db: pool, readOverlay: instanceOverlay(process.env) }, { retryMs: STANDUP_MOVE_RETRY_MS });
+const instanceScheduled = instanceDir ? join(instanceDir, SCHEDULED_PATH) : undefined;
+if (vault) startStandupMove({ vault, db: pool, readOverlay: fileOverlay(scheduledFile === instanceScheduled ? instanceScheduled : undefined) }, { retryMs: STANDUP_MOVE_RETRY_MS });
 else console.log("standup move: no vault bridge — Me/profile.md cannot be read, so nothing moves");

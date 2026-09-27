@@ -614,14 +614,33 @@ async function record(db: Db, date: string, reason: "wrote" | BriefSkip, meta: R
   );
 }
 
-async function reportUnreadable(db: Db, template: string, date: string, maxBytes: number): Promise<void> {
+/**
+ * One `report` request per template the brief could not use — missing (W2
+ * checkpoint D1: an upgraded vault never got `Templates/Brief.md`, and the
+ * routine skipped every morning with nobody told) or unreadable (§6.4) —
+ * deduped per template path while one is pending: a routine runs once a
+ * morning, so a read before the insert is the whole dedupe, and the owner is
+ * asked once, not every day.
+ */
+async function reportTemplate(db: Db, template: string, date: string, reason: typeof TEMPLATE_MISSING | typeof TEMPLATE_UNREADABLE, maxBytes: number): Promise<void> {
+  const open = await db.query(
+    `SELECT 1 FROM proposals WHERE kind = 'report' AND decision = 'pending' AND source_agent = $1 AND payload->'template_issue'->>'path' = $2 LIMIT 1`,
+    [COMPONENT, template],
+  );
+  if (open.rows.length > 0) return;
+  const payload =
+    reason === TEMPLATE_MISSING
+      ? {
+          title: `${template} is not in the vault — no Morning Brief for ${date}`,
+          summary: `The brief is written from ${template}, and there is no such file, so nothing was written. \`metistry update\` re-seeds the templates a vault lacks (it never touches one you have), or write your own ${template}.`,
+        }
+      : {
+          title: `${template} could not be read — no Morning Brief for ${date}`,
+          summary: `The template is not readable text, or is larger than METISTRY_TEMPLATE_MAX_BYTES (${maxBytes} bytes). Nothing was written. Open it in Obsidian, or run \`metistry templates check\`.`,
+        };
   await db.query(`INSERT INTO proposals (kind, source_agent, trust, payload) VALUES ('report', $1, 'internal', $2)`, [
     COMPONENT,
-    JSON.stringify({
-      title: `${template} could not be read — no Morning Brief for ${date}`,
-      summary: `The template is not readable text, or is larger than METISTRY_TEMPLATE_MAX_BYTES (${maxBytes} bytes). Nothing was written. Open it in Obsidian, or run \`metistry templates check\`.`,
-      refs: [template],
-    }),
+    JSON.stringify({ ...payload, refs: [template], template_issue: { path: template, reason } }),
   ]);
 }
 
@@ -697,7 +716,7 @@ export async function briefFile(db: Db, ctx: BriefCtx = {}): Promise<BriefFileRe
   if (skip !== null || templateText === null) {
     const reason = skip ?? TEMPLATE_MISSING;
     console.log(`${COMPONENT}: ${template} — ${reason}; no brief for ${date}`);
-    if (reason === TEMPLATE_UNREADABLE) await reportUnreadable(db, template, date, maxBytes);
+    await reportTemplate(db, template, date, reason, maxBytes);
     await record(db, date, reason, { template, max_bytes: maxBytes });
     return done(false);
   }

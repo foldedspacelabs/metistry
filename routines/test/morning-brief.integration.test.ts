@@ -129,4 +129,20 @@ describe.skipIf(!hasDb)("morning-brief (real db)", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ kind: "knowledge", decision: "pending", payload: expect.objectContaining({ day_section: { day: DATE, path: dailyNotePath(DATE), reason: "unpaired", at_line: 3 } }) });
   });
+
+  it("a missing template raises ONE report request on the real table, keyed on the template, however many mornings skip (W2 checkpoint D1)", async () => {
+    await pool.query(`DELETE FROM proposals WHERE source_agent = $1`, [COMPONENT]);
+    const noTemplate = () => {
+      const v = fakeVault();
+      v.files.delete(DEFAULT_TEMPLATE);
+      return v;
+    };
+    await morningBrief(pool, ctx(noTemplate()));
+    await morningBrief(pool, ctx(noTemplate(), new Date("2026-09-29T11:00:00Z")));
+    const runs = await pool.query(`SELECT meta->>'outcome' AS outcome FROM runs WHERE component = $1 AND meta ? 'brief_for' ORDER BY id`, [COMPONENT]);
+    expect(runs.rows.map((r) => r.outcome)).toEqual(["skipped:template_missing", "skipped:template_missing"]);
+    const { rows } = await pool.query(`SELECT kind, decision, payload FROM proposals WHERE source_agent = $1`, [COMPONENT]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ kind: "report", decision: "pending", payload: expect.objectContaining({ refs: [DEFAULT_TEMPLATE], template_issue: { path: DEFAULT_TEMPLATE, reason: "template_missing" } }) });
+  });
 });

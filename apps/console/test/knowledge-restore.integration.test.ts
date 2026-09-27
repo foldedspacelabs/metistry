@@ -318,7 +318,13 @@ describe.skipIf(!hasDb)("restore a file (integration)", () => {
       decision: "pending",
       payload: { body: { kind: "before_after", before: { text: NOW }, after: { text: OLD } }, restore: { path: PATH, sha: V1 } },
       request: { type: "improvement", body: "before_after", decisions: ["allow", "accept_with_changes", "deny"] },
+      subject: null, // no work row behind it (T2-14)
     });
+    // …in the very shape GET /api/proposals serves the same row (W2 checkpoint D2: the 202 lacked `subject`)
+    const listed = ((await (await fetch(`${base}/api/proposals`, { headers: { cookie } })).json()).proposals as Record<string, unknown>[]).find((p) => String(p.id) === String(out.proposal_id));
+    expect(listed).toBeDefined();
+    expect(Object.keys(out.proposal).sort()).toEqual(Object.keys(listed!).sort());
+    expect(out.proposal.subject).toEqual(listed!.subject);
     const [row] = await rows();
     expect(row).toMatchObject({ source: { kind: "metistry", external_ref: `restore:${PATH}@${V1}` }, decision: "pending" });
 

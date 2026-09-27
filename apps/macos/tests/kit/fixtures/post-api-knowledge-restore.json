@@ -22,7 +22,7 @@
     "date": "2026-09-28T09:10:00-04:00",
     "proposal": {
       "id": "6",
-      "ts": "2026-09-27T04:15:56.757Z",
+      "ts": "2026-09-27T20:01:51.333Z",
       "kind": "improvement",
       "source_agent": "console",
       "trust": "user",
@@ -82,7 +82,8 @@
           "accept_with_changes",
           "deny"
         ]
-      }
+      },
+      "subject": null
     }
   }
 }

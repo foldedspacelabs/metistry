@@ -2124,7 +2124,7 @@ POST /api/knowledge/restore   {"path":"Areas/Health/sleep.md","sha":"4c1d2e3f","
      "proposal":{"id","ts","kind":"improvement","source_agent":"console","trust":"user",
                  "payload":{"title","summary","body":{"kind":"before_after","heading","before":{"label","text"},"after":{"label","text"}},
                             "restore":{"path","sha","date","base_sha256","version_sha256"}},
-                 "decision":"pending",…,"request":{…}}}
+                 "decision":"pending",…,"request":{…},"subject":null}}
 409 {"error":{"code":"conflict",…},"reason":"stale","file":{"path","sha256","bytes"} | null}
 400 a missing path / a sha that is not a commit id / a seen_sha that is not a sha256 or "" — by name;
     the file is already that version; or, for the owner, a path this door does not serve (the classification)

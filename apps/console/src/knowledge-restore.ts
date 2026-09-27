@@ -41,6 +41,7 @@ import {
   classify,
   describeRequest,
   raiseMirror,
+  requestSubjectOf,
   resolveAtSource,
   type ErrorCode,
   type MirrorExecutor,
@@ -228,7 +229,10 @@ export async function raiseRestore(deps: RestoreDeps, ask: { path: string; sha: 
     path: ask.path,
     sha: version.sha,
     date: version.date,
-    proposal: row ? { ...row, request: describeRequest(String(row.kind), row.payload) } : null,
+    // as GET /api/proposals serves it (server.ts's `servedProposal`): the
+    // reading, and the subject (T2-14) — none, for a row with no work row
+    // behind it; the same shape rollback's 202 answers with
+    proposal: row ? { ...row, request: describeRequest(String(row.kind), row.payload), subject: requestSubjectOf(String(row.kind), {}) } : null,
   };
 }
 

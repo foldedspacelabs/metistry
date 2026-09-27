@@ -230,6 +230,25 @@ describe("doctor: schedules", () => {
     });
   });
 
+  it("a last run that skipped for a missing template is degraded, names the template and the fix (W2 checkpoint D1)", async () => {
+    const r = await rowsFor([
+      { component: "brief", kind: "routine_run", at: ago(31), ok: true, meta: { processed: 0, outcome: "silent" } },
+      { component: "brief", kind: "routine_run", at: ago(30), ok: true, meta: { brief_for: "2026-09-15", outcome: "skipped:template_missing", template: "Templates/Brief.md", max_bytes: 262144 } },
+    ]);
+    expect(r.brief?.status).toBe("degraded");
+    expect(r.brief?.remediation).toContain("Templates/Brief.md is not in the vault");
+    expect(r.brief?.remediation).toContain("`metistry update` re-seeds missing templates");
+    expect(r.brief?.meta).toMatchObject({ template_missing: "Templates/Brief.md" });
+    expect(r.brief?.action).toEqual({ kind: "run_verb", command: ["metistry", "update"], label: "Run metistry update" });
+    // once a run writes the brief, the row is clean again
+    const fixed = await rowsFor([
+      { component: "brief", kind: "routine_run", at: ago(1470), ok: true, meta: { outcome: "skipped:template_missing", template: "Templates/Brief.md" } },
+      { component: "brief", kind: "routine_run", at: ago(30), ok: true, meta: { brief_for: "2026-09-15", outcome: "acted" } },
+    ]);
+    expect(fixed.brief?.status).toBe("ok");
+    expect(fixed.brief?.meta).toMatchObject({ template_missing: null });
+  });
+
   it("a marker a later run has answered is history, even inside its window", async () => {
     const r = await rowsFor([
       { component: "fold", kind: "runner", tool: "preflight_failed", at: ago(120), ok: false, error: "blocked_config: fixed since" },

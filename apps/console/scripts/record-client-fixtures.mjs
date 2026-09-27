@@ -363,6 +363,11 @@ const REQUESTS = [
   ["GET /api/variables", () => ({ path: "/api/variables" })],
   ["GET /api/commands", () => ({ path: "/api/commands" })],
   ["GET /api/proposals", () => ({ path: "/api/proposals" })],
+  // recorded alongside `GET /api/proposals`, before anything below answers
+  // or snoozes one of the three seeded proposals: the acceptance this
+  // fixture demonstrates (T1-7) is that `waiting` matches that list's
+  // length exactly, at the same moment.
+  ["GET /api/needs-you/count", () => ({ path: "/api/needs-you/count" })],
   ["GET /api/agents", () => ({ path: "/api/agents" })],
   ["GET /api/agents/:id/definition", () => ({ path: "/api/agents/researcher/definition" })],
   ["GET /api/projects", () => ({ path: "/api/projects" })],

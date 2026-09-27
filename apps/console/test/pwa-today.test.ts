@@ -37,8 +37,8 @@ const TODAY_SRC = read("../web/today.js");
 interface Day { date: string; tasks: Record<string, unknown>[]; work: Record<string, unknown>[]; order: string[]; events: Record<string, unknown>[]; brief: string | null; standup: string | null; plan: string | null; as_of: string }
 const day = (patch: Partial<Day> = {}): Day => ({ ...structuredClone(FIXTURE.body), ...patch });
 const at = (iso: string) => new Date(iso);
-/** The fixture's moment: 13:05Z, twenty-five minutes before the 13:30Z standup. */
-const AS_OF = at(FIXTURE.body.as_of);
+/** The moment the spine is drawn at: 13:05Z, twenty-five minutes before the recorded 13:30Z standup. (The recording's own `as_of` is the clock it was recorded by.) */
+const AS_OF = at("2026-09-28T13:05:00.000Z");
 const TASK = FIXTURE.body.tasks[0]!;
 
 afterEach(() => vi.unstubAllGlobals());
@@ -54,15 +54,16 @@ describe("the spine, from the recorded Today", () => {
   });
 
   it("the tasks and work in the owner's order; anything unordered after, as served", () => {
-    expect(orderedItems(day()).map((i) => i.key)).toEqual(["mt-7f3k2a", "work:214"]);
-    expect(orderedItems(day({ order: ["work:214"] })).map((i) => i.key)).toEqual(["work:214", "mt-7f3k2a"]);
-    expect(orderedItems(day({ order: [] })).map((i) => i.key)).toEqual(["mt-7f3k2a", "work:214"]);
+    // recorded: the owner dragged the task, then the Blocked card waiting on it; the due card is unordered
+    expect(orderedItems(day()).map((i) => i.key)).toEqual(["mt-7f3k2a", "work:41", "work:1"]);
+    expect(orderedItems(day({ order: ["work:1"] })).map((i) => i.key)).toEqual(["work:1", "mt-7f3k2a", "work:41"]);
+    expect(orderedItems(day({ order: [] })).map((i) => i.key)).toEqual(["mt-7f3k2a", "work:41", "work:1"]);
   });
 
   it("at 13:05Z: nothing behind, the day's work in the gap, the standup next — and in Next Up", () => {
     const s = spineOf(day(), AS_OF);
     expect(s.past).toEqual([]);
-    expect(s.open.map((i) => i.key)).toEqual(["mt-7f3k2a", "work:214"]);
+    expect(s.open.map((i) => i.key)).toEqual(["mt-7f3k2a", "work:41", "work:1"]);
     expect(s.later.map((e) => e.key)).toEqual(["event:evt-standup-0928"]);
     expect(s.nextUp?.key).toBe("event:evt-standup-0928");
   });
@@ -88,7 +89,7 @@ describe("the spine, from the recorded Today", () => {
   it("draws Now, the gap's line, the day's work, then the meeting at its time — which points up to Next Up", () => {
     const html = spineHtml(spineOf(day(), AS_OF), day(), { now: AS_OF });
     const order = [...html.matchAll(/<li class="(spine-[a-z]+)[^"]*"[^>]*>/g)].map((m) => m[1]);
-    expect(order).toEqual(["spine-now", "spine-line", "spine-item", "spine-item", "spine-line", "spine-item"]);
+    expect(order).toEqual(["spine-now", "spine-line", "spine-item", "spine-item", "spine-item", "spine-line", "spine-item"]);
     expect(html).toContain(`Now · ${clockTime(AS_OF)}`);
     expect(html).toContain(`Until ${clockTime("2026-09-28T13:30:00.000Z")}`);
     expect(html).toContain("in Next Up ↑");
@@ -98,7 +99,7 @@ describe("the spine, from the recorded Today", () => {
     const html = spineHtml(spineOf(day({ events: [] }), AS_OF), day({ events: [] }), { now: AS_OF });
     expect(html).not.toContain("spine-now");
     expect(html).not.toContain("spine-line");
-    expect((html.match(/class="spine-item/g) ?? []).length).toBe(2);
+    expect((html.match(/class="spine-item/g) ?? []).length).toBe(3);
   });
 
   it("the past folds itself into one line; a line ticked a moment ago stays where it was", () => {
@@ -132,7 +133,8 @@ describe("a task row", () => {
     const work = /<li class="spine-item work"[\s\S]*?<\/li>/.exec(html)?.[0] ?? "";
     expect(work).not.toContain('type="checkbox"');
     expect(work).toContain("Open on the Board");
-    expect(work).toContain("in progress · with user · metistry");
+    expect(work).toContain("Pick the fixture redaction");
+    expect(work).toContain("blocked · metistry");
   });
 
   it("priority is weight, never colour; at most two chips above it", () => {

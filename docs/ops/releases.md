@@ -102,6 +102,18 @@ Left out on purpose: `src/`, tests, tsconfigs, Dockerfiles, `.git`. A
 release is compiled output. `metistry update` never builds in release
 mode, and `docker compose` only ever pulls.
 
+Before it is tarred, the staged pack's **own** doctor validates the pack's
+own manifests — `ops/release/check-pack-manifests.mjs`, importing the
+packed `packages/cli/dist/doctor.js` with the packed `node_modules` — and a
+single invalid manifest, or a `collectors/` or `routines/` that contributed
+none, fails the job. CI runs the same script on the built checkout. (A
+0.12.0 → 0.14.0 upgrade printed `schedule: expected string, received
+object` for every collector and routine; the 0.14.0 pack validates all 26.
+Those rows were 0.12.0's CLI — the one that ran the update — reading 0.14.0's
+manifests with its own schema. A release's first update is always run by
+the release before it: `docs/ops/cli.md`, "The closing doctor is the new
+code's".)
+
 The **bundled runtime** (`ops/release/build-runtime-deps.sh`, the
 `runtime-deps (darwin-arm64)` job) is the other half of "no build tools on
 the user's machine": Node, a relocatable Postgres 17 + pgvector built from

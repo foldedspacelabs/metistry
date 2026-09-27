@@ -225,6 +225,19 @@ async function actOnChild(r: StepRunner, t: ServiceTarget, action: ServiceAction
   }
 }
 
+/**
+ * One of the supervisor's children, restarted over its control socket — the
+ * exact path `metistry restart <child>` takes, for a caller that already
+ * holds a StepRunner (`update`, after it wrote a bearer only that child
+ * reads). Never the supervisor's own agent: kickstarting that takes every
+ * child down with it.
+ */
+export async function restartSupervisorChild(r: StepRunner, o: { runDir: string; env: NodeJS.ProcessEnv; name: string }): Promise<ServiceResult> {
+  const stateRoot = o.env.METISTRY_INSTANCE_DIR?.replace(/\/+$/, "") || o.runDir;
+  const config = await readSupervisorConfig(supervisorConfigPath(stateRoot)).catch(() => undefined);
+  return actOnChild(r, { name: o.name, kind: "child", ...(config ? { control: { socket: config.socket, token: config.token } } : {}) }, "restart");
+}
+
 async function actOn(r: StepRunner, t: ServiceTarget, ctx: ServiceTargetContext, envFile: string | undefined, action: ServiceAction): Promise<ServiceResult> {
   if (t.kind === "child") return actOnChild(r, t, action);
   return t.kind === "launchd" ? actOnLaunchd(r, t, ctx.uid, action) : actOnCompose(r, t, ctx.productDir, envFile, action);

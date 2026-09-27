@@ -26,7 +26,6 @@
 
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 import {
   INSTANCE_LAYOUT,
   PROFILE_PATH,
@@ -91,18 +90,23 @@ export interface TidyDeps {
    * `scheduled.yaml`'s bytes as they are on disk: null when there is no file
    * yet, undefined when this console cannot see the instance directory. The
    * bridge serves the vault, not `.metistry/`, so the read is the
-   * filesystem's — the same file the scheduler reads (`instanceOverlay`).
+   * filesystem's — the same file the scheduler reads (`fileOverlay`).
    */
   readOverlay: () => Promise<Buffer | null | undefined>;
 }
 
-/** `scheduled.yaml` read from `METISTRY_INSTANCE_DIR`, or undefined when that is unset. */
-export function instanceOverlay(env: NodeJS.ProcessEnv): () => Promise<Buffer | null | undefined> {
-  const dir = env["METISTRY_INSTANCE_DIR"]?.replace(/\/+$/, "");
+/**
+ * `scheduled.yaml` read from the instance directory — the file the runner
+ * reads, and the one the bridge writes at `SCHEDULED_PATH`. Undefined (the
+ * move stays put) when there is no instance directory, or when the runner
+ * was pointed at another file (`METISTRY_SCHEDULED_FILE`): moving the
+ * standup into a file the runner does not read would move it nowhere.
+ */
+export function fileOverlay(path: string | undefined): () => Promise<Buffer | null | undefined> {
   return async () => {
-    if (!dir) return undefined;
+    if (!path) return undefined;
     try {
-      return await readFile(join(dir, SCHEDULED_PATH));
+      return await readFile(path);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
       throw err;
@@ -156,7 +160,7 @@ export async function moveStandupFacts(deps: TidyDeps): Promise<TidyOutcome> {
 
   const overlay = await deps.readOverlay();
   if (overlay === undefined) {
-    return { state: "overlay_unseen", done: true, detail: `METISTRY_INSTANCE_DIR is unset, so ${SCHEDULED_PATH} cannot be read — the standup lines stay where they are` };
+    return { state: "overlay_unseen", done: true, detail: `this console cannot read the instance's ${SCHEDULED_PATH} (METISTRY_INSTANCE_DIR unset, or METISTRY_SCHEDULED_FILE names another file) — the standup lines stay where they are` };
   }
   const plan = planStandupMove(text, overlay === null ? null : overlay.toString("utf8"));
   switch (plan.state) {

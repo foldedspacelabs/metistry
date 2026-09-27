@@ -68,7 +68,7 @@ import {
   type ProfileFacts,
   type SupervisorConfig,
 } from "@foldedspacelabs/metistry-core";
-import { COMPUTE_FILENAME, INSTANCE_LAYOUT, LEGACY_VAULT_DIR, PROFILE_PATH, REGISTRY_KINDS, describeVaultSync, detectLayout, pushOverrideNote, readStandupKeys, emptyCompute, extensionsDirFor, instanceFile, loadCompute, loadKind, resolveInstanceLayout, vaultStatusSchema, type Compute, type RegistryKindName, type VaultStatus } from "@foldedspacelabs/metistry-core";
+import { COMPUTE_FILENAME, INSTANCE_LAYOUT, LEGACY_VAULT_DIR, PROFILE_PATH, REGISTRY_KINDS, TEMPLATE_MISSING, describeVaultSync, detectLayout, pushOverrideNote, readStandupKeys, emptyCompute, extensionsDirFor, instanceFile, loadCompute, loadKind, resolveInstanceLayout, vaultStatusSchema, type Compute, type RegistryKindName, type VaultStatus } from "@foldedspacelabs/metistry-core";
 import { cliShimLinkHint, cliShimPath } from "./cli-shim.js";
 import { engineStatus, loadDeployment } from "./deployment.js";
 import { localServerRows } from "./local-models.js";
@@ -739,6 +739,8 @@ interface LastRun {
   error: string | null;
   /** the runner could not place the schedule (`no_working_days`, `no_timezone`, `unknown_timezone` — docs/ops/scheduled.md) and said why */
   refused: { reason: string; why: string } | null;
+  /** the routine recorded `skipped:template_missing` on this run: the vault path of the template it could not find */
+  templateMissing: string | null;
 }
 
 /** `2026-09-16 07:00 America/New_York` — the wall clock the schedule is read in, or UTC for an `{every}` one. */
@@ -836,7 +838,8 @@ export async function scheduleRows(
     );
     for (const r of lastRows) {
       const refused = typeof r.meta?.schedule_refused === "string" ? { reason: String(r.meta.schedule_refused), why: String(r.meta.why ?? r.meta.schedule_refused) } : null;
-      last.set(`${r.component}/${r.kind}`, { ts: new Date(r.ts), ok: r.ok === null ? null : Boolean(r.ok), error: r.error ?? null, refused });
+      const templateMissing = r.meta?.outcome === `skipped:${TEMPLATE_MISSING}` ? (typeof r.meta?.template === "string" && r.meta.template !== "" ? r.meta.template : "its template") : null;
+      last.set(`${r.component}/${r.kind}`, { ts: new Date(r.ts), ok: r.ok === null ? null : Boolean(r.ok), error: r.error ?? null, refused, templateMissing });
     }
     const { rows: markerRows } = await db.query(
       `SELECT component, tool, max(ts) AS ts, (array_agg(error ORDER BY ts DESC))[1] AS error
@@ -896,6 +899,7 @@ export async function scheduleRows(
       skipped_streak: fresh(skipped),
       preflight_failed: fresh(blocked),
       schedule_refused: lastRun?.refused?.reason ?? null,
+      template_missing: lastRun?.templateMissing ?? null,
     };
 
     let action: DoctorAction | undefined;
@@ -956,6 +960,19 @@ export async function scheduleRows(
           return {
             status: "degraded" as const,
             remediation: `${streak?.count} failed run(s) in a row since ${streak?.since.toISOString()}: ${streak?.lastError ?? "(no error text)"} — at METISTRY_RUNNER_MAX_STREAK (${maxStreak}) the runner stops running it`,
+            meta,
+          };
+        }
+        if (lastRun.templateMissing !== null) {
+          // The run "succeeded" and did nothing: a routine whose template is
+          // not in the vault skips every time it runs, and the row read ok
+          // while it did (W2 checkpoint D1 — an upgraded vault never got
+          // Templates/Brief.md). Degraded, not failed: the owner may have
+          // removed it on purpose, and nothing else is broken.
+          action = runVerb(["metistry", "update"], "Run metistry update");
+          return {
+            status: "degraded" as const,
+            remediation: `${s.name} skipped its last run (${lastRun.ts.toISOString().slice(0, 16)}Z, ${TEMPLATE_MISSING}): ${lastRun.templateMissing} is not in the vault — \`metistry update\` re-seeds missing templates (only files the vault lacks; yours are never touched), or write your own ${lastRun.templateMissing}`,
             meta,
           };
         }

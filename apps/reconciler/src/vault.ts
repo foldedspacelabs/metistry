@@ -11,7 +11,7 @@ import { NON_VAULT_ROOTS, isProtectedPath, isVaultPath, sectionMissingMessage, w
 import { Committer, RUN_TRAILER, SOURCE_TRAILER, TURN_TRAILER, validActId } from "./committer.js";
 import { Git } from "./git.js";
 import { SECTION_PATHS, confine, isProtected, sectionWriteAllowed, validPrincipal, writeAllowed, type CallerClass, type Confined } from "./paths.js";
-import { basenameTitle, isConflictFile, isMarkdown, parseFrontmatter, sha256 } from "./notes.js";
+import { basenameTitle, conflictOriginal, isConflictFile, isMarkdown, parseFrontmatter, sha256 } from "./notes.js";
 
 export interface Intent {
   /**
@@ -31,6 +31,44 @@ export interface Intent {
 }
 
 export type Outcome<T> = { ok: true; value: T } | { ok: false; code: ErrorCode; message?: string };
+
+// ---- Resolve a conflict (plan §2.11, T2-10) ----------------------------------
+
+/**
+ * Which side of a sync conflict the owner keeps: `mine` is the note as it
+ * stands, `theirs` is the sync tool's copy — *the Other* in the review
+ * (indexer.ts `conflictPayload`). The Mac app's `ConflictSide` spells the same
+ * two words.
+ */
+export const CONFLICT_SIDES = ["mine", "theirs"] as const;
+export type ConflictSide = (typeof CONFLICT_SIDES)[number];
+
+/** A conflict as it stands on disk — the four fields the review's `payload.conflict` carries: the copy, the note it is a copy of, and each file's hash (null: not there). */
+export interface ConflictState {
+  path: string;
+  original: string | null;
+  sha256: string | null;
+  original_sha256: string | null;
+}
+
+export interface ConflictSettled {
+  /** The note that remains. */
+  path: string;
+  /** The copy, now gone from the working tree. */
+  copy: string;
+  kept: ConflictSide;
+  /** The remaining note's content hash and size. */
+  sha256: string;
+  bytes: number;
+  /** The commit that put the discarded side into history before it was discarded; null when history already held it (or there was nothing to discard). */
+  recorded: string | null;
+}
+
+/** A settle, or why not. `current: null` is "not in conflict" — settled already, or never a conflict at all. */
+export type ResolveOutcome = Outcome<ConflictSettled> | { ok: false; code: "conflict"; message: string; current: ConflictState | null };
+
+/** Settling a conflict is the owner's act, always (§2.11: "vault bridge as `user`"). */
+const OWNER_PRINCIPAL = "user";
 
 export interface VaultConfig {
   maxBytes: number;
@@ -519,6 +557,129 @@ export class Vault {
     await pruneEmptyDirs(this.root, dirname(c.value.abs));
     this.committer.enqueue({ paths: [c.value.rel], principal: intent.principal, message: intent.message, group: intent.group, run: intent.run, turn: intent.turn });
     return { ok: true, value: { path: c.value.rel } };
+  }
+
+  /**
+   * Settle a sync-conflict copy (plan §2.11 *Resolve a conflict*, T2-10):
+   * keep the note as it stands and drop the copy, or take the copy's bytes
+   * as the note and drop the copy. Always as `user`; one note changes.
+   *
+   * Refuses, in this order:
+   *
+   * - a path that is not knowledge (`forbidden`), or that confine() refuses;
+   * - **a path the reconciler does not have in `conflict`** — no index row
+   *   saying so (`inConflict`), a name that is not a sync tool's copy, or a
+   *   copy that is gone — as `conflict` with `current: null`: settled from
+   *   another device, or never a conflict at all. Nothing is written;
+   * - a copy that names no note (`invalid_request`), and *Keep Mine* when
+   *   there is no mine to keep (`invalid_request`: take the other, or settle
+   *   it in Obsidian);
+   * - **`expectedSha` that is not the side being discarded as it stands** —
+   *   the copy's hash to keep mine, the note's to take the other, `""` when
+   *   that side does not exist — as `conflict` with the current hashes. What
+   *   the owner gives up must be what the owner saw.
+   *
+   * **The discarded side stays in history** (C136: that is what makes the
+   * act undoable after the client's own ten seconds). A copy was never
+   * committed — the sweep leaves conflict copies alone — and a note may
+   * carry edits the sweep has not reached, so whichever side is about to be
+   * discarded is committed first, as `user`, and the settle is refused
+   * (`not_available`, nothing discarded) if history cannot be made to hold it.
+   * Then, inside the tree gate, both files are hashed again and the settle is
+   * refused `conflict` if either moved, before a byte changes.
+   *
+   * One settle at a time: two at once for the same copy would each pass the
+   * check the other is about to falsify.
+   */
+  resolveConflict(path: unknown, keep: ConflictSide, expectedSha: string, caller: CallerClass, inConflict: (rel: string) => Promise<boolean>): Promise<ResolveOutcome> {
+    const next = this.settling.then(() => this.resolveNow(path, keep, expectedSha, caller, inConflict));
+    this.settling = next.catch(() => undefined);
+    return next;
+  }
+
+  private settling: Promise<unknown> = Promise.resolve();
+
+  private async resolveNow(path: unknown, keep: ConflictSide, expectedSha: string, caller: CallerClass, inConflict: (rel: string) => Promise<boolean>): Promise<ResolveOutcome> {
+    const c = await this.confined(path);
+    if (!c.ok) return c;
+    const copy = c.value.rel;
+    if (!isVaultPath(copy)) return fail("forbidden");
+    const notInConflict = (why: string): ResolveOutcome => ({ ok: false, code: "conflict", message: `${copy} is not in conflict — ${why}`, current: null });
+    if (!isConflictFile(copy) || !(await inConflict(copy))) return notInConflict("it was settled, or it never was");
+    const original = conflictOriginal(copy);
+    if (original === null) return fail("invalid_request", `${copy} names no note it is a copy of — settle it in Obsidian`);
+    const o = await this.confined(original);
+    if (!o.ok) return o;
+    if (!isVaultPath(original) || !writeAllowed(copy, OWNER_PRINCIPAL, caller) || !writeAllowed(original, OWNER_PRINCIPAL, caller)) return fail("forbidden");
+
+    const read = async () => ({ theirs: await this.current(c.value.abs), mine: await this.current(o.value.abs) });
+    const state = (s: { theirs: { sha256: string } | null; mine: { sha256: string } | null }): ConflictState => ({ path: copy, original, sha256: s.theirs?.sha256 ?? null, original_sha256: s.mine?.sha256 ?? null });
+    const moved = (message: string, now: Awaited<ReturnType<typeof read>>): ResolveOutcome => ({ ok: false, code: "conflict", message, current: state(now) });
+
+    const before = await read();
+    if (!before.theirs) return notInConflict("the copy is gone");
+    if (keep === "mine" && !before.mine) return fail("invalid_request", `there is no ${original} to keep — take the other, or settle it in Obsidian`);
+    const discardedRel = keep === "mine" ? copy : original;
+    const discarded = keep === "mine" ? before.theirs : before.mine;
+    if ((discarded?.sha256 ?? "") !== expectedSha) return moved(`${discardedRel} is not what you saw — look at both sides again before discarding one`, before);
+
+    let recorded: string | null = null;
+    if (discarded) {
+      const r = await this.recordInHistory(discardedRel, original);
+      if (!r.ok) return r;
+      recorded = r.value;
+    }
+
+    return this.committer.withTree(async (): Promise<ResolveOutcome> => {
+      const now = await read();
+      if (!now.theirs) return notInConflict("the copy is gone");
+      if (now.theirs.sha256 !== before.theirs!.sha256 || (now.mine?.sha256 ?? null) !== (before.mine?.sha256 ?? null)) {
+        return moved(`${original} or its copy changed while the conflict was being settled — look again`, now);
+      }
+      const kept = keep === "theirs" ? now.theirs : now.mine!;
+      if (keep === "theirs") {
+        const tmp = join(dirname(o.value.abs), `.${randomBytes(6).toString("hex")}.tmp`);
+        await writeFile(tmp, now.theirs.bytes);
+        await rename(tmp, o.value.abs);
+      }
+      // A copy history never held is just gone: `git add` of a path git has
+      // never seen is an error, not an empty change. (Keep Mine recorded it
+      // above, so there its removal is always a change to commit.)
+      const copyTracked = (await this.git.raw(["ls-files", "--error-unmatch", "--", copy])).code === 0;
+      await unlink(c.value.abs);
+      this.committer.enqueue({
+        paths: [...(keep === "theirs" ? [original] : []), ...(copyTracked ? [copy] : [])],
+        principal: OWNER_PRINCIPAL,
+        message: `Settle the conflict on ${original}: ${keep === "mine" ? "keep mine" : "take the other"}`,
+      });
+      return { ok: true, value: { path: original, copy, kept: keep, sha256: kept.sha256, bytes: kept.bytes.length, recorded } };
+    });
+  }
+
+  /**
+   * Make history hold one file exactly as it stands: commit it now, as
+   * `user`, through the sole committer — or nothing, when HEAD already has
+   * these bytes. Returns the commit (null: nothing to commit). Refused
+   * `not_available` when git is mid-merge or mid-rebase (the committer would
+   * wait, and the file would be discarded unrecorded) or when the file is
+   * still not held afterwards — gitignored, or a flush that failed.
+   */
+  private async recordInHistory(rel: string, original: string): Promise<Outcome<string | null>> {
+    const op = await this.git.operationInProgress();
+    if (op) return fail("not_available", `the vault is mid-${op} — finish it, then settle the conflict on ${original}; nothing was discarded`);
+    if (await this.heldByHistory(rel)) return { ok: true, value: null };
+    this.committer.enqueue({ paths: [rel], principal: OWNER_PRINCIPAL, message: `Record ${rel} before the conflict on ${original} is settled` });
+    const flushed = await this.committer.flush();
+    if (!(await this.heldByHistory(rel))) {
+      return fail("not_available", `${rel} could not be committed${flushed.paused ? ` (the vault is mid-${flushed.paused})` : ""}, so it would not be in history — nothing was discarded; try again`);
+    }
+    return { ok: true, value: flushed.commits.find((cm) => cm.paths.includes(rel))?.sha ?? null };
+  }
+
+  /** Tracked, and the working tree's bytes are HEAD's. */
+  private async heldByHistory(rel: string): Promise<boolean> {
+    const tracked = await this.git.raw(["ls-files", "--error-unmatch", "--", rel]);
+    return tracked.code === 0 && (await this.git.status([rel])).length === 0;
   }
 
   private async renameNow(from: unknown, to: unknown, intent: Intent, caller: CallerClass): Promise<Outcome<{ from: string; to: string }>> {

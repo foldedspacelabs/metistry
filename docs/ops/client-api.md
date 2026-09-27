@@ -329,7 +329,7 @@ takes a `since` cursor and answers with the next one.
 | `GET /api/knowledge/fold` | owner | session · local_owner | natural | — | — | served | the latest knowledge fold |
 | `GET /api/knowledge/drafts` | owner | session · local_owner | natural | — | — | served | the drafts waiting on the owner |
 | `GET /api/knowledge/areas` | owner | session · local_owner | natural | — | — | served | the per-area rollup |
-| `POST /api/knowledge/conflicts/resolve` | owner | session · local_owner | no | stale | — | T2-10 | settle a conflicted file: keep one side |
+| `POST /api/knowledge/conflicts/resolve` | owner | session · local_owner | no | stale | — | served | settle a conflicted file: keep one side |
 | `GET /api/knowledge/history` | owner | session · local_owner | natural | — | — | served | a file's commits |
 | `GET /api/knowledge/version` | owner | session · local_owner | natural | — | — | served | one file at one commit |
 | `POST /api/knowledge/restore` | owner | session · local_owner | no | stale | — | served | raise a Needs You request to restore a file; Approve restores as `user` |
@@ -1780,14 +1780,49 @@ rather than a refusal. `apps/console/test/compute-routes.test.ts` holds it.
 ```
 GET  /api/knowledge/search | page | pages | links    see below
 GET  /api/knowledge/fold | drafts | areas            see below — the owner's alone
-POST /api/knowledge/conflicts/resolve      T2-10 — {path, keep, seen_sha}   409 stale — only a path in `conflict`
+POST /api/knowledge/conflicts/resolve      served — {path, keep, seen_sha}   409 stale — only a path in `conflict`   the owner's alone
 GET  /api/knowledge/history?path=&limit=   served — a file's commits, through the bridge's `GET /vault/log`   the owner's alone
 GET  /api/knowledge/version?path=&sha=     served — one file at one commit, through the bridge's `GET /vault/show`   the owner's alone
 POST /api/knowledge/restore                served — {path, sha, seen_sha}: raises a Needs You request, never writes   409 stale   the owner's alone
 ```
 
 **Resolving a conflict** writes one note through the vault bridge as `user`,
-and only for a path the reconciler has in `conflict`. **Restore** never writes
+and only for a path the reconciler has in `conflict`.
+
+```
+POST /api/knowledge/conflicts/resolve
+     {"path":"Areas/Health/sleep.sync-conflict-20260927-101500-ABCDEFG.md","keep":"mine","seen_sha":"<the copy's sha256>"}
+200  {"ok":true,"path":"Areas/Health/sleep.md","kept":"mine","sha":"<the note's sha256>"}
+409  {"error":{"code":"conflict",…},"reason":"stale","conflict":{"path","original","sha256","original_sha256"} | null}
+```
+
+- **`path` is the copy** — `payload.conflict.path` on the conflict's review
+  (*Events become requests*), the one path the index has in `conflict`.
+  `keep` is `mine` (the note as it stands; the copy goes) or `theirs` (the
+  copy's bytes become the note; the copy goes). The answer's `path` is the
+  note that remains and `sha` its content hash.
+- **`seen_sha` is the side you give up**, as the review showed it:
+  `conflict.sha256` to keep mine, `conflict.original_sha256` to take theirs,
+  `""` when that side does not exist. What you discard must be what you saw.
+- **`409 stale`** when it is not, with `conflict` as it stands — and when the
+  path is **not in `conflict`** at all (settled from another device, or never a
+  conflict), with `conflict: null`. Nothing is written either way, and neither
+  is a failed answer: the review carries no `payload.error` for it.
+- **The side you give up stays in history.** The bridge commits it, as
+  `user`, before discarding it — a copy was never committed, and the note may
+  hold an edit the sweep has not reached yet. If history cannot be made to
+  hold it (git is mid-merge), the answer is `503` and nothing is discarded.
+- **The Undo is the client's** (C136): Keep Mine and Take the Other act at
+  once with ten seconds of Undo, held by the client *before* it sends. This
+  route has no undo; after the ten seconds, the other side is a
+  `GET /api/knowledge/version` away.
+- **The review** clears at its source (`resolved_at_source`) when the copy
+  goes. A settle refused or failed for any other reason — no bridge, the
+  bridge's refusal, a throw — is written on the review as `payload.error`
+  (C45), with `decision` the verb the button stands for (Keep Mine `allow`,
+  Take the Other `accept_with_changes`), `door: "resolve_conflict"` and `keep`.
+- No principal but the owner: an agent bearer and the capture owner token get
+  the uniform `403`, before the body is read. **Restore** never writes
 on its own: it raises a request carrying the before and the after, and Approve
 writes the old bytes as a **new** commit as `user` (*Restore <path> to
 <date>*) — history is preserved, always (§2.21). No agent principal can

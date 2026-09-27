@@ -44,7 +44,7 @@
 // drift.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { canSee, filterHits, filterPages, may, readableAreas, type ErrorCode, type KnowledgeScope, type Principal } from "@foldedspacelabs/metistry-core";
+import { canSee, errorEnvelope, filterHits, filterPages, may, readableAreas, type ErrorCode, type KnowledgeScope, type MirrorExecutor, type Principal } from "@foldedspacelabs/metistry-core";
 import { KNOWLEDGE_LINKS_QUERY, KNOWLEDGE_PAGES_QUERY } from "@foldedspacelabs/metistry-mcp-brain";
 
 /**
@@ -61,7 +61,8 @@ import { KNOWLEDGE_LINKS_QUERY, KNOWLEDGE_PAGES_QUERY } from "@foldedspacelabs/m
 export { NO_SCOPE, OWNER_SCOPE, canSee, filterHits, filterPages, grantedScope, type KnowledgeScope } from "@foldedspacelabs/metistry-core";
 import { VaultError, type VaultClient } from "@foldedspacelabs/metistry-artifacts";
 import { QueryError, type QueryStore } from "@foldedspacelabs/metistry-queries";
-import { sendError, sendJson, sendRefusal, sendUnrouted } from "./http-util.js";
+import { readJson, sendError, sendJson, sendRefusal, sendUnrouted } from "./http-util.js";
+import { raiseRestore } from "./knowledge-restore.js";
 
 export const KNOWLEDGE_MODES = ["keyword", "semantic", "hybrid"] as const;
 export type KnowledgeSearchMode = (typeof KNOWLEDGE_MODES)[number];
@@ -142,6 +143,8 @@ export interface KnowledgeDeps {
   queries?: QueryStore | undefined;
   /** a note's git history — the reconciler's `GET /vault/log` and `GET /vault/show` (§2.21, T10-4); absent → `not_available` */
   history?: KnowledgeHistory | undefined;
+  /** Where `POST /api/knowledge/restore` raises its Needs You request (T10-5); absent → `not_available` */
+  requests?: MirrorExecutor | undefined;
 }
 
 // ----- file history (design-build-plan §2.21, T10-4) -----
@@ -274,13 +277,14 @@ type Audit = (kind: string, tool: string, ok: boolean, meta: Record<string, unkn
  * GET /api/knowledge/fold?date=  ·  GET /api/knowledge/drafts?limit=&offset=
  * GET /api/knowledge/areas
  * GET /api/knowledge/history?path=&limit=  ·  GET /api/knowledge/version?path=&sha=
+ * POST /api/knowledge/restore {path, sha, seen_sha}
  *
  * server.ts has already established the principal; `scope` is what that
  * principal may see. Not streamed — the bridge's hit list is bounded at 100,
  * a page is one file, and the list is one bounded window of an index.
  */
 export async function knowledgeRoutes(
-  _req: IncomingMessage,
+  req: IncomingMessage,
   res: ServerResponse,
   key: string,
   url: URL,
@@ -526,6 +530,9 @@ export async function knowledgeRoutes(
     });
   }
 
+  // ----- restore a file: a Needs You request, never a write (§2.21, T10-5) -----
+  if (key === "POST /api/knowledge/restore") return restoreRoute(req, res, key, deps, principal, audit);
+
   if (key === "GET /api/knowledge/fold") {
     const date = (url.searchParams.get("date") ?? "").trim();
     if (date !== "" && !isCalendarDay(date)) return sendError(res, "invalid_request", "date must be a calendar day, YYYY-MM-DD — omit it for the newest fold there is");
@@ -581,8 +588,66 @@ export async function knowledgeRoutes(
   // Anything else under /api/knowledge/.
   return sendUnrouted(
     res,
-    "the knowledge read path is GET /api/knowledge/search, GET /api/knowledge/page, GET /api/knowledge/pages, GET /api/knowledge/links, GET /api/knowledge/fold, GET /api/knowledge/drafts, GET /api/knowledge/areas, GET /api/knowledge/history and GET /api/knowledge/version (docs/ops/client-api.md)",
+    "the knowledge read path is GET /api/knowledge/search, GET /api/knowledge/page, GET /api/knowledge/pages, GET /api/knowledge/links, GET /api/knowledge/fold, GET /api/knowledge/drafts, GET /api/knowledge/areas, GET /api/knowledge/history and GET /api/knowledge/version, and POST /api/knowledge/restore (docs/ops/client-api.md)",
   );
+}
+
+/**
+ * `POST /api/knowledge/restore {path, sha, seen_sha}` — raise ONE Needs You
+ * request to put a note back as it was at `sha`; Approve does the write, as
+ * `user` (knowledge-restore.ts). The owner's alone, refused to everyone else
+ * here before the body is read — whatever server.ts's gate did first — and
+ * notes only, for the owner too: the machinery's history is the CLI's.
+ */
+async function restoreRoute(req: IncomingMessage, res: ServerResponse, key: string, deps: KnowledgeDeps, principal: Principal, audit: Audit): Promise<void> {
+  const owner = may(principal, "act", { kind: "console", door: "console_management", route: key });
+  if (!owner.ok) {
+    await audit("knowledge", "restore", false, { refused: owner.reason });
+    return sendRefusal(res, owner);
+  }
+  let body: unknown;
+  try {
+    body = await readJson(req);
+  } catch {
+    return sendError(res, "invalid_request", "the body must be JSON: {path, sha, seen_sha}");
+  }
+  const { path: rawPath, sha: rawSha, seen_sha: seen } = (typeof body === "object" && body !== null ? body : {}) as Record<string, unknown>;
+  const path = typeof rawPath === "string" ? rawPath.trim() : "";
+  if (path === "") return sendError(res, "invalid_request", "path is required — a vault-relative path, e.g. Areas/Health/sleep.md");
+  // The page door's rule, for a write this time: a path that is not a note
+  // is refused before anything is read — `.metistry/`, `Artifacts/`, the
+  // root instructions — for the owner too.
+  const note = may(principal, "read", { kind: "knowledge", door: "console_page", path });
+  if (!note.ok) {
+    await audit("knowledge", "restore", false, { refused: note.reason });
+    return sendRefusal(res, note);
+  }
+  const sha = typeof rawSha === "string" ? rawSha.trim() : "";
+  if (!COMMIT_ID.test(sha)) return sendError(res, "invalid_request", "sha must be a commit id — 7 to 64 hex characters, as GET /api/knowledge/history lists them");
+  if (typeof seen !== "string" || (seen !== "" && !/^[0-9a-f]{64}$/.test(seen))) {
+    return sendError(res, "invalid_request", "seen_sha must be the file's content hash as you rendered it — the sha256 GET /api/knowledge/page serves — or \"\" for a file that is not in the vault now");
+  }
+  if (!deps.vault || !deps.history) return sendError(res, "not_available", NOT_AVAILABLE);
+  if (!deps.requests) return sendError(res, "not_available", "restoring raises a Needs You request, and this console has no database to raise it in");
+
+  let out: Awaited<ReturnType<typeof raiseRestore>>;
+  try {
+    out = await raiseRestore({ vault: deps.vault, history: deps.history, db: deps.requests }, { path, sha, seen_sha: seen });
+  } catch (err) {
+    if (err instanceof VaultError) {
+      await audit("knowledge", "restore", false, { error: err.code });
+      return sendError(res, err.code, err.message);
+    }
+    throw err;
+  }
+  if (!out.ok) {
+    await audit("knowledge", "restore", false, { error: out.code, ...(out.code === "conflict" ? { reason: "stale" } : {}) });
+    // F-1's frozen reason: what you saw is not what is there; the body carries the file as it stands (null when it is gone)
+    if (out.code === "conflict") return sendJson(res, 409, { ...errorEnvelope("conflict", out.message), reason: "stale", file: out.stale ?? null });
+    return sendError(res, out.code, out.message);
+  }
+  await audit("knowledge", "restore", true, { proposal: out.id, raised: out.raised, sha: out.sha });
+  return sendJson(res, 202, { ok: true, proposal_id: String(out.id), raised: out.raised, path: out.path, sha: out.sha, date: out.date, proposal: out.proposal });
 }
 
 /**

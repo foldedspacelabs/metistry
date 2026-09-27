@@ -149,7 +149,7 @@ so the prompt, the reply and the tool calls are visible together.
 
 ## The loop
 
-`routines/reply-review` runs `@daily` — frequent enough that a busy week
+`routines/reply-review` runs every day at 23:00 — frequent enough that a busy week
 doesn't sit on a backlog of 👎 until the weekend:
 
 1. Collects the 👎 since the last `improvement` proposal it emitted (or the

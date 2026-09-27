@@ -33,8 +33,9 @@ import {
   type IntentPhrasing,
   type IntentRules,
   type ChoiceStage,
+  scoreChoice,
 } from "@foldedspacelabs/metistry-core";
-import { scoreChoice, type ComputeAccess } from "../compute-client.js";
+import type { ComputeAccess } from "../compute-client.js";
 
 /** The five the inbox already speaks — `FM_SCHEMA`'s enum, and what the console can render. */
 export const INBOX_KINDS = ["todo", "event", "idea", "link", "note"] as const;

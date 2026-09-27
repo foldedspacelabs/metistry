@@ -170,6 +170,14 @@ export {
   type IntentRules,
 } from "./intent.js";
 export {
+  resolveOnMachineCall,
+  scoreChoice,
+  type ChoiceScore,
+  type ModelAccess,
+  type ResolvedOnMachineCall,
+  type ScoreChoiceOptions,
+} from "./score-choice.js";
+export {
   ACTION_KINDS,
   ACTION_MODES,
   AUTONOMY_LEVELS,

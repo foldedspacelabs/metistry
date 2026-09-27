@@ -56,7 +56,7 @@ export const STORE_AS_SECRET = "This looks like a key. Variables can be read by 
 
 /** Where a schedule or a time lives instead (ruling 2, K8). */
 export const NO_SCHEDULE_IN_VARIABLES =
-  "no schedule or time lives in a variable — a routine's timing is its own schedule (Scheduled; `metistry scheduled`), and facts about you such as your timezone and working days are Me/profile.md";
+  "no schedule or time lives in a variable — a routine's timing is its own schedule, under Scheduled, and facts about you such as your timezone and working days are Me/profile.md";
 
 export interface VariableIssue {
   code: VariableRefusal;
@@ -70,7 +70,7 @@ export function variableNameIssue(name: unknown): VariableIssue | undefined {
     return { code: "name", message: `${JSON.stringify(name)} is not a variable name — lowercase snake_case: a letter, then letters, digits and _ (at most 64), e.g. team_name` };
   }
   if (isSecretKeyName(name) || SECRET_NAME_EXTRA_RE.test(name)) {
-    return { code: "secret_name", message: `${name} is a secret's name, not a variable's — whatever it held would be read by agents. ${STORE_AS_SECRET.replace("<name>", name)}` };
+    return { code: "secret_name", message: `${name} is a secret's name, not a variable's — variables can be read by agents, and redaction would blank its value anyway. Store as Secret: \`metistry secrets set ${name}\` (the value on stdin)` };
   }
   if (name.split("_").some((w) => SCHEDULE_WORDS.has(w))) {
     return { code: "schedule_name", message: `${name}: ${NO_SCHEDULE_IN_VARIABLES}` };

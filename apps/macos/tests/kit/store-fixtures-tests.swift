@@ -246,7 +246,7 @@ private let drives: [String: Drive] = [
     "GET /api/sessions/:id": { s, a in done(await s.session(a.p("id"))) },
     // Activity
     "GET /api/q/activity_feed": { s, a in
-        done(await s.activityFeed(hours: a.qInt("hours"), limit: a.qInt("limit"), kind: a.q("kind"), project: a.q("project"), agent: a.q("agent"), since: a.q("since")))
+        done(await s.activityFeed(hours: a.qInt("hours"), limit: a.qInt("limit"), kind: a.q("kind"), project: a.q("project"), agent: a.q("agent"), since: a.q("since"), turnID: a.q("turn_id")))
     },
     "GET /api/runs/:id": { s, a in done(await s.run(a.pInt("id"))) },
     "GET /api/runs/export": { s, a in done(await s.exportRuns(since: a.q("since"), until: a.q("until"), component: a.q("component"), limit: a.qInt("limit"))) },

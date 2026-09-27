@@ -64,6 +64,11 @@ public final class AppModel {
     /// Metistry last had, at once); dropped with everything else on an
     /// instance switch.
     public let needsYou: NeedsYouModel
+    /// Activity: the filter, the painted page, the held rows and what was read
+    /// on demand (activity-view.swift). Held here rather than by its view, so
+    /// the list the owner left is the list they come back to; dropped with
+    /// everything else on an instance switch.
+    public let activity: ActivityModel
 
     public init(
         bundleResourceURL: URL?,
@@ -120,6 +125,7 @@ public final class AppModel {
         // An answer here moves the count: the row and the Dock hear it now,
         // not at the shell's next tick.
         needsYou.onQueueChanged = { [weak shell] in await shell?.refreshCount() }
+        self.activity = ActivityModel(session: console)
 
         // The wizard's step 2 hands the folder back the moment it is known, so
         // every later verb runs against it.

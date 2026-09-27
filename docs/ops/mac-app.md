@@ -1039,6 +1039,48 @@ accessibility probe; a SwiftUI text field on the Mac does not carry its
 `.accessibilityLabel` onto the AppKit field (macOS 26.4), so each field is held
 to a prompt that names it instead.
 
+## Activity
+
+`sources/kit/activity-view.swift` is the Activity row's screen (T6-3,
+screen-02-activity.md). It reads `ActivityStore` — the `activity_feed` named
+query — and, on demand, `GET /api/runs/:id` and `GET /api/knowledge/page`;
+`AppModel.activity` holds its model so the list the owner left is the list they
+come back to, and an instance switch drops it.
+
+- **Bands, one glyph column, who did it.** *Just now* (15 minutes) · *Earlier
+  today* · *Yesterday* · the day, as sticky headers on `sunken`. The glyph is
+  the kind's SF Symbol (design-system §3.2, plus `capture`, `routine_run`,
+  `config_write`); a row whose `ok` is `false` draws `failed`'s own mark in
+  `failed` — the glyph, never the row, and never read from `detail` (C19).
+  Subjects are Title Cased only for the kinds the console composes
+  (`work_history` is not one, C18). The actor chip is the `agent` hue for the
+  assistant (by its configured name, left out until known) and for an id the
+  registry lists; anything else is neutral on `absent-quiet`.
+- **Eight chips** — All and the query's seven groups, passed straight through
+  as `kind` — beside *Window* (24 hours · 7 days), *Agent* and *Project*.
+- **New rows are held, never inserted.** The poll (`RefreshPolicy.feed`) asks
+  with `since` — the newest `ts` painted or held — de-duplicates on
+  `(ref, ts, kind)` and holds what is new behind *↓ 12 new*; taking it paints
+  them at the top in one step. A filter change starts again: no cursor, no
+  buffer.
+- **A turn folds its calls.** Rows sharing a `turn_id` sit under their `turn`
+  row; the run (`GET /api/runs/:id`) gives the model, time, cost, tokens and
+  the whole call count, and opening it asks `activity_feed` with `turn_id` —
+  the one parameter this ticket added to `ActivityStore` — so a turn whose
+  calls fell past `limit` still shows them all, or says *4 tools, 1 shown*.
+- **A routine that wrote carries the spark**, read from its run's `meta.path`,
+  and opening it draws that file in the one prose component. `meta.outcome`
+  `skipped:…` draws `absent`, not `failed` (§12.3).
+- **States.** Empty (*Nothing in the Last 24 Hours* · Widen to 7 Days),
+  filtered-empty (*No Captures in the Last 24 Hours* · Clear the Filter) and
+  failed (*Couldn't Load Activity*, the error verbatim, Try Again) are three
+  panels; a failed refresh over rows is the stale band.
+- **Keys.** ↑↓ and ←→ are the list's own; ↩ is Item ▸ Open for a row with a
+  destination, which opens the web app (the capture, request, task and message
+  screens are not in the Mac yet; a run's detail is drawn nowhere). Screen 2
+  §8's `1`–`7`, `/`, ⌘R and ⌘↩ are not in the closed menu table (C119), so they
+  are not bound; the chips and the pill are focusable controls instead.
+
 ## Build and run it
 
 ```sh

@@ -14,7 +14,8 @@
 // (T6-*). Until one lands, its detail says so in a sentence and offers the web
 // app — a labelled "not yet", never an empty pane pretending to be a screen
 // (mac-app.md, "Not yet, and labelled as such on screen"). Needs You is the
-// first that has landed (needs-you-view.swift, T5-4a).
+// first that has landed (needs-you-view.swift, T5-4a);
+// Activity is another (activity-view.swift, T6-3).
 //
 // ACCESSIBILITY (§2.18). Every control speaks its name, and a glyph-only one its
 // shortcut too; the Needs You row says *Needs You, 10 waiting*; the gauge says
@@ -46,7 +47,7 @@ public struct RootView: View {
             ShellSidebar(shell: shell)
                 .navigationSplitViewColumnWidth(min: 180, ideal: MetistrySize.sidebar, max: 320)
         } detail: {
-            ShellDetail(shell: shell, needsYou: model.needsYou, consoleURL: PasskeyRouting.consoleURL(in: model.status.report).flatMap(URL.init(string:)))
+            ShellDetail(shell: shell, needsYou: model.needsYou, activity: model.activity, consoleURL: PasskeyRouting.consoleURL(in: model.status.report).flatMap(URL.init(string:)))
                 // The detail landmark, named for where the owner is.
                 .accessibilityElement(children: .contain)
                 .accessibilityLabel(shell.selection.title)
@@ -197,13 +198,20 @@ struct NeedsYouRow: View {
 // MARK: - The detail
 
 struct ShellDetail: View {
+    @Environment(\.openURL) private var openURL
     let shell: ShellModel
     let needsYou: NeedsYouModel
+    let activity: ActivityModel
     let consoleURL: URL?
 
     var body: some View {
         let destination = shell.selection
-        if destination == .needsYou {
+        if destination == .activity {
+            // A row's destination is a screen the Mac does not draw yet — the
+            // capture, the request, the task, the message — so it opens in the
+            // web app, which has them. A run's detail is drawn nowhere (§6.2).
+            ActivityView(model: activity, assistantName: shell.assistantName, onOpen: consoleURL.map { url in { _ in openURL(url) } })
+        } else if destination == .needsYou {
             // C110: answering the last request leaves the owner here, on
             // *Nothing needs you*, with the row still in the sidebar until they
             // go elsewhere. One request is its card (T5-4b): the detail draws

@@ -54,6 +54,7 @@ import { assistantPromptFiles, loadAssistantDefinition } from "../dist/actors.js
 import { loadRules } from "../dist/router.js";
 import { TargetRegistry } from "../dist/dispatch.js";
 import { loadPublicIdentity } from "../dist/identity.js";
+import { EventHub, startEventFeed } from "../dist/events.js";
 import { FIXTURE_DIR, REPO_ROOT, expectedFixtures, fixtureBody, shapeDiff } from "./client-fixtures.mjs";
 
 // ---- arguments -------------------------------------------------------------------
@@ -177,8 +178,15 @@ const crews = new CrewRegistry(pool, [join(REPO_ROOT, "seed/agents")], undefined
 
 const localOwnerToken = mintToken();
 const policy = { idleDays: 30, maxDays: 365 };
+// The live-changes hub (§2.20). Its ids start at a pinned number so a
+// re-recording diffs by what changed rather than by the clock; its LISTEN is
+// started only for the stream recording at the end, so nothing the requests
+// below write is in it.
+const STREAM_FIRST_ID = 4100;
+const events = new EventHub({ firstId: STREAM_FIRST_ID });
 const server = makeServer(pool, queries, {
   origin: "http://127.0.0.1:8080",
+  events,
   localOwner: { token: localOwnerToken, trusted: [] },
   inboxDir: layout.path("inboxDir"),
   // the vault is the capture sink and the knowledge reader, as on an install with its reconciler up
@@ -504,6 +512,104 @@ for (const [key, make, tag] of REQUESTS) {
   };
   recorded.set(f.stem, fixture);
 }
+// ---- the event stream: one frame of every catalogue type, from the real triggers -----
+//
+// A console that has just started listening; a subscriber resuming from an id
+// it never issued (so the first frame is `resync`); then one write per type,
+// each waited for before the next, so the frames land in one order every
+// time. Every write is the row the type's rule reads (docs/ops/client-api.md,
+// "Where events come from"): a `runs` row brings its own run.started and
+// run.finished with it, which is what a client really hears.
+{
+  const f = byRoute.get("GET /api/events");
+  const feed = startEventFeed({ hub: events, db: pool, connect: () => pool.connect(), log: (l) => failures.push(`GET /api/events: ${l}`) });
+  await feed.ready;
+  const request = { method: "GET", path: "/api/events", body: null, idempotency_key: null, last_event_id: String(STREAM_FIRST_ID - 100) };
+  const abort = new AbortController();
+  const res = await fetch(base + request.path, { headers: { authorization: `Bearer ${localOwnerToken}`, "last-event-id": request.last_event_id }, signal: abort.signal });
+  const frames = [];
+  const reading = (async () => {
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let cur = { data: [] };
+    try {
+      for await (const chunk of res.body) {
+        buffer += decoder.decode(chunk, { stream: true });
+        let nl;
+        while ((nl = buffer.indexOf("\n")) !== -1) {
+          const line = buffer.slice(0, nl);
+          buffer = buffer.slice(nl + 1);
+          if (line === "") {
+            if (cur.data.length > 0) frames.push({ id: cur.id, event: cur.event, data: JSON.parse(cur.data.join("\n")) });
+            cur = { data: [], id: cur.id };
+          } else if (!line.startsWith(":")) {
+            const i = line.indexOf(":");
+            const [field, value] = [line.slice(0, i), line.slice(i + 1).replace(/^ /, "")];
+            if (field === "id") cur.id = value;
+            else if (field === "event") cur.event = value;
+            else if (field === "data") cur.data.push(value);
+          }
+        }
+      }
+    } catch {
+      /* aborted: done */
+    }
+  })();
+  const heard = async (type) => {
+    const end = Date.now() + 5000;
+    while (!frames.some((x) => x.event === type)) {
+      if (Date.now() > end) throw new Error(`GET /api/events: no ${type} within 5 s — heard ${frames.map((x) => x.event).join(", ")}`);
+      await new Promise((r) => setTimeout(r, 10));
+    }
+  };
+  const finished = (component, kind, meta, ok = true) =>
+    pool.query(`INSERT INTO runs (component, kind, ok, started_at, finished_at, meta) VALUES ($1, $2, $3, now(), now(), $4)`, [component, kind, ok, JSON.stringify(meta)]);
+  const streamTurn = "turn-fixture-stream";
+  const steps = [
+    ["resync", async () => undefined],
+    ["turn.progress", async () => (ids.streamRun = Number((await one(`INSERT INTO runs (component, kind, tool, ok, started_at, meta) VALUES ('cursor', 'tool', 'knowledge_search', NULL, now(), jsonb_build_object('turn_id', $1::text)) RETURNING id`, [streamTurn])).id))],
+    ["run.finished", () => pool.query(`UPDATE runs SET ok = true, finished_at = now() WHERE id = $1`, [ids.streamRun])],
+    ["message.new", () => outboundMessage("The fixture recorder heard this reply as an id.")],
+    ["presence.changed", () => pool.query(`UPDATE agents SET display_name = 'Cursor (fixture)' WHERE id = $1`, [ids.agent])],
+    ["needs_you.changed", () => proposal("report", { title: "One more thing to read", summary: "a report for the stream" })],
+    ["work.changed", async () => (ids.streamWork = Number((await one(`INSERT INTO work (title, project, kind, status, created_by) VALUES ('Watch the stream', $1, 'task', 'open', 'user') RETURNING id`, [P])).id))],
+    // both shapes of thread.changed: a task's room, then an artifact's thread
+    ["thread.changed", () => pool.query(`INSERT INTO artifact_comments (id, work_id, body, author_principal, author_kind) VALUES ('cmt_01FIXTURESTREAMROOM000000', $1, 'A room the stream names by its task.', 'user', 'human')`, [ids.streamWork])],
+    ["thread.changed", async () => {
+      await pool.query(`INSERT INTO artifact_comments (id, artifact_id, version_id, body, author_principal, author_kind) VALUES ('cmt_01FIXTURESTREAMART0000000', $1, $2, 'A thread the stream names by its artifact.', 'user', 'human')`, [ids.artifact, ids.v2]);
+      const end = Date.now() + 5000;
+      while (!frames.some((x) => x.event === "thread.changed" && "artifact_id" in x.data)) {
+        if (Date.now() > end) throw new Error("GET /api/events: no thread.changed for the artifact within 5 s");
+        await new Promise((r) => setTimeout(r, 10));
+      }
+    }],
+    ["capture.new", () => pool.query(`INSERT INTO inbox (source, path, note) VALUES ('http', 'Inbox/fixture-stream.md', 'a capture the stream names by id')`)],
+    ["vault.reconciled", () => finished("reconciler", "collector_run", { trigger: "watch", added: 1, changed: 2, renamed: 0, removed: 1 })],
+    ["vault.sync", () => finished("reconciler", "vault_sync", { state: "push" })],
+    ["routine.status", () => finished("morning-brief", "routine_run", { outcome: "acted", processed: 1 })],
+    ["sync.status", () => finished("github-state", "collector_run", { processed: 3 })],
+    ["connection.health", () => finished("github", "connection_call", { connection: "github" }, false)],
+    ["config.changed", () => finished("reconciler", "config_write", { path: ".metistry/compute.yaml" })],
+    ["budget.state", () => finished("assistant", "budget", { scope: "instance", window: "daily" }, false)],
+    ["release.available", () => finished("update-check", "routine_run", { outcome: "acted", current: "0.11.0", release_available: "0.12.0" })],
+  ];
+  try {
+    for (const [type, write] of steps) {
+      await write();
+      await heard(type);
+    }
+    await new Promise((r) => setTimeout(r, 400)); // anything the last write brings with it
+  } catch (e) {
+    failures.push(e.message);
+  }
+  abort.abort();
+  await reading;
+  await feed.stop();
+  events.closeAll();
+  if (f && res.status === 200) recorded.set(f.stem, { route: f.route, source: "recorded", ticket: f.ticket, request, status: res.status, stream: frames });
+  else failures.push(`GET /api/events: ${res.status}`);
+}
+
 for (const f of table) {
   if (f.served && !recorded.has(f.stem) && !failures.some((x) => x.startsWith(f.route))) {
     failures.push(`${f.route} (${f.stem}): served, and the recorder has no request for it — add one to REQUESTS`);

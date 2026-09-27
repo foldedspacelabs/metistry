@@ -206,6 +206,18 @@ when it is on PATH and logged in.
 download — so the version it prints is `<latest>`, the request rather
 than a resolved tag.
 
+### Knowing there is one — the daily Update Check
+
+The console runs `routines/update-check` once a day: it asks the same
+`releases/latest` endpoint (the same `METISTRY_RELEASE_REPO`,
+`METISTRY_GITHUB_API` and `METISTRY_GITHUB_TOKEN`) and compares the answer
+with the console's own version. A newer release writes one `runs` row
+(`component = 'update-check'`, `meta.release_available`), which every open
+client hears as `release.available {version}` (`docs/ops/client-api.md`, "Live
+changes"); an equal or older one is silent; a feed that does not answer is a
+`skipped:<reason>` row and never an alert. It installs nothing — updating is
+still `metistry update`, by hand.
+
 ## Secrets
 
 Repo secrets, set in GitHub → Settings → Secrets → Actions. None of them

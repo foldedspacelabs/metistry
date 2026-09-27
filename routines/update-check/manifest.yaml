@@ -1,0 +1,16 @@
+schema: 1
+name: update-check
+type: routine
+description: >
+  The daily Update Check (design-build-plan §2.20) — asks the release feed for
+  the product's newest release and compares it with the runtime this console
+  is. Newer: one run row carrying `meta.release_available`, which the console
+  streams to every subscribed client as `release.available {version}`; the
+  update itself is still `metistry update`, by the owner's hand. Not newer:
+  silent. Feed unreachable, or no release yet: a skip row saying which, never
+  an alert — an update check is not worth a notification. Model-free
+  (invariant 4); reads nothing of the vault; the only thing it sends is one
+  GET to the GitHub API (METISTRY_GITHUB_TOKEN rides along when set, which
+  lifts the anonymous rate limit). METISTRY_RELEASE_REPO and
+  METISTRY_GITHUB_API point it elsewhere, as they do `metistry update`.
+schedule: "@daily"

@@ -88,7 +88,7 @@ import {
   type TemplateReader,
 } from "@foldedspacelabs/metistry-core";
 import type { RegisteredCollector, Db, CollectorCtx } from "@metistry-apps/collectors";
-import { vaultReader, type PlanCtx, type PlanVault } from "@metistry-apps/routines";
+import { vaultReader, type PlanCtx, type PlanVault, type UpdateCheckCtx } from "@metistry-apps/routines";
 
 export { scheduleToSeconds }; // one import path for the runner's callers and tests
 
@@ -103,7 +103,7 @@ export { scheduleToSeconds }; // one import path for the runner's callers and te
  * composes the capabilities it already built for the server and hands them
  * on; a component takes the fields it declares and ignores the rest.
  */
-export type ComponentCtx = CollectorCtx & PlanCtx & { reader?: TemplateReader };
+export type ComponentCtx = CollectorCtx & PlanCtx & UpdateCheckCtx & { reader?: TemplateReader };
 
 /**
  * The routine-only slice of `ComponentCtx`, built ONCE here from the objects

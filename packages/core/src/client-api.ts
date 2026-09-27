@@ -306,7 +306,7 @@ export const CLIENT_API: readonly ClientRoute[] = [
   planned("DELETE", "/api/prose/:id/feedback", "T1-12", "clear a prose rating", { idempotent: "natural" }),
 
   // ----- live changes -----
-  planned("GET", "/api/events", "T2-18", "Server-Sent Events: what changed, as ids; `Last-Event-ID` resumes"),
+  route("GET", "/api/events", "Server-Sent Events: what changed, as ids; `Last-Event-ID` resumes"),
 
   // ----- the vault's git -----
   planned("GET", "/api/vault/status", "T10-2", "branch, ahead and behind, last commit, last push, conflict"),

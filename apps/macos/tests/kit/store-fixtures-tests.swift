@@ -451,16 +451,21 @@ private let drives: [String: Drive] = [
     var events: [ConsoleEvent] = []
     for try await event in stores.events(lastEventID: nil) { events.append(event) }
     let fixture = try ConsoleFixture.load("get-api-events")
-    #expect(events.map(\.id) == fixture.stream?.map(\.id))
+    // recorded from a real console (T2-18), so ids and values are whatever it
+    // said: every assertion reads them off the fixture rather than naming them
+    let ids = try #require(fixture.stream).map(\.id)
+    #expect(events.map(\.id) == ids)
     #expect(!events.contains { if case .unknown = $0.change { true } else { false } }, "every frame is a catalogue type this build reads")
-    #expect(events.contains(.init(id: "4106", change: .needsYouChanged(waiting: 3))))
-    #expect(events.contains(.init(id: "4109", change: .threadChanged(workID: nil, artifactID: "art_01M3FY9WJ7M4N2ZAJFNZBVH8KK"))))
+    #expect(events.contains { if case .needsYouChanged = $0.change { true } else { false } })
+    // both shapes of thread.changed decode to the one they are
+    #expect(events.contains { if case .threadChanged(workID: .some, artifactID: nil) = $0.change { true } else { false } })
+    #expect(events.contains { if case .threadChanged(workID: nil, artifactID: .some(let a)) = $0.change { a.hasPrefix("art_") } else { false } })
     #expect(console.calls.map(\.path) == ["/api/events"])
 
     // a reconnect resumes after the last id it saw
     var resumed: [String?] = []
-    for try await event in stores.events(lastEventID: "4117") { resumed.append(event.id) }
-    #expect(resumed == ["4118", "4119"])
+    for try await event in stores.events(lastEventID: ids[ids.count - 3]) { resumed.append(event.id) }
+    #expect(resumed == Array(ids.suffix(2)))
 }
 
 @Test func aTypeThisBuildDoesNotKnowIsIgnoredNotFatal() throws {
@@ -673,10 +678,12 @@ func everyStoreMethodSpeaksItsRouteOverTheSessionTransport() async throws {
     #expect(export.rows.count == 3)
     #expect(export.cursor?.contains("|") == true)
 
-    // and the event stream rides the same child
+    // and the event stream rides the same child — the recording's ids, read off
+    // the fixture: a resume after the third-from-last replays the last two
+    let recorded = try #require(byStem["get-api-events"]?.stream).map(\.id)
     var ids: [String?] = []
-    for try await event in session.stores.events(lastEventID: "4117") { ids.append(event.id) }
-    #expect(ids == ["4118", "4119"])
+    for try await event in session.stores.events(lastEventID: recorded[recorded.count - 3]) { ids.append(event.id) }
+    #expect(ids == Array(recorded.suffix(2)))
 }
 
 @Test func aOneRowExportPrettyPrintedByConsoleCallIsStillOneRow() throws {

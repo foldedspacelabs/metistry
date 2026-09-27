@@ -143,8 +143,8 @@ metistry compute route-report [--since 30d] [--json]
 Every verb takes `--json` (the app's surface) and `--dry-run` (print the
 plan, write nothing) — except `cache-report` and `route-report`, which write
 nothing to begin with: they are the two READS here, over the `runs` ledger
-("Measuring it (OPEN-6)") and over `inbound_messages` ("The router's
-baseline"). Every write goes through the reconciler as `user`, and
+("Measuring it (OPEN-6)") and over `inbound_messages` and the route record
+("The router's baseline"). Every write goes through the reconciler as `user`, and
 the **result is validated before it is written** — an edit that would produce
 a file the engine could not load is refused and the file is left untouched.
 Hand-written comments, ordering and blocks the verbs do not cover survive
@@ -554,6 +554,56 @@ because a 40 % line decided by three messages either way is not a reading.
 **Nothing here is a decision.** The verdict prints §5.2's exit rule with this
 install's number in it; whether PoC-20 phase 1 gets built is the owner's, and
 so is the invariant-4 question it would raise (§3.2 of the research).
+
+### The policy, in shadow — the route record (T9-1)
+
+Invariant 4, as ratified on 2026-09-26, says every routing choice is recorded
+with its reasons. `docs/ops/dynamic-router.md` is the whole spec; this is
+what the report shows of it. For **every** `POST /message` the console routed
+with a ruleset loaded, it writes one `runs` row: `component: console`, `kind:
+route`, `tool` the served kind (`note`, `fast_path`, `override`, `default`, or
+`policy` once T9-4 serves), no `provider` or `model` (a route row buys
+nothing), and `meta` v1 — the rules' route, the cheap features (`words`,
+`attachments`, `thread_turns`, `recent_failures`, `reask`), and what the
+policy did (`meta.policy.outcome`, one of §5's eight).
+
+**In shadow, and after the 202.** The row is written once the message is
+filed and answered, so nothing the policy answers, throws or fails to
+answer can reach the served route, the 202 body or the reply — T9-1's tests
+hold that byte for byte at the door. The consultation has one deadline,
+400 ms, for the features query and the policy together; past it the row
+reads `timeout`. A row that cannot be written is logged and lost; it never
+fails a message already answered.
+
+**No text.** The row holds counts, the owner's own names (tiers, table ids,
+named queries) and numbers. The message, `meta.route.text`'s copy of it and
+the previous message the `reask` check compared are never in it. The thread
+facts come from one named query, `seed/queries/route_features.yaml`
+(`expose: route` — it returns the previous message's text, which only the
+console reads).
+
+**Until T9-2 there is no policy**, so every consultation (every row but
+`/note` and a fast path, which are `not_consulted`) reads `absent`, and the
+report says so in a sentence instead of seven tables of zeroes. From T9-2
+it prints, each over its own denominator:
+
+| Section | Rows | Over |
+| --- | --- | --- |
+| outcomes | the eight outcomes of §5, always all eight | route rows |
+| table rows that decided | each `table[].id`, plus `(no match)` | chosen + no match |
+| operations chosen | each operation of §3 | chosen |
+| served tier → chosen tier | the disagreement matrix | chosen |
+| held by | each `bounded_by` value | route rows |
+| on the owner's overrides | `agrees` / `disagrees`: would the policy have picked the tier the owner picked | counterfactuals |
+| stage-2 shadow on the chosen tier | mean `shadow_agreement` of the shadowed turns on those messages ("Shadow mode") | shadowed turns |
+| latency | p50 and p95 of the consultation's `duration_ms` | consultations |
+| misses | policy-served turns followed within 10 minutes by an override to a higher tier or a re-ask — meaningful from T9-4 | policy-served turns |
+
+Every label from a closed vocabulary is a row even at zero; the owner's own
+names (tiers, table ids) appear once seen. Under 30 consultations the
+section says "widen `--since`". The fifth kind, `policy`, reads 0 until T9-4
+and is not counted as a fall-through: the exit rule above stays about the
+rules alone.
 
 ## Budgets
 

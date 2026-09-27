@@ -149,6 +149,8 @@ describe("seed queries", () => {
     // todo line — and `blocked_by`, its vault path: the day_work reason
     // exactly. The owner reads it at `GET /api/q/board` (P4); the counts,
     // `board_projects`, carry neither and stay generic.
+    // `route_features` (T9-1) carries the previous message's TEXT for the
+    // router's re-ask comparison: the console's own read, never an agent's.
     expect(routeBacked.sort()).toEqual([
       "board",
       "collector_health",
@@ -156,6 +158,7 @@ describe("seed queries", () => {
       "knowledge_page_links",
       "knowledge_pages",
       "pending_requests",
+      "route_features",
       "secret_last_used",
       "session_detail",
       "vault_task_by_key",
@@ -504,6 +507,7 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
     try {
       await client.query(`CREATE SCHEMA ${schema}`);
       await client.query(`CREATE TABLE ${schema}.inbound_messages (LIKE public.inbound_messages INCLUDING ALL)`);
+      await client.query(`CREATE TABLE ${schema}.runs (LIKE public.runs INCLUDING ALL)`); // the policy's rows read `runs`, which route-record.integration writes concurrently
       await client.query(`SET search_path TO ${schema}, public`);
       const isolated = new QueryStore({ query: (text, values) => client.query(text, values) });
       await isolated.loadDir(SEED_DIR);
@@ -513,7 +517,7 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
       // every length bucket is a row at 0, never an absence (§4.3: "a
       // never-firing tier must be visible … a row, not a silence").
       const empty = (await isolated.run("route_report", { days: 30 })).rows;
-      expect(empty.filter((r) => r.row_kind === "kind").map((r) => r.label)).toEqual(["note", "fast_path", "override", "default"]);
+      expect(empty.filter((r) => r.row_kind === "kind").map((r) => r.label)).toEqual(["note", "fast_path", "override", "default", "policy"]);
       expect(empty.filter((r) => r.row_kind === "length").map((r) => r.label)).toEqual(["<=5 words", "6-15 words", "16-40 words", ">40 words"]);
       for (const r of empty) expect(Number(r.n), String(r.label)).toBe(0);
       expect(empty.find((r) => r.row_kind === "total")).toMatchObject({ routed: "0", unrouted: "0", fall_through: "0" });
@@ -556,7 +560,7 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
       // kind=model + routed_by=rule: the fourth kind does not exist on the
       // wire, and getting that wrong is the difference between a 58% reading
       // and a 75% one.
-      expect(of("kind")).toEqual({ note: 1, fast_path: 2, override: 2, default: 7 });
+      expect(of("kind")).toEqual({ note: 1, fast_path: 2, override: 2, default: 7, policy: 0 });
       expect(Number(got.find((r) => r.row_kind === "kind" && r.label === "default")!.share)).toBeCloseTo(7 / 12, 4);
       // shares of the ROUTED messages, so they sum to 1 — the unrouted row is
       // not in any of them
@@ -595,6 +599,138 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
       await client.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
       client.release();
     }
+  });
+
+  // The policy's record (T9-1, docs/ops/dynamic-router.md §6): route_report
+  // over `runs` of kind `route`. Its own schema for the same reason as above —
+  // route-record.integration writes real route rows into the shared `runs`.
+  it("route_report: the policy's rows — every closed-vocabulary label at zero, each over its own denominator, no text", async () => {
+    const schema = `rp_${Date.now()}`;
+    const client = await pool.connect();
+    try {
+      await client.query(`CREATE SCHEMA ${schema}`);
+      await client.query(`CREATE TABLE ${schema}.inbound_messages (LIKE public.inbound_messages INCLUDING ALL)`);
+      await client.query(`CREATE TABLE ${schema}.runs (LIKE public.runs INCLUDING ALL)`);
+      await client.query(`SET search_path TO ${schema}, public`);
+      const isolated = new QueryStore({ query: (text, values) => client.query(text, values) });
+      await isolated.loadDir(SEED_DIR);
+      const labels = (rows: Record<string, unknown>[], kind: string) => rows.filter((r) => r.row_kind === kind).map((r) => String(r.label));
+
+      // **every new label is emitted at zero** — the ones this query can know
+      const empty = (await isolated.run("route_report", { days: 30 })).rows;
+      expect(labels(empty, "policy_outcome")).toEqual(["not_consulted", "counterfactual", "absent", "chosen", "no_match", "out_of_bounds", "timeout", "failed"]);
+      expect(labels(empty, "policy_row")).toEqual(["(no match)"]);
+      expect(labels(empty, "policy_operation").sort()).toEqual(["answer", "retrieve:knowledge", "retrieve:queries", "tools"]);
+      expect(labels(empty, "policy_bounded_by").sort()).toEqual(["command:note", "crew_registry", "failed", "override", "queries", "session", "timeout"]);
+      expect(labels(empty, "policy_override")).toEqual(["agrees", "disagrees"]);
+      expect(labels(empty, "policy_latency")).toEqual(["p50", "p95"]);
+      expect(labels(empty, "policy_miss")).toEqual(["miss"]);
+      expect(labels(empty, "policy_tier")).toEqual([]); // tiers are the owner's names — seen, never invented
+      expect(labels(empty, "policy_shadow")).toEqual([]);
+      for (const r of empty.filter((r) => String(r.row_kind).startsWith("policy_"))) {
+        expect(Number(r.n), `${r.row_kind} ${r.label}`).toBe(0);
+        expect(Number(r.denominator), `${r.row_kind} ${r.label}`).toBe(0);
+        expect(r.share, `${r.row_kind} ${r.label}`).toBeNull();
+      }
+
+      // Rows of exactly the shape consultRoute writes (router.ts), text and all where a route would carry it — it must not reach a cell.
+      const served = (tier: string, routed_by = "rule") => ({ kind: "model", tier, operation: "tools", routed_by });
+      const row = async (tool: string, ok: boolean, duration: number, meta: Record<string, unknown>, ts = "now()") => {
+        const { rows } = await client.query(
+          `INSERT INTO ${schema}.runs (ts, component, kind, tool, ok, duration_ms, started_at, finished_at, meta)
+           VALUES (${ts}, 'console', 'route', $1, $2, $3, ${ts}, ${ts}, $4::jsonb) RETURNING id`,
+          [tool, ok, duration, JSON.stringify({ v: 1, thread: "rp", phase: "shadow", ...meta })],
+        );
+        return rows[0].id;
+      };
+      await row("note", true, 3, { message_id: 1, served: { kind: "note", routed_by: "rule" }, policy: { outcome: "not_consulted", bounded_by: ["command:note"] } });
+      await row("fast_path", true, 4, { message_id: 2, served: { kind: "fast_path", query: "open_work" }, policy: { outcome: "not_consulted", bounded_by: ["fast_path:open_work"] } });
+      await row("default", true, 10, { message_id: 3, served: served("default"), policy: { outcome: "absent", bounded_by: [] } });
+      await row("default", true, 20, { message_id: 4, served: served("default"), policy: { outcome: "chosen", row: "small-talk", chosen: { operation: "answer", tier: "fast" }, bounded_by: [], would_serve: { operation: "answer", tier: "fast" } } });
+      await row("default", true, 30, { message_id: 5, served: served("default"), policy: { outcome: "chosen", row: "small-talk", chosen: { operation: "answer", tier: "fast" }, bounded_by: [], would_serve: { operation: "answer", tier: "fast" } } });
+      await row("default", true, 40, { message_id: 6, served: served("default"), policy: { outcome: "chosen", row: "the-record", chosen: { operation: "retrieve:knowledge", tier: "default" }, bounded_by: [] } });
+      await row("default", true, 50, { message_id: 7, served: served("default"), policy: { outcome: "chosen", row: "status", chosen: { operation: "fast_path:open_work" }, bounded_by: [] } });
+      await row("default", true, 60, { message_id: 8, served: served("default"), policy: { outcome: "no_match", bounded_by: [], would_serve: { operation: "tools", tier: "default" } } });
+      await row("default", true, 70, { message_id: 9, served: served("default"), policy: { outcome: "out_of_bounds", row: "by-complexity", chosen: { operation: "tools", tier: "deep" }, bounded_by: ["session"] } });
+      await row("default", false, 400, { message_id: 10, served: served("default"), policy: { outcome: "timeout", bounded_by: ["timeout"] } });
+      await row("default", false, 5, { message_id: 11, served: served("default"), policy: { outcome: "failed", bounded_by: ["failed"] } });
+      await row("override", true, 80, { message_id: 12, served: served("deep", "override"), policy: { outcome: "counterfactual", answer: "chosen", bounded_by: ["override"], would_serve: { operation: "tools", tier: "deep" } } });
+      await row("override", true, 90, { message_id: 13, served: served("deep", "override"), policy: { outcome: "counterfactual", answer: "no_match", bounded_by: ["override"], would_serve: { operation: "tools", tier: "default" } } });
+      // a row still in flight has no outcome and is not counted anywhere
+      await client.query(`INSERT INTO ${schema}.runs (component, kind, tool, ok, started_at, meta) VALUES ('console', 'route', 'default', NULL, now(), '{"v":1,"message_id":14}')`);
+      // stage-2 shadow on two of the messages the policy sent to `fast`
+      for (const [id, agreement] of [[4, 0.8], [5, 0.6]] as const) {
+        await client.query(
+          `INSERT INTO ${schema}.runs (component, kind, ok, shadow_model, shadow_agreement, meta) VALUES ('assistant', 'turn', true, 'cand', $1, $2::jsonb)`,
+          [agreement, JSON.stringify({ message_id: String(id), thread: "rp", text: "a private sentence that must not surface" })],
+        );
+      }
+
+      const got = (await isolated.run("route_report", { days: 1 })).rows;
+      const of = (kind: string): Record<string, number> => Object.fromEntries(got.filter((r) => r.row_kind === kind).map((r) => [String(r.label), Number(r.n)]));
+      const denom = (kind: string) => [...new Set(got.filter((r) => r.row_kind === kind).map((r) => Number(r.denominator)))];
+
+      expect(of("policy_outcome")).toEqual({ not_consulted: 2, counterfactual: 2, absent: 1, chosen: 4, no_match: 1, out_of_bounds: 1, timeout: 1, failed: 1 });
+      expect(denom("policy_outcome")).toEqual([13]); // every FINISHED route row
+      expect(of("policy_row")).toEqual({ "(no match)": 1, "small-talk": 2, "the-record": 1, status: 1 });
+      expect(denom("policy_row")).toEqual([5]); // chosen + no_match
+      expect(of("policy_operation")).toEqual({ answer: 2, "retrieve:knowledge": 1, "retrieve:queries": 0, tools: 0, "fast_path:open_work": 1 });
+      expect(denom("policy_operation")).toEqual([4]);
+      expect(of("policy_tier")).toEqual({ "default → fast": 2, "default → default": 1, "default → fast_path": 1 });
+      expect(of("policy_bounded_by")).toEqual({ "command:note": 1, "fast_path:open_work": 1, override: 2, session: 1, crew_registry: 0, queries: 0, timeout: 1, failed: 1 });
+      expect(denom("policy_bounded_by")).toEqual([13]);
+      expect(of("policy_override")).toEqual({ agrees: 1, disagrees: 1 });
+      expect(denom("policy_override")).toEqual([2]);
+      // p50/p95 over the 11 consultations (not the note, not the fast path): 5,10,…,400
+      expect(of("policy_latency")).toEqual({ p50: 50, p95: 245 });
+      expect(denom("policy_latency")).toEqual([11]);
+      const shadowRow = got.find((r) => r.row_kind === "policy_shadow")!;
+      expect(shadowRow).toMatchObject({ label: "fast" });
+      expect(Number(shadowRow.n)).toBe(2);
+      expect(Number(shadowRow.share)).toBeCloseTo(0.7, 3);
+      expect(of("policy_miss")).toEqual({ miss: 0 }); // nothing is policy-served before T9-4
+      expect(of("kind").policy).toBe(0);
+
+      const cells = JSON.stringify(got);
+      expect(cells).not.toContain("private sentence");
+    } finally {
+      await client.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+      client.release();
+    }
+  });
+
+  // The router's thread facts (docs/ops/dynamic-router.md §2): one row
+  // always, and the numbers the cheap features are computed from.
+  it("route_features: one row for any thread; the active session, the last five finished turns, and the previous message before exclude_id", async () => {
+    const thread = `rf-${randomUUID()}`;
+    const fresh = (await store.run("route_features", { thread, exclude_id: 0 })).rows;
+    expect(fresh).toHaveLength(1);
+    expect(fresh[0]).toMatchObject({ session_active: false, session_turns: 0, session_provider: null, session_model: null, recent_failures: 0, prev_ts: null, prev_text: null });
+
+    const session = randomUUID();
+    await pool.query(`INSERT INTO sessions (id, thread, turns) VALUES ($1, $2, 7)`, [session, thread]);
+    await pool.query(`INSERT INTO assistant_sessions (id, thread, provider, model) VALUES ($1, $2, 'openrouter', 'anthropic/claude-sonnet-5')`, [session, thread]);
+    // six finished turns, newest last: the oldest failure falls outside the five
+    const turns: [boolean, Record<string, unknown>][] = [[false, {}], [true, {}], [true, { stopped: "max_turns" }], [false, {}], [true, {}], [true, {}]];
+    for (const [i, [ok, extra]] of turns.entries()) {
+      await pool.query(
+        `INSERT INTO runs (ts, component, kind, ok, meta) VALUES (now() - make_interval(secs => $1), 'assistant', 'turn', $2, $3::jsonb)`,
+        [60 - i, ok, JSON.stringify({ thread, ...extra })],
+      );
+    }
+    await pool.query(`INSERT INTO runs (component, kind, ok, meta) VALUES ('assistant', 'turn', NULL, $1::jsonb)`, [JSON.stringify({ thread })]); // in flight: not ended
+    const a = await pool.query(`INSERT INTO inbound_messages (thread, text) VALUES ($1, 'the first question') RETURNING id`, [thread]);
+    const b = await pool.query(`INSERT INTO inbound_messages (thread, text) VALUES ($1, 'the second question') RETURNING id`, [thread]);
+
+    const [row] = (await store.run("route_features", { thread, exclude_id: Number(b.rows[0].id) })).rows;
+    expect(row).toMatchObject({ session_active: true, session_turns: 7, session_provider: "openrouter", session_model: "anthropic/claude-sonnet-5", recent_failures: 2, prev_text: "the first question" });
+    // at serve the message is not written yet: 0 excludes nothing and the latest is the previous one
+    expect((await store.run("route_features", { thread, exclude_id: 0 })).rows[0]).toMatchObject({ prev_text: "the second question" });
+    expect((await store.run("route_features", { thread, exclude_id: Number(a.rows[0].id) })).rows[0]).toMatchObject({ prev_text: null });
+
+    // a rolled session is not the one the drain would resume
+    await pool.query(`UPDATE sessions SET status = 'rolled' WHERE id = $1`, [session]);
+    expect((await store.run("route_features", { thread, exclude_id: 0 })).rows[0]).toMatchObject({ session_active: false, session_turns: 0, session_provider: null });
   });
 
   it("claude_usage_daily computes cache_hit_rate = cache_read / (cache_read + tokens_in + cache_write) per model-day, null with no cache metrics", async () => {

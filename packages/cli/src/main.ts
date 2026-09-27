@@ -656,7 +656,9 @@ const USAGE = `metistry — Metistry command line
       the same kind of window (default 30d) — note, fast_path, override and
       the fall-through to the default tier, the tiers and rules that fired,
       and the length and first word of the fall-throughs, with PoC-20 phase
-      0's exit rule as the verdict. Neither calls a model or changes
+      0's exit rule as the verdict — and, under it, the route record: what
+      a local policy would have chosen, in shadow, beside what the rules
+      served (docs/ops/dynamic-router.md). Neither calls a model or changes
       anything (docs/ops/compute.md).
 
   metistry deployment [--json] [--product-dir <checkout>]

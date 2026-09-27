@@ -197,6 +197,16 @@ export function spentFrom(rows: readonly SpendRow[], provider?: string): Spent {
 // ---- the routine pause (C5: `stop` pauses routines too) -----------------------
 
 /**
+ * A routine pause, with the budget that caused it — so the runner can raise
+ * ONE Needs You request per budget window (C133) and clear it when the
+ * window resets or the limit moves. Still a `PreflightMiss`: preflight reads
+ * only the first three fields.
+ */
+export interface BudgetMiss extends PreflightMiss {
+  readonly hit: BudgetHit;
+}
+
+/**
  * The budget half of the runner's preflight. A routine that declares
  * `requires.engine` would enqueue a turn something has to pay for; if the
  * tier that turn will run on is over a `stop` budget, the run is not worth
@@ -206,7 +216,7 @@ export function spentFrom(rows: readonly SpendRow[], provider?: string): Spent {
  * Null means "go". The miss names the `compute.yaml` field, not an
  * environment variable, which is why `PreflightMiss.fix` exists.
  */
-export function budgetMiss(cfg: Compute, rows: readonly SpendRow[], tierOrCrew: string = ROUTINE_TIER): PreflightMiss | null {
+export function budgetMiss(cfg: Compute, rows: readonly SpendRow[], tierOrCrew: string = ROUTINE_TIER): BudgetMiss | null {
   const budgets = cfg.budgets;
   if (!budgets) return null;
   const assignment = resolveAssignment(cfg, tierOrCrew);
@@ -222,5 +232,6 @@ export function budgetMiss(cfg: Compute, rows: readonly SpendRow[], tierOrCrew: 
     name: verdict.refusal.field,
     why: `the ${verdict.refusal.scope} ${verdict.refusal.window} budget is spent, so the turn this run would enqueue could not be answered`,
     fix: budgetRefusalMessage(verdict.refusal),
+    hit: verdict.refusal,
   };
 }

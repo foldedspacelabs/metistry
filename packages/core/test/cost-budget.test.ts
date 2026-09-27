@@ -212,6 +212,8 @@ describe("the routine pause (preflight's budget half)", () => {
     expect(miss?.name).toBe("budgets.instance.daily_usd");
     expect(miss?.fix).toContain(BUDGET_EXCEEDED);
     expect(miss?.why).toContain("could not be answered");
+    // the budget itself rides along, so the runner can key one request per window on it (C133, T3-12)
+    expect(miss?.hit).toMatchObject({ scope: "instance", window: "daily", field: "budgets.instance.daily_usd", over: true, action: "stop" });
   });
 
   it("returns null under the limit, and null when the file sets no budgets at all", () => {

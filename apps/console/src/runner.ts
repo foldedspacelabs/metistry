@@ -48,6 +48,16 @@
 // set. Both are mirrors of this instance's own state (core's `raiseMirror`),
 // so a waiting one is never raised twice, and one the owner answered is not
 // raised again until what it was about has recovered.
+//
+// THREE STRIKES AND A STOP LIMIT (C135, C133, T3-12). A component that fails
+// three times in a row (METISTRY_RUNNER_MAX_STREAK, default 3) stops being
+// run and raises ONE request per (component, error signature) per streak: a
+// routine's waiting failure report is turned into the stop rather than joined
+// by a second row; a collector, which raises nothing for a single failure,
+// raises its stop as a `report` of its own. A budget whose action is `stop`
+// pauses every routine that would enqueue a turn (preflight, C5) and raises
+// ONE `report` per budget window, naming every routine it paused; it clears
+// itself when the window resets or the limit moves.
 
 import { readFile } from "node:fs/promises";
 import { dirname } from "node:path";
@@ -89,7 +99,12 @@ import {
   SCHEDULED_KINDS,
   emptyCompute,
   raiseMirror,
+  redactSecrets,
   resolveAtSource,
+  budgetRefusalMessage,
+  budgetWindowKey,
+  type BudgetHit,
+  type BudgetMiss,
   type Compute,
   type ComponentStreak,
   type Manifest,
@@ -279,9 +294,12 @@ export interface RunnerOptions {
    * The budget half of preflight (C5: `stop` pauses routines too). Asked only
    * of a component that declares `requires.engine`, so a model-free collector
    * never pays for the lookup. Absent = no budget pause at all, which is what
-   * an install with no `budgets:` block gets.
+   * an install with no `budgets:` block gets. A miss that carries its `hit`
+   * (core's `budgetMiss`) also raises the one Stop-limit request (C133), and
+   * is asked again on a later tick only while that request waits, to clear
+   * it once the budget no longer stops anything.
    */
-  budget?: () => Promise<PreflightMiss | null>;
+  budget?: () => Promise<PreflightMiss | BudgetMiss | null>;
   /**
    * `compute.yaml` in force, for the `requires.engine` half of preflight
    * (C2/C3): a routine that would enqueue an assistant turn is not started
@@ -328,7 +346,7 @@ interface ResolvedOptions {
   fetchFn: typeof fetch;
   maxStreak: number;
   alertDedupeHours: number;
-  budget?: (() => Promise<PreflightMiss | null>) | undefined;
+  budget?: (() => Promise<PreflightMiss | BudgetMiss | null>) | undefined;
   compute: () => Compute;
   scheduled: () => Promise<OverlayRead>;
   profile: () => Promise<ProfileFacts>;
@@ -607,6 +625,8 @@ export async function tick(db: Db, scheduled: ScheduledCollector[], ctx: Compone
   // every secret a preflight found missing this tick, and what it stopped —
   // raised as one request per secret once the whole tick has been seen
   const secretMisses = new Map<string, { why: string; stopped: Set<string> }>();
+  // every budget that paused a routine this tick, and which routines (C133)
+  const budgetStops = new Map<string, BudgetStop>();
 
   for (const c of scheduled) {
     // 0. the owner's layer: paused (their choice — no run, and no row a tick)
@@ -653,14 +673,27 @@ export async function tick(db: Db, scheduled: ScheduledCollector[], ctx: Compone
             `Fix the cause — ${clip(lastError, 80)} — and the next successful run clears it; ` +
             `raise METISTRY_RUNNER_MAX_STREAK to keep trying, or remove \`schedule\` from ${c.dir}/manifest.yaml to retire it`,
         });
+        // stopped before this process saw the third failure (a restart, a
+        // lowered limit): the same one request — a no-op when it is raised
+        await tell(opts, (r) => r.componentStopped(stopOf(c, streak.count, streak.since, lastError, streak.signature, null, opts)));
       }
       continue;
     }
 
     // 2. preflight: never spend a window on a component that cannot succeed
-    const pre = await preflight(c.requires, { env: opts.env, compute: opts.compute(), fetchFn: opts.fetchFn, ...(opts.budget ? { budget: opts.budget } : {}) });
+    let budgetHit: BudgetHit | undefined;
+    const askBudget = opts.budget;
+    const budget = askBudget
+      ? async (): Promise<PreflightMiss | null> => {
+          const miss = await askBudget();
+          if (miss && "hit" in miss) budgetHit = miss.hit;
+          return miss;
+        }
+      : undefined;
+    const pre = await preflight(c.requires, { env: opts.env, compute: opts.compute(), fetchFn: opts.fetchFn, ...(budget ? { budget } : {}) });
     if (!pre.ok) {
       noteSecretMisses(secretMisses, c, pre);
+      if (budgetHit) noteBudgetStop(budgetStops, c, budgetHit, opts.now);
       if (!slot.recorded(windows.lastPreflight)) {
         const message = blockedConfigMessage(c.name, c.dir, pre);
         await recordRunnerRow(db, c, PREFLIGHT_FAILED, message, { missing: pre.missing.map((m) => m.name) });
@@ -697,7 +730,7 @@ export async function tick(db: Db, scheduled: ScheduledCollector[], ctx: Compone
       // processed, not an assistant-facing outcome.
       const meta: Record<string, unknown> = c.runKind === "routine_run" ? { processed: n, outcome: n > 0 ? "acted" : "silent" } : { processed: n };
       await finishRun(db, runId, { ok: true, meta });
-      if (c.runKind === "routine_run") await tell(opts, (r) => r.routineSucceeded(c.name));
+      await tell(opts, (r) => (c.runKind === "routine_run" ? r.routineSucceeded(c.name) : r.collectorSucceeded(c.name)));
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       const signature = errorSignature(c.name, error);
@@ -714,6 +747,10 @@ export async function tick(db: Db, scheduled: ScheduledCollector[], ctx: Compone
       if (c.runKind === "routine_run") {
         await tell(opts, (r) => r.routineFailed({ component: c.name, title: unitOf(c).displayName, runId, error, signature, failedAt: opts.now }));
       }
+      // three strikes (C135): this failure is the one that stops it
+      if (count >= opts.maxStreak) {
+        await tell(opts, (r) => r.componentStopped(stopOf(c, count, streak?.since ?? opts.now, error, signature, runId, opts)));
+      }
     }
   }
 
@@ -722,6 +759,33 @@ export async function tick(db: Db, scheduled: ScheduledCollector[], ctx: Compone
     await tell(opts, (r) => r.secretsFailed(failures, opts.now));
   }
   await tell(opts, (r) => r.secretsRestored((name) => (opts.env[name] ?? "").trim() !== ""));
+
+  if (budgetStops.size > 0) await tell(opts, (r) => r.budgetStopped([...budgetStops.values()]));
+  // a waiting Stop-limit request clears once its budget no longer stops the
+  // routines — asked again only while one waits, so an install whose budget
+  // is fine pays for no spend query on a tick that runs no routine
+  const askBudget = opts.budget;
+  if (askBudget) {
+    await tell(opts, (r) =>
+      r.budgetResumed(async () => {
+        const miss = await askBudget();
+        if (miss === null) return null;
+        return "hit" in miss ? budgetStopKey(miss.hit, opts.now) : undefined;
+      }),
+    );
+  }
+}
+
+/** A component's stop, as the requests seam takes it. */
+function stopOf(c: ScheduledCollector, failures: number, since: Date, error: string, signature: string, runId: number | null, opts: ResolvedOptions): ComponentStop {
+  return { component: c.name, title: unitOf(c).displayName, runKind: c.runKind, failures, limit: opts.maxStreak, since, error, signature, runId, stoppedAt: opts.now };
+}
+
+/** A budget's pause this tick: one per budget window, every routine it paused named once. */
+function noteBudgetStop(into: Map<string, BudgetStop>, c: ScheduledCollector, hit: BudgetHit, now: Date): void {
+  const key = budgetStopKey(hit, now);
+  const seen = into.get(key) ?? { key, hit, paused: [], at: now };
+  if (!seen.paused.includes(c.name)) into.set(key, { ...seen, paused: [...seen.paused, c.name].sort() });
 }
 
 /**
@@ -760,14 +824,22 @@ export const RUNNER_AGENT = "runner";
 export const ROUTINE_FAILED_KIND = "report";
 /** A missing secret is access (§2.12), stored as its own kind — `access_request`'s Approve is a grants write for an area, and a secret names none. */
 export const SECRET_FAILED_KIND = "secret_failure";
+/** A collector that stopped after three strikes (C135) is a `report` too — its only request: a single failure raises none. */
+export const COLLECTOR_FAILED_KIND = "report";
+/** A budget whose action is `stop` paused the routines (C133): a `report` (C96), whose act is Raise. */
+export const BUDGET_STOPPED_KIND = "report";
 /** `payload.event` — what raised the request, for a client drawing it and for the doors that answer it. */
 export const ROUTINE_FAILED_EVENT = "routine_failed";
 export const SECRET_FAILED_EVENT = "secret_failed";
+export const COLLECTOR_FAILED_EVENT = "collector_failed";
+export const BUDGET_STOPPED_EVENT = "budget_stopped";
 /** How much of a failed run's error the report carries — the run row has all of it. */
 export const ROUTINE_ERROR_EXCERPT = 600; // limit: fixed — an excerpt a phone can show without scrolling; Activity has the run
 
 const ROUTINE_REF = "routine-failed:";
 const SECRET_REF = "secret:";
+const COLLECTOR_REF = "collector-failed:";
+const BUDGET_REF = "budget-stop:";
 
 /** One request per (routine, error signature): the same fault again is the same subject, a different fault is news. */
 export function routineFailedSource(component: string, signature: string): RequestSource {
@@ -777,6 +849,25 @@ export function routineFailedSource(component: string, signature: string): Reque
 /** One request per secret, however many components it stopped. */
 export function secretFailedSource(name: string): RequestSource {
   return { kind: RUNNER_SOURCE_KIND, external_ref: `${SECRET_REF}${name}` };
+}
+
+/** A collector's three strikes: one request per (collector, error signature), as a routine's failure is. */
+export function collectorFailedSource(component: string, signature: string): RequestSource {
+  return { kind: RUNNER_SOURCE_KIND, external_ref: `${COLLECTOR_REF}${component}#${signature}` };
+}
+
+/**
+ * `<scope>:<window>:<calendar window>@<limit>` — one Stop-limit request per
+ * budget window. The limit is in the key so a raised limit that is spent
+ * again the same day is news, not the answered request of the old limit.
+ */
+export function budgetStopKey(hit: BudgetHit, now: Date): string {
+  return `${budgetWindowKey(hit, now)}@${hit.limit}`;
+}
+
+/** One request per budget window, however many routines it paused. */
+export function budgetStoppedSource(key: string): RequestSource {
+  return { kind: RUNNER_SOURCE_KIND, external_ref: `${BUDGET_REF}${key}` };
 }
 
 export interface RoutineFailure {
@@ -797,14 +888,57 @@ export interface SecretFailure {
   readonly stopped: readonly string[];
 }
 
+/** A component the runner has stopped running: its streak reached the limit (C135). */
+export interface ComponentStop {
+  readonly component: string;
+  /** The name the owner reads (the manifest's display name). */
+  readonly title: string;
+  readonly runKind: ScheduledCollector["runKind"];
+  /** Consecutive failures — at least `limit`. */
+  readonly failures: number;
+  /** METISTRY_RUNNER_MAX_STREAK in force. */
+  readonly limit: number;
+  /** The first failure of the streak. */
+  readonly since: Date;
+  /** The latest failure's error, and its signature — the request's key. */
+  readonly error: string;
+  readonly signature: string;
+  /** The run that failed the last time; null when the stop was first seen on a skipped window. */
+  readonly runId: number | null;
+  readonly stoppedAt: Date;
+}
+
+/** A budget that paused routines this tick (C133). */
+export interface BudgetStop {
+  /** `budgetStopKey` — the request's key. */
+  readonly key: string;
+  readonly hit: BudgetHit;
+  /** Every routine it paused this tick, by name. */
+  readonly paused: readonly string[];
+  readonly at: Date;
+}
+
 /** Where the runner's events become requests. `runnerRequests` is the one implementation; the seam is for tests that model `runs` alone. */
 export interface RunnerRequests {
   routineFailed(f: RoutineFailure): Promise<void>;
   /** The routine ran: every report still waiting on one of its faults is cleared at its source. */
   routineSucceeded(component: string): Promise<void>;
+  /** The collector ran: its waiting stop, if any, is cleared at its source. */
+  collectorSucceeded(component: string): Promise<void>;
+  /** Three strikes: one request per (component, signature) per streak — a routine's waiting report says it stopped. */
+  componentStopped(s: ComponentStop): Promise<void>;
   secretsFailed(failures: readonly SecretFailure[], at: Date): Promise<void>;
   /** Clears the waiting request of every secret `isSet` says is set again. */
   secretsRestored(isSet: (name: string) => boolean): Promise<void>;
+  /** A Stop limit paused routines: one request per budget window, naming each. */
+  budgetStopped(stops: readonly BudgetStop[]): Promise<void>;
+  /**
+   * Clears every waiting Stop-limit request but the one `current` names —
+   * `current` resolves to the key of the budget stopping routines now, null
+   * when none is, undefined when it cannot say (nothing is cleared). Asked
+   * only when a request waits.
+   */
+  budgetResumed(current: () => Promise<string | null | undefined>): Promise<void>;
 }
 
 const iso = (v: unknown): string | null => (v === null || v === undefined ? null : (v instanceof Date ? v : new Date(String(v))).toISOString());
@@ -871,6 +1005,48 @@ export function runnerRequests(db: Db): RunnerRequests {
       for (const ref of await pendingRefs(db, `${ROUTINE_REF}${component}#`)) await resolveAtSource(db, { kind: RUNNER_SOURCE_KIND, external_ref: ref });
     },
 
+    async collectorSucceeded(component) {
+      for (const ref of await pendingRefs(db, `${COLLECTOR_REF}${component}#`)) await resolveAtSource(db, { kind: RUNNER_SOURCE_KIND, external_ref: ref });
+    },
+
+    async componentStopped(s) {
+      const routine = s.runKind === "routine_run";
+      const source = routine ? routineFailedSource(s.component, s.signature) : collectorFailedSource(s.component, s.signature);
+      const stopped = stoppedFields(s);
+      // A routine's report for this fault is waiting: it becomes the stop,
+      // rather than a second request about the same fault beside it.
+      if (routine) {
+        const { rows } = await db.query(
+          `UPDATE proposals SET payload = payload || $3::jsonb
+           WHERE decision = 'pending' AND source->>'kind' = $1 AND source->>'external_ref' = $2 AND NOT (payload ? 'stopped')
+           RETURNING id`,
+          [source.kind, source.external_ref, JSON.stringify(redactSecrets(stopped))],
+        );
+        if (rows.length > 0) return;
+      }
+      // Waiting already, or answered since it last ran cleanly: one request
+      // per signature per streak, and an answer sticks while the fault lasts.
+      const { lastOk, told } = await toldSince(db, source, [s.component]);
+      if (told) return;
+      await raiseMirror(db, {
+        kind: routine ? ROUTINE_FAILED_KIND : COLLECTOR_FAILED_KIND,
+        source_agent: RUNNER_AGENT,
+        trust: "internal",
+        source,
+        payload: {
+          body: clipTo(s.error, ROUTINE_ERROR_EXCERPT),
+          event: routine ? ROUTINE_FAILED_EVENT : COLLECTOR_FAILED_EVENT,
+          component: s.component,
+          run_id: s.runId,
+          error_signature: s.signature,
+          last_ok_at: lastOk,
+          failed_at: s.stoppedAt.toISOString(),
+          act: { label: "Try Again", kind: "run_now", component: s.component },
+          ...stopped,
+        },
+      });
+    },
+
     async secretsFailed(failures, at) {
       for (const f of failures) {
         const source = secretFailedSource(f.name);
@@ -916,6 +1092,74 @@ export function runnerRequests(db: Db): RunnerRequests {
         if (isSet(ref.slice(SECRET_REF.length))) await resolveAtSource(db, { kind: RUNNER_SOURCE_KIND, external_ref: ref });
       }
     },
+
+    async budgetStopped(stops) {
+      for (const b of stops) {
+        const source = budgetStoppedSource(b.key);
+        const { rows } = await db.query(
+          `SELECT id, decision, payload->'paused' AS paused FROM proposals WHERE source->>'kind' = $1 AND source->>'external_ref' = $2 ORDER BY id DESC LIMIT 1`,
+          [source.kind, source.external_ref],
+        );
+        const last = rows[0];
+        if (last) {
+          // Waiting: a routine paused since joins its list. Answered, or
+          // cleared and stopping again at the same limit in the same window:
+          // the owner has heard about this window already.
+          if (last.decision !== "pending") continue;
+          const had = Array.isArray(last.paused) ? (last.paused as unknown[]).map(String) : [];
+          const all = [...new Set([...had, ...b.paused])].sort();
+          if (all.length !== had.length) {
+            await db.query(`UPDATE proposals SET payload = payload || $2::jsonb WHERE id = $1 AND decision = 'pending'`, [last.id, JSON.stringify(budgetPaused(all))]);
+          }
+          continue;
+        }
+        const h = b.hit;
+        await raiseMirror(db, {
+          kind: BUDGET_STOPPED_KIND,
+          source_agent: RUNNER_AGENT,
+          trust: "internal",
+          source,
+          payload: {
+            title: h.scope === "instance" ? `Compute stopped at the ${money(h.limit)} ${h.window} budget` : `${h.scope.replace(/^provider:/, "")} stopped at its ${money(h.limit)} ${h.window} budget`,
+            event: BUDGET_STOPPED_EVENT,
+            budget: { scope: h.scope, window: h.window, field: h.field, limit: h.limit, spent: h.spent, action: h.action },
+            ...budgetPaused(b.paused),
+            stopped_at: b.at.toISOString(),
+            fix: budgetRefusalMessage(h),
+            // Settings › Compute › Spending limits (C138): the limit is the owner's hand, never this request's
+            act: { label: "Raise", kind: "open_settings", pane: "compute", section: "spending_limits" },
+          },
+        });
+      }
+    },
+
+    async budgetResumed(current) {
+      const waiting = await pendingRefs(db, BUDGET_REF);
+      if (waiting.length === 0) return;
+      const now = await current();
+      if (now === undefined) return;
+      for (const ref of waiting) {
+        if (ref !== `${BUDGET_REF}${now}`) await resolveAtSource(db, { kind: RUNNER_SOURCE_KIND, external_ref: ref });
+      }
+    },
+  };
+}
+
+const money = (n: number): string => `$${n.toFixed(2)}`;
+
+/** What a stop adds to its request: the title that says so, and the streak — how many, since when, at what limit. */
+function stoppedFields(s: ComponentStop): Record<string, unknown> {
+  return {
+    title: `${s.title} stopped after ${s.failures} failures`,
+    stopped: { failures: s.failures, limit: s.limit, since: s.since.toISOString(), at: s.stoppedAt.toISOString() },
+  };
+}
+
+/** The part of a Stop-limit request that names what it paused — the list, and the excerpt a report draws. */
+function budgetPaused(paused: readonly string[]): Record<string, unknown> {
+  return {
+    paused,
+    body: `Paused until the window resets or the limit is raised: ${paused.join(", ")}.`,
   };
 }
 

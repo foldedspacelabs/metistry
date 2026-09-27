@@ -89,9 +89,10 @@ describe.skipIf(!hasDb)("events become requests (C96, T2-9, integration)", () =>
     // the table draws it as a report whose act is its own word
     expect(describeRequest("report", a[0].payload)).toMatchObject({ type: "report", body: "excerpt", primary: { label: null, sends: { door: "act" } } });
 
-    // the next run that works clears both at their source
+    // the next run that works clears both at their source — three failures in
+    // a row have stopped it (T3-12), so the limit is raised to let it run
     behave.error = null;
-    await tick(pool, [c], {}, at());
+    await tick(pool, [c], {}, at({ maxStreak: 9 }));
     expect((await requestsFor(first.external_ref)).map((r) => r.decision)).toEqual([RESOLVED_AT_SOURCE]);
     expect((await requestsFor(second.external_ref)).map((r) => r.decision)).toEqual([RESOLVED_AT_SOURCE]);
   });

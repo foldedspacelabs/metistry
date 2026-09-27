@@ -420,6 +420,29 @@ keep_awake: allow_sleep_on_battery   # never | allow_sleep_on_battery | always |
 | `always` | held on any power source. On a laptop away from a charger that costs battery; the Mac still sleeps at low battery, which the assertion is defined not to stop. |
 | `always_lid_closed` | the same as `always`, **plus an administrator change you make yourself**. See below. Offered, never a default. |
 
+**The same setting as switches (T4-20).** The Services pane shows it as a
+switch with two sub-switches, and the file may say it that way too — the four
+values stay valid, and each is exactly one of these:
+
+```yaml
+keep_awake: { enabled: true, sleep_on_battery: true, sleep_lid_closed: false }
+```
+
+| key | means | when absent |
+| --- | --- | --- |
+| `enabled` | the switch; `false` holds nothing, whatever the two below say (they are remembered, not applied) | required — an object that does not say is an error |
+| `sleep_on_battery` | `true` = released on battery and UPS (`allow_sleep_on_battery`); `false` = held on any power (`always`) | `true` — nothing keeps a laptop awake on battery unless asked |
+| `sleep_lid_closed` | `true` = a closed lid sleeps; `false` = you want a closed Mac kept awake, which only the administrator setting below delivers | `true` — never a default |
+
+`never` is `{ enabled: false }`; `allow_sleep_on_battery` is
+`{ enabled: true }`; `always` is `{ enabled: true, sleep_on_battery: false }`;
+`always_lid_closed` is `always` with `sleep_lid_closed: false`. The one
+object no value names — the switch on, sleep on battery, the lid awake — is
+held exactly as `allow_sleep_on_battery` (that is everything a process can
+hold for it) and reported as that value with the lid half beside it. A CLI
+that predates the object form refuses a file that carries it; writing one of
+the four values back is the way down.
+
 **Informed consent, not a default.** A power assertion *overrides* the
 user's own sleep setting (`pmset(1)`: "processes may dynamically override
 these power management settings by using I/O Kit power assertions"), so
@@ -455,10 +478,19 @@ governs the lid is an `IOPMrootDomain` property, not an assertion. The only
 user-space switch that changes it is `sudo pmset -a disablesleep 1`, which
 is system-wide, persists in a root-owned plist, and `pmset(1)` says plainly:
 "pmset must be run as root in order to modify any settings". Metistry will
-not make an administrator change to your Mac. So `always_lid_closed` is
-accepted, behaves exactly as `always`, and every surface says the
-lid-closed half is **not available on this Mac without an administrator
-change** — offered and explained rather than faked. (A lid-closed Mac stays
+not make an administrator change to your Mac. So `always_lid_closed` (or
+`sleep_lid_closed: false`) is accepted and stored as asked, the assertion
+behaves exactly as `always`, and every surface says the lid-closed half is
+**not available on this Mac without an administrator change** — offered and
+explained rather than faked (ruling 3, 2026-09-26). Choosing it prints the
+dialog: the command (`sudo pmset -a disablesleep 1`), how to undo it
+(`sudo pmset -a disablesleep 0`), and the warning — **not recommended**: it
+applies to the whole Mac and every app, persists across restarts, can
+overheat a laptop in a bag and run the battery flat; and because it stops
+every sleep, not only the lid's, the Mac then does not sleep on battery
+either, whatever `sleep_on_battery` says. You run it yourself, in Terminal,
+as an administrator; Metistry never does. `metistry doctor` reads `pmset -g`
+(a `SleepDisabled 1` line) and says whether it is in effect. (A lid-closed Mac stays
 awake in closed-display mode, which is your own external power, display and
 input setup; macOS decides that, not us.) Scheduled sleep, the Apple menu's
 Sleep item, a thermal emergency and low battery all bypass the assertion by
@@ -474,7 +506,8 @@ promise about the machine is unmet, so it never fails a run:
 | holding | `ok`, with the pid, since, and the power source. The pid is cross-checked against the **"Listed by owning process"** block of `pmset -g assertions` — never the summary block, which is a *level* (a maximum) and reads 1 while four processes hold it, and never a name, because under `caffeinate` the name is Apple's on every holder |
 | released on battery under `allow_sleep_on_battery` | `ok` — this is the setting working, and it reads as success |
 | configured, but nothing has written the state file, or its heartbeat is stale | `degraded` — the supervisor is not running, or has not restarted since the setting changed |
-| `always_lid_closed` | `degraded`, carrying the administrator sentence above |
+| the lid asked for (`always_lid_closed`, `sleep_lid_closed: false`), and `pmset -g` has no `SleepDisabled 1` | `degraded`, carrying the administrator sentence, how to undo it and the warning; `meta.lid_closed: "not in effect"` (`"unknown"` when `pmset -g` did not answer — never "off") |
+| the lid asked for, and the administrator setting is in effect | `ok`; `meta.lid_closed: "in effect"` |
 | `shape: compose` | `absent` — no supervisor to hold it |
 | **the Mac slept anyway** | `degraded`, naming when and for how long, with the repair |
 
@@ -484,7 +517,8 @@ its own 60-second ticks and writes what it sees to
 while it was holding means the machine was asleep under it — a closed lid,
 a scheduled sleep, or another policy winning. Doctor then says so, and
 offers `metistry deployment set-keep-awake always --yes` with its battery
-cost stated. A gap across a *restart* is deliberately **not** reported as
+cost stated — or, when the lid sub-switch is off, `--sleep-on-battery false`,
+which holds on battery too without resetting the lid answer. A gap across a *restart* is deliberately **not** reported as
 sleep: that is what `metistry stop`, a logout and a reboot all look like,
 and a clean stop records itself so the gap after it is never misread.
 
@@ -494,8 +528,10 @@ write, from a process that was already running a 60-second probe cycle.
 0.42s and 2.8MB on the Mac this was measured on, and had no Sleep-domain
 entries to parse against.)
 
-Changing it: `metistry deployment set-keep-awake <value> [--yes]` —
-preview-then-confirm through the reconciler, like `set-shape`. It takes
+Changing it: `metistry deployment set-keep-awake <value> [--yes]`, or the
+switches as flags — `--enabled`, `--sleep-on-battery`, `--sleep-lid-closed`,
+each `true|false` (`docs/ops/cli.md`) — preview-then-confirm through the
+reconciler, like `set-shape`. It takes
 effect at the next `metistry up`, which renders `METISTRY_KEEP_AWAKE` into
 the supervisor's environment; nothing already running changes underneath
 you.

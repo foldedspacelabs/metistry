@@ -125,6 +125,7 @@ import { renderTemplatesCheck, templatesCheck } from "./templates.js";
 import { configureUi, createUi, defaultUi, type Ui } from "./ui.js";
 import { up } from "./up.js";
 import { gitHead, update } from "./update.js";
+import { parseContinueFrom, type ContinueFrom } from "./update-reexec.js";
 import { jobFilesFor, retireLegacyEnv } from "./legacy-env.js";
 import { collectVersionInfo, renderVersionInfo } from "./version.js";
 
@@ -144,7 +145,7 @@ export interface ParsedArgs {
  * `--version <x.y.z>` silently installed the latest release instead
  * (#198, "not fixed here" #2).
  */
-export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "dry-run", "allow-dirty", "no-launchd", "no-compose", "no-color", "skip-build", "skip-migrate", "rollback", "allow-legacy", "yes", "follow", "namespace", "rotate", "list", "complete", "skip-test", "remote", "json-lines", "stdio", "named", "clear", "no-discover", "include-config", "no-app", "relaunch"]);
+export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "dry-run", "allow-dirty", "no-launchd", "no-compose", "no-color", "skip-build", "skip-migrate", "rollback", "allow-legacy", "yes", "follow", "namespace", "rotate", "list", "complete", "skip-test", "remote", "json-lines", "stdio", "named", "clear", "no-discover", "include-config", "no-app", "relaunch", "no-reexec"]);
 
 /** The §2.14 verbs over owner-named secrets (M7), and the shared scope's migration (T4-3). `list --named` joins them; `sync|mint|list|purge` are the install's own variables. */
 export const NAMED_SECRET_VERBS = new Set(["set", "replace", "remove", "hosts", "grant", "migrate-scope", "purge-shared"]);
@@ -681,6 +682,7 @@ const USAGE = `metistry — Metistry command line
   metistry update [--skip-build] [--skip-migrate] [--dry-run] [--product-dir <dir>]
                   [--channel git|release] [--version <x.y.z>] [--rollback]
                   [--allow-legacy] [--app-path <path>] [--no-app] [--relaunch]
+                  [--no-reexec]
       Move an install forward: git fetch + pull --ff-only, pnpm install + build,
       db/migrations under a Postgres advisory lock, rebuild containers and
       kickstart the host jobs whose code changed, write metistry.lock into the
@@ -698,6 +700,11 @@ const USAGE = `metistry — Metistry command line
       old one kept as Metistry.app.previous for --rollback. Never sudo; a
       running app is told to relaunch, and only quit with --relaunch.
       --no-app leaves the app alone.
+      Once current points at the new release, update hands the rest (build,
+      migrations, restart, lock, doctor) to that release's own CLI, so one run
+      moves everything onto the new code; --no-reexec finishes on the running
+      code instead (debugging). --continue-from=switched is that hand-over's
+      own flag, never needed by hand.
       An instance still on the legacy layout (the vault in Knowledge/, the config
       files at the instance root) is REFUSED past 0.8.x before anything is
       fetched, with the "metistry migrate-layout" line to run; --allow-legacy
@@ -2221,9 +2228,19 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
         err("update needs a Metistry checkout: pass --product-dir or set METISTRY_PRODUCT_DIR");
         return 2;
       }
+      let continueFrom: ContinueFrom | undefined;
+      try {
+        continueFrom = parseContinueFrom(flags["continue-from"]);
+      } catch (e) {
+        err(`metistry update: ${e instanceof Error ? e.message : String(e)}`);
+        return 2;
+      }
       loadEnv();
       const r = await update({
         productDir,
+        continueFrom,
+        noReexec: flags["no-reexec"] === true,
+        forwardFlags: flags,
         out,
         exec: io.exec,
         envFile: str(flags, "env-file"),

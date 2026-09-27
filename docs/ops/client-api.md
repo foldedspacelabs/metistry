@@ -272,7 +272,7 @@ takes a `since` cursor and answers with the next one.
 | `GET /api/proposals` | owner | session · local_owner | natural | — | since | served | the queue; with `since`, everything that changed |
 | `POST /api/proposals/batch` | owner | session · local_owner | no | — | — | served | one verb (`later`, `skip`, `deny`) to many requests; per-row results |
 | `POST /api/proposals/:id` | owner | session · local_owner | no | already_decided · stale | — | served · T2-3 | answer one request; `if_unchanged` refuses a stale answer |
-| `GET /api/needs-you/count` | owner | session · local_owner | natural | — | — | T1-7 | how many requests wait: the sidebar row and the Dock badge |
+| `GET /api/needs-you/count` | owner | session · local_owner | natural | — | — | served | how many requests wait: the sidebar row and the Dock badge |
 | `GET /api/agents` | owner | session · local_owner | natural | — | — | served | the registry, each row's rendered scope and permission rows, and the unanswered access requests |
 | `POST /api/agents` | local | local_owner | no | 409 | — | served | register an agent and mint its bearer (shown once) |
 | `PUT /api/agents/:id/grants` | owner | session · local_owner | natural | — | — | served | replace an agent's knowledge grant |
@@ -587,7 +587,7 @@ GET  /api/proposals[?since=&limit=]   200 {"proposals":[…],"cursor":"…","mor
 POST /api/proposals/batch             {ids, decision: later | skip | deny, feedback?}   200 {"results":[…]}
 POST /api/proposals/:id               {decision, feedback?, area?, if_unchanged?: {seen_at}}
                                       200 {"ok":true, …}   409 already_decided | stale   404   400
-GET  /api/needs-you/count             T1-7 — 200 {"waiting":3,"oldest_ts":"…"}, through the `pending_count` named query
+GET  /api/needs-you/count             200 {"waiting":3,"oldest_ts":"…","as_of":"…"}, through the `pending_count` named query
 ```
 
 One queue for everything that needs the owner (D7): a request is answered with

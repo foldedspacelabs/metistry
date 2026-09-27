@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import { QueryStore } from "@foldedspacelabs/metistry-queries";
-import { mintToken } from "@foldedspacelabs/metistry-core";
+import { REQUEST_KINDS, describeRequest, mintToken } from "@foldedspacelabs/metistry-core";
 import { makeServer } from "../src/server.js";
 import * as store from "../src/auth-store.js";
 import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
@@ -315,6 +315,30 @@ describe.skipIf(!hasDb)("console PWA chunk", () => {
       [sub.endpoint],
     );
     expect(rows.length).toBe(1);
+  });
+
+  // X-5: the PWA cannot import core, so the queue serves each row's reading
+  // from F-5's table beside the stored row, and the view draws that word.
+  it("the queue serves every row's reading from F-5's table — a kind it does not know as a report", async () => {
+    const kinds = [...REQUEST_KINDS, "sync_conflict"];
+    const source = `x5-${mintToken(6)}`;
+    const { rows } = await pool.query(
+      `INSERT INTO proposals (kind, source_agent, trust, payload)
+       SELECT k, $1, 'internal', jsonb_build_object('title', 'x5 ' || k) FROM unnest($2::text[]) AS k RETURNING id, kind`,
+      [source, kinds],
+    );
+    const r = await fetch(`${base}/api/proposals?limit=200`, { headers: { cookie: sessionCookie } });
+    expect(r.status).toBe(200);
+    const { proposals } = await r.json();
+    const mine = new Map(proposals.filter((p: any) => p.source_agent === source).map((p: any) => [p.kind, p]));
+    expect([...mine.keys()].sort()).toEqual([...kinds].sort());
+    for (const k of kinds) {
+      const p = mine.get(k) as any;
+      expect(p.kind, k).toBe(k); // the stored row is unchanged — `request` is additive
+      expect(p.request, k).toEqual(JSON.parse(JSON.stringify(describeRequest(k, p.payload))));
+    }
+    expect((mine.get("sync_conflict") as any).request).toMatchObject({ type: "report", word: "report" });
+    await pool.query(`DELETE FROM proposals WHERE id = ANY($1::bigint[])`, [rows.map((x: { id: string }) => x.id)]);
   });
 
   it("lists inbound messages for the thread view", async () => {

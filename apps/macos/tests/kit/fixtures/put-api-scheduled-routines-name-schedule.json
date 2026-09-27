@@ -1,21 +1,20 @@
 {
   "route": "PUT /api/scheduled/routines/:name/schedule",
-  "source": "contract",
-  "ticket": "T3-3",
-  "note": "the body is a scheduled.yaml schedule: {days, at, tz?} or {every}; writes .metistry/scheduled.yaml, never a manifest",
+  "source": "recorded",
+  "ticket": null,
   "request": {
     "method": "PUT",
     "path": "/api/scheduled/routines/morning-brief/schedule",
     "body": {
-      "at": [
-        "06:30"
-      ],
       "days": [
         "mon",
         "tue",
         "wed",
         "thu",
         "fri"
+      ],
+      "at": [
+        "06:30"
       ]
     },
     "idempotency_key": null
@@ -25,9 +24,26 @@
     "ok": true,
     "routine": {
       "name": "morning-brief",
+      "title": "Morning Brief",
+      "paused": {
+        "value": false,
+        "origin": "default"
+      },
+      "next_run": "2026-09-28T10:30:00.000Z",
+      "next_refused": null,
+      "last_run": {
+        "run_id": "8",
+        "at": "2026-09-27T04:18:49.512Z",
+        "ok": true,
+        "outcome": "silent",
+        "cost_usd": null,
+        "error": null
+      },
+      "is_default": false,
+      "held": null,
+      "describe": "mon, tue, wed, thu, fri at 06:30",
       "kind": "routine",
       "source": "product",
-      "title": "Morning Brief",
       "schedule": {
         "value": {
           "days": [
@@ -43,28 +59,25 @@
         },
         "origin": "yours"
       },
-      "paused": {
-        "value": false,
-        "origin": "default"
-      },
-      "config": {
-        "skip_without_calendar_event": {
-          "value": false,
-          "origin": "yours"
-        }
-      },
+      "config": {},
       "actor": null,
       "task": null,
       "grants": null,
-      "next_run": "2026-09-29T10:30:00.000Z",
-      "last_run": {
-        "run_id": "8812",
-        "at": "2026-09-28T11:00:04.000Z",
-        "ok": true,
-        "outcome": "wrote Journal/Brief/2026-09-28.md",
-        "cost_usd": "0.004100"
+      "days": {
+        "value": [
+          "mon",
+          "tue",
+          "wed",
+          "thu",
+          "fri"
+        ],
+        "origin": "yours"
+      },
+      "time_zone": {
+        "value": "America/New_York",
+        "origin": "profile"
       }
     },
-    "as_of": "2026-09-28T13:05:00.000Z"
+    "as_of": "2026-09-27T04:18:49.918Z"
   }
 }

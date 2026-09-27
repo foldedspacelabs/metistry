@@ -1,27 +1,26 @@
 {
   "route": "PUT /api/scheduled/routines/:name/assignment",
-  "source": "contract",
-  "ticket": "T3-3",
-  "note": "reach local: a passkey session is refused 403 local_only; per-run grants are read-only (F-2 ruling)",
+  "source": "recorded",
+  "ticket": null,
   "request": {
     "method": "PUT",
     "path": "/api/scheduled/routines/weekly-digest/assignment",
     "body": {
       "actor": "researcher",
+      "task": "Summarise the week's Projects/ changes.",
       "grants": {
         "read": [
           "Projects"
         ]
       },
       "schedule": {
-        "at": [
-          "16:00"
-        ],
         "days": [
           "fri"
+        ],
+        "at": [
+          "16:00"
         ]
-      },
-      "task": "Summarise the week's Projects/ changes."
+      }
     },
     "idempotency_key": null
   },
@@ -30,9 +29,9 @@
     "ok": true,
     "routine": {
       "name": "weekly-digest",
+      "title": "Weekly Digest",
       "kind": "routine",
       "source": "assignment",
-      "title": "Weekly Digest",
       "schedule": {
         "value": {
           "days": [
@@ -56,9 +55,23 @@
           "Projects"
         ]
       },
-      "next_run": "2026-10-02T20:00:00.000Z",
-      "last_run": null
+      "days": {
+        "value": [
+          "fri"
+        ],
+        "origin": "yours"
+      },
+      "time_zone": {
+        "value": "America/New_York",
+        "origin": "profile"
+      },
+      "next_run": null,
+      "next_refused": null,
+      "last_run": null,
+      "is_default": false,
+      "held": "a New Routine is an assignment the runner does not start yet — agent routines (T3-8) run it; until then it is kept, listed, and not run",
+      "describe": "fri at 16:00"
     },
-    "as_of": "2026-09-28T13:05:00.000Z"
+    "as_of": "2026-09-27T04:18:49.944Z"
   }
 }

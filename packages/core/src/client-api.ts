@@ -200,7 +200,7 @@ export const CLIENT_API: readonly ClientRoute[] = [
   // ----- work: the board, dispatch -----
   route("GET", "/api/targets", "the compute targets a task may be dispatched to", { ticket: "T4-11" }),
   route("POST", "/api/tasks/:id/dispatch", "dispatch a task to a compute target", { conflict: [], ticket: "T4-11" }),
-  route("PATCH", "/api/tasks/:id", "edit a task: status, owner, project, title", { conflict: [], ticket: "T1-1" }),
+  route("PATCH", "/api/tasks/:id", "edit a task: status, owner, project, title, description", { conflict: [], ticket: "T1-1" }),
   route("POST", "/api/tasks/:id/claim", "claim a task, with a lease", { conflict: [] }),
   route("POST", "/api/tasks/:id/release", "release a claimed task", { conflict: [] }),
   route("POST", "/api/tasks/:id/renew", "renew a claim's lease", { conflict: [] }),

@@ -126,11 +126,21 @@ export interface ProtectedWriteOptions {
   fetchFn: typeof fetch;
   /** default: `METISTRY_INSTANCE_DIR` */
   instanceDir?: string | undefined;
+  /**
+   * Create the file only if it is absent — never replace one that is there.
+   * Through the bridge this is the reconciler's own compare-and-swap
+   * (`expected_sha256: ""`, refused as `conflict` when a file exists), so a
+   * file that appears between the caller's look and the write is still kept;
+   * directly, the same check on disk. A kept file comes back `kept: true`.
+   */
+  createOnly?: boolean | undefined;
 }
 
 export interface ProtectedWrite {
   how: "bridge" | "direct" | "none";
   detail: string;
+  /** `createOnly` found a file already there and left it exactly as it was — nothing was written */
+  kept?: true;
 }
 
 /**
@@ -171,12 +181,14 @@ export async function writeProtected(r: StepRunner, rel: string, content: string
       res = await opts.fetchFn(`${base}/vault/write`, {
         method: "POST",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        body: JSON.stringify({ path: rel, content, intent: { principal: "user", message } }),
+        body: JSON.stringify({ path: rel, content, intent: { principal: "user", message }, ...(opts.createOnly ? { expected_sha256: "" } : {}) }),
         signal: AbortSignal.timeout(10_000),
       });
     } catch (err) {
       throw new StepFailed(`reconciler bridge at ${base} did not answer (${err instanceof Error ? err.message : String(err)}) — start it (launchctl kickstart -k gui/${opts.uid}/${RECONCILER_LABEL}) and rerun; ${rel} was NOT written`);
     }
+    // create-only: the reconciler's compare-and-swap found a file there — it is kept, byte for byte
+    if (opts.createOnly && res.status === 409) return { how: "bridge", kept: true, detail: `${rel} is already in the vault — kept as it is` };
     if (!res.ok) {
       let why = `HTTP ${res.status}`;
       try {
@@ -206,6 +218,7 @@ export async function writeProtected(r: StepRunner, rel: string, content: string
       }
     }
     const path = join(dir, rel);
+    if (opts.createOnly && existsSync(path)) return { how: "direct", kept: true, detail: `${path} is already there — kept as it is` };
     await r.write(path, content, `${message}; no reconciler bridge configured, so written directly — a reconciler, once installed, sweeps it into a user commit`);
     return { how: "direct", detail: `${path} written directly (no reconciler configured)` };
   }

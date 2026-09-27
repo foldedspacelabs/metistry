@@ -372,6 +372,7 @@ recorded. *New* routes cite their ticket. All `owner` unless marked.
 | `GET /api/runs/export`, `GET /api/runs/:id` | owner | | exists |
 | `GET /api/instances`, `GET /api/commands` | owner | | exists |
 | `GET /api/compute`, `GET /api/compute/models`, `POST /api/compute/{assign,budget,providers/test}` | owner | budgets are designed onto the phone | exists |
+| `GET /api/compute/catalogue`, `POST /api/compute/unassign` | owner | the catalogue grouped by model; `default` is reassigned, never unassigned (W2 housekeeping) | T4-18 |
 | `GET /api/knowledge/{search,page,pages,links}` | owner | | exists |
 | `GET /api/q/:name` | owner (agents via `queries_run`) | `expose: generic` only | exists |
 | `GET /api/needs-you/count` | owner | the sidebar row, the Dock badge | T1-7 |
@@ -920,7 +921,7 @@ lands it in `CLAUDE.md` and in `metistry-build-plan.md` §1, which is kept in sy
 | 0031 | `prose_feedback.sql` | `prose_feedback (prose_id UNIQUE, rating, note, ts)` | durable | T1-12 |
 | 0032 | `project_grants.sql` | `projects.grants jsonb` | durable | T1-13 |
 | 0033 | `capture_sessions.sql` | `capture_sessions (id, event_id, started_at, ended_at, media_bytes, transcript_capture_id, folded_at, audio_deleted_at)` — retention state; media stays on the Mac under `.metistry/state/capture/` | derived | T8-4 |
-| 0034 | `calendar_events.sql` | `calendar_events (connection, event_id, ical_uid, series_id, starts_at, ends_at, title, location, organizer, attendees jsonb, self_status, updated_at)` + `sync_state (connection, key, value, updated_at)` — **every** calendar source syncs here, so Today has one read path | derived | T2-11 |
+| 0034 | `calendar_events.sql` | `calendar_events (connection, event_id, ical_uid, series_id, starts_at, ends_at, all_day, title, location, organizer, attendees jsonb, self_status, updated_at)` + `sync_state (connection, key, value, updated_at)` — **every** calendar source syncs here, so Today has one read path; `all_day` added (W2 housekeeping — the F-7 Today fixture's field) | derived | T2-11 |
 | 0035 | `event_notify.sql` | `metistry_notify()` and `AFTER INSERT OR UPDATE` triggers on `runs`, `proposals`, `work`, `inbox`, `artifact_comments`, `outbound_messages`, `agents` — `pg_notify` with `{table, op, id}` only (§2.20) | no data | T2-18 |
 | 0036 | — | spare | | |
 | 0037 | — | spare | | |
@@ -963,6 +964,9 @@ cannot hand an agent with `queries: true` the owner's data.
 | `vault_task_by_key` | `task_key` | route | the row the Tick and Defer doors act on |
 | `today_order` | `day` | route | Today's order |
 | `day_events` | `day`, `connection` | route | `calendar_events` for a day, every source |
+| `calendar_event` | `event_id` | route | one event by id, any source — the meeting-note door (T2-11; W2 housekeeping) |
+| `day_work` | `day`, `project`, `flags`, `combine`, `limit` | route | the `work` side of a day, `blocked_by` surfaced (T2-7; W2 housekeeping) |
+| `day_close` | `day`, `tz`, `limit` | route | what Close the Day writes: done, and what moved and to when (T2-8; W2 housekeeping) |
 | `routine_history` | `component`, `limit` | route | runs with outcome, cost, steps |
 | `turn_progress` | `turn_id` | route | running tool names for Chat |
 | `spend_by_actor` | `days` | generic | Usage's *Where it went* |
@@ -1038,8 +1042,8 @@ SHA, task line text, work row `updated_at` (T2-14).
 
 | File | Writer | How |
 | --- | --- | --- |
-| `Journal/Standup/<date>.md` | the assistant, `source: standup` | the routine renders a skeleton from `Templates/Standup.md`; **one** assistant turn fills the prose slots — the fold's pattern (`routines/knowledge-fold/run.ts:24–42`); the routine calls no model |
-| `Journal/Brief/<date>.md` | the assistant, `source: morning-brief` | the same pattern; the same single turn writes each meeting's Next Up line |
+| `Journal/Standup/<date>.md` | the routine, `source: standup` | the routine renders `Templates/Standup.md` and writes the file itself; the assistant fills its marked prose slots afterwards through `knowledge_write`; the routine calls no model (W2 housekeeping: an assistant-turn fill as the file's writer was unbuildable — T3-5) |
+| `Journal/Brief/<date>.md` | the routine, `source: morning-brief` | the same pattern — the routine writes the file; each meeting's Next Up line is a marked prose slot the assistant fills through `knowledge_write` (W2 housekeeping, T3-6) |
 | `Journal/<date>.md`, between `<!-- metistry:day -->` markers | `morning-brief` at 7:00 AM (model-free: plan, meetings, the standup's embed); `user` at Close the Day | the reconciler **section operation** |
 | a ticked or deferred line | `user` | the Tick and Defer doors |
 | `Journal/Plan/<tomorrow>.md` | `plan-tomorrow` | on close, or at its scheduled time |
@@ -2227,7 +2231,9 @@ linear:<KEY>` through the capture service (source `linear`, idempotent per issue
 `packages/connections`.
 *Tests:* recorded GraphQL fixtures; **the key never leaves for another host; a
 second Add to Today returns the first capture**.
-*Accept:* the owner's assigned issues appear on the Board and in Needs You.
+*Accept:* the owner's assigned issues appear in `work` and in Needs You — not
+on the Board, whose cards are `task` and `review` rows only (`CLAIMABLE_KINDS`,
+ruling 2026-09-06; W2 housekeeping).
 
 **T4-25 · Linear: a task becomes an issue** · M · W3 · deps T4-24, T2-5 —
 *Spec:* From a task line, *Send to Linear*: `POST /api/trackers/linear/issues`
@@ -2694,7 +2700,8 @@ request with the before and after; Approve writes the old bytes as a new commit
 as `user`; 409 if the file changed.
 *Files:* `apps/console/src/`.
 *Tests:* **no restore happens before Approve; an agent credential is refused**.
-*Accept:* Knowledge shows the request inline.
+*Accept:* the request's payload carries `title` and `before_after`, so T10-7 can
+draw it inline (W2 housekeeping: the inline line moved to T10-7).
 
 **T10-6 · Roll back** · L · W2 · deps T10-3, T10-4 —
 *Spec:* `metistry vault rollback <commit|--to date|--file path>` and
@@ -2713,7 +2720,8 @@ state**.
 conflict, Roll Back…); a Knowledge page gains its history with *Restore*.
 *Files:* `settings-panes/instance-pane.swift`, `knowledge-view.swift`.
 *Tests:* §2.18; Roll Back names what it will undo.
-*Accept:* as T6's.
+*Accept:* as T6's; Knowledge shows a restore request inline — answering it there
+answers it in Needs You (moved from T10-5, W2 housekeeping).
 
 #### X — Fixes found at the W0 freeze
 

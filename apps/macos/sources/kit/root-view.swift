@@ -11,9 +11,10 @@
 // until Settings ▸ Services takes it (T6-11). No Rooms (C89).
 //
 // THE SCREENS ARE NOT HERE YET. Each destination's view is its own ticket
-// (T5-4a, T6-*). Until one lands, its detail says so in a sentence and offers
-// the web app — a labelled "not yet", never an empty pane pretending to be a
-// screen (mac-app.md, "Not yet, and labelled as such on screen").
+// (T6-*). Until one lands, its detail says so in a sentence and offers the web
+// app — a labelled "not yet", never an empty pane pretending to be a screen
+// (mac-app.md, "Not yet, and labelled as such on screen"). Needs You is the
+// first that has landed (needs-you-view.swift, T5-4a).
 //
 // ACCESSIBILITY (§2.18). Every control speaks its name, and a glyph-only one its
 // shortcut too; the Needs You row says *Needs You, 10 waiting*; the gauge says
@@ -45,7 +46,7 @@ public struct RootView: View {
             ShellSidebar(shell: shell)
                 .navigationSplitViewColumnWidth(min: 180, ideal: MetistrySize.sidebar, max: 320)
         } detail: {
-            ShellDetail(shell: shell, consoleURL: PasskeyRouting.consoleURL(in: model.status.report).flatMap(URL.init(string:)))
+            ShellDetail(shell: shell, needsYou: model.needsYou, consoleURL: PasskeyRouting.consoleURL(in: model.status.report).flatMap(URL.init(string:)))
                 // The detail landmark, named for where the owner is.
                 .accessibilityElement(children: .contain)
                 .accessibilityLabel(shell.selection.title)
@@ -197,14 +198,23 @@ struct NeedsYouRow: View {
 
 struct ShellDetail: View {
     let shell: ShellModel
+    let needsYou: NeedsYouModel
     let consoleURL: URL?
 
     var body: some View {
         let destination = shell.selection
-        if destination == .needsYou, (shell.waiting ?? 0) == 0 {
-            // C110: answering the last request leaves the owner here, on this,
-            // with the row still in the sidebar until they go elsewhere.
-            ContentUnavailableView("Nothing needs you", systemImage: "checkmark.circle")
+        if destination == .needsYou {
+            // C110: answering the last request leaves the owner here, on
+            // *Nothing needs you*, with the row still in the sidebar until they
+            // go elsewhere. One request's body and answers are T5-4b's.
+            NeedsYouView(
+                model: needsYou,
+                waiting: shell.waiting,
+                assistantName: shell.assistantName,
+                onGoToToday: { shell.go(to: .today) }
+            ) { row in
+                NeedsYouRequestSummary(row, assistantName: shell.assistantName, consoleURL: consoleURL, calendar: needsYou.calendar)
+            }
         } else {
             ContentUnavailableView {
                 Label(destination.title, systemImage: destination.symbolName)

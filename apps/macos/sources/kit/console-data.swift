@@ -270,9 +270,18 @@ public struct RequestRow: Codable, Sendable, Equatable, Identifiable {
     public let snoozedUntil: String?
     /// The cursor for THIS row, accepted as `if_unchanged.seen_at`.
     public let cursor: String?
+    /// The row's reading from core's request type table (F-5, X-5): its type,
+    /// the word the owner reads, its body block. The client draws
+    /// the word it is given and holds no kind → word map of its own
+    /// (docs/ops/client-api.md) — so the stored `kind` is never a label. Nil
+    /// only from a console older than X-5.
+    public let request: RequestShape?
+    /// What this request mirrors — `{kind, external_ref, person}` (migration
+    /// 0027, T1-8) — or nil for a request an agent or the assistant raised.
+    public let source: RequestSource?
 
     enum CodingKeys: String, CodingKey {
-        case id, ts, kind, trust, payload, decision, cursor
+        case id, ts, kind, trust, payload, decision, cursor, request, source
         case sourceAgent = "source_agent"
         case decidedAt = "decided_at"
         case workID = "work_id"
@@ -292,9 +301,13 @@ public struct RequestRow: Codable, Sendable, Equatable, Identifiable {
         decidedAt = try c.decodeIfPresent(String.self, forKey: .decidedAt)
         workID = c.wireInt(.workID)
         snoozedUntil = try c.decodeIfPresent(String.self, forKey: .snoozedUntil)
+        // Additive fields read tolerantly: a shape this build does not know
+        // costs the row its reading, never the whole queue (P5).
+        request = try? c.decodeIfPresent(RequestShape.self, forKey: .request)
+        source = try? c.decodeIfPresent(RequestSource.self, forKey: .source)
     }
 
-    public init(id: Int, ts: String, kind: String, payload: JSONValue? = nil, decision: String? = "pending", cursor: String? = nil, snoozedUntil: String? = nil, sourceAgent: String? = nil, trust: String? = nil, decidedAt: String? = nil, workID: Int? = nil) {
+    public init(id: Int, ts: String, kind: String, payload: JSONValue? = nil, decision: String? = "pending", cursor: String? = nil, snoozedUntil: String? = nil, sourceAgent: String? = nil, trust: String? = nil, decidedAt: String? = nil, workID: Int? = nil, request: RequestShape? = nil, source: RequestSource? = nil) {
         self.id = id
         self.ts = ts
         self.kind = kind
@@ -306,6 +319,8 @@ public struct RequestRow: Codable, Sendable, Equatable, Identifiable {
         self.trust = trust
         self.decidedAt = decidedAt
         self.workID = workID
+        self.request = request
+        self.source = source
     }
 
     public var isPending: Bool { (decision ?? "pending") == "pending" }
@@ -367,6 +382,57 @@ public struct RequestRow: Codable, Sendable, Equatable, Identifiable {
             currentAreas: payload?["current_areas"]?.arrayValue?.compactMap(\.stringValue) ?? [],
             granted: payload?["granted"]?.string("area")
         )
+    }
+}
+
+/// `request` on a `GET /api/proposals` row — `describeRequest` in
+/// packages/core/src/requests.ts, served by the console (X-5). Read, never
+/// derived: the type table lives in core and nowhere else. What the list
+/// reads of it; the answers it also carries are the request card's to read.
+public struct RequestShape: Codable, Sendable, Equatable {
+    /// One of the twelve types (`question`, `pull_request`, `access`, …) —
+    /// a key for filtering, never a label.
+    public let type: String
+    /// The word the owner reads: *question*, *pull request*, *access*.
+    public let word: String
+    /// The body block, from screen 3 §12.2's closed set.
+    public let body: String
+    /// A meeting: the answers apply to every row of the group, in order.
+    public let grouped: Bool
+    /// What this row's answers may store on it, `later` aside.
+    public let decisions: [String]
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        type = try c.decode(String.self, forKey: .type)
+        word = try c.decode(String.self, forKey: .word)
+        body = try c.decode(String.self, forKey: .body)
+        grouped = try c.decodeIfPresent(Bool.self, forKey: .grouped) ?? false
+        decisions = try c.decodeIfPresent([String].self, forKey: .decisions) ?? []
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case type, word, body, grouped, decisions
+    }
+}
+
+/// `proposals.source` (migration 0027): the system a mirrored request lives
+/// in, the subject within it, and the person the source names.
+public struct RequestSource: Codable, Sendable, Equatable {
+    /// `github`, `calendar`, `mail`, `linear` — the source system.
+    public let kind: String
+    public let externalRef: String
+    public let person: String?
+
+    enum CodingKeys: String, CodingKey {
+        case kind, person
+        case externalRef = "external_ref"
+    }
+
+    public init(kind: String, externalRef: String, person: String? = nil) {
+        self.kind = kind
+        self.externalRef = externalRef
+        self.person = person
     }
 }
 

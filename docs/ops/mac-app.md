@@ -109,7 +109,7 @@ path.
 | `connect-repo --auth token` | it reads the PAT from **stdin**, and the app gives every child an empty stdin on purpose so no verb can hang a progress view waiting for a paste | the wizard shows the option, disabled, with that reason; run it in a terminal |
 | **Minting an enrolment code** | there is no HTTP route that mints one, deliberately — whoever can run the host command already controls Postgres and the vault, so shell access is the root of trust for a first passkey (plan §4.2) — and `metistry enroll` is on the CLI's own "not yet" list | step 6 shows the exact `scripts/enroll.mjs` command and takes the code you paste back |
 | **A QR code** for the phone | nothing in this product renders one yet; `apps/console/scripts/enroll.mjs` says the same about itself ("QR rendering arrives with `packages/cli`"), and an encoder is a dependency nobody has asked for | step 6 shows the enrolment URL, selectable, to type or hand over |
-| **The screens behind the sidebar's rows** | the shell has the rows (T5-2); each screen is its own ticket (T5-4a Needs You, T6-1 Today, T6-2 Chat, …), and until it lands the row's detail names the gap and offers the web app | the PWA — "Add to Dock" in Safari, or the detail's **Open in Browser** |
+| **The screens behind the sidebar's rows** | the shell has the rows (T5-2); each screen is its own ticket (T6-1 Today, T6-2 Chat, …), and until it lands the row's detail names the gap and offers the web app. Needs You's list has landed (T5-4a, "The Needs You view" below); one request's body and answers are T5-4b's, and until they land its detail says so | the PWA — "Add to Dock" in Safari, or the detail's **Open in Browser** |
 | **New Capture** (the toolbar's + and ⌘N) | the composer is T5-5; until then both are dimmed, with the reason in the tooltip | the PWA's + |
 | **The keep-awake control** (Services) | the model half is shipped — `KeepAwakeSetting` (four values, each with what it costs), `KeepAwakeFacts` (doctor's row) and `deploymentSetKeepAwake` — and the pane is a switch with a radio pair under it, which is the designer's. First run can pass `--keep-awake` and does not ask on its own | a terminal: `metistry deployment set-keep-awake <value> --yes`, or `metistry init --keep-awake <value>` |
 | **An iOS target** | `MetistryKit` is already free of AppKit and of `Process` so it can be shared; there is no iOS target in `Package.swift` | — |
@@ -746,6 +746,27 @@ Dock keep the console's last answer. The Dock tile carries the same label
 (`NSApp.dockTile.badgeLabel`, set from the app target). A change is announced
 to VoiceOver once, and not while the owner is on Needs You. Under Reduce Motion
 the row appears without sliding.
+
+**The Needs You view (T5-4a, `needs-you-view.swift`).** The row opens a list
+and a detail (screen 3 §13): one line per request — the type's word *as the
+console gives it* (X-5's `request`; the stored kind is never shown), what it
+asks, who asked (the configured name for the assistant, an agent's id, or the
+source a mirror lives in, with `external` / `you` as a neutral chip) and its
+age — grouped *Today* and *Earlier*, newest first, and filtered by type and by
+**From** (Everyone · the assistant · Agents · each source present). One
+selected request is drawn beside the list; several selected is the **bulk
+list**: **Later · Skip · Decline** and never Approve — `BulkVerb` is the closed
+list the selection is answered through, and it has no case that sends `allow`,
+`accept_with_changes` or `accept_as_work`. Skip lives only there (K2); Decline
+is `deny` with one reason given once (R15); *Select All on This Page* is capped
+at the batch's 100. The batch's result is a band above the list, not a toast —
+*2 of 3 declined*, what happened to the rest, the row still pending kept
+selected and **Retry** re-sending exactly it; a Later that went through leaves
+no receipt. While the console is unreachable every one of those verbs, Retry
+and the Item menu's L and D are off with the gate's sentence under them, and
+`NeedsYouModel` refuses before the store is asked (O3). The source filter reads
+`source` off each row, which `GET /api/proposals` does not serve yet — until it
+does, From offers Everyone · the assistant · Agents.
 
 **Where it reads from.** `ShellModel` holds no client: it reads
 `NeedsYouStore.waitingCount()` (`GET /api/needs-you/count`),

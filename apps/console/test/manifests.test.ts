@@ -187,6 +187,7 @@ describe("shipped manifests schedule through the runner", () => {
       "plan-tomorrow": "the eve of working days at 23:00",
       "reply-review": "every day at 23:00",
       "weekly-review": "sun at 18:00",
+      "session-purge": "every day at 04:00",
     });
   });
 

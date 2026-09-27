@@ -112,11 +112,15 @@ describe.skipIf(!hasDb)("the reach gate: `local` routes are the owner on this Ma
     return { status: r.status, body: (await r.json()) as { error?: { code: string; message: string }; token?: string } };
   }
 
-  it("the table files minting a bearer under `local`", () => {
-    expect(LOCAL.map(routeKey)).toEqual(["POST /api/agents", "POST /api/agents/:id/rotate"]);
+  it("the table files minting a bearer under `local` — and Purge Now, which cannot be undone (T3-9)", () => {
+    expect(LOCAL.map(routeKey)).toEqual(["POST /api/agents", "POST /api/agents/:id/rotate", "POST /api/sessions/purge"]);
   });
 
   it("**a passkey session from 127.0.0.1 is refused on every local route** — 403 local_only, naming the Mac app, and nothing is minted", async () => {
+    // Rows after this one only: another suite in this package (sessions-purge)
+    // can be refused on a `local` route at the same moment, so "the newest N
+    // rows" is not this test's rows.
+    const since = Number((await pool.query(`SELECT coalesce(max(id), 0) AS id FROM runs`)).rows[0].id);
     for (const r of LOCAL) {
       const before = await storedHash(agentId);
       const body = bodyFor(r);
@@ -132,10 +136,10 @@ describe.skipIf(!hasDb)("the reach gate: `local` routes are the owner on this Ma
     }
     // …and the refusal is on the ledger, with the route and the credential kind
     const { rows } = await pool.query(
-      `SELECT meta FROM runs WHERE component = 'console' AND kind = 'auth' AND tool = 'local_only' ORDER BY id DESC LIMIT $1`,
-      [LOCAL.length],
+      `SELECT meta FROM runs WHERE component = 'console' AND kind = 'auth' AND tool = 'local_only' AND id > $1 ORDER BY id`,
+      [since],
     );
-    expect(rows.map((x) => x.meta.route).sort()).toEqual(LOCAL.map(routeKey).sort());
+    expect([...new Set(rows.map((x) => x.meta.route))].sort()).toEqual(LOCAL.map(routeKey).sort());
     for (const x of rows) expect(x.meta.via).toBe("session");
   });
 
@@ -169,7 +173,8 @@ describe.skipIf(!hasDb)("the reach gate: `local` routes are the owner on this Ma
       const before = await storedHash(agentId);
       const p = await post(base, pathFor(r.path, agentId), { authorization: `Bearer ${localOwnerToken}` }, bodyFor(r));
       expect([200, 201], `${routeKey(r)}: ${JSON.stringify(p.body)}`).toContain(p.status);
-      expect(typeof p.body.token, routeKey(r)).toBe("string");
+      // the two mint routes answer a bearer; Purge Now's empty body is its preview (sessions-purge.integration.test.ts)
+      if (routeKey(r) !== "POST /api/sessions/purge") expect(typeof p.body.token, routeKey(r)).toBe("string");
       if (routeKey(r) === "POST /api/agents/:id/rotate") {
         expect(await storedHash(agentId)).toBe(tokenHash(p.body.token!));
         expect(await storedHash(agentId)).not.toBe(before);

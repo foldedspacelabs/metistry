@@ -107,7 +107,7 @@ describe("the default schedules fire once, at their time (T3-1's acceptance)", (
     const { routines, skipped } = await loadRoutines({ home: `${root}routines` });
     expect(skipped).toEqual([]);
     const loaded = await loadSchedules(routines.map((u) => ({ ...u, run: recorder(db, fired, u.name) })));
-    expect(loaded.map((r) => r.name).sort()).toEqual(["knowledge-fold", "morning-brief", "plan-tomorrow", "reply-review", "weekly-review"]);
+    expect(loaded.map((r) => r.name).sort()).toEqual(["knowledge-fold", "morning-brief", "plan-tomorrow", "reply-review", "session-purge", "weekly-review"]);
 
     // Sunday 00:00 to Saturday 23:59, New York
     await runClock(db, loaded, { from: "2026-09-20T04:00:00Z", to: "2026-09-27T03:59:00Z" });
@@ -120,11 +120,12 @@ describe("the default schedules fire once, at their time (T3-1's acceptance)", (
     expect(ats(fired["plan-tomorrow"])).toEqual(["2026-09-20", "2026-09-21", "2026-09-22", "2026-09-23", "2026-09-24"].map((d) => `${d} 23:00`));
     expect(ats(fired["reply-review"])).toEqual(everyDay.map((d) => `${d} 23:00`));
     expect(ats(fired["weekly-review"])).toEqual(["2026-09-20 18:00"]);
+    expect(ats(fired["session-purge"])).toEqual(everyDay.map((d) => `${d} 04:00`)); // T3-9: the session archive's retention
 
     // each run is handed its slot and zone, and its row carries the slot
     for (const f of Object.values(fired).flat()) expect(f).toMatchObject({ scheduledFor: f.at, timeZone: NY });
     const rows = db.runs.filter((r) => r.kind === "routine_run");
-    expect(rows).toHaveLength(5 + 7 + 5 + 7 + 1);
+    expect(rows).toHaveLength(5 + 7 + 5 + 7 + 1 + 7);
     for (const r of rows) expect(r.meta).toMatchObject({ scheduled_for: r.ts.toISOString(), time_zone: NY, outcome: "silent" });
   }, 60_000); // ten thousand ticks: ~3 s alone, more beside every other suite
 });

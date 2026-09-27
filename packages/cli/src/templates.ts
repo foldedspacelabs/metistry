@@ -40,7 +40,7 @@ export const TEMPLATE_SOURCES: Readonly<Record<string, string>> = Object.freeze(
   "Meeting.md": USER_SOURCE,
   "Weekly.md": USER_SOURCE,
   "Plan.md": "plan-tomorrow",
-  "Standup.md": "standup-draft",
+  "Standup.md": "standup",
   "Fold.md": FOLD_SOURCE,
 });
 

@@ -285,7 +285,7 @@ takes a `since` cursor and answers with the next one.
 | `PUT /api/projects/:slug` | owner | session · local_owner | natural | — | — | served | set a project's mode, daily budget and caps |
 | `GET /api/targets` | owner | session · local_owner | natural | — | — | served · T4-11 | the compute targets a task may be dispatched to |
 | `POST /api/tasks/:id/dispatch` | owner | session · local_owner | no | 409 | — | served · T4-11 | dispatch a task to a compute target |
-| `PATCH /api/tasks/:id` | owner | session · local_owner | no | 409 | — | served · T1-1 | edit a task: status, owner, project, title |
+| `PATCH /api/tasks/:id` | owner | session · local_owner | no | 409 | — | served · T1-1 | edit a task: status, owner, project, title, description |
 | `POST /api/tasks/:id/claim` | owner | session · local_owner | no | 409 | — | served | claim a task, with a lease |
 | `POST /api/tasks/:id/release` | owner | session · local_owner | no | 409 | — | served | release a claimed task |
 | `POST /api/tasks/:id/renew` | owner | session · local_owner | no | 409 | — | served | renew a claim's lease |
@@ -1068,7 +1068,7 @@ where one applies. T4-11 turns targets into Agent connections.
 #### The task routes — the board's drags, and nothing else (`user` principal)
 
 ```
-PATCH /api/tasks/:id   {status?, owner?, project?, title?}
+PATCH /api/tasks/:id   {status?, owner?, project?, title?, description?}
 POST  /api/tasks/:id/claim    {lease_seconds?}
 POST  /api/tasks/:id/release  {note?}
 POST  /api/tasks/:id/renew    {note?, lease_seconds?}
@@ -1093,7 +1093,7 @@ its own for the **op** (`component: user`, `kind: task_op`).
 
 `PATCH` has two arms and the fields pick which — see `packages/tasks`' README.
 `status: "open"` is the **unblock** and is legal from `blocked` only;
-`owner`/`title`/`project` need no claim; `in_progress | blocked | closed` are
+`owner`/`title`/`project`/`description` need no claim; `in_progress | blocked | closed` are
 the holder's, so closing a card you do not hold answers `409 … held by X, not
 by user — claim it first`. Mixing the two arms in one body is a `400` naming
 both fields, because the looser gate must never carry the stricter arm's write.
@@ -1105,7 +1105,17 @@ a check — a human may address a card to any crew, and an agent cannot address
 one at all. If an agent verb ever gains assignment, `crossKindRefusal` is the
 guard it needs (`docs/research/2026-09-11-local-models-openrouter-opencode.md`).
 
-T1-1 adds `description` to `PATCH /api/tasks/:id`.
+**A description is set by whoever creates the row and edited by the owner
+only** (T1-1, C85). `description` is at most 2,000 characters; `null` or a
+blank string clears it, so "none" has one spelling (`null`) on every read.
+An agent sets it once, through `tasks_create`; `tasks_update` has no
+`description` key, so no agent surface can rewrite what a card says it is
+about — the same absence that keeps `owner` off every agent verb. It is a
+board-arm field, so the owner may describe a card a crew holds without
+taking the claim, and it cannot ride in one body with a holder status (`400`
+naming both). The door's `runs` row names the field, never the text. Every
+task route's `task` now carries `description`, and so does `GET
+/api/q/board` — the card detail's first section.
 
 ### Artifacts, reviews and rooms
 

@@ -151,6 +151,10 @@ describe("seed queries", () => {
     // `board_projects`, carry neither and stay generic.
     // `route_features` (T9-1) carries the previous message's TEXT for the
     // router's re-ask comparison: the console's own read, never an agent's.
+    // `today_order` (T1-9) is the owner's own drag order for a day — no route
+    // reads it yet (`GET /api/today` is T2-7's), marked ahead of it the same
+    // way `collector_health` is: the write door is owner-only, and a read
+    // door that were not would be the asymmetry an agent could ask through.
     expect(routeBacked.sort()).toEqual([
       "board",
       "collector_health",
@@ -161,6 +165,7 @@ describe("seed queries", () => {
       "route_features",
       "secret_last_used",
       "session_detail",
+      "today_order",
       "vault_task_by_key",
       "vault_tasks_query",
       "vault_tasks_recurring",

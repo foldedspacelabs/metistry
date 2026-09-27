@@ -1,0 +1,49 @@
+{
+  "route": "GET /api/q/:name",
+  "source": "recorded",
+  "ticket": null,
+  "request": {
+    "method": "GET",
+    "path": "/api/q/spend_by_actor?days=31",
+    "body": null,
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "rows": [
+      {
+        "actor": "crew:fixtures",
+        "calls": "1",
+        "calls_unpriced": "0",
+        "tokens_in": "4200",
+        "tokens_out": "610",
+        "cost_usd": "0.018400"
+      },
+      {
+        "actor": "assistant",
+        "calls": "2",
+        "calls_unpriced": "1",
+        "tokens_in": "1500",
+        "tokens_out": "200",
+        "cost_usd": "0.004200"
+      },
+      {
+        "actor": "standup",
+        "calls": "1",
+        "calls_unpriced": "0",
+        "tokens_in": "1800",
+        "tokens_out": "240",
+        "cost_usd": "0.001900"
+      },
+      {
+        "actor": "console",
+        "calls": "1",
+        "calls_unpriced": "0",
+        "tokens_in": "0",
+        "tokens_out": "0",
+        "cost_usd": "0.000000"
+      }
+    ],
+    "as_of": "2026-09-27T03:43:07.940Z"
+  }
+}

@@ -24,13 +24,23 @@
 //   * No model is anywhere in it, and it is not an action: `ACTION_KINDS` is
 //     untouched, so no proposal can ask for a tick at any autonomy level.
 //
+// The Defer door — `POST /api/vault-tasks/:task_key/schedule {do | someday,
+// seen_text}` (§2.11, T2-5; owner ruling K6) — is the same door with a
+// different edit: core's `setTaskScheduled` writes one `do <date>` or one
+// `someday` in `formatTaskLine`'s spelling and nothing else, never a glyph.
+// Everything above holds for it word for word: the key, the note judged
+// rather than the index, `seen_text` → `409 stale`, the read's hash on the
+// write, the refusals before any read. Deferral is one row at a time here;
+// "Skip" is not a door at all (K2: Skip is bulk-only, and it is Needs You's).
+//
 // Reached only by the `user` principal: server.ts's management gate runs
 // first, so an agent bearer and the capture owner token get the uniform 403
 // there. `Idempotency-Key` is honoured (the PWA's offline outbox replays
-// ticks, §2.17): see `ReplayCache` for what that holds and for how long.
+// ticks and deferrals, §2.17): see `ReplayCache` for what that holds and for
+// how long.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { errorEnvelope, isVaultPath, locateTaskLine, parseTaskLine, replaceLine, setTaskChecked, statusFor, taskToday, TASK_KEY_RE, type ErrorCode, type LocatedTaskLine } from "@foldedspacelabs/metistry-core";
+import { errorEnvelope, isVaultPath, locateTaskLine, parseTaskLine, replaceLine, setTaskChecked, setTaskScheduled, statusFor, taskToday, TASK_KEY_RE, type ErrorCode, type LocatedTaskLine, type TaskDateOptions, type TaskDeferral } from "@foldedspacelabs/metistry-core";
 import { VaultError, type VaultClient } from "@foldedspacelabs/metistry-artifacts";
 import type { QueryStore } from "@foldedspacelabs/metistry-queries";
 import { readJson, sendJson } from "./http-util.js";
@@ -38,16 +48,21 @@ import { readJson, sendJson } from "./http-util.js";
 /** The named query that turns a key into the note that holds it (seed/queries/vault_task_by_key.yaml). */
 export const VAULT_TASK_BY_KEY_QUERY = "vault_task_by_key";
 
-const CHECK_ROUTE = /^POST \/api\/vault-tasks\/([^/]+)\/check$/;
-/** The body's keys. Anything else is refused by name — a silently ignored field is a lie about what happened. */
-const CHECK_FIELDS = ["checked", "seen_text", "path"] as const;
+const VAULT_TASK_ROUTE = /^POST \/api\/vault-tasks\/([^/]+)\/(check|schedule)$/;
+/** Each door's body keys. Anything else is refused by name — a silently ignored field is a lie about what happened. */
+const DOOR_FIELDS = {
+  check: ["checked", "seen_text", "path"],
+  schedule: ["do", "someday", "seen_text", "path"],
+} as const;
+const DOOR_BODY = { check: "{checked, seen_text}", schedule: "{do, seen_text} or {someday: true, seen_text}" } as const;
+type Door = keyof typeof DOOR_FIELDS;
 /** A task line is one line; this bounds what the door will compare, not what a note may hold. */
 const SEEN_TEXT_MAX = 10_000; // limit: fixed — a checkbox line longer than this is a paragraph, and the door refuses rather than compares it
 const IDEMPOTENCY_KEY_MAX = 200; // limit: fixed — the same ceiling `POST /capture` enforces (docs/ops/client-api.md)
 
 /** True when the request is for this module. Used by server.ts's management gate so a non-`user` credential gets the uniform 403. */
 export function isVaultTaskRoute(key: string): boolean {
-  return CHECK_ROUTE.test(key);
+  return VAULT_TASK_ROUTE.test(key);
 }
 
 type Audit = (kind: string, tool: string, ok: boolean, meta: Record<string, unknown>) => Promise<void>;
@@ -120,20 +135,29 @@ export interface VaultTaskDeps {
   timeZone?: string | undefined;
 }
 
-/** What the door says about the line: facts about the bytes it read or wrote, never the index's derived columns — those arrive with the next walk. */
+/** What a door says about the line it wrote (or found stale). */
+type View = (path: string, t: LocatedTaskLine) => Record<string, unknown>;
+
+/** What the Tick door says about the line: facts about the bytes it read or wrote, never the index's derived columns — those arrive with the next walk. */
 function taskView(path: string, t: LocatedTaskLine) {
   return { path, task_key: t.task_key, anchor: t.parsed.anchor, line_no: t.line_no, text: t.parsed.text, checked: t.parsed.checked, done_on: t.parsed.done_on };
 }
 
+/** The Defer door's view: the same facts, with the day it now has (and `due`, which it never moves, for the row to repaint beside it). */
+function deferView(path: string, t: LocatedTaskLine) {
+  return { path, task_key: t.task_key, anchor: t.parsed.anchor, line_no: t.line_no, text: t.parsed.text, checked: t.parsed.checked, due: t.parsed.due, scheduled_for: t.parsed.scheduled_for, someday: t.parsed.someday };
+}
+
 const fail = (code: ErrorCode, message: string): Answer => ({ status: statusFor(code), body: errorEnvelope(code, message) });
 /** `409 stale`: what the client rendered is not what the note holds. The body carries the line as it stands (null when the line is gone). */
-const stale = (message: string, path: string, t: LocatedTaskLine | null): Answer => ({
+const stale = (message: string, path: string, t: LocatedTaskLine | null, view: View = taskView): Answer => ({
   status: statusFor("conflict"),
-  body: { ...errorEnvelope("conflict", message), reason: "stale", line: t?.line ?? null, task: t ? taskView(path, t) : null },
+  body: { ...errorEnvelope("conflict", message), reason: "stale", line: t?.line ?? null, task: t ? view(path, t) : null },
 });
 
 export async function vaultTaskRoutes(req: IncomingMessage, res: ServerResponse, key: string, deps: VaultTaskDeps): Promise<void> {
-  const m = CHECK_ROUTE.exec(key)!;
+  const m = VAULT_TASK_ROUTE.exec(key)!;
+  const door = m[2] as Door;
   let taskKey: string;
   try {
     taskKey = decodeURIComponent(m[1]!);
@@ -145,17 +169,32 @@ export async function vaultTaskRoutes(req: IncomingMessage, res: ServerResponse,
   let body: Record<string, unknown>;
   try {
     const raw = await readJson(req);
-    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return sendJson(res, 400, errorEnvelope("invalid_request", "body must be a JSON object: {checked, seen_text}"));
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return sendJson(res, 400, errorEnvelope("invalid_request", `body must be a JSON object: ${DOOR_BODY[door]}`));
     body = raw as Record<string, unknown>;
   } catch {
     return sendJson(res, 400, errorEnvelope("invalid_request", "request body is not JSON"));
   }
-  const unknown = Object.keys(body).filter((k) => !(CHECK_FIELDS as readonly string[]).includes(k));
-  if (unknown.length > 0) return sendJson(res, 400, errorEnvelope("invalid_request", `unknown field${unknown.length > 1 ? "s" : ""} ${unknown.join(", ")} — the body is {checked, seen_text} and, where a key names two notes, path`));
-  if (typeof body.checked !== "boolean") return sendJson(res, 400, errorEnvelope("invalid_request", "checked must be true (tick) or false (Undo)"));
+  const fields: readonly string[] = DOOR_FIELDS[door];
+  const unknown = Object.keys(body).filter((k) => !fields.includes(k));
+  if (unknown.length > 0) return sendJson(res, 400, errorEnvelope("invalid_request", `unknown field${unknown.length > 1 ? "s" : ""} ${unknown.join(", ")} — the body is ${DOOR_BODY[door]} and, where a key names two notes, path`));
+
+  // the door's own field, checked before anything they share
+  let checked = false;
+  let when: TaskDeferral = { someday: true };
+  if (door === "check") {
+    if (typeof body.checked !== "boolean") return sendJson(res, 400, errorEnvelope("invalid_request", "checked must be true (tick) or false (Undo)"));
+    checked = body.checked;
+  } else {
+    if ((body.do === undefined) === (body.someday === undefined)) return sendJson(res, 400, errorEnvelope("invalid_request", "send exactly one of do (a day, YYYY-MM-DD) or someday (true)"));
+    if (body.do !== undefined) {
+      if (typeof body.do !== "string" || !ISO_DAY_RE.test(body.do) || !isCalendarDay(body.do)) return sendJson(res, 400, errorEnvelope("invalid_request", "do must be a calendar day, YYYY-MM-DD — the client resolves `tomorrow` or `next week` before it sends"));
+      when = { do: body.do };
+    } else if (body.someday !== true) {
+      return sendJson(res, 400, errorEnvelope("invalid_request", "someday must be true — to give the line a day, send do"));
+    }
+  }
   if (typeof body.seen_text !== "string" || body.seen_text.length > SEEN_TEXT_MAX) return sendJson(res, 400, errorEnvelope("invalid_request", "seen_text must be the task's text exactly as the client rendered it (the row's `text`)"));
   if (body.path !== undefined && (typeof body.path !== "string" || body.path === "")) return sendJson(res, 400, errorEnvelope("invalid_request", "path, when given, is the note's vault path as the row names it"));
-  const checked = body.checked;
   const seenText = body.seen_text;
   const wantPath = body.path as string | undefined;
 
@@ -163,36 +202,51 @@ export async function vaultTaskRoutes(req: IncomingMessage, res: ServerResponse,
   const idemKey = typeof rawKey === "string" ? rawKey.trim() : undefined;
   if (idemKey !== undefined && (idemKey === "" || idemKey.length > IDEMPOTENCY_KEY_MAX)) return sendJson(res, 400, errorEnvelope("invalid_request", `Idempotency-Key must be 1–${IDEMPOTENCY_KEY_MAX} characters`));
 
-  const fingerprint = JSON.stringify([taskKey, checked, seenText, wantPath ?? null]);
-  const { answer, replayed } = await deps.replays.once(idemKey === undefined ? undefined : `user:check:${idemKey}`, fingerprint, () => check(taskKey, checked, seenText, wantPath, deps));
+  const fingerprint = JSON.stringify(door === "check" ? [taskKey, checked, seenText, wantPath ?? null] : [taskKey, when, seenText, wantPath ?? null]);
+  const act = door === "check" ? () => check(taskKey, checked, seenText, wantPath, deps) : () => schedule(taskKey, when, seenText, wantPath, deps);
+  const { answer, replayed } = await deps.replays.once(idemKey === undefined ? undefined : `user:${door}:${idemKey}`, fingerprint, act);
   if (replayed) res.setHeader("idempotency-replayed", "true");
   return sendJson(res, answer.status, answer.body);
 }
 
-async function check(taskKey: string, checked: boolean, seenText: string, wantPath: string | undefined, deps: VaultTaskDeps): Promise<Answer> {
-  const verb = checked ? "tick" : "untick";
-  const audited = async (ok: boolean, outcome: string, answer: Answer): Promise<Answer> => {
-    // the key and the outcome, never the path or the text: `runs` is read by
-    // surfaces broader than this door, and the line is the owner's own words
-    await deps.audit("vault_task", "check", ok, { task_key: taskKey, checked, outcome });
-    return answer;
-  };
-  if (!deps.vault) return fail("not_available", "ticking a task writes its note, and no vault bridge is configured in this deployment — METISTRY_RECONCILER_URL + METISTRY_BRIDGE_TOKEN_RECONCILER (docs/ops/reconciler.md)");
+const ISO_DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+/** `2026-02-30` has the shape and is no day: round-trip it through the UTC calendar, which has no zone to disagree with. */
+function isCalendarDay(s: string): boolean {
+  const d = new Date(`${s}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
+}
+
+type Audited = (ok: boolean, outcome: string, answer: Answer) => Promise<Answer>;
+
+/** The line a door acts on, found in the note — or the answer that says why not. */
+type Found =
+  | { ok: true; vault: VaultClient; path: string; sha256: string; content: string; line: LocatedTaskLine; opts: TaskDateOptions; today: string }
+  | { ok: false; answer: Answer };
+
+/**
+ * Both doors' first half: the key to its one note, the refusals before any
+ * read, the read, the line found in the note by the walk's own key, and the
+ * text judged against what the client rendered. Stops with an answer at the
+ * first thing that is not so.
+ */
+async function findLine(taskKey: string, seenText: string, wantPath: string | undefined, deps: VaultTaskDeps, audited: Audited, view: View, act: string): Promise<Found> {
+  const no = (answer: Answer): Found => ({ ok: false, answer });
+  if (!deps.vault) return no(fail("not_available", `${act} a task writes its note, and no vault bridge is configured in this deployment — METISTRY_RECONCILER_URL + METISTRY_BRIDGE_TOKEN_RECONCILER (docs/ops/reconciler.md)`));
   const vault = deps.vault;
 
   const { rows } = await deps.queries.run(VAULT_TASK_BY_KEY_QUERY, { task_key: taskKey });
   const candidates = rows.filter((r) => wantPath === undefined || r.path === wantPath);
-  if (candidates.length === 0) return fail("not_found", wantPath === undefined ? `no task has the key ${taskKey} — the index may not have walked the note yet; refresh Today` : `no task has the key ${taskKey} in ${wantPath}`);
+  if (candidates.length === 0) return no(fail("not_found", wantPath === undefined ? `no task has the key ${taskKey} — the index may not have walked the note yet; refresh Today` : `no task has the key ${taskKey} in ${wantPath}`));
   if (candidates.length > 1) {
     const paths = candidates.map((r) => String(r.path));
-    return fail("invalid_request", `the key ${taskKey} names a line in ${paths.length} notes (${paths.join(", ")}) — send path to say which`);
+    return no(fail("invalid_request", `the key ${taskKey} names a line in ${paths.length} notes (${paths.join(", ")}) — send path to say which`));
   }
   const path = String(candidates[0]!.path);
 
-  // Refused before anything is read: this door writes knowledge notes and
+  // Refused before anything is read: these doors write knowledge notes and
   // nothing else (`isVaultPath`: no dot-directory — `.metistry/` above all —
   // no `Artifacts/`, not the root CLAUDE.md or README.md), and markdown only.
-  if (!isVaultPath(path) || !path.endsWith(".md")) return audited(false, "forbidden_path", fail("forbidden", "that task's note is not in the vault this door writes — only knowledge notes (never `.metistry/`, a dot-directory or `Artifacts/`) are ticked here"));
+  if (!isVaultPath(path) || !path.endsWith(".md")) return no(await audited(false, "forbidden_path", fail("forbidden", "that task's note is not in the vault this door writes — only knowledge notes (never `.metistry/`, a dot-directory or `Artifacts/`) are written here")));
 
   const opts = { now: (deps.now ?? (() => new Date()))(), timeZone: deps.timeZone };
   const today = taskToday(opts);
@@ -201,37 +255,75 @@ async function check(taskKey: string, checked: boolean, seenText: string, wantPa
   try {
     file = await vault.read(path);
   } catch (err) {
-    if (err instanceof VaultError) return fail(err.code, `the vault bridge refused to read the note: ${err.message}`);
+    if (err instanceof VaultError) return no(fail(err.code, `the vault bridge refused to read the note: ${err.message}`));
     throw err;
   }
-  if (!file) return audited(false, "stale", stale("the note that held this task is gone — refresh Today", path, null));
+  if (!file) return no(await audited(false, "stale", stale("the note that held this task is gone — refresh Today", path, null, view)));
   const content = file.content.toString("utf8");
   const line = locateTaskLine(content, taskKey, opts);
-  if (!line) return audited(false, "stale", stale("the line is no longer in the note — it was edited or removed since Today was drawn", path, null));
-  if (line.parsed.text !== seenText) return audited(false, "stale", stale("the line's text changed since Today was drawn — here it is as it stands", path, line));
+  if (!line) return no(await audited(false, "stale", stale("the line is no longer in the note — it was edited or removed since Today was drawn", path, null, view)));
+  if (line.parsed.text !== seenText) return no(await audited(false, "stale", stale("the line's text changed since Today was drawn — here it is as it stands", path, line, view)));
+  return { ok: true, vault, path, sha256: file.sha256, content, line, opts, today };
+}
+
+/** Both doors' second half: the one line replaced, written as `user` with the read's hash; a note that moved meanwhile is `409 stale` with the line as it now stands. */
+async function writeLine(f: Extract<Found, { ok: true }>, taskKey: string, edited: string, message: string, audited: Audited, view: View, outcome: string): Promise<Answer> {
+  const next = replaceLine(f.content, f.line.line_no, edited);
+  try {
+    await f.vault.write(f.path, Buffer.from(next, "utf8"), { principal: "user", message }, f.sha256);
+  } catch (err) {
+    if (err instanceof VaultError && err.code === "conflict") {
+      // the note moved between the read and the write: say what it holds now
+      const now = await f.vault.read(f.path).catch(() => null);
+      const current = now ? locateTaskLine(now.content.toString("utf8"), taskKey, f.opts) : null;
+      return audited(false, "stale", stale("the note changed while the edit was being written — here is the line as it stands", f.path, current, view));
+    }
+    if (err instanceof VaultError) return audited(false, err.code, fail(err.code, `the vault bridge refused the write: ${err.message}`));
+    throw err;
+  }
+  const written: LocatedTaskLine = { ...f.line, line: edited, parsed: parseTaskLine(edited, f.opts)! }; // the edit proved it parses
+  return audited(true, outcome, { status: 200, body: { ok: true, task: view(f.path, written), line: edited } });
+}
+
+async function check(taskKey: string, checked: boolean, seenText: string, wantPath: string | undefined, deps: VaultTaskDeps): Promise<Answer> {
+  const verb = checked ? "tick" : "untick";
+  const audited: Audited = async (ok, outcome, answer) => {
+    // the key and the outcome, never the path or the text: `runs` is read by
+    // surfaces broader than this door, and the line is the owner's own words
+    await deps.audit("vault_task", "check", ok, { task_key: taskKey, checked, outcome });
+    return answer;
+  };
+  const f = await findLine(taskKey, seenText, wantPath, deps, audited, taskView, "ticking");
+  if (!f.ok) return f.answer;
+  const { path, line } = f;
   if (line.parsed.checked === checked) return audited(false, "stale", stale(checked ? "the line is already ticked" : "the line is not ticked", path, line));
 
-  const edit = setTaskChecked(line.line, checked, today, opts);
+  const edit = setTaskChecked(line.line, checked, f.today, f.opts);
   if (!edit.ok) {
     // the box moved under the client (ticked, or dropped `[-]`, in the note): stale, with the line
     if (edit.reason === "already" || edit.reason === "dropped") return audited(false, "stale", stale(edit.message, path, line));
     return audited(false, edit.reason, fail("invalid_request", `${edit.message} (${path}, line ${line.line_no})`));
   }
-
-  const next = replaceLine(content, line.line_no, edit.line);
-  try {
-    await vault.write(path, Buffer.from(next, "utf8"), { principal: "user", message: `${checked ? "complete" : "reopen"} "${line.parsed.text.slice(0, 120)}"` }, file.sha256);
-  } catch (err) {
-    if (err instanceof VaultError && err.code === "conflict") {
-      // the note moved between the read and the write: say what it holds now
-      const now = await vault.read(path).catch(() => null);
-      const current = now ? locateTaskLine(now.content.toString("utf8"), taskKey, opts) : null;
-      return audited(false, "stale", stale("the note changed while the tick was being written — here is the line as it stands", path, current));
-    }
-    if (err instanceof VaultError) return audited(false, err.code, fail(err.code, `the vault bridge refused the write: ${err.message}`));
-    throw err;
-  }
-  const written: LocatedTaskLine = { ...line, line: edit.line, parsed: parseTaskLine(edit.line, opts)! }; // setTaskChecked proved it parses
-  return audited(true, verb, { status: 200, body: { ok: true, task: taskView(path, written), line: edit.line } });
+  return writeLine(f, taskKey, edit.line, `${checked ? "complete" : "reopen"} "${line.parsed.text.slice(0, 120)}"`, audited, taskView, verb);
 }
 
+async function schedule(taskKey: string, when: TaskDeferral, seenText: string, wantPath: string | undefined, deps: VaultTaskDeps): Promise<Answer> {
+  const deferral = "do" in when ? "do" : "someday";
+  const audited: Audited = async (ok, outcome, answer) => {
+    // as Tick: the key, what was asked and the outcome — never the path or the text
+    await deps.audit("vault_task", "schedule", ok, { task_key: taskKey, deferral, outcome });
+    return answer;
+  };
+  const f = await findLine(taskKey, seenText, wantPath, deps, audited, deferView, "deferring");
+  if (!f.ok) return f.answer;
+  const { path, line } = f;
+
+  const edit = setTaskScheduled(line.line, when, f.opts);
+  if (!edit.ok) {
+    // the line moved under the client — ticked, dropped, or already deferred so, in the note: stale, with the line
+    if (edit.reason === "done" || edit.reason === "dropped" || edit.reason === "already") return audited(false, "stale", stale(edit.message, path, line, deferView));
+    return audited(false, edit.reason, fail("invalid_request", `${edit.message} (${path}, line ${line.line_no})`));
+  }
+  const text = line.parsed.text.slice(0, 120);
+  return writeLine(f, taskKey, edit.line, "do" in when ? `defer "${text}" to ${when.do}` : `defer "${text}" to someday`, audited, deferView, deferral);
+}

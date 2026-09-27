@@ -153,3 +153,21 @@ export async function lastMirror(db: MirrorExecutor, source: Pick<RequestSource,
   const row = rows[0];
   return row ? { id: Number(row.id), decision: String(row.decision) } : null;
 }
+
+// ---- a knowledge conflict's mirror (C96, T2-9; T2-10) ----------------------
+//
+// A sync-conflict copy in the vault is raised by the reconciler as ONE
+// `review` mirroring the copy, and settled at the Resolve a conflict door
+// (`POST /api/knowledge/conflicts/resolve`), which lives in the console. Two
+// apps name the same subject, and apps never import each other, so the
+// subject's spelling lives here, once.
+
+/** The mirror's source system: the subject lives in this instance's own vault. */
+export const KNOWLEDGE_CONFLICT_SOURCE_KIND = "metistry";
+/** `source.external_ref` is this prefix and the copy's vault path. */
+export const KNOWLEDGE_CONFLICT_REF_PREFIX = "conflict:";
+
+/** The subject a conflict copy's request mirrors. */
+export function knowledgeConflictSource(path: string): RequestSource {
+  return { kind: KNOWLEDGE_CONFLICT_SOURCE_KIND, external_ref: `${KNOWLEDGE_CONFLICT_REF_PREFIX}${path}` };
+}

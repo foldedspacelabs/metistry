@@ -21,7 +21,7 @@
 
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { finishRun, lastMirror, nextRecurrence, raiseMirror, resolveAtSource, RESOLVED_AT_SOURCE, startRun, taskToday, type RequestSource, type RunExecutor, type TaskDateOptions } from "@foldedspacelabs/metistry-core";
+import { finishRun, KNOWLEDGE_CONFLICT_REF_PREFIX, KNOWLEDGE_CONFLICT_SOURCE_KIND, knowledgeConflictSource, lastMirror, nextRecurrence, raiseMirror, resolveAtSource, RESOLVED_AT_SOURCE, startRun, taskToday, type RequestSource, type RunExecutor, type TaskDateOptions } from "@foldedspacelabs/metistry-core";
 import type { Committer } from "./committer.js";
 import { EMPTY_SUMMARY, type Embeddings, type EmbedSummary } from "./embeddings.js";
 import type { Vault } from "./vault.js";
@@ -148,16 +148,16 @@ export const CONFLICT_AGENT = "reconciler";
 export const CONFLICT_KIND = "review";
 /** `payload.event` on a conflict's request — what raised it, for a client drawing the body and for T2-10 finding it. */
 export const CONFLICT_EVENT = "knowledge_conflict";
-/** The mirror's source system: the subject lives in this instance's own vault. */
-export const CONFLICT_SOURCE_KIND = "metistry";
+/** The mirror's source system: the subject lives in this instance's own vault (core's, since T2-10: the console's door names the same subject). */
+export const CONFLICT_SOURCE_KIND = KNOWLEDGE_CONFLICT_SOURCE_KIND;
 /** `source.external_ref` is this prefix and the copy's vault path — the same key the pre-T2-9 report used, so the two can be told apart and never doubled. */
-export const CONFLICT_REF_PREFIX = "conflict:";
+export const CONFLICT_REF_PREFIX = KNOWLEDGE_CONFLICT_REF_PREFIX;
 /** Each side's text in the request is capped; the files are the record and the door reads them again. */
 export const CONFLICT_TEXT_MAX = 32_000; // limit: fixed — a request is read on a phone; a note longer than this is compared in Obsidian, and `truncated` says so
 
 /** The subject a conflict copy's request mirrors. */
 export function conflictSource(path: string): RequestSource {
-  return { kind: CONFLICT_SOURCE_KIND, external_ref: `${CONFLICT_REF_PREFIX}${path}` };
+  return knowledgeConflictSource(path);
 }
 
 export class Indexer {

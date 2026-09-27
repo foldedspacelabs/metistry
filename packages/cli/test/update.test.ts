@@ -250,11 +250,45 @@ describe("metistry update", () => {
     const noOwner = { METISTRY_RECONCILER_URL: BRIDGE.METISTRY_RECONCILER_URL, METISTRY_BRIDGE_TOKEN_RECONCILER: "tok" };
     const r3 = await update({ ...base(P, noOwner), out: (l) => lines.push(l), exec: fakeExec(), skipBuild: true, skipMigrate: true, fetchFn: minted.fn, mintOwnerToken: () => "fresh-owner", doctorFn: okDoctor });
     expect(r3.code).toBe(0);
-    expect((minted.calls[0]!.init.headers as Record<string, string>).authorization).toBe("Bearer fresh-owner");
+    // (after waiting for the reconciler it kickstarted to answer on /check)
+    const lockPost = minted.calls.find((c) => c.url.endsWith("/vault/write"))!;
+    expect((lockPost.init.headers as Record<string, string>).authorization).toBe("Bearer fresh-owner");
     expect(lines.join("\n")).toContain("METISTRY_BRIDGE_TOKEN_RECONCILER_USER minted");
     // …and the reconciler is kickstarted for it, because a bearer it has not
     // read is not a bearer
     expect(lines.join("\n")).toContain("so it reads the freshly minted METISTRY_BRIDGE_TOKEN_RECONCILER_USER");
+  });
+
+  // Rehearsed 0.12.0 → 0.14.x: the kickstart returns before the restarted
+  // reconciler listens, and the lock POST that followed at once was refused
+  // with "did not answer (fetch failed)".
+  it("waits for a reconciler it just restarted to answer before writing the lock through it", async () => {
+    const P = await checkout({ git: true });
+    const calls: string[] = [];
+    let down = 3;
+    const fetchFn = (async (url: string | URL | Request) => {
+      calls.push(String(url));
+      if (String(url).endsWith("/check") && down-- > 0) throw new TypeError("fetch failed");
+      return new Response(JSON.stringify({ queued: true }), { status: 201 });
+    }) as unknown as typeof fetch;
+    const lines: string[] = [];
+    // a fresh object each run: update writes the bearer it mints back into the env it was handed
+    const noOwner = (): NodeJS.ProcessEnv => ({ METISTRY_RECONCILER_URL: BRIDGE.METISTRY_RECONCILER_URL, METISTRY_BRIDGE_TOKEN_RECONCILER: "tok" });
+    const r = await update({ ...base(P, noOwner()), out: (l) => lines.push(l), exec: fakeExec(), skipBuild: true, skipMigrate: true, fetchFn, mintOwnerToken: () => "fresh-owner", doctorFn: okDoctor, reconcilerReady: { intervalMs: 1, timeoutMs: 5_000 } });
+    expect(r.code).toBe(0);
+    expect(r.restarted).toEqual([RECONCILER]);
+    expect(calls).toEqual([...Array(4).fill("http://127.0.0.1:7812/check"), "http://127.0.0.1:7812/vault/write"]);
+    expect(lines.join("\n")).toContain("reconciler: answering again at http://127.0.0.1:7812 after its restart");
+
+    // one that never comes back: the wait ends, the write is still tried, and fails with its own remediation
+    const never = (async (url: string | URL | Request) => {
+      throw new TypeError(`fetch failed ${String(url)}`);
+    }) as unknown as typeof fetch;
+    const lines2: string[] = [];
+    const r2 = await update({ ...base(P, noOwner()), out: (l) => lines2.push(l), exec: fakeExec(), skipBuild: true, skipMigrate: true, fetchFn: never, mintOwnerToken: () => "fresh-owner", doctorFn: okDoctor, reconcilerReady: { intervalMs: 1, timeoutMs: 20 } });
+    expect(r2.code).toBe(1);
+    expect(lines2.join("\n")).toContain("reconciler: not answering at http://127.0.0.1:7812 0s after its restart (METISTRY_RECONCILER_READY_TIMEOUT_MS) — writing anyway");
+    expect(lines2.join("\n")).toContain("did not answer (fetch failed http://127.0.0.1:7812/vault/write)");
   });
 
   // The 0.12.0 → 0.14.0 upgrade: the mint failed, the step threw, and every
@@ -328,7 +362,7 @@ describe("metistry update", () => {
     expect(r.code).toBe(0);
     expect(exec.calls.filter((c) => c.cmd === "security" && c.args[0] === "-i")).toEqual([]);
     expect(readFileSync(join(inst, ".metistry", "state", ".env"), "utf8")).toMatch(/^METISTRY_BRIDGE_TOKEN_RECONCILER_USER=from-the-keychain$/m);
-    expect((f.calls[0]!.init.headers as Record<string, string>).authorization).toBe("Bearer from-the-keychain");
+    expect((f.calls.find((c) => c.url.endsWith("/vault/write"))!.init.headers as Record<string, string>).authorization).toBe("Bearer from-the-keychain");
     expect(r.restarted).toEqual([RECONCILER]);
     const text = lines.join("\n");
     expect(text).toContain("copied from this instance's Keychain item into .env");

@@ -11,7 +11,7 @@ import { readFile } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { KEEP_AWAKE_VALUES, parseKeepAwake, type DeploymentShape, type KeepAwake } from "@foldedspacelabs/metistry-core";
+import { KEEP_AWAKE_VALUES, parseKeepAwake, type DeploymentShape, type Effort, type KeepAwake } from "@foldedspacelabs/metistry-core";
 import {
   assign,
   cacheReport,
@@ -46,7 +46,11 @@ import { realExec, type Exec } from "./exec.js";
 import { AUTH_MODES, connectRepo, readStdin, type AuthMode } from "./connect-repo.js";
 import { connect, connectList, CONNECT_TOOLS, parseTool, renderConnect, renderConnectList } from "./connect.js";
 import { consoleCall, renderConsoleCallError, renderWhoami, runConsoleSession, whoami } from "./console-client.js";
-import { agentAutonomy, agentsList, parseAutonomyFlags, renderAgents, renderAutonomy } from "./agents.js";
+import { agentAutonomy, agentsDefine, agentsList, parseAutonomyFlags, renderAgents, renderAutonomy, renderDefine } from "./agents.js";
+
+const AGENTS_USAGE =
+  "usage: metistry agents list [--json] | metistry agents autonomy <id> [--level observe|propose|act_within_scope] [--allow <kind>] [--propose <kind>] [--deny <kind>] [--json]" +
+  " | metistry agents define <id> [--area <area>] [--model <provider/model>|same_as_assistant] [--effort low|medium|high] [--description <text>] [--prompt-file <file>|-] [--if-sha256 <hex>] [--dry-run] [--json]";
 import { importSessions } from "./import-sessions.js";
 import { askKeepAwake, init, type Ask } from "./init.js";
 import { migrateInbox } from "./migrate-inbox.js";
@@ -460,12 +464,27 @@ const USAGE = `metistry — Metistry command line
 
   metistry agents list [--json]
       Every registered agent and what it holds: role, access, and the rest —
-      queries, projects, a crew's toolset, autonomy. The SAME words the
-      console's Agents panel and the Needs You card use, because the console
-      renders them and this prints what it is sent (one vocabulary, docs/ops/
-      auth.md). Read-only: a grant is the owner's hand, and the door that
-      widens one is the console's alone. An agent waiting on an answer shows
-      what it asked for and which request to answer.
+      queries, projects, a crew's toolset, autonomy — then its permissions
+      table, Resource × Read × Write, where an empty cell is "—" and anything
+      not listed is not granted. The SAME words the console's Agents panel,
+      the Mac app and the Needs You card use, because the console renders them
+      and this prints what it is sent (one vocabulary, docs/ops/auth.md,
+      docs/ops/actors.md). Read-only: a grant is the owner's hand, and the door
+      that widens one is the console's alone. An agent waiting on an answer
+      shows what it asked for and which request to answer.
+
+  metistry agents define <id> [--area <area>] [--model <provider/model>|same_as_assistant]
+                   [--effort low|medium|high] [--description <text>]
+                   [--prompt-file <file>|-] [--if-sha256 <hex>] [--dry-run] [--json]
+      A crew's definition — .metistry/agents/<area>/<id>.md, a protected path
+      in your hand alone (the assistant can never write it). Edits the
+      operating prompt, the model and effort, the description; every other
+      line of the file is kept as it was. A shipped crew becomes the
+      instance's own copy, which then wins by name; a new crew needs --area,
+      --model and --prompt-file. The result is checked the way the console
+      reads it before anything is written, and --if-sha256 refuses a file that
+      changed since you read it (stale). With no edit flags it shows where the
+      definition is and its hash. Written through the reconciler as you.
 
   metistry agents autonomy <id> [--level observe|propose|act_within_scope]
                    [--allow <kind>] [--propose <kind>] [--deny <kind>] [--json]
@@ -773,6 +792,7 @@ export const HELP_GROUPS: Array<{ title: string; verbs: Array<[string, string]> 
       ["deployment set-keep-awake", "whether this install holds the Mac awake, and on which power"],
       ["agents list", "every registered agent and what it holds"],
       ["agents autonomy <id>", "how much room one agent has with an action"],
+      ["agents define <id>", "a crew's definition: its prompt, model and effort"],
       ["identity [set]", "identity.yaml — the one place the assistant is named; set its name, mention and mark"],
       ["templates check [<file>]", "does the vault's Templates/ read, before the next run reads it"],
       ["instances list|add|remove|refresh", "the peer registry: which other instances this one knows"],
@@ -1562,12 +1582,54 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
           return 1;
         }
       }
+      // M12 (§2.2): a crew's definition — `.metistry/agents/<area>/<id>.md`,
+      // a protected path — in the owner's hand. The console only reads it.
+      if (positional[0] === "define") {
+        const id = positional[1];
+        const loadedDefine = loadEnv();
+        const instanceDir = str(flags, "instance") ?? loadedDefine.instanceDir;
+        if (!id || !instanceDir) {
+          err(`${AGENTS_USAGE}${id ? "\n(define needs the instance repo: pass --instance <dir> or set METISTRY_INSTANCE_DIR)" : ""}`);
+          return 2;
+        }
+        const json = flags.json === true;
+        try {
+          const promptFile = str(flags, "prompt-file");
+          const effort = str(flags, "effort");
+          const view = await agentsDefine({
+            id,
+            change: {
+              area: str(flags, "area"),
+              model: str(flags, "model"),
+              effort: effort as Effort | undefined,
+              description: str(flags, "description"),
+              prompt: promptFile === undefined ? undefined : promptFile === "-" ? await (io.readStdin ?? readStdin)() : await readFile(promptFile, "utf8"),
+            },
+            ifSha256: str(flags, "if-sha256"),
+            instanceDir,
+            seedDir: resolveSeedDir(productDir),
+            env: process.env,
+            platform: io.platform ?? process.platform,
+            uid: io.uid ?? (typeof process.getuid === "function" ? process.getuid() : 0),
+            fetchFn: io.fetchFn ?? fetch,
+            dryRun: flags["dry-run"] === true,
+            // --json is a wire contract: only the final document on stdout
+            out: json ? err : out,
+            ...(io.exec ? { exec: io.exec } : {}),
+          });
+          out(json ? JSON.stringify(view, null, 2) : renderDefine(view, ui));
+          return 0;
+        } catch (e) {
+          err(`metistry agents define: ${e instanceof Error ? e.message : String(e)}`);
+          return 1;
+        }
+      }
       // The owner's own hand on an agent's autonomy — one of the two doors a
       // WIDENING may come through (docs/ops/actions.md). The mode flags are
       // read off the RAW argv because each of them may be repeated, and the
       // shared parser keeps only the last of a repeated flag.
       if (positional[0] !== "autonomy" || !positional[1]) {
-        err("usage: metistry agents list [--json] | metistry agents autonomy <id> [--level observe|propose|act_within_scope] [--allow <kind>] [--propose <kind>] [--deny <kind>] [--json]");
+        err(AGENTS_USAGE);
         return 2;
       }
       const loaded = loadEnv();

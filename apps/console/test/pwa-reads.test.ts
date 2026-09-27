@@ -13,6 +13,8 @@
 // source by name and evaluated. A rename makes the lift throw rather than
 // letting a test pass vacuously — and `node --check` on app.js (last test)
 // catches what a lift cannot see: a clash with a name declared elsewhere.
+// The helpers every view shares moved to lib.js (T7-3a), a module with no DOM
+// in it, so those are imported as they are.
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -21,9 +23,13 @@ import { listAgents } from "../src/agents.js";
 import { permissionRowText, type PermissionRow } from "@foldedspacelabs/metistry-core";
 import { agentAutonomy, MODE_LABEL as CLI_MODE_LABEL, renderAutonomy, renderPermissions } from "../../../packages/cli/src/agents.js";
 import { createUi } from "../../../packages/cli/src/ui.js";
+import { clockTime, dateTime, esc as libEsc } from "../web/lib.js";
 
 const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
 const SRC = read("../web/app.js");
+/** Every module the PWA loads: the shell and the views split out of it (T7-3a). */
+const MODULES = ["app.js", "lib.js", "today.js", "needs-you.js", "md.js"];
+const ALL_SRC = MODULES.map((m) => read(`../web/${m}`)).join("\n");
 const CSS = read("../web/style.css");
 const TOKENS_CSS = read("../web/tokens.css");
 const TOKENS = JSON.parse(read("../../../docs/product/design/tokens.json")) as { type: { $meta: { serif: string } } };
@@ -44,8 +50,8 @@ function lift(name: string): string {
   throw new Error(`could not find the end of ${name} in app.js`);
 }
 
-/** app.js's esc() is textContent → innerHTML: it escapes &, < and >. */
-const esc = (s: unknown) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+/** lib.js's esc() — what a text node's serialisation escapes: &, < and >. */
+const esc = libEsc;
 
 const lifted = <T>(names: string[], expr: string): T =>
   new Function("esc", `${names.map(lift).join("\n")}\nreturn (${expr});`)(esc) as T;
@@ -312,10 +318,6 @@ describe("fills and faces are tokens", () => {
 // ---------------------------------------------------------------------------
 
 describe("clock times are 12-hour with AM/PM on every device", () => {
-  const { clockTime, dateTime } = lifted<{ clockTime: (t: unknown) => string; dateTime: (t: unknown) => string }>(
-    ["clockTime", "dateTime"],
-    "{ clockTime, dateTime }",
-  );
   const at = (h: number, m: number) => new Date(2026, 8, 26, h, m); // local time, so the test holds in any TZ
 
   it("pins the clock whatever the locale", () => {
@@ -332,18 +334,49 @@ describe("clock times are 12-hour with AM/PM on every device", () => {
     expect(dateTime(undefined)).toBe("");
   });
 
-  it("leaves no timestamp to the locale's clock", () => {
-    expect(SRC).not.toMatch(/\.toLocaleString\(|\.toLocaleTimeString\(/);
+  it("leaves no timestamp to the locale's clock, in any module", () => {
+    expect(ALL_SRC).not.toMatch(/\.toLocaleString\(|\.toLocaleTimeString\(/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F-13: register and rotate are reach `local` — the refusal is shown as it came
+// ---------------------------------------------------------------------------
+
+describe("a local-only refusal is surfaced in the server's words (F-13)", () => {
+  const LOCAL_ONLY = "POST /api/agents is reach `local`: only the Metistry Mac app (or the `metistry` command line) on the Mac this console runs on can do it — a passkey session cannot, even from that Mac. Open the Mac app there (docs/ops/client-api.md)";
+  // `lift` reads plain functions; this one is async, so it is cut out whole by its own shape
+  const decl = /^async function refusalText\([\s\S]*?\n\}$/m.exec(SRC)?.[0];
+  if (!decl) throw new Error("app.js no longer declares refusalText — update this test with the rename");
+  const refusalText = new Function(`${decl}\nreturn refusalText;`)() as (r: unknown, fallback: string) => Promise<string>;
+
+  it("says what the envelope says, and only falls back when there is nothing to say", async () => {
+    expect(await refusalText({ json: async () => ({ error: { code: "local_only", message: LOCAL_ONLY } }) }, "rotate failed")).toBe(LOCAL_ONLY);
+    expect(await refusalText({ json: async () => { throw new Error("not json"); } }, "rotate failed")).toBe("rotate failed");
+    expect(await refusalText({ json: async () => ({}) }, "rotate failed")).toBe("rotate failed");
+  });
+
+  it("both doors the passkey session can no longer use go through it", () => {
+    expect(SRC).toContain('else alert(await refusalText(r, "rotate failed"));');
+    expect(SRC).toMatch(/if \(!r\.ok\) return alert\(await refusalText\(r, "invalid/);
   });
 });
 
 // A lift evaluates one declaration at a time, so it cannot see two top-level
 // declarations of one name — which is a SyntaxError that stops the whole PWA
 // from loading. Parse the real file, as the browser will.
-describe("app.js", () => {
-  it("parses as a module", () => {
-    const r = spawnSync(process.execPath, ["--check", fileURLToPath(new URL("../web/app.js", import.meta.url))], { encoding: "utf8" });
-    expect(r.stderr).toBe("");
-    expect(r.status).toBe(0);
+describe("the PWA's modules", () => {
+  for (const m of MODULES) {
+    it(`${m} parses as a module`, () => {
+      const r = spawnSync(process.execPath, ["--check", fileURLToPath(new URL(`../web/${m}`, import.meta.url))], { encoding: "utf8" });
+      expect(r.stderr).toBe("");
+      expect(r.status).toBe(0);
+    });
+  }
+
+  it("esc() escapes what a text node would, and attr's quote on top", () => {
+    expect(esc(`<img src=x onerror="a&b">`)).toBe("&lt;img src=x onerror=\"a&amp;b\"&gt;");
+    expect(esc(null)).toBe("");
+    expect(esc(12)).toBe("12");
   });
 });

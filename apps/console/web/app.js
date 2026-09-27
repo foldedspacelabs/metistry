@@ -3,6 +3,13 @@
 // the composer stashes to localStorage and replays after sign-in.
 
 import { renderMarkdown } from "./md.js";
+// Shared, DOM-free helpers; each view that has its own file imports them too.
+import { attr, clockTime, dateTime, esc, scopeOf } from "./lib.js";
+// The views split out of this file (T7-3a, screen 18 §2–§3), mounted below
+// with the shell's doors: this file is the shell, and imports them; they
+// never import it.
+import { mountNeedsYou } from "./needs-you.js";
+import { mountToday } from "./today.js";
 
 const { startRegistration, startAuthentication } = window.SimpleWebAuthnBrowser;
 
@@ -84,7 +91,7 @@ function show(view) {
 }
 
 function loadView(view) {
-  ({ today: loadToday, feed: loadFeedView, chat: loadMessages, board: loadBoardView, projects: loadProjects, artifacts: loadArtifacts, rooms: loadRooms, settings: loadSettings, triage: loadTriage, agents: loadAgents, usage: loadUsage }[view] ?? (() => {}))();
+  ({ today: today.load, feed: loadFeedView, chat: loadMessages, board: loadBoardView, projects: loadProjects, artifacts: loadArtifacts, rooms: loadRooms, settings: loadSettings, triage: needsYou.load, agents: loadAgents, usage: loadUsage }[view] ?? (() => {}))();
 }
 
 // A room or an artifact link lives in the hash; leaving that view drops it, so
@@ -316,22 +323,8 @@ function replyParagraphs(text) {
     .join("");
 }
 
-// ----- clock times: 12-hour with AM/PM, always (design-system-amendments §8.1) -----
-// Never the device locale's clock: `toLocaleString()` is 24-hour on an en-GB
-// or de-DE phone, which is how one screen came to show 13:02 beside 8:47 AM
-// (review 01). The date keeps the locale's order; only the clock is pinned.
-// Function declarations, so every renderer above and below can call them.
-function clockTime(ts) {
-  const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return "";
-  const h = d.getHours();
-  return `${h % 12 || 12}:${String(d.getMinutes()).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
-}
-function dateTime(ts) {
-  const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return "";
-  return `${d.toLocaleDateString()}, ${clockTime(d)}`;
-}
+// Clock times are 12-hour with AM/PM, always (design-system-amendments
+// §8.1): `clockTime` and `dateTime` live in lib.js, which every view shares.
 
 // Agent prose is set in the serif (C32, C35 — style.css `.agent-prose`), so it
 // reads as the assistant's before a word of it is read, and it still says so
@@ -736,300 +729,10 @@ $("push-test").onclick = async () => {
   if (result !== "sent") alert(`push: ${result}`);
 };
 
-// ----- Needs You (D7: ONE queue for everything that needs the user). Every
-// row is a REQUEST, and a request reads as one of the types in F-5's table
-// (packages/core/src/requests.ts, design-build-plan §2.12). The PWA cannot
-// import core, so GET /api/proposals serves each row's reading as `request`
-// (`describeRequest`: type, word, body, answers) and this view draws that —
-// it holds no kind → word map of its own. A kind the table does not know
-// arrives as a report; the stored kind is never shown in its place.
-// Grouped by type, oldest first; every field output-encoded, attribute values
-// quote-safe too (CRIT-7). -----
-/** The word the owner reads for a row — the table's, as the server served it. */
-const requestWord = (p) => p.request?.word ?? "";
-/** A group heading: the table's word in Title Case (P10). */
-const requestHeading = (word) => word.replace(/\b\w/g, (ch) => ch.toUpperCase());
-// A row's answers are its TYPE's, as the server serves them in `request`
-// (F-5's table; T2-3): the primary verb, Revise and Decline, each with the
-// word the owner reads and the decision it stores — Approve / Revise /
-// Decline for most, Send Answers on a question, Dismiss on a report, Approve
-// meaning Approve as Work where the row suggests work (§1.4). The server
-// refuses anything else, so this view draws exactly what it may send. An
-// answer that goes through another system's door (a pull request's review,
-// an invitation's RSVP, a report's own act) is drawn once that door is
-// served — never as a button that cannot send (C138).
-//
-// Later is the one per-row verb that is NOT an answer to the request
-// (docs/ops/reply-feedback.md): it gives the row an `until` and leaves it
-// pending, and it is valid for every kind. Skip — decline with nothing to
-// say — is bulk-only (§2.12, K2): it lives on the selection bar (`s`), never
-// on a row, so no single request is ever brushed off one tap from Approve.
-// (A report's Dismiss and a message's Not Mine store the same `skip` — as
-// that type's Decline, which is the table's to say, not this view's.)
-const DECLINE_STYLE = ' style="background:#7a3b3b"';
-const DEFER = [{ d: "later", label: "Later" }];
-const attr = (s) => esc(s).replaceAll('"', "&quot;");
-
-// Multi-select. Ids the user ticked, and the `ts` each row was rendered with
-// — the second is what `if_unchanged` sends back, so an answer to a row that
-// moved under us is refused rather than applied to a different question.
-const picked = new Set();
-const seenAt = new Map();
-// The rows as they were painted — an answer that needs a field off the row
-// (an access request's area) reads it from what the user was SHOWN.
-const rendered = new Map();
-const proposalById = (id) => rendered.get(String(id));
-
-/** The one decision call. `if_unchanged` rides every single-row answer; a 409 repaints instead of alerting. */
-async function decide(id, body) {
-  const seen = seenAt.get(String(id));
-  const res = await api(`/api/proposals/${id}`, {
-    method: "POST",
-    body: JSON.stringify({ ...body, ...(seen ? { if_unchanged: { seen_at: seen } } : {}) }),
-  });
-  if (res.status === 409) {
-    const b = await res.json().catch(() => ({}));
-    // `stale` means the row changed, not that someone answered it: repaint
-    // and let the user read the new version before deciding again.
-    if (b.reason === "stale") alert("this one changed while it was on screen — here it is again");
-    return false;
-  }
-  const answered = await res.json().catch(() => ({}));
-  // An `action` is the one verb whose allow DOES something (docs/ops/actions.md).
-  // What it did is held for the next paint rather than alerted: the row leaves
-  // the queue on success, and "it worked, here is what it made" belongs where
-  // the row was, not in a modal. A refusal keeps the row and says why.
-  lastAction = res.ok
-    ? (answered.action ? { ok: true, ...answered.action } : null)
-    : (answered.error ? { ok: false, message: answered.error.message ?? "refused" } : lastAction);
-  return res.ok;
-}
-
-// What the last action did, rendered once above the queue and then forgotten.
-let lastAction = null;
-const ACTION_NOISE = ["ok", "kind", "at", "by", "on_behalf_of"];
-function actionNote(a) {
-  if (!a.ok) return `refused — ${a.message}`;
-  const parts = Object.entries(a).filter(([k]) => !ACTION_NOISE.includes(k)).map(([k, v]) => `${k} ${v}`);
-  return `${a.kind}${parts.length ? `: ${parts.join(" · ")}` : ""}`;
-}
-
-async function loadTriage() {
-  const res = await api("/api/proposals");
-  const { proposals } = await res.json();
-  $("triage-empty").hidden = proposals.length > 0;
-  setNeeds(proposals.length); // the bell and the Needs You row — never a tab (P2)
-  const live = new Set(proposals.map((p) => String(p.id)));
-  for (const id of [...picked]) if (!live.has(id)) picked.delete(id); // a row that left the queue leaves the selection
-  seenAt.clear();
-  rendered.clear();
-  for (const p of proposals) { seenAt.set(String(p.id), p.ts); rendered.set(String(p.id), p); }
-  const groups = new Map();
-  for (const p of [...proposals].sort((a, b) => new Date(a.ts) - new Date(b.ts))) {
-    const word = requestWord(p);
-    if (!groups.has(word)) groups.set(word, []);
-    groups.get(word).push(p);
-  }
-  const note = lastAction ? `<li class="muted">last action — ${esc(actionNote(lastAction))}</li>` : "";
-  lastAction = null; // said once; the record keeps it (runs, and the proposal's payload.result)
-  $("proposal-list").innerHTML = note + [...groups]
-    .map(([word, rows]) => `<li class="muted">${esc(requestHeading(word))} · ${rows.length}</li>` + rows.map(proposalRow).join(""))
-    .join("");
-  document.querySelectorAll("[data-triage]").forEach((b) => (b.onclick = async () => {
-    const body = { decision: b.dataset.d };
-    // Revise is the answer that carries a reason: without one the assistant
-    // has nothing to change, so an empty note cancels rather than sends.
-    //
-    // Where the table says Revise carries an AREA (an access request) the
-    // thing to revise is the grant — Revise is how you grant a narrower
-    // prefix than the one asked for — so it asks for that instead, pre-filled
-    // with the ask. The server validates it with the grants validator's own
-    // rule and refuses anything else.
-    if (b.dataset.d === "accept_with_changes") {
-      const row = b.dataset.carries === "area" ? proposalById(b.dataset.triage) : null;
-      if (row) {
-        const area = (prompt("grant which folder instead?", row.payload?.area ?? "") ?? "").trim();
-        if (!area) return;
-        body.area = area;
-      } else {
-        const feedback = (prompt("what should change?") ?? "").trim();
-        if (!feedback) return;
-        body.feedback = feedback;
-      }
-    }
-    await decide(b.dataset.triage, body);
-    loadTriage();
-  }));
-  // Send Answers: one answer per question, sent together — an option, or the
-  // owner's own words where the question ends in Something else… (C105).
-  document.querySelectorAll("[data-answers]").forEach((b) => (b.onclick = async () => {
-    const p = proposalById(b.dataset.answers);
-    const got = p ? collectAnswers(p, (sel) => document.querySelectorAll(sel)) : { missing: 0 };
-    if (got.missing !== undefined) return alert(`answer question ${got.missing + 1} first`);
-    await decide(b.dataset.answers, { decision: b.dataset.d, answers: got.answers });
-    loadTriage();
-  }));
-  // typing your own answer chooses Something else… for that question
-  document.querySelectorAll("[data-other-text]").forEach((t) => (t.oninput = () => {
-    const box = [...document.querySelectorAll("input[data-other]")].find((x) => x.name === t.dataset.otherText);
-    if (box) box.checked = t.value.trim() !== "";
-  }));
-  document.querySelectorAll("[data-pick]").forEach((c) => (c.onchange = () => {
-    if (c.checked) picked.add(c.dataset.pick);
-    else picked.delete(c.dataset.pick);
-    renderBatchBar();
-  }));
-  renderBatchBar();
-}
-
-function renderBatchBar() {
-  const bar = $("triage-batch");
-  if (!bar) return;
-  bar.hidden = picked.size === 0;
-  $("triage-selected").textContent = picked.size ? `${picked.size} selected — l / s` : "";
-  for (const c of document.querySelectorAll("[data-pick]")) c.checked = picked.has(c.dataset.pick);
-}
-
-/** One verb, many rows. The server answers per row; anything it refused stays in the queue and says so. */
-async function batchDecide(decision) {
-  if (picked.size === 0) return;
-  const ids = [...picked].map(Number);
-  const res = await api("/api/proposals/batch", { method: "POST", body: JSON.stringify({ ids, decision }) });
-  if (res.ok) {
-    const { results } = await res.json();
-    const failed = results.filter((r) => !r.ok).length;
-    if (failed) alert(`${results.length - failed} of ${results.length} applied — the rest were already answered elsewhere`);
-  }
-  picked.clear();
-  loadTriage();
-}
-
-/**
- * An `action` row says what it would DO before you answer it
- * (docs/ops/actions.md): the kind, a short preview of its own arguments, and
- * the reason the agent gave. Arguments are agent-authored text, so every one
- * of them is output-encoded and clipped — the queue renders a claim, never a
- * document. `payload.result` (after an allow) and `payload.error` (after a
- * failure that left the row pending) render the same way.
- */
-const ARG_PREVIEW_CHARS = 140;
-function actionDetail(p) {
-  if (p.kind !== "action") return "";
-  const a = p.payload?.action ?? {};
-  const args = Object.entries(a.args ?? {})
-    .map(([k, v]) => `${k}=${typeof v === "object" && v !== null ? JSON.stringify(v) : String(v)}`)
-    .join(" ")
-    .slice(0, ARG_PREVIEW_CHARS);
-  const outcome = p.payload?.result
-    ? `<br><span class="muted">done — ${esc(actionNote({ ok: true, kind: a.kind, ...p.payload.result }))}</span>`
-    : p.payload?.error
-      ? `<br><span class="muted">last try refused — ${esc(String(p.payload.error.message ?? p.payload.error.code ?? ""))}</span>`
-      : "";
-  return `<br><span class="muted"><b>${esc(a.kind ?? "?")}</b> ${esc(args)}</span>${p.payload?.reason ? `<br><span class="muted">why: ${esc(String(p.payload.reason).slice(0, ARG_PREVIEW_CHARS))}</span>` : ""}${outcome}`;
-}
-
-/**
- * An `access_request` row says what it is asking for before you answer it
- * (docs/ops/actions.md): the area, the reason the agent gave, and what that
- * credential holds today — agent-authored text, so output-encoded and clipped
- * like an action's arguments. The `index` → `areas` note is the consequence
- * that is easy to miss: an agent at tier `index` can be told any title in the
- * vault and read none, and granting it one folder trades that browse for the
- * read. Approving is a choice between two scopes, not a pure widening.
- *
- * `escalated` is the one fact that changes how the row reads: you already
- * said no to this exact ask, and the agent is asking once more with a fuller
- * reason (ruled 2026-09-19 C). The tool allows that ONCE — a third ask after
- * a second decline is refused at the tool — so this line is not the start of
- * a queue you will have to keep answering.
- */
-function accessDetail(p) {
-  if (p.kind !== "access_request") return "";
-  const held = esc(scopeOf(p.payload?.current_scope, p.payload?.current_tier, p.payload?.current_areas));
-  const trade = p.payload?.current_tier === "index" ? " — approving trades its whole-vault title browse for reads inside that folder" : "";
-  const again = p.payload?.escalated ? `<br><span class="muted">asked again after a decline — you answered #${esc(String(p.payload.prior_proposal ?? "?"))}</span>` : "";
-  const done = p.payload?.granted ? `<br><span class="muted">granted — ${esc(String(p.payload.granted.area ?? ""))}</span>` : "";
-  return `<br><span class="muted">wants <b>${esc(String(p.payload?.area ?? "?"))}</b> · has ${held}${esc(trade)}</span>${again}` +
-    `${p.payload?.reason ? `<br><span class="muted">why: ${esc(String(p.payload.reason).slice(0, ARG_PREVIEW_CHARS))}</span>` : ""}${done}`;
-}
-
-/**
- * A question's body (the `choices` block, screen 3 §12.3): each question the
- * server served in `request.questions`, pick one as radios and pick any as
- * checkboxes, ending in Something else… where it allows the owner's own
- * words. Every prompt and option is agent-authored text: output-encoded.
- */
-function questionDetail(p) {
-  const qs = p.request?.questions;
-  if (!Array.isArray(qs) || qs.length === 0) return "";
-  const context = p.payload?.context?.prose ? `<br><span class="muted">why: ${esc(String(p.payload.context.prose).slice(0, ARG_PREVIEW_CHARS))}</span>` : "";
-  return context + qs.map((q, n) => {
-    const name = `q-${p.id}-${n}`;
-    const type = q.multi ? "checkbox" : "radio";
-    const options = (q.options ?? []).map((o) => `<label><input type="${type}" name="${attr(name)}" value="${attr(o)}"> ${esc(o)}</label>`).join(" ");
-    const other = q.allow_other
-      ? ` <label><input type="${type}" name="${attr(name)}" value="" data-other> Something else…</label> <input type="text" data-other-text="${attr(name)}" maxlength="1000" aria-label="${attr(`your own answer: ${q.prompt}`)}">`
-      : "";
-    return `<br><span role="${q.multi ? "group" : "radiogroup"}" aria-label="${attr(q.prompt)}"><b>${esc(q.prompt)}</b>${q.multi ? ' <span class="muted">(any)</span>' : ""} ${options}${other}</span>`;
-  }).join("");
-}
-
-/**
- * The answers a question row's inputs hold: one per question, in order —
- * `{choices, other?}`, or `{missing: n}` for the first question with none.
- * `find` is `document.querySelectorAll`, passed in so the rule is testable.
- */
-function collectAnswers(p, find) {
-  const answers = [];
-  for (const [n, q] of (p.request?.questions ?? []).entries()) {
-    const boxes = [...find(`[name="q-${Number(p.id)}-${n}"]`)];
-    const choices = boxes.filter((b) => b.checked && !b.hasAttribute("data-other")).map((b) => b.value);
-    const otherOn = q.allow_other && boxes.some((b) => b.checked && b.hasAttribute("data-other"));
-    const text = otherOn ? ([...find(`[data-other-text="q-${Number(p.id)}-${n}"]`)][0]?.value ?? "").trim() : "";
-    if ((otherOn && text === "") || (choices.length === 0 && !otherOn)) return { missing: n };
-    answers.push(otherOn ? { choices, other: text } : { choices });
-  }
-  return { answers };
-}
-
-/** The row's answers, as its type's table row says — each one that stores a decision on this row; see DECLINE_STYLE's comment. */
-function requestAnswers(p) {
-  const r = p.request ?? {};
-  const work = p.payload?.suggested_work;
-  return [["primary", r.primary], ["revise", r.revise], ["decline", r.decline]]
-    .filter(([, a]) => a?.label && a.sends?.decision)
-    .map(([slot, a]) => {
-      const d = a.sends.decision;
-      if (d === "answers") return `<button data-answers="${p.id}" data-d="${attr(d)}">${esc(a.label)}</button>`;
-      // Approve as Work: the click is what creates the `work` row (§4.12 intact — a human clicked)
-      const title = d === "accept_as_work" && work?.title ? ` title="${attr(`creates the task “${work.title}”, unassigned`)}"` : "";
-      const carries = a.carries ? ` data-carries="${attr(a.carries)}"` : "";
-      return `<button data-triage="${p.id}" data-d="${attr(d)}"${carries}${slot === "decline" && d === "deny" ? DECLINE_STYLE : ""}${title}>${esc(a.label)}</button>`;
-    })
-    .join(" ");
-}
-
-function proposalRow(p) {
-  const c = p.payload?.classification ?? {};
-  // review proposals (§4.21) carry a top-level title; with none, the table's word — never the stored kind
-  const label = c.action || c.title || p.payload?.title || requestWord(p);
-  const defer = DEFER.map((x) => `<button data-triage="${p.id}" data-d="${x.d}" class="quiet">${x.label}</button>`).join(" ");
-  return `<li><span><input type="checkbox" data-pick="${p.id}" aria-label="${attr(`select ${label}`)}"> ${esc(label)} <span class="muted">${esc(requestWord(p))} · ${esc(c.kind ?? "")} · ${esc(p.source_agent)} · ${new Date(p.ts).toLocaleDateString()}</span>${actionDetail(p)}${accessDetail(p)}${questionDetail(p)}</span>
-        <span>${requestAnswers(p)} ${defer}</span></li>`;
-}
-
-$("triage-later").onclick = () => batchDecide("later");
-$("triage-skip").onclick = () => batchDecide("skip");
-$("triage-clear").onclick = () => { picked.clear(); renderBatchBar(); };
-
-// `l` and `s` over the selection. Never while typing — a shortcut that fires
-// from inside a text field is a bug, not an affordance.
-document.addEventListener("keydown", (e) => {
-  if ($("triage").hidden || e.metaKey || e.ctrlKey || e.altKey) return;
-  if (/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName ?? "")) return;
-  if (e.key === "l") { e.preventDefault(); batchDecide("later"); }
-  if (e.key === "s") { e.preventDefault(); batchDecide("skip"); }
-});
+// ----- Today and Needs You: their own files (T7-3a; screen 18 §2–§3) -----
+// Mounted with the shell's doors; `loadView` calls their `load`.
+const today = mountToday({ $, api, show });
+const needsYou = mountNeedsYou({ $, api, setNeeds, show });
 
 // ----- devices -----
 async function loadDevices() {
@@ -1044,7 +747,7 @@ async function loadDevices() {
   }));
 }
 
-function esc(s) { const d = document.createElement("div"); d.textContent = s ?? ""; return d.innerHTML; }
+// esc() and attr(): lib.js — every server value reaches markup through one of them (CRIT-7).
 
 // ----- agents (external-agent registry; every agent-authored field output-encoded — CRIT-7) -----
 // The token is shown exactly once, at mint/rotate; the list never carries it.
@@ -1125,14 +828,9 @@ function permissionsTableHtml(rows) {
 // panel prints the words it is given. It used to hold a third spelling of
 // them — `ACCESS_LABEL = {none, titles, folders}` lived here — which is how
 // one record came to be said four ways (§2.10).
-//
-// The fallback is for a row written before the field existed: an old
-// `access_request` in the queue still renders, in the same words, from the
-// two fields it does carry.
-const ACCESS_LABEL = { none: "none", index: "titles", areas: "folders" };
-const accessLabel = (t) => ACCESS_LABEL[t] ?? t;
-const scopeOf = (view, tier, areas) =>
-  view?.scope ?? (tier === "areas" ? `folders: ${(areas ?? []).join(", ") || "nothing"}` : accessLabel(tier ?? "none"));
+// The words, and the fallback for a row written before the field existed,
+// are `scopeOf` in lib.js: Needs You prints an access request's scope in
+// the same words.
 let agentsCache = [];
 async function loadAgents() {
   const res = await api("/api/agents");
@@ -1183,7 +881,7 @@ async function loadAgents() {
     const id = b.dataset.agentRotate;
     if (!confirm(`rotate the token for ${id}? the current token stops working immediately.`)) return;
     const r = await api(`/api/agents/${encodeURIComponent(id)}/rotate`, { method: "POST" });
-    if (r.ok) showAgentToken(await r.json()); else alert("rotate failed");
+    if (r.ok) showAgentToken(await r.json()); else alert(await refusalText(r, "rotate failed"));
     loadAgents();
   }));
   document.querySelectorAll("[data-agent-revoke]").forEach((b) => (b.onclick = async () => {
@@ -1192,6 +890,14 @@ async function loadAgents() {
     await api(`/api/agents/${encodeURIComponent(id)}/revoke`, { method: "POST" });
     loadAgents();
   }));
+}
+
+// A refusal in the server's own words (F-13): register and rotate are reach
+// `local`, so a passkey session gets `403 local_only`, whose message names the
+// Mac app — shown as it came, never replaced by a guess at why.
+async function refusalText(res, fallback) {
+  const body = await res.json().catch(() => ({}));
+  return body?.error?.message || fallback;
 }
 
 function showAgentToken({ id, token }) {
@@ -1205,7 +911,7 @@ $("agent-create").onsubmit = async (e) => {
   const body = { id: $("agent-id").value.trim(), display_name: $("agent-name").value.trim(), kind: $("agent-kind").value };
   const r = await api("/api/agents", { method: "POST", body: JSON.stringify(body) });
   if (r.status === 409) return alert("that id is already registered");
-  if (!r.ok) return alert("invalid — id is a slug (a-z, 0-9, -; max 40) and a display name is required");
+  if (!r.ok) return alert(await refusalText(r, "invalid — id is a slug (a-z, 0-9, -; max 40) and a display name is required"));
   showAgentToken(await r.json());
   $("agent-id").value = ""; $("agent-name").value = "";
   loadAgents();
@@ -1327,23 +1033,6 @@ async function dashQuery(name, params) {
   return (await api(`/api/q/${name}${qs}`)).json();
 }
 
-function renderRuns({ rows, as_of }) {
-  const s = rows[0] ?? {};
-  const failed = asNum(s.failures);
-  const tiles = [
-    ["runs ok", asNum(s.runs_ok), "ok"],
-    ["failed", failed, failed > 0 ? "failed" : ""],
-    ["turns", asNum(s.turns), ""],
-    ["captures", asNum(s.captures), ""],
-    ["spend", `$${fmtUsd(s.spend_usd)}`, ""],
-  ];
-  $("dash-runs").innerHTML = tiles.map(([label, v, cls]) => `<li class="tile"><b class="${cls}">${esc(String(v))}</b><span class="muted">${label}</span></li>`).join("");
-  $("dash-runs-note").textContent = s.last_run_at
-    ? `${failed > 0 ? "check Settings — " : ""}last activity ${dateTime(s.last_run_at)}`
-    : "nothing ran in the last 24h";
-  dashStamp("runs", as_of);
-}
-
 // §4.19 one row per project + §4.21 the kill switch: a mode chip and ONE
 // toggle (confirm first — flipping back to Auto re-extends trust to every
 // member). The user reads Auto / Supervised (glossary.md); the stored values
@@ -1454,16 +1143,8 @@ async function loadPanels(panels) {
   }));
 }
 
-// The old dashboard, in the three places the shell gives it: Today holds the
-// last 24 hours and the reviews waiting on you, Work ▸ Projects the project
-// rows, and the Usage sheet the spend.
-function loadToday() {
-  return loadPanels({
-    runs: async () => renderRuns(await dashQuery("runs_summary", { hours: 24 })),
-    reviews: async () => { const r = await dashQuery("prs_for_review"); $("dash-reviews").innerHTML = reviewListHtml(r.rows); dashStamp("reviews", r.as_of); },
-  });
-}
-
+// The old dashboard, where the shell gives it: Work ▸ Projects the project
+// rows, and the Usage sheet the spend. Today is the day itself (today.js).
 function loadProjects() {
   return loadPanels({
     projects: async () => { renderProjectRows(await (await api("/api/projects")).json()); renderAreas(await dashQuery("areas_overview")); },

@@ -392,14 +392,14 @@ raw r||s, 12h exp, origin-only aud).
 the tailnet level — not a local/sudo issue. Enable at the URL tailscale
 printed (login.tailscale.com/f/serve?node=…, plus HTTPS Certificates under
 admin/dns), then `/usr/local/bin/tailscale serve --bg 8093` as the normal
-user. Target URL: `https://mac-studio.tailee85c6.ts.net/`. iPhone protocol in
+user. Target URL: `https://mac-studio.example.ts.net/`. iPhone protocol in
 `poc/poc6-pwa/IPHONE-STEPS.md` (iOS 16.4+, Home-Screen install required for
 push — the page self-diagnoses standalone vs tab mode). Note `serve --bg`
 does not exit on the not-enabled error; it polls forever.
 
 **COMPLETED 2026-08-27: PASS end to end.** User enabled Serve + certs at the
 tailnet level; `tailscale serve --bg 8093` proxied cleanly; PWA installed to
-the iPhone Home Screen over `https://mac-studio.tailee85c6.ts.net/`
+the iPhone Home Screen over `https://mac-studio.example.ts.net/`
 (standalone mode detected, push supported); subscription landed on
 `web.push.apple.com`. First pushes failed `403 BadJwtToken` — root cause:
 **Apple rejects a VAPID `sub` contact of `mailto:...@example.invalid`**

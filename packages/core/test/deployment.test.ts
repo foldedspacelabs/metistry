@@ -93,7 +93,7 @@ describe("resolveUrl — the one place a configured url is resolved", () => {
 
   it("leaves a real host alone", () => {
     expect(resolveUrl("http://10.0.0.5:7812", { shape: "compose" })).toBe("http://10.0.0.5:7812");
-    expect(resolveUrl("https://mac-studio.tailee85c6.ts.net", { shape: "launchd" })).toBe("https://mac-studio.tailee85c6.ts.net");
+    expect(resolveUrl("https://mac-studio.example.ts.net", { shape: "launchd" })).toBe("https://mac-studio.example.ts.net");
   });
 
   it("inside a container under the compose shape the url is already right", () => {

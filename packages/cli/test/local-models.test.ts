@@ -464,7 +464,7 @@ describe("the supervisor child (darwin)", () => {
 
 describe("the seed template", () => {
   it("validates against the schema through the same reader `providers add` uses, and does not take the console's port", async () => {
-    const { name, block } = await readTemplate(join(REPO, "seed"), "llamaserver");
+    const { name, block } = await readTemplate({ seedDir: join(REPO, "seed"), instanceDir: await mkdtemp(join(tmpdir(), "metistry-no-instance-")) }, "llamaserver");
     expect(name).toBe("llamaserver");
     const p = providerSchema.parse(block);
     expect(p.serve).toMatchObject({ runtime: "llamaserver", port: LLAMASERVER_DEFAULT_PORT, extra_args: [] });

@@ -74,7 +74,7 @@ export const LOCAL_SERVER_NAMES = ["lmstudio", "ollama", "llamaserver", "applefm
 export type LocalServerName = (typeof LOCAL_SERVER_NAMES)[number];
 
 /**
- * What `seed/compute-templates/llamaserver.yaml` writes — NOT llama.cpp's
+ * What `seed/compute-templates/llamaserver/manifest.yaml` writes — NOT llama.cpp's
  * own 8080, which is already the Metistry console's default port
  * (`CONSOLE_DEFAULT_PORT`). 7813 continues the loopback block the bridges
  * use (apple-fm 7810, eventkit 7811, reconciler 7812). The port in

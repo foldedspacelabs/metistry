@@ -1,3 +1,4 @@
+schema: 1
 name: apple-fm
 type: bridge
 description: Apple Foundation Models on-device — an OpenAI-compatible /v1 provider surface (runtime JSON schemas, PoC-19) plus the classify route (PoC-3). Free tier, cost 0.

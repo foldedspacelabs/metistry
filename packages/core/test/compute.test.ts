@@ -4,6 +4,7 @@
 // rivet adopt, plan refresh §1 R3) rather than a generic type error, and a
 // half-written save must never take a running install's assignments away.
 import { readFileSync } from "node:fs";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { describe, expect, it } from "vitest";
 import {
   COMPUTE_FILES_DEFAULT,
@@ -112,10 +113,15 @@ describe("compute.yaml schema", () => {
     expect(resolveAssignment(cfg, "nonesuch")).toMatchObject({ from: "default", critical: true });
   });
 
+  /** A shipped template's `provider:` block, as compute.yaml would carry it under `providers.<name>`. */
+  const template = (name: string): string => {
+    const m = parseYaml(readFileSync(new URL(`../../../seed/compute-templates/${name}/manifest.yaml`, import.meta.url), "utf8")) as { name: string; provider: unknown };
+    return stringifyYaml({ providers: { [m.name]: m.provider } });
+  };
+
   it("every shipped provider template is a valid provider block", () => {
-    for (const name of ["openrouter", "lmstudio", "ollama"]) {
-      const text = readFileSync(new URL(`../../../seed/compute-templates/${name}.yaml`, import.meta.url), "utf8");
-      const cfg = parseCompute(`providers:\n${text.split("\n").filter((l) => !l.startsWith("#")).map((l) => (l.trim() === "" ? l : `  ${l}`)).join("\n")}`);
+    for (const name of ["openrouter", "lmstudio", "ollama", "llamaserver", "applefm"]) {
+      const cfg = parseCompute(template(name));
       expect(Object.keys(cfg.providers)).toEqual([name]);
     }
   });
@@ -124,12 +130,10 @@ describe("compute.yaml schema", () => {
     const cfg = parseCompute(SKETCH);
     expect(cfg.providers.openrouter?.caching).toBeUndefined();   // the sketch predates the field: nothing is sent for it
     expect(cfg.providers.lmstudio?.caching).toBeUndefined();
-    const text = readFileSync(new URL("../../../seed/compute-templates/openrouter.yaml", import.meta.url), "utf8");
-    const tmpl = parseCompute(`providers:\n${text.split("\n").filter((l) => !l.startsWith("#")).map((l) => (l.trim() === "" ? l : `  ${l}`)).join("\n")}`);
+    const tmpl = parseCompute(template("openrouter"));
     expect(tmpl.providers.openrouter?.caching).toBe("auto");
     for (const name of ["lmstudio", "ollama", "llamaserver", "applefm"]) {
-      const other = readFileSync(new URL(`../../../seed/compute-templates/${name}.yaml`, import.meta.url), "utf8");
-      expect(other).not.toContain("caching:");
+      expect(template(name)).not.toContain("caching:");
     }
   });
 

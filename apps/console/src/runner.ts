@@ -20,12 +20,10 @@
 // message names the environment variable or manifest field that would fix
 // it.
 
-import { readFile } from "node:fs/promises";
-import { parse as parseYaml } from "yaml";
+import { dirname } from "node:path";
 import {
   startRun,
   finishRun,
-  validateManifest,
   scheduleToSeconds,
   blockedConfigMessage,
   errorSignature,
@@ -44,6 +42,7 @@ import {
   emptyCompute,
   type Compute,
   type ComponentStreak,
+  type Manifest,
   type PreflightMiss,
   type Requirements,
   type TemplateQueries,
@@ -150,25 +149,38 @@ function resolve(opts: RunnerOptions): ResolvedOptions {
   };
 }
 
-export async function loadSchedules(
-  registered: RegisteredCollector[],
-  collectorsDir: string,
-): Promise<ScheduledCollector[]> {
+/**
+ * A collector or routine as its registry loaded it (plan §2.7): the manifest
+ * in force — the product's, or the owner's extension that replaced it — and
+ * the product code that runs it (collectors/index.ts, routines/index.ts).
+ */
+export interface ComponentUnit {
+  name: string;
+  manifest: Manifest;
+  /** the manifest file in force, so a refusal can name the file you would edit */
+  path: string;
+  run: RegisteredCollector["run"];
+}
+
+/**
+ * The schedule of every loaded unit. The registry has already validated each
+ * manifest and skipped what it could not load, with the reason; what is left
+ * to refuse here is a schedule this build's `scheduleToSeconds` cannot parse
+ * — skipped and logged the same way, never fatal, so one bad manifest
+ * (shipped or the owner's) cannot take every OTHER component down with it.
+ * Most frequent first.
+ */
+export async function loadSchedules(units: readonly ComponentUnit[]): Promise<ScheduledCollector[]> {
   const out: ScheduledCollector[] = [];
-  for (const c of registered) {
-    const dir = `${collectorsDir}/${c.name}`;
-    // One bad manifest must not take the runner down (enforce at the tool,
-    // not by trusting every manifest a component ships to be one this
-    // build's scheduleToSeconds understands): skip it and log why, so every
-    // OTHER component still starts.
+  for (const u of units) {
+    const dir = dirname(u.path);
     try {
-      const manifest = validateManifest(parseYaml(await readFile(`${dir}/manifest.yaml`, "utf8")));
-      if (!manifest.ok) throw new Error(`invalid manifest: ${manifest.errors.join("; ")}`);
-      const m = manifest.manifest;
+      const m = u.manifest;
       if (m.type !== "collector" && m.type !== "routine") throw new Error(`not schedulable (type ${m.type})`);
       if (m.schedule === undefined) throw new Error(`no schedule`);
       out.push({
-        ...c,
+        name: u.name,
+        run: u.run,
         dir,
         requires: requirementsOf(m),
         intervalSec: scheduleToSeconds(m.schedule),
@@ -176,10 +188,14 @@ export async function loadSchedules(
         ...(m.type === "collector" && m.uses_model ? { usesModel: m.uses_model } : {}),
       });
     } catch (e) {
-      console.warn(`${c.name}: skipped — ${(e as Error).message} (fix ${dir}/manifest.yaml)`);
+      console.warn(`${u.name}: skipped — ${(e as Error).message} (fix ${u.path})`);
     }
   }
-  return out;
+  // A tick runs what is due one after another, so order is latency: the
+  // most frequent component first (inbox-drain, every five minutes, is what
+  // a capture waits on), then by name — a rule, where the old static list
+  // had an order nobody wrote down.
+  return out.sort((a, b) => a.intervalSec - b.intervalSec || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 }
 
 // ---- bookkeeping rows (one per window, never one per tick) -----------------

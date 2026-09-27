@@ -1,7 +1,12 @@
 # Ollama — the OpenAI-compatible surface it serves alongside its own API.
 # on_machine, so nothing leaves and nothing is billed. `ollama pull <model>`
 # first; `metistry compute models list --provider ollama` shows what is there.
-ollama:
+schema: 1
+name: ollama
+type: provider
+description: Ollama's OpenAI-compatible server — on this Mac, no cost
+# the block `metistry compute providers add --from ollama` writes into compute.yaml
+provider:
   kind: openai-compatible
   base_url: http://127.0.0.1:11434/v1
   locality: on_machine

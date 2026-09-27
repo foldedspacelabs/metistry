@@ -7,6 +7,7 @@ import {
   EMBED_DEFAULT_MODEL,
   EMBED_DEFAULT_URL,
   EmbedClient,
+  extensionsDirFromEnv,
   firstOnMachineBaseUrl,
   INSTANCE_LAYOUT,
   instancePresence,
@@ -19,14 +20,15 @@ import {
   ROUTINE_TIER,
   SPEND_QUERY,
   type PreflightMiss,
+  type RegistrySkip,
   type SpendRow,
 } from "@foldedspacelabs/metistry-core";
 import { QueryStore } from "@foldedspacelabs/metistry-queries";
 import { makePool } from "./db.js";
 import { makeServer } from "./server.js";
 import { pushConfigFromEnv, startNotifier } from "./push.js";
-import { collectors } from "@metistry-apps/collectors";
-import { routines } from "@metistry-apps/routines";
+import { loadCollectors } from "@metistry-apps/collectors";
+import { loadRoutines } from "@metistry-apps/routines";
 import { loadSchedules, routineCapabilities, startRunner } from "./runner.js";
 import { loadRules } from "./router.js";
 import { watchCompute } from "./compute.js";
@@ -106,11 +108,27 @@ const applyAssignments = (): void => {
 const compute = await watchCompute(pool, "console", applyAssignments);
 applyAssignments();
 
-// D4 overlay for compute targets (§4.18): product dir first, instance dirs after.
+// Extensions (plan §2.7, M15): the owner's units in `.metistry/extensions/`,
+// loaded through the same registries as the product's. Only a console that
+// can see its instance has any — the compose console mounts none (D5).
+const extensionsDir = extensionsDirFromEnv(process.env);
+console.log(extensionsDir ? `extensions: ${extensionsDir}` : "extensions: none — METISTRY_INSTANCE_DIR is unset, so product units only");
+/** One line per unit a registry refused: never fatal, never silent (plan §2.7). */
+const logSkips = (kind: string, skipped: readonly RegistrySkip[]): void => {
+  for (const s of skipped) console.warn(`${kind} ${s.name ?? s.path}: skipped — ${s.reason} (${s.path})`);
+};
+
+// Compute targets (§4.18) load through the target registry: the FIRST
+// METISTRY_TARGETS_DIRS entry is the product's, every later one the owner's
+// overlay, then the extensions directory; an owner's unit wins by name (D4).
+const [productTargets, ...ownerTargets] = optionalEnv("METISTRY_TARGETS_DIRS", `targets:${INSTANCE_LAYOUT.targetsDir}`).split(":");
 const targets = new TargetRegistry();
-for (const dir of optionalEnv("METISTRY_TARGETS_DIRS", `targets:${INSTANCE_LAYOUT.targetsDir}`).split(":")) {
-  await targets.loadDir(dir);
-}
+await targets.load([
+  ...(productTargets ? [{ dir: productTargets, origin: "product" as const }] : []),
+  ...ownerTargets.map((dir) => ({ dir, origin: "extension" as const })),
+  ...(extensionsDir ? [{ dir: extensionsDir, origin: "extension" as const }] : []),
+]);
+logSkips("target", targets.skipped);
 console.log(`targets: ${targets.names().join(", ") || "(none)"}`);
 
 // METISTRY_ORIGIN may be a comma-separated list; the FIRST entry is
@@ -312,11 +330,14 @@ const server = makeServer(pool, queries, {
 });
 if (push) startNotifier(pool, push);
 
-// routine runner (SHOULD-8): collectors scheduled from their manifests
-const scheduled = [
-  ...(await loadSchedules(collectors, optionalEnv("METISTRY_COLLECTORS_DIR", "collectors"))),
-  ...(await loadSchedules(routines, optionalEnv("METISTRY_ROUTINES_DIR", "routines"))),
-];
+// routine runner (SHOULD-8): collectors and routines scheduled from their
+// manifests, each loaded through its registry (plan §2.7) — the product's
+// directory, then the owner's extensions — and joined to its product code.
+const loadedCollectors = await loadCollectors({ home: optionalEnv("METISTRY_COLLECTORS_DIR", "collectors"), extensionsDir });
+const loadedRoutines = await loadRoutines({ home: optionalEnv("METISTRY_ROUTINES_DIR", "routines"), extensionsDir });
+logSkips("collector", loadedCollectors.skipped);
+logSkips("routine", loadedRoutines.skipped);
+const scheduled = [...(await loadSchedules(loadedCollectors.collectors)), ...(await loadSchedules(loadedRoutines.routines))];
 // The routine pause (C5): a routine that declares `requires.engine` is not
 // started at all when the tier its turn would run on is over a `stop` budget
 // — the same verdict the engine's guard reaches, from the same `spend` query

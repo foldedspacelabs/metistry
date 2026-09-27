@@ -9,7 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import { QueryStore } from "@foldedspacelabs/metistry-queries";
 import { mintToken } from "@foldedspacelabs/metistry-core";
-import { collectors } from "@metistry-apps/collectors";
+import { collectorCode } from "@metistry-apps/collectors";
 import { makeServer } from "../src/server.js";
 import { TargetRegistry } from "../src/dispatch.js";
 import * as store from "../src/auth-store.js";
@@ -169,7 +169,9 @@ describe.skipIf(!hasDb)("dispatch (integration)", () => {
 
   // ----- return path: nothing new — github-state already reconciles the ref -----
   it("github-state upserts onto the dispatched row by ref (no duplicate), then closes it when the issue closes", async () => {
-    const githubState = collectors.find((c) => c.name === "github-state")!;
+    const code = await collectorCode("github-state"); // the registry's lookup: the product's code, by name
+    if (typeof code !== "function") throw new Error(code.missing);
+    const githubState = { run: code };
     const ctx = { githubToken: "read-t", githubRepos: [REPO], fetchFn } as Parameters<typeof githubState.run>[1];
     await githubState.run(pool, ctx);
     const open = await pool.query(`SELECT id, title, status FROM work WHERE external_ref = $1`, [`gh:${REPO}#42`]);

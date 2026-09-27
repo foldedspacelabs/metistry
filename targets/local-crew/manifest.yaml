@@ -10,6 +10,7 @@
 # (apps/console/src/dispatch.ts `checkBrief`), against a policy that is this
 # target's `data_policy` narrowed by the crew's `scope`: a brief may cite a
 # vault path only if it is under BOTH. Refused briefs never become a work row.
+schema: 1
 name: local-crew
 type: target
 description: Run a manifest-defined crew locally in the assistant container — durable work row in, report queue + runs out

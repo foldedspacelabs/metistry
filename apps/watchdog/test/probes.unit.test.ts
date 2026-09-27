@@ -153,10 +153,10 @@ function fakeDb(world: FakeWorld) {
 async function manifestDirs() {
   const root = await mkdtemp(join(tmpdir(), "wd-manifests-"));
   await mkdir(join(root, "collectors", "fast"), { recursive: true });
-  await writeFile(join(root, "collectors", "fast", "manifest.yaml"), `name: fast\ntype: collector\nschedule: "*/5 * * * *"\nwrites: [x]\n`);
+  await writeFile(join(root, "collectors", "fast", "manifest.yaml"), `schema: 1\nname: fast\ntype: collector\nschedule: "*/5 * * * *"\nwrites: [x]\n`);
   await mkdir(join(root, "collectors", "notes"), { recursive: true }); // no manifest → not a component
   await mkdir(join(root, "routines", "slow"), { recursive: true });
-  await writeFile(join(root, "routines", "slow", "manifest.yaml"), `name: slow\ntype: routine\nschedule: "@daily"\n`);
+  await writeFile(join(root, "routines", "slow", "manifest.yaml"), `schema: 1\nname: slow\ntype: routine\nschedule: "@daily"\n`);
   return { collectorsDir: join(root, "collectors"), routinesDir: join(root, "routines") };
 }
 
@@ -188,9 +188,36 @@ async function cfgFor(extra: Partial<ProbeConfig> = {}): Promise<ProbeConfig> {
 describe("probes over a fake db", () => {
   it("manifest discovery: directories with a collector/routine manifest, interval from core's parser", async () => {
     const dirs = await manifestDirs();
-    expect(await loadScheduled(dirs.collectorsDir)).toEqual([{ name: "fast", runKind: "collector_run", schedule: "*/5 * * * *", intervalSec: 300 }]);
-    expect(await loadScheduled(dirs.routinesDir)).toEqual([{ name: "slow", runKind: "routine_run", schedule: "@daily", intervalSec: 86400 }]);
-    expect(await loadScheduled(join(dirs.routinesDir, "does-not-exist"))).toEqual([]);
+    expect(await loadScheduled(dirs)).toEqual({
+      scheduled: [
+        { name: "fast", runKind: "collector_run", schedule: "*/5 * * * *", intervalSec: 300 },
+        { name: "slow", runKind: "routine_run", schedule: "@daily", intervalSec: 86400 },
+      ],
+      skipped: [],
+    });
+    expect(await loadScheduled({ collectorsDir: join(dirs.routinesDir, "does-not-exist"), routinesDir: join(dirs.routinesDir, "nor-this") })).toEqual({ scheduled: [], skipped: [] });
+  });
+
+  it("manifest discovery reads the owner's extensions through the same registry: an overlay moves the schedule, a new name is not waited for", async () => {
+    const dirs = await manifestDirs();
+    const extensionsDir = await mkdtemp(join(tmpdir(), "wd-extensions-"));
+    await mkdir(join(extensionsDir, "fast"), { recursive: true });
+    await writeFile(join(extensionsDir, "fast", "manifest.yaml"), `schema: 1\nname: fast\ntype: collector\nschedule: "@hourly"\nwrites: [x]\n`);
+    await mkdir(join(extensionsDir, "mine"), { recursive: true }); // no product collector of that name → no code → the console never runs it
+    await writeFile(join(extensionsDir, "mine", "manifest.yaml"), `schema: 1\nname: mine\ntype: collector\nschedule: "@hourly"\nwrites: [x]\n`);
+    const { scheduled, skipped } = await loadScheduled({ ...dirs, extensionsDir });
+    expect(scheduled.find((s) => s.name === "fast")).toMatchObject({ schedule: "@hourly", intervalSec: 3600 });
+    expect(scheduled.map((s) => s.name)).not.toContain("mine");
+    expect(skipped).toEqual([expect.objectContaining({ name: "mine", reason: expect.stringContaining("no product collector is named \"mine\"") })]);
+  });
+
+  it("a manifest the registry refuses is skipped with its reason, never thrown", async () => {
+    const dirs = await manifestDirs();
+    await mkdir(join(dirs.collectorsDir, "old"), { recursive: true });
+    await writeFile(join(dirs.collectorsDir, "old", "manifest.yaml"), `name: old\ntype: collector\nschedule: "@hourly"\nwrites: [x]\n`); // no schema: 1
+    const { scheduled, skipped } = await loadScheduled(dirs);
+    expect(scheduled.map((s) => s.name)).toEqual(["fast", "slow"]);
+    expect(skipped).toEqual([expect.objectContaining({ reason: "schema: missing — every manifest carries schema: 1" })]);
   });
 
   it("assistant-drain: a queue nobody is draining is `absent` when the assistant is not a supervisor child (W1), and still failed when it is", async () => {

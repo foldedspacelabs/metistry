@@ -1432,7 +1432,7 @@ agent's pass, per the PR close rule; the owner reviews at checkpoints.
 | W0 | F-0, F-1…F-14, T1-4, T1-5, T7-1, T8-1 |
 | W1 | T1-1, T1-2, T1-3, T1-6, T1-7, T1-8, T1-9, T1-11, T1-12, T1-14, T1-15 · T2-1, T2-2, T2-4 → T2-5, T2-6, T2-15, T2-16, T2-17, T2-18 · T3-1, T3-2, T3-4, T3-9 · T4-1 → T4-2, T4-3; T4-4, T4-5, T4-6, T4-20, T4-21 · T5-1, T5-2, T5-3 · T7-2 · T9-1 · T10-1 → T10-3, T10-2 · X-2, X-3, X-4, X-5 |
 | W2 | T1-10, T1-13 · T2-3, T2-7, T2-8, T2-9, T2-10, T2-11, T2-14 · T3-3, T3-5 → T3-6, T3-7, T3-12 · T4-7, T4-8a → T4-8b, T4-24; T4-18 · T5-4a, T5-4b, T5-5, T5-6, T5-7 · T6-1a, T6-1b, T6-2, T6-3 · T7-3a, T7-3b, T7-7 · T9-2 · T10-4 → T10-5, T10-6 |
-| W3 | T2-12, T2-13 · T3-8, T3-10, T3-11 · T4-9, T4-12 → T4-13, T4-19, T4-22, T4-23, T4-25, T4-26 · T6-4…T6-11 · T7-4, T7-5 · T8-2a → T8-2b, T8-6 · T9-3 · T10-7 |
+| W3 | T2-12, T2-13 · T3-8, T3-10, T3-11 · T4-9, T4-12 → T4-13, T4-19, T4-22, T4-23, T4-25, T4-26 · T6-4…T6-11 · T7-4, T7-5 · T8-2a → T8-2b, T8-6 · T9-3 · T10-7 · X-6…X-23 |
 | W4 | T4-10 → T4-11, T4-14; T4-15 → T4-17 · T6-12, T6-13a, T6-13b, T6-14, T6-15, T6-16 · T7-6 · T8-3, T8-4, T8-5, T8-7 · T9-4 (merges after the eval clears its bar) |
 | W5 | X-1 |
 
@@ -2786,6 +2786,165 @@ centralised. Both read F-5's table instead.
 *Tests:* **no row offers Skip; every kind renders the table's word**.
 *Accept:* —
 
+#### X — Follow-ups ruled at the W2 checkpoint
+
+The owner's rulings of 2026-09-27 (`docs/product/decisions-log.md`, *Ruled at the
+W2 checkpoint*) that no ticket already carried; each is its own PR, outside any
+track's files, and names its ruling by number.
+
+**X-6 · `/vault/log` is the owner's** · S · W3 · deps T10-4 —
+*Spec:* Ruling 1: the reconciler's `GET /vault/log` is narrowed to the owner like
+`/vault/show` — its `.metistry/` subjects never reach an agent bearer (§2.21).
+*Files:* `apps/reconciler/src/server.ts`, `apps/reconciler/src/vault.ts`.
+*Tests:* **an agent bearer never sees a `.metistry/` subject; the owner's
+`GET /api/knowledge/history` still does**.
+*Accept:* —
+
+**X-7 · A provider key's grantee, and compute through the egress guard** · M · W3 · deps T4-18, T4-2 —
+*Spec:* Ruling 2: `secrets.yaml` gains a provider-key grantee (`provider:<name>`
+beside `connection:` and `agent:`), and every compute call is routed through T4-2's
+egress guard, so a provider key reaches only its provider's host.
+*Files:* `packages/core/src/secrets.ts`, `packages/core/src/egress.ts`,
+`packages/core/src/compute.ts`, `packages/core/src/embed.ts`,
+`apps/assistant/src/engine-openai.ts`, `collectors/compute-client.ts`.
+*Tests:* **a provider key without its grant is refused before dialling; a compute
+call to a host outside the provider's is refused by the guard**.
+*Accept:* —
+
+**X-8 · An agent's connection grants persist** · S · W3 · deps T4-8b —
+*Spec:* Ruling 5: an agent's connection grant persists in the agent's grants —
+the console's `validateGrants` and `coerceGrants` keep `connections`.
+*Files:* `apps/console/src/agents.ts`, `packages/mcp-brain/src/access.ts`.
+*Tests:* **a `connections` grant written through the console reads back unchanged,
+and a crew still needs both `uses: [connections]` and the grant**.
+*Accept:* —
+
+**X-9 · Restore is the Mac's** · S · W3 · deps T10-5 —
+*Spec:* Ruling 7: §2.3 wins — `POST /api/knowledge/restore`'s reach becomes
+`local`, so restore is not reachable from the phone (§2.1).
+*Files:* `packages/core/src/client-api.ts`, `apps/console/src/knowledge-routes.ts`,
+`docs/ops/client-api.md`.
+*Tests:* U2; **a passkey session is answered `local_only`; the local owner token
+still raises the request**.
+*Accept:* —
+
+**X-10 · A report is acknowledged; an agent reads its answer** · M · W3 · deps T2-3 —
+*Spec:* Ruling 8: a report gets an acknowledge answer, which knowledge-fold reads,
+and an agent can read back the owner's answer to its own question — never another
+agent's.
+*Files:* `packages/core/src/requests.ts`, `apps/console/src/server.ts`,
+`packages/mcp-brain/src/report.ts`, `routines/knowledge-fold/run.ts`,
+`docs/ops/client-api.md`.
+*Tests:* **an acknowledged report is read by the fold; an agent reads its own
+question's answer and is refused another's**.
+*Accept:* —
+
+**X-11 · The routine folders take a create again** · S · W3 · deps T3-6 —
+*Spec:* Ruling 9: the assistant may create files in `Journal/Brief/`,
+`Journal/Standup/` and `Journal/Plan/` again — T3-6's create refusal is relaxed;
+the routine still writes its own file and the marked-slot fill stays (§2.13).
+*Files:* `packages/mcp-brain/src/knowledge-write.ts`.
+*Tests:* **the assistant creates a new file in each folder; a file the routine
+wrote still takes only its slot lines**.
+*Accept:* —
+
+**X-12 · Add to Today** · S · W3 · deps T2-7, T4-24 —
+*Spec:* Ruling 11: Linear issues stay in work and Needs You, not the Board (T4-24,
+accepted); a route puts a work item — a Linear issue among them — on Today.
+*Files:* `apps/console/src/today-routes.ts`, `packages/core/src/client-api.ts`,
+`docs/ops/client-api.md`.
+*Tests:* U2; **an item added to a day outside Today's window is refused**.
+*Accept:* F-7's `get-api-today` fixture still matches.
+
+**X-13 · A budget refusal is a report** · S · W3 · deps T3-12 —
+*Spec:* Ruling 12: `apps/assistant`'s `budgets.ts` raises a budget refusal as a
+`report`, not a `decision` (C96).
+*Files:* `apps/assistant/src/budgets.ts`.
+*Tests:* **a refused turn over budget raises one `report` and no `decision`**.
+*Accept:* —
+
+**X-14 · The `where:` grammar reaches Slipping and Owed** · M · W3 · deps T2-7, T6-1a —
+*Spec:* Ruling 14: `compileTaskFilter`'s `where:` grammar gains a carry count, a
+"names a person" facet and negation, so Slipping and Owed are real views, not
+approximations.
+*Files:* `packages/core/src/task-filter.ts`, `seed/queries/vault_tasks_query.yaml`,
+`apps/console/src/`.
+*Tests:* **Slipping and Owed each compile to one parameterised query; a negated
+facet never interpolates a value**.
+*Accept:* —
+
+**X-15 · Run Now after 23:00 re-renders the plan** · S · W3 · deps T3-7 —
+*Spec:* Ruling 15: Run Now on Tomorrow's Plan after its 23:00 run re-renders the
+plan instead of staying silent.
+*Files:* `routines/plan-tomorrow/`, `apps/console/src/scheduled-routes.ts`.
+*Tests:* **Run Now after the 23:00 run rewrites `Journal/Plan/<tomorrow>.md` and
+records `acted`**.
+*Accept:* —
+
+**X-16 · `{{ calendar }}` sanitises its titles** · S · W3 · deps T3-6 —
+*Spec:* Ruling 16: core's `{{ calendar }}` sanitises event titles, the same
+one-line rule the brief's section applies.
+*Files:* `packages/core/src/template.ts`.
+*Tests:* **a title carrying a newline, a heading, a marker or a wikilink renders
+inert on one line**.
+*Accept:* —
+
+**X-17 · A snooze that expires is an event** · S · W3 · deps T5-7 —
+*Spec:* Ruling 17: the console emits `needs_you.changed` when a snoozed request's
+snooze expires (§2.20).
+*Files:* `apps/console/src/events.ts`, `apps/console/src/server.ts`.
+*Tests:* **one `needs_you.changed` when the snooze expires, and none before**.
+*Accept:* —
+
+**X-18 · `GET /api/messages` carries `turn_id`** · S · W3 · deps T6-2 —
+*Spec:* Ruling 18: `GET /api/messages` gains `turn_id` (additive; `api_version`
+stays 1), so an older reply draws its tool strip.
+*Files:* `apps/console/src/server.ts`, `docs/ops/client-api.md`,
+`apps/macos/sources/kit/stores/chat-store.swift`.
+*Tests:* **a reply with a turn carries its `turn_id`; one without carries
+`null`**.
+*Accept:* F-7's `get-api-messages` fixture re-recorded with `turn_id`.
+
+**X-19 · The offline capture queue is persisted** · S · W3 · deps T5-5 —
+*Spec:* Ruling 19: the Mac's offline capture queue is persisted, in a store beyond
+the preferences allowlist (approved).
+*Files:* `apps/macos/sources/kit/stores/capture-store.swift`.
+*Tests:* **a capture queued offline survives a relaunch and is sent exactly
+once**.
+*Accept:* —
+
+**X-20 · `init --shape` and `--keep-awake`** · S · W3 —
+*Spec:* Ruling 23: `metistry init --shape` is defined (default `launchd` on
+macOS) and `--keep-awake` follows the chosen shape.
+*Files:* `packages/cli/src/init.ts`, `docs/ops/cli.md`,
+`docs/ops/deployment-shapes.md`.
+*Tests:* **`init` on macOS with no `--shape` takes `launchd`; `--keep-awake` is
+refused for a shape that cannot hold the Mac awake**.
+*Accept:* —
+
+**X-21 · A routine's display name on Activity** · S · W3 · deps T1-3, T6-3 —
+*Spec:* Ruling 25: `activity_feed` carries a routine's display name, so a
+routine's subject never shows its raw component id.
+*Files:* `seed/queries/activity_feed.yaml`,
+`apps/macos/sources/kit/activity-view.swift`.
+*Tests:* **a routine row's subject is its display name**.
+*Accept:* F-7's `get-api-q-activity_feed` fixture re-recorded.
+
+**X-22 · The Mac reads `request.questions`** · S · W3 · deps T5-4b —
+*Spec:* Ruling 26: the Mac reads a request's questions from `request.questions`,
+not `payload`.
+*Files:* `apps/macos/sources/kit/request-bodies/question-steps.swift`.
+*Tests:* **a request whose payload has no `questions` still draws its questions**.
+*Accept:* —
+
+**X-23 · `connection_call` on Activity and turn progress** · S · W3 · deps T1-3, T2-17, T4-8b —
+*Spec:* Ruling 28: `activity_feed` and `turn_progress` surface `connection_call`
+rows.
+*Files:* `seed/queries/activity_feed.yaml`, `seed/queries/turn_progress.yaml`.
+*Tests:* **a `connection_call` run appears in both queries, with no argument or
+secret value**.
+*Accept:* —
+
 #### W5 — Acceptance
 
 **X-1 · The document sweep** · S · W5 — glossary, `reply-feedback.md`, `board.md`,
@@ -2813,15 +2972,15 @@ the designer.
 | W0 | 19 | 38 |
 | W1 | 44 | 119.5 |
 | W2 | 35 | 128.5 |
-| W3 | 28 | 105 |
+| W3 | 46 | 127.5 |
 | W4 | 17 | 65 |
 | W5 | 1 | 1 |
-| **Total** | **144** | **≈ 457** (±30 %) |
+| **Total** | **162** | **≈ 479.5** (±30 %) |
 
 **Revised from ≈ 411.** Added by the answers and the additions: real-time events
 (10: T2-18, T5-7, T7-7), vault git (22.5: T10), Linear (10: T4-24…T4-26), Tomorrow's
-Plan after the fold (1.5), F-0 (1), the W0 freeze fixes (5.5: X-2…X-5). Removed: the Gmail API (5, §4 Q8). **≈ 8 weeks
-of calendar time at ~12 concurrent implement agents** (457 / 12 ≈ 38 working
+Plan after the fold (1.5), F-0 (1), the W0 freeze fixes (5.5: X-2…X-5), the W2 checkpoint follow-ups (22.5: X-6…X-23, ruled 2026-09-27). Removed: the Gmail API (5, §4 Q8). **≈ 8 weeks
+of calendar time at ~12 concurrent implement agents** (479.5 / 12 ≈ 40 working
 days); the critical path is still **35 agent-days** — F-3 → T4-1 → T4-2 → T4-8a →
 T4-8b → T4-9 → T4-10 → T4-11, secrets into connections — so ~15 agents would bring
 it to ≈ 7.

@@ -22,7 +22,8 @@ path.
   *Metistry* on every screen, the Go · Capture · Item menus with every
   shortcut in them, Help ▸ Keyboard Shortcuts, and the Needs You count on the
   Dock. The screens behind the rows are their own tickets; until one lands its
-  detail says so and offers the web app.
+  detail says so and offers the web app. Needs You, Activity, Chat and Today's top
+  (the brief, Next Up, Close the Day — "Today" below) have landed.
 - **Status.** Its own window now (Window ▸ Status), no longer a sidebar row.
   Runs `metistry doctor --json` and renders the rows to the design
   system's §3.13 — grouped by doctor's own `kind`, `absent` shown in absent
@@ -1189,6 +1190,61 @@ Tapbacks are the board's two thumbs beside the name and the turn's right-click
 menu (P8); Bad asks for an optional note. The Chat row in the sidebar carries
 one `agent` dot while a turn works — presence, not a badge — and the model keeps
 watching a working turn after the owner walks away.
+
+## Today: the brief, Next Up, Close the Day
+
+`sources/kit/today-view.swift` is the Today row's screen, and
+`today-brief-view.swift` its top (T6-1b, screen-05-today.md §15.1–15.3,
+§15.5). `AppModel.today` holds the model, so a folded brief, a closed day and
+a dismissed offer outlive a trip elsewhere; an instance switch drops it. The
+spine, NOW and the day bar are T6-1a's; until then the day under the top is
+its meetings and tasks as plain rows.
+
+- **What it reads.** `GET /api/today` (T2-7) for the day; the brief
+  (`Journal/Brief/<date>.md`, T3-6) and the Standup routine's file (C111)
+  through `GET /api/knowledge/page`; `Me/profile.md`'s `working_days` and
+  `working_hours`, the two fields the routines read; `GET
+  /api/scheduled/routines/morning-brief` only when the brief is missing, to
+  tell a failed run from one not due yet; tomorrow's shape from `GET
+  /api/today?date=<tomorrow>` while Close the Day is open.
+- **The Morning Brief.** One wash — the file's first paragraph, the
+  configured name with the spark, *written, not retrieved* — then Standup
+  collapsed with **Copy Standup** (the app target hands the kit the
+  pasteboard) and *Metistry doesn't post this*, then the foot: *The plan is
+  the day below · 7 tasks, 2 carried · <file>*. It folds to its first
+  sentence on the next open once it has been on screen (scrolled past, or
+  left); a click reopens it; nothing folds under the reader. Missing, it says
+  why — no working days, the run failed (when, and when next), not written
+  yet, unreadable — and that the day below is still complete.
+- **Next Up** from thirty minutes before the next timed meeting: title,
+  time, place, who; **what you owe them** — open tasks whose person facet
+  names an attendee and are not `waiting` — tickable through the Tick door;
+  the brief's one written line for that meeting; **Open Notes**
+  (`POST /api/meetings/:event_id/note`, opened in Obsidian), **Record**
+  (dimmed with its reason until the capture bar lands, #253) and **Draft the
+  Agenda**, which sends one chat message naming the meeting and what is owed.
+  The standup gets two lines and Copy Standup. After the last meeting:
+  *Nothing else on your calendar today.*
+- **One voice open, three predictions.** The brief is the open wash; opening
+  Next Up's line folds it, and while Close the Day holds the top the brief is
+  its line. Every prediction goes through `TodayPredictions.page` (three).
+- **Calendar help** is computed here, not written: when no 90-minute stretch
+  is left in the working day and moving one meeting (at least 30 minutes out)
+  would leave one, a line says so beside **Move the <meeting>…** and **Not
+  Today** (today only). The move asks the preview first; with other people in
+  it, a neutral confirmation names who the calendar will tell and the new
+  time (C90), and only then is the single-use token sent. The owner's own
+  meeting moves on the token without the warning.
+- **Close the Day** takes the top from thirty minutes before `working_hours`
+  ends (never on its own without them — *Close the Day…* in the header opens
+  it early): Done (a count, the first three), Still Open and Owed to People
+  each with **Tomorrow · This Week · Someday** through the Defer door, the
+  next working day's shape, and an optional line. **Close the Day** is `POST
+  /api/today/close`; it folds to *Day closed at 5:14 PM · 6 done · 3 to
+  tomorrow · 1 this week · 1 someday* with Reopen and the file it wrote. `409
+  section_missing` is shown as the request it raised — *Today's Note Wasn't
+  Updated*, why, and **Open the Request** — never as a success; `409 stale`
+  and `404` keep the panel open and say why.
 
 ## Build and run it
 

@@ -9,7 +9,7 @@ tags: [template]
 
 ## Yesterday
 
-{{ tasks where: "done = yesterday" order: "priority" as: "list" }}
+{{ tasks where: "done = yesterday and status = done" order: "priority" as: "list" }}
 
 ## Today
 

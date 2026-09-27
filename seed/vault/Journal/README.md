@@ -8,7 +8,7 @@ Alongside it, Metistry keeps three machine-owned files nobody else writes:
 - `Plan/<date>.md` — tomorrow's plan, written by `plan-tomorrow` the
   evening before.
 - `Standup/<date>.md` — a yesterday / today / blockers draft, written by
-  `standup-draft` each morning.
+  the `standup` routine each morning.
 - `Fold/<date>.md` — what happened and what was decided, written by the
   evening fold.
 

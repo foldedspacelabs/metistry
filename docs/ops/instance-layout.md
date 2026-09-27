@@ -16,7 +16,7 @@ the root, TitleCase, exactly where Obsidian already opens it.
   Journal/            the user's own daily note, `<date>.md` (one writer, §5.1)
     Plan/             plan-tomorrow's file, one per evening — machine-owned
     Fold/             the evening fold's file, one per day — machine-owned
-    Standup/          standup-draft's file, one per morning — machine-owned
+    Standup/          the standup routine's file, one per morning — machine-owned
     Meetings/         the user's own meeting notes, `<date>-<topic>.md`
   Templates/          Daily/Meeting/Plan/Standup/Fold/Weekly.md — user-owned,
                       stamped by `metistry init` (docs/product/daily-flow-spec.md §6.1)

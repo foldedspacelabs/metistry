@@ -31,6 +31,9 @@
 //     `HTTPS_PROXY`, and git/curl answers a `407` challenge.
 
 import { z } from "zod";
+import type { SecretRedactor } from "./redact.js";
+import type { RunExecutor } from "./runs.js";
+import { SECRET_USE_META_KEY, fillSecretRefs, parseSecretGrantee, secretGrant, secretRefsIn, type SecretSource, type SecretsFile } from "./secrets.js";
 
 /** `metistry up` allocates the proxy this port when the instance has no namespace — after llamaserver's 7813, continuing the loopback block. */
 export const EGRESS_PROXY_DEFAULT_PORT = 7814;
@@ -205,4 +208,375 @@ export interface EgressDenial {
 /** One line for the supervisor's log, and the `meta` for the `runs` row — the same words in both places. */
 export function describeDenial(d: EgressDenial): string {
   return `[egress] refused ${d.child ?? "an unauthenticated client"} → ${d.host}:${d.port} (${d.reason})`;
+}
+
+// =====================================================================================
+// The secret fill (§2.14, T4-2): `{{ secret.name }}` is filled HERE, at egress, and
+// only for a destination on that secret's *Sent only to* list.
+// =====================================================================================
+//
+// WHY IT IS NOT THE PROXY. The proxy above is CONNECT-only on purpose: it
+// learns a host and a port and never a byte of the tunnel, so it cannot see —
+// let alone fill — a header. The fill therefore happens in the process that
+// makes the call, just before TLS, and the proxy remains the second wall
+// (the host must ALSO be on the install's allowlist to be dialled at all).
+//
+// WHERE IT SITS. `guardedFetch` is a `fetch` — the one shape every outbound
+// caller in this product already takes as a seam: the engine's chat client
+// (`fetchFn`), the MCP SDK's HTTP transport (`fetch`), a connection's client.
+// A caller hands its request over with the references still in it and gets
+// back a Response whose body and headers are already redacted. The filled
+// request never exists outside this function, so there is nothing to log by
+// mistake.
+//
+// What it makes impossible rather than discouraged — each a refusal with a
+// code (`EgressRefused`), before a byte is sent:
+//
+//   * **A value to an unlisted host.** Every secret the request references
+//     — or already carries literally, because a value the redactor knows is
+//     the same secret however it got there — must list the exact destination
+//     (host, and port when not 443) in `hosts:`. A secret that
+//     `secrets.yaml` does not describe lists nothing. `host_not_listed`.
+//   * **A value in a URL.** URLs land in logs, proxies and histories. A
+//     reference, a known value (in any encoding), or userinfo in the URL is
+//     flagged and the call refused. `secret_in_url`.
+//   * **A value in a model's request body.** For `purpose: "model"` a
+//     reference or a known value anywhere in the body is refused: the body
+//     IS the model's context. A provider key still goes in a header.
+//     `secret_in_model_body`.
+//   * **A value over cleartext** to anything but loopback. `cleartext`.
+//   * **A grantee the owner did not grant.** Off refuses (`not_granted`); Ask
+//     refuses (`needs_approval`) unless the caller holds the owner's approval
+//     for that name on this call.
+//   * **A redirect carrying the value somewhere else.** A request that
+//     carries a secret is sent with `redirect: "manual"`: a 3xx comes back to
+//     the caller as a response, and following it is a new call through this
+//     door, checked against the new host.
+//
+// And on the way back: the response body (streamed, with a carry so a value
+// split across chunks is still caught), every response header, and any error
+// are passed through the `SecretRedactor`, which learned each value the moment
+// it was filled. A transcript shows `***REDACTED secret.<name>***`.
+//
+// Each call that sends a secret reports the NAMES it used (`onUse`) — which
+// is what `recordSecretUse` stamps on the caller's `runs` row as
+// `meta.secrets`, and what the `secret_last_used` query reads back as *last
+// used* (T4-1).
+
+/** What the call is for. `model`: a request to a compute provider — its body is the model's context, so no secret may be in it. `service`: anything else (a connection, a bridge). */
+export const SECRET_EGRESS_PURPOSES = ["model", "service"] as const;
+export type SecretEgressPurpose = (typeof SECRET_EGRESS_PURPOSES)[number];
+
+/** Why the door refused. A closed set: each is a code path with a test (U3). */
+export const EGRESS_REFUSAL_CODES = [
+  "bad_url",
+  "secret_in_url",
+  "secret_in_model_body",
+  "host_not_listed",
+  "cleartext",
+  "not_granted",
+  "needs_approval",
+  "missing_secret",
+  "malformed_reference",
+  "uninspectable_body",
+] as const;
+export type EgressRefusalCode = (typeof EGRESS_REFUSAL_CODES)[number];
+
+/**
+ * A refusal at the door. Names secrets and the destination — never a value;
+ * the message is built from names only, so it is safe to show, log and
+ * record as it is.
+ */
+export class EgressRefused extends Error {
+  override readonly name = "EgressRefused";
+  constructor(
+    readonly code: EgressRefusalCode,
+    readonly names: readonly string[],
+    readonly destination: string | null,
+    message: string,
+  ) {
+    super(`egress refused (${code}): ${message}`);
+  }
+}
+
+/** The request as the caller writes it: references in, values never. */
+export interface EgressCall {
+  url: string;
+  method?: string | undefined;
+  headers?: Readonly<Record<string, string>> | undefined;
+  body?: string | undefined;
+}
+
+/** The owner's rules for one caller's calls. `planEgress` needs all but the store; `guardedFetch` needs the store too. */
+export interface SecretEgressRules {
+  /** `.metistry/secrets.yaml`, parsed */
+  secrets: SecretsFile;
+  /** who is calling: `connection:<name>` or `agent:<id>` — the grantee `secrets.yaml` grants to */
+  grantee: string;
+  purpose: SecretEgressPurpose;
+  /** learns every value filled; redacts the way back. One per process that fills, shared by all its calls. */
+  redactor: SecretRedactor;
+  /** names whose **Ask** grant the owner approved for this call (the approval path, T4-9). Never read from the request. */
+  approved?: readonly string[] | undefined;
+}
+
+export interface SecretEgressPolicy extends SecretEgressRules {
+  /** one instance's store (`InstanceSecrets`) */
+  source: SecretSource;
+  /** told the NAMES (never values) once a call carrying them is sent — stamp them with `recordSecretUse` */
+  onUse?: ((use: { names: string[]; destination: string }) => void | Promise<void>) | undefined;
+}
+
+/** Where a URL goes, spelled as a *Sent only to* entry: `host`, or `host:port` when not 443. */
+export interface EgressDestination {
+  entry: string;
+  host: string;
+  port: number;
+  /** plain http to something that is not loopback */
+  cleartext: boolean;
+}
+
+/** `https://api.github.com/x` → `api.github.com`; `http://127.0.0.1:7812/` → `127.0.0.1:7812`. Undefined for anything that is not an http(s) URL. Unlike `egressEntryFor`, loopback is a destination here: a secret for a local bridge still lists its host. */
+export function egressDestination(url: string): EgressDestination | undefined {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return undefined;
+  }
+  if (u.protocol !== "https:" && u.protocol !== "http:") return undefined;
+  const host = u.hostname.toLowerCase();
+  if (host === "") return undefined;
+  const port = u.port === "" ? (u.protocol === "http:" ? 80 : EGRESS_DEFAULT_PORT) : Number(u.port);
+  return { entry: port === EGRESS_DEFAULT_PORT ? host : `${host}:${port}`, host, port, cleartext: u.protocol === "http:" && !isLoopbackHost(host) };
+}
+
+function safeDecode(s: string): string {
+  try {
+    return decodeURIComponent(s.replaceAll("+", " "));
+  } catch {
+    return s;
+  }
+}
+
+function unionSorted(...lists: ReadonlyArray<readonly string[]>): string[] {
+  return [...new Set(lists.flat())].sort();
+}
+
+/** What a call will send, once every check has passed. Names only. */
+export interface EgressPlan {
+  destination: EgressDestination;
+  /** references to fill */
+  refs: string[];
+  /** every secret the call carries: the references and any known value already in it */
+  names: string[];
+}
+
+/**
+ * Every check, and no value read: the refusal a call would get, or the plan
+ * of what it would send. `guardedFetch` runs exactly this before it fills;
+ * an Ask preview (T4-8b) can run it to say "sends github_write to
+ * api.github.com" without touching the Keychain.
+ */
+export function planEgress(call: EgressCall, rules: SecretEgressRules): EgressPlan {
+  if (!parseSecretGrantee(rules.grantee)) throw new Error(`${JSON.stringify(rules.grantee)} is not a grantee — connection:<name> or agent:<id>`);
+  const destination = egressDestination(call.url);
+  if (!destination) throw new EgressRefused("bad_url", [], null, `${JSON.stringify(call.url.slice(0, 200))} is not an http(s) URL`);
+  const dest = destination.entry;
+
+  // ---- a secret in the URL: flagged, and refused
+  const inUrl = [call.url, safeDecode(call.url)];
+  const urlRefs = inUrl.map((u) => secretRefsIn(u));
+  const urlNames = unionSorted(...urlRefs.map((r) => r.names), ...inUrl.map((u) => rules.redactor.find(u)));
+  const u = new URL(call.url);
+  if (urlNames.length > 0 || urlRefs.some((r) => r.malformed.length > 0) || u.username !== "" || u.password !== "") {
+    const what = urlNames.length > 0 ? urlNames.join(", ") : u.username !== "" || u.password !== "" ? "credentials in the URL's userinfo" : "a secret reference";
+    throw new EgressRefused("secret_in_url", urlNames, dest, `${what} in a URL — a URL lands in logs and histories, so a secret goes in a header or the body, never the URL`);
+  }
+
+  // ---- what the headers and the body carry
+  const headers = Object.entries(call.headers ?? {});
+  for (const [name] of headers) {
+    const r = secretRefsIn(name);
+    if (r.names.length > 0 || r.malformed.length > 0 || rules.redactor.find(name).length > 0) {
+      throw new EgressRefused("malformed_reference", r.names, dest, "a header NAME cannot carry a secret — only its value");
+    }
+  }
+  const headerText = headers.map(([, v]) => v);
+  const body = call.body ?? "";
+  const headerRefs = headerText.map((v) => secretRefsIn(v));
+  const bodyRefs = secretRefsIn(body);
+  const malformed = unionSorted(...headerRefs.map((r) => r.malformed), bodyRefs.malformed);
+  if (malformed.length > 0) throw new EgressRefused("malformed_reference", [], dest, `not a secret reference: ${malformed.join(", ")} — the form is {{ secret.name }}`);
+  const bodyLiteral = rules.redactor.find(body);
+  const headerLiteral = unionSorted(...headerText.map((v) => rules.redactor.find(v)));
+
+  if (rules.purpose === "model" && (bodyRefs.names.length > 0 || bodyLiteral.length > 0)) {
+    const names = unionSorted(bodyRefs.names, bodyLiteral);
+    throw new EgressRefused("secret_in_model_body", names, dest, `${names.join(", ")} in a model request body — a model never receives a secret value`);
+  }
+
+  const refs = unionSorted(...headerRefs.map((r) => r.names), bodyRefs.names);
+  const names = unionSorted(refs, bodyLiteral, headerLiteral);
+  if (names.length === 0) return { destination, refs, names };
+
+  // ---- only to listed hosts
+  const unlisted = names.filter((n) => {
+    const policy = Object.hasOwn(rules.secrets.secrets, n) ? rules.secrets.secrets[n] : undefined;
+    return !policy || !policy.hosts.includes(dest);
+  });
+  if (unlisted.length > 0) {
+    throw new EgressRefused("host_not_listed", unlisted, dest, `${unlisted.join(", ")} may not be sent to ${dest} — it is not on the secret's *Sent only to* list (\`metistry secrets hosts <name>\`)`);
+  }
+  if (destination.cleartext) {
+    throw new EgressRefused("cleartext", names, dest, `${names.join(", ")} would go to ${dest} over plain http — a secret goes off this machine over https only`);
+  }
+
+  // ---- who may use it
+  const approved = new Set(rules.approved ?? []);
+  const off = names.filter((n) => secretGrant(rules.secrets, n, rules.grantee) === "off");
+  if (off.length > 0) throw new EgressRefused("not_granted", off, dest, `${rules.grantee} is not granted ${off.join(", ")} (\`metistry secrets grant <name> ${rules.grantee} on|ask\`)`);
+  const ask = names.filter((n) => secretGrant(rules.secrets, n, rules.grantee) === "ask" && !approved.has(n));
+  if (ask.length > 0) throw new EgressRefused("needs_approval", ask, dest, `${rules.grantee} may use ${ask.join(", ")} only with the owner's approval of this call`);
+
+  return { destination, refs, names };
+}
+
+/** Text of a request body the door can inspect; undefined when it cannot. */
+async function bodyText(body: unknown): Promise<string | undefined | null> {
+  if (body === undefined || body === null) return null;
+  if (typeof body === "string") return body;
+  if (body instanceof URLSearchParams) return body.toString();
+  return undefined;
+}
+
+const NULL_BODY_STATUS = new Set([101, 103, 204, 205, 304]);
+
+/**
+ * A stream that redacts as it goes. It holds back the last (longest form − 1)
+ * characters of each chunk, so a value split across two chunks is still one
+ * match: any form that starts before the held tail ends inside what has
+ * already arrived, and the regex sees it whole.
+ */
+function redactingStream(redactor: SecretRedactor): TransformStream<string, string> {
+  let buf = "";
+  return new TransformStream<string, string>({
+    transform(chunk, controller) {
+      buf += chunk;
+      const hold = Math.max(0, redactor.longestForm - 1);
+      const safe = buf.length - hold;
+      if (safe <= 0) return;
+      const { text, consumed } = redactor.redactPrefix(buf, safe);
+      if (text !== "") controller.enqueue(text);
+      buf = buf.slice(consumed);
+    },
+    flush(controller) {
+      if (buf !== "") controller.enqueue(redactor.redactText(buf));
+      buf = "";
+    },
+  });
+}
+
+function redactResponse(res: Response, redactor: SecretRedactor): Response {
+  const headers = new Headers();
+  res.headers.forEach((value, key) => {
+    // the body changes length when a value is redacted
+    if (key === "content-length" || key === "content-encoding") return;
+    headers.append(key, redactor.redactText(value));
+  });
+  const init = { status: res.status, statusText: redactor.redactText(res.statusText), headers };
+  if (NULL_BODY_STATUS.has(res.status) || res.body === null) return new Response(null, init);
+  const body = res.body.pipeThrough(new TextDecoderStream()).pipeThrough(redactingStream(redactor)).pipeThrough(new TextEncoderStream());
+  return new Response(body, init);
+}
+
+/**
+ * **The egress door for a call that may carry a secret** — a `fetch`.
+ *
+ * Hand it to anything that takes a fetch seam. Each call is planned
+ * (`planEgress` — every refusal above), then its `{{ secret.name }}`
+ * references are filled from the instance's store all or nothing, then sent;
+ * the response comes back with every known value redacted, and a failure
+ * comes back as an error with none in it.
+ *
+ * A body the door cannot read (a stream, a Blob, FormData) is refused: a body
+ * that cannot be inspected is a body that could carry anything.
+ */
+export function guardedFetch(policy: SecretEgressPolicy, fetchFn: typeof fetch = fetch): typeof fetch {
+  const { redactor } = policy;
+  return async (input: Parameters<typeof fetch>[0], init: RequestInit = {}): Promise<Response> => {
+    const request = input instanceof Request ? input : undefined;
+    const url = request ? request.url : input instanceof URL ? input.href : String(input);
+    const headerBag = new Headers(request ? request.headers : undefined);
+    new Headers(init.headers).forEach((v, k) => headerBag.set(k, v));
+    const headers: Record<string, string> = {};
+    headerBag.forEach((v, k) => (headers[k] = v));
+    const rawBody = init.body !== undefined ? await bodyText(init.body) : request ? (request.body === null ? null : await request.text()) : null;
+    if (rawBody === undefined) throw new EgressRefused("uninspectable_body", [], egressDestination(url)?.entry ?? null, "a request body the egress guard cannot read (a stream, a Blob, FormData) is not sent");
+    const method = init.method ?? request?.method ?? "GET";
+
+    const plan = planEgress({ url, method, headers, ...(rawBody === null ? {} : { body: rawBody }) }, policy);
+    const dest = plan.destination.entry;
+
+    // ---- fill, all or nothing, learning each value as it is read
+    const recording: SecretSource = {
+      async value(name) {
+        const v = await policy.source.value(name);
+        if (v) redactor.learn(name, v);
+        return v;
+      },
+    };
+    const filledHeaders: Record<string, string> = {};
+    const missing = new Set<string>();
+    for (const [k, v] of Object.entries(headers)) {
+      const r = await fillSecretRefs(v, recording);
+      if (r.ok) filledHeaders[k] = r.text;
+      else r.missing.forEach((n) => missing.add(n));
+    }
+    let filledBody: string | null = rawBody;
+    if (rawBody !== null) {
+      const r = await fillSecretRefs(rawBody, recording);
+      if (r.ok) filledBody = r.text;
+      else r.missing.forEach((n) => missing.add(n));
+    }
+    if (missing.size > 0) {
+      const names = [...missing].sort();
+      throw new EgressRefused("missing_secret", names, dest, `no item in this instance for ${names.join(", ")} — \`metistry secrets set <name>\` stores one; nothing was sent`);
+    }
+
+    const out: RequestInit = { ...init, method, headers: filledHeaders };
+    if (filledBody === null) delete out.body;
+    else out.body = filledBody;
+    if (plan.names.length > 0) out.redirect = "manual";
+
+    let res: Response;
+    try {
+      res = await fetchFn(url, out);
+    } catch (err) {
+      if (plan.names.length > 0) await policy.onUse?.({ names: plan.names, destination: dest });
+      throw redactor.redactError(err);
+    }
+    if (plan.names.length > 0) await policy.onUse?.({ names: plan.names, destination: dest });
+    return redactResponse(res, redactor);
+  };
+}
+
+/**
+ * Stamp the NAMES a call sent on its `runs` row — `meta.secrets`, a sorted
+ * set, merged with any already there (a run that makes several calls
+ * accumulates, it does not overwrite). `secret_last_used` reads it back as
+ * *last used*. Takes any executor with pg's query shape, like `startRun`.
+ */
+export async function recordSecretUse(db: RunExecutor, runId: number, names: readonly string[]): Promise<void> {
+  if (names.length === 0) return;
+  await db.query(
+    `UPDATE runs SET meta = jsonb_set(
+       coalesce(meta, '{}'::jsonb), ARRAY[$3::text],
+       (SELECT coalesce(jsonb_agg(DISTINCT n ORDER BY n), '[]'::jsonb)
+          FROM jsonb_array_elements_text(
+            CASE WHEN jsonb_typeof(meta -> $3::text) = 'array' THEN meta -> $3::text ELSE '[]'::jsonb END || $2::jsonb
+          ) AS s(n)))
+     WHERE id = $1`,
+    [runId, JSON.stringify([...names]), SECRET_USE_META_KEY],
+  );
 }

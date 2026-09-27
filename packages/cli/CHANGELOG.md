@@ -1,5 +1,14 @@
 # @foldedspacelabs/metistry-cli
 
+## 0.14.1
+
+### Patch Changes
+
+- b80fa8e: **`metistry update` finishes its restart, and a Keychain write works from Terminal (the 0.12.0 → 0.14.0 upgrade).** Keychain writes are now `security -i` with the command on stdin: the old `add-generic-password … -w` prompt read the terminal rather than the pipe whenever there was one, so an update run in Terminal hung on "password data for new item:" and failed, and it kept only the first 128 characters of any longer secret. The owner bearer is copied from this instance's Keychain item when it exists instead of being re-minted; a mint that fails no longer aborts the restart — the jobs whose code changed still come back on the new release, the lock waits for the bearer, and the run ends, exit 1, with the exact commands. A release-mode update now actually kickstarts the jobs whose code changed (it compared the new release with itself). The lock write waits for a reconciler the run just restarted to answer again instead of racing its start. The summary says when the restart never began or stopped part-way instead of "nothing kickstarted", doctor's rejected-token row names the restart that fixes it, and `metistry secrets retire-legacy-env` lists what only the product checkout's `.env` still has, moves it into the instance and deletes the old file. Every runtime pack's own doctor now validates its own manifests before it is released.
+- 4fec374: **`metistry update` moves the Mac app with the release.** On a Mac under the launchd shape, release mode now follows the runtime pack with the same release's `Metistry-<version>.dmg`: verified against `checksums.txt` by the same `downloadVerified` path as the pack, mounted with `hdiutil attach -nobrowse -readonly`, the copy checked for bundle id `com.foldedspacelabs.metistry`, `CFBundleShortVersionString` equal to the release and — when signed — `codesign --verify --deep --strict` plus `spctl --assess` (an unsigned local build is installed with the assessment skipped and said so, never over a signed app), then swapped into `/Applications/Metistry.app` (or `~/Applications`, `METISTRY_APP_PATH`, `--app-path`) with the old bundle kept as `Metistry.app.previous` for `--rollback`. Idempotent (`app already 0.14.0`), never downgrades an app Sparkle moved further, never uses sudo (an unwritable folder prints the `--app-path ~/Applications/Metistry.app` alternative), never quits a running app without `--relaunch`, and never fails the update. `--no-app` skips it; `--dry-run` shows it. Doctor gains an `app` row: the installed app's version against `metistry.lock`, degraded when behind.
+- @foldedspacelabs/metistry-connections@0.14.1
+  - @foldedspacelabs/metistry-core@0.14.1
+
 ## 0.14.0
 
 ### Minor Changes

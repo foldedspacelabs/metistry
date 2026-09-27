@@ -1,5 +1,14 @@
 # @foldedspacelabs/metistry-mcp-brain
 
+## 0.14.1
+
+### Patch Changes
+
+- @foldedspacelabs/metistry-artifacts@0.14.1
+  - @foldedspacelabs/metistry-core@0.14.1
+  - @foldedspacelabs/metistry-queries@0.14.1
+  - @foldedspacelabs/metistry-tasks@0.14.1
+
 ## 0.14.0
 
 ### Minor Changes

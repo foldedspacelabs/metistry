@@ -1,5 +1,11 @@
 # @foldedspacelabs/metistry-mcp-eventkit
 
+## 0.14.1
+
+### Patch Changes
+
+- @foldedspacelabs/metistry-core@0.14.1
+
 ## 0.14.0
 
 ### Minor Changes

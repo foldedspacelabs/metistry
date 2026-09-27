@@ -41,6 +41,7 @@ import {
 import { buildDeploymentReport, renderDeploymentReport, setDeploymentShape, setKeepAwake } from "./deployment-report.js";
 import { EXTENSION_VERBS, extensionsAdd, extensionsList, extensionsRemove, parseExtensionVerb, renderExtensions, type ExtensionsOptions } from "./extensions.js";
 import { doctor, renderTable, type DoctorDeps } from "./doctor.js";
+import { VARIABLE_VERBS, parseVariableVerb, renderVariables, variablesList, variablesSet, variablesUnset, type VariablesOptions } from "./variables.js";
 import { loadInstallEnv, productVersion, resolveProductDir, resolveSeedDir, type LoadedEnv } from "./env.js";
 import { realExec, type Exec } from "./exec.js";
 import { AUTH_MODES, connectRepo, readStdin, type AuthMode } from "./connect-repo.js";
@@ -447,6 +448,21 @@ const USAGE = `metistry — Metistry command line
       deleted. A §4.7 protected path: every write goes through the reconciler
       as the "user" principal.
 
+  metistry variables list [--json] [--instance <dir>]
+  metistry variables set <name> <value> [--dry-run]
+  metistry variables unset <name> [--dry-run]
+      Plain shared values in .metistry/variables.yaml, referenced as
+      {{ variable.<name> }} in connection files and agents' instructions.
+      Agents read them, so "set" refuses a value that looks like a key, token
+      or password — store it as a secret instead (metistry secrets set) — or
+      that is one of this instance's secret values, and refuses a schedule or
+      a time (standup_time, timezone, 09:15, a cron line): a routine's timing
+      is its own schedule, and facts about you are Me/profile.md. A refusal
+      names the variable, never the value. "unset" names what still
+      references it. "list" prints each value and where it is used (--json:
+      the rows GET /api/variables serves). A §4.7 protected path: every write
+      goes through the reconciler as the "user" principal.
+
   metistry runs export [--since <cursor|timestamp>] [--until <timestamp>]
                        [--component <name>] [--limit N] [--json-lines]
       The runs audit ledger as NDJSON on stdout, oldest first, one JSON object
@@ -797,6 +813,7 @@ export const HELP_GROUPS: Array<{ title: string; verbs: Array<[string, string]> 
       ["templates check [<file>]", "does the vault's Templates/ read, before the next run reads it"],
       ["instances list|add|remove|refresh", "the peer registry: which other instances this one knows"],
       ["extensions list|add|remove", "your own units — templates, connection types, targets, overlays"],
+      ["variables list|set|unset", "plain shared values agents read — never a secret, never a schedule"],
     ],
   },
   {
@@ -1424,6 +1441,58 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
         return 0;
       } catch (e) {
         err(`metistry extensions ${verb}: ${e instanceof Error ? e.message : String(e)}`);
+        return 1;
+      }
+    }
+    case "variables": {
+      // M14 (plan §2.2, §2.14): plain values agents read. Every write is a
+      // §4.7 protected write through the reconciler as the `user`.
+      const loadedVars = loadEnv();
+      const instanceDir = str(flags, "instance") ?? loadedVars.instanceDir;
+      if (!instanceDir) {
+        err("variables needs the instance repo: pass --instance <dir> or set METISTRY_INSTANCE_DIR (docs/ops/cli.md) — variables.yaml lives there");
+        return 2;
+      }
+      const verb = parseVariableVerb(positional[0]);
+      if (!verb) {
+        err(`usage: metistry variables ${VARIABLE_VERBS.join(" | ")}   (metistry --help)`);
+        return 2;
+      }
+      const json = flags.json === true;
+      const varOpts: VariablesOptions = {
+        instanceDir,
+        instanceId: await readInstanceId(instanceDir),
+        env: process.env,
+        platform: io.platform ?? process.platform,
+        uid: io.uid ?? (typeof process.getuid === "function" ? process.getuid() : 0),
+        fetchFn: io.fetchFn ?? fetch,
+        ...(io.exec ? { exec: io.exec } : {}),
+        dryRun: flags["dry-run"] === true,
+        // --json is a wire contract (docs/ops/cli.md): progress to stderr
+        out: json ? err : out,
+      };
+      try {
+        if (verb === "list") {
+          const rows = await variablesList(varOpts);
+          out(json ? JSON.stringify({ variables: rows }, null, 2) : renderVariables(rows));
+          return 0;
+        }
+        if (verb === "set") {
+          if (positional.length > 3) {
+            err("usage: metistry variables set <name> <value>   (quote a value with spaces: one argument)");
+            return 2;
+          }
+          const r = await variablesSet(positional[1], positional[2], varOpts);
+          if (json) out(JSON.stringify(r, null, 2));
+          else if (r.delivery) out(r.delivery.detail);
+          return 0;
+        }
+        const r = await variablesUnset(positional[1], varOpts);
+        if (json) out(JSON.stringify(r, null, 2));
+        else if (r.delivery) out(r.delivery.detail);
+        return 0;
+      } catch (e) {
+        err(`metistry variables ${verb}: ${e instanceof Error ? e.message : String(e)}`);
         return 1;
       }
     }

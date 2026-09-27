@@ -41,6 +41,7 @@ import { listSecrets, SECRETS_NOT_AVAILABLE, type SecretsView } from "./secrets-
 import { listVariables, VARIABLES_NOT_AVAILABLE, type VariablesView } from "./variables-route.js";
 import { CONNECTION_ROUTE, CONNECTIONS_NOT_AVAILABLE, listConnections, oneConnection, validConnectionName, type ConnectionsView } from "./connections-route.js";
 import { VAULT_STATUS_NOT_AVAILABLE, VaultStatusUnavailable, type VaultStatusReader } from "./vault-status.js";
+import { applyRollback, carriesRollback, parseRollbackAsk, raiseRollback, rollbackOf, type VaultReverter } from "./vault-rollback.js";
 import { NDJSON_CONTENT_TYPE, RUNS_EXPORT_QUERY, parseExportParams, streamRunsExport } from "./runs-export.js";
 import { consultRoute, route as routeMessage, servedKindOf, threadFactsOf, type RoutePolicy, type Rules } from "./router.js";
 import { sendToSession, storeSubscription, type PushConfig } from "./push.js";
@@ -168,6 +169,12 @@ export interface ConsoleConfig {
    * `/api/scheduled*` route answers 503.
    */
   scheduled?: ScheduledAdmin | undefined;
+   * `POST /api/vault/rollback` and its Approve (vault-rollback.ts, plan §2.21,
+   * T10-6): the reconciler's `POST /vault/revert` with the console's bearer —
+   * which the reconciler never lets change configuration. Absent = no vault
+   * bridge, and the route answers 503.
+   */
+  vaultRevert?: VaultReverter | undefined;
 }
 
 // ----- since-cursors (docs/ops/client-api.md) -----
@@ -1093,6 +1100,8 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         key === "GET /api/connections" ||
         CONNECTION_ROUTE.test(key) ||
         key === "GET /api/vault/status" ||
+        // a rollback of the vault's history: the local owner's hand alone (T10-6)
+        key === "POST /api/vault/rollback" ||
         key === "GET /api/commands" ||
         // the live-changes stream is the owner's alone: an agent learns what
         // changed through its own tools, and the capture token captures (§2.20)
@@ -1191,6 +1200,32 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         if (err instanceof VaultStatusUnavailable) return sendError(res, "not_available", err.message);
         throw err;
       }
+    }
+
+    // ----- roll back (§2.21, T10-6; reach `local`): a Needs You request, never a revert -----
+    // The `local` gate above has already refused a passkey session, the
+    // capture token and every agent bearer. This asks the reconciler for a
+    // preview and raises the request; only Approve reverts (decideProposal).
+    if (key === "POST /api/vault/rollback") {
+      let body: unknown;
+      try {
+        body = await readJson(req);
+      } catch {
+        return sendError(res, "invalid_request", "the body must be JSON: {commit} | {to} | {file[, to]}");
+      }
+      const ask = parseRollbackAsk(body);
+      if (!ask.ok) {
+        if (ask.code === "forbidden") await audit("vault", "rollback", false, { refused: "configuration", body });
+        return sendError(res, ask.code, ask.message);
+      }
+      if (!cfg.vaultRevert) return sendError(res, "not_available", "rolling back runs through the reconciler, and no vault bridge is configured in this deployment — METISTRY_RECONCILER_URL + METISTRY_BRIDGE_TOKEN_RECONCILER (docs/ops/reconciler.md)");
+      const out = await raiseRollback({ revert: cfg.vaultRevert, db }, ask.value);
+      if (!out.ok) {
+        await audit("vault", "rollback", false, { error: out.code, target: ask.value.target });
+        return sendError(res, out.code, out.message);
+      }
+      await audit("vault", "rollback", true, { proposal: out.id, raised: out.raised, target: ask.value.target, include_config: ask.value.include_config });
+      return sendJson(res, 202, { ok: true, proposal_id: String(out.id), raised: out.raised, preview: out.preview, proposal: out.proposal });
     }
 
     // ----- the runs audit export (S5): NDJSON, streamed, through the named query -----
@@ -1911,6 +1946,38 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     // written, the request still waiting) if the file is no longer the
     // "before". Revise and Decline write nothing.
     let applied: { path: string; created: boolean } | undefined;
+    // A rollback (T10-6, vault-rollback.ts) is an improvement THIS console
+    // raised on the owner's word: Approve runs the reconciler's revert as
+    // `user` — a new commit, pinned to the previewed history and refused
+    // `stale` (nothing changed, the request still waiting) if the change set
+    // moved. One that includes configuration is carried out by the waiting
+    // `metistry vault rollback --include-config`, never by this bearer. A row
+    // carrying a rollback this console did not raise rolls back nothing and
+    // is never read as a prompt improvement. Revise and Decline change nothing.
+    const rollingBack = row.kind === "improvement" && carriesRollback(row.payload);
+    let rolledBack: Awaited<ReturnType<typeof applyRollback>> | undefined;
+    if (rollingBack && verb === "allow") {
+      const edit = rollbackOf(row);
+      if (edit === null) {
+        await audit("triage", "rollback", false, { proposal: row.id, error: "not_ours" });
+        return refuseAnswer(id, verb, "invalid_request", "this request carries a rollback this console did not raise, so Approve rolls back nothing — Decline it, and ask again from the Mac");
+      }
+      if (!edit.include_config && !cfg.vaultRevert) return refuseAnswer(id, verb, "not_available", "approving this rolls the vault back, and no vault bridge is configured in this deployment — METISTRY_RECONCILER_URL + METISTRY_BRIDGE_TOKEN_RECONCILER (docs/ops/reconciler.md)");
+      try {
+        rolledBack = await applyRollback(cfg.vaultRevert!, edit, row.id);
+      } catch (err) {
+        if (err instanceof VaultError) {
+          await audit("triage", "rollback", false, { proposal: row.id, error: err.code });
+          const refused = await refuseAnswer(id, verb, err.code, err.message);
+          return err.code === "conflict" ? { status: 409, body: conflictBody("stale", err.message, row) } : refused;
+        }
+        return failedAnswer(id, verb, err);
+      }
+      await db.query(`UPDATE proposals SET payload = payload || jsonb_build_object('rolled_back', $2::jsonb) WHERE id = $1 AND decision = 'pending'`, [
+        id,
+        JSON.stringify({ ...rolledBack, at: new Date().toISOString(), by: "user" }),
+      ]);
+    }
     // A restore (T10-5, knowledge-restore.ts) is an improvement THIS console
     // raised on the owner's word: Approve writes the note's bytes at the
     // request's commit back as `user`, a new commit, refused `stale`
@@ -1920,8 +1987,10 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     // never read as a prompt improvement either. Revise and Decline write nothing.
     const restoring = row.kind === "improvement" && carriesRestore(row.payload);
     let restored: { path: string; sha: string; sha256: string } | undefined;
-    const meEdit = row.kind === "improvement" && !restoring ? meEditOf(row.payload) : null;
-    if (restoring) {
+    const meEdit = row.kind === "improvement" && !restoring && !rollingBack ? meEditOf(row.payload) : null;
+    if (rollingBack) {
+      // handled above
+    } else if (restoring) {
       if (verb === "allow") {
         const restore = restoreOf(row);
         if (restore === null) {
@@ -2196,9 +2265,10 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       ...(created ? { work_id: created.id } : {}),
       ...(acted ? { action: acted.kind } : {}),
       ...(granted ? { granted: granted.area, agent: granted.agent } : {}),
+      ...(rolledBack ? { rolled_back: rolledBack.runs_in === "console" ? rolledBack.sha : "runs_in_cli" } : {}),
     });
     if (rows.length === 1) {
-      return { status: 200, body: { ok: true, ...(applied ? { applied } : {}), ...(restored ? { restored } : {}), ...(enrolled ? { enrolled } : {}), ...(created ? { work: created } : {}), ...(acted ? { action: acted } : {}), ...(granted ? { granted } : {}) } };
+      return { status: 200, body: { ok: true, ...(applied ? { applied } : {}), ...(restored ? { restored } : {}), ...(rolledBack ? { rolled_back: rolledBack } : {}), ...(enrolled ? { enrolled } : {}), ...(created ? { work: created } : {}), ...(acted ? { action: acted } : {}), ...(granted ? { granted } : {}) } };
     }
     // lost the race between the read above and this update: someone else decided it
     const now = (await db.query(PROPOSAL_FOR_DECISION_SQL, [id])).rows[0];

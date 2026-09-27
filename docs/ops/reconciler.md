@@ -65,6 +65,28 @@ Reading any of it is a **named query** — `vault_tasks_query`,
 `vault_tasks_recurring`, `task_ageing` in `seed/queries/` — never a second
 component with a connection string.
 
+## Meetings and people
+
+The same walk keeps two small maps Today resolves through (plan §2.9,
+migration `0029_meeting_refs.sql`, ticket T1-10):
+
+| Table | From | Which files |
+| --- | --- | --- |
+| `vault_meeting_refs (event_id, path)` | a meeting note's frontmatter `event_id:`, verbatim | notes under `Journal/Meetings/` (archived `<year>/<month>/` too) — a directory only you can write, so no agent can make a note that claims your meeting |
+| `people_emails (email, path)` | a People page's frontmatter `email:` — one address or a list, trimmed, `mailto:` dropped, lowercased | pages under `People/` that are **yours** (no `source:`, or `source: user`); a page an agent created carries its own `source:` and never maps an address |
+
+**Never guessed.** A row exists only because a file you wrote names the key
+in a field of its own. Nothing is inferred from a filename, a title or a
+display name, and an entry that is not plainly an address (`Jim <jim@x.com>`)
+is dropped rather than repaired. `people_by_email` (`expose: route`) returns
+the one page that claims an address — and nothing when no page does or when
+two do — so an unmatched attendee is a plain name, never a wrong page.
+
+Both are **derived in full** and rebuilt whole every cycle (they hold no
+state to preserve): drop them, let one walk run, and they are exactly what
+they were. `POST /reconcile` returns their sizes as `meeting_refs` and
+`people_emails`.
+
 ## Pointing it at an instance repo
 
 The reconciler needs exactly one path: `METISTRY_INSTANCE_DIR`, the working
@@ -668,7 +690,7 @@ Setup, modes, and what "deterministic rebuild" means:
 | `METISTRY_EMBED_DIM` | `768` | must match the model AND the `vector(768)` column |
 | `METISTRY_EMBED_BATCH` | `16` | chunks per `/api/embed` request |
 | `METISTRY_EMBED_MAX_FILES_PER_CYCLE` | `200` | the rest wait for the next cycle |
-| `METISTRY_DB_*` | as elsewhere | the index tables (`knowledge_files`, `knowledge_links`, `embeddings`, `vault_tasks`, `vault_task_refs`, `proposals`, `runs`) |
+| `METISTRY_DB_*` | as elsewhere | the index tables (`knowledge_files`, `knowledge_links`, `embeddings`, `vault_tasks`, `vault_task_refs`, `vault_meeting_refs`, `people_emails`, `proposals`, `runs`) |
 | `METISTRY_TZ` | unset (then `TZ`, then UTC) | the zone `due friday` and `do monday` resolve against, recorded per row as `parsed_on` |
 | `METISTRY_GIT_HTTP_PROXY` | set by `metistry up` when this install confines the reconciler | the supervisor's egress proxy, passed to git as `-c http.proxy=…` |
 | `METISTRY_GIT_ASKPASS` | set by `metistry up` when this install confines the reconciler | the askpass shim's path. Its presence is also what turns on `-c credential.helper=` — the two move together |

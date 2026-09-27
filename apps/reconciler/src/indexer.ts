@@ -12,6 +12,12 @@
 // pass lives here: this is already the process that walks the tree and
 // hashes it, so there is no second watcher, no second holder of the repo
 // (D5), and no new component talking to Postgres (invariant 3).
+//
+// Since T1-10 it also fills `vault_meeting_refs` (a meeting note's
+// `event_id:`) and `people_emails` (a People page's `email:`), the two maps
+// that let Today go from a calendar event to its note and from an attendee
+// to a person page (plan §2.9, today-hub-requests A3/A4) — for the same
+// reason, and derived on the same terms.
 
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
@@ -22,6 +28,7 @@ import type { Vault } from "./vault.js";
 import {
   areaForPath,
   basenameTitle,
+  emptyNoteMeta,
   extractLinks,
   extractTaskRefs,
   extractTasks,
@@ -30,8 +37,11 @@ import {
   isConflictFile,
   isInboxPath,
   isMarkdown,
+  isMeetingNotePath,
+  isPersonPath,
   isTaskPath,
   mimeForPath,
+  ownedByUser,
   ownsTaskLines,
   parseFrontmatter,
   parseVaultTaskRef,
@@ -79,6 +89,10 @@ export interface ReconcileSummary {
   inbox: InboxSummary;
   /** The vault's `- [ ]` lines, as of this cycle (daily-flow-spec §1.5). */
   tasks: TaskSummary;
+  /** `vault_meeting_refs` rows after this cycle: one per (event_id, meeting note). */
+  meeting_refs: number;
+  /** `people_emails` rows after this cycle: one per (address, People page). */
+  people_emails: number;
   /** Phase 6: vectors brought up to date this cycle. Absent when no embedder is configured. */
   embeddings?: EmbedSummary;
   duration_ms: number;
@@ -190,7 +204,7 @@ export class Indexer {
       const bytes = await readFile(abs);
       const st = await stat(abs);
       const conflict = isConflictFile(p);
-      let meta: NoteMeta = { title: null, description: null, draft: false, source: null, area: null };
+      let meta: NoteMeta = emptyNoteMeta();
       let links: NoteLink[] = [];
       let tasks: ScannedTask[] = [];
       let refs: NoteTaskRef[] = [];
@@ -326,6 +340,11 @@ export class Indexer {
     // block-anchored reference to one
     const tasks = await this.syncTasks(scanned, pathSet, byBasename, dirtyPaths, today, taskDates);
 
+    // the two maps Today resolves through: a calendar event → its meeting
+    // note, an attendee's address → a person page (plan §2.9)
+    const meetingRefs = await this.syncPairs(MEETING_REFS, meetingRefPairs(scanned.values()));
+    const peopleEmails = await this.syncPairs(PEOPLE_EMAILS, personEmailPairs(scanned.values()));
+
     // external edits: Obsidian (any device) writes straight to the tree;
     // nothing else can commit them. Paths with a pending bridge intent are
     // that principal's; conflict copies are flagged, not committed.
@@ -362,6 +381,8 @@ export class Indexer {
       external_edits: externalEdits,
       inbox,
       tasks,
+      meeting_refs: meetingRefs,
+      people_emails: peopleEmails,
       ...(embeddings ? { embeddings } : {}),
       duration_ms: Date.now() - started,
     };
@@ -738,6 +759,93 @@ export class Indexer {
     }
     return want.size;
   }
+
+  /**
+   * **`vault_meeting_refs` and `people_emails`** (plan §2.9, T1-10): two
+   * `(key, path)` tables, derived in full and owned by this walk exactly as
+   * `vault_task_refs` is — rebuilt whole every cycle rather than diffed per
+   * note, because they hold no state to preserve and a vault's worth of
+   * meetings and people is small. Read the table, delete what the vault no
+   * longer says, insert what it newly does; a cycle that changes nothing
+   * writes nothing.
+   *
+   * Neither table ever holds a GUESS. A pair is here because a file the
+   * owner wrote says so, in a field of its own — never inferred from a
+   * filename, a title or a display name — and `people_by_email` then refuses
+   * to choose between two pages that claim one address.
+   */
+  private async syncPairs(table: PairTable, want: Map<string, [string, string]>): Promise<number> {
+    const held = new Set<string>();
+    for (const r of (await this.db.query(`SELECT ${table.key} AS k, path FROM ${table.name}`)).rows) {
+      held.add(pairKey(String(r.k), String(r.path)));
+    }
+    const gone = [...held].filter((k) => !want.has(k)).map((k) => k.split(REF_SEP) as [string, string]);
+    if (gone.length > 0) {
+      await this.db.query(
+        `DELETE FROM ${table.name} t USING unnest($1::text[], $2::text[]) AS g(k, path)
+          WHERE t.${table.key} = g.k AND t.path = g.path`,
+        [gone.map((g) => g[0]), gone.map((g) => g[1])],
+      );
+    }
+    const fresh = [...want.entries()].filter(([k]) => !held.has(k)).map(([, v]) => v);
+    for (let i = 0; i < fresh.length; i += TASK_UPSERT_ROWS) {
+      const batch = fresh.slice(i, i + TASK_UPSERT_ROWS);
+      await this.db.query(
+        `INSERT INTO ${table.name} (${table.key}, path)
+         SELECT * FROM unnest($1::text[], $2::text[]) ON CONFLICT DO NOTHING`,
+        [batch.map((b) => b[0]), batch.map((b) => b[1])],
+      );
+    }
+    return want.size;
+  }
+}
+
+// ---- meeting refs and people emails (plan §2.9, T1-10) ----------------------
+
+/** A derived `(key, path)` table this walk owns. Both names are constants below — never a value from a note. */
+interface PairTable {
+  name: "vault_meeting_refs" | "people_emails";
+  key: "event_id" | "email";
+}
+
+const MEETING_REFS: PairTable = { name: "vault_meeting_refs", key: "event_id" };
+const PEOPLE_EMAILS: PairTable = { name: "people_emails", key: "email" };
+
+function pairKey(key: string, path: string): string {
+  return `${key}${REF_SEP}${path}`;
+}
+
+/**
+ * `event_id:` from every meeting note — a note under `Journal/Meetings/`,
+ * which only the user can write (`isMeetingNotePath`). The same id in two
+ * notes is two rows: a copied note is still the owner's file, and which one
+ * "Open notes" opens is its caller's rule, not a thing this walk decides by
+ * dropping one.
+ */
+export function meetingRefPairs(notes: Iterable<{ path: string; conflict: boolean; meta: NoteMeta }>): Map<string, [string, string]> {
+  const want = new Map<string, [string, string]>();
+  for (const s of notes) {
+    if (s.conflict || !isMeetingNotePath(s.path) || s.meta.event_id === null) continue;
+    want.set(pairKey(s.meta.event_id, s.path), [s.meta.event_id, s.path]);
+  }
+  return want;
+}
+
+/**
+ * `email:` from every People page THE USER OWNS. `People/` is not a
+ * user-only directory — an agent with the area may create a page there, and
+ * that page carries its creator's `source:` — so ownership is checked here,
+ * at the walk: an address is mapped to a person only on the owner's word,
+ * and an agent cannot make an attendee resolve to a page it wrote. A wrong
+ * person page on a briefing is worse than none (A4).
+ */
+export function personEmailPairs(notes: Iterable<{ path: string; conflict: boolean; meta: NoteMeta }>): Map<string, [string, string]> {
+  const want = new Map<string, [string, string]>();
+  for (const s of notes) {
+    if (s.conflict || !isPersonPath(s.path) || !ownedByUser(s.meta)) continue;
+    for (const email of s.meta.emails) want.set(pairKey(email, s.path), [email, s.path]);
+  }
+  return want;
 }
 
 // ---- the task row (daily-flow-spec §1.5) -----------------------------------

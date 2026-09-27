@@ -15,7 +15,8 @@ mtime — sync churns mtime), renames are recognised by hash, and Obsidian /
 Syncthing conflict copies are not indexed: each is raised once as a Needs You
 `review` holding both versions — the note as it stands and the copy — which
 clears itself when the copy is gone (C96, T2-9; `docs/ops/client-api.md`,
-*Events become requests*).
+*Events become requests*). The owner settles one at the console's Resolve a
+conflict door, which is `POST /vault/conflicts/resolve` below (T2-10).
 
 The same walk keeps the **vault inbox** honest. `Inbox/` is where
 captures live (`docs/ops/inbox.md`), and a file you put there yourself — in
@@ -196,6 +197,7 @@ write, not what you may read. Errors are the core envelope
 | `POST /vault/rename` | `{from, to, intent}` — git-mv semantics; never clobbers |
 | `POST /vault/section` | `{path, marker, body, principal, expected_outer_sha, run?, turn?}` — replace the bytes between a section's markers in the owner's daily note and nothing else ("The section operation" below) |
 | `POST /vault/revert` | roll back (§2.21, T10-6): `{intent: {principal: "user", message}, commit \| to \| file [+ to], include_config?, dry_run?, head?, expect?}` — one NEW commit that undoes a commit, restores every changed path to a moment, or puts one file back ("Roll back" below). `dry_run` previews (`200`), otherwise `201` with the new `sha` |
+| `POST /vault/conflicts/resolve` | `{path, keep, expected_sha256}` — settle one sync-conflict copy as `user` (§2.11, T2-10): `keep: "mine"` drops the copy, `"theirs"` writes the copy's bytes over the note and drops the copy. `path` is the **copy**, and only a copy the index has in `conflict` (`knowledge_files.status`) — anything else is `409` with `current: null`. `expected_sha256` is the side being **discarded** as the caller saw it (the copy's hash to keep mine, the note's to take theirs, `""` for a side that is not there); a mismatch is `409` with `current: {path, original, sha256, original_sha256}`. The discarded side is **committed first** so history keeps it (C136) — mid-merge, or a side that cannot be committed, is `503` with nothing discarded. Keep Mine with no note beside the copy is `400`; a non-knowledge path `403`; no database `503`. Answers `{path, copy, kept, sha256, bytes, recorded, queued}` — `path` is the note that remains, `recorded` the commit that kept the other side (null when history already held it) — and clears the copy's review (`resolved_at_source`) and its index row at once |
 | `POST /flush` | commit the queue now (the interval does this every `METISTRY_COMMIT_INTERVAL_SEC`; the artifacts module calls it after every publish so one version is one commit) |
 | `POST /reconcile` | run the index cycle now (the interval does this every `METISTRY_RECONCILE_INTERVAL_SEC`); the summary carries `inbox: {added, changed, archived}` |
 | `POST /embeddings/rebuild` | forget every vector and re-embed the vault under the configured model (§6 decision 8's deterministic rebuild) |
@@ -447,7 +449,9 @@ sweep, because the reconciler is the only thing that can commit them
 (PoC-12: "edit on iPhone → commits cleanly"). The subject names the files
 — up to two by name, more by count (*Edits from Obsidian: 3 notes*) — and
 the body lists every path. Paths with a pending bridge intent belong to
-that intent; conflict copies are flagged, not committed. Turn the sweep
+that intent; conflict copies are flagged, not committed — except a copy's
+deletion once history holds it (a settle commits the side it gives up, so a
+copy deleted by hand after that must not leave the tree dirty). Turn the sweep
 off with `METISTRY_COMMIT_EXTERNAL_EDITS=false`.
 
 Those edits are also **never overwritten**. Every caller's write is

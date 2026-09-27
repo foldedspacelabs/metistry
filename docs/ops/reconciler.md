@@ -12,8 +12,10 @@ enters a container, and the engine keeps having no shell and no git
 It also owns §4.13 change detection: the index in `knowledge_files` /
 `knowledge_links` is rebuilt from the working tree by content hash (never
 mtime — sync churns mtime), renames are recognised by hash, and Obsidian /
-Syncthing conflict copies are flagged once as a `proposals` report instead
-of being indexed.
+Syncthing conflict copies are not indexed: each is raised once as a Needs You
+`review` holding both versions — the note as it stands and the copy — which
+clears itself when the copy is gone (C96, T2-9; `docs/ops/client-api.md`,
+*Events become requests*).
 
 The same walk keeps the **vault inbox** honest. `Inbox/` is where
 captures live (`docs/ops/inbox.md`), and a file you put there yourself — in

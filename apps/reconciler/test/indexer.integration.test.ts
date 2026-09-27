@@ -1,16 +1,18 @@
 // The reconcile loop against the real (scratch) database: only Postgres
-// can prove the upserts, the partial-index ON CONFLICT for conflict
-// proposals, and the rename/removal bookkeeping. Skipped without a db.
+// can prove the upserts, the partial-index ON CONFLICT that keeps a conflict
+// copy to one request, and the rename/removal bookkeeping. Skipped without a db.
 import { randomUUID } from "node:crypto";
-import { mkdir, rename, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import { Committer } from "../src/committer.js";
 import { Vault } from "../src/vault.js";
-import { Indexer } from "../src/indexer.js";
+import { CONFLICT_EVENT, Indexer, conflictSource } from "../src/indexer.js";
+import { sha256 } from "../src/notes.js";
 import { tempRepo, type TempRepo } from "./helpers.js";
 import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
+import { RESOLVED_AT_SOURCE, describeRequest } from "@foldedspacelabs/metistry-core";
 
 const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
 
@@ -122,17 +124,33 @@ describe.skipIf(!hasDb)("reconciler index loop (real db)", () => {
     expect((await pool.query(`SELECT count(*)::int AS n FROM knowledge_files WHERE path = $1`, [`${PREFIX}Draft.md`])).rows[0].n).toBe(0);
   });
 
-  it("an Obsidian conflict file is flagged once as a proposal, never indexed as a note", async () => {
+  it("an Obsidian conflict copy is ONE review with both versions (C96, T2-9), never indexed as a note", async () => {
     const p = `${PREFIX}Beta (conflict 2026-09-06 12-00-00).md`;
-    await writeFile(join(repo.root, p), "# Beta\n\nthe other device's version\n");
+    const theirs = "# Beta\n\nthe other device's version\n";
+    await writeFile(join(repo.root, p), theirs);
     const s1 = await indexer.reconcile("test");
     expect(s1).toMatchObject({ conflicts: 1, conflicts_new: 1 });
     const s2 = await indexer.reconcile("test");
-    expect(s2).toMatchObject({ conflicts: 1, conflicts_new: 0 }); // not one per cycle
-    const props = await pool.query(`SELECT kind, source_agent, trust, decision, payload FROM proposals WHERE source_agent = 'reconciler'`);
+    expect(s2).toMatchObject({ conflicts: 1, conflicts_new: 0 }); // one per copy, not one per cycle
+    const props = await pool.query(`SELECT kind, source_agent, trust, decision, source, payload FROM proposals WHERE source_agent = 'reconciler'`);
     expect(props.rows).toHaveLength(1);
-    expect(props.rows[0]).toMatchObject({ kind: "report", source_agent: "reconciler", trust: "internal", decision: "pending" });
-    expect(props.rows[0].payload).toMatchObject({ kind: "conflict_file", refs: [p], idempotency_key: `conflict:${p}` });
+    expect(props.rows[0]).toMatchObject({ kind: "review", source_agent: "reconciler", trust: "internal", decision: "pending", source: conflictSource(p) });
+    const mine = await readFile(join(repo.root, PREFIX, "Beta.md"));
+    const payload = props.rows[0].payload;
+    expect(payload).toMatchObject({
+      title: "Sync conflict: Beta.md",
+      event: CONFLICT_EVENT,
+      body: {
+        kind: "before_after",
+        heading: `${PREFIX}Beta.md`,
+        before: { label: "Mine", path: `${PREFIX}Beta.md`, text: mine.toString("utf8"), sha256: sha256(mine), truncated: false },
+        after: { label: "The Other", path: p, text: theirs, sha256: sha256(Buffer.from(theirs)), truncated: false },
+      },
+      conflict: { path: p, original: `${PREFIX}Beta.md`, sha256: sha256(Buffer.from(theirs)), original_sha256: sha256(mine) },
+      refs: [p, `${PREFIX}Beta.md`],
+    });
+    // the table reads it as a review with the before-and-after body, answered at the resolve door
+    expect(describeRequest("review", payload)).toMatchObject({ type: "review", body: "before_after", primary: { label: "Keep Mine", sends: { door: "resolve_conflict" } } });
     const row = (await pool.query(`SELECT status, draft FROM knowledge_files WHERE path = $1`, [p])).rows[0];
     expect(row).toEqual({ status: "conflict", draft: true }); // structurally invisible to agents
     expect((await pool.query(`SELECT count(*)::int AS n FROM knowledge_links WHERE from_path = $1`, [p])).rows[0].n).toBe(0);
@@ -163,5 +181,72 @@ describe.skipIf(!hasDb)("reconciler index loop (real db)", () => {
     // a quiet cycle sweeps nothing
     const again = await indexer.reconcile("test");
     expect(again.external_edits).toBe(0);
+  });
+
+  describe("knowledge conflicts become requests (C96, T2-9)", () => {
+    const copy = (name: string) => `${PREFIX}${name}.sync-conflict-20260926-120000-ABCDEFG.md`;
+    const reviews = async (p: string) =>
+      (await pool.query(`SELECT id, kind, decision FROM proposals WHERE source->>'external_ref' = $1 ORDER BY id`, [conflictSource(p).external_ref])).rows;
+
+    it("a Syncthing copy whose original is gone still raises, with Mine empty", async () => {
+      const p = copy("Orphan");
+      await writeFile(join(repo.root, p), "only the copy survived\n");
+      await indexer.reconcile("test");
+      const [r] = await reviews(p);
+      const { payload } = (await pool.query(`SELECT payload FROM proposals WHERE id = $1`, [r.id])).rows[0];
+      expect(payload.conflict).toEqual({ path: p, original: `${PREFIX}Orphan.md`, sha256: sha256(Buffer.from("only the copy survived\n")), original_sha256: null });
+      expect(payload.body.before).toEqual({ label: "Mine", path: `${PREFIX}Orphan.md`, text: "", sha256: null, truncated: false });
+    });
+
+    it("a Decline stays a Decline while the copy stays: the same copy is never raised twice", async () => {
+      const p = copy("Orphan");
+      const [r] = await reviews(p);
+      await pool.query(`UPDATE proposals SET decision = 'deny', decided_at = now() WHERE id = $1`, [r.id]);
+      const s = await indexer.reconcile("test");
+      expect(s.conflicts_new).toBe(0);
+      expect(await reviews(p)).toEqual([{ id: r.id, kind: "review", decision: "deny" }]);
+    });
+
+    it("the copy going away clears its waiting request at the source; coming back raises it anew", async () => {
+      const p = copy("Gamma");
+      await writeFile(join(repo.root, PREFIX, "Gamma.md"), "mine\n");
+      await writeFile(join(repo.root, p), "theirs\n");
+      await indexer.reconcile("test");
+      const [first] = await reviews(p);
+      expect(first).toMatchObject({ kind: "review", decision: "pending" });
+
+      await unlink(join(repo.root, p)); // merged in Obsidian, then deleted
+      await indexer.reconcile("test");
+      expect(await reviews(p)).toEqual([{ id: first.id, kind: "review", decision: RESOLVED_AT_SOURCE }]);
+
+      await writeFile(join(repo.root, p), "theirs, again\n");
+      const s = await indexer.reconcile("test");
+      expect(s.conflicts_new).toBe(1);
+      const rows = await reviews(p);
+      expect(rows.map((x) => x.decision)).toEqual([RESOLVED_AT_SOURCE, "pending"]);
+      await unlink(join(repo.root, p));
+      await indexer.reconcile("test");
+    });
+
+    it("a copy already raised as a pre-T2-9 report is not raised again beside it", async () => {
+      const p = copy("Legacy");
+      await pool.query(`INSERT INTO proposals (kind, source_agent, trust, payload) VALUES ('report', 'reconciler', 'internal', $1::jsonb)`, [
+        JSON.stringify({ title: "Conflict file", kind: "conflict_file", idempotency_key: `conflict:${p}` }),
+      ]);
+      await writeFile(join(repo.root, p), "old news\n");
+      const s = await indexer.reconcile("test");
+      expect(s.conflicts_new).toBe(0);
+      expect(await reviews(p)).toEqual([]);
+      await unlink(join(repo.root, p));
+      await indexer.reconcile("test");
+    });
+
+    it("never clears a request that is not a conflict mirror", async () => {
+      const other = { kind: "metistry", external_ref: `${MARKER}#not-a-conflict` };
+      await pool.query(`INSERT INTO proposals (kind, source_agent, trust, payload, source) VALUES ('improvement', 'reconciler', 'internal', '{}'::jsonb, $1::jsonb)`, [JSON.stringify(other)]);
+      await indexer.reconcile("test");
+      const { rows } = await pool.query(`SELECT decision FROM proposals WHERE source->>'external_ref' = $1`, [other.external_ref]);
+      expect(rows).toEqual([{ decision: "pending" }]);
+    });
   });
 });

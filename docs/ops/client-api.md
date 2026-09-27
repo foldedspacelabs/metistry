@@ -697,6 +697,49 @@ the only answers.
 oldest request's time and nothing else — the sidebar row and the Dock badge
 (§2.10, §2.12).
 
+#### Events become requests (C96, T2-9)
+
+Three things the owner used to learn about only on their own screens arrive in
+this queue too, as rows of existing types. No route changed: they are rows
+`GET /api/proposals` already serves, each a **mirror** (`source.kind =
+"metistry"`) — one row per subject while it waits, cleared as
+`resolved_at_source` when the thing it is about recovers, never `expired`.
+`payload.event` says which one a row is.
+
+| Event | `kind` → type | `source.external_ref` | Clears when |
+| --- | --- | --- | --- |
+| A scheduled **routine** failed | `report` → report | `routine-failed:<routine>#<error signature>` | the routine next runs cleanly |
+| A **secret** a component needs is unset | `secret_failure` → access | `secret:<VARIABLE>` | the variable is set |
+| A sync **conflict copy** is in the vault | `review` → review | `conflict:<vault path of the copy>` | the copy is gone |
+
+```
+routine_failed   {title, body: "<the error, ≤ 600 chars>", component, run_id, error_signature,
+                  last_ok_at | null, failed_at, act: {label: "Try Again", kind: "run_now", component}}
+secret_failed    {title, variable, why, stopped: ["<component>", …], fix, last_ok_at | null, failed_at,
+                  body: {kind: "before_after", heading, before: {label: "Stopped", text}, after: {label, text}}}
+knowledge_conflict {title, refs,
+                  body: {kind: "before_after", heading,
+                         before: {label: "Mine",      path | null, text, sha256 | null, truncated},
+                         after:  {label: "The Other", path,        text, sha256,        truncated}},
+                  conflict: {path, original | null, sha256, original_sha256 | null}}
+```
+
+- **One per signature.** A routine's same fault again is the same row; a
+  different fault is a row of its own. A secret is one row however many
+  components it stopped — a component stopped later is added to `stopped` on
+  the waiting row. A conflict copy is one row.
+- **An answer sticks while the fault lasts.** Dismissed (or any other answer)
+  and still broken: not raised again. Recovered and broken again: a new row.
+  A conflict copy the owner declined is not asked about again while it stays.
+- **Two timestamps** (C64): `last_ok_at` — when the routine, or anything the
+  secret stopped, last ran cleanly (`null`: never) — and `failed_at`.
+- A conflict's texts are capped at 32 000 characters each (`truncated` says
+  so); `conflict.sha256` and `original_sha256` are the files' own hashes, what
+  `POST /api/knowledge/conflicts/resolve` (T2-10) checks before it writes.
+- A collector's failed run raises nothing here — three failures in a row do
+  (T3-12). A copy raised before T2-9, as a `report` keyed `conflict:<path>`, is
+  not raised again as a review beside it.
+
 #### `409` for a settled decision, `404` for an unknown one
 
 ```

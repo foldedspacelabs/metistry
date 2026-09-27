@@ -90,6 +90,7 @@ async function runClock(db: FakeRuns, components: ScheduledCollector[], c: Clock
       timeZone: null,
       startedAt: new Date(Date.parse(from)),
       profile: async () => (profileAt ? profileAt(now) : PROFILE),
+      requests: null, // runs-fake models `runs` alone; the Needs You requests are runner.test's and event-requests' (T2-9)
       ...options,
       now,
     });

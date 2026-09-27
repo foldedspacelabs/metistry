@@ -38,6 +38,16 @@
 // three records ONE runs row per window — for a time of day, one per slot —
 // never one per tick, and every message names the environment variable or
 // manifest field that would fix it.
+//
+// EVENTS BECOME REQUESTS (C96, T2-9): the alert is a push; what the owner
+// answers is a Needs You request. A routine that fails raises one `report`
+// per error signature, with two timestamps (when it last succeeded, when it
+// failed), and it clears itself the next time the routine succeeds. A secret
+// that is missing raises ONE `secret_failure` request (read as access)
+// naming every component it stopped, and it clears itself once the secret is
+// set. Both are mirrors of this instance's own state (core's `raiseMirror`),
+// so a waiting one is never raised twice, and one the owner answered is not
+// raised again until what it was about has recovered.
 
 import { readFile } from "node:fs/promises";
 import { dirname } from "node:path";
@@ -76,14 +86,19 @@ import {
   SCHEDULE_HELD,
   SKIPPED_STREAK,
   WEEKDAYS,
+  SCHEDULED_KINDS,
   emptyCompute,
+  raiseMirror,
+  resolveAtSource,
   type Compute,
   type ComponentStreak,
   type Manifest,
   type ManifestSchedule,
   type OccurrenceRefusal,
   type PreflightMiss,
+  type PreflightResult,
   type ProfileFacts,
+  type RequestSource,
   type Requirements,
   type Scheduled,
   type ScheduledUnit,
@@ -297,6 +312,13 @@ export interface RunnerOptions {
    * Default: `now`.
    */
   startedAt?: Date;
+  /**
+   * Where a failed routine and a missing secret become Needs You requests
+   * (C96). Default: `runnerRequests` over the runner's own `db`. `null`
+   * raises none — for a caller whose `db` has no `proposals` table, which
+   * no install is.
+   */
+  requests?: RunnerRequests | null;
   /** injected by tests; production always uses the wall clock */
   now?: Date;
 }
@@ -311,6 +333,7 @@ interface ResolvedOptions {
   scheduled: () => Promise<OverlayRead>;
   profile: () => Promise<ProfileFacts>;
   timeZone: string | null;
+  requests: RunnerRequests | null;
   now: Date;
   startedAt: Date;
 }
@@ -318,7 +341,7 @@ interface ResolvedOptions {
 const NO_OVERLAY = async (): Promise<OverlayRead> => ({ ok: true, value: emptyScheduled });
 const NO_PROFILE = async (): Promise<ProfileFacts> => ({});
 
-function resolve(opts: RunnerOptions): ResolvedOptions {
+function resolve(db: Db, opts: RunnerOptions): ResolvedOptions {
   const env = opts.env ?? process.env;
   const now = opts.now ?? new Date();
   return {
@@ -331,6 +354,7 @@ function resolve(opts: RunnerOptions): ResolvedOptions {
     scheduled: opts.scheduled ?? NO_OVERLAY,
     profile: opts.profile ?? NO_PROFILE,
     timeZone: opts.timeZone !== undefined ? opts.timeZone : configuredTimeZone(env),
+    requests: opts.requests !== undefined ? opts.requests : runnerRequests(db),
     now,
     startedAt: opts.startedAt ?? now,
   };
@@ -551,7 +575,7 @@ async function slotFor(schedule: ManifestSchedule, w: Windows, opts: ResolvedOpt
  * manifest's schedule as `.metistry/scheduled.yaml` changes it.
  */
 export async function tick(db: Db, scheduled: ScheduledCollector[], ctx: ComponentCtx = {}, options: RunnerOptions = {}): Promise<void> {
-  const opts = resolve(options);
+  const opts = resolve(db, options);
   const streaks: ComponentStreak[] = await failureStreaks(db);
 
   const overlay = await opts.scheduled();
@@ -579,6 +603,10 @@ export async function tick(db: Db, scheduled: ScheduledCollector[], ctx: Compone
         return { ok: false, why };
       },
     ));
+
+  // every secret a preflight found missing this tick, and what it stopped —
+  // raised as one request per secret once the whole tick has been seen
+  const secretMisses = new Map<string, { why: string; stopped: Set<string> }>();
 
   for (const c of scheduled) {
     // 0. the owner's layer: paused (their choice — no run, and no row a tick)
@@ -632,6 +660,7 @@ export async function tick(db: Db, scheduled: ScheduledCollector[], ctx: Compone
     // 2. preflight: never spend a window on a component that cannot succeed
     const pre = await preflight(c.requires, { env: opts.env, compute: opts.compute(), fetchFn: opts.fetchFn, ...(opts.budget ? { budget: opts.budget } : {}) });
     if (!pre.ok) {
+      noteSecretMisses(secretMisses, c, pre);
       if (!slot.recorded(windows.lastPreflight)) {
         const message = blockedConfigMessage(c.name, c.dir, pre);
         await recordRunnerRow(db, c, PREFLIGHT_FAILED, message, { missing: pre.missing.map((m) => m.name) });
@@ -668,6 +697,7 @@ export async function tick(db: Db, scheduled: ScheduledCollector[], ctx: Compone
       // processed, not an assistant-facing outcome.
       const meta: Record<string, unknown> = c.runKind === "routine_run" ? { processed: n, outcome: n > 0 ? "acted" : "silent" } : { processed: n };
       await finishRun(db, runId, { ok: true, meta });
+      if (c.runKind === "routine_run") await tell(opts, (r) => r.routineSucceeded(c.name));
     } catch (err) {
       const error = err instanceof Error ? err.message : String(err);
       const signature = errorSignature(c.name, error);
@@ -681,8 +711,225 @@ export async function tick(db: Db, scheduled: ScheduledCollector[], ctx: Compone
           `Fix it, or remove \`schedule\` from ${c.dir}/manifest.yaml to retire it; ` +
           `after METISTRY_RUNNER_MAX_STREAK (${opts.maxStreak}) failures in a row the runner stops running it`,
       });
+      if (c.runKind === "routine_run") {
+        await tell(opts, (r) => r.routineFailed({ component: c.name, title: unitOf(c).displayName, runId, error, signature, failedAt: opts.now }));
+      }
     }
   }
+
+  if (secretMisses.size > 0) {
+    const failures = [...secretMisses].map(([name, m]) => ({ name, why: m.why, stopped: [...m.stopped].sort() }));
+    await tell(opts, (r) => r.secretsFailed(failures, opts.now));
+  }
+  await tell(opts, (r) => r.secretsRestored((name) => (opts.env[name] ?? "").trim() !== ""));
+}
+
+/**
+ * The preflight misses that are a SECRET — a declared variable or the
+ * engine's `auth.secret` that is unset. Not a `reachable` URL (a bridge that
+ * is down is not a credential) and not a miss that carries its own `fix`
+ * (compute.yaml assigns nothing, a budget stopped it): those are not the
+ * owner's secret to set, and the budget stop has a request of its own (C133).
+ */
+function noteSecretMisses(into: Map<string, { why: string; stopped: Set<string> }>, c: ScheduledCollector, pre: PreflightResult): void {
+  for (const m of pre.missing) {
+    if (m.fix !== undefined || c.requires.reachable.includes(m.name)) continue;
+    const seen = into.get(m.name) ?? { why: m.why, stopped: new Set<string>() };
+    seen.stopped.add(c.name);
+    into.set(m.name, seen);
+  }
+}
+
+/** Raise or clear through `opts.requests`. A queue write that fails is logged and never costs the tick: the run row and the alert already hold the fact. */
+async function tell(opts: ResolvedOptions, act: (r: RunnerRequests) => Promise<unknown>): Promise<void> {
+  if (opts.requests === null) return;
+  try {
+    await act(opts.requests);
+  } catch (err) {
+    console.error(`runner: a Needs You request could not be written — ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+// ---- events become requests (C96, T2-9) ---------------------------------------
+
+/** The source system of every request the runner raises: the subject is this instance's own — its runs, its secrets. */
+export const RUNNER_SOURCE_KIND = "metistry";
+/** What raises them: this process, never an agent. */
+export const RUNNER_AGENT = "runner";
+/** A failed routine is a `report` (§2.12): an excerpt, its act, Dismiss. */
+export const ROUTINE_FAILED_KIND = "report";
+/** A missing secret is access (§2.12), stored as its own kind — `access_request`'s Approve is a grants write for an area, and a secret names none. */
+export const SECRET_FAILED_KIND = "secret_failure";
+/** `payload.event` — what raised the request, for a client drawing it and for the doors that answer it. */
+export const ROUTINE_FAILED_EVENT = "routine_failed";
+export const SECRET_FAILED_EVENT = "secret_failed";
+/** How much of a failed run's error the report carries — the run row has all of it. */
+export const ROUTINE_ERROR_EXCERPT = 600; // limit: fixed — an excerpt a phone can show without scrolling; Activity has the run
+
+const ROUTINE_REF = "routine-failed:";
+const SECRET_REF = "secret:";
+
+/** One request per (routine, error signature): the same fault again is the same subject, a different fault is news. */
+export function routineFailedSource(component: string, signature: string): RequestSource {
+  return { kind: RUNNER_SOURCE_KIND, external_ref: `${ROUTINE_REF}${component}#${signature}` };
+}
+
+/** One request per secret, however many components it stopped. */
+export function secretFailedSource(name: string): RequestSource {
+  return { kind: RUNNER_SOURCE_KIND, external_ref: `${SECRET_REF}${name}` };
+}
+
+export interface RoutineFailure {
+  readonly component: string;
+  /** The name the owner reads (the manifest's display name). */
+  readonly title: string;
+  readonly runId: number;
+  readonly error: string;
+  readonly signature: string;
+  readonly failedAt: Date;
+}
+
+export interface SecretFailure {
+  /** The variable that is unset — the name the owner sets. */
+  readonly name: string;
+  readonly why: string;
+  /** Every component it stopped this tick, by name. */
+  readonly stopped: readonly string[];
+}
+
+/** Where the runner's events become requests. `runnerRequests` is the one implementation; the seam is for tests that model `runs` alone. */
+export interface RunnerRequests {
+  routineFailed(f: RoutineFailure): Promise<void>;
+  /** The routine ran: every report still waiting on one of its faults is cleared at its source. */
+  routineSucceeded(component: string): Promise<void>;
+  secretsFailed(failures: readonly SecretFailure[], at: Date): Promise<void>;
+  /** Clears the waiting request of every secret `isSet` says is set again. */
+  secretsRestored(isSet: (name: string) => boolean): Promise<void>;
+}
+
+const iso = (v: unknown): string | null => (v === null || v === undefined ? null : (v instanceof Date ? v : new Date(String(v))).toISOString());
+
+/** Pending mirrors whose `external_ref` starts with `prefix` — one SELECT, the prefix compared as text (never a LIKE pattern). */
+async function pendingRefs(db: Db, prefix: string): Promise<string[]> {
+  const { rows } = await db.query(
+    `SELECT DISTINCT source->>'external_ref' AS ref FROM proposals
+     WHERE decision = 'pending' AND source->>'kind' = $1 AND left(source->>'external_ref', $2) = $3`,
+    [RUNNER_SOURCE_KIND, prefix.length, prefix],
+  );
+  return rows.map((r) => String(r.ref));
+}
+
+/**
+ * When the components last succeeded, and whether a request for `source`
+ * has been raised since — waiting or answered. "Since" is what makes an
+ * answer stick: a Dismiss is not asked again while the fault lasts, and is
+ * asked again once the component has recovered and failed anew. Both times
+ * are Postgres's own, so no clock in this process can move the line.
+ */
+async function toldSince(db: Db, source: RequestSource, components: readonly string[]): Promise<{ lastOk: string | null; told: boolean }> {
+  const { rows } = await db.query(
+    `WITH last_ok AS (SELECT max(ts) AS ts FROM runs WHERE component = ANY($1) AND kind = ANY($2) AND ok)
+     SELECT (SELECT ts FROM last_ok) AS last_ok,
+            EXISTS (SELECT 1 FROM proposals
+                    WHERE source->>'kind' = $3 AND source->>'external_ref' = $4
+                      AND ts > coalesce((SELECT ts FROM last_ok), '-infinity'::timestamptz)) AS told`,
+    [[...components], [...SCHEDULED_KINDS], source.kind, source.external_ref],
+  );
+  return { lastOk: iso(rows[0]?.last_ok), told: rows[0]?.told === true };
+}
+
+const clipTo = (s: string, n: number): string => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+
+/** The runner's requests, written to the `proposals` table through core's mirrors. */
+export function runnerRequests(db: Db): RunnerRequests {
+  return {
+    async routineFailed(f) {
+      const source = routineFailedSource(f.component, f.signature);
+      const { lastOk, told } = await toldSince(db, source, [f.component]);
+      if (told) return;
+      await raiseMirror(db, {
+        kind: ROUTINE_FAILED_KIND,
+        source_agent: RUNNER_AGENT,
+        trust: "internal",
+        source,
+        payload: {
+          title: `${f.title} failed`,
+          body: clipTo(f.error, ROUTINE_ERROR_EXCERPT),
+          event: ROUTINE_FAILED_EVENT,
+          component: f.component,
+          run_id: f.runId,
+          error_signature: f.signature,
+          // the two timestamps (C64, C96): when it last worked, and when it did not
+          last_ok_at: lastOk,
+          failed_at: f.failedAt.toISOString(),
+          act: { label: "Try Again", kind: "run_now", component: f.component },
+        },
+      });
+    },
+
+    async routineSucceeded(component) {
+      for (const ref of await pendingRefs(db, `${ROUTINE_REF}${component}#`)) await resolveAtSource(db, { kind: RUNNER_SOURCE_KIND, external_ref: ref });
+    },
+
+    async secretsFailed(failures, at) {
+      for (const f of failures) {
+        const source = secretFailedSource(f.name);
+        // Waiting already: it names everything this secret has stopped, so a
+        // component stopped since (a routine whose time came round) is added
+        // to the list rather than raised on its own.
+        const { rows } = await db.query(
+          `SELECT id, payload->'stopped' AS stopped FROM proposals WHERE decision = 'pending' AND source->>'kind' = $1 AND source->>'external_ref' = $2 LIMIT 1`,
+          [source.kind, source.external_ref],
+        );
+        const waiting = rows[0];
+        if (waiting) {
+          const had = Array.isArray(waiting.stopped) ? (waiting.stopped as unknown[]).map(String) : [];
+          const all = [...new Set([...had, ...f.stopped])].sort();
+          if (all.length !== had.length) {
+            await db.query(`UPDATE proposals SET payload = payload || $2::jsonb WHERE id = $1 AND decision = 'pending'`, [waiting.id, JSON.stringify(secretStopped(f.name, all))]);
+          }
+          continue;
+        }
+        const { lastOk, told } = await toldSince(db, source, f.stopped);
+        if (told) continue;
+        await raiseMirror(db, {
+          kind: SECRET_FAILED_KIND,
+          source_agent: RUNNER_AGENT,
+          trust: "internal",
+          source,
+          payload: {
+            title: `${f.name} is not set`,
+            event: SECRET_FAILED_EVENT,
+            variable: f.name, // not `secret`: a field of that name is redacted on the way in (redact.ts)
+            why: f.why,
+            ...secretStopped(f.name, f.stopped),
+            last_ok_at: lastOk,
+            failed_at: at.toISOString(),
+            fix: `Set ${f.name} in this install's .env (\`metistry secrets sync --to env\`); what it stopped runs again on its next window.`,
+          },
+        });
+      }
+    },
+
+    async secretsRestored(isSet) {
+      for (const ref of await pendingRefs(db, SECRET_REF)) {
+        if (isSet(ref.slice(SECRET_REF.length))) await resolveAtSource(db, { kind: RUNNER_SOURCE_KIND, external_ref: ref });
+      }
+    },
+  };
+}
+
+/** The part of a secret's request that names what it stopped — the list, and the before-and-after body an access request draws. */
+function secretStopped(name: string, stopped: readonly string[]): Record<string, unknown> {
+  return {
+    stopped,
+    body: {
+      kind: "before_after",
+      heading: name,
+      before: { label: "Stopped", text: stopped.join("\n") },
+      after: { label: `Once ${name} is set`, text: "Each runs again on its next window." },
+    },
+  };
 }
 
 /**

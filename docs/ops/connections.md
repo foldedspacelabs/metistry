@@ -74,8 +74,8 @@ would meet, **before any call is made**:
 and the sync its provider declares when that sync reads it (the rule *A sync
 reading its connection* below applies).
 Agents reach a connection through the lazy pair `connections_list` /
-`connections_call` and their grants (T4-8b); until then an empty list is the
-true answer (*Nobody yet*).
+`connections_call` (below); until a host mounts the pool behind them and
+agents carry grants, an empty list is the true answer (*Nobody yet*).
 
 ## The pooled client
 
@@ -88,8 +88,9 @@ environment depends on), with the server's `tools/list` cached until it sends
 so an edit takes effect without a restart. It is a library: the process that
 holds it is the one whose calls it makes — `metistry connections add|test` and
 `metistry doctor` in the CLI today, and the console (a supervisor child) once
-the lazy pair lands (T4-8b), which also writes each call's `runs` row from the
-pool's events (`connection_call`, `connection_check`).
+it mounts the pool behind the lazy pair. A proxied call's `runs` row is
+written by mcp-brain itself (below), so a host does not also write one from
+the pool's `connection_call` event for it; `connection_check` is the CLI's.
 
 The host sets the clocks: the CLI reads `METISTRY_CONNECTION_CONNECT_TIMEOUT_MS`
 (default 30 s — a cold `npx -y …` downloads first) and
@@ -143,6 +144,65 @@ Seatbelt profile for it, which are not this ticket's files. An HTTP connection
 has no such gap: its requests are made by the pool, through the door. So
 prefer an HTTP server where one exists, and grant a command connection only
 the secret it needs.
+
+## The lazy pair — how an agent reaches one (T4-8b)
+
+Agents never dial a connection. On `/mcp` two tools stand in front of all of
+them (`packages/mcp-brain/src/connections-tools.ts`, plan §2.6, C115):
+
+- **`connections_list`** — with no argument, the connections lent to the
+  caller, each with its status and the tools it may call, read without
+  dialling; with `connection`, those tools' own descriptions and input
+  schemas, fetched from the upstream on demand. No upstream tool is ever on
+  the bridge's eager `tools/list` — that is the "lazy".
+- **`connections_call`** — one tool of one connection, through the host's
+  pooled client (`ConnectionsProxy`: this package's `ConnectionPool` for
+  `tools`/`call`, `describeConnections` for `list`).
+
+**Who reaches which connection** is core's `may()` (`mayConnection`), at the
+tool:
+
+| Caller | Reaches a connection when |
+| --- | --- |
+| the owner | always |
+| the assistant | always — a connection not offered to agents is the assistant's and the syncs' (C115) |
+| an external agent | it is **offered** (`offer_to_agents: true`) **and** named in the credential's `grants.connections` |
+| a crew | the same, **and** its manifest's `uses` names the `connections` group — the group without the grant reaches nothing, the grant without the group is refused at the door |
+| the capture token | never |
+
+A connection the caller cannot reach answers exactly like one that does not
+exist (`not_found`, *no such connection: <name>*): which connections the owner
+holds is not a borrower's to learn.
+
+**Which tools run in this release: a connection's Reads set to Allow.** A tool
+at Never, or one the file does not list, is *no such tool* — refused and not
+offered. Ask First, and every Changes things or Starts an agent tool whatever
+its mode, is refused with the sentence saying so: approving a call is
+preview-then-confirm, which arrives with T4-9. The pool refuses the same modes
+again before it dials.
+
+**What crosses the wire.** The answer is the pool's redacted content, every
+string through the §4.20 sanitizer. A refusal from the pool or the egress door
+reaches the caller as a code and a sentence built from names the caller sent;
+the pool's own sentence — which names secrets, variables and hosts — goes to
+the `runs` row as `meta.detail`, where the owner reads it. The caller's bearer
+reaches the proxy only as `caller.bearer`, so a call whose arguments carry it
+is refused `caller_credential`; it is never sent upstream.
+
+**The audit.** Every `connections_call` — refusals included — is one `runs`
+row of kind `connection_call`: the principal as `component`,
+`meta.connection`, `meta.connection_tool`, the secret NAMES it carried in
+`meta.secrets` (so *last used* on the Secrets list counts it), and
+`meta.is_error` when the upstream's tool reported failure. The
+`connection_calls` named query (`expose: route`) reads them back by
+connection, principal, since and ok.
+
+**Not yet wired — said plainly.** This release ships the gate, the tools and
+the record. The console does not yet hand mcp-brain a `ConnectionsProxy`, and
+an agent's registry `grants` do not yet carry `connections` (the console's
+grant validator and a crew's manifest are where they will), so today both
+tools answer `not_available` on a live console and no agent is lent anything
+— the fail-closed end of every axis.
 
 ## `check()`
 

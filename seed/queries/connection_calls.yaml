@@ -1,0 +1,61 @@
+# Seeded default (D4 overlay: an instance file of the same name wins).
+#
+# Every call made through the connections proxy (plan §2.6, §2.10; T4-8b):
+# one row per `connections_call` on `/mcp`, which mcp-brain writes as a
+# two-phase `runs` row of `kind = 'connection_call'` — the principal as
+# `component`, the connection and the upstream tool in `meta.connection` /
+# `meta.connection_tool`, the secret NAMES the call carried in `meta.secrets`
+# (never a value; the same key `secret_last_used` reads), and whether the
+# upstream said its tool failed in `meta.is_error`. A refused call is a row
+# too (`ok = false`, `error` = the envelope's code), so "who tried to reach
+# what" is answerable from here — the audit, and a connection's *Used by*.
+#
+# `ok` is the run's own: false when the call was refused or the connection
+# could not be reached, true when the upstream answered — a tool that
+# answered with an error is still an answer (`is_error` says so), the pool's
+# own rule (packages/connections).
+#
+# Postgres is derived (invariant 1): lose the ledger and every connection
+# reads "never called" until its next call, which is the honest answer.
+#
+# **`expose: route`.** The rows say which agent reached which of the owner's
+# services, with which credential, and when — the owner's to read on the
+# Connections screen, not a generic `/api/q/connection_calls` or `queries_run`
+# answer for an agent.
+name: connection_calls
+expose: route
+description: >-
+  Calls made through the connections proxy, newest first: when, by which
+  principal, to which connection and upstream tool, whether it answered
+  (ok; is_error when the tool itself reported failure), the error code when
+  it did not, how long it took, and the secret names it carried (never a
+  value). Blank params match every row; `ok` is "", "true" or "false".
+params:
+  connection: { type: text, default: "" } # blank = every connection
+  principal:  { type: text, default: "" } # blank = every principal; else one agents.id
+  since:      { type: text, default: "" } # blank = all time; else a timestamptz text — rows AT or after it
+  ok:         { type: text, default: "" } # blank = both; "true" | "false"
+  limit:      { type: int,  default: 100 }
+sql: |
+  SELECT
+    r.id,
+    r.ts,
+    r.component                                  AS principal,
+    r.meta ->> 'connection'                      AS connection,
+    r.meta ->> 'connection_tool'                 AS tool,
+    r.ok,
+    coalesce((r.meta ->> 'is_error')::boolean, false) AS is_error,
+    r.error,
+    r.duration_ms                                AS ms,
+    CASE WHEN jsonb_typeof(r.meta -> 'secrets') = 'array' THEN r.meta -> 'secrets' ELSE '[]'::jsonb END AS secrets,
+    r.meta ->> 'turn_id'                         AS turn_id
+  FROM runs r
+  WHERE r.kind = 'connection_call'
+    AND (nullif(:connection::text, '') IS NULL OR r.meta ->> 'connection' = :connection::text)
+    AND (nullif(:principal::text, '') IS NULL OR r.component = :principal::text)
+    -- a blank `since` casts to NULL, never to an error: nullif before the cast
+    AND r.ts >= coalesce(nullif(:since::text, '')::timestamptz, '-infinity'::timestamptz)
+    AND (nullif(:ok::text, '') IS NULL OR r.ok IS NOT DISTINCT FROM (:ok::text = 'true'))
+  ORDER BY r.ts DESC, r.id DESC
+  LIMIT (:limit)::int
+cache_ttl: 0

@@ -28,6 +28,7 @@ import {
   errorEnvelope,
   finishRun,
   may,
+  parseBearer,
   redactSecrets,
   runCheck,
   sanitizeForAgent,
@@ -44,6 +45,7 @@ import { ARTIFACTS_TOOL_NAMES, registerArtifactTools } from "./artifacts-tools.j
 import { CREW_TOOL_NAMES, registerCrewTools, type CrewDispatcher } from "./crew-tools.js";
 import { THREAD_TOOL_NAMES, registerThreadTools } from "./thread-tools.js";
 import { QUERIES_TOOL_NAMES, registerQueriesTools } from "./queries-tools.js";
+import { CONNECTIONS_TOOL_NAMES, registerConnectionsTools, type ConnectionsProxy } from "./connections-tools.js";
 import { ACTION_TOOL_NAMES, registerActionTools, type ActionExecutor } from "./action-tools.js";
 import { requestAccess } from "./access.js";
 import { KNOWLEDGE_FS_TOOL_NAMES, registerKnowledgeFsTools, type KnowledgeLister, type KnowledgeVaultSearcher } from "./knowledge-fs.js";
@@ -61,7 +63,7 @@ import type { AgentPrincipal, Db } from "./types.js";
 
 export interface BrainConfig {
   db: Db;
-  /** Credential → principal. Null means 401; the bridge never sees the token. */
+  /** Credential → principal. Null means 401; identity is decided here and only here (the connections proxy reads the raw bearer solely to refuse a call that carries it upstream). */
   authenticate(req: IncomingMessage): Promise<AgentPrincipal | null>;
   tasks: TasksService;
   /** Where `capture` writes files when no sink is injected — a plain directory (the standalone shape). */
@@ -84,6 +86,15 @@ export interface BrainConfig {
   crews?: CrewDispatcher | undefined;
   /** The one read path into state (invariant 3) for queries_list/queries_run. Absent → `not_available`. Internal principals always; external agents need grants.queries = true. */
   queries?: QueryStore | undefined;
+  /**
+   * The host's connections for the proxy's lazy pair, `connections_list` /
+   * `connections_call` (plan §2.6, T4-8b; connections-tools.ts): a listing
+   * that never dials, and a pooled client that does. Absent → both tools
+   * answer `not_available`. Who may reach which connection is core's
+   * `mayConnection`, asked here; which of a connection's tools run is the
+   * owner's per-tool policy, held by the proxy.
+   */
+  connections?: ConnectionsProxy | undefined;
   /** The host's action executor for `propose_action` at mode `allow` (apps/console/src/actions.ts). Absent → an allowed action answers `not_available`; the tool itself is offered only to a credential the owner has given room (docs/ops/actions.md). */
   actions?: ActionExecutor | undefined;
   /** Nudge when a held lease has this many seconds or fewer left (default 120). */
@@ -101,8 +112,8 @@ export interface BrainServer {
 }
 
 /**
- * The declared surface (§4.3 default 1): 27 tools, no meta-tool indirection.
- * 26 of them are EAGER — every principal sees them — and `propose_action` is
+ * The declared surface (§4.3 default 1): 29 tools, no meta-tool indirection.
+ * 28 of them are EAGER — every principal sees them — and `propose_action` is
  * the one that is not: it is registered only for a credential whose autonomy
  * table admits an action (docs/ops/actions.md), which is nobody until the
  * owner sets a level. So the eager definition budget measured below is
@@ -129,6 +140,14 @@ export interface BrainServer {
  * here, "ask the owner for the area you were refused" — and it arrives with
  * the discovery decision attached rather than fitting under the line
  * quietly. The tool after this one fails that check again.
+ *
+ * 2026-09-27 (T4-8b, the approved spec §2.6 / Q5): 26 → 28 eager, for the
+ * proxy's lazy pair `connections_list` / `connections_call`. Two tools in
+ * front of every connection the owner will ever add, each of which would
+ * otherwise put its own tools on this surface: the upstream definitions are
+ * fetched on demand by `connections_list { connection }` and never listed
+ * here. The count ceiling moved with it, reasoned in
+ * `ops/scripts/check-tool-surface.mjs`.
  */
 export const TOOL_NAMES = [
   "capture",
@@ -149,6 +168,7 @@ export const TOOL_NAMES = [
   ...ARTIFACTS_TOOL_NAMES,
   ...CREW_TOOL_NAMES,
   ...QUERIES_TOOL_NAMES,
+  ...CONNECTIONS_TOOL_NAMES,
   ...ACTION_TOOL_NAMES,
 ] as const;
 export type ToolName = (typeof TOOL_NAMES)[number];
@@ -183,6 +203,12 @@ export function sanitizeDeep(value: unknown): unknown {
     return out;
   }
   return value;
+}
+
+/** A `connections_call`'s connection and upstream tool, for its `connection_call` runs row — names the schema already bounded. */
+function connectionOf(args: unknown): { connection: string; connection_tool: string } | undefined {
+  const a = (args ?? {}) as { connection?: unknown; tool?: unknown };
+  return typeof a.connection === "string" && typeof a.tool === "string" ? { connection: a.connection, connection_tool: a.tool } : undefined;
 }
 
 /** Args as they land in the audit row: scalars only, clipped, secrets redacted, bodies dropped. */
@@ -257,10 +283,16 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
   // --- per-request server ---------------------------------------------------
 
   /** aliasByRequestId: filled by handle()'s alias rewriter, read by `wrap` so the runs row names the deprecated spelling that was used. */
-  function buildServer(principal: AgentPrincipal, aliasByRequestId: Map<string, string>): McpServer {
+  function buildServer(principal: AgentPrincipal, aliasByRequestId: Map<string, string>, callerBearer?: string | undefined): McpServer {
     const server = new McpServer({ name: "metistry-brain", version }, { capabilities: { tools: {} } });
 
-    /** Every tool call: one two-phase runs row (component = agent id), sanitizer, nudge. */
+    /**
+     * Every tool call: one two-phase runs row (component = agent id), sanitizer, nudge.
+     * The row's kind is `tool`, except a call through the connections proxy,
+     * which is `connection_call` (plan §2.6) with the connection and the
+     * upstream tool named in `meta` — so the audit of what reached outside
+     * Metistry is one kind to read (`connection_calls`), refusals included.
+     */
     function wrap<A>(name: ToolName, body: (args: A, act: WriteAct) => Promise<Outcome>): (args: A, extra?: ToolCallExtra) => Promise<CallToolResult> {
       return async (args: A, extra?: ToolCallExtra) => {
         // The turn handle rides in the call's `_meta`, never in a schema
@@ -271,8 +303,9 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
         // a call that came in under a deprecated name is recorded under the primary
         // one, with the old spelling in meta.alias — so the stragglers are countable.
         const alias = extra?.requestId !== undefined ? aliasByRequestId.get(String(extra.requestId)) : undefined;
-        const runMeta = { via: "mcp-brain", args: summarizeArgs(args), ...(turn_id !== undefined ? { turn_id } : {}), ...(alias ? { alias } : {}) };
-        const runId = await startRun(db, { component: principal.id, kind: "tool", tool: name, meta: runMeta });
+        const proxied = name === "connections_call" ? connectionOf(args) : undefined;
+        const runMeta = { via: "mcp-brain", args: summarizeArgs(args), ...(turn_id !== undefined ? { turn_id } : {}), ...(alias ? { alias } : {}), ...(proxied ?? {}) };
+        const runId = await startRun(db, { component: principal.id, kind: proxied ? "connection_call" : "tool", tool: name, meta: runMeta });
         let outcome: Outcome;
         // **The run's own allowlist, at the door** (P2 of
         // docs/research/2026-09-19-grants-and-access-simplified.md §2.2): a
@@ -582,6 +615,12 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
     // queries_list / queries_run (invariant 3's one read path, out to agents): internal always, external with grants.queries = true
     registerQueriesTools(reg, cfg.queries, principal);
 
+    // connections_list / connections_call (plan §2.6, T4-8b): the proxy's
+    // lazy pair — eager themselves, the upstream definitions behind a call.
+    // The caller's bearer travels to the proxy ONLY so a call that carries it
+    // in its arguments is refused; it is never sent upstream.
+    registerConnectionsTools(reg, cfg.connections, principal, callerBearer);
+
     // propose_action (docs/ops/actions.md): registered ONLY when this
     // credential's autonomy table admits something — nobody, until the owner
     // sets a level. That is this group's "lazy": the definition does not ride
@@ -628,7 +667,11 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
       const principal = await cfg.authenticate(req); // the credential decides; nothing in the body is identity
       if (!principal) return sendEnvelope(res, "unauthenticated");
       const aliasByRequestId = new Map<string, string>();
-      const server = buildServer(principal, aliasByRequestId);
+      // Identity is still the host's `authenticate`; the raw bearer is read
+      // here for one purpose — the connections proxy refuses a call whose
+      // arguments carry the caller's own credential (connections-tools.ts).
+      const header = req.headers.authorization;
+      const server = buildServer(principal, aliasByRequestId, parseBearer(Array.isArray(header) ? header[0] : header) ?? undefined);
       // No sessionIdGenerator = stateless: no session header, no server-side state between requests.
       const transport = new StreamableHTTPServerTransport({ enableJsonResponse: true });
       res.on("close", () => {
@@ -670,6 +713,7 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
           artifacts: cfg.artifacts ? "available" : "not_available",
           crews: cfg.crews ? cfg.crews.crews().map((c) => c.name) : "not_available",
           queries: cfg.queries ? "available" : "not_available",
+          connections: cfg.connections ? "available" : "not_available",
           // Phase 6: semantic ranking is additive — without an embedder every mode still answers, in keyword.
           knowledge_search_modes: cfg.embedder ? ["keyword", "semantic", "hybrid"] : ["keyword"],
         };

@@ -322,6 +322,17 @@ export const CREW_TOOL_GROUPS = {
   actions: ["propose_action"],
   /** Versioned output into the crew's projects (§4.21). */
   artifacts: ["artifacts_publish", "artifacts_get", "artifacts_list", "artifacts_comment", "artifacts_resolve", "artifacts_review"],
+  /**
+   * The proxy's lazy pair (plan §2.6, C115; T4-8b): list the connections the
+   * crew was lent, and call one of their tools. Its own group for the same
+   * reason `rooms` and `actions` are — reaching outside Metistry is a new
+   * power, so a crew gains it only when the owner edits the manifest — and,
+   * like `actions`, holding the tools is only half the gate: a connection is
+   * reached only when the owner has offered it to agents and granted it to
+   * this crew (core's `mayConnection`), so naming this group alone reaches
+   * nothing.
+   */
+  connections: ["connections_list", "connections_call"],
 } as const;
 export type CrewToolGroup = keyof typeof CREW_TOOL_GROUPS;
 

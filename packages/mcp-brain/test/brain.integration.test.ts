@@ -970,7 +970,7 @@ cache_ttl: 0
     grant("tok-alice", { id: ALICE, grants: { tier: "none", areas: [] }, projects: [PA] }); // restore alice's plain grant for the rest of the suite
   });
 
-  it("every tool call is a two-phase runs row on the agent (kind=tool), with args summarized and bodies clipped", async () => {
+  it("every tool call is a two-phase runs row on the agent (kind=tool; connection_call for the proxy), with args summarized and bodies clipped", async () => {
     // the artifacts module is not wired in this suite (its own suite covers it): each artifact_* call is a recorded not_available
     const ar = await connect("tok-alice");
     const artId = "art_01J00000000000000000000000";
@@ -986,6 +986,9 @@ cache_ttl: 0
       // the room tools ride the same service, so an unwired deployment refuses them the same way
       ["tasks_comment", { work_id: 1, body: "b" }],
       ["tasks_thread", { work_id: 1 }],
+      // no connections proxy is wired here either (T4-8b): both tools are a recorded not_available
+      ["connections_list", {}],
+      ["connections_call", { connection: "github", tool: "list_issues", arguments: { q: "x" } }],
     ] as const) {
       expect((await call(ar, name, args)).body.error.code, name).toBe("not_available");
     }
@@ -996,9 +999,14 @@ cache_ttl: 0
     expect((await call(ar, "request_access", { area: "Areas/Recorded", reason: "recording one of every eager tool" })).body).toMatchObject({ area: "Areas/Recorded" });
     await ar.close();
     const { rows } = await pool.query(
-      `SELECT tool, ok, finished_at IS NOT NULL AS finished, meta FROM runs WHERE component = $1 AND kind = 'tool' ORDER BY id`,
+      `SELECT tool, kind, ok, finished_at IS NOT NULL AS finished, meta FROM runs WHERE component = $1 AND kind IN ('tool', 'connection_call') ORDER BY id`,
       [ALICE],
     );
+    // a call through the proxy is its own kind, naming the connection and the upstream tool — the connection_calls query's rows
+    const proxied = rows.filter((r) => r.tool === "connections_call");
+    expect(proxied.length).toBeGreaterThan(0);
+    for (const r of proxied) expect(r).toMatchObject({ kind: "connection_call", ok: false, meta: { connection: "github", connection_tool: "list_issues" } });
+    expect(rows.filter((r) => r.kind === "connection_call").every((r) => r.tool === "connections_call")).toBe(true);
     const tools = new Set(rows.map((r) => r.tool));
     for (const t of EAGER_TOOL_NAMES) expect(tools.has(t), t).toBe(true);
     expect(rows.every((r) => r.finished && r.ok !== null)).toBe(true);

@@ -283,6 +283,8 @@ describe("doctor: the launchd shape", () => {
       exec,
       platform: "darwin",
       uid: 501,
+      // this Mac's own /Applications is not the fixture — the app row has its own tests
+      appPath: null,
     });
     expect(report.shape).toBe("launchd");
     expect(report.rows[0]).toMatchObject({ kind: "deployment", name: "deployment", status: "ok" });
@@ -311,7 +313,7 @@ describe("doctor: the launchd shape", () => {
     // the two agents it really installs
     const shapeEnv = { ...env, METISTRY_EK_URL: "http://127.0.0.1:7811" };
     const run = async (exec: Exec) =>
-      byName((await doctor({ productDir, env: shapeEnv, deployment: { shape: "launchd", services: {} }, fetchFn: fakeFetch({}), db: null, exec, platform: "darwin", uid: 501 })).rows);
+      byName((await doctor({ productDir, env: shapeEnv, deployment: { shape: "launchd", services: {} }, fetchFn: fakeFetch({}), db: null, exec, platform: "darwin", uid: 501, appPath: null })).rows);
     const printing = (out: string) =>
       fakeExec({
         launchctl: {

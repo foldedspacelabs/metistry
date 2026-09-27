@@ -303,8 +303,8 @@ describe("no code path runs pmset with arguments that write", () => {
     // and the whole doctor, once, with the lid asked for
     const I = await withHolder(await instanceWith(`shape: launchd\nkeep_awake: always_lid_closed\nservices: {}\n`));
     const exec = pmset(SETTINGS_OFF);
-    // db: null and namespace: null — this test opens no database and reads no ports file
-    await doctor({ productDir: P, env: { METISTRY_INSTANCE_DIR: I }, exec, platform: "darwin", uid: 501, fetchFn: noFetch, db: null, namespace: null, timeoutMs: 50 });
+    // db: null, namespace: null and appPath: null — this test opens no database, reads no ports file and looks at no /Applications
+    await doctor({ productDir: P, env: { METISTRY_INSTANCE_DIR: I }, exec, platform: "darwin", uid: 501, fetchFn: noFetch, db: null, namespace: null, appPath: null, timeoutMs: 50 });
     seen.push(...exec.calls.filter((c) => c.cmd.endsWith("pmset")).map((c) => c.args));
 
     expect(seen.length).toBeGreaterThan(0);

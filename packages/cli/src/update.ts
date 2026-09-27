@@ -24,6 +24,7 @@ import { productVersion } from "./env.js";
 import { envPaths, readInstanceId } from "./instance.js";
 import { applyPorts, loadNamespace } from "./namespace.js";
 import type { Exec } from "./exec.js";
+import { rollbackApp, updateApp, type UpdateAppResult } from "./mac-app.js";
 import { labelFor, loadPlistTemplates, loadSupervisedTemplates, type PlistTemplate } from "./launchd.js";
 import { SUPERVISOR_SERVICE } from "./supervisor.js";
 import { instanceLockPath, readLock, serializeLock, type LockFile, type LockSource } from "./lock.js";
@@ -79,6 +80,16 @@ export interface UpdateOptions {
   mintOwnerToken?: (() => string) | undefined;
   /** test seam: the login Keychain the shared-scope migration reads and writes (default: `security`, on darwin) */
   keychain?: KeychainBackend | undefined;
+  /**
+   * release mode, launchd shape, macOS: the Mac app to move with the release
+   * (`--app-path`). undefined = `METISTRY_APP_PATH`, else /Applications/Metistry.app,
+   * else ~/Applications/Metistry.app; null = `--no-app`, leave it alone (mac-app.ts).
+   */
+  appPath?: string | null | undefined;
+  /** `--relaunch`: quit a running copy of the app and reopen it after the swap — never without this */
+  relaunch?: boolean | undefined;
+  /** test seam: the wait between polls after `--relaunch` quits the app */
+  appSleep?: ((ms: number) => Promise<void>) | undefined;
   /** default true; `false` is a test seam — see `up`'s `cliShim` (cli-shim.ts). `update` writes the same shim `up` does: it shares nothing else with `up`, but a checkout that only ever runs `update` still gets one. */
   cliShim?: boolean | undefined;
 }
@@ -96,6 +107,8 @@ export interface UpdateResult {
   release?: InstallReleaseResult;
   /** release mode only: what happened to `<product>/runtime/` (Node, Postgres + pgvector, git) */
   runtimeDeps?: InstallRuntimeDepsResult;
+  /** release mode on a launchd Mac: what happened to the Mac app (mac-app.ts) */
+  app?: UpdateAppResult;
   /** the directory the rest of the update ran against (`<product-dir>/current` in release mode) */
   runDir: string;
   /** the seed templates the vault lacked, copied in by this run (`Templates/Brief.md`, …) — never one it already had */
@@ -303,6 +316,7 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
   let failure: StepFailed | undefined;
   let release: InstallReleaseResult | undefined;
   let runtimeDeps: InstallRuntimeDepsResult | undefined;
+  let app: UpdateAppResult | undefined;
   let sharedScope: MigrateScopeResult | undefined;
   let seededTemplates: SeedTemplatesResult | undefined;
   // release mode swings this to `<product-dir>/current` once the switch is done
@@ -337,6 +351,20 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
     if (!dir) return;
     const refusal = legacyLayoutRefusal({ shape: detectLayout(dir), instanceDir: dir, version: v, allowLegacy: opts.allowLegacy });
     if (refusal) throw new StepFailed(refusal);
+  };
+
+  // The Mac app follows the release the pack just moved to (mac-app.ts). Only
+  // where the app is the install's front end — macOS, launchd shape — and it
+  // can never fail the update: the product has already moved.
+  const macApp = async (v: string): Promise<UpdateAppResult | undefined> => {
+    if (platform !== "darwin") return undefined;
+    r.section("app");
+    if (deployment.shape !== "launchd") {
+      r.note(`shape ${deployment.shape}: the Mac app is not moved by update — Sparkle keeps it current`);
+      return undefined;
+    }
+    const appOpts = { env, appPath: opts.appPath, relaunch: opts.relaunch, sleep: opts.appSleep };
+    return opts.rollback ? await rollbackApp(r, appOpts) : await updateApp(r, { ...appOpts, productDir, version: v, fetchFn });
   };
 
   try {
@@ -375,6 +403,7 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
         r.action(`verify its sha256 against checksums.txt, unpack to ${productDir}/releases/${want}/ and point current at it`);
         r.action(`download metistry-runtime-deps-${want}-${opts.target ?? releaseTarget(platform)}.tar.gz the same way and unpack it to ${productDir}/${RUNTIME_DIRNAME}/ (Node, Postgres + pgvector, git)`);
       }
+      app = await macApp(want);
     } else {
       release = opts.rollback ? await rollbackRelease(r, productDir) : await installRelease(r, { productDir, fetchFn, env, version: opts.releaseVersion, ...(opts.target ? { target: opts.target } : {}) });
       releaseVersion = release.version;
@@ -387,6 +416,7 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
         runtimeDeps = await installRuntimeDeps(r, { productDir, fetchFn, env, version: releaseVersion, ...(opts.target ? { target: opts.target } : {}) });
         if (!runtimeDeps.installed) r.note(`${RUNTIME_DIRNAME}/: unchanged — ${runtimeDeps.reason}`);
       }
+      app = await macApp(releaseVersion);
     }
 
     const templates = await templatesForRestart(runDir, deployment.shape, labelSuffix, env);
@@ -532,8 +562,8 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
       : await closingDoctor(r, runDir, opts.doctorDeps, opts.doctorFn ?? doctor);
   const code = failure ? failure.code || 1 : doctorCode;
   r.out("");
-  r.out(updateSummary({ ui: r.ui, dryRun: r.dryRun, failure, code, source, version: lock?.product.version ?? releaseVersion, migrations, restarted, kickstartFailed: kickFailed.length }));
-  return { code, source, runDir, commands: r.commands, ...(lock ? { lock } : {}), restarted, ...(migrations ? { migrations } : {}), ...(release ? { release } : {}), ...(runtimeDeps ? { runtimeDeps } : {}), ...(sharedScope ? { sharedScope } : {}), ...(seededTemplates ? { seededTemplates } : {}) };
+  r.out(updateSummary({ ui: r.ui, dryRun: r.dryRun, failure, code, source, version: lock?.product.version ?? releaseVersion, migrations, restarted, kickstartFailed: kickFailed.length, app }));
+  return { code, source, runDir, commands: r.commands, ...(lock ? { lock } : {}), restarted, ...(migrations ? { migrations } : {}), ...(release ? { release } : {}), ...(runtimeDeps ? { runtimeDeps } : {}), ...(app ? { app } : {}), ...(sharedScope ? { sharedScope } : {}), ...(seededTemplates ? { seededTemplates } : {}) };
 }
 
 // ---- seed templates the vault lacks ---------------------------------------------------
@@ -759,6 +789,8 @@ export function updateSummary(s: {
   restarted: string[];
   /** kickstarts that were tried and failed */
   kickstartFailed?: number | undefined;
+  /** the Mac app's half, when it ran — a skip is not news, so it is not summarised */
+  app?: UpdateAppResult | undefined;
 }): string {
   const { ui } = s;
   if (s.dryRun) return `${ui.paint("skipped", `${ui.icon("off")} dry run`)} ${ui.dim(`— ${s.source} ${s.version}, nothing was changed`)}`;
@@ -772,6 +804,7 @@ export function updateSummary(s: {
     s.migrations ? `${s.migrations.applied.length} migration(s) applied` : "no migrations",
     s.restarted.length > 0 ? `${s.restarted.length} job(s) kickstarted` : "nothing kickstarted",
     ...((s.kickstartFailed ?? 0) > 0 ? [`${s.kickstartFailed} kickstart(s) failed`] : []),
+    ...(s.app && s.app.status !== "skipped" ? [`${s.app.detail}${s.app.running === "needs-relaunch" ? " (reopen it)" : ""}`] : []),
   ];
   return `${verdict} ${ui.dim(`— ${parts.join(", ")}`)}`;
 }

@@ -82,6 +82,8 @@ import { defaultUi, padTo, statusName, visibleWidth, type Ui } from "./ui.js";
 import { envPaths, readInstanceId } from "./instance.js";
 import { securityPresence } from "./keychain.js";
 import { MIGRATE_SCOPE_COMMAND, sharedScopeStatus } from "./secrets.js";
+import { appDmgAssetName, compareVersions, resolveAppPath } from "./mac-app.js";
+import { instanceLockPath, readLock } from "./lock.js";
 import { connectionDoctorRows } from "./connection-check.js";
 import { resolveSeedDir } from "./env.js";
 
@@ -143,6 +145,8 @@ export interface DoctorDeps {
   keychainProbe?: (service: string, account: string) => Promise<boolean>;
   /** test seam: the Keychain a connection's check fills a command's granted secrets from (default: the login Keychain, on darwin) */
   keychain?: KeychainBackend;
+  /** the Mac app the `app` row reads (default: `METISTRY_APP_PATH`, /Applications, ~/Applications — mac-app.ts); null = no `app` row */
+  appPath?: string | null;
 }
 
 // ---- manifests ------------------------------------------------------------
@@ -643,6 +647,41 @@ export async function cliRow(productDir: string, env: NodeJS.ProcessEnv): Promis
         return { status: "absent", remediation: `no cli shim yet at ${shim} — \`metistry up\` writes one`, meta: { shim } };
       },
     )),
+  };
+  return action ? { ...row, action } : row;
+}
+
+// ---- the Mac app ------------------------------------------------------------
+//
+// `metistry update` moves /Applications/Metistry.app with the release on a
+// launchd Mac (mac-app.ts); this row says whether it did. The installed
+// bundle's CFBundleShortVersionString against metistry.lock's version:
+// behind is `degraded` (the install works; its front end is older than the
+// product it drives), never `failed`. No app at all is `absent` — a Mac that
+// runs the product from the terminal is not broken.
+
+export async function appRow(o: { env: NodeJS.ProcessEnv; exec: Exec; appPath?: string | null | undefined }): Promise<DoctorRow | undefined> {
+  if (o.appPath === null) return undefined;
+  const resolved = await resolveAppPath(o.exec, o.env, o.appPath);
+  if ("skip" in resolved) return { kind: "app", ...(await runCheck("app", "the Mac app's Info.plist", async () => ({ status: "absent", remediation: resolved.skip }))) };
+  const { path, info } = resolved;
+  const lockPath = instanceLockPath(o.env);
+  const lock = lockPath ? await readLock(lockPath).catch(() => undefined) : undefined;
+  let action: DoctorAction | undefined;
+  const row = {
+    kind: "app",
+    ...(await runCheck("app", `${path} CFBundleShortVersionString vs metistry.lock`, async () => {
+      if (!info.version) return { status: "degraded", remediation: `${path} has no readable CFBundleShortVersionString — reinstall it from the release's DMG`, meta: { path } };
+      const meta = { path, version: info.version, ...(lock ? { lock: lock.product.version, source: lock.product.source } : {}) };
+      if (!lock) return { meta };
+      const cmp = compareVersions(info.version, lock.product.version);
+      if (cmp === undefined || cmp >= 0) return { meta };
+      if (lock.product.source === "release") {
+        action = runVerb(["metistry", "update"], "Update the app");
+        return { status: "degraded", remediation: `the app is ${info.version} and the install is ${lock.product.version} — \`metistry update\` installs ${appDmgAssetName(lock.product.version)} from the same release`, meta };
+      }
+      return { status: "degraded", remediation: `the app is ${info.version} and the checkout is ${lock.product.version} — a git-mode update does not move the app: Check for Updates… in the app, or install ${appDmgAssetName(lock.product.version)}`, meta };
+    })),
   };
   return action ? { ...row, action } : row;
 }
@@ -1688,7 +1727,7 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
   // model servers. Concurrently it is the slowest single probe. Nothing about
   // any one check changes — no timeout was shortened to buy this, because a
   // slow-but-healthy bridge reported as down would be a worse table.
-  const [componentRows, registries, layout, inbox, profile, cli, dbAndSchedules, launchd, keepAwake, supervisor, containers, localModels, sharedScope, vaultSync, connections] = await Promise.all([
+  const [componentRows, registries, layout, inbox, profile, cli, app, dbAndSchedules, launchd, keepAwake, supervisor, containers, localModels, sharedScope, vaultSync, connections] = await Promise.all([
     (async () => Promise.all((await walkManifests(deps.productDir)).map((m) => componentRow(m, { env, fetchFn, timeoutMs, shape, labelSuffix, compute }))))(),
     // the registries over product + extensions: overlays and skips (plan §2.7)
     registriesRow(deps.productDir, env),
@@ -1698,6 +1737,8 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
     // whether typing `metistry` finds this install's shim: a filesystem
     // look, so it costs nothing to start with everything else
     cliRow(deps.productDir, env),
+    // the Mac app against the lock: where the app is the install's front end
+    platform === "darwin" && shape === "launchd" ? appRow({ env, exec, appPath: deps.appPath }) : Promise.resolve(undefined),
     (async (): Promise<DoctorRow[]> => {
       const db = deps.db === undefined ? await openDbFromEnv(env) : deps.db;
       try {
@@ -1736,7 +1777,7 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
     // someone else's server (docs/ops/connections.md)
     env.METISTRY_INSTANCE_DIR ? connectionRows({ instanceDir, productDir: deps.productDir, env, platform, uid, exec, ...(deps.keychain ? { keychain: deps.keychain } : {}) }) : Promise.resolve([]),
   ]);
-  rows.push(...componentRows, registries, layout, inbox, ...(profile ? [profile] : []), cli, ...dbAndSchedules, ...launchd, ...(keepAwake ? [keepAwake] : []), ...supervisor, ...containers, ...localModels, ...(sharedScope ? [sharedScope] : []), vaultSync, ...connections);
+  rows.push(...componentRows, registries, layout, inbox, ...(profile ? [profile] : []), cli, ...(app ? [app] : []), ...dbAndSchedules, ...launchd, ...(keepAwake ? [keepAwake] : []), ...supervisor, ...containers, ...localModels, ...(sharedScope ? [sharedScope] : []), vaultSync, ...connections);
 
   return { as_of: new Date().toISOString(), product_dir: deps.productDir, shape, ok: !rows.some((r) => r.status === "failed"), rows };
 }

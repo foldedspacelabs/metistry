@@ -390,6 +390,47 @@ describe.skipIf(!hasDb)("GET /api/events (real db, real sockets)", () => {
     s.close();
   });
 
+  // T3-5: Today shows *Standup at 8:00 AM* until the file lands, then the
+  // file — refreshed on `routine.status` (§2.5, §2.20). The routine's own row
+  // is written after the vault write returns, so the event a client refreshes
+  // on can never arrive before the file it refreshes for.
+  it("the Standup routine's file landing reaches a subscriber as routine.status {name: standup} — after the write", async () => {
+    const s = await open(base, asLocal());
+    await expect.poll(() => s.lastId()).toBeDefined();
+    const { routines } = await loadRoutines({ home: fileURLToPath(new URL("../../../routines", import.meta.url)) });
+    const standup = routines.find((r) => r.name === "standup")!;
+    await pool.query(`DELETE FROM runs WHERE component = 'standup'`);
+    const files = new Map<string, string>([
+      ["Me/profile.md", "---\nworking_days: [mon, tue, wed, thu, fri]\n---\n"],
+      ["Templates/Standup.md", "---\nsource: user\n---\n# Standup — {{ date }}\n"],
+    ]);
+    let landedAt = 0;
+    const vault = {
+      async read(path: string) {
+        const t = files.get(path);
+        return t === undefined ? null : { content: Buffer.from(t), sha256: "x" };
+      },
+      async write(path: string, content: Buffer) {
+        files.set(path, content.toString("utf8"));
+        landedAt = Date.now();
+        return { path, sha256: "y", bytes: content.length, created: true };
+      },
+    };
+    const slot = new Date("2026-09-21T12:00:00Z"); // Monday, 08:00 in New York
+    expect(await standup.run(pool, { vault, calendar: null, now: slot, scheduledFor: slot, timeZone: "America/New_York", env: {} } as Parameters<typeof standup.run>[1])).toBe(1);
+    let fileWhenHeard: string | undefined;
+    await s.waitFor((x) => {
+      const hit = x.event === "routine.status" && (x.data as { name: string }).name === "standup";
+      if (hit) fileWhenHeard = files.get("Journal/Standup/2026-09-21.md");
+      return hit;
+    }, 2000);
+    expect(landedAt).toBeGreaterThan(0);
+    expect(fileWhenHeard).toContain("# Standup — 2026-09-21"); // the file was there when the event was heard
+    expect(files.get("Journal/Standup/2026-09-21.md")).toContain("source: standup");
+    await pool.query(`DELETE FROM runs WHERE component = 'standup'`);
+    s.close();
+  });
+
   it("**a reconnect with Last-Event-ID replays exactly the missed events** — then carries on live", async () => {
     // a hub of its own, fed by nothing but this test, so "exactly" can be exact
     const own = new EventHub({ firstId: 7000 });

@@ -6,7 +6,8 @@
 //   1. the MANIFEST — a product routine or collector, or an extension: the
 //      default schedule, the config schema, what it reads and writes;
 //   2. `Me/profile.md` — facts about the owner a schedule may FOLLOW
-//      (`working_days`, `timezone`); read, never written;
+//      (`working_days`, `timezone`); read, never written by Metistry
+//      (`profileFacts`, below — T3-4);
 //   3. THIS FILE — the owner's changes, written only through the Scheduled
 //      doors (T3-3). Reset to Default deletes an entry.
 //
@@ -26,10 +27,23 @@
 //     caller can apply it by accident.
 
 import { z } from "zod";
-import { parse as parseYaml } from "yaml";
+import { isScalar, isSeq, parse as parseYaml, parseDocument, Scalar, type YAMLMap } from "yaml";
 import { validAgentAreaGrant } from "./instance-layout.js";
 import { AGENT_NAME_RE } from "./instances.js";
-import { everySchema, forward, isPlainObject, issueMessage, scheduleSchema } from "./schedule.js";
+import {
+  AT_RE,
+  WEEKDAYS,
+  everySchema,
+  forward,
+  isPlainObject,
+  issueMessage,
+  resolveDays,
+  scheduleSchema,
+  timeOfDayScheduleSchema,
+  type ProfileFacts,
+  type TimeOfDaySchedule,
+  type Weekday,
+} from "./schedule.js";
 
 /** Under `.metistry/` — a protected path the console writes (T3-2 adds it to `CALLER_AUTHORITY.console`). */
 export const SCHEDULED_FILENAME = "scheduled.yaml";
@@ -235,4 +249,246 @@ export function parseScheduled(text: string): ScheduledResult {
   }
   if (raw === null || raw === undefined) return { ok: true, value: emptyScheduled, errors: [] };
   return validateScheduled(raw);
+}
+
+// ---- Me/profile.md — the facts a schedule follows (T3-4) ---------------------------
+//
+// `Me/profile.md` keeps facts about the owner — `timezone`, `working_days`,
+// `working_hours`, `daily_capacity_min`, `task_size_minutes`, `today_cap` —
+// and Metistry only ever READS it (§2.5). These are the readers, in one place,
+// so the scheduler, `plan-tomorrow`'s working-day guard and the Scheduled
+// view cannot disagree about which days the owner works. A key the owner did
+// not write is absent, and nothing fills it in.
+
+/** Where the owner's facts live, vault-relative. `Me/` is the owner's alone (`isUserOwnedPath`): written as `user`, or not at all. */
+export const PROFILE_PATH = "Me/profile.md";
+
+const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/;
+
+/** A note's frontmatter as keys, or null when it has none or it is not a mapping. Never throws: an unreadable header is an absent one. */
+export function profileFrontmatter(text: string | null): Record<string, unknown> | null {
+  if (text === null) return null;
+  const m = FRONTMATTER_RE.exec(text);
+  if (!m) return null;
+  let parsed: unknown;
+  try {
+    parsed = parseYaml(m[1] ?? "");
+  } catch {
+    return null;
+  }
+  return isPlainObject(parsed) ? parsed : null;
+}
+
+/**
+ * `[mon, tue]`, `["Monday", "SUN"]`, `"mon, wed"` or a block sequence —
+ * anything YAML admits — as weekday tokens, Sunday first. Null when nothing
+ * readable is there: an unreadable list is not "every day".
+ */
+export function profileWeekdays(value: unknown): Weekday[] | null {
+  const raw = Array.isArray(value) ? value : typeof value === "string" ? value.split(",") : null;
+  if (raw === null) return null;
+  const days = new Set<string>();
+  for (const entry of raw) if (typeof entry === "string") days.add(entry.trim().slice(0, 3).toLowerCase());
+  const out = WEEKDAYS.filter((d) => days.has(d));
+  return out.length === 0 ? null : out;
+}
+
+/**
+ * `Me/profile.md` as the two facts a schedule may follow. A timezone that is
+ * written but not a zone is passed on as written, so the scheduler refuses it
+ * `unknown_timezone` rather than skipping to the next zone in line.
+ */
+export function profileFacts(text: string | null): ProfileFacts {
+  const fm = profileFrontmatter(text) ?? {};
+  const tz = fm["timezone"];
+  const days = profileWeekdays(fm["working_days"]);
+  return {
+    ...(tz !== undefined && tz !== null && String(tz).trim() !== "" ? { timezone: String(tz).trim() } : {}),
+    ...(days !== null ? { working_days: days } : {}),
+  };
+}
+
+/** Which days a time-of-day schedule runs on, and where that answer came from — or why there is none. */
+export type ResolvedDays =
+  | { readonly ok: true; readonly days: Sourced<Weekday[]> }
+  | { readonly ok: false; readonly reason: "no_working_days"; readonly why: string };
+
+/**
+ * A schedule's days with their origin (§2.5). A day SET (`working_days`,
+ * `eve_of_working_days`) follows the profile until the owner sets days on the
+ * routine, so its days are *from your profile*; an explicit list is the
+ * layer that wrote it (*default* or *yours*). A set with no working days in
+ * the profile is refused `no_working_days` — the routine is absent, and
+ * nothing guesses Monday to Friday.
+ */
+export function resolveScheduleDays(schedule: Sourced<TimeOfDaySchedule>, facts: ProfileFacts): ResolvedDays {
+  const { days } = schedule.value;
+  const resolved = resolveDays(days, facts.working_days);
+  if (resolved === null) {
+    return { ok: false, reason: "no_working_days", why: `${PROFILE_PATH} does not say which days you work (working_days), so a schedule on ${String(days)} does not run — nothing guesses` };
+  }
+  return { ok: true, days: { value: resolved, origin: typeof days === "string" ? "profile" : schedule.origin } };
+}
+
+// ---- the standup move (§2.5, §4 Q13) -------------------------------------------------
+//
+// `standup_days` and `standup_time` were profile keys; the owner ruled that
+// scheduling lives on routines (ruling 2, K8/K13), so they move to the
+// Standup routine's entry here, ONCE. Pure: the console reads the two files,
+// asks `planStandupMove`, writes the overlay and raises the proposal
+// (apps/console/src/profile-tidy.ts). Nothing here writes `Me/profile.md` —
+// that happens only when the owner approves the proposal, as `user`.
+
+/** The Standup routine's name — its manifest (T3-5) and its entry here. */
+export const STANDUP_ROUTINE = "standup";
+/** The two keys that move. Closed: a later move is a product change with its own proposal. */
+export const STANDUP_PROFILE_KEYS = ["standup_days", "standup_time"] as const;
+export type StandupProfileKey = (typeof STANDUP_PROFILE_KEYS)[number];
+/** §4 Q12, as answered: the Standup runs on working days at 8:00 AM. The time a moved `standup_days` gets when the profile named no `standup_time`. */
+export const STANDUP_DEFAULT_AT = "08:00";
+
+/** `"09:15"`, `"9:15"`, `"9:15 am"`, `"1:30 PM"` → `HH:MM`, 24-hour. Null when it is shaped otherwise — never a guess. */
+export function profileTime(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const m = /^\s*(\d{1,2}):(\d{2})\s*([ap]\.?m\.?)?\s*$/i.exec(value);
+  if (!m) return null;
+  let hour = Number(m[1]);
+  const minute = Number(m[2]);
+  const half = m[3]?.[0]?.toLowerCase();
+  if (half !== undefined) {
+    if (hour < 1 || hour > 12) return null;
+    hour = (hour % 12) + (half === "p" ? 12 : 0);
+  }
+  const out = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+  return AT_RE.test(out) ? out : null;
+}
+
+/** What `Me/profile.md` says about the standup, if anything. */
+export type StandupKeys =
+  | { readonly state: "none" }
+  | { readonly state: "unreadable"; readonly keys: readonly StandupProfileKey[]; readonly why: string }
+  | { readonly state: "readable"; readonly keys: readonly StandupProfileKey[]; readonly schedule: TimeOfDaySchedule };
+
+const sameDays = (a: readonly Weekday[], b: readonly Weekday[]): boolean => a.length === b.length && a.every((d) => b.includes(d));
+
+/**
+ * The standup keys in a profile, read into a schedule. Days the profile
+ * gives that ARE its working days become `working_days`, so the routine
+ * keeps following the profile; any other list is copied as it stands. An
+ * absent `standup_days` is `working_days` and an absent `standup_time` is
+ * 8:00 AM (Q12). A key that is present and unreadable moves nothing: the
+ * owner's words are never dropped for a default.
+ */
+export function readStandupKeys(profileText: string | null): StandupKeys {
+  const fm = profileFrontmatter(profileText);
+  if (fm === null) return { state: "none" };
+  const keys = STANDUP_PROFILE_KEYS.filter((k) => Object.hasOwn(fm, k));
+  if (keys.length === 0) return { state: "none" };
+  const why: string[] = [];
+  const listed = Object.hasOwn(fm, "standup_days") ? profileWeekdays(fm["standup_days"]) : undefined;
+  if (listed === null) why.push("standup_days is not a list of weekdays ([mon, tue, …])");
+  const at = Object.hasOwn(fm, "standup_time") ? profileTime(fm["standup_time"]) : STANDUP_DEFAULT_AT;
+  if (at === null) why.push(`standup_time is not a time of day ("09:15")`);
+  if (why.length > 0 || listed === null || at === null) return { state: "unreadable", keys, why: why.join("; ") };
+  const working = profileWeekdays(fm["working_days"]);
+  const days = listed === undefined || (working !== null && sameDays(listed, working)) ? "working_days" : listed;
+  const schedule = timeOfDayScheduleSchema.parse({ days, at: [at] });
+  return { state: "readable", keys, schedule };
+}
+
+/**
+ * The profile with `keys` removed from its frontmatter, and nothing else
+ * changed — every other byte, comments and line endings included, is the
+ * owner's and stays exactly where it was. A top-level key is its line plus
+ * the lines that continue it (indented, or a `- ` entry of a block list).
+ * Null when a key is not a top-level line of the frontmatter, or when the
+ * result does not parse to exactly the old frontmatter minus those keys:
+ * a tidy that cannot be proved is not offered.
+ */
+export function withoutProfileKeys(text: string, keys: readonly string[]): string | null {
+  const lines = text.match(/[^\n]*\n|[^\n]+$/g) ?? [];
+  const bare = (l: string): string => l.replace(/\r?\n$/, "");
+  if (lines.length === 0 || bare(lines[0]!) !== "---") return null;
+  const close = lines.findIndex((l, i) => i > 0 && /^---[ \t]*$/.test(bare(l)));
+  if (close === -1) return null;
+  const before = profileFrontmatter(text);
+  if (before === null) return null;
+
+  const drop = new Set<number>();
+  const found = new Set<string>();
+  for (let i = 1; i < close; i++) {
+    const key = keys.find((k) => new RegExp(`^${k}[ \\t]*:`).test(lines[i]!));
+    if (key === undefined) continue;
+    found.add(key);
+    drop.add(i);
+    for (let j = i + 1; j < close && /^([ \t]+\S|-([ \t]|$))/.test(bare(lines[j]!)); j++) drop.add(j);
+  }
+  if (keys.some((k) => !found.has(k))) return null;
+  const after = lines.filter((_, i) => !drop.has(i)).join("");
+
+  const expected = Object.fromEntries(Object.entries(before).filter(([k]) => !keys.includes(k)));
+  const got = profileFrontmatter(after);
+  // a frontmatter emptied of every key parses as null, which is `{}` here
+  if (JSON.stringify(got ?? {}) !== JSON.stringify(expected)) return null;
+  return after;
+}
+
+/**
+ * `.metistry/scheduled.yaml` with one routine's schedule set — through the
+ * YAML document, so every comment and entry the owner wrote stays. Times are
+ * written quoted, as the file's own examples are. Throws on a file that does
+ * not parse: an invalid overlay is never rewritten (module doc).
+ */
+export function withRoutineSchedule(overlayText: string, name: string, schedule: TimeOfDaySchedule): string {
+  if (!SCHEDULED_NAME_RE.test(name)) throw new Error(`withRoutineSchedule: ${JSON.stringify(name)} is not a routine name`);
+  const doc = parseDocument(overlayText);
+  if (doc.errors.length > 0) throw new Error(`withRoutineSchedule: ${doc.errors[0]!.message}`);
+  const node = doc.createNode(schedule, { flow: true }) as YAMLMap;
+  const at: unknown = node.get("at", true);
+  if (isSeq(at)) for (const item of at.items) if (isScalar(item)) item.type = Scalar.QUOTE_DOUBLE;
+  doc.setIn(["routines", name, "schedule"], node);
+  return doc.toString();
+}
+
+/** What moving the standup keys means for these two files. */
+export type StandupMove =
+  /** The profile has no standup keys: nothing to move, nothing to tidy. */
+  | { readonly state: "none" }
+  /** A key is there but cannot be read; nothing moves, and doctor says why. */
+  | { readonly state: "unreadable"; readonly keys: readonly StandupProfileKey[]; readonly why: string }
+  /** `scheduled.yaml` does not validate: it is never rewritten, so the move waits for the owner to fix it. */
+  | { readonly state: "overlay_invalid"; readonly keys: readonly StandupProfileKey[]; readonly errors: readonly string[] }
+  | {
+      readonly state: "move";
+      readonly keys: readonly StandupProfileKey[];
+      /** What the profile said, as a schedule. */
+      readonly schedule: TimeOfDaySchedule;
+      /** The overlay to write, or null when the Standup routine already has a schedule of the owner's — theirs wins, and the keys are simply ignored. */
+      readonly overlay: string | null;
+      /** The profile without the keys — the proposal's "after" — or null when that cannot be proved (`withoutProfileKeys`). */
+      readonly tidied: string | null;
+    };
+
+/**
+ * The whole decision, pure: read the keys, and say what to write where. The
+ * caller writes the overlay FIRST and raises the proposal only once that has
+ * landed, so no answer to the proposal can lose what the profile said.
+ */
+export function planStandupMove(profileText: string | null, overlayText: string | null): StandupMove {
+  const read = readStandupKeys(profileText);
+  if (read.state !== "readable") return read;
+  const overlay = parseScheduled(overlayText ?? "");
+  if (!overlay.ok) return { state: "overlay_invalid", keys: read.keys, errors: overlay.errors };
+  const entry = overlay.value.routines?.[STANDUP_ROUTINE];
+  const theirs = entry !== undefined && (isAssignment(entry) || entry.schedule !== undefined);
+  let next: string | null = null;
+  if (!theirs) {
+    next = withRoutineSchedule(overlayText ?? "", STANDUP_ROUTINE, read.schedule);
+    const check = parseScheduled(next);
+    // the file this writes must be one the schema accepts, carrying exactly this schedule
+    if (!check.ok || JSON.stringify(check.value.routines?.[STANDUP_ROUTINE]?.schedule) !== JSON.stringify(read.schedule)) {
+      throw new Error(`planStandupMove: the overlay it would write does not validate — ${check.errors.join("; ")}`);
+    }
+  }
+  return { state: "move", keys: read.keys, schedule: read.schedule, overlay: next, tidied: withoutProfileKeys(profileText!, read.keys) };
 }

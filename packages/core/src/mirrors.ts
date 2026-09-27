@@ -130,3 +130,26 @@ export async function resolveAtSource(db: MirrorExecutor, source: Pick<RequestSo
   );
   return rows.map((r) => Number(r.id));
 }
+
+/** The newest request ever raised for a subject, answered or not. */
+export interface MirrorHistory {
+  readonly id: number;
+  /** `pending`, an owner's answer, `resolved_at_source` or `expired`. */
+  readonly decision: string;
+}
+
+/**
+ * Has this subject EVER been raised — pending or answered? `raiseMirror`
+ * de-duplicates only while a row waits; a subject that must be asked once
+ * and never again (a declined answer is an answer) checks this first. Null
+ * when nothing was ever raised for it.
+ */
+export async function lastMirror(db: MirrorExecutor, source: Pick<RequestSource, "kind" | "external_ref">): Promise<MirrorHistory | null> {
+  const { kind, external_ref } = parseRequestSource({ kind: source.kind, external_ref: source.external_ref });
+  const { rows } = await db.query(
+    `SELECT id, decision FROM proposals WHERE source IS NOT NULL AND source->>'kind' = $1 AND source->>'external_ref' = $2 ORDER BY id DESC LIMIT 1`,
+    [kind, external_ref],
+  );
+  const row = rows[0];
+  return row ? { id: Number(row.id), decision: String(row.decision) } : null;
+}

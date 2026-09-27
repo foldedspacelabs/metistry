@@ -48,7 +48,7 @@ Generated from `docs/product/design-build-plan.md` by `ops/scripts/tickets.mjs`.
 - [x] [T2-6](t2/t2-6.md) · The section operation · L · opus high
 - [x] [T2-15](t2/t2-15.md) · C45, tested per door · M · opus
 - [x] [T2-16](t2/t2-16.md) · Identity and the config record · M · opus
-- [ ] [T2-17](t2/t2-17.md) · Turn progress and sessions · S · sonnet · after T1-11, T1-15
+- [x] [T2-17](t2/t2-17.md) · Turn progress and sessions · S · sonnet · after T1-11, T1-15
 - [x] [T2-18](t2/t2-18.md) · Live events · L · opus high · after F-1, F-6
 - [x] [T3-1](t3/t3-1.md) · The scheduler · L · opus high · after F-4
 - [x] [T3-2](t3/t3-2.md) · The overlay · M · opus · after F-4, T3-1

@@ -1,5 +1,83 @@
 # @metistry-apps/watchdog
 
+## 0.13.0
+
+### Minor Changes
+
+- c38dc4e: **Registries, not lists (§2.7).** Collectors, routines, targets, provider
+  templates and connection types load through `Registry` — built from
+  manifests, never from a list in code. Core adds `REGISTRY_KINDS` (the closed
+  list of kinds, and what an extension may do with each), `loadKind`,
+  `kindSources`, `extensionsDirFor`/`extensionsDirFromEnv`, `describeExtensions`,
+  and `unitCode`/`joinCode`: a collector's or routine's code is found in its own
+  package **by name**, so an extension may replace a product unit's manifest but
+  never supplies code, and one naming no product unit is skipped with the reason.
+  A new `provider` manifest kind (`type: provider` and a `provider:` block that is
+  `providerSchema` itself) turns `seed/compute-templates/<name>.yaml` into
+  `seed/compute-templates/<name>/manifest.yaml`; `COMPUTE_TEMPLATES` and
+  `parseTemplate` are gone — `computeTemplates()` is the registry, and
+  `readTemplate` takes `{ seedDir, instanceDir }`. `collectors` and `routines`
+  arrays are replaced by `loadCollectors`/`loadRoutines` and
+  `collectorCode`/`routineCode`; the console's `loadSchedules` takes loaded units,
+  `TargetRegistry.load(sources)` skips a bad manifest instead of throwing, and the
+  watchdog's `loadScheduled` reads the same registries. Every product manifest
+  now carries `schema: 1`. New verb: `metistry extensions list | add | remove`
+  (M15) — data-only, owner's hand, refused when its registry would skip the unit.
+  Doctor gains a `registries` row. **Upgrade note:** an owner's
+  `.metistry/targets/<name>/manifest.yaml` overlay without `schema: 1` is now
+  skipped (the product's target is in force) until the line is added.
+
+### Patch Changes
+
+- 06c854e: **The scheduler: routines run once, at their time.** Core implements the
+  next-occurrence function F-4 froze (`nextOccurrence`, hand-rolled over `Intl`,
+  Temporal's `compatible` rule on both daylight-saving nights) and the runner's
+  question `dueOccurrence` — the latest slot owed since the last run, so slots
+  missed while the Mac slept coalesce into one run. A time of day is read in the
+  schedule's `tz`, then `Me/profile.md`'s `timezone`, then `METISTRY_TZ` — never
+  `TZ`, which both deployment shapes default to UTC — and with none is refused
+  `no_timezone`. Manifests now validate `schedule:` against §2.5's closed shape
+  (cron strings still accepted for one release), and the five routines carry
+  §2.5's defaults: Morning Brief working days 07:00, Knowledge Fold 21:00,
+  Tomorrow's Plan `eve_of_working_days` 23:00, Reply Review 23:00, Weekly
+  Review Sunday 18:00. The console's runner reads each manifest ⊕
+  `.metistry/scheduled.yaml` on every tick — schedule and pause by name; an
+  entry it cannot apply, or a file that does not validate, HOLDS what it names
+  rather than falling back to defaults — reads `timezone` / `working_days` from
+  `Me/profile.md` through the vault bridge, stamps each run with the slot it is
+  for (`meta.scheduled_for`, `ctx.scheduledFor`, `ctx.timeZone`), and records a
+  schedule it cannot place once a day as `skipped:<reason>`. `knowledge-fold`
+  and `plan-tomorrow` drop their hourly clock gates (`plan-tomorrow` keeps its
+  working-day guard) and date a late run from its slot. `metistry doctor` and
+  the watchdog bound a time of day by the widest gap of its week
+  (`longestGapSeconds`), and doctor reports a refused schedule as `absent` in
+  the runner's own words.
+- Updated dependencies [152022a]
+- Updated dependencies [942372e]
+- Updated dependencies [95fb504]
+- Updated dependencies [df37d39]
+- Updated dependencies [3d2e818]
+- Updated dependencies [4451f77]
+- Updated dependencies [3a1ff8c]
+- Updated dependencies [6592f91]
+- Updated dependencies [bf33ee1]
+- Updated dependencies [bd29463]
+- Updated dependencies [9ac7949]
+- Updated dependencies [3f9d719]
+- Updated dependencies [4cba65a]
+- Updated dependencies [be25ade]
+- Updated dependencies [c38dc4e]
+- Updated dependencies [a927e61]
+- Updated dependencies [06c854e]
+- Updated dependencies [ec21783]
+- Updated dependencies [a1f1113]
+- Updated dependencies [24a9ddb]
+- Updated dependencies [8c9dde6]
+- Updated dependencies [8217e01]
+- Updated dependencies [37f0ed2]
+- Updated dependencies [5e8f8d1]
+  - @foldedspacelabs/metistry-core@0.13.0
+
 ## 0.12.0
 
 ### Patch Changes

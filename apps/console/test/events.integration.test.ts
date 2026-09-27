@@ -10,6 +10,7 @@
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
@@ -17,7 +18,7 @@ import { QueryStore } from "@foldedspacelabs/metistry-queries";
 import { EVENT_CATALOGUE, mintToken, startRun, finishRun } from "@foldedspacelabs/metistry-core";
 import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
 import { runConsoleSession } from "@foldedspacelabs/metistry-cli/dist/console-client.js";
-import { routines } from "@metistry-apps/routines";
+import { loadRoutines } from "@metistry-apps/routines";
 import { makeServer } from "../src/server.js";
 import { EventHub, EVENTS_CHANNEL, payloadRefusal, startEventFeed, type EventFeed } from "../src/events.js";
 import * as store from "../src/auth-store.js";
@@ -379,6 +380,8 @@ describe.skipIf(!hasDb)("GET /api/events (real db, real sockets)", () => {
     const s = await open(base, asLocal());
     await expect.poll(() => s.lastId()).toBeDefined();
     const fetchFn = (async () => new Response(JSON.stringify({ tag_name: "v99.0.0" }), { status: 200 })) as typeof fetch;
+    // the routine as the runner finds it: through the registry, by its manifest's name
+    const { routines } = await loadRoutines({ home: fileURLToPath(new URL("../../../routines", import.meta.url)) });
     const updateCheck = routines.find((r) => r.name === "update-check")!;
     expect(await updateCheck.run(pool, { runtimeVersion: "0.11.0", fetchFn, env: {} } as Parameters<typeof updateCheck.run>[1])).toBe(1);
     const f = await s.waitFor((x) => x.event === "release.available", 2000);

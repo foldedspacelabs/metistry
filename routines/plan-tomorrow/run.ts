@@ -29,18 +29,35 @@
 // evening whose next day is a working day, after the 21:00 fold. The
 // console's runner fires it once, at its time (T3-1), so the clock gates the
 // hourly schedule needed — "not before noon", "not before the day end
-// Me/profile.md states" — are gone. What stays is the WORKING-DAY GUARD
-// below: a run nobody scheduled for an eve (Run Now, an owner's own `days:`)
-// still plans only a working day. A run the runner fired late — the Mac
-// slept through 23:00 and woke at 07:30 — plans the day after its SLOT
+// Me/profile.md states" — are gone. What stays is the WORKING-EVE GUARD
+// below: a run nobody scheduled for an eve (Run Now, Close the Day, an
+// owner's own `days:`) still plans only a working day, and records
+// `skipped:not_a_working_eve` otherwise. A run the runner fired late — the
+// Mac slept through 23:00 and woke at 07:30 — plans the day after its SLOT
 // (`ctx.scheduledFor`, in `ctx.timeZone`), which is today, not tomorrow.
+//
+// AFTER THE FOLD (§2.5, T3-7). The 23:00 run comes two hours after the
+// 21:00 Knowledge Fold, so the plan links tonight's `Journal/Fold/<date>.md`
+// and lists its `decisions:` frontmatter as a section of its own — read from
+// the file's header, never summarised: still model-free.
+//
+// EARLY, THEN SUPERSEDED (§2.5, §2.13). Close the Day (T2-8) runs this with
+// `ctx.closedDay`: the plan renders EARLY for the day after the one closed,
+// before there is a fold to link. The 23:00 run then SUPERSEDES that render
+// — same path, compare-and-swap on the bytes the early render left — with
+// the fold's context. The ledger says which is which: every row this routine
+// writes carries `meta.trigger` (`close` | `schedule` | `manual`), and only a
+// row that is NOT a close settles a date. So a second close re-renders (the
+// owner's own act, every time), the 23:00 run replaces any number of early
+// renders, and a second scheduled or manual pass after it stays silent.
 //
 // THE GUARD, in order, and what each costs:
 //
-//   already settled for that   → one indexed `runs` read
-//     target date
+//   already settled for that   → one indexed `runs` read (a close skips it:
+//     target date                  closing again is asking again)
 //   tomorrow is not a working  → one small vault read (`Me/profile.md`),
-//     day                        recorded, and the evening goes quiet
+//     day                        recorded `not_a_working_eve`, and the
+//                                evening goes quiet
 //
 // DEGRADING HONESTLY (§6.4, §6.6). No `working_days` in `Me/` → nothing is
 // written and the run says `no_working_days`, rather than guessing
@@ -57,16 +74,20 @@ import {
   TEMPLATE_UNREADABLE,
   addTaskDays,
   calendarDate,
+  configuredTimeZone,
   intEnv,
   profileFrontmatter,
   profileWeekdays,
   renderTemplate,
   templateSkip,
+  validTimeZone,
+  vaultLink,
   type CalendarEvent,
   type CalendarProvider,
   type TemplateQueries,
   type Weekday,
 } from "@foldedspacelabs/metistry-core";
+import { foldPath } from "../knowledge-fold/run.js";
 import type { Db, RoutineCtx } from "../morning-brief/run.js";
 import { vaultReader } from "../vault-reader.js";
 
@@ -91,7 +112,7 @@ const EK_MAX_DAYS = 31; // limit: fixed — `GET /events` clamps `days` to 31 (p
 export const PLAN_SKIPS = [
   "already_planned", // this target date is settled, whichever way it went
   "no_working_days", // §6.6: Me/ does not say which days you work, and nothing guesses
-  "not_a_working_day", // tomorrow is not one of them
+  "not_a_working_eve", // §2.5: tomorrow is not one of them, so tonight is not the eve of a working day
   "no_vault", // no reconciler bridge: nothing to read the template from, nowhere to write
   TEMPLATE_MISSING, // §6.4: a configuration fact, silent
   TEMPLATE_UNREADABLE, // §6.4: not text, or over the cap — one report request names the file
@@ -125,7 +146,21 @@ export interface PlanCtx extends RoutineCtx {
   /** Injected by tests; production uses the wall clock. */
   now?: Date | undefined;
   env?: NodeJS.ProcessEnv | undefined;
+  /**
+   * Close the Day (T2-8's `POST /api/today/close {day}`): the `YYYY-MM-DD`
+   * just closed. Present, this run is the EARLY render — it plans the day
+   * after `closedDay`, whatever the clock says, is never silenced by an
+   * earlier render of the same date (closing again re-renders), and records
+   * `trigger: "close"`, which the 23:00 run supersedes. Absent: a scheduled
+   * run (`scheduledFor`) or one nobody scheduled (Run Now).
+   */
+  closedDay?: string | undefined;
 }
+
+/** Who asked for this render — on every `runs` row this routine writes, as `meta.trigger`. Only a `close` row leaves its date open for the 23:00 run. */
+export type PlanTrigger = "close" | "schedule" | "manual";
+
+export const triggerOf = (ctx: PlanCtx): PlanTrigger => (ctx.closedDay !== undefined ? "close" : ctx.scheduledFor !== undefined ? "schedule" : "manual");
 
 // --- Me/profile.md -------------------------------------------------------------
 
@@ -182,13 +217,52 @@ export function parseProfile(text: string | null): WorkingProfile {
 
 // --- dates ---------------------------------------------------------------------
 
-export const zoneOf = (env: NodeJS.ProcessEnv): string => env["METISTRY_TZ"] || env["TZ"] || "UTC";
+/**
+ * The instance's zone: METISTRY_TZ, and never TZ — both deployment shapes pin
+ * the process's TZ to UTC (T3-1), so reading it would plan the wrong
+ * "tomorrow" for anyone west of Greenwich after 20:00. UTC only when nothing
+ * says otherwise.
+ */
+export const zoneOf = (env: NodeJS.ProcessEnv): string => configuredTimeZone(env) ?? "UTC";
+
+/** The zone a run dates in: the slot's (the runner's), then `Me/profile.md`'s `timezone` when `Intl` knows it, then `zoneOf`. */
+export function runZone(ctx: PlanCtx, profileText: string | null, env: NodeJS.ProcessEnv): string {
+  if (ctx.timeZone) return ctx.timeZone;
+  const tz = frontmatterOf(profileText)?.["timezone"];
+  return validTimeZone(tz) ? tz : zoneOf(env);
+}
 
 /** The weekday of a calendar date, as civil arithmetic — no zone, because `2026-09-22` is a Tuesday everywhere. */
 export function weekdayOf(date: string): number | null {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
   if (!m) return null;
   return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))).getUTCDay();
+}
+
+/**
+ * An instant whose calendar date in `timeZone` is `day` — `now` itself when
+ * it already is (a close of today, the ordinary case), else the nearest of
+ * noon UTC on that day and twelve hours either side, which covers every
+ * zone from −12:00 to +14:00. It is what lets Close the Day of an earlier
+ * day plan the day after IT: the template engine resolves "tomorrow" from an
+ * instant, not from a date.
+ */
+export function instantOn(day: string, timeZone: string, now: Date): Date {
+  if (calendarDate(now, timeZone) === day) return now;
+  const noon = Date.parse(`${day}T12:00:00Z`);
+  for (const hours of [0, -12, 12]) {
+    const at = new Date(noon + hours * 3_600_000);
+    if (calendarDate(at, timeZone) === day) return at;
+  }
+  return new Date(noon);
+}
+
+/** `YYYY-MM-DD` naming a day that exists — `2026-02-31` is not one, though `Date.UTC` would roll it into March. */
+export function isCalendarDate(value: unknown): value is string {
+  const m = typeof value === "string" ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(value) : null;
+  if (!m) return false;
+  const at = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  return at.getUTCFullYear() === Number(m[1]) && at.getUTCMonth() === Number(m[2]) - 1 && at.getUTCDate() === Number(m[3]);
 }
 
 /** Whole days from `from` to `to`, both `YYYY-MM-DD`. Null when either is not a date. */
@@ -213,11 +287,14 @@ export interface GateInput {
 export type GateVerdict = { ok: true } | { ok: false; reason: PlanSkip; why: string };
 
 /**
- * The working-day guard (§2.5: the schedule says WHEN; this says whether the
- * day planned is one you work), as one pure function — which is what makes
- * "not a working day" and "no `Me/`" unit-testable without a database, a
- * vault or a clock. There is no clock in it any more: the runner fires the
- * routine at its time.
+ * The working-eve guard (§2.5: the schedule says WHEN; this says whether the
+ * day planned is one you work — `eve_of_working_days` as a check, for the
+ * runs nobody scheduled for an eve), as one pure function — which is what
+ * makes "not a working eve" and "no `Me/`" unit-testable without a database,
+ * a vault or a clock. With Monday–Friday working days, Sunday to Thursday
+ * evenings plan the next day; Friday and Saturday evenings are skipped
+ * `not_a_working_eve` (nothing plans Monday on a Friday). There is no clock
+ * in it: the runner fires the routine at its time.
  */
 export function gate(input: GateInput): GateVerdict {
   const { target, profile } = input;
@@ -230,7 +307,11 @@ export function gate(input: GateInput): GateVerdict {
   }
   const weekday = weekdayOf(target);
   if (weekday === null || !profile.workingDays.includes(weekday)) {
-    return { ok: false, reason: "not_a_working_day", why: `${target} is not one of your working days (${profile.workingDays.map((d) => WEEKDAYS[d]).join(", ")})` };
+    return {
+      ok: false,
+      reason: "not_a_working_eve",
+      why: `tonight is not the eve of a working day: ${target} is not one of your working days (${profile.workingDays.map((d) => WEEKDAYS[d]).join(", ")})`,
+    };
   }
   return { ok: true };
 }
@@ -310,20 +391,106 @@ const MATERIALISED_RE = /^- \[[ x-]\] .*\^mt-[0-9a-z]{8}\s*$/im;
  */
 export const refuseMaterialised = (markdown: string): boolean => MATERIALISED_RE.test(markdown);
 
+// --- tonight's fold (§2.5, T3-7) -------------------------------------------------
+
+/** The section heading the fold is listed under — the routine's, not the template's, so an edited `Templates/Plan.md` cannot lose it. */
+export const FOLD_HEADING = "## Tonight's fold";
+const FOLD_MAX_DECISIONS = 20; // limit: fixed — a fold's `decisions:` is a handful of lines; past this the file itself is the place to read them
+const FOLD_MAX_CHARS = 240; // limit: fixed — one decision is one line; a longer one is clipped with an ellipsis, and the link has the rest
+
+/**
+ * One decision as one inert list line. Model-free and verbatim, except for
+ * what would change what the LINE is: newlines collapse (one decision, one
+ * line), and a leading `[` is escaped so `[ ] ship it` can never become a
+ * `- [ ]` task in a machine file (D4 — the `refuseMaterialised` belt still
+ * runs after this). A decision that is not a scalar (a mapping, a list) is
+ * not guessed at: it is counted, and the section says how many it skipped.
+ */
+function decisionLine(value: unknown): string | null {
+  if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") return null;
+  const text = String(value).replace(/\s+/g, " ").trim();
+  if (text === "") return null;
+  const clipped = text.length > FOLD_MAX_CHARS ? `${text.slice(0, FOLD_MAX_CHARS - 1)}…` : text;
+  return `- ${clipped.replace(/^\[/, "\\[")}`;
+}
+
+export interface FoldSection {
+  /** `Journal/Fold/<date>.md`, whether or not it exists. */
+  path: string;
+  /** Did the file exist to link? */
+  linked: boolean;
+  /** How many decisions the section lists. */
+  decisions: number;
+  markdown: string;
+}
+
+/**
+ * The fold's section for the evening `date`: a link to `Journal/Fold/<date>.md`
+ * and its `decisions:` frontmatter as a list. `early` is Close the Day's
+ * render, which usually comes before the 21:00 fold — the section says the
+ * 23:00 run will add it, rather than that there was none. Never throws on
+ * what the file SAYS; a bridge that refuses to read it propagates like every
+ * other read (`readText`).
+ */
+export async function foldSection(vault: PlanVault, date: string, early: boolean): Promise<FoldSection> {
+  const path = foldPath(date);
+  const text = await readText(vault, path);
+  if (text === null) {
+    const markdown = early
+      ? `${FOLD_HEADING}\n\n_Tonight's fold has not run yet — the 11:00 PM plan replaces this one and links \`${path}\`._\n`
+      : `${FOLD_HEADING}\n\n_No fold for ${date} — \`${path}\` does not exist._\n`;
+    return { path, linked: false, decisions: 0, markdown };
+  }
+  const raw = frontmatterOf(text)?.["decisions"];
+  const list = Array.isArray(raw) ? raw : raw === undefined || raw === null ? [] : [raw];
+  const lines: string[] = [];
+  let unreadable = 0;
+  for (const item of list) {
+    const line = decisionLine(item);
+    if (line === null) unreadable += 1;
+    else lines.push(line);
+  }
+  const shown = lines.slice(0, FOLD_MAX_DECISIONS);
+  const notes: string[] = [];
+  if (lines.length > shown.length) notes.push(`_…and ${lines.length - shown.length} more in the fold._`);
+  if (unreadable > 0) notes.push(`_${unreadable} \`decisions:\` ${unreadable === 1 ? "entry is" : "entries are"} not a line of text — read them in the fold._`);
+  const body = shown.length === 0 && unreadable === 0 ? ["_No decisions in its `decisions:` frontmatter._"] : ["Decided:", "", ...shown, ...(notes.length > 0 ? ["", ...notes] : [])];
+  return { path, linked: true, decisions: shown.length, markdown: `${FOLD_HEADING}\n\n${vaultLink(path)}\n\n${body.join("\n")}\n` };
+}
+
+/**
+ * The fold's section, spliced in after the template's body and BEFORE the
+ * provenance footer — so the file still ends in the line that names its
+ * template (`<!-- rendered by … -->`), which is what `metistry templates
+ * check` and the ownership reader expect of a rendered file.
+ */
+export function withFoldSection(markdown: string, section: string): string {
+  const footer = markdown.lastIndexOf("\n<!-- rendered by ");
+  if (footer === -1) return `${markdown.replace(/\n*$/, "\n")}\n${section}`;
+  const head = markdown.slice(0, footer).replace(/\n*$/, "\n");
+  return `${head}\n${section}${markdown.slice(footer)}`;
+}
+
 // --- bookkeeping ---------------------------------------------------------------
 
 /**
- * One `runs` row per target date, written the first time a pass settles that
- * date — either because it wrote the file or because it decided not to. A
- * later pass for the same date (Run Now, or a late run and its slot) finds it
- * and stays silent — superseding an early render with the 23:00 one is
- * T3-7's. `meta.planned_for` is the discriminator: the runner writes its own
- * `routine_run` row for every run and that one deliberately carries none.
+ * One `runs` row per pass that decides a target date — because it wrote the
+ * file or because it decided not to. A row that is NOT Close the Day's
+ * (`meta.trigger` is `schedule` or `manual`, or absent on a row from before
+ * T3-7) SETTLES the date: a later scheduled or manual pass for it (Run Now,
+ * or a late run and its slot) finds it and stays silent. A close row never
+ * settles anything — it is the early render the 23:00 run supersedes, and a
+ * close that decided NOT to plan (the template was missing at 17:00) must
+ * not stop the 23:00 run once it is fixed. A close itself never asks: it
+ * always renders. `meta.planned_for` is the discriminator: the runner writes
+ * its own `routine_run` row for every run and that one deliberately carries
+ * none.
  */
 async function settled(db: Db, target: string): Promise<string | null> {
   const { rows } = await db.query(
     `SELECT meta FROM runs
      WHERE component = $1 AND kind = 'routine_run' AND ok AND meta->>'planned_for' = $2
+       AND meta->>'trigger' IS DISTINCT FROM 'close'
      ORDER BY ts DESC LIMIT 1`,
     [COMPONENT, target],
   );
@@ -341,12 +508,12 @@ async function settled(db: Db, target: string): Promise<string | null> {
  * `silent`, because a settled date is never nothing (§6.4: even doing
  * nothing is a fact recorded).
  */
-async function record(db: Db, target: string, reason: "wrote" | PlanSkip, meta: Record<string, unknown> = {}): Promise<void> {
+async function record(db: Db, target: string, trigger: PlanTrigger, reason: "wrote" | PlanSkip, meta: Record<string, unknown> = {}): Promise<void> {
   const outcome = reason === "wrote" ? "acted" : `skipped:${reason}`;
   await db.query(
     `INSERT INTO runs (component, kind, ok, started_at, finished_at, meta)
      VALUES ($1, 'routine_run', true, now(), now(), $2)`,
-    [COMPONENT, JSON.stringify({ planned_for: target, outcome, ...meta })],
+    [COMPONENT, JSON.stringify({ planned_for: target, outcome, trigger, ...meta })],
   );
 }
 
@@ -367,21 +534,12 @@ async function reportUnreadable(db: Db, target: string, maxBytes: number): Promi
 /** One pass. Returns 1 when tomorrow's plan was written, 0 otherwise — every 0 is a fact recorded or the guard doing its job. */
 export async function run(db: Db, ctx: PlanCtx = {}): Promise<number> {
   const env = ctx.env ?? process.env;
-  // The slot's zone when the runner fired it (the schedule's tz, then
-  // Me/profile.md's timezone, then METISTRY_TZ), so "tomorrow" is the same
-  // day the schedule meant; otherwise the instance's zone.
-  const timeZone = ctx.timeZone ?? zoneOf(env);
   const now = ctx.now ?? new Date();
-  // The evening this plan is FOR: the slot, when the runner fired it late.
-  const evening = ctx.scheduledFor ?? now;
-  const today = calendarDate(evening, timeZone);
-  const target = addTaskDays(today, 1);
-  if (target === null) return 0; // unreachable: `today` came from calendarDate
-
-  const already = await settled(db, target);
-  if (already !== null) {
-    console.log(`${COMPONENT}: ${target} is already settled (${already})`);
-    return 0;
+  const trigger = triggerOf(ctx);
+  if (ctx.closedDay !== undefined && !isCalendarDate(ctx.closedDay)) {
+    // the door validates `{day}` before it gets here; a caller that did not
+    // is a bug, and a bug is louder than a plan for the wrong day
+    throw new Error(`${COMPONENT}: closedDay must be a YYYY-MM-DD date, got ${JSON.stringify(ctx.closedDay)}`);
   }
 
   const vault = ctx.vault;
@@ -392,12 +550,31 @@ export async function run(db: Db, ctx: PlanCtx = {}): Promise<number> {
     console.log(`${COMPONENT}: no vault bridge — nothing to read ${TEMPLATE_PATH} from and nowhere to write ${PLAN_DIR}/`);
     return 0;
   }
+  const profileText = await readText(vault, PROFILE_PATH);
 
-  const profile = parseProfile(await readText(vault, PROFILE_PATH));
+  // The evening this plan is FOR: the day Close the Day closed; else the
+  // slot, when the runner fired it (late, if the Mac slept); else now — in
+  // the slot's zone (the schedule's tz, then Me/profile.md's timezone, then
+  // METISTRY_TZ), so "tomorrow" is the same day the schedule meant.
+  const timeZone = runZone(ctx, profileText, env);
+  const evening = ctx.closedDay !== undefined ? instantOn(ctx.closedDay, timeZone, now) : (ctx.scheduledFor ?? now);
+  const today = calendarDate(evening, timeZone);
+  const target = addTaskDays(today, 1);
+  if (target === null) return 0; // unreachable: `today` is a checked date
+
+  if (trigger !== "close") {
+    const already = await settled(db, target);
+    if (already !== null) {
+      console.log(`${COMPONENT}: ${target} is already settled (${already})`);
+      return 0;
+    }
+  }
+
+  const profile = parseProfile(profileText);
   const verdict = gate({ target, profile });
   if (!verdict.ok) {
     console.log(`${COMPONENT}: ${verdict.why}`);
-    await record(db, target, verdict.reason, { why: verdict.why });
+    await record(db, target, trigger, verdict.reason, { why: verdict.why });
     return 0;
   }
 
@@ -408,21 +585,22 @@ export async function run(db: Db, ctx: PlanCtx = {}): Promise<number> {
     const reason = skip ?? TEMPLATE_MISSING;
     console.log(`${COMPONENT}: ${TEMPLATE_PATH} — ${reason}; nothing written for ${target}`);
     if (reason === TEMPLATE_UNREADABLE) await reportUnreadable(db, target, maxBytes);
-    await record(db, target, reason, { template: TEMPLATE_PATH, max_bytes: maxBytes });
+    await record(db, target, trigger, reason, { template: TEMPLATE_PATH, max_bytes: maxBytes });
     return 0;
   }
 
   // Ownership before rendering: a plan file that is not ours costs one read
   // and no work at all (§5.1). `existing.sha256` is also the compare-and-swap
-  // value the rewrite carries, so re-running an evening replaces the same file
-  // rather than racing it.
+  // value the rewrite carries, so re-running an evening — or the 23:00 run
+  // superseding Close the Day's early render — replaces the same file rather
+  // than racing it.
   const path = `${PLAN_DIR}/${target}.md`;
   const existing = await vault.read(path);
   const owner = existing === null ? null : sourceOf(existing.content.toString("utf8"));
   if (existing !== null && owner !== PRINCIPAL) {
     const why = `${path} says \`source: ${owner ?? "(none — yours)"}\`, not \`${PRINCIPAL}\` — one writer per file, and this one is not mine`;
     console.log(`${COMPONENT}: ${why}`);
-    await record(db, target, "user_owned", { path, source: owner, why });
+    await record(db, target, trigger, "user_owned", { path, source: owner, why });
     return 0;
   }
 
@@ -435,7 +613,8 @@ export async function run(db: Db, ctx: PlanCtx = {}): Promise<number> {
     calendar: ctx.calendar === undefined ? eventkitCalendar(ctx, timeZone, now) : ctx.calendar,
     reader: vaultReader(vault),
     ...(ctx.me !== undefined ? { me: ctx.me } : {}),
-    // the template's "tomorrow" is the evening's: a late run still plans `target`
+    // the template's "tomorrow" is the evening's: a late run, or a close of an
+    // earlier day, still plans `target`
     now: evening,
     timeZone,
     env,
@@ -446,25 +625,28 @@ export async function run(db: Db, ctx: PlanCtx = {}): Promise<number> {
     // Unreachable — `templateSkip` above asked the same question of the same
     // bytes — and recorded rather than thrown, because a plan that cannot
     // render is a configuration fact either way (§6.4).
-    await record(db, target, render.skipped, { template: TEMPLATE_PATH });
+    await record(db, target, trigger, render.skipped, { template: TEMPLATE_PATH });
     return 0;
   }
 
-  const markdown = render.markdown;
+  // Tonight's fold, spliced in after the template's body — BEFORE the
+  // materialise belt, so nothing the fold's header says can mint a task line.
+  const fold = await foldSection(vault, today, trigger === "close");
+  const markdown = withFoldSection(render.markdown, fold.markdown);
   if (refuseMaterialised(markdown)) {
     const why = `the render produced a task line with a minted \`^mt-\` anchor, which no routine may write (D4) — refusing to write ${path}`;
     console.warn(`${COMPONENT}: ${why}`);
-    await record(db, target, "would_materialise", { path, why });
+    await record(db, target, trigger, "would_materialise", { path, why });
     return 0;
   }
 
   const written = await vault.write(
     path,
     Buffer.from(markdown, "utf8"),
-    { principal: PRINCIPAL, message: `plan for ${target}` },
+    { principal: PRINCIPAL, message: trigger === "close" ? `plan for ${target} (at Close the Day)` : `plan for ${target}` },
     existing?.sha256 ?? "", // "" = must not exist; otherwise compare-and-swap on what we just read
   );
-  await record(db, target, "wrote", {
+  await record(db, target, trigger, "wrote", {
     path,
     bytes: written.bytes,
     created: written.created,
@@ -472,7 +654,10 @@ export async function run(db: Db, ctx: PlanCtx = {}): Promise<number> {
     template_warnings: render.warnings.length,
     ...(render.warnings.length > 0 ? { warnings: render.warnings.map((w) => `${TEMPLATE_PATH}:${w.line} ${w.message}`) } : {}),
     truncated: render.truncated,
+    fold: fold.path,
+    fold_linked: fold.linked,
+    fold_decisions: fold.decisions,
   });
-  console.log(`${COMPONENT}: wrote ${path} (${written.bytes} bytes${render.warnings.length > 0 ? `, ${render.warnings.length} template warning(s)` : ""}${render.truncated ? ", truncated" : ""})`);
+  console.log(`${COMPONENT}: wrote ${path} (${written.bytes} bytes${render.warnings.length > 0 ? `, ${render.warnings.length} template warning(s)` : ""}${render.truncated ? ", truncated" : ""}${trigger === "close" ? ", early — the 23:00 run supersedes it" : ""})`);
   return 1;
 }

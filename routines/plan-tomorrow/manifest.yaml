@@ -12,9 +12,11 @@ description: >
   file, `Journal/Plan/<date>.md` as principal `plan-tomorrow` (§5.1, one
   writer per file), and never a note the user owns — a recurring rule is
   listed as a proposal, never materialised. Once an evening, on the eve of a
-  working day, at 23:00 — after the 21:00 fold; the runner fires it at its
-  time (docs/ops/scheduled.md) and the routine keeps only its working-day
-  guard.
+  working day, at 23:00 — after the 21:00 fold, so it links tonight's
+  `Journal/Fold/<date>.md` and lists its `decisions:` frontmatter; the runner
+  fires it at its time (docs/ops/scheduled.md) and the routine keeps only its
+  working-eve guard (`skipped:not_a_working_eve`). Close the Day renders it
+  early; the 23:00 run supersedes that render.
 # §2.5's default, as answered (§4 Q12): `eve_of_working_days` — every day
 # whose NEXT day is a working day in Me/profile.md (Mon–Fri → Sun–Thu) — at
 # 23:00. No working days in the profile → `skipped:no_working_days`, never a

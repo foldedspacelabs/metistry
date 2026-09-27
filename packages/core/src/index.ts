@@ -751,6 +751,18 @@ export {
   type RequestTypeSpec,
 } from "./requests.js";
 export {
+  RESOLVED_AT_SOURCE,
+  REQUEST_TRUSTS,
+  parseRequestSource,
+  raiseMirror,
+  resolveAtSource,
+  type MirrorExecutor,
+  type MirrorRaise,
+  type MirrorRaised,
+  type RequestSource,
+  type RequestTrust,
+} from "./mirrors.js";
+export {
   startRun,
   finishRun,
   withRun,

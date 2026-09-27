@@ -80,7 +80,8 @@ function sample(path: string): string {
 /** Query strings that keep a served read small; nothing else needs one to be routed. */
 const QUERY: Record<string, string> = { "GET /api/runs/export": "?limit=1" };
 
-describe.skipIf(!hasDb)("the client API table against the console that serves it", () => {
+describe.skipIf(!hasDb)("the client API table against the console that serves it", { timeout: 60_000 }, () => {
+  // the table has passed a hundred served rows × every credential: vitest's 5 s default is no longer a probe of correctness
   let pool: pg.Pool;
   let server: ReturnType<typeof makeServer>;
   let base: string;

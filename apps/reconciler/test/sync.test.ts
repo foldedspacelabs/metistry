@@ -16,7 +16,7 @@ import { mintToken } from "@foldedspacelabs/metistry-core";
 import { Committer, type SyncRecord } from "../src/committer.js";
 import { Git, refusedGitArgs, type GitOptions, type GitResult } from "../src/git.js";
 import { makeBridge } from "../src/server.js";
-import { conflictKey } from "../src/sync-record.js";
+import { conflictKey, protectedKey } from "../src/sync-record.js";
 import { Indexer, type ReconcileSummary } from "../src/indexer.js";
 import { Vault } from "../src/vault.js";
 import { tempRepo, type TempRepo } from "./helpers.js";
@@ -359,21 +359,33 @@ describe("a conflict stops, never guesses (§2.21 rule 3)", () => {
     expect(await asOwner(bare, ["show", "main:now.md"])).toBe("# Now\n\nboth plans\n");
   });
 
-  it("an uncommitted edit in the way (a `.metistry/` file is never swept) → a conflict naming it, its bytes untouched", async () => {
-    await ownerPushes(".metistry/rules.yaml", "rules: [remote]\n", "Owner edits rules elsewhere");
-    await writeFile(join(repo.root, ".metistry/rules.yaml"), "rules: [local, uncommitted]\n");
+  it("an uncommitted edit in the way (the sweep is off) → a conflict naming it, its bytes untouched", async () => {
+    // a `.metistry/` edit used to be the example; a remote change there is now refused before anything is in anyone's way (next describe)
+    const unswept = new Committer(git, { authorPrefix: "Metistry", authorEmail: "metistry@test", sourceTrailer: "Brain-Source", sweepExternalEdits: false });
+    await ownerPushes("now.md", "# Now\n\nremote\n", "Owner edits now elsewhere");
+    await writeFile(join(repo.root, "now.md"), "# Now\n\nlocal, uncommitted\n");
     const head = await localHead();
 
-    const r = await committer.pull();
+    const r = await unswept.pull();
     expect(r).toMatchObject({ ok: false, integrated: "conflict" });
-    expect(committer.vault.conflict).toMatchObject({ reason: "local_changes", paths: [".metistry/rules.yaml"] });
-    expect(await readFile(join(repo.root, ".metistry/rules.yaml"), "utf8")).toBe("rules: [local, uncommitted]\n");
+    expect(unswept.vault.conflict).toMatchObject({ reason: "local_changes", paths: ["now.md"] });
+    expect(await readFile(join(repo.root, "now.md"), "utf8")).toBe("# Now\n\nlocal, uncommitted\n");
     expect(await localHead()).toBe(head);
 
     // the owner drops their edit; the next sync is clean
-    await asOwner(repo.root, ["checkout", "-q", "--", ".metistry/rules.yaml"]);
-    expect(await committer.pull()).toMatchObject({ ok: true, integrated: "fast_forward" });
-    expect(committer.vault.state).toBe("clean");
+    await asOwner(repo.root, ["checkout", "-q", "--", "now.md"]);
+    expect(await unswept.pull()).toMatchObject({ ok: true, integrated: "fast_forward" });
+    expect(unswept.vault.state).toBe("clean");
+  });
+
+  it("an uncommitted `.metistry/` edit and a remote change to the same file → refused as protected configuration, the local bytes untouched", async () => {
+    await ownerPushes(".metistry/rules.yaml", "rules: [remote]\n", "Owner edits rules elsewhere");
+    await writeFile(join(repo.root, ".metistry/rules.yaml"), "rules: [local, uncommitted]\n");
+    const head = await localHead();
+    expect(await committer.pull()).toMatchObject({ ok: false, integrated: "conflict" });
+    expect(committer.vault.conflict).toMatchObject({ reason: "protected_path_from_remote", paths: [".metistry/rules.yaml"] });
+    expect(await readFile(join(repo.root, ".metistry/rules.yaml"), "utf8")).toBe("rules: [local, uncommitted]\n");
+    expect(await localHead()).toBe(head);
   });
 
   it("a remote that shares no history is a conflict, not a merge of unrelated histories", async () => {
@@ -412,6 +424,105 @@ describe("a conflict stops, never guesses (§2.21 rule 3)", () => {
     } finally {
       await new Promise<void>((r) => server.close(() => r()));
     }
+  });
+});
+
+describe("the remote is not a write path into configuration (ruling 2026-09-26: refuse and report)", () => {
+  /** What git ran since `mark` — the steps that would move a tree or a ref. */
+  const moves = (mark: number) => git.argv.slice(mark).filter((a) => ["merge", "push", "reset", "commit-tree", "merge-tree"].includes(a[0]!));
+
+  it("a remote commit touching `.metistry/deployment.yaml` → nothing moves, state conflict naming it, no merge or push; retries add nothing; a revert on the remote lets the rest through", async () => {
+    const theirs = await ownerPushes(".metistry/deployment.yaml", "shape: hostile\n", "Change the deployment");
+    await write("Areas/A.md", "a\n", "Act A");
+    await committer.flush();
+    const ours = await localHead();
+
+    const mark = git.argv.length;
+    const r = await committer.push();
+    expect(r).toMatchObject({ attempted: true, ok: false, integrated: "conflict", pushed: false, ahead: 1, behind: 1 });
+    expect(r.error).toContain(".metistry/deployment.yaml");
+    expect(moves(mark)).toEqual([]);
+    expect(git.argv.slice(mark)).toContainEqual(expect.arrayContaining(["diff", "--name-only"]));
+    // nothing moved: both heads where they were, the file never landed, the push is held
+    expect(await remoteHead()).toBe(theirs);
+    expect(await localHead()).toBe(ours);
+    expect(existsSync(join(repo.root, ".metistry/deployment.yaml"))).toBe(false);
+    expect(await repo.git.status()).toEqual([]);
+
+    expect(committer.vault.state).toBe("conflict");
+    const c = committer.vault.conflict!;
+    expect(c).toMatchObject({
+      reason: "protected_path_from_remote",
+      paths: [".metistry/deployment.yaml"],
+      path_count: 1,
+      commits: [{ sha: theirs, author: "Owner", subject: "Change the deployment", paths: [".metistry/deployment.yaml"] }],
+      commit_count: 1,
+    });
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({ state: "conflict", ok: false, meta: { reason: "protected_path_from_remote", paths: [".metistry/deployment.yaml"], commits: [theirs] } });
+
+    // the next tick finds the same commit: same key (the db test counts ONE row), same episode, still nothing moved
+    const mark2 = git.argv.length;
+    expect(await committer.push()).toMatchObject({ ok: false, integrated: "conflict", pushed: false });
+    expect(moves(mark2)).toEqual([]);
+    expect(records.map((e) => e.state)).toEqual(["conflict", "conflict"]);
+    expect(records[1]!.conflict!.commits!.map(protectedKey)).toEqual(records[0]!.conflict!.commits!.map(protectedKey));
+    expect(records[1]!.conflict!.since).toBe(records[0]!.conflict!.since);
+
+    // the owner reverts it on the remote: nothing protected is left to bring in, so the rest integrates and the held push goes out
+    await asOwner(owner, ["revert", "--no-edit", "HEAD"]);
+    await asOwner(owner, ["push", "-q", "origin", "main"]);
+    expect(await committer.push()).toMatchObject({ ok: true, pushed: true });
+    expect(committer.vault).toEqual({ state: "clean", conflict: null });
+    expect(existsSync(join(repo.root, ".metistry/deployment.yaml"))).toBe(false);
+    expect(await asOwner(bare, ["show", "main:Areas/A.md"])).toBe("a\n");
+  });
+
+  it("a mixed commit (a note AND protected config) is refused whole — the note does not ride in either, nor does an earlier vault-only commit", async () => {
+    await ownerPushes("Areas/Earlier.md", "harmless\n", "A harmless note");
+    await asOwner(owner, ["pull", "-q", "--ff-only", "origin", "main"]);
+    await put(owner, "Areas/Owner.md", "a note\n");
+    await put(owner, ".metistry/rules.yaml", "rules: [remote]\n");
+    await asOwner(owner, ["add", "-A"]);
+    await asOwner(owner, ["commit", "-q", "-m", "Note and rules"]);
+    await asOwner(owner, ["push", "-q", "origin", "main"]);
+    const mixed = (await asOwner(owner, ["rev-parse", "HEAD"])).trim();
+    const head = await localHead();
+
+    const mark = git.argv.length;
+    expect(await committer.pull()).toMatchObject({ ok: false, integrated: "conflict" });
+    expect(moves(mark)).toEqual([]);
+    expect(await localHead()).toBe(head);
+    expect(existsSync(join(repo.root, "Areas/Owner.md"))).toBe(false);
+    expect(existsSync(join(repo.root, "Areas/Earlier.md"))).toBe(false);
+    expect(await readFile(join(repo.root, ".metistry/rules.yaml"), "utf8")).toBe("rules: []\n");
+    // the refusal names only the protected path, and only the commit that made it
+    expect(committer.vault.conflict).toMatchObject({ reason: "protected_path_from_remote", paths: [".metistry/rules.yaml"], commit_count: 1, commits: [{ sha: mixed, paths: [".metistry/rules.yaml"] }] });
+    expect(rewalked).toEqual([]);
+  });
+
+  it("the whole of `.metistry/` — `state/` too, which git would overwrite silently as ignored — and a case-folded `claude.md` are refused", async () => {
+    await asOwner(owner, ["pull", "-q", "--ff-only", "origin", "main"]);
+    await put(owner, ".metistry/state/.env", "METISTRY_SECRET=theirs\n");
+    await put(owner, "claude.md", "# instructions from the remote\n");
+    await asOwner(owner, ["add", "-f", "-A"]);
+    await asOwner(owner, ["commit", "-q", "-m", "Plant state and instructions"]);
+    await asOwner(owner, ["push", "-q", "origin", "main"]);
+
+    expect(await committer.pull()).toMatchObject({ ok: false, integrated: "conflict" });
+    expect(committer.vault.conflict).toMatchObject({ reason: "protected_path_from_remote", paths: [".metistry/state/.env", "claude.md"] });
+    expect(existsSync(join(repo.root, ".metistry/state/.env"))).toBe(false);
+    expect(existsSync(join(repo.root, "claude.md"))).toBe(false);
+  });
+
+  it("a vault-only remote commit still integrates as before", async () => {
+    const theirs = await ownerPushes("Areas/Owner.md", "just a note\n", "Owner's note");
+    const mark = git.argv.length;
+    expect(await committer.pull()).toMatchObject({ ok: true, integrated: "fast_forward", behind: 1 });
+    expect(await localHead()).toBe(theirs);
+    expect(git.argv.slice(mark)).toContainEqual(["merge", "--ff-only", "-q", theirs]);
+    expect(committer.vault.state).toBe("clean");
+    expect(records.map((e) => e.state)).toEqual(["pull"]);
   });
 });
 

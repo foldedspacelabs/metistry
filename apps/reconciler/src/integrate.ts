@@ -23,15 +23,27 @@
 // a refusal is reported as the conflict it is ("your uncommitted edit is
 // in the way"), never forced.
 //
+// The remote is not a write path into configuration (owner's ruling,
+// 2026-09-26, "refuse and report"). Before any of the above, the fetched
+// commits are diffed against the merge base; if the remote changed a §4.7
+// protected path — `.metistry/**` but `state/`, the root `CLAUDE.md` and
+// `README.md` (paths.ts `isProtectedFromRemote`) — nothing is integrated,
+// nothing is pushed, and the result is a conflict of reason
+// `protected_path_from_remote` naming the paths and the commits that made
+// them. The whole fetch is refused, never the offending half of it: a
+// partial integrate would be a merge nobody wrote. Vault-only remote
+// commits integrate exactly as before.
+//
 // Nothing here pushes or fetches: the committer owns the network and the
 // locks; this module is the pure-git decision and the one tree step.
 
 import { GitError, type Git, type GitAuthor, type GitIdentity } from "./git.js";
+import { isProtectedFromRemote } from "./paths.js";
 
 export type IntegrateOutcome = "up_to_date" | "fast_forward" | "rebased" | "merged";
 
-/** Why a sync stopped. `diverged`: both sides changed the same lines. `local_changes`: an edit nobody has committed is in the way. `unrelated`: the remote shares no history with this vault. */
-export type ConflictReason = "diverged" | "local_changes" | "unrelated";
+/** Why a sync stopped. `diverged`: both sides changed the same lines. `local_changes`: an edit nobody has committed is in the way. `unrelated`: the remote shares no history with this vault. `protected_path_from_remote`: the remote changed a §4.7 protected path — configuration is the owner's hand, never a pull. */
+export type ConflictReason = "diverged" | "local_changes" | "unrelated" | "protected_path_from_remote";
 
 /** One side's latest commit touching a conflicted path. */
 export interface SideCommit {
@@ -52,6 +64,15 @@ export interface IntegrateConflict {
   remote: { sha: string; behind: number };
   /** For the first few paths: the latest commit on each side that touched it. */
   sides: Array<{ path: string; local: SideCommit | null; remote: SideCommit | null }>;
+  /** `protected_path_from_remote` only: each remote commit that touched a refused path, oldest first; at most `MAX_PROTECTED_COMMITS`. Each is one Needs You report. */
+  commits?: ProtectedCommit[];
+  /** How many offending commits there were before the cap. */
+  commit_count?: number;
+}
+
+/** A remote commit that changed a protected path, and which ones (at most `MAX_CONFLICT_PATHS`). */
+export interface ProtectedCommit extends SideCommit {
+  paths: string[];
 }
 
 export type IntegrateResult =
@@ -76,6 +97,7 @@ export interface IntegrateInput {
 }
 
 export const MAX_CONFLICT_PATHS = 50; // limit: fixed — a report names paths; past this it counts them
+export const MAX_PROTECTED_COMMITS = 20; // limit: fixed — one report each; past this the last report counts them
 const MAX_SIDE_DETAIL = 10; // limit: fixed — per-path commit lookups are two git calls each
 
 /** A commit object, parsed: enough to replay it faithfully. */
@@ -212,6 +234,38 @@ async function conflictOf(git: Git, reason: ConflictReason, paths: string[], bas
 }
 
 /**
+ * The remote commits (`base..incoming`) that changed a protected path, oldest
+ * first. The refusal itself is decided by the NET diff (what integrating
+ * would change); this names who made it. A path the net diff refuses that no
+ * single commit shows (an evil merge on the remote) is pinned on the tip.
+ */
+async function protectedCommits(git: Git, base: string, incoming: string, refused: string[]): Promise<ProtectedCommit[]> {
+  const wanted = new Set(refused);
+  const out = await git.run(["log", "--reverse", "--no-renames", "--name-only", "-z", "--format=%x1e%H%x1f%an%x1f%s", `${base}..${incoming}`]);
+  const commits: ProtectedCommit[] = [];
+  const seen = new Set<string>();
+  for (const rec of out.split("\x1e").filter((r) => r.trim())) {
+    // `<header>\0\n<path>\0<path>\0…` — the one newline is git's separator before the names
+    const [header = "", ...names] = rec.split("\0");
+    const [sha = "", author = "", subject = ""] = header.split("\x1f");
+    const paths = [...new Set(names.map((p) => p.replace(/^\n/, "")).filter((p) => wanted.has(p)))].sort();
+    if (!sha || paths.length === 0) continue;
+    for (const p of paths) seen.add(p);
+    commits.push({ sha, author, subject, paths: paths.slice(0, MAX_CONFLICT_PATHS) });
+  }
+  const unclaimed = refused.filter((p) => !seen.has(p));
+  if (unclaimed.length > 0) {
+    const tip = commits.find((c) => c.sha === incoming);
+    if (tip) tip.paths = [...new Set([...tip.paths, ...unclaimed])].sort().slice(0, MAX_CONFLICT_PATHS);
+    else {
+      const [sha = incoming, author = "", subject = ""] = (await git.run(["log", "-1", "--format=%H%x1f%an%x1f%s", incoming])).trim().split("\x1f");
+      commits.push({ sha, author, subject, paths: unclaimed.slice(0, MAX_CONFLICT_PATHS) });
+    }
+  }
+  return commits;
+}
+
+/**
  * Decide and — unless it conflicts — perform the integration of `incoming`
  * into the current branch. The caller holds the tree (no bridge write lands
  * while this runs) and has flushed its queue.
@@ -228,6 +282,19 @@ export async function integrate(git: Git, input: IntegrateInput): Promise<Integr
   const baseR = await git.raw(["merge-base", head, incoming]);
   const base = baseR.code === 0 ? baseR.stdout.trim() : "";
   if (!base) return conflictOf(git, "unrelated", [], "", head, incoming, ahead, behind);
+
+  // The remote may not write configuration (ruling 2026-09-26): decided
+  // before anything is computed or moved, over everything it would bring.
+  const refused = (await changedBetween(git, base, incoming)).filter(isProtectedFromRemote);
+  if (refused.length > 0) {
+    const result = await conflictOf(git, "protected_path_from_remote", refused, base, head, incoming, ahead, behind);
+    if (result.outcome === "conflict") {
+      const commits = await protectedCommits(git, base, incoming, refused);
+      result.conflict.commits = commits.slice(0, MAX_PROTECTED_COMMITS);
+      result.conflict.commit_count = commits.length;
+    }
+    return result;
+  }
 
   let target: string;
   let outcome: IntegrateOutcome;

@@ -323,7 +323,9 @@ Package-level detail (flags, resolution order, probe table) lives in
 
 **An instance directory holds everything about that instance** (ratified
 2026-09-09, `docs/product/desktop-app-plan.md`). Nothing about it persists
-outside its directory except per-user secrets in the login Keychain. So:
+outside its directory except its Keychain items, filed under its own
+`instance_id` (the retired shared scope's originals aside — `metistry
+secrets migrate-scope`). So:
 
 - **`.env` lives at `<instance>/.metistry/state/.env`**, not in the product
   checkout. It is gitignored by the seed and written `0600`.
@@ -790,8 +792,9 @@ metistry compute show [--json]
 A §4.7 protected path like `.metistry/deployment.yaml`: every write goes through the
 reconciler as the `user` principal, and an edit whose RESULT would not
 validate is refused rather than written. `providers add` reads the API key
-from stdin into the login Keychain (user scope) and never takes it as an
-argument. Budgets are enforced in the engine, before the call — see
+from stdin into the login Keychain (still the per-user account until compute
+reads `{{ secret.name }}` — run `metistry secrets migrate-scope` after it) and
+never takes it as an argument. Budgets are enforced in the engine, before the call — see
 `docs/ops/compute.md`, which is the whole story including what is missing.
 
 `--from` names a **provider template** — a unit of the provider registry: the
@@ -876,33 +879,48 @@ can read a value, let alone print one.
 `--instance <dir>` says which instance this is. On Linux `secrets` refuses
 and points at `chmod 600` on `.env` or your own secret manager.
 
-### Two scopes: the instance's, and yours
+### One account: the instance's
 
 An item is `metistry:<VAR>` plus an **account**, and the account is what
-keeps several instance directories on one Mac apart. One table —
-`SECRET_SCOPES` in `packages/cli/src/secrets.ts` — decides which account a
-name belongs under, so `sync`, `mint`, `list`, `purge` and the Mac app
-cannot disagree:
-
-| scope | account | which variables |
-| --- | --- | --- |
-| **instance** | the instance's `instance_id` | `METISTRY_DB_PASSWORD`, `METISTRY_LOCAL_OWNER_TOKEN`, every `METISTRY_BRIDGE_TOKEN_*`, `METISTRY_ASSISTANT_TOKEN`, `METISTRY_VAPID_*`, `METISTRY_GITHUB_*` — **and anything not listed**, because self-containment is the rule |
-| **user** | `metistry` (override: `METISTRY_KEYCHAIN_ACCOUNT`) | every `METISTRY_*_API_KEY` (a compute provider credential named by `.metistry/compute.yaml`'s `auth.secret` — your account with that provider, shared by every instance on this Mac), `METISTRY_DEVIN_API_KEY`, `METISTRY_AWS_SECRET_ACCESS_KEY`, `METISTRY_AWS_SESSION_TOKEN` (your AWS account, not this instance's) |
+keeps several instance directories on one Mac apart. Since the owner's
+ruling Q3 (plan §2.14, "no bleed between instances") there is one:
+**the instance's `instance_id`**, for every variable — `sync`, `mint`,
+`list` and `purge` read and write nothing else. With no `instance_id` yet
+(no instance directory configured, or one that has not run `sync`/`up`) an
+install's own variables stay under the per-user account `metistry`
+(override: `METISTRY_KEYCHAIN_ACCOUNT`) until one is minted.
 
 `METISTRY_SIGN_IDENTITY` and `METISTRY_GITHUB_OAUTH_CLIENT_ID` are not
 secrets; they stay plain `.env`/config values.
 
-**`sync --to env` migrates as it goes.** It looks in the instance's
-account first, then the user account as a fallback — and an instance-scoped
-value found only under the user account is **copied** to the instance's,
-with a line saying which. The old item is never deleted, so rolling back to
-an older CLI still finds it. `secrets list` shows `scope` (where a name
-belongs) beside `keychain` (the account an item was actually found under),
-so `instance / user` reads "not migrated yet".
+**The shared scope is retired.** Until T4-3 a table (`SECRET_SCOPES`) filed
+third-party credentials under the per-user account, shared by every
+instance on the Mac: every `METISTRY_*_API_KEY` (a compute provider key
+named by `.metistry/compute.yaml`'s `auth.secret`), `METISTRY_DEVIN_API_KEY`,
+`METISTRY_AWS_SECRET_ACCESS_KEY`, `METISTRY_AWS_SESSION_TOKEN`. Each of those
+is now an **owner-named secret** of every instance that uses it, under its
+lowercase name — `METISTRY_DEVIN_API_KEY` → `{{ secret.devin_api_key }}` —
+and:
 
-With no `instance_id` available — no instance directory configured, or one
-created before 2026-09-09 that has not run `sync`/`up` yet — every secret
-stays under the user account exactly as before.
+- `sync --to env` fills its `.env` line from that owner-named secret and
+  **never reads the per-user account**. With no copy in this instance the
+  line is left exactly as it is, and when an original is still under the
+  per-user account (asked by presence, never for a value) it says so and
+  names `metistry secrets migrate-scope`.
+- `sync --to keychain` does not sweep it in from `.env`: its policy (where it
+  may be sent, who may use it) is yours to write, so it names
+  `metistry secrets set <name>` instead.
+- `mint` refuses it — a credential another service issues is never a random
+  string.
+- `list` shows the secret it became, and whether its original is still in
+  the shared scope. The older fallback — an instance-scoped value found only
+  under the per-user account copied across by `sync` — is gone with the
+  table.
+
+`metistry compute providers add` still stores a new provider key under the
+per-user account until compute reads `{{ secret.name }}` (T4-18); run
+`metistry secrets migrate-scope` after it, and `secrets sync --to env` then
+fills the line.
 
 **`sync --to env` mints the generated ones.** A secret that exists in
 neither the Keychain nor `.env` is normally reported ("not in the Keychain,
@@ -934,7 +952,7 @@ metistry secrets purge --instance ~/instances/test-two --yes    # deletes
 
 It only ever touches that instance's own account, and refuses outright
 when the directory has no `instance_id` or when its account somehow *is*
-the per-user account. User-scoped names are listed as kept. The instance's
+the per-user account. Shared-scope originals are listed as kept (`purge-shared` is theirs). The instance's
 owner-named secrets (below) are deleted with the rest — their names come
 from its `secrets.yaml`. It does not remove the directory itself.
 
@@ -948,7 +966,7 @@ variables above, and the two never share a Keychain item:
 | --- | --- | --- |
 | name | `METISTRY_<VAR>`, from `.env` / `.env.example` | lowercase snake_case, chosen by you: `github_write` |
 | Keychain item | service `metistry:<VAR>` | service `metistry:secret:<name>` |
-| account | the instance's id, or the per-user account (`SECRET_SCOPES`) | **the instance's `instance_id`, always** — no user scope, no fallback |
+| account | the instance's id (the per-user account only while it has none) | **the instance's `instance_id`, always** — no user scope, no fallback |
 | policy | none | `.metistry/secrets.yaml`: hosts, grants, expiry — never a value |
 | verbs | `sync`, `mint`, `list`, `purge` | `set`, `replace`, `remove`, `hosts`, `grant`, `list --named` |
 
@@ -1027,12 +1045,96 @@ host list, and a model never receives a value — core's `guardedFetch`
 
 **The M7 row and this CLI.** Plan §2.2's M7 names `metistry secrets
 set|replace|remove|hosts|grant|migrate-scope|purge-shared`. The first five
-are the verbs above. `migrate-scope` and `purge-shared` — moving the old
-user-scoped provider, AWS and Devin keys into each instance and then
-removing the shared originals — are T4-3's. `sync|mint|list|purge` are not
-in M7's list and stay exactly as they were: they manage the install's own
-variables (`.env`, the bridge tokens, the owner door), and the Mac app's
+are the verbs above; `migrate-scope` and `purge-shared` are the next
+section. `sync|mint|list|purge` are not
+in M7's list: they manage the install's own variables (`.env`, the bridge tokens, the owner door), and the Mac app's
 first run drives `sync` and `mint`.
+
+## Migrating the shared scope: `migrate-scope` and `purge-shared`
+
+Plan §2.14's four steps, for the third-party credentials the retired shared
+scope kept under the per-user account (above). `metistry update` runs the
+migration on every update; the verb reruns it by hand:
+
+```sh
+metistry secrets migrate-scope [--dry-run] [--instance <dir>] [--json]
+metistry secrets purge-shared [--yes] [--instance <dir>] [--json]
+```
+
+1. **Copy.** Every shared-scope variable this instance knows of — its
+   `.env`, `.env.example`, the `auth.secret` names in `.metistry/compute.yaml`,
+   `requires.env` in its own manifests under `.metistry/` — whose original is
+   under the per-user account is **copied** into this instance's account as
+   `metistry:secret:<name>` (`METISTRY_DEVIN_API_KEY` → `devin_api_key`), and
+   the name is recorded in `secrets.yaml` through the reconciler as you, with
+   no host and no grant until you give them (`secrets hosts`, `secrets
+   grant`). **An item the instance already holds wins**: the original is not
+   even read. Idempotent — a rerun copies nothing, writes no file and changes
+   no item.
+2. **Rewrite references.** `auth.secret` and `requires.env` become
+   `{{ secret.<name> }}`, through the protected write, edited as YAML
+   documents so your comments survive — **but only into a file that still
+   validates with the reference in it**, judged by core's own schema for that
+   file. Today's `compute.yaml` and manifest schemas take an environment
+   name, so each reference is left as it is and reported; the release whose
+   schema reads `{{ secret.name }}` there lets the next `metistry update`
+   finish it. A reference to a secret the instance does not hold is never
+   rewritten.
+3. **Stop reading the per-user account** — `sync`, above.
+4. **Leave the originals.** The migration has no code path that deletes a
+   Keychain item (a test hands it a Keychain whose `delete` throws). It
+   lists what it left.
+
+```
+$ metistry secrets migrate-scope --instance ~/instances/second
+shared scope: account metistry → this instance's 11111111-2222-4333-8444-555555555555 (~/instances/second)
+copied METISTRY_DEVIN_API_KEY → devin_api_key (metistry:secret:devin_api_key, account 11111111-…). The value is not printed.
+copied METISTRY_OPENROUTER_API_KEY → openrouter_api_key (metistry:secret:openrouter_api_key, account 11111111-…). The value is not printed.
+recording in secrets.yaml: devin_api_key, openrouter_api_key — sent to no host and granted to no one until you say (`metistry secrets hosts <name> <host>`, `metistry secrets grant`)
+left .metistry/compute.yaml providers.openrouter.auth.secret as METISTRY_OPENROUTER_API_KEY: this release's schema does not read {{ secret.name }} there yet (…), so it keeps the environment name until one does — `metistry update` then finishes it
+left in the shared scope — this migration deletes nothing: METISTRY_DEVIN_API_KEY, METISTRY_OPENROUTER_API_KEY. `metistry secrets purge-shared` removes an original once every instance on this Mac has its copy.
+shared scope: copied for ~/instances/second; 1 reference(s) keep their environment name until a release reads {{ secret.name }} there.
+```
+
+The Keychain may ask once per original the first time — run it from
+Terminal and allow it. An original it will not hand over is reported, left,
+and makes the verb exit 1; nothing half-recorded is written. It refuses an
+instance with no `instance_id`, a host with no login Keychain, and a
+per-user account that *is* this instance's (`METISTRY_KEYCHAIN_ACCOUNT`).
+
+**`metistry update` can never be failed by it.** A dry run asks the
+Keychain nothing and prints the command; an instance with no id, a host
+with no Keychain, a locked Keychain or a refused write is a note naming
+`metistry secrets migrate-scope --instance <dir>` — and until you run it the
+instance keeps working exactly as before, because its `.env` still carries
+the values. (The `update` that installs this release runs the release it is
+replacing — the migration runs on the next `update`, or when you run the verb,
+which §3.4 asks of you once per instance anyway.)
+
+**Doctor** has one `shared scope` row for an instance with an id, on a Mac,
+from presence probes only (never a value, never a prompt), and never
+`failed`: *degraded* with the exact `migrate-scope` command while an
+original has no copy here; *degraded* with `purge-shared` once everything is
+copied and originals remain; ok when none are left.
+
+**`purge-shared`** removes an original from the per-user account only when
+**every instance this Mac knows** has its own copy — this instance plus every
+`METISTRY_INSTANCE_DIR` a Metistry LaunchAgent in `~/Library/LaunchAgents`
+names (a directory that is gone is skipped and said so). An instance with no
+`instance_id` holds no copy, so it keeps every original. Preview-then-
+confirm: without `--yes` it deletes nothing and names, for each original it
+keeps, the instances still without a copy. It refuses when an instance's id
+is the per-user account itself, and deletes nothing but per-user originals.
+
+```
+$ metistry secrets purge-shared
+shared scope: account metistry
+instances this Mac knows: ~/instances/first (1111…), ~/instances/second (6666…)
+1 original(s) every one of them has copied — removable: METISTRY_DEVIN_API_KEY
+kept METISTRY_OPENROUTER_API_KEY: no copy yet in ~/instances/second — `metistry secrets migrate-scope --instance <dir>` there first
+
+preview only. Nothing was deleted — rerun with --yes to delete the 1 original(s) above.
+```
 
 ## Importing Claude Code sessions
 

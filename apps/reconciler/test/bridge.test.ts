@@ -195,16 +195,22 @@ describe("vault bridge", () => {
     expect((await post("/vault/write", { path: "Areas/Owned.md", content: "x", intent: intent("researcher", "not me") }, OWNER)).status).toBe(403);
   });
 
-  it("the console keeps its two enumerated protected doors: §4.10's prompt overlay and the Compute pane", async () => {
+  it("the console keeps its three enumerated protected doors: §4.10's prompt overlay, the Compute pane and Scheduled", async () => {
     const w = await post("/vault/write", { path: ".metistry/assistant-prompt.md", content: "# overlay\n", intent: intent("user", "assistant prompt: apply improvement proposal #7") });
     expect(w.status).toBe(201);
     // `POST /api/compute/assign` — the owner moving a tier to a cheaper model
     // from the phone, through the same function `metistry compute` calls
     const c = await post("/vault/write", { path: ".metistry/compute.yaml", content: "providers: {}\n", intent: intent("user", "metistry compute assign default → lmstudio/gemma") });
     expect(c.status).toBe(201);
-    // and both are still the user's name on it — authority moved, attribution did not
+    // the Scheduled doors (T3-3) — the owner pausing a routine
+    const s = await post("/vault/write", { path: ".metistry/scheduled.yaml", content: "routines:\n  morning-brief:\n    paused: true\n", intent: intent("user", "scheduled: pause morning-brief") });
+    expect(s.status).toBe(201);
+    // and all three are still the user's name on it — authority moved, attribution did not
     expect((await post("/vault/write", { path: ".metistry/assistant-prompt.md", content: "# no", intent: intent("assistant", "rewrite myself") })).status).toBe(403);
     expect((await post("/vault/write", { path: ".metistry/compute.yaml", content: "providers: {}\n", intent: intent("assistant", "pick my own model") })).status).toBe(403);
+    expect((await post("/vault/write", { path: ".metistry/scheduled.yaml", content: "{}\n", intent: intent("assistant", "unpause myself") })).status).toBe(403);
+    // …and the door is that one file: a near miss of its name opens nothing
+    expect((await post("/vault/write", { path: ".metistry/scheduled.yml", content: "{}\n", intent: intent("user", "a near miss") })).status).toBe(403);
   });
 
   it("an agent relayed through the console cannot escalate: the bearer is the console's, whatever the body says", async () => {

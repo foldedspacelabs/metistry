@@ -8,7 +8,8 @@
 import { mkdir, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { SECTION_WRITERS, confine, isDailyNotePath, isProtected, isProtectedFromRemote, mayClaim, parseVaultPath, sectionWriteAllowed, writeAllowed } from "../src/paths.js";
+import { INSTANCE_CONFIG_DIRS, INSTANCE_LAYOUT, LEGACY_MACHINERY_ROOTS, PROTECTED_ROOT_FILES } from "@foldedspacelabs/metistry-core";
+import { CALLER_AUTHORITY, SECTION_WRITERS, confine, isDailyNotePath, isProtected, isProtectedFromRemote, mayClaim, parseVaultPath, sectionWriteAllowed, writeAllowed } from "../src/paths.js";
 import { tempRepo, type TempRepo } from "./helpers.js";
 
 describe("parseVaultPath (syntactic)", () => {
@@ -127,7 +128,7 @@ describe("protected paths (§4.7)", () => {
 
   // The 2026-09-20 ruling, as a unit: `principal: user` is a CLAIM, and a
   // claim is worth exactly what the credential behind it is worth.
-  it("a console bearer claiming `user` reaches no protected path but the prompt overlay", () => {
+  it("a console bearer claiming `user` reaches no protected path but its three doors", () => {
     for (const p of [
       ".metistry/identity.yaml",
       ".metistry/rules.yaml",
@@ -144,17 +145,55 @@ describe("protected paths (§4.7)", () => {
       expect(writeAllowed(p, "user", "console"), p).toBe(false);
       expect(writeAllowed(p, "user", "owner"), p).toBe(true);
     }
-    // …and the two enumerated doors the console already ships: §4.10
-    // self-modification (prompt-overlay.ts) and the Compute pane's two writes
-    // (compute-routes.ts), both gated on the owner's own session there.
+    // …and the three enumerated doors: §4.10 self-modification
+    // (prompt-overlay.ts), the Compute pane's two writes (compute-routes.ts),
+    // and the Scheduled doors (T3-2/T3-3), each gated on the owner there.
     expect(writeAllowed(".metistry/assistant-prompt.md", "user", "console")).toBe(true);
     expect(writeAllowed(".metistry/compute.yaml", "user", "console")).toBe(true);
+    expect(writeAllowed(".metistry/scheduled.yaml", "user", "console")).toBe(true);
     // still `user` even there — attribution does not move because authority did
     expect(writeAllowed(".metistry/assistant-prompt.md", "assistant", "console")).toBe(false);
     expect(writeAllowed(".metistry/compute.yaml", "assistant", "console")).toBe(false);
+    expect(writeAllowed(".metistry/scheduled.yaml", "assistant", "console")).toBe(false);
+    expect(writeAllowed(".metistry/scheduled.yaml", "agent-seven", "console")).toBe(false);
     // and the door is a path, not a directory: nothing beside it opens
     expect(writeAllowed(".metistry/compute.yaml.bak", "user", "console")).toBe(false);
     expect(writeAllowed(".metistry/queries/compute.yaml", "user", "console")).toBe(false);
+  });
+
+  // T3-2: `.metistry/scheduled.yaml` is the ONE protected path the ruling of
+  // 2026-09-26 added to the console's doors — and adding it opened nothing
+  // else. Every protected path the layout names, every config directory, the
+  // root files, the legacy roots, and every near miss of the new door's
+  // spelling: refused to the console, written by the owner.
+  it("the console still cannot write any other protected path", () => {
+    expect(CALLER_AUTHORITY.console.protectedPaths).toEqual([".metistry/assistant-prompt.md", ".metistry/compute.yaml", ".metistry/scheduled.yaml"]);
+    const doors = new Set(CALLER_AUTHORITY.console.protectedPaths as readonly string[]);
+    const named = Object.values(INSTANCE_LAYOUT).filter((p) => isProtected(p) && !doors.has(p));
+    expect(named).toContain(".metistry/identity.yaml");
+    expect(named).toContain(".metistry/secrets.yaml");
+    const others = [
+      ...named,
+      ...INSTANCE_CONFIG_DIRS.filter((d) => d !== "instance-migrations").map((d) => `.metistry/${d}/scheduled.yaml`),
+      ...PROTECTED_ROOT_FILES,
+      ...LEGACY_MACHINERY_ROOTS.filter((r) => r.includes(".")),
+      // near misses of the new door: another name, another place, a child of it
+      ".metistry/scheduled.yml",
+      ".metistry/scheduled.yaml.bak",
+      ".metistry/scheduled.yaml/x",
+      ".metistry/Scheduled.yaml",
+      ".metistry/extensions/scheduled.yaml",
+      ".metistry/routines/scheduled.yaml",
+      ".metistry/connections/github.yaml",
+    ];
+    for (const p of others) {
+      expect(isProtected(p), p).toBe(true);
+      expect(writeAllowed(p, "user", "console"), p).toBe(false);
+      expect(writeAllowed(p, "user", "owner"), p).toBe(true);
+    }
+    // a vault note that happens to be called scheduled.yaml is not the door, and not protected
+    expect(isProtected("scheduled.yaml")).toBe(false);
+    expect(isProtected("Areas/scheduled.yaml")).toBe(false);
   });
 
   it("the owner bearer may be the user and nobody else — a leaked one cannot forge an agent into history", () => {

@@ -210,15 +210,20 @@ export const REQUEST_TYPE_TABLE: { readonly [T in RequestType]: RequestTypeSpec 
  * Stored `proposals.kind` → type: every kind the product stores today, and
  * the ones §2.12 names for the types still to come. `meeting` has none — it
  * is a `group_id` over note, to-do and transcript rows (T1-8), never a kind.
- * C96's events are raised AS these kinds, not beside them: a failed secret is
- * access, a failed routine a `report`, a knowledge conflict a `review`, a
- * routine suggestion an `improvement` (T2-9).
+ * C96's events are raised AS these kinds, not beside them: a failed routine is
+ * a `report`, a knowledge conflict a `review`, a routine suggestion an
+ * `improvement` (T2-9). A failed secret is the one that needs its own kind,
+ * `secret_failure` — §2.12 lists it beside `access_request` and
+ * `grant_elevation` as a third stored kind of access — because
+ * `access_request`'s Approve is a grants write for the area it names, and a
+ * secret names no area: raised as one, its Approve could only be refused.
  */
 export const REQUEST_KIND_TYPE = {
   decision: "question",
   pull_request: "pull_request",
   access_request: "access",
   grant_elevation: "access",
+  secret_failure: "access",
   action: "action",
   connection_call: "action",
   review: "review",

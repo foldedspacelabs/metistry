@@ -58,8 +58,10 @@ import {
   isInterval,
   isLegacyCron,
   longestGapSeconds,
+  PROFILE_PATH,
   parseScheduled,
   preflight,
+  profileFacts,
   requirementsOf,
   shouldAlert,
   signatureTag,
@@ -86,7 +88,7 @@ import {
   type TemplateReader,
 } from "@foldedspacelabs/metistry-core";
 import type { RegisteredCollector, Db, CollectorCtx } from "@metistry-apps/collectors";
-import { frontmatterOf, vaultReader, workingDaysOf, type PlanCtx, type PlanVault } from "@metistry-apps/routines";
+import { vaultReader, type PlanCtx, type PlanVault } from "@metistry-apps/routines";
 
 export { scheduleToSeconds }; // one import path for the runner's callers and tests
 
@@ -145,26 +147,13 @@ export interface ScheduledCollector extends RegisteredCollector {
 
 // ---- the owner's layers: scheduled.yaml and Me/profile.md -------------------
 
-/** Where `Me/profile.md` lives in the vault — the facts a schedule may follow (§2.5). */
-export const PROFILE_PATH = "Me/profile.md";
-
 /**
- * `Me/profile.md`'s frontmatter as the two facts a schedule follows — read,
- * never written. The SAME readers `plan-tomorrow`'s working-day guard uses
- * (`frontmatterOf`, `workingDaysOf`), so the runner and the guard can never
- * disagree about which days you work. A key the owner did not write is
- * absent, and nothing fills it in; a timezone that is not a string is passed
- * on as written, so it is refused `unknown_timezone` rather than skipped.
+ * `Me/profile.md` and its two facts a schedule follows — core's (T3-4), the
+ * one reader the runner, `plan-tomorrow`'s working-day guard and the
+ * Scheduled view share, so none of them can disagree about which days you
+ * work. Re-exported so this file stays the runner's one import path.
  */
-export function profileFacts(text: string | null): ProfileFacts {
-  const fm = frontmatterOf(text) ?? {};
-  const tz = fm["timezone"];
-  const days = workingDaysOf(fm["working_days"]);
-  return {
-    ...(tz !== undefined && tz !== null && String(tz).trim() !== "" ? { timezone: String(tz).trim() } : {}),
-    ...(days !== null ? { working_days: days.map((d) => WEEKDAYS[d]!) } : {}),
-  };
-}
+export { PROFILE_PATH, profileFacts };
 
 /**
  * `.metistry/scheduled.yaml` as the runner reads it on a tick. `ok: false`

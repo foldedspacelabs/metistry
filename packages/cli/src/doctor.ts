@@ -53,7 +53,7 @@ import {
   type Manifest,
   type SupervisorConfig,
 } from "@foldedspacelabs/metistry-core";
-import { COMPUTE_FILENAME, INSTANCE_LAYOUT, LEGACY_VAULT_DIR, REGISTRY_KINDS, detectLayout, emptyCompute, extensionsDirFor, instanceFile, loadCompute, loadKind, resolveInstanceLayout, type Compute, type RegistryKindName } from "@foldedspacelabs/metistry-core";
+import { COMPUTE_FILENAME, INSTANCE_LAYOUT, LEGACY_VAULT_DIR, PROFILE_PATH, REGISTRY_KINDS, detectLayout, readStandupKeys, emptyCompute, extensionsDirFor, instanceFile, loadCompute, loadKind, resolveInstanceLayout, type Compute, type RegistryKindName } from "@foldedspacelabs/metistry-core";
 import { cliShimLinkHint, cliShimPath } from "./cli-shim.js";
 import { engineStatus, loadDeployment } from "./deployment.js";
 import { localServerRows } from "./local-models.js";
@@ -419,6 +419,34 @@ export async function layoutRow(instanceDir: string): Promise<DoctorRow> {
         meta: { layout: "legacy" },
       };
     })),
+  };
+}
+
+/**
+ * `standup_days` / `standup_time` still in `Me/profile.md` — one INFO line,
+ * never a finding (§2.5, §4 Q13). When the standup runs is the Standup
+ * routine's now: the console read the lines once into its schedule and
+ * asked, in Needs You, whether to tidy them away. Declined, or not yet
+ * answered, they are ignored — and this is where the owner learns that.
+ * Null (no row at all) when the profile has neither key or cannot be read.
+ */
+export async function profileRow(instanceDir: string): Promise<DoctorRow | null> {
+  let text: string;
+  try {
+    text = await readFile(join(instanceDir, PROFILE_PATH), "utf8");
+  } catch {
+    return null;
+  }
+  const keys = readStandupKeys(text);
+  if (keys.state === "none") return null;
+  const named = keys.keys.join(", ");
+  const info =
+    keys.state === "unreadable"
+      ? `${PROFILE_PATH} still has ${named}, which cannot be read (${keys.why}) — nothing uses ${keys.keys.length === 1 ? "it" : "them"}: when the standup runs is set on the Standup routine, under Scheduled. Delete ${keys.keys.length === 1 ? "the line" : "the lines"} when you like.`
+      : `${PROFILE_PATH} still has ${named} — ignored: when the standup runs lives on the Standup routine now, under Scheduled. Approve *Tidy ${PROFILE_PATH}* in Needs You, or delete ${keys.keys.length === 1 ? "the line" : "the lines"} yourself.`;
+  return {
+    kind: "instance",
+    ...(await runCheck("profile", `${PROFILE_PATH} holds facts about you, not when a routine runs (no standup_days, standup_time)`, async () => ({ meta: { info, ignored: [...keys.keys] } }))),
   };
 }
 
@@ -1275,12 +1303,13 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
   // model servers. Concurrently it is the slowest single probe. Nothing about
   // any one check changes — no timeout was shortened to buy this, because a
   // slow-but-healthy bridge reported as down would be a worse table.
-  const [componentRows, registries, layout, inbox, cli, dbAndSchedules, launchd, keepAwake, supervisor, containers, localModels, sharedScope] = await Promise.all([
+  const [componentRows, registries, layout, inbox, profile, cli, dbAndSchedules, launchd, keepAwake, supervisor, containers, localModels, sharedScope] = await Promise.all([
     (async () => Promise.all((await walkManifests(deps.productDir)).map((m) => componentRow(m, { env, fetchFn, timeoutMs, shape, labelSuffix, compute }))))(),
     // the registries over product + extensions: overlays and skips (plan §2.7)
     registriesRow(deps.productDir, env),
     layoutRow(instanceDir),
     inboxRow(instanceDir),
+    profileRow(instanceDir),
     // whether typing `metistry` finds this install's shim: a filesystem
     // look, so it costs nothing to start with everything else
     cliRow(deps.productDir, env),
@@ -1315,7 +1344,7 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
       ? sharedScopeRow({ instanceDir, productDir: deps.productDir, env, probe: deps.keychainProbe ?? securityPresence(exec) })
       : Promise.resolve(undefined),
   ]);
-  rows.push(...componentRows, registries, layout, inbox, cli, ...dbAndSchedules, ...launchd, ...(keepAwake ? [keepAwake] : []), ...supervisor, ...containers, ...localModels, ...(sharedScope ? [sharedScope] : []));
+  rows.push(...componentRows, registries, layout, inbox, ...(profile ? [profile] : []), cli, ...dbAndSchedules, ...launchd, ...(keepAwake ? [keepAwake] : []), ...supervisor, ...containers, ...localModels, ...(sharedScope ? [sharedScope] : []));
 
   return { as_of: new Date().toISOString(), product_dir: deps.productDir, shape, ok: !rows.some((r) => r.status === "failed"), rows };
 }
@@ -1347,8 +1376,11 @@ export function renderTable(report: DoctorReport, ui: Ui = defaultUi()): string 
       const status = padTo(ui.paint(statusName(r.status), r.status), statusWidth);
       out.push(`  ${ui.statusIcon(r.status)} ${padTo(r.name, nameWidth)}  ${status}  ${ui.dim(`${r.latency_ms}ms`.padStart(6))}`.trimEnd());
       // the one thing a red row is read for: what to do about it. Never on
-      // an ok row — an ok row's probe is noise between the rows that matter.
-      const detail = r.status === "ok" ? "" : (r.remediation ?? r.probe);
+      // an ok row — an ok row's probe is noise between the rows that matter —
+      // except the one line an ok row carries on purpose (`meta.info`): a
+      // fact the owner should know that asks nothing of them (profileRow).
+      const info = typeof r.meta?.["info"] === "string" ? r.meta["info"] : "";
+      const detail = r.status === "ok" ? info : (r.remediation ?? r.probe);
       if (detail) {
         // the arrow is a marker, not a word: it hangs in the margin and the
         // text wraps under itself, rather than the arrow taking a line of

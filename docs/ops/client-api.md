@@ -730,6 +730,28 @@ has the enum, the autonomy table, and why `dispatch` stays human by default.
 Rows an agent was allowed to run on its own arrive already decided `auto` —
 never in this queue, always in the timeline.
 
+#### `allow` on an improvement that edits `Me/` — the owner's hand on the owner's file
+
+```
+POST /api/proposals/52  {"decision":"allow"}
+200 {"ok":true,"applied":{"path":"Me/profile.md","created":false}}
+409 {"error":{"code":"conflict",…},"reason":"stale","decision":"pending","proposal":{…}}
+    the file is no longer the "before" you were shown: nothing was written,
+    and the request still waits — Decline it, or edit the file yourself
+503 not_available — no vault bridge in this deployment
+```
+
+An `improvement` whose payload carries an edit to a file under `Me/` —
+*Tidy Me/profile.md* (T3-4, `apps/console/src/profile-tidy.ts`) is the first —
+draws the before-and-after body from `payload.body`
+(`{kind: "before_after", heading, before: {label, text}, after: {label, text}}`)
+and names the file in `payload.edit` (`{path, base_sha256}`). **Approve writes
+`body.after.text` and nothing else, as `user`**, compare-and-swap on
+`base_sha256`, and only if the file is byte for byte `body.before.text`; a path
+outside `Me/` is not this edit at all. Revise and Decline write nothing. `Me/`
+is the owner's alone (`isUserOwnedPath`): this answer is the only way anything
+but the owner's own editor changes it.
+
 #### `POST /api/proposals/batch` — one verb, many rows
 
 ```

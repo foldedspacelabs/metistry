@@ -396,3 +396,108 @@ describe("the owner bearer: fail closed, and the refusal is on the record", () =
     expect(update!.values[1]).toBe(false); // ok = false
   });
 });
+
+/**
+ * T2-16: the record of every protected-path change the bridge ACCEPTS — a
+ * `config_write` run, so Activity shows it whichever door made it (the CLI's
+ * owner bearer, or the console's two enumerated compute/prompt writes).
+ */
+describe("config_write: every accepted protected-path change is on the record", () => {
+  let repo: TempRepo;
+  let server: ReturnType<typeof makeBridge>;
+  let base: string;
+  const rows: Array<{ text: string; values: unknown[] }> = [];
+  const db = {
+    async query(text: string, values: unknown[] = []) {
+      rows.push({ text, values });
+      return { rows: [{ id: rows.length }] };
+    },
+  };
+  const H = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+  const OWNER = { authorization: `Bearer ${ownerToken}`, "content-type": "application/json" };
+  const post = (path: string, body: unknown, headers: Record<string, string>) => fetch(`${base}${path}`, { method: "POST", headers, body: JSON.stringify(body) });
+  const inserts = () => rows.filter((r) => r.text.includes("INSERT INTO runs")).map((r) => ({ kind: r.values[1], tool: r.values[3], meta: JSON.parse(String(r.values[6])) }));
+  const configRows = () => inserts().filter((r) => r.kind === "config_write");
+
+  beforeAll(async () => {
+    repo = await tempRepo();
+    const committer = new Committer(repo.git, { authorPrefix: "Metistry", authorEmail: "metistry@test", sourceTrailer: "Brain-Source" });
+    const vault = new Vault(repo.root, repo.git, committer, { maxBytes: 4096 });
+    server = makeBridge({ vault, committer, db }, { token, ownerToken, maxBodyBytes: 64 * 1024 });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  });
+  afterAll(async () => {
+    await new Promise<void>((r) => server.close(() => r()));
+    await repo.cleanup();
+  });
+
+  it("an owner write of identity.yaml writes one finished, ok config_write row naming the file, the caller and the message", async () => {
+    rows.length = 0;
+    const r = await post("/vault/write", { path: ".metistry/identity.yaml", content: "name: Ada\n", intent: intent("user", "metistry identity set: name Example → Ada") }, OWNER);
+    expect(r.status).toBe(200);
+    expect(configRows()).toEqual([
+      { kind: "config_write", tool: "vault_write", meta: { path: ".metistry/identity.yaml", op: "write", caller: "owner", principal: "user", message: "metistry identity set: name Example → Ada" } },
+    ]);
+    const update = rows.find((x) => x.text.includes("UPDATE runs"));
+    expect(update!.values[1]).toBe(true); // ok = true, finished
+  });
+
+  it("the console's enumerated door (compute.yaml) is recorded too — whichever door made it", async () => {
+    rows.length = 0;
+    const r = await post("/vault/write", { path: ".metistry/compute.yaml", content: "assignments: {}\n", intent: intent("user", "compute assign") }, H);
+    expect(r.status).toBe(201);
+    expect(configRows()).toEqual([{ kind: "config_write", tool: "vault_write", meta: { path: ".metistry/compute.yaml", op: "write", caller: "console", principal: "user", message: "compute assign" } }]);
+  });
+
+  it("ordinary vault content is not a config write", async () => {
+    rows.length = 0;
+    expect((await post("/vault/write", { path: "Areas/Ordinary.md", content: "x", intent: intent("assistant", "note") }, H)).status).toBe(201);
+    expect(configRows()).toEqual([]);
+    // .metistry/state/ is derived, not protected
+    expect((await post("/vault/write", { path: ".metistry/state/scratch.txt", content: "x", intent: intent("user", "state") }, OWNER)).status).toBe(201);
+    expect(configRows()).toEqual([]);
+  });
+
+  it("a refused protected write leaves its auth row and NO config_write row", async () => {
+    rows.length = 0;
+    const r = await post("/vault/write", { path: ".metistry/identity.yaml", content: "name: Mallory\n", intent: intent("user", "claiming to be you") }, H);
+    expect(r.status).toBe(403);
+    expect(inserts().map((x) => x.kind)).toEqual(["auth"]);
+  });
+
+  it("an invalid request is not a write and is not recorded", async () => {
+    rows.length = 0;
+    expect((await post("/vault/write", { path: ".metistry/identity.yaml", intent: intent("user", "no content") }, OWNER)).status).toBe(400);
+    expect(inserts()).toEqual([]);
+  });
+
+  it("a protected delete, and each protected side of a rename, are recorded", async () => {
+    rows.length = 0;
+    expect((await post("/vault/write", { path: ".metistry/queries/extra.yaml", content: "name: extra\n", intent: intent("user", "add query") }, OWNER)).status).toBe(201);
+    expect((await post("/vault/rename", { from: ".metistry/queries/extra.yaml", to: ".metistry/queries/renamed.yaml", intent: intent("user", "rename query") }, OWNER)).status).toBe(200);
+    expect((await post("/vault/delete", { path: ".metistry/queries/renamed.yaml", intent: intent("user", "drop query") }, OWNER)).status).toBe(200);
+    expect(configRows().map((x) => [x.meta.op, x.meta.path, x.meta.from ?? null])).toEqual([
+      ["write", ".metistry/queries/extra.yaml", null],
+      ["rename", ".metistry/queries/extra.yaml", ".metistry/queries/extra.yaml"],
+      ["rename", ".metistry/queries/renamed.yaml", ".metistry/queries/extra.yaml"],
+      ["delete", ".metistry/queries/renamed.yaml", null],
+    ]);
+  });
+
+  it("a record that cannot be written never fails the write it describes", async () => {
+    const failing = { async query() { throw new Error("db down"); } };
+    const r2 = await tempRepo();
+    const committer = new Committer(r2.git, { authorPrefix: "Metistry", authorEmail: "metistry@test", sourceTrailer: "Brain-Source" });
+    const s2 = makeBridge({ vault: new Vault(r2.root, r2.git, committer, { maxBytes: 4096 }), committer, db: failing }, { token, ownerToken, maxBodyBytes: 64 * 1024 });
+    await new Promise<void>((r) => s2.listen(0, "127.0.0.1", r));
+    try {
+      const url = `http://127.0.0.1:${(s2.address() as AddressInfo).port}/vault/write`;
+      const res = await fetch(url, { method: "POST", headers: OWNER, body: JSON.stringify({ path: ".metistry/identity.yaml", content: "name: Ada\n", intent: intent("user", "rename") }) });
+      expect(res.status).toBe(200);
+    } finally {
+      await new Promise<void>((r) => s2.close(() => r()));
+      await r2.cleanup();
+    }
+  });
+});

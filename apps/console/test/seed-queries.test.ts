@@ -630,6 +630,19 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
     expect(rows.find((r) => r.kind === "proposal_decided")!.detail).toBe("you decided allow");
   });
 
+  // T2-16: a protected write is on the record whichever door made it — the
+  // reconciler writes a `config_write` run for each one it accepts, and the
+  // feed shows it as the principal's act, in the `run` group.
+  it("activity_feed shows a config_write (a rename) as the principal's act, naming the file and the change", async () => {
+    const tag = `cfg-${Date.now()}`;
+    const meta = { path: ".metistry/identity.yaml", op: "write", caller: "owner", principal: tag, message: "metistry identity set: name Iris → Ada" };
+    await pool.query(`INSERT INTO runs (component, kind, ok, tool, meta, finished_at) VALUES ('reconciler', 'config_write', true, 'vault_write', $1::jsonb, now())`, [JSON.stringify(meta)]);
+    const rows = (await store.run("activity_feed", { hours: 1, limit: 500, agent: tag })).rows;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ kind: "config_write", group: "run", actor: tag, subject: ".metistry/identity.yaml", detail: "metistry identity set: name Iris → Ada" });
+    expect(String(rows[0]!.ref)).toMatch(/^runs:\d+$/);
+  });
+
   // ADOPT 1 (docs/research/2026-09-16-taskuary-review.md): the feed is the
   // TIMELINE. A capture is in it the instant it lands — the accidental
   // latency the review found was that it waited for the `*/5` drain — and the

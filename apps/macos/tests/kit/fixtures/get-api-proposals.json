@@ -13,7 +13,7 @@
     "proposals": [
       {
         "id": "3",
-        "ts": "2026-09-27T02:32:12.911Z",
+        "ts": "2026-09-27T03:19:34.940Z",
         "kind": "report",
         "source_agent": "assistant",
         "trust": "internal",
@@ -50,7 +50,7 @@
       },
       {
         "id": "2",
-        "ts": "2026-09-27T02:32:12.910Z",
+        "ts": "2026-09-27T03:19:34.940Z",
         "kind": "knowledge",
         "source_agent": "assistant",
         "trust": "internal",
@@ -96,7 +96,7 @@
       },
       {
         "id": "1",
-        "ts": "2026-09-27T02:32:12.910Z",
+        "ts": "2026-09-27T03:19:34.939Z",
         "kind": "decision",
         "source_agent": "assistant",
         "trust": "internal",
@@ -140,11 +140,137 @@
             "answers",
             "accept_with_changes",
             "deny"
+          ],
+          "questions": [
+            {
+              "prompt": "Which fixture format?",
+              "options": [
+                "one file per route",
+                "one file per store"
+              ],
+              "multi": false,
+              "allow_other": false
+            }
+          ]
+        }
+      },
+      {
+        "id": "5",
+        "ts": "2026-09-27T03:18:34.952Z",
+        "kind": "decision",
+        "source_agent": "assistant",
+        "trust": "external",
+        "payload": {
+          "title": "Three things before I open the fixtures PR",
+          "context": {
+            "refs": [
+              "gh:foldedspacelabs/metistry#339"
+            ],
+            "prose": "The recorder writes one file per route; the PR needs a home and reviewers."
+          },
+          "questions": [
+            {
+              "multi": false,
+              "prompt": "Which store should the fixtures land under?",
+              "options": [
+                "NeedsYouStore",
+                "TodayStore"
+              ],
+              "allow_other": true
+            },
+            {
+              "multi": true,
+              "prompt": "Who should review it?",
+              "options": [
+                "Dana",
+                "Kessler",
+                "the assistant"
+              ],
+              "allow_other": true
+            },
+            {
+              "multi": false,
+              "prompt": "Open it as a draft?",
+              "options": [
+                "yes",
+                "no"
+              ],
+              "allow_other": false
+            }
+          ],
+          "provenance": {
+            "via": "mcp-brain",
+            "agent": "assistant",
+            "submitted_at": "2026-09-28T12:50:00.000Z"
+          }
+        },
+        "decision": "pending",
+        "decided_at": null,
+        "work_id": null,
+        "snoozed_until": null,
+        "request": {
+          "type": "question",
+          "word": "question",
+          "body": "choices",
+          "primary": {
+            "label": "Send Answers",
+            "sends": {
+              "decision": "answers"
+            }
+          },
+          "revise": {
+            "label": "Revise",
+            "sends": {
+              "decision": "accept_with_changes"
+            },
+            "carries": "feedback"
+          },
+          "decline": {
+            "label": "Decline",
+            "sends": {
+              "decision": "deny"
+            }
+          },
+          "grouped": false,
+          "decisions": [
+            "answers",
+            "accept_with_changes",
+            "deny"
+          ],
+          "questions": [
+            {
+              "prompt": "Which store should the fixtures land under?",
+              "options": [
+                "NeedsYouStore",
+                "TodayStore"
+              ],
+              "multi": false,
+              "allow_other": true
+            },
+            {
+              "prompt": "Who should review it?",
+              "options": [
+                "Dana",
+                "Kessler",
+                "the assistant"
+              ],
+              "multi": true,
+              "allow_other": true
+            },
+            {
+              "prompt": "Open it as a draft?",
+              "options": [
+                "yes",
+                "no"
+              ],
+              "multi": false,
+              "allow_other": false
+            }
           ]
         }
       }
     ],
-    "cursor": "2026-09-26 22:32:12.911337-04|3",
+    "cursor": "2026-09-26 23:19:34.940543-04|3",
     "more": false
   }
 }

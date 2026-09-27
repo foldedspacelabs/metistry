@@ -176,10 +176,10 @@ import Testing
     // the configured name, from GET /api/identity
     #expect(shell.assistantName == "Aide")
     #expect(ShellCommand.ask.title(assistantName: shell.assistantName) == "Ask Aide")
-    // the fixture's three waiting
-    #expect(shell.waiting == 3)
+    // the fixture's four waiting
+    #expect(shell.waiting == 4)
     #expect(shell.showsNeedsYouRow)
-    #expect(shell.badgeLabel == "3")
+    #expect(shell.badgeLabel == "4")
     // the compute fixture: spend with no limit set
     #expect(shell.gauge.level == .within)
     #expect(shell.gauge.spokenLabel == "Usage, $0.00 today")

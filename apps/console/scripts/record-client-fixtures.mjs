@@ -375,6 +375,24 @@ await pool.query(
   `INSERT INTO proposals (kind, source_agent, trust, payload, decision, decided_at) VALUES ('access_request', $1, 'external', $2::jsonb, 'allow', now())`,
   [ids.agent, JSON.stringify({ area: "Areas/Ops", reason: "the runbooks live there", granted: { area: "Areas/Ops", by: "user" } })],
 );
+// three questions in one request (T2-3): pick one, pick any with Something
+// else…, and one that takes its own options only — as `requests_create` kind
+// `question` stores them (context, provenance), asked by the assistant; the
+// stepped card's fixture. Seeded after every other proposal so no recorded id
+// moves, and a minute older than them so the queue's newest question is still
+// the one the component samples draw.
+ids.questions = Number((await one(`INSERT INTO proposals (ts, kind, source_agent, trust, payload) VALUES (now() - interval '1 minute', 'decision', 'assistant', 'external', $1::jsonb) RETURNING id`, [
+  JSON.stringify({
+    title: "Three things before I open the fixtures PR",
+    questions: [
+      { prompt: "Which store should the fixtures land under?", options: ["NeedsYouStore", "TodayStore"], multi: false, allow_other: true },
+      { prompt: "Who should review it?", options: ["Dana", "Kessler", "the assistant"], multi: true, allow_other: true },
+      { prompt: "Open it as a draft?", options: ["yes", "no"], multi: false, allow_other: false },
+    ],
+    context: { prose: "The recorder writes one file per route; the PR needs a home and reviewers.", refs: ["gh:foldedspacelabs/metistry#339"] },
+    provenance: { agent: "assistant", via: "mcp-brain", submitted_at: "2026-09-28T12:50:00.000Z" },
+  }),
+])).id);
 // the instance's own assistant, registered from its configuration as the console does at start
 await agents.ensureInternalAgent(pool, agents.INTERNAL_ASSISTANT_ID, { token: mintToken(32) });
 await crews.refresh();
@@ -398,7 +416,7 @@ const REQUESTS = [
   ["GET /api/commands", () => ({ path: "/api/commands" })],
   ["GET /api/proposals", () => ({ path: "/api/proposals" })],
   // recorded alongside `GET /api/proposals`, before anything below answers
-  // or snoozes one of the three seeded proposals: the acceptance this
+  // or snoozes one of the four seeded proposals: the acceptance this
   // fixture demonstrates (T1-7) is that `waiting` matches that list's
   // length exactly, at the same moment.
   ["GET /api/needs-you/count", () => ({ path: "/api/needs-you/count" })],
@@ -428,7 +446,8 @@ const REQUESTS = [
   ["DELETE /api/messages/:id/feedback", () => ({ path: `/api/messages/${ids.reply}/feedback` })],
   ["POST /api/prose/:id/feedback", () => ({ path: `/api/prose/${ids.run}/feedback`, body: { rating: 1, note: "guessed instead of retrieving" } })],
   ["DELETE /api/prose/:id/feedback", () => ({ path: `/api/prose/${ids.run}/feedback` })],
-  ["POST /api/proposals/:id", () => ({ path: `/api/proposals/${ids.decision}`, body: { decision: "one file per route" } })],
+  // Send Answers on the three-question request (T2-3): one answer per question — an option, options and the owner's words, an option
+  ["POST /api/proposals/:id", () => ({ path: `/api/proposals/${ids.questions}`, body: { decision: "answers", answers: [{ choices: ["NeedsYouStore"] }, { choices: ["Dana", "the assistant"], other: "and whoever owns F-7" }, { choices: ["yes"] }] } })],
   ["POST /api/proposals/batch", () => ({ path: "/api/proposals/batch", body: { ids: [ids.later], decision: "later" } })],
 
   ["POST /api/agents", () => ({ path: "/api/agents", body: { id: "devin", display_name: "Devin", remote: true } })],

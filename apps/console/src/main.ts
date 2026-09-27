@@ -43,6 +43,7 @@ import { SCHEDULED_PATH, STANDUP_MOVE_RETRY_MS, fileOverlay, startStandupMove } 
 import { vaultBridgeSearch } from "./knowledge-routes.js";
 import type { ComputeAdmin } from "./compute-routes.js";
 import type { SecretsView } from "./secrets-route.js";
+import type { VariablesView } from "./variables-route.js";
 import { readInstanceId, securityPresence, realExec } from "@foldedspacelabs/metistry-cli";
 import { CrewRegistry } from "./crews.js";
 import { assistantPromptFiles, loadAssistantDefinition } from "./actors.js";
@@ -308,9 +309,21 @@ console.log(
     : "secrets absent: METISTRY_INSTANCE_DIR is unset or not readable — GET /api/secrets answers 503; `metistry secrets list --named` still works (degrades: absent)",
 );
 
+// GET /api/variables (plan §2.14): the instance's `.metistry/variables.yaml`,
+// and its `.metistry/` walked for *used in*. No instance directory → 503.
+const variables: VariablesView | undefined = computeAdmin
+  ? { instanceDir: computeAdmin.instanceDir, file: resolveInstanceLayout(computeAdmin.instanceDir).path("variables") }
+  : undefined;
+console.log(
+  variables
+    ? `variables: ${variables.file}`
+    : "variables absent: METISTRY_INSTANCE_DIR is unset or not readable — GET /api/variables answers 503; `metistry variables list` still works (degrades: absent)",
+);
+
 const server = makeServer(pool, queries, {
   origin,
   ...(secrets ? { secrets } : {}),
+  ...(variables ? { variables } : {}),
   origins,
   ...(identity ? { identity } : {}),
   ...(instancesFiles ? { instancesFiles } : {}),

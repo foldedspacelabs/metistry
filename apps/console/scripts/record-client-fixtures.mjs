@@ -129,6 +129,12 @@ await writeFile(
       agent:devin: ask
 `,
 );
+// the Variables list (§2.14): the file, and a connection that declares one —
+// so `read_by` and `used_in` have something to say
+await writeFile(layout.path("variables"), `variables:\n  team_name: Platform\n  company: Acme\n`);
+await mkdir(join(layout.path("metistryDir"), "connections"), { recursive: true });
+await writeFile(join(layout.path("metistryDir"), "connections", "github.yaml"), `name: github\ntype: mcp\nvariables: [team_name]\n`);
+
 const fixtureKeychain = memoryKeychain();
 const instanceSecrets = new InstanceSecrets(fixtureKeychain, await readInstanceId(instanceDir));
 await instanceSecrets.set("github_write", "fixture-value-never-recorded");
@@ -195,6 +201,7 @@ const server = makeServer(pool, queries, {
   version: JSON.parse(readFileSync(join(REPO_ROOT, "apps/console/package.json"), "utf8")).version,
   instancesFiles: layout.path("instances"),
   secrets: { file: layout.path("secrets"), presence: instanceSecrets.presence() },
+  variables: { instanceDir, file: layout.path("variables") },
   computeAdmin: {
     instanceDir,
     seedDir: join(REPO_ROOT, "seed"),
@@ -325,6 +332,7 @@ const REQUESTS = [
   ["GET /api/devices", () => ({ path: "/api/devices" })],
   ["GET /api/instances", () => ({ path: "/api/instances" })],
   ["GET /api/secrets", () => ({ path: "/api/secrets" })],
+  ["GET /api/variables", () => ({ path: "/api/variables" })],
   ["GET /api/commands", () => ({ path: "/api/commands" })],
   ["GET /api/proposals", () => ({ path: "/api/proposals" })],
   ["GET /api/agents", () => ({ path: "/api/agents" })],

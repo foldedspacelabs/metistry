@@ -8,6 +8,11 @@ export const REDACTED = "***REDACTED***";
 /** Key names whose values never enter agent context, transcripts, or logs. */
 const SECRET_KEY = /(token|secret|password|passphrase|credential|api[_-]?key|authorization|bearer|cookie)/i;
 
+/** Whether a field NAMED `key` has its value redacted here — so a variable (variables.ts) may not take such a name: whatever it held would read as ***REDACTED*** anyway, and the name says it is a secret. */
+export function isSecretKeyName(key: string): boolean {
+  return SECRET_KEY.test(key);
+}
+
 /** Redact secret-named fields recursively. Returns a new structure. */
 export function redactSecrets<T>(value: T): T {
   return walk(value, false) as T;

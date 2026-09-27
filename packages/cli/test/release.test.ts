@@ -516,6 +516,7 @@ describe("metistry update --channel release", () => {
     const r = await update({ ...base(P, { METISTRY_INSTANCE_DIR: inst, METISTRY_BRIDGE_TOKEN_RECONCILER_USER: "owner" }), out: (l) => lines.push(l), exec, fetchFn: releaseServer({ versions: ["0.2.0"] }).fn, target: TARGET, skipMigrate: true, openSession: async () => null });
 
     expect(r.release).toMatchObject({ version: "0.2.0", installed: true });
+    expect(r.restart).toMatchObject({ reached: true, completed: true, owed: [WATCHDOG] });
     expect(r.restarted).toEqual([WATCHDOG]);
     expect(exec.calls.filter((c) => c.cmd === "launchctl" && c.args[0] === "kickstart").map((c) => c.args.at(-1))).toEqual([`gui/501/${WATCHDOG}`]);
     expect(lines.join("\n")).toContain("1 job(s) kickstarted");

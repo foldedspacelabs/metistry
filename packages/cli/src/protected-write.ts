@@ -21,7 +21,7 @@ import { join } from "node:path";
 import { INSTANCE_LAYOUT, mintToken, resolveInstanceLayout, type InstancePathKey } from "@foldedspacelabs/metistry-core";
 import { hostLocal } from "./doctor.js";
 import { withEnvLine } from "./postgres.js";
-import { mintSecret } from "./secrets.js";
+import { adoptOrMintSecret } from "./secrets.js";
 import { StepFailed, type StepRunner } from "./steps.js";
 
 export const RECONCILER_LABEL = "com.foldedspacelabs.metistry.reconciler";
@@ -48,12 +48,37 @@ export interface EnsureOwnerTokenOptions {
 
 export interface EnsureOwnerTokenResult {
   minted: boolean;
+  /**
+   * `.env` gained the bearer in this run — minted, or adopted from this
+   * instance's Keychain item. Either way a reconciler started before this
+   * run does not hold it until it is restarted.
+   */
+  changed: boolean;
   /** One line for the plan: what happened, and never the value. */
   detail: string;
 }
 
+/** The exact commands that finish what a failed mint could not, in the order to run them. */
+export const OWNER_BRIDGE_TOKEN_FIX = [`metistry secrets mint ${OWNER_BRIDGE_TOKEN}`, "metistry restart reconciler"] as const;
+
 /**
- * Mint `METISTRY_BRIDGE_TOKEN_RECONCILER_USER` if this install has none.
+ * `ensureOwnerBridgeToken` could not put the bearer anywhere — the Keychain
+ * refused, or `.env` could not be written. A StepFailed, so `up` stops on it
+ * as before; `update` catches exactly this one and finishes its restart
+ * without the bearer rather than leaving every job on the old code.
+ */
+export class OwnerTokenMintFailed extends StepFailed {
+  constructor(
+    message: string,
+    /** what the Keychain (or the filesystem) said — the part worth repeating in a summary */
+    readonly reason: string,
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * Give this install `METISTRY_BRIDGE_TOKEN_RECONCILER_USER` if it has none.
  *
  * It is the migration, and it is why an existing install does not have to be
  * told anything: `metistry up` and `metistry update` both call this BEFORE
@@ -62,33 +87,41 @@ export interface EnsureOwnerTokenResult {
  * sync --to env` mints it too (`GENERATED_SECRETS`) for an install that runs
  * neither.
  *
- * On macOS it goes through `mintSecret`, so the login Keychain — the
- * canonical store — has it and a later `secrets sync --to env` regenerates
- * the same value rather than rotating it behind the reconciler's back.
- * Elsewhere `.env` IS the store (`metistry secrets` says so), and the line is
- * appended exactly as `up` appends the generated Postgres password.
+ * On macOS the login Keychain is the canonical store, so it is READ first:
+ * when this instance's item already exists, that value is written into
+ * `.env` and nothing is minted (`adoptOrMintSecret`). Only when the Keychain
+ * has none is one minted into both — so a later `secrets sync --to env`
+ * regenerates the same value rather than rotating it behind the reconciler's
+ * back. Elsewhere `.env` IS the store (`metistry secrets` says so), and the
+ * line is appended exactly as `up` appends the generated Postgres password.
  */
 export async function ensureOwnerBridgeToken(r: StepRunner, opts: EnsureOwnerTokenOptions): Promise<EnsureOwnerTokenResult> {
-  if (opts.env[OWNER_BRIDGE_TOKEN]) return { minted: false, detail: `${OWNER_BRIDGE_TOKEN}: already set — the owner class is this install's CLI` };
-  if (!opts.envFile) return { minted: false, detail: `${OWNER_BRIDGE_TOKEN} is unset and there is no .env to mint it into — protected paths stay unwritable (docs/ops/auth.md)` };
-  const value = (opts.mint ?? mintToken)();
-  const shown = `mint ${OWNER_BRIDGE_TOKEN} into ${opts.platform === "darwin" ? `the login Keychain and ${opts.envFile}` : opts.envFile} (the bearer that may write .metistry/; never shown)`;
+  if (opts.env[OWNER_BRIDGE_TOKEN]) return { minted: false, changed: false, detail: `${OWNER_BRIDGE_TOKEN}: already set — the owner class is this install's CLI` };
+  if (!opts.envFile) return { minted: false, changed: false, detail: `${OWNER_BRIDGE_TOKEN} is unset and there is no .env to mint it into — protected paths stay unwritable (docs/ops/auth.md)` };
+  const darwin = opts.platform === "darwin";
+  const shown = darwin
+    ? `mint ${OWNER_BRIDGE_TOKEN} into the login Keychain and ${opts.envFile} — or, when this instance's Keychain item already exists, copy that one into ${opts.envFile} (the bearer that may write .metistry/; never shown)`
+    : `mint ${OWNER_BRIDGE_TOKEN} into ${opts.envFile} (the bearer that may write .metistry/; never shown)`;
   // A dry run reaches nothing and mints nothing — and must not mutate the
   // environment it was handed, which is `process.env` when the CLI is the
   // caller (the test-isolation guard catches exactly that).
-  if (!r.action(shown)) return { minted: false, detail: `${OWNER_BRIDGE_TOKEN} would be minted` };
+  if (!r.action(shown)) return { minted: false, changed: false, detail: `${OWNER_BRIDGE_TOKEN} would be ${darwin ? "copied from the Keychain, or minted" : "minted"}` };
+  let value: string;
+  let how: "adopted" | "minted";
   try {
-    if (opts.platform === "darwin") {
-      await mintSecret(OWNER_BRIDGE_TOKEN, {
+    if (darwin) {
+      ({ value, how } = await adoptOrMintSecret(OWNER_BRIDGE_TOKEN, {
         envFile: opts.envFile,
         ...(opts.instanceId ? { instanceId: opts.instanceId } : {}),
         exec: r.exec,
         out: (l) => r.note(l),
         platform: opts.platform,
         env: opts.env,
-        mint: () => value,
-      });
+        ...(opts.mint ? { mint: opts.mint } : {}),
+      }));
     } else {
+      value = (opts.mint ?? mintToken)();
+      how = "minted";
       const current = existsSync(opts.envFile) ? await readFile(opts.envFile, "utf8") : "";
       const next = withEnvLine(current, OWNER_BRIDGE_TOKEN, value, "the vault bridge's OWNER bearer: the one credential that may write .metistry/ (docs/ops/auth.md). Minted by `metistry up`; never printed.");
       if (next) await r.write(opts.envFile, next, "the owner-class bridge bearer", 0o600);
@@ -96,12 +129,21 @@ export async function ensureOwnerBridgeToken(r: StepRunner, opts: EnsureOwnerTok
   } catch (err) {
     // A Keychain that will not answer is a step failure with a remediation,
     // not a stack trace out of `metistry update`.
-    throw new StepFailed(
-      `could not mint ${OWNER_BRIDGE_TOKEN} (${err instanceof Error ? err.message : String(err)}) — without it no caller may write a §4.7 protected path; \`metistry secrets mint ${OWNER_BRIDGE_TOKEN}\` does the same thing on its own (docs/ops/auth.md)`,
+    const reason = err instanceof Error ? err.message : String(err);
+    throw new OwnerTokenMintFailed(
+      `could not mint ${OWNER_BRIDGE_TOKEN} (${reason}) — without it no caller may write a §4.7 protected path; run ${OWNER_BRIDGE_TOKEN_FIX.map((c) => `\`${c}\``).join(", then ")} (docs/ops/auth.md)`,
+      reason,
     );
   }
   opts.env[OWNER_BRIDGE_TOKEN] = value;
-  return { minted: true, detail: `${OWNER_BRIDGE_TOKEN} minted — restart the reconciler for it to take effect (it reads .env at start)` };
+  return {
+    minted: how === "minted",
+    changed: true,
+    detail:
+      how === "adopted"
+        ? `${OWNER_BRIDGE_TOKEN} copied from this instance's Keychain item into .env — restart the reconciler for it to take effect (it reads .env at start)`
+        : `${OWNER_BRIDGE_TOKEN} minted — restart the reconciler for it to take effect (it reads .env at start)`,
+  };
 }
 
 /**

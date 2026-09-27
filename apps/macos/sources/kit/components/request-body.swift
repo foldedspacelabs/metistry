@@ -47,11 +47,15 @@ public struct ChoicesBody: Sendable, Equatable {
     public var chosen: Set<Int>
     /// The owner's own words, when *Something else…* is chosen.
     public var other: String
+    /// C105: every question ends in *Something else…* — unless the asker said
+    /// its options are the only answers it can take (T2-3's `allow_other:
+    /// false`), in which case offering it would invite a refusal.
+    public var allowsOther: Bool
 
     /// Every question ends in it (C105). Its index is `options.count`.
     public static let somethingElse = "Something else…"
 
-    public init(prompt: String, options: [String], multi: Bool = false, step: Int = 1, of: Int = 1, chosen: Set<Int> = [], other: String = "") {
+    public init(prompt: String, options: [String], multi: Bool = false, step: Int = 1, of: Int = 1, chosen: Set<Int> = [], other: String = "", allowsOther: Bool = true) {
         self.prompt = prompt
         self.options = options
         self.multi = multi
@@ -59,10 +63,11 @@ public struct ChoicesBody: Sendable, Equatable {
         self.of = of
         self.chosen = chosen
         self.other = other
+        self.allowsOther = allowsOther
     }
 
     /// The options as drawn: the question's own, then *Something else…*.
-    public var drawn: [String] { options + [Self.somethingElse] }
+    public var drawn: [String] { options + (allowsOther ? [Self.somethingElse] : []) }
     public var somethingElseIndex: Int { options.count }
 }
 

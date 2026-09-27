@@ -219,7 +219,23 @@ in Obsidian — into `Journal/Plan/<tomorrow>.md`, written through the
 reconciler's bridge as `principal: plan-tomorrow`
 (`docs/product/daily-flow-spec.md` §5.1, §7). A run the Mac slept through is
 fired on waking and plans the day after its **slot** — Sunday 23:00 caught up
-at 07:30 Monday plans Monday — in the zone the slot was read in.
+at 07:30 Monday plans Monday — in the zone the slot was read in. With
+Monday–Friday working days, Sunday to Thursday evenings plan the next day;
+Friday and Saturday evenings plan nothing (`skipped:not_a_working_eve`) —
+nothing plans Monday on a Friday.
+
+**After the fold.** The 23:00 run comes two hours after the 21:00 Knowledge
+Fold, so the plan ends with a `## Tonight's fold` section: a link to
+tonight's `Journal/Fold/<date>.md` and its `decisions:` frontmatter as a list,
+read from the file's header and never summarised (still model-free). No fold
+tonight → one line saying so.
+
+**Early, then superseded.** Close the Day (T2-8) runs it with the day just
+closed: the plan renders **early**, for the day after that one, usually
+before there is a fold to link. The 23:00 run then **supersedes** it — the
+same file, compare-and-swap on the bytes the early render left — with the
+fold's context. Closing again re-renders every time; it is your act, not a
+duplicate.
 
 **No model is in it, at any tier.** The ordering is the template's
 (`order: "priority, due, size"` — a field list), your prioritisation *rule* is
@@ -229,13 +245,14 @@ declares no `engine`, so the runner never asks whether one is configured.
 
 ### The guard, in order
 
-The schedule decides *when*; the routine keeps only the working-day guard,
-for a run nobody scheduled for an eve (a Run Now, or days you set yourself):
+The schedule decides *when*; the routine keeps only the working-eve guard,
+for a run nobody scheduled for an eve (a Run Now, Close the Day, or days you
+set yourself):
 
 | check | what it means | costs |
 | --- | --- | --- |
-| this target date is **settled** | one pass already decided that day, whichever way | one indexed `runs` read |
-| tomorrow is **not a working day** | `working_days:` in `Me/profile.md`; absent, **nothing is written at all** and the run says `no_working_days` rather than guessing Monday-to-Friday | one small vault read; recorded, and the evening goes quiet |
+| this target date is **settled** | a scheduled or manual pass already decided that day, whichever way. A Close the Day row never settles a date (the 23:00 run supersedes it), and a close never asks | one indexed `runs` read |
+| tonight is **not a working eve** | tomorrow is not in `working_days:` in `Me/profile.md` → `not_a_working_eve`; absent, **nothing is written at all** and the run says `no_working_days` rather than guessing Monday-to-Friday | one small vault read; recorded, and the evening goes quiet |
 
 With no `working_days` at all, the runner refuses the schedule first
 (`skipped:no_working_days` on its own row) and does not run the routine.
@@ -261,16 +278,20 @@ file under compare-and-swap; nothing is ever appended.
 
 ### Reading the ledger
 
-One `runs` row per target date, written the first time a pass settles it.
+One `runs` row per pass that decides a target date: Close the Day's early
+renders, then the scheduled (or manual) one that settles it.
 `meta.planned_for` is the discriminator (the runner's own per-run
-`routine_run` row carries none; it carries `meta.scheduled_for`, the slot). `meta.outcome` (T1-4: every routine and the
+`routine_run` row carries none; it carries `meta.scheduled_for`, the slot).
+`meta.trigger` says who asked — `close`, `schedule` or `manual` — and only a
+row that is not `close` settles the date. `meta.outcome` (T1-4: every routine and the
 runner share this vocabulary — `acted | silent | skipped:<reason>`) is
 `acted` when the plan was written, or `skipped:<reason>` with `<reason>` one
-of `no_working_days`, `not_a_working_day`, `template_missing`,
-`template_unreadable`, `user_owned` or `would_materialise`:
+of `no_working_days`, `not_a_working_eve`, `template_missing`,
+`template_unreadable`, `user_owned` or `would_materialise`. A written plan
+also records `fold` (the path), `fold_linked` and `fold_decisions`:
 
 ```sql
-SELECT ts, meta->>'planned_for' AS for_day, meta->>'outcome' AS outcome, meta
+SELECT ts, meta->>'planned_for' AS for_day, meta->>'trigger' AS trigger, meta->>'outcome' AS outcome, meta
 FROM runs WHERE component = 'plan-tomorrow' AND kind = 'routine_run' AND ok
   AND meta ? 'planned_for'
 ORDER BY ts DESC LIMIT 7;

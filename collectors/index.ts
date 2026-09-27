@@ -57,3 +57,15 @@ export {
   SOURCE_AGENT as DEVIN_SOURCE_AGENT,
   type DevinWorkMeta,
 } from "./devin-sessions/run.js";
+
+// The Linear sync's Add to Today (T4-24): the service a `task` request's
+// primary answer calls, through the capture service. Exported for the
+// console door that answers `{door: "today"}`.
+export {
+  TODAY_PRINCIPAL as LINEAR_TODAY_PRINCIPAL,
+  TODAY_SOURCE as LINEAR_TODAY_SOURCE,
+  TodayRefused as LinearTodayRefused,
+  addIssueToToday,
+  todayLine as linearTodayLine,
+  type AddToTodayResult,
+} from "./linear/today.js";

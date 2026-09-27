@@ -241,6 +241,7 @@ describe("shipped manifests schedule through the runner", () => {
       ["devin-knowledge", "Devin Knowledge", "every 1h"],
       ["devin-sessions", "Devin Sessions", "every 5m"],
       ["github-state", "GitHub", "every 15m"],
+      ["linear", "Linear", "every 15m"],
     ]);
     expect(listing.syncs.find((s) => s.name === "github-state")?.raise).toEqual({
       review_requested: { value: true, origin: "default" },

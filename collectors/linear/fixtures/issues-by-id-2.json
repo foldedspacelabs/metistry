@@ -1,0 +1,58 @@
+{
+  "data": {
+    "issues": {
+      "nodes": [
+        {
+          "id": "9b1d7a52-0c4e-4f7a-9e1b-3a5c7d9e1f02",
+          "identifier": "ENG-102",
+          "title": "Write the Linear sync docs",
+          "url": "https://linear.app/fsl/issue/eng-102/write-the-linear-sync-docs",
+          "priority": 3,
+          "priorityLabel": "Medium",
+          "dueDate": "2026-10-02",
+          "updatedAt": "2026-09-27T08:00:00.000Z",
+          "description": null,
+          "state": {
+            "name": "Done",
+            "type": "completed"
+          },
+          "team": {
+            "key": "ENG",
+            "name": "Engineering"
+          },
+          "creator": {
+            "name": "Ada Park"
+          },
+          "assignee": {
+            "name": "Matt Colf",
+            "isMe": true
+          }
+        },
+        {
+          "id": "9b1d7a52-0c4e-4f7a-9e1b-3a5c7d9e1f03",
+          "identifier": "ENG-103",
+          "title": "Review the capture retention policy",
+          "url": "https://linear.app/fsl/issue/eng-103/review-the-capture-retention-p",
+          "priority": 0,
+          "priorityLabel": "No priority",
+          "dueDate": null,
+          "updatedAt": "2026-09-27T08:30:00.000Z",
+          "description": null,
+          "state": {
+            "name": "Backlog",
+            "type": "backlog"
+          },
+          "team": {
+            "key": "ENG",
+            "name": "Engineering"
+          },
+          "creator": null,
+          "assignee": {
+            "name": "Ada Park",
+            "isMe": false
+          }
+        }
+      ]
+    }
+  }
+}

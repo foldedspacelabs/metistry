@@ -29,6 +29,21 @@ describe("project patch + autonomy validation (pure)", () => {
     }
   });
 
+  it("grants (T1-13): an agent area grant, validated the same as PUT /api/agents/:id/grants — the bare vault and anything outside the vault's content are refused", () => {
+    expect(validateProjectPatch({ grants: { tier: "areas", areas: ["Areas/Fsl"] } })).toEqual({ grants: { tier: "areas", areas: ["Areas/Fsl"] } });
+    expect(validateProjectPatch({ grants: { tier: "none" } })).toEqual({ grants: { tier: "none", areas: [] } });
+    for (const bad of [
+      { grants: { tier: "areas", areas: ["/"] } }, // the bare vault — internal rows only, never a project's
+      { grants: { tier: "areas", areas: [".metistry/state"] } }, // machinery — not vault content
+      { grants: { tier: "areas", areas: ["Artifacts/Reports"] } }, // artifacts — not vault content
+      { grants: { tier: "areas", areas: ["Areas/../Me"] } }, // traversal
+      { grants: { tier: "areas", areas: ["areas/fsl"] } }, // wrong case — TitleCase only
+      { grants: { tier: "widen" } },
+    ]) {
+      expect(() => validateProjectPatch(bad), JSON.stringify(bad)).toThrow(agents.AgentError);
+    }
+  });
+
   it("autonomy: agent ids (plus `user` in accept_from), a cap 0..1000, no unknown keys — and absent keys stay absent", () => {
     expect(agents.validateAutonomy({})).toEqual({});
     expect(agents.validateAutonomy({ may_dispatch_to: ["qa", "qa"], accept_from: ["user", "alice"], max_open_bundles: 0 })).toEqual({ may_dispatch_to: ["qa"], accept_from: ["user", "alice"], max_open_bundles: 0 });
@@ -117,6 +132,19 @@ describe.skipIf(!hasDb)("projects routes (integration)", () => {
     expect((await json("PUT", `/api/projects/${P}`, { widen: true })).status).toBe(400);
     expect((await json("PUT", `/api/projects/Not-A-Slug`, { mode: "review" })).status).toBe(404);
     await pool.query(`DELETE FROM projects WHERE id = $1`, [fresh]);
+  });
+
+  it("PUT stores the project's own grant (0032) and returns it; a grant outside the vault's content is refused (T1-13's test)", async () => {
+    const r = await json("PUT", `/api/projects/${P}`, { grants: { tier: "areas", areas: ["Areas/Fsl"] } });
+    expect(r.status).toBe(200);
+    expect((await r.json()).project).toMatchObject({ id: P, grants: { tier: "areas", areas: ["Areas/Fsl"] } });
+    expect((await pool.query(`SELECT grants FROM projects WHERE id = $1`, [P])).rows[0]).toEqual({ grants: { tier: "areas", areas: ["Areas/Fsl"] } });
+    // a grant outside the vault's content: machinery, artifacts, and the bare vault (internal rows only) are all refused before anything is written
+    for (const areas of [[".metistry/state"], ["Artifacts/Reports"], ["/"]]) {
+      const bad = await json("PUT", `/api/projects/${P}`, { grants: { tier: "areas", areas } });
+      expect(bad.status, JSON.stringify(areas)).toBe(400);
+    }
+    expect((await pool.query(`SELECT grants FROM projects WHERE id = $1`, [P])).rows[0]).toEqual({ grants: { tier: "areas", areas: ["Areas/Fsl"] } }); // unchanged by the refused writes
   });
 
   it("PUT /api/agents/:id/autonomy stores the narrowing (validated, audited) and the registry lists it; a revoked or unknown agent is 404", async () => {

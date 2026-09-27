@@ -10,7 +10,7 @@
 import { PROJECT_COLS, PROJECT_MODES, PROJECT_SLUG_RE, ensureProject, finishRun, startRun, toProjectRow, type ProjectMode, type ProjectRow } from "@foldedspacelabs/metistry-core";
 import { QueryError, type QueryStore } from "@foldedspacelabs/metistry-queries";
 import type { Db } from "./auth-store.js";
-import { AgentError } from "./agents.js";
+import { AgentError, validateGrants, type Grants } from "./agents.js";
 
 export interface ProjectView {
   id: string;
@@ -95,6 +95,16 @@ export interface ProjectPatch {
   max_open_bundles?: number;
   title?: string | null;
   area?: string | null;
+  /**
+   * The project's own read grant (T1-13, migration 0032) — {tier, areas,
+   * queries?}, the same envelope an agent's own grant already is. Validated
+   * by the identical function `PUT /api/agents/:id/grants` uses
+   * (`validateGrants`), with the external rules: the bare vault ("/") and
+   * anything outside the vault's CONTENT are refused. A member's effective
+   * reach unions this with its own grants, "via project" (T4-7); nothing
+   * reads it before then.
+   */
+  grants?: Grants;
 }
 
 const MAX_BUNDLE_CAP = 1000;  // limit: fixed — the ceiling on what a PUT may ask for — the API contract, not a knob
@@ -106,7 +116,7 @@ export function validateProjectPatch(input: unknown): ProjectPatch {
   const b = input as Record<string, unknown>;
   const out: ProjectPatch = {};
   for (const k of Object.keys(b)) {
-    if (!["mode", "daily_budget_usd", "max_open_bundles", "title", "area"].includes(k)) throw new AgentError("invalid_request", `unknown key ${k}`);
+    if (!["mode", "daily_budget_usd", "max_open_bundles", "title", "area", "grants"].includes(k)) throw new AgentError("invalid_request", `unknown key ${k}`);
   }
   if (b.mode !== undefined) {
     if (!PROJECT_MODES.includes(b.mode as ProjectMode)) throw new AgentError("invalid_request", "mode must be autonomous | review");
@@ -128,6 +138,12 @@ export function validateProjectPatch(input: unknown): ProjectPatch {
     else if (typeof b[k] !== "string" || (b[k] as string).length > 120) throw new AgentError("invalid_request", `${k} must be a string of at most 120 characters`);
     else out[k] = (b[k] as string).trim() || null;
   }
+  // Validated as an agent area grant (T1-13's spec): the identical
+  // `validateGrants` a foreign agent's own `PUT /api/agents/:id/grants`
+  // uses, opts default (not `kind: internal`) — so the bare vault is
+  // refused here too, and a grant outside the vault's content is refused
+  // by the same `validAgentAreaGrant` check.
+  if (b.grants !== undefined) out.grants = validateGrants(b.grants);
   if (Object.keys(out).length === 0) throw new AgentError("invalid_request", "nothing to change");
   return out;
 }
@@ -138,7 +154,7 @@ export function validateProjectPatch(input: unknown): ProjectPatch {
  * apply the patch, and record it (runs kind project_admin, with the mode
  * transition when there is one — the brief and the panel read it).
  */
-export async function updateProject(db: Db, id: string, patch: ProjectPatch, principal = "user"): Promise<ProjectRow> {
+export async function updateProject(db: Db, id: string, patch: ProjectPatch, principal = "user"): Promise<ProjectRow & { grants: Grants }> {
   if (!PROJECT_SLUG_RE.test(id)) throw new AgentError("invalid_request", "project must be a slug");
   await ensureProject(db, id);
   const before = await db.query(`SELECT ${PROJECT_COLS} FROM projects WHERE id = $1`, [id]);
@@ -157,8 +173,9 @@ export async function updateProject(db: Db, id: string, patch: ProjectPatch, pri
          max_open_bundles = COALESCE($5, max_open_bundles),
          title = CASE WHEN $6 THEN $7 ELSE title END,
          area = CASE WHEN $8 THEN $9 ELSE area END,
+         grants = CASE WHEN $10 THEN $11::jsonb ELSE grants END,
          updated_at = now()
-       WHERE id = $1 RETURNING ${PROJECT_COLS}`,
+       WHERE id = $1 RETURNING ${PROJECT_COLS}, grants`,
       [
         id,
         patch.mode ?? null,
@@ -169,10 +186,13 @@ export async function updateProject(db: Db, id: string, patch: ProjectPatch, pri
         patch.title ?? null,
         patch.area !== undefined,
         patch.area ?? null,
+        patch.grants !== undefined,
+        patch.grants !== undefined ? JSON.stringify(patch.grants) : null,
       ],
     );
     await finishRun(db, runId, { ok: true });
-    return toProjectRow(rows[0]!);
+    const row = rows[0]!;
+    return { ...toProjectRow(row), grants: (row.grants ?? { tier: "none", areas: [] }) as Grants };
   } catch (err) {
     await finishRun(db, runId, { ok: false, error: err instanceof Error ? err.message : String(err) });
     throw err;

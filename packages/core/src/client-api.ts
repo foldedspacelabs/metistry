@@ -194,7 +194,7 @@ export const CLIENT_API: readonly ClientRoute[] = [
 
   // ----- projects -----
   route("GET", "/api/projects", "every project with its mode, budget and rollup"),
-  route("PUT", "/api/projects/:slug", "set a project's mode, daily budget and caps", { idempotent: "natural" }),
+  route("PUT", "/api/projects/:slug", "set a project's mode, daily budget, caps and its own read grant", { idempotent: "natural", ticket: "T1-13" }),
 
   // ----- work: the board, dispatch -----
   route("GET", "/api/targets", "the compute targets a task may be dispatched to", { ticket: "T4-11" }),

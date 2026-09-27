@@ -315,7 +315,11 @@ async function componentRow(
         if (token && status.status === 401) {
           return {
             status: "degraded" as const,
-            remediation: `${url} refused METISTRY_LOCAL_OWNER_TOKEN (401): the console was started with a different value (\`metistry secrets sync --to env\` then ${restartHint("console", deps.shape, deps.labelSuffix)}), or the request did not reach it from this machine — under compose it needs METISTRY_TRUSTED_LOOPBACK_PROXY (docs/ops/auth.md)`,
+            // Most often a token mismatch: `.env` (and the Keychain) hold a
+            // newer value than the one the running console was started with
+            // — a sync or a mint rotated it — and the fix is a restart, which
+            // makes the console read `.env`'s value. Re-syncing changes nothing.
+            remediation: `${url} refused the METISTRY_LOCAL_OWNER_TOKEN in .env (401): the running console holds a different one — restart the console (${restartHint("console", deps.shape, deps.labelSuffix)}) so it reads .env's value; or the request did not reach it from this machine — under compose it needs METISTRY_TRUSTED_LOOPBACK_PROXY (docs/ops/auth.md)`,
             meta,
           };
         }

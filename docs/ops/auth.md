@@ -411,8 +411,9 @@ three are idempotent:
 - **`metistry up`** — before it renders any job, so the reconciler it
   (re)starts is holding it.
 - **`metistry update`** — at the top of its restart step, for the same
-  reason, and it kickstarts the reconciler itself if nothing else in the run
-  did. This is why an update needs no instructions: the owner runs the verb
+  reason, and it restarts the reconciler itself if nothing else in the run
+  did — only the reconciler: under the launchd shape through the
+  supervisor's control socket, never by kickstarting the supervisor. This is why an update needs no instructions: the owner runs the verb
   they were going to run. It reads before it mints: when this instance's
   Keychain item already exists, that value is copied into `.env` and nothing
   new is minted. And a Keychain that refuses the write does not stop the

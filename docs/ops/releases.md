@@ -110,9 +110,10 @@ none, fails the job. CI runs the same script on the built checkout. (A
 0.12.0 → 0.14.0 upgrade printed `schedule: expected string, received
 object` for every collector and routine; the 0.14.0 pack validates all 26.
 Those rows were 0.12.0's CLI — the one that ran the update — reading 0.14.0's
-manifests with its own schema. A release's first update is always run by
-the release before it: `docs/ops/cli.md`, "The closing doctor is the new
-code's".)
+manifests with its own schema. An update is started by the release before
+it; from 0.14.2 on it hands everything after the switch to the release it
+installed: `docs/ops/cli.md`, "The rest of a release update runs on the
+release it installed".)
 
 The **bundled runtime** (`ops/release/build-runtime-deps.sh`, the
 `runtime-deps (darwin-arm64)` job) is the other half of "no build tools on
@@ -189,11 +190,21 @@ run with `--channel release`.
    without `--relaunch`, never failing the update (`--no-app` skips it,
    `--app-path` points it elsewhere; `docs/ops/cli.md`, "Moving the Mac app
    with the release"),
-5. runs `db/migrations` from `current` under the advisory lock,
-6. `docker compose pull && up -d --no-build` in `current`, with
+5. **hands the rest to the release it just installed**: the process
+   running `update` is the release being left, so it re-executes
+   `current/packages/cli/dist/main.js update --continue-from=switched` on
+   the bundled `node`, with the same flags and environment, and exits with
+   its code — every step below runs on the new code. A new CLI that cannot
+   start is survived loudly (the old code finishes, exit 1, with the way
+   back); a release that predates the hand-over, `--rollback` and
+   `--no-reexec` finish on the running code (`docs/ops/cli.md`, "The rest
+   of a release update runs on the release it installed"). **One run is
+   enough from 0.14.2 on**; the update onto 0.14.2 is still 0.14.1's,
+6. runs `db/migrations` from `current` under the advisory lock,
+7. `docker compose pull && up -d --no-build` in `current`, with
    `METISTRY_CONSOLE_IMAGE` / `METISTRY_ASSISTANT_IMAGE` set to the
    versioned ghcr images,
-7. kickstarts the launchd jobs whose code changed, writes `metistry.lock`
+8. kickstarts the launchd jobs whose code changed, writes `metistry.lock`
    through the reconciler, copies each `seed/vault/Templates/*.md` the vault
    **lacks** (create-only — a template that is there is never touched;
    `docs/ops/cli.md`, "Seeding the templates the vault lacks"), and runs

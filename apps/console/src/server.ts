@@ -43,6 +43,7 @@ import { dispatch, type TargetRegistry } from "./dispatch.js";
 import { DEVIN_PURPOSES, isDevinPurpose } from "./devin.js";
 import { listProjects, updateProject, validateProjectPatch } from "./projects.js";
 import { applyImprovement } from "./prompt-overlay.js";
+import { applyMeEdit, meEditOf } from "./profile-tidy.js";
 import { crewDispatcher, type CrewRegistry } from "./crews.js";
 import { runAction, type ActionServices } from "./actions.js";
 import { computeRoutes, isComputeRoute, type ComputeAdmin } from "./compute-routes.js";
@@ -1376,8 +1377,30 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     // principal `user` — a human change, in the user's name. It happens
     // BEFORE the row is decided, so a refused write leaves the proposal
     // pending instead of silently dropping the change.
+    //
+    // An improvement that carries a `Me/` edit — *Tidy Me/profile.md* (T3-4,
+    // profile-tidy.ts), and the session fold's profile facts after it — is
+    // the owner's hand on the owner's own file: Approve writes exactly the
+    // "after" they were shown, as `user`, and is refused `stale` (nothing
+    // written, the request still waiting) if the file is no longer the
+    // "before". Revise and Decline write nothing.
     let applied: { path: string; created: boolean } | undefined;
-    if (row.kind === "improvement" && verb === "allow") {
+    const meEdit = row.kind === "improvement" ? meEditOf(row.payload) : null;
+    if (meEdit !== null && verb === "allow") {
+      if (!cfg.vault) return refuseAnswer(id, verb, "not_available", `approving this writes ${meEdit.path}, and no vault bridge is configured in this deployment — METISTRY_RECONCILER_URL + METISTRY_BRIDGE_TOKEN_RECONCILER (docs/ops/reconciler.md)`);
+      try {
+        const r = await applyMeEdit(cfg.vault, meEdit, row.id);
+        applied = { path: r.path, created: false };
+      } catch (err) {
+        if (err instanceof VaultError) {
+          await audit("triage", "me_edit", false, { proposal: row.id, path: meEdit.path, error: err.code });
+          const refused = await refuseAnswer(id, verb, err.code, err.message);
+          // the file moved under the owner: the same `stale` every other door's 409 says (F-1)
+          return err.code === "conflict" ? { status: 409, body: conflictBody("stale", err.message, row) } : refused;
+        }
+        return failedAnswer(id, verb, err);
+      }
+    } else if (row.kind === "improvement" && verb === "allow") {
       if (!cfg.vault) return refuseAnswer(id, verb, "not_available", "applying an improvement proposal writes assistant-prompt.md, and no vault bridge is configured in this deployment — METISTRY_RECONCILER_URL + METISTRY_BRIDGE_TOKEN_RECONCILER (docs/ops/reconciler.md)");
       try {
         const r = await applyImprovement(cfg.vault, row.payload, row.id);
@@ -1580,7 +1603,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     await audit("triage", verb, rows.length === 1, {
       proposal: row.id,
       kind: row.kind,
-      ...(applied ? { overlay: applied.path } : {}),
+      ...(applied ? (meEdit !== null ? { wrote: applied.path } : { overlay: applied.path }) : {}),
       ...(created ? { work_id: created.id } : {}),
       ...(acted ? { action: acted.kind } : {}),
       ...(granted ? { granted: granted.area, agent: granted.agent } : {}),

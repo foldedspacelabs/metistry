@@ -39,6 +39,7 @@ import { capabilitiesOf, type PublicIdentity } from "./identity.js";
 import { loadInstances } from "./instances.js";
 import { listSecrets, SECRETS_NOT_AVAILABLE, type SecretsView } from "./secrets-route.js";
 import { listVariables, VARIABLES_NOT_AVAILABLE, type VariablesView } from "./variables-route.js";
+import { CONNECTION_ROUTE, CONNECTIONS_NOT_AVAILABLE, listConnections, oneConnection, validConnectionName, type ConnectionsView } from "./connections-route.js";
 import { VAULT_STATUS_NOT_AVAILABLE, VaultStatusUnavailable, type VaultStatusReader } from "./vault-status.js";
 import { NDJSON_CONTENT_TYPE, RUNS_EXPORT_QUERY, parseExportParams, streamRunsExport } from "./runs-export.js";
 import { consultRoute, route as routeMessage, servedKindOf, threadFactsOf, type RoutePolicy, type Rules } from "./router.js";
@@ -141,6 +142,12 @@ export interface ConsoleConfig {
    * route answers 503.
    */
   variables?: VariablesView | undefined;
+  /**
+   * `GET /api/connections(/:name)` (connections-route.ts, plan §2.6): the
+   * instance's `.metistry/connections/`, read against the connection-type
+   * registry, with a presence probe for secrets. Absent = both routes 503.
+   */
+  connections?: ConnectionsView | undefined;
   /**
    * The live-changes hub `GET /api/events` streams from (events.ts, §2.20):
    * `main.ts` builds it and starts the one `LISTEN` that feeds it. Absent =
@@ -1075,6 +1082,8 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         key === "GET /api/instances" ||
         key === "GET /api/secrets" ||
         key === "GET /api/variables" ||
+        key === "GET /api/connections" ||
+        CONNECTION_ROUTE.test(key) ||
         key === "GET /api/vault/status" ||
         key === "GET /api/commands" ||
         // the live-changes stream is the owner's alone: an agent learns what
@@ -1141,6 +1150,24 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         return sendJson(res, statusFor("invalid_request"), errorEnvelope("invalid_request", r.message));
       }
       return sendJson(res, 200, { variables: r.variables, as_of: new Date().toISOString() });
+    }
+
+    // ----- the Connections list (§2.6): names, reach, tools and modes — never a value -----
+    // Read-only and dial-free: every write is `metistry connections` on the
+    // Mac (M13), and whether a server answers is `metistry connections test`
+    // (connections-route.ts).
+    if (key === "GET /api/connections") {
+      if (!cfg.connections) return sendError(res, "not_available", CONNECTIONS_NOT_AVAILABLE);
+      return sendJson(res, 200, { connections: await listConnections(cfg.connections), as_of: new Date().toISOString() });
+    }
+    const connectionOf = CONNECTION_ROUTE.exec(key);
+    if (connectionOf) {
+      if (!cfg.connections) return sendError(res, "not_available", CONNECTIONS_NOT_AVAILABLE);
+      const name = connectionOf[1]!; // a kebab name has nothing to percent-decode; anything else is not a connection
+      if (!validConnectionName(name)) return sendError(res, "not_found", "no such connection");
+      const connection = await oneConnection(cfg.connections, name);
+      if (!connection) return sendError(res, "not_found", "no such connection");
+      return sendJson(res, 200, { connection, as_of: new Date().toISOString() });
     }
 
     // ----- the vault's git (§2.21): where sync stands, read from the reconciler -----

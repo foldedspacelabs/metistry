@@ -134,6 +134,28 @@ export {
   type VariableVerb,
   type VariablesOptions,
 } from "./variables.js";
+export {
+  CONNECTION_VERBS,
+  NEW_TOOL_MODE,
+  TOOL_GROUP_LABEL,
+  TOOL_MODE_LABEL,
+  connectionRel,
+  connectionsAdd,
+  connectionsList,
+  connectionsPolicy,
+  connectionsRemove,
+  connectionsSet,
+  connectionsShow,
+  connectionsTest,
+  parseConnectionVerb,
+  parseToolMode,
+  renderConnections,
+  type AddResult,
+  type AddSpec,
+  type PolicySpec,
+  type SetSpec,
+} from "./connections.js";
+export { connectionDoctorRows, type ConnectionsOptions } from "./connection-check.js";
 export { renderPlist, parsePlistTemplate, loadPlistTemplates, launchdCommands, renderSystemdUnit, labelFor, logPathFor, serviceOf, withNamespace, LABEL_PREFIX, type PlistTemplate } from "./launchd.js";
 export {
   allocateBase,

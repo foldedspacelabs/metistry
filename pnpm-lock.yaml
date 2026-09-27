@@ -60,6 +60,9 @@ importers:
       '@foldedspacelabs/metistry-cli':
         specifier: workspace:*
         version: link:../../packages/cli
+      '@foldedspacelabs/metistry-connections':
+        specifier: workspace:*
+        version: link:../../packages/connections
       '@foldedspacelabs/metistry-core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -223,6 +226,9 @@ importers:
 
   packages/cli:
     dependencies:
+      '@foldedspacelabs/metistry-connections':
+        specifier: workspace:*
+        version: link:../connections
       '@foldedspacelabs/metistry-core':
         specifier: workspace:*
         version: link:../core
@@ -239,6 +245,28 @@ importers:
       '@types/pg':
         specifier: ^8.16.0
         version: 8.23.1
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: ^4.0.18
+        version: 4.1.11(@types/node@22.20.1)(vite@8.2.2(@types/node@22.20.1)(yaml@2.9.0))
+
+  packages/connections:
+    dependencies:
+      '@foldedspacelabs/metistry-core':
+        specifier: workspace:*
+        version: link:../core
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.30.0
+        version: 1.30.0(zod@4.5.2)
+      yaml:
+        specifier: ^2.9.0
+        version: 2.9.0
+    devDependencies:
+      '@types/node':
+        specifier: ^22.20.1
+        version: 22.20.1
       typescript:
         specifier: ^7.0.2
         version: 7.0.2

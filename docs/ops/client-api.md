@@ -357,8 +357,8 @@ takes a `since` cursor and answers with the next one.
 | `POST /api/scheduled/routines` | local | local_owner | no | — | — | T3-8 | New Routine: an actor, a task and per-run grants |
 | `PUT /api/scheduled/syncs/:name` | owner | session · local_owner | natural | — | — | T3-3 | a sync's cadence, pause and raise toggles |
 | `POST /api/scheduled/syncs/:name/run` | owner | session · local_owner | no | — | — | T3-3 | run a sync now |
-| `GET /api/connections` | owner | session · local_owner | natural | — | — | T4-8a | the connections: status, tools, used by |
-| `GET /api/connections/:name` | owner | session · local_owner | natural | — | — | T4-8a | one connection |
+| `GET /api/connections` | owner | session · local_owner | natural | — | — | served | the connections: status, reach, tools and modes, used by — names, never a value |
+| `GET /api/connections/:name` | owner | session · local_owner | natural | — | — | served | one connection, with its file and its provider's unit |
 | `GET /api/secrets` | owner | session · local_owner | natural | — | — | served | secret names, hosts, grants, last used — never a value |
 | `GET /api/variables` | owner | session · local_owner | natural | — | — | served | the variables agents read — name, value, read by, used in |
 | `GET /api/recordings/:id` | owner | session · local_owner | natural | — | — | T8-4 | one recording's retention state |
@@ -2431,8 +2431,8 @@ new routine, are `local`.
 ### Connections, secrets, variables, recordings — read here, written by the CLI
 
 ```
-GET /api/connections           T4-8a — status, tools, used by
-GET /api/connections/:name     T4-8a
+GET /api/connections           served — status, reach, tools and modes, used by: names, never a value
+GET /api/connections/:name     served — one connection, its file and its provider's unit
 GET /api/secrets               served — names, hosts, grants, last used: never a value
 GET /api/variables             served — name, value, read by, used in: never a secret
 GET /api/recordings/:id        T8-4 — a recording's retention state
@@ -2441,6 +2441,90 @@ GET /api/recordings/:id        T8-4 — a recording's retention state
 Every write here is a CLI verb with the owner caller class (M7, M13, M14 below):
 hosts, commands, credentials and the offer switch are the boundary, and a
 secret's value never crosses the API in either direction.
+
+#### `GET /api/connections` — the Connections list (`user` principal)
+
+```
+GET /api/connections
+200 {"connections":[{"name":"github",
+                     "type":"mcp",
+                     "provider":"custom",
+                     "description":"GitHub's MCP server",
+                     "status":"ok",
+                     "issues":[],
+                     "reach":{"class":"command","command":"npx",
+                              "args":["-y","@modelcontextprotocol/server-github"],
+                              "cwd":null,"env":["GITHUB_PERSONAL_ACCESS_TOKEN"],
+                              "runs_on":"host"},
+                     "secrets":["github_read"],
+                     "variables":[],
+                     "tools":[{"name":"create_issue","group":"changes","mode":"ask"},
+                              {"name":"search_issues","group":"reads","mode":"on"}],
+                     "offer_to_agents":false,
+                     "used_by":[{"kind":"sync","name":"github-state"}]}],
+     "as_of":"2026-09-28T13:05:00.000Z"}
+503 no instance directory in this deployment (degrades: absent)
+```
+
+One row per file in the instance's `.metistry/connections/`, sorted by name
+(plan §2.6; `packages/connections`' `describeConnections`, the rows
+`metistry connections list --json` prints). `type` is what it is (`mcp`,
+`calendar`, …) and `provider` the connection-type unit that reaches it, or
+`custom`. `reach` is how Metistry reaches it — `http` (`url`, `auth` scheme,
+header and query-parameter **names**, `timeout_s`), `command` (`command`,
+`args`, `cwd`, environment-variable **names**, `runs_on`) or `path`. `tools`
+is the owner's per-tool policy: each tool's `group` (`reads` · `changes` ·
+`starts_agent`) and `mode` (`on` · `ask` · `off`, drawn *Allow · Ask First ·
+Never*). `used_by` is what reads it today — the syncs in `scheduled.yaml` that
+name it; agents reach a connection through the lazy pair (T4-8b), and until
+then an empty list is the true answer (*Nobody yet*).
+
+**`status`** is one of doctor's words, and `issues` says why, one sentence each:
+
+| `status` | Means |
+| --- | --- |
+| `ok` | the file validates against its provider's unit and the door would let it through |
+| `absent` | something it needs is not here: its provider's connection type (not installed — the file is not deleted), a variable it uses, or a secret's item in **this instance's** Keychain (a presence probe; never a value) |
+| `failed` | the file does not validate or breaks a rule (a key pasted where a name belongs, a secret in a URL or on a command line), or `secrets.yaml` does not grant a secret to `connection:<name>`, or does not list the host an HTTP connection sends it to — exactly what the egress door would refuse, said before any call |
+
+**Names, never values, by construction.** A row is built field by field; it
+carries header, query and environment **names** and never a header or
+environment value, and a secret is a name. A file that broke a rule shows its
+name, `status: "failed"` and `issues`, and **nothing it holds** — the rule may
+be a key pasted into the wrong place, and a row that repeated the file would
+repeat the key.
+
+**Nothing here dials.** A GET that started a command or reached a server would
+be a read with a side effect; whether a connection answers is `metistry
+connections test <name>` and `metistry doctor` on the Mac. The last check or
+call the console itself made (`runs` rows `connection_check` /
+`connection_call`, which `connection.health` announces) joins the row when the
+console makes calls (T4-8b). Every write — add, set, policy, remove — is
+`metistry connections` on the Mac (M13, `docs/ops/cli.md`): a connection file
+says where Metistry reaches and with which credential, which is the boundary,
+so no route writes one (invariant 10).
+
+#### `GET /api/connections/:name` — one connection (`user` principal)
+
+```
+GET /api/connections/linear
+200 {"connection":{…the row above…,
+                   "file":".metistry/connections/linear.yaml",
+                   "provider_unit":{"name":"linear","origin":"product",
+                                    "provides":"mcp","capabilities":[],
+                                    "implementation":"native","sync":null,
+                                    "tools":[{"name":"list_issues","group":"reads"}]}},
+     "as_of":"2026-09-28T13:05:00.000Z"}
+404 no such connection — no file of that name, or a name that cannot be one
+503 no instance directory in this deployment (degrades: absent)
+```
+
+The row, plus `file` (instance-relative) and `provider_unit`: the
+connection-type unit's name, whether it is the product's or the owner's
+extension, what it provides, its capabilities, how it is implemented, the
+sync that reads it, and the tools it declares with the group each keeps
+(a connection may not relabel one). `null` for a `custom` connection, an
+uninstalled provider, or a file that does not validate.
 
 #### `GET /api/secrets` — the Secrets list (`user` principal)
 

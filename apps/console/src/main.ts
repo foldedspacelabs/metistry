@@ -46,6 +46,7 @@ import { vaultBridgeHistory, vaultBridgeSearch } from "./knowledge-routes.js";
 import type { ComputeAdmin } from "./compute-routes.js";
 import type { SecretsView } from "./secrets-route.js";
 import type { VariablesView } from "./variables-route.js";
+import type { ConnectionsView } from "./connections-route.js";
 import { readInstanceId, securityPresence, realExec } from "@foldedspacelabs/metistry-cli";
 import { CrewRegistry } from "./crews.js";
 import { assistantPromptFiles, loadAssistantDefinition } from "./actors.js";
@@ -352,6 +353,20 @@ console.log(
     : "route policy: absent — no policy: block in rules.yaml (every route row reads `absent`)",
 );
 
+// GET /api/connections(/:name) (plan §2.6): the instance's
+// `.metistry/connections/`, read against the connection-type registry (the
+// seed's and the owner's extensions), with the same presence-only probe the
+// Secrets list has. Nothing here dials. No instance directory → 503.
+const connections: ConnectionsView | undefined = computeAdmin
+  ? { instanceDir: computeAdmin.instanceDir, seedDir: computeAdmin.seedDir, ...(secrets?.presence ? { presence: secrets.presence } : {}) }
+  : undefined;
+console.log(
+  connections
+    ? `connections: ${resolveInstanceLayout(connections.instanceDir).path("connectionsDir")} (read-only; every write is \`metistry connections\`)`
+    : "connections absent: METISTRY_INSTANCE_DIR is unset or not readable — GET /api/connections answers 503; `metistry connections list` still works (degrades: absent)",
+);
+
+
 // routine runner (SHOULD-8): collectors and routines scheduled from their
 // manifests, each loaded through its registry (plan §2.7) — the product's
 // directory, then the owner's extensions — and joined to its product code.
@@ -427,6 +442,7 @@ const server = makeServer(pool, queries, {
   origin,
   ...(secrets ? { secrets } : {}),
   ...(variables ? { variables } : {}),
+  ...(connections ? { connections } : {}),
   origins,
   ...(identity ? { identity } : {}),
   ...(instancesFiles ? { instancesFiles } : {}),

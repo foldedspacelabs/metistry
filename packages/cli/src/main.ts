@@ -38,7 +38,7 @@ import {
   setBudget,
   type ComputeOptions,
 } from "./compute.js";
-import { buildDeploymentReport, renderDeploymentReport, setDeploymentShape, setKeepAwake } from "./deployment-report.js";
+import { buildDeploymentReport, renderDeploymentReport, setDeploymentShape, setKeepAwake, type KeepAwakeFlags } from "./deployment-report.js";
 import { EXTENSION_VERBS, extensionsAdd, extensionsList, extensionsRemove, parseExtensionVerb, renderExtensions, type ExtensionsOptions } from "./extensions.js";
 import { doctor, renderTable, type DoctorDeps } from "./doctor.js";
 import { VARIABLE_VERBS, parseVariableVerb, renderVariables, variablesList, variablesSet, variablesUnset, type VariablesOptions } from "./variables.js";
@@ -155,6 +155,27 @@ export function parseArgs(argv: string[], booleans = BOOLEAN_FLAGS): ParsedArgs 
   }
   const [command, ...rest] = positional;
   return { command, positional: rest, flags };
+}
+
+/**
+ * `set-keep-awake`'s three switches (T4-20). Each takes `true` or `false` and
+ * nothing else: a bare `--sleep-lid-closed` is refused rather than read as
+ * true, because the one that keeps a closed Mac awake is `false` and a flag
+ * that meant the opposite of what it looks like would be the worst guess.
+ */
+export function keepAwakeFlags(flags: ParsedArgs["flags"]): KeepAwakeFlags {
+  const out: KeepAwakeFlags = {};
+  for (const [flag, key] of [
+    ["enabled", "enabled"],
+    ["sleep-on-battery", "sleep_on_battery"],
+    ["sleep-lid-closed", "sleep_lid_closed"],
+  ] as const) {
+    const v = flags[flag];
+    if (v === undefined) continue;
+    if (v !== "true" && v !== "false") throw new Error(`--${flag} takes true or false, not ${v === true ? "nothing" : JSON.stringify(v)}`);
+    out[key] = v === "true";
+  }
+  return out;
 }
 
 function str(flags: ParsedArgs["flags"], name: string): string | undefined {
@@ -674,16 +695,23 @@ const USAGE = `metistry — Metistry command line
       it. Refuses while services still run under the current shape (the data
       does not move between shapes on its own); --force writes anyway.
 
-  metistry deployment set-keep-awake <never|allow_sleep_on_battery|always|always_lid_closed>
+  metistry deployment set-keep-awake [<never|allow_sleep_on_battery|always|always_lid_closed>]
+                                [--enabled true|false] [--sleep-on-battery true|false]
+                                [--sleep-lid-closed true|false]
                                 [--yes] [--product-dir <checkout>] [--instance <dir>]
       Whether this install holds the Mac awake, and on which power (macOS).
       The same protected write as set-shape — preview without --yes, applied
       with it — and it prints what the choice costs before writing it. It does
       NOT refuse while services run: changing the policy changes nothing
       already running, and it takes effect at the next metistry up.
-      always_lid_closed is accepted and behaves as always: no process can keep
-      a Mac awake with the lid shut, and doctor says so rather than pretending
-      (docs/ops/deployment-shapes.md).
+      A value alone is written as itself. A flag changes only the switch it
+      names — over the value when one is given, else over the setting in
+      effect — and writes the object form { enabled, sleep_on_battery,
+      sleep_lid_closed }. Keeping a closed Mac awake (always_lid_closed, or
+      --sleep-lid-closed false) is stored as asked, but only an administrator
+      setting delivers it: this prints the command, how to undo it and why it
+      is not recommended, and never runs it. doctor reads pmset -g and says
+      whether it is in effect (docs/ops/deployment-shapes.md).
 
   metistry migrate-inbox [--instance <dir>] [--dry-run]
       Move an existing instance's inbox into the vault: inbox/* (or a
@@ -2273,9 +2301,19 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
         }
       }
       if (positional[0] === "set-keep-awake") {
+        const usage = `usage: metistry deployment set-keep-awake [<${KEEP_AWAKE_VALUES.join("|")}>] [--enabled true|false] [--sleep-on-battery true|false] [--sleep-lid-closed true|false] [--yes] [--instance <dir>]`;
         const keepAwake: KeepAwake | undefined = parseKeepAwake(positional[1]);
-        if (!keepAwake) {
-          err(`usage: metistry deployment set-keep-awake <${KEEP_AWAKE_VALUES.join("|")}> [--yes] [--instance <dir>]`);
+        let set: KeepAwakeFlags;
+        try {
+          set = keepAwakeFlags(flags);
+        } catch (e) {
+          err(`${e instanceof Error ? e.message : String(e)}\n${usage}`);
+          return 2;
+        }
+        // a value that is not one of the four is a typo, never a guess — and
+        // so is naming nothing at all
+        if ((positional[1] !== undefined && !keepAwake) || positional.length > 2 || (keepAwake === undefined && Object.keys(set).length === 0)) {
+          err(usage);
           return 2;
         }
         const loadedDep = loadEnv();
@@ -2289,6 +2327,7 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
             productDir,
             instanceDir,
             keepAwake,
+            set,
             yes: flags.yes === true,
             env: process.env,
             platform: io.platform ?? process.platform,

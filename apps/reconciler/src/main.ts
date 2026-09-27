@@ -136,8 +136,19 @@ const logSync = (r: PushResult): PushResult => {
   }
   return r;
 };
+// The policy as of NOW: a stat of deployment.yaml per call, so a flush that
+// follows `metistry vault settings` already acts on the new answer.
+let lastPolicy = describeVaultSync(vaultPolicy.current().policy);
+const policyNow = () => {
+  if (vaultPolicy.refresh()) {
+    const now = describeVaultSync(vaultPolicy.current().policy);
+    if (now !== lastPolicy) console.log(`reconciler: vault sync policy is now ${now}`);
+    lastPolicy = now;
+  }
+  return vaultPolicy.current().policy;
+};
 const sync = new SyncScheduler(
-  () => vaultPolicy.current().policy,
+  policyNow,
   {
     push: () => committer.push().then(logSync),
     pull: () => committer.pull().then(logSync),
@@ -195,12 +206,6 @@ committer.hooks = {
   },
 };
 
-// push and pull on the policy in force, re-reading deployment.yaml first so
-// `metistry vault settings` takes effect on the next tick
-let lastPolicy = describeVaultSync(vaultPolicy.current().policy);
-sync.start(undefined, () => {
-  if (!vaultPolicy.refresh()) return;
-  const now = describeVaultSync(vaultPolicy.current().policy);
-  if (now !== lastPolicy) console.log(`reconciler: vault sync policy is now ${now}`);
-  lastPolicy = now;
-});
+// push and pull on the policy in force (policyNow re-reads deployment.yaml,
+// so `metistry vault settings` takes effect without a restart)
+sync.start();

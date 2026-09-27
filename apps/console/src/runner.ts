@@ -54,6 +54,7 @@ import {
   errorSignature,
   failureStreaks,
   intEnv,
+  entryProblems,
   isAssignment,
   isInterval,
   isLegacyCron,
@@ -63,6 +64,7 @@ import {
   preflight,
   profileFacts,
   requirementsOf,
+  scheduledUnitOf,
   shouldAlert,
   signatureTag,
   streakFor,
@@ -84,6 +86,7 @@ import {
   type ProfileFacts,
   type Requirements,
   type Scheduled,
+  type ScheduledUnit,
   type TemplateQueries,
   type TemplateReader,
 } from "@foldedspacelabs/metistry-core";
@@ -143,6 +146,14 @@ export interface ScheduledCollector extends RegisteredCollector {
    * line the runner does.
    */
   usesModel?: string;
+  /**
+   * What Scheduled reads off the manifest (`scheduledUnitOf`, core): the
+   * section its changes live in, and the config keys and Needs You rules it
+   * declares — what `.metistry/scheduled.yaml` may name for it. Absent (a
+   * component built by hand): a routine under `routines`, a collector under
+   * `syncs`, declaring nothing.
+   */
+  unit?: ScheduledUnit;
 }
 
 // ---- the owner's layers: scheduled.yaml and Me/profile.md -------------------
@@ -205,15 +216,20 @@ type Effective =
   | { readonly held: false; readonly schedule: ManifestSchedule; readonly paused: boolean }
   | { readonly held: true; readonly why: string; /** alert per component — false when the file-level alert already covers it */ readonly alert: boolean };
 
-const own = <T>(map: Readonly<Record<string, T>> | undefined, key: string): T | undefined =>
-  map !== undefined && Object.hasOwn(map, key) ? map[key] : undefined;
+/** The unit this component is under Scheduled — its manifest's, or, for one built by hand, its kind's section with nothing declared. */
+function unitOf(c: ScheduledCollector): ScheduledUnit {
+  return c.unit ?? { name: c.name, section: c.runKind === "routine_run" ? "routines" : "syncs", displayName: c.name, schedule: c.schedule, config: {}, raise: {} };
+}
 
 /**
  * This component's schedule and pause after the overlay: its manifest's
- * default, then `routines.<name>` (any component — a collector may present as
- * a routine, §2.5) or `syncs.<name>` (a collector's cadence). An entry the
- * runner cannot apply HOLDS the component rather than being ignored: an
- * ignored entry is a change the owner made that nothing applies.
+ * default, then its entry — `routines.<name>` for a routine or a collector
+ * that presents as one (§2.5), `syncs.<name>` for a sync. An entry the
+ * runner cannot apply HOLDS the component rather than being ignored (an
+ * ignored entry is a change the owner made that nothing applies): a New
+ * Routine named like it, an entry in the other section or in both, a config
+ * key or Needs You rule its manifest does not declare (`entryProblems`,
+ * core — the one statement of what an entry may name).
  */
 export function effectiveSchedule(c: ScheduledCollector, overlay: OverlayRead): Effective {
   if (!overlay.ok) {
@@ -221,19 +237,15 @@ export function effectiveSchedule(c: ScheduledCollector, overlay: OverlayRead): 
     const which = overlay.held === "all" ? "it cannot be read well enough to say which components it changes" : `it names ${c.name}`;
     return { held: true, alert: false, why: `.metistry/scheduled.yaml does not validate, and ${which} — held until it does: ${overlay.errors.join("; ")}` };
   }
-  const routine = own(overlay.value.routines, c.name);
-  const sync = own(overlay.value.syncs, c.name);
-  const kind = c.runKind === "routine_run" ? "routine" : "collector";
-  if (routine !== undefined && isAssignment(routine)) {
-    return { held: true, alert: true, why: `.metistry/scheduled.yaml's routines.${c.name} is a New Routine (actor, task), but ${c.name} is a product ${kind} — give the New Routine a name of its own` };
-  }
-  if (sync !== undefined && c.runKind === "routine_run") {
-    return { held: true, alert: true, why: `.metistry/scheduled.yaml's syncs.${c.name} names a routine — a routine's changes live under routines.${c.name}` };
-  }
-  if (routine !== undefined && sync !== undefined) {
-    return { held: true, alert: true, why: `.metistry/scheduled.yaml names ${c.name} under both routines: and syncs: — one entry per component` };
-  }
-  if (routine !== undefined) return { held: false, schedule: routine.schedule ?? c.schedule, paused: routine.paused ?? false };
+  const unit = unitOf(c);
+  const problems = entryProblems(unit, overlay.value).filter((p) => p.holds);
+  if (problems.length > 0) return { held: true, alert: true, why: problems.map((p) => p.message).join("; ") };
+  const routines = overlay.value.routines;
+  const syncs = overlay.value.syncs;
+  const routine = unit.section === "routines" && routines !== undefined && Object.hasOwn(routines, c.name) ? routines[c.name] : undefined;
+  const sync = unit.section === "syncs" && syncs !== undefined && Object.hasOwn(syncs, c.name) ? syncs[c.name] : undefined;
+  // entryProblems has refused a New Routine under this name, so a routine entry here is an override
+  if (routine !== undefined && !isAssignment(routine)) return { held: false, schedule: routine.schedule ?? c.schedule, paused: routine.paused ?? false };
   if (sync !== undefined) return { held: false, schedule: sync.every !== undefined ? { every: sync.every } : c.schedule, paused: sync.paused ?? false };
   return { held: false, schedule: c.schedule, paused: false };
 }
@@ -354,6 +366,7 @@ export async function loadSchedules(units: readonly ComponentUnit[]): Promise<Sc
       if (m.type !== "collector" && m.type !== "routine") throw new Error(`not schedulable (type ${m.type})`);
       if (m.schedule === undefined) throw new Error(`no schedule`);
       if (isLegacyCron(m.schedule)) scheduleToSeconds(m.schedule); // throws on a cron this build cannot read as an interval
+      const unit = scheduledUnitOf(m);
       out.push({
         name: u.name,
         run: u.run,
@@ -361,6 +374,7 @@ export async function loadSchedules(units: readonly ComponentUnit[]): Promise<Sc
         schedule: m.schedule,
         requires: requirementsOf(m),
         runKind: m.type === "routine" ? "routine_run" : "collector_run",
+        ...(unit ? { unit } : {}),
         ...(m.type === "collector" && m.uses_model ? { usesModel: m.uses_model } : {}),
       });
     } catch (e) {

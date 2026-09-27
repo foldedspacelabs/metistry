@@ -1,8 +1,13 @@
 schema: 1
 name: inbox-drain
 type: collector
+display_name: Inbox Sort
+# Housekeeping with no connection, so it presents as a routine under
+# Scheduled (§2.5): its changes live under routines.inbox-drain.
+presents_as: routine
 description: Classify new inbox captures deterministically and emit proposals — never auto-creates (§4.12); a todo-shaped capture carries a suggested work row the user may accept with one click
-schedule: "*/5 * * * *"
+# §2.5's default: every 5 minutes — a capture waits on it.
+schedule: { every: 5m }
 writes: [proposals, inbox]
 reads: [inbox]
 # The ONE model this collector may call, pinned `<provider>/<model-id>` (core's

@@ -40,7 +40,7 @@ import { loadInstances } from "./instances.js";
 import { listSecrets, SECRETS_NOT_AVAILABLE, type SecretsView } from "./secrets-route.js";
 import { listVariables, VARIABLES_NOT_AVAILABLE, type VariablesView } from "./variables-route.js";
 import { NDJSON_CONTENT_TYPE, RUNS_EXPORT_QUERY, parseExportParams, streamRunsExport } from "./runs-export.js";
-import { route as routeMessage, type Rules } from "./router.js";
+import { consultRoute, route as routeMessage, servedKindOf, threadFactsOf, type RoutePolicy, type Rules } from "./router.js";
 import { sendToSession, storeSubscription, type PushConfig } from "./push.js";
 import { dispatch, type TargetRegistry } from "./dispatch.js";
 import { DEVIN_PURPOSES, isDevinPurpose } from "./devin.js";
@@ -73,6 +73,14 @@ export interface ConsoleConfig {
   webRoot?: string; // PWA shell dir; absent = API-only (tests)
   push?: PushConfig; // absent = push degrades absent
   rules?: Rules; // router rules; absent = everything routes to the model
+  /**
+   * The local routing policy (docs/ops/dynamic-router.md; the table is T9-2's).
+   * Consulted IN SHADOW only — after the 202, for the `runs` row of kind
+   * `route` — so nothing it answers, throws or fails to answer can reach the
+   * served route. Absent = no `policy:` block, the shipped behaviour: every
+   * route row reads `policy.outcome: "absent"`.
+   */
+  routePolicy?: RoutePolicy | undefined;
   targets?: TargetRegistry; // compute targets (§4.18); absent = no dispatch surface
   /** `compute.yaml` in force (hot-reloaded). Absent = nothing assigned, so every agent is the same engine kind and rule 4 refuses nothing. */
   compute?: () => Compute;
@@ -684,12 +692,43 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       if (!body.text) return sendError(res, "invalid_request");
       const thread = body.thread_id ?? "default";
       const decision = cfg.rules ? routeMessage(cfg.rules, body.text, body.tier) : null;
+      const decidedAt = new Date();
       // Durable BEFORE the 202 (SHOULD-7). Routing decision rides in meta.
       const { rows } = await db.query(
         `INSERT INTO inbound_messages (thread, text, meta) VALUES ($1, $2, $3) RETURNING id`,
         [thread, body.text, JSON.stringify(decision ? { route: decision } : {})],
       );
       const messageId = rows[0]?.id;
+      // The route record (docs/ops/dynamic-router.md §6, T9-1): one `runs` row
+      // of kind `route` per message the rules routed. IN SHADOW it is called
+      // only after the 202 has been sent — "shadow does not wait" — so the
+      // served route, the 202 body and the reply are what they were before
+      // the record existed, whatever the policy does. A record that fails to
+      // write is logged and lost; it never fails a message already answered.
+      const recordRoute = (): void => {
+        if (!decision || !cfg.rules) return;
+        const rules = cfg.rules;
+        void (async () => {
+          const runId = await startRun(db, {
+            component: "console",
+            kind: "route",
+            tool: servedKindOf(decision),
+            meta: { v: 1, message_id: Number(messageId), thread, phase: "shadow" },
+          });
+          const rec = await consultRoute({
+            rules,
+            route: decision,
+            text: body.text!,
+            attachments: 0, // POST /message takes none today (§2: the feature is defined so adding them is one line)
+            thread,
+            messageId: Number(messageId),
+            policy: cfg.routePolicy,
+            loadFacts: async () => threadFactsOf((await queries.run("route_features", { thread, exclude_id: Number(messageId) })).rows[0]),
+            at: decidedAt,
+          });
+          await finishRun(db, runId, { ok: rec.ok, ...(rec.error !== undefined ? { error: rec.error } : {}), meta: rec.meta });
+        })().catch((err: unknown) => console.error(`route record for message ${String(messageId)} not written: ${err instanceof Error ? err.message : String(err)}`));
+      };
 
       // A question the assistant is blocked on is a `decision` proposal (one
       // queue, D7): answering it in chat settles it, exactly as answering from
@@ -733,7 +772,8 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         ]);
         await db.query(`UPDATE inbound_messages SET status = 'done' WHERE id = $1`, [messageId]);
         await audit("capture", "note", true, { inbox_id: r.id, path: r.path, message_id: messageId });
-        return sendJson(res, 202, { message_id: messageId, reply });
+        sendJson(res, 202, { message_id: messageId, reply });
+        return recordRoute();
       }
 
       // Fast path answers here — no model, no assistant (invariant 4, PoC-8).
@@ -753,14 +793,16 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
           );
           await db.query(`UPDATE inbound_messages SET status = 'done' WHERE id = $1`, [messageId]);
           await finishRun(db, runId, { ok: true });
-          return sendJson(res, 202, { message_id: messageId, reply });
+          sendJson(res, 202, { message_id: messageId, reply });
+          return recordRoute();
         } catch (err) {
           await finishRun(db, runId, { ok: false, error: String(err) });
           // fall through: leave for the assistant rather than dropping the turn
         }
       }
       await audit("message", "inbound", true, { message_id: messageId });
-      return sendJson(res, 202, { message_id: messageId });
+      sendJson(res, 202, { message_id: messageId });
+      return recordRoute();
     }
 
     if (req.method === "GET" && url.pathname.startsWith("/api/q/")) {

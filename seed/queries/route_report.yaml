@@ -61,6 +61,49 @@
 # bodies in the app where they belong, and invariant 10's mutating surface is
 # untouched because this mutates nothing.
 #
+# **The policy's record (T9-1, docs/ops/dynamic-router.md §6).** Beside the
+# routes, the `runs` rows of kind `route` the console writes for every
+# message it routed: what a local policy WOULD have chosen, in shadow, and
+# why. They add a fifth kind and nine row kinds, all `policy`-prefixed:
+#
+#   kind `policy`       a message the POLICY served (`routed_by: "policy"`,
+#                       T9-4). It reads 0 until serve exists, and it is not a
+#                       fall-through: the exit rule's `fall_through` stays the
+#                       rules' `default` alone.
+#   policy_outcome      the eight outcomes of §5, over every finished route
+#                       row (`denominator`); `not_consulted` is /note and the
+#                       fast path, `absent` is "no `policy:` block"
+#   policy_row          which `table[].id` decided, plus `(no match)`, over
+#                       `chosen` + `no_match`
+#   policy_operation    each operation chosen, over `chosen`
+#   policy_tier         `<served tier> → <chosen tier>`: the disagreement
+#                       matrix, over `chosen` (a fast-path choice has no tier
+#                       and reads `fast_path`)
+#   policy_bounded_by   each `bounded_by` value, over every route row
+#   policy_override     on counterfactuals, whether the tier the policy would
+#                       have served is the one the owner picked — the one
+#                       free label the product gets
+#   policy_latency      `p50` and `p95` of `duration_ms`, in ms in `n`, over
+#                       the consultations that finished (/note and the fast
+#                       path are not consultations)
+#   policy_shadow       per chosen tier, the stage-2 shadow runs on those
+#                       messages (joined by `message_id`): `n` and
+#                       `denominator` are the shadowed turns, and `share` is
+#                       their MEAN `shadow_agreement` — the one row kind whose
+#                       share is not n / denominator
+#   policy_miss         policy-served turns followed in the same thread
+#                       within 10 minutes by an override to a higher tier in
+#                       the row's `policy.tiers`, or by a re-ask (T9-4)
+#
+# Every label from a CLOSED vocabulary is emitted at zero — the outcomes, the
+# fixed operations, the bounds, `(no match)`, agrees/disagrees, p50/p95,
+# `miss`. Labels only the owner's files can name (table ids, tiers, a
+# `fast_path:<query>` or `delegate:<crew>` operation) appear once seen; this
+# query cannot read `rules.yaml`, and inventing them would be worse. None of
+# them is text: the route row holds counts and names from the owner's own
+# vocabulary and never the message (the console writes it that way and its
+# tests hold it), and nothing here selects anything else.
+#
 # `COLLATE "C"` on every tie-break, for the reason `knowledge_pages` has it:
 # CI runs Linux and the owner runs macOS, and two orderings of one report is
 # one too many.
@@ -79,6 +122,12 @@ description: >-
   share is taken over (`denominator`). Counts only: no message text, no
   thread, no vault path — the first word is a single lower-cased alphabetic
   or command-shaped token and everything else is folded into `(other)`.
+  Beside them, the route record (`runs` of kind `route`,
+  docs/ops/dynamic-router.md §6): a fifth kind `policy` (a message the policy
+  served — 0 until T9-4) and `policy_outcome`, `policy_row`,
+  `policy_operation`, `policy_tier`, `policy_bounded_by`, `policy_override`,
+  `policy_latency`, `policy_shadow` and `policy_miss` rows, each over its own
+  denominator and none carrying text.
 params:
   days: { type: int, default: 30 } # the CLI's `--since 30d`; §5.2 wants a real month of typing, not a week
 sql: |
@@ -90,8 +139,10 @@ sql: |
       i.ts,
       i.text,
       i.meta -> 'route' AS route,
-      -- the four kinds of §5.2, derived from the three the router writes
+      -- the four kinds of §5.2, derived from the three the router writes,
+      -- and the fifth: a route the POLICY served (T9-4 — 0 until then)
       CASE
+        WHEN i.meta -> 'route' ->> 'routed_by' = 'policy' THEN 'policy'
         WHEN i.meta -> 'route' ->> 'kind' = 'note'      THEN 'note'
         WHEN i.meta -> 'route' ->> 'kind' = 'fast_path' THEN 'fast_path'
         WHEN i.meta -> 'route' ->> 'kind' = 'model'
@@ -125,7 +176,7 @@ sql: |
   ),
   kinds AS (
     SELECT k.label, k.ord, count(m.route_kind) AS n
-    FROM (VALUES ('note', 1), ('fast_path', 2), ('override', 3), ('default', 4)) AS k(label, ord)
+    FROM (VALUES ('note', 1), ('fast_path', 2), ('override', 3), ('default', 4), ('policy', 5)) AS k(label, ord)
     LEFT JOIN m ON m.route_kind = k.label
     GROUP BY 1, 2
   ),
@@ -133,7 +184,7 @@ sql: |
     -- only the model routes have a tier: `note` and `fast_path` reach no
     -- model at all, so they have no tier to name and are not counted here
     SELECT coalesce(route ->> 'tier', '') AS label, count(*) AS n
-    FROM m WHERE route_kind IN ('override', 'default') GROUP BY 1
+    FROM m WHERE route_kind IN ('override', 'default', 'policy') AND route ->> 'kind' = 'model' GROUP BY 1
   ),
   rules AS (
     -- a fast_path rule has no NAME in rules.yaml, only a `match:` and the
@@ -158,6 +209,112 @@ sql: |
     SELECT label, count(*) AS n
     FROM first_tokens GROUP BY label
     ORDER BY count(*) DESC, label COLLATE "C" LIMIT 15
+  ),
+  -- ---- the policy's record: runs of kind `route` (docs/ops/dynamic-router.md §6)
+  -- Finished rows only: a row still in flight has no outcome yet, and a
+  -- consultation that hung is `timeout` once its deadline passes.
+  rr AS (
+    SELECT
+      r.ts,
+      r.tool,
+      r.duration_ms,
+      r.meta,
+      r.meta ->> 'thread'                               AS thread,
+      r.meta ->> 'message_id'                           AS message_id,
+      r.meta -> 'policy' ->> 'outcome'                  AS outcome,
+      r.meta -> 'policy' ->> 'row'                      AS policy_row,
+      r.meta -> 'policy' -> 'chosen' ->> 'operation'    AS chosen_op,
+      r.meta -> 'policy' -> 'chosen' ->> 'tier'         AS chosen_tier,
+      r.meta -> 'policy' -> 'would_serve' ->> 'tier'    AS would_tier,
+      r.meta -> 'served' ->> 'tier'                     AS served_tier,
+      CASE WHEN jsonb_typeof(r.meta -> 'policy' -> 'bounded_by') = 'array'
+           THEN r.meta -> 'policy' -> 'bounded_by' ELSE '[]'::jsonb END AS bounded_by,
+      CASE WHEN jsonb_typeof(r.meta -> 'policy' -> 'tiers') = 'array'
+           THEN r.meta -> 'policy' -> 'tiers' ELSE '[]'::jsonb END     AS policy_tiers
+    FROM runs r, win w
+    WHERE r.kind = 'route' AND r.component = 'console'
+      AND r.ts >= w.since AND r.finished_at IS NOT NULL
+  ),
+  rtot AS (
+    SELECT
+      count(*)                                                          AS rows_n,
+      count(*) FILTER (WHERE outcome IN ('chosen', 'no_match'))         AS decided,
+      count(*) FILTER (WHERE outcome = 'chosen')                        AS chosen,
+      count(*) FILTER (WHERE outcome = 'counterfactual')                AS counterfactual,
+      count(duration_ms) FILTER (WHERE outcome <> 'not_consulted')      AS timed,
+      count(*) FILTER (WHERE tool = 'policy')                           AS policy_served
+    FROM rr
+  ),
+  p_outcomes AS (
+    SELECT o.label, o.ord, count(rr.outcome) AS n
+    FROM (VALUES ('not_consulted', 1), ('counterfactual', 2), ('absent', 3), ('chosen', 4),
+                 ('no_match', 5), ('out_of_bounds', 6), ('timeout', 7), ('failed', 8)) AS o(label, ord)
+    LEFT JOIN rr ON rr.outcome = o.label
+    GROUP BY 1, 2
+  ),
+  p_rows AS (
+    SELECT v.label, count(rr.outcome) AS n
+    FROM (SELECT '(no match)' AS label
+          UNION SELECT policy_row FROM rr WHERE outcome = 'chosen' AND policy_row IS NOT NULL) v
+    LEFT JOIN rr ON rr.outcome IN ('chosen', 'no_match')
+                AND coalesce(CASE WHEN rr.outcome = 'chosen' THEN rr.policy_row END, '(no match)') = v.label
+    GROUP BY 1
+  ),
+  -- the operations of §3 that take no argument are known here; a
+  -- `fast_path:<query>` or `delegate:<crew>` joins them once it is chosen
+  p_ops AS (
+    SELECT v.label, count(rr.outcome) AS n
+    FROM (SELECT unnest(ARRAY['answer', 'retrieve:knowledge', 'retrieve:queries', 'tools']) AS label
+          UNION SELECT chosen_op FROM rr WHERE outcome = 'chosen' AND chosen_op IS NOT NULL) v
+    LEFT JOIN rr ON rr.outcome = 'chosen' AND rr.chosen_op = v.label
+    GROUP BY 1
+  ),
+  p_tiers AS (
+    SELECT coalesce(served_tier, '(none)') || ' → ' ||
+           CASE WHEN chosen_op LIKE 'fast\_path:%' THEN 'fast_path' ELSE coalesce(chosen_tier, '(none)') END AS label,
+           count(*) AS n
+    FROM rr WHERE outcome = 'chosen' GROUP BY 1
+  ),
+  p_bounds AS (
+    SELECT v.label, count(b.label) AS n
+    FROM (SELECT unnest(ARRAY['command:note', 'override', 'session', 'crew_registry', 'queries', 'timeout', 'failed']) AS label
+          UNION SELECT e FROM rr, jsonb_array_elements_text(rr.bounded_by) AS e) v
+    LEFT JOIN (SELECT e AS label FROM rr, jsonb_array_elements_text(rr.bounded_by) AS e) b ON b.label = v.label
+    GROUP BY 1
+  ),
+  p_override AS (
+    SELECT a.label, a.ord, count(c.agrees) AS n
+    FROM (VALUES ('agrees', 1), ('disagrees', 2)) AS a(label, ord)
+    LEFT JOIN (SELECT CASE WHEN would_tier IS NOT DISTINCT FROM served_tier THEN 'agrees' ELSE 'disagrees' END AS agrees
+               FROM rr WHERE outcome = 'counterfactual') c ON c.agrees = a.label
+    GROUP BY 1, 2
+  ),
+  p_latency AS (
+    SELECT
+      percentile_cont(0.5)  WITHIN GROUP (ORDER BY duration_ms) AS p50,
+      percentile_cont(0.95) WITHIN GROUP (ORDER BY duration_ms) AS p95
+    FROM rr WHERE outcome <> 'not_consulted' AND duration_ms IS NOT NULL
+  ),
+  -- stage-2 shadow runs on the messages the policy chose a tier for: the
+  -- turn row carries `shadow_agreement` (0020) and the message id it answered
+  p_shadow AS (
+    SELECT rr.chosen_tier AS label, count(t.shadow_agreement) AS n, round(avg(t.shadow_agreement), 3) AS mean
+    FROM rr
+    JOIN runs t ON t.kind = 'turn' AND t.component = 'assistant'
+               AND t.meta ->> 'message_id' = rr.message_id AND t.shadow_agreement IS NOT NULL
+    WHERE rr.outcome = 'chosen' AND rr.chosen_tier IS NOT NULL
+    GROUP BY 1
+  ),
+  p_miss AS (
+    SELECT count(*) FILTER (WHERE EXISTS (
+             SELECT 1 FROM rr nx
+             WHERE nx.thread = s.thread AND nx.ts > s.ts AND nx.ts <= s.ts + interval '10 minutes'
+               AND (nx.meta -> 'features' ->> 'reask' = 'true'
+                    OR (nx.tool = 'override'
+                        AND array_position(ARRAY(SELECT jsonb_array_elements_text(s.policy_tiers)), nx.served_tier)
+                          > array_position(ARRAY(SELECT jsonb_array_elements_text(s.policy_tiers)), s.served_tier)))
+           )) AS n
+    FROM rr s WHERE s.tool = 'policy'
   )
   SELECT r.* FROM (
     SELECT 'total'::text AS row_kind, 0 AS ord, NULL::text AS label,
@@ -171,29 +328,77 @@ sql: |
            NULL, NULL, NULL, NULL, NULL, NULL
     FROM kinds k, tot t
     UNION ALL
-    SELECT 'tier', 5, x.label, x.n, t.routed,
+    SELECT 'tier', 6, x.label, x.n, t.routed,
            CASE WHEN t.routed > 0 THEN round(x.n::numeric / t.routed, 4) END,
            NULL, NULL, NULL, NULL, NULL, NULL
     FROM tiers x, tot t
     UNION ALL
-    SELECT 'rule', 6, x.label, x.n, t.fast_path,
+    SELECT 'rule', 7, x.label, x.n, t.fast_path,
            CASE WHEN t.fast_path > 0 THEN round(x.n::numeric / t.fast_path, 4) END,
            NULL, NULL, NULL, NULL, NULL, NULL
     FROM rules x, tot t
     UNION ALL
-    SELECT 'length', 6 + l.ord, l.label, l.n, t.fall_through,
+    SELECT 'length', 7 + l.ord, l.label, l.n, t.fall_through,
            CASE WHEN t.fall_through > 0 THEN round(l.n::numeric / t.fall_through, 4) END,
            NULL, NULL, NULL, NULL, NULL, NULL
     FROM lengths l, tot t
     UNION ALL
-    SELECT 'first_word', 11, x.label, x.n, t.fall_through,
+    SELECT 'first_word', 12, x.label, x.n, t.fall_through,
            CASE WHEN t.fall_through > 0 THEN round(x.n::numeric / t.fall_through, 4) END,
            NULL, NULL, NULL, NULL, NULL, NULL
     FROM firsts x, tot t
+    UNION ALL
+    SELECT 'policy_outcome', 19 + o.ord, o.label, o.n, t.rows_n,
+           CASE WHEN t.rows_n > 0 THEN round(o.n::numeric / t.rows_n, 4) END,
+           NULL, NULL, NULL, NULL, NULL, NULL
+    FROM p_outcomes o, rtot t
+    UNION ALL
+    SELECT 'policy_row', 30, x.label, x.n, t.decided,
+           CASE WHEN t.decided > 0 THEN round(x.n::numeric / t.decided, 4) END,
+           NULL, NULL, NULL, NULL, NULL, NULL
+    FROM p_rows x, rtot t
+    UNION ALL
+    SELECT 'policy_operation', 31, x.label, x.n, t.chosen,
+           CASE WHEN t.chosen > 0 THEN round(x.n::numeric / t.chosen, 4) END,
+           NULL, NULL, NULL, NULL, NULL, NULL
+    FROM p_ops x, rtot t
+    UNION ALL
+    SELECT 'policy_tier', 32, x.label, x.n, t.chosen,
+           CASE WHEN t.chosen > 0 THEN round(x.n::numeric / t.chosen, 4) END,
+           NULL, NULL, NULL, NULL, NULL, NULL
+    FROM p_tiers x, rtot t
+    UNION ALL
+    SELECT 'policy_bounded_by', 33, x.label, x.n, t.rows_n,
+           CASE WHEN t.rows_n > 0 THEN round(x.n::numeric / t.rows_n, 4) END,
+           NULL, NULL, NULL, NULL, NULL, NULL
+    FROM p_bounds x, rtot t
+    UNION ALL
+    SELECT 'policy_override', 33 + x.ord, x.label, x.n, t.counterfactual,
+           CASE WHEN t.counterfactual > 0 THEN round(x.n::numeric / t.counterfactual, 4) END,
+           NULL, NULL, NULL, NULL, NULL, NULL
+    FROM p_override x, rtot t
+    UNION ALL
+    SELECT 'policy_latency', 36, 'p50', coalesce(round(l.p50)::bigint, 0), t.timed, NULL,
+           NULL, NULL, NULL, NULL, NULL, NULL
+    FROM p_latency l, rtot t
+    UNION ALL
+    SELECT 'policy_latency', 37, 'p95', coalesce(round(l.p95)::bigint, 0), t.timed, NULL,
+           NULL, NULL, NULL, NULL, NULL, NULL
+    FROM p_latency l, rtot t
+    UNION ALL
+    SELECT 'policy_shadow', 38, x.label, x.n, x.n, x.mean,
+           NULL, NULL, NULL, NULL, NULL, NULL
+    FROM p_shadow x
+    UNION ALL
+    SELECT 'policy_miss', 39, 'miss', x.n, t.policy_served,
+           CASE WHEN t.policy_served > 0 THEN round(x.n::numeric / t.policy_served, 4) END,
+           NULL, NULL, NULL, NULL, NULL, NULL
+    FROM p_miss x, rtot t
   ) r
   -- `ord` first so the reading order is the reporting order: the total (0),
-  -- the four kinds (1-4), the tiers (5), the rules (6), the length buckets
-  -- (7-10) and the first words (11). The UNION is wrapped because a set
+  -- the five kinds (1-5), the tiers (6), the rules (7), the length buckets
+  -- (8-11), the first words (12), then the policy's rows: the outcomes
+  -- (20-27) and the rest (30-39). The UNION is wrapped because a set
   -- operation's ORDER BY admits result column NAMES only, and `COLLATE "C"`
   -- is an expression.
   ORDER BY r.ord, r.n DESC, r.label COLLATE "C" NULLS FIRST

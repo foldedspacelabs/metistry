@@ -1,0 +1,84 @@
+# Seeded default (D4 overlay: an instance file of the same name wins).
+#
+# The router's thread facts (docs/ops/dynamic-router.md §2, T9-1): the one
+# read the route record makes, so the console's router talks to no table
+# itself (invariant 3). One row, always — every column below has an answer
+# for a thread nobody has written to yet (no session, no turns, no previous
+# message), so "no row" is never a reading the router has to interpret.
+#
+#   session_active    the thread has an `active` row in `sessions` — the
+#                     session the drain would resume
+#   session_turns     that session's `turns`, 0 with none: the context the
+#                     model will carry (`thread_turns`)
+#   session_provider  the provider and model that session was built against
+#   session_model     (`assistant_sessions`, 0016). NULL for a session the
+#                     OpenAI engine did not write — an Agent SDK session has
+#                     no row there. The session rule (§1, R10) reads these:
+#                     a policy may not move an active session to another
+#                     model, because the drain would not resume it.
+#   recent_failures   of this thread's last five FINISHED `turn` runs, how
+#                     many ended `ok = false` or with `meta.stopped` set
+#                     (`max_turns`, `veto`, `max_budget`). An in-flight turn
+#                     has not ended either way and is not counted.
+#   prev_ts           the thread's previous inbound message — the one before
+#   prev_text         `exclude_id` (the message's own id in shadow, where it
+#                     is already written; 0 at serve, where it is not).
+#
+# **`prev_text` is the owner's own words, which is why this is `expose:
+# route`.** The console compares it with the new message for `reask` and
+# drops it: only the boolean reaches the record (§6, "Never in the row"). No
+# agent reaches this through the generic door or `queries_run`; the owner's
+# own read of it at `GET /api/q/route_features` is P4's rule, and it shows
+# them nothing they did not type.
+#
+# `component = 'assistant'` because that is who writes chat turns (the
+# drain, apps/assistant/src/drain.ts) and it is what `runs_component_idx`
+# indexes; the console's own fast-path `turn` rows carry no `meta.thread`
+# and are not model turns.
+name: route_features
+expose: route
+description: >-
+  One thread's facts for the router's cheap features: whether it has an
+  active session and that session's turns, provider and model; how many of
+  its last five finished assistant turns failed or stopped early; and the
+  previous inbound message's time and text (before `exclude_id`, or the
+  latest when it is 0), which the console compares for a re-ask and never
+  records. Always exactly one row.
+params:
+  thread: { type: text, default: "" } # blank matches no thread: the fresh-thread row
+  exclude_id: { type: int, default: 0 } # the message's own id in shadow; 0 = none to exclude
+sql: |
+  WITH s AS (
+    SELECT s.turns, a.provider, a.model
+    FROM sessions s
+    LEFT JOIN assistant_sessions a ON a.id = s.id AND a.rolled_at IS NULL
+    WHERE s.thread = (:thread)::text AND s.status = 'active'
+    ORDER BY s.last_active_at DESC
+    LIMIT 1
+  ),
+  t AS (
+    SELECT r.ok, r.meta
+    FROM runs r
+    WHERE r.component = 'assistant' AND r.kind = 'turn'
+      AND r.meta ->> 'thread' = (:thread)::text
+      AND r.ok IS NOT NULL
+    ORDER BY r.ts DESC, r.id DESC
+    LIMIT 5
+  ),
+  p AS (
+    SELECT i.ts, i.text
+    FROM inbound_messages i
+    WHERE i.thread = (:thread)::text
+      AND ((:exclude_id)::bigint = 0 OR i.id < (:exclude_id)::bigint)
+    ORDER BY i.id DESC
+    LIMIT 1
+  )
+  SELECT
+    EXISTS (SELECT 1 FROM s)                                                    AS session_active,
+    coalesce((SELECT turns FROM s), 0)                                          AS session_turns,
+    (SELECT provider FROM s)                                                    AS session_provider,
+    (SELECT model FROM s)                                                       AS session_model,
+    (SELECT count(*) FILTER (WHERE NOT t.ok OR t.meta ? 'stopped') FROM t)::int AS recent_failures,
+    (SELECT ts FROM p)                                                          AS prev_ts,
+    (SELECT text FROM p)                                                        AS prev_text
+cache_ttl: 0 # a re-ask is decided by the message a second ago; a cached row would miss it

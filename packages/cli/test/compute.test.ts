@@ -1102,6 +1102,89 @@ describe("route-report", () => {
     expect(plain).not.toContain(TOKEN);
   });
 
+  // ---- the policy's rows (T9-1, docs/ops/dynamic-router.md §6) ----
+  /** `route_report`'s policy rows, as pg hands them back: every closed label, zeros included. */
+  function policyRows(o: { outcomes: Record<string, number>; chosen?: Array<[string, string, number]>; rowsDecided?: Record<string, number>; override?: [number, number]; latency?: [number, number]; shadow?: Array<[string, number, number]> }) {
+    const labels = ["not_consulted", "counterfactual", "absent", "chosen", "no_match", "out_of_bounds", "timeout", "failed"];
+    const total = labels.reduce((a, l) => a + (o.outcomes[l] ?? 0), 0);
+    const share = (n: number, d: number): string | null => (d > 0 ? (n / d).toFixed(4) : null);
+    const chosen = o.outcomes.chosen ?? 0;
+    const decided = chosen + (o.outcomes.no_match ?? 0);
+    const cf = o.outcomes.counterfactual ?? 0;
+    const timed = total - (o.outcomes.not_consulted ?? 0);
+    const [agrees, disagrees] = o.override ?? [0, 0];
+    return [
+      ...labels.map((label, i) => ({ row_kind: "policy_outcome", ord: 20 + i, label, n: String(o.outcomes[label] ?? 0), denominator: String(total), share: share(o.outcomes[label] ?? 0, total) })),
+      ...Object.entries(o.rowsDecided ?? { "(no match)": o.outcomes.no_match ?? 0 }).map(([label, n]) => ({ row_kind: "policy_row", ord: 30, label, n: String(n), denominator: String(decided), share: share(n, decided) })),
+      ...["answer", "retrieve:knowledge", "retrieve:queries", "tools"].map((label) => {
+        const n = (o.chosen ?? []).filter(([op]) => op === label).reduce((a, [, , k]) => a + k, 0);
+        return { row_kind: "policy_operation", ord: 31, label, n: String(n), denominator: String(chosen), share: share(n, chosen) };
+      }),
+      ...(o.chosen ?? []).map(([, pair, n]) => ({ row_kind: "policy_tier", ord: 32, label: pair, n: String(n), denominator: String(chosen), share: share(n, chosen) })),
+      ...["command:note", "override", "session", "crew_registry", "queries", "timeout", "failed"].map((label) => ({ row_kind: "policy_bounded_by", ord: 33, label, n: "0", denominator: String(total), share: share(0, total) })),
+      { row_kind: "policy_override", ord: 34, label: "agrees", n: String(agrees), denominator: String(cf), share: share(agrees, cf) },
+      { row_kind: "policy_override", ord: 35, label: "disagrees", n: String(disagrees), denominator: String(cf), share: share(disagrees, cf) },
+      { row_kind: "policy_latency", ord: 36, label: "p50", n: String(o.latency?.[0] ?? 0), denominator: String(timed), share: null },
+      { row_kind: "policy_latency", ord: 37, label: "p95", n: String(o.latency?.[1] ?? 0), denominator: String(timed), share: null },
+      ...(o.shadow ?? []).map(([label, n, mean]) => ({ row_kind: "policy_shadow", ord: 38, label, n: String(n), denominator: String(n), share: mean.toFixed(3) })),
+      { row_kind: "policy_miss", ord: 39, label: "miss", n: "0", denominator: "0", share: null },
+    ];
+  }
+
+  it("the policy's rows: a console whose query predates the route record says so, and names the command that lands it", async () => {
+    const dir = await instance();
+    const r = await routeReport({ ...reportOpts(dir, consoleServing(rowsFor({ routed: 120, fallThrough: 90 })).fn) });
+    expect(r.policy).toMatchObject({ recorded: false, rows: 0, consultations: 0 });
+    const plain = renderRouteReport(r, createUi({ env: {} }));
+    expect(plain).toContain("the policy, in shadow");
+    expect(plain.replace(/\s+/g, " ")).toMatch(/predates the route record.*metistry update/);
+  });
+
+  it("the policy's rows: with no `policy:` block every consultation is `absent`, and the report says that in a sentence", async () => {
+    const dir = await instance();
+    const rows = [...rowsFor({ routed: 120, fallThrough: 90 }), ...policyRows({ outcomes: { not_consulted: 30, absent: 90 }, latency: [3, 9] })];
+    const r = await routeReport({ ...reportOpts(dir, consoleServing(rows).fn) });
+    expect(r.policy).toMatchObject({ recorded: true, rows: 120, consultations: 90, thin: false, latency: { p50_ms: 3, p95_ms: 9, over: 90 } });
+    expect(r.policy.outcomes.map((o) => o.label)).toEqual(["not_consulted", "counterfactual", "absent", "chosen", "no_match", "out_of_bounds", "timeout", "failed"]);
+    expect(r.policy.outcomes.find((o) => o.label === "absent")).toMatchObject({ n: 90, denominator: 120, share: 0.75 });
+    const plain = renderRouteReport(r, createUi({ env: {} }));
+    expect(plain.replace(/\s+/g, " ")).toMatch(/no `policy:` block in rules\.yaml: every consultation is `absent`/);
+    expect(plain).not.toContain("served tier → chosen tier");
+    expect(strip(plain)).toBe(plain);
+  });
+
+  it("the policy's rows: a table per question, each over its own denominator; a thin window says widen --since", async () => {
+    const dir = await instance();
+    const rows = [
+      ...rowsFor({ routed: 40, fallThrough: 30 }),
+      ...policyRows({
+        outcomes: { not_consulted: 10, counterfactual: 4, chosen: 12, no_match: 6, timeout: 1, failed: 1 },
+        chosen: [["answer", "default → fast", 8], ["tools", "default → deep", 4]],
+        rowsDecided: { "small-talk": 8, "struggling": 4, "(no match)": 6 },
+        override: [3, 1],
+        latency: [120, 380],
+        shadow: [["fast", 5, 0.82]],
+      }),
+    ];
+    const r = await routeReport({ ...reportOpts(dir, consoleServing(rows).fn) });
+    expect(r.policy).toMatchObject({ rows: 34, consultations: 24, thin: true });
+    expect(r.policy.table_rows.find((x) => x.label === "small-talk")).toMatchObject({ n: 8, denominator: 18 });
+    expect(r.policy.operations.find((x) => x.label === "answer")).toMatchObject({ n: 8, denominator: 12 });
+    expect(r.policy.tiers.map((x) => x.label)).toEqual(["default → fast", "default → deep"]);
+    expect(r.policy.override.find((x) => x.label === "agrees")).toMatchObject({ n: 3, denominator: 4, share: 0.75 });
+    expect(r.policy.shadow).toEqual([{ tier: "fast", turns: 5, mean_agreement: 0.82 }]);
+    const plain = renderRouteReport(r, createUi({ env: {} }));
+    for (const heading of ["outcomes", "table rows that decided", "operations chosen", "served tier → chosen tier", "held by", "on the owner's overrides", "stage-2 shadow on the chosen tier"]) {
+      expect(plain, heading).toContain(heading);
+    }
+    expect(plain).toContain("share of chosen + no match");
+    expect(plain).toContain("default → fast");
+    expect(plain).toContain("0.820");
+    expect(plain).toContain("p50 120 ms, p95 380 ms");
+    expect(plain.replace(/\s+/g, " ")).toMatch(/Only 24 consultations — widen --since/);
+    expect(strip(plain)).toBe(plain);
+  });
+
   it("a console that does not know the query says so, with the command that lands it", async () => {
     const dir = await instance();
     await expect(routeReport({ ...reportOpts(dir, consoleServing([], 404).fn) })).rejects.toThrow(/metistry update/);

@@ -356,7 +356,7 @@ takes a `since` cursor and answers with the next one.
 | `GET /api/connections` | owner | session · local_owner | natural | — | — | T4-8a | the connections: status, tools, used by |
 | `GET /api/connections/:name` | owner | session · local_owner | natural | — | — | T4-8a | one connection |
 | `GET /api/secrets` | owner | session · local_owner | natural | — | — | served | secret names, hosts, grants, last used — never a value |
-| `GET /api/variables` | owner | session · local_owner | natural | — | — | T4-4 | the variables agents read |
+| `GET /api/variables` | owner | session · local_owner | natural | — | — | served | the variables agents read — name, value, read by, used in |
 | `GET /api/recordings/:id` | owner | session · local_owner | natural | — | — | T8-4 | one recording's retention state |
 | `POST /api/github/pulls/:owner/:repo/:number/review` | owner | session · local_owner | no | stale | — | T2-13 | post a review; the head SHA must match the one shown |
 | `POST /api/github/pulls/:owner/:repo/:number/threads/:id/reply` | owner | session · local_owner | no | stale | — | T2-13 | reply to a review thread; the head SHA must match |
@@ -1877,7 +1877,7 @@ new routine, are `local`.
 GET /api/connections           T4-8a — status, tools, used by
 GET /api/connections/:name     T4-8a
 GET /api/secrets               served — names, hosts, grants, last used: never a value
-GET /api/variables             T4-4
+GET /api/variables             served — name, value, read by, used in: never a secret
 GET /api/recordings/:id        T8-4 — a recording's retention state
 ```
 
@@ -1920,6 +1920,38 @@ and a row is built field by field. Every write is `metistry secrets
 set|replace|remove|hosts|grant` on the Mac (M7, `docs/ops/cli.md`). The
 Keychain account is the instance's own, so a second instance's console —
 even with the same file — reports the first's secret absent.
+
+#### `GET /api/variables` — the Variables list (`user` principal)
+
+```
+GET /api/variables
+200 {"variables":[{"name":"team_name",
+                   "value":"Platform",
+                   "read_by":["agent:researcher","connection:github"],
+                   "used_in":[".metistry/agents/example/researcher.md",
+                              ".metistry/connections/github.yaml"]}],
+     "as_of":"2026-09-28T13:05:00.000Z"}
+400 variables.yaml does not validate — the message names the variable and the reason, never the value
+503 no instance directory in this deployment (degrades: absent)
+```
+
+One row per variable in the instance's `.metistry/variables.yaml`, sorted by
+name (plan §2.14). `used_in` is every file under `.metistry/` (`state/`
+excluded) that references `{{ variable.<name> }}` — or, for a connection file,
+lists it under `variables:` — instance-relative; `read_by` is who those files
+stand for: `agent:<id>` for an agent definition, `connection:<name>` for a
+connection.
+
+**Never a secret, by construction.** Core's `parseVariablesFile` refuses a
+key-shaped value (*Store as Secret*), a secret's name (`api_key`,
+`github_token`), a value holding `{{ … }}` (so no `{{ secret.x }}` can ride in
+one), and — ruling 2 — a schedule or a time, by name (`standup_time`,
+`timezone`) or by value (`09:15`, a cron line, a time zone). It refuses at the
+parse, so a hand-edited file carrying one does not load: the 400 names the
+variable and the reason, the ledger row records only that it failed, and no
+row of that file is served. Every write is `metistry variables set|unset` on
+the Mac (M14, `docs/ops/cli.md`), which also refuses a value equal to one of
+the instance's own secrets.
 
 ### Outbound doors through a connection
 

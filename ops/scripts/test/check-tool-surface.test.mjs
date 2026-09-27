@@ -14,7 +14,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { findingsFor, headroomOf, MAX_DEFINITION_TOKENS, MAX_EAGER_TOOLS, measure, parseBridgeManifest } from "../check-tool-surface.mjs";
+import { readFileSync } from "node:fs";
+import { COUNT_ACKNOWLEDGED, findingsFor, headroomOf, MAX_DEFINITION_TOKENS, MAX_EAGER_TOOLS, measure, parseBridgeManifest } from "../check-tool-surface.mjs";
 
 const scriptSrc = fileURLToPath(new URL("../check-tool-surface.mjs", import.meta.url));
 
@@ -70,6 +71,21 @@ test("past the tool line: a fail, unless the number is the acknowledged one", ()
   const grown = findingsFor([bridge({ tools: MAX_EAGER_TOOLS + 2 })], { b: MAX_EAGER_TOOLS + 1 });
   assert.equal(grown.length, 1);
   assert.match(grown[0].reason, /past the 21 acknowledged/);
+});
+
+test("brain's ceiling is 28 — the connections proxy's lazy pair (T4-8b) — and the tool after it is the decision again", () => {
+  // The approved spec (§2.6, Q5): "mcp-brain moves from 26 to 28 eager
+  // tools". The manifest declares one more than the ceiling: `propose_action`,
+  // lazy by credential and never on the eager surface.
+  assert.equal(COUNT_ACKNOWLEDGED.brain, 28);
+  const manifest = parseBridgeManifest(readFileSync(fileURLToPath(new URL("../../../packages/mcp-brain/manifest.yaml", import.meta.url)), "utf8"));
+  assert.equal(manifest.declared.length, COUNT_ACKNOWLEDGED.brain + 1);
+  assert.ok(manifest.declared.includes("connections_list") && manifest.declared.includes("connections_call"));
+  const brain = (tools) => bridge({ bridge: "brain", tools, declared: manifest.declared.length });
+  assert.deepEqual(findingsFor([brain(28)]), []);
+  const next = findingsFor([brain(29)]);
+  assert.equal(next.length, 1);
+  assert.match(next[0].reason, /past the 28 acknowledged/);
 });
 
 test("an unbuilt bridge is an error, not a pass", () => {

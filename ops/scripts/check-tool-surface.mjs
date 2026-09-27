@@ -82,8 +82,22 @@ export const MAX_DEFINITION_TOKENS = 5000;
  * tokens against the >5,000 line, LOWER than the 4,979 it carried a week ago
  * with one tool fewer. The next tool after this one fails here again, and
  * that is the point.
+ *
+ * **brain moved from 26 to 28 on 2026-09-27, deliberately, for the
+ * connections proxy's lazy pair** — `connections_list` and `connections_call`
+ * (T4-8b; the approved spec's §2.6 and its Q5: "mcp-brain moves from 26 to 28
+ * eager tools"). The reasoning for this one: the pair is the ALTERNATIVE to
+ * growing this surface. Every connection the owner adds — a GitHub server
+ * with forty tools, a work Jira, a feed — is reached through these two, and
+ * none of its tools is ever listed here: `connections_list { connection }`
+ * fetches the upstream's definitions on demand, which is lazy discovery for
+ * exactly the part of the surface that would otherwise be unbounded. Two
+ * eager tools now buy a surface that stops growing with the owner's
+ * connections, rather than one that grows with each of them. The token axis
+ * still gates lazy and still holds (brain's own test ratchets it). The next
+ * tool after these two fails here again.
  */
-export const COUNT_ACKNOWLEDGED = { brain: 26 };
+export const COUNT_ACKNOWLEDGED = { brain: 28 };
 
 // ---- manifests -----------------------------------------------------------
 

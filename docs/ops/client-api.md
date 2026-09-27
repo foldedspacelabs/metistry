@@ -2372,7 +2372,10 @@ put bodies in the stream).
 - **A fresh subscriber** (no `Last-Event-ID`) gets one id-only frame first —
   `id: <head>` and a blank line. It dispatches nothing (the WHATWG rule for a
   frame with no `data`) but sets the client's last event id, so a stream that
-  hears nothing before it drops still resumes from where it opened.
+  hears nothing before it drops still resumes from where it opened. Through
+  `console session --stdio` it arrives as `{id, event: {id}}` — no `type`, no
+  `data` (through 0.13.0 the session dropped it, and the Mac had no cursor
+  until the first real event).
 - **A resuming subscriber** gets exactly the events after its id, in order,
   then the live stream — or, when any of them is gone (older than the ring,
   from before this console started, an id this console never issued), one

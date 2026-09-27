@@ -6,7 +6,7 @@
 // Phase 3+ when brain-query exists — for now continuity is the SDK
 // transcript, per §4.17 rule 6's fast-path).
 
-import { DEFAULT_CACHING, emptyCompute, finishRun, parseDecisionBlock, rollSession, startRun, type Compute, type TierMap } from "@foldedspacelabs/metistry-core";
+import { DEFAULT_CACHING, emptyCompute, finishRun, parseDecisionBlock, rollSession, startRun, v1Options, type Compute, type TierMap } from "@foldedspacelabs/metistry-core";
 import { isBudgetRefusal, offerBudgetWindow, BudgetRefusal } from "./budgets.js";
 import { recordShadow } from "./shadow.js";
 import { resolveTurn } from "./tiers.js";
@@ -148,12 +148,14 @@ export async function drainOne(db: Db, engine: Engine, tiers: TierMap, opts: Dra
     // becomes a `decision` row in the one queue (D7), answerable from chat,
     // triage or a notification. Parsed at the point the reply is stored —
     // the convention is in the seed prompt, the enforcement is here, and a
-    // malformed block simply yields no queue item.
+    // malformed block simply yields no queue item. `questions` is the record
+    // (v2, T2-3); one pick-one question also carries v1's `options`, so a
+    // client that predates v2 can still answer it with the option itself.
     const ask = parseDecisionBlock(result.text);
     if (ask) {
       await db.query(
         `INSERT INTO proposals (kind, source_agent, trust, payload) VALUES ('decision', 'assistant', 'internal', $1)`,
-        [JSON.stringify({ title: ask.title, options: ask.options, message_id: Number(out.rows[0]?.id), thread: msg.thread, in_reply_to: Number(msg.id) })],
+        [JSON.stringify({ title: ask.title, questions: ask.questions, ...v1Options(ask.questions), message_id: Number(out.rows[0]?.id), thread: msg.thread, in_reply_to: Number(msg.id) })],
       );
     }
     await db.query(`UPDATE inbound_messages SET status = 'done', session_id = $2 WHERE id = $1`, [

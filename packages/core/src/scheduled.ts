@@ -702,7 +702,12 @@ function nextFor(schedule: ManifestSchedule, name: string, ctx: ResolveContext):
   return n.ok && n.at.getTime() < ctx.now.getTime() ? { ok: true, at: ctx.now, timeZone: null } : n;
 }
 
-function timeOfDayFields(schedule: ManifestSchedule, origin: FieldOrigin, ctx: OccurrenceContext): Pick<ResolvedScheduled, "days" | "timeZone"> {
+/**
+ * A time of day's weekdays and zone, each with its origin — for a manifest's
+ * schedule (`resolveUnit`) and a New Routine's alike (the Scheduled doors),
+ * so the two cannot disagree about which days `working_days` means.
+ */
+export function timeOfDayFields(schedule: ManifestSchedule, origin: FieldOrigin, ctx: OccurrenceContext): Pick<ResolvedScheduled, "days" | "timeZone"> {
   if (isLegacyCron(schedule) || isInterval(schedule)) return { days: null, timeZone: null };
   const resolvedDays = resolveDays(schedule.days, ctx.profile.working_days);
   const days = resolvedDays === null ? null : sourced<readonly Weekday[]>(resolvedDays, typeof schedule.days === "string" ? "profile" : origin);

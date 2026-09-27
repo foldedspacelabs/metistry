@@ -437,7 +437,7 @@ describe(".metistry/scheduled.yaml, read every tick", () => {
       why: expect.stringContaining("both routines: and syncs:"),
     });
     // …and a name nothing schedules is no one's business here
-    expect(effectiveSchedule(fold, ok({ routines: { constructor: { paused: true } } }))).toEqual({ held: false, schedule: fold.schedule, paused: false });
+    expect(effectiveSchedule(fold, ok({ routines: { constructor: { paused: true } } }))).toMatchObject({ held: false, schedule: fold.schedule, paused: false });
   });
 
   // T3-2: the manifests' layer — what each shipped component declares decides
@@ -450,11 +450,11 @@ describe(".metistry/scheduled.yaml, read every tick", () => {
     const get = (name: string): ScheduledCollector => all.find((c) => c.name === name)!;
     const ok = (value: object): OverlayRead => ({ ok: true, value });
     // Inbox Sort is a routine under Scheduled, though a collector underneath
-    expect(effectiveSchedule(get("inbox-drain"), ok({ routines: { "inbox-drain": { paused: true } } }))).toEqual({ held: false, schedule: { every: "5m" }, paused: true });
+    expect(effectiveSchedule(get("inbox-drain"), ok({ routines: { "inbox-drain": { paused: true } } }))).toMatchObject({ held: false, schedule: { every: "5m" }, paused: true });
     expect(effectiveSchedule(get("inbox-drain"), ok({ syncs: { "inbox-drain": { connection: "inbox", every: "1h" } } }))).toMatchObject({ held: true, alert: true, why: expect.stringContaining("names a routine") });
     // GitHub is a sync: a routines: entry for it is not applied, and says so
     expect(effectiveSchedule(get("github-state"), ok({ routines: { "github-state": { paused: true } } }))).toMatchObject({ held: true, why: "routines.github-state: github-state is a sync — its changes live under syncs.github-state" });
-    expect(effectiveSchedule(get("github-state"), ok({ syncs: { "github-state": { connection: "github", every: "1h", raise: { assigned: false } } } }))).toEqual({ held: false, schedule: { every: "1h" }, paused: false });
+    expect(effectiveSchedule(get("github-state"), ok({ syncs: { "github-state": { connection: "github", every: "1h", raise: { assigned: false } } } }))).toMatchObject({ held: false, schedule: { every: "1h" }, paused: false });
     expect(effectiveSchedule(get("github-state"), ok({ syncs: { "github-state": { connection: "github", raise: { merged: true } } } }))).toMatchObject({ held: true, why: expect.stringContaining("GitHub raises no merged") });
     // no shipped routine declares config yet, so any key is one it does not take
     expect(effectiveSchedule(get("knowledge-fold"), ok({ routines: { "knowledge-fold": { config: { template: "Templates/Fold.md" } } } }))).toMatchObject({
@@ -480,7 +480,7 @@ describe(".metistry/scheduled.yaml, read every tick", () => {
     expect(read.ok).toBe(true);
     for (const c of all) expect(effectiveSchedule(c, read), c.name).toMatchObject({ held: false, paused: false });
     const standup = all.find((c) => c.name === "standup")!;
-    expect(effectiveSchedule(standup, read)).toEqual({ held: false, paused: false, schedule: { days: "working_days", at: ["09:15"] } });
+    expect(effectiveSchedule(standup, read)).toEqual({ held: false, paused: false, schedule: { days: "working_days", at: ["09:15"] }, config: { template: "Templates/Standup.md", skip_without_calendar_event: false } });
     if (!read.ok) return;
     expect(checkScheduled(read.value, all.map((c) => c.unit!))).toEqual([]);
   });

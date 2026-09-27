@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import type { ManifestSchedule, ProfileFacts, Weekday } from "@foldedspacelabs/metistry-core";
+import { checkScheduled, type ManifestSchedule, type ProfileFacts, type Weekday } from "@foldedspacelabs/metistry-core";
 import { loadCollectors } from "@metistry-apps/collectors";
 import { loadRoutines } from "@metistry-apps/routines";
 import {
@@ -435,6 +435,27 @@ describe(".metistry/scheduled.yaml, read every tick", () => {
       alert: true,
       why: "routines.knowledge-fold.config.template: Knowledge Fold takes no template — it declares no config",
     });
+  });
+
+  // T3-4 moves standup_days / standup_time into `routines.standup` before
+  // T3-5 ships the Standup routine. That entry must not invalidate the file
+  // or hold anything: it names nothing installed yet, so it waits, said once
+  // as applying to nothing, and applies the moment the routine lands.
+  it("routines.standup before the Standup routine exists: accepted, holds nothing, applies to nothing yet", async () => {
+    const all = await loadSchedules([
+      ...(await loadCollectors({ home: `${root}collectors` })).collectors,
+      ...(await loadRoutines({ home: `${root}routines` })).routines,
+    ]);
+    const text = `routines:\n  standup:\n    schedule: { days: working_days, at: [ "09:15" ] }\n`;
+    const dir = await mkdtemp(join(tmpdir(), "metistry-scheduled-"));
+    await writeFile(join(dir, "scheduled.yaml"), text);
+    const read = await readOverlay(join(dir, "scheduled.yaml"));
+    expect(read.ok).toBe(true);
+    for (const c of all) expect(effectiveSchedule(c, read), c.name).toMatchObject({ held: false, paused: false });
+    if (!read.ok) return;
+    expect(checkScheduled(read.value, all.map((c) => c.unit!))).toEqual([
+      { name: "standup", field: "routines.standup", message: "routines.standup names no routine here — it applies to nothing until one by that name is installed", holds: false },
+    ]);
   });
 
   it("an undeclared config key holds the routine for the ticks it lasts: not run on defaults, one row a day, one alert", async () => {

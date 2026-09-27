@@ -143,13 +143,18 @@ move. Since 2026-09-19 it has one: **`request_access {area, reason}`** on
   the tool with "ask the owner directly" (a `requests_create` report in words).
   An `escalate` with nothing declined behind it is an ordinary first ask — the
   flag comes off the record, never off the caller's word for it.
+- **The ceiling leaves a record** (C42). That third refusal writes no
+  proposal, so it used to be invisible. It writes one `runs` row, kind
+  `access_ceiling`, with the agent, the area and the declines behind it, and
+  the Agents panel lists them (`GET /api/agents`' `access_ceilings`) until the
+  agent holds the area or is revoked. You act on it there, not in the queue.
 
 ### Your three answers, and what each one does
 
 | Answer | Wire | What it does |
 | --- | --- | --- |
 | **Approve** | `allow` | Widens the agent's grant by the area it asked for — **through `writeGrants`, the same call `PUT /api/agents/:id/grants` makes**, with the same validator and the same `agent_admin` audit row (`via: triage`, `proposal: <id>`). |
-| **Revise** | `accept_with_changes` + `{"area": "…"}` | The same widening with **your** prefix instead — usually narrower. Without an `area` it is a `400`: there is nothing to grant. |
+| **Revise** | `accept_with_changes` + `{"area": "…"}` | The same widening with **your** prefix instead — the one asked for or a folder **under** it, never wider or beside it (C40): anything else is a `400` that writes nothing, because granting more than was asked is a decision for Agents. Without an `area` it is a `400`: there is nothing to grant. |
 | **Decline** | `deny` | Records the refusal on the row. **Nothing moves.** |
 | **Later / Skip** | `later` / `skip` | As everywhere: Later snoozes and settles nothing, Skip declines quietly. Neither grants. |
 
@@ -187,8 +192,11 @@ queue, through the one triage route.
 - `metistry agents autonomy <id>` shows the effective table;
   `--level <l>`, `--allow/--propose/--deny <kind>` change it (read, merge, PUT).
 - `POST /api/proposals/:id {"decision":"allow"}` on an `access_request` row
-  widens the grant and answers `{ok: true, granted: {agent, area, grants}}`;
-  `{"decision":"accept_with_changes","area":"…"}` grants that area instead.
+  widens the grant and answers `{ok: true, granted: {agent, area, grants,
+  prior_tier}}` — `prior_tier` is what it held before, so a client can say
+  when Approve traded `index` browse away (C41);
+  `{"decision":"accept_with_changes","area":"…"}` grants that area instead,
+  and only if it is at or under the one asked for (C40).
 - Every path lands in `runs`: `console/tool/propose_action` (the emit),
   `console/triage/action:<kind>` (the decision), `console/action/<kind>` (the
   execution, plus whatever the service itself records), and
@@ -209,6 +217,9 @@ psql -c "select kind, decision, payload->'action'->>'kind', payload->'result' fr
 
 # who is asking for what, and what you granted
 psql -c "select source_agent, payload->>'area', decision, payload->>'escalated', payload->'granted'->>'area' from proposals where kind='access_request' order by ts desc limit 10"
+
+# agents that hit the escalation ceiling (C42)
+psql -c "select ts, component, meta->>'area', meta->>'declines' from runs where kind='access_ceiling' order by ts desc limit 10"
 
 # approvals that outlive a re-sync (internal rows only, migration 0023)
 psql -c "select agent_id, area, proposal_id, granted_at from agent_grant_overrides order by granted_at desc"

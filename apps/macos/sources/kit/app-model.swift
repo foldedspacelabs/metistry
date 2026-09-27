@@ -58,6 +58,12 @@ public final class AppModel {
     /// badge, the Usage gauge, the configured name (shell-model.swift). It
     /// reads `console.stores` through three F-7 protocols and nothing else.
     public let shell: ShellModel
+    /// Needs You's list: the queue, its filters, the selection and the bulk
+    /// verbs (needs-you-view.swift). Held here rather than by its view, so the
+    /// list the owner left is the list they come back to (C135: show what
+    /// Metistry last had, at once); dropped with everything else on an
+    /// instance switch.
+    public let needsYou: NeedsYouModel
 
     public init(
         bundleResourceURL: URL?,
@@ -107,7 +113,13 @@ public final class AppModel {
         self.wizard = WizardModel(steps: firstRun)
         self.menu = MenuBarModel(status: status, cli: cli)
         self.logs = LogViewerModel(cli: cli)
-        self.shell = ShellModel(stores: console.stores, defaults: defaults)
+        let shell = ShellModel(stores: console.stores, defaults: defaults)
+        self.shell = shell
+        let needsYou = NeedsYouModel(session: console)
+        self.needsYou = needsYou
+        // An answer here moves the count: the row and the Dock hear it now,
+        // not at the shell's next tick.
+        needsYou.onQueueChanged = { [weak shell] in await shell?.refreshCount() }
 
         // The wizard's step 2 hands the folder back the moment it is known, so
         // every later verb runs against it.

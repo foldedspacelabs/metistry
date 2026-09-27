@@ -28,12 +28,17 @@
 # `GET /api/q/board` (P4); an agent's `queries_run` and the capture owner
 # token get the unknown-query answer. The COUNTS stay generic
 # (`board_projects` carries no path and no text).
+#
+# `description` (T1-1, C85) is the card detail's first section: what the task
+# is about, set by whoever created the row and edited only by the owner
+# (`PATCH /api/tasks/:id`). Route-only for the same reason as the rest.
 name: board
 expose: route
 description: >-
   One row per board card over the tasks module's work rows — the derived
   column (backlog / assigned / in_progress / blocked / done), whether a
-  closed card's agent reported back, who it is assigned to, who holds the
+  closed card's agent reported back, what the card is about (its
+  description), who it is assigned to, who holds the
   lease, age, last report, the room on it and how many messages it holds,
   the human todo it waits on (`meta.blocked_by`, resolved to that line's
   text and whether it is still open), and whether it wants a human. Ordered
@@ -73,7 +78,7 @@ sql: |
   ),
   carded AS (
     SELECT
-      s.id, s.title, s.kind, s.project, s.owner, s.claimed_by, s.lease_expires_at,
+      s.id, s.title, s.description, s.kind, s.project, s.owner, s.claimed_by, s.lease_expires_at,
       s.external_ref, s.updated_at, s.status, s.due, s.meta,
       rp.last_report_at,
       -- closed WITH a report from the agent that ran it vs closed with none
@@ -125,7 +130,7 @@ sql: |
   -- (path, anchor) the ref spells rather than on a concatenation, so the
   -- anchor index answers it for at most five pages of cards. An unresolvable
   -- ref comes back as the ref with no text rather than as nothing at all.
-  SELECT p."column", p.id, p.title, p.kind, p.project, p.owner, p.claimed_by, p.lease_expires_at,
+  SELECT p."column", p.id, p.title, p.description, p.kind, p.project, p.owner, p.claimed_by, p.lease_expires_at,
          p.age_hours, p.last_report_at, p.reported, p.escalated, p.external_ref, p.artifact,
          p.thread_count > 0 AS has_thread, p.thread_count,
          p.meta->>'blocked_by' AS blocked_by,

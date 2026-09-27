@@ -136,6 +136,9 @@ describe("through main(), as the owner runs it", () => {
     Object.assign(process.env, saved);
   });
 
+  /** the notices are wrapped at the terminal width and dimmed: where a line breaks depends on the temp path's length (macOS vs Linux), so compare the prose, not the layout */
+  const prose = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, "").replace(/\s+/g, " ");
+
   async function run(argv: string[], home: string) {
     const out: string[] = [];
     const err: string[] = [];
@@ -149,12 +152,12 @@ describe("through main(), as the owner runs it", () => {
     const preview = await run(["secrets", "retire-legacy-env", "--instance", i.inst, "--product-dir", i.product], i.home);
     expect(preview.code).toBe(0);
     expect(preview.out).toContain("only in the old file — to copy: METISTRY_AFM_URL, METISTRY_BRIDGE_TOKEN_APPLE_FM");
-    expect(preview.err).toContain("`metistry secrets retire-legacy-env` lists what only it still has");
+    expect(prose(preview.err)).toContain("`metistry secrets retire-legacy-env` lists what only it still has");
     delete process.env.METISTRY_INSTANCE_DIR;
     const done = await run(["secrets", "retire-legacy-env", "--yes", "--instance", i.inst, "--product-dir", i.product], i.home);
     expect(done.code).toBe(0);
     expect(existsSync(i.legacy)).toBe(false);
-    expect(done.err).not.toContain("still being read as a fallback"); // not about a file this run deleted
+    expect(prose(done.err)).not.toContain("still being read as a fallback"); // not about a file this run deleted
     expect(`${done.out}${done.err}`).not.toContain(SECRET);
   });
 

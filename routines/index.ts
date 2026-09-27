@@ -62,3 +62,6 @@ export { purgeArchive, purgePreview, type PurgeCounts, type PurgePreview, type U
 // config (`template`, `skip_without_calendar_event`). Absent until the runner
 // hands config on, and then the manifest's defaults apply.
 export type { StandupCtx } from "./standup/run.js";
+// What the Morning Brief takes beyond `PlanCtx`: a vault that may also have
+// the section door (`POST /vault/section`, T2-6) — the console's client does.
+export type { BriefCtx, BriefVault } from "./morning-brief/run.js";

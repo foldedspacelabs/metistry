@@ -48,6 +48,7 @@ import { DEVIN_PURPOSES, isDevinPurpose } from "./devin.js";
 import { listProjects, updateProject, validateProjectPatch } from "./projects.js";
 import { applyImprovement } from "./prompt-overlay.js";
 import { applyMeEdit, meEditOf } from "./profile-tidy.js";
+import { applyRestore, carriesRestore, restoreOf } from "./knowledge-restore.js";
 import { crewDispatcher, type CrewRegistry } from "./crews.js";
 import { runAction, type ActionServices } from "./actions.js";
 import { computeRoutes, isComputeRoute, type ComputeAdmin } from "./compute-routes.js";
@@ -366,7 +367,7 @@ const SUBJECT_COLUMN_NAMES = ["subject_work_updated_at", "subject_work_title", "
  * was raised.
  */
 const PROPOSAL_FOR_DECISION_SQL = `
-  SELECT p.id, p.ts, p.kind, p.source_agent, p.trust, p.payload, p.decision, p.feedback, p.decided_at, p.work_id, p.snoozed_until,
+  SELECT p.id, p.ts, p.kind, p.source_agent, p.trust, p.payload, p.source, p.decision, p.feedback, p.decided_at, p.work_id, p.snoozed_until,
          greatest(
            p.ts,
            coalesce(p.decided_at, p.ts),
@@ -1314,6 +1315,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
           ...(cfg.searchKnowledge ? { search: cfg.searchKnowledge } : {}),
           ...(cfg.vault ? { vault: cfg.vault } : {}),
           ...(cfg.knowledgeHistory ? { history: cfg.knowledgeHistory } : {}),
+          requests: db,
           queries,
         },
         principalOf(auth),
@@ -1855,8 +1857,43 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     // written, the request still waiting) if the file is no longer the
     // "before". Revise and Decline write nothing.
     let applied: { path: string; created: boolean } | undefined;
-    const meEdit = row.kind === "improvement" ? meEditOf(row.payload) : null;
-    if (meEdit !== null && verb === "allow") {
+    // A restore (T10-5, knowledge-restore.ts) is an improvement THIS console
+    // raised on the owner's word: Approve writes the note's bytes at the
+    // request's commit back as `user`, a new commit, refused `stale`
+    // (nothing written, the request still waiting) if the file is no longer
+    // the "before" it showed. A row that carries a restore this console did
+    // not raise — an agent's, a hand-written one — restores nothing, and is
+    // never read as a prompt improvement either. Revise and Decline write nothing.
+    const restoring = row.kind === "improvement" && carriesRestore(row.payload);
+    let restored: { path: string; sha: string; sha256: string } | undefined;
+    const meEdit = row.kind === "improvement" && !restoring ? meEditOf(row.payload) : null;
+    if (restoring) {
+      if (verb === "allow") {
+        const restore = restoreOf(row);
+        if (restore === null) {
+          await audit("triage", "restore", false, { proposal: row.id, error: "not_ours" });
+          return refuseAnswer(id, verb, "invalid_request", "this request carries a restore this console did not raise, so Approve restores nothing — Decline it, and restore from the note's history in Knowledge");
+        }
+        if (!cfg.vault || !cfg.knowledgeHistory) return refuseAnswer(id, verb, "not_available", `approving this restores ${restore.path}, and no vault bridge is configured in this deployment — METISTRY_RECONCILER_URL + METISTRY_BRIDGE_TOKEN_RECONCILER (docs/ops/reconciler.md)`);
+        try {
+          const r = await applyRestore(cfg.vault, cfg.knowledgeHistory, restore, row.id);
+          applied = { path: r.path, created: r.created };
+          restored = { path: r.path, sha: restore.sha, sha256: r.sha256 };
+        } catch (err) {
+          if (err instanceof VaultError) {
+            await audit("triage", "restore", false, { proposal: row.id, path: restore.path, error: err.code });
+            const refused = await refuseAnswer(id, verb, err.code, err.message);
+            // the file moved under the owner: F-1's `stale`, as every other door's 409 says
+            return err.code === "conflict" ? { status: 409, body: conflictBody("stale", err.message, row) } : refused;
+          }
+          return failedAnswer(id, verb, err);
+        }
+        await db.query(
+          `UPDATE proposals SET payload = payload || jsonb_build_object('restored', $2::jsonb) WHERE id = $1 AND decision = 'pending'`,
+          [id, JSON.stringify({ path: restored.path, sha: restored.sha, sha256: restored.sha256, at: new Date().toISOString(), by: "user" })],
+        );
+      }
+    } else if (meEdit !== null && verb === "allow") {
       if (!cfg.vault) return refuseAnswer(id, verb, "not_available", `approving this writes ${meEdit.path}, and no vault bridge is configured in this deployment — METISTRY_RECONCILER_URL + METISTRY_BRIDGE_TOKEN_RECONCILER (docs/ops/reconciler.md)`);
       try {
         const r = await applyMeEdit(cfg.vault, meEdit, row.id);
@@ -2101,13 +2138,13 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       proposal: row.id,
       kind: row.kind,
       ...(answered ? { questions: answered.length, ...(verb !== "answers" ? { v1_option: true } : {}) } : {}),
-      ...(applied ? (meEdit !== null ? { wrote: applied.path } : { overlay: applied.path }) : {}),
+      ...(applied ? (restored ? { restored: applied.path, from: restored.sha } : meEdit !== null ? { wrote: applied.path } : { overlay: applied.path }) : {}),
       ...(created ? { work_id: created.id } : {}),
       ...(acted ? { action: acted.kind } : {}),
       ...(granted ? { granted: granted.area, agent: granted.agent } : {}),
     });
     if (rows.length === 1) {
-      return { status: 200, body: { ok: true, ...(applied ? { applied } : {}), ...(enrolled ? { enrolled } : {}), ...(created ? { work: created } : {}), ...(acted ? { action: acted } : {}), ...(granted ? { granted } : {}) } };
+      return { status: 200, body: { ok: true, ...(applied ? { applied } : {}), ...(restored ? { restored } : {}), ...(enrolled ? { enrolled } : {}), ...(created ? { work: created } : {}), ...(acted ? { action: acted } : {}), ...(granted ? { granted } : {}) } };
     }
     // lost the race between the read above and this update: someone else decided it
     const now = (await db.query(PROPOSAL_FOR_DECISION_SQL, [id])).rows[0];

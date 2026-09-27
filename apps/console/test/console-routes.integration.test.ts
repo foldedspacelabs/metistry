@@ -265,6 +265,7 @@ describe.skipIf(!hasDb)("the console's compute, knowledge, commands and run-deta
     "GET /api/knowledge/areas",
     "GET /api/knowledge/history?path=Areas/Health/sleep.md",
     `GET /api/knowledge/version?path=Areas/Health/sleep.md&sha=${"5".repeat(40)}`,
+    "POST /api/knowledge/restore",
     "GET /api/commands",
   ];
 
@@ -320,6 +321,12 @@ describe.skipIf(!hasDb)("the console's compute, knowledge, commands and run-deta
     expect(history.commits).toEqual([expect.objectContaining({ sha: HISTORY_SHA, path: "Areas/Health/sleep.md", change: "added", source: "user" })]);
     const version = await (await get(`/api/knowledge/version?path=Areas/Health/sleep.md&sha=${HISTORY_SHA.slice(0, 8)}`, auth)).json();
     expect(version).toMatchObject({ path: "Areas/Health/sleep.md", sha: HISTORY_SHA, content: "# Sleep\n\nfirst draft\n" });
+    // T10-5: the restore door raises a request (and writes nothing — this vault's `write` throws)
+    const restore = await post("/api/knowledge/restore", { path: "Areas/Health/sleep.md", sha: HISTORY_SHA.slice(0, 8), seen_sha: "a".repeat(64) }, auth);
+    expect(restore.status).toBe(202);
+    const raised = await restore.json();
+    expect(raised).toMatchObject({ ok: true, raised: true, path: "Areas/Health/sleep.md", sha: HISTORY_SHA });
+    await pool.query(`DELETE FROM proposals WHERE id = $1`, [raised.proposal_id]);
   });
 
   // ------------------------------------------------------------- GET /api/compute

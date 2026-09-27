@@ -95,7 +95,7 @@ Every bridge is a published npm package usable by a stranger.
   tools, secret redaction by default — and Swift TCC bridges implement the
   spec, held to it by the same conformance tests.
 - Preview-then-confirm on destructive tools binds every bridge; a proxied
-  connection tool's On · Ask · Off is the owner's per-tool policy and defaults
+  connection tool's Allow · Ask First · Never is the owner's per-tool policy and defaults
   to Ask.
 
 ## Stack

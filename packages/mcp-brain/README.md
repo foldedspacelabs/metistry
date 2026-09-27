@@ -8,7 +8,8 @@ one of `list` / `get` / `search` / `create` / `update`
 (`docs/product/glossary.md`) — plus vault notes as MCP resources:
 
 - **in:** `capture` (a note or file into the inbox), `requests_create` (a
-  finding, decision, gotcha, or progress note as a request for the user);
+  finding, a decision made, a gotcha, or a progress note as a request for the
+  user — or a question they answer);
 - **shared work:** `tasks_list`, `tasks_claim`, `tasks_renew`,
   `tasks_update`, `tasks_release`, `tasks_close`, `tasks_create` — thin
   adapters over [`@foldedspacelabs/metistry-tasks`](../tasks);
@@ -68,7 +69,7 @@ optional nudge line. Errors set `isError` and carry core's uniform envelope
 | Tool | Arguments | Returns |
 | --- | --- | --- |
 | `capture` | `note?`, `filename?`, `content_base64?`, `mime?` (one of `note` / `content_base64` required) | `{ id, path, sha256 }` — an `inbox` row, `source = 'mcp'`, `source_agent` = you |
-| `requests_create` | `title`, `body`, `kind?` ∈ finding \| decision \| gotcha \| progress, `refs?: string[]`, `idempotency_key?` | `{ id, deduplicated: false \| "idempotency_key" \| "title" }` — a request of type `report` in the user's Needs You queue (a `proposals` row, kind `report`, trust `external`) |
+| `requests_create` | `title`, `body`, `kind?` ∈ finding \| decided \| gotcha \| progress \| question (`decision` is accepted and stored as `decided`), `questions?` (with kind `question`: 1–5 of `{prompt, options, multi?, allow_other?}`, 2–8 options each), `refs?: string[]`, `idempotency_key?` | `{ id, deduplicated: false \| "idempotency_key" \| "title" }` — a request of type `report` in the user's Needs You queue (a `proposals` row, kind `report`, trust `external`); with kind `question`, a request of type `question` (kind `decision`, the questions in `payload.questions`, `body` and `refs` as `payload.context`) that the user answers per question — an option, or their own words where `allow_other` (the default) |
 | `tasks_list` | `filter?` ∈ ready \| mine \| all (default `ready`), `project?`, `limit?` | `{ filter, tasks }` — `ready` = claimable, `mine` = held by you, `all` = both |
 | `tasks_claim` | `id`, `lease_seconds?` | `{ ok: true, task }` or `{ ok: false, reason, task? }` |
 | `tasks_renew` | `id`, `lease_seconds?` | same |

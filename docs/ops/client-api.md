@@ -585,7 +585,7 @@ local probes, are `metistry doctor` on the Mac (M6).
 ### Needs You — requests and their answers
 
 ```
-GET  /api/proposals[?since=&limit=]   200 {"proposals":[…],"cursor":"…","more":false}
+GET  /api/proposals[?since=&limit=]   200 {"proposals":[{…the stored row…, "request":{type, word, body, primary, revise, decline, grouped, decisions}}],"cursor":"…","more":false}
 POST /api/proposals/batch             {ids, decision: later | skip | deny, feedback?}   200 {"results":[…]}
 POST /api/proposals/:id               {decision, feedback?, area?, if_unchanged?: {seen_at}}
                                       200 {"ok":true, …}   409 already_decided | stale   404   400
@@ -600,7 +600,20 @@ the stored row, never from the request. `GET /api/proposals` without `since`
 is the queue (pending, minus what `later` put down); with `since` it is
 everything that changed — see the cursors above. T2-3 adds decision block v2
 (several questions per request, answers stored per question, `decided`
-accepted beside `decision`). `GET /api/needs-you/count` answers a count and the
+accepted beside `decision`).
+
+Every row `GET /api/proposals` returns carries `request`: its reading from
+F-5's type table (`describeRequest` in `packages/core/src/requests.ts`, plan
+§2.12) — the type, the word the owner reads, the body block, the answers its
+type offers there, and the decisions those answers store. A client draws the
+word it is given and keeps no kind → word map of its own (the PWA cannot
+import core; this is how it reads the one table, X-5). A kind the table does
+not know arrives as a `report` with Dismiss its only answer — the stored
+`kind` is never the word. The field is additive: every stored column is still
+there beside it. Skip is a bulk verb in every client (K2): the PWA offers it
+on the selection bar and its `s` shortcut, never on a row.
+
+`GET /api/needs-you/count` answers a count and the
 oldest request's time and nothing else — the sidebar row and the Dock badge
 (§2.10, §2.12).
 

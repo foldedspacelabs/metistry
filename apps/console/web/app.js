@@ -737,52 +737,32 @@ $("push-test").onclick = async () => {
 };
 
 // ----- Needs You (D7: ONE queue for everything that needs the user). Every
-// row is a REQUEST, and a request has one of seven types (glossary.md):
-// note · report · review · question · access · improvement · action. The stored
-// `proposals.kind` values are unchanged — this is the view layer mapping the
-// eight-or-so internal kinds onto the six words the user reads, so the queue
-// has one vocabulary instead of the union of everything that fills it.
+// row is a REQUEST, and a request reads as one of the types in F-5's table
+// (packages/core/src/requests.ts, design-build-plan §2.12). The PWA cannot
+// import core, so GET /api/proposals serves each row's reading as `request`
+// (`describeRequest`: type, word, body, answers) and this view draws that —
+// it holds no kind → word map of its own. A kind the table does not know
+// arrives as a report; the stored kind is never shown in its place.
 // Grouped by type, oldest first; every field output-encoded, attribute values
 // quote-safe too (CRIT-7). -----
-const REQUEST_TYPE = {
-  decision: "question",
-  grant_elevation: "access",
-  access_request: "access",
-  improvement: "improvement",
-  knowledge: "note",
-  draft_settle: "note",
-  action: "action",
-  report: "report",
-  review: "review",
-};
-// group headings, so Title Case (P10)
-const TYPE_LABEL = {
-  note: "Notes",
-  report: "Reports",
-  review: "Reviews",
-  question: "Questions",
-  access: "Access",
-  improvement: "Improvements",
-  action: "Actions",
-};
-const requestType = (kind) => REQUEST_TYPE[kind] ?? kind;
+/** The word the owner reads for a row — the table's, as the server served it. */
+const requestWord = (p) => p.request?.word ?? "";
+/** A group heading: the table's word in Title Case (P10). */
+const requestHeading = (word) => word.replace(/\b\w/g, (ch) => ch.toUpperCase());
 // Approve / Revise / Decline are the three answers to every request. The wire
 // (and `proposals.decision`) keeps allow / accept_with_changes / deny.
 //
-// Later and Skip are the two that are NOT answers to the request
-// (docs/ops/reply-feedback.md): Later gives the row an `until` and leaves it
-// pending, Skip declines it with nothing to say. They are valid for every
-// kind — including a `decision` proposal answered with its own options —
-// because "I cannot deal with this right now" is true of anything.
+// Later is the one per-row verb that is NOT an answer to the request
+// (docs/ops/reply-feedback.md): it gives the row an `until` and leaves it
+// pending, and it is valid for every kind. Skip — decline with nothing to
+// say — is bulk-only (§2.12, K2): it lives on the selection bar (`s`), never
+// on a row, so no single request is ever brushed off one tap from Approve.
 const DECISIONS = [
   { d: "allow", label: "Approve" },
   { d: "accept_with_changes", label: "Revise" },
   { d: "deny", label: "Decline", style: ' style="background:#7a3b3b"' },
 ];
-const DEFER = [
-  { d: "later", label: "Later" },
-  { d: "skip", label: "Skip" },
-];
+const DEFER = [{ d: "later", label: "Later" }];
 const attr = (s) => esc(s).replaceAll('"', "&quot;");
 
 // Multi-select. Ids the user ticked, and the `ts` each row was rendered with
@@ -841,14 +821,14 @@ async function loadTriage() {
   for (const p of proposals) { seenAt.set(String(p.id), p.ts); rendered.set(String(p.id), p); }
   const groups = new Map();
   for (const p of [...proposals].sort((a, b) => new Date(a.ts) - new Date(b.ts))) {
-    const type = requestType(p.kind);
-    if (!groups.has(type)) groups.set(type, []);
-    groups.get(type).push(p);
+    const word = requestWord(p);
+    if (!groups.has(word)) groups.set(word, []);
+    groups.get(word).push(p);
   }
   const note = lastAction ? `<li class="muted">last action — ${esc(actionNote(lastAction))}</li>` : "";
   lastAction = null; // said once; the record keeps it (runs, and the proposal's payload.result)
   $("proposal-list").innerHTML = note + [...groups]
-    .map(([type, rows]) => `<li class="muted">${esc(TYPE_LABEL[type] ?? type)} · ${rows.length}</li>` + rows.map(proposalRow).join(""))
+    .map(([word, rows]) => `<li class="muted">${esc(requestHeading(word))} · ${rows.length}</li>` + rows.map(proposalRow).join(""))
     .join("");
   document.querySelectorAll("[data-triage]").forEach((b) => (b.onclick = async () => {
     const body = { decision: b.dataset.d };
@@ -955,7 +935,8 @@ function accessDetail(p) {
 
 function proposalRow(p) {
   const c = p.payload?.classification ?? {};
-  const label = c.action || c.title || p.payload?.title || p.kind; // review proposals (§4.21) carry a top-level title
+  // review proposals (§4.21) carry a top-level title; with none, the table's word — never the stored kind
+  const label = c.action || c.title || p.payload?.title || requestWord(p);
   // a `decision` proposal is answered with its OWN options (the server checks them again)
   const opts = p.kind === "decision" && Array.isArray(p.payload?.options) ? p.payload.options.slice(0, 8) : null;
   // Approve as work: only where the row CARRIES a suggestion the drain or a
@@ -970,7 +951,7 @@ function proposalRow(p) {
     ? ` <button data-triage="${p.id}" data-d="accept_as_work" title="${attr(`creates the task “${work.title}”, unassigned`)}">Approve as Work</button>`
     : "";
   const defer = DEFER.map((x) => `<button data-triage="${p.id}" data-d="${x.d}" class="quiet">${x.label}</button>`).join(" ");
-  return `<li><span><input type="checkbox" data-pick="${p.id}" aria-label="${attr(`select ${label}`)}"> ${esc(label)} <span class="muted">${esc(requestType(p.kind))} · ${esc(c.kind ?? "")} · ${esc(p.source_agent)} · ${new Date(p.ts).toLocaleDateString()}</span>${actionDetail(p)}${accessDetail(p)}</span>
+  return `<li><span><input type="checkbox" data-pick="${p.id}" aria-label="${attr(`select ${label}`)}"> ${esc(label)} <span class="muted">${esc(requestWord(p))} · ${esc(c.kind ?? "")} · ${esc(p.source_agent)} · ${new Date(p.ts).toLocaleDateString()}</span>${actionDetail(p)}${accessDetail(p)}</span>
         <span>${answers}${asWork} ${defer}</span></li>`;
 }
 

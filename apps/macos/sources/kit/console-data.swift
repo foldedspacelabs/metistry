@@ -441,8 +441,14 @@ public enum RequestAnswer: Sendable, Equatable {
     /// A `decision` request is answered with one of its own `payload.options`
     /// (an enrolment's are `approve` and `deny`), and the option set is
     /// validated against the stored row. The client sends the option it was
-    /// SHOWN rather than a verb it chose.
+    /// SHOWN rather than a verb it chose. v1's wire: the console takes it only
+    /// on a request that asks exactly one pick-one question.
     case option(String)
+    /// Send Answers (T2-3): one answer per question the request asks, in
+    /// order — the question's own options and/or, where it ends in *Something
+    /// else…*, the owner's words. The console checks every one against the
+    /// questions as STORED, and never executes any of them.
+    case answers([QuestionAnswer])
 
     public var wire: String {
         switch self {
@@ -453,6 +459,7 @@ public enum RequestAnswer: Sendable, Equatable {
         case .later: return "later"
         case .skip: return "skip"
         case .option(let value): return value
+        case .answers: return "answers"
         }
     }
 
@@ -487,7 +494,14 @@ public enum RequestAnswer: Sendable, Equatable {
     public var isSendable: Bool {
         if case .revise(let reason) = self { return !reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         if case .reviseArea(let area) = self { return !area.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        if case .answers(let answers) = self { return !answers.isEmpty && answers.allSatisfy(\.isAnswered) }
         return true
+    }
+
+    /// Send Answers' list, and nothing else ever carries one.
+    public var questionAnswers: [QuestionAnswer]? {
+        if case .answers(let answers) = self { return answers }
+        return nil
     }
 
     /// The button's label. A builder word must never reach one, so these are
@@ -501,7 +515,33 @@ public enum RequestAnswer: Sendable, Equatable {
         case .later: return "Later"
         case .skip: return "Skip"
         case .option(let value): return value.replacingOccurrences(of: "_", with: " ").capitalized
+        case .answers: return "Send Answers"
         }
+    }
+}
+
+/// One question's answer (T2-3, `POST /api/proposals/:id` with `decision:
+/// "answers"`): the options chosen — at most one on a pick-one question —
+/// and/or the owner's own words where the question ends in *Something else…*.
+public struct QuestionAnswer: Sendable, Equatable {
+    public let choices: [String]
+    public let other: String?
+
+    public init(choices: [String] = [], other: String? = nil) {
+        self.choices = choices
+        self.other = other
+    }
+
+    /// Something chosen, or words written: an empty *Something else…* is not an answer.
+    public var isAnswered: Bool {
+        !choices.isEmpty || !(other ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// The wire shape: `{choices, other?}`.
+    var wire: [String: Any] {
+        var out: [String: Any] = ["choices": choices]
+        if let other { out["other"] = other }
+        return out
     }
 }
 

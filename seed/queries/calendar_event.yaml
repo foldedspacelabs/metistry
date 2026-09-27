@@ -1,0 +1,59 @@
+# Seeded default (D4 overlay: an instance file of the same name wins).
+#
+# One calendar event by its `event_id`, whatever its source — for the
+# meeting-note door (`POST /api/meetings/:event_id/note`, ticket T2-11),
+# which is handed an id from Today and nothing else. Same shape as a
+# `day_events` row, with the same two joins and the same rule for which note
+# is the first (see day_events.yaml): the door answers with that note when
+# there is one, and otherwise needs the event's title and start to make it.
+#
+# **An id no source has is no row.** The door refuses to write a note for an
+# event the calendar does not hold, so a made-up id cannot put an arbitrary
+# `event_id:` into the owner's notes. Where two sources hold one id, the row
+# is the first by connection name, byte order — the note is keyed by the id
+# alone (`vault_meeting_refs`), so which source supplies the title is the
+# only thing that choice decides.
+#
+# **`expose: route`**, on day_events.yaml's rule: it is the owner's door's
+# read, never the generic door's.
+name: calendar_event
+expose: route
+description: >-
+  One calendar event by event_id, from whichever source holds it (first by
+  connection name) — title, times, attendees with their People pages, the
+  owner's answer, and the meeting note for it (the shortest path, then byte
+  order, where two notes claim it). No row when no source holds the id.
+params:
+  event_id: { type: text, default: "" } # blank matches nothing
+sql: |
+  SELECT
+    e.event_id,
+    e.connection,
+    e.title,
+    e.starts_at AS start,
+    e.ends_at AS "end",
+    e.all_day,
+    e.location,
+    coalesce((
+      SELECT jsonb_agg(jsonb_build_object(
+               'name', nullif(a.value->>'name', ''),
+               'email', nullif(a.value->>'email', ''),
+               'person', (
+                 SELECT p.path FROM people_emails p
+                  WHERE p.email = a.value->>'email'
+                    AND NOT EXISTS (SELECT 1 FROM people_emails o WHERE o.email = p.email AND o.path <> p.path)
+                  LIMIT 1),
+               'self', coalesce((a.value->>'self')::boolean, false))
+             ORDER BY a.ordinality)
+        FROM jsonb_array_elements(e.attendees) WITH ORDINALITY AS a(value, ordinality)
+    ), '[]'::jsonb) AS attendees,
+    e.self_status,
+    (SELECT r.path FROM vault_meeting_refs r
+      WHERE r.event_id = e.event_id
+      ORDER BY length(r.path), r.path COLLATE "C"
+      LIMIT 1) AS note
+  FROM calendar_events e
+  WHERE e.event_id = :event_id
+  ORDER BY e.connection COLLATE "C"
+  LIMIT 1
+cache_ttl: 0 # the door's second call must see the first call's note as soon as the walk does

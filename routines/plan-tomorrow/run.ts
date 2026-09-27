@@ -49,19 +49,23 @@
 // `where:` the vocabulary refuses — each renders one line and the plan still
 // lands.
 
-import { parse as parseYaml } from "yaml";
 import {
   DEFAULT_TEMPLATE_MAX_BYTES,
+  PROFILE_PATH as CORE_PROFILE_PATH,
+  WEEKDAYS,
   TEMPLATE_MISSING,
   TEMPLATE_UNREADABLE,
   addTaskDays,
   calendarDate,
   intEnv,
+  profileFrontmatter,
+  profileWeekdays,
   renderTemplate,
   templateSkip,
   type CalendarEvent,
   type CalendarProvider,
   type TemplateQueries,
+  type Weekday,
 } from "@foldedspacelabs/metistry-core";
 import type { Db, RoutineCtx } from "../morning-brief/run.js";
 import { vaultReader } from "../vault-reader.js";
@@ -71,8 +75,8 @@ export const COMPONENT = "plan-tomorrow";
 export const PLAN_DIR = "Journal/Plan";
 /** D12: templates live in the vault, where Obsidian can see them and the user edits them. */
 export const TEMPLATE_PATH = "Templates/Plan.md";
-/** §6.6: the machine-readable half of "how I work". Nothing can guess these, so nothing does. */
-export const PROFILE_PATH = "Me/profile.md";
+/** §6.6: the machine-readable half of "how I work". Nothing can guess these, so nothing does. Core's, so every reader names one file. */
+export const PROFILE_PATH = CORE_PROFILE_PATH;
 /** The `intent.principal` every write carries, and the `source:` the rendered file declares — the string `ownershipRefusal` reads later. */
 export const PRINCIPAL = COMPONENT;
 
@@ -125,7 +129,8 @@ export interface PlanCtx extends RoutineCtx {
 
 // --- Me/profile.md -------------------------------------------------------------
 
-const WEEKDAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
+/** A note's leading `---` block — here only to put the degradation note under it (`withNote`); READING it is core's. */
+const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/;
 
 export interface WorkingProfile {
   /** Weekday numbers (0 = Sunday), or null when `Me/` does not say — and null is never filled in with a guess. */
@@ -134,20 +139,14 @@ export interface WorkingProfile {
   dayEnd: number | null;
 }
 
-const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/;
-
-/** A note's frontmatter as keys, or null when it has none / is not a mapping. Never throws: an unreadable header is an absent one. */
+/**
+ * A note's frontmatter as keys, or null when it has none / is not a mapping.
+ * Never throws: an unreadable header is an absent one. Core's reader
+ * (`profileFrontmatter`) — the scheduler reads `Me/profile.md` through the
+ * same one, so the two cannot disagree about what the profile says.
+ */
 export function frontmatterOf(text: string | null): Record<string, unknown> | null {
-  if (text === null) return null;
-  const m = FRONTMATTER_RE.exec(text);
-  if (!m) return null;
-  let parsed: unknown;
-  try {
-    parsed = parseYaml(m[1] ?? "");
-  } catch {
-    return null;
-  }
-  return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null;
+  return profileFrontmatter(text);
 }
 
 /**
@@ -160,17 +159,9 @@ export function sourceOf(text: string): string | null {
   return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
 }
 
-/** `[mon, tue]`, `["Monday"]` or a block sequence — anything YAML admits, as weekday numbers. Null when nothing readable is there. */
+/** `[mon, tue]`, `["Monday"]` or a block sequence — anything YAML admits, as weekday numbers. Null when nothing readable is there. Core's `profileWeekdays`, as numbers. */
 export function workingDaysOf(value: unknown): number[] | null {
-  const raw = Array.isArray(value) ? value : typeof value === "string" ? value.split(",") : null;
-  if (raw === null) return null;
-  const days = new Set<number>();
-  for (const entry of raw) {
-    if (typeof entry !== "string") continue;
-    const n = WEEKDAYS.indexOf(entry.trim().slice(0, 3).toLowerCase() as (typeof WEEKDAYS)[number]);
-    if (n >= 0) days.add(n);
-  }
-  return days.size === 0 ? null : [...days].sort((a, b) => a - b);
+  return profileWeekdays(value)?.map((d: Weekday) => WEEKDAYS.indexOf(d)) ?? null;
 }
 
 /** `"09:00-17:30"` → 1050, the minute the working day ends. Null when it is absent or shaped otherwise — never a guess. */

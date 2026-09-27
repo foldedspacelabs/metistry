@@ -32,14 +32,11 @@ routine manifests carry §2.5's default schedules in the closed shape
   console's authority to write the file (`CALLER_AUTHORITY.console`) — T3-2.
   The collector manifests move to the closed shape there too (they still
   carry cron strings, read as intervals), and gain `display_name`, `config`
-  and their Needs You rules.
+  and their Needs You rules. Until the console may write the file, the
+  standup move (below) is refused at the overlay write and does nothing.
 - **The Scheduled doors**, the file's only writer — T3-3. Agent routines —
   a New Routine's actor, task and grants — run through T3-8; until then the
   runner schedules only components that have code.
-- **`Me/profile.md` as a layer with origins**, and moving `standup_days` /
-  `standup_time` onto the Standup routine — T3-4. The runner already reads
-  `timezone` and `working_days` from it (below), through the same readers
-  `plan-tomorrow`'s working-day guard uses.
 
 ## The file
 
@@ -178,6 +175,37 @@ it (`FIELD_ORIGINS`, `FIELD_ORIGIN_LABELS` in `scheduled.ts`):
 
 A resolved field is a `Sourced<T>` — `{ value, origin }`. The resolver that
 produces them is T3-2's, and T3-4's for the profile.
+
+## `Me/profile.md`, and the standup move
+
+`Me/profile.md` keeps facts about you — `timezone`, `working_days`,
+`working_hours`, `daily_capacity_min`, `task_size_minutes`, `today_cap` — and
+Metistry only reads it. The readers are `profileFacts`, `profileFrontmatter`
+and `profileWeekdays` in `scheduled.ts`: the scheduler and Tomorrow's Plan's
+working-day guard read the file through the same ones. A schedule on
+`working_days` follows the profile until you set days on the routine
+(`resolveScheduleDays`, origin *from your profile*); with no working days in
+the profile the routine is absent — `no_working_days` — and nothing guesses.
+
+**`standup_days` and `standup_time` moved to the Standup routine** (§4 Q13).
+When the console starts it reads them **once** into
+`routines.standup.schedule` here — days that are your working days become
+`working_days`, so the standup keeps following the profile; a missing time is
+08:00 — and then raises **one** request in Needs You, *Tidy Me/profile.md*,
+showing the file before and after the two lines go:
+
+- **Approve** writes that "after", as you — and is refused, writing nothing,
+  if the file changed since you were shown it.
+- **Decline** leaves the lines. Nothing reads them, and `metistry doctor`
+  names them in one info line under `instance`.
+- It is raised once, ever: not again after either answer. Delete the lines
+  yourself and a waiting request clears on its own.
+
+What the move will not do: rewrite an entry you already gave the Standup
+routine a schedule in (yours wins; the tidy is still offered), rewrite a file
+that does not validate (it waits for you to fix it), or move a line it
+cannot read (`standup_time: after coffee` — doctor says why). The code is
+`planStandupMove` (core, pure) and `apps/console/src/profile-tidy.ts`.
 
 ## The next occurrence
 

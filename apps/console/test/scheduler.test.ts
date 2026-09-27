@@ -107,7 +107,7 @@ describe("the default schedules fire once, at their time (T3-1's acceptance)", (
     const { routines, skipped } = await loadRoutines({ home: `${root}routines` });
     expect(skipped).toEqual([]);
     const loaded = await loadSchedules(routines.map((u) => ({ ...u, run: recorder(db, fired, u.name) })));
-    expect(loaded.map((r) => r.name).sort()).toEqual(["knowledge-fold", "morning-brief", "plan-tomorrow", "reply-review", "session-purge", "weekly-review"]);
+    expect(loaded.map((r) => r.name).sort()).toEqual(["knowledge-fold", "morning-brief", "plan-tomorrow", "reply-review", "session-purge", "update-check", "weekly-review"]);
 
     // Sunday 00:00 to Saturday 23:59, New York
     await runClock(db, loaded, { from: "2026-09-20T04:00:00Z", to: "2026-09-27T03:59:00Z" });
@@ -121,12 +121,18 @@ describe("the default schedules fire once, at their time (T3-1's acceptance)", (
     expect(ats(fired["reply-review"])).toEqual(everyDay.map((d) => `${d} 23:00`));
     expect(ats(fired["weekly-review"])).toEqual(["2026-09-20 18:00"]);
     expect(ats(fired["session-purge"])).toEqual(everyDay.map((d) => `${d} 04:00`)); // T3-9: the session archive's retention
+    // §2.20's Update Check is an interval (@daily), not a time of day: due at
+    // the first tick (it has never run), then once every 24 hours after
+    expect(ats(fired["update-check"])).toEqual(everyDay.map((d) => `${d} 00:00`));
 
-    // each run is handed its slot and zone, and its row carries the slot
-    for (const f of Object.values(fired).flat()) expect(f).toMatchObject({ scheduledFor: f.at, timeZone: NY });
+    // each time-of-day run is handed its slot and zone, and its row carries the slot
+    const slotted = Object.entries(fired).filter(([name]) => name !== "update-check");
+    for (const f of slotted.flatMap(([, v]) => v)) expect(f).toMatchObject({ scheduledFor: f.at, timeZone: NY });
     const rows = db.runs.filter((r) => r.kind === "routine_run");
-    expect(rows).toHaveLength(5 + 7 + 5 + 7 + 1 + 7);
-    for (const r of rows) expect(r.meta).toMatchObject({ scheduled_for: r.ts.toISOString(), time_zone: NY, outcome: "silent" });
+    const slotRows = rows.filter((r) => r.component !== "update-check");
+    expect(slotRows).toHaveLength(5 + 7 + 5 + 7 + 1 + 7);
+    expect(rows).toHaveLength(slotRows.length + 7);
+    for (const r of slotRows) expect(r.meta).toMatchObject({ scheduled_for: r.ts.toISOString(), time_zone: NY, outcome: "silent" });
   }, 60_000); // ten thousand ticks: ~3 s alone, more beside every other suite
 });
 

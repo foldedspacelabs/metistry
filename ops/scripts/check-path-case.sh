@@ -29,7 +29,11 @@ fi
 # exception: SwiftPM looks for those exact names and there is no way to rename
 # them. Everything else under apps/macos IS lowercase — the Swift targets name
 # their own `path:` rather than taking SPM's default `Sources/<Target>/`.
-allowed='^(seed/vault/|.*/(README|LICENSE|CLAUDE|AGENTS|SKILL|RESULTS|SYNTHESIS|Dockerfile|Info\.plist|PRODUCT|MEMORY|CHANGELOG)[^/]*$|(README|LICENSE|CLAUDE|AGENTS)[^/]*$|apps/macos/Package\.(swift|resolved)$|metistry-build-plan\.md$|docs/)'
+#
+# The root's CONTRIBUTING, SECURITY and NOTICE, and `.github/`'s CODEOWNERS,
+# ISSUE_TEMPLATE/ and PULL_REQUEST_TEMPLATE.md, are names GitHub (and the
+# Apache licence, for NOTICE) look for exactly.
+allowed='^(seed/vault/|.*/(README|LICENSE|CLAUDE|AGENTS|SKILL|RESULTS|SYNTHESIS|Dockerfile|Info\.plist|PRODUCT|MEMORY|CHANGELOG)[^/]*$|(README|LICENSE|CLAUDE|AGENTS|CONTRIBUTING|SECURITY|NOTICE)[^/]*$|\.github/(CODEOWNERS|ISSUE_TEMPLATE/[a-z0-9_.-]+|PULL_REQUEST_TEMPLATE\.md)$|apps/macos/Package\.(swift|resolved)$|metistry-build-plan\.md$|docs/)'
 offenders=$(git ls-files | grep -Ev "$allowed" | grep '[A-Z]' || true)
 if [ -n "$offenders" ]; then
   echo "unexpected uppercase outside the seed vault tree (casing rule, CLAUDE.md):" >&2

@@ -443,6 +443,8 @@ describe("doctor: failed", () => {
     const okRest = { "/health": res(200), "/api/status": res(401) };
     const tokenRejected = byName((await doctor({ ...base, fetchFn: fakeFetch({ "7901/check": res(401), ...okRest }) })).rows).x;
     expect(tokenRejected).toMatchObject({ status: "failed", remediation: expect.stringMatching(/rejected the token \(HTTP 401\)/) });
+    // …and names the restart that makes the bridge read .env again, not just the diagnosis
+    expect(tokenRejected?.remediation).toMatch(/it reads \.env only at start, so restart it: docker compose up -d x$/);
     // T4-21: the button is "open Secrets", not a parsed command — the wrong-token
     // case is the one a person fixes by editing a value, never by running one
     expect(tokenRejected?.action).toEqual({ kind: "open_secrets", label: "Fix METISTRY_BRIDGE_TOKEN_X in Secrets" });

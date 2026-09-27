@@ -10,6 +10,8 @@ import { attr, clockTime, dateTime, esc, scopeOf } from "./lib.js";
 // never import it.
 import { mountNeedsYou } from "./needs-you.js";
 import { mountToday } from "./today.js";
+// The live-changes stream and the polls it stands in for (T7-7, §2.20).
+import { EVENTS_CAPABILITY, createLive, createRefresher, viewsFor } from "./live.js";
 
 const { startRegistration, startAuthentication } = window.SimpleWebAuthnBrowser;
 
@@ -137,6 +139,7 @@ function chrome(on) {
 
 function showAuth() {
   signedIn = false;
+  live.stop(); // no stream and no poll while signed out; signing in starts both again
   closeSheet();
   current = null;
   chrome(false);
@@ -227,11 +230,11 @@ async function refreshNeeds() {
   setNeeds(waiting);
 }
 
-let needsTimer = null;
+// The fallback while the stream is down: `needs_you.changed` carries the count
+// while it is up, and this timer does not run (live.js).
 function watchNeeds(intervalMs = 30000) {
   refreshNeeds().catch(() => {});
-  if (needsTimer) return;
-  needsTimer = setInterval(() => {
+  live.poll("needs", () => {
     if (signedIn && document.visibilityState === "visible") refreshNeeds().catch(() => {});
   }, intervalMs);
 }
@@ -270,7 +273,7 @@ $("enroll-btn").onclick = async () => {
   const response = await startRegistration({ optionsJSON: options });
   const label = prompt("name this device (e.g. Matt's iPhone)", "device") ?? "device";
   const fin = await fetch("/auth/enroll/finish", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: enrollCode, label, response }) });
-  if (fin.ok) { history.replaceState(null, "", "/"); show(HOME); watchNeeds(); } else alert("enrollment failed");
+  if (fin.ok) { history.replaceState(null, "", "/"); show(HOME); goLive(); } else alert("enrollment failed");
 };
 
 $("login-btn").onclick = async () => {
@@ -278,7 +281,7 @@ $("login-btn").onclick = async () => {
   const { key, options } = await start.json();
   const response = await startAuthentication({ optionsJSON: options });
   const fin = await fetch("/auth/login/finish", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ key, response }) });
-  if (fin.ok) { show(hasDraft() ? "chat" : HOME); replayDraft(); watchNeeds(); } else alert("sign-in failed");
+  if (fin.ok) { show(hasDraft() ? "chat" : HOME); replayDraft(); goLive(); } else alert("sign-in failed");
 };
 
 // ----- chat -----
@@ -392,11 +395,10 @@ function wireTapbacks() {
   }));
 }
 
-// live updates: poll while the chat is visible; burst after a send
-let pollTimer = null;
+// live updates: `message.new` and `turn.progress` while the stream is up;
+// while it is down, poll while the chat is visible, and burst after a send
 function pollChat(intervalMs = 2500) {
-  if (pollTimer) clearInterval(pollTimer);
-  pollTimer = setInterval(() => {
+  live.poll("chat", () => {
     if (!$("chat").hidden && document.visibilityState === "visible") loadMessages().catch(() => {});
   }, intervalMs);
 }
@@ -1596,11 +1598,10 @@ async function loadFeedView() {
   pollFeed();
 }
 
+// `run.*` and `capture.new` while the stream is up; while it is down,
 // auto-refresh every 10s while the tab is visible, like chat's poll
-let feedTimer = null;
 function pollFeed(intervalMs = 10000) {
-  if (feedTimer) clearInterval(feedTimer);
-  feedTimer = setInterval(() => {
+  live.poll("feed", () => {
     if (!$("feed").hidden && document.visibilityState === "visible") loadFeed().catch(() => {});
   }, intervalMs);
 }
@@ -1958,14 +1959,13 @@ async function loadBoardView() {
   pollBoard();
 }
 
-// auto-refresh on the feed's cadence — a board that lags lies about who holds
-// the lease. Never mid-gesture, though: re-rendering the columns under a drag
-// or under an open picker would cancel the thing the user was doing.
-let boardTimer = null;
+// `work.changed` while the stream is up; while it is down, auto-refresh on
+// the feed's cadence — a board that lags lies about who holds the lease.
+// Never mid-gesture, though: re-rendering the columns under a drag or under
+// an open picker would cancel the thing the user was doing.
 const boardBusy = () => boardDragging !== null || ["board-move", "board-assign", "board-detail"].some((id) => !$(id).hidden);
 function pollBoard(intervalMs = 10000) {
-  if (boardTimer) clearInterval(boardTimer);
-  boardTimer = setInterval(() => {
+  live.poll("board", () => {
     if (!$("board").hidden && document.visibilityState === "visible" && !boardBusy()) loadBoard().catch(() => {});
   }, intervalMs);
 }
@@ -2017,6 +2017,84 @@ async function loadPresence() {
   }
 }
 
+// ===== live changes (T7-7; design-build-plan §2.20) =====
+// One `EventSource` on `GET /api/events` while signed in. An event names what
+// changed; the view on screen that reads it refetches through its own route
+// (ids, never bodies — the stream opens no read path). `needs_you.changed`
+// carries the count, so the bell repaints without a fetch. The polls above
+// are the fallback and run only while the stream is not up; the stream's
+// state is on <body data-stream>, which the offline band (T7-4) follows.
+const LIVE_REFRESH = {
+  today: () => today.refresh(),
+  chat: () => loadMessages(),
+  triage: () => needsYou.load(),
+  feed: () => loadFeed(),
+  board: () => loadBoard(),
+  rooms: () => loadRooms(),
+  artifacts: () => (artOpen?.version ? loadThreads(artOpen.id, artOpen.version) : loadArtifacts()),
+  agents: () => loadPresence(),
+  projects: () => loadProjects(),
+  usage: () => loadUsage(),
+  settings: () => loadSettings(),
+};
+
+/** A text field with focus inside one of these sections: a repaint would take what is being typed. */
+function typingIn(sections) {
+  const el = document.activeElement;
+  if (!el || !/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return false;
+  if (el.tagName === "INPUT" && /^(checkbox|radio|button|submit|reset)$/.test(el.type)) return false;
+  return sections.some((id) => $(id).contains(el));
+}
+
+const liveRefresher = createRefresher({
+  refreshers: LIVE_REFRESH,
+  visible: () => (signedIn ? [current, sheetView].filter(Boolean) : []),
+  // chat and a room repaint their messages, never the field being typed in
+  busy: (view) => (view === "board" && boardBusy()) || (view !== "chat" && view !== "rooms" && typingIn(VIEWS[view].sections)),
+  hidden: () => document.visibilityState !== "visible",
+});
+
+const live = createLive({
+  EventSource: typeof window.EventSource === "function" ? window.EventSource : null,
+  onEvent(type, data) {
+    if (type === "needs_you.changed") {
+      if (Number.isFinite(data.waiting)) setNeeds(data.waiting);
+      else refreshNeeds().catch(() => {});
+    }
+    liveRefresher.queue(viewsFor(type, data, { artifact_id: artOpen?.id }));
+  },
+  // `resync`, or a fresh stream after the browser gave up: what changed in between is unknown
+  onReload() {
+    refreshNeeds().catch(() => {});
+    liveRefresher.queue(Object.keys(LIVE_REFRESH));
+  },
+  onState(state) { document.body.dataset.stream = state; },
+});
+
+/**
+ * Signed in: the chat's and the count's fallback polls, and the stream —
+ * when `GET /api/identity` says this console serves it (the `events`
+ * capability). Without it, or without `EventSource`, the polls are all there is.
+ */
+async function goLive() {
+  pollChat();
+  watchNeeds();
+  let events = false;
+  try {
+    const res = await fetch("/api/identity");
+    if (res.ok) events = ((await res.json()).capabilities ?? []).includes(EVENTS_CAPABILITY);
+  } catch { /* unreadable: poll */ }
+  if (signedIn) live.start({ stream: events });
+}
+
+document.addEventListener("focusout", () => setTimeout(() => liveRefresher.flush(), 0)); // a deferred refetch lands once the field is left
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible") return;
+  liveRefresher.flush();
+  live.nudge();
+});
+window.addEventListener("online", () => live.nudge());
+
 // ----- boot -----
 // Last, so that everything above exists before the first view loads. Booting
 // from the middle of the module loaded a view into constants the module had
@@ -2026,5 +2104,5 @@ if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").cat
 try {
   const probe = await fetch("/api/status");
   // a #/artifacts/… or #/rooms/work/… link (what a proposal carries) opens straight there; Today is home
-  if (probe.ok) { show(artifactRoute() ? "artifacts" : roomRoute() ? "rooms" : HOME); replayDraft(); pollChat(); watchNeeds(); } else showAuth();
+  if (probe.ok) { show(artifactRoute() ? "artifacts" : roomRoute() ? "rooms" : HOME); replayDraft(); goLive(); } else showAuth();
 } catch { showAuth(); }

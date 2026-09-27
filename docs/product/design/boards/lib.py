@@ -3012,7 +3012,7 @@ def scheduleblock(T):
         + f'<div style="margin-top: 4px;">'
         + kv(T,"Next Run","Tomorrow, 6:02 AM")
         + kv(T,"Then","Wednesday, 6:02 AM &middot; Thursday, 6:02 AM")
-        + kv(T,"Time Zone","America/Detroit",last=True) + '</div>')
+        + kv(T,"Time Zone","America/New_York",last=True) + '</div>')
 
 def outputblock(T):
     return sunk(T,

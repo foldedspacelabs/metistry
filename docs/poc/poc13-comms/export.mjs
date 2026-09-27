@@ -7,7 +7,7 @@ import { homedir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 
-const OUT = '/Users/mattcolf/Development/Metistry/.claude/worktrees/metistry-phase-0-poc-12cdbc/poc/poc13-comms';
+const OUT = '/Users/example/Development/Metistry/.claude/worktrees/metistry-phase-0-poc-12cdbc/poc/poc13-comms';
 const DB = `${homedir()}/Library/Messages/chat.db`;
 const q = (sql) => JSON.parse(execFileSync('/usr/bin/sqlite3', ['-readonly', '-json', DB, sql], { encoding: 'utf8', maxBuffer: 1 << 28 }) || '[]');
 

@@ -404,7 +404,8 @@ the iPhone Home Screen over `https://mac-studio.example.ts.net/`
 `web.push.apple.com`. First pushes failed `403 BadJwtToken` — root cause:
 **Apple rejects a VAPID `sub` contact of `mailto:...@example.invalid`**
 (FCM had accepted the identical JWT; Apple validates the contact URI).
-Changed to `mailto:metistry@mattcolf.dev` → **201 Created**, notification
+Changed to `mailto:metistry@example.com` (standing in for a real
+address on the owner's own domain) → **201 Created**, notification
 delivered to the phone including with the app closed, triggered from the Mac.
 Build note: the production console's VAPID subject must be a real contact on
 a real domain. (Debug detour recorded honestly: a pkill pattern that didn't
@@ -1027,7 +1028,7 @@ Anything a finding invalidates. Note it here; don't edit the plan.
 3. *Binaries:* stable-path compiled binaries for the native tier. Confirmed.
 4. *Login window:* stay logged-in-user (gui/501 LaunchAgents) for now;
    service-based approaches later if ever needed.
-5. *Gateway (`mattcolf.dev`):* only for exposing services (incl. MCP) beyond
+5. *Gateway (a home gateway):* only for exposing services (incl. MCP) beyond
    the local host — register there only if cloud agents/internet need it;
    otherwise host networking within the container setup.
 6. *Docker networking:* no Docker-Desktop magic — explicit configuration
@@ -1053,7 +1054,7 @@ Anything a finding invalidates. Note it here; don't edit the plan.
    for a logged-in `gui/501` LaunchAgent. If the Mac Studio is ever expected
    to serve while logged out / after reboot-to-login-window, that needs one
    follow-up test and possibly auto-login policy.
-5. **Home gateway (`mattcolf.dev` + tailnet, being built in a parallel
+5. **Home gateway (own domain + tailnet, being built in a parallel
    session):** the user intends it as the exposure path for local services,
    likely including MCP bridges for the future `cloud` profile — overlaps
    §4.16's satellite-node story and PoC-6's `tailscale serve`. Decide how the

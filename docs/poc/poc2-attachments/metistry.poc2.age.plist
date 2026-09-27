@@ -4,10 +4,10 @@
   <key>Label</key><string>metistry.poc2.age</string>
   <key>ProgramArguments</key><array>
     <string>/opt/homebrew/bin/node</string>
-    <string>/Users/mattcolf/Development/Metistry/.claude/worktrees/metistry-phase-0-poc-12cdbc/poc/poc2-attachments/presence_by_age.mjs</string>
+    <string>/Users/example/Development/Metistry/.claude/worktrees/metistry-phase-0-poc-12cdbc/poc/poc2-attachments/presence_by_age.mjs</string>
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><false/>
-  <key>StandardOutPath</key><string>/private/tmp/claude-501/-Users-mattcolf-Development-Metistry--claude-worktrees-metistry-phase-0-poc-12cdbc/3daa1fa7-6368-4d64-85d3-4af8b9ceffeb/scratchpad/poc2age.out</string>
-  <key>StandardErrorPath</key><string>/private/tmp/claude-501/-Users-mattcolf-Development-Metistry--claude-worktrees-metistry-phase-0-poc-12cdbc/3daa1fa7-6368-4d64-85d3-4af8b9ceffeb/scratchpad/poc2age.err</string>
+  <key>StandardOutPath</key><string>/private/tmp/claude-501/-Users-example-Development-Metistry--claude-worktrees-metistry-phase-0-poc-12cdbc/3daa1fa7-6368-4d64-85d3-4af8b9ceffeb/scratchpad/poc2age.out</string>
+  <key>StandardErrorPath</key><string>/private/tmp/claude-501/-Users-example-Development-Metistry--claude-worktrees-metistry-phase-0-poc-12cdbc/3daa1fa7-6368-4d64-85d3-4af8b9ceffeb/scratchpad/poc2age.err</string>
 </dict></plist>

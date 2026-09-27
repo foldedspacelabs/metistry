@@ -178,7 +178,7 @@ It runs as a plain background `node` process (started with `nohup`, logging to `
 It does **not** survive a reboot. To restart:
 
 ```sh
-cd /Users/mattcolf/Development/Metistry/.claude/worktrees/metistry-phase-0-poc-12cdbc/poc/poc6-pwa
+cd /Users/example/Development/Metistry/.claude/worktrees/metistry-phase-0-poc-12cdbc/poc/poc6-pwa
 nohup /opt/homebrew/bin/node server.mjs > server.log 2>&1 &
 ```
 

@@ -12,8 +12,8 @@
 //  2. **One file, its own, as `source: standup`** — written through the
 //     vault bridge as principal `standup`, dated from the slot, never over a
 //     file it does not own, and never twice for one morning.
-//  3. **No model** — `prose` is not legal in a standup render (C103 is
-//     T3-6's), so no turn is enqueued and the prose line renders its refusal.
+//  3. **No model in the routine** — the seeded template asks none; a `prose`
+//     line (legal since C103) is a pending slot and exactly ONE turn.
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -301,15 +301,31 @@ describe("standup: what it does with a template it cannot use (§6.4)", () => {
 
 // ------------------------------------------------------------- no model
 
-describe("standup: model-free", () => {
-  it("`prose` renders its refusal in a standup — no slot, no turn, no inbound message (C103 is T3-6's)", async () => {
+describe("standup: model-free by default, one turn for prose (C103)", () => {
+  it("the seeded template asks no model: no slot, no turn", async () => {
     const db = fakeDb();
-    const vault = seededVault({ [DEFAULT_TEMPLATE]: "---\nsource: user\n---\n# Standup — {{ date }}\n\n{{ prose \"say something\" }}\n" });
+    const vault = seededVault();
     expect(await run(db, ctxWith(vault))).toBe(1);
     expect(vault.writes[0]!.text).not.toContain("metistry:prose");
-    expect(vault.writes[0]!.text).toContain("only available in a fold template");
-    expect(db.rows()[0]).toMatchObject({ template_warnings: 1 });
     expect(db.calls.some((c) => c.text.includes("inbound_messages"))).toBe(false);
+    expect(db.rows()[0]).toMatchObject({ prose_slots: 0 });
+  });
+
+  it("`prose` lines are pending slots in the file it writes, and ONE turn names them all", async () => {
+    const db = fakeDb();
+    const vault = seededVault({ [DEFAULT_TEMPLATE]: '---\nsource: user\n---\n# Standup — {{ date }}\n\n{{ prose "say what matters" }}\n\n{{ prose "say what is blocked" }}\n' });
+    expect(await run(db, ctxWith(vault))).toBe(1);
+    const text = vault.writes[0]!.text;
+    expect(vault.writes[0]!.principal).toBe(PRINCIPAL); // the file stays the routine's
+    expect(text).toContain("<!-- metistry:prose 1 --> _pending");
+    expect(text).toContain("<!-- metistry:prose 2 --> _pending");
+    const turns = db.calls.filter((c) => c.text.includes("INSERT INTO inbound_messages"));
+    expect(turns).toHaveLength(1);
+    expect(turns[0]!.values[0]).toBe(COMPONENT);
+    expect(String(turns[0]!.values[1])).toContain("1. say what matters");
+    expect(String(turns[0]!.values[1])).toContain("2. say what is blocked");
+    expect(JSON.parse(String(turns[0]!.values[2]))).toMatchObject({ kind: "prose", tier: "routine", fresh_session: true, source: COMPONENT, path: FILE, slots: 2 });
+    expect(db.rows()[0]).toMatchObject({ prose_slots: 2, template_warnings: 0 });
   });
 });
 

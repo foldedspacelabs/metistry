@@ -6,9 +6,11 @@ description: >
   The morning standup (design-build-plan §2.13) — renders Templates/Standup.md
   (or the template its config names) into Journal/Standup/<date>.md, written
   through the reconciler as principal `standup` and carrying `source: standup`:
-  yesterday's done lines, today's, and what is blocked. Model-free
-  (invariant 4) — `prose` is not legal in the standup template yet, so nothing
-  here reaches an engine and no assistant turn is needed. Writes exactly one
+  yesterday's done lines, today's, and what is blocked. The routine calls no
+  model (invariant 4): a `prose` line in the template (legal since C103) is left
+  as a pending slot and filled by ONE assistant turn, through knowledge_write,
+  which may change those lines and nothing else — the seeded template has none,
+  so by default no model is asked. Writes exactly one
   machine-owned file, its own reserved subfolder's, and never a note the owner
   owns. Working days at 08:00; the runner fires it at its time
   (docs/ops/scheduled.md) and records `skipped:no_working_days` when

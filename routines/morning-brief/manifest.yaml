@@ -2,10 +2,28 @@ schema: 1
 name: morning-brief
 type: routine
 display_name: "Morning Brief"
-description: Daily review with the D10 soft budget — most impactful proposals surfaced, full queue one tap away, un-acted items auto-expire (searchable, never lost)
+description: >
+  The one morning surface (design-build-plan §2.13; C97, C102, C103, C111).
+  Renders Templates/Brief.md into Journal/Brief/<date>.md, written through the
+  reconciler as principal `morning-brief` and carrying `source: morning-brief`:
+  what matters today, the standup embedded by reference (it lands at 8:00),
+  Next Up for each of today's meetings, what is waiting on you. Writes the
+  daily note's Metistry section — plan, meetings, the standup's embed —
+  model-free, between its markers only, never creating the note. The routine
+  calls no model: the file's prose slots (the template's `prose` lines and one
+  line per meeting) are filled by ONE assistant turn, through knowledge_write,
+  which may change those lines and nothing else. Then the chat message with
+  the D10 soft budget, linking the file; un-acted proposals auto-expire
+  (searchable, never lost).
 # §2.5's default, as answered (§4 Q12): working days at 07:00 — before the
 # 08:00 standup, which the brief embeds by reference. `working_days` follows
 # Me/profile.md; with none there the runner records
 # `skipped:no_working_days` and nothing is guessed. `.metistry/scheduled.yaml`
 # may change it (docs/ops/scheduled.md).
 schedule: { days: working_days, at: ["07:00"] }
+config:
+  template:
+    kind: path
+    label: Shape From
+    description: The vault template the brief is rendered from. Today's meetings are listed under its "## Next Up" heading, or at the end.
+    default: Templates/Brief.md

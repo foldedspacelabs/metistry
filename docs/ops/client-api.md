@@ -364,8 +364,8 @@ takes a `since` cursor and answers with the next one.
 | `POST /api/github/pulls/:owner/:repo/:number/threads/:id/resolve` | owner | session · local_owner | no | stale | — | T2-13 | resolve a review thread; the head SHA must match |
 | `POST /api/trackers/:connection/issues` | owner | session · local_owner | natural | — | — | T4-25 | create an issue from a task; idempotent by task key |
 | `POST /api/trackers/:connection/issues/:key/complete` | owner | session · local_owner | natural | — | — | T4-26 | close an issue |
-| `POST /api/prose/:id/feedback` | owner | session · local_owner | natural | — | — | T1-12 | rate one piece of generated prose |
-| `DELETE /api/prose/:id/feedback` | owner | session · local_owner | natural | — | — | T1-12 | clear a prose rating |
+| `POST /api/prose/:id/feedback` | owner | session · local_owner | natural | — | — | served | rate one piece of generated prose |
+| `DELETE /api/prose/:id/feedback` | owner | session · local_owner | natural | — | — | served | clear a prose rating |
 | `GET /api/events` | owner | session · local_owner | natural | — | — | served | Server-Sent Events: what changed, as ids; `Last-Event-ID` resumes |
 | `GET /api/vault/status` | owner | session · local_owner | natural | — | — | served | branch, ahead and behind, last commit, last push, conflict |
 | `POST /api/vault/rollback` | local | local_owner | no | — | — | T10-6 | raise a Needs You request to roll back, with the preview |
@@ -2112,9 +2112,21 @@ the line with `POST /api/vault-tasks/:task_key/link`.
 ### Prose feedback
 
 ```
-POST   /api/prose/:id/feedback    T1-12 — rate one piece of generated prose (an upsert, like a reply's)
-DELETE /api/prose/:id/feedback    T1-12
+POST   /api/prose/:id/feedback    {rating: 1 | -1, note?}   200 {"ok":true,"feedback":{rating,note,ts}}
+DELETE /api/prose/:id/feedback                              200 {"ok":true,"feedback":null}
+404 — :id is not a runs row;  400 — a rating that is not 1 or -1, a note that is not a string
 ```
+
+A 👍/👎 on any piece of generated prose that is not a chat reply — a meeting
+briefing, Next Up's one line, a revision explanation (B7 of
+`today-hub-requests.md`, C33 open). `:id` is a `runs.id`: the one id already
+stable wherever prose is produced (every model turn logs one `runs` row,
+`0001_init.sql`), so this needed no second id-minting scheme. An upsert on
+that id, exactly like a reply's (`prose_feedback`, migration `0031`,
+`docs/ops/reply-feedback.md`'s pattern applied to a sibling table) — one
+judgement per `runs` row, revisable, deletable. A reply's own rating is
+unchanged: `POST /api/messages/:id/feedback` still keys on
+`outbound_messages.id` and stays the chat-specific route.
 
 ### Live changes — `GET /api/events`
 

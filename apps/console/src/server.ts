@@ -169,6 +169,7 @@ export interface ConsoleConfig {
    * `/api/scheduled*` route answers 503.
    */
   scheduled?: ScheduledAdmin | undefined;
+  /**
    * `POST /api/vault/rollback` and its Approve (vault-rollback.ts, plan §2.21,
    * T10-6): the reconciler's `POST /vault/revert` with the console's bearer —
    * which the reconciler never lets change configuration. Absent = no vault

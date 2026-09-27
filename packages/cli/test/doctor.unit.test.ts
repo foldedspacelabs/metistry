@@ -6,7 +6,23 @@ import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { cliRow, confinementRow, doctor, hostLocal, inboxRow, parseComposePs, parseLaunchctlPrint, probeTargetFor, registriesRow, renderTable, walkManifests, type Db, type DoctorRow } from "../src/doctor.js";
+import {
+  cliRow,
+  confinementRow,
+  doctor,
+  hostLocal,
+  inboxRow,
+  parseComposePs,
+  parseComposeUptimeSec,
+  parseLaunchctlPrint,
+  processUptimeSec,
+  probeTargetFor,
+  registriesRow,
+  renderTable,
+  walkManifests,
+  type Db,
+  type DoctorRow,
+} from "../src/doctor.js";
 import { SANDBOX_EXEC } from "../src/sandbox.js";
 import { cliShimPath, writeCliShim } from "../src/cli-shim.js";
 import { StepRunner } from "../src/steps.js";
@@ -225,6 +241,7 @@ describe("doctor: the console row with the local owner token", () => {
     expect(r.console?.remediation).toMatch(/secrets sync --to env/);
     expect(r.console?.remediation).toMatch(/METISTRY_TRUSTED_LOOPBACK_PROXY/);
     expect(r.console?.remediation).not.toContain("owner-token"); // the value never reaches a report
+    expect(r.console?.action).toEqual({ kind: "run_verb", command: ["metistry", "secrets", "sync", "--to", "env"], label: "Sync secrets to .env" });
   });
 
   it("without the token, a 401 is still a pass — unchanged", async () => {
@@ -324,6 +341,36 @@ describe("doctor: the launchd shape", () => {
   });
 });
 
+// T4-21: each service's uptime, read by the Services pane straight off the
+// row (`meta.uptime_sec`) rather than the pane computing it from a pid or a
+// "Status" string itself.
+describe("doctor: uptime for the Services pane", () => {
+  it("a running launchd job's uptime comes from ps -o etimes=, keyed off the pid launchctl print reported", async () => {
+    const productDir = await checkout();
+    const inner = fakeExec({ launchctl: { "com.foldedspacelabs.metistry.a": { code: 0, stdout: LAUNCHCTL_RUNNING }, "com.foldedspacelabs.metistry.b": { code: 0, stdout: LAUNCHCTL_RUNNING } } });
+    const exec: Exec = async (cmd, args, opts) => (cmd === "ps" ? { code: 0, stdout: args[3] === "4242" ? "3600\n" : "", stderr: "" } : inner(cmd, args, opts));
+    const report = await doctor({ productDir, env, fetchFn: fakeFetch({ "7901/check": res(200, checkBody("ok")), "/health": res(200), "/api/status": res(401) }), db: null, exec, platform: "darwin", uid: 501 });
+    expect(byName(report.rows)["launchd:com.foldedspacelabs.metistry.a"]?.meta).toEqual({ pid: 4242, uptime_sec: 3600 });
+  });
+
+  it("a running compose container's uptime is parsed from docker compose ps's own Status text", async () => {
+    const productDir = await checkout();
+    const report = await doctor({
+      productDir,
+      env,
+      fetchFn: fakeFetch({ "7901/check": res(200, checkBody("ok")), "/health": res(200), "/api/status": res(401) }),
+      db: null,
+      exec: fakeExec({ docker: { code: 0, stdout: compose([{ Service: "db", State: "running", Health: "healthy", Status: "Up 3 hours" }, { Service: "console", State: "running", Status: "Up 51 seconds" }, { Service: "assistant", State: "exited", Status: "Exited (0) 2 minutes ago" }]) } }),
+      platform: "linux",
+    });
+    const r = byName(report.rows);
+    expect(r["compose:db"]?.meta).toMatchObject({ uptime_sec: 10800 });
+    expect(r["compose:console"]?.meta).toMatchObject({ uptime_sec: 51 });
+    // not running: no uptime is invented for an exited container
+    expect(r["compose:assistant"]?.meta).toMatchObject({ uptime_sec: undefined });
+  });
+});
+
 describe("doctor: degraded (runs, needs a hand) never fails the exit code", () => {
   it("bridge says degraded, migrations pending, container unhealthy", async () => {
     const productDir = await checkout();
@@ -339,6 +386,8 @@ describe("doctor: degraded (runs, needs a hand) never fails the exit code", () =
     expect(report.ok).toBe(true);
     expect(r.x).toMatchObject({ status: "degraded", remediation: "helper lost its TCC grant" });
     expect(r.migrations).toMatchObject({ status: "degraded", remediation: expect.stringMatching(/1 migration\(s\) not applied \(0002_b\.sql\) — run pnpm db:migrate/) });
+    // T4-21: a per-problem action for the Services pane, beside the terminal text
+    expect(r.migrations?.action).toEqual({ kind: "run_verb", command: ["metistry", "update"], label: "Run metistry update" });
     expect(r["compose:console"]).toMatchObject({ status: "degraded", remediation: expect.stringMatching(/starting/) });
     expect(renderTable(report)).toMatch(/0 failed/);
   });
@@ -386,7 +435,11 @@ describe("doctor: failed", () => {
     const productDir = await checkout();
     const base = { productDir, env, db: null, exec: fakeExec({ docker: { code: 127 } }), platform: "linux" as const };
     const okRest = { "/health": res(200), "/api/status": res(401) };
-    expect(byName((await doctor({ ...base, fetchFn: fakeFetch({ "7901/check": res(401), ...okRest }) })).rows).x).toMatchObject({ status: "failed", remediation: expect.stringMatching(/rejected the token \(HTTP 401\)/) });
+    const tokenRejected = byName((await doctor({ ...base, fetchFn: fakeFetch({ "7901/check": res(401), ...okRest }) })).rows).x;
+    expect(tokenRejected).toMatchObject({ status: "failed", remediation: expect.stringMatching(/rejected the token \(HTTP 401\)/) });
+    // T4-21: the button is "open Secrets", not a parsed command — the wrong-token
+    // case is the one a person fixes by editing a value, never by running one
+    expect(tokenRejected?.action).toEqual({ kind: "open_secrets", label: "Fix METISTRY_BRIDGE_TOKEN_X in Secrets" });
     expect(byName((await doctor({ ...base, fetchFn: fakeFetch({ "7901/check": res(200, { hello: "world" }), ...okRest }) })).rows).x).toMatchObject({ status: "failed", remediation: expect.stringMatching(/without a check\(\) body/) });
     expect(byName((await doctor({ ...base, fetchFn: fakeFetch({ "7901/check": res(503, checkBody("failed", "helper crashed")), ...okRest }) })).rows).x).toMatchObject({ status: "failed", remediation: "helper crashed" });
   });
@@ -430,12 +483,15 @@ describe("doctor: absent (not configured / not installed) is informational", () 
     const r = byName(report.rows);
     expect(report.ok).toBe(true);
     expect(r.db).toMatchObject({ status: "absent", remediation: expect.stringMatching(/METISTRY_DB_PASSWORD is unset/) });
+    expect(r.db?.action).toEqual({ kind: "open_secrets", label: "Add METISTRY_DB_PASSWORD in Secrets" });
     expect(r.migrations).toMatchObject({ status: "absent", remediation: "not checked — no db configured" });
     expect(r.x).toMatchObject({ status: "absent", remediation: expect.stringMatching(/set METISTRY_X_URL/) });
+    expect(r.x?.action).toEqual({ kind: "open_secrets", label: "Add METISTRY_BRIDGE_TOKEN_X in Secrets" });
     expect(r["launchd:com.foldedspacelabs.metistry.a"]).toMatchObject({
       status: "absent",
       remediation: expect.stringMatching(/not bootstrapped — metistry up, or by hand: sed .*ops\/launchd\/com\.foldedspacelabs\.metistry\.a\.plist.*launchctl bootstrap gui\/\$\(id -u\)/),
     });
+    expect(r["launchd:com.foldedspacelabs.metistry.a"]?.action).toEqual({ kind: "run_verb", command: ["metistry", "up"], label: "Run metistry up" });
     expect(r.compose).toMatchObject({ kind: "compose", status: "absent", remediation: expect.stringMatching(/docker not found/) });
     expect(report.rows.filter((x) => x.name.startsWith("compose:"))).toHaveLength(0);
   });
@@ -484,6 +540,9 @@ describe("doctor: the registries row", () => {
     expect(row.status).toBe("degraded");
     expect(row.remediation).toContain("schema: missing — every manifest carries schema: 1");
     expect(row.remediation).toContain(join(product, "collectors/old/manifest.yaml"));
+    // T4-21: nothing here can name WHICH unit to fix in one command (there may
+    // be several), so the button just gets the operator to the list
+    expect(row.action).toEqual({ kind: "run_verb", command: ["metistry", "extensions", "list"], label: "List extensions" });
   });
 });
 
@@ -505,6 +564,7 @@ describe("doctor: the pre-#156 inbox layout (docs/ops/inbox.md)", () => {
     expect(row).toMatchObject({ status: "degraded" });
     expect(row.remediation).toMatch(/metistry migrate-inbox --dry-run/);
     expect(row.meta).toMatchObject({ entries: 1, gitignored: false });
+    expect(row.action).toEqual({ kind: "run_verb", command: ["metistry", "migrate-inbox", "--dry-run"], label: "Preview migrate-inbox" });
   });
 
   it("ok when only the vault's TitleCase Inbox/ exists — a case-insensitive filesystem must not read it as the pre-#156 dir", async () => {
@@ -560,6 +620,13 @@ describe("doctor: the cli shim (cli-shim.ts)", () => {
     expect(row).toMatchObject({ name: "cli on PATH", kind: "cli", status: "absent" });
     expect(row.remediation).toBe(`ln -s ${shim} ~/.local/bin/metistry  (or add its directory to PATH)`);
     expect(row.meta).toMatchObject({ shim });
+    // no HOME in this environment: doctor cannot resolve `~`, so it offers no
+    // button rather than one pointed at a path it never verified (T4-21)
+    expect(row.action).toBeUndefined();
+
+    // with HOME, the same fix as argv — never the `~`-shorthand a shell would expand
+    const withHome = await cliRow(productDir, { PATH: "/nonexistent", HOME: "/Users/o" });
+    expect(withHome.action).toEqual({ kind: "run_verb", command: ["ln", "-s", shim, "/Users/o/.local/bin/metistry"], label: "Link metistry onto PATH" });
   });
 
   it("absent, and says `metistry up` writes one, before it ever has", async () => {
@@ -567,6 +634,7 @@ describe("doctor: the cli shim (cli-shim.ts)", () => {
     const row = await cliRow(productDir, { PATH: "/nonexistent" });
     expect(row.status).toBe("absent");
     expect(row.remediation).toMatch(/metistry up. writes one/);
+    expect(row.action).toEqual({ kind: "run_verb", command: ["metistry", "up"], label: "Run metistry up" });
   });
 
   it("ok, and says where, once something answering to `metistry` is actually on PATH", async () => {
@@ -617,6 +685,27 @@ describe("parsers and conventions", () => {
     expect(parseLaunchctlPrint(LAUNCHCTL_RUNNING)).toEqual({ state: "running", pid: 4242 });
     expect(parseLaunchctlPrint(LAUNCHCTL_WAITING)).toEqual({ state: "waiting", lastExit: 78 });
     expect(parseLaunchctlPrint("garbage")).toEqual({ state: "unknown" });
+  });
+
+  // T4-21: each service's uptime, for the Services pane.
+  it("process uptime: ps -o etimes=, best-effort — never throws, never fails the row", async () => {
+    const exec: Exec = async (cmd, args) => (cmd === "ps" && args[3] === "4242" ? { code: 0, stdout: " 125\n", stderr: "" } : { code: 1, stdout: "", stderr: "no such pid" });
+    expect(await processUptimeSec(exec, 4242)).toBe(125);
+    expect(await processUptimeSec(exec, 9999)).toBeUndefined(); // ps itself says no such pid
+    const throws: Exec = async () => {
+      throw new Error("ENOENT");
+    };
+    expect(await processUptimeSec(throws, 1)).toBeUndefined();
+  });
+
+  it("compose uptime: docker's go-units phrasing (\"Up 3 hours\", \"Up About a minute\", …) parsed back into seconds", () => {
+    expect(parseComposeUptimeSec("Up 3 hours")).toBe(3 * 3600);
+    expect(parseComposeUptimeSec("Up 51 seconds (healthy)")).toBe(51);
+    expect(parseComposeUptimeSec("Up About a minute")).toBe(60);
+    expect(parseComposeUptimeSec("Up 2 weeks")).toBe(2 * 604800);
+    expect(parseComposeUptimeSec("Up")).toBeUndefined(); // no duration at all
+    expect(parseComposeUptimeSec("Exited (1) 2 minutes ago")).toBeUndefined(); // not running — doctor never calls this for it, but the parser itself must not guess
+    expect(parseComposeUptimeSec(undefined)).toBeUndefined();
   });
 
   it("env conventions: the three shipped bridges keep their variables; anything else follows METISTRY_<NAME>_URL", () => {

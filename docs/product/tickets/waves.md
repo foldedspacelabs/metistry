@@ -2,7 +2,7 @@
 
 Generated from `docs/product/design-build-plan.md` by `ops/scripts/tickets.mjs`. A ticket is ticked when its file says `status: merged`; the coordinator ticks each checkpoint (§3.1) by hand below the generated list.
 
-**144 tickets · 6 waves · ≈ 457 agent-days · critical path 35 agent-days** (F-3 → T4-1 → T4-2 → T4-8a → T4-8b → T4-9 → T4-10 → T4-11)
+**162 tickets · 6 waves · ≈ 479.5 agent-days · critical path 35 agent-days** (F-3 → T4-1 → T4-2 → T4-8a → T4-8b → T4-9 → T4-10 → T4-11)
 
 ## W0 — 19 tickets, 38 agent-days
 
@@ -115,9 +115,9 @@ Generated from `docs/product/design-build-plan.md` by `ops/scripts/tickets.mjs`.
 - [x] [T10-5](t10/t10-5.md) · Restore a file · M · opus · after T10-4, T1-8
 - [x] [T10-6](t10/t10-6.md) · Roll back · L · opus high · after T10-3, T10-4
 
-- [x] **W2 checkpoint** — merged, main green, scratch-instance upgrade, conformance test, Mac smoke, release
+- [ ] **W2 checkpoint** — merged, main green, scratch-instance upgrade, conformance test, Mac smoke, release
 
-## W3 — 28 tickets, 105 agent-days
+## W3 — 46 tickets, 127.5 agent-days
 
 - [ ] [T2-12](t2/t2-12.md) · Move a meeting · M · opus · after T2-11
 - [ ] [T2-13](t2/t2-13.md) · Pull requests · L · opus high · after T1-8, T4-1
@@ -147,6 +147,24 @@ Generated from `docs/product/design-build-plan.md` by `ops/scripts/tickets.mjs`.
 - [ ] [T8-6](t8/t8-6.md) · The private tier · M · opus · after T4-18
 - [ ] [T9-3](t9/t9-3.md) · The confirmatory eval · M · opus · after T9-2
 - [ ] [T10-7](t10/t10-7.md) · History in the app · M · opus · after T10-2, T10-4, T5-3
+- [ ] [X-6](x/x-6.md) · `/vault/log` is the owner's · S · sonnet · after T10-4
+- [ ] [X-7](x/x-7.md) · A provider key's grantee, and compute through the egress guard · M · opus · after T4-18, T4-2
+- [ ] [X-8](x/x-8.md) · An agent's connection grants persist · S · sonnet · after T4-8b
+- [ ] [X-9](x/x-9.md) · Restore is the Mac's · S · sonnet · after T10-5
+- [ ] [X-10](x/x-10.md) · A report is acknowledged; an agent reads its answer · M · opus · after T2-3
+- [ ] [X-11](x/x-11.md) · The routine folders take a create again · S · sonnet · after T3-6
+- [ ] [X-12](x/x-12.md) · Add to Today · S · sonnet · after T2-7, T4-24
+- [ ] [X-13](x/x-13.md) · A budget refusal is a report · S · sonnet · after T3-12
+- [ ] [X-14](x/x-14.md) · The `where:` grammar reaches Slipping and Owed · M · opus · after T2-7, T6-1a
+- [ ] [X-15](x/x-15.md) · Run Now after 23:00 re-renders the plan · S · sonnet · after T3-7
+- [ ] [X-16](x/x-16.md) · `{{ calendar }}` sanitises its titles · S · sonnet · after T3-6
+- [ ] [X-17](x/x-17.md) · A snooze that expires is an event · S · sonnet · after T5-7
+- [ ] [X-18](x/x-18.md) · `GET /api/messages` carries `turn_id` · S · sonnet · after T6-2
+- [ ] [X-19](x/x-19.md) · The offline capture queue is persisted · S · sonnet · after T5-5
+- [ ] [X-20](x/x-20.md) · `init --shape` and `--keep-awake` · S · sonnet
+- [ ] [X-21](x/x-21.md) · A routine's display name on Activity · S · sonnet · after T1-3, T6-3
+- [ ] [X-22](x/x-22.md) · The Mac reads `request.questions` · S · sonnet · after T5-4b
+- [ ] [X-23](x/x-23.md) · `connection_call` on Activity and turn progress · S · sonnet · after T1-3, T2-17, T4-8b
 
 - [ ] **W3 checkpoint** — merged, main green, scratch-instance upgrade, conformance test, Mac smoke, release
 

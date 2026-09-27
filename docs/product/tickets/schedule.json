@@ -146,10 +146,28 @@
         "T8-2b",
         "T8-6",
         "T9-3",
-        "T10-7"
+        "T10-7",
+        "X-6",
+        "X-7",
+        "X-8",
+        "X-9",
+        "X-10",
+        "X-11",
+        "X-12",
+        "X-13",
+        "X-14",
+        "X-15",
+        "X-16",
+        "X-17",
+        "X-18",
+        "X-19",
+        "X-20",
+        "X-21",
+        "X-22",
+        "X-23"
       ],
-      "count": 28,
-      "agent_days": 105
+      "count": 46,
+      "agent_days": 127.5
     },
     "W4": {
       "tickets": [
@@ -2174,6 +2192,262 @@
       "file": "docs/product/tickets/x/x-5.md",
       "status": "merged"
     },
+    "X-6": {
+      "title": "`/vault/log` is the owner's",
+      "track": "X",
+      "wave": "W3",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "T10-4"
+      ],
+      "file": "docs/product/tickets/x/x-6.md",
+      "status": "todo"
+    },
+    "X-7": {
+      "title": "A provider key's grantee, and compute through the egress guard",
+      "track": "X",
+      "wave": "W3",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T4-18",
+        "T4-2"
+      ],
+      "file": "docs/product/tickets/x/x-7.md",
+      "status": "todo"
+    },
+    "X-8": {
+      "title": "An agent's connection grants persist",
+      "track": "X",
+      "wave": "W3",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "T4-8b"
+      ],
+      "file": "docs/product/tickets/x/x-8.md",
+      "status": "todo"
+    },
+    "X-9": {
+      "title": "Restore is the Mac's",
+      "track": "X",
+      "wave": "W3",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "T10-5"
+      ],
+      "file": "docs/product/tickets/x/x-9.md",
+      "status": "todo"
+    },
+    "X-10": {
+      "title": "A report is acknowledged; an agent reads its answer",
+      "track": "X",
+      "wave": "W3",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T2-3"
+      ],
+      "file": "docs/product/tickets/x/x-10.md",
+      "status": "todo"
+    },
+    "X-11": {
+      "title": "The routine folders take a create again",
+      "track": "X",
+      "wave": "W3",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "T3-6"
+      ],
+      "file": "docs/product/tickets/x/x-11.md",
+      "status": "todo"
+    },
+    "X-12": {
+      "title": "Add to Today",
+      "track": "X",
+      "wave": "W3",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "T2-7",
+        "T4-24"
+      ],
+      "file": "docs/product/tickets/x/x-12.md",
+      "status": "todo"
+    },
+    "X-13": {
+      "title": "A budget refusal is a report",
+      "track": "X",
+      "wave": "W3",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "T3-12"
+      ],
+      "file": "docs/product/tickets/x/x-13.md",
+      "status": "todo"
+    },
+    "X-14": {
+      "title": "The `where:` grammar reaches Slipping and Owed",
+      "track": "X",
+      "wave": "W3",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T2-7",
+        "T6-1a"
+      ],
+      "file": "docs/product/tickets/x/x-14.md",
+      "status": "todo"
+    },
+    "X-15": {
+      "title": "Run Now after 23:00 re-renders the plan",
+      "track": "X",
+      "wave": "W3",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "T3-7"
+      ],
+      "file": "docs/product/tickets/x/x-15.md",
+      "status": "todo"
+    },
+    "X-16": {
+      "title": "`{{ calendar }}` sanitises its titles",
+      "track": "X",
+      "wave": "W3",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "T3-6"
+      ],
+      "file": "docs/product/tickets/x/x-16.md",
+      "status": "todo"
+    },
+    "X-17": {
+      "title": "A snooze that expires is an event",
+      "track": "X",
+      "wave": "W3",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "T5-7"
+      ],
+      "file": "docs/product/tickets/x/x-17.md",
+      "status": "todo"
+    },
+    "X-18": {
+      "title": "`GET /api/messages` carries `turn_id`",
+      "track": "X",
+      "wave": "W3",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "T6-2"
+      ],
+      "file": "docs/product/tickets/x/x-18.md",
+      "status": "todo"
+    },
+    "X-19": {
+      "title": "The offline capture queue is persisted",
+      "track": "X",
+      "wave": "W3",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "T5-5"
+      ],
+      "file": "docs/product/tickets/x/x-19.md",
+      "status": "todo"
+    },
+    "X-20": {
+      "title": "`init --shape` and `--keep-awake`",
+      "track": "X",
+      "wave": "W3",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-20.md",
+      "status": "todo"
+    },
+    "X-21": {
+      "title": "A routine's display name on Activity",
+      "track": "X",
+      "wave": "W3",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "T1-3",
+        "T6-3"
+      ],
+      "file": "docs/product/tickets/x/x-21.md",
+      "status": "todo"
+    },
+    "X-22": {
+      "title": "The Mac reads `request.questions`",
+      "track": "X",
+      "wave": "W3",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "T5-4b"
+      ],
+      "file": "docs/product/tickets/x/x-22.md",
+      "status": "todo"
+    },
+    "X-23": {
+      "title": "`connection_call` on Activity and turn progress",
+      "track": "X",
+      "wave": "W3",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "T1-3",
+        "T2-17",
+        "T4-8b"
+      ],
+      "file": "docs/product/tickets/x/x-23.md",
+      "status": "todo"
+    },
     "X-1": {
       "title": "The document sweep",
       "track": "X",
@@ -2188,8 +2462,8 @@
     }
   },
   "totals": {
-    "tickets": 144,
-    "agent_days": 457,
+    "tickets": 162,
+    "agent_days": 479.5,
     "waves": 6
   },
   "critical_path": {

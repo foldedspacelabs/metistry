@@ -247,6 +247,10 @@ the script's `REQUESTS` and re-records with `--only "<METHOD> <path>"`; the
 script refuses to replace a `contract` fixture whose shape its recording does
 not match unless `--accept` is given, and the PR says why.
 
+CI runs `--check` in the `checks` job after the tests, on a fresh scratch
+database of its own, so a PR that moves a served shape without re-recording
+its fixture fails there (W2 housekeeping).
+
 ## Checks that are not tests
 
 Some rules are easier to enforce over the whole tree than to remember in each

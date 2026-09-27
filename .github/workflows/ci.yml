@@ -102,6 +102,20 @@ jobs:
         env:
           METISTRY_DB_PASSWORD: ci-only
         run: pnpm test
+      # The Mac's fixtures (F-7) are what the real console says. Record every
+      # served route again, in memory, and fail where a shape moved without its
+      # fixture being re-recorded (the fix: `--only "<route>" --accept`, plan
+      # §2.16). The recorder imports the console's dist, so the console and
+      # what it depends on build first; it needs an empty scratch database, so
+      # test-db.sh makes a fresh one of its own.
+      - name: client fixtures match the console (recorder --check)
+        env:
+          METISTRY_DB_PASSWORD: ci-only
+          METISTRY_TEST_DB_NAME: metistry_test_fixtures
+        run: |
+          pnpm --filter '@metistry-apps/console...' run build
+          ops/scripts/test-db.sh
+          node apps/console/scripts/record-client-fixtures.mjs --check
 
   # The Mac app cannot rot silently between releases: it compiles and its unit
   # tests run on every PR. Deliberately small — no signing, no bundle assembly,

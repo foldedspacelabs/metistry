@@ -208,7 +208,8 @@ than a resolved tag.
 
 ### Knowing there is one — the daily Update Check
 
-The console runs `routines/update-check` once a day: it asks the same
+The console runs `routines/update-check` every day at 06:00 (its Scheduled
+default; the owner can move it): it asks the same
 `releases/latest` endpoint (the same `METISTRY_RELEASE_REPO`,
 `METISTRY_GITHUB_API` and `METISTRY_GITHUB_TOKEN`) and compares the answer
 with the console's own version. A newer release writes one `runs` row

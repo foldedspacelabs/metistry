@@ -4,6 +4,7 @@
 // scratch db is available (ops/scripts/test-db.sh) — every seed query
 // actually executes against the migrated schema, so a column typo fails
 // here instead of on the dashboard.
+import { randomUUID } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -128,7 +129,21 @@ describe("seed queries", () => {
     // `vault_task_by_key` (T2-4) is the Tick door's lookup: a path and a line of the owner's own words, for the owner's door alone.
     // `secret_last_used` says which credentials this instance used and when:
     // the Secrets screen's to read through `GET /api/secrets`, not an agent's.
-    expect(routeBacked.sort()).toEqual(["collector_health", "day_work", "knowledge_page_links", "knowledge_pages", "pending_requests", "secret_last_used", "vault_task_by_key", "vault_tasks_query", "vault_tasks_recurring"]);
+    // `session_detail` (T1-11) is a session's own transcript — the owner's
+    // conversation — so it is reachable only through `GET /api/sessions/:id`
+    // (T2-17), never the generic door.
+    expect(routeBacked.sort()).toEqual([
+      "collector_health",
+      "day_work",
+      "knowledge_page_links",
+      "knowledge_pages",
+      "pending_requests",
+      "secret_last_used",
+      "session_detail",
+      "vault_task_by_key",
+      "vault_tasks_query",
+      "vault_tasks_recurring",
+    ]);
     expect(store.exposure("task_ageing")).toBe("generic");
     for (const name of REQUIRED.filter((n) => !routeBacked.includes(n))) expect(store.exposure(name), name).toBe("generic");
   });
@@ -1426,5 +1441,43 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
     expect(JSON.stringify(rows)).not.toContain("Jim");
 
     await pool.query(`DELETE FROM vault_tasks`);
+  });
+
+  // T1-11's own test line: "expired rows are not returned" — session_detail
+  // (migration 0030) is the owner's own transcript, so a row the writer's
+  // 30-day retention (T3-9) has passed must never come back, no matter which
+  // session or turn is asked for. Also covers the query's other two reads:
+  // `turn_id` narrows to one turn, and an unknown session returns nothing —
+  // both without an error, the `run_detail` "0 names no row" pattern.
+  it("session_detail: expired rows are not returned, `turn_id` narrows to one turn, and an unknown session returns nothing", async () => {
+    const session = randomUUID();
+    const fresh = { turn_id: "turn-fresh", ts: "now()", expires: "now() + interval '1 day'" };
+    const stale = { turn_id: "turn-stale", ts: "now() - interval '31 days'", expires: "now() - interval '1 day'" };
+    for (const t of [fresh, stale]) {
+      await pool.query(
+        `INSERT INTO session_archive (session_id, thread, turn_id, ts, system_prompt, messages, tool_calls, expires_at)
+         VALUES ($1, 'default', $2, ${t.ts}, 'system prompt', $3::jsonb, '[]'::jsonb, ${t.expires})`,
+        [session, t.turn_id, JSON.stringify([{ role: "user", content: t.turn_id }])],
+      );
+    }
+
+    // the expired turn never comes back, session-wide …
+    const all = (await store.run("session_detail", { session_id: session })).rows;
+    expect(all.map((r) => r.turn_id)).toEqual(["turn-fresh"]);
+
+    // … nor when asked for BY turn_id — an expired row is gone, not merely hidden from the list
+    expect((await store.run("session_detail", { session_id: session, turn_id: "turn-stale" })).rows).toHaveLength(0);
+
+    // turn_id narrows to exactly one turn
+    const one = (await store.run("session_detail", { session_id: session, turn_id: "turn-fresh" })).rows;
+    expect(one).toHaveLength(1);
+    expect(one[0]).toMatchObject({ session_id: session, thread: "default", turn_id: "turn-fresh", system_prompt: "system prompt" });
+    expect(one[0]!.folded_at).toBeNull();
+
+    // an unknown session, and the all-blank default, are both an honest empty result — never an error
+    expect((await store.run("session_detail", { session_id: randomUUID() })).rows).toHaveLength(0);
+    expect((await store.run("session_detail")).rows).toHaveLength(0);
+
+    await pool.query(`DELETE FROM session_archive WHERE session_id = $1`, [session]);
   });
 });

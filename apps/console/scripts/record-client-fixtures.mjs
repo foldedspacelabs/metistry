@@ -252,6 +252,18 @@ await pool.query(
   [DAY, DEFER_TEXT, P],
 );
 
+// the board's other two shapes (T1-2): a Blocked card waiting on that todo
+// (`meta.blocked_by`, resolved to its text), and a Done card whose crew
+// reported back — the `reported` facet, from the one work→runs join. Ids
+// given, far past the sequence, so every other fixture's work ids are the
+// ones they were recorded with.
+ids.blockedTask = Number((await one(
+  `INSERT INTO work (id, title, project, kind, status, created_by, meta) OVERRIDING SYSTEM VALUE VALUES (41, 'Pick the fixture redaction', $1, 'task', 'blocked', 'user', jsonb_build_object('blocked_by', $2::text)) RETURNING id`,
+  [P, `vault:${DAY}#^mt-7f3k2a`],
+)).id);
+ids.reportedTask = Number((await one(`INSERT INTO work (id, title, project, kind, status, created_by, closed_at) OVERRIDING SYSTEM VALUE VALUES (42, 'Measure the recorder run time', $1, 'task', 'closed', 'user', now()) RETURNING id`, [P])).id);
+await pool.query(`INSERT INTO runs (component, kind, ok, started_at, finished_at, meta) VALUES ('crew:fixtures', 'crew_run', true, now(), now(), jsonb_build_object('work_id', $1::bigint, 'reports', 1))`, [ids.reportedTask]);
+
 // devices: two sessions on one passkey — one to list, one to revoke
 const pkId = `fixture-${mintToken(6)}`;
 await authStore.storePasskey(pool, { id: pkId, publicKey: new Uint8Array([1]), signCount: 0, transports: ["internal"], origin: "http://127.0.0.1:8080", label: "iPhone" });

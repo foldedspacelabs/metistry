@@ -1,0 +1,6 @@
+---
+"@foldedspacelabs/metistry-core": minor
+"@foldedspacelabs/metistry-cli": minor
+---
+
+**Keep awake as a switch and two sub-switches, and the lid as the owner's administrator setting (T4-20).** `deployment.yaml`'s `keep_awake` also takes the object form `{ enabled, sleep_on_battery, sleep_lid_closed }` beside the four values, which all still load and mean what they meant; missing sub-switches take the safe answer (sleep on battery, sleep with the lid closed) and `enabled` is required. Core adds `keepAwakeSetting`/`keepAwakeValue`/`keepAwakeSettingOf`, the lid dialog's words (`LID_CLOSED_DIALOG_TITLE`, `LID_CLOSED_COMMAND`, `LID_CLOSED_UNDO`, `LID_CLOSED_WARNING`), `parseSleepDisabled` and `PMSET_READS`/`isPmsetRead`. `metistry deployment set-keep-awake` takes `--enabled`, `--sleep-on-battery` and `--sleep-lid-closed` (`true|false` only), each changing only what it names and writing the object form; choosing the lid prints the administrator command, how to undo it and the warning, stores the answer, and runs nothing. `metistry doctor`'s `keep-awake` row reads `pmset -g` and reports the lid half as in effect, not in effect or unknown (`meta.lid_closed`), and its early-cutoff repair keeps the lid answer. `metistry deployment --json` gains `keep_awake_setting`. A test sweeps every package, app and the Mac app for a `pmset` started with arguments that write.

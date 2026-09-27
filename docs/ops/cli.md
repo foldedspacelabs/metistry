@@ -24,7 +24,7 @@ All of them are real.
 | `--version` / `version [--json]` | this CLI's version, the resolved product dir's, the lock's pin, and a release's runtime pack |
 | `deployment [--json]` | the effective shape (D4 overlay) and the services it implies, with cheap running state |
 | `deployment set-shape <compose\|launchd>` | write the instance's `.metistry/deployment.yaml` through the reconciler, preview-then-confirm |
-| `deployment set-keep-awake <never\|allow_sleep_on_battery\|always\|always_lid_closed>` | whether this install holds the Mac awake, and on which power (macOS); the same protected write |
+| `deployment set-keep-awake [<never\|allow_sleep_on_battery\|always\|always_lid_closed>] [--enabled\|--sleep-on-battery\|--sleep-lid-closed true\|false]` | whether this install holds the Mac awake, on which power, and whether a closed lid should stay awake (macOS); the same protected write; the lid setting is stored and never applied — only an administrator's `pmset` delivers it |
 | `migrate-layout [--dry-run] [--json] [--allow-dirty]` | carry an instance from the legacy layout to the flat one: the directory becomes the vault, the machinery moves under `.metistry/`, stored paths lose `Knowledge/` |
 | `migrate-inbox [--dry-run]` | move a pre-#156 `inbox/` into the vault inbox and rewrite `inbox.path` |
 | `migrate-shape <launchd\|compose>` | move a LIVE install between the shapes, with its data: dump, stop, flip, up, restore, verify, doctor |
@@ -192,6 +192,34 @@ full are in `docs/ops/deployment-shapes.md`, "Keeping the Mac awake". Short
 version: absent means `never` and nothing is held; `metistry init` asks the
 question once, on a terminal, and writes your answer; `metistry doctor`
 reports one `keep-awake` row, `degraded` at worst.
+
+**The switches (T4-20).** The same setting is also the Services pane's
+switch and its two sub-switches, and the verb takes them as flags, each
+`true` or `false` and nothing else (a bare `--sleep-lid-closed` is refused,
+never read as true):
+
+```sh
+metistry deployment set-keep-awake --enabled true --yes            # the switch
+metistry deployment set-keep-awake --sleep-on-battery false --yes  # hold on battery too
+metistry deployment set-keep-awake --sleep-lid-closed false        # preview: prints the lid dialog
+metistry deployment set-keep-awake always --sleep-lid-closed false --yes
+```
+
+A value alone is written as itself (`keep_awake: always`), so a file that
+only ever used the four values keeps reading that way. A flag changes only
+the switch it names — over the value when one is given, else over the setting
+already in effect — and writes the object form, one line, every key said:
+`keep_awake: { enabled: true, sleep_on_battery: true, sleep_lid_closed: false }`.
+Naming neither a value nor a flag, a second value, or a value that is not
+one of the four is a usage error (exit 2).
+
+`--sleep-lid-closed false` (and `always_lid_closed`) is stored as asked, and
+before it is, the verb prints the lid dialog: the administrator command
+(`sudo pmset -a disablesleep 1`), how to undo it (`sudo pmset -a disablesleep 0`)
+and why it is not recommended. **The verb runs neither** — no code path in
+Metistry runs `pmset` with arguments that write, and a test sweeps the source
+for one. `metistry doctor` reads `pmset -g` and reports whether the
+administrator setting is in effect.
 
 `metistry migrate-shape <launchd|compose> [--dry-run] [--namespace]` is the
 verb for a LIVE install, and it is deliberately not a flag on `set-shape`.

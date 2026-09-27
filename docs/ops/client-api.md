@@ -2040,7 +2040,7 @@ console cannot or must not do it (credentials, the machine, code that runs):
 | M1 | Install, first run, runtime seed | `metistry init`, `runtime install`, `up`, `down`, `migrate-*` | the console is not running yet, or is what is being installed |
 | M2 | Update and roll back the runtime | `metistry update [--channel\|--version\|--rollback]` | replaces the console itself |
 | M3 | Deployment shape | `metistry deployment set-shape` | moves the data between shapes |
-| M4 | Keep awake, and the lid-closed setting | `metistry deployment set-keep-awake` (object form, T4-20) | a machine setting; the lid dialog never runs a command |
+| M4 | Keep awake, and the lid-closed setting | `metistry deployment set-keep-awake [<value>] [--enabled\|--sleep-on-battery\|--sleep-lid-closed true\|false]` (the object form, T4-20; `docs/ops/cli.md`) | a machine setting; the lid dialog never runs a command |
 | M5 | Service lifecycle and logs | `metistry restart\|stop\|start [service]`, `logs` | the supervisor's local socket; a remote stop locks the owner out |
 | M6 | Doctor | `metistry doctor --json` | local probes: launchd, containers, TCC |
 | M7 | Secrets | `metistry secrets set\|replace\|remove\|hosts\|grant\|migrate-scope\|purge-shared` | the login Keychain; a value never crosses the API |

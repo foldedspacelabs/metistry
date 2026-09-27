@@ -286,7 +286,8 @@ const newKey = (verb) => `${verb}-${crypto.randomUUID?.() ?? `${Date.now()}-${Ma
 
 /**
  * Mount Today on #today. `ctx` is the shell's: `$`, `api`, `show`. Returns
- * `{ load }`, which the shell calls each time Today opens.
+ * `{ load, refresh }`: the shell calls `load` each time Today opens, and
+ * `refresh` when a live event says something on it changed.
  */
 export function mountToday({ $, api, show }) {
   let day = null;
@@ -296,6 +297,7 @@ export function mountToday({ $, api, show }) {
   let deferring = null;
   const notes = new Map(); // task_key → what its last write left
   const busy = new Set();
+  let lookedSince = null; // the rail's boundary for this look
 
   async function load() {
     // a new look: last visit's receipts and open choices are history, and a line ticked then folds into the past
@@ -305,7 +307,19 @@ export function mountToday({ $, api, show }) {
     freshLook = true;
     const since = store.get(LOOKED) ?? new Date(Date.now() - 24 * 60 * MIN).toISOString();
     store.set(LOOKED, new Date().toISOString());
+    lookedSince = since;
     await Promise.all([loadDay(), loadRail(since)]);
+  }
+
+  /**
+   * Something Today shows changed (a live event, T7-7): the day and the rail
+   * again, under the reader. Not a new look — nothing folds, no receipt or
+   * open choice is cleared, the rail keeps this look's boundary — and a failed
+   * read keeps the day on screen, as after a write.
+   */
+  async function refresh() {
+    if (lookedSince === null) return load();
+    await Promise.all([loadDay({ again: true }), loadRail(lookedSince)]);
   }
 
   /**
@@ -488,5 +502,5 @@ export function mountToday({ $, api, show }) {
     }
   });
 
-  return { load };
+  return { load, refresh };
 }

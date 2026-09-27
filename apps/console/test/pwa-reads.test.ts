@@ -28,7 +28,7 @@ import { clockTime, dateTime, esc as libEsc } from "../web/lib.js";
 const read = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), "utf8");
 const SRC = read("../web/app.js");
 /** Every module the PWA loads: the shell and the views split out of it (T7-3a). */
-const MODULES = ["app.js", "lib.js", "today.js", "needs-you.js", "md.js"];
+const MODULES = ["app.js", "lib.js", "today.js", "needs-you.js", "live.js", "md.js"];
 const ALL_SRC = MODULES.map((m) => read(`../web/${m}`)).join("\n");
 const CSS = read("../web/style.css");
 const TOKENS_CSS = read("../web/tokens.css");

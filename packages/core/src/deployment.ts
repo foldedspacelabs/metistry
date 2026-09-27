@@ -19,6 +19,7 @@
 
 import { z } from "zod";
 import { keepAwakeConfigSchema, keepAwakeSetting, keepAwakeValue, type KeepAwake, type KeepAwakeSetting } from "./power.js";
+import { overlayVaultSync, vaultSyncSchema } from "./vault-sync.js";
 
 export const DEPLOYMENT_FILENAME = "deployment.yaml";
 
@@ -73,6 +74,13 @@ export const deploymentSchema = z
      * object existed still loads; `keepAwakeSettingOf` reads either.
      */
     keep_awake: keepAwakeConfigSchema.optional(),
+    /**
+     * When the reconciler pushes to the instance repo's remote and pulls
+     * from it (§2.21, vault-sync.ts). Optional for the same reason as
+     * `keep_awake`: absent means "the default", and an instance file written
+     * before the key existed inherits the seed's answer per key.
+     */
+    vault: vaultSyncSchema.optional(),
     services: z.record(z.string(), serviceOverrideSchema).default({}),
   })
   .strict();
@@ -108,7 +116,9 @@ export function overlayDeployment(seed: Deployment, instance: Deployment | undef
   // when it HAS one, and an instance file written before the key existed
   // keeps whatever the seed says instead of reading as an explicit `never`.
   const keepAwake = instance.keep_awake ?? seed.keep_awake;
-  return { shape: instance.shape, ...(keepAwake !== undefined ? { keep_awake: keepAwake } : {}), services };
+  // `vault` merges per key, like `keep_awake`: setting `push` alone keeps the seed's `pull`
+  const vault = overlayVaultSync(seed.vault, instance.vault);
+  return { shape: instance.shape, ...(keepAwake !== undefined ? { keep_awake: keepAwake } : {}), ...(vault !== undefined ? { vault } : {}), services };
 }
 
 /** The setting as the one shape, with "the user was never asked" spelled as the switch off. */

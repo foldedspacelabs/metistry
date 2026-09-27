@@ -236,7 +236,7 @@ public struct UsageGauge: Sendable, Equatable {
 
     public var symbolName: String { level == .within ? "gauge.medium" : "gauge.high" }
 
-    /// Secondary ink within budget, primary over 90%, the warning tint at the limit.
+    /// Secondary ink within the limits, primary over 90%, the warning tint at a limit.
     public var inkRole: MetistryColorRole {
         switch level {
         case .within: return .textSecondary
@@ -245,16 +245,18 @@ public struct UsageGauge: Sendable, Equatable {
         }
     }
 
-    /// components-02 §3, verbatim: *Usage, $1.84 today, 37% of the day's budget*.
-    /// The percentage is the day's when a daily limit is set, else the month's;
-    /// with no limit and no spend read, the control is just *Usage*.
+    /// components-02 §3's row — *Usage, $1.84 today, 37% of the day's budget* —
+    /// in C130's words: budgets are *spending limits* now, so it says
+    /// *37% of the daily spending limit*. The percentage is the day's when a
+    /// daily limit is set, else the month's; with no limit and no spend read,
+    /// the control is just *Usage*.
     public var spokenLabel: String {
         var parts = ["Usage"]
         if let today { parts.append("\(Self.dollars(today)) today") }
         if let fraction = dailyFraction {
-            parts.append("\(Self.percent(fraction)) of the day's budget")
+            parts.append("\(Self.percent(fraction)) of the daily spending limit")
         } else if let fraction = monthlyFraction {
-            parts.append("\(Self.percent(fraction)) of the month's budget")
+            parts.append("\(Self.percent(fraction)) of the monthly spending limit")
         }
         return parts.joined(separator: ", ")
     }
@@ -293,6 +295,9 @@ public final class ShellModel {
     public private(set) var showsNeedsYouRow = false
     public private(set) var identity: ConsoleIdentity?
     public private(set) var gauge: UsageGauge = .unknown
+    /// The gauge's popover (screen 17, usage-view.swift): the month's reads,
+    /// on the same store as the gauge.
+    public let usageDetail: UsageModel
     /// The sidebar's Pinned area, filed under the identity's instance id.
     public private(set) var pins: PinnedItems
 
@@ -340,6 +345,7 @@ public final class ShellModel {
         self.usage = usage
         self.defaults = defaults
         self.pins = PinnedItems(instanceID: nil, defaults: defaults)
+        self.usageDetail = UsageModel(store: usage)
     }
 
     /// One `ConsoleStores` serves all three.
@@ -358,6 +364,7 @@ public final class ShellModel {
         self.needsYou = needsYou
         self.settings = settings
         self.usage = usage
+        usageDetail.adopt(usage)
         waiting = nil
         showsNeedsYouRow = false
         identity = nil
@@ -541,6 +548,15 @@ public final class ShellModel {
         let asked = generation
         let result = await usage.compute()
         guard asked == generation, case .success(let compute) = result else { return }
+        gauge = UsageGauge(compute: compute)
+    }
+
+    /// The popover's reads, and the gauge from the same answer — so the
+    /// toolbar and the popover it opens never disagree about the month.
+    public func refreshUsageDetail(now: Date = Date()) async {
+        let asked = generation
+        await usageDetail.refresh(now: now)
+        guard asked == generation, let compute = usageDetail.compute.value else { return }
         gauge = UsageGauge(compute: compute)
     }
 

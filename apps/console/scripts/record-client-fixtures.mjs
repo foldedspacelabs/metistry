@@ -230,6 +230,10 @@ const DAY = "Journal/2026-09-28.md";
 const TASK_TEXT = "Send Dana the fixture format";
 const DEFER_TEXT = "Draft the Q4 plan";
 await vault.write(DAY, Buffer.from(`# 2026-09-28\n\n- [ ] ${TASK_TEXT} due 2026-09-28 p2 size s ^mt-7f3k2a\n- [ ] Book the room for Thursday\n- [ ] ${DEFER_TEXT} due 2026-10-01 p1 ^mt-4q8r2d\n`), { principal: "user", message: "fixture" });
+// the day's three machine-written files (T2-7): what GET /api/today names by path
+for (const dir of ["Brief", "Standup", "Plan"]) {
+  await vault.write(`Journal/${dir}/2026-09-28.md`, Buffer.from(`# ${dir} — 28 September\n`), { principal: "user", message: "fixture" });
+}
 
 // the reconciler's section operation (T2-6), in memory, as the bridge runs it —
 // core's `writeNoteSection` — for Close the Day (T2-8); and today's note, from
@@ -697,6 +701,11 @@ const REQUESTS = [
   ["POST /api/sessions/purge", () => ({ path: "/api/sessions/purge", body: { confirm: false } })],
   // T10-6: undo the fold's commit — a Needs You request carrying the preview; nothing is reverted until Approve
   ["POST /api/vault/rollback", () => ({ path: "/api/vault/rollback", body: { commit: "9ab8c7d6" } })],
+
+  // Today (T2-7): the owner's drag order — the day's task and the Blocked card waiting on it — then the day, and All's filter
+  ["PUT /api/today/order", () => ({ path: "/api/today/order", body: { date: "2026-09-28", task_keys: ["mt-7f3k2a", `work:${ids.blockedTask}`] } })],
+  ["GET /api/today", () => ({ path: "/api/today?date=2026-09-28" })],
+  ["GET /api/vault-tasks", () => ({ path: `/api/vault-tasks?where=${encodeURIComponent("due <= 2026-09-28")}` })],
 
   ["POST /api/vault-tasks/:task_key/check", () => ({ path: "/api/vault-tasks/mt-7f3k2a/check", body: { checked: true, seen_text: TASK_TEXT }, key: "tick-0928-0001" })],
   ["POST /api/vault-tasks/:task_key/schedule", () => ({ path: "/api/vault-tasks/mt-4q8r2d/schedule", body: { do: "2026-09-30", seen_text: DEFER_TEXT }, key: "defer-0928-0001" })],

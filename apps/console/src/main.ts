@@ -32,13 +32,14 @@ import { makeServer } from "./server.js";
 import { pushConfigFromEnv, startNotifier } from "./push.js";
 import { loadCollectors } from "@metistry-apps/collectors";
 import { loadRoutines } from "@metistry-apps/routines";
-import { PROFILE_PATH, loadSchedules, profileFacts, readOverlay, routineCapabilities, startRunner, type ComponentCtx } from "./runner.js";
+import { PROFILE_PATH, loadSchedules, profileFacts, readOverlay, routineCapabilities, runNow, startRunner, type ComponentCtx, type RunnerOptions } from "./runner.js";
+import type { ScheduledAdmin } from "./scheduled-routes.js";
 import { PLAN_ROUTINE, RoutineTrigger, closeTriggeredPass } from "./close-day.js";
 import { loadRules, makeRoutePolicy } from "./router.js";
 import { watchCompute } from "./compute.js";
 import { TargetRegistry } from "./dispatch.js";
 import { dirSink, vaultSink, DEFAULT_MAX_TRACKED_BYTES, INBOX_PREFIX, vaultBridgeLister, vaultBridgeSearcher, vaultBridgeWriter } from "@foldedspacelabs/metistry-mcp-brain";
-import { ASSISTANT_DEFAULT_AREAS, INTERNAL_ASSISTANT_ID, ensureInternalAgent, revokeAgent, validateGrants } from "./agents.js";
+import { ASSISTANT_DEFAULT_AREAS, INTERNAL_ASSISTANT_ID, ensureInternalAgent, listAgents, revokeAgent, validateGrants } from "./agents.js";
 import { httpVaultClient } from "./vault-client.js";
 import { SCHEDULED_PATH, STANDUP_MOVE_RETRY_MS, fileOverlay, startStandupMove } from "./profile-tidy.js";
 import { httpVaultStatus } from "./vault-status.js";
@@ -366,6 +367,48 @@ console.log(
     : "connections absent: METISTRY_INSTANCE_DIR is unset or not readable — GET /api/connections answers 503; `metistry connections list` still works (degrades: absent)",
 );
 
+// The routine pause (C5): a routine that declares `requires.engine` is not
+// started at all when the tier its turn would run on is over a `stop` budget
+// — the same verdict the engine's guard reaches, from the same `spend` query
+// (invariant 3), so the scheduler and the engine can never disagree. The miss
+// carries the budget it hit, which is what the runner keys the one Stop-limit
+// request on (C133, T3-12): one per budget window, cleared when it resets.
+const routineBudget = async (): Promise<BudgetMiss | null> => {
+  const cfg = compute.store.current;
+  if (!cfg.budgets || !queries.names().includes(SPEND_QUERY)) return null;
+  const { rows } = await queries.run(SPEND_QUERY);
+  return budgetMiss(cfg, rows as SpendRow[], ROUTINE_TIER);
+};
+
+// The owner's two layers over every manifest's schedule (§2.5), both read on
+// EVERY tick so a change lands on the next one: `.metistry/scheduled.yaml`
+// (the schedule and pause they set; absent = the defaults), and the facts in
+// `Me/profile.md` a time of day follows — `working_days` and `timezone`,
+// through the vault bridge like every other vault read here. No instance
+// directory, no overlay; no bridge, a profile that says nothing (and a
+// routine on `working_days` then says `no_working_days`, never guesses).
+const scheduledFile = optionalEnv(
+  "METISTRY_SCHEDULED_FILE",
+  instanceDir ? join(instanceDir, resolveInstanceLayout(instanceDir).layout.metistryDir, SCHEDULED_FILENAME) : "",
+);
+const readProfile = vault ? async () => profileFacts((await vault.read(PROFILE_PATH))?.content.toString("utf8") ?? null) : undefined;
+const runnerZone = configuredTimeZone(process.env);
+
+const runnerOptions: RunnerOptions = {
+  budget: routineBudget,
+  compute: () => compute.store.current,
+  scheduled: () => readOverlay(scheduledFile || null),
+  ...(readProfile ? { profile: readProfile } : {}),
+  timeZone: runnerZone,
+};
+
+// The Scheduled doors (T3-3, scheduled-routes.ts): the runner's components,
+// the overlay the runner reads, and — only when that is the instance's own
+// `.metistry/scheduled.yaml` and the vault bridge is up — the reconciler's
+// write of it as `user`. Anything else and the doors read but do not write,
+// saying which of the two is missing.
+const instanceScheduled = instanceDir ? join(instanceDir, SCHEDULED_PATH) : undefined;
+const scheduledWritable = vault !== undefined && instanceScheduled !== undefined && scheduledFile === instanceScheduled;
 
 // routine runner (SHOULD-8): collectors and routines scheduled from their
 // manifests, each loaded through its registry (plan §2.7) — the product's
@@ -376,7 +419,7 @@ logSkips("collector", loadedCollectors.skipped);
 logSkips("routine", loadedRoutines.skipped);
 const scheduled = [...(await loadSchedules(loadedCollectors.collectors)), ...(await loadSchedules(loadedRoutines.routines))];
 // What the runner hands every component (runner.ts `ComponentCtx`), built
-// once here so Close the Day's on-demand pass of `plan-tomorrow` gets exactly
+// once here so Close the Day's on-demand pass of `plan-tomorrow` and the Scheduled doors' Run Now (T3-3) get exactly
 // what the 11:00 PM one does.
 const componentCtx: ComponentCtx = {
   // Which model a collector may call is `compute.yaml`'s to say, not an
@@ -430,6 +473,27 @@ const componentCtx: ComponentCtx = {
   runtimeVersion: consoleVersion,
 };
 
+const scheduledAdmin: ScheduledAdmin = {
+  components: scheduled,
+  overlay: {
+    read: fileOverlay(scheduledFile || undefined),
+    ...(scheduledWritable
+      ? { write: async (content: Buffer, expectedSha256: string, message: string) => void (await vault!.write(SCHEDULED_PATH, content, { principal: "user", message }, expectedSha256)) }
+      : {
+          readOnly: !instanceDir
+            ? "METISTRY_INSTANCE_DIR is unset, so this console has no .metistry/scheduled.yaml to change (docs/ops/deployment-shapes.md)"
+            : !vault
+              ? "no vault bridge (METISTRY_RECONCILER_URL + METISTRY_BRIDGE_TOKEN_RECONCILER) — the reconciler is the only writer of .metistry/scheduled.yaml"
+              : `METISTRY_SCHEDULED_FILE names ${scheduledFile}, not the instance's ${instanceScheduled} — a change written there would not be the file the runner reads`,
+        }),
+  },
+  ...(readProfile ? { profile: readProfile } : {}),
+  timeZone: runnerZone,
+  // Run Now gets the same componentCtx and options as a scheduled tick and Close the Day
+  runNow: (name: string) => runNow(pool, scheduled, name, componentCtx, runnerOptions),
+  actorExists: async (id: string) => (await listAgents(pool)).some((a) => a.id === id && !a.revoked),
+};
+
 // Close the Day (T2-8, close-day.ts) enqueues `plan-tomorrow` with the day
 // it closed (`closedDay`, the routine's close shape): one pass at a time, recorded as a `routine_run` like a
 // scheduled one. Not loaded here (a trimmed routines directory) → the close
@@ -474,6 +538,7 @@ const server = makeServer(pool, queries, {
   // GET /api/vault/status: the reconciler's sync status over the same bridge (T10-2)
   ...(reconcilerUrl && reconcilerToken ? { vaultStatus: httpVaultStatus({ url: reconcilerUrl, token: reconcilerToken }) } : {}),
   crews,
+  scheduled: scheduledAdmin,
   compute: () => compute.store.current,
   // the assistant's definition (T4-6): the same overlays the engine composes its prompt from
   assistantDefinition: () =>
@@ -486,40 +551,8 @@ const server = makeServer(pool, queries, {
 });
 if (push) startNotifier(pool, push);
 
-// The routine pause (C5): a routine that declares `requires.engine` is not
-// started at all when the tier its turn would run on is over a `stop` budget
-// — the same verdict the engine's guard reaches, from the same `spend` query
-// (invariant 3), so the scheduler and the engine can never disagree. The miss
-// carries the budget it hit, which is what the runner keys the one Stop-limit
-// request on (C133, T3-12): one per budget window, cleared when it resets.
-const routineBudget = async (): Promise<BudgetMiss | null> => {
-  const cfg = compute.store.current;
-  if (!cfg.budgets || !queries.names().includes(SPEND_QUERY)) return null;
-  const { rows } = await queries.run(SPEND_QUERY);
-  return budgetMiss(cfg, rows as SpendRow[], ROUTINE_TIER);
-};
 
-// The owner's two layers over every manifest's schedule (§2.5), both read on
-// EVERY tick so a change lands on the next one: `.metistry/scheduled.yaml`
-// (the schedule and pause they set; absent = the defaults), and the facts in
-// `Me/profile.md` a time of day follows — `working_days` and `timezone`,
-// through the vault bridge like every other vault read here. No instance
-// directory, no overlay; no bridge, a profile that says nothing (and a
-// routine on `working_days` then says `no_working_days`, never guesses).
-const scheduledFile = optionalEnv(
-  "METISTRY_SCHEDULED_FILE",
-  instanceDir ? join(instanceDir, resolveInstanceLayout(instanceDir).layout.metistryDir, SCHEDULED_FILENAME) : "",
-);
-const readProfile = vault ? async () => profileFacts((await vault.read(PROFILE_PATH))?.content.toString("utf8") ?? null) : undefined;
-const runnerZone = configuredTimeZone(process.env);
-
-startRunner(pool, scheduled, componentCtx, intEnv("METISTRY_RUNNER_TICK_MS", 60_000), {
-  budget: routineBudget,
-  compute: () => compute.store.current,
-  scheduled: () => readOverlay(scheduledFile || null),
-  ...(readProfile ? { profile: readProfile } : {}),
-  timeZone: runnerZone,
-});
+startRunner(pool, scheduled, componentCtx, intEnv("METISTRY_RUNNER_TICK_MS", 60_000), runnerOptions);
 console.log(`runner: ${scheduled.map((c) => `${c.name} (${describeSchedule(c.schedule)})`).join(", ")}`);
 console.log(
   `runner: overlay ${scheduledFile || "(none — METISTRY_INSTANCE_DIR unset)"}; profile ${readProfile ? `${PROFILE_PATH} via the vault bridge` : "absent (no vault bridge)"}; ` +
@@ -536,6 +569,5 @@ server.listen(port, host, () => console.log(`console listening on ${host}:${port
 // edits Me/. Needs the vault bridge (the profile, and the overlay write as
 // `user`) and the instance directory (the overlay read); without either it
 // says so once and does nothing.
-const instanceScheduled = instanceDir ? join(instanceDir, SCHEDULED_PATH) : undefined;
 if (vault) startStandupMove({ vault, db: pool, readOverlay: fileOverlay(scheduledFile === instanceScheduled ? instanceScheduled : undefined) }, { retryMs: STANDUP_MOVE_RETRY_MS });
 else console.log("standup move: no vault bridge — Me/profile.md cannot be read, so nothing moves");

@@ -46,6 +46,7 @@ import { vaultBridgeHistory, vaultBridgeSearch } from "./knowledge-routes.js";
 import type { ComputeAdmin } from "./compute-routes.js";
 import type { SecretsView } from "./secrets-route.js";
 import type { VariablesView } from "./variables-route.js";
+import type { ConnectionsView } from "./connections-route.js";
 import { readInstanceId, securityPresence, realExec } from "@foldedspacelabs/metistry-cli";
 import { CrewRegistry } from "./crews.js";
 import { assistantPromptFiles, loadAssistantDefinition } from "./actors.js";
@@ -351,6 +352,66 @@ console.log(
     ? `route policy: ${rules.policy.mode}, ${rules.policy.table.length} row(s), tiers ${rules.policy.tiers.join(" < ")}, deadline ${rules.policy.timeout_ms} ms`
     : "route policy: absent — no policy: block in rules.yaml (every route row reads `absent`)",
 );
+
+// GET /api/connections(/:name) (plan §2.6): the instance's
+// `.metistry/connections/`, read against the connection-type registry (the
+// seed's and the owner's extensions), with the same presence-only probe the
+// Secrets list has. Nothing here dials. No instance directory → 503.
+const connections: ConnectionsView | undefined = computeAdmin
+  ? { instanceDir: computeAdmin.instanceDir, seedDir: computeAdmin.seedDir, ...(secrets?.presence ? { presence: secrets.presence } : {}) }
+  : undefined;
+console.log(
+  connections
+    ? `connections: ${resolveInstanceLayout(connections.instanceDir).path("connectionsDir")} (read-only; every write is \`metistry connections\`)`
+    : "connections absent: METISTRY_INSTANCE_DIR is unset or not readable — GET /api/connections answers 503; `metistry connections list` still works (degrades: absent)",
+);
+
+const server = makeServer(pool, queries, {
+  origin,
+  ...(secrets ? { secrets } : {}),
+  ...(variables ? { variables } : {}),
+  ...(connections ? { connections } : {}),
+  origins,
+  ...(identity ? { identity } : {}),
+  ...(instancesFiles ? { instancesFiles } : {}),
+  version: consoleVersion,
+  events,
+  ...(localOwner ? { localOwner } : {}),
+  inboxDir,
+  inbox,
+  policy: {
+    idleDays: intEnv("METISTRY_SESSION_IDLE_DAYS", 30),
+    maxDays: intEnv("METISTRY_SESSION_MAX_DAYS", 365),
+  },
+  secureCookies: origin.startsWith("https:"),
+  webRoot: fileURLToPath(new URL("../web", import.meta.url)),
+  rules,
+  routePolicy,
+  targets,
+  ...(push ? { push } : {}),
+  ...(readKnowledge ? { readKnowledge } : {}),
+  ...(embedder ? { embedder } : {}),
+  ...(writeKnowledge ? { writeKnowledge } : {}),
+  ...(listKnowledge ? { listKnowledge } : {}),
+  ...(searchVaultKeyword ? { searchVaultKeyword } : {}),
+  ...(searchKnowledge ? { searchKnowledge } : {}),
+  ...(knowledgeHistory ? { knowledgeHistory } : {}),
+  ...(computeAdmin ? { computeAdmin } : {}),
+  ...(vault ? { vault } : {}),
+  // GET /api/vault/status: the reconciler's sync status over the same bridge (T10-2)
+  ...(reconcilerUrl && reconcilerToken ? { vaultStatus: httpVaultStatus({ url: reconcilerUrl, token: reconcilerToken }) } : {}),
+  crews,
+  compute: () => compute.store.current,
+  // the assistant's definition (T4-6): the same overlays the engine composes its prompt from
+  assistantDefinition: () =>
+    loadAssistantDefinition({
+      identityFiles,
+      promptFiles: assistantPromptFiles(process.env),
+      instanceDir: process.env.METISTRY_INSTANCE_DIR?.trim() || undefined,
+      productDir: process.cwd(),
+    }),
+});
+if (push) startNotifier(pool, push);
 
 // routine runner (SHOULD-8): collectors and routines scheduled from their
 // manifests, each loaded through its registry (plan §2.7) — the product's

@@ -18,6 +18,7 @@
   "dependencies": {
     "@foldedspacelabs/metistry-artifacts": "workspace:*",
     "@foldedspacelabs/metistry-cli": "workspace:*",
+    "@foldedspacelabs/metistry-connections": "workspace:*",
     "@foldedspacelabs/metistry-core": "workspace:*",
     "@foldedspacelabs/metistry-mcp-brain": "workspace:*",
     "@foldedspacelabs/metistry-queries": "workspace:*",

@@ -88,6 +88,9 @@ sql: SELECT id, title FROM work WHERE status <> 'closed' ORDER BY updated_at DES
       body: JSON.stringify({ note: "from shortcut" }),
     });
     expect(cap.status).toBe(201);
+    // T2-1: the Shortcut's owner_token is not an owner credential — it stays "http"
+    const { id } = await cap.json();
+    expect((await pool.query(`SELECT source FROM inbox WHERE id = $1`, [id])).rows[0].source).toBe("http");
     const mgmt = await fetch(`${base}/api/devices`, { headers: auth });
     expect(mgmt.status).toBe(403);
     expect((await mgmt.json()).error.message).toBe("not granted"); // no existence leak
@@ -119,6 +122,9 @@ sql: SELECT id, title FROM work WHERE status <> 'closed' ORDER BY updated_at DES
       body: JSON.stringify({ note: "from the mac app" }),
     });
     expect(cap.status).toBe(201);
+    // T2-1: the local owner token IS an owner credential — the Mac app's captures are "app"
+    const { id } = await cap.json();
+    expect((await pool.query(`SELECT source FROM inbox WHERE id = $1`, [id])).rows[0].source).toBe("app");
   });
 
   it("a passkey session and the local owner token answer whoami as the same principal, by different means", async () => {
@@ -273,8 +279,9 @@ sql: SELECT id, title FROM work WHERE status <> 'closed' ORDER BY updated_at DES
     expect(r.status).toBe(201);
     const body = await r.json();
     expect(body.path).not.toContain(".."); // traversal neutralized
-    const { rows } = await pool.query(`SELECT sha256 FROM inbox WHERE id = $1`, [body.id]);
+    const { rows } = await pool.query(`SELECT sha256, source FROM inbox WHERE id = $1`, [body.id]);
     expect(rows[0].sha256).toBe(body.sha256);
+    expect(rows[0].source).toBe("app"); // T2-1: a passkey session is an owner credential
   });
 
   it("named queries serve with as_of; unknown query is 404; session works", async () => {

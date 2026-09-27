@@ -555,7 +555,7 @@ because a 40 % line decided by three messages either way is not a reading.
 install's number in it; whether PoC-20 phase 1 gets built is the owner's, and
 so is the invariant-4 question it would raise (§3.2 of the research).
 
-### The policy, in shadow — the route record (T9-1)
+### The policy, in shadow — the route record (T9-1, T9-2)
 
 Invariant 4, as ratified on 2026-09-26, says every routing choice is recorded
 with its reasons. `docs/ops/dynamic-router.md` is the whole spec; this is
@@ -582,10 +582,52 @@ facts come from one named query, `seed/queries/route_features.yaml`
 (`expose: route` — it returns the previous message's text, which only the
 console reads).
 
-**Until T9-2 there is no policy**, so every consultation (every row but
-`/note` and a fast path, which are `not_consulted`) reads `absent`, and the
-report says so in a sentence instead of seven tables of zeroes. From T9-2
-it prints, each over its own denominator:
+**The policy is a table you write** — `.metistry/rules.yaml` `policy:`, a
+protected path, your hand (T9-2; the seed ships it commented out beside
+`intent:`). Without the block every consultation (every row but `/note` and
+a fast path, which are `not_consulted`) reads `absent`, and the report says
+so in a sentence instead of seven tables of zeroes. With it:
+
+```yaml
+policy:
+  mode: shadow                     # serve is refused at load until T9-4
+  tiers: [fast, default, deep]     # the allow-list, cheapest first — tier names, never models
+  timeout_ms: 400                  # the whole consultation; 50–2000
+  caps: { tool_calls: 12, tokens: 150000, cost_usd: 0.50 }   # no defaults
+  complexity: { min_confidence: 0.70 }   # fit it; required when a row reads complexity
+  table:
+    - id: small-talk
+      when: { intent: smalltalk }
+      then: { operation: answer, tier: fast }
+    - id: by-complexity
+      when: { complexity: [simple, moderate, demanding] }
+      then: { operation: tools, tier: { simple: fast, moderate: default, demanding: deep } }
+```
+
+The rules still run first and always win; the table is shown only the
+fall-through and, as a counterfactual after the 202, your overrides. The
+first matching row picks an operation from a closed list (`answer`,
+`fast_path:<query>`, `retrieve:knowledge`, `retrieve:queries`,
+`delegate:<crew>`, `tools`) and a tier from `tiers:`; a condition on a
+feature nobody could compute is false, so its row skips. The block is
+validated in the same parse as a bad `fast_path` regex, and every refusal
+names its field (`invalid rules.yaml: policy.table[2].then.tier: "opus" is
+not in policy.tiers …`). At run time a choice that would move a thread's
+active session to another model, or names a query or crew that is not
+loaded, is `out_of_bounds` and the default stands (`docs/ops/dynamic-router.md`
+§4–§5 has every field and every outcome).
+
+**The model features cost one local call each, and only when a row reads
+them.** `intent` and the planner's `complexity` (`simple` · `moderate` ·
+`demanding`) are both scored by `assignments.intent` — the intent tier's
+model, below — concurrently, each cut off at three quarters of `timeout_ms`,
+so a slow or absent scorer is an absent feature (`features.intent.outcome:
+unavailable`) and the table still decides inside the deadline. An
+off-machine model there is refused at load by this file's schema and again
+at the call, as a `failed` consultation. `intent` needs `rules.yaml`'s
+`intent:` block too; under its threshold the feature is `unsure`.
+
+It prints, each over its own denominator:
 
 | Section | Rows | Over |
 | --- | --- | --- |
@@ -1059,8 +1101,9 @@ other assignment, and it is deliberate: a tier nobody named must not resolve
 to whatever answers ordinary turns, which for most installs is billable. The
 same collector money rule applies, checked twice — **`compute.yaml` refuses an
 off-machine provider here at load, naming the field**, and `scoreChoice()`
-refuses again at the call, which is the half that survives an instance editing
-its own file after CI has run.
+(`packages/core` since T9-2, shared with the router's policy) refuses again at
+the call, which is the half that survives an instance editing its own file
+after CI has run.
 
 **Which server it is decides the request.** The three that expose token
 probabilities do not agree about how to ask, and each row below was measured
@@ -1110,8 +1153,10 @@ turning on at all.
 
 **What it is not.** The tier emits a FACT — what the message says — and never
 a destination. It names no tier and no model, `route()` does not read it, and
-the console's composer still routes by regex alone (invariant 4). Reading a
-verdict in the router is PoC-20 phase 2 and needs a ruling first.
+the console's composer still routes by regex alone. Since invariant 4 was
+ratified (2026-09-26) the router's policy may read a verdict as one feature
+among several — the table in `rules.yaml` decides what it means, in shadow
+until T9-4 ("The policy, in shadow" above).
 
 ### Embeddings
 

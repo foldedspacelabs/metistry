@@ -10,7 +10,33 @@
 
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
-import { intentRulesSchema, resolveTier, tiersSchema, type Effort, type TierMap } from "@foldedspacelabs/metistry-core";
+import {
+  POLICY_TIMEOUT_DEFAULT_MS,
+  RUNTIME_BOUNDS,
+  boundDecision,
+  complexityValue,
+  decide,
+  intentRulesSchema,
+  intentValue,
+  isComplexity,
+  isIntent,
+  parseOperation,
+  policyReads,
+  resolveTier,
+  scoreRouteFeatures,
+  scorerTimeoutMs,
+  tierTarget,
+  tiersSchema,
+  validateRoutePolicy,
+  type Compute,
+  type ComplexityFeature,
+  type Effort,
+  type IntentFeature,
+  type ModelFeatureOutcome,
+  type ModelFeatures,
+  type RoutePolicyConfig,
+  type TierMap,
+} from "@foldedspacelabs/metistry-core";
 
 const rulesSchema = z.object({
   fast_path: z.array(z.object({ match: z.string(), query: z.string() })).default([]),
@@ -20,12 +46,14 @@ const rulesSchema = z.object({
    * The intent tier's thresholds (PoC-20 phase 1,
    * docs/research/2026-09-21-intent-classification-tier.md §3.2 P2).
    *
-   * VALIDATED here and read NOWHERE in this file. That is not an oversight and
-   * a test greps for it: `route()` never sees a classifier verdict, `Route` is
-   * not extended, and the composer door is PoC-20 phase 2, which needs the
-   * owner's ruling on invariant 4's wording first (§6 question 1). What reads
-   * these numbers today is `inbox-drain`, at the capture door, which §4.1
-   * rates as costing no invariant argument at all.
+   * Validated here, and NEVER read by `route()`: the rules below route by
+   * prefix, regex and explicit command alone, `Route` is not extended, and a
+   * test greps `route()` for exactly that (collectors/test/invariant4.test.ts).
+   * Two readers use the numbers: `inbox-drain`, at the capture door, and —
+   * since invariant 4 was ratified on 2026-09-26 — the local policy above
+   * `route()` (T9-2), for which a verdict under the owner's threshold is the
+   * feature `unsure` (docs/ops/dynamic-router.md §2). The policy runs in
+   * shadow: it records what it would choose and serves nothing.
    *
    * It is parsed here because this is where `rules.yaml` is parsed, and the
    * schema's whole job is to fail AT LOAD: a threshold outside [0,1], or an
@@ -36,7 +64,14 @@ const rulesSchema = z.object({
   intent: intentRulesSchema.optional(),
 });
 
-export type Rules = z.infer<typeof rulesSchema>;
+/**
+ * `rules.yaml` as the console reads it. `policy` is the owner's table
+ * (docs/ops/dynamic-router.md §4), validated by core's `validateRoutePolicy`
+ * against the rest of this file — its tiers, its fast paths, its `intent:`
+ * block — so it is set by `loadRules` and nowhere else. Absent = no policy,
+ * the shipped behaviour.
+ */
+export type Rules = z.infer<typeof rulesSchema> & { policy?: RoutePolicyConfig };
 export type { TierMap };
 
 export type Route =
@@ -45,10 +80,20 @@ export type Route =
   | { kind: "model"; tier: string; model: string; effort: Effort; text: string; routed_by: "rule" | "override" };
 
 export function loadRules(yamlText: string): Rules {
-  const parsed = rulesSchema.safeParse(parseYaml(yamlText));
+  const doc: unknown = parseYaml(yamlText);
+  const parsed = rulesSchema.safeParse(doc);
   if (!parsed.success) throw new Error(`invalid rules.yaml: ${parsed.error.issues.map((i) => i.message).join("; ")}`);
-  const rules = parsed.data;
+  const rules: Rules = parsed.data;
   for (const r of rules.fast_path) new RegExp(r.match, "i"); // fail at load, not per message
+  // The policy block (T9-2): refused at load, every refusal naming its field,
+  // in this same parse — never a surprise on a message. `policy:` with
+  // nothing under it is the block commented out, and absent means off.
+  const block = typeof doc === "object" && doc !== null ? (doc as Record<string, unknown>).policy : undefined;
+  if (block !== undefined && block !== null) {
+    const p = validateRoutePolicy(block, { tiers: Object.keys(rules.tiers), fastPathQueries: rules.fast_path.map((r) => r.query), intentRules: rules.intent !== undefined });
+    if (!p.ok) throw new Error(`invalid rules.yaml: ${p.errors.join("; ")}`);
+    rules.policy = p.policy;
+  }
   return rules;
 }
 
@@ -68,12 +113,15 @@ function modelRoute(tiers: TierMap, name: string | undefined, text: string, rout
 // that decision — it takes the `Route` the rules already returned and
 // describes it, beside what a policy WOULD have chosen.
 //
-// No policy ships yet (T9-2 builds the table in `rules.yaml`), so every row
-// on a real install reads `policy.outcome: "absent"`. The seam — `RoutePolicy`
-// — exists now so the consultation's deadline, its failure modes and its
-// record are built and tested before anything can choose: a stub that
-// answers, throws or never resolves must leave the served route untouched,
-// and T9-1's tests hold that at the HTTP door.
+// The seam — `RoutePolicy` — was built first (T9-1), so the consultation's
+// deadline, its failure modes and its record were tested before anything
+// could choose: a stub that answers, throws or never resolves leaves the
+// served route untouched, and T9-1's tests hold that at the HTTP door. The
+// policy that fills it is the owner's table in `rules.yaml` `policy:`
+// (T9-2, `makeRoutePolicy` below, over core's `router-policy.ts`); with no
+// block every row reads `policy.outcome: "absent"`, as before. It is still
+// SHADOW: it chooses, the choice is recorded, and the rules' route is what
+// is served until T9-4.
 //
 // It sits above `route()` on purpose: collectors/test/invariant4.test.ts reads
 // `route()` to the end of this file and requires it to stay blind to any
@@ -86,16 +134,13 @@ export type ServedKind = "note" | "fast_path" | "override" | "default" | "policy
 export const POLICY_OUTCOMES = ["not_consulted", "counterfactual", "absent", "chosen", "no_match", "out_of_bounds", "timeout", "failed"] as const;
 export type PolicyOutcome = (typeof POLICY_OUTCOMES)[number];
 
-/** §4's `timeout_ms` default: the whole consultation — features, table, bounds — or the rules' default. The intent research's p95 bar for the composer path. */
-export const POLICY_TIMEOUT_MS = 400; // limit: fixed — the spec's default; T9-2 reads the owner's `policy.timeout_ms` (50–2000) in its place
+/** §4's `timeout_ms` default: the whole consultation — features, table, bounds — or the rules' default. A policy built from `rules.yaml` carries the owner's `policy.timeout_ms` (50–2000) instead. */
+export const POLICY_TIMEOUT_MS = POLICY_TIMEOUT_DEFAULT_MS;
 
 /** How far back a previous message may be for `reask` to fire (§2). */
 export const REASK_WINDOW_MS = 30 * 60_000; // limit: fixed — §2's feature definition, not an install's policy
 /** The word-set overlap at which a message is the same question again (§2). */
 export const REASK_JACCARD = 0.5; // limit: fixed — §2's feature definition
-
-/** Why a bounded choice was refused (§5's `out_of_bounds` row). The run-time ones only — the load-time refusals never reach a message. */
-const RUNTIME_BOUNDS = ["session", "crew_registry", "queries"] as const;
 
 /** What a policy proposes for one message: an operation from §3's closed vocabulary and a tier name — never a model. */
 export interface PolicyChoice {
@@ -118,6 +163,9 @@ export interface RouteFeatures {
   thread_turns?: number;
   recent_failures?: number;
   reask?: boolean;
+  /** the model features (T9-2), present only when the policy's table reads them: the scorer's outcome and numbers, never text */
+  intent?: IntentFeature;
+  complexity?: ComplexityFeature;
 }
 
 /** The thread's session, as the session rule (§1, R10) will need it: a policy may not move an active session to another model. */
@@ -146,10 +194,21 @@ export interface ThreadFacts {
  */
 export interface RoutePolicy {
   decide(input: { features: RouteFeatures; session: SessionFacts; served: ServedKind }): PolicyAnswer | Promise<PolicyAnswer>;
+  /**
+   * The model features the table reads (§2) — `intent`, `complexity` — from
+   * the text, on the local scorer. Called inside the consultation's one
+   * deadline, concurrently with the features query, and only when the
+   * policy is consulted. The text goes to the on-machine scorer and nowhere
+   * else; what comes back is names and numbers, checked again here before
+   * any of it is recorded. Absent = the table reads no model feature.
+   */
+  modelFeatures?: (text: string, at: Date) => Promise<ModelFeatures>;
   /** `policy.timeout_ms`; absent = `POLICY_TIMEOUT_MS` */
   timeoutMs?: number;
-  /** `policy.tiers`, cheapest first — recorded so the report can tell a higher tier from a lower one */
+  /** `policy.tiers`, cheapest first — the allow-list: an answer naming any other tier is not a decision. Recorded so the report can tell a higher tier from a lower one */
   tiers?: readonly string[];
+  /** `policy.caps.tool_calls` — an answer granting more is not a decision */
+  toolCallsCap?: number;
 }
 
 /** The derived kind `route_report` counts: `override` and `default` are both `kind: "model"` on the wire. */
@@ -215,10 +274,16 @@ export function threadFactsOf(row: Record<string, unknown> | undefined): ThreadF
 // a policy that answered with a sentence would be a way to put text in a row
 // Run detail shows, so an answer that is not name-shaped is not an answer.
 const ROW_ID_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-const OPERATION_RE = /^[a-z]+(?::[a-z0-9_-]+)?$/;
 
-/** Validate what a policy answered; a string is the reason it is not a decision (→ `failed`). */
-function checkAnswer(a: unknown, tiers: TierMap): PolicyAnswer | string {
+/**
+ * Validate what a policy answered; a string is the reason it is not a
+ * decision (→ `failed`). This is the bounds check at run time, on WHATEVER
+ * answered (§4, "load-time validation, then the bounds check at run time"):
+ * an operation outside the vocabulary, a tier outside `tiers:` or outside
+ * the policy's own allow-list, a tool budget above its cap — none of them
+ * is a choice, and none of them reaches the record as one.
+ */
+function checkAnswer(a: unknown, tiers: TierMap, policy: Pick<RoutePolicy, "tiers" | "toolCallsCap">): PolicyAnswer | string {
   if (typeof a !== "object" || a === null) return "the policy answered something that is not a decision";
   const o = a as Record<string, unknown>;
   if (o.outcome === "no_match") return { outcome: "no_match" };
@@ -226,20 +291,63 @@ function checkAnswer(a: unknown, tiers: TierMap): PolicyAnswer | string {
   if (typeof o.row !== "string" || o.row.length > 64 || !ROW_ID_RE.test(o.row)) return "the policy named no table row";
   const c = o.chosen as Record<string, unknown> | null | undefined;
   if (typeof c !== "object" || c === null) return "the policy chose nothing";
-  if (typeof c.operation !== "string" || c.operation.length > 80 || !OPERATION_RE.test(c.operation)) return "the policy chose no operation";
+  // The vocabulary is core's, spelled exactly (`parseOperation`). T9-1 held
+  // this with a shape regex whose head could not contain `_`, which refused
+  // every `fast_path:<query>` choice as garbage.
+  if (typeof c.operation !== "string" || c.operation.length > 80) return "the policy chose no operation";
+  if (!parseOperation(c.operation)) return "the policy chose an operation outside the vocabulary";
   const chosen: PolicyChoice = { operation: c.operation };
   if (c.tier !== undefined) {
     if (typeof c.tier !== "string" || !Object.hasOwn(tiers, c.tier)) return "the policy named a tier outside tiers:";
+    if (policy.tiers && !policy.tiers.includes(c.tier)) return "the policy named a tier outside policy.tiers";
     chosen.tier = c.tier;
   }
   if (c.tool_calls !== undefined) {
     if (typeof c.tool_calls !== "number" || !Number.isInteger(c.tool_calls) || c.tool_calls < 0 || c.tool_calls > 10_000) return "the policy chose a tool_calls that is not a count";
+    if (policy.toolCallsCap !== undefined && c.tool_calls > policy.toolCallsCap) return "the policy chose a tool_calls above caps.tool_calls";
     chosen.tool_calls = c.tool_calls;
   }
   if (o.outcome === "chosen") return { outcome: "chosen", row: o.row, chosen };
   const bounded = o.bounded_by;
   if (typeof bounded !== "string" || !(RUNTIME_BOUNDS as readonly string[]).includes(bounded)) return "the policy named no bound it was held to";
   return { outcome: "out_of_bounds", row: o.row, chosen, bounded_by: bounded as (typeof RUNTIME_BOUNDS)[number] };
+}
+
+const MODEL_FEATURE_OUTCOMES: readonly ModelFeatureOutcome[] = ["scored", "below_threshold", "guarded", "unavailable"];
+const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,127}$/; // a provider or model id: a name, never a sentence
+const CODE_RE = /^[a-z_]{1,40}$/;
+
+/**
+ * What a policy's scorer answered, re-checked field by field before any of it
+ * is recorded: the outcome from its closed list, the verdict from its closed
+ * enum, the numbers finite, the provenance name-shaped and the reason a code.
+ * Anything else is dropped — the record is read in Run detail, so a scorer
+ * cannot put a sentence in it. The table reads the values core derives from
+ * these (`intentValue`, `complexityValue`), so a dropped field is an absent
+ * feature, never a misfire.
+ */
+function modelFeaturesOf(m: unknown): Pick<RouteFeatures, "intent" | "complexity"> {
+  const out: Pick<RouteFeatures, "intent" | "complexity"> = {};
+  if (typeof m !== "object" || m === null) return out;
+  const one = (v: unknown, verdict: "intent" | "class"): Record<string, unknown> | undefined => {
+    if (typeof v !== "object" || v === null) return undefined;
+    const o = v as Record<string, unknown>;
+    if (!MODEL_FEATURE_OUTCOMES.includes(o.outcome as ModelFeatureOutcome)) return undefined;
+    const f: Record<string, unknown> = { outcome: o.outcome };
+    const named = verdict === "intent" ? isIntent(o.intent) : isComplexity(o.class);
+    if (named) f[verdict] = verdict === "intent" ? o.intent : o.class;
+    for (const k of ["confidence", "threshold"] as const) if (typeof o[k] === "number" && Number.isFinite(o[k]) && o[k] >= 0 && o[k] <= 1) f[k] = o[k];
+    if (typeof o.latency_ms === "number" && Number.isFinite(o.latency_ms) && o.latency_ms >= 0) f.latency_ms = Math.round(o.latency_ms);
+    for (const k of ["provider", "model"] as const) if (typeof o[k] === "string" && NAME_RE.test(o[k])) f[k] = o[k];
+    if (typeof o.reason === "string" && CODE_RE.test(o.reason)) f.reason = o.reason;
+    return f;
+  };
+  const r = m as Record<string, unknown>;
+  const intent = one(r.intent, "intent");
+  const complexity = one(r.complexity, "class");
+  if (intent) out.intent = intent as unknown as IntentFeature;
+  if (complexity) out.complexity = complexity as unknown as ComplexityFeature;
+  return out;
 }
 
 /** One consultation's record: the `runs` row's `ok`/`error` and its `meta` (v1, §6). Never the message text. */
@@ -319,6 +427,11 @@ export async function consultRoute(input: ConsultInput): Promise<RouteRecord> {
 
   type Step = { features: RouteFeatures; session: SessionFacts; factsError?: string; answer?: PolicyAnswer | string };
   const step = async (): Promise<Step> => {
+    // The model features start WITH the features query, not after it: one
+    // deadline covers both (§4 `timeout_ms`). Awaited below; a rejection a
+    // failed features query pre-empts is handled here so it never surfaces.
+    const scoring = consulted && policy.modelFeatures ? policy.modelFeatures(input.text, input.at) : undefined;
+    scoring?.catch(() => {});
     let facts: ThreadFacts | null = null;
     let factsError: string | undefined;
     try {
@@ -332,7 +445,8 @@ export async function consultRoute(input: ConsultInput): Promise<RouteRecord> {
     if (!consulted || factsError !== undefined) return { features, session, ...(factsError !== undefined ? { factsError } : {}) };
     let answer: PolicyAnswer | string;
     try {
-      answer = checkAnswer(await policy.decide({ features, session, served: kind }), rules.tiers);
+      if (scoring) Object.assign(features, modelFeaturesOf(await scoring));
+      answer = checkAnswer(await policy.decide({ features, session, served: kind }), rules.tiers, policy);
     } catch (err) {
       answer = `the policy threw: ${err instanceof Error ? err.message : String(err)}`;
     }
@@ -387,6 +501,76 @@ export async function consultRoute(input: ConsultInput): Promise<RouteRecord> {
     ...tiersOf,
   };
   return { tool: kind, ok: true, meta: { ...base, features: got.features, policy: policyMeta, agrees } };
+}
+
+// ---- The policy (T9-2): the owner's table, bounded, in shadow ----------------
+//
+// `rules.yaml` `policy:` made into the `RoutePolicy` the consultation above
+// asks (docs/ops/dynamic-router.md §2–§5). Everything that decides is core's
+// and pure — `decide()` over the table, `boundDecision()` over the session
+// and the registries — and this is only the wiring to the console's world:
+// the live tier map, `compute.yaml` in force, the loaded queries and crews,
+// and the one local scorer. With no `policy:` block there is no policy and
+// every row reads `absent`, which is the shipped behaviour.
+
+export interface RoutePolicyDeps {
+  /** the LIVE rules object — `tiers` is swapped when `compute.yaml`'s assignments change (main.ts); `policy` and `intent` are the owner's */
+  rules: Rules;
+  /** `compute.yaml` in force: where a tier runs (the session rule) and which model scores (`assignments.intent`) */
+  compute?: (() => Compute) | undefined;
+  /** where a scorer provider's `auth.secret` resolves */
+  secretEnv?: NodeJS.ProcessEnv | undefined;
+  fetchFn?: typeof fetch | undefined;
+  /** the named query is loaded now — a `fast_path:<query>` choice whose query is not is `out_of_bounds` (`queries`) */
+  hasQuery: (name: string) => boolean;
+  /** the crew's manifest is loaded now — a `delegate:<crew>` choice whose crew is not is `out_of_bounds` (`crew_registry`) */
+  hasCrew: (name: string) => boolean;
+}
+
+/**
+ * The owner's table as a `RoutePolicy`, or undefined when `rules.yaml` has
+ * no `policy:` block. `mode: serve` never gets here — `loadRules` refuses it
+ * until T9-4 — so whatever this chooses is recorded and not served.
+ *
+ * The scorer is asked only for what some row reads (`policyReads`, once),
+ * with each call cut off inside the owner's deadline (`scorerTimeoutMs`), so
+ * a slow scorer is an absent feature and the table still decides.
+ */
+export function makeRoutePolicy(deps: RoutePolicyDeps): RoutePolicy | undefined {
+  const policy = deps.rules.policy;
+  if (!policy) return undefined;
+  const reads = policyReads(policy);
+  const access = {
+    ...(deps.compute ? { compute: deps.compute } : {}),
+    ...(deps.secretEnv ? { secretEnv: deps.secretEnv } : {}),
+    ...(deps.fetchFn ? { fetchFn: deps.fetchFn } : {}),
+  };
+  const timeoutMs = scorerTimeoutMs(policy.timeout_ms);
+  const modelFeatures = (text: string, at: Date): Promise<ModelFeatures> =>
+    scoreRouteFeatures(access, text, { reads, intentRules: deps.rules.intent, complexityMinConfidence: policy.complexity?.min_confidence, timeoutMs, now: at });
+  return {
+    timeoutMs: policy.timeout_ms,
+    tiers: policy.tiers,
+    toolCallsCap: policy.caps.tool_calls,
+    ...(reads.intent || reads.complexity ? { modelFeatures } : {}),
+    decide: ({ features, session }) => {
+      const decision = decide(policy, {
+        words: features.words,
+        attachments: features.attachments,
+        thread_turns: features.thread_turns,
+        recent_failures: features.recent_failures,
+        reask: features.reask,
+        intent: intentValue(features.intent),
+        complexity: complexityValue(features.complexity),
+      });
+      return boundDecision(policy, decision, {
+        session,
+        resolve: (tier) => tierTarget(deps.compute?.(), deps.rules.tiers, tier),
+        hasQuery: deps.hasQuery,
+        hasCrew: deps.hasCrew,
+      });
+    },
+  };
 }
 
 /**

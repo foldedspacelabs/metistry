@@ -121,6 +121,11 @@ the policy may choose only a tier that resolves to that session's (provider,
 model) — which still leaves it every operation and every effort-only variant.
 Anything else is out of bounds and takes the rules' default (`bounded_by:
 session`). A new thread, or one whose session rolled at a task boundary, is free.
+Where the session's (provider, model) is not on record — an Agent SDK session
+keeps no `assistant_sessions` row, so `route_features` returns NULL for both —
+the only model known not to move it is the one the rules' default runs on, so
+the tier must resolve to that (T9-2's reading of this rule; `boundDecision` in
+`packages/core/src/router-policy.ts`).
 Rejected: letting the policy switch models and measuring the damage in shadow — the
 damage is lost context, which the shadow's agreement measure cannot see either.
 
@@ -187,9 +192,17 @@ the translation. Rejected: a separate `assignments.planner` line — it would na
 the same local model twice and give the off-machine refusal two places to live.
 The one scorer answers two questions.
 
-`scoreChoice` lives in `collectors/compute-client.ts` today and the console cannot
-import from `collectors/`. If the console needs it, it moves to `packages/core`
-with its off-machine refusal intact; it is not copied.
+`scoreChoice` lived in `collectors/compute-client.ts` and the console cannot
+import from `collectors/`, so T9-2 moved it to `packages/core`
+(`src/score-choice.ts`) with its off-machine refusal intact — moved, not
+copied: the collectors import it from core, and `completeJson` resolves its
+provider through the same `resolveOnMachineCall`.
+
+**Each scorer call has its own deadline, inside the consultation's**: three
+quarters of `timeout_ms` (`scorerTimeoutMs`). That is what makes "ran past the
+timeout" an absent feature rather than a `timeout` outcome: a slow scorer is
+cut off, recorded `unavailable`, and the table still decides — on the rows that
+do not read it — before the consultation's own deadline.
 
 ## 3. The operation vocabulary
 

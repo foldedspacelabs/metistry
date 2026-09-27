@@ -15,9 +15,10 @@
 //     `response_format: json_schema`, the same call the engine makes, the
 //     same call LM Studio and Ollama answer. No bridge-specific route, no
 //     second client to keep in step.
-//   * **The money rule is enforced HERE, not asked for in a comment.** A
-//     collector whose `uses_model:` names a provider that is not
-//     `locality: on_machine` THROWS, loudly, before any request is built.
+//   * **The money rule is enforced at the call, not asked for in a comment.**
+//     A collector whose `uses_model:` names a provider that is not
+//     `locality: on_machine` THROWS, loudly, before any request is built
+//     (core's `resolveOnMachineCall`, which `scoreChoice` shares).
 //     CI refuses the same thing statically (`collectors/test/
 //     collector-providers.test.ts`); this is the half that survives an
 //     instance editing its own `compute.yaml` after CI has run.
@@ -40,19 +41,7 @@
 // `scrubModelOutput` before any caller sees it. Same guarantee, one place,
 // and now it covers every collector rather than one route.
 
-import {
-  choiceServerOf,
-  collectorProviderIssue,
-  parseModelRef,
-  scoreChoiceOver,
-  scrubModelOutput,
-  type ChoiceFetch,
-  type ChoiceOption,
-  type ChoiceServer,
-  type Compute,
-  type ModelRef,
-  type Provider,
-} from "@foldedspacelabs/metistry-core";
+import { resolveOnMachineCall, scrubModelOutput, type ModelAccess } from "@foldedspacelabs/metistry-core";
 
 /** A JSON Schema object, as `response_format.json_schema.schema` takes it. */
 export type JsonSchema = Record<string, unknown>;
@@ -62,15 +51,15 @@ export interface ChatMessage {
   content: string;
 }
 
-/** What a collector needs from the world to make the call. Carried on `CollectorCtx`. */
-export interface ComputeAccess {
-  /** the configuration IN FORCE, as a getter — `compute.yaml` hot-reloads, and a collector that captured it at startup would keep calling a provider the operator removed */
-  compute?: () => Compute;
-  /** where a provider's `auth.secret` is resolved from (the console's own environment) */
-  secretEnv?: NodeJS.ProcessEnv;
+/**
+ * What a collector needs from the world to make the call. Carried on
+ * `CollectorCtx`. The compute getter, the secret environment and the fetch
+ * seam are core's `ModelAccess` — the same three `scoreChoice` takes, since
+ * the two share one resolution (below).
+ */
+export interface ComputeAccess extends ModelAccess {
   /** the pinned `<provider>/<model-id>` from THIS collector's manifest, handed down by the runner */
   usesModel?: string;
-  fetchFn?: typeof fetch;
 }
 
 export type JsonCompletion<T> =
@@ -94,47 +83,12 @@ const DEFAULT_TIMEOUT_MS = 60_000; // limit: fixed — one generation on a resid
 
 const skip = (why: string): { ok: false; why: string } => ({ ok: false, why });
 
-/** A model reference resolved against the `compute.yaml` in force, with everything a request needs. */
-interface ResolvedCall {
-  ref: ModelRef;
-  provider: Provider;
-  url: string;
-  bearer: string | undefined;
-}
-
-/**
- * The half `completeJson` and `scoreChoice` share: the provider resolution,
- * the money rule, the bearer, and the URL.
- *
- * ONE implementation, because the money rule is the property this module
- * exists to hold and a second copy of it is a second place for it to be
- * wrong. THROWS for an off-machine provider — the one thing that does not
- * degrade — and returns a reason for everything else.
- */
-function resolveCall(ctx: ComputeAccess, collector: string, modelRef: string | undefined, absent: string): ResolvedCall | { ok: false; why: string } {
-  if (!modelRef) return skip(absent);
-  const ref = parseModelRef(modelRef);
-  const cfg = ctx.compute?.();
-  const provider = cfg?.providers[ref.provider];
-
-  const issue = collectorProviderIssue(collector, ref.provider, provider);
-  if (issue) throw new Error(issue);
-
-  if (!provider) {
-    return skip(
-      `compute.yaml declares no provider ${ref.provider}, so ${collector} has no on-device tier — ` +
-        `\`metistry compute providers add --from ${ref.provider}\` if you want one (\`metistry doctor\` reports whether the server is answering)`,
-    );
-  }
-
-  const secret = provider.auth?.secret;
-  const bearer = secret ? ctx.secretEnv?.[secret] : undefined;
-  if (secret && !bearer) {
-    return skip(`providers.${ref.provider}.auth.secret names ${secret}, which is not in this process's environment — \`metistry secrets sync --to env\` and restart`);
-  }
-
-  return { ref, provider, url: `${provider.base_url.replace(/\/+$/, "")}/chat/completions`, bearer };
-}
+// The provider resolution, the money rule, the bearer and the URL are
+// core's `resolveOnMachineCall` — ONE implementation, shared with
+// `scoreChoice` (which moved into `packages/core` with T9-2, because the
+// console's router asks the same one-token question and cannot import from
+// here). It THROWS for an off-machine provider, the one thing that does not
+// degrade, and returns a reason for everything else.
 
 /**
  * Run one schema-constrained completion on the model this collector's
@@ -146,7 +100,7 @@ function resolveCall(ctx: ComputeAccess, collector: string, modelRef: string | u
  * item; degrading quietly would mean an unattended job had started spending.
  */
 export async function completeJson<T>(ctx: ComputeAccess, opts: CompleteJsonOptions): Promise<JsonCompletion<T>> {
-  const resolved = resolveCall(ctx, opts.collector, ctx.usesModel, `${opts.collector} declares no uses_model: in its manifest, so it calls nothing`);
+  const resolved = resolveOnMachineCall(ctx, opts.collector, ctx.usesModel, `${opts.collector} declares no uses_model: in its manifest, so it calls nothing`);
   if ("ok" in resolved) return resolved;
   const { ref, provider, url, bearer } = resolved;
 
@@ -205,117 +159,16 @@ export async function completeJson<T>(ctx: ComputeAccess, opts: CompleteJsonOpti
   };
 }
 
-// ---- scoreChoice: the answer-token sibling (PoC-20 phase 1) -------------------
+// ---- scoreChoice: moved to `packages/core` (T9-2) ------------------------------
 //
-// `completeJson()` gains a sibling, on the SAME URL with different fields —
-// which is the research's own wording (§2.5 note 5). Same provider
-// resolution, same money rule, same bearer, same "absent is not a failure".
-// What differs is the body: `max_tokens` 1 (or 2, per server), `logprobs:
-// true`, `top_logprobs: N`, reasoning suppressed, and the answer read out of
-// the returned distribution rather than out of generated JSON.
-//
-// Measured against the JSON-schema route on identical weights: **p50 155 ms
-// against 336 ms**, 2.2× faster, plus a calibrated-looking confidence number
-// the schema route cannot produce (§2.5, §2.4).
-//
-// The request itself is built in `packages/core`'s `choice.ts` rather than
-// here, on purpose: the threshold this tier turns on is FITTED on the owner's
-// fixtures by `metistry-eval intents`, and a threshold fitted against one
-// request shape is not valid against another. One body-builder, two callers,
-// same bytes.
-
-export interface ScoreChoiceOptions {
-  /** the collector's name, for the refusal messages and the money rule */
-  collector: string;
-  /** the pinned `<provider>/<model-id>` for THIS tier. Not `ctx.usesModel`: the intent tier is assigned in `compute.yaml`, not in the collector's manifest. */
-  modelRef: string | undefined;
-  /** what the model may answer, with descriptions (never bare names — research §2.3.1.1) */
-  options: readonly ChoiceOption[];
-  /** the one-token codes, generated from the option list by `codesFor` */
-  codes: readonly string[];
-  messages: ChatMessage[];
-  /** how many top tokens to ask for; the server's own ceiling still applies. Default: one per option. */
-  topLogprobs?: number;
-  timeoutMs?: number;
-}
-
-export type ChoiceScore =
-  | {
-      ok: true;
-      /** the option key the model put the most mass on — one of `options[].key`, never anything else */
-      choice: string;
-      code: string;
-      /** TypeSafe's statistic over the renormalised distribution, clamped to [0,1] (research §2.2) */
-      confidence: number;
-      /** every option key → its renormalised probability */
-      distribution: Record<string, number>;
-      /** the share of the model's own top-N mass that landed inside the closed alphabet */
-      alpha: number;
-      /** how many options appeared in the returned top-N at all */
-      covered: number;
-      provider: string;
-      model: string;
-      /** which of the four local servers answered, where the provider block says so */
-      server: ChoiceServer | undefined;
-      latency_ms: number;
-    }
-  | { ok: false; why: string };
-
-/**
- * Score one closed choice on the model `modelRef` names, or say why nothing
- * ran.
- *
- * Degrades exactly as `completeJson` does — no assignment, no such provider,
- * no credential, a server that does not answer, a server that answers without
- * logprobs, a distribution with no option code in it — and THROWS for the one
- * thing that must not degrade, an off-machine provider. `compute.yaml` refuses
- * that at load too (`assignments.intent`); this is the half that survives an
- * instance editing its own file after CI has run.
- *
- * No `scrubLeaves` on the answer, because there is no model free text in it:
- * the answer is one of the caller's own option keys and the rest is
- * arithmetic. The one textual thing a server CAN put in front of a caller is
- * an error body, which may echo the prompt — so that, and only that, is
- * scrubbed.
- */
-export async function scoreChoice(ctx: ComputeAccess, opts: ScoreChoiceOptions): Promise<ChoiceScore> {
-  const resolved = resolveCall(
-    ctx,
-    opts.collector,
-    opts.modelRef,
-    `compute.yaml assigns no model to the intent tier (assignments.intent), so ${opts.collector} scores nothing — the tier is off, which is a supported install`,
-  );
-  if ("ok" in resolved) return resolved;
-  const { ref, provider, url, bearer } = resolved;
-
-  const scored = await scoreChoiceOver({
-    url,
-    model: ref.model,
-    messages: opts.messages,
-    options: opts.options,
-    codes: opts.codes,
-    server: choiceServerOf(ref.provider, provider),
-    bearer,
-    ...(opts.topLogprobs !== undefined ? { topLogprobs: opts.topLogprobs } : {}),
-    ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
-    ...(provider.request ? { extra: provider.request } : {}),
-    ...(ctx.fetchFn ? { fetchFn: ctx.fetchFn as unknown as ChoiceFetch } : {}),
-  });
-  if (!scored.ok) return skip(scrubModelOutput(scored.why));
-  return {
-    ok: true,
-    choice: scored.key,
-    code: scored.code,
-    confidence: scored.confidence,
-    distribution: scored.distribution,
-    alpha: scored.alpha,
-    covered: scored.covered,
-    provider: ref.provider,
-    model: ref.model,
-    server: scored.server,
-    latency_ms: scored.latency_ms,
-  };
-}
+// `scoreChoice()` — the answer-token sibling of `completeJson()` (PoC-20
+// phase 1) — was written here, on the same URL with different fields. It now
+// lives in `packages/core/src/score-choice.ts`, with its off-machine refusal
+// intact, because the router's policy asks the same question on the same
+// model (docs/ops/dynamic-router.md §2) and the console cannot import from
+// `collectors/`. It was moved, not copied: the collectors import it from core
+// (`inbox-drain/intent-tier.ts`), and it resolves through the same
+// `resolveOnMachineCall` this file does.
 
 /**
  * `scrubModelOutput` over every string in a parsed result, however deep.

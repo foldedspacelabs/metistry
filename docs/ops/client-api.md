@@ -366,7 +366,7 @@ takes a `since` cursor and answers with the next one.
 | `POST /api/trackers/:connection/issues/:key/complete` | owner | session · local_owner | natural | — | — | T4-26 | close an issue |
 | `POST /api/prose/:id/feedback` | owner | session · local_owner | natural | — | — | T1-12 | rate one piece of generated prose |
 | `DELETE /api/prose/:id/feedback` | owner | session · local_owner | natural | — | — | T1-12 | clear a prose rating |
-| `GET /api/events` | owner | session · local_owner | natural | — | — | T2-18 | Server-Sent Events: what changed, as ids; `Last-Event-ID` resumes |
+| `GET /api/events` | owner | session · local_owner | natural | — | — | served | Server-Sent Events: what changed, as ids; `Last-Event-ID` resumes |
 | `GET /api/vault/status` | owner | session · local_owner | natural | — | — | T10-2 | branch, ahead and behind, last commit, last push, conflict |
 | `POST /api/vault/rollback` | local | local_owner | no | — | — | T10-6 | raise a Needs You request to roll back, with the preview |
 <!-- client-api:routes:end -->
@@ -442,7 +442,7 @@ cannot advertise something it would then answer `not_available` (or `404`) for:
 | `artifacts` | the vault client the artifacts module stores through (§4.21) |
 | `queries` | at least one named query loaded (invariant 3's read path) |
 | `dispatch` | at least one compute target configured (§4.18) |
-| `events` | `GET /api/events` is served — the table's row says so (§2.20, T2-18) |
+| `events` | `GET /api/events` is served — the table's row says so (§2.20) — and this console has its events hub wired, so the route streams rather than answering `503` |
 
 **What it is not.** Never a tool name (`knowledge_read` is a tool;
 `knowledge` is a group), never a count of anything, never an origin, never
@@ -461,8 +461,8 @@ which of seven doors exist; what they still cannot do is open one.
 **`api_version`** (F-1) is the contract this console speaks — see Versioning.
 **`events`** (F-1) is the one capability that is not a tool group: it says the
 console streams live changes, so a client subscribes instead of polling — and,
-because it follows the table's row rather than a flag, never subscribes to a
-console that would answer `404`.
+because it follows the table's row and the console's own wiring rather than a
+flag, never subscribes to a console that would answer `404` or `503`.
 
 ### The agent surface — `/mcp` and `POST /capture`
 
@@ -2061,10 +2061,19 @@ DELETE /api/prose/:id/feedback    T1-12
 ### Live changes — `GET /api/events`
 
 ```
-GET /api/events     T2-18 — text/event-stream; Last-Event-ID resumes
-id: 4127
+GET /api/events                       Last-Event-ID: 1790000000000123   (optional)
+200 content-type: text/event-stream; charset=utf-8
+retry: 3000
+
+id: 1790000000000124
 event: work.changed
 data: {"work_id":214}
+
+: heartbeat
+401 {"error":{"code":"unauthenticated",…}}        no credential
+403 {"error":{"code":"forbidden","message":"not granted"}}   an agent bearer, the capture token
+429 {"error":{"code":"rate_limited",…}}           METISTRY_EVENTS_MAX_STREAMS streams already open
+503 {"error":{"code":"not_available",…}}          no events hub in this deployment
 ```
 
 **Server-Sent Events, at reach `owner`**: typed events carrying **ids, never
@@ -2080,6 +2089,52 @@ lines until it is cancelled — one subscription per app. `GET /api/identity`
 advertises the stream as the `events` capability; polling with `since` cursors
 stays the fallback, and token-by-token reply streaming is not in v1 (it would
 put bodies in the stream).
+
+**On the wire.**
+
+- **Ids** are decimal integers, increasing, and opaque to a client: hand the
+  last one back as `Last-Event-ID` and never do arithmetic on it. They start at
+  the console's start time × 1000, so a restarted console begins above every
+  id the last one issued.
+- **A fresh subscriber** (no `Last-Event-ID`) gets one id-only frame first —
+  `id: <head>` and a blank line. It dispatches nothing (the WHATWG rule for a
+  frame with no `data`) but sets the client's last event id, so a stream that
+  hears nothing before it drops still resumes from where it opened.
+- **A resuming subscriber** gets exactly the events after its id, in order,
+  then the live stream — or, when any of them is gone (older than the ring,
+  from before this console started, an id this console never issued), one
+  `resync` numbered at the head: refetch every visible screen, then resume
+  from its id.
+- **A heartbeat** — a `: heartbeat` comment — every 20 s
+  (`METISTRY_EVENTS_HEARTBEAT_MS`) keeps a proxy from closing an idle stream,
+  and at each one the console **asks the credential again**: a revoked
+  session's stream ends within one heartbeat.
+- **A slow subscriber** (256 KiB of frames unsent) is disconnected rather than
+  buffered; its reconnect replays or resyncs.
+- **The console's own LISTEN** is re-established by itself when the database
+  connection drops, and every subscriber is sent `resync` when it comes back —
+  what changed while nobody listened is not in the ring.
+
+**Where events come from** (migration 0035; the rules are `mapBatch` in
+`apps/console/src/events.ts`). Seven tables carry a trigger that notifies
+`{table, op, id}` — never a column value; the console gathers a burst for
+250 ms, looks the rows up once per table, and says each thing once per burst:
+
+| Table | Event |
+| --- | --- |
+| `runs` | `run.started` on insert; `run.finished` once when it finishes; `turn.progress` at both ends of a row carrying `meta.turn_id` (a tool call in a turn). When it finishes, by `kind`: `routine_run` → `routine.status`; `collector_run` → `sync.status`, except the reconciler's pass → `vault.reconciled` when it changed files; `runner` → the status of the routine or sync named in `meta.run_kind`; `budget` → `budget.state` (`meta.scope`); `config_write` → `config.changed` (`meta.path`); `vault_sync` → `vault.sync` (`meta.state`); `connection_call` / `connection_check` → `connection.health` on a failure or a recovery (`meta.connection`); the Update Check's own `routine_run` → `release.available` (`meta.release_available`) |
+| `proposals` | any change → `needs_you.changed` with the pending, un-snoozed count |
+| `work` | any change → `work.changed`; a row claimed by an agent → `presence.changed` too |
+| `inbox` | any change → `capture.new` |
+| `artifact_comments` | any change → `thread.changed` for its task or its artifact |
+| `outbound_messages` | insert → `message.new` |
+| `agents` | a change, with a heartbeat alone (`last_seen_at` inside the same minute) throttled in the trigger → `presence.changed` |
+
+The `runs` kinds a ticket still to land writes (`config_write`, `vault_sync`,
+`connection_call`) are mapped by the `meta` key named here; that is the
+contract those writers meet. Whatever a rule would emit passes one guard
+before it is numbered (`payloadRefusal`): exactly the type's fields, each an
+id, a name, a state token or a count. Anything else is logged and never sent.
 
 The catalogue is `packages/core/src/events.ts` (`EVENT_CATALOGUE`, the payload
 types in `EventPayloads`), one row per type. Numeric ids are JSON numbers; a

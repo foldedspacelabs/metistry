@@ -1,5 +1,53 @@
 # @foldedspacelabs/metistry-mcp-brain
 
+## 0.13.0
+
+### Minor Changes
+
+- 42021b1: Access hardening (T2-2). **Revise on an access request can only grant less**
+  (C40): `accept_with_changes {area}` is refused with a `400` unless the area is
+  the one asked for or a folder under it, and the refusal writes nothing — no
+  grant, no override, no `payload.error`; it carries `asked`. **The answer
+  carries the prior tier** (C41): `granted.prior_tier` on the response and on
+  `payload.granted`. **The escalation ceiling leaves a record** (C42):
+  `request_access`'s third ask after two declines writes a `runs` row of kind
+  `access_ceiling` (exported as `ACCESS_CEILING_KIND`, with `AccessCeilingMeta`),
+  and `GET /api/agents` lists them as `access_ceilings`, grouped per (agent,
+  area), until the agent holds the area or is revoked.
+- 739564d: **One commit per act (T10-1, plan §2.21).** The reconciler's committer keys each commit by the act that made it instead of by `(principal, group)` per flush window: an explicit `group`, else the intent's `turn`, else its `run`, else the write alone. A commit carries `Brain-Source: <principal>` plus `Metistry-Run: <runs.id>` and `Metistry-Turn: <turn id>` trailers where known; two acts of one principal on the same path in one window fold into one commit carrying both. The bridge's intent gains `turn` and `run` (ids only — anything else is `invalid_request`, so a body cannot forge a trailer). The sweep of out-of-band edits is one `user` commit per sweep whose subject names its files (*Edits from Obsidian: 3 notes*). `knowledge_write` now sends the reply's turn handle and its call's `runs.id` instead of a per-agent group, so two replies in one flush window are two commits.
+- 5e8f8d1: A work row says what it is about (T1-1, C85). Migration `0026_work_description.sql` adds `work.description` (nullable text, durable). `TasksService.create` takes `description` and `update` takes it on the board arm, capped at `DESCRIPTION_MAX` (2,000 characters); blank is stored as none, and `Task.description` is `null` when nobody wrote one. `tasks_create` accepts it. `tasks_update` has no `description` key, so an agent sets a description at create and never edits it. The owner edits it with `PATCH /api/tasks/:id {"description": …}`, without a claim; `null` or blank clears it, and it cannot ride with a holder status. Every task route's `task`, the `board` query's rows and MetistryKit's `BoardCard` carry it; `TaskPatch` gains `description` and `TaskPatch.describing(_:)`.
+
+### Patch Changes
+
+- Updated dependencies [152022a]
+- Updated dependencies [942372e]
+- Updated dependencies [95fb504]
+- Updated dependencies [df37d39]
+- Updated dependencies [3d2e818]
+- Updated dependencies [4451f77]
+- Updated dependencies [3a1ff8c]
+- Updated dependencies [6592f91]
+- Updated dependencies [bf33ee1]
+- Updated dependencies [bd29463]
+- Updated dependencies [9ac7949]
+- Updated dependencies [3f9d719]
+- Updated dependencies [4cba65a]
+- Updated dependencies [be25ade]
+- Updated dependencies [c38dc4e]
+- Updated dependencies [a927e61]
+- Updated dependencies [06c854e]
+- Updated dependencies [ec21783]
+- Updated dependencies [a1f1113]
+- Updated dependencies [24a9ddb]
+- Updated dependencies [8c9dde6]
+- Updated dependencies [8217e01]
+- Updated dependencies [37f0ed2]
+- Updated dependencies [5e8f8d1]
+  - @foldedspacelabs/metistry-core@0.13.0
+  - @foldedspacelabs/metistry-tasks@0.13.0
+  - @foldedspacelabs/metistry-artifacts@0.13.0
+  - @foldedspacelabs/metistry-queries@0.13.0
+
 ## 0.12.0
 
 ### Patch Changes

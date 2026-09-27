@@ -1,5 +1,277 @@
 # @metistry-apps/console
 
+## 0.13.0
+
+### Minor Changes
+
+- 42021b1: Access hardening (T2-2). **Revise on an access request can only grant less**
+  (C40): `accept_with_changes {area}` is refused with a `400` unless the area is
+  the one asked for or a folder under it, and the refusal writes nothing — no
+  grant, no override, no `payload.error`; it carries `asked`. **The answer
+  carries the prior tier** (C41): `granted.prior_tier` on the response and on
+  `payload.granted`. **The escalation ceiling leaves a record** (C42):
+  `request_access`'s third ask after two declines writes a `runs` row of kind
+  `access_ceiling` (exported as `ACCESS_CEILING_KIND`, with `AccessCeilingMeta`),
+  and `GET /api/agents` lists them as `access_ceilings`, grouped per (agent,
+  area), until the agent holds the area or is revoked.
+- 2275d5d: **The activity query (T1-3).** `activity_feed` returns `ok` on every row:
+  `false` where a run failed, `true` where it did not, and `null` where the
+  source cannot fail. Failure is now a column instead of English inside
+  `detail`. Routines are in the feed as a seventh group, `routine` (C43). A
+  `routine_run` row appears once it has settled, dated by when it did. Its
+  failure comes from `ok`/`error`, because a failed run carries no
+  `meta.outcome` (T1-4), and its skip or what it wrote comes from
+  `meta.outcome`. A `silent` tick is never a row. A new `turn_id` param returns
+  every call one reply made. A request closed because its source changed reads
+  *resolved at its source — nobody decided it here*, not *you decided
+  resolved_at_source*. The PWA's chips are eight (Routines added), and the glyph
+  takes `failed` from `ok`. MetistryKit's `ActivityFeedRow` decodes `ok`.
+- 152022a: **Actors, resolved (T4-6).** Core implements the actor model F-2 froze: `resolveActor` composes the assistant, a crew or an external agent from its registry row, manifest, `identity.yaml` and `compute.yaml`; `describePermissions()` (beside `describeScope`) draws the permissions table — Resource × Read × Write, provenance per entry — by asking `may()` for every tool, so a line is a door that says yes; and `TOOL_PERMISSION_CELLS` encodes docs/ops/actors.md's tool→cell table beside `RULED_TOOLS`, with an enumeration test that parses the document. A crew's `model:` is now a compute reference (`<provider>/<model-id>`) or `same_as_assistant`; the legacy `haiku | sonnet | opus` resolve through `assignments.crews` for one release, and the crew runner resolves all three with the rule the actor states (`resolveCrewAssignment`). The console carries `permissions` on every `GET /api/agents` row, serves `GET /api/agents/:id/definition` (definition, compute, limits — read-only), and `POST /api/agents` refuses `kind: internal` before anything is written. `metistry agents list` prints the table and `metistry agents define <id>` (M12) edits a crew's prompt, model, effort and description, validated the way the console reads the file and refused when stale (`--if-sha256`). MetistryKit decodes the rows into the shared `PermissionRow` wire types and prints them with `PermissionRowText` — the CLI, the console and the Mac print one table.
+- c0bb21e: C82's rename: the per-area work rollup (`work` grouped by area — open / in progress / blocked / closed this week) is now **Areas**, not Projects, so it never reads as the same thing as the per-project rollup with modes, budgets and a cap. The seed gains `areas_overview` (identical SQL to `projects_overview`, which stays loaded as an alias for one release); the dashboard's Work ▸ Projects sheet now labels the two panels Projects and Areas, and the morning brief's section is `📂 Areas:`.
+- 8d71dfc: The board has five columns (T1-2). `board.yaml`'s `column` is `backlog`,
+  `assigned`, `in_progress`, `blocked` or `done`, and each label is the word its
+  value says: Assigned (no longer "Addressed to") and Blocked. **`needs_you` is
+  now `blocked`** and the `reported` column is gone. A Done card whose crew
+  reported back carries `reported: true` instead. Each card also gains
+  `thread_count`, the message count of its room, and `blocked_by`,
+  `blocked_by_task` and `blocked_by_task_open`, the human todo it waits on,
+  ported from `day_work`. `board_projects` counts the same five columns.
+  `board` is now `expose: route`, because `blocked_by_task` is a line of the
+  owner's own notes. The owner still reads it at `GET /api/q/board`. An agent's
+  `queries_run` and the capture owner token get the unknown-query answer.
+- 942372e: **Captures from the apps (T2-1): `POST /capture` records `source: "app"` for
+  an owner credential.** A passkey session or the local owner token — the Mac
+  app and the PWA, never a request field — is now distinguished from the
+  Shortcut's `owner_token` and an agent bearer, both of which keep `"http"` as
+  before (the bridge's own `capture` tool still records `"mcp"`). Activity can
+  now tell the owner's own captures apart. F-1's frozen row is served; its
+  fixture (`apps/macos/tests/kit/fixtures/post-capture.json`) is re-recorded.
+- 95fb504: The Defer door: `POST /api/vault-tasks/:task_key/schedule {do | someday, seen_text, path?}` writes one `do <date>` or one `someday` on one line of the owner's note through the vault bridge as `user`, with the note's hash — the English spelling `formatTaskLine` emits, never a Tasks-plugin glyph (K6). It is the Tick door's discipline throughout: the line found in the note by the walk's own key, `409 stale` with the line as it stands when the text moved or the line was ticked, dropped or already deferred so, refusals before any read for `.metistry/`, dot-directories and `Artifacts/`, and `Idempotency-Key` replays. A line whose day is a `⏳` or a Dataview `scheduled::` is refused rather than given a second day. Core gains `setTaskScheduled` (proved by re-parsing its own output), the `someday` token in the task grammar (`ParsedTaskLine.someday`, `SOMEDAY_TOKEN`) and a `someday` flag in the filter vocabulary; migration `0036_vault_tasks_someday.sql` adds the derived `vault_tasks.someday` column, which the reconciler's walk writes and `vault_tasks_query` filters and flags on.
+- bf33ee1: The owner's three knowledge reads (T1-6): `GET /api/knowledge/fold?date=` (the newest `Journal/Fold/YYYY-MM-DD.md` on or before a day — newest by the date in its name — and its outgoing links, a link to a draft or conflict dropped), `GET /api/knowledge/drafts?limit=&offset=` (every `status: draft` note, never a conflict) and `GET /api/knowledge/areas` (each area's `<area>/README.md` description, settled page count, last change, and whether the newest fold names it). Each is a new `expose: route` named query — `knowledge_fold_latest`, `knowledge_drafts`, `knowledge_areas` — and each route refuses every principal but the owner itself, before any SQL runs, so a draft is never reachable at the generic `/api/q/<name>` door or through `/mcp`. Core marks the three client-API rows served.
+- bd29463: **Live changes: `GET /api/events` is served.** Migration `0035_event_notify.sql` adds `metistry_notify()` and an `AFTER INSERT OR UPDATE` trigger on `runs`, `proposals`, `work`, `inbox`, `artifact_comments`, `outbound_messages` and `agents` that notifies `{table, op, id}` and nothing else (a no-op update is silent; an agent's heartbeat is throttled to one a minute). The console holds one `LISTEN`, gathers a burst for 250 ms, maps it to the catalogue's typed events and streams them as Server-Sent Events to the owner — a passkey session or the local owner token; an agent bearer and the capture token get the uniform `403`. Every payload passes a guard before it is numbered: exactly its type's fields, each an id, a name, a state or a count. `Last-Event-ID` replays exactly the missed events from a ring of the last 1,000 (or ten minutes), or sends `resync`; a dropped `LISTEN` reconnects by itself and sends `resync`; the credential is re-checked at every 20 s heartbeat; `METISTRY_EVENTS_MAX_STREAMS` (32) caps open streams with a `429`. `GET /api/identity` advertises `events` only while the route is served and the hub is wired.
+  
+  The daily **Update Check** routine (`routines/update-check/`) asks the release feed for the newest release and, when it is newer than the running console, writes the row the console streams as `release.available {version}`; an unreachable feed is a `skipped:` row, never an alert. `@foldedspacelabs/metistry-core`: `GET /api/events` is `served` in the client API table.
+- 9ac7949: **The Needs You count (T1-7): `GET /api/needs-you/count`.** F-1's frozen row
+  is served — `{waiting, oldest_ts, as_of}` through the new `pending_count`
+  named query (`expose: route`), the same pending-and-not-snoozed filter `GET
+  /api/proposals` applies, so the sidebar row and the Dock badge can never
+  disagree with the queue's own length. Always exactly one row; a snoozed
+  proposal (`later`) is not counted, same as the queue it mirrors. Owner reach
+  only — the capture owner token is refused `403`, not served as if the route
+  did not exist.
+- 3f9d719: **Per-instance secrets (plan §2.14).** A secret is an owner-chosen lowercase
+  name, a value in the login Keychain under service `metistry:secret:<name>`
+  and account `<instance_id>` — one instance, one account, no shared scope —
+  and a policy in `.metistry/secrets.yaml`: the hosts it is sent only to, who
+  may use it (On · Ask · Off per connection and actor), and an expiry. It is
+  referenced as `{{ secret.name }}`.
+  
+  `@foldedspacelabs/metistry-core` adds the store and its contract:
+  `InstanceSecrets` (bound to one `instance_id`; nothing on it takes an
+  account), the `KeychainBackend` seam and `memoryKeychain()` for tests,
+  `secretService`/`secretAccount`, the strict `secrets.yaml` schema
+  (`parseSecretsFile`, `secretGrant`), the resolver (`fillSecretRefs`, all or
+  nothing; `parseSecretReference`, with `env:NAME` for one release),
+  `describeSecrets` over a presence-only probe, and `INSTANCE_LAYOUT.secrets`.
+  
+  `@foldedspacelabs/metistry-cli` adds `metistry secrets set | replace | remove
+  | hosts | grant` and `list --named`: the value on stdin into this instance's
+  Keychain account, the policy through the reconciler as the owner.
+  `sync | mint | list | purge` are unchanged, except that `purge` now also
+  deletes the instance's named items. `securityKeychain`/`securityPresence`
+  drive `security` for the new store; `Keychain` delegates to them with the
+  same argv.
+  
+  `@metistry-apps/console` serves `GET /api/secrets` (reach owner): names,
+  hosts, grants, expiry, presence and last used — never a value; the console
+  holds a presence probe and nothing that can read an item. *Last used* comes
+  from the new `secret_last_used` named query (`expose: route`) over
+  `runs.meta.secrets`.
+- 4cba65a: **Profile facts and the standup move (T3-4).** `Me/profile.md` is read in one place: core's `profileFacts` (the two facts a schedule follows), `profileFrontmatter` and `profileWeekdays`, which `plan-tomorrow`'s guard and the console's runner now use too; `resolveScheduleDays` gives a schedule's days with their origin, and a profile with no working days is refused `no_working_days`, never guessed. `standup_days`/`standup_time` move to the Standup routine: the console reads them once into `routines.standup.schedule` in `.metistry/scheduled.yaml` (as `user`; refused until the console holds that authority, T3-2) and raises one *Tidy Me/profile.md* request with the before and after. Approving it writes exactly the "after" as `user`, and is refused `409 stale` if the file changed since; Decline leaves the lines, ignored, and `metistry doctor` names them in one info line (an ok row may now carry `meta.info`). `lastMirror` (core) says whether a subject was ever raised. The seeded profile drops the two keys.
+- be25ade: **Prose feedback (T1-12; B7 of `today-hub-requests.md`).** A 👍/👎 on any
+  piece of generated prose that is not a chat reply — a meeting briefing, Next
+  Up's one line, a revision explanation. `POST|DELETE /api/prose/:id/feedback`
+  (session · local_owner only, exactly like a reply's rating) keys `:id` on a
+  `runs.id` rather than minting a second id scheme: every model turn already
+  logs one row there, so it is the one id already stable wherever prose is
+  produced. `prose_feedback` (migration `0031_prose_feedback.sql`) is a sibling
+  of `reply_feedback`, not a widening of it — one upsert per `runs` row,
+  revisable, deletable, durable. `reply_feedback` and
+  `POST|DELETE /api/messages/:id/feedback` are unchanged.
+- 5ad6f93: The PWA reads F-5's request type table (X-5). `GET /api/proposals` now carries
+  `request` on every row — core's `describeRequest`: type, word, body, answers,
+  decisions — additively, beside the stored columns. The PWA draws the word it
+  is served and its local `REQUEST_TYPE` / `TYPE_LABEL` copies are gone, so a
+  kind the table does not know reads as a report rather than its stored kind.
+  Skip is bulk-only (K2): no row offers it; it stays on the selection bar and
+  its `s` shortcut.
+- c38dc4e: **Registries, not lists (§2.7).** Collectors, routines, targets, provider
+  templates and connection types load through `Registry` — built from
+  manifests, never from a list in code. Core adds `REGISTRY_KINDS` (the closed
+  list of kinds, and what an extension may do with each), `loadKind`,
+  `kindSources`, `extensionsDirFor`/`extensionsDirFromEnv`, `describeExtensions`,
+  and `unitCode`/`joinCode`: a collector's or routine's code is found in its own
+  package **by name**, so an extension may replace a product unit's manifest but
+  never supplies code, and one naming no product unit is skipped with the reason.
+  A new `provider` manifest kind (`type: provider` and a `provider:` block that is
+  `providerSchema` itself) turns `seed/compute-templates/<name>.yaml` into
+  `seed/compute-templates/<name>/manifest.yaml`; `COMPUTE_TEMPLATES` and
+  `parseTemplate` are gone — `computeTemplates()` is the registry, and
+  `readTemplate` takes `{ seedDir, instanceDir }`. `collectors` and `routines`
+  arrays are replaced by `loadCollectors`/`loadRoutines` and
+  `collectorCode`/`routineCode`; the console's `loadSchedules` takes loaded units,
+  `TargetRegistry.load(sources)` skips a bad manifest instead of throwing, and the
+  watchdog's `loadScheduled` reads the same registries. Every product manifest
+  now carries `schema: 1`. New verb: `metistry extensions list | add | remove`
+  (M15) — data-only, owner's hand, refused when its registry would skip the unit.
+  Doctor gains a `registries` row. **Upgrade note:** an owner's
+  `.metistry/targets/<name>/manifest.yaml` overlay without `schema: 1` is now
+  skipped (the product's target is in force) until the line is added.
+- b5ed326: The route record, in shadow (T9-1, docs/ops/dynamic-router.md §6). Every
+  `POST /message` the console routes now writes one `runs` row of kind `route`
+  AFTER the 202: the served kind, the cheap features (`words`, `attachments`,
+  `thread_turns`, `recent_failures`, `reask` — never the text), and what a local
+  policy would have chosen beside what the rules served. No policy ships yet, so
+  every consultation reads `absent`; the seam (`routePolicy` on the console's
+  config) is consulted under a 400 ms deadline, and a policy that answers,
+  throws or never resolves leaves the served route, the 202 body and the reply
+  byte-identical. New named query `route_features` (`expose: route`) supplies the
+  thread facts. `route_report` gains the fifth kind `policy` (0 until T9-4) and
+  the `policy_*` rows; `metistry compute route-report` renders them under the
+  baseline's verdict and carries them as `policy` in `--json`.
+- a927e61: **The overlay: `scheduled.yaml` checked against the manifests, every field
+  resolved with its origin.** Routine and collector manifests gain
+  `display_name`, `config` (fields from a closed five kinds — text, path,
+  number, boolean, choice — each with a default of its kind), and, for a
+  collector, `needs_you` (its Needs You rules) and `presents_as`. Core's
+  `entryProblems` / `checkScheduled` check each entry against its manifest —
+  its section, its config keys and values, its raise rules — and the runner
+  HOLDS a component whose entry does not fit, rather than ignoring the change;
+  `resolveScheduled` resolves every routine and sync over manifest ⊕
+  `Me/profile.md` ⊕ `scheduled.yaml` into `Sourced` fields (*default* · *from
+  your profile* · *yours*) with the next run. The reconciler admits
+  `.metistry/scheduled.yaml` as the console's third protected door — and still
+  no other. Every collector moves to §2.5's closed shape (no shipped cron
+  string is left); Inbox Sort (`inbox-drain`, every 5 min) and Usage Rollup
+  (`claude-usage`, hourly) present as routines; GitHub declares
+  `review_requested` and `assigned`. Manifest errors now name a bad record key
+  by its rule rather than "Invalid key in record".
+- 06c854e: **The scheduler: routines run once, at their time.** Core implements the
+  next-occurrence function F-4 froze (`nextOccurrence`, hand-rolled over `Intl`,
+  Temporal's `compatible` rule on both daylight-saving nights) and the runner's
+  question `dueOccurrence` — the latest slot owed since the last run, so slots
+  missed while the Mac slept coalesce into one run. A time of day is read in the
+  schedule's `tz`, then `Me/profile.md`'s `timezone`, then `METISTRY_TZ` — never
+  `TZ`, which both deployment shapes default to UTC — and with none is refused
+  `no_timezone`. Manifests now validate `schedule:` against §2.5's closed shape
+  (cron strings still accepted for one release), and the five routines carry
+  §2.5's defaults: Morning Brief working days 07:00, Knowledge Fold 21:00,
+  Tomorrow's Plan `eve_of_working_days` 23:00, Reply Review 23:00, Weekly
+  Review Sunday 18:00. The console's runner reads each manifest ⊕
+  `.metistry/scheduled.yaml` on every tick — schedule and pause by name; an
+  entry it cannot apply, or a file that does not validate, HOLDS what it names
+  rather than falling back to defaults — reads `timezone` / `working_days` from
+  `Me/profile.md` through the vault bridge, stamps each run with the slot it is
+  for (`meta.scheduled_for`, `ctx.scheduledFor`, `ctx.timeZone`), and records a
+  schedule it cannot place once a day as `skipped:<reason>`. `knowledge-fold`
+  and `plan-tomorrow` drop their hourly clock gates (`plan-tomorrow` keeps its
+  working-day guard) and date a late run from its slot. `metistry doctor` and
+  the watchdog bound a time of day by the widest gap of its week
+  (`longestGapSeconds`), and doctor reports a refused schedule as `absent` in
+  the runner's own words.
+- 49579af: The session archive table (migration `0030_session_archive.sql`, ephemeral — a
+  30-day cache in Postgres, lost on `docker compose down -v`): one row per turn
+  of every session, chat included — the system prompt as sent, the messages,
+  and the tool calls with arguments and results, redacted (the writer is
+  T3-9). The seed gains `session_detail` (`expose: route`): a session's turns
+  in full, oldest first, filterable to one `turn_id`, with expired rows never
+  returned — Run detail's conversation (`GET /api/sessions/:id`, T2-17).
+- a1f1113: The session archive is written (T3-9). The engine appends every finished turn — chat and machine-enqueued alike — to `session_archive`: the system prompt as sent, the messages that turn added, and each tool call with its arguments and result, all through `core/redact.ts` inside the store itself (`apps/assistant/src/archive.ts`), with `expires_at` 30 days out and `folded_at` NULL (the session fold's queue). The turn handle is minted by the drain before the call, so the in-flight `runs` row, every tool call's `_meta` and the archived row share one `turn_id`; the turn row also carries `meta.session_id`. A failed archive write never fails a turn — it lands in the run's notes. The new `session-purge` routine (daily) deletes what has expired and anything older than its `retention_days` (Scheduled config, 1–30, default 30; anything else is refused with the field named). `POST /api/sessions/purge` (reach `local`, served) is Purge Now: without `confirm: true` it deletes nothing and names the sessions not yet folded; with it, it deletes every archived turn up to the preview's `as_of`, audited.
+- 24a9ddb: The Tick door: `POST /api/vault-tasks/:task_key/check {checked, seen_text, path?}` writes exactly `[x]` and `done <date>` on one line of the owner's note through the vault bridge as `user`, with the note's hash — and Undo (`checked: false`) is the same door, the reverse. The line is found in the note by the reconciler's own key, judged against the text the client rendered (`409 stale` with the line as it stands), and refused before anything is read when its note is not a knowledge note (`.metistry/`, a dot-directory, `Artifacts/`). `Idempotency-Key` replays the first answer. Core gains `setTaskChecked` (the one edit, proved by re-parsing its own output), `taskLinesOf` / `locateTaskLine` (the walk's keying, held to `extractTasks` by a test), `replaceLine`, `taskHashKey` and `TASK_KEY_RE`; the seed gains the `vault_task_by_key` named query (`expose: route`).
+- 8c9dde6: **Turn progress and sessions (T2-17): `GET /api/turns/:turn_id/progress`,
+  `GET /api/sessions/:id`.** F-1's two frozen rows are served. The first reads
+  `turn_progress` — every tool call one assistant turn has made so far, oldest
+  first; a blank or unknown `turn_id` is `calls: []`, never a refusal. The
+  second reads `session_detail` — one row per turn of an archived session,
+  oldest first, narrowed to one turn with `?turn_id=`; a session that has
+  never existed, expired, or been purged answers `404`. Both fixtures
+  (`get-api-turns-turn_id-progress.json`, `get-api-sessions-id.json`) are
+  re-recorded from their hand-written contract shape.
+- 8217e01: **Variables (plan §2.14, M14).** Plain shared values in
+  `.metistry/variables.yaml`, referenced as `{{ variable.name }}` in connection
+  files and agents' instructions. Core adds `parseVariablesFile`,
+  `fillVariableRefs` (all or nothing, one pass, `{{ secret.x }}` left for the
+  egress fill), `describeVariables` and the refusals: a key-shaped value (*Store
+  as Secret*), a secret's name, a value that templates, and — ruling 2 — a
+  schedule or a time, by name or by value. They hold at the parse, so a
+  hand-edited file carrying one does not load anywhere, and a refusal names the
+  variable, never the value. The CLI adds `metistry variables set|unset|list`
+  (set also refuses a value equal to one of the instance's own secrets); the
+  console serves `GET /api/variables` — name, value, read by, used in — to the
+  owner. `INSTANCE_LAYOUT.variables` and redact's `isSecretKeyName` are new.
+- 37f0ed2: **The vault's sync policy and status (T10-2, plan §2.21).** `deployment.yaml` gains a `vault:` block — `push: after_commit | manual | {every: N}`, `pull: {every: N}` (1m…24h; no pull "never"), default after_commit and 5m — merged per key over the D4 overlay (core's `vault-sync.ts`). The reconciler schedules the committer's sync (T10-3) on it and re-reads the file when it changes: after_commit pushes after a flush that made commits and retries only what is unpushed, every N pushes on the interval when something is unpushed, manual never pushes; pull integrates every N; a standing conflict stops scheduled pushes. The committer already records push, pull and conflict; the schedule adds `commit` — one `vault_sync` run per flush that made commits, `meta.state = commit` — so `vault.sync` fires for all four states. The bridge serves `GET /vault/status`; the console serves it to the owner as `GET /api/vault/status`, strictly parsed. `metistry vault settings [--push …] [--pull …] [--yes]` shows and writes the policy (M18, a protected write through the reconciler as `user`), and doctor gains a *vault sync* row (ahead, behind, last push, conflict). `METISTRY_PUSH_SCHEDULE` still overrides `push` for this release, and says so everywhere it applies; `.env.example` no longer sets it.
+- 5e8f8d1: A work row says what it is about (T1-1, C85). Migration `0026_work_description.sql` adds `work.description` (nullable text, durable). `TasksService.create` takes `description` and `update` takes it on the board arm, capped at `DESCRIPTION_MAX` (2,000 characters); blank is stored as none, and `Task.description` is `null` when nobody wrote one. `tasks_create` accepts it. `tasks_update` has no `description` key, so an agent sets a description at create and never edits it. The owner edits it with `PATCH /api/tasks/:id {"description": …}`, without a claim; `null` or blank clears it, and it cannot ride with a holder status. Every task route's `task`, the `board` query's rows and MetistryKit's `BoardCard` carry it; `TaskPatch` gains `description` and `TaskPatch.describing(_:)`.
+
+### Patch Changes
+
+- 88e890d: C45 at every consequential door of `POST /api/proposals/:id`: an answer whose
+  consequence is refused or fails — the improvement overlay write, an action's
+  service call, Approve as Work's `work` row, an enrolment's approval, an access
+  request's grants write — leaves the request pending with `payload.error =
+  {code, message, decision, at}`. Before, only the action path wrote the error;
+  the others left the row pending but silent, and approving an enrolment whose
+  agent had been revoked settled it `approve` while letting nobody in (now a
+  `404` that stays pending). A consequence that throws stores `internal` with no
+  detail. `apps/console/test/c45.integration.test.ts` tests every door.
+- 3d2e818: **Groups and sources (T1-8, migration 0027).** A request can now mirror something that lives elsewhere: `proposals.source` holds `{kind, external_ref, person}`, and a unique partial index over the pending rows makes one subject one row — `raiseMirror` (core) inserts with the matching `ON CONFLICT … DO NOTHING` and returns the waiting row's id on a second raise, so two raises for one PR make one row. `resolveAtSource` closes a pending mirror as `decision = 'resolved_at_source'` when its source changes, and matches nothing without a `source`. A `proposals_source_shape` CHECK refuses a source without a non-empty `kind` and `external_ref`, which would otherwise dodge both the dedupe and the expiry. `proposals.group_id` is the card several rows are answered as (a meeting's Accept All). The morning brief's 14-day expiry now skips every row with a `source` — a mirror never expires. The `pending_requests` named query returns `source` and `group_id`.
+- 3a1ff8c: **The assistant's identity is the owner's to change, and every protected write is on the record (T2-16).** `metistry identity set [--name] [--mention] [--mark] [--dry-run] [--json]` (M10) changes `.metistry/identity.yaml` through the protected write — the reconciler as `user`, with the owner bearer. Every field is validated before anything is read or sent (a one-line name of at most 40 characters with no `{{`/`}}`, an `@kebab` mention, a single-glyph mark), the edited text is read back before it goes, and a refusal writes nothing. Only the changed lines are rewritten, so comments and `voice: >` keep every byte. The mark is the file's existing `icon:` key; a new name brings its mention along when the mention was the one `init` derived. The reconciler now records every protected-path write, delete and rename it accepts as a finished `config_write` run (`meta {path, op, from?, caller, principal, message}`), whichever door made it, and `activity_feed` shows those rows in the `run` group with the principal as actor — so a rename appears in Activity. The fixture recorder seeds one, and `get-api-q-activity_feed.json` is re-recorded.
+- 1141155: **The PWA has the shell screen 18 drew: five tabs, + and the bell in the header, and sheets.** Under 900px the eleven-button emoji strip is gone. In its place are five tabs (Today · Chat · Work · Knowledge · More), drawn with the design's glyphs, and none of them ever carries a badge. The Needs You count lives on the bell in the header, which opens Needs You as a sheet. + opens Capture as a sheet. From 600px a usage gauge joins them and opens Usage. Work's children (Board · Projects · Artifacts) are a segmented control. Activity (the feed's name since N1), Agents, Usage and Settings sit under More, and each More row pushes with a back button. A large title collapses into the header as you scroll. From 600px content is capped at the reading measure, sheets become centred dialogs, and the board's columns scroll sideways and snap. At 900px the PWA takes the Mac's layout: a toolbar, the sidebar in the Mac's order, and the Needs You row carrying the count instead of the bell, present only while something waits (C110). The old dashboard is split across its new homes: Today (the last 24 hours and reviews), Work ▸ Projects and the Usage sheet. The app now boots after every declaration, which fixes the home tab not painting on first load.
+- Updated dependencies [42021b1]
+- Updated dependencies [2275d5d]
+- Updated dependencies [152022a]
+- Updated dependencies [c0bb21e]
+- Updated dependencies [8d71dfc]
+- Updated dependencies [942372e]
+- Updated dependencies [732039b]
+- Updated dependencies [95fb504]
+- Updated dependencies [b89bb73]
+- Updated dependencies [df37d39]
+- Updated dependencies [3d2e818]
+- Updated dependencies [4451f77]
+- Updated dependencies [3a1ff8c]
+- Updated dependencies [6592f91]
+- Updated dependencies [bf33ee1]
+- Updated dependencies [bd29463]
+- Updated dependencies [ff95350]
+- Updated dependencies [9ac7949]
+- Updated dependencies [739564d]
+- Updated dependencies [3f9d719]
+- Updated dependencies [4cba65a]
+- Updated dependencies [be25ade]
+- Updated dependencies [c38dc4e]
+- Updated dependencies [b5ed326]
+- Updated dependencies [a927e61]
+- Updated dependencies [06c854e]
+- Updated dependencies [ed8f802]
+- Updated dependencies [ec21783]
+- Updated dependencies [49579af]
+- Updated dependencies [a1f1113]
+- Updated dependencies [24a9ddb]
+- Updated dependencies [8c9dde6]
+- Updated dependencies [b0c61f8]
+- Updated dependencies [8217e01]
+- Updated dependencies [37f0ed2]
+- Updated dependencies [336778b]
+- Updated dependencies [5e8f8d1]
+  - @foldedspacelabs/metistry-mcp-brain@0.13.0
+  - @foldedspacelabs/metistry-cli@0.13.0
+  - @foldedspacelabs/metistry-core@0.13.0
+  - @metistry-apps/routines@0.13.0
+  - @metistry-apps/collectors@0.13.0
+  - @foldedspacelabs/metistry-tasks@0.13.0
+  - @foldedspacelabs/metistry-artifacts@0.13.0
+  - @foldedspacelabs/metistry-queries@0.13.0
+
 ## 0.12.0
 
 ### Minor Changes

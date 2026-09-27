@@ -435,6 +435,38 @@ Resolve it in a terminal in the instance directory (`git pull`, fix,
 commit) or make the note match the remote's in Obsidian; the next sync
 that integrates cleanly clears `vault.state`.
 
+**The remote cannot change configuration** (ruling 2026-09-26, "refuse and
+report"). Before anything else in step 3, the fetched commits are diffed
+against the merge base (`git diff --name-only <base> <remote>`). If any path
+is protected from the remote — the §4.7 set (`paths.ts`
+`isProtectedFromRemote`): **all** of `.metistry/` (including `state/`,
+which is gitignored and which git would overwrite silently), the root
+`CLAUDE.md` and `README.md`, the legacy machinery roots, and any
+case-folded spelling of them (`claude.md`, `.Metistry/…` — on macOS that
+*is* the protected file once checked out) — then:
+
+- nothing is integrated and nothing is pushed, **even the vault notes in
+  the same fetch**: the fetch is refused whole, because integrating the
+  rest would be a merge nobody wrote;
+- `vault.state` is `conflict` with reason `protected_path_from_remote`,
+  naming the paths (at most 50) and the offending commits (at most 20);
+  the `vault_sync` runs row carries `meta.state: conflict`, the reason,
+  the paths and the commit shas;
+- **one** Needs You `report` per offending remote commit (key
+  `vault-sync-protected:<sha>`) — the commit, its author and subject, the
+  protected paths it changed. The hourly retries and a restart add
+  nothing; a later offending commit is a report of its own;
+- local writes keep committing, and wait to be pushed.
+
+To resume, either **undo it on the remote** — `git revert <sha>` in a
+clone and push; the net change from the merge base then touches nothing
+protected, and the next sync integrates the rest and pushes what was
+held — or **take it by hand** in a terminal in the instance directory
+(`git pull`, read the diff, commit if a merge is needed): once it is in
+the local history the merge base has moved past it, and the next sync is
+clean. Dismiss the reports once done. A vault-only remote commit
+integrates exactly as the table above says.
+
 **Your operation in progress is yours.** While the working tree has a
 merge, rebase, cherry-pick, revert or bisect in progress (git's own
 `MERGE_HEAD`, `rebase-merge/`, …), the committer stages nothing, commits

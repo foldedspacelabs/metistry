@@ -422,6 +422,8 @@ const REQUESTS = [
   ["POST /message", () => ({ path: "/message", body: { text: "What's on today?" } })],
   ["POST /api/messages/:id/feedback", () => ({ path: `/api/messages/${ids.reply}/feedback`, body: { rating: 1, note: "exactly the three" } })],
   ["DELETE /api/messages/:id/feedback", () => ({ path: `/api/messages/${ids.reply}/feedback` })],
+  ["POST /api/prose/:id/feedback", () => ({ path: `/api/prose/${ids.run}/feedback`, body: { rating: 1, note: "guessed instead of retrieving" } })],
+  ["DELETE /api/prose/:id/feedback", () => ({ path: `/api/prose/${ids.run}/feedback` })],
   ["POST /api/proposals/:id", () => ({ path: `/api/proposals/${ids.decision}`, body: { decision: "one file per route" } })],
   ["POST /api/proposals/batch", () => ({ path: "/api/proposals/batch", body: { ids: [ids.later], decision: "later" } })],
 

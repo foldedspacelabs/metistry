@@ -122,7 +122,7 @@ import {
   type TemplateReader,
 } from "@foldedspacelabs/metistry-core";
 import type { RegisteredCollector, Db, CollectorCtx } from "@metistry-apps/collectors";
-import { vaultReader, type PlanCtx, type PlanVault, type UpdateCheckCtx } from "@metistry-apps/routines";
+import { vaultReader, type BriefVault, type PlanCtx, type UpdateCheckCtx } from "@metistry-apps/routines";
 
 export { scheduleToSeconds }; // one import path for the runner's callers and tests
 
@@ -149,6 +149,9 @@ export type ComponentCtx = CollectorCtx &
      * absent for a component that declares no config.
      */
     config?: Readonly<Record<string, ConfigValue>>;
+    vault?: BriefVault | undefined;
+    /** the §2.21 act key: a routine passing it on its vault writes makes them one commit (the Morning Brief's file and its daily-note section) */
+    runId?: number | undefined;
   };
 
 /**
@@ -161,7 +164,7 @@ export type ComponentCtx = CollectorCtx &
  * vault-backed directive renders its own "not configured" note and the file
  * still renders.
  */
-export function routineCapabilities(queries: TemplateQueries, vault?: PlanVault): Pick<ComponentCtx, "queries" | "vault" | "reader"> {
+export function routineCapabilities(queries: TemplateQueries, vault?: BriefVault): Pick<ComponentCtx, "queries" | "vault" | "reader"> {
   return {
     queries,
     ...(vault ? { vault, reader: vaultReader(vault) } : {}),
@@ -758,7 +761,7 @@ export async function tick(db: Db, scheduled: ScheduledCollector[], ctx: Compone
     const slotMeta = slot.scheduledFor ? { scheduled_for: slot.scheduledFor.toISOString(), time_zone: slot.timeZone } : undefined;
     const runId = await startRun(db, { component: c.name, kind: c.runKind, ...(slotMeta ? { meta: slotMeta } : {}) });
     const runCtx: ComponentCtx = {
-      ...componentCtx(c, ctx, eff.config),
+      ...componentCtx(c, ctx, eff.config, runId),
       ...(slot.scheduledFor ? { scheduledFor: slot.scheduledFor } : {}),
       ...(slot.timeZone ? { timeZone: slot.timeZone } : {}),
     };
@@ -1188,9 +1191,10 @@ function secretStopped(name: string, stopped: readonly string[]): Record<string,
 }
 
 /** What one component is handed for a run: the shared ctx, its pinned model, and its resolved config. */
-function componentCtx(c: ScheduledCollector, ctx: ComponentCtx, config: Readonly<Record<string, ConfigValue>>): ComponentCtx {
+function componentCtx(c: ScheduledCollector, ctx: ComponentCtx, config: Readonly<Record<string, ConfigValue>>, runId: number): ComponentCtx {
   return {
     ...ctx,
+    runId,
     ...(c.usesModel ? { usesModel: c.usesModel } : {}),
     ...(Object.keys(config).length > 0 ? { config } : {}),
   };
@@ -1290,7 +1294,7 @@ export async function runNow(db: Db, scheduled: readonly ScheduledCollector[], n
   if (!pre.ok) return { started: false, reason: "blocked", message: blockedConfigMessage(c.name, c.dir, pre) };
   const runId = await startRun(db, { component: c.name, kind: c.runKind, meta: { trigger: "run_now" } });
   const streak = streakFor(await failureStreaks(db), c.name, c.runKind);
-  const done = execute(db, c, runId, componentCtx(c, ctx, eff.config), streak, opts).catch((err: unknown) => {
+  const done = execute(db, c, runId, componentCtx(c, ctx, eff.config, runId), streak, opts).catch((err: unknown) => {
     console.error(`runner: Run Now of ${c.name} (run ${String(runId)}) could not be recorded:`, err);
   });
   return { started: true, runId: String(runId), done };

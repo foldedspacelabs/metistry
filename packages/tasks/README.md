@@ -67,11 +67,11 @@ second) and records a `runs` row (`component = agent`, `kind = 'task_op'`,
 
 | Method | Does | Returns |
 | --- | --- | --- |
-| `create(input, agent)` | Insert a task. `input`: `title` (required), `project?`, `area?`, `depends_on?: number[]`, `due?: 'YYYY-MM-DD'`, `idempotency_key?`, `external_ref?`. Unknown `depends_on` ids are refused. Same key → the existing row, untouched. | `Task` |
+| `create(input, agent)` | Insert a task. `input`: `title` (required), `project?`, `area?`, `depends_on?: number[]`, `due?: 'YYYY-MM-DD'`, `idempotency_key?`, `external_ref?`, `description?` (at most `DESCRIPTION_MAX` = 2000 characters; blank is none). Unknown `depends_on` ids are refused. Same key → the existing row, untouched. | `Task` |
 | `listReady({project?, limit?})` | Status `open`, kind `task`/`review`, unclaimed or lease expired, every dependency `closed`. Due dates first, then oldest. Rows collected from a source of truth (`issue`, `pr`, `event`) are never listed or claimable — their status belongs to the source. | `Task[]` |
 | `claim(id, agent, leaseSeconds?)` | One atomic `UPDATE`: requires unclaimed-or-expired, status `open`/`in_progress`, dependencies closed. Sets holder, lease, `in_progress`. | `Result` |
 | `heartbeat(id, agent, leaseSeconds?, note?)` | Extend the lease. Holder only, and only while the lease is live — an expired lease is never renewed. `note` lands on `history`; a renew *without* one appends nothing, so a lease kept alive every few minutes never buries the row's record. | `Result` |
-| `update(id, agent, {status?, note?, owner?, title?, project?})` | **Two arms** — see below. Holder arm: `status` ∈ `in_progress \| blocked \| closed` (`closed` releases the claim and sets `closed_at`; `blocked` keeps it), and/or a bare `note`. Board arm: `owner` (`null` clears), `title`, `project`, and `status: 'open'` (the unblock, legal from `blocked` only). Appends to `history`. | `Result` |
+| `update(id, agent, {status?, note?, owner?, title?, project?, description?})` | **Two arms** — see below. Holder arm: `status` ∈ `in_progress \| blocked \| closed` (`closed` releases the claim and sets `closed_at`; `blocked` keeps it), and/or a bare `note`. Board arm: `owner` (`null` clears), `title`, `project`, `description` (`null` or blank clears), and `status: 'open'` (the unblock, legal from `blocked` only). Appends to `history`. | `Result` |
 | `release(id, agent, note?)` | Holder hands the task back: clears the claim, status → `open`. | `Result` |
 | `get(id)` | One task or `null`. | `Task \| null` |
 | `listForAgent(agent)` | Everything the agent currently holds. | `Task[]` |
@@ -93,7 +93,7 @@ the caller passes:
 | Arm | Fields | Gate |
 | --- | --- | --- |
 | **holder** | `status: in_progress \| blocked \| closed`, a bare `note` | `claimed_by = agent` |
-| **board** | `owner`, `title`, `project`, `status: 'open'` | none — but kind `task`/`review`, not closed, and `open` only from `blocked` |
+| **board** | `owner`, `title`, `project`, `description`, `status: 'open'` | none — but kind `task`/`review`, not closed, and `open` only from `blocked` |
 
 The board arm exists because addressing, renaming and re-filing a card are
 gestures on a row nobody need hold, and because `blocked` is the one state
@@ -104,6 +104,13 @@ nothing in the system could leave: `UpdateInput.status` used to be
 throws `invalid_input` naming both fields. Mixing would let the arm with the
 looser gate carry the other arm's write, which is the whole reason the gate
 lives in the `WHERE` clause and not in an adapter.
+
+**`description` is set once by the creator and edited only by the owner**
+(C85). `create` takes it from whoever makes the row; afterwards it is a
+board-arm field, and the only adapter that passes it is the console's
+`PATCH /api/tasks/:id` as `user`. Metistry's agent verb `tasks_update` has no
+`description` key, so an agent that wrote a card can never rewrite what the
+card says it is about.
 
 The unblock hands the row back the way `release()` does (claim and lease
 cleared), so it lands wherever `owner` says it should. `owner` stays
@@ -134,7 +141,8 @@ columns) and `ensureSchema` is a no-op.
 ```
 work(id, title, project, area, kind, status, external_ref, owner, due,
      claimed_by, lease_expires_at, depends_on bigint[], idempotency_key,
-     history jsonb, created_by, closed_at, created_at, updated_at, meta)
+     history jsonb, created_by, closed_at, created_at, updated_at, meta,
+     description)
 runs(id, ts, component, kind, meta, ok, error, started_at, finished_at, ...)
 ```
 

@@ -48,7 +48,16 @@ describe.skipIf(!hasDb)("… (real db)", () => { /* … */ });
 
 `loadTestEnv` scrubs first and loads second, so it is safe to call from a file
 that inherited a polluted environment. It never overrides a value already set,
-which is how CI passes `METISTRY_DB_PASSWORD` in with no file on disk at all.
+which is how CI passes `METISTRY_DB_PASSWORD` and `METISTRY_TEST_DB_NAME` in
+with no file on disk at all.
+
+`hasDb` is true only when **both** `METISTRY_DB_PASSWORD` is set **and**
+`METISTRY_TEST_DB_NAME` looks like a scratch name (`metistry_test_` followed
+by lowercase letters, digits and underscores) — a password alone, inherited
+from a shell whose install has one but which never exported the scratch name,
+is not enough. Gating on the password alone would make a bare `vitest` run
+skipIf(false) into every DB suite and fail it at `testDb()`'s refusal instead
+of skipping; gating on both turns the missing name into a clean skip.
 
 ## How to open the database
 

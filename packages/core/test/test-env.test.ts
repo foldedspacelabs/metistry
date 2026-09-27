@@ -76,8 +76,8 @@ describe("loadTestEnv", () => {
     expect(env).toEqual({ METISTRY_DB_HOST: "127.0.0.1", METISTRY_DB_PASSWORD: "from-file", METISTRY_TEST_DB_NAME: "metistry_test_ci" });
   });
 
-  it("never overrides a value the caller already set — CI passes the password in, there is no file", async () => {
-    const env: NodeJS.ProcessEnv = { METISTRY_DB_PASSWORD: "ci-only" };
+  it("never overrides a value the caller already set — CI passes both in, there is no file", async () => {
+    const env: NodeJS.ProcessEnv = { METISTRY_DB_PASSWORD: "ci-only", METISTRY_TEST_DB_NAME: "metistry_test_ci" };
     const r = loadTestEnv(join(await fresh(), "nope", ".env"), env);
     expect(r).toEqual({ hasDb: true, loaded: [], removed: [] });
     expect(env.METISTRY_DB_PASSWORD).toBe("ci-only");
@@ -85,6 +85,23 @@ describe("loadTestEnv", () => {
 
   it("no file, no database: hasDb is false so the suite skips rather than fails", async () => {
     expect(loadTestEnv(join(await fresh(), ".env"), {}).hasDb).toBe(false);
+  });
+
+  it("a password without a scratch name skips, and never reaches Postgres — hasDb requires both", async () => {
+    // An install's password, inherited by a shell that never exported the scratch
+    // name: hasDb must be false so the suite skips at describe.skipIf, rather than
+    // reaching testDb() and failing on its refusal.
+    const env: NodeJS.ProcessEnv = { METISTRY_DB_PASSWORD: "install-password" };
+    const r = loadTestEnv(join(await fresh(), "nope", ".env"), env);
+    expect(r.hasDb).toBe(false);
+
+    // Same, but the name present does not look like a scratch name — still false.
+    const envBadName: NodeJS.ProcessEnv = { METISTRY_DB_PASSWORD: "install-password", METISTRY_TEST_DB_NAME: "metistry" };
+    expect(loadTestEnv(join(await fresh(), "nope", ".env"), envBadName).hasDb).toBe(false);
+
+    // Both present and the name scratch-shaped: true.
+    const envOk: NodeJS.ProcessEnv = { METISTRY_DB_PASSWORD: "install-password", METISTRY_TEST_DB_NAME: "metistry_test_x2" };
+    expect(loadTestEnv(join(await fresh(), "nope", ".env"), envOk).hasDb).toBe(true);
   });
 });
 

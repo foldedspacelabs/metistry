@@ -60,7 +60,7 @@ Presentation
     -: control secondary "Edit" · says "Edit permissions"
 
 ### the agents fixture's effective actions, in the CLI's words (on surface #fffdf8)
-[12]
+[20]
   -: mark text "cursor capture: Never (default for observe)" · footnote 10pt mono · ink=text-primary #1a1815 · on=surface #fffdf8 · contrast=17.43 · says "cursor capture: Never (default for observe)"
   -: mark text "cursor comment: Never (default for observe)" · footnote 10pt mono · ink=text-primary #1a1815 · on=surface #fffdf8 · contrast=17.43 · says "cursor comment: Never (default for observe)"
   -: mark text "cursor dispatch: Never (default for observe)" · footnote 10pt mono · ink=text-primary #1a1815 · on=surface #fffdf8 · contrast=17.43 · says "cursor dispatch: Never (default for observe)"
@@ -69,10 +69,18 @@ Presentation
   -: mark text "old-laptop comment: Never (default for observe)" · footnote 10pt mono · ink=text-primary #1a1815 · on=surface #fffdf8 · contrast=17.43 · says "old-laptop comment: Never (default for observe)"
   -: mark text "old-laptop dispatch: Never (default for observe)" · footnote 10pt mono · ink=text-primary #1a1815 · on=surface #fffdf8 · contrast=17.43 · says "old-laptop dispatch: Never (default for observe)"
   -: mark text "old-laptop task_update: Never (default for observe)" · footnote 10pt mono · ink=text-primary #1a1815 · on=surface #fffdf8 · contrast=17.43 · says "old-laptop task_update: Never (default for observe)"
-  -: mark text "opencode capture: Never (default for observe)" · footnote 10pt mono · ink=text-primary #1a1815 · on=surface #fffdf8 · contrast=17.43 · says "opencode capture: Never (default for observe)"
-  -: mark text "opencode comment: Never (default for observe)" · footnote 10pt mono · ink=text-primary #1a1815 · on=surface #fffdf8 · contrast=17.43 · says "opencode comment: Never (default for observe)"
-  -: mark text "opencode dispatch: Never (default for observe)" · footnote 10pt mono · ink=text-primary #1a1815 · on=surface #fffdf8 · contrast=17.43 · says "opencode dispatch: Never (default for observe)"
-  -: mark text "opencode task_update: Never (default for observe)" · footnote 10pt mono · ink=text-primary #1a1815 · on=surface #fffdf8 · contrast=17.43 · says "opencode task_update: Never (default for observe)"
+  -: mark text "opencode capture: Ask First (default for propose)" · footnote 10pt mono · ink=text-primary #1a1815 · on=surface #fffdf8 · contrast=17.43 · says "opencode capture: Ask First (default for propose)"
+  -: mark text "opencode comment: Ask First (default for propose)" · footnote 10pt mono · ink=text-primary #1a1815 · on=surface #fffdf8 · contrast=17.43 · says "opencode comment: Ask First (default for propose)"
+  -: mark text "opencode dispatch: Ask First (default for propose)" · footnote 10pt mono · ink=text-primary #1a1815 · on=surface #fffdf8 · contrast=17.43 · says "opencode dispatch: Ask First (default for propose)"
+  -: mark text "opencode task_update: Ask First (default for propose)" · footnote 10pt mono · ink=text-primary #1a1815 · on=surface #fffdf8 · contrast=17.43 · says "opencode task_update: Ask First (default for propose)"
+  -: mark text "assistant capture: Never (default for observe)" · footnote 10pt mono · ink=text-primary #1a1815 · on=surface #fffdf8 · contrast=17.43 · says "assistant capture: Never (default for observe)"
+  -: mark text "assistant comment: Never (default for observe)" · footnote 10pt mono · ink=text-primary #1a1815 · on=surface #fffdf8 · contrast=17.43 · says "assistant comment: Never (default for observe)"
+  -: mark text "assistant dispatch: Never (default for observe)" · footnote 10pt mono · ink=text-primary #1a1815 · on=surface #fffdf8 · contrast=17.43 · says "assistant dispatch: Never (default for observe)"
+  -: mark text "assistant task_update: Never (default for observe)" · footnote 10pt mono · ink=text-primary #1a1815 · on=surface #fffdf8 · contrast=17.43 · says "assistant task_update: Never (default for observe)"
+  -: mark text "researcher capture: Never (default for observe)" · footnote 10pt mono · ink=text-primary #1a1815 · on=surface #fffdf8 · contrast=17.43 · says "researcher capture: Never (default for observe)"
+  -: mark text "researcher comment: Never (default for observe)" · footnote 10pt mono · ink=text-primary #1a1815 · on=surface #fffdf8 · contrast=17.43 · says "researcher comment: Never (default for observe)"
+  -: mark text "researcher dispatch: Never (default for observe)" · footnote 10pt mono · ink=text-primary #1a1815 · on=surface #fffdf8 · contrast=17.43 · says "researcher dispatch: Never (default for observe)"
+  -: mark text "researcher task_update: Never (default for observe)" · footnote 10pt mono · ink=text-primary #1a1815 · on=surface #fffdf8 · contrast=17.43 · says "researcher task_update: Never (default for observe)"
 
 ## dark
 
@@ -134,7 +142,7 @@ Presentation
     -: control secondary "Edit" · says "Edit permissions"
 
 ### the agents fixture's effective actions, in the CLI's words (on surface #171c22)
-[12]
+[20]
   -: mark text "cursor capture: Never (default for observe)" · footnote 10pt mono · ink=text-primary #e9edf1 · on=surface #171c22 · contrast=14.56 · says "cursor capture: Never (default for observe)"
   -: mark text "cursor comment: Never (default for observe)" · footnote 10pt mono · ink=text-primary #e9edf1 · on=surface #171c22 · contrast=14.56 · says "cursor comment: Never (default for observe)"
   -: mark text "cursor dispatch: Never (default for observe)" · footnote 10pt mono · ink=text-primary #e9edf1 · on=surface #171c22 · contrast=14.56 · says "cursor dispatch: Never (default for observe)"
@@ -143,10 +151,18 @@ Presentation
   -: mark text "old-laptop comment: Never (default for observe)" · footnote 10pt mono · ink=text-primary #e9edf1 · on=surface #171c22 · contrast=14.56 · says "old-laptop comment: Never (default for observe)"
   -: mark text "old-laptop dispatch: Never (default for observe)" · footnote 10pt mono · ink=text-primary #e9edf1 · on=surface #171c22 · contrast=14.56 · says "old-laptop dispatch: Never (default for observe)"
   -: mark text "old-laptop task_update: Never (default for observe)" · footnote 10pt mono · ink=text-primary #e9edf1 · on=surface #171c22 · contrast=14.56 · says "old-laptop task_update: Never (default for observe)"
-  -: mark text "opencode capture: Never (default for observe)" · footnote 10pt mono · ink=text-primary #e9edf1 · on=surface #171c22 · contrast=14.56 · says "opencode capture: Never (default for observe)"
-  -: mark text "opencode comment: Never (default for observe)" · footnote 10pt mono · ink=text-primary #e9edf1 · on=surface #171c22 · contrast=14.56 · says "opencode comment: Never (default for observe)"
-  -: mark text "opencode dispatch: Never (default for observe)" · footnote 10pt mono · ink=text-primary #e9edf1 · on=surface #171c22 · contrast=14.56 · says "opencode dispatch: Never (default for observe)"
-  -: mark text "opencode task_update: Never (default for observe)" · footnote 10pt mono · ink=text-primary #e9edf1 · on=surface #171c22 · contrast=14.56 · says "opencode task_update: Never (default for observe)"
+  -: mark text "opencode capture: Ask First (default for propose)" · footnote 10pt mono · ink=text-primary #e9edf1 · on=surface #171c22 · contrast=14.56 · says "opencode capture: Ask First (default for propose)"
+  -: mark text "opencode comment: Ask First (default for propose)" · footnote 10pt mono · ink=text-primary #e9edf1 · on=surface #171c22 · contrast=14.56 · says "opencode comment: Ask First (default for propose)"
+  -: mark text "opencode dispatch: Ask First (default for propose)" · footnote 10pt mono · ink=text-primary #e9edf1 · on=surface #171c22 · contrast=14.56 · says "opencode dispatch: Ask First (default for propose)"
+  -: mark text "opencode task_update: Ask First (default for propose)" · footnote 10pt mono · ink=text-primary #e9edf1 · on=surface #171c22 · contrast=14.56 · says "opencode task_update: Ask First (default for propose)"
+  -: mark text "assistant capture: Never (default for observe)" · footnote 10pt mono · ink=text-primary #e9edf1 · on=surface #171c22 · contrast=14.56 · says "assistant capture: Never (default for observe)"
+  -: mark text "assistant comment: Never (default for observe)" · footnote 10pt mono · ink=text-primary #e9edf1 · on=surface #171c22 · contrast=14.56 · says "assistant comment: Never (default for observe)"
+  -: mark text "assistant dispatch: Never (default for observe)" · footnote 10pt mono · ink=text-primary #e9edf1 · on=surface #171c22 · contrast=14.56 · says "assistant dispatch: Never (default for observe)"
+  -: mark text "assistant task_update: Never (default for observe)" · footnote 10pt mono · ink=text-primary #e9edf1 · on=surface #171c22 · contrast=14.56 · says "assistant task_update: Never (default for observe)"
+  -: mark text "researcher capture: Never (default for observe)" · footnote 10pt mono · ink=text-primary #e9edf1 · on=surface #171c22 · contrast=14.56 · says "researcher capture: Never (default for observe)"
+  -: mark text "researcher comment: Never (default for observe)" · footnote 10pt mono · ink=text-primary #e9edf1 · on=surface #171c22 · contrast=14.56 · says "researcher comment: Never (default for observe)"
+  -: mark text "researcher dispatch: Never (default for observe)" · footnote 10pt mono · ink=text-primary #e9edf1 · on=surface #171c22 · contrast=14.56 · says "researcher dispatch: Never (default for observe)"
+  -: mark text "researcher task_update: Never (default for observe)" · footnote 10pt mono · ink=text-primary #e9edf1 · on=surface #171c22 · contrast=14.56 · says "researcher task_update: Never (default for observe)"
 
 ## largest text
 
@@ -208,7 +224,7 @@ Presentation
     -: control secondary "Edit" · says "Edit permissions"
 
 ### the agents fixture's effective actions, in the CLI's words (on surface #fffdf8)
-[12]
+[20]
   -: mark text "cursor capture: Never (default for observe)" · footnote 31pt mono · ink=text-primary #1a1815 · on=surface #fffdf8 · contrast=17.43 · says "cursor capture: Never (default for observe)"
   -: mark text "cursor comment: Never (default for observe)" · footnote 31pt mono · ink=text-primary #1a1815 · on=surface #fffdf8 · contrast=17.43 · says "cursor comment: Never (default for observe)"
   -: mark text "cursor dispatch: Never (default for observe)" · footnote 31pt mono · ink=text-primary #1a1815 · on=surface #fffdf8 · contrast=17.43 · says "cursor dispatch: Never (default for observe)"
@@ -217,7 +233,15 @@ Presentation
   -: mark text "old-laptop comment: Never (default for observe)" · footnote 31pt mono · ink=text-primary #1a1815 · on=surface #fffdf8 · contrast=17.43 · says "old-laptop comment: Never (default for observe)"
   -: mark text "old-laptop dispatch: Never (default for observe)" · footnote 31pt mono · ink=text-primary #1a1815 · on=surface #fffdf8 · contrast=17.43 · says "old-laptop dispatch: Never (default for observe)"
   -: mark text "old-laptop task_update: Never (default for observe)" · footnote 31pt mono · ink=text-primary #1a1815 · on=surface #fffdf8 · contrast=17.43 · says "old-laptop task_update: Never (default for observe)"
-  -: mark text "opencode capture: Never (default for observe)" · footnote 31pt mono · ink=text-primary #1a1815 · on=surface #fffdf8 · contrast=17.43 · says "opencode capture: Never (default for observe)"
-  -: mark text "opencode comment: Never (default for observe)" · footnote 31pt mono · ink=text-primary #1a1815 · on=surface #fffdf8 · contrast=17.43 · says "opencode comment: Never (default for observe)"
-  -: mark text "opencode dispatch: Never (default for observe)" · footnote 31pt mono · ink=text-primary #1a1815 · on=surface #fffdf8 · contrast=17.43 · says "opencode dispatch: Never (default for observe)"
-  -: mark text "opencode task_update: Never (default for observe)" · footnote 31pt mono · ink=text-primary #1a1815 · on=surface #fffdf8 · contrast=17.43 · says "opencode task_update: Never (default for observe)"
+  -: mark text "opencode capture: Ask First (default for propose)" · footnote 31pt mono · ink=text-primary #1a1815 · on=surface #fffdf8 · contrast=17.43 · says "opencode capture: Ask First (default for propose)"
+  -: mark text "opencode comment: Ask First (default for propose)" · footnote 31pt mono · ink=text-primary #1a1815 · on=surface #fffdf8 · contrast=17.43 · says "opencode comment: Ask First (default for propose)"
+  -: mark text "opencode dispatch: Ask First (default for propose)" · footnote 31pt mono · ink=text-primary #1a1815 · on=surface #fffdf8 · contrast=17.43 · says "opencode dispatch: Ask First (default for propose)"
+  -: mark text "opencode task_update: Ask First (default for propose)" · footnote 31pt mono · ink=text-primary #1a1815 · on=surface #fffdf8 · contrast=17.43 · says "opencode task_update: Ask First (default for propose)"
+  -: mark text "assistant capture: Never (default for observe)" · footnote 31pt mono · ink=text-primary #1a1815 · on=surface #fffdf8 · contrast=17.43 · says "assistant capture: Never (default for observe)"
+  -: mark text "assistant comment: Never (default for observe)" · footnote 31pt mono · ink=text-primary #1a1815 · on=surface #fffdf8 · contrast=17.43 · says "assistant comment: Never (default for observe)"
+  -: mark text "assistant dispatch: Never (default for observe)" · footnote 31pt mono · ink=text-primary #1a1815 · on=surface #fffdf8 · contrast=17.43 · says "assistant dispatch: Never (default for observe)"
+  -: mark text "assistant task_update: Never (default for observe)" · footnote 31pt mono · ink=text-primary #1a1815 · on=surface #fffdf8 · contrast=17.43 · says "assistant task_update: Never (default for observe)"
+  -: mark text "researcher capture: Never (default for observe)" · footnote 31pt mono · ink=text-primary #1a1815 · on=surface #fffdf8 · contrast=17.43 · says "researcher capture: Never (default for observe)"
+  -: mark text "researcher comment: Never (default for observe)" · footnote 31pt mono · ink=text-primary #1a1815 · on=surface #fffdf8 · contrast=17.43 · says "researcher comment: Never (default for observe)"
+  -: mark text "researcher dispatch: Never (default for observe)" · footnote 31pt mono · ink=text-primary #1a1815 · on=surface #fffdf8 · contrast=17.43 · says "researcher dispatch: Never (default for observe)"
+  -: mark text "researcher task_update: Never (default for observe)" · footnote 31pt mono · ink=text-primary #1a1815 · on=surface #fffdf8 · contrast=17.43 · says "researcher task_update: Never (default for observe)"

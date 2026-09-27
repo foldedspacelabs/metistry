@@ -1,6 +1,6 @@
 // The permissions table (T4-6): the CLI, the console and MetistryKit print
 // ONE table. The rows come from the server (core's `describePermissions`,
-// carried on every `GET /api/agents` row); `PermissionsTable` says them in
+// carried on every `GET /api/agents` row); `PermissionRowText` says them in
 // core's words (`permissionRowText`). This test holds the Kit to the recorded
 // fixture in the very strings `apps/console/test/pwa-reads.test.ts` holds
 // core, the CLI and the console's panel to — the same fixture, the same
@@ -43,24 +43,27 @@ private let oneTable: [String: [[String]]] = [
     #expect(Set(list.agents.map(\.id)) == Set(oneTable.keys))
     for agent in list.agents {
         let rows = try #require(agent.permissions, "\(agent.id) carries no permission rows")
-        #expect(rows.map(PermissionsTable.rowText) == oneTable[agent.id], "\(agent.id)")
+        #expect(rows.map(PermissionRowText.rowText) == oneTable[agent.id], "\(agent.id)")
     }
     // the assistant's reach is configuration, never a grant (C52): every entry is the base, from the environment
     let assistant = try #require(list.agents.first { $0.id == "assistant" }?.permissions)
-    #expect(assistant.flatMap { $0.read + $0.write }.allSatisfy { $0.provenance.kind == "base" })
+    #expect(assistant.flatMap { $0.read + $0.write }.allSatisfy { $0.provenance == .base(source: "environment") })
+    // a crew's base is its manifest — core's `{manifest: <path>}`, read as such
+    let researcher = try #require(list.agents.first { $0.id == "researcher" }?.permissions)
+    #expect(researcher.flatMap { $0.read + $0.write }.allSatisfy { $0.provenance == .base(source: "manifest", manifest: "seed/agents/example/researcher.md") })
 }
 
 @Test func absenceIsTheDashAndEveryMarkerIsSaidInWords() {
-    let approved = AgentPermissionRow.Entry(key: "Areas/Finance", label: "Areas/Finance", provenance: .init(kind: "approved", proposalID: 311))
-    let byHand = AgentPermissionRow.Entry(key: "Me/Health", label: "Me/Health", provenance: .init(kind: "approved"))
-    let routine = AgentPermissionRow.Entry(key: "Areas/Ops", label: "Areas/Ops", provenance: .init(kind: "routine", routine: "morning-brief"))
-    let asks = AgentPermissionRow.Entry(key: "create_issue", label: "create_issue", asks: true)
-    #expect(PermissionsTable.cellText([]) == "—")
-    #expect(PermissionsTable.entryText(approved) == "Areas/Finance (approved in Needs You · #311)")
-    #expect(PermissionsTable.entryText(byHand) == "Me/Health (approved in Needs You)")
-    #expect(PermissionsTable.entryText(routine) == "Areas/Ops (during morning-brief only)")
-    let linear = AgentPermissionRow(resource: .init(kind: "connection", name: "linear"), label: "linear", read: [], write: [asks])
-    #expect(PermissionsTable.rowText(linear) == ["linear ⧉", "—", "create_issue ⏱"])
+    let approved = PermissionEntry(key: "Areas/Finance", label: "Areas/Finance", provenance: .approved(proposalID: 311))
+    let byHand = PermissionEntry(key: "Me/Health", label: "Me/Health", provenance: .approved(proposalID: nil))
+    let routine = PermissionEntry(key: "Areas/Ops", label: "Areas/Ops", provenance: .routine("morning-brief"))
+    let asks = PermissionEntry(key: "create_issue", label: "create_issue", asks: true)
+    #expect(PermissionRowText.cellText([]) == "—")
+    #expect(PermissionRowText.entryText(approved) == "Areas/Finance (approved in Needs You · #311)")
+    #expect(PermissionRowText.entryText(byHand) == "Me/Health (approved in Needs You)")
+    #expect(PermissionRowText.entryText(routine) == "Areas/Ops (during morning-brief only)")
+    let linear = PermissionRow(resource: .init(kind: "connection", name: "linear"), label: "linear", read: [], write: [asks])
+    #expect(PermissionRowText.rowText(linear) == ["linear ⧉", "—", "create_issue ⏱"])
 }
 
 @Test func anOlderConsoleSendsNoRowsAndTheKitSaysNothingRatherThanGuessing() throws {

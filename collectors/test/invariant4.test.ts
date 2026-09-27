@@ -148,7 +148,9 @@ describe("the classifier adds no surface (invariants 9 and 10)", () => {
     // The tier is a COLLECTOR reading a local model, not a door anybody can
     // knock on. Nothing the assistant can call changed, and `ops/scripts/
     // check-tool-surface.mjs` measures the same list on every CI run.
-    expect(TOOL_NAMES.filter((n) => n !== "propose_action").length).toBeLessThanOrEqual(26);
+    // 28 since T4-8b's connections lazy pair (the approved spec §2.6, Q5) — a
+    // proxy door with its own gate, not a classifier surface.
+    expect(TOOL_NAMES.filter((n) => n !== "propose_action").length).toBeLessThanOrEqual(28);
   });
 });
 

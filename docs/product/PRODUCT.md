@@ -3025,3 +3025,29 @@ launchd cannot even see.
 - 2026-09-27 — **The Mac's Today now starts and ends the day.** The morning opens on the brief — one paragraph, marked as written rather than retrieved, with the standup a click away to copy — and the brief folds to a line once read so it never crowds the day. Half an hour before a meeting, Next Up shows who is in it and what you owe them, tickable in place. When the calendar leaves no room to focus, it offers one move and names who will be told before anything changes. At the end of the day, Close the Day sends each open line to tomorrow, this week or someday and writes the day into your note — and if your note's section is broken it says so and shows the request, instead of pretending it worked.
 
 - 2026-09-27 — **What compute cost this month is one click away, and it never guesses.** The Mac's Usage gauge opens the month against your spending limit, a bar per day up to today, who spent it (chat, each agent, each routine), the cache rate, AWS kept apart from compute, and the calls nothing could price counted as $0 rather than hidden. At a limit it says what actually happened — stopped, critical calls only, or still running — with Raise one click from the setting. There is no "on pace for" figure anywhere: the popover reports what was spent, not what might be.
+
+- 2026-09-27 — **The repository is ready to be read by anyone.** Identifiers
+  that belonged to one install (a tailnet host, a home directory, a personal
+  domain, the owner's name in fixtures) became example values, and the
+  owner's runbook (`docs/ops/going-public.md`) removes them from history too,
+  rehearsed on a clone with every count at zero. The release path is locked
+  down for outside contributors: CI runs read-only on `pull_request`, the
+  signing and notarization secrets are readable only by the four jobs that
+  declare the `release` environment and only after the owner approves the run,
+  and only the owner can create a `v*` tag. Security reports go to GitHub's
+  private vulnerability reporting (`SECURITY.md`). Positioning: invariant 8 —
+  security that survives full code visibility — now has the code visible.
+
+- 2026-09-27 — **One command updates everything the owner runs, the app
+  included.** `metistry update` used to move the product under the Mac app
+  and leave the app itself on whatever Sparkle last installed, so a terminal
+  update could leave a new product behind an old front end. On a launchd Mac
+  it now installs the same release's DMG too, under the same gate as the
+  runtime pack — sha256 against the release's `checksums.txt`, then bundle
+  id, version and (signed builds) codesign and Gatekeeper on the exact copy
+  that lands — and swaps it in with the previous bundle kept for
+  `--rollback`. Safe to leave running because every edge is a refusal with a
+  test rather than a prompt: it never escalates privileges, never quits a
+  running app unasked, never downgrades, never trades a signed app for an
+  unsigned one, and never fails the product update it rides on. Doctor's
+  `app` row makes "the app is behind the install" a visible, one-verb fix.

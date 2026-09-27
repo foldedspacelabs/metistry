@@ -62,6 +62,7 @@ import { loadSchedules, overlayFromText, runNow } from "../dist/runner.js";
 import { SCHEDULED_PATH } from "../dist/profile-tidy.js";
 import { loadCollectors } from "@metistry-apps/collectors";
 import { loadRoutines } from "@metistry-apps/routines";
+import { ConflictMoved } from "../dist/knowledge-routes.js";
 import { FIXTURE_DIR, REPO_ROOT, expectedFixtures, fixtureBody, shapeDiff } from "./client-fixtures.mjs";
 
 // ---- arguments -------------------------------------------------------------------
@@ -218,6 +219,12 @@ const HISTORY = [
 await vault.write(PAGE, Buffer.from("# Roadmap\n\nShip the store interface, then the stores. See [[Projects/Metistry/Design]].\n"), { principal: "user", message: "fixture" });
 const PAGE_SHA256 = (await vault.read(PAGE)).sha256; // what GET /api/knowledge/page serves as `sha256` — the restore's `seen_sha`
 
+// a sync conflict on the roadmap, for the Resolve a conflict door (T2-10): the
+// phone's edit, kept by the sync tool beside the Mac's as a copy
+const CONFLICT_COPY = "Projects/Metistry/Roadmap.sync-conflict-20260928-091200-7QX2LMA.md";
+const CONFLICT_THEIRS = Buffer.from("# Roadmap\n\nShip the stores first, then the interface.\n");
+const sha256Of = (bytes) => createHash("sha256").update(bytes).digest("hex");
+
 // a day note with tasks on it, for the Tick door (T2-4) and the Defer door (T2-5) to write — one each, so neither sees the other's edit
 const DAY = "Journal/2026-09-28.md";
 const TASK_TEXT = "Send Dana the fixture format";
@@ -359,6 +366,19 @@ const server = makeServer(pool, queries, {
     hits: [{ path: PAGE, title: "Roadmap", description: "what ships next", snippet: "…Ship the store interface, then the stores…", score: 0.82, source: "keyword" }].slice(0, limit),
     degraded: "keyword only — the embedder is down",
   }),
+  // the reconciler's POST /vault/conflicts/resolve for the roadmap's one copy
+  // (T2-10): its rules — the index, the side given up, history — are the
+  // bridge's own, and apps/reconciler tests them; this answers as it does
+  knowledgeConflicts: {
+    resolve: async (path, keep, seenSha) => {
+      if (path !== CONFLICT_COPY) throw new ConflictMoved(`${path} is not in conflict — it was settled, or it never was`, null);
+      const mine = await vault.read(PAGE);
+      const current = { path, original: PAGE, sha256: sha256Of(CONFLICT_THEIRS), original_sha256: mine.sha256 };
+      if (seenSha !== (keep === "mine" ? current.sha256 : current.original_sha256)) throw new ConflictMoved(`${keep === "mine" ? path : PAGE} is not what you saw — look at both sides again before discarding one`, current);
+      const kept = keep === "mine" ? mine.content : CONFLICT_THEIRS;
+      return { path: PAGE, copy: path, kept: keep, sha256: sha256Of(kept), bytes: kept.length, recorded: "5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f" };
+    },
+  },
   // the reconciler's GET /vault/log and GET /vault/show for the roadmap (T10-4):
   // the owner wrote it as Plan.md, a fold edited it, the owner renamed it
   // the reconciler's POST /vault/revert, previewing an undo of the fold's
@@ -619,6 +639,9 @@ const REQUESTS = [
   ["GET /api/knowledge/version", () => ({ path: `/api/knowledge/version?path=${encodeURIComponent("Projects/Metistry/Plan.md")}&sha=9ab8c7d6` })],
   // T10-5: put the roadmap back as it was at the rename — a Needs You request, nothing written; `seen_sha` is the page's hash as GET /api/knowledge/page served it
   ["POST /api/knowledge/restore", () => ({ path: "/api/knowledge/restore", body: { path: PAGE, sha: "4c1d2e3f", seen_sha: PAGE_SHA256 } })],
+
+  // Keep Mine on the roadmap's conflict (T2-10): what is given up is the phone's copy, as the review showed it
+  ["POST /api/knowledge/conflicts/resolve", () => ({ path: "/api/knowledge/conflicts/resolve", body: { path: CONFLICT_COPY, keep: "mine", seen_sha: sha256Of(CONFLICT_THEIRS) } })],
 
   ["POST /capture", () => ({ path: "/capture", body: { note: "Ask Dana about the fixture format on Thursday." }, key: "fixture-capture-0001" })],
   ["POST /message", () => ({ path: "/message", body: { text: "What's on today?" } })],

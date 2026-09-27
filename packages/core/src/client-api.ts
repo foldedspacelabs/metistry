@@ -251,7 +251,7 @@ export const CLIENT_API: readonly ClientRoute[] = [
   route("GET", "/api/knowledge/fold", "the latest knowledge fold"),
   route("GET", "/api/knowledge/drafts", "the drafts waiting on the owner"),
   route("GET", "/api/knowledge/areas", "the per-area rollup"),
-  planned("POST", "/api/knowledge/conflicts/resolve", "T2-10", "settle a conflicted file: keep one side", { conflict: ["stale"] }),
+  route("POST", "/api/knowledge/conflicts/resolve", "settle a conflicted file: keep one side", { conflict: ["stale"] }),
   route("GET", "/api/knowledge/history", "a file's commits"),
   route("GET", "/api/knowledge/version", "one file at one commit"),
   route("POST", "/api/knowledge/restore", "raise a Needs You request to restore a file; Approve restores as `user`", { conflict: ["stale"] }),

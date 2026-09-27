@@ -9,8 +9,8 @@
 // way it can fail: a refusal from the service (the code it names), and a
 // consequence that THROWS (`internal`, with no detail on the row). The doors
 // that answer through another system (F-5's `pr_review`, `rsvp`, `draft`,
-// `resolve_conflict`, `act`, `today`, `delegate`) are not built yet; each one
-// adds its describe here when it lands (the ticket's acceptance).
+// `resolve_conflict`, `act`, `today`, `delegate`) each add their describe here
+// when they land (the ticket's acceptance) — `resolve_conflict` has (T2-10).
 //
 // Failures that cannot be provoked honestly through the API — a unique
 // violation in the tasks service, a grants write that throws — are injected
@@ -20,11 +20,12 @@ import { createHash } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import { QueryStore } from "@foldedspacelabs/metistry-queries";
-import { mintToken } from "@foldedspacelabs/metistry-core";
+import { knowledgeConflictSource, mintToken, raiseMirror } from "@foldedspacelabs/metistry-core";
 import { VaultError, type VaultClient } from "@foldedspacelabs/metistry-artifacts";
 import { ACCESS_REQUEST_KIND } from "@foldedspacelabs/metistry-mcp-brain";
 import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
 import { makeServer } from "../src/server.js";
+import { ConflictMoved, type ConflictSide } from "../src/knowledge-routes.js";
 import { OVERLAY_PATH } from "../src/prompt-overlay.js";
 import * as store from "../src/auth-store.js";
 import * as agents from "../src/agents.js";
@@ -71,6 +72,9 @@ describe.skipIf(!hasDb)("C45 — a failed answer leaves the request pending, wit
   const crew = `c45-crew-${suffix}`;
   const gone = `c45-gone-${suffix}`;
   const enrollee = `c45-enrol-${suffix}`;
+  const reconciler = `c45-reconciler-${suffix}`; // raises the conflict reviews, as the reconciler does
+  /** What the reconciler's /vault/conflicts/resolve does with the next settle. */
+  const conflicts = { mode: "ok" as "ok" | "refuse" | "throw" | "stale", calls: 0 };
   let askerToken: string;
   let rpcId = 1;
 
@@ -143,7 +147,19 @@ describe.skipIf(!hasDb)("C45 — a failed answer leaves the request pending, wit
   beforeAll(async () => {
     pool = await testDb(pg.Pool);
     const common = { origin: "http://127.0.0.1:0", inboxDir: `/tmp/metistry-test-inbox-c45-${Date.now()}`, policy, secureCookies: false };
-    server = makeServer(db, new QueryStore(pool), { ...common, vault: vault.client });
+    server = makeServer(db, new QueryStore(pool), {
+      ...common,
+      vault: vault.client,
+      knowledgeConflicts: {
+        async resolve(path: string, keep: ConflictSide) {
+          conflicts.calls++;
+          if (conflicts.mode === "refuse") throw new VaultError("not_available", "the vault is mid-merge — finish it, then settle the conflict; nothing was discarded");
+          if (conflicts.mode === "throw") throw new Error("ECONNRESET vault-bridge 10.0.0.9:7443 secret-ish detail");
+          if (conflicts.mode === "stale") throw new ConflictMoved(`${path} is not what you saw — look at both sides again before discarding one`, { path, original: "Areas/C45/Note.md", sha256: "b".repeat(64), original_sha256: "a".repeat(64) });
+          return { path: "Areas/C45/Note.md", copy: path, kept: keep, sha256: "a".repeat(64), bytes: 1, recorded: null };
+        },
+      },
+    });
     bareServer = makeServer(pool, new QueryStore(pool), common);
     await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
     await new Promise<void>((r) => bareServer.listen(0, "127.0.0.1", r));
@@ -160,7 +176,7 @@ describe.skipIf(!hasDb)("C45 — a failed answer leaves the request pending, wit
   afterAll(async () => {
     await new Promise<void>((r) => server.close(() => r()));
     await new Promise<void>((r) => bareServer.close(() => r()));
-    await pool.query(`DELETE FROM proposals WHERE source_agent = ANY($1::text[])`, [[asker, crew, gone, enrollee]]);
+    await pool.query(`DELETE FROM proposals WHERE source_agent = ANY($1::text[])`, [[asker, crew, gone, enrollee, reconciler]]);
     await pool.query(`DELETE FROM agents WHERE id = ANY($1::text[])`, [[asker, crew, gone, enrollee]]);
     await pool.end();
   });
@@ -348,6 +364,74 @@ describe.skipIf(!hasDb)("C45 — a failed answer leaves the request pending, wit
       failNext(/UPDATE agents SET grants/, new Error("boom: serialization failure"));
       await expectLeftPending(id, await answer(id, { decision: "allow" }), "internal", "allow", { status: 500, internal: true });
       expect(await grantsOf(asker)).toEqual(before);
+      await stillAnswerable(id);
+    });
+  });
+
+  // ---- Keep Mine / Take the Other on a knowledge conflict: the Resolve a conflict door ----
+
+  describe("Keep Mine and Take the Other on a knowledge conflict (the resolve_conflict door, T2-10)", () => {
+    let n = 0;
+    /** A conflict copy's review, raised as the reconciler raises it: a mirror of the copy. */
+    const conflictReview = async () => {
+      const copy = `Areas/C45/Note-${suffix}-${++n}.sync-conflict-20260927-101500-ABCDEFG.md`;
+      const { id } = await raiseMirror(pool, {
+        kind: "review",
+        source_agent: reconciler,
+        trust: "internal",
+        payload: { title: "Sync conflict: Note.md", event: "knowledge_conflict", body: { kind: "before_after" }, conflict: { path: copy, original: "Areas/C45/Note.md", sha256: "b".repeat(64), original_sha256: "a".repeat(64) } },
+        source: knowledgeConflictSource(copy),
+      });
+      return { id, copy };
+    };
+    const settle = (copy: string, keep: ConflictSide, at = base) => owner("POST", "/api/knowledge/conflicts/resolve", { path: copy, keep, seen_sha: keep === "mine" ? "b".repeat(64) : "a".repeat(64) }, at);
+
+    it("no vault bridge in this deployment: 503, the review pending with the reason — Keep Mine is the review's `allow`", async () => {
+      const { id, copy } = await conflictReview();
+      const error = await expectLeftPending(id, await settle(copy, "mine", bare), "not_available", "allow", { status: 503 });
+      expect(error).toMatchObject({ door: "resolve_conflict", keep: "mine" });
+      await stillAnswerable(id);
+    });
+
+    it("the bridge refuses the settle: its code, pending — Take the Other is the review's Revise — and a settle that works leaves it to the source", async () => {
+      const { id, copy } = await conflictReview();
+      conflicts.mode = "refuse";
+      try {
+        const error = await expectLeftPending(id, await settle(copy, "theirs"), "not_available", "accept_with_changes", { status: 503 });
+        expect(error).toMatchObject({ door: "resolve_conflict", keep: "theirs" });
+      } finally {
+        conflicts.mode = "ok";
+      }
+      // no retry happened on its own; the owner settles again, and the row
+      // is the reconciler's to clear at its source (the copy is gone), not this door's to decide
+      expect((await settle(copy, "theirs")).status).toBe(200);
+      expect((await rowOf(id)).decision).toBe("pending");
+    });
+
+    it("the bridge falls over: 500, pending, `internal` with no detail on the row", async () => {
+      const { id, copy } = await conflictReview();
+      conflicts.mode = "throw";
+      try {
+        await expectLeftPending(id, await settle(copy, "mine"), "internal", "allow", { status: 500, internal: true });
+      } finally {
+        conflicts.mode = "ok";
+      }
+      await stillAnswerable(id);
+    });
+
+    it("stale is not a failed answer: 409, and nothing written on the row", async () => {
+      const { id, copy } = await conflictReview();
+      conflicts.mode = "stale";
+      try {
+        const r = await settle(copy, "mine");
+        expect(r.status).toBe(409);
+        expect(await r.json()).toMatchObject({ reason: "stale", conflict: { path: copy } });
+      } finally {
+        conflicts.mode = "ok";
+      }
+      const row = await rowOf(id);
+      expect(row.decision).toBe("pending");
+      expect(row.payload.error).toBeUndefined();
       await stillAnswerable(id);
     });
   });

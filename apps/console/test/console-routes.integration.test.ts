@@ -24,7 +24,7 @@ import { loadRules } from "../src/router.js";
 import * as store from "../src/auth-store.js";
 import * as agents from "../src/agents.js";
 import type { ComputeAdmin } from "../src/compute-routes.js";
-import type { KnowledgeSearchResult } from "../src/knowledge-routes.js";
+import { ConflictMoved, type KnowledgeSearchResult } from "../src/knowledge-routes.js";
 import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
 
 const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install
@@ -79,6 +79,7 @@ describe.skipIf(!hasDb)("the console's compute, knowledge, commands and run-deta
   const pageTag = `KpRoutes${mintToken(6).replaceAll(/[^A-Za-z0-9]/g, "")}`;
 
   const HISTORY_SHA = "5".repeat(40);
+  const CONFLICT_COPY = "Areas/Health/sleep.sync-conflict-20260927-101500-ABCDEFG.md";
 
   /** Search results the fake bridge hands back — one hit inside the vault, three the route must never pass on. */
   const BRIDGE_HITS: KnowledgeSearchResult = {
@@ -146,6 +147,15 @@ describe.skipIf(!hasDb)("the console's compute, knowledge, commands and run-deta
           if (path !== "Areas/Health/sleep.md" || !HISTORY_SHA.startsWith(sha)) throw new VaultError("not_found", "no such version");
           const content = Buffer.from("# Sleep\n\nfirst draft\n");
           return { sha: HISTORY_SHA, author: "Metistry user", date: "2026-09-26T12:00:00Z", subject: "Start sleep", source: "user", runs: [], turns: [], path, content, sha256: "b".repeat(64), bytes: content.length };
+        },
+      },
+      // The reconciler's /vault/conflicts/resolve (T2-10), for one copy: the
+      // door's own rules are knowledge-conflicts.test.ts; here it only has to
+      // be reachable by the owner and by nobody else.
+      knowledgeConflicts: {
+        resolve: async (path, keep) => {
+          if (path !== CONFLICT_COPY) throw new ConflictMoved(`${path} is not in conflict — it was settled, or it never was`, null);
+          return { path: "Areas/Health/sleep.md", copy: path, kept: keep, sha256: "a".repeat(64), bytes: 20, recorded: null };
         },
       },
       // A minimal VaultClient: only `read` is exercised here, and it answers
@@ -266,6 +276,7 @@ describe.skipIf(!hasDb)("the console's compute, knowledge, commands and run-deta
     "GET /api/knowledge/history?path=Areas/Health/sleep.md",
     `GET /api/knowledge/version?path=Areas/Health/sleep.md&sha=${"5".repeat(40)}`,
     "POST /api/knowledge/restore",
+    "POST /api/knowledge/conflicts/resolve",
     "GET /api/commands",
   ];
 
@@ -327,6 +338,12 @@ describe.skipIf(!hasDb)("the console's compute, knowledge, commands and run-deta
     const raised = await restore.json();
     expect(raised).toMatchObject({ ok: true, raised: true, path: "Areas/Health/sleep.md", sha: HISTORY_SHA });
     await pool.query(`DELETE FROM proposals WHERE id = $1`, [raised.proposal_id]);
+    const settled = await post("/api/knowledge/conflicts/resolve", { path: CONFLICT_COPY, keep: "mine", seen_sha: "b".repeat(64) }, auth);
+    expect(settled.status).toBe(200);
+    expect(await settled.json()).toEqual({ ok: true, path: "Areas/Health/sleep.md", kept: "mine", sha: "a".repeat(64) });
+    const notInConflict = await post("/api/knowledge/conflicts/resolve", { path: "Areas/Health/sleep.md", keep: "mine", seen_sha: "b".repeat(64) }, auth);
+    expect(notInConflict.status).toBe(409);
+    expect(await notInConflict.json()).toMatchObject({ reason: "stale", conflict: null });
   });
 
   // ------------------------------------------------------------- GET /api/compute

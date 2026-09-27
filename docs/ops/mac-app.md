@@ -101,7 +101,8 @@ path.
   Sparkle itself, so the app cannot disagree with the workflow that signs the
   feed. Sparkle also owns its own preferences — the Updates pane's
   automatic-checks toggle writes Sparkle's `automaticallyChecksForUpdates`, not
-  a key of ours.
+  a key of ours. Sparkle is not the only way in: `metistry update` installs the
+  same release's DMG (below, "Updated from the terminal too").
 
 **Not yet, and labelled as such on screen:**
 
@@ -1355,6 +1356,30 @@ interrupted run is re-done rather than mistaken for a finished one.
 When Sparkle updates the app it ships a newer seed; the next
 `metistry runtime install` copies it forward and leaves the previous
 `releases/<v>` in place, so `metistry update --rollback` still works.
+
+### Updated from the terminal too
+
+The other direction closes the loop. On a launchd Mac, `metistry update` in
+release mode moves the **bundle** as well as the product dir: after the
+runtime pack it downloads the same release's `Metistry-<version>.dmg`,
+verifies it against `checksums.txt` exactly as it verified the pack, mounts
+it read-only (`hdiutil attach -nobrowse -readonly`), and swaps the bundle
+into `/Applications/Metistry.app` — checked first for this bundle id, the
+release's `CFBundleShortVersionString`, and (signed builds) `codesign
+--verify --deep --strict` plus `spctl --assess`. The old bundle stays beside
+it as `Metistry.app.previous` for `metistry update --rollback`; `Finder` and
+Launch Services do not treat that name as an app. The seed inside the new
+bundle is the release `update` just unpacked, so the app's next
+`metistry runtime install` finds nothing to copy.
+
+What it will not do, by design: ask for an administrator (a `/Applications`
+the user cannot write gets the `--app-path ~/Applications/Metistry.app`
+line instead), quit a running app (it says to reopen it; `--relaunch`
+opts in), downgrade an app Sparkle already moved further, or replace a
+signed app with an unsigned one. `--no-app` skips it. The runbook is
+`docs/ops/cli.md`, "Moving the Mac app with the release"; the code is
+`packages/cli/src/mac-app.ts`, and doctor's `app` row reports the app's
+version against `metistry.lock`.
 
 Two details that are not cosmetic. The copied tree is made **writable**
 (`cp` preserves the bundle's `0555` directories, and `update` could not

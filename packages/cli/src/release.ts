@@ -293,6 +293,31 @@ export async function downloadAsset(r: StepRunner, opts: { fetchFn: typeof fetch
   }
 }
 
+/**
+ * Download one asset of a resolved release into `dir` and check it against
+ * the release's `checksums.txt` — the gate the runtime pack and the Mac app's
+ * DMG both go through, so neither is trusted on a different rule. A mismatch
+ * discards `dir` and names what was left `unchanged`; an asset the checksums
+ * do not list is refused, never installed unverified.
+ */
+export async function downloadVerified(
+  r: StepRunner,
+  o: { fetchFn: typeof fetch; repo: string; rel: ResolvedRelease; name: string; dir: string; env: NodeJS.ProcessEnv; what: string; unchanged: string },
+): Promise<{ path: string; bytes: number; sha256: string }> {
+  const { rel, name, dir } = o;
+  if (!rel.assets[CHECKSUMS_ASSET] && rel.via !== "gh") throw new StepFailed(`release ${rel.tag} has no ${CHECKSUMS_ASSET} — refusing to install an unverifiable ${o.what}`);
+  await downloadAsset(r, { fetchFn: o.fetchFn, repo: o.repo, rel, name: CHECKSUMS_ASSET, dir, env: o.env });
+  const want = parseChecksums(await readFile(join(dir, CHECKSUMS_ASSET), "utf8"))[name];
+  if (!want) throw new StepFailed(`${CHECKSUMS_ASSET} of ${rel.tag} has no line for ${name} — refusing to install an unverifiable ${o.what}`);
+  const got = await downloadAsset(r, { fetchFn: o.fetchFn, repo: o.repo, rel, name, dir, env: o.env });
+  if (got.sha256 !== want) {
+    await rm(dir, { recursive: true, force: true });
+    throw new StepFailed(`${name} failed its checksum (expected ${want}, got ${got.sha256}) — the download was discarded and ${o.unchanged} is unchanged`);
+  }
+  r.note(`${name}: ${got.bytes} bytes, sha256 ${got.sha256.slice(0, 12)}… verified`);
+  return { path: join(dir, name), ...got };
+}
+
 /** The version `current` points at, or undefined when nothing is installed yet. */
 export async function currentVersion(productDir: string): Promise<string | undefined> {
   try {
@@ -403,23 +428,11 @@ export async function installRelease(r: StepRunner, opts: InstallReleaseOptions)
     const names = Object.keys(rel.assets).sort();
     throw new StepFailed(`release ${rel.tag} has no ${asset} (assets: ${names.length ? names.join(", ") : "none"}) — this platform has no runtime pack in that release`);
   }
-  const sumsUrl = rel.assets[CHECKSUMS_ASSET];
-  if (!sumsUrl) throw new StepFailed(`release ${rel.tag} has no ${CHECKSUMS_ASSET} — refusing to install an unverifiable runtime pack`);
+  if (!rel.assets[CHECKSUMS_ASSET]) throw new StepFailed(`release ${rel.tag} has no ${CHECKSUMS_ASSET} — refusing to install an unverifiable runtime pack`);
 
   const staging = join(releasesDir(productDir), ".download");
-  const tarball = join(staging, asset);
   r.action(`download ${asset} from ${rel.tag} and verify its sha256 against ${CHECKSUMS_ASSET}`);
-  await downloadAsset(r, { fetchFn, repo, rel, name: CHECKSUMS_ASSET, dir: staging, env });
-  const sums = parseChecksums(await readFile(join(staging, CHECKSUMS_ASSET), "utf8"));
-  const want = sums[asset];
-  if (!want) throw new StepFailed(`${CHECKSUMS_ASSET} of ${rel.tag} has no line for ${asset} — refusing to install an unverifiable runtime pack`);
-
-  const got = await downloadAsset(r, { fetchFn, repo, rel, name: asset, dir: staging, env });
-  if (got.sha256 !== want) {
-    await rm(staging, { recursive: true, force: true });
-    throw new StepFailed(`${asset} failed its checksum (expected ${want}, got ${got.sha256}) — the download was discarded and ${CURRENT_LINK} is unchanged`);
-  }
-  r.note(`${asset}: ${got.bytes} bytes, sha256 ${got.sha256.slice(0, 12)}… verified`);
+  const tarball = (await downloadVerified(r, { fetchFn, repo, rel, name: asset, dir: staging, env, what: "runtime pack", unchanged: CURRENT_LINK })).path;
 
   const dir = releaseDir(productDir, rel.version);
   await rm(dir, { recursive: true, force: true });

@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DoctorDeps, DoctorReport } from "../src/doctor.js";
 import type { Exec, ExecOptions, ExecResult } from "../src/exec.js";
+import { APP_BUNDLE_ID } from "../src/mac-app.js";
 
 const plist = (label: string, args: string, extra = "") =>
   `<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0">\n<dict>\n  <key>Label</key><string>${label}</string>\n  <key>ProgramArguments</key>\n  <array>${args}</array>\n${extra}  <key>KeepAlive</key><true/>\n</dict>\n</plist>\n`;
@@ -137,3 +138,30 @@ export const shown = (c: Call) => [c.cmd, ...c.args].join(" ");
 
 export const okDoctor = async (d: DoctorDeps): Promise<DoctorReport> => ({ as_of: "now", product_dir: d.productDir, shape: "compose", ok: true, rows: [] });
 export const failDoctor = async (d: DoctorDeps): Promise<DoctorReport> => ({ as_of: "now", product_dir: d.productDir, shape: "compose", ok: false, rows: [] });
+
+/** A real XML Info.plist — the integration test hands the same bundle to the real plutil. */
+export function infoPlist(version: string, id = APP_BUNDLE_ID): string {
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleExecutable</key>
+	<string>Metistry</string>
+	<key>CFBundleIdentifier</key>
+	<string>${id}</string>
+	<key>CFBundleShortVersionString</key>
+	<string>${version}</string>
+	<key>CFBundleVersion</key>
+	<string>${version}</string>
+</dict>
+</plist>
+`;
+}
+
+/** A fake Metistry.app: a real Info.plist and a shell-script executable — enough for plutil, ditto, codesign and hdiutil. */
+export async function makeBundle(path: string, version: string, id = APP_BUNDLE_ID): Promise<string> {
+  await mkdir(join(path, "Contents", "MacOS"), { recursive: true });
+  await writeFile(join(path, "Contents", "Info.plist"), infoPlist(version, id));
+  await writeFile(join(path, "Contents", "MacOS", "Metistry"), `#!/bin/sh\necho ${version}\n`, { mode: 0o755 });
+  return path;
+}

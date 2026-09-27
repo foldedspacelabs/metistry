@@ -25,13 +25,13 @@ describe("github-state collector", () => {
     const fetchFn = (async (url: string) => ({
       ok: true,
       json: async () => {
-        if (url.endsWith("/user")) return { login: "mattcolf" };
+        if (url.endsWith("/user")) return { login: "samrivera" };
         if (url.endsWith("/reviews?per_page=100")) return [];
         if (url.includes("/pulls?")) return [
-          { number: 9, draft: false, user: { login: "claude" }, requested_reviewers: [{ login: "mattcolf" }], requested_teams: [] },
+          { number: 9, draft: false, user: { login: "claude" }, requested_reviewers: [{ login: "samrivera" }], requested_teams: [] },
         ];
         return [
-          { number: 7, title: "fix brief tz", state: "open", html_url: "https://gh/7", updated_at: "2026-09-01T00:00:00Z", user: { login: "mattcolf" }, assignee: { login: "mattcolf" } },
+          { number: 7, title: "fix brief tz", state: "open", html_url: "https://gh/7", updated_at: "2026-09-01T00:00:00Z", user: { login: "samrivera" }, assignee: { login: "samrivera" } },
           { number: 9, title: "ios plan", state: "open", pull_request: {}, html_url: "https://gh/9", updated_at: "2026-09-02T00:00:00Z", user: { login: "claude" }, milestone: { due_on: "2026-09-10T00:00:00Z" } },
         ];
       },
@@ -43,9 +43,9 @@ describe("github-state collector", () => {
     expect(inserts[0]!.values).toContain("issue");
     expect(inserts[1]!.values).toContain("pr");
     expect(inserts[1]!.values).toContain("2026-09-10");
-    expect(JSON.parse(String(inserts[0]!.values[7]))).toEqual({ author: "mattcolf", url: "https://gh/7" });
+    expect(JSON.parse(String(inserts[0]!.values[7]))).toEqual({ author: "samrivera", url: "https://gh/7" });
     expect(JSON.parse(String(inserts[1]!.values[7]))).toEqual({
-      author: "claude", url: "https://gh/9", draft: false, review_requested: ["mattcolf"], review_teams: [], needs_my_review: true,
+      author: "claude", url: "https://gh/9", draft: false, review_requested: ["samrivera"], review_teams: [], needs_my_review: true,
     });
     const close = db.q.find((x) => x.text.startsWith("UPDATE work"))!;
     expect(close.values[1]).toEqual(["gh:foldedspacelabs/metistry#7", "gh:foldedspacelabs/metistry#9"]);

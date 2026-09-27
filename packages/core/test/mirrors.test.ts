@@ -19,7 +19,7 @@ function fake(...answers: Record<string, unknown>[][]): MirrorExecutor & { calls
   };
 }
 
-const pr = { kind: "github", external_ref: "gh:foldedspacelabs/metistry#41", person: "mattcolf" };
+const pr = { kind: "github", external_ref: "gh:foldedspacelabs/metistry#41", person: "samrivera" };
 const raise = { kind: "pull_request", source_agent: "github-state", trust: "internal" as const, payload: { title: "Groups and sources" }, source: pr };
 
 describe("parseRequestSource", () => {

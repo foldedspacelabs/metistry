@@ -215,7 +215,7 @@ export interface TemplateContext extends TaskDateOptions {
   /** Absent or null → `include` renders a note; nothing else needs the vault. */
   reader?: TemplateReader | null | undefined;
   /**
-   * The owner's own person page (`People/Matt Colf.md`), for the
+   * The owner's own person page (`People/Sam Rivera.md`), for the
    * `assigned_to_me` flag. The caller's, never the template's: `me` is a
    * context param of `vault_tasks_query`, and a `where:` string cannot reach
    * it. Absent, the flag means "delegated to nobody", which is what the query

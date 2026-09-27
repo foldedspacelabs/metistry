@@ -59,7 +59,7 @@ Steps, from Apple's certificate guide
 
 1. **Create the CSR** in Keychain Access on the Studio: *Keychain Access
    → Certificate Assistant → Request a Certificate From a Certificate
-   Authority…* — enter your email, common name "Matt Colf", leave the CA
+   Authority…* — enter your email, your name as the common name (e.g. "Sam Rivera"), leave the CA
    email blank, select **Saved to disk**, save
    `~/Desktop/CertificateSigningRequest.certSigningRequest`.
 2. **Request the certificate**: [developer.apple.com/account/resources/certificates](https://developer.apple.com/account/resources/certificates)
@@ -78,7 +78,7 @@ Steps, from Apple's certificate guide
    ```sh
    security find-identity -v -p codesigning
    ```
-   Done looks like a line reading `"Developer ID Application: Matt Colf
+   Done looks like a line reading `"Developer ID Application: Sam Rivera
    (TEAMID1234)"` with a `1)` valid count, not `0 valid identities found`.
 
 ## 3. Signing the Swift helpers
@@ -90,7 +90,7 @@ Both helpers already know how to prefer a Developer ID identity —
 ```sh
 codesign --force --options runtime --timestamp \
   --identifier com.foldedspacelabs.metistry.eventkit \
-  --sign "Developer ID Application: Matt Colf (TEAMID1234)" \
+  --sign "Developer ID Application: Sam Rivera (TEAMID1234)" \
   helper/ek-helper.app
 ```
 
@@ -236,7 +236,7 @@ packages/mcp-apple-fm/scripts/build-helper.sh
 codesign -dv --verbose=2 packages/mcp-apple-fm/helper/afm-helper.app 2>&1 | grep -E "Authority|Identifier|Format"
 ```
 
-Done looks like `Authority=Developer ID Application: Matt Colf (TEAMID1234)`
+Done looks like `Authority=Developer ID Application: Sam Rivera (TEAMID1234)`
 and `Format=app bundle with Mach-O thin (arm64)` on both — not
 `Authority=(unavailable)` (ad-hoc, no `Authority` line) and not
 `Format=Mach-O thin` (a bare binary — path-keyed in TCC, see above).

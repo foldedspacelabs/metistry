@@ -14,8 +14,9 @@
 // (T6-*). Until one lands, its detail says so in a sentence and offers the web
 // app — a labelled "not yet", never an empty pane pretending to be a screen
 // (mac-app.md, "Not yet, and labelled as such on screen"). Needs You
-// (needs-you-view.swift, T5-4a), Activity (activity-view.swift, T6-3) and
-// Chat (chat-view.swift, T6-2) have landed.
+// (needs-you-view.swift, T5-4a), Activity (activity-view.swift, T6-3),
+// Chat (chat-view.swift, T6-2) and Today's top — the brief, Next Up,
+// calendar help, Close the Day (today-view.swift, T6-1b) — have landed.
 //
 // ACCESSIBILITY (§2.18). Every control speaks its name, and a glyph-only one its
 // shortcut too; the Needs You row says *Needs You, 10 waiting*; the gauge says
@@ -50,7 +51,7 @@ public struct RootView: View {
             ShellSidebar(shell: shell, chatIsWorking: model.chat.isWorking)
                 .navigationSplitViewColumnWidth(min: 180, ideal: MetistrySize.sidebar, max: 320)
         } detail: {
-            ShellDetail(shell: shell, needsYou: model.needsYou, activity: model.activity, chat: model.chat, consoleURL: PasskeyRouting.consoleURL(in: model.status.report).flatMap(URL.init(string:)))
+            ShellDetail(shell: shell, needsYou: model.needsYou, activity: model.activity, chat: model.chat, today: model.today, instanceDir: model.instances.active, consoleURL: PasskeyRouting.consoleURL(in: model.status.report).flatMap(URL.init(string:)))
                 // The detail landmark, named for where the owner is.
                 .accessibilityElement(children: .contain)
                 .accessibilityLabel(shell.selection.title)
@@ -242,11 +243,23 @@ struct ShellDetail: View {
     let needsYou: NeedsYouModel
     let activity: ActivityModel
     let chat: ChatModel
+    let today: TodayModel
+    let instanceDir: URL?
     let consoleURL: URL?
 
     var body: some View {
         let destination = shell.selection
-        if destination == .activity {
+        if destination == .today {
+            // A vault path — the meeting's note — opens where the owner reads
+            // the vault. Record waits for the capture bar (#253), so it is
+            // dimmed with its reason. The close's request is in Needs You.
+            TodayView(
+                model: today,
+                assistantName: shell.assistantName,
+                onOpenPath: instanceDir.map { dir in { path in if let url = ObsidianLink.url(for: path, in: dir) { openURL(url) } } },
+                onGoToNeedsYou: { Task { await shell.refreshCount(); shell.goToNeedsYou() } }
+            )
+        } else if destination == .activity {
             // A row's destination is a screen the Mac does not draw yet — the
             // capture, the request, the task, the message — so it opens in the
             // web app, which has them. A run's detail is drawn nowhere (§6.2).
@@ -303,6 +316,21 @@ struct ShellDetail: View {
             return "\(waiting) waiting. \(screen)"
         }
         return screen
+    }
+}
+
+/// `obsidian://open?path=` for a vault path under this Mac's instance — the
+/// app that renders the vault is where a note is read (CLAUDE.md, casing).
+public enum ObsidianLink {
+    public static func url(for vaultPath: String, in instanceDir: URL) -> URL? {
+        let file = instanceDir.appendingPathComponent(vaultPath).standardizedFileURL
+        // Never a path that leaves the instance.
+        guard file.path.hasPrefix(instanceDir.standardizedFileURL.path + "/") else { return nil }
+        var parts = URLComponents()
+        parts.scheme = "obsidian"
+        parts.host = "open"
+        parts.queryItems = [URLQueryItem(name: "path", value: file.path)]
+        return parts.url
     }
 }
 

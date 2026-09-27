@@ -288,6 +288,10 @@ describe("**the console-initiated revert refuses every `.metistry/` protected pa
     const inc = await c.revert({ to: "2026-01-02", include_config: true });
     expect(inc.status).toBe(403);
     expect((await inc.json()).error.message).toContain("--include-config");
+    // a preview that names configuration changes nothing, so the console may show one
+    const peek = await c.revert({ to: "2026-01-02", include_config: true, dry_run: true });
+    expect(peek.status).toBe(200);
+    expect((await peek.json()).config.length).toBeGreaterThan(0);
     expect(await h.git.head()).toBe(head);
   });
 

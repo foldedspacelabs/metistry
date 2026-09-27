@@ -13,7 +13,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import type { ManifestSchedule, ProfileFacts, Weekday } from "@foldedspacelabs/metistry-core";
+import { checkScheduled, type ManifestSchedule, type ProfileFacts, type Weekday } from "@foldedspacelabs/metistry-core";
+import { loadCollectors } from "@metistry-apps/collectors";
 import { loadRoutines } from "@metistry-apps/routines";
 import {
   effectiveSchedule,
@@ -416,6 +417,64 @@ describe(".metistry/scheduled.yaml, read every tick", () => {
     });
     // …and a name nothing schedules is no one's business here
     expect(effectiveSchedule(fold, ok({ routines: { constructor: { paused: true } } }))).toEqual({ held: false, schedule: fold.schedule, paused: false });
+  });
+
+  // T3-2: the manifests' layer — what each shipped component declares decides
+  // which section its changes live in and which keys an entry may name.
+  it("against the shipped manifests: a collector presenting as a routine is changed under routines:, a sync under syncs:, and an undeclared key holds", async () => {
+    const all = await loadSchedules([
+      ...(await loadCollectors({ home: `${root}collectors` })).collectors,
+      ...(await loadRoutines({ home: `${root}routines` })).routines,
+    ]);
+    const get = (name: string): ScheduledCollector => all.find((c) => c.name === name)!;
+    const ok = (value: object): OverlayRead => ({ ok: true, value });
+    // Inbox Sort is a routine under Scheduled, though a collector underneath
+    expect(effectiveSchedule(get("inbox-drain"), ok({ routines: { "inbox-drain": { paused: true } } }))).toEqual({ held: false, schedule: { every: "5m" }, paused: true });
+    expect(effectiveSchedule(get("inbox-drain"), ok({ syncs: { "inbox-drain": { connection: "inbox", every: "1h" } } }))).toMatchObject({ held: true, alert: true, why: expect.stringContaining("names a routine") });
+    // GitHub is a sync: a routines: entry for it is not applied, and says so
+    expect(effectiveSchedule(get("github-state"), ok({ routines: { "github-state": { paused: true } } }))).toMatchObject({ held: true, why: "routines.github-state: github-state is a sync — its changes live under syncs.github-state" });
+    expect(effectiveSchedule(get("github-state"), ok({ syncs: { "github-state": { connection: "github", every: "1h", raise: { assigned: false } } } }))).toEqual({ held: false, schedule: { every: "1h" }, paused: false });
+    expect(effectiveSchedule(get("github-state"), ok({ syncs: { "github-state": { connection: "github", raise: { merged: true } } } }))).toMatchObject({ held: true, why: expect.stringContaining("GitHub raises no merged") });
+    // no shipped routine declares config yet, so any key is one it does not take
+    expect(effectiveSchedule(get("knowledge-fold"), ok({ routines: { "knowledge-fold": { config: { template: "Templates/Fold.md" } } } }))).toMatchObject({
+      held: true,
+      alert: true,
+      why: "routines.knowledge-fold.config.template: Knowledge Fold takes no template — it declares no config",
+    });
+  });
+
+  // T3-4 moves standup_days / standup_time into `routines.standup` before
+  // T3-5 ships the Standup routine. That entry must not invalidate the file
+  // or hold anything: it names nothing installed yet, so it waits, said once
+  // as applying to nothing, and applies the moment the routine lands.
+  it("routines.standup before the Standup routine exists: accepted, holds nothing, applies to nothing yet", async () => {
+    const all = await loadSchedules([
+      ...(await loadCollectors({ home: `${root}collectors` })).collectors,
+      ...(await loadRoutines({ home: `${root}routines` })).routines,
+    ]);
+    const text = `routines:\n  standup:\n    schedule: { days: working_days, at: [ "09:15" ] }\n`;
+    const dir = await mkdtemp(join(tmpdir(), "metistry-scheduled-"));
+    await writeFile(join(dir, "scheduled.yaml"), text);
+    const read = await readOverlay(join(dir, "scheduled.yaml"));
+    expect(read.ok).toBe(true);
+    for (const c of all) expect(effectiveSchedule(c, read), c.name).toMatchObject({ held: false, paused: false });
+    if (!read.ok) return;
+    expect(checkScheduled(read.value, all.map((c) => c.unit!))).toEqual([
+      { name: "standup", field: "routines.standup", message: "routines.standup names no routine here — it applies to nothing until one by that name is installed", holds: false },
+    ]);
+  });
+
+  it("an undeclared config key holds the routine for the ticks it lasts: not run on defaults, one row a day, one alert", async () => {
+    const db = new FakeRuns(new Date("2026-09-21T04:00:00Z"));
+    const fired: Record<string, Fired[]> = {};
+    const fold = routine(db, fired, "knowledge-fold", { days: EVERY_DAY, at: ["21:00"] }, {
+      unit: { name: "knowledge-fold", section: "routines", displayName: "Knowledge Fold", schedule: { days: EVERY_DAY, at: ["21:00"] }, config: {}, raise: {} },
+    });
+    await runClock(db, [fold], { from: "2026-09-21T04:00:00Z", to: "2026-09-22T03:59:00Z", scheduled: overlay({ routines: { "knowledge-fold": { paused: false, config: { voice: "dry" } } } }) });
+    expect(fired["knowledge-fold"]).toBeUndefined();
+    expect(db.rowsFor("knowledge-fold", "schedule_held")).toHaveLength(1);
+    expect(db.outbound).toHaveLength(1);
+    expect(db.outbound[0]?.text).toContain("Knowledge Fold takes no voice");
   });
 });
 

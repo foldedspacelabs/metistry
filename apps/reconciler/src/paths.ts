@@ -4,7 +4,7 @@
 
 import { lstat, readdir, realpath } from "node:fs/promises";
 import { join, sep } from "node:path";
-import { INSTANCE_LAYOUT, JOURNAL_DIR, LEGACY_MACHINERY_ROOTS, NON_VAULT_ROOTS, PROTECTED_ROOT_FILES, isProtectedPath, isUserOwnedPath, type NoteSectionName } from "@foldedspacelabs/metistry-core";
+import { INSTANCE_LAYOUT, JOURNAL_DIR, LEGACY_MACHINERY_ROOTS, NON_VAULT_ROOTS, PROTECTED_ROOT_FILES, SCHEDULED_FILENAME, isProtectedPath, isUserOwnedPath, type NoteSectionName } from "@foldedspacelabs/metistry-core";
 
 export type PathRefusal =
   | "invalid_request" // malformed / traversal / absolute / bad casing / control chars
@@ -100,9 +100,9 @@ export interface CallerAuthority {
  * **console** — may claim any principal, because it IS the multiplexer: it
  * writes as `user` for the owner's own click (a capture, an artifact version,
  * a comment), as `assistant`, and as `agent:<id>` for a crew. What it may not
- * do is change how the system behaves — except on exactly TWO paths, which
- * are the two owner-authenticated doors the console already ships (invariant
- * 10: a closed, enumerated set, each one a product change to add):
+ * do is change how the system behaves — except on exactly THREE paths, each
+ * an owner-authenticated door the console ships (invariant 10: a closed,
+ * enumerated set, each one a product change to add):
  *
  *   `.metistry/assistant-prompt.md` — §4.10 self-modification. The owner
  *   allows an `improvement` proposal in triage and the console appends the
@@ -116,12 +116,19 @@ export interface CallerAuthority {
  *   what a turn cost and could not move it to a cheaper model, which is the
  *   gap that route exists to close.
  *
- * Both are listed HERE rather than left to the console's restraint, which is
+ *   `.metistry/scheduled.yaml` — the Scheduled doors (plan §2.5, T3-3):
+ *   pause, resume, a routine's schedule, a sync's cadence and raise
+ *   toggles, Reset to Default. Ruled 2026-09-26 the one new console-writable
+ *   protected path (§2.1). The console validates what it writes against the
+ *   file's schema and the manifests (packages/core/src/scheduled.ts) before
+ *   it asks; the runner never applies a file that does not validate.
+ *
+ * All three are listed HERE rather than left to the console's restraint, which is
  * the entire point: the bridge is incapable of the other twenty-odd protected
  * paths — `identity.yaml`, `rules.yaml`, `deployment.yaml`, `metistry.lock`,
  * `queries/`, `agents/`, `routines/`, `targets/`, `extensions/`, `CLAUDE.md`,
  * `README.md` — no matter what the console asks for or claims to be. Moving
- * either door to the CLI would shrink this list; nothing may grow it without
+ * any door to the CLI would shrink this list; nothing may grow it without
  * a product change landing in this table.
  *
  * The legacy spellings (`assistant-prompt.md` / `compute.yaml` at the
@@ -131,7 +138,10 @@ export interface CallerAuthority {
  */
 export const CALLER_AUTHORITY: Readonly<Record<CallerClass, CallerAuthority>> = Object.freeze({
   owner: { principals: [USER_PRINCIPAL], protectedPaths: "all" },
-  console: { principals: "any", protectedPaths: [INSTANCE_LAYOUT.assistantPrompt, INSTANCE_LAYOUT.compute] },
+  console: {
+    principals: "any",
+    protectedPaths: [INSTANCE_LAYOUT.assistantPrompt, INSTANCE_LAYOUT.compute, `${INSTANCE_LAYOUT.metistryDir}/${SCHEDULED_FILENAME}`],
+  },
 });
 
 /** May this credential commit in that principal's name? */

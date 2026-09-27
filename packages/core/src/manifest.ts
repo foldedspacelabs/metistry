@@ -12,7 +12,7 @@ import { connectionTypeShape, refineConnectionType } from "./connections.js";
 import { providerSchema } from "./compute.js";
 import { modelRefIssue } from "./model-ref.js";
 import { crewModelIssue } from "./crew-model.js";
-import { manifestScheduleSchema } from "./schedule.js";
+import { issueMessage, manifestScheduleSchema } from "./schedule.js";
 import { EFFORTS } from "./tiers.js";
 
 // A collector's or routine's `schedule:` — §2.5's closed shape (`{days, at,
@@ -156,6 +156,101 @@ const usesModel = z.string().superRefine((v, ctx) => {
   if (why) ctx.addIssue({ code: "custom", message: `uses_model ${why}` });
 });
 
+// ---- what Scheduled reads off a routine or collector (plan §2.5, T3-2) -------
+//
+// A manifest is the first of Scheduled's three layers: the default schedule,
+// the name a person reads, the config a routine takes and the Needs You rules
+// a sync may raise. `.metistry/scheduled.yaml` may change a value; it may
+// never add a key the manifest does not declare — `scheduled.ts` checks every
+// entry against these declarations, and an entry that names an undeclared key
+// holds its component rather than being ignored (a change nothing applies).
+
+/** What a person reads for a component: `Morning Brief`, not `morning-brief`. The `name` stays the stable handle (C55). */
+const displayName = z
+  .string()
+  .min(1, "a name a person reads cannot be empty")
+  .max(60, "a name a person reads is at most 60 characters")
+  .refine((s) => s === s.trim() && !/[\x00-\x1f\x7f]/.test(s), "a name a person reads has no leading or trailing space and no control characters");
+
+/** A declared key: snake_case, the spelling `scheduled.yaml` uses (`skip_without_calendar_event`, `review_requested`). */
+const declaredKey = z.string().regex(/^[a-z][a-z0-9_]*$/, "a config key or Needs You rule is lowercase snake_case");
+
+/**
+ * The closed vocabulary of a routine's config fields. `path` is a vault path
+ * with a TitleCase first segment (`Templates/Standup.md`) — never
+ * `.metistry/`, `Artifacts/` or a traversal. A new kind is a product change,
+ * never a manifest line.
+ */
+export const CONFIG_FIELD_KINDS = ["text", "path", "number", "boolean", "choice"] as const;
+export type ConfigFieldKind = (typeof CONFIG_FIELD_KINDS)[number];
+
+const MAX_CONFIG_TEXT = 500; // limit: fixed — a config value is a setting, not a document; the task prompt has its own ceiling (scheduled.ts MAX_TASK_CHARS)
+
+/** Why `value` is not a valid value for a field of `kind` (with these `options`), or undefined when it is. The ONE check, for a manifest's default and for the owner's `scheduled.yaml` alike. */
+export function configValueIssue(field: { readonly kind: ConfigFieldKind; readonly options?: readonly string[] | undefined }, value: unknown): string | undefined {
+  switch (field.kind) {
+    case "boolean":
+      return typeof value === "boolean" ? undefined : "is true or false";
+    case "number":
+      return typeof value === "number" && Number.isFinite(value) ? undefined : "is a number";
+    case "text":
+      return typeof value === "string" && value.length <= MAX_CONFIG_TEXT ? undefined : `is text, at most ${MAX_CONFIG_TEXT} characters`;
+    case "path":
+      return knowledgePrefix.safeParse(value).success
+        ? undefined
+        : "is a vault path with a TitleCase first segment (Templates/Standup.md) — never .metistry/, Artifacts/ or a traversal";
+    case "choice":
+      return typeof value === "string" && (field.options ?? []).includes(value) ? undefined : `is one of ${(field.options ?? []).join(", ")}`;
+  }
+}
+
+/** One config field a routine takes: its kind, the label a person reads, and its default — the value in force until the owner changes it. */
+export const configFieldSchema = z
+  .object({
+    kind: z.enum(CONFIG_FIELD_KINDS, { error: () => `kind is one of ${CONFIG_FIELD_KINDS.join(", ")}` }),
+    label: displayName,
+    description: z.string().optional(),
+    default: z.union([z.string(), z.number(), z.boolean()]),
+    /** `choice` only: the values it may take. */
+    options: z.array(z.string().min(1)).min(2, "a choice has at least two options").optional(),
+  })
+  .strict()
+  .superRefine((f, ctx) => {
+    if (f.kind === "choice" && f.options === undefined) ctx.addIssue({ code: "custom", path: ["options"], message: "a choice lists its options" });
+    if (f.kind !== "choice" && f.options !== undefined) ctx.addIssue({ code: "custom", path: ["options"], message: "only a choice has options" });
+    const issue = configValueIssue(f, f.default);
+    if (issue) ctx.addIssue({ code: "custom", path: ["default"], message: `the default ${issue}` });
+  });
+
+export type ConfigField = z.infer<typeof configFieldSchema>;
+
+/**
+ * One Needs You rule a collector may raise (§2.7: "declared `needs_you` raise
+ * rules"): the label a person reads beside its toggle, and whether it is on
+ * until the owner says otherwise. `scheduled.yaml`'s `syncs.<name>.raise`
+ * switches a declared rule; it cannot name one that is not here.
+ */
+export const raiseRuleSchema = z
+  .object({
+    label: displayName,
+    description: z.string().optional(),
+    default: z.boolean({ error: () => "a Needs You rule's default is true or false" }),
+  })
+  .strict();
+
+export type RaiseRule = z.infer<typeof raiseRuleSchema>;
+
+/**
+ * Where a collector appears under Scheduled (§2.5): a **sync** (the default —
+ * it reads a connection, on an interval) or a **routine** (housekeeping with
+ * no connection: Inbox Sort, Usage Rollup). It decides which section of
+ * `scheduled.yaml` holds its changes — `routines.<name>` or `syncs.<name>`.
+ */
+export const PRESENTS_AS = ["sync", "routine"] as const;
+export type PresentsAs = (typeof PRESENTS_AS)[number];
+
+const configDeclarations = z.record(declaredKey, configFieldSchema);
+
 export const collectorManifest = base.extend({
   type: z.literal("collector"),
   schedule,
@@ -163,6 +258,10 @@ export const collectorManifest = base.extend({
   reads: z.array(z.string()).default([]),
   requires: requiresField,
   uses_model: usesModel.optional(),
+  display_name: displayName.optional(),
+  presents_as: z.enum(PRESENTS_AS, { error: () => `presents_as is ${PRESENTS_AS.join(" or ")}` }).optional(),
+  config: configDeclarations.optional(),
+  needs_you: z.record(declaredKey, raiseRuleSchema).optional(),
 });
 
 export const routineManifest = base.extend({
@@ -170,6 +269,8 @@ export const routineManifest = base.extend({
   schedule,
   agent: z.string().optional(),
   requires: requiresField,
+  display_name: displayName.optional(),
+  config: configDeclarations.optional(),
 });
 
 // Secrets are referenced, never written into a manifest: `env:VAR`.
@@ -515,6 +616,7 @@ export function validateManifest(input: unknown): ManifestResult {
   if (parsed.success) return { ok: true, manifest: parsed.data };
   return {
     ok: false,
-    errors: parsed.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`),
+    // a record's bad key is reported by what the key rule says, not zod's "Invalid key in record"
+    errors: parsed.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${issueMessage(i)}`),
   };
 }

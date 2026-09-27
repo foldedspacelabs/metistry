@@ -1,8 +1,13 @@
 schema: 1
 name: claude-usage
 type: collector
+display_name: Usage Rollup
+# Housekeeping with no connection, so it presents as a routine under
+# Scheduled (§2.5): its changes live under routines.claude-usage.
+presents_as: routine
 description: Roll the assistant's per-turn runs rows up into daily token/cost metrics by model tier (claude.tokens_in / claude.tokens_out / claude.cost_usd), so the dashboard and the monthly headroom check read a small series instead of scanning runs. Derived from local data only — no external credential.
-schedule: "@hourly"
+# §2.5's default: hourly.
+schedule: { every: 1h }
 writes: [metrics]
 reads: [runs]
 requires: []

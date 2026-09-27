@@ -21,6 +21,8 @@ import {
   MANIFEST_SCHEMA_VERSION,
   nextOccurrence,
   providerSchema,
+  resolveScheduled,
+  scheduledUnitOf,
   validateManifest,
   type Weekday,
 } from "@foldedspacelabs/metistry-core";
@@ -30,6 +32,10 @@ import { loadSchedules, scheduleToSeconds, type ComponentUnit } from "../src/run
 import { TargetRegistry } from "../src/dispatch.js";
 
 const root = fileURLToPath(new URL("../../../", import.meta.url));
+
+/** `2026-09-21 07:00` — a wall clock in New York. */
+const local = (d: Date): string =>
+  new Intl.DateTimeFormat("sv-SE", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(d);
 
 // Invariant 5: everything is a directory with a manifest, and CI validates
 // every one of them — collectors, routines, targets, bridges, services, and
@@ -192,6 +198,61 @@ describe("shipped manifests schedule through the runner", () => {
       // once a day since the last one, at no particular time of day
       "update-check": "@daily",
     });
+  });
+
+  // T3-2's acceptance: Scheduled lists §2.5's defaults at their times — the
+  // listing the Scheduled routes serve (T3-3), resolved from the SHIPPED
+  // manifests through their registries, each first occurrence through
+  // T3-1's `nextOccurrence`. Standup is the eighth default; its routine (and
+  // the manifest that carries working days 08:00) is T3-5's.
+  it("Scheduled lists §2.5's defaults at those times, each resolving to its first occurrence", async () => {
+    const units = [
+      ...(await loadCollectors({ home: `${root}collectors` })).collectors,
+      ...(await loadRoutines({ home: `${root}routines` })).routines,
+    ].map((u) => scheduledUnitOf(u.manifest)!);
+    // Sunday 2026-09-20, 12:00 in New York; the owner works Monday to Friday
+    const now = new Date("2026-09-20T16:00:00Z");
+    const listing = resolveScheduled(units, {}, { profile: { timezone: "America/New_York", working_days: ["mon", "tue", "wed", "thu", "fri"] }, fallbackTimeZone: null, now });
+    const row = (r: (typeof listing.routines)[number]) => [r.displayName, r.describe, r.next?.ok ? local(r.next.at) : r.next, r.isDefault];
+    expect(listing.routines.map(row)).toEqual([
+      ["Usage Rollup", "every 1h", "2026-09-20 12:00", true], // never run: due now
+      ["Inbox Sort", "every 5m", "2026-09-20 12:00", true],
+      ["Knowledge Fold", "every day at 21:00", "2026-09-20 21:00", true],
+      ["Morning Brief", "working days at 07:00", "2026-09-21 07:00", true], // Monday — Sunday is not a working day
+      ["Tomorrow's Plan", "the eve of working days at 23:00", "2026-09-20 23:00", true], // Sunday plans Monday
+      ["Reply Review", "every day at 23:00", "2026-09-20 23:00", true],
+      ["Session Purge", "every day at 04:00", "2026-09-21 04:00", true], // T3-9's archive retention; Monday 04:00 is the next 04:00 after Sunday noon
+      ["Weekly Review", "sun at 18:00", "2026-09-20 18:00", true],
+    ]);
+    // Session Purge's retention_days is declared, so the owner's value applies rather than holding it
+    expect(listing.routines.find((r) => r.name === "session-purge")?.config).toEqual({ retention_days: { value: 30, origin: "default" } });
+    // Inbox Sort and Usage Rollup are collectors that present as routines; everything else a collector is, is a sync
+    expect(listing.routines.filter((r) => ["inbox-drain", "claude-usage"].includes(r.name)).map((r) => r.section)).toEqual(["routines", "routines"]);
+    expect(listing.syncs.map((s) => [s.name, s.displayName, s.describe])).toEqual([
+      ["aws-costs", "AWS Costs", "every 6h"],
+      ["devin-knowledge", "Devin Knowledge", "every 1h"],
+      ["devin-sessions", "Devin Sessions", "every 5m"],
+      ["github-state", "GitHub", "every 15m"],
+    ]);
+    expect(listing.syncs.find((s) => s.name === "github-state")?.raise).toEqual({
+      review_requested: { value: true, origin: "default" },
+      assigned: { value: true, origin: "default" },
+    });
+    // every field of every default is the manifest's, save the profile's days and zone behind a time of day
+    for (const r of [...listing.routines, ...listing.syncs]) {
+      expect(r.schedule.origin, r.name).toBe("default");
+      expect(r.paused, r.name).toEqual({ value: false, origin: "default" });
+      if (r.timeZone) expect(r.timeZone.origin, r.name).toBe("profile");
+    }
+    expect(listing.problems).toEqual([]);
+  });
+
+  it("every shipped collector and routine carries a display name and §2.5's closed shape — no cron string is left", async () => {
+    for (const { file, type } of (await shippedManifests()).filter((f) => f.type === "collectors" || f.type === "routines")) {
+      const m = parseYaml(await readFile(`${root}${file}`, "utf8")) as { display_name?: unknown; schedule?: unknown };
+      expect(typeof m.display_name, `${file} (${type})`).toBe("string");
+      expect(typeof m.schedule, `${file}: a cron string is accepted for one release, and the product has moved off it`).toBe("object");
+    }
   });
 
   it("cron subset", () => {

@@ -1,8 +1,22 @@
 schema: 1
 name: github-state
 type: collector
+display_name: GitHub
 description: Reconcile open issues/PRs from configured repos into the work table (§4.8 — collectors reconcile status from the source; nothing invents it)
-schedule: "*/15 * * * *"
+schedule: { every: 15m }
+# The Needs You rules this sync may raise, each a toggle under Scheduled
+# (§2.5: `syncs.github-state.raise`). Declared here so the owner's file can
+# switch them and cannot name any other; the raises themselves are
+# `pull_request` mirrors (T2-13) and assigned-issue `task` mirrors (T4-23),
+# which read these toggles when they land. Until then this collector
+# reconciles `work` and raises nothing.
+needs_you:
+  review_requested:
+    label: A pull request asks for your review
+    default: true
+  assigned:
+    label: An issue is assigned to you
+    default: true
 writes: [work]
 reads: []
 requires: [github-token]

@@ -372,9 +372,11 @@ takes a `since` cursor and answers with the next one.
 <!-- client-api:routes:end -->
 
 The **console writes exactly three protected paths**: `.metistry/assistant-prompt.md`
-(an approved improvement), `.metistry/compute.yaml` (`/api/compute*`) and —
-with T3-2 — `.metistry/scheduled.yaml`. Every other protected path is written by
-the CLI with the owner caller class (`apps/reconciler/src/paths.ts`).
+(an approved improvement), `.metistry/compute.yaml` (`/api/compute*`) and
+`.metistry/scheduled.yaml` (the Scheduled doors, T3-3 — the reconciler admits it
+since T3-2; `docs/ops/scheduled.md`). Every other protected path is written by
+the CLI with the owner caller class (`apps/reconciler/src/paths.ts`
+`CALLER_AUTHORITY`).
 
 ## Routes, family by family
 

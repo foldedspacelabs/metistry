@@ -1,5 +1,108 @@
 # @metistry-apps/routines
 
+## 0.13.0
+
+### Minor Changes
+
+- c0bb21e: C82's rename: the per-area work rollup (`work` grouped by area — open / in progress / blocked / closed this week) is now **Areas**, not Projects, so it never reads as the same thing as the per-project rollup with modes, budgets and a cap. The seed gains `areas_overview` (identical SQL to `projects_overview`, which stays loaded as an alias for one release); the dashboard's Work ▸ Projects sheet now labels the two panels Projects and Areas, and the morning brief's section is `📂 Areas:`.
+- 3d2e818: **Groups and sources (T1-8, migration 0027).** A request can now mirror something that lives elsewhere: `proposals.source` holds `{kind, external_ref, person}`, and a unique partial index over the pending rows makes one subject one row — `raiseMirror` (core) inserts with the matching `ON CONFLICT … DO NOTHING` and returns the waiting row's id on a second raise, so two raises for one PR make one row. `resolveAtSource` closes a pending mirror as `decision = 'resolved_at_source'` when its source changes, and matches nothing without a `source`. A `proposals_source_shape` CHECK refuses a source without a non-empty `kind` and `external_ref`, which would otherwise dodge both the dedupe and the expiry. `proposals.group_id` is the card several rows are answered as (a meeting's Accept All). The morning brief's 14-day expiry now skips every row with a `source` — a mirror never expires. The `pending_requests` named query returns `source` and `group_id`.
+- bd29463: **Live changes: `GET /api/events` is served.** Migration `0035_event_notify.sql` adds `metistry_notify()` and an `AFTER INSERT OR UPDATE` trigger on `runs`, `proposals`, `work`, `inbox`, `artifact_comments`, `outbound_messages` and `agents` that notifies `{table, op, id}` and nothing else (a no-op update is silent; an agent's heartbeat is throttled to one a minute). The console holds one `LISTEN`, gathers a burst for 250 ms, maps it to the catalogue's typed events and streams them as Server-Sent Events to the owner — a passkey session or the local owner token; an agent bearer and the capture token get the uniform `403`. Every payload passes a guard before it is numbered: exactly its type's fields, each an id, a name, a state or a count. `Last-Event-ID` replays exactly the missed events from a ring of the last 1,000 (or ten minutes), or sends `resync`; a dropped `LISTEN` reconnects by itself and sends `resync`; the credential is re-checked at every 20 s heartbeat; `METISTRY_EVENTS_MAX_STREAMS` (32) caps open streams with a `429`. `GET /api/identity` advertises `events` only while the route is served and the hub is wired.
+  
+  The daily **Update Check** routine (`routines/update-check/`) asks the release feed for the newest release and, when it is newer than the running console, writes the row the console streams as `release.available {version}`; an unreachable feed is a `skipped:` row, never an alert. `@foldedspacelabs/metistry-core`: `GET /api/events` is `served` in the client API table.
+- c38dc4e: **Registries, not lists (§2.7).** Collectors, routines, targets, provider
+  templates and connection types load through `Registry` — built from
+  manifests, never from a list in code. Core adds `REGISTRY_KINDS` (the closed
+  list of kinds, and what an extension may do with each), `loadKind`,
+  `kindSources`, `extensionsDirFor`/`extensionsDirFromEnv`, `describeExtensions`,
+  and `unitCode`/`joinCode`: a collector's or routine's code is found in its own
+  package **by name**, so an extension may replace a product unit's manifest but
+  never supplies code, and one naming no product unit is skipped with the reason.
+  A new `provider` manifest kind (`type: provider` and a `provider:` block that is
+  `providerSchema` itself) turns `seed/compute-templates/<name>.yaml` into
+  `seed/compute-templates/<name>/manifest.yaml`; `COMPUTE_TEMPLATES` and
+  `parseTemplate` are gone — `computeTemplates()` is the registry, and
+  `readTemplate` takes `{ seedDir, instanceDir }`. `collectors` and `routines`
+  arrays are replaced by `loadCollectors`/`loadRoutines` and
+  `collectorCode`/`routineCode`; the console's `loadSchedules` takes loaded units,
+  `TargetRegistry.load(sources)` skips a bad manifest instead of throwing, and the
+  watchdog's `loadScheduled` reads the same registries. Every product manifest
+  now carries `schema: 1`. New verb: `metistry extensions list | add | remove`
+  (M15) — data-only, owner's hand, refused when its registry would skip the unit.
+  Doctor gains a `registries` row. **Upgrade note:** an owner's
+  `.metistry/targets/<name>/manifest.yaml` overlay without `schema: 1` is now
+  skipped (the product's target is in force) until the line is added.
+- 06c854e: **The scheduler: routines run once, at their time.** Core implements the
+  next-occurrence function F-4 froze (`nextOccurrence`, hand-rolled over `Intl`,
+  Temporal's `compatible` rule on both daylight-saving nights) and the runner's
+  question `dueOccurrence` — the latest slot owed since the last run, so slots
+  missed while the Mac slept coalesce into one run. A time of day is read in the
+  schedule's `tz`, then `Me/profile.md`'s `timezone`, then `METISTRY_TZ` — never
+  `TZ`, which both deployment shapes default to UTC — and with none is refused
+  `no_timezone`. Manifests now validate `schedule:` against §2.5's closed shape
+  (cron strings still accepted for one release), and the five routines carry
+  §2.5's defaults: Morning Brief working days 07:00, Knowledge Fold 21:00,
+  Tomorrow's Plan `eve_of_working_days` 23:00, Reply Review 23:00, Weekly
+  Review Sunday 18:00. The console's runner reads each manifest ⊕
+  `.metistry/scheduled.yaml` on every tick — schedule and pause by name; an
+  entry it cannot apply, or a file that does not validate, HOLDS what it names
+  rather than falling back to defaults — reads `timezone` / `working_days` from
+  `Me/profile.md` through the vault bridge, stamps each run with the slot it is
+  for (`meta.scheduled_for`, `ctx.scheduledFor`, `ctx.timeZone`), and records a
+  schedule it cannot place once a day as `skipped:<reason>`. `knowledge-fold`
+  and `plan-tomorrow` drop their hourly clock gates (`plan-tomorrow` keeps its
+  working-day guard) and date a late run from its slot. `metistry doctor` and
+  the watchdog bound a time of day by the widest gap of its week
+  (`longestGapSeconds`), and doctor reports a refused schedule as `absent` in
+  the runner's own words.
+- a1f1113: The session archive is written (T3-9). The engine appends every finished turn — chat and machine-enqueued alike — to `session_archive`: the system prompt as sent, the messages that turn added, and each tool call with its arguments and result, all through `core/redact.ts` inside the store itself (`apps/assistant/src/archive.ts`), with `expires_at` 30 days out and `folded_at` NULL (the session fold's queue). The turn handle is minted by the drain before the call, so the in-flight `runs` row, every tool call's `_meta` and the archived row share one `turn_id`; the turn row also carries `meta.session_id`. A failed archive write never fails a turn — it lands in the run's notes. The new `session-purge` routine (daily) deletes what has expired and anything older than its `retention_days` (Scheduled config, 1–30, default 30; anything else is refused with the field named). `POST /api/sessions/purge` (reach `local`, served) is Purge Now: without `confirm: true` it deletes nothing and names the sessions not yet folded; with it, it deletes every archived turn up to the preview's `as_of`, audited.
+
+### Patch Changes
+
+- 4cba65a: **Profile facts and the standup move (T3-4).** `Me/profile.md` is read in one place: core's `profileFacts` (the two facts a schedule follows), `profileFrontmatter` and `profileWeekdays`, which `plan-tomorrow`'s guard and the console's runner now use too; `resolveScheduleDays` gives a schedule's days with their origin, and a profile with no working days is refused `no_working_days`, never guessed. `standup_days`/`standup_time` move to the Standup routine: the console reads them once into `routines.standup.schedule` in `.metistry/scheduled.yaml` (as `user`; refused until the console holds that authority, T3-2) and raises one *Tidy Me/profile.md* request with the before and after. Approving it writes exactly the "after" as `user`, and is refused `409 stale` if the file changed since; Decline leaves the lines, ignored, and `metistry doctor` names them in one info line (an ok row may now carry `meta.info`). `lastMirror` (core) says whether a subject was ever raised. The seeded profile drops the two keys.
+- a927e61: **The overlay: `scheduled.yaml` checked against the manifests, every field
+  resolved with its origin.** Routine and collector manifests gain
+  `display_name`, `config` (fields from a closed five kinds — text, path,
+  number, boolean, choice — each with a default of its kind), and, for a
+  collector, `needs_you` (its Needs You rules) and `presents_as`. Core's
+  `entryProblems` / `checkScheduled` check each entry against its manifest —
+  its section, its config keys and values, its raise rules — and the runner
+  HOLDS a component whose entry does not fit, rather than ignoring the change;
+  `resolveScheduled` resolves every routine and sync over manifest ⊕
+  `Me/profile.md` ⊕ `scheduled.yaml` into `Sourced` fields (*default* · *from
+  your profile* · *yours*) with the next run. The reconciler admits
+  `.metistry/scheduled.yaml` as the console's third protected door — and still
+  no other. Every collector moves to §2.5's closed shape (no shipped cron
+  string is left); Inbox Sort (`inbox-drain`, every 5 min) and Usage Rollup
+  (`claude-usage`, hourly) present as routines; GitHub declares
+  `review_requested` and `assigned`. Manifest errors now name a bad record key
+  by its rule rather than "Invalid key in record".
+- b0c61f8: The daily Update Check now declares its `display_name` (*Update Check*) and a time-of-day schedule — every day at 06:00 in your zone — in the same closed shape as every other routine, so Scheduled lists it and the runner fires it once a day at that time.
+- Updated dependencies [152022a]
+- Updated dependencies [942372e]
+- Updated dependencies [95fb504]
+- Updated dependencies [df37d39]
+- Updated dependencies [3d2e818]
+- Updated dependencies [4451f77]
+- Updated dependencies [3a1ff8c]
+- Updated dependencies [6592f91]
+- Updated dependencies [bf33ee1]
+- Updated dependencies [bd29463]
+- Updated dependencies [9ac7949]
+- Updated dependencies [3f9d719]
+- Updated dependencies [4cba65a]
+- Updated dependencies [be25ade]
+- Updated dependencies [c38dc4e]
+- Updated dependencies [a927e61]
+- Updated dependencies [06c854e]
+- Updated dependencies [ec21783]
+- Updated dependencies [a1f1113]
+- Updated dependencies [24a9ddb]
+- Updated dependencies [8c9dde6]
+- Updated dependencies [8217e01]
+- Updated dependencies [37f0ed2]
+- Updated dependencies [5e8f8d1]
+  - @foldedspacelabs/metistry-core@0.13.0
+
 ## 0.12.0
 
 ### Patch Changes

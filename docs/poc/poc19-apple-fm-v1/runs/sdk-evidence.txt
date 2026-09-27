@@ -1,47 +1,15 @@
-$ grep -n 'DynamicGenerationSchema' "$SDK/.../FoundationModels.swiftmodule/arm64e-apple-macos.swiftinterface"
-1271:public struct DynamicGenerationSchema : Swift.Sendable {
-1275:  public static var null: FoundationModels.DynamicGenerationSchema {
-1278:  public init(name: Swift.String, description: Swift.String? = nil, properties: [FoundationModels.DynamicGenerationSchema.Property])
-1282:  public init(name: Swift.String, description: Swift.String? = nil, representNilExplicitlyInGeneratedContent explicitNil: Swift.Bool, properties: [FoundationModels.DynamicGenerationSchema.Property])
-1283:  public init(name: Swift.String, description: Swift.String? = nil, anyOf choices: [FoundationModels.DynamicGenerationSchema])
-1285:  public init(arrayOf itemSchema: FoundationModels.DynamicGenerationSchema, minimumElements: Swift.Int? = nil, maximumElements: Swift.Int? = nil)
-1292:    public init(name: Swift.String, description: Swift.String? = nil, schema: FoundationModels.DynamicGenerationSchema, isOptional: Swift.Bool = false)
-1350:  public init(root: FoundationModels.DynamicGenerationSchema, dependencies: [FoundationModels.DynamicGenerationSchema]) throws
+Evidence from the installed macOS SDK's FoundationModels interface file:
+$(xcrun --show-sdk-path)/System/Library/Frameworks/FoundationModels.framework/
+Versions/A/Modules/FoundationModels.swiftmodule/arm64e-apple-macos.swiftinterface
 
-$ sed -n '1269,1294p' (the declaration)
-@available(tvOS, unavailable)
-@available(watchOS, unavailable)
-public struct DynamicGenerationSchema : Swift.Sendable {
-  @available(iOS 26.4, macOS 26.4, visionOS 26.4, *)
-  @available(tvOS, unavailable)
-  @available(watchOS, unavailable)
-  public static var null: FoundationModels.DynamicGenerationSchema {
-    get
-  }
+Trimmed to the three signatures PoC-19 relies on (the full declarations are
+Apple's; read them in the SDK at the line numbers given):
+
+1278 (in `public struct DynamicGenerationSchema`, declared at 1271-1294):
   public init(name: Swift.String, description: Swift.String? = nil, properties: [FoundationModels.DynamicGenerationSchema.Property])
-  @available(iOS 26.4, macOS 26.4, visionOS 26.4, *)
-  @available(tvOS, unavailable)
-  @available(watchOS, unavailable)
-  public init(name: Swift.String, description: Swift.String? = nil, representNilExplicitlyInGeneratedContent explicitNil: Swift.Bool, properties: [FoundationModels.DynamicGenerationSchema.Property])
-  public init(name: Swift.String, description: Swift.String? = nil, anyOf choices: [FoundationModels.DynamicGenerationSchema])
-  public init(name: Swift.String, description: Swift.String? = nil, anyOf choices: [Swift.String])
-  public init(arrayOf itemSchema: FoundationModels.DynamicGenerationSchema, minimumElements: Swift.Int? = nil, maximumElements: Swift.Int? = nil)
-  public init<Value>(type: Value.Type, guides: [FoundationModels.GenerationGuide<Value>] = []) where Value : FoundationModels.Generable
-  public init(referenceTo name: Swift.String)
-  @available(iOS 26.0, macOS 26.0, visionOS 26.0, *)
-  @available(tvOS, unavailable)
-  @available(watchOS, unavailable)
-  public struct Property {
-    public init(name: Swift.String, description: Swift.String? = nil, schema: FoundationModels.DynamicGenerationSchema, isOptional: Swift.Bool = false)
-  }
-}
 
-$ grep -n 'GenerationSchema(root\|init(root' — the bridge from dynamic to the type respond() takes
-1350:  public init(root: FoundationModels.DynamicGenerationSchema, dependencies: [FoundationModels.DynamicGenerationSchema]) throws
+1350 (the bridge from a dynamic schema to the type respond() takes):
+  public init(root: FoundationModels.DynamicGenerationSchema, dependencies: [FoundationModels.DynamicGenerationSchema]) throws
 
-$ grep -n 'tokenCount' — real usage accounting, macOS 26.4+
-599:  nonisolated(nonsending) final public func tokenCount(for prompt: some PromptRepresentable) async throws -> Swift.Int
-605:  nonisolated(nonsending) final public func tokenCount(for instructions: FoundationModels.Instructions) async throws -> Swift.Int
-611:  nonisolated(nonsending) final public func tokenCount(for tools: [any FoundationModels.Tool]) async throws -> Swift.Int
-617:  nonisolated(nonsending) final public func tokenCount(for schema: FoundationModels.GenerationSchema) async throws -> Swift.Int
-623:  nonisolated(nonsending) final public func tokenCount(for transcriptEntries: some Collection<Transcript.Entry>) async throws -> Swift.Int
+599-623 (real usage accounting, macOS 26.4+; one overload per input kind):
+  final public func tokenCount(for prompt: some PromptRepresentable) async throws -> Swift.Int

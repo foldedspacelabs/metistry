@@ -140,18 +140,17 @@ mid-name (`METISTRY_BRIDGE_TOKEN_<NAME>`); the names come from
 comment and non-secret line byte-for-byte intact. Values reach `security`
 on stdin, never in argv.
 
-An item is `metistry:<VAR>` plus an **account**, and `SECRET_SCOPES` in
-`src/secrets.ts` is the one table that says which: instance-scoped names
-(`METISTRY_DB_PASSWORD`, `METISTRY_BRIDGE_TOKEN_*`,
-`METISTRY_ASSISTANT_TOKEN`, `METISTRY_VAPID_*`, `METISTRY_GITHUB_*`, and
-anything unlisted) go under the instance's `instance_id`; user-scoped ones
-(every `METISTRY_*_API_KEY` — a compute provider credential named by
-`compute.yaml` — plus `METISTRY_AWS_SECRET_ACCESS_KEY` and
-`METISTRY_AWS_SESSION_TOKEN`) go under the per-user account
-(`METISTRY_KEYCHAIN_ACCOUNT`, default `metistry`). `sync --to env`
-resolves the instance account first, falls back to the user account and
-**copies** what it finds there into the instance's, never deleting it.
-`purge` deletes one instance's items only, preview-then-confirm.
+An item is `metistry:<VAR>` plus an **account**, and there is one: the
+instance's `instance_id` (the per-user account `metistry` only while an
+install has none yet). The shared per-user scope third-party credentials
+once lived in is retired (plan §2.14): every `METISTRY_*_API_KEY`,
+`METISTRY_DEVIN_API_KEY` and the AWS keys are owner-named secrets of each
+instance now (`METISTRY_DEVIN_API_KEY` → `{{ secret.devin_api_key }}`),
+`sync --to env` fills their lines from those and never reads the per-user
+account, and `secrets migrate-scope` copies the old originals in (deleting
+nothing; `metistry update` runs it). `purge` deletes one instance's items
+only, preview-then-confirm; `purge-shared` removes a per-user original only
+once every instance on the Mac has its copy.
 
 `--instance <dir>` says which instance; `--env-file` targets a `.env`
 other than `<instance>/state/.env`.

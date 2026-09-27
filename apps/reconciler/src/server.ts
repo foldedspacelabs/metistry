@@ -19,7 +19,7 @@ import type { Db, Indexer } from "./indexer.js";
 import type { Embeddings } from "./embeddings.js";
 import { parseMode, searchVault } from "./search.js";
 import type { CallerClass } from "./paths.js";
-import type { EmbedClient } from "@foldedspacelabs/metistry-core";
+import type { EmbedClient, VaultStatus } from "@foldedspacelabs/metistry-core";
 
 export interface BridgeConfig {
   /** `METISTRY_BRIDGE_TOKEN_RECONCILER` — the console's bearer, and every caller the console fronts. */
@@ -46,6 +46,8 @@ export interface BridgeDeps {
   embeddings?: Embeddings | undefined;
   embedClient?: EmbedClient | undefined;
   db?: Db | undefined;
+  /** `GET /vault/status` (§2.21, T10-2) — sync.ts's `readVaultStatus` over this process's schedule. Absent → not_available. */
+  vaultStatus?: (() => Promise<VaultStatus>) | undefined;
 }
 
 /**
@@ -302,6 +304,15 @@ export function makeBridge(deps: BridgeDeps, cfg: BridgeConfig): Server {
       if (key === "GET /vault/log") {
         const limit = clampInt(q.get("limit"), 20, 1, 200);
         return reply(res, await vault.log(q.get("path"), limit), 200, (entries) => ({ path: q.get("path") ?? null, entries }));
+      }
+
+      // Branch, ahead and behind, last commit, last push and pull, any
+      // conflict, and the policy in force. Read-only, and nothing in it is a
+      // note's content, so either bearer may ask; the console's
+      // `GET /api/vault/status` is the owner's door onto it.
+      if (key === "GET /vault/status") {
+        if (!deps.vaultStatus) return fail(res, "not_available");
+        return send(res, 200, await deps.vaultStatus());
       }
 
       if (key === "GET /vault/diff") return reply(res, await vault.diff(q.get("path"), q.get("from"), q.get("to")));

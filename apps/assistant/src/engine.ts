@@ -66,6 +66,8 @@ export interface TurnResult {
    * answer, and the candidate's is inside this (shadow.ts).
    */
   shadow?: ShadowRun;
+  /** The turn handle this turn ran under — the spec's, or the one the engine minted (`TurnSpec.turnId`). */
+  turn_id?: string;
 }
 
 /**
@@ -90,6 +92,13 @@ export interface TurnSpec {
   maxCostUsd?: number | undefined;
   /** Agentic turns for this turn only — a crew manifest's `max_turns`. Absent = the engine's own default. */
   maxTurns?: number | undefined;
+  /**
+   * The turn correlation handle: what every tool call of this reply carries
+   * in `_meta`, what the turn's `runs` row carries in `meta.turn_id`, and the
+   * session archive's `turn_id`. The drain mints it before the call so the
+   * in-flight row already has it; absent, the engine mints one.
+   */
+  turnId?: string | undefined;
 }
 
 /** One turn. The whole contract: a prompt and a spec in, a result out — and nothing about the provider leaks into the caller. */

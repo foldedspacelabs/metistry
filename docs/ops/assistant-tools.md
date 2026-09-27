@@ -171,8 +171,11 @@ An empty result is the signal that the aliases can come out.
 `turn_id` into the `runs` row's `meta.turn_id`, which the `activity_feed`
 query surfaces so one reply's calls group together — but it is **not a tool
 parameter**. It rides in the MCP call's `_meta`, under
-`com.foldedspacelabs.metistry/turn_id`, and `apps/assistant/src/tools.ts`
-mints one per tool host, i.e. one per reply. Until 2026-09-19 it was an
+`com.foldedspacelabs.metistry/turn_id`: the drain mints one per reply before
+the call (`apps/assistant/src/drain.ts`), so the turn's own `runs` row carries
+it from its in-flight insert, the tool host (`apps/assistant/src/tools.ts`)
+stamps it on every call, and the session archive keys the turn by it (T3-9) —
+a host given none mints its own. Until 2026-09-19 it was an
 optional argument on every tool and the seed prompt asked the model to
 invent one and pass it faithfully: ~940 definition tokens, 18.8% of the whole
 advertised surface, for a field no model should be reasoning about — and a

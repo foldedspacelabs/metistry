@@ -11,6 +11,7 @@ import { isBudgetRefusal, offerBudgetWindow, BudgetRefusal } from "./budgets.js"
 import { recordShadow } from "./shadow.js";
 import { resolveTurn } from "./tiers.js";
 import type { Engine } from "./engine.js";
+import { newTurnId } from "./brain.js";
 
 /** The assistant's own agent id — the `claimed_by` on any task it holds. Never the assistant's NAME (CLAUDE.md: the name lives in identity.yaml alone). */
 export const ASSISTANT_AGENT = "assistant";
@@ -97,6 +98,11 @@ export async function drainOne(db: Db, engine: Engine, tiers: TierMap, opts: Dra
       );
   const resume: string | undefined = sess.rows[0]?.id;
 
+  // The turn handle, minted before the call so the in-flight row carries it:
+  // the reply's tool calls stamp it (tools.ts), the archive keys the turn by
+  // it (archive.ts), and `run_detail` joins the calls to this row on it.
+  const turnId = newTurnId();
+
   const runId = await startRun(db, {
     component: "assistant",
     kind: "turn",
@@ -105,6 +111,7 @@ export async function drainOne(db: Db, engine: Engine, tiers: TierMap, opts: Dra
     meta: {
       message_id: msg.id,
       thread: msg.thread,
+      turn_id: turnId,
       routed_by: routeMeta.routed_by ?? "rule",
       tier,
       effort,
@@ -119,12 +126,12 @@ export async function drainOne(db: Db, engine: Engine, tiers: TierMap, opts: Dra
   try {
     let result;
     try {
-      result = await engine(prompt, { model, effort, resume, assignment, thread: msg.thread, tier });
+      result = await engine(prompt, { model, effort, resume, assignment, thread: msg.thread, tier, turnId });
     } catch (err) {
       // A budget refusal is not a stale session: retrying it would only spend
       // the check again and land in the same place.
       if (!resume || isBudgetRefusal(err)) throw err;
-      result = await engine(prompt, { model, effort, assignment, thread: msg.thread, tier }); // stale session: fresh start
+      result = await engine(prompt, { model, effort, assignment, thread: msg.thread, tier, turnId }); // stale session: fresh start
     }
     const upsert = await db.query(
       `INSERT INTO sessions (id, thread, turns) VALUES ($1, $2, 1)
@@ -166,7 +173,9 @@ export async function drainOne(db: Db, engine: Engine, tiers: TierMap, opts: Dra
     // the agent — mcp-brain, kind=tool), cache read/write tokens from the SDK's
     // usage (claude-usage derives cache_hit_rate downstream), the session's turn
     // count, and any sessions this turn rolled.
-    const meta: Record<string, unknown> = { session_turns: sessionTurns };
+    // `session_id` is the archive's other key: with `turn_id` it names this
+    // turn's row in `session_archive` (Run detail's conversation).
+    const meta: Record<string, unknown> = { session_id: result.session_id, session_turns: sessionTurns };
     if (result.tools_used) meta.tools_used = result.tools_used;
     if (result.cache_read !== undefined) meta.cache_read = result.cache_read;
     if (result.cache_write !== undefined) meta.cache_write = result.cache_write;

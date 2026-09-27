@@ -319,6 +319,7 @@ each routine's manifest:
 | Tomorrow's Plan (`plan-tomorrow`) | `eve_of_working_days` at 23:00 — after the fold |
 | Reply Review (`reply-review`) | every day at 23:00 |
 | Weekly Review (`weekly-review`) | Sunday at 18:00 |
+| Session Purge (`session-purge`) | every day at 04:00 — the session archive's retention (`retention_days`, 1–30, default 30; T3-9) |
 | Inbox Sort, Usage Rollup | every 5 min, hourly — the collectors `inbox-drain` and `claude-usage`, still on their cron strings until T3-2 |
 
 A routine on `working_days` or `eve_of_working_days` runs only once

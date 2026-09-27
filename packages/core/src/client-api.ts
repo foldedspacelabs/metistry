@@ -229,7 +229,7 @@ export const CLIENT_API: readonly ClientRoute[] = [
   route("GET", "/api/runs/:id", "one run in full, with the tool calls of its turn"),
   planned("GET", "/api/turns/:turn_id/progress", "T2-17", "a turn's tool calls so far: the working indicator"),
   planned("GET", "/api/sessions/:id", "T2-17", "one archived session"),
-  planned("POST", "/api/sessions/purge", "T3-9", "purge the session archive now; the confirm names unfolded sessions", { reach: ["local"] }),
+  route("POST", "/api/sessions/purge", "purge the session archive now; the confirm names unfolded sessions", { reach: ["local"] }),
 
   // ----- registries the clients read -----
   route("GET", "/api/instances", "the linked instances (`instances.yaml`)"),

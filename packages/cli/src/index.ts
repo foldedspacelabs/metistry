@@ -172,15 +172,17 @@ export { StepRunner, StepFailed } from "./steps.js";
 // docs/ops/console-api.md): `compute.yaml` is edited as a YAML document,
 // validated against core's schema, and written through the reconciler as
 // `user` in exactly one place, so the CLI verb and the app's Compute pane
-// cannot drift into two behaviours. `providers add`/`remove` are
-// deliberately NOT on this list — they take a secret, and secrets never
-// cross the console (apps/console/src/compute-routes.ts).
+// cannot drift into two behaviours. `providers add`/`set`/`remove` are
+// deliberately NOT on this list — they take a secret or say where one goes,
+// and that never crosses the console (§2.2 M16,
+// apps/console/src/compute-routes.ts).
 export {
   assign,
   computeFiles,
   computeReport,
   instanceComputeFile,
   modelsList,
+  modelsSearch,
   parseAssignmentTarget,
   parseBudgetAction,
   parseBudgetTarget,
@@ -188,6 +190,10 @@ export {
   providerTest,
   renderComputeReport,
   setBudget,
+  unassign,
+  type ListingCache,
+  type ModelsSearchResult,
+  type UnassignResult,
   type AssignResult,
   type AssignmentTarget,
   type BudgetResult,

@@ -11,7 +11,7 @@ import { readFile } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { KEEP_AWAKE_VALUES, parseKeepAwake, parsePullArg, parsePushArg, type DeploymentShape, type Effort, type KeepAwake } from "@foldedspacelabs/metistry-core";
+import { KEEP_AWAKE_VALUES, instanceFile, loadCompute, parseKeepAwake, parsePullArg, parsePushArg, providerSecretNames, type DeploymentShape, type Effort, type KeepAwake } from "@foldedspacelabs/metistry-core";
 import {
   assign,
   cacheReport,
@@ -19,7 +19,10 @@ import {
   modelsInstall,
   modelsList,
   modelsLoad,
+  modelsSearch,
   parseAssignmentTarget,
+  parseBilling,
+  parseSwitch,
   parseBudgetAction,
   parseBudgetTarget,
   parseEffort,
@@ -28,14 +31,17 @@ import {
   providerTest,
   providersAdd,
   providersRemove,
+  providersSet,
   renderCacheReport,
   renderComputeReport,
   renderModelsInstall,
   renderModelsList,
+  renderModelsSearch,
   renderProviderTest,
   renderRouteReport,
   routeReport,
   setBudget,
+  unassign,
   type ComputeOptions,
 } from "./compute.js";
 import { buildDeploymentReport, renderDeploymentReport, setDeploymentShape, setKeepAwake, type KeepAwakeFlags } from "./deployment-report.js";
@@ -341,6 +347,9 @@ const USAGE = `metistry — Metistry command line
       third-party credential (a METISTRY_*_API_KEY, your AWS keys) is an
       owner-named secret of the instance now: --to env fills its line from
       {{ secret.<name> }} and never reads the retired shared per-user account.
+      --to env also delivers every {{ secret.<name> }} compute.yaml's providers
+      reference as METISTRY_SECRET_<NAME>, from this instance's item — how a
+      key reaches the engine, which never reads the Keychain.
       purge deletes one instance's items and nothing else — its owner-named
       secrets included; without --yes it only previews.
 
@@ -650,13 +659,17 @@ const USAGE = `metistry — Metistry command line
   metistry compute show [--json]
   metistry compute providers list [--json]
   metistry compute providers add --from <template>
-                                 [--name <n>] [--base-url <url>] [--secret <NAME>] [--skip-test]
+                                 [--name <n>] [--base-url <url>] [--secret <name>] [--skip-test]
+  metistry compute providers set <name> [--enabled on|off] [--billing token|subscription]
+                                 [--base-url <url>] [--secret <name>]
   metistry compute providers remove <name>
   metistry compute providers test <name> [--complete] [--model <id>]
   metistry compute models list [--provider <name>] [--json]
+  metistry compute models search [<query>] [--provider <name>] [--json]
   metistry compute models install <provider/model> [--json]
   metistry compute models load|unload <provider/model> [--ttl <seconds>] [--json]
   metistry compute assign <default|<tier>|crew:<name>> <provider/model> [--effort low|medium|high]
+  metistry compute unassign <tier|crew:<name>>
   metistry compute budget <instance|provider:<name>> [--daily <usd>] [--monthly <usd>]
                           --action allow|stop|critical_only
   metistry compute cache-report [--since 7d] [--json]
@@ -669,8 +682,15 @@ const USAGE = `metistry — Metistry command line
       a provider template — a unit of the provider registry: the product's
       seed/compute-templates/ and your own in .metistry/extensions/ (metistry
       extensions list); "providers add" with no --from names them — and reads
-      the API key from stdin into the login Keychain (user scope), never
-      taking it as an argument. Budgets are enforced in the engine, before the call
+      the API key from stdin into one of THIS instance's secrets (the login
+      Keychain under its instance_id; recorded in secrets.yaml), never taking
+      it as an argument, and writes auth.secret: "{{ secret.<name> }}".
+      "providers set" is the provider's gear: its switch (off = not searched,
+      not offered, nothing assignable), billing, base URL, and which secret
+      its key is. "models search" groups every switched-on provider's
+      catalogue by model through seed/model-identities.yaml (an id it cannot
+      map stays its own row). "unassign" removes a tier or a crew; default
+      is reassigned, never removed. Budgets are enforced in the engine, before the call
       (docs/ops/compute.md). "cache-report" and "route-report" are the two
       that read rather than write. cache-report: prompt-cache effectiveness
       per provider, model and tier over the last --since days (7d, 2w, 3m,
@@ -1231,11 +1251,24 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
         out(minted.detail);
         if (minted.id) instanceId = minted.id;
       }
+      // `--to env` delivers every named secret compute.yaml's providers
+      // reference (T4-18): the engine reads a key from its environment, never
+      // the Keychain. A compute.yaml that does not validate delivers nothing,
+      // and says so — the rest of the sync is unaffected.
+      let deliver: string[] = [];
+      if (loaded.instanceDir && positional[0] === "sync") {
+        try {
+          deliver = providerSecretNames((await loadCompute(instanceFile(loaded.instanceDir, "compute"))).compute);
+        } catch (e) {
+          out(`compute.yaml does not validate, so no provider key is delivered this run (${e instanceof Error ? e.message : String(e)})`);
+        }
+      }
       const secretsOpts = {
         envFile,
         envTarget: paths.write,
         exampleFile: productDir ? join(productDir, ".env.example") : undefined,
         instanceId,
+        deliver,
         out,
         ...(io.exec ? { exec: io.exec } : {}),
         // the Keychain exists only on darwin; CI runs this suite on Linux, so tests pin the platform
@@ -2184,7 +2217,7 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
                   // a typo, never a guess: name what exists, and why a unit of that name did not load
                   const skipped = templates.skipped.filter((s) => s.name === template).map((s) => `${s.path} was skipped: ${s.reason}`);
                   if (template) err(`no provider template named ${JSON.stringify(template)}${skipped.length > 0 ? ` (${skipped.join("; ")})` : ""}`);
-                  err(`usage: metistry compute providers add --from ${templateChoices(templateNames())} [--name <n>] [--base-url <url>] [--secret <NAME>] [--skip-test]`);
+                  err(`usage: metistry compute providers add --from ${templateChoices(templateNames())} [--name <n>] [--base-url <url>] [--secret <name>] [--skip-test]`);
                   return 2;
                 }
                 const r = await providersAdd({
@@ -2200,6 +2233,23 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
                   out(`provider ${r.name} added (${r.provider.locality}, ${r.provider.base_url}) — ${r.delivery.detail}`);
                   if (r.test) out(renderProviderTest(r.test, ui));
                 }
+                return 0;
+              }
+              case "set": {
+                const name = positional[2];
+                if (!name || flags.enabled === true || flags.billing === true || flags.secret === true || flags["base-url"] === true) {
+                  err("usage: metistry compute providers set <name> [--enabled on|off] [--billing token|subscription] [--base-url <url>] [--secret <name>]");
+                  return 2;
+                }
+                const r = await providersSet({
+                  ...computeOpts,
+                  name,
+                  enabled: parseSwitch(str(flags, "enabled")),
+                  billing: parseBilling(str(flags, "billing")),
+                  baseUrl: str(flags, "base-url"),
+                  secret: str(flags, "secret"),
+                });
+                out(json ? JSON.stringify(r, null, 2) : `provider ${r.name}: ${r.changed.join(", ")} — ${r.delivery.detail}`);
                 return 0;
               }
               case "remove": {
@@ -2232,7 +2282,7 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
                 }
               }
               default:
-                err(`usage: metistry compute providers list | add --from ${templateChoices(templateNames())} | remove <name> | test <name> [--complete] [--model <id>]`);
+                err(`usage: metistry compute providers list | add --from ${templateChoices(templateNames())} | set <name> … | remove <name> | test <name> [--complete] [--model <id>]`);
                 return 2;
             }
           }
@@ -2242,6 +2292,14 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
               case "list": {
                 const r = await modelsList({ ...computeOpts, provider: str(flags, "provider") });
                 out(json ? JSON.stringify(r, null, 2) : renderModelsList(r, templateNames()));
+                return r.providers.every((p) => p.ok) ? 0 : 1;
+              }
+              case "search": {
+                // every switched-on provider's catalogue, grouped by model
+                // (C131) — live from the CLI; the console keeps the listings
+                // and re-reads them on Refresh
+                const r = await modelsSearch({ ...computeOpts, query: positional.slice(2).join(" "), provider: str(flags, "provider") });
+                out(json ? JSON.stringify(r, null, 2) : renderModelsSearch(r, ui));
                 return r.providers.every((p) => p.ok) ? 0 : 1;
               }
               case "install": {
@@ -2267,7 +2325,7 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
                 return r.ok ? 0 : 1;
               }
               default:
-                err("usage: metistry compute models list [--provider <name>] | install <provider/model> | load|unload <provider/model>");
+                err("usage: metistry compute models list [--provider <name>] | search [<query>] | install <provider/model> | load|unload <provider/model>");
                 return 2;
             }
           }
@@ -2280,6 +2338,12 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
             }
             const r = await assign({ ...computeOpts, target, model, effort: parseEffort(str(flags, "effort")) });
             out(json ? JSON.stringify(r, null, 2) : `${r.target} → ${r.provider}/${r.model} at ${r.effort} effort — ${r.delivery.detail}`);
+            return 0;
+          }
+          case "unassign": {
+            const target = parseAssignmentTarget(positional[1]);
+            const r = await unassign({ ...computeOpts, target });
+            out(json ? JSON.stringify(r, null, 2) : `${r.target} removed — ${r.delivery.detail}`);
             return 0;
           }
           case "budget": {
@@ -2327,7 +2391,7 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
             return 0;
           }
           default:
-            err("usage: metistry compute show | providers … | models list | assign … | budget … | cache-report | route-report   (metistry --help)");
+            err("usage: metistry compute show | providers … | models list|search … | assign … | unassign … | budget … | cache-report | route-report   (metistry --help)");
             return 2;
         }
       } catch (e) {

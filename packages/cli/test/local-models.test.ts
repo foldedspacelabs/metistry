@@ -238,6 +238,14 @@ describe("discovery: the apple-fm bridge", () => {
     expect(headers.authorization).toBe("Bearer other");
   });
 
+  it("reads a {{ secret.x }} reference from its delivery variable — the one resolver every service uses (T4-18)", async () => {
+    const http = fakeFetch({ [AFM]: afmModels });
+    const cfg = computeOf(`providers: { applefm: { kind: openai-compatible, base_url: "http://127.0.0.1:${APPLEFM_DEFAULT_PORT}/v1", locality: on_machine, auth: { secret: "{{ secret.afm_token }}" } } }`);
+    await probeLocalServers({ compute: cfg, env: { METISTRY_SECRET_AFM_TOKEN: "named", METISTRY_BRIDGE_TOKEN_APPLE_FM: "conventional" }, fetchFn: http.fn });
+    const headers = http.calls.find((c) => c.url === AFM)!.init!.headers as Record<string, string>;
+    expect(headers.authorization).toBe("Bearer named");
+  });
+
   it("without the token the 401 is reported as refused, not as models", async () => {
     const http = fakeFetch({ [AFM]: { status: 401 } });
     const rows = await probeLocalServers({ compute: computeOf("providers: {}"), env: {}, fetchFn: http.fn });
@@ -471,5 +479,27 @@ describe("the seed template", () => {
     expect(p.locality).toBe("on_machine");
     expect(p.base_url).toBe(LOCAL_SERVERS.llamaserver.defaultBaseUrl);
     expect(LLAMASERVER_DEFAULT_PORT).not.toBe(8080); // CONSOLE_DEFAULT_PORT — the collision this default exists to avoid
+  });
+});
+
+describe("fetchModels: what a listing says beyond the id (T4-18's catalogue)", () => {
+  it("keeps OpenRouter's name, context, per-million price and tools — and invents nothing a listing is silent on", async () => {
+    const url = "https://openrouter.ai/api/v1";
+    const fetchFn = (async () =>
+      new Response(
+        JSON.stringify({
+          data: [
+            { id: "meta-llama/llama-3.3-70b-instruct", name: "Meta: Llama 3.3 70B", context_length: 131072, pricing: { prompt: "0.00000013", completion: "0.0000004" }, supported_parameters: ["tools", "temperature"] },
+            { id: "openrouter/auto", pricing: { prompt: "-1", completion: "-1" } },
+            { id: "bare-model" },
+          ],
+        }),
+        { status: 200 },
+      )) as unknown as typeof fetch;
+    const probe = await fetchModels({ url, fetchFn });
+    expect(probe.models).toEqual(["bare-model", "meta-llama/llama-3.3-70b-instruct", "openrouter/auto"]);
+    expect(probe.details?.["meta-llama/llama-3.3-70b-instruct"]).toEqual({ name: "Meta: Llama 3.3 70B", context: 131072, in_per_m: 0.13, out_per_m: 0.4, tools: true });
+    expect(probe.details?.["openrouter/auto"]).toBeUndefined(); // "-1" is a router's "varies", not a price
+    expect(probe.details?.["bare-model"]).toBeUndefined();
   });
 });

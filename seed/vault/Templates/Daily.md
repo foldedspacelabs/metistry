@@ -9,6 +9,11 @@ tags: [template]
 
 {{ recurring due: today }}
 
+## Today · Metistry
+
+<!-- metistry:day -->
+<!-- /metistry:day -->
+
 ## Notes
 
 ## Meetings

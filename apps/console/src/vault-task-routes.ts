@@ -310,8 +310,11 @@ async function check(taskKey: string, checked: boolean, seenText: string, wantPa
 async function schedule(taskKey: string, when: TaskDeferral, seenText: string, wantPath: string | undefined, deps: VaultTaskDeps): Promise<Answer> {
   const deferral = "do" in when ? "do" : "someday";
   const audited: Audited = async (ok, outcome, answer) => {
-    // as Tick: the key, what was asked and the outcome — never the path or the text
-    await deps.audit("vault_task", "schedule", ok, { task_key: taskKey, deferral, outcome });
+    // as Tick: the key, what was asked and the outcome — never the path or the text.
+    // `to` is where the line was sent: Close the Day's "what moved and to
+    // when" reads it back (seed/queries/day_close.yaml), because the index
+    // only ever knows where a line's day is NOW
+    await deps.audit("vault_task", "schedule", ok, { task_key: taskKey, deferral, to: "do" in when ? when.do : "someday", outcome });
     return answer;
   };
   const f = await findLine(taskKey, seenText, wantPath, deps, audited, deferView, "deferring");

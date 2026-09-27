@@ -1,0 +1,114 @@
+# Seeded default (D4 overlay: an instance file of the same name wins).
+#
+# What one day did to the owner's tasks — the rows Close the Day writes into
+# the daily note's section (design-build-plan §2.11, §2.13; screen-05-today
+# §15.5.1; ticket T2-8): **done**, and **what moved and to when**.
+#
+# Two sources, and why both:
+#
+#   * **The index** (`vault_tasks.done_on = day`) — every line ticked that
+#     day, wherever it was ticked: the Tick door, Obsidian, the phone. It is
+#     up to one walk behind the file (`METISTRY_RECONCILE_INTERVAL_SEC`).
+#   * **The doors' own record** (`runs`, kind `vault_task`, the Tick and
+#     Defer doors' audit rows, apps/console/src/vault-task-routes.ts) — what
+#     the owner did from Today, with no walk in between. A close pressed ten
+#     seconds after the last tick still counts that tick. The LATEST act per
+#     key and door wins: a tick then Undo is not done; a line deferred twice
+#     went where the second deferral sent it.
+#
+# "Moved" is the Defer door's record ALONE, and deliberately: the index holds
+# where a line's `do` date is now, never where it was this morning, so a line
+# deferred on Tuesday to next week would otherwise look moved again on every
+# close until then. A deferral made by hand in Obsidian is the owner's own
+# edit of their own note and is not reported back to them. A line both done
+# and moved is done.
+#
+# `to` is the Defer door's `to` (a `YYYY-MM-DD`, or `someday`). Rows written
+# before the door recorded it name only `deferral`; a `someday` one still
+# reads, a dated one without its day is left out rather than guessed.
+#
+# `tz` is the zone the day is counted in — the console passes its own
+# (`METISTRY_TZ`), the zone the doors stamp `done <date>` in, so "today" means
+# the same day on both sides. A zone Postgres does not know is an error, never
+# a silent UTC: the console validates it before binding.
+#
+# **`expose: route`**, on the rule `vault_task_by_key.yaml` states: every row
+# carries a vault path and the text of a line the owner typed. The generic
+# `/api/q/<name>` and `queries_run` answer this name as they answer an
+# unknown one.
+name: day_close
+expose: route
+description: >-
+  One day's task outcomes for Close the Day — done (the index's done_on plus
+  the Tick door's own record, latest act per key) and moved (the Defer door's
+  record, with the day or `someday` each line was sent to) — with the path,
+  anchor and text of each line. Done first, then moved by destination.
+params:
+  day: { type: text, default: "" } # YYYY-MM-DD; blank = the cluster's current_date
+  tz: { type: text, default: "" } # IANA zone the day is counted in; blank = UTC
+  limit: { type: int, default: 200 }
+sql: |
+  WITH f AS (
+    SELECT
+      coalesce(nullif(:day::text, '')::date, current_date) AS day,
+      coalesce(nullif(:tz::text, ''), 'UTC')               AS tz
+  ),
+  -- the doors' own record of the day: the latest successful act per key and door
+  acts AS (
+    SELECT DISTINCT ON (r.meta->>'task_key', r.tool)
+      r.meta->>'task_key' AS task_key,
+      r.tool,
+      r.meta,
+      r.ts
+    FROM runs r, f
+    WHERE r.kind = 'vault_task'
+      AND r.ok
+      AND r.tool IN ('check', 'schedule')
+      AND r.meta ? 'task_key'
+      AND (r.ts AT TIME ZONE f.tz)::date = f.day
+    ORDER BY r.meta->>'task_key', r.tool, r.ts DESC, r.id DESC
+  ),
+  unticked AS (
+    SELECT task_key FROM acts WHERE tool = 'check' AND (meta->>'checked')::boolean IS FALSE
+  ),
+  done AS (
+    SELECT vt.task_key FROM vault_tasks vt, f
+    WHERE vt.checked AND vt.done_on = f.day
+    UNION
+    SELECT task_key FROM acts WHERE tool = 'check' AND (meta->>'checked')::boolean IS TRUE
+  ),
+  settled AS (
+    SELECT d.task_key, 'done'::text AS act, NULL::text AS to_day
+    FROM done d
+    WHERE d.task_key NOT IN (SELECT task_key FROM unticked)
+    UNION ALL
+    SELECT a.task_key, 'moved'::text,
+      CASE WHEN a.meta->>'deferral' = 'someday' THEN 'someday' ELSE a.meta->>'to' END
+    FROM acts a
+    WHERE a.tool = 'schedule'
+      AND (a.meta->>'deferral' = 'someday' OR a.meta ? 'to')
+      AND a.task_key NOT IN (SELECT d.task_key FROM done d WHERE d.task_key NOT IN (SELECT task_key FROM unticked))
+  )
+  SELECT
+    s.act,
+    s.task_key,
+    s.to_day,
+    t.path,
+    t.anchor,
+    t.text
+  FROM settled s
+  LEFT JOIN LATERAL (
+    SELECT vt.path, vt.anchor, vt.text
+    FROM vault_tasks vt
+    WHERE vt.task_key = s.task_key
+    ORDER BY vt.path COLLATE "C", vt.line_no
+    LIMIT 1
+  ) t ON true
+  ORDER BY
+    CASE s.act WHEN 'done' THEN 0 ELSE 1 END,
+    CASE WHEN s.to_day = 'someday' THEN 1 ELSE 0 END,
+    s.to_day,
+    t.text COLLATE "C",
+    s.task_key
+  LIMIT :limit
+cache_ttl: 0 # a close that misses the tick made a moment ago is a close that lies

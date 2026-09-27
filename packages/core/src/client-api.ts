@@ -266,7 +266,7 @@ export const CLIENT_API: readonly ClientRoute[] = [
   route("POST", "/api/vault-tasks/:task_key/check", "tick or untick one task line", { idempotent: "key", conflict: ["stale"] }),
   route("POST", "/api/vault-tasks/:task_key/schedule", "defer one task line: a `do` date or someday", { idempotent: "key", conflict: ["stale"] }),
   planned("POST", "/api/vault-tasks/:task_key/link", "T4-25", "add one tracker ref to one task line", { conflict: ["stale"] }),
-  planned("POST", "/api/today/close", "T2-8", "Close the Day: write the section, then plan tomorrow"),
+  route("POST", "/api/today/close", "Close the Day: write the section, then plan tomorrow", { conflict: ["stale"] }),
 
   // ----- calendar and mail -----
   planned("POST", "/api/meetings/:event_id/note", "T2-11", "the meeting note for one event; a second call returns the first", { idempotent: "natural" }),

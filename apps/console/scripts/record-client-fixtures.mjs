@@ -41,7 +41,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pg from "pg";
-import { CLIENT_API, INSTANCE_LAYOUT, InstanceSecrets, SECRET_USE_META_KEY, memoryKeychain, mintToken, resolveInstanceLayout } from "@foldedspacelabs/metistry-core";
+import { CLIENT_API, INSTANCE_LAYOUT, InstanceSecrets, SECRET_USE_META_KEY, calendarDate, memoryKeychain, mintToken, resolveInstanceLayout, writeNoteSection } from "@foldedspacelabs/metistry-core";
 import { readInstanceId } from "@foldedspacelabs/metistry-cli";
 import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
 import { QueryStore } from "@foldedspacelabs/metistry-queries";
@@ -57,6 +57,7 @@ import { TargetRegistry } from "../dist/dispatch.js";
 import { loadPublicIdentity } from "../dist/identity.js";
 import { EventHub, startEventFeed } from "../dist/events.js";
 import { parseVaultStatus } from "../dist/vault-status.js";
+import { RoutineTrigger } from "../dist/close-day.js";
 import { FIXTURE_DIR, REPO_ROOT, expectedFixtures, fixtureBody, shapeDiff } from "./client-fixtures.mjs";
 
 // ---- arguments -------------------------------------------------------------------
@@ -193,6 +194,21 @@ const TASK_TEXT = "Send Dana the fixture format";
 const DEFER_TEXT = "Draft the Q4 plan";
 await vault.write(DAY, Buffer.from(`# 2026-09-28\n\n- [ ] ${TASK_TEXT} due 2026-09-28 p2 size s ^mt-7f3k2a\n- [ ] Book the room for Thursday\n- [ ] ${DEFER_TEXT} due 2026-10-01 p1 ^mt-4q8r2d\n`), { principal: "user", message: "fixture" });
 
+// the reconciler's section operation (T2-6), in memory, as the bridge runs it —
+// core's `writeNoteSection` — for Close the Day (T2-8); and today's note, from
+// the seeded Templates/Daily.md shape, markers and all. Close the Day closes
+// TODAY, so this one note is dated by the recording's clock (UTC here).
+vault.section = async (path, marker, body, principal, outer) => {
+  const cur = await vault.read(path);
+  if (!cur) throw new VaultError("not_found", `${path} does not exist`);
+  const out = writeNoteSection(cur.content, marker, body, outer);
+  if (!out.ok) throw new VaultError(out.code, out.message ?? out.code);
+  const w = await vault.write(path, out.content, { principal, message: `update the ${marker} section of ${path}` }, cur.sha256);
+  return { path, section: marker, sha256: w.sha256, bytes: w.bytes, outer_sha256: out.outerSha256, appended: out.appended };
+};
+const CLOSE_DAY = calendarDate(new Date(), process.env.METISTRY_TZ || "UTC");
+await vault.write(`Journal/${CLOSE_DAY}.md`, Buffer.from(`# ${CLOSE_DAY}\n\n## Today\n\n## Today · Metistry\n\n<!-- metistry:day -->\n<!-- /metistry:day -->\n\n## Notes\n`), { principal: "user", message: "fixture" });
+
 const queries = new QueryStore(pool);
 await queries.loadDir(join(REPO_ROOT, "seed/queries"));
 const targets = new TargetRegistry({ env: { METISTRY_GITHUB_WRITE_TOKEN: "fixture-not-a-token", METISTRY_GITHUB_DISPATCH_REPO: "example/fixtures" }, fetchFn: fakeFetch });
@@ -224,6 +240,8 @@ const server = makeServer(pool, queries, {
   rules: loadRules(await readFile(layout.path("rules"), "utf8")),
   targets,
   vault,
+  // Close the Day's plan-tomorrow, enqueued — a pass that does nothing here: the recording is of the door
+  planTomorrow: new RoutineTrigger("plan-tomorrow", async () => {}),
   identity: await loadPublicIdentity(layout.path("identity")),
   crews,
   assistantDefinition: () =>
@@ -540,6 +558,7 @@ const REQUESTS = [
 
   ["POST /api/vault-tasks/:task_key/check", () => ({ path: "/api/vault-tasks/mt-7f3k2a/check", body: { checked: true, seen_text: TASK_TEXT }, key: "tick-0928-0001" })],
   ["POST /api/vault-tasks/:task_key/schedule", () => ({ path: "/api/vault-tasks/mt-4q8r2d/schedule", body: { do: "2026-09-30", seen_text: DEFER_TEXT }, key: "defer-0928-0001" })],
+  ["POST /api/today/close", () => ({ path: "/api/today/close", body: { day: CLOSE_DAY, line: "Store interface frozen; recorder next." } })],
 
 
   // the reads that show the writes above: a room with a comment, a feed with a capture in it

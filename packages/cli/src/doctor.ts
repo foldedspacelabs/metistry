@@ -23,6 +23,7 @@ import {
   humanGap,
   instanceStatePath,
   intEnv,
+  type KeychainBackend,
   keepAwakeSettingOf,
   keepAwakeValue,
   parseKeepAwakeState,
@@ -81,6 +82,8 @@ import { defaultUi, padTo, statusName, visibleWidth, type Ui } from "./ui.js";
 import { envPaths, readInstanceId } from "./instance.js";
 import { securityPresence } from "./keychain.js";
 import { MIGRATE_SCOPE_COMMAND, sharedScopeStatus } from "./secrets.js";
+import { connectionDoctorRows } from "./connection-check.js";
+import { resolveSeedDir } from "./env.js";
 
 export interface Db {
   query(text: string, values?: unknown[]): Promise<{ rows: any[] }>;
@@ -138,6 +141,8 @@ export interface DoctorDeps {
   timeoutMs?: number;
   /** test seam: the Keychain presence probe the shared-scope row asks (default: `security` without -w, on darwin) — never a value */
   keychainProbe?: (service: string, account: string) => Promise<boolean>;
+  /** test seam: the Keychain a connection's check fills a command's granted secrets from (default: the login Keychain, on darwin) */
+  keychain?: KeychainBackend;
 }
 
 // ---- manifests ------------------------------------------------------------
@@ -1586,6 +1591,37 @@ export async function localModelRows(env: NodeJS.ProcessEnv, productDir: string,
 
 // ---- the whole report -------------------------------------------------------------
 
+/**
+ * One row per connection in `.metistry/connections/` — its `check()`, through
+ * the same pool the console uses, so a secret still goes only where its
+ * policy says. A cold `npx -y …` downloads before it answers, so the dial gets
+ * its own timeout (`METISTRY_CONNECTION_CHECK_TIMEOUT_MS`, default 15 s).
+ */
+export async function connectionRows(o: { instanceDir: string; productDir: string; env: NodeJS.ProcessEnv; platform: NodeJS.Platform; uid: number; exec: Exec; keychain?: KeychainBackend }): Promise<DoctorRow[]> {
+  let seedDir: string | undefined;
+  try {
+    seedDir = resolveSeedDir(o.productDir);
+  } catch {
+    seedDir = undefined;
+  }
+  try {
+    return await connectionDoctorRows({
+      instanceDir: o.instanceDir,
+      instanceId: await readInstanceId(o.instanceDir).catch(() => undefined),
+      ...(seedDir ? { seedDir } : {}),
+      env: o.env,
+      platform: o.platform,
+      uid: o.uid,
+      exec: o.exec,
+      ...(o.keychain ? { keychain: o.keychain } : {}),
+      timeoutMs: intEnv("METISTRY_CONNECTION_CHECK_TIMEOUT_MS", 15_000, o.env),
+      out: () => undefined,
+    });
+  } catch (err) {
+    return [{ kind: "connection", name: "connections", status: "degraded", latency_ms: 0, probe: "read .metistry/connections/", remediation: err instanceof Error ? err.message : String(err) }];
+  }
+}
+
 export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
   // a COPY: doctor is read-only, and applying this instance's port block to
   // the real process environment would leak into whatever ran it
@@ -1635,7 +1671,7 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
   // model servers. Concurrently it is the slowest single probe. Nothing about
   // any one check changes — no timeout was shortened to buy this, because a
   // slow-but-healthy bridge reported as down would be a worse table.
-  const [componentRows, registries, layout, inbox, profile, cli, dbAndSchedules, launchd, keepAwake, supervisor, containers, localModels, sharedScope, vaultSync] = await Promise.all([
+  const [componentRows, registries, layout, inbox, profile, cli, dbAndSchedules, launchd, keepAwake, supervisor, containers, localModels, sharedScope, vaultSync, connections] = await Promise.all([
     (async () => Promise.all((await walkManifests(deps.productDir)).map((m) => componentRow(m, { env, fetchFn, timeoutMs, shape, labelSuffix, compute }))))(),
     // the registries over product + extensions: overlays and skips (plan §2.7)
     registriesRow(deps.productDir, env),
@@ -1678,8 +1714,12 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
     // the vault's sync: ahead, behind, last push, conflict (§2.21) — never
     // `failed`, since commits are safe locally whatever the remote does
     vaultSyncRow({ env, shape, fetchFn, timeoutMs }),
+    // each connection's own check() (plan §2.6): dialled, listed, compared
+    // with its file — never `failed` here either, since a connection is
+    // someone else's server (docs/ops/connections.md)
+    env.METISTRY_INSTANCE_DIR ? connectionRows({ instanceDir, productDir: deps.productDir, env, platform, uid, exec, ...(deps.keychain ? { keychain: deps.keychain } : {}) }) : Promise.resolve([]),
   ]);
-  rows.push(...componentRows, registries, layout, inbox, ...(profile ? [profile] : []), cli, ...dbAndSchedules, ...launchd, ...(keepAwake ? [keepAwake] : []), ...supervisor, ...containers, ...localModels, ...(sharedScope ? [sharedScope] : []), vaultSync);
+  rows.push(...componentRows, registries, layout, inbox, ...(profile ? [profile] : []), cli, ...dbAndSchedules, ...launchd, ...(keepAwake ? [keepAwake] : []), ...supervisor, ...containers, ...localModels, ...(sharedScope ? [sharedScope] : []), vaultSync, ...connections);
 
   return { as_of: new Date().toISOString(), product_dir: deps.productDir, shape, ok: !rows.some((r) => r.status === "failed"), rows };
 }

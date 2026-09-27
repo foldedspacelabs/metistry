@@ -30,50 +30,50 @@ Generated from `docs/product/design-build-plan.md` by `ops/scripts/tickets.mjs`.
 
 ## W1 — 44 tickets, 119.5 agent-days
 
-- [ ] [T1-1](t1/t1-1.md) · `work.description` · M · opus · after F-6
-- [ ] [T1-2](t1/t1-2.md) · The board query · M · opus
-- [ ] [T1-3](t1/t1-3.md) · The activity query · M · opus · after T1-4
-- [ ] [T1-6](t1/t1-6.md) · Knowledge reads · M · opus
-- [ ] [T1-7](t1/t1-7.md) · The Needs You count · S · sonnet · after F-1
-- [ ] [T1-8](t1/t1-8.md) · Groups and sources · M · opus · after F-6
-- [ ] [T1-9](t1/t1-9.md) · Today's order · S · sonnet · after F-6
-- [ ] [T1-11](t1/t1-11.md) · The session archive table · S · sonnet · after F-6
-- [ ] [T1-12](t1/t1-12.md) · Prose feedback · S · sonnet · after F-6
-- [ ] [T1-14](t1/t1-14.md) · Areas · S · sonnet
-- [ ] [T1-15](t1/t1-15.md) · Small queries · S · sonnet
-- [ ] [T2-1](t2/t2-1.md) · Captures from the apps · S · sonnet
-- [ ] [T2-2](t2/t2-2.md) · Access hardening · M · opus
-- [ ] [T2-4](t2/t2-4.md) · The Tick door · M · opus · after F-13
-- [ ] [T2-5](t2/t2-5.md) · The Defer door · M · opus · after T2-4
-- [ ] [T2-6](t2/t2-6.md) · The section operation · L · opus high
-- [ ] [T2-15](t2/t2-15.md) · C45, tested per door · M · opus
-- [ ] [T2-16](t2/t2-16.md) · Identity and the config record · M · opus
+- [x] [T1-1](t1/t1-1.md) · `work.description` · M · opus · after F-6
+- [x] [T1-2](t1/t1-2.md) · The board query · M · opus
+- [x] [T1-3](t1/t1-3.md) · The activity query · M · opus · after T1-4
+- [x] [T1-6](t1/t1-6.md) · Knowledge reads · M · opus
+- [x] [T1-7](t1/t1-7.md) · The Needs You count · S · sonnet · after F-1
+- [x] [T1-8](t1/t1-8.md) · Groups and sources · M · opus · after F-6
+- [x] [T1-9](t1/t1-9.md) · Today's order · S · sonnet · after F-6
+- [x] [T1-11](t1/t1-11.md) · The session archive table · S · sonnet · after F-6
+- [x] [T1-12](t1/t1-12.md) · Prose feedback · S · sonnet · after F-6
+- [x] [T1-14](t1/t1-14.md) · Areas · S · sonnet
+- [x] [T1-15](t1/t1-15.md) · Small queries · S · sonnet
+- [x] [T2-1](t2/t2-1.md) · Captures from the apps · S · sonnet
+- [x] [T2-2](t2/t2-2.md) · Access hardening · M · opus
+- [x] [T2-4](t2/t2-4.md) · The Tick door · M · opus · after F-13
+- [x] [T2-5](t2/t2-5.md) · The Defer door · M · opus · after T2-4
+- [x] [T2-6](t2/t2-6.md) · The section operation · L · opus high
+- [x] [T2-15](t2/t2-15.md) · C45, tested per door · M · opus
+- [x] [T2-16](t2/t2-16.md) · Identity and the config record · M · opus
 - [ ] [T2-17](t2/t2-17.md) · Turn progress and sessions · S · sonnet · after T1-11, T1-15
-- [ ] [T2-18](t2/t2-18.md) · Live events · L · opus high · after F-1, F-6
-- [ ] [T3-1](t3/t3-1.md) · The scheduler · L · opus high · after F-4
-- [ ] [T3-2](t3/t3-2.md) · The overlay · M · opus · after F-4, T3-1
-- [ ] [T3-4](t3/t3-4.md) · Profile facts and the standup move · M · opus · after F-4, T1-8
-- [ ] [T3-9](t3/t3-9.md) · Writing the session archive · M · opus · after T1-11
-- [ ] [T4-1](t4/t4-1.md) · Per-instance secrets · L · opus high · after F-3
-- [ ] [T4-2](t4/t4-2.md) · Egress guard and redaction · M · opus · after T4-1
-- [ ] [T4-3](t4/t4-3.md) · Migrating the shared scope · M · opus · after T4-1
-- [ ] [T4-4](t4/t4-4.md) · Variables · M · opus · after F-3
-- [ ] [T4-5](t4/t4-5.md) · Registries · L · opus high · after F-3
-- [ ] [T4-6](t4/t4-6.md) · Actors · L · opus high · after F-2
-- [ ] [T4-20](t4/t4-20.md) · Keep awake and the lid · M · opus
-- [ ] [T4-21](t4/t4-21.md) · Doctor for the Services pane · S · sonnet
-- [ ] [T5-1](t5/t5-1.md) · The stores · L · opus high · after F-7, F-12
-- [ ] [T5-2](t5/t5-2.md) · The shell · L · opus high · after F-7
-- [ ] [T5-3](t5/t5-3.md) · Shared components · L · opus high · after F-7
-- [ ] [T7-2](t7/t7-2.md) · The shell · L · opus high · after F-9
-- [ ] [T9-1](t9/t9-1.md) · Decisions, in shadow · M · opus · after F-8
-- [ ] [T10-1](t10/t10-1.md) · One commit per act · M · opus
-- [ ] [T10-3](t10/t10-3.md) · Integrate before pushing · L · opus high · after T10-1
-- [ ] [T10-2](t10/t10-2.md) · Sync policy and status · M · opus · after F-6
-- [ ] [X-2](x/x-2.md) · `hasDb` needs the scratch name · S · sonnet
-- [ ] [X-3](x/x-3.md) · A password test that a path can break · S · sonnet
-- [ ] [X-4](x/x-4.md) · PWA maskable icon and dark manifest colours · S · sonnet
-- [ ] [X-5](x/x-5.md) · The PWA reads F-5's table · M · opus · after F-5, F-14
+- [x] [T2-18](t2/t2-18.md) · Live events · L · opus high · after F-1, F-6
+- [x] [T3-1](t3/t3-1.md) · The scheduler · L · opus high · after F-4
+- [x] [T3-2](t3/t3-2.md) · The overlay · M · opus · after F-4, T3-1
+- [x] [T3-4](t3/t3-4.md) · Profile facts and the standup move · M · opus · after F-4, T1-8
+- [x] [T3-9](t3/t3-9.md) · Writing the session archive · M · opus · after T1-11
+- [x] [T4-1](t4/t4-1.md) · Per-instance secrets · L · opus high · after F-3
+- [x] [T4-2](t4/t4-2.md) · Egress guard and redaction · M · opus · after T4-1
+- [x] [T4-3](t4/t4-3.md) · Migrating the shared scope · M · opus · after T4-1
+- [x] [T4-4](t4/t4-4.md) · Variables · M · opus · after F-3
+- [x] [T4-5](t4/t4-5.md) · Registries · L · opus high · after F-3
+- [x] [T4-6](t4/t4-6.md) · Actors · L · opus high · after F-2
+- [x] [T4-20](t4/t4-20.md) · Keep awake and the lid · M · opus
+- [x] [T4-21](t4/t4-21.md) · Doctor for the Services pane · S · sonnet
+- [x] [T5-1](t5/t5-1.md) · The stores · L · opus high · after F-7, F-12
+- [x] [T5-2](t5/t5-2.md) · The shell · L · opus high · after F-7
+- [x] [T5-3](t5/t5-3.md) · Shared components · L · opus high · after F-7
+- [x] [T7-2](t7/t7-2.md) · The shell · L · opus high · after F-9
+- [x] [T9-1](t9/t9-1.md) · Decisions, in shadow · M · opus · after F-8
+- [x] [T10-1](t10/t10-1.md) · One commit per act · M · opus
+- [x] [T10-3](t10/t10-3.md) · Integrate before pushing · L · opus high · after T10-1
+- [x] [T10-2](t10/t10-2.md) · Sync policy and status · M · opus · after F-6
+- [x] [X-2](x/x-2.md) · `hasDb` needs the scratch name · S · sonnet
+- [x] [X-3](x/x-3.md) · A password test that a path can break · S · sonnet
+- [x] [X-4](x/x-4.md) · PWA maskable icon and dark manifest colours · S · sonnet
+- [x] [X-5](x/x-5.md) · The PWA reads F-5's table · M · opus · after F-5, F-14
 
 - [ ] **W1 checkpoint** — merged, main green, scratch-instance upgrade, conformance test, Mac smoke, release
 

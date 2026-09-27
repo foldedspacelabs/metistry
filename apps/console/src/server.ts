@@ -39,6 +39,7 @@ import { capabilitiesOf, type PublicIdentity } from "./identity.js";
 import { loadInstances } from "./instances.js";
 import { listSecrets, SECRETS_NOT_AVAILABLE, type SecretsView } from "./secrets-route.js";
 import { listVariables, VARIABLES_NOT_AVAILABLE, type VariablesView } from "./variables-route.js";
+import { VAULT_STATUS_NOT_AVAILABLE, VaultStatusUnavailable, type VaultStatusReader } from "./vault-status.js";
 import { NDJSON_CONTENT_TYPE, RUNS_EXPORT_QUERY, parseExportParams, streamRunsExport } from "./runs-export.js";
 import { consultRoute, route as routeMessage, servedKindOf, threadFactsOf, type RoutePolicy, type Rules } from "./router.js";
 import { sendToSession, storeSubscription, type PushConfig } from "./push.js";
@@ -139,6 +140,12 @@ export interface ConsoleConfig {
    * the route answers 503 (degrades: absent) and clients keep polling.
    */
   events?: EventHub | undefined;
+  /**
+   * `GET /api/vault/status` (vault-status.ts, plan §2.21): the reconciler's
+   * `GET /vault/status`, strictly parsed. Absent = no vault bridge, and the
+   * route answers 503.
+   */
+  vaultStatus?: VaultStatusReader | undefined;
 }
 
 // ----- since-cursors (docs/ops/client-api.md) -----
@@ -942,6 +949,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         key === "GET /api/instances" ||
         key === "GET /api/secrets" ||
         key === "GET /api/variables" ||
+        key === "GET /api/vault/status" ||
         key === "GET /api/commands" ||
         // the live-changes stream is the owner's alone: an agent learns what
         // changed through its own tools, and the capture token captures (§2.20)
@@ -1005,6 +1013,19 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         return sendJson(res, statusFor("invalid_request"), errorEnvelope("invalid_request", r.message));
       }
       return sendJson(res, 200, { variables: r.variables, as_of: new Date().toISOString() });
+    }
+
+    // ----- the vault's git (§2.21): where sync stands, read from the reconciler -----
+    // Read-only, owner-only. The policy itself is `metistry vault settings`
+    // on the Mac (M18) — history and the remote are not a route's to change.
+    if (key === "GET /api/vault/status") {
+      if (!cfg.vaultStatus) return sendError(res, "not_available", VAULT_STATUS_NOT_AVAILABLE);
+      try {
+        return sendJson(res, 200, await cfg.vaultStatus());
+      } catch (err) {
+        if (err instanceof VaultStatusUnavailable) return sendError(res, "not_available", err.message);
+        throw err;
+      }
     }
 
     // ----- the runs audit export (S5): NDJSON, streamed, through the named query -----

@@ -11,9 +11,10 @@ connections` (M13, `docs/ops/cli.md`); the read routes are `GET
 **This release dials MCP servers** — over Streamable HTTP or by starting a
 command (stdio). The other types have their own consumers and tickets: agent
 connections (targets, T4-11), tools generated for API, feed and files
-connections (T4-10), calendar, mail and tracker providers (T4-12…T4-15,
-T4-24). Asking the pool to dial one of those is refused `not_built`, naming
-where it arrives.
+connections (T4-10), calendar and mail providers (T4-12…T4-15). A
+**tracker** is read by its provider's sync — Linear is the first (T4-24,
+*Linear* below). Asking the pool to dial any of those is refused `not_built`,
+naming where it arrives.
 
 ## The file, read
 
@@ -69,7 +70,9 @@ would meet, **before any call is made**:
   an HTTP connection sends a secret to a host that is not on the secret's
   *Sent only to* list (the same refusal the egress door makes).
 
-*Used by* is what reads it today: the syncs in `scheduled.yaml` that name it.
+*Used by* is what reads it today: the syncs in `scheduled.yaml` that name it,
+and the sync its provider declares when that sync reads it (the rule *A sync
+reading its connection* below applies).
 Agents reach a connection through the lazy pair `connections_list` /
 `connections_call` and their grants (T4-8b); until then an empty list is the
 true answer (*Nobody yet*).
@@ -161,6 +164,78 @@ prints it; `metistry doctor` has one row per connection, and a connection
 never fails the install there — `failed` is reported as `degraded` with the
 check's own verdict in `meta.check_status`, because a connection is someone
 else's server.
+
+## A sync reading its connection
+
+A `calendar`, `mail` or `tracker` connection's provider is product code — a
+connection type whose `implementation` is `builtin` — and a sync (the
+collector the type names in `sync:`) reads it on an interval. What the sync
+opens is `openSyncHttp` (`packages/connections`, `sync.ts`):
+
+- **Which connection.** `scheduled.yaml`'s `syncs.<sync>.connection` when the
+  owner names one; otherwise the one `ok` connection whose provider declares
+  that sync — adding the connection is enough. Two and none named is refused
+  (`failed`, naming `syncs.<sync>.connection`) rather than one silently
+  winning; none at all is `absent`, and the sync writes nothing.
+- **Where it may go.** The connection's URL must be the provider's own origin
+  (Linear: `https://api.linear.app`) or the sync refuses it before anything is
+  sent. The `fetch` it hands the sync refuses any other origin and follows no
+  redirect (`other_host`), and every request goes through core's
+  `guardedFetch` with `connection:<name>` as the grantee — the same door the
+  pool uses: filled only for a host on the secret's *Sent only to* list, over
+  https, only when granted; everything that comes back redacted.
+- **Where a value comes from.** A sync runs in the console, which never reads
+  the Keychain. `metistry secrets sync --to env` delivers every secret a
+  sync-read connection lists as `METISTRY_SECRET_<NAME>` (as it delivers a
+  provider key to the engine, T4-18), and the sync's source reads it back.
+  Unlike the engine's provider key, the value is never put on a request by
+  its caller — the door fills it or refuses. Restart the console after the
+  sync so it holds the line.
+- **The owner's switches.** `syncs.<sync>.raise` in `scheduled.yaml`; a rule
+  the file does not mention takes the collector manifest's default.
+
+## Linear
+
+The first `tracker` provider (plan §2.6, §4 Q22): GraphQL at
+`https://api.linear.app/graphql`, a **personal API key** sent as
+`Authorization: <API_KEY>` — no `Bearer`, which Linear's OAuth tokens take.
+Capability `read` in this release; *Send to Linear* (`create`, T4-25) and
+*Close in Linear* (`complete`, T4-26) add theirs when they land.
+
+```sh
+metistry secrets set linear_api_key                    # the value on stdin
+metistry secrets hosts linear_api_key api.linear.app
+metistry secrets grant linear_api_key connection:linear on
+metistry connections add linear --type tracker --provider linear \
+  --url https://api.linear.app/graphql \
+  --auth api_key --auth-header Authorization --secret linear_api_key --no-discover
+metistry secrets sync --to env                         # delivers it to the console; restart the console
+```
+
+**The sync** (`collectors/linear/`, every 15 minutes) reconciles the open
+issues assigned to the key's own user into `work` — `external_ref
+linear:<KEY>`, kind `issue`, with `meta` naming the connection, state,
+priority and url — as `github-state` does for GitHub. An issue that leaves the
+list is looked up once by id and its row closed with `meta.closed_reason`
+(`completed`, `canceled`, `unassigned` or `gone`). The client sends read
+queries only: a document that is not a `query` operation is refused before it
+leaves (`not_a_query`).
+
+**Needs You.** With `syncs.linear.raise.assigned` on (the default), each
+assigned issue raises one `task` request — a mirror (T1-8): source `linear`,
+the issue's creator as the person, trust `external` (the words are Linear's).
+It clears as `resolved_at_source` when the issue is closed or given to someone
+else; if it comes back, it is raised again. One the owner answered is not
+raised again while the assignment lasts.
+
+**Add to Today** — the task request's primary answer — captures `- [ ] <title>
+do <today> linear:<KEY>` into `Inbox/` through the capture service
+(`addIssueToToday`, `collectors/linear/today.ts`): `inbox.source` `linear`,
+idempotent per issue (principal `tracker:linear`, key `linear:<KEY>`), so a
+second press returns the first capture and writes nothing. The title is the
+one the sync recorded, never text the caller sends; nothing writes the owner's
+own notes. *The console door that calls it is not built yet* — the frozen
+route table (plan §2.1) has no route for the `today` door.
 
 ## Decisions made here
 

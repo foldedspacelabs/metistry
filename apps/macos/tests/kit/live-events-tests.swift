@@ -180,7 +180,11 @@ func aDroppedStreamFallsBackToPollingAndRecovers() async throws {
     let untold = SectionModel(session: session, policy: .requests) { await $0.waitingCount().map { ($0, nil) } }
     await waiting.refresh()
     await untold.refresh()
-    let later = Date().addingTimeInterval(RefreshPolicy.requests.interval + 1)
+    // one poll interval after each section's own last attempt — never a date
+    // taken up front, which a slow runner can reach before the test does
+    func later(_ s: SectionModel<NeedsYouCount>) -> Date {
+        (s.section.lastAttemptAt ?? Date()).addingTimeInterval(RefreshPolicy.requests.interval + 1)
+    }
 
     // before the stream: both poll
     #expect(waiting.clock == .requests)
@@ -194,8 +198,8 @@ func aDroppedStreamFallsBackToPollingAndRecovers() async throws {
     // live: the section the stream speaks for waits to be told; one it does not speak for still polls
     #expect(waiting.clock == RefreshPolicy.requests.whileLive)
     #expect(untold.clock == .requests)
-    await waiting.refreshIfDue(now: later)
-    await untold.refreshIfDue(now: later)
+    await waiting.refreshIfDue(now: later(waiting))
+    await untold.refreshIfDue(now: later(untold))
     #expect(console.calls.count == 1, "only the section no event names asked on the clock")
 
     // the stream drops: polling resumes at once, on the section's own clock
@@ -203,7 +207,7 @@ func aDroppedStreamFallsBackToPollingAndRecovers() async throws {
     try await until { !session.events.isLive }
     console.reset()
     #expect(waiting.clock == .requests)
-    await waiting.refreshIfDue(now: later)
+    await waiting.refreshIfDue(now: later(waiting))
     #expect(console.calls.map(\.path) == ["/api/needs-you/count"])
 
     // it reopens from the console's cursor — the id of a stream that said nothing else
@@ -215,8 +219,8 @@ func aDroppedStreamFallsBackToPollingAndRecovers() async throws {
     try await until { session.events.isLive }
     #expect(waiting.isInvalidated, "a resume is not a resync: only what the replay names is due")
     console.reset()
-    await waiting.refreshIfDue(now: later)   // told
-    await waiting.refreshIfDue(now: later.addingTimeInterval(60))   // not told, not five minutes
+    await waiting.refreshIfDue()   // told
+    await waiting.refreshIfDue(now: later(waiting).addingTimeInterval(60))   // not told, not five minutes
     #expect(console.calls.map(\.path) == ["/api/needs-you/count"])
     session.events.stop()
 }

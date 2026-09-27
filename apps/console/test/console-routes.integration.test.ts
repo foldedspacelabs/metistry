@@ -73,6 +73,8 @@ describe.skipIf(!hasDb)("the console's compute, knowledge, commands and run-deta
   // else can have guessed and are counted by that name alone.
   const pageTag = `KpRoutes${mintToken(6).replaceAll(/[^A-Za-z0-9]/g, "")}`;
 
+  const HISTORY_SHA = "5".repeat(40);
+
   /** Search results the fake bridge hands back — one hit inside the vault, three the route must never pass on. */
   const BRIDGE_HITS: KnowledgeSearchResult = {
     q: "sleep",
@@ -132,6 +134,15 @@ describe.skipIf(!hasDb)("the console's compute, knowledge, commands and run-deta
       localOwner: { token: localOwnerToken, trusted: [] },
       computeAdmin,
       searchKnowledge: async (q, mode, limit) => ({ ...BRIDGE_HITS, q, mode: mode ?? "keyword", hits: BRIDGE_HITS.hits.slice(0, limit) }),
+      // The reconciler's /vault/log and /vault/show for one note (T10-4).
+      knowledgeHistory: {
+        log: async (path) => (path === "Areas/Health/sleep.md" ? [{ sha: HISTORY_SHA, author: "Metistry user", date: "2026-09-26T12:00:00Z", subject: "Start sleep", source: "user", runs: [], turns: [], path, change: "added" as const }] : []),
+        show: async (path, sha) => {
+          if (path !== "Areas/Health/sleep.md" || !HISTORY_SHA.startsWith(sha)) throw new VaultError("not_found", "no such version");
+          const content = Buffer.from("# Sleep\n\nfirst draft\n");
+          return { sha: HISTORY_SHA, author: "Metistry user", date: "2026-09-26T12:00:00Z", subject: "Start sleep", source: "user", runs: [], turns: [], path, content, sha256: "b".repeat(64), bytes: content.length };
+        },
+      },
       // A minimal VaultClient: only `read` is exercised here, and it answers
       // for one page. Every other path is "not there", which is what the
       // route must be indistinguishable from when it refuses one.
@@ -245,6 +256,8 @@ describe.skipIf(!hasDb)("the console's compute, knowledge, commands and run-deta
     "GET /api/knowledge/fold",
     "GET /api/knowledge/drafts",
     "GET /api/knowledge/areas",
+    "GET /api/knowledge/history?path=Areas/Health/sleep.md",
+    `GET /api/knowledge/version?path=Areas/Health/sleep.md&sha=${"5".repeat(40)}`,
     "GET /api/commands",
   ];
 
@@ -295,6 +308,10 @@ describe.skipIf(!hasDb)("the console's compute, knowledge, commands and run-deta
     expect((await get("/api/knowledge/pages", auth)).status).toBe(200);
     for (const door of ["fold", "drafts", "areas"]) expect((await get(`/api/knowledge/${door}`, auth)).status, door).toBe(200);
     expect((await get(`/api/runs/${turnRunId}`, auth)).status).toBe(200);
+    const history = await (await get("/api/knowledge/history?path=Areas/Health/sleep.md", auth)).json();
+    expect(history.commits).toEqual([expect.objectContaining({ sha: HISTORY_SHA, path: "Areas/Health/sleep.md", change: "added", source: "user" })]);
+    const version = await (await get(`/api/knowledge/version?path=Areas/Health/sleep.md&sha=${HISTORY_SHA.slice(0, 8)}`, auth)).json();
+    expect(version).toMatchObject({ path: "Areas/Health/sleep.md", sha: HISTORY_SHA, content: "# Sleep\n\nfirst draft\n" });
   });
 
   // ------------------------------------------------------------- GET /api/compute

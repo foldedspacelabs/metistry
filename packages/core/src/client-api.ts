@@ -250,8 +250,8 @@ export const CLIENT_API: readonly ClientRoute[] = [
   route("GET", "/api/knowledge/drafts", "the drafts waiting on the owner"),
   route("GET", "/api/knowledge/areas", "the per-area rollup"),
   planned("POST", "/api/knowledge/conflicts/resolve", "T2-10", "settle a conflicted file: keep one side", { conflict: ["stale"] }),
-  planned("GET", "/api/knowledge/history", "T10-4", "a file's commits"),
-  planned("GET", "/api/knowledge/version", "T10-4", "one file at one commit"),
+  route("GET", "/api/knowledge/history", "a file's commits"),
+  route("GET", "/api/knowledge/version", "one file at one commit"),
   planned("POST", "/api/knowledge/restore", "T10-5", "raise a Needs You request to restore a file; Approve restores as `user`", { conflict: ["stale"] }),
 
   // ----- the named queries -----

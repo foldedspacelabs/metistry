@@ -21,7 +21,7 @@
       "next_refused": null,
       "last_run": {
         "run_id": "8",
-        "at": "2026-09-27T04:18:49.512Z",
+        "at": "2026-09-27T19:30:28.763Z",
         "ok": true,
         "outcome": "silent",
         "cost_usd": null,
@@ -41,7 +41,12 @@
         },
         "origin": "default"
       },
-      "config": {},
+      "config": {
+        "template": {
+          "value": "Templates/Brief.md",
+          "origin": "default"
+        }
+      },
       "actor": null,
       "task": null,
       "grants": null,
@@ -63,7 +68,7 @@
     "history": [
       {
         "run_id": "8",
-        "at": "2026-09-27T04:18:49.512Z",
+        "at": "2026-09-27T19:30:28.763Z",
         "ok": true,
         "outcome": "silent",
         "cost_usd": null,
@@ -72,6 +77,6 @@
         "trigger": null
       }
     ],
-    "as_of": "2026-09-27T04:18:49.909Z"
+    "as_of": "2026-09-27T19:30:29.135Z"
   }
 }

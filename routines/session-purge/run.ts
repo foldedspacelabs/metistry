@@ -46,8 +46,8 @@ export const PREVIEW_SESSIONS = 50; // limit: fixed — a confirm dialog names s
 export interface SessionPurgeCtx extends RoutineCtx {
   /**
    * The routine's resolved Scheduled config (manifest ⊕ `.metistry/scheduled.yaml`,
-   * §2.5). Absent until the runner resolves configs (T3-2) — and then the
-   * default applies, which is the ruling.
+   * §2.5), handed on per run by the runner (T3-3). Absent — a caller that
+   * passes none — the default applies, which is the ruling.
    */
   config?: Record<string, unknown> | undefined;
 }

@@ -102,9 +102,9 @@ export interface StandupCtx extends PlanCtx {
   /**
    * The routine's resolved Scheduled config (manifest ⊕
    * `.metistry/scheduled.yaml`, §2.5): `template` and
-   * `skip_without_calendar_event`. Absent → the manifest's defaults, which is
-   * what every run gets until the runner hands config on (session-purge reads
-   * its own the same way).
+   * `skip_without_calendar_event`, handed on per run by the runner (T3-3).
+   * Absent → the manifest's defaults (session-purge reads its own the same
+   * way).
    */
   config?: Record<string, unknown> | undefined;
 }

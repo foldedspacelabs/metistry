@@ -89,6 +89,8 @@ Rules:
 | On · Ask · Off | create_session. Ask, 2 of 3 | radio group |
 | Offer switch | Offer to agents through Metistry, on | switch |
 
+*Note (W2 housekeeping):* the Usage gauge speaks C130's word — *37% of the day's spending limit*, not *budget* — and the per-tool row speaks the ruled **Allow · Ask First · Never**, not *On · Ask · Off*.
+
 ## 4. Motion, text and focus (C122)
 
 - **Reduce Motion:** stepped questions cross-fade; the Needs You row appears

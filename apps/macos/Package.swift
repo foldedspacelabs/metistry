@@ -56,9 +56,10 @@ let package = Package(
         // (the wire shape, the runtime precedence, the planned argument
         // arrays). The executable target is `@main` plus a Process wrapper.
         //
-        // `fixtures/` is the recorded client-API fixtures (F-7). The tests read
-        // them by `#filePath`, as the source scan reads `sources/`, so they are
+        // `fixtures/` is the recorded client-API fixtures (F-7) and `snapshots/`
+        // the shared components' baselines (T5-3). The tests read both by
+        // `#filePath`, as the source scan reads `sources/`, so they are
         // excluded rather than bundled.
-        .testTarget(name: "MetistryKitTests", dependencies: ["MetistryKit"], path: "tests/kit", exclude: ["fixtures"]),
+        .testTarget(name: "MetistryKitTests", dependencies: ["MetistryKit"], path: "tests/kit", exclude: ["fixtures", "snapshots"]),
     ]
 )

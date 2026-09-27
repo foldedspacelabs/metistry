@@ -289,8 +289,8 @@ export const CLIENT_API: readonly ClientRoute[] = [
   planned("POST", "/api/scheduled/syncs/:name/run", "T3-3", "run a sync now"),
 
   // ----- connections, secrets, variables, recordings: read-only here, every write is the CLI -----
-  planned("GET", "/api/connections", "T4-8a", "the connections: status, tools, used by"),
-  planned("GET", "/api/connections/:name", "T4-8a", "one connection"),
+  route("GET", "/api/connections", "the connections: status, reach, tools and modes, used by — names, never a value"),
+  route("GET", "/api/connections/:name", "one connection, with its file and its provider's unit"),
   route("GET", "/api/secrets", "secret names, hosts, grants, last used — never a value"),
   route("GET", "/api/variables", "the variables agents read — name, value, read by, used in"),
   planned("GET", "/api/recordings/:id", "T8-4", "one recording's retention state"),

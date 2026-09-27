@@ -145,7 +145,8 @@ asked with a passkey session — "The `local` gate" above), `not_found` 404, `co
 absent in this deployment — degrades: absent — never a permission), and
 `section_missing` 409 — the vault bridge's answer when the daily note's
 `metistry:day` markers are not exactly one clean pair (docs/ops/reconciler.md,
-"The section operation"); no console route answers it yet.
+"The section operation"), and Close the Day's (`POST /api/today/close`) when it
+finds them so.
 
 #### A refusal names the field that would permit it — except on the door
 
@@ -339,7 +340,7 @@ takes a `since` cursor and answers with the next one.
 | `POST /api/vault-tasks/:task_key/check` | owner | session · local_owner | key | stale | — | served | tick or untick one task line |
 | `POST /api/vault-tasks/:task_key/schedule` | owner | session · local_owner | key | stale | — | served | defer one task line: a `do` date or someday |
 | `POST /api/vault-tasks/:task_key/link` | owner | session · local_owner | no | stale | — | T4-25 | add one tracker ref to one task line |
-| `POST /api/today/close` | owner | session · local_owner | no | — | — | T2-8 | Close the Day: write the section, then plan tomorrow |
+| `POST /api/today/close` | owner | session · local_owner | no | stale | — | served | Close the Day: write the section, then plan tomorrow |
 | `POST /api/meetings/:event_id/note` | owner | session · local_owner | natural | — | — | T2-11 | the meeting note for one event; a second call returns the first |
 | `POST /api/calendar/events/:id/move` | owner | session · local_owner | no | — | — | T2-12 | move an event: preview, then confirm with a single-use token |
 | `POST /api/calendar/invitations/:id/respond` | owner | session · local_owner | no | — | — | T4-17 | answer an invitation through the connection that can |
@@ -2207,7 +2208,7 @@ PUT  /api/today/order                        T2-7 — the owner's order for the 
 POST /api/vault-tasks/:task_key/check        {checked, seen_text, path?}   Idempotency-Key   409 stale, with the current line
 POST /api/vault-tasks/:task_key/schedule     {do | someday, seen_text, path?}   Idempotency-Key   409 stale, with the current line
 POST /api/vault-tasks/:task_key/link         T4-25 — {ref}: one `linear:` (or `gh:`) ref onto one line   409 stale
-POST /api/today/close                        T2-8 — {day, line?}: Close the Day
+POST /api/today/close                        {day, line?}   409 stale · 409 section_missing, with the request's id
 ```
 
 **Tick and Defer** (§2.11) write through the vault bridge as `user`, with the
@@ -2314,6 +2315,69 @@ word. What differs is the one edit, core's `setTaskScheduled`:
   bulk-only and belongs to Needs You (K2).
 - **Finding them again:** the filter vocabulary's `someday` flag
   (`where: "someday"`) — `vault_tasks.someday`, written by the walk.
+
+#### Close the Day — `POST /api/today/close` (T2-8)
+
+```
+POST /api/today/close
+{"day": "2026-09-28", "line": "Store interface frozen; recorder next."}
+
+200 {"ok": true, "day": "2026-09-28", "path": "Journal/2026-09-28.md", "appended": false,
+     "closed_at": "2026-09-28T21:14:03.000Z", "done": 6, "moved": {"2026-09-29": 3, "2026-10-02": 1, "someday": 1},
+     "line": "Store interface frozen; recorder next.",
+     "plan": {"enqueued": true, "routine": "plan-tomorrow"}}
+409 {"error": {"code": "section_missing", …}, "reason": "unpaired", "at_line": 14,
+     "day", "path", "request_id": 4121, "plan": {"enqueued": true, "routine": "plan-tomorrow"}}
+409 {"error": {"code": "conflict", …}, "reason": "stale", "today": "2026-09-29"}
+404 {"error": {"code": "not_found", …}, "day", "path", "plan": {…}}
+```
+
+- **What it writes.** The daily note's `metistry:day` section, through the
+  reconciler's section operation (`POST /vault/section`) as `user` — the
+  only way into that region, and a door that cannot touch a byte outside it.
+  The body is written whole on every close, so closing again replaces it:
+  `Closed at 5:14 PM · 6 done · 5 moved`, the owner's line
+  (`**For tomorrow:** …`), then **Done** and **Moved** (`- <text> → <day or
+  someday> · [[<note>]]`). Plain bullets, never a checkbox, so the walk finds
+  no task in it. A note with no section yet gets `## Today · Metistry` and the
+  markers appended at its end (`appended: true`); the seeded
+  `Templates/Daily.md` places them.
+- **Where the facts come from.** The named query `day_close`
+  (`expose: route`): **done** is every line the index saw ticked that day
+  (`done_on`) plus the Tick door's own record of the day, so a tick made a
+  moment before the close counts; the latest act per line wins (a tick then
+  Undo is not done). **Moved** is the Defer door's record of the day and
+  where it sent each line — a deferral typed by hand in Obsidian is the
+  owner's own edit and is not reported back. The day is counted in
+  `METISTRY_TZ`, as the doors stamp their dates. `done` and `moved` in the
+  answer are the fold line's numbers.
+- **Then `plan-tomorrow` is enqueued** with the day closed (`closedDay`) and
+  the answer returns — the plan renders in the background, one pass at a
+  time, recorded as a `routine_run` with `meta.trigger: "close"`. A close
+  always renders tomorrow's plan, so closing twice renders it twice, and the
+  11:00 PM run supersedes an early render (docs/ops/automation.md). Every
+  other guard of the routine holds. `plan.enqueued: false`, with a
+  `reason`, where the console has no `plan-tomorrow` loaded.
+- **Markers missing** — deleted, doubled, one alone, quoted in a code block,
+  the heading left without them — is `409 section_missing` with the scan's
+  `reason` and line (`at_line`), and **nothing is written into the note**.
+  One `note` request (stored kind `knowledge`, from `console`) says the
+  section could not be found and shows what would have been written; closing
+  again while it is still open points at the same `request_id`. The close
+  still completes: the plan is enqueued. A client shows the request, never a
+  success.
+- **`day`** is the day Today was drawn for, and must be today in
+  `METISTRY_TZ`: a page left open past midnight is `409 stale` with `today`,
+  and nothing is written or enqueued. **`line`** is optional, one line, at
+  most 500 characters, trimmed; empty or `null` is none.
+- **No `Journal/<day>.md`** is `404`: the door never creates the owner's
+  note (apply `Templates/Daily.md`, then close again). The plan is still
+  enqueued. An owner's edit outside the section between the door's read and
+  its write is read again once, then `409 stale`.
+- **Who**: the owner — an agent bearer and the capture owner token get the
+  management gate's uniform `403`, no credential the uniform `401`. Not an
+  action: no proposal can close the day. **`503`** with no vault bridge
+  (`METISTRY_RECONCILER_URL`).
 
 ### Calendar and mail — through the connection that can
 

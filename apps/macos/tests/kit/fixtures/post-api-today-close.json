@@ -1,13 +1,12 @@
 {
   "route": "POST /api/today/close",
-  "source": "contract",
-  "ticket": "T2-8",
-  "note": "markers missing is a note request and no write (§2.13): 409 with reason and the request's id",
+  "source": "recorded",
+  "ticket": null,
   "request": {
     "method": "POST",
     "path": "/api/today/close",
     "body": {
-      "day": "2026-09-28",
+      "day": "2026-09-27",
       "line": "Store interface frozen; recorder next."
     },
     "idempotency_key": null
@@ -15,8 +14,15 @@
   "status": 200,
   "body": {
     "ok": true,
-    "day": "2026-09-28",
-    "path": "Journal/2026-09-28.md",
+    "day": "2026-09-27",
+    "path": "Journal/2026-09-27.md",
+    "appended": false,
+    "closed_at": "2026-09-27T04:18:17.665Z",
+    "done": 1,
+    "moved": {
+      "2026-09-30": 1
+    },
+    "line": "Store interface frozen; recorder next.",
     "plan": {
       "enqueued": true,
       "routine": "plan-tomorrow"

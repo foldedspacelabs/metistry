@@ -1863,21 +1863,20 @@ $("feed-project").onchange = () => { resetFeed(); loadFeed().catch(() => {}); };
 // snaps back carrying the server's own message. Every drop maps to exactly
 // ONE route, so "what did that drag do" has one answer in the `runs` ledger.
 
-// The six columns in board order, each with the sentence its predicate means
+// The five columns in board order, each with the sentence its predicate means
 // (P10: Title Case names things). The order here must match board.yaml's.
 //
-// "Addressed to" is the label ruled 2026-09-17, in the owner's own words:
-// `work.owner` is informational — a name on the card, not a lease — and
-// "Assigned" read like a claim the row had not made. The KEY stays `assigned`
-// (board.yaml's derived value, every drop's route, the `runs` ledger): this is
-// a rename of what the user reads, not of what the service stores.
+// Every label is the word its KEY says (T1-2; C2, C38, C39): `assigned` is
+// Assigned and `blocked` is Blocked, because a label that disagrees with its
+// own value is a bug waiting for someone to fix the wrong side of it — and
+// "Needs You" is the request queue's name, not a column's. Reported is not a
+// column: whether a report came back is the `reported` flag on a Done card.
 const BOARD_COLUMNS = [
-  ["backlog", "Backlog", "open, addressed to no one"],
-  ["assigned", "Addressed to", "someone's name on it, not started"],
+  ["backlog", "Backlog", "open, nobody's name on it"],
+  ["assigned", "Assigned", "someone's name on it, not started"],
   ["in_progress", "In Progress", "an agent holds the lease"],
-  ["needs_you", "Needs You", "blocked — nothing but your hand moves it"],
-  ["done", "Done", "closed, no report came back"],
-  ["reported", "Reported", "closed, and a report landed"],
+  ["blocked", "Blocked", "nothing but your hand moves it"],
+  ["done", "Done", "closed — and whether a report came back"],
 ];
 const BOARD_LABEL = new Map(BOARD_COLUMNS.map(([key, label]) => [key, label]));
 const BOARD_LIMIT = 50; // per column — board.yaml's default, named here so the header can say "showing N of M"
@@ -1905,14 +1904,19 @@ function escalationLabel(c) {
 function boardCardHtml(c) {
   const bits = [c.claimed_by ? `held by ${c.claimed_by}` : c.owner ? `for ${c.owner}` : "unclaimed", `${fmtAge(c.age_hours)} old`];
   if (c.kind === "review") bits.push("review bundle");
-  if (c.last_report_at) bits.push(`reported ${relTime(c.last_report_at)}`);
+  // `reported` is the Done column's facet (C39): a closed card whose agent
+  // reported back says so; an open one with a report just says when
+  if (c.last_report_at) bits.push(`${c.reported ? "reported" : "last report"} ${relTime(c.last_report_at)}`);
+  // blocked-by (board.yaml, from day_work): surfaced, never a gate — the
+  // text of the owner's own todo line, only while that line is still open
+  if (c.blocked_by_task_open && c.blocked_by_task) bits.push(`waiting on you: ${c.blocked_by_task}`);
   // A closed card has nowhere to go — `update()` refuses a row that is
   // already closed — so it gets no grab affordance rather than a dead one.
   const movable = Object.keys(dropsFor(c)).length > 0;
   const label = `${c.title} — ${BOARD_LABEL.get(String(c.column)) ?? c.column}${movable ? ", press m to move it" : ""}`;
   return `<li class="card${c.escalated ? " escalated" : ""}${c.has_thread ? " linked" : ""}" data-card="${esc(c.id)}"${movable ? ` draggable="true"` : ""} tabindex="0" role="button" aria-label="${esc(label)}">
     <div class="row"><span class="card-title">${esc(c.title)}</span><span class="muted">#${esc(c.id)}</span></div>
-    <div class="muted">${esc(bits.join(" · "))}${c.has_thread ? ` <span class="chip">room</span>` : ""}${c.escalated ? ` <span class="chip failed">${esc(escalationLabel(c))}</span>` : ""}</div></li>`;
+    <div class="muted">${esc(bits.join(" · "))}${c.has_thread ? ` <span class="chip">room ${esc(asNum(c.thread_count))}</span>` : ""}${c.escalated ? ` <span class="chip failed">${esc(escalationLabel(c))}</span>` : ""}</div></li>`;
 }
 
 // ----- the drags: which drop does what (docs/ops/board.md "Drags") -----
@@ -1926,8 +1930,9 @@ const boardHome = (c) => (c.owner ? "assigned" : "backlog");
 /**
  * The legal drops for ONE card: `{ targetColumn: op }`. Derived from the same
  * rules the statements in packages/tasks enforce, so the board offers no drop
- * the service would refuse. `reported` never appears — nothing you can drag
- * makes a report exist — and a closed card has no drops at all.
+ * the service would refuse. A closed card has no drops at all — and with
+ * Reported a flag on Done rather than a column, nothing a drag could reach
+ * needs a report to exist.
  */
 function dropsFor(c) {
   const d = {};
@@ -1935,15 +1940,15 @@ function dropsFor(c) {
   if (c.column === "backlog") { d.assigned = "assign"; d.in_progress = "claim"; }
   else if (c.column === "assigned") { d.backlog = "unassign"; d.in_progress = "claim"; }
   else if (c.column === "in_progress") { d[boardHome(c)] = "release"; }   // never orphaned — Hermes's `reclaimed`, which we already had
-  else if (c.column === "needs_you") { d[boardHome(c)] = "unblock"; }     // the one route back to `open`
+  else if (c.column === "blocked") { d[boardHome(c)] = "unblock"; }       // the one route back to `open`
   d.done = "close"; // offered from every open column; the SERVICE decides from the current status and a refusal is shown
   return d;
 }
 
 // One op, one route. Anything that needs two calls is not a drop.
 const DROP_WHAT = {
-  assign: "address it to a crew",
-  unassign: "clear the addressee",
+  assign: "assign it to a crew",
+  unassign: "clear the assignee",
   claim: "claim it as you",
   release: "hand it back — release the lease",
   unblock: "unblock it — the one route back to open",
@@ -2077,6 +2082,8 @@ function openCard(c) {
     ["owner", c.owner ?? "nobody — it is in the open queue"],
     ["lease", lease],
     ["external ref", c.external_ref ?? "none"],
+    ...(c.blocked_by ? [["waiting on", c.blocked_by_task ? `${c.blocked_by_task}${c.blocked_by_task_open ? "" : " (done)"}` : c.blocked_by]] : []),
+    ...(c.reported ? [["report", `came back ${relTime(c.last_report_at)}`]] : []),
     ["last activity", c.updated_at ? relTime(c.updated_at) : "unknown"],
   ];
   $("board-detail-fields").innerHTML = fields.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(String(v))}</dd>`).join("");

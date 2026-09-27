@@ -26,7 +26,7 @@ path — §4.7 — changed by your hand only; the assistant cannot write it).
 name: researcher            # = the filename, lowercase kebab-case
 type: agent
 area: example               # = the directory (optional; filled from the path)
-model: haiku                # haiku | sonnet | opus
+model: lmstudio/gemma       # <provider>/<model-id>, or same_as_assistant
 effort: low                 # low | medium | high (default low) — the other half of the tier
 description: Reads the granted notes and reports what it finds   # the assistant's roster line (H8)
 uses: [knowledge, requests]        # tool GROUPS, see below
@@ -44,6 +44,17 @@ autonomy:                   # optional (§4.21); absent = defaults apply, never 
 
 You are a researcher working for {{name}}, this instance's assistant. …
 ```
+
+`model` names what the crew runs on, in its own definition (C128, T4-6): a
+model from `compute.yaml`'s providers as `<provider>/<model-id>` — the same
+pinned reference `compute.yaml` uses everywhere — or `same_as_assistant`, the
+assistant's **default tier** (`assignments.default`, its model and its effort;
+never the router). The pre-C128 aliases `haiku | sonnet | opus` still load for
+one release: they run on `assignments.crews.<name>` when that is set, and on
+the default tier when it is not — exactly where they ran before. After that
+release doctor warns. `metistry agents define <name> --model …` edits it
+([cli.md](cli.md)); what each form resolves to is [actors.md](actors.md),
+*Crew compute*.
 
 `model` and `effort` together are the crew's **tier** — the same (model,
 effort) pair the router picks for a chat turn (`docs/ops/assistant-tools.md`).

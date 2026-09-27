@@ -700,9 +700,12 @@ Five rules, enforced by the shape of the system rather than by prompting
 2. **No tool calls an engine.** There is no "run this on provider X" tool —
    invariant 9 by absence. The factory is called by the drain, never from
    inside a turn.
-3. **A crew follows its own provider**, `assignments.crews.<name>`, not the
-   assistant's. Crews never call each other: work moves as `work` rows and
-   results come back as reports.
+3. **A crew follows its own provider**, not the assistant's — since T4-6 the
+   one its definition names (`model: <provider>/<model-id>`, C128), or the
+   assistant's default tier (`same_as_assistant`); a legacy `haiku | sonnet |
+   opus` still reads `assignments.crews.<name>` for one release
+   (`resolveCrewAssignment`, docs/ops/actors.md). Crews never call each other:
+   work moves as `work` rows and results come back as reports.
 4. **Scoping work is collaboration; naming the worker is triggering it.** A
    turn may create *unassigned* work any agent can claim. A **directed**
    `agents_delegate` to a crew whose engine kind differs from the caller's is

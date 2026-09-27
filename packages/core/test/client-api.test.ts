@@ -194,8 +194,8 @@ describe("matchRoute", () => {
 describe("noRouteMessage", () => {
   it("names the served routes beside a misspelt one", () => {
     const m = noRouteMessage("GET", "/api/knowledge/backlinks");
-    for (const door of ["GET /api/knowledge/search", "GET /api/knowledge/page", "GET /api/knowledge/pages", "GET /api/knowledge/links", "GET /api/knowledge/fold", "GET /api/knowledge/drafts", "GET /api/knowledge/areas", "GET /api/knowledge/history", "GET /api/knowledge/version", "POST /api/knowledge/restore"]) expect(m).toContain(door);
-    expect(m).not.toContain("/api/knowledge/conflicts/resolve"); // frozen ahead of T2-10, not served — never offered
+    for (const door of ["GET /api/knowledge/search", "GET /api/knowledge/page", "GET /api/knowledge/pages", "GET /api/knowledge/links", "GET /api/knowledge/fold", "GET /api/knowledge/drafts", "GET /api/knowledge/areas", "GET /api/knowledge/history", "GET /api/knowledge/version", "POST /api/knowledge/restore", "POST /api/knowledge/conflicts/resolve"]) expect(m).toContain(door);
+    expect(m).not.toContain("/api/today"); // another family's, and frozen ahead of T2-7 — never offered here
   });
 
   it("offers the other method when the path is right", () => {

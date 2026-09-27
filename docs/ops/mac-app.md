@@ -869,6 +869,10 @@ apps/macos/
                        the shared components every screen draws with (T5-3,
                        "Shared components") — each a presentation value, then
                        a view that only draws it
+  sources/kit/request-bodies/
+                       one Needs You request as a card, and a meeting's parts
+                       as one — its reading, its answers, their refusals
+                       (T5-4b, "Needs You: the bodies")
   sources/app/         the Metistry executable: @main and the six scenes
                        (window, Settings, log window, Status, Keyboard
                        Shortcuts, MenuBarExtra), the menus, the Dock badge, Sparkle,
@@ -973,6 +977,46 @@ METISTRY_RECORD_SNAPSHOTS=1 swift test --package-path apps/macos --filter Snapsh
 # to look at every drawing
 METISTRY_SNAPSHOT_PNG_DIR=/tmp/shots swift test --package-path apps/macos --filter Grows
 ```
+
+## Needs You: the bodies
+
+`sources/kit/request-bodies/` draws one request as screen 3 §12.2's five parts
+— header · the ask · context · one body · answers — and a meeting's parts as
+one card (T5-4b). Three rules carry it:
+
+- **The reading is the server's.** Each `GET /api/proposals` row carries
+  `request` — core's `describeRequest`: the type, the word, the body block,
+  the three answers and what each sends (X-5). The card draws that and keeps
+  no kind → word map; a row without one reads as core's unknown kind, a report
+  with Dismiss. `RequestReading` fills the block from `payload.body` when a
+  producer sends it and otherwise from the fields each producer writes (named
+  in the file), and says *partial* — never invents — when it cannot.
+- **An answer is to the row that was shown.** A decision goes through
+  `POST /api/proposals/:id` with `if_unchanged.seen_at`. `409 stale` sends
+  nothing and repaints from the row the refusal carries (its `changed_at` is
+  what the next answer claims); `409 already_decided` shows the winner; any
+  other refusal is shown verbatim and the card stays answerable (C40, C45); O3
+  holds a decision before it is sent and keeps the draft. An answer that posts
+  to another system is a door (`RequestDoorHandling`) — none is wired in this
+  build, and each such control says so.
+- **A meeting's two verbs wait for Undo, then go one by one.** Accept All and
+  Decline All are held ten seconds (client-held — there is no verb that takes
+  an answer back), then sent one per part in order; the result counts (*4 of 5
+  accepted*) and says why, and Try Again resends only what was never applied.
+
+The list hosts it (T5-4a): `RequestCards.card(for:)` keeps one
+`RequestAnswering` per request, which the detail draws as `RequestCardView` and
+whose `itemActions` are the selection's Approve · Revise · Decline · Later in
+the Item menu — so the menu and the button act on the same card.
+
+Questions step one at a time and end on Your Answers; one question sends on
+the choice. Access Revise composes `<asked>/<folder>`, so it cannot name a
+wider area (C40), and the receipt states the tier trade from `prior_tier`
+(C41). The cards are snapshotted with the shared components
+(`tests/kit/snapshots/request-card.txt`, `meeting-card.txt`) and walked by the
+accessibility probe; a SwiftUI text field on the Mac does not carry its
+`.accessibilityLabel` onto the AppKit field (macOS 26.4), so each field is held
+to a prompt that names it instead.
 
 ## Build and run it
 

@@ -441,6 +441,14 @@ The routine's own row carries `brief_for`, `outcome` (`acted`, or
 `next_up` (meetings listed, or null when the calendar could not be asked),
 `prose_slots` and `inbound_id`. Only a write settles a morning.
 
+A template it cannot use — `template_missing` or `template_unreadable` —
+also raises **one** `report` request naming the file (`payload.template_issue
+{path, reason}`), deduped per template while one is pending, so a vault
+without `Templates/Brief.md` is asked once rather than skipped silently every
+morning; `metistry update` re-seeds a seed template the vault lacks, and
+`metistry doctor`'s schedule row for the routine is degraded while its last
+run says `skipped:template_missing`.
+
 ```sql
 SELECT ts, meta->>'brief_for' AS for_day, meta->>'outcome' AS outcome,
        meta->>'day_section' AS section, meta->>'prose_slots' AS slots

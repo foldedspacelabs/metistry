@@ -126,6 +126,9 @@ function fakeDb() {
       if (text.includes("FROM proposals") && text.includes("day_section")) {
         return { rows: pendingNotes.filter((p: any) => p.day_section?.path === values[1]).map(() => ({ "?column?": 1 })) };
       }
+      if (text.includes("FROM proposals") && text.includes("template_issue")) {
+        return { rows: pendingNotes.filter((p: any) => p.template_issue?.path === values[1]).map(() => ({ "?column?": 1 })) };
+      }
       if (text.includes("INSERT INTO proposals")) {
         pendingNotes.push(JSON.parse(String(values[1])));
         return { rows: [] };
@@ -396,6 +399,30 @@ describe("morning-brief: its own file, as source: morning-brief", () => {
     expect(vault.writes).toEqual([]);
     expect(db.rows()).toEqual([expect.objectContaining({ outcome: "skipped:template_missing" })]);
     await expect(run(fakeDb(), ctxWith(seededVault(), { config: { template: 7 } }))).rejects.toThrow(/nothing was written/);
+  });
+
+  it("a missing template raises ONE report request naming it and the fix — the same request an unreadable one raises, deduped per template (W2 checkpoint D1)", async () => {
+    const db = fakeDb();
+    await run(db, ctxWith(seededVault({ [DEFAULT_TEMPLATE]: undefined })));
+    expect(db.proposals()).toEqual([
+      expect.objectContaining({
+        title: expect.stringContaining(`${DEFAULT_TEMPLATE} is not in the vault`),
+        summary: expect.stringContaining("`metistry update` re-seeds the templates a vault lacks"),
+        refs: [DEFAULT_TEMPLATE],
+        template_issue: { path: DEFAULT_TEMPLATE, reason: "template_missing" },
+      }),
+    ]);
+    const report = db.calls.find((c) => c.text.includes("INSERT INTO proposals"));
+    expect(report?.text).toContain("'report'");
+    // the next morning, while that one waits: asked once, not every day
+    await run(db, ctxWith(seededVault({ [DEFAULT_TEMPLATE]: undefined }), { now: new Date("2026-09-29T11:00:00Z"), scheduledFor: new Date("2026-09-29T11:00:00Z") }));
+    expect(db.rows().map((r) => r.outcome)).toEqual(["skipped:template_missing", "skipped:template_missing"]);
+    expect(db.proposals()).toHaveLength(1);
+    // an unreadable template is the same request, its own reason, keyed on its own path
+    const other = fakeDb();
+    await run(other, ctxWith(seededVault({ [DEFAULT_TEMPLATE]: "bad \u0000 bytes" })));
+    expect(other.rows()).toEqual([expect.objectContaining({ outcome: "skipped:template_unreadable" })]);
+    expect(other.proposals()).toEqual([expect.objectContaining({ title: expect.stringContaining("could not be read"), template_issue: { path: DEFAULT_TEMPLATE, reason: "template_unreadable" } })]);
   });
 
   it("the chat message opens with the file (C97: the message links there)", async () => {

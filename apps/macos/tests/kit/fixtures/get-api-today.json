@@ -1,8 +1,7 @@
 {
   "route": "GET /api/today",
-  "source": "contract",
-  "ticket": "T2-7",
-  "note": "tasks: vault_tasks_query rows (today's preset); work: day_work rows; order: today_order keys (task_key or work:<id>); events: day_events rows; brief/standup/plan: vault paths, null when not written yet",
+  "source": "recorded",
+  "ticket": null,
   "request": {
     "method": "GET",
     "path": "/api/today?date=2026-09-28",
@@ -17,12 +16,13 @@
         "path": "Journal/2026-09-28.md",
         "task_key": "mt-7f3k2a",
         "anchor": "mt-7f3k2a",
-        "line_no": 12,
+        "line_no": 3,
         "text": "Send Dana the fixture format",
         "text_norm": "send dana the fixture format",
         "checked": false,
         "dropped": false,
         "waiting": false,
+        "someday": false,
         "due": "2026-09-28",
         "scheduled_for": null,
         "start_on": null,
@@ -41,58 +41,86 @@
         "work_id": null,
         "work_title": null,
         "work_status": null,
-        "blocks_work_id": null,
-        "blocks_work_title": null,
-        "blocks_work_status": null,
+        "blocks_work_id": "41",
+        "blocks_work_title": "Pick the fixture redaction",
+        "blocks_work_status": "blocked",
         "duplicate_of": null,
         "places": 1,
         "parse_warning": null,
         "parsed_on": "2026-09-28",
         "first_seen_on": "2026-09-25",
-        "last_seen_at": "2026-09-28T12:58:01.000Z",
+        "last_seen_at": "2026-09-27T18:43:42.022Z",
         "age_days": 3,
-        "carried_days": 0,
+        "carried_days": null,
         "row_flags": [
-          "due"
+          "blocking_agent",
+          "assigned_to_me"
         ]
       }
     ],
     "work": [
       {
-        "id": "214",
-        "title": "Freeze the store interface",
+        "id": "41",
+        "title": "Pick the fixture redaction",
         "kind": "task",
-        "status": "in_progress",
+        "status": "blocked",
         "project": "metistry",
         "area": null,
         "owner": null,
-        "claimed_by": "user",
-        "lease_expires_at": "2026-09-28T15:00:00.000Z",
+        "claimed_by": null,
+        "lease_expires_at": null,
+        "external_ref": null,
+        "due": null,
+        "closed_at": null,
+        "updated_at": "2026-09-27T18:43:42.023Z",
+        "created_at": "2026-09-27T18:43:42.023Z",
+        "blocked_by": "vault:Journal/2026-09-28.md#^mt-7f3k2a",
+        "blocked_by_path": "Journal/2026-09-28.md",
+        "blocked_by_anchor": "mt-7f3k2a",
+        "blocked_by_task": "Send Dana the fixture format",
+        "blocked_by_task_open": true,
+        "row_flags": [
+          "waiting_on_me",
+          "blocked",
+          "open",
+          "unclaimed"
+        ]
+      },
+      {
+        "id": "1",
+        "title": "Freeze the store interface (F-7)",
+        "kind": "task",
+        "status": "open",
+        "project": "metistry",
+        "area": null,
+        "owner": null,
+        "claimed_by": null,
+        "lease_expires_at": null,
         "external_ref": null,
         "due": "2026-09-28",
         "closed_at": null,
-        "updated_at": "2026-09-28T12:40:00.000Z",
-        "created_at": "2026-09-25T09:00:00.000Z",
+        "updated_at": "2026-09-27T18:43:42.200Z",
+        "created_at": "2026-09-27T18:43:42.014Z",
         "blocked_by": null,
         "blocked_by_path": null,
         "blocked_by_anchor": null,
         "blocked_by_task": null,
         "blocked_by_task_open": null,
         "row_flags": [
-          "in_progress",
           "open",
+          "unclaimed",
           "due"
         ]
       }
     ],
     "order": [
       "mt-7f3k2a",
-      "work:214"
+      "work:41"
     ],
     "events": [
       {
         "event_id": "evt-standup-0928",
-        "connection": "calendar",
+        "connection": "eventkit",
         "title": "Standup",
         "start": "2026-09-28T13:30:00.000Z",
         "end": "2026-09-28T13:45:00.000Z",
@@ -101,9 +129,15 @@
         "attendees": [
           {
             "name": "Dana",
+            "self": false,
             "email": "dana@example.com",
-            "person": "People/Dana.md",
-            "self": false
+            "person": null
+          },
+          {
+            "name": "Me",
+            "self": true,
+            "email": "me@example.com",
+            "person": null
           }
         ],
         "self_status": "accepted",
@@ -113,6 +147,6 @@
     "brief": "Journal/Brief/2026-09-28.md",
     "standup": "Journal/Standup/2026-09-28.md",
     "plan": "Journal/Plan/2026-09-28.md",
-    "as_of": "2026-09-28T13:05:00.000Z"
+    "as_of": "2026-09-27T18:43:42.292Z"
   }
 }

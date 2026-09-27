@@ -9,14 +9,20 @@ import {
   REQUEST_DOORS,
   REQUEST_KIND_TYPE,
   REQUEST_KINDS,
+  REQUEST_SUBJECT_BASES,
+  REQUEST_TYPE_SUBJECT,
   REQUEST_TYPE_TABLE,
   REQUEST_TYPES,
   describeRequest,
   isRequestKind,
+  parseSubjectFingerprint,
   requestBodyOf,
+  requestSubjectOf,
   requestTypeOf,
   requestWordOf,
   requestWordSql,
+  subjectFingerprint,
+  subjectUnchanged,
   type RequestAnswer,
 } from "../src/index.js";
 
@@ -198,5 +204,70 @@ describe("request types — the SQL rendering", () => {
       expect(() => requestWordSql(bad), bad).toThrow(/is not a column reference/);
     }
     expect(() => requestWordSql("kind")).not.toThrow();
+  });
+});
+
+// ---- the subject (T2-14): what a request is about, and whether it moved -------
+
+describe("request subjects — one basis per type", () => {
+  const T1 = "2026-09-26 08:00:00.000001+00";
+  const T2 = "2026-09-26 08:00:00.000002+00";
+
+  it("a pull request is judged by its head, a task by its line, anything else by its work row", () => {
+    expect(REQUEST_TYPE_SUBJECT).toEqual({ pull_request: "head_sha", task: "line_text" });
+    const all = { head_sha: "abc123", line_text: "- [ ] call the plumber", work_updated_at: T1 };
+    expect(requestSubjectOf("pull_request", all)?.basis).toBe("head_sha");
+    expect(requestSubjectOf("task", all)?.basis).toBe("line_text");
+    for (const kind of ["action", "review", "knowledge", "decision", "access_request", "improvement", "report", "no_such_kind"]) {
+      expect(requestSubjectOf(kind, all)?.basis, kind).toBe("work_updated_at");
+    }
+  });
+
+  it("falls back to the work row where the type's own basis is missing, and a row with neither has no subject", () => {
+    expect(requestSubjectOf("pull_request", { work_updated_at: T1 })?.basis).toBe("work_updated_at");
+    expect(requestSubjectOf("task", { work_updated_at: T1 })?.basis).toBe("work_updated_at");
+    expect(requestSubjectOf("pull_request", {})).toBeNull();
+    expect(requestSubjectOf("decision", { head_sha: "abc", line_text: "x" })).toBeNull(); // a question is not about a head or a line
+  });
+
+  it("each subject change moves the fingerprint — a new head, an edited line, a deleted line, a moved work row", () => {
+    const pr = (h: string) => requestSubjectOf("pull_request", { head_sha: h, work_updated_at: T1 })!.fingerprint;
+    const task = (l: string | null) => requestSubjectOf("task", { line_text: l })!.fingerprint;
+    const work = (t: string) => requestSubjectOf("action", { work_updated_at: t })!.fingerprint;
+    expect(pr("abc123")).not.toBe(pr("def456"));
+    expect(task("- [ ] call the plumber")).not.toBe(task("- [ ] call the plumber today"));
+    expect(task("- [ ] call the plumber")).not.toBe(task(null));
+    expect(task(null)).toBe("line_text:gone");
+    expect(work(T1)).not.toBe(work(T2)); // microseconds apart is still a move
+    // …and nothing but the subject moves it: the same reading is the same fingerprint
+    expect(pr("abc123")).toBe(pr("abc123"));
+  });
+
+  it("is narrow: a pull request whose work row moved but whose head did not is unchanged", () => {
+    const before = requestSubjectOf("pull_request", { head_sha: "abc123", work_updated_at: T1 });
+    const after = requestSubjectOf("pull_request", { head_sha: "abc123", work_updated_at: T2 });
+    expect(subjectUnchanged(before!.fingerprint, after)).toBe(true);
+  });
+
+  it("the same value under two bases is two fingerprints", () => {
+    expect(subjectFingerprint("head_sha", "x")).not.toBe(subjectFingerprint("line_text", "x"));
+    for (const b of REQUEST_SUBJECT_BASES) expect(subjectFingerprint(b, "x")).toMatch(new RegExp(`^${b}:[0-9a-f]{32}$`));
+  });
+
+  it("a row that gained or lost its subject has changed", () => {
+    const s = requestSubjectOf("action", { work_updated_at: T1 });
+    expect(subjectUnchanged(null, null)).toBe(true);
+    expect(subjectUnchanged(null, s)).toBe(false);
+    expect(subjectUnchanged(s!.fingerprint, null)).toBe(false);
+  });
+
+  it("parseSubjectFingerprint takes what the server serves, or null, and nothing else (misuse)", () => {
+    const served = requestSubjectOf("task", { line_text: "x" })!.fingerprint;
+    expect(parseSubjectFingerprint(served)).toBe(served);
+    expect(parseSubjectFingerprint("line_text:gone")).toBe("line_text:gone");
+    expect(parseSubjectFingerprint(null)).toBeNull();
+    for (const bad of [undefined, "", "abc123", "head_sha:abc123", "HEAD_SHA:" + "0".repeat(32), `nope:${"0".repeat(32)}`, `${served} `, 42, {}, ["x"], true]) {
+      expect(parseSubjectFingerprint(bad), JSON.stringify(bad)).toBeUndefined();
+    }
   });
 });

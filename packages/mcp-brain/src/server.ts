@@ -36,7 +36,7 @@ import {
   type CheckResult,
   type ErrorCode,
 } from "@foldedspacelabs/metistry-core";
-import { TasksError, type Result as TaskResult, type Task, type TasksService } from "@foldedspacelabs/metistry-tasks";
+import { DESCRIPTION_MAX, TasksError, type Result as TaskResult, type Task, type TasksService } from "@foldedspacelabs/metistry-tasks";
 import type { ArtifactsService } from "@foldedspacelabs/metistry-artifacts";
 import type { QueryStore } from "@foldedspacelabs/metistry-queries";
 import { ALIAS_NAMES, resolveAliasCall } from "./aliases.js";
@@ -419,6 +419,11 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
       },
     );
 
+    // No `owner`, no `open`, no `title`, no `description`: those are the board
+    // arm of `TasksService.update`, and the board is the owner's (the console's
+    // PATCH /api/tasks/:id). An agent describes a task once, at tasks_create,
+    // and never rewrites what a card says it is about (C85) — enforced by the
+    // key being absent here, not by asking.
     reg(
       "tasks_update",
       "Change status (in_progress/blocked) and/or append a note on a task you hold; use tasks_close to finish one instead of passing status: closed here.",
@@ -459,6 +464,7 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
         depends_on: z.array(id).max(50).optional(),
         due: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
         idempotency_key: z.string().min(1).max(200).optional(),
+        description: z.string().max(DESCRIPTION_MAX).optional(),
       },
       async (a) => {
         // The one project check that is `forbidden` rather than `not_found`:
@@ -475,6 +481,7 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
             ...(a.depends_on !== undefined ? { depends_on: a.depends_on } : {}),
             ...(a.due !== undefined ? { due: a.due } : {}),
             ...(a.idempotency_key !== undefined ? { idempotency_key: a.idempotency_key } : {}),
+            ...(a.description !== undefined ? { description: a.description } : {}),
           },
           principal.id,
         );

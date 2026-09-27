@@ -185,8 +185,8 @@ describe("device flow", () => {
 
     // the keychain item is git-credential-osxkeychain's shape, and the value came down stdin
     const kc = calls.find((c) => c.cmd === "security");
-    expect(kc?.args).toEqual(["add-internet-password", "-U", "-a", "octocat", "-s", "github.com", "-r", "htps", "-A", "-w"]);
-    expect(kc?.opts.stdin).toBe(`${TOKEN}\n${TOKEN}\n`);
+    expect(kc?.args).toEqual(["-i"]);
+    expect(kc?.opts.stdin).toBe(`"add-internet-password" "-U" "-a" "octocat" "-s" "github.com" "-r" "htps" "-A" "-w" "${TOKEN}"\n`);
 
     // the negative assertion this test exists for
     for (const c of calls) for (const a of c.args) expect(a).not.toContain(TOKEN);
@@ -209,7 +209,7 @@ describe("device flow", () => {
       platform: "darwin",
       readSecret: async () => `${PAT}\n`,
     });
-    expect(calls.find((c) => c.cmd === "security")?.opts.stdin).toBe(`${PAT}\n${PAT}\n`);
+    expect(calls.find((c) => c.cmd === "security")?.opts.stdin).toBe(`"add-internet-password" "-U" "-a" "octocat" "-s" "github.com" "-r" "htps" "-A" "-w" "${PAT}"\n`);
     for (const l of lines) expect(l).not.toContain(PAT);
 
     await expect(

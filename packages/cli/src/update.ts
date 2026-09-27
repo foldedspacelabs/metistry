@@ -19,16 +19,17 @@ import { INSTANCE_LAYOUT, LEGACY_VAULT_DIR, TEMPLATES_DIR, detectLayout, intEnv,
 import { writeCliShim } from "./cli-shim.js";
 import { SEED_VAULT_DIR } from "./init.js";
 import { loadDeployment } from "./deployment.js";
-import { doctor, renderTable, type DoctorDeps, type DoctorReport } from "./doctor.js";
+import { doctor, hostLocal, renderTable, type DoctorDeps, type DoctorReport } from "./doctor.js";
 import { productVersion } from "./env.js";
 import { envPaths, readInstanceId } from "./instance.js";
 import { applyPorts, loadNamespace } from "./namespace.js";
 import type { Exec } from "./exec.js";
 import { rollbackApp, updateApp, type UpdateAppResult } from "./mac-app.js";
 import { labelFor, loadPlistTemplates, loadSupervisedTemplates, type PlistTemplate } from "./launchd.js";
+import { jobFilesFor, legacyEnvReport, RETIRE_LEGACY_ENV_COMMAND } from "./legacy-env.js";
 import { SUPERVISOR_SERVICE } from "./supervisor.js";
 import { instanceLockPath, readLock, serializeLock, type LockFile, type LockSource } from "./lock.js";
-import { ensureOwnerBridgeToken, OWNER_BRIDGE_TOKEN, protectedRel, writeProtected, type ProtectedWrite } from "./protected-write.js";
+import { ensureOwnerBridgeToken, OWNER_BRIDGE_TOKEN, OWNER_BRIDGE_TOKEN_FIX, OwnerTokenMintFailed, protectedRel, writeProtected, type EnsureOwnerTokenResult, type ProtectedWrite } from "./protected-write.js";
 import { listMigrationFiles, MIGRATION_LOCK_KEY, openMigrationSession, runMigrations, type MigrateResult, type MigrationSession } from "./migrate.js";
 import { currentVersion, installRelease, rollbackRelease, releaseTarget, runtimePackCommit, type InstallReleaseResult } from "./release.js";
 import { installRuntimeDeps, runtimeDepsEnabled, RUNTIME_DIRNAME, type InstallRuntimeDepsResult } from "./runtime-deps.js";
@@ -90,6 +91,8 @@ export interface UpdateOptions {
   relaunch?: boolean | undefined;
   /** test seam: the wait between polls after `--relaunch` quits the app */
   appSleep?: ((ms: number) => Promise<void>) | undefined;
+  /** test seam: how long, and how often, the lock write waits for a reconciler this run restarted (default: METISTRY_RECONCILER_READY_TIMEOUT_MS, every 500 ms) */
+  reconcilerReady?: { timeoutMs?: number | undefined; intervalMs?: number | undefined } | undefined;
   /** default true; `false` is a test seam — see `up`'s `cliShim` (cli-shim.ts). `update` writes the same shim `up` does: it shares nothing else with `up`, but a checkout that only ever runs `update` still gets one. */
   cliShim?: boolean | undefined;
 }
@@ -115,6 +118,32 @@ export interface UpdateResult {
   seededTemplates?: SeedTemplatesResult;
   /** the shared-scope migration (plan §2.14), when it ran — names only */
   sharedScope?: MigrateScopeResult;
+  /** how far the restart step got, and which jobs it owed a kickstart */
+  restart: RestartProgress;
+  /** what the run could not do and carried on without — each with the commands that finish it */
+  deferred: DeferredFailure[];
+}
+
+/**
+ * The restart step's own account of itself. `restarted` alone cannot tell
+ * "nothing needed restarting" from "the step never got that far", and the
+ * summary printed the first when it meant the second.
+ */
+export interface RestartProgress {
+  /** the step began */
+  reached: boolean;
+  /** …and ran to its end */
+  completed: boolean;
+  /** the host jobs whose code changed — what the step owed a kickstart */
+  owed: string[];
+}
+
+/** Something `update` could not do and did not stop for: named at the end, with the exact commands, and the reason the exit code is not 0. */
+export interface DeferredFailure {
+  what: string;
+  why: string;
+  /** the commands that finish it, in order */
+  fix: string[];
 }
 
 export { RECONCILER_LABEL } from "./protected-write.js";
@@ -319,6 +348,10 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
   let app: UpdateAppResult | undefined;
   let sharedScope: MigrateScopeResult | undefined;
   let seededTemplates: SeedTemplatesResult | undefined;
+  /** how far the restart step got, and what it owed — the summary is written from this, so an interrupted restart is never "nothing kickstarted" */
+  const restart: RestartProgress = { reached: false, completed: false, owed: [] };
+  /** what this run could not do and did not stop for — each is named at the end with its commands, and makes the exit code non-zero */
+  const deferred: DeferredFailure[] = [];
   // release mode swings this to `<product-dir>/current` once the switch is done
   let runDir = runDirFor(productDir, source);
   let releaseVersion = version;
@@ -336,8 +369,10 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
   const ns = await loadNamespace(env.METISTRY_INSTANCE_DIR);
   const labelSuffix = ns?.labelSuffix;
   if (ns) applyPorts(env, ns);
-  // hashed before the build/switch and again after: only jobs whose code moved are kickstarted
-  let before = await hashHostJobs(runDir, await templatesForRestart(runDir, deployment.shape, labelSuffix, env));
+  // hashed before the build/switch and again after: only jobs whose code moved
+  // are kickstarted. In release mode `runDir` is `current`, which still points
+  // at the release being LEFT here — that is the "before".
+  const before = await hashHostJobs(runDir, await templatesForRestart(runDir, deployment.shape, labelSuffix, env));
 
   // The legacy-layout gate, asked with whatever version is knowable at the
   // time. In release mode that is `--version` (or "latest", which is not a
@@ -407,8 +442,12 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
     } else {
       release = opts.rollback ? await rollbackRelease(r, productDir) : await installRelease(r, { productDir, fetchFn, env, version: opts.releaseVersion, ...(opts.target ? { target: opts.target } : {}) });
       releaseVersion = release.version;
+      // `before` is NOT re-hashed here. It was taken through `current` while
+      // that still pointed at the release being left; hashing again after the
+      // switch hashed the NEW release twice, so every release-mode update found
+      // no code changed and kickstarted nothing — the jobs kept running the old
+      // release until something else restarted them (0.12.0 → 0.14.0).
       runDir = runDirFor(productDir, source);
-      before = await hashHostJobs(runDir, await templatesForRestart(runDir, deployment.shape, labelSuffix, env));
       // the bundled runtime moves with the release — a new Node, Postgres or
       // git arrives inside its deps pack (docs/ops/bundled-runtime.md). A
       // rollback keeps the runtime it has: it is a superset, not a downgrade.
@@ -449,35 +488,59 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
     }
 
     r.section("restart");
-    // BEFORE anything is kickstarted, because the reconciler reads `.env` at
-    // start and the lock write below is a §4.7 protected path: the owner
-    // bearer has to be in the environment the restarted job inherits, or the
-    // install would have to be told to run a command. An install that already
-    // has one spends nothing here (docs/ops/auth.md).
+    restart.reached = true;
+    // What this step owes, decided BEFORE anything in it can fail: every host
+    // job whose code moved. An interrupted restart can then say which of them
+    // it did not reach, rather than "nothing kickstarted" — which is what the
+    // 0.12.0 → 0.14.0 run printed after its mint aborted the step with three
+    // jobs still on the old code.
+    const after = platform === "darwin" ? await hashHostJobs(runDir, templates) : {};
+    restart.owed = platform === "darwin" && !r.dryRun ? templates.filter((t) => before[t.label] !== after[t.label]).map((t) => t.label) : [];
+
+    // The owner bearer BEFORE anything is kickstarted, because the reconciler
+    // reads `.env` at start and the lock write below is a §4.7 protected path:
+    // the bearer has to be in the environment the restarted job inherits, or
+    // the install would have to be told to run a command. An install that
+    // already has one spends nothing here; one whose Keychain has it copies it
+    // rather than minting (docs/ops/auth.md).
+    //
+    // And a mint that fails does NOT stop the restart. The jobs whose code
+    // moved are running the release this update just left, against a schema
+    // it just migrated; leaving them there to report a Keychain problem is the
+    // worse failure. The restart finishes with the tokens the install has, the
+    // lock (which needs the bearer) is left for the rerun, and the exit code
+    // says so at the end.
     const knownInstanceId = instanceDir.instanceDir ? await readInstanceId(instanceDir.instanceDir).catch(() => undefined) : undefined;
-    const ownerBearer = await ensureOwnerBridgeToken(r, {
-      env,
-      envFile,
-      platform,
-      // filed under THIS instance's Keychain account when it has an id, so a
-      // later `metistry secrets purge` takes it with the instance
-      ...(knownInstanceId ? { instanceId: knownInstanceId } : {}),
-      ...(opts.mintOwnerToken ? { mint: opts.mintOwnerToken } : {}),
-    });
-    r.note(ownerBearer.detail);
+    let ownerBearer: EnsureOwnerTokenResult;
+    let ownerMintFailed = false;
+    try {
+      ownerBearer = await ensureOwnerBridgeToken(r, {
+        env,
+        envFile,
+        platform,
+        // filed under THIS instance's Keychain account when it has an id, so a
+        // later `metistry secrets purge` takes it with the instance
+        ...(knownInstanceId ? { instanceId: knownInstanceId } : {}),
+        ...(opts.mintOwnerToken ? { mint: opts.mintOwnerToken } : {}),
+      });
+      r.note(ownerBearer.detail);
+    } catch (err) {
+      if (!(err instanceof OwnerTokenMintFailed)) throw err;
+      ownerMintFailed = true;
+      ownerBearer = { minted: false, changed: false, detail: err.message };
+      deferred.push({ what: OWNER_BRIDGE_TOKEN, why: `not minted — ${err.reason}`, fix: [...OWNER_BRIDGE_TOKEN_FIX] });
+      r.note(`${r.ui.paint("failed", `${r.ui.icon("fail")} ${err.message}`)} — the restart goes on without it`);
+    }
     if (usesCompose(deployment)) await composeUp(r, runDir, source, source === "release" ? releaseVersion : undefined, envFile);
     else r.note("shape launchd: no containers, so docker is never called — console, assistant and db are kickstarted below with the other host jobs");
     if (platform === "darwin") {
-      const after = await hashHostJobs(runDir, templates);
       for (const t of templates) {
-        const changed = before[t.label] !== after[t.label];
         if (r.dryRun) {
           // the db job execs the Postgres toolchain, not this repo's code, so it
           // tracks nothing here — an update never bounces the database
           const tracked = [...new Set(t.repoPaths.map(trackedPathFor))];
           await r.run("launchctl", ["kickstart", "-k", `gui/${uid}/${t.label}`], { comment: tracked.length ? `only if ${tracked.join(", ")} changed` : "no product code of its own — never kickstarted by update" });
-        }
-        else if (changed) {
+        } else if (restart.owed.includes(t.label)) {
           // tolerated so one job cannot stop the update, but only a kickstart
           // that SUCCEEDED counts: `restarted` is what the summary reports as
           // "kickstarted", and a job that failed was not
@@ -489,14 +552,16 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
           }
         }
       }
-      // A freshly minted owner bearer is only real once the reconciler has
-      // read it. Usually its code moved in the same update and the loop above
-      // already bounced it; when it did not, this is the difference between
-      // an update that works and one that 401s on its own lock write.
-      if (!r.dryRun && ownerBearer.minted) {
+      // A bearer this run put into `.env` — minted, or copied from the
+      // Keychain — is only real once the reconciler has read it. Usually its
+      // code moved in the same update and the loop above already bounced it;
+      // when it did not, this is the difference between an update that works
+      // and one that 401s on its own lock write. Nothing else is restarted for
+      // it: the reconciler is the only service that holds this bearer.
+      if (!r.dryRun && ownerBearer.changed) {
         const label = labelFor(deployment.shape === "launchd" ? SUPERVISOR_SERVICE : "reconciler", labelSuffix);
         if (!restarted.includes(label)) {
-          const k = await r.run("launchctl", ["kickstart", "-k", `gui/${uid}/${label}`], { tolerateFailure: true, comment: `so it reads the freshly minted ${OWNER_BRIDGE_TOKEN}` });
+          const k = await r.run("launchctl", ["kickstart", "-k", `gui/${uid}/${label}`], { tolerateFailure: true, comment: `so it reads the ${ownerBearer.minted ? "freshly minted" : "newly written"} ${OWNER_BRIDGE_TOKEN}` });
           if (k.code === 0) restarted.push(label);
           else {
             kickFailed.push({ label, code: k.code });
@@ -507,7 +572,8 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
       // "nothing changed" only when nothing was TRIED: a job whose code moved
       // and whose kickstart failed is the opposite of nothing changing
       if (!r.dryRun && restarted.length === 0) r.note(kickFailed.length === 0 ? "no host job's code changed — nothing kickstarted" : `nothing kickstarted — ${kickFailed.map((f) => `kickstart of ${f.label} failed (exit ${f.code})`).join("; ")}`);
-    } else r.note(`no launchd on ${platform}: restart the host units yourself (systemctl --user restart <unit>)${ownerBearer.minted ? ` — the reconciler must be restarted for ${OWNER_BRIDGE_TOKEN} to take effect, or the lock write below is refused` : ""}`);
+    } else r.note(`no launchd on ${platform}: restart the host units yourself (systemctl --user restart <unit>)${ownerBearer.changed ? ` — the reconciler must be restarted for ${OWNER_BRIDGE_TOKEN} to take effect, or the lock write below is refused` : ""}`);
+    restart.completed = true;
 
     r.section("lock");
     const head = r.dryRun || source === "release" ? undefined : await gitHead(productDir, r.exec);
@@ -520,8 +586,24 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
       updated_at: now.toISOString(),
       migrations_applied: migrations?.recorded ?? prior?.migrations_applied ?? [],
     };
-    const delivery = await writeLock(r, lock, { env, platform, uid, fetchFn });
-    r.note(delivery.detail);
+    if (ownerMintFailed && env.METISTRY_RECONCILER_URL) {
+      // The bridge refuses a protected path to every bearer but the owner's,
+      // so the call could only fail — and failing here would also skip the
+      // templates and the shim below, which do not need it.
+      const rel = protectedRel(instanceDir.instanceDir ?? env.METISTRY_INSTANCE_DIR, "lock");
+      r.note(`${rel} NOT written — it is a protected path and ${OWNER_BRIDGE_TOKEN} could not be minted; ${prior ? `it still pins ${prior.product.version}` : "there is none yet"} while this install runs ${releaseVersion}`);
+      deferred.push({ what: rel, why: `not moved to ${releaseVersion} — it needs ${OWNER_BRIDGE_TOKEN}`, fix: ["metistry update"] });
+    } else {
+      // A reconciler this run restarted (itself, or the supervisor it is a
+      // child of) is not listening the moment `kickstart` returns; the lock
+      // write waits for it to answer rather than racing its start.
+      const reconcilerJobs = [labelFor(SUPERVISOR_SERVICE, labelSuffix), labelFor("reconciler", labelSuffix)];
+      if (!r.dryRun && env.METISTRY_RECONCILER_URL && restarted.some((l) => reconcilerJobs.includes(l))) {
+        await waitForReconciler(r, { url: env.METISTRY_RECONCILER_URL, fetchFn, timeoutMs: opts.reconcilerReady?.timeoutMs ?? RECONCILER_READY_TIMEOUT_MS, intervalMs: opts.reconcilerReady?.intervalMs ?? RECONCILER_READY_POLL_MS });
+      }
+      const delivery = await writeLock(r, lock, { env, platform, uid, fetchFn });
+      r.note(delivery.detail);
+    }
 
     // A template a release adds (Templates/Brief.md in 0.14) reached only a
     // FRESH init — `update` never looked at the vault, so an upgraded one
@@ -539,6 +621,10 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
     // values), and every way it can stop short ends in the one command.
     r.section("secrets");
     sharedScope = await updateSharedScope(r, { instanceDir: instanceDir.instanceDir, envFile, exampleFile: join(runDir, ".env.example"), env, platform, uid, fetchFn, exec: opts.exec, keychain: opts.keychain });
+    // The product checkout's .env, still read after the instance's: say what
+    // only it has (names, never values) and the verb that retires it. Never
+    // moved or deleted here — the preview and the --yes are the owner's.
+    if (envPathsFound?.legacy && instanceDir.instanceDir) await noteLegacyEnv(r, { legacy: envPathsFound.legacy, target: envPathsFound.write, instanceDir: instanceDir.instanceDir, home: env.HOME });
 
     // `update` shares no code path with `up` (it never renders a plist or
     // touches the supervisor), so a checkout that only ever runs `update`
@@ -560,10 +646,18 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
     mode === "child"
       ? await childClosingDoctor(r, { productDir, runDir, envFile: opts.envFile, doctorDeps: opts.doctorDeps, doctorFn: opts.doctorFn ?? doctor })
       : await closingDoctor(r, runDir, opts.doctorDeps, opts.doctorFn ?? doctor);
-  const code = failure ? failure.code || 1 : doctorCode;
+  // a deferred failure is still a failure — it just did not get to stop the
+  // restart. Non-zero, but only here, at the end.
+  const code = failure ? failure.code || 1 : deferred.length > 0 ? 1 : doctorCode;
+  if (deferred.length > 0) {
+    r.out("");
+    r.out(`${r.ui.paint("failed", `${r.ui.icon("fail")} not done`)} — this update carried on without ${deferred.length === 1 ? "it" : "them"}; run these, in order:`);
+    for (const d of deferred) r.out(`  ${d.what}: ${d.why}`);
+    for (const c of [...new Set(deferred.flatMap((d) => d.fix))]) r.out(`    ${c}`);
+  }
   r.out("");
-  r.out(updateSummary({ ui: r.ui, dryRun: r.dryRun, failure, code, source, version: lock?.product.version ?? releaseVersion, migrations, restarted, kickstartFailed: kickFailed.length, app }));
-  return { code, source, runDir, commands: r.commands, ...(lock ? { lock } : {}), restarted, ...(migrations ? { migrations } : {}), ...(release ? { release } : {}), ...(runtimeDeps ? { runtimeDeps } : {}), ...(app ? { app } : {}), ...(sharedScope ? { sharedScope } : {}), ...(seededTemplates ? { seededTemplates } : {}) };
+  r.out(updateSummary({ ui: r.ui, dryRun: r.dryRun, failure, code, source, version: lock?.product.version ?? releaseVersion, migrations, restarted, kickstartFailed: kickFailed.length, app, restart, deferred }));
+  return { code, source, runDir, commands: r.commands, ...(lock ? { lock } : {}), restarted, restart, deferred, ...(migrations ? { migrations } : {}), ...(release ? { release } : {}), ...(runtimeDeps ? { runtimeDeps } : {}), ...(app ? { app } : {}), ...(sharedScope ? { sharedScope } : {}), ...(seededTemplates ? { seededTemplates } : {}) };
 }
 
 // ---- seed templates the vault lacks ---------------------------------------------------
@@ -721,6 +815,61 @@ export async function childClosingDoctor(
   return report.ok ? 0 : 1;
 }
 
+// ---- waiting for a restarted reconciler --------------------------------------------------
+
+/** How long the lock write waits for a reconciler this run just restarted to answer again. A slow machine raises METISTRY_RECONCILER_READY_TIMEOUT_MS. */
+export const RECONCILER_READY_TIMEOUT_MS = intEnv("METISTRY_RECONCILER_READY_TIMEOUT_MS", 60_000);
+/** How often it asks. */
+export const RECONCILER_READY_POLL_MS = 500; // limit: fixed — a poll interval, not a policy
+
+/**
+ * `launchctl kickstart -k` returns once the job has been restarted, not once
+ * the process inside it is listening — and under the launchd shape the
+ * reconciler is a child the supervisor starts after Postgres. The lock write
+ * that followed the kickstart raced that start (rehearsed 0.12.0 → 0.14.x:
+ * "reconciler bridge … did not answer (fetch failed)"), so it waits here until
+ * the bridge answers anything at all — a 401 included: the write that follows
+ * reports its own refusal. True when it answered; false after the timeout, and
+ * the write then fails with its usual remediation.
+ */
+export async function waitForReconciler(r: StepRunner, o: { url: string; fetchFn: typeof fetch; timeoutMs: number; intervalMs: number }): Promise<boolean> {
+  const base = hostLocal(o.url);
+  const until = Date.now() + o.timeoutMs;
+  let tries = 0;
+  for (;;) {
+    tries++;
+    try {
+      await o.fetchFn(`${base}/check`, { signal: AbortSignal.timeout(Math.max(o.intervalMs, 1000)) });
+      if (tries > 1) r.note(`reconciler: answering again at ${base} after its restart`);
+      return true;
+    } catch {
+      if (Date.now() >= until) {
+        r.note(`reconciler: not answering at ${base} ${Math.round(o.timeoutMs / 1000)}s after its restart (METISTRY_RECONCILER_READY_TIMEOUT_MS) — writing anyway`);
+        return false;
+      }
+      await new Promise((res) => setTimeout(res, o.intervalMs));
+    }
+  }
+}
+
+// ---- the product checkout's .env ----------------------------------------------------
+
+/** One line about the deprecated fallback file: what only it still has, and the command that retires it. Never fails the update. */
+export async function noteLegacyEnv(r: StepRunner, o: { legacy: string; target: string; instanceDir: string; home: string | undefined }): Promise<void> {
+  try {
+    const rep = await legacyEnvReport({ legacy: o.legacy, target: o.target, jobFiles: await jobFilesFor({ instanceDir: o.instanceDir, home: o.home }) });
+    if (!rep) return;
+    const after = rep.sourcedBy.length ? ` (${rep.sourcedBy.length} job file(s) still source it, so run \`metistry up\` first)` : "";
+    r.note(
+      rep.onlyLegacy.length
+        ? `legacy .env: ${rep.legacy} is still read as a fallback, and only it has ${rep.onlyLegacy.join(", ")} — \`${RETIRE_LEGACY_ENV_COMMAND}\` previews moving them into ${rep.target}; \`--yes\` moves them and deletes it${after}`
+        : `legacy .env: ${rep.legacy} has nothing ${rep.target} lacks — \`${RETIRE_LEGACY_ENV_COMMAND} --yes\` deletes it${after}`,
+    );
+  } catch (err) {
+    r.note(`legacy .env: ${o.legacy} could not be compared (${err instanceof Error ? err.message : String(err)}) — \`${RETIRE_LEGACY_ENV_COMMAND}\` says what it still has`);
+  }
+}
+
 // ---- the shared scope (plan §2.14, T4-3) ---------------------------------------------
 
 /**
@@ -777,6 +926,10 @@ export async function updateSharedScope(
  * The one line to read when the rest has scrolled past: did it land, on what
  * version, and what moved. Deliberately last, after doctor's own table —
  * this is the verdict, not a heading (docs/ops/cli-style.md).
+ *
+ * What it says about the restart comes from `restart` when it is given: a
+ * step that never began, or one that stopped part-way, is said to be exactly
+ * that — never "nothing kickstarted", which reads as "nothing needed it".
  */
 export function updateSummary(s: {
   ui: Ui;
@@ -791,20 +944,36 @@ export function updateSummary(s: {
   kickstartFailed?: number | undefined;
   /** the Mac app's half, when it ran — a skip is not news, so it is not summarised */
   app?: UpdateAppResult | undefined;
+  restart?: RestartProgress | undefined;
+  deferred?: DeferredFailure[] | undefined;
 }): string {
   const { ui } = s;
   if (s.dryRun) return `${ui.paint("skipped", `${ui.icon("off")} dry run`)} ${ui.dim(`— ${s.source} ${s.version}, nothing was changed`)}`;
+  const deferred = s.deferred ?? [];
   const verdict = s.failure
     ? ui.paint("failed", `${ui.icon("fail")} update failed`)
-    : s.code === 0
-      ? ui.paint("ok", `${ui.icon("ok")} update ok`)
-      : ui.paint("degraded", `${ui.icon("warn")} updated, and doctor is not happy`);
+    : deferred.length > 0
+      ? ui.paint("failed", `${ui.icon("fail")} update incomplete`)
+      : s.code === 0
+        ? ui.paint("ok", `${ui.icon("ok")} update ok`)
+        : ui.paint("degraded", `${ui.icon("warn")} updated, and doctor is not happy`);
   const parts = [
     `${s.source} ${s.version}`,
     s.migrations ? `${s.migrations.applied.length} migration(s) applied` : "no migrations",
-    s.restarted.length > 0 ? `${s.restarted.length} job(s) kickstarted` : "nothing kickstarted",
-    ...((s.kickstartFailed ?? 0) > 0 ? [`${s.kickstartFailed} kickstart(s) failed`] : []),
+    ...restartParts(s),
     ...(s.app && s.app.status !== "skipped" ? [`${s.app.detail}${s.app.running === "needs-relaunch" ? " (reopen it)" : ""}`] : []),
+    ...(deferred.length > 0 ? [`not done: ${deferred.map((d) => d.what).join(", ")} (the commands are above)`] : []),
   ];
   return `${verdict} ${ui.dim(`— ${parts.join(", ")}`)}`;
+}
+
+function restartParts(s: { failure?: StepFailed | undefined; restarted: string[]; kickstartFailed?: number | undefined; restart?: RestartProgress | undefined }): string[] {
+  const p = s.restart;
+  if (p && !p.reached) return [s.failure ? "nothing restarted — the update stopped before its restart step" : "no restart step"];
+  if (p && !p.completed) {
+    const missed = p.owed.filter((l) => !s.restarted.includes(l));
+    const done = s.restarted.length > 0 ? `kickstarted ${s.restarted.join(", ")}` : "none kickstarted";
+    return [`restart interrupted — ${done}${missed.length > 0 ? `; NOT kickstarted (code changed): ${missed.join(", ")}` : ""}`];
+  }
+  return [s.restarted.length > 0 ? `${s.restarted.length} job(s) kickstarted` : "nothing kickstarted", ...((s.kickstartFailed ?? 0) > 0 ? [`${s.kickstartFailed} kickstart(s) failed`] : [])];
 }

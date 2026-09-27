@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 import { serializeLock } from "../src/lock.js";
 import { main } from "../src/main.js";
 import { up } from "../src/up.js";
+import { decodeSecurity } from "./fake-security.js";
 import { checkout, failDoctor, fakeExec, HELPER, JOBS, okDoctor, RECONCILER, retired, retiredCalls, shown, WATCHDOG } from "./fixtures.js";
 
 const NODE = "/usr/local/bin/node";
@@ -184,7 +185,8 @@ describe("metistry up", () => {
     const P = await checkout();
     const stored: Array<{ service: string; account: string }> = [];
     const exec = fakeExec({
-      security: (args) => {
+      security: (argv, opts) => {
+        const { args } = decodeSecurity(argv, opts);
         const s = args[args.indexOf("-s") + 1]!;
         const a = args[args.indexOf("-a") + 1]!;
         if (args[0] === "add-generic-password") stored.push({ service: s, account: a });

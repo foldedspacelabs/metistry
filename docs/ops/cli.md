@@ -14,6 +14,7 @@ All of them are real.
 | `secrets sync\|mint\|list [--json]` | move secrets between the Keychain and `.env` |
 | `secrets set\|replace\|remove\|hosts\|grant <name>` | owner-named secrets, per instance: the value on stdin into the Keychain, the policy into `.metistry/secrets.yaml` |
 | `secrets list --named [--json]` | the owner-named secrets: names, hosts, grants, presence — never a value |
+| `secrets retire-legacy-env [--yes]` | move what only the product checkout's `.env` still has into the instance's, then delete it |
 | `connect <tool> [--rotate]` | give one external dev tool (Cursor, OpenCode, Devin, Claude Code) its own agent token and config |
 | `connect --list [--json]` | which tools are connected: the row, the bearer, the config |
 | `console whoami [--json]` | ask the console who it thinks you are, with this install's owner token |
@@ -1140,11 +1141,26 @@ A commented declaration (`# METISTRY_GITHUB_TOKEN=`) is uncommented in
 place; a secret the file never named is appended under one marker
 comment. The file is written `0600`.
 
-**Values never travel in argv.** `security ... -w` given as the last
-option prompts, and the prompt reads stdin when there is no tty, so the
-value goes down the child's stdin and never appears in `ps`. `secrets
-list` checks presence *without* `-w`, so there is no code path in it that
-can read a value, let alone print one.
+**Values never travel in argv.** Every Keychain write is `security -i`
+(its interactive mode) with the one command line — value included — on the
+child's stdin, so the process's argv is `-i` and nothing else, and the value
+never appears in `ps`. Each argument is double-quoted with `\` and `"`
+escaped, the way the tool's own tokenizer reads it back; a value with a
+newline or NUL is refused, and so is a line longer than the 4095 bytes
+`security -i` reads whole (a longer one is split and its tail run as a
+command). `secrets list` checks presence *without* `-w`, so there is no code
+path in it that can read a value, let alone print one.
+
+Until 0.14.x a write was `add-generic-password … -w` as the last option with
+the value piped in. That reads the value with getpass(3), which opens the
+terminal first and reads stdin only when there is none: every test and agent
+session passed, and the owner's `metistry update` in Terminal printed
+`password data for new item:`, waited on the keyboard with the value unread
+in the pipe, and was killed by the exec timeout (exit 1, nothing on stderr).
+getpass(3) also keeps only the first 128 characters, so a longer secret — an
+OpenAI project key, an AWS session token — was stored truncated. A value
+written that way is worth writing again (`metistry secrets replace <name>`,
+or `sync --to keychain` for an install variable).
 
 `--env-file <path>` targets a `.env` other than the resolved one, and
 `--instance <dir>` says which instance this is. On Linux `secrets` refuses
@@ -1246,6 +1262,54 @@ RESTART NEEDED: the console is running with the previous METISTRY_LOCAL_OWNER_TO
 A service that is not running is told it reads the new value when it next
 starts; one with no URL configured gets the command conditionally ("if the
 reconciler is running …"). An adopted token needs nothing.
+
+### Retiring the product checkout's `.env`: `secrets retire-legacy-env`
+
+An instance's environment is `<instance>/.metistry/state/.env`. The product
+checkout's own `.env` is still read **after** it, as a fallback, and every
+command says so on stderr:
+
+```
+…/.env is still being read as a fallback and is deprecated — everything an install
+needs is now in …/.metistry/state/.env. `metistry secrets retire-legacy-env` lists
+what only it still has; `--yes` moves that and deletes it.
+```
+
+Deleting it by hand drops whatever only it had — and nothing said which names
+those were. The verb does:
+
+```sh
+metistry secrets retire-legacy-env          # preview: names only, nothing written
+metistry secrets retire-legacy-env --yes    # copy, then delete
+```
+
+- **Only in the old file** — copied into the instance's file, appended under
+  one marker comment, quoted the way `.env` is read back. A line the
+  instance's file already has is never touched.
+- **In both, different values** — listed as shadowed: the instance's value
+  already wins, and the old one is read by nothing. Not copied.
+- **`METISTRY_INSTANCE_DIR`** — never copied: in the old file it is how a CLI
+  started without the shim finds the instance, and the instance's own file
+  never needs it.
+
+Names only, in every line it prints — never a value. It needs no Keychain, so
+it runs on Linux too. `--yes` deletes the old file only when everything it
+alone had was copied, and it **keeps** it (exit 1, saying why) when:
+
+- **a job still sources it.** `up` renders every job against the env file it
+  resolved at the time, so an install that ran `up` before its `state/.env`
+  existed has plists — or supervisor children — that `. '<product>/.env'` on
+  every start. Run `metistry up` first; it renders them against
+  `state/.env`. (It looks in `<instance>/.metistry/state/supervisor.json` and
+  this product's plists in `~/Library/LaunchAgents`.)
+- **it is how this CLI found the instance** — `METISTRY_INSTANCE_DIR` came from
+  the old file and nowhere else. Run `metistry` through its shim
+  (`<instance>/.metistry/state/cli/metistry`, which exports it) or export it.
+- **a value cannot be written as a dotenv line** (a newline, or a single quote
+  in a value that needs quoting) — it names it, to move by hand.
+
+`metistry update` prints the same list on a `legacy .env:` line in its
+secrets step — and never moves or deletes anything itself.
 
 ### `secrets purge --instance <dir>`
 
@@ -2276,7 +2340,44 @@ node bridges, the bare binary for the EventKit helper. After the build it
 hashes again and kickstarts only the jobs whose digest moved. A change to
 a `src/` file that produced no `dist/` change restarts nothing; a rebuilt
 helper binary restarts the helper. Containers are always `up -d --build`
-— compose's own cache decides whether anything rebuilds.
+— compose's own cache decides whether anything rebuilds. In release mode
+"before" is the release being left — hashed through `current` before the
+switch — and "after" the one installed. (Through 0.14.0 the "before" was
+taken again after the switch, so both hashes were of the new release and a
+release-mode update never kickstarted anything for new code.)
+
+**The owner bearer, and a mint that fails.** The restart step first makes
+sure this install holds `METISTRY_BRIDGE_TOKEN_RECONCILER_USER`
+(`docs/ops/auth.md`): already in the environment → nothing; in this
+instance's Keychain item but not `.env` → copied into `.env`, nothing minted;
+in neither → minted into both. Either of the last two restarts the
+reconciler (the supervisor, under the launchd shape) so it reads it. When the
+Keychain refuses the write, **the restart still runs**: every job whose code
+changed is kickstarted on the tokens the install has, because leaving them on
+the release just left — against the schema just migrated — is the worse
+failure. The lock is a protected path the bridge refuses without the owner
+bearer, so it is not attempted; the templates, secrets and shim steps still
+run; and the run ends with what was not done and the commands, in order:
+
+```
+✗ not done — this update carried on without them; run these, in order:
+  METISTRY_BRIDGE_TOKEN_RECONCILER_USER: not minted — security add-generic-password … failed (1): …
+  .metistry/metistry.lock: not moved to 0.14.1 — it needs METISTRY_BRIDGE_TOKEN_RECONCILER_USER
+    metistry secrets mint METISTRY_BRIDGE_TOKEN_RECONCILER_USER
+    metistry restart reconciler
+    metistry update
+
+✗ update incomplete — release 0.14.1, 10 migration(s) applied, 1 job(s) kickstarted, not done: …
+```
+
+Exit code 1 — decided there, at the end, not by stopping. (`metistry up`
+still stops on a failed mint: it has not started anything yet.)
+
+**The summary says how far the restart got.** `nothing kickstarted` means the
+step ran and no job's code had changed. A run that stopped before the step
+says `nothing restarted — the update stopped before its restart step`; one
+that stopped inside it says `restart interrupted — kickstarted …; NOT
+kickstarted (code changed): …`, naming each job still on the old code.
 
 **Migrations under the advisory lock.** The runner is
 `ops/scripts/migrate.sh` ported to the CLI, and the two share one
@@ -2303,7 +2404,12 @@ D5) — so `update` writes it as a bridge call, never as a file:
 allowed to write it, and the commit lands on the reconciler's next flush.
 A bridge that is configured but not answering, or that refuses, fails
 the update (exit 1) with the reason — the lock is then simply not moved;
-rerun after fixing. Only when **no** bridge is configured
+rerun after fixing. When this run kickstarted the reconciler — or the supervisor it is a
+child of — the write first waits for it to answer again (any HTTP answer on
+`/check`; up to `METISTRY_RECONCILER_READY_TIMEOUT_MS`, default 60 s), because
+`kickstart` returns before the restarted process listens: the lock POST that
+followed at once was refused with "did not answer (fetch failed)" in the
+0.12.0 → 0.14.x rehearsal. Only when **no** bridge is configured
 (`METISTRY_RECONCILER_URL` unset) *and* `METISTRY_INSTANCE_DIR` is a
 local directory does `update` write the file directly — and even then it
 first checks that no reconciler launchd job is running, because a

@@ -26,6 +26,7 @@ import {
 } from "../src/connect.js";
 import type { Exec, ExecOptions } from "../src/exec.js";
 import { main } from "../src/main.js";
+import { decodeSecurity } from "./fake-security.js";
 
 const OWNER = "local-owner-token-never-printed";
 const INSTANCE_ID = "a1b2c3d4-2222-4333-8444-555555555555";
@@ -33,15 +34,15 @@ const INSTANCE_ID = "a1b2c3d4-2222-4333-8444-555555555555";
 /** A login Keychain in a Map, keyed by (account, service) like the real one. Records calls so a test can prove a value never reached argv. */
 function fakeSecurity(seed: Record<string, string> = {}) {
   const store = new Map(Object.entries(seed));
-  const calls: Array<{ args: string[]; opts: ExecOptions }> = [];
-  const exec: Exec = async (cmd, args, opts = {}) => {
-    calls.push({ args, opts });
+  const calls: Array<{ args: string[]; argv: string[]; opts: ExecOptions }> = [];
+  const exec: Exec = async (cmd, argv, opts = {}) => {
+    const { args, value } = cmd === "security" ? decodeSecurity(argv, opts) : { args: argv, value: undefined };
+    calls.push({ args, argv, opts });
     if (cmd !== "security") return { code: 127, stdout: "", stderr: "not security" };
     const at = `${args[args.indexOf("-a") + 1] ?? ""}/${args[args.indexOf("-s") + 1] ?? ""}`;
     if (args[0] === "add-generic-password") {
-      const [a, b] = String(opts.stdin ?? "").split("\n");
-      if (a === undefined || a !== b) return { code: 1, stdout: "", stderr: "passwords don't match" };
-      store.set(at, a);
+      if (value === undefined) return { code: 1, stdout: "", stderr: "add-generic-password: no -w value on the security -i line" };
+      store.set(at, value);
       return { code: 0, stdout: "", stderr: "" };
     }
     if (args[0] === "find-generic-password") {
@@ -146,7 +147,7 @@ describe("connect: the agent row", () => {
     // instance-scoped: the account is the instance_id, not the shared per-user one
     expect(kc.store.get(`${INSTANCE_ID}/metistry:METISTRY_AGENT_TOKEN_CURSOR`)).toBe("minted-1");
     // and it travelled on stdin, never in argv
-    expect(kc.calls.some((call) => call.args.some((a) => a.includes("minted-1")))).toBe(false);
+    expect(kc.calls.some((call) => call.argv.some((a) => a.includes("minted-1")))).toBe(false);
   });
 
   it("is idempotent: an existing row is not re-created, and nothing secret is printed without --rotate", async () => {

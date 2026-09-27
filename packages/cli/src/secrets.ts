@@ -527,6 +527,32 @@ export async function mintSecret(name: string, opts: SecretsOptions): Promise<vo
   if (!accounts.instance) opts.out(`(no instance_id available, so it went to the user account ${accounts.user}; \`metistry up\` or \`metistry secrets sync\` mints one)`);
 }
 
+/**
+ * This instance's Keychain value for `name`, written into `.env` — or, only
+ * when the Keychain holds none, a fresh one minted into both (`mintSecret`).
+ * Read-if-present, mint-only-if-absent: `update` runs this for the
+ * reconciler's owner bearer, and minting over a value the Keychain already
+ * holds would rotate it for nothing (and spend a Keychain write the run may
+ * not be able to make). Names only in the output, never the value.
+ */
+export async function adoptOrMintSecret(name: string, opts: SecretsOptions): Promise<{ how: "adopted" | "minted"; value: string }> {
+  const platform = opts.platform ?? process.platform;
+  requireDarwin(platform, opts.out);
+  const { own } = keychains(opts);
+  const held = await own.getSecret(name);
+  if (held !== undefined && held !== "") {
+    const target = opts.envTarget ?? opts.envFile;
+    const values = new Map([[name, held]]);
+    const { text, missing } = rewriteEnv(await readText(target), values);
+    await writeEnvFile(target, appendEnv(text, values, missing));
+    opts.out(`copied ${name} from the login Keychain (account ${own.account}) into ${target} — the Keychain already had one, so nothing was minted`);
+    return { how: "adopted", value: held };
+  }
+  let value = "";
+  await mintSecret(name, { ...opts, mint: () => (value = (opts.mint ?? mintToken)()) });
+  return { how: "minted", value };
+}
+
 // ---- purge -------------------------------------------------------------------
 
 export interface PurgeOptions extends SecretsOptions {

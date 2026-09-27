@@ -4,11 +4,13 @@
 // and `metistry update` end to end — versioned images pulled, migrations
 // run against `current`, the lock pinned to the release that was actually
 // installed.
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { cp, mkdir, mkdtemp, readFile, readlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { serializeLock, type LockFile } from "../src/lock.js";
 import {
@@ -29,7 +31,7 @@ import {
 } from "../src/release.js";
 import { StepFailed, StepRunner } from "../src/steps.js";
 import { update } from "../src/update.js";
-import { checkout, fakeExec, okDoctor, put } from "./fixtures.js";
+import { checkout, fakeExec, okDoctor, put, WATCHDOG } from "./fixtures.js";
 
 const NOW = new Date("2026-09-07T15:00:00Z");
 const REPO = "foldedspacelabs/metistry";
@@ -121,6 +123,42 @@ describe("release assets", () => {
       expect(script, profile).toContain(profile);
       expect(existsSync(new URL(`../../../ops/sandbox/${profile}.sb`, import.meta.url)), profile).toBe(true);
     }
+  });
+
+  // Suspected, and ruled out, on the 0.12.0 → 0.14.0 upgrade (the 0.14.0 pack
+  // validates all 26 of its manifests; 0.12.0's CLI was what rejected them).
+  // A pack whose own code cannot read its own manifests is still exactly the
+  // failure that would look like that, so it is refused before it is tarred.
+  it("the pack is refused when its own doctor cannot validate its own manifests — and CI runs the same check", async () => {
+    const script = readFileSync(new URL("../../../ops/release/pack-runtime.sh", import.meta.url), "utf8");
+    expect(script).toContain('node "$root/ops/release/check-pack-manifests.mjs" "$stage"');
+    expect(script.indexOf("check-pack-manifests.mjs")).toBeGreaterThan(script.indexOf("pnpm install --prod")); // the packed code, with the packed deps
+    expect(script.indexOf("check-pack-manifests.mjs")).toBeLessThan(script.indexOf('tar -czf "$tarball"'));
+    const ci = readFileSync(new URL("../../../.github/workflows/ci.yml", import.meta.url), "utf8");
+    expect(ci).toContain("node ops/release/check-pack-manifests.mjs .");
+
+    // the checker, against a product dir whose built doctor says one manifest is invalid
+    const checker = fileURLToPath(new URL("../../../ops/release/check-pack-manifests.mjs", import.meta.url));
+    const dir = await mkdtemp(join(tmpdir(), "metistry-packcheck-"));
+    const stub = (rows: unknown[]) => `export async function walkManifests() { return ${JSON.stringify(rows)}; }\n`;
+    const ok = { dir: "collectors/a", result: { ok: true } };
+    const routine = { dir: "routines/b", result: { ok: true } };
+    const bad = { dir: "routines/c", result: { ok: false, errors: ["schedule: Invalid input: expected string, received object"] } };
+    await put(dir, "packages/cli/dist/doctor.js", stub([ok, routine, bad]));
+    const run = (d: string) => spawnSync(process.execPath, [checker, d], { encoding: "utf8" });
+    const failed = run(dir);
+    expect(failed.status).toBe(1);
+    expect(failed.stderr).toContain("routines/c/manifest.yaml: schedule: Invalid input: expected string, received object");
+    expect(failed.stdout).toContain("3 manifest(s), 1 invalid — FAILED");
+    await put(dir, "packages/cli/dist/doctor.js", stub([ok, routine]));
+    expect(run(dir).status).toBe(0);
+    // a pack that lost its routines/ entirely is not "all valid"
+    await put(dir, "packages/cli/dist/doctor.js", stub([ok]));
+    const empty = run(dir);
+    expect(empty.status).toBe(1);
+    expect(empty.stderr).toContain("routines/ contributed no manifest");
+    // no built CLI at all is a failure, not a pass
+    expect(run(await mkdtemp(join(tmpdir(), "metistry-packcheck-"))).status).toBe(1);
   });
 
   it("runtimePackCommit reads the manifest's commit and never fabricates one", async () => {
@@ -494,6 +532,32 @@ describe("metistry update --channel release", () => {
     const r = await update({ ...base(P, { METISTRY_INSTANCE_DIR: inst }), exec, fetchFn: s.fn, target: TARGET, skipMigrate: true, openSession: async () => null });
 
     expect(r.lock).toEqual({ product: { version: "0.2.0", commit: "prior-sha", source: "release" }, updated_at: NOW.toISOString(), migrations_applied: [] });
+  });
+
+  // 0.12.0 → 0.14.0: `before` was re-hashed AFTER `current` moved, so it
+  // hashed the new release twice, found nothing changed, and a release-mode
+  // update never kickstarted a job for new code.
+  it("kickstarts the jobs whose code differs between the release it left and the one it installed", async () => {
+    const P = await mkdtemp(join(tmpdir(), "metistry-rel-"));
+    const inst = await mkdtemp(join(tmpdir(), "mi-"));
+    const old = await checkout();
+    await cp(old, join(P, "releases", "0.1.0"), { recursive: true });
+    await switchCurrent(P, "0.1.0");
+    const src = await checkout();
+    await put(src, "apps/watchdog/dist/lib/util.js", "v2"); // the new release changed the watchdog, and only it
+    const prior: LockFile = { product: { version: "0.1.0", commit: "unknown", source: "release" }, updated_at: "2026-09-01T00:00:00.000Z", migrations_applied: [] };
+    await mkdir(join(inst, ".metistry"), { recursive: true });
+    await writeFile(join(inst, ".metistry", "metistry.lock"), serializeLock(prior));
+    const exec = await tarInto(src);
+    const lines: string[] = [];
+    // an install that already holds the owner bearer, so nothing but the code change can restart anything
+    const r = await update({ ...base(P, { METISTRY_INSTANCE_DIR: inst, METISTRY_BRIDGE_TOKEN_RECONCILER_USER: "owner" }), out: (l) => lines.push(l), exec, fetchFn: releaseServer({ versions: ["0.2.0"] }).fn, target: TARGET, skipMigrate: true, openSession: async () => null });
+
+    expect(r.release).toMatchObject({ version: "0.2.0", installed: true });
+    expect(r.restart).toMatchObject({ reached: true, completed: true, owed: [WATCHDOG] });
+    expect(r.restarted).toEqual([WATCHDOG]);
+    expect(exec.calls.filter((c) => c.cmd === "launchctl" && c.args[0] === "kickstart").map((c) => c.args.at(-1))).toEqual([`gui/501/${WATCHDOG}`]);
+    expect(lines.join("\n")).toContain("1 job(s) kickstarted");
   });
 
   it("--version pins a specific release; --rollback flips back without downloading anything", async () => {

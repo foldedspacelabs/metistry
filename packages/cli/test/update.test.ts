@@ -222,6 +222,10 @@ describe("metistry update", () => {
     expect(session.ended).toBe(true);
     expect(exec.calls.map(shown)).not.toContain("docker compose up -d --build");
     expect(f.calls).toEqual([]);
+    // the summary says the restart never began, not that nothing needed one
+    expect(r.restart.reached).toBe(false);
+    expect(lines.at(-1)).toContain("nothing restarted — the update stopped before its restart step");
+    expect(lines.at(-1)).not.toContain("nothing kickstarted");
   });
 
   it("the bridge refusing the write fails the update with the envelope's message; a URL without a token is refused before any call", async () => {
@@ -246,11 +250,158 @@ describe("metistry update", () => {
     const noOwner = { METISTRY_RECONCILER_URL: BRIDGE.METISTRY_RECONCILER_URL, METISTRY_BRIDGE_TOKEN_RECONCILER: "tok" };
     const r3 = await update({ ...base(P, noOwner), out: (l) => lines.push(l), exec: fakeExec(), skipBuild: true, skipMigrate: true, fetchFn: minted.fn, mintOwnerToken: () => "fresh-owner", doctorFn: okDoctor });
     expect(r3.code).toBe(0);
-    expect((minted.calls[0]!.init.headers as Record<string, string>).authorization).toBe("Bearer fresh-owner");
+    // (after waiting for the reconciler it kickstarted to answer on /check)
+    const lockPost = minted.calls.find((c) => c.url.endsWith("/vault/write"))!;
+    expect((lockPost.init.headers as Record<string, string>).authorization).toBe("Bearer fresh-owner");
     expect(lines.join("\n")).toContain("METISTRY_BRIDGE_TOKEN_RECONCILER_USER minted");
     // …and the reconciler is kickstarted for it, because a bearer it has not
     // read is not a bearer
     expect(lines.join("\n")).toContain("so it reads the freshly minted METISTRY_BRIDGE_TOKEN_RECONCILER_USER");
+  });
+
+  // Rehearsed 0.12.0 → 0.14.x: the kickstart returns before the restarted
+  // reconciler listens, and the lock POST that followed at once was refused
+  // with "did not answer (fetch failed)".
+  it("waits for a reconciler it just restarted to answer before writing the lock through it", async () => {
+    const P = await checkout({ git: true });
+    const calls: string[] = [];
+    let down = 3;
+    const fetchFn = (async (url: string | URL | Request) => {
+      calls.push(String(url));
+      if (String(url).endsWith("/check") && down-- > 0) throw new TypeError("fetch failed");
+      return new Response(JSON.stringify({ queued: true }), { status: 201 });
+    }) as unknown as typeof fetch;
+    const lines: string[] = [];
+    // a fresh object each run: update writes the bearer it mints back into the env it was handed
+    const noOwner = (): NodeJS.ProcessEnv => ({ METISTRY_RECONCILER_URL: BRIDGE.METISTRY_RECONCILER_URL, METISTRY_BRIDGE_TOKEN_RECONCILER: "tok" });
+    const r = await update({ ...base(P, noOwner()), out: (l) => lines.push(l), exec: fakeExec(), skipBuild: true, skipMigrate: true, fetchFn, mintOwnerToken: () => "fresh-owner", doctorFn: okDoctor, reconcilerReady: { intervalMs: 1, timeoutMs: 5_000 } });
+    expect(r.code).toBe(0);
+    expect(r.restarted).toEqual([RECONCILER]);
+    expect(calls).toEqual([...Array(4).fill("http://127.0.0.1:7812/check"), "http://127.0.0.1:7812/vault/write"]);
+    expect(lines.join("\n")).toContain("reconciler: answering again at http://127.0.0.1:7812 after its restart");
+
+    // one that never comes back: the wait ends, the write is still tried, and fails with its own remediation
+    const never = (async (url: string | URL | Request) => {
+      throw new TypeError(`fetch failed ${String(url)}`);
+    }) as unknown as typeof fetch;
+    const lines2: string[] = [];
+    const r2 = await update({ ...base(P, noOwner()), out: (l) => lines2.push(l), exec: fakeExec(), skipBuild: true, skipMigrate: true, fetchFn: never, mintOwnerToken: () => "fresh-owner", doctorFn: okDoctor, reconcilerReady: { intervalMs: 1, timeoutMs: 20 } });
+    expect(r2.code).toBe(1);
+    expect(lines2.join("\n")).toContain("reconciler: not answering at http://127.0.0.1:7812 0s after its restart (METISTRY_RECONCILER_READY_TIMEOUT_MS) — writing anyway");
+    expect(lines2.join("\n")).toContain("did not answer (fetch failed http://127.0.0.1:7812/vault/write)");
+  });
+
+  // The 0.12.0 → 0.14.0 upgrade: the mint failed, the step threw, and every
+  // job whose code changed stayed on the release the update had just left.
+  it("a Keychain that refuses the mint does not stop the restart: every changed job is kickstarted, the lock waits for the bearer, and only the exit code says so", async () => {
+    const P = await checkout({ git: true });
+    const inst = await mkdtemp(join(tmpdir(), "mi-"));
+    const exec = fakeExec({
+      git: (args) => (args[0] === "rev-parse" ? { stdout: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n" } : undefined),
+      pnpm: async (args) => {
+        if (args[0] === "-r") await put(P, "apps/watchdog/dist/lib/util.js", "v2");
+      },
+      // nothing in this instance's Keychain, and a write that fails the way the
+      // owner's did: exit 1, nothing on stderr
+      security: (args) => (args[0] === "find-generic-password" ? { code: 44, stderr: "The specified item could not be found in the keychain." } : { code: 1, stderr: "" }),
+    });
+    const f = fakeFetch();
+    const lines: string[] = [];
+    const env: NodeJS.ProcessEnv = { METISTRY_INSTANCE_DIR: inst, METISTRY_RECONCILER_URL: BRIDGE.METISTRY_RECONCILER_URL, METISTRY_BRIDGE_TOKEN_RECONCILER: "tok" };
+    const r = await update({ ...base(P, env), out: (l) => lines.push(l), exec, fetchFn: f.fn, openSession: async () => fakeSession(), doctorFn: okDoctor });
+    const text = lines.join("\n");
+
+    expect(r.code).toBe(1);
+    expect(r.restart).toEqual({ reached: true, completed: true, owed: [WATCHDOG] });
+    expect(r.restarted).toEqual([WATCHDOG]);
+    expect(text).toContain("could not mint METISTRY_BRIDGE_TOKEN_RECONCILER_USER (security add-generic-password metistry:METISTRY_BRIDGE_TOKEN_RECONCILER_USER failed (1): no message — a locked keychain, or a timeout)");
+    expect(text).toContain("— the restart goes on without it");
+    expect(text).not.toContain("metistry update: could not mint"); // not a step failure
+    expect(env.METISTRY_BRIDGE_TOKEN_RECONCILER_USER).toBeUndefined();
+    // the lock is a protected path: no POST on a bearer the bridge would refuse…
+    expect(f.calls).toEqual([]);
+    expect(text).toContain(".metistry/metistry.lock NOT written");
+    // …and the steps after it that do not need the bearer still ran
+    expect(r.seededTemplates).toBeDefined();
+    expect(text).toContain("== secrets");
+    // what is left, with the commands in the order they must run, once each
+    expect(r.deferred.map((d) => d.what)).toEqual(["METISTRY_BRIDGE_TOKEN_RECONCILER_USER", ".metistry/metistry.lock"]);
+    const block = text.slice(text.indexOf("not done"));
+    const at = (c: string) => block.indexOf(`    ${c}\n`);
+    expect(at("metistry secrets mint METISTRY_BRIDGE_TOKEN_RECONCILER_USER")).toBeGreaterThan(-1);
+    expect(at("metistry secrets mint METISTRY_BRIDGE_TOKEN_RECONCILER_USER")).toBeLessThan(at("metistry restart reconciler"));
+    expect(at("metistry restart reconciler")).toBeLessThan(block.lastIndexOf("    metistry update"));
+    expect(lines.at(-1)).toContain("update incomplete");
+    expect(lines.at(-1)).toContain("1 job(s) kickstarted");
+    expect(lines.at(-1)).toContain("not done: METISTRY_BRIDGE_TOKEN_RECONCILER_USER, .metistry/metistry.lock");
+  });
+
+  it("an owner bearer this instance's Keychain already holds is copied into .env, not minted — and the reconciler is restarted to read it", async () => {
+    const P = await checkout({ git: true });
+    const inst = await mkdtemp(join(tmpdir(), "mi-"));
+    const exec = fakeExec({
+      git: (args) => (args[0] === "rev-parse" ? { stdout: "abc\n" } : undefined),
+      security: (args) =>
+        args[0] === "find-generic-password" && args.includes("metistry:METISTRY_BRIDGE_TOKEN_RECONCILER_USER")
+          ? { stdout: "from-the-keychain\n" }
+          : args[0] === "-i"
+            ? { code: 99, stderr: "a write — there must not be one" }
+            : undefined,
+    });
+    const f = fakeFetch();
+    const lines: string[] = [];
+    const r = await update({
+      ...base(P, { METISTRY_INSTANCE_DIR: inst, METISTRY_RECONCILER_URL: BRIDGE.METISTRY_RECONCILER_URL, METISTRY_BRIDGE_TOKEN_RECONCILER: "tok" }),
+      out: (l) => lines.push(l),
+      exec,
+      skipBuild: true,
+      skipMigrate: true,
+      fetchFn: f.fn,
+      doctorFn: okDoctor,
+    });
+    expect(r.code).toBe(0);
+    expect(exec.calls.filter((c) => c.cmd === "security" && c.args[0] === "-i")).toEqual([]);
+    expect(readFileSync(join(inst, ".metistry", "state", ".env"), "utf8")).toMatch(/^METISTRY_BRIDGE_TOKEN_RECONCILER_USER=from-the-keychain$/m);
+    expect((f.calls.find((c) => c.url.endsWith("/vault/write"))!.init.headers as Record<string, string>).authorization).toBe("Bearer from-the-keychain");
+    expect(r.restarted).toEqual([RECONCILER]);
+    const text = lines.join("\n");
+    expect(text).toContain("copied from this instance's Keychain item into .env");
+    expect(text).toContain("so it reads the newly written METISTRY_BRIDGE_TOKEN_RECONCILER_USER");
+    expect(text).not.toContain("from-the-keychain");
+  });
+
+  it("a restart that stops part-way says which changed jobs it never reached — never \"nothing kickstarted\"", async () => {
+    const P = await checkout({ git: true });
+    const inst = await mkdtemp(join(tmpdir(), "mi-"));
+    const exec = fakeExec({
+      pnpm: async (args) => {
+        if (args[0] === "-r") await put(P, "apps/watchdog/dist/lib/util.js", "v2");
+      },
+      docker: () => ({ code: 1, stderr: "Cannot connect to the Docker daemon" }),
+    });
+    const lines: string[] = [];
+    const r = await update({ ...base(P, { METISTRY_INSTANCE_DIR: inst, ...BRIDGE }), out: (l) => lines.push(l), exec, fetchFn: fakeFetch().fn, openSession: async () => fakeSession(), doctorFn: okDoctor });
+    expect(r.code).toBe(1);
+    expect(r.restart).toEqual({ reached: true, completed: false, owed: [WATCHDOG] });
+    const summary = lines.at(-1)!;
+    expect(summary).toContain(`restart interrupted — none kickstarted; NOT kickstarted (code changed): ${WATCHDOG}`);
+    expect(summary).not.toContain("nothing kickstarted");
+  });
+
+  it("names what only the product checkout's .env still has, and the verb that retires it — never a value, never a move", async () => {
+    const P = await checkout({ git: true });
+    const inst = await mkdtemp(join(tmpdir(), "mi-"));
+    await writeFile(join(P, ".env"), "METISTRY_BRIDGE_TOKEN_EVENTKIT=legacy-only-value\nMETISTRY_DB_PORT=5432\n");
+    await mkdir(join(inst, ".metistry", "state"), { recursive: true });
+    await writeFile(join(inst, ".metistry", "state", ".env"), "METISTRY_DB_PORT=55432\n");
+    const lines: string[] = [];
+    const r = await update({ ...base(P, { METISTRY_INSTANCE_DIR: inst, ...BRIDGE }), out: (l) => lines.push(l), exec: fakeExec(), skipBuild: true, skipMigrate: true, fetchFn: fakeFetch().fn, doctorFn: okDoctor });
+    expect(r.code).toBe(0);
+    const text = lines.join("\n");
+    expect(text).toContain(`legacy .env: ${join(P, ".env")} is still read as a fallback, and only it has METISTRY_BRIDGE_TOKEN_EVENTKIT — \`metistry secrets retire-legacy-env\` previews moving them`);
+    expect(text).not.toContain("legacy-only-value");
+    expect(existsSync(join(P, ".env"))).toBe(true);
+    expect(readFileSync(join(inst, ".metistry", "state", ".env"), "utf8")).toBe("METISTRY_DB_PORT=55432\n");
   });
 
   it("without a bridge: a local instance dir gets the lock written directly (and read back); a running reconciler with no URL is refused; no instance dir writes nothing", async () => {

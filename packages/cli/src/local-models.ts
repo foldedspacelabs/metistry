@@ -28,7 +28,7 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, open, rename, rm } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join } from "node:path";
-import { INSTANCE_LAYOUT, instanceStatePath, resolveInstanceLayout, runCheck, type ChildSpecInput, type CheckResult, type Compute, type LlamaServe, type Provider } from "@foldedspacelabs/metistry-core";
+import { INSTANCE_LAYOUT, credentialFromEnv, instanceStatePath, providerCredential, resolveInstanceLayout, runCheck, type ChildSpecInput, type CheckResult, type Compute, type LlamaServe, type Provider } from "@foldedspacelabs/metistry-core";
 import type { Exec } from "./exec.js";
 import { StepFailed } from "./steps.js";
 
@@ -142,10 +142,50 @@ export interface ModelsProbe {
   owned_by: Record<string, string>;
   /** one line: a model count, an HTTP status, or why it did not answer. Never a secret. */
   detail: string;
+  /**
+   * What the listing says about a model beyond its id, where it says it —
+   * OpenRouter's catalogue carries a display name, a context window, a
+   * per-token price and the parameters a model takes; a local server's
+   * carries none of it. The catalogue search (`modelsSearch`) reads this;
+   * nothing is invented where a listing is silent.
+   */
+  details?: Record<string, ListingDetail>;
+}
+
+export interface ListingDetail {
+  name?: string;
+  context?: number;
+  /** USD per million tokens, from the listing's per-token price */
+  in_per_m?: number;
+  out_per_m?: number;
+  /** `supported_parameters` includes `tools` */
+  tools?: boolean;
 }
 
 interface ModelsResponse {
-  data?: Array<{ id?: unknown; owned_by?: unknown }>;
+  data?: Array<{ id?: unknown; owned_by?: unknown; name?: unknown; context_length?: unknown; pricing?: { prompt?: unknown; completion?: unknown } | null; supported_parameters?: unknown }>;
+}
+
+/** A per-token USD price as a listing spells it (OpenRouter: the string `"0.000003"`) → per million. Negative (`"-1"`, a router's "varies") or unparseable is no price. */
+function perMillion(v: unknown): number | undefined {
+  const n = typeof v === "number" ? v : typeof v === "string" && v.trim() !== "" ? Number(v) : Number.NaN;
+  if (!Number.isFinite(n) || n < 0) return undefined;
+  return Math.round(n * 1e6 * 1e6) / 1e6;
+}
+
+/** The listing's own facts about one model — only the fields it actually carries. */
+function detailOf(m: NonNullable<ModelsResponse["data"]>[number]): ListingDetail | undefined {
+  const d: ListingDetail = {};
+  if (typeof m.name === "string" && m.name.trim() !== "") d.name = m.name.trim();
+  if (typeof m.context_length === "number" && Number.isInteger(m.context_length) && m.context_length > 0) d.context = m.context_length;
+  const input = perMillion(m.pricing?.prompt);
+  const output = perMillion(m.pricing?.completion);
+  if (input !== undefined && output !== undefined) {
+    d.in_per_m = input;
+    d.out_per_m = output;
+  }
+  if (Array.isArray(m.supported_parameters) && m.supported_parameters.includes("tools")) d.tools = true;
+  return Object.keys(d).length > 0 ? d : undefined;
 }
 
 /**
@@ -172,12 +212,15 @@ export async function fetchModels(opts: { url: string; bearer?: string | undefin
     return { ok: false, models: [], owned_by: {}, detail: `${url} answered ${res.status} but not JSON` };
   }
   const owned: Record<string, string> = {};
+  const details: Record<string, ListingDetail> = {};
   for (const m of body.data ?? []) {
     const id = String(m?.id ?? "");
     if (id && typeof m?.owned_by === "string") owned[id] = m.owned_by;
+    const d = id && m ? detailOf(m) : undefined;
+    if (d) details[id] = d;
   }
   const models = (body.data ?? []).map((m) => String(m?.id ?? "")).filter(Boolean).sort();
-  return { ok: true, models, owned_by: owned, detail: `${url} → ${models.length} model(s)` };
+  return { ok: true, models, owned_by: owned, detail: `${url} → ${models.length} model(s)`, ...(Object.keys(details).length > 0 ? { details } : {}) };
 }
 
 // ---- discovery ------------------------------------------------------------------
@@ -216,9 +259,11 @@ export async function probeLocalServers(opts: { compute?: Compute | undefined; f
       const url = apiRoot(configured?.provider.base_url ?? spec.defaultBaseUrl);
       // The provider's own `auth.secret` when it declares one, the server's
       // conventional variable when it does not: a bridge answers 401 without
-      // a bearer, and reporting that as "not running" would be a lie.
-      const tokenVar = configured?.provider.auth?.secret ?? spec.tokenVar;
-      const bearer = tokenVar ? env[tokenVar] : undefined;
+      // a bearer, and reporting that as "not running" would be a lie. Read
+      // from the environment — where every service reads it — through the
+      // one resolver (`credentialFromEnv`), whichever spelling it takes.
+      const cred = configured ? providerCredential(configured.provider) : undefined;
+      const bearer = cred ? credentialFromEnv(cred, env) : spec.tokenVar ? env[spec.tokenVar] : undefined;
       const probe = await fetchModels({ url, bearer, fetchFn: opts.fetchFn, timeoutMs: opts.timeoutMs ?? 2_000, local: true });
       return {
         server,

@@ -17,8 +17,8 @@
 // and in a test with nothing on disk.
 //
 // What is deliberately NOT here: making a call, counting a token, or
-// enforcing a budget. Those are the engine's (PR 3). A budget in this file
-// is recorded and validated; nothing yet refuses a call because of one.
+// enforcing a budget. Those are the engine's (`apps/assistant`), which
+// checks every budget below before the call (C133).
 
 import { readFile } from "node:fs/promises";
 import { parse as parseYaml } from "yaml";
@@ -27,6 +27,7 @@ import { INSTANCE_LAYOUT } from "./instance-layout.js";
 import { dataPolicySchema } from "./data-policy.js";
 import { isLegacyCrewModel, SAME_AS_ASSISTANT } from "./crew-model.js";
 import { PROVIDER_NAME_RE, modelRefIssue, parseModelRef, type ModelRef } from "./model-ref.js";
+import { parseSecretReference, secretDeliveryVar } from "./secret-ref.js";
 import { DEFAULT_TIER, EFFORTS, type Effort, type TierMap } from "./tiers.js";
 
 /** The file's name wherever it lives — the instance's `.metistry/`, and `seed/`. */
@@ -86,8 +87,21 @@ export type BudgetAction = (typeof BUDGET_ACTIONS)[number];
 /** `stop` by default: an unstated budget action must be the safe one (C5). */
 export const DEFAULT_BUDGET_ACTION: BudgetAction = "stop";
 
-/** An environment-variable NAME. A value can never match it, which is the point. */
+/** An environment-variable NAME — what an `env:` reference (and the pre-T4-18 bare spelling) takes. A value can never match it, which is the point. */
 export const SECRET_NAME_RE = /^[A-Z][A-Z0-9_]*$/;
+
+/**
+ * How a provider is billed (C128, screen-15 §5.3): `token` — by the token,
+ * the default for anything off this machine — or `subscription`, a plan
+ * whose own window is its limit (T4-19). An on_machine provider bills
+ * nothing, so it has no `billing:` at all.
+ */
+export const BILLINGS = ["token", "subscription"] as const;
+export type Billing = (typeof BILLINGS)[number];
+
+/** The ONE tag a provider shows (C132): Local (free), Cloud (by the token), Subscription. There is no "By token" tag — Cloud without Subscription means it. */
+export const PROVIDER_TAGS = ["local", "cloud", "subscription"] as const;
+export type ProviderTag = (typeof PROVIDER_TAGS)[number];
 
 /** Tier and crew names, the same spelling `tiersSchema` already enforces. */
 const NAME_RE = /^[a-z][a-z0-9_-]*$/;
@@ -128,12 +142,113 @@ const baseUrl = z
 
 const authSchema = z.strictObject({
   /**
-   * The NAME of a Keychain item, never a value (C6: provider secrets are
-   * user scope). The casing rule is what makes a pasted key impossible to
-   * mistake for a name — `sk-or-v1-…` cannot match it.
+   * A REFERENCE to the credential, never the credential (§2.14, T4-18) —
+   * one of the three spellings `credentialOf` reads. Each is a shape a
+   * pasted key cannot take: `sk-or-v1-…` is neither braces, nor `env:`,
+   * nor UPPER_SNAKE.
    */
-  secret: z.string().regex(SECRET_NAME_RE, "auth.secret is the NAME of a secret (UPPER_SNAKE_CASE, e.g. METISTRY_OPENROUTER_API_KEY), never the key itself — `metistry compute providers add` puts the value in the login Keychain"),
+  secret: z.string().refine((s) => credentialOf(s) !== undefined, {
+    message:
+      "auth.secret is a REFERENCE to a secret, never the key itself — `{{ secret.<name> }}` for one of this instance's secrets " +
+      "(`metistry compute providers add` stores the key from stdin and writes the reference), or `env:<NAME>` for a variable of this install's environment",
+  }),
 });
+
+// ---- credentials: what auth.secret names, and where a service finds it -----------
+
+/**
+ * What a provider's `auth.secret` refers to (plan §2.14, T4-18):
+ *
+ *   `{{ secret.<name> }}`  one of THIS instance's secrets — the value in the
+ *                          login Keychain under the instance's own account,
+ *                          its policy in `.metistry/secrets.yaml`. What
+ *                          `providers add` writes.
+ *   `env:<NAME>`           a variable of this install's environment: a bridge
+ *                          bearer this install minted, a key a container is
+ *                          handed. Accepted for one release (§2.14).
+ *   `<NAME>`               the pre-T4-18 spelling of the same thing, kept so
+ *                          every existing file loads. `metistry secrets
+ *                          migrate-scope` rewrites the retired provider
+ *                          credentials among them to the first form.
+ */
+export type ProviderCredential =
+  | { kind: "secret"; /** the secret's lowercase name */ name: string; /** the reference as written */ ref: string }
+  | { kind: "env"; /** the variable */ name: string; ref: string; /** written bare, without `env:` — the pre-T4-18 spelling */ legacy: boolean };
+
+/** Parse one `auth.secret`. Undefined for anything that is not a reference — which is what a pasted key is. */
+export function credentialOf(ref: string): ProviderCredential | undefined {
+  const r = parseSecretReference(ref);
+  if (r?.kind === "secret") return { kind: "secret", name: r.name, ref };
+  if (r?.kind === "env") return { kind: "env", name: r.name, ref, legacy: false };
+  const bare = ref.trim();
+  if (SECRET_NAME_RE.test(bare)) return { kind: "env", name: bare, ref, legacy: true };
+  return undefined;
+}
+
+/** A provider's credential, or undefined when it authenticates with nothing (a local server). */
+export function providerCredential(p: Provider): ProviderCredential | undefined {
+  return p.auth ? credentialOf(p.auth.secret) : undefined;
+}
+
+/**
+ * The environment variable(s) a service reads a provider's credential from,
+ * in order.
+ *
+ * **Never the Keychain.** The engine has no shell and no `security` (invariant
+ * 9), runs in a sandbox that reads four config files by name, and is started
+ * by the supervisor with an allowlisted environment. So a secret reaches it
+ * the way every credential already does — from the OWNER'S hand: `metistry
+ * secrets sync --to env` reads this instance's Keychain account and writes
+ * the delivery line into `.metistry/state/.env` (0600), and `metistry up`
+ * passes exactly the names this file references (`assistantEnvKeys`). A
+ * console door that handed the engine a value was the alternative, and it is
+ * the one thing §2.2 M7 rules out: a value never crosses the API.
+ *
+ *   `{{ secret.x }}`  `METISTRY_SECRET_X` (`secretDeliveryVar`). For one
+ *                     release also `METISTRY_X` when `x` is `*_api_key`: the
+ *                     line T4-3 filled from this very secret, which a running
+ *                     engine was started with — `migrate-scope` rewriting the
+ *                     reference under it must not cut it off before the next
+ *                     `metistry up`. Never for a name that itself begins
+ *                     `secret_`, whose fallback would spell ANOTHER secret's
+ *                     delivery variable.
+ *   `env:NAME`, `NAME`  `NAME`.
+ */
+export function credentialEnvNames(c: ProviderCredential): string[] {
+  if (c.kind === "env") return [c.name];
+  const own = secretDeliveryVar(c.name);
+  return /_api_key$/.test(c.name) && !c.name.startsWith("secret_") ? [own, `METISTRY_${c.name.toUpperCase()}`] : [own];
+}
+
+/** The credential's value from an environment — the first non-empty of `credentialEnvNames` — or undefined. The one reader the engine, the collectors and `up` share. */
+export function credentialFromEnv(c: ProviderCredential, env: NodeJS.ProcessEnv): string | undefined {
+  for (const name of credentialEnvNames(c)) {
+    const v = (env[name] ?? "").trim();
+    if (v) return v;
+  }
+  return undefined;
+}
+
+/** Every `{{ secret.x }}` this file's providers reference, each once, in declaration order — what `secrets sync --to env` delivers. */
+export function providerSecretNames(cfg: Compute): string[] {
+  const out: string[] = [];
+  for (const p of Object.values(cfg.providers)) {
+    const c = providerCredential(p);
+    if (c?.kind === "secret" && !out.includes(c.name)) out.push(c.name);
+  }
+  return out;
+}
+
+/** Whether this provider is switched on (C130): absent `enabled:` is on. */
+export function providerEnabled(p: Provider): boolean {
+  return p.enabled !== false;
+}
+
+/** The provider's one tag (C132): on this machine is Local; off it, Subscription or Cloud. */
+export function providerTag(p: Provider): ProviderTag {
+  if (p.locality === "on_machine") return "local";
+  return p.billing === "subscription" ? "subscription" : "cloud";
+}
 
 /**
  * The local server runtimes Metistry RUNS ITSELF — the two whose lifecycle
@@ -215,6 +330,15 @@ const pricingSchema = z.strictObject({
 
 export const providerSchema = z.strictObject({
   kind: z.enum(PROVIDER_KINDS, { error: `kind must be one of ${PROVIDER_KINDS.join(", ")} — one engine, one wire protocol (C2)` }),
+  /**
+   * The provider's switch (C130). `false` = neither searched nor offered, and
+   * nothing may be assigned to it — the schema refuses an assignment that
+   * names a switched-off provider, so "off" cannot mean "still answering
+   * turns". Absent = on, which is every file written before T4-18.
+   */
+  enabled: z.boolean({ error: "enabled is true or false — whether this provider is searched, offered and may be assigned" }).optional(),
+  /** `token` (absent) or `subscription` — off_machine only (checked below). */
+  billing: z.enum(BILLINGS, { error: `billing must be ${BILLINGS.join(" or ")} — how this provider charges (C128)` }).optional(),
   base_url: baseUrl,
   locality: z.enum(LOCALITIES, { error: `locality must be ${LOCALITIES.join(" or ")} — it is what decides whether a data policy is required` }),
   auth: authSchema.optional(),
@@ -249,6 +373,11 @@ export const providerSchema = z.strictObject({
     // line in the file that does nothing, which is worse than a refusal.
     if (p.caching === "auto" && p.locality !== "off_machine") {
       ctx.addIssue({ code: "custom", path: ["caching"], message: `caching: auto sends a prompt-caching field to a provider that bills for the prompt, and this one is ${p.locality} — a local server caches its own prefix with no field to send. Remove caching:.` });
+    }
+    // A local server bills nothing, by definition (`cost_source: "local"`), so
+    // a billing mode on one would be a line that says something untrue.
+    if (p.billing !== undefined && p.locality !== "off_machine") {
+      ctx.addIssue({ code: "custom", path: ["billing"], message: `billing: is how a provider off this machine charges, and this one is ${p.locality} — a local server bills nothing. Remove billing:.` });
     }
     if (!p.serve) return;
     if (p.locality !== "on_machine") {
@@ -320,7 +449,7 @@ export function collectorProviderIssue(collector: string, providerName: string, 
  * file declares no local provider at all.
  */
 export function firstOnMachineBaseUrl(cfg: Compute): string | undefined {
-  return Object.values(cfg.providers).find((p) => p.locality === "on_machine")?.base_url;
+  return Object.values(cfg.providers).find((p) => p.locality === "on_machine" && providerEnabled(p))?.base_url;
 }
 
 // ---- assignments -------------------------------------------------------------
@@ -460,6 +589,17 @@ export const computeSchema = z
           code: "custom",
           path,
           message: `provider ${JSON.stringify(provider)} is not declared in this file's providers: (${known.join(", ") || "none"}) — add it with \`metistry compute providers add --from <template>\``,
+        });
+        return;
+      }
+      // Switched off means not offered — and an assignment is the strongest
+      // form of offering there is. Refused here, at load, so "off" can never
+      // quietly mean "still answering turns".
+      if (!providerEnabled(cfg.providers[provider]!)) {
+        ctx.addIssue({
+          code: "custom",
+          path,
+          message: `providers.${provider} is switched off (enabled: false), so nothing may run on it — switch it on (\`metistry compute providers set ${provider} --enabled on\`) or assign a model another provider serves`,
         });
       }
     };
@@ -670,6 +810,14 @@ export function resolveCrewAssignment(cfg: Compute, crew: string, def: { readonl
       reason:
         `crew '${crew}' runs on ${ref.ref}, but compute.yaml declares no provider '${ref.provider}' — ` +
         `add it (\`metistry compute providers add --from <template> --name ${ref.provider}\`) or change the crew's model (\`metistry agents define ${crew} --model <provider/model>\`)`,
+    };
+  }
+  if (!providerEnabled(config)) {
+    return {
+      ok: false,
+      reason:
+        `crew '${crew}' runs on ${ref.ref}, but providers.${ref.provider} is switched off (enabled: false) — ` +
+        `switch it on (\`metistry compute providers set ${ref.provider} --enabled on\`) or change the crew's model (\`metistry agents define ${crew} --model <provider/model>\`)`,
     };
   }
   return { ok: true, assignment: { ...ref, effort: def.effort, from: `crew:${crew}`, config, critical: false } };
@@ -896,8 +1044,9 @@ export async function startComputeWatch(opts: ComputeWatchOptions): Promise<Comp
  * It used to be one environment variable. Since C2/C3 an engine is
  * configuration plus a credential: `assignments.default` says which provider
  * and model a turn runs on, and the provider's `auth.secret` names the
- * Keychain item whose value reaches the process as an environment variable
- * of that name. Either half missing = no engine, and that is a SUPPORTED
+ * credential, whose value reaches the process in its environment
+ * (`credentialEnvNames` — never the Keychain). Either half missing = no
+ * engine, and that is a SUPPORTED
  * shape, not a fault: the assistant is the only component that needs a
  * model, so `up` leaves it out of the supervisor's children rather than
  * starting a child that could only crash-loop. Everything model-free
@@ -909,7 +1058,7 @@ export interface EngineStatus {
   ok: boolean;
   /** what `default` resolved to, when `assignments.default` is there at all */
   assignment?: ResolvedAssignment;
-  /** the secret NAME the default provider declares, when it declares one (a local server needs none) */
+  /** the default provider's `auth.secret` as written — a reference, never a value — when it declares one (a local server needs none) */
   secret?: string;
   /** why not, naming the field or the variable that is missing — never a bare "misconfigured" */
   why?: string;
@@ -926,14 +1075,21 @@ export function engineStatus(cfg: Compute, env: NodeJS.ProcessEnv = process.env)
       fix: "metistry compute assign default <provider/model>",
     };
   }
+  const cred = providerCredential(assignment.config);
   const secret = assignment.config.auth?.secret;
-  if (secret && (env[secret] ?? "").trim() === "") {
+  if (cred && credentialFromEnv(cred, env) === undefined) {
     return {
       ok: false,
       assignment,
-      secret,
-      why: `assignments.default runs on ${assignment.ref}, and providers.${assignment.provider}.auth.secret names ${secret}, which is unset here`,
-      fix: `metistry compute providers add --from <template> --name ${assignment.provider} --secret ${secret}, then metistry secrets sync --to env`,
+      secret: cred.ref,
+      why:
+        cred.kind === "env"
+          ? `assignments.default runs on ${assignment.ref}, and providers.${assignment.provider}.auth.secret names ${cred.name}, which is unset here`
+          : `assignments.default runs on ${assignment.ref}, and providers.${assignment.provider}.auth.secret is {{ secret.${cred.name} }}, which reaches a service as ${credentialEnvNames(cred).join(" or ")} — unset here`,
+      fix:
+        cred.kind === "env"
+          ? `put ${cred.name} in this install's environment (metistry secrets sync --to env), or reference one of this instance's secrets: metistry compute providers set ${assignment.provider} --secret <name>`
+          : `metistry secrets set ${cred.name} (the key on stdin) if this instance has no such secret, then metistry secrets sync --to env`,
     };
   }
   return { ok: true, assignment, ...(secret ? { secret } : {}) };

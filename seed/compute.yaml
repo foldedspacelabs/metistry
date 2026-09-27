@@ -30,7 +30,7 @@
 #     kind: openai-compatible
 #     base_url: https://openrouter.ai/api/v1
 #     locality: off_machine
-#     auth: { secret: METISTRY_OPENROUTER_API_KEY }   # a NAME. The value lives in the login Keychain, user scope.
+#     auth: { secret: "{{ secret.openrouter_api_key }}" }   # a REFERENCE to one of this instance's secrets — never the key
 #     zdr: true
 #     caching: auto                                   # send OpenRouter's automatic prompt-caching field on every call (off everywhere else)
 #     request: { provider: { order: [anthropic], allow_fallbacks: false } }

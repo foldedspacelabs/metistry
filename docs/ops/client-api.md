@@ -316,7 +316,9 @@ takes a `since` cursor and answers with the next one.
 | `GET /api/commands` | owner | session · local_owner | natural | — | — | served | the composer's commands and agents, generated from the rules and the registry |
 | `GET /api/compute` | owner | session · local_owner | natural | — | — | served | providers, assignments, budgets and spend |
 | `GET /api/compute/models` | owner | session · local_owner | natural | — | — | served | the models each provider serves |
+| `GET /api/compute/catalogue` | owner | session · local_owner | natural | — | — | served · T4-18 | every switched-on provider's catalogue grouped by model, one line per place; `refresh` re-reads them |
 | `POST /api/compute/assign` | owner | session · local_owner | natural | — | — | served | assign a model and effort to a tier or a crew |
+| `POST /api/compute/unassign` | owner | session · local_owner | natural | — | — | served · T4-18 | remove a tier or a crew's assignment; `default` is reassigned, never removed |
 | `POST /api/compute/budget` | owner | session · local_owner | natural | — | — | served | set a spending limit and what happens at it |
 | `POST /api/compute/providers/test` | owner | session · local_owner | no | — | — | served | test a configured provider's credential |
 | `GET /api/knowledge/search` | owner | session · local_owner | natural | — | — | served | search the vault: keyword, semantic or hybrid |
@@ -1578,7 +1580,9 @@ in the repo holds the menu and the router together.
 ```
 GET  /api/compute                                     the same report as `metistry compute show --json`
 GET  /api/compute/models[?provider=<name>]            live /v1/models, per provider, plus unconfigured local servers
+GET  /api/compute/catalogue[?q=&provider=&refresh=true]   T4-18 — `compute models search --json`: grouped by model
 POST /api/compute/assign          {tier|crew, model, effort?}
+POST /api/compute/unassign        {tier|crew}            T4-18 — `compute unassign`; `default` is refused
 POST /api/compute/budget          {scope, daily?, monthly?, action}
 POST /api/compute/providers/test  {name, complete?}
 200  the verb's own JSON result, plus `notes` (the lines the CLI would print) and `as_of`
@@ -1612,28 +1616,65 @@ meant to be. It is the owner's own configuration of how the system behaves —
 autonomy level that reaches it. `runAction` has no compute kind, which is that
 sentence in code rather than in a comment.
 
-**A secret never crosses this boundary.** `providers add` and `providers
-remove` are deliberately **absent**. Adding a provider takes a key; a key
-belongs on stdin into the login Keychain, from the hand of the person at the
-machine (`docs/ops/compute.md` "Secrets"), and provider credentials are
-*user*-scoped — shared by every instance on that Mac, and never one
-instance's to hand out over HTTP. So **adding or removing a provider, and
-anything that takes a secret, stays CLI/app-only.** What `GET /api/compute`
-reports is the **NAME** of the secret a provider authenticates with and
-whether an item of that name exists:
+**A secret never crosses this boundary.** `providers add`, `set` and
+`remove` are deliberately **absent** (§2.2 M16). Adding a provider takes a
+key; a key belongs on stdin into this instance's Keychain account, from the
+hand of the person at the machine (`docs/ops/compute.md` "Secrets"), and the
+switch, the base URL and which secret a provider uses are where prompts and
+keys go — the Q8 table keeps them to the Mac. So **adding, configuring or
+removing a provider, and anything that takes a secret, stays CLI/app-only.**
+What `GET /api/compute` reports is the **reference** a provider authenticates
+with (T4-18: `{{ secret.<name> }}`, one of this instance's secrets) and whether
+this instance holds it — plus the provider's switch, billing and one tag:
 
 ```json
 {"name":"openrouter","locality":"off_machine","zdr":true,
- "secret":"METISTRY_OPENROUTER_API_KEY","secret_present":true,
+ "enabled":true,"tag":"cloud",
+ "secret":"{{ secret.openrouter_api_key }}","secret_kind":"secret","secret_name":"openrouter_api_key",
+ "secret_present":true,
  "models_assigned":["anthropic/claude-opus-4"],
  "budget":{"daily_usd":5,"monthly_usd":60,"action":"stop"}}
 ```
 
-Presence, never a value. `secret_present` needs a login Keychain to be
-truthful, so it is `false` wherever there is none (a container): the honest
-`false`, not a missing field. `POST /api/compute/providers/test` does use the
-credential — a real `GET <base_url>/models`, and with `complete: true` a
-one-token completion — and reports only whether it worked.
+`secret_kind` is `secret` or `env` (an install variable, `env:NAME`, and
+`secret_legacy: true` on the pre-T4-18 bare spelling); `billing` is present
+only where the file sets it; `tag` is `local`, `cloud` or `subscription`.
+Presence, never a value: with a login Keychain it is this instance's item;
+without one (a container) it is whether the delivery variable is set. `POST
+/api/compute/providers/test` does use the credential — a real
+`GET <base_url>/models`, and with `complete: true` a one-token completion — and
+reports only whether it worked.
+
+**The catalogue** (`GET /api/compute/catalogue`, T4-18, C131) is every
+**switched-on** provider's listing grouped by model through the model identity
+table (`seed/model-identities.yaml`, overlaid by the instance's own, by key):
+
+```json
+{"query":"gemma",
+ "providers":[{"name":"lmstudio","tag":"local","ok":true,"detail":"… → 3 model(s)","count":3,"read_at":"…"}],
+ "skipped":[{"name":"ollama","why":"switched off — `metistry compute providers set ollama --enabled on`"}],
+ "rows":[{"kind":"model","key":"gemma-3-4b","name":"Gemma 3 4B","maker":"Google","context":131072,"capabilities":["vision"],
+          "places":[{"provider":"openrouter","model":"google/gemma-3-4b-it","ref":"openrouter/google/gemma-3-4b-it","tag":"cloud",
+                     "zdr":true,"in_per_m":0.02,"out_per_m":0.04,"price_source":"listing","included":false,"cheapest":false}],
+          "summary":{"local":true,"cloud":true,"from_in_per_m":0.02}}],
+ "as_of":"…"}
+```
+
+A row is `kind: "model"` when the table maps it and `kind: "unmapped"` when it
+does not — **one unmapped row per (provider, id)**, never merged with a
+look-alike, keyed `<provider>/<id>`. `q` (at most 200 characters) keeps rows
+where every word appears, best match first. The console keeps each provider's
+listing for 15 minutes, per instance, in memory only; `refresh=true` re-reads
+every switched-on provider now (C132's Refresh). A listing that cannot be read
+is `ok: false` on its provider's line and the search goes on. No path on this
+Mac is in the body. `400` for an empty or undeclared `provider`, a `refresh`
+that is not `true`/`false`, or an over-long `q`.
+
+**Unassign** (`POST /api/compute/unassign`, T4-18) removes a tier's or a crew's
+assignment through the same YAML-document write as `assign` — the other half
+of editing the tiers the dynamic router chooses from (Q1). `{tier: "default"}`
+is `400`: `default` is reassigned, never removed. A target the file does not
+assign is `400`, and nothing is written.
 
 `GET /api/compute` adds two fields the CLI report does not carry:
 

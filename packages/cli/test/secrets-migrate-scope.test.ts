@@ -144,8 +144,10 @@ describe("step 1 — copy into this instance, record the name", () => {
     expect(Object.keys(parseSecretsFile(file).secrets).sort()).toEqual(["aws_secret_access_key", "devin_api_key", "local_api_key"]);
     expect(parseSecretsFile(file).secrets.devin_api_key).toEqual({ hosts: [], grants: {} });
     expect(r.recorded.sort()).toEqual(["aws_secret_access_key", "devin_api_key", "local_api_key"]);
-    // the closing line counts what it did (W1 checkpoint D4)
-    expect(o.lines.at(-1)).toBe(`shared scope: copied 3 secret(s) for ${dir}; 1 reference(s) keep their environment name until a release reads {{ secret.name }} there.`);
+    // the closing line counts what it did (W1 checkpoint D4) — and since
+    // T4-18 compute.yaml reads {{ secret.name }}, so its reference is
+    // rewritten rather than left waiting
+    expect(o.lines.at(-1)).toBe(`shared scope: copied 3 secret(s), 1 reference(s) rewritten for ${dir}.`);
     for (const v of ["devin-SHARED-original", "local-SHARED-original", "aws-SHARED-original"]) {
       expect(file).not.toContain(v);
       expect(o.lines.join("\n")).not.toContain(v);
@@ -250,20 +252,41 @@ describe("step 1 — copy into this instance, record the name", () => {
 });
 
 describe("step 2 — references, only into a file that still validates", () => {
-  it("today's compute.yaml schema takes an environment name, so auth.secret is LEFT and reported — the file byte-for-byte unchanged", async () => {
+  it("compute.yaml reads {{ secret.name }} now (T4-18), so auth.secret is REWRITTEN through core's own gate, comments kept — and a rerun still counts the original as kept", async () => {
     const kc = keychain();
     const dir = await instance(ID_A, "gate");
     const o = opts(dir, ID_A, kc);
     const r = await migrateScope(o);
-    expect(r.rewritten).toEqual([]);
-    expect(r.pending).toMatchObject([{ file: ".metistry/compute.yaml", field: "providers.local.auth.secret", from: "METISTRY_LOCAL_API_KEY", to: "local_api_key" }]);
-    expect(r.pending[0]!.why).toContain("does not read {{ secret.name }} there yet");
-    // only the issue about that field, not the whole schema report
-    expect(r.pending[0]!.why).toContain("providers.local.auth.secret: auth.secret is the NAME");
-    // a reference waiting on a release is not the owner's to do: the copy is complete
+    expect(r.pending).toEqual([]);
+    expect(r.rewritten).toEqual([{ file: ".metistry/compute.yaml", field: "providers.local.auth.secret", from: "METISTRY_LOCAL_API_KEY", to: "local_api_key" }]);
     expect(r.complete).toBe(true);
-    expect(readFileSync(join(dir, ".metistry/compute.yaml"), "utf8")).toBe(COMPUTE);
-    expect(o.lines.join("\n")).toContain("keep their environment name until a release reads");
+    const compute = readFileSync(join(dir, ".metistry/compute.yaml"), "utf8");
+    expect(compute).toContain("# compute.yaml — this comment is the owner's and must survive");
+    expect(compute).toContain('"{{ secret.local_api_key }}"');
+    expect(compute).not.toContain("METISTRY_LOCAL_API_KEY");
+
+    // the rewritten file no longer names the variable, but it still names the
+    // secret the variable became — so the original is still this instance's
+    const again = await migrateScope(opts(dir, ID_A, kc));
+    expect(again.rewritten).toEqual([]);
+    expect(again.kept.map((k) => k.from)).toContain("METISTRY_LOCAL_API_KEY");
+    expect(again.originals).toContain("METISTRY_LOCAL_API_KEY");
+  });
+
+  it("a manifest's requires.env still takes an environment name, so it is LEFT and reported — the file byte-for-byte unchanged", async () => {
+    const kc = keychain();
+    const dir = await instance(ID_A, "gate-manifest");
+    await mkdir(join(dir, ".metistry/agents/cost"), { recursive: true });
+    const manifest = "name: cost\nrequires:\n  env: [METISTRY_AWS_SECRET_ACCESS_KEY]\n";
+    await writeFile(join(dir, ".metistry/agents/cost/manifest.yaml"), manifest);
+    const o = opts(dir, ID_A, kc);
+    const r = await migrateScope(o);
+    const pending = r.pending.filter((p) => p.file.endsWith("manifest.yaml"));
+    // whether the manifest's own schema refuses the reference or the file is refused whole, it is never written
+    expect(r.rewritten.filter((w) => w.file.endsWith("manifest.yaml"))).toEqual([]);
+    expect(pending.length).toBeGreaterThan(0);
+    expect(r.complete).toBe(true);
+    expect(readFileSync(join(dir, ".metistry/agents/cost/manifest.yaml"), "utf8")).toBe(manifest);
   });
 
   it("once the schema reads secret references, the rewrite lands through the protected write with every comment kept — and a rerun is then a no-op", async () => {

@@ -1426,6 +1426,93 @@ public struct ComputeModelsReply: Decodable, Sendable, Equatable {
     }
 }
 
+/// `GET /api/compute/catalogue` (T4-18, C131) — every switched-on provider's
+/// catalogue grouped by MODEL: one row per model, one place per provider that
+/// serves it. An id the model identity table cannot map is a row of its own
+/// (`kind == "unmapped"`), never merged with a look-alike. The pane filters
+/// and sorts what this carries; nothing here is computed on the client.
+public struct ComputeCatalogueReply: Decodable, Sendable, Equatable {
+    public struct Searched: Sendable, Equatable {
+        public let name: String
+        /// `local` · `cloud` · `subscription` — the provider's one tag (C132)
+        public let tag: String
+        public let ok: Bool
+        public let detail: String
+        public let count: Int
+        public let readAt: String?
+    }
+
+    public struct Skipped: Sendable, Equatable {
+        public let name: String
+        public let why: String
+    }
+
+    public struct Place: Sendable, Equatable {
+        public let provider: String
+        public let model: String
+        /// `<provider>/<model>` — exactly what an assignment takes
+        public let ref: String
+        public let tag: String
+        public let zdr: Bool?
+        public let inPerM: Double?
+        public let outPerM: Double?
+        /// *Included in* the plan — a subscription's place carries no price
+        public let included: Bool
+        public let cheapest: Bool
+    }
+
+    public struct Row: Sendable, Equatable {
+        /// `model` (the table maps it) or `unmapped`
+        public let kind: String
+        public let key: String
+        public let name: String
+        public let maker: String?
+        public let context: Int?
+        public let capabilities: [String]
+        public let places: [Place]
+        public let local: Bool
+        public let cloud: Bool
+        public let fromInPerM: Double?
+    }
+
+    public let query: String
+    public let providers: [Searched]
+    public let skipped: [Skipped]
+    public let rows: [Row]
+    public let asOf: String?
+
+    public init(from decoder: any Decoder) throws {
+        let json = try JSONValue(from: decoder)
+        query = json.string("query") ?? ""
+        providers = (json["providers"]?.arrayValue ?? []).compactMap { p in
+            guard let name = p.string("name") else { return nil }
+            return Searched(name: name, tag: p.string("tag") ?? "cloud", ok: p.bool("ok") ?? false, detail: p.string("detail") ?? "", count: p.int("count") ?? 0, readAt: p.string("read_at"))
+        }
+        skipped = (json["skipped"]?.arrayValue ?? []).compactMap { s in
+            guard let name = s.string("name") else { return nil }
+            return Skipped(name: name, why: s.string("why") ?? "")
+        }
+        rows = (json["rows"]?.arrayValue ?? []).compactMap { r in
+            guard let key = r.string("key"), let name = r.string("name") else { return nil }
+            let places: [Place] = (r["places"]?.arrayValue ?? []).compactMap { p in
+                guard let ref = p.string("ref") else { return nil }
+                return Place(
+                    provider: p.string("provider") ?? "", model: p.string("model") ?? "", ref: ref, tag: p.string("tag") ?? "cloud",
+                    zdr: p.bool("zdr"), inPerM: p["in_per_m"]?.doubleValue, outPerM: p["out_per_m"]?.doubleValue,
+                    included: p.bool("included") ?? false, cheapest: p.bool("cheapest") ?? false
+                )
+            }
+            return Row(
+                kind: r.string("kind") ?? "unmapped", key: key, name: name, maker: r.string("maker"), context: r.int("context"),
+                capabilities: (r["capabilities"]?.arrayValue ?? []).compactMap(\.stringValue), places: places,
+                local: r["summary"]?.bool("local") ?? false, cloud: r["summary"]?.bool("cloud") ?? false,
+                fromInPerM: r["summary"]?["from_in_per_m"]?.doubleValue
+            )
+        }
+        asOf = json.string("as_of")
+    }
+}
+
 /// `POST /api/compute/assign` and `/budget`. `notes` is the lines the CLI would
 /// have printed — the non-ZDR warning, "nothing enforces this yet" — and they
 /// are shown rather than dropped, because they are the reason the pane is

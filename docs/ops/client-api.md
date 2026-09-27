@@ -1158,6 +1158,18 @@ irreversible, so it is `local`: its confirm names the sessions not yet folded
 into knowledge and offers *Fold First*; the retention the purge routine keeps
 is its Scheduled configuration (§2.5).
 
+`activity_feed` (T1-3) takes `hours`, `limit`, `agent`, `project`, `kind`,
+`since` and `turn_id`, and each row is `ts, kind, group, actor, subject,
+detail, ref, turn_id, ok`. `kind` matches an exact row kind or one of the
+seven groups the chips read — `capture`, `proposal`, `decision`, `run`,
+`work`, `message` and `routine`. `ok` is `false` only where a run failed,
+`true` where it did not, and `null` where the source cannot fail, so a client
+draws failure from the column, never from `detail`. A `routine_run` is in the
+`routine` group once it has settled, dated by when it did; a tick whose
+`meta.outcome` is `silent` never appears, and a failed one (`ok = false`,
+which carries no outcome) always does. `turn_id` returns every call one reply
+made, whatever the window's `limit` left out.
+
 #### `GET /api/runs/export` — the audit ledger as NDJSON (S5)
 
 ```

@@ -26,6 +26,7 @@ import { applyPorts, loadNamespace } from "./namespace.js";
 import type { Exec } from "./exec.js";
 import { rollbackApp, updateApp, type UpdateAppResult } from "./mac-app.js";
 import { labelFor, loadPlistTemplates, loadSupervisedTemplates, type PlistTemplate } from "./launchd.js";
+import { jobFilesFor, legacyEnvReport, RETIRE_LEGACY_ENV_COMMAND } from "./legacy-env.js";
 import { SUPERVISOR_SERVICE } from "./supervisor.js";
 import { instanceLockPath, readLock, serializeLock, type LockFile, type LockSource } from "./lock.js";
 import { ensureOwnerBridgeToken, OWNER_BRIDGE_TOKEN, OWNER_BRIDGE_TOKEN_FIX, OwnerTokenMintFailed, protectedRel, writeProtected, type EnsureOwnerTokenResult, type ProtectedWrite } from "./protected-write.js";
@@ -611,6 +612,10 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
     // values), and every way it can stop short ends in the one command.
     r.section("secrets");
     sharedScope = await updateSharedScope(r, { instanceDir: instanceDir.instanceDir, envFile, exampleFile: join(runDir, ".env.example"), env, platform, uid, fetchFn, exec: opts.exec, keychain: opts.keychain });
+    // The product checkout's .env, still read after the instance's: say what
+    // only it has (names, never values) and the verb that retires it. Never
+    // moved or deleted here — the preview and the --yes are the owner's.
+    if (envPathsFound?.legacy && instanceDir.instanceDir) await noteLegacyEnv(r, { legacy: envPathsFound.legacy, target: envPathsFound.write, instanceDir: instanceDir.instanceDir, home: env.HOME });
 
     // `update` shares no code path with `up` (it never renders a plist or
     // touches the supervisor), so a checkout that only ever runs `update`
@@ -799,6 +804,24 @@ export async function childClosingDoctor(
   }
   r.out(renderTable(report, r.ui));
   return report.ok ? 0 : 1;
+}
+
+// ---- the product checkout's .env ----------------------------------------------------
+
+/** One line about the deprecated fallback file: what only it still has, and the command that retires it. Never fails the update. */
+export async function noteLegacyEnv(r: StepRunner, o: { legacy: string; target: string; instanceDir: string; home: string | undefined }): Promise<void> {
+  try {
+    const rep = await legacyEnvReport({ legacy: o.legacy, target: o.target, jobFiles: await jobFilesFor({ instanceDir: o.instanceDir, home: o.home }) });
+    if (!rep) return;
+    const after = rep.sourcedBy.length ? ` (${rep.sourcedBy.length} job file(s) still source it, so run \`metistry up\` first)` : "";
+    r.note(
+      rep.onlyLegacy.length
+        ? `legacy .env: ${rep.legacy} is still read as a fallback, and only it has ${rep.onlyLegacy.join(", ")} — \`${RETIRE_LEGACY_ENV_COMMAND}\` previews moving them into ${rep.target}; \`--yes\` moves them and deletes it${after}`
+        : `legacy .env: ${rep.legacy} has nothing ${rep.target} lacks — \`${RETIRE_LEGACY_ENV_COMMAND} --yes\` deletes it${after}`,
+    );
+  } catch (err) {
+    r.note(`legacy .env: ${o.legacy} could not be compared (${err instanceof Error ? err.message : String(err)}) — \`${RETIRE_LEGACY_ENV_COMMAND}\` says what it still has`);
+  }
 }
 
 // ---- the shared scope (plan §2.14, T4-3) ---------------------------------------------

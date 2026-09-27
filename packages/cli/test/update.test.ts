@@ -354,6 +354,22 @@ describe("metistry update", () => {
     expect(summary).not.toContain("nothing kickstarted");
   });
 
+  it("names what only the product checkout's .env still has, and the verb that retires it — never a value, never a move", async () => {
+    const P = await checkout({ git: true });
+    const inst = await mkdtemp(join(tmpdir(), "mi-"));
+    await writeFile(join(P, ".env"), "METISTRY_BRIDGE_TOKEN_EVENTKIT=legacy-only-value\nMETISTRY_DB_PORT=5432\n");
+    await mkdir(join(inst, ".metistry", "state"), { recursive: true });
+    await writeFile(join(inst, ".metistry", "state", ".env"), "METISTRY_DB_PORT=55432\n");
+    const lines: string[] = [];
+    const r = await update({ ...base(P, { METISTRY_INSTANCE_DIR: inst, ...BRIDGE }), out: (l) => lines.push(l), exec: fakeExec(), skipBuild: true, skipMigrate: true, fetchFn: fakeFetch().fn, doctorFn: okDoctor });
+    expect(r.code).toBe(0);
+    const text = lines.join("\n");
+    expect(text).toContain(`legacy .env: ${join(P, ".env")} is still read as a fallback, and only it has METISTRY_BRIDGE_TOKEN_EVENTKIT — \`metistry secrets retire-legacy-env\` previews moving them`);
+    expect(text).not.toContain("legacy-only-value");
+    expect(existsSync(join(P, ".env"))).toBe(true);
+    expect(readFileSync(join(inst, ".metistry", "state", ".env"), "utf8")).toBe("METISTRY_DB_PORT=55432\n");
+  });
+
   it("without a bridge: a local instance dir gets the lock written directly (and read back); a running reconciler with no URL is refused; no instance dir writes nothing", async () => {
     const P = await checkout({ git: true });
     const inst = await mkdtemp(join(tmpdir(), "mi-" /* short on purpose: the supervisor socket under .metistry/state/run/ has ~103 bytes to live in */));

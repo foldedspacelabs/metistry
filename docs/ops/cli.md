@@ -14,6 +14,7 @@ All of them are real.
 | `secrets sync\|mint\|list [--json]` | move secrets between the Keychain and `.env` |
 | `secrets set\|replace\|remove\|hosts\|grant <name>` | owner-named secrets, per instance: the value on stdin into the Keychain, the policy into `.metistry/secrets.yaml` |
 | `secrets list --named [--json]` | the owner-named secrets: names, hosts, grants, presence — never a value |
+| `secrets retire-legacy-env [--yes]` | move what only the product checkout's `.env` still has into the instance's, then delete it |
 | `connect <tool> [--rotate]` | give one external dev tool (Cursor, OpenCode, Devin, Claude Code) its own agent token and config |
 | `connect --list [--json]` | which tools are connected: the row, the bearer, the config |
 | `console whoami [--json]` | ask the console who it thinks you are, with this install's owner token |
@@ -1246,6 +1247,54 @@ RESTART NEEDED: the console is running with the previous METISTRY_LOCAL_OWNER_TO
 A service that is not running is told it reads the new value when it next
 starts; one with no URL configured gets the command conditionally ("if the
 reconciler is running …"). An adopted token needs nothing.
+
+### Retiring the product checkout's `.env`: `secrets retire-legacy-env`
+
+An instance's environment is `<instance>/.metistry/state/.env`. The product
+checkout's own `.env` is still read **after** it, as a fallback, and every
+command says so on stderr:
+
+```
+…/.env is still being read as a fallback and is deprecated — everything an install
+needs is now in …/.metistry/state/.env. `metistry secrets retire-legacy-env` lists
+what only it still has; `--yes` moves that and deletes it.
+```
+
+Deleting it by hand drops whatever only it had — and nothing said which names
+those were. The verb does:
+
+```sh
+metistry secrets retire-legacy-env          # preview: names only, nothing written
+metistry secrets retire-legacy-env --yes    # copy, then delete
+```
+
+- **Only in the old file** — copied into the instance's file, appended under
+  one marker comment, quoted the way `.env` is read back. A line the
+  instance's file already has is never touched.
+- **In both, different values** — listed as shadowed: the instance's value
+  already wins, and the old one is read by nothing. Not copied.
+- **`METISTRY_INSTANCE_DIR`** — never copied: in the old file it is how a CLI
+  started without the shim finds the instance, and the instance's own file
+  never needs it.
+
+Names only, in every line it prints — never a value. It needs no Keychain, so
+it runs on Linux too. `--yes` deletes the old file only when everything it
+alone had was copied, and it **keeps** it (exit 1, saying why) when:
+
+- **a job still sources it.** `up` renders every job against the env file it
+  resolved at the time, so an install that ran `up` before its `state/.env`
+  existed has plists — or supervisor children — that `. '<product>/.env'` on
+  every start. Run `metistry up` first; it renders them against
+  `state/.env`. (It looks in `<instance>/.metistry/state/supervisor.json` and
+  this product's plists in `~/Library/LaunchAgents`.)
+- **it is how this CLI found the instance** — `METISTRY_INSTANCE_DIR` came from
+  the old file and nowhere else. Run `metistry` through its shim
+  (`<instance>/.metistry/state/cli/metistry`, which exports it) or export it.
+- **a value cannot be written as a dotenv line** (a newline, or a single quote
+  in a value that needs quoting) — it names it, to move by hand.
+
+`metistry update` prints the same list on a `legacy .env:` line in its
+secrets step — and never moves or deletes anything itself.
 
 ### `secrets purge --instance <dir>`
 

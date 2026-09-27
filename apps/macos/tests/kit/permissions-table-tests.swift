@@ -57,13 +57,24 @@ private let oneTable: [String: [[String]]] = [
     let approved = PermissionEntry(key: "Areas/Finance", label: "Areas/Finance", provenance: .approved(proposalID: 311))
     let byHand = PermissionEntry(key: "Me/Health", label: "Me/Health", provenance: .approved(proposalID: nil))
     let routine = PermissionEntry(key: "Areas/Ops", label: "Areas/Ops", provenance: .routine("morning-brief"))
+    let inherited = PermissionEntry(key: "Areas/Shared", label: "Areas/Shared", provenance: .project("drey"))
     let asks = PermissionEntry(key: "create_issue", label: "create_issue", asks: true)
     #expect(PermissionRowText.cellText([]) == "—")
     #expect(PermissionRowText.entryText(approved) == "Areas/Finance (approved in Needs You · #311)")
     #expect(PermissionRowText.entryText(byHand) == "Me/Health (approved in Needs You)")
     #expect(PermissionRowText.entryText(routine) == "Areas/Ops (during morning-brief only)")
+    #expect(PermissionRowText.entryText(inherited) == "Areas/Shared (via project drey)")
+    #expect(inherited.provenance.marker == "via project drey")
     let linear = PermissionRow(resource: .init(kind: "connection", name: "linear"), label: "linear", read: [], write: [asks])
     #expect(PermissionRowText.rowText(linear) == ["linear ⧉", "—", "create_issue ⏱"])
+}
+
+/// T4-7: an inherited entry's provenance is core's `{kind: "project", project}` — decoded as such and written back the same.
+@Test func anInheritedEntryDecodesAsViaProjectAndRoundTrips() throws {
+    let json = Data(#"{"kind":"project","project":"drey"}"#.utf8)
+    let p = try JSONDecoder().decode(PermissionProvenance.self, from: json)
+    #expect(p == .project("drey"))
+    #expect(try JSONDecoder().decode(PermissionProvenance.self, from: JSONEncoder().encode(p)) == p)
 }
 
 @Test func anOlderConsoleSendsNoRowsAndTheKitSaysNothingRatherThanGuessing() throws {

@@ -1169,6 +1169,7 @@ public enum PermissionRowText {
         switch p {
         case .approved(let id): return id.map { "approved in Needs You · #\($0)" } ?? "approved in Needs You"
         case .routine(let name): return "during \(name) only"
+        case .project(let slug): return "via project \(slug)"
         case .base: return nil
         }
     }

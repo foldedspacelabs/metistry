@@ -67,6 +67,12 @@ public enum PermissionWords {
         "during \(routine) only"
     }
 
+    /// Inherited from a project the actor is a member of (T4-7; screen 13):
+    /// the project's name is the provenance.
+    public static func viaProject(_ project: String) -> String {
+        "via project \(project)"
+    }
+
     /// One kind's effective line with its reason (C46, C47) — the CLI's
     /// `renderActionLine` word for word, so the app and `metistry agents
     /// autonomy` never disagree: `set` is plain; `defaulted` says so;
@@ -112,8 +118,10 @@ public enum PermissionProvenance: Codable, Sendable, Equatable {
     case approved(proposalID: Int?)
     /// Held only while this routine runs.
     case routine(String)
+    /// Inherited from a project the actor is a member of (T4-7); leaving it takes the line away.
+    case project(String)
 
-    enum CodingKeys: String, CodingKey { case kind, source, proposalId, routine }
+    enum CodingKeys: String, CodingKey { case kind, source, proposalId, routine, project }
     private enum ManifestKeys: String, CodingKey { case manifest }
 
     public init(from decoder: any Decoder) throws {
@@ -121,6 +129,7 @@ public enum PermissionProvenance: Codable, Sendable, Equatable {
         switch try c.decode(String.self, forKey: .kind) {
         case "approved": self = .approved(proposalID: try c.decodeIfPresent(Int.self, forKey: .proposalId))
         case "routine": self = .routine(try c.decode(String.self, forKey: .routine))
+        case "project": self = .project(try c.decode(String.self, forKey: .project))
         default:
             if let manifest = try? c.nestedContainer(keyedBy: ManifestKeys.self, forKey: .source) {
                 self = .base(source: "manifest", manifest: try manifest.decode(String.self, forKey: .manifest))
@@ -148,6 +157,9 @@ public enum PermissionProvenance: Codable, Sendable, Equatable {
         case .routine(let name):
             try c.encode("routine", forKey: .kind)
             try c.encode(name, forKey: .routine)
+        case .project(let slug):
+            try c.encode("project", forKey: .kind)
+            try c.encode(slug, forKey: .project)
         }
     }
 
@@ -157,6 +169,7 @@ public enum PermissionProvenance: Codable, Sendable, Equatable {
         case .base: return nil
         case .approved(let id): return PermissionWords.approved(id)
         case .routine(let name): return PermissionWords.duringRoutine(name)
+        case .project(let slug): return PermissionWords.viaProject(slug)
         }
     }
 }

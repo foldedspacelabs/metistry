@@ -32,7 +32,9 @@ public protocol AgentsStore: Sendable {
 // MARK: - Requests
 
 /// `POST /api/agents` — `{id, display_name, kind?, remote?}`. A `remote`
-/// agent is pending until the owner approves it (S2).
+/// agent is pending until the owner approves it (S2). `kind` may only be
+/// `external`: the console refuses `internal` (the assistant's row is its
+/// configuration's) and `crew` (a crew's is its manifest's) — T4-6.
 public struct AgentRegistration: Sendable, Equatable {
     /// `^[a-z][a-z0-9-]{0,39}$`.
     public var id: String
@@ -76,7 +78,7 @@ public struct AgentGrantsResult: ConsoleBody { public let json: JSONValue; publi
 public struct AgentProjectsResult: ConsoleBody { public let json: JSONValue; public init(json: JSONValue) { self.json = json } }
 /// `POST /api/agents/:id/revoke` — `{revoked, access_requests?}`.
 public struct AgentRevocation: ConsoleBody { public let json: JSONValue; public init(json: JSONValue) { self.json = json } }
-/// `GET /api/agents/:id/definition` (T4-6): the definition an actor runs with, and the files it comes from — read-only.
+/// `GET /api/agents/:id/definition` (T4-6): the definition an actor runs with — `definition` (null for an external agent), `compute`, `limits` — and the files it comes from. Read-only: the write is `metistry agents define` (M12).
 public struct AgentDefinition: ConsoleBody { public let json: JSONValue; public init(json: JSONValue) { self.json = json } }
 
 // MARK: - Over the transport

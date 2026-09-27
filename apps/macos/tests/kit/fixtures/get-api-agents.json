@@ -1,7 +1,7 @@
 {
   "route": "GET /api/agents",
   "source": "recorded",
-  "ticket": "T4-6",
+  "ticket": null,
   "request": {
     "method": "GET",
     "path": "/api/agents",
@@ -16,28 +16,39 @@
         "display_name": "Cursor",
         "kind": "external",
         "grants": {
-          "tier": "none",
-          "areas": []
+          "tier": "areas",
+          "areas": [
+            "Projects",
+            "Areas/Ops"
+          ],
+          "queries": true
         },
-        "projects": [],
+        "projects": [
+          "metistry"
+        ],
         "autonomy": {},
-        "created_at": "2026-09-26T22:54:15.073Z",
+        "created_at": "2026-09-26T23:55:44.162Z",
         "last_seen_at": null,
         "revoked": false,
         "remote": false,
-        "approved_at": "2026-09-26T22:54:15.073Z",
+        "approved_at": "2026-09-26T23:55:44.161Z",
         "grant_source": "registry",
         "pending": false,
         "scope": {
           "id": "cursor",
           "role": "agent",
           "who": "an agent",
-          "tier": "none",
-          "access": "none",
-          "areas": [],
-          "scope": "none",
-          "queries": false,
-          "projects": [],
+          "tier": "areas",
+          "access": "folders",
+          "areas": [
+            "Projects",
+            "Areas/Ops"
+          ],
+          "scope": "folders: Projects, Areas/Ops",
+          "queries": true,
+          "projects": [
+            "metistry"
+          ],
           "uses": null,
           "autonomy": {
             "level": "observe",
@@ -73,10 +84,169 @@
           "source": "registry",
           "from": "the registry — the owner's own hand, durable",
           "extras": [
+            "queries",
+            "projects: metistry",
             "autonomy: observe"
           ],
-          "line": "an agent · none · autonomy: observe"
-        }
+          "line": "an agent · folders: Projects, Areas/Ops · queries, projects: metistry, autonomy: observe"
+        },
+        "permissions": [
+          {
+            "resource": {
+              "kind": "knowledge"
+            },
+            "label": "Knowledge",
+            "read": [
+              {
+                "key": "Projects",
+                "label": "Projects",
+                "asks": false,
+                "provenance": {
+                  "kind": "base",
+                  "source": "registry"
+                }
+              },
+              {
+                "key": "Areas/Ops",
+                "label": "Areas/Ops",
+                "asks": false,
+                "provenance": {
+                  "kind": "approved",
+                  "proposalId": 4
+                }
+              }
+            ],
+            "write": []
+          },
+          {
+            "resource": {
+              "kind": "work"
+            },
+            "label": "Work",
+            "read": [
+              {
+                "key": "metistry",
+                "label": "metistry",
+                "asks": false,
+                "provenance": {
+                  "kind": "base",
+                  "source": "registry"
+                }
+              }
+            ],
+            "write": [
+              {
+                "key": "create",
+                "label": "Create",
+                "asks": false,
+                "provenance": {
+                  "kind": "base",
+                  "source": "registry"
+                }
+              },
+              {
+                "key": "update",
+                "label": "Update",
+                "asks": false,
+                "provenance": {
+                  "kind": "base",
+                  "source": "registry"
+                }
+              },
+              {
+                "key": "comment",
+                "label": "Comment",
+                "asks": false,
+                "provenance": {
+                  "kind": "base",
+                  "source": "registry"
+                }
+              }
+            ]
+          },
+          {
+            "resource": {
+              "kind": "artifacts"
+            },
+            "label": "Artifacts",
+            "read": [
+              {
+                "key": "metistry",
+                "label": "metistry",
+                "asks": false,
+                "provenance": {
+                  "kind": "base",
+                  "source": "registry"
+                }
+              }
+            ],
+            "write": [
+              {
+                "key": "publish",
+                "label": "Publish",
+                "asks": false,
+                "provenance": {
+                  "kind": "base",
+                  "source": "registry"
+                }
+              },
+              {
+                "key": "comment",
+                "label": "Comment",
+                "asks": false,
+                "provenance": {
+                  "kind": "base",
+                  "source": "registry"
+                }
+              },
+              {
+                "key": "review",
+                "label": "Review",
+                "asks": false,
+                "provenance": {
+                  "kind": "base",
+                  "source": "registry"
+                }
+              }
+            ]
+          },
+          {
+            "resource": {
+              "kind": "inbox"
+            },
+            "label": "Inbox",
+            "read": [],
+            "write": [
+              {
+                "key": "capture",
+                "label": "Capture",
+                "asks": false,
+                "provenance": {
+                  "kind": "base",
+                  "source": "registry"
+                }
+              }
+            ]
+          },
+          {
+            "resource": {
+              "kind": "queries"
+            },
+            "label": "Queries",
+            "read": [
+              {
+                "key": "named",
+                "label": "Named queries",
+                "asks": false,
+                "provenance": {
+                  "kind": "base",
+                  "source": "registry"
+                }
+              }
+            ],
+            "write": []
+          }
+        ]
       },
       {
         "id": "old-laptop",
@@ -88,11 +258,11 @@
         },
         "projects": [],
         "autonomy": {},
-        "created_at": "2026-09-26T22:54:15.074Z",
+        "created_at": "2026-09-26T23:55:44.163Z",
         "last_seen_at": null,
         "revoked": false,
         "remote": false,
-        "approved_at": "2026-09-26T22:54:15.074Z",
+        "approved_at": "2026-09-26T23:55:44.163Z",
         "grant_source": "registry",
         "pending": false,
         "scope": {
@@ -143,7 +313,27 @@
             "autonomy: observe"
           ],
           "line": "an agent · none · autonomy: observe"
-        }
+        },
+        "permissions": [
+          {
+            "resource": {
+              "kind": "inbox"
+            },
+            "label": "Inbox",
+            "read": [],
+            "write": [
+              {
+                "key": "capture",
+                "label": "Capture",
+                "asks": false,
+                "provenance": {
+                  "kind": "base",
+                  "source": "registry"
+                }
+              }
+            ]
+          }
+        ]
       },
       {
         "id": "opencode",
@@ -154,12 +344,14 @@
           "areas": []
         },
         "projects": [],
-        "autonomy": {},
-        "created_at": "2026-09-26T22:54:15.076Z",
+        "autonomy": {
+          "level": "propose"
+        },
+        "created_at": "2026-09-26T23:55:44.163Z",
         "last_seen_at": null,
         "revoked": false,
         "remote": false,
-        "approved_at": "2026-09-26T22:54:15.076Z",
+        "approved_at": "2026-09-26T23:55:44.163Z",
         "grant_source": "registry",
         "pending": false,
         "scope": {
@@ -172,6 +364,151 @@
           "scope": "none",
           "queries": false,
           "projects": [],
+          "uses": null,
+          "autonomy": {
+            "level": "propose",
+            "actions": {
+              "dispatch": "propose",
+              "task_update": "propose",
+              "comment": "propose",
+              "capture": "propose"
+            },
+            "detailed": {
+              "dispatch": {
+                "mode": "propose",
+                "source": "defaulted",
+                "ceiling": "propose"
+              },
+              "task_update": {
+                "mode": "propose",
+                "source": "defaulted",
+                "ceiling": "propose"
+              },
+              "comment": {
+                "mode": "propose",
+                "source": "defaulted",
+                "ceiling": "propose"
+              },
+              "capture": {
+                "mode": "propose",
+                "source": "defaulted",
+                "ceiling": "propose"
+              }
+            }
+          },
+          "source": "registry",
+          "from": "the registry — the owner's own hand, durable",
+          "extras": [
+            "autonomy: propose"
+          ],
+          "line": "an agent · none · autonomy: propose"
+        },
+        "permissions": [
+          {
+            "resource": {
+              "kind": "work"
+            },
+            "label": "Work",
+            "read": [],
+            "write": [
+              {
+                "key": "update",
+                "label": "Update",
+                "asks": true,
+                "provenance": {
+                  "kind": "base",
+                  "source": "registry"
+                }
+              },
+              {
+                "key": "comment",
+                "label": "Comment",
+                "asks": true,
+                "provenance": {
+                  "kind": "base",
+                  "source": "registry"
+                }
+              },
+              {
+                "key": "dispatch",
+                "label": "Dispatch",
+                "asks": true,
+                "provenance": {
+                  "kind": "base",
+                  "source": "registry"
+                }
+              }
+            ]
+          },
+          {
+            "resource": {
+              "kind": "artifacts"
+            },
+            "label": "Artifacts",
+            "read": [],
+            "write": [
+              {
+                "key": "comment",
+                "label": "Comment",
+                "asks": true,
+                "provenance": {
+                  "kind": "base",
+                  "source": "registry"
+                }
+              }
+            ]
+          },
+          {
+            "resource": {
+              "kind": "inbox"
+            },
+            "label": "Inbox",
+            "read": [],
+            "write": [
+              {
+                "key": "capture",
+                "label": "Capture",
+                "asks": false,
+                "provenance": {
+                  "kind": "base",
+                  "source": "registry"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "assistant",
+        "display_name": "assistant (internal)",
+        "kind": "internal",
+        "grants": {
+          "tier": "areas",
+          "areas": [
+            "/"
+          ]
+        },
+        "projects": [],
+        "autonomy": {},
+        "created_at": "2026-09-26T23:55:44.165Z",
+        "last_seen_at": null,
+        "revoked": false,
+        "remote": false,
+        "approved_at": null,
+        "grant_source": "environment",
+        "pending": false,
+        "scope": {
+          "id": "assistant",
+          "role": "assistant",
+          "who": "the instance assistant",
+          "tier": "areas",
+          "access": "folders",
+          "areas": [
+            "/"
+          ],
+          "scope": "folders: /",
+          "queries": false,
+          "projects": null,
           "uses": null,
           "autonomy": {
             "level": "observe",
@@ -204,13 +541,302 @@
               }
             }
           },
-          "source": "registry",
-          "from": "the registry — the owner's own hand, durable",
+          "source": "environment",
+          "from": "configuration, not a grant (METISTRY_ASSISTANT_AREAS), plus any area the owner has approved",
           "extras": [
+            "every project",
             "autonomy: observe"
           ],
-          "line": "an agent · none · autonomy: observe"
-        }
+          "line": "the instance assistant · folders: / · every project, autonomy: observe"
+        },
+        "permissions": [
+          {
+            "resource": {
+              "kind": "knowledge"
+            },
+            "label": "Knowledge",
+            "read": [
+              {
+                "key": "/",
+                "label": "The whole vault",
+                "asks": false,
+                "provenance": {
+                  "kind": "base",
+                  "source": "environment"
+                }
+              }
+            ],
+            "write": [
+              {
+                "key": "/",
+                "label": "The whole vault",
+                "asks": false,
+                "provenance": {
+                  "kind": "base",
+                  "source": "environment"
+                }
+              }
+            ]
+          },
+          {
+            "resource": {
+              "kind": "work"
+            },
+            "label": "Work",
+            "read": [
+              {
+                "key": "*",
+                "label": "All tasks",
+                "asks": false,
+                "provenance": {
+                  "kind": "base",
+                  "source": "environment"
+                }
+              }
+            ],
+            "write": [
+              {
+                "key": "create",
+                "label": "Create",
+                "asks": false,
+                "provenance": {
+                  "kind": "base",
+                  "source": "environment"
+                }
+              },
+              {
+                "key": "update",
+                "label": "Update",
+                "asks": false,
+                "provenance": {
+                  "kind": "base",
+                  "source": "environment"
+                }
+              },
+              {
+                "key": "comment",
+                "label": "Comment",
+                "asks": false,
+                "provenance": {
+                  "kind": "base",
+                  "source": "environment"
+                }
+              }
+            ]
+          },
+          {
+            "resource": {
+              "kind": "artifacts"
+            },
+            "label": "Artifacts",
+            "read": [
+              {
+                "key": "*",
+                "label": "All",
+                "asks": false,
+                "provenance": {
+                  "kind": "base",
+                  "source": "environment"
+                }
+              }
+            ],
+            "write": [
+              {
+                "key": "publish",
+                "label": "Publish",
+                "asks": false,
+                "provenance": {
+                  "kind": "base",
+                  "source": "environment"
+                }
+              },
+              {
+                "key": "comment",
+                "label": "Comment",
+                "asks": false,
+                "provenance": {
+                  "kind": "base",
+                  "source": "environment"
+                }
+              },
+              {
+                "key": "review",
+                "label": "Review",
+                "asks": false,
+                "provenance": {
+                  "kind": "base",
+                  "source": "environment"
+                }
+              }
+            ]
+          },
+          {
+            "resource": {
+              "kind": "inbox"
+            },
+            "label": "Inbox",
+            "read": [],
+            "write": [
+              {
+                "key": "capture",
+                "label": "Capture",
+                "asks": false,
+                "provenance": {
+                  "kind": "base",
+                  "source": "environment"
+                }
+              }
+            ]
+          },
+          {
+            "resource": {
+              "kind": "queries"
+            },
+            "label": "Queries",
+            "read": [
+              {
+                "key": "named",
+                "label": "Named queries",
+                "asks": false,
+                "provenance": {
+                  "kind": "base",
+                  "source": "environment"
+                }
+              }
+            ],
+            "write": []
+          },
+          {
+            "resource": {
+              "kind": "agents"
+            },
+            "label": "Agents",
+            "read": [],
+            "write": [
+              {
+                "key": "delegate",
+                "label": "Delegate",
+                "asks": false,
+                "provenance": {
+                  "kind": "base",
+                  "source": "environment"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "researcher",
+        "display_name": "researcher (crew, example)",
+        "kind": "crew",
+        "grants": {
+          "tier": "areas",
+          "areas": [
+            "Projects",
+            "Resources"
+          ]
+        },
+        "projects": [],
+        "autonomy": {},
+        "created_at": "2026-09-26T23:55:44.167Z",
+        "last_seen_at": null,
+        "revoked": false,
+        "remote": false,
+        "approved_at": null,
+        "grant_source": "manifest",
+        "pending": false,
+        "scope": {
+          "id": "researcher",
+          "role": "crew",
+          "who": "a crew",
+          "tier": "areas",
+          "access": "folders",
+          "areas": [
+            "Projects",
+            "Resources"
+          ],
+          "scope": "folders: Projects, Resources",
+          "queries": false,
+          "projects": [],
+          "uses": [
+            "knowledge",
+            "requests"
+          ],
+          "autonomy": {
+            "level": "observe",
+            "actions": {
+              "dispatch": "deny",
+              "task_update": "deny",
+              "comment": "deny",
+              "capture": "deny"
+            },
+            "detailed": {
+              "dispatch": {
+                "mode": "deny",
+                "source": "defaulted",
+                "ceiling": "deny"
+              },
+              "task_update": {
+                "mode": "deny",
+                "source": "defaulted",
+                "ceiling": "deny"
+              },
+              "comment": {
+                "mode": "deny",
+                "source": "defaulted",
+                "ceiling": "deny"
+              },
+              "capture": {
+                "mode": "deny",
+                "source": "defaulted",
+                "ceiling": "deny"
+              }
+            }
+          },
+          "source": {
+            "manifest": "seed/agents/example/researcher.md"
+          },
+          "from": "its manifest (seed/agents/example/researcher.md) — a protected path, re-read on every sync",
+          "extras": [
+            "uses: knowledge, requests",
+            "autonomy: observe"
+          ],
+          "line": "a crew · folders: Projects, Resources · uses: knowledge, requests, autonomy: observe"
+        },
+        "permissions": [
+          {
+            "resource": {
+              "kind": "knowledge"
+            },
+            "label": "Knowledge",
+            "read": [
+              {
+                "key": "Projects",
+                "label": "Projects",
+                "asks": false,
+                "provenance": {
+                  "kind": "base",
+                  "source": {
+                    "manifest": "seed/agents/example/researcher.md"
+                  }
+                }
+              },
+              {
+                "key": "Resources",
+                "label": "Resources",
+                "asks": false,
+                "provenance": {
+                  "kind": "base",
+                  "source": {
+                    "manifest": "seed/agents/example/researcher.md"
+                  }
+                }
+              }
+            ],
+            "write": []
+          }
+        ]
       }
     ],
     "access_requests": []

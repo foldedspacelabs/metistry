@@ -243,7 +243,7 @@ describe.skipIf(!hasDb)("agent registry (integration)", () => {
     // from an API call
     const minted = await json("POST", "/api/agents", { id: `${agentId}-crew`, display_name: "not a crew", kind: "crew" });
     expect(minted.status).toBe(400);
-    expect((await minted.json()).error.message).toContain("external | internal");
+    expect((await minted.json()).error.message).toBe(agents.AGENT_KIND_REFUSAL);
     // headers claiming one, on a real external bearer
     const spoofed = await agents.authenticateAgent(pool, {
       headers: { ...auth, "x-agent-kind": "crew", "x-crew-uses": "rooms,tasks" } as Record<string, string>,
@@ -342,6 +342,87 @@ describe.skipIf(!hasDb)("agent registry (integration)", () => {
     // turning it back off drops the key entirely (default shape, byte for byte with a never-granted agent)
     const off = await json("PUT", `/api/agents/${agentId}/grants`, { tier: "areas", areas: ["Areas/Fsl"] });
     expect((await off.json()).grants).toEqual({ tier: "areas", areas: ["Areas/Fsl"] });
+  });
+
+  // T4-6 (docs/ops/actors.md, open question 2): the plan has exactly one
+  // assistant, and its row is `ensureInternalAgent`'s, from the user's own
+  // configuration. A second `internal` row minted over HTTP would be a
+  // credential the door treats as the assistant — the one writer — that no
+  // configuration answers for. Refused, and NOTHING is written: no row, no
+  // enrolment request, no audit row claiming a mint.
+  it("POST /api/agents with kind: internal is refused and nothing is written", async () => {
+    const id = `${agentId}-int`;
+    const count = async () => ({
+      agents: Number((await pool.query(`SELECT count(*) AS n FROM agents WHERE id = $1`, [id])).rows[0].n),
+      proposals: Number((await pool.query(`SELECT count(*) AS n FROM proposals WHERE source_agent = $1 OR payload->'enroll'->>'agent' = $1`, [id])).rows[0].n),
+      runs: Number((await pool.query(`SELECT count(*) AS n FROM runs WHERE meta->>'agent' = $1`, [id])).rows[0].n),
+    });
+    for (const body of [
+      { id, display_name: "a second assistant", kind: "internal" },
+      { id, display_name: "a second assistant", kind: "internal", remote: true },
+      { id, display_name: "a second assistant", kind: "internal", remote: false },
+    ]) {
+      const r = await json("POST", "/api/agents", body);
+      expect(r.status, JSON.stringify(body)).toBe(400);
+      const out = await r.json();
+      expect(out.error).toEqual({ code: "invalid_request", message: agents.AGENT_KIND_REFUSAL });
+      expect(JSON.stringify(out)).not.toContain("token");
+    }
+    expect(await count()).toEqual({ agents: 0, proposals: 0, runs: 0 });
+    // the store refuses it too, for any caller that is not the route
+    await expect(agents.createAgent(pool, { id, display_name: "x", kind: "internal" })).rejects.toThrow(agents.AGENT_KIND_REFUSAL);
+    expect(await count()).toEqual({ agents: 0, proposals: 0, runs: 0 });
+    // …while the one kind it may name still mints
+    const ok = await json("POST", "/api/agents", { id, display_name: "external after all", kind: "external" });
+    expect(ok.status).toBe(201);
+    expect((await pool.query(`SELECT kind, grant_source FROM agents WHERE id = $1`, [id])).rows[0]).toEqual({ kind: "external", grant_source: "registry" });
+    await pool.query(`DELETE FROM runs WHERE meta->>'agent' = $1`, [id]);
+    await pool.query(`DELETE FROM agents WHERE id = $1`, [id]);
+  });
+
+  it("GET /api/agents carries each row's permission rows, drawn from what the door admits", async () => {
+    const list = await (await json("GET", "/api/agents")).json();
+    const mine = list.agents.find((a: any) => a.id === agentId);
+    // tier areas on Areas/Fsl, project drey, observe: read the folder and the project, capture into the inbox — and nothing else
+    expect(mine.permissions.map((r: any) => [r.label, r.read.map((e: any) => e.label), r.write.map((e: any) => e.label)])).toEqual([
+      ["Knowledge", ["Areas/Fsl"], []],
+      ["Work", ["drey"], ["Create", "Update", "Comment"]],
+      ["Artifacts", ["drey"], ["Publish", "Comment", "Review"]],
+      ["Inbox", [], ["Capture"]],
+    ]);
+    // every row carries the field, a revoked one included (it holds nothing)
+    expect(list.agents.every((a: any) => Array.isArray(a.permissions))).toBe(true);
+    expect(list.agents.filter((a: any) => a.revoked).every((a: any) => a.permissions.length === 0)).toBe(true);
+  });
+
+  it("GET /api/agents/:id/definition — the owner reads it; every other credential is refused like the rest of the family", async () => {
+    const path = `/api/agents/${agentId}/definition`;
+    // U2: no credential, an agent bearer, the capture owner token
+    expect((await fetch(base + path)).status).toBe(401);
+    for (const bearer of [agentToken, ownerToken]) {
+      const r = await fetch(base + path, { headers: { authorization: `Bearer ${bearer}` } });
+      expect(r.status).toBe(403);
+      expect(await r.json()).toEqual({ error: { code: "forbidden", message: "not granted" } });
+    }
+    // the owner: from this Mac (the local owner token) and from a passkey session alike — it is a read
+    for (const headers of [{ authorization: `Bearer ${localOwnerToken}` }, { cookie }]) {
+      const r = await fetch(base + path, { headers });
+      expect(r.status).toBe(200);
+      const body = await r.json();
+      // an external agent is someone else's code: no definition, no compute, no limits
+      expect(body).toMatchObject({ id: agentId, definition: null, compute: null, limits: null });
+      expect(typeof body.as_of).toBe("string");
+    }
+    // no such agent, and an id that is not one: the family's 404
+    for (const id of [`nobody-${suffix}`, "Not-A-Slug"]) {
+      const r = await json("GET", `/api/agents/${id}/definition`);
+      expect(r.status, id).toBe(404);
+    }
+    // the assistant's id always resolves (chat runs it with or without a credential)
+    const a = await (await json("GET", "/api/agents/assistant/definition")).json();
+    expect(a).toMatchObject({ id: "assistant", definition: { kind: "assistant", files: [] }, compute: { kind: "router" }, limits: null });
+    // a read, and only a read: the write is `metistry agents define` (M12)
+    for (const method of ["PUT", "POST", "PATCH", "DELETE"]) expect((await json(method, path, {})).status, method).toBe(404);
   });
 
   it("ensureInternalAgent: idempotent upsert from configuration — same token keeps the hash, projects re-sync, revocation clears, kind is internal", async () => {

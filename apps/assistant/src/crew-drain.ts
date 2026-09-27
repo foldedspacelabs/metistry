@@ -24,12 +24,11 @@
 // kind = tool) on the same component.
 
 import { createHash } from "node:crypto";
-import { DEFAULT_CACHING, emptyCompute, finishRun, mintToken, sanitizeForAgent, startRun, tokenHash, type Compute, type ResolvedAssignment, type TierMap } from "@foldedspacelabs/metistry-core";
+import { DEFAULT_CACHING, emptyCompute, finishRun, mintToken, resolveCrewAssignment, sanitizeForAgent, startRun, tokenHash, type Compute, type ResolvedAssignment } from "@foldedspacelabs/metistry-core";
 import { crewSystemPrompt, crewToolNames, parseCrewSnapshot, runCrewOnEngine, type CrewRunInput, type CrewRunResult } from "./crew.js";
 import { makeEngine, type Engine, type TurnGuard } from "./engine.js";
 import { memorySessionStore } from "./sessions.js";
 import { mcpToolHost } from "./tools.js";
-import { resolveTurn } from "./tiers.js";
 import { isBudgetRefusal } from "./budgets.js";
 import type { Identity } from "./prompt.js";
 
@@ -245,24 +244,19 @@ export async function drainCrewOne(db: Db, cfg: CrewDrainConfig): Promise<boolea
   const taskId = typeof row.meta?.task_id === "number" ? row.meta.task_id : undefined;
   const briefSha = typeof row.meta?.brief_sha === "string" ? row.meta.brief_sha : createHash("sha256").update(brief).digest("hex");
 
-  // The crew's own assignment decides the engine (collaboration rule 3).
-  // Nothing assigned → no engine, and a row parked with the line to write
-  // rather than a run that could only fail (C2/C3).
-  const turn = resolveTurn(cfg.compute?.() ?? emptyCompute(), {} as TierMap, `crew:${crewId}`, { model: crew.model, effort: crew.effort });
-  if (!turn.assignment) {
-    await settle(
-      db,
-      row.id,
-      {
-        status: "blocked",
-        note:
-          `crew '${crewId}' has no compute: compute.yaml assigns neither assignments.crews.${crewId} nor assignments.default — ` +
-          `\`metistry compute assign crew:${crewId} <provider/model>\` (docs/ops/compute.md)`,
-      },
-      agent,
-    );
+  // The crew's own definition decides the engine (collaboration rule 3; C128):
+  // a pinned `<provider>/<model>` runs as written, `same_as_assistant` on the
+  // assistant's default tier, a legacy alias through `assignments.crews` for
+  // one release — core's `resolveCrewAssignment`, the same rule the actor
+  // says (`crewCompute`, docs/ops/actors.md). Nothing it can run → no engine,
+  // and a row parked with the line to write rather than a run that could
+  // only fail (C2/C3).
+  const resolved = resolveCrewAssignment(cfg.compute?.() ?? emptyCompute(), crewId, crew);
+  if (!resolved.ok) {
+    await settle(db, row.id, { status: "blocked", note: resolved.reason }, agent);
     return true;
   }
+  const turn = { tier: resolved.assignment.from, model: resolved.assignment.model, effort: resolved.assignment.effort, assignment: resolved.assignment };
 
   // The room on the row this crew is about (the dispatched task if there is
   // one, else the crew row itself) becomes the brief's prior-work block —

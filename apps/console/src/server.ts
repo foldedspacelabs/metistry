@@ -18,7 +18,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
-import { API_VERSION, API_VERSION_HEADER, AREA_PREFIX_REFUSAL, runCheck, startRun, finishRun, errorEnvelope, intEnv, may, parseAction, noRouteMessage, PROJECT_SLUG_RE, rollSession, statusFor, servedRoute, isLocalRoute, localOnlyMessage, routeKey, SKIP_FEEDBACK, validAgentAreaGrant, type CheckResult, type Compute, type ErrorCode, type ErrorEnvelope, type Principal } from "@foldedspacelabs/metistry-core";
+import { API_VERSION, API_VERSION_HEADER, AREA_PREFIX_REFUSAL, runCheck, startRun, finishRun, errorEnvelope, intEnv, may, parseAction, noRouteMessage, PROJECT_SLUG_RE, rollSession, statusFor, servedRoute, isLocalRoute, localOnlyMessage, routeKey, resolveActor, SKIP_FEEDBACK, validAgentAreaGrant, type CheckResult, type Compute, type ErrorCode, type ErrorEnvelope, type Principal } from "@foldedspacelabs/metistry-core";
 import { QueryError, QueryStore } from "@foldedspacelabs/metistry-queries";
 import { captureToInbox, createBrainServer, dirSink, type CaptureSink, type KnowledgeLister, type KnowledgeReader, type KnowledgeVaultSearcher, type KnowledgeWriter, type QueryEmbedder } from "@foldedspacelabs/metistry-mcp-brain";
 import { TasksError, TasksService } from "@foldedspacelabs/metistry-tasks";
@@ -28,6 +28,8 @@ import { isTaskOpRoute, taskRoutes } from "./task-routes.js";
 import type { Db } from "./auth-store.js";
 import * as store from "./auth-store.js";
 import * as agents from "./agents.js";
+import * as actors from "./actors.js";
+import type { AssistantDefinitionSource } from "./actors.js";
 import type { SessionPolicy } from "./session-policy.js";
 import { parseCookies, readBody, readJson, sendError, sendJson, sendRefusal, sendUnrouted, sessionCookie } from "./http-util.js";
 import * as wa from "./webauthn.js";
@@ -91,6 +93,13 @@ export interface ConsoleConfig {
   crews?: CrewRegistry;
   /** identity.yaml's public fields for `GET /api/identity` (identity.ts); absent = 503 not_available. */
   identity?: PublicIdentity | undefined;
+  /**
+   * The assistant's definition files (identity.yaml, the root CLAUDE.md,
+   * assistant-prompt.md), read per request for `GET /api/agents/:id/definition`
+   * and the assistant's permission lines (actors.ts). Absent = an assistant
+   * with no files and the row's own label for a name.
+   */
+  assistantDefinition?: (() => Promise<AssistantDefinitionSource>) | undefined;
   /** What `GET /api/identity` reports as `version` — the console package's; absent = null. */
   version?: string | undefined;
   /**
@@ -217,6 +226,10 @@ function principalOf(auth: Auth): Principal {
 // One shape for every per-agent verb so the management gate and the handler
 // cannot drift apart. Ids are slugs; anything else falls through to 404.
 const AGENT_ROUTE = /^(PUT|POST) \/api\/agents\/([a-z][a-z0-9-]{0,39})\/(grants|projects|autonomy|revoke|rotate|approve)$/;
+// An agent's definition (T4-6), read-only. Loose on the id on purpose: the
+// management gate answers the whole family the same way, whatever spelling,
+// and the handler owns the slug grammar (a miss is the family's 404).
+const AGENT_DEFINITION_ROUTE = /^GET \/api\/agents\/([^/]+)\/definition$/;
 // Projects (§4.19 rollup, §4.21 controls): the kill switch, budget, caps. Session only — this is the user's hand.
 const PROJECT_ROUTE = /^PUT \/api\/projects\/([a-z][a-z0-9-]{0,39})$/;
 // Dispatch a work row to a compute target (§4.18). Body: { target, brief, sources? }.
@@ -858,6 +871,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         key === "GET /api/agents" ||
         key === "POST /api/agents" ||
         AGENT_ROUTE.test(key) ||
+        AGENT_DEFINITION_ROUTE.test(key) ||
         key === "GET /api/projects" ||
         PROJECT_ROUTE.test(key) ||
         key === "GET /api/runs/export" ||
@@ -1129,8 +1143,31 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     // never a second door onto granting.
     if (key === "GET /api/agents") {
       // Each row carries its rendered `scope` (core's `describeScope`), so
-      // the panel prints the words it is given rather than inventing them.
-      return sendJson(res, 200, { agents: await agents.listAgents(db, (id) => cfg.crews?.toolset(id)), access_requests: await agents.pendingAccessRequests(db) });
+      // the panel prints the words it is given rather than inventing them —
+      // and, since T4-6, its `permissions`: the actor's Resource × Read ×
+      // Write rows (core's `describePermissions`, which asks `may()`). The
+      // CLI, the console's panel and MetistryKit print these rows and
+      // nothing of their own, so the three cannot draw three tables.
+      const rows = await agents.listAgents(db, (id) => cfg.crews?.toolset(id));
+      const sources = await actorSourcesFor(rows);
+      return sendJson(res, 200, {
+        agents: rows.map((r) => ({ ...r, permissions: actors.permissionLines(r.id, sources) })),
+        access_requests: await agents.pendingAccessRequests(db),
+      });
+    }
+
+    const definitionOf = AGENT_DEFINITION_ROUTE.exec(key);
+    if (definitionOf) {
+      // Read-only: the write is `metistry agents define` (M12, §2.2) — the
+      // definition says how an actor behaves, so it is the owner's hand on a
+      // protected path, never an API call (invariant 2). No row, a revoked
+      // row, a crew whose manifest is gone: the family's 404. An external
+      // agent answers 200 with `definition: null` — it is someone else's code.
+      const id = definitionOf[1]!; // a slug has nothing to percent-decode; anything else is not an id
+      if (!agents.AGENT_ID_RE.test(id)) return sendError(res, "not_found", "no such agent, or it is revoked");
+      const actor = resolveActor(id, await actorSourcesFor(await agents.listAgents(db)));
+      if (!actor) return sendError(res, "not_found", "no such agent, or it is revoked");
+      return sendJson(res, 200, actors.definitionBody(actor));
     }
 
     if (key === "POST /api/agents") {
@@ -1238,6 +1275,16 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     if (rows.length === 0) return `nothing open (${stamp})`;
     const lines = rows.slice(0, 10).map((r) => `• ${r.title ?? JSON.stringify(r)}${r.status ? ` — ${r.status}` : ""}`);
     return `${query.replaceAll("_", " ")} (${stamp}):\n${lines.join("\n")}`;
+  }
+
+  /** What `resolveActor` reads, loaded for this request (actors.ts). */
+  async function actorSourcesFor(rows: readonly agents.AgentRow[]) {
+    return actors.consoleActorSources(db, {
+      rows,
+      crews: cfg.crews,
+      assistant: cfg.assistantDefinition ? await cfg.assistantDefinition() : { identity: undefined, files: [] },
+      compute: cfg.compute?.(),
+    });
   }
 
   async function audit(kind: string, tool: string, ok: boolean, meta: Record<string, unknown>): Promise<void> {

@@ -25,20 +25,21 @@
 
 import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
-import { parse as parseYaml } from "yaml";
+import { join, relative, resolve, sep } from "node:path";
 import {
   autonomyWidenings,
   crossKindRefusal,
   emptyCompute,
   finishRun,
   mintToken,
+  parseCrewDefinition,
   startRun,
   tokenHash,
-  validateManifest,
+  type ActorCrewSource,
   type AgentManifest,
   type Compute,
   type DataPolicy,
+  type DefinitionFile,
   type TargetManifest,
 } from "@foldedspacelabs/metistry-core";
 import type { VaultClient } from "@foldedspacelabs/metistry-artifacts";
@@ -66,44 +67,35 @@ export interface CrewDefinition {
   sha256: string;
   /** Where it was read from (`agents/example/researcher.md`, or a disk path). */
   where: string;
+  /**
+   * The same file as an actor's definition names it (core's `DefinitionFile`):
+   * POSIX and RELATIVE — to the instance for the owner's own file, to the
+   * release for a shipped one (invariant 7) — with its origin and hash.
+   * Absent only on a definition parsed outside `loadCrews`.
+   */
+  file?: DefinitionFile | undefined;
   /** The registry grant derived from `scope` (tier areas, or none when scope is empty). */
   grants: Grants;
   /** The registry autonomy block derived from `manifest.autonomy` (normalized by the same validator external PUT /autonomy uses; absent → `{}`, narrows nothing). */
   autonomy: Autonomy;
 }
 
-const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)([\s\S]*)$/;
 const CREW_FILE = /^(?:.*\/)?([a-z0-9-]+)\/([a-z0-9-]+)\.md$/; // <area>/<name>.md
-const MAX_PROMPT_CHARS = 32_000;  // limit: fixed — a crew manifest longer than this is a malformed file; refusing it whole is the point
 
 /**
  * Parse one `agents/<area>/<name>.md`. Throws with `where:` on any miss —
  * a malformed manifest is refused whole, never partially registered.
  * `expected` (from the path) must agree with the frontmatter: the name IS
  * the filename, and an `area` key, when present, IS the directory.
+ *
+ * The file's own rules are core's `parseCrewDefinition` — the reading
+ * `metistry agents define` validates an edit with before it writes, so the
+ * two hands on this file cannot disagree about it. What is added here is
+ * the registry's half: the scope through the grant validator, the autonomy
+ * block through the registry's normalizer.
  */
 export function parseCrewFile(text: string, where: string, expected?: { name: string; area: string }): CrewDefinition {
-  const m = FRONTMATTER.exec(text);
-  if (!m) throw new Error(`${where}: expected YAML frontmatter (--- … ---) followed by the operating prompt`);
-  let raw: unknown;
-  try {
-    raw = parseYaml(m[1]!);
-  } catch (err) {
-    throw new Error(`${where}: frontmatter is not YAML: ${err instanceof Error ? err.message : String(err)}`);
-  }
-  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) throw new Error(`${where}: frontmatter must be a mapping`);
-  const withArea = expected && (raw as { area?: unknown }).area === undefined ? { ...(raw as object), area: expected.area } : raw;
-  const r = validateManifest(withArea);
-  if (!r.ok) throw new Error(`${where}: invalid manifest: ${r.errors.join("; ")}`);
-  if (r.manifest.type !== "agent") throw new Error(`${where}: type must be agent (got ${r.manifest.type})`);
-  const manifest = r.manifest;
-  if (expected) {
-    if (manifest.name !== expected.name) throw new Error(`${where}: manifest name "${manifest.name}" must match the filename "${expected.name}"`);
-    if (manifest.area !== expected.area) throw new Error(`${where}: manifest area "${manifest.area}" must match the directory "${expected.area}"`);
-  }
-  const prompt = m[2]!.trim();
-  if (!prompt) throw new Error(`${where}: the body below the frontmatter is the crew's operating prompt and may not be empty`);
-  if (prompt.length > MAX_PROMPT_CHARS) throw new Error(`${where}: operating prompt exceeds ${MAX_PROMPT_CHARS} characters`);
+  const { manifest, prompt } = parseCrewDefinition(text, where, expected);
   let grants: Grants;
   try {
     // the external validator on purpose: TitleCase areas, never the bare vault — a crew is not the assistant
@@ -160,6 +152,35 @@ export async function readCrewVault(vault: VaultClient, prefix: string): Promise
   return out.sort((a, b) => a.rel.localeCompare(b.rel));
 }
 
+/**
+ * Where the console's crew directories are, so a loaded file can be named the
+ * way an actor's definition names it: relative, with its origin.
+ */
+export interface CrewOrigins {
+  /** METISTRY_INSTANCE_DIR: a disk entry under it is the owner's own file. */
+  instanceDir?: string | undefined;
+  /** The release — the console's working directory, where `seed/` lives. Default: `process.cwd()`. */
+  productDir?: string | undefined;
+}
+
+/**
+ * One loaded crew file as core's `DefinitionFile`. An entry read through the
+ * vault bridge is the instance's by construction (the bridge serves the
+ * instance repo, and its prefix is instance-relative); a disk entry is the
+ * instance's when it sits under the instance directory and the release's
+ * otherwise — `seed/agents`, which "changing means writing the instance's own
+ * copy, which then wins by name" (docs/ops/actors.md).
+ */
+export function definitionFileOf(dir: string, rel: string, from: "disk" | "vault", sha256: string, origins: CrewOrigins = {}): DefinitionFile {
+  const posix = (p: string) => p.split(sep).join("/");
+  if (from === "vault") return { path: `${dir.replace(/^\.\//, "").replace(/\/+$/, "")}/${rel}`, origin: "instance", sha256 };
+  const product = origins.productDir ?? process.cwd();
+  const abs = resolve(product, dir, rel);
+  const instance = origins.instanceDir ? resolve(origins.instanceDir) : undefined;
+  if (instance && (abs === instance || abs.startsWith(`${instance}${sep}`))) return { path: posix(relative(instance, abs)), origin: "instance", sha256 };
+  return { path: posix(relative(product, abs)), origin: "product", sha256 };
+}
+
 export interface CrewLoad {
   crews: Map<string, CrewDefinition>;
   /** Files refused (with the reason); a refused manifest is treated as absent — registered nowhere, revoked if it was. */
@@ -174,7 +195,7 @@ export interface CrewLoad {
  * configured (that is how the instance repo's protected `agents/` reaches
  * the console), else skipped. Later entries override earlier ones by name.
  */
-export async function loadCrews(dirs: string[], vault?: VaultClient): Promise<CrewLoad> {
+export async function loadCrews(dirs: string[], vault?: VaultClient, origins: CrewOrigins = {}): Promise<CrewLoad> {
   const crews = new Map<string, CrewDefinition>();
   const errors: string[] = [];
   const sources: CrewLoad["sources"] = {};
@@ -194,12 +215,14 @@ export async function loadCrews(dirs: string[], vault?: VaultClient): Promise<Cr
       sources[dir] = "absent";
       continue;
     }
+    const from = sources[dir] === "vault" ? "vault" : "disk";
     for (const f of files) {
       const m = CREW_FILE.exec(f.rel);
       if (!m) continue;
       const where = `${dir}/${f.rel}`;
       try {
         const def = parseCrewFile(f.text, where, { area: m[1]!, name: m[2]! });
+        def.file = definitionFileOf(dir, f.rel, from, def.sha256, origins);
         crews.set(def.manifest.name, def);
       } catch (err) {
         errors.push(err instanceof Error ? err.message : String(err));
@@ -305,11 +328,12 @@ export class CrewRegistry {
     private readonly db: Db,
     private readonly dirs: string[],
     private readonly vault?: VaultClient | undefined,
+    private readonly origins: CrewOrigins = {},
   ) {}
 
   /** Load + sync. Never throws on a bad manifest (it lands in `errors`); does throw on a dead database. */
   async refresh(): Promise<CrewSyncSummary> {
-    const load = await loadCrews(this.dirs, this.vault);
+    const load = await loadCrews(this.dirs, this.vault, this.origins);
     this.crews = load.crews;
     this.errors = load.errors;
     this.sources = load.sources;
@@ -346,7 +370,20 @@ export class CrewRegistry {
    */
   toolset(name: string): { uses: readonly string[]; manifest?: string | undefined } | undefined {
     const def = this.crews.get(name);
-    return def ? { uses: def.manifest.uses, manifest: def.where } : undefined;
+    // the file as its definition names it — relative (invariant 7), the same path an actor's lines carry
+    return def ? { uses: def.manifest.uses, manifest: def.file?.path ?? def.where } : undefined;
+  }
+
+  /**
+   * A loaded crew as an actor's source (core's `ActorCrewSource`): the
+   * manifest, the prompt, and the file as its definition names it. Undefined
+   * for a name with no loaded manifest — which `resolveActor` reads as no
+   * actor at all, the same fail-closed answer `toolset` gives the door.
+   */
+  actorSource(name: string): ActorCrewSource | undefined {
+    const def = this.crews.get(name);
+    if (!def) return undefined;
+    return { manifest: def.manifest, prompt: def.prompt, file: def.file ?? { path: def.where, origin: "instance", sha256: def.sha256 } };
   }
 
   /**
@@ -459,7 +496,7 @@ export async function dispatchCrew(
   //
   // Checked BEFORE the dispatch run row so a refused push costs nothing but
   // its own audit row, and the refusal names the field that would permit it.
-  const cross = crossKindRefusal(compute, null, def.manifest.name);
+  const cross = crossKindRefusal(compute, null, def.manifest.name, def.manifest);
   if (cross) {
     const id = await startRun(db, {
       component: "console",

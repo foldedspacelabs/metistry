@@ -73,8 +73,8 @@ describe("every row", () => {
     }
   });
 
-  it("serves exactly 73 rows — a ticket flipping a row to served/unserved must update this number", () => {
-    expect(CLIENT_API.filter((r) => r.served).length).toBe(73); // T4-1: GET /api/secrets; T2-5: the Defer door
+  it("serves exactly 74 rows — a ticket flipping a row to served/unserved must update this number", () => {
+    expect(CLIENT_API.filter((r) => r.served).length).toBe(74); // T4-1: GET /api/secrets; T2-5: the Defer door; T4-6: GET /api/agents/:id/definition
   });
 
   it("takes a cursor only on a read, and an Idempotency-Key only on a write", () => {

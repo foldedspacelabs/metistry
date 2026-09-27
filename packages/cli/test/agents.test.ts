@@ -2,8 +2,15 @@
 // WIDENING may come through, so what it refuses and what it preserves matter
 // more than what it prints: an unknown kind never reaches the console, and
 // setting one kind never erases the §4.21 narrowing sitting beside it.
-import { describe, expect, it } from "vitest";
-import { agentAutonomy, agentsList, isEmptyChange, mergeAutonomy, parseAutonomyFlags, renderAgents, renderAutonomy } from "../src/agents.js";
+import { createHash } from "node:crypto";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { parseCrewDefinition, type PermissionRow } from "@foldedspacelabs/metistry-core";
+import { agentAutonomy, agentsDefine, agentsList, isEmptyChange, mergeAutonomy, parseAutonomyFlags, renderAgents, renderAutonomy, renderDefine, renderPermissions } from "../src/agents.js";
+import { main } from "../src/main.js";
 import { createUi } from "../src/ui.js";
 
 const env = { METISTRY_LOCAL_OWNER_TOKEN: "owner-token-value", METISTRY_CONSOLE_URL: "http://127.0.0.1:9" } as NodeJS.ProcessEnv;
@@ -206,5 +213,142 @@ describe("agents list", () => {
     // …and the token never rides out in the error, the way every other verb
     // in this file redacts it.
     await expect(agentsList({ env, fetchFn: down })).rejects.toThrow(/\[redacted\]/);
+  });
+});
+
+describe("agents list — the permissions table (T4-6)", () => {
+  const base = { kind: "external", revoked: false, pending: false, last_seen_at: null };
+  const entry = (key: string, label = key, extra: Record<string, unknown> = {}) => ({ key, label, asks: false, provenance: { kind: "base", source: "registry" }, ...extra });
+  const permissions: PermissionRow[] = [
+    { resource: { kind: "knowledge" }, label: "Knowledge", read: [entry("Areas/Health"), entry("Areas/Finance", "Areas/Finance", { provenance: { kind: "approved", proposalId: 311 } })], write: [] },
+    { resource: { kind: "work" }, label: "Work", read: [], write: [entry("dispatch", "Dispatch", { asks: true })] },
+  ] as PermissionRow[];
+
+  it("prints Resource × Read × Write in core's words, with the dash for an empty cell", () => {
+    const ui = createUi({ env: { NO_COLOR: "1" } });
+    const text = renderAgents([{ id: "researcher", display_name: "Researcher", ...base, permissions, asked: [] }], ui);
+    const lines = text.split("\n");
+    expect(lines.some((l) => /^ {4}\s*Read\s+Write$/.test(l))).toBe(true);
+    expect(lines).toContain("    Knowledge  Areas/Health, Areas/Finance (approved in Needs You · #311)  —");
+    expect(lines).toContain("    Work       —                                                           Dispatch ⏱");
+  });
+
+  it("says an actor that holds nothing holds nothing — and draws no table for a revoked row", () => {
+    const ui = createUi({ env: { NO_COLOR: "1" } });
+    expect(renderPermissions([], ui)).toContain("holds nothing — anything not listed is not granted");
+    const revoked = renderAgents([{ id: "gone", display_name: "Gone", ...base, revoked: true, permissions, asked: [] }], ui);
+    expect(revoked).not.toContain("Knowledge");
+  });
+});
+
+describe("agents define — a crew's definition, in the owner's hand (M12)", () => {
+  let instance: string;
+  let seed: string;
+  const out: string[] = [];
+  const SHIPPED = "---\n# shipped\nname: researcher\ntype: agent\nmodel: haiku   # haiku | sonnet | opus\nuses: [knowledge]\nscope: [Projects]\n---\n\nYou research.\n";
+  const OWN = "---\nname: scout\ntype: agent\narea: research\nmodel: haiku # a comment the owner wrote\neffort: low\nuses: [knowledge, requests]\nscope: [Projects]\n---\n\nYou scout.\n";
+  const opts = (id: string, change: Parameters<typeof agentsDefine>[0]["change"], extra: Partial<Parameters<typeof agentsDefine>[0]> = {}) => ({
+    id,
+    change,
+    instanceDir: instance,
+    seedDir: seed,
+    // no reconciler: written directly (protected-write.ts), and never a launchd probe off macOS
+    env: {} as NodeJS.ProcessEnv,
+    platform: "linux" as const,
+    uid: 501,
+    out: (l: string) => out.push(l),
+    ...extra,
+  });
+  const sha = (t: string) => createHash("sha256").update(t).digest("hex");
+  const own = () => join(instance, ".metistry", "agents", "research", "scout.md");
+
+  beforeEach(async () => {
+    out.length = 0;
+    instance = mkdtempSync(join(tmpdir(), "metistry-define-inst-"));
+    seed = mkdtempSync(join(tmpdir(), "metistry-define-seed-"));
+    await mkdir(join(instance, ".metistry", "agents", "research"), { recursive: true });
+    await writeFile(join(instance, ".metistry", "identity.yaml"), "name: Aide\n");
+    await writeFile(own(), OWN);
+    await mkdir(join(seed, "agents", "example"), { recursive: true });
+    await writeFile(join(seed, "agents", "example", "researcher.md"), SHIPPED);
+  });
+  afterEach(async () => {
+    await rm(instance, { recursive: true, force: true });
+    await rm(seed, { recursive: true, force: true });
+  });
+
+  it("edits the model, effort and prompt, keeping every other line — comments included", async () => {
+    const r = await agentsDefine(opts("scout", { model: "lmstudio/gemma", effort: "medium", prompt: "You scout carefully.\n" }));
+    const text = readFileSync(own(), "utf8");
+    expect(text).toBe("---\nname: scout\ntype: agent\narea: research\nmodel: lmstudio/gemma # a comment the owner wrote\neffort: medium\nuses: [knowledge, requests]\nscope: [Projects]\n---\n\nYou scout carefully.\n");
+    expect(r).toMatchObject({ id: "scout", area: "research", path: ".metistry/agents/research/scout.md", from: "instance", sha256_before: sha(OWN), sha256: sha(text), model: "lmstudio/gemma", effort: "medium", changed: true });
+    expect(parseCrewDefinition(text, "x", { name: "scout", area: "research" }).manifest.uses).toEqual(["knowledge", "requests"]);
+  });
+
+  it("a shipped crew becomes the instance's own copy, which then wins by name", async () => {
+    const r = await agentsDefine(opts("researcher", { model: "same_as_assistant" }));
+    expect(r).toMatchObject({ from: "product", path: ".metistry/agents/example/researcher.md", sha256_before: sha(SHIPPED), model: "same_as_assistant", changed: true });
+    const text = readFileSync(join(instance, ".metistry", "agents", "example", "researcher.md"), "utf8");
+    expect(text).toContain("# shipped");
+    expect(text).toContain("model: same_as_assistant");
+    expect(readFileSync(join(seed, "agents", "example", "researcher.md"), "utf8")).toBe(SHIPPED); // the release is never written
+  });
+
+  it("a new crew needs an area, a model and a prompt — and reaches nothing until the owner names its tools by hand", async () => {
+    await expect(agentsDefine(opts("fresh", { model: "lmstudio/gemma", prompt: "x" }))).rejects.toThrow(/needs --area/);
+    await expect(agentsDefine(opts("fresh", { area: "ops", prompt: "x" }))).rejects.toThrow(/needs --model/);
+    const r = await agentsDefine(opts("fresh", { area: "ops", model: "lmstudio/gemma", description: "Triage", prompt: "You triage.\n" }));
+    expect(r).toMatchObject({ from: "new", path: ".metistry/agents/ops/fresh.md", sha256_before: null, changed: true });
+    const parsed = parseCrewDefinition(readFileSync(join(instance, ".metistry", "agents", "ops", "fresh.md"), "utf8"), "x", { name: "fresh", area: "ops" });
+    expect(parsed.manifest).toMatchObject({ name: "fresh", area: "ops", model: "lmstudio/gemma", effort: "low", description: "Triage", uses: [], scope: [] });
+    expect(parsed.prompt).toBe("You triage.");
+  });
+
+  it("stale: --if-sha256 that is not the file's refuses the edit, and nothing is written", async () => {
+    await expect(agentsDefine({ ...opts("scout", { model: "lmstudio/gemma" }), ifSha256: "0".repeat(64) })).rejects.toThrow(/^stale: .*nothing was written/);
+    expect(readFileSync(own(), "utf8")).toBe(OWN);
+    // the hash it was read at is accepted
+    await expect(agentsDefine({ ...opts("scout", { model: "lmstudio/gemma" }), ifSha256: sha(OWN) })).resolves.toMatchObject({ changed: true });
+  });
+
+  it("refuses what the console would refuse, before writing: an empty prompt, a model that is not one, a bad id, the assistant", async () => {
+    await expect(agentsDefine(opts("scout", { prompt: "   " }))).rejects.toThrow(/refusing to write .*operating prompt and may not be empty/);
+    await expect(agentsDefine(opts("scout", { model: "gpt-5" }))).rejects.toThrow(/--model "gpt-5" is not `<provider>\/<model-id>`/);
+    await expect(agentsDefine(opts("scout", { effort: "extreme" as never }))).rejects.toThrow(/--effort must be one of/);
+    await expect(agentsDefine(opts("Scout", { model: "lmstudio/gemma" }))).rejects.toThrow(/is not an agent id/);
+    await expect(agentsDefine(opts("assistant", { model: "lmstudio/gemma" }))).rejects.toThrow(/assistant's definition is not a crew file/);
+    await expect(agentsDefine(opts("scout", { area: "ops", model: "lmstudio/gemma" }))).rejects.toThrow(/lives in research\/, not ops\//);
+    expect(readFileSync(own(), "utf8")).toBe(OWN);
+  });
+
+  it("no edit flags is a read; --dry-run plans and writes nothing", async () => {
+    const shown = await agentsDefine(opts("scout", {}));
+    expect(shown).toMatchObject({ changed: false, sha256: sha(OWN), model: "haiku" });
+    expect(renderDefine(shown, createUi({ env: { NO_COLOR: "1" } }))).toContain("nothing changed");
+    await agentsDefine({ ...opts("scout", { model: "lmstudio/gemma" }), dryRun: true });
+    expect(readFileSync(own(), "utf8")).toBe(OWN);
+  });
+
+  it("two files with one name is refused rather than guessed at", async () => {
+    await mkdir(join(instance, ".metistry", "agents", "ops"), { recursive: true });
+    await writeFile(join(instance, ".metistry", "agents", "ops", "scout.md"), OWN.replace("area: research", "area: ops"));
+    await expect(agentsDefine(opts("scout", { model: "lmstudio/gemma" }))).rejects.toThrow(/defined twice/);
+  });
+
+  it("main(): the verb is wired, reads the prompt from stdin with -, and prints JSON", async () => {
+    const lines: string[] = [];
+    const errs: string[] = [];
+    const code = await main(["agents", "define", "scout", "--instance", instance, "--prompt-file", "-", "--json"], {
+      out: (l) => lines.push(l),
+      err: (l) => errs.push(l),
+      readStdin: async () => "From stdin.\n",
+      platform: "linux",
+    });
+    expect(errs.filter((e) => !/written directly/.test(e))).toEqual([]);
+    expect(code).toBe(0);
+    expect(JSON.parse(lines.join("\n"))).toMatchObject({ id: "scout", changed: true });
+    expect(readFileSync(own(), "utf8")).toContain("From stdin.");
+    expect(existsSync(own())).toBe(true);
+    expect(await main(["agents", "define"], { out: () => {}, err: (l) => errs.push(l) })).toBe(2);
   });
 });

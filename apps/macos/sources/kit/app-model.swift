@@ -54,6 +54,10 @@ public final class AppModel {
     /// management verbs beside them (stores/console-session.swift). The child
     /// starts on the first request a screen makes, not here.
     public let console: ConsoleSession
+    /// The window's frame: where the owner is, the Needs You row and the Dock
+    /// badge, the Usage gauge, the configured name (shell-model.swift). It
+    /// reads `console.stores` through three F-7 protocols and nothing else.
+    public let shell: ShellModel
 
     public init(
         bundleResourceURL: URL?,
@@ -97,11 +101,13 @@ public final class AppModel {
         self.status = status
         self.consoleSignIn = consoleSignIn
         self.firstRun = firstRun
-        self.console = ConsoleSession(cli: cli, spawner: sessionSpawner, defaults: defaults)
+        let console = ConsoleSession(cli: cli, spawner: sessionSpawner, defaults: defaults)
+        self.console = console
         self.settings = SettingsModel(status: status, cli: cli, instanceDir: instances.active, consoleSignIn: consoleSignIn)
         self.wizard = WizardModel(steps: firstRun)
         self.menu = MenuBarModel(status: status, cli: cli)
         self.logs = LogViewerModel(cli: cli)
+        self.shell = ShellModel(stores: console.stores, defaults: defaults)
 
         // The wizard's step 2 hands the folder back the moment it is known, so
         // every later verb runs against it.
@@ -125,6 +131,14 @@ public final class AppModel {
         } else {
             firstRun.instanceDirectory = instances.active
         }
+    }
+
+    /// Starts the shell's poll and keeps `apply` fed with the Dock badge's
+    /// label. Called once by the app, never from `init`: a model built by a
+    /// test starts nothing.
+    public func startShell(dockBadge apply: @escaping @MainActor (String?) -> Void) {
+        shell.observeBadge(apply)
+        shell.start()
     }
 
     public var runtime: MetistryRuntime? { resolution.runtime }
@@ -190,5 +204,9 @@ public final class AppModel {
         // The same line for the console itself: the old instance's child is
         // ended and every section built on it is dropped.
         console.adopt(cli: cli, defaults: defaults)
+        // The shell forgets the last instance's count, name, pins and history,
+        // reads through the new session, and asks now rather than at its next tick.
+        shell.adopt(stores: console.stores)
+        Task { await shell.refresh() }
     }
 }

@@ -783,7 +783,7 @@ uniform `403`, never a `404` that would hide the route's existence.
 ### Agents — the registry
 
 ```
-GET  /api/agents                      200 {"agents":[{…, "scope":{…}, "permissions":[…]}],"access_requests":[…]}
+GET  /api/agents                      200 {"agents":[{…, "scope":{…}, "permissions":[…]}],"access_requests":[…],"access_ceilings":[…]}
 POST /api/agents                      {id, display_name, kind?, remote?}   201 {"id","token","pending","proposal_id"?}   409 — the id is taken
 PUT  /api/agents/:id/grants           {tier, areas?, queries?}   200 {"ok":true,"grants":{…}}
 PUT  /api/agents/:id/projects         {projects: [slug, …]}      200 {"ok":true,"projects":[…]}
@@ -947,8 +947,9 @@ answer carries `via: triage` and the proposal id, and the owner's own PUT
 carries `via: console`. Approve therefore cannot grant anything this route
 would refuse, and the console's mutating surface gains no verb (invariant 10).
 
-`GET /api/agents` answers the registry **and** the unanswered asks, so the
-panel where a grant is edited shows what has been asked of it:
+`GET /api/agents` answers the registry, the unanswered asks **and** the asks
+the escalation ceiling refused, so the panel where a grant is edited shows
+what has been asked of it — including what it can no longer ask:
 
 ```
 GET /api/agents
@@ -957,8 +958,23 @@ GET /api/agents
                 "grant_source","scope"}],
      "access_requests":[{"proposal_id":412,"agent":"devin","area":"Areas/Health",
                          "reason":"knowledge_read pointed me here","ts":"…",
-                         "escalated":true,"prior_proposal":399}]}
+                         "escalated":true,"prior_proposal":399}],
+     "access_ceilings":[{"agent":"devin","area":"Areas/Finance","declines":2,
+                         "last_proposal":388,"last_declined_at":"…",
+                         "hits":3,"first_at":"…","last_at":"…"}]}
 ```
+
+`access_ceilings` (C42, T2-2): after you decline an area twice, a third
+`request_access` for it is refused at the tool and writes **no** proposal —
+it is not a question you have not answered — so without this list it would
+be invisible. Each such refusal writes one `runs` row, kind `access_ceiling`
+(`meta: {agent, area, declines, last_proposal, last_declined_at}`), and this
+is those rows grouped per (agent, area): `hits` is how many asks the ceiling
+has refused, `last_proposal` the decline that closed it. The last 30 days,
+newest first, at most 50 pairs; a pair drops off once the agent holds the
+area (you granted it here) or is revoked. It is a view and has no verb: what
+you do about it — grant the area, revoke the credential, or nothing — is the
+routes below.
 
 `scope` is the row **rendered**, in the one vocabulary every surface uses
 (`describeScope` — [auth.md](auth.md)):
@@ -1001,14 +1017,36 @@ an extra field —
 
 ```
 POST /api/proposals/412 {"decision":"allow"}
-200 {"ok":true,"granted":{"agent":"devin","area":"Areas/Health","grants":{…}}}
+200 {"ok":true,"granted":{"agent":"devin","area":"Areas/Health","grants":{…},"prior_tier":"index"}}
 POST /api/proposals/412 {"decision":"accept_with_changes","area":"Areas/Health/Sleep"}
-200 {"ok":true,"granted":{"agent":"devin","area":"Areas/Health/Sleep","grants":{…}}}
+200 {"ok":true,"granted":{"agent":"devin","area":"Areas/Health/Sleep","grants":{…},"prior_tier":"index"}}
 400 `accept_with_changes` with no `area` (there is nothing to grant), or an area the validator refuses
+    — the row stays pending, carrying payload.error
+400 `accept_with_changes` with an area that is not the one asked for or a folder under it
+    {"error":{"code":"invalid_request","message":"Revise can only grant less …"},"asked":"Areas/Health"}
+    — nothing is written: not the grant, not payload.error; the card is as you left it
 403 a crew's scope is its manifest — Decline and edit that file
 404 the agent is revoked or gone
-    — every refusal leaves the row pending, carrying payload.error, for you to Decline
+    — every refusal leaves the row pending, for you to Decline
 ```
+
+**Revise can only grant less** (C40, ruled 2026-09-20). The area that was
+asked for is a ceiling: a revision must be it or a folder under it
+(`Areas/Health` admits `Areas/Health/Sleep`; never `Areas`, `Areas/Finance`
+or `Areas/HealthX`). Granting more than was asked, or somewhere beside it, is
+not a revision of this request — it is a different decision about a scope
+nobody asked for, and it is `PUT /api/agents/:id/grants`, on Agents, with the
+whole credential in view. The refusal carries `asked` so a control can offer
+the tree under it. It is audited (`console/triage/access_request`, `error:
+wider_than_asked`) and writes nothing else.
+
+**`prior_tier`** (C41) is the tier the credential held **before** this answer,
+read from the registry at the moment of the write (and stored on the row as
+`payload.granted.prior_tier`). An area grant *is* tier `areas`, so when
+`prior_tier` is `index`, Approve was also a trade: vault-wide titles for
+titles inside its folders. A client states that from this field rather than
+deriving it from the ask's `current_scope`, which is a snapshot from when the
+agent asked.
 
 `deny`, `later` and `skip` grant nothing at all, and neither does a revoked
 agent's ask: revoking settles its pending requests as `deny` in the same

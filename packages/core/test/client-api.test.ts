@@ -74,7 +74,7 @@ describe("every row", () => {
   });
 
   it("serves exactly N rows — a ticket flipping a row to served/unserved must update this number", () => {
-    expect(CLIENT_API.filter((r) => r.served).length).toBe(78); // T4-1: GET /api/secrets; T2-5: the Defer door; T4-6: GET /api/agents/:id/definition; T4-4: GET /api/variables; T3-9: POST /api/sessions/purge; T2-18: GET /api/events; T1-7: GET /api/needs-you/count
+    expect(CLIENT_API.filter((r) => r.served).length).toBe(81); // T4-1: GET /api/secrets; T2-5: the Defer door; T4-6: GET /api/agents/:id/definition; T4-4: GET /api/variables; T3-9: POST /api/sessions/purge; T2-18: GET /api/events; T1-7: GET /api/needs-you/count; T1-6: the fold, the drafts, the areas
   });
 
   it("takes a cursor only on a read, and an Idempotency-Key only on a write", () => {
@@ -190,8 +190,8 @@ describe("matchRoute", () => {
 describe("noRouteMessage", () => {
   it("names the served routes beside a misspelt one", () => {
     const m = noRouteMessage("GET", "/api/knowledge/backlinks");
-    for (const door of ["GET /api/knowledge/search", "GET /api/knowledge/page", "GET /api/knowledge/pages", "GET /api/knowledge/links"]) expect(m).toContain(door);
-    expect(m).not.toContain("/api/knowledge/fold"); // frozen ahead of T1-6, not served — never offered
+    for (const door of ["GET /api/knowledge/search", "GET /api/knowledge/page", "GET /api/knowledge/pages", "GET /api/knowledge/links", "GET /api/knowledge/fold", "GET /api/knowledge/drafts", "GET /api/knowledge/areas"]) expect(m).toContain(door);
+    expect(m).not.toContain("/api/knowledge/history"); // frozen ahead of T10-4, not served — never offered
   });
 
   it("offers the other method when the path is right", () => {

@@ -288,6 +288,153 @@ describe("the link list scopes BOTH ends of every edge", () => {
   });
 });
 
+/**
+ * The owner's three reads (T1-6) over their REAL manifests, with a fake
+ * executor that records every statement it was handed — so "refused" can be
+ * asserted as "and no SQL ran", not only as a status code.
+ */
+async function ownerRoute(file: string, route: string, principal: Principal, rows: Record<string, unknown>[], qs = "", audits: unknown[][] = []): Promise<{ status: number; body: any; params: unknown[]; ran: number }> {
+  const params: unknown[][] = [];
+  const store = new QueryStore({
+    async query(_text, values) {
+      params.push(values);
+      return { rows };
+    },
+  });
+  store.load(await readFile(new URL(`../../../seed/queries/${file}.yaml`, import.meta.url), "utf8"));
+  const c = capture();
+  const url = new URL(`http://x${route.slice("GET ".length)}${qs}`);
+  await knowledgeRoutes(new IncomingMessage(new Socket()), c.res, route, url, { queries: store }, principal, async (...a) => {
+    audits.push(a);
+  });
+  return { ...c.read(), params: params[0] ?? [], ran: params.length };
+}
+
+const OWNER_READS = [
+  ["knowledge_fold_latest", "GET /api/knowledge/fold"],
+  ["knowledge_drafts", "GET /api/knowledge/drafts"],
+  ["knowledge_areas", "GET /api/knowledge/areas"],
+] as const;
+
+describe("the fold, the drafts and the areas are the owner's alone", () => {
+  // Every principal that is not the owner, at its WIDEST: an agent granted
+  // the whole vault with `queries: true`, the assistant itself, a crew
+  // member, and the capture token. None of them is the owner, so none of
+  // them is handed a draft, whatever server.ts's gate did first.
+  const wide = (role: Principal["role"], id: string): Principal => ({ id, role, scope: { tier: "areas", areas: null, queries: true, projects: null }, source: "registry" });
+  const OTHERS: Principal[] = [granted(["Areas/Health"]), wide("agent", "everything"), wide("assistant", "assistant"), wide("crew", "crew"), NOBODY];
+
+  it("refuses every other principal the console's uniform 403, and runs no SQL", async () => {
+    for (const [file, route] of OWNER_READS) {
+      for (const p of OTHERS) {
+        const audits: unknown[][] = [];
+        const r = await ownerRoute(file, route, p, [{ path: "Areas/Health/secret.md" }], "", audits);
+        expect(r.status, `${route} ${p.id}`).toBe(403);
+        expect(r.body, `${route} ${p.id}`).toEqual({ error: { code: "forbidden", message: "not granted" } });
+        expect(r.ran, `${route} ${p.id}`).toBe(0);
+        expect(audits[0]?.[2], `${route} ${p.id}`).toBe(false); // the refusal is audited
+      }
+    }
+  });
+
+  it("answers 503 naming the file when its named query is not loaded", async () => {
+    for (const [file, route] of OWNER_READS) {
+      const c = capture();
+      await knowledgeRoutes(new IncomingMessage(new Socket()), c.res, route, new URL(`http://x${route.slice(4)}`), {}, OWNER, async () => {});
+      const r = c.read();
+      expect(r.status, route).toBe(503);
+      expect(r.body.error.message, route).toContain(`${file}.yaml`);
+    }
+  });
+});
+
+describe("GET /api/knowledge/fold", () => {
+  const FOLD = { path: "Journal/Fold/2026-09-28.md", date: "2026-09-28", title: "Fold — 28 September", modified: "2026-09-28T01:00:00.000Z" };
+  const ROWS = [
+    { ...FOLD, link_path: "Areas/Health/nowhere.md", link_kind: "wikilink", link_title: "nowhere", link_resolved: false },
+    { ...FOLD, link_path: "Me/profile.md", link_kind: "wikilink", link_title: "profile", link_resolved: true },
+    { ...FOLD, link_path: ".metistry/compute.yaml", link_kind: "wikilink", link_title: "compute", link_resolved: true },
+  ];
+
+  it("folds the rows into one fold and its links — Me/ included for the owner, the machinery never", async () => {
+    const r = await ownerRoute("knowledge_fold_latest", "GET /api/knowledge/fold", OWNER, ROWS, "?date=2026-09-28");
+    expect(r.status).toBe(200);
+    expect(r.params).toEqual(["2026-09-28"]);
+    expect(r.body.fold).toEqual({
+      ...FOLD,
+      links: [
+        { path: "Areas/Health/nowhere.md", title: "nowhere", kind: "wikilink", resolved: false },
+        { path: "Me/profile.md", title: "profile", kind: "wikilink", resolved: true },
+      ],
+    });
+    expect(r.body).toMatchObject({ date: "2026-09-28", as_of: expect.any(String) });
+    expect(JSON.stringify(r.body)).not.toContain("metistry/");
+  });
+
+  it("is `fold: null` before the first fold, and an empty link list for a fold that names nothing", async () => {
+    const none = await ownerRoute("knowledge_fold_latest", "GET /api/knowledge/fold", OWNER, []);
+    expect(none.status).toBe(200);
+    expect(none.body).toMatchObject({ fold: null, date: null });
+    expect(none.params).toEqual([""]); // blank = the newest there is
+    const bare = await ownerRoute("knowledge_fold_latest", "GET /api/knowledge/fold", OWNER, [{ ...FOLD, link_path: null, link_kind: null, link_title: null, link_resolved: null }]);
+    expect(bare.body.fold).toEqual({ ...FOLD, links: [] });
+  });
+
+  it("refuses a date that is not a calendar day, by name, before any SQL runs", async () => {
+    for (const qs of ["?date=yesterday", "?date=2026-02-30", "?date=2026-9-28", "?date=2026-09-28T00:00:00Z", "?date=%27%20OR%201=1"]) {
+      const r = await ownerRoute("knowledge_fold_latest", "GET /api/knowledge/fold", OWNER, ROWS, qs);
+      expect(r.status, qs).toBe(400);
+      expect(r.body.error.message, qs).toContain("YYYY-MM-DD");
+      expect(r.ran, qs).toBe(0);
+    }
+  });
+});
+
+describe("GET /api/knowledge/drafts", () => {
+  const DRAFTS = [
+    { path: "Areas/Health/sleep.md", area: "Areas/Health", title: "Sleep", description: "the taper", modified: "2026-09-27T20:00:00.000Z" },
+    { path: "Me/profile.md", area: "Me", title: "profile", description: null, modified: "2026-09-27T20:00:00.000Z" },
+    { path: ".metistry/rules.yaml", area: ".metistry", title: "rules", description: null, modified: null },
+  ];
+
+  it("hands the owner every draft that is knowledge, paged, with no total", async () => {
+    const r = await ownerRoute("knowledge_drafts", "GET /api/knowledge/drafts", OWNER, DRAFTS, "?limit=20&offset=0");
+    expect(r.status).toBe(200);
+    expect(r.params).toEqual([20, 0]);
+    expect(r.body.drafts.map((d: any) => d.path)).toEqual(["Areas/Health/sleep.md", "Me/profile.md"]);
+    expect(r.body).toMatchObject({ limit: 20, offset: 0, as_of: expect.any(String) });
+    expect(r.body).not.toHaveProperty("total");
+  });
+
+  it("refuses a limit or offset out of range by name", async () => {
+    for (const [qs, needle] of [
+      ["?limit=0", "between 1 and 500"],
+      ["?limit=501", "between 1 and 500"],
+      ["?offset=-1", "non-negative integer"],
+    ] as const) {
+      const r = await ownerRoute("knowledge_drafts", "GET /api/knowledge/drafts", OWNER, DRAFTS, qs);
+      expect(r.status, qs).toBe(400);
+      expect(r.body.error.message, qs).toContain(needle);
+    }
+  });
+});
+
+describe("GET /api/knowledge/areas", () => {
+  it("lists the areas that are knowledge, and drops a folder that is not — by core's predicate", async () => {
+    const AREAS = [
+      { area: ".metistry", description: null, pages: 3, last_change: null, named_by_fold: false },
+      { area: "Areas/Health", description: "Sleep, labs, and the protein blend", pages: 4, last_change: "2026-09-27T20:00:00.000Z", named_by_fold: true },
+      { area: "Artifacts", description: null, pages: 1, last_change: null, named_by_fold: false },
+      { area: "Me", description: null, pages: 2, last_change: null, named_by_fold: false },
+    ];
+    const r = await ownerRoute("knowledge_areas", "GET /api/knowledge/areas", OWNER, AREAS);
+    expect(r.status).toBe(200);
+    expect(r.params).toEqual([]);
+    expect(r.body.areas).toEqual([AREAS[1], AREAS[3]]);
+    expect(r.body.as_of).toEqual(expect.any(String));
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Ruled 2026-09-19 (D): "the owner should always have access to everything.
 // Agents, however, should only have access to what they're granted. Dropping

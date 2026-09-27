@@ -224,8 +224,14 @@ still `metistry update`, by hand.
 
 ## Secrets
 
-Repo secrets, set in GitHub → Settings → Secrets → Actions. None of them
-are in the repo, and none reach a build log.
+The signing secrets — `APPLE_*` and `SPARKLE_PRIVATE_KEY` — live in the
+**`release` environment** (GitHub → Settings → Environments → `release`),
+whose required reviewer is the owner. Only the four jobs that sign or
+notarize (`runtime`, `runtime-deps`, `macos-app`, `appcast`) declare
+`environment: release`, so only they can read those secrets, and each waits
+for the owner's approval on the run. None of them are in the repo, and none
+reach a build log. (Repo-level secrets of the same names also still work, for
+a fork that has not made the environment.)
 
 | secret | used by | needed for |
 | --- | --- | --- |

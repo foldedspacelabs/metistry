@@ -1335,7 +1335,7 @@ function renderProjectRows({ projects, as_of }) {
   dashStamp("projects", as_of);
 }
 
-function renderProjects({ rows, as_of }) {
+function renderAreas({ rows, as_of }) {
   $("dash-projects").innerHTML = rows.length
     ? rows.map((r) => {
         const latest = (Array.isArray(r.latest) ? r.latest : []).map((t) => esc(String(t).slice(0, 60))).join(" · ");
@@ -1422,7 +1422,7 @@ function loadToday() {
 
 function loadProjects() {
   return loadPanels({
-    projects: async () => { renderProjectRows(await (await api("/api/projects")).json()); renderProjects(await dashQuery("projects_overview")); },
+    projects: async () => { renderProjectRows(await (await api("/api/projects")).json()); renderAreas(await dashQuery("areas_overview")); },
   });
 }
 

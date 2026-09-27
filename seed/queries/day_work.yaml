@@ -56,7 +56,7 @@
 # `/api/q/<name>` and `queries_run` answer this name with the refusal they
 # answer an unknown name with (ruled 2026-09-19: one endpoint per operation).
 # The work rows an agent may legitimately read unscoped are already served by
-# `open_work`, `board` and `projects_overview`; what is new here is the half
+# `open_work`, `board` and `areas_overview`; what is new here is the half
 # that reaches into the vault, and that half is the half to scope. `expose`
 # gates the two generic doors only — the template engine and the routines run
 # this in process.

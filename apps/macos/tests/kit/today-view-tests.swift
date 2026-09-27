@@ -480,14 +480,14 @@ import Testing
             #expect(CGFloat(image.width) <= width, "\(name) is \(image.width) wide at \(size)")
             heights[size] = CGFloat(image.height)
         }
-        #expect((heights[.accessibility5] ?? 0) > (heights[.large] ?? 0), "\(name) did not grow at the largest text")
+        #expect((heights[.accessibility5] ?? 0) > (heights[.large] ?? 0), "\(name) did not grow at the largest text: \(heights)")
     }
 }
 
 @Test func noStringInTheScreensSourcesSaysAssistantOrNamesOne() throws {
     let kit = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("sources/kit")
     var literals: [String] = []
-    for file in ["today-view.swift", "today-brief-view.swift"] {
+    for file in ["today-view.swift", "today-brief-view.swift", "today-model.swift"] {
         let text = try String(contentsOf: kit.appendingPathComponent(file), encoding: .utf8)
         // §2.18.4: nothing here slides, so Reduce Motion has nothing to stop; no bare key outside the menu table (C119)
         #expect(!text.contains("withAnimation") && !text.contains(".animation(") && !text.contains(".transition("), "\(file)")
@@ -501,6 +501,346 @@ import Testing
     for literal in literals {
         #expect(!literal.localizedCaseInsensitiveContains("assistant"), "\"\(literal)\"")
         #expect(literal.range(of: #"\bMetis\b"#, options: .regularExpression) == nil, "\"\(literal)\"")
+    }
+}
+
+
+// MARK: - The spine (T6-1a) — the ticket's two first
+
+@MainActor
+@Test func aTickOnAChangedLineShowsTheCurrentLineAndWritesNothing() async throws {
+    let console = TodayConsole(day: busyDay(), pages: pages())
+    let (model, session) = todayModel(console, at: at("11:00"))
+    defer { withExtendedLifetime(session) {} }
+    await model.load()
+    let spine = try #require(model.spine)
+    guard case .task(let lease)? = spine.placeable.first(where: { $0.key == "mt-lease" }) else { Issue.record("\(spine.placeable)"); return }
+
+    console.check = .failure(.http(status: 409, envelope: ConsoleErrorEnvelope(json: json(#"{"error": {"code": "conflict", "message": "the line changed"}, "reason": "stale", "line": "- [ ] Draft the lease comparison for Jim"}"#))))
+    let before = console.calls.count
+    let written = await model.tick(lease, checked: true)
+    #expect(!written)
+
+    // one call, the Tick door, and nothing after it: no retry, no reload, no order
+    let after = Array(console.calls.dropFirst(before))
+    #expect(after.map(\.path) == ["/api/vault-tasks/mt-lease/check"], "\(after.map(\.path))")
+    #expect(after.first?.body == json(#"{"checked": true, "seen_text": "Draft the lease comparison"}"#))
+    #expect(model.notes["mt-lease"] == .stale(line: "- [ ] Draft the lease comparison for Jim"))
+    // the row keeps its place, open, with the line as it now stands beneath it
+    #expect(model.spine?.placeable.map(\.key) == spine.placeable.map(\.key))
+    guard case .task(let still)? = model.spine?.placeable.first(where: { $0.key == "mt-lease" }) else { Issue.record("gone"); return }
+    #expect(!still.checked)
+
+    let tree = try await AccessibilityProbe.snapshot(TodayView(model: model, assistantName: "Aide", tick: .seconds(3600)).frame(width: 820, height: 2000))
+    defer { tree.close() }
+    let said = tree.labels + tree.texts
+    #expect(said.contains { $0.contains("This line changed in your note since it was shown. Nothing was written.") }, "\(said)")
+    #expect(said.contains { $0.contains("- [ ] Draft the lease comparison for Jim") }, "the current line is shown: \(said)")
+    #expect(!said.contains { $0.hasPrefix("Ticked in") }, "never a receipt for a write that did not happen")
+    let box = try #require(tree.controls.first { $0.role == "AXCheckBox" && $0.name.hasPrefix("Draft the lease comparison") })
+    #expect(box.value == "0" || box.value.isEmpty, "the box stays open: \(box)")
+}
+
+@MainActor
+@Test func dragOrderSurvivesAReload() async throws {
+    let day = dayJSON(tasks: [
+        task("mt-a", "Answer the lease email", size: "s"),
+        task("mt-b", "Book the walkthrough", size: "s"),
+        task("mt-c", "Call the dentist", size: "s"),
+    ], events: [], work: [workRow("41", "Pick the fixture redaction", waitsOn: "Answer the lease email")])
+    let console = TodayConsole(day: day, pages: pages())
+    let (model, session) = todayModel(console, at: at("10:00"))
+    defer { withExtendedLifetime(session) {} }
+    await model.load()
+    #expect(model.spine?.isList == true, "no meeting: the plain list (§12.4)")
+    #expect(model.spine?.list.map(\.key) == ["mt-a", "mt-b", "mt-c", "work:41"], "no order yet: as served")
+
+    // a drag: Call the dentist dropped on Answer the lease email takes its place
+    await model.move("mt-c", onto: "mt-a")
+    let put = try #require(console.calls.last { $0.method == "PUT" })
+    #expect(put.path == "/api/today/order")
+    #expect(put.body == json(#"{"date": "2026-09-28", "task_keys": ["mt-c", "mt-a", "mt-b", "work:41"]}"#))
+    #expect(model.spine?.list.map(\.key) == ["mt-c", "mt-a", "mt-b", "work:41"])
+    // Move Down: the keyboard's and VoiceOver's drag
+    await model.move("work:41", by: -1)
+    #expect(model.spine?.list.map(\.key) == ["mt-c", "mt-a", "work:41", "mt-b"])
+
+    // the reload: the same model, and a fresh one — the order is the console's now
+    await model.load()
+    #expect(model.orderOverride == nil, "the day carries the stored order")
+    #expect(model.spine?.list.map(\.key) == ["mt-c", "mt-a", "work:41", "mt-b"])
+    let (fresh, freshSession) = todayModel(console, at: at("15:00"))
+    defer { withExtendedLifetime(freshSession) {} }
+    await fresh.load()
+    #expect(fresh.spine?.list.map(\.key) == ["mt-c", "mt-a", "work:41", "mt-b"])
+
+    // a refused order puts the rows back and says so
+    console.orderRefusal = .http(status: 400, envelope: ConsoleErrorEnvelope(code: "invalid_request", message: "this key is not on 2026-09-28: mt-b"))
+    await fresh.move("mt-b", onto: "mt-c")
+    #expect(fresh.spine?.list.map(\.key) == ["mt-c", "mt-a", "work:41", "mt-b"])
+    #expect(fresh.orderNote?.hasPrefix("Not moved") == true)
+}
+
+@MainActor
+@Test func thePageOpensAtNow() async throws {
+    let console = TodayConsole(day: busyDay(), pages: pages())
+    let (model, session) = todayModel(console, at: at("13:31"))
+    defer { withExtendedLifetime(session) {} }
+    await model.load()
+    let spine = try #require(model.spine)
+    #expect(spine.now == at("13:31"))
+    // the morning is one line above NOW
+    #expect(spine.earlier.meetings.map(\.title) == ["Standup"])
+    #expect(spine.earlier.done.map(\.title) == ["Sign the SOW"])
+    #expect(spine.earlier.summary == "1 done · 1 meeting · 1 carried forward")
+    #expect(!model.pastOpen)
+    // what is left, in time order: the gap before the Lease Call, the call, the afternoon
+    #expect(spine.entries.map(\.id) == ["gap:\(Int(at("13:31").timeIntervalSince1970))", "meeting:evt-lease", "gap:\(Int(at("14:30").timeIntervalSince1970))"])
+
+    let tree = try await AccessibilityProbe.snapshot(TodayView(model: model, assistantName: "Aide", tick: .seconds(3600)).frame(width: 820, height: 2000))
+    defer { tree.close() }
+    let names = tree.nodes.map(\.name)
+    #expect(names.contains("Now, 1:31 PM"), "\(names)")
+    #expect(names.contains { $0.hasPrefix("Earlier today: 1 done, 1 meeting, 1 carried forward") }, "the morning, one line: \(names)")
+    // what is left is under NOW, in its gaps
+    let placed = spine.entries.flatMap { entry -> [String] in if case .gap(let g) = entry { return g.items.map(\.key) } else { return [] } }
+    #expect(placed == ["mt-jim", "mt-ana", "mt-lease"], "\(placed)")
+    #expect(!tree.controlNames.contains { $0.hasPrefix("Sign the SOW") }, "a line done this morning is in the fold, not on the page")
+    #expect(tree.headings.contains("Now, 1:31 PM"), "NOW is a heading, so the rotor finds it: \(tree.headings)")
+
+    model.togglePast()
+    let open = try await AccessibilityProbe.snapshot(TodayView(model: model, assistantName: "Aide", tick: .seconds(3600)).frame(width: 820, height: 2200))
+    defer { open.close() }
+    #expect(open.controlNames.contains { $0.hasPrefix("Sign the SOW, done") }, "expanded in place: \(open.controlNames)")
+}
+
+// MARK: - The spine, laid out
+
+@Test func rowsGoInTheGapsInTheOwnersOrderAndWhatDoesNotFitIsShownNotRefused() throws {
+    // 9:00–17:30; meetings 10:00–12:00 with Dana and 13:00–17:00 with Jim; a focus block 12:00–12:45
+    let day = TodayDay(json: dayJSON(tasks: [
+        task("mt-l", "Write the settings brief", size: "l"),
+        task("mt-s", "Renew the parking permit", size: "s"),
+        task("mt-m", "Read the migration notes", size: "m"),
+        task("mt-x", "Plan the offsite", size: "l"),
+        task("mt-none", "Water the plants"),
+    ], events: [
+        event("e1", "Design Review", "10:00", "12:00", with: [("Dana", nil)]),
+        event("focus", "Deep work", "12:00", "12:45"),
+        event("e2", "Vendor Day", "13:00", "17:00", with: [("Jim", nil)]),
+    ]))
+    let profile = WorkingProfile(workingDays: ["mon"], dayStart: 540, dayEnd: 1050)
+    let spine = TodaySpine.build(day, order: ["mt-s", "mt-l"], kept: [], now: at("08:40"), profile: profile, calendar: utcCalendar, sizes: TaskFacets.defaultSizeMinutes)
+
+    // the page opens at 8:40 but the day at 9:00; the owner's two first, then as served
+    #expect(spine.arranged.map(\.key) == ["mt-s", "mt-l", "mt-m", "mt-x", "mt-none"])
+    #expect(spine.placeable.map(\.key) == ["mt-s", "mt-m", "mt-none", "mt-l", "mt-x"], "as drawn: the gaps, then what doesn't fit")
+    let gaps = spine.entries.compactMap { entry -> TodaySpine.Gap? in if case .gap(let g) = entry { return g } else { return nil } }
+    #expect(gaps.map(\.label) == ["1h free", "Focus — Deep work", "15m free", "30m free"])
+    // 9:00–10:00: 15m and 45m fit, and the line with no size; neither 90m row fits anywhere left
+    #expect(gaps[0].items.map(\.key) == ["mt-s", "mt-m", "mt-none"])
+    #expect(gaps[0].fits == "all 3 fit · 1 has no size")
+    #expect(gaps[1].items.isEmpty, "the 90m rows do not fit 45m")
+    #expect(spine.doesNotFit.map(\.key) == ["mt-l", "mt-x"], "shown under Doesn't fit, and they hold up nothing after them")
+    // a row is never drawn above one the owner put before it
+    let later = TodaySpine.build(day, order: ["mt-m", "mt-s"], kept: [], now: at("09:30"), profile: profile, calendar: utcCalendar, sizes: TaskFacets.defaultSizeMinutes)
+    let laterGaps = later.entries.compactMap { entry -> TodaySpine.Gap? in if case .gap(let g) = entry { return g } else { return nil } }
+    #expect(laterGaps.first?.items.map(\.key) == [], "30m before the review: the 45m row does not fit")
+    #expect(laterGaps[1].items.map(\.key) == ["mt-m"], "it goes to the focus block")
+    #expect(laterGaps[2].items.map(\.key) == ["mt-s", "mt-none"], "and the 15m row follows it rather than jumping ahead into 9:30")
+    #expect(TodayWords.doesNotFit(spine.dayEnd.map(ClockTime(timeZone: utc).time)) == "Doesn’t fit before 5:30 PM")
+
+    // with no working_hours there is no end: the afternoon is open and everything fits
+    let open = TodaySpine.build(day, order: [], kept: [], now: at("08:40"), profile: nil, calendar: utcCalendar, sizes: TaskFacets.defaultSizeMinutes)
+    #expect(open.doesNotFit.isEmpty)
+    #expect(open.dayEnd == nil)
+
+    // a line with no size fits anywhere, and the gap says it has none
+    let unsized = TodaySpine.build(day, order: ["mt-none"], kept: [], now: at("08:40"), profile: profile, calendar: utcCalendar, sizes: TaskFacets.defaultSizeMinutes)
+    guard case .gap(let first)? = unsized.entries.first else { Issue.record("\(unsized.entries)"); return }
+    #expect(first.items.first?.key == "mt-none")
+    #expect(first.fits.contains("1 has no size"))
+}
+
+@Test func aLineTickedHereKeepsItsPlaceAndTheSizesAreTheProfiles() throws {
+    let day = TodayDay(json: dayJSON(tasks: [
+        task("mt-a", "Answer the lease email", checked: true, size: "s"),
+        task("mt-b", "Book the walkthrough", size: "s"),
+    ], events: [event("e1", "Lease Call", "14:00", "14:30", with: [("Jim", nil)])]))
+    let profile = WorkingProfile.parse("---\nworking_hours: \"09:00-17:30\"\ntask_size_minutes: { s: 20, m: 50, l: 100 }\n---\n")
+    #expect(profile.sizeMinutes == ["s": 20, "m": 50, "l": 100])
+    #expect(WorkingProfile.parse("---\ntask_size_minutes:\n  s: 10\n  l: 80\n---\n").sizeMinutes == ["s": 10, "l": 80])
+    #expect(WorkingProfile.parse("---\n# task_size_minutes: { s: 15 }\n---\n").sizeMinutes == nil, "commented out: the profile does not say")
+
+    let kept = TodaySpine.build(day, order: ["mt-a", "mt-b"], kept: ["mt-a"], now: at("10:00"), profile: profile, calendar: utcCalendar, sizes: profile.sizeMinutes!)
+    #expect(kept.placeable.map(\.key) == ["mt-a", "mt-b"], "ticked a moment ago: struck, where it was (P9)")
+    #expect(kept.earlier.done.isEmpty)
+    let later = TodaySpine.build(day, order: ["mt-a", "mt-b"], kept: [], now: at("10:00"), profile: profile, calendar: utcCalendar, sizes: profile.sizeMinutes!)
+    #expect(later.earlier.done.map(\.key) == ["mt-a"], "on the next open it is the morning's")
+    guard case .gap(let gap)? = later.entries.first else { Issue.record("\(later.entries)"); return }
+    #expect(gap.used == 20, "size s is the profile's 20 minutes")
+}
+
+@Test func theDayBarMeasuresTheWorkingDayAndRefusesNothing() throws {
+    let day = TodayDay(json: dayJSON(tasks: [
+        task("mt-l", "Write the settings brief", size: "l"),
+        task("mt-s", "Renew the parking permit", size: "s"),
+    ], events: [
+        event("e1", "Design Review", "10:00", "11:00", with: [("Dana", nil)]),
+        event("e2", "Overlapping Sync", "10:30", "11:30", with: [("Jim", nil)]),
+        event("focus", "Deep work", "15:00", "16:30"),
+    ]))
+    let profile = WorkingProfile(dayStart: 540, dayEnd: 1080)
+    let sizes = TaskFacets.defaultSizeMinutes
+    let spine = TodaySpine.build(day, order: [], kept: [], now: at("09:00"), profile: profile, calendar: utcCalendar, sizes: sizes)
+    let bar = try #require(DayBar.of(day, spine: spine, profile: profile, calendar: utcCalendar, sizes: sizes))
+    #expect(bar.value(.meetings) == 90, "two overlapping meetings are one stretch, counted once")
+    #expect(bar.value(.focus) == 90)
+    #expect(bar.value(.travel) == 0)
+    #expect(bar.value(.fits) == 105)
+    #expect(bar.value(.doesNotFit) == 0)
+    #expect(bar.line == "3h committed of 9h · everything planned fits")
+    #expect(bar.sentence == "The day: 3 hours committed of 9 hours; everything planned fits")
+    #expect(DayBar.Segment.allCases.map(\.rawValue) == ["Meetings", "Travel", "Focus Blocked", "Tasks That Fit", "Doesn’t Fit"])
+    #expect(DayBar.Segment.allCases.map(TodayDayBarView.ink) == [.chart1, .chart2, .chart3, .chart4, .degraded], "a chart: the ramp, never the facet channels")
+
+    // at 5:00 PM an hour is left: the 90-minute line doesn't fit, and the bar says so
+    let late = TodaySpine.build(day, order: [], kept: [], now: at("17:00"), profile: profile, calendar: utcCalendar, sizes: sizes)
+    let lateBar = try #require(DayBar.of(day, spine: late, profile: profile, calendar: utcCalendar, sizes: sizes))
+    #expect(lateBar.value(.doesNotFit) == 90)
+    #expect(lateBar.line == "3h committed of 9h · 1h 30m doesn’t fit")
+    #expect(DayBar.of(day, spine: spine, profile: WorkingProfile(), calendar: utcCalendar, sizes: sizes) == nil, "no working_hours: none assumed")
+}
+
+// MARK: - All
+
+@MainActor
+@Test func allRunsTheBoxThroughTheOneLanguageAndSaysARefusalInTheParsersWords() async throws {
+    let console = TodayConsole(day: busyDay(), pages: pages())
+    let (model, session) = todayModel(console, at: at("10:00"))
+    defer { withExtendedLifetime(session) {} }
+    await model.load()
+    #expect(model.mode == .today)
+    model.toggleMode()
+    #expect(model.mode == .all, "View ▸ Today / All")
+
+    model.whereText = "due <= 2026-09-28"
+    await model.runWhere()
+    let asked = try #require(console.calls.last { $0.path.hasPrefix("/api/vault-tasks") })
+    #expect(asked.method == "GET")
+    #expect(URLComponents(string: "http://x\(asked.path)")?.queryItems == [URLQueryItem(name: "where", value: "due <= 2026-09-28")])
+    guard case .rows(let rows, let filter, _) = model.allTasks else { Issue.record("\(model.allTasks)"); return }
+    #expect(filter == "due <= 2026-09-28")
+    #expect(!rows.isEmpty, "the recorded rows decode")
+
+    // Waiting on Others is a stored where: string, loaded into the box as it is
+    let waiting = try #require(SavedTaskView.all.first { $0.name == "Waiting on Others" })
+    await model.apply(waiting)
+    #expect(model.whereText == "waiting")
+    #expect(console.calls.last?.path == "/api/vault-tasks?where=waiting")
+    // Slipping and Owed are drawn and dimmed, saying why — nothing is guessed at
+    #expect(SavedTaskView.all.map(\.name) == ["Slipping", "Owed", "Waiting on Others"])
+    for name in ["Slipping", "Owed"] {
+        let view = try #require(SavedTaskView.all.first { $0.name == name })
+        #expect(view.filter == nil && view.unavailableBecause != nil)
+        let calls = console.calls.count
+        await model.apply(view)
+        #expect(console.calls.count == calls, "\(name) asks nothing")
+    }
+
+    // a filter outside the grammar: the parser's own message
+    let refusing = RefusingVaultTasks(inner: console)
+    let (other, otherSession) = todayModel(refusing, at: at("10:00"))
+    defer { withExtendedLifetime(otherSession) {} }
+    other.whereText = "due <= friday; drop table"
+    await other.runWhere()
+    #expect(other.allTasks == .refused("where: character \";\" is not allowed — the filter language has no quotes, semicolons or parentheses"))
+
+    // ⌘F is All's box
+    model.setMode(.today)
+    model.askForTheBox()
+    #expect(model.mode == .all)
+    #expect(model.takeBoxRequest())
+    #expect(!model.takeBoxRequest(), "answered once")
+}
+
+@MainActor
+@Test func theRecordedDayKeepsTheStoredOrderAndItsWorkRows() async throws {
+    let console = try FixtureConsole.recorded()
+    let (model, session) = todayModel(console, at: at("12:00"))
+    defer { withExtendedLifetime(session) {} }
+    await model.load()
+    let day = try #require(model.day)
+    #expect(!day.order.isEmpty)
+    let spine = try #require(model.spine)
+    #expect(Array(spine.placeable.map(\.key).prefix(day.order.count)) == day.order, "the stored order leads")
+    #expect(!day.work.isEmpty && spine.placeable.contains { if case .work = $0 { return true } else { return false } })
+    let order = try ConsoleFixture.load("put-api-today-order")
+    #expect(order.replyJSON?["order"]?.arrayValue?.isEmpty == false)
+}
+
+// MARK: - The spine's §2.18
+
+@MainActor
+@Test func everyControlOnTheSpineAndInAllSpeaksItsName() async throws {
+    let day = dayJSON(tasks: [
+        task("mt-jim", "Send Jim the revised Q4 scope", assigned: "Jim", priority: 2, size: "m", carried: 2),
+        task("mt-lease", "Draft the lease comparison", priority: 3, size: "l"),
+        task("mt-sow", "Sign the SOW", checked: true),
+    ], events: [
+        event("evt-standup", "Standup", "09:30", "09:45", with: [("Dana", "People/Dana.md")]),
+        event("focus", "Deep work", "15:00", "16:00"),
+    ], work: [workRow("41", "Pick the fixture redaction", waitsOn: "Send Jim the revised Q4 scope")])
+    let console = TodayConsole(day: day, pages: pages())
+    let (model, session) = todayModel(console, at: at("11:00"))
+    defer { withExtendedLifetime(session) {} }
+    await model.load()
+    let tree = try await AccessibilityProbe.snapshot(TodayView(model: model, assistantName: "Aide", tick: .seconds(3600)).frame(width: 820, height: 2200))
+    defer { tree.close() }
+    #expect(tree.unlabeledBesidesFields.isEmpty, "unlabeled: \(tree.unlabeledBesidesFields)")
+    #expect(tree.saysAssistant.isEmpty, "\(tree.saysAssistant)")
+    let said = tree.labels + tree.texts
+    #expect(said.contains { $0.hasPrefix("The day: ") }, "the day bar speaks one sentence: \(said)")
+    #expect(said.contains("Pick the fixture redaction. Work #41, blocked, waiting on you: Send Jim the revised Q4 scope. An agent's row — Open it on the Board"), "\(said)")
+    #expect(said.contains { $0.hasPrefix("Focus — Deep work") }, "a focus block is a place for rows: \(said)")
+    #expect(tree.controlNames.contains { $0.hasPrefix("Send Jim the revised Q4 scope. Priority 2, 45 minutes, second day") }, "\(tree.controlNames)")
+    #expect(tree.controls.contains { $0.role == "AXSegmentedControl" || $0.name == TodayWords.todayOrAllSpoken || $0.name == "Today" }, "\(tree.controlNames)")
+
+    model.setMode(.all)
+    let all = try await AccessibilityProbe.snapshot(TodayView(model: model, assistantName: "Aide", tick: .seconds(3600)).frame(width: 820, height: 1400))
+    defer { all.close() }
+    #expect(all.unlabeledBesidesFields.isEmpty, "unlabeled: \(all.unlabeledBesidesFields)")
+    #expect(all.fieldsWithoutAPrompt.isEmpty)
+    for name in ["Saved view, Slipping", "Saved view, Owed", "Saved view, Waiting on Others", TodayWords.copyWhere] {
+        #expect(all.controlNames.contains { $0.hasPrefix(name) }, "\(name) in \(all.controlNames)")
+    }
+}
+
+@MainActor
+@Test func theSpineGrowsLongerNeverWiderAtTheLargestText() async throws {
+    let bar = DayBar(minutes: [.meetings: 162, .travel: 0, .focus: 90, .fits: 65, .doesNotFit: 0], workingMinutes: 540)
+    let gap = TodaySpine.Gap(start: at("10:00"), end: at("10:35"), focus: nil, items: [], used: 25, unsized: 0)
+    let work = try #require(TodayWork(json: json(workRow("41", "Pick the fixture redaction", waitsOn: "Send Dana the fixture format"))))
+    let clock = ClockTime(timeZone: utc)
+    let pieces: [(String, AnyView)] = [
+        ("bar", AnyView(TodayDayBarView(bar: bar))),
+        ("gap", AnyView(TodayGapHeader(gap: gap, clock: clock))),
+        ("work", AnyView(TodayWorkRow(work: work, onMoveUp: nil, onMoveDown: nil))),
+        ("earlier", AnyView(TodayEarlierLine(summary: "3 done · 1 meeting · 2 carried forward", open: false, onToggle: {}))),
+        ("now", AnyView(TodayNowRule(time: "1:31 PM"))),
+    ]
+    let width: CGFloat = 360
+    for (name, view) in pieces {
+        var heights: [DynamicTypeSize: CGFloat] = [:]
+        for size in [DynamicTypeSize.large, .accessibility5] {
+            let renderer = ImageRenderer(content: view.frame(width: width).environment(\.dynamicTypeSize, size))
+            renderer.proposedSize = ProposedViewSize(width: width, height: nil)
+            renderer.scale = 1
+            let image = try #require(renderer.cgImage, "\(name) did not render")
+            #expect(CGFloat(image.width) <= width, "\(name) is \(image.width) wide at \(size)")
+            heights[size] = CGFloat(image.height)
+        }
+        #expect((heights[.accessibility5] ?? 0) > (heights[.large] ?? 0), "\(name) did not grow at the largest text: \(heights)")
     }
 }
 
@@ -583,11 +923,32 @@ private func event(_ id: String, _ title: String, _ from: String, _ to: String, 
     """
 }
 
-private func dayJSON(date: String = "2026-09-28", tasks: [String], events: [String], brief: String? = briefPath) -> JSONValue {
+private func dayJSON(date: String = "2026-09-28", tasks: [String], events: [String], brief: String? = briefPath, work: [String] = []) -> JSONValue {
     json("""
-    {"date": "\(date)", "tasks": [\(tasks.joined(separator: ","))], "work": [], "order": [], "events": [\(events.joined(separator: ","))],
+    {"date": "\(date)", "tasks": [\(tasks.joined(separator: ","))], "work": [\(work.joined(separator: ","))], "order": [], "events": [\(events.joined(separator: ","))],
      "brief": \(brief.map { "\"\($0)\"" } ?? "null"), "standup": "\(standupPath)", "plan": "Journal/Plan/\(date).md", "as_of": "2026-09-28T23:59:00.000Z"}
     """)
+}
+
+/// A `day_work` row: blocked on a line of the owner's.
+private func workRow(_ id: String, _ title: String, waitsOn: String?) -> String {
+    """
+    {"id": "\(id)", "title": "\(title)", "kind": "task", "status": "blocked", "blocked_by_task": \(waitsOn.map { "\"\($0)\"" } ?? "null"),
+     "blocked_by_task_open": \(waitsOn != nil), "row_flags": ["waiting_on_me", "blocked", "open"]}
+    """
+}
+
+/// Answers `GET /api/vault-tasks` with the parser's refusal; everything else as the console it wraps.
+private final class RefusingVaultTasks: ConsoleCallTransport, @unchecked Sendable {
+    let inner: any ConsoleCallTransport
+    init(inner: any ConsoleCallTransport) { self.inner = inner }
+
+    func call(_ method: String, _ path: String, body: Data?, idempotencyKey: String?) async -> Result<Data, ConsoleError> {
+        if path.hasPrefix("/api/vault-tasks?") {
+            return .failure(.http(status: 400, envelope: ConsoleErrorEnvelope(code: "invalid_request", message: "where: character \";\" is not allowed — the filter language has no quotes, semicolons or parentheses")))
+        }
+        return await inner.call(method, path, body: body, idempotencyKey: idempotencyKey)
+    }
 }
 
 /// A Monday: a standup, the Lease Call with Jim, one line owed to him, one waiting on Ana, one of the owner's own, one done.
@@ -624,6 +985,8 @@ private final class TodayConsole: ConsoleCallTransport, @unchecked Sendable {
     private var _close: Result<JSONValue, ConsoleError>?
     private var _check: Result<JSONValue, ConsoleError>?
     private var _routine: JSONValue?
+    private var _order: [String]?
+    private var _orderRefusal: ConsoleError?
     private let fallback = try? FixtureConsole.recorded()
 
     init(day: JSONValue, pages: [String: String]) {
@@ -636,6 +999,9 @@ private final class TodayConsole: ConsoleCallTransport, @unchecked Sendable {
     var close: Result<JSONValue, ConsoleError>? { get { lock.withLock { _close } } set { lock.withLock { _close = newValue } } }
     var check: Result<JSONValue, ConsoleError>? { get { lock.withLock { _check } } set { lock.withLock { _check = newValue } } }
     var routine: JSONValue? { get { lock.withLock { _routine } } set { lock.withLock { _routine = newValue } } }
+    /// The order `PUT /api/today/order` stored, served back in the day.
+    var order: [String]? { get { lock.withLock { _order } } set { lock.withLock { _order = newValue } } }
+    var orderRefusal: ConsoleError? { get { lock.withLock { _orderRefusal } } set { lock.withLock { _orderRefusal = newValue } } }
 
     private func encode(_ value: JSONValue) -> Result<Data, ConsoleError> { .success(try! JSONEncoder().encode(value)) }
 
@@ -651,7 +1017,16 @@ private final class TodayConsole: ConsoleCallTransport, @unchecked Sendable {
                 if let date = q["date"], date != "2026-09-28" {
                     return encode(dayJSON(date: date, tasks: [task("mt-t", "Tomorrow's line")], events: [event("evt-t", "Kickoff", "10:00", "10:30")]))
                 }
+                if let stored = _order, case .object(var fields) = _day {
+                    fields["order"] = .array(stored.map(JSONValue.string))
+                    return encode(.object(fields))
+                }
                 return encode(_day)
+            case ("PUT", "/api/today/order"):
+                if let refusal = _orderRefusal { return .failure(refusal) }
+                let keys = sent?["task_keys"]?.arrayValue?.compactMap(\.stringValue) ?? []
+                _order = keys
+                return encode(.object(["ok": .bool(true), "date": sent?["date"] ?? .null, "order": .array(keys.map(JSONValue.string))]))
             case ("GET", "/api/knowledge/page"):
                 guard let p = q["path"], let content = _pages[p] else {
                     return .failure(.http(status: 404, envelope: ConsoleErrorEnvelope(code: "not_found", message: "no such page")))

@@ -397,7 +397,7 @@ recorded. *New* routes cite their ticket. All `owner` unless marked.
 | `GET /api/events` | owner | SSE; `Last-Event-ID` resumes; ids only (§2.20) | T2-18 |
 | `GET /api/vault/status` | owner | ahead/behind, last commit, last push, conflict | T10-2 |
 | `GET /api/knowledge/history?path=`, `GET /api/knowledge/version?path=&sha=` | owner | a file's commits; one file at one commit | T10-4 |
-| `POST /api/knowledge/restore` | owner | raises a Needs You request; Approve restores as `user` (§2.21) | T10-5 |
+| `POST /api/knowledge/restore` | **local** | raises a Needs You request; Approve restores as `user` (§2.21); not reachable from the phone — §2.3 wins (ruled 2026-09-27) | T10-5, X-9 |
 | `POST /api/vault/rollback` | **local** | raises a Needs You request with the preview; Approve reverts as `user` | T10-6 |
 | `POST /api/trackers/:connection/issues`, `POST /api/trackers/:connection/issues/:key/complete` | owner | through a `tracker` connection's capability (Linear first) | T4-25, T4-26 |
 | `POST /api/vault-tasks/:task_key/link` | owner | adds one `linear:` (or `gh:`) ref to one line; 409 | T4-25 |
@@ -548,6 +548,10 @@ syncs:
     every: 15m                        # 5m | 15m | 1h | 6h
     raise: { review_requested: true, assigned: true }
 ```
+
+**A sync's first `connection:`** is written by the connection setup flow
+(`metistry connections add`, T4-9/T4-10) into `scheduled.yaml`; the Scheduled
+door keeps refusing to set it (ruled 2026-09-27, the coordinator's call).
 
 **Schedule shape (closed):** `{days, at, tz?}` — `days` is a list of weekdays,
 `working_days`, or `eve_of_working_days` (every day whose next day is a working
@@ -1048,6 +1052,11 @@ SHA, task line text, work row `updated_at` (T2-14).
 | a ticked or deferred line | `user` | the Tick and Defer doors |
 | `Journal/Plan/<tomorrow>.md` | `plan-tomorrow` | on close, or at its scheduled time |
 
+**The assistant may create files** in `Journal/Brief/`, `Journal/Standup/` and
+`Journal/Plan/` again (ruled 2026-09-27): T3-6's create refusal is relaxed (X-11). The routine
+still writes its own file, and the marked-slot fill of a file the routine wrote
+stays as above.
+
 **The section operation, enforced at the tool:** `POST /vault/section
 {path, marker, body, principal, expected_outer_sha}`. It refuses unless the path
 is `Journal/<date>.md`, the file has exactly one well-formed marker pair outside a
@@ -1323,6 +1332,8 @@ reports branch, ahead/behind, last commit, last push, and any conflict.
 - **History reads:** `GET /api/knowledge/history?path=` (the file's commits,
   through the bridge's existing `GET /vault/log`) and
   `GET /api/knowledge/version?path=&sha=` (a new reconciler `GET /vault/show`).
+  `GET /vault/log` is narrowed to the owner like `/vault/show`: its `.metistry/`
+  subjects never reach an agent bearer (ruled 2026-09-27, X-6).
 - **Restore one file:** `POST /api/knowledge/restore {path, sha, seen_sha}` raises
   a Needs You request carrying the before and after; **Approve** writes the old
   bytes as a **new** commit as `user` (*Restore <path> to <date>*), 409 if the
@@ -1788,6 +1799,8 @@ cannot write the note any other way; a mismatched outer hash is refused**.
 `GET /api/vault-tasks?where=` via `compileTaskFilter` with Slipping · Owed ·
 Waiting on Others; `PUT /api/today/order`. Note: `vault_tasks_query`'s `unscheduled`
 flag also counts `someday` lines (T2-5) — a someday line carries no date.
+Today's preset is the open lines due or do ≤ D plus the lines ticked on D, with
+someday dropped; the `day_work` flags stand as built (#378) (ruled 2026-09-27).
 *Files:* `apps/console/src/`, `seed/queries/`.
 *Tests:* U2; **order keys outside the day are refused**.
 *Accept:* F-7's Today fixture matches.
@@ -1944,7 +1957,9 @@ assistant turn, writes `Journal/Standup/<date>.md` as `source: standup`; emits
 presents it by embed (`![[Journal/Standup/<date>]]`), never by copy;
 `Journal/Brief/<date>.md` with Next Up lines from one turn; the model-free
 daily-note section; `Journal/Brief` in `JOURNAL_MACHINE_DIRS` and the seed; prose
-legal in `Templates/Brief.md` and `Templates/Standup.md` (C103).
+legal in `Templates/Brief.md` and `Templates/Standup.md` (C103). The assistant's
+create refusal in the routine folders is relaxed (ruled 2026-09-27); the marked-slot fill
+stays (X-11, §2.13).
 *Files:* `routines/morning-brief/`, `packages/core/src/instance-layout.ts`,
 `seed/vault/`.
 *Tests:* **no generated text is ever written between the markers**; the brief
@@ -1969,8 +1984,11 @@ definition and the task, grants for the run only, enqueues one crew run;
 `POST /api/scheduled/routines` (local). Build to the owner's W1 ruling
 (`decisions-log.md`): per-run grants are **read-only**; a routine's reserved
 subfolder (`Journal/Digest/`) is a routine ownership fact, written through the
-reconciler under the routine's own principal — never a per-run grant.
-*Files:* `apps/console/src/runner.ts`, `apps/assistant/src/crew-drain.ts`.
+reconciler under the routine's own principal — never a per-run grant. T3-8
+removes `grants.write` from `routineAssignmentSchema` and from `scheduled.md`'s
+example (ruled 2026-09-27).
+*Files:* `apps/console/src/runner.ts`, `apps/assistant/src/crew-drain.ts`,
+`packages/core/src/scheduled.ts`, `docs/ops/scheduled.md`.
 *Tests:* **a per-run grant is gone after the run; outside it the actor cannot read
 the area**.
 *Accept:* —
@@ -2083,7 +2101,8 @@ never forwarded upstream**.
 **T4-8b · Connections P1: the lazy pair** · L · W2 · deps T4-8a —
 *Spec:* `connections_list`, `connections_call` on `/mcp` (reads, `on | off`);
 `COUNT_ACKNOWLEDGED` 26 → 28 with its reason; `runs` rows `connection_call`;
-`connection_calls` query; a `{kind: "connection"}` variant in `Resource`.
+`connection_calls` query; a `{kind: "connection"}` variant in `Resource`. P1 is
+Reads set to Allow only, accepted until T4-9 (ruled 2026-09-27).
 *Files:* `packages/mcp-brain`, `packages/core/src/access.ts`,
 `ops/scripts/check-tool-surface.mjs`.
 *Tests:* the surface check; **a crew needs both `uses: [connections]` and a grant**.
@@ -2104,7 +2123,9 @@ manifest, and a per-instance **bring-your-own client id** (and secret) override
 stored as a secret (§2.6); the broker redirect mode is modelled but not built;
 generated tools for API, Feed, Files; the permissions row *Through Metistry*; a
 client model for OAuth on a **custom** connection (C118), where no connection type's
-manifest supplies the client id.
+manifest supplies the client id. The setup flow (`metistry connections add`)
+writes a sync's first `connection:` into `scheduled.yaml`; the Scheduled door
+keeps refusing to set it (ruled 2026-09-27, the coordinator's call; §2.5).
 *Files:* `packages/connections`, `packages/cli`.
 *Tests:* **the assistant cannot start an OAuth flow; the loopback listener binds
 127.0.0.1 only and closes after one callback; `state` and the PKCE verifier are
@@ -2121,7 +2142,8 @@ move into its connection type.
 
 **T4-12 · Calendar: ICS feeds** · M · W3 · deps T2-11, T4-8a —
 *Spec:* An `ics` connection type (§2.6) and its sync writing `calendar_events`
-(read-only; created by T2-11).
+(read-only; created by T2-11). `collectors/eventkit-calendar` is the precedent
+(ruled 2026-09-27).
 *Files:* `packages/connections`, `collectors/`.
 *Tests:* a feed with recurrence and a time zone parses; **the feed URL is a
 secret when it carries a token**.
@@ -2267,7 +2289,8 @@ sync never writes the owner's note**.
 **T5-2 · The shell** · L · W1 · deps F-7 —
 *Spec:* The sidebar's eight rows and the conditional Needs You row (C110), the
 toolbar (+ and gauge), the window title, the `CommandMenu`s of §2.18, the Dock
-badge, the configured name.
+badge, the configured name. The Knowledge row stays flat for now — no children
+(ruled 2026-09-27).
 *Files:* `root-view.swift`, `app-model.swift`, new menus.
 *Tests:* **the row leaves only on the next navigation after zero; no label says
 *assistant***.
@@ -2356,8 +2379,9 @@ under Reduce Motion.
 *Accept:* as above.
 
 **T6-3 · Activity** · M · W2 · deps T5-3, T1-3 —
-*Spec:* `screen-02-activity.md` §1–§12: time bands, eight chips, the held-new
-pill, turn groups via `turn_id`, routine rows with their prose.
+*Spec:* `screen-02-activity.md` §1–§7 and §9–§12: time bands, eight chips, the
+held-new pill, turn groups via `turn_id`, routine rows with their prose. §8's keys
+are dropped from the spec for now, to be re-evaluated later (ruled 2026-09-27).
 *Files:* `activity-view.swift`.
 *Tests:* new rows are held and counted, never inserted; a failed row's glyph takes
 `failed`.
@@ -2441,7 +2465,8 @@ never wider.
 **T6-12 · Compute** · L · W4 · deps T4-18, T4-19 —
 *Spec:* `screen-15-settings.md` §5.3 (C130–C133) + §2.4: Metis uses, Providers
 (one line each, gear), Your Models with search grouped by model, Spending limits
-with project budgets, **Advanced: tiers** (Q1).
+with project budgets, **Advanced: tiers** (Q1). The section still titled
+*Budgets* (T5-6, #360) is retitled *Spending Limits* (ruled 2026-09-27).
 *Files:* `compute-view.swift`, `compute-model.swift`.
 *Tests:* a model is written the same way in every place it appears.
 *Accept:* as above.
@@ -2947,6 +2972,12 @@ places later, with no ticket in this program:
   bridge extension must pass the same wire-contract conformance suite TypeScript
   bridges pass (`packages/core/src/stdio-conformance.ts`) before it is enabled —
   `metistry extensions test <name>`.
+
+**Needs You and an Inbox — later** (ruled 2026-09-27)**.** Design, do not build: split
+**Needs You** (agent, permission and Metistry items only) from a new **Inbox** menu
+item for everything else — GitHub pull request reviews, calendar invites and the
+like — with Needs You as a sidebar on Inbox. Designed after the UX build
+completes; no ticket (`decisions-log.md`, *Later*).
 
 **Also after this program:** the **token broker** (§2.6), built when Slack, Notion,
 Atlassian or another confidential-only provider is scheduled; **OAuth from the

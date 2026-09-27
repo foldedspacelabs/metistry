@@ -110,7 +110,7 @@ path.
 | **Minting an enrolment code** | there is no HTTP route that mints one, deliberately — whoever can run the host command already controls Postgres and the vault, so shell access is the root of trust for a first passkey (plan §4.2) — and `metistry enroll` is on the CLI's own "not yet" list | step 6 shows the exact `scripts/enroll.mjs` command and takes the code you paste back |
 | **A QR code** for the phone | nothing in this product renders one yet; `apps/console/scripts/enroll.mjs` says the same about itself ("QR rendering arrives with `packages/cli`"), and an encoder is a dependency nobody has asked for | step 6 shows the enrolment URL, selectable, to type or hand over |
 | **The screens behind the sidebar's rows** | the shell has the rows (T5-2); each screen is its own ticket (T6-1 Today, T6-2 Chat, …), and until it lands the row's detail names the gap and offers the web app. Needs You's list has landed (T5-4a, "The Needs You view" below); one request's body and answers are T5-4b's, and until they land its detail says so. Chat has landed (T6-2, "Chat" below) | the PWA — "Add to Dock" in Safari, or the detail's **Open in Browser** |
-| **New Capture** (the toolbar's + and ⌘N) | the composer is T5-5; until then both are dimmed, with the reason in the tooltip | the PWA's + |
+| **Attachments and live capture in the composer** | New Capture is the text composer (T5-5, "The capture composer" below); the owner held audio and screen capture until the designer's floating action bar returns (#253), and the attachment chip, ⌘⇧A and the window's drop target are not built. The Capture menu's Ask · Note · To-do and Start/Stop Recording stay dimmed for the bar (T8) | the PWA's +, or `metistry console call POST /capture` with `filename` and `content_base64` |
 | **The keep-awake control** (Services) | the model half is shipped — `KeepAwakeSetting` (four values, each with what it costs), `KeepAwakeFacts` (doctor's row) and `deploymentSetKeepAwake` — and the pane is a switch with a radio pair under it, which is the designer's. First run can pass `--keep-awake` and does not ask on its own | a terminal: `metistry deployment set-keep-awake <value> --yes`, or `metistry init --keep-awake <value>` |
 | **An iOS target** | `MetistryKit` is already free of AppKit and of `Process` so it can be shared; there is no iOS target in `Package.swift` | — |
 
@@ -800,12 +800,37 @@ first reading, never a repeat of the same count, whether the event or the poll
 said it.
 
 **The toolbar.** The mark and the title *Metistry* (the same on every screen —
-the highlighted row says where you are); **+** (New Capture, ⌘N — dimmed until
-T5-5's composer registers in `ShellModel.captureActions`); the **Usage gauge**,
+the highlighted row says where you are); **+** (New Capture, ⌘N — the composer, below, registers in
+`ShellModel.captureActions`); the **Usage gauge**,
 `gauge.medium` in secondary ink, `gauge.high` in primary ink over 90% of a
 spending limit, the warning tint at it, speaking *Usage, $1.84 today, 37% of
 the day's budget*. Its popover is a stand-in with those facts and a way to
 Settings until screen 17 (T5-6). There is no bell (C110).
+
+**The capture composer (T5-5, `capture-view.swift`).** The + and ⌘N open a
+popover under the +: one field (placeholder `note…`, growing from three
+lines), **Capture** (⌘↩) and a receipt line — no title, nothing that suggests
+(screen 4). It does not wait for the 201: ⌘↩ moves the words into a pending
+capture and the line reads *capturing… you can close this*; closing cancels
+nothing. **Esc closes and keeps the draft** — the draft is
+`CaptureComposerModel.draft`, held by `AppModel`, not by the popover. **The
+`Idempotency-Key` is minted once**, when Capture is pressed, and every resend
+of that capture carries it; `POST /capture` answers a key it has seen with the
+original response, so **a replay renders as the same capture** — *captured →
+inbox #418 · Inbox/….md*, the id and path that came back. A capture that got
+no answer (no session child, no connection) is **queued** with its key — the
+`degraded` chip *queued — will send when the instance is reachable* — and
+resent every 10 s backing off to a minute, when the popover opens, and as soon
+as any read hears the console again; a capture is an append, so O3's gate
+lets it through while decisions are held. A console that **answered** with a
+refusal (a 4xx, a 5xx, a 401) is a failure instead: its words on the line, the
+text back in the field, and **Retry** with the same key — so is Capture on the
+unchanged words; edited words are a new capture with a new key. A failure
+always wins the line; otherwise it shows the oldest unresolved capture with a
+count (*capturing… (2)*). The queue lives in memory: a capture still queued
+when the app quits is not kept. An instance switch never sends a queued or
+failed capture to the other instance — its words come back into the field with
+a line saying why.
 
 **The menus (C119).** Every shortcut is a menu item, and every menu item is one
 case of `ShellCommand` — the menus, the Keyboard Shortcuts page and the tests

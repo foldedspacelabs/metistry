@@ -70,6 +70,7 @@ resolver does no I/O. Core imports no Postgres, no vault and no config.
 | `compute` | `compute.yaml`, parsed | the console's compute loader; `emptyCompute()` when absent |
 | `connections(id)` | the connection names this actor may reach | `() => []` until F-3 / T4-8 |
 | `grantHistory(id)` | approvals and per-run routine grants | 0023 + `access_request` proposals; `routines: []` until T3-8 |
+| `projectGrants` | every project's own read grant (0032) | `listProjectGrants` (`apps/console/src/projects.ts`); absent = no project holds one |
 
 Resolution, in order:
 
@@ -122,6 +123,20 @@ row is where those changes are **composed**:
   `autonomy` by `syncCrews`. The manifest's `uses` is the one part that never
   lands on the row: it rides on the principal, as `principalOfRow` does it.
 - An external agent's row is the registry itself: `grants`, `projects`, `autonomy`.
+- **A crew or an external agent also inherits its projects' grants** (T4-7,
+  D13). Its reach is its row's grant ∪ the own grant (0032) of every project
+  its row lists, by core's `inheritGrants`: the widest tier, its own areas
+  first and then each project area its own do not cover, and `queries` if
+  any of them holds it. The union is resolved per request — by
+  `authenticateAgent` in the same statement that reads the membership, and by
+  `resolveActor` from `projectGrants` — and never written into the row, so
+  leaving a project is the whole of losing what it gave. A project's stored
+  grant is re-checked fail closed (an area an agent could not be granted is
+  dropped). The one corner the single-tier scope cannot say is `index` beside
+  `areas`; the union is `areas`, as an approval on an `index` grant is. The
+  **assistant inherits nothing**: its reach is configuration (C52), and an
+  internal row's empty project list means "may work in every project", not
+  membership of each.
 
 Rebuilding a permission from its original sources would be a second policy,
 and it could disagree with the door.
@@ -247,12 +262,13 @@ entries that are not `base`:
 | `{ kind: "base", source }` | how the actor holds it by default: every verb, project and query entry, and every area not listed below. `source` is `permissions.source`. | nothing. For the assistant, `source: "environment"` reads as *configuration, not a grant* (C52, `sourceLabel`). |
 | `{ kind: "approved", proposalId }` | an area in `grantHistory.approved`. For an internal row that is `agent_grant_overrides` (0023). For an external row it is an approved `access_request` proposal's `payload.granted.area` that the row still holds. | *approved in Needs You · #n* |
 | `{ kind: "routine", routine }` | an area a routine's per-run grant adds (`grantHistory.routines`). It is shown as an extra Knowledge · Read entry, computed as if that grant were applied, and only when the knowledge read tools would then be admitted (for a crew, `knowledge` ∈ `uses`). One entry per (area, routine). It is not in `permissions.scope`, which is the base. | *during \<routine\> only* |
+| `{ kind: "project", project }` | reach the actor holds only through a project it is a member of (T4-7; `grantHistory.projects`, `inheritGrants`'s `via`): an area, *Titles only* when the project's tier is `index`, or *Named queries* when the project grants `queries`. The first project (by slug) that supplies it names it. It IS in `permissions.scope` — the door grants it. | *via project \<slug\>* |
 
 **In words.** The rows are data; one function says a cell —
 `permissionRowText` (`access.ts`): the row's label (a connection's marked
 `⧉`), then each cell's entries comma-separated, each its `label`, `⏱` when it
-asks, and `(approved in Needs You · #n)` or `(during <routine> only)` when it is
-not the base. An empty cell is `—`. `metistry agents list` calls it; the
+asks, and `(approved in Needs You · #n)`, `(during <routine> only)` or
+`(via project <slug>)` when it is not the base. An empty cell is `—`. `metistry agents list` calls it; the
 console's panel (`apps/console/web/app.js`) and MetistryKit (`PermissionRowText`,
 over the `PermissionRow` wire types its `PermissionsTable` component draws)
 carry copies that `apps/console/test/pwa-reads.test.ts` and

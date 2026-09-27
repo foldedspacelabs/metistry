@@ -155,12 +155,20 @@ describe("seed queries", () => {
     // reads it yet (`GET /api/today` is T2-7's), marked ahead of it the same
     // way `collector_health` is: the write door is owner-only, and a read
     // door that were not would be the asymmetry an agent could ask through.
+    // `pending_count` (T1-7, §2.10) is counts only, same as `task_ageing` —
+    // but it is *route*, not generic, because what it counts is the
+    // owner's OWN unanswered-decision queue: a proposal count is exactly the
+    // kind of fact `pending_requests` already keeps off the generic door
+    // (an agent with `queries: true` learning how many things the owner has
+    // yet to decide, including about that agent's own asks, is the same
+    // hole one door narrower). `GET /api/needs-you/count` is its one door.
     expect(routeBacked.sort()).toEqual([
       "board",
       "collector_health",
       "day_work",
       "knowledge_page_links",
       "knowledge_pages",
+      "pending_count",
       "pending_requests",
       "route_features",
       "secret_last_used",
@@ -1761,6 +1769,60 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
     expect(mine((await store.run("pending_requests", { kind: "report", limit: 500 })).rows)).toHaveLength(1);
 
     await pool.query(`DELETE FROM proposals WHERE source_agent = $1`, [tag]);
+  });
+
+  // The sidebar row and the Dock badge (T1-7, §2.10, §2.12): always exactly
+  // one row, a snoozed proposal never moves it, and its `waiting` never
+  // disagrees with the same pending-and-not-snoozed filter run by hand — the
+  // same filter `GET /api/proposals` applies, so this is the ticket's
+  // acceptance ("matches GET /api/proposals' length") checked at the SQL
+  // level rather than over HTTP.
+  it("pending_count: always one row, a snoozed proposal is not counted, and `waiting` is exactly the pending-and-not-snoozed filter's count", async () => {
+    const tag = `pc-${Date.now()}`;
+    const mk = (o: { decision?: string; snoozed?: string } = {}) =>
+      pool.query(
+        `INSERT INTO proposals (kind, source_agent, trust, payload, decision, snoozed_until) VALUES ('report', $1, 'internal', '{}'::jsonb, $2, $3) RETURNING id`,
+        [tag, o.decision ?? "pending", o.snoozed ?? null],
+      );
+    const rawCount = async () =>
+      Number(
+        (
+          await pool.query(
+            `SELECT count(*)::int AS n FROM proposals WHERE decision = 'pending' AND (snoozed_until IS NULL OR snoozed_until <= now())`,
+          )
+        ).rows[0]!.n,
+      );
+
+    // one row, always — even before this test adds anything of its own
+    const before = (await store.run("pending_count")).rows;
+    expect(before).toHaveLength(1);
+    expect(before[0]!.waiting).toBe(await rawCount());
+
+    // a pending, unsnoozed row: the count moves by exactly one
+    await mk();
+    const withPending = (await store.run("pending_count")).rows;
+    expect(withPending).toHaveLength(1);
+    expect(withPending[0]!.waiting).toBe((before[0]!.waiting as number) + 1);
+    expect(withPending[0]!.waiting).toBe(await rawCount());
+    expect(withPending[0]!.oldest_ts).not.toBeNull();
+
+    // a row snoozed into the future: `later` is not an answer, but it has
+    // left the queue until its instant arrives — the count does not move
+    await mk({ snoozed: "2099-01-01T00:00:00Z" });
+    const withSnoozed = (await store.run("pending_count")).rows;
+    expect(withSnoozed).toHaveLength(1);
+    expect(withSnoozed[0]!.waiting).toBe(withPending[0]!.waiting);
+    expect(withSnoozed[0]!.waiting).toBe(await rawCount());
+
+    // a decided row: also not pending, also does not move it
+    await mk({ decision: "allow" });
+    const withDecided = (await store.run("pending_count")).rows;
+    expect(withDecided[0]!.waiting).toBe(withPending[0]!.waiting);
+    expect(withDecided[0]!.waiting).toBe(await rawCount());
+
+    await pool.query(`DELETE FROM proposals WHERE source_agent = $1`, [tag]);
+    // back to the baseline once this test's own rows are gone
+    expect((await store.run("pending_count")).rows[0]!.waiting).toBe(before[0]!.waiting);
   });
 
   it("pending_requests: every stored kind reads as the request type table says — action as action — and a kind it does not know as a report", async () => {

@@ -1,0 +1,50 @@
+# Seeded default (D4 overlay: an instance file of the same name wins).
+#
+# The Needs You sidebar row and the Dock badge (design-build-plan §2.10's
+# row, §2.12: "the sidebar row exists while `pending_count` is above zero and
+# leaves on the next navigation after it reaches zero"; ticket T1-7). One row,
+# always: `waiting` — how many proposals the owner has yet to decide — and
+# `oldest_ts`, the oldest of them, so a client can show "waiting 3 days"
+# without a second read.
+#
+# **The same filter as the queue itself, not a re-derivation of it.** `GET
+# /api/proposals` (`server.ts`, inline SQL — §2.10 says new reads do not
+# copy it) and `pending_requests.yaml` both count a row only while
+# `decision = 'pending'` and it is not snoozed to a future instant; this
+# query is that same WHERE clause, so the count this route answers can never
+# drift from the length of the list the owner is actually shown.
+#
+# **A snoozed row is not counted.** `later` leaves `decision = 'pending'`
+# (migration 0019) but the row has left the queue until `snoozed_until`
+# arrives — `pending_requests.yaml`'s comment on why a plan that listed it
+# would be a lie applies here word for word: a badge that counted it would
+# be the same lie in a number.
+#
+# **No params, and no `include_snoozed`.** `pending_requests` takes one
+# because a plan may deliberately ask to see what is coming due; the sidebar
+# and the Dock never do — they are always "what needs you right now" — so
+# there is nothing here for a caller to widen.
+#
+# **Always one row.** `count(*)` and `min(ts)` are aggregates with no
+# `GROUP BY`, so this returns exactly one row even when nothing is pending —
+# `waiting: 0, oldest_ts: null` — unlike `collector_health`'s "never ran"
+# absence. A client does not need a not-found case to know there is nothing
+# to do.
+name: pending_count
+expose: route
+description: >-
+  How many proposals wait on the owner right now (`decision = 'pending'`,
+  excluding any row still snoozed) and the oldest of them — the sidebar row
+  and the Dock badge. Exactly one row, always; `waiting` is 0 and
+  `oldest_ts` is null when nothing is pending. The same filter `GET
+  /api/proposals` and `pending_requests` apply, so this can never disagree
+  with the queue's own length.
+params: {}
+sql: |
+  SELECT
+    count(*)::int AS waiting,
+    min(p.ts)      AS oldest_ts
+  FROM proposals p
+  WHERE p.decision = 'pending'
+    AND (p.snoozed_until IS NULL OR p.snoozed_until <= now())
+cache_ttl: 0 # a badge that lags behind an answer just given is exactly the stale count the owner would notice first

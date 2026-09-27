@@ -344,10 +344,32 @@ commit back to `runs.meta.turn_id` and the activity feed. `knowledge_write`
 sends the reply's turn and its own call's `runs` row, never a group.
 
 A failed commit is unstaged and retried on later flushes; all-or-nothing
-per commit. Push runs on `METISTRY_PUSH_SCHEDULE` (`@hourly` default) only
-if a remote exists, integrates whatever the remote has first ("Sync with
-the remote" below), and never blocks anything; a failed push or a stopped
-sync shows up in `check()` as `degraded`.
+per commit. **Push and pull run on the vault sync policy** — the `vault:`
+block of `.metistry/deployment.yaml`, set with `metistry vault settings`
+(`docs/ops/cli.md`; plan §2.21): push `after_commit` (the default: once a
+flush has made commits; commits still unpushed are retried every five
+minutes), `{every: N}` (when something is unpushed), or `manual`; pull
+`{every: N}` (default 5m, no "never"). Each is the committer's sync — commit
+and sweep, fetch, integrate whatever the remote has first ("Sync with the
+remote" below), and for a push then push — so this is only WHEN. The
+reconciler re-reads the file when it changes — no restart — and keeps the
+last good policy if an edit stops validating. Only with a remote, never
+blocking anything; while a conflict stands nothing is pushed on the
+schedule, and the pull keeps integrating until it is clean. A failed push or
+a stopped sync shows up in `check()` as `degraded`. `METISTRY_PUSH_SCHEDULE`
+still overrides `push` for this release, and the reconciler logs that it
+does at start.
+
+The committer records every push, pull that brought something in, and
+conflict as a `runs` row of `kind = vault_sync`; the schedule adds `commit`,
+one row per flush that made commits — so `meta.state` ∈ `commit | push |
+pull | conflict`, and the console turns each into a `vault.sync` event
+(§2.20). `GET /vault/status` (either bearer) answers branch, remote, ahead
+and behind (as of the last fetch), the last commit (with its `Brain-Source`
+principal), the last push that went out or failed and the last pull (both
+since the reconciler started), the conflict that stopped the last integrate
+or unmerged paths the owner left, and the policy in force; the console
+serves it to the owner as `GET /api/vault/status`.
 
 **Edits made outside the bridge** — Obsidian on your phone, a text editor
 on the Mac — are swept by the reconcile loop into one `user` commit per
@@ -427,8 +449,8 @@ history with the vault:
 - **one** Needs You `report` is raised (`kind: vault_conflict`): the
   paths, and for each the latest commit on either side. One per
   *episode* — its key is the commit where the two histories last agreed,
-  which does not move while the conflict stands, so the hourly retries
-  (and a restart) add nothing, and a report you dismissed stays dismissed;
+  which does not move while the conflict stands, so the scheduled pulls
+  that retry it (and a restart) add nothing, and a report you dismissed stays dismissed;
 - writes keep committing locally.
 
 Resolve it in a terminal in the instance directory (`git pull`, fix,
@@ -489,9 +511,9 @@ than `--keep`, a `merge` that is not `--ff-only`, and `rebase`,
 `apps/reconciler/test/sync.test.ts` records every argv the committer runs
 across its scenarios and checks the same list.
 
-`push()` is the scheduled act; `pull()` — fetch and integrate without
-pushing — is there for the pull schedule (`vault.pull` in
-`deployment.yaml`, T10-2).
+`push()` and `pull()` — fetch and integrate without pushing — are the
+two scheduled acts; WHEN each runs is the vault sync policy
+(`deployment.yaml`'s `vault:` block, `metistry vault settings`), above.
 
 ## Confinement (the `launchd` shape)
 
@@ -635,7 +657,7 @@ Setup, modes, and what "deterministic rebuild" means:
 | `METISTRY_RECONCILER_PORT` | `7812` | |
 | `METISTRY_COMMIT_INTERVAL_SEC` | `30` | queue flush cadence |
 | `METISTRY_RECONCILE_INTERVAL_SEC` | `300` | index cycle cadence |
-| `METISTRY_PUSH_SCHEDULE` | `@hourly` | `@hourly` / `@daily` / `never` / `<n>[s\|m\|h]` |
+| `METISTRY_PUSH_SCHEDULE` | unset | **deprecated, this release only**: overrides the vault policy's `push` — `@hourly` / `@daily` / `never` / `<n>[s\|m\|h]`. Set the policy with `metistry vault settings` instead |
 | `METISTRY_GIT_AUTHOR_NAME` | `Metistry` | author-name prefix (`<prefix> <principal>`) |
 | `METISTRY_GIT_AUTHOR_EMAIL` | `metistry@localhost` | |
 | `METISTRY_VAULT_MAX_BYTES` | `2097152` | per-write size cap |

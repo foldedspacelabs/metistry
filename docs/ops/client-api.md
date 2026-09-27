@@ -271,7 +271,7 @@ takes a `since` cursor and answers with the next one.
 | `GET /api/status` | owner | session · local_owner · owner_token | natural | — | — | served | the console's own checks: the database and the capture sink |
 | `GET /api/proposals` | owner | session · local_owner | natural | — | since | served | the queue; with `since`, everything that changed |
 | `POST /api/proposals/batch` | owner | session · local_owner | no | — | — | served | one verb (`later`, `skip`, `deny`) to many requests; per-row results |
-| `POST /api/proposals/:id` | owner | session · local_owner | no | already_decided · stale | — | served · T2-3 | answer one request; `if_unchanged` refuses a stale answer |
+| `POST /api/proposals/:id` | owner | session · local_owner | no | already_decided · stale | — | served · T2-14 | answer one request with an answer its type takes; `if_unchanged` refuses a stale answer |
 | `GET /api/needs-you/count` | owner | session · local_owner | natural | — | — | served | how many requests wait: the sidebar row and the Dock badge |
 | `GET /api/agents` | owner | session · local_owner | natural | — | — | served | the registry, each row's rendered scope and permission rows, and the unanswered access requests |
 | `POST /api/agents` | local | local_owner | no | 409 | — | served | register an agent and mint its bearer (shown once) |
@@ -589,33 +589,109 @@ local probes, are `metistry doctor` on the Mac (M6).
 ### Needs You — requests and their answers
 
 ```
-GET  /api/proposals[?since=&limit=]   200 {"proposals":[{…the stored row…, "request":{type, word, body, primary, revise, decline, grouped, decisions}}],"cursor":"…","more":false}
+GET  /api/proposals[?since=&limit=]   200 {"proposals":[{…the stored row…, "request":{type, word, body, primary, revise, decline, grouped, decisions, questions?}}],"cursor":"…","more":false}
 POST /api/proposals/batch             {ids, decision: later | skip | deny, feedback?}   200 {"results":[…]}
-POST /api/proposals/:id               {decision, feedback?, area?, if_unchanged?: {seen_at}}
+POST /api/proposals/:id               {decision, feedback?, area?, answers?, if_unchanged?: {seen_at}}
                                       200 {"ok":true, …}   409 already_decided | stale   404   400
 GET  /api/needs-you/count             200 {"waiting":3,"oldest_ts":"…","as_of":"…"}, through the `pending_count` named query
 ```
 
-One queue for everything that needs the owner (D7): a request is answered with
-the verbs its kind takes — `allow`, `deny`, `accept_with_changes`, a
-`decision`'s own options — plus `later` and `skip` for every kind, and
-`accept_as_work` where the row carries a suggestion. The option set comes from
-the stored row, never from the request. `GET /api/proposals` without `since`
-is the queue (pending, minus what `later` put down); with `since` it is
-everything that changed — see the cursors above. T2-3 adds decision block v2
-(several questions per request, answers stored per question, `decided`
-accepted beside `decision`).
+One queue for everything that needs the owner (D7). **What a request may be
+answered with is its type's row in F-5's table, read from the stored row**
+(`describeRequest(kind, payload).decisions`, plan §2.12; T2-3) — the console
+builds no list of its own and never takes one from the request — plus `later`,
+which is not an answer and every row takes:
+
+| Type | `decision` the single route takes |
+| --- | --- |
+| question | `answers` (below), `accept_with_changes` (Revise: the owner's words, answering none of the questions), `deny` — an agent's enrolment takes no Revise |
+| access | `allow`, `accept_with_changes` + `area` (narrower only), `deny` |
+| action · note · improvement · review (preview) | `allow`, `accept_with_changes`, `deny` — and `accept_as_work` where the row carries a valid `payload.suggested_work` |
+| review (before and after) | `deny` — Keep Mine and Take the Other go through the conflict door |
+| report, and any kind the table does not know | `skip` (Dismiss) — its act goes through its own door; a report cannot be approved, revised or declined |
+| message | `skip` (Not Mine) — Draft Reply goes through the mail door |
+| pull request · invitation · task | nothing on the row: every answer goes through that system's door |
+
+A verb the row does not take is `400 invalid_request` naming the ones it does,
+and writes nothing on the row. **Skip is bulk-only (K2)**: the batch applies it
+to any row; the single route takes `skip` only where the table makes it the
+type's Decline (a report's Dismiss, a message's Not Mine), and refuses it
+elsewhere with `Skip is bulk-only (K2) — POST /api/proposals/batch`. The batch's
+`deny` is refused, per row, on a type with no Decline. `GET /api/proposals`
+without `since` is the queue (pending, minus what `later` put down); with
+`since` it is everything that changed — see the cursors above.
 
 Every row `GET /api/proposals` returns carries `request`: its reading from
 F-5's type table (`describeRequest` in `packages/core/src/requests.ts`, plan
 §2.12) — the type, the word the owner reads, the body block, the answers its
-type offers there, and the decisions those answers store. A client draws the
-word it is given and keeps no kind → word map of its own (the PWA cannot
-import core; this is how it reads the one table, X-5). A kind the table does
-not know arrives as a `report` with Dismiss its only answer — the stored
-`kind` is never the word. The field is additive: every stored column is still
-there beside it. Skip is a bulk verb in every client (K2): the PWA offers it
-on the selection bar and its `s` shortcut, never on a row.
+type offers there, the decisions those answers store, and on a question its
+`questions`. A client draws what it is given and keeps no kind → word map, and
+no answer list, of its own (the PWA cannot import core; this is how it reads
+the one table, X-5, T2-3). A kind the table does not know arrives as a
+`report` with Dismiss its only answer — the stored `kind` is never the word.
+The field is additive: every stored column is still there beside it. Skip is a
+bulk verb in every client (K2): the PWA offers it on the selection bar and its
+`s` shortcut, never on a row.
+
+#### A question — several per request, answered per question (T2-3)
+
+```
+GET /api/proposals → {…, "kind":"decision", "payload":{"title":"Three things before I open the fixtures PR",
+                        "questions":[…], "context":{"prose":"…","refs":["gh:…#339"]}, …},
+                      "request":{"type":"question", "body":"choices",
+                        "primary":{"label":"Send Answers","sends":{"decision":"answers"}}, …,
+                        "decisions":["answers","accept_with_changes","deny"],
+                        "questions":[{"prompt":"Which store should the fixtures land under?","options":["NeedsYouStore","TodayStore"],"multi":false,"allow_other":true},
+                                     {"prompt":"Who should review it?","options":["Dana","Kessler","the assistant"],"multi":true,"allow_other":true},
+                                     {"prompt":"Open it as a draft?","options":["yes","no"],"multi":false,"allow_other":false}]}}
+
+POST /api/proposals/5  {"decision":"answers","answers":[{"choices":["NeedsYouStore"]},
+                                                       {"choices":["Dana","the assistant"],"other":"and whoever owns F-7"},
+                                                       {"choices":["yes"]}]}
+200 {"ok":true}
+400 an answer outside a question's options, `other` where the question takes none, a second choice on a
+    pick-one question, an unanswered question, a list that is not one per question, `feedback` beside `answers`
+```
+
+A question request (stored kind `decision`) asks 1–5 questions, each with 2–8
+options of up to 80 characters, **pick one** (`multi: false`) or **pick any**
+(`multi: true`), and — unless `allow_other: false` — ending in *Something
+else…*. Read the questions from `request.questions`, never from the payload:
+it is also how a row from before v2 (`payload.options`, one question whose
+prompt is its title) is served — as one pick-one question with no *Something
+else…*, because those rows were written under v1's rule that the options are
+the only answers.
+
+- **Send Answers** is `decision: "answers"` with `answers`: one entry per
+  question, in order, each `{choices, other?}` — `choices` from that
+  question's own options (at most one on pick one), `other` the owner's own
+  words (1–1000 characters) where the question allows them. Pick one takes a
+  choice *or* words; pick any takes any of the options and, optionally, words.
+  Checked against the questions **as stored** (core's `checkAnswers`), refused
+  whole with the reason, never half-read.
+- **Nothing in an answer is executed** (C105). An option is a label and
+  `other` is words; neither is a verb. The one question whose answer does
+  something — an agent's enrolment, whose option `approve` lets it in and whose
+  `deny` (or Decline) revokes it — takes only its own options.
+- **Stored** as `decision = answered` — what answering a question in chat has
+  always stored — with the per-question record in `payload.answers` and its
+  words in `feedback` (one question: the answer; several: each prompt with its
+  answer), written in the statement that settles the row. An enrolment keeps
+  storing its own `approve | deny`.
+- **Revise** is `accept_with_changes` + `feedback`: *these are the wrong
+  questions*. It answers none of them. **Decline** is `deny`.
+- **v1's wire** — the option itself as `decision`, `{"decision":"metistry"}` —
+  is still one answer to a request that asks exactly one pick-one question
+  (it is what every client sent before v2); on anything else it is a `400`.
+  A request raised with one pick-one question also carries v1's
+  `payload.options` beside `questions`, so a client that predates v2 can draw
+  it.
+- **Who asks**: the assistant, by ending a reply with a ```` ```decision ````
+  block (one question, or several — `seed/assistant-prompt.md`), and every
+  agent through `requests_create` kind `question` with `questions` — no new
+  tool (`packages/mcp-brain`). Its `body` and `refs` arrive as
+  `payload.context {prose, refs}`. A report's kind `decided` (C104) is not a
+  question: `decision` is accepted as its old name and stored as `decided`.
 
 `GET /api/needs-you/count` answers a count and the
 oldest request's time and nothing else — the sidebar row and the Dock badge
@@ -713,14 +789,16 @@ them means the answer was to a different question
 ```
 POST /api/proposals/17  {"decision":"accept_as_work"}
 200 {"ok":true,"work":{"id":214,"title":"renew the wildcard cert","project":null}}
-400 when the row carries no valid `payload.suggested_work`, or is not kind knowledge|report
+400 when the row carries no valid `payload.suggested_work`, or is not a `knowledge` request
 409 / 400 / 500 the tasks service refused or failed: the proposal stays pending, carrying payload.error
 ```
 
-Offered only on a `knowledge` or `report` proposal whose payload carries
+Offered only on a `knowledge` proposal whose payload carries
 `suggested_work: {title, project?, kind?}` — validated **server-side against
-the stored row**, never against the request, exactly like the option set of a
-`decision` proposal. It inserts the `work` row (owner-less, unclaimed), sets
+the stored row**, never against the request, exactly like a question's
+options. (A `report` is Dismissed, never approved — T2-3 — so a suggestion on
+one is no longer an answer.) Where it is offered it is what Approve sends
+(§1.4); `allow` stays valid beside it. It inserts the `work` row (owner-less, unclaimed), sets
 `proposals.work_id`, and decides the proposal `allow`. `project` that is not a
 project slug is dropped rather than invented; an unknown `kind` is a refusal
 rather than a silent fall back to `task`. `docs/ops/reply-feedback.md` has the

@@ -195,8 +195,10 @@ describe.skipIf(!hasDb)("Taskuary adopts (integration)", () => {
     const bad = await json("POST", `/api/proposals/${p.id}`, { decision: "allow", if_unchanged: { seen_at: "yesterday" } });
     expect(bad.status).toBe(400);
     expect((await pool.query(`SELECT decision FROM proposals WHERE id = $1`, [p.id])).rows[0].decision).toBe("pending");
-    // omitting it entirely is the old behaviour, unchanged
-    expect((await json("POST", `/api/proposals/${p.id}`, { decision: "allow" })).status).toBe(200);
+    // omitting it entirely is the old behaviour, unchanged — and a report is
+    // Dismissed (`skip`), never approved (T2-3: the verbs are F-5's table's)
+    expect((await json("POST", `/api/proposals/${p.id}`, { decision: "allow" })).status).toBe(400);
+    expect((await json("POST", `/api/proposals/${p.id}`, { decision: "skip" })).status).toBe(200);
   });
 
   // ---- ADOPT 5: later / skip ------------------------------------------------------
@@ -228,7 +230,7 @@ describe.skipIf(!hasDb)("Taskuary adopts (integration)", () => {
 
   it("skip stores a deny whose feedback is the marker — and the weekly review's reason line will not carry it", async () => {
     const p = await propose("knowledge", { title: "nothing to learn here" });
-    expect((await json("POST", `/api/proposals/${p.id}`, { decision: "skip", feedback: "ignore me" })).status).toBe(200);
+    expect((await json("POST", "/api/proposals/batch", { ids: [p.id], decision: "skip", feedback: "ignore me" })).status).toBe(200);
     const row = (await pool.query(`SELECT decision, feedback FROM proposals WHERE id = $1`, [p.id])).rows[0];
     expect(row.decision).toBe("deny");
     // the user's own words are NOT kept: a skip is putting something down, not a judgement
@@ -254,7 +256,8 @@ describe.skipIf(!hasDb)("Taskuary adopts (integration)", () => {
     const agentId = `tq-enrol-${mintToken(4).toLowerCase().replaceAll(/[^a-z0-9]/g, "")}`;
     await pool.query(`INSERT INTO agents (id, display_name, kind, token_hash) VALUES ($1, $1, 'external', $2)`, [agentId, `${agentId}-hash`]);
     const p = await propose("decision", { title: "let it in?", options: ["approve", "deny"], enroll: { agent: agentId } });
-    expect((await json("POST", `/api/proposals/${p.id}`, { decision: "skip" })).status).toBe(200);
+    const r = await json("POST", "/api/proposals/batch", { ids: [p.id], decision: "skip" });
+    expect((await r.json()).results[0]).toMatchObject({ id: p.id, ok: true });
     const a = (await pool.query(`SELECT revoked_at FROM agents WHERE id = $1`, [agentId])).rows[0];
     expect(a.revoked_at).toBeNull(); // deny would have revoked it; skip is not deny
   });

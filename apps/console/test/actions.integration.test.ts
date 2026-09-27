@@ -215,8 +215,9 @@ describe.skipIf(!hasDb)("actions + autonomy (integration)", () => {
     // the refusal is a runs row too: a safety mechanism that leaves no trace is not visible
     const runs = await pool.query(`SELECT kind, ok FROM runs WHERE meta->>'proposal' = $1 ORDER BY id`, [String(id)]);
     expect(runs.rows.every((x) => x.ok === false)).toBe(true);
-    // and it can still be answered once the world changes — or put down
-    expect((await json("POST", `/api/proposals/${id}`, { decision: "skip" })).status).toBe(200);
+    // and it can still be answered once the world changes — or put down (Skip is bulk-only, K2)
+    const put = await json("POST", "/api/proposals/batch", { ids: [id], decision: "skip" });
+    expect((await put.json()).results[0]).toMatchObject({ id, ok: true });
   });
 
   it("task_update goes through the board's own arm, with the board's own refusal sentence", async () => {

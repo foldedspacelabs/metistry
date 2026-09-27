@@ -331,7 +331,7 @@ takes a `since` cursor and answers with the next one.
 | `POST /api/knowledge/conflicts/resolve` | owner | session · local_owner | no | stale | — | T2-10 | settle a conflicted file: keep one side |
 | `GET /api/knowledge/history` | owner | session · local_owner | natural | — | — | served | a file's commits |
 | `GET /api/knowledge/version` | owner | session · local_owner | natural | — | — | served | one file at one commit |
-| `POST /api/knowledge/restore` | owner | session · local_owner | no | stale | — | T10-5 | raise a Needs You request to restore a file; Approve restores as `user` |
+| `POST /api/knowledge/restore` | owner | session · local_owner | no | stale | — | served | raise a Needs You request to restore a file; Approve restores as `user` |
 | `GET /api/q/:name` | owner | session · local_owner · owner_token | natural | — | — | served | run a named query exposed `generic` |
 | `GET /api/today` | owner | session · local_owner | natural | — | — | T2-7 | the day: tasks, work, order, events, brief, standup and plan |
 | `GET /api/vault-tasks` | owner | session · local_owner | natural | — | — | T2-7 | vault tasks by filter: Slipping, Owed, Waiting on Others |
@@ -1753,7 +1753,7 @@ GET  /api/knowledge/fold | drafts | areas            see below — the owner's a
 POST /api/knowledge/conflicts/resolve      T2-10 — {path, keep, seen_sha}   409 stale — only a path in `conflict`
 GET  /api/knowledge/history?path=&limit=   served — a file's commits, through the bridge's `GET /vault/log`   the owner's alone
 GET  /api/knowledge/version?path=&sha=     served — one file at one commit, through the bridge's `GET /vault/show`   the owner's alone
-POST /api/knowledge/restore                T10-5 — {path, sha, seen_sha}: raises a Needs You request   409 stale
+POST /api/knowledge/restore                served — {path, sha, seen_sha}: raises a Needs You request, never writes   409 stale   the owner's alone
 ```
 
 **Resolving a conflict** writes one note through the vault bridge as `user`,
@@ -2050,6 +2050,62 @@ CLI's, with the owner's hand on it. And both are the owner's **alone**, like
 including what an edit since took out, so no agent reads it — whatever its
 grants, and even through a gate widened by mistake. Restore (T10-5) and roll
 back (T10-6) build on these two; neither changes anything.
+
+#### `POST /api/knowledge/restore` — put a note back as it was (`user` principal; T10-5)
+
+```
+POST /api/knowledge/restore   {"path":"Areas/Health/sleep.md","sha":"4c1d2e3f","seen_sha":"<sha256 as rendered>" | ""}
+202 {"ok":true,"proposal_id":"61","raised":true,"path","sha":"<full commit id>","date",
+     "proposal":{"id","ts","kind":"improvement","source_agent":"console","trust":"user",
+                 "payload":{"title","summary","body":{"kind":"before_after","heading","before":{"label","text"},"after":{"label","text"}},
+                            "restore":{"path","sha","date","base_sha256","version_sha256"}},
+                 "decision":"pending",…,"request":{…}}}
+409 {"error":{"code":"conflict",…},"reason":"stale","file":{"path","sha256","bytes"} | null}
+400 a missing path / a sha that is not a commit id / a seen_sha that is not a sha256 or "" — by name;
+    the file is already that version; or, for the owner, a path this door does not serve (the classification)
+403 any principal that is not the owner — decided in the route before the body is read
+404 no such commit, a commit not on this vault's branch, or the file absent at it
+503 no vault bridge configured
+```
+
+**It never writes.** It raises **one** Needs You request — an *improvement*,
+drawn as a before and after: the note as it is now, and the note at `sha` —
+and answers `202` with the request as `GET /api/proposals` serves it. Only
+**Approve** (`POST /api/proposals/:id`, `allow`) restores: it writes the
+version's bytes back **as `user`, as a new commit** — *Restore <path> to
+<date>* — so the history keeps every version, including the one it replaced.
+Nothing is reset, checked out or rewritten, and the console holds no git to do
+it with. The answer carries `applied` and `restored: {path, sha, sha256}`, and
+the row keeps `payload.restored`. Revise and Decline write nothing.
+
+**Stale, twice.** `seen_sha` is the file's **content hash as the client
+rendered it** — the `sha256` `GET /api/knowledge/page` serves — or `""` for a
+note that is not in the vault now (restoring a deleted note). A file that is
+not that is `409 stale` with the file as it stands (`file: null` when it is
+gone), and nothing is raised. Approve checks again: the note must still be the
+"before" the request showed, and the version must still hash to the "after";
+the write is a compare-and-swap on the "before". A note edited meanwhile is
+`409 stale` there too — nothing written, the request still waiting with the
+reason on it (C45); Decline it and restore again from the note as it is.
+
+**One request per note and commit.** The request is a mirror (T1-8) whose
+`source` is `{kind: "metistry", external_ref: "restore:<path>@<sha>"}`: asking
+twice hands back the request already waiting (`raised: false`), and one raised
+against a file that has changed since leaves the queue as
+`resolved_at_source` and is replaced. Knowledge shows a page's request inline
+by its `payload.restore.path` and answers it at the same door — answering it
+there answers it in Needs You (screen 10 §3.1). Like every mirror, it does not
+expire at 14 days.
+
+**Notes only, the owner only — at the tool.** The path must be one `page`
+serves; `.metistry/`, `Artifacts/` and the root instructions are refused here
+for the owner too — configuration is rolled back with the CLI's owner caller
+class (T10-6, M18). Every other principal is refused `403` in the route
+itself, whatever the gate before it did. And Approve restores only a request
+**this console raised** (`source_agent: console`, stamped server-side) whose
+`source` names the same path and commit: a restore-shaped payload on any other
+row restores nothing and is refused, never read as a prompt improvement. No
+agent principal can restore: no tool exposes it, and neither door admits one.
 
 ### The named queries — `GET /api/q/:name`
 

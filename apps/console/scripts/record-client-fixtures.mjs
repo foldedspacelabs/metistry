@@ -185,6 +185,7 @@ const HISTORY = [
   { sha: "1f2e3d4c5b6a79880706a5b4c3d2e1f0a9b8c7d6", author: "Metistry user", date: "2026-09-27T14:10:00-04:00", subject: "Start the plan", source: "user", runs: [], turns: [], path: "Projects/Metistry/Plan.md", change: "added", content: "# Plan\n" },
 ];
 await vault.write(PAGE, Buffer.from("# Roadmap\n\nShip the store interface, then the stores. See [[Projects/Metistry/Design]].\n"), { principal: "user", message: "fixture" });
+const PAGE_SHA256 = (await vault.read(PAGE)).sha256; // what GET /api/knowledge/page serves as `sha256` — the restore's `seen_sha`
 
 // a day note with tasks on it, for the Tick door (T2-4) and the Defer door (T2-5) to write — one each, so neither sees the other's edit
 const DAY = "Journal/2026-09-28.md";
@@ -481,6 +482,8 @@ const REQUESTS = [
   ["GET /api/knowledge/areas", () => ({ path: "/api/knowledge/areas" })],
   ["GET /api/knowledge/history", () => ({ path: `/api/knowledge/history?path=${encodeURIComponent(PAGE)}` })],
   ["GET /api/knowledge/version", () => ({ path: `/api/knowledge/version?path=${encodeURIComponent("Projects/Metistry/Plan.md")}&sha=9ab8c7d6` })],
+  // T10-5: put the roadmap back as it was at the rename — a Needs You request, nothing written; `seen_sha` is the page's hash as GET /api/knowledge/page served it
+  ["POST /api/knowledge/restore", () => ({ path: "/api/knowledge/restore", body: { path: PAGE, sha: "4c1d2e3f", seen_sha: PAGE_SHA256 } })],
 
   ["POST /capture", () => ({ path: "/capture", body: { note: "Ask Dana about the fixture format on Thursday." }, key: "fixture-capture-0001" })],
   ["POST /message", () => ({ path: "/message", body: { text: "What's on today?" } })],

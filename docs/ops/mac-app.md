@@ -109,7 +109,7 @@ path.
 | `connect-repo --auth token` | it reads the PAT from **stdin**, and the app gives every child an empty stdin on purpose so no verb can hang a progress view waiting for a paste | the wizard shows the option, disabled, with that reason; run it in a terminal |
 | **Minting an enrolment code** | there is no HTTP route that mints one, deliberately — whoever can run the host command already controls Postgres and the vault, so shell access is the root of trust for a first passkey (plan §4.2) — and `metistry enroll` is on the CLI's own "not yet" list | step 6 shows the exact `scripts/enroll.mjs` command and takes the code you paste back |
 | **A QR code** for the phone | nothing in this product renders one yet; `apps/console/scripts/enroll.mjs` says the same about itself ("QR rendering arrives with `packages/cli`"), and an encoder is a dependency nobody has asked for | step 6 shows the enrolment URL, selectable, to type or hand over |
-| **The screens behind the sidebar's rows** | the shell has the rows (T5-2); each screen is its own ticket (T6-1 Today, T6-2 Chat, …), and until it lands the row's detail names the gap and offers the web app. Needs You's list has landed (T5-4a, "The Needs You view" below); one request's body and answers are T5-4b's, and until they land its detail says so | the PWA — "Add to Dock" in Safari, or the detail's **Open in Browser** |
+| **The screens behind the sidebar's rows** | the shell has the rows (T5-2); each screen is its own ticket (T6-1 Today, T6-2 Chat, …), and until it lands the row's detail names the gap and offers the web app. Needs You's list has landed (T5-4a, "The Needs You view" below); one request's body and answers are T5-4b's, and until they land its detail says so. Chat has landed (T6-2, "Chat" below) | the PWA — "Add to Dock" in Safari, or the detail's **Open in Browser** |
 | **New Capture** (the toolbar's + and ⌘N) | the composer is T5-5; until then both are dimmed, with the reason in the tooltip | the PWA's + |
 | **The keep-awake control** (Services) | the model half is shipped — `KeepAwakeSetting` (four values, each with what it costs), `KeepAwakeFacts` (doctor's row) and `deploymentSetKeepAwake` — and the pane is a switch with a radio pair under it, which is the designer's. First run can pass `--keep-awake` and does not ask on its own | a terminal: `metistry deployment set-keep-awake <value> --yes`, or `metistry init --keep-awake <value>` |
 | **An iOS target** | `MetistryKit` is already free of AppKit and of `Process` so it can be shared; there is no iOS target in `Package.swift` | — |
@@ -1080,6 +1080,68 @@ come back to, and an instance switch drops it.
   screens are not in the Mac yet; a run's detail is drawn nowhere). Screen 2
   §8's `1`–`7`, `/`, ⌘R and ⌘↩ are not in the closed menu table (C119), so they
   are not bound; the chips and the pill are focusable controls instead.
+
+## Chat
+
+`sources/kit/chat-view.swift` and `chat-model.swift` (T6-2) draw screen 1 as the
+round-0 final draws it (`boards/chat.py`): one capped column — 620pt at the
+reply's 16pt, growing with the text size — centred in the pane so a resize
+moves it and never rewraps a line; the owner's turns on `accent-quiet`, the
+assistant's with no fill and a 2px `agent` rule hung 18pt in the gutter (C69).
+Every fact is one route's answer, and where the wire says nothing the screen
+guesses nothing:
+
+- **The transcript** is `GET /api/messages?limit=30`, merged by direction and
+  id (inbound and outbound ids are separate sequences). A turn is *working*
+  while its own message says `new` or `processing`, finished at `done`,
+  failed at `failed` — never inferred from whether a reply has shown up.
+- **The tool strip is joined exactly.** A message row carries no `turn_id` and
+  no `in_reply_to`, so the strip belongs to the message that *started* the
+  turn: the recent `turn` runs (`GET /api/q/activity_feed?kind=turn`), each
+  read once (`GET /api/runs/:id`) for the `meta.message_id` the drain stamps,
+  then `GET /api/turns/:turn_id/progress`. Never by adjacency or a time
+  window. While the live stream is up (T5-7), a turn run starting or a call
+  moving (`EventTopic.working`) makes the strip due at once, and the in-flight
+  poll drops to a 5 s net. A consequence, stated rather than papered over: a turn that finished
+  before the screen watched it has no strip — nothing on the wire joins an old
+  reply to its turn.
+- **Waiting** (§5.1): the dots and *working*; a tool name, the count and the
+  elapsed seconds once there is one; *working · nothing back for 62s* on
+  `degraded-quiet` at sixty seconds with nothing new — never "stuck". The dots
+  are the product's one loop and hold flat at 0.5 under Reduce Motion
+  (`ChatDots`). Token streaming is not in v1 (§2.20), so there is no
+  *prose streaming* moment.
+- **P9.** A reply that arrives while the reader is scrolled up is appended,
+  announced once, and shown as *↓ New Reply*; the transcript scrolls only for
+  the owner's own send, the first paint, a reply while already at the end, or
+  the pill. Whether the reader is at the end is measured, not guessed: the
+  transcript is not lazy, so its end's position in the viewport says so.
+- **Sending is a decision (O3).** `POST /message` is not an append
+  (`ConsoleAct`), so Send is off while the instance is unreachable, with the
+  gate's sentence under it; a send that goes out and fails stays on screen as
+  *Not sent* with its words and Try Again. A rating is an append and is
+  always sent; a refused one goes back to what it was, with the reason.
+- **Stop is drawn and off.** The console has no route that cancels a turn, so
+  Stop says so beneath the composer, and Send stays — a composer offering only
+  a dead Stop would be a dead end (C138).
+- **The tier** (§3c) is the tiers `GET /api/commands` names in a field — each
+  `model_override` row's `tier`, with the model and effort it resolves to — sent
+  as `POST /message`'s `tier`, pinned for this turn or this conversation.
+  Model and effort are shown, not chosen: the route takes a tier and nothing
+  else, and a tier's model is Settings ▸ Compute's. ⇧⌘N (New Conversation)
+  puts the tier back in the router's hands.
+- **The prompt card** is the pending `decision` row whose `payload.message_id`
+  is the reply's id, drawn as Needs You's own card (`RequestCardView`) with an
+  `accent` rule — one act on one row from either place.
+- **Page chips and the pane.** A reply's `[[wikilinks]]` are chips; one opens
+  `GET /api/knowledge/page` in a 400pt pane beside the column when the window
+  holds both at full width, and as a sheet when it does not. A reply names no
+  artifacts on the wire, so there are no artifact chips yet.
+
+Tapbacks are the board's two thumbs beside the name and the turn's right-click
+menu (P8); Bad asks for an optional note. The Chat row in the sidebar carries
+one `agent` dot while a turn works — presence, not a badge — and the model keeps
+watching a working turn after the owner walks away.
 
 ## Build and run it
 

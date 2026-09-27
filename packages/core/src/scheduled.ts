@@ -11,9 +11,11 @@
 //   3. THIS FILE — the owner's changes, written only through the Scheduled
 //      doors (T3-3). Reset to Default deletes an entry.
 //
-// Schema and types only. Loading it and merging the layers is T3-2's, the
-// runner that reads it every tick is T3-1's, the doors that write it are
-// T3-3's (docs/ops/scheduled.md, "What is not wired yet").
+// The schema (F-4); what an entry may name against its manifest, and every
+// field resolved over the three layers with its origin (T3-2, at the end of
+// this file). The runner that reads it every tick is T3-1's
+// (apps/console/src/runner.ts), the doors that write it are T3-3's
+// (docs/ops/scheduled.md).
 //
 // Two properties the doors lean on:
 //
@@ -30,22 +32,30 @@ import { z } from "zod";
 import { isScalar, isSeq, parse as parseYaml, parseDocument, Scalar, type YAMLMap } from "yaml";
 import { validAgentAreaGrant } from "./instance-layout.js";
 import { AGENT_NAME_RE } from "./instances.js";
+import { configValueIssue, type ConfigField, type Manifest, type RaiseRule } from "./manifest.js";
 import {
   AT_RE,
   WEEKDAYS,
+  describeSchedule,
   everySchema,
   forward,
+  isInterval,
+  isLegacyCron,
   isPlainObject,
   issueMessage,
+  nextOccurrence,
   resolveDays,
   scheduleSchema,
   timeOfDayScheduleSchema,
+  type ManifestSchedule,
+  type Occurrence,
+  type OccurrenceContext,
   type ProfileFacts,
   type TimeOfDaySchedule,
   type Weekday,
 } from "./schedule.js";
 
-/** Under `.metistry/` — a protected path the console writes (T3-2 adds it to `CALLER_AUTHORITY.console`). */
+/** Under `.metistry/` — the one protected path the console gained on 2026-09-26 (`CALLER_AUTHORITY.console`, apps/reconciler/src/paths.ts). */
 export const SCHEDULED_FILENAME = "scheduled.yaml";
 
 // ---- where a field's value came from ------------------------------------------
@@ -64,7 +74,7 @@ export const FIELD_ORIGIN_LABELS: Readonly<Record<FieldOrigin, string>> = Object
   yours: "yours", // scheduled.yaml said so
 });
 
-/** A resolved value and the layer it came from. The resolver that produces these is T3-2's (and T3-4's, for the profile). */
+/** A resolved value and the layer it came from — produced by `resolveScheduled`, below (T3-4 adds the profile's own fields). */
 export interface Sourced<T> {
   readonly value: T;
   readonly origin: FieldOrigin;
@@ -94,8 +104,8 @@ const snakeKey = z.string().regex(SCHEDULED_KEY_RE, "a key is lowercase snake_ca
 const configScalar = z.union([z.string(), z.number(), z.boolean()]);
 /**
  * A config value: a string, a number, true/false, or a list of those. Which
- * keys a routine takes, and of what kind, is its manifest's `config` schema —
- * checked against the manifest when the overlay loads (T3-2), not here.
+ * keys a routine takes, and of what kind, is its manifest's `config` —
+ * checked against the manifest by `entryProblems`, below, not here.
  */
 const configValue = z.union([configScalar, z.array(configScalar)], {
   error: () => "a config value is a string, a number, true/false, or a list of those",
@@ -182,8 +192,8 @@ export function isAssignment(entry: RoutineEntry): entry is RoutineAssignment {
 /**
  * A sync: a collector reading one connection, on an interval. Its cadence is
  * `every` from the closed set — a sync has no time of day. `raise` switches
- * the collector manifest's declared Needs You rules on or off (T3-2 checks the
- * names against the manifest). Never in the connection file (§2.6).
+ * the collector manifest's declared Needs You rules on or off (`entryProblems`
+ * checks the names against the manifest's `needs_you`). Never in the connection file (§2.6).
  */
 export const syncEntrySchema = z
   .object({
@@ -491,4 +501,283 @@ export function planStandupMove(profileText: string | null, overlayText: string 
     }
   }
   return { state: "move", keys: read.keys, schedule: read.schedule, overlay: next, tidied: withoutProfileKeys(profileText!, read.keys) };
+}
+
+// ---- the manifests' side: what each entry may name (T3-2) ----------------------
+//
+// The schema above checks the file on its own. What it cannot know is which
+// names are scheduled here, which section each one lives in, and which
+// config keys and Needs You rules each declares — that is the manifests'
+// layer. `entryProblems` checks one component's entries against its
+// manifest; `checkScheduled` the whole file. The runner holds a component
+// with a problem that `holds` (apps/console/src/runner.ts), because an entry
+// that is ignored is a change the owner made that nothing applies.
+
+/** The two sections of the file, and so of the Scheduled pane. */
+export const SCHEDULED_SECTIONS = ["routines", "syncs"] as const;
+export type ScheduledSection = (typeof SCHEDULED_SECTIONS)[number];
+
+/**
+ * A routine or collector as Scheduled reads it off its manifest — the first
+ * layer. `section` is where its changes live: a routine, or a collector that
+ * `presents_as: routine` (Inbox Sort, Usage Rollup), is under `routines`;
+ * every other collector is a sync.
+ */
+export interface ScheduledUnit {
+  readonly name: string;
+  readonly section: ScheduledSection;
+  /** What a person reads — the manifest's `display_name`, else its `name`. */
+  readonly displayName: string;
+  /** The default schedule. */
+  readonly schedule: ManifestSchedule;
+  /** The config fields it takes, with their defaults. None declared = it takes no config. */
+  readonly config: Readonly<Record<string, ConfigField>>;
+  /** The Needs You rules it may raise, with their defaults — a sync's only. */
+  readonly raise: Readonly<Record<string, RaiseRule>>;
+}
+
+const FROZEN_EMPTY: Readonly<Record<string, never>> = Object.freeze({});
+
+/** The unit Scheduled reads off a routine or collector manifest; null for every other kind. */
+export function scheduledUnitOf(m: Manifest): ScheduledUnit | null {
+  if (m.type !== "routine" && m.type !== "collector") return null;
+  const section: ScheduledSection = m.type === "routine" || m.presents_as === "routine" ? "routines" : "syncs";
+  return {
+    name: m.name,
+    section,
+    displayName: m.display_name ?? m.name,
+    schedule: m.schedule,
+    config: m.config ?? FROZEN_EMPTY,
+    raise: (m.type === "collector" ? m.needs_you : undefined) ?? FROZEN_EMPTY,
+  };
+}
+
+/** Something in the file a manifest does not allow, named by its field. */
+export interface ScheduledProblem {
+  /** The component the entry is keyed by. */
+  readonly name: string;
+  /** The field, spelled as a path in the file: `syncs.github-state.raise.merged`. */
+  readonly field: string;
+  readonly message: string;
+  /**
+   * true — the component is HELD until the file changes (not run, and said
+   * so); false — the entry names nothing scheduled here, so there is nothing
+   * to hold (an extension removed while referenced: the entry turns absent,
+   * and nothing deletes it, §2.7).
+   */
+  readonly holds: boolean;
+}
+
+const own = <T>(map: Readonly<Record<string, T>> | undefined, key: string): T | undefined =>
+  map !== undefined && Object.hasOwn(map, key) ? map[key] : undefined;
+
+const declared = (keys: readonly string[], what: string): string => (keys.length === 0 ? `it declares no ${what}` : `it declares ${keys.join(", ")}`);
+
+/** What is wrong with this component's entries, against its manifest. Empty = they apply as written. */
+export function entryProblems(unit: ScheduledUnit, file: Scheduled): ScheduledProblem[] {
+  const { name } = unit;
+  const routine = own(file.routines, name);
+  const sync = own(file.syncs, name);
+  const hold = (field: string, message: string): ScheduledProblem => ({ name, field, message, holds: true });
+  if (routine !== undefined && sync !== undefined) {
+    return [hold(name, `.metistry/scheduled.yaml names ${name} under both routines: and syncs: — one entry per component`)];
+  }
+  if (routine !== undefined) {
+    const at = `routines.${name}`;
+    if (isAssignment(routine)) {
+      return [hold(at, `${at} is a New Routine (actor, task), but ${name} is a ${unit.section === "routines" ? "routine" : "sync"} with a manifest — give the New Routine a name of its own`)];
+    }
+    if (unit.section === "syncs") return [hold(at, `${at}: ${name} is a sync — its changes live under syncs.${name}`)];
+    const keys = Object.keys(unit.config);
+    const out: ScheduledProblem[] = [];
+    for (const [key, value] of Object.entries(routine.config ?? {})) {
+      const field = own(unit.config, key);
+      if (field === undefined) {
+        out.push(hold(`${at}.config.${key}`, `${at}.config.${key}: ${unit.displayName} takes no ${key} — ${declared(keys, "config")}`));
+        continue;
+      }
+      const issue = configValueIssue(field, value);
+      if (issue) out.push(hold(`${at}.config.${key}`, `${at}.config.${key}: ${key} ${issue}`));
+    }
+    return out;
+  }
+  if (sync !== undefined) {
+    const at = `syncs.${name}`;
+    if (unit.section === "routines") return [hold(at, `${at} names a routine — a routine's changes live under routines.${name}`)];
+    const rules = Object.keys(unit.raise);
+    return Object.keys(sync.raise ?? {})
+      .filter((rule) => own(unit.raise, rule) === undefined)
+      .map((rule) => hold(`${at}.raise.${rule}`, `${at}.raise.${rule}: ${unit.displayName} raises no ${rule} — ${declared(rules, "Needs You rules")}`));
+  }
+  return [];
+}
+
+/**
+ * Every problem in a valid file against the units scheduled here: each
+ * unit's `entryProblems`, and every entry that names no unit — which holds
+ * nothing (there is nothing to hold) but is said, because it applies to
+ * nothing. A New Routine under its own name is not a problem: it has no
+ * manifest by design.
+ */
+export function checkScheduled(file: Scheduled, units: readonly ScheduledUnit[]): ScheduledProblem[] {
+  const out = units.flatMap((u) => entryProblems(u, file));
+  const known = new Set(units.map((u) => u.name));
+  for (const [name, entry] of Object.entries(file.routines ?? {})) {
+    if (!known.has(name) && !isAssignment(entry)) {
+      out.push({ name, field: `routines.${name}`, message: `routines.${name} names no routine here — it applies to nothing until one by that name is installed`, holds: false });
+    }
+  }
+  for (const name of Object.keys(file.syncs ?? {})) {
+    if (!known.has(name)) out.push({ name, field: `syncs.${name}`, message: `syncs.${name} names no sync here — it applies to nothing until one by that name is installed`, holds: false });
+  }
+  return out;
+}
+
+// ---- resolving every field with its origin (T3-2) --------------------------------
+
+/**
+ * One routine or sync as Scheduled shows it: every field resolved over the
+ * three layers, each with the layer it came from (`Sourced`), so a client
+ * renders *default* · *from your profile* · *yours* and never works the
+ * layer out for itself.
+ */
+export interface ResolvedScheduled {
+  readonly name: string;
+  readonly section: ScheduledSection;
+  readonly displayName: string;
+  /** No entry in the file at all — the UI's **default** tag, and what Reset to Default returns it to. */
+  readonly isDefault: boolean;
+  readonly schedule: Sourced<ManifestSchedule>;
+  /** The schedule, said for a person (`working days at 07:00`, `every 5m`). */
+  readonly describe: string;
+  /**
+   * A time of day's weekdays: the schedule's own list, or — for a day set —
+   * the profile's days behind it (origin `profile`). null for an interval,
+   * or when a day set has no working days to follow.
+   */
+  readonly days: Sourced<readonly Weekday[]> | null;
+  /**
+   * A time of day's zone: the schedule's `tz`, then the profile's `timezone`,
+   * then the runner's configured zone (`METISTRY_TZ`, origin `default`).
+   * null for an interval, or when none is set.
+   */
+  readonly timeZone: Sourced<string> | null;
+  readonly paused: Sourced<boolean>;
+  /** Every declared config field, its value and where the value came from. */
+  readonly config: Readonly<Record<string, Sourced<ConfigValue>>>;
+  /** A sync's declared Needs You rules, each on or off and where that came from. */
+  readonly raise: Readonly<Record<string, Sourced<boolean>>>;
+  /** A sync's connection, as the file names it; null until an entry names one. */
+  readonly connection: string | null;
+  /** Why the runner holds it — its entries do not apply to its manifest; null otherwise. */
+  readonly held: string | null;
+  /** When it runs next, after the context's `now` (`nextOccurrence`); null while paused or held, and for a legacy cron string. */
+  readonly next: Occurrence | null;
+}
+
+export interface ResolveContext extends OccurrenceContext {
+  /** The moment `next` is counted from. */
+  readonly now: Date;
+  /** An interval counts from its last run; absent (never run) = due at `now`. */
+  readonly lastRuns?: Readonly<Record<string, Date>>;
+}
+
+export interface ScheduledListing {
+  /** Routines, and collectors that present as one — by name. */
+  readonly routines: readonly ResolvedScheduled[];
+  /** Syncs — by name. */
+  readonly syncs: readonly ResolvedScheduled[];
+  /** Every problem in the file against these units (`checkScheduled`). */
+  readonly problems: readonly ScheduledProblem[];
+}
+
+const sourced = <T>(value: T, origin: FieldOrigin): Sourced<T> => ({ value, origin });
+
+function nextFor(schedule: ManifestSchedule, name: string, ctx: ResolveContext): Occurrence | null {
+  if (isLegacyCron(schedule)) return null;
+  if (!isInterval(schedule)) return nextOccurrence(schedule, ctx.now, ctx);
+  const last = ctx.lastRuns ? own(ctx.lastRuns, name) : undefined;
+  if (last === undefined) return { ok: true, at: ctx.now, timeZone: null };
+  const n = nextOccurrence(schedule, last, ctx);
+  return n.ok && n.at.getTime() < ctx.now.getTime() ? { ok: true, at: ctx.now, timeZone: null } : n;
+}
+
+function timeOfDayFields(schedule: ManifestSchedule, origin: FieldOrigin, ctx: OccurrenceContext): Pick<ResolvedScheduled, "days" | "timeZone"> {
+  if (isLegacyCron(schedule) || isInterval(schedule)) return { days: null, timeZone: null };
+  const resolvedDays = resolveDays(schedule.days, ctx.profile.working_days);
+  const days = resolvedDays === null ? null : sourced<readonly Weekday[]>(resolvedDays, typeof schedule.days === "string" ? "profile" : origin);
+  const present = (z: string | null | undefined): z is string => typeof z === "string" && z.trim() !== "";
+  const timeZone = present(schedule.tz)
+    ? sourced(schedule.tz, origin)
+    : present(ctx.profile.timezone)
+      ? sourced(ctx.profile.timezone, "profile")
+      : present(ctx.fallbackTimeZone)
+        ? sourced(ctx.fallbackTimeZone, "default")
+        : null;
+  return { days, timeZone };
+}
+
+/** One unit, resolved over a valid file and the profile. */
+export function resolveUnit(unit: ScheduledUnit, file: Scheduled, ctx: ResolveContext): ResolvedScheduled {
+  const problems = entryProblems(unit, file).filter((p) => p.holds);
+  const held = problems.length > 0 ? problems.map((p) => p.message).join("; ") : null;
+  const routine = own(file.routines, unit.name);
+  const sync = own(file.syncs, unit.name);
+  // A held component's entries do not apply — it shows its manifest's values and why it is held.
+  const override = held === null && routine !== undefined && !isAssignment(routine) ? routine : undefined;
+  const syncEntry = held === null ? sync : undefined;
+
+  const schedule =
+    override?.schedule !== undefined
+      ? sourced<ManifestSchedule>(override.schedule, "yours")
+      : syncEntry?.every !== undefined
+        ? sourced<ManifestSchedule>({ every: syncEntry.every }, "yours")
+        : sourced(unit.schedule, "default");
+  const pausedValue = override?.paused ?? syncEntry?.paused;
+  const paused = pausedValue !== undefined ? sourced(pausedValue, "yours") : sourced(false, "default");
+
+  const config: Record<string, Sourced<ConfigValue>> = {};
+  for (const [key, field] of Object.entries(unit.config)) {
+    const mine = override?.config ? own(override.config, key) : undefined;
+    config[key] = mine !== undefined ? sourced(mine, "yours") : sourced(field.default, "default");
+  }
+  const raise: Record<string, Sourced<boolean>> = {};
+  for (const [rule, decl] of Object.entries(unit.raise)) {
+    const mine = syncEntry?.raise ? own(syncEntry.raise, rule) : undefined;
+    raise[rule] = mine !== undefined ? sourced(mine, "yours") : sourced(decl.default, "default");
+  }
+
+  return {
+    name: unit.name,
+    section: unit.section,
+    displayName: unit.displayName,
+    isDefault: routine === undefined && sync === undefined,
+    schedule,
+    describe: describeSchedule(schedule.value),
+    ...timeOfDayFields(schedule.value, schedule.origin, ctx),
+    paused,
+    config,
+    raise,
+    connection: sync?.connection ?? null,
+    held,
+    next: held !== null || paused.value ? null : nextFor(schedule.value, unit.name, ctx),
+  };
+}
+
+/**
+ * **Scheduled, resolved** — every routine and sync the manifests schedule,
+ * each field over manifest ⊕ `Me/profile.md` ⊕ `scheduled.yaml` with its
+ * origin, and when each runs next. Pure: the caller reads the files (the
+ * runner's `readOverlay`, the profile through the vault bridge) and passes
+ * a VALID file — an invalid one is never applied, here or anywhere, and is
+ * shown as its errors instead.
+ */
+export function resolveScheduled(units: readonly ScheduledUnit[], file: Scheduled, ctx: ResolveContext): ScheduledListing {
+  const byName = (a: ResolvedScheduled, b: ResolvedScheduled): number => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+  const all = units.map((u) => resolveUnit(u, file, ctx)).sort(byName);
+  return {
+    routines: all.filter((r) => r.section === "routines"),
+    syncs: all.filter((r) => r.section === "syncs"),
+    problems: checkScheduled(file, units),
+  };
 }

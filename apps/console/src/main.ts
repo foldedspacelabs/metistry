@@ -40,6 +40,7 @@ import { dirSink, vaultSink, DEFAULT_MAX_TRACKED_BYTES, INBOX_PREFIX, vaultBridg
 import { ASSISTANT_DEFAULT_AREAS, INTERNAL_ASSISTANT_ID, ensureInternalAgent, revokeAgent, validateGrants } from "./agents.js";
 import { httpVaultClient } from "./vault-client.js";
 import { SCHEDULED_PATH, STANDUP_MOVE_RETRY_MS, fileOverlay, startStandupMove } from "./profile-tidy.js";
+import { httpVaultStatus } from "./vault-status.js";
 import { vaultBridgeSearch } from "./knowledge-routes.js";
 import type { ComputeAdmin } from "./compute-routes.js";
 import type { SecretsView } from "./secrets-route.js";
@@ -357,6 +358,8 @@ const server = makeServer(pool, queries, {
   ...(searchKnowledge ? { searchKnowledge } : {}),
   ...(computeAdmin ? { computeAdmin } : {}),
   ...(vault ? { vault } : {}),
+  // GET /api/vault/status: the reconciler's sync status over the same bridge (T10-2)
+  ...(reconcilerUrl && reconcilerToken ? { vaultStatus: httpVaultStatus({ url: reconcilerUrl, token: reconcilerToken }) } : {}),
   crews,
   compute: () => compute.store.current,
   // the assistant's definition (T4-6): the same overlays the engine composes its prompt from

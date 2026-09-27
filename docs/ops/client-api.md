@@ -367,7 +367,7 @@ takes a `since` cursor and answers with the next one.
 | `POST /api/prose/:id/feedback` | owner | session · local_owner | natural | — | — | T1-12 | rate one piece of generated prose |
 | `DELETE /api/prose/:id/feedback` | owner | session · local_owner | natural | — | — | T1-12 | clear a prose rating |
 | `GET /api/events` | owner | session · local_owner | natural | — | — | served | Server-Sent Events: what changed, as ids; `Last-Event-ID` resumes |
-| `GET /api/vault/status` | owner | session · local_owner | natural | — | — | T10-2 | branch, ahead and behind, last commit, last push, conflict |
+| `GET /api/vault/status` | owner | session · local_owner | natural | — | — | served | branch, ahead and behind, last commit, last push, conflict |
 | `POST /api/vault/rollback` | local | local_owner | no | — | — | T10-6 | raise a Needs You request to roll back, with the preview |
 <!-- client-api:routes:end -->
 
@@ -2211,9 +2211,52 @@ an additive change and keeps the version.
 ### The vault's git
 
 ```
-GET  /api/vault/status     T10-2 — branch, ahead and behind, last commit, last push, any conflict
+GET  /api/vault/status     served — branch, ahead and behind, last commit, last push, any conflict
 POST /api/vault/rollback   T10-6 — reach local: raises a Needs You request with the preview
 ```
+
+#### `GET /api/vault/status` — where sync stands (`user` principal)
+
+```
+GET /api/vault/status
+200 {"branch":"main",
+     "remote":"origin",
+     "ahead":2, "behind":0,
+     "last_commit":{"sha":"4c1d2e3f…","subject":"Tick 1 task","author":"user",
+                    "at":"2026-09-28T12:58:01.000Z"},
+     "last_push":{"at":"2026-09-28T12:58:31.000Z","ok":false,"remote":"origin",
+                  "error":"fatal: unable to access '…': Could not resolve host: github.com"},
+     "last_pull":{"at":"2026-09-28T13:00:00.000Z","ok":true,"remote":"origin"},
+     "conflict":null,
+     "policy":{"push":"after_commit","pull":{"every":"5m"}},
+     "as_of":"2026-09-28T13:05:00.000Z"}
+503 no vault bridge in this deployment, or the reconciler did not answer (degrades: absent)
+```
+
+The reconciler's own `GET /vault/status`, fetched with the console's bridge
+bearer and parsed **strictly** (core's `vaultStatusSchema`) before it is sent
+on, so the route carries these fields and nothing else — never a note's
+content. `remote` is where pushes go (`origin` when there is one); with no
+remote, `remote`, `ahead` and `behind` are null. `ahead` counts commits the
+remote has not got — every commit, when the remote has never had the branch;
+`behind` counts the remote's commits not yet here, as of the last fetch.
+`last_commit.author` is the principal the reconciler stamped (`Brain-Source:`),
+or git's author for a commit made outside it. `last_push` and `last_pull` are
+the last attempt (`ok: false` carries git's last error line, any
+`user:secret@` in a URL masked); `last_push` survives a reconciler restart
+through the remote-tracking ref's reflog, `last_pull` does not. `conflict` is
+`{paths}` while a pull could not integrate (T10-3) or git holds unmerged paths,
+else null.
+
+`policy` is the sync policy in force — `deployment.yaml`'s `vault:` block over
+its defaults (`push: after_commit`, `pull: {every: 5m}`): `push` is
+`after_commit`, `manual` or `{every}`; `pull` is `{every}`. `push_override`
+appears while `METISTRY_PUSH_SCHEDULE` overrides `push` (this release only),
+and `error` while the file does not validate — the last good policy keeps
+running. The policy is set with `metistry vault settings` on the Mac (M18,
+`docs/ops/cli.md`), never through a route. Every commit, push, pull that
+brought something, and conflict is a `vault.sync` event; a client refetches
+here.
 
 A rollback touches files only, never rewrites history — Approve runs revert
 commits as `user` — and a console-initiated revert refuses every `.metistry/`

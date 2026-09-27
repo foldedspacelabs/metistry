@@ -1,5 +1,103 @@
 # @metistry-apps/reconciler
 
+## 0.14.0
+
+### Minor Changes
+
+- 23b963a: Events become requests (T2-9, C96). **A failed routine** raises one `report`
+  per error signature, carrying when it last ran cleanly and when it failed and
+  a *Try Again* act; it clears as `resolved_at_source` the next time the routine
+  succeeds. **A missing secret** — a `requires.env` variable or the engine's
+  `auth.secret` — raises one request of the new stored kind `secret_failure`
+  (read as access) naming every component it stopped, cleared once the variable
+  is set. **A sync conflict copy** is now a `review` holding both versions (the
+  note as it stands and the copy, with their hashes) instead of a path-only
+  report, and clears when the copy is gone. All three are core mirrors: one row
+  per subject while it waits, and an answer is not asked again until what it was
+  about has recovered. The runner takes `requests` (default `runnerRequests`
+  over its own db; `null` raises none).
+- ed7f5c2: **File history (T10-4): `GET /api/knowledge/history`, `GET /api/knowledge/version`,
+  and the reconciler's `GET /vault/show`.** F-1's two frozen rows are served. History
+  is a note's commits, newest first, followed across renames — each naming the file
+  as it was called then, what the commit did to it, and the committer's
+  `Brain-Source:`/`Metistry-Run:`/`Metistry-Turn:` trailers (T10-1) as provenance.
+  Version is the note's bytes at one commit, from the bridge's new `GET /vault/show`
+  (`git cat-file blob`, base64 on the bridge). Both are the owner's alone and notes
+  only: a protected or non-vault path is refused at the console and again at the
+  bridge, for either bearer, and a `sha` that is not 7–64 hex characters is refused
+  at both before it can reach git's argv; a commit not on the vault's branch is
+  `404`. `GET /vault/log` gains the trailers on every entry and, with a path,
+  `path` and `change` — additive. Both fixtures are re-recorded from their contract
+  shape (a superset of it).
+- 0dd4ccb: **Meeting refs and people emails (T1-10).** Migration `0029_meeting_refs.sql`
+  adds two derived tables, `vault_meeting_refs (event_id, path)` and
+  `people_emails (email, path)`. The reconciler's walk fills them from a meeting
+  note's frontmatter `event_id:` (notes under `Journal/Meetings/`, the user's
+  directory at the tool) and from a People page's `email:` (one address or a
+  list, trimmed, `mailto:` dropped, lowercased; only pages the user owns), and
+  rebuilds both whole every cycle. `POST /reconcile` reports `meeting_refs` and
+  `people_emails`. The new named query `people_by_email` (`expose: route`)
+  returns the one People page that claims an address, and nothing when none or
+  more than one does: an unmatched attendee never resolves to a page.
+- 406bacb: Resolve a conflict (T2-10, plan §2.11). `POST /api/knowledge/conflicts/resolve
+  {path, keep, seen_sha}` is served: the owner keeps the note as it stands
+  (`mine`) or takes the sync tool's copy (`theirs`), written as `user` through
+  the reconciler's new `POST /vault/conflicts/resolve`, for a copy the index has
+  in `conflict` and nothing else. `seen_sha` is the side being given up, as the
+  review showed it; a mismatch, or a path not in conflict, is `409 stale` with
+  the conflict as it stands (`null` when there is none). The side given up is
+  committed before it is discarded, so history keeps it after the client's
+  ten-second Undo (C136); a settle refused for any other reason is written on the
+  conflict's review as `payload.error` (C45). The review clears at its source and
+  the copy's index row goes at once. The reconcile sweep now commits the deletion
+  of a conflict copy that history holds. Core gains `knowledgeConflictSource`
+  (and its two constants), the conflict mirror's subject, which the console and
+  the reconciler now share.
+- 935901e: **Roll back (T10-6): `metistry vault rollback`, `POST /api/vault/rollback` and the
+  reconciler's `POST /vault/revert`.** History is preserved, always: a rollback is ONE
+  new commit, made as `user`, that undoes a commit (`git revert`), puts every path back
+  as it was at a moment (`--to <date>`), or puts one file back (`--file`, before its
+  last change or `--to` a moment) — computed off the working tree with `merge-tree`
+  and a scratch index, applied by `merge --ff-only`, never a reset or a force. Undo is
+  rolling back that commit. A re-walk and the push policy follow.
+  
+  Every rollback waits for Approve in Needs You. The route (F-1's frozen row, now
+  served; reach `local`, so a passkey session is `403 local_only`) asks the reconciler
+  for a preview and raises one request carrying it — the commits it undoes, the files
+  it puts back; Approve runs the revert pinned to the previewed history and held to
+  the previewed change set (`409 stale` otherwise). The reconciler refuses the revert
+  for any principal but `user`, from either bearer. Configuration — every
+  `.metistry/` path, `CLAUDE.md`, `README.md` — is left as it is and named
+  (`skipped_config`) unless `include_config`, which a real revert admits only from the
+  owner-class bearer: `metistry vault rollback --include-config` raises the request,
+  waits for Approve and makes the change itself (`--request <id>` resumes the wait).
+  `POST /api/proposals/:id` answers a rollback with `rolled_back`; its decision SELECT
+  now carries `source` (additive, as T10-5's). `Git` takes an `indexFile` option (a
+  scratch `GIT_INDEX_FILE`), and the committer a `holdHistory` hold.
+
+### Patch Changes
+
+- Updated dependencies [d92ea0c]
+- Updated dependencies [f01606b]
+- Updated dependencies [2fc0ef0]
+- Updated dependencies [211b408]
+- Updated dependencies [851e08a]
+- Updated dependencies [23b963a]
+- Updated dependencies [ed7f5c2]
+- Updated dependencies [ea2e876]
+- Updated dependencies [ac377ed]
+- Updated dependencies [9dcc405]
+- Updated dependencies [fcfbadf]
+- Updated dependencies [fce1f33]
+- Updated dependencies [406bacb]
+- Updated dependencies [448857f]
+- Updated dependencies [7028e37]
+- Updated dependencies [66ef5c7]
+- Updated dependencies [440d0d1]
+- Updated dependencies [61d9546]
+- Updated dependencies [935901e]
+  - @foldedspacelabs/metistry-core@0.14.0
+
 ## 0.13.0
 
 ### Minor Changes

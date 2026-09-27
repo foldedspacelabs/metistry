@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { parseDecisionBlock } from "@foldedspacelabs/metistry-core";
 import { loadSystemPrompt, parseIdentity, readOverlay, renderPrompt } from "../src/prompt.js";
 
 const seedIdentity = readFileSync(new URL("../../../seed/identity.yaml", import.meta.url), "utf8");
@@ -28,6 +29,12 @@ describe("identity + prompt", () => {
     expect(out).toMatch(/Every read is logged/);
     // the seed prompt file itself carries no name: a renamed instance is a clone, not a rewrite
     expect(seedPrompt).not.toContain(id.name);
+  });
+
+  it("every decision block the seed prompt teaches is one the parser accepts — v1's one question and v2's several (T2-3)", () => {
+    const blocks = [...seedPrompt.matchAll(/```decision\n[\s\S]*?\n```/g)].map((m) => m[0]);
+    expect(blocks).toHaveLength(2);
+    expect(blocks.map((b) => parseDecisionBlock(`the reply\n\n${b}`)?.questions.length)).toEqual([1, 2]);
   });
 
   it("templating: known keys fill (voice may be empty), unknown keys stay visible, name is required", () => {

@@ -563,6 +563,34 @@ describe.skipIf(!hasDb)("the console's compute, knowledge, commands and run-deta
     expect((await (await get(`/api/knowledge/pages?prefix=Areas/${pageTag}&limit=10`)).json()).pages).toHaveLength(2);
   });
 
+  // T1-2: `board` went `expose: route` when it gained `blocked_by_task` — the
+  // text of a line in the owner's own notes, beside its vault path. Nothing
+  // new is served, so this is the door's misuse set pinned for that query:
+  // the owner reads it where the panel and the Mac app always have, and every
+  // other credential is refused the way it is refused a query that does not
+  // exist. The counts, `board_projects`, stay on the generic door.
+  it("serves the board to the owner at the generic door, and to no other credential — the counts stay generic", async () => {
+    const noCredential = await fetch(`${base}/api/q/board`);
+    expect(noCredential.status).toBe(401);
+    expect(await noCredential.json()).toEqual({ error: { code: "unauthenticated", message: "authentication required" } });
+
+    const agent = await get("/api/q/board", { authorization: `Bearer ${agentToken}` });
+    expect(agent.status).toBe(403);
+    expect((await agent.json()).error).toEqual({ code: "forbidden", message: "not granted" });
+
+    // the capture owner token is not the owner: the unknown-query answer, byte for byte
+    const capture = await get("/api/q/board", { authorization: `Bearer ${ownerToken}` });
+    expect(capture.status).toBe(404);
+    expect(await capture.json()).toEqual(await (await get("/api/q/no_such_query_at_all", { authorization: `Bearer ${ownerToken}` })).json());
+    expect((await get("/api/q/board_projects", { authorization: `Bearer ${ownerToken}` })).status).toBe(200);
+
+    for (const headers of [{ authorization: `Bearer ${localOwnerToken}` }, owner()]) {
+      const r = await get("/api/q/board?limit=5", headers);
+      expect(r.status).toBe(200);
+      expect(await r.json()).toMatchObject({ rows: expect.any(Array), as_of: expect.any(String) });
+    }
+  });
+
   it("pages refuses an out-of-range limit, a negative offset and an unusable filter — each by name", async () => {
     for (const [qs, needle] of [
       ["?limit=0", "between 1 and 500"],

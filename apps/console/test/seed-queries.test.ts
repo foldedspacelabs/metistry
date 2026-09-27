@@ -132,7 +132,12 @@ describe("seed queries", () => {
     // `session_detail` (T1-11) is a session's own transcript — the owner's
     // conversation — so it is reachable only through `GET /api/sessions/:id`
     // (T2-17), never the generic door.
+    // `board` (T1-2) carries `blocked_by_task` — the text of the owner's own
+    // todo line — and `blocked_by`, its vault path: the day_work reason
+    // exactly. The owner reads it at `GET /api/q/board` (P4); the counts,
+    // `board_projects`, carry neither and stay generic.
     expect(routeBacked.sort()).toEqual([
+      "board",
       "collector_health",
       "day_work",
       "knowledge_page_links",
@@ -752,7 +757,10 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
   // over-cap queued bundle (blocked, but releasing itself — not a human's
   // problem). If a predicate drifts, exactly one of these lands in the
   // wrong column.
-  const BOARD_ORDER = ["backlog", "assigned", "in_progress", "needs_you", "done", "reported"];
+  //
+  // FIVE columns since T1-2 (C2, C38, C39): Reported folded into Done as the
+  // `reported` flag, and every value is the word its label says.
+  const BOARD_ORDER = ["backlog", "assigned", "in_progress", "blocked", "done"];
 
   it("board buckets one fixture per column, flags what wants a human, and limits PER column", async () => {
     const tag = `boardq-${Date.now()}`;
@@ -787,12 +795,37 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
       JSON.stringify({ work_id: id.done, reports: 0 }),
     ]);
 
-    // one room, on the blocked card — the Needs You card is the one that most
-    // wants somewhere to answer (docs/ops/threads.md)
+    // one room, on the blocked card — the Blocked card is the one that most
+    // wants somewhere to answer (docs/ops/threads.md) — with a root and two
+    // replies, so `thread_count` is the room's MESSAGE count, not 1
     await pool.query(
       `INSERT INTO artifact_comments (id, work_id, body, author_principal, author_kind) VALUES ($1, $2, 'why is this stuck?', 'user', 'human')`,
       [`cmt_${tag}`, id.blocked],
     );
+    for (const [n, who, kind] of [["a", `${tag}-agent`, "agent"], ["b", "user", "human"]] as const) {
+      await pool.query(
+        `INSERT INTO artifact_comments (id, work_id, body, author_principal, author_kind, parent_id) VALUES ($1, $2, 'a reply', $3, $4, $5)`,
+        [`cmt_${tag}_${n}`, id.blocked, who, kind, `cmt_${tag}`],
+      );
+    }
+
+    // blocked-by (§3, ported from day_work): the blocked card waits on an
+    // OPEN human todo, the backlog card names one already ticked, and the
+    // assigned card names a line the index does not have. The ref is the one
+    // spelling `vault:<path>#^<anchor>`.
+    const todo = async (anchor: string, text: string, checked: boolean) =>
+      pool.query(
+        `INSERT INTO vault_tasks (path, task_key, anchor, line_no, text, text_norm, checked, parsed_on, first_seen_on, last_seen_at)
+         VALUES ($1, $2, $2, 3, $3, lower($3), $4, current_date, current_date, now())`,
+        [`Journal/${tag}.md`, anchor, text, checked],
+      );
+    await todo(`mt-${tag}-open`, `${tag} call the plumber`, false); // tagged: other tests count open lines by their text
+    await todo(`mt-${tag}-done`, `${tag} sign the form`, true);
+    const blockOn = (workId: number, anchor: string) =>
+      pool.query(`UPDATE work SET meta = meta || jsonb_build_object('blocked_by', $2::text) WHERE id = $1`, [workId, `vault:Journal/${tag}.md#^${anchor}`]);
+    await blockOn(id.blocked, `mt-${tag}-open`);
+    await blockOn(id.backlog, `mt-${tag}-done`);
+    await blockOn(id.assigned, `mt-${tag}-nowhere`);
 
     const { rows } = await store.run("board", { project: tag, limit: 50 });
     const col = new Map(rows.map((r) => [Number(r.id), r.column]));
@@ -801,10 +834,19 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
     expect(col.get(id.assigned)).toBe("assigned"); // owner set, never claimed — the "assigned but not started" state
     expect(col.get(id.working)).toBe("in_progress");
     expect(col.get(id.interrupted)).toBe("in_progress"); // a lapsed lease is still in_progress on the row; the flag says it stalled
-    expect(col.get(id.blocked)).toBe("needs_you");
-    expect(col.get(id.queued)).toBe("needs_you");
+    expect(col.get(id.blocked)).toBe("blocked");
+    expect(col.get(id.queued)).toBe("blocked");
     expect(col.get(id.done)).toBe("done");
-    expect(col.get(id.reported)).toBe("reported");
+    expect(col.get(id.reported)).toBe("done"); // Reported is a flag on a Done card, not a column (C39)
+    expect(new Set(rows.map((r) => r.column))).toEqual(new Set(BOARD_ORDER)); // five, and only five
+
+    // `reported`: closed AND a report came back. The run with `reports: 0`
+    // leaves its card unflagged — a crew that produced nothing does not look
+    // like one that produced a finding.
+    const flag = new Map(rows.map((r) => [Number(r.id), r.reported]));
+    expect(flag.get(id.reported)).toBe(true);
+    expect(flag.get(id.done)).toBe(false);
+    for (const k of ["backlog", "assigned", "working", "blocked"] as const) expect(flag.get(id[k]), k).toBe(false);
     expect(col.has(id.collected)).toBe(false); // kind `issue` — a collector owns its status, so it has no board state
 
     const esc = new Map(rows.map((r) => [Number(r.id), r.escalated]));
@@ -819,8 +861,20 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
     // has_thread (0016): a card with a room links to it, one without opens its
     // own detail. The panel asks no second endpoint to find that out.
     const thread = new Map(rows.map((r) => [Number(r.id), r.has_thread]));
-    expect(thread.get(id.blocked)).toBe(true); // the room opened below
+    expect(thread.get(id.blocked)).toBe(true); // the room opened above
     expect(thread.get(id.backlog)).toBe(false);
+    const count = new Map(rows.map((r) => [Number(r.id), r.thread_count]));
+    expect(count.get(id.blocked)).toBe(3); // root + two replies — the glyph's number
+    expect(count.get(id.backlog)).toBe(0); // zero, never null: Has Thread filters on it
+
+    // blocked-by, resolved beside the card — the same three answers day_work gives
+    const card = (k: keyof typeof id) => rows.find((r) => Number(r.id) === id[k])!;
+    expect(card("blocked")).toMatchObject({ blocked_by: `vault:Journal/${tag}.md#^mt-${tag}-open`, blocked_by_task: `${tag} call the plumber`, blocked_by_task_open: true });
+    expect(card("backlog")).toMatchObject({ blocked_by_task: `${tag} sign the form`, blocked_by_task_open: false }); // ticked: still named, no longer waiting
+    expect(card("assigned")).toMatchObject({ blocked_by: `vault:Journal/${tag}.md#^mt-${tag}-nowhere`, blocked_by_task: null, blocked_by_task_open: null }); // the ref, with no text
+    expect(card("working")).toMatchObject({ blocked_by: null, blocked_by_task: null, blocked_by_task_open: null });
+    // and it surfaces, never gates: the backlog card is still in Backlog
+    expect(col.get(id.backlog)).toBe("backlog");
 
     const reported = rows.find((r) => Number(r.id) === id.reported)!;
     expect(reported.last_report_at).not.toBeNull();
@@ -835,15 +889,15 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
     expect(seen).toEqual([...seen].sort((a, b) => a - b));
     expect(seen).not.toContain(-1);
 
-    // `limit` is per column, not per result set: backlog, in_progress and
-    // needs_you each hold two fixtures, so limit 1 drops one from each and
+    // `limit` is per column, not per result set: backlog, in_progress,
+    // blocked and done each hold two fixtures, so limit 1 drops one from each and
     // every column still shows its most recent card. A busy column never
     // crowds another out.
     const capped = (await store.run("board", { project: tag, limit: 1 })).rows;
     const counts = new Map<string, number>();
     for (const r of capped) counts.set(String(r.column), (counts.get(String(r.column)) ?? 0) + 1);
     for (const [c, n] of counts) expect(n, c).toBe(1);
-    expect([...counts.keys()].sort()).toEqual([...BOARD_ORDER].sort()); // all six survive
+    expect([...counts.keys()].sort()).toEqual([...BOARD_ORDER].sort()); // all five survive
   });
 
   it("board_projects groups the same predicate by project × column for the cross-project view", async () => {
@@ -857,13 +911,13 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
     );
     const rows = (await store.run("board_projects", { limit: 100000 })).rows.filter((r) => r.project === tag);
     const byCol = new Map(rows.map((r) => [String(r.column), r]));
-    expect([...byCol.keys()].sort()).toEqual(["backlog", "needs_you"]);
+    expect([...byCol.keys()].sort()).toEqual(["backlog", "blocked"]);
     expect(Number(byCol.get("backlog")!.cards)).toBe(2);
     expect(Number(byCol.get("backlog")!.escalations)).toBe(0);
     expect(Number(byCol.get("backlog")!.oldest_age_hours)).toBeGreaterThanOrEqual(10);
-    expect(Number(byCol.get("needs_you")!.cards)).toBe(1);
-    expect(Number(byCol.get("needs_you")!.escalations)).toBe(1); // blocked and not queued — a human has to move it
-    expect(byCol.get("needs_you")!.last_activity).not.toBeNull();
+    expect(Number(byCol.get("blocked")!.cards)).toBe(1);
+    expect(Number(byCol.get("blocked")!.escalations)).toBe(1); // blocked and not queued — a human has to move it
+    expect(byCol.get("blocked")!.last_activity).not.toBeNull();
 
     // the counts must match the cards, or the filter's labels lie
     const cards = (await store.run("board", { project: tag, limit: 50 })).rows;

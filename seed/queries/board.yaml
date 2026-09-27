@@ -1,18 +1,44 @@
 # Seeded default (D4 overlay: an instance file of the same name wins).
 #
 # The board view over `work` (docs/ops/board.md; derived from
-# docs/research/2026-09-12-hermes-agent-review.md §4/§6a). Phase 1 of that
-# note's plan: read-only, no migration, no fifth status value — every column
-# is a CASE over columns that already exist, so the panel never derives a
-# state and MetistryKit renders the same rows with no extra server work.
+# docs/research/2026-09-12-hermes-agent-review.md §4/§6a). Read-only, no
+# migration, no new status value — every column is a CASE over columns that
+# already exist, so the panel never derives a state and MetistryKit renders
+# the same rows with no extra server work.
+#
+# FIVE columns (T1-2; design-build-plan W1/W2, C2 C37 C38 C39). Reported is
+# not a column: whether a report came back is a fact about a closed card, not
+# a place, so it is the `reported` flag on a Done card. And every column's
+# VALUE is the word its label says — `assigned` is Assigned and `blocked` is
+# Blocked — because a label that disagrees with its own value is a bug
+# waiting for someone to fix the wrong side of it (C38). `blocked` was
+# `needs_you` until T1-2: that name belongs to the request queue (C2).
 #
 # Scope: the two kinds the tasks module owns (`task`, `review`). Rows a
 # collector reconciles from a source of truth (issue/pr/event) are visible in
 # `work` but never claimable (packages/tasks CLAIMABLE_KINDS, ruling
 # 2026-09-06), so "assigned" and "in progress" would be lies about them.
 # `open_work` / `projects_overview` remain the view over those.
+#
+# `expose: route` since T1-2 (design-build-plan §2.10: "wherever the owner's
+# route is the only door, so the generic door cannot hand an agent with
+# `queries: true` the owner's data"). `blocked_by_task` is the text of a line
+# the owner typed in their own notes, and `blocked_by` names its vault path —
+# the same two things that make `day_work` route-only. The owner is served at
+# `GET /api/q/board` (P4); an agent's `queries_run` and the capture owner
+# token get the unknown-query answer. The COUNTS stay generic
+# (`board_projects` carries no path and no text).
 name: board
-description: One row per board card over the tasks module's work rows — the derived column (backlog / assigned / in_progress / needs_you / done / reported), who it is addressed to, who holds the lease, age, last report, whether a room hangs on it, and whether it wants a human. Ordered by column, then most recently touched. `limit` applies PER COLUMN, so one busy column never crowds the others out.
+expose: route
+description: >-
+  One row per board card over the tasks module's work rows — the derived
+  column (backlog / assigned / in_progress / blocked / done), whether a
+  closed card's agent reported back, who it is assigned to, who holds the
+  lease, age, last report, the room on it and how many messages it holds,
+  the human todo it waits on (`meta.blocked_by`, resolved to that line's
+  text and whether it is still open), and whether it wants a human. Ordered
+  by column, then most recently touched. `limit` applies PER COLUMN, so one
+  busy column never crowds the others out.
 params:
   project: { type: text, default: "" } # blank = every project; rows with no project appear only in that view
   limit: { type: int, default: 50 } # per column, not per result set
@@ -34,43 +60,49 @@ sql: |
       AND (r.meta->>'reports')::numeric > 0
     GROUP BY 1
   ),
+  -- The room on a card (0016, docs/ops/threads.md) and how many messages it
+  -- holds, root and replies alike — what the thread glyph shows beside
+  -- itself, so the Has Thread filter and the count need no second read
+  -- (screen 16 §3). One room per work row is a unique index, so this is a
+  -- message count, never a thread count across rooms.
+  threads AS (
+    SELECT c.work_id, count(*)::int AS messages
+    FROM artifact_comments c
+    WHERE c.work_id IS NOT NULL
+    GROUP BY 1
+  ),
   carded AS (
     SELECT
       s.id, s.title, s.kind, s.project, s.owner, s.claimed_by, s.lease_expires_at,
       s.external_ref, s.updated_at, s.status, s.due, s.meta,
       rp.last_report_at,
+      -- closed WITH a report from the agent that ran it vs closed with none
+      -- (Hermes note §4.5: "done" and "reported" are not the same card).
+      -- Both are Done; this says which. False on every open card, where a
+      -- report is progress rather than an outcome — `last_report_at` still
+      -- arrives on those.
+      (s.status = 'closed' AND rp.last_report_at IS NOT NULL) AS reported,
       -- the one detail view the console already has for a card: a review
       -- bundle names the artifact it was cut from (handles, never payloads)
       s.meta->'bundle'->>'artifact' AS artifact,
-      -- the room on this card (0016, docs/ops/threads.md). One room per work
-      -- row is a unique index, so this is an existence test, not a count: a
-      -- card with a room opens #/rooms/work/<id>; one without opens its own
-      -- detail. The console never asks a second endpoint to find that out.
-      EXISTS (SELECT 1 FROM artifact_comments c WHERE c.work_id = s.id AND c.parent_id IS NULL) AS has_thread,
+      coalesce(th.messages, 0) AS thread_count,
       round(extract(epoch FROM (now() - s.created_at)) / 3600.0, 1)::float8 AS age_hours,
       CASE
-        -- closed WITH a report from the agent that ran it vs closed with none
-        -- (Hermes note §4.5: "done" and "reported" are not the same card)
-        WHEN s.status = 'closed' AND rp.last_report_at IS NOT NULL THEN 'reported'
         WHEN s.status = 'closed'                                   THEN 'done'
-        -- blocked is the human-gated state: UpdateInput.status is
-        -- Exclude<TaskStatus,'open'>, so nothing in the system can move a
-        -- blocked row forward — only the user's hand (§4.1 of the note)
-        WHEN s.status = 'blocked'                                  THEN 'needs_you'
+        -- blocked is the human-gated state: nothing in the system but the
+        -- user's hand moves a blocked row forward (the unblock is the board
+        -- arm of the task PATCH route, and no agent verb reaches `open`)
+        WHEN s.status = 'blocked'                                  THEN 'blocked'
         WHEN s.status = 'in_progress'                              THEN 'in_progress'
-        -- open and addressed to someone, not yet claimed (claim() sets
-        -- status = 'in_progress' atomically, so open + owner IS the
-        -- "addressed to, not started" column the owner asked for). The VALUE
-        -- stays `assigned` — the label the console renders was renamed to
-        -- "Addressed to" (2026-09-17); the key every drop and `runs` row
-        -- carries did not.
+        -- open and assigned to someone, not yet claimed (claim() sets
+        -- status = 'in_progress' atomically, so open + owner IS "assigned,
+        -- not started"). `owner` stays informational — a name, never a lease.
         WHEN s.owner IS NOT NULL                                   THEN 'assigned'
         ELSE 'backlog'
       END AS "column",
       -- Wants a human. NOT the Hermes note's "a pending decision proposal
-      -- cites the row" — no proposal kind carries a work id (verified against
-      -- every INSERT INTO proposals in the tree), so that join does not
-      -- exist. These three do, on columns the row already has.
+      -- cites the row" — see docs/ops/board.md for why that is still not
+      -- what this means. These three are on columns the row already has.
       (s.status <> 'closed' AND (
          (s.status = 'in_progress' AND s.lease_expires_at IS NOT NULL AND s.lease_expires_at <= now())
          OR (s.status = 'blocked' AND s.meta->'bundle'->>'queued' IS NULL)
@@ -78,15 +110,37 @@ sql: |
       )) AS escalated
     FROM scoped s
     LEFT JOIN reported rp ON rp.work_id = s.id::text
+    LEFT JOIN threads th ON th.work_id = s.id
   ),
   ranked AS (
     SELECT c.*, row_number() OVER (PARTITION BY c."column" ORDER BY c.updated_at DESC, c.id DESC) AS rn
     FROM carded c
+  ),
+  paged AS (
+    SELECT * FROM ranked WHERE rn <= :limit
   )
-  SELECT "column", id, title, kind, project, owner, claimed_by, lease_expires_at,
-         age_hours, last_report_at, escalated, external_ref, artifact, has_thread, status, due::text AS due, updated_at
-  FROM ranked
-  WHERE rn <= :limit
-  ORDER BY array_position(ARRAY['backlog','assigned','in_progress','needs_you','done','reported']::text[], "column"),
-           updated_at DESC, id DESC
+  -- `meta.blocked_by` resolved, ported from day_work.yaml: the ref's spelling
+  -- is fixed — `vault:<path>#^<anchor>` — and it SURFACES, never gates
+  -- (docs/ops/reconciler.md). Resolved after the page is cut, and on the
+  -- (path, anchor) the ref spells rather than on a concatenation, so the
+  -- anchor index answers it for at most five pages of cards. An unresolvable
+  -- ref comes back as the ref with no text rather than as nothing at all.
+  SELECT p."column", p.id, p.title, p.kind, p.project, p.owner, p.claimed_by, p.lease_expires_at,
+         p.age_hours, p.last_report_at, p.reported, p.escalated, p.external_ref, p.artifact,
+         p.thread_count > 0 AS has_thread, p.thread_count,
+         p.meta->>'blocked_by' AS blocked_by,
+         t.text                                                  AS blocked_by_task,
+         CASE WHEN t.path IS NOT NULL THEN NOT t.checked AND NOT t.dropped END AS blocked_by_task_open,
+         p.status, p.due::text AS due, p.updated_at
+  FROM paged p
+  LEFT JOIN LATERAL (
+    SELECT vt.path, vt.text, vt.checked, vt.dropped
+    FROM vault_tasks vt
+    WHERE vt.path   = substring(p.meta->>'blocked_by' from '^vault:(.*)#\^[^#]+$')
+      AND vt.anchor = substring(p.meta->>'blocked_by' from '#\^([^#]+)$')
+    ORDER BY vt.line_no
+    LIMIT 1
+  ) t ON true
+  ORDER BY array_position(ARRAY['backlog','assigned','in_progress','blocked','done']::text[], p."column"),
+           p.updated_at DESC, p.id DESC
 cache_ttl: 0 # a board that lags is a board that lies about who holds the lease

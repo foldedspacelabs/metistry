@@ -1558,6 +1558,12 @@ optional field beside `name`, `description`, `params`, `sql` and `cache_ttl`:
 | `route` | this query has an **endpoint of its own**, and that endpoint does something this door cannot. Asking for it here is the `404` an unknown name gets — **unless you are the owner**, who is served it |
 
 The field exists because of `knowledge_pages` and `knowledge_page_links`.
+It has since spread to every query whose rows carry a vault path beside a line
+of the owner's own notes — `day_work`, the `vault_*` lookups, and `board`
+(T1-2: `blocked_by_task` is the text of the todo a card waits on). For those
+there may be no endpoint of their own at all: the owner reads `board` here,
+where the panel and the Mac app always have, and every other credential gets
+the unknown-query answer. `board_projects`, the counts, stays `generic`.
 `GET /api/knowledge/pages` and `GET /api/knowledge/links` filter every row
 they return through the caller's scope (`canSee` — for a link, at both ends);
 the

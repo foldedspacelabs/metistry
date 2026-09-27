@@ -591,21 +591,21 @@ public struct Board: Codable, Sendable, Equatable {
         self.asOf = asOf
     }
 
-    /// The six columns in the query's own order. The order is the query's
-    /// because a second opinion about it would be a second board.
-    public static let columnOrder = ["backlog", "assigned", "in_progress", "needs_you", "done", "reported"]
+    /// The five columns in the query's own order. The order is the query's
+    /// because a second opinion about it would be a second board. Reported is
+    /// not among them: it is `BoardCard.reported`, a facet of a Done card (C39).
+    public static let columnOrder = ["backlog", "assigned", "in_progress", "blocked", "done"]
 
-    /// Column key → the label the console renders. `assigned` reads
-    /// "Addressed to" since 2026-09-17; the KEY every drop and `runs` row
-    /// carries did not change.
+    /// Column key → the label. Each label is the word its key says (C2, C38):
+    /// a label that disagrees with its own value is a bug waiting for someone
+    /// to fix the wrong side of it, and "Needs You" names the request queue.
     public static func label(for column: String) -> String {
         switch column {
         case "backlog": return "Backlog"
-        case "assigned": return "Addressed to"
-        case "in_progress": return "In progress"
-        case "needs_you": return "Needs you"
+        case "assigned": return "Assigned"
+        case "in_progress": return "In Progress"
+        case "blocked": return "Blocked"
         case "done": return "Done"
-        case "reported": return "Reported"
         default: return column
         }
     }
@@ -641,33 +641,51 @@ public struct BoardCard: Codable, Sendable, Equatable, Identifiable {
     /// `task` or `review`.
     public let kind: String?
     public let project: String?
-    /// Who it is addressed to. Assignment is the human's alone — no agent verb
-    /// has an `owner` key at all.
+    /// Who it is assigned to — a name, never a lease. Assignment is the
+    /// human's alone: no agent verb has an `owner` key at all.
     public let owner: String?
     public let claimedBy: String?
     public let leaseExpiresAt: String?
     public let ageHours: Double?
     public let lastReportAt: String?
+    /// Closed, and the agent that ran it reported back — the Done column's
+    /// facet. False on every open card.
+    public let reported: Bool
     /// Wants a human: an expired lease, a blocked row that is not queued, or a
     /// due date in the past. Three conditions on columns the row already has.
     public let escalated: Bool
     public let externalRef: String?
     /// The artifact a review bundle was cut from — a handle, never a payload.
     public let artifact: String?
-    /// An existence test, not a count: a card with a room opens the room.
+    /// The card has a room — the Has Thread filter.
     public let hasThread: Bool
+    /// The room's message count, root and replies — the number beside the
+    /// thread glyph. Zero when there is no room.
+    public let threadCount: Int
+    /// `meta.blocked_by`: the human todo this card waits on, spelled
+    /// `vault:<path>#^<anchor>`. It surfaces and never gates.
+    public let blockedBy: String?
+    /// That todo's text, when the index has the line; nil when it does not.
+    public let blockedByTask: String?
+    /// Whether that todo is still open — *waiting on you* — or nil when the
+    /// ref resolved to nothing.
+    public let blockedByTaskOpen: Bool?
     public let status: String?
     public let due: String?
     public let updatedAt: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, column, title, kind, project, owner, escalated, artifact, status, due
+        case id, column, title, kind, project, owner, escalated, artifact, status, due, reported
         case claimedBy = "claimed_by"
         case leaseExpiresAt = "lease_expires_at"
         case ageHours = "age_hours"
         case lastReportAt = "last_report_at"
         case externalRef = "external_ref"
         case hasThread = "has_thread"
+        case threadCount = "thread_count"
+        case blockedBy = "blocked_by"
+        case blockedByTask = "blocked_by_task"
+        case blockedByTaskOpen = "blocked_by_task_open"
         case updatedAt = "updated_at"
     }
 
@@ -683,10 +701,15 @@ public struct BoardCard: Codable, Sendable, Equatable, Identifiable {
         leaseExpiresAt = try c.decodeIfPresent(String.self, forKey: .leaseExpiresAt)
         ageHours = c.wireDouble(.ageHours)
         lastReportAt = try c.decodeIfPresent(String.self, forKey: .lastReportAt)
+        reported = try c.decodeIfPresent(Bool.self, forKey: .reported) ?? false
         escalated = try c.decodeIfPresent(Bool.self, forKey: .escalated) ?? false
         externalRef = try c.decodeIfPresent(String.self, forKey: .externalRef)
         artifact = try c.decodeIfPresent(String.self, forKey: .artifact)
         hasThread = try c.decodeIfPresent(Bool.self, forKey: .hasThread) ?? false
+        threadCount = c.wireInt(.threadCount) ?? 0
+        blockedBy = try c.decodeIfPresent(String.self, forKey: .blockedBy)
+        blockedByTask = try c.decodeIfPresent(String.self, forKey: .blockedByTask)
+        blockedByTaskOpen = try c.decodeIfPresent(Bool.self, forKey: .blockedByTaskOpen)
         status = try c.decodeIfPresent(String.self, forKey: .status)
         due = try c.decodeIfPresent(String.self, forKey: .due)
         updatedAt = try c.decodeIfPresent(String.self, forKey: .updatedAt)
@@ -725,12 +748,13 @@ public struct TaskPatch: Sendable, Equatable {
         self.title = title
     }
 
-    /// The drag a board column makes: one status, nothing else.
+    /// The drag a board column makes: one status, nothing else. The column
+    /// keys that are statuses are the statuses' own words, `blocked` included.
     public static func moving(to column: String) -> TaskPatch {
-        TaskPatch(status: column == "needs_you" ? "blocked" : column)
+        TaskPatch(status: column)
     }
 
-    /// Addressing a card to a crew — human-only by the collaboration rule, and
+    /// Assigning a card to a crew — human-only by the collaboration rule, and
     /// `owner` exists on this route and on no agent surface.
     public static func addressing(to owner: String) -> TaskPatch {
         TaskPatch(owner: owner)

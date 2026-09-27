@@ -50,6 +50,24 @@ import { loadVaultSettings, renderVaultSettings, setVaultSettings, VAULT_VERBS }
 import { EXTENSION_VERBS, extensionsAdd, extensionsList, extensionsRemove, parseExtensionVerb, renderExtensions, type ExtensionsOptions } from "./extensions.js";
 import { doctor, renderTable, type DoctorDeps } from "./doctor.js";
 import { VARIABLE_VERBS, parseVariableVerb, renderVariables, variablesList, variablesSet, variablesUnset, type VariablesOptions } from "./variables.js";
+import {
+  CONNECTION_VERBS,
+  afterDoubleDash,
+  connectionsAdd,
+  connectionsList,
+  connectionsPolicy,
+  connectionsRemove,
+  connectionsSet,
+  connectionsShow,
+  connectionsTest,
+  parseConnectionVerb,
+  renderCheck,
+  renderConnectionDetail,
+  renderConnections,
+  renderPolicy,
+  repeatedFlag,
+  type ConnectionsOptions,
+} from "./connections.js";
 import { loadInstallEnv, productVersion, resolveProductDir, resolveSeedDir, type LoadedEnv } from "./env.js";
 import { realExec, type Exec } from "./exec.js";
 import { AUTH_MODES, connectRepo, readStdin, type AuthMode } from "./connect-repo.js";
@@ -124,7 +142,7 @@ export interface ParsedArgs {
  * `--version <x.y.z>` silently installed the latest release instead
  * (#198, "not fixed here" #2).
  */
-export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "dry-run", "allow-dirty", "no-launchd", "no-compose", "no-color", "skip-build", "skip-migrate", "rollback", "allow-legacy", "yes", "follow", "namespace", "rotate", "list", "complete", "skip-test", "remote", "json-lines", "stdio", "named", "clear"]);
+export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "dry-run", "allow-dirty", "no-launchd", "no-compose", "no-color", "skip-build", "skip-migrate", "rollback", "allow-legacy", "yes", "follow", "namespace", "rotate", "list", "complete", "skip-test", "remote", "json-lines", "stdio", "named", "clear", "no-discover"]);
 
 /** The §2.14 verbs over owner-named secrets (M7), and the shared scope's migration (T4-3). `list --named` joins them; `sync|mint|list|purge` are the install's own variables. */
 export const NAMED_SECRET_VERBS = new Set(["set", "replace", "remove", "hosts", "grant", "migrate-scope", "purge-shared"]);
@@ -496,6 +514,37 @@ const USAGE = `metistry — Metistry command line
       references it. "list" prints each value and where it is used (--json:
       the rows GET /api/variables serves). A §4.7 protected path: every write
       goes through the reconciler as the "user" principal.
+
+  metistry connections list [--json] [--instance <dir>]
+  metistry connections show <name> [--json]
+  metistry connections add <name> --type mcp (--url <url> [--auth bearer|api_key
+                           --secret <name> [--auth-header <Header>]] [--header K=V]…
+                         | [--env K=V]… [--runs-on host|container] -- <command> [args…])
+                           [--provider <type>] [--description <text>] [--no-discover] [--dry-run]
+  metistry connections set <name> [--url <url>] [--auth …] [--header K=V]… [--unset-header K]…
+                           [--env K=V]… [--unset-env K]… [--runs-on …] [--description <text>]
+                           [-- <command> [args…]] [--dry-run]
+  metistry connections policy <name> [<tool> allow|ask|never [--group reads|changes|starts_agent]]
+                              [--offer on|off] [--dry-run]
+  metistry connections remove <name> [--dry-run]
+  metistry connections test <name> [--json]
+      Servers Metistry reaches for you (.metistry/connections/<name>.yaml,
+      docs/ops/connections.md): an MCP server by URL or by command. Secrets
+      and variables are written as {{ secret.<name> }} and {{ variable.<name> }}
+      — names, never values; a value that looks like a key is refused. "add"
+      dials it once and lists what it offers: a tool its connection type
+      declares keeps its group, any other is filed under Changes things, and
+      the modes start at Reads Allow, Changes things Ask First, Starts an
+      agent Ask First, offer to agents off (--no-discover writes it without
+      dialling). "policy" prints the tool table, or sets one tool to Allow,
+      Ask First or Never — a tool that is not listed is refused before
+      anything is dialled. "test" dials it and compares what it offers with
+      the file. "remove" deletes it; what referred to it turns absent. A
+      command is given only the environment the file names — never this
+      process's — and a granted secret there is given to that command only.
+      A §4.7 protected path: every write goes through the reconciler as the
+      "user" principal. The console reads the same files at GET
+      /api/connections and never writes them.
 
   metistry runs export [--since <cursor|timestamp>] [--until <timestamp>]
                        [--component <name>] [--limit N] [--json-lines]
@@ -881,6 +930,7 @@ export const HELP_GROUPS: Array<{ title: string; verbs: Array<[string, string]> 
       ["instances list|add|remove|refresh", "the peer registry: which other instances this one knows"],
       ["extensions list|add|remove", "your own units — templates, connection types, targets, overlays"],
       ["variables list|set|unset", "plain shared values agents read — never a secret, never a schedule"],
+      ["connections list|show|add|set|policy|remove|test", "servers Metistry reaches for you, and which of their tools may run"],
     ],
   },
   {
@@ -1630,6 +1680,113 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
         return 0;
       } catch (e) {
         err(`metistry variables ${verb}: ${e instanceof Error ? e.message : String(e)}`);
+        return 1;
+      }
+    }
+    case "connections": {
+      // M13 (plan §2.2, §2.6): where Metistry reaches for the owner. Every
+      // write is a §4.7 protected write through the reconciler as the `user`;
+      // `add` and `test` dial, through the same pool the console uses.
+      const loadedConn = loadEnv();
+      const instanceDir = str(flags, "instance") ?? loadedConn.instanceDir;
+      if (!instanceDir) {
+        err("connections needs the instance repo: pass --instance <dir> or set METISTRY_INSTANCE_DIR (docs/ops/cli.md) — .metistry/connections/ lives there");
+        return 2;
+      }
+      const verb = parseConnectionVerb(positional[0]);
+      if (!verb) {
+        err(`usage: metistry connections ${CONNECTION_VERBS.join(" | ")}   (metistry --help)`);
+        return 2;
+      }
+      // parseArgs appends everything after `--` to the positionals: split it back off
+      const command = afterDoubleDash(argv);
+      const args = command ? positional.slice(0, positional.length - command.length) : positional;
+      let seedDir: string | undefined;
+      try {
+        seedDir = resolveSeedDir(productDir);
+      } catch {
+        seedDir = undefined; // no seed: only the owner's own connection types
+      }
+      const json = flags.json === true;
+      const connOpts: ConnectionsOptions = {
+        instanceDir,
+        instanceId: await readInstanceId(instanceDir),
+        ...(seedDir ? { seedDir } : {}),
+        env: process.env,
+        platform: io.platform ?? process.platform,
+        uid: io.uid ?? (typeof process.getuid === "function" ? process.getuid() : 0),
+        fetchFn: io.fetchFn ?? fetch,
+        ...(io.exec ? { exec: io.exec } : {}),
+        dryRun: flags["dry-run"] === true,
+        // --json is a wire contract (docs/ops/cli.md): progress to stderr
+        out: json ? err : out,
+      };
+      const auth = { auth: str(flags, "auth"), secret: str(flags, "secret"), authHeader: str(flags, "auth-header") };
+      try {
+        if (verb === "list") {
+          const rows = await connectionsList(connOpts);
+          out(json ? JSON.stringify({ connections: rows }, null, 2) : renderConnections(rows));
+          return 0;
+        }
+        if (verb === "show") {
+          const d = await connectionsShow(args[1], connOpts);
+          out(json ? JSON.stringify({ connection: d }, null, 2) : renderConnectionDetail(d));
+          return 0;
+        }
+        if (verb === "test") {
+          const r = await connectionsTest(args[1], connOpts);
+          out(json ? JSON.stringify(r, null, 2) : renderCheck(r));
+          return r.status === "failed" ? 1 : 0;
+        }
+        if (verb === "add") {
+          const r = await connectionsAdd(
+            {
+              name: args[1],
+              type: str(flags, "type"),
+              provider: str(flags, "provider"),
+              url: str(flags, "url"),
+              command,
+              env: repeatedFlag(argv, "env"),
+              headers: repeatedFlag(argv, "header"),
+              runsOn: str(flags, "runs-on"),
+              description: str(flags, "description"),
+              discover: flags["no-discover"] !== true,
+              ...auth,
+            },
+            connOpts,
+          );
+          out(json ? JSON.stringify(r, null, 2) : (r.delivery?.detail ?? ""));
+          return 0;
+        }
+        if (verb === "set") {
+          const r = await connectionsSet(
+            args[1],
+            {
+              url: str(flags, "url"),
+              command,
+              env: repeatedFlag(argv, "env"),
+              unsetEnv: repeatedFlag(argv, "unset-env"),
+              headers: repeatedFlag(argv, "header"),
+              unsetHeaders: repeatedFlag(argv, "unset-header"),
+              runsOn: str(flags, "runs-on"),
+              description: str(flags, "description"),
+              ...auth,
+            },
+            connOpts,
+          );
+          out(json ? JSON.stringify(r, null, 2) : (r.delivery?.detail ?? ""));
+          return 0;
+        }
+        if (verb === "policy") {
+          const r = await connectionsPolicy(args[1], { tool: args[2], mode: args[3], group: str(flags, "group"), offer: str(flags, "offer") }, connOpts);
+          out(json ? JSON.stringify(r, null, 2) : [renderPolicy(r.row), ...(r.delivery ? [r.delivery.detail] : [])].join("\n"));
+          return 0;
+        }
+        const r = await connectionsRemove(args[1], connOpts);
+        out(json ? JSON.stringify(r, null, 2) : r.delivery.detail);
+        return 0;
+      } catch (e) {
+        err(`metistry connections ${verb}: ${e instanceof Error ? e.message : String(e)}`);
         return 1;
       }
     }

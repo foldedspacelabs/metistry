@@ -22,9 +22,9 @@ path.
   *Metistry* on every screen, the Go · Capture · Item menus with every
   shortcut in them, Help ▸ Keyboard Shortcuts, and the Needs You count on the
   Dock. The screens behind the rows are their own tickets; until one lands its
-  detail says so and offers the web app. Needs You, Activity, Chat and Today
-  (the brief, Next Up, Close the Day, and the day's spine and All — "Today"
-  below) have landed.
+  detail says so and offers the web app. Needs You, Today (the brief, Next Up,
+  Close the Day, and the day's spine and All — "Today" below), Chat, Activity,
+  the Usage popover and the capture composer have landed.
 - **Status.** Its own window now (Window ▸ Status), no longer a sidebar row.
   Runs `metistry doctor --json` and renders the rows to the design
   system's §3.13 — grouped by doctor's own `kind`, `absent` shown in absent
@@ -111,7 +111,7 @@ path.
 | `connect-repo --auth token` | it reads the PAT from **stdin**, and the app gives every child an empty stdin on purpose so no verb can hang a progress view waiting for a paste | the wizard shows the option, disabled, with that reason; run it in a terminal |
 | **Minting an enrolment code** | there is no HTTP route that mints one, deliberately — whoever can run the host command already controls Postgres and the vault, so shell access is the root of trust for a first passkey (plan §4.2) — and `metistry enroll` is on the CLI's own "not yet" list | step 6 shows the exact `scripts/enroll.mjs` command and takes the code you paste back |
 | **A QR code** for the phone | nothing in this product renders one yet; `apps/console/scripts/enroll.mjs` says the same about itself ("QR rendering arrives with `packages/cli`"), and an encoder is a dependency nobody has asked for | step 6 shows the enrolment URL, selectable, to type or hand over |
-| **The screens behind the sidebar's rows** | the shell has the rows (T5-2); each screen is its own ticket (T6-1 Today, T6-2 Chat, …), and until it lands the row's detail names the gap and offers the web app. Needs You's list has landed (T5-4a, "The Needs You view" below); one request's body and answers are T5-4b's, and until they land its detail says so. Chat has landed (T6-2, "Chat" below) | the PWA — "Add to Dock" in Safari, or the detail's **Open in Browser** |
+| **The screens behind the rest of the sidebar's rows** | the shell has the rows (T5-2); each screen is its own ticket, and until it lands the row's detail names the gap and offers the web app. Landed in W2, each with its section below: Needs You (T5-4a's list, T5-4b's bodies), Today (T6-1a's spine, T6-1b's brief, Next Up and Close the Day), Chat (T6-2), Activity (T6-3), the Usage popover (T5-6) and the capture composer (T5-5). Still to come: Work ▸, Knowledge, Agents and Scheduled (W3, T6-4…T6-11) | the PWA — "Add to Dock" in Safari, or the detail's **Open in Browser** |
 | **Attachments and live capture in the composer** | New Capture is the text composer (T5-5, "The capture composer" below); the owner held audio and screen capture until the designer's floating action bar returns (#253), and the attachment chip, ⌘⇧A and the window's drop target are not built. The Capture menu's Ask · Note · To-do and Start/Stop Recording stay dimmed for the bar (T8) | the PWA's +, or `metistry console call POST /capture` with `filename` and `content_base64` |
 | **The keep-awake control** (Services) | the model half is shipped — `KeepAwakeSetting` (four values, each with what it costs), `KeepAwakeFacts` (doctor's row) and `deploymentSetKeepAwake` — and the pane is a switch with a radio pair under it, which is the designer's. First run can pass `--keep-awake` and does not ask on its own | a terminal: `metistry deployment set-keep-awake <value> --yes`, or `metistry init --keep-awake <value>` |
 | **An iOS target** | `MetistryKit` is already free of AppKit and of `Process` so it can be shared; there is no iOS target in `Package.swift` | — |

@@ -11,6 +11,9 @@ ticket, and the §2 sections your ticket names** — not the whole plan.
   `git worktree add ../metistry-<id> -b claude/<id>-<slug> origin/main` (use your
   ticket id in lowercase, e.g. `t2-4`). One ticket, one branch, one PR. **Never
   commit to `main`.**
+- **Never `git stash` in a worktree** — the stash is shared across every
+  worktree of the repo, so another agent can pop yours. Make a WIP commit
+  instead and amend or squash it before you push.
 - **Never the live instance.** Do not run a `metistry` verb against the owner's
   instance, do not read its `.metistry/state/.env`, do not connect to its
   console, reconciler or database, and do not use its ports. If a step seems to
@@ -64,9 +67,15 @@ Public text never describes the owner's employment; say *second instance*.
   acceptance evidence (commands and their real output), and anything you noticed
   outside the ticket — then ends with
   `🤖 Generated with [Claude Code](https://claude.com/claude-code)`.
-- **Your ticket's status**: in your PR, set `status: in-review` and `pr: <number>`
-  in your ticket file (those two lines are the only ones you edit there). If you
-  cannot finish, set `status: blocked` and say why in the PR.
+- **Your ticket's status**: in your PR, set `status: in-review` in your ticket
+  file and leave `pr: null` — you push once, so the number is not known yet;
+  the wave's housekeeping PR records every number (`status:` and `pr:` are the
+  only lines you edit there). If you cannot finish, set `status: blocked` and
+  say why in the PR.
+- **A test-only fix that unblocks CI** may ride inside your ticket PR when CI
+  fails for a reason outside your ticket — say so in the PR body, with what
+  failed and why the fix touches tests only. Anything beyond a test is a
+  report, not a fix.
 - **Do not merge.** The coordinator merges after CI and a review agent.
 - **Scope ceiling:** your ticket's files. Report anything important outside it;
   do not act on it.

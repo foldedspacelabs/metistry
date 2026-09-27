@@ -209,6 +209,20 @@ describe("the permissions table: the CLI, the console and MetistryKit print one 
     }
   });
 
+  it("an entry inherited from a project (T4-7) is said 'via project <slug>' — core's words, in the panel", () => {
+    const row: PermissionRow = {
+      resource: { kind: "knowledge" },
+      label: "Knowledge",
+      read: [
+        { key: "Areas/Own", label: "Areas/Own", asks: false, provenance: { kind: "base", source: "registry" } },
+        { key: "Areas/Shared", label: "Areas/Shared", asks: false, provenance: { kind: "project", project: "drey" } },
+      ],
+      write: [],
+    };
+    expect([...permissionRowText(row)]).toEqual(["Knowledge", "Areas/Own, Areas/Shared (via project drey)", "—"]);
+    expect(perms.permissionRowText(row)).toEqual([...permissionRowText(row)]);
+  });
+
   it("says holding nothing, and a console too old to send rows, rather than drawing an empty table", () => {
     expect(perms.permissionsTableHtml([])).toContain("holds nothing");
     expect(perms.permissionsTableHtml(undefined)).toContain("permissions: unavailable");

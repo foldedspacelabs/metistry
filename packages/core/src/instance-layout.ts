@@ -252,7 +252,34 @@ export const USER_OWNED_ROOTS = Object.freeze(["Me"] as const);
  * machine's.
  */
 export const JOURNAL_DIR = "Journal";
-export const JOURNAL_MACHINE_DIRS = Object.freeze(["Plan", "Fold", "Standup"] as const);
+export const JOURNAL_MACHINE_DIRS = Object.freeze(["Plan", "Fold", "Standup", "Brief"] as const);
+
+/**
+ * **The machine folders a ROUTINE writes, and which routine** — owner ruling
+ * (a), W1 (`docs/product/decisions-log.md`): a routine's reserved subfolder is
+ * an ownership fact about the routine, written through the reconciler under
+ * the routine's own principal. `Journal/Fold/` is not here: the fold's file
+ * is the assistant's own write (`knowledge_write`, the fold's pattern), so it
+ * is a machine folder with no routine writer.
+ *
+ * Read by `knowledge_write` (mcp-brain) to keep the assistant out of these
+ * folders except for one thing — filling a pending `prose` slot in a file the
+ * routine already wrote (`fillProseSlots`, prose-slots.ts, C103) — and by
+ * each routine to name its own folder.
+ */
+export const JOURNAL_ROUTINE_DIRS: Readonly<Record<string, string>> = Object.freeze({
+  Plan: "plan-tomorrow",
+  Standup: "standup",
+  Brief: "morning-brief",
+});
+
+/** The routine that owns the folder `rel` is in (`Journal/Brief/2026-09-28.md` → `morning-brief`), or null for any other path. Exact casing, like every vault path. */
+export function journalRoutineOf(rel: string): string | null {
+  if (typeof rel !== "string") return null;
+  const segments = rel.split("/");
+  if (segments.length < 3 || segments[0] !== JOURNAL_DIR) return null;
+  return Object.hasOwn(JOURNAL_ROUTINE_DIRS, segments[1]!) ? JOURNAL_ROUTINE_DIRS[segments[1]!]! : null;
+}
 
 /**
  * **`Me/` and the user's own journal are refused to every principal but the
@@ -267,8 +294,8 @@ export const JOURNAL_MACHINE_DIRS = Object.freeze(["Plan", "Fold", "Standup"] as
  * `may()` at all — a routine's own commit, `intent.principal` something other
  * than `user`.
  *
- * `Journal/Plan/`, `Journal/Fold/` and `Journal/Standup/` are deliberately
- * NOT this: each is a routine's own reserved, one-writer subdirectory
+ * `Journal/Plan/`, `Journal/Fold/`, `Journal/Standup/` and `Journal/Brief/`
+ * are deliberately NOT this: each is a routine's own reserved, one-writer subdirectory
  * (`JOURNAL_MACHINE_DIRS`), and this predicate answers `false` for anything
  * under one of them so those writes are untouched by this rule.
  */

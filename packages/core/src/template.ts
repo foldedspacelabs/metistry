@@ -55,6 +55,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { intEnv } from "./config.js";
+import { PROSE_PENDING, proseMarker } from "./prose-slots.js";
 import { TASK_QUERY_NAME, compileTaskFilter, type TaskFilterParams } from "./task-filter.js";
 import {
   ANCHOR_ALPHABET,
@@ -96,6 +97,21 @@ export const REQUESTS_QUERY = "pending_requests";
  * refuses it every time, at render time, by construction.
  */
 export const FOLD_SOURCE = "knowledge-fold";
+
+/**
+ * Every render `prose` is legal in (C103, ruled 2026-09-25; T3-6): the fold's,
+ * whose file the assistant writes whole, and the two morning routines whose
+ * files are their own — the Morning Brief and the Standup. For those two the
+ * assistant's one turn may fill each pending slot's LINE and nothing else
+ * (`fillProseSlots`, prose-slots.ts, enforced in `knowledge_write`). Every
+ * other writer — `plan-tomorrow`, `user` — still renders the refusal note:
+ * Tomorrow's Plan stays model-free, and the owner's own note is never a
+ * place a model writes.
+ */
+export const PROSE_SOURCES: readonly string[] = Object.freeze([FOLD_SOURCE, "standup", "morning-brief"]);
+
+/** What a `prose` directive renders anywhere else — the §6.4 note in the file, and the `templates check` error. */
+export const PROSE_REFUSAL = "`prose` is only available in the fold's, the Morning Brief's and the Standup's templates (§6.3, C103)";
 
 /**
  * The one `source` that may MATERIALISE a recurring instance (§4, D4): the
@@ -168,6 +184,8 @@ export interface CalendarEvent {
   all_day?: boolean | undefined;
   location?: string | undefined;
   calendar?: string | undefined;
+  /** Attendee NAMES, as the eventkit bridge serves them (A1) — never an address. The Morning Brief's Next Up reads them; no directive renders them. */
+  attendees?: string[] | undefined;
 }
 
 /** The eventkit bridge client, injected. Null is a fact the plan renders (§6.4), never a failed run. */
@@ -941,7 +959,7 @@ export function templateSkip(text: string | null | undefined, maxBytes: number):
 // --- validate -----------------------------------------------------------------
 
 export interface ValidateOptions extends TaskDateOptions {
-  /** When given, `prose` is an ERROR outside a fold template rather than a note (§6.3.3). */
+  /** When given, `prose` is an ERROR outside the `PROSE_SOURCES` renders rather than a note (§6.3.3, C103). */
   source?: string | undefined;
   maxBytes?: number | undefined;
 }
@@ -993,13 +1011,20 @@ export function validateTemplate(text: string, opts: ValidateOptions = {}): Temp
       continue;
     }
     if (call.verb === "prose") {
-      const foldOwned = opts.source === undefined || opts.source === FOLD_SOURCE;
+      // Legal where the output is the fold's or a morning routine's (C103),
+      // said as a note — the slot costs a model turn; unknown writer, a note
+      // saying where it is legal; any other writer, an error found at the
+      // keyboard rather than in tomorrow's file.
+      const legal = opts.source !== undefined && PROSE_SOURCES.includes(opts.source);
+      const unknown = opts.source === undefined;
       findings.push({
         line: call.line,
-        severity: foldOwned ? "note" : "error",
-        message: foldOwned
-          ? "`prose` renders only where the assistant owns the output (`Journal/Fold/`, §6.3)"
-          : `\`prose\` is only available in a fold template (§6.3) — this one renders as \`${opts.source ?? ""}\``,
+        severity: legal || unknown ? "note" : "error",
+        message: legal
+          ? "`prose` is filled on this file's one assistant turn — a model call, with its cost in Usage (§6.3, C103)"
+          : unknown
+            ? "`prose` renders only in the fold's, the Morning Brief's and the Standup's files (§6.3, C103)"
+            : `${PROSE_REFUSAL} — this one renders as \`${opts.source ?? ""}\``,
       });
     }
   }
@@ -1378,14 +1403,15 @@ export function sectionOf(text: string, heading: string): string | null {
 }
 
 function renderProse(call: TemplateDirective, ctx: TemplateContext, dateOpts: TaskDateOptions, proseRequests: ProseRequest[]): Out {
-  if (ctx.source !== FOLD_SOURCE) {
-    // D14, and it is a mechanism rather than a convention: the engine knows
-    // which file it is rendering, `ownershipRefusal` admits exactly one
-    // non-self source, and a routine calls no model (invariant 4).
-    return { markdown: "", filled: false, warning: "`prose` is only available in a fold template (§6.3)" };
+  if (!PROSE_SOURCES.includes(ctx.source)) {
+    // D14 as C103 widened it, and a mechanism rather than a convention: the
+    // engine knows which file it is rendering, and only the fold's and the
+    // two morning routines' files have a turn to fill a slot (a routine calls
+    // no model, invariant 4).
+    return { markdown: "", filled: false, warning: PROSE_REFUSAL };
   }
   const index = proseRequests.length + 1;
-  const marker = `<!-- metistry:prose ${index} -->`;
+  const marker = proseMarker(index);
   proseRequests.push({
     index,
     prompt: call.positional ?? "",
@@ -1393,5 +1419,5 @@ function renderProse(call: TemplateDirective, ctx: TemplateContext, dateOpts: Ta
     marker,
     line: call.line,
   });
-  return { markdown: `${marker} _pending — the fold writes this slot_`, filled: true };
+  return { markdown: `${marker} ${ctx.source === FOLD_SOURCE ? "_pending — the fold writes this slot_" : PROSE_PENDING}`, filled: true };
 }

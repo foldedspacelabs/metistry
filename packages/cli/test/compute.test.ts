@@ -11,10 +11,11 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { parseCompute } from "@foldedspacelabs/metistry-core";
+import { parseCompute, parseSecretsFile } from "@foldedspacelabs/metistry-core";
 import {
   STABLE_PREFIX_HIT_RATIO,
   apiRoot,
+  secretReferenceArg,
   assign,
   cacheReport,
   computeReport,
@@ -29,6 +30,12 @@ import {
   providerTest,
   providersAdd,
   providersRemove,
+  providersSet,
+  parseBilling,
+  parseSwitch,
+  modelsSearch,
+  renderModelsSearch,
+  unassign,
   parseSince,
   readTemplate,
   renderCacheReport,
@@ -99,10 +106,19 @@ function fakeFetch(routes: Record<string, { status?: number; body?: unknown }>) 
 }
 
 const KEY = "sk-or-v1-never-in-argv";
+/** The retired per-user account (C6). Nothing here may read or write it any more (plan §2.14, T4-18). */
 const ACCOUNT = "metistry-test-account";
+/** The instance's own account: its `instance_id`, the one a provider key is filed under. */
+const INSTANCE_ID = "11111111-2222-4333-8444-555555555555";
+/** Where `providers add --from openrouter` files the key: `metistry:secret:<name>` under the instance's account. */
+const OPENROUTER_ITEM = `${INSTANCE_ID}/metistry:secret:openrouter_api_key`;
 
+/** A scratch instance: an identity with an `instance_id` (the Keychain account its secrets are filed under), and nothing else yet. */
 async function instance(): Promise<string> {
-  return await mkdtemp(join(tmpdir(), "metistry-compute-"));
+  const dir = await mkdtemp(join(tmpdir(), "metistry-compute-"));
+  await mkdir(join(dir, ".metistry"), { recursive: true });
+  await writeFile(join(dir, ".metistry", "identity.yaml"), `name: Aide\ninstance_id: "${INSTANCE_ID}"\n`);
+  return dir;
 }
 
 /** Options plus the lines the verb printed. */
@@ -136,7 +152,7 @@ const HANDWRITTEN_CLOUD = `providers:
     kind: openai-compatible
     base_url: https://cloud.example/v1
     locality: off_machine
-    auth: { secret: METISTRY_CLOUD_API_KEY }
+    auth: { secret: "{{ secret.cloud_api_key }}" }
     data_policy: { allow: [Projects], deny_sources: [comms], max_brief_bytes: 65536 }
     pricing: { example-model: { in_per_m: 1, out_per_m: 2 } }
 `;
@@ -179,20 +195,28 @@ describe("providers add", () => {
     expect(lines.join("\n")).not.toContain(KEY);
   });
 
-  it("reads the key from stdin into the USER Keychain account, never into argv or the file", async () => {
+  it("reads the key from stdin into THIS INSTANCE's secret — its own Keychain account, never the per-user one — and writes a reference, never the key", async () => {
     const dir = await instance();
     const kc = fakeSecurity();
     const http = fakeFetch({ "https://openrouter.ai/api/v1/models": { body: { data: [{ id: "anthropic/claude-sonnet-5" }] } } });
-    const { o } = harness(dir, { exec: kc.exec, fetchFn: http.fn, readSecret: async () => `${KEY}\n` });
+    const { o, lines } = harness(dir, { exec: kc.exec, fetchFn: http.fn, readSecret: async () => `${KEY}\n` });
     const r = await providersAdd({ ...o, template: "openrouter" });
 
-    expect(r.secret).toBe("METISTRY_OPENROUTER_API_KEY");
+    expect(r.secret).toBe("{{ secret.openrouter_api_key }}");
     expect(r.secretStatus).toBe("stored");
-    expect(kc.store.get(`${ACCOUNT}/metistry:METISTRY_OPENROUTER_API_KEY`)).toBe(KEY);
+    expect(kc.store.get(OPENROUTER_ITEM)).toBe(KEY);
+    // the retired per-user account is neither read nor written (Q3)
+    expect([...kc.store.keys()].filter((k) => k.startsWith(`${ACCOUNT}/`))).toEqual([]);
+    for (const c of kc.calls) expect(c.args).not.toContain(ACCOUNT);
     for (const c of kc.calls) expect(c.args.join(" ")).not.toContain(KEY); // stdin only
     const text = await readFile(file(dir), "utf8");
-    expect(text).toContain("secret: METISTRY_OPENROUTER_API_KEY");
+    expect(text).toContain("{{ secret.openrouter_api_key }}");
     expect(text).not.toContain(KEY);
+    // its name and policy are in secrets.yaml, as `metistry secrets set` writes them: sent only to the provider's host, granted to no one
+    const policy = parseSecretsFile(await readFile(join(dir, ".metistry", "secrets.yaml"), "utf8")).secrets.openrouter_api_key;
+    expect(policy).toMatchObject({ hosts: ["openrouter.ai"], grants: {} });
+    expect(await readFile(join(dir, ".metistry", "secrets.yaml"), "utf8")).not.toContain(KEY);
+    expect(lines.join("\n")).toContain("METISTRY_SECRET_OPENROUTER_API_KEY"); // where the engine will read it
 
     // and it ends with a real probe, carrying the bearer it just stored
     expect(r.test?.ok).toBe(true);
@@ -208,6 +232,38 @@ describe("providers add", () => {
     await expect(providersAdd({ ...o, template: "lmstudio", skipTest: true })).rejects.toThrow(/already declares provider lmstudio/);
     await expect(providersAdd({ ...o, template: "lmstudio", name: "LM Studio", skipTest: true })).rejects.toThrow(/--name/);
     await expect(providersAdd({ ...o, template: "openrouter", secret: KEY, skipTest: true })).rejects.toThrow(/never the key itself/);
+  });
+
+  it("--secret takes a secret's name, {{ secret.<name> }} or env:<NAME> — a pasted key is refused without echoing any of it, and the retired UPPER name with the one it became", async () => {
+    expect(secretReferenceArg("openrouter_key")).toBe("{{ secret.openrouter_key }}");
+    expect(secretReferenceArg("{{secret.openrouter_key}}")).toBe("{{ secret.openrouter_key }}");
+    expect(secretReferenceArg("env:METISTRY_BRIDGE_TOKEN_APPLE_FM")).toBe("env:METISTRY_BRIDGE_TOKEN_APPLE_FM");
+    expect(() => secretReferenceArg("METISTRY_OPENROUTER_API_KEY")).toThrow(/per instance now.*openrouter_api_key|openrouter_api_key.*per instance now/s);
+    try {
+      secretReferenceArg(KEY);
+      expect.unreachable();
+    } catch (e) {
+      const m = (e as Error).message;
+      expect(m).toContain("never the key itself");
+      expect(m).not.toContain(KEY.slice(0, 5)); // not even a prefix of what was typed
+    }
+  });
+
+  it("a key this instance already holds is not asked for again, and an instance with no instance_id is refused before anything is asked or written", async () => {
+    const dir = await instance();
+    const kc = fakeSecurity({ [OPENROUTER_ITEM]: KEY });
+    let asked = 0;
+    const { o } = harness(dir, { exec: kc.exec, readSecret: async () => ((asked += 1), "other") });
+    const r = await providersAdd({ ...o, template: "openrouter", skipTest: true });
+    expect(r.secretStatus).toBe("present");
+    expect(asked).toBe(0);
+    expect(kc.store.get(OPENROUTER_ITEM)).toBe(KEY);
+
+    const bare = await mkdtemp(join(tmpdir(), "metistry-compute-noid-"));
+    const { o: o2 } = harness(bare, { exec: fakeSecurity().exec, readSecret: async () => ((asked += 1), KEY) });
+    await expect(providersAdd({ ...o2, template: "openrouter", skipTest: true })).rejects.toThrow(/no instance_id/);
+    expect(asked).toBe(0);
+    expect(existsSync(file(bare))).toBe(false);
   });
 
   it("--name and --base-url rewrite the template block", async () => {
@@ -329,7 +385,7 @@ describe("assign / budget: the file is edited in place and never left invalid", 
 
   it("warns, never blocks, on an off_machine provider that does not claim ZDR (C13)", async () => {
     const dir = await instance();
-    const kc = fakeSecurity({ [`${ACCOUNT}/metistry:METISTRY_CLOUD_API_KEY`]: KEY });
+    const kc = fakeSecurity({ [`${INSTANCE_ID}/metistry:secret:cloud_api_key`]: KEY });
     const { o, lines } = harness(dir, { exec: kc.exec });
     await writeFile(file(await withMetistryDir(dir)), HANDWRITTEN_CLOUD);
     await assign({ ...o, target: parseAssignmentTarget("default"), model: "cloud/example-model" });
@@ -372,7 +428,7 @@ describe("assign / budget: the file is edited in place and never left invalid", 
 describe("test / models list: live probes through the one seam", () => {
   it("carries the bearer, reports the model count, and fails a 401 without printing the key", async () => {
     const dir = await instance();
-    const kc = fakeSecurity({ [`${ACCOUNT}/metistry:METISTRY_OPENROUTER_API_KEY`]: KEY });
+    const kc = fakeSecurity({ [OPENROUTER_ITEM]: KEY });
     const http = fakeFetch({ "https://openrouter.ai/api/v1/models": { status: 401, body: { error: "no" } } });
     const { o } = harness(dir, { exec: kc.exec, fetchFn: http.fn });
     await providersAdd({ ...o, template: "openrouter", skipTest: true });
@@ -385,7 +441,7 @@ describe("test / models list: live probes through the one seam", () => {
 
   it("--complete makes one real one-token call on an assigned model, with the provider's request block", async () => {
     const dir = await instance();
-    const kc = fakeSecurity({ [`${ACCOUNT}/metistry:METISTRY_OPENROUTER_API_KEY`]: KEY });
+    const kc = fakeSecurity({ [OPENROUTER_ITEM]: KEY });
     const http = fakeFetch({
       "https://openrouter.ai/api/v1/models": { body: { data: [{ id: "z" }, { id: "anthropic/claude-sonnet-5" }] } },
       "https://openrouter.ai/api/v1/chat/completions": { body: { choices: [] } },
@@ -401,7 +457,7 @@ describe("test / models list: live probes through the one seam", () => {
 
   it("with nothing assigned, --complete picks the bake-off's own shortlist model, not the alphabetically-first one from a 447-model catalogue (the bug this fixes)", async () => {
     const dir = await instance();
-    const kc = fakeSecurity({ [`${ACCOUNT}/metistry:METISTRY_OPENROUTER_API_KEY`]: KEY });
+    const kc = fakeSecurity({ [OPENROUTER_ITEM]: KEY });
     const http = fakeFetch({
       "https://openrouter.ai/api/v1/models": { body: { data: [{ id: "aion-labs/aion-2.0" }, { id: "anthropic/claude-sonnet-5" }, { id: "zzz/z" }] } },
       "https://openrouter.ai/api/v1/chat/completions": { status: 404, body: { error: "no route" } },
@@ -424,7 +480,7 @@ describe("test / models list: live probes through the one seam", () => {
 
   it("--model overrides the automatic choice, even over an existing assignment", async () => {
     const dir = await instance();
-    const kc = fakeSecurity({ [`${ACCOUNT}/metistry:METISTRY_OPENROUTER_API_KEY`]: KEY });
+    const kc = fakeSecurity({ [OPENROUTER_ITEM]: KEY });
     const http = fakeFetch({
       "https://openrouter.ai/api/v1/models": { body: { data: [{ id: "anthropic/claude-sonnet-5" }, { id: "z" }] } },
       "https://openrouter.ai/api/v1/chat/completions": { body: { choices: [] } },
@@ -438,7 +494,7 @@ describe("test / models list: live probes through the one seam", () => {
 
   it("falls back to OpenRouter's own auto-router when nothing is assigned and the shortlist model is not served", async () => {
     const dir = await instance();
-    const kc = fakeSecurity({ [`${ACCOUNT}/metistry:METISTRY_OPENROUTER_API_KEY`]: KEY });
+    const kc = fakeSecurity({ [OPENROUTER_ITEM]: KEY });
     const http = fakeFetch({
       "https://openrouter.ai/api/v1/models": { body: { data: [{ id: "aion-labs/aion-2.0" }, { id: "openrouter/auto" }] } },
       "https://openrouter.ai/api/v1/chat/completions": { body: { choices: [] } },
@@ -470,7 +526,7 @@ describe("test / models list: live probes through the one seam", () => {
     const { o } = harness(dir, { exec: kc.exec, fetchFn: fakeFetch({}).fn });
     await providersAdd({ ...o, template: "openrouter", skipTest: true, readSecret: async () => KEY });
     kc.store.clear();
-    await expect(providerTest({ ...o, name: "openrouter" })).rejects.toThrow(/METISTRY_OPENROUTER_API_KEY, which is not in the login Keychain/);
+    await expect(providerTest({ ...o, name: "openrouter" })).rejects.toThrow(/\{\{ secret\.openrouter_api_key \}\}, and this instance has no secret openrouter_api_key/);
     await expect(providerTest({ ...o, name: "nope" })).rejects.toThrow(/providers\.nope is not declared/);
   });
 
@@ -599,10 +655,178 @@ describe("models install", () => {
   });
 });
 
+describe("providers set — the gear and the switch (T4-18)", () => {
+  const TWO = `# the owner's own comment
+providers:
+  lmstudio: { kind: openai-compatible, base_url: "http://127.0.0.1:1234/v1", locality: on_machine }
+  ollama: { kind: openai-compatible, base_url: "http://127.0.0.1:11434/v1", locality: on_machine }
+${""}  cloud:
+    kind: openai-compatible
+    base_url: https://cloud.example/v1
+    locality: off_machine
+    data_policy: { allow: [Projects], deny_sources: [comms], max_brief_bytes: 65536 }
+assignments:
+  default: { model: lmstudio/a }
+`;
+
+  it("switches a provider off and on, sets billing, the base URL and which secret its key is — keeping every comment", async () => {
+    const dir = await instance();
+    await writeFile(file(dir), TWO);
+    const { o, lines } = harness(dir, { platform: "linux" });
+    const off = await providersSet({ ...o, name: "ollama", enabled: false });
+    expect(off.changed).toEqual(["enabled"]);
+    expect(await readFile(file(dir), "utf8")).toContain("enabled: false");
+    expect(lines.join("\n")).toContain("neither searched nor offered");
+    await providersSet({ ...o, name: "ollama", enabled: true });
+    expect(await readFile(file(dir), "utf8")).not.toContain("enabled:"); // on is the absence of the key, the shape every older file has
+
+    const r = await providersSet({ ...o, name: "cloud", billing: "subscription", baseUrl: "https://cloud.example/api/v1", secret: "cloud_key" });
+    expect(r.changed).toEqual(["billing", "base_url", "auth.secret"]);
+    expect(r.provider).toMatchObject({ billing: "subscription", base_url: "https://cloud.example/api/v1", auth: { secret: "{{ secret.cloud_key }}" } });
+    const text = await readFile(file(dir), "utf8");
+    expect(text).toContain("# the owner's own comment");
+    expect(text).toContain("{{ secret.cloud_key }}");
+    expect(lines.join("\n")).toContain("this instance has no secret cloud_key yet");
+    expect((await computeReport(o)).providers.find((p) => p.name === "cloud")).toMatchObject({ tag: "subscription", billing: "subscription", secret_present: false });
+  });
+
+  it("refuses to switch off a provider an assignment names — the schema names the field — and writes nothing", async () => {
+    const dir = await instance();
+    await writeFile(file(dir), TWO);
+    const { o } = harness(dir, { platform: "linux" });
+    await expect(providersSet({ ...o, name: "lmstudio", enabled: false })).rejects.toThrow(/assignments\.default\.model: providers\.lmstudio is switched off/);
+    expect(await readFile(file(dir), "utf8")).toBe(TWO);
+  });
+
+  it("refuses billing on a local server, a provider that is not there, a pasted key, and a run that changes nothing", async () => {
+    const dir = await instance();
+    await writeFile(file(dir), TWO);
+    const { o } = harness(dir, { platform: "linux" });
+    await expect(providersSet({ ...o, name: "lmstudio", billing: "subscription" })).rejects.toThrow(/providers\.lmstudio\.billing/);
+    await expect(providersSet({ ...o, name: "nope", enabled: false })).rejects.toThrow(/does not declare a provider called nope/);
+    await expect(providersSet({ ...o, name: "cloud", secret: KEY })).rejects.toThrow(/never the key itself/);
+    await expect(providersSet({ ...o, name: "cloud" })).rejects.toThrow(/say what to change/);
+    expect(await readFile(file(dir), "utf8")).toBe(TWO);
+    expect(() => parseSwitch("maybe")).toThrow(/on or off/);
+    expect(() => parseBilling("monthly")).toThrow(/token or subscription/);
+  });
+});
+
+describe("unassign — tiers are editable (Q1)", () => {
+  it("removes a tier and a crew, keeps comments, and refuses default and a target that is not there", async () => {
+    const dir = await instance();
+    const { o, lines } = harness(dir, { platform: "linux" });
+    await providersAdd({ ...o, template: "lmstudio", skipTest: true });
+    await assign({ ...o, target: parseAssignmentTarget("default"), model: "lmstudio/a" });
+    await assign({ ...o, target: parseAssignmentTarget("deep"), model: "lmstudio/b", effort: "high" });
+    await assign({ ...o, target: parseAssignmentTarget("crew:researcher"), model: "lmstudio/b" });
+    const r = await unassign({ ...o, target: parseAssignmentTarget("deep") });
+    expect(r.target).toBe("assignments.tiers.deep");
+    expect(lines.join("\n")).toContain("a turn that names deep");
+    await unassign({ ...o, target: parseAssignmentTarget("crew:researcher") });
+    const cfg = parseCompute(await readFile(file(dir), "utf8"));
+    expect(cfg.assignments?.tiers).toEqual({});
+    expect(cfg.assignments?.crews).toEqual({});
+    expect(cfg.assignments?.default.model).toBe("lmstudio/a");
+    await expect(unassign({ ...o, target: parseAssignmentTarget("default") })).rejects.toThrow(/cannot be removed/);
+    await expect(unassign({ ...o, target: parseAssignmentTarget("deep") })).rejects.toThrow(/not assigned/);
+  });
+});
+
+describe("models search — one model, several places (C131)", () => {
+  const CATALOGUE = `providers:
+  openrouter:
+    kind: openai-compatible
+    base_url: https://openrouter.ai/api/v1
+    locality: off_machine
+    auth: { secret: "{{ secret.openrouter_api_key }}" }
+    zdr: true
+    data_policy: { allow: [Projects], deny_sources: [comms], max_brief_bytes: 65536 }
+  groq:
+    kind: openai-compatible
+    base_url: https://groq.example/openai/v1
+    locality: off_machine
+    data_policy: { allow: [Projects], deny_sources: [comms], max_brief_bytes: 65536 }
+    pricing: { llama-3.3-70b-versatile: { in_per_m: 0.59, out_per_m: 0.79 } }
+  ollama: { kind: openai-compatible, base_url: "http://127.0.0.1:11434/v1", locality: on_machine }
+  lmstudio: { kind: openai-compatible, base_url: "http://127.0.0.1:1234/v1", locality: on_machine, enabled: false }
+`;
+  const LISTINGS = {
+    "https://openrouter.ai/api/v1/models": {
+      body: {
+        data: [
+          { id: "meta-llama/llama-3.3-70b-instruct", name: "Meta: Llama 3.3 70B Instruct", context_length: 131072, pricing: { prompt: "0.00000013", completion: "0.0000004" }, supported_parameters: ["tools"] },
+          { id: "acme/mystery-7b", name: "Acme: Mystery 7B", context_length: 32768, pricing: { prompt: "-1", completion: "-1" } },
+        ],
+      },
+    },
+    "https://groq.example/openai/v1/models": { body: { data: [{ id: "llama-3.3-70b-versatile" }, { id: "acme/mystery-7b" }] } },
+    "http://127.0.0.1:11434/v1/models": { body: { data: [{ id: "llama3.3:70b" }] } },
+  };
+
+  it("groups every switched-on provider's listing by model, prices each place from the listing or pricing:, and never dials a switched-off one", async () => {
+    const dir = await instance();
+    await writeFile(file(dir), CATALOGUE);
+    const kc = fakeSecurity({ [OPENROUTER_ITEM]: KEY });
+    const http = fakeFetch(LISTINGS);
+    const { o } = harness(dir, { exec: kc.exec, fetchFn: http.fn });
+    const r = await modelsSearch({ ...o, query: "llama" });
+    expect(r.skipped).toEqual([{ name: "lmstudio", why: expect.stringContaining("switched off") }]);
+    expect(http.calls.some((c) => c.url.includes(":1234"))).toBe(false);
+    expect(r.rows).toHaveLength(1);
+    const [row] = r.rows;
+    expect(row).toMatchObject({ kind: "model", key: "llama-3.3-70b", name: "Llama 3.3 70B", maker: "Meta", context: 131072 });
+    expect(row!.places.map((p) => [p.ref, p.in_per_m, p.price_source, p.cheapest])).toEqual([
+      ["ollama/llama3.3:70b", null, null, false],
+      ["openrouter/meta-llama/llama-3.3-70b-instruct", 0.13, "listing", true],
+      ["groq/llama-3.3-70b-versatile", 0.59, "pricing", false],
+    ]);
+    // the listing carried the key the Keychain holds, never the per-user account
+    expect((http.calls.find((c) => c.url.startsWith("https://openrouter.ai"))?.init?.headers as Record<string, string>).authorization).toBe(`Bearer ${KEY}`);
+    expect(JSON.stringify(r)).not.toContain(KEY);
+  });
+
+  it("**unmapped ids stay separate rows** — the same unknown id on two providers is two rows, a router's '-1' price is no price", async () => {
+    const dir = await instance();
+    await writeFile(file(dir), CATALOGUE);
+    const { o } = harness(dir, { exec: fakeSecurity({ [OPENROUTER_ITEM]: KEY }).exec, fetchFn: fakeFetch(LISTINGS).fn });
+    const r = await modelsSearch({ ...o, query: "mystery" });
+    expect(r.rows.map((x) => x.key).sort()).toEqual(["groq/acme/mystery-7b", "openrouter/acme/mystery-7b"]);
+    const or = r.rows.find((x) => x.key === "openrouter/acme/mystery-7b")!;
+    expect(or).toMatchObject({ kind: "unmapped", name: "Acme: Mystery 7B", context: 32768 });
+    expect(or.places[0]).toMatchObject({ in_per_m: null, cheapest: false });
+  });
+
+  it("the instance's own model-identities.yaml overlays the product's by key", async () => {
+    const dir = await instance();
+    await writeFile(file(dir), CATALOGUE);
+    await writeFile(join(dir, ".metistry", "model-identities.yaml"), `schema: 1\nmodels:\n  mystery-7b: { name: Mystery 7B, maker: Acme, ids: [acme/mystery-7b] }\n`);
+    const { o } = harness(dir, { exec: fakeSecurity({ [OPENROUTER_ITEM]: KEY }).exec, fetchFn: fakeFetch(LISTINGS).fn });
+    const r = await modelsSearch({ ...o, query: "mystery" });
+    expect(r.rows).toHaveLength(1);
+    expect(r.rows[0]).toMatchObject({ kind: "model", key: "mystery-7b", maker: "Acme" });
+    expect(r.rows[0]!.places.map((p) => p.provider).sort()).toEqual(["groq", "openrouter"]);
+  });
+
+  it("a listing it could not read is reported on its provider's line, and the search goes on", async () => {
+    const dir = await instance();
+    await writeFile(file(dir), CATALOGUE);
+    const { o } = harness(dir, { exec: fakeSecurity().exec, fetchFn: fakeFetch(LISTINGS).fn });
+    const r = await modelsSearch({ ...o });
+    const or = r.providers.find((p) => p.name === "openrouter")!;
+    expect(or.ok).toBe(false);
+    expect(or.detail).toContain("this instance has no secret openrouter_api_key");
+    expect(r.providers.find((p) => p.name === "groq")).toMatchObject({ ok: true, count: 2 });
+    const text = strip(renderModelsSearch(r, createUi({ env: {} })));
+    expect(text).toContain("Llama 3.3 70B");
+    expect(text).toContain("groq/llama-3.3-70b-versatile  cloud  $0.59 in / $0.79 out per M");
+  });
+});
+
 describe("show", () => {
   it("reports the overlay, secret PRESENCE (never a value), assignments and the non-ZDR warning", async () => {
     const dir = await instance();
-    const kc = fakeSecurity({ [`${ACCOUNT}/metistry:METISTRY_CLOUD_API_KEY`]: KEY });
+    const kc = fakeSecurity({ [`${INSTANCE_ID}/metistry:secret:cloud_api_key`]: KEY });
     const { o } = harness(dir, { exec: kc.exec });
     const empty = await computeReport(o);
     expect(empty.assigns_nothing).toBe(true);
@@ -621,12 +845,12 @@ describe("show", () => {
     const r = await computeReport(o);
     expect(r.file).toBe(file(dir));
     expect(r.files).toEqual([join(SEED, "compute.yaml"), file(dir)]); // seed first, the instance's own last
-    expect(r.providers[0]).toMatchObject({ name: "cloud", secret: "METISTRY_CLOUD_API_KEY", secret_present: true, models_assigned: ["example-model"] });
+    expect(r.providers[0]).toMatchObject({ name: "cloud", enabled: true, tag: "cloud", secret: "{{ secret.cloud_api_key }}", secret_kind: "secret", secret_name: "cloud_api_key", secret_present: true, models_assigned: ["example-model"] });
     expect(r.assignments.map((a) => a.target)).toEqual(["default", "deep"]);
     expect(r.assignments[1]).toMatchObject({ target: "deep", provider: "cloud", effort: "high", warn_non_zdr: true });
     expect(r.instance_budget).toMatchObject({ monthly_usd: 60, action: "stop" });
     const text = renderComputeReport(r);
-    expect(text).toContain("METISTRY_CLOUD_API_KEY (in Keychain)");
+    expect(text).toContain("{{ secret.cloud_api_key }} (in Keychain)");
     expect(text).not.toContain(KEY);
     expect(text).toContain("The engine dials these providers and enforces every budget above");
     expect(JSON.stringify(r)).not.toContain(KEY);
@@ -634,10 +858,10 @@ describe("show", () => {
 });
 
 describe("metistry compute (the command)", () => {
-  const run = async (args: string[], exec?: Exec) => {
+  const run = async (args: string[], exec?: Exec, fetchFn?: typeof fetch) => {
     const out: string[] = [];
     const err: string[] = [];
-    const code = await main(args, { out: (s) => out.push(s), err: (s) => err.push(s), platform: "linux", uid: 501, ...(exec ? { exec } : {}) });
+    const code = await main(args, { out: (s) => out.push(s), err: (s) => err.push(s), platform: "linux", uid: 501, ...(exec ? { exec } : {}), ...(fetchFn ? { fetchFn } : {}) });
     return { code, out: out.join("\n"), err: err.join("\n") };
   };
 
@@ -702,6 +926,39 @@ describe("metistry compute (the command)", () => {
     const r = await run(["compute", "assign", "deep", "openrouter/anthropic/claude-sonnet-5", ...P]);
     expect(r.code).toBe(1);
     expect(r.err).toContain("assignments.tiers.deep.model");
+  });
+
+  it("providers set, unassign and models search through the command: each lands in the instance's file, and a bare switch is a usage error", async () => {
+    const dir = await instance();
+    const P = ["--instance", dir, "--product-dir", REPO];
+    expect((await run(["compute", "providers", "add", "--from", "lmstudio", "--skip-test", ...P])).code).toBe(0);
+    expect((await run(["compute", "providers", "add", "--from", "ollama", "--skip-test", ...P])).code).toBe(0);
+    expect((await run(["compute", "assign", "default", "lmstudio/a", ...P])).code).toBe(0);
+    expect((await run(["compute", "assign", "deep", "lmstudio/a", ...P])).code).toBe(0);
+
+    const set = await run(["compute", "providers", "set", "ollama", "--enabled", "off", "--json", ...P]);
+    expect(set.code).toBe(0);
+    expect(JSON.parse(set.out)).toMatchObject({ name: "ollama", changed: ["enabled"] });
+    expect(await readFile(file(dir), "utf8")).toContain("enabled: false");
+    // the switch refuses what would leave an assignment on a provider that is off
+    const refused = await run(["compute", "providers", "set", "lmstudio", "--enabled", "off", ...P]);
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain("assignments.default.model");
+    expect((await run(["compute", "providers", "set", "ollama", "--enabled", ...P])).code).toBe(2);
+    expect((await run(["compute", "providers", "set", "ollama", "--enabled", "maybe", ...P])).code).toBe(1);
+
+    expect((await run(["compute", "unassign", "deep", ...P])).code).toBe(0);
+    expect(parseCompute(await readFile(file(dir), "utf8")).assignments?.tiers).toEqual({});
+    expect((await run(["compute", "unassign", "default", ...P])).code).toBe(1);
+
+    // a fake listing, never a real local server; the switched-off ollama is not dialled at all
+    const http = fakeFetch({ "http://127.0.0.1:1234/v1/models": { body: { data: [{ id: "google/gemma-3-4b" }, { id: "acme/other" }] } } });
+    const search = await run(["compute", "models", "search", "gemma", "--json", ...P], undefined, http.fn);
+    expect(search.code).toBe(0);
+    const doc = JSON.parse(search.out);
+    expect(doc).toMatchObject({ query: "gemma", skipped: [{ name: "ollama" }], providers: [{ name: "lmstudio", ok: true, count: 2 }] });
+    expect(doc.rows).toEqual([expect.objectContaining({ kind: "model", key: "gemma-3-4b", places: [expect.objectContaining({ ref: "lmstudio/google/gemma-3-4b" })] })]);
+    expect(http.calls.map((c) => c.url)).toEqual(["http://127.0.0.1:1234/v1/models"]);
   });
 
   it("--dry-run prints the plan and writes nothing", async () => {

@@ -24,6 +24,14 @@ import {
   resolveTier,
   servedProviders,
   collectorProviderIssue,
+  credentialEnvNames,
+  credentialFromEnv,
+  credentialOf,
+  engineStatus,
+  providerSecretNames,
+  providerTag,
+  resolveCrewAssignment,
+  SECRET_DELIVERY_PREFIX,
   startComputeWatch,
   validateCompute,
   type ReadFile,
@@ -622,5 +630,153 @@ assignments:
       assignments: { default: { model: "ollama/a" }, intent: { model: "ollama/a", effort: "low" } },
     });
     expect(r.ok).toBe(false);
+  });
+});
+
+// ---- T4-18: keys as secret references, the switch, billing ------------------------
+
+const CLOUD = (auth: string, extra = "") => `
+providers:
+  openrouter:
+    kind: openai-compatible
+    base_url: https://openrouter.ai/api/v1
+    locality: off_machine
+    auth: { secret: ${JSON.stringify(auth)} }
+    data_policy: { allow: [Areas], deny_sources: [], max_brief_bytes: 1024 }${extra}
+assignments:
+  default: { model: openrouter/anthropic/claude-sonnet-5 }
+`;
+
+describe("auth.secret is a reference (plan §2.14, T4-18)", () => {
+  it("takes {{ secret.<name> }} — one of this instance's secrets", () => {
+    const cfg = parseCompute(CLOUD("{{ secret.openrouter_api_key }}"));
+    expect(credentialOf(cfg.providers.openrouter!.auth!.secret)).toEqual({ kind: "secret", name: "openrouter_api_key", ref: "{{ secret.openrouter_api_key }}" });
+  });
+
+  it("takes env:NAME and, so every file written before it still loads, the bare NAME — both an install variable", () => {
+    expect(credentialOf("env:METISTRY_BRIDGE_TOKEN_APPLE_FM")).toMatchObject({ kind: "env", name: "METISTRY_BRIDGE_TOKEN_APPLE_FM", legacy: false });
+    expect(credentialOf("METISTRY_OPENROUTER_API_KEY")).toMatchObject({ kind: "env", name: "METISTRY_OPENROUTER_API_KEY", legacy: true });
+    expect(parseCompute(CLOUD("env:METISTRY_KEY")).providers.openrouter?.auth?.secret).toBe("env:METISTRY_KEY");
+    expect(parseCompute(CLOUD("METISTRY_OPENROUTER_API_KEY")).providers.openrouter?.auth?.secret).toBe("METISTRY_OPENROUTER_API_KEY");
+  });
+
+  it("refuses a pasted key, a malformed reference and a lowercase bare name — each naming the field and the two spellings", () => {
+    for (const bad of ["sk-or-v1-deadbeef", "{{ secret.Bad-Name }}", "{{ secrets.x }}", "openrouter_api_key", "env:lower"]) {
+      const m = why(CLOUD(bad));
+      expect(m, bad).toContain("providers.openrouter.auth.secret");
+      expect(m, bad).toContain("{{ secret.<name> }}");
+      expect(m, bad).toContain("never the key itself");
+    }
+  });
+
+  it("a named secret reaches a service as METISTRY_SECRET_<NAME> — a namespace no install variable is in", () => {
+    const c = credentialOf("{{ secret.db_password }}")!;
+    expect(credentialEnvNames(c)).toEqual([`${SECRET_DELIVERY_PREFIX}DB_PASSWORD`]);
+    // the install's own database password is NOT this secret, whatever the names say
+    expect(credentialFromEnv(c, { METISTRY_DB_PASSWORD: "the-db-one" })).toBeUndefined();
+    expect(credentialFromEnv(c, { METISTRY_SECRET_DB_PASSWORD: "the-named-one" })).toBe("the-named-one");
+  });
+
+  it("for one release a *_api_key secret also answers to the line T4-3 filled from it — a running engine keeps its key across migrate-scope's rewrite", () => {
+    const c = credentialOf("{{ secret.openrouter_api_key }}")!;
+    expect(credentialEnvNames(c)).toEqual(["METISTRY_SECRET_OPENROUTER_API_KEY", "METISTRY_OPENROUTER_API_KEY"]);
+    expect(credentialFromEnv(c, { METISTRY_OPENROUTER_API_KEY: "old-line" })).toBe("old-line");
+    expect(credentialFromEnv(c, { METISTRY_OPENROUTER_API_KEY: "old-line", METISTRY_SECRET_OPENROUTER_API_KEY: "new-line" })).toBe("new-line");
+    // never a fallback that would spell ANOTHER secret's delivery variable
+    expect(credentialEnvNames(credentialOf("{{ secret.secret_x_api_key }}")!)).toEqual(["METISTRY_SECRET_SECRET_X_API_KEY"]);
+    // and nothing for a name that was never a provider credential
+    expect(credentialEnvNames(credentialOf("{{ secret.github_write }}")!)).toEqual(["METISTRY_SECRET_GITHUB_WRITE"]);
+  });
+
+  it("an env reference is read from the variable it names, and a blank value is no value", () => {
+    const c = credentialOf("env:METISTRY_BRIDGE_TOKEN_APPLE_FM")!;
+    expect(credentialFromEnv(c, { METISTRY_BRIDGE_TOKEN_APPLE_FM: "tok" })).toBe("tok");
+    expect(credentialFromEnv(c, { METISTRY_BRIDGE_TOKEN_APPLE_FM: "  " })).toBeUndefined();
+  });
+
+  it("providerSecretNames lists every {{ secret.x }} the providers reference, once — what `secrets sync --to env` delivers", () => {
+    const cfg = parseCompute(`
+providers:
+  a: { kind: openai-compatible, base_url: "https://a.example/v1", locality: off_machine, auth: { secret: "{{ secret.shared_key }}" }, data_policy: { allow: [], deny_sources: [], max_brief_bytes: 1 } }
+  b: { kind: openai-compatible, base_url: "https://b.example/v1", locality: off_machine, auth: { secret: "{{ secret.shared_key }}" }, data_policy: { allow: [], deny_sources: [], max_brief_bytes: 1 } }
+  c: { kind: openai-compatible, base_url: "http://127.0.0.1:7810/v1", locality: on_machine, auth: { secret: METISTRY_BRIDGE_TOKEN_APPLE_FM } }
+  d: { kind: openai-compatible, base_url: "https://d.example/v1", locality: off_machine, auth: { secret: "{{ secret.other }}" }, data_policy: { allow: [], deny_sources: [], max_brief_bytes: 1 } }
+`);
+    expect(providerSecretNames(cfg)).toEqual(["shared_key", "other"]);
+  });
+
+  it("engineStatus: absent until the delivery line exists, naming the reference and the variable — never a value", () => {
+    const cfg = parseCompute(CLOUD("{{ secret.openrouter_api_key }}"));
+    const off = engineStatus(cfg, {});
+    expect(off.ok).toBe(false);
+    expect(off.secret).toBe("{{ secret.openrouter_api_key }}");
+    expect(off.why).toContain("providers.openrouter.auth.secret is {{ secret.openrouter_api_key }}");
+    expect(off.why).toContain("METISTRY_SECRET_OPENROUTER_API_KEY");
+    expect(off.fix).toContain("metistry secrets sync --to env");
+    expect(engineStatus(cfg, { METISTRY_SECRET_OPENROUTER_API_KEY: "k" }).ok).toBe(true);
+    expect(engineStatus(cfg, { METISTRY_OPENROUTER_API_KEY: "k" }).ok).toBe(true);
+    // the pre-T4-18 spelling reads exactly as it did
+    const legacy = engineStatus(parseCompute(CLOUD("METISTRY_OPENROUTER_API_KEY")), {});
+    expect(legacy.why).toContain("providers.openrouter.auth.secret names METISTRY_OPENROUTER_API_KEY, which is unset here");
+  });
+});
+
+describe("the provider switch (C130)", () => {
+  const TWO = (enabled: string) => `
+providers:
+  lmstudio: { kind: openai-compatible, base_url: http://127.0.0.1:1234/v1, locality: on_machine${enabled} }
+  ollama: { kind: openai-compatible, base_url: http://127.0.0.1:11434/v1, locality: on_machine }
+`;
+
+  it("is on unless the file says enabled: false — every file written before it is unchanged", () => {
+    expect(parseCompute(TWO("")).providers.lmstudio?.enabled).toBeUndefined();
+    expect(parseCompute(TWO(", enabled: false")).providers.lmstudio?.enabled).toBe(false);
+    expect(why(TWO(", enabled: nope"))).toContain("providers.lmstudio.enabled");
+  });
+
+  it("a switched-off provider may be declared, but nothing may be assigned to it — default, tier, crew, shadow and intent each refused by name", () => {
+    const base = TWO(", enabled: false");
+    const cases: Array<[string, string]> = [
+      ["assignments:\n  default: { model: lmstudio/a }\n", "assignments.default.model"],
+      ["assignments:\n  default: { model: ollama/a }\n  tiers: { deep: { model: lmstudio/a } }\n", "assignments.tiers.deep.model"],
+      ["assignments:\n  default: { model: ollama/a }\n  crews: { researcher: { model: lmstudio/a } }\n", "assignments.crews.researcher.model"],
+      ["assignments:\n  default: { model: ollama/a, shadow: { model: lmstudio/a, fraction: 0.1 } }\n", "assignments.default.shadow.model"],
+      ["assignments:\n  default: { model: ollama/a }\n  intent: { model: lmstudio/a }\n", "assignments.intent.model"],
+    ];
+    for (const [block, field] of cases) {
+      const m = why(`${base}${block}`);
+      expect(m, field).toContain(field);
+      expect(m, field).toContain("providers.lmstudio is switched off");
+      expect(m, field).toContain("metistry compute providers set lmstudio --enabled on");
+    }
+    expect(parseCompute(`${base}assignments:\n  default: { model: ollama/a }\n`).assignments?.default.model).toBe("ollama/a");
+  });
+
+  it("a crew whose own model is on a switched-off provider is parked with the reason, never run on it", () => {
+    const cfg = parseCompute(`${TWO(", enabled: false")}assignments:\n  default: { model: ollama/a }\n`);
+    const r = resolveCrewAssignment(cfg, "researcher", { model: "lmstudio/a", effort: "medium" });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.reason).toContain("providers.lmstudio is switched off");
+  });
+
+  it("the embedder's default skips a switched-off local server", () => {
+    expect(firstOnMachineBaseUrl(parseCompute(TWO(", enabled: false")))).toBe("http://127.0.0.1:11434/v1");
+  });
+});
+
+describe("billing (C128) and the one tag (C132)", () => {
+  it("token or subscription, off this machine only; the tag is Local, Cloud or Subscription", () => {
+    const sub = parseCompute(CLOUD("{{ secret.k }}", "\n    billing: subscription"));
+    expect(sub.providers.openrouter?.billing).toBe("subscription");
+    expect(providerTag(sub.providers.openrouter!)).toBe("subscription");
+    expect(providerTag(parseCompute(CLOUD("{{ secret.k }}")).providers.openrouter!)).toBe("cloud");
+    expect(providerTag(parseCompute(CLOUD("{{ secret.k }}", "\n    billing: token")).providers.openrouter!)).toBe("cloud");
+    const local = parseCompute("providers: { lmstudio: { kind: openai-compatible, base_url: http://127.0.0.1:1234/v1, locality: on_machine } }");
+    expect(providerTag(local.providers.lmstudio!)).toBe("local");
+  });
+
+  it("refuses billing on a local server — it bills nothing — and an unknown mode, naming the field", () => {
+    expect(why("providers: { lmstudio: { kind: openai-compatible, base_url: http://127.0.0.1:1234/v1, locality: on_machine, billing: subscription } }")).toContain("providers.lmstudio.billing");
+    expect(why(CLOUD("{{ secret.k }}", "\n    billing: monthly"))).toContain("billing must be token or subscription");
   });
 });

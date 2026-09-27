@@ -418,6 +418,29 @@ describe("instance-scoped secrets", () => {
     for (const l of lines) expect(l).not.toContain("shared-original");
   });
 
+  it("`--to env` delivers every secret compute.yaml references as METISTRY_SECRET_<NAME> — from this instance's item, and no other secret (T4-18)", async () => {
+    const file = await envFile();
+    const kc = fakeSecurity({
+      [`${INSTANCE_ID}/metistry:secret:openrouter_api_key`]: "sk-or-the-instance-key",
+      [`${INSTANCE_ID}/metistry:secret:github_write`]: "ghp-not-for-the-engine",
+      // a secret of the same NAME under the per-user account is never it
+      [`${USER}/metistry:secret:zen_key`]: "the-wrong-account",
+    });
+    const lines: string[] = [];
+    const r = await syncSecrets("env", { envFile: file, exec: kc.exec, out: (l) => lines.push(l), platform: "darwin", env: {}, instanceId: INSTANCE_ID, deliver: ["openrouter_api_key", "zen_key"] });
+    const after = readFileSync(file, "utf8");
+    expect(after).toContain("METISTRY_SECRET_OPENROUTER_API_KEY=sk-or-the-instance-key");
+    expect(after).not.toContain("ghp-not-for-the-engine"); // referenced by no provider: stays in the Keychain
+    expect(after).not.toContain("the-wrong-account");
+    expect(r.skipped).toContain("METISTRY_SECRET_ZEN_KEY"); // referenced, and this instance has no item: said, never invented
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+    for (const c of kc.calls.filter((x) => x.args.includes("-w"))) expect(c.args[c.args.indexOf("-a") + 1]).toBe(INSTANCE_ID);
+    for (const l of lines) expect(l).not.toContain("sk-or-the-instance-key");
+    // a delivery line is never mistaken for a retired shared-scope original
+    expect(wasSharedScope("METISTRY_SECRET_OPENROUTER_API_KEY")).toBe(false);
+    expect(wasSharedScope("METISTRY_OPENROUTER_API_KEY")).toBe(true);
+  });
+
   it("`--to env` MOVES the file to the instance when the one it read was the checkout's, leaving the old one in place", async () => {
     const file = await envFile();
     const target = join(file, "..", "state", ".env");

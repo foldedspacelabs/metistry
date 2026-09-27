@@ -12,37 +12,60 @@
 //     so it is a §4.7 protected path: the write goes through the
 //     reconciler as the `user` principal (protected-write.ts), exactly as
 //     `deployment.yaml`, `metistry.lock` and `identity.yaml` do.
-//   * A secret value never reaches an argument. `--secret` names a
-//     variable; the value is read from stdin into the login Keychain under
-//     the USER account (C6: provider secrets are the person's, shared by
-//     every instance on this Mac), and nothing here can print one.
+//   * A secret value never reaches an argument. A provider's key is one of
+//     THIS INSTANCE'S secrets (plan §2.14, the owner's Q3: per instance
+//     only): `providers add` reads it from stdin into the login Keychain
+//     under the instance's own account, records its name in secrets.yaml
+//     (`secrets set`, the same code), and writes `{{ secret.<name> }}` —
+//     a reference — into compute.yaml. Nothing here can print a value.
 
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parseDocument, parse as parseYaml } from "yaml";
 import {
+  BILLINGS,
   BUDGET_ACTIONS,
   COMPUTE_FILENAME,
   DEFAULT_CACHE_READ_MULTIPLIER,
   DEFAULT_CACHE_WRITE_MULTIPLIER,
   DEFAULT_CACHING,
-  extensionsDirFor,
-  instanceFile,
-  loadKind,
-  PROVIDER_NAME_RE,
+  INSTANCE_SECRET_NAME_RE,
+  MODEL_IDENTITIES_FILENAME,
   SECRET_NAME_RE,
+  credentialEnvNames,
+  credentialFromEnv,
+  credentialOf,
+  egressDestination,
+  extensionsDirFor,
+  groupCatalogue,
+  instanceFile,
+  InstanceSecrets,
+  instancePresence,
+  loadKind,
+  loadModelIdentities,
+  PROVIDER_NAME_RE,
   loadCompute,
   modelRefIssue,
   parseCompute,
   parseModelRef,
+  parseSecretsFile,
+  providerCredential,
+  providerEnabled,
   providerSchema,
+  providerTag,
+  secretService,
+  type Billing,
   type Budget,
   type BudgetAction,
+  type CatalogueEntry,
+  type CatalogueRow,
   type Compute,
   type Effort,
   type Provider,
+  type ProviderCredential,
   type ProviderManifest,
+  type ProviderTag,
   type Registry,
 } from "@foldedspacelabs/metistry-core";
 import { readStdin } from "./connect-repo.js";
@@ -65,8 +88,10 @@ import {
   type LocalServerName,
   type LocalServerRow,
 } from "./local-models.js";
-import { Keychain, keychainAccount, serviceFor } from "./keychain.js";
+import { readInstanceId } from "./instance.js";
+import { Keychain, keychainAccount, securityKeychain, securityPresence } from "./keychain.js";
 import { protectedRel, writeProtected, type ProtectedWrite } from "./protected-write.js";
+import { secretsFilePath, secretsReplace, secretsSet, type NamedSecretsOptions } from "./secrets.js";
 import { StepFailed, StepRunner } from "./steps.js";
 import { defaultUi, type Ui } from "./ui.js";
 
@@ -168,9 +193,66 @@ export function instanceComputeFile(instanceDir: string): string {
   return instanceFile(instanceDir, "compute");
 }
 
-/** The login Keychain under the USER account: a provider credential belongs to the person, not to one instance (C6). */
-function providerKeychain(opts: ComputeOptions): Keychain {
-  return new Keychain(opts.exec ?? realExec, keychainAccount(opts.env));
+// ---- a provider's credential: this instance's, and only ever this instance's --------
+//
+// C6 filed provider keys under the per-USER account, shared by every instance
+// on the Mac. The owner's Q3 (plan §2.14) retired that: a secret belongs to
+// exactly one instance, filed under its `instance_id`. So no provider key is
+// read from or written to the per-user account below — `metistry secrets
+// migrate-scope` is what copies an old key across, once. (An `env:` install
+// variable of an install with no `instance_id` yet is looked for under the
+// per-user account, exactly as `accountFor` files it until one is minted.)
+
+/** This instance's `instance_id` — the one Keychain account its secrets are filed under — or undefined when identity.yaml has none yet. */
+async function instanceIdOf(opts: Pick<ComputeOptions, "instanceDir">): Promise<string | undefined> {
+  return readInstanceId(opts.instanceDir).catch(() => undefined);
+}
+
+/** Is there a login Keychain to ask? darwin only; a container and CI's Linux have none. */
+const hasKeychain = (opts: Pick<ComputeOptions, "platform">): boolean => opts.platform === "darwin";
+
+/**
+ * Whether the credential a provider references is where it would be read —
+ * presence only, never a value:
+ *
+ *   `{{ secret.x }}` an item `x` under THIS instance's account (a Keychain to
+ *                    ask), else its delivery line in this process's environment
+ *   `env:NAME`       NAME in this process's environment, else the install's own
+ *                    `metistry:NAME` item under this install's account
+ */
+async function credentialPresent(opts: ComputeOptions, c: ProviderCredential, instanceId: string | undefined): Promise<boolean> {
+  const exec = opts.exec ?? realExec;
+  if (c.kind === "secret") {
+    if (hasKeychain(opts) && instanceId) return instancePresence(securityPresence(exec), instanceId).has(c.name);
+    return credentialFromEnv(c, opts.env) !== undefined;
+  }
+  if ((opts.env[c.name] ?? "").trim() !== "") return true;
+  if (!hasKeychain(opts)) return false;
+  return new Keychain(exec, instanceId ?? keychainAccount(opts.env)).hasSecret(c.name);
+}
+
+/**
+ * `--secret` as the owner types it → the reference written into the file.
+ * A secret NAME (`openrouter_key`) or `{{ secret.openrouter_key }}` is one of
+ * this instance's secrets; `env:NAME` is an install variable. The pre-T4-18
+ * UPPER_SNAKE spelling is refused with the name it would be now: a provider's
+ * key is an instance secret, and the flag that stored one under the per-user
+ * account is exactly what Q3 retired.
+ */
+export function secretReferenceArg(v: string): string {
+  const t = v.trim();
+  if (INSTANCE_SECRET_NAME_RE.test(t)) return `{{ secret.${t} }}`;
+  const c = credentialOf(t);
+  if (c && !(c.kind === "env" && c.legacy)) return c.kind === "secret" ? `{{ secret.${c.name} }}` : t;
+  if (SECRET_NAME_RE.test(t)) {
+    const suggest = t.replace(/^METISTRY_/, "").toLowerCase();
+    throw new StepFailed(
+      `--secret takes one of this instance's secrets by name (lowercase, e.g. ${INSTANCE_SECRET_NAME_RE.test(suggest) ? suggest : "openrouter_key"}) — a provider's key is per instance now (plan §2.14). ` +
+        `An install variable is written env:${t}.`,
+    );
+  }
+  // never echoed, not even in part: what was typed here may be the key itself
+  throw new StepFailed("--secret takes the NAME of a secret (lowercase, e.g. openrouter_key), {{ secret.<name> }}, or env:<NAME> — never the key itself, and what was given is none of them");
 }
 
 const HEADER = [
@@ -235,9 +317,21 @@ export interface ProviderRow {
   locality: string;
   base_url: string;
   zdr: boolean | undefined;
-  /** the NAME of the secret this provider authenticates with, never its value */
+  /** the switch (C130): off = neither searched nor offered, and nothing may be assigned to it */
+  enabled: boolean;
+  /** how it charges — `token` or `subscription` off this machine, absent on it (C128) */
+  billing?: Billing;
+  /** the ONE tag it shows (C132): local · cloud · subscription */
+  tag: ProviderTag;
+  /** `auth.secret` exactly as the file writes it — a REFERENCE (`{{ secret.x }}`, `env:NAME`), never a value */
   secret?: string;
-  /** whether an item of that name exists in the login Keychain — presence only */
+  /** what the reference is: one of this instance's secrets, or an install variable */
+  secret_kind?: "secret" | "env";
+  /** the secret's name (`x`) or the variable (`NAME`) */
+  secret_name?: string;
+  /** the pre-T4-18 bare spelling — `metistry secrets migrate-scope` rewrites a retired provider key to `{{ secret.x }}` */
+  secret_legacy?: boolean;
+  /** whether it is where it would be read — this instance's Keychain account for a secret — presence only */
   secret_present?: boolean;
   models_assigned: string[];
   budget?: Budget;
@@ -271,7 +365,7 @@ export async function computeReport(opts: ComputeOptions): Promise<ComputeReport
   const files = computeFiles(opts);
   const loaded = await loadCompute(files);
   const cfg = loaded.compute;
-  const kc = opts.platform === "darwin" ? providerKeychain(opts) : undefined;
+  const instanceId = await instanceIdOf(opts);
 
   const assigned = new Map<string, string[]>();
   const rows: AssignmentRow[] = [];
@@ -296,13 +390,25 @@ export async function computeReport(opts: ComputeOptions): Promise<ComputeReport
 
   const providers: ProviderRow[] = [];
   for (const [name, p] of Object.entries(cfg.providers)) {
+    const c = providerCredential(p);
     providers.push({
       name,
       kind: p.kind,
       locality: p.locality,
       base_url: p.base_url,
       zdr: p.zdr,
-      ...(p.auth ? { secret: p.auth.secret, secret_present: kc ? await kc.hasSecret(p.auth.secret) : false } : {}),
+      enabled: providerEnabled(p),
+      ...(p.billing ? { billing: p.billing } : {}),
+      tag: providerTag(p),
+      ...(c
+        ? {
+            secret: c.ref,
+            secret_kind: c.kind,
+            secret_name: c.name,
+            ...(c.kind === "env" && c.legacy ? { secret_legacy: true } : {}),
+            secret_present: await credentialPresent(opts, c, instanceId),
+          }
+        : {}),
       models_assigned: [...new Set(assigned.get(name) ?? [])],
       ...(cfg.budgets?.providers[name] ? { budget: cfg.budgets.providers[name] } : {}),
     });
@@ -335,13 +441,14 @@ export function renderComputeReport(r: ComputeReport, templates: readonly string
   lines.push("");
   lines.push(
     ...table(
-      ["provider", "locality", "base_url", "zdr", "secret", "budget"],
+      ["provider", "on", "tag", "base_url", "zdr", "secret", "budget"],
       r.providers.map((p) => [
         p.name,
-        p.locality,
+        p.enabled ? "on" : "OFF",
+        p.tag,
         p.base_url,
         p.zdr === undefined ? "-" : p.zdr ? "yes" : "no",
-        p.secret ? `${p.secret} ${p.secret_present ? "(in Keychain)" : "(MISSING)"}` : "-",
+        p.secret ? `${p.secret} ${p.secret_present ? (p.secret_kind === "secret" ? "(in Keychain)" : "(set)") : "(MISSING)"}${p.secret_legacy ? " — old spelling: `metistry secrets migrate-scope`" : ""}` : "-",
         p.budget ? `${money(p.budget.daily_usd)}/day ${money(p.budget.monthly_usd)}/mo ${p.budget.action}` : "-",
       ]),
     ),
@@ -370,7 +477,7 @@ export interface ProvidersAddOptions extends ComputeOptions {
   /** the name this provider gets in the file; default = the template's own */
   name?: string | undefined;
   baseUrl?: string | undefined;
-  /** the NAME of the Keychain item (never a value) */
+  /** which secret the key is: a secret NAME (`openrouter_key`), `{{ secret.<name> }}`, or `env:<NAME>` — never a value */
   secret?: string | undefined;
   /** skip the live `/models` probe this normally ends with */
   skipTest?: boolean | undefined;
@@ -379,12 +486,14 @@ export interface ProvidersAddOptions extends ComputeOptions {
 export interface ProvidersAddResult {
   name: string;
   provider: Provider;
-  /** the secret's NAME, when this provider authenticates */
+  /** the REFERENCE written as `auth.secret`, when this provider authenticates — never a value */
   secret?: string;
-  /** what happened to it: stored from stdin, already there, or none needed */
+  /** what happened to the key: stored from stdin, already there, or none needed */
   secretStatus: "stored" | "present" | "none" | "skipped";
   test?: ProviderTestResult;
   delivery: ProtectedWrite;
+  /** the secrets.yaml write that recorded a newly stored key's name */
+  secret_delivery?: ProtectedWrite;
 }
 
 /**
@@ -409,15 +518,62 @@ export async function readTemplate(opts: Pick<ComputeOptions, "seedDir" | "insta
   return { name: unit.name, block: raw.provider as Record<string, unknown>, origin: unit.origin, path: unit.path };
 }
 
+/** The `metistry secrets` options for this instance, from a compute verb's. */
+function namedSecretsOptions(opts: ComputeOptions, instanceId: string): NamedSecretsOptions {
+  return {
+    instanceDir: opts.instanceDir,
+    instanceId,
+    env: opts.env,
+    platform: opts.platform,
+    uid: opts.uid,
+    exec: opts.exec,
+    fetchFn: opts.fetchFn,
+    readSecret: opts.readSecret,
+    dryRun: opts.dryRun,
+    out: opts.out,
+  };
+}
+
+/**
+ * A provider's key, into THIS instance's Keychain account — through
+ * `metistry secrets set`'s own code, so the item and its line in
+ * secrets.yaml land together exactly as they do by hand. The line's *Sent
+ * only to* is the provider's host: the one place this key is for.
+ */
+async function storeProviderSecret(opts: ProvidersAddOptions, provider: string, p: Provider, name: string): Promise<{ status: ProvidersAddResult["secretStatus"]; delivery?: ProtectedWrite | undefined }> {
+  const deliverAs = credentialEnvNames({ kind: "secret", name, ref: "" })[0]!;
+  if (!hasKeychain(opts)) {
+    opts.out(`no login Keychain on ${opts.platform}: store ${name} on the Mac that holds this instance (\`metistry secrets set ${name}\`), or hand it to this install's services as ${deliverAs}.`);
+    return { status: "skipped" };
+  }
+  const instanceId = await instanceIdOf(opts);
+  if (!instanceId) {
+    throw new StepFailed(`${opts.instanceDir} has no instance_id in identity.yaml, and a provider's key belongs to exactly one instance — \`metistry up\` or \`metistry secrets sync --to env\` mints one; ${instanceComputeFile(opts.instanceDir)} was NOT changed`);
+  }
+  const store = new InstanceSecrets(securityKeychain(opts.exec ?? realExec), instanceId);
+  if (await store.has(name)) {
+    opts.out(`${name} is already one of this instance's secrets (${secretService(name)}, account ${store.account}) — left as it is (\`metistry compute providers test ${provider}\` proves it works).`);
+    return { status: "present" };
+  }
+  if (opts.dryRun === true) {
+    opts.out(`[dry-run] would ask for the ${provider} key on stdin and store it as ${name} (${secretService(name)}, account ${store.account})`);
+    return { status: "skipped" };
+  }
+  const path = secretsFilePath(opts.instanceDir);
+  const named = existsSync(path) && Object.hasOwn(parseSecretsFile(await readFile(path, "utf8")).secrets, name);
+  const host = egressDestination(p.base_url)?.entry;
+  opts.out(`paste the ${provider} API key, then Ctrl-D (read from stdin, never echoed, never in argv):`);
+  const r = named ? await secretsReplace(name, {}, namedSecretsOptions(opts, instanceId)) : await secretsSet(name, { hosts: host ? [host] : [] }, namedSecretsOptions(opts, instanceId));
+  opts.out(`the engine reads it as ${deliverAs} once \`metistry secrets sync --to env\` has written that line (then \`metistry restart assistant\`).`);
+  return { status: "stored", delivery: r.delivery };
+}
+
 export async function providersAdd(opts: ProvidersAddOptions): Promise<ProvidersAddResult> {
   const { name: templateName, block } = await readTemplate(opts, opts.template);
   const name = opts.name ?? templateName;
   if (!PROVIDER_NAME_RE.test(name)) throw new StepFailed(`--name ${JSON.stringify(name)} is not a provider name (lowercase, digits, - and _, starting with a letter)`);
   if (opts.baseUrl !== undefined) block.base_url = opts.baseUrl;
-  if (opts.secret !== undefined) {
-    if (!SECRET_NAME_RE.test(opts.secret)) throw new StepFailed(`--secret takes the NAME of a secret (UPPER_SNAKE_CASE, e.g. METISTRY_OPENROUTER_API_KEY), never the key itself — ${JSON.stringify(opts.secret)} is not a name`);
-    block.auth = { secret: opts.secret };
-  }
+  if (opts.secret !== undefined) block.auth = { secret: secretReferenceArg(opts.secret) };
   const parsed = providerSchema.safeParse(block);
   if (!parsed.success) {
     throw new StepFailed(`the ${opts.template} template with these overrides is not a valid provider: ${parsed.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ")}`);
@@ -429,47 +585,41 @@ export async function providersAdd(opts: ProvidersAddOptions): Promise<Providers
     throw new StepFailed(`${edit.path} already declares provider ${name} — \`metistry compute providers remove ${name}\` first, or pass --name <other> to add a second one`);
   }
   edit.doc.setIn(["providers", name], block);
+  // Refused BEFORE a key is asked for: an edit that could not be written
+  // must not have cost anybody a paste, or left an item behind it.
+  try {
+    parseCompute(String(edit.doc));
+  } catch (e) {
+    throw new StepFailed(`refusing to write ${edit.path}: the result would be invalid — ${e instanceof Error ? e.message : String(e)}`);
+  }
 
-  // The value: stdin → the login Keychain, user account. Before the write,
-  // so a run that cannot store the credential does not leave a provider in
-  // the file with nothing behind it.
+  // The key, before the provider: a run that cannot store the credential does
+  // not leave a provider in the file with nothing behind it.
   let secretStatus: ProvidersAddResult["secretStatus"] = "none";
-  if (provider.auth) {
-    const varName = provider.auth.secret;
-    if (opts.env[varName]) {
-      // Already in this install's environment: nothing to ask for, nothing
-      // to store. The normal case for a provider that IS one of Metistry's
-      // own bridges — `applefm` authenticates with
-      // METISTRY_BRIDGE_TOKEN_APPLE_FM, an instance-scope secret this
-      // install already holds. Prompting would be asking the operator to
-      // paste back a value we minted.
-      opts.out(`${varName} is already set in this install's environment — nothing to store (\`metistry secrets list\` says where it lives).`);
+  let secretDelivery: ProtectedWrite | undefined;
+  const cred = providerCredential(provider);
+  if (cred?.kind === "secret") {
+    const r = await storeProviderSecret(opts, name, provider, cred.name);
+    secretStatus = r.status;
+    secretDelivery = r.delivery;
+  } else if (cred?.kind === "env") {
+    // An install variable — the normal case for a provider that IS one of
+    // Metistry's own bridges: `applefm` authenticates with
+    // METISTRY_BRIDGE_TOKEN_APPLE_FM, which this install minted. Nothing to
+    // paste and nothing to store: prompting would be asking the operator to
+    // paste back a value we made.
+    if ((opts.env[cred.name] ?? "").trim() !== "") {
+      opts.out(`${cred.name} is already set in this install's environment — nothing to store (\`metistry secrets list\` says where it lives).`);
       secretStatus = "present";
-    } else if (opts.platform !== "darwin") {
-      opts.out(`no login Keychain on ${opts.platform}: put ${varName} in this install's environment yourself (docs/ops/compute.md).`);
-      secretStatus = "skipped";
     } else {
-      const kc = providerKeychain(opts);
-      if (await kc.hasSecret(varName)) {
-        opts.out(`${varName} is already in the login Keychain under account ${kc.account} — left as it is (\`metistry compute providers test ${name}\` proves it works).`);
-        secretStatus = "present";
-      } else if (opts.dryRun === true) {
-        opts.out(`[dry-run] would ask for ${varName} on stdin and store it under Keychain account ${kc.account}`);
-        secretStatus = "skipped";
-      } else {
-        opts.out(`paste the ${name} API key, then Ctrl-D (read from stdin, never echoed, never in argv):`);
-        const value = (await (opts.readSecret ?? readStdin)()).trim();
-        if (!value) throw new StepFailed(`no key on stdin — ${edit.path} was NOT changed`);
-        await kc.setSecret(varName, value);
-        opts.out(`stored ${varName} in the login Keychain under account ${kc.account} (user scope: a provider credential is yours, shared by every instance on this Mac).`);
-        secretStatus = "stored";
-      }
+      opts.out(`${cred.name} is an install variable and is not set here — \`metistry secrets sync --to env\` writes the ones this install mints; a key you hold belongs in one of this instance's secrets instead (\`--secret <name>\`).`);
+      secretStatus = "skipped";
     }
   }
 
   const { delivery } = await commit(opts, edit, `metistry compute providers add ${name} (--from ${opts.template})`);
   const test = opts.skipTest === true || opts.dryRun === true ? undefined : await providerTest({ ...opts, name }).catch((e) => ({ name, ok: false, listingOk: false, url: provider.base_url, detail: e instanceof Error ? e.message : String(e), models: [] }) as ProviderTestResult);
-  return { name, provider, ...(provider.auth ? { secret: provider.auth.secret } : {}), secretStatus, ...(test ? { test } : {}), delivery };
+  return { name, provider, ...(provider.auth ? { secret: provider.auth.secret } : {}), secretStatus, ...(test ? { test } : {}), delivery, ...(secretDelivery ? { secret_delivery: secretDelivery } : {}) };
 }
 
 export interface ProvidersRemoveResult {
@@ -496,9 +646,98 @@ export async function providersRemove(opts: ComputeOptions & { name: string }): 
   if (users.length > 0) {
     throw new StepFailed(`${opts.name} is still named by ${users.join(", ")} — reassign those first (\`metistry compute assign <target> <other-provider>/<model>\`); ${edit.path} was NOT changed`);
   }
+  const cred = providerCredential(before.providers[opts.name]!);
   const { delivery } = await commit(opts, edit, `metistry compute providers remove ${opts.name}`);
-  opts.out(`the ${opts.name} secret (if any) is left in the login Keychain — \`metistry secrets\` is the only thing that deletes one.`);
+  if (cred?.kind === "secret") opts.out(`its key, ${cred.name}, is left as one of this instance's secrets — \`metistry secrets remove ${cred.name}\` is the only thing that deletes one (it lists what else references it first).`);
   return { name: opts.name, delivery };
+}
+
+// ---- providers set: the gear (screen-15 §5.3) ------------------------------------
+
+/** `on|off|true|false` → a boolean; anything else throws rather than guessing. */
+export function parseSwitch(v: string | undefined): boolean | undefined {
+  if (v === undefined) return undefined;
+  if (v === "on" || v === "true") return true;
+  if (v === "off" || v === "false") return false;
+  throw new Error(`--enabled takes on or off, not ${JSON.stringify(v)}`);
+}
+
+/** `--billing token|subscription`, strict. */
+export function parseBilling(v: string | undefined): Billing | undefined {
+  if (v === undefined) return undefined;
+  if (!(BILLINGS as readonly string[]).includes(v)) throw new Error(`--billing takes ${BILLINGS.join(" or ")}, not ${JSON.stringify(v)}`);
+  return v as Billing;
+}
+
+export interface ProvidersSetOptions extends ComputeOptions {
+  name: string;
+  /** the switch (C130): off = not searched, not offered, and nothing may be assigned to it */
+  enabled?: boolean | undefined;
+  billing?: Billing | undefined;
+  baseUrl?: string | undefined;
+  /** which secret the key is — a NAME, `{{ secret.<name> }}` or `env:<NAME>` — never a value; the key itself goes in with `metistry secrets set` */
+  secret?: string | undefined;
+}
+
+export interface ProvidersSetResult {
+  name: string;
+  provider: Provider;
+  /** the fields this run changed, by name */
+  changed: string[];
+  delivery: ProtectedWrite;
+}
+
+/**
+ * `metistry compute providers set <name>` — the provider's gear, and its
+ * switch (M16: keys and base URLs are where prompts go, so this is the
+ * Mac's and the CLI's, never a console route). The same edit-validate-write
+ * as every verb here: switching off a provider that an assignment still
+ * names is refused by the schema, naming the assignment, and nothing is
+ * written.
+ *
+ * `--secret` points the provider at one of this instance's secrets; it takes
+ * no value. A name this instance has no item for is written anyway, with a
+ * note — setting the reference first and the key second is a legitimate
+ * order — and `compute show` reports it `MISSING` until it is there.
+ */
+export async function providersSet(opts: ProvidersSetOptions): Promise<ProvidersSetResult> {
+  const edit = await openInstanceFile(opts);
+  if (!edit.doc.hasIn(["providers", opts.name])) {
+    throw new StepFailed(`${edit.path} does not declare a provider called ${opts.name} — \`metistry compute providers add --from <template> --name ${opts.name}\` adds one`);
+  }
+  const at = (field: string): string[] => ["providers", opts.name, field];
+  const changed: string[] = [];
+  if (opts.enabled !== undefined) {
+    // on is the absence of the key — the shape every file had before the switch existed
+    if (opts.enabled) edit.doc.deleteIn(at("enabled"));
+    else edit.doc.setIn(at("enabled"), false);
+    changed.push("enabled");
+  }
+  if (opts.billing !== undefined) {
+    edit.doc.setIn(at("billing"), opts.billing);
+    changed.push("billing");
+  }
+  if (opts.baseUrl !== undefined) {
+    edit.doc.setIn(at("base_url"), opts.baseUrl);
+    changed.push("base_url");
+  }
+  let reference: string | undefined;
+  if (opts.secret !== undefined) {
+    reference = secretReferenceArg(opts.secret);
+    edit.doc.setIn(["providers", opts.name, "auth"], edit.doc.createNode({ secret: reference }, { flow: true }));
+    changed.push("auth.secret");
+  }
+  if (changed.length === 0) {
+    throw new StepFailed("say what to change: --enabled on|off, --billing token|subscription, --base-url <url>, or --secret <name>");
+  }
+  const { compute, delivery } = await commit(opts, edit, `metistry compute providers set ${opts.name} (${changed.join(", ")})`);
+  const provider = compute.providers[opts.name]!;
+  const cred = reference ? credentialOf(reference) : undefined;
+  if (cred?.kind === "secret" && !(await credentialPresent(opts, cred, await instanceIdOf(opts)))) {
+    opts.out(`this instance has no secret ${cred.name} yet — \`metistry secrets set ${cred.name}\` stores it (the key on stdin); until then \`compute show\` reports it MISSING.`);
+  }
+  if (opts.enabled === false && opts.dryRun !== true) opts.out(`${opts.name} is switched off: it is neither searched nor offered, and nothing may be assigned to it until \`metistry compute providers set ${opts.name} --enabled on\`.`);
+  return { name: opts.name, provider, changed, delivery };
 }
 
 // ---- providers test / models list --------------------------------------------
@@ -596,18 +835,43 @@ async function providerOf(opts: ComputeOptions, name: string): Promise<{ provide
 /** The API root with no trailing slash, so `${root}/models` is right whatever the file says. Defined with the rest of the local-server wire in local-models.ts; re-exported because this is where every caller already imports it from. */
 export { apiRoot };
 
-/** The bearer for a provider, from the login Keychain. Returns undefined for a provider that declares no auth; throws when the item is missing, naming the variable and not its value. */
+/**
+ * The bearer for a provider. Undefined for one that declares no auth; a
+ * refusal naming the REFERENCE — never a value — when there is nothing to
+ * send. This verb is the owner's hand, so it may read the Keychain; a
+ * service never does (`credentialEnvNames`).
+ *
+ *   `{{ secret.x }}` this instance's item `x` — the Keychain is the record,
+ *                    so a stale delivery line cannot pass a test the engine
+ *                    would then fail — else, with no Keychain, the delivery
+ *                    variable
+ *   `env:NAME`       NAME from the environment, else this install's own
+ *                    `metistry:NAME` item. Never the retired per-user account.
+ */
 async function bearerFor(opts: ComputeOptions, name: string, provider: Provider): Promise<string | undefined> {
-  if (!provider.auth) return undefined;
-  const varName = provider.auth.secret;
-  const fromEnv = opts.env[varName];
-  if (fromEnv) return fromEnv;
-  if (opts.platform !== "darwin") throw new StepFailed(`${varName} is not in this environment and there is no login Keychain on ${opts.platform} — export it before running this`);
-  const value = await providerKeychain(opts).getSecret(varName);
-  if (!value) {
-    throw new StepFailed(`providers.${name}.auth.secret names ${varName}, which is not in the login Keychain under account ${keychainAccount(opts.env)} — \`metistry compute providers add --from <template> --name ${name} --secret ${varName}\` stores it (or \`security add-generic-password -a ${keychainAccount(opts.env)} -s ${serviceFor(varName)} -w\`)`);
+  const c = providerCredential(provider);
+  if (!c) return undefined;
+  const exec = opts.exec ?? realExec;
+  if (c.kind === "secret") {
+    const instanceId = hasKeychain(opts) ? await instanceIdOf(opts) : undefined;
+    const value = instanceId ? await new InstanceSecrets(securityKeychain(exec), instanceId).value(c.name) : credentialFromEnv(c, opts.env);
+    if (value) return value;
+    throw new StepFailed(
+      hasKeychain(opts)
+        ? `providers.${name}.auth.secret is {{ secret.${c.name} }}, and this instance has no secret ${c.name}${instanceId ? ` (account ${instanceId})` : " (identity.yaml has no instance_id)"} — \`metistry secrets set ${c.name}\` stores one (the key on stdin), or \`metistry compute providers set ${name} --secret <name>\` points at another`
+        : `providers.${name}.auth.secret is {{ secret.${c.name} }}, and there is no login Keychain on ${opts.platform} — set ${credentialEnvNames(c).join(" or ")} in this environment`,
+    );
   }
-  return value;
+  const fromEnv = (opts.env[c.name] ?? "").trim();
+  if (fromEnv) return fromEnv;
+  if (!hasKeychain(opts)) throw new StepFailed(`${c.name} is not in this environment and there is no login Keychain on ${opts.platform} — export it before running this`);
+  const instanceId = await instanceIdOf(opts);
+  const value = await new Keychain(exec, instanceId ?? keychainAccount(opts.env)).getSecret(c.name);
+  if (value) return value;
+  throw new StepFailed(
+    `providers.${name}.auth.secret names ${c.name}, an install variable that is neither in this environment nor this install's Keychain — ` +
+      `a key you hold is one of this instance's secrets: \`metistry secrets set <name>\`, then \`metistry compute providers set ${name} --secret <name>\``,
+  );
 }
 
 /** One provider's `/v1/models`, with its credential. The call itself is `fetchModels` — the one place that knows the wire — so a cloud provider, a local one and doctor all report a failure in the same words. */
@@ -722,6 +986,125 @@ export function renderModelsList(r: ModelsListResult, templates: readonly string
   }
   lines.push("");
   lines.push("Assign one with: metistry compute assign <default|tier|crew:name> <provider/model> [--effort low|medium|high]");
+  return lines.join("\n");
+}
+
+// ---- models search: one model, several places (C131) -----------------------------
+
+/**
+ * The listings `modelsSearch` read, kept between calls — the console holds
+ * one so a search-as-you-type is not a round of `/v1/models` per keystroke,
+ * and **Refresh** (C132) is `refresh: true`: every switched-on provider's
+ * catalogue re-read. The CLI passes none and always reads live.
+ */
+export interface ListingCache {
+  get(key: string): { probe: Awaited<ReturnType<typeof fetchModels>>; at: string } | undefined;
+  set(key: string, value: { probe: Awaited<ReturnType<typeof fetchModels>>; at: string }): void;
+}
+
+export interface ModelsSearchOptions extends ComputeOptions {
+  query?: string | undefined;
+  /** only this provider's catalogue */
+  provider?: string | undefined;
+  /** re-read every catalogue even where `cache` holds one */
+  refresh?: boolean | undefined;
+  cache?: ListingCache | undefined;
+}
+
+export interface ModelsSearchResult {
+  query: string;
+  /** the switched-on providers searched, and what each listing said */
+  providers: Array<{ name: string; tag: ProviderTag; ok: boolean; detail: string; count: number; read_at: string }>;
+  /** providers left out, and why — a switched-off one is never searched (C130) */
+  skipped: Array<{ name: string; why: string }>;
+  /** grouped by model: one row per model, one line per place; an id the table cannot map is its own row */
+  rows: CatalogueRow[];
+  /** the model identity files read, in overlay order */
+  identity_files: string[];
+}
+
+/** The identity table's overlay: the product's seed, then this instance's own (by key — model-identities.ts). */
+export function modelIdentityFiles(opts: Pick<ComputeOptions, "seedDir" | "instanceDir">): string[] {
+  return [join(opts.seedDir, MODEL_IDENTITIES_FILENAME), instanceFile(opts.instanceDir, "modelIdentities")];
+}
+
+/** A listing's cache key: the provider AND where it points, so an edited base URL is never answered from the old one. */
+const listingKey = (name: string, p: Provider): string => `${name}\u0000${apiRoot(p.base_url)}\u0000${p.auth?.secret ?? ""}`;
+
+/**
+ * `metistry compute models search [<query>]` — every switched-on provider's
+ * catalogue, grouped by MODEL through the model identity table (C131), best
+ * match first. Prices come from the listing where it carries them (OpenRouter
+ * does), else from `compute.yaml`'s `pricing:`; a subscription's place reads
+ * *Included*, a local one is free. Nothing is invented where both are silent.
+ */
+export async function modelsSearch(opts: ModelsSearchOptions): Promise<ModelsSearchResult> {
+  const { compute } = await loadCompute(computeFiles(opts));
+  if (opts.provider !== undefined && !compute.providers[opts.provider]) await providerOf(opts, opts.provider); // one refusal, one place
+  const identityFiles = modelIdentityFiles(opts);
+  const table = await loadModelIdentities(identityFiles);
+  const result: ModelsSearchResult = { query: (opts.query ?? "").trim(), providers: [], skipped: [], rows: [], identity_files: identityFiles };
+  const entries: CatalogueEntry[] = [];
+  for (const [name, p] of Object.entries(compute.providers)) {
+    if (opts.provider !== undefined && name !== opts.provider) continue;
+    if (!providerEnabled(p)) {
+      result.skipped.push({ name, why: `switched off — \`metistry compute providers set ${name} --enabled on\`` });
+      continue;
+    }
+    const key = listingKey(name, p);
+    let hit = opts.refresh === true ? undefined : opts.cache?.get(key);
+    if (!hit) {
+      let probe: Awaited<ReturnType<typeof fetchModels>>;
+      try {
+        probe = await fetchModels({ url: p.base_url, bearer: await bearerFor(opts, name, p), fetchFn: opts.fetchFn, local: p.locality === "on_machine" });
+      } catch (e) {
+        probe = { ok: false, models: [], owned_by: {}, detail: e instanceof Error ? e.message : String(e) };
+      }
+      hit = { probe, at: new Date().toISOString() };
+      // a failed read is not kept: the next search tries again rather than repeating the failure
+      if (probe.ok) opts.cache?.set(key, hit);
+    }
+    const tag = providerTag(p);
+    result.providers.push({ name, tag, ok: hit.probe.ok, detail: hit.probe.detail, count: hit.probe.models.length, read_at: hit.at });
+    for (const model of hit.probe.models) {
+      const d = hit.probe.details?.[model];
+      const rate = p.pricing?.[model];
+      const listed = d?.in_per_m !== undefined && d.out_per_m !== undefined;
+      entries.push({
+        provider: name,
+        model,
+        tag,
+        ...(p.zdr !== undefined ? { zdr: p.zdr } : {}),
+        ...(listed ? { in_per_m: d!.in_per_m, out_per_m: d!.out_per_m, price_source: "listing" as const } : rate ? { in_per_m: rate.in_per_m, out_per_m: rate.out_per_m, price_source: "pricing" as const } : {}),
+        ...(d?.name ? { listed_name: d.name } : {}),
+        ...(d?.context ? { context: d.context } : {}),
+        ...(d?.tools ? { tools: true } : {}),
+      });
+    }
+  }
+  result.rows = groupCatalogue(entries, table, { query: opts.query });
+  return result;
+}
+
+const perM = (n: number | null): string => (n === null ? "-" : `$${n}`);
+
+/** One line per model, then one indented line per place: **name** maker · provider · tag (C132). */
+export function renderModelsSearch(r: ModelsSearchResult, ui: Ui = defaultUi()): string {
+  const lines: string[] = [];
+  for (const p of r.providers) lines.push(`${ui.statusIcon(p.ok ? "ok" : "failed")} ${p.name} ${ui.dim(`(${p.tag}) — ${p.detail}`)}`);
+  for (const s of r.skipped) lines.push(`${ui.icon("off")} ${s.name} ${ui.dim(`— ${s.why}`)}`);
+  if (lines.length === 0) lines.push("no providers to search — `metistry compute providers add --from <template>`");
+  lines.push("");
+  if (r.rows.length === 0) lines.push(r.query ? `nothing matches ${JSON.stringify(r.query)}.` : "no models listed.");
+  for (const row of r.rows) {
+    const where = [row.summary.local ? "local" : "", row.summary.cloud ? "cloud" : ""].filter(Boolean).join(" or ");
+    const from = row.summary.from_in_per_m !== null ? ` · from $${row.summary.from_in_per_m} per M` : "";
+    lines.push(`${ui.strong(row.name)} ${ui.dim(row.maker ?? "")}${row.kind === "unmapped" ? ui.dim(" (not in the identity table)") : ""} ${ui.dim(`— ${row.places.length} place${row.places.length === 1 ? "" : "s"}, ${where}${from}`)}`);
+    for (const pl of row.places) {
+      const price = pl.included ? "included in the plan" : pl.tag === "local" ? "free" : `${perM(pl.in_per_m)} in / ${perM(pl.out_per_m)} out per M`;
+      lines.push(`    ${pl.ref}  ${pl.tag}  ${price}${pl.cheapest ? "  cheapest" : ""}`);
+    }
+  }
   return lines.join("\n");
 }
 
@@ -904,6 +1287,37 @@ export async function assign(opts: ComputeOptions & { target: AssignmentTarget; 
   const warn = p.locality === "off_machine" && p.zdr !== true;
   if (warn) opts.out(`⚠ ${ref.provider} is off_machine and does not claim zero data retention — this is recorded, never blocked (C13); the engine writes one warning row per run.`);
   return { target: path.join("."), provider: ref.provider, model: ref.model, effort, warn_non_zdr: warn, delivery };
+}
+
+// ---- unassign: tiers are editable (Q1) ------------------------------------------
+
+export interface UnassignResult {
+  target: string;
+  delivery: ProtectedWrite;
+}
+
+/**
+ * `metistry compute unassign <tier|crew:name>` — the other half of editing
+ * the tiers (the owner's Q1: `assignments.tiers` stays, as the allow-list the
+ * dynamic router chooses from, edited under Settings ▸ Compute ▸ Advanced).
+ *
+ * `default` is refused: it is required whenever `assignments:` exists and is
+ * where every unnamed tier lands, so it is reassigned, never removed. A tier
+ * removed here is not an error anywhere: a turn that still names it resolves
+ * to `default`, the rule `resolveAssignment` has always followed.
+ */
+export async function unassign(opts: ComputeOptions & { target: AssignmentTarget }): Promise<UnassignResult> {
+  if (opts.target.kind === "default") {
+    throw new StepFailed("assignments.default cannot be removed: it is where every unnamed and unknown tier lands — `metistry compute assign default <provider/model>` changes it");
+  }
+  const edit = await openInstanceFile(opts);
+  const path = assignmentPath(opts.target);
+  if (!edit.doc.hasIn(path)) throw new StepFailed(`${path.join(".")} is not assigned in ${edit.path} — nothing to remove`);
+  edit.doc.deleteIn(path);
+  const { delivery } = await commit(opts, edit, `metistry compute unassign ${path.join(".")}`);
+  const who = opts.target.kind === "tier" ? `a turn that names ${opts.target.name}` : `crew ${opts.target.name}, where its definition still says a legacy haiku|sonnet|opus,`;
+  opts.out(opts.dryRun === true ? `[dry-run] ${path.join(".")} would be removed — ${who} would then run on assignments.default.` : `${path.join(".")} removed — ${who} now runs on assignments.default.`);
+  return { target: path.join("."), delivery };
 }
 
 // ---- budget ------------------------------------------------------------------

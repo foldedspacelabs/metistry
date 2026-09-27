@@ -149,6 +149,24 @@ describe("the request", () => {
     }
     expect(completionsUrl("http://x/v1/")).toBe("http://x/v1/chat/completions");
   });
+
+  it("a {{ secret.x }} reference is read from the environment it was delivered to — METISTRY_SECRET_X — and never the Keychain (T4-18)", () => {
+    const named = { ...cloud.config, auth: { secret: "{{ secret.openrouter_api_key }}" } };
+    expect(credentialFor(named, "openrouter", { METISTRY_SECRET_OPENROUTER_API_KEY: "sk-delivered" })).toBe("sk-delivered");
+    // for one release, the line T4-3 filled from the same secret: a running engine keeps its key across migrate-scope's rewrite
+    expect(credentialFor(named, "openrouter", { METISTRY_OPENROUTER_API_KEY: "sk-old-line" })).toBe("sk-old-line");
+    try {
+      credentialFor(named, "openrouter", { METISTRY_DB_PASSWORD: "not-this" });
+      expect.unreachable();
+    } catch (err) {
+      expect(err).toBeInstanceOf(CredentialError);
+      const m = (err as Error).message;
+      expect(m).toContain("{{ secret.openrouter_api_key }}");
+      expect(m).toContain("METISTRY_SECRET_OPENROUTER_API_KEY");
+      expect(m).toContain("metistry secrets sync --to env");
+      expect(m).not.toContain("not-this");
+    }
+  });
 });
 
 // ---- prompt caching (OPEN-6, ruled 2026-09-17) -------------------------------

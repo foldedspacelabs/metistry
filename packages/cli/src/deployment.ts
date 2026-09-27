@@ -21,6 +21,8 @@ import {
   SEED_DIR,
   resolveUrl,
   emptyCompute,
+  credentialEnvNames,
+  providerCredential,
   type Compute,
   type Deployment,
   type DeploymentShape,
@@ -310,18 +312,21 @@ export const ASSISTANT_ENV_KEYS = [
 
 /**
  * The engine's credential is NOT in the list above, because its NAME is not
- * fixed: `compute.yaml` says which Keychain item each provider uses
- * (`providers.<name>.auth.secret`), and the engine reads the environment
- * variable of that name at the point of the call (`credentialFor`,
- * apps/assistant/src/engine-openai.ts). So the allowlist is the static keys
- * plus exactly the secret names THIS install's compute.yaml declares —
- * still an allowlist, and still one this file computes rather than a
- * passthrough of whatever is in the operator's shell.
+ * fixed: `compute.yaml` says which credential each provider uses
+ * (`providers.<name>.auth.secret`), and the engine reads it from its
+ * environment at the point of the call (`credentialFor`,
+ * apps/assistant/src/engine-openai.ts) — `{{ secret.x }}` as
+ * `METISTRY_SECRET_X`, an install variable as itself (core's
+ * `credentialEnvNames`, the one spelling of where each lands). So the
+ * allowlist is the static keys plus exactly the variables THIS install's
+ * compute.yaml references — still an allowlist, and still one this file
+ * computes rather than a passthrough of whatever is in the operator's shell.
  */
 export function assistantEnvKeys(compute: Compute): readonly string[] {
-  const named = Object.values(compute.providers)
-    .map((p) => p.auth?.secret)
-    .filter((n): n is string => typeof n === "string");
+  const named = Object.values(compute.providers).flatMap((p) => {
+    const c = providerCredential(p);
+    return c ? credentialEnvNames(c) : [];
+  });
   return [...ASSISTANT_ENV_KEYS, ...new Set(named)];
 }
 

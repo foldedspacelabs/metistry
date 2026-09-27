@@ -621,7 +621,7 @@ describe("an instance with no engine (W1)", () => {
   const ABSENT_LINE =
     "assistant: absent — assignments.default runs on openrouter/anthropic/claude-sonnet-5, and providers.openrouter.auth.secret names METISTRY_OPENROUTER_API_KEY, which is unset here; " +
     "captures, tasks, search and the console run; fold turns wait (docs/ops/assistant-tools.md). " +
-    "Fix: metistry compute providers add --from <template> --name openrouter --secret METISTRY_OPENROUTER_API_KEY, then metistry secrets sync --to env";
+    "Fix: put METISTRY_OPENROUTER_API_KEY in this install's environment (metistry secrets sync --to env), or reference one of this instance's secrets: metistry compute providers set openrouter --secret <name>";
 
   it("is not written into the supervisor's children, and `up` says why in one line", async () => {
     const P = await launchdCheckout();

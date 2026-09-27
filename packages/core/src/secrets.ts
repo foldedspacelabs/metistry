@@ -45,11 +45,14 @@ import { parseDocument } from "yaml";
 import { TOOL_MODES, type ToolMode } from "./connections.js";
 import { parseEgressEntry } from "./egress.js";
 import { AGENT_NAME_RE, INSTANCE_ID_RE } from "./instances.js";
+import { INSTANCE_SECRET_NAME_RE, SECRET_DELIVERY_PREFIX, SECRET_REF_EXACT_RE, SECRET_REF_RE, parseSecretReference, secretDeliveryVar, type SecretReference } from "./secret-ref.js";
+
+// The spelling of a reference lives in a leaf module (compute.ts reads it too,
+// and cannot import this file without a load-time cycle); re-exported here so
+// every caller keeps one import.
+export { INSTANCE_SECRET_NAME_RE, SECRET_DELIVERY_PREFIX, SECRET_REF_RE, parseSecretReference, secretDeliveryVar, type SecretReference };
 
 // ---- names ---------------------------------------------------------------------
-
-/** A secret's name: owner-chosen, lowercase snake_case (§2.14), at most 64 characters — the shape connections.ts gives a `secret` field. Not compute.ts's `SECRET_NAME_RE`, which is the UPPER_SNAKE environment name `auth.secret` still takes until T4-18. */
-export const INSTANCE_SECRET_NAME_RE = /^[a-z][a-z0-9_]{0,63}$/;
 
 export function isSecretName(value: unknown): value is string {
   return typeof value === "string" && INSTANCE_SECRET_NAME_RE.test(value);
@@ -199,10 +202,6 @@ export function secretGrant(file: SecretsFile, name: string, grantee: string): S
 
 // ---- references: {{ secret.name }} ---------------------------------------------------
 
-/** One well-formed reference. Global: use with `matchAll`/`replace`, never `test`. */
-export const SECRET_REF_RE = /\{\{\s*secret\.([a-z][a-z0-9_]{0,63})\s*\}\}/g;
-/** Exactly one reference and nothing else. */
-const SECRET_REF_EXACT_RE = new RegExp(`^${SECRET_REF_RE.source}$`);
 /** Anything that is trying to be a secret reference, in any case — what a well-formed one is checked against, so a typo is refused rather than sent. */
 const SECRET_REF_LOOSE_RE = /\{\{\s*secrets?\b[^}]*\}\}/gi;
 
@@ -223,23 +222,6 @@ export function secretRefsIn(text: string): SecretRefs {
     if (!SECRET_REF_EXACT_RE.test(whole) && !malformed.includes(whole)) malformed.push(whole);
   }
   return { names, malformed };
-}
-
-/**
- * A field that holds ONE reference (`auth.secret`, a connection's `secret`
- * field): `{{ secret.name }}`, or — for one release — `env:NAME`, the
- * install-environment spelling it replaces (§2.14). Undefined when the value
- * is neither.
- */
-export type SecretReference = { kind: "secret"; name: string } | { kind: "env"; name: string; deprecated: true };
-
-export function parseSecretReference(value: string): SecretReference | undefined {
-  const v = value.trim();
-  const m = SECRET_REF_EXACT_RE.exec(v);
-  if (m?.[1]) return { kind: "secret", name: m[1] };
-  const e = /^env:([A-Z][A-Z0-9_]*)$/.exec(v);
-  if (e?.[1]) return { kind: "env", name: e[1], deprecated: true };
-  return undefined;
 }
 
 /** What fills a reference: one instance's store (`InstanceSecrets`), or a fake. */

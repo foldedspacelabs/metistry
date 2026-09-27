@@ -45,9 +45,11 @@ import {
   normalizeSecretHost,
   parseCompute,
   parseSecretGrantee,
+  parseSecretReference,
   parseSecretsFile,
   resolveInstanceLayout,
   resolveUrl,
+  secretDeliveryVar,
   secretEnvName,
   secretNameIssue,
   secretRefsIn,
@@ -193,7 +195,9 @@ export function accountFor(_name: string, accounts: Accounts): string {
 export const RETIRED_SHARED_SCOPE: readonly { match: RegExp; what: string }[] = [
   { match: /^METISTRY_AWS_(SECRET_ACCESS_KEY|SESSION_TOKEN)$/, what: "your AWS credentials (aws-costs)" },
   { match: /^METISTRY_DEVIN_API_KEY$/, what: "your Devin (Cognition) credential" },
-  { match: /^METISTRY_[A-Z0-9_]*_API_KEY$/, what: "a compute provider credential (compute.yaml `auth.secret`)" },
+  // not `METISTRY_SECRET_*`: that is where a named secret is DELIVERED to a
+  // service (T4-18, core's `secretDeliveryVar`), never a shared-scope original
+  { match: /^METISTRY_(?!SECRET_)[A-Z0-9_]*_API_KEY$/, what: "a compute provider credential (compute.yaml `auth.secret`)" },
 ];
 
 /** Whether the retired shared scope filed this variable under the per-user account. */
@@ -275,6 +279,15 @@ export interface SecretsOptions {
   mint?: (() => string) | undefined;
   /** `--to env`: whether a service that holds a token is running now (`serviceAnswers` in the CLI). Absent = unknown, so a changed token's restart hint is conditional. */
   serviceRunning?: ((service: TokenService) => Promise<boolean | undefined>) | undefined;
+  /**
+   * `--to env`: named secrets this instance's services read — every
+   * `{{ secret.x }}` compute.yaml's providers reference (core's
+   * `providerSecretNames`). Each is written as `METISTRY_SECRET_X` from this
+   * instance's item, which is how a key reaches the engine without the
+   * engine ever touching the Keychain (T4-18). Nothing else named is
+   * delivered: a secret no service reads stays in the Keychain.
+   */
+  deliver?: readonly string[] | undefined;
 }
 
 export type SyncDirection = "keychain" | "env";
@@ -439,6 +452,14 @@ export async function syncSecrets(direction: SyncDirection, opts: SecretsOptions
     }
     if (v === undefined) skipped.push(name);
     else values.set(name, v);
+  }
+  // the named secrets a service reads (compute.yaml's providers): delivered
+  // under their own variable, from this instance's item and nowhere else
+  for (const name of opts.deliver ?? []) {
+    const line = secretDeliveryVar(name);
+    const v = named ? await named.value(name) : undefined;
+    if (v === undefined || v === "") skipped.push(line);
+    else values.set(line, v);
   }
 
   // the move: an instance's `.env` belongs under its own state/, and the
@@ -1090,7 +1111,30 @@ async function sharedReferenceSites(instanceDir: string): Promise<ReferenceSite[
   return sites;
 }
 
-/** Every shared-scope variable an instance knows of: its `.env`, `.env.example`, and the files that reference one. */
+/**
+ * The originals compute.yaml USED to name and now references as a secret:
+ * `{{ secret.openrouter_api_key }}` was `METISTRY_OPENROUTER_API_KEY` before
+ * step 2 rewrote it. Once compute reads references (T4-18) the rewrite lands,
+ * and without this the rewritten file would stop naming the original — a
+ * rerun would no longer count it as kept, and `purge-shared` would never
+ * find it to remove.
+ */
+async function rewrittenComputeOriginals(instanceDir: string): Promise<string[]> {
+  const doc = parseDocument(await readText(join(instanceDir, protectedRel(instanceDir, "compute"))));
+  if (doc.errors.length) return [];
+  const compute = doc.toJS() as { providers?: Record<string, { auth?: { secret?: unknown } } | null> } | undefined;
+  const out: string[] = [];
+  for (const cfg of Object.values(compute?.providers ?? {})) {
+    const ref = cfg?.auth?.secret;
+    const r = typeof ref === "string" ? parseSecretReference(ref) : undefined;
+    if (r?.kind !== "secret") continue;
+    const original = `METISTRY_${r.name.toUpperCase()}`;
+    if (sharedScopeSecretName(original) === r.name && !out.includes(original)) out.push(original);
+  }
+  return out;
+}
+
+/** Every shared-scope variable an instance knows of: its `.env`, `.env.example`, and the files that reference one — or did, before step 2 rewrote them. */
 async function sharedScopeCandidates(instanceDir: string, files: { envFile?: string | undefined; exampleFile?: string | undefined }): Promise<string[]> {
   const names: string[] = [];
   const add = (n: string): void => {
@@ -1098,6 +1142,7 @@ async function sharedScopeCandidates(instanceDir: string, files: { envFile?: str
   };
   for (const f of [files.envFile, files.exampleFile]) if (f) for (const n of declaredVars(await readText(f))) add(n);
   for (const s of await sharedReferenceSites(instanceDir)) add(s.from);
+  for (const n of await rewrittenComputeOriginals(instanceDir)) add(n);
   return names;
 }
 

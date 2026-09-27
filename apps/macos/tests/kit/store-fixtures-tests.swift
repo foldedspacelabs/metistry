@@ -348,9 +348,14 @@ private let drives: [String: Drive] = [
     // Usage
     "GET /api/compute": { s, _ in done(await s.compute()) },
     "GET /api/compute/models": { s, a in done(await s.computeModels(provider: a.q("provider"))) },
+    "GET /api/compute/catalogue": { s, a in done(await s.computeCatalogue(query: a.q("q"), provider: a.q("provider"), refresh: a.q("refresh") == "true")) },
     "POST /api/compute/assign": { s, a in
         let target: ComputeAssignTarget = a.b("crew").map(ComputeAssignTarget.crew) ?? .tier(a.b("tier") ?? "")
         return done(await s.assignCompute(target, model: a.b("model") ?? "", effort: a.b("effort")))
+    },
+    "POST /api/compute/unassign": { s, a in
+        let target: ComputeAssignTarget = a.b("crew").map(ComputeAssignTarget.crew) ?? .tier(a.b("tier") ?? "")
+        return done(await s.unassignCompute(target))
     },
     "POST /api/compute/budget": { s, a in
         done(await s.setComputeBudget(scope: a.b("scope") ?? "", daily: a.bDouble("daily"), monthly: a.bDouble("monthly"), action: a.b("action") ?? ""))

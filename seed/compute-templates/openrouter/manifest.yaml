@@ -9,7 +9,11 @@
 # on the runs row (docs/ops/compute.md, "Prompt caching").
 #
 # `metistry compute providers add --from openrouter` writes this block into
-# the instance's compute.yaml and asks for the key on stdin.
+# the instance's compute.yaml and asks for the key on stdin. The key becomes
+# one of THIS instance's secrets, `openrouter_api_key` (the login Keychain
+# under the instance's own account, its name in secrets.yaml, sent only to
+# openrouter.ai), and `auth.secret` is a reference to it — never the key.
+# `--secret <name>` picks a different secret.
 schema: 1
 name: openrouter
 type: provider
@@ -19,7 +23,7 @@ provider:
   kind: openai-compatible
   base_url: https://openrouter.ai/api/v1
   locality: off_machine
-  auth: { secret: METISTRY_OPENROUTER_API_KEY }
+  auth: { secret: "{{ secret.openrouter_api_key }}" }
   zdr: true
   caching: auto
   request: { provider: { order: [anthropic], allow_fallbacks: false } }

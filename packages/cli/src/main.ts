@@ -53,7 +53,7 @@ import { migrateInbox } from "./migrate-inbox.js";
 import { migrateLayout } from "./migrate-layout.js";
 import { migrateShape } from "./migrate-shape.js";
 import { ensureInstanceId, instanceEnvFile, readInstanceId } from "./instance.js";
-import { readIdentity, renderIdentity } from "./identity.js";
+import { identitySet, readIdentity, renderIdentity, renderIdentitySet, IDENTITY_SET_FIELDS, type IdentityChange } from "./identity.js";
 import {
   INSTANCE_VERBS,
   instancesAdd,
@@ -84,7 +84,7 @@ import {
   type SyncDirection,
 } from "./secrets.js";
 import { controlServices, downAll, renderDown, renderServiceResults, serviceLogs, UnknownServiceError, type ServiceAction } from "./service-control.js";
-import { StepRunner } from "./steps.js";
+import { StepFailed, StepRunner } from "./steps.js";
 import { renderTemplatesCheck, templatesCheck } from "./templates.js";
 import { configureUi, createUi, defaultUi, type Ui } from "./ui.js";
 import { up } from "./up.js";
@@ -370,9 +370,15 @@ const USAGE = `metistry — Metistry command line
       or the console closes it, then {id, ended}. EOF on stdin ends the session.
 
   metistry identity [--json] [--instance <dir>]
+  metistry identity set [--name <name>] [--mention <@slug>] [--mark <glyph>] [--dry-run] [--json]
       The instance's identity.yaml (name, mention, voice, icon, instance_id) —
-      the only place the assistant is named (CLAUDE.md). Read-only: identity.yaml
-      is a §4.7 protected path, so this verb has no field to change it.
+      the only place the assistant is named (CLAUDE.md). "set" changes the
+      name, the mention and the mark (the file's icon:) through the protected
+      write — the reconciler as the owner, recorded as a config_write run that
+      Activity shows. A new name brings its mention along when the mention was
+      the one derived from the old name. Every field is validated first; an
+      invalid one is refused and nothing is written. The console and the
+      assistant read the file at start: "metistry restart" shows the change.
 
   metistry templates check [<file>] [--json] [--instance <dir>]
       Validate the vault's Templates/ — every directive, with the line number
@@ -751,7 +757,7 @@ export const HELP_GROUPS: Array<{ title: string; verbs: Array<[string, string]> 
       ["deployment set-keep-awake", "whether this install holds the Mac awake, and on which power"],
       ["agents list", "every registered agent and what it holds"],
       ["agents autonomy <id>", "how much room one agent has with an action"],
-      ["identity", "identity.yaml — the one place the assistant is named"],
+      ["identity [set]", "identity.yaml — the one place the assistant is named; set its name, mention and mark"],
       ["templates check [<file>]", "does the vault's Templates/ read, before the next run reads it"],
       ["instances list|add|remove|refresh", "the peer registry: which other instances this one knows"],
       ["extensions list|add|remove", "your own units — templates, connection types, targets, overlays"],
@@ -1155,6 +1161,42 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
       const instanceDir = str(flags, "instance") ?? process.env.METISTRY_INSTANCE_DIR;
       if (!instanceDir) {
         err("identity needs the instance repo: pass --instance <dir> or set METISTRY_INSTANCE_DIR (docs/ops/cli.md)");
+        return 2;
+      }
+      if (positional[0] === "set") {
+        const change: IdentityChange = {};
+        for (const f of IDENTITY_SET_FIELDS) {
+          const v = flags[f];
+          if (v === true) {
+            err(`--${f} takes a value (metistry identity set --${f} <value>)`);
+            return 2;
+          }
+          if (v !== undefined) change[f] = v;
+        }
+        const json = flags.json === true;
+        const dryRun = flags["dry-run"] === true;
+        try {
+          const r = await identitySet({
+            instanceDir,
+            change,
+            env: process.env,
+            platform: io.platform ?? process.platform,
+            uid: io.uid ?? (typeof process.getuid === "function" ? process.getuid() : 0),
+            fetchFn: io.fetchFn ?? fetch,
+            ...(io.exec ? { exec: io.exec } : {}),
+            dryRun,
+            // --json is a wire contract (docs/ops/cli.md): progress to stderr
+            out: json ? err : out,
+          });
+          out(json ? JSON.stringify(r, null, 2) : renderIdentitySet(r, dryRun));
+          return 0;
+        } catch (e) {
+          err(`metistry identity set: ${e instanceof Error ? e.message : String(e)}`);
+          return e instanceof StepFailed ? e.code : 1;
+        }
+      }
+      if (positional[0] !== undefined) {
+        err("usage: metistry identity [--json] | metistry identity set [--name <name>] [--mention <@slug>] [--mark <glyph>] [--dry-run]");
         return 2;
       }
       const identity = await readIdentity(instanceDir);

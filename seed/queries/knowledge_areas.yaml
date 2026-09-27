@@ -1,0 +1,100 @@
+# Seeded default (D4 overlay: an instance file of the same name wins).
+#
+# The areas, described rather than counted (design-build-plan §2.10; screen
+# 10 §5, C68). One row per area: its index page's one-line description, how
+# many settled pages it holds, when one last changed, and whether the newest
+# fold names it — the "why it is in front of you" column, which is
+# provenance and never a computed score (P5).
+#
+# **`area` is `knowledge_pages`' derivation, byte for byte** — the first two
+# segments under `Areas/` (`Areas/Health/2026/sleep.md` is `Areas/Health`),
+# the first segment anywhere else (`Journal`, `Me`, `Projects`), and a
+# vault-root file belongs to none and is left out. The page list's `area`
+# filter takes exactly these values, so a row here is a list the client can
+# open with `GET /api/knowledge/pages?area=<area>`.
+#
+# **The description is the area's INDEX page's** — `<area>/README.md`, the
+# note every seeded folder carries (`seed/vault/*/README.md`) — its
+# frontmatter `description`, as the indexer stores it. NULL when there is no
+# such page or it has no description: nothing writes that line yet (C68), and
+# a file count in its place would answer *how much* when the owner asked
+# *what*. The README still counts as a page of its area.
+#
+# **`named_by_fold`** is the newest fold's own outgoing links (the
+# `knowledge_fold_latest` rule for "newest": the greatest
+# `Journal/Fold/YYYY-MM-DD.md` that is neither a draft nor a conflict), mapped
+# to their areas — so "named by last night's fold" is a fact the owner can
+# check by opening the fold, not a rank. A link to a draft or a conflict
+# names nothing, exactly as `knowledge_fold_latest` drops it from the list.
+#
+# **Never a draft or a conflict**, in the count, the last change or the
+# description: the page list's rule, so the count here and the length of the
+# list it opens cannot disagree. `last_change` is the newest `mtime` among
+# the pages counted.
+#
+# Ordered by area in BYTE order (`COLLATE "C"`, `knowledge_pages.yaml` has
+# why). Unbounded on purpose: an area is a top-level folder, and a vault has
+# tens of them, not thousands.
+#
+# **`expose: route`**: every row names a folder of the owner's vault —
+# including `Me` and `Journal`, which only the owner may be shown (#255) —
+# with a count of what is in it, so `GET /api/knowledge/areas` is the one
+# door and it is the owner's. The route also drops any area that is not
+# knowledge by `core`'s own predicate (`.metistry`, `Artifacts`), so a row
+# the walk should never have written cannot become a folder on screen.
+name: knowledge_areas
+expose: route
+description: >-
+  One row per vault area (`knowledge_pages`' derived grouping: `Areas/<X>`,
+  else the top-level folder): `area`, `description` (its `<area>/README.md`'s
+  one-line frontmatter description, NULL when there is none), `pages` (settled
+  pages, never drafts or conflicts), `last_change` (their newest mtime) and
+  `named_by_fold` (true when the newest fold links into it). Ordered by area
+  in BYTE order (`COLLATE "C"`).
+sql: |
+  WITH page AS (
+    SELECT
+      k.path,
+      CASE
+        WHEN k.path LIKE 'Areas/%/%' THEN split_part(k.path, '/', 1) || '/' || split_part(k.path, '/', 2)
+        WHEN strpos(k.path, '/') > 0 THEN split_part(k.path, '/', 1)
+      END AS area,
+      k.description,
+      k.mtime
+    FROM knowledge_files k
+    WHERE NOT k.draft
+      AND k.status <> 'conflict'
+  ),
+  fold AS (
+    SELECT k.path
+    FROM knowledge_files k
+    WHERE k.path ~ '^Journal/Fold/[0-9]{4}-[0-9]{2}-[0-9]{2}\.md$'
+      AND NOT k.draft
+      AND k.status <> 'conflict'
+    ORDER BY k.path COLLATE "C" DESC
+    LIMIT 1
+  ),
+  named AS (
+    SELECT DISTINCT
+      CASE
+        WHEN l.to_path LIKE 'Areas/%/%' THEN split_part(l.to_path, '/', 1) || '/' || split_part(l.to_path, '/', 2)
+        WHEN strpos(l.to_path, '/') > 0 THEN split_part(l.to_path, '/', 1)
+      END AS area
+    FROM knowledge_links l
+    JOIN fold f ON l.from_path = f.path
+    WHERE NOT EXISTS (
+      SELECT 1 FROM knowledge_files d
+      WHERE d.path = l.to_path AND (d.draft OR d.status = 'conflict')
+    )
+  )
+  SELECT
+    p.area,
+    (SELECT i.description FROM page i WHERE i.path = p.area || '/README.md') AS description,
+    count(*)::int                                                            AS pages,
+    max(p.mtime)                                                             AS last_change,
+    EXISTS (SELECT 1 FROM named n WHERE n.area = p.area)                     AS named_by_fold
+  FROM page p
+  WHERE p.area IS NOT NULL
+  GROUP BY p.area
+  ORDER BY p.area COLLATE "C"
+cache_ttl: 0 # a page the owner just wrote is a last change this list must show

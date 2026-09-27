@@ -1,0 +1,62 @@
+# Seeded default (D4 overlay: an instance file of the same name wins).
+#
+# The drafts waiting on the owner (design-build-plan §2.10; screen 10 §3.2,
+# C66). `knowledge_pages` and every `mcp-brain` tool drop a `status: draft`
+# note with the same `WHERE NOT draft`, and for an agent that is right: a
+# draft is never served to one. For the OWNER it was wrong — hiding a draft
+# from the only person who can settle it — so this is the other half of the
+# same column, read for the owner and nobody else. No migration:
+# `0009_brain.sql` already has `draft`, `title` and `description`.
+#
+# **A conflict is not a draft.** The indexer sets `draft` on a `conflict` row
+# too (`apps/reconciler/src/indexer.ts`: `draft || conflict`), because a file
+# it could not settle must be invisible to agents for the same reason. But a
+# conflict is answered with Keep Mine / Take the Other (T2-10), not with
+# Approve / Revise / Decline, so it is left out here and a draft means
+# exactly what the note's own frontmatter says.
+#
+# **Ordered by path, in byte order, as the page list is.** `path` is the
+# primary key, so the order is total and a window cannot repeat or skip a
+# draft under `offset`; `COLLATE "C"` so the owner's Mac and a Linux
+# container page it identically (`knowledge_pages.yaml` has the whole
+# argument). Not by `mtime`, which sync churns.
+#
+# **No total**, for the page list's reason: the caller pages until a window
+# comes back short.
+#
+# **`expose: route`, and owner-only at the route.** A draft is the one thing
+# an agent must never be handed by any door, so the generic `/api/q/<name>`
+# and `/mcp`'s `queries_run` answer this name with the refusal they give an
+# unknown one, and `GET /api/knowledge/drafts` refuses every principal that
+# is not the owner before it runs anything. The owner may still read it at
+# the generic door (P4: "the owner should always have access to
+# everything") — it is theirs either way.
+name: knowledge_drafts
+expose: route
+description: >-
+  The owner's drafts — one row per note whose frontmatter says `status:
+  draft`, from the reconciler's index: path, derived area (as
+  `knowledge_pages` derives it), title (frontmatter's, else the basename),
+  one-line description and last change. Never an unsettled `conflict`, which
+  is its own kind of pending thing. Ordered by path in BYTE order (`COLLATE
+  "C"`); page with `limit`/`offset`. Owner-only: never served to an agent.
+params:
+  limit: { type: int, default: 100 }
+  offset: { type: int, default: 0 }
+sql: |
+  SELECT
+    k.path,
+    CASE
+      WHEN k.path LIKE 'Areas/%/%' THEN split_part(k.path, '/', 1) || '/' || split_part(k.path, '/', 2)
+      WHEN strpos(k.path, '/') > 0 THEN split_part(k.path, '/', 1)
+    END                                                              AS area,
+    COALESCE(k.title, regexp_replace(k.path, '^.*/|\.md$', '', 'g')) AS title,
+    k.description,
+    k.mtime                                                          AS modified
+  FROM knowledge_files k
+  WHERE k.draft
+    AND k.status <> 'conflict'
+  ORDER BY k.path COLLATE "C"
+  LIMIT :limit
+  OFFSET :offset
+cache_ttl: 0 # a draft the owner just settled must leave the list at once

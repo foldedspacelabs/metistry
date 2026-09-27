@@ -4,7 +4,7 @@
 // approved configuration rollback with the owner-class bearer — and nothing
 // else, ever. Fetch is faked; no console, reconciler or instance is touched.
 import { describe, expect, it } from "vitest";
-import { main } from "../src/main.js";
+import { main, parseArgs } from "../src/main.js";
 import { momentArg, rollbackVault, type VaultRollbackOptions } from "../src/vault.js";
 
 const CONSOLE = "http://127.0.0.1:9";
@@ -180,5 +180,7 @@ describe("metistry vault rollback", () => {
     expect(await run(["vault", "rollback", "--file", "Areas/x.md", "--request", "62"])).toBe(2);
     expect(await run(["vault", "rollback", "--to"])).toBe(2);
     expect(errs.join("\n")).toContain("name exactly one thing to roll back");
+    // --include-config takes no value: the commit after it is still the commit
+    expect(parseArgs(["vault", "rollback", "--include-config", "4c1d2e3f"])).toMatchObject({ command: "vault", positional: ["rollback", "4c1d2e3f"], flags: { "include-config": true } });
   });
 });

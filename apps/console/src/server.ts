@@ -57,6 +57,7 @@ import { computeRoutes, isComputeRoute, type ComputeAdmin } from "./compute-rout
 import { isKnowledgeRoute, knowledgeRoutes, type ConflictRefusal, type KnowledgeConflicts, type KnowledgeHistory, type KnowledgeSearcher } from "./knowledge-routes.js";
 import { isVaultTaskRoute, ReplayCache, vaultTaskRoutes } from "./vault-task-routes.js";
 import { closeDayRoute, isCloseDayRoute, type RoutineTrigger } from "./close-day.js";
+import { isTodayRoute, todayRoutes } from "./today-routes.js";
 import type { ConsoleVaultClient } from "./vault-client.js";
 import { isScheduledRoute, scheduledRoutes, type ScheduledAdmin } from "./scheduled-routes.js";
 import { isMeetingNoteRoute, meetingNoteRoute, MeetingNotes } from "./meeting-note-route.js";
@@ -111,6 +112,8 @@ export interface ConsoleConfig {
   vault?: ConsoleVaultClient;
   /** `plan-tomorrow`, run on demand by Close the Day (close-day.ts). Absent = the close still writes the section and says the plan was not enqueued. */
   planTomorrow?: RoutineTrigger | undefined;
+  /** The owner's zone for Today's routes (T2-7): `METISTRY_TZ` (core `configuredTimeZone`), never `TZ`. Null or absent → Today counts days in UTC. */
+  timeZone?: string | null | undefined;
   /** A note's git history for `GET /api/knowledge/history` and `GET /api/knowledge/version` — the reconciler's `/vault/log` and `/vault/show` (§2.21, T10-4); absent = both answer not_available. */
   knowledgeHistory?: KnowledgeHistory | undefined;
   /** Resolve a conflict for `POST /api/knowledge/conflicts/resolve` — the reconciler's `POST /vault/conflicts/resolve` (§2.11, T2-10); absent = not_available. */
@@ -1128,7 +1131,9 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         // so does Close the Day, into the note's section
         isCloseDayRoute(key) ||
         // …and so does the meeting-note door (T2-11)
-        isMeetingNoteRoute(key)
+        isMeetingNoteRoute(key) ||
+        // Today reads the owner's own day — their notes' task lines, their calendar — and stores their order
+        isTodayRoute(key)
       ) {
         return sendRefusal(res, management);
       }
@@ -1452,6 +1457,12 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     // `user`, then `plan-tomorrow` enqueued; broken markers are a `note`
     // request and no write (close-day.ts).
     if (isCloseDayRoute(key)) return closeDayRoute(req, res, { db, queries, vault: cfg.vault, audit, plan: cfg.planTomorrow });
+
+    // ----- Today (§2.1, §2.10; T2-7): the day composed, any filter, the owner's order -----
+    // Every row through a route-only named query; both task reads compile
+    // their filter with core's `compileTaskFilter`; an order key outside the
+    // day is refused (today-routes.ts).
+    if (isTodayRoute(key)) return todayRoutes(req, res, key, url, { db, queries, vault: cfg.vault, audit, timeZone: cfg.timeZone });
 
     // ----- artifacts + review dispatch (§4.21; owner session only) -----
     if (isArtifactRoute(url.pathname)) return artifactRoutes(req, res, url, artifacts);

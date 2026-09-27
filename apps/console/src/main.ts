@@ -552,6 +552,8 @@ const server = makeServer(pool, queries, {
   ...(reconcilerUrl && reconcilerToken ? { vaultRevert: httpVaultReverter({ url: reconcilerUrl, token: reconcilerToken }) } : {}),
   crews,
   scheduled: scheduledAdmin,
+  // Today's day (T2-7): METISTRY_TZ, never TZ — unset, Today counts days in UTC
+  timeZone: configuredTimeZone(process.env),
   compute: () => compute.store.current,
   // the assistant's definition (T4-6): the same overlays the engine composes its prompt from
   assistantDefinition: () =>

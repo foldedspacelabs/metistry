@@ -19,10 +19,10 @@
   },
   "devDependencies": {
     "@foldedspacelabs/metistry-queries": "workspace:*",
-    "@types/node": "^22.20.1",
+    "@types/node": "^26.6.2",
     "@types/pg": "^8.23.1",
     "pg": "^8.23.0",
     "typescript": "^7.0.2",
-    "vitest": "^4.0.18"
+    "vitest": "^5.0.1"
   }
 }

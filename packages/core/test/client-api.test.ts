@@ -73,8 +73,8 @@ describe("every row", () => {
     }
   });
 
-  it("serves exactly 75 rows — a ticket flipping a row to served/unserved must update this number", () => {
-    expect(CLIENT_API.filter((r) => r.served).length).toBe(75); // T4-1: GET /api/secrets; T2-5: the Defer door; T4-6: GET /api/agents/:id/definition; T4-4: GET /api/variables
+  it("serves exactly 76 rows — a ticket flipping a row to served/unserved must update this number", () => {
+    expect(CLIENT_API.filter((r) => r.served).length).toBe(76); // T4-1: GET /api/secrets; T2-5: the Defer door; T4-6: GET /api/agents/:id/definition; T4-4: GET /api/variables; T3-9: POST /api/sessions/purge
   });
 
   it("takes a cursor only on a read, and an Idempotency-Key only on a write", () => {
@@ -101,9 +101,9 @@ describe("reach and principals", () => {
     }
   });
 
-  it("minting a bearer is `local` — registering an agent and rotating its token (F-13)", () => {
+  it("minting a bearer is `local` — registering an agent and rotating its token (F-13) — and so is Purge Now, which cannot be undone (T3-9)", () => {
     const local = CLIENT_API.filter((r) => r.served && isLocalRoute(r)).map(key);
-    expect(local).toEqual(["POST /api/agents", "POST /api/agents/:id/rotate"]);
+    expect(local).toEqual(["POST /api/agents", "POST /api/agents/:id/rotate", "POST /api/sessions/purge"]);
     // the rest of the agent registry stays reachable from any owner client
     for (const k of ["GET /api/agents", "PUT /api/agents/:id/grants", "POST /api/agents/:id/revoke", "POST /api/agents/:id/approve"]) {
       expect(CLIENT_API.find((r) => key(r) === k)!.reach, k).toEqual(["owner"]);

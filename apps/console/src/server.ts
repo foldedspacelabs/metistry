@@ -53,6 +53,7 @@ import { computeRoutes, isComputeRoute, type ComputeAdmin } from "./compute-rout
 import { isKnowledgeRoute, knowledgeRoutes, type KnowledgeSearcher } from "./knowledge-routes.js";
 import { isVaultTaskRoute, ReplayCache, vaultTaskRoutes } from "./vault-task-routes.js";
 import { agentList, commandList } from "./commands.js";
+import { purgeArchive, purgePreview } from "@metistry-apps/routines";
 import { createRequire } from "node:module";
 
 const require_ = createRequire(import.meta.url);
@@ -884,6 +885,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         PROJECT_ROUTE.test(key) ||
         key === "GET /api/runs/export" ||
         RUN_DETAIL_ROUTE.test(key) ||
+        key === "POST /api/sessions/purge" ||
         key === "GET /api/instances" ||
         key === "GET /api/secrets" ||
         key === "GET /api/variables" ||
@@ -981,6 +983,31 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         res.destroy();
         return;
       }
+    }
+
+    // ----- Purge Now: the session archive, on demand (T3-9; reach `local`) -----
+    // The scheduled `session-purge` routine's own delete, reached by the
+    // owner's hand on this Mac (the `local` gate above has already refused a
+    // passkey session). Irreversible, so it is two steps on one door, and the
+    // first is the default: a body without `confirm: true` deletes NOTHING
+    // and answers what a purge would cost — every session and turn, and by
+    // name the sessions the fold has not read yet, so the confirm can offer
+    // Fold First (C136). `confirm: true` deletes; with the preview's `as_of`
+    // it deletes exactly what was counted, and a turn archived since is kept.
+    // The archive is a cache (invariant 1), so nothing durable is lost — the
+    // audit row says what went, and how much of it was never folded.
+    if (key === "POST /api/sessions/purge") {
+      const body = (await readJson(req)) as { confirm?: unknown; as_of?: unknown };
+      if (body.confirm !== undefined && typeof body.confirm !== "boolean") return sendError(res, "invalid_request", "confirm is true or false");
+      let asOf: Date | undefined;
+      if (body.as_of !== undefined) {
+        asOf = typeof body.as_of === "string" ? new Date(body.as_of) : undefined;
+        if (!asOf || Number.isNaN(asOf.getTime())) return sendError(res, "invalid_request", "as_of is the ISO timestamp a preview answered with");
+      }
+      if (body.confirm !== true) return sendJson(res, 200, { purged: false, ...(await purgePreview(db)) });
+      const gone = await purgeArchive(db, asOf);
+      await audit("sessions", "purge", true, { ...gone, ...(asOf ? { as_of: asOf.toISOString() } : {}), via: auth.kind });
+      return sendJson(res, 200, { purged: true, ...gone, as_of: new Date().toISOString() });
     }
 
     // ----- one run, in full: the activity feed's drill-down (owner only) -----

@@ -173,5 +173,84 @@ func componentSamples() async throws -> [ComponentSample] {
     for (name, block) in blocks {
         add("request-body", name, block.presentation(today: day, now: now, clock: clock)) { AnyView(RequestBodyView(block, today: day, now: now, clock: clock)) }
     }
+
+    samples += try await requestCardSamples(identity.name)
+    return samples
+}
+
+// MARK: - The request card and the meeting card (T5-4b)
+
+/// Needs You's bodies, in the states a card can be in: stepped, summarised,
+/// revising an access request, refused (C45), repainted after a 409, held by
+/// O3, settled — and a meeting before and after a partial Accept All.
+@MainActor
+func requestCardSamples(_ name: String) async throws -> [ComponentSample] {
+    let clock = SampleClock.clock
+    let now = SampleClock.now
+    let day = SampleClock.today
+    let quiet = AnswerConsole { _, _ in AnswerConsole.ok() }
+    var samples: [ComponentSample] = []
+
+    func card(_ sample: String, _ model: RequestAnswering, allowsDecisions: Bool = true) {
+        let p = RequestCard.presentation(model, allowsDecisions: allowsDecisions, today: day, now: now, clock: clock)
+        samples.append(ComponentSample(component: "request-card", name: sample, ground: .surface, presentation: p) {
+            AnyView(RequestCardView(model, allowsDecisions: allowsDecisions, today: day, now: now, clock: clock))
+        })
+    }
+    func answering(_ row: RequestRow, _ transport: any ConsoleCallTransport = quiet) -> RequestAnswering {
+        RequestAnswering(row, store: ConsoleStores(transport: transport), assistantName: name)
+    }
+
+    let questions = #"{"title":"Two things about the Connections pane","questions":[{"prompt":"Where should the Connections table live?","options":["Its own file, SettingsConnections.swift","Inside settings-view.swift"]},{"prompt":"Which columns?","options":["Name","Status","Last used"],"multi":true}],"context":{"prose":"Two calls before I start on the pane.","refs":["docs/product/design/screen-15-settings.md"]}}"#
+    let access = #"{"title":"devin asks to read Areas/Health","area":"Areas/Health","reason":"The sleep log is there, and the question was about sleep.","current_tier":"index","current_areas":[],"current_scope":{"line":"external · titles · autonomy: observe"},"escalated":true,"prior_proposal":311,"prior_declined_at":"2026-09-27T13:14:00.000Z"}"#
+    let action = #"{"title":"Comment on work #41","action":{"kind":"comment","args":{"work_id":41,"body":"Moved to Friday — the fixture format is waiting on the store list."}},"reason":"You asked for a status note when it slipped."}"#
+    let failed = #"{"title":"Dispatch work #41 to the cloud target","action":{"kind":"dispatch","args":{"work_id":41,"target":"cloud"}},"error":{"code":"conflict","message":"task 41 is held by nobody, not by user","decision":"allow","at":"2026-09-28T12:14:00.000Z"}}"#
+    let moved = #"{"error":{"code":"conflict","message":"the proposal changed after you saw it"},"reason":"stale","decision":"pending","proposal":{"id":"2","ts":"2026-09-28T12:00:00.000Z","kind":"action","source_agent":"assistant","trust":"internal","payload":{"title":"Comment on work #41","action":{"kind":"comment","args":{"work_id":41,"body":"Moved to Monday instead."}}},"decision":"pending","changed_at":"2026-09-28T12:30:00.000Z"}}"#
+
+    let stepOne = answering(try requestRow(1, "decision", payload: questions, ts: "2026-09-28T12:52:00.000Z"))
+    card("a question — step 1 of 2", stepOne)
+
+    let summary = answering(try requestRow(1, "decision", payload: questions, ts: "2026-09-28T12:52:00.000Z"))
+    await summary.choose(0)
+    summary.steps?.next()
+    summary.steps?.next()
+    card("a question — Your Answers, one left", summary)
+
+    let revising = answering(try requestRow(7, "access_request", payload: access, ts: "2026-09-28T12:53:00.000Z", trust: "external", agent: "devin"))
+    revising.compose(.revise)
+    revising.areaTail = "Sleep"
+    card("access — Revise open, the tier trade, asked again", revising)
+
+    card("an action — its comment shown before it is posted", answering(try requestRow(2, "action", payload: action, ts: "2026-09-28T12:40:00.000Z")))
+    card("an action — its last answer failed (C45)", answering(try requestRow(8, "action", payload: failed, ts: "2026-09-28T12:10:00.000Z")))
+
+    let stale = answering(try requestRow(2, "action", payload: action, ts: "2026-09-28T12:00:00.000Z"), AnswerConsole { _, _ in AnswerConsole.refusal(409, moved) })
+    await stale.press(.primary)
+    card("repainted after a 409 stale", stale)
+
+    card("unreachable — every answer off, the fact once", answering(try requestRow(2, "action", payload: action, ts: "2026-09-28T12:40:00.000Z")), allowsDecisions: false)
+    card("a task mirror — this build cannot reach its doors", answering(try requestRow(3, "task", payload: #"{"title":"ABC-123 Fix the export","summary":"Exports drop the last row.","source_label":"Linear · ABC-123"}"#, ts: "2026-09-28T11:00:00.000Z", agent: "linear-sync")))
+
+    let settled = answering(try requestRow(5, "report", payload: #"{"title":"Templates/Plan.md could not be read","summary":"The template is not readable text."}"#))
+    await settled.press(.decline)
+    card("settled — the receipt", settled)
+
+    // The meeting: open, then after a partial Accept All.
+    let answeredElsewhere = #"{"error":{"code":"conflict","message":"already decided"},"reason":"already_decided","decision":"allow","proposal":{"id":"13"}}"#
+    let parts = try (11...15).map { i in
+        try requestRow(i, "knowledge", payload: #"{"title":"\#(["Send Kessler the revised scope", "Book the vendor call", "Draft the SOW", "Ask Dana for the fixture list", "File the notes"][i - 11])","meeting":"Vendor review","due":"2026-09-30"}"#, ts: "2026-09-28T12:3\(i - 10):00.000Z")
+    }
+    for (sample, run) in [("a meeting — open", false), ("a meeting — 4 of 5 accepted", true)] {
+        let transport = AnswerConsole { call, _ in call.path == "/api/proposals/13" ? AnswerConsole.refusal(409, answeredElsewhere) : AnswerConsole.ok() }
+        let model = GroupAnswering(MeetingGroup(id: "mtg-1", parts: parts), store: ConsoleStores(transport: transport), assistantName: name, hold: { _ in })
+        if run {
+            model.start(.acceptAll, now: now)
+            await model.settled()
+        }
+        let p = MeetingCard.presentation(model, assistantName: name, allowsDecisions: true, today: day, now: now, clock: clock)
+        samples.append(ComponentSample(component: "meeting-card", name: sample, ground: .surface, presentation: p) {
+            AnyView(MeetingCardView(model, assistantName: name, allowsDecisions: true, today: day, now: now, clock: clock))
+        })
+    }
     return samples
 }

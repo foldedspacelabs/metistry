@@ -1,6 +1,10 @@
 # Seeded default (D4 overlay: an instance file of the same name wins).
+#
+# C82: renamed to `areas_overview` (identical SQL — see that file). This name
+# stays loaded as an alias for one release so a caller still asking for it by
+# the old name gets the same rows; remove it once that release ships.
 name: projects_overview
-description: Per-area rollup of the work table for the dashboard Projects panel — open / in progress / blocked counts, closed in the last 7 days, and the latest open titles. Same aggregation as the morning brief's Projects section.
+description: Per-area rollup of the work table — open / in progress / blocked counts, closed in the last 7 days, and the latest open titles. Deprecated alias for `areas_overview` (C82); kept for one release, identical rows.
 params:
   limit: { type: int, default: 12 }
 sql: |

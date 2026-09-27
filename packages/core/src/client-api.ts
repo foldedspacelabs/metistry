@@ -291,7 +291,7 @@ export const CLIENT_API: readonly ClientRoute[] = [
   planned("GET", "/api/connections", "T4-8a", "the connections: status, tools, used by"),
   planned("GET", "/api/connections/:name", "T4-8a", "one connection"),
   route("GET", "/api/secrets", "secret names, hosts, grants, last used — never a value"),
-  planned("GET", "/api/variables", "T4-4", "the variables agents read"),
+  route("GET", "/api/variables", "the variables agents read — name, value, read by, used in"),
   planned("GET", "/api/recordings/:id", "T8-4", "one recording's retention state"),
 
   // ----- outbound doors through a connection -----

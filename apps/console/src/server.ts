@@ -38,6 +38,7 @@ import { serveStatic } from "./static.js";
 import { capabilitiesOf, type PublicIdentity } from "./identity.js";
 import { loadInstances } from "./instances.js";
 import { listSecrets, SECRETS_NOT_AVAILABLE, type SecretsView } from "./secrets-route.js";
+import { listVariables, VARIABLES_NOT_AVAILABLE, type VariablesView } from "./variables-route.js";
 import { NDJSON_CONTENT_TYPE, RUNS_EXPORT_QUERY, parseExportParams, streamRunsExport } from "./runs-export.js";
 import { route as routeMessage, type Rules } from "./router.js";
 import { sendToSession, storeSubscription, type PushConfig } from "./push.js";
@@ -116,6 +117,12 @@ export interface ConsoleConfig {
    * anything that reads a value. Absent = the route answers 503.
    */
   secrets?: SecretsView | undefined;
+  /**
+   * `GET /api/variables` (variables-route.ts, plan §2.14): the instance's
+   * `variables.yaml` and the directory walked for *used in*. Absent = the
+   * route answers 503.
+   */
+  variables?: VariablesView | undefined;
 }
 
 // ----- since-cursors (docs/ops/client-api.md) -----
@@ -879,6 +886,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         RUN_DETAIL_ROUTE.test(key) ||
         key === "GET /api/instances" ||
         key === "GET /api/secrets" ||
+        key === "GET /api/variables" ||
         key === "GET /api/commands" ||
         // `/api/compute*` is owner-only CONFIGURATION, not an invariant-10
         // action: it changes how the system behaves, so it is the user's
@@ -925,6 +933,20 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         return sendJson(res, statusFor("invalid_request"), errorEnvelope("invalid_request", r.message));
       }
       return sendJson(res, 200, { secrets: r.secrets, as_of: new Date().toISOString() });
+    }
+
+    // ----- the Variables list (§2.14): plain values agents read, never a secret -----
+    // core's parse refuses a key-shaped value, so a file carrying one is a
+    // 400 naming the variable — never the value. Every write is `metistry
+    // variables` on the Mac (M14).
+    if (key === "GET /api/variables") {
+      if (!cfg.variables) return sendError(res, "not_available", VARIABLES_NOT_AVAILABLE);
+      const r = await listVariables(cfg.variables);
+      if (!r.ok) {
+        await audit("variables", "read", false, { reason: "variables.yaml does not validate" });
+        return sendJson(res, statusFor("invalid_request"), errorEnvelope("invalid_request", r.message));
+      }
+      return sendJson(res, 200, { variables: r.variables, as_of: new Date().toISOString() });
     }
 
     // ----- the runs audit export (S5): NDJSON, streamed, through the named query -----

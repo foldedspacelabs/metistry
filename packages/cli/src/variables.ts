@@ -107,7 +107,10 @@ export async function variableUsage(instanceDir: string): Promise<Map<string, st
       }
       if (!e.isFile() || p === own || !/\.(ya?ml|md|json)$/.test(e.name)) continue;
       const text = await readFile(p, "utf8").catch(() => "");
-      for (const name of variableRefsIn(text).names) {
+      const names = new Set(variableRefsIn(text).names);
+      // a connection file also DECLARES what it reads in `variables:` (F-3)
+      if (/\.ya?ml$/.test(e.name) && relative(base, p).startsWith("connections/")) for (const n of declaredVariables(text)) names.add(n);
+      for (const name of names) {
         const list = usage.get(name) ?? [];
         list.push(relative(instanceDir, p));
         usage.set(name, list);
@@ -117,6 +120,14 @@ export async function variableUsage(instanceDir: string): Promise<Map<string, st
   // a legacy (flat) instance has no `.metistry/` to walk — only the instance root, which is the vault
   if (base !== instanceDir.replace(/\/+$/, "")) await walk(base);
   return usage;
+}
+
+/** A connection file's `variables:` list — names only; a file that does not parse declares nothing. */
+function declaredVariables(text: string): string[] {
+  const doc = parseDocument(text);
+  if (doc.errors.length > 0) return [];
+  const list = (doc.toJS() as { variables?: unknown } | null)?.variables;
+  return Array.isArray(list) ? list.filter((n): n is string => typeof n === "string" && /^[a-z][a-z0-9_]{0,63}$/.test(n)) : [];
 }
 
 /** The file and its rows. Absent file = no variables. A file that does not validate throws, naming the variable — never a value. */

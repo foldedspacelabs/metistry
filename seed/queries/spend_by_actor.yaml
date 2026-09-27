@@ -1,0 +1,42 @@
+# Seeded default (D4 overlay: an instance file of the same name wins).
+#
+# Usage's *Where it went* (screen-17-usage.md §1.3: "agents, routines and
+# chat ranked by spend"), from the same ledger and the same accounting
+# `spend` uses (invariant 3, one read path) — grouped by actor (`component`)
+# instead of by day/provider/model, because the popover ranks WHO spent it,
+# not which provider served it. `cost_usd IS NOT NULL` is `spend`'s own
+# filter: a call with no cost recorded (a bridge call, a collector run) never
+# had a price to begin with, and is not part of "where the money went".
+#
+# `calls_unpriced` mirrors `spend`'s own honesty about the one line the
+# screen states beside the ranking ("calls with no price count as $0"):
+# `meta.cost_source = 'unknown'` is a call that WAS billable but nobody could
+# price, kept visible rather than folded silently into `cost_usd = 0`.
+#
+# `expose: generic` (the default) — nothing here is scoped to a caller the
+# way `knowledge_pages` or `pending_requests` are; ranking spend by actor is
+# exactly what the generic `/api/q/spend_by_actor` is for.
+name: spend_by_actor
+description: >-
+  Cost from the runs ledger by actor (component) over a trailing window —
+  Usage's *Where it went*: agents, routines and chat ranked by spend. Same
+  source and accounting as `spend`; rows with no cost recorded are excluded.
+  `calls_unpriced` counts calls priced unknown (no usage.cost and no
+  pricing: entry) — they count as $0 in cost_usd and say so here rather than
+  reading as free compute.
+params:
+  days: { type: int, default: 31 }
+sql: |
+  SELECT
+    coalesce(component, '')                                    AS actor,
+    count(*)                                                   AS calls,
+    count(*) FILTER (WHERE meta ->> 'cost_source' = 'unknown')  AS calls_unpriced,
+    coalesce(sum(tokens_in), 0)                                AS tokens_in,
+    coalesce(sum(tokens_out), 0)                                AS tokens_out,
+    coalesce(sum(cost_usd), 0)                                 AS cost_usd
+  FROM runs
+  WHERE ts >= current_date - make_interval(days => (:days)::int)
+    AND cost_usd IS NOT NULL
+  GROUP BY 1
+  ORDER BY cost_usd DESC
+cache_ttl: 60

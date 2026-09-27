@@ -1,0 +1,97 @@
+# Seeded default (D4 overlay: an instance file of the same name wins).
+#
+# The newest fold and what it links to (design-build-plan §2.10; screen 10
+# §2, C65). `routines/knowledge-fold` has written `Journal/Fold/<date>.md`
+# every evening since Phase 6, in the assistant's own voice, and until this
+# query nothing but Obsidian could find it. Surfacing it is the whole change.
+#
+# **Which file, not its bytes.** A note's body is not derived state — there
+# is no column holding one — so the body is `GET /api/knowledge/page` on the
+# path this returns, through the vault bridge. What IS derived is which file
+# is the newest fold and which pages it names: the reconciler indexes both on
+# every walk (`knowledge_files`, `knowledge_links`).
+#
+# **"Newest" is the date in the file NAME, not `mtime`.** The fold's file is
+# `Journal/Fold/YYYY-MM-DD.md` by construction (`routines/knowledge-fold`,
+# `JOURNAL_MACHINE_DIRS` in `packages/core/src/instance-layout.ts`), and
+# the date it is FOR is the name — a fold caught up late (the Mac slept
+# through 21:00) is written after the next day's edits and must not jump
+# ahead of it. Only names of exactly that shape count, so a
+# `Journal/Fold/README.md` or a note the owner dropped in there is not a
+# fold. ISO dates compare as text, so the newest is the greatest path.
+#
+# `date` bounds it: blank is "the newest there is", a `YYYY-MM-DD` is "the
+# newest on or before that day" (the route validates the shape). A fold that
+# is a `draft` or an unsettled `conflict` is not a fact yet and is skipped.
+#
+# **Rows, not an object.** One row per outgoing link, the fold's own columns
+# repeated on each (`link_*` NULL when it links to nothing), and NO row at
+# all before the first fold — the route folds this into
+# `{fold: {…, links: […]}}` or `{fold: null}`. A link whose target is a draft
+# or a conflict is DROPPED, as `knowledge_page_links` drops it; a link to a
+# path no note lives at yet is kept with `link_resolved: false`. Ordered by
+# target path in BYTE order and then kind, so the list is the same on every
+# cluster. The 500-link cap is fixed: a fold names a handful of pages, and a
+# file naming more is not one.
+#
+# **`expose: route`**: every row carries vault paths, and the link targets
+# may be `Me/` or the owner's own journal, which only the owner may be shown
+# (#255) — so `GET /api/knowledge/fold` is the one door, owner-only, and the
+# generic door and `queries_run` answer this name as they answer an unknown
+# one.
+name: knowledge_fold_latest
+expose: route
+description: >-
+  The newest evening fold (`Journal/Fold/YYYY-MM-DD.md`, newest by the date
+  in its name, on or before `date` when one is given) and its outgoing links:
+  one row per link — `path`, `date`, `title`, `modified` of the fold, then
+  `link_path`, `link_kind`, `link_title`, `link_resolved` — with `link_*`
+  NULL when the fold links nowhere, and no row at all before the first fold.
+  Never a draft or conflicted fold, never a link to a draft or conflict. The
+  fold's BYTES are not here (`GET /api/knowledge/page`).
+params:
+  date: { type: text, default: "" } # blank = the newest there is; YYYY-MM-DD = the newest on or before it
+sql: |
+  WITH bound AS (
+    SELECT NULLIF(:date::text, '') AS date
+  ),
+  fold AS (
+    SELECT
+      k.path,
+      substr(k.path, 14, 10)                                           AS date,
+      COALESCE(k.title, regexp_replace(k.path, '^.*/|\.md$', '', 'g')) AS title,
+      k.mtime                                                          AS modified
+    FROM knowledge_files k, bound b
+    WHERE k.path ~ '^Journal/Fold/[0-9]{4}-[0-9]{2}-[0-9]{2}\.md$'
+      AND NOT k.draft
+      AND k.status <> 'conflict'
+      AND (b.date IS NULL OR substr(k.path, 14, 10) <= b.date)
+    ORDER BY k.path COLLATE "C" DESC
+    LIMIT 1
+  ),
+  link AS (
+    SELECT l.from_path, l.to_path, l.kind
+    FROM knowledge_links l
+    JOIN fold f ON l.from_path = f.path
+    WHERE NOT EXISTS (
+      SELECT 1 FROM knowledge_files d
+      WHERE d.path = l.to_path AND (d.draft OR d.status = 'conflict')
+    )
+  )
+  SELECT
+    f.path,
+    f.date,
+    f.title,
+    f.modified,
+    l.to_path                                                                AS link_path,
+    l.kind                                                                   AS link_kind,
+    CASE WHEN l.to_path IS NOT NULL
+      THEN COALESCE(t.title, regexp_replace(l.to_path, '^.*/|\.md$', '', 'g'))
+    END                                                                      AS link_title,
+    CASE WHEN l.to_path IS NOT NULL THEN t.path IS NOT NULL END              AS link_resolved
+  FROM fold f
+  LEFT JOIN link l ON l.from_path = f.path
+  LEFT JOIN knowledge_files t ON t.path = l.to_path
+  ORDER BY l.to_path COLLATE "C" NULLS FIRST, l.kind COLLATE "C"
+  LIMIT 500
+cache_ttl: 0 # the fold lands once an evening; a cached answer is last night's fold on the morning after

@@ -55,6 +55,9 @@ const REQUIRED = [
   "rooms",
   "knowledge_pages", // GET /api/knowledge/pages — a page LIST is derived state, so invariant 3 sends it through here and the route holds no SQL of its own
   "knowledge_page_links", // GET /api/knowledge/links — so is the link graph, which the reconciler parses out of the notes on every walk
+  "knowledge_fold_latest", // GET /api/knowledge/fold — which file is the newest fold, and what it links to
+  "knowledge_drafts", // GET /api/knowledge/drafts — the owner's drafts, the other half of the column every agent door filters out
+  "knowledge_areas", // GET /api/knowledge/areas — the area rollup the Knowledge screen lists
   "secret_last_used", // GET /api/secrets — *last used*, from the names the egress fill stamps on its run (never a value)
 ];
 
@@ -145,6 +148,9 @@ describe("seed queries", () => {
     // `session_detail` (T1-11) is a session's own transcript — the owner's
     // conversation — so it is reachable only through `GET /api/sessions/:id`
     // (T2-17), never the generic door.
+    // The owner's three knowledge reads (T1-6): the drafts no agent may ever
+    // be handed, the fold's links and the areas — both of which name `Me/`
+    // and the owner's journal (#255). Owner-only at their own routes.
     // `board` (T1-2) carries `blocked_by_task` — the text of the owner's own
     // todo line — and `blocked_by`, its vault path: the day_work reason
     // exactly. The owner reads it at `GET /api/q/board` (P4); the counts,
@@ -166,6 +172,9 @@ describe("seed queries", () => {
       "board",
       "collector_health",
       "day_work",
+      "knowledge_areas",
+      "knowledge_drafts",
+      "knowledge_fold_latest",
       "knowledge_page_links",
       "knowledge_pages",
       "pending_count",
@@ -1414,6 +1423,109 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
 
     await pool.query(`DELETE FROM knowledge_links WHERE from_path LIKE $1 OR to_path LIKE $1`, [`%${tag}%`]);
     await pool.query(`DELETE FROM knowledge_files WHERE path LIKE $1`, [`%${tag}%`]);
+  });
+
+  // The owner's three knowledge reads (design-build-plan §2.10, T1-6). The
+  // fold's rows sit at year 9999 so that "the newest fold there is" is this
+  // test's on a scratch database every other suite shares — nothing else
+  // writes a `Journal/Fold/` row, and nothing could write a later one.
+  const kmk = (path: string, title: string | null, draft = false, status = "clean", description: string | null = title ? `${title} description` : null) =>
+    pool.query(`INSERT INTO knowledge_files (path, title, description, draft, status, mtime, indexed_at) VALUES ($1, $2, $3, $4, $5, now(), now())`, [path, title, description, draft, status]);
+  const klink = (from: string, to: string, kind = "wikilink") =>
+    pool.query(`INSERT INTO knowledge_links (from_path, to_path, kind) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`, [from, to, kind]);
+  const FOLDS = ["Journal/Fold/9999-12-29.md", "Journal/Fold/9999-12-30.md", "Journal/Fold/9999-12-31.md", "Journal/Fold/9999-12-31-notes.md"];
+
+  it("knowledge_fold_latest: newest by the date in the NAME, drafts skipped, links kept or dropped as the graph does", async () => {
+    const tag = `Kf${Date.now()}`;
+    const area = `Areas/${tag}`;
+    await kmk("Journal/Fold/9999-12-29.md", "Fold — 29");
+    await kmk("Journal/Fold/9999-12-30.md", "Fold — 30");
+    await kmk("Journal/Fold/9999-12-31.md", "Fold — 31", true); // a draft fold is not a fact yet: skipped, not served
+    await kmk("Journal/Fold/9999-12-31-notes.md", "not a fold"); // the owner's own note in there: not the shape, so not a fold
+    await kmk(`${area}/sleep.md`, "Sleep");
+    await kmk(`${area}/secret.md`, "Secret", true);
+    await klink("Journal/Fold/9999-12-30.md", `${area}/sleep.md`);
+    await klink("Journal/Fold/9999-12-30.md", `${area}/sleep.md`, "embed");
+    await klink("Journal/Fold/9999-12-30.md", `${area}/nowhere.md`); // unresolved: kept, marked
+    await klink("Journal/Fold/9999-12-30.md", `${area}/secret.md`); // to a draft: dropped
+    await klink("Journal/Fold/9999-12-31.md", `${area}/sleep.md`); // from the draft fold: never seen
+
+    try {
+      const newest = (await store.run("knowledge_fold_latest", {})).rows;
+      expect(newest.map((r) => [r.path, r.date, r.title, r.link_path, r.link_kind, r.link_title, r.link_resolved])).toEqual([
+        ["Journal/Fold/9999-12-30.md", "9999-12-30", "Fold — 30", `${area}/nowhere.md`, "wikilink", "nowhere", false],
+        ["Journal/Fold/9999-12-30.md", "9999-12-30", "Fold — 30", `${area}/sleep.md`, "embed", "Sleep", true],
+        ["Journal/Fold/9999-12-30.md", "9999-12-30", "Fold — 30", `${area}/sleep.md`, "wikilink", "Sleep", true],
+      ]);
+      expect(JSON.stringify(newest)).not.toContain("secret.md");
+      expect(newest[0]!.modified).not.toBeNull();
+      // `date` bounds it — on or before — and a fold that links nowhere is ONE row with the link columns NULL
+      expect((await store.run("knowledge_fold_latest", { date: "9999-12-30" })).rows.map((r) => r.path)).toEqual(Array(3).fill("Journal/Fold/9999-12-30.md"));
+      const bare = (await store.run("knowledge_fold_latest", { date: "9999-12-29" })).rows;
+      expect(bare).toEqual([expect.objectContaining({ path: "Journal/Fold/9999-12-29.md", date: "9999-12-29", link_path: null, link_kind: null, link_title: null, link_resolved: null })]);
+      // before the first fold there is no row at all — the route's `fold: null`
+      expect((await store.run("knowledge_fold_latest", { date: "0001-01-01" })).rows).toEqual([]);
+    } finally {
+      await pool.query(`DELETE FROM knowledge_links WHERE from_path = ANY($1) OR to_path LIKE $2`, [FOLDS, `%${tag}%`]);
+      await pool.query(`DELETE FROM knowledge_files WHERE path = ANY($1) OR path LIKE $2`, [FOLDS, `%${tag}%`]);
+    }
+  });
+
+  it("knowledge_drafts: the drafts and only the drafts — never a conflict, never a settled page — in byte order of path", async () => {
+    const tag = `Kd${Date.now()}`;
+    const area = `Areas/${tag}`;
+    await kmk(`${area}/b-draft.md`, "B draft", true);
+    await kmk(`${area}/a-draft.md`, null, true); // no frontmatter title → the basename
+    await kmk(`${area}/torn.md`, "Torn", true, "conflict"); // the indexer marks a conflict `draft` too: it is still not one
+    await kmk(`${area}/sleep.md`, "Sleep"); // settled: the page list's, not this one's
+    await kmk(`Me/${tag}.md`, "Mine", true); // the owner's own folder: a draft there is still theirs to see
+    try {
+      const mine = (rows: Record<string, unknown>[]) => rows.filter((r) => String(r.path).includes(tag));
+      const all = mine((await store.run("knowledge_drafts", { limit: 500 })).rows);
+      expect(all.map((r) => r.path)).toEqual([`${area}/a-draft.md`, `${area}/b-draft.md`, `Me/${tag}.md`]); // byte order: `Areas/` before `Me/`
+      expect(all[0]).toMatchObject({ area, title: "a-draft", description: null });
+      expect(all[1]).toMatchObject({ area, title: "B draft", description: "B draft description" });
+      expect(all[2]).toMatchObject({ area: "Me" });
+      for (const r of all) expect(r.modified).not.toBeNull();
+      expect(Object.keys(all[0]!).sort()).toEqual(["area", "description", "modified", "path", "title"]);
+    } finally {
+      await pool.query(`DELETE FROM knowledge_files WHERE path LIKE $1`, [`%${tag}%`]);
+    }
+  });
+
+  it("knowledge_areas: one row per derived area — README's description, settled count, last change, named by the newest fold", async () => {
+    const tag = `Ka${Date.now()}`;
+    const area = `Areas/${tag}`;
+    const sibling = `Areas/${tag}care`;
+    await kmk(`${area}/README.md`, "Index", false, "clean", "Sleep, labs, and the protein blend");
+    await kmk(`${area}/sleep.md`, "Sleep");
+    await kmk(`${area}/2026/taper.md`, "Taper"); // deeper than two segments: still this area
+    await kmk(`${area}/secret.md`, "Secret", true); // a draft: not counted
+    await kmk(`${area}/torn.md`, "Torn", false, "conflict"); // unsettled: not counted
+    await kmk(`${sibling}/billing.md`, "Billing"); // no README: no description, and still an area
+    await kmk(`${sibling}/README.md`, "Care", true, "clean", "a draft's description is not a fact"); // a DRAFT index page describes nothing
+    await kmk(`${tag}.md`, "root"); // a vault-root file belongs to no area
+    await kmk("Journal/Fold/9999-12-30.md", "Fold");
+    await klink("Journal/Fold/9999-12-30.md", `${area}/2026/taper.md`);
+    await klink("Journal/Fold/9999-12-30.md", `${sibling}/README.md`); // to a draft: names nothing
+    await pool.query(`UPDATE knowledge_files SET mtime = '2026-09-20T12:00:00Z' WHERE path LIKE $1`, [`${area}/%`]);
+    await pool.query(`UPDATE knowledge_files SET mtime = '2026-09-27T08:00:00Z' WHERE path = $1`, [`${area}/sleep.md`]);
+    await pool.query(`UPDATE knowledge_files SET mtime = '2026-09-28T08:00:00Z' WHERE path = $1`, [`${area}/secret.md`]); // newer, and a draft: not the last change
+    try {
+      const rows = (await store.run("knowledge_areas", {})).rows;
+      const mine = rows.filter((r) => String(r.area).includes(tag));
+      expect(mine.map((r) => r.area)).toEqual([area, sibling]);
+      expect(mine[0]).toEqual({ area, description: "Sleep, labs, and the protein blend", pages: 3, last_change: new Date("2026-09-27T08:00:00Z"), named_by_fold: true });
+      expect(mine[1]).toMatchObject({ area: sibling, description: null, pages: 1, named_by_fold: false });
+      expect(rows.some((r) => r.area === null)).toBe(false); // the root file is in no area
+      expect(rows.find((r) => r.area === "Journal")).toMatchObject({ named_by_fold: false }); // the fold's own folder is not named by it linking elsewhere
+      // byte order over the whole result, so the list is the same on every cluster
+      const names = rows.map((r) => String(r.area));
+      expect(names).toEqual([...names].sort((a, b) => (Buffer.from(a) < Buffer.from(b) ? -1 : 1)));
+    } finally {
+      await pool.query(`DELETE FROM knowledge_links WHERE from_path = ANY($1) OR to_path LIKE $2`, [FOLDS, `%${tag}%`]);
+      await pool.query(`DELETE FROM knowledge_files WHERE path = ANY($1) OR path LIKE $2`, [FOLDS, `%${tag}%`]);
+    }
   });
 
   // ---------------------------------------------------------------------

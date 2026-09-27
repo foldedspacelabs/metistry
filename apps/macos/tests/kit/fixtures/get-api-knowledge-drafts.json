@@ -1,8 +1,7 @@
 {
   "route": "GET /api/knowledge/drafts",
-  "source": "contract",
-  "ticket": "T1-6",
-  "note": "knowledge_drafts: owner-only; never reachable at the generic door or through /mcp",
+  "source": "recorded",
+  "ticket": null,
   "request": {
     "method": "GET",
     "path": "/api/knowledge/drafts?limit=20",
@@ -14,6 +13,7 @@
     "drafts": [
       {
         "path": "Areas/Health/Sleep.md",
+        "area": "Areas/Health",
         "title": "Sleep",
         "description": "the taper",
         "modified": "2026-09-27T20:00:00.000Z"
@@ -21,6 +21,6 @@
     ],
     "limit": 20,
     "offset": 0,
-    "as_of": "2026-09-28T13:05:00.000Z"
+    "as_of": "2026-09-27T00:39:38.063Z"
   }
 }

@@ -323,9 +323,9 @@ takes a `since` cursor and answers with the next one.
 | `GET /api/knowledge/page` | owner | session · local_owner | natural | — | — | served | one page's content |
 | `GET /api/knowledge/pages` | owner | session · local_owner | natural | — | — | served | the page index, filtered by area or prefix |
 | `GET /api/knowledge/links` | owner | session · local_owner | natural | — | — | served | a page's links, both directions |
-| `GET /api/knowledge/fold` | owner | session · local_owner | natural | — | — | T1-6 | the latest knowledge fold |
-| `GET /api/knowledge/drafts` | owner | session · local_owner | natural | — | — | T1-6 | the drafts waiting on the owner |
-| `GET /api/knowledge/areas` | owner | session · local_owner | natural | — | — | T1-6 | the per-area rollup |
+| `GET /api/knowledge/fold` | owner | session · local_owner | natural | — | — | served | the latest knowledge fold |
+| `GET /api/knowledge/drafts` | owner | session · local_owner | natural | — | — | served | the drafts waiting on the owner |
+| `GET /api/knowledge/areas` | owner | session · local_owner | natural | — | — | served | the per-area rollup |
 | `POST /api/knowledge/conflicts/resolve` | owner | session · local_owner | no | stale | — | T2-10 | settle a conflicted file: keep one side |
 | `GET /api/knowledge/history` | owner | session · local_owner | natural | — | — | T10-4 | a file's commits |
 | `GET /api/knowledge/version` | owner | session · local_owner | natural | — | — | T10-4 | one file at one commit |
@@ -1500,9 +1500,7 @@ rather than a refusal. `apps/console/test/compute-routes.test.ts` holds it.
 
 ```
 GET  /api/knowledge/search | page | pages | links    see below
-GET  /api/knowledge/fold?date=             T1-6 — the `knowledge_fold_latest` named query: the newest fold and its links
-GET  /api/knowledge/drafts?limit=&offset=  T1-6 — `knowledge_drafts`: the drafts waiting on the owner
-GET  /api/knowledge/areas                  T1-6 — `knowledge_areas`: each area's index description, count, last change
+GET  /api/knowledge/fold | drafts | areas            see below — the owner's alone
 POST /api/knowledge/conflicts/resolve      T2-10 — {path, keep, seen_sha}   409 stale — only a path in `conflict`
 GET  /api/knowledge/history?path=          T10-4 — a file's commits, through the bridge's `GET /vault/log`
 GET  /api/knowledge/version?path=&sha=     T10-4 — one file at one commit, through a new `GET /vault/show`
@@ -1706,6 +1704,47 @@ link table's primary key read the other way round, so the order is total and
 ceiling of 500, like the page list. There is no `total`, for the page list's
 reason. A page that does not exist is an empty `200`, not a `404`: it has no
 links, and "refused" and "absent" stay indistinguishable.
+
+#### `GET /api/knowledge/{fold,drafts,areas}` — the owner's three (T1-6)
+
+```
+GET /api/knowledge/fold?date=2026-09-28
+200 {"fold":{"path":"Journal/Fold/2026-09-28.md","date":"2026-09-28","title","modified",
+             "links":[{"path","title","kind","resolved"}]},
+     "date":"2026-09-28","as_of":"…"}
+200 {"fold":null,"date":null,"as_of":"…"}                    before the first fold
+GET /api/knowledge/drafts?limit=&offset=
+200 {"drafts":[{"path","area","title","description","modified"}],"limit":100,"offset":0,"as_of":"…"}
+GET /api/knowledge/areas
+200 {"areas":[{"area":"Areas/Health","description","pages":4,"last_change","named_by_fold":true}],"as_of":"…"}
+400 date (not a calendar day, YYYY-MM-DD) / limit / offset — by name
+403 any principal that is not the owner — the console's uniform `not granted`,
+    decided in the route before any SQL runs
+503 the named query is not loaded, naming its file
+```
+
+Screen 10's three asks (design-build-plan §2.10), each a named query run by
+`packages/queries` and each `expose: route`: `seed/queries/knowledge_fold_latest.yaml`,
+`knowledge_drafts.yaml`, `knowledge_areas.yaml`. No migration — `knowledge_files`
+and `knowledge_links` already hold every column.
+
+**Owner-only, at the route.** server.ts's management gate already answers an
+agent bearer and the capture owner token `403` across `/api/knowledge/*`; these
+three also refuse every principal that is not the owner **themselves**
+(`may(…, {kind: "console", door: "console_management"})`), so a gate widened
+by mistake still cannot hand one a draft. A draft is never served to an agent
+by any door (screen 10 §3.2, C66); the fold's links and the areas name `Me/`
+and the owner's own journal, which only the owner is shown (#255). **Agents
+use `/mcp`** — and there, as at the generic `/api/q/<name>`, all three names
+are the unknown-query refusal (`queries_list` does not list them), while
+`knowledge_read`/`_search`/`_list` never return a draft, even inside a granted
+folder. The owner is still served them at `/api/q/<name>` (P4).
+
+| Route | What it is |
+| --- | --- |
+| `fold` | the newest `Journal/Fold/YYYY-MM-DD.md` — newest by the date in its **name**, so a fold caught up late does not jump ahead — on or before `date` when given; never a draft or conflicted fold. `links` are its outgoing edges: a link to a draft or conflict is dropped, one to a path no note lives at yet is `resolved: false`, and a target that is not knowledge (`.metistry/`, `Artifacts/`) is dropped by `canSee` even for the owner. The fold's **bytes** are `GET /api/knowledge/page` on its `path` — a note body is not derived state |
+| `drafts` | every note whose frontmatter says `status: draft` — never a `conflict`, which the indexer also flags but which is settled by `POST /api/knowledge/conflicts/resolve` (T2-10), not Approve/Revise/Decline. Ordered by path in byte order; `limit` 100 by default, ceiling 500; no `total` |
+| `areas` | one row per area, derived exactly as `pages` derives `area` (so `?area=<area>` on the page list opens it): `description` is its `<area>/README.md`'s frontmatter description (`null` until something writes one — C68), `pages` the settled count (never drafts or conflicts), `last_change` their newest `mtime`, `named_by_fold` whether the newest fold links into it — provenance, never a score (P5). A folder that is not knowledge is dropped by core's predicate. Unpaged: a vault has tens of areas |
 
 ### The named queries — `GET /api/q/:name`
 

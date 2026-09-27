@@ -51,6 +51,9 @@ export function principalOf(p: AgentPrincipal): Principal {
       // every agent, internal included; that is `may()`'s null-slug case.
       projects: internal && p.projects.length === 0 ? null : [...p.projects],
       autonomy: p.autonomy,
+      // Copied like the areas: a grant rewritten mid-request cannot widen a
+      // decision already being made. Absent stays absent — none.
+      ...(p.grants.connections !== undefined ? { connections: [...p.grants.connections] } : {}),
     },
     source: internal ? "environment" : crew && p.manifest !== undefined ? { manifest: p.manifest } : "registry",
     // Copied for the same reason the areas are, and only for a crew: on any

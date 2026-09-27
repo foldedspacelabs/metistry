@@ -181,9 +181,13 @@ describe("seed queries", () => {
     // `day_close` (T2-8) is what the day did to the owner's tasks — paths
     // and the text of their own lines — composed into their daily note by
     // Close the Day, the owner's door alone.
+    // `connection_calls` (T4-8b, §2.10) says which agent reached which of the
+    // owner's services, with which credential names, and when: the audit and
+    // a connection's *Used by* — the owner's to read, never an agent's.
     expect(routeBacked.sort()).toEqual([
       "board",
       "collector_health",
+      "connection_calls",
       "day_close",
       "day_work",
       "knowledge_areas",
@@ -572,6 +576,45 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
     );
     const rows = (await store.run("routine_history", { component: tag, limit: 50 })).rows;
     expect(rows.map((r) => [r.trigger, Number(r.steps), r.outcome])).toEqual([["run_now", 0, null], [null, 2, null]]);
+  });
+
+  // T4-8b (§2.10): every call through the connections proxy, as mcp-brain
+  // writes it — kind connection_call, the connection and the upstream tool in
+  // meta, the secret names it carried. Each param narrows, and a blank one
+  // matches everything.
+  it("connection_calls: one row per proxied call, newest first, filtered by connection, principal, since and ok, secret names only", async () => {
+    const tag = `cc-${Date.now()}`;
+    const other = `${tag}-other`;
+    await pool.query(
+      `INSERT INTO runs (component, kind, tool, ok, error, ts, duration_ms, meta) VALUES
+         ($1, 'connection_call', 'connections_call', true,  NULL,        now() - interval '2 hours', 41, $3::jsonb),
+         ($1, 'connection_call', 'connections_call', false, 'not_found', now() - interval '1 hours', 2,  $4::jsonb),
+         ($2, 'connection_call', 'connections_call', true,  NULL,        now(),                      17, $5::jsonb),
+         -- an ordinary tool call must not appear, whatever its meta says
+         ($1, 'tool',            'queries_run',      true,  NULL,        now(),                      3,  $3::jsonb)`,
+      [
+        tag,
+        other,
+        JSON.stringify({ connection: `${tag}-gh`, connection_tool: "list_issues", secrets: ["github_token"], is_error: false }),
+        JSON.stringify({ connection: `${tag}-jira`, connection_tool: "list_issues" }),
+        JSON.stringify({ connection: `${tag}-gh`, connection_tool: "search_code", is_error: true }),
+      ],
+    );
+    const mine = (await store.run("connection_calls", { principal: tag })).rows;
+    expect(mine.map((r) => r.connection)).toEqual([`${tag}-jira`, `${tag}-gh`]); // newest first; the tool row is not a connection call
+    expect(mine[1]).toMatchObject({ principal: tag, tool: "list_issues", ok: true, is_error: false, error: null, ms: 41, secrets: ["github_token"] });
+    expect(mine[0]).toMatchObject({ ok: false, error: "not_found", secrets: [] });
+    const gh = (await store.run("connection_calls", { connection: `${tag}-gh` })).rows;
+    expect(gh.map((r) => [r.principal, r.tool, r.is_error])).toEqual([
+      [other, "search_code", true],
+      [tag, "list_issues", false],
+    ]);
+    expect((await store.run("connection_calls", { principal: tag, ok: "false" })).rows.map((r) => r.connection)).toEqual([`${tag}-jira`]);
+    expect((await store.run("connection_calls", { principal: tag, ok: "true" })).rows.map((r) => r.connection)).toEqual([`${tag}-gh`]);
+    const since = new Date(Date.now() - 90 * 60_000).toISOString();
+    expect((await store.run("connection_calls", { principal: tag, since })).rows.map((r) => r.connection)).toEqual([`${tag}-jira`]);
+    expect((await store.run("connection_calls", { principal: tag, limit: 1 })).rows).toHaveLength(1);
+    expect((await store.run("connection_calls", { principal: `${tag}-missing` })).rows).toHaveLength(0);
   });
 
   // T1-15: Usage's *Where it went* — the same $0/unpriced accounting `spend`

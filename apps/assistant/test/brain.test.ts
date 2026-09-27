@@ -17,7 +17,8 @@ describe("brain allowlist", () => {
   it("is exactly mcp-brain's manifest, in order, fully qualified as mcp__brain__<tool>", () => {
     expect([...BRAIN_TOOLS]).toEqual(manifest.exposes.map((t) => t.name));
     expect(brainToolNames()).toEqual(manifest.exposes.map((t) => `mcp__${BRAIN_SERVER}__${t.name}`));
-    expect(brainToolNames()).toHaveLength(27);
+    expect(brainToolNames()).toHaveLength(29);
+    expect(brainToolNames()).toContain("mcp__brain__connections_call"); // the proxy's lazy pair (T4-8b): the assistant reaches every connection; the bridge decides for everyone else
     expect(brainToolNames()).toContain("mcp__brain__propose_action"); // on the list because the list is the manifest; the BRIDGE registers it per credential (docs/ops/actions.md)
     expect(brainToolNames()).toContain("mcp__brain__queries_run"); // invariant 3's one read path, out to agents (internal always; external needs grants.queries)
     expect(brainToolNames()).toContain("mcp__brain__knowledge_write"); // the assistant's brain-commit rides the same allowlist; the bridge admits it for the internal principal only

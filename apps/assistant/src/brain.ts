@@ -54,6 +54,12 @@ export function newTurnId(): string {
  * revert at the next console start. The refusal says that, which is more use
  * to a model than a tool that is simply absent.
  *
+ * `connections_list` / `connections_call` (plan §2.6, T4-8b) are the proxy's
+ * lazy pair: the assistant reaches every connection the owner holds — a
+ * connection not offered to agents is the assistant's and the syncs'
+ * (C115) — and the tools each one runs are the owner's per-tool policy,
+ * held by the proxy.
+ *
  * `propose_action` (docs/ops/actions.md) is on the list because the list IS
  * the manifest — but the bridge registers it only for a credential whose
  * `autonomy` table admits an action, and the assistant's registry row carries
@@ -88,6 +94,8 @@ export const BRAIN_TOOLS = [
   "agents_delegate",
   "queries_list",
   "queries_run",
+  "connections_list",
+  "connections_call",
   "propose_action",
 ] as const;
 

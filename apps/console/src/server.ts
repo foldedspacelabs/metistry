@@ -267,6 +267,8 @@ const FEEDBACK_ROUTE = /^(POST|DELETE) \/api\/messages\/(\d{1,12})\/feedback$/;
 const RUN_DETAIL_ROUTE = /^GET \/api\/runs\/(\d{1,12})$/;
 /** The named query `GET /api/runs/:id` is served from. Its ABSENCE is a refusal with a status, exactly as the export's is. */
 const RUN_DETAIL_QUERY = "run_detail";
+/** The named query `GET /api/needs-you/count` is served from (T1-7, §2.10): the same pending-and-not-snoozed filter `GET /api/proposals` applies, so the sidebar row and the Dock badge can never disagree with the queue's own length. */
+const PENDING_COUNT_QUERY = "pending_count";
 
 // ----- the two verbs that are not answers (docs/ops/reply-feedback.md) -----
 //
@@ -926,6 +928,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         key === "GET /api/proposals" ||
         key === "POST /api/proposals/batch" ||
         /^POST \/api\/proposals\/\d+$/.test(key) ||
+        key === "GET /api/needs-you/count" ||
         FEEDBACK_ROUTE.test(key) ||
         key === "GET /api/agents" ||
         key === "POST /api/agents" ||
@@ -1225,6 +1228,25 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       const body = (await readJson(req)) as { decision?: string; feedback?: string; area?: unknown; if_unchanged?: { seen_at?: unknown } };
       const r = await decideProposal(triage[1]!, body);
       return sendJson(res, r.status, r.body);
+    }
+
+    // ----- the sidebar row and the Dock badge (§2.10, §2.12; T1-7) -----
+    // The named query is the read path (invariant 3): its absence is a
+    // refusal with a status, exactly as the export's and the run detail's
+    // are, never a silent zero. It always answers one row — `waiting: 0,
+    // oldest_ts: null` counts as "nothing needs you" — so there is no
+    // not-found case here.
+    if (key === "GET /api/needs-you/count") {
+      if (!queries.names().includes(PENDING_COUNT_QUERY)) {
+        return sendError(res, "not_available", `the named query ${PENDING_COUNT_QUERY} is not loaded (seed/queries/${PENDING_COUNT_QUERY}.yaml, METISTRY_QUERIES_DIRS)`);
+      }
+      const result = await queries.run(PENDING_COUNT_QUERY);
+      const row = result.rows[0] as { waiting?: unknown; oldest_ts?: unknown } | undefined;
+      return sendJson(res, 200, {
+        waiting: typeof row?.waiting === "number" ? row.waiting : 0,
+        oldest_ts: row?.oldest_ts ?? null,
+        as_of: result.as_of.toISOString(),
+      });
     }
 
     // ----- reply quality: 👍/👎 on one outbound message (docs/ops/reply-feedback.md) -----

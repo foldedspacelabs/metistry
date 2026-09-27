@@ -108,19 +108,22 @@ bridge configured and `Templates/Fold.md` stamped in the vault (`metistry
 init`), the fold takes the skeleton path; the fallback above is what an
 instance without either gets, not a permanent state of every install.
 
-## Schedule (and why it is hourly)
+## Schedule
 
-`schedule: "@hourly"`, and the routine itself refuses to fold before **18:00
-local** — the container's timezone is `METISTRY_TZ` — and refuses to fold twice
-in one local day.
+Every day at **21:00** (§2.5's default, as answered):
+`schedule: { days: [sun, mon, tue, wed, thu, fri, sat], at: ["21:00"] }`,
+read in `Me/profile.md`'s `timezone`, then `METISTRY_TZ` — never UTC by
+default. The console's runner fires it once, at its time
+(`docs/ops/scheduled.md`, "How the runner fires"), so the routine has no clock
+gate of its own: a run is a fold. Tomorrow's Plan runs two hours later, at
+23:00, and links tonight's fold.
 
-The gate has to live in the routine because the runner has no notion of time of
-day; and the schedule has to be hourly *because* of the gate: the runner marks
-a routine due from its last `routine_run` row, so an `@daily` routine that
-skipped at 09:00 would be due again at 09:00 tomorrow and never reach the
-evening. Hourly ticks plus two gates give one fold a night, retried each hour
-until it lands. (This is the one deviation from the original spec, which said
-`@daily`.)
+Until T3-1 the runner had no time of day, so the fold was `@hourly` with two
+gates inside it — not before 18:00, and not twice in one local day. Both went
+with the hourly schedule. A fold the Mac slept through runs once on waking and
+is **dated from its slot**: Sunday's 21:00 caught up at 08:00 Monday writes
+`Journal/Fold/<Sunday>.md` and leaves Monday's for Monday night. Change the
+time or pause it in `.metistry/scheduled.yaml`.
 
 ## The guardrail at the tool
 
@@ -198,9 +201,10 @@ your version (`docs/ops/inbox.md`).
 ## Turning it off
 
 Remove its directory, `routines/knowledge-fold/` (a product change, a PR — the
-routine registry is the directory listing, plan §2.7) — or,
-without a rebuild, set the evening gate past the end of the day. The safest
-instance-side switch is to revoke the assistant's write path
+routine registry is the directory listing, plan §2.7) — or, without a rebuild,
+`paused: true` on its entry in `.metistry/scheduled.yaml`
+(`docs/ops/scheduled.md`), read on the next tick. The safest instance-side
+switch that keeps its ledger running is to revoke the assistant's write path
 (`METISTRY_BRIDGE_TOKEN_RECONCILER` unset → `knowledge_write` answers
 `not_available`), which stops the fold from writing while the routine keeps its
 ledger. Nothing is lost either way: the material it folds stays in Postgres,

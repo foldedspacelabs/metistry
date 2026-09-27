@@ -130,6 +130,16 @@ export interface RoutineCtx {
   ekUrl?: string; // eventkit bridge (degrades absent)
   ekToken?: string;
   fetchFn?: typeof fetch;
+  /**
+   * The slot this run is FOR, when a time-of-day schedule fired it (the
+   * console's runner, apps/console/src/runner.ts). A run that is late — the
+   * Mac slept through 23:00 and woke at 07:30 — still dates and plans from
+   * its slot, not from the moment it woke. Absent: an interval schedule, or a
+   * run nobody scheduled.
+   */
+  scheduledFor?: Date | undefined;
+  /** The zone that slot was read in — the schedule's `tz`, then `Me/profile.md`'s `timezone`, then METISTRY_TZ. */
+  timeZone?: string | undefined;
 }
 
 interface EkEvent {

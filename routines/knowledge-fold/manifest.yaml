@@ -1,5 +1,7 @@
 schema: 1
 name: knowledge-fold
 type: routine
-description: The evening fold (plan §4.11) — assembles what is new since its last successful fold (accepted proposals, closed work, published artifacts, captured sessions) into one ≤4 KB brief of handles and enqueues exactly ONE assistant turn on thread `fold`; the assistant is the one writer (Journal + the entity pages it owns). Model-free (invariant 4); never reads the vault, so it can never read its own output. Scheduled hourly because the runner has no time of day — it folds once a night, after 18:00 local (METISTRY_TZ), and is silent otherwise.
-schedule: "@hourly"
+description: The evening fold (plan §4.11) — assembles what is new since its last successful fold (accepted proposals, closed work, published artifacts, captured sessions) into one ≤4 KB brief of handles and enqueues exactly ONE assistant turn on thread `fold`; the assistant is the one writer (Journal + the entity pages it owns). Model-free (invariant 4); never reads the vault, so it can never read its own output. Once a night, at 21:00 — the runner fires it at its time (docs/ops/scheduled.md), so the routine has no clock gate of its own.
+# §2.5's default, as answered (§4 Q12): every day at 21:00, two hours before
+# Tomorrow's Plan (23:00), which links tonight's fold.
+schedule: { days: [sun, mon, tue, wed, thu, fri, sat], at: ["21:00"] }

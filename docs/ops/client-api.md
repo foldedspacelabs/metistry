@@ -2584,8 +2584,9 @@ header and query-parameter **names**, `timeout_s`), `command` (`command`,
 is the owner's per-tool policy: each tool's `group` (`reads` · `changes` ·
 `starts_agent`) and `mode` (`on` · `ask` · `off`, drawn *Allow · Ask First ·
 Never*). `used_by` is what reads it today — the syncs in `scheduled.yaml` that
-name it; agents reach a connection through the lazy pair (T4-8b), and until
-then an empty list is the true answer (*Nobody yet*).
+name it; agents reach a connection through the lazy pair on `/mcp`
+(`docs/ops/connections.md`), and until they are lent one an empty list is the
+true answer (*Nobody yet*).
 
 **`status`** is one of doctor's words, and `issues` says why, one sentence each:
 

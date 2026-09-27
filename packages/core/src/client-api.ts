@@ -260,9 +260,9 @@ export const CLIENT_API: readonly ClientRoute[] = [
   route("GET", "/api/q/:name", "run a named query exposed `generic`", { principals: OWNER_AND_CAPTURE_TOKEN }),
 
   // ----- Today and the vault's tasks -----
-  planned("GET", "/api/today", "T2-7", "the day: tasks, work, order, events, brief, standup and plan"),
-  planned("GET", "/api/vault-tasks", "T2-7", "vault tasks by filter: Slipping, Owed, Waiting on Others"),
-  planned("PUT", "/api/today/order", "T2-7", "the owner's order for the day", { idempotent: "natural" }),
+  route("GET", "/api/today", "the day: tasks, work, order, events, brief, standup and plan"),
+  route("GET", "/api/vault-tasks", "vault tasks by filter: Slipping, Owed, Waiting on Others"),
+  route("PUT", "/api/today/order", "the owner's order for the day", { idempotent: "natural" }),
   route("POST", "/api/vault-tasks/:task_key/check", "tick or untick one task line", { idempotent: "key", conflict: ["stale"] }),
   route("POST", "/api/vault-tasks/:task_key/schedule", "defer one task line: a `do` date or someday", { idempotent: "key", conflict: ["stale"] }),
   planned("POST", "/api/vault-tasks/:task_key/link", "T4-25", "add one tracker ref to one task line", { conflict: ["stale"] }),

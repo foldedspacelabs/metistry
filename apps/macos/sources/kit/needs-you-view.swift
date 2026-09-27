@@ -840,6 +840,12 @@ public struct NeedsYouView<Detail: View>: View {
                 }
             }
         }
+        // Flexible down to nothing, as Activity is: the list and the detail
+        // scroll, and the window's minimum is the shell's to set. Without it
+        // the screen's minimum was its content's at no width at all: 878 pt
+        // tall with the list on screen, 1,078 while it loaded or when the
+        // console did not answer.
+        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .topLeading)
         .background(p[.surface])
         .shellItemActions(model.itemActions(row: rowActions))
         .task {

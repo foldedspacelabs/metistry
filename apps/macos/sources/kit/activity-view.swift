@@ -1025,7 +1025,12 @@ public struct ActivityView: View {
                 .padding(.bottom, MetistrySpace.s2)
             content(p)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        // Flexible down to nothing: the list scrolls, and the window's minimum
+        // is the shell's to set. Without the zeros the screen's minimum was its
+        // content's at no width at all — the chips a character per line, 1,117 pt
+        // tall — and the window grew, or its content slid off the top, when
+        // Activity opened.
+        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .topLeading)
         .background(p[ActivityRowPresenter.ground])
         .task {
             await model.refreshIfDue()

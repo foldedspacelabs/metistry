@@ -54,6 +54,9 @@
 
 import {
   costOf,
+  credentialEnvNames,
+  credentialFromEnv,
+  providerCredential,
   unpricedNote,
   usageFromResponse,
   type CallCost,
@@ -127,18 +130,25 @@ export interface ChatOptions {
 const sleepReal = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 /**
- * Read the provider's credential out of the environment. `auth.secret` is a
- * NAME (C6): the value lives in the login Keychain and reaches a service as
- * the environment variable of that name (`metistry secrets sync --to env`).
+ * Read the provider's credential out of the environment — never the
+ * Keychain: this process has no shell and no `security` (invariant 9), and
+ * runs sandboxed with an allowlisted environment. `auth.secret` is a
+ * REFERENCE (§2.14, T4-18); where each spelling lands is core's
+ * `credentialEnvNames` — `{{ secret.x }}` as `METISTRY_SECRET_X`, written
+ * into `.env` from this instance's Keychain account by the owner's
+ * `metistry secrets sync --to env`, an install variable as itself.
  */
 export function credentialFor(provider: Provider, providerName: string, env: NodeJS.ProcessEnv = process.env): string | undefined {
-  const name = provider.auth?.secret;
-  if (!name) return undefined; // a local server needs none; sending an empty bearer would be worse than sending nothing
-  const value = (env[name] ?? "").trim();
+  const cred = providerCredential(provider);
+  if (!cred) return undefined; // a local server needs none; sending an empty bearer would be worse than sending nothing
+  const value = credentialFromEnv(cred, env);
   if (!value) {
     throw new CredentialError(
-      `compute.yaml names providers.${providerName}.auth.secret = ${name}, but ${name} is unset in this install's environment — ` +
-        `run \`metistry secrets set ${name}\` then \`metistry secrets sync --to env\`, or drop auth: from the provider if it needs no key`,
+      cred.kind === "secret"
+        ? `compute.yaml names providers.${providerName}.auth.secret = {{ secret.${cred.name} }}, but it has not reached this process (${credentialEnvNames(cred).join(" or ")} is unset) — ` +
+            `run \`metistry secrets sync --to env\` (and \`metistry secrets set ${cred.name}\` first if this instance has no such secret), then restart the assistant`
+        : `compute.yaml names providers.${providerName}.auth.secret = ${cred.name}, but ${cred.name} is unset in this install's environment — ` +
+            `run \`metistry secrets sync --to env\`, point the provider at one of this instance's secrets (\`metistry compute providers set ${providerName} --secret <name>\`), or drop auth: from the provider if it needs no key`,
     );
   }
   return value;

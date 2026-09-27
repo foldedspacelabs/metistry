@@ -19,8 +19,8 @@ What that does, in order:
    if there is no row yet — so a re-run is a no-op, not a second identity.
    The console returns the bearer **once**, at mint or rotate.
 2. Stores it in the login Keychain as `metistry:METISTRY_AGENT_TOKEN_CURSOR`
-   under this instance's `instance_id` account (instance-scoped:
-   `packages/cli/src/secrets.ts` `SECRET_SCOPES`). It is not printed and not
+   under this instance's `instance_id` account (every item is:
+   `packages/cli/src/secrets.ts`, plan §2.14). It is not printed and not
    written to any file.
 3. Merges into `~/.cursor/mcp.json` (0600, created if absent, **every other
    server preserved**):

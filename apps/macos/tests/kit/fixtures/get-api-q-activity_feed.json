@@ -12,37 +12,37 @@
   "body": {
     "rows": [
       {
-        "ts": "2026-09-26T22:54:15.233Z",
-        "kind": "task_op",
-        "group": "work",
-        "actor": "user",
-        "subject": "work:4",
-        "detail": "create work #4",
-        "ref": "runs:38",
-        "turn_id": null
-      },
-      {
-        "ts": "2026-09-26T22:54:15.233Z",
+        "ts": "2026-09-27T00:14:12.154Z",
         "kind": "work_history",
         "group": "work",
         "actor": "user",
-        "subject": "review: metistry/store-interface ver_01M3FYT8NB0W22G5J1H3A71PTY (1 thread)",
+        "subject": "review: metistry/store-interface ver_01M3G3CN559NZE73ANMDKBJ8SB (1 thread)",
         "detail": "create",
         "ref": "work:4",
         "turn_id": null
       },
       {
-        "ts": "2026-09-26T22:54:15.203Z",
+        "ts": "2026-09-27T00:14:12.153Z",
+        "kind": "task_op",
+        "group": "work",
+        "actor": "user",
+        "subject": "work:4",
+        "detail": "create work #4",
+        "ref": "runs:40",
+        "turn_id": null
+      },
+      {
+        "ts": "2026-09-27T00:14:12.126Z",
         "kind": "dispatch",
         "group": "run",
         "actor": "console",
         "subject": "github-issues",
         "detail": "dispatched to github-issues ok",
-        "ref": "runs:33",
+        "ref": "runs:35",
         "turn_id": null
       },
       {
-        "ts": "2026-09-26T22:54:15.203Z",
+        "ts": "2026-09-27T00:14:12.126Z",
         "kind": "work_history",
         "group": "work",
         "actor": "owner",
@@ -52,17 +52,17 @@
         "turn_id": null
       },
       {
-        "ts": "2026-09-26T22:54:15.200Z",
+        "ts": "2026-09-27T00:14:12.123Z",
         "kind": "task_op",
         "group": "work",
         "actor": "user",
         "subject": "work:1",
         "detail": "release work #1",
-        "ref": "runs:31",
+        "ref": "runs:33",
         "turn_id": null
       },
       {
-        "ts": "2026-09-26T22:54:15.200Z",
+        "ts": "2026-09-27T00:14:12.123Z",
         "kind": "work_history",
         "group": "work",
         "actor": "user",
@@ -72,17 +72,7 @@
         "turn_id": null
       },
       {
-        "ts": "2026-09-26T22:54:15.197Z",
-        "kind": "task_op",
-        "group": "work",
-        "actor": "user",
-        "subject": "work:1",
-        "detail": "heartbeat work #1",
-        "ref": "runs:29",
-        "turn_id": null
-      },
-      {
-        "ts": "2026-09-26T22:54:15.197Z",
+        "ts": "2026-09-27T00:14:12.121Z",
         "kind": "work_history",
         "group": "work",
         "actor": "user",
@@ -92,17 +82,27 @@
         "turn_id": null
       },
       {
-        "ts": "2026-09-26T22:54:15.194Z",
+        "ts": "2026-09-27T00:14:12.120Z",
+        "kind": "task_op",
+        "group": "work",
+        "actor": "user",
+        "subject": "work:1",
+        "detail": "heartbeat work #1",
+        "ref": "runs:31",
+        "turn_id": null
+      },
+      {
+        "ts": "2026-09-27T00:14:12.118Z",
         "kind": "task_op",
         "group": "work",
         "actor": "user",
         "subject": "work:1",
         "detail": "claim work #1",
-        "ref": "runs:27",
+        "ref": "runs:29",
         "turn_id": null
       },
       {
-        "ts": "2026-09-26T22:54:15.194Z",
+        "ts": "2026-09-27T00:14:12.118Z",
         "kind": "work_history",
         "group": "work",
         "actor": "user",
@@ -112,17 +112,17 @@
         "turn_id": null
       },
       {
-        "ts": "2026-09-26T22:54:15.191Z",
+        "ts": "2026-09-27T00:14:12.115Z",
         "kind": "task_op",
         "group": "work",
         "actor": "user",
         "subject": "work:1",
         "detail": "update work #1",
-        "ref": "runs:25",
+        "ref": "runs:27",
         "turn_id": null
       },
       {
-        "ts": "2026-09-26T22:54:15.191Z",
+        "ts": "2026-09-27T00:14:12.115Z",
         "kind": "work_history",
         "group": "work",
         "actor": "user",
@@ -132,37 +132,37 @@
         "turn_id": null
       },
       {
-        "ts": "2026-09-26T22:54:15.186Z",
+        "ts": "2026-09-27T00:14:12.110Z",
         "kind": "agent_admin",
         "group": "run",
         "actor": "console",
         "subject": "old-laptop",
         "detail": "revoke old-laptop",
-        "ref": "runs:23",
+        "ref": "runs:25",
         "turn_id": null
       },
       {
-        "ts": "2026-09-26T22:54:15.184Z",
+        "ts": "2026-09-27T00:14:12.107Z",
         "kind": "agent_admin",
         "group": "run",
         "actor": "console",
         "subject": "opencode",
         "detail": "rotate opencode",
-        "ref": "runs:22",
+        "ref": "runs:24",
         "turn_id": null
       },
       {
-        "ts": "2026-09-26T22:54:15.181Z",
+        "ts": "2026-09-27T00:14:12.105Z",
         "kind": "agent_admin",
         "group": "run",
         "actor": "console",
         "subject": "devin",
         "detail": "approve devin",
-        "ref": "runs:21",
+        "ref": "runs:23",
         "turn_id": null
       },
       {
-        "ts": "2026-09-26T22:54:15.181Z",
+        "ts": "2026-09-27T00:14:12.104Z",
         "kind": "proposal_decided",
         "group": "decision",
         "actor": "devin",
@@ -172,7 +172,7 @@
         "turn_id": null
       },
       {
-        "ts": "2026-09-26T22:54:15.179Z",
+        "ts": "2026-09-27T00:14:12.102Z",
         "kind": "alert",
         "group": "message",
         "actor": "assistant",
@@ -182,57 +182,57 @@
         "turn_id": null
       },
       {
-        "ts": "2026-09-26T22:54:15.179Z",
+        "ts": "2026-09-27T00:14:12.102Z",
         "kind": "agent_admin",
         "group": "run",
         "actor": "console",
         "subject": "cursor",
         "detail": "autonomy_widened cursor",
-        "ref": "runs:20",
+        "ref": "runs:22",
         "turn_id": null
       },
       {
-        "ts": "2026-09-26T22:54:15.178Z",
+        "ts": "2026-09-27T00:14:12.101Z",
         "kind": "agent_admin",
         "group": "run",
         "actor": "console",
         "subject": "cursor",
         "detail": "autonomy cursor",
-        "ref": "runs:19",
+        "ref": "runs:21",
         "turn_id": null
       },
       {
-        "ts": "2026-09-26T22:54:15.175Z",
+        "ts": "2026-09-27T00:14:12.099Z",
         "kind": "agent_admin",
         "group": "run",
         "actor": "console",
         "subject": "cursor",
         "detail": "projects cursor",
-        "ref": "runs:18",
+        "ref": "runs:20",
         "turn_id": null
       },
       {
-        "ts": "2026-09-26T22:54:15.173Z",
+        "ts": "2026-09-27T00:14:12.097Z",
         "kind": "agent_admin",
         "group": "run",
         "actor": "console",
         "subject": "cursor",
         "detail": "grant cursor",
-        "ref": "runs:17",
+        "ref": "runs:19",
         "turn_id": null
       },
       {
-        "ts": "2026-09-26T22:54:15.167Z",
+        "ts": "2026-09-27T00:14:12.093Z",
         "kind": "agent_admin",
         "group": "run",
         "actor": "console",
         "subject": "devin",
         "detail": "mint devin",
-        "ref": "runs:16",
+        "ref": "runs:18",
         "turn_id": null
       },
       {
-        "ts": "2026-09-26T22:54:15.166Z",
+        "ts": "2026-09-27T00:14:12.093Z",
         "kind": "proposal_created",
         "group": "proposal",
         "actor": "devin",
@@ -242,7 +242,7 @@
         "turn_id": null
       },
       {
-        "ts": "2026-09-26T22:54:15.161Z",
+        "ts": "2026-09-27T00:14:12.088Z",
         "kind": "proposal_decided",
         "group": "decision",
         "actor": "assistant",
@@ -252,7 +252,7 @@
         "turn_id": null
       },
       {
-        "ts": "2026-09-26T22:54:15.147Z",
+        "ts": "2026-09-27T00:14:12.079Z",
         "kind": "capture",
         "group": "capture",
         "actor": "http",
@@ -262,37 +262,47 @@
         "turn_id": null
       },
       {
-        "ts": "2026-09-26T22:54:15.070Z",
+        "ts": "2026-09-27T00:14:12.001Z",
+        "kind": "config_write",
+        "group": "run",
+        "actor": "user",
+        "subject": ".metistry/identity.yaml",
+        "detail": "metistry identity set: name Iris → Ada, mention @iris → @ada",
+        "ref": "runs:5",
+        "turn_id": null
+      },
+      {
+        "ts": "2026-09-27T00:14:12.001Z",
         "kind": "tool",
         "group": "run",
         "actor": "assistant",
         "subject": "tasks_update",
         "detail": "called tasks_update",
         "ref": "runs:3",
-        "turn_id": "turn-Us27wk3"
+        "turn_id": "turn-ETZLKsLc"
       },
       {
-        "ts": "2026-09-26T22:54:15.070Z",
+        "ts": "2026-09-27T00:14:12.001Z",
         "kind": "tool",
         "group": "run",
         "actor": "assistant",
         "subject": "knowledge_search",
         "detail": "called knowledge_search",
         "ref": "runs:2",
-        "turn_id": "turn-Us27wk3"
+        "turn_id": "turn-ETZLKsLc"
       },
       {
-        "ts": "2026-09-26T22:54:15.070Z",
+        "ts": "2026-09-27T00:14:12.000Z",
         "kind": "turn",
         "group": "run",
         "actor": "assistant",
         "subject": "turn",
         "detail": "turn gemma $0.004200",
         "ref": "runs:1",
-        "turn_id": "turn-Us27wk3"
+        "turn_id": "turn-ETZLKsLc"
       },
       {
-        "ts": "2026-09-26T22:54:15.069Z",
+        "ts": "2026-09-27T00:14:12.000Z",
         "kind": "proposal_created",
         "group": "proposal",
         "actor": "assistant",
@@ -302,7 +312,7 @@
         "turn_id": null
       },
       {
-        "ts": "2026-09-26T22:54:15.069Z",
+        "ts": "2026-09-27T00:14:11.999Z",
         "kind": "proposal_created",
         "group": "proposal",
         "actor": "assistant",
@@ -312,7 +322,7 @@
         "turn_id": null
       },
       {
-        "ts": "2026-09-26T22:54:15.068Z",
+        "ts": "2026-09-27T00:14:11.999Z",
         "kind": "proposal_created",
         "group": "proposal",
         "actor": "assistant",
@@ -322,6 +332,6 @@
         "turn_id": null
       }
     ],
-    "as_of": "2026-09-26T22:54:15.275Z"
+    "as_of": "2026-09-27T00:14:12.203Z"
   }
 }

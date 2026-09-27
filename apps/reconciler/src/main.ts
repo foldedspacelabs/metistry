@@ -20,7 +20,7 @@ import {
   pushOverrideNote,
 } from "@foldedspacelabs/metistry-core";
 import { Git } from "./git.js";
-import { Committer, type PushResult } from "./committer.js";
+import { Committer, SOURCE_TRAILER, type PushResult } from "./committer.js";
 import { Vault } from "./vault.js";
 import { Embeddings } from "./embeddings.js";
 import { Indexer } from "./indexer.js";
@@ -83,7 +83,7 @@ const commitExternalEdits = optionalEnv("METISTRY_COMMIT_EXTERNAL_EDITS", "true"
 const committer = new Committer(git, {
   authorPrefix: optionalEnv("METISTRY_GIT_AUTHOR_NAME", "Metistry"),
   authorEmail: optionalEnv("METISTRY_GIT_AUTHOR_EMAIL", "metistry@localhost"),
-  sourceTrailer: "Brain-Source", // §4.7 commit hygiene: self-declared provenance, never authorization
+  sourceTrailer: SOURCE_TRAILER, // §4.7 commit hygiene: self-declared provenance, never authorization
   sweepExternalEdits: commitExternalEdits, // swept before every integrate, as on every walk (§2.21 rule 2)
 });
 const vault = new Vault(instanceDir, git, committer, { maxBytes: intEnv("METISTRY_VAULT_MAX_BYTES", 2 * 1024 * 1024) });

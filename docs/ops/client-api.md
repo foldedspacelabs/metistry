@@ -327,8 +327,8 @@ takes a `since` cursor and answers with the next one.
 | `GET /api/knowledge/drafts` | owner | session · local_owner | natural | — | — | served | the drafts waiting on the owner |
 | `GET /api/knowledge/areas` | owner | session · local_owner | natural | — | — | served | the per-area rollup |
 | `POST /api/knowledge/conflicts/resolve` | owner | session · local_owner | no | stale | — | T2-10 | settle a conflicted file: keep one side |
-| `GET /api/knowledge/history` | owner | session · local_owner | natural | — | — | T10-4 | a file's commits |
-| `GET /api/knowledge/version` | owner | session · local_owner | natural | — | — | T10-4 | one file at one commit |
+| `GET /api/knowledge/history` | owner | session · local_owner | natural | — | — | served | a file's commits |
+| `GET /api/knowledge/version` | owner | session · local_owner | natural | — | — | served | one file at one commit |
 | `POST /api/knowledge/restore` | owner | session · local_owner | no | stale | — | T10-5 | raise a Needs You request to restore a file; Approve restores as `user` |
 | `GET /api/q/:name` | owner | session · local_owner · owner_token | natural | — | — | served | run a named query exposed `generic` |
 | `GET /api/today` | owner | session · local_owner | natural | — | — | T2-7 | the day: tasks, work, order, events, brief, standup and plan |
@@ -1545,8 +1545,8 @@ rather than a refusal. `apps/console/test/compute-routes.test.ts` holds it.
 GET  /api/knowledge/search | page | pages | links    see below
 GET  /api/knowledge/fold | drafts | areas            see below — the owner's alone
 POST /api/knowledge/conflicts/resolve      T2-10 — {path, keep, seen_sha}   409 stale — only a path in `conflict`
-GET  /api/knowledge/history?path=          T10-4 — a file's commits, through the bridge's `GET /vault/log`
-GET  /api/knowledge/version?path=&sha=     T10-4 — one file at one commit, through a new `GET /vault/show`
+GET  /api/knowledge/history?path=&limit=   served — a file's commits, through the bridge's `GET /vault/log`   the owner's alone
+GET  /api/knowledge/version?path=&sha=     served — one file at one commit, through the bridge's `GET /vault/show`   the owner's alone
 POST /api/knowledge/restore                T10-5 — {path, sha, seen_sha}: raises a Needs You request   409 stale
 ```
 
@@ -1788,6 +1788,62 @@ folder. The owner is still served them at `/api/q/<name>` (P4).
 | `fold` | the newest `Journal/Fold/YYYY-MM-DD.md` — newest by the date in its **name**, so a fold caught up late does not jump ahead — on or before `date` when given; never a draft or conflicted fold. `links` are its outgoing edges: a link to a draft or conflict is dropped, one to a path no note lives at yet is `resolved: false`, and a target that is not knowledge (`.metistry/`, `Artifacts/`) is dropped by `canSee` even for the owner. The fold's **bytes** are `GET /api/knowledge/page` on its `path` — a note body is not derived state |
 | `drafts` | every note whose frontmatter says `status: draft` — never a `conflict`, which the indexer also flags but which is settled by `POST /api/knowledge/conflicts/resolve` (T2-10), not Approve/Revise/Decline. Ordered by path in byte order; `limit` 100 by default, ceiling 500; no `total` |
 | `areas` | one row per area, derived exactly as `pages` derives `area` (so `?area=<area>` on the page list opens it): `description` is its `<area>/README.md`'s frontmatter description (`null` until something writes one — C68), `pages` the settled count (never drafts or conflicts), `last_change` their newest `mtime`, `named_by_fold` whether the newest fold links into it — provenance, never a score (P5). A folder that is not knowledge is dropped by core's predicate. Unpaged: a vault has tens of areas |
+
+#### `GET /api/knowledge/history`, `GET /api/knowledge/version` — a note's past (`user` principal; T10-4)
+
+```
+GET /api/knowledge/history?path=Areas/Health/sleep.md&limit=
+200 {"path":"Areas/Health/sleep.md",
+     "commits":[{"sha","path","change","subject","author","source","runs":[…],"turns":[…],"at"}],
+     "limit":50,"as_of":"…"}
+GET /api/knowledge/version?path=Areas/Health/sleep.md&sha=4c1d2e3f
+200 {"path","sha","subject","author","source","runs","turns","at",
+     "content","sha256","bytes","as_of"}
+400 a missing path / a limit outside 1–200 / a sha that is not a commit id — by name;
+    or, for the owner, a path this door does not serve (the classification, as on `page`)
+403 any principal that is not the owner — the console's uniform `not granted`,
+    decided in the route before the bridge is asked
+404 (version) no such commit, a commit not on this vault's branch, or the file absent at it
+503 no vault bridge configured
+```
+
+Git is the record (invariant 1), and the console holds no git (D5): both come
+from the reconciler's bridge, read with the console's bearer —
+`GET /vault/log?path=` and `GET /vault/show` (`docs/ops/reconciler.md`).
+
+**`history`** is the file's commits, newest first, followed across renames
+(`git log --follow`). Each commit names the file **as it was called then**
+(`path`) — across a rename that is the old name, and it is the name to pass
+to `version` for that commit — and what the commit did to it (`change`:
+`added`, `modified`, `deleted`, `renamed`, `copied`, `type_changed`; `null` on
+a merge that carried it unchanged). `at` is the author date in UTC. `author`
+is git's author name (`Metistry <principal>` for the reconciler's own
+commits); `source`, `runs` and `turns` are the commit's `Brain-Source:`,
+`Metistry-Run:` and `Metistry-Turn:` trailers (§2.21, T10-1) — **provenance
+to show, never authority**, and a trailer value that is not the shape the
+committer writes is dropped rather than passed on. A commit whose name for
+the file was never a note (moved in from `.metistry/`) is dropped by `canSee`.
+`limit` defaults to 50; the ceiling is the bridge's 200. No cursor: a note's
+history is short, and a longer look is a larger `limit`.
+
+**`version`** is the file's bytes at one commit, as `content` (UTF-8, like
+`page`) with their `sha256` and `bytes`, and the commit's own fields. `sha` is
+a **commit id and nothing else** — 7 to 64 hex characters, abbreviated or
+full; the answer carries the full one. A ref, `HEAD~1`, a `rev:path` or an
+option-shaped string is `400` here and again at the bridge, so nothing but
+hex ever reaches git's argv. A commit that exists but is not on this branch's
+history (fetched and not yet integrated) is `404`, as is a file absent at
+that commit — including the commit that deleted it; ask for the one before.
+
+**Notes only, the owner only.** Both apply `page`'s rule to the path —
+`.metistry/`, `Artifacts/`, the root `CLAUDE.md` are classified for the owner
+and served to nobody — and the bridge refuses a protected or non-vault path
+again (`403`) whichever bearer asks: the history of the machinery is the
+CLI's, with the owner's hand on it. And both are the owner's **alone**, like
+`fold`/`drafts`/`areas`: a note's history holds every version of it,
+including what an edit since took out, so no agent reads it — whatever its
+grants, and even through a gate widened by mistake. Restore (T10-5) and roll
+back (T10-6) build on these two; neither changes anything.
 
 ### The named queries — `GET /api/q/:name`
 

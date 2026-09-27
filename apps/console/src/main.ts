@@ -41,7 +41,7 @@ import { ASSISTANT_DEFAULT_AREAS, INTERNAL_ASSISTANT_ID, ensureInternalAgent, re
 import { httpVaultClient } from "./vault-client.js";
 import { SCHEDULED_PATH, STANDUP_MOVE_RETRY_MS, fileOverlay, startStandupMove } from "./profile-tidy.js";
 import { httpVaultStatus } from "./vault-status.js";
-import { vaultBridgeSearch } from "./knowledge-routes.js";
+import { vaultBridgeHistory, vaultBridgeSearch } from "./knowledge-routes.js";
 import type { ComputeAdmin } from "./compute-routes.js";
 import type { SecretsView } from "./secrets-route.js";
 import type { VariablesView } from "./variables-route.js";
@@ -191,6 +191,9 @@ const searchVaultKeyword = reconcilerUrl && reconcilerToken ? vaultBridgeSearche
 // searcher above stays exactly what it is — knowledge_grep's candidate
 // pre-filter — because widening it would change what a grep costs.
 const searchKnowledge = reconcilerUrl && reconcilerToken ? vaultBridgeSearch({ url: reconcilerUrl, token: reconcilerToken }) : undefined;
+// GET /api/knowledge/history and /version (§2.21, T10-4): a note's commits
+// and its bytes at one of them — the bridge's /vault/log and /vault/show.
+const knowledgeHistory = reconcilerUrl && reconcilerToken ? vaultBridgeHistory({ url: reconcilerUrl, token: reconcilerToken }) : undefined;
 if (!vault) console.warn("vault bridge absent: set METISTRY_RECONCILER_URL + METISTRY_BRIDGE_TOKEN_RECONCILER for knowledge_read, knowledge_write, knowledge_list, knowledge_grep, /api/knowledge/* and artifacts (degrades: absent)");
 
 // Captures live in the vault at `Inbox/` (docs/ops/inbox.md), so
@@ -356,6 +359,7 @@ const server = makeServer(pool, queries, {
   ...(listKnowledge ? { listKnowledge } : {}),
   ...(searchVaultKeyword ? { searchVaultKeyword } : {}),
   ...(searchKnowledge ? { searchKnowledge } : {}),
+  ...(knowledgeHistory ? { knowledgeHistory } : {}),
   ...(computeAdmin ? { computeAdmin } : {}),
   ...(vault ? { vault } : {}),
   // GET /api/vault/status: the reconciler's sync status over the same bridge (T10-2)

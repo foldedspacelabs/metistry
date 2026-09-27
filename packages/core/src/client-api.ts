@@ -300,9 +300,9 @@ export const CLIENT_API: readonly ClientRoute[] = [
   planned("POST", "/api/trackers/:connection/issues", "T4-25", "create an issue from a task; idempotent by task key", { idempotent: "natural" }),
   planned("POST", "/api/trackers/:connection/issues/:key/complete", "T4-26", "close an issue", { idempotent: "natural" }),
 
-  // ----- prose feedback -----
-  planned("POST", "/api/prose/:id/feedback", "T1-12", "rate one piece of generated prose", { idempotent: "natural" }),
-  planned("DELETE", "/api/prose/:id/feedback", "T1-12", "clear a prose rating", { idempotent: "natural" }),
+  // ----- prose feedback (T1-12) -----
+  route("POST", "/api/prose/:id/feedback", "rate one piece of generated prose", { idempotent: "natural" }),
+  route("DELETE", "/api/prose/:id/feedback", "clear a prose rating", { idempotent: "natural" }),
 
   // ----- live changes -----
   route("GET", "/api/events", "Server-Sent Events: what changed, as ids; `Last-Event-ID` resumes"),

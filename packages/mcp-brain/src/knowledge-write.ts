@@ -19,6 +19,14 @@
 //   hand-written note — which never carries `source:` — be replaced whole by
 //   a model turn); the one exemption is `now.md` at the vault root by exact
 //   name, see USER_SOURCE / ownershipRefusal below;
+// - a routine's own folder (`Journal/Plan/`, `Journal/Standup/`,
+//   `Journal/Brief/` — core's `JOURNAL_ROUTINE_DIRS`) is written under that
+//   routine's principal and nobody else's (owner ruling (a), W1). The one
+//   thing the assistant may do there is fill the pending `prose` slots of a
+//   file the routine already wrote (C103): the incoming content is checked
+//   against the file on disk by `fillProseSlots`, only the slot lines may
+//   differ, and the write goes out in the ROUTINE's name — never a create,
+//   never a stamp, never another byte (`writeRoutineProse` below);
 // - a markdown write is stamped with provenance (§4.15): `source` is the
 //   credential's id — never an argument — and `updated` is today;
 // - compare-and-swap is NOT optional (2026-09-16): an omitted
@@ -35,7 +43,7 @@
 import { createHash } from "node:crypto";
 import { parse as parseYaml } from "yaml";
 import type { ErrorCode } from "@foldedspacelabs/metistry-core";
-import { isProtectedPath, may, notKnowledge } from "@foldedspacelabs/metistry-core";
+import { PROSE_SOURCES, fillProseSlots, isProtectedPath, journalRoutineOf, may, notKnowledge } from "@foldedspacelabs/metistry-core";
 import { validKnowledgePath, type KnowledgeReader } from "./knowledge.js";
 import { principalOf } from "./principal.js";
 import type { AgentPrincipal } from "./types.js";
@@ -293,7 +301,7 @@ export interface KnowledgeWriteArgs {
 }
 
 export type KnowledgeWriteOutcome =
-  | { ok: true; result: { path: string; sha256: string; bytes: number; created: boolean; queued: true; provenance: { source: string; updated: string } | null }; meta: Record<string, unknown> }
+  | { ok: true; result: { path: string; sha256: string; bytes: number; created: boolean; queued: true; provenance: { source: string; updated: string } | null; /** A routine file's slots this write filled (C103). */ filled?: number[] }; meta: Record<string, unknown> }
   | { ok: false; code: ErrorCode; message?: string | undefined; meta: Record<string, unknown> };
 
 export const MAX_WRITE_BYTES = 2 * 1024 * 1024; // limit: fixed — mirrors the bridge's own default cap, which enforces it; ours cannot be larger
@@ -356,6 +364,10 @@ export async function writeKnowledge(
     return { ok: false, code: "not_available", message: "knowledge writes are not configured in this deployment (the vault bridge is absent)", meta };
   }
 
+  // A routine's own folder: fill its file's prose slots, or nothing.
+  const routine = journalRoutineOf(args.path);
+  if (routine !== null) return writeRoutineProse(args, routine, writer, reader, act, meta);
+
   // Ownership (see ownershipRefusal): new notes are free; an existing note
   // belongs to whoever's `source` it carries, and no `source:` at all means
   // the user (USER_SOURCE) — never the caller.
@@ -415,5 +427,87 @@ export async function writeKnowledge(
     ok: true,
     result: { path: out.path, sha256: out.sha256, bytes: out.bytes, created: out.created, queued: true, provenance },
     meta: { ...meta, sha256: out.sha256, bytes: out.bytes, created: out.created, ...(provenance ? { provenance } : {}) },
+  };
+}
+
+/**
+ * `knowledge_write` into a routine's own folder (`JOURNAL_ROUTINE_DIRS`).
+ * The file is the routine's — written under its principal, `source:` its
+ * name (owner ruling (a), W1) — and the assistant's one turn may fill each
+ * pending `prose` slot's line in it (C103) and change nothing else. Refused:
+ *
+ *   - a folder whose routine renders no prose (`Journal/Plan/` —
+ *     Tomorrow's Plan is model-free): `forbidden`;
+ *   - a file that does not exist — the assistant never creates one here, so
+ *     it can never pre-empt the routine's own file: `forbidden`;
+ *   - a file whose `source` is not the folder's routine (the owner's own
+ *     note, say): `forbidden`, owned by whoever it names;
+ *   - a hash that is not the file's as it is now: `conflict`, with the hash;
+ *   - content that differs from the file anywhere but a pending slot's line,
+ *     or a slot line that is not one line of prose (`fillProseSlots`):
+ *     `invalid_request`, saying which line and why.
+ *
+ * What is written is `fillProseSlots`' output — the file on disk with the
+ * checked lines in place — never the incoming content as sent; so there is
+ * no provenance stamp to add and `source` cannot change. The commit is the
+ * routine's, carrying this reply's turn.
+ */
+async function writeRoutineProse(
+  args: KnowledgeWriteArgs,
+  routine: string,
+  writer: KnowledgeWriter,
+  reader: KnowledgeReader | undefined,
+  act: WriteAct,
+  meta: Record<string, unknown>,
+): Promise<KnowledgeWriteOutcome> {
+  const folder = args.path.split("/").slice(0, 2).join("/");
+  const m = { ...meta, routine_file: routine };
+  if (!PROSE_SOURCES.includes(routine)) {
+    return { ok: false, code: "forbidden", message: `${folder}/ is the ${routine} routine's own folder, and nothing else writes it — report instead`, meta: m };
+  }
+  if (!reader) return { ok: false, code: "not_available", message: "the vault read path is absent, so a routine's file cannot be checked — nothing was written", meta: m };
+  let existing: string | null;
+  try {
+    existing = await reader(args.path);
+  } catch {
+    return { ok: false, code: "not_available", message: "could not read the file to check its prose slots — try again", meta: m };
+  }
+  if (existing === null) {
+    return { ok: false, code: "forbidden", message: `${folder}/ is the ${routine} routine's own folder: you may fill the pending prose slots of a file it wrote, never create one`, meta: m };
+  }
+  const owner = frontmatterSource(existing) ?? USER_SOURCE;
+  if (owner !== routine) return { ok: false, code: "forbidden", message: `owned by ${owner}; propose instead`, meta: { ...m, owned_by: owner } };
+  const current = sha256Text(existing);
+  if (args.expected_sha256 !== current) {
+    return { ok: false, code: "conflict", message: `knowledge_read ${args.path} and fill its slots in what is there now (current sha256 ${current}), passing that sha256 back as expected_sha256`, meta: { ...m, current_sha256: current } };
+  }
+  const fill = fillProseSlots(existing, args.content);
+  if (!fill.ok) return { ok: false, code: "invalid_request", message: `${fill.message}. Nothing was written.`, meta: m };
+  if (Buffer.byteLength(fill.content, "utf8") > MAX_WRITE_BYTES) return { ok: false, code: "invalid_request", message: `content exceeds ${MAX_WRITE_BYTES} bytes`, meta: m };
+
+  const out = await writer({
+    path: args.path,
+    content: fill.content,
+    // The routine's name, not the caller's: the folder is the routine's
+    // (ruling (a)); the turn trailer says which reply wrote the words.
+    intent: {
+      principal: routine,
+      message: args.message,
+      ...(act.runId !== undefined ? { run: String(act.runId) } : {}),
+      ...(act.turnId !== undefined ? { turn: act.turnId } : {}),
+    },
+    expected_sha256: current,
+  });
+  if (!out.ok) {
+    if (out.code === "conflict") {
+      const now = out.current_sha256 ?? null;
+      return { ok: false, code: "conflict", message: now ? `the file changed since you read it (current sha256 ${now}) — knowledge_read it again and redo the slots` : "the file no longer exists", meta: { ...m, current_sha256: now } };
+    }
+    return { ok: false, code: out.code, message: out.message, meta: m };
+  }
+  return {
+    ok: true,
+    result: { path: out.path, sha256: out.sha256, bytes: out.bytes, created: out.created, queued: true, provenance: null, filled: fill.filled },
+    meta: { ...m, sha256: out.sha256, bytes: out.bytes, filled: fill.filled },
   };
 }

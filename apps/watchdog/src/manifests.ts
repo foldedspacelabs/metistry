@@ -12,12 +12,20 @@
 // path stays model-free and dependency-thin (PoC-11). manifests.test.ts
 // (console) pins that every product unit has its code, so the two views agree.
 
-import { loadKind, scheduleToSeconds, type RegistrySkip } from "@foldedspacelabs/metistry-core";
+import { describeSchedule, loadKind, longestGapSeconds, type RegistrySkip } from "@foldedspacelabs/metistry-core";
 
 export interface ScheduledComponent {
   name: string;
   runKind: "collector_run" | "routine_run";
+  /** the manifest's schedule, said the way a person would (`describeSchedule`) */
   schedule: string;
+  /**
+   * The longest the schedule can go between two runs (`longestGapSeconds`):
+   * an interval is itself; a time of day is the widest gap of its week, and a
+   * day set that follows Me/profile.md — which this probe does not read — is
+   * bounded by the week. A coarse bound for a time of day, and the right
+   * one for a probe: it can say "stopped", never "late".
+   */
   intervalSec: number;
 }
 
@@ -40,12 +48,12 @@ export async function loadScheduled(dirs: ScheduledDirs): Promise<{ scheduled: S
     for (const u of reg.units()) {
       let intervalSec: number;
       try {
-        intervalSec = scheduleToSeconds(u.manifest.schedule);
+        intervalSec = longestGapSeconds(u.manifest.schedule);
       } catch (e) {
         skipped.push({ path: u.path, origin: u.origin, name: u.name, reason: (e as Error).message }); // the runner skips it too
         continue;
       }
-      scheduled.push({ name: u.name, runKind: kind === "routine" ? "routine_run" : "collector_run", schedule: u.manifest.schedule, intervalSec });
+      scheduled.push({ name: u.name, runKind: kind === "routine" ? "routine_run" : "collector_run", schedule: describeSchedule(u.manifest.schedule), intervalSec });
     }
   }
   return { scheduled, skipped };

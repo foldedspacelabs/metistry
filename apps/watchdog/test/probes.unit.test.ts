@@ -220,6 +220,22 @@ describe("probes over a fake db", () => {
     expect(skipped).toEqual([expect.objectContaining({ reason: "schema: missing — every manifest carries schema: 1" })]);
   });
 
+  // T3-1: a manifest on §2.5's time of day is bounded by the widest gap of
+  // its week — a day set by the week itself, since this probe does not read
+  // Me/profile.md — and named the way a person would say it.
+  it("manifest discovery: a time-of-day schedule is bounded by its week and said in words", async () => {
+    const root = await mkdtemp(join(tmpdir(), "wd-tod-"));
+    await mkdir(join(root, "fold"), { recursive: true });
+    await writeFile(join(root, "fold", "manifest.yaml"), `schema: 1\nname: fold\ntype: routine\nschedule: { days: [sun, mon, tue, wed, thu, fri, sat], at: ["21:00"] }\n`);
+    await mkdir(join(root, "brief"), { recursive: true });
+    await writeFile(join(root, "brief", "manifest.yaml"), `schema: 1\nname: brief\ntype: routine\nschedule: { days: working_days, at: ["07:00"] }\n`);
+    const { scheduled, skipped } = await loadScheduled({ collectorsDir: join(root, "no-collectors"), routinesDir: root });
+    expect(skipped).toEqual([]);
+    const byName = Object.fromEntries(scheduled.map((s) => [s.name, s]));
+    expect(byName.fold).toEqual({ name: "fold", runKind: "routine_run", schedule: "every day at 21:00", intervalSec: 25 * 3600 });
+    expect(byName.brief).toEqual({ name: "brief", runKind: "routine_run", schedule: "working days at 07:00", intervalSec: 7 * 86400 + 3600 });
+  });
+
   it("assistant-drain: a queue nobody is draining is `absent` when the assistant is not a supervisor child (W1), and still failed when it is", async () => {
     const db = fakeDb({ lastRuns: [], fmCounts: { fm: 0, rule_default: 0 } });
     // three fold turns waiting, one abandoned mid-processing

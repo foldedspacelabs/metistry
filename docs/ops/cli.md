@@ -1221,9 +1221,12 @@ is next due, and whether the runner has stopped running it (a failure streak
 at `METISTRY_RUNNER_MAX_STREAK`) or never started it (a declared prerequisite
 missing). `failed` — and so exit 1 — is reserved for the states you have to
 act on: given up on, blocked on configuration, or more than 2× its interval
-with no run at all. A component that has simply never run is `absent`, because
-a fresh install is not broken. `docs/ops/automation.md` has the whole failure
-model and the `--json` shape.
+with no run at all (for a time-of-day schedule, the widest gap of its week).
+A component that has simply never run is `absent`, because a fresh install is
+not broken — and so is one whose schedule the runner could not place
+(`no_working_days`, `no_timezone`), with the runner's reason as its
+remediation. `docs/ops/automation.md` has the whole failure model and the
+`--json` shape; `docs/ops/scheduled.md` how the runner fires.
 
 Add a component by adding a directory with a manifest; doctor covers it.
 A new http bridge named `foo` on port 7820 is probed the moment

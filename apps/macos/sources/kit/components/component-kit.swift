@@ -67,6 +67,11 @@ public enum MetistryGlyph: String, CaseIterable, Sendable {
     case checkbox = "square"
     case checkboxOn = "checkmark.square"
     case edit = "pencil"
+    /// Approve's check and Decline's cross: the two most consequential buttons
+    /// in the product keep their glyphs, so they are told apart in greyscale
+    /// and not by fill alone (components-01 §2.4).
+    case approve = "checkmark"
+    case decline = "xmark"
 
     /// The symbol drawn when a control holding this glyph is selected (a lit rating).
     public var selectedName: String {
@@ -102,6 +107,8 @@ public enum MetistryGlyph: String, CaseIterable, Sendable {
         case .radio, .checkbox: return "not chosen"
         case .radioOn, .checkboxOn: return "chosen"
         case .edit: return "Edit"
+        case .approve: return "Approve"
+        case .decline: return "Decline"
         }
     }
 }

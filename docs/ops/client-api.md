@@ -1020,7 +1020,9 @@ Every row of `GET /api/agents` carries `permissions`: the actor's
 - The table **renders `may()`**: a tool fills its cell only when the door
   would admit it, so a line here is a door that says yes.
 - `asks` is ⏱: the owner answers first. `provenance` is `base` (no marker),
-  `approved` (*approved in Needs You · #n*) or `routine` (*during … only*).
+  `approved` (*approved in Needs You · #n*), `routine` (*during … only*) or
+  `project` (*via project \<slug\>* — inherited from a project the actor is a
+  member of, T4-7; see *Projects*).
 - A client prints `label` and never re-derives a cell. The CLI, the console's
   panel and MetistryKit print the same words — core's `permissionRowText`,
   an empty cell `—` — held together by a test on the recorded fixture.
@@ -1279,9 +1281,17 @@ the daily budget and the caps. Every change records a `project_admin` run
 (`validateGrants`) with the external rules: the bare vault (`/`) is refused
 (that spelling is the internal assistant row's alone), and every area must be
 vault CONTENT — a grant naming `.metistry/`, `Artifacts/…`, or anything else
-outside the vault is refused. A member's effective reach unions a project's
-grant with its own, "via project" (T4-7); nothing reads this field before
-then.
+outside the vault is refused.
+
+**Every member inherits it** (T4-7). A crew's or external agent's effective
+reach is its own grant ∪ the grants of the projects its row lists: the door
+resolves the union per request (an agent bearer on `/mcp` and every agent
+door), and `GET /api/agents` draws each inherited entry with provenance
+`{kind: "project", project}` — *via project \<slug\>*. The agent row's own
+`grants` field is unchanged by it. Narrowing the project's grant narrows every
+member on its next request; removing the slug from the agent's projects
+(`PUT /api/agents/:id/projects`) removes the inherited reach. The instance's
+assistant inherits nothing (its reach is configuration).
 
 ### Work — the board and dispatch
 

@@ -15,7 +15,7 @@
 // through the console's `writeGrants`, one validator, one audit row
 // (invariant 2).
 
-import { INSTANCE_LAYOUT, isUserOwnedPath, isVaultPath, VAULT_ROOT_AREA } from "./instance-layout.js";
+import { INSTANCE_LAYOUT, isUserOwnedPath, isVaultPath, validAgentAreaGrant, VAULT_ROOT_AREA } from "./instance-layout.js";
 
 /**
  * Read tiers (§4.11): default-deny, user-granted, attached to the token
@@ -698,6 +698,114 @@ export function memberOfProject(scope: Scope, slug: string | null): boolean {
   return scope.projects === null || scope.projects.includes(slug);
 }
 
+// ===========================================================================
+// Project grants, inherited (T4-7) — a member's reach is its own ∪ its projects'
+// ===========================================================================
+//
+// A project may hold its own read grant (0032, `PUT /api/projects/:slug`),
+// and every agent IN the project inherits it (D13, ruled 2026-09-22; screen
+// 13). The union is computed where the credential is resolved — never
+// written into the member's own row — so the member's `agents.grants` stays
+// the owner's hand on THAT agent, and leaving the project is the whole of
+// taking the inherited reach away: the next request resolves without it.
+
+/** One project's own read grant, as a member inherits it. `grants` is the stored jsonb, re-checked here rather than trusted. */
+export interface ProjectGrant {
+  readonly project: string;
+  readonly grants: unknown;
+}
+
+/**
+ * Reach a member holds only through a project: an area, the `titles` of a
+ * tier-`index` grant, or `queries`. The first project (by the order given)
+ * that supplies it is its provenance — *via project* on every surface.
+ */
+export interface InheritedReach {
+  readonly key: string;
+  readonly project: string;
+}
+
+/** The keys of `InheritedReach` that are not an area. Neither is a valid area prefix, so the two can never collide with one. */
+export const INHERITED_TITLES = "titles";
+export const INHERITED_QUERIES = "queries";
+
+/** A grant envelope, as a member's own row and a project's row both store it. */
+export interface GrantEnvelope {
+  readonly tier: GrantTier;
+  readonly areas: readonly string[];
+  readonly queries?: boolean | undefined;
+}
+
+const TIER_RANK: Readonly<Record<GrantTier, number>> = Object.freeze({ none: 0, index: 1, areas: 2 });
+
+/**
+ * A project's stored grant, read back fail-closed: an unknown tier is
+ * `none`, and each area must still be one an agent may be granted
+ * (`validAgentAreaGrant` — so the bare vault, `.metistry/`, `Artifacts/…`
+ * or a traversal written into the row by hand is dropped, never inherited).
+ * An `areas` tier left with no area is `none`: an empty folder list is no
+ * grant, and must not become one by arriving malformed.
+ */
+function projectEnvelope(raw: unknown): GrantEnvelope {
+  const g = (raw ?? {}) as { tier?: unknown; areas?: unknown; queries?: unknown };
+  const tier: GrantTier = g.tier === "index" || g.tier === "areas" ? g.tier : "none";
+  const areas = tier === "areas" && Array.isArray(g.areas) ? g.areas.filter((a): a is string => validAgentAreaGrant(a)) : [];
+  return { tier: tier === "areas" && areas.length === 0 ? "none" : tier, areas, queries: g.queries === true };
+}
+
+/**
+ * **A member's effective grant: its own ∪ its projects'** (T4-7), with the
+ * provenance of everything the projects added.
+ *
+ * Only the projects in `member` count — a project grant reaches the agents
+ * IN the project and nobody else, so a slug dropped from `member` takes its
+ * reach with it (the ticket's bold test). Per field:
+ *
+ * - **tier** — the widest held (`none` < `index` < `areas`).
+ * - **areas** — the member's own first, verbatim, then each project's area
+ *   that the areas already held do not cover (`underAreas`), in project
+ *   order. An area the member holds itself is its own, never *via project*.
+ * - **queries** — held if the member or any of its projects holds it.
+ *
+ * One corner the single-tier `Scope` cannot say both halves of: `index`
+ * (titles everywhere, no content) beside `areas` (content under some
+ * folders). The union comes to `areas` — the content — exactly as an
+ * approval on top of an `index` grant does (`mergeGrantOverrides` in the
+ * console, ruled 2026-09-19 B); the titles outside those folders are not
+ * drawn and not served.
+ *
+ * Pure, like everything in this file: the host reads the rows and hands
+ * them in, and the console's door and the permissions table call this one
+ * function, so the table cannot draw a reach the door does not grant.
+ */
+export function inheritGrants(own: GrantEnvelope, member: readonly string[], projects: readonly ProjectGrant[]): { grants: GrantEnvelope; via: InheritedReach[] } {
+  const held = projects.filter((p) => member.includes(p.project)).map((p) => ({ project: p.project, grants: projectEnvelope(p.grants) }));
+  let tier: GrantTier = own.tier;
+  for (const p of held) if (TIER_RANK[p.grants.tier] > TIER_RANK[tier]) tier = p.grants.tier;
+
+  const via: InheritedReach[] = [];
+  const areas = own.tier === "areas" ? [...own.areas] : [];
+  if (tier === "areas") {
+    for (const p of held) {
+      for (const area of p.grants.areas) {
+        if (areas.includes(area) || underAreas(area, areas)) continue;
+        areas.push(area);
+        via.push({ key: area, project: p.project });
+      }
+    }
+  } else if (tier === "index" && own.tier !== "index") {
+    via.push({ key: INHERITED_TITLES, project: held.find((p) => p.grants.tier === "index")!.project });
+  }
+
+  const ownQueries = own.queries === true;
+  const queriesFrom = ownQueries ? undefined : held.find((p) => p.grants.queries === true);
+  if (queriesFrom) via.push({ key: INHERITED_QUERIES, project: queriesFrom.project });
+  const queries = ownQueries || queriesFrom !== undefined;
+
+  if (via.length === 0) return { grants: own, via };
+  return { grants: { tier, areas: tier === "areas" ? areas : [], ...(queries ? { queries: true } : {}) }, via };
+}
+
 /**
  * **The one decision function.**
  *
@@ -1343,6 +1451,13 @@ export function describePermissions(p: Principal, opts: DescribePermissionsOptio
   const projectsHeld = scope.projects === null || scope.projects.length > 0;
   const approved = new Map<string, number | null>();
   for (const a of opts.history?.approved ?? []) if (!approved.has(a.area)) approved.set(a.area, a.proposalId);
+  // T4-7: what the scope holds only through a project — an area, the titles, the queries
+  const inherited = new Map<string, string>();
+  for (const i of opts.history?.projects ?? []) if (!inherited.has(i.key)) inherited.set(i.key, i.project);
+  /** Via a project when only a project holds `key`, else the base. */
+  const viaProject = (key: string): PermissionProvenance => (inherited.has(key) ? { kind: "project", project: inherited.get(key)! } : base);
+  /** An area's provenance: approved in Needs You, else via a project, else the base. */
+  const provenanceOf = (key: string): PermissionProvenance => (approved.has(key) ? { kind: "approved", proposalId: approved.get(key)! } : viaProject(key));
 
   const cells = new Map<string, PermissionEntry[]>();
   const cellOf = (resource: PermissionResourceKind, column: PermissionColumn): PermissionEntry[] => {
@@ -1366,12 +1481,10 @@ export function describePermissions(p: Principal, opts: DescribePermissionsOptio
     area === VAULT_ROOT_AREA ? { key: VAULT_ROOT_AREA, label: WHOLE_VAULT_LABEL, asks: false, provenance } : { key: area, label: area, asks: false, provenance };
   /** The areas the scope holds, as entries: the whole vault once, or each area verbatim. Approved areas carry their request. */
   const areaEntries = (): PermissionEntry[] => {
-    if (scope.tier === "index") return [{ key: "titles", label: TITLES_ONLY_LABEL, asks: false, provenance: base }];
+    if (scope.tier === "index") return [{ key: "titles", label: TITLES_ONLY_LABEL, asks: false, provenance: viaProject(INHERITED_TITLES) }];
     if (scope.tier !== "areas") return [];
-    if (scope.areas === null || scope.areas.includes(VAULT_ROOT_AREA)) {
-      return [areaEntry(VAULT_ROOT_AREA, approved.has(VAULT_ROOT_AREA) ? { kind: "approved", proposalId: approved.get(VAULT_ROOT_AREA)! } : base)];
-    }
-    return scope.areas.map((a) => areaEntry(a, approved.has(a) ? { kind: "approved", proposalId: approved.get(a)! } : base));
+    if (scope.areas === null || scope.areas.includes(VAULT_ROOT_AREA)) return [areaEntry(VAULT_ROOT_AREA, provenanceOf(VAULT_ROOT_AREA))];
+    return scope.areas.map((a) => areaEntry(a, provenanceOf(a)));
   };
   const projectEntries = (resource: PermissionResourceKind): PermissionEntry[] =>
     scope.projects === null
@@ -1394,7 +1507,8 @@ export function describePermissions(p: Principal, opts: DescribePermissionsOptio
           : areaEntries()
         : entries === "projects"
           ? projectEntries(resource)
-          : [{ key: entries.key, label: entries.label, asks: false, provenance: base }];
+          : // a named query is held by the `queries` flag alone — via a project when only a project holds it
+            [{ key: entries.key, label: entries.label, asks: false, provenance: resource === "queries" ? viaProject(INHERITED_QUERIES) : base }];
     for (const e of add) put(resource, column, e);
   }
 
@@ -1477,6 +1591,7 @@ export const PERMISSION_CONNECTION_MARK = "⧉";
 export function permissionProvenanceText(p: PermissionProvenance): string | null {
   if (p.kind === "approved") return p.proposalId === null ? "approved in Needs You" : `approved in Needs You · #${p.proposalId}`;
   if (p.kind === "routine") return `during ${p.routine} only`;
+  if (p.kind === "project") return `via project ${p.project}`;
   return null;
 }
 

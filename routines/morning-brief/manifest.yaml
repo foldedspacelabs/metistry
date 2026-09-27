@@ -2,4 +2,9 @@ schema: 1
 name: morning-brief
 type: routine
 description: Daily review with the D10 soft budget — most impactful proposals surfaced, full queue one tap away, un-acted items auto-expire (searchable, never lost)
-schedule: "@daily"
+# §2.5's default, as answered (§4 Q12): working days at 07:00 — before the
+# 08:00 standup, which the brief embeds by reference. `working_days` follows
+# Me/profile.md; with none there the runner records
+# `skipped:no_working_days` and nothing is guessed. `.metistry/scheduled.yaml`
+# may change it (docs/ops/scheduled.md).
+schedule: { days: working_days, at: ["07:00"] }

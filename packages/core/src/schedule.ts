@@ -7,16 +7,14 @@
 //     manifests move to (T3-2). Closed means closed: an interval outside the
 //     four, a cron string, `8:00`, a UTC offset are each refused at parse,
 //     and widening the set is a product change, never a config line.
-//   * THE LEGACY CRON SUBSET below — what product manifests carry today, and
-//     may keep carrying for ONE release (§2.5). `scheduleToSeconds` reads it
-//     as an interval; nothing new is written in it.
+//   * THE LEGACY CRON SUBSET below — what a product manifest may keep
+//     carrying for ONE release (§2.5). `scheduleToSeconds` reads it as an
+//     interval; nothing new is written in it.
 //
-// The next-occurrence function is frozen here as a TYPE (`NextOccurrence`)
-// and implemented in T3-1, hand-rolled over `Intl` (no dependency, U5). A
-// type rather than a stub that throws: core is published, and a function
-// that always throws compiles in every caller and fails at run time, where a
-// missing export fails at build time — where a ticket that got ahead of T3-1
-// should find out.
+// The next-occurrence function's signature was frozen by F-4
+// (`NextOccurrence`); its body, `nextOccurrence`, and the runner's question
+// `dueOccurrence` are at the end of this file (T3-1), hand-rolled over
+// `Intl` (no dependency, U5).
 
 import { z } from "zod";
 
@@ -237,7 +235,7 @@ export function resolveDays(days: Days, workingDays: readonly Weekday[] | undefi
   return WEEKDAYS.filter((_, i) => workingDays.includes(WEEKDAYS[(i + 1) % WEEKDAYS.length]!));
 }
 
-// ---- the next-occurrence function: its signature (F-4), its body (T3-1) ------
+// ---- the next-occurrence function: its signature (F-4) ------------------------
 
 /**
  * The facts in `Me/profile.md` a schedule may FOLLOW — read, never written
@@ -253,8 +251,9 @@ export interface OccurrenceContext {
   readonly profile: ProfileFacts;
   /**
    * The zone used when neither the schedule's `tz` nor the profile's
-   * `timezone` names one: the runner's configured zone (`METISTRY_TZ`, then
-   * `TZ`). `null` = nothing configured, and a time-of-day schedule is refused
+   * `timezone` names one: the runner's configured zone — `METISTRY_TZ`
+   * (`configuredTimeZone`; not `TZ`, which both deployment shapes default to
+   * UTC). `null` = nothing configured, and a time-of-day schedule is refused
    * `no_timezone` rather than answered in UTC.
    */
   readonly fallbackTimeZone: string | null;
@@ -270,9 +269,8 @@ export type Occurrence =
   | { readonly ok: false; readonly reason: OccurrenceRefusal; readonly why: string };
 
 /**
- * **The next-occurrence function — the signature F-4 freezes; T3-1 writes
- * `export const nextOccurrence: NextOccurrence` in this file.** The contract
- * it implements to:
+ * **The next-occurrence function — the signature F-4 froze; `nextOccurrence`
+ * below (T3-1) is its body.** The contract it implements to:
  *
  * - **Pure.** No clock, no IO, no `process.env`: `after` and `ctx` are all it
  *   knows, so every DST and timezone case is a plain call in a test.
@@ -294,3 +292,251 @@ export type Occurrence =
  *   earlier. Each (local date, `at`) pair yields at most one occurrence.
  */
 export type NextOccurrence = (schedule: Schedule, after: Date, ctx: OccurrenceContext) => Occurrence;
+
+// ---- the next-occurrence function (T3-1) --------------------------------------
+//
+// Hand-rolled over `Intl` (U5: no date library). Three small pieces:
+//
+//   * `offsetAt` — a zone's UTC offset at one instant, read off
+//     `Intl.DateTimeFormat#formatToParts` (the wall clock there, as if it
+//     were UTC, minus the instant);
+//   * `wallToInstant` — a wall-clock time in a zone to the instant it names,
+//     with Temporal's `compatible` disambiguation (the algorithm of
+//     `DisambiguatePossibleEpochNanoseconds`, over milliseconds);
+//   * `occurrencesIn` — every (local date, `at`) instant in a span, which the
+//     two exported functions take the first or the last of.
+//
+// Dates are civil arithmetic on "wall clock as UTC" milliseconds: a local
+// date's weekday is its UTC weekday, because 2026-09-22 is a Tuesday
+// everywhere. Only the step from a wall time to an instant consults a zone.
+
+const MINUTE_MS = 60_000;
+const DAY_MS = 86_400_000;
+/** limit: fixed — any time-of-day schedule recurs at least weekly, so 8 local days always hold the next slot after any instant (one spare for a zone whose offset moves the date). */
+const SCAN_DAYS = 8;
+
+/**
+ * One formatter per zone: constructing an `Intl.DateTimeFormat` is the
+ * expensive half. Bounded by the zones this runtime knows (`validTimeZone`
+ * gates every name that reaches it), so the map cannot grow without limit.
+ */
+const WALL_CLOCKS = new Map<string, Intl.DateTimeFormat>();
+
+function wallClock(timeZone: string): Intl.DateTimeFormat {
+  let f = WALL_CLOCKS.get(timeZone);
+  if (!f) {
+    f = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      hourCycle: "h23",
+      year: "numeric",
+      month: "numeric",
+      day: "numeric",
+      hour: "numeric",
+      minute: "numeric",
+      second: "numeric",
+    });
+    WALL_CLOCKS.set(timeZone, f);
+  }
+  return f;
+}
+
+/** The wall clock in `timeZone` at `instant`, as if it were UTC, in milliseconds (seconds precision — a zone's offset never has finer). */
+function wallAt(instant: number, timeZone: string): number {
+  const parts = wallClock(timeZone).formatToParts(new Date(instant));
+  const get = (t: Intl.DateTimeFormatPartTypes): number => Number(parts.find((p) => p.type === t)?.value ?? "0");
+  return Date.UTC(get("year"), get("month") - 1, get("day"), get("hour"), get("minute"), get("second"));
+}
+
+/** `timeZone`'s offset from UTC at `instant`, in milliseconds (New York in winter: −5 h). */
+function offsetAt(instant: number, timeZone: string): number {
+  const whole = instant - (((instant % 1000) + 1000) % 1000);
+  return wallAt(whole, timeZone) - whole;
+}
+
+/** Every instant whose wall clock in `timeZone` is `wall` — none (a gap), one, or two (an overlap), ascending. */
+function possibleInstants(wall: number, timeZone: string): number[] {
+  const offsets = new Set([offsetAt(wall - DAY_MS, timeZone), offsetAt(wall + DAY_MS, timeZone)]);
+  return [...offsets]
+    .map((o) => wall - o)
+    .filter((i) => offsetAt(i, timeZone) === wall - i)
+    .sort((a, b) => a - b);
+}
+
+/**
+ * A wall-clock time in a zone → the instant it names, Temporal's
+ * `compatible` way: a time that happens twice is the EARLIER; a time the
+ * clocks skip is shifted forward by the gap (02:30 on a 02:00→03:00 night is
+ * 03:30; 02:15 on Lord Howe's 02:00→02:30 night is 02:45).
+ */
+function wallToInstant(wall: number, timeZone: string): number {
+  const possible = possibleInstants(wall, timeZone);
+  if (possible.length > 0) return possible[0]!;
+  const before = offsetAt(wall - DAY_MS, timeZone);
+  const after = offsetAt(wall + DAY_MS, timeZone);
+  const shifted = wall + (after - before);
+  const later = possibleInstants(shifted, timeZone);
+  return later.length > 0 ? later[later.length - 1]! : shifted - after;
+}
+
+/** Midnight of the local date `instant` falls on in `timeZone`, as wall-clock-as-UTC milliseconds. */
+function localMidnight(instant: number, timeZone: string): number {
+  const wall = wallAt(instant, timeZone);
+  return wall - (((wall % DAY_MS) + DAY_MS) % DAY_MS);
+}
+
+const atMinutes = (at: string): number => Number(at.slice(0, 2)) * 60 + Number(at.slice(3, 5));
+
+/**
+ * Every occurrence in (`from`, `until`], ascending — one per (local date,
+ * `at`) pair whose weekday is in `days`. Two pairs can name one instant only
+ * where a zone skipped a whole date (Samoa, 2011-12-30); that instant is
+ * listed once.
+ */
+function occurrencesIn(at: readonly string[], days: readonly Weekday[], timeZone: string, from: number, until: number): number[] {
+  const out = new Set<number>();
+  const minutes = at.map(atMinutes);
+  const last = localMidnight(until, timeZone) + DAY_MS;
+  for (let day = localMidnight(from, timeZone) - DAY_MS; day <= last; day += DAY_MS) {
+    if (!days.includes(WEEKDAYS[new Date(day).getUTCDay()]!)) continue;
+    for (const m of minutes) {
+      const instant = wallToInstant(day + m * MINUTE_MS, timeZone);
+      if (instant > from && instant <= until) out.add(instant);
+    }
+  }
+  return [...out].sort((a, b) => a - b);
+}
+
+const present = (z: string | null | undefined): z is string => typeof z === "string" && z.trim() !== "";
+
+type Resolved =
+  | { readonly ok: true; readonly timeZone: string; readonly days: Weekday[] }
+  | { readonly ok: false; readonly reason: OccurrenceRefusal; readonly why: string };
+
+/** The zone and the weekdays a time-of-day schedule runs in — or the refusal that says which fact is missing. */
+function resolveTimeOfDay(schedule: TimeOfDaySchedule, ctx: OccurrenceContext): Resolved {
+  const [timeZone, from] = present(schedule.tz)
+    ? [schedule.tz, "the schedule's tz"]
+    : present(ctx.profile.timezone)
+      ? [ctx.profile.timezone, "Me/profile.md's timezone"]
+      : present(ctx.fallbackTimeZone)
+        ? [ctx.fallbackTimeZone, "the runner's zone (METISTRY_TZ)"]
+        : [null, null];
+  if (timeZone === null) {
+    return {
+      ok: false,
+      reason: "no_timezone",
+      why: "no timezone: the schedule has no tz, Me/profile.md has no timezone, and METISTRY_TZ is unset — a time of day is never read in UTC by default",
+    };
+  }
+  if (!validTimeZone(timeZone)) {
+    return {
+      ok: false,
+      reason: "unknown_timezone",
+      why: `${from} is ${JSON.stringify(timeZone)}, which is not an IANA zone this runtime knows (America/New_York, Etc/UTC) — nothing falls back to another zone`,
+    };
+  }
+  const days = resolveDays(schedule.days, ctx.profile.working_days);
+  if (days === null || days.length === 0) {
+    return {
+      ok: false,
+      reason: "no_working_days",
+      why: `the schedule runs on ${schedule.days}, and Me/profile.md does not say which days you work (working_days: [mon, tue, wed, thu, fri]) — nothing guesses them`,
+    };
+  }
+  return { ok: true, timeZone, days };
+}
+
+/** The next occurrence strictly after `after` — the contract is `NextOccurrence`'s, above. Pure: no clock, no IO, no environment. */
+export const nextOccurrence: NextOccurrence = (schedule, after, ctx) => {
+  if (isInterval(schedule)) return { ok: true, at: new Date(after.getTime() + EVERY_SECONDS[schedule.every] * 1000), timeZone: null };
+  const r = resolveTimeOfDay(schedule, ctx);
+  if (!r.ok) return r;
+  const from = after.getTime();
+  const [first] = occurrencesIn(schedule.at, r.days, r.timeZone, from, from + SCAN_DAYS * DAY_MS);
+  // Unreachable: `days` is non-empty, so every week holds a slot. Said as a
+  // refusal rather than thrown — a pure function the runner calls every tick
+  // does not get to take the runner down.
+  if (first === undefined) return { ok: false, reason: "no_working_days", why: `no ${schedule.days} slot in the ${SCAN_DAYS} days after ${after.toISOString()}` };
+  return { ok: true, at: new Date(first), timeZone: r.timeZone };
+};
+
+/**
+ * The occurrence a runner OWES at `now`, having last run at `after` — or
+ * `null` when it owes none. Pure, like `nextOccurrence`.
+ *
+ * - **`{every}`** → `after + every`, when that is not later than `now`.
+ * - **`{days, at, tz?}`** → the LATEST occurrence in (`after`, `now`]. Slots
+ *   missed while the Mac slept are coalesced into ONE run, for the most
+ *   recent of them — launchd's own rule for `StartCalendarInterval`. A plan
+ *   written on waking is then for the day ahead, not for a day already gone.
+ * - Refusals are `nextOccurrence`'s, for the same reasons.
+ */
+export function dueOccurrence(schedule: Schedule, after: Date, now: Date, ctx: OccurrenceContext): Occurrence | null {
+  if (isInterval(schedule)) {
+    const at = after.getTime() + EVERY_SECONDS[schedule.every] * 1000;
+    return at <= now.getTime() ? { ok: true, at: new Date(at), timeZone: null } : null;
+  }
+  const r = resolveTimeOfDay(schedule, ctx);
+  if (!r.ok) return r;
+  if (after.getTime() >= now.getTime()) return null;
+  // Any schedule recurs within a week, so the last eight days hold the latest
+  // slot however long the Mac slept.
+  const from = Math.max(after.getTime(), now.getTime() - SCAN_DAYS * DAY_MS);
+  const owed = occurrencesIn(schedule.at, r.days, r.timeZone, from, now.getTime());
+  const latest = owed[owed.length - 1];
+  return latest === undefined ? null : { ok: true, at: new Date(latest), timeZone: r.timeZone };
+}
+
+/**
+ * The zone the runner reads a time of day in when neither the schedule nor
+ * `Me/profile.md` names one: `METISTRY_TZ`, and nothing else. Not `TZ` —
+ * both deployment shapes set `TZ` to `UTC` whenever `METISTRY_TZ` is unset
+ * (`consoleEnv` in packages/cli/src/deployment.ts, docker-compose.yml), so
+ * reading it would be the UTC fallback §2.5 refuses, under another name.
+ */
+export function configuredTimeZone(env: NodeJS.ProcessEnv): string | null {
+  return present(env.METISTRY_TZ) ? env.METISTRY_TZ : null;
+}
+
+// ---- saying a schedule, and bounding it -------------------------------------
+
+const ALL_WEEK: readonly Weekday[] = WEEKDAYS;
+const DAY_SET_WORDS: Readonly<Record<DaySet, string>> = Object.freeze({
+  working_days: "working days",
+  eve_of_working_days: "the eve of working days",
+});
+
+/** One line for a person — `working days at 07:00`, `every day at 21:00`, `every 5m`, or a legacy cron string as written. */
+export function describeSchedule(schedule: ManifestSchedule): string {
+  if (isLegacyCron(schedule)) return schedule;
+  if (isInterval(schedule)) return `every ${schedule.every}`;
+  const days =
+    typeof schedule.days === "string"
+      ? DAY_SET_WORDS[schedule.days]
+      : schedule.days.length === ALL_WEEK.length
+        ? "every day"
+        : WEEKDAYS.filter((d) => (schedule.days as Weekday[]).includes(d)).join(", ");
+  return `${days} at ${schedule.at.join(", ")}${schedule.tz ? ` (${schedule.tz})` : ""}`;
+}
+
+/**
+ * The longest a schedule can go between two runs, in seconds — the bound a
+ * probe measures "silent too long" against (the watchdog, `metistry
+ * doctor`). A legacy cron string is its interval; `{every}` is itself. A
+ * time of day is the widest gap between two slots of its week, plus an hour
+ * for the night the clocks go back; a day set follows a profile this bound
+ * has not read, so it is bounded by the week (one working day a week is a
+ * profile, too).
+ */
+export function longestGapSeconds(schedule: ManifestSchedule): number {
+  if (isLegacyCron(schedule)) return scheduleToSeconds(schedule);
+  if (isInterval(schedule)) return EVERY_SECONDS[schedule.every];
+  const WEEK_MINUTES = 7 * 1440;
+  if (typeof schedule.days === "string") return WEEK_MINUTES * 60 + 3600;
+  const slots = schedule.days
+    .flatMap((d) => schedule.at.map((at) => WEEKDAYS.indexOf(d) * 1440 + atMinutes(at)))
+    .sort((a, b) => a - b);
+  let widest = slots[0]! + WEEK_MINUTES - slots[slots.length - 1]!;
+  for (let i = 1; i < slots.length; i++) widest = Math.max(widest, slots[i]! - slots[i - 1]!);
+  return widest * 60 + 3600;
+}

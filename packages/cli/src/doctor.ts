@@ -29,7 +29,10 @@ import {
   resolveUrl,
   shouldHold,
   runCheck,
-  scheduleToSeconds,
+  describeSchedule,
+  isInterval,
+  isLegacyCron,
+  longestGapSeconds,
   servicePlan,
   SHAPED_SERVICES,
   usesCompose,
@@ -555,6 +558,8 @@ interface LastRun {
   ts: Date;
   ok: boolean | null;
   error: string | null;
+  /** the runner could not place the schedule (`no_working_days`, `no_timezone`, `unknown_timezone` — docs/ops/scheduled.md) and said why */
+  refused: { reason: string; why: string } | null;
 }
 
 /**
@@ -574,7 +579,25 @@ export async function scheduleRows(
     if (!m.result.ok) return [];
     const man = m.result.manifest;
     if (man.type !== "collector" && man.type !== "routine") return [];
-    return [{ dir: m.dir, name: man.name, schedule: man.schedule, runKind: man.type === "routine" ? "routine_run" : "collector_run" }];
+    return [
+      {
+        dir: m.dir,
+        name: man.name,
+        schedule: describeSchedule(man.schedule),
+        // a time of day is due at a slot, not an interval after the last run:
+        // its bound below is the widest gap of its week, and when it is next
+        // due depends on Me/profile.md, which the console's runner reads
+        timeOfDay: !isLegacyCron(man.schedule) && !isInterval(man.schedule),
+        bound: (() => {
+          try {
+            return longestGapSeconds(man.schedule);
+          } catch {
+            return 0;
+          }
+        })(),
+        runKind: man.type === "routine" ? "routine_run" : "collector_run",
+      },
+    ];
   });
   if (scheduled.length === 0) return [];
 
@@ -598,12 +621,13 @@ export async function scheduleRows(
   try {
     streaks = await failureStreaks(db);
     const { rows: lastRows } = await db.query(
-      `SELECT DISTINCT ON (component, kind) component, kind, ts, ok, error
+      `SELECT DISTINCT ON (component, kind) component, kind, ts, ok, error, meta
        FROM runs WHERE kind = ANY($1) ORDER BY component, kind, ts DESC`,
       [[...SCHEDULED_KINDS]],
     );
     for (const r of lastRows) {
-      last.set(`${r.component}/${r.kind}`, { ts: new Date(r.ts), ok: r.ok === null ? null : Boolean(r.ok), error: r.error ?? null });
+      const refused = typeof r.meta?.schedule_refused === "string" ? { reason: String(r.meta.schedule_refused), why: String(r.meta.why ?? r.meta.schedule_refused) } : null;
+      last.set(`${r.component}/${r.kind}`, { ts: new Date(r.ts), ok: r.ok === null ? null : Boolean(r.ok), error: r.error ?? null, refused });
     }
     const { rows: markerRows } = await db.query(
       `SELECT component, tool, max(ts) AS ts, (array_agg(error ORDER BY ts DESC))[1] AS error
@@ -629,22 +653,20 @@ export async function scheduleRows(
 
   const out: DoctorRow[] = [];
   for (const s of scheduled) {
-    const intervalSec = (() => {
-      try {
-        return scheduleToSeconds(s.schedule);
-      } catch {
-        return 0;
-      }
-    })();
+    const intervalSec = s.bound;
     const lastRun = last.get(`${s.name}/${s.runKind}`);
     const streak = streaks.find((x) => x.component === s.name && x.kind === s.runKind);
     const skipped = markers.get(`${s.name}/${SKIPPED_STREAK}`);
     const blocked = markers.get(`${s.name}/${PREFLIGHT_FAILED}`);
     // a marker only describes the CURRENT state while it is inside its own
-    // window plus a tick's grace — an old one is history, not a finding
+    // window plus a tick's grace, and while nothing has run since — an old
+    // one, or one a later run has answered, is history, not a finding
     const fresh = (m: { ts: Date } | undefined): boolean =>
-      m !== undefined && intervalSec > 0 && now.getTime() - m.ts.getTime() <= intervalSec * OVERDUE_FACTOR * 1000;
-    const nextDue = lastRun && intervalSec > 0 ? new Date(lastRun.ts.getTime() + intervalSec * 1000) : null;
+      m !== undefined &&
+      intervalSec > 0 &&
+      now.getTime() - m.ts.getTime() <= intervalSec * OVERDUE_FACTOR * 1000 &&
+      (lastRun === undefined || m.ts.getTime() > lastRun.ts.getTime());
+    const nextDue = lastRun && intervalSec > 0 && !s.timeOfDay ? new Date(lastRun.ts.getTime() + intervalSec * 1000) : null;
     const overdueSec = lastRun ? Math.floor((now.getTime() - lastRun.ts.getTime()) / 1000) - intervalSec : null;
     const meta = {
       dir: s.dir,
@@ -659,11 +681,12 @@ export async function scheduleRows(
       overdue_sec: overdueSec !== null && overdueSec > 0 ? overdueSec : 0,
       skipped_streak: fresh(skipped),
       preflight_failed: fresh(blocked),
+      schedule_refused: lastRun?.refused?.reason ?? null,
     };
 
     out.push({
       kind: "schedule",
-      ...(await runCheck(s.name, `${s.schedule} (every ${humanSec(intervalSec)}): ran inside ${OVERDUE_FACTOR}× its interval, last run ok, no open failure streak`, async () => {
+      ...(await runCheck(s.name, `${s.schedule} (${s.timeOfDay ? "at most" : "every"} ${humanSec(intervalSec)}${s.timeOfDay ? " apart" : ""}): ran inside ${OVERDUE_FACTOR}× that, last run ok, no open failure streak`, async () => {
         if (fresh(skipped)) {
           return {
             status: "failed" as const,
@@ -684,6 +707,12 @@ export async function scheduleRows(
             remediation: `no run recorded yet — the console's runner writes one row per window; check that the console is up and that ${s.dir}/manifest.yaml is registered`,
             meta,
           };
+        }
+        if (lastRun.refused) {
+          // §2.5's absent state: the runner could not place the schedule
+          // (no working days, no timezone) and said so on its own row — a
+          // fact about Me/profile.md or METISTRY_TZ, never a fault to fix here
+          return { status: "absent" as const, remediation: `not scheduled: ${lastRun.refused.why}`, meta };
         }
         if (intervalSec > 0 && now.getTime() - lastRun.ts.getTime() > intervalSec * OVERDUE_FACTOR * 1000) {
           return {

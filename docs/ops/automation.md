@@ -1,9 +1,10 @@
 # Scheduled work: what happens when it fails
 
 Collectors and routines are run by the console's runner (`apps/console/src/runner.ts`),
-once per manifest interval, each under a two-phase `runs` row. This document
-is the other half of that: what the runner does when a component keeps
-failing, and how you find out.
+each under a two-phase `runs` row: an interval schedule once per interval, a
+time-of-day schedule once per slot, at its time (`docs/ops/scheduled.md`,
+"How the runner fires"). This document is the other half of that: what the
+runner does when a component keeps failing, and how you find out.
 
 Before: a collector whose token expired failed every hour forever, spent an
 API call each time, contributed one number to a tile, and nothing ever said
@@ -19,7 +20,8 @@ runner stops running it: no call, no spend, no new failure row. One
 `runs` row per skipped window records the fact — `kind: runner`,
 `tool: skipped_streak`, `ok: false`, `meta: {streak, max_streak, error_signature, since}` —
 and **one per window, not one per tick**: the runner ticks every 60 s, so a
-`*/15 * * * *` collector records four skips an hour at most one apiece.
+`*/15 * * * *` collector records four skips an hour at most one apiece. For a
+time-of-day schedule the window is the slot: one row per slot it missed.
 
 One successful run clears it. There is no ack, no pause file and no state to
 reset by hand: the streak is a query, so fixing the cause is the whole
@@ -116,7 +118,14 @@ fold   schedule  ok         0
 | `ok` | ran inside 2× its interval, last run succeeded, no open streak |
 | `degraded` | an open failure streak below the limit |
 | `failed` | the runner has stopped running it (`skipped_streak`), or a `preflight_failed` window is current, or it has not run in more than 2× its interval |
-| `absent` | no run recorded yet (a fresh install is not broken), or no db configured |
+| `absent` | no run recorded yet (a fresh install is not broken), no db configured, or the runner could not place its schedule — `no_working_days`, `no_timezone`, `unknown_timezone` — and said why on its own row |
+
+**A time-of-day schedule** (`{days, at}`, §2.5) has no interval: doctor
+bounds it by the widest gap between two slots of its week (`every day at
+21:00` → 25 h, the extra hour for the night the clocks go back), and a day set
+that follows `Me/profile.md` by the week itself, since doctor does not read
+the profile. `next_due_at` is `null` for one — when it is next due depends on
+the profile, which the console's runner reads.
 
 `failed` is the actionable set, and `metistry doctor` already exits non-zero
 when any row is `failed`.
@@ -141,10 +150,13 @@ this `meta`:
 }
 ```
 
-`last_run_at` is `null` and `streak` is `0` for a component that has never
-run. A `skipped_streak` / `preflight_failed` marker counts as the *current*
-state only while it is inside 2× the component's interval; an older one is
-history.
+`schedule` is said the way a person would (`working days at 07:00`, or a
+legacy cron string as written), and `schedule_refused` names the reason when
+the runner could not place it. `last_run_at` is `null` and `streak` is `0`
+for a component that has never run. A `skipped_streak` / `preflight_failed`
+marker counts as the *current* state only while it is inside 2× the
+component's interval **and** nothing has run since; an older one, or one a
+later run has answered, is history.
 
 ## Where the rows show up
 
@@ -188,13 +200,16 @@ Models".
 
 ## `plan-tomorrow` — the evening's one file
 
-The second routine that is hourly on paper and once-a-night in practice
-(`knowledge-fold` was the first, and `docs/ops/knowledge-fold.md` explains why:
-the runner has no notion of time of day, so an `@daily` routine that skips at
-09:00 is due again at 09:00 tomorrow and never reaches the evening). It renders
-`Templates/Plan.md` — a markdown file in the vault, which you edit in Obsidian
-— into `Journal/Plan/<tomorrow>.md`, written through the reconciler's bridge as
-`principal: plan-tomorrow` (`docs/product/daily-flow-spec.md` §5.1, §7).
+Scheduled `eve_of_working_days` at 23:00 (§2.5): every evening whose next day
+is a working day in `Me/profile.md`, two hours after the 21:00 fold. The runner
+fires it once, at its time (`docs/ops/scheduled.md`); until T3-1 it was hourly
+with a clock gate inside the routine, because the runner had no time of day.
+It renders `Templates/Plan.md` — a markdown file in the vault, which you edit
+in Obsidian — into `Journal/Plan/<tomorrow>.md`, written through the
+reconciler's bridge as `principal: plan-tomorrow`
+(`docs/product/daily-flow-spec.md` §5.1, §7). A run the Mac slept through is
+fired on waking and plans the day after its **slot** — Sunday 23:00 caught up
+at 07:30 Monday plans Monday — in the zone the slot was read in.
 
 **No model is in it, at any tier.** The ordering is the template's
 (`order: "priority, due, size"` — a field list), your prioritisation *rule* is
@@ -202,14 +217,18 @@ prose the plan includes verbatim for you to read, and `{{ prose }}` is refused
 outright in a template whose output the assistant may not write. The manifest
 declares no `engine`, so the runner never asks whether one is configured.
 
-### The gate, in order
+### The guard, in order
+
+The schedule decides *when*; the routine keeps only the working-day guard,
+for a run nobody scheduled for an eve (a Run Now, or days you set yourself):
 
 | check | what it means | costs |
 | --- | --- | --- |
-| before **12:00** local | nothing is planned over breakfast — the day it plans *from* is not over | nothing: no query, no vault read |
-| this target date is **settled** | one pass already decided tonight, whichever way | one indexed `runs` read |
-| before your **day end** | `working_hours:` in `Me/profile.md` (`"09:00-17:30"` → 17:30); absent, **19:00** local, and the plan says so | one small vault read |
-| tomorrow is **not a working day** | `working_days:` in `Me/profile.md`; absent, **nothing is written at all** and the run says `no_working_days` rather than guessing Monday-to-Friday | recorded, and the evening goes quiet |
+| this target date is **settled** | one pass already decided that day, whichever way | one indexed `runs` read |
+| tomorrow is **not a working day** | `working_days:` in `Me/profile.md`; absent, **nothing is written at all** and the run says `no_working_days` rather than guessing Monday-to-Friday | one small vault read; recorded, and the evening goes quiet |
+
+With no `working_days` at all, the runner refuses the schedule first
+(`skipped:no_working_days` on its own row) and does not run the routine.
 
 ### What it writes, and what it will not
 
@@ -232,10 +251,9 @@ file under compare-and-swap; nothing is ever appended.
 
 ### Reading the ledger
 
-One `runs` row per target date, written the first time a pass settles it —
-which is what keeps an hourly routine from filing twenty rows a night.
-`meta.planned_for` is the discriminator (the runner's own per-tick
-`routine_run` row carries none). `meta.outcome` (T1-4: every routine and the
+One `runs` row per target date, written the first time a pass settles it.
+`meta.planned_for` is the discriminator (the runner's own per-run
+`routine_run` row carries none; it carries `meta.scheduled_for`, the slot). `meta.outcome` (T1-4: every routine and the
 runner share this vocabulary — `acted | silent | skipped:<reason>`) is
 `acted` when the plan was written, or `skipped:<reason>` with `<reason>` one
 of `no_working_days`, `not_a_working_day`, `template_missing`,
@@ -248,7 +266,7 @@ FROM runs WHERE component = 'plan-tomorrow' AND kind = 'routine_run' AND ok
 ORDER BY ts DESC LIMIT 7;
 ```
 
-`too_early` is deliberately **not** a row: it is the schedule working.
+There is no `too_early` any more: the runner does not run it early.
 
 ### What an install needs before the first plan renders
 
@@ -256,7 +274,7 @@ ORDER BY ts DESC LIMIT 7;
 | --- | --- | --- |
 | `Templates/Plan.md` | everything the plan says (`metistry init` stamps it; you edit it in Obsidian) | `template_missing`, silently — a missing template is a configuration fact |
 | `Me/profile.md` → `working_days` | which eves plan at all | `no_working_days`, recorded: nothing is written and nothing is guessed |
-| `Me/profile.md` → `working_hours` | when the evening starts | 19:00 local, with one visible line in the plan saying a default nobody chose was used |
+| `Me/profile.md` → `timezone` (or `METISTRY_TZ`) | the zone 23:00 is read in, and which day is "tomorrow" | `no_timezone`, recorded: never read in UTC by default |
 | `Me/Working Style.md` → `## Prioritisation` | the prose the plan includes verbatim | one `> ⚠️ metistry: …` line where the include is |
 | `METISTRY_EK_URL` + `METISTRY_BRIDGE_TOKEN_EVENTKIT` | tomorrow's events | one line saying the calendar bridge is not reachable |
 
@@ -266,12 +284,12 @@ them the window is refused with the variables named rather than spent. The
 eventkit bridge is deliberately **not** declared `reachable:`: blocking on it
 would mean no plan at all on an evening the calendar was down.
 
-Turning it off is the same as the fold's: remove its directory,
+Turning it off: `paused: true` on its entry in `.metistry/scheduled.yaml`
+(`docs/ops/scheduled.md`; read on the next tick), or remove its directory,
 `routines/plan-tomorrow/` (a product change, a PR — the routine registry is the
-directory listing, plan §2.7) — or, without a rebuild, take
-`working_days:` out of `Me/profile.md`, which is your own hand and takes effect
-at the next tick: the routine then records `no_working_days` and writes
-nothing.
+directory listing, plan §2.7) — or take `working_days:` out of
+`Me/profile.md`, which is your own hand and also takes effect at the next
+tick: the runner then records `no_working_days` and runs nothing.
 
 ## What this is not
 
@@ -279,11 +297,17 @@ nothing.
   the compute work (plan refresh 2026-09-13, PR 3) and will fail an
   unattended run with a named error of their own. Preflight refuses on
   *configuration*, before any of that.
-- **Not a pause switch.** There is no "pause this collector" verb: a
-  component is scheduled because its manifest has a `schedule`, and retiring
-  one means removing that line (invariant 5 — the manifest is the contract).
+- **Not the pause switch.** Pausing is the owner's, in
+  `.metistry/scheduled.yaml` (`paused: true`; `docs/ops/scheduled.md`) — the
+  Scheduled doors write it (T3-3). Retiring a component for good still means
+  removing its manifest's `schedule` (invariant 5 — the manifest is the
+  contract).
 - **Not the watchdog.** The watchdog's `silent-collector` probe still
   independently reports a component with no `runs` row inside 3× its
-  interval — it runs on the host and must be able to say the console itself
-  is dead. The runner's rows and the watchdog's probe read the same table
-  and the same manifests, so they cannot disagree about an interval.
+  interval — for a time of day, 3× the widest gap of its week
+  (`longestGapSeconds`) — because it runs on the host and must be able to say
+  the console itself is dead. The runner's rows and the watchdog's probe read
+  the same table and the same manifests. The probe does not read
+  `scheduled.yaml`, so a component paused or held there is reported silent
+  after that bound (a schedule refused for want of a profile is not: its
+  once-a-day `skipped:` row is a run row).

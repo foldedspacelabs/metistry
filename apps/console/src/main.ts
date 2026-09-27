@@ -7,6 +7,8 @@ import {
   EMBED_DEFAULT_MODEL,
   EMBED_DEFAULT_URL,
   EmbedClient,
+  configuredTimeZone,
+  describeSchedule,
   extensionsDirFromEnv,
   firstOnMachineBaseUrl,
   INSTANCE_LAYOUT,
@@ -18,6 +20,7 @@ import {
   requireEnv,
   resolveLocalModelUrl,
   ROUTINE_TIER,
+  SCHEDULED_FILENAME,
   SPEND_QUERY,
   type PreflightMiss,
   type RegistrySkip,
@@ -29,7 +32,7 @@ import { makeServer } from "./server.js";
 import { pushConfigFromEnv, startNotifier } from "./push.js";
 import { loadCollectors } from "@metistry-apps/collectors";
 import { loadRoutines } from "@metistry-apps/routines";
-import { loadSchedules, routineCapabilities, startRunner } from "./runner.js";
+import { PROFILE_PATH, loadSchedules, profileFacts, readOverlay, routineCapabilities, startRunner } from "./runner.js";
 import { loadRules } from "./router.js";
 import { watchCompute } from "./compute.js";
 import { TargetRegistry } from "./dispatch.js";
@@ -42,6 +45,7 @@ import type { SecretsView } from "./secrets-route.js";
 import { readInstanceId, securityPresence, realExec } from "@foldedspacelabs/metistry-cli";
 import { CrewRegistry } from "./crews.js";
 import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 import { defaultGatewayFrom, parseTrustedProxies } from "./local-owner.js";
 import { canonicalOrigin } from "./webauthn.js";
@@ -349,6 +353,20 @@ const routineBudget = async (): Promise<PreflightMiss | null> => {
   return budgetMiss(cfg, rows as SpendRow[], ROUTINE_TIER);
 };
 
+// The owner's two layers over every manifest's schedule (§2.5), both read on
+// EVERY tick so a change lands on the next one: `.metistry/scheduled.yaml`
+// (the schedule and pause they set; absent = the defaults), and the facts in
+// `Me/profile.md` a time of day follows — `working_days` and `timezone`,
+// through the vault bridge like every other vault read here. No instance
+// directory, no overlay; no bridge, a profile that says nothing (and a
+// routine on `working_days` then says `no_working_days`, never guesses).
+const scheduledFile = optionalEnv(
+  "METISTRY_SCHEDULED_FILE",
+  instanceDir ? join(instanceDir, resolveInstanceLayout(instanceDir).layout.metistryDir, SCHEDULED_FILENAME) : "",
+);
+const readProfile = vault ? async () => profileFacts((await vault.read(PROFILE_PATH))?.content.toString("utf8") ?? null) : undefined;
+const runnerZone = configuredTimeZone(process.env);
+
 startRunner(pool, scheduled, {
   // Which model a collector may call is `compute.yaml`'s to say, not an
   // environment variable's: a GETTER, so an edit to the file reaches the
@@ -396,8 +414,18 @@ startRunner(pool, scheduled, {
   ...(process.env.METISTRY_DEVIN_SESSION_TIMEOUT_HOURS ? { devinSessionTimeoutHours: intEnv("METISTRY_DEVIN_SESSION_TIMEOUT_HOURS", 24) } : {}),
   inboxDir,
   inboxSink: inbox,
-}, intEnv("METISTRY_RUNNER_TICK_MS", 60_000), { budget: routineBudget, compute: () => compute.store.current });
-console.log(`runner: ${scheduled.map((c) => `${c.name}/${c.intervalSec}s`).join(", ")}`);
+}, intEnv("METISTRY_RUNNER_TICK_MS", 60_000), {
+  budget: routineBudget,
+  compute: () => compute.store.current,
+  scheduled: () => readOverlay(scheduledFile || null),
+  ...(readProfile ? { profile: readProfile } : {}),
+  timeZone: runnerZone,
+});
+console.log(`runner: ${scheduled.map((c) => `${c.name} (${describeSchedule(c.schedule)})`).join(", ")}`);
+console.log(
+  `runner: overlay ${scheduledFile || "(none — METISTRY_INSTANCE_DIR unset)"}; profile ${readProfile ? `${PROFILE_PATH} via the vault bridge` : "absent (no vault bridge)"}; ` +
+    `fallback zone ${runnerZone ?? "none — set METISTRY_TZ, or a time of day with no tz and no profile timezone is refused no_timezone"}`,
+);
 
 const host = optionalEnv("METISTRY_CONSOLE_HOST", "127.0.0.1"); // loopback default (invariant 8)
 const port = intEnv("METISTRY_CONSOLE_PORT", 8080);

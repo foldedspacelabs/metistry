@@ -10,14 +10,14 @@ import { actionTableSchema, AUTONOMY_LEVELS } from "./actions.js";
 import { connectionTypeShape, refineConnectionType } from "./connections.js";
 import { providerSchema } from "./compute.js";
 import { modelRefIssue } from "./model-ref.js";
+import { manifestScheduleSchema } from "./schedule.js";
 import { EFFORTS } from "./tiers.js";
 
-const cron = z
-  .string()
-  .regex(
-    /^(@(hourly|daily|weekly|monthly)|(\S+\s+){4}\S+)$/,
-    "schedule must be a 5-field cron expression or @hourly/@daily/@weekly/@monthly",
-  );
+// A collector's or routine's `schedule:` — §2.5's closed shape (`{days, at,
+// tz?}` or `{every}`), or, for one release, a legacy cron string
+// (`manifestScheduleSchema`, schedule.ts). The console's runner reads both
+// (apps/console/src/runner.ts); `.metistry/scheduled.yaml` may override it.
+const schedule = manifestScheduleSchema;
 
 const name = z
   .string()
@@ -156,7 +156,7 @@ const usesModel = z.string().superRefine((v, ctx) => {
 
 export const collectorManifest = base.extend({
   type: z.literal("collector"),
-  schedule: cron,
+  schedule,
   writes: z.array(z.string()).min(1),
   reads: z.array(z.string()).default([]),
   requires: requiresField,
@@ -165,7 +165,7 @@ export const collectorManifest = base.extend({
 
 export const routineManifest = base.extend({
   type: z.literal("routine"),
-  schedule: cron,
+  schedule,
   agent: z.string().optional(),
   requires: requiresField,
 });

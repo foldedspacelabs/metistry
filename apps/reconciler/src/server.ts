@@ -14,8 +14,7 @@ import { authorized, errorEnvelope, finishRun, INSTANCE_LAYOUT, isNoteSectionNam
 import type { Vault, Outcome } from "./vault.js";
 import { parseIntent } from "./vault.js";
 import { validPrincipal } from "./paths.js";
-import { validActId } from "./committer.js";
-import type { Committer } from "./committer.js";
+import { conflictSummary, validActId, type Committer } from "./committer.js";
 import type { Db, Indexer } from "./indexer.js";
 import type { Embeddings } from "./embeddings.js";
 import { parseMode, searchVault } from "./search.js";
@@ -179,6 +178,9 @@ export function makeBridge(deps: BridgeDeps, cfg: BridgeConfig): Server {
             queue_depth: committer.depth,
             last_flush: committer.lastFlush ? { at: new Date(committer.lastFlush.at).toISOString(), ...committer.lastFlush.result } : null,
             last_push: committer.lastPush ? { at: new Date(committer.lastPush.at).toISOString(), ...committer.lastPush.result } : null,
+            last_pull: committer.lastPull ? { at: new Date(committer.lastPull.at).toISOString(), ...committer.lastPull.result } : null,
+            // `vault.state` (§2.21): clean, or the conflict that stopped the sync
+            vault_sync: committer.vault,
             last_reconcile: deps.indexer?.last ?? null,
             embeddings,
             // What each bearer may do, stated by the bridge itself: doctor
@@ -200,6 +202,13 @@ export function makeBridge(deps: BridgeDeps, cfg: BridgeConfig): Server {
             };
           }
           if (head === null) return { status: "degraded" as const, remediation: "repository has no commits yet — the first flushed write creates one", meta };
+          if (committer.vault.state === "conflict" && committer.vault.conflict) {
+            return {
+              status: "degraded" as const,
+              remediation: `vault sync stopped: ${conflictSummary(committer.vault.conflict)} — nothing was pushed or overwritten and commits continue locally; resolve it in Obsidian or a terminal (docs/ops/reconciler.md, "Sync with the remote") and the next sync clears this`,
+              meta,
+            };
+          }
           if (committer.lastPush && !committer.lastPush.result.ok) {
             return { status: "degraded" as const, remediation: `last push failed: ${committer.lastPush.result.error ?? "unknown"} — check the remote/credentials; commits are safe locally`, meta };
           }

@@ -23,6 +23,7 @@ import { Vault } from "./vault.js";
 import { Embeddings } from "./embeddings.js";
 import { Indexer } from "./indexer.js";
 import { makeBridge } from "./server.js";
+import { syncRecorder } from "./sync-record.js";
 
 const instanceDir = requireEnv("METISTRY_INSTANCE_DIR");
 const token = requireEnv("METISTRY_BRIDGE_TOKEN_RECONCILER");
@@ -70,10 +71,12 @@ const git = new Git(instanceDir);
 if (!(await git.isRepo())) {
   throw new Error(`METISTRY_INSTANCE_DIR=${instanceDir} is not a git repository — see docs/ops/reconciler.md`);
 }
+const commitExternalEdits = optionalEnv("METISTRY_COMMIT_EXTERNAL_EDITS", "true") !== "false";
 const committer = new Committer(git, {
   authorPrefix: optionalEnv("METISTRY_GIT_AUTHOR_NAME", "Metistry"),
   authorEmail: optionalEnv("METISTRY_GIT_AUTHOR_EMAIL", "metistry@localhost"),
   sourceTrailer: "Brain-Source", // §4.7 commit hygiene: self-declared provenance, never authorization
+  sweepExternalEdits: commitExternalEdits, // swept before every integrate, as on every walk (§2.21 rule 2)
 });
 const vault = new Vault(instanceDir, git, committer, { maxBytes: intEnv("METISTRY_VAULT_MAX_BYTES", 2 * 1024 * 1024) });
 
@@ -113,7 +116,7 @@ const indexer = new Indexer(
   pool,
   vault,
   committer,
-  { commitExternalEdits: optionalEnv("METISTRY_COMMIT_EXTERNAL_EDITS", "true") !== "false", inboxPrefix: instanceLayout.layout.inboxDir },
+  { commitExternalEdits, inboxPrefix: instanceLayout.layout.inboxDir },
   embeddings,
 );
 
@@ -144,10 +147,20 @@ const reconcile = (trigger: string) =>
 setTimeout(() => reconcile("startup"), 2000);
 setInterval(() => reconcile("interval"), reconcileIntervalSec * 1000);
 
+// §2.21: every sync act is a `runs` row (and a conflict its one Needs You
+// report); an integrate that changed files is followed by a walk that
+// starts after it, never one that read the tree before it (rule 5).
+committer.hooks = {
+  record: syncRecorder(pool),
+  integrated: () => {
+    indexer.reconcileAfter("integrate").catch((err) => console.error("reconciler: re-walk after integrate failed:", err instanceof Error ? err.message : err));
+  },
+};
+
 if (pushEverySec) {
   setInterval(() => {
     committer.push().then((r) => {
-      if (r.attempted) console.log(`reconciler: push ${r.ok ? "ok" : "failed"} (${r.remote})`);
+      if (r.attempted) console.log(`reconciler: sync ${r.ok ? "ok" : "stopped"} (${r.remote}: ${r.integrated ?? "no fetch"}${r.behind ? `, ${r.behind} in` : ""}${r.pushed ? ", pushed" : ""})`);
     });
   }, pushEverySec * 1000);
 }

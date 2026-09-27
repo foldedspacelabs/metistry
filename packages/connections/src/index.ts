@@ -2,7 +2,9 @@
 //
 // Connection files read against the connection-type registry (`load.ts`,
 // `catalog.ts`), the listing every surface renders (`describe.ts`), the
-// pooled MCP client (`pool.ts`, `plan.ts`) and its check (`check.ts`).
+// pooled MCP client (`pool.ts`, `plan.ts`) and its check (`check.ts`); what a
+// sync opens to read a builtin provider's connection (`sync.ts`) and the
+// `linear` provider itself (`linear.ts`, T4-24).
 // docs/ops/connections.md is the same contract in words.
 
 export { CONNECTION_REFUSAL_CODES, ConnectionRefused, type ConnectionRefusalCode } from "./errors.js";
@@ -52,3 +54,36 @@ export {
   type DescribeOptions,
   type ReachSummary,
 } from "./describe.js";
+export {
+  envSecretSource,
+  instanceSyncOpener,
+  openSyncHttp,
+  syncReaders,
+  syncSecretNames,
+  syncTarget,
+  type OpenSyncOptions,
+  type OpenedSync,
+  type SyncHttp,
+  type SyncOpener,
+  type SyncTarget,
+} from "./sync.js";
+export {
+  ASSIGNED_ISSUES_QUERY,
+  ISSUES_BY_ID_QUERY,
+  LINEAR_CLOSED_STATE_TYPES,
+  LINEAR_ERROR_CODES,
+  LINEAR_GRAPHQL_URL,
+  LINEAR_KEY_RE,
+  LINEAR_MODULE,
+  LINEAR_ORIGIN,
+  LINEAR_STATE_TYPES,
+  LINEAR_SYNC,
+  LinearError,
+  assignedOpenIssues,
+  issuesById,
+  linearQuery,
+  linearRef,
+  readIssue,
+  type LinearErrorCode,
+  type LinearIssue,
+} from "./linear.js";

@@ -42,6 +42,7 @@ import { ConnectionRefused } from "./errors.js";
 import { typedValues, type ConnectionEntry, type ConnectionStatus } from "./load.js";
 import { planDial } from "./plan.js";
 import { connectionGrantee } from "./pool.js";
+import { syncReaders } from "./sync.js";
 
 /** Who reads a connection. Syncs today; agents and the assistant once the lazy pair lands (T4-8b). */
 export interface ConnectionUser {
@@ -114,10 +115,9 @@ function reachOf(entry: ConnectionEntry): ReachSummary | null {
   return null;
 }
 
-function usersOf(name: string, scheduled: Scheduled | null | undefined): ConnectionUser[] {
-  const out: ConnectionUser[] = [];
-  for (const [sync, entry] of Object.entries(scheduled?.syncs ?? {})) if (entry.connection === name) out.push({ kind: "sync", name: sync });
-  return out.sort((a, b) => a.name.localeCompare(b.name));
+/** The syncs that read `name`: those `scheduled.yaml` names it for, and the sync its provider declares when that sync reads it (`syncReaders`, the rule the sync itself opens by). */
+function usersOf(name: string, scheduled: Scheduled | null | undefined, entries: readonly ConnectionEntry[]): ConnectionUser[] {
+  return (syncReaders({ entries, scheduled }).get(name) ?? []).map((sync) => ({ kind: "sync" as const, name: sync }));
 }
 
 /** What the caller can add to a file's own verdict: missing variables and secret items (absent), grants and hosts the door would refuse (failed). */
@@ -165,6 +165,18 @@ async function runtimeIssues(entry: ConnectionEntry, catalog: ConnectionCatalog,
       if (err instanceof ConnectionRefused && err.code !== "not_built") failed.push(err.message);
     }
   }
+  // a connection a sync reads over HTTP (a builtin provider, T4-24): the same question of its auth and headers
+  const http = c.reach.http;
+  if (c.type !== "mcp" && http && entry.provider?.manifest.implementation.kind === "builtin" && absent.length === 0) {
+    const dest = egressDestination(http.url)?.entry;
+    const carried = new Set<string>();
+    if ("secret" in http.auth) carried.add(http.auth.secret);
+    for (const v of Object.values(http.headers)) for (const n of secretRefsIn(v).names) carried.add(n);
+    for (const n of [...carried].sort()) {
+      const hosts = Object.hasOwn(file.secrets, n) ? file.secrets[n]!.hosts : [];
+      if (dest && !hosts.includes(dest)) failed.push(`${n} may not be sent to ${dest} — it is not on the secret's *Sent only to* list (\`metistry secrets hosts ${n} ${[...hosts, dest].join(" ")}\`)`);
+    }
+  }
   return { absent, failed };
 }
 
@@ -185,7 +197,7 @@ export async function describeConnection(entry: ConnectionEntry, catalog: Connec
       variables: [],
       tools: [],
       offer_to_agents: false,
-      used_by: usersOf(entry.name, opts.scheduled ?? catalog.scheduled),
+      used_by: usersOf(entry.name, opts.scheduled ?? catalog.scheduled, catalog.entries),
     };
   }
   let status: ConnectionStatus = entry.status;
@@ -210,7 +222,7 @@ export async function describeConnection(entry: ConnectionEntry, catalog: Connec
       .map(([name, p]) => ({ name, group: p.group, mode: p.mode }))
       .sort((a, b) => a.name.localeCompare(b.name)),
     offer_to_agents: c.offer_to_agents,
-    used_by: usersOf(c.name, opts.scheduled ?? catalog.scheduled),
+    used_by: usersOf(c.name, opts.scheduled ?? catalog.scheduled, catalog.entries),
   };
 }
 

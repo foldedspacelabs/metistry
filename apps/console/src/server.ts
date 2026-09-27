@@ -18,7 +18,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
-import { API_VERSION, API_VERSION_HEADER, AREA_PREFIX_REFUSAL, runCheck, startRun, finishRun, errorEnvelope, intEnv, may, parseAction, noRouteMessage, PROJECT_SLUG_RE, rollSession, statusFor, servedRoute, isLocalRoute, localOnlyMessage, routeKey, resolveActor, SKIP_FEEDBACK, answersText, checkAnswers, describeRequest, validAgentAreaGrant, type QuestionAnswer, type RequestShape, type CheckResult, type Compute, type ErrorCode, type ErrorEnvelope, type Principal } from "@foldedspacelabs/metistry-core";
+import { API_VERSION, API_VERSION_HEADER, AREA_PREFIX_REFUSAL, runCheck, startRun, finishRun, errorEnvelope, intEnv, may, parseAction, noRouteMessage, PROJECT_SLUG_RE, rollSession, statusFor, servedRoute, isLocalRoute, localOnlyMessage, routeKey, resolveActor, SKIP_FEEDBACK, answersText, checkAnswers, describeRequest, parseSubjectFingerprint, requestSubjectOf, subjectUnchanged, validAgentAreaGrant, type QuestionAnswer, type RequestShape, type RequestSubject, type SubjectReading, type CheckResult, type Compute, type ErrorCode, type ErrorEnvelope, type Principal } from "@foldedspacelabs/metistry-core";
 import { QueryError, QueryStore } from "@foldedspacelabs/metistry-queries";
 import { captureToInbox, createBrainServer, dirSink, type CaptureSink, type KnowledgeLister, type KnowledgeReader, type KnowledgeVaultSearcher, type KnowledgeWriter, type QueryEmbedder } from "@foldedspacelabs/metistry-mcp-brain";
 import { TasksError, TasksService } from "@foldedspacelabs/metistry-tasks";
@@ -326,11 +326,44 @@ const BATCH_DECISIONS = ["later", "skip", "deny"];
 const SNOOZE_HOURS = intEnv("METISTRY_SNOOZE_HOURS", 3);
 
 /**
+ * The subject of a request as it stands (T2-14; core's `requestSubjectOf`
+ * says which basis a type is judged by, this is where each is READ):
+ *
+ *   head_sha         the PR's work row `meta.head_sha` — what the GitHub sync
+ *                    last saw — else the head the row was raised with
+ *   line_text        the vault line `payload.task_line = {path, task_key}`
+ *                    names (`vault_tasks`, the reconciler's index); NULL when
+ *                    it names one that is gone. A row naming no line reads
+ *                    its work row's title: a tracker item's one line.
+ *   work_updated_at  the linked work row's `updated_at`, in Postgres's own
+ *                    text form, so no precision is lost on the way to a hash
+ *
+ * Read beside the row by both the list and the decision, so the fingerprint a
+ * client renders and the one its answer is judged against are the same read.
+ * The `subject_*` columns never reach the wire: `servedProposal` folds them
+ * into `subject`.
+ */
+const SUBJECT_COLUMNS = `
+  w.updated_at::text AS subject_work_updated_at,
+  w.title AS subject_work_title,
+  nullif(coalesce(w.meta->>'head_sha', p.payload->>'head_sha'), '') AS subject_head_sha,
+  coalesce(jsonb_typeof(p.payload->'task_line') = 'object', false) AS subject_line_named,
+  vt.text AS subject_line_text`;
+const SUBJECT_JOINS = `
+  LEFT JOIN work w ON w.id = p.work_id
+  LEFT JOIN vault_tasks vt ON vt.path = p.payload->'task_line'->>'path' AND vt.task_key = p.payload->'task_line'->>'task_key'`;
+const SUBJECT_COLUMN_NAMES = ["subject_work_updated_at", "subject_work_title", "subject_head_sha", "subject_line_named", "subject_line_text", "own_changed_at"] as const;
+
+/**
  * The row a decision reads, plus when it last CHANGED — which is not one
  * column, because a proposal can be moved by things that are not the
  * proposal: the work row it came from, and the room hanging on that work row
  * (`artifact_comments`, migration 0018). `greatest()` over all of them is
- * what `if_unchanged` compares against.
+ * what `if_unchanged.seen_at` compares against. `own_changed_at` leaves the
+ * work row out: an answer that also sends `if_unchanged.subject` has the work
+ * row judged by its subject's fingerprint instead (T2-14), so a render's
+ * `ts` does not go stale forever once the work row has moved since the row
+ * was raised.
  */
 const PROPOSAL_FOR_DECISION_SQL = `
   SELECT p.id, p.ts, p.kind, p.source_agent, p.trust, p.payload, p.decision, p.feedback, p.decided_at, p.work_id, p.snoozed_until,
@@ -339,15 +372,40 @@ const PROPOSAL_FOR_DECISION_SQL = `
            coalesce(p.decided_at, p.ts),
            coalesce(w.updated_at, p.ts),
            coalesce((SELECT max(c.created_at) FROM artifact_comments c WHERE c.work_id = p.work_id), p.ts)
-         ) AS changed_at
+         ) AS changed_at,
+         greatest(
+           p.ts,
+           coalesce(p.decided_at, p.ts),
+           coalesce((SELECT max(c.created_at) FROM artifact_comments c WHERE c.work_id = p.work_id), p.ts)
+         ) AS own_changed_at,
+         ${SUBJECT_COLUMNS}
   FROM proposals p
-  LEFT JOIN work w ON w.id = p.work_id
+  ${SUBJECT_JOINS}
   WHERE p.id = $1`;
+
+/** The `subject_*` columns as core's reading: `undefined` where the row cannot supply a basis, `null` where it names one that is gone. */
+function subjectReadingOf(row: Record<string, unknown>): SubjectReading {
+  const text = (v: unknown): string | undefined => (typeof v === "string" && v !== "" ? v : undefined);
+  const head = text(row.subject_head_sha);
+  const workAt = text(row.subject_work_updated_at);
+  const workTitle = typeof row.subject_work_title === "string" ? row.subject_work_title : undefined;
+  const line = row.subject_line_named === true ? (typeof row.subject_line_text === "string" ? row.subject_line_text : null) : workTitle;
+  return {
+    ...(head !== undefined ? { head_sha: head } : {}),
+    ...(line !== undefined ? { line_text: line } : {}),
+    ...(workAt !== undefined ? { work_updated_at: workAt } : {}),
+  };
+}
+
+/** A read row's subject as it stands, or null — see `SUBJECT_COLUMNS`. */
+function subjectOfRow(row: Record<string, unknown>): RequestSubject | null {
+  return requestSubjectOf(String(row.kind ?? ""), subjectReadingOf(row));
+}
 
 /** What one answer to one proposal comes back as: a status and the body to send, so the batch caller gets an outcome rather than a socket. */
 type DecisionOutcome = { status: number; body: ErrorEnvelope | Record<string, unknown> };
 /** `POST /api/proposals/:id`'s body (docs/ops/client-api.md): a decision, and what that decision carries. `answers` rides only with `decision: "answers"` (T2-3). */
-type DecisionBody = { decision?: unknown; feedback?: string; area?: unknown; answers?: unknown; if_unchanged?: { seen_at?: unknown } };
+type DecisionBody = { decision?: unknown; feedback?: string; area?: unknown; answers?: unknown; if_unchanged?: { seen_at?: unknown; subject?: unknown } };
 
 /** `seen_at`: the row's own `ts` as this server serialised it, or the list `cursor` it was rendered from. Anything else is a 400, never a silent decision. */
 const SEEN_AT_RE = new RegExp(`^(${CURSOR_TS})(?:\\|\\d{1,12})?$`);
@@ -374,7 +432,7 @@ function conflictBody(reason: "already_decided" | "stale", message: string, row:
     reason,
     decision: row.decision ?? null,
     decided_at: row.decided_at ?? null,
-    proposal: row,
+    proposal: servedProposal(row),
   };
 }
 
@@ -387,6 +445,20 @@ function conflictBody(reason: "already_decided" | "stale", message: string, row:
  */
 export function withRequestShape<R extends Record<string, unknown>>(row: R): R & { request: RequestShape } {
   return { ...row, request: describeRequest(String(row.kind ?? ""), row.payload) };
+}
+
+/**
+ * A row read with `SUBJECT_COLUMNS` as it crosses the wire: `request` (F-5's
+ * reading) and `subject` — `{basis, fingerprint}` of what the request is
+ * about as it stands, or null (T2-14). A client renders the fingerprint and
+ * sends it back as `if_unchanged.subject`; the columns it was built from stay
+ * here.
+ */
+export function servedProposal(row: Record<string, unknown>): Record<string, unknown> & { request: RequestShape; subject: RequestSubject | null } {
+  const subject = subjectOfRow(row);
+  const out: Record<string, unknown> = { ...row };
+  for (const c of SUBJECT_COLUMN_NAMES) delete out[c];
+  return { ...withRequestShape(out), subject };
 }
 
 /** `{title, project?, kind?}` off a proposal payload, or undefined — the ONLY thing `accept_as_work` will build a row from, validated here rather than trusted. */
@@ -1294,20 +1366,28 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       // learns what was settled while it was away instead of showing a stale
       // queue. A snooze deliberately does NOT move the cursor: it is a future
       // instant, and a cursor that jumped forward would skip live rows.
+      // Each row is read beside its subject as it stands (T2-14,
+      // `SUBJECT_COLUMNS`), so the fingerprint served is the one an answer is
+      // judged against.
       const { rows } = await db.query(
         since === null
-          ? `SELECT id, ts, kind, source_agent, trust, payload, decision, decided_at, work_id, snoozed_until, ts::text || '|' || id AS cursor FROM proposals
-             WHERE decision = 'pending' AND (snoozed_until IS NULL OR snoozed_until <= now()) ORDER BY ts DESC, id DESC LIMIT $1`
-          : `SELECT id, ts, kind, source_agent, trust, payload, decision, decided_at, work_id, snoozed_until, greatest(ts, decided_at)::text || '|' || id AS cursor FROM proposals
-             WHERE (greatest(ts, decided_at), id) > ($2::timestamptz, $3::bigint) ORDER BY greatest(ts, decided_at) ASC, id ASC LIMIT $1`,
+          ? `SELECT p.id, p.ts, p.kind, p.source_agent, p.trust, p.payload, p.decision, p.decided_at, p.work_id, p.snoozed_until, ${SUBJECT_COLUMNS},
+                    p.ts::text || '|' || p.id AS cursor
+             FROM proposals p ${SUBJECT_JOINS}
+             WHERE p.decision = 'pending' AND (p.snoozed_until IS NULL OR p.snoozed_until <= now()) ORDER BY p.ts DESC, p.id DESC LIMIT $1`
+          : `SELECT p.id, p.ts, p.kind, p.source_agent, p.trust, p.payload, p.decision, p.decided_at, p.work_id, p.snoozed_until, ${SUBJECT_COLUMNS},
+                    greatest(p.ts, p.decided_at)::text || '|' || p.id AS cursor
+             FROM proposals p ${SUBJECT_JOINS}
+             WHERE (greatest(p.ts, p.decided_at), p.id) > ($2::timestamptz, $3::bigint) ORDER BY greatest(p.ts, p.decided_at) ASC, p.id ASC LIMIT $1`,
         since === null ? [limit + 1] : [limit + 1, c![1], c![2]],
       );
       const { page, cursor, more } = pageOf(rows as ({ cursor: string } & Record<string, unknown>)[], limit, since);
       // Each row carries its reading from F-5's table (core's `describeRequest`):
       // the word the owner reads, the body, and the answers its type offers.
       // A client draws that and holds no kind → word map of its own — the
-      // PWA cannot import core, so this is how it reads the one table.
-      return sendJson(res, 200, { proposals: page.map(withRequestShape), cursor, more });
+      // PWA cannot import core, so this is how it reads the one table. And
+      // `subject`, the fingerprint an answer sends back (T2-14).
+      return sendJson(res, 200, { proposals: page.map(servedProposal), cursor, more });
     }
 
     // One verb to many rows (docs/ops/reply-feedback.md). All-or-nothing PER
@@ -1656,15 +1736,41 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     // itself moved — the answer was given to a different question, so it is
     // refused and the current row comes back instead. Opt-in: a caller that
     // sends nothing gets exactly the old behaviour.
+    //
+    // …and its SUBJECT (T2-14, plan §2.12 *Stale*): a card never acts on
+    // something the owner didn't see. `subject` is the fingerprint the row was
+    // served with (`servedProposal`) — the PR's head, the task's line, the
+    // work row — and if what the request is about is not that any more, the
+    // answer is refused HERE, before any consequence below runs: nothing is
+    // sent, nothing is settled, nothing is written on the row (not even C45's
+    // `payload.error` — the question was not answered, so nothing failed). The
+    // 409 carries the row with its subject as it stands, to repaint and
+    // answer again.
     if (body.if_unchanged !== undefined) {
-      if (body.if_unchanged === null || typeof body.if_unchanged !== "object") {
-        return { status: 400, body: errorEnvelope("invalid_request", "if_unchanged must be an object: {seen_at}") };
+      const seenBy = body.if_unchanged;
+      if (seenBy === null || typeof seenBy !== "object" || Array.isArray(seenBy)) {
+        return { status: 400, body: errorEnvelope("invalid_request", "if_unchanged must be an object: {seen_at?, subject?}") };
       }
-      const seen = parseSeenAt(body.if_unchanged.seen_at);
+      const sentSubject = Object.hasOwn(seenBy, "subject");
+      if (seenBy.seen_at === undefined && !sentSubject) {
+        return { status: 400, body: errorEnvelope("invalid_request", "if_unchanged names what you rendered: seen_at, subject, or both") };
+      }
+      const seen = seenBy.seen_at === undefined ? undefined : parseSeenAt(seenBy.seen_at);
       if (seen === null) {
         return { status: 400, body: errorEnvelope("invalid_request", "if_unchanged.seen_at must be a timestamp this server minted — the `ts` of the row you rendered, or the list `cursor` you rendered it from") };
       }
-      if (new Date(row.changed_at as string).getTime() > seen.getTime()) {
+      const seenSubject = sentSubject ? parseSubjectFingerprint(seenBy.subject) : null;
+      if (seenSubject === undefined) {
+        return { status: 400, body: errorEnvelope("invalid_request", "if_unchanged.subject must be the `subject.fingerprint` this server served on the row you rendered, or null for a row served with no subject") };
+      }
+      if (sentSubject) {
+        const now = subjectOfRow(row);
+        if (!subjectUnchanged(seenSubject, now)) {
+          await audit("triage", "stale", false, { proposal: row.id, kind: row.kind, subject: now?.basis ?? null });
+          return { status: 409, body: conflictBody("stale", "what this request is about changed after you saw it", row) };
+        }
+      }
+      if (seen !== undefined && new Date((sentSubject ? row.own_changed_at : row.changed_at) as string).getTime() > seen.getTime()) {
         await audit("triage", "stale", false, { proposal: row.id, kind: row.kind, seen_at: seen.toISOString() });
         return { status: 409, body: conflictBody("stale", "the proposal changed after you saw it", row) };
       }

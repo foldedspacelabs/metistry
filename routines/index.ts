@@ -59,8 +59,8 @@ export { vaultReader, type VaultReadable } from "./vault-reader.js";
 // these rather than holding a second copy of what "purge" means.
 export { purgeArchive, purgePreview, type PurgeCounts, type PurgePreview, type UnfoldedSession } from "./session-purge/run.js";
 // What the Standup routine takes beyond `PlanCtx`: its resolved Scheduled
-// config (`template`, `skip_without_calendar_event`). Absent until the runner
-// hands config on, and then the manifest's defaults apply.
+// config (`template`, `skip_without_calendar_event`), which the runner hands
+// on per run (T3-3); absent, the manifest's defaults apply.
 export type { StandupCtx } from "./standup/run.js";
 // What the Morning Brief takes beyond `PlanCtx`: a vault that may also have
 // the section door (`POST /vault/section`, T2-6) — the console's client does.

@@ -79,41 +79,41 @@ Generated from `docs/product/design-build-plan.md` by `ops/scripts/tickets.mjs`.
 
 ## W2 — 35 tickets, 128.5 agent-days
 
-- [ ] [T1-10](t1/t1-10.md) · Meeting refs and people emails · M · opus · after F-6
-- [ ] [T1-13](t1/t1-13.md) · Project grants table · S · sonnet · after F-6
-- [ ] [T2-3](t2/t2-3.md) · Questions v2 and both report names · L · opus high · after F-5
-- [ ] [T2-7](t2/t2-7.md) · Today routes and order · L · opus high · after T1-9, T2-4, T2-11
-- [ ] [T2-8](t2/t2-8.md) · Close the Day · M · opus · after T2-5, T2-6
-- [ ] [T2-9](t2/t2-9.md) · Events become requests · M · opus · after T1-8, F-5
-- [ ] [T2-10](t2/t2-10.md) · Resolve a conflict · M · opus · after T2-9
-- [ ] [T2-11](t2/t2-11.md) · Calendar fields and the meeting note · L · opus high · after T1-10
-- [ ] [T2-14](t2/t2-14.md) · Stale requests · M · opus · after T1-8
-- [ ] [T3-3](t3/t3-3.md) · Scheduled routes and doors · M · opus · after T3-1, T3-2, F-13
-- [ ] [T3-5](t3/t3-5.md) · The Standup routine · M · opus · after T3-1
-- [ ] [T3-6](t3/t3-6.md) · The Morning Brief · L · opus high · after T2-6, T3-5
-- [ ] [T3-7](t3/t3-7.md) · Tomorrow's Plan after the fold · M · opus · after T3-1
-- [ ] [T3-12](t3/t3-12.md) · Three strikes and a Stop limit · M · opus · after T2-9
-- [ ] [T4-7](t4/t4-7.md) · Project grants inherited · M · opus · after T4-6, T1-13
-- [ ] [T4-8a](t4/t4-8a.md) · Connections P1: registry and client · L · opus high · after T4-1, T4-2, T4-5
-- [ ] [T4-8b](t4/t4-8b.md) · Connections P1: the lazy pair · L · opus high · after T4-8a
-- [ ] [T4-24](t4/t4-24.md) · Linear: the connection and its sync · L · opus high · after T4-8a, T4-2, T1-8
-- [ ] [T4-18](t4/t4-18.md) · Compute · L · opus high · after T4-1
-- [ ] [T5-4a](t5/t5-4a.md) · Needs You: the list · L · opus high · after T5-2, T5-3
-- [ ] [T5-4b](t5/t5-4b.md) · Needs You: the bodies · L · opus high · after T5-3
-- [ ] [T5-5](t5/t5-5.md) · The capture composer · M · opus · after T5-1
-- [ ] [T5-6](t5/t5-6.md) · The Usage popover · M · opus · after T5-1, T1-15
-- [ ] [T5-7](t5/t5-7.md) · Live events on the Mac · M · opus · after F-12, T2-18
-- [ ] [T6-1a](t6/t6-1a.md) · Today: the spine · L · opus high · after T5-3, T2-7
-- [ ] [T6-1b](t6/t6-1b.md) · Today: brief, Next Up, close · L · opus high · after T5-3, T2-8, T3-6
-- [ ] [T6-2](t6/t6-2.md) · Chat · L · opus high · after T5-3, T2-17
-- [ ] [T6-3](t6/t6-3.md) · Activity · M · opus · after T5-3, T1-3
-- [ ] [T7-3a](t7/t7-3a.md) · Today and Needs You · L · opus high · after T7-2
-- [ ] [T7-3b](t7/t7-3b.md) · Work, Knowledge, More · L · opus high · after T7-2
-- [ ] [T7-7](t7/t7-7.md) · Live events in the PWA · M · opus · after T2-18, T7-2
-- [ ] [T9-2](t9/t9-2.md) · The policy · L · opus high · after T9-1
-- [ ] [T10-4](t10/t10-4.md) · File history · M · opus · after T10-1
-- [ ] [T10-5](t10/t10-5.md) · Restore a file · M · opus · after T10-4, T1-8
-- [ ] [T10-6](t10/t10-6.md) · Roll back · L · opus high · after T10-3, T10-4
+- [x] [T1-10](t1/t1-10.md) · Meeting refs and people emails · M · opus · after F-6
+- [x] [T1-13](t1/t1-13.md) · Project grants table · S · sonnet · after F-6
+- [x] [T2-3](t2/t2-3.md) · Questions v2 and both report names · L · opus high · after F-5
+- [x] [T2-7](t2/t2-7.md) · Today routes and order · L · opus high · after T1-9, T2-4, T2-11
+- [x] [T2-8](t2/t2-8.md) · Close the Day · M · opus · after T2-5, T2-6
+- [x] [T2-9](t2/t2-9.md) · Events become requests · M · opus · after T1-8, F-5
+- [x] [T2-10](t2/t2-10.md) · Resolve a conflict · M · opus · after T2-9
+- [x] [T2-11](t2/t2-11.md) · Calendar fields and the meeting note · L · opus high · after T1-10
+- [x] [T2-14](t2/t2-14.md) · Stale requests · M · opus · after T1-8
+- [x] [T3-3](t3/t3-3.md) · Scheduled routes and doors · M · opus · after T3-1, T3-2, F-13
+- [x] [T3-5](t3/t3-5.md) · The Standup routine · M · opus · after T3-1
+- [x] [T3-6](t3/t3-6.md) · The Morning Brief · L · opus high · after T2-6, T3-5
+- [x] [T3-7](t3/t3-7.md) · Tomorrow's Plan after the fold · M · opus · after T3-1
+- [x] [T3-12](t3/t3-12.md) · Three strikes and a Stop limit · M · opus · after T2-9
+- [x] [T4-7](t4/t4-7.md) · Project grants inherited · M · opus · after T4-6, T1-13
+- [x] [T4-8a](t4/t4-8a.md) · Connections P1: registry and client · L · opus high · after T4-1, T4-2, T4-5
+- [x] [T4-8b](t4/t4-8b.md) · Connections P1: the lazy pair · L · opus high · after T4-8a
+- [x] [T4-24](t4/t4-24.md) · Linear: the connection and its sync · L · opus high · after T4-8a, T4-2, T1-8
+- [x] [T4-18](t4/t4-18.md) · Compute · L · opus high · after T4-1
+- [x] [T5-4a](t5/t5-4a.md) · Needs You: the list · L · opus high · after T5-2, T5-3
+- [x] [T5-4b](t5/t5-4b.md) · Needs You: the bodies · L · opus high · after T5-3
+- [x] [T5-5](t5/t5-5.md) · The capture composer · M · opus · after T5-1
+- [x] [T5-6](t5/t5-6.md) · The Usage popover · M · opus · after T5-1, T1-15
+- [x] [T5-7](t5/t5-7.md) · Live events on the Mac · M · opus · after F-12, T2-18
+- [x] [T6-1a](t6/t6-1a.md) · Today: the spine · L · opus high · after T5-3, T2-7
+- [x] [T6-1b](t6/t6-1b.md) · Today: brief, Next Up, close · L · opus high · after T5-3, T2-8, T3-6
+- [x] [T6-2](t6/t6-2.md) · Chat · L · opus high · after T5-3, T2-17
+- [x] [T6-3](t6/t6-3.md) · Activity · M · opus · after T5-3, T1-3
+- [x] [T7-3a](t7/t7-3a.md) · Today and Needs You · L · opus high · after T7-2
+- [x] [T7-3b](t7/t7-3b.md) · Work, Knowledge, More · L · opus high · after T7-2
+- [x] [T7-7](t7/t7-7.md) · Live events in the PWA · M · opus · after T2-18, T7-2
+- [x] [T9-2](t9/t9-2.md) · The policy · L · opus high · after T9-1
+- [x] [T10-4](t10/t10-4.md) · File history · M · opus · after T10-1
+- [x] [T10-5](t10/t10-5.md) · Restore a file · M · opus · after T10-4, T1-8
+- [x] [T10-6](t10/t10-6.md) · Roll back · L · opus high · after T10-3, T10-4
 
 - [ ] **W2 checkpoint** — merged, main green, scratch-instance upgrade, conformance test, Mac smoke, release
 

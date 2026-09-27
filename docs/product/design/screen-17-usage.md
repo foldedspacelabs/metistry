@@ -39,3 +39,5 @@ chroma floor (C87), acceptable for a single series and worth fixing in the token
 `spend` (month, today, by crew and model, unpriced calls), `cache_report` or
 `claude_usage_daily` (cache rate), `aws_costs_daily`, and the compute budgets. All
 served today.
+
+*Note (W2 housekeeping):* "the budget" on this screen is C130's **spending limit**, read from `GET /api/compute` (the limits and their action) — the popover's copy says *spending limit*, per C130.

@@ -76,6 +76,63 @@ coordinator records what was built meanwhile and does not decide them.
 | (a) | A routine's reserved subfolder (like `Journal/Plan/` for plan-tomorrow, `Journal/Digest/` for the Digest routine) is a routine **ownership** fact, written through the reconciler under the routine's own principal — not a grant. Per-run grants stay read-only. | §2.5's example (W1 housekeeping); T3-8 builds to it. |
 | T10-3 | A remote commit touching a protected path (all of `.metistry/`, `state/` included, and case-folded root names) is **refused and reported**: nothing integrates, the push is held, one Needs You report per offending commit. | #324. |
 
+## W2 — the second build wave
+
+| Date | Where | The call |
+| --- | --- | --- |
+| 2026-09-27 | #336 | `update-check` runs every day at 06:00 (T3-2's schedule shape), not `@daily` — restated; `releases.md` and `scheduled.md` already say so. |
+| 2026-09-27 | T10-5 (#362) | T10-5's accept line "Knowledge shows the request inline" belongs to **T10-7**, which draws it; T10-5's request payload carries `title` and `before_after` so T10-7 can. The plan moves the line (W2 housekeeping). |
+| 2026-09-27 | T2-8 (#363) | A ticket may touch `seed/queries/` and `seed/vault/Templates/` when its door provably needs them — Close the Day needed both. |
+| 2026-09-27 | T2-14 (#359) | A test-only fix that unblocks CI may ride inside a ticket PR, disclosed in its body. `agent-brief.md` says so. |
+| 2026-09-27 | W2 | `pr: null` while a ticket is `in-review` is the convention: an agent pushes once, and the wave's housekeeping PR records every number. `agent-brief.md` says so. |
+| 2026-09-27 | W2 | An agent's Opus co-author trailer is rewritten to the Fable trailer only when a rebase is needed anyway — never a rebase for the trailer alone. |
+
+## Rulings made by the owner, recorded at W2
+
+The first five were recorded in W1 (*Rulings made by the owner in W1* above) and are restated as confirmed; `METISTRY_TZ` was T3-1's call in W1 and is now the owner's ruling.
+
+| Ruling | What it settles | Built by |
+| --- | --- | --- |
+| (b) | Permission words are **Allow · Ask First · Never** everywhere. | PWA, CLI, Kit; the plan and `CLAUDE.md` (W1 housekeeping). |
+| (c) | The door names `act`, `today` and `delegate` are kept. | `client-api.ts` (F-1, F-5). |
+| (a) | A routine's reserved subfolder is an **ownership** fact, written under the routine's principal; per-run grants are read-only. | §2.5; T3-8 builds to it. |
+| T10-3 | A remote commit touching a protected path is **refused and reported**. | #324. |
+| TZ | The zone fallback is **`METISTRY_TZ` only, never `TZ`**. | T3-1 (#303). |
+| F-13 | `local_only` is answered to passkey sessions only; `api_version` stays 1. | F-13 (#283). |
+
+## Open for the owner at the W2 checkpoint
+
+Found while W2 was built. Nothing here is decided; what is built meanwhile is what merged.
+
+- T10-4 (#343): `GET /vault/log` serves `.metistry/` subjects to either bearer — should an agent bearer see them?
+- T4-18 (#352): compute calls bypass T4-2's egress guard, and a provider key has no grantee.
+- T2-3 (#347): a report cannot be approved, and an agent cannot read the answer to its question.
+- T3-5/T3-6 (#342, #368): §2.13's assistant-turn prose fill is unbuildable as written — the routine writes its own file (plan fixed in W2 housekeeping to the marked-slot form; confirm).
+- T5-2 (#296): the Knowledge sidebar row has no children — confirm or ask the designer.
+- `init --keep-awake --shape`: the flags' contract is unwritten.
+- T10-5 (#362): restore reaches the owner, but §2.3 draws "—" for the phone.
+- T2-10 (#371): C136's "the discarded side is committed first" — confirm the order.
+- T3-3/T4-8 (#364, #353, #374): who adds a sync's first `connection`?
+- T3-8: drops `grants.write` from `routineAssignmentSchema` — confirm before it builds.
+- T4-24 (#373): Linear issues are not on the Board; there is no route for Add to Today; a secret's last-used is not stamped for syncs.
+- T4-8b (#374): P1 is Reads/Allow only; the console's `validateGrants` drops `grants.connections`; `activity_feed` should surface `connection_call`.
+- T4-8b (#374): the brain is not wired to a connection pool on a live console.
+- T3-12 (#367): `apps/assistant` `budgets.ts` raises a budget refusal as a `decision`; C96 says `report`.
+- T2-7 (#378): Today's preset definition and the `day_work` flags were the agent's call.
+- T2-7/T6-1a (#378, #379): the `where:` grammar cannot express Slipping or Owed.
+- T6-3 (#356): screen-02 §8's keys are not in the closed menu table.
+- T6-3 (#356): a routine's subject shows its raw component id.
+- T3-7 (#357): Run Now after the 23:00 plan stays silent.
+- T2-8 (#363): must pass `closedDay` — **done**.
+- T3-6 (#368): `{{ calendar }}` renders event titles unsanitised.
+- T5-7 (#355): a snoozed request coming due emits no event.
+- T6-2 (#370): `GET /api/messages` lacks `turn_id`, so older replies draw no tool strip.
+- T5-5 (#354): the offline capture queue is in memory only.
+- T5-4b (#351): reads a request's questions from `payload`, not `request.questions`.
+- T4-12: `collectors/eventkit-calendar` as its precedent.
+- T2-11 (#366): per-attendee status is stored but not served.
+- T5-6 (#360): Settings ▸ Compute is still titled "Budgets".
+
 ## Rulings the owner must make
 
 (a), (b) and (c) were ruled in W1 — see *Rulings made by the owner in W1* above.

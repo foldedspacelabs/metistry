@@ -30,6 +30,8 @@ C135–C138. Closes review 01 §3.2 and §3.3 (R2.4–R2.6).
 | Instance | — | — | a linked instance *Not seen for 3 days* · Check Now · Remove | — |
 | Updates | — | — | — | failed update rolled back, *nothing was lost* · View Log |
 
+*Note (W2 housekeeping):* Projects' and Usage's spend comes from `GET /api/compute`; the ceiling it is read against is a **spending limit** (C130), and **Raise** opens Settings › Compute › Spending limits (§5).
+
 ## 3. Undo or confirm (C136)
 
 Reversible → act at once, **Undo** for ten seconds: Decline All; Keep Mine /

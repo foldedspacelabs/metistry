@@ -159,6 +159,24 @@ assignments:
     expect(assistantEnvKeys(compute)).toContain("METISTRY_OPENROUTER_API_KEY");
   });
 
+  it("a {{ secret.x }} key is passed as METISTRY_SECRET_X — and for one release the line T4-3 filled from it — and no other secret (T4-18)", () => {
+    const named = parseCompute(`
+providers:
+  openrouter:
+    kind: openai-compatible
+    base_url: https://openrouter.ai/api/v1
+    locality: off_machine
+    auth: { secret: "{{ secret.openrouter_api_key }}" }
+    data_policy: { allow: [Projects], deny_sources: [comms], max_brief_bytes: 65536 }
+assignments:
+  default: { model: openrouter/anthropic/claude-sonnet-5 }
+`);
+    expect(assistantEnvKeys(named)).toEqual([...ASSISTANT_ENV_KEYS, "METISTRY_SECRET_OPENROUTER_API_KEY", "METISTRY_OPENROUTER_API_KEY"]);
+    const e = assistantEnv(ctx({ ...env, METISTRY_SECRET_OPENROUTER_API_KEY: "sk-delivered", METISTRY_SECRET_GITHUB_WRITE: "ghp-not-the-engines" }), named);
+    expect(e.METISTRY_SECRET_OPENROUTER_API_KEY).toBe("sk-delivered");
+    expect(e.METISTRY_SECRET_GITHUB_WRITE).toBeUndefined(); // delivered for someone else: never the engine's
+  });
+
   it("defaults the brain URL to the console's own port when .env has none", () => {
     expect(assistantEnv(ctx({ METISTRY_CONSOLE_PORT: "8099" })).METISTRY_BRAIN_URL).toBe("http://127.0.0.1:8099/mcp");
   });

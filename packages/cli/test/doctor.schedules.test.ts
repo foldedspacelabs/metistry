@@ -11,7 +11,7 @@ import { scheduleRows, type Db, type DoctorRow } from "../src/doctor.js";
 const NOW = new Date("2026-09-15T12:00:00Z");
 const ago = (minutes: number) => new Date(NOW.getTime() - minutes * 60_000);
 
-/** A checkout with one hourly collector and one daily routine. */
+/** A checkout with one hourly collector, one daily routine, and one on §2.5's time of day. */
 async function checkout(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "metistry-schedules-"));
   const put = async (rel: string, text: string) => {
@@ -20,6 +20,7 @@ async function checkout(): Promise<string> {
   };
   await put("collectors/gh/manifest.yaml", "name: gh\ntype: collector\nschedule: '@hourly'\nwrites: [work]\n");
   await put("routines/fold/manifest.yaml", "name: fold\ntype: routine\nschedule: '@daily'\n");
+  await put("routines/brief/manifest.yaml", 'name: brief\ntype: routine\nschedule: { days: working_days, at: ["07:00"] }\n');
   return root;
 }
 
@@ -30,6 +31,7 @@ interface Seed {
   at: Date;
   ok: boolean | null;
   error?: string;
+  meta?: Record<string, unknown>;
 }
 
 /** The three reads the section makes, answered from one seeded row list. */
@@ -55,7 +57,7 @@ const seededDb = (rows: Seed[]): Db => ({
         rows: keys.map((key) => {
           const [component, kind] = key.split(" ") as [string, string];
           const newest = rows.filter((r) => r.component === component && r.kind === kind).sort((a, b) => +b.at - +a.at)[0]!;
-          return { component, kind, ts: newest.at, ok: newest.ok, error: newest.error ?? null };
+          return { component, kind, ts: newest.at, ok: newest.ok, error: newest.error ?? null, meta: newest.meta ?? {} };
         }),
       };
     }
@@ -157,6 +159,36 @@ describe("doctor: schedules", () => {
     expect(r.fold?.remediation).toContain("METISTRY_OPENROUTER_API_KEY is unset");
     expect(r.fold?.remediation).toContain("`requires` in routines/fold/manifest.yaml");
     expect(r.fold?.meta).toMatchObject({ preflight_failed: true });
+  });
+
+  // T3-1: a time of day is due at a slot, not an interval after the last
+  // run. Doctor bounds it by the widest gap of its week (a day set: the
+  // week, because it follows Me/profile.md) and does not guess when it is
+  // next due — the console's runner, which reads the profile, knows that.
+  it("a time-of-day schedule is said the way a person would, bounded by its week, with no guessed next-due", async () => {
+    const r = await rowsFor([{ component: "brief", kind: "routine_run", at: ago(60 * 26), ok: true }]);
+    expect(r.brief?.status).toBe("ok"); // 26 h since the last brief is inside a week's bound
+    expect(r.brief?.probe).toContain("working days at 07:00 (at most");
+    expect(r.brief?.meta).toMatchObject({ schedule: "working days at 07:00", interval_sec: 7 * 86400 + 3600, next_due_at: null });
+  });
+
+  it("a schedule the runner could not place is absent, and says why in the runner's own words", async () => {
+    const why = "the schedule runs on working_days, and Me/profile.md does not say which days you work";
+    const r = await rowsFor([
+      { component: "brief", kind: "routine_run", at: ago(30), ok: true, meta: { schedule_refused: "no_working_days", why, outcome: "skipped:no_working_days" } },
+    ]);
+    expect(r.brief?.status).toBe("absent");
+    expect(r.brief?.remediation).toBe(`not scheduled: ${why}`);
+    expect(r.brief?.meta).toMatchObject({ schedule_refused: "no_working_days" });
+  });
+
+  it("a marker a later run has answered is history, even inside its window", async () => {
+    const r = await rowsFor([
+      { component: "fold", kind: "runner", tool: "preflight_failed", at: ago(120), ok: false, error: "blocked_config: fixed since" },
+      { component: "fold", kind: "routine_run", at: ago(60), ok: true },
+    ]);
+    expect(r.fold?.status).toBe("ok");
+    expect(r.fold?.meta).toMatchObject({ preflight_failed: false });
   });
 
   it("no db: one absent row, never a false clean bill of health", async () => {

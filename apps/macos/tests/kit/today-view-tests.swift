@@ -844,6 +844,43 @@ import Testing
     }
 }
 
+// MARK: - The window's minimum
+
+// 0.14.1, as Activity's and Needs You's: the window's minimum is SwiftUI's
+// answer for the whole window at no size at all, and Today answered with its
+// content's at no width — 1,127–1,440 pt with a day on screen, 1,841 when the
+// console did not answer — so opening it grew the window. Its minimum is the
+// shell's, in every panel.
+@MainActor
+@Test func openingTodayNeverRaisesTheWindowsMinimum() async throws {
+    let console = TodayConsole(day: busyDay(), pages: pages(brief: briefFile()))
+    let (model, session) = todayModel(console, at: at("13:31"))
+    defer { withExtendedLifetime(session) {} }
+    await model.load()
+    #expect(model.day != nil)
+
+    let window = try await ShellProbe.acrossTheSwitch { TodayView(model: model, assistantName: "Aide", tick: .seconds(3600)) }
+    #expect(window.after.minimum.height <= max(window.before.minimum.height, 460), "opening Today raised the window's minimum to \(window.after.minimum)")
+    #expect(window.after.frame == window.before.frame, "the window moved: \(window.before.frame) → \(window.after.frame)")
+
+    // every panel: waiting, the day, All, failed
+    let (waiting, waitingSession) = todayModel(TodayConsole(day: busyDay(), pages: pages()), at: at("13:31"))
+    let (failed, failedSession) = todayModel(UnreachableConsole(), at: at("13:31"))
+    defer { withExtendedLifetime([waitingSession, failedSession]) {} }
+    await failed.load()
+    let probe = MinimumProbe()
+    var sizes = [
+        ("waiting", probe.minimum(of: TodayView(model: waiting, assistantName: "Aide", tick: .seconds(3600)))),
+        ("the day", probe.minimum(of: TodayView(model: model, assistantName: "Aide", tick: .seconds(3600)))),
+        ("failed", probe.minimum(of: TodayView(model: failed, assistantName: "Aide", tick: .seconds(3600)))),
+    ]
+    model.setMode(.all)
+    sizes.append(("all", probe.minimum(of: TodayView(model: model, assistantName: "Aide", tick: .seconds(3600)))))
+    for (name, size) in sizes {
+        #expect(size.height <= 460, "\(name) asks for \(size) at the least")
+    }
+}
+
 // MARK: - Helpers
 
 private let utc = TimeZone(identifier: "UTC")!
@@ -1065,6 +1102,13 @@ private final class TodayConsole: ConsoleCallTransport, @unchecked Sendable {
         if let scripted { return scripted }
         guard let fallback else { return .failure(.transport("no fixtures")) }
         return await fallback.call(method, path, body: body, idempotencyKey: idempotencyKey)
+    }
+}
+
+/// A console that is not there: every request fails as a refused connection.
+private struct UnreachableConsole: ConsoleCallTransport {
+    func call(_ method: String, _ path: String, body: Data?, idempotencyKey: String?) async -> Result<Data, ConsoleError> {
+        .failure(.transport("connect ECONNREFUSED 127.0.0.1:1"))
     }
 }
 #endif

@@ -119,12 +119,14 @@ export function writeOther(q, a, text) {
 }
 
 /**
- * The body an answer to a `choices` row sends. v1 answers with the option
- * itself — the wire recorded for POST /api/proposals/:id. v2 sends
- * the decision `answers` (§2.12: Send Answers → per-question answers) with one
- * entry per question, in order: the options chosen, and `other` where the
- * owner wrote their own. **The per-question shape is T2-3's to freeze**; it is
- * built here and nowhere else, so matching it is this one function.
+ * The body an answer to a `choices` row sends. A single pick-one question
+ * answers with the option itself — the v1 wire, which T2-3's server still
+ * takes for any row that is exactly one pick-one question. Otherwise it
+ * sends the decision `answers` (§2.12: Send Answers → per-question answers)
+ * with one entry per question, in order: `{choices, other?}` — T2-3's own
+ * frozen shape (`checkAnswers`, packages/core/src/decision-block.ts), checked
+ * again there against the stored row. Built here and nowhere else, so
+ * matching it is this one function.
  */
 export const SEND_ANSWERS = "answers"; // the decision a v2 question's Send Answers stores (core REQUEST_DECISIONS)
 export function answersBody(qs, answers) {
@@ -133,7 +135,7 @@ export function answersBody(qs, answers) {
     decision: SEND_ANSWERS,
     answers: qs.map((q, i) => {
       const a = answers[i] ?? {};
-      const out = { options: [...(a.chosen ?? [])] };
+      const out = { choices: [...(a.chosen ?? [])] };
       const other = String(a.other ?? "").trim();
       if (q.other && other) out.other = other;
       return out;

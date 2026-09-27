@@ -302,7 +302,7 @@ describe("questions come one at a time", () => {
     expect(canSend(qs, answers)).toBe(true);
     expect(answersBody(qs, answers)).toEqual({
       decision: "answers",
-      answers: [{ options: ["one file per store"] }, { options: ["Board"] }, { options: [], other: "ship Friday" }],
+      answers: [{ choices: ["one file per store"] }, { choices: ["Board"] }, { choices: [], other: "ship Friday" }],
     });
     answers = [];
     expect(answersBody(qs, answers).answers).toHaveLength(3);
@@ -349,7 +349,7 @@ describe("questions come one at a time", () => {
       path: `/api/proposals/${p.id}`, method: "POST", headers: {},
       body: {
         decision: "answers",
-        answers: [{ options: ["one file per store"] }, { options: ["Today", "Board"] }, { options: [], other: "and the Board after" }],
+        answers: [{ choices: ["one file per store"] }, { choices: ["Today", "Board"] }, { choices: [], other: "and the Board after" }],
         if_unchanged: { seen_at: p.ts },
       },
     }]);

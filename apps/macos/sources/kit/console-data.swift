@@ -903,8 +903,10 @@ public struct AgentList: Codable, Sendable, Equatable {
 public struct AgentRecord: Codable, Sendable, Equatable, Identifiable {
     public let id: String
     public let displayName: String?
-    /// `external` or `internal`. An internal agent's token comes from the
-    /// user's own environment, which IS its approval.
+    /// `external`, `internal` (the instance's assistant) or `crew`. An
+    /// internal agent's token comes from the user's own environment, which IS
+    /// its approval; a crew's row from its manifest. Only `external` is ever
+    /// minted over the API (T4-6).
     public let kind: String?
     /// Default-deny: `{tier: "none", areas: []}` at mint. Approval is NOT a
     /// grant — two different questions, answered separately.
@@ -924,9 +926,15 @@ public struct AgentRecord: Codable, Sendable, Equatable, Identifiable {
     public let approvedAt: String?
     /// Derived by the server: remote, unapproved, unrevoked.
     public let pending: Bool
+    /// The actor's permissions table (T4-6): Resource × Read × Write, drawn
+    /// by `core`'s `describePermissions` — which asks the same `may()` the
+    /// doors ask — and printed with `PermissionsTable`, never recomputed.
+    /// `[]` holds nothing (a revoked row, a crew whose manifest is gone).
+    /// Nil only against a console older than this app.
+    public let permissions: [AgentPermissionRow]?
 
     enum CodingKeys: String, CodingKey {
-        case id, kind, grants, projects, autonomy, scope, revoked, remote, pending
+        case id, kind, grants, projects, autonomy, scope, revoked, remote, pending, permissions
         case displayName = "display_name"
         case createdAt = "created_at"
         case lastSeenAt = "last_seen_at"
@@ -948,6 +956,7 @@ public struct AgentRecord: Codable, Sendable, Equatable, Identifiable {
         remote = try c.decodeIfPresent(Bool.self, forKey: .remote) ?? false
         approvedAt = try c.decodeIfPresent(String.self, forKey: .approvedAt)
         pending = try c.decodeIfPresent(Bool.self, forKey: .pending) ?? false
+        permissions = try c.decodeIfPresent([AgentPermissionRow].self, forKey: .permissions)
     }
 
     /// `autonomy.level` — `observe`, `act_within_scope`, … Held as JSON
@@ -991,6 +1000,111 @@ public struct AgentActionEntry: Sendable, Equatable {
     public init?(json: JSONValue) {
         guard let mode = json.string("mode"), let source = json.string("source"), let ceiling = json.string("ceiling") else { return nil }
         self.init(mode: mode, source: source, asked: json.string("asked"), ceiling: ceiling)
+    }
+}
+
+/// One line of an actor's permissions table (T4-6, screen 7 §4.1): a
+/// resource, and what the actor may read and write there. The wire shape of
+/// `core`'s `PermissionRow` (`packages/core/src/actor.ts`).
+public struct AgentPermissionRow: Codable, Sendable, Equatable {
+    public struct Resource: Codable, Sendable, Equatable {
+        /// `knowledge` · `work` · `artifacts` · `inbox` · `queries` · `agents`, or `connection`.
+        public let kind: String
+        /// A connection's name; nil for the six resources.
+        public let name: String?
+
+        public init(kind: String, name: String? = nil) {
+            self.kind = kind
+            self.name = name
+        }
+    }
+
+    /// Where an entry came from. `base` carries no marker; `approved` names its
+    /// Needs You request; `routine` is held only while that routine runs.
+    public struct Provenance: Codable, Sendable, Equatable {
+        /// `base` · `approved` · `routine`
+        public let kind: String
+        public let proposalID: Int?
+        public let routine: String?
+
+        enum CodingKeys: String, CodingKey {
+            case kind, routine
+            case proposalID = "proposalId"
+        }
+
+        public init(kind: String, proposalID: Int? = nil, routine: String? = nil) {
+            self.kind = kind
+            self.proposalID = proposalID
+            self.routine = routine
+        }
+    }
+
+    /// One thing in a cell: an area, a project, a verb, a connection tool.
+    public struct Entry: Codable, Sendable, Equatable {
+        /// What a client matches on, never shown.
+        public let key: String
+        /// The words to print.
+        public let label: String
+        /// ⏱ — the owner answers first.
+        public let asks: Bool
+        public let provenance: Provenance
+
+        public init(key: String, label: String, asks: Bool = false, provenance: Provenance = Provenance(kind: "base")) {
+            self.key = key
+            self.label = label
+            self.asks = asks
+            self.provenance = provenance
+        }
+    }
+
+    public let resource: Resource
+    /// The resource in words: "Knowledge", or a connection's name.
+    public let label: String
+    public let read: [Entry]
+    public let write: [Entry]
+
+    public init(resource: Resource, label: String, read: [Entry], write: [Entry]) {
+        self.resource = resource
+        self.label = label
+        self.read = read
+        self.write = write
+    }
+}
+
+/// **The permissions table in words** — `core`'s `permissionRowText`, said
+/// the same way here, in `metistry agents list` and in the console's panel,
+/// so the three surfaces print one table (a test holds this to the recorded
+/// fixture, in the strings the TypeScript test holds core to). An empty cell
+/// is the dash: absence is the denial, drawn rather than left blank.
+public enum PermissionsTable {
+    public static let emptyCell = "—"
+    public static let asksMark = "⏱"
+    public static let connectionMark = "⧉"
+
+    /// Where an entry came from, in words; nil for the base, which carries no marker.
+    public static func provenanceText(_ p: AgentPermissionRow.Provenance) -> String? {
+        switch p.kind {
+        case "approved": return p.proposalID.map { "approved in Needs You · #\($0)" } ?? "approved in Needs You"
+        case "routine": return "during \(p.routine ?? "") only"
+        default: return nil
+        }
+    }
+
+    public static func entryText(_ e: AgentPermissionRow.Entry) -> String {
+        var text = e.label
+        if e.asks { text += " \(asksMark)" }
+        if let why = provenanceText(e.provenance) { text += " (\(why))" }
+        return text
+    }
+
+    public static func cellText(_ entries: [AgentPermissionRow.Entry]) -> String {
+        entries.isEmpty ? emptyCell : entries.map(entryText).joined(separator: ", ")
+    }
+
+    /// One row: resource · read · write. A connection is marked ⧉.
+    public static func rowText(_ row: AgentPermissionRow) -> [String] {
+        let label = row.resource.kind == "connection" ? "\(row.label) \(connectionMark)" : row.label
+        return [label, cellText(row.read), cellText(row.write)]
     }
 }
 

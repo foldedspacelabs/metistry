@@ -1,8 +1,7 @@
 {
   "route": "GET /api/agents/:id/definition",
-  "source": "contract",
-  "ticket": "T4-6",
-  "note": "packages/core/src/actor.ts' definition; null for an external agent; the write is metistry agents define (M12)",
+  "source": "recorded",
+  "ticket": null,
   "request": {
     "method": "GET",
     "path": "/api/agents/researcher/definition",
@@ -14,17 +13,24 @@
     "id": "researcher",
     "definition": {
       "kind": "crew",
-      "area": "research",
-      "description": "Finds and summarises sources for a question",
-      "prompt": "You research one question at a time and cite every source.",
+      "area": "example",
+      "description": "Reads the granted project and resource notes and reports what it finds",
+      "prompt": "You are a researcher working for {{name}}, this instance's assistant. You get one brief per run and no memory between runs.\n\nDo exactly what the brief asks and nothing adjacent. Use `knowledge_search` to find the notes it names or implies, `knowledge_read` to read the ones that matter, and keep going until you can answer the brief's question or have shown it cannot be answered from what you were granted.\n\nThen `report`:\n\n- kind `finding` for what you learned, with the note paths you relied on in `refs`;\n- kind `gotcha` for anything contradictory, stale, or missing that the assistant should know about;\n- kind `progress` if you ran out of turns first — say what is done and what is not.\n\nBe concrete: quote the sentence, name the file, date the claim. Never invent a path you did not read. If a note you needed was not granted, say so in the report rather than guessing around it.",
       "files": [
         {
-          "path": ".metistry/agents/research/researcher.md",
-          "origin": "instance",
-          "sha256": "0f3c000000000000000000000000000000000000000000000000000000000000"
+          "path": "seed/agents/example/researcher.md",
+          "origin": "product",
+          "sha256": "917db5297001626f6798c8f3bd5d6cf138f71d2060aeaaf48744f43ac4826d84"
         }
       ]
     },
-    "as_of": "2026-09-28T13:05:00.000Z"
+    "compute": {
+      "kind": "same_as_assistant"
+    },
+    "limits": {
+      "maxTurns": 10,
+      "budgetUsdPerRun": 0.25
+    },
+    "as_of": "2026-09-26T23:55:44.207Z"
   }
 }

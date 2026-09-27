@@ -272,7 +272,7 @@ takes a `since` cursor and answers with the next one.
 | `POST /api/proposals/batch` | owner | session · local_owner | no | — | — | served | one verb (`later`, `skip`, `deny`) to many requests; per-row results |
 | `POST /api/proposals/:id` | owner | session · local_owner | no | already_decided · stale | — | served · T2-3 | answer one request; `if_unchanged` refuses a stale answer |
 | `GET /api/needs-you/count` | owner | session · local_owner | natural | — | — | T1-7 | how many requests wait: the sidebar row and the Dock badge |
-| `GET /api/agents` | owner | session · local_owner | natural | — | — | served · T4-6 | the registry, each row's rendered scope, and the unanswered access requests |
+| `GET /api/agents` | owner | session · local_owner | natural | — | — | served | the registry, each row's rendered scope and permission rows, and the unanswered access requests |
 | `POST /api/agents` | local | local_owner | no | 409 | — | served | register an agent and mint its bearer (shown once) |
 | `PUT /api/agents/:id/grants` | owner | session · local_owner | natural | — | — | served | replace an agent's knowledge grant |
 | `PUT /api/agents/:id/projects` | owner | session · local_owner | natural | — | — | served | replace the projects an agent may work in |
@@ -280,7 +280,7 @@ takes a `since` cursor and answers with the next one.
 | `POST /api/agents/:id/revoke` | owner | session · local_owner | no | — | — | served | revoke an agent's bearer |
 | `POST /api/agents/:id/rotate` | local | local_owner | no | — | — | served | mint a new bearer for an agent (shown once) |
 | `POST /api/agents/:id/approve` | owner | session · local_owner | natural | — | — | served | let a pending remote enrolment in |
-| `GET /api/agents/:id/definition` | owner | session · local_owner | natural | — | — | T4-6 | an agent's definition, read-only — the write is `metistry agents define` |
+| `GET /api/agents/:id/definition` | owner | session · local_owner | natural | — | — | served | an agent's definition, compute and limits, read-only — the write is `metistry agents define` |
 | `GET /api/projects` | owner | session · local_owner | natural | — | — | served | every project with its mode, budget and rollup |
 | `PUT /api/projects/:slug` | owner | session · local_owner | natural | — | — | served | set a project's mode, daily budget and caps |
 | `GET /api/targets` | owner | session · local_owner | natural | — | — | served · T4-11 | the compute targets a task may be dispatched to |
@@ -761,7 +761,7 @@ uniform `403`, never a `404` that would hide the route's existence.
 ### Agents — the registry
 
 ```
-GET  /api/agents                      200 {"agents":[…],"access_requests":[…]}
+GET  /api/agents                      200 {"agents":[{…, "scope":{…}, "permissions":[…]}],"access_requests":[…]}
 POST /api/agents                      {id, display_name, kind?, remote?}   201 {"id","token","pending","proposal_id"?}   409 — the id is taken
 PUT  /api/agents/:id/grants           {tier, areas?, queries?}   200 {"ok":true,"grants":{…}}
 PUT  /api/agents/:id/projects         {projects: [slug, …]}      200 {"ok":true,"projects":[…]}
@@ -769,7 +769,7 @@ PUT  /api/agents/:id/autonomy         {level?, actions?, may_dispatch_to?, accep
 POST /api/agents/:id/revoke           200 {"revoked":true,"access_requests"?:[…]}
 POST /api/agents/:id/rotate           200 {"id","token"}         — the new bearer, shown once
 POST /api/agents/:id/approve          200 {"approved":true,"proposals"?:[…]}
-GET  /api/agents/:id/definition       T4-6 — the definition an actor runs with, read-only
+GET  /api/agents/:id/definition       200 {"id","definition","compute","limits","as_of"}   — read-only
 400 — the field is named;  404 — no such agent, or it is revoked
 ```
 
@@ -778,9 +778,80 @@ crews. A token crosses the wire **once**, in the answer to
 the call that minted it. Registering and rotating mint a credential, which is a
 boundary change, so both are reach `local` (F-13): the local owner token from
 this Mac — the Mac app, `metistry connect` — and a passkey session is refused
-`403 local_only` ("The `local` gate" above). T4-6 adds permission rows to
-`GET /api/agents` and the read-only definition route; writing a definition is
-`metistry agents define` (M12).
+`403 local_only` ("The `local` gate" above).
+
+**`POST /api/agents` mints `external` rows only** (T4-6). `kind` may be
+omitted or `external`; anything else is `400 invalid_request`, refused before
+anything is minted or written — no row, no enrolment request, no audit row.
+The assistant's row is `ensureInternalAgent`'s, written from the user's own
+configuration (`METISTRY_ASSISTANT_TOKEN`) at every start; a crew's is its
+manifest's. A second `internal` row minted over HTTP would be a credential the
+door treats as the assistant — the one writer — that no configuration answers
+for (docs/ops/actors.md).
+
+#### `permissions` — the table every surface prints (T4-6)
+
+Every row of `GET /api/agents` carries `permissions`: the actor's
+**Resource × Read × Write** rows (core's `describePermissions`,
+`packages/core/src/access.ts`), in the shape of core's `PermissionRow`
+(`packages/core/src/actor.ts`):
+
+```json
+{ "resource": { "kind": "knowledge" }, "label": "Knowledge",
+  "read":  [ { "key": "Projects", "label": "Projects", "asks": false, "provenance": { "kind": "base", "source": "registry" } },
+             { "key": "Areas/Ops", "label": "Areas/Ops", "asks": false, "provenance": { "kind": "approved", "proposalId": 4 } } ],
+  "write": [] }
+```
+
+- Rows come Knowledge, Work, Artifacts, Inbox, Queries, Agents, then one per
+  connection (`resource.kind: "connection"`, `name`). A row with both cells
+  empty is left out; **`[]` holds nothing** — a revoked row, or a crew whose
+  manifest is gone. Anything not listed is not granted.
+- The table **renders `may()`**: a tool fills its cell only when the door
+  would admit it, so a line here is a door that says yes.
+- `asks` is ⏱: the owner answers first. `provenance` is `base` (no marker),
+  `approved` (*approved in Needs You · #n*) or `routine` (*during … only*).
+- A client prints `label` and never re-derives a cell. The CLI, the console's
+  panel and MetistryKit print the same words — core's `permissionRowText`,
+  an empty cell `—` — held together by a test on the recorded fixture.
+- The instance's assistant's lines are always configuration, never a grant
+  (C52): every base entry's source is `environment`.
+
+The mapping from each tool to its cell is `docs/ops/actors.md`'s table, encoded
+beside `RULED_TOOLS` as `TOOL_PERMISSION_CELLS`.
+
+#### `GET /api/agents/:id/definition` — what an actor runs with, read-only (T4-6)
+
+```
+GET /api/agents/researcher/definition
+200 {"id":"researcher",
+     "definition":{"kind":"crew","area":"example","description":"…","prompt":"…",
+                   "files":[{"path":"seed/agents/example/researcher.md","origin":"product","sha256":"…"}]},
+     "compute":{"kind":"same_as_assistant"},
+     "limits":{"maxTurns":10,"budgetUsdPerRun":0.25},
+     "as_of":"…"}
+```
+
+The actor's `definition`, `compute` and `limits` (core's `Actor`, plan §2.4) —
+a model and effort are part of a definition (C128), so they come with it.
+
+- **A crew**: its manifest — area, description, operating prompt — and the one
+  file, relative to the instance (`origin: instance`) or to the release
+  (`origin: product`, a shipped crew the instance has not copied). `compute` is
+  `{kind: "model", ref, effort}` or `{kind: "same_as_assistant"}`.
+- **The assistant** (`/api/agents/assistant/definition`, always answers):
+  `identity` (`name`, `mention`, `mark`) and the files that exist, in
+  composition order — `identity.yaml`, the root `CLAUDE.md`,
+  `assistant-prompt.md`. `compute` is `{kind: "router"}`.
+- **An external agent**: `definition`, `compute` and `limits` are `null` — it is
+  someone else's code.
+- `404` — no such agent, a revoked one, or a crew whose manifest is not loaded.
+
+Each file's `sha256` is what an edit is made against. **The write is not
+here**: a definition says how an actor behaves, so it is the owner's hand on a
+protected path — `metistry agents define <id> --if-sha256 <hex>` (M12,
+docs/ops/cli.md), which refuses a file that moved since it was read. Every
+other method on the path is `404`.
 
 #### Approve-before-enroll for remote agents (S2)
 
@@ -799,9 +870,9 @@ POST /api/agents/devin/approve   (user principal)
 404 — no such row, revoked, or never remote (nothing to approve)
 ```
 
-- `remote` is optional and defaults to `false`; it must be a boolean, and
-  `kind: internal` can never be remote (an internal agent's token comes
-  from the user's own environment, which *is* the approval, §4.11).
+- `remote` is optional and defaults to `false`; it must be a boolean. Only
+  `external` rows are minted here at all — an internal agent's token comes
+  from the user's own environment, which *is* the approval (§4.11).
 - The token **is** returned at mint, because the console shows a token
   exactly once. It simply authenticates nothing yet.
 - While pending, `/mcp` and `/capture` answer **the same uniform 401 an

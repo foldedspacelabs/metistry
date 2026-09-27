@@ -182,7 +182,7 @@ export const CLIENT_API: readonly ClientRoute[] = [
   planned("GET", "/api/needs-you/count", "T1-7", "how many requests wait: the sidebar row and the Dock badge"),
 
   // ----- agents -----
-  route("GET", "/api/agents", "the registry, each row's rendered scope, and the unanswered access requests", { ticket: "T4-6" }),
+  route("GET", "/api/agents", "the registry, each row's rendered scope and permission rows, and the unanswered access requests"),
   // minting a bearer is a boundary change: the owner on this Mac, never a passkey session (F-13)
   route("POST", "/api/agents", "register an agent and mint its bearer (shown once)", { reach: ["local"], conflict: [] }),
   route("PUT", "/api/agents/:id/grants", "replace an agent's knowledge grant", { idempotent: "natural" }),
@@ -191,7 +191,7 @@ export const CLIENT_API: readonly ClientRoute[] = [
   route("POST", "/api/agents/:id/revoke", "revoke an agent's bearer"),
   route("POST", "/api/agents/:id/rotate", "mint a new bearer for an agent (shown once)", { reach: ["local"] }),
   route("POST", "/api/agents/:id/approve", "let a pending remote enrolment in", { idempotent: "natural" }),
-  planned("GET", "/api/agents/:id/definition", "T4-6", "an agent's definition, read-only — the write is `metistry agents define`"),
+  route("GET", "/api/agents/:id/definition", "an agent's definition, compute and limits, read-only — the write is `metistry agents define`"),
 
   // ----- projects -----
   route("GET", "/api/projects", "every project with its mode, budget and rollup"),

@@ -20,7 +20,7 @@
 
 import { readFile } from "node:fs/promises";
 import { parse as parseYaml } from "yaml";
-import { CAPABILITIES, type Capability } from "@foldedspacelabs/metistry-core";
+import { CAPABILITIES, type AssistantIdentity, type Capability } from "@foldedspacelabs/metistry-core";
 
 export interface PublicIdentity {
   instance_id: string;
@@ -95,4 +95,20 @@ export async function loadPublicIdentity(paths: string): Promise<PublicIdentity 
     }
   }
   return found === null ? undefined : parsePublicIdentity(found);
+}
+
+/**
+ * The assistant's identity as its DEFINITION names it (core's
+ * `AssistantIdentity`, T4-6) — an owner read, so `mention` is here where the
+ * public identity above leaves it out. `mark` reads the `icon:` key until
+ * T2-16 decides the key's name (docs/ops/actors.md, open question 3).
+ * Undefined when the file names no assistant.
+ */
+export function parseAssistantIdentity(text: string): AssistantIdentity | undefined {
+  const raw = parseYaml(text) as unknown;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const r = raw as Record<string, unknown>;
+  const name = str(r, "name");
+  if (!name) return undefined;
+  return { name, mention: str(r, "mention") ?? null, mark: str(r, "icon") ?? null };
 }

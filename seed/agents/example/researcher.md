@@ -6,7 +6,7 @@
 # (`agentManifest`); walkthrough: docs/ops/crews.md.
 name: researcher
 type: agent
-model: haiku                  # haiku | sonnet | opus
+model: haiku                  # <provider>/<model-id> or same_as_assistant; haiku | sonnet | opus are read for one release (docs/ops/actors.md)
 # The other half of the tier pair: low | medium | high (default low). An
 # extraction crew — read a lot, report one page — wants haiku + low; the
 # assistant does the thinking. Raise it deliberately and watch the cost.

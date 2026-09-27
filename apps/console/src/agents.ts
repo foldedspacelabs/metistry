@@ -11,6 +11,7 @@
 import {
   ACTION_KINDS,
   AREA_PREFIX_REFUSAL,
+  ASSISTANT_AGENT_ID,
   ACTION_MODES,
   AUTONOMY_LEVELS,
   autonomyWidenings,
@@ -22,6 +23,7 @@ import {
   intEnv,
   mintToken,
   parseBearer,
+  scopeOfRegistryRow,
   startRun,
   tokenHash,
   validAgentAreaGrant,
@@ -36,9 +38,20 @@ import { ACCESS_REQUEST_KIND, underAreas } from "@foldedspacelabs/metistry-mcp-b
 import type { Db } from "./auth-store.js";
 
 export const AGENT_ID_RE = /^[a-z][a-z0-9-]{0,39}$/;
-/** The kinds `POST /api/agents` may NAME: a crew is not registered by hand — its row comes from a manifest in a protected path (crews.ts). */
-export const AGENT_KINDS = ["external", "internal"] as const;
+/**
+ * The ONE kind `POST /api/agents` may name (T4-6). A crew is not registered
+ * by hand — its row comes from a manifest in a protected path (crews.ts) —
+ * and neither is the assistant: its row is `ensureInternalAgent`'s, written
+ * from the user's own configuration (`METISTRY_ASSISTANT_TOKEN`) at every
+ * start. A second `internal` row minted over HTTP would be a credential the
+ * door treats as the assistant — the one writer, delegation, every project —
+ * that no configuration answers for (docs/ops/actors.md, open question 2).
+ */
+export const AGENT_KINDS = ["external"] as const;
 export type AgentKind = (typeof AGENT_KINDS)[number];
+/** Why `POST /api/agents` refuses any other kind — the field, and where each other kind's row comes from. */
+export const AGENT_KIND_REFUSAL =
+  "kind must be external — the instance's assistant is registered from its own configuration (METISTRY_ASSISTANT_TOKEN), and a crew from its manifest (.metistry/agents/<area>/<id>.md, `metistry agents define`); neither is minted here";
 /**
  * Every kind the column actually stores, and the exact list migration 0025's
  * CHECK constraint holds it to. `crew` has been written since Phase 5
@@ -88,8 +101,8 @@ export interface AgentPrincipal {
   autonomy?: { level?: AutonomyLevel | undefined; actions?: Partial<Record<ActionKind, ActionMode>> | undefined } | undefined;
 }
 
-/** The registry id of the instance's own assistant (CLAUDE.md naming: never the assistant's name). */
-export const INTERNAL_ASSISTANT_ID = "assistant";
+/** The registry id of the instance's own assistant (CLAUDE.md naming: never the assistant's name) — core's, so an actor and this registry name the same row. */
+export const INTERNAL_ASSISTANT_ID = ASSISTANT_AGENT_ID;
 
 /**
  * The bare vault grant: the whole vault, root notes included (`now.md`).
@@ -172,13 +185,8 @@ export function principalOfRow(row: AgentRow, toolset?: (id: string) => { uses: 
   return {
     id: row.id,
     role: row.kind === "internal" ? "assistant" : crew ? "crew" : "agent",
-    scope: {
-      tier: row.grants.tier,
-      areas: [...row.grants.areas],
-      queries: row.grants.queries === true,
-      projects: row.kind === "internal" && row.projects.length === 0 ? null : [...row.projects],
-      autonomy: row.autonomy,
-    },
+    // core's derivation — the one an actor's permissions are drawn from too (docs/ops/actors.md)
+    scope: scopeOfRegistryRow(row),
     source: source === "manifest" ? { manifest: declared?.manifest ?? `${INSTANCE_LAYOUT.agentsDir}/<area>/${row.id}.md` } : source,
     ...(crew ? { uses: [...(declared?.uses ?? [])] } : {}),
   };
@@ -223,7 +231,7 @@ const MAX_AREAS = 64;  // limit: fixed — a grant list this long is a mistake, 
 
 export interface GrantsOptions {
   /** The row's kind. `internal` admits the bare vault (`/`); anything else (the default) refuses it. */
-  kind?: AgentKind | undefined;
+  kind?: StoredAgentKind | undefined;
 }
 
 /** Validate + normalize a grants payload. Throws AgentError on any miss. */
@@ -475,8 +483,9 @@ export async function listAgents(db: Db, toolset?: (id: string) => { uses: reado
  * from off this machine. The token is minted either way — there is nothing
  * to hand over later, because the console shows a token once — but a
  * remote row starts PENDING and authenticates nothing until the owner
- * approves it. An `internal` row can never be remote: its token comes from
- * the user's own environment, which IS the approval (§4.11).
+ * approves it. Only an `external` row is minted here (T4-6): the assistant's
+ * token comes from the user's own environment, which IS the approval (§4.11),
+ * and a crew's from its manifest.
  */
 export async function createAgent(
   db: Db,
@@ -486,15 +495,16 @@ export async function createAgent(
   if (!AGENT_ID_RE.test(id)) throw new AgentError("invalid_request", "id must be a slug ^[a-z][a-z0-9-]{0,39}$");
   const displayName = typeof input.display_name === "string" ? input.display_name.trim().slice(0, 120) : "";
   if (!displayName) throw new AgentError("invalid_request", "display_name required");
+  // Refused BEFORE anything is minted or written: no row, no token, no
+  // enrolment request, no audit row claiming a mint that did not happen.
   const kind = input.kind === undefined ? "external" : input.kind;
-  if (!AGENT_KINDS.includes(kind as (typeof AGENT_KINDS)[number])) throw new AgentError("invalid_request", "kind must be external | internal");
+  if (!AGENT_KINDS.includes(kind as AgentKind)) throw new AgentError("invalid_request", AGENT_KIND_REFUSAL);
   if (input.remote !== undefined && typeof input.remote !== "boolean") throw new AgentError("invalid_request", "remote must be a boolean");
   const remote = input.remote === true;
-  if (remote && kind !== "external") throw new AgentError("invalid_request", "remote applies to kind external only");
   const token = mintToken(32);
   try {
-    await db.query(`INSERT INTO agents (id, display_name, kind, token_hash, remote, approved_at, grant_source) VALUES ($1, $2, $3, $4, $5, $6, $7)`, [
-      id, displayName, kind, tokenHash(token), remote, remote ? null : new Date().toISOString(), kind === "internal" ? "environment" : "registry",
+    await db.query(`INSERT INTO agents (id, display_name, kind, token_hash, remote, approved_at, grant_source) VALUES ($1, $2, 'external', $3, $4, $5, 'registry')`, [
+      id, displayName, tokenHash(token), remote, remote ? null : new Date().toISOString(),
     ]);
   } catch (err) {
     if ((err as { code?: string }).code === "23505") throw new AgentError("conflict", "agent id already registered");

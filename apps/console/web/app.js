@@ -1044,6 +1044,35 @@ function actionTableHtml(scope) {
     ${rows.map((r) => `<span class="action-row ${esc(r.source ?? "")}" role="listitem"><span class="mono">${esc(r.kind)}</span> ${esc(r.text)}</span>`).join("")}
   </span>`;
 }
+// **The permissions table is the SERVER's** (T4-6): every agent row on
+// `GET /api/agents` carries `permissions` — Resource × Read × Write, drawn by
+// core's `describePermissions`, which asks the same `may()` the doors ask.
+// This panel prints each cell in the words core's `permissionRowText` gives
+// the CLI (`metistry agents list`) and MetistryKit gives the Mac app — a test
+// holds the three to one table (apps/console/test/pwa-reads.test.ts). An
+// empty cell is the dash: absence is the denial.
+const PERMISSION_EMPTY_CELL = "—";
+function permissionEntryText(e) {
+  const p = e?.provenance ?? {};
+  const why = p.kind === "approved" ? (p.proposalId === null || p.proposalId === undefined ? "approved in Needs You" : `approved in Needs You · #${p.proposalId}`) : p.kind === "routine" ? `during ${p.routine} only` : null;
+  return `${e?.label ?? ""}${e?.asks ? " ⏱" : ""}${why === null ? "" : ` (${why})`}`;
+}
+function permissionCellText(entries) {
+  return Array.isArray(entries) && entries.length > 0 ? entries.map(permissionEntryText).join(", ") : PERMISSION_EMPTY_CELL;
+}
+function permissionRowText(row) {
+  const label = row?.resource?.kind === "connection" ? `${row.label} ⧉` : String(row?.label ?? "");
+  return [label, permissionCellText(row?.read), permissionCellText(row?.write)];
+}
+function permissionsTableHtml(rows) {
+  if (!Array.isArray(rows)) return `<span class="muted">permissions: unavailable</span>`;
+  if (rows.length === 0) return `<span class="muted">holds nothing — anything not listed is not granted</span>`;
+  const body = rows.map((r) => {
+    const [label, read, write] = permissionRowText(r);
+    return `<tr><th scope="row">${esc(label)}</th><td>${esc(read)}</td><td>${esc(write)}</td></tr>`;
+  }).join("");
+  return `<table class="permissions" aria-label="permissions"><thead><tr><td></td><th scope="col">Read</th><th scope="col">Write</th></tr></thead><tbody>${body}</tbody></table>`;
+}
 // **The scope vocabulary is the SERVER's** since P3 of
 // docs/research/2026-09-19-grants-and-access-simplified.md §3.4: every agent
 // row on `GET /api/agents` carries a rendered `scope` (core's
@@ -1099,7 +1128,7 @@ async function loadAgents() {
         : `<span><button data-agent-grants="${esc(a.id)}" class="secondary">grants</button> <button data-agent-rotate="${esc(a.id)}" class="secondary">rotate</button> <button data-agent-revoke="${esc(a.id)}">revoke</button></span>`;
       return `<li class="${a.revoked ? "revoked" : ""}"><span><b>${esc(a.display_name)}</b> <span class="muted">${esc(a.id)}</span> <span class="chip">${esc(ROLE_LABEL[a.kind] ?? a.kind)}</span><br>
         <span class="muted">access: ${scope}${projects} · ${seen}</span>${narrowing ? `<br><span class="muted">autonomy: ${narrowing}</span>` : ""}${from}
-        ${actionTable}${asks ? `<span class="muted">${asks}</span><br>` : ""}
+        ${a.revoked ? "" : permissionsTableHtml(a.permissions)}${actionTable}${asks ? `<span class="muted">${asks}</span><br>` : ""}
         <span id="presence-${esc(a.id)}" class="presence"></span></span>${actions}</li>`;
     })
     .join("");

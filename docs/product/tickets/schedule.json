@@ -499,7 +499,7 @@
         "F-6"
       ],
       "file": "docs/product/tickets/t1/t1-10.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T1-11": {
       "title": "The session archive table",
@@ -541,7 +541,7 @@
         "F-6"
       ],
       "file": "docs/product/tickets/t1/t1-13.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T1-14": {
       "title": "Areas",
@@ -603,7 +603,7 @@
         "F-5"
       ],
       "file": "docs/product/tickets/t2/t2-3.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T2-4": {
       "title": "The Tick door",
@@ -659,7 +659,7 @@
         "T2-11"
       ],
       "file": "docs/product/tickets/t2/t2-7.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T2-8": {
       "title": "Close the Day",
@@ -674,7 +674,7 @@
         "T2-6"
       ],
       "file": "docs/product/tickets/t2/t2-8.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T2-9": {
       "title": "Events become requests",
@@ -689,7 +689,7 @@
         "F-5"
       ],
       "file": "docs/product/tickets/t2/t2-9.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T2-10": {
       "title": "Resolve a conflict",
@@ -703,7 +703,7 @@
         "T2-9"
       ],
       "file": "docs/product/tickets/t2/t2-10.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T2-11": {
       "title": "Calendar fields and the meeting note",
@@ -717,7 +717,7 @@
         "T1-10"
       ],
       "file": "docs/product/tickets/t2/t2-11.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T2-12": {
       "title": "Move a meeting",
@@ -760,7 +760,7 @@
         "T1-8"
       ],
       "file": "docs/product/tickets/t2/t2-14.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T2-15": {
       "title": "C45, tested per door",
@@ -859,7 +859,7 @@
         "F-13"
       ],
       "file": "docs/product/tickets/t3/t3-3.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T3-4": {
       "title": "Profile facts and the standup move",
@@ -888,7 +888,7 @@
         "T3-1"
       ],
       "file": "docs/product/tickets/t3/t3-5.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T3-6": {
       "title": "The Morning Brief",
@@ -903,7 +903,7 @@
         "T3-5"
       ],
       "file": "docs/product/tickets/t3/t3-6.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T3-7": {
       "title": "Tomorrow's Plan after the fold",
@@ -917,7 +917,7 @@
         "T3-1"
       ],
       "file": "docs/product/tickets/t3/t3-7.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T3-8": {
       "title": "Agent routines",
@@ -988,7 +988,7 @@
         "T2-9"
       ],
       "file": "docs/product/tickets/t3/t3-12.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T4-1": {
       "title": "Per-instance secrets",
@@ -1087,7 +1087,7 @@
         "T1-13"
       ],
       "file": "docs/product/tickets/t4/t4-7.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T4-8a": {
       "title": "Connections P1: registry and client",
@@ -1103,7 +1103,7 @@
         "T4-5"
       ],
       "file": "docs/product/tickets/t4/t4-8a.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T4-8b": {
       "title": "Connections P1: the lazy pair",
@@ -1117,7 +1117,7 @@
         "T4-8a"
       ],
       "file": "docs/product/tickets/t4/t4-8b.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T4-9": {
       "title": "Connections P2: Ask",
@@ -1247,7 +1247,7 @@
         "T4-1"
       ],
       "file": "docs/product/tickets/t4/t4-18.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T4-19": {
       "title": "Spending limits data",
@@ -1330,7 +1330,7 @@
         "T1-8"
       ],
       "file": "docs/product/tickets/t4/t4-24.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T4-25": {
       "title": "Linear: a task becomes an issue",
@@ -1418,7 +1418,7 @@
         "T5-3"
       ],
       "file": "docs/product/tickets/t5/t5-4a.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T5-4b": {
       "title": "Needs You: the bodies",
@@ -1432,7 +1432,7 @@
         "T5-3"
       ],
       "file": "docs/product/tickets/t5/t5-4b.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T5-5": {
       "title": "The capture composer",
@@ -1446,7 +1446,7 @@
         "T5-1"
       ],
       "file": "docs/product/tickets/t5/t5-5.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T5-6": {
       "title": "The Usage popover",
@@ -1461,7 +1461,7 @@
         "T1-15"
       ],
       "file": "docs/product/tickets/t5/t5-6.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T5-7": {
       "title": "Live events on the Mac",
@@ -1476,7 +1476,7 @@
         "T2-18"
       ],
       "file": "docs/product/tickets/t5/t5-7.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T6-1a": {
       "title": "Today: the spine",
@@ -1491,7 +1491,7 @@
         "T2-7"
       ],
       "file": "docs/product/tickets/t6/t6-1a.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T6-1b": {
       "title": "Today: brief, Next Up, close",
@@ -1507,7 +1507,7 @@
         "T3-6"
       ],
       "file": "docs/product/tickets/t6/t6-1b.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T6-2": {
       "title": "Chat",
@@ -1522,7 +1522,7 @@
         "T2-17"
       ],
       "file": "docs/product/tickets/t6/t6-2.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T6-3": {
       "title": "Activity",
@@ -1537,7 +1537,7 @@
         "T1-3"
       ],
       "file": "docs/product/tickets/t6/t6-3.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T6-4": {
       "title": "Knowledge",
@@ -1782,7 +1782,7 @@
         "T7-2"
       ],
       "file": "docs/product/tickets/t7/t7-3a.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T7-3b": {
       "title": "Work, Knowledge, More",
@@ -1796,7 +1796,7 @@
         "T7-2"
       ],
       "file": "docs/product/tickets/t7/t7-3b.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T7-4": {
       "title": "Offline",
@@ -1851,7 +1851,7 @@
         "T7-2"
       ],
       "file": "docs/product/tickets/t7/t7-7.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T8-1": {
       "title": "The TCC enum",
@@ -1992,7 +1992,7 @@
         "T9-1"
       ],
       "file": "docs/product/tickets/t9/t9-2.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T9-3": {
       "title": "The confirmatory eval",
@@ -2075,7 +2075,7 @@
         "T10-1"
       ],
       "file": "docs/product/tickets/t10/t10-4.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T10-5": {
       "title": "Restore a file",
@@ -2090,7 +2090,7 @@
         "T1-8"
       ],
       "file": "docs/product/tickets/t10/t10-5.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T10-6": {
       "title": "Roll back",
@@ -2105,7 +2105,7 @@
         "T10-4"
       ],
       "file": "docs/product/tickets/t10/t10-6.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T10-7": {
       "title": "History in the app",

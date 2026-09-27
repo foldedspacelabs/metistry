@@ -118,7 +118,7 @@ fold   schedule  ok         0
 | `ok` | ran inside 2× its interval, last run succeeded, no open streak |
 | `degraded` | an open failure streak below the limit |
 | `failed` | the runner has stopped running it (`skipped_streak`), or a `preflight_failed` window is current, or it has not run in more than 2× its interval |
-| `absent` | no run recorded yet (a fresh install is not broken), no db configured, or the runner could not place its schedule — `no_working_days`, `no_timezone`, `unknown_timezone` — and said why on its own row |
+| `absent` | no run recorded yet (a fresh install is not broken), no db configured, or the runner could not place its schedule — `no_working_days`, `no_timezone`, `unknown_timezone` — and said why on its own row. A `no_working_days` skip is rechecked against `Me/profile.md` as it is now: once the profile has `working_days`, the row is `ok` and says it *was skipped … until the next run at <time>* |
 
 **A time-of-day schedule** (`{days, at}`, §2.5) has no interval: doctor
 bounds it by the widest gap between two slots of its week (`every day at

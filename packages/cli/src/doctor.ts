@@ -36,6 +36,10 @@ import {
   isInterval,
   isLegacyCron,
   longestGapSeconds,
+  configuredTimeZone,
+  nextOccurrence,
+  profileFacts,
+  resolveDays,
   servicePlan,
   SHAPED_SERVICES,
   usesCompose,
@@ -58,6 +62,9 @@ import {
   type DeploymentShape,
   type ChildStatus,
   type Manifest,
+  type ManifestSchedule,
+  type Occurrence,
+  type ProfileFacts,
   type SupervisorConfig,
 } from "@foldedspacelabs/metistry-core";
 import { COMPUTE_FILENAME, INSTANCE_LAYOUT, LEGACY_VAULT_DIR, PROFILE_PATH, REGISTRY_KINDS, describeVaultSync, detectLayout, pushOverrideNote, readStandupKeys, emptyCompute, extensionsDirFor, instanceFile, loadCompute, loadKind, resolveInstanceLayout, vaultStatusSchema, type Compute, type RegistryKindName, type VaultStatus } from "@foldedspacelabs/metistry-core";
@@ -729,6 +736,35 @@ interface LastRun {
   refused: { reason: string; why: string } | null;
 }
 
+/** `2026-09-16 07:00 America/New_York` — the wall clock the schedule is read in, or UTC for an `{every}` one. */
+export function occurrenceWhen(o: { at: Date; timeZone: string | null }): string {
+  const tz = o.timeZone ?? "UTC";
+  return `${o.at.toLocaleString("sv-SE", { timeZone: tz }).slice(0, 16)} ${tz}`;
+}
+
+/**
+ * Does the refusal the runner recorded on a component's last run still hold?
+ * The row is history the moment `Me/profile.md` answers it: a `no_working_days`
+ * skip, once the profile has `working_days`, is not "not scheduled" any more —
+ * it was skipped, and it runs at its next slot. Asked with the same pure
+ * functions the runner places a schedule with (core's `resolveDays`,
+ * `nextOccurrence`), on the profile as it is NOW. `holds` for any other
+ * refusal, and for a schedule that is not a time of day: this only rechecks
+ * the one fact it can read.
+ */
+export function recheckRefusal(
+  refused: { reason: string },
+  schedule: ManifestSchedule,
+  facts: ProfileFacts,
+  env: NodeJS.ProcessEnv,
+  now: Date,
+): { holds: true } | { holds: false; next: Occurrence } {
+  if (refused.reason !== "no_working_days" || isLegacyCron(schedule) || isInterval(schedule)) return { holds: true };
+  const days = resolveDays(schedule.days, facts.working_days);
+  if (days === null || days.length === 0) return { holds: true };
+  return { holds: false, next: nextOccurrence(schedule, now, { profile: facts, fallbackTimeZone: configuredTimeZone(env) }) };
+}
+
 /**
  * One row per schedulable manifest: when it last ran, whether that run
  * succeeded, its open failure streak, when it is next due, and whether the
@@ -750,6 +786,7 @@ export async function scheduleRows(
       {
         dir: m.dir,
         name: man.name,
+        manifestSchedule: man.schedule,
         schedule: describeSchedule(man.schedule),
         // a time of day is due at a slot, not an interval after the last run:
         // its bound below is the widest gap of its week, and when it is next
@@ -818,6 +855,11 @@ export async function scheduleRows(
     ];
   }
 
+  // the profile as it is NOW — a refusal recorded before it gained
+  // working_days is history, not the current state (recheckRefusal)
+  const instanceDir = env.METISTRY_INSTANCE_DIR?.replace(/\/+$/, "") || productDir;
+  const facts = profileFacts(await readFile(join(instanceDir, PROFILE_PATH), "utf8").catch(() => null));
+
   const out: DoctorRow[] = [];
   for (const s of scheduled) {
     const intervalSec = s.bound;
@@ -882,8 +924,19 @@ export async function scheduleRows(
         if (lastRun.refused) {
           // §2.5's absent state: the runner could not place the schedule
           // (no working days, no timezone) and said so on its own row — a
-          // fact about Me/profile.md or METISTRY_TZ, never a fault to fix here
-          return { status: "absent" as const, remediation: `not scheduled: ${lastRun.refused.why}`, meta };
+          // fact about Me/profile.md or METISTRY_TZ, never a fault to fix here.
+          // Unless the fact has changed since: then the row is history.
+          const again = recheckRefusal(lastRun.refused, s.manifestSchedule, facts, env, now);
+          if (again.holds) return { status: "absent" as const, remediation: `not scheduled: ${lastRun.refused.why}`, meta };
+          if (!again.next.ok) return { status: "absent" as const, remediation: `not scheduled: ${again.next.why}`, meta: { ...meta, schedule_refused_now: again.next.reason } };
+          return {
+            meta: {
+              ...meta,
+              next_due_at: again.next.at.toISOString(),
+              schedule_refused_now: null,
+              info: `was skipped at ${lastRun.ts.toISOString().slice(0, 16)}Z (${lastRun.refused.reason}) — ${PROFILE_PATH} has working_days now, so it is scheduled again: nothing to do until the next run at ${occurrenceWhen(again.next)}`,
+            },
+          };
         }
         if (intervalSec > 0 && now.getTime() - lastRun.ts.getTime() > intervalSec * OVERDUE_FACTOR * 1000) {
           action = viewConsoleLogs;

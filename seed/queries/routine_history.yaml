@@ -1,21 +1,30 @@
 # Seeded default (D4 overlay: an instance file of the same name wins).
 #
-# One routine's runs, newest first (§2.10; T3-3's Scheduled screen reads it as
-# `GET /api/scheduled/routines/:name`). Every row the runner or a routine
-# itself wrote as `kind = 'routine_run'` for that component name — the
-# runner's own per-tick row (every tick, skips included, `apps/console/src/
-# runner.ts`) alongside a routine's own detailed row where it writes one
-# (`plan-tomorrow`, `knowledge-fold`: "a settled date is never nothing").
+# One scheduled component's runs, newest first (§2.10; the Scheduled doors,
+# T3-3, read it for `GET /api/scheduled`'s last run and for
+# `GET /api/scheduled/{routines,syncs}/:name`'s history). Every row the runner
+# or the component itself wrote as its OWN kind — `routine_run` for a routine,
+# `collector_run` for a sync or a collector that presents as a routine (Inbox
+# Sort, Usage Rollup) — for that component name: the runner's generic row per
+# run (`apps/console/src/runner.ts`), a refused schedule's once-a-day row, and
+# a routine's own detailed row where it writes one (`plan-tomorrow`,
+# `knowledge-fold`: "a settled date is never nothing"). The runner's own
+# bookkeeping (`kind = 'runner'`: held, blocked, a streak) is not the
+# component's history and is not here. Names are unique across the two kinds
+# (one entry per component, §2.5), so the name alone picks the rows.
 #
 # `outcome` is `meta.outcome` (T1-4's shared vocabulary — acted | silent |
 # skipped:<reason> — every routine and the runner write it the same way, so
-# this reads it exactly as `activity_feed` does, never a second mapping).
+# this reads it exactly as `activity_feed` does, never a second mapping). A
+# collector's row carries none: NULL.
 #
-# `steps` is `meta.processed` — the generic count the runner's own tick
-# already carries (`runner.ts`: `{ processed: n, outcome: n > 0 ? "acted" :
-# "silent" }`). A routine's own detailed row (plan-tomorrow, knowledge-fold)
-# carries no `processed` and reports `steps: NULL` — an honest "not counted",
-# never a false zero.
+# `steps` is `meta.processed` — the generic count the runner's own row
+# already carries (`{ processed: n, … }`). A routine's own detailed row
+# (plan-tomorrow, knowledge-fold) carries no `processed` and reports
+# `steps: NULL` — an honest "not counted", never a false zero.
+#
+# `trigger` is `meta.trigger`: `run_now` for a run the owner asked for from
+# Scheduled (T3-3), NULL for one the schedule started.
 #
 # `expose: route`. A routine's history is the owner's Scheduled screen; there
 # is no reason for the generic `/api/q/routine_history` or an agent's
@@ -23,7 +32,7 @@
 name: routine_history
 expose: route
 description: >-
-  One routine's runs, newest first: when it ran, what it decided
+  One routine's or sync's runs, newest first: when it ran, what it decided
   (meta.outcome — acted | silent | skipped:<reason>, T1-4), whether it
   failed and why, what it cost, and how many steps it took (meta.processed —
   the count the runner's own tick already writes; a routine's own detailed
@@ -42,9 +51,10 @@ sql: |
     r.error,
     r.cost_usd,
     r.meta ->> 'outcome'            AS outcome,
-    (r.meta ->> 'processed')::int   AS steps
+    (r.meta ->> 'processed')::int   AS steps,
+    r.meta ->> 'trigger'            AS trigger
   FROM runs r
-  WHERE r.kind = 'routine_run' AND r.component = (:component)::text
+  WHERE r.kind IN ('routine_run', 'collector_run') AND r.component = (:component)::text
   ORDER BY r.ts DESC
   LIMIT (:limit)::int
 cache_ttl: 0

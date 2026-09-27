@@ -558,6 +558,22 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
     expect((await store.run("routine_history", { component: `${tag}-missing` })).rows).toHaveLength(0);
   });
 
+  // T3-3: a sync's history is its `collector_run` rows (and Inbox Sort's and
+  // Usage Rollup's, which present as routines); the runner's own bookkeeping
+  // (`kind = 'runner'`) is not; a Run Now is marked by `meta.trigger`.
+  it("routine_history: a sync's collector_run rows too, never the runner's bookkeeping, and Run Now marked by trigger", async () => {
+    const tag = `rh-sync-${Date.now()}`;
+    await pool.query(
+      `INSERT INTO runs (component, kind, tool, ok, ts, meta) VALUES
+         ($1, 'collector_run', NULL,            true,  now() - interval '1 hours', '{"processed":2}'::jsonb),
+         ($1, 'collector_run', NULL,            true,  now(),                      '{"processed":0,"trigger":"run_now"}'::jsonb),
+         ($1, 'runner',        'schedule_held', false, now(),                      '{}'::jsonb)`,
+      [tag],
+    );
+    const rows = (await store.run("routine_history", { component: tag, limit: 50 })).rows;
+    expect(rows.map((r) => [r.trigger, Number(r.steps), r.outcome])).toEqual([["run_now", 0, null], [null, 2, null]]);
+  });
+
   // T1-15: Usage's *Where it went* — the same $0/unpriced accounting `spend`
   // uses (invariant 3), grouped by actor instead of by day/provider/model.
   it("spend_by_actor: totals per actor over the window, unpriced calls counted but priced at $0, excluded when there is no cost at all", async () => {

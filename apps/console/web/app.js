@@ -749,19 +749,24 @@ $("push-test").onclick = async () => {
 const requestWord = (p) => p.request?.word ?? "";
 /** A group heading: the table's word in Title Case (P10). */
 const requestHeading = (word) => word.replace(/\b\w/g, (ch) => ch.toUpperCase());
-// Approve / Revise / Decline are the three answers to every request. The wire
-// (and `proposals.decision`) keeps allow / accept_with_changes / deny.
+// A row's answers are its TYPE's, as the server serves them in `request`
+// (F-5's table; T2-3): the primary verb, Revise and Decline, each with the
+// word the owner reads and the decision it stores — Approve / Revise /
+// Decline for most, Send Answers on a question, Dismiss on a report, Approve
+// meaning Approve as Work where the row suggests work (§1.4). The server
+// refuses anything else, so this view draws exactly what it may send. An
+// answer that goes through another system's door (a pull request's review,
+// an invitation's RSVP, a report's own act) is drawn once that door is
+// served — never as a button that cannot send (C138).
 //
 // Later is the one per-row verb that is NOT an answer to the request
 // (docs/ops/reply-feedback.md): it gives the row an `until` and leaves it
 // pending, and it is valid for every kind. Skip — decline with nothing to
 // say — is bulk-only (§2.12, K2): it lives on the selection bar (`s`), never
 // on a row, so no single request is ever brushed off one tap from Approve.
-const DECISIONS = [
-  { d: "allow", label: "Approve" },
-  { d: "accept_with_changes", label: "Revise" },
-  { d: "deny", label: "Decline", style: ' style="background:#7a3b3b"' },
-];
+// (A report's Dismiss and a message's Not Mine store the same `skip` — as
+// that type's Decline, which is the table's to say, not this view's.)
+const DECLINE_STYLE = ' style="background:#7a3b3b"';
 const DEFER = [{ d: "later", label: "Later" }];
 const attr = (s) => esc(s).replaceAll('"', "&quot;");
 
@@ -835,12 +840,13 @@ async function loadTriage() {
     // Revise is the answer that carries a reason: without one the assistant
     // has nothing to change, so an empty note cancels rather than sends.
     //
-    // On an `access_request` the thing to revise is the AREA — Revise is how
-    // you grant a narrower prefix than the one asked for — so it asks for
-    // that instead, pre-filled with the ask. The server validates it with the
-    // grants validator's own rule and refuses anything else.
+    // Where the table says Revise carries an AREA (an access request) the
+    // thing to revise is the grant — Revise is how you grant a narrower
+    // prefix than the one asked for — so it asks for that instead, pre-filled
+    // with the ask. The server validates it with the grants validator's own
+    // rule and refuses anything else.
     if (b.dataset.d === "accept_with_changes") {
-      const row = b.dataset.kind === "access_request" ? proposalById(b.dataset.triage) : null;
+      const row = b.dataset.carries === "area" ? proposalById(b.dataset.triage) : null;
       if (row) {
         const area = (prompt("grant which folder instead?", row.payload?.area ?? "") ?? "").trim();
         if (!area) return;
@@ -853,6 +859,20 @@ async function loadTriage() {
     }
     await decide(b.dataset.triage, body);
     loadTriage();
+  }));
+  // Send Answers: one answer per question, sent together — an option, or the
+  // owner's own words where the question ends in Something else… (C105).
+  document.querySelectorAll("[data-answers]").forEach((b) => (b.onclick = async () => {
+    const p = proposalById(b.dataset.answers);
+    const got = p ? collectAnswers(p, (sel) => document.querySelectorAll(sel)) : { missing: 0 };
+    if (got.missing !== undefined) return alert(`answer question ${got.missing + 1} first`);
+    await decide(b.dataset.answers, { decision: b.dataset.d, answers: got.answers });
+    loadTriage();
+  }));
+  // typing your own answer chooses Something else… for that question
+  document.querySelectorAll("[data-other-text]").forEach((t) => (t.oninput = () => {
+    const box = [...document.querySelectorAll("input[data-other]")].find((x) => x.name === t.dataset.otherText);
+    if (box) box.checked = t.value.trim() !== "";
   }));
   document.querySelectorAll("[data-pick]").forEach((c) => (c.onchange = () => {
     if (c.checked) picked.add(c.dataset.pick);
@@ -933,26 +953,69 @@ function accessDetail(p) {
     `${p.payload?.reason ? `<br><span class="muted">why: ${esc(String(p.payload.reason).slice(0, ARG_PREVIEW_CHARS))}</span>` : ""}${done}`;
 }
 
+/**
+ * A question's body (the `choices` block, screen 3 §12.3): each question the
+ * server served in `request.questions`, pick one as radios and pick any as
+ * checkboxes, ending in Something else… where it allows the owner's own
+ * words. Every prompt and option is agent-authored text: output-encoded.
+ */
+function questionDetail(p) {
+  const qs = p.request?.questions;
+  if (!Array.isArray(qs) || qs.length === 0) return "";
+  const context = p.payload?.context?.prose ? `<br><span class="muted">why: ${esc(String(p.payload.context.prose).slice(0, ARG_PREVIEW_CHARS))}</span>` : "";
+  return context + qs.map((q, n) => {
+    const name = `q-${p.id}-${n}`;
+    const type = q.multi ? "checkbox" : "radio";
+    const options = (q.options ?? []).map((o) => `<label><input type="${type}" name="${attr(name)}" value="${attr(o)}"> ${esc(o)}</label>`).join(" ");
+    const other = q.allow_other
+      ? ` <label><input type="${type}" name="${attr(name)}" value="" data-other> Something else…</label> <input type="text" data-other-text="${attr(name)}" maxlength="1000" aria-label="${attr(`your own answer: ${q.prompt}`)}">`
+      : "";
+    return `<br><span role="${q.multi ? "group" : "radiogroup"}" aria-label="${attr(q.prompt)}"><b>${esc(q.prompt)}</b>${q.multi ? ' <span class="muted">(any)</span>' : ""} ${options}${other}</span>`;
+  }).join("");
+}
+
+/**
+ * The answers a question row's inputs hold: one per question, in order —
+ * `{choices, other?}`, or `{missing: n}` for the first question with none.
+ * `find` is `document.querySelectorAll`, passed in so the rule is testable.
+ */
+function collectAnswers(p, find) {
+  const answers = [];
+  for (const [n, q] of (p.request?.questions ?? []).entries()) {
+    const boxes = [...find(`[name="q-${Number(p.id)}-${n}"]`)];
+    const choices = boxes.filter((b) => b.checked && !b.hasAttribute("data-other")).map((b) => b.value);
+    const otherOn = q.allow_other && boxes.some((b) => b.checked && b.hasAttribute("data-other"));
+    const text = otherOn ? ([...find(`[data-other-text="q-${Number(p.id)}-${n}"]`)][0]?.value ?? "").trim() : "";
+    if ((otherOn && text === "") || (choices.length === 0 && !otherOn)) return { missing: n };
+    answers.push(otherOn ? { choices, other: text } : { choices });
+  }
+  return { answers };
+}
+
+/** The row's answers, as its type's table row says — each one that stores a decision on this row; see DECLINE_STYLE's comment. */
+function requestAnswers(p) {
+  const r = p.request ?? {};
+  const work = p.payload?.suggested_work;
+  return [["primary", r.primary], ["revise", r.revise], ["decline", r.decline]]
+    .filter(([, a]) => a?.label && a.sends?.decision)
+    .map(([slot, a]) => {
+      const d = a.sends.decision;
+      if (d === "answers") return `<button data-answers="${p.id}" data-d="${attr(d)}">${esc(a.label)}</button>`;
+      // Approve as Work: the click is what creates the `work` row (§4.12 intact — a human clicked)
+      const title = d === "accept_as_work" && work?.title ? ` title="${attr(`creates the task “${work.title}”, unassigned`)}"` : "";
+      const carries = a.carries ? ` data-carries="${attr(a.carries)}"` : "";
+      return `<button data-triage="${p.id}" data-d="${attr(d)}"${carries}${slot === "decline" && d === "deny" ? DECLINE_STYLE : ""}${title}>${esc(a.label)}</button>`;
+    })
+    .join(" ");
+}
+
 function proposalRow(p) {
   const c = p.payload?.classification ?? {};
   // review proposals (§4.21) carry a top-level title; with none, the table's word — never the stored kind
   const label = c.action || c.title || p.payload?.title || requestWord(p);
-  // a `decision` proposal is answered with its OWN options (the server checks them again)
-  const opts = p.kind === "decision" && Array.isArray(p.payload?.options) ? p.payload.options.slice(0, 8) : null;
-  // Approve as work: only where the row CARRIES a suggestion the drain or a
-  // crew put there deterministically. The click is what creates the `work`
-  // row (§4.12 intact — a human clicked); the server validates the payload
-  // again and refuses the verb on a row that has none.
-  const work = p.payload?.suggested_work;
-  const answers = opts
-    ? opts.map((o) => `<button data-triage="${p.id}" data-d="${attr(o)}">${esc(o)}</button>`).join(" ")
-    : DECISIONS.map((x) => `<button data-triage="${p.id}" data-d="${x.d}" data-kind="${attr(p.kind)}"${x.style ?? ""}>${x.label}</button>`).join(" ");
-  const asWork = work?.title
-    ? ` <button data-triage="${p.id}" data-d="accept_as_work" title="${attr(`creates the task “${work.title}”, unassigned`)}">Approve as Work</button>`
-    : "";
   const defer = DEFER.map((x) => `<button data-triage="${p.id}" data-d="${x.d}" class="quiet">${x.label}</button>`).join(" ");
-  return `<li><span><input type="checkbox" data-pick="${p.id}" aria-label="${attr(`select ${label}`)}"> ${esc(label)} <span class="muted">${esc(requestWord(p))} · ${esc(c.kind ?? "")} · ${esc(p.source_agent)} · ${new Date(p.ts).toLocaleDateString()}</span>${actionDetail(p)}${accessDetail(p)}</span>
-        <span>${answers}${asWork} ${defer}</span></li>`;
+  return `<li><span><input type="checkbox" data-pick="${p.id}" aria-label="${attr(`select ${label}`)}"> ${esc(label)} <span class="muted">${esc(requestWord(p))} · ${esc(c.kind ?? "")} · ${esc(p.source_agent)} · ${new Date(p.ts).toLocaleDateString()}</span>${actionDetail(p)}${accessDetail(p)}${questionDetail(p)}</span>
+        <span>${requestAnswers(p)} ${defer}</span></li>`;
 }
 
 $("triage-later").onclick = () => batchDecide("later");

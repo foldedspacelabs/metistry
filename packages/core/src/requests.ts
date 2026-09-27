@@ -31,6 +31,8 @@
 //     pick the thread over the diff, and cannot give an access request some
 //     other type's answers.
 
+import { questionsOf, type Question } from "./decision-block.js";
+
 /** The twelve types the owner reads, in §2.12's order. Closed: a new type is a product change that picks a body from `REQUEST_BODIES` (plan §2.7). */
 export const REQUEST_TYPES = [
   "question",
@@ -55,8 +57,10 @@ export type RequestBody = (typeof REQUEST_BODIES)[number];
 /**
  * What an answer stores on the request row itself — `proposals.decision`,
  * through `POST /api/proposals/:id` (docs/ops/reply-feedback.md). `answers`
- * is a question's: one answer per question, an option or `other` + text
- * (T2-3). `skip` is stored as `deny` + `SKIP_FEEDBACK` and fires none of
+ * is a question's: one answer per question, its options and/or `other` + text
+ * (T2-3, `checkAnswers`), stored as `answered` — what a question answered in
+ * chat has always stored — with the record in `payload.answers` and its words
+ * in `feedback`. `skip` is stored as `deny` + `SKIP_FEEDBACK` and fires none of
  * `deny`'s consequences. `later` is absent on purpose: it is not an answer
  * (it sets `snoozed_until`) and every type takes it.
  */
@@ -285,21 +289,32 @@ export interface RequestShape {
   readonly grouped: boolean;
   /** The decisions this row's answers store — what `POST /api/proposals/:id` may record for it, `later` aside. Doors are not listed: they are not decisions on the row. */
   readonly decisions: readonly RequestDecision[];
+  /**
+   * A question's questions (type `question` only): `payload.questions`, or a
+   * row from before v2 read as its one pick-one question (`questionsOf`,
+   * decision-block.ts). What Send Answers answers, one entry per question —
+   * served here so no client keeps its own reading of the two shapes. A
+   * question row that holds none has no Send Answers: `primary` is null and
+   * `answers` is not among its decisions.
+   */
+  readonly questions?: readonly Question[];
 }
 
 /**
  * Everything a client needs to draw one row and offer its answers. Approve
  * sends `accept_as_work` where the payload suggests work (§1.4), and `allow`
  * stays valid beside it — §2.12's answer set makes both Approve's wire. A
- * kind this table does not know is a report with no act: Dismiss is its only
- * answer.
+ * question carries its questions, read from the payload. A kind this table
+ * does not know is a report with no act: Dismiss is its only answer.
  */
 export function describeRequest(kind: string, payload?: unknown): RequestShape {
   const type = requestTypeOf(kind);
   const spec = REQUEST_TYPE_TABLE[type];
   const at: RequestBodyAnswers = bodyAnswersOf(kind, payload) ?? { body: UNKNOWN_KIND_BODY, primary: null, revise: null, decline: spec.bodies[0].decline };
+  const questions = type === "question" ? questionsOf(payload) : null;
   const asWork = suggestsWork(payload) && sendsDecision(at.primary, "allow");
-  const primary: RequestAnswer | null = asWork && at.primary !== null ? { ...at.primary, sends: { decision: "accept_as_work" } } : at.primary;
+  const primary: RequestAnswer | null =
+    questions !== null && questions.length === 0 ? null : asWork && at.primary !== null ? { ...at.primary, sends: { decision: "accept_as_work" } } : at.primary;
   const decisions = new Set<RequestDecision>(asWork ? ["allow"] : []);
   for (const a of [primary, at.revise, at.decline]) if (a !== null && "decision" in a.sends) decisions.add(a.sends.decision);
   return {
@@ -311,6 +326,7 @@ export function describeRequest(kind: string, payload?: unknown): RequestShape {
     decline: at.decline,
     grouped: spec.grouped === true,
     decisions: REQUEST_DECISIONS.filter((d) => decisions.has(d)),
+    ...(questions !== null ? { questions } : {}),
   };
 }
 

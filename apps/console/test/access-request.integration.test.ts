@@ -200,7 +200,7 @@ describe.skipIf(!hasDb)("access requests, agent to owner and back (integration)"
     expect(names).toContain("request_access");
     expect(names.filter((n) => /approve|grant|decide|triage|proposal/.test(n))).toEqual([]);
 
-    await owner("POST", `/api/proposals/${id}`, { decision: "skip" }); // put it down; Skip grants nothing either
+    await owner("POST", "/api/proposals/batch", { ids: [id], decision: "skip" }); // put it down (bulk-only, K2); Skip grants nothing either
     expect(await grantsOf(agentId)).toEqual(before);
   });
 

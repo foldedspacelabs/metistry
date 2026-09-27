@@ -18,7 +18,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
-import { API_VERSION, API_VERSION_HEADER, AREA_PREFIX_REFUSAL, runCheck, startRun, finishRun, errorEnvelope, intEnv, may, parseAction, noRouteMessage, PROJECT_SLUG_RE, rollSession, statusFor, servedRoute, isLocalRoute, localOnlyMessage, routeKey, resolveActor, SKIP_FEEDBACK, describeRequest, validAgentAreaGrant, type RequestShape, type CheckResult, type Compute, type ErrorCode, type ErrorEnvelope, type Principal } from "@foldedspacelabs/metistry-core";
+import { API_VERSION, API_VERSION_HEADER, AREA_PREFIX_REFUSAL, runCheck, startRun, finishRun, errorEnvelope, intEnv, may, parseAction, noRouteMessage, PROJECT_SLUG_RE, rollSession, statusFor, servedRoute, isLocalRoute, localOnlyMessage, routeKey, resolveActor, SKIP_FEEDBACK, answersText, checkAnswers, describeRequest, validAgentAreaGrant, type QuestionAnswer, type RequestShape, type CheckResult, type Compute, type ErrorCode, type ErrorEnvelope, type Principal } from "@foldedspacelabs/metistry-core";
 import { QueryError, QueryStore } from "@foldedspacelabs/metistry-queries";
 import { captureToInbox, createBrainServer, dirSink, type CaptureSink, type KnowledgeLister, type KnowledgeReader, type KnowledgeVaultSearcher, type KnowledgeWriter, type QueryEmbedder } from "@foldedspacelabs/metistry-mcp-brain";
 import { TasksError, TasksService } from "@foldedspacelabs/metistry-tasks";
@@ -313,7 +313,13 @@ const SESSION_DETAIL_QUERY = "session_detail";
 // stores a `deny` whose feedback is exactly SKIP_FEEDBACK, which is how the
 // paths that route a reason back to the source agent know to leave it alone,
 // and it fires NONE of `deny`'s per-kind consequences.
-const UNIVERSAL_DECISIONS = ["later", "skip"] as const;
+//
+// Neither is on F-5's table as an answer to every type, and since T2-3 the
+// table is the whole list (`describeRequest(kind, payload).decisions`, plan
+// §2.12): `later` rides beside every row's answers, and `skip` is Skip, which
+// is BULK-ONLY (K2) — every row the batch reaches takes it, and a single row
+// takes it only where the table makes it that type's Decline (a report's
+// Dismiss, a message's Not Mine).
 /** What `POST /api/proposals/batch` will apply to many rows at once — see the refusal message there for why `allow` is not on it. */
 const BATCH_DECISIONS = ["later", "skip", "deny"];
 /** How long `later` puts something down for. Config, not a literal: "back in three hours" is an opinion about a working day. */
@@ -340,6 +346,8 @@ const PROPOSAL_FOR_DECISION_SQL = `
 
 /** What one answer to one proposal comes back as: a status and the body to send, so the batch caller gets an outcome rather than a socket. */
 type DecisionOutcome = { status: number; body: ErrorEnvelope | Record<string, unknown> };
+/** `POST /api/proposals/:id`'s body (docs/ops/client-api.md): a decision, and what that decision carries. `answers` rides only with `decision: "answers"` (T2-3). */
+type DecisionBody = { decision?: unknown; feedback?: string; area?: unknown; answers?: unknown; if_unchanged?: { seen_at?: unknown } };
 
 /** `seen_at`: the row's own `ts` as this server serialised it, or the list `cursor` it was rendered from. Anything else is a 400, never a silent decision. */
 const SEEN_AT_RE = new RegExp(`^(${CURSOR_TS})(?:\\|\\d{1,12})?$`);
@@ -1319,7 +1327,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       if (body.feedback !== undefined && typeof body.feedback !== "string") return sendError(res, "invalid_request", "feedback must be a string");
       const results: Record<string, unknown>[] = [];
       for (const id of ids as number[]) {
-        const r = await decideProposal(String(id), { decision: body.decision, ...(typeof body.feedback === "string" ? { feedback: body.feedback } : {}) });
+        const r = await decideProposal(String(id), { decision: body.decision, ...(typeof body.feedback === "string" ? { feedback: body.feedback } : {}) }, { bulk: true });
         results.push({ id, ok: r.status === 200, ...(r.body as Record<string, unknown>) });
       }
       await audit("triage", `batch:${body.decision}`, results.every((r) => r.ok === true), { proposals: ids, applied: results.filter((r) => r.ok === true).length, of: ids.length });
@@ -1328,7 +1336,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
 
     const triage = /^POST \/api\/proposals\/(\d+)$/.exec(key);
     if (triage) {
-      const body = (await readJson(req)) as { decision?: string; feedback?: string; area?: unknown; if_unchanged?: { seen_at?: unknown } };
+      const body = (await readJson(req)) as DecisionBody;
       const r = await decideProposal(triage[1]!, body);
       return sendJson(res, r.status, r.body);
     }
@@ -1633,10 +1641,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
    * Returns a status and a body rather than writing the response, because
    * the batch caller needs the outcome, not a socket.
    */
-  async function decideProposal(
-    id: string,
-    body: { decision?: string; feedback?: string; area?: unknown; if_unchanged?: { seen_at?: unknown } },
-  ): Promise<DecisionOutcome> {
+  async function decideProposal(id: string, body: DecisionBody, opts: { bulk?: boolean } = {}): Promise<DecisionOutcome> {
     const row = (await db.query(PROPOSAL_FOR_DECISION_SQL, [id])).rows[0];
     if (!row) return { status: 404, body: errorEnvelope("not_found", "not found") };
     // Already decided — from another device, or this one before it went
@@ -1665,22 +1670,57 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       }
     }
 
-    // A `decision` proposal (the assistant asked a blocking question) is
-    // answered with one of ITS OWN options; everything else takes the three
-    // triage verbs. `later` and `skip` are valid for every kind, and
-    // `accept_as_work` appears only where the row carries a suggestion.
-    // Either way the option set comes from the stored row, never from the
-    // request body.
+    // What this row may record is F-5's table, read for this kind and THIS
+    // stored payload (`describeRequest(...).decisions`, plan §2.12; T2-3) —
+    // never a list built here, and never the request's. A report is Dismissed
+    // (`skip`) or acted on at its own door, so it cannot be approved; `later`
+    // is not an answer and every row takes it; Skip is bulk-only (K2, above).
+    const shape = describeRequest(String(row.kind), row.payload);
+    const verbs = new Set<string>([...shape.decisions, "later", ...(opts.bulk === true ? ["skip"] : [])]);
+    const verb = typeof body.decision === "string" ? body.decision : "";
+    const questions = shape.questions ?? [];
+
+    // A question's answer (T2-3, C105): one entry per question, each one of
+    // that question's OWN options or — where it allows it — the owner's words
+    // as `other`, checked against the questions as STORED (core's
+    // `checkAnswers`). Nothing in an answer is ever executed. The v1 wire, the
+    // option itself as `decision`, is still one answer to a row that asks
+    // exactly one pick-one question: every client sent that before v2, and
+    // removing it would be API version 2 (client-api.md).
+    let answered: QuestionAnswer[] | undefined;
+    if (body.answers !== undefined && verb !== "answers") {
+      return { status: 400, body: errorEnvelope("invalid_request", "answers ride only with decision: answers") };
+    }
+    const v1Option = shape.type === "question" && !verbs.has(verb) && questions.length === 1 && !questions[0]!.multi && questions[0]!.options.includes(verb);
+    if ((verb === "answers" && verbs.has(verb)) || v1Option) {
+      if (body.feedback !== undefined) {
+        return { status: 400, body: errorEnvelope("invalid_request", "an answer in your own words goes in its question's `other`; feedback belongs to Revise and Decline") };
+      }
+      const checked = v1Option ? checkAnswers(questions, [{ choices: [verb] }]) : checkAnswers(questions, body.answers);
+      if (!checked.ok) return { status: 400, body: errorEnvelope("invalid_request", checked.error) };
+      answered = checked.answers;
+    } else if (!verbs.has(verb)) {
+      const takes = `${[...verbs].join(" | ")}${shape.type === "question" && questions.length === 1 && !questions[0]!.multi ? ", or one of its options" : ""}`;
+      const why = verb === "skip" ? `Skip is bulk-only (K2) — POST /api/proposals/batch. ` : "";
+      return { status: 400, body: errorEnvelope("invalid_request", `${why}this ${shape.word} takes ${takes}`) };
+    }
+    // Approve as Work builds a row only from a suggestion this server
+    // validates itself — never merely because the payload has the key.
     const suggested = suggestedWorkOf(row);
-    const options: string[] = [
-      ...(row.kind === "decision" && Array.isArray(row.payload?.options)
-        ? [...(row.payload.options as unknown[]).filter((o): o is string => typeof o === "string"), "deny"]
-        : ["allow", "deny", "accept_with_changes"]),
-      ...UNIVERSAL_DECISIONS,
-      ...(suggested ? ["accept_as_work"] : []),
-    ];
-    const verb = body.decision ?? "";
-    if (!options.includes(verb)) return { status: 400, body: errorEnvelope("invalid_request", "invalid request") };
+    if (verb === "accept_as_work" && suggested === undefined) {
+      return { status: 400, body: errorEnvelope("invalid_request", "this request carries no suggested_work this console would build a task from — Approve it instead") };
+    }
+    // An enrolment is a question the CONSOLE asked (agents.ts), and its one
+    // consequence is its option `approve` letting the agent in — or Decline,
+    // or its option `deny`, revoking it. Never free text: its question takes
+    // only its own options, and `other` on any question is words, not a verb.
+    // Revise has nothing to change on it, so it is refused, as it always was.
+    const enrollAgent = row.kind === "decision" ? agents.enrollTarget(row.payload) : undefined;
+    if (enrollAgent !== undefined && verb === "accept_with_changes") {
+      return { status: 400, body: errorEnvelope("invalid_request", "an enrolment is answered approve or deny — Revise has nothing to change on it") };
+    }
+    const only = answered?.length === 1 && answered[0]!.other === undefined && answered[0]!.choices.length === 1 ? answered[0]!.choices[0] : undefined;
+    const enrolment: "approve" | "deny" | undefined = enrollAgent === undefined ? undefined : verb === "deny" ? "deny" : only === "approve" || only === "deny" ? only : undefined;
 
     // `later` is not an answer: the row keeps `decision = 'pending'` and gets
     // an `until`. It leaves the queue, it comes back on its own, and nothing
@@ -1806,9 +1846,8 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     // permanent verb the registry already has. `skip` does not: that is
     // the whole difference between putting something down and answering it.
     let enrolled: { agent: string; approved: boolean } | undefined;
-    const enrollAgent = row.kind === "decision" ? agents.enrollTarget(row.payload) : undefined;
-    if (enrollAgent !== undefined && (verb === "approve" || verb === "deny")) {
-      const approved = verb === "approve";
+    if (enrollAgent !== undefined && enrolment !== undefined) {
+      const approved = enrolment === "approve";
       const ok = approved ? await agents.approveAgent(db, enrollAgent) : await agents.revokeAgent(db, enrollAgent);
       await audit("agent_admin", approved ? "approve" : "revoke", ok, { agent: enrollAgent, op: approved ? "approve" : "revoke", via: "triage", proposal: row.id });
       // An approval that let nobody in (the agent was revoked, or is gone,
@@ -1934,17 +1973,28 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     // SKIP_FEEDBACK is what keeps it out of the paths that route feedback
     // back to the source agent), `accept_as_work` stores an `allow` and the
     // work id it just created.
-    const storedDecision = verb === "skip" ? "deny" : verb === "accept_as_work" ? "allow" : verb;
-    const storedFeedback = verb === "skip" ? SKIP_FEEDBACK : (body.feedback ?? null);
+    //
+    // A question's answers store `answered` — what answering it in chat has
+    // always stored — with the per-question record in `payload.answers` and
+    // its words in `feedback`, written in the same statement that settles the
+    // row so an answer is never recorded on a question someone else settled.
+    // An enrolment keeps storing its own `approve | deny`, which is what the
+    // registry pane's settling writes too (`settleEnrollment`) — and no words:
+    // its option is a verb there, and `deny` + feedback is what the weekly
+    // review reads as a reason the owner gave.
+    const storedDecision = verb === "skip" ? "deny" : verb === "accept_as_work" ? "allow" : (enrolment ?? (answered ? "answered" : verb));
+    const storedFeedback = verb === "skip" ? SKIP_FEEDBACK : answered && enrolment === undefined ? answersText(questions, answered) : (body.feedback ?? null);
     const { rows } = await db.query(
       `UPDATE proposals SET decision = $2, feedback = $3, decided_at = now(), snoozed_until = NULL,
-              work_id = coalesce($4::bigint, work_id)
+              work_id = coalesce($4::bigint, work_id),
+              payload = CASE WHEN $5::jsonb IS NULL THEN payload ELSE payload || jsonb_build_object('answers', $5::jsonb) END
        WHERE id = $1 AND decision = 'pending' RETURNING id`,
-      [id, storedDecision, storedFeedback, created ? created.id : null],
+      [id, storedDecision, storedFeedback, created ? created.id : null, answered ? JSON.stringify(answered) : null],
     );
-    await audit("triage", verb, rows.length === 1, {
+    await audit("triage", answered ? "answers" : verb, rows.length === 1, {
       proposal: row.id,
       kind: row.kind,
+      ...(answered ? { questions: answered.length, ...(verb !== "answers" ? { v1_option: true } : {}) } : {}),
       ...(applied ? (meEdit !== null ? { wrote: applied.path } : { overlay: applied.path }) : {}),
       ...(created ? { work_id: created.id } : {}),
       ...(acted ? { action: acted.kind } : {}),

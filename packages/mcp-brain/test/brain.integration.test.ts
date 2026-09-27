@@ -426,6 +426,74 @@ cache_ttl: 0
     await bob.close();
   });
 
+  it("requests_create: `decided` and `decision` are one report kind, stored as `decided` (C104)", async () => {
+    const alice = await connect("tok-alice");
+    const said = await call(alice, "requests_create", { title: "Chose keyword search", body: "the embedder is down", kind: "decided" });
+    const legacy = await call(alice, "requests_create", { title: "Chose the stdio transport", body: "one child per session", kind: "decision" });
+    for (const r of [said, legacy]) {
+      expect(r.isError).toBe(false);
+      const row = (await pool.query(`SELECT kind, payload FROM proposals WHERE id = $1`, [r.body.id])).rows[0];
+      expect(row.kind).toBe("report"); // a report that says a decision was made — never a question
+      expect(row.payload.kind).toBe("decided");
+    }
+    await alice.close();
+  });
+
+  it("requests_create kind question: one `decision` row asking every question, context beside it; no new tool (T2-3)", async () => {
+    const alice = await connect("tok-alice");
+    const questions = [
+      { prompt: "Which repo should the fix land in?", options: ["metistry", "metistry-instance"] },
+      { prompt: "Which labels apply?", options: ["bug", "docs", "ui"], multi: true },
+      { prompt: "Ship it tonight?", options: ["yes", "not yet"], allow_other: false },
+    ];
+    const asked = await call(alice, "requests_create", { title: "Three things before I file the fix", body: "The fold drops drafts; I have a patch.", kind: "question", questions, refs: ["gh:x/y#7"], idempotency_key: "ask-1" });
+    expect(asked.isError).toBe(false);
+    expect(asked.body.deduplicated).toBe(false);
+    const row = (await pool.query(`SELECT kind, source_agent, trust, decision, payload FROM proposals WHERE id = $1`, [asked.body.id])).rows[0];
+    expect(row).toMatchObject({ kind: "decision", source_agent: ALICE, trust: "external", decision: "pending" });
+    expect(row.payload).toMatchObject({
+      title: "Three things before I file the fix",
+      questions: [
+        { prompt: "Which repo should the fix land in?", options: ["metistry", "metistry-instance"], multi: false, allow_other: true },
+        { prompt: "Which labels apply?", options: ["bug", "docs", "ui"], multi: true, allow_other: true },
+        { prompt: "Ship it tonight?", options: ["yes", "not yet"], multi: false, allow_other: false },
+      ],
+      context: { prose: "The fold drops drafts; I have a patch.", refs: ["gh:x/y#7"] },
+      idempotency_key: "ask-1",
+      provenance: { agent: ALICE, via: "mcp-brain" },
+    });
+    expect(row.payload).not.toHaveProperty("options"); // three questions: nothing a v1 client could answer with one option
+    expect(row.payload).not.toHaveProperty("body"); // the context is not a body block (F-5 reads `body.kind`)
+    // the same key, or the same title within 24h, is the same question
+    expect(await call(alice, "requests_create", { title: "reworded", body: "retry", kind: "question", questions, idempotency_key: "ask-1" })).toMatchObject({ body: { id: asked.body.id, deduplicated: "idempotency_key" } });
+    expect(await call(alice, "requests_create", { title: "Three things before I file the fix", body: "again", kind: "question", questions })).toMatchObject({ body: { id: asked.body.id, deduplicated: "title" } });
+    // one pick-one question also carries v1's options, for a client that predates v2
+    const single = await call(alice, "requests_create", { title: "Which repo?", body: "one thing", kind: "question", questions: [questions[0]] });
+    expect((await pool.query(`SELECT payload FROM proposals WHERE id = $1`, [single.body.id])).rows[0].payload.options).toEqual(["metistry", "metistry-instance"]);
+    await alice.close();
+  });
+
+  it("requests_create kind question refuses a question set outside the block's bounds — whole, with the reason, writing nothing", async () => {
+    const alice = await connect("tok-alice");
+    const before = (await pool.query(`SELECT count(*)::int AS n FROM proposals WHERE source_agent = $1`, [ALICE])).rows[0].n;
+    const refused: [Record<string, unknown>, RegExp][] = [
+      [{ kind: "question" }, /kind question needs questions/],
+      [{ kind: "question", questions: [] }, /1\.\.5/],
+      [{ kind: "question", questions: [{ prompt: "q", options: ["only"] }] }, /question 1: 2\.\.8 options/],
+      [{ kind: "question", questions: Array.from({ length: 6 }, (_, i) => ({ prompt: `q${i}`, options: ["a", "b"] })) }, /1\.\.5/],
+      [{ kind: "question", questions: [{ prompt: "q", options: ["a", "a"] }] }, /two options are the same/],
+      [{ kind: "finding", questions: [{ prompt: "q", options: ["a", "b"] }] }, /questions ride only with kind question/],
+    ];
+    for (const [extra, reason] of refused) {
+      const r = await call(alice, "requests_create", { title: `refused ${JSON.stringify(extra).length}`, body: "x", ...extra });
+      expect(r.isError, JSON.stringify(extra)).toBe(true);
+      expect(r.body.error.code, JSON.stringify(extra)).toBe("invalid_request");
+      expect(r.body.error.message, JSON.stringify(extra)).toMatch(reason);
+    }
+    expect((await pool.query(`SELECT count(*)::int AS n FROM proposals WHERE source_agent = $1`, [ALICE])).rows[0].n).toBe(before);
+    await alice.close();
+  });
+
   it("capture: an inbox row exactly like POST /capture, source_agent from the credential", async () => {
     const alice = await connect("tok-alice");
     const r = await call(alice, "capture", { note: "# finding\nfrom mcp", filename: "../../evil.md" });

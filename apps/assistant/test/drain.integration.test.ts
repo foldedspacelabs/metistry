@@ -130,6 +130,8 @@ describe.skipIf(!hasDb)("assistant drain", () => {
     expect(rows[0]).toMatchObject({ kind: "decision", source_agent: "assistant", trust: "internal", decision: "pending" });
     expect(rows[0].payload).toMatchObject({
       title: "Which repo?",
+      // v2's record, and — for one pick-one question — v1's options beside it for a client that predates v2
+      questions: [{ prompt: "Which repo?", options: ["metistry", "metistry-instance"], multi: false, allow_other: true }],
       options: ["metistry", "metistry-instance"],
       message_id: Number(out.rows[0].id),
       in_reply_to: Number(id),
@@ -140,6 +142,25 @@ describe.skipIf(!hasDb)("assistant drain", () => {
     expect(await drainOne(pool, fakeEngine, tiers)).toBe(true);
     const after = await pool.query(`SELECT count(*)::int AS n FROM proposals WHERE payload->>'thread' = $1`, [thread]);
     expect(after.rows[0].n).toBe(1);
+    await pool.query(`DELETE FROM proposals WHERE payload->>'thread' = $1`, [thread]);
+  });
+
+  it("a v2 block asks several questions in one request — and carries no v1 options, which could answer only one", async () => {
+    const asking: Engine = async () => ({
+      text: "two things first.\n\n```decision\ntitle: Two things first\nquestion: Which repo?\n- metistry\n- metistry-instance\nquestion: Which labels?\npick: any\nother: no\n- bug\n- docs\n```",
+      session_id: sdkSession,
+    });
+    await enqueue("file it");
+    expect(await drainOne(pool, asking, tiers)).toBe(true);
+    const { rows } = await pool.query(`SELECT kind, payload FROM proposals WHERE payload->>'thread' = $1`, [thread]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].kind).toBe("decision");
+    expect(rows[0].payload.title).toBe("Two things first");
+    expect(rows[0].payload.questions).toEqual([
+      { prompt: "Which repo?", options: ["metistry", "metistry-instance"], multi: false, allow_other: true },
+      { prompt: "Which labels?", options: ["bug", "docs"], multi: true, allow_other: false },
+    ]);
+    expect(rows[0].payload).not.toHaveProperty("options");
     await pool.query(`DELETE FROM proposals WHERE payload->>'thread' = $1`, [thread]);
   });
 

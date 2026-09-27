@@ -132,9 +132,11 @@ describe.skipIf(!hasDb)("C45 — a failed answer leaves the request pending, wit
     return row.payload.error as Record<string, unknown>;
   }
 
-  /** ...and it is still the owner's to settle: Skip is valid on every kind. */
+  /** ...and it is still the owner's to settle: Skip is valid on every kind — in the bulk list, where Skip lives (K2). */
   async function stillAnswerable(id: number): Promise<void> {
-    expect((await answer(id, { decision: "skip" })).status).toBe(200);
+    const r = await owner("POST", "/api/proposals/batch", { ids: [id], decision: "skip" });
+    expect(r.status).toBe(200);
+    expect((await r.json()).results).toEqual([expect.objectContaining({ id, ok: true })]);
     expect((await rowOf(id)).decision).toBe("deny");
   }
 

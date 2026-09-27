@@ -12,7 +12,7 @@ exposes:
   - name: capture
     description: Drop a note or file into the inbox as a proposal (source_agent stamped from the credential)
   - name: requests_create
-    description: Raise a request of type `report` (finding/decision/gotcha/progress) for the user's Needs You queue — idempotent on idempotency_key, same-title-within-24h suppressed
+    description: Raise a request for the user's Needs You queue — a `report` (finding/decided/gotcha/progress; `decision` is accepted as `decided`) or, with kind `question`, 1–5 questions the user answers (a `decision` row) — idempotent on idempotency_key, same-title-within-24h suppressed
   - name: request_access
     description: Ask the owner to widen this credential's read grant by one vault area — one `access_request` request in Needs You, deduplicated per (agent, area) while it is pending; grants nothing itself, and the owner's Approve goes through the console's existing grants door
   - name: tasks_list

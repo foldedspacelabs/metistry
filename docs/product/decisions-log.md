@@ -100,38 +100,54 @@ The first five were recorded in W1 (*Rulings made by the owner in W1* above) and
 | TZ | The zone fallback is **`METISTRY_TZ` only, never `TZ`**. | T3-1 (#303). |
 | F-13 | `local_only` is answered to passkey sessions only; `api_version` stays 1. | F-13 (#283). |
 
-## Open for the owner at the W2 checkpoint
+## Ruled at the W2 checkpoint (2026-09-27)
 
-Found while W2 was built. Nothing here is decided; what is built meanwhile is what merged.
+The owner ruled on the list that was open at the W2 checkpoint. Numbers are the
+owner's; two were left to the coordinator and are marked **coordinator's call**.
+Plan edits carry *(ruled 2026-09-27)*; a follow-up with no ticket became an
+X-track ticket in W3 (`design-build-plan.md` §3.3).
 
-- T10-4 (#343): `GET /vault/log` serves `.metistry/` subjects to either bearer — should an agent bearer see them?
-- T4-18 (#352): compute calls bypass T4-2's egress guard, and a provider key has no grantee.
-- T2-3 (#347): a report cannot be approved, and an agent cannot read the answer to its question.
-- T3-5/T3-6 (#342, #368): §2.13's assistant-turn prose fill is unbuildable as written — the routine writes its own file (plan fixed in W2 housekeeping to the marked-slot form; confirm).
-- T5-2 (#296): the Knowledge sidebar row has no children — confirm or ask the designer.
-- `init --keep-awake --shape`: the flags' contract is unwritten.
-- T10-5 (#362): restore reaches the owner, but §2.3 draws "—" for the phone.
-- T2-10 (#371): C136's "the discarded side is committed first" — confirm the order.
-- T3-3/T4-8 (#364, #353, #374): who adds a sync's first `connection`?
-- T3-8: drops `grants.write` from `routineAssignmentSchema` — confirm before it builds.
-- T4-24 (#373): Linear issues are not on the Board; there is no route for Add to Today; a secret's last-used is not stamped for syncs.
-- T4-8b (#374): P1 is Reads/Allow only; the console's `validateGrants` drops `grants.connections`; `activity_feed` should surface `connection_call`.
-- T4-8b (#374): the brain is not wired to a connection pool on a live console.
-- T3-12 (#367): `apps/assistant` `budgets.ts` raises a budget refusal as a `decision`; C96 says `report`.
-- T2-7 (#378): Today's preset definition and the `day_work` flags were the agent's call.
-- T2-7/T6-1a (#378, #379): the `where:` grammar cannot express Slipping or Owed.
-- T6-3 (#356): screen-02 §8's keys are not in the closed menu table.
-- T6-3 (#356): a routine's subject shows its raw component id.
-- T3-7 (#357): Run Now after the 23:00 plan stays silent.
-- T2-8 (#363): must pass `closedDay` — **done**.
-- T3-6 (#368): `{{ calendar }}` renders event titles unsanitised.
-- T5-7 (#355): a snoozed request coming due emits no event.
-- T6-2 (#370): `GET /api/messages` lacks `turn_id`, so older replies draw no tool strip.
-- T5-5 (#354): the offline capture queue is in memory only.
-- T5-4b (#351): reads a request's questions from `payload`, not `request.questions`.
-- T4-12: `collectors/eventkit-calendar` as its precedent.
-- T2-11 (#366): per-attendee status is stored but not served.
-- T5-6 (#360): Settings ▸ Compute is still titled "Budgets".
+| # | Item | Ruling | Where it lands |
+| --- | --- | --- | --- |
+| 1 | T10-4 (#343): `GET /vault/log` serves `.metistry/` subjects to either bearer | Narrowed to the owner, like `/vault/show`. | X-6 |
+| 2 | T4-18 (#352): compute calls bypass T4-2's egress guard; a provider key has no grantee | `secrets.yaml` gains a provider-key grantee, and compute calls go through T4-2's egress guard. | X-7 |
+| 3 | T3-3/T4-8 (#364, #353, #374): who adds a sync's first `connection:` | **Coordinator's call** (the owner is indifferent): the connection setup flow (`metistry connections add`, T4-9/T4-10) writes it into `scheduled.yaml`; the Scheduled door keeps refusing to set it. | §2.5 and T4-10 (plan) |
+| 4 | T3-8: drops `grants.write` from `routineAssignmentSchema` | Confirmed: T3-8 removes `grants.write` from `routineAssignmentSchema` and from `scheduled.md`'s example. | T3-8 (plan) |
+| 5 | T4-8b (#374): the console's `validateGrants` drops `grants.connections` | An agent's connection grant persists in the agent's grants: `validateGrants` and `coerceGrants` keep `connections`. | X-8 |
+| 6 | T4-8b (#374): P1 is Reads/Allow only | Accepted until T4-9. | T4-8b (plan) |
+| 7 | T10-5 (#362): restore reaches the owner, but §2.3 draws "—" for the phone | §2.3 wins: restore is not reachable from the phone — the restore door's reach becomes `local`. | §2.1 (plan), X-9 |
+| 8 | T2-3 (#347): a report cannot be approved; an agent cannot read the answer to its question | Reports get an acknowledge answer, which knowledge-fold reads; an agent can read back the answer to its question. | X-10 |
+| 9 | T3-5/T3-6 (#342, #368): §2.13's prose fill | The marked-slot form stays, and the assistant may create files in `Journal/Brief/`, `Journal/Standup/` and `Journal/Plan/` again — T3-6's create refusal is relaxed; the routine still writes its own file. | §2.13, T3-6 (plan), X-11 |
+| 10 | T2-10 (#371): C136's "the discarded side is committed first" | Confirmed. | built (T2-10, #371) |
+| 11 | T4-24 (#373): Linear issues are not on the Board; no route for Add to Today | Linear issues in work and Needs You, not the Board — accepted. A route for Add to Today is a follow-up. | X-12 |
+| 12 | T3-12 (#367): `budgets.ts` raises a budget refusal as a `decision` | `apps/assistant` `budgets.ts` raises it as a `report` (C96). | X-13 |
+| 13 | T2-7 (#378): Today's preset and the `day_work` flags were the agent's call | Accepted: open lines due or do ≤ D, plus lines ticked on D, someday dropped; the `day_work` flags as built. | T2-7 (plan) |
+| 14 | T2-7/T6-1a (#378, #379): the `where:` grammar cannot express Slipping or Owed | Extend the grammar — a carry count, a "names a person" facet, negation — so Slipping and Owed are real views. | X-14 |
+| 15 | T3-7 (#357): Run Now after the 23:00 plan stays silent | Run Now after 23:00 re-renders the plan. | X-15 |
+| 16 | T3-6 (#368): `{{ calendar }}` renders event titles unsanitised | Core's `{{ calendar }}` sanitises event titles. | X-16 |
+| 17 | T5-7 (#355): a snoozed request coming due emits no event | The console emits `needs_you.changed` when a snooze expires. | X-17 |
+| 18 | T6-2 (#370): `GET /api/messages` lacks `turn_id` | `GET /api/messages` gains `turn_id` (additive). | X-18 |
+| 19 | T5-5 (#354): the offline capture queue is in memory only | The Mac's offline capture queue is persisted; a store beyond the preferences allowlist is approved. | X-19 |
+| 20 | T2-11 (#366): per-attendee status is stored but not served | **Coordinator's call:** it stays stored, not served, until a screen needs it. | no ticket |
+| 21 | T4-12: `collectors/eventkit-calendar` as its precedent | Confirmed. | T4-12 (plan) |
+| 22 | T5-2 (#296): the Knowledge sidebar row has no children | The row stays flat for now. | T5-2 (plan) |
+| 23 | `init --keep-awake --shape`: the flags' contract is unwritten | Define `init --shape` (default `launchd` on macOS); `--keep-awake` follows the chosen shape. | X-20 |
+| 24 | T6-3 (#356): screen-02 §8's keys are not in the closed menu table | §8's keys are dropped from the spec for now, to be re-evaluated later. | T6-3 (plan) |
+| 25 | T6-3 (#356): a routine's subject shows its raw component id | `activity_feed` carries a routine's display name. | X-21 |
+| 26 | T5-4b (#351): reads a request's questions from `payload` | The Mac reads `request.questions`, not `payload`. | X-22 |
+| 27 | T5-6 (#360): Settings ▸ Compute is still titled "Budgets" | Retitled to spending limits. | T6-12 (plan) |
+| 28 | T4-8b (#374): `activity_feed` should surface `connection_call` | `activity_feed` and `turn_progress` surface `connection_call` rows. | X-23 |
+
+T2-8 (#363)'s `closedDay` was already done. **Not ruled, still open:** a
+secret's last-used is not stamped for syncs (T4-24, #373), and the brain is not
+wired to a connection pool on a live console (T4-8b, #374).
+
+### Later — designed after the UX build, not built now
+
+Split **Needs You** from a new **Inbox** menu item: Needs You keeps only the
+agent, permission and Metistry items; everything else (GitHub pull request
+reviews, calendar invites, …) moves to Inbox, with Needs You as a sidebar on
+Inbox. To be designed after the UX build completes; no ticket (plan §5).
 
 ## Rulings the owner must make
 

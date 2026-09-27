@@ -119,29 +119,28 @@ describe("doctor: schedules", () => {
   it("an open streak below the limit degrades and names the limit's variable", async () => {
     const r = await rowsFor([
       { component: "gh", kind: "collector_run", at: ago(200), ok: true },
-      { component: "gh", kind: "collector_run", at: ago(120), ok: false, error: "401 Bad credentials" },
       { component: "gh", kind: "collector_run", at: ago(60), ok: false, error: "401 Bad credentials" },
       { component: "gh", kind: "collector_run", at: ago(5), ok: false, error: "401 Bad credentials" },
     ]);
     expect(r.gh?.status).toBe("degraded");
-    expect(r.gh?.meta).toMatchObject({ streak: 3, last_ok: false });
+    expect(r.gh?.meta).toMatchObject({ streak: 2, last_ok: false });
     expect(r.gh?.meta?.error_signature).toMatch(/^[0-9a-f]{12}$/);
-    expect(r.gh?.remediation).toContain("3 failed run(s) in a row");
-    expect(r.gh?.remediation).toContain("METISTRY_RUNNER_MAX_STREAK (5)");
+    expect(r.gh?.remediation).toContain("2 failed run(s) in a row");
+    expect(r.gh?.remediation).toContain("METISTRY_RUNNER_MAX_STREAK (3)"); // three strikes by default (C135)
   });
 
   it("a fresh skipped_streak row is the state, and the limit it hit is the one you can raise", async () => {
     const r = await rowsFor(
       [
         { component: "gh", kind: "collector_run", at: ago(90), ok: false, error: "401 Bad credentials" },
-        { component: "gh", kind: "runner", tool: "skipped_streak", at: ago(20), ok: false, error: "gh skipped: 5 consecutive failed runs" },
+        { component: "gh", kind: "runner", tool: "skipped_streak", at: ago(20), ok: false, error: "gh skipped: 7 consecutive failed runs" },
       ],
-      { METISTRY_RUNNER_MAX_STREAK: "3" },
+      { METISTRY_RUNNER_MAX_STREAK: "7" },
     );
     expect(r.gh?.status).toBe("failed");
     expect(r.gh?.meta).toMatchObject({ skipped_streak: true });
     expect(r.gh?.remediation).toContain("the runner has stopped running gh");
-    expect(r.gh?.remediation).toContain("METISTRY_RUNNER_MAX_STREAK (3)"); // the env value, not the default
+    expect(r.gh?.remediation).toContain("METISTRY_RUNNER_MAX_STREAK (7)"); // the env value, not the default
     expect(r.gh?.remediation).toContain("collectors/gh/manifest.yaml");
   });
 

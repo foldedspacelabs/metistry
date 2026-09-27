@@ -365,6 +365,33 @@ export class Committer {
     });
   }
 
+  /**
+   * Hold history for one rollback (§2.21, T10-6; revert.ts): serialized with
+   * every flush, push and pull, holding the tree so no bridge write lands
+   * while it runs, and with every pending act committed FIRST — so the
+   * rollback is computed against, and lands on top of, everything already
+   * written. `fn` makes at most one new commit and moves the branch only by
+   * `merge --ff-only`; it never rewrites anything, and neither does this.
+   */
+  holdHistory<T>(fn: () => Promise<T>): Promise<T> {
+    return this.exclusive(() =>
+      this.holdingTree(async () => {
+        await this.flushNow();
+        return fn();
+      }),
+    );
+  }
+
+  /** The identity this committer stamps for a principal (`<prefix> <principal>`) — a rollback's commit is as much its own act as a write's. */
+  identityFor(principal: string): GitIdentity {
+    return authorFor(this.cfg, principal);
+  }
+
+  /** The principal trailer line (`Brain-Source: <principal>`), or null when none is configured. */
+  sourceLine(principal: string): string | null {
+    return this.cfg.sourceTrailer ? `${this.cfg.sourceTrailer}: ${principal}` : null;
+  }
+
   /** A sync never throws: an unexpected git failure (a git too old for `merge-tree --write-tree`, say) is a failed sync with its message, and nothing was moved. */
   private async syncSafely(push: boolean, timeoutMs: number): Promise<PushResult> {
     try {

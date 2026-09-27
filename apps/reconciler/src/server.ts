@@ -13,7 +13,9 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { authorized, errorEnvelope, finishRun, INSTANCE_LAYOUT, isNoteSectionName, isProtectedPath, isVaultPath, NOTE_SECTION_NAMES, runCheck, startRun, statusFor, type ErrorCode } from "@foldedspacelabs/metistry-core";
 import type { Vault, Outcome } from "./vault.js";
 import { parseIntent } from "./vault.js";
-import { validPrincipal } from "./paths.js";
+import { USER_PRINCIPAL, mayClaim, validPrincipal } from "./paths.js";
+import { parseRevertTarget, revert, targetBody, type RevertExpect } from "./revert.js";
+import { COMMIT_ID } from "./vault.js";
 import { conflictSummary, validActId, type Committer } from "./committer.js";
 import type { Db, Indexer } from "./indexer.js";
 import type { Embeddings } from "./embeddings.js";
@@ -48,6 +50,8 @@ export interface BridgeDeps {
   db?: Db | undefined;
   /** `GET /vault/status` (§2.21, T10-2) — sync.ts's `readVaultStatus` over this process's schedule. Absent → not_available. */
   vaultStatus?: (() => Promise<VaultStatus>) | undefined;
+  /** A rollback committed these files: re-walk them and follow the push policy (§2.21 — "a re-walk follows"). main.ts wires it. */
+  reverted?: ((paths: string[]) => void) | undefined;
 }
 
 /**
@@ -186,6 +190,16 @@ function expectedSha(body: Record<string, unknown>): { ok: true; sha: string | u
   if (v === undefined || v === null) return { ok: true, sha: undefined };
   if (typeof v !== "string" || !(v === "" || /^[0-9a-f]{64}$/.test(v))) return { ok: false };
   return { ok: true, sha: v };
+}
+
+/** `expect`: absent → undefined; a well-formed change set → it; anything else → null (refused). */
+function parseExpect(v: unknown): RevertExpect | undefined | null {
+  if (v === undefined || v === null) return undefined;
+  if (typeof v !== "object" || Array.isArray(v)) return null;
+  const e = v as Record<string, unknown>;
+  const strings = (x: unknown): x is string[] => Array.isArray(x) && x.length <= 10_000 && x.every((s) => typeof s === "string");
+  if (!strings(e.files) || !strings(e.reverts) || !strings(e.skipped_config)) return null;
+  return { files: e.files, reverts: e.reverts, skipped_config: e.skipped_config };
 }
 
 export function makeBridge(deps: BridgeDeps, cfg: BridgeConfig): Server {
@@ -396,6 +410,65 @@ export function makeBridge(deps: BridgeDeps, cfg: BridgeConfig): Server {
           await auditRefusal(deps.db, { caller, tool: "vault_section", code: out.code, path: typeof body.path === "string" ? body.path : String(body.path), principal: body.principal });
         }
         return reply(res, out, 200, (v) => ({ ...v, queued: true }));
+      }
+
+      // Roll back (§2.21, T10-6): a NEW commit that puts files back —
+      // revert.ts plans it off the working tree and moves the branch by
+      // fast-forward only; nothing here can rewrite history (git.ts refuses
+      // the argv). Two refusals at the tool, each audited like any other
+      // mutation's: the revert is `user`'s and nobody else's, whichever
+      // bearer asks (an agent principal is `forbidden` even from the owner
+      // class); and `include_config` — changing `.metistry/`, `CLAUDE.md`,
+      // `README.md` — is the owner-class bearer's alone. Without it every
+      // configuration path is left as it is and reported `skipped_config`.
+      // `dry_run` is the preview a Needs You request carries; `head` pins
+      // the history it was computed against, and `expect` makes Approve
+      // refuse `stale` anything but the change set the owner saw.
+      if (key === "POST /vault/revert") {
+        const body = await readJson(req, cfg.maxBodyBytes);
+        if (!body) return fail(res, "invalid_request", "JSON object body required (within the size cap)");
+        const intent = parseIntent(body.intent);
+        if (!intent.ok) return fail(res, intent.code, intent.message);
+        const target = parseRevertTarget(body);
+        const what = target.ok ? JSON.stringify(targetBody(target.value)) : "(no target)";
+        const refuse = async (message: string) => {
+          await auditRefusal(deps.db, { caller, tool: "vault_revert", code: "forbidden", path: what, principal: intent.value.principal });
+          return fail(res, "forbidden", message);
+        };
+        if (intent.value.principal !== USER_PRINCIPAL || !mayClaim(caller, intent.value.principal)) {
+          return refuse("a rollback is the owner's alone — the reconciler reverts as `user` and as no other principal");
+        }
+        if (body.include_config !== undefined && typeof body.include_config !== "boolean") return fail(res, "invalid_request", "include_config is true or false");
+        const includeConfig = body.include_config === true;
+        if (includeConfig && caller !== "owner") {
+          return refuse("reverting configuration needs the owner's own hand — `metistry vault rollback --include-config` on the Mac, never a route");
+        }
+        if (!target.ok) return fail(res, target.code, target.message);
+        if (body.head !== undefined && (typeof body.head !== "string" || !COMMIT_ID.test(body.head))) return fail(res, "invalid_request", "head must be a commit id — the one the preview answered with");
+        if (body.dry_run !== undefined && typeof body.dry_run !== "boolean") return fail(res, "invalid_request", "dry_run is true or false");
+        const expect = parseExpect(body.expect);
+        if (expect === null) return fail(res, "invalid_request", "expect is {files, reverts, skipped_config} — string arrays, as the preview answered");
+        const dryRun = body.dry_run === true;
+        const out = await revert(vault.git, vault.root, committer, target.value, {
+          head: body.head as string | undefined,
+          includeConfig,
+          dryRun,
+          expect,
+          note: intent.value.message,
+        });
+        if (!out.ok && out.code === "forbidden") await auditRefusal(deps.db, { caller, tool: "vault_revert", code: out.code, path: what, principal: intent.value.principal });
+        if (out.ok && !dryRun) {
+          // configuration a rollback changed is a protected write like any other: Activity shows it, whichever door
+          for (const f of out.value.files.filter((x) => isProtectedPath(x.path))) {
+            await recordConfigWrite(deps.db, { caller, op: f.change === "deleted" ? "delete" : "write", tool: "vault_revert", path: f.path, principal: intent.value.principal, message: out.value.message.split("\n")[0] ?? "" });
+          }
+          try {
+            deps.reverted?.(out.value.files.map((f) => f.path));
+          } catch (err) {
+            console.error("reconciler: re-walk after a rollback failed to start:", err instanceof Error ? err.message : err);
+          }
+        }
+        return reply(res, out, dryRun ? 200 : 201, (v) => ({ ...v, target: targetBody(v.target) }));
       }
 
       if (key === "POST /flush") {

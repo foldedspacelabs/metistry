@@ -412,6 +412,7 @@ export {
   parsePullArg,
   parsePushArg,
   pushFromSchedule,
+  pushOverrideNote,
   resolveVaultSync,
   vaultIntervalSchema,
   vaultPullSchema,

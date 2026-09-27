@@ -17,6 +17,7 @@ import {
   resolveInstanceLayout,
   resolveLocalModelUrl,
   describeVaultSync,
+  pushOverrideNote,
 } from "@foldedspacelabs/metistry-core";
 import { Git } from "./git.js";
 import { Committer, type PushResult } from "./committer.js";
@@ -54,9 +55,7 @@ const reconcileIntervalSec = intEnv("METISTRY_RECONCILE_INTERVAL_SEC", 300);
 // overrides `push` for this release (a bad value stops the process here, as
 // it always has).
 const vaultPolicy = new VaultPolicySource(overlayFilesFromEnv(process.env, "deployment").split(":"), process.env);
-if (vaultPolicy.current().policy.push_override !== undefined) {
-  console.warn(`METISTRY_PUSH_SCHEDULE=${vaultPolicy.current().policy.push_override} overrides deployment.yaml's vault push policy — honoured for this release only. Remove it from .env and set the policy with \`metistry vault settings\` (docs/ops/cli.md).`);
-}
+if (vaultPolicy.current().policy.push_override !== undefined) console.warn(`reconciler: ${pushOverrideNote(vaultPolicy.current().policy.push_override!)}`);
 
 const pool = new pg.Pool({
   host: optionalEnv("METISTRY_DB_HOST", "127.0.0.1"),

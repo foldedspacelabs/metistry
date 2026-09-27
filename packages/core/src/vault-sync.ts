@@ -133,9 +133,14 @@ export function resolveVaultSync(block: VaultSyncBlock | undefined, env: { [k: s
 }
 
 /** The policy in words, for a log line, a doctor row, a preview. */
-export function describeVaultSync(p: Pick<ResolvedVaultSync, "push" | "pull" | "push_override">): string {
+export function describeVaultSync(p: { push: VaultPush; pull: VaultPull; push_override?: string | undefined }): string {
   const push = typeof p.push === "object" ? `every ${p.push.every}` : p.push;
   return `push ${push}${p.push_override !== undefined ? ` (${PUSH_SCHEDULE_ENV}=${p.push_override})` : ""}, pull every ${p.pull.every}`;
+}
+
+/** The deprecation, in the words the CLI, doctor and the reconciler's log all use. */
+export function pushOverrideNote(value: string): string {
+  return `${PUSH_SCHEDULE_ENV}=${value} in the environment overrides the push policy — honoured for this release only. Remove it from .env (then \`metistry restart reconciler\`) and set the policy with \`metistry vault settings\`.`;
 }
 
 /**

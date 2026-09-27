@@ -15,6 +15,7 @@
         "column": "backlog",
         "id": "1",
         "title": "Freeze the store interface (F-7)",
+        "description": "One protocol per store, and every method answers from a fixture before its route is served.",
         "kind": "task",
         "project": "metistry",
         "owner": null,
@@ -33,12 +34,13 @@
         "blocked_by_task_open": null,
         "status": "open",
         "due": "2026-09-27",
-        "updated_at": "2026-09-27T00:15:05.489Z"
+        "updated_at": "2026-09-27T00:36:35.373Z"
       },
       {
         "column": "assigned",
         "id": "4",
-        "title": "review: metistry/store-interface ver_01M3G3E98VZWQFNB74ADTT9VPN (1 thread)",
+        "title": "review: metistry/store-interface ver_01M3G4NMXQ1DY61VBBPM145FXV (1 thread)",
+        "description": null,
         "kind": "review",
         "project": "metistry",
         "owner": "cursor",
@@ -49,7 +51,7 @@
         "reported": false,
         "escalated": false,
         "external_ref": null,
-        "artifact": "art_01M3G3E98RJZR9P0V87FY33W0M",
+        "artifact": "art_01M3G4NMXMNV51E19PMRCARA23",
         "has_thread": false,
         "thread_count": 0,
         "blocked_by": null,
@@ -57,12 +59,13 @@
         "blocked_by_task_open": null,
         "status": "open",
         "due": null,
-        "updated_at": "2026-09-27T00:15:05.518Z"
+        "updated_at": "2026-09-27T00:36:35.410Z"
       },
       {
         "column": "in_progress",
         "id": "2",
         "title": "Open the release checklist",
+        "description": null,
         "kind": "task",
         "project": "metistry",
         "owner": null,
@@ -81,12 +84,13 @@
         "blocked_by_task_open": null,
         "status": "in_progress",
         "due": null,
-        "updated_at": "2026-09-27T00:15:05.492Z"
+        "updated_at": "2026-09-27T00:36:35.376Z"
       },
       {
         "column": "in_progress",
         "id": "3",
         "title": "Decide the fixture format",
+        "description": "One JSON per route, recorded from a scratch console; the views are built against them.",
         "kind": "task",
         "project": "metistry",
         "owner": null,
@@ -105,12 +109,13 @@
         "blocked_by_task_open": null,
         "status": "in_progress",
         "due": null,
-        "updated_at": "2026-09-27T00:15:05.368Z"
+        "updated_at": "2026-09-27T00:36:35.243Z"
       },
       {
         "column": "blocked",
         "id": "41",
         "title": "Pick the fixture redaction",
+        "description": null,
         "kind": "task",
         "project": "metistry",
         "owner": null,
@@ -129,19 +134,20 @@
         "blocked_by_task_open": true,
         "status": "blocked",
         "due": null,
-        "updated_at": "2026-09-27T00:15:05.373Z"
+        "updated_at": "2026-09-27T00:36:35.249Z"
       },
       {
         "column": "done",
         "id": "42",
         "title": "Measure the recorder run time",
+        "description": null,
         "kind": "task",
         "project": "metistry",
         "owner": null,
         "claimed_by": null,
         "lease_expires_at": null,
         "age_hours": 0,
-        "last_report_at": "2026-09-27T00:15:05.374Z",
+        "last_report_at": "2026-09-27T00:36:35.249Z",
         "reported": true,
         "escalated": false,
         "external_ref": null,
@@ -153,9 +159,9 @@
         "blocked_by_task_open": null,
         "status": "closed",
         "due": null,
-        "updated_at": "2026-09-27T00:15:05.374Z"
+        "updated_at": "2026-09-27T00:36:35.249Z"
       }
     ],
-    "as_of": "2026-09-27T00:15:05.560Z"
+    "as_of": "2026-09-27T00:36:35.462Z"
   }
 }

@@ -226,6 +226,9 @@ import Testing
     #expect(card.threadCount == 7)
     #expect(unblocked.threadCount == 0)
     #expect(card.escalated)
+    // description (C85): the card detail's first section; nil when nobody wrote one
+    #expect(card.description == "The *.home cert lapses on the 20th; the proxy reloads it.")
+    #expect(unblocked.description == nil)
     // A lease in the past is not a lease that is held — which is what
     // `interrupted` reads on the presence chip.
     #expect(!card.isHeld(now: Date(timeIntervalSince1970: 4_000_000_000)))
@@ -238,6 +241,10 @@ import Testing
     #expect(TaskPatch().wireBody == nil)
     #expect(TaskPatch.moving(to: "blocked").status == "blocked")
     #expect(TaskPatch.addressing(to: "drey").wireBody?["owner"] as? String == "drey")
+    // description rides the board arm (the owner's), so it cannot travel with a holder status either
+    #expect(TaskPatch.describing("why this card exists").wireBody?["description"] as? String == "why this card exists")
+    #expect(TaskPatch.describing("").wireBody?["description"] as? String == "") // blank clears it at the route
+    #expect(TaskPatch(status: "blocked", description: "because").wireBody == nil)
 
     let api = ConsoleAPI(transport: StubConsole([:]))
     let refused = await api.updateTask(214, TaskPatch(status: "closed", title: "new"))
@@ -882,7 +889,7 @@ enum Fixtures {
        "escalated":false,"external_ref":null,"artifact":"metistry/app-ux","has_thread":false,"thread_count":0,
        "reported":false,"blocked_by":null,"blocked_by_task":null,"blocked_by_task_open":null,
        "status":"open","due":null,"updated_at":"2026-09-18T07:00:00.000Z"},
-      {"column":"in_progress","id":214,"title":"renew the wildcard cert","kind":"task","project":"ops",
+      {"column":"in_progress","id":214,"title":"renew the wildcard cert","description":"The *.home cert lapses on the 20th; the proxy reloads it.","kind":"task","project":"ops",
        "owner":"drey","claimed_by":"drey","lease_expires_at":"2026-09-18T10:00:00.000Z","age_hours":4.5,
        "last_report_at":null,"escalated":true,"external_ref":"gh:owner/repo#41","artifact":null,
        "has_thread":true,"thread_count":7,"reported":false,

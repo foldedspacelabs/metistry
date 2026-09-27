@@ -309,8 +309,9 @@ curl -s -X POST -H "Authorization: Bearer $METISTRY_BRIDGE_TOKEN_RECONCILER" \
 
 **The console's client.** `httpVaultClient(…).section(path, "day", body,
 principal, expectedOuterSha, {run?, turn?})` (`apps/console/src/vault-client.ts`)
-is this route for the console's own callers — the Morning Brief through the
-runner's `ctx.vault` (`docs/ops/automation.md`). A refusal throws `VaultError`
+is this route for the console's own callers — Close the Day (`close-day.ts`)
+and the Morning Brief through the runner's `ctx.vault`
+(`docs/ops/automation.md`). A refusal throws `VaultError`
 with the bridge's own code, `section_missing` included.
 
 **Computing the outer hash.** Don't reimplement the grammar: read the note

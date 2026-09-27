@@ -140,6 +140,78 @@ export interface KnowledgeDeps {
   vault?: VaultClient | undefined;
   /** the console's own QueryStore — invariant 3's ONE read path into derived state, for `GET /api/knowledge/pages` and `GET /api/knowledge/links`; without the named query loaded, the route answers `not_available` naming the file */
   queries?: QueryStore | undefined;
+  /** a note's git history — the reconciler's `GET /vault/log` and `GET /vault/show` (§2.21, T10-4); absent → `not_available` */
+  history?: KnowledgeHistory | undefined;
+}
+
+// ----- file history (design-build-plan §2.21, T10-4) -----
+//
+// Git is the record (invariant 1), and the console holds no git and no
+// working tree (D5, invariant 7): a note's commits and its bytes at one
+// commit both come from the reconciler's bridge, read with the console's
+// bearer. The bridge refuses a non-note path and a revision that is not a
+// commit id by itself (`GET /vault/show`); this door refuses both again,
+// first, so an owner's question never reaches the bridge in a shape it would
+// refuse — and so the rule does not depend on the bridge being new enough.
+
+/** What a commit did to the file, as the bridge reports it. */
+export type KnowledgeChange = "added" | "modified" | "deleted" | "renamed" | "copied" | "type_changed";
+
+/** One commit as the bridge's `GET /vault/log?path=` returns it. */
+export interface KnowledgeCommit {
+  sha: string;
+  author: string;
+  date: string;
+  subject: string;
+  source?: string | null | undefined;
+  runs?: string[] | undefined;
+  turns?: string[] | undefined;
+  path?: string | undefined;
+  change?: KnowledgeChange | undefined;
+}
+
+/** One note at one commit, as the bridge's `GET /vault/show` returns it (bytes decoded). */
+export interface KnowledgeVersion extends KnowledgeCommit {
+  path: string;
+  content: Buffer;
+  sha256: string;
+  bytes: number;
+}
+
+export interface KnowledgeHistory {
+  /** The file's commits, newest first, followed across renames. Throws `VaultError` with the bridge's code. */
+  log(path: string, limit: number): Promise<KnowledgeCommit[]>;
+  /** The file at one commit. Throws `VaultError` — `not_found` for no such commit, not on this branch, or no such file then. */
+  show(path: string, sha: string): Promise<KnowledgeVersion>;
+}
+
+/** A commit id as this door takes one: hex, abbreviated or full — never a ref, `HEAD~1` or an option. The bridge's own rule (apps/reconciler/src/vault.ts `COMMIT_ID`), stated again at the first door. */
+export const COMMIT_ID = /^[0-9a-fA-F]{7,64}$/;
+
+/** A `KnowledgeHistory` over the reconciler's `GET /vault/log` and `GET /vault/show` (mirrors `vaultBridgeSearch`). */
+export function vaultBridgeHistory(opts: KnowledgeBridgeOptions): KnowledgeHistory {
+  const base = opts.url.replace(/\/+$/, "");
+  const doFetch = opts.fetch ?? fetch;
+  const timeout = opts.timeoutMs ?? 15_000;
+  const call = async (route: string, params: Record<string, string>): Promise<unknown> => {
+    const url = new URL(`${base}${route}`);
+    for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
+    const r = await doFetch(url, { headers: { authorization: `Bearer ${opts.token}` }, signal: AbortSignal.timeout(timeout) });
+    if (!r.ok) {
+      const j = await body(r);
+      throw new VaultError(codeOf(j, r.status), j?.error?.message ?? `vault bridge ${route} returned ${r.status}`);
+    }
+    return r.json();
+  };
+  return {
+    async log(path, limit) {
+      return ((await call("/vault/log", { path, limit: String(limit) })) as { entries: KnowledgeCommit[] }).entries;
+    },
+    async show(path, sha) {
+      const { content_base64, ...v } = (await call("/vault/show", { path, sha })) as Omit<KnowledgeVersion, "content"> & { content_base64: string };
+      return { ...v, content: Buffer.from(content_base64, "base64") };
+    },
+  };
 }
 
 const NOT_AVAILABLE =
@@ -166,7 +238,18 @@ export const KNOWLEDGE_DRAFTS_QUERY = "knowledge_drafts";
 export const KNOWLEDGE_AREAS_QUERY = "knowledge_areas";
 
 /** The owner's alone: refused to every other principal by the route itself, whatever server.ts's gate did first. */
-const OWNER_ONLY_ROUTES: ReadonlySet<string> = new Set(["GET /api/knowledge/fold", "GET /api/knowledge/drafts", "GET /api/knowledge/areas"]);
+const OWNER_ONLY_ROUTES: ReadonlySet<string> = new Set([
+  "GET /api/knowledge/fold",
+  "GET /api/knowledge/drafts",
+  "GET /api/knowledge/areas",
+  // A note's history is every version of it, including the ones an edit
+  // since took out — never an agent's, whatever its grants (§2.21, T10-4).
+  "GET /api/knowledge/history",
+  "GET /api/knowledge/version",
+]);
+
+const MAX_HISTORY_LIMIT = 200; // limit: fixed — the bridge clamps `GET /vault/log` at 200, so promising more here would be a lie
+const DEFAULT_HISTORY_LIMIT = 50; // limit: fixed — a year of a busy note's acts at a glance; page by asking for more, up to the ceiling
 
 const MAX_PAGES_LIMIT = 500; // limit: fixed — a LIST out of the index is scalar columns over an indexed key, so it is not the bridge's 100; 500 rows is one screenful of scrolling and bounds the response a phone has to parse. Shared by the page list and the link list, which page the same way
 const DEFAULT_PAGES_LIMIT = 100; // limit: fixed — the default `knowledge_pages.yaml` and `knowledge_page_links.yaml` both declare, so an omitted `limit` means the same thing on the route and in the manifest
@@ -190,6 +273,7 @@ type Audit = (kind: string, tool: string, ok: boolean, meta: Record<string, unkn
  * GET /api/knowledge/links?path=&limit=&offset=
  * GET /api/knowledge/fold?date=  ·  GET /api/knowledge/drafts?limit=&offset=
  * GET /api/knowledge/areas
+ * GET /api/knowledge/history?path=&limit=  ·  GET /api/knowledge/version?path=&sha=
  *
  * server.ts has already established the principal; `scope` is what that
  * principal may see. Not streamed — the bridge's hit list is bounded at 100,
@@ -376,7 +460,7 @@ export async function knowledgeRoutes(
     });
   }
 
-  // ----- the owner's three: the fold, the drafts, the areas (T1-6) -----
+  // ----- the owner's alone: the fold, the drafts, the areas (T1-6), a note's history (T10-4) -----
   if (OWNER_ONLY_ROUTES.has(key)) {
     // A code path, not a sentence (U3): whoever else reached this — a gate
     // in server.ts widened by mistake, a narrower principal minted one day —
@@ -386,6 +470,60 @@ export async function knowledgeRoutes(
       await audit("knowledge", key.slice("GET /api/knowledge/".length), false, { refused: owner.reason });
       return sendRefusal(res, owner);
     }
+  }
+
+  if (key === "GET /api/knowledge/history" || key === "GET /api/knowledge/version") {
+    const op = key === "GET /api/knowledge/history" ? "history" : "version";
+    const path = (url.searchParams.get("path") ?? "").trim();
+    if (path === "") return sendError(res, "invalid_request", "path is required — a vault-relative path, e.g. Areas/Health/sleep.md");
+    // The page route's rule, for the page's past: `.metistry/`, `Artifacts/`
+    // and every other path that is not a note is refused before the bridge is
+    // asked, for the owner too — the history of the machinery is the CLI's.
+    const seen = may(principal, "read", { kind: "knowledge", door: "console_page", path });
+    if (!seen.ok) {
+      await audit("knowledge", op, false, { refused: seen.reason });
+      return sendRefusal(res, seen);
+    }
+    if (op === "history") {
+      const limit = clampHistory(url.searchParams.get("limit"));
+      if (limit === undefined) return sendError(res, "invalid_request", `limit must be an integer between 1 and ${MAX_HISTORY_LIMIT}`);
+      if (!deps.history) return sendError(res, "not_available", NOT_AVAILABLE);
+      let entries: KnowledgeCommit[];
+      try {
+        entries = await deps.history.log(path, limit);
+      } catch (err) {
+        if (err instanceof VaultError) return sendError(res, err.code, err.message);
+        throw err;
+      }
+      // Across a rename, a commit names the file as it was called then — the
+      // name `version` needs for that commit. A name that was never a note
+      // (moved in from `.metistry/`) is dropped, as any row outside the scope is.
+      const commits = entries.map((e) => commitOf(e, path)).filter((c) => canSee(c.path, scope));
+      await audit("knowledge", "history", true, { commits: commits.length, filtered: entries.length - commits.length });
+      return sendJson(res, 200, { path, commits, limit, as_of: new Date().toISOString() });
+    }
+    const sha = (url.searchParams.get("sha") ?? "").trim();
+    if (!COMMIT_ID.test(sha)) return sendError(res, "invalid_request", "sha must be a commit id — 7 to 64 hex characters, as GET /api/knowledge/history lists them");
+    if (!deps.history) return sendError(res, "not_available", NOT_AVAILABLE);
+    let v: KnowledgeVersion;
+    try {
+      v = await deps.history.show(path, sha);
+    } catch (err) {
+      if (err instanceof VaultError) return sendError(res, err.code, err.message);
+      throw err;
+    }
+    await audit("knowledge", "version", true, { bytes: v.bytes });
+    // The commit's own fields; `path` is the version's, and `change` is a
+    // history row's (what the commit did to the file), not a version's.
+    const { path: _p, change: _c, ...commit } = commitOf(v, path);
+    return sendJson(res, 200, {
+      path: v.path,
+      ...commit,
+      content: v.content.toString("utf8"),
+      sha256: v.sha256,
+      bytes: v.bytes,
+      as_of: new Date().toISOString(),
+    });
   }
 
   if (key === "GET /api/knowledge/fold") {
@@ -443,8 +581,38 @@ export async function knowledgeRoutes(
   // Anything else under /api/knowledge/.
   return sendUnrouted(
     res,
-    "the knowledge read path is GET /api/knowledge/search, GET /api/knowledge/page, GET /api/knowledge/pages, GET /api/knowledge/links, GET /api/knowledge/fold, GET /api/knowledge/drafts and GET /api/knowledge/areas (docs/ops/client-api.md)",
+    "the knowledge read path is GET /api/knowledge/search, GET /api/knowledge/page, GET /api/knowledge/pages, GET /api/knowledge/links, GET /api/knowledge/fold, GET /api/knowledge/drafts, GET /api/knowledge/areas, GET /api/knowledge/history and GET /api/knowledge/version (docs/ops/client-api.md)",
   );
+}
+
+/**
+ * One commit on the wire: the bridge's fields, named for a client — `at` is
+ * the author date in UTC (the bridge hands back git's own offset form), and
+ * `change` is null on a merge that carried the file without changing it.
+ * `source`, `runs` and `turns` are the committer's trailers — provenance to
+ * show, never authority.
+ */
+function commitOf(e: KnowledgeCommit, path: string) {
+  const at = new Date(e.date);
+  return {
+    sha: e.sha,
+    path: e.path ?? path,
+    change: e.change ?? null,
+    subject: e.subject,
+    author: e.author,
+    source: e.source ?? null,
+    runs: e.runs ?? [],
+    turns: e.turns ?? [],
+    at: Number.isNaN(at.getTime()) ? e.date : at.toISOString(),
+  };
+}
+
+/** History's `limit` — "learn the ceiling", as `clamp` below. */
+function clampHistory(raw: string | null): number | undefined {
+  if (raw === null || raw.trim() === "") return DEFAULT_HISTORY_LIMIT;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1 || n > MAX_HISTORY_LIMIT) return undefined;
+  return n;
 }
 
 /** The page an area's description is read from (`knowledge_areas.yaml`), and the probe its folder is judged by. */

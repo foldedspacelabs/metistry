@@ -317,6 +317,16 @@ export function makeBridge(deps: BridgeDeps, cfg: BridgeConfig): Server {
 
       if (key === "GET /vault/diff") return reply(res, await vault.diff(q.get("path"), q.get("from"), q.get("to")));
 
+      // One note at one commit (§2.21, T10-4) — the bytes behind
+      // `GET /api/knowledge/version` and, later, what a restore writes back.
+      // Notes only, whichever bearer asks: a protected or non-vault path is
+      // `forbidden` and a revision that is not a commit id is
+      // `invalid_request`, both before git runs (vault.ts `show`). Read-only;
+      // the bytes travel as base64 so an attachment survives the round trip.
+      if (key === "GET /vault/show") {
+        return reply(res, await vault.show(q.get("path"), q.get("sha")), 200, ({ content, ...v }) => ({ ...v, content_base64: content.toString("base64") }));
+      }
+
       if (key === "POST /vault/write" || key === "POST /vault/delete" || key === "POST /vault/rename") {
         const body = await readJson(req, cfg.maxBodyBytes);
         if (!body) return fail(res, "invalid_request", "JSON object body required (within the size cap)");

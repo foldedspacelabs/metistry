@@ -51,7 +51,7 @@ import { applyMeEdit, meEditOf } from "./profile-tidy.js";
 import { crewDispatcher, type CrewRegistry } from "./crews.js";
 import { runAction, type ActionServices } from "./actions.js";
 import { computeRoutes, isComputeRoute, type ComputeAdmin } from "./compute-routes.js";
-import { isKnowledgeRoute, knowledgeRoutes, type KnowledgeSearcher } from "./knowledge-routes.js";
+import { isKnowledgeRoute, knowledgeRoutes, type KnowledgeHistory, type KnowledgeSearcher } from "./knowledge-routes.js";
 import { isVaultTaskRoute, ReplayCache, vaultTaskRoutes } from "./vault-task-routes.js";
 import { agentList, commandList } from "./commands.js";
 import { purgeArchive, purgePreview } from "@metistry-apps/routines";
@@ -102,6 +102,8 @@ export interface ConsoleConfig {
   computeAdmin?: ComputeAdmin | undefined;
   /** The vault client the artifacts module (§4.21) stores content through; absent = artifacts degrade to not_available. */
   vault?: VaultClient;
+  /** A note's git history for `GET /api/knowledge/history` and `GET /api/knowledge/version` — the reconciler's `/vault/log` and `/vault/show` (§2.21, T10-4); absent = both answer not_available. */
+  knowledgeHistory?: KnowledgeHistory | undefined;
   /** Loaded crew manifests (crews.ts); absent = agents_delegate answers not_available. */
   crews?: CrewRegistry;
   /** identity.yaml's public fields for `GET /api/identity` (identity.ts); absent = 503 not_available. */
@@ -1228,7 +1230,12 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         res,
         key,
         url,
-        { ...(cfg.searchKnowledge ? { search: cfg.searchKnowledge } : {}), ...(cfg.vault ? { vault: cfg.vault } : {}), queries },
+        {
+          ...(cfg.searchKnowledge ? { search: cfg.searchKnowledge } : {}),
+          ...(cfg.vault ? { vault: cfg.vault } : {}),
+          ...(cfg.knowledgeHistory ? { history: cfg.knowledgeHistory } : {}),
+          queries,
+        },
         principalOf(auth),
         audit,
       );

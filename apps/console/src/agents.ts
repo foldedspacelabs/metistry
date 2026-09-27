@@ -19,6 +19,7 @@ import {
   effectiveActions,
   ensureProject,
   finishRun,
+  inheritGrants,
   INSTANCE_LAYOUT,
   intEnv,
   mintToken,
@@ -360,10 +361,16 @@ export async function authenticateAgent(
   const header = req.headers.authorization;
   const token = parseBearer(Array.isArray(header) ? header[0] : header);
   if (!token) return null;
+  // `project_grants` (T4-7): the own read grant of every project this row
+  // is a member of, read in the SAME statement as the membership itself, so
+  // a request resolves against one moment — never a project list from before
+  // a leave and its grants from after.
   const { rows } = await db.query(
     `UPDATE agents SET last_seen_at = now()
      WHERE token_hash = $1 AND revoked_at IS NULL AND (NOT remote OR approved_at IS NOT NULL)
-     RETURNING id, kind, grants, projects, autonomy`,
+     RETURNING id, kind, grants, projects, autonomy,
+       (SELECT coalesce(jsonb_agg(jsonb_build_object('project', p.id, 'grants', p.grants) ORDER BY p.id), '[]'::jsonb)
+          FROM projects p WHERE p.id = ANY(agents.projects)) AS project_grants`,
     [tokenHash(token)],
   );
   const row = rows[0];
@@ -386,11 +393,21 @@ export async function authenticateAgent(
   // asserted by the caller (§4.19). mcp-brain resolves it through core's
   // `effectiveActions`; nothing downstream re-derives the rules.
   const autonomy = coerceAutonomy(row.autonomy);
+  // **A member's reach is its own ∪ its projects'** (T4-7, D13): the union is
+  // resolved here, per request, and never written back into the row — so the
+  // row stays the owner's hand on THIS agent, and leaving a project is the
+  // whole of losing what it gave. The assistant inherits nothing: its reach
+  // is configuration (C52), and an internal row's empty project list is
+  // "may work anywhere", not membership of every project.
+  const projects: string[] = row.projects ?? [];
+  const own = coerceGrants(row.grants);
+  const inherited = kind === "internal" ? own : inheritGrants(own, projects, Array.isArray(row.project_grants) ? row.project_grants : []).grants;
+  const grants: Grants = { tier: inherited.tier, areas: [...inherited.areas], ...(inherited.queries === true ? { queries: true } : {}) };
   return {
     id: row.id,
     kind,
-    grants: coerceGrants(row.grants),
-    projects: row.projects ?? [],
+    grants,
+    projects,
     autonomy: { ...(autonomy.level !== undefined ? { level: autonomy.level } : {}), ...(autonomy.actions !== undefined ? { actions: autonomy.actions } : {}) },
     ...(crew ? { uses: crew.uses } : {}),
     ...(crew?.manifest !== undefined ? { manifest: crew.manifest } : {}),

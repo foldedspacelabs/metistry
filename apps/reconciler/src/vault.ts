@@ -1,5 +1,5 @@
 // Vault operations against the working tree. Reads never touch git (so a
-// write is visible the instant it lands — C3); history (log/diff) does.
+// write is visible the instant it lands — C3); history (log/diff/show) does.
 // Every path passes confine() first; every mutation checks the principal's
 // authority on the path, then lands on disk atomically and enqueues a
 // commit intent with the committer. Nothing here composes a shell command.
@@ -7,8 +7,8 @@
 import { mkdir, readdir, readFile, realpath, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { randomBytes } from "node:crypto";
-import { NON_VAULT_ROOTS, isVaultPath, sectionMissingMessage, writeNoteSection, type ErrorCode, type NoteSectionName } from "@foldedspacelabs/metistry-core";
-import { Committer, validActId } from "./committer.js";
+import { NON_VAULT_ROOTS, isProtectedPath, isVaultPath, sectionMissingMessage, writeNoteSection, type ErrorCode, type NoteSectionName } from "@foldedspacelabs/metistry-core";
+import { Committer, RUN_TRAILER, SOURCE_TRAILER, TURN_TRAILER, validActId } from "./committer.js";
 import { Git } from "./git.js";
 import { SECTION_PATHS, confine, isProtected, sectionWriteAllowed, validPrincipal, writeAllowed, type CallerClass, type Confined } from "./paths.js";
 import { basenameTitle, isConflictFile, isMarkdown, parseFrontmatter, sha256 } from "./notes.js";
@@ -70,6 +70,96 @@ export function parseIntent(input: unknown): Outcome<Intent> {
       turn: i.turn as string | undefined,
     },
   };
+}
+
+/** What a commit did to one file, as `git log --name-status` letters it. */
+export type FileChange = "added" | "modified" | "deleted" | "renamed" | "copied" | "type_changed";
+
+export interface LogEntry {
+  sha: string;
+  author: string;
+  date: string;
+  subject: string;
+  /** `Brain-Source:` — the principal the committer wrote for; null on a commit it did not make. */
+  source: string | null;
+  /** `Metistry-Run:` values, one per run coalesced into the commit (T10-1). */
+  runs: string[];
+  /** `Metistry-Turn:` values, likewise. */
+  turns: string[];
+  /** With a path only: the file's name at this commit (across a rename, the OLD name). */
+  path?: string;
+  /** With a path only: what this commit did to it. Absent on a merge that did not change it. */
+  change?: FileChange;
+}
+
+export interface VersionEntry extends LogEntry {
+  path: string;
+  content: Buffer;
+  sha256: string;
+  bytes: number;
+}
+
+/** A commit id as a client may name one: hex only, abbreviated or full, sha-1 or sha-256. Anything else — a ref, `HEAD~1`, an option — is not a revision this door takes. */
+export const COMMIT_ID = /^[0-9a-fA-F]{7,64}$/;
+
+// A record separator before each commit and a unit separator between its
+// fields, the subject LAST so a separator inside it cannot shift a trailer.
+const LOG_FORMAT = [
+  "%x1e%H",
+  "%an",
+  "%aI",
+  `%(trailers:key=${SOURCE_TRAILER},valueonly,separator=%x2C)`,
+  `%(trailers:key=${RUN_TRAILER},valueonly,separator=%x2C)`,
+  `%(trailers:key=${TURN_TRAILER},valueonly,separator=%x2C)`,
+  "%s",
+].join("%x1f");
+
+const CHANGES: Record<string, FileChange> = { A: "added", M: "modified", D: "deleted", R: "renamed", C: "copied", T: "type_changed" };
+
+/**
+ * `git log --format=LOG_FORMAT`, with `--follow --name-status -z` when `rel`
+ * is set. Newest first, so the name a rename reports as its OLD side is the
+ * file's name for every older record until the next rename.
+ */
+export function parseLog(out: string, rel: string | null): LogEntry[] {
+  const entries: LogEntry[] = [];
+  let current = rel;
+  for (const record of out.split("\x1e")) {
+    if (!record.trim()) continue;
+    const nul = record.indexOf("\0");
+    const header = (nul >= 0 ? record.slice(0, nul) : record).replace(/\n+$/, "");
+    const [sha = "", author = "", date = "", source = "", runs = "", turns = "", ...subject] = header.split("\x1f");
+    const entry: LogEntry = {
+      sha,
+      author,
+      date,
+      subject: subject.join("\x1f"),
+      source: firstOf(source, validPrincipal),
+      runs: listOf(runs),
+      turns: listOf(turns),
+    };
+    if (rel !== null && current !== null) {
+      const tokens = nul >= 0 ? record.slice(nul + 1).replace(/^\n/, "").split("\0").filter(Boolean) : [];
+      const letter = tokens[0]?.[0];
+      if (letter && CHANGES[letter]) {
+        const two = letter === "R" || letter === "C";
+        entry.path = (two ? tokens[2] : tokens[1]) ?? current;
+        entry.change = CHANGES[letter];
+        current = (two ? tokens[1] : entry.path) ?? current;
+      } else entry.path = current;
+    }
+    entries.push(entry);
+  }
+  return entries;
+}
+
+function listOf(raw: string): string[] {
+  return [...new Set(raw.split(",").map((v) => v.trim()).filter((v) => validActId(v)))];
+}
+
+function firstOf(raw: string, valid: (v: unknown) => boolean): string | null {
+  const v = raw.split(",")[0]?.trim() ?? "";
+  return v && valid(v) ? v : null;
 }
 
 export class Vault {
@@ -208,23 +298,85 @@ export class Vault {
     return hits;
   }
 
-  async log(path: unknown, limit: number): Promise<Outcome<Array<{ sha: string; author: string; date: string; subject: string }>>> {
-    const args = ["log", `--max-count=${limit}`, "--format=%H%x1f%an%x1f%aI%x1f%s"];
+  /**
+   * Commit history, newest first — the whole tree, or one path followed
+   * across renames. Every entry carries the commit's own provenance trailers
+   * (§2.21, T10-1) as the committer wrote them: `source` (`Brain-Source:`),
+   * `runs` and `turns`. Provenance for READING history, never authority — an
+   * owner's hand-made commit can say anything in a trailer, so a value that is
+   * not the shape the committer writes is dropped rather than passed on.
+   *
+   * With a path, each entry also says what the commit did to the file and
+   * what the file was CALLED then (`--follow` crosses a rename, and the old
+   * name is the one `show` needs for an older commit).
+   */
+  async log(path: unknown, limit: number): Promise<Outcome<LogEntry[]>> {
+    const args = ["log", `--max-count=${limit}`, `--format=${LOG_FORMAT}`];
+    let rel: string | null = null;
     if (path !== undefined && path !== "" && path !== null) {
       const c = await this.confined(path);
       if (!c.ok) return c;
-      args.push("--follow", "--", c.value.rel);
+      rel = c.value.rel;
+      args.push("--follow", "--name-status", "-z", "--", rel);
     }
     if ((await this.git.head()) === null) return { ok: true, value: [] };
-    const out = await this.git.run(args);
-    const value = out
-      .split("\n")
-      .filter(Boolean)
-      .map((line) => {
-        const [sha = "", author = "", date = "", subject = ""] = line.split("\x1f");
-        return { sha, author, date, subject };
-      });
-    return { ok: true, value };
+    return { ok: true, value: parseLog(await this.git.run(args), rel) };
+  }
+
+  /**
+   * One note's bytes at one commit (§2.21 rollback, T10-4): what
+   * `GET /api/knowledge/version` shows and what a restore (T10-5) would write
+   * back. Read-only, and refused before git runs at all for:
+   *
+   *   * a path that is not a vault note — `.metistry/` and every other
+   *     protected path, `Artifacts/`, a dot-directory, the root
+   *     `CLAUDE.md`/`README.md` (`forbidden`). The history of the machinery
+   *     is the CLI's, with the owner's hand on it, never this door's;
+   *   * a revision that is not a commit id (`invalid_request`) — `HEAD~1`, a
+   *     branch name, `--output=…` and every other option-shaped string are
+   *     refused by shape, so nothing but hex reaches git's argv.
+   *
+   * A well-formed id that names no commit, a commit that is not on this
+   * branch's history (a fetched-but-unintegrated remote commit is not "the
+   * vault's history" yet), or a file absent at that commit is `not_found`.
+   * The bytes come from `git cat-file blob`, never `git show`, so no
+   * textconv driver the repo or the user's config names can rewrite them.
+   */
+  async show(path: unknown, rev: unknown): Promise<Outcome<VersionEntry>> {
+    const c = await this.confined(path);
+    if (!c.ok) return c;
+    const rel = c.value.rel;
+    if (isProtectedPath(rel) || !isVaultPath(rel)) return fail("forbidden", `${rel} is not a vault note — file history is served for notes only`);
+    if (typeof rev !== "string" || !COMMIT_ID.test(rev)) return fail("invalid_request", "bad revision — sha must be a commit id (7 to 64 hex characters)");
+    if ((await this.git.head()) === null) return fail("not_found", "the vault has no commits yet");
+    const sha = await this.git.commitOf(rev.toLowerCase());
+    if (!sha) return fail("not_found", `no commit ${rev}`);
+    // On this branch: `HEAD..<sha>` is every commit reachable from <sha> and
+    // not from HEAD — empty exactly when <sha> is HEAD or one of its ancestors.
+    const beyond = await this.git.raw(["log", "--max-count=1", "--format=%H", `HEAD..${sha}`]);
+    if (beyond.code !== 0 || beyond.stdout.trim() !== "") return fail("not_found", `${rev} is not in this vault's history`);
+    const entry = await this.blobAt(sha, rel);
+    if (!entry) return fail("not_found", `${rel} does not exist at ${sha.slice(0, 12)}`);
+    if (entry.size > this.cfg.maxBytes) return fail("invalid_request", `${rel} at ${sha.slice(0, 12)} is ${entry.size} bytes — over the ${this.cfg.maxBytes}-byte cap`);
+    const blob = await this.git.rawBytes(["cat-file", "blob", entry.oid]);
+    if (blob.code !== 0) throw new Error(`git cat-file blob ${entry.oid} failed (${blob.code}): ${blob.stderr.trim()}`);
+    const [meta] = parseLog(await this.git.run(["log", "--max-count=1", `--format=${LOG_FORMAT}`, sha]), null);
+    if (!meta) throw new Error(`git log ${sha} returned nothing`);
+    return { ok: true, value: { ...meta, path: rel, sha, content: blob.stdout, sha256: sha256(blob.stdout), bytes: blob.stdout.length } };
+  }
+
+  /** The regular file at `rel` in `commit`'s tree, or null — a directory, a symlink or a submodule there is no file to show. */
+  private async blobAt(commit: string, rel: string): Promise<{ oid: string; size: number } | null> {
+    const r = await this.git.raw(["ls-tree", "-l", "-z", commit, "--", rel]);
+    if (r.code !== 0) return null;
+    for (const line of r.stdout.split("\0")) {
+      const tab = line.indexOf("\t");
+      if (tab < 0 || line.slice(tab + 1) !== rel) continue;
+      const [mode, type, oid, size] = line.slice(0, tab).trim().split(/\s+/);
+      if (type !== "blob" || (mode !== "100644" && mode !== "100755") || !oid || !size) return null;
+      return { oid, size: Number(size) };
+    }
+    return null;
   }
 
   /** Unified diff of a path (or the whole tree) between two revisions; `to` absent = the working tree. */

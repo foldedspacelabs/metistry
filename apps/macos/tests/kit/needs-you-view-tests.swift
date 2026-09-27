@@ -44,7 +44,7 @@ import Testing
     let sent = try #require(console.calls.first { $0.method == "POST" })
     #expect(sent.path == "/api/proposals/batch")
     #expect(sent.body?["decision"]?.stringValue == "deny", "Decline is deny, always (R15)")
-    #expect(outcome.asked.count == 3)
+    #expect(outcome.asked.count == 4)
 
     // and what VoiceOver finds on the bulk panel: the three, and no Approve
     let tree = try await AccessibilityProbe.snapshot(NeedsYouBulkPanel(model: selectedModel(model)).frame(width: 520))
@@ -71,7 +71,7 @@ import Testing
     console.down = "connect ECONNREFUSED 127.0.0.1:8080"
     await model.refresh()
     #expect(!model.allowsDecisions)
-    #expect(model.rows.count == 3, "a stale list keeps what it had (P5)")
+    #expect(model.rows.count == 4, "a stale list keeps what it had (P5)")
     #expect(model.staleSince != nil, "…and says when it is from")
 
     // every verb off, each with the fact under it — the gate's own sentence
@@ -97,11 +97,11 @@ import Testing
     console.batch = { ids, _ in ids.map { .init(id: $0, ok: false, reason: nil, message: "the console could not write the row") } }
     model.selectAllOnPage()
     let outcome = try #require(await model.answerSelection(.skip))
-    #expect(outcome.retryable.count == 3)
+    #expect(outcome.retryable.count == 4)
     console.down = "connect ECONNREFUSED 127.0.0.1:8080"
     await model.refresh()
     let retry = try #require(outcome.presentation(disabledBecause: model.decisionsUnavailableReason).controls.first)
-    #expect(retry.label == "Retry 3")
+    #expect(retry.label == "Retry 4")
     #expect(!retry.isEnabled)
     let sentBefore = console.calls.count
     #expect(await model.retry() == nil)
@@ -120,7 +120,7 @@ import Testing
     var counted = 0
     model.onQueueChanged = { counted += 1 }
     await model.refresh()
-    model.selectAllOnPage()
+    model.selection = [1, 2, 3] // the question with three parts (5) stays out of it
     model.declineReason = "  not this week  "
 
     // 3 applied, 2 answered on the phone first, 1 refused and still pending
@@ -178,7 +178,7 @@ import Testing
     let later = try #require(await model.answerSelection(.later))
     #expect(later.isComplete)
     #expect(model.outcome == nil, "Later settled nothing (components-01 §2.5)")
-    #expect(model.rows.map(\.id) == [3])
+    #expect(model.rows.map(\.id) == [3, 5])
 
     console.failBatch = .http(status: 500, envelope: ConsoleErrorEnvelope(code: "internal", message: "database unavailable"))
     console.rows = try recordedRows()
@@ -224,11 +224,11 @@ import Testing
     let (model, _, session) = try await fixtureModel()
     defer { withExtendedLifetime(session) {} }
     let rows = model.rowModels(assistantName: "Aide")
-    // the fixture: a report, a `knowledge` row, a `decision` row — newest first
-    #expect(rows.map(\.id) == [3, 2, 1])
-    #expect(rows.map(\.word) == ["report", "note", "question"])
+    // the fixture: a report, a `knowledge` row, two `decision` rows — newest first
+    #expect(rows.map(\.id) == [3, 2, 1, 5])
+    #expect(rows.map(\.word) == ["report", "note", "question", "question"])
     #expect(!rows.contains { $0.word == "knowledge" || $0.word == "decision" })
-    #expect(rows.map(\.title) == ["Nightly fold finished", "Add the store list to the roadmap", "Which fixture format?"])
+    #expect(rows.map(\.title) == ["Nightly fold finished", "Add the store list to the roadmap", "Which fixture format?", "Three things before I open the fixtures PR"])
     #expect(rows[1].spoken == "from Aide: note, Add the store list to the roadmap. 5 minutes old.")
     #expect(rows[1].presentation().word.uppercase, "the type label is the small all-caps style")
     // with the name not known yet, it is left out — never "assistant"
@@ -431,8 +431,8 @@ import Testing
 @Test func theListSpeaksEveryRowAndEveryControl() async throws {
     let (model, _, session) = try await fixtureModel()
     defer { withExtendedLifetime(session) {} }
-    let view = NeedsYouView(model: model, waiting: 3, assistantName: "Aide", onGoToToday: {}) { row in
-        NeedsYouRequestSummary(row, assistantName: "Aide", consoleURL: URL(string: "http://127.0.0.1:1/"), now: recordedNow, calendar: model.calendar)
+    let view = NeedsYouView(model: model, waiting: 4, assistantName: "Aide", onGoToToday: {}) { row in
+        NeedsYouRequestSummary(row, assistantName: "Aide", consoleURL: URL(string: "http://127.0.0.1:1/"), now: fixtureNow, calendar: model.calendar)
     }
     let tree = try await AccessibilityProbe.snapshot(view.frame(width: 1000, height: 640))
     defer { tree.close() }
@@ -443,11 +443,11 @@ import Testing
     #expect(said.contains("from Aide: question, Which fixture format?. 5 minutes old."), "said: \(said)")
     // the filters say what they are and how many
     let controls = tree.controlNames
-    #expect(controls.contains("All, 3"), "controls: \(controls)")
+    #expect(controls.contains("All, 4"), "controls: \(controls)")
     #expect(controls.contains("Reports, 1"), "controls: \(controls)")
     #expect(controls.contains("Select All on This Page"), "controls: \(controls)")
     // the group is a heading, and the selected request is beside the list
-    #expect(tree.labels.contains("TODAY · 3"), "labels: \(tree.labels)")
+    #expect(tree.labels.contains("TODAY · 4"), "labels: \(tree.labels)")
     #expect(tree.labels.contains("Nightly fold finished"), "labels: \(tree.labels)")
 }
 
@@ -460,7 +460,7 @@ import Testing
     let pieces: [(String, AnyView, CGFloat)] = [
         ("row", AnyView(NeedsYouRowView(row.presentation())), 340),
         ("band", AnyView(NeedsYouOutcomeBand(outcome: partial, disabledBecause: nil, onRetry: {}, onDismiss: {})), 640),
-        ("summary", AnyView(NeedsYouRequestSummary(model.rows[1], assistantName: "Aide", consoleURL: nil, now: recordedNow, calendar: model.calendar).frame(height: 900, alignment: .top)), 560),
+        ("summary", AnyView(NeedsYouRequestSummary(model.rows[1], assistantName: "Aide", consoleURL: nil, now: fixtureNow, calendar: model.calendar).frame(height: 900, alignment: .top)), 560),
     ]
     for (name, view, width) in pieces {
         var heights: [DynamicTypeSize: CGFloat] = [:]
@@ -481,8 +481,10 @@ import Testing
 // MARK: - Helpers
 
 private let utc = TimeZone(identifier: "UTC")!
-/// Five minutes after the recorded queue's rows were raised.
+/// The clock the scripted queues are read at.
 private let recordedNow = WireTime.date("2026-09-27T02:37:12.911Z")!
+/// Five minutes after the recorded queue's newest rows were raised.
+private let fixtureNow = WireTime.date("2026-09-27T03:24:34.940Z")!
 
 /// What every text field in a window says it is. The probe reads AppKit's
 /// attribute form, where a SwiftUI text field's label does not appear (its
@@ -499,9 +501,9 @@ private func textFieldLabels(in window: NSWindow) -> [String] {
 /// A model over a scripted console. The session is the caller's to keep: the
 /// model holds it weakly, as the app's `AppModel` owns it.
 @MainActor
-private func queueModel(_ console: any ConsoleCallTransport) -> (NeedsYouModel, ConsoleSession) {
+private func queueModel(_ console: any ConsoleCallTransport, now: Date = recordedNow) -> (NeedsYouModel, ConsoleSession) {
     let session = ConsoleSession(transport: console, management: nil)
-    let model = NeedsYouModel(session: session, timeZone: utc, now: { recordedNow })
+    let model = NeedsYouModel(session: session, timeZone: utc, now: { now })
     model.announce = { _ in }
     return (model, session)
 }
@@ -510,9 +512,9 @@ private func queueModel(_ console: any ConsoleCallTransport) -> (NeedsYouModel, 
 @MainActor
 private func fixtureModel() async throws -> (NeedsYouModel, FixtureConsole, ConsoleSession) {
     let console = try FixtureConsole.recorded()
-    let (model, session) = queueModel(console)
+    let (model, session) = queueModel(console, now: fixtureNow)
     await model.refresh()
-    #expect(model.rows.count == 3, "the recorded queue")
+    #expect(model.rows.count == 4, "the recorded queue")
     return (model, console, session)
 }
 

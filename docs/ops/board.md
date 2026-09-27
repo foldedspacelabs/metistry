@@ -1,6 +1,6 @@
 # The Board — a Kanban view over `work`
 
-The board is a **view**, not a table. Nothing was migrated and no fifth status
+The board is a **view**, not a table. Nothing was migrated and no new status
 value was added: every column is a `CASE` over columns `work` already carries,
 computed once in a named query and read by every surface.
 
@@ -23,35 +23,70 @@ Invariant 3 holds: the panel calls `/api/q/<name>` and nothing else. The
 columns are decided **server-side**, so the Mac app renders the same rows with
 no extra server work — the query returns plain scalar columns on purpose.
 
+**`board` is `expose: route`, and the owner is who reads it** (since T1-2). A
+card now carries `blocked_by_task` — the text of a line in the owner's own
+notes — beside `blocked_by`, its vault path: the same two things that make
+`day_work` route-only (`docs/ops/client-api.md`, "`expose:`"). The owner is
+served at `GET /api/q/board` exactly as before, which is where the panel and
+the Mac app read it. An agent's `queries_run` and the capture owner token get
+the unknown-query answer, byte for byte. `board_projects` is counts — no path,
+no text — and stays on the generic door for everyone who could read it.
+
 ## Scope: which rows are cards
 
 `kind = 'task'` or `'review'` — the two kinds the tasks module owns
 (`CLAIMABLE_KINDS`, ruling 2026-09-06). Rows a collector reconciles from a
 source of truth (`issue`, `pr`, `event`) are visible in `work` but never
-claimable, so "addressed to" and "in progress" would be lies about them;
+claimable, so "assigned" and "in progress" would be lies about them;
 `open_work` and `projects_overview` stay the view over those.
 
-## The six columns
+## The five columns
 
 Read top to bottom: the **first** matching rule wins, so the list is a
-decision order, not a set of overlapping filters.
+decision order, not a set of overlapping filters. Every column's **value is
+the word its label says** — a label that disagrees with its own value is a bug
+waiting for someone to fix the wrong side of it (C38).
 
-| Column | Predicate | What it means |
+| Column (value) | Predicate | What it means |
 | --- | --- | --- |
-| **Backlog** | `status = 'open'` AND `owner IS NULL` | Nobody's name on it. Any agent may claim it. |
-| **Addressed to** | `status = 'open'` AND `owner IS NOT NULL` | Somebody's name is on it and it has not started. `claim()` sets `status = 'in_progress'` in the same statement, so *open + owner* is exactly "addressed to, not started". `owner` stays **informational** — a name, never a lease — which is why the label is "Addressed to" and not "Assigned" (ruled 2026-09-17). The derived value is still `assigned`. |
-| **In Progress** | `status = 'in_progress'` | Claimed. A **lapsed lease is still in this column** — the row says in progress, and the `escalated` flag says it stalled. Moving it elsewhere would hide that a claim was dropped. |
-| **Needs You** | `status = 'blocked'` | The human-gated state. It stays human-gated: the one route back to `open` is the unblock below, and no agent surface can reach it (`tasks_update`'s status enum has no `open`). Only your hand. |
-| **Done** | `status = 'closed'` and no report | Finished, nothing came back. |
-| **Reported** | `status = 'closed'` and a report landed | Finished, and there is something to read. |
+| **Backlog** (`backlog`) | `status = 'open'` AND `owner IS NULL` | Nobody's name on it. Any agent may claim it. |
+| **Assigned** (`assigned`) | `status = 'open'` AND `owner IS NOT NULL` | Somebody's name is on it and it has not started. `claim()` sets `status = 'in_progress'` in the same statement, so *open + owner* is exactly "assigned, not started". `owner` stays **informational** — a name, never a lease. (The owner reverted the 2026-09-17 label ruling on 2026-09-20, C38: the label is the value.) |
+| **In Progress** (`in_progress`) | `status = 'in_progress'` | Claimed. A **lapsed lease is still in this column** — the row says in progress, and the `escalated` flag says it stalled. Moving it elsewhere would hide that a claim was dropped. |
+| **Blocked** (`blocked`) | `status = 'blocked'` | The human-gated state. It stays human-gated: the one route back to `open` is the unblock below, and no agent surface can reach it (`tasks_update`'s status enum has no `open`). Only your hand. The value was `needs_you` until T1-2; that name belongs to the request queue (C2). |
+| **Done** (`done`) | `status = 'closed'` | Finished. Whether anything came back is the card's `reported` flag, not a column. |
 
-**Done vs Reported** is the note's §4.5: it is not on the row. It is
-reconstructed from the one confirmed join between a `work` row and what an
-agent produced — `crew-drain.ts` stamps `runs.meta.work_id` when it claims a
-row and merges `reports` (the `mcp__brain__report` call count) when the run
-finishes. `last_report_at` is the latest such run; a run with `reports: 0`
-leaves the card in Done, which is the point — a crew that produced nothing
-should not look like one that produced a finding.
+**Reported is a flag on a Done card, not a column** (C39). Whether a report
+came back is not on the row. It is reconstructed from the one confirmed join
+between a `work` row and what an agent produced — `crew-drain.ts` stamps
+`runs.meta.work_id` when it claims a row and merges `reports` (the
+`mcp__brain__report` call count) when the run finishes. `last_report_at` is
+the latest such run, on every card; `reported` is `status = 'closed'` and
+`last_report_at` set, so it is false on every open card. A run with
+`reports: 0` leaves the flag false, which is the point — a crew that produced
+nothing should not look like one that produced a finding. It was a sixth
+column until T1-2; it was never a *status*, only the fact that something came
+back, and a place that only a report could fill is not a place anyone can
+drag to.
+
+## What a card carries beyond its column
+
+| Field | What it is |
+| --- | --- |
+| `reported` | the Done facet above |
+| `has_thread` | the card has a room (`docs/ops/threads.md`) — the *Has Thread* filter |
+| `thread_count` | that room's **message** count, root and replies, `0` with no room. One room per work row is a unique index, so this counts messages, never rooms — the number beside the thread glyph, so the filter and the glyph need no second read |
+| `blocked_by` | `meta.blocked_by` as the row carries it: `vault:<path>#^<anchor>`, a human todo this card waits on |
+| `blocked_by_task` | that todo's text, when the index has the line; `null` when the ref resolves to nothing (the ref still comes back — an unresolvable ref is a path with no text, not nothing at all) |
+| `blocked_by_task_open` | `true` while the todo is neither ticked nor dropped — *waiting on you: Call the dentist*; `false` once it is; `null` when unresolved |
+
+The three blocked-by fields are ported from `day_work.yaml`, which Today
+reads, so the two screens say the same sentence from the same predicate.
+Blocked-by **surfaces and never gates** (`docs/ops/reconciler.md`): a card
+waiting on a todo is still in whichever column its status puts it, it is
+still claimable, and `depends_on` is untouched — a typo in a note can never
+stall an agent. The lookup runs after each column's page is cut and on the
+`(path, anchor)` the ref spells, so the anchor index answers it for at most
+five pages of cards.
 
 ## A card can be born from a proposal
 
@@ -65,7 +100,7 @@ row and links it back as `proposals.work_id`.
 
 Such a card lands in **Backlog**: `status = 'open'`, `owner IS NULL`, no claim.
 That is not a default nobody thought about — accepting a capture says *this
-should get done*, not *this is So-and-so's*, and addressing it to somebody
+should get done*, not *this is So-and-so's*, and assigning it to somebody
 would be a second decision the click did not make. Any agent may claim it, like
 any other backlog card.
 
@@ -102,7 +137,7 @@ The panel labels the flag from fields on the wire (`lease lapsed` / `blocked`
 ## How to read it
 
 - **Column headers count every card**, not the rendered ones. `limit` is **per
-  column** (default 50), so a busy Backlog never crowds Needs You out of the
+  column** (default 50), so a busy Backlog never crowds Blocked out of the
   page; when a column is capped the header says `showing N`.
 - **The red number** beside a count is that column's escalations.
 - **Ordering** is board order, then most recently touched first.
@@ -110,6 +145,9 @@ The panel labels the flag from fields on the wire (`lease lapsed` / `blocked`
   projects that have cards. `[` and `]` step it. Rows with no project (the
   user's default project) are counted under *all projects* and have no option
   of their own.
+- **A card waiting on your todo** says *waiting on you: …* with the line's
+  text, while that line is open.
+- **A Done card whose crew reported back** says *reported 2h ago*.
 - **Clicking a card** opens its **room** (`#/rooms/work/<id>`) when one
   exists — the card's room *is* the conversation about it
   (`docs/ops/threads.md`), and `board.yaml`'s `has_thread` says so on the wire
@@ -143,13 +181,12 @@ panel invented.
 
 | Drop | Route | Who may | Note |
 | --- | --- | --- | --- |
-| Backlog → **Addressed to** | `PATCH /api/tasks/:id {owner}` | the user, to **any** crew | A picker of agent names from `GET /api/agents`, plus *me*. The one drop that needs a value. |
-| Addressed to → **Backlog** | `PATCH /api/tasks/:id {owner: null}` | the user | Clears the addressee; the row stays `open`. |
-| Backlog/Addressed to → **In Progress** | `POST /api/tasks/:id/claim` | the user | The user claims *as themselves* (`claimed_by = user`). Nobody drags another agent into a lease. |
-| In Progress → **Addressed to / Backlog** | `POST /api/tasks/:id/release` | the **holder** | Hermes's `reclaimed`, which we already had: never orphaned. Which column it lands in is `owner`'s to decide, so the board offers the one it will actually land in. |
-| Needs You → **Backlog / Addressed to** | `PATCH /api/tasks/:id {status: "open"}` | the user | The unblock. Legal from `blocked` only, and it hands the row back the way `release()` does — so a row a stuck crew still holds comes free without the crew's hand. |
+| Backlog → **Assigned** | `PATCH /api/tasks/:id {owner}` | the user, to **any** crew | A picker of agent names from `GET /api/agents`, plus *me*. The one drop that needs a value. |
+| Assigned → **Backlog** | `PATCH /api/tasks/:id {owner: null}` | the user | Clears the assignee; the row stays `open`. |
+| Backlog/Assigned → **In Progress** | `POST /api/tasks/:id/claim` | the user | The user claims *as themselves* (`claimed_by = user`). Nobody drags another agent into a lease. |
+| In Progress → **Assigned / Backlog** | `POST /api/tasks/:id/release` | the **holder** | Hermes's `reclaimed`, which we already had: never orphaned. Which column it lands in is `owner`'s to decide, so the board offers the one it will actually land in. |
+| Blocked → **Backlog / Assigned** | `PATCH /api/tasks/:id {status: "open"}` | the user | The unblock. Legal from `blocked` only, and it hands the row back the way `release()` does — so a row a stuck crew still holds comes free without the crew's hand. |
 | any open column → **Done** | `PATCH /api/tasks/:id {status: "closed"}` | the **holder** | Offered everywhere and decided by the service: close a card you do not hold and it refuses `held by X, not by user — claim it first`. |
-| → **Reported** | — | nobody | Not a drop target. Nothing you can drag makes a report exist. |
 | a **closed** card | — | nobody | Not draggable. `update()` refuses a closed row, so it gets no grab cursor either. |
 
 Two things are *not* here on purpose. **Nobody drags a card onto another
@@ -157,8 +194,8 @@ agent's lease** — In Progress is entered by claiming, and the claim is always
 the user's own. And **assignment has no agent surface at all**: `owner` exists
 on `PATCH` and nowhere else, because `tasks_update`'s schema has no `owner`
 key. That is collaboration rule 4 (`crossKindRefusal`, #159) enforced by
-absence rather than by a check — a human may address a card to any crew; an
-agent cannot address one. With one engine kind configured the check would be a
+absence rather than by a check — a human may assign a card to any crew; an
+agent cannot assign one. With one engine kind configured the check would be a
 no-op today anyway; when an agent verb gains assignment, that guard is what it
 needs.
 

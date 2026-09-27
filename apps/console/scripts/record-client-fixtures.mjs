@@ -282,6 +282,22 @@ await pool.query(
   [PAGE],
 );
 await pool.query(`INSERT INTO knowledge_links (from_path, to_path, kind) VALUES ($1, 'Projects/Metistry/Design.md', 'wikilink') ON CONFLICT DO NOTHING`, [PAGE]);
+// the owner's three knowledge reads (T1-6): last night's fold naming the roadmap (and a
+// draft, which the fold route drops), one draft waiting on the owner, and an area whose
+// README carries the one-line description the areas list shows
+const FOLD = "Journal/Fold/2026-09-28.md";
+await pool.query(
+  `INSERT INTO knowledge_files (path, title, description, draft, status, mtime, indexed_at) VALUES
+     ($1, 'Fold — 28 September', NULL, false, 'clean', '2026-09-28T01:00:00Z', now()),
+     ('Areas/Health/README.md', 'Health', 'Sleep, labs, and the protein blend', false, 'clean', '2026-09-20T12:00:00Z', now()),
+     ('Areas/Health/Sleep.md', 'Sleep', 'the taper', true, 'clean', '2026-09-27T20:00:00Z', now())
+   ON CONFLICT (path) DO NOTHING`,
+  [FOLD],
+);
+await pool.query(
+  `INSERT INTO knowledge_links (from_path, to_path, kind) VALUES ($1, $2, 'wikilink'), ($1, 'Areas/Health/Sleep.md', 'wikilink') ON CONFLICT DO NOTHING`,
+  [FOLD, PAGE],
+);
 
 // the walk's row for that task: the index a tick finds its note through (seed/queries/vault_task_by_key.yaml)
 await pool.query(
@@ -380,6 +396,9 @@ const REQUESTS = [
   ["GET /api/knowledge/page", () => ({ path: `/api/knowledge/page?path=${encodeURIComponent(PAGE)}` })],
   ["GET /api/knowledge/pages", () => ({ path: "/api/knowledge/pages?prefix=Projects" })],
   ["GET /api/knowledge/links", () => ({ path: `/api/knowledge/links?path=${encodeURIComponent(PAGE)}` })],
+  ["GET /api/knowledge/fold", () => ({ path: "/api/knowledge/fold?date=2026-09-28" })],
+  ["GET /api/knowledge/drafts", () => ({ path: "/api/knowledge/drafts?limit=20" })],
+  ["GET /api/knowledge/areas", () => ({ path: "/api/knowledge/areas" })],
 
   ["POST /capture", () => ({ path: "/capture", body: { note: "Ask Dana about the fixture format on Thursday." }, key: "fixture-capture-0001" })],
   ["POST /message", () => ({ path: "/message", body: { text: "What's on today?" } })],

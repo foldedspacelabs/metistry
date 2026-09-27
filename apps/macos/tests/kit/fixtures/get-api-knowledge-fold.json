@@ -1,8 +1,7 @@
 {
   "route": "GET /api/knowledge/fold",
-  "source": "contract",
-  "ticket": "T1-6",
-  "note": "knowledge_fold_latest: the newest Journal/Fold/*.md and its links; fold is null before the first fold",
+  "source": "recorded",
+  "ticket": null,
   "request": {
     "method": "GET",
     "path": "/api/knowledge/fold?date=2026-09-28",
@@ -15,14 +14,17 @@
       "path": "Journal/Fold/2026-09-28.md",
       "date": "2026-09-28",
       "title": "Fold — 28 September",
+      "modified": "2026-09-28T01:00:00.000Z",
       "links": [
         {
           "path": "Projects/Metistry/Roadmap.md",
           "title": "Roadmap",
-          "kind": "wikilink"
+          "kind": "wikilink",
+          "resolved": true
         }
       ]
     },
-    "as_of": "2026-09-28T13:05:00.000Z"
+    "date": "2026-09-28",
+    "as_of": "2026-09-27T00:39:38.061Z"
   }
 }

@@ -21,6 +21,16 @@
 // this file is the only place a path is judged against the caller's scope, so
 // the generic `/api/q/<name>` door refuses them (ruled 2026-09-19).
 //
+// **Three more reads are the owner's alone** (design-build-plan §2.10, T1-6):
+// the newest fold and its links (`knowledge_fold_latest`), the drafts waiting
+// on the owner (`knowledge_drafts`) and the per-area rollup
+// (`knowledge_areas`). Each is `expose: route` too, and each refuses every
+// principal but the owner HERE, before any SQL runs — not only at server.ts's
+// management gate — because a draft is the one thing no agent may ever be
+// handed (screen 10 §3.2) and the other two name `Me/` and the owner's own
+// journal, which only the owner is shown (#255). One door per operation: no
+// agent reaches any of the three at `/api/q/<name>` or through `/mcp`.
+//
 // **What the bridge does not refuse, this does.** The reconciler's
 // `/vault/read` confines a path to the instance repo and stops there: it will
 // happily serve `.metistry/state/.env`, `.metistry/compute.yaml` or the root
@@ -34,7 +44,7 @@
 // drift.
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { filterHits, filterPages, may, readableAreas, type ErrorCode, type KnowledgeScope, type Principal } from "@foldedspacelabs/metistry-core";
+import { canSee, filterHits, filterPages, may, readableAreas, type ErrorCode, type KnowledgeScope, type Principal } from "@foldedspacelabs/metistry-core";
 import { KNOWLEDGE_LINKS_QUERY, KNOWLEDGE_PAGES_QUERY } from "@foldedspacelabs/metistry-mcp-brain";
 
 /**
@@ -150,6 +160,14 @@ const MAX_QUERY = 200; // limit: fixed — the bridge refuses a longer `q`; refu
  */
 export { KNOWLEDGE_PAGES_QUERY, KNOWLEDGE_LINKS_QUERY } from "@foldedspacelabs/metistry-mcp-brain";
 
+/** The named queries behind the owner's three knowledge reads (§2.10). Not loaded → the route is `not_available` naming the file, as for the page list. */
+export const KNOWLEDGE_FOLD_QUERY = "knowledge_fold_latest";
+export const KNOWLEDGE_DRAFTS_QUERY = "knowledge_drafts";
+export const KNOWLEDGE_AREAS_QUERY = "knowledge_areas";
+
+/** The owner's alone: refused to every other principal by the route itself, whatever server.ts's gate did first. */
+const OWNER_ONLY_ROUTES: ReadonlySet<string> = new Set(["GET /api/knowledge/fold", "GET /api/knowledge/drafts", "GET /api/knowledge/areas"]);
+
 const MAX_PAGES_LIMIT = 500; // limit: fixed — a LIST out of the index is scalar columns over an indexed key, so it is not the bridge's 100; 500 rows is one screenful of scrolling and bounds the response a phone has to parse. Shared by the page list and the link list, which page the same way
 const DEFAULT_PAGES_LIMIT = 100; // limit: fixed — the default `knowledge_pages.yaml` and `knowledge_page_links.yaml` both declare, so an omitted `limit` means the same thing on the route and in the manifest
 const MAX_FILTER = 500; // limit: fixed — `canSee` refuses a path over 500 characters, so a filter longer than one cannot select anything a client may see
@@ -170,6 +188,8 @@ type Audit = (kind: string, tool: string, ok: boolean, meta: Record<string, unkn
  * GET /api/knowledge/search?q=&mode=&limit=  ·  GET /api/knowledge/page?path=
  * GET /api/knowledge/pages?area=&prefix=&limit=&offset=
  * GET /api/knowledge/links?path=&limit=&offset=
+ * GET /api/knowledge/fold?date=  ·  GET /api/knowledge/drafts?limit=&offset=
+ * GET /api/knowledge/areas
  *
  * server.ts has already established the principal; `scope` is what that
  * principal may see. Not streamed — the bridge's hit list is bounded at 100,
@@ -356,11 +376,108 @@ export async function knowledgeRoutes(
     });
   }
 
+  // ----- the owner's three: the fold, the drafts, the areas (T1-6) -----
+  if (OWNER_ONLY_ROUTES.has(key)) {
+    // A code path, not a sentence (U3): whoever else reached this — a gate
+    // in server.ts widened by mistake, a narrower principal minted one day —
+    // gets the console's uniform hidden 403, and no query runs.
+    const owner = may(principal, "read", { kind: "console", door: "console_management", route: key });
+    if (!owner.ok) {
+      await audit("knowledge", key.slice("GET /api/knowledge/".length), false, { refused: owner.reason });
+      return sendRefusal(res, owner);
+    }
+  }
+
+  if (key === "GET /api/knowledge/fold") {
+    const date = (url.searchParams.get("date") ?? "").trim();
+    if (date !== "" && !isCalendarDay(date)) return sendError(res, "invalid_request", "date must be a calendar day, YYYY-MM-DD — omit it for the newest fold there is");
+    const result = await runNamed(res, deps, KNOWLEDGE_FOLD_QUERY, { date });
+    if (!result) return;
+    // Rows, one per outgoing link with the fold's columns repeated (none at
+    // all before the first fold): folded into one object here. The fold's
+    // own path and every link target pass `canSee` like any other row — the
+    // owner's scope is the whole vault, and even the owner is never handed a
+    // `.metistry/` or `Artifacts/` path as a page.
+    const head = filterPages(result.rows.slice(0, 1), scope)[0];
+    const links = head
+      ? filterPages(
+          result.rows
+            .filter((r) => typeof r.link_path === "string")
+            .map((r) => ({ path: r.link_path, title: r.link_title, kind: r.link_kind, resolved: r.link_resolved === true })),
+          scope,
+        )
+      : [];
+    await audit("knowledge", "fold", true, { found: head !== undefined, links: links.length, ...(date ? { date } : {}) });
+    return sendJson(res, 200, {
+      fold: head ? { path: head.path, date: head.date, title: head.title, modified: head.modified ?? null, links } : null,
+      date: date || null,
+      as_of: result.as_of.toISOString(),
+    });
+  }
+
+  if (key === "GET /api/knowledge/drafts") {
+    const limit = clampPages(url.searchParams.get("limit"));
+    if (limit === undefined) return sendError(res, "invalid_request", `limit must be an integer between 1 and ${MAX_PAGES_LIMIT}`);
+    const offset = offsetOf(url.searchParams.get("offset"));
+    if (offset === undefined) return sendError(res, "invalid_request", "offset must be a non-negative integer");
+    const result = await runNamed(res, deps, KNOWLEDGE_DRAFTS_QUERY, { limit, offset });
+    if (!result) return;
+    const drafts = filterPages(result.rows, scope);
+    await audit("knowledge", "drafts", true, { rows: drafts.length, filtered: result.rows.length - drafts.length });
+    // No total, for the page list's reason. Page until a window comes back short.
+    return sendJson(res, 200, { drafts, limit, offset, as_of: result.as_of.toISOString() });
+  }
+
+  if (key === "GET /api/knowledge/areas") {
+    const result = await runNamed(res, deps, KNOWLEDGE_AREAS_QUERY, {});
+    if (!result) return;
+    // An area is a FOLDER, and whether a folder holds knowledge is core's
+    // predicate, asked of a page inside it — the same `canSee` every row of
+    // the page list passes. So an index row the walk should never have
+    // written (`.metistry`, `Artifacts`) cannot become a folder on screen.
+    const areas = result.rows.filter((r) => typeof r.area === "string" && r.area !== "" && canSee(`${r.area}/${AREA_INDEX}`, scope));
+    await audit("knowledge", "areas", true, { rows: areas.length, filtered: result.rows.length - areas.length });
+    return sendJson(res, 200, { areas, as_of: result.as_of.toISOString() });
+  }
+
   // Anything else under /api/knowledge/.
   return sendUnrouted(
     res,
-    "the knowledge read path is GET /api/knowledge/search, GET /api/knowledge/page, GET /api/knowledge/pages and GET /api/knowledge/links (docs/ops/client-api.md)",
+    "the knowledge read path is GET /api/knowledge/search, GET /api/knowledge/page, GET /api/knowledge/pages, GET /api/knowledge/links, GET /api/knowledge/fold, GET /api/knowledge/drafts and GET /api/knowledge/areas (docs/ops/client-api.md)",
   );
+}
+
+/** The page an area's description is read from (`knowledge_areas.yaml`), and the probe its folder is judged by. */
+const AREA_INDEX = "README.md";
+
+/**
+ * Run one of the owner's named queries, or answer why not and return
+ * undefined. Invariant 3: the ONLY thing that produces derived state here is
+ * the query driver — no SQL in this file. Not loaded is the deployment's 503
+ * naming the file; a param the overlay does not declare is the caller's 400;
+ * neither is a 500.
+ */
+async function runNamed(res: ServerResponse, deps: KnowledgeDeps, name: string, params: Record<string, string | number>): Promise<Awaited<ReturnType<QueryStore["run"]>> | undefined> {
+  if (!deps.queries?.names().includes(name)) {
+    sendError(res, "not_available", `the named query ${name} is not loaded (seed/queries/${name}.yaml, METISTRY_QUERIES_DIRS)`);
+    return undefined;
+  }
+  try {
+    return await deps.queries.run(name, params);
+  } catch (err) {
+    if (err instanceof QueryError) {
+      sendError(res, err.code === "unknown_query" ? "not_available" : "invalid_request", err.message);
+      return undefined;
+    }
+    throw err;
+  }
+}
+
+/** `2026-02-30` has the shape and is no day: round-trip it through the UTC calendar, which has no zone to disagree with. */
+function isCalendarDay(s: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const d = new Date(`${s}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
 }
 
 /** `limit`, or undefined when it is not an integer in range — never silently clamped, because a client that asked for 500 should learn the ceiling. */

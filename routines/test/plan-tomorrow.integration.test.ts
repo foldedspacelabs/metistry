@@ -209,4 +209,37 @@ describe.skipIf(!hasDb)("plan-tomorrow (real db)", () => {
     expect(await planTomorrow(pool, { vault, queries, calendar, now: EVENING, env: ENV })).toBe(0);
     expect(vault.writes).toHaveLength(0);
   });
+
+  // T3-7: Close the Day renders early; the 23:00 run supersedes it. The
+  // settled read is the SQL that decides it — a close row never settles.
+  it("two closes re-render, the 23:00 run supersedes them with the fold, and a second 23:00 pass is silent", async () => {
+    const fold = `Journal/Fold/2026-09-21.md`;
+    const vault = fakeVault();
+    const closeAt = new Date("2026-09-21T21:30:00Z"); // Mon 17:30 EDT
+    const slot = new Date("2026-09-22T03:00:00Z"); // Mon 23:00 EDT
+    const close = { vault, queries, calendar, now: closeAt, env: ENV, closedDay: "2026-09-21" };
+    const scheduled = { vault, queries, calendar, now: slot, scheduledFor: slot, timeZone: "America/New_York", env: ENV };
+
+    expect(await planTomorrow(pool, close)).toBe(1);
+    expect(await planTomorrow(pool, close)).toBe(1); // a second close re-renders
+    expect(vault.files.get(PLAN_FILE)).toContain("Tonight's fold has not run yet");
+
+    vault.files.set(fold, `---\nsource: knowledge-fold\ndecisions:\n  - ${MARK} keep the Friday demo\n---\n# Fold\n`);
+    expect(await planTomorrow(pool, scheduled)).toBe(1); // supersedes
+    const late = vault.files.get(PLAN_FILE) ?? "";
+    expect(late).toContain("[[Journal/Fold/2026-09-21]]");
+    expect(late).toContain(`- ${MARK} keep the Friday demo`);
+    expect(await planTomorrow(pool, scheduled)).toBe(0); // settled now
+
+    expect(vault.writes.map((w) => w.path)).toEqual([PLAN_FILE, PLAN_FILE, PLAN_FILE]);
+    const { rows } = await pool.query(
+      `SELECT meta->>'trigger' AS trigger, meta->>'outcome' AS outcome FROM runs WHERE component = $1 AND meta->>'planned_for' = $2 ORDER BY ts, id`,
+      [COMPONENT, TARGET],
+    );
+    expect(rows).toEqual([
+      { trigger: "close", outcome: "acted" },
+      { trigger: "close", outcome: "acted" },
+      { trigger: "schedule", outcome: "acted" },
+    ]);
+  });
 });

@@ -177,7 +177,9 @@ describe("seed queries", () => {
     // Usage's *Where it went* ranking, nothing scoped to a caller.
     // `people_by_email` (T1-10) maps an address to a page naming someone the
     // owner knows: Today's to read, never an agent's way to probe who the
-    // owner knows by address.
+    // owner knows by address. `day_events` and `calendar_event` (T2-11) are
+    // the owner's calendar — who they meet, with links into their People
+    // pages and meeting notes: Today's and the meeting-note door's to read.
     // `day_close` (T2-8) is what the day did to the owner's tasks — paths
     // and the text of their own lines — composed into their daily note by
     // Close the Day, the owner's door alone.
@@ -186,9 +188,11 @@ describe("seed queries", () => {
     // a connection's *Used by* — the owner's to read, never an agent's.
     expect(routeBacked.sort()).toEqual([
       "board",
+      "calendar_event",
       "collector_health",
       "connection_calls",
       "day_close",
+      "day_events",
       "day_work",
       "knowledge_areas",
       "knowledge_drafts",
@@ -499,6 +503,66 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
     } finally {
       await pool.query(`DELETE FROM people_emails WHERE path = ANY($1::text[])`, [[jim, twinA, twinB]]);
       await pool.query(`DELETE FROM knowledge_files WHERE path = ANY($1::text[])`, [[jim, twinA, twinB]]);
+    }
+  });
+
+  // T2-11: one day of the calendar, every source — the rows `GET /api/today`
+  // serves as `events` (the F-7 fixture's shape), with an attendee's person
+  // page resolved by people_by_email's rule and the meeting note by the
+  // first-note rule. `calendar_event` is the same row for one id.
+  it("day_events: the day in the owner's zone, every source, attendees to the ONE page that claims them, the first note — and calendar_event agrees", async () => {
+    const tag = `dev${Date.now()}`;
+    const a = `${tag}-a`;
+    const b = `${tag}-b`;
+    const jim = `People/${tag} Jim.md`;
+    const twinA = `People/${tag} Sam A.md`;
+    const twinB = `People/${tag} Sam B.md`;
+    const person = (name: string, email: string | null, self = false) => ({ name, email, status: "accepted", role: "required", type: "person", self });
+    const ev = (conn: string, id: string, start: string, end: string, title: string, attendees: unknown[] = [], allDay = false) =>
+      pool.query(
+        `INSERT INTO calendar_events (connection, event_id, starts_at, ends_at, all_day, title, location, attendees, self_status) VALUES ($1, $2, $3, $4, $5, $6, NULL, $7::jsonb, $8)`,
+        [conn, id, start, end, allDay, title, JSON.stringify(attendees), attendees.length ? "accepted" : null],
+      );
+    // New York, 28 September (EDT, UTC-4): the day is 04:00Z to 04:00Z next day
+    await ev(a, `${tag}-late`, "2026-09-29T01:00:00Z", "2026-09-29T02:00:00Z", "9 PM in New York"); // on the 28th there, the 29th in UTC
+    await ev(a, `${tag}-early`, "2026-09-28T02:00:00Z", "2026-09-28T03:00:00Z", "10 PM the night before"); // the 27th there
+    await ev(a, `${tag}-ends-at-midnight`, "2026-09-28T03:00:00Z", "2026-09-28T04:00:00Z", "ends at midnight"); // the 27th's
+    await ev(a, `${tag}-point`, "2026-09-28T04:00:00Z", "2026-09-28T04:00:00Z", "zero-length at midnight"); // the 28th's
+    await ev(a, `${tag}-allday`, "2026-09-28T04:00:00Z", "2026-09-29T04:00:00Z", "Offsite", [], true);
+    await ev(a, `${tag}-standup`, "2026-09-28T13:30:00Z", "2026-09-28T13:45:00Z", "Standup", [person("Jim", "jim@x.example"), person("Sam", "sam@x.example"), person("Pat", "pat@x.example"), person("Me", "me@x.example", true), person("Room", null)]);
+    await ev(b, `${tag}-feed`, "2026-09-28T15:00:00Z", "2026-09-28T16:00:00Z", "From another source");
+    await pool.query(`INSERT INTO people_emails (email, path) VALUES ('jim@x.example', $1), ('sam@x.example', $2), ('sam@x.example', $3)`, [jim, twinA, twinB]);
+    const note = `Journal/Meetings/2026-09-28-${tag}-standup.md`;
+    await pool.query(`INSERT INTO vault_meeting_refs (event_id, path) VALUES ($1, $2), ($1, $3), ($1, $4)`, [`${tag}-standup`, note, `${note.slice(0, -3)} 1.md`, `Journal/Meetings/2026/09/2026-09-28-${tag}-standup.md`]);
+    try {
+      const day = async (params: Record<string, string>) => (await store.run("day_events", params)).rows.filter((r) => String(r.event_id).startsWith(tag));
+      const ny = await day({ day: "2026-09-28", tz: "America/New_York" });
+      expect(ny.map((r) => r.event_id)).toEqual([`${tag}-allday`, `${tag}-point`, `${tag}-standup`, `${tag}-feed`, `${tag}-late`]);
+      const standup = ny.find((r) => r.event_id === `${tag}-standup`)!;
+      // exactly the F-7 fixture's keys, no more
+      expect(Object.keys(standup).sort()).toEqual(["all_day", "attendees", "connection", "end", "event_id", "location", "note", "self_status", "start", "title"]);
+      expect(standup).toMatchObject({ connection: a, title: "Standup", all_day: false, location: null, self_status: "accepted", note });
+      expect(new Date(standup.start).toISOString()).toBe("2026-09-28T13:30:00.000Z");
+      expect(standup.attendees).toEqual([
+        { name: "Jim", email: "jim@x.example", person: jim, self: false }, // one page claims him
+        { name: "Sam", email: "sam@x.example", person: null, self: false }, // two do: neither is him
+        { name: "Pat", email: "pat@x.example", person: null, self: false }, // none does: a plain name
+        { name: "Me", email: "me@x.example", person: null, self: true },
+        { name: "Room", email: null, person: null, self: false },
+      ]);
+      // the same day in UTC is another set; one source alone is that source's rows
+      expect((await day({ day: "2026-09-28", tz: "UTC" })).map((r) => r.event_id)).toEqual([`${tag}-allday`, `${tag}-early`, `${tag}-ends-at-midnight`, `${tag}-point`, `${tag}-standup`, `${tag}-feed`]);
+      expect((await day({ day: "2026-09-28", tz: "America/New_York", connection: b })).map((r) => r.event_id)).toEqual([`${tag}-feed`]);
+
+      const one = (await store.run("calendar_event", { event_id: `${tag}-standup` })).rows;
+      expect(one).toHaveLength(1);
+      expect(one[0]).toEqual(standup);
+      expect((await store.run("calendar_event", { event_id: `${tag}-nope` })).rows).toHaveLength(0);
+      expect((await store.run("calendar_event")).rows).toHaveLength(0); // the default, blank
+    } finally {
+      await pool.query(`DELETE FROM calendar_events WHERE connection IN ($1, $2)`, [a, b]);
+      await pool.query(`DELETE FROM people_emails WHERE path = ANY($1::text[])`, [[jim, twinA, twinB]]);
+      await pool.query(`DELETE FROM vault_meeting_refs WHERE event_id = $1`, [`${tag}-standup`]);
     }
   });
 

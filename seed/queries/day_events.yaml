@@ -1,0 +1,95 @@
+# Seeded default (D4 overlay: an instance file of the same name wins).
+#
+# One day of the owner's calendar, every source at once (design-build-plan
+# §2.9, §2.10; ticket T2-11). Every calendar syncs into `calendar_events`
+# under its own `connection` (db/migrations/0034_calendar_events.sql) — the
+# eventkit sync now, ICS, CalDAV and Google later — so Today reads ONE table
+# and never asks which calendar a meeting lives in. Each row is the shape
+# `GET /api/today` serves in its `events` (the F-7 fixture,
+# apps/macos/tests/kit/fixtures/get-api-today.json), so T2-7 composes it as
+# it stands.
+#
+# **Which day.** An event is on `day` when it overlaps local midnight to
+# midnight in `tz` — the owner's zone (`Me/profile.md`'s `timezone`, or
+# METISTRY_TZ), passed by the caller because the database's own zone is
+# whatever the container was started with. Blank `tz` is the session's zone,
+# the convention every other day-shaped query here keeps (`day_work`,
+# `today_order`). An event that ends exactly at midnight is the previous
+# day's; a zero-length one at midnight is this day's.
+#
+# **Two joins, and neither guesses.**
+#   * `attendees[].person` is the ONE People page that claims the address —
+#     `people_by_email`'s rule, word for word (0029): a page the owner wrote
+#     says `email:`, and two pages claiming one address resolve to neither.
+#     An unmatched attendee is a plain name; `person` is null.
+#   * `note` is the meeting note for this occurrence — a note under
+#     `Journal/Meetings/` whose frontmatter says this `event_id:`
+#     (`vault_meeting_refs`). Where two notes claim one event (a copied note
+#     carries its `event_id:` with it), the FIRST is the shortest path, then
+#     byte order: a copy is the original's name plus a suffix (Obsidian's
+#     ` 1`, Finder's ` copy`), so the original wins, and the choice never
+#     flips on a file's mtime. `calendar_event` and the meeting-note door
+#     make the same choice.
+#
+# **Never the invite body.** `calendar_events` has no column for it
+# (0034), so no row here can carry one.
+#
+# **`expose: route`.** Every row names who the owner is meeting, and links
+# into their notes and their People pages; it is Today's to read, through the
+# owner's own route. The generic `/api/q/<name>` and `queries_run` answer
+# this name with the refusal they answer an unknown name with, so an agent
+# with `queries: true` cannot read the owner's day through them.
+name: day_events
+expose: route
+description: >-
+  One day's calendar events from every source (calendar_events), all-day
+  first then by start — each with its attendees (name, address, the one
+  People page that claims the address, the owner's own row marked), the
+  owner's answer, and the meeting note for it. Narrow by `connection`; `tz`
+  is the zone the day is read in.
+params:
+  day: { type: text, default: "" } # YYYY-MM-DD; blank = today in `tz`
+  connection: { type: text, default: "" } # blank = every source
+  tz: { type: text, default: "" } # an IANA zone; blank = the session's zone
+sql: |
+  WITH z AS (
+    SELECT coalesce(nullif(:tz::text, ''), current_setting('TimeZone')) AS tz
+  ), d AS (
+    SELECT z.tz, coalesce(nullif(:day::text, '')::date, (now() AT TIME ZONE z.tz)::date) AS day FROM z
+  ), w AS (
+    SELECT (d.day::timestamp AT TIME ZONE d.tz) AS day_start,
+           ((d.day + 1)::timestamp AT TIME ZONE d.tz) AS day_end
+    FROM d
+  )
+  SELECT
+    e.event_id,
+    e.connection,
+    e.title,
+    e.starts_at AS start,
+    e.ends_at AS "end",
+    e.all_day,
+    e.location,
+    coalesce((
+      SELECT jsonb_agg(jsonb_build_object(
+               'name', nullif(a.value->>'name', ''),
+               'email', nullif(a.value->>'email', ''),
+               'person', (
+                 SELECT p.path FROM people_emails p
+                  WHERE p.email = a.value->>'email'
+                    AND NOT EXISTS (SELECT 1 FROM people_emails o WHERE o.email = p.email AND o.path <> p.path)
+                  LIMIT 1),
+               'self', coalesce((a.value->>'self')::boolean, false))
+             ORDER BY a.ordinality)
+        FROM jsonb_array_elements(e.attendees) WITH ORDINALITY AS a(value, ordinality)
+    ), '[]'::jsonb) AS attendees,
+    e.self_status,
+    (SELECT r.path FROM vault_meeting_refs r
+      WHERE r.event_id = e.event_id
+      ORDER BY length(r.path), r.path COLLATE "C"
+      LIMIT 1) AS note
+  FROM calendar_events e, w
+  WHERE e.starts_at < w.day_end
+    AND (e.ends_at > w.day_start OR e.starts_at >= w.day_start)
+    AND (nullif(:connection::text, '') IS NULL OR e.connection = :connection::text)
+  ORDER BY e.all_day DESC, e.starts_at, e.ends_at, e.connection COLLATE "C", e.event_id COLLATE "C"
+cache_ttl: 0 # a meeting just added, or a note just opened, must show on the next render

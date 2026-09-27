@@ -3,7 +3,7 @@
 // stdio, same shape as afm-helper:
 //   {"id":1,"op":"check"}                          behavioral probe (real read)
 //   {"id":2,"op":"request"}                        trigger the consent prompts
-//   {"id":3,"op":"list_events","days":1}
+//   {"id":3,"op":"list_events","days":1}          add "notes":true for the invite bodies
 //   {"id":4,"op":"list_reminders"}
 //   {"id":5,"op":"create_event","title":"...","start":"ISO","end":"ISO"}
 //   {"id":6,"op":"create_reminder","title":"...","due":"ISO?"}
@@ -21,6 +21,7 @@ struct Req: Decodable {
     let start: String?
     let end: String?
     let due: String?
+    let notes: Bool?
 }
 
 func emit(_ o: [String: Any]) {
@@ -50,15 +51,98 @@ func request() -> [String: Any] {
     return ["events": ev, "reminders": rm]
 }
 
-func listEvents(days: Int) -> [[String: Any]] {
+// A participant's status, role and kind, spelled the way the bridge and the
+// calendar_events table spell them (lowercase, snake_case) — never EventKit's
+// raw integers, which are an enum's order and not a contract.
+func participantStatus(_ s: EKParticipantStatus) -> String {
+    switch s {
+    case .pending: return "pending"
+    case .accepted: return "accepted"
+    case .declined: return "declined"
+    case .tentative: return "tentative"
+    case .delegated: return "delegated"
+    case .completed: return "completed"
+    case .inProcess: return "in_process"
+    default: return "unknown"
+    }
+}
+func participantRole(_ r: EKParticipantRole) -> String {
+    switch r {
+    case .required: return "required"
+    case .optional: return "optional"
+    case .chair: return "chair"
+    case .nonParticipant: return "non_participant"
+    default: return "unknown"
+    }
+}
+func participantType(_ t: EKParticipantType) -> String {
+    switch t {
+    case .person: return "person"
+    case .room: return "room"
+    case .resource: return "resource"
+    case .group: return "group"
+    default: return "unknown"
+    }
+}
+
+// The address a participant is reached at: EventKit hands a `mailto:` URL,
+// so this is that URL's address, percent-decoded, and nil for anything that
+// is not a mailto (a `urn:uuid:` for a room, say). Lowercasing is the
+// reader's business (the sync normalises exactly as people_emails does).
+func participantEmail(_ p: EKParticipant) -> Any {
+    let u = p.url
+    guard u.scheme?.lowercased() == "mailto" else { return NSNull() }
+    let raw = u.absoluteString.dropFirst("mailto:".count)
+    let addr = String(raw).removingPercentEncoding ?? String(raw)
+    return addr.isEmpty ? NSNull() : addr
+}
+
+func participant(_ p: EKParticipant) -> [String: Any] {
+    ["name": p.name ?? NSNull(), "email": participantEmail(p), "status": participantStatus(p.participantStatus),
+     "role": participantRole(p.participantRole), "type": participantType(p.participantType), "self": p.isCurrentUser]
+}
+
+// UTC, basic format: the stable suffix a recurring occurrence's key carries.
+// All-day occurrences are floating (EKEvent.h: "returned in the default time
+// zone"), so they carry the local calendar day instead — the same instant
+// read in another zone would otherwise be another key.
+let occurrenceUTC: DateFormatter = {
+    let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX")
+    f.timeZone = TimeZone(identifier: "UTC"); f.dateFormat = "yyyyMMdd'T'HHmmss'Z'"; return f
+}()
+let occurrenceDay: DateFormatter = {
+    let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX")
+    f.timeZone = TimeZone.current; f.dateFormat = "yyyyMMdd"; return f
+}()
+
+// The events window: local midnight today, for `days` days. `notes` is the
+// invite body — dial-in codes, confidential agendas — and is read ONLY when
+// the request asks for it; the eventkit bridge never does (its GET /events
+// strips the field even if it arrives), so nothing it serves carries one.
+func listEvents(days: Int, notes: Bool = false) -> (events: [[String: Any]], start: Date, end: Date) {
     let start = Calendar.current.startOfDay(for: Date())
     let end = Calendar.current.date(byAdding: .day, value: max(days, 1), to: start)!
     let pred = store.predicateForEvents(withStart: start, end: end, calendars: nil)
-    return store.events(matching: pred).map {
-        ["id": $0.eventIdentifier ?? "", "title": $0.title ?? "", "start": iso.string(from: $0.startDate),
-         "end": iso.string(from: $0.endDate), "all_day": $0.isAllDay, "location": $0.location ?? "",
-         "calendar": $0.calendar.title, "attendees": ($0.attendees ?? []).map { $0.name ?? "" }]
+    let events: [[String: Any]] = store.events(matching: pred).map { e in
+        let recurring = e.hasRecurrenceRules || e.isDetached
+        var o: [String: Any] = [
+            "id": e.eventIdentifier ?? "", "title": e.title ?? "", "start": iso.string(from: e.startDate),
+            "end": iso.string(from: e.endDate), "all_day": e.isAllDay, "location": e.location ?? "",
+            "calendar": e.calendar.title,
+            // names only, as before: morning-brief and weekly-review read this list as strings
+            "attendees": (e.attendees ?? []).map { $0.name ?? "" },
+            "participants": (e.attendees ?? []).map(participant),
+            "organizer": e.organizer.map(participant) ?? NSNull(),
+            "ical_uid": e.calendarItemExternalIdentifier ?? NSNull(),
+            "recurring": recurring,
+            "occurrence": recurring && e.occurrenceDate != nil
+                ? (e.isAllDay ? occurrenceDay.string(from: e.occurrenceDate) : occurrenceUTC.string(from: e.occurrenceDate))
+                : NSNull(),
+        ]
+        if notes { o["notes"] = e.notes ?? NSNull() }
+        return o
     }
+    return (events, start, end)
 }
 
 func listReminders() -> [[String: Any]] {
@@ -107,12 +191,16 @@ func handle(_ line: String) -> [String: Any] {
         case "check":
             // behavioral probe (hard req 3): a real read; unauthorized returns an
             // empty world with no error, so report the auth status alongside
-            let n = listEvents(days: 7).count
+            let n = listEvents(days: 7).events.count
             return ["id": req.id, "ok": true, "probe": "read 7 days of events", "events_found": n,
                     "auth_events": status(EKEventStore.authorizationStatus(for: .event)),
                     "auth_reminders": status(EKEventStore.authorizationStatus(for: .reminder))]
         case "request": return ["id": req.id, "ok": true, "granted": request()]
-        case "list_events": return ["id": req.id, "ok": true, "events": listEvents(days: req.days ?? 1)]
+        case "list_events":
+            let r = listEvents(days: req.days ?? 1, notes: req.notes == true)
+            // the window read, so a sync can tell "cancelled" from "outside what was asked"
+            return ["id": req.id, "ok": true, "events": r.events,
+                    "window": ["start": iso.string(from: r.start), "end": iso.string(from: r.end)]]
         case "list_reminders": return ["id": req.id, "ok": true, "reminders": listReminders()]
         case "create_event": return ["id": req.id, "ok": true, "created": try createEvent(req)]
         case "create_reminder": return ["id": req.id, "ok": true, "created": try createReminder(req)]

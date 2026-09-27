@@ -341,7 +341,7 @@ takes a `since` cursor and answers with the next one.
 | `POST /api/vault-tasks/:task_key/schedule` | owner | session · local_owner | key | stale | — | served | defer one task line: a `do` date or someday |
 | `POST /api/vault-tasks/:task_key/link` | owner | session · local_owner | no | stale | — | T4-25 | add one tracker ref to one task line |
 | `POST /api/today/close` | owner | session · local_owner | no | stale | — | served | Close the Day: write the section, then plan tomorrow |
-| `POST /api/meetings/:event_id/note` | owner | session · local_owner | natural | — | — | T2-11 | the meeting note for one event; a second call returns the first |
+| `POST /api/meetings/:event_id/note` | owner | session · local_owner | natural | — | — | served | the meeting note for one event; a second call returns the first |
 | `POST /api/calendar/events/:id/move` | owner | session · local_owner | no | — | — | T2-12 | move an event: preview, then confirm with a single-use token |
 | `POST /api/calendar/invitations/:id/respond` | owner | session · local_owner | no | — | — | T4-17 | answer an invitation through the connection that can |
 | `POST /api/mail/messages/:id/draft` | owner | session · local_owner | no | — | — | T4-17 | draft a reply through the connection that can; never sends |
@@ -2411,17 +2411,64 @@ POST /api/today/close
 ### Calendar and mail — through the connection that can
 
 ```
-POST /api/meetings/:event_id/note                 T2-11 — the meeting note from `Templates/Meeting.md`; a second call returns the first path
+POST /api/meetings/:event_id/note                 {}   201 {ok, event_id, path, created: true} · 200 {…, created: false}
 POST /api/calendar/events/:id/move                T2-12 — preview, then confirm with a single-use token
 POST /api/calendar/invitations/:id/respond        T4-17 — through the connection's `rsvp` capability
 POST /api/mail/messages/:id/draft                 T4-17 — through the connection's `draft` capability; never sends mail
 ```
 
-A meeting note is one new note per `event_id`, written as `user`; attendee
-notes never reach an agent. Moving an event previews its attendees and the new
-time, and the bridge refuses a confirm for an event with others in it unless it
-carries the owner-door token (B10). Where no connection offers the capability,
-the client offers *Open in Calendar* instead.
+**Where the calendar comes from.** Every calendar source syncs into one table,
+`calendar_events` (0034), under its own `connection` — the eventkit sync
+(`collectors/eventkit-calendar`, every 5 minutes, today and the next two weeks,
+connection `eventkit`) now; ICS, CalDAV and Google later (T4-12…T4-14). Today
+reads a day of it through the route-only `day_events` query; this door reads
+one event through `calendar_event`. A row is one **occurrence**: its
+`event_id` is the source's key for that one meeting — for EventKit, the
+event's identifier, plus the occurrence's original date when it recurs
+(`<identifier>_20260928T133000Z`, or `_20260928` all-day) — so a Monday
+standup's note is that Monday's, and moving a one-off meeting keeps its note.
+Each attendee carries a name, an address (lowercased, as `people_emails`
+stores it), the one People page that claims the address (`person`, or null —
+never a guess) and whether it is the owner; the event carries the owner's own
+answer (`self_status`). **The invite body never arrives**: the eventkit bridge
+does not ask its helper for it and drops it if sent, and `calendar_events` has
+no column for it — dial-in codes and confidential agendas never reach anything
+an agent reads.
+
+**The meeting note** (§2.11) — the owner's *Open notes*:
+
+- **One note per `event_id`.** The first call renders the owner's
+  `Templates/Meeting.md` (core's engine, `source: user`; the meeting's start is
+  the render's *now*, so `{{ date }}` is the meeting's day; `{{ calendar }}`
+  reads `day_events`) and writes it as `user` to
+  `Journal/Meetings/<date>-<topic>.md` — the day in the owner's zone
+  (`METISTRY_TZ`), the topic the title lowercased with every run of anything
+  but letters and digits one `-`. The note's frontmatter gains `event_id:`,
+  which is how the reconciler's walk links it (`vault_meeting_refs`). `201`,
+  `created: true`. Commit: `open notes for "<title>"`, as `user`.
+- **Every later call is `200` with the same path**, `created: false`. The
+  index answers first (where two notes claim one event, the shortest path,
+  then byte order — a copy is the original's name with a suffix); the walk
+  may be minutes behind, so the door also serialises calls for one event,
+  remembers the path it wrote, re-derives the same file name, believes a file
+  there only when its own frontmatter names this event, and writes
+  create-only — it never overwrites a note. A file of that name that is
+  another note's pushes the new one to `-2`, `-3`, …
+- **Refused, nothing written:** an id no calendar holds (`404` — the sync may
+  not have read it yet); `Templates/Meeting.md` missing (`404`, the file
+  named); a body with any field (`400` — the title, day and template are the
+  calendar's and the vault's, never the request's); an id with surrounding
+  space, a control character, or over 1024 characters (`400`); no vault
+  bridge (`503`).
+- **Owner only**, like Tick: an agent bearer and the capture owner token get
+  the uniform `403`. Not an action — no proposal can open a note. The ledger
+  row (`kind: meeting_note`) carries the id and the outcome, never the title
+  or the path.
+
+Moving an event previews its attendees and the new time, and the bridge
+refuses a confirm for an event with others in it unless it carries the
+owner-door token (B10). Where no connection offers the capability, the client
+offers *Open in Calendar* instead.
 
 ### Scheduled — routines and syncs
 

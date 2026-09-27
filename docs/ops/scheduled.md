@@ -392,9 +392,14 @@ each routine's manifest:
 
 The syncs: GitHub (`github-state`) every 15 min, raising *A pull request
 asks for your review* and *An issue is assigned to you* (both on — the
-raises themselves land with T2-13 and T4-23); Devin Sessions every 5 min;
-Devin Knowledge hourly; AWS Costs every 6 hours. No shipped manifest carries
-a cron string any more.
+raises themselves land with T2-13 and T4-23); Calendar (`eventkit-calendar`,
+T2-11) every 5 min — the owner's calendars on this Mac, today and the next two
+weeks, through the eventkit bridge into `calendar_events` (connection
+`eventkit`), the one table every calendar source syncs into and Today reads;
+it degrades absent without `METISTRY_EK_URL` and the bridge token, and a
+helper built before T2-11 is a failed run naming the rebuild; Devin Sessions
+every 5 min; Devin Knowledge hourly; AWS Costs every 6 hours. No shipped
+manifest carries a cron string any more.
 
 **Standup** is §2.5's eighth default, working days at 08:00. It renders
 its template into `Journal/Standup/<date>.md` — its own reserved subfolder,

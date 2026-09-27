@@ -15,8 +15,9 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { join, relative } from "node:path";
-import { INSTANCE_LAYOUT, LEGACY_VAULT_DIR, detectLayout, intEnv, usesCompose, type Deployment, type InstanceLayoutShape, type KeychainBackend } from "@foldedspacelabs/metistry-core";
+import { INSTANCE_LAYOUT, LEGACY_VAULT_DIR, TEMPLATES_DIR, detectLayout, intEnv, usesCompose, type Deployment, type InstanceLayoutShape, type KeychainBackend } from "@foldedspacelabs/metistry-core";
 import { writeCliShim } from "./cli-shim.js";
+import { SEED_VAULT_DIR } from "./init.js";
 import { loadDeployment } from "./deployment.js";
 import { doctor, renderTable, type DoctorDeps, type DoctorReport } from "./doctor.js";
 import { productVersion } from "./env.js";
@@ -97,6 +98,8 @@ export interface UpdateResult {
   runtimeDeps?: InstallRuntimeDepsResult;
   /** the directory the rest of the update ran against (`<product-dir>/current` in release mode) */
   runDir: string;
+  /** the seed templates the vault lacked, copied in by this run (`Templates/Brief.md`, …) — never one it already had */
+  seededTemplates?: SeedTemplatesResult;
   /** the shared-scope migration (plan §2.14), when it ran — names only */
   sharedScope?: MigrateScopeResult;
 }
@@ -301,6 +304,7 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
   let release: InstallReleaseResult | undefined;
   let runtimeDeps: InstallRuntimeDepsResult | undefined;
   let sharedScope: MigrateScopeResult | undefined;
+  let seededTemplates: SeedTemplatesResult | undefined;
   // release mode swings this to `<product-dir>/current` once the switch is done
   let runDir = runDirFor(productDir, source);
   let releaseVersion = version;
@@ -489,6 +493,15 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
     const delivery = await writeLock(r, lock, { env, platform, uid, fetchFn });
     r.note(delivery.detail);
 
+    // A template a release adds (Templates/Brief.md in 0.14) reached only a
+    // FRESH init — `update` never looked at the vault, so an upgraded one
+    // never got it and the routine that reads it skipped every morning (W2
+    // checkpoint D1). After the lock because, like the lock, it goes through
+    // the reconciler as the owner, which the restart above has just handed
+    // the owner bearer. Absent files only: the owner's templates are theirs.
+    r.section("templates");
+    seededTemplates = await seedTemplates(r, { seedDir: join(runDir, "seed"), instanceDir: instanceDir.instanceDir, env, platform, uid, fetchFn });
+
     // After the lock, because it writes secrets.yaml through the same
     // reconciler as the owner, which the restart above has just given the
     // owner bearer. It can never fail the update: an instance that has not
@@ -520,7 +533,87 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
   const code = failure ? failure.code || 1 : doctorCode;
   r.out("");
   r.out(updateSummary({ ui: r.ui, dryRun: r.dryRun, failure, code, source, version: lock?.product.version ?? releaseVersion, migrations, restarted, kickstartFailed: kickFailed.length }));
-  return { code, source, runDir, commands: r.commands, ...(lock ? { lock } : {}), restarted, ...(migrations ? { migrations } : {}), ...(release ? { release } : {}), ...(runtimeDeps ? { runtimeDeps } : {}), ...(sharedScope ? { sharedScope } : {}) };
+  return { code, source, runDir, commands: r.commands, ...(lock ? { lock } : {}), restarted, ...(migrations ? { migrations } : {}), ...(release ? { release } : {}), ...(runtimeDeps ? { runtimeDeps } : {}), ...(sharedScope ? { sharedScope } : {}), ...(seededTemplates ? { seededTemplates } : {}) };
+}
+
+// ---- seed templates the vault lacks ---------------------------------------------------
+
+export interface SeedTemplatesResult {
+  /** vault-relative paths written (or, in a dry run, that would be) — each one the vault did not have */
+  copied: string[];
+  /** seed templates the vault already had: left byte for byte as they are */
+  kept: string[];
+}
+
+/**
+ * Copy every `seed/vault/Templates/*.md` the instance's vault does NOT have.
+ *
+ * `metistry init` stamps the seed's templates once; a template a later
+ * release adds therefore reached only fresh installs, and the routine that
+ * reads it skipped on every upgraded one (W2 checkpoint D1: `Templates/Brief.md`,
+ * `skipped:template_missing` every morning). This is the other half of
+ * init's `keepExisting`: what is genuinely missing is copied, and a file that
+ * is there — whatever it says, edited or not — is never touched. The owner's
+ * templates are theirs (invariant 2).
+ *
+ * Each copy goes through the reconciler as `user` when a bridge is
+ * configured, create-only (the bridge's own compare-and-swap refuses to
+ * replace a file that appeared in between), else directly into a local vault
+ * — the same policy as every other file `update` writes (protected-write.ts).
+ * Idempotent: a second run finds nothing missing and writes nothing. It never
+ * fails the update — a template it could not write is named, with the rerun.
+ */
+export async function seedTemplates(
+  r: StepRunner,
+  o: { seedDir: string; instanceDir: string | undefined; env: NodeJS.ProcessEnv; platform: NodeJS.Platform; uid: number; fetchFn: typeof fetch },
+): Promise<SeedTemplatesResult> {
+  const result: SeedTemplatesResult = { copied: [], kept: [] };
+  let failed = 0;
+  const dir = o.instanceDir?.replace(/\/+$/, "");
+  if (!dir) {
+    r.note("templates: no METISTRY_INSTANCE_DIR — no vault to seed");
+    return result;
+  }
+  const shape = detectLayout(dir);
+  if (shape !== "flat") {
+    r.note(`templates: ${dir} is on the ${shape} layout — not seeded (\`metistry migrate-layout\` first; the vault is at the instance root after it)`);
+    return result;
+  }
+  const from = join(o.seedDir, SEED_VAULT_DIR, TEMPLATES_DIR);
+  let names: string[];
+  try {
+    names = (await readdir(from)).filter((f) => f.endsWith(".md")).sort();
+  } catch {
+    r.note(`templates: no seed templates at ${from} — nothing to seed`);
+    return result;
+  }
+  for (const name of names) {
+    const rel = `${TEMPLATES_DIR}/${name}`;
+    if (existsSync(join(dir, rel))) {
+      result.kept.push(rel);
+      continue;
+    }
+    try {
+      const content = await readFile(join(from, name), "utf8");
+      const delivery = await writeProtected(r, rel, content, `metistry update: seed ${rel} (the vault did not have it)`, {
+        env: o.env,
+        platform: o.platform,
+        uid: o.uid,
+        fetchFn: o.fetchFn,
+        instanceDir: dir,
+        createOnly: true,
+      });
+      if (delivery.kept) result.kept.push(rel);
+      else result.copied.push(rel);
+      r.note(`templates: ${delivery.kept ? "kept" : "seeded"} ${rel} — ${delivery.detail}`);
+    } catch (err) {
+      if (!(err instanceof StepFailed)) throw err;
+      failed++;
+      r.note(`templates: ${rel} was NOT seeded (${err.message}) — the update is unaffected; rerun \`metistry update\` once that is fixed`);
+    }
+  }
+  if (result.copied.length === 0 && failed === 0) r.note(`templates: the vault has all ${names.length} seed template(s) — nothing copied`);
+  return result;
 }
 
 // ---- the closing doctor, run by the NEW code ------------------------------------------

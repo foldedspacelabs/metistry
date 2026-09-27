@@ -1,0 +1,40 @@
+# Seeded default (D4 overlay: an instance file of the same name wins).
+#
+# One day's drag order (design-build-plan §2.9, §2.10, decision D10:
+# "Today's drag order stored server-side"; ticket T1-9) — the rows
+# `db/migrations/0028_today_order.sql` holds, for the one day asked about,
+# in the order the owner last left them.
+#
+# This is the WHOLE of what `today_order` (the table) is for: Today composes
+# several sources for one day (`vault_tasks_query`, `day_work`, `day_events`)
+# and none of them carries where the owner dragged a row to, so this is the
+# one extra fact `GET /api/today` (T2-7) folds in beside them, keyed by
+# `task_key`. A day with no row here has never been reordered — Today falls
+# back to those queries' own order, and that is a client-side decision, not
+# something this query papers over with a default.
+#
+# **`expose: route`.** No door reads this yet — `GET /api/today` is T2-7's
+# job, not this ticket's — marked ahead of it so the generic
+# `/api/q/today_order` and `queries_run` never become a second, unscoped way
+# to read the owner's arrangement of their own day. Same rule
+# `collector_health` states for the same reason: nothing here is sensitive on
+# its own (a date and a hash key), but the write door (`PUT /api/today/order`)
+# is owner-only, and a read door that is not would be an asymmetry an agent
+# could ask through instead.
+name: today_order
+expose: route
+description: >-
+  One day's rows from `today_order`, in position order: the owner's drag
+  order for Today, keyed by `task_key`. A day with no row here returns no
+  rows — never reordered, so Today falls back to its own queries' order.
+params:
+  day: { type: text, default: "" } # blank = the cluster's current_date
+sql: |
+  SELECT
+    t.day::text AS day,
+    t.task_key,
+    t.position
+  FROM today_order t
+  WHERE t.day = coalesce(nullif(:day::text, '')::date, current_date)
+  ORDER BY t.position
+cache_ttl: 0 # a stale drag order after the owner just moved a row is exactly the thing to never show

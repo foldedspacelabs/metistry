@@ -4,12 +4,13 @@
 
 ### the Today fixture's task (on surface #fffdf8)
 Presentation
-  marks: [4]
+  marks: [5]
     -: mark badge "P2" · caption-1 10pt sans semibold · ink=text-primary #1a1815 · on=surface #fffdf8 · outline=border-control #8e8676 · contrast=17.43 · says "priority 2"
     -: mark text "Today" · glyph=calendar · subhead 11pt sans · ink=text-secondary #57514a · on=surface #fffdf8 · contrast=7.71 · says "due today"
     -: mark text "~15m" · glyph=clock · subhead 11pt sans · ink=text-secondary #57514a · on=surface #fffdf8 · contrast=7.71 · says "about 15 minutes"
     -: mark chip "metistry" · subhead 11pt sans · ink=entity-project #345dcf · plate=entity-project-quiet #dee3f0 · on=surface #fffdf8 · contrast=4.53 · says "project metistry"
-  spoken: "priority 2, due today, about 15 minutes, project metistry"
+    -: mark chip "Blocking an Agent" · glyph=exclamationmark.triangle · subhead 11pt sans · ink=degraded #8a5a00 · plate=degraded-quiet #efe6d5 · on=surface #fffdf8 · contrast=4.78 · says "blocking an agent"
+  spoken: "priority 2, due today, about 15 minutes, project metistry, blocking an agent"
 
 ### everything: overdue wins the one tint, the rest fold into +N (on surface #fffdf8)
 Presentation
@@ -36,12 +37,13 @@ Presentation
 
 ### the Today fixture's task (on surface #171c22)
 Presentation
-  marks: [4]
+  marks: [5]
     -: mark badge "P2" · caption-1 10pt sans semibold · ink=text-primary #e9edf1 · on=surface #171c22 · outline=border-control #68717c · contrast=14.56 · says "priority 2"
     -: mark text "Today" · glyph=calendar · subhead 11pt sans · ink=text-secondary #a7b1bc · on=surface #171c22 · contrast=7.88 · says "due today"
     -: mark text "~15m" · glyph=clock · subhead 11pt sans · ink=text-secondary #a7b1bc · on=surface #171c22 · contrast=7.88 · says "about 15 minutes"
     -: mark chip "metistry" · subhead 11pt sans · ink=entity-project #7d98e1 · plate=entity-project-quiet #27324e · on=surface #171c22 · contrast=4.51 · says "project metistry"
-  spoken: "priority 2, due today, about 15 minutes, project metistry"
+    -: mark chip "Blocking an Agent" · glyph=exclamationmark.triangle · subhead 11pt sans · ink=degraded #e8b84b · plate=degraded-quiet #383529 · on=surface #171c22 · contrast=6.66 · says "blocking an agent"
+  spoken: "priority 2, due today, about 15 minutes, project metistry, blocking an agent"
 
 ### everything: overdue wins the one tint, the rest fold into +N (on surface #171c22)
 Presentation
@@ -68,12 +70,13 @@ Presentation
 
 ### the Today fixture's task (on surface #fffdf8)
 Presentation
-  marks: [4]
+  marks: [5]
     -: mark badge "P2" · caption-1 31pt sans semibold · ink=text-primary #1a1815 · on=surface #fffdf8 · outline=border-control #8e8676 · contrast=17.43 · says "priority 2"
     -: mark text "Today" · glyph=calendar · subhead 34pt sans · ink=text-secondary #57514a · on=surface #fffdf8 · contrast=7.71 · says "due today"
     -: mark text "~15m" · glyph=clock · subhead 34pt sans · ink=text-secondary #57514a · on=surface #fffdf8 · contrast=7.71 · says "about 15 minutes"
     -: mark chip "metistry" · subhead 34pt sans · ink=entity-project #345dcf · plate=entity-project-quiet #dee3f0 · on=surface #fffdf8 · contrast=4.53 · says "project metistry"
-  spoken: "priority 2, due today, about 15 minutes, project metistry"
+    -: mark chip "Blocking an Agent" · glyph=exclamationmark.triangle · subhead 34pt sans · ink=degraded #8a5a00 · plate=degraded-quiet #efe6d5 · on=surface #fffdf8 · contrast=4.78 · says "blocking an agent"
+  spoken: "priority 2, due today, about 15 minutes, project metistry, blocking an agent"
 
 ### everything: overdue wins the one tint, the rest fold into +N (on surface #fffdf8)
 Presentation

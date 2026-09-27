@@ -1,8 +1,7 @@
 {
   "route": "GET /api/knowledge/history",
-  "source": "contract",
-  "ticket": "T10-4",
-  "note": "a file's commits, newest first",
+  "source": "recorded",
+  "ticket": null,
   "request": {
     "method": "GET",
     "path": "/api/knowledge/history?path=Projects%2FMetistry%2FRoadmap.md",
@@ -14,18 +13,44 @@
     "path": "Projects/Metistry/Roadmap.md",
     "commits": [
       {
-        "sha": "4c1d2e3f",
-        "subject": "assistant: fold",
-        "author": "assistant",
+        "sha": "4c1d2e3f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d",
+        "path": "Projects/Metistry/Roadmap.md",
+        "change": "renamed",
+        "subject": "Rename the plan to the roadmap",
+        "author": "Metistry user",
+        "source": "user",
+        "runs": [],
+        "turns": [],
+        "at": "2026-09-28T13:10:00.000Z"
+      },
+      {
+        "sha": "9ab8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0",
+        "path": "Projects/Metistry/Plan.md",
+        "change": "modified",
+        "subject": "Fold: the store interface",
+        "author": "Metistry assistant",
+        "source": "assistant",
+        "runs": [
+          "4107"
+        ],
+        "turns": [
+          "t_fold-0928"
+        ],
         "at": "2026-09-28T03:00:00.000Z"
       },
       {
-        "sha": "9ab8c7d6",
-        "subject": "user: edit",
-        "author": "user",
+        "sha": "1f2e3d4c5b6a79880706a5b4c3d2e1f0a9b8c7d6",
+        "path": "Projects/Metistry/Plan.md",
+        "change": "added",
+        "subject": "Start the plan",
+        "author": "Metistry user",
+        "source": "user",
+        "runs": [],
+        "turns": [],
         "at": "2026-09-27T18:10:00.000Z"
       }
     ],
-    "as_of": "2026-09-28T13:05:00.000Z"
+    "limit": 50,
+    "as_of": "2026-09-27T03:02:01.331Z"
   }
 }

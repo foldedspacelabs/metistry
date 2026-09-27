@@ -1,20 +1,30 @@
 {
   "route": "GET /api/knowledge/version",
-  "source": "contract",
-  "ticket": "T10-4",
-  "note": "one file at one commit",
+  "source": "recorded",
+  "ticket": null,
   "request": {
     "method": "GET",
-    "path": "/api/knowledge/version?path=Projects%2FMetistry%2FRoadmap.md&sha=9ab8c7d6",
+    "path": "/api/knowledge/version?path=Projects%2FMetistry%2FPlan.md&sha=9ab8c7d6",
     "body": null,
     "idempotency_key": null
   },
   "status": 200,
   "body": {
-    "path": "Projects/Metistry/Roadmap.md",
-    "sha": "9ab8c7d6",
-    "content": "# Roadmap\n\nShip the store interface.\n",
-    "bytes": 38,
-    "as_of": "2026-09-28T13:05:00.000Z"
+    "path": "Projects/Metistry/Plan.md",
+    "sha": "9ab8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0",
+    "subject": "Fold: the store interface",
+    "author": "Metistry assistant",
+    "source": "assistant",
+    "runs": [
+      "4107"
+    ],
+    "turns": [
+      "t_fold-0928"
+    ],
+    "at": "2026-09-28T03:00:00.000Z",
+    "content": "# Plan\n\nShip the store interface.\n",
+    "sha256": "f617b86744f058b41814af06d85b48e4ca2717c48ef169b5efb4a3af57a58116",
+    "bytes": 34,
+    "as_of": "2026-09-27T03:02:23.193Z"
   }
 }

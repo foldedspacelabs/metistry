@@ -168,7 +168,8 @@ public struct ActivityFeedRow: Codable, Sendable, Equatable, Identifiable {
     /// The exact row kind — `capture`, `tool`, `turn`, `task_op`, `proposal`, …
     public let kind: String
     /// The coarser closed vocabulary the chips read: capture | proposal |
-    /// decision | run | work | message. Decided in the query, not per surface.
+    /// decision | run | work | message | routine. Decided in the query, not
+    /// per surface.
     public let group: String?
     public let actor: String?
     public let subject: String?
@@ -180,13 +181,17 @@ public struct ActivityFeedRow: Codable, Sendable, Equatable, Identifiable {
     /// The id stamped on every brain tool call made while answering one
     /// message; nil on everything that is not one.
     public let turnID: String?
+    /// `false` only where a run failed — the glyph, not the row, takes
+    /// `failed`; `true` for a run that did not; nil where the source has no
+    /// notion of failing (a capture, a request, a work entry, a message).
+    public let ok: Bool?
 
     enum CodingKeys: String, CodingKey {
-        case ts, kind, group, actor, subject, detail, ref
+        case ts, kind, group, actor, subject, detail, ref, ok
         case turnID = "turn_id"
     }
 
-    public init(ts: String, kind: String, group: String? = nil, actor: String? = nil, subject: String? = nil, detail: String? = nil, ref: String? = nil, turnID: String? = nil) {
+    public init(ts: String, kind: String, group: String? = nil, actor: String? = nil, subject: String? = nil, detail: String? = nil, ref: String? = nil, turnID: String? = nil, ok: Bool? = nil) {
         self.ts = ts
         self.kind = kind
         self.group = group
@@ -195,6 +200,7 @@ public struct ActivityFeedRow: Codable, Sendable, Equatable, Identifiable {
         self.detail = detail
         self.ref = ref
         self.turnID = turnID
+        self.ok = ok
     }
 
     /// The de-duplication tuple, and the row's identity for a `ForEach`. `ref`

@@ -19,7 +19,7 @@
 // `describeScope` render an agent the CLI read over HTTP and one the console
 // read out of Postgres in the same words.
 
-import { describePermissions, type GrantSource, type GrantTier, type Principal, type Role, type Scope } from "./access.js";
+import { describePermissions, inheritGrants, type GrantSource, type GrantTier, type InheritedReach, type Principal, type ProjectGrant, type Role, type Scope } from "./access.js";
 import type { ActionAutonomy } from "./actions.js";
 import type { Compute } from "./compute.js";
 import { crewModelIssue, isLegacyCrewModel, SAME_AS_ASSISTANT } from "./crew-model.js";
@@ -151,7 +151,9 @@ export type PermissionProvenance =
   /** Approved in Needs You. `proposalId` links the request; null only for a hand-written override (0023). */
   | { readonly kind: "approved"; readonly proposalId: number | null }
   /** Held only while this routine runs — a per-run grant (§2.5, T3-8). */
-  | { readonly kind: "routine"; readonly routine: string };
+  | { readonly kind: "routine"; readonly routine: string }
+  /** Inherited from a project the actor is a member of (T4-7, D13): the project's own grant, not the actor's. Leaving the project takes it away. */
+  | { readonly kind: "project"; readonly project: string };
 
 /** One thing in a cell: an area, a project, a verb, a connection tool. */
 export interface PermissionEntry {
@@ -290,6 +292,8 @@ export interface ActorGrantHistory {
   readonly approved: readonly { readonly area: string; readonly proposalId: number | null }[];
   /** Per-run read grants routines give this actor (§2.5, T3-8). `[]` until T3-8. */
   readonly routines: readonly { readonly routine: string; readonly areas: readonly string[] }[];
+  /** What the scope holds only through a project it is a member of (T4-7) — `inheritGrants`'s `via`. Absent = nothing inherited. */
+  readonly projects?: readonly InheritedReach[] | undefined;
 }
 
 /** Everything `ResolveActor` reads, loaded by the host. Lookups are synchronous: the host has already read what it passes. */
@@ -311,6 +315,13 @@ export interface ActorSources {
   /** Connections granted to this actor (F-3, T4-8). `() => []` until they exist. */
   readonly connections: (id: string) => readonly string[];
   readonly grantHistory: (id: string) => ActorGrantHistory;
+  /**
+   * Every project's own read grant (0032, T4-7). A crew or external member
+   * inherits its projects' — its scope is `inheritGrants` over its row and
+   * these, the same union the console's door resolves a bearer to. Absent =
+   * no project holds a grant.
+   */
+  readonly projectGrants?: readonly ProjectGrant[] | undefined;
 }
 
 /**
@@ -451,14 +462,24 @@ function areaFromPath(path: string): string {
  *    else is external.
  *
  * Permissions come from the ROW for every kind, because the row is what the
- * door reads. The assistant's source is always `environment`: its reach is
- * configuration, never a grant (C52), whatever an old row's column says.
+ * door reads — and for a crew or an external agent, the row ∪ the grants of
+ * the projects it is a member of (T4-7), which is what the door resolves its
+ * bearer to; each inherited line is marked *via project*. The assistant
+ * inherits nothing: its reach is configuration (C52), and its "every
+ * project" is where it may work, not a list of projects it joined. The
+ * assistant's source is always `environment`: its reach is configuration,
+ * never a grant (C52), whatever an old row's column says.
  */
 export const resolveActor: ResolveActor = (id, sources) => {
   const row = sources.registry(id);
   const live = row !== undefined && !row.revoked ? row : undefined;
   const history = sources.grantHistory(id);
   const connections = [...sources.connections(id)];
+  /** A member's scope: its row ∪ its projects' grants (`inheritGrants`), and the history that marks what came via which project. */
+  const member = (r: ActorRegistryRow): { scope: Scope; history: ActorGrantHistory } => {
+    const { grants, via } = inheritGrants(r.grants, r.projects, sources.projectGrants ?? []);
+    return { scope: scopeOfRegistryRow({ ...r, grants }), history: via.length === 0 ? history : { ...history, projects: via } };
+  };
 
   const assistant = (r: ActorRegistryRow | undefined): AssistantActor => {
     const scope = r ? scopeOfRegistryRow(r) : EMPTY_SCOPE;
@@ -490,7 +511,7 @@ export const resolveActor: ResolveActor = (id, sources) => {
     case "crew": {
       const crew = sources.crew(id);
       if (!crew) return null;
-      const scope = scopeOfRegistryRow(live);
+      const { scope, history: lineage } = member(live);
       const source: GrantSource = { manifest: crew.file.path };
       const groups = crewToolGroups(crew.manifest.uses);
       const principal: Principal = { id, role: "crew", scope, source, uses: [...crew.manifest.uses] };
@@ -510,7 +531,7 @@ export const resolveActor: ResolveActor = (id, sources) => {
           scope,
           autonomy: actionAutonomyOf(live.autonomy),
           source,
-          lines: crewPermissionRows(id, describePermissions(principal, { connections, history })),
+          lines: crewPermissionRows(id, describePermissions(principal, { connections, history: lineage })),
         },
         tools: { groups, connections },
         compute: crewCompute(id, crew.manifest, sources.compute),
@@ -518,7 +539,7 @@ export const resolveActor: ResolveActor = (id, sources) => {
       };
     }
     case "external": {
-      const scope = scopeOfRegistryRow(live);
+      const { scope, history: lineage } = member(live);
       // The registry: the owner's own hand (docs/ops/actors.md's field table).
       const source: GrantSource = "registry";
       const principal: Principal = { id, role: "agent", scope, source };
@@ -532,7 +553,7 @@ export const resolveActor: ResolveActor = (id, sources) => {
           scope,
           autonomy: actionAutonomyOf(live.autonomy),
           source,
-          lines: externalPermissionRows(id, describePermissions(principal, { connections, history })),
+          lines: externalPermissionRows(id, describePermissions(principal, { connections, history: lineage })),
         },
         tools: { groups: null, connections },
         compute: null,

@@ -18,7 +18,7 @@
 # collector reconciles from a source of truth (issue/pr/event) are visible in
 # `work` but never claimable (packages/tasks CLAIMABLE_KINDS, ruling
 # 2026-09-06), so "assigned" and "in progress" would be lies about them.
-# `open_work` / `projects_overview` remain the view over those.
+# `open_work` / `areas_overview` remain the view over those.
 #
 # `expose: route` since T1-2 (design-build-plan §2.10: "wherever the owner's
 # route is the only door, so the generic door cannot hand an agent with

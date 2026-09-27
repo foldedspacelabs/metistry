@@ -30,6 +30,8 @@ import type {
   ResolveActor,
   Role,
   Scope,
+  resolveActor,
+  crewCompute,
 } from "../../src/index.js";
 
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
@@ -100,6 +102,10 @@ export type Kinds = [
 export type Signature = [
   Expect<Equal<Parameters<ResolveActor>, [id: string, sources: ActorSources]>>,
   Expect<Equal<ReturnType<ResolveActor>, Actor | null>>,
+  // …and T4-6's implementation is exactly that signature
+  Expect<Equal<typeof resolveActor, ResolveActor>>,
+  // a crew's compute is never the router's
+  Expect<Equal<ReturnType<typeof crewCompute>, CrewActor["compute"]>>,
 ];
 
 // ---- refusals: what must not compile -------------------------------------------

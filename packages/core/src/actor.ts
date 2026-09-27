@@ -9,10 +9,9 @@
 // `agents` registry row, a crew's manifest, `identity.yaml`, `compute.yaml`.
 // The source mapping, field by field, is docs/ops/actors.md.
 //
-// F-2 freezes the SHAPE and nothing else. This file is types plus one
-// mapping table: it resolves nothing and no door reads it yet. `ResolveActor`
-// is the signature T4-6 implements here, and `describePermissions()` (T4-6,
-// beside `describeScope` in access.ts) is what fills a `PermissionRow`.
+// F-2 froze the SHAPE; T4-6 implements it: `resolveActor` below composes an
+// actor from its sources, and `describePermissions()` (beside `describeScope`
+// in access.ts) is what fills a `PermissionRow`.
 //
 // Like the rest of core it imports no Postgres, no vault and no config
 // (CLAUDE.md: the dependency arrow points one way). The host loads the
@@ -20,10 +19,11 @@
 // `describeScope` render an agent the CLI read over HTTP and one the console
 // read out of Postgres in the same words.
 
-import type { GrantSource, GrantTier, Role, Scope } from "./access.js";
+import { describePermissions, type GrantSource, type GrantTier, type Principal, type Role, type Scope } from "./access.js";
 import type { ActionAutonomy } from "./actions.js";
 import type { Compute } from "./compute.js";
-import type { AgentManifest, CrewToolGroup } from "./manifest.js";
+import { CREW_TOOL_GROUPS, crewGroupOf, crewModelIssue, isLegacyCrewModel, SAME_AS_ASSISTANT, type AgentManifest, type CrewToolGroup } from "./manifest.js";
+import { modelRefIssue } from "./model-ref.js";
 import type { Effort } from "./tiers.js";
 
 // ---- what an actor is ----------------------------------------------------------
@@ -321,3 +321,222 @@ export interface ActorSources {
  * for every field.
  */
 export type ResolveActor = (id: string, sources: ActorSources) => Actor | null;
+
+// ---- the resolver (T4-6) -------------------------------------------------------------
+
+/**
+ * The instance's own assistant's registry id — `agents.id` for the row
+ * `ensureInternalAgent` writes (the console's `INTERNAL_ASSISTANT_ID`). A
+ * slug, never the configured name (CLAUDE.md naming).
+ */
+export const ASSISTANT_AGENT_ID = "assistant";
+
+/** The scope of an assistant whose credential is off: nothing it does reaches a door (docs/ops/actors.md, rule 1). */
+export const EMPTY_SCOPE: Scope = Object.freeze({ tier: "none", areas: Object.freeze([]) as readonly string[], queries: false, projects: Object.freeze([]) as readonly string[] });
+
+/** A stored `agents.kind` → the actor it is. Outside the three, `external`: arriving unknown never makes a row more than it was. */
+export function actorKindOf(rowKind: string): ActorKind {
+  return Object.hasOwn(ACTOR_OF_AGENT_KIND, rowKind) ? ACTOR_OF_AGENT_KIND[rowKind as AgentRowKind].kind : "external";
+}
+
+/**
+ * **A registry row's scope, as `may()` reads it** — `principalOfRow`'s
+ * derivation (apps/console/src/agents.ts), written once here so the console's
+ * door and an actor cannot derive it differently: the grant's tier and areas
+ * (copied), `queries` only when it is literally `true`, the projects — where
+ * an `internal` row's empty list is `null`, every project — and the row's
+ * autonomy record.
+ */
+export function scopeOfRegistryRow(row: Pick<ActorRegistryRow, "kind" | "grants" | "projects" | "autonomy">): Scope {
+  return {
+    tier: row.grants.tier,
+    areas: [...row.grants.areas],
+    queries: row.grants.queries === true,
+    projects: row.kind === "internal" && row.projects.length === 0 ? null : [...row.projects],
+    autonomy: row.autonomy,
+  };
+}
+
+/** The action half of an autonomy record: its level and per-kind table, and nothing of §4.21's narrowing keys. */
+function actionAutonomyOf(a: ActionAutonomy | null | undefined): ActionAutonomy {
+  return { ...(a?.level !== undefined ? { level: a.level } : {}), ...(a?.actions !== undefined ? { actions: { ...a.actions } } : {}) };
+}
+
+/** A manifest's `uses`, aliases resolved, deduplicated, in `CREW_TOOL_GROUPS` order. `[]` is a crew holding no tools — never `null`. */
+export function crewToolGroups(uses: readonly string[]): CrewToolGroup[] {
+  const held = new Set(uses.map(crewGroupOf).filter((g): g is CrewToolGroup => g !== undefined));
+  return (Object.keys(CREW_TOOL_GROUPS) as CrewToolGroup[]).filter((g) => held.has(g));
+}
+
+/**
+ * **What a crew runs on, said** (docs/ops/actors.md, *Crew compute*): its own
+ * `<provider>/<model>` with its own effort; `same_as_assistant`; or — for one
+ * release — a legacy alias, through `assignments.crews.<id>` when that is set
+ * and as `same_as_assistant` when it is not, which is where an unassigned
+ * crew always ran. `resolveCrewAssignment` (compute.ts) is the same rule for
+ * the runner; a test holds the two together.
+ *
+ * Throws on a `model:` the schema would have refused: a loaded manifest has
+ * passed it, so reaching here with one is a bug, not a crew to guess about.
+ */
+export function crewCompute(id: string, manifest: Pick<AgentManifest, "model" | "effort">, compute: Compute): CrewActor["compute"] {
+  const model = manifest.model;
+  if (model === SAME_AS_ASSISTANT) return { kind: "same_as_assistant" };
+  if (isLegacyCrewModel(model)) {
+    const crews = compute.assignments?.crews ?? {};
+    const a = Object.hasOwn(crews, id) ? crews[id] : undefined;
+    if (a && modelRefIssue(a.model) === undefined) return { kind: "model", ref: a.model as ModelRefString, effort: a.effort };
+    return { kind: "same_as_assistant" };
+  }
+  if (modelRefIssue(model) === undefined) return { kind: "model", ref: model as ModelRefString, effort: manifest.effort };
+  throw new Error(`crew ${id}: model ${crewModelIssue(model) ?? "is not readable"}`);
+}
+
+/**
+ * Why a line was refused to an actor — thrown, never filtered (U3). A crew's
+ * or an external agent's rows are narrowed through the two checks below; a
+ * row the model says such an actor can never hold means `may()` and the
+ * types have come apart, and saying nothing about it would draw a power the
+ * owner never granted.
+ */
+export class ActorPermissionRefused extends Error {
+  constructor(
+    readonly actor: string,
+    readonly row: PermissionRow,
+    why: string,
+  ) {
+    super(`${actor}: ${why} — refusing to draw it (docs/ops/actors.md, *Made impossible by the types*)`);
+    this.name = "ActorPermissionRefused";
+  }
+}
+
+/** An external agent's rows: never a Knowledge write, never the Agents row. */
+export function externalPermissionRows(actor: string, rows: readonly PermissionRow[]): ExternalPermissionRow[] {
+  return rows.map((r) => {
+    if (r.resource.kind === "knowledge" && r.write.length > 0) throw new ActorPermissionRefused(actor, r, "Knowledge Write belongs to the instance assistant alone (one writer, §4.11)");
+    if (r.resource.kind === "agents") throw new ActorPermissionRefused(actor, r, "delegating is the instance assistant's alone (agents_delegate)");
+    return r as ExternalPermissionRow;
+  });
+}
+
+/** A crew's rows: an external agent's, less Queries (`CREW_NEVER_TOOLS`). */
+export function crewPermissionRows(actor: string, rows: readonly PermissionRow[]): CrewPermissionRow[] {
+  const external = externalPermissionRows(actor, rows);
+  return external.map((r) => {
+    if (r.resource.kind === "queries") throw new ActorPermissionRefused(actor, r, "no crew runs a named query (CREW_NEVER_TOOLS)");
+    return r as CrewPermissionRow;
+  });
+}
+
+/** The directory a relative definition path sits in — a crew's area when its manifest omits `area:` (the loader fills it from there anyway). */
+function areaFromPath(path: string): string {
+  const parts = path.split("/");
+  return parts.length >= 2 ? parts[parts.length - 2]! : "";
+}
+
+/**
+ * **One resolver for everything that acts** (plan §2.4). Pure: every source
+ * is loaded by the host and handed in. docs/ops/actors.md is the rule for
+ * every field; in order:
+ *
+ * 1. The assistant's id ALWAYS resolves to the assistant — chat runs it with
+ *    or without a credential. A live `internal` row supplies its scope; with
+ *    none (its token unset, so the row is revoked) the scope is the empty one
+ *    and it holds no lines.
+ * 2. No row, or a revoked one → `null`: a revoked credential acts as nothing.
+ * 3. A pending row (S2) resolves, so the owner deciding sees what it would hold.
+ * 4. By the row's kind: `internal` is the assistant; `crew` needs its
+ *    manifest loaded (else `null` — the next sync revokes the row); anything
+ *    else is external.
+ *
+ * Permissions come from the ROW for every kind, because the row is what the
+ * door reads. The assistant's source is always `environment`: its reach is
+ * configuration, never a grant (C52), whatever an old row's column says.
+ */
+export const resolveActor: ResolveActor = (id, sources) => {
+  const row = sources.registry(id);
+  const live = row !== undefined && !row.revoked ? row : undefined;
+  const history = sources.grantHistory(id);
+  const connections = [...sources.connections(id)];
+
+  const assistant = (r: ActorRegistryRow | undefined): AssistantActor => {
+    const scope = r ? scopeOfRegistryRow(r) : EMPTY_SCOPE;
+    const principal: Principal = { id, role: "assistant", scope, source: "environment" };
+    return {
+      id,
+      kind: "assistant",
+      displayName: sources.assistant.identity.name,
+      definition: { kind: "assistant", identity: sources.assistant.identity, files: [...sources.assistant.files] },
+      permissions: {
+        role: "assistant",
+        scope,
+        autonomy: actionAutonomyOf(r?.autonomy),
+        source: "environment",
+        lines: r ? describePermissions(principal, { connections, history }) : [],
+      },
+      tools: { groups: null, connections },
+      compute: { kind: "router" },
+      limits: null,
+    };
+  };
+
+  if (id === sources.assistant.id) return assistant(live !== undefined && actorKindOf(live.kind) === "assistant" ? live : undefined);
+  if (!live) return null;
+
+  switch (actorKindOf(live.kind)) {
+    case "assistant":
+      return assistant(live);
+    case "crew": {
+      const crew = sources.crew(id);
+      if (!crew) return null;
+      const scope = scopeOfRegistryRow(live);
+      const source: GrantSource = { manifest: crew.file.path };
+      const groups = crewToolGroups(crew.manifest.uses);
+      const principal: Principal = { id, role: "crew", scope, source, uses: [...crew.manifest.uses] };
+      return {
+        id,
+        kind: "crew",
+        displayName: crew.manifest.name,
+        definition: {
+          kind: "crew",
+          area: crew.manifest.area ?? areaFromPath(crew.file.path),
+          description: crew.manifest.description ?? null,
+          prompt: crew.prompt,
+          files: [crew.file],
+        },
+        permissions: {
+          role: "crew",
+          scope,
+          autonomy: actionAutonomyOf(live.autonomy),
+          source,
+          lines: crewPermissionRows(id, describePermissions(principal, { connections, history })),
+        },
+        tools: { groups, connections },
+        compute: crewCompute(id, crew.manifest, sources.compute),
+        limits: { maxTurns: crew.manifest.max_turns, budgetUsdPerRun: crew.manifest.budget_usd_per_run },
+      };
+    }
+    case "external": {
+      const scope = scopeOfRegistryRow(live);
+      // The registry: the owner's own hand (docs/ops/actors.md's field table).
+      const source: GrantSource = "registry";
+      const principal: Principal = { id, role: "agent", scope, source };
+      return {
+        id,
+        kind: "external",
+        displayName: live.display_name,
+        definition: null,
+        permissions: {
+          role: "agent",
+          scope,
+          autonomy: actionAutonomyOf(live.autonomy),
+          source,
+          lines: externalPermissionRows(id, describePermissions(principal, { connections, history })),
+        },
+        tools: { groups: null, connections },
+        compute: null,
+        limits: null,
+      };
+    }
+  }
+};

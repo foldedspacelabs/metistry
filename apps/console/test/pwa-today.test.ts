@@ -371,4 +371,32 @@ describe("the mounted view writes through the Tick and Defer doors, and nothing 
     expect(new URL(feed.path, "http://x").searchParams.get("since")).toBe("2026-09-28T09:00:00.000Z");
     expect(b.stored.get("metistry.today-looked")).not.toBe("2026-09-28T09:00:00.000Z");
   });
+  it("a live event's refresh (T7-7) reads the day and the rail again under the reader — the same look, not a new one", async () => {
+    let fail = false;
+    const b = fakeBrowser({
+      respond: (c) => {
+        if (c.method !== "GET") return { body: { ok: true, line: "- [x] Send Dana the fixture format", task: {} } };
+        if (c.path === "/api/today") return fail ? { status: 503, body: { error: { code: "not_available", message: "down" } } } : { body: day() };
+        if (c.path.startsWith("/api/knowledge/page")) return { status: 404, body: {} };
+        return { body: { rows: [] } };
+      },
+    });
+    const view = mountToday({ $: b.$, api: b.api, show: () => {} });
+    b.stored.set("metistry.today-looked", "2026-09-28T09:00:00.000Z");
+    await view.load();
+    const looked = b.stored.get("metistry.today-looked");
+    await b.$("today").fire("change", { target: control({ act: "tick", key: "mt-7f3k2a" }, { checked: true }) });
+    expect(b.$("today-spine").innerHTML).toContain("Ticked in");
+    b.calls.length = 0;
+    await view.refresh();
+    expect(b.calls.map((c) => c.path.split("?")[0])).toEqual(expect.arrayContaining(["/api/today", "/api/q/agent_presence", "/api/q/activity_feed"]));
+    const feed = b.calls.find((c) => c.path.startsWith("/api/q/activity_feed"))!;
+    expect(new URL(feed.path, "http://x").searchParams.get("since")).toBe("2026-09-28T09:00:00.000Z"); // this look's boundary
+    expect(b.stored.get("metistry.today-looked")).toBe(looked); // not re-stamped
+    expect(b.$("today-spine").innerHTML).toContain("Ticked in"); // what the write left stays
+    expect(b.writes()).toEqual([]);
+    fail = true;
+    await view.refresh();
+    expect(b.$("today-spine").innerHTML).toContain("Send Dana the fixture format"); // a failed refetch keeps the day
+  });
 });

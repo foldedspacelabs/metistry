@@ -34,7 +34,7 @@ import {
   type Principal,
   type ScopeView,
 } from "@foldedspacelabs/metistry-core";
-import { ACCESS_REQUEST_KIND, underAreas } from "@foldedspacelabs/metistry-mcp-brain";
+import { ACCESS_CEILING_KIND, ACCESS_REQUEST_KIND, underAreas, type AccessCeilingMeta } from "@foldedspacelabs/metistry-mcp-brain";
 import type { Db } from "./auth-store.js";
 
 export const AGENT_ID_RE = /^[a-z][a-z0-9-]{0,39}$/;
@@ -629,6 +629,32 @@ export function widenedGrants(current: Grants, area: string): Grants {
   return { tier: "areas", areas, ...(current.queries === true ? { queries: true } : {}) };
 }
 
+/**
+ * **Revise can only grant less** (C40, ruled 2026-09-20). The area that was
+ * asked for is a CEILING: a revision must be that prefix or one under it
+ * (`underAreas`, the same prefix rule every read path uses — `Areas/Health`
+ * admits `Areas/Health` and `Areas/Health/Sleep`, never `Areas`, never
+ * `Areas/Finance`, never `Areas/HealthX`).
+ *
+ * Granting more than was asked is not a revision of this request: it is a
+ * different decision about a scope nobody asked for, and it belongs on
+ * Agents (`PUT /api/agents/:id/grants`) where the owner is looking at the
+ * whole credential rather than at one sentence from an agent. The Needs You
+ * control cannot express a widening; this is the door refusing one, so a
+ * client that could would still be refused (enforce at the tool).
+ */
+export function revisionWithin(asked: string, revised: string): boolean {
+  return underAreas(revised, [asked]);
+}
+
+/**
+ * The refusal when it is not. One sentence, so every client says the same
+ * thing about the same rule.
+ */
+export function revisionRefusal(asked: string, revised: string): string {
+  return `Revise can only grant less than was asked: ${revised} is not ${asked} or a folder under it. To grant more, or somewhere else, change the grant on Agents (PUT /api/agents/:id/grants), where the whole credential is in view; to refuse this request, Decline.`;
+}
+
 // ----- approvals that outlive a re-sync (ruled 2026-09-19 B) ---------------
 //
 // An INTERNAL row's grants are replaced from configuration at every console
@@ -722,6 +748,61 @@ export async function pendingAccessRequests(db: Db): Promise<AccessRequestRow[]>
     ...(r.escalated === true ? { escalated: true } : {}),
     ...(r.prior_proposal ? { prior_proposal: Number(r.prior_proposal) } : {}),
   }));
+}
+
+// ----- the escalation ceiling, where grants are edited (C42) ----------------
+//
+// `request_access` refuses a third ask for an area the owner has declined
+// twice (mcp-brain's access.ts), and that refusal writes no proposal — so it
+// used to be invisible. Each one now writes a `runs` row of kind
+// `access_ceiling`, and this is the Agents panel's read of them: grouped per
+// (agent, area), newest first, and only while they still MEAN something — a
+// ceiling for an agent that is revoked, or for an area the agent has since
+// been granted on Agents, is history rather than a live fact, and the panel
+// is about the credential as it stands.
+
+const CEILING_WINDOW_DAYS = 30;  // limit: fixed — how far back the panel looks; older refusals are still in `runs` (Activity, psql), just not on the credential's row
+const MAX_CEILINGS = 50;  // limit: fixed — a panel list, not an export; fifty distinct (agent, area) pairs at the ceiling is a credential to revoke, not a list to page
+
+/** One (agent, area) at the ceiling, as `GET /api/agents` lists it. */
+export interface AccessCeilingRow extends AccessCeilingMeta {
+  /** How many asks the ceiling has refused in the window — an agent still asking is the fact worth seeing. */
+  hits: number;
+  first_at: string;
+  last_at: string;
+}
+
+/** The (agent, area) pairs at the ceiling, newest refusal first — `holders` is the registry as just listed, so a resolved one can be dropped. */
+export async function accessCeilings(db: Db, holders: readonly AgentRow[]): Promise<AccessCeilingRow[]> {
+  const { rows } = await db.query(
+    `SELECT meta->>'agent' AS agent, meta->>'area' AS area, count(*)::int AS hits, min(ts) AS first_at, max(ts) AS last_at,
+            (array_agg(meta ORDER BY ts DESC, id DESC))[1] AS latest
+     FROM runs WHERE kind = $1 AND ts > now() - make_interval(days => $2)
+     GROUP BY 1, 2 ORDER BY max(ts) DESC LIMIT $3`,
+    [ACCESS_CEILING_KIND, CEILING_WINDOW_DAYS, MAX_CEILINGS],
+  );
+  const live = new Map(holders.filter((h) => !h.revoked).map((h) => [h.id, h]));
+  const iso = (v: unknown) => (v instanceof Date ? v.toISOString() : String(v));
+  const out: AccessCeilingRow[] = [];
+  for (const r of rows) {
+    const agent = String(r.agent ?? "");
+    const area = String(r.area ?? "");
+    const holder = live.get(agent);
+    if (!holder) continue; // revoked or gone: nothing left to decide about it
+    if (holder.grants.tier === "areas" && underAreas(area, holder.grants.areas)) continue; // granted since: the ceiling is moot
+    const latest = (r.latest ?? {}) as Partial<AccessCeilingMeta>;
+    out.push({
+      agent,
+      area,
+      declines: Number(latest.declines ?? 0),
+      last_proposal: Number(latest.last_proposal ?? 0),
+      last_declined_at: typeof latest.last_declined_at === "string" ? latest.last_declined_at : null,
+      hits: Number(r.hits),
+      first_at: iso(r.first_at),
+      last_at: iso(r.last_at),
+    });
+  }
+  return out;
 }
 
 /** What a revocation writes on the asks it settles — a reason, and not the SKIP marker, because there IS something to learn from it. */

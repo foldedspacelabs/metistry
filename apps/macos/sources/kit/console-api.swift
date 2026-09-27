@@ -585,17 +585,23 @@ public struct ConsoleAPI: Sendable {
     /// returns rows *at or after* the instant and the client de-duplicates on
     /// `(ref, ts, kind)` (`seed/queries/activity_feed.yaml` says exactly this).
     /// `ActivityFeed.merging(_:)` is that de-duplication, in one place.
+    ///
+    /// `turnID` narrows the page to the calls one reply made — what a turn's
+    /// disclosure fetches, so it shows every call rather than only those that
+    /// fell inside the window's `limit` (screen-02-activity.md §6 fault 6).
     public func activityFeed(
         hours: Int? = nil,
         limit: Int? = nil,
         kind: String? = nil,
         project: String? = nil,
         agent: String? = nil,
-        since: String? = nil
+        since: String? = nil,
+        turnID: String? = nil
     ) async -> Result<ActivityFeed, ConsoleError> {
         await get("/api/q/activity_feed", [
             "hours": hours.map(String.init), "limit": limit.map(String.init),
             "kind": kind, "project": project, "agent": agent, "since": since,
+            "turn_id": turnID,
         ])
     }
 

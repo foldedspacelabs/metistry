@@ -94,10 +94,10 @@ const FILE_KEY: Record<IdentitySetField, "name" | "mention" | "icon"> = { name: 
 
 export type IdentityChange = Partial<Record<IdentitySetField, string>>;
 
-/** limit: fixed — a label in a title bar, a menu and a notification, not prose. */
-export const MAX_NAME_GRAPHEMES = 40;
-/** limit: fixed — `@` plus the slug a mention is matched on. */
-export const MAX_MENTION_LENGTH = 41;
+/** The longest name: a label in a title bar, a menu and a notification, not prose. */
+export const MAX_NAME_GRAPHEMES = 40; // limit: fixed — a validation rule of the identity contract, not a tunable
+/** The longest mention: `@` plus the slug a mention is matched on. */
+export const MAX_MENTION_LENGTH = 41; // limit: fixed — `@` + the 40 a name may have
 /** `@` then lowercase kebab-case — the shape `metistry init` derives from a name. */
 export const MENTION_RE = /^@[a-z0-9]+(?:-[a-z0-9]+)*$/;
 

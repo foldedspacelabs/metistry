@@ -168,11 +168,20 @@ run with `--channel release`.
    inside one, so a version flip never orphans the Postgres the plists
    point at (`METISTRY_RUNTIME_DEPS=0` skips it; `--rollback` leaves it
    alone),
-4. runs `db/migrations` from `current` under the advisory lock,
-5. `docker compose pull && up -d --no-build` in `current`, with
+4. on a Mac under the launchd shape, moves the **Mac app** to the same
+   release: `Metistry-<version>.dmg`, verified against the same
+   `checksums.txt` by the same code, mounted read-only, its bundle id,
+   version and signature (codesign + Gatekeeper, when signed) checked, and
+   swapped into `/Applications/Metistry.app` with the old one kept as
+   `Metistry.app.previous` — never with sudo, never killing a running app
+   without `--relaunch`, never failing the update (`--no-app` skips it,
+   `--app-path` points it elsewhere; `docs/ops/cli.md`, "Moving the Mac app
+   with the release"),
+5. runs `db/migrations` from `current` under the advisory lock,
+6. `docker compose pull && up -d --no-build` in `current`, with
    `METISTRY_CONSOLE_IMAGE` / `METISTRY_ASSISTANT_IMAGE` set to the
    versioned ghcr images,
-6. kickstarts the launchd jobs whose code changed, writes `metistry.lock`
+7. kickstarts the launchd jobs whose code changed, writes `metistry.lock`
    through the reconciler, copies each `seed/vault/Templates/*.md` the vault
    **lacks** (create-only — a template that is there is never touched;
    `docs/ops/cli.md`, "Seeding the templates the vault lacks"), and runs
@@ -184,6 +193,10 @@ a symlink flip:
 ```sh
 metistry update --rollback
 ```
+
+On a launchd Mac the rollback also swaps `Metistry.app.previous` back in
+(and keeps the newer app as the previous), so the front end goes back with
+the product it drives.
 
 **Migrations are not reverted.** They are additive-first by rule
 (`CLAUDE.md`), so a schema slightly ahead of the code is the expected
@@ -338,6 +351,12 @@ renders the feed through `ops/release/appcast.mjs`. Called without a
 signature that script emits a loud placeholder and exits non-zero, so a
 misconfigured secret fails the job instead of publishing a feed every
 installed app would reject.
+
+**Sparkle and `metistry update` install the same DMG.** Either can move the
+app, and neither undoes the other: `update` never downgrades an app Sparkle
+already moved past the release it installs, and is a no-op (`app already
+x.y.z`) when they agree. Doctor's `app` row reads the app's version against
+`metistry.lock`.
 
 One item per feed, not `generate_appcast`: that tool walks a directory of
 past updates, and these updates live on GitHub Releases as one DMG per tag.

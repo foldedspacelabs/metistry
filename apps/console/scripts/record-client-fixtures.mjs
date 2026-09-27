@@ -35,6 +35,7 @@
 // contract fixture before it replaces it (client-fixtures.mjs).
 
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -44,7 +45,7 @@ import { CLIENT_API, INSTANCE_LAYOUT, InstanceSecrets, SECRET_USE_META_KEY, memo
 import { readInstanceId } from "@foldedspacelabs/metistry-cli";
 import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
 import { QueryStore } from "@foldedspacelabs/metistry-queries";
-import { memoryVault } from "@foldedspacelabs/metistry-artifacts";
+import { VaultError, memoryVault } from "@foldedspacelabs/metistry-artifacts";
 import { INBOX_PREFIX, vaultSink } from "@foldedspacelabs/metistry-mcp-brain";
 import { makeServer } from "../dist/server.js";
 import * as authStore from "../dist/auth-store.js";
@@ -159,6 +160,11 @@ const fakeFetch = async (input, init) => {
 
 const vault = memoryVault();
 const PAGE = "Projects/Metistry/Roadmap.md";
+const HISTORY = [
+  { sha: "4c1d2e3f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d", author: "Metistry user", date: "2026-09-28T09:10:00-04:00", subject: "Rename the plan to the roadmap", source: "user", runs: [], turns: [], path: PAGE, change: "renamed", content: "# Roadmap\n\nShip the store interface, then the stores.\n" },
+  { sha: "9ab8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0", author: "Metistry assistant", date: "2026-09-27T23:00:00-04:00", subject: "Fold: the store interface", source: "assistant", runs: ["4107"], turns: ["t_fold-0928"], path: "Projects/Metistry/Plan.md", change: "modified", content: "# Plan\n\nShip the store interface.\n" },
+  { sha: "1f2e3d4c5b6a79880706a5b4c3d2e1f0a9b8c7d6", author: "Metistry user", date: "2026-09-27T14:10:00-04:00", subject: "Start the plan", source: "user", runs: [], turns: [], path: "Projects/Metistry/Plan.md", change: "added", content: "# Plan\n" },
+];
 await vault.write(PAGE, Buffer.from("# Roadmap\n\nShip the store interface, then the stores. See [[Projects/Metistry/Design]].\n"), { principal: "user", message: "fixture" });
 
 // a day note with tasks on it, for the Tick door (T2-4) and the Defer door (T2-5) to write — one each, so neither sees the other's edit
@@ -241,6 +247,18 @@ const server = makeServer(pool, queries, {
     hits: [{ path: PAGE, title: "Roadmap", description: "what ships next", snippet: "…Ship the store interface, then the stores…", score: 0.82, source: "keyword" }].slice(0, limit),
     degraded: "keyword only — the embedder is down",
   }),
+  // the reconciler's GET /vault/log and GET /vault/show for the roadmap (T10-4):
+  // the owner wrote it as Plan.md, a fold edited it, the owner renamed it
+  knowledgeHistory: {
+    log: async (path) => (path === PAGE ? HISTORY : []),
+    show: async (path, sha) => {
+      const c = HISTORY.find((h) => h.sha.startsWith(sha) && h.path === path);
+      if (!c) throw new VaultError("not_found", `${path} does not exist at ${sha}`);
+      const content = Buffer.from(c.content);
+      const { content: _c, change: _ch, ...commit } = c; // the bridge's /vault/show carries no `change`
+      return { ...commit, content, sha256: createHash("sha256").update(content).digest("hex"), bytes: content.length };
+    },
+  },
 });
 await new Promise((r) => server.listen(0, "127.0.0.1", r));
 const base = `http://127.0.0.1:${server.address().port}`;
@@ -421,6 +439,8 @@ const REQUESTS = [
   ["GET /api/knowledge/fold", () => ({ path: "/api/knowledge/fold?date=2026-09-28" })],
   ["GET /api/knowledge/drafts", () => ({ path: "/api/knowledge/drafts?limit=20" })],
   ["GET /api/knowledge/areas", () => ({ path: "/api/knowledge/areas" })],
+  ["GET /api/knowledge/history", () => ({ path: `/api/knowledge/history?path=${encodeURIComponent(PAGE)}` })],
+  ["GET /api/knowledge/version", () => ({ path: `/api/knowledge/version?path=${encodeURIComponent("Projects/Metistry/Plan.md")}&sha=9ab8c7d6` })],
 
   ["POST /capture", () => ({ path: "/capture", body: { note: "Ask Dana about the fixture format on Thursday." }, key: "fixture-capture-0001" })],
   ["POST /message", () => ({ path: "/message", body: { text: "What's on today?" } })],

@@ -18,7 +18,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
-import { API_VERSION, API_VERSION_HEADER, AREA_PREFIX_REFUSAL, runCheck, startRun, finishRun, errorEnvelope, intEnv, may, parseAction, noRouteMessage, PROJECT_SLUG_RE, rollSession, statusFor, servedRoute, isLocalRoute, localOnlyMessage, routeKey, resolveActor, SKIP_FEEDBACK, answersText, checkAnswers, describeRequest, parseSubjectFingerprint, requestSubjectOf, subjectUnchanged, validAgentAreaGrant, type QuestionAnswer, type RequestShape, type RequestSubject, type SubjectReading, type CheckResult, type Compute, type ErrorCode, type ErrorEnvelope, type Principal } from "@foldedspacelabs/metistry-core";
+import { API_VERSION, API_VERSION_HEADER, AREA_PREFIX_REFUSAL, knowledgeConflictSource, runCheck, startRun, finishRun, errorEnvelope, intEnv, may, parseAction, noRouteMessage, PROJECT_SLUG_RE, rollSession, statusFor, servedRoute, isLocalRoute, localOnlyMessage, routeKey, resolveActor, SKIP_FEEDBACK, answersText, checkAnswers, describeRequest, parseSubjectFingerprint, requestSubjectOf, subjectUnchanged, validAgentAreaGrant, type QuestionAnswer, type RequestShape, type RequestSubject, type SubjectReading, type CheckResult, type Compute, type ErrorCode, type ErrorEnvelope, type Principal } from "@foldedspacelabs/metistry-core";
 import { QueryError, QueryStore } from "@foldedspacelabs/metistry-queries";
 import { captureToInbox, createBrainServer, dirSink, type CaptureSink, type KnowledgeLister, type KnowledgeReader, type KnowledgeVaultSearcher, type KnowledgeWriter, type QueryEmbedder } from "@foldedspacelabs/metistry-mcp-brain";
 import { TasksError, TasksService } from "@foldedspacelabs/metistry-tasks";
@@ -54,7 +54,7 @@ import { applyRestore, carriesRestore, restoreOf } from "./knowledge-restore.js"
 import { crewDispatcher, type CrewRegistry } from "./crews.js";
 import { runAction, type ActionServices } from "./actions.js";
 import { computeRoutes, isComputeRoute, type ComputeAdmin } from "./compute-routes.js";
-import { isKnowledgeRoute, knowledgeRoutes, type KnowledgeHistory, type KnowledgeSearcher } from "./knowledge-routes.js";
+import { isKnowledgeRoute, knowledgeRoutes, type ConflictRefusal, type KnowledgeConflicts, type KnowledgeHistory, type KnowledgeSearcher } from "./knowledge-routes.js";
 import { isVaultTaskRoute, ReplayCache, vaultTaskRoutes } from "./vault-task-routes.js";
 import { closeDayRoute, isCloseDayRoute, type RoutineTrigger } from "./close-day.js";
 import type { ConsoleVaultClient } from "./vault-client.js";
@@ -113,6 +113,8 @@ export interface ConsoleConfig {
   planTomorrow?: RoutineTrigger | undefined;
   /** A note's git history for `GET /api/knowledge/history` and `GET /api/knowledge/version` — the reconciler's `/vault/log` and `/vault/show` (§2.21, T10-4); absent = both answer not_available. */
   knowledgeHistory?: KnowledgeHistory | undefined;
+  /** Resolve a conflict for `POST /api/knowledge/conflicts/resolve` — the reconciler's `POST /vault/conflicts/resolve` (§2.11, T2-10); absent = not_available. */
+  knowledgeConflicts?: KnowledgeConflicts | undefined;
   /** Loaded crew manifests (crews.ts); absent = agents_delegate answers not_available. */
   crews?: CrewRegistry;
   /** identity.yaml's public fields for `GET /api/identity` (identity.ts); absent = 503 not_available. */
@@ -1405,6 +1407,8 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
           ...(cfg.vault ? { vault: cfg.vault } : {}),
           ...(cfg.knowledgeHistory ? { history: cfg.knowledgeHistory } : {}),
           requests: db,
+          ...(cfg.knowledgeConflicts ? { conflicts: cfg.knowledgeConflicts } : {}),
+          conflictRefused: recordConflictRefusal,
           queries,
         },
         principalOf(auth),
@@ -1797,6 +1801,24 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       [id, JSON.stringify({ code, message, decision: verb, at: new Date().toISOString(), ...details })],
     );
     return { status: statusFor(code), body: { ...errorEnvelope(code, message), ...details } };
+  }
+
+  /**
+   * C45 for the Resolve a conflict door (T2-10): the conflict's waiting
+   * review — the reconciler's mirror of the copy — carries why a Keep Mine or
+   * a Take the Other did not happen, exactly as `refuseAnswer` records a
+   * refused answer: `decision` is the verb the button stands for (§2.12:
+   * Keep Mine is the review's `allow`, Take the Other its Revise), `door` the
+   * door it went through. Pending rows only, and `changed_at` untouched.
+   */
+  async function recordConflictRefusal(r: ConflictRefusal): Promise<void> {
+    const source = knowledgeConflictSource(r.path);
+    const error = { code: r.code, message: r.message, decision: r.keep === "mine" ? "allow" : "accept_with_changes", door: "resolve_conflict", keep: r.keep, at: new Date().toISOString() };
+    await db.query(
+      `UPDATE proposals SET payload = payload || jsonb_build_object('error', $3::jsonb)
+       WHERE decision = 'pending' AND source IS NOT NULL AND source->>'kind' = $1 AND source->>'external_ref' = $2`,
+      [source.kind, source.external_ref, JSON.stringify(error)],
+    );
   }
 
   /**

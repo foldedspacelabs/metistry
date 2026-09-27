@@ -74,7 +74,7 @@ describe("every row", () => {
   });
 
   it("serves exactly N rows — a ticket flipping a row to served/unserved must update this number", () => {
-    expect(CLIENT_API.filter((r) => r.served).length).toBe(107); // T4-8a: GET /api/connections, GET /api/connections/:name; T4-18: GET /api/compute/catalogue, POST /api/compute/unassign; T4-1: GET /api/secrets; T2-5: the Defer door; T4-6: GET /api/agents/:id/definition; T4-4: GET /api/variables; T3-9: POST /api/sessions/purge; T2-18: GET /api/events; T1-7: GET /api/needs-you/count; T1-6: the fold, the drafts, the areas; T10-2: GET /api/vault/status; T1-12: POST|DELETE /api/prose/:id/feedback; T2-17: GET /api/turns/:turn_id/progress, GET /api/sessions/:id; T10-4: GET /api/knowledge/history, GET /api/knowledge/version; T10-6: POST /api/vault/rollback; T2-11: POST /api/meetings/:event_id/note
+    expect(CLIENT_API.filter((r) => r.served).length).toBe(108); // T2-10: POST /api/knowledge/conflicts/resolve; T4-8a: GET /api/connections, GET /api/connections/:name; T4-18: GET /api/compute/catalogue, POST /api/compute/unassign; T4-1: GET /api/secrets; T2-5: the Defer door; T4-6: GET /api/agents/:id/definition; T4-4: GET /api/variables; T3-9: POST /api/sessions/purge; T2-18: GET /api/events; T1-7: GET /api/needs-you/count; T1-6: the fold, the drafts, the areas; T10-2: GET /api/vault/status; T1-12: POST|DELETE /api/prose/:id/feedback; T2-17: GET /api/turns/:turn_id/progress, GET /api/sessions/:id; T10-4: GET /api/knowledge/history, GET /api/knowledge/version; T10-6: POST /api/vault/rollback; T2-11: POST /api/meetings/:event_id/note
   });
 
   it("takes a cursor only on a read, and an Idempotency-Key only on a write", () => {

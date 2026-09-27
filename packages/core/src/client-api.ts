@@ -309,7 +309,7 @@ export const CLIENT_API: readonly ClientRoute[] = [
   route("GET", "/api/events", "Server-Sent Events: what changed, as ids; `Last-Event-ID` resumes"),
 
   // ----- the vault's git -----
-  planned("GET", "/api/vault/status", "T10-2", "branch, ahead and behind, last commit, last push, conflict"),
+  route("GET", "/api/vault/status", "branch, ahead and behind, last commit, last push, conflict"),
   planned("POST", "/api/vault/rollback", "T10-6", "raise a Needs You request to roll back, with the preview", { reach: ["local"] }),
 ];
 

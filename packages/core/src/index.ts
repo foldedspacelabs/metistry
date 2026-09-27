@@ -400,6 +400,34 @@ export {
   type RunEvent,
   type VaultSyncState,
 } from "./events.js";
+export {
+  PUSH_SCHEDULE_ENV,
+  VAULT_SYNC_DEFAULT,
+  VAULT_SYNC_MAX_SEC,
+  VAULT_SYNC_MIN_SEC,
+  VAULT_SYNC_RUN_KIND,
+  describeVaultSync,
+  intervalSeconds,
+  overlayVaultSync,
+  parsePullArg,
+  parsePushArg,
+  pushFromSchedule,
+  pushOverrideNote,
+  resolveVaultSync,
+  vaultIntervalSchema,
+  vaultPullSchema,
+  vaultPushSchema,
+  vaultStatusSchema,
+  vaultSyncAttemptSchema,
+  vaultSyncSchema,
+  type ResolvedVaultSync,
+  type VaultPull,
+  type VaultPush,
+  type VaultStatus,
+  type VaultSyncAttempt,
+  type VaultSyncBlock,
+  type VaultSyncPolicy,
+} from "./vault-sync.js";
 export { errorEnvelope, statusFor, type ErrorCode, type ErrorEnvelope } from "./errors.js";
 export { requireEnv, optionalEnv, intEnv } from "./config.js";
 export {

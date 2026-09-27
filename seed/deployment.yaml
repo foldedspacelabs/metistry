@@ -44,6 +44,21 @@ shape: compose
 #
 # keep_awake: allow_sleep_on_battery
 
+# vault — when the reconciler pushes the instance repo to its remote and
+# pulls from it (plan §2.21; docs/ops/reconciler.md). Absent keys take these
+# defaults; set them with `metistry vault settings`, which writes YOUR
+# instance's copy of this file.
+#
+#   push: after_commit     once a flush has made commits (the default)
+#   push: {every: 15m}     on an interval, 1m…24h
+#   push: manual           never on its own — you push from a terminal
+#   pull: {every: 5m}      fetch on an interval, 1m…24h; there is no "never"
+#
+# vault:
+#   push: after_commit
+#   pull:
+#     every: 5m
+
 # Per-service overrides. Both keys are optional; a service not listed here
 # takes the install-wide shape above.
 #

@@ -74,7 +74,7 @@ describe("every row", () => {
   });
 
   it("serves exactly N rows — a ticket flipping a row to served/unserved must update this number", () => {
-    expect(CLIENT_API.filter((r) => r.served).length).toBe(81); // T4-1: GET /api/secrets; T2-5: the Defer door; T4-6: GET /api/agents/:id/definition; T4-4: GET /api/variables; T3-9: POST /api/sessions/purge; T2-18: GET /api/events; T1-7: GET /api/needs-you/count; T1-6: the fold, the drafts, the areas
+    expect(CLIENT_API.filter((r) => r.served).length).toBe(82); // T4-1: GET /api/secrets; T2-5: the Defer door; T4-6: GET /api/agents/:id/definition; T4-4: GET /api/variables; T3-9: POST /api/sessions/purge; T2-18: GET /api/events; T1-7: GET /api/needs-you/count; T1-6: the fold, the drafts, the areas; T10-2: GET /api/vault/status
   });
 
   it("takes a cursor only on a read, and an Idempotency-Key only on a write", () => {

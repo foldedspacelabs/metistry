@@ -25,6 +25,7 @@ All of them are real.
 | `deployment [--json]` | the effective shape (D4 overlay) and the services it implies, with cheap running state |
 | `deployment set-shape <compose\|launchd>` | write the instance's `.metistry/deployment.yaml` through the reconciler, preview-then-confirm |
 | `deployment set-keep-awake [<never\|allow_sleep_on_battery\|always\|always_lid_closed>] [--enabled\|--sleep-on-battery\|--sleep-lid-closed true\|false]` | whether this install holds the Mac awake, on which power, and whether a closed lid should stay awake (macOS); the same protected write; the lid setting is stored and never applied — only an administrator's `pmset` delivers it |
+| `vault settings [--push <after_commit\|manual\|<n>m\|<n>h>] [--pull <n>m\|<n>h] [--yes] [--json]` | the vault's git sync policy (M18): when the reconciler pushes and pulls; the same protected write |
 | `migrate-layout [--dry-run] [--json] [--allow-dirty]` | carry an instance from the legacy layout to the flat one: the directory becomes the vault, the machinery moves under `.metistry/`, stored paths lose `Knowledge/` |
 | `migrate-inbox [--dry-run]` | move a pre-#156 `inbox/` into the vault inbox and rewrite `inbox.path` |
 | `migrate-shape <launchd\|compose>` | move a LIVE install between the shapes, with its data: dump, stop, flip, up, restore, verify, doctor |
@@ -520,7 +521,7 @@ reach the console without a passkey ceremony.
 Then `pnpm -r build && metistry up` — containers, every launchd job,
 doctor (below). Add a private remote to the instance repo whenever you
 like — `metistry connect-repo <url>`, the next section; the reconciler
-pushes on `METISTRY_PUSH_SCHEDULE` and never blocks on it. Point Obsidian
+pushes on the vault sync policy (`metistry vault settings`, below) and never blocks on it. Point Obsidian
 at `<dir>/Knowledge` as the vault root.
 
 `init` finds `seed/` in the checkout it runs from (`--product-dir`,
@@ -572,8 +573,8 @@ The instance repo comes from `--instance`, else `METISTRY_INSTANCE_DIR`
    lands its queue before anyone else touches the tree (D5). A reconciler
    that is not running is not an error.
 5. **`push -u origin <branch>`** — one push, so the remote is proven end
-   to end and the branch tracks. From here the reconciler pushes on
-   `METISTRY_PUSH_SCHEDULE` (`docs/ops/reconciler.md`).
+   to end and the branch tracks. From here the reconciler pushes and
+   pulls on the vault sync policy (`metistry vault settings`, next).
 
 Every git and `security` call is an argument array through `execFile` —
 no shell anywhere, so no part of a URL is ever interpreted.
@@ -610,6 +611,64 @@ There is no Keychain. `connect-repo` skips it and prints the equivalent:
 point `credential.helper` at `store --file ~/.git-credentials` and put
 the token in that file, `chmod 600`. Everything else (origin,
 `ls-remote`, flush, push) is identical.
+
+## When the vault syncs: `metistry vault settings`
+
+The reconciler — the instance repo's sole committer — pushes the vault to its
+remote and pulls from it on a policy the owner sets (plan §2.21, M18). The
+policy is the `vault:` block of the instance's `.metistry/deployment.yaml`:
+
+```yaml
+vault:
+  push: after_commit     # after_commit | manual | {every: 15m}
+  pull:
+    every: 5m            # fetch every N; there is no "never"
+```
+
+| `push` | what it does |
+| --- | --- |
+| `after_commit` (default) | push once a flush has made commits. A push that failed — or commits left from before a restart — is retried by the scheduler, no more often than every five minutes, and only while something is unpushed |
+| `{every: N}` | push every N (1m…24h), when there is something to push |
+| `manual` | never push on its own; you push from a terminal |
+
+`pull` is always an interval (1m…24h, default 5m): a remote the reconciler never
+fetches from is how an install diverges without noticing. A pull is the
+reconciler's sync without the push — commit and sweep, fetch, integrate
+(fast-forward, rebase only its own unpublished commits, else merge; never
+forced) — and a conflict stops it, raises one Needs You report, and stops
+scheduled pushes until a later pull integrates cleanly
+(`docs/ops/reconciler.md`, "Sync with the remote").
+
+```sh
+metistry vault settings                               # the policy in force, and where each answer came from
+metistry vault settings --json
+metistry vault settings --push 15m                    # preview the new block
+metistry vault settings --push after_commit --pull 10m --yes   # write it
+metistry vault settings --push manual --yes
+```
+
+With no flag it prints the policy in force and where each key came from — the
+instance's file, the product's `seed/deployment.yaml`, or the default. With
+`--push` and/or `--pull` it previews the whole block (a key you do not name
+keeps its current answer, and the file ends up stating both); `--yes` writes
+it — the same §4.7 protected write as `deployment set-shape`, through the
+reconciler as `user` with the owner bearer. Every other line of the file is
+left byte for byte. The reconciler re-reads `deployment.yaml` when it changes,
+so the new policy is in force within a few seconds, with no restart. `--push`
+takes `after_commit`, `manual`, or an interval with or without `every`
+(`15m`, `every:15m`); `--pull` takes an interval. Anything else is refused and
+nothing is written.
+
+**`METISTRY_PUSH_SCHEDULE`** — the variable this replaces (`@hourly`,
+`@daily`, `never`, `<n>[s|m|h]`) — still overrides `push` for this release,
+exactly as it used to behave. `vault settings`, `doctor`'s *vault sync* row and
+the reconciler's log all say so while it is set. It is never written into the
+file: remove the line from `.env`, `metistry restart reconciler`, and set the
+policy here.
+
+Where sync stands — branch, ahead and behind, last commit, last push and
+pull, any conflict, the policy — is `GET /api/vault/status`
+(`docs/ops/client-api.md`) and doctor's *vault sync* row.
 
 ## Connecting an external dev tool: `metistry connect <tool>`
 
@@ -1578,6 +1637,18 @@ its reason. A skip is `degraded`, never `failed`: the product runs without the
 unit, and the remediation names the file and what is wrong with it (most often
 a manifest without `schema: 1`). `metistry extensions list` is the same facts
 for the extensions directory alone.
+
+**The `vault sync` row** (plan §2.21). The reconciler's `GET /vault/status`
+with its bearer: ahead and behind the remote, the last push, any conflict and
+the sync policy in force — all in `meta` (with a one-line `summary`), so
+`--json` answers "is my vault on GitHub" without a terminal. Never `failed`:
+commits are safe locally whatever the remote does, and the reconciler's own
+row already fails when it is down. `degraded` for a conflict (a pull could not
+integrate — the paths are named), a failed push or pull (git's last line, any
+URL credential masked), a `vault:` block that does not validate (the last good
+policy keeps running), and `METISTRY_PUSH_SCHEDULE` still overriding `push`;
+`absent` with no remote (`metistry connect-repo`) or no reconciler bridge
+configured. The policy is `metistry vault settings`, above.
 
 **The `schedules` rows.** Every collector and routine manifest also gets a
 `kind: schedule` row read from the `runs` table: when it last ran, whether

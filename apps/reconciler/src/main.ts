@@ -16,14 +16,17 @@ import {
   requireEnv,
   resolveInstanceLayout,
   resolveLocalModelUrl,
+  describeVaultSync,
+  pushOverrideNote,
 } from "@foldedspacelabs/metistry-core";
 import { Git } from "./git.js";
-import { Committer } from "./committer.js";
+import { Committer, type PushResult } from "./committer.js";
 import { Vault } from "./vault.js";
 import { Embeddings } from "./embeddings.js";
 import { Indexer } from "./indexer.js";
 import { makeBridge } from "./server.js";
 import { syncRecorder } from "./sync-record.js";
+import { aheadBehind, commitRecorder, readVaultStatus, SyncScheduler, VaultPolicySource } from "./sync-policy.js";
 
 const instanceDir = requireEnv("METISTRY_INSTANCE_DIR");
 const token = requireEnv("METISTRY_BRIDGE_TOKEN_RECONCILER");
@@ -47,7 +50,12 @@ const host = optionalEnv("METISTRY_RECONCILER_HOST", "127.0.0.1"); // loopback d
 const port = intEnv("METISTRY_RECONCILER_PORT", 7812);
 const commitIntervalSec = intEnv("METISTRY_COMMIT_INTERVAL_SEC", 30);
 const reconcileIntervalSec = intEnv("METISTRY_RECONCILE_INTERVAL_SEC", 300);
-const pushEverySec = parsePushSchedule(optionalEnv("METISTRY_PUSH_SCHEDULE", "@hourly"));
+// WHEN to push and pull (§2.21, T10-2): deployment.yaml's `vault:` block over
+// the D4 overlay, re-read when the file changes; METISTRY_PUSH_SCHEDULE still
+// overrides `push` for this release (a bad value stops the process here, as
+// it always has).
+const vaultPolicy = new VaultPolicySource(overlayFilesFromEnv(process.env, "deployment").split(":"), process.env);
+if (vaultPolicy.current().policy.push_override !== undefined) console.warn(`reconciler: ${pushOverrideNote(vaultPolicy.current().policy.push_override!)}`);
 
 const pool = new pg.Pool({
   host: optionalEnv("METISTRY_DB_HOST", "127.0.0.1"),
@@ -120,18 +128,59 @@ const indexer = new Indexer(
   embeddings,
 );
 
+// the schedule over the committer's sync (T10-3 is HOW; this is WHEN). A
+// sync that did something is a log line; a quiet pull is not.
+const logSync = (r: PushResult): PushResult => {
+  if (r.attempted && (!r.ok || r.pushed || (r.integrated && r.integrated !== "up_to_date"))) {
+    console.log(`reconciler: sync ${r.ok ? "ok" : "stopped"} (${r.remote}: ${r.integrated ?? "no fetch"}${r.behind ? `, ${r.behind} in` : ""}${r.pushed ? ", pushed" : ""})`);
+  }
+  return r;
+};
+// The policy as of NOW: a stat of deployment.yaml per call, so a flush that
+// follows `metistry vault settings` already acts on the new answer.
+let lastPolicy = describeVaultSync(vaultPolicy.current().policy);
+const policyNow = () => {
+  if (vaultPolicy.refresh()) {
+    const now = describeVaultSync(vaultPolicy.current().policy);
+    if (now !== lastPolicy) console.log(`reconciler: vault sync policy is now ${now}`);
+    lastPolicy = now;
+  }
+  return vaultPolicy.current().policy;
+};
+const sync = new SyncScheduler(
+  policyNow,
+  {
+    push: () => committer.push().then(logSync),
+    pull: () => committer.pull().then(logSync),
+    ahead: async () => (await aheadBehind(git)).ahead,
+    conflict: () => committer.vault.conflict,
+  },
+  commitRecorder(pool),
+);
+
 const server = makeBridge(
-  { vault, committer, indexer, embeddings, embedClient, db: pool },
+  {
+    vault,
+    committer,
+    indexer,
+    embeddings,
+    embedClient,
+    db: pool,
+    vaultStatus: () =>
+      readVaultStatus({ git, policy: () => vaultPolicy.current(), lastPush: () => sync.lastPush, lastPull: () => committer.lastPull, conflict: () => committer.vault.conflict }),
+  },
   { token, ...(ownerToken ? { ownerToken } : {}), maxBodyBytes: intEnv("METISTRY_VAULT_MAX_BYTES", 2 * 1024 * 1024) + 64 * 1024 },
 );
 server.listen(port, host, () => {
-  console.log(`reconciler listening on ${host}:${port} (repo: ${instanceDir}; commit every ${commitIntervalSec}s; reconcile every ${reconcileIntervalSec}s; push ${pushEverySec ? `every ${pushEverySec}s` : "never"}; protected paths: ${ownerToken ? "the owner bearer only" : "NO caller — mint METISTRY_BRIDGE_TOKEN_RECONCILER_USER"})`);
+  console.log(`reconciler listening on ${host}:${port} (repo: ${instanceDir}; commit every ${commitIntervalSec}s; reconcile every ${reconcileIntervalSec}s; ${describeVaultSync(vaultPolicy.current().policy)}; protected paths: ${ownerToken ? "the owner bearer only" : "NO caller — mint METISTRY_BRIDGE_TOKEN_RECONCILER_USER"})`);
 });
 
 setInterval(() => {
   committer.flush().then(
     (r) => {
       if (r.commits.length || r.failed) console.log(`reconciler: flushed ${r.commits.length} commit(s)${r.failed ? `, ${r.failed} failed` : ""}`);
+      // a `commit` event, and under `after_commit` the push
+      sync.afterFlush(r.commits.length).catch((err) => console.error("reconciler: push after commit failed:", err instanceof Error ? err.message : err));
     },
     (err) => console.error("reconciler: flush failed:", err instanceof Error ? err.message : err),
   );
@@ -157,22 +206,6 @@ committer.hooks = {
   },
 };
 
-if (pushEverySec) {
-  setInterval(() => {
-    committer.push().then((r) => {
-      if (r.attempted) console.log(`reconciler: sync ${r.ok ? "ok" : "stopped"} (${r.remote}: ${r.integrated ?? "no fetch"}${r.behind ? `, ${r.behind} in` : ""}${r.pushed ? ", pushed" : ""})`);
-    });
-  }, pushEverySec * 1000);
-}
-
-/** `@hourly` | `@daily` | `never` | `<n>s` | `<n>m` | `<n>h` → seconds (0 = never). */
-function parsePushSchedule(s: string): number {
-  const v = s.trim().toLowerCase();
-  if (v === "never" || v === "" || v === "0") return 0;
-  if (v === "@hourly") return 3600;
-  if (v === "@daily") return 86400;
-  const m = /^(\d+)([smh]?)$/.exec(v);
-  if (!m) throw new Error(`METISTRY_PUSH_SCHEDULE must be @hourly, @daily, never, or <n>[s|m|h] — got "${s}"`);
-  const n = Number(m[1]);
-  return m[2] === "m" ? n * 60 : m[2] === "h" ? n * 3600 : n;
-}
+// push and pull on the policy in force (policyNow re-reads deployment.yaml,
+// so `metistry vault settings` takes effect without a restart)
+sync.start();

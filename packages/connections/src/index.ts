@@ -4,10 +4,10 @@
 // `catalog.ts`), the listing every surface renders (`describe.ts`), the
 // pooled MCP client (`pool.ts`, `plan.ts`) and its check (`check.ts`); what a
 // sync opens to read a builtin provider's connection (`sync.ts`), the
-// `linear` provider itself (`linear.ts`, T4-24) and the `ics` provider — an
-// iCalendar feed, parsed and expanded (`ics.ts`, T4-12) — and the `caldav`
-// provider: read, write own and reply over RFC 6638 (`caldav.ts`,
-// `dav-xml.ts`, T4-13).
+// `linear` provider itself (`linear.ts`, T4-24) and Send to Linear
+// (`linear-issue.ts`, T4-25), and the `ics` provider — an iCalendar feed,
+// parsed and expanded (`ics.ts`, T4-12) — and the `caldav` provider: read,
+// write own and reply over RFC 6638 (`caldav.ts`, `dav-xml.ts`, T4-13).
 // docs/ops/connections.md is the same contract in words.
 
 export { CONNECTION_REFUSAL_CODES, ConnectionRefused, type ConnectionRefusalCode } from "./errors.js";
@@ -90,6 +90,19 @@ export {
   type LinearErrorCode,
   type LinearIssue,
 } from "./linear.js";
+export {
+  ISSUE_CREATE_MUTATION,
+  ISSUE_TITLE_MAX,
+  TRACKER_CREATE_CAPABILITY,
+  VIEWER_TEAMS_QUERY,
+  createLinearIssue,
+  issueTitle,
+  trackerIssueId,
+  viewerTeams,
+  type CreateIssueRequest,
+  type CreateIssueResult,
+  type LinearTeam,
+} from "./linear-issue.js";
 export {
   ICS_ERROR_CODES,
   ICS_MAX_BYTES,

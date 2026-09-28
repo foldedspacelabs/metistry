@@ -18,14 +18,16 @@
 # `linear.ts`) reaches https://api.linear.app and nothing else, and follows
 # no redirect.
 #
-# `read` only in this release: creating and completing an issue are their own
-# doors (T4-25, T4-26), and add their capabilities when they land.
+# `read` is the sync's. `create` is *Send to Linear* (T4-25): the owner's door
+# `POST /api/trackers/<connection>/issues` files one issue per task, through
+# one fixed mutation (packages/connections `linear-issue.ts`). Completing an
+# issue is its own door (T4-26) and adds its capability when it lands.
 schema: 1
 name: linear
 type: connection-type
 description: Linear — the issues assigned to you, on the Board as work and in Needs You as tasks. A personal API key, sent to api.linear.app only.
 provides: tracker
 transports: [http]
-capabilities: [read]
+capabilities: [read, create]
 sync: linear
 implementation: { kind: builtin, module: linear }

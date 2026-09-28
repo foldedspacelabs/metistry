@@ -1,0 +1,16 @@
+# SYNTHETIC — a planner on this machine, never dialled: the test replays.
+providers:
+  ollama: { kind: openai-compatible, base_url: http://127.0.0.1:9/v1, locality: on_machine }
+  cloud:
+    kind: openai-compatible
+    base_url: https://cloud.invalid/v1
+    locality: off_machine
+    data_policy: { allow: [Projects], deny_sources: [], max_brief_bytes: 65536 }
+    pricing:
+      big-model: { in_per_m: 3, out_per_m: 15 }
+assignments:
+  default: { model: ollama/small-model, effort: medium }
+  tiers:
+    fast: { model: ollama/small-model, effort: low }
+    deep: { model: cloud/big-model, effort: high }
+  intent: { model: ollama/gemma4:e4b-it-qat }

@@ -1,0 +1,9 @@
+{
+  "since_days": 14,
+  "groups": [
+    { "provider": "ollama", "model": "small-model", "tier": "default", "caching": "off", "turns": 900, "tokens_in": 9000000, "tokens_out": 900000, "cost_usd": 0, "turns_unpriced": 0 },
+    { "provider": "cloud", "model": "big-model", "tier": "deep", "caching": "off", "turns": 100, "tokens_in": 2000000, "tokens_out": 200000, "cost_usd": 9, "turns_unpriced": 0 },
+    { "provider": "ollama", "model": "small-model", "tier": "fast", "caching": "off", "turns": 5, "tokens_in": 20000, "tokens_out": 2000, "cost_usd": 0, "turns_unpriced": 0 }
+  ],
+  "totals": {}, "threshold": 0.5, "verdict": { "status": "ok", "line": "synthetic" }
+}

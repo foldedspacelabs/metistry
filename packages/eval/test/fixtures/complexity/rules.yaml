@@ -1,0 +1,15 @@
+# SYNTHETIC — the parts of rules.yaml the eval reads.
+tiers:
+  fast: { model: small-model, effort: low }
+  default: { model: small-model }
+  deep: { model: big-model, effort: high }
+policy:
+  mode: shadow
+  tiers: [fast, default, deep]
+  timeout_ms: 400
+  caps: { tool_calls: 12, tokens: 150000, cost_usd: 0.5 }
+  complexity: { min_confidence: 0.6 }
+  table:
+    - id: by-complexity
+      when: { complexity: [simple, moderate, demanding] }
+      then: { operation: tools, tier: { simple: fast, moderate: default, demanding: deep } }

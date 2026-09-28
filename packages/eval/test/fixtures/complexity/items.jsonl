@@ -1,0 +1,15 @@
+# SYNTHETIC — test data for the harness, never an eval fixture. The owner's
+# fixtures live in <instance>/.metistry/eval/complexity.jsonl and only the
+# owner labels them (C11); these exist so the replay has something to answer.
+{"id":"s1","text":"synthetic simple item one","label":"simple"}
+{"id":"s2","text":"synthetic simple item two","label":"simple"}
+{"id":"s3","text":"synthetic simple item three","label":"simple","accept":["moderate"]}
+{"id":"s4","text":"synthetic simple long trap alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi omega one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen","label":"simple","trap":"long_simple"}
+{"id":"m1","text":"synthetic moderate item one","label":"moderate"}
+{"id":"m2","text":"synthetic moderate item two","label":"moderate"}
+{"id":"m3","text":"synthetic moderate item three","label":"moderate"}
+{"id":"m4","text":"synthetic moderate item four","label":"moderate","accept":["demanding"]}
+{"id":"d1","text":"synthetic demanding item one","label":"demanding"}
+{"id":"d2","text":"synthetic demanding item two","label":"demanding","d08":true}
+{"id":"d3","text":"synthetic demanding item three","label":"demanding"}
+{"id":"d4","text":"synthetic short demanding","label":"demanding","trap":"short_demanding"}

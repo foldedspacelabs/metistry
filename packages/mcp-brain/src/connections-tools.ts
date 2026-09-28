@@ -320,12 +320,12 @@ export function registerConnectionsTools(reg: Register, proxy: ConnectionsProxy 
 
   reg(
     "connections_call",
-    "Call one tool of a connection lent to you (connections_list says how each runs). A change answers a preview first; call again with its confirm_token to run it.",
+    "Call one tool of a lent connection. A change previews first; resend it with its confirm_token.",
     {
       connection: z.string().min(1).max(64),
       tool: z.string().min(1).max(128),
       arguments: z.record(z.string(), z.unknown()).optional(),
-      confirm_token: z.string().max(64).optional(),
+      confirm_token: z.string().optional(), // any string: only a token this server minted redeems (connection-confirm.ts)
     },
     async (a, act) => {
       const meta: Record<string, unknown> = { connection: a.connection, connection_tool: a.tool };

@@ -107,6 +107,11 @@ public final class AppModel {
     /// so the project the owner left is the one they come back to; dropped
     /// with everything else on an instance switch.
     public let projects: ProjectsModel
+    /// Settings ▸ Instance ▸ History: the vault's sync and Roll Back…
+    /// (settings-panes/instance-pane.swift). Held here so a rollback asked for
+    /// keeps its preview while the Settings window is closed and reopened;
+    /// dropped on an instance switch.
+    public let vaultHistory: VaultHistoryModel
 
     public init(
         bundleResourceURL: URL?,
@@ -184,6 +189,10 @@ public final class AppModel {
         self.agents = AgentsModel(session: console)
         self.board = BoardModel(session: console)
         self.projects = ProjectsModel(session: console)
+        let vaultHistory = VaultHistoryModel(session: console)
+        self.vaultHistory = vaultHistory
+        // A rollback asked for is a request: the row and the Dock hear it now.
+        vaultHistory.onQueueChanged = { [weak shell] in await shell?.refreshCount() }
 
         // The wizard's step 2 hands the folder back the moment it is known, so
         // every later verb runs against it.

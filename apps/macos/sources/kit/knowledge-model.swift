@@ -21,11 +21,18 @@
 //     `collector_health` per sync once a door serves it. Until then the line
 //     says *freshness unknown* (§6, P5): no route serves the query yet
 //     (seed/queries/collector_health.yaml is `expose: route` with no route).
-//   * a page — `GET /api/knowledge/page` and `GET /api/knowledge/links`.
+//   * a page — `GET /api/knowledge/page` and `GET /api/knowledge/links`; its
+//     history, `GET /api/knowledge/history`, and one version of it,
+//     `GET /api/knowledge/version` (T10-4, drawn by T10-7).
 //
 // WHAT IT WRITES, and nothing else: a request's answer (the Needs You card,
-// unchanged), and a conflict settled through T2-10's door
-// (`POST /api/knowledge/conflicts/resolve`). The conflict's Undo is the
+// unchanged), a conflict settled through T2-10's door
+// (`POST /api/knowledge/conflicts/resolve`), and a restore ASKED for —
+// `POST /api/knowledge/restore` (T10-5) raises a Needs You request and writes
+// nothing; the page then shows that request inline, and answering it there
+// answers it in Needs You (screen 10 §3.1). Restore is reach `local` (ruling
+// 7): drawn and sent only while `GET /api/whoami` says this client is the
+// local owner token (vault-history-model.swift). The conflict's Undo is the
 // client's (C136; knowledge-routes.ts): Keep Mine or Take the Other is held
 // here for ten seconds and only then sent, so Undo sends nothing at all.
 //
@@ -752,6 +759,8 @@ public struct SourcesLine: Sendable, Equatable {
 public struct KnowledgePageRead: Sendable, Equatable {
     public var path: String
     public var content: String
+    /// The content hash as served — what a restore sends as `seen_sha`.
+    public var sha256: String? = nil
     public var outgoing: [KnowledgePageLink]
     public var incoming: [KnowledgePageLink]
     /// The links could not be read; the words still stand.
@@ -780,6 +789,87 @@ public struct KnowledgePageRead: Sendable, Equatable {
         let unwritten = link.resolved == false ? ", not written yet" : ""
         return "\(name), \(kindWord(link.kind)), \(link.path)\(unwritten)"
     }
+}
+
+// MARK: - A page's history
+
+/// One commit of a page's history (`GET /api/knowledge/history`, T10-4).
+public struct KnowledgeCommit: Sendable, Equatable, Identifiable {
+    public var sha: String
+    /// The page's name AS IT WAS in this commit — across a rename, the old one.
+    public var path: String
+    /// `added` · `modified` · `deleted` · `renamed` · …; nil on a merge that carried it.
+    public var change: String?
+    public var subject: String
+    public var author: String?
+    /// `Brain-Source:` — provenance to show, never authority.
+    public var source: String?
+    public var at: Date?
+    public var id: String { sha }
+
+    public init(sha: String, path: String, change: String? = nil, subject: String = "", author: String? = nil, source: String? = nil, at: Date? = nil) {
+        self.sha = sha
+        self.path = path
+        self.change = change
+        self.subject = subject
+        self.author = author
+        self.source = source
+        self.at = at
+    }
+
+    public var short: String { String(sha.prefix(7)) }
+
+    static func list(_ json: JSONValue) -> [KnowledgeCommit] {
+        (json["commits"]?.arrayValue ?? []).compactMap { c in
+            guard let sha = c.string("sha"), let path = c.string("path") else { return nil }
+            return KnowledgeCommit(sha: sha, path: path, change: c.string("change"), subject: c.string("subject") ?? "", author: c.string("author"), source: c.string("source"), at: WireTime.date(c.string("at")))
+        }
+    }
+
+    /// *Rename the plan to the roadmap, by You, 28 Sep, 1:10 PM, renamed, 4c1d2e3* — the row, as one.
+    public func spoken(assistantName: String?, clock: ClockTime, now: Date) -> String {
+        var parts = [subject.isEmpty ? "No subject" : subject]
+        if let who = VaultWho.name(source: source, author: author, assistantName: assistantName) { parts.append("by \(who)") }
+        if let at { parts.append(clock.moment(at, now: now)) }
+        if let change { parts.append(change) }
+        parts.append(short)
+        return parts.joined(separator: ", ")
+    }
+}
+
+/// What a history row offers (§2.21): Restore, or why not.
+public enum KnowledgeRestoreOffer: Sendable, Equatable {
+    /// The newest commit is the page as it stands — nothing to restore.
+    case current
+    /// The commit names the page by an earlier name; the door restores this name only.
+    case renamed
+    /// The commit that deleted it has no bytes to restore.
+    case deleted
+    /// This client is not the local owner (ruling 7): no Restore is drawn at all.
+    case notHere
+    /// Restore — off, with the fact that turned it off, when one did.
+    case offered(disabledBecause: String?)
+}
+
+/// A restore request (T10-5) for one page: the improvement THIS console
+/// raised, found by its `payload.restore.path`. The console decides what
+/// Approve may do; this only finds the row to draw.
+public enum KnowledgeRestoreRequest {
+    public static func path(of row: RequestRow) -> String? {
+        guard row.kind == "improvement", row.sourceAgent == "console", row.decision == nil || row.decision == "pending" else { return nil }
+        return row.payload?["restore"]?.string("path")
+    }
+}
+
+/// A restore asked for on a page: in flight, or refused.
+public struct KnowledgeRestoreNote: Sendable, Equatable {
+    public enum Phase: Sendable, Equatable {
+        case sending(sha: String)
+        case refused(String)
+    }
+
+    public var path: String
+    public var phase: Phase
 }
 
 /// Where on the screen the owner is.
@@ -818,6 +908,14 @@ public final class KnowledgeModel {
     public private(set) var page: KnowledgeRead<KnowledgePageRead>?
     public private(set) var areaPages: KnowledgeRead<[KnowledgePageEntry]>?
     public private(set) var search: KnowledgeRead<KnowledgeSearchReply>?
+    /// The page on screen's commits, newest first.
+    public private(set) var history: KnowledgeRead<[KnowledgeCommit]>?
+    /// One version of the page, opened from its history, by commit.
+    public private(set) var versions: [String: KnowledgeRead<String>] = [:]
+    /// A restore asked for on the page on screen.
+    public private(set) var restoreNote: KnowledgeRestoreNote?
+    /// Whether this client may restore (ruling 7) — asked once per instance.
+    public private(set) var reach: ClientReach = .unknown
     public var query = ""
     /// Filter (⌘F) asked for the box; the view focuses it and clears this.
     public var wantsSearchFocus = false
@@ -839,6 +937,7 @@ public final class KnowledgeModel {
     @ObservationIgnored private let conflictHold: Duration
     @ObservationIgnored private var requestCards: (name: String, generation: Int, cards: RequestCards)?
     @ObservationIgnored private let foldBox: FoldDateBox
+    @ObservationIgnored private var reachAsked = false
 
     /// The newest fold on or before a day — `Earlier Folds` moves it back.
     private final class FoldDateBox: @unchecked Sendable {
@@ -861,7 +960,8 @@ public final class KnowledgeModel {
             await Self.readFold(stores, date: box.date)
         }
         requests = SectionModel(session: session, policy: .requests, topics: [.needsYou]) { stores in
-            await stores.requests().map { page in (page.proposals.filter { KnowledgeEyeItem.kind(of: $0) != nil }, nil) }
+            // Needs your eye's three kinds, and a page's restore request (T10-7).
+            await stores.requests().map { page in (page.proposals.filter { KnowledgeEyeItem.kind(of: $0) != nil || KnowledgeRestoreRequest.path(of: $0) != nil }, nil) }
         }
         drafts = SectionModel(session: session, policy: .board, topics: [.knowledge]) { stores in
             await stores.knowledgeDrafts(limit: 50, offset: nil).map { (KnowledgeDraftRow.list($0.json), WireTime.date($0["as_of"]?.stringValue)) }
@@ -983,6 +1083,11 @@ public final class KnowledgeModel {
         page = nil
         areaPages = nil
         search = nil
+        history = nil
+        versions = [:]
+        restoreNote = nil
+        reach = .unknown
+        reachAsked = false
         conflicts = [:]
         requestCards = nil
         foldDate = nil
@@ -999,9 +1104,16 @@ public final class KnowledgeModel {
         }
     }
 
-    func readPage(_ path: String) async {
+    /// `quietly` keeps what is on screen until the new answer replaces it —
+    /// a page re-read after a restore, not one being opened.
+    func readPage(_ path: String, quietly: Bool = false) async {
         guard let session else { return }
-        page = .loading
+        if !quietly || page?.value?.path != path {
+            page = .loading
+            history = nil
+            versions = [:]
+        }
+        if restoreNote?.path != path { restoreNote = nil }
         let generation = session.generation
         let words = await session.stores.knowledgePage(path: path)
         guard session.generation == generation, place == .page(path) else { return }
@@ -1009,7 +1121,7 @@ public final class KnowledgeModel {
         case .failure(let e):
             page = .failed(Self.problem(e))
         case .success(let p):
-            var read = KnowledgePageRead(path: path, content: p.content, outgoing: [], incoming: [], linksProblem: nil)
+            var read = KnowledgePageRead(path: path, content: p.content, sha256: p.sha256, outgoing: [], incoming: [], linksProblem: nil)
             switch await session.stores.knowledgeLinks(path: path, limit: nil, offset: nil) {
             case .success(let l):
                 read.outgoing = l.outgoing
@@ -1019,7 +1131,120 @@ public final class KnowledgeModel {
             }
             guard session.generation == generation, place == .page(path) else { return }
             page = .loaded(read)
+            await readHistory(path)
+            await askReachIfNeeded()
         }
+    }
+
+    // MARK: A page's history (T10-7)
+
+    func readHistory(_ path: String) async {
+        guard let session else { return }
+        if history?.value == nil { history = .loading }
+        let generation = session.generation
+        let answer = await session.stores.history(path: path)
+        guard session.generation == generation, place == .page(path) else { return }
+        switch answer {
+        case .success(let reply): history = .loaded(KnowledgeCommit.list(reply.json))
+        case .failure(let e): history = .failed(Self.problem(e))
+        }
+    }
+
+    /// `GET /api/whoami`, once per instance: whether this client is the local owner.
+    func askReachIfNeeded() async {
+        guard !reachAsked, let session else { return }
+        reachAsked = true
+        let generation = session.generation
+        let answer = await session.stores.whoami()
+        guard session.generation == generation else { return }
+        switch answer {
+        case .success(let who): reach = .of(via: who.via)
+        case .failure:
+            // Unknown is not local: no Restore is drawn.
+            reach = .unknown
+            reachAsked = false
+        }
+    }
+
+    /// Show This Version: the page's bytes at one commit, under its name then.
+    public func toggleVersion(_ commit: KnowledgeCommit) async {
+        if versions[commit.sha] != nil {
+            versions[commit.sha] = nil
+            return
+        }
+        guard let session, case .page(let path) = place else { return }
+        versions[commit.sha] = .loading
+        let generation = session.generation
+        let answer = await session.stores.version(path: commit.path, sha: commit.sha)
+        guard session.generation == generation, place == .page(path), versions[commit.sha] != nil else { return }
+        switch answer {
+        case .success(let v): versions[commit.sha] = .loaded(v["content"]?.stringValue ?? "")
+        case .failure(let e): versions[commit.sha] = .failed(Self.problem(e))
+        }
+    }
+
+    /// The page on screen, by its path.
+    public var pagePath: String? { if case .page(let path) = place { return path } else { return nil } }
+
+    /// The restore request waiting for a page, if one is.
+    public func restoreRequest(for path: String) -> RequestRow? {
+        (requests.section.value ?? []).first { KnowledgeRestoreRequest.path(of: $0) == path }
+    }
+
+    /// What one row of the page's history offers.
+    public func restoreOffer(_ commit: KnowledgeCommit, isNewest: Bool, on path: String) -> KnowledgeRestoreOffer {
+        if commit.change == "deleted" { return .deleted }
+        if commit.path != path { return .renamed }
+        if isNewest { return .current }
+        guard reach.rewindsHistory else { return .notHere }
+        if !allowsDecisions { return .offered(disabledBecause: StateWords.unreachable) }
+        if restoreRequest(for: path) != nil { return .offered(disabledBecause: VaultHistoryWords.restoreWaiting) }
+        if restoreNote?.path == path, case .sending = restoreNote?.phase { return .offered(disabledBecause: "asking…") }
+        return .offered(disabledBecause: nil)
+    }
+
+    /// Restore: ask. Nothing changes until Approve — here, inline, or in
+    /// Needs You. Refused with nothing sent unless this client is the local
+    /// owner (ruling 7); the console refuses it too.
+    public func restore(_ commit: KnowledgeCommit) async {
+        guard case .page(let path) = place, let read = page?.value, read.path == path, commit.path == path else { return }
+        guard reach.rewindsHistory else {
+            restoreNote = KnowledgeRestoreNote(path: path, phase: .refused(VaultHistoryWords.onlyTheMac))
+            return
+        }
+        guard let session else { return }
+        if case .sending = restoreNote?.phase, restoreNote?.path == path { return }
+        restoreNote = KnowledgeRestoreNote(path: path, phase: .sending(sha: commit.sha))
+        let generation = session.generation
+        let answer = await session.stores.restore(path: path, sha: commit.sha, seenSHA: read.sha256 ?? "")
+        guard session.generation == generation else { return }
+        switch answer {
+        case .success:
+            restoreNote = nil
+            // The request is Needs You's; the page draws it inline from there.
+            await answered()
+        case .failure(let e):
+            if case .http(403, let envelope) = e, envelope?.code == "local_only" {
+                // The console says this client is not the Mac: Restore goes.
+                reach = .remote(via: "local_only")
+                restoreNote = KnowledgeRestoreNote(path: path, phase: .refused(VaultHistoryWords.onlyTheMac))
+            } else if e.wasHeldForReachability {
+                restoreNote = KnowledgeRestoreNote(path: path, phase: .refused(StateWords.unreachable))
+            } else if e.conflictReason == "stale" {
+                restoreNote = KnowledgeRestoreNote(path: path, phase: .refused("This page changed after you read it — it is shown as it stands now; restore again from there."))
+                await readPage(path, quietly: true)
+            } else {
+                restoreNote = KnowledgeRestoreNote(path: path, phase: .refused(Self.problem(e)))
+            }
+        }
+    }
+
+    /// The inline restore request was answered: the queue asks again, and the
+    /// page — whose words Approve just changed — is read again.
+    public func restoreAnswered(_ path: String) async {
+        await answered()
+        guard place == .page(path) else { return }
+        await readPage(path, quietly: true)
     }
 
     func readArea(_ area: String) async {
@@ -1183,6 +1408,7 @@ public enum KnowledgeWords {
     public static let answeredThere = "This arrived as a request, so answering it here answers it in Needs You."
     public static let neitherLost = "Neither version was lost: the sync stopped rather than choosing."
     public static let mergeInObsidian = "Merge in Obsidian"
+    public static let restoreWaiting = "Restore Waiting"
 
     // One architectural rule per section, in situ (§1).
     /// §2, C102 — the name is templated, never written here.

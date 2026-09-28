@@ -2122,13 +2122,32 @@ that commit — including the commit that deleted it; ask for the one before.
 
 **Notes only, the owner only.** Both apply `page`'s rule to the path —
 `.metistry/`, `Artifacts/`, the root `CLAUDE.md` are classified for the owner
-and served to nobody — and the bridge refuses a protected or non-vault path
-again (`403`) whichever bearer asks: the history of the machinery is the
-CLI's, with the owner's hand on it. And both are the owner's **alone**, like
-`fold`/`drafts`/`areas`: a note's history holds every version of it,
-including what an edit since took out, so no agent reads it — whatever its
-grants, and even through a gate widened by mistake. Restore (T10-5) and roll
-back (T10-6) build on these two; neither changes anything.
+and served to nobody — before the bridge is ever asked, for the owner too:
+the history of the machinery is the CLI's, with the owner's hand on it. And
+both are the owner's **alone**, like `fold`/`drafts`/`areas`: a note's
+history holds every version of it, including what an edit since took out, so
+no agent reads it — whatever its grants, and even through a gate widened by
+mistake. Restore (T10-5) and roll back (T10-6) build on these two; neither
+changes anything.
+
+**The bridge does not merely trust that gate (ruled 2026-09-27, X-6).**
+`GET /vault/show` has always refused a protected or non-vault path (`403`)
+whichever bearer asks, bytes included. `GET /vault/log` did not — a
+`.metistry/` path, or a whole-tree commit that happened to touch one, reached
+either bearer with its subject and trailers, even though this door never
+sent it one. `vault.log()` is now narrowed the same way `show` is, but to the
+**owner bearer** rather than to nobody: for every other caller — the
+console's bearer, which is what fronts an agent here — a `.metistry/` (or
+root `CLAUDE.md`/`README.md`) `path` is `403 forbidden`, and a whole-tree
+read drops any commit that touched one rather than redacting it.
+`Artifacts/` is deliberately left out of this one: the artifacts service
+resolves a version's commit through this same `GET /vault/log`, with the
+console's own (non-owner) bearer, and was never part of the confidentiality
+boundary `.metistry/` is. This is defence in depth, not a second copy of the
+console's rule — `history`/`version` never send a protected `path` in the
+first place, so the practical effect is on a caller that reaches the bridge
+some other way (`apps/reconciler/src/vault.ts`,
+`apps/reconciler/test/history.test.ts`).
 
 #### `POST /api/knowledge/restore` — put a note back as it was (`user` principal; T10-5)
 

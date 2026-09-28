@@ -5,7 +5,12 @@
 //
 // The misuse half is the ticket's bold line: a protected or non-vault path is
 // refused, and a bad revision is refused — both before git runs, for either
-// bearer — plus the bridge's own 401s.
+// bearer — plus the bridge's own 401s. `GET /vault/log` is narrower still
+// (ruled 2026-09-27, X-6): `show`'s protected-path refusal is unconditional,
+// but `log`'s is narrowed to the owner — a `.metistry/` path, or a whole-tree
+// commit that touched one, is `forbidden`/dropped for every caller but the
+// owner, so no agent bearer (the console's bearer, which fronts one) ever
+// sees a `.metistry/` subject.
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { AddressInfo } from "node:net";
@@ -114,6 +119,29 @@ describe("file history: GET /vault/log with a path, GET /vault/show", () => {
     expect(all[0]).toMatchObject({ sha: pic, subject: "a picture", source: "user" });
     expect(all[0].path).toBeUndefined();
     expect(all[0].change).toBeUndefined();
+  });
+
+  it("MISUSE: `/vault/log` is narrowed to the owner like `/vault/show` — a `.metistry/` path is refused for the console's bearer, not for the owner (ruled 2026-09-27, X-6)", async () => {
+    for (const path of [".metistry/identity.yaml", ".metistry/rules.yaml"]) {
+      const r = await get(`/vault/log?path=${encodeURIComponent(path)}`);
+      expect(r.status, path).toBe(403);
+      expect((await r.json()).error.code, path).toBe("forbidden");
+    }
+    // the owner's alone: the CLI's own door onto the machinery's history
+    const owned = await (await get(`/vault/log?path=${encodeURIComponent(".metistry/identity.yaml")}`, OWNER)).json();
+    expect(owned.entries.map((e: { subject: string }) => e.subject)).toContain("seed");
+    // `Artifacts/` is not swept in — the console's artifacts service resolves
+    // a version's commit through this same door with the console's own bearer
+    expect((await get(`/vault/log?path=${encodeURIComponent("Artifacts/bundle-1/report.md")}`)).status).toBe(200);
+  });
+
+  it("MISUSE: the whole-tree log never hands an agent bearer a `.metistry/` subject; the owner still sees it (ruled 2026-09-27, X-6)", async () => {
+    const asAgent = (await (await get("/vault/log?limit=200")).json()).entries as Array<{ sha: string; subject: string }>;
+    expect(asAgent.some((e) => e.sha === seed)).toBe(false);
+    expect(asAgent.some((e) => e.subject === "seed")).toBe(false);
+
+    const asOwner = (await (await get("/vault/log?limit=200", OWNER)).json()).entries as Array<{ sha: string; subject: string }>;
+    expect(asOwner.some((e) => e.sha === seed && e.subject === "seed")).toBe(true);
   });
 
   it("a trailer the committer would never write is dropped, not passed on", () => {

@@ -469,9 +469,11 @@ describe("writeKnowledge ownership (the fold's rule 2)", () => {
 
 // A routine's own folder (owner ruling (a), W1; C103, T3-6): `Journal/Brief/`,
 // `Journal/Standup/` and `Journal/Plan/` are written under the routine's
-// principal. The assistant's one turn may fill the pending prose slots of a
-// file the routine wrote — and the misuse tests below are every other thing
-// it might try there.
+// principal ONCE the routine has written its file — the assistant's one turn
+// may then fill the pending prose slots of that file, and the misuse tests
+// below are every other thing it might try there. A path with no file there
+// yet is an ordinary create (ruling 9, W2 checkpoint, 2026-09-27,
+// decisions-log.md — X-11 relaxes T3-6's blanket create refusal).
 describe("knowledge_write in a routine's own folder — prose slots, nothing else", () => {
   const PATH = "Journal/Brief/2026-09-28.md";
   const BRIEF = [
@@ -538,14 +540,18 @@ describe("knowledge_write in a routine's own folder — prose slots, nothing els
     expect(calls).toHaveLength(0);
   });
 
-  it("MISUSE: never a create — the assistant cannot pre-empt a routine's file, in any routine's folder", async () => {
+  it("creates a new file in each routine folder (ruling 9): an ordinary create, stamped and committed under the assistant's own name, never the routine's", async () => {
     const { writer, calls } = recorder(okReply);
-    for (const path of [PATH, "Journal/Standup/2026-09-28.md"]) {
-      const r = await writeKnowledge(assistant, { path, content: BRIEF, message: "m", expected_sha256: "" }, writer, NOW, reader(null));
-      expect(r, path).toMatchObject({ ok: false, code: "forbidden" });
-      expect(r.ok === false && r.message, path).toMatch(/never create one/);
+    for (const path of [PATH, "Journal/Standup/2026-09-28.md", "Journal/Plan/2026-09-29.md"]) {
+      const r = await writeKnowledge(assistant, { path, content: "# A new note\n", message: "m", expected_sha256: "" }, writer, NOW, reader(null));
+      expect(r.ok, path).toBe(true);
     }
-    expect(calls).toHaveLength(0);
+    expect(calls).toHaveLength(3);
+    for (const c of calls) {
+      expect(c.intent.principal).toBe("assistant");
+      expect(c.content.startsWith("---\nsource: assistant\nupdated: 2026-09-07\n---\n")).toBe(true);
+      expect(c.expected_sha256).toBe(""); // create only
+    }
   });
 
   it("MISUSE: Tomorrow's Plan renders no prose, so its folder is refused outright — even a file that happens to hold a marker", async () => {

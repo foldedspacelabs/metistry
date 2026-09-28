@@ -1677,8 +1677,9 @@ before anything is written and without repeating the value:
   --auth-header <Header> --secret <name>`) or Basic sign-in with an app password
   (`--auth basic --username <user> --secret <name>` — the username is written,
   the password is the secret, filled at the egress door; a username with a colon
-  is refused). Basic is read by a sync — a CalDAV calendar (T4-13); an MCP server
-  with basic sign-in is dialled from T4-10;
+  is refused). `--auth basic` is accepted only by a connection type that
+  declares it (`auth: [basic]` — the CalDAV calendars, T4-13); any other type,
+  or a custom connection, is refused;
 - a Google address for a CalDAV calendar — *Google needs sign-in with Google*
   (its CalDAV takes OAuth only), and a known service (`icloud-calendar`,
   `fastmail-calendar`) pointed anywhere but its own server;

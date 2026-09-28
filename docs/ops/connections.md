@@ -414,6 +414,10 @@ to `connection:<name>` — or refuses (`sync.ts`, *A sync reading its
 connection*). The password is never in a URL, the file, a log, a run or an
 error; a server that echoes it gets the secret's name back.
 
+**Basic sign-in is CalDAV's alone**: the three types declare `auth: [basic]`,
+and core's `connectionIssues`, the CLI and `openSyncHttp` refuse basic on any
+connection whose type does not (a tracker, a feed, a custom MCP server).
+
 **Refused at the file** (`caldavConnectionIssues`, before anything is sent or
 written): **a Google address — *Google needs sign-in with Google*** (Google's
 CalDAV takes OAuth only and answers Basic with a 401; Google Calendar is its

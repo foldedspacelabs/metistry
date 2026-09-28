@@ -125,7 +125,7 @@ describe("a task row", () => {
     expect(html).toMatch(/<input type="checkbox" id="tick-3" data-act="tick" data-key="mt-7f3k2a">/);
     expect(html).toContain('<label class="item-title" for="tick-3">Send Dana the fixture format</label>');
     expect(html).toContain("due today · P2 · S · metistry");
-    expect(html).toMatch(/data-act="defer" data-key="mt-7f3k2a" aria-expanded="false">Defer</);
+    expect(html).toMatch(/data-act="defer" data-key="mt-7f3k2a" aria-expanded="false" data-needs-connection>Defer</); // not offered offline (T7-4)
   });
 
   it("a work row has no checkbox — it is finished on the Board", () => {

@@ -477,11 +477,11 @@
           "value": "America/New_York",
           "origin": "profile"
         },
-        "next_run": null,
+        "next_run": "2026-10-02T19:00:00.000Z",
         "next_refused": null,
         "last_run": null,
         "is_default": false,
-        "held": "a New Routine is an assignment the runner does not start yet — agent routines (T3-8) run it; until then it is kept, listed, and not run",
+        "held": null,
         "describe": "fri at 15:00"
       },
       {

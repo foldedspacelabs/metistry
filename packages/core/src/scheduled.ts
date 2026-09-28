@@ -120,8 +120,30 @@ const grantPath = z
   .string()
   .refine(grantable, "a grant is a TitleCase vault prefix an agent may hold (e.g. Areas/Finance) — never .metistry/, Artifacts/ or a traversal");
 
-/** Per-run grants: given to the actor for that run only (T3-8), on top of its own. */
-const grantsSchema = z.object({ read: z.array(grantPath).optional(), write: z.array(grantPath).optional() }).strict();
+/**
+ * Why a per-run grant has no `write:` — one sentence for the file and the
+ * Scheduled doors alike. Per-run grants are READ-ONLY (owner ruling (a), W1;
+ * confirmed at the W2 checkpoint, item 4): a routine's reserved subfolder
+ * (`Journal/Digest/`) is an OWNERSHIP fact about the routine, written through
+ * the reconciler under its own principal — never something a run is granted.
+ */
+export const GRANTS_READ_ONLY_REFUSAL =
+  "per-run grants are read-only — a routine's reserved subfolder is its own ownership, written through the reconciler under its own principal, never a grant (owner ruling, W1)";
+
+/**
+ * Per-run grants: READ-ONLY vault prefixes, given to the actor for that run
+ * only (T3-8), on top of its own. `write:` is refused by name rather than as
+ * an unknown key, so the refusal says why.
+ */
+const grantsSchema = z.strictObject(
+  { read: z.array(grantPath).optional() },
+  {
+    error: (iss) =>
+      iss.code === "unrecognized_keys" && iss.keys.includes("write")
+        ? `write: ${GRANTS_READ_ONLY_REFUSAL}`
+        : undefined,
+  },
+);
 
 /** A change to a routine that has a manifest — product, or extension. Every field is optional: each overrides one field and leaves the rest to the layers below. */
 export const routineOverrideSchema = z
@@ -185,6 +207,77 @@ export const routineEntrySchema = z.unknown().transform((v, ctx): RoutineEntry =
 
 export function isAssignment(entry: RoutineEntry): entry is RoutineAssignment {
   return "actor" in entry;
+}
+
+// ---- agent routines: what a New Routine's run carries (T3-8) -----------------------
+//
+// A New Routine runs as ONE crew run (§2.5): the console's runner enqueues a
+// `work` row for the actor's crew queue, and the assistant's drain runs it
+// with a bearer minted for that run and burnt after (crew-drain.ts). The
+// run's read grants ride on that row, and they are honoured only while the
+// bearer the drain stamped on the row is the crew's live one — so a grant is
+// held for exactly one run, by exactly that run's credential, and nothing is
+// ever written into the crew's own registry row. These are the two keys the
+// three hands (runner, drain, the console's door) share.
+
+/** `work.meta.routine` on a crew row a New Routine enqueued: which routine, which runner row, and the run's read grants. */
+export const ROUTINE_RUN_META_KEY = "routine";
+/**
+ * `work.meta.<this>` — the SHA-256 of the bearer the drain minted for this
+ * run (the same hash `agents.token_hash` holds while the run is live).
+ * Stamped when the bearer is minted and removed when it is burnt; the
+ * console's door honours `routine.grants` only on the row whose stamp is the
+ * crew's live hash.
+ */
+export const RUN_BEARER_META_KEY = "run_bearer_sha256";
+
+export interface RoutineRunMeta {
+  /** The New Routine's name — its key under `routines:`. */
+  readonly name: string;
+  /** The runner's `routine_run` row this crew run was enqueued by. */
+  readonly run_id: number;
+  /** Read-only, for this run only: TitleCase vault prefixes, no trailing slash. */
+  readonly grants: { readonly read: readonly string[] };
+}
+
+/** A grant as the registry spells an area — `Journal/Digest/` and `Journal/Digest` are one prefix, and the registry's has no slash. */
+export function grantArea(prefix: string): string {
+  return prefix.replace(/\/+$/, "");
+}
+
+/** The work-row half of a New Routine's run. Pure: the runner writes it, the drain and the door read it back with `routineRunReads`. */
+export function routineRunMeta(name: string, runId: number, assignment: Pick<RoutineAssignment, "grants">): RoutineRunMeta {
+  const read = [...new Set((assignment.grants?.read ?? []).map(grantArea))];
+  return { name, run_id: runId, grants: { read } };
+}
+
+/**
+ * The per-run read grant a work row's meta carries — only prefixes an agent
+ * may hold survive (`validAgentAreaGrant`), so a row written by any other
+ * hand cannot carry `.metistry/`, `Artifacts/` or a traversal into a scope.
+ */
+export function routineRunReads(meta: unknown): string[] {
+  if (!isPlainObject(meta)) return [];
+  const routine = meta[ROUTINE_RUN_META_KEY];
+  if (!isPlainObject(routine) || !isPlainObject(routine.grants) || !Array.isArray(routine.grants.read)) return [];
+  return [...new Set(routine.grants.read.filter((a): a is string => typeof a === "string").map(grantArea).filter((a) => validAgentAreaGrant(a)))];
+}
+
+/**
+ * The New Routines a valid file holds — assignments under a name no
+ * component with a manifest has (one that does is HELD, `entryProblems`,
+ * and runs nothing). What the runner runs and what the Scheduled doors list.
+ */
+export function newRoutines(file: Scheduled, manifestNames: Iterable<string>): [string, RoutineAssignment][] {
+  const known = new Set(manifestNames);
+  return Object.entries(file.routines ?? {}).filter((e): e is [string, RoutineAssignment] => !known.has(e[0]) && isAssignment(e[1]));
+}
+
+/** Every New Routine naming `actor`, and the areas each grants it per run — an actor's permission lines draw these as *while this routine runs* (§2.4). */
+export function routineGrantsFor(file: Scheduled, manifestNames: Iterable<string>, actor: string): { routine: string; areas: string[] }[] {
+  return newRoutines(file, manifestNames)
+    .filter(([, a]) => a.actor === actor && (a.grants?.read?.length ?? 0) > 0)
+    .map(([routine, a]) => ({ routine, areas: routineRunMeta(routine, 0, a).grants.read.slice() }));
 }
 
 // ---- syncs -------------------------------------------------------------------------

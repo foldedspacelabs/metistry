@@ -69,7 +69,7 @@ resolver does no I/O. Core imports no Postgres, no vault and no config.
 | `crew(id)` | a loaded manifest, prompt and file | `CrewRegistry.get(id)`, with `where` made relative |
 | `compute` | `compute.yaml`, parsed | the console's compute loader; `emptyCompute()` when absent |
 | `connections(id)` | the connection names this actor may reach | `() => []` until F-3 / T4-8 |
-| `grantHistory(id)` | approvals and per-run routine grants | 0023 + `access_request` proposals; `routines: []` until T3-8 |
+| `grantHistory(id)` | approvals and per-run routine grants | 0023 + `access_request` proposals; `routines` from the New Routines in a valid `.metistry/scheduled.yaml` that name the actor (T3-8) |
 | `projectGrants` | every project's own read grant (0032) | `listProjectGrants` (`apps/console/src/projects.ts`); absent = no project holds one |
 
 Resolution, in order:
@@ -311,10 +311,11 @@ ceiling (C42).
    that: T4-6's bold test (*Knowledge Write never appears for a non-assistant
    role*), `CREW_NEVER_TOOLS` (`knowledge_write`), and the one-writer rule
    (§4.11). The types follow the test and the code, so a per-run write has no
-   cell (`ActorGrantHistory.routines` carries read areas only). If the owner
-   rules that a routine's `write:` is the runner writing on the crew's behalf,
-   nothing here changes. If the ruling is that the crew itself writes, then
-   `CrewPermissionRow` and the door change together.
+   cell (`ActorGrantHistory.routines` carries read areas only). **Closed**: the
+   owner ruled (W1, confirmed at the W2 checkpoint) that per-run grants are
+   read-only and a routine's reserved subfolder is an ownership fact written
+   under its own principal; T3-8 removed `write:` from the schema
+   (`docs/ops/scheduled.md`).
 2. **A second `internal` row — closed by T4-6.** `POST /api/agents` now mints
    `external` rows only and refuses `kind: internal` before anything is written
    (`AGENT_KIND_REFUSAL`). A row that predates this still resolves as an

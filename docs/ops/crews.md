@@ -269,6 +269,16 @@ assistant container drain loop ◀── claim (SKIP LOCKED, lease) ──┘
 A crew whose run produced zero `requests_create` calls is visible as `reports: 0` on
 the run row — the brief probably did not say what to report.
 
+## The other way in: a New Routine
+
+A crew row is also enqueued by the console's runner when a **New Routine**
+(`docs/ops/scheduled.md`) names the crew as its actor: the same row shape —
+`owner = crew:<name>`, the manifest snapshot, the task as the brief,
+`created_by = runner` — plus `meta.routine`, the run's **read-only** per-run
+grant. The owner wrote the task, so there is no `checkBrief`; the grant is
+held only by the bearer the drain mints for that run, while it runs, and never
+touches the crew's registry row (`authenticateAgent`, `crew-drain.ts`).
+
 ## The registry sync
 
 The console loads manifests from `METISTRY_AGENTS_DIRS`

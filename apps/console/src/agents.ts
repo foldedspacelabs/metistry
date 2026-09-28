@@ -24,6 +24,9 @@ import {
   intEnv,
   mintToken,
   parseBearer,
+  routineRunReads,
+  RUN_BEARER_META_KEY,
+  ROUTINE_RUN_META_KEY,
   scopeOfRegistryRow,
   startRun,
   tokenHash,
@@ -365,13 +368,23 @@ export async function authenticateAgent(
   // is a member of, read in the SAME statement as the membership itself, so
   // a request resolves against one moment — never a project list from before
   // a leave and its grants from after.
+  //
+  // `run_routines` (T3-8): a crew's PER-RUN read grants — `meta.routine` of
+  // the crew row it is running now, and only of the row whose stamped bearer
+  // IS this token (the drain stamps it at mint and removes it after the
+  // burn, crew-drain.ts). Read in the same statement, so a grant is held by
+  // exactly one run's credential: the next run's bearer, a dispatched run,
+  // and any moment outside the run match no row and hold nothing extra.
   const { rows } = await db.query(
     `UPDATE agents SET last_seen_at = now()
      WHERE token_hash = $1 AND revoked_at IS NULL AND (NOT remote OR approved_at IS NOT NULL)
      RETURNING id, kind, grants, projects, autonomy,
        (SELECT coalesce(jsonb_agg(jsonb_build_object('project', p.id, 'grants', p.grants) ORDER BY p.id), '[]'::jsonb)
-          FROM projects p WHERE p.id = ANY(agents.projects)) AS project_grants`,
-    [tokenHash(token)],
+          FROM projects p WHERE p.id = ANY(agents.projects)) AS project_grants,
+       (SELECT coalesce(jsonb_agg(w.meta ORDER BY w.id), '[]'::jsonb) FROM work w
+          WHERE agents.kind = 'crew' AND w.kind = 'task' AND w.owner = $2 || agents.id AND w.status = 'in_progress'
+            AND w.meta ? $3 AND w.meta->>$4 = agents.token_hash) AS run_routines`,
+    [tokenHash(token), CREW_OWNER, ROUTINE_RUN_META_KEY, RUN_BEARER_META_KEY],
   );
   const row = rows[0];
   if (!row) return null;
@@ -402,7 +415,9 @@ export async function authenticateAgent(
   const projects: string[] = row.projects ?? [];
   const own = coerceGrants(row.grants);
   const inherited = kind === "internal" ? own : inheritGrants(own, projects, Array.isArray(row.project_grants) ? row.project_grants : []).grants;
-  const grants: Grants = { tier: inherited.tier, areas: [...inherited.areas], ...(inherited.queries === true ? { queries: true } : {}) };
+  // …and, for a crew mid-routine, ∪ that run's read grant (T3-8, §2.5) — never written back either
+  const runReads = kind === "crew" && Array.isArray(row.run_routines) ? row.run_routines.flatMap((m: unknown) => routineRunReads(m)) : [];
+  const grants: Grants = withRunReads({ tier: inherited.tier, areas: [...inherited.areas], ...(inherited.queries === true ? { queries: true } : {}) }, runReads);
   return {
     id: row.id,
     kind,
@@ -412,6 +427,22 @@ export async function authenticateAgent(
     ...(crew ? { uses: crew.uses } : {}),
     ...(crew?.manifest !== undefined ? { manifest: crew.manifest } : {}),
   };
+}
+
+/** `work.owner` of a crew's queued run — crews.ts's `CREW_OWNER_PREFIX`, spelled here so this file does not import the crew loader. */
+const CREW_OWNER = "crew:";
+
+/**
+ * A grant ∪ a routine run's read-only areas (T3-8): tier `areas`, each area
+ * the grant does not already cover appended. Read-only by what holds it — a
+ * crew never writes the vault (CREW_NEVER_TOOLS) — and `index` beside
+ * `areas` comes to `areas`, as a project's grant does (`inheritGrants`).
+ */
+export function withRunReads(g: Grants, reads: readonly string[]): Grants {
+  const areas = g.tier === "areas" ? [...g.areas] : [];
+  const extra = reads.filter((a, i) => reads.indexOf(a) === i && !areas.includes(a) && !underAreas(a, areas));
+  if (extra.length === 0) return g;
+  return { ...g, tier: "areas", areas: [...areas, ...extra] };
 }
 
 export interface InternalAgentConfig {

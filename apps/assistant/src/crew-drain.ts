@@ -17,6 +17,16 @@
 // rather than a rule anyone has to remember; the run row says `fresh_session`
 // so the fact is visible where cost is read.
 //
+// Per-run grants (T3-8, §2.5): a row a New Routine enqueued carries its
+// read grants in `meta.routine` (core's `routineRunMeta`). They are held by
+// THIS run's bearer and nothing else: the drain stamps the bearer's hash on
+// the row once it is minted (`meta.run_bearer_sha256`), the console's door
+// honours the grant only while that stamp is the crew's live hash, and the
+// drain removes the stamp after the burn — so the grant is gone with the
+// run, and the crew's own registry row is never widened. Read-only by
+// construction: the grant is Knowledge · Read on a crew, which never writes
+// the vault (CREW_NEVER_TOOLS).
+//
 // Every run is a two-phase `runs` row on the CREW's id (component = crew
 // name, kind = crew_run) — the dashboard's "runs by component" is where a
 // crew is watched — carrying cost, tokens, tools used, the brief's sha and
@@ -24,7 +34,21 @@
 // kind = tool) on the same component.
 
 import { createHash } from "node:crypto";
-import { DEFAULT_CACHING, emptyCompute, finishRun, mintToken, resolveCrewAssignment, sanitizeForAgent, startRun, tokenHash, type Compute, type ResolvedAssignment } from "@foldedspacelabs/metistry-core";
+import {
+  DEFAULT_CACHING,
+  ROUTINE_RUN_META_KEY,
+  RUN_BEARER_META_KEY,
+  emptyCompute,
+  finishRun,
+  mintToken,
+  resolveCrewAssignment,
+  routineRunReads,
+  sanitizeForAgent,
+  startRun,
+  tokenHash,
+  type Compute,
+  type ResolvedAssignment,
+} from "@foldedspacelabs/metistry-core";
 import { crewSystemPrompt, crewToolNames, parseCrewSnapshot, runCrewOnEngine, type CrewRunInput, type CrewRunResult } from "./crew.js";
 import { makeEngine, type Engine, type TurnGuard } from "./engine.js";
 import { memorySessionStore } from "./sessions.js";
@@ -143,6 +167,26 @@ export async function stampProposalWork(db: Db, crewId: string, workId: number, 
   return rows.length;
 }
 
+/**
+ * Bind a routine's per-run grant to THIS run's bearer: the row carries the
+ * bearer's hash, and the console's door honours `meta.routine.grants` only
+ * on the row whose stamp is the crew's live `token_hash` (T3-8). A no-op on
+ * a row with no routine grant — a dispatched crew run holds nothing extra.
+ */
+export async function stampRunBearer(db: Db, workId: number, token: string): Promise<void> {
+  await db.query(`UPDATE work SET meta = jsonb_set(meta, $2::text[], to_jsonb($3::text)) WHERE id = $1 AND meta ? $4`, [
+    workId,
+    [RUN_BEARER_META_KEY],
+    tokenHash(token),
+    ROUTINE_RUN_META_KEY,
+  ]);
+}
+
+/** Take the stamp off: after the burn it names a hash no bearer has, and it is removed so the row says so too. */
+export async function clearRunBearer(db: Db, workId: number): Promise<void> {
+  await db.query(`UPDATE work SET meta = meta - $2::text WHERE id = $1 AND meta ? $2::text`, [workId, RUN_BEARER_META_KEY]);
+}
+
 /** Burn it: replace the hash with one of a token that is discarded here. The run's bearer is dead from this statement on. */
 export async function burnRunToken(db: Db, crewId: string): Promise<void> {
   await db.query(`UPDATE agents SET token_hash = $2 WHERE id = $1 AND kind = 'crew'`, [crewId, tokenHash(mintToken(32))]);
@@ -243,6 +287,9 @@ export async function drainCrewOne(db: Db, cfg: CrewDrainConfig): Promise<boolea
     return true;
   }
   const taskId = typeof row.meta?.task_id === "number" ? row.meta.task_id : undefined;
+  // a New Routine's run (T3-8): which routine, and the read grant this run's bearer holds
+  const routine = row.meta?.[ROUTINE_RUN_META_KEY] as { name?: unknown; run_id?: unknown } | undefined;
+  const runGrants = routineRunReads(row.meta);
   const briefSha = typeof row.meta?.brief_sha === "string" ? row.meta.brief_sha : createHash("sha256").update(brief).digest("hex");
 
   // The crew's own definition decides the engine (collaboration rule 3; C128):
@@ -306,9 +353,12 @@ export async function drainCrewOne(db: Db, cfg: CrewDrainConfig): Promise<boolea
       crew_sha: crew.sha256,
       dispatch_run_id: row.meta?.dispatch_run_id ?? null,
       uses: crew.uses,
+      // the routine this run is, and what its bearer read beyond the crew's own scope — for this run only
+      ...(routine ? { routine: typeof routine.name === "string" ? routine.name : null, routine_run_id: routine.run_id ?? null, run_grants: { read: runGrants } } : {}),
     },
   });
   try {
+    if (routine) await stampRunBearer(db, row.id, token);
     const input: CrewRunInput = { crew, brief, task_id: taskId, brain: { url: cfg.brainUrl, token }, identity: cfg.identity };
     const r = await (cfg.runAssigned ?? ((i, a) => runCrewOnEngine(i, a, engineForCrew(cfg, i, cfg.guard))))(input, turn.assignment);
     const reports = r.tools_used["mcp__brain__report"] ?? 0;
@@ -351,6 +401,8 @@ export async function drainCrewOne(db: Db, cfg: CrewDrainConfig): Promise<boolea
     else await settle(db, row.id, { status: "retry", note: `crew run attempt ${row.attempts} failed (${message.slice(0, 200)}); retry after ${backoff}s`, backoffSeconds: backoff }, agent);
   } finally {
     await burnRunToken(db, crewId);
+    // the grant went with the bearer; the stamp goes too, so the row does not name a dead hash
+    if (routine) await clearRunBearer(db, row.id).catch(() => undefined);
     // whatever it raised belongs to the row it held — even on a failed run
     await stampProposalWork(db, crewId, row.id, startedAt).catch(() => undefined);
   }

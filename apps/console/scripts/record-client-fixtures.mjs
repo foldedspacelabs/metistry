@@ -432,7 +432,9 @@ const server = makeServer(pool, queries, {
       if (r.started) runsStarted.push(r.done);
       return r;
     },
-    actorExists: async (id) => (await agents.listAgents(pool)).some((a) => a.id === id && !a.revoked),
+    // a New Routine's actor is a crew (T3-8), as main.ts wires it; and New Routines run, so none is held
+    actorExists: async (id) => crews.get(id) !== undefined && (await agents.listAgents(pool)).some((a) => a.id === id && a.kind === "crew" && !a.revoked),
+    runsAssignments: true,
   },
   searchKnowledge: async (q, mode, limit) => ({
     q,
@@ -826,6 +828,7 @@ const REQUESTS = [
   ["POST /api/scheduled/routines/:name/run", () => ({ path: "/api/scheduled/routines/morning-brief/run", body: {} })],
   ["DELETE /api/scheduled/routines/:name", () => ({ path: "/api/scheduled/routines/morning-brief" })],
   ["PUT /api/scheduled/routines/:name/assignment", () => ({ path: "/api/scheduled/routines/weekly-digest/assignment", body: { actor: "researcher", task: "Summarise the week's Projects/ changes.", grants: { read: ["Projects"] }, schedule: { days: ["fri"], at: ["16:00"] } } })],
+  ["POST /api/scheduled/routines", () => ({ path: "/api/scheduled/routines", body: { name: "monthly-digest", actor: "researcher", task: "Summarise the month's Projects/ changes.", grants: { read: ["Projects"] }, schedule: { days: ["fri"], at: ["16:00"] } } })],
   ["PUT /api/scheduled/syncs/:name", () => ({ path: "/api/scheduled/syncs/github-state", body: { every: "1h", raise: { review_requested: false } } })],
   ["POST /api/scheduled/syncs/:name/run", () => ({ path: "/api/scheduled/syncs/github-state/run", body: {} })],
 

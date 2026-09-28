@@ -37,7 +37,8 @@ shape, a `display_name`, and what it declares for this file ("Defaults").
 `docs/ops/client-api.md`, "Scheduled") are the file's only writer and serve
 `resolveScheduled`'s listing: a routine's schedule, pause and Reset to
 Default, a sync's cadence, pause and raise toggles, and — from the Mac alone —
-a New Routine's actor, task and per-run grants (read-only). Each writes the
+a New Routine: creating one (`POST /api/scheduled/routines`) and its actor,
+task and per-run grants (read-only). Each writes the
 file as a YAML document, so your comments survive, only after the result
 validates and fits the component it names; an invalid file is never
 rewritten. **Run Now** runs one component through the runner, under your
@@ -54,9 +55,9 @@ Scheduled door, as you, and is refused, writing nothing, if the entry changed
 since you were shown it (`docs/ops/client-api.md`, "`allow` on a routine
 suggestion"). Revise, Decline and Later write nothing.
 
-Still to come, each a ticket in the plan's §3.3: agent routines — a New
-Routine is kept and listed, but the runner starts only components that have
-code until T3-8; creating a New Routine (`POST /api/scheduled/routines`, T3-8).
+**New Routines run** (T3-8): each run is one crew run for its actor, with
+its per-run grants held only while that run lasts ("New Routines — how one
+runs", below).
 
 ## The file
 
@@ -70,7 +71,7 @@ routines:
   vendor-sweep:                       # a New Routine: an assignment, no product code
     actor: vendor-research
     task: "Summarise everything added to Areas/Finance since yesterday…"
-    grants: { read: [Areas/Finance], write: [Journal/Digest/] }
+    grants: { read: [Areas/Finance] }   # per-run grants are read-only; Journal/Digest/ is the routine's own subfolder — ownership, not a grant (below)
     schedule: { days: [mon, tue, wed, thu, fri], at: ["07:00"] }
 syncs:
   github-state:
@@ -160,9 +161,9 @@ an `actor`, `task` or `grants`, and then it needs:
 
 | Field | |
 | --- | --- |
-| `actor` | an agent id (`vendor-research`) — the actor that runs it |
+| `actor` | a crew's id (`vendor-research`) — the crew that runs it. Its run is one crew run, so the actor is a crew this console loaded (`agents/<area>/<name>.md`) |
 | `task` | what to do, appended to the actor's definition, never replacing it. At most 4000 characters; more than that is a new actor |
-| `grants` | optional: `read:` and `write:` lists of vault prefixes, given for that run only (T3-8) |
+| `grants` | optional: `read:` — a list of vault prefixes the actor may read for that run only. **Read-only**: `write:` is refused by name (below) |
 | `schedule` | **required** — there is no manifest to default from |
 | `paused` | optional |
 
@@ -170,11 +171,48 @@ It has no `config`: config is declared by a manifest, and an assignment has
 none, so `config` on one is refused by name.
 
 A grant is a TitleCase vault prefix an agent may hold — `Areas/Finance`, or
-`Journal/Digest/` (a trailing slash names the same prefix). `.metistry/`,
+`Areas/Finance/` (a trailing slash names the same prefix). `.metistry/`,
 `Artifacts/`, a traversal and a lowercase root are refused. A grant never
 widens what the tool refuses: `Me/` and your own journal (`Journal/` outside
 `Plan/`, `Fold/`, `Standup/`) are written by you alone, grant or no grant
 (`isUserOwnedPath`, `packages/core/src/instance-layout.ts`).
+
+**Per-run grants are read-only** (the owner's ruling (a), W1; confirmed at the
+W2 checkpoint). `grants: { write: […] }` does not validate — the line names
+the ruling — and so the file is not applied until it goes. Where a routine
+writes is not a grant: a routine's reserved subfolder (`Journal/Plan/` for
+Tomorrow's Plan, `Journal/Digest/` for a Digest routine) is an **ownership**
+fact about the routine, written through the reconciler under the routine's own
+principal, and nothing a run is granted widens it.
+
+### New Routines — how one runs
+
+A New Routine is scheduled exactly like a routine with a manifest — the same
+due-gate, failure streak, runs rows, pause and Run Now — from the file the
+runner reads on that tick. Its run does one thing (`agentRoutineComponents`,
+`apps/console/src/runner.ts`):
+
+1. **One crew run is enqueued** for its actor (`crewRoutineQueue`,
+   `apps/console/src/crews.ts`): a `work` row on the crew's queue carrying the
+   crew's definition — which stays its system prompt — and the task as the
+   brief, appended to it, never replacing it. One row per runner row, however
+   often a tick is retried. The runner's row says `acted`.
+2. **The run's grant rides on that row** (`meta.routine`: the routine, the
+   runner row, `grants.read`), never on the crew's registry row.
+3. **The assistant's drain runs it** with a bearer minted for that run and
+   burnt after (`apps/assistant/src/crew-drain.ts`), stamping the bearer's
+   hash on the row while it runs and removing it after.
+4. **The console's door honours the grant only for that bearer, while the row
+   runs** (`authenticateAgent`, `apps/console/src/agents.ts`): before the run,
+   after it, for the crew's next run and for any other agent, the crew reads
+   its own scope and nothing more. A crew never writes the vault, so the
+   grant is Knowledge · Read and nothing else.
+
+An actor that is not a crew this console loaded — a removed manifest, the
+assistant, an external agent — is a failed run naming the fix, and enqueues
+nothing. A console whose runner has no crew queue lists a New Routine as
+held and does not run it. The actor's permission lines show each area a New
+Routine grants it as held *while this routine runs*.
 
 ## Syncs
 

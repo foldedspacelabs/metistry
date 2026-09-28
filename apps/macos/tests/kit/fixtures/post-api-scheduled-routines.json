@@ -1,28 +1,27 @@
 {
   "route": "POST /api/scheduled/routines",
-  "source": "contract",
-  "ticket": "T3-8",
-  "note": "reach local: New Routine — an assignment, no product code; 409 when the name is taken",
+  "source": "recorded",
+  "ticket": null,
   "request": {
     "method": "POST",
     "path": "/api/scheduled/routines",
     "body": {
+      "name": "monthly-digest",
       "actor": "researcher",
+      "task": "Summarise the month's Projects/ changes.",
       "grants": {
         "read": [
           "Projects"
         ]
       },
-      "name": "weekly-digest",
       "schedule": {
-        "at": [
-          "16:00"
-        ],
         "days": [
           "fri"
+        ],
+        "at": [
+          "16:00"
         ]
-      },
-      "task": "Summarise the week's Projects/ changes."
+      }
     },
     "idempotency_key": null
   },
@@ -30,10 +29,10 @@
   "body": {
     "ok": true,
     "routine": {
-      "name": "weekly-digest",
+      "name": "monthly-digest",
+      "title": "Monthly Digest",
       "kind": "routine",
       "source": "assignment",
-      "title": "Weekly Digest",
       "schedule": {
         "value": {
           "days": [
@@ -51,15 +50,29 @@
       },
       "config": {},
       "actor": "researcher",
-      "task": "Summarise the week's Projects/ changes.",
+      "task": "Summarise the month's Projects/ changes.",
       "grants": {
         "read": [
           "Projects"
         ]
       },
+      "days": {
+        "value": [
+          "fri"
+        ],
+        "origin": "yours"
+      },
+      "time_zone": {
+        "value": "America/New_York",
+        "origin": "profile"
+      },
       "next_run": "2026-10-02T20:00:00.000Z",
-      "last_run": null
+      "next_refused": null,
+      "last_run": null,
+      "is_default": false,
+      "held": null,
+      "describe": "fri at 16:00"
     },
-    "as_of": "2026-09-28T13:05:00.000Z"
+    "as_of": "2026-09-28T21:41:45.833Z"
   }
 }

@@ -803,9 +803,34 @@ function clockOf(iso: string | undefined, timeZone: string): string {
   }
 }
 
+/**
+ * An event's title is written by whoever sends the invite, not the owner —
+ * the one string in `{{ calendar }}`'s output an attacker chooses (Ruling 16,
+ * decisions-log.md). §6.2 renders one line per event; every trick below
+ * depends on breaking out of that line, so collapsing line breaks first
+ * removes the ATX heading (`#`), the frontmatter delimiter (`---`) and the
+ * task marker (`- [ ]`) in one move — none of those parse unless they lead a
+ * real line, and after this a title can't put one there. What's left is
+ * neutralised token by token: a wikilink's `[[`/`]]` pair, and a raw HTML tag,
+ * both of which parse mid-line and so survive collapsing alone.
+ */
+const EVENT_TITLE_LINE_BREAKS = /\r\n|[\r\n\u0085\u2028\u2029]/g;
+const ZERO_WIDTH_SPACE = "\u200b";
+
+function sanitizeEventTitle(title: string): string {
+  const oneLine = title.replace(EVENT_TITLE_LINE_BREAKS, " ").replace(/\s+/g, " ").trim();
+  return oneLine
+    .replace(/\[\[/g, `[${ZERO_WIDTH_SPACE}[`)
+    .replace(/\]\]/g, `]${ZERO_WIDTH_SPACE}]`)
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
 function eventItem(event: CalendarEvent, timeZone: string): string {
   const when = event.all_day === true ? "all day" : `${clockOf(event.start, timeZone)}–${clockOf(event.end, timeZone)}`;
-  return `- ${when} ${event.title ?? "(untitled)"}${chips([event.location ?? null, event.calendar ?? null])}`;
+  const sanitized = event.title === undefined ? "" : sanitizeEventTitle(event.title);
+  const title = sanitized === "" ? "(untitled)" : sanitized;
+  return `- ${when} ${title}${chips([event.location ?? null, event.calendar ?? null])}`;
 }
 
 // --- recurrence ---------------------------------------------------------------

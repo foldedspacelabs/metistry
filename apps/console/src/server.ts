@@ -62,6 +62,8 @@ import type { ConsoleVaultClient } from "./vault-client.js";
 import { isScheduledRoute, scheduledRoutes, type ScheduledAdmin } from "./scheduled-routes.js";
 import { isMeetingNoteRoute, meetingNoteRoute, MeetingNotes } from "./meeting-note-route.js";
 import { CALENDAR_SYNC, isMeetingMoveRoute, meetingMoveRoute, type EventkitDoor } from "./meeting-move-route.js";
+import { githubPullRoute, isGithubPullRoute } from "./github-pulls-route.js";
+import type { GithubWriteClient } from "./github-write.js";
 import { agentList, commandList } from "./commands.js";
 import { purgeArchive, purgePreview } from "@metistry-apps/routines";
 import type { EventHub } from "./events.js";
@@ -166,6 +168,12 @@ export interface ConsoleConfig {
    * registry, with a presence probe for secrets. Absent = both routes 503.
    */
   connections?: ConnectionsView | undefined;
+  /**
+   * The owner's GitHub client (github-write.ts, plan §2.11): the one holder of
+   * the `github_write` secret, read by the pull request doors and nothing
+   * else — never handed to the MCP mount. Absent = those doors answer 503.
+   */
+  githubWrite?: GithubWriteClient | undefined;
   /**
    * The live-changes hub `GET /api/events` streams from (events.ts, §2.20):
    * `main.ts` builds it and starts the one `LISTEN` that feeds it. Absent =
@@ -1144,6 +1152,8 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         isMeetingNoteRoute(key) ||
         // moving a meeting re-times other people's day: the owner's hand, and the bridge holds the rule (T2-12)
         isMeetingMoveRoute(key) ||
+        // the PR doors post to GitHub AS the owner, with the owner's own secret (T2-13)
+        isGithubPullRoute(key) ||
         // Today reads the owner's own day — their notes' task lines, their calendar — and stores their order
         isTodayRoute(key)
       ) {
@@ -1473,6 +1483,8 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         ...(runNow ? { refresh: async () => (await runNow(CALENDAR_SYNC)).started } : {}),
       });
     }
+    // ----- the pull request doors: a review, a thread reply or resolve, posted as the owner through the github_write client — the head SHA shown must match (§2.11, T2-13) -----
+    if (isGithubPullRoute(key)) return githubPullRoute(req, res, key, { db, github: cfg.githubWrite, audit }, principalOf(auth));
 
     // ----- Close the Day (§2.11, §2.13; T2-8) -----
     // The daily note's section through the reconciler's section operation as

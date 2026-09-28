@@ -296,9 +296,9 @@ export const CLIENT_API: readonly ClientRoute[] = [
   planned("GET", "/api/recordings/:id", "T8-4", "one recording's retention state"),
 
   // ----- outbound doors through a connection -----
-  planned("POST", "/api/github/pulls/:owner/:repo/:number/review", "T2-13", "post a review; the head SHA must match the one shown", { conflict: ["stale"] }),
-  planned("POST", "/api/github/pulls/:owner/:repo/:number/threads/:id/reply", "T2-13", "reply to a review thread; the head SHA must match", { conflict: ["stale"] }),
-  planned("POST", "/api/github/pulls/:owner/:repo/:number/threads/:id/resolve", "T2-13", "resolve a review thread; the head SHA must match", { conflict: ["stale"] }),
+  route("POST", "/api/github/pulls/:owner/:repo/:number/review", "post a review; the head SHA must match the one shown", { conflict: ["stale"] }),
+  route("POST", "/api/github/pulls/:owner/:repo/:number/threads/:id/reply", "reply to a review thread; the head SHA must match", { conflict: ["stale"] }),
+  route("POST", "/api/github/pulls/:owner/:repo/:number/threads/:id/resolve", "resolve a review thread; the head SHA must match", { conflict: ["stale"] }),
   planned("POST", "/api/trackers/:connection/issues", "T4-25", "create an issue from a task; idempotent by task key", { idempotent: "natural" }),
   planned("POST", "/api/trackers/:connection/issues/:key/complete", "T4-26", "close an issue", { idempotent: "natural" }),
 

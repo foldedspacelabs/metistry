@@ -1064,6 +1064,22 @@ export {
   type RequestTrust,
 } from "./mirrors.js";
 export {
+  GITHUB_API_ORIGIN,
+  GITHUB_SOURCE_KIND,
+  GITHUB_WRITE_SECRET,
+  HEAD_SHA_RE,
+  PR_REVIEW_DECISION,
+  PR_REVIEW_EVENTS,
+  PR_REVIEW_GITHUB_EVENT,
+  PULL_REQUEST_KIND,
+  githubPullRef,
+  githubPullSource,
+  isHeadSha,
+  parseGithubPullRef,
+  parseGithubRepo,
+  type PrReviewEvent,
+} from "./github-pulls.js";
+export {
   startRun,
   finishRun,
   withRun,

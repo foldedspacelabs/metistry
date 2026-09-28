@@ -41,7 +41,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pg from "pg";
-import { CLIENT_API, INSTANCE_LAYOUT, InstanceSecrets, SECRET_USE_META_KEY, memoryKeychain, mintToken, resolveInstanceLayout, writeNoteSection } from "@foldedspacelabs/metistry-core";
+import { CLIENT_API, INSTANCE_LAYOUT, InstanceSecrets, SECRET_USE_META_KEY, memoryKeychain, mintToken, parseSecretsFile, resolveInstanceLayout, writeNoteSection } from "@foldedspacelabs/metistry-core";
 import { readInstanceId } from "@foldedspacelabs/metistry-cli";
 import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
 import { QueryStore } from "@foldedspacelabs/metistry-queries";
@@ -66,6 +66,7 @@ import { SCHEDULED_PATH } from "../dist/profile-tidy.js";
 import { loadCollectors } from "@metistry-apps/collectors";
 import { loadRoutines } from "@metistry-apps/routines";
 import { ConflictMoved } from "../dist/knowledge-routes.js";
+import { GithubWriteClient } from "../dist/github-write.js";
 import { FIXTURE_DIR, REPO_ROOT, expectedFixtures, fixtureBody, shapeDiff } from "./client-fixtures.mjs";
 
 // ---- arguments -------------------------------------------------------------------
@@ -223,6 +224,30 @@ const fakeFetch = async (input, init) => {
   return new Response("{}", { status: 200 });
 };
 
+// the owner's GitHub client for the pull request doors (T2-13): the
+// github_write policy above sends it to api.github.com; GitHub itself is this
+// fake — one open PR at a known head, with one open review thread
+const PR_HEAD = "adf440c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7";
+const githubFake = async (input, init) => {
+  const url = new URL(String(input));
+  outbound.push(url.href);
+  const json = (status, v) => new Response(JSON.stringify(v), { status, headers: { "content-type": "application/json" } });
+  if (url.pathname === "/repos/example/metistry/pulls/281") return json(200, { number: 281, state: "open", merged: false, head: { sha: PR_HEAD }, html_url: "https://github.com/example/metistry/pull/281" });
+  if (url.pathname === "/repos/example/metistry/pulls/281/reviews" && init?.method === "POST") return json(200, { id: 991, state: "APPROVED", html_url: "https://github.com/example/metistry/pull/281#pullrequestreview-991" });
+  if (url.pathname === "/graphql") {
+    const q = String(JSON.parse(String(init?.body ?? "{}")).query ?? "");
+    if (/addPullRequestReviewThreadReply/.test(q)) return json(200, { data: { addPullRequestReviewThreadReply: { comment: { databaseId: 5512, url: "https://github.com/example/metistry/pull/281#discussion_r5512" } } } });
+    if (/resolveReviewThread/.test(q)) return json(200, { data: { resolveReviewThread: { thread: { id: "PRRT_kw1", isResolved: true } } } });
+    return json(200, { data: { node: { id: "PRRT_kw1", isResolved: false, pullRequest: { number: 281, state: "OPEN", headRefOid: PR_HEAD, repository: { nameWithOwner: "example/metistry" } } } } });
+  }
+  return json(404, { message: "Not Found" });
+};
+const githubWrite = new GithubWriteClient({
+  secrets: { value: async (name) => (name === "github_write" ? "fixture-value-never-recorded" : undefined) },
+  policy: async () => parseSecretsFile(await readFile(layout.path("secrets"), "utf8")),
+  fetch: githubFake,
+});
+
 const vault = memoryVault();
 const PAGE = "Projects/Metistry/Roadmap.md";
 const HISTORY = [
@@ -366,6 +391,7 @@ const server = makeServer(pool, queries, {
   version: JSON.parse(readFileSync(join(REPO_ROOT, "apps/console/package.json"), "utf8")).version,
   instancesFiles: layout.path("instances"),
   secrets: { file: layout.path("secrets"), presence: instanceSecrets.presence() },
+  githubWrite,
   variables: { instanceDir, file: layout.path("variables") },
   connections: { instanceDir, seedDir: join(REPO_ROOT, "seed"), presence: instanceSecrets.presence() },
   // the reconciler's GET /vault/status, as a week of use leaves it: two
@@ -759,6 +785,10 @@ const REQUESTS = [
   ["POST /api/meetings/:event_id/note", () => ({ path: "/api/meetings/evt-standup-0928/note", body: {} })],
   // Move the standup half an hour later (T2-12): the preview, which names Dana and moves nothing
   ["POST /api/calendar/events/:id/move", () => ({ path: "/api/calendar/events/evt-standup-0928/move", body: { start: "2026-09-28T14:00:00.000Z", end: "2026-09-28T14:15:00.000Z" } })],
+  // the pull request doors (T2-13), each with the head the owner was shown
+  ["POST /api/github/pulls/:owner/:repo/:number/review", () => ({ path: "/api/github/pulls/example/metistry/281/review", body: { event: "approve", body: "Looks right.", head_sha: PR_HEAD } })],
+  ["POST /api/github/pulls/:owner/:repo/:number/threads/:id/reply", () => ({ path: "/api/github/pulls/example/metistry/281/threads/PRRT_kw1/reply", body: { body: "Fixed in the next push.", head_sha: PR_HEAD } })],
+  ["POST /api/github/pulls/:owner/:repo/:number/threads/:id/resolve", () => ({ path: "/api/github/pulls/example/metistry/281/threads/PRRT_kw1/resolve", body: { head_sha: PR_HEAD } })],
 
 
   // the reads that show the writes above: a room with a comment, a feed with a capture in it
@@ -974,7 +1004,8 @@ await new Promise((r) => server.close(() => r()));
 await new Promise((r) => ekBridge.close(() => r()));
 await pool.end();
 await rm(root, { recursive: true, force: true });
-if (outbound.some((u) => !u.startsWith("http://127.0.0.1:1/") && !u.startsWith("https://api.github.com/repos/example/fixtures") && !u.includes("/models"))) {
+const PR_DOOR_CALLS = ["https://api.github.com/repos/example/metistry/pulls/281", "https://api.github.com/graphql"]; // the pull request doors' fake GitHub (T2-13)
+if (outbound.some((u) => !u.startsWith("http://127.0.0.1:1/") && !u.startsWith("https://api.github.com/repos/example/fixtures") && !u.includes("/models") && !PR_DOOR_CALLS.some((p) => u.startsWith(p)))) {
   failures.push(`an outbound call went somewhere unexpected: ${outbound.join(", ")}`);
 }
 

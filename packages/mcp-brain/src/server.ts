@@ -56,7 +56,7 @@ import { sha256Text, writeKnowledge, type KnowledgeWriter, type WriteAct } from 
 import { computeNudge } from "./nudge.js";
 import { principalOf } from "./principal.js";
 import { done, fail, refuse, type Outcome } from "./outcome.js";
-import { REQUEST_CREATE_KINDS, submitQuestion, submitReport } from "./report.js";
+import { REQUEST_CREATE_KINDS, submitPullRequest, submitQuestion, submitReport } from "./report.js";
 import { allProjects, memberOf } from "./scope.js";
 import { liftTurnId, turnIdFrom } from "./turn-id.js";
 import type { AgentPrincipal, Db } from "./types.js";
@@ -377,7 +377,7 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
     // are one report kind (C104, report.ts).
     reg(
       "requests_create",
-      "Raise a request in the user's Needs You queue: a report (finding, decided, gotcha, progress), or kind question with 1-5 questions of 2-8 options that you wait on. Same idempotency_key, or the same title within 24h, returns the existing id.",
+      "Raise a request in the user's Needs You queue: a report (finding, decided, gotcha, progress), kind question with 1-5 questions of 2-8 options that you wait on, or kind pull_request with the PR in refs (gh:owner/name#n) for the user's review. Same idempotency_key, or the same title within 24h, returns the existing id.",
       {
         title: z.string().min(1).max(200),
         body: z.string().min(1).max(50_000),
@@ -393,6 +393,10 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
           return q.ok ? done({ id: q.id, deduplicated: q.deduplicated }, { proposal_id: q.id, deduplicated: q.deduplicated, questions: (a.questions as unknown[]).length }) : fail("invalid_request", q.error);
         }
         if (a.questions !== undefined) return fail("invalid_request", "questions ride only with kind question — a report asks nothing");
+        if (a.kind === "pull_request") {
+          const p = await submitPullRequest(db, principal.id, { title: a.title, body: a.body, refs: a.refs });
+          return p.ok ? done({ id: p.id, deduplicated: p.deduplicated }, { proposal_id: p.id, deduplicated: p.deduplicated, kind: "pull_request" }) : fail(p.code, p.error);
+        }
         const r = await submitReport(db, principal.id, { title: a.title, body: a.body, kind: a.kind, refs: a.refs, idempotency_key: a.idempotency_key });
         return done(r, { proposal_id: r.id, deduplicated: r.deduplicated });
       },

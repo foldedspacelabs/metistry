@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { run } from "./run.js";
+import { fileURLToPath } from "node:url";
+import { loadKind } from "@foldedspacelabs/metistry-core";
+import { RAISE_DEFAULTS, REVIEW_THREADS_QUERY, ReadOnlyRefused, isGraphqlQuery, readOnlyGithub, run } from "./run.js";
 
 function fakeDb(closedRows: { id: number; external_ref: string; kind: string }[] = [{ id: 1, external_ref: "", kind: "" }]) {
   const q: { text: string; values: unknown[] }[] = [];
@@ -8,10 +10,15 @@ function fakeDb(closedRows: { id: number; external_ref: string; kind: string }[]
     async query(text: string, values: unknown[] = []) {
       q.push({ text, values });
       if (text.startsWith("UPDATE work SET status")) return { rows: closedRows };
+      if (text.startsWith("INSERT INTO proposals")) return { rows: [{ id: 1 }] };
       return { rows: [] };
     },
   };
 }
+
+const HEAD = "a".repeat(40);
+/** GitHub's GraphQL answer for a PR with no review threads. */
+const NO_THREADS = { data: { repository: { pullRequest: { reviewThreads: { nodes: [] } } } } };
 
 describe("github-state collector", () => {
   it("degrades absent without token/repos", async () => {
@@ -24,11 +31,13 @@ describe("github-state collector", () => {
     const db = fakeDb();
     const fetchFn = (async (url: string) => ({
       ok: true,
+      text: async () => "diff --git a/x b/x\n+new\n",
       json: async () => {
         if (url.endsWith("/user")) return { login: "samrivera" };
+        if (url.endsWith("/graphql")) return NO_THREADS;
         if (url.endsWith("/reviews?per_page=100")) return [];
         if (url.includes("/pulls?")) return [
-          { number: 9, draft: false, user: { login: "claude" }, requested_reviewers: [{ login: "samrivera" }], requested_teams: [] },
+          { number: 9, draft: false, head: { sha: HEAD }, user: { login: "claude" }, requested_reviewers: [{ login: "samrivera" }], requested_teams: [] },
         ];
         return [
           { number: 7, title: "fix brief tz", state: "open", html_url: "https://gh/7", updated_at: "2026-09-01T00:00:00Z", user: { login: "samrivera" }, assignee: { login: "samrivera" } },
@@ -45,11 +54,11 @@ describe("github-state collector", () => {
     expect(inserts[1]!.values).toContain("2026-09-10");
     expect(JSON.parse(String(inserts[0]!.values[7]))).toEqual({ author: "samrivera", url: "https://gh/7" });
     expect(JSON.parse(String(inserts[1]!.values[7]))).toEqual({
-      author: "claude", url: "https://gh/9", draft: false, review_requested: ["samrivera"], review_teams: [], needs_my_review: true,
+      author: "claude", url: "https://gh/9", draft: false, head_sha: HEAD, review_requested: ["samrivera"], review_teams: [], needs_my_review: true, threads: [],
     });
     const close = db.q.find((x) => x.text.startsWith("UPDATE work"))!;
     expect(close.values[1]).toEqual(["gh:foldedspacelabs/metistry#7", "gh:foldedspacelabs/metistry#9"]);
-    expect(n).toBe(3); // 2 upserts + 1 closed
+    expect(n).toBe(4); // 2 upserts + 1 request raised + 1 closed
   });
 
   it("surfaces API failure as an error (the runner records it), never silent", async () => {
@@ -61,6 +70,7 @@ describe("github-state collector", () => {
   it("needs_my_review: open non-draft PR I haven't approved → true; my approval clears it; re-request re-opens it; draft/unknown viewer → false", async () => {
     const mk = (viewerOk: boolean, pull: any, reviews: any[]) => (async (url: string) => {
       if (url.endsWith("/user")) return { ok: viewerOk, json: async () => ({ login: "me" }) };
+      if (url.endsWith("/graphql")) return { ok: true, json: async () => NO_THREADS };
       if (url.includes("/reviews?")) return { ok: true, json: async () => reviews };
       return { ok: true, json: async () => (url.includes("/pulls?") ? [pull] : [
         { number: 1, title: "t", state: "open", pull_request: {}, html_url: "", updated_at: "2026-09-01T00:00:00Z", user: pull.user },
@@ -116,5 +126,132 @@ describe("github-state collector", () => {
     await run(db, { githubToken: "t", githubRepos: ["o/r"], fetchFn });
     const metaUpdate = db.q.find((x) => x.text.startsWith("UPDATE work SET meta"));
     expect(metaUpdate!.values).toEqual([21, JSON.stringify({ merged: false, merged_at: null })]);
+  });
+});
+
+// ---- T2-13: the read-only client, the manifest's defaults, the raise ------------------------
+
+describe("the collector's PAT stays read-only (T2-13)", () => {
+  const sent: { url: string; method: string }[] = [];
+  const base = (async (url: string, init?: RequestInit) => {
+    sent.push({ url, method: init?.method ?? "GET" });
+    return new Response("{}", { status: 200 });
+  }) as unknown as typeof fetch;
+  const get = readOnlyGithub(base);
+  const gql = (query: string) => JSON.stringify({ query, variables: {} });
+
+  it("sends a GET to api.github.com and a GraphQL query to its /graphql — and nothing else leaves", async () => {
+    sent.length = 0;
+    await get("https://api.github.com/repos/o/r/pulls?state=open");
+    await get("https://api.github.com/graphql", { method: "POST", body: gql(REVIEW_THREADS_QUERY) });
+    expect(sent.map((x) => x.method)).toEqual(["GET", "POST"]);
+
+    const refused: [string, RequestInit | undefined][] = [
+      ["https://api.github.com/repos/o/r/pulls/1/reviews", { method: "POST", body: JSON.stringify({ event: "APPROVE", commit_id: HEAD }) }],
+      ["https://api.github.com/repos/o/r/pulls/1/comments/5/replies", { method: "POST", body: "{}" }],
+      ["https://api.github.com/repos/o/r/issues/1", { method: "PATCH", body: "{}" }],
+      ["https://api.github.com/repos/o/r/pulls/1/requested_reviewers", { method: "DELETE" }],
+      ["https://api.github.com/repos/o/r/contents/x", { method: "PUT", body: "{}" }],
+      ["https://api.github.com/graphql", { method: "POST", body: gql("mutation { resolveReviewThread(input: {threadId: \"PRRT_1\"}) { thread { id } } }") }],
+      ["https://api.github.com/graphql", { method: "POST", body: gql("query A { viewer { login } } mutation B { addPullRequestReviewThreadReply(input: {}) { comment { id } } }") }],
+      ["https://api.github.com/graphql", { method: "POST", body: gql("# a comment\nsubscription { x }") }],
+      ["https://api.github.com/graphql", { method: "POST", body: "not json" }],
+      ["https://uploads.github.com/repos/o/r/releases/1/assets", { method: "GET" }],
+      ["https://evil.example/repos/o/r/pulls", undefined],
+    ];
+    sent.length = 0;
+    for (const [url, init] of refused) await expect(get(url, init), `${init?.method ?? "GET"} ${url}`).rejects.toBeInstanceOf(ReadOnlyRefused);
+    expect(sent).toEqual([]); // refused before it left
+  });
+
+  it("reads a document's first operation, comments and all", () => {
+    expect(isGraphqlQuery(gql(REVIEW_THREADS_QUERY))).toBe(true);
+    expect(isGraphqlQuery(gql("  # leading comment\n query X { a }"))).toBe(true);
+    expect(isGraphqlQuery(gql("{ a }"))).toBe(false); // the shorthand is a query to GraphQL, but not a document this client sends
+    expect(isGraphqlQuery(JSON.stringify({ variables: {} }))).toBe(false);
+    expect(isGraphqlQuery(undefined)).toBe(false);
+  });
+
+  it("a whole pass sends only GETs and the one threads query", async () => {
+    const methods: string[] = [];
+    const bodies: string[] = [];
+    const fetchFn = (async (url: string, init?: RequestInit) => {
+      methods.push(`${init?.method ?? "GET"} ${new URL(url).pathname}`);
+      if (typeof init?.body === "string") bodies.push(init.body);
+      return {
+        ok: true,
+        text: async () => "",
+        json: async () => {
+          if (url.endsWith("/user")) return { login: "me" };
+          if (url.endsWith("/graphql")) return NO_THREADS;
+          if (url.includes("/reviews?")) return [];
+          if (url.includes("/pulls?")) return [{ number: 3, head: { sha: HEAD }, user: { login: "dana" }, requested_reviewers: [{ login: "me" }] }];
+          return [{ number: 3, title: "t", state: "open", pull_request: {}, html_url: "https://github.com/o/r/pull/3", updated_at: "2026-09-01T00:00:00Z", user: { login: "dana" } }];
+        },
+      };
+    }) as unknown as typeof fetch;
+    await run(fakeDb([]), { githubToken: "t", githubRepos: ["o/r"], fetchFn });
+    expect(methods.every((m) => m.startsWith("GET ") || m === "POST /graphql"), methods.join(", ")).toBe(true);
+    expect(bodies.every((b) => isGraphqlQuery(b))).toBe(true);
+    expect(methods).toContain("POST /graphql");
+  });
+});
+
+describe("the github-state manifest", () => {
+  it("loads through the collector registry, and the review_requested default is the one the code applies", async () => {
+    const reg = await loadKind("collector", { productDir: fileURLToPath(new URL("../..", import.meta.url)) });
+    const m = reg.get("github-state")?.manifest;
+    expect(m, JSON.stringify(reg.skipped)).toBeDefined();
+    expect(m?.needs_you?.review_requested?.default).toBe(RAISE_DEFAULTS.review_requested);
+  });
+});
+
+describe("the pull request mirror, without a database", () => {
+  const pass = (over: { viewerOk?: boolean; reviewers?: string[]; draft?: boolean } = {}) =>
+    (async (url: string) => ({
+      ok: true,
+      text: async () => "@@ -1 +1 @@\n-old\n+new\n",
+      json: async () => {
+        if (url.endsWith("/user")) return { login: "me" };
+        if (url.endsWith("/graphql")) return NO_THREADS;
+        if (url.includes("/reviews?")) return [];
+        if (url.includes("/pulls?")) return [{ number: 3, draft: over.draft ?? false, head: { sha: HEAD }, user: { login: "dana" }, requested_reviewers: (over.reviewers ?? ["me"]).map((login) => ({ login })) }];
+        return [{ number: 3, title: "Fix the parser", state: "open", pull_request: {}, html_url: "https://github.com/o/r/pull/3", updated_at: "2026-09-01T00:00:00Z", user: { login: "dana" } }];
+      },
+    })) as unknown as typeof fetch;
+  const viewerless = (async (url: string) => (url.endsWith("/user") ? { ok: false, status: 401, json: async () => ({}) } : pass()(url))) as unknown as typeof fetch;
+
+  it("raises one pull_request request carrying the head, the diff and the threads", async () => {
+    const db = fakeDb([]);
+    await run(db, { githubToken: "t", githubRepos: ["o/r"], fetchFn: pass() });
+    const ins = db.q.filter((x) => x.text.startsWith("INSERT INTO proposals"));
+    expect(ins).toHaveLength(1);
+    const [kind, agent, trust, payload, source] = ins[0]!.values as string[];
+    expect([kind, agent, trust]).toEqual(["pull_request", "github-state", "external"]);
+    expect(JSON.parse(source!)).toEqual({ kind: "github", external_ref: "gh:o/r#3", person: "dana" });
+    expect(JSON.parse(payload!)).toEqual({
+      title: "Review o/r#3: Fix the parser",
+      event: "review_requested",
+      repo: "o/r",
+      number: 3,
+      url: "https://github.com/o/r/pull/3",
+      head_sha: HEAD,
+      author: "dana",
+      requested: true,
+      patch: "@@ -1 +1 @@\n-old\n+new\n",
+      threads: [],
+    });
+  });
+
+  it("raises nothing with syncs.github-state.raise.review_requested off", async () => {
+    const db = fakeDb([]);
+    await run(db, { githubToken: "t", githubRepos: ["o/r"], fetchFn: pass(), raise: { review_requested: false, assigned: true } });
+    expect(db.q.some((x) => x.text.startsWith("INSERT INTO proposals"))).toBe(false);
+  });
+
+  it("an unknown viewer claims nothing and clears nothing", async () => {
+    const db = fakeDb([]);
+    await run(db, { githubToken: "t", githubRepos: ["o/r"], fetchFn: viewerless });
+    expect(db.q.some((x) => /proposals/.test(x.text))).toBe(false);
   });
 });

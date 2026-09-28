@@ -20,6 +20,7 @@ describe.skipIf(!hasDb)("collectors (real db)", () => {
   beforeAll(async () => {
     pool = await testDb(pg.Pool);
     await pool.query(`DELETE FROM work WHERE external_ref LIKE 'gh:itest/%'`);
+    await pool.query(`DELETE FROM proposals WHERE source->>'external_ref' LIKE 'gh:itest/%'`); // the review request #2 raises (T2-13)
     await pool.query(`DELETE FROM runs WHERE component = 'assistant' AND kind = 'turn'`); // scratch db: other suites' drain turns would land in the window
     await pool.query(`DELETE FROM metrics WHERE name LIKE 'claude.%'`);
     await pool.query(`DELETE FROM inbox WHERE idempotency_principal = $1`, [PRINCIPAL]);
@@ -29,6 +30,7 @@ describe.skipIf(!hasDb)("collectors (real db)", () => {
   // one made must not survive it: routines' weekly-review renders whatever
   // `runs` holds, and three stray devin-knowledge rows failed it once.
   afterAll(async () => {
+    await pool.query(`DELETE FROM proposals WHERE source->>'external_ref' LIKE 'gh:itest/%'`);
     await pool.query(`DELETE FROM runs WHERE component = 'devin-knowledge'`);
     await pool.query(`DELETE FROM inbox WHERE idempotency_principal = $1`, [PRINCIPAL]);
     await pool.end();
@@ -40,6 +42,8 @@ describe.skipIf(!hasDb)("collectors (real db)", () => {
       json: async () =>
         url.endsWith("/user")
           ? { login: "me" }
+          : url.endsWith("/graphql")
+            ? { data: { repository: { pullRequest: { reviewThreads: { nodes: [] } } } } } // #2 needs my review: its open threads (T2-13)
           : url.includes("/reviews?")
             ? []
             : url.includes("/pulls?")

@@ -113,6 +113,10 @@ describe("definition size (docs/research/2026-08-tool-discovery.md's other axis)
     // of every connection the owner adds, whose own definitions are fetched on
     // demand and never listed here. The count ceiling moved 26 → 28 with it,
     // reasoned in `ops/scripts/check-tool-surface.mjs`.
+    //
+    // Asking for a review (T2-13) cost 23 (4,565 → 4,588) and moved no
+    // ceiling: `requests_create` takes kind `pull_request` with the PR in the
+    // `refs` it already had — one enum value and a clause, no new property.
     expect(tokens).toBeLessThan(4600);
   });
 

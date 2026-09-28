@@ -272,6 +272,8 @@ type Effective =
       readonly paused: boolean;
       /** The resolved config — each declared key, the owner's value over the manifest's default. Empty when the component declares none. */
       readonly config: Readonly<Record<string, ConfigValue>>;
+      /** A sync's resolved Needs You switches — each rule its manifest declares, the owner's `syncs.<name>.raise` over the default. Absent when it declares none. */
+      readonly raise?: Readonly<Record<string, boolean>>;
     }
   | { readonly held: true; readonly why: string; /** alert per component — false when the file-level alert already covers it */ readonly alert: boolean };
 
@@ -307,8 +309,25 @@ export function effectiveSchedule(c: ScheduledCollector, overlay: OverlayRead): 
   if (routine !== undefined && !isAssignment(routine)) {
     return { held: false, schedule: routine.schedule ?? c.schedule, paused: routine.paused ?? false, config: resolvedConfig(unit, routine.config) };
   }
-  if (sync !== undefined) return { held: false, schedule: sync.every !== undefined ? { every: sync.every } : c.schedule, paused: sync.paused ?? false, config: resolvedConfig(unit, undefined) };
-  return { held: false, schedule: c.schedule, paused: false, config: resolvedConfig(unit, undefined) };
+  if (sync !== undefined) {
+    return { held: false, schedule: sync.every !== undefined ? { every: sync.every } : c.schedule, paused: sync.paused ?? false, config: resolvedConfig(unit, undefined), ...resolvedRaise(unit, sync.raise) };
+  }
+  return { held: false, schedule: c.schedule, paused: false, config: resolvedConfig(unit, undefined), ...resolvedRaise(unit, undefined) };
+}
+
+/**
+ * Every Needs You rule a sync's manifest declares, the owner's switch from
+ * `syncs.<name>.raise` over the manifest's default — what the sync is handed
+ * as `raise`, so a toggle under Scheduled reaches the next pass with no
+ * restart (§2.5). `entryProblems` has already held a sync whose entry names a
+ * rule its manifest does not declare. Nothing when it declares none.
+ */
+function resolvedRaise(unit: ScheduledUnit, mine: Readonly<Record<string, boolean>> | undefined): { raise?: Readonly<Record<string, boolean>> } {
+  const rules = Object.entries(unit.raise);
+  if (rules.length === 0) return {};
+  const out: Record<string, boolean> = {};
+  for (const [rule, decl] of rules) out[rule] = mine !== undefined && Object.hasOwn(mine, rule) ? mine[rule] === true : decl.default;
+  return { raise: out };
 }
 
 /**
@@ -761,7 +780,7 @@ export async function tick(db: Db, scheduled: ScheduledCollector[], ctx: Compone
     const slotMeta = slot.scheduledFor ? { scheduled_for: slot.scheduledFor.toISOString(), time_zone: slot.timeZone } : undefined;
     const runId = await startRun(db, { component: c.name, kind: c.runKind, ...(slotMeta ? { meta: slotMeta } : {}) });
     const runCtx: ComponentCtx = {
-      ...componentCtx(c, ctx, eff.config, runId),
+      ...componentCtx(c, ctx, eff, runId),
       ...(slot.scheduledFor ? { scheduledFor: slot.scheduledFor } : {}),
       ...(slot.timeZone ? { timeZone: slot.timeZone } : {}),
     };
@@ -1190,13 +1209,14 @@ function secretStopped(name: string, stopped: readonly string[]): Record<string,
   };
 }
 
-/** What one component is handed for a run: the shared ctx, its pinned model, and its resolved config. */
-function componentCtx(c: ScheduledCollector, ctx: ComponentCtx, config: Readonly<Record<string, ConfigValue>>, runId: number): ComponentCtx {
+/** What one component is handed for a run: the shared ctx, its pinned model, its resolved config and — a sync — its resolved Needs You switches. */
+function componentCtx(c: ScheduledCollector, ctx: ComponentCtx, eff: { config: Readonly<Record<string, ConfigValue>>; raise?: Readonly<Record<string, boolean>> | undefined }, runId: number): ComponentCtx {
   return {
     ...ctx,
     runId,
     ...(c.usesModel ? { usesModel: c.usesModel } : {}),
-    ...(Object.keys(config).length > 0 ? { config } : {}),
+    ...(Object.keys(eff.config).length > 0 ? { config: eff.config } : {}),
+    ...(eff.raise ? { raise: eff.raise } : {}),
   };
 }
 
@@ -1294,7 +1314,7 @@ export async function runNow(db: Db, scheduled: readonly ScheduledCollector[], n
   if (!pre.ok) return { started: false, reason: "blocked", message: blockedConfigMessage(c.name, c.dir, pre) };
   const runId = await startRun(db, { component: c.name, kind: c.runKind, meta: { trigger: "run_now" } });
   const streak = streakFor(await failureStreaks(db), c.name, c.runKind);
-  const done = execute(db, c, runId, componentCtx(c, ctx, eff.config, runId), streak, opts).catch((err: unknown) => {
+  const done = execute(db, c, runId, componentCtx(c, ctx, eff, runId), streak, opts).catch((err: unknown) => {
     console.error(`runner: Run Now of ${c.name} (run ${String(runId)}) could not be recorded:`, err);
   });
   return { started: true, runId: String(runId), done };

@@ -1,14 +1,13 @@
 {
   "route": "POST /api/github/pulls/:owner/:repo/:number/threads/:id/reply",
-  "source": "contract",
-  "ticket": "T2-13",
-  "note": "the same head guard",
+  "source": "recorded",
+  "ticket": null,
   "request": {
     "method": "POST",
     "path": "/api/github/pulls/example/metistry/281/threads/PRRT_kw1/reply",
     "body": {
       "body": "Fixed in the next push.",
-      "head_sha": "adf440c1"
+      "head_sha": "adf440c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7"
     },
     "idempotency_key": null
   },

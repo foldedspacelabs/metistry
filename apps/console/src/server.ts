@@ -114,6 +114,8 @@ export interface ConsoleConfig {
   planTomorrow?: RoutineTrigger | undefined;
   /** The owner's zone for Today's routes (T2-7): `METISTRY_TZ` (core `configuredTimeZone`), never `TZ`. Null or absent → Today counts days in UTC. */
   timeZone?: string | null | undefined;
+  /** The instant Today, Close the Day and the task doors take "today" from (and Tick its `done <date>`). Absent = the wall clock; the fixture recorder pins it so recordings do not move with the date. */
+  now?: (() => Date) | undefined;
   /** A note's git history for `GET /api/knowledge/history` and `GET /api/knowledge/version` — the reconciler's `/vault/log` and `/vault/show` (§2.21, T10-4); absent = both answer not_available. */
   knowledgeHistory?: KnowledgeHistory | undefined;
   /** Resolve a conflict for `POST /api/knowledge/conflicts/resolve` — the reconciler's `POST /vault/conflicts/resolve` (§2.11, T2-10); absent = not_available. */
@@ -1448,7 +1450,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     // Exactly `[x]` and `done <date>` on one line of the owner's note, or the
     // reverse, written as `user` with the note's hash — never a patch, never
     // an action a proposal can reach (vault-task-routes.ts).
-    if (isVaultTaskRoute(key)) return vaultTaskRoutes(req, res, key, { queries, vault: cfg.vault, audit, replays: vaultTaskReplays });
+    if (isVaultTaskRoute(key)) return vaultTaskRoutes(req, res, key, { queries, vault: cfg.vault, audit, replays: vaultTaskReplays, now: cfg.now });
     // ----- the meeting-note door: one note per event, from the owner's template, as `user` (T2-11) -----
     if (isMeetingNoteRoute(key)) return meetingNoteRoute(req, res, key, { queries, vault: cfg.vault, audit, notes: meetingNotes });
 
@@ -1456,13 +1458,13 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     // The daily note's section through the reconciler's section operation as
     // `user`, then `plan-tomorrow` enqueued; broken markers are a `note`
     // request and no write (close-day.ts).
-    if (isCloseDayRoute(key)) return closeDayRoute(req, res, { db, queries, vault: cfg.vault, audit, plan: cfg.planTomorrow });
+    if (isCloseDayRoute(key)) return closeDayRoute(req, res, { db, queries, vault: cfg.vault, audit, plan: cfg.planTomorrow, now: cfg.now });
 
     // ----- Today (§2.1, §2.10; T2-7): the day composed, any filter, the owner's order -----
     // Every row through a route-only named query; both task reads compile
     // their filter with core's `compileTaskFilter`; an order key outside the
     // day is refused (today-routes.ts).
-    if (isTodayRoute(key)) return todayRoutes(req, res, key, url, { db, queries, vault: cfg.vault, audit, timeZone: cfg.timeZone });
+    if (isTodayRoute(key)) return todayRoutes(req, res, key, url, { db, queries, vault: cfg.vault, audit, timeZone: cfg.timeZone, now: cfg.now });
 
     // ----- artifacts + review dispatch (§4.21; owner session only) -----
     if (isArtifactRoute(url.pathname)) return artifactRoutes(req, res, url, artifacts);

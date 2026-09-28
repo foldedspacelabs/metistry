@@ -768,6 +768,9 @@ export {
   budgetWindowKey,
   budgetMiss,
   spentFrom,
+  callsFrom,
+  spendingLimits,
+  PROJECTS_QUERY,
   type BudgetCheckInput,
   type BudgetHit,
   type BudgetMiss,
@@ -775,6 +778,13 @@ export {
   type BudgetWindow,
   type SpendRow,
   type Spent,
+  type DollarLimit,
+  type WindowLimit,
+  type ProviderLimit,
+  type ProjectLimit,
+  type SpendingLimits,
+  type LimitProvider,
+  type ProjectBudgetRow,
 } from "./budget.js";
 export {
   COMPUTE_FILENAME,

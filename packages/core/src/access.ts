@@ -1118,6 +1118,10 @@ export const ACTION_PERMISSION_CELLS: Readonly<Record<ActionKind, readonly Permi
   task_update: Object.freeze([cell("work", "write", V.update)]),
   comment: Object.freeze([cell("work", "write", V.comment), cell("artifacts", "write", V.comment)]),
   capture: Object.freeze([cell("inbox", "write", V.capture)]),
+  // A connection is its own row (describePermissions' connection rows), where
+  // an Ask First tool already carries the ⏱ — so the action that approves one
+  // fills no cell of the six.
+  connection_call: Object.freeze([]),
 });
 
 function mayUseTool(p: Principal, name: string): Decision {

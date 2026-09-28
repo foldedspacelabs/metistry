@@ -71,6 +71,9 @@ describe.skipIf(!hasDb)("the reach gate: `local` routes are the owner on this Ma
     if (routeKey(r) === "PUT /api/scheduled/routines/:name/assignment") {
       return { actor: agentId, task: "Summarise the week's Projects/ changes.", grants: { read: ["Projects"] }, schedule: { days: ["fri"], at: ["16:00"] } };
     }
+    if (routeKey(r) === "POST /api/scheduled/routines") {
+      return { name: `new-${ROUTINE}`, actor: agentId, task: "Summarise the month's Projects/ changes.", grants: { read: ["Projects"] }, schedule: { days: ["fri"], at: ["16:00"] } };
+    }
     if (routeKey(r) === "POST /api/agents") {
       const id = `itest-reach-new-${suffix}-${minted.length}`;
       minted.push(id);
@@ -175,13 +178,14 @@ describe.skipIf(!hasDb)("the reach gate: `local` routes are the owner on this Ma
     return { status: r.status, body: (await r.json()) as { error?: { code: string; message: string }; token?: string } };
   }
 
-  it("the table files minting a bearer under `local` — Purge Now (T3-9), Restore (X-9, ruling 7) and Roll Back (T10-6)", () => {
+  it("the table files minting a bearer under `local` — Purge Now (T3-9), Restore (X-9, ruling 7), what a routine runs and a New Routine (T3-3, T3-8), and Roll Back (T10-6)", () => {
     expect(LOCAL.map(routeKey)).toEqual([
       "POST /api/agents",
       "POST /api/agents/:id/rotate",
       "POST /api/sessions/purge",
       "POST /api/knowledge/restore",
       "PUT /api/scheduled/routines/:name/assignment",
+      "POST /api/scheduled/routines",
       "POST /api/vault/rollback",
     ]);
   });
@@ -249,6 +253,7 @@ describe.skipIf(!hasDb)("the reach gate: `local` routes are the owner on this Ma
       // the assignment door answers the routine as it now stands (scheduled-routes.integration.test.ts); Restore and
       // Roll Back each raise a Needs You request (knowledge-restore.integration.test.ts, vault-rollback.integration.test.ts)
       if (routeKey(r) === "PUT /api/scheduled/routines/:name/assignment") expect(overlay.toString("utf8")).toContain(`actor: ${agentId}`);
+      else if (routeKey(r) === "POST /api/scheduled/routines") expect(overlay.toString("utf8")).toContain(`new-${ROUTINE}:`);
       else if (routeKey(r) !== "POST /api/sessions/purge" && routeKey(r) !== "POST /api/vault/rollback" && routeKey(r) !== "POST /api/knowledge/restore") expect(typeof p.body.token, routeKey(r)).toBe("string");
       if (routeKey(r) === "POST /api/agents/:id/rotate") {
         expect(await storedHash(agentId)).toBe(tokenHash(p.body.token!));

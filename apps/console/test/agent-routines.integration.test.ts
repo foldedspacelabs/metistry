@@ -124,8 +124,11 @@ describe.skipIf(!hasDb)("agent routines (integration)", () => {
   });
 
   afterAll(async () => {
-    await pool.query(`DELETE FROM work WHERE owner = ANY($1)`, [[`crew:${CREW}`, `crew:${OTHER}`]]);
-    await pool.query(`DELETE FROM runs WHERE component = ANY($1)`, [[ROUTINE, STRANGER, "runner", CREW, OTHER]]);
+    const owners = [`crew:${CREW}`, `crew:${OTHER}`];
+    // the runner's own task_op rows for the rows this suite enqueued — never another suite's runner rows
+    await pool.query(`DELETE FROM runs WHERE component = 'runner' AND kind = 'task_op' AND (meta->>'id')::bigint IN (SELECT id FROM work WHERE owner = ANY($1))`, [owners]);
+    await pool.query(`DELETE FROM work WHERE owner = ANY($1)`, [owners]);
+    await pool.query(`DELETE FROM runs WHERE component = ANY($1)`, [[ROUTINE, STRANGER, CREW, OTHER]]);
     await pool.query(`DELETE FROM outbound_messages WHERE kind = 'alert' AND (position($1 in text) > 0 OR position($2 in text) > 0)`, [ROUTINE, STRANGER]);
     await pool.query(`DELETE FROM agents WHERE id = ANY($1)`, [[CREW, OTHER]]);
     await pool.end();

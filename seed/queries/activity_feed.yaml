@@ -89,7 +89,12 @@ sql: |
         WHEN r.kind = 'task_op'              THEN 'work:' || (r.meta->>'id')
         WHEN r.kind = 'agent_admin'          THEN r.meta->>'agent'
         WHEN r.kind = 'project_mode'         THEN r.meta->>'project'
-        WHEN r.kind = 'routine_run'          THEN r.component
+        -- the display name, not the raw component id (Ruling 25, X-21):
+        -- `knowledge-fold` reads as `Knowledge Fold`, matching the manifest's
+        -- own `display_name` for every built-in routine but the one or two
+        -- that spell theirs out of order — this query has no manifest to
+        -- read, only the id the runner already wrote
+        WHEN r.kind = 'routine_run'          THEN initcap(replace(r.component, '-', ' '))
         ELSE r.kind
       END                                                                                 AS subject,
       CASE

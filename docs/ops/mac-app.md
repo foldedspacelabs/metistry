@@ -24,8 +24,9 @@ path.
   Dock. The screens behind the rows are their own tickets; until one lands its
   detail says so and offers the web app. Needs You, Today (the brief, Next Up,
   Close the Day, and the day's spine and All — "Today" below), Chat, Activity,
-  Knowledge, the Usage popover and the capture composer have landed. So has Work ▸
-  Board, with the card detail and a task's room ("Work ▸ Board" below).
+  Knowledge, Scheduled, Agents, the Usage popover and the capture composer
+  have landed. So have Work ▸ Board, with the card detail and a task's room
+  ("Work ▸ Board" below), and Work ▸ Projects.
 - **Status.** Its own window now (Window ▸ Status), no longer a sidebar row.
   Runs `metistry doctor --json` and renders the rows to the design
   system's §3.13 — grouped by doctor's own `kind`, `absent` shown in absent
@@ -113,7 +114,7 @@ path.
 | `connect-repo --auth token` | it reads the PAT from **stdin**, and the app gives every child an empty stdin on purpose so no verb can hang a progress view waiting for a paste | the wizard shows the option, disabled, with that reason; run it in a terminal |
 | **Minting an enrolment code** | there is no HTTP route that mints one, deliberately — whoever can run the host command already controls Postgres and the vault, so shell access is the root of trust for a first passkey (plan §4.2) — and `metistry enroll` is on the CLI's own "not yet" list | step 6 shows the exact `scripts/enroll.mjs` command and takes the code you paste back |
 | **A QR code** for the phone | nothing in this product renders one yet; `apps/console/scripts/enroll.mjs` says the same about itself ("QR rendering arrives with `packages/cli`"), and an encoder is a dependency nobody has asked for | step 6 shows the enrolment URL, selectable, to type or hand over |
-| **The screens behind the rest of the sidebar's rows** | the shell has the rows (T5-2); each screen is its own ticket, and until it lands the row's detail names the gap and offers the web app. Landed in W2, each with its section below: Needs You (T5-4a's list, T5-4b's bodies), Today (T6-1a's spine, T6-1b's brief, Next Up and Close the Day), Chat (T6-2), Activity (T6-3), the Usage popover (T5-6) and the capture composer (T5-5); in W3, Knowledge (T6-4). Still to come: Work ▸, Agents and Scheduled (W3, T6-5…T6-11) | the PWA — "Add to Dock" in Safari, or the detail's **Open in Browser** |
+| **The screens behind the rest of the sidebar's rows** | the shell has the rows (T5-2); each screen is its own ticket, and until it lands the row's detail names the gap and offers the web app. Landed in W2, each with its section below: Needs You (T5-4a's list, T5-4b's bodies), Today (T6-1a's spine, T6-1b's brief, Next Up and Close the Day), Chat (T6-2), Activity (T6-3), the Usage popover (T5-6) and the capture composer (T5-5); in W3, Knowledge (T6-4), Agents (T6-5), Scheduled (T6-6), Work ▸ Board (T6-7) and Work ▸ Projects (T6-8). Still to come: Work ▸ Artifacts and the rest of W3 (T6-9…T6-11) | the PWA — "Add to Dock" in Safari, or the detail's **Open in Browser** |
 | **Attachments and live capture in the composer** | New Capture is the text composer (T5-5, "The capture composer" below); the owner held audio and screen capture until the designer's floating action bar returns (#253), and the attachment chip, ⌘⇧A and the window's drop target are not built. The Capture menu's Ask · Note · To-do and Start/Stop Recording stay dimmed for the bar (T8) | the PWA's +, or `metistry console call POST /capture` with `filename` and `content_base64` |
 | **The keep-awake control** (Services) | the model half is shipped — `KeepAwakeSetting` (four values, each with what it costs), `KeepAwakeFacts` (doctor's row) and `deploymentSetKeepAwake` — and the pane is a switch with a radio pair under it, which is the designer's. First run can pass `--keep-awake` and does not ask on its own | a terminal: `metistry deployment set-keep-awake <value> --yes`, or `metistry init --keep-awake <value>` |
 | **An iOS target** | `MetistryKit` is already free of AppKit and of `Process` so it can be shared; there is no iOS target in `Package.swift` | — |
@@ -1534,6 +1535,67 @@ the owner comes back; an instance switch drops it.
   2px rule in the serif, the owner's in the accent wash, the pips with *yours
   resets it*, and *Add to the Room* — no recipient. Resolve and Reopen are
   the owner's; a message that did not post stays in the composer.
+
+## Work ▸ Projects
+
+`sources/kit/projects-view.swift` is Work ▸ Projects (T6-8,
+screen-13-projects.md, C83, C94); its model is `projects-model.swift`, held by
+`AppModel.projects` so the project the owner left is the one they come back
+to, and dropped on an instance switch. Projects appear on first use (0011), so
+there is no New Project.
+
+- **The list** is `GET /api/projects`: the name, then the **mode** — read first
+  after the name — then the agents that joined, *4 open · 1 blocked* (the
+  board's Blocked column, `GET /api/q/board`, counted per project), today's
+  spend against the budget as a line and a bar that turns `degraded` at the
+  budget, and the last activity. ↩ opens a project; ⌘O opens its folder in
+  Obsidian. Empty: *No Projects Yet* · **Open Board** (plan §1.4). Spend older
+  than fifteen minutes, or a failed refresh over it, draws the stale band —
+  *Spend as of 40 minutes ago* · **Sync Now** (components-03 §2).
+- **The mode uses the channels honestly (C83).** Autonomous is a quiet
+  outline. A Review the owner chose takes **weight** — a 2 pt `text-primary`
+  outline and the review mark (`MetistryGlyph.reviewMode`, a raised hand; not
+  the eye, which is Needs You's *review* request). Only a Review the budget
+  forced takes the **tint** — `degraded-quiet`, the warning mark and *Review ·
+  over budget*. Which one is `last_mode_change`: a `project_mode` run is the
+  budget's flip, a `project_admin` run the owner's toggle; the spend is never
+  read to guess it, so a project over its budget that the owner put back into
+  Review is a choice.
+- **A project**: the header — name, chip, the **Review** switch, and footnotes
+  (*$5 a day · 20 handoffs at once*; *review since 2:40 PM (over budget)* or
+  *(you set it)*); over budget, one sentence — *Went over its $3 budget at
+  2:40 PM. Handoffs between agents now come to you.* — and **Raise Budget**,
+  which opens Settings › Compute › Spending limits (C138; T4-19 puts project
+  budgets there). Then **In Flight** (open, blocked, handoffs in flight of the
+  cap, queued, open threads, spent today); **Permissions** — the project's own
+  grant, served on `GET /api/projects` since T6-8, labelled *every member gets
+  these* and drawn in the Agents table (C58) in `core`'s words (*Titles only*,
+  *Named queries*); **Agents**, each with only what it holds **beyond** the
+  project — *+ Areas/Ops (Approved in Needs You · #4)*, *+ Areas/Beta (via
+  project beta)* — or *project access only*; and **Recent Runs** from
+  `activity_feed` for the project, each opening its detail in the web app
+  until Run detail is on the Mac.
+- **The instance's own agent.** The rollup lists an internal row with no
+  project list as a member of every project, and it inherits nothing from any
+  (T4-7: its reach is its configuration). It is not counted among a project's
+  agents, is never offered to Add Agent, and is drawn apart: *Aide works in
+  every project on its own access. It inherits nothing from a project.* (the
+  configured name).
+- **The confirmations (§4).** Nothing is sent until the owner confirms, and
+  the row is read again after. **Back to Autonomous**: *Its agents will hand
+  work to each other without you again.*, the button in the destructive role.
+  **Into Review**: *3 handoffs in flight will wait for you.* **Add Agent**
+  lists the connected agents that are let in and not members (a crew's
+  projects are its definition's) and names exactly what joining gives: the
+  project's tasks and artifacts, and each line of the project's grant the
+  agent does not already hold — or *Nothing more to inherit*. It sends `PUT
+  /api/agents/:id/projects` with the agent's projects and this one. A refusal
+  is said in the console's words, and the switch stays where the console says.
+- **Accessibility (§2.18).** A row is one element — *Metistry, Review, 1 agent,
+  4 open, 1 blocked, active 2 hours ago, $0.00 today · no budget*; the chip
+  says its mode (and *over budget*) in words; the switch is one control, *Review,
+  on*, with the focus ring; each section is a heading; nothing moves; no key is
+  bound outside the menu table; the root frame is flexible to zero (#392).
 
 ## Build and run it
 

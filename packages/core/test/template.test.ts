@@ -317,6 +317,13 @@ describe("{{ calendar }}", () => {
       const out = await render("{{ calendar day: today }}", { calendar: { events: async () => eventWith("Evil\r\n# Gotcha") } });
       expect(out.markdown).toContain("- 09:30–10:00 Evil # Gotcha");
     });
+
+    it("an ordinary title survives readable — apostrophe, ampersand, non-ASCII, emoji, a lone bracket or angle", async () => {
+      const out = await render("{{ calendar day: today }}", {
+        calendar: { events: async () => eventWith("Amy's café ☕ review & feedback [draft] < 30 min") },
+      });
+      expect(out.markdown).toContain("- 09:30–10:00 Amy's café ☕ review & feedback [draft] &lt; 30 min");
+    });
   });
 });
 

@@ -4,6 +4,7 @@
 // brief and every client take its word for it.
 import { describe, expect, it } from "vitest";
 import {
+  ACKNOWLEDGED,
   REQUEST_BODIES,
   REQUEST_DECISIONS,
   REQUEST_DOORS,
@@ -15,6 +16,7 @@ import {
   REQUEST_TYPES,
   describeRequest,
   isRequestKind,
+  readBackOf,
   parseSubjectFingerprint,
   requestBodyOf,
   requestSubjectOf,
@@ -152,9 +154,9 @@ describe("request types — a row", () => {
     expect(suggested.primary).toMatchObject({ label: "Approve", sends: { decision: "accept_as_work" } });
     expect(suggested.decisions).toEqual(["allow", "accept_as_work", "accept_with_changes", "deny"]);
 
-    // a question answers with its answers; a report has no Approve to fold into
+    // a question answers with its answers; a report has no Approve to fold into — Acknowledge is not one (X-10)
     expect(describeRequest("decision", { options: ["a", "b"], suggested_work: {} }).decisions).toEqual(["answers", "accept_with_changes", "deny"]);
-    expect(describeRequest("report", { suggested_work: {} }).decisions).toEqual(["skip"]);
+    expect(describeRequest("report", { suggested_work: {} }).decisions).toEqual(["acknowledge", "skip"]);
     // the table itself is untouched by a row's payload
     expect(REQUEST_TYPE_TABLE.note.bodies[0].primary?.sends).toEqual({ decision: "allow" });
   });
@@ -187,6 +189,81 @@ describe("request types — a row", () => {
     expect(describeRequest("invitation").decisions).toEqual([]);
     expect(describeRequest("task").decisions).toEqual([]);
     expect(describeRequest("message").decisions).toEqual(["skip"]);
+  });
+});
+
+describe("a report is acknowledged (X-10, ruling 8 of 2026-09-27)", () => {
+  const act = { label: "Try Again", kind: "run_now", component: "standup" };
+
+  it("a report that names no act — an agent's finding, a routine's note — is answered Acknowledge, or Dismissed", () => {
+    const r = describeRequest("report", { title: "Nightly fold finished", body: "12 pages", kind: "finding" });
+    expect(r).toMatchObject({ type: "report", body: "excerpt", primary: { label: "Acknowledge", sends: { decision: "acknowledge" } }, revise: null, decline: { label: "Dismiss", sends: { decision: "skip" } } });
+    expect(r.decisions).toEqual(["acknowledge", "skip"]);
+  });
+
+  it("a report that names its act keeps it: an event's Try Again is not an acknowledgement", () => {
+    const r = describeRequest("report", { title: "standup failed", act });
+    expect(r.primary).toEqual({ label: null, sends: { door: "act" } });
+    expect(r.decisions).toEqual(["skip"]);
+    // an act with no label is no act — its button would have no word
+    for (const bad of [{}, { label: "" }, { label: "   " }, { label: 3 }, [act], "Try Again", null]) {
+      expect(describeRequest("report", { act: bad }).primary?.label, JSON.stringify(bad)).toBe("Acknowledge");
+    }
+  });
+
+  it("a kind the table does not know is still Dismiss alone — Acknowledge is a report's, and an unknown kind is not one", () => {
+    expect(describeRequest("no_such_kind", { title: "x" })).toMatchObject({ primary: null, decisions: ["skip"] });
+  });
+
+  it("Acknowledge is offered on no other type, and the table's own report row is untouched", () => {
+    for (const kind of ["decision", "action", "knowledge", "review", "improvement", "access_request", "message", "task", "invitation", "pull_request"]) {
+      expect(describeRequest(kind, { title: "x" }).decisions, kind).not.toContain("acknowledge");
+    }
+    expect(REQUEST_TYPE_TABLE.report.bodies[0].primary).toEqual({ label: null, sends: { door: "act" } });
+  });
+});
+
+describe("the read-back — what the agent that asked is told (X-10)", () => {
+  const questions = [
+    { prompt: "Which repo?", options: ["metistry", "metistry-instance"], multi: false, allow_other: true },
+    { prompt: "Which labels?", options: ["bug", "docs"], multi: true, allow_other: false },
+  ];
+  const at = new Date("2026-09-28T09:00:00Z");
+
+  it("a question answered: each question's prompt with the owner's choices and words, in order", () => {
+    const row = { decision: "answered", decided_at: at, feedback: "Which repo? — mine; Which labels? — bug", payload: { questions, answers: [{ choices: [], other: "mine" }, { choices: ["bug"] }] } };
+    expect(readBackOf(row)).toEqual({
+      state: "answered",
+      decided_at: "2026-09-28T09:00:00.000Z",
+      answers: [
+        { prompt: "Which repo?", choices: [], other: "mine" },
+        { prompt: "Which labels?", choices: ["bug"] },
+      ],
+    });
+  });
+
+  it("waiting, acknowledged, revised, declined, dismissed, expired — each its own state, the owner's words only where they gave some", () => {
+    expect(readBackOf({ decision: "pending", payload: { questions } })).toEqual({ state: "pending" });
+    expect(readBackOf({ decision: ACKNOWLEDGED, decided_at: at })).toEqual({ state: "acknowledged", decided_at: at.toISOString() });
+    expect(readBackOf({ decision: "accept_with_changes", decided_at: at, feedback: "ask about the migration" })).toEqual({ state: "revised", decided_at: at.toISOString(), feedback: "ask about the migration" });
+    expect(readBackOf({ decision: "deny", decided_at: at, feedback: "not now" })).toEqual({ state: "declined", decided_at: at.toISOString(), feedback: "not now" });
+    expect(readBackOf({ decision: "deny", decided_at: at, feedback: null })).toEqual({ state: "declined", decided_at: at.toISOString() });
+    expect(readBackOf({ decision: "expired", decided_at: at })).toEqual({ state: "expired", decided_at: at.toISOString() });
+  });
+
+  it("a Dismiss (skip) carries no words: SKIP_FEEDBACK is a marker, never a reason", () => {
+    expect(readBackOf({ decision: "deny", decided_at: at, feedback: "skipped" })).toEqual({ state: "dismissed", decided_at: at.toISOString() });
+  });
+
+  it("any other stored decision is `closed` — the machinery's word is never the agent's", () => {
+    for (const d of ["allow", "approve", "resolved_at_source", "auto", "", null, 7]) {
+      expect(readBackOf({ decision: d, feedback: "private words", payload: { answers: [{ choices: ["x"] }] } }), String(d)).toEqual({ state: "closed" });
+    }
+  });
+
+  it("reads nothing else off the row: not the payload's other fields, not an answer that is not one", () => {
+    const r = readBackOf({ decision: "answered", payload: { questions, answers: [{ choices: ["metistry", 3] }, "junk"], provenance: { agent: "someone" }, context: { prose: "x" } } });
+    expect(r).toEqual({ state: "answered", answers: [{ prompt: "Which repo?", choices: ["metistry"] }] });
   });
 });
 

@@ -513,3 +513,74 @@ describe.skipIf(!hasDb)("assistant drain — a provider that refused the account
     await pool.query(`UPDATE proposals SET decision = 'skip' WHERE decision = 'pending' AND source->>'external_ref' LIKE 'provider-refused:%'`);
   });
 });
+
+// T8-2b wires T8-6's private tier into the drain: a turn whose row names a
+// capture session runs on `assignments.tiers.private` — an on_machine
+// provider — whatever the router chose, and with none assigned it is REFUSED:
+// failed, said, recorded, and the engine never called. Never `default`.
+describe.skipIf(!hasDb)("assistant drain — a capture session in scope (real db)", () => {
+  let pool: pg.Pool;
+  const thread = `t-private-${Date.now()}`;
+  const WITH_PRIVATE = `
+providers:
+  lmstudio: { kind: openai-compatible, base_url: "http://127.0.0.1:1234/v1", locality: on_machine }
+  openrouter:
+    kind: openai-compatible
+    base_url: https://openrouter.ai/api/v1
+    locality: off_machine
+    data_policy: { allow: [Knowledge], deny_sources: [], max_brief_bytes: 1024 }
+assignments:
+  default: { model: openrouter/anthropic/claude-sonnet-5, effort: medium }
+  tiers:
+    deep: { model: openrouter/anthropic/claude-opus-5, effort: high }
+    private: { model: lmstudio/google/gemma-3n-e4b, effort: low }
+`;
+  const specs: Array<{ tier?: string | undefined; provider?: string | undefined; locality?: string | undefined; model: string }> = [];
+  const engine: Engine = async (_prompt, spec) => {
+    specs.push({ tier: spec.tier, provider: spec.assignment?.provider, locality: spec.assignment?.config.locality, model: spec.model });
+    return { text: "answered on this Mac", session_id: randomUUID() };
+  };
+
+  beforeAll(async () => {
+    pool = await testDb(pg.Pool);
+    await pool.query(`UPDATE inbound_messages SET status = 'done' WHERE status = 'new'`);
+  });
+  afterAll(async () => pool.end());
+
+  const enqueue = async (meta: unknown) =>
+    (await pool.query(`INSERT INTO inbound_messages (thread, text, meta) VALUES ($1, 'what did they decide?', $2) RETURNING id`, [thread, JSON.stringify(meta)])).rows[0].id;
+  const turnRun = async (id: unknown) =>
+    (await pool.query(`SELECT ok, error, provider, meta FROM runs WHERE component = 'assistant' AND kind = 'turn' AND (meta->>'message_id')::bigint = $1`, [id])).rows;
+
+  it("a turn naming a capture session runs on the private tier's on_machine provider, though the router chose deep", async () => {
+    specs.length = 0;
+    const id = await enqueue({ capture_session: "20260928-120000-00ab", route: { kind: "model", tier: "deep", text: "what did they decide?", routed_by: "rule" } });
+    expect(await drainOne(pool, engine, tiers, { compute: () => parseCompute(WITH_PRIVATE) })).toBe(true);
+    expect(specs).toEqual([{ tier: "private", provider: "lmstudio", locality: "on_machine", model: "google/gemma-3n-e4b" }]);
+    const [run] = await turnRun(id);
+    expect(run).toMatchObject({ ok: true, provider: "lmstudio", meta: { tier: "private", capture_session: true } });
+    // the same row without the marker keeps the router's choice — the rule is the marker, not the words
+    specs.length = 0;
+    await enqueue({ route: { kind: "model", tier: "deep", text: "what did they decide?", routed_by: "rule" } });
+    await drainOne(pool, engine, tiers, { compute: () => parseCompute(WITH_PRIVATE) });
+    expect(specs[0]).toMatchObject({ tier: "deep", provider: "openrouter" });
+  });
+
+  it("with no private tier assigned the turn is refused — the engine is never called, not on default and not on rules.yaml", async () => {
+    specs.length = 0;
+    const noPrivate = parseCompute(WITH_PRIVATE.replace(/^ {4}private: .*$/m, ""));
+    for (const compute of [noPrivate, parseCompute("providers: {}\n")]) {
+      const id = await enqueue({ capture_session: "20260928-120000-00ab", tier: "routine" });
+      expect(await drainOne(pool, engine, tiers, { compute: () => compute })).toBe(true);
+      expect((await pool.query(`SELECT status FROM inbound_messages WHERE id = $1`, [id])).rows[0].status).toBe("failed");
+      const reply = (await pool.query(`SELECT text, kind FROM outbound_messages WHERE in_reply_to = $1`, [id])).rows;
+      expect(reply).toHaveLength(1);
+      expect(reply[0]).toMatchObject({ kind: "alert" });
+      expect(reply[0].text).toMatch(/^not answered: a capture session is in scope, so this turn runs on the private tier, and compute.yaml assigns none — it never falls back to default/);
+      const [run] = await turnRun(id);
+      expect(run).toMatchObject({ ok: false, provider: null, meta: { tier: "private", capture_session: true, refused: "private_tier_unavailable" } });
+      expect(run.error).toMatch(/metistry compute assign private/);
+    }
+    expect(specs).toEqual([]);
+  });
+});

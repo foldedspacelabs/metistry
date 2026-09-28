@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Becomes lc-helper.app/Contents/Info.plist, and is also linked into the
+     executable as __TEXT,__info_plist, so the usage strings are present even
+     when the binary runs outside the bundle (PoC-9: without them tccd
+     silently refuses to prompt). Copied from packages/mcp-eventkit/helper/
+     Info.plist, and for the same reason:
+
+     Shipping the helper as a BUNDLE is what makes the TCC grants durable.
+     TCC records a bundled client by its CFBundleIdentifier and validates the
+     caller against the stored csreq — the signature's designated
+     requirement, which for a Developer ID identity is identifier +
+     certificate chain and contains no cdhash — so a rebuild keeps the grant.
+     A bare Mach-O is recorded by absolute path instead, invisible to the
+     Privacy pane and to `tccutil reset` (docs/ops/apple-signing.md §3).
+
+     The IDENTIFIER is the one the helper already names itself by
+     (sources/helper/main.swift's fallback, and what the process tap
+     excludes so a recording never hears the helper): it must never change,
+     or every Mac consents again. The NAMES are what System Settings ›
+     Privacy & Security › Microphone / Screen & System Audio Recording show,
+     so they read "Metistry Recorder".
+
+     Three grants, two strings: Microphone and Audio Capture (the process
+     tap, macOS 14.2+) take a usage description; Screen Recording has no
+     app-supplied string at all — the system's own sentence is all there is
+     (docs/research/2026-09-21-live-capture-bar.md §2.2). SpeechTranscriber
+     has no authorization API, so no speech-recognition string: nothing here
+     sends audio to Apple.
+
+     LSUIElement keeps it out of the Dock; deliberately NOT
+     LSBackgroundOnly — it must be allowed to front the consent dialogs the
+     first time it asks. -->
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key><string>com.foldedspacelabs.metistry.live-capture</string>
+  <key>CFBundleName</key><string>Metistry Recorder</string>
+  <key>CFBundleDisplayName</key><string>Metistry Recorder</string>
+  <key>CFBundleExecutable</key><string>lc-helper</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+  <key>CFBundleShortVersionString</key><string>0.0.1</string>
+  <key>CFBundleVersion</key><string>1</string>
+  <key>LSMinimumSystemVersion</key><string>14.0</string>
+  <key>LSUIElement</key><true/>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Metistry records your side of a meeting when you press Record, and transcribes it on this Mac.</string>
+  <key>NSAudioCaptureUsageDescription</key>
+  <string>Metistry records the sound of only the apps you choose when you press Record, and transcribes it on this Mac.</string>
+</dict>
+</plist>

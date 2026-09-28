@@ -1970,6 +1970,16 @@ still correct and still passes — a passkey session is required. Then the db
 jobs behind every plist in `ops/launchd` (macOS), and `docker compose ps`
 against the services in `docker-compose.yml`.
 
+**Live capture's two rows** (T8-2b, only once `METISTRY_LIVE_CAPTURE_URL` is
+set; before that the bridge's row is `absent`, "not configured"). The
+**`launchd:com.foldedspacelabs.metistry.recorder`** row is the recorder job
+— running, or not bootstrapped (`metistry up`). The **`live-capture`** row
+is the bridge's own `check()`: the three grants as macOS lets a helper know
+them, the on-device transcriber, and the transcript delivery — `degraded`
+while `METISTRY_LIVE_CAPTURE_INBOX_TOKEN` is unset (transcripts stay on the
+Mac) or while a recording is still owed to the inbox, with the console's
+own reason. Its restart hint is `metistry restart live-capture`.
+
 **The `registries` row** (plan §2.7). One row across every registry kind —
 collectors, routines, targets, provider templates, connection types — loaded
 exactly as the console and the CLI load them: the product's units, and, when
@@ -2173,6 +2183,20 @@ return the instance to the fixed labels and ports.
    `ops/sandbox/assistant.sb`. A bridge becomes a child only when this
    install has opted into it — its `METISTRY_*_URL` is set — so an install
    with no calendar bridge starts no job that could only fail.
+
+   **Live capture (T8-2b)** is opt-in under **every** shape, compose
+   included: with `METISTRY_LIVE_CAPTURE_URL` set, `up` installs the
+   recorder — the signed `lc-helper.app` as its own agent,
+   `com.foldedspacelabs.metistry.recorder`, the one program argument of its
+   job because the Microphone, Audio Capture and Screen Recording grants
+   attach to it — with `METISTRY_INSTANCE_DIR` in its environment so it
+   writes sessions under `<instance>/.metistry/state/capture`, and the
+   `live-capture` bridge beside the other bridges (a supervisor child under
+   the launchd shape). Without the variable neither exists, so an install
+   that never asked for a microphone never grows a job that could ask for
+   one. A release carries no built bundle; `up` pins the job at the signed
+   one in the install root the way it pins the calendar's, and a missing one
+   is a note naming `packages/mcp-live-capture/scripts/build-helper.sh`.
 
    **`--register-via app`** does everything above except install the
    supervisor's own agent: the Mac app registers the copy inside its bundle

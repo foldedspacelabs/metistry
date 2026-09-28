@@ -18,7 +18,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import type { SetShapeOptions, SetShapeResult } from "../src/deployment-report.js";
 import { migrateShape, TABLE_LIST_SQL, tableCountsSql, type MigrateShapeOptions } from "../src/migrate-shape.js";
-import { TCC_HELPERS } from "../src/tcc-pin.js";
+import { buildScriptFor, TCC_HELPERS } from "../src/tcc-pin.js";
 import { up, type UpOptions, type UpResult } from "../src/up.js";
 import { checkout, fakeExec, okDoctor, shown } from "./fixtures.js";
 
@@ -285,6 +285,63 @@ describe("the TCC helper bundles — `up` re-pins on every run, not just migrate
     const calKickstarts = calls.filter((c) => c === "launchctl kickstart -k gui/501/com.foldedspacelabs.metistry.calendar");
     expect(supKickstarts.length).toBe(1);
     expect(calKickstarts.length).toBe(1);
+  });
+
+  it("the recorder (T8-2b) is pinned like the calendar — its own agent, its root process the signed lc-helper — once live capture is configured", async () => {
+    const { P } = await releaseTree();
+    const I = await instance({ release: true });
+    const home = await mkdtemp(join(tmpdir(), "metistry-home-"));
+    const bundles = TCC_HELPERS.map((h) => join(P, h.bundle, h.exe));
+    const exec = fakeExec();
+    const r = await up({
+      productDir: P,
+      env: { ...upEnv(I), METISTRY_LIVE_CAPTURE_URL: "http://127.0.0.1:7815", HOME: home },
+      exec,
+      out: () => {},
+      platform: "darwin",
+      uid: 501,
+      home,
+      node: NODE,
+      deployment: launchd,
+      exists: pgReady(P, bundles),
+      mintPassword: () => "generated",
+      doctorFn: okDoctor,
+    });
+    expect(r.code).toBe(0);
+    const recorder = await readFile(join(home, "Library", "LaunchAgents", "com.foldedspacelabs.metistry.recorder.plist"), "utf8");
+    const helper = join(P, "packages", "mcp-live-capture", "helper", "lc-helper.app", "Contents", "MacOS", "lc-helper");
+    // the ONE program argument is the signed helper in the tree that holds it — nothing in front of it
+    expect(recorder).toMatch(new RegExp(`<key>ProgramArguments</key>\\s*<array>\\s*<string>${helper.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}</string>\\s*</array>`));
+    expect(recorder).not.toContain(join(P, "current", "packages", "mcp-live-capture"));
+    // where it writes sessions comes from the instance `up` knows, not a path of its own
+    expect(recorder).toContain(`<key>METISTRY_INSTANCE_DIR</key><string>${I}</string>`);
+    expect(recorder).toContain("<key>METISTRY_LC_SOCKET</key><string>/tmp/metistry-live-capture.sock</string>");
+    // and its bridge is a supervisor child beside the other bridges
+    const config = JSON.parse(await readFile(join(I, ".metistry", "state", "supervisor.json"), "utf8"));
+    expect(config.children.map((c: { name: string }) => c.name)).toContain("live-capture");
+    const calls = exec.calls.map(shown);
+    expect(calls.filter((c) => c === "launchctl kickstart -k gui/501/com.foldedspacelabs.metistry.recorder")).toHaveLength(1);
+  });
+
+  it("without METISTRY_LIVE_CAPTURE_URL there is no recorder and no live-capture child — an install that never asked for a microphone gets none", async () => {
+    const { P } = await releaseTree();
+    const I = await instance({ release: true });
+    const home = await mkdtemp(join(tmpdir(), "metistry-home-"));
+    const exec = fakeExec();
+    const r = await up({ productDir: P, env: { ...upEnv(I), HOME: home }, exec, out: () => {}, platform: "darwin", uid: 501, home, node: NODE, deployment: launchd, exists: pgReady(P, TCC_HELPERS.map((h) => join(P, h.bundle, h.exe))), mintPassword: () => "generated", doctorFn: okDoctor });
+    expect(r.code).toBe(0);
+    expect(existsSync(join(home, "Library", "LaunchAgents", "com.foldedspacelabs.metistry.recorder.plist"))).toBe(false);
+    expect(exec.calls.map(shown).some((c) => c.includes("metistry.recorder"))).toBe(false);
+    const config = JSON.parse(await readFile(join(I, ".metistry", "state", "supervisor.json"), "utf8"));
+    expect(config.children.map((c: { name: string }) => c.name)).not.toContain("live-capture");
+  });
+
+  it("a missing recorder bundle names ITS build script, not another helper's", () => {
+    expect(TCC_HELPERS.map((h) => [h.service, buildScriptFor(h)])).toEqual([
+      ["calendar", "packages/mcp-eventkit/scripts/build-helper.sh"],
+      ["apple-fm", "packages/mcp-apple-fm/scripts/build-helper.sh"],
+      ["recorder", "packages/mcp-live-capture/scripts/build-helper.sh"],
+    ]);
   });
 
   it("a plain `up` on a tree that DOES ship the helper leaves it alone", async () => {

@@ -524,6 +524,42 @@ app or a script safe once something calls it with the flag.
 `path` is relative to the instance repo root: captures live in the vault at
 `Inbox/` so Obsidian can see and edit them (`docs/ops/inbox.md`).
 
+#### A recording's transcript — the live-capture bridge at session end (T8-2b)
+
+When a recording ends — Stop, the ten-hour stop, the disk, or a crash the
+recorder finds when it next starts — the live-capture bridge
+(`packages/mcp-live-capture`) sends its transcript here, as any capture
+arrives. No new route and no new reach:
+
+```
+POST /capture
+Authorization: Bearer <METISTRY_LIVE_CAPTURE_INBOX_TOKEN>   (a capture owner token)
+Idempotency-Key: live-capture:20260928-120000-00ab           (one per session, forever)
+Content-Type: application/json
+
+{"note": "---\nkind: \"transcript\"\ncapture_session: \"20260928-120000-00ab\"\nended_reason: \"owner\"\n…---\n\n[00:00:01] (apps) …",
+ "filename": "transcript-20260928-120000-00ab.md"}
+
+201 {"id":42,"path":"Inbox/…-transcript-20260928-120000-00ab.md","sha256":"…"}
+```
+
+- **The credential** is an `owner_tokens` row — capture and messages only
+  (`docs/ops/capture-shortcut.md` §1 mints one) — so it records
+  `source: "http"`, scoped `owner_token` for the key. It is the bridge's
+  third credential and reaches nothing on the bridge itself; the bridge
+  refuses to start if it equals its tool or control token.
+- **The key** makes every retry the first row: the bridge marks a session
+  delivered only after a `201` with an `id`, so a crash between the
+  console's answer and that mark re-sends, and gets the same row back.
+- **A refusal** (`401`/`403`), a `5xx`, or no answer leaves the session on
+  the Mac, owed; the bridge's `check` turns `degraded` with the reason, and
+  the next pass (every minute) sends it with the same key.
+- **The frontmatter** is written by our own door, so the inbox drain
+  classifies on it: `kind: transcript` is placed deterministically, and
+  `ended_reason: crashed` from an owner credential raises **one** `report`
+  in Needs You, keyed on the session (C137). An agent bearer's capture
+  raises none.
+
 `POST /api/messages/:id/feedback` needs no key: it is an upsert on the
 message id, so a replay is already the same row. `POST /message` is not
 idempotent and not meant to be queued (a reply three hours late into a

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Hardened-runtime RESOURCE ACCESS entitlement, not App Sandbox — the same
+     shape as packages/mcp-eventkit/helper/ek-helper.entitlements, and for the
+     same lesson (learned 2026-09-08 from tccd's own log): with
+     --options runtime and no resource entitlement, tccd does not prompt, it
+     denies, silently. The microphone's is com.apple.security.device.audio-input.
+
+     Nothing else: the process tap (Audio Capture) and Screen Recording have no
+     hardened-runtime entitlement — their consent is the usage string in
+     Info.plist and the system's own prompt. NOT the App Sandbox:
+     com.apple.security.app-sandbox stays absent — it would break the
+     helper's launchd-service shape and its capture directory for no benefit.
+
+     codesign hands this file to AMFI, whose XML parser rejects comments, so
+     scripts/build-helper.sh strips them through plutil first. -->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.device.audio-input</key><true/>
+</dict>
+</plist>

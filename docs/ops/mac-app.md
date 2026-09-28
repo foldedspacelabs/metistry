@@ -325,7 +325,16 @@ and `/mcp` — are listed with their reasons in
 stores: `ManagementRunner`, whose `ManagementCommand` can only hold one of
 §2.2's verbs (M1–M18 — the set is closed at the type; `CLIManagementRunner`
 runs it, T5-1), and `LiveCaptureClient`
-for the local live-capture bridge (T8).
+for the local live-capture bridge (T8). The bridge and its recorder job are
+`metistry up`'s (T8-2b; `docs/ops/cli.md`), not the app's: the app's
+entitlements stay empty — the recorder, a separate signed bundle
+(`lc-helper.app`, *Metistry Recorder* in System Settings ▸ Privacy &
+Security), holds the Microphone, Audio Capture and Screen Recording grants —
+and Settings ▸ Services shows the two doctor rows it adds, the recorder's
+`launchd:` job and the bridge's `live-capture` check. A recording's
+transcript reaches the console from the bridge through `POST /capture`, so
+the app sends nothing when a session ends. No capture UI is drawn here; the
+bar is T8-5's.
 
 The routes `ConsoleAPI` already spoke keep their names and typed replies. A
 reply the contract spells out field by field is typed; every other reply is a

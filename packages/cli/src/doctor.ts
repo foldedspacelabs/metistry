@@ -252,6 +252,8 @@ interface ProbeTarget {
 const KNOWN_TARGETS: Record<string, ProbeTarget> = {
   "apple-fm": { urlVar: "METISTRY_AFM_URL", tokenVar: "METISTRY_BRIDGE_TOKEN_APPLE_FM", launchdService: "apple-fm" },
   eventkit: { urlVar: "METISTRY_EK_URL", tokenVar: "METISTRY_BRIDGE_TOKEN_EVENTKIT", launchdService: "eventkit" },
+  // the bridge; its recorder (the TCC helper) has a `launchd:` row of its own
+  "live-capture": { urlVar: "METISTRY_LIVE_CAPTURE_URL", tokenVar: "METISTRY_BRIDGE_TOKEN_LIVE_CAPTURE", launchdService: "live-capture" },
   reconciler: { urlVar: "METISTRY_RECONCILER_URL", tokenVar: "METISTRY_BRIDGE_TOKEN_RECONCILER", launchdService: "reconciler" },
 };
 

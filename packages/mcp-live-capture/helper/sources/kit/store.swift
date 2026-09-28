@@ -10,6 +10,11 @@
 //                     everything up to the crash (C137)
 //   <source>.m4a      the audio (the Core Audio adapter writes it)
 //
+// When a session has ended, the bridge hands its transcript to the console's
+// `POST /capture` and tells the helper so (`delivery`, below): the record is
+// the one place that says a transcript reached Metistry, so a crash, a
+// console that was down or a refused credential leaves it owed, never lost.
+//
 // Retention (the purge after ingestion + 7 days) is T8-4's; nothing here
 // deletes.
 
@@ -45,6 +50,20 @@ public struct ScopeProcess: Codable, Equatable {
     enum CodingKeys: String, CodingKey { case bundleID = "bundle_id", pid }
 }
 
+/// Where a session's transcript went: the inbox row `POST /capture` answered
+/// with. Written once; a session with one is never delivered again.
+public struct Delivery: Codable, Equatable {
+    public let inboxID: Int
+    public let at: Date
+
+    public init(inboxID: Int, at: Date) {
+        self.inboxID = inboxID
+        self.at = at
+    }
+
+    enum CodingKeys: String, CodingKey { case inboxID = "inbox_id", at }
+}
+
 public struct SessionRecord: Codable, Equatable {
     public let sessionID: String
     public let startedAt: Date
@@ -63,11 +82,14 @@ public struct SessionRecord: Codable, Equatable {
     /// about the audio-capture grant that macOS lets a helper observe.
     public var appAudioObserved: Bool
     public var remindersRaised: Int
+    /// nil until the transcript has reached the console (T8-2b). A
+    /// session.json written before this field existed reads as owed.
+    public var delivery: Delivery? = nil
 
     enum CodingKeys: String, CodingKey {
         case sessionID = "session_id", startedAt = "started_at", state, endedAt = "ended_at", endedReason = "ended_reason"
         case apps, tapMode = "tap_mode", processes, appAudio = "app_audio", microphone, gaps
-        case appAudioObserved = "app_audio_observed", remindersRaised = "reminders_raised"
+        case appAudioObserved = "app_audio_observed", remindersRaised = "reminders_raised", delivery
     }
 }
 
@@ -97,6 +119,10 @@ public protocol SessionStore: AnyObject {
     func sessions() -> [SessionRecord]
     /// When the session's files were last written — how far a crash saved.
     func lastWrite(_ sessionID: String) -> Date?
+    /// The transcript as written, one object per line (segments and gaps),
+    /// in the order they were appended. A torn last line — the crash landed
+    /// mid-write — is skipped, never guessed at.
+    func transcript(_ sessionID: String) -> [[String: Any]]
 }
 
 public let sessionFile = "session.json"
@@ -185,6 +211,25 @@ public final class FileSessionStore: SessionStore {
             (try? fm.attributesOfItem(atPath: dir.appendingPathComponent(n).path))?[.modificationDate] as? Date
         }.max()
     }
+
+    public func transcript(_ sessionID: String) -> [[String: Any]] {
+        let url = directory(for: sessionID).appendingPathComponent(transcriptFile)
+        guard let data = try? Data(contentsOf: url) else { return [] }
+        return data.split(separator: 0x0A).compactMap { line in
+            (try? JSONSerialization.jsonObject(with: Data(line))) as? [String: Any]
+        }
+    }
+}
+
+/// `METISTRY_CAPTURE_DIR`, else `<METISTRY_INSTANCE_DIR>/.metistry/state/capture`
+/// (plan §2.15) — the launchd job `metistry up` renders carries the instance
+/// directory, so the helper needs no path of its own (invariant 7). nil when
+/// neither is set: the helper refuses to start rather than pick a directory.
+public func captureDirectory(_ env: [String: String]) -> String? {
+    if let dir = env["METISTRY_CAPTURE_DIR"]?.trimmingCharacters(in: .whitespaces), !dir.isEmpty { return dir }
+    guard var instance = env["METISTRY_INSTANCE_DIR"]?.trimmingCharacters(in: .whitespaces), !instance.isEmpty else { return nil }
+    while instance.count > 1 && instance.hasSuffix("/") { instance.removeLast() }
+    return instance + "/.metistry/state/capture"
 }
 
 func round2(_ x: Double) -> Double { (x * 100).rounded() / 100 }

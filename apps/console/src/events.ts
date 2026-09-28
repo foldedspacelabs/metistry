@@ -2,7 +2,7 @@
 // server tells the client WHAT changed, as ids; the client refetches the thing
 // itself through the route that already decides who may read it.
 //
-// Four pieces, each small enough to hold in one reading:
+// Five pieces, each small enough to hold in one reading:
 //
 //   * **The notice.** Migration 0035 puts one trigger on each of seven tables
 //     and `pg_notify('metistry_events', {table, op, id})` — never a column
@@ -22,6 +22,12 @@
 //   * **The feed.** One `LISTEN` on a dedicated connection, re-established
 //     with backoff when it drops — and a `resync` published when it comes
 //     back, because notices sent while nobody listened are gone.
+//   * **The snooze poll** (ruling 17, X-17). A snooze ending is `snoozed_until
+//     <= now()` becoming true with no row written, so no trigger ever fires
+//     for it — the one change to `needs_you.changed`'s count that the LISTEN
+//     cannot see. Every `SNOOZE_POLL_MS` the feed re-asks the same count by
+//     hand and says so only when it moved since the last time either this or
+//     a batch asked (`pollWaiting`, sharing `mapBatch`'s `memory.waiting`).
 //
 // **Why ids never bodies.** The stream opens no new read path (invariant 3):
 // every event says what to refetch and the refetch passes the route's own
@@ -61,6 +67,15 @@ export const DEFAULT_MAX_STREAMS = 32;
 export const MAX_BUFFERED_BYTES = 256 * 1024; // limit: fixed — frames are ids, so this is thousands of them; a client that far behind is gone, not slow
 /** What a browser's `EventSource` waits before reconnecting (the SSE `retry:` field). */
 export const RETRY_MS = 3000; // limit: fixed — a browser's own default is about this; the replay makes the wait cost nothing
+/**
+ * How often the feed re-checks the Needs You count on its own (ruling 17,
+ * X-17). A snooze ending writes no row — `snoozed_until` is compared against
+ * `now()`, not set by anything — so nothing notifies Postgres and the trigger
+ * path says nothing. This is the only way that moment is ever seen; every
+ * other way `waiting` changes (raised, decided, put down with `later`) is a
+ * write the trigger already catches, well inside one tick of this.
+ */
+export const SNOOZE_POLL_MS = 30_000; // limit: fixed — a snooze is counted in hours; this is coarse on purpose
 
 /** The reconciler's own component name on its runs rows (apps/reconciler/src/indexer.ts): its reconcile pass is not a sync. */
 export const RECONCILER_COMPONENT = "reconciler";
@@ -420,10 +435,16 @@ export interface MapperMemory {
   finished: Set<number>;
   /** Each connection's last outcome: `connection.health` is for a failure or a recovery, not every call. */
   connectionOk: Map<string, boolean>;
+  /**
+   * The last `waiting` count said, by any means — a batch or the snooze poll
+   * (below). `null` until the first one takes: neither says anything from a
+   * baseline it never had.
+   */
+  waiting: number | null;
 }
 
 export function newMapperMemory(): MapperMemory {
-  return { finished: new Set(), connectionOk: new Map() };
+  return { finished: new Set(), connectionOk: new Map(), waiting: null };
 }
 
 const FINISHED_MEMORY = 4096; // limit: fixed — only to stop a duplicate run.finished from a late second notice; older ids cannot recur
@@ -535,7 +556,10 @@ export function mapBatch(notices: readonly Notice[], facts: BatchFacts, memory: 
         break;
     }
   }
-  if (proposalsMoved && facts.waiting !== null) push({ type: "needs_you.changed", data: { waiting: facts.waiting } });
+  if (proposalsMoved && facts.waiting !== null) {
+    push({ type: "needs_you.changed", data: { waiting: facts.waiting } });
+    memory.waiting = facts.waiting; // the snooze poll's baseline moves with every batch that already said this — never a duplicate right behind one
+  }
 
   // one per (type, subject), the latest payload, in the order each was first said
   const seen = new Map<string, number>();
@@ -689,6 +713,8 @@ export interface FeedOptions {
   coalesceMs?: number;
   /** How often the LISTEN connection is proved alive with `SELECT 1` (a half-open socket delivers nothing and says nothing). */
   pingMs?: number;
+  /** How often the Needs You count is re-checked on its own, for a snooze ending with no row written (default `SNOOZE_POLL_MS`). */
+  snoozePollMs?: number;
   log?: (line: string) => void;
 }
 
@@ -712,11 +738,20 @@ const PING_TIMEOUT_MS = 10_000; // limit: fixed — a SELECT 1 that takes this l
  * notices sent while nobody listened are gone, and a client told so refetches
  * rather than trusting a stream with a hole in it. A batch whose lookups fail
  * is a `resync` for the same reason.
+ *
+ * Beside the LISTEN, a second and much plainer clock: every `snoozePollMs`
+ * the Needs You count is re-asked directly (ruling 17, X-17), because a
+ * snooze ending is a comparison against `now()`, not a write — the one way
+ * `waiting` can change that no trigger ever sees. The first ask only sets
+ * the baseline; only a LATER ask that reads a different count says anything,
+ * so nothing is said before the count actually changes, and a batch that
+ * already said it moves the same baseline, so the two paths never double up.
  */
 export function startEventFeed(o: FeedOptions): EventFeed {
   const log = o.log ?? ((line: string) => console.warn(line));
   const coalesceMs = o.coalesceMs ?? COALESCE_MS;
   const pingMs = o.pingMs ?? 30_000;
+  const snoozePollMs = o.snoozePollMs ?? SNOOZE_POLL_MS;
   const memory = newMapperMemory();
   let pending: Notice[] = [];
   let timer: NodeJS.Timeout | undefined;
@@ -736,6 +771,26 @@ export function startEventFeed(o: FeedOptions): EventFeed {
       log(`events: not streamed — ${err instanceof Error ? err.message : String(err)}`);
     }
   };
+
+  /**
+   * The one thing the LISTEN cannot see: re-ask the pending, un-snoozed count
+   * and say so only when it moved since the last time either clock asked.
+   * `memory.waiting` starting `null` means the very first ask — this one or
+   * a batch's — sets the baseline rather than announcing it as a change.
+   */
+  const pollWaiting = async (): Promise<void> => {
+    try {
+      const { rows } = await o.db.query(WAITING_SQL);
+      const waiting = Number(rows[0]?.waiting ?? 0);
+      if (memory.waiting !== null && waiting !== memory.waiting) publishSafely("needs_you.changed", { waiting });
+      memory.waiting = waiting;
+    } catch (err) {
+      log(`events: could not re-check the Needs You count (${err instanceof Error ? err.message : String(err)})`);
+    }
+  };
+  void pollWaiting();
+  const snoozeTimer = setInterval(() => void pollWaiting(), snoozePollMs);
+  snoozeTimer.unref?.();
 
   const runBatch = async (batch: Notice[]): Promise<void> => {
     try {
@@ -829,6 +884,7 @@ export function startEventFeed(o: FeedOptions): EventFeed {
     flush,
     async stop() {
       stopped = true;
+      clearInterval(snoozeTimer);
       const c = client;
       if (c) {
         try {

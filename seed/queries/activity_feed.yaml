@@ -156,7 +156,9 @@ sql: |
     -- agent was allowed to run within its scope, docs/ops/actions.md) and
     -- `resolved_at_source` (a mirror whose source changed — the PR merged,
     -- the invite answered elsewhere — closed by `resolveAtSource`, T1-8,
-    -- packages/core/src/mirrors.ts) is the owner's hand.
+    -- packages/core/src/mirrors.ts) is the owner's hand. A mirror's receipt
+    -- (`payload.cleared.what`, T4-23 — "You approved it on GitHub") says what
+    -- happened there.
     SELECT
       p.decided_at                                                                        AS ts,
       'proposal_decided'                                                                  AS kind,
@@ -165,7 +167,7 @@ sql: |
       CASE
         WHEN p.decision = 'expired' THEN 'auto-expired — nobody decided it'
         WHEN p.decision = 'auto' THEN concat_ws(' ', 'ran within its autonomy:', p.payload->'action'->>'kind')
-        WHEN p.decision = 'resolved_at_source' THEN 'resolved at its source' || coalesce(' (' || (p.source->>'kind') || ')', '') || ' — nobody decided it here'
+        WHEN p.decision = 'resolved_at_source' THEN 'resolved at its source' || coalesce(' (' || (p.source->>'kind') || ')', '') || coalesce(': ' || (p.payload->'cleared'->>'what'), '') || ' — nobody decided it here'
         ELSE concat_ws(': ', 'you decided ' || p.decision, p.feedback)
       END                                                                                   AS detail,
       'proposals:' || p.id                                                                 AS ref,

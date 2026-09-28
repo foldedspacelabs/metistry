@@ -71,7 +71,7 @@ public struct RequestReading: Sendable, Equatable {
         var body: RequestBodyBlock?
         var partial: PartialNoteModel?
         if shape.bodyKind == .choices {
-            questions = QuestionSteps(payload: payload)
+            questions = QuestionSteps(payload: payload, requestQuestions: shape.questions)
             if questions == nil { partial = PartialNoteModel("the questions did not arrive with this request — Revise to say so, or Decline it") }
         } else {
             (body, partial) = BodyReading.read(shape.bodyKind, row: row, shape: shape)

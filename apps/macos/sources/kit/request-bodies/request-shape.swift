@@ -58,7 +58,7 @@ public extension RequestShape {
         }
     }
 
-    init(type: String, word: String, body: String, primary: Answer? = nil, revise: Answer? = nil, decline: Answer? = nil, grouped: Bool = false, decisions: [String] = []) {
+    init(type: String, word: String, body: String, primary: Answer? = nil, revise: Answer? = nil, decline: Answer? = nil, grouped: Bool = false, decisions: [String] = [], questions: JSONValue? = nil) {
         self.type = type
         self.word = word
         self.body = body
@@ -67,6 +67,7 @@ public extension RequestShape {
         self.decline = decline
         self.grouped = grouped
         self.decisions = decisions
+        self.questions = questions
     }
 
     /// The block this row is drawn with. A body outside the closed set cannot

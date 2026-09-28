@@ -1562,7 +1562,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     // Every row through a route-only named query; both task reads compile
     // their filter with core's `compileTaskFilter`; an order key outside the
     // day is refused (today-routes.ts).
-    if (isTodayRoute(key)) return todayRoutes(req, res, key, url, { db, queries, vault: cfg.vault, audit, timeZone: cfg.timeZone, now: cfg.now });
+    if (isTodayRoute(key)) return todayRoutes(req, res, key, url, { db, queries, vault: cfg.vault, audit, timeZone: cfg.timeZone, now: cfg.now, inbox });
 
     // ----- artifacts + review dispatch (§4.21; owner session only) -----
     if (isArtifactRoute(url.pathname)) return artifactRoutes(req, res, url, artifacts);

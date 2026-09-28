@@ -338,6 +338,7 @@ takes a `since` cursor and answers with the next one.
 | `GET /api/today` | owner | session · local_owner | natural | — | — | served | the day: tasks, work, order, events, brief, standup and plan |
 | `GET /api/vault-tasks` | owner | session · local_owner | natural | — | — | served | vault tasks by filter: Slipping, Owed, Waiting on Others |
 | `PUT /api/today/order` | owner | session · local_owner | natural | — | — | served | the owner's order for the day |
+| `POST /api/today/add` | owner | session · local_owner | natural | — | — | served | Add to Today: capture a work item's task line onto the owner's current day (ruling 11); a second call for the same item returns the first capture |
 | `POST /api/vault-tasks/:task_key/check` | owner | session · local_owner | key | stale | — | served | tick or untick one task line |
 | `POST /api/vault-tasks/:task_key/schedule` | owner | session · local_owner | key | stale | — | served | defer one task line: a `do` date or someday |
 | `POST /api/vault-tasks/:task_key/link` | owner | session · local_owner | key | stale | — | served | add one tracker ref to one task line |
@@ -2571,6 +2572,7 @@ every edge; tier `none` gets nothing (`docs/ops/assistant-tools.md`).
 GET  /api/today?date=                        the day: vault tasks (Today's preset), work, the order, events, and the brief, standup and plan paths
 GET  /api/vault-tasks?where=&order=&limit=&offset=   vault tasks by any filter (`compileTaskFilter`) — All, and its saved views
 PUT  /api/today/order                        {date, task_keys}: the owner's order for the day; a key outside the day is 400
+POST /api/today/add                          {key, date?}: Add to Today — capture a work item's task line onto the day; date must be the owner's current one
 POST /api/vault-tasks/:task_key/check        {checked, seen_text, path?}   Idempotency-Key   409 stale, with the current line
 POST /api/vault-tasks/:task_key/schedule     {do | someday, seen_text, path?}   Idempotency-Key   409 stale, with the current line
 POST /api/vault-tasks/:task_key/link         {ref, seen_text, path?}   Idempotency-Key   409 stale, with the current line
@@ -2885,6 +2887,42 @@ PUT /api/today/order
 - The index is up to one walk behind the notes
   (`METISTRY_RECONCILE_INTERVAL_SEC`), so a line added in Obsidian a moment
   ago is not yet on the day, and its key is refused until it is.
+
+#### Add to Today — `POST /api/today/add` (X-12; ruling 11)
+
+```
+POST /api/today/add
+{"key": "ENG-123"}
+
+200 {"ok": true, "date": "2026-09-28", "id": 41, "path": "Inbox/linear-ENG-123.md",
+     "sha256": "<hex>", "replayed": false, "line": "- [ ] ENG-123 · Renew the SSL cert do 2026-09-28 linear:ENG-123"}
+400 {"error": {"code": "invalid_request", "message": "2026-09-29 is outside Today's window — …"}}
+404 {"error": {"code": "not_found", "message": "ENG-123 is not an issue the Linear sync has seen"}}
+```
+
+Ruling 11 (2026-09-27, `docs/product/decisions-log.md`): Linear issues stay
+in `work` and Needs You, not the Board (T4-24) — this door is the "follow-up"
+route for *Add to Today*, the mirrored `task` request's primary answer
+(`sends: {door: "today"}`; a Linear issue is the one kind of work item wired
+today).
+
+- **`key`** is the same key the mirrored Needs You request names
+  (`payload.key`) — a Linear issue key, `TEAM-123`. The door calls T4-24's
+  own service (`addIssueToToday`, `collectors/linear/today.ts`) unchanged: it
+  captures `- [ ] <title> do <date> linear:<KEY>` into `Inbox/` through the
+  capture service, with the title Linear's own as the sync recorded it —
+  never text the caller sends — and never writes the owner's own notes.
+  `404 not_found` names an issue the sync has not seen.
+- **Idempotent by the issue, not a header.** A second Add to Today for the
+  same key returns the FIRST capture (`replayed: true`, same `id`, `path`,
+  `sha256` and `line`) and writes nothing — the inbox's own unique index
+  decides even when two presses race, so no `Idempotency-Key` is needed.
+- **`date`, left out, is the owner's current day** (`METISTRY_TZ`, never
+  `TZ`, as `GET /api/today` reads it). Given, it must equal that day exactly
+  — **an item added to a day outside Today's window is refused** `400`,
+  naming the window — because Add to Today means today, not an arbitrary day
+  a client might compute wrong; a future or past `date` cannot be captured
+  through this door at all.
 
 ### Calendar and mail — through the connection that can
 

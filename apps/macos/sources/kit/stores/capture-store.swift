@@ -150,9 +150,19 @@ public struct JSONCaptureQueueStore: CaptureQueuePersistence {
         all.removeAll { $0.instanceID == instanceID }
         all.append(contentsOf: items)
         do {
-            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(
+                at: url.deletingLastPathComponent(),
+                withIntermediateDirectories: true,
+                attributes: [.posixPermissions: 0o700]
+            )
             let data = try JSONEncoder().encode(all)
+            // `.atomic` writes to a temp file and renames it in, so the file
+            // that lands takes the umask's permissions, not this call's —
+            // the mode has to be set again, on the file itself, after every
+            // write. It holds raw capture text, so it is owner-only, like the
+            // watchdog's control socket.
             try data.write(to: url, options: .atomic)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
         } catch {
             // Best-effort, like every other write this app makes to its own
             // preferences: a failed write loses at most this change, never

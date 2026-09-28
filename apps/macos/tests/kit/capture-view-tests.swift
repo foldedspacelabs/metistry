@@ -359,6 +359,23 @@ import AppKit
     #expect(store.load() == [untouched], "instance C's entry is exactly what it was")
 }
 
+@MainActor
+@Test func theQueueFileIsOwnerOnlyAfterAWriteAndStaysThatWayAfterARewrite() async throws {
+    let (store, dir) = try tempQueueStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let url = dir.appendingPathComponent("capture-queue.json")
+
+    store.replace(instanceID: "instance-a", with: [PersistedCapture(text: "a note", idempotencyKey: "key-1", instanceID: "instance-a", createdAt: Date())])
+    let firstMode = try #require(FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? Int)
+    #expect(firstMode & 0o777 == 0o600, "it holds raw capture text, owner-only like the watchdog's control socket — mode was \(String(firstMode, radix: 8))")
+
+    // A re-write goes through the same `.atomic` temp-file-and-rename path —
+    // the mode has to be reapplied every time, not just the first.
+    store.replace(instanceID: "instance-a", with: [PersistedCapture(text: "a second note", idempotencyKey: "key-2", instanceID: "instance-a", createdAt: Date())])
+    let secondMode = try #require(FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? Int)
+    #expect(secondMode & 0o777 == 0o600, "a rewrite keeps it owner-only — mode was \(String(secondMode, radix: 8))")
+}
+
 /// A fresh, empty queue file under a scratch directory this test owns —
 /// never the real Application Support (`JSONCaptureQueueStore.defaultURL()`
 /// is never called here). Returns the directory too, so the caller can clean

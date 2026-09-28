@@ -373,6 +373,18 @@ export function unitOf(c: ScheduledCollector): ScheduledUnit {
 }
 
 /**
+ * `meta.display_name` for a routine's runs row (Ruling 25, X-21): the
+ * manifest's own `display_name` where the runner has a unit for it (the
+ * same word Scheduled shows), else a New Routine's `titleOf` fallback —
+ * `unitOf` already resolves both. `activity_feed` has no manifest to read,
+ * only this stamp; a collector needs no display name (Scheduled's `syncs`
+ * section is never a routine's word), so this is empty outside `routine_run`.
+ */
+function routineDisplayNameMeta(c: ScheduledCollector): Record<string, unknown> {
+  return c.runKind === "routine_run" ? { display_name: unitOf(c).displayName } : {};
+}
+
+/**
  * This component's schedule and pause after the overlay: its manifest's
  * default, then its entry — `routines.<name>` for a routine or a collector
  * that presents as one (§2.5), `syncs.<name>` for a sync. An entry the
@@ -879,7 +891,7 @@ export async function tick(db: Db, scheduled: ScheduledCollector[], ctx: Compone
     // ctx, so a late run after the Mac slept still plans and dates from its
     // slot rather than from the moment it woke
     const slotMeta = slot.scheduledFor ? { scheduled_for: slot.scheduledFor.toISOString(), time_zone: slot.timeZone } : undefined;
-    const runId = await startRun(db, { component: c.name, kind: c.runKind, ...(slotMeta ? { meta: slotMeta } : {}) });
+    const runId = await startRun(db, { component: c.name, kind: c.runKind, meta: { ...routineDisplayNameMeta(c), ...slotMeta } });
     const runCtx: ComponentCtx = {
       ...componentCtx(c, ctx, eff, runId),
       ...(slot.scheduledFor ? { scheduledFor: slot.scheduledFor } : {}),
@@ -1489,7 +1501,7 @@ export async function runNow(db: Db, scheduled: readonly ScheduledCollector[], n
   if (rows[0]) return { started: false, reason: "running", message: `${label} is already running (run ${String(rows[0].id)}) — Run Now waits for it to finish rather than start a second` };
   const pre = await preflight(c.requires, { env: opts.env, compute: opts.compute(), fetchFn: opts.fetchFn, ...(opts.budget ? { budget: opts.budget } : {}) });
   if (!pre.ok) return { started: false, reason: "blocked", message: blockedConfigMessage(c.name, c.dir, pre) };
-  const runId = await startRun(db, { component: c.name, kind: c.runKind, meta: { trigger: "run_now" } });
+  const runId = await startRun(db, { component: c.name, kind: c.runKind, meta: { ...routineDisplayNameMeta(c), trigger: "run_now" } });
   const streak = streakFor(await failureStreaks(db), c.name, c.runKind);
   const done = execute(db, c, runId, componentCtx(c, ctx, eff, runId), streak, opts).catch((err: unknown) => {
     console.error(`runner: Run Now of ${c.name} (run ${String(runId)}) could not be recorded:`, err);

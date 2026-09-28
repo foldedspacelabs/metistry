@@ -101,8 +101,8 @@ import Testing
     let items = model.items
     let turn = try #require(items.first { if case .turn = $0 { return true } else { return false } })
     guard case .turn(let head, let turnID, let calls) = turn else { return }
-    #expect(turnID == "turn-izC79FgJ")
-    #expect(calls.map(\.subject) == ["tasks_update", "knowledge_search"])
+    #expect(turnID == "turn-FsBUg1CO")
+    #expect(calls.map(\.subject) == ["knowledge_search", "tasks_update"])
     // the calls are not rows of their own
     #expect(!items.contains { $0.head.kind == "tool" })
     #expect(items.count == model.rows.count - 2)
@@ -119,7 +119,7 @@ import Testing
     console.reset()
     await model.setExpanded(turn, true)
     let asked = try #require(console.calls.first { $0.path.hasPrefix("/api/q/activity_feed") })
-    #expect(query(asked.path)["turn_id"] == "turn-izC79FgJ", "\(asked.path)")
+    #expect(query(asked.path)["turn_id"] == "turn-FsBUg1CO", "\(asked.path)")
     #expect(model.presentation(turn, assistantName: "Aide").spoken.contains("expanded"))
     #expect(!model.calls(of: turn).rows.contains { $0.kind == "turn" }, "the turn is the disclosure, not one of its calls")
 }
@@ -251,6 +251,10 @@ import Testing
     #expect(ActivityTitleCase.subject("Migrate the settings pane to tokens", kind: "work_history") == "Migrate the settings pane to tokens")
     #expect(ActivityTitleCase.subject("ask about the renewal", kind: "capture") == "ask about the renewal")
     #expect(ActivityTitleCase.subject("tasks_update", kind: "tool") == "tasks_update")
+    // X-21 (Ruling 25): `activity_feed` already hands the panel a routine's
+    // display name (`Knowledge Fold`, not `knowledge-fold`) — already Title
+    // Case, so it passes through unchanged rather than being re-cased
+    #expect(ActivityTitleCase.subject("Knowledge Fold", kind: "routine_run") == "Knowledge Fold")
     #expect(!ActivityTitleCase.kinds.contains("work_history"))
 }
 
@@ -343,7 +347,8 @@ import Testing
     #expect(!said.contains { $0.lowercased().hasPrefix("assistant") }, "said: \(said)")
     // <actor>, <subject>, <kind said in words>, <detail>, <time> (§9)
     #expect(said.contains("app, Ask Dana about the fixture format on Thursday., capture, app, new, 2 minutes ago"), "said: \(said)")
-    #expect(said.contains("knowledge-fold, knowledge-fold, routine, failed, routine failed vault bridge unreachable, 2 minutes ago"), "said: \(said)")
+    // X-21 (Ruling 25): the subject is the routine's display name, not its raw component id
+    #expect(said.contains("knowledge-fold, Knowledge Fold, routine, failed, routine failed vault bridge unreachable, 2 minutes ago"), "said: \(said)")
     #expect(said.contains { $0.hasPrefix("Aide, gemma, turn,") && $0.contains("2 tools collapsed") }, "said: \(said)")
     #expect(said.contains("Just now"), "the band header")
     let controls = tree.controlNames
@@ -449,7 +454,7 @@ import Testing
 
 private let utc = TimeZone(identifier: "UTC")!
 /// Two minutes after the recorded feed's `as_of`.
-private let recordedNow = WireTime.date("2026-09-27T03:21:35.215Z")!
+private let recordedNow = WireTime.date("2026-09-28T23:07:56.988Z")!
 
 @MainActor
 private func activityModel(_ console: any ConsoleCallTransport) -> (ActivityModel, ConsoleSession) {
@@ -462,7 +467,7 @@ private func fixtureModel() async throws -> (ActivityModel, FixtureConsole, Cons
     let console = try FixtureConsole.recorded()
     let (model, session) = activityModel(console)
     await model.load()
-    #expect(model.rows.count == 39, "the recorded feed")
+    #expect(model.rows.count == 44, "the recorded feed")
     return (model, console, session)
 }
 

@@ -89,7 +89,15 @@ sql: |
         WHEN r.kind = 'task_op'              THEN 'work:' || (r.meta->>'id')
         WHEN r.kind = 'agent_admin'          THEN r.meta->>'agent'
         WHEN r.kind = 'project_mode'         THEN r.meta->>'project'
-        WHEN r.kind = 'routine_run'          THEN r.component
+        -- the display name, not the raw component id (Ruling 25, X-21): the
+        -- runner stamps `meta.display_name` on every routine_run row from
+        -- the manifest it already has loaded (apps/console/src/runner.ts,
+        -- close-day.ts) — this query has no manifest of its own to read.
+        -- `coalesce` is only for a row written before that stamp existed:
+        -- the same identifier-to-title fallback the console's own `titleOf`
+        -- gives a New Routine with no manifest, so an old row still reads as
+        -- a name instead of a raw slug, never the true configured one
+        WHEN r.kind = 'routine_run'          THEN coalesce(r.meta->>'display_name', initcap(replace(r.component, '-', ' ')))
         ELSE r.kind
       END                                                                                 AS subject,
       CASE

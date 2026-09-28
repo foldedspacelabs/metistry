@@ -1159,8 +1159,11 @@ function relTime(ts) {
 // absent on purpose — their subjects can carry agent- or user-authored text —
 // and so is `work_history`, whose subject is the task's own title (C18): "Migrate
 // the settings pane to tokens" is someone's writing, not a label we composed.
-// `routine_run` is in: its subject is the routine's component name, which the
-// system chose (an identifier like `plan-tomorrow` is left as it is anyway).
+// `routine_run` is in: its subject is the routine's display name
+// (`activity_feed`'s own `meta.display_name` stamp, Ruling 25, X-21) — already
+// Title Case, so the identifier guard below leaves it as it is; a row from
+// before that stamp existed still reads as a name, not a raw slug like
+// `plan-tomorrow`, via the query's own identifier-to-title fallback.
 const TITLE_CASE_KINDS = new Set([
   "collector_run", "proposal_created", "proposal_decided", "project_mode",
   "agent_admin", "brief", "review", "alert", "task_op", "crew_run", "routine_run",

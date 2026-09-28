@@ -1085,7 +1085,7 @@ uniform `403`, never a `404` that would hide the route's existence.
 ```
 GET  /api/agents                      200 {"agents":[{…, "scope":{…}, "permissions":[…]}],"access_requests":[…],"access_ceilings":[…]}
 POST /api/agents                      {id, display_name, kind?, remote?}   201 {"id","token","pending","proposal_id"?}   409 — the id is taken
-PUT  /api/agents/:id/grants           {tier, areas?, queries?}   200 {"ok":true,"grants":{…}}
+PUT  /api/agents/:id/grants           {tier, areas?, queries?, connections?}   200 {"ok":true,"grants":{…}}
 PUT  /api/agents/:id/projects         {projects: [slug, …]}      200 {"ok":true,"projects":[…]}
 PUT  /api/agents/:id/autonomy         {level?, actions?, may_dispatch_to?, accept_from?, max_open_bundles?}
 POST /api/agents/:id/revoke           200 {"revoked":true,"access_requests"?:[…]}
@@ -1240,6 +1240,18 @@ grant of one would be inert. That is a rule about AGENTS, not about the owner,
 whose own `Artifacts/` are `GET /api/artifacts` (ruled 2026-09-19). The bare
 vault (`/`) is admitted for a `kind: internal` row alone, keyed on the ROW's
 kind and never on the request.
+
+`connections` (T4-8b, ruling 5) is a third, independent axis: the connection
+names this credential is lent through the `/mcp` proxy's lazy pair
+(`connections_list`, `connections_call`) — shape-checked as a list of
+connection names and nothing else (whether the name exists, and whether the
+owner has offered it to agents, is the door's question, not this route's).
+Like `queries`, it rides across an access-request approval untouched
+(`widenedGrants`) and is dropped only by a write that omits it — `PUT`
+replaces the whole grant, so a write naming only `tier`/`areas` clears
+`connections` exactly as it clears `queries`. A crew still needs its
+manifest's `uses: [connections]` beside this grant: the grant alone reaches
+nothing (core's `mayToolset` + `mayConnection`).
 
 Since 2026-09-19 an agent can **ask** for an area it was refused
 (`request_access` on `/mcp`, `docs/ops/actions.md`), and approving that ask in

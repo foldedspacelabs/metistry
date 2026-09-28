@@ -1,0 +1,20 @@
+schema: 1
+name: live-capture
+type: bridge
+description: Live capture — app audio through a Core Audio process tap scoped to the apps the owner chose, the owner's microphone, and on-device transcription as it records (plan §2.15, T8)
+transport: http
+port: 7815                # 7810–7814 are taken (apple-fm, eventkit, reconciler, llama-server, egress)
+runs_on: host            # TCC-bound: its own launchd service is its own responsible process (PoC-1)
+requires_tcc: [microphone, audio_capture, screen_recording]   # §2.15: all three; the screen is T8-3's
+discovery: eager         # 2 tools — far under the lazy threshold (PoC-17)
+degrades: absent         # no bridge, no bar, no capture surface (screen 11 §8)
+# `exposes:` is the AGENT-facing surface — what a tool caller may invoke.
+# Starting, stopping and answering a recording are deliberately NOT listed:
+# they are the owner's hand, from the bar, on a separate control credential
+# the bridge refuses to any tool caller (403). Invariant 9 by absence —
+# nothing in this list can start a recording (plan §2.15; screen 11 §9.6).
+exposes:
+  - name: check
+    description: Health — the microphone, audio-capture and screen grants, and whether the on-device transcriber is ready
+  - name: status
+    description: Whether a recording is running — its apps, elapsed time and when it stops; never its audio or transcript

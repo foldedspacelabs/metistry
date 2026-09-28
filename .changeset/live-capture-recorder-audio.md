@@ -1,0 +1,5 @@
+---
+"@foldedspacelabs/metistry-mcp-live-capture": minor
+---
+
+**New package: the live-capture recorder, audio (T8-2a).** A Swift helper (`lc-helper`) and a TypeScript bridge. App audio is recorded through a Core Audio process tap built from the apps the owner chose, and nothing else. The tap description is made in one function that cannot express "everything except", and an empty scope is refused. The owner's microphone is a second stream. Both are transcribed on the Mac as they record, by `SpeechTranscriber` on macOS 26. The helper runs C137's lifecycle on its own clock: a reminder every two hours, a stop at ten, a warning under 10 GB free and a stop under 5 GB, a paused and marked gap across sleep, and a crash that keeps everything up to it. The bridge serves `check` and `status` to its bridge token. Start, stop and Keep Going answer only a separate control token, and the bridge token gets 403 there. `check()` reports the three grants and the transcriber. The signed bundle, usage strings, launchd job and doctor row come with T8-2b.

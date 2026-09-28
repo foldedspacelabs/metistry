@@ -1,0 +1,30 @@
+{
+  "name": "@foldedspacelabs/metistry-mcp-live-capture",
+  "version": "0.14.4",
+  "description": "Metistry live-capture bridge: app audio through a Core Audio process tap scoped to the apps you choose, your microphone, and on-device transcription as it records — over the §4.3 wire contract (HTTP + bearer auth + check()). Recording is started only by the owner's control credential; no tool starts one. Ships a Swift helper; TCC-bound — runs as its own launchd service. Usable standalone.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": { "metistry-mcp-live-capture": "./dist/main.js" },
+  "files": ["dist", "manifest.yaml", "README.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "build:helper": "./scripts/build-helper.sh",
+    "test:helper": "./scripts/test-helper.sh",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "start": "node dist/main.js"
+  },
+  "engines": { "node": ">=22" },
+  "os": ["darwin"],
+  "dependencies": {
+    "@foldedspacelabs/metistry-core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.1",
+    "yaml": "^2.9.1"
+  }
+}

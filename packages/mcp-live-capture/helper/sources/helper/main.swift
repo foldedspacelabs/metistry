@@ -52,12 +52,18 @@ term.setEventHandler {
 term.resume()
 
 func serve(socketPath: String) {
+    var addr = sockaddr_un()
+    let capacity = MemoryLayout.size(ofValue: addr.sun_path)
+    // A longer path would be cut short and bound somewhere nobody connects to.
+    guard socketPath.utf8.count < capacity else {
+        FileHandle.standardError.write(Data("METISTRY_LC_SOCKET is \(socketPath.utf8.count) bytes; a Unix socket path must be under \(capacity)\n".utf8))
+        exit(2)
+    }
     unlink(socketPath)
     let fd = socket(AF_UNIX, SOCK_STREAM, 0)
-    var addr = sockaddr_un()
     addr.sun_family = sa_family_t(AF_UNIX)
     withUnsafeMutablePointer(to: &addr.sun_path) { p in
-        p.withMemoryRebound(to: CChar.self, capacity: 104) { _ = strlcpy($0, socketPath, 104) }
+        p.withMemoryRebound(to: CChar.self, capacity: capacity) { _ = strlcpy($0, socketPath, capacity) }
     }
     let len = socklen_t(MemoryLayout<sockaddr_un>.size)
     guard withUnsafePointer(to: &addr, { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(fd, $0, len) } }) == 0, listen(fd, 8) == 0 else {

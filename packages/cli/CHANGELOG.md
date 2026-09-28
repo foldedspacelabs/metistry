@@ -1,5 +1,15 @@
 # @foldedspacelabs/metistry-cli
 
+## 0.14.2
+
+### Patch Changes
+
+- 5fae5ae: **Doctor describes a stopped schedule with the runner's numbers, once.** The schedule row put doctor's own `METISTRY_RUNNER_MAX_STREAK` beside the runner's skip-row sentence, so one line could say "reached METISTRY_RUNNER_MAX_STREAK (3) … (limit METISTRY_RUNNER_MAX_STREAK = 5)". The count and limit now come from the runner's skip row (its `streak` and `max_streak`), the last error is quoted on its own, and doctor's environment is only the fallback for rows written before that meta existed.
+- 38b481b: **A new owner bearer restarts only the reconciler, and a slow reconciler defers the lock instead of failing the update.** On the owner's 0.14.1 run, `update` minted the owner bearer and then kickstarted the launchd shape's SUPERVISOR agent for it, taking the console, the reconciler and both bridges down mid-update. It now restarts only the reconciler — the one service that reads that bearer — through the supervisor's control socket (`supervisor restart reconciler`, the path `metistry restart reconciler` takes), and never the supervisor's agent. The lock write's wait for a restarted reconciler is now up to 180 s (`METISTRY_RECONCILER_READY_TIMEOUT_MS`), polling from every 0.5 s backing off to every 5 s; a reconciler that still has not answered defers the lock — not tried, the rest of the update still runs, exit 1 with `metistry update` to finish it — where it used to try a write that could only fail and fail the whole update.
+- 7d19782: **One `metistry update` is enough: the rest of a release update runs on the release it installed.** The `metistry` shim runs `current`'s CLI — the release an update is leaving — so migrations, the restart, the owner bearer, the lock and everything after the switch ran the old release's code, and 0.14.1's fixes took three runs to land. Once `current` points at the new release (pack verified, bundled runtime unpacked), `update` now re-executes that release's own CLI with `--continue-from=switched`, the same flags and environment plus `METISTRY_UPDATE_REEXEC=1`, streams its output and exits with its code. The marker refuses a second hand-over; a release whose CLI predates it is not handed to; a new CLI that never starts (told apart from one that started and failed by a handshake file, not the exit code) is survived loudly — the running code finishes, exit 1, with the previous release's `update --rollback` by path. `--rollback`, git checkouts and `--no-reexec` (a debugging switch) finish on the running code. The update onto 0.14.2 is still run by 0.14.1; from 0.14.2 on, one run is enough.
+- @foldedspacelabs/metistry-connections@0.14.2
+  - @foldedspacelabs/metistry-core@0.14.2
+
 ## 0.14.1
 
 ### Patch Changes

@@ -131,7 +131,7 @@ export interface VaultTaskDeps {
   audit: Audit;
   replays: ReplayCache;
   /** The instant `done <date>` is taken from, in `METISTRY_TZ` (or `timeZone`). Injectable for tests. */
-  now?: () => Date;
+  now?: (() => Date) | undefined;
   timeZone?: string | undefined;
 }
 

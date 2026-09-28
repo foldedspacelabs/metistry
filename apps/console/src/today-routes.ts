@@ -110,7 +110,7 @@ export interface TodayDeps {
   vault?: VaultClient | undefined;
   audit: Audit;
   /** The instant "today" is taken from. Injectable for tests. */
-  now?: () => Date;
+  now?: (() => Date) | undefined;
   /** `METISTRY_TZ` (core `configuredTimeZone`) — never `TZ`. Null or absent → UTC. */
   timeZone?: string | null | undefined;
 }

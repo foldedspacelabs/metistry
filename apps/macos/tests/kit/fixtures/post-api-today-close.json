@@ -6,7 +6,7 @@
     "method": "POST",
     "path": "/api/today/close",
     "body": {
-      "day": "2026-09-27",
+      "day": "2026-09-28",
       "line": "Store interface frozen; recorder next."
     },
     "idempotency_key": null
@@ -14,10 +14,10 @@
   "status": 200,
   "body": {
     "ok": true,
-    "day": "2026-09-27",
-    "path": "Journal/2026-09-27.md",
+    "day": "2026-09-28",
+    "path": "Journal/2026-09-28.md",
     "appended": false,
-    "closed_at": "2026-09-27T04:18:17.665Z",
+    "closed_at": "2026-09-28T12:00:00.000Z",
     "done": 1,
     "moved": {
       "2026-09-30": 1

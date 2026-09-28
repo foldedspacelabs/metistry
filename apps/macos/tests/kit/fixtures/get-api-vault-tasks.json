@@ -16,7 +16,7 @@
         "path": "Journal/2026-09-28.md",
         "task_key": "mt-7f3k2a",
         "anchor": "mt-7f3k2a",
-        "line_no": 3,
+        "line_no": 5,
         "text": "Send Dana the fixture format",
         "text_norm": "send dana the fixture format",
         "checked": false,
@@ -49,8 +49,8 @@
         "parse_warning": null,
         "parsed_on": "2026-09-28",
         "first_seen_on": "2026-09-25",
-        "last_seen_at": "2026-09-27T18:43:42.022Z",
-        "age_days": 2,
+        "last_seen_at": "2026-09-28T05:29:56.057Z",
+        "age_days": 3,
         "carried_days": null,
         "row_flags": [
           "blocking_agent",
@@ -59,6 +59,6 @@
       }
     ],
     "more": false,
-    "as_of": "2026-09-27T18:43:42.301Z"
+    "as_of": "2026-09-28T12:00:00.000Z"
   }
 }

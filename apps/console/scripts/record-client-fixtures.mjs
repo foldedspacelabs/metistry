@@ -41,7 +41,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import pg from "pg";
-import { CLIENT_API, INSTANCE_LAYOUT, InstanceSecrets, SECRET_USE_META_KEY, calendarDate, memoryKeychain, mintToken, resolveInstanceLayout, writeNoteSection } from "@foldedspacelabs/metistry-core";
+import { CLIENT_API, INSTANCE_LAYOUT, InstanceSecrets, SECRET_USE_META_KEY, memoryKeychain, mintToken, resolveInstanceLayout, writeNoteSection } from "@foldedspacelabs/metistry-core";
 import { readInstanceId } from "@foldedspacelabs/metistry-cli";
 import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
 import { QueryStore } from "@foldedspacelabs/metistry-queries";
@@ -77,6 +77,17 @@ for (const a of argv) {
     process.exit(2);
   }
 }
+
+// ---- the recording's clock ----------------------------------------------------------
+//
+// Every date a fixture carries is 2026-09-28: the seeded rows, the note paths,
+// the requests. The console's day-aware doors (Today, Close the Day, Tick,
+// Defer) are handed this instant rather than the wall clock, so a recording —
+// and `--check` in CI — says the same thing on any day it runs. A wall-clock
+// "today" here once overwrote the task note on the one date the two matched.
+const RECORDING_NOW = new Date("2026-09-28T12:00:00.000Z");
+const RECORDING_DAY = "2026-09-28"; // RECORDING_NOW's day in UTC, the zone the doors count days in here
+process.env.TZ = "UTC"; // the doors fall back to TZ for their zone; the recording's is UTC, whatever this shell's is
 
 // ---- the scratch database ---------------------------------------------------------
 
@@ -225,20 +236,22 @@ const CONFLICT_COPY = "Projects/Metistry/Roadmap.sync-conflict-20260928-091200-7
 const CONFLICT_THEIRS = Buffer.from("# Roadmap\n\nShip the stores first, then the interface.\n");
 const sha256Of = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
-// a day note with tasks on it, for the Tick door (T2-4) and the Defer door (T2-5) to write — one each, so neither sees the other's edit
-const DAY = "Journal/2026-09-28.md";
+// today's note, from the seeded Templates/Daily.md shape, markers and all,
+// with tasks on it: for the Tick door (T2-4) and the Defer door (T2-5) to
+// write — one each, so neither sees the other's edit — and for Close the Day
+// (T2-8) to close
+const DAY = `Journal/${RECORDING_DAY}.md`;
 const TASK_TEXT = "Send Dana the fixture format";
 const DEFER_TEXT = "Draft the Q4 plan";
-await vault.write(DAY, Buffer.from(`# 2026-09-28\n\n- [ ] ${TASK_TEXT} due 2026-09-28 p2 size s ^mt-7f3k2a\n- [ ] Book the room for Thursday\n- [ ] ${DEFER_TEXT} due 2026-10-01 p1 ^mt-4q8r2d\n`), { principal: "user", message: "fixture" });
+await vault.write(DAY, Buffer.from(`# ${RECORDING_DAY}\n\n## Today\n\n- [ ] ${TASK_TEXT} due 2026-09-28 p2 size s ^mt-7f3k2a\n- [ ] Book the room for Thursday\n- [ ] ${DEFER_TEXT} due 2026-10-01 p1 ^mt-4q8r2d\n\n## Today · Metistry\n\n<!-- metistry:day -->\n<!-- /metistry:day -->\n\n## Notes\n`), { principal: "user", message: "fixture" });
 // the day's three machine-written files (T2-7): what GET /api/today names by path
 for (const dir of ["Brief", "Standup", "Plan"]) {
-  await vault.write(`Journal/${dir}/2026-09-28.md`, Buffer.from(`# ${dir} — 28 September\n`), { principal: "user", message: "fixture" });
+  await vault.write(`Journal/${dir}/${RECORDING_DAY}.md`, Buffer.from(`# ${dir} — 28 September\n`), { principal: "user", message: "fixture" });
 }
 
 // the reconciler's section operation (T2-6), in memory, as the bridge runs it —
-// core's `writeNoteSection` — for Close the Day (T2-8); and today's note, from
-// the seeded Templates/Daily.md shape, markers and all. Close the Day closes
-// TODAY, so this one note is dated by the recording's clock (UTC here).
+// core's `writeNoteSection` — for Close the Day (T2-8), which closes TODAY:
+// the recording's day, and the note above.
 vault.section = async (path, marker, body, principal, outer) => {
   const cur = await vault.read(path);
   if (!cur) throw new VaultError("not_found", `${path} does not exist`);
@@ -247,8 +260,6 @@ vault.section = async (path, marker, body, principal, outer) => {
   const w = await vault.write(path, out.content, { principal, message: `update the ${marker} section of ${path}` }, cur.sha256);
   return { path, section: marker, sha256: w.sha256, bytes: w.bytes, outer_sha256: out.outerSha256, appended: out.appended };
 };
-const CLOSE_DAY = calendarDate(new Date(), process.env.METISTRY_TZ || "UTC");
-await vault.write(`Journal/${CLOSE_DAY}.md`, Buffer.from(`# ${CLOSE_DAY}\n\n## Today\n\n## Today · Metistry\n\n<!-- metistry:day -->\n<!-- /metistry:day -->\n\n## Notes\n`), { principal: "user", message: "fixture" });
 // Scheduled (T3-3): the product's own routines and collectors, loaded as the
 // console loads them — their code swapped for a no-op, so Run Now's run is the
 // real door and the real runner around a component that touches nothing — and
@@ -310,6 +321,8 @@ const server = makeServer(pool, queries, {
   vault,
   // Close the Day's plan-tomorrow, enqueued — a pass that does nothing here: the recording is of the door
   planTomorrow: new RoutineTrigger("plan-tomorrow", async () => {}),
+  // the recording's clock, not the wall's: see RECORDING_NOW
+  now: () => new Date(RECORDING_NOW),
   identity: await loadPublicIdentity(layout.path("identity")),
   crews,
   assistantDefinition: () =>
@@ -422,7 +435,7 @@ const ids = {};
 const one = async (sql, params = []) => (await pool.query(sql, params)).rows[0];
 
 await pool.query(`INSERT INTO projects (id, title, area, mode) VALUES ($1, 'Metistry', 'Projects/Metistry', 'review') ON CONFLICT (id) DO NOTHING`, [P]);
-ids.task = Number((await one(`INSERT INTO work (title, project, kind, status, created_by, due) VALUES ('Freeze the store interface', $1, 'task', 'open', 'user', current_date + 1) RETURNING id`, [P])).id);
+ids.task = Number((await one(`INSERT INTO work (title, project, kind, status, created_by, due) VALUES ('Freeze the store interface', $1, 'task', 'open', 'user', $2::date) RETURNING id`, [P, RECORDING_DAY])).id);
 ids.dispatchTask = Number((await one(`INSERT INTO work (title, project, kind, status, created_by) VALUES ('Open the release checklist', $1, 'task', 'open', 'user') RETURNING id`, [P])).id);
 // a card its creator described (T1-1, C85) — the board's `description`, set at create
 ids.roomTask = Number((await one(`INSERT INTO work (title, project, kind, status, created_by, description) VALUES ('Decide the fixture format', $1, 'task', 'in_progress', 'user', 'One JSON per route, recorded from a scratch console; the views are built against them.') RETURNING id`, [P])).id);
@@ -486,7 +499,7 @@ await pool.query(`INSERT INTO knowledge_links (from_path, to_path, kind) VALUES 
 // the owner's three knowledge reads (T1-6): last night's fold naming the roadmap (and a
 // draft, which the fold route drops), one draft waiting on the owner, and an area whose
 // README carries the one-line description the areas list shows
-const FOLD = "Journal/Fold/2026-09-28.md";
+const FOLD = `Journal/Fold/${RECORDING_DAY}.md`;
 await pool.query(
   `INSERT INTO knowledge_files (path, title, description, draft, status, mtime, indexed_at) VALUES
      ($1, 'Fold — 28 September', NULL, false, 'clean', '2026-09-28T01:00:00Z', now()),
@@ -503,13 +516,13 @@ await pool.query(
 // the walk's row for that task: the index a tick finds its note through (seed/queries/vault_task_by_key.yaml)
 await pool.query(
   `INSERT INTO vault_tasks (path, task_key, anchor, line_no, text, text_norm, checked, due, priority, size, project, area, parsed_on, first_seen_on, last_seen_at)
-   VALUES ($1, 'mt-7f3k2a', 'mt-7f3k2a', 3, $2, lower($2), false, '2026-09-28', 2, 's', $3, 'Projects/Metistry', '2026-09-28', '2026-09-25', now())
+   VALUES ($1, 'mt-7f3k2a', 'mt-7f3k2a', 5, $2, lower($2), false, '2026-09-28', 2, 's', $3, 'Projects/Metistry', '2026-09-28', '2026-09-25', now())
    ON CONFLICT (path, task_key) DO UPDATE SET checked = false`,
   [DAY, TASK_TEXT, P],
 );
 await pool.query(
   `INSERT INTO vault_tasks (path, task_key, anchor, line_no, text, text_norm, checked, due, priority, project, area, parsed_on, first_seen_on, last_seen_at)
-   VALUES ($1, 'mt-4q8r2d', 'mt-4q8r2d', 5, $2, lower($2), false, '2026-10-01', 1, $3, 'Projects/Metistry', '2026-09-28', '2026-09-25', now())
+   VALUES ($1, 'mt-4q8r2d', 'mt-4q8r2d', 7, $2, lower($2), false, '2026-10-01', 1, $3, 'Projects/Metistry', '2026-09-28', '2026-09-25', now())
    ON CONFLICT (path, task_key) DO UPDATE SET checked = false, scheduled_for = NULL`,
   [DAY, DEFER_TEXT, P],
 );
@@ -535,7 +548,8 @@ ids.blockedTask = Number((await one(
   `INSERT INTO work (id, title, project, kind, status, created_by, meta) OVERRIDING SYSTEM VALUE VALUES (41, 'Pick the fixture redaction', $1, 'task', 'blocked', 'user', jsonb_build_object('blocked_by', $2::text)) RETURNING id`,
   [P, `vault:${DAY}#^mt-7f3k2a`],
 )).id);
-ids.reportedTask = Number((await one(`INSERT INTO work (id, title, project, kind, status, created_by, closed_at) OVERRIDING SYSTEM VALUE VALUES (42, 'Measure the recorder run time', $1, 'task', 'closed', 'user', now()) RETURNING id`, [P])).id);
+// closed the evening before the recording's day, so Today (which lists what closed on its day) leaves it out
+ids.reportedTask = Number((await one(`INSERT INTO work (id, title, project, kind, status, created_by, closed_at) OVERRIDING SYSTEM VALUE VALUES (42, 'Measure the recorder run time', $1, 'task', 'closed', 'user', $2::timestamptz) RETURNING id`, [P, "2026-09-27T20:00:00Z"])).id);
 await pool.query(`INSERT INTO runs (component, kind, ok, started_at, finished_at, meta) VALUES ('crew:fixtures', 'crew_run', true, now(), now(), jsonb_build_object('work_id', $1::bigint, 'reports', 1))`, [ids.reportedTask]);
 
 // the session archive (T3-9): one session the fold has not read yet, one it
@@ -636,7 +650,7 @@ const REQUESTS = [
   ["GET /api/knowledge/page", () => ({ path: `/api/knowledge/page?path=${encodeURIComponent(PAGE)}` })],
   ["GET /api/knowledge/pages", () => ({ path: "/api/knowledge/pages?prefix=Projects" })],
   ["GET /api/knowledge/links", () => ({ path: `/api/knowledge/links?path=${encodeURIComponent(PAGE)}` })],
-  ["GET /api/knowledge/fold", () => ({ path: "/api/knowledge/fold?date=2026-09-28" })],
+  ["GET /api/knowledge/fold", () => ({ path: `/api/knowledge/fold?date=${RECORDING_DAY}` })],
   ["GET /api/knowledge/drafts", () => ({ path: "/api/knowledge/drafts?limit=20" })],
   ["GET /api/knowledge/areas", () => ({ path: "/api/knowledge/areas" })],
   ["GET /api/knowledge/history", () => ({ path: `/api/knowledge/history?path=${encodeURIComponent(PAGE)}` })],
@@ -703,13 +717,13 @@ const REQUESTS = [
   ["POST /api/vault/rollback", () => ({ path: "/api/vault/rollback", body: { commit: "9ab8c7d6" } })],
 
   // Today (T2-7): the owner's drag order — the day's task and the Blocked card waiting on it — then the day, and All's filter
-  ["PUT /api/today/order", () => ({ path: "/api/today/order", body: { date: "2026-09-28", task_keys: ["mt-7f3k2a", `work:${ids.blockedTask}`] } })],
-  ["GET /api/today", () => ({ path: "/api/today?date=2026-09-28" })],
-  ["GET /api/vault-tasks", () => ({ path: `/api/vault-tasks?where=${encodeURIComponent("due <= 2026-09-28")}` })],
+  ["PUT /api/today/order", () => ({ path: "/api/today/order", body: { date: RECORDING_DAY, task_keys: ["mt-7f3k2a", `work:${ids.blockedTask}`] } })],
+  ["GET /api/today", () => ({ path: `/api/today?date=${RECORDING_DAY}` })],
+  ["GET /api/vault-tasks", () => ({ path: `/api/vault-tasks?where=${encodeURIComponent(`due <= ${RECORDING_DAY}`)}` })],
 
   ["POST /api/vault-tasks/:task_key/check", () => ({ path: "/api/vault-tasks/mt-7f3k2a/check", body: { checked: true, seen_text: TASK_TEXT }, key: "tick-0928-0001" })],
   ["POST /api/vault-tasks/:task_key/schedule", () => ({ path: "/api/vault-tasks/mt-4q8r2d/schedule", body: { do: "2026-09-30", seen_text: DEFER_TEXT }, key: "defer-0928-0001" })],
-  ["POST /api/today/close", () => ({ path: "/api/today/close", body: { day: CLOSE_DAY, line: "Store interface frozen; recorder next." } })],
+  ["POST /api/today/close", () => ({ path: "/api/today/close", body: { day: RECORDING_DAY, line: "Store interface frozen; recorder next." } })],
   // Open notes on the day's standup (T2-11): the first call, which writes the note
   ["POST /api/meetings/:event_id/note", () => ({ path: "/api/meetings/evt-standup-0928/note", body: {} })],
 

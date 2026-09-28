@@ -33,7 +33,9 @@
 //     process on the Mac can read another's argv; a secret goes in `env:`,
 //     given to that command only;
 //   * a `{{ secret.x }}` in a path reach, which has nowhere to send one;
-//   * an Authorization header beside an auth shortcut that writes one.
+//   * an Authorization header beside an auth shortcut that writes one;
+//   * and what a builtin provider refuses for its own connections
+//     (`builtinIssues` — CalDAV's, T4-13).
 
 import { lstat, readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -48,6 +50,7 @@ import {
   type Registry,
   type RegistryUnit,
 } from "@foldedspacelabs/metistry-core";
+import { CALDAV_MODULE, caldavConnectionIssues } from "./caldav.js";
 
 /** `github.yaml` → `github`. A connection's file is named for it, like a registry unit's directory. */
 export const CONNECTION_FILE_RE = /^([a-z][a-z0-9-]*)\.ya?ml$/;
@@ -141,6 +144,19 @@ export function connectionFileRules(c: ConnectionFile): string[] {
   return issues;
 }
 
+/**
+ * The rules a builtin provider adds for its own connections — refused at
+ * the file, before anything is dialled or written (CalDAV: a Google address,
+ * a known service pointed elsewhere, a sign-in that is not an app password;
+ * `caldav.ts`).
+ */
+function builtinIssues(c: ConnectionFile, unit: RegistryUnit<ConnectionTypeManifest>): string[] {
+  const impl = unit.manifest.implementation;
+  if (impl.kind !== "builtin") return [];
+  if (impl.module === CALDAV_MODULE) return caldavConnectionIssues(c, unit.name);
+  return [];
+}
+
 /** One validated input, judged. Pure: the registry is the caller's, already loaded. */
 export function judgeConnection(name: string, path: string, input: unknown, types: Registry<ConnectionTypeManifest> | undefined): ConnectionEntry {
   const base = { name, path, connection: null, provider: null } as const;
@@ -162,7 +178,7 @@ export function judgeConnection(name: string, path: string, input: unknown, type
       issues: [...connectionIssues(c, undefined).map((s) => `${s} (\`metistry extensions list\` shows the connection types this instance has)`)],
     };
   }
-  const issues = connectionIssues(c, unit.manifest);
+  const issues = [...connectionIssues(c, unit.manifest), ...builtinIssues(c, unit)];
   return { ...base, connection: c, provider: unit, status: issues.length > 0 ? "failed" : "ok", issues };
 }
 

@@ -330,6 +330,23 @@ describe("a connection joined to its connection type", () => {
     expect(connectionIssues(c, type())).toEqual(['tools.delete_calendar: google-calendar has no tool "delete_calendar"']);
   });
 
+  it("**basic sign-in only where the connection type declares it** (T4-13): refused on any other type and on a custom connection; accepted by CalDAV", () => {
+    const shape = { schema: 1, type: "connection-type", transports: ["http"], implementation: { kind: "builtin" } };
+    const caldav = asType({ ...shape, name: "caldav", provides: "calendar", capabilities: ["read", "rsvp"], auth: ["basic"], implementation: { kind: "builtin", module: "caldav" } });
+    const linear = asType({ ...shape, name: "linear", provides: "tracker", capabilities: ["read"], implementation: { kind: "builtin", module: "linear" } });
+    const basic = { scheme: "basic", username: "me@example.com", secret: "app_password" };
+    const file = (provider: string, type: string, auth: unknown) => conn({ name: "x", type, provider, reach: { http: { url: "https://dav.example.com/", auth } }, secrets: ["app_password"] });
+    expect(connectionIssues(file("caldav", "calendar", basic), caldav)).toEqual([]);
+    expect(connectionIssues(file("linear", "tracker", basic), linear)).toEqual(["reach.http.auth: linear does not accept basic sign-in — only a connection type that declares it (auth: [basic]) does"]);
+    expect(connectionIssues(file("custom", "mcp", basic), undefined)).toEqual([
+      "reach.http.auth: basic sign-in is accepted only by a connection type that declares it (auth: [basic] — CalDAV's), not by a custom connection",
+    ]);
+    // a type that lists its schemes is held to exactly those
+    expect(connectionIssues(file("caldav", "calendar", { scheme: "bearer", secret: "app_password" }), caldav)).toEqual(["reach.http.auth: caldav signs in with basic, not bearer"]);
+    // and a type that lists none still takes every other scheme
+    expect(connectionIssues(file("linear", "tracker", { scheme: "api_key", header: "Authorization", secret: "app_password" }), linear)).toEqual([]);
+  });
+
   it("refuses text in a secret field — its value is a reference, never the secret", () => {
     const caldav = asType({
       schema: 1,

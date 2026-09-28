@@ -1656,7 +1656,8 @@ leaving `{{ secret.x }}` for the egress fill.
 
 M13 (plan §2.2, §2.6): servers Metistry reaches for you, one file each in
 `.metistry/connections/<name>.yaml` (`docs/ops/connections.md` is the whole
-contract). This release dials **MCP servers**, by URL or by command.
+contract). This release dials **MCP servers**, by URL or by command; a
+calendar or tracker connection is read by its sync (`--no-discover`).
 
 ```sh
 metistry connections add github --type mcp \
@@ -1664,6 +1665,9 @@ metistry connections add github --type mcp \
     -- npx -y @modelcontextprotocol/server-github         # dial once, list what it offers, write it
 metistry connections add linear --type mcp --url https://mcp.linear.app/mcp \
     --auth bearer --secret linear_key                      # an HTTP server; the key by name
+metistry connections add icloud --type calendar --provider icloud-calendar \
+    --url https://caldav.icloud.com/ --auth basic --username you@icloud.com \
+    --secret icloud_app_password --no-discover             # CalDAV: an app password, by name
 metistry connections list [--json]                        # every connection: status, reach, tools, used by
 metistry connections show github [--json]                 # one, in full
 metistry connections policy github                        # the tool table, by group
@@ -1690,9 +1694,17 @@ before anything is written and without repeating the value:
 - a `{{ secret.x }}` in a **URL** or its query (a URL lands in logs), on a
   **command line** or in a working directory (every process on the Mac can read
   another's argv) — a secret goes in a header or in `env:`;
-- `--auth basic` and `--auth oauth` (they arrive with T4-10); this release sends
-  none, a bearer (`--auth bearer --secret <name>`) or an API-key header (`--auth
-  api_key --auth-header <Header> --secret <name>`);
+- `--auth oauth` (it arrives with T4-10); this release sends none, a bearer
+  (`--auth bearer --secret <name>`), an API-key header (`--auth api_key
+  --auth-header <Header> --secret <name>`) or Basic sign-in with an app password
+  (`--auth basic --username <user> --secret <name>` — the username is written,
+  the password is the secret, filled at the egress door; a username with a colon
+  is refused). `--auth basic` is accepted only by a connection type that
+  declares it (`auth: [basic]` — the CalDAV calendars, T4-13); any other type,
+  or a custom connection, is refused;
+- a Google address for a CalDAV calendar — *Google needs sign-in with Google*
+  (its CalDAV takes OAuth only), and a known service (`icloud-calendar`,
+  `fastmail-calendar`) pointed anywhere but its own server;
 - a name already taken; a provider (`--provider`) that no connection type
   installed provides.
 

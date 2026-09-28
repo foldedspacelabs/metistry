@@ -5,7 +5,9 @@
 // pooled MCP client (`pool.ts`, `plan.ts`) and its check (`check.ts`); what a
 // sync opens to read a builtin provider's connection (`sync.ts`), the
 // `linear` provider itself (`linear.ts`, T4-24) and the `ics` provider — an
-// iCalendar feed, parsed and expanded (`ics.ts`, T4-12).
+// iCalendar feed, parsed and expanded (`ics.ts`, T4-12) — and the `caldav`
+// provider: read, write own and reply over RFC 6638 (`caldav.ts`,
+// `dav-xml.ts`, T4-13).
 // docs/ops/connections.md is the same contract in words.
 
 export { CONNECTION_REFUSAL_CODES, ConnectionRefused, type ConnectionRefusalCode } from "./errors.js";
@@ -116,3 +118,47 @@ export {
   type IcsTime,
   type Rule,
 } from "./ics.js";
+export {
+  CALDAV_ERROR_CODES,
+  CALDAV_KNOWN_SERVICES,
+  CALDAV_MODULE,
+  CALDAV_SYNC,
+  CaldavError,
+  GOOGLE_CALDAV_REFUSAL,
+  RSVP_RESPONSES,
+  caldavCalendars,
+  caldavConnectionIssues,
+  calendarAddress,
+  changeOwnEvent,
+  createOwnEvent,
+  deleteOwnEvent,
+  discoverCaldav,
+  findCaldavEvent,
+  foldLine,
+  markOwner,
+  newEventUid,
+  planOwnChange,
+  planReply,
+  previewChangeEvent,
+  previewCreateEvent,
+  previewDeleteEvent,
+  previewReply,
+  readCaldav,
+  renderOwnEvent,
+  respondToInvitation,
+  type CaldavAccount,
+  type CaldavCalendar,
+  type CaldavErrorCode,
+  type CaldavOccurrence,
+  type CaldavRead,
+  type CaldavResource,
+  type LineChange,
+  type OwnEventChange,
+  type OwnEventDraft,
+  type OwnPreview,
+  type ReplyPlan,
+  type ReplyPreview,
+  type RsvpResponse,
+  type WriteResult,
+} from "./caldav.js";
+export { CALDAV_NS, DAV_NS, DavXmlError, parseMultistatus, parseXml, type DavResponse, type XmlElement } from "./dav-xml.js";

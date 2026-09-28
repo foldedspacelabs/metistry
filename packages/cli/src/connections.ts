@@ -235,14 +235,15 @@ export function parsePair(raw: string, what: string): [string, string] {
   return [raw.slice(0, eq), raw.slice(eq + 1)];
 }
 
-/** How an HTTP connection signs in: `--auth none|bearer|api_key` with `--secret` (and `--auth-header` for an API key). basic and oauth arrive with T4-10. */
+/** How an HTTP connection signs in: `--auth none|bearer|api_key|basic` with `--secret` (and `--auth-header` for an API key, `--username` for basic — an app password, T4-13). oauth arrives with T4-10. */
 export interface AuthFlags {
   auth?: string | undefined;
   secret?: string | undefined;
   authHeader?: string | undefined;
+  username?: string | undefined;
 }
 
-function authOf(flags: AuthFlags): { scheme: string; secret?: string; header?: string } | undefined {
+function authOf(flags: AuthFlags): { scheme: string; secret?: string; header?: string; username?: string } | undefined {
   if (flags.auth === undefined) return undefined;
   switch (flags.auth) {
     case "none":
@@ -255,10 +256,30 @@ function authOf(flags: AuthFlags): { scheme: string; secret?: string; header?: s
       if (!flags.secret || !flags.authHeader) throw new StepFailed("--auth api_key needs --auth-header <Header-Name> and --secret <name>");
       return { scheme: "api_key", header: flags.authHeader, secret: flags.secret };
     case "basic":
+      // an app password (CalDAV, T4-13): the username is not secret and is written; the password is a secret, by name
+      if (!flags.secret || !flags.username) throw new StepFailed("--auth basic needs --username <user> and --secret <name> — the secret holds the (app) password, never the command line");
+      if (flags.username.includes(":")) throw new StepFailed("--username cannot contain a colon — Basic sign-in splits the pair there (RFC 7617)");
+      return { scheme: "basic", username: flags.username, secret: flags.secret };
     case "oauth":
-      throw new StepFailed(`--auth ${flags.auth}: ${flags.auth} sign-in arrives with T4-10 — this release sends none, a bearer, or an API key header`);
+      throw new StepFailed(`--auth ${flags.auth}: ${flags.auth} sign-in arrives with T4-10 — this release sends none, a bearer, an API key header, or basic with an app password`);
     default:
-      throw new StepFailed(`--auth takes none, bearer or api_key, not ${JSON.stringify(flags.auth)}`);
+      throw new StepFailed(`--auth takes none, bearer, api_key or basic, not ${JSON.stringify(flags.auth)}`);
+  }
+}
+
+/**
+ * `--auth basic` only for a provider whose connection type declares it
+ * (`auth: [basic]` — CalDAV's app password, T4-13). Refused here, before
+ * anything is judged or written; core's `connectionIssues` refuses a
+ * hand-written file the same way.
+ */
+function basicAllowed(auth: { scheme: string } | undefined, provider: string, catalog: { types: InstanceCatalog["types"] }): void {
+  if (auth?.scheme !== "basic") return;
+  const declared = provider === CUSTOM_PROVIDER ? undefined : catalog.types.get(provider)?.manifest.auth;
+  if (!declared?.includes("basic")) {
+    throw new StepFailed(
+      `--auth basic is accepted only by a connection type that declares it (a CalDAV calendar: --provider caldav, icloud-calendar or fastmail-calendar) — ${provider === CUSTOM_PROVIDER ? "a custom connection" : provider} does not`,
+    );
   }
 }
 
@@ -299,6 +320,7 @@ export async function connectionsAdd(spec: AddSpec, opts: ConnectionsOptions): P
   }
   const provider = spec.provider ?? CUSTOM_PROVIDER;
   const auth = authOf(spec);
+  basicAllowed(auth, provider, catalog);
   const env = Object.fromEntries((spec.env ?? []).map((p) => parsePair(p, "--env")));
   const headers = Object.fromEntries((spec.headers ?? []).map((p) => parsePair(p, "--header")));
   if (spec.url === undefined && (auth || Object.keys(headers).length)) throw new StepFailed("--auth and --header are for a connection reached by --url");
@@ -454,6 +476,7 @@ export async function connectionsSet(name: string | undefined, spec: SetSpec, op
   const auth = authOf(spec);
   if (auth) {
     if (!isHttp) throw new StepFailed("--auth is for a connection reached by --url");
+    basicAllowed(auth, String(doc.getIn(["provider"]) ?? CUSTOM_PROVIDER), e.catalog);
     doc.setIn(["reach", "http", "auth"], doc.createNode(auth));
     changed.push(`auth ${auth.scheme}`);
   }

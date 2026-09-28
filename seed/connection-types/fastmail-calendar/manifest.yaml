@@ -1,0 +1,30 @@
+# Fastmail Calendar — a known service over the CalDAV provider (plan §2.6,
+# §4 Q7; T4-13). Sign in with an app password made in Fastmail's settings
+# (app passwords) with calendar (CalDAV) access — never the account's own
+# password — and the account's email as the username:
+#
+#   metistry secrets set fastmail_app_password          (the value on stdin)
+#   metistry secrets hosts fastmail_app_password caldav.fastmail.com
+#   metistry secrets grant fastmail_app_password connection:fastmail on
+#   metistry connections add fastmail --type calendar --provider fastmail-calendar \
+#     --url https://caldav.fastmail.com/dav/ \
+#     --auth basic --username you@fastmail.com --secret fastmail_app_password --no-discover
+#   metistry secrets sync --to env                      (then restart the console)
+#
+# A connection of this type anywhere but caldav.fastmail.com is refused.
+schema: 1
+name: fastmail-calendar
+type: connection-type
+description: Fastmail Calendar over CalDAV with an app password — your events on Today, and replies to invitations from Metistry.
+provides: calendar
+transports: [http]
+auth: [basic]                    # an app password — the only sign-in a CalDAV connection takes
+fields:
+  - key: server
+    kind: url
+    label: Server
+    required: false
+    default: https://caldav.fastmail.com/dav/
+capabilities: [read, write_own, rsvp]
+sync: caldav-calendar
+implementation: { kind: builtin, module: caldav }

@@ -678,16 +678,22 @@ loudly).
 
 ```
 predicate := clause (("and" | "or") clause)*
-clause    := field op value | flag
+clause    := field op value | flag | "not" flag
 field     := due | do | start | done | priority | size | type
-           | assigned | project | area | source | status
+           | assigned | project | area | source | status | carried
 op        := <= | < | = | >= | >
 value     := a date literal | today | tomorrow | yesterday | +Nd | p1..p4
-           | s|m|l | a slug | [[A Page]]
+           | s|m|l | a slug | [[A Page]] | a whole number of days (carried)
 flag      := overdue | unscheduled | waiting | recurring | carried
-           | blocking_agent | assigned_to_me
+           | blocking_agent | assigned_to_me | someday | names_person
 order     := a comma list of fields, each optionally `desc`
 ```
+
+*Ruling 14 (2026-09-27, X-14)* added the carry count (`carried >= 3` — days
+carried past the day owed; `carried` alone stays the flag), `names_person`
+(the line names someone who is not the owner) and `not <flag>`, so All's
+saved views are real: Slipping is `carried >= 3 or overdue or names_person`,
+Owed is `names_person and not waiting`. `someday` was ruled earlier (K6).
 
 Anything outside that grammar is a render-time failure note (§6.4). The same
 vocabulary is what the app's filter chips emit and what the plugin's suggester

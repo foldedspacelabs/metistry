@@ -2668,9 +2668,33 @@ PUT /api/today/order
   with the parser's own message, which names the token — nothing is guessed
   or passed through. `limit` is 1–500 (default 50); `more` says whether
   `offset + limit` has another page. **The saved views** of All are stored
-  `where:` strings; *Waiting on Others* is `where=waiting`. *Slipping* and
-  *Owed* are not yet expressible in the grammar as screen-05 §15.6 defines
-  them (open — see T2-7's PR).
+  `where:` strings (`SAVED_TASK_VIEWS`, `apps/console/src/today-routes.ts`),
+  each one run of `vault_tasks_query`:
+
+  | View | `where:` |
+  | --- | --- |
+  | Slipping | `carried >= 3 or overdue or names_person` |
+  | Owed | `names_person and not waiting` |
+  | Waiting on Others | `waiting` |
+
+  **The grammar's additions (ruling 14, X-14)** — each still compiles to
+  fixed bind params, never to SQL text:
+  - **`carried` with an operator is the carry count**: whole days the line
+    has been carried past the day it was owed (`carried_days`, the Today
+    chip's "carried 3 days"), `carried >= 3`, `carried <= 2`,
+    `carried = 4`; a line that is not carried counts 0. Alone, `carried` is
+    still the flag. `carried = 0` / `carried <= 0` is `400` pointing at
+    `not carried`, and `carried >= 0` (every line) is `400` too. It sorts:
+    `order=carried desc`.
+  - **`names_person`** is a flag: the line names a person (`@Jim`,
+    `@[[Jim Fallon]]`) who is not the owner — the rows `assigned_to_me`
+    does not hold. This door passes no owner page, so here it is any line
+    that names someone. With `waiting` it is owed *by* them; without, owed
+    *to* them. Rows carry it in `row_flags`.
+  - **`not <flag>`** negates any flag (`not waiting`, `not someday`) and
+    joins like any clause. Only a flag: `not` before a field, `not not`, a
+    bare `not`, an unknown word after it, or a flag with its own negation
+    is `400` with the parser's message. `and` and `or` still never mix.
 - **`PUT /api/today/order`** takes `{date, task_keys}` — the whole order for
   the day, and nothing else (another field is `400`). Each key is a task key
   or `work:<id>`, at most 1000, none twice. **Every key must be one

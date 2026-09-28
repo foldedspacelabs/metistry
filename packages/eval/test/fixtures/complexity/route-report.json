@@ -1,0 +1,27 @@
+{
+  "since_days": 14,
+  "totals": { "messages": 1000, "routed": 1000, "unrouted": 0, "fall_through": 900, "fall_through_share": 0.9, "first_message": "2026-09-01T08:00:00.000Z", "last_message": "2026-09-14T22:00:00.000Z" },
+  "kinds": [],
+  "tiers": [ { "label": "default", "n": 900, "share": 0.9, "denominator": 1000 }, { "label": "deep", "n": 100, "share": 0.1, "denominator": 1000 } ],
+  "rules": [], "lengths": [], "first_words": [], "threshold": 0.4,
+  "verdict": { "status": "ok", "line": "synthetic" },
+  "policy": {
+    "recorded": true,
+    "rows": 1000,
+    "consultations": 1000,
+    "outcomes": [ { "label": "chosen", "n": 900, "share": 0.9, "denominator": 1000 }, { "label": "counterfactual", "n": 100, "share": 0.1, "denominator": 1000 } ],
+    "table_rows": [ { "label": "by-complexity", "n": 900, "share": 1, "denominator": 900 } ],
+    "operations": [ { "label": "tools", "n": 900, "share": 1, "denominator": 900 } ],
+    "tiers": [
+      { "label": "default → fast", "n": 300, "share": 0.3333, "denominator": 900 },
+      { "label": "default → default", "n": 500, "share": 0.5556, "denominator": 900 },
+      { "label": "default → deep", "n": 100, "share": 0.1111, "denominator": 900 }
+    ],
+    "bounded_by": [],
+    "override": [ { "label": "agrees", "n": 80, "share": 0.8, "denominator": 100 }, { "label": "disagrees", "n": 20, "share": 0.2, "denominator": 100 } ],
+    "latency": { "p50_ms": 120, "p95_ms": 210, "over": 1000 },
+    "shadow": [ { "tier": "fast", "turns": 40, "mean_agreement": 0.82 } ],
+    "miss": null,
+    "thin": false
+  }
+}

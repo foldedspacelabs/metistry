@@ -800,6 +800,47 @@ section says "widen `--since`". The fifth kind, `policy`, reads 0 until T9-4
 and is not counted as a fall-through: the exit rule above stays about the
 rules alone.
 
+### The confirmatory eval — `metistry-eval complexity` (T9-3)
+
+`mode: serve` waits on the bar you accepted (plan §4 Q2): two weeks of shadow,
+then this eval (`docs/ops/dynamic-router.md` §7.2). It is yours to run — the
+fixtures, `compute.yaml` and the local server are the instance's:
+
+```sh
+cd <instance>/.metistry/eval
+metistry compute route-report --since 14d --json > route-report.json
+metistry compute cache-report --since 14d --json > cache-report.json
+metistry-eval complexity --instance <instance> --fit \
+  --route-report route-report.json --cache-report cache-report.json --out complexity-report.md
+```
+
+- **The fixtures are yours.** `<instance>/.metistry/eval/complexity.jsonl`,
+  one `{"text", "label", "accept"?, "trap"?, "d08"?, "id"?, "notes"?}` per
+  line; `label` is `simple` · `moderate` · `demanding`, written from the class
+  names alone before you read the descriptions. `trap` is `long_simple` (a
+  `simple` item over 40 words) or `short_demanding` (a `demanding` item of 8
+  words or fewer); `d08: true` marks a D08-class item (terse, operational
+  replanning under several constraints). The example the product ships
+  (`packages/eval/examples/complexity.example.jsonl`) is empty on purpose (C11).
+  The set is checked against §7.2 — at least 50 per class, the traps at 10 %,
+  five D08-class items, and length not predicting the label (|r| < 0.2) — and
+  a set that misses one is **not a qualifying run**, whatever it scores.
+- **The planner is the served call.** Every item goes through the router's own
+  `scoreRouteFeatures` on `assignments.intent` — the same guard, prompt, model
+  and wire — twice, for determinism, after one discarded warm-up call. An
+  off-machine planner is refused at load and at the call.
+- **The report** quotes the pre-registered bar first, then the fixture-set
+  checks, each bar row with PASS/FAIL, every deep miss verbatim with its
+  confidence, the confusion matrix, the fitted threshold (`--fit`: the lowest
+  `complexity.min_confidence` meeting accuracy and deep-miss together,
+  counting an item below it as served on the default tier), the cost table
+  (reported, never gated) and the shadow window's policy rows. It prints the
+  sha256 of the planner's wording and of the bar: a change to either after the
+  run voids it. Exit 0 means PASS and nothing else.
+- **Offline.** `--record <file>` writes every server response; `--replay
+  <file>` answers from one with no network at all. `--threshold` and
+  `--timeout-ms` evaluate at a value you name instead of `rules.yaml`'s.
+
 ## Budgets
 
 Enforced **in the engine, before the call**, against the `spend` named query

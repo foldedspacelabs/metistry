@@ -693,6 +693,43 @@ the answer's body reaches the call**. A refusal leaves the row pending with
 `payload.error` (C45). Revise and Decline run nothing. `docs/ops/actions.md`
 has the whole rule.
 
+#### Mirrors — one subject, one card, cleared with a receipt (T1-8, T4-23)
+
+A request with a `source {kind, external_ref, person}` **mirrors** something
+that lives elsewhere — a PR waiting on the owner's review, an issue assigned
+to them, a secret this instance needs. No route changed; these are fields on
+rows `GET /api/proposals` already serves.
+
+- **One subject, one card.** While one waits, every raise of the same
+  `(source.kind, source.external_ref)` lands on it (0027's index), whatever
+  its stored kind and whoever raised it. The row's `source_agent` is whoever
+  asked first; **everyone else who asked** is appended, once each, to
+  `payload.also_asked` — so an agent's review ask and GitHub's review request
+  for the same PR are one card with both askers on it, in either order:
+
+  ```
+  also_asked: [{source_agent, trust, at, title?, event?, context?: {prose, refs}}, …]   # at most 20
+  ```
+
+  Nothing the first asker wrote changes; the same asker raising again writes
+  nothing. A raise may not carry `also_asked` or `cleared` itself — both are
+  the mirror's own.
+- **Cleared at the source, with a receipt.** When the source changes (the
+  review landed on GitHub, the issue was closed, the secret was set) the row
+  leaves the queue as `decision = "resolved_at_source"` and gains
+  `payload.cleared`:
+
+  ```
+  cleared: {what: "You approved it on GitHub", where: "github"}
+  ```
+
+  `what` is one line saying what happened there, `where` the source system
+  (`source.kind`) — a client draws *You approved it on GitHub · 10:14 AM ·
+  cleared here* from it and `decided_at`. It rides on the `409
+  already_decided` a late answer gets (`proposal.payload.cleared`) and in
+  Activity's detail. A mirror its source cleared is nobody's decision here:
+  the weekly review notes it apart from what the owner decided.
+
 #### A question — several per request, answered per question (T2-3)
 
 ```
@@ -792,8 +829,10 @@ budget_stopped   {title: "Compute stopped at the $60.00 monthly budget", body: "
 budget_refused   {title: "Compute is over its daily budget", body: "<the refusal, naming the field, plus how nothing spent>",
                   thread, budget: {scope, window, field, limit, spent},
                   act: {label: "Raise", kind: "open_settings", pane: "compute", section: "spending_limits"}}
-secret_failed    {title, variable, why, stopped: ["<component>", …], fix, last_ok_at | null, failed_at,
-                  body: {kind: "before_after", heading, before: {label: "Stopped", text}, after: {label, text}}}
+secret_failed    {title, variable, why, stopped: ["<component>", …],
+                  dependents: [{component, title, kind: "routine" | "collector"}, …], used_by: "<one line>",
+                  fix, last_ok_at | null, failed_at,
+                  body: {kind: "before_after", heading, before: {label: "Waiting on it", text}, after: {label, text}}}
 knowledge_conflict {title, refs,
                   body: {kind: "before_after", heading,
                          before: {label: "Mine",      path | null, text, sha256 | null, truncated},
@@ -811,7 +850,12 @@ knowledge_conflict {title, refs,
   routine paused later is added to `paused` on the waiting row — and a limit
   raised and spent again is a new key, so a new row. A secret is one row
   however many components it stopped — a component stopped later is added to
-  `stopped` on the waiting row. A conflict copy is one row. A chat turn's
+  `stopped` on the waiting row — and it **names its dependents** (T4-23):
+  `dependents` is every scheduled component whose manifest requires it (for
+  the engine's secret, every one that requires the engine), whether or not
+  its time has come yet; `used_by` is the line a card shows (*Morning Brief
+  and GitHub use it*); `body.before` lists each, marked *stopped* or *stops
+  when its time comes*. A conflict copy is one row. A chat turn's
   **budget refusal** is once per calendar window (`compute.md` "Budgets") —
   not per signature, since it carries no `source` to key on.
 - **An answer sticks while the fault lasts.** Dismissed (or any other answer)
@@ -3194,13 +3238,27 @@ the GitHub sync does not ask again for that head, and asks again when the PR
 is pushed. A comment, a reply or a resolve posts and leaves the request
 waiting. The request also resolves at its source (`resolved_at_source`) when
 the review lands on GitHub another way, the PR goes back to draft, or it
-closes. A post GitHub refused, or one that could not be sent, leaves the
+closes — with a receipt saying which (`payload.cleared.what`: *You approved it
+on GitHub*, *Back to draft on GitHub*, *Pushed again on GitHub — the new head
+is a new request*, *Merged on GitHub*, *Closed on GitHub*; §*Mirrors* above).
+An agent's `requests_create` kind `pull_request` for the same PR is the same
+card: whichever asked second is in `payload.also_asked`. A post GitHub
+refused, or one that could not be sent, leaves the
 request pending with `payload.error {code, message, decision, door:
 "pr_review", action, at}` (C45); a stale answer writes nothing on the row.
 
 GitHub does not let an account approve its own pull request: a PR an agent
 opened under the owner's account is answered `400` with GitHub's words, and
 the request keeps waiting with them.
+
+**An issue assigned to the owner** (T4-23, R7) — with the GitHub sync's
+*An issue is assigned to you* on (`syncs.github-state.raise.assigned`, the
+default) — is one `task` request (`source {kind: "github", external_ref:
+"gh:<owner>/<repo>#<n>", person: <author>}`, `payload {title, body (an
+excerpt), event: "github_assigned", repo, number, url, author}`), raised once
+per assignment: one the owner answered is not asked again while it stays
+assigned. It clears at its source when the issue is closed (*Closed on
+GitHub*) or given to someone else (*Assigned to someone else on GitHub*).
 
 ### Prose feedback
 

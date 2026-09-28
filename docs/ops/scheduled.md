@@ -442,7 +442,8 @@ The syncs: GitHub (`github-state`) every 15 min, raising *A pull request
 asks for your review* — one `pull_request` request per open PR waiting on
 your review, for its current head, cleared when your review lands, the PR is
 drafted or it closes (T2-13; `docs/ops/client-api.md`, *Pull requests*) — and
-*An issue is assigned to you* (both on; the issue raise lands with T4-23). The
+*An issue is assigned to you* — one `task` request per open issue assigned to
+you, cleared when it closes or is given to someone else (both on; T4-23). The
 runner hands a sync its switches, your `raise` over the manifest's defaults,
 on every pass; Calendar (`eventkit-calendar`,
 T2-11) every 5 min — the owner's calendars on this Mac, today and the next two

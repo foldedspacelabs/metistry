@@ -30,7 +30,13 @@ export interface Intent {
   turn?: string | undefined;
 }
 
-export type Outcome<T> = { ok: true; value: T } | { ok: false; code: ErrorCode; message?: string };
+/**
+ * `caseOf` rides on a refusal whose path was refused only for its casing
+ * while another spelling exists (paths.ts `confine`) — the reader's route
+ * turns it into `not_found` with a hint; the reads themselves stay
+ * case-exact.
+ */
+export type Outcome<T> = { ok: true; value: T } | { ok: false; code: ErrorCode; message?: string; caseOf?: string };
 
 // ---- Resolve a conflict (plan §2.11, T2-10) ----------------------------------
 
@@ -210,7 +216,8 @@ export class Vault {
 
   private async confined(p: unknown): Promise<Outcome<Confined>> {
     const c = await confine(this.root, p);
-    return c.ok ? { ok: true, value: c.path } : fail(c.code);
+    if (c.ok) return { ok: true, value: c.path };
+    return c.caseOf !== undefined ? { ok: false, code: c.code, caseOf: c.caseOf } : fail(c.code);
   }
 
   /** Current bytes + hash, or null if absent. Directories read as "absent". */

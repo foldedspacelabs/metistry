@@ -155,6 +155,46 @@ describe.skipIf(!hasDb)("crew drain (integration)", () => {
     expect(run_.meta).toMatchObject({ routine: "vendor-sweep", routine_run_id: 9001, run_grants: { read: ["Areas/Finance"] } });
   });
 
+  it("defer and report (C59): a New Routine's run is unattended, and the Ask First calls it deferred end up in its run row and its note — read from the rows, scoped to this run", async () => {
+    const id = await enqueue("Comment on the flaky issues", { routine: { name: "flake-sweep", run_id: 9101, grants: { read: [] } } });
+    let seen: CrewRunInput | null = null;
+    const deferRow = async (component: string, turnId: string, extra: Record<string, unknown> = {}) =>
+      pool.query(`INSERT INTO runs (component, kind, tool, ok, started_at, finished_at, meta) VALUES ($1, 'connection_call', 'connections_call', true, now(), now(), $2)`, [
+        component,
+        JSON.stringify({ connection: "github", connection_tool: "comment_issue", mode: "ask", outcome: "deferred", proposal_id: 4242, turn_id: turnId, unattended: true, ...extra }),
+      ]);
+    const run = async (input: CrewRunInput) => {
+      seen = input;
+      // what the bridge writes when this run's Ask First call is deferred…
+      await deferRow(crewId, input.turn_id!);
+      // …and what must NOT reach this run's report: another caller claiming this turn, a paused call, another turn
+      await deferRow(`${crewId}-other`, input.turn_id!);
+      await deferRow(crewId, input.turn_id!, { outcome: undefined, connection_tool: "create_issue" });
+      await deferRow(crewId, "another-turn", { connection_tool: "run_workflow" });
+      return ok;
+    };
+    expect(await drainCrewOne(pool, { ...cfg, runAssigned: run })).toBe(true);
+    expect(seen!.interactive).toBe(false);
+    expect(seen!.turn_id).toMatch(/^[0-9a-f-]{36}$/);
+
+    const row = await workRow(id);
+    expect(row.status).toBe("closed"); // a deferred step does not make the run fail
+    expect(row.history.at(-1).note).toMatch(/, skipped 1 waiting for approval in Needs You \(comment_issue on github #4242\)$/);
+    const r = (await pool.query(`SELECT meta FROM runs WHERE component = $1 AND kind = 'crew_run' AND (meta->>'work_id')::bigint = $2`, [crewId, id])).rows[0];
+    expect(r.meta).toMatchObject({ unattended: true, turn_id: seen!.turn_id, skipped_count: 1, skipped: [{ connection: "github", tool: "comment_issue", proposal_id: 4242 }] });
+  });
+
+  it("a crew the assistant delegated to pauses rather than defers: interactive, and nothing to report", async () => {
+    const id = await enqueue("delegated in a conversation");
+    let seen: CrewRunInput | null = null;
+    expect(await drainCrewOne(pool, { ...cfg, runAssigned: async (input) => { seen = input; return ok; } })).toBe(true);
+    expect(seen!.interactive).toBe(true);
+    const r = (await pool.query(`SELECT meta FROM runs WHERE component = $1 AND kind = 'crew_run' AND (meta->>'work_id')::bigint = $2`, [crewId, id])).rows[0];
+    expect(r.meta.unattended).toBeUndefined();
+    expect(r.meta.skipped).toBeUndefined();
+    expect(r.meta.turn_id).toBe(seen!.turn_id);
+  });
+
   it("a routine run that fails still leaves no stamp behind; a dispatched (non-routine) row is never stamped", async () => {
     const failing = await enqueue("routine that throws", { routine: { name: "vendor-sweep", run_id: 9002, grants: { read: ["Areas/Finance"] } } });
     await drainCrewOne(pool, { ...cfg, maxAttempts: 1, runAssigned: async () => { throw new Error("engine fell over"); } });

@@ -52,6 +52,8 @@ import {
 import { crewSystemPrompt, crewToolNames, parseCrewSnapshot, runCrewOnEngine, type CrewRunInput, type CrewRunResult } from "./crew.js";
 import { makeEngine, type Engine, type TurnGuard } from "./engine.js";
 import { memorySessionStore } from "./sessions.js";
+import { newTurnId } from "./brain.js";
+import { deferredCalls, skippedMeta } from "./deferred.js";
 import { mcpToolHost } from "./tools.js";
 import { isBudgetRefusal } from "./budgets.js";
 import { providerRefusal } from "./provider-refusal.js";
@@ -102,7 +104,9 @@ function engineForCrew(cfg: CrewDrainConfig, input: CrewRunInput, guard?: TurnGu
   return makeEngine({
     systemPrompt: crewSystemPrompt(input.crew, input.identity),
     sessions: memorySessionStore(), // a crew run never resumes one (cost research decision 3)
-    tools: () => mcpToolHost({ url: input.brain.url, token: input.brain.token, allow: crewToolNames(input.crew.uses), clientName: `metistry-crew-${input.crew.name}` }),
+    // the run's own turn handle and interactive bit ride on every call (tools.ts), so the run can read back what it deferred
+    tools: (spec) =>
+      mcpToolHost({ url: input.brain.url, token: input.brain.token, allow: crewToolNames(input.crew.uses), clientName: `metistry-crew-${input.crew.name}`, turnId: spec.turnId, interactive: spec.interactive }),
     ...(guard ? { guard } : {}),
   });
 }
@@ -322,6 +326,12 @@ export async function drainCrewOne(db: Db, cfg: CrewDrainConfig): Promise<boolea
   if (block) brief += block.text;
 
   const startedAt = new Date();
+  // Who is there (C59): a New Routine's run is unattended — its Ask First
+  // calls are deferred and reported, never waited on. A crew the assistant
+  // delegated to is an agent it is delegating to in a conversation, and
+  // pauses (screen-09 §4's table).
+  const interactive = !routine;
+  const turnId = newTurnId();
   const token = await issueRunToken(db, crewId);
   if (!token) {
     await settle(db, row.id, { status: "blocked", note: `crew '${crewId}' is not registered or is revoked — the console syncs agents/<area>/<name>.md; is the manifest still there?` }, agent);
@@ -353,15 +363,19 @@ export async function drainCrewOne(db: Db, cfg: CrewDrainConfig): Promise<boolea
       crew_sha: crew.sha256,
       dispatch_run_id: row.meta?.dispatch_run_id ?? null,
       uses: crew.uses,
+      turn_id: turnId,
+      ...(interactive ? {} : { unattended: true }),
       // the routine this run is, and what its bearer read beyond the crew's own scope — for this run only
       ...(routine ? { routine: typeof routine.name === "string" ? routine.name : null, routine_run_id: routine.run_id ?? null, run_grants: { read: runGrants } } : {}),
     },
   });
   try {
     if (routine) await stampRunBearer(db, row.id, token);
-    const input: CrewRunInput = { crew, brief, task_id: taskId, brain: { url: cfg.brainUrl, token }, identity: cfg.identity };
+    const input: CrewRunInput = { crew, brief, task_id: taskId, brain: { url: cfg.brainUrl, token }, identity: cfg.identity, turn_id: turnId, interactive };
     const r = await (cfg.runAssigned ?? ((i, a) => runCrewOnEngine(i, a, engineForCrew(cfg, i, cfg.guard))))(input, turn.assignment);
     const reports = r.tools_used["mcp__brain__report"] ?? 0;
+    // what an unattended run skipped, read from the rows the bridge wrote for it (deferred.ts)
+    const skipped = interactive ? [] : await deferredCalls(db, { component: crewId, runId, turnId });
     await finishRun(db, runId, {
       ok: r.outcome === "ok",
       ...(r.outcome !== "ok" ? { error: `crew run ${r.outcome}${r.errors?.length ? `: ${r.errors.join("; ").slice(0, 500)}` : ""}` } : {}),
@@ -381,9 +395,11 @@ export async function drainCrewOne(db: Db, cfg: CrewDrainConfig): Promise<boolea
         text_chars: r.text_chars,
         session_id: r.session_id,
         ...(r.cost_source !== undefined ? { cost_source: r.cost_source } : {}),
+        ...skippedMeta(skipped),
       },
     });
-    const summary = `crew run #${runId}: ${r.outcome}, ${r.num_turns} turns, ${reports} report${reports === 1 ? "" : "s"}${r.cost_usd !== undefined ? `, $${r.cost_usd.toFixed(4)}` : ""}`;
+    const skippedNote = skipped.length > 0 ? `, skipped ${skipped.length} waiting for approval in Needs You (${skipped.map((s) => `${s.tool} on ${s.connection}${s.proposal_id !== null ? ` #${s.proposal_id}` : ""}`).slice(0, 5).join("; ")}${skipped.length > 5 ? "; …" : ""})` : "";
+    const summary = `crew run #${runId}: ${r.outcome}, ${r.num_turns} turns, ${reports} report${reports === 1 ? "" : "s"}${r.cost_usd !== undefined ? `, $${r.cost_usd.toFixed(4)}` : ""}${skippedNote}`;
     // a budget or turn stop is final: retrying would spend again for the same brief
     await settle(db, row.id, r.outcome === "ok" ? { status: "closed", note: summary } : { status: "blocked", note: `${summary}${r.errors?.length ? ` — ${r.errors[0]!.slice(0, 200)}` : ""}` }, agent);
   } catch (err) {

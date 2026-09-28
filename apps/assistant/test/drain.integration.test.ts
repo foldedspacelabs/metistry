@@ -217,6 +217,64 @@ describe.skipIf(!hasDb)("assistant drain", () => {
     expect(run.rows[0]).toMatchObject({ tier: "routine", effort: "low", fresh: true });
   });
 
+  describe("defer and report (C59): a routine's turn is unattended, and reports what it deferred", () => {
+    /** What the bridge writes for one of this turn's calls (packages/mcp-brain connections-tools.ts). */
+    const callRow = (component: string, turnId: string, meta: Record<string, unknown>) =>
+      pool.query(`INSERT INTO runs (component, kind, tool, ok, started_at, finished_at, meta) VALUES ($1, 'connection_call', 'connections_call', true, now(), now(), $2)`, [
+        component,
+        JSON.stringify({ connection: "github", connection_tool: "comment_issue", mode: "ask", turn_id: turnId, ...meta }),
+      ]);
+
+    it("an unattended turn tells every call so, and its output and run row name each deferred step — from the rows, never the reply", async () => {
+      const { rows } = await pool.query(`INSERT INTO inbound_messages (thread, text, meta) VALUES ($1, $2, $3) RETURNING id`, [
+        `prose-${Date.now()}`,
+        "fill the slots",
+        JSON.stringify({ kind: "prose", tier: "routine", fresh_session: true }),
+      ]);
+      const seen: { interactive?: boolean | undefined; turnId?: string | undefined }[] = [];
+      const reply = "Filled both slots.\n\n```learned\n[]\n```";
+      const engine: Engine = async (_prompt, spec) => {
+        seen.push({ interactive: spec.interactive, turnId: spec.turnId });
+        await callRow("assistant", spec.turnId!, { outcome: "deferred", unattended: true, proposal_id: 777 });
+        await callRow("assistant", spec.turnId!, { outcome: "deferred", unattended: true, proposal_id: 778, connection_tool: "run_workflow" });
+        // not this turn's report: another caller forging the handle, and this turn's own call that ran
+        await callRow("itest-forger", spec.turnId!, { outcome: "deferred", proposal_id: 999, connection_tool: "delete_repo" });
+        await callRow("assistant", spec.turnId!, { mode: "call", connection_tool: "list_issues" });
+        return { text: reply, session_id: randomUUID() };
+      };
+      expect(await drainOne(pool, engine, tiers)).toBe(true);
+      expect(seen).toEqual([{ interactive: false, turnId: expect.any(String) }]);
+
+      const out = (await pool.query(`SELECT text FROM outbound_messages WHERE in_reply_to = $1`, [rows[0].id])).rows[0].text as string;
+      expect(out.startsWith(reply)).toBe(true); // the reply itself is untouched: only a foot is added
+      expect(out.slice(reply.length)).toBe(
+        "\n\nSkipped 2 steps that wait for your approval in Needs You — nothing ran:\n- comment_issue on github (request #777)\n- run_workflow on github (request #778)",
+      );
+      const run = (await pool.query(`SELECT ok, meta FROM runs WHERE component='assistant' AND kind='turn' AND (meta->>'message_id')::bigint = $1`, [rows[0].id])).rows[0];
+      expect(run.ok).toBe(true); // a deferred step is reported, not a failure
+      expect(run.meta).toMatchObject({ unattended: true, turn_id: seen[0]!.turnId, skipped_count: 2 });
+      expect(run.meta.skipped.map((s: { tool: string; proposal_id: number }) => [s.tool, s.proposal_id])).toEqual([["comment_issue", 777], ["run_workflow", 778]]);
+      await pool.query(`DELETE FROM runs WHERE component = 'itest-forger'`);
+    });
+
+    it("a chat turn is interactive: its calls pause, and nothing is added to the reply", async () => {
+      const id = await enqueue("comment on 412", { route: { kind: "model", tier: "default", model: "haiku", text: "comment on 412", routed_by: "rule" } });
+      let interactive: boolean | undefined;
+      const engine: Engine = async (prompt, spec) => {
+        interactive = spec.interactive;
+        await callRow("assistant", spec.turnId!, { outcome: "deferred", proposal_id: 780 }); // even a row like this is not a chat turn's to report
+        return fakeEngine(prompt, spec);
+      };
+      expect(await drainOne(pool, engine, tiers)).toBe(true);
+      expect(interactive).toBe(true);
+      const out = (await pool.query(`SELECT text FROM outbound_messages WHERE in_reply_to = $1`, [id])).rows[0].text as string;
+      expect(out).not.toContain("Skipped");
+      const run = (await pool.query(`SELECT meta FROM runs WHERE component='assistant' AND kind='turn' AND (meta->>'message_id')::bigint = $1`, [id])).rows[0];
+      expect(run.meta.unattended).toBeUndefined();
+      expect(run.meta.skipped).toBeUndefined();
+    });
+  });
+
   it("closing a task the assistant held rolls the thread's session, logs a session_roll run, and the NEXT turn starts fresh", async () => {
     const taskThread = `task-${Date.now()}`;
     const first = randomUUID();

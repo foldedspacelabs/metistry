@@ -325,6 +325,15 @@ describe("the tool loop", () => {
     expect(s.requests[0]!.body.tools[0].function.name).toBe("mcp__brain__knowledge_search");
   });
 
+  it("the host is built from the turn's own spec: its turn handle and whether the owner is there (C59) reach every call's _meta", async () => {
+    const specs: { turnId?: string | undefined; interactive?: boolean | undefined }[] = [];
+    const s = server([{ body: chat("done") }]);
+    const h = host({});
+    const engine = makeOpenAiEngine({ tools: (spec) => (specs.push({ turnId: spec.turnId, interactive: spec.interactive }), h), sessions: memorySessionStore(), fetchFn: s.fetchFn, sleep: s.sleep, env: { METISTRY_OPENROUTER_API_KEY: "sk-test" } });
+    await engine("fill the slots", { model: cloud.model, effort: cloud.effort, assignment: cloud, thread: "t", turnId: "turn-9", interactive: false });
+    expect(specs).toEqual([{ turnId: "turn-9", interactive: false }]);
+  });
+
   it("the no-progress veto: the same call with the same answer nudges at 3 and stops tool use at 5, then answers", async () => {
     const repeat = toolCall("c", "mcp__brain__knowledge_search", { q: "same" });
     // the FIRST call is productive (nothing was known before it), so the veto

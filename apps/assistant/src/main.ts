@@ -131,7 +131,7 @@ const engine = makeEngine({
   // (archive.ts): redacted, 30 days, unfolded until the session fold reads it.
   archive: pgSessionArchive(pool),
   // The turn's own handle, so its calls and its archived row share one id.
-  tools: (spec) => (brain ? mcpToolHost({ url: brain.url, token: brain.token, allow: brainToolNames(), turnId: spec.turnId }) : NO_TOOLS),
+  tools: (spec) => (brain ? mcpToolHost({ url: brain.url, token: brain.token, allow: brainToolNames(), turnId: spec.turnId, interactive: spec.interactive }) : NO_TOOLS),
   ...(process.env.METISTRY_MAX_TURNS ? { maxTurns: intEnv("METISTRY_MAX_TURNS", 12) } : {}),
 });
 const shown = engineReady.assignment!;

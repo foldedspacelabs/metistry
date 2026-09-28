@@ -499,6 +499,53 @@ describe.skipIf(!hasDb)("the console's compute, knowledge, commands and run-deta
     }
   });
 
+  // ------------------------------------------------ T4-19: spending limits data
+
+  it("limits: the instance's and each provider's limits beside project daily budgets — a subscription is its plan window, never dollars", async () => {
+    const file = instancePath(instanceDir, "compute");
+    const project = `itest-limits-${mintToken(6).toLowerCase().replaceAll(/[^a-z0-9]/g, "").slice(0, 6) || "x"}`;
+    const plan = `  plan:
+    kind: openai-compatible
+    base_url: https://cloud.example/v1
+    locality: off_machine
+    billing: subscription
+    auth: { secret: "{{ secret.plan_key }}" }
+    data_policy: { allow: [Projects], deny_sources: [comms], max_brief_bytes: 65536 }
+`;
+    await writeFile(file, COMPUTE_YAML.replace("assignments:", `${plan}assignments:`) + "budgets:\n  instance: { daily_usd: 5, monthly_usd: 60, action: stop }\n  providers: { openrouter: { monthly_usd: 20, action: critical_only } }\n");
+    await pool.query(`INSERT INTO projects (id, title, daily_budget_usd) VALUES ($1, 'Limits', 2.50)`, [project]);
+    await pool.query(`INSERT INTO runs (component, kind, provider, model, cost_usd, ok, meta) VALUES ($1, 'turn', 'plan', 'm', 0, true, jsonb_build_object('project', $2::text))`, [MARK, project]);
+    try {
+      const r = await get("/api/compute");
+      expect(r.status).toBe(200);
+      const { limits } = await r.json();
+      expect(limits.instance).toMatchObject({ kind: "usd", scope: "instance", field: "budgets.instance", daily_usd: 5, monthly_usd: 60, action: "stop", spent: { daily: expect.any(Number), monthly: expect.any(Number) } });
+      expect(limits.providers.find((p: any) => p.name === "openrouter")).toMatchObject({ kind: "usd", tag: "cloud", scope: "provider:openrouter", daily_usd: null, monthly_usd: 20, action: "critical_only" });
+      // THE TEST THE TICKET NAMES: a subscription provider has no dollar limit
+      const sub = limits.providers.find((p: any) => p.name === "plan");
+      expect(sub).toEqual({ name: "plan", tag: "subscription", enabled: true, kind: "window", scope: "provider:plan", used: { calls_today: 1, calls_this_month: 1 } });
+      expect(limits.providers.find((p: any) => p.name === "lmstudio")).toMatchObject({ kind: "usd", tag: "local", action: null });
+      expect(limits.projects).toContainEqual({ kind: "usd", scope: `project:${project}`, id: project, title: "Limits", daily_usd: 2.5, spent: { daily: 0 }, mode: "autonomous", at_limit: "review" });
+
+      // and no door can give it one: the budget route refuses it, naming the field, and writes nothing
+      bridgeCalls.length = 0;
+      for (const body of [{ scope: "provider:plan", daily: 5, action: "stop" }, { scope: "provider:plan", monthly: 60, action: "allow" }]) {
+        const bad = await post("/api/compute/budget", body);
+        expect(bad.status, JSON.stringify(body)).toBe(400);
+        const message = (await bad.json()).error.message;
+        expect(message).toContain("budgets.providers.plan");
+        expect(message).toContain("billed by subscription");
+      }
+      expect(bridgeCalls.filter((c) => c.url.endsWith("/vault/write"))).toEqual([]);
+      // the instance's own limit is still a dollar limit beside it
+      expect((await post("/api/compute/budget", { scope: "instance", daily: 6, action: "stop" })).status).toBe(200);
+    } finally {
+      await writeFile(file, COMPUTE_YAML);
+      await pool.query(`DELETE FROM runs WHERE component = $1 AND provider = 'plan'`, [MARK]);
+      await pool.query(`DELETE FROM projects WHERE id = $1`, [project]);
+    }
+  });
+
   it("the catalogue refuses a query it cannot mean: an empty provider, an undeclared one, a refresh that is not a boolean", async () => {
     for (const [path, needle] of [
       ["/api/compute/catalogue?provider=", "declared provider"],

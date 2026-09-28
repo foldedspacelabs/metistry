@@ -40,13 +40,17 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   BUDGET_ACTIONS,
   EFFORTS,
+  PROJECTS_QUERY,
   resolveInstanceLayout,
   SPEND_QUERY,
   computePaths,
   errorEnvelope,
+  spendingLimits,
   spentFrom,
   statusFor,
   type Effort,
+  type ProjectBudgetRow,
+  type SpendingLimits,
   type Spent,
   type SpendRow,
 } from "@foldedspacelabs/metistry-core";
@@ -182,15 +186,31 @@ export function writeTargetIssue(opts: ComputeOptions): string | undefined {
   );
 }
 
-/** Both budget windows, per scope, from the ONE spend read path (invariant 3). Absent query = null, never a guessed zero. */
-async function spend(queries: QueryStore, providers: string[]): Promise<{ instance: Spent; providers: Record<string, Spent> } | null> {
+/** The `spend` rows, from the ONE spend read path (invariant 3). Absent query = null, never a guessed zero. */
+async function spendRows(queries: QueryStore): Promise<SpendRow[] | null> {
   if (!queries.names().includes(SPEND_QUERY)) return null;
-  const { rows } = await queries.run(SPEND_QUERY);
-  const spendRows = rows as SpendRow[];
+  return (await queries.run(SPEND_QUERY)).rows as SpendRow[];
+}
+
+/** Both budget windows, per scope — the pre-T4-19 `spend` field, kept for the clients that read it. */
+function spendOf(rows: SpendRow[] | null, providers: string[]): { instance: Spent; providers: Record<string, Spent> } | null {
+  if (rows === null) return null;
   return {
-    instance: spentFrom(spendRows),
-    providers: Object.fromEntries(providers.map((name) => [name, spentFrom(spendRows, name)])),
+    instance: spentFrom(rows),
+    providers: Object.fromEntries(providers.map((name) => [name, spentFrom(rows, name)])),
   };
+}
+
+/**
+ * Every spending limit side by side (C130, C133; T4-19): the instance's and
+ * each provider's from `compute.yaml`, each project's daily budget from
+ * `projects_rollup` — the same read `GET /api/projects` makes, so the two
+ * panes can never show a project two different numbers. A subscription
+ * provider is its plan's window, never a dollar limit (core `spendingLimits`).
+ */
+async function limitsOf(queries: QueryStore, report: Awaited<ReturnType<typeof computeReport>>, spend: SpendRow[] | null): Promise<SpendingLimits> {
+  const projects = queries.names().includes(PROJECTS_QUERY) ? ((await queries.run(PROJECTS_QUERY)).rows as ProjectBudgetRow[]) : null;
+  return spendingLimits({ instance: report.instance_budget, providers: report.providers, spend, projects });
 }
 
 /** `{tier}` or `{crew}` → the CLI's target spelling. Exactly one, never both: two targets in one body is a request nobody can mean. */
@@ -257,9 +277,11 @@ export async function computeRoutes(
   try {
     if (key === "GET /api/compute") {
       const report = await computeReport(opts);
+      const rows = await spendRows(deps.queries);
       return sendJson(res, 200, {
         ...report,
-        spend: await spend(deps.queries, report.providers.map((p) => p.name)),
+        spend: spendOf(rows, report.providers.map((p) => p.name)),
+        limits: await limitsOf(deps.queries, report, rows),
         // What the WRITE verbs will refuse, reported with the read so a
         // client can grey the controls instead of discovering it on submit.
         writable: writeTargetIssue(opts) === undefined,

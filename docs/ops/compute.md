@@ -275,7 +275,7 @@ and the Compute pane works from the phone (`docs/ops/console-api.md`
 
 | route | the verb it is |
 | --- | --- |
-| `GET /api/compute` | `compute show --json`, plus `spend` (both budget windows, from the `spend` named query) and `writable` |
+| `GET /api/compute` | `compute show --json`, plus `spend` (both budget windows, from the `spend` named query), `limits` (every spending limit side by side, project daily budgets included — T4-19) and `writable` |
 | `GET /api/compute/models[?provider=]` | `compute models list --json` |
 | `GET /api/compute/catalogue[?q=&provider=&refresh=true]` | `compute models search --json` — the listings kept in memory between searches, `refresh=true` re-reading every one (C132's Refresh) |
 | `POST /api/compute/assign` `{tier\|crew, model, effort?}` | `compute assign` |
@@ -380,7 +380,8 @@ off: neither searched nor offered, never the embedder's default, a
 collector's call on it degrades as if it were absent, and nothing may be
 assigned to it — switching off one an assignment still names is refused,
 naming the assignment. Absent is on. `billing: subscription` marks a plan
-whose own window is its limit (T4-19 enforces that); absent is `token`. The
+whose own window is its limit, so a dollar spending limit on one
+(`budgets.providers.<name>`) is refused — see *Budgets*; absent is `token`. The
 one tag a provider shows follows: `local` on this machine, else
 `subscription` or `cloud` (C132 — there is no "By token" tag).
 
@@ -881,6 +882,25 @@ window (so once today, again tomorrow; once this month for a monthly one).
   stops them (`docs/ops/client-api.md`, *Events become requests*).
 - **a crew** fails with `budget_exceeded` and its work row parks as `blocked`
   with the reason. Retrying would re-run the check and land in the same place.
+
+**A subscription has no dollar limit** (C128, C133; T4-19). A provider with
+`billing: subscription` is paid for by its plan, so its calls cost no dollars
+beyond it and a dollar limit on it could never fire: its plan's window is its
+limit, and the provider enforces it. So `budgets.providers.<name>` on one is
+refused by the schema — on every door, since `compute budget`, the console's
+`POST /api/compute/budget` and `providers set --billing subscription` all
+re-validate the whole file before writing — naming the field and the two ways
+out (remove the limit, or `billing: token` if it is billed by the token). The
+instance's limit still applies beside it: it is every provider together.
+
+**Spending limits, side by side.** What Settings › Compute › Spending limits
+reads is `GET /api/compute`'s `limits` (`docs/ops/client-api.md`): this
+instance's limit, each provider's — dollars for a provider billed by the
+token, the calls made in each window for a subscription — and each project's
+daily budget (`projects.daily_budget_usd`, set by `PUT /api/projects/:id`; at
+it an autonomous project flips to review rather than refusing), each beside
+its spend. Core's `spendingLimits` is the fold; the numbers come from the
+`spend` and `projects_rollup` named queries.
 
 Every refusal names the field that would permit it, and the action that would
 relax it. A budget that cannot be measured — `budgets:` set but the `spend`

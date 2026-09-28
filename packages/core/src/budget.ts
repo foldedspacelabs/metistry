@@ -23,7 +23,8 @@
 // with a key the caller dedupes on, so a warning arrives once per window and
 // not once per call.
 
-import { DEFAULT_BUDGET_ACTION, resolveAssignment, type Budget, type BudgetAction, type Budgets, type Compute } from "./compute.js";
+import { DEFAULT_BUDGET_ACTION, resolveAssignment, type Budget, type BudgetAction, type Budgets, type Compute, type ProviderTag } from "./compute.js";
+import type { ProjectMode } from "./projects.js";
 import { ROUTINE_TIER } from "./tiers.js";
 import type { PreflightMiss } from "./preflight.js";
 
@@ -166,6 +167,8 @@ export interface SpendRow {
   provider?: string | null;
   is_today?: boolean | null;
   is_this_month?: boolean | null;
+  /** How many calls the row groups — what a subscription's window is read in, since its calls cost no dollars (T4-19). */
+  calls?: number | string | null;
   cost_usd?: number | string | null;
 }
 
@@ -233,5 +236,169 @@ export function budgetMiss(cfg: Compute, rows: readonly SpendRow[], tierOrCrew: 
     why: `the ${verdict.refusal.scope} ${verdict.refusal.window} budget is spent, so the turn this run would enqueue could not be answered`,
     fix: budgetRefusalMessage(verdict.refusal),
     hit: verdict.refusal,
+  };
+}
+
+// ---- spending limits, as the owner reads them (C130, C133; T4-19) --------------
+//
+// Settings › Compute › Spending limits and the Usage popover read ONE shape:
+// every limit the owner has, side by side — this instance's, each provider's,
+// and each project's daily budget — each beside what has been spent against
+// it. It is a fold over data the caller already read through the one read
+// path (invariant 3: the `spend` and `projects_rollup` named queries); this
+// file never touches a database.
+//
+// Two kinds of limit, and the difference is the ticket:
+//
+//   usd    — per day and per month in dollars, with Allow · Stop · Critical
+//            only. The instance, every provider billed by the token, and a
+//            project's daily budget (which flips the project to review —
+//            `packages/artifacts` `enforceBudget` — rather than refusing).
+//   window — a provider billed by SUBSCRIPTION. Its calls cost no dollars
+//            beyond the plan, so a dollar limit on it could never fire; its
+//            plan's own window is its limit (C128, C133), enforced by the
+//            provider. `compute.yaml`'s schema refuses a dollar limit on one
+//            (`budgets.providers.<name>`), so a subscription row carries no
+//            `daily_usd`, no `monthly_usd` and no action — it carries the
+//            calls made in each window instead.
+
+/** A spending limit in dollars — the instance's, or a provider's billed by the token. */
+export interface DollarLimit {
+  kind: "usd";
+  /** `instance` or `provider:<name>` — the same scope `POST /api/compute/budget` takes. */
+  scope: string;
+  /** The dotted path in `compute.yaml` a write sets — what a refusal names. */
+  field: string;
+  /** Null = no daily limit set. */
+  daily_usd: number | null;
+  /** Null = no monthly limit set. */
+  monthly_usd: number | null;
+  /** What happens at the limit; null = no limit is set here, so nothing happens. */
+  action: BudgetAction | null;
+  /** Spend in both windows; null when the `spend` query is not loaded — never a guessed zero. */
+  spent: Spent | null;
+}
+
+/** A subscription's limit: its plan's window. No dollars and no action — the plan decides, and the provider enforces it. */
+export interface WindowLimit {
+  kind: "window";
+  scope: string;
+  /** Calls made on the plan in each window; null when the `spend` query is not loaded. */
+  used: { calls_today: number; calls_this_month: number } | null;
+}
+
+/** One provider's line: the provider, then its limit. */
+export type ProviderLimit = (DollarLimit | WindowLimit) & { name: string; tag: ProviderTag; enabled: boolean };
+
+/**
+ * A project's daily budget (`projects.daily_budget_usd`), beside the
+ * instance's and the providers'. Set by `PUT /api/projects/:id`, not by
+ * `compute.yaml`: at the limit an autonomous project flips to review
+ * (`at_limit`), it is never a refusal.
+ */
+export interface ProjectLimit {
+  kind: "usd";
+  /** `project:<id>`. */
+  scope: string;
+  id: string;
+  title: string | null;
+  /** Null = the project has no daily budget. */
+  daily_usd: number | null;
+  /** Today's spend, from `projects_rollup` — the same number the Projects pane and the flip read. */
+  spent: { daily: number };
+  mode: ProjectMode;
+  at_limit: "review";
+}
+
+export interface SpendingLimits {
+  instance: DollarLimit;
+  providers: ProviderLimit[];
+  /** Null when `projects_rollup` is not loaded — never a guessed empty list. */
+  projects: ProjectLimit[] | null;
+}
+
+/** What `spendingLimits` needs of a provider — the shape `metistry compute show --json` already reports. */
+export interface LimitProvider {
+  name: string;
+  tag: ProviderTag;
+  enabled: boolean;
+  budget?: Budget | undefined;
+}
+
+/** A row of `projects_rollup`, as the driver returns it (numerics arrive as strings from pg). */
+export interface ProjectBudgetRow {
+  id?: unknown;
+  title?: unknown;
+  mode?: unknown;
+  daily_budget_usd?: unknown;
+  spend_today_usd?: unknown;
+}
+
+/** The seeded query project budgets are read from — the same one `GET /api/projects` reads. */
+export const PROJECTS_QUERY = "projects_rollup";
+
+/** Fold `spend` rows into the calls made in each window, optionally for one provider — a subscription's measure. */
+export function callsFrom(rows: readonly SpendRow[], provider?: string): { calls_today: number; calls_this_month: number } {
+  let today = 0;
+  let month = 0;
+  for (const r of rows) {
+    if (provider !== undefined && (r.provider ?? "") !== provider) continue;
+    const n = money_(r.calls);
+    if (r.is_this_month) month += n;
+    if (r.is_today) today += n;
+  }
+  return { calls_today: today, calls_this_month: month };
+}
+
+function dollarLimit(scope: string, field: string, budget: Budget | undefined, spent: Spent | null): DollarLimit {
+  return {
+    kind: "usd",
+    scope,
+    field,
+    daily_usd: budget?.daily_usd ?? null,
+    monthly_usd: budget?.monthly_usd ?? null,
+    action: budget ? (budget.action ?? DEFAULT_BUDGET_ACTION) : null,
+    spent,
+  };
+}
+
+/**
+ * Every spending limit, side by side (C130's section, C133's rules). A
+ * provider tagged `subscription` is a `window` limit whatever its row says:
+ * the schema already refuses a dollar budget on one, and this reads the tag
+ * rather than trusting that a dollar field could never reach it.
+ */
+export function spendingLimits(input: {
+  instance: Budget | undefined;
+  providers: readonly LimitProvider[];
+  spend: readonly SpendRow[] | null;
+  projects: readonly ProjectBudgetRow[] | null;
+}): SpendingLimits {
+  const { spend } = input;
+  const providers: ProviderLimit[] = input.providers.map((p) => {
+    const scope = `provider:${p.name}`;
+    const head = { name: p.name, tag: p.tag, enabled: p.enabled };
+    if (p.tag === "subscription") return { ...head, kind: "window", scope, used: spend ? callsFrom(spend, p.name) : null };
+    return { ...head, ...dollarLimit(scope, `budgets.providers.${p.name}`, p.budget, spend ? spentFrom(spend, p.name) : null) };
+  });
+  const projects =
+    input.projects?.map((r): ProjectLimit => {
+      const id = String(r.id);
+      const budget = r.daily_budget_usd === null || r.daily_budget_usd === undefined ? null : money_(r.daily_budget_usd);
+      return {
+        kind: "usd",
+        scope: `project:${id}`,
+        id,
+        title: typeof r.title === "string" ? r.title : null,
+        daily_usd: budget,
+        spent: { daily: money_(r.spend_today_usd) },
+        mode: r.mode === "review" ? "review" : "autonomous",
+        at_limit: "review",
+      };
+    }) ?? null;
+  return {
+    instance: dollarLimit("instance", "budgets.instance", input.instance, spend ? spentFrom(spend) : null),
+    providers,
+    projects,
   };
 }

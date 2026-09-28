@@ -211,7 +211,7 @@ enum UsageFixture {
     let shell = ShellModel(stores: ConsoleStores(transport: try FixtureConsole.recorded()), defaults: UserDefaults(suiteName: "usage-\(UUID().uuidString)")!)
     #expect(shell.gauge == .unknown)
     await shell.refreshUsageDetail(now: UsageFixture.now)
-    #expect(shell.gauge.month == 0.0042)
+    #expect(shell.gauge.month == 0.0245) // the recorder's seeded spend this month
     #expect(shell.usageDetail.report(fallback: shell.gauge).gauge == shell.gauge)
     // an instance switch drops what the last one said
     shell.adopt(stores: nil)

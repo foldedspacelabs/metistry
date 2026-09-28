@@ -1242,6 +1242,18 @@ connection's secrets are never delivered: the pool fills them in the process
 that dials. Run `sync --to env` again after adding such a connection, then
 restart the console.
 
+And it delivers **`github_write`** (T2-13) when `secrets.yaml` names it — the
+owner's own fine-grained token with pull-request write, which the console's
+pull request doors post reviews with (`docs/ops/client-api.md`, *Pull
+requests*). It is nobody else's: no connection or agent is granted it, the
+GitHub sync reads with its own read-only token, and the doors send it only to
+`api.github.com`, and only while the secret's *Sent only to* list says so:
+
+```sh
+printf %s "$TOKEN" | metistry secrets set github_write --hosts api.github.com
+metistry secrets sync --to env && metistry restart console
+```
+
 **`sync --to env` mints the generated ones.** A secret that exists in
 neither the Keychain nor `.env` is normally reported ("not in the Keychain,
 left as they are") — inventing a GitHub PAT would be nonsense. The

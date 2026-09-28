@@ -11,7 +11,7 @@ import { readFile } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { KEEP_AWAKE_VALUES, instanceFile, loadCompute, parseKeepAwake, parsePullArg, parsePushArg, providerSecretNames, type DeploymentShape, type Effort, type KeepAwake } from "@foldedspacelabs/metistry-core";
+import { GITHUB_WRITE_SECRET, KEEP_AWAKE_VALUES, instanceFile, loadCompute, parseKeepAwake, parsePullArg, parsePushArg, parseSecretsFile, providerSecretNames, type DeploymentShape, type Effort, type KeepAwake } from "@foldedspacelabs/metistry-core";
 import {
   assign,
   cacheReport,
@@ -375,7 +375,9 @@ const USAGE = `metistry — Metistry command line
       reference as METISTRY_SECRET_<NAME>, from this instance's item — how a
       key reaches the engine, which never reads the Keychain — and every
       secret a sync-read connection lists (Linear's key), which the console's
-      sync fills at the egress door for the secret's listed hosts only.
+      sync fills at the egress door for the secret's listed hosts only, and
+      github_write when secrets.yaml names it — the console's pull request
+      doors post your reviews with it, to api.github.com only.
       purge deletes one instance's items and nothing else — its owner-named
       secrets included; without --yes it only previews.
       retire-legacy-env ends the "still being read as a fallback" notice: it
@@ -1422,6 +1424,16 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
           deliver = [...new Set([...deliver, ...syncSecrets])];
         } catch (e) {
           out(`the connection types could not be read, so no sync's secret is delivered this run (${e instanceof Error ? e.message : String(e)})`);
+        }
+        // ...and the owner's own github_write when secrets.yaml names it
+        // (T2-13): the console's pull request doors post with it, filled only
+        // while its *Sent only to* list names api.github.com. Named by the
+        // file, never assumed: an instance without it delivers nothing
+        const secretsPath = instanceFile(loaded.instanceDir, "secrets");
+        try {
+          if (existsSync(secretsPath) && Object.hasOwn(parseSecretsFile(await readFile(secretsPath, "utf8")).secrets, GITHUB_WRITE_SECRET)) deliver = [...new Set([...deliver, GITHUB_WRITE_SECRET])];
+        } catch (e) {
+          out(`secrets.yaml does not validate, so ${GITHUB_WRITE_SECRET} is not delivered this run (${e instanceof Error ? e.message : String(e)})`);
         }
       }
       // an installed launchd shape (this instance's supervisor.json): the

@@ -557,6 +557,44 @@ describe("metistry secrets sync --to env — a sync-read connection's secret (T4
   });
 });
 
+describe("metistry secrets sync --to env — the owner's github_write (T2-13)", () => {
+  const sync = async (secretsYaml: string | null) => {
+    const dir = await mkdtemp(join(tmpdir(), "metistry-sync-ghw-"));
+    const files: Record<string, string> = {
+      ".metistry/identity.yaml": `name: Aide\ninstance_id: "${INSTANCE_ID}"\n`,
+      ".metistry/state/.env": "METISTRY_DB_HOST=127.0.0.1\n",
+      ...(secretsYaml !== null ? { ".metistry/secrets.yaml": secretsYaml } : {}),
+    };
+    for (const [rel, text] of Object.entries(files)) {
+      await mkdir(join(dir, rel, ".."), { recursive: true });
+      await writeFile(join(dir, rel), text, { mode: 0o600 });
+    }
+    const kc = fakeSecurity({ [`${INSTANCE_ID}/metistry:secret:github_write`]: "github-write-value-for-the-doors" });
+    const out: string[] = [];
+    const code = await main(["secrets", "sync", "--to", "env", "--instance", dir, "--product-dir", fileURLToPath(new URL("../../..", import.meta.url))], {
+      out: (l) => out.push(l),
+      err: (l) => out.push(l),
+      exec: kc.exec,
+      platform: "darwin",
+      fetchFn: (async () => {
+        throw new Error("no network in this test");
+      }) as typeof fetch,
+    });
+    expect(code, out.join("\n")).toBe(0);
+    for (const l of out) expect(l).not.toContain("github-write-value-for-the-doors");
+    return readFileSync(join(dir, ".metistry/state/.env"), "utf8");
+  };
+
+  it("delivers it as METISTRY_SECRET_GITHUB_WRITE for the console's pull request doors when secrets.yaml names it", async () => {
+    expect(await sync("secrets:\n  github_write:\n    hosts: [api.github.com]\n")).toContain("METISTRY_SECRET_GITHUB_WRITE=github-write-value-for-the-doors");
+  });
+
+  it("delivers nothing when secrets.yaml does not name it — a Keychain item alone is not a decision to send it", async () => {
+    expect(await sync(null)).not.toContain("METISTRY_SECRET_GITHUB_WRITE");
+    expect(await sync("secrets: {}\n")).not.toContain("METISTRY_SECRET_GITHUB_WRITE");
+  });
+});
+
 describe("metistry secrets purge", () => {
   const seeded = () =>
     fakeSecurity({

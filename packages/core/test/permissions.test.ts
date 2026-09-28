@@ -61,7 +61,9 @@ describe("every ruled tool maps to exactly one cell (the enumeration)", () => {
   it("every action kind has its cells, and every cell is a Write verb", () => {
     expect(Object.keys(ACTION_PERMISSION_CELLS).sort()).toEqual([...ACTION_KINDS].sort());
     for (const kind of ACTION_KINDS) {
-      expect(ACTION_PERMISSION_CELLS[kind].length, kind).toBeGreaterThan(0);
+      // connection_call alone fills none: a connection is its own row, and its Ask First tools carry the ⏱ there (T4-9)
+      if (kind === "connection_call") expect(ACTION_PERMISSION_CELLS[kind], kind).toEqual([]);
+      else expect(ACTION_PERMISSION_CELLS[kind].length, kind).toBeGreaterThan(0);
       for (const c of ACTION_PERMISSION_CELLS[kind]) {
         expect(c.column, kind).toBe("write");
         expect(typeof c.entries, kind).toBe("object");

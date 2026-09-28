@@ -6,6 +6,12 @@ import { describe, expect, it } from "vitest";
 import {
   ACTION_DEFAULTS,
   ACTION_KINDS,
+  CONFIRM_TOKEN_RE,
+  PROPOSABLE_ACTION_KINDS,
+  canonicalJson,
+  confirmTokenDigest,
+  connectionCallDigest,
+  mintConfirmToken,
   ACTION_MODES,
   AUTONOMY_LEVELS,
   admitsAnyAction,
@@ -22,8 +28,10 @@ import {
 const dispatch = { kind: "dispatch", args: { work_id: 12, target: "devin", brief: "look at the flake" } };
 
 describe("the enum is closed", () => {
-  it("admits exactly four kinds and nothing else", () => {
-    expect([...ACTION_KINDS]).toEqual(["dispatch", "task_update", "comment", "capture"]);
+  it("admits exactly five kinds and nothing else — and propose_action raises four of them", () => {
+    expect([...ACTION_KINDS]).toEqual(["dispatch", "task_update", "comment", "capture", "connection_call"]);
+    // connection_call is raised by the connections proxy, which builds and previews its payload (T4-9)
+    expect([...PROPOSABLE_ACTION_KINDS]).toEqual(["dispatch", "task_update", "comment", "capture"]);
     for (const kind of ["send_email", "message", "git_push", "shell", "grant", "autonomy", "", "DISPATCH"]) {
       const r = parseAction({ kind, args: {} });
       expect(r.ok, kind).toBe(false);
@@ -85,6 +93,70 @@ describe("the enum is closed", () => {
     expect(describeAction(parseActionOrThrow(dispatch))).toBe('dispatch task #12 to target "devin"');
     expect(describeAction(parseActionOrThrow({ kind: "task_update", args: { work_id: 7, patch: { status: "blocked", owner: null } } }))).toBe("update task #7: status → blocked, owner → none");
     expect(describeAction(parseActionOrThrow({ kind: "capture", args: { note: "n", filename: "a.md" } }))).toBe("capture a note as a.md");
+    expect(describeAction(parseActionOrThrow(connectionCall))).toBe("call create_issue on github");
+  });
+});
+
+const TOKEN = "A".repeat(43);
+const connectionCall = { kind: "connection_call", args: { connection: "github", tool: "create_issue", args: { title: "flake" }, confirm_token: TOKEN } };
+
+describe("connection_call — closed to {connection, tool, args, confirm_token} (plan §2.1 Q5)", () => {
+  it("parses the closed shape and refuses anything beside it", () => {
+    expect(parseAction(connectionCall).ok).toBe(true);
+    expect(actionWorkId(parseActionOrThrow(connectionCall))).toBeUndefined();
+    for (const bad of [
+      { ...connectionCall.args, confirm_token: undefined }, // no token: nothing previewed it
+      { ...connectionCall.args, confirm_token: "short" }, // not a token the preview mints
+      { ...connectionCall.args, approved: true }, // a caller never says it was approved
+      { ...connectionCall.args, principal: "user" }, // nor who it runs as
+      { ...connectionCall.args, connection: "GitHub" }, // a connection name is kebab-case
+      { ...connectionCall.args, connection: "../secrets" },
+      { ...connectionCall.args, tool: "" },
+      { ...connectionCall.args, args: "title=flake" },
+    ]) {
+      expect(parseAction({ kind: "connection_call", args: bad }).ok, JSON.stringify(bad)).toBe(false);
+    }
+  });
+
+  it("mints a fresh 256-bit token every time, and keeps only its digest", () => {
+    const a = mintConfirmToken();
+    const b = mintConfirmToken();
+    expect(a).toMatch(CONFIRM_TOKEN_RE);
+    expect(a).not.toBe(b);
+    expect(confirmTokenDigest(a)).toMatch(/^[0-9a-f]{64}$/);
+    expect(confirmTokenDigest(a)).not.toContain(a);
+    expect(confirmTokenDigest(a)).not.toBe(confirmTokenDigest(b));
+  });
+
+  it("binds one payload: key order never matters, and any other principal, connection, tool or argument is another digest", () => {
+    const base = { principal: "scout", connection: "github", tool: "create_issue", args: { title: "flake", labels: ["ci"], body: { a: 1, b: 2 } } };
+    expect(connectionCallDigest(base)).toBe(connectionCallDigest({ ...base, args: { body: { b: 2, a: 1 }, labels: ["ci"], title: "flake" } }));
+    expect(canonicalJson({ b: 1, a: [2, { d: 1, c: 0 }] })).toBe('{"a":[2,{"c":0,"d":1}],"b":1}');
+    for (const other of [
+      { ...base, principal: "writer" },
+      { ...base, connection: "gitlab" },
+      { ...base, tool: "delete_repo" },
+      { ...base, args: { ...base.args, title: "flake!" } },
+      { ...base, args: { ...base.args, labels: ["ci", "p0"] } },
+    ]) {
+      expect(connectionCallDigest(other), JSON.stringify(other)).not.toBe(connectionCallDigest(base));
+    }
+  });
+
+  it("is never allow, at any level or by any entry — and even observe may ask, since asking runs nothing", () => {
+    for (const level of AUTONOMY_LEVELS) {
+      expect(effectiveActions({ level }).connection_call, level).toBe("propose");
+      const clamped = effectiveActionsDetailed({ level, actions: { connection_call: "allow" } }).connection_call;
+      expect(clamped, level).toEqual({ mode: "propose", source: "clamped", ceiling: "propose", asked: "allow" });
+      // the owner may turn one agent's asking off
+      expect(effectiveActions({ level, actions: { connection_call: "deny" } }).connection_call, level).toBe("deny");
+    }
+    // the ceiling swallows a raise to allow, so it is no widening; deny → propose is one
+    expect(autonomyWidenings({}, { actions: { connection_call: "allow" } })).toEqual([]);
+    expect(autonomyWidenings({ actions: { connection_call: "deny" } }, {})).toEqual(["actions.connection_call deny → propose"]);
+    // and asking about a connection call never offers propose_action
+    expect(admitsAnyAction({})).toBe(false);
+    expect(admitsAnyAction({ level: "act_within_scope", actions: { dispatch: "deny", task_update: "deny", comment: "deny", capture: "deny" } })).toBe(false);
   });
 });
 
@@ -92,15 +164,17 @@ describe("the level is a ceiling", () => {
   it("an absent level is observe: nothing, so the axis is opt-in", () => {
     for (const record of [undefined, null, {}, { max_open_bundles: 2 } as never]) {
       const t = effectiveActions(record as never);
-      expect(ACTION_KINDS.every((k) => t[k] === "deny"), JSON.stringify(record)).toBe(true);
+      expect(PROPOSABLE_ACTION_KINDS.every((k) => t[k] === "deny"), JSON.stringify(record)).toBe(true);
+      // the one exception is a request, never a power: an Ask First connection call waits for the owner
+      expect(t.connection_call).toBe("propose");
       expect(admitsAnyAction(record as never)).toBe(false);
     }
   });
 
   it("ships the product defaults, dispatch human at every level", () => {
     expect(effectiveActions({ level: "observe" })).toEqual(ACTION_DEFAULTS.observe);
-    expect(effectiveActions({ level: "propose" })).toEqual({ dispatch: "propose", task_update: "propose", comment: "propose", capture: "propose" });
-    expect(effectiveActions({ level: "act_within_scope" })).toEqual({ dispatch: "propose", task_update: "allow", comment: "allow", capture: "allow" });
+    expect(effectiveActions({ level: "propose" })).toEqual({ dispatch: "propose", task_update: "propose", comment: "propose", capture: "propose", connection_call: "propose" });
+    expect(effectiveActions({ level: "act_within_scope" })).toEqual({ dispatch: "propose", task_update: "allow", comment: "allow", capture: "allow", connection_call: "propose" });
   });
 
   it("clamps a per-kind entry to the level — an `allow` below act_within_scope never becomes one", () => {
@@ -108,6 +182,7 @@ describe("the level is a ceiling", () => {
     // arithmetic instead of a rule a second call site could forget
     expect(effectiveActions({ level: "propose", actions: { comment: "allow" } }).comment).toBe("propose");
     expect(effectiveActions({ level: "observe", actions: { comment: "allow", capture: "propose" } })).toEqual(ACTION_DEFAULTS.observe);
+    expect(effectiveActions({ level: "act_within_scope", actions: { connection_call: "allow" } }).connection_call).toBe("propose");
     // and narrowing works in every direction it should
     expect(effectiveActions({ level: "act_within_scope", actions: { comment: "deny" } }).comment).toBe("deny");
     expect(effectiveActions({ level: "act_within_scope", actions: { dispatch: "allow" } }).dispatch).toBe("allow");

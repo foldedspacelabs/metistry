@@ -84,10 +84,18 @@ export { THREAD_TOOL_NAMES, registerThreadTools, type ThreadToolName } from "./t
 export { CREW_TOOL_NAMES, crewRoster, registerCrewTools, type CrewDispatcher, type CrewDispatchInput, type CrewDispatchOutcome, type CrewSummary, type CrewToolName } from "./crew-tools.js";
 export {
   CONNECTIONS_TOOL_NAMES,
+  DEFAULT_CONNECTION_ASKS_PER_HOUR,
+  DEFAULT_CONNECTION_CALLS_PER_HOUR,
+  DEFAULT_CONNECTION_CONFIRM_TTL_S,
+  DEFAULT_CONNECTION_LIMITS,
   NO_SUCH_TOOL,
+  howToolRuns,
+  offeredTool,
   registerConnectionsTools,
-  servedThisRelease,
+  type ConnectionLimits,
   type ConnectionsProxy,
+  type ConnectionsToolOptions,
+  type ToolRuns,
   type ConnectionsToolName,
   type ProxiedCallOutcome,
   type ProxiedConnection,
@@ -97,3 +105,14 @@ export {
 export { QUERIES_TOOL_NAMES, registerQueriesTools, MAX_ROWS as QUERIES_MAX_ROWS, type QueriesToolName } from "./queries-tools.js";
 export { ACTION_TOOL_NAMES, registerActionTools, proposeAction, type ActionExecutor, type ActionExecution, type ActionToolName } from "./action-tools.js";
 export { type Outcome } from "./outcome.js";
+export {
+  recentConnectionCalls,
+  recordConfirm,
+  redeemApprovalToken,
+  redeemCallerToken,
+  releaseApprovalToken,
+  type ConfirmMode,
+  type ConfirmRecord,
+  type RedeemMiss,
+  type Redeemed,
+} from "./connection-confirm.js";

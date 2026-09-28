@@ -22,6 +22,7 @@
 //     "auto-execute happens only at act_within_scope" a property of the
 //     arithmetic rather than a rule somewhere else that could be forgotten.
 
+import { createHash, randomBytes } from "node:crypto";
 import { z } from "zod";
 
 /**
@@ -30,9 +31,27 @@ import { z } from "zod";
  * row — the proposal adds a door, never a power. Deliberately absent: sending
  * anything (mail, message), git, shell, and any change to grants or autonomy
  * (invariant 2 — the credential surface is never an agent's to widen).
+ *
+ * `connection_call` (plan §1.1 Q5, §2.6; T4-9) is the fifth: one tool of one
+ * of the owner's connections, set to Ask First, run through the connections
+ * pool — the connection service — once the owner approves. Its reach is
+ * itself enumerated by the owner's hand (the connection file's `tools:`), and
+ * its effective mode is never `allow` (`ACTION_KIND_CEILING`). It is raised by
+ * the proxy's `connections_call`, which builds the payload and previews it —
+ * never by `propose_action` (`PROPOSABLE_ACTION_KINDS`), so what an Approve
+ * runs is the server's payload and never a caller's.
  */
-export const ACTION_KINDS = ["dispatch", "task_update", "comment", "capture"] as const;
+export const ACTION_KINDS = ["dispatch", "task_update", "comment", "capture", "connection_call"] as const;
 export type ActionKind = (typeof ACTION_KINDS)[number];
+
+/**
+ * The kinds `propose_action` raises. `connection_call` is not one: its payload
+ * is built and previewed by the connections proxy (`connections_call`), which
+ * holds the confirm token that binds an Approve to exactly that payload.
+ */
+export const PROPOSABLE_ACTION_KINDS = ["dispatch", "task_update", "comment", "capture"] as const satisfies readonly ActionKind[];
+export type ProposableActionKind = (typeof PROPOSABLE_ACTION_KINDS)[number];
+export const isProposableActionKind = (k: ActionKind): k is ProposableActionKind => (PROPOSABLE_ACTION_KINDS as readonly ActionKind[]).includes(k);
 
 /** What an agent may do with one kind. Ordered least → most: the INDEX is the rank, so comparisons never need a second table. */
 export const ACTION_MODES = ["deny", "propose", "allow"] as const;
@@ -89,16 +108,80 @@ const commentArgs = z
     if (!onArtifact && a.version_id !== undefined) ctx.addIssue({ code: "custom", path: ["version_id"], message: "version_id belongs to an artifact comment; a room on a task has no versions" });
   });
 
+// --- connection_call: the preview's confirm token ------------------------------
+//
+// Preview-then-confirm (CLAUDE.md, Packages; eventkit's shipped mechanism,
+// packages/mcp-eventkit/src/index.ts): a call that changes something first
+// comes back as a preview and a token, nothing dialled, and runs only when
+// the token is presented. The token is 32 random bytes; the server keeps its
+// SHA-256 and the SHA-256 of the canonical payload it previewed, never the
+// token itself, and redeems it once (mcp-brain's connection-confirm.ts). A
+// token that does not match what it previewed, or comes back a second time,
+// is refused — nothing runs.
+
+/** A confirm token as minted: 32 random bytes, base64url, no padding. */
+export const CONFIRM_TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
+
+/** A fresh confirm token. */
+export function mintConfirmToken(): string {
+  return randomBytes(32).toString("base64url");
+}
+
+/** What the server keeps of a token: its SHA-256, hex. */
+export function confirmTokenDigest(token: string): string {
+  return createHash("sha256").update(`metistry-confirm\0${token}`).digest("hex");
+}
+
+/** JSON with every object's keys sorted — so the same payload always hashes the same, whatever order a caller wrote it in. */
+export function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map((v) => canonicalJson(v === undefined ? null : v)).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, v]) => v !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonicalJson(v)}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+/** The one payload a confirm token binds: who asked, which connection, which tool, which arguments. */
+export interface ConnectionCallPayload {
+  principal: string;
+  connection: string;
+  tool: string;
+  args: Record<string, unknown>;
+}
+
+/** The SHA-256 of the canonical payload — what a redemption compares, so a token previewed for one call can never run another. */
+export function connectionCallDigest(p: ConnectionCallPayload): string {
+  return createHash("sha256")
+    .update(canonicalJson({ principal: p.principal, connection: p.connection, tool: p.tool, args: p.args }))
+    .digest("hex");
+}
+
+/** A connection's name as a connection file spells it (core's connectionFileSchema: lowercase kebab). */
+const connectionName = z.string().regex(/^[a-z][a-z0-9-]*$/, "a connection name is lowercase kebab-case").max(64);
+/** A tool's name as an upstream spells it (connectionFileSchema's `toolName`). */
+const upstreamToolName = z.string().regex(/^[A-Za-z][A-Za-z0-9_.-]*$/, "a tool name starts with a letter and uses letters, digits, _ . -").max(128);
+
+const connectionCallArgs = z.strictObject({
+  connection: connectionName,
+  tool: upstreamToolName,
+  args: z.record(z.string(), z.unknown()),
+  confirm_token: z.string().regex(CONFIRM_TOKEN_RE, "a confirm token is the one the preview returned"),
+});
+
 /**
  * `{kind, args}` as it is stored in `proposals.payload.action` and as the
  * bridge's `propose_action` receives it. A discriminated union so an unknown
- * kind fails on the discriminator with the four that exist named back.
+ * kind fails on the discriminator with the five that exist named back.
  */
 export const actionSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("dispatch"), args: z.strictObject({ work_id: workRef, target: text(120), brief: text(100_000) }) }),
   z.strictObject({ kind: z.literal("task_update"), args: z.strictObject({ work_id: workRef, patch: taskPatch }) }),
   z.strictObject({ kind: z.literal("comment"), args: commentArgs }),
   z.strictObject({ kind: z.literal("capture"), args: z.strictObject({ note: text(200_000), filename: z.string().max(200).optional() }) }),
+  z.strictObject({ kind: z.literal("connection_call"), args: connectionCallArgs }),
 ]);
 
 export type Action = z.infer<typeof actionSchema>;
@@ -116,7 +199,7 @@ export function parseAction(input: unknown): { ok: true; action: Action } | { ok
 
 /** The work row an action is about, when it names one — what `proposals.work_id` is set from, so staleness and the room join for free. */
 export function actionWorkId(action: Action): number | undefined {
-  if (action.kind === "capture") return undefined;
+  if (action.kind === "capture" || action.kind === "connection_call") return undefined;
   if (action.kind === "comment") return action.args.work_id;
   return action.args.work_id;
 }
@@ -136,6 +219,8 @@ export function describeAction(action: Action): string {
         : `comment on ${action.args.artifact_id} @ ${action.args.version_id}`;
     case "capture":
       return `capture a note${action.args.filename ? ` as ${action.args.filename}` : ""}`;
+    case "connection_call":
+      return `call ${action.args.tool} on ${action.args.connection}`;
   }
 }
 
@@ -149,15 +234,32 @@ export const LEVEL_CEILING: Readonly<Record<AutonomyLevel, ActionMode>> = {
 };
 
 /**
+ * A kind whose ceiling is its own, whatever the level. `connection_call` is
+ * `propose` at every level (plan §1.1 Q5: "its effective mode is never `allow`
+ * in its first release"): an Ask First call waits for the owner's Approve,
+ * so asking is not a power (the rule `request_access` follows) and even
+ * `observe` may ask — while no level, and no per-kind entry, can make one run
+ * without the owner. The owner may still set it to `deny` for one agent, and
+ * the proxy then refuses that agent's Ask First calls outright.
+ */
+export const ACTION_KIND_CEILING: Readonly<Partial<Record<ActionKind, ActionMode>>> = { connection_call: "propose" };
+
+/** The most one kind may be at one level: its own ceiling where it has one, else the level's. */
+export function ceilingFor(level: AutonomyLevel, kind: ActionKind): ActionMode {
+  return ACTION_KIND_CEILING[kind] ?? LEVEL_CEILING[level];
+}
+
+/**
  * What each level means with no per-kind entry. `dispatch` is `propose` even
  * at `act_within_scope`: it is the one kind that leaves the machine, and
  * off-machine is a human decision by default (§4.12). The owner can still set
  * it to `allow` by hand — that is a widening, and widenings are recorded.
+ * `connection_call` is `propose` everywhere — its own ceiling, above.
  */
 export const ACTION_DEFAULTS: Readonly<Record<AutonomyLevel, Readonly<Record<ActionKind, ActionMode>>>> = {
-  observe: { dispatch: "deny", task_update: "deny", comment: "deny", capture: "deny" },
-  propose: { dispatch: "propose", task_update: "propose", comment: "propose", capture: "propose" },
-  act_within_scope: { dispatch: "propose", task_update: "allow", comment: "allow", capture: "allow" },
+  observe: { dispatch: "deny", task_update: "deny", comment: "deny", capture: "deny", connection_call: "propose" },
+  propose: { dispatch: "propose", task_update: "propose", comment: "propose", capture: "propose", connection_call: "propose" },
+  act_within_scope: { dispatch: "propose", task_update: "allow", comment: "allow", capture: "allow", connection_call: "propose" },
 };
 
 /** The two keys of `agents.autonomy` this file owns. The §4.21 narrowing keys live beside them and are none of this file's business. */
@@ -195,9 +297,9 @@ export interface EffectiveActionEntry {
  */
 export function effectiveActionsDetailed(a: ActionAutonomy | null | undefined): Record<ActionKind, EffectiveActionEntry> {
   const level = a?.level ?? DEFAULT_AUTONOMY_LEVEL;
-  const ceiling = LEVEL_CEILING[level];
   const out = {} as Record<ActionKind, EffectiveActionEntry>;
   for (const kind of ACTION_KINDS) {
+    const ceiling = ceilingFor(level, kind);
     const own = a?.actions?.[kind];
     const asked = own ?? ACTION_DEFAULTS[level][kind];
     const clamped = modeRank(asked) > modeRank(ceiling);
@@ -224,10 +326,14 @@ export function effectiveActions(a: ActionAutonomy | null | undefined): Record<A
   return out;
 }
 
-/** True when this record admits anything at all — the bridge registers `propose_action` only then (docs/ops/actions.md, discovery). */
+/**
+ * True when this record admits anything `propose_action` can raise — the
+ * bridge registers the tool only then (docs/ops/actions.md, discovery).
+ * `connection_call` is not counted: the proxy raises it, not this tool.
+ */
 export function admitsAnyAction(a: ActionAutonomy | null | undefined): boolean {
   const table = effectiveActions(a);
-  return ACTION_KINDS.some((k) => table[k] !== "deny");
+  return PROPOSABLE_ACTION_KINDS.some((k) => table[k] !== "deny");
 }
 
 /**
@@ -258,4 +364,5 @@ export const actionTableSchema = z.strictObject({
   task_update: z.enum(ACTION_MODES).optional(),
   comment: z.enum(ACTION_MODES).optional(),
   capture: z.enum(ACTION_MODES).optional(),
+  connection_call: z.enum(ACTION_MODES).optional(),
 });

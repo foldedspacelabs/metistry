@@ -17,12 +17,28 @@
 // One action is ONE service call. That is what makes "a failure never leaves
 // it half-applied" true by construction rather than by a rollback nobody
 // tested — there is no second step to strand.
+//
+// `connection_call` (T4-9) is the same rule with the connection service — the
+// pooled client behind the proxy — as the service. What it adds is the
+// confirm token: Approve runs the payload the proxy built, previewed and bound
+// to that token when the agent asked, and nothing a client sends with the
+// Approve. The token is spent by the Approve that uses it, so the same
+// request cannot run twice and a token copied into another row runs nothing.
 
 import { Buffer } from "node:buffer";
-import { finishRun, startRun, type Action, type ActionKind, type ErrorCode } from "@foldedspacelabs/metistry-core";
+import {
+  EgressRefused,
+  confirmTokenDigest,
+  connectionCallDigest,
+  finishRun,
+  startRun,
+  type Action,
+  type ActionKind,
+  type ErrorCode,
+} from "@foldedspacelabs/metistry-core";
 import { TasksError, type TasksService } from "@foldedspacelabs/metistry-tasks";
 import { ArtifactsError, type ArtifactsService, type Principal } from "@foldedspacelabs/metistry-artifacts";
-import { captureToInbox, type CaptureSink } from "@foldedspacelabs/metistry-mcp-brain";
+import { captureToInbox, redeemApprovalToken, releaseApprovalToken, type CaptureSink, type ConnectionsProxy } from "@foldedspacelabs/metistry-mcp-brain";
 import { dispatch, type TargetRegistry } from "./dispatch.js";
 import { refusalCode, refusalMessage } from "./task-routes.js";
 import type { Db } from "./auth-store.js";
@@ -44,13 +60,20 @@ export interface ActionServices {
   targets?: TargetRegistry | undefined;
   artifacts?: ArtifactsService | undefined;
   inbox: CaptureSink;
+  /** The pooled client the connections proxy dials through (`ConnectionsProxy.call`). Absent → a `connection_call` answers `not_available`. */
+  connections?: Pick<ConnectionsProxy, "call"> | undefined;
 }
 
 /** Who asked, and which proposal this is — provenance and the idempotency key, never authority. */
 export interface ActionContext {
   proposalId: number;
   onBehalfOf: string;
+  /** `connection_call` only: the `runs` row whose confirm record the Approve redeems (`payload.preview_run`, written by the proxy with the row). */
+  previewRun?: number | undefined;
 }
+
+/** How much of an upstream's answer is kept on the request as its result — the rest is in the answer the agent reads, not the queue. */
+const CONNECTION_RESULT_MAX_CHARS = 8_000; // limit: fixed — a Needs You row carries a readable result, not an archive; the connection_call runs row is the record
 
 export type ActionOutcome =
   | { ok: true; result: Record<string, unknown> }
@@ -147,6 +170,9 @@ async function execute(svc: ActionServices, action: Action, ctx: ActionContext):
       }
     }
 
+    case "connection_call":
+      return runConnectionCall(svc, action, ctx);
+
     case "capture": {
       // Keyed on the proposal, so a double-tap on Approve — or a retry after a
       // dropped response — lands one inbox row, not two.
@@ -162,5 +188,106 @@ async function execute(svc: ActionServices, action: Action, ctx: ActionContext):
       });
       return { ok: true, result: { inbox_id: r.id, path: r.path, ...(r.replayed ? { replayed: true } : {}) } };
     }
+  }
+}
+
+/** The pool's refusal, duck-typed as mcp-brain does: decided before anything was dialled. */
+function refusalCodeOf(err: unknown): string | undefined {
+  if (err instanceof EgressRefused) return err.code;
+  if (err instanceof Error && err.name === "ConnectionRefused" && typeof (err as { code?: unknown }).code === "string") return (err as unknown as { code: string }).code;
+  return undefined;
+}
+
+/** A pre-dial refusal's code, as this door's envelope says it. */
+function refusalAnswer(code: string): ErrorCode {
+  switch (code) {
+    case "unknown_connection":
+    case "tool_not_listed":
+    case "tool_off":
+      return "not_found";
+    case "caller_credential":
+      return "invalid_request";
+    default:
+      return "not_available";
+  }
+}
+
+/**
+ * Approve on an Ask First connection call. Three things before anything is
+ * dialled, each a refusal that leaves the request pending with why (C45):
+ *
+ *   1. the token redeems — the one the proxy minted for THIS request, for the
+ *      agent that asked, unspent. A replay, or a token copied into another
+ *      row, matches nothing;
+ *   2. the payload is the one it previewed — the digest the proxy recorded
+ *      against {agent, connection, tool, args}. A row whose arguments were
+ *      changed after the preview runs nothing;
+ *   3. the pool still agrees — the tool may have moved to Never since.
+ *
+ * The call is `approved: true` (the pool's Ask First gate) and records its
+ * own `connection_call` row, so the audit of what reached a connection is one
+ * kind whichever door it came through. A refusal decided before dialling
+ * gives the token back — nothing reached the upstream, so Approve may be
+ * pressed again once it is fixed; a call that was dialled keeps it spent,
+ * because an upstream that failed may still have acted.
+ */
+async function runConnectionCall(svc: ActionServices, action: Action & { kind: "connection_call" }, ctx: ActionContext): Promise<ActionOutcome> {
+  const { connection, tool, args, confirm_token } = action.args;
+  if (!svc.connections) {
+    return { ok: false, code: "not_available", message: `approving this calls ${tool} on ${connection}, and this console has no connections pool wired — nothing ran (docs/ops/connections.md)` };
+  }
+  if (ctx.previewRun === undefined || !Number.isSafeInteger(ctx.previewRun)) {
+    return { ok: false, code: "invalid_request", message: "this request carries no preview the proxy recorded, so Approve runs nothing — Decline it; the agent can ask again through connections_call" };
+  }
+  const redeemed = await redeemApprovalToken(svc.db, { previewRun: ctx.previewRun, principal: ctx.onBehalfOf, digest: confirmTokenDigest(confirm_token), proposalId: ctx.proposalId });
+  if (!redeemed.ok) {
+    return {
+      ok: false,
+      code: "conflict",
+      message: `this request's confirm token ${redeemed.miss === "spent" ? "was already used" : "was not issued for this request"} — nothing ran. Decline it; the agent can ask again`,
+      details: { refused: `confirm_${redeemed.miss}` },
+    };
+  }
+  // The server's payload, never the client's: the arguments about to run are
+  // held to the digest the proxy recorded when it previewed them.
+  if (redeemed.payload !== connectionCallDigest({ principal: ctx.onBehalfOf, connection, tool, args })) {
+    return { ok: false, code: "conflict", message: "this request's arguments are not the ones the agent's call previewed — nothing ran. Decline it; the agent can ask again", details: { refused: "confirm_other_payload" } };
+  }
+
+  const runId = await startRun(svc.db, {
+    component: ctx.onBehalfOf,
+    kind: "connection_call",
+    tool: "approve",
+    meta: { via: "console", connection, connection_tool: tool, mode: "approved", proposal: ctx.proposalId, preview_run: ctx.previewRun, principal: "user", on_behalf_of: ctx.onBehalfOf },
+  });
+  try {
+    const out = await svc.connections.call({ connection, tool, args, approved: true });
+    await finishRun(svc.db, runId, { ok: true, meta: { dialled: true, is_error: out.isError, secrets: [...out.secrets] } });
+    const text = JSON.stringify(out.content);
+    return {
+      ok: true,
+      result: {
+        connection,
+        tool,
+        is_error: out.isError,
+        connection_run: runId,
+        ...(text.length <= CONNECTION_RESULT_MAX_CHARS ? { content: out.content } : { content_omitted: true }),
+      },
+    };
+  } catch (err) {
+    const refusal = refusalCodeOf(err);
+    const message = err instanceof Error ? err.message : String(err);
+    if (refusal !== undefined) {
+      await releaseApprovalToken(svc.db, ctx.previewRun);
+      await finishRun(svc.db, runId, { ok: false, error: refusal, meta: { refusal, detail: message.slice(0, 500) } });
+      return { ok: false, code: refusalAnswer(refusal), message: `${connection} refused the call before anything was sent (${refusal}) — nothing ran; Connections shows why, and Approve can be pressed again once it is fixed`, details: { refused: refusal } };
+    }
+    await finishRun(svc.db, runId, { ok: false, error: message.slice(0, 500), meta: { dialled: true } });
+    return {
+      ok: false,
+      code: "not_available",
+      message: `${connection} did not answer the call — it was sent, so it is not repeated; check ${connection} itself, then Decline this request`,
+      details: { refused: "upstream" },
+    };
   }
 }

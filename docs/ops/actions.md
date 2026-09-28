@@ -8,7 +8,7 @@ in the console's view map nothing emitted (`2026-09-16-taskuary-review.md` ADOPT
 use it (A3 / OPEN-2: **widening is allowed, by the owner's hand**).
 
 **The enum is closed and it is data.** An `action` proposal carries
-`payload.action = {kind, args}`; `kind` is one of exactly four, held in
+`payload.action = {kind, args}`; `kind` is one of exactly five, held in
 `packages/core/src/actions.ts` as a list plus a zod schema per kind. An unknown
 kind — or an argument the schema does not admit — is a `400` naming the field:
 
@@ -18,6 +18,7 @@ kind — or an argument the schema does not admit — is a `400` naming the fiel
 | `task_update` | `{work_id, patch}` | `TasksService.update()` — what the board's drag calls |
 | `comment` | `{work_id, body}` or `{artifact_id, version_id, body}` | `workComment()` / `commentCreate()` |
 | `capture` | `{note, filename?}` | `captureToInbox()` |
+| `connection_call` | `{connection, tool, args, confirm_token}` | the connections pool's `call()`, `approved` — what `connections_call` dials (T4-9; below) |
 
 What is *not* on it is the point: no email, no message, no git, no shell, no
 grant. Every kind is something the console can already do through an existing
@@ -32,11 +33,17 @@ the two, so `allow` can only come out of `act_within_scope`. `dispatch` stays
 `propose` unless set (off-machine is a human decision by default) and an absent
 level is `observe`, so this release widens nobody. With no per-kind entry:
 
-| | `dispatch` | `task_update` | `comment` | `capture` |
-| --- | --- | --- | --- | --- |
-| `observe` (**and an absent level**) | deny | deny | deny | deny |
-| `propose` | propose | propose | propose | propose |
-| `act_within_scope` | **propose** | allow | allow | allow |
+| | `dispatch` | `task_update` | `comment` | `capture` | `connection_call` |
+| --- | --- | --- | --- | --- | --- |
+| `observe` (**and an absent level**) | deny | deny | deny | deny | **propose** |
+| `propose` | propose | propose | propose | propose | propose |
+| `act_within_scope` | **propose** | allow | allow | allow | **propose** |
+
+`connection_call` has a ceiling of its own, `propose` at every level
+(`ACTION_KIND_CEILING`): an Ask First call waits for your Approve, so asking is
+not a power (the rule `request_access` follows) and no level or entry makes one
+run without you. The one thing you may set is `deny`, which turns that agent's
+asking off.
 
 **Resolving the table names WHY, not just what** (`effectiveActionsDetailed`,
 C46/C47): every kind's effective mode is `set` (the owner's own per-kind
@@ -97,6 +104,46 @@ credential rather than by a meta-tool index is the cheaper half of that
 research's own advice: it costs zero extra turns, where the `tool_index` /
 `execute` / `batch` pattern cost +1 turn and +34% prompt tokens on a surface
 this size.
+
+## Connection calls — Ask First, approved in Needs You (T4-9)
+
+A connection's tools each carry **your** policy — Allow · Ask First · Never,
+defaulting to Ask First (CLAUDE.md; `docs/ops/connections.md`). An agent
+reaches them through `connections_call` on `/mcp`, and the policy decides what
+that call does:
+
+| The tool | What `connections_call` does |
+| --- | --- |
+| Never, or not listed | `not_found`, *no such tool* — token or not |
+| a Read at Allow | runs at once |
+| Changes things / Starts an agent at Allow | **preview-then-confirm**: answers `{status: "preview", confirm_token, expires_in_sec}`, nothing dialled; runs when the agent calls again with the token and the same arguments |
+| anything at Ask First | answers `{status: "pending", proposal_id}` and raises an `action` of kind `connection_call` in Needs You; runs only on your Approve |
+
+**The row is the proxy's, never the agent's.** `connections_call` builds the
+payload from the call it just gated — `{connection, tool, args,
+confirm_token}` — and writes it with `payload.preview_run`, the `runs` row that
+holds the token's record. `propose_action` never raises this kind: it is not
+offered there, and asking anyway is a `400` naming `connections_call`.
+
+**Approve runs the server's payload, never the client's.** The stored
+arguments must match the digest the proxy recorded at preview, and the token
+must be the one minted for this request, for the agent that asked, unspent:
+nothing in the answer's body reaches the call, a row edited after the preview
+runs nothing, and a copy of the row — token and all — runs nothing. The call
+goes through the pool with `approved: true` and records its own
+`connection_call` runs row (`tool: approve`, `component` the agent, `meta.mode:
+approved`); `payload.result` carries `{connection, tool, is_error,
+connection_run, content}` (content up to 8,000 characters).
+
+**A token runs once.** Approve spends it. A second Approve is `409
+already_decided`; the copy's is `409` with *not issued for this request*.
+**C45 on this path:** a refusal decided before anything was dialled (the tool
+moved to Never, a grant is missing) leaves the row pending with why **and gives
+the token back** — fix it and Approve again. A call that was sent and failed
+keeps its token spent and the row pending: the upstream may have acted, so it
+is never repeated — check the service, then Decline.
+
+**Revise and Decline** settle the row and run nothing.
 
 ## Access requests — the other row this file describes
 
@@ -197,6 +244,11 @@ queue, through the one triage route.
   when Approve traded `index` browse away (C41);
   `{"decision":"accept_with_changes","area":"…"}` grants that area instead,
   and only if it is at or under the one asked for (C40).
+- `POST /api/proposals/:id {"decision":"allow"}` on a `connection_call` row
+  runs the proxy's payload through the pool and answers `{ok: true, action:
+  {kind: "connection_call", connection, tool, is_error, connection_run,
+  content?}}`; `409` when its token is spent or not this request's, or its
+  arguments are not the previewed ones — nothing ran.
 - Every path lands in `runs`: `console/tool/propose_action` (the emit),
   `console/triage/action:<kind>` (the decision), `console/action/<kind>` (the
   execution, plus whatever the service itself records), and

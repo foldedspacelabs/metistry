@@ -199,7 +199,8 @@ function renderActionLine(entry: EffectiveActionEntry, level: AutonomyLevel, ui:
 
 export function renderAutonomy(v: AutonomyView, ui: Ui = defaultUi()): string {
   const lines = [`agent      ${v.agent} (${v.display_name})`, `level      ${v.level}`];
-  for (const kind of ACTION_KINDS) lines.push(`  ${kind.padEnd(12)} ${renderActionLine(v.actionsDetailed[kind], v.level, ui)}`);
+  const width = Math.max(...ACTION_KINDS.map((k) => k.length));
+  for (const kind of ACTION_KINDS) lines.push(`  ${kind.padEnd(width)} ${renderActionLine(v.actionsDetailed[kind], v.level, ui)}`);
   if (v.widened.length > 0) lines.push(`widened    ${v.widened.join("; ")} — recorded in runs, and you have an alert`);
   lines.push(`modes      ${ACTION_MODES.map((m) => MODE_LABEL[m]).join(" | ")} · a level is a ceiling (docs/ops/actions.md)`);
   return lines.join("\n");

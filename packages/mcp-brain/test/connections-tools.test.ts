@@ -6,8 +6,9 @@
 //     bold test) — and the owner must have offered the connection;
 //   * a connection the caller cannot reach answers exactly like one that
 //     does not exist, on both tools;
-//   * this release runs a connection's Reads set to Allow and nothing else,
-//     and the proxy is never asked for anything else;
+//   * the owner's per-tool policy decides how a tool runs, and nothing but a
+//     Read at Allow — or a confirmed call — ever reaches the proxy (T4-9; the
+//     full preview → confirm → Approve flows are connections-confirm.integration.test.ts);
 //   * the caller's bearer reaches the proxy only as the thing to refuse, and
 //     the wire never carries the pool's own sentence (which names secrets);
 //   * every call is one `runs` row of kind `connection_call`, refusals
@@ -202,29 +203,67 @@ describe("who reaches a connection", () => {
   });
 });
 
-describe("which tools run in this release — Reads set to Allow, and nothing else", () => {
-  it("lists only the callable tools, and fetches definitions only when a connection is named", async () => {
+describe("how each tool runs — the owner's per-tool policy (T4-9)", () => {
+  it("lists every tool the caller is offered with how it runs, and fetches definitions only when a connection is named", async () => {
     const proxy = fakeProxy();
     const { call } = await brainFor(agent(["github"]), proxy);
     const all = await call("connections_list");
-    expect(all.body.connections).toEqual([{ name: "github", type: "mcp", description: "GitHub", status: "ok", tools: ["list_issues"] }]);
+    expect(all.body.connections).toEqual([
+      {
+        name: "github",
+        type: "mcp",
+        description: "GitHub",
+        status: "ok",
+        // Never (delete_repo) is not there at all
+        tools: [
+          { name: "list_issues", runs: "now" },
+          { name: "search_code", runs: "owner" },
+          { name: "create_issue", runs: "confirm" },
+        ],
+      },
+    ]);
     expect(proxy.dialled).toEqual([]); // the listing never dials
     const one = await call("connections_list", { connection: "github" });
-    expect(one.body).toEqual({ connection: "github", tools: [{ name: "list_issues", description: "the list_issues tool", inputSchema: { type: "object", properties: { q: { type: "string" } } } }] });
+    const schema = { type: "object", properties: { q: { type: "string" } } };
+    expect(one.body).toEqual({
+      connection: "github",
+      tools: [
+        { name: "list_issues", runs: "now", description: "the list_issues tool", inputSchema: schema },
+        { name: "search_code", runs: "owner", description: "the search_code tool", inputSchema: schema },
+        { name: "create_issue", runs: "confirm", description: "the create_issue tool", inputSchema: schema },
+      ],
+    });
     expect(proxy.dialled).toEqual(["github"]);
   });
 
-  it("Never and an unlisted tool are 'no such tool'; Ask First and a tool that changes things are refused with the reason — and the proxy is asked for none of them", async () => {
+  it("Never and an unlisted tool are 'no such tool', and the proxy is asked for neither", async () => {
     const proxy = fakeProxy();
     const { call } = await brainFor(agent(["github"]), proxy);
     expect((await call("connections_call", { connection: "github", tool: "delete_repo" })).body.error).toEqual({ code: "not_found", message: "no such tool: github/delete_repo" });
     expect((await call("connections_call", { connection: "github", tool: "exfiltrate" })).body.error).toEqual({ code: "not_found", message: "no such tool: github/exfiltrate" });
-    const ask = await call("connections_call", { connection: "github", tool: "search_code" });
-    expect(ask.body.error.code).toBe("forbidden");
-    expect(ask.body.error.message).toContain("Ask First");
-    const changes = await call("connections_call", { connection: "github", tool: "create_issue" });
-    expect(changes.body.error.code).toBe("forbidden");
-    expect(changes.body.error.message).toContain("changes things");
+    // …even with a confirm token in hand
+    expect((await call("connections_call", { connection: "github", tool: "delete_repo", confirm_token: "A".repeat(43) })).body.error.code).toBe("not_found");
+    expect(proxy.calls).toEqual([]);
+  });
+
+  it("a tool that changes things, set to Allow, answers a preview and a token first — nothing is dialled", async () => {
+    const proxy = fakeProxy();
+    const { call } = await brainFor(agent(["github"]), proxy);
+    const preview = await call("connections_call", { connection: "github", tool: "create_issue", arguments: { title: "flake" } });
+    expect(preview.isError).toBe(false);
+    expect(preview.body).toMatchObject({ status: "preview", connection: "github", tool: "create_issue", arguments: { title: "flake" }, expires_in_sec: 900 });
+    expect(preview.body.confirm_token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(proxy.calls).toEqual([]);
+  });
+
+  it("Ask First never runs on a caller's token — refused before anything is recorded or dialled", async () => {
+    const proxy = fakeProxy();
+    const db = recordingDb();
+    const { call } = await brainFor(agent(["github"]), proxy, db);
+    const r = await call("connections_call", { connection: "github", tool: "search_code", confirm_token: "A".repeat(43) });
+    expect(r.body.error.code).toBe("forbidden");
+    expect(r.body.error.message).toContain("Ask First");
+    expect(db.runs.at(-1)!.meta).toMatchObject({ refusal: "ask_only", tool_mode: "ask" });
     expect(proxy.calls).toEqual([]);
   });
 });

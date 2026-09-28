@@ -208,11 +208,12 @@ the door does not do.
 | `capture` | Inbox · Write | `capture` → *Capture* |
 | `queries_list`, `queries_run` | Queries · Read | `named` → *Named queries* |
 | `agents_delegate` | Agents · Write | `delegate` → *Delegate* |
-| `propose_action` | none of its own | it gates the four action kinds below |
+| `propose_action` | none of its own | it gates the four action kinds it raises, below |
 | action `dispatch` | Work · Write | `dispatch` → *Dispatch* |
 | action `task_update` | Work · Write | `update` → *Update* |
 | action `comment` | Work · Write **and** Artifacts · Write | `comment` → *Comment*. Its schema takes a `work_id` or an `artifact_id` (C53). |
 | action `capture` | Inbox · Write | `capture` → *Capture* |
+| action `connection_call` | **not in the table** | An Ask First call the owner approves (T4-9). Raised by `connections_call`, never `propose_action`, so it is drawn where the tool is: on the connection's own row, with its ⏱. |
 | `requests_create`, `request_access` | **not in the table** | Asking is not a power. Every credential may ask, and asking grants nothing (`mayUseTool`). |
 | `connections_list`, `connections_call` | **not in the table** as tools | The proxy's lazy pair (§2.6, T4-8b) is the door, not a power: what it reaches is drawn as **one row per connection**, its tools by group and mode (Reads → Read, Changes things and Starts an agent → Write, Ask First ⏱) — `describePermissions`' connection rows. |
 

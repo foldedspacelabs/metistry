@@ -115,7 +115,7 @@ describe("the PWA prints the effective action table the CLI prints (§2.17)", ()
       const cli = await cliTable(row);
       const rows = pwa.actionTableRows(row.scope);
       expect(rows).not.toBeNull();
-      expect(cli.rows).toHaveLength(4);
+      expect(cli.rows).toHaveLength(5); // the five action kinds, connection_call last (T4-9)
       expect(rows!.map((r) => [r.kind, r.text])).toEqual(cli.rows);
       expect((row.scope as { autonomy: { level: string } }).autonomy.level).toBe(cli.level);
       // and the markup carries each line, escaped, with its level

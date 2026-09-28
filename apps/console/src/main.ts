@@ -39,7 +39,19 @@ import { PLAN_ROUTINE, RoutineTrigger, closeTriggeredPass } from "./close-day.js
 import { loadRules, makeRoutePolicy } from "./router.js";
 import { watchCompute } from "./compute.js";
 import { TargetRegistry } from "./dispatch.js";
-import { dirSink, vaultSink, DEFAULT_MAX_TRACKED_BYTES, INBOX_PREFIX, vaultBridgeLister, vaultBridgeSearcher, vaultBridgeWriter } from "@foldedspacelabs/metistry-mcp-brain";
+import {
+  dirSink,
+  vaultSink,
+  DEFAULT_CONNECTION_ASKS_PER_HOUR,
+  DEFAULT_CONNECTION_CALLS_PER_HOUR,
+  DEFAULT_CONNECTION_CONFIRM_TTL_S,
+  DEFAULT_MAX_TRACKED_BYTES,
+  INBOX_PREFIX,
+  vaultBridgeLister,
+  vaultBridgeSearcher,
+  vaultBridgeWriter,
+  type ConnectionLimits,
+} from "@foldedspacelabs/metistry-mcp-brain";
 import { ASSISTANT_DEFAULT_AREAS, INTERNAL_ASSISTANT_ID, ensureInternalAgent, listAgents, revokeAgent, validateGrants } from "./agents.js";
 import { httpVaultClient } from "./vault-client.js";
 import { SCHEDULED_PATH, STANDUP_MOVE_RETRY_MS, fileOverlay, startStandupMove } from "./profile-tidy.js";
@@ -386,6 +398,15 @@ console.log(
     : "connections absent: METISTRY_INSTANCE_DIR is unset or not readable — GET /api/connections answers 503; `metistry connections list` still works (degrades: absent)",
 );
 
+// The connections proxy's confirm-token lifetime and hourly limits, each
+// counted from `runs` (T4-9; docs/ops/connections.md). They bind whenever a
+// proxy is mounted; the pool itself is not wired on a live console yet.
+const connectionLimits: ConnectionLimits = {
+  confirmTtlS: intEnv("METISTRY_CONNECTION_CONFIRM_TTL_S", DEFAULT_CONNECTION_CONFIRM_TTL_S),
+  callsPerHour: intEnv("METISTRY_CONNECTION_CALLS_PER_HOUR", DEFAULT_CONNECTION_CALLS_PER_HOUR),
+  asksPerHour: intEnv("METISTRY_CONNECTION_ASKS_PER_HOUR", DEFAULT_CONNECTION_ASKS_PER_HOUR),
+};
+
 // The routine pause (C5): a routine that declares `requires.engine` is not
 // started at all when the tier its turn would run on is over a `stop` budget
 // — the same verdict the engine's guard reaches, from the same `spend` query
@@ -536,6 +557,7 @@ const server = makeServer(pool, queries, {
   githubWrite,
   ...(variables ? { variables } : {}),
   ...(connections ? { connections } : {}),
+  connectionLimits,
   origins,
   ...(identity ? { identity } : {}),
   ...(instancesFiles ? { instancesFiles } : {}),

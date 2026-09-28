@@ -20,7 +20,8 @@
       "dispatch": "propose",
       "task_update": "propose",
       "comment": "propose",
-      "capture": "propose"
+      "capture": "propose",
+      "connection_call": "propose"
     },
     "widened": [
       "level observe → propose",

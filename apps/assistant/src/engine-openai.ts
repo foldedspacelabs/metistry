@@ -56,10 +56,12 @@
 
 import {
   costOf,
+  redactedSecret,
   credentialEnvNames,
   DEFAULT_MAX_OUTPUT_TOKENS,
   credentialFromEnv,
   providerCredential,
+  SecretRedactor,
   unpricedNote,
   usageFromResponse,
   type CallCost,
@@ -177,6 +179,22 @@ function lowered(asked: unknown, cap: number): number {
   return typeof asked === "number" && Number.isInteger(asked) && asked > 0 ? Math.min(asked, cap) : cap;
 }
 
+/**
+ * A provider's error text with the credential this call presented taken out
+ * — the whole key in every form core's `SecretRedactor` knows, and any run of
+ * eight or more of its characters (a provider that echoes `sk-or-v1-…a1b2c3d4`
+ * names a fragment no value match catches). This text becomes `runs.error`,
+ * a Needs You report and a reply in the thread; none of them may carry the key.
+ */
+export function redactProviderText(text: string, apiKey: string | undefined, name = "provider_credential"): string {
+  if (!apiKey) return text;
+  const redactor = new SecretRedactor();
+  const safeName = /^[a-z][a-z0-9_]{0,63}$/.test(name) ? name : "provider_credential";
+  redactor.learn(safeName, apiKey);
+  const whole = redactor.redactText(text);
+  return whole.replace(/[A-Za-z0-9_\-]{8,}/g, (run) => (apiKey.includes(run) ? redactedSecret(safeName) : run));
+}
+
 /** `<base_url>/chat/completions`, with the trailing slash question settled once. */
 export function completionsUrl(baseUrl: string): string {
   return `${baseUrl.replace(/\/+$/, "")}/chat/completions`;
@@ -197,6 +215,7 @@ export function makeChatClient(cfg: ChatClientConfig): ChatClient {
   const attempts = cfg.attempts ?? DEFAULT_ATTEMPTS;
   const backoff = cfg.backoffMs ?? DEFAULT_BACKOFF_MS;
   const url = completionsUrl(provider.base_url);
+  const credName = (providerCredential(provider)?.name ?? "provider_credential").toLowerCase().replace(/[^a-z0-9_]/g, "_");
 
   const body = (messages: readonly ChatMessage[], opts: ChatOptions): Record<string, unknown> => {
     const out: Record<string, unknown> = {};
@@ -274,7 +293,9 @@ export function makeChatClient(cfg: ChatClientConfig): ChatClient {
         if (res.ok) return parseCompletion(await res.json(), provider, assignment.model);
         const text = await res.text().catch(() => "");
         const retryable = res.status === 429 || res.status >= 500;
-        lastErr = new EngineHttpError(res.status, text, url);
+        // redacted HERE, before the error exists: everything downstream (the
+        // runs row, a Needs You report, the thread) reads `body`/`message`
+        lastErr = new EngineHttpError(res.status, redactProviderText(text, cfg.apiKey, credName), url);
         if (!retryable || attempt === attempts - 1) throw lastErr;
         await sleep(retryAfterMs(res.headers, backoff * 2 ** attempt));
       }

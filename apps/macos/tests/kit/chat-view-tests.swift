@@ -366,6 +366,27 @@ func ticksThatPileUpRunOneAfterAnotherAndAllReturn() async throws {
 }
 
 @MainActor
+@Test func aHeldTurnShowsAsWaitingOnTheProviderNotAsNothing() async throws {
+    // `held`: the provider refused the account and the turn waits, unsent, on a Needs You report
+    #expect(ChatTurnState(inboundStatus: "held") == .held)
+    let console = ChatConsole(messages: [ChatConsole.message(1, .yours, "what's on today?", at: 0, status: "held")])
+    let (model, session) = chatModel(console)
+    defer { withExtendedLifetime(session) {} }
+    await model.refresh()
+    let activity = try #require(model.activities[1], "a held turn is drawn, not dropped")
+    #expect(activity.state == .held)
+    #expect(activity.isShown)
+    #expect(!model.isWorking, "nothing is running: no dots, no polling for tools")
+    #expect(ChatWaitingMoment.of(activity, now: base.addingTimeInterval(90)) == nil)
+    #expect(ChatMarks.held().map(\.text) == ["waiting on the provider", "· see Needs You"])
+    #expect(model.rows(calendar: utcCalendar).map(\.id).contains("turn:1"))
+    // released and answered: the same turn settles like any other
+    console.setStatus(1, "done")
+    await model.refresh()
+    #expect(model.activities[1]?.state == .finished)
+}
+
+@MainActor
 @Test func sendingWhileUnreachableIsOffWithTheGatesSentenceAndARefusalKeepsTheWords() async throws {
     let console = ChatConsole(messages: [ChatConsole.message(1, .yours, "hello", at: 0, status: "done")])
     let (model, session) = chatModel(console)

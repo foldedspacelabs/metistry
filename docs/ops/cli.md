@@ -1281,6 +1281,21 @@ A service that is not running is told it reads the new value when it next
 starts; one with no URL configured gets the command conditionally ("if the
 reconciler is running …"). An adopted token needs nothing.
 
+**Under the launchd shape the jobs follow `.env` themselves.** The
+supervisor's LaunchAgent plist and `supervisor.json` embed the environment
+`up` rendered them from, so `metistry restart console` would respawn the
+console with the OLD token. Every verb that rewrites `.env` —
+`secrets sync --to env`, `secrets mint`, `secrets migrate-scope`,
+`secrets retire-legacy-env --yes`, and `update` (its owner-bearer mint and
+shared-scope migration) — ends by comparing the installed jobs with `.env`
+(names only, hashed) and, when they differ, running `metistry up --no-compose`
+to re-render the plists and `supervisor.json` from `.env` and restart the
+supervisor. The restart hint above then reads "restarted onto it below".
+When it cannot (a dry run, no built CLI, an `up` that fails) it prints one
+instruction: `metistry up`. Nothing happens on an install that was never
+brought up under the launchd shape (`deployment-shapes.md`, "The jobs follow
+`.env`").
+
 ### Retiring the product checkout's `.env`: `secrets retire-legacy-env`
 
 An instance's environment is `<instance>/.metistry/state/.env`. The product

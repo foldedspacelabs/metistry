@@ -16,7 +16,10 @@ carry. `docs/ops/inbox.md`.
 docker compose exec -e METISTRY_ORIGIN=https://<your-origin> console node scripts/enroll.mjs --owner-token "iphone-shortcut"
 ```
 
-Store it once in the Shortcut (step 3). It is an **owner token**: capture
+Store it once in the Shortcut (step 3). The live-capture bridge takes one
+of its own the same way — mint a second, labelled `live-capture`, and set it
+as `METISTRY_LIVE_CAPTURE_INBOX_TOKEN` (`packages/mcp-live-capture/README.md`)
+— so revoking one never silences the other. It is an **owner token**: capture
 and messages only — it cannot manage devices or answer requests (CRIT-7), so a
 lost phone leaks capture ability, not control. Revoke from the Studio:
 `UPDATE owner_tokens SET revoked_at = now() WHERE label = 'iphone-shortcut'`.

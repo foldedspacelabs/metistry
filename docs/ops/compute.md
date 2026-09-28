@@ -1276,8 +1276,18 @@ Enforced at the tool, three times, never by prompting:
   fixes it — never answered elsewhere.
 
 `metistry compute unassign private` removes it; the next capture-session turn
-is then refused until it is assigned again. Capture sessions themselves are
-T8-2b's, and the engine consults `turnTier` once one exists.
+is then refused until it is assigned again.
+
+**How the drain knows (T8-2b).** A turn is in a capture session when its
+`inbound_messages` row says so: `meta.capture_session` (or
+`meta.route.capture_session`) names the recording. The drain resolves every
+turn through `resolveTurnFor` → core's `turnTier` first, so a marked turn is
+`private` whatever the router, the composer's picker or a routine chose. The
+marker fails closed — any value but `null` counts — so a writer that gets it
+wrong can only keep a turn on this Mac. A refused turn is `failed`, answered
+with an alert that names the command, and recorded as a `runs` row with
+`meta.refused: private_tier_unavailable`; the engine is never called. Every
+turn that ran private carries `meta.capture_session: true` on its `runs` row.
 
 ### What a collector may call
 

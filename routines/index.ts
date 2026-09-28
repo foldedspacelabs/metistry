@@ -65,3 +65,8 @@ export type { StandupCtx } from "./standup/run.js";
 // What the Morning Brief takes beyond `PlanCtx`: a vault that may also have
 // the section door (`POST /vault/section`, T2-6) — the console's client does.
 export type { BriefCtx, BriefVault } from "./morning-brief/run.js";
+// The session fold (T3-10, C79): one pass — harvest the fold's answered turn
+// into requests, then enqueue the next — for a caller that wants its story
+// rather than a count (a Fold First over the sessions a purge would lose,
+// C136), and the subject each file's one waiting request is raised under.
+export { foldPass, foldSource, type FoldPass, type SessionFoldCtx } from "./session-fold/run.js";

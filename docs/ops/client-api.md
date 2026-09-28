@@ -1471,6 +1471,24 @@ after it is written and starts unfolded (`folded_at` NULL — the session fold's
 queue). The scheduled `session-purge` routine deletes what has expired, and
 anything older than its `retention_days` (Scheduled config, 1–30, default 30).
 
+**What the fold learns arrives as a request** (C79, T3-10). The hourly
+`session-fold` routine reads the owner's chat turns out of that queue, lets the
+assistant suggest preferences, lessons and profile facts on a turn of its own
+(thread `session-fold`), checks each suggestion model-free — a quote must be
+the owner's own words from a turn the fold showed — and raises at most one
+`improvement` per file, with `source: {kind: "metistry", external_ref:
+"Me/Working Style.md#session-fold"}` (or `Me/profile.md#session-fold`). Its
+payload is the Me/ edit every client already answers — `body` a
+`before_after` of the whole file, `edit: {path, base_sha256}` — plus `items`,
+one per line: `kind` (`preference`, `lesson`, `profile`), `line` (what Approve
+writes), `quote` (the owner's words), `key`/`value` for a profile fact, and the
+provenance screen-12 draws — `session_id`, `turn_id`, `archive_id`, `thread`,
+`ts`. **Approve** (`POST /api/proposals/:id`, `allow`) writes the after as
+`user`, refused `stale` if the file changed since; Decline writes nothing, and
+a declined line is not proposed again. A later fold for a file whose request
+is still waiting closes it `resolved_at_source` and raises one request with
+both sets of lines, so a file never has two Approves that cannot both land.
+
 **Purge Now** is irreversible, so it is `local`, and it is two steps on one
 door. A body without `confirm: true` deletes **nothing** and answers what a
 purge would cost: every archived session and turn, the exact count of sessions

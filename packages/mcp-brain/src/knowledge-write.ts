@@ -21,12 +21,15 @@
 //   name, see USER_SOURCE / ownershipRefusal below;
 // - a routine's own folder (`Journal/Plan/`, `Journal/Standup/`,
 //   `Journal/Brief/` — core's `JOURNAL_ROUTINE_DIRS`) is written under that
-//   routine's principal and nobody else's (owner ruling (a), W1). The one
-//   thing the assistant may do there is fill the pending `prose` slots of a
-//   file the routine already wrote (C103): the incoming content is checked
-//   against the file on disk by `fillProseSlots`, only the slot lines may
-//   differ, and the write goes out in the ROUTINE's name — never a create,
-//   never a stamp, never another byte (`writeRoutineProse` below);
+//   routine's principal and nobody else's (owner ruling (a), W1) ONCE the
+//   routine has written its file: the one thing the assistant may then do
+//   there is fill the pending `prose` slots (C103) — the incoming content is
+//   checked against the file on disk by `fillProseSlots`, only the slot
+//   lines may differ, and the write goes out in the ROUTINE's name — never a
+//   stamp, never another byte (`writeRoutineProse` below). A path with no
+//   file there yet is an ordinary create, same as anywhere else in the vault
+//   (ruling 9, W2 checkpoint, 2026-09-27, decisions-log.md: X-11 relaxes
+//   T3-6's blanket create refusal on these three folders);
 // - a markdown write is stamped with provenance (§4.15): `source` is the
 //   credential's id — never an argument — and `updated` is today;
 // - compare-and-swap is NOT optional (2026-09-16): an omitted
@@ -364,20 +367,32 @@ export async function writeKnowledge(
     return { ok: false, code: "not_available", message: "knowledge writes are not configured in this deployment (the vault bridge is absent)", meta };
   }
 
-  // A routine's own folder: fill its file's prose slots, or nothing.
+  // A routine's own folder: an existing file there is the routine's, and the
+  // assistant's one turn may only fill its pending prose slots (or be
+  // refused) — never touch anything else about it. A path with no file
+  // there YET is an ordinary create (ruling 9 above), so it falls through to
+  // the general path below exactly like any other new note; the read here
+  // is what tells the two cases apart, and it is done once, whichever path
+  // it feeds.
   const routine = journalRoutineOf(args.path);
-  if (routine !== null) return writeRoutineProse(args, routine, writer, reader, act, meta);
+  let existing: string | null = null;
+  if (routine !== null || /\.md$/i.test(args.path)) {
+    if (!reader) {
+      if (routine !== null) return { ok: false, code: "not_available", message: "the vault read path is absent, so a routine's folder cannot be checked — nothing was written", meta };
+    } else {
+      try {
+        existing = await reader(args.path);
+      } catch {
+        return { ok: false, code: "not_available", message: "could not read the note to check who owns it — try again", meta };
+      }
+    }
+  }
+  if (routine !== null && existing !== null) return writeRoutineProse(args, routine, writer, existing, act, meta);
 
   // Ownership (see ownershipRefusal): new notes are free; an existing note
   // belongs to whoever's `source` it carries, and no `source:` at all means
   // the user (USER_SOURCE) — never the caller.
   if (reader && /\.md$/i.test(args.path)) {
-    let existing: string | null;
-    try {
-      existing = await reader(args.path);
-    } catch {
-      return { ok: false, code: "not_available", message: "could not read the note to check who owns it — try again", meta };
-    }
     const refusal = existing === null ? null : ownershipRefusal(existing, principal.id, args.path);
     if (refusal) return { ok: false, code: "forbidden", message: refusal, meta: { ...meta, owned_by: frontmatterSource(existing!) ?? USER_SOURCE } };
   }
@@ -431,15 +446,17 @@ export async function writeKnowledge(
 }
 
 /**
- * `knowledge_write` into a routine's own folder (`JOURNAL_ROUTINE_DIRS`).
- * The file is the routine's — written under its principal, `source:` its
- * name (owner ruling (a), W1) — and the assistant's one turn may fill each
- * pending `prose` slot's line in it (C103) and change nothing else. Refused:
+ * `knowledge_write` into a routine's own folder (`JOURNAL_ROUTINE_DIRS`), for
+ * a path where the routine has already written a file — the caller
+ * (`writeKnowledge`) has read it and it is not null; a path with no file yet
+ * never reaches here (ruling 9: that is an ordinary create, handled by the
+ * general path instead). The file is the routine's — written under its
+ * principal, `source:` its name (owner ruling (a), W1) — and the
+ * assistant's one turn may fill each pending `prose` slot's line in it
+ * (C103) and change nothing else. Refused:
  *
  *   - a folder whose routine renders no prose (`Journal/Plan/` —
  *     Tomorrow's Plan is model-free): `forbidden`;
- *   - a file that does not exist — the assistant never creates one here, so
- *     it can never pre-empt the routine's own file: `forbidden`;
  *   - a file whose `source` is not the folder's routine (the owner's own
  *     note, say): `forbidden`, owned by whoever it names;
  *   - a hash that is not the file's as it is now: `conflict`, with the hash;
@@ -456,7 +473,7 @@ async function writeRoutineProse(
   args: KnowledgeWriteArgs,
   routine: string,
   writer: KnowledgeWriter,
-  reader: KnowledgeReader | undefined,
+  existing: string,
   act: WriteAct,
   meta: Record<string, unknown>,
 ): Promise<KnowledgeWriteOutcome> {
@@ -464,16 +481,6 @@ async function writeRoutineProse(
   const m = { ...meta, routine_file: routine };
   if (!PROSE_SOURCES.includes(routine)) {
     return { ok: false, code: "forbidden", message: `${folder}/ is the ${routine} routine's own folder, and nothing else writes it — report instead`, meta: m };
-  }
-  if (!reader) return { ok: false, code: "not_available", message: "the vault read path is absent, so a routine's file cannot be checked — nothing was written", meta: m };
-  let existing: string | null;
-  try {
-    existing = await reader(args.path);
-  } catch {
-    return { ok: false, code: "not_available", message: "could not read the file to check its prose slots — try again", meta: m };
-  }
-  if (existing === null) {
-    return { ok: false, code: "forbidden", message: `${folder}/ is the ${routine} routine's own folder: you may fill the pending prose slots of a file it wrote, never create one`, meta: m };
   }
   const owner = frontmatterSource(existing) ?? USER_SOURCE;
   if (owner !== routine) return { ok: false, code: "forbidden", message: `owned by ${owner}; propose instead`, meta: { ...m, owned_by: owner } };

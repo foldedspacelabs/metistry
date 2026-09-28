@@ -434,10 +434,11 @@ public enum ConflictDiff {
         while i < n || j < m {
             if i < n, j < m, a[i] == b[j] {
                 out.append(DiffLine(.context, a[i])); i += 1; j += 1
-            } else if j < m, i == n || table[i][j + 1] >= table[i + 1][j] {
-                out.append(DiffLine(.added, b[j])); j += 1
-            } else {
+            } else if i < n, j == m || table[i + 1][j] >= table[i][j + 1] {
+                // Yours goes first: `-` then `+`, as a diff reads.
                 out.append(DiffLine(.removed, a[i])); i += 1
+            } else {
+                out.append(DiffLine(.added, b[j])); j += 1
             }
         }
         return out
@@ -990,7 +991,8 @@ public final class KnowledgeModel {
 
     private func enter(_ place: KnowledgePlace) async {
         switch place {
-        case .home, .item: return
+        case .home: return
+        case .item(let id): prepare(item: id)
         case .page(let path): await readPage(path)
         case .area(let area): await readArea(area)
         case .search(let q): await runSearch(q)
@@ -1114,7 +1116,14 @@ public final class KnowledgeModel {
 
     public var allowsDecisions: Bool { session?.allowsDecisions ?? false }
 
+    /// Opening a conflict makes its view's model — once, here, never while a view is drawn.
+    func prepare(item id: String) {
+        guard let row = eye.first(where: { $0.id == id })?.request, KnowledgeEyeItem.kind(of: row) == .conflict else { return }
+        _ = resolution(for: row)
+    }
+
     /// The conflict view's model for a conflict's request.
+    @discardableResult
     public func resolution(for row: RequestRow) -> ConflictResolution? {
         if let held = conflicts[row.id] { return held }
         guard let session, let conflict = KnowledgeConflict(row) else { return nil }

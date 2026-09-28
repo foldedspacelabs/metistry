@@ -493,7 +493,10 @@ const P = "metistry";
 const ids = {};
 const one = async (sql, params = []) => (await pool.query(sql, params)).rows[0];
 
-await pool.query(`INSERT INTO projects (id, title, area, mode) VALUES ($1, 'Metistry', 'Projects/Metistry', 'review') ON CONFLICT (id) DO NOTHING`, [P]);
+// …with its own read grant (0032), which every member inherits (T4-7) and the
+// Projects screen draws as *every member gets these* (T6-8). cursor, the member
+// below, already holds `Projects`, so it inherits nothing new from it.
+await pool.query(`INSERT INTO projects (id, title, area, mode, grants) VALUES ($1, 'Metistry', 'Projects/Metistry', 'review', '{"tier":"areas","areas":["Projects/Metistry"]}'::jsonb) ON CONFLICT (id) DO NOTHING`, [P]);
 ids.task = Number((await one(`INSERT INTO work (title, project, kind, status, created_by, due) VALUES ('Freeze the store interface', $1, 'task', 'open', 'user', $2::date) RETURNING id`, [P, RECORDING_DAY])).id);
 ids.dispatchTask = Number((await one(`INSERT INTO work (title, project, kind, status, created_by) VALUES ('Open the release checklist', $1, 'task', 'open', 'user') RETURNING id`, [P])).id);
 // a card its creator described (T1-1, C85) — the board's `description`, set at create

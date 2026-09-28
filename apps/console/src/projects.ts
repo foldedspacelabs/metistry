@@ -29,9 +29,19 @@ export interface ProjectView {
   last_activity: string | null;
   /** The most recent mode change — a budget flip (`project_mode`) or the user's toggle (`project_admin`) — so the panel can say WHY it is in review. */
   last_mode_change: { ts: string; by: string; reason: string; to: ProjectMode } | null;
+  /**
+   * The project's own read grant (T1-13, migration 0032) as stored — what
+   * every member inherits (T4-7). Served here so the Projects screen can draw
+   * *every member gets these* (T6-8, screen 13 §2) from the same read as the
+   * rest of the row; `{tier: "none", areas: []}` when none was ever set.
+   */
+  grants: Grants;
   created_at: string;
   updated_at: string;
 }
+
+/** A project nobody granted anything: the column's own default (0032). */
+const noGrant = (): Grants => ({ tier: "none", areas: [] });
 
 const num = (v: unknown) => (v === null || v === undefined ? 0 : Number(v));
 
@@ -47,7 +57,13 @@ export async function listProjects(db: Db, queries: QueryStore): Promise<{ proje
   }
   const ids = rows.map((r) => String(r.id));
   const changes = new Map<string, ProjectView["last_mode_change"]>();
+  const grants = new Map<string, Grants>();
   if (ids.length > 0) {
+    // The grant column is read here rather than added to the seed rollup: an
+    // instance may overlay `projects_rollup` (D4), and an overlay written
+    // before 0032 would silently drop the one field this screen needs.
+    const { rows: held } = await db.query(`SELECT id, grants FROM projects WHERE id = ANY($1::text[])`, [ids]);
+    for (const r of held) grants.set(String(r.id), (r.grants ?? noGrant()) as Grants);
     const { rows: runs } = await db.query(
       `SELECT DISTINCT ON (meta->>'project') meta->>'project' AS project, ts, component, kind, meta
        FROM runs WHERE kind IN ('project_mode', 'project_admin') AND meta->>'project' = ANY($1::text[]) AND meta->>'to' IS NOT NULL
@@ -82,6 +98,7 @@ export async function listProjects(db: Db, queries: QueryStore): Promise<{ proje
       spend_today_usd: num(r.spend_today_usd),
       last_activity: r.last_activity ? new Date(r.last_activity as string).toISOString() : null,
       last_mode_change: changes.get(p.id) ?? null,
+      grants: grants.get(p.id) ?? noGrant(),
       created_at: new Date(p.created_at).toISOString(),
       updated_at: new Date(p.updated_at).toISOString(),
     };

@@ -39,7 +39,7 @@ import Testing
     ], "sidebar: \(rows)")
     // the toolbar's two glyph-only controls say their names (and the shortcut the + has)
     #expect(tree.toolbarButtons.contains("New Capture, Command-N"), "toolbar: \(tree.toolbarButtons)")
-    #expect(tree.toolbarButtons.contains("Usage, $0.00 today"), "toolbar: \(tree.toolbarButtons)")
+    #expect(tree.toolbarButtons.contains("Usage, $0.01 today"), "toolbar: \(tree.toolbarButtons)")
     #expect(!tree.toolbarButtons.contains { $0.localizedCaseInsensitiveContains("bell") || $0 == "Needs You" }, "no bell on the Mac toolbar (C110)")
 }
 

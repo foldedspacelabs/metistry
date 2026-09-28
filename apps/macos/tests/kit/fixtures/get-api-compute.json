@@ -72,17 +72,17 @@
     "assigns_nothing": false,
     "spend": {
       "instance": {
-        "daily": 0.0042,
-        "monthly": 0.0042
+        "daily": 0.0061,
+        "monthly": 0.0245
       },
       "providers": {
         "openrouter": {
           "daily": 0,
-          "monthly": 0
+          "monthly": 0.0184
         },
         "lmstudio": {
-          "daily": 0.0042,
-          "monthly": 0.0042
+          "daily": 0.0061,
+          "monthly": 0.0061
         },
         "ollama": {
           "daily": 0,
@@ -99,8 +99,8 @@
         "monthly_usd": null,
         "action": null,
         "spent": {
-          "daily": 0.0042,
-          "monthly": 0.0042
+          "daily": 0.0061,
+          "monthly": 0.0245
         }
       },
       "providers": [
@@ -116,7 +116,7 @@
           "action": null,
           "spent": {
             "daily": 0,
-            "monthly": 0
+            "monthly": 0.0184
           }
         },
         {
@@ -130,8 +130,8 @@
           "monthly_usd": null,
           "action": null,
           "spent": {
-            "daily": 0.0042,
-            "monthly": 0.0042
+            "daily": 0.0061,
+            "monthly": 0.0061
           }
         },
         {
@@ -166,6 +166,6 @@
       ]
     },
     "writable": true,
-    "as_of": "2026-09-28T22:08:11.297Z"
+    "as_of": "2026-09-28T22:20:51.099Z"
   }
 }

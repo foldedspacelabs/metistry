@@ -182,7 +182,7 @@ import Testing
     #expect(shell.badgeLabel == "4")
     // the compute fixture: spend with no limit set
     #expect(shell.gauge.level == .within)
-    #expect(shell.gauge.spokenLabel == "Usage, $0.00 today")
+    #expect(shell.gauge.spokenLabel == "Usage, $0.01 today") // the recorder's seeded spend: $0.0042 + $0.0019 today
     // pins are filed under the identity's instance id — read off the recording, which mints a new one each time
     let identity = try ConsoleFixture.load("get-api-identity")
     #expect(shell.pins.instanceID == identity.replyJSON?["instance_id"]?.stringValue)

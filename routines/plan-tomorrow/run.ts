@@ -46,10 +46,13 @@
 // before there is a fold to link. The 23:00 run then SUPERSEDES that render
 // — same path, compare-and-swap on the bytes the early render left — with
 // the fold's context. The ledger says which is which: every row this routine
-// writes carries `meta.trigger` (`close` | `schedule` | `manual`), and only a
-// row that is NOT a close settles a date. So a second close re-renders (the
-// owner's own act, every time), the 23:00 run replaces any number of early
-// renders, and a second scheduled or manual pass after it stays silent.
+// writes carries `meta.trigger` (`close` | `schedule` | `manual`), and only
+// the SCHEDULED pass asks whether a row already settled the date. So a
+// second close re-renders (the owner's own act, every time), the 23:00 run
+// replaces any number of early renders, and a second scheduled pass after it
+// stays silent — but Run Now (`manual`) never asks either (ruling 15, X-15):
+// the owner asked for this one by hand, same as a close, so it always
+// re-renders rather than reporting a date some earlier pass already settled.
 //
 // THE GUARD, in order, and what each costs:
 //
@@ -477,14 +480,15 @@ export function withFoldSection(markdown: string, section: string): string {
  * One `runs` row per pass that decides a target date — because it wrote the
  * file or because it decided not to. A row that is NOT Close the Day's
  * (`meta.trigger` is `schedule` or `manual`, or absent on a row from before
- * T3-7) SETTLES the date: a later scheduled or manual pass for it (Run Now,
- * or a late run and its slot) finds it and stays silent. A close row never
- * settles anything — it is the early render the 23:00 run supersedes, and a
- * close that decided NOT to plan (the template was missing at 17:00) must
- * not stop the 23:00 run once it is fixed. A close itself never asks: it
- * always renders. `meta.planned_for` is the discriminator: the runner writes
- * its own `routine_run` row for every run and that one deliberately carries
- * none.
+ * T3-7) SETTLES the date, in the sense this asks about: a later SCHEDULED
+ * pass for it (a late run and its slot) finds it and stays silent — that is
+ * the only caller left that asks (ruling 15, X-15: Run Now no longer does).
+ * A close row never settles anything — it is the early render the 23:00 run
+ * supersedes, and a close that decided NOT to plan (the template was missing
+ * at 17:00) must not stop the 23:00 run once it is fixed. A close itself
+ * never asks: it always renders. `meta.planned_for` is the discriminator:
+ * the runner writes its own `routine_run` row for every run and that one
+ * deliberately carries none.
  */
 async function settled(db: Db, target: string): Promise<string | null> {
   const { rows } = await db.query(
@@ -562,7 +566,13 @@ export async function run(db: Db, ctx: PlanCtx = {}): Promise<number> {
   const target = addTaskDays(today, 1);
   if (target === null) return 0; // unreachable: `today` is a checked date
 
-  if (trigger !== "close") {
+  // Only the scheduled (23:00) pass asks whether the date is already
+  // settled — the guard against firing twice for the same slot (the Mac
+  // waking near its time, a retried tick). A close never asks (it is the
+  // owner's own act, always superseded later), and since ruling 15 (X-15)
+  // neither does Run Now: the owner asked for this one by hand, so it
+  // re-renders rather than reporting a date the 23:00 run already settled.
+  if (trigger === "schedule") {
     const already = await settled(db, target);
     if (already !== null) {
       console.log(`${COMPONENT}: ${target} is already settled (${already})`);

@@ -30,6 +30,7 @@ import { makeEngine, type Engine, type TurnGuard } from "./engine.js";
 import { memorySessionStore } from "./sessions.js";
 import { mcpToolHost } from "./tools.js";
 import { isBudgetRefusal } from "./budgets.js";
+import { providerRefusal } from "./provider-refusal.js";
 import type { Identity } from "./prompt.js";
 
 export interface Db {
@@ -342,7 +343,10 @@ export async function drainCrewOne(db: Db, cfg: CrewDrainConfig): Promise<boolea
     // check and land in the same place, and the row stays visible on the list
     // with the field that would release it (the Eve adopt: a crew fails with
     // budget_exceeded; only a person-facing turn is offered another window).
-    if (isBudgetRefusal(err)) await settle(db, row.id, { status: "blocked", note: message.slice(0, 500) }, agent);
+    // A provider refusing the account (402 out of credits, 401/403 a key it
+    // will not take) is final the same way: another attempt buys the same
+    // refusal, three times over (provider-refusal.ts).
+    if (isBudgetRefusal(err) || providerRefusal(err)) await settle(db, row.id, { status: "blocked", note: message.slice(0, 500) }, agent);
     else if (row.attempts >= maxAttempts) await settle(db, row.id, { status: "blocked", note: `crew run failed ${row.attempts}× — last: ${message.slice(0, 300)}` }, agent);
     else await settle(db, row.id, { status: "retry", note: `crew run attempt ${row.attempts} failed (${message.slice(0, 200)}); retry after ${backoff}s`, backoffSeconds: backoff }, agent);
   } finally {

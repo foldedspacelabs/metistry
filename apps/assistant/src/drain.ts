@@ -12,6 +12,7 @@ import { recordShadow } from "./shadow.js";
 import { resolveTurn } from "./tiers.js";
 import type { Engine } from "./engine.js";
 import { newTurnId } from "./brain.js";
+import { holdTurn, pausedFor, probeDue, providerRecovered, providerRefusal, raiseRefusal, releaseHeld } from "./provider-refusal.js";
 
 /** The assistant's own agent id — the `claimed_by` on any task it holds. Never the assistant's NAME (CLAUDE.md: the name lives in identity.yaml alone). */
 export const ASSISTANT_AGENT = "assistant";
@@ -50,6 +51,8 @@ async function closedOwnTask(db: Db, runId: number): Promise<number | null> {
 export interface DrainOptions {
   /** `compute.yaml` in force, read per turn because it is hot-reloaded. Absent = nothing assigned, so rules.yaml's tiers: decide and the SDK path runs. */
   compute?: (() => Compute) | undefined;
+  /** Test seam: how long a paused provider waits between probes (default `PROVIDER_PROBE_MS`). */
+  probeMs?: number | undefined;
 }
 
 /**
@@ -64,6 +67,11 @@ export function isChatTurn(meta: any): boolean {
 }
 
 export async function drainOne(db: Db, engine: Engine, tiers: TierMap, opts: DrainOptions = {}): Promise<boolean> {
+  // Turns held behind a provider that refused the account go back to `new`
+  // once it is no longer paused — or one at a time, as the probe
+  // (provider-refusal.ts). Before the claim, so a released turn keeps its
+  // place in the queue.
+  await releaseHeld(db, opts.probeMs);
   const { rows } = await db.query(
     `UPDATE inbound_messages SET status = 'processing'
      WHERE id = (SELECT id FROM inbound_messages WHERE status = 'new'
@@ -83,6 +91,15 @@ export async function drainOne(db: Db, engine: Engine, tiers: TierMap, opts: Dra
   // unknown name lands on `default` rather than on an invented model.
   const compute = opts.compute?.() ?? emptyCompute();
   const { tier, model, effort, assignment } = resolveTurn(compute, tiers, routeMeta.kind === "model" ? routeMeta.tier : msg.meta?.tier);
+
+  // A provider that refused the account (402 out of credits, 401/403 a key
+  // it does not accept) is PAUSED while its report waits: the turn is held,
+  // not sent — the same refusal again would buy nothing. The probe is the
+  // one exception, so a top-up is noticed on its own.
+  if (assignment && (await pausedFor(db, assignment.provider)) && !(await probeDue(db, assignment.provider, opts.probeMs))) {
+    await holdTurn(db, msg.id, assignment.provider);
+    return true;
+  }
 
   // Fresh session at a task boundary (cost research decision 3). A fold turn
   // is its own task and never continues the chat; anything else can ask for a
@@ -129,8 +146,9 @@ export async function drainOne(db: Db, engine: Engine, tiers: TierMap, opts: Dra
       result = await engine(prompt, { model, effort, resume, assignment, thread: msg.thread, tier, turnId });
     } catch (err) {
       // A budget refusal is not a stale session: retrying it would only spend
-      // the check again and land in the same place.
-      if (!resume || isBudgetRefusal(err)) throw err;
+      // the check again and land in the same place. Nor is a provider
+      // refusing the account — a 402 retried is the same 402.
+      if (!resume || isBudgetRefusal(err) || providerRefusal(err)) throw err;
       result = await engine(prompt, { model, effort, assignment, thread: msg.thread, tier, turnId }); // stale session: fresh start
     }
     const upsert = await db.query(
@@ -213,8 +231,30 @@ export async function drainOne(db: Db, engine: Engine, tiers: TierMap, opts: Dra
       ...(result.cache_write !== undefined ? { cache_write_tokens: result.cache_write } : {}),
       meta,
     });
+    // It got through: whatever report said this provider refused is cleared
+    // at its source, and the turns held behind it go on the next pass.
+    if (assignment) await providerRecovered(db, assignment.provider);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    const refused = assignment ? providerRefusal(err) : undefined;
+    if (refused && assignment) {
+      // ONE report per (provider, error class) while one waits (C96). The
+      // turn that raised it fails with the provider's own words; a turn that
+      // found one already waiting — the probe — goes back to waiting.
+      await finishRun(db, runId, { ok: false, error: message, meta: { provider_refused: refused.status } });
+      const report = await raiseRefusal(db, { provider: assignment.provider, config: assignment.config, refusal: refused, messageId: Number(msg.id), runId, thread: msg.thread });
+      if (!report.raised) {
+        await holdTurn(db, msg.id, assignment.provider);
+        return true;
+      }
+      await db.query(`UPDATE inbound_messages SET status = 'failed' WHERE id = $1`, [msg.id]);
+      await db.query(`INSERT INTO outbound_messages (thread, text, in_reply_to, kind) VALUES ($1, $2, $3, 'alert')`, [
+        msg.thread,
+        `${assignment.provider} refused this turn (HTTP ${refused.status}): ${refused.message} — it is in Needs You; turns for ${assignment.provider} wait until it is fixed`,
+        msg.id,
+      ]);
+      return true;
+    }
     await db.query(`UPDATE inbound_messages SET status = 'failed' WHERE id = $1`, [msg.id]);
     // A budget refusal says exactly what stopped and which field would
     // change it — there is no point replacing that with "that turn failed".

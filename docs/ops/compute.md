@@ -98,6 +98,17 @@ so a validation error tells you what to edit.
 `zdr: false` (or absent) on an `off_machine` provider is **a warning, never a
 block** — informed choice.
 
+`max_output_tokens` may be set on any assignment (`default`, a tier, a crew):
+the most output a turn on it may ask for, sent as `max_tokens` on **every**
+call. Absent, it is **8192** (`DEFAULT_MAX_OUTPUT_TOKENS`, core) — never the
+model's own maximum. Leaving the field off the request asks for the model's
+whole window (65,536 on a Claude model through OpenRouter), and a provider
+that reserves credit against the ask answers `402 … requires more credits, or
+fewer max_tokens` once the balance is below it, however short the answer
+would have been. A provider's `request:` block may ask for **less**
+(`max_tokens` or `max_completion_tokens`), never more: the assignment's
+ceiling wins. It must be a whole number ≥ 1.
+
 `critical: true` may be set on any assignment, and the seed sets it on
 `default` (OPEN-4, ruled 2026-09-17): under a budget's `critical_only` the
 turn you are waiting on keeps being answered, while routines and delegation
@@ -463,6 +474,19 @@ dependency (C4):
 - **Backoff** on 429 and 5xx, honouring `Retry-After`; a refused connection
   (the local server is still loading) retries on the same schedule. A 4xx
   that is not 429 is not retried — a bad request will be bad again.
+- **A provider that refuses the account** — `402` (out of credits), `401` or
+  `403` (the key) — is not retried anywhere: not by the loop, not by the
+  drain's stale-session fallback, not by a crew's attempts. The turn fails
+  with the provider's own message, and ONE Needs You `report` is raised per
+  (provider, error class) while one waits (C96) — *openrouter: out of credits
+  — top up at https://openrouter.ai/settings/credits; 2 turns waiting*. While
+  it waits the provider is **paused**: its turns are held
+  (`inbound_messages.status = 'held'`), not sent, and counted on the report.
+  Dismissing it, or any later turn on that provider succeeding, releases them
+  oldest first; one held turn is tried every ten minutes, so a top-up is
+  enough on its own (`apps/assistant/src/provider-refusal.ts`).
+- **`max_tokens`** is the tier's `max_output_tokens` (default 8192) on every
+  call — "The rules the schema enforces" above.
 - **Structured output** is `response_format: json_schema` *plus* a zod
   validation and ONE repair retry, because LM Studio warns sub-7B models may
   fail it and OpenRouter says some endpoints treat it as a hint. Two failures

@@ -235,14 +235,15 @@ export function parsePair(raw: string, what: string): [string, string] {
   return [raw.slice(0, eq), raw.slice(eq + 1)];
 }
 
-/** How an HTTP connection signs in: `--auth none|bearer|api_key` with `--secret` (and `--auth-header` for an API key). basic and oauth arrive with T4-10. */
+/** How an HTTP connection signs in: `--auth none|bearer|api_key|basic` with `--secret` (and `--auth-header` for an API key, `--username` for basic — an app password, T4-13). oauth arrives with T4-10. */
 export interface AuthFlags {
   auth?: string | undefined;
   secret?: string | undefined;
   authHeader?: string | undefined;
+  username?: string | undefined;
 }
 
-function authOf(flags: AuthFlags): { scheme: string; secret?: string; header?: string } | undefined {
+function authOf(flags: AuthFlags): { scheme: string; secret?: string; header?: string; username?: string } | undefined {
   if (flags.auth === undefined) return undefined;
   switch (flags.auth) {
     case "none":
@@ -255,10 +256,14 @@ function authOf(flags: AuthFlags): { scheme: string; secret?: string; header?: s
       if (!flags.secret || !flags.authHeader) throw new StepFailed("--auth api_key needs --auth-header <Header-Name> and --secret <name>");
       return { scheme: "api_key", header: flags.authHeader, secret: flags.secret };
     case "basic":
+      // an app password (CalDAV, T4-13): the username is not secret and is written; the password is a secret, by name
+      if (!flags.secret || !flags.username) throw new StepFailed("--auth basic needs --username <user> and --secret <name> — the secret holds the (app) password, never the command line");
+      if (flags.username.includes(":")) throw new StepFailed("--username cannot contain a colon — Basic sign-in splits the pair there (RFC 7617)");
+      return { scheme: "basic", username: flags.username, secret: flags.secret };
     case "oauth":
-      throw new StepFailed(`--auth ${flags.auth}: ${flags.auth} sign-in arrives with T4-10 — this release sends none, a bearer, or an API key header`);
+      throw new StepFailed(`--auth ${flags.auth}: ${flags.auth} sign-in arrives with T4-10 — this release sends none, a bearer, an API key header, or basic with an app password`);
     default:
-      throw new StepFailed(`--auth takes none, bearer or api_key, not ${JSON.stringify(flags.auth)}`);
+      throw new StepFailed(`--auth takes none, bearer, api_key or basic, not ${JSON.stringify(flags.auth)}`);
   }
 }
 

@@ -166,11 +166,43 @@ describe("metistry connections add", () => {
     expect(again.err).toMatch(/already a connection named fake/);
   });
 
-  it("basic and OAuth sign-in are refused as not built yet, naming T4-10", async () => {
+  it("OAuth sign-in is refused as not built yet, naming T4-10", async () => {
     const dir = await instance("oauth");
     const r = await run(["connections", "add", "remote", "--type", "mcp", "--url", "https://x.example.com/mcp", "--auth", "oauth", "--no-discover", "--instance", dir]);
     expect(r.code).toBe(1);
     expect(r.err).toMatch(/oauth sign-in arrives with T4-10/);
+  });
+
+  it("the iCloud recipe (docs/ops/connections.md) writes an ok CalDAV connection: basic sign-in, the username written, the app password by name only (T4-13)", async () => {
+    const dir = await instance("icloud");
+    const r = await run([
+      "connections", "add", "icloud", "--type", "calendar", "--provider", "icloud-calendar", "--url", "https://caldav.icloud.com/",
+      "--auth", "basic", "--username", "you@icloud.com", "--secret", "icloud_app_password", "--no-discover", "--instance", dir,
+    ]);
+    expect(r.code, r.all).toBe(0);
+    expect(yamlOf(dir, "icloud")).toMatchObject({
+      type: "calendar",
+      provider: "icloud-calendar",
+      reach: { http: { url: "https://caldav.icloud.com/", auth: { scheme: "basic", username: "you@icloud.com", secret: "icloud_app_password" } } },
+      secrets: ["icloud_app_password"],
+    });
+    const show = await run(["connections", "show", "icloud", "--json", "--instance", dir]);
+    expect(show.code, show.all).toBe(0);
+    expect(JSON.parse(show.out).connection).toMatchObject({ provider_unit: { provides: "calendar", implementation: "builtin", sync: "caldav-calendar" }, used_by: [{ kind: "sync", name: "caldav-calendar" }] });
+    // --auth basic needs both halves; a colon in the username is refused
+    expect((await run(["connections", "add", "x", "--type", "calendar", "--provider", "caldav", "--url", "https://dav.example.com/", "--auth", "basic", "--secret", "pw", "--no-discover", "--instance", dir])).err).toMatch(/--auth basic needs --username/);
+    expect((await run(["connections", "add", "x", "--type", "calendar", "--provider", "caldav", "--url", "https://dav.example.com/", "--auth", "basic", "--username", "a:b", "--secret", "pw", "--no-discover", "--instance", dir])).err).toMatch(/colon/);
+  });
+
+  it("**a Google CalDAV address is refused — Google needs sign-in with Google** — and nothing is written (T4-13)", async () => {
+    const dir = await instance("google-caldav");
+    const r = await run([
+      "connections", "add", "gcal", "--type", "calendar", "--provider", "caldav", "--url", "https://apidata.googleusercontent.com/caldav/v2/you%40gmail.com/events",
+      "--auth", "basic", "--username", "you@gmail.com", "--secret", "google_app_password", "--no-discover", "--instance", dir,
+    ]);
+    expect(r.code).toBe(1);
+    expect(r.err).toMatch(/Google needs sign-in with Google/);
+    expect(existsSync(file(dir, "gcal"))).toBe(false);
   });
 });
 

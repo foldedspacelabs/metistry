@@ -533,8 +533,8 @@ const USAGE = `metistry — Metistry command line
 
   metistry connections list [--json] [--instance <dir>]
   metistry connections show <name> [--json]
-  metistry connections add <name> --type mcp (--url <url> [--auth bearer|api_key
-                           --secret <name> [--auth-header <Header>]] [--header K=V]…
+  metistry connections add <name> --type mcp (--url <url> [--auth bearer|api_key|basic
+                           --secret <name> [--auth-header <Header>] [--username <user>]] [--header K=V]…
                          | [--env K=V]… [--runs-on host|container] -- <command> [args…])
                            [--provider <type>] [--description <text>] [--no-discover] [--dry-run]
   metistry connections set <name> [--url <url>] [--auth …] [--header K=V]… [--unset-header K]…
@@ -558,7 +558,10 @@ const USAGE = `metistry — Metistry command line
       the file. "remove" deletes it; what referred to it turns absent. A
       command is given only the environment the file names — never this
       process's — and a granted secret there is given to that command only.
-      A §4.7 protected path: every write goes through the reconciler as the
+      --auth basic writes --username beside the secret that holds an app
+      password (a CalDAV calendar: --provider caldav, icloud-calendar or
+      fastmail-calendar); the password is filled at the egress door, never
+      written. A §4.7 protected path: every write goes through the reconciler as the
       "user" principal. The console reads the same files at GET
       /api/connections and never writes them.
 
@@ -1894,7 +1897,7 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
         // --json is a wire contract (docs/ops/cli.md): progress to stderr
         out: json ? err : out,
       };
-      const auth = { auth: str(flags, "auth"), secret: str(flags, "secret"), authHeader: str(flags, "auth-header") };
+      const auth = { auth: str(flags, "auth"), secret: str(flags, "secret"), authHeader: str(flags, "auth-header"), username: str(flags, "username") };
       try {
         if (verb === "list") {
           const rows = await connectionsList(connOpts);

@@ -23,7 +23,8 @@
 //     the owner's own doors (design-build-plan §2.11): the Tick door's
 //     `setTaskChecked` flips the box and writes or removes one `done <date>`
 //     (T2-4), and the Defer door's `setTaskScheduled` writes one `do <date>`
-//     or one `someday` (T2-5, K6) — each nothing else, and each refusing any
+//     or one `someday` (T2-5, K6), and the Link door's `setTaskRef` adds one
+//     `linear:`/`gh:` ref (T4-25) — each nothing else, and each refusing any
 //     line where it cannot prove that by re-parsing its own output.
 //   * A FIELD IT CANNOT READ IS NEVER GUESSED. `due nextweek` sets no date;
 //     it sets `parse_warning`, which the day's plan renders as one visible
@@ -1244,5 +1245,69 @@ export function setTaskScheduled(line: string, when: TaskDeferral, opts: TaskDat
     after.someday === (date === null) &&
     unscheduledFields(after) === unscheduledFields(before);
   if (!proven) return { ok: false, reason: "unsafe", message: "the line would not read back as the same task with only its day changed — defer it in the note" };
+  return { ok: true, line: next };
+}
+
+// --- the Link door's one edit (design-build-plan §2.1, T4-25) ---------------
+//
+// *Send to Linear* is two doors: the tracker creates the issue, then
+// `POST /api/vault-tasks/:task_key/link {ref}` writes `linear:<KEY>` on the
+// line. The same discipline as the Tick and Defer edits: a line and a ref in,
+// never a patch; the only bytes it can add are one space and the ref, at the
+// end of the trailing run (before the anchor, which Obsidian needs last); and
+// the proof is the re-parse — every field but `ext_refs` must read back
+// exactly as it was, and `ext_refs` must be what it was plus this one ref.
+
+/** A ref the Link door writes: `linear:<TEAM-123>` or `gh:<owner>/<repo>#<n>` — the two schemes of `EXT_REF_SCHEMES`, each in the one shape its collector joins on. */
+export const TASK_REF_RE = /^(?:linear:[A-Z][A-Z0-9]{0,9}-[1-9][0-9]{0,8}|gh:[A-Za-z0-9][A-Za-z0-9-]{0,38}\/[A-Za-z0-9._-]{1,100}#[1-9][0-9]{0,9})$/;
+
+export type TaskRefRefusal = "not_a_task" | "rule" | "already" | "linked" | "unsafe";
+
+export type TaskRefEdit =
+  | { ok: true; line: string }
+  | { ok: false; reason: TaskRefRefusal; message: string };
+
+/** The fields a link may not change: everything `parseTaskLine` reads but `ext_refs`. */
+function unlinkedFields(p: ParsedTaskLine): string {
+  const { ext_refs: _r, ...rest } = p;
+  return JSON.stringify(rest);
+}
+
+/**
+ * Add one tracker ref to one task line — the Link door's whole write.
+ *
+ * Refused, never approximated: a ref not in `TASK_REF_RE`'s shape (thrown —
+ * a caller's bug, like a bad date); not a task line; a recurrence rule (never
+ * itself a task, §4); a line that already carries this ref (`already`); a
+ * line that already carries a ref of the same scheme (`linked` — one issue per
+ * line, so ticking it names one issue to close); and any line where the
+ * result does not re-parse as the same task with only this ref added
+ * (`unsafe`). A ticked or dropped line may be linked: a ref is a pointer, not
+ * a state.
+ */
+export function setTaskRef(line: string, ref: string, opts: TaskDateOptions = {}): TaskRefEdit {
+  if (!TASK_REF_RE.test(ref)) throw new RangeError(`not a task ref: ${JSON.stringify(ref)}`);
+  const before = parseTaskLine(line, opts);
+  const m = LINE_RE.exec(line);
+  if (!before || !m || line.includes("\r") || line.includes("\n")) return { ok: false, reason: "not_a_task", message: "the line is not a task line" };
+  if (before.recurrence) return { ok: false, reason: "rule", message: "the line is a recurrence rule, which is never itself a task — link the day's instance instead" };
+  if (before.ext_refs.includes(ref)) return { ok: false, reason: "already", message: `the line already carries ${ref}` };
+  const scheme = ref.slice(0, ref.indexOf(":") + 1);
+  const same = before.ext_refs.find((r) => r.toLowerCase().startsWith(scheme));
+  if (same) return { ok: false, reason: "linked", message: `the line already carries ${same} — one ${scheme.slice(0, -1)} ref per line; change it in the note` };
+
+  const rest = m[4] ?? "";
+  const restAt = line.length - rest.length;
+  const trimmed = rest.trimEnd();
+  const anchor = TRAILING_ANCHOR_RE.exec(trimmed);
+  const core = anchor ? trimmed.slice(0, anchor.index) : trimmed;
+  const tail = rest.slice(core.length);
+  const edited = `${core}${core === "" ? "" : " "}${ref}`;
+  // `- [ ]` with nothing after the box has no separator yet; the grammar needs one
+  const sep = rest === "" ? " " : "";
+  const next = `${line.slice(0, restAt)}${sep}${edited}${tail}`;
+  const after = parseTaskLine(next, opts);
+  const proven = after !== null && JSON.stringify(after.ext_refs) === JSON.stringify([...before.ext_refs, ref]) && unlinkedFields(after) === unlinkedFields(before);
+  if (!proven) return { ok: false, reason: "unsafe", message: "the line would not read back as the same task with only the ref added — link it in the note" };
   return { ok: true, line: next };
 }

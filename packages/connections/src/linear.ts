@@ -7,12 +7,12 @@
 // secret: <name>}`, so the header this client sends holds a reference and the
 // egress door fills it for `api.linear.app` or not at all (`sync.ts`).
 //
-// **Read-only, by construction.** This release's capability is `read`: the
-// client below has two fixed query documents and no way to send another —
-// `linearQuery` refuses any document that is not a `query` operation, so a
-// mutation cannot leave through it even by a later edit that forgets.
-// Creating and completing an issue (`create`, `complete`) are their own
-// tickets (T4-25, T4-26) and their own doors.
+// **Read-only, by construction.** The sync's client below has fixed query
+// documents and no way to send another — `linearQuery` refuses any document
+// that is not a `query` operation, so a mutation cannot leave through it even
+// by a later edit that forgets. Creating an issue (`create`, T4-25) is its
+// own module and its own fixed document (`linear-issue.ts`), sent through the
+// same transport (`sendLinearDocument`), which no index export reaches.
 //
 // Pure over a `fetch`: no Postgres, no vault (the dependency arrow). The
 // sync that writes `work` and raises requests is `collectors/linear/`.
@@ -80,7 +80,8 @@ export class LinearError extends Error {
   }
 }
 
-const ISSUE_FIELDS = `id identifier title url priority priorityLabel dueDate updatedAt description
+/** The fields every issue document asks for — what `readIssue` reads. */
+export const ISSUE_FIELDS = `id identifier title url priority priorityLabel dueDate updatedAt description
   state { name type } team { key name } creator { name } assignee { name isMe }`;
 
 /** The owner's open assigned issues, a page at a time. */
@@ -110,6 +111,16 @@ export async function linearQuery<T>(sync: Pick<SyncHttp, "fetch" | "headers">, 
   if (!/^query\b/.test(first) || /\bmutation\b|\bsubscription\b/.test(first)) {
     throw new LinearError("not_a_query", "this client sends read queries only — creating or changing an issue is its own door (T4-25, T4-26)");
   }
+  return sendLinearDocument<T>(sync, document, variables);
+}
+
+/**
+ * The transport under every Linear document: POST to the one endpoint with
+ * the connection's headers (a reference the door fills), every failure a
+ * code. Not exported from the package: `linearQuery` is the read door, and
+ * each mutation is a fixed document in its own module (`linear-issue.ts`).
+ */
+export async function sendLinearDocument<T>(sync: Pick<SyncHttp, "fetch" | "headers">, document: string, variables: Record<string, unknown>): Promise<T> {
   const res = await sync.fetch(LINEAR_GRAPHQL_URL, {
     method: "POST",
     headers: { ...sync.headers, "content-type": "application/json", accept: "application/json", "user-agent": "metistry-linear" },

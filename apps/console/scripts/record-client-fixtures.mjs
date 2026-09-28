@@ -272,6 +272,28 @@ const DAY = `Journal/${RECORDING_DAY}.md`;
 const TASK_TEXT = "Send Dana the fixture format";
 const DEFER_TEXT = "Draft the Q4 plan";
 await vault.write(DAY, Buffer.from(`# ${RECORDING_DAY}\n\n## Today\n\n- [ ] ${TASK_TEXT} due 2026-09-28 p2 size s ^mt-7f3k2a\n- [ ] Book the room for Thursday\n- [ ] ${DEFER_TEXT} due 2026-10-01 p1 ^mt-4q8r2d\n\n## Today · Metistry\n\n<!-- metistry:day -->\n<!-- /metistry:day -->\n\n## Notes\n`), { principal: "user", message: "fixture" });
+// Send to Linear (T4-25): a task of its own, in a note of its own, for the
+// tracker door to file and the Link door to link — so neither the Tick nor the
+// Defer recording sees its edit
+const SEND_NOTE = "Projects/Metistry/Exports.md";
+const SEND_TEXT = "File the export bug";
+await vault.write(SEND_NOTE, Buffer.from(`# Exports\n\n- [ ] ${SEND_TEXT} p2 ^mt-8s2l4k\n`), { principal: "user", message: "fixture" });
+// …and the Linear it files into: in process, answering the three documents the
+// service sends (no issue under the task's id yet, one team, the create)
+const fakeLinear = async (_url, init) => {
+  const { query, variables } = JSON.parse(String(init.body));
+  if (/MetistryIssuesById/.test(query)) return Response.json({ data: { issues: { nodes: [] } } });
+  if (/MetistryViewerTeams/.test(query)) return Response.json({ data: { viewer: { teams: { nodes: [{ id: "team-met", key: "MET", name: "Metistry" }] } } } });
+  const { id, title } = variables.input;
+  return Response.json({
+    data: {
+      issueCreate: {
+        success: true,
+        issue: { id, identifier: "MET-42", title, url: "https://linear.app/example/issue/MET-42/file-the-export-bug", priority: 0, priorityLabel: "No priority", dueDate: null, updatedAt: RECORDING_NOW, description: null, state: { name: "Backlog", type: "backlog" }, team: { key: "MET", name: "Metistry" }, creator: { name: "Me" }, assignee: null },
+      },
+    },
+  });
+};
 // the day's three machine-written files (T2-7): what GET /api/today names by path
 for (const dir of ["Brief", "Standup", "Plan"]) {
   await vault.write(`Journal/${dir}/${RECORDING_DAY}.md`, Buffer.from(`# ${dir} — 28 September\n`), { principal: "user", message: "fixture" });
@@ -392,6 +414,11 @@ const server = makeServer(pool, queries, {
   instancesFiles: layout.path("instances"),
   secrets: { file: layout.path("secrets"), presence: instanceSecrets.presence() },
   githubWrite,
+  // Send to Linear (T4-25): the Linear connection as the opener hands it over — the fake above behind it
+  openTracker: async () => ({
+    ok: true,
+    sync: { connection: "linear", provider: "linear", url: "https://api.linear.app/graphql", origin: "https://api.linear.app", headers: {}, fetch: fakeLinear, capabilities: ["read", "create"], raise: {}, secretsUsed: () => [] },
+  }),
   variables: { instanceDir, file: layout.path("variables") },
   connections: { instanceDir, seedDir: join(REPO_ROOT, "seed"), presence: instanceSecrets.presence() },
   // the reconciler's GET /vault/status, as a week of use leaves it: two
@@ -598,6 +625,13 @@ await pool.query(
    ON CONFLICT (path, task_key) DO UPDATE SET checked = false, scheduled_for = NULL`,
   [DAY, DEFER_TEXT, P],
 );
+// …and the one Send to Linear files and links (T4-25): no day, so Today and its filters leave it out
+await pool.query(
+  `INSERT INTO vault_tasks (path, task_key, anchor, line_no, text, text_norm, checked, priority, project, area, parsed_on, first_seen_on, last_seen_at)
+   VALUES ($1, 'mt-8s2l4k', 'mt-8s2l4k', 3, $2, lower($2), false, 2, $3, 'Projects/Metistry', '2026-09-28', '2026-09-25', now())
+   ON CONFLICT (path, task_key) DO UPDATE SET checked = false, ext_refs = '{}'`,
+  [SEND_NOTE, SEND_TEXT, P],
+);
 
 // the day's standup (T2-11): one occurrence of a series, as the eventkit sync
 // leaves it in calendar_events — the event the meeting-note door opens a note for
@@ -795,6 +829,9 @@ const REQUESTS = [
 
   ["POST /api/vault-tasks/:task_key/check", () => ({ path: "/api/vault-tasks/mt-7f3k2a/check", body: { checked: true, seen_text: TASK_TEXT }, key: "tick-0928-0001" })],
   ["POST /api/vault-tasks/:task_key/schedule", () => ({ path: "/api/vault-tasks/mt-4q8r2d/schedule", body: { do: "2026-09-30", seen_text: DEFER_TEXT }, key: "defer-0928-0001" })],
+  // Send to Linear (T4-25): the issue filed, then its ref written on the line
+  ["POST /api/trackers/:connection/issues", () => ({ path: "/api/trackers/linear/issues", body: { task_key: "mt-8s2l4k" } })],
+  ["POST /api/vault-tasks/:task_key/link", () => ({ path: "/api/vault-tasks/mt-8s2l4k/link", body: { ref: "linear:MET-42", seen_text: SEND_TEXT } })], // the kit's link() sends no Idempotency-Key; the door honours one (client-api.md)
   ["POST /api/today/close", () => ({ path: "/api/today/close", body: { day: RECORDING_DAY, line: "Store interface frozen; recorder next." } })],
   // Open notes on the day's standup (T2-11): the first call, which writes the note
   ["POST /api/meetings/:event_id/note", () => ({ path: "/api/meetings/evt-standup-0928/note", body: {} })],

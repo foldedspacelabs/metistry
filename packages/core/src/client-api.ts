@@ -265,7 +265,7 @@ export const CLIENT_API: readonly ClientRoute[] = [
   route("PUT", "/api/today/order", "the owner's order for the day", { idempotent: "natural" }),
   route("POST", "/api/vault-tasks/:task_key/check", "tick or untick one task line", { idempotent: "key", conflict: ["stale"] }),
   route("POST", "/api/vault-tasks/:task_key/schedule", "defer one task line: a `do` date or someday", { idempotent: "key", conflict: ["stale"] }),
-  planned("POST", "/api/vault-tasks/:task_key/link", "T4-25", "add one tracker ref to one task line", { conflict: ["stale"] }),
+  route("POST", "/api/vault-tasks/:task_key/link", "add one tracker ref to one task line", { idempotent: "key", conflict: ["stale"] }),
   route("POST", "/api/today/close", "Close the Day: write the section, then plan tomorrow", { conflict: ["stale"] }),
 
   // ----- calendar and mail -----
@@ -299,7 +299,7 @@ export const CLIENT_API: readonly ClientRoute[] = [
   route("POST", "/api/github/pulls/:owner/:repo/:number/review", "post a review; the head SHA must match the one shown", { conflict: ["stale"] }),
   route("POST", "/api/github/pulls/:owner/:repo/:number/threads/:id/reply", "reply to a review thread; the head SHA must match", { conflict: ["stale"] }),
   route("POST", "/api/github/pulls/:owner/:repo/:number/threads/:id/resolve", "resolve a review thread; the head SHA must match", { conflict: ["stale"] }),
-  planned("POST", "/api/trackers/:connection/issues", "T4-25", "create an issue from a task; idempotent by task key", { idempotent: "natural" }),
+  route("POST", "/api/trackers/:connection/issues", "create an issue from a task; idempotent by task key", { idempotent: "natural", conflict: ["stale"] }),
   planned("POST", "/api/trackers/:connection/issues/:key/complete", "T4-26", "close an issue", { idempotent: "natural" }),
 
   // ----- prose feedback (T1-12) -----

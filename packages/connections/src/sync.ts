@@ -187,6 +187,8 @@ export interface SyncHttp {
   headers: Readonly<Record<string, string>>;
   /** the door: pinned to `origin`, no redirect followed, secrets filled for listed hosts only, everything that comes back redacted */
   fetch: typeof fetch;
+  /** what its provider declares it can do (`read`, `create`, …) — a door that changes the service checks its capability here before anything is sent */
+  capabilities: readonly string[];
   /** the owner's Needs You switches for this sync from `scheduled.yaml` (`syncs.<sync>.raise`) — only what the file says; the manifest's defaults are the sync's */
   raise: Readonly<Record<string, boolean>>;
   /** the secret names the calls so far carried — for the run's `meta.secrets` */
@@ -310,6 +312,7 @@ export function openSyncHttp(opts: OpenSyncOptions): OpenedSync {
       origin,
       headers,
       fetch: pinned,
+      capabilities: [...entry.provider.manifest.capabilities],
       raise,
       secretsUsed: () => [...used].sort(),
     },

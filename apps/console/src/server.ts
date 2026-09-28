@@ -57,6 +57,8 @@ import { runAction, type ActionServices } from "./actions.js";
 import { computeRoutes, isComputeRoute, type ComputeAdmin } from "./compute-routes.js";
 import { isKnowledgeRoute, knowledgeRoutes, type ConflictRefusal, type KnowledgeConflicts, type KnowledgeHistory, type KnowledgeSearcher } from "./knowledge-routes.js";
 import { isVaultTaskRoute, ReplayCache, vaultTaskRoutes } from "./vault-task-routes.js";
+import { isTrackerIssueRoute, trackerIssueRoute } from "./tracker-issue-route.js";
+import type { CreateIssueResult, SyncOpener } from "@foldedspacelabs/metistry-connections";
 import { closeDayRoute, isCloseDayRoute, type RoutineTrigger } from "./close-day.js";
 import { isTodayRoute, todayRoutes } from "./today-routes.js";
 import type { ConsoleVaultClient } from "./vault-client.js";
@@ -176,6 +178,14 @@ export interface ConsoleConfig {
    * else — never handed to the MCP mount. Absent = those doors answer 503.
    */
   githubWrite?: GithubWriteClient | undefined;
+  /**
+   * Opens the tracker connection *Send to Linear* files through
+   * (tracker-issue-route.ts, T4-25): the instance's catalog, read afresh per
+   * send, with the connection's secret filled at the egress door for its
+   * listed host only (packages/connections `instanceSyncOpener`). Absent =
+   * `POST /api/trackers/:connection/issues` answers 503.
+   */
+  openTracker?: SyncOpener | undefined;
   /**
    * The pooled client behind the connections proxy (plan §2.6): handed to
    * `/mcp` as `connections_list` / `connections_call`'s proxy, and to the
@@ -591,6 +601,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
   const artifacts = cfg.vault ? new ArtifactsService(db, cfg.vault, { origin: cfg.origin, tasks }) : undefined;
   /** `Idempotency-Key` replays for the vault-task doors — per server, in memory (vault-task-routes.ts says why that is enough). */
   const vaultTaskReplays = new ReplayCache();
+  const trackerSends = new Map<string, Promise<CreateIssueResult>>();
   /** The meeting-note door's per-event queue and the notes it wrote ahead of the walk — per server, in memory (meeting-note-route.ts says why that is enough). */
   const meetingNotes = new MeetingNotes();
   /** The services one action may reach. Read per call: `cfg.targets` and the vault bridge are hot-reloaded, and an action must follow the file rather than the process's startup. */
@@ -1193,6 +1204,8 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         isMeetingMoveRoute(key) ||
         // the PR doors post to GitHub AS the owner, with the owner's own secret (T2-13)
         isGithubPullRoute(key) ||
+        // …and Send to Linear files an issue through the owner's tracker connection (T4-25)
+        isTrackerIssueRoute(key) ||
         // Today reads the owner's own day — their notes' task lines, their calendar — and stores their order
         isTodayRoute(key)
       ) {
@@ -1524,6 +1537,9 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     }
     // ----- the pull request doors: a review, a thread reply or resolve, posted as the owner through the github_write client — the head SHA shown must match (§2.11, T2-13) -----
     if (isGithubPullRoute(key)) return githubPullRoute(req, res, key, { db, github: cfg.githubWrite, audit }, principalOf(auth));
+    // ----- Send to Linear: one issue per task, idempotent by task key, through the tracker connection's `create` (T4-25) -----
+    // The line is linked by the other door (`POST /api/vault-tasks/:task_key/link`); this one writes nothing of the owner's.
+    if (isTrackerIssueRoute(key)) return trackerIssueRoute(req, res, key, { queries, vault: cfg.vault, openTracker: cfg.openTracker, audit, inflight: trackerSends, now: cfg.now });
 
     // ----- Close the Day (§2.11, §2.13; T2-8) -----
     // The daily note's section through the reconciler's section operation as

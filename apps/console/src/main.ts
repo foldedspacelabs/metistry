@@ -393,6 +393,12 @@ console.log(
 const connections: ConnectionsView | undefined = computeAdmin
   ? { instanceDir: computeAdmin.instanceDir, seedDir: computeAdmin.seedDir, ...(secrets?.presence ? { presence: secrets.presence } : {}) }
   : undefined;
+// A sync reading its connection (T4-24, packages/connections `sync.ts`), and
+// Send to Linear filing through one (T4-25): the instance's catalog, read
+// afresh on every open, and the secrets `metistry secrets sync --to env`
+// delivered for sync-read connections — filled at the egress door for each
+// secret's listed hosts, never put on a request here. No instance: absent.
+const openSync = connections ? instanceSyncOpener({ instanceDir: connections.instanceDir, seedDir: connections.seedDir, env: process.env }) : undefined;
 console.log(
   connections
     ? `connections: ${resolveInstanceLayout(connections.instanceDir).path("connectionsDir")} (read-only; every write is \`metistry connections\`)`
@@ -499,7 +505,7 @@ const componentCtx: ComponentCtx = {
   // secrets sync --to env` delivered for sync-read connections — filled at
   // the egress door for each secret's listed hosts, never put on a request
   // here. The `linear` collector is the first reader. No instance: absent.
-  ...(connections ? { openSync: instanceSyncOpener({ instanceDir: connections.instanceDir, seedDir: connections.seedDir, env: process.env }) } : {}),
+  ...(openSync ? { openSync } : {}),
   // The owner's zone for a sync that must say which day something is on —
   // the ICS sync's all-day dates and window (T4-12). METISTRY_TZ, never TZ.
   ...(runnerZone ? { ownerTimeZone: runnerZone } : {}),
@@ -559,6 +565,10 @@ if (!planTomorrow) console.warn(`${PLAN_ROUTINE} is not loaded: Close the Day wr
 
 const server = makeServer(pool, queries, {
   origin,
+  // Send to Linear (T4-25): the same opener the syncs read their connection
+  // through — the catalog afresh per send, the key filled at the egress door
+  // for api.linear.app only. No instance: the door answers 503.
+  ...(openSync ? { openTracker: openSync } : {}),
   ...(secrets ? { secrets } : {}),
   githubWrite,
   ...(variables ? { variables } : {}),

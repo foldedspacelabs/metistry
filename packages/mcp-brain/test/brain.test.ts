@@ -16,6 +16,8 @@ import {
   canSeeUnder,
   computeNudge,
   createBrainServer,
+  INTERACTIVE_META_KEY,
+  interactiveFrom,
   knowledgeScope,
   liftTurnId,
   memberOf,
@@ -232,6 +234,22 @@ describe("the turn handle (turn-id.ts): _meta on the wire, one release of tolera
     expect(liftTurnId({ jsonrpc: "2.0", id: 5, method: "tools/list", params: { arguments: { turn_id: "t" } } })).toBeUndefined();
     expect(liftTurnId(null)).toBeUndefined();
     expect(liftTurnId("tools/call")).toBeUndefined();
+  });
+});
+
+describe("the interactive bit (turn-id.ts; C59): _meta beside the turn handle, and absent means interactive", () => {
+  it("rides under our own reverse-DNS key, beside the turn handle's", () => {
+    expect(INTERACTIVE_META_KEY).toBe("com.foldedspacelabs.metistry/interactive");
+    expect(INTERACTIVE_META_KEY.split("/")[0]).toBe(TURN_ID_META_KEY.split("/")[0]);
+  });
+
+  it("only an explicit boolean false says nobody is there; anything else is the interactive default", () => {
+    expect(interactiveFrom({ [INTERACTIVE_META_KEY]: false, [TURN_ID_META_KEY]: "t1" })).toBe(false);
+    expect(interactiveFrom({ [INTERACTIVE_META_KEY]: true })).toBe(true);
+    // malformed values are dropped like a malformed turn handle, never refused
+    for (const odd of ["false", 0, null, "no", [], {}]) expect(interactiveFrom({ [INTERACTIVE_META_KEY]: odd }), JSON.stringify(odd)).toBe(true);
+    expect(interactiveFrom({ interactive: false })).toBe(true); // the bare name is not the key
+    for (const empty of [undefined, null, {}, "string"]) expect(interactiveFrom(empty)).toBe(true);
   });
 });
 

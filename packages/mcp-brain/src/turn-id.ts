@@ -80,3 +80,33 @@ export function liftTurnId(message: unknown): string | undefined {
   params._meta = meta;
   return lifted;
 }
+
+// ---- the interactive bit (C59; T4-22) --------------------------------------
+//
+// *Ask* means two things by context (screen-09 §4): **pause** for an agent the
+// owner is talking to, **defer** for a routine at 6 AM that has nobody to ask.
+// Which one a call is cannot be read from the principal — the same credential
+// answers the owner's message at 11 AM and a routine's turn at 6:02 AM — so the
+// CLIENT says how the turn was started, beside the turn handle and for the
+// same reasons: it is request metadata, not a parameter, and no model should
+// have to reason about (or be able to forge) it in its arguments.
+//
+// It grants nothing either way. Paused or deferred, an Ask First call runs
+// only on the owner's Approve (connections-tools.ts); the bit decides the
+// SHAPE of the answer and what the run reports, never whether anything runs.
+// That is why a missing or malformed value may safely default: absent is
+// "interactive" — the answer every client had before the bit existed.
+
+/** The `_meta` key the bit rides under; `apps/assistant/src/brain.ts` carries the same literal, locked by its test. */
+export const INTERACTIVE_META_KEY = "com.foldedspacelabs.metistry/interactive";
+
+/**
+ * Whether the call was made by a run the owner is present for. `false` only
+ * for an explicit boolean `false` — anything else (absent, a string, a number)
+ * is the interactive default, dropped like a malformed turn handle rather than
+ * refused.
+ */
+export function interactiveFrom(meta: unknown): boolean {
+  if (meta === null || typeof meta !== "object") return true;
+  return (meta as Record<string, unknown>)[INTERACTIVE_META_KEY] !== false;
+}

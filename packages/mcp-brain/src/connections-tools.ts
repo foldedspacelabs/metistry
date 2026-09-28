@@ -31,6 +31,16 @@
 //     payload this call built and recorded, never one a caller sends later
 //     (apps/console/src/actions.ts). The pool refuses Ask First again before
 //     it dials unless the console says the owner approved (defence in depth).
+//   * **Ask First pauses an interactive run and defers an unattended one**
+//     (C59; T4-22). The run's origin rides in the call's `_meta` beside the
+//     turn handle (turn-id.ts), because one credential serves both. Paused,
+//     the caller hears `status: pending`. Deferred, it hears `skipped: true,
+//     reason: "waits_for_you"` and its row says `outcome: "deferred"` — the
+//     same request is raised in Needs You either way, nothing is dialled,
+//     nothing waits, and the run that made the call reports it
+//     (apps/assistant reads the deferred rows back by `turn_id`). The bit
+//     grants nothing: a deferred call runs only on the owner's Approve,
+//     exactly like a paused one.
 //   * **Rate limits come from `runs`**: this caller's dialled calls and its
 //     Ask First requests to one connection in the last hour, counted from the
 //     rows this bridge writes (the limits are the host's, `ConnectionLimits`).
@@ -67,12 +77,17 @@ import type { AgentPrincipal, Db } from "./types.js";
 export const CONNECTIONS_TOOL_NAMES = ["connections_list", "connections_call"] as const;
 export type ConnectionsToolName = (typeof CONNECTIONS_TOOL_NAMES)[number];
 
-/** The server's registration function, narrowed to these names. `act.runId` is this call's own `runs` row — where a preview's confirm record is kept. */
+/**
+ * The server's registration function, narrowed to these names. `act.runId` is
+ * this call's own `runs` row — where a preview's confirm record is kept;
+ * `act.interactive` is the call's `_meta` bit (turn-id.ts) — `false` when the
+ * run that made it has nobody to ask (C59).
+ */
 export type Register = <S extends z.ZodRawShape>(
   name: ConnectionsToolName,
   description: string,
   inputSchema: S,
-  body: (args: z.infer<z.ZodObject<S>>, act: { runId?: number | string | undefined }) => Promise<Outcome>,
+  body: (args: z.infer<z.ZodObject<S>>, act: { runId?: number | string | undefined; interactive?: boolean | undefined }) => Promise<Outcome>,
 ) => void;
 
 /** How long a caller-confirmed preview's token redeems (eventkit's and Executor's human scale). The host passes its own (`METISTRY_CONNECTION_CONFIRM_TTL_S`). */
@@ -368,7 +383,25 @@ export function registerConnectionsTools(reg: Register, proxy: ConnectionsProxy 
         if (limited) return limited;
         const token = mintConfirmToken();
         const action: Action = { kind: "connection_call", args: { connection: a.connection, tool: a.tool, args, confirm_token: token } };
-        const proposalId = await insertConnectionCallRequest(db, principal, action, runId, { digest: confirmTokenDigest(token), payload: connectionCallDigest(payload), mode: "ask" });
+        const deferred = act.interactive === false;
+        const proposalId = await insertConnectionCallRequest(db, principal, action, runId, { digest: confirmTokenDigest(token), payload: connectionCallDigest(payload), mode: "ask" }, deferred);
+        if (deferred) {
+          // Nobody is there to ask (C59): the run finishes without this step
+          // and says so. Not an error — a refusal would make the run look
+          // broken — and not a wait: the answer is back before anything else.
+          return done(
+            {
+              skipped: true,
+              reason: "waits_for_you",
+              proposal_id: proposalId,
+              connection: a.connection,
+              tool: a.tool,
+              preview: describeAction(action),
+              note: "Nothing ran, and nobody is here to approve it now: it waits for the owner in Needs You. Finish the rest of this run without it and say you skipped it — do not call it again.",
+            },
+            { ...meta, mode: "ask", outcome: "deferred", proposal_id: proposalId },
+          );
+        }
         return done(
           {
             status: "pending",
@@ -436,10 +469,11 @@ function tokenRefused(connection: string, tool: string, miss: RedeemMiss | "othe
  * there is no moment when the owner can see a request whose token does not
  * yet redeem.
  */
-async function insertConnectionCallRequest(db: Db, principal: AgentPrincipal, action: Action & { kind: "connection_call" }, previewRun: number, confirm: ConfirmRecord): Promise<number> {
+async function insertConnectionCallRequest(db: Db, principal: AgentPrincipal, action: Action & { kind: "connection_call" }, previewRun: number, confirm: ConfirmRecord, deferred: boolean): Promise<number> {
   const rest = redactSecrets({
     title: describeAction(action),
-    provenance: { agent: principal.id, via: "connections_call", submitted_at: new Date().toISOString() },
+    // `deferred`: an unattended run raised it and moved on (C59) — nobody is waiting on the answer
+    provenance: { agent: principal.id, via: "connections_call", submitted_at: new Date().toISOString(), ...(deferred ? { deferred: true } : {}) },
   });
   const payload = { ...rest, action, preview_run: previewRun };
   const { rows } = await db.query(

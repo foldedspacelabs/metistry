@@ -71,6 +71,8 @@ export interface VaultWriteIntent {
 export interface WriteAct {
   turnId?: string | undefined;
   runId?: number | string | undefined;
+  /** How the run was started (turn-id.ts's interactive bit): `false` = nobody is there to ask. Absent = interactive. */
+  interactive?: boolean | undefined;
 }
 
 export interface VaultWriteRequest {

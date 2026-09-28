@@ -58,7 +58,7 @@ import { principalOf } from "./principal.js";
 import { done, fail, refuse, type Outcome } from "./outcome.js";
 import { REQUEST_CREATE_KINDS, submitPullRequest, submitQuestion, submitReport } from "./report.js";
 import { allProjects, memberOf } from "./scope.js";
-import { liftTurnId, turnIdFrom } from "./turn-id.js";
+import { interactiveFrom, liftTurnId, turnIdFrom } from "./turn-id.js";
 import type { AgentPrincipal, Db } from "./types.js";
 
 export interface BrainConfig {
@@ -238,7 +238,7 @@ export type TaskFilter = (typeof TASK_FILTERS)[number];
  * What a tool handler is handed besides its arguments: the SDK's request
  * context, narrowed to the two fields this bridge reads — the JSON-RPC id
  * (which the deprecated-name rewriter keys its note by) and the call's
- * `_meta` (which carries the turn handle; turn-id.ts).
+ * `_meta` (which carries the turn handle and the interactive bit; turn-id.ts).
  */
 interface ToolCallExtra {
   requestId?: string | number;
@@ -302,11 +302,15 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
         // 938 tokens the model never reads. A legacy `arguments.turn_id` was
         // already lifted there by `handle` below.
         const turn_id = turnIdFrom(extra?._meta);
+        // …and so does how the run was started (C59): an unattended run's
+        // Ask First call is deferred rather than paused. Grants nothing; the
+        // row says so only when it is unattended, so older rows read the same.
+        const interactive = interactiveFrom(extra?._meta);
         // a call that came in under a deprecated name is recorded under the primary
         // one, with the old spelling in meta.alias — so the stragglers are countable.
         const alias = extra?.requestId !== undefined ? aliasByRequestId.get(String(extra.requestId)) : undefined;
         const proxied = name === "connections_call" ? connectionOf(args) : undefined;
-        const runMeta = { via: "mcp-brain", args: summarizeArgs(args), ...(turn_id !== undefined ? { turn_id } : {}), ...(alias ? { alias } : {}), ...(proxied ?? {}) };
+        const runMeta = { via: "mcp-brain", args: summarizeArgs(args), ...(turn_id !== undefined ? { turn_id } : {}), ...(interactive ? {} : { unattended: true }), ...(alias ? { alias } : {}), ...(proxied ?? {}) };
         const runId = await startRun(db, { component: principal.id, kind: proxied ? "connection_call" : "tool", tool: name, meta: runMeta });
         let outcome: Outcome;
         // **The run's own allowlist, at the door** (P2 of
@@ -330,7 +334,7 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
         try {
           // the act travels to the one tool that commits (knowledge_write): its
           // turn and this call's runs row become the commit's key and trailers
-          outcome = await body(args, { turnId: turn_id, runId });
+          outcome = await body(args, { turnId: turn_id, runId, interactive });
         } catch (err) {
           if (err instanceof TasksError) {
             outcome = fail(err.code === "conflict" ? "conflict" : "invalid_request", err.message);

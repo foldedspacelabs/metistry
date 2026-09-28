@@ -1,6 +1,6 @@
 {
   "name": "@foldedspacelabs/metistry-tasks",
-  "version": "0.14.2",
+  "version": "0.14.3",
   "description": "A shared task list for heterogeneous agents: atomic claims, leases with heartbeat, dependency gating, idempotent create, append-only history. One TypeScript service over any pg-shaped client; adapters (HTTP, MCP, CLI) add nothing.",
   "license": "Apache-2.0",
   "type": "module",

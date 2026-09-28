@@ -53,7 +53,8 @@ import type { ConnectionsView } from "./connections-route.js";
 import { envSecretSource, instanceSyncOpener } from "@foldedspacelabs/metistry-connections";
 import { GithubWriteClient } from "./github-write.js";
 import { readInstanceId, securityPresence, realExec } from "@foldedspacelabs/metistry-cli";
-import { CrewRegistry } from "./crews.js";
+import { CrewRegistry, crewRoutineQueue } from "./crews.js";
+import { TasksService } from "@foldedspacelabs/metistry-tasks";
 import { assistantPromptFiles, loadAssistantDefinition } from "./actors.js";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -419,6 +420,9 @@ const runnerOptions: RunnerOptions = {
   scheduled: () => readOverlay(scheduledFile || null),
   ...(readProfile ? { profile: readProfile } : {}),
   timeZone: runnerZone,
+  // New Routines (T3-8): each run is ONE crew run on its actor's queue, which
+  // the assistant container's drain runs with a bearer minted for that run
+  agentRoutines: crewRoutineQueue(new TasksService(pool), crews),
 };
 
 // The Scheduled doors (T3-3, scheduled-routes.ts): the runner's components,
@@ -519,7 +523,9 @@ const scheduledAdmin: ScheduledAdmin = {
   timeZone: runnerZone,
   // Run Now gets the same componentCtx and options as a scheduled tick and Close the Day
   runNow: (name: string) => runNow(pool, scheduled, name, componentCtx, runnerOptions),
-  actorExists: async (id: string) => (await listAgents(pool)).some((a) => a.id === id && !a.revoked),
+  // a New Routine's actor is a crew this console loaded (its run is one crew run), and a live one
+  actorExists: async (id: string) => crews.get(id) !== undefined && (await listAgents(pool)).some((a) => a.id === id && a.kind === "crew" && !a.revoked),
+  runsAssignments: true,
 };
 
 // Close the Day (T2-8, close-day.ts) enqueues `plan-tomorrow` with the day

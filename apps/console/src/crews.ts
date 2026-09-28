@@ -22,6 +22,12 @@
 //   `scope` ∩ the `local-crew` target's `allow` list, and only then becomes a
 //   durable `work` row (kind task, owner crew:<name>) the assistant
 //   container's drain loop picks up. Refusals are `runs` rows too.
+// - RUN A NEW ROUTINE (T3-8, §2.5). The runner's `agentRoutines` queue lands
+//   here (`crewRoutineQueue`): the routine's actor is a crew this console
+//   loaded, the task is the brief — appended to the crew's definition, which
+//   stays the system prompt — and the run's read-only grants ride on the work
+//   row (`meta.routine`), held only by that run's bearer (crew-drain.ts).
+//   Idempotent per runner row, so a retried tick never enqueues twice.
 
 import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
@@ -33,6 +39,7 @@ import {
   finishRun,
   mintToken,
   parseCrewDefinition,
+  ROUTINE_RUN_META_KEY,
   startRun,
   tokenHash,
   type ActorCrewSource,
@@ -45,6 +52,7 @@ import {
 import type { VaultClient } from "@foldedspacelabs/metistry-artifacts";
 import { TasksError, type TasksService } from "@foldedspacelabs/metistry-tasks";
 import type { AgentPrincipal, CrewDispatcher, CrewDispatchInput, CrewDispatchOutcome, CrewSummary } from "@foldedspacelabs/metistry-mcp-brain";
+import type { AgentRoutineQueue, AgentRoutineRun } from "./runner.js";
 import { AgentError, recordWidening, validateAutonomy, validateGrants, type Autonomy, type Grants } from "./agents.js";
 import { checkBrief, type TargetRegistry } from "./dispatch.js";
 
@@ -576,4 +584,50 @@ export function crewDispatcher(
     dispatch: (input, principal) => dispatchCrew(db, tasks, registry, targets, input, principal, compute?.()),
     crews: () => registry.summaries(),
   };
+}
+
+// --- New Routines: one crew run per routine run (T3-8) ---------------------------------
+
+/** Who enqueues a New Routine's run — the runner, never an agent (`runner.ts` RUNNER_AGENT). */
+const ROUTINE_ENQUEUER = "runner";
+
+/**
+ * Enqueue ONE crew run for a New Routine's run: the crew's snapshot, the
+ * task as the brief, and `meta.routine` — the runner row and the run's
+ * read-only grants. Throws, naming the fix, when the actor is not a crew
+ * this console has loaded (a revoked crew, a removed manifest, the
+ * assistant or an external agent): the runner records a failed run.
+ */
+export async function enqueueRoutineRun(tasks: TasksService, registry: Pick<CrewRegistry, "get">, run: AgentRoutineRun): Promise<number> {
+  const def = registry.get(run.actor);
+  if (!def) {
+    throw new Error(
+      `${run.routine}: its actor ${run.actor} is not a crew this console has loaded — a New Routine runs as one crew run; ` +
+        `change its actor in Scheduled, or restore agents/<area>/${run.actor}.md`,
+    );
+  }
+  const brief = run.task;
+  const work = await tasks.create(
+    {
+      title: `[routine:${run.routine}] ${firstLine(brief).slice(0, 120)}`,
+      kind: "task",
+      owner: `${CREW_OWNER_PREFIX}${def.manifest.name}`,
+      // one crew run per runner row: a tick retried after a crash lands on the same row
+      idempotency_key: `routine:${run.routine}:${run.meta.run_id}`,
+      meta: {
+        crew: snapshotOf(def),
+        brief,
+        brief_sha: createHash("sha256").update(brief).digest("hex"),
+        dispatch_run_id: run.meta.run_id,
+        [ROUTINE_RUN_META_KEY]: run.meta,
+      },
+    },
+    ROUTINE_ENQUEUER,
+  );
+  return work.id;
+}
+
+/** The runner's `agentRoutines`: New Routines onto the crew queue, through the tasks service like every crew row. */
+export function crewRoutineQueue(tasks: TasksService, registry: Pick<CrewRegistry, "get">): AgentRoutineQueue {
+  return { enqueue: (run) => enqueueRoutineRun(tasks, registry, run) };
 }

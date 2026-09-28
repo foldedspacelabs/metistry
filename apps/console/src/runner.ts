@@ -58,6 +58,17 @@
 // pauses every routine that would enqueue a turn (preflight, C5) and raises
 // ONE `report` per budget window, naming every routine it paused; it clears
 // itself when the window resets or the limit moves.
+//
+// AGENT ROUTINES (T3-8, §2.5): a New Routine — an actor, a task and per-run
+// read grants in `.metistry/scheduled.yaml`, with no code — is scheduled
+// exactly like a routine with a manifest (the same due-gate, streak,
+// runs rows and Run Now), from the overlay read on the same tick. Its run
+// does one thing: enqueue ONE crew run for its actor through the queue the
+// console wires in (`agentRoutines`, crews.ts `crewRoutineQueue`) — the
+// crew's definition as the system prompt, the task appended as the brief,
+// and the run's read grants on the work row, held only by that run's bearer
+// (crew-drain.ts, agents.ts `authenticateAgent`). With no queue wired, a
+// New Routine is listed and not run.
 
 import { readFile } from "node:fs/promises";
 import { dirname } from "node:path";
@@ -76,6 +87,9 @@ import {
   intEnv,
   entryProblems,
   isAssignment,
+  newRoutines,
+  routineRunMeta,
+  NO_REQUIREMENTS,
   isInterval,
   isLegacyCron,
   longestGapSeconds,
@@ -116,6 +130,8 @@ import {
   type ProfileFacts,
   type RequestSource,
   type Requirements,
+  type RoutineAssignment,
+  type RoutineRunMeta,
   type Scheduled,
   type ScheduledUnit,
   type TemplateQueries,
@@ -202,6 +218,78 @@ export interface ScheduledCollector extends RegisteredCollector {
   unit?: ScheduledUnit;
   /** Where its manifest came from (plan §2.7): the product's, or the owner's extension. Absent = product. */
   origin?: "product" | "extension";
+  /**
+   * A New Routine (T3-8): no manifest and no code — the assignment itself,
+   * as the overlay that scheduled this tick holds it. Its `run` enqueues one
+   * crew run (`agentRoutineComponents`). Absent on everything with a manifest.
+   */
+  assignment?: RoutineAssignment;
+}
+
+// ---- agent routines: a New Routine is one crew run (T3-8) ----------------------
+
+/** One New Routine run, as the runner hands it to the crew queue. */
+export interface AgentRoutineRun {
+  /** The routine's name — its key under `routines:`. */
+  readonly routine: string;
+  /** The crew that runs it (`agents.id`). */
+  readonly actor: string;
+  /** Appended to the crew's definition as the run's brief — never replacing it. */
+  readonly task: string;
+  /** The work row's `meta.routine`: the runner row, and the run's read-only grants. */
+  readonly meta: RoutineRunMeta;
+}
+
+/**
+ * Where a New Routine's run goes: ONE crew run on the actor's queue. Resolves
+ * to the work row's id; throws — a failed run naming the fix — when the
+ * actor is not a crew this console can run.
+ */
+export interface AgentRoutineQueue {
+  enqueue(run: AgentRoutineRun): Promise<number>;
+}
+
+/** Where a New Routine lives, for every message that would otherwise name a manifest. */
+export const ASSIGNMENT_HOME = ".metistry/scheduled.yaml";
+
+/** `weekly-digest` → `Weekly Digest`: what a person reads for a New Routine, which has no manifest to carry a display name. */
+export function titleOf(name: string): string {
+  return name
+    .split("-")
+    .filter(Boolean)
+    .map((w) => w[0]!.toUpperCase() + w.slice(1))
+    .join(" ");
+}
+
+/**
+ * The New Routines in this tick's overlay, as components the runner schedules
+ * like any other: a valid file only (an invalid one is never applied), and
+ * never under a name a manifest has (that entry HOLDS the manifest's
+ * component instead). Their run enqueues one crew run through `queue`; with
+ * no queue there is nothing to run them on, and none is returned.
+ */
+export function agentRoutineComponents(overlay: OverlayRead, scheduled: readonly ScheduledCollector[], queue: AgentRoutineQueue | undefined): ScheduledCollector[] {
+  if (!queue || !overlay.ok) return [];
+  return newRoutines(overlay.value, scheduled.map((c) => c.name)).map(([name, a]): ScheduledCollector => ({
+    name,
+    dir: ASSIGNMENT_HOME,
+    schedule: a.schedule,
+    requires: NO_REQUIREMENTS,
+    runKind: "routine_run",
+    unit: { name, section: "routines", displayName: titleOf(name), schedule: a.schedule, config: {}, raise: {} },
+    assignment: a,
+    run: async (_db, ctx) => {
+      const runId = (ctx as ComponentCtx).runId;
+      if (runId === undefined) throw new Error(`${name}: a New Routine's run needs its runner row`);
+      await queue.enqueue({ routine: name, actor: a.actor, task: a.task, meta: routineRunMeta(name, runId, a) });
+      return 1; // one crew run enqueued: acted
+    },
+  }));
+}
+
+/** What to do to stop a component for good — its manifest's schedule, or a New Routine's pause. */
+function retireHint(c: ScheduledCollector): string {
+  return c.assignment ? `pause ${c.name} in Scheduled (${ASSIGNMENT_HOME})` : `remove \`schedule\` from ${c.dir}/manifest.yaml`;
 }
 
 // ---- the owner's layers: scheduled.yaml and Me/profile.md -------------------
@@ -293,6 +381,8 @@ export function unitOf(c: ScheduledCollector): ScheduledUnit {
  * core — the one statement of what an entry may name).
  */
 export function effectiveSchedule(c: ScheduledCollector, overlay: OverlayRead): Effective {
+  // a New Routine was built from this same overlay read (`agentRoutineComponents`), which only ever reads a valid one
+  if (c.assignment) return { held: false, schedule: c.assignment.schedule, paused: c.assignment.paused ?? false, config: {} };
   if (!overlay.ok) {
     if (overlay.held !== "all" && !overlay.held.includes(c.name)) return { held: false, schedule: c.schedule, paused: false, config: resolvedConfig(unitOf(c), undefined) };
     const which = overlay.held === "all" ? "it cannot be read well enough to say which components it changes" : `it names ${c.name}`;
@@ -401,6 +491,11 @@ export interface RunnerOptions {
    * no install is.
    */
   requests?: RunnerRequests | null;
+  /**
+   * Where a New Routine's run goes (T3-8): the crew queue. Absent = New
+   * Routines are listed and not run — nothing here could run them.
+   */
+  agentRoutines?: AgentRoutineQueue;
   /** injected by tests; production always uses the wall clock */
   now?: Date;
 }
@@ -416,6 +511,7 @@ interface ResolvedOptions {
   profile: () => Promise<ProfileFacts>;
   timeZone: string | null;
   requests: RunnerRequests | null;
+  agentRoutines?: AgentRoutineQueue | undefined;
   now: Date;
   startedAt: Date;
 }
@@ -437,6 +533,7 @@ function resolve(db: Db, opts: RunnerOptions): ResolvedOptions {
     profile: opts.profile ?? NO_PROFILE,
     timeZone: opts.timeZone !== undefined ? opts.timeZone : configuredTimeZone(env),
     requests: opts.requests !== undefined ? opts.requests : runnerRequests(db),
+    ...(opts.agentRoutines ? { agentRoutines: opts.agentRoutines } : {}),
     now,
     startedAt: opts.startedAt ?? now,
   };
@@ -695,7 +792,9 @@ export async function tick(db: Db, scheduled: ScheduledCollector[], ctx: Compone
   // every budget that paused a routine this tick, and which routines (C133)
   const budgetStops = new Map<string, BudgetStop>();
 
-  for (const c of scheduled) {
+  // every component with a manifest, then this tick's New Routines (T3-8)
+  const components = [...scheduled, ...agentRoutineComponents(overlay, scheduled, opts.agentRoutines)];
+  for (const c of components) {
     // 0. the owner's layer: paused (their choice — no run, and no row a tick)
     // or held (an entry that cannot be applied, recorded once a day)
     const eff = effectiveSchedule(c, overlay);
@@ -738,7 +837,7 @@ export async function tick(db: Db, scheduled: ScheduledCollector[], ctx: Compone
           text:
             `${c.name} is no longer being run: ${streak.count} failures in a row (limit METISTRY_RUNNER_MAX_STREAK = ${opts.maxStreak}). ` +
             `Fix the cause — ${clip(lastError, 80)} — and the next successful run clears it; ` +
-            `raise METISTRY_RUNNER_MAX_STREAK to keep trying, or remove \`schedule\` from ${c.dir}/manifest.yaml to retire it`,
+            `raise METISTRY_RUNNER_MAX_STREAK to keep trying, or ${retireHint(c)} to retire it`,
         });
         // stopped before this process saw the third failure (a restart, a
         // lowered limit): the same one request — a no-op when it is raised
@@ -1250,7 +1349,7 @@ async function execute(db: Db, c: ScheduledCollector, runId: number, runCtx: Com
       streakSince: streak?.since ?? opts.now,
       text:
         `${c.name} failed ${count} run(s) in a row: ${clip(error, 100)}. ` +
-        `Fix it, or remove \`schedule\` from ${c.dir}/manifest.yaml to retire it; ` +
+        `Fix it, or ${retireHint(c)} to retire it; ` +
         `after METISTRY_RUNNER_MAX_STREAK (${opts.maxStreak}) failures in a row the runner stops running it`,
     });
     if (c.runKind === "routine_run") {
@@ -1298,11 +1397,13 @@ const IN_FLIGHT_MS = 60 * 60_000; // limit: fixed — an hour: longer than any r
  * The row carries `meta.trigger = "run_now"`, so history tells the two apart.
  */
 export async function runNow(db: Db, scheduled: readonly ScheduledCollector[], name: string, ctx: ComponentCtx = {}, options: RunnerOptions = {}): Promise<RunNowResult> {
-  const c = scheduled.find((x) => x.name === name);
-  if (!c) return { started: false, reason: "not_found", message: `nothing named ${name} is scheduled here` };
   const opts = resolve(db, options);
+  const overlay = await opts.scheduled();
+  // a New Routine is found in the overlay read now, exactly as a tick would find it (T3-8)
+  const c = scheduled.find((x) => x.name === name) ?? agentRoutineComponents(overlay, scheduled, opts.agentRoutines).find((x) => x.name === name);
+  if (!c) return { started: false, reason: "not_found", message: `nothing named ${name} is scheduled here` };
   const label = c.unit?.displayName ?? c.name;
-  const eff = effectiveSchedule(c, await opts.scheduled());
+  const eff = effectiveSchedule(c, overlay);
   if (eff.held) return { started: false, reason: "held", message: `${label} is held, so Run Now did not start it: ${eff.why}` };
   if (eff.paused) return { started: false, reason: "paused", message: `${label} is paused, so Run Now did not start it — Resume it first (the pause is yours, in .metistry/scheduled.yaml)` };
   const { rows } = await db.query(

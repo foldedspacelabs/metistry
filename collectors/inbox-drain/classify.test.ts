@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classify, frontmatter, suggestedWork } from "./run.js";
+import { classify, crashReport, frontmatter, suggestedWork } from "./run.js";
 
 const base = { id: 1, path: "123-x.bin", mime: null, note: null, source: "http" };
 
@@ -102,5 +102,54 @@ describe("suggestedWork — a capture that is asking for a task", () => {
     expect(sw(fm(['kind: "todo"', 'title: "x"', 'project: "metistry"']))?.project).toBe("metistry");
     expect(sw(fm(['kind: "todo"', 'title: "x"', 'project: "Some Project"']))?.project).toBeUndefined();
     expect(sw(fm(['kind: "todo"', 'title: "x"']))?.project).toBeUndefined();
+  });
+});
+
+// T8-2b: a recording's transcript, and the one report a crashed one raises (C137).
+describe("a recording's transcript", () => {
+  const transcript = (endedReason: string, session = "20260928-120000-00ab") =>
+    [
+      "---",
+      'kind: "transcript"',
+      'title: "Recording 2026-09-28 13:00"',
+      `capture_session: ${JSON.stringify(session)}`,
+      'started_at: "2026-09-28T12:00:00Z"',
+      'ended_at: "2026-09-28T12:41:07Z"',
+      `ended_reason: ${JSON.stringify(endedReason)}`,
+      'apps: "us.zoom.xos"',
+      'source: "live-capture"',
+      "---",
+      "",
+      "[00:00:01] (apps) the numbers are in",
+    ].join("\n");
+  const row = (note: string, source_agent: string | null = null) => ({ ...base, id: 9, path: "Inbox/9-transcript-20260928-120000-00ab.md", note, source_agent });
+
+  it("declares itself: frontmatter kind transcript, deterministic, never a model tier", () => {
+    expect(classify(row(transcript("owner")))).toEqual({ kind: "transcript", reason: "frontmatter kind: transcript", title: "Recording 2026-09-28 13:00" });
+  });
+
+  it("a crash raises one report, keyed on the session, in this file's words", () => {
+    const r = crashReport(row(transcript("crashed")), classify(row(transcript("crashed"))))!;
+    expect(r).toMatchObject({
+      kind: "report",
+      source_agent: "inbox-drain",
+      trust: "internal",
+      source: { kind: "live-capture", external_ref: "crash:20260928-120000-00ab" },
+      payload: { title: "A recording stopped unexpectedly", event: "recording_crashed", capture_session: "20260928-120000-00ab", inbox_id: 9, refs: ["Inbox/9-transcript-20260928-120000-00ab.md"], ended_at: "2026-09-28T12:41:07.000Z" },
+    });
+    expect(r.payload.body).toMatch(/stopped at 12:41 UTC .*Everything it heard up to then was saved/);
+    expect(r.payload.body).not.toContain("the numbers are in");
+  });
+
+  it("raises nothing for a recording that ended any other way, for an agent's capture, or for a session id that is not one", () => {
+    for (const reason of ["owner", "max_duration", "disk_full", "helper_stopped", "resume_failed"]) {
+      expect(crashReport(row(transcript(reason)), classify(row(transcript(reason))))).toBeUndefined();
+    }
+    const forged = row(transcript("crashed"), "some-agent");
+    expect(crashReport(forged, classify(forged))).toBeUndefined();
+    const bad = row(transcript("crashed", "../../x"));
+    expect(crashReport(bad, classify(bad))).toBeUndefined();
+    const plain = row("---\nended_reason: crashed\n---\nnot a transcript");
+    expect(crashReport(plain, classify(plain))).toBeUndefined();
   });
 });

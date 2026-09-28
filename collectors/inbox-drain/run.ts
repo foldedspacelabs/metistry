@@ -31,7 +31,7 @@
 
 import type { CaptureSink } from "@foldedspacelabs/metistry-mcp-brain";
 import type { SyncOpener } from "@foldedspacelabs/metistry-connections";
-import { finishRun, intentStage, resolveIntentTier, startRun, type IntentRules } from "@foldedspacelabs/metistry-core";
+import { finishRun, intentStage, raiseMirror, resolveIntentTier, startRun, type IntentRules, type MirrorRaise } from "@foldedspacelabs/metistry-core";
 import { completeJson, type ComputeAccess } from "../compute-client.js";
 import { intentMeta, intentPlacement, scoreIntent, type IntentOutcome } from "./intent-tier.js";
 
@@ -49,7 +49,7 @@ export interface InboxRow {
 }
 
 export interface Classification {
-  kind: "todo" | "url" | "image" | "document" | "note" | "session";
+  kind: "todo" | "url" | "image" | "document" | "note" | "session" | "transcript";
   reason: string; // which rule fired — auditable, not vibes
   title: string;
 }
@@ -113,6 +113,10 @@ export function classify(row: InboxRow): Classification {
   // A session summary declares itself (stash review item 2): the frontmatter is
   // authoritative, so no FM tier is consulted and Needs You can label it.
   if (fm.kind === "session") return { kind: "session", reason: "frontmatter kind: session", title };
+  // A recording's transcript (packages/mcp-live-capture, daily-flow-spec
+  // §8.4) declares itself the same way — and being placed here, it never
+  // falls through to a model tier.
+  if (fm.kind === "transcript") return { kind: "transcript", reason: "frontmatter kind: transcript", title };
 
   if (note && URL_RE.test(note)) return { kind: "url", reason: "note is a bare url", title };
   if (note && TODO_RE.test(note)) return { kind: "todo", reason: "leading action verb", title };
@@ -160,6 +164,50 @@ export function suggestedWork(row: InboxRow, c: Classification): SuggestedWork |
   // projects table uses; free text would invent a project on accept.
   const project = (fm.project ?? "").trim();
   return { title: trimmed, ...(/^[a-z][a-z0-9-]{0,39}$/.test(project) ? { project } : {}) };
+}
+
+/** The report a crashed recording raises: its subject, so one recording is one card however often it is raised. */
+export const RECORDING_CRASH_SOURCE = "live-capture";
+
+/**
+ * A recording that crashed raises ONE report in Needs You (C137: "saved up to
+ * the crash; one report"). The recorder cannot write a request itself — a
+ * bridge talks to no database (invariant 3) — so it says `ended_reason:
+ * crashed` in the transcript it delivers, and this drain, which already reads
+ * every capture's frontmatter, raises the report from it.
+ *
+ * Only from the owner's own door: a capture that came in on an AGENT token
+ * raises nothing, so no agent can put a "your recording crashed" card in
+ * front of the owner. One per session: the subject is the session id, so a
+ * second raise while the first waits returns the first (`raiseMirror`), and
+ * the recorder's `Idempotency-Key` already makes a redelivery the same inbox
+ * row. Deterministic — the words below are this file's, never the capture's
+ * body.
+ */
+export function crashReport(row: InboxRow, c: Classification): MirrorRaise | undefined {
+  if (c.kind !== "transcript" || row.source_agent) return undefined;
+  const fm = frontmatter((row.note ?? "").trim());
+  if (fm.ended_reason !== "crashed") return undefined;
+  const session = (fm.capture_session ?? "").trim();
+  if (!/^[a-z0-9-]{1,64}$/.test(session)) return undefined;
+  const endedAt = Date.parse(fm.ended_at ?? "");
+  const upTo = Number.isNaN(endedAt) ? "" : ` at ${new Date(endedAt).toISOString().slice(11, 16)} UTC`;
+  return {
+    kind: "report",
+    source_agent: "inbox-drain",
+    trust: "internal",
+    source: { kind: RECORDING_CRASH_SOURCE, external_ref: `crash:${session}` },
+    payload: {
+      title: "A recording stopped unexpectedly",
+      body: `The recorder stopped${upTo} without being told to. Everything it heard up to then was saved: the transcript is in your inbox (${row.path}). To keep recording, Record again from the capture bar.`,
+      event: "recording_crashed",
+      capture_session: session,
+      inbox_id: Number(row.id),
+      path: row.path,
+      refs: [row.path],
+      ...(Number.isNaN(endedAt) ? {} : { ended_at: new Date(endedAt).toISOString() }),
+    },
+  };
 }
 
 // The optional on-device model tier (ruled 2026-09-01: free on-device
@@ -435,6 +483,8 @@ export async function run(db: Db, ctx: CollectorCtx = {}): Promise<number> {
         trust,
       ],
     );
+    const crash = crashReport(row, det);
+    if (crash) await raiseMirror(db as Parameters<typeof raiseMirror>[0], crash);
     await db.query(`UPDATE inbox SET status = 'classified', proposal = $2, triaged_at = NULL WHERE id = $1`, [
       row.id,
       JSON.stringify(final),

@@ -292,7 +292,11 @@ provider is **paused**: turns assigned to it are held
 being sent. One held turn is tried every ten minutes, so topping up is enough
 to get going again; either way the held turns are then answered oldest first.
 Rules and budgets still decide first (invariant 4) — the pause only stops a
-provider that has already said no from being asked again. The mechanism is
+provider that has already said no from being asked again. The provider's
+error text is passed through core's `SecretRedactor` with the key the call
+presented — the whole value in every form, and any run of eight or more of
+its characters a provider echoes — before it becomes `runs.error`, the
+report or the reply (`redactProviderText`, `engine-openai.ts`). The mechanism is
 `apps/assistant/src/provider-refusal.ts`; the `max_tokens` every call now
 carries is `docs/ops/compute.md`'s `max_output_tokens`.
 

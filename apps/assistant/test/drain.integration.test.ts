@@ -279,6 +279,9 @@ assignments:
   default: { model: openrouter/anthropic/claude-sonnet-5, effort: medium, max_output_tokens: 4096 }
 `;
 
+/** A fake key, long enough that a provider echoing part of it is a fragment worth catching. */
+const FAKE_KEY = "sk-or-v1-9f8e7d6c5b4a39281706f5e4d3c2b1a0";
+
 const CREDITS_402 = {
   status: 402,
   body: { error: { code: 402, message: "This request requires more credits, or fewer max_tokens. You requested up to 65536 tokens, but can only afford 3999." } },
@@ -305,7 +308,7 @@ describe.skipIf(!hasDb)("assistant drain — a provider that refused the account
   const engine = makeOpenAiEngine({
     tools: () => NO_TOOLS,
     sessions: memorySessionStore(),
-    env: { METISTRY_OPENROUTER_API_KEY: "sk-test" },
+    env: { METISTRY_OPENROUTER_API_KEY: FAKE_KEY },
     fetchFn,
     sleep: async () => {},
   });
@@ -432,6 +435,23 @@ describe.skipIf(!hasDb)("assistant drain — a provider that refused the account
     const r = await pool.query(`SELECT payload FROM proposals WHERE id > $1 AND decision = 'pending' AND source->>'external_ref' = 'provider-refused:openrouter#credential'`, [since]);
     expect(r.rows).toHaveLength(1);
     expect(r.rows[0].payload.title).toBe("openrouter: the key was refused (HTTP 401) — replace it in Settings › Secrets; 0 turns waiting");
+    await pool.query(`UPDATE proposals SET decision = 'skip' WHERE decision = 'pending' AND source->>'external_ref' LIKE 'provider-refused:%'`);
+  });
+
+  it("the key never reaches runs.error, the report or the reply — not whole, not a fragment the provider echoed", async () => {
+    const fragment = FAKE_KEY.slice(-12);
+    answers = [{ status: 403, body: { error: { message: `Key ${FAKE_KEY} is disabled (key ending …${fragment}); header was Bearer ${FAKE_KEY}` } } }];
+    const id = await enqueue("still there?");
+    expect(await drain()).toBe(true);
+    const run = (await pool.query(`SELECT error FROM runs WHERE component = 'assistant' AND kind = 'turn' AND (meta->>'message_id')::bigint = $1`, [id])).rows[0];
+    const report = (await pool.query(`SELECT payload::text AS p FROM proposals WHERE id > $1 AND source->>'external_ref' = 'provider-refused:openrouter#credential' AND (payload->>'message_id')::bigint = $2`, [since, id])).rows[0];
+    const reply = (await pool.query(`SELECT text FROM outbound_messages WHERE in_reply_to = $1`, [id])).rows[0];
+    for (const [where, text] of [["runs.error", run.error], ["report", report.p], ["reply", reply.text]] as const) {
+      expect(text, where).toContain("is disabled");
+      expect(text, where).not.toContain(FAKE_KEY);
+      expect(text, where).not.toContain(fragment);
+      expect(text, where).toContain("***REDACTED secret.");
+    }
     await pool.query(`UPDATE proposals SET decision = 'skip' WHERE decision = 'pending' AND source->>'external_ref' LIKE 'provider-refused:%'`);
   });
 });

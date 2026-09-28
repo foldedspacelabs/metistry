@@ -44,7 +44,11 @@ jobs:
           if ! git cat-file -e "$base" 2>/dev/null; then echo "macos=true" >> "$GITHUB_OUTPUT"; echo "sandbox=true" >> "$GITHUB_OUTPUT"; exit 0; fi
           changed=$(git diff --name-only "$base" "${{ github.sha }}")
           echo "$changed" | sed 's/^/  /'
-          if echo "$changed" | grep -qE '^(apps/macos/|\.github/workflows/ci\.yml|docs/product/design/tokens|ops/scripts/build-design-tokens)'; then
+          # packages/*/helper/** and any Package.swift outside apps/macos also
+          # gate this job: it is the one that runs the TCC bridges' Swift
+          # helper tests (see the macos-app job below), so a helper-only PR
+          # still needs the macOS runner even when apps/macos itself is untouched.
+          if echo "$changed" | grep -qE '^(apps/macos/|\.github/workflows/ci\.yml|docs/product/design/tokens|ops/scripts/build-design-tokens|packages/[^/]+/helper/|.*Package\.swift$)'; then
             echo "macos=true" >> "$GITHUB_OUTPUT"
           else
             echo "macos=false" >> "$GITHUB_OUTPUT"
@@ -165,6 +169,33 @@ jobs:
       # fail on a stale one rather than quietly resolving something else.
       - run: swift build --package-path apps/macos --disable-automatic-resolution
       - run: swift test --package-path apps/macos --disable-automatic-resolution
+      # The TCC bridges' Swift helpers (packages/*/helper: mcp-eventkit's
+      # ek-helper, mcp-apple-fm's afm-helper, …) live outside apps/macos, so
+      # the step above never touches them — they had no CI test run at all.
+      # A step, not a new job: the macOS runner bills at 10x, and this job is
+      # already paying for it. None of these helpers are SwiftPM packages
+      # today (they're a bare .swift file built by swiftc, or — for a helper
+      # that ships its own harness — a scripts/test-helper.sh that compiles
+      # the kit with its tests and runs the result); `swift test` only
+      # applies where a Package.swift is actually present. Either way, never
+      # build-helper.sh: that signs the bundle, which needs a Developer ID
+      # identity this runner doesn't have, and it's not a test.
+      - name: Swift helper tests (packages/*/helper)
+        run: |
+          set -eu
+          for dir in packages/*/helper; do
+            [ -d "$dir" ] || continue
+            pkg="$(dirname "$dir")"
+            if [ -f "$dir/Package.swift" ]; then
+              echo "== swift test: $dir =="
+              swift test --package-path "$dir"
+            elif [ -f "$pkg/scripts/test-helper.sh" ]; then
+              echo "== $pkg/scripts/test-helper.sh =="
+              sh "$pkg/scripts/test-helper.sh"
+            else
+              echo "== skip (no tests): $dir =="
+            fi
+          done
 
   # The Seatbelt profiles, exercised by a real process on the macOS the
   # product ships to. 0.14.2's reconciler.sb granted `network-bind` alone,

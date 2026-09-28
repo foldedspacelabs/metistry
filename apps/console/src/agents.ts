@@ -40,6 +40,7 @@ import {
 } from "@foldedspacelabs/metistry-core";
 import { ACCESS_CEILING_KIND, ACCESS_REQUEST_KIND, underAreas, type AccessCeilingMeta } from "@foldedspacelabs/metistry-mcp-brain";
 import type { Db } from "./auth-store.js";
+import { validConnectionName } from "./connections-route.js";
 
 export const AGENT_ID_RE = /^[a-z][a-z0-9-]{0,39}$/;
 /**
@@ -79,11 +80,22 @@ export type GrantSourceName = (typeof GRANT_SOURCES)[number];
 export const TIERS = ["none", "index", "areas"] as const;
 export type Tier = (typeof TIERS)[number];
 
-/** A grant is a read tier plus, for `areas`, the vault prefixes it covers. `queries` is a separate axis — mcp-brain's queries_list/queries_run (invariant 3's read path) — default false; internal principals get it regardless (mcp-brain's own rule, not this one). */
+/**
+ * A grant is a read tier plus, for `areas`, the vault prefixes it covers.
+ * `queries` is a separate axis — mcp-brain's queries_list/queries_run
+ * (invariant 3's read path) — default false; internal principals get it
+ * regardless (mcp-brain's own rule, not this one). `connections` (T4-8b,
+ * ruling 5) is a third, independent axis: the connection names this
+ * credential is lent through the proxy (`connections_list`,
+ * `connections_call`) — never inherited from a project, never widened by an
+ * access-request approval, and never dropped by one either (`widenedGrants`
+ * carries it across exactly like `queries`).
+ */
 export interface Grants {
   tier: Tier;
   areas: string[];
   queries?: boolean;
+  connections?: string[];
 }
 
 /**
@@ -232,15 +244,35 @@ const BARE_VAULT_RE = /^\/$/;
 const AREA_REFUSAL = AREA_PREFIX_REFUSAL;
 const AREA_REFUSAL_WITH_BARE_VAULT = `${AREA_PREFIX_REFUSAL}, or / for the whole vault`;
 const MAX_AREAS = 64;  // limit: fixed — a grant list this long is a mistake, not a configuration
+const MAX_CONNECTIONS = 64;  // limit: fixed — mirrors MAX_AREAS; a lent-connection list this long is a mistake, not a configuration
 
 export interface GrantsOptions {
   /** The row's kind. `internal` admits the bare vault (`/`); anything else (the default) refuses it. */
   kind?: StoredAgentKind | undefined;
 }
 
+/**
+ * Validate + normalize a `connections` grant (ruling 5, T4-8b): the
+ * connection names this credential is lent, shape only. Whether the name
+ * exists and whether the owner has offered it to agents is the DOOR's
+ * question (core's `mayConnection`), never the validator's — a name here for
+ * a connection later renamed or removed simply stops resolving, same as
+ * `.metistry/connections/<name>.yaml` itself going away.
+ */
+function validateConnectionsGrant(input: unknown): string[] {
+  if (input === undefined) return [];
+  if (!Array.isArray(input) || input.length > MAX_CONNECTIONS) throw new AgentError("invalid_request", "connections must be a list of connection names");
+  const out: string[] = [];
+  for (const c of input) {
+    if (typeof c !== "string" || !validConnectionName(c)) throw new AgentError("invalid_request", "connection must be a connection's name — lowercase kebab-case");
+    if (!out.includes(c)) out.push(c);
+  }
+  return out;
+}
+
 /** Validate + normalize a grants payload. Throws AgentError on any miss. */
 export function validateGrants(input: unknown, opts: GrantsOptions = {}): Grants {
-  const g = (input ?? {}) as { tier?: unknown; areas?: unknown; queries?: unknown };
+  const g = (input ?? {}) as { tier?: unknown; areas?: unknown; queries?: unknown; connections?: unknown };
   if (!TIERS.includes(g.tier as Tier)) throw new AgentError("invalid_request", "tier must be none | index | areas");
   const tier = g.tier as Tier;
   const rawAreas = g.areas === undefined ? [] : g.areas;
@@ -260,7 +292,8 @@ export function validateGrants(input: unknown, opts: GrantsOptions = {}): Grants
   if (tier === "areas" && areas.length === 0) throw new AgentError("invalid_request", "tier=areas needs at least one area");
   if (g.queries !== undefined && typeof g.queries !== "boolean") throw new AgentError("invalid_request", "queries must be a boolean");
   const queries = g.queries === true;
-  return { tier, areas, ...(queries ? { queries } : {}) };
+  const connections = validateConnectionsGrant(g.connections);
+  return { tier, areas, ...(queries ? { queries } : {}), ...(connections.length > 0 ? { connections } : {}) };
 }
 
 /** Project ids share the agent slug shape (§4.19 projects are a view, keyed by slug). */
@@ -331,7 +364,13 @@ function coerceAutonomy(raw: unknown): Autonomy {
 
 function coerceGrants(raw: unknown): Grants {
   const g = (raw ?? {}) as Partial<Grants>;
-  return { tier: TIERS.includes(g.tier as Tier) ? (g.tier as Tier) : "none", areas: Array.isArray(g.areas) ? g.areas : [], ...(g.queries === true ? { queries: true } : {}) };
+  const connections = Array.isArray(g.connections) ? g.connections.filter((c): c is string => typeof c === "string") : [];
+  return {
+    tier: TIERS.includes(g.tier as Tier) ? (g.tier as Tier) : "none",
+    areas: Array.isArray(g.areas) ? g.areas : [],
+    ...(g.queries === true ? { queries: true } : {}),
+    ...(connections.length > 0 ? { connections } : {}),
+  };
 }
 
 /**
@@ -415,9 +454,19 @@ export async function authenticateAgent(
   const projects: string[] = row.projects ?? [];
   const own = coerceGrants(row.grants);
   const inherited = kind === "internal" ? own : inheritGrants(own, projects, Array.isArray(row.project_grants) ? row.project_grants : []).grants;
+  // `connections` (ruling 5) is never a project's to lend, and never a
+  // routine run's either — it comes off this row alone, same as `queries`'
+  // own axis, and neither `inheritGrants` (core, T4-7) nor a run's read
+  // grant (T3-8, below) knows anything of it or may be asked to invent it.
+  const base: Grants = {
+    tier: inherited.tier,
+    areas: [...inherited.areas],
+    ...(inherited.queries === true ? { queries: true } : {}),
+    ...(own.connections !== undefined && own.connections.length > 0 ? { connections: [...own.connections] } : {}),
+  };
   // …and, for a crew mid-routine, ∪ that run's read grant (T3-8, §2.5) — never written back either
   const runReads = kind === "crew" && Array.isArray(row.run_routines) ? row.run_routines.flatMap((m: unknown) => routineRunReads(m)) : [];
-  const grants: Grants = withRunReads({ tier: inherited.tier, areas: [...inherited.areas], ...(inherited.queries === true ? { queries: true } : {}) }, runReads);
+  const grants: Grants = withRunReads(base, runReads);
   return {
     id: row.id,
     kind,
@@ -670,11 +719,20 @@ export function accessArea(payload: unknown): string | undefined {
  * - `queries` is carried across untouched and NEVER set: it is a separate
  *   axis (invariant 3's read path), no part of what was asked for, and
  *   nothing here may hand it over.
+ * - `connections` (ruling 5) is carried across untouched too, for the same
+ *   reason: an area approval is not the door a connection is lent through,
+ *   and a widening on one axis must never read as a silent revocation on the
+ *   other — the bug this ticket exists to close.
  */
 export function widenedGrants(current: Grants, area: string): Grants {
   const held = current.tier === "areas" ? current.areas : [];
   const areas = underAreas(area, held) ? [...held] : [...held, area];
-  return { tier: "areas", areas, ...(current.queries === true ? { queries: true } : {}) };
+  return {
+    tier: "areas",
+    areas,
+    ...(current.queries === true ? { queries: true } : {}),
+    ...(current.connections !== undefined && current.connections.length > 0 ? { connections: [...current.connections] } : {}),
+  };
 }
 
 /**
@@ -740,7 +798,10 @@ export function mergeGrantOverrides(configured: Grants, overrides: readonly stri
     held.push(area);
   }
   if (held.length === 0) return configured;
-  return validateGrants({ tier: "areas", areas: held, ...(configured.queries === true ? { queries: true } : {}) }, { kind: "internal" });
+  return validateGrants(
+    { tier: "areas", areas: held, ...(configured.queries === true ? { queries: true } : {}), ...(configured.connections !== undefined ? { connections: configured.connections } : {}) },
+    { kind: "internal" },
+  );
 }
 
 /**

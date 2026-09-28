@@ -7,6 +7,9 @@
 //   {"id":4,"op":"list_reminders"}
 //   {"id":5,"op":"create_event","title":"...","start":"ISO","end":"ISO"}
 //   {"id":6,"op":"create_reminder","title":"...","due":"ISO?"}
+//   {"id":7,"op":"get_event","event_id":"..."}     one occurrence by the bridge's key (never its notes)
+//   {"id":8,"op":"move_event","event_id":"...","start":"ISO","end":"ISO"}
+//                                                  this occurrence only; the bridge gates it (T2-12)
 // Info.plist is embedded at link time (usage descriptions) so tccd will
 // prompt; the binary must be its own responsible process for that.
 
@@ -22,6 +25,7 @@ struct Req: Decodable {
     let end: String?
     let due: String?
     let notes: Bool?
+    let event_id: String?
 }
 
 func emit(_ o: [String: Any]) {
@@ -115,34 +119,93 @@ let occurrenceDay: DateFormatter = {
     f.timeZone = TimeZone.current; f.dateFormat = "yyyyMMdd"; return f
 }()
 
-// The events window: local midnight today, for `days` days. `notes` is the
+// The occurrence key the bridge serves as `event_id` (events.ts `eventKey`,
+// the one spelling): the identifier, plus the ORIGINAL date for an
+// occurrence of a recurring event. Computed here too only so `get_event` and
+// `move_event` can find the one occurrence a key names.
+func occurrenceSuffix(_ e: EKEvent) -> String? {
+    let recurring = e.hasRecurrenceRules || e.isDetached
+    guard recurring, let d = e.occurrenceDate else { return nil }
+    return e.isAllDay ? occurrenceDay.string(from: d) : occurrenceUTC.string(from: d)
+}
+func eventKey(_ e: EKEvent) -> String? {
+    guard let id = e.eventIdentifier, !id.isEmpty else { return nil }
+    return occurrenceSuffix(e).map { "\(id)_\($0)" } ?? id
+}
+
+// One event as `list_events` and `get_event` report it. `notes` is the
 // invite body — dial-in codes, confidential agendas — and is read ONLY when
-// the request asks for it; the eventkit bridge never does (its GET /events
-// strips the field even if it arrives), so nothing it serves carries one.
+// the request asks for it; the eventkit bridge never does (its routes strip
+// the field even if it arrives), so nothing it serves carries one.
+func eventDict(_ e: EKEvent, notes: Bool = false) -> [String: Any] {
+    let recurring = e.hasRecurrenceRules || e.isDetached
+    var o: [String: Any] = [
+        "id": e.eventIdentifier ?? "", "title": e.title ?? "", "start": iso.string(from: e.startDate),
+        "end": iso.string(from: e.endDate), "all_day": e.isAllDay, "location": e.location ?? "",
+        "calendar": e.calendar.title,
+        // names only, as before: morning-brief and weekly-review read this list as strings
+        "attendees": (e.attendees ?? []).map { $0.name ?? "" },
+        "participants": (e.attendees ?? []).map(participant),
+        "organizer": e.organizer.map(participant) ?? NSNull(),
+        "ical_uid": e.calendarItemExternalIdentifier ?? NSNull(),
+        "recurring": recurring,
+        "occurrence": occurrenceSuffix(e) ?? NSNull(),
+        "writable": e.calendar.allowsContentModifications,
+    ]
+    if notes { o["notes"] = e.notes ?? NSNull() }
+    return o
+}
+
+// The events window: local midnight today, for `days` days.
 func listEvents(days: Int, notes: Bool = false) -> (events: [[String: Any]], start: Date, end: Date) {
     let start = Calendar.current.startOfDay(for: Date())
     let end = Calendar.current.date(byAdding: .day, value: max(days, 1), to: start)!
     let pred = store.predicateForEvents(withStart: start, end: end, calendars: nil)
-    let events: [[String: Any]] = store.events(matching: pred).map { e in
-        let recurring = e.hasRecurrenceRules || e.isDetached
-        var o: [String: Any] = [
-            "id": e.eventIdentifier ?? "", "title": e.title ?? "", "start": iso.string(from: e.startDate),
-            "end": iso.string(from: e.endDate), "all_day": e.isAllDay, "location": e.location ?? "",
-            "calendar": e.calendar.title,
-            // names only, as before: morning-brief and weekly-review read this list as strings
-            "attendees": (e.attendees ?? []).map { $0.name ?? "" },
-            "participants": (e.attendees ?? []).map(participant),
-            "organizer": e.organizer.map(participant) ?? NSNull(),
-            "ical_uid": e.calendarItemExternalIdentifier ?? NSNull(),
-            "recurring": recurring,
-            "occurrence": recurring && e.occurrenceDate != nil
-                ? (e.isAllDay ? occurrenceDay.string(from: e.occurrenceDate) : occurrenceUTC.string(from: e.occurrenceDate))
-                : NSNull(),
-        ]
-        if notes { o["notes"] = e.notes ?? NSNull() }
-        return o
-    }
+    let events: [[String: Any]] = store.events(matching: pred).map { eventDict($0, notes: notes) }
     return (events, start, end)
+}
+
+// The one occurrence a key names, or nil. A one-off event's key is its
+// identifier, which EventKit looks up directly. An occurrence's key carries
+// its ORIGINAL date, which stays put when that occurrence is moved, so the
+// search is the series' occurrences within a month either side of it —
+// matched on the whole key, never on the identifier alone (which is every
+// occurrence of the series).
+let OCCURRENCE_SEARCH_DAYS = 31.0 // limit: fixed — an occurrence moved more than a month from its original date is not found, and the move is refused, never guessed
+func findEvent(_ key: String) -> EKEvent? {
+    if let e = store.event(withIdentifier: key), eventKey(e) == key { return e }
+    guard let us = key.lastIndex(of: "_") else { return nil }
+    let id = String(key[..<us]), occ = String(key[key.index(after: us)...])
+    guard let when = occurrenceUTC.date(from: occ) ?? occurrenceDay.date(from: occ) else { return nil }
+    let span = OCCURRENCE_SEARCH_DAYS * 86_400
+    let pred = store.predicateForEvents(withStart: when.addingTimeInterval(-span), end: when.addingTimeInterval(span), calendars: nil)
+    return store.events(matching: pred).first { $0.eventIdentifier == id && eventKey($0) == key }
+}
+
+func getEvent(_ r: Req) throws -> Any {
+    guard let key = r.event_id, !key.isEmpty else {
+        throw NSError(domain: "ek", code: 3, userInfo: [NSLocalizedDescriptionKey: "event_id required"])
+    }
+    return findEvent(key).map { eventDict($0) } ?? NSNull()
+}
+
+// Moves THIS occurrence only (`.thisEvent`): a series is never re-timed by
+// moving one Monday. Who may ask is the bridge's decision, made before this
+// runs (index.ts: a confirm for an event with others in it needs the owner
+// door's token); this function only refuses what EventKit cannot do.
+func moveEvent(_ r: Req) throws -> [String: Any] {
+    guard let key = r.event_id, !key.isEmpty, let s = r.start.flatMap(iso.date), let e = r.end.flatMap(iso.date), e > s else {
+        throw NSError(domain: "ek", code: 4, userInfo: [NSLocalizedDescriptionKey: "event_id/start/end required (ISO8601), end after start"])
+    }
+    guard let ev = findEvent(key) else {
+        throw NSError(domain: "ek", code: 5, userInfo: [NSLocalizedDescriptionKey: "no event with this key"])
+    }
+    guard ev.calendar.allowsContentModifications else {
+        throw NSError(domain: "ek", code: 6, userInfo: [NSLocalizedDescriptionKey: "the event's calendar is read-only"])
+    }
+    ev.startDate = s; ev.endDate = e
+    try store.save(ev, span: .thisEvent, commit: true)
+    return eventDict(ev)
 }
 
 func listReminders() -> [[String: Any]] {
@@ -204,6 +267,8 @@ func handle(_ line: String) -> [String: Any] {
         case "list_reminders": return ["id": req.id, "ok": true, "reminders": listReminders()]
         case "create_event": return ["id": req.id, "ok": true, "created": try createEvent(req)]
         case "create_reminder": return ["id": req.id, "ok": true, "created": try createReminder(req)]
+        case "get_event": return ["id": req.id, "ok": true, "event": try getEvent(req)]
+        case "move_event": return ["id": req.id, "ok": true, "moved": try moveEvent(req)]
         default: return ["id": req.id, "ok": false, "error": "unknown op \(req.op)"]
         }
     } catch {

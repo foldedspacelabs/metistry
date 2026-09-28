@@ -144,7 +144,7 @@ import Testing
     let request = EventMove(start: "2026-09-28T14:00:00.000Z", end: "2026-09-28T14:15:00.000Z")
     let moveReply = try #require(move.replyJSON)
     let warning = try #require(MoveWarning(preview: moveReply, request: request))
-    #expect(warning.people == ["Dana"] && warning.token == "mv-preview-token-single-use" && warning.title == "Standup")
+    #expect(warning.people == ["Dana"] && warning.token == "fixture-token-not-a-secret" && warning.title == "Standup")
     let clock = ClockTime(timeZone: utc)
     let confirm = try #require(warning.confirmation(clock: clock))
     #expect(confirm.title == "Move the Standup to 2:00–2:15 PM?")

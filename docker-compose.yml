@@ -72,6 +72,9 @@ services:
       METISTRY_BRIDGE_TOKEN_APPLE_FM: ${METISTRY_BRIDGE_TOKEN_APPLE_FM:-}
       METISTRY_EK_URL: ${METISTRY_EK_URL:-}
       METISTRY_BRIDGE_TOKEN_EVENTKIT: ${METISTRY_BRIDGE_TOKEN_EVENTKIT:-}
+      # Move a meeting's owner-door token (T2-12): the console's door presents
+      # it on a confirm; the assistant service is never given it
+      METISTRY_OWNER_DOOR_TOKEN_EVENTKIT: ${METISTRY_OWNER_DOOR_TOKEN_EVENTKIT:-}
       # reconciler vault bridge (D5; host service holding the instance repo):
       # note contents for mcp-brain's knowledge_read. Degrades absent when unset.
       METISTRY_RECONCILER_URL: ${METISTRY_RECONCILER_URL:-}

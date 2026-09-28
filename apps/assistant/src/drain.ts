@@ -12,6 +12,7 @@ import { recordShadow } from "./shadow.js";
 import { resolveTurn } from "./tiers.js";
 import type { Engine } from "./engine.js";
 import { newTurnId } from "./brain.js";
+import { deferredCalls, skippedMeta, skippedReport } from "./deferred.js";
 import { holdTurn, pausedFor, probeDue, providerRecovered, providerRefusal, raiseRefusal, releaseHeld } from "./provider-refusal.js";
 
 /** The assistant's own agent id — the `claimed_by` on any task it holds. Never the assistant's NAME (CLAUDE.md: the name lives in identity.yaml alone). */
@@ -119,6 +120,11 @@ export async function drainOne(db: Db, engine: Engine, tiers: TierMap, opts: Dra
   // the reply's tool calls stamp it (tools.ts), the archive keys the turn by
   // it (archive.ts), and `run_detail` joins the calls to this row on it.
   const turnId = newTurnId();
+  // Whether the owner is there (C59): a chat turn is, a routine's turn (the
+  // fold, a prose slot) is not. Every call of the turn says so in `_meta`, so
+  // an Ask First call pauses in chat and is deferred — skipped, reported,
+  // still raised in Needs You — when nobody is waiting on the reply.
+  const interactive = isChatTurn(msg.meta);
 
   const runId = await startRun(db, {
     component: "assistant",
@@ -138,18 +144,19 @@ export async function drainOne(db: Db, engine: Engine, tiers: TierMap, opts: Dra
       // cache-report as a prefix that failed to cache (OPEN-6).
       ...(assignment ? { engine: assignment.config.kind, model_ref: assignment.ref, caching: assignment.config.caching ?? DEFAULT_CACHING } : {}),
       ...(fresh ? { fresh_session: true } : {}),
+      ...(interactive ? {} : { unattended: true }),
     },
   });
   try {
     let result;
     try {
-      result = await engine(prompt, { model, effort, resume, assignment, thread: msg.thread, tier, turnId });
+      result = await engine(prompt, { model, effort, resume, assignment, thread: msg.thread, tier, turnId, interactive });
     } catch (err) {
       // A budget refusal is not a stale session: retrying it would only spend
       // the check again and land in the same place. Nor is a provider
       // refusing the account — a 402 retried is the same 402.
       if (!resume || isBudgetRefusal(err) || providerRefusal(err)) throw err;
-      result = await engine(prompt, { model, effort, assignment, thread: msg.thread, tier, turnId }); // stale session: fresh start
+      result = await engine(prompt, { model, effort, assignment, thread: msg.thread, tier, turnId, interactive }); // stale session: fresh start
     }
     const upsert = await db.query(
       `INSERT INTO sessions (id, thread, turns) VALUES ($1, $2, 1)
@@ -158,9 +165,15 @@ export async function drainOne(db: Db, engine: Engine, tiers: TierMap, opts: Dra
       [result.session_id, msg.thread],
     );
     const sessionTurns = Number(upsert.rows[0]?.turns ?? 1);
+    // An unattended turn reports what it skipped (C59): read from the rows
+    // the bridge wrote for this turn's deferred calls, never from the reply,
+    // and put at the foot of the output — after the reply, so a block the
+    // reply ends with is still parsed from the reply alone below.
+    const skipped = interactive ? [] : await deferredCalls(db, { component: ASSISTANT_AGENT, runId, turnId });
+    const report = skippedReport(skipped);
     const out = await db.query(
       `INSERT INTO outbound_messages (thread, text, in_reply_to) VALUES ($1, $2, $3) RETURNING id`,
-      [msg.thread, result.text, msg.id],
+      [msg.thread, report ? `${result.text}\n\n${report}` : result.text, msg.id],
     );
     // A reply that ends with a ```decision block is a blocking question: it
     // becomes a `decision` row in the one queue (D7), answerable from chat,
@@ -204,6 +217,7 @@ export async function drainOne(db: Db, engine: Engine, tiers: TierMap, opts: Dra
     if (result.stopped) meta.stopped = result.stopped;
     if (result.notes?.length) meta.notes = result.notes;
     if (rolled.length > 0) meta.rolled_sessions = rolled;
+    Object.assign(meta, skippedMeta(skipped));
     // The stage-2 shadow comparison, when this turn was sampled: both
     // transcripts and the agreement onto THIS row (0020), and the candidate's
     // spend as its own `runs` row against its own provider (shadow.ts). The

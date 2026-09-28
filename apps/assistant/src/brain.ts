@@ -28,6 +28,15 @@ export const BRAIN_SERVER = "brain";
  */
 export const TURN_ID_META_KEY = "com.foldedspacelabs.metistry/turn_id";
 
+/**
+ * Beside it, how the run was started (C59): `false` when nobody is there to
+ * ask — a routine's turn, a New Routine's crew run — so the bridge DEFERS an
+ * Ask First call instead of pausing on it (deferred.ts). The bridge holds the
+ * same literal in turn-id.ts; test/brain.test.ts locks the two. It grants
+ * nothing either way: an Ask First call runs only on the owner's Approve.
+ */
+export const INTERACTIVE_META_KEY = "com.foldedspacelabs.metistry/interactive";
+
 /** One handle per reply. A UUID is already the shape the bridge stores: `[A-Za-z0-9_-]{1,64}`. */
 export function newTurnId(): string {
   return randomUUID();

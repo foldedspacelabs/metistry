@@ -99,6 +99,13 @@ export interface TurnSpec {
    * in-flight row already has it; absent, the engine mints one.
    */
   turnId?: string | undefined;
+  /**
+   * Whether the owner is there for this turn (C59): a chat turn is, a
+   * routine's turn or a New Routine's crew run is not. Every tool call of the
+   * turn carries it in `_meta` (tools.ts), and an Ask First call is paused or
+   * deferred by it. Absent = not sent: the bridge's interactive default.
+   */
+  interactive?: boolean | undefined;
 }
 
 /** One turn. The whole contract: a prompt and a spec in, a result out — and nothing about the provider leaks into the caller. */

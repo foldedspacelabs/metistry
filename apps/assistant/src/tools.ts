@@ -18,7 +18,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import { BRAIN_SERVER, newTurnId, TURN_ID_META_KEY } from "./brain.js";
+import { BRAIN_SERVER, INTERACTIVE_META_KEY, newTurnId, TURN_ID_META_KEY } from "./brain.js";
 
 /** One tool as the chat-completions wire wants it: a name, a description, and a JSON Schema for the arguments. */
 export interface ToolSpec {
@@ -100,6 +100,13 @@ export interface McpToolHostOptions {
    * of the object's lifetime rather than out of the model remembering to.
    */
   turnId?: string | undefined;
+  /**
+   * Whether the owner is there for this run (C59): sent on every call beside
+   * the turn handle, so an Ask First call pauses (true) or is deferred and
+   * reported (false). Absent = not sent, and the bridge takes it as
+   * interactive — what every client got before the bit existed.
+   */
+  interactive?: boolean | undefined;
 }
 
 /**
@@ -111,8 +118,8 @@ export interface McpToolHostOptions {
  * Exported because it is the whole of the wire contract worth testing: a
  * handle that stops being sent breaks the activity feed's grouping silently.
  */
-export function callParams(name: string, args: Record<string, unknown>, turnId: string): { name: string; arguments: Record<string, unknown>; _meta: Record<string, unknown> } {
-  return { name, arguments: args, _meta: { [TURN_ID_META_KEY]: turnId } };
+export function callParams(name: string, args: Record<string, unknown>, turnId: string, interactive?: boolean): { name: string; arguments: Record<string, unknown>; _meta: Record<string, unknown> } {
+  return { name, arguments: args, _meta: { [TURN_ID_META_KEY]: turnId, ...(interactive !== undefined ? { [INTERACTIVE_META_KEY]: interactive } : {}) } };
 }
 
 /**
@@ -164,7 +171,7 @@ export function mcpToolHost(opts: McpToolHostOptions): ToolHost {
         return { text: `"${name}" is not in this run's tool list`, isError: true };
       }
       const c = await connect();
-      const r = (await c.callTool(callParams(unqualify(name), args, turnId))) as {
+      const r = (await c.callTool(callParams(unqualify(name), args, turnId, opts.interactive))) as {
         content?: { type?: string; text?: string }[];
         isError?: boolean;
       };

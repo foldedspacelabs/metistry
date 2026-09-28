@@ -186,6 +186,22 @@ tolerated for one release: the bridge lifts it into `_meta` at the door
 (`packages/mcp-brain/src/turn-id.ts`), so nothing that already works stops
 working, and nothing advertises it.
 
+**Who is there** rides beside it (C59; T4-22), under
+`com.foldedspacelabs.metistry/interactive`. A chat turn sends `true`; a
+routine's turn (an inbound row with `meta.kind` — the fold, a prose slot)
+sends `false`, and so does a New Routine's crew run; a crew the assistant
+delegated to sends `true`, as an agent it is delegating to in a conversation.
+It decides one thing: an Ask First connection call **pauses** (`status:
+pending`) when the owner is there and is **deferred** (`skipped: true, reason:
+waits_for_you`) when nobody is — the request lands in Needs You either way,
+and nothing runs until the owner's Approve. After an unattended run the drain
+reads back the `connection_call` rows the bridge marked `outcome: deferred`
+for this run's principal and turn handle (`apps/assistant/src/deferred.ts`),
+records them on the run's own row (`meta.skipped`, `meta.skipped_count`) and
+ends the run's output with them — the reply for a turn, the work row's note
+for a crew run — so what was skipped is reported whether or not the model
+said so.
+
 The SDK sees them as `mcp__brain__<tool>`; that fully-qualified list is
 the engine's `allowedTools`, built-in tools are disabled (`tools: []`),
 and `strictMcpConfig` makes the SDK ignore any `.mcp.json`, user settings

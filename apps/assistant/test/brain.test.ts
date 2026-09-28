@@ -7,7 +7,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { parse as parseYaml } from "yaml";
-import { BRAIN_SERVER, BRAIN_TOOLS, brainConfigFromEnv, brainToolNames, newTurnId, TURN_ID_META_KEY } from "../src/brain.js";
+import { BRAIN_SERVER, BRAIN_TOOLS, brainConfigFromEnv, brainToolNames, INTERACTIVE_META_KEY, newTurnId, TURN_ID_META_KEY } from "../src/brain.js";
 import { callParams } from "../src/tools.js";
 const manifest = parseYaml(readFileSync(new URL("../../../packages/mcp-brain/manifest.yaml", import.meta.url), "utf8")) as { exposes: { name: string }[] };
 /** The bridge's own copy of the `_meta` key and of the shape it will store, read as TEXT — the assistant does not import the bridge, it talks to it over HTTP. */
@@ -64,5 +64,17 @@ describe("the turn handle on the wire", () => {
       _meta: { [TURN_ID_META_KEY]: "turn-7" },
     });
     expect(callParams("queries_list", {}, "turn-7").arguments).toEqual({});
+  });
+
+  it("carries the interactive bit beside it, under the key the bridge reads — and only when the run said (C59)", () => {
+    expect(INTERACTIVE_META_KEY).toBe("com.foldedspacelabs.metistry/interactive");
+    expect(bridgeTurnId).toContain(`export const INTERACTIVE_META_KEY = "${INTERACTIVE_META_KEY}";`);
+    expect(callParams("connections_call", { connection: "github", tool: "comment_issue" }, "turn-8", false)).toEqual({
+      name: "connections_call",
+      arguments: { connection: "github", tool: "comment_issue" },
+      _meta: { [TURN_ID_META_KEY]: "turn-8", [INTERACTIVE_META_KEY]: false },
+    });
+    expect(callParams("connections_call", {}, "turn-8", true)._meta).toEqual({ [TURN_ID_META_KEY]: "turn-8", [INTERACTIVE_META_KEY]: true });
+    expect(callParams("connections_call", {}, "turn-8")._meta).toEqual({ [TURN_ID_META_KEY]: "turn-8" }); // unsaid: the bridge's interactive default
   });
 });

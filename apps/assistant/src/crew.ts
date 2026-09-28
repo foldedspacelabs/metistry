@@ -62,6 +62,10 @@ export interface CrewRunInput {
   brain: { url: string; token: string };
   /** identity.yaml, for `{{name}}` in the operating prompt; absent = the template is left as-is. */
   identity?: Identity | undefined;
+  /** The run's turn handle, minted by the drain so its `crew_run` row and every call of the run share it. Absent = the engine mints one. */
+  turn_id?: string | undefined;
+  /** Whether the owner is there for this run (C59) — false for a New Routine's run, whose Ask First calls are deferred and reported. */
+  interactive?: boolean | undefined;
 }
 
 // Fixed trailer on every crew's system prompt: what the runner enforces,
@@ -138,6 +142,8 @@ export async function runCrewOnEngine(input: CrewRunInput, assignment: ResolvedA
     tier: `crew:${input.crew.name}`,
     maxTurns: input.crew.max_turns,
     maxCostUsd: input.crew.budget_usd_per_run,
+    ...(input.turn_id !== undefined ? { turnId: input.turn_id } : {}),
+    ...(input.interactive !== undefined ? { interactive: input.interactive } : {}),
   };
   const result = await engine(crewUserPrompt(input.brief, input.task_id), spec);
   const outcome: CrewOutcome = result.stopped === "max_budget" ? "max_budget" : result.stopped === "max_turns" ? "max_turns" : "ok";

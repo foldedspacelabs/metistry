@@ -183,7 +183,22 @@ or not. `connections_list` names every other tool with how it runs:
 | --- | --- | --- |
 | `now` | a Read at Allow | runs at once |
 | `confirm` | Changes things / Starts an agent at Allow | **preview-then-confirm** (CLAUDE.md): the first call answers `{status: "preview", arguments, confirm_token, expires_in_sec}` and dials nothing; the call runs when the caller sends the same `connection`, `tool` and `arguments` with `confirm_token` |
-| `owner` | anything at Ask First | answers `{status: "pending", proposal_id}` and raises an `action` of kind `connection_call` in Needs You; nothing runs until the owner's Approve, and no caller's token runs it (`docs/ops/actions.md`) |
+| `owner` | anything at Ask First | answers `{status: "pending", proposal_id}` and raises an `action` of kind `connection_call` in Needs You; nothing runs until the owner's Approve, and no caller's token runs it (`docs/ops/actions.md`). From an **unattended** run, deferred instead — below |
+
+**Ask First pauses when the owner is there and defers when nobody is** (C59;
+T4-22). One credential answers the owner's message at 11 AM and a routine's
+turn at 6:02 AM, so the run says which it is: `_meta`
+`com.foldedspacelabs.metistry/interactive`, beside the turn handle
+(`docs/ops/assistant-tools.md`). With `false`, an Ask First call answers
+`{skipped: true, reason: "waits_for_you", proposal_id}` at once — not an error,
+not a wait — and still raises the same request in Needs You (its provenance
+says `deferred: true`); its row carries `mode: ask`, `outcome: deferred` and
+`unattended: true`. The run finishes without the step and reports it: the
+assistant's drain reads its own deferred rows back and names them on the run's
+row and in its output. The bit grants nothing — a deferred call runs only on
+the owner's Approve, exactly as a paused one, and still counts against
+`METISTRY_CONNECTION_ASKS_PER_HOUR`. Absent or malformed is interactive: a
+client that never sends it gets `pending`, as before.
 
 **The confirm token** is 32 random bytes, returned once. The server keeps its
 SHA-256 and the SHA-256 of the canonical `{principal, connection, tool, args}`

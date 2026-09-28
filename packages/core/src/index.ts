@@ -800,6 +800,7 @@ export {
   providerSchema,
   assignmentSchema,
   assignmentsSchema,
+  DEFAULT_MAX_OUTPUT_TOKENS,
   budgetSchema,
   budgetsSchema,
   computeSchema,

@@ -267,6 +267,22 @@ function authOf(flags: AuthFlags): { scheme: string; secret?: string; header?: s
   }
 }
 
+/**
+ * `--auth basic` only for a provider whose connection type declares it
+ * (`auth: [basic]` — CalDAV's app password, T4-13). Refused here, before
+ * anything is judged or written; core's `connectionIssues` refuses a
+ * hand-written file the same way.
+ */
+function basicAllowed(auth: { scheme: string } | undefined, provider: string, catalog: { types: InstanceCatalog["types"] }): void {
+  if (auth?.scheme !== "basic") return;
+  const declared = provider === CUSTOM_PROVIDER ? undefined : catalog.types.get(provider)?.manifest.auth;
+  if (!declared?.includes("basic")) {
+    throw new StepFailed(
+      `--auth basic is accepted only by a connection type that declares it (a CalDAV calendar: --provider caldav, icloud-calendar or fastmail-calendar) — ${provider === CUSTOM_PROVIDER ? "a custom connection" : provider} does not`,
+    );
+  }
+}
+
 export interface AddSpec extends AuthFlags {
   name: string | undefined;
   type: string | undefined;
@@ -304,6 +320,7 @@ export async function connectionsAdd(spec: AddSpec, opts: ConnectionsOptions): P
   }
   const provider = spec.provider ?? CUSTOM_PROVIDER;
   const auth = authOf(spec);
+  basicAllowed(auth, provider, catalog);
   const env = Object.fromEntries((spec.env ?? []).map((p) => parsePair(p, "--env")));
   const headers = Object.fromEntries((spec.headers ?? []).map((p) => parsePair(p, "--header")));
   if (spec.url === undefined && (auth || Object.keys(headers).length)) throw new StepFailed("--auth and --header are for a connection reached by --url");
@@ -459,6 +476,7 @@ export async function connectionsSet(name: string | undefined, spec: SetSpec, op
   const auth = authOf(spec);
   if (auth) {
     if (!isHttp) throw new StepFailed("--auth is for a connection reached by --url");
+    basicAllowed(auth, String(doc.getIn(["provider"]) ?? CUSTOM_PROVIDER), e.catalog);
     doc.setIn(["reach", "http", "auth"], doc.createNode(auth));
     changed.push(`auth ${auth.scheme}`);
   }

@@ -194,6 +194,24 @@ describe("metistry connections add", () => {
     expect((await run(["connections", "add", "x", "--type", "calendar", "--provider", "caldav", "--url", "https://dav.example.com/", "--auth", "basic", "--username", "a:b", "--secret", "pw", "--no-discover", "--instance", dir])).err).toMatch(/colon/);
   });
 
+  it("**--auth basic is refused for a connection type that does not declare it** — a tracker, a custom MCP server — and nothing is written (T4-13)", async () => {
+    const dir = await instance("basic-scope");
+    const tracker = await run(["connections", "add", "linear", "--type", "tracker", "--provider", "linear", "--url", "https://api.linear.app/graphql", "--auth", "basic", "--username", "me", "--secret", "pw", "--no-discover", "--instance", dir]);
+    expect(tracker.code).toBe(1);
+    expect(tracker.err).toMatch(/--auth basic is accepted only by a connection type that declares it .* linear does not/);
+    expect(existsSync(file(dir, "linear"))).toBe(false);
+    const mcp = await run(["connections", "add", "remote", "--type", "mcp", "--url", "https://x.example.com/mcp", "--auth", "basic", "--username", "me", "--secret", "pw", "--no-discover", "--instance", dir]);
+    expect(mcp.code).toBe(1);
+    expect(mcp.err).toMatch(/a custom connection does not/);
+    expect(existsSync(file(dir, "remote"))).toBe(false);
+    // and set cannot put it on one either
+    expect((await run(["connections", "add", "remote", "--type", "mcp", "--url", "https://x.example.com/mcp", "--no-discover", "--instance", dir])).code).toBe(0);
+    const set = await run(["connections", "set", "remote", "--auth", "basic", "--username", "me", "--secret", "pw", "--instance", dir]);
+    expect(set.code).toBe(1);
+    expect(set.err).toMatch(/a custom connection does not/);
+    expect(yamlOf(dir, "remote")).not.toHaveProperty("reach.http.auth");
+  });
+
   it("**a Google CalDAV address is refused — Google needs sign-in with Google** — and nothing is written (T4-13)", async () => {
     const dir = await instance("google-caldav");
     const r = await run([

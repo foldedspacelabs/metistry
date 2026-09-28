@@ -96,7 +96,7 @@ public struct StatusPanel: View {
     /// It is a header line and not a doctor row because it answers a different
     /// question: doctor's `console` row says whether the service is up, and this
     /// says whether it takes this Mac as the owner. The detail — `via`, and the
-    /// exact command when there is one to run — is under Settings → Connections;
+    /// exact command when there is one to run — is under Settings ▸ Account;
     /// this line is the one sentence, and it never has a token in it to show
     /// (`ConsoleWhoami` has no field for one).
     @ViewBuilder

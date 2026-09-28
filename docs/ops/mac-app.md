@@ -180,7 +180,7 @@ nobody configured is a fact, not a fault.
 **Where it appears.** One `ConsoleSignInModel` for the whole app, so no two
 screens can disagree and the question is asked once per launch rather than four
 times: the Status panel's header (under the doctor summary, with `via`),
-Settings → Connections (the full card, with the remedy and the exact argument
+Settings ▸ Account (the full card, with the remedy and the exact argument
 array), the menu bar (a second dot beside the `console` row, and the headline
 inside its submenu — a service being *up* and a service *knowing who you are*
 are different questions), and the wizard's step 6, which now leads with it.
@@ -682,23 +682,60 @@ One FILE, not a fourth key (ruling 19, X-19): the offline capture queue
 work, not a setting, so it is a `UserDefaults` domain the settings test above
 does not — and should not — see.
 
+**The window (T6-11, screen-15).** Settings is its own window, never a pane
+in the main one: a sidebar in four groups — *Instance · Services · Compute ·
+Updates*, **Access** (*Account · Connections · Secrets · Variables*),
+**Capture** (*Live Capture · Sessions*), *Keyboard · Advanced* — at a fixed
+**840 × 600** (a 200 pt sidebar, a 640 pt pane; the owner ruled it is not
+resizable, and the scene takes the view's size). Every pane is a vertical
+scroll view, so the largest macOS text makes a pane **longer, never wider**;
+a row of controls that cannot fit side by side stacks (`SettingsControls`).
+`metistryText` scales on the Mac for it (`metistryFont`: the semantic font at
+`.large`, the Mac's point sizes by Dynamic Type's ratios otherwise).
+*Connections* was renamed **Account** (console sign-in and the instance
+repository); *Connections* is now the external servers' pane. The model is
+`sources/kit/settings-model.swift`, the window `settings-view.swift`, each pane
+a file under `settings-panes/`.
+
+**Every write is a §2.2 verb, confirmed.** A change to a protected file
+(`identity.yaml`, `deployment.yaml`, `instances.yaml`), to the running services
+or to the runtime is a `ManagementCommand` — a type that cannot hold a verb
+§2.2 does not list — shown in a confirmation with what it costs and the exact
+command (`SettingsConfirmation`), and run through the session's
+`ManagementRunner`. Its answer is the CLI's own last line, with everything it
+printed under View Log. Restarting or starting one service acts at once;
+stopping anything, Restart All, Update and Roll Back ask first. No console
+route was added for any of it (invariant 10).
+
+**The lid dialog runs nothing (plan §2.15, ruling 3).** *Allow sleep when the
+lid is closed* switched off opens a sheet: *Keeping a closed Mac awake needs
+an administrator setting Metistry will not change for you*, the command
+(`sudo pmset -a disablesleep 1`) with **Copy**, how to undo it
+(`sudo pmset -a disablesleep 0`) and the warning. Presenting it, Copy and
+Cancel reach no runner; **Turn Off** closes it and stores the switch —
+`set-keep-awake --sleep-lid-closed false --yes`, M4 — and doctor's read of
+`pmset -g` decides whether the pane says it is in effect. The words are
+core's (`LID_CLOSED_*` in `packages/core/src/power.ts`), mirrored in
+`keep-awake.swift`; `settings-window-tests.swift` reads power.ts and compares.
+
 | Pane | Value | Read through |
 | --- | --- | --- |
-| Instance | active directory, recents, Open in Finder | the persisted pointers above |
-| Instance | instance id, assistant name, mention, icon | `metistry identity --json`, **read only** — the file behind it is a §4.7 protected path, so there is no field to edit any of it |
+| Instance | the assistant: name, mention, mark, instance ID | `metistry identity --json` |
+| Instance | Edit… (name, mention, mark) | `metistry identity set --name --mention --mark` (M10, T2-16), only the fields that changed, **confirmed with the exact command** — a protected write through the reconciler, shown in Activity as a `config_write` run |
+| Instance | this instance: path, Choose…, Open in Finder, Set Up Again… | the persisted pointers above; Set Up Again re-enters the wizard |
+| Instance | namespace and ports | `doctor --json` → the `deployment` row's `meta.namespace` (`state/ports.yaml`); none said is the default labels and ports, which the app does not copy |
+| Instance | Recent (up to eight, Forget) | the persisted pointers above |
 | Instance | History: the sync policy in force, branch, ahead and behind, the last commit, the last push and pull, any conflict | `GET /api/vault/status` (T10-2), **read only** — the policy is `deployment.yaml`'s `vault:` block, changed with `metistry vault settings` (M18); the pane names the verb and offers no field |
 | Instance | History: Roll Back… (the last commit, one commit, or a day) | `POST /api/vault/rollback` (T10-6) — raises a Needs You request with the preview and changes nothing; the sheet names what Approve would undo. Reach `local`: drawn and sent only while `GET /api/whoami`'s `via` is `local_owner_token` (ruling 7) |
-| Instance | Set up again… | re-enters the wizard |
-| Services | shape, and which file it came from | `doctor --json` → the `deployment` row's `meta` (the CLI resolved the D4 overlay) |
-| Services | the service list with status | the same `meta`'s service plan, matched against doctor's `service` rows |
-| Services | keep this Mac awake: the setting, whether it is holding, and on which power | `doctor --json` → the `keep-awake` row (macOS only). `KeepAwakeFacts` reads it; the app runs no `pmset` and holds no assertion of its own |
-| Services | changing it | `metistry deployment set-keep-awake <never\|allow_sleep_on_battery\|always\|always_lid_closed> --yes` (`MetistryCLI.deploymentSetKeepAwake`) — `deployment.yaml` is a §4.7 protected path, so the CLI writes it through the reconciler and the app writes no file |
-| Services | Start at login | `SMAppService.mainApp` — macOS keeps the registration; the app writes nothing (above) |
-| Services | Run Metistry in the background | `SMAppService.agent(plistName:)` on the plist sealed in this bundle — the install's ONE background item; macOS keeps this registration too (above) |
-| Connections | console sign-in: who this Mac is, with `via`, the remedy, and the argument array | `metistry console whoami --json` — the app never resolves, holds or displays the token ("Signing in" above) |
-| Connections | instance repo status, HEAD, queue depth | `doctor --json` → the `reconciler` row's `meta`. The reconciler is the sole committer, so the app runs no git of its own |
-| Connections | the provider keys `compute.yaml` names: set / not set | `metistry secrets list --json` — never a value |
-| Connections | bridges | `doctor --json` → the `bridge` rows |
+| Instance | linked instances: name, origin, capabilities, last seen — *Not seen for 3 days* past a day | `GET /api/instances` |
+| Instance | Link an Instance…, Refresh / Check Now, Remove | `metistry instances add <origin>` / `refresh` / `remove <id>` (M11) — add and remove confirmed; `instances.yaml` is a protected path |
+| Services | Doctor: Run Doctor, each problem with its fix, checks passed | `doctor --json` — a failed or degraded row, or a not-configured one that carries an `action` (T4-21). The fix is the row's `action`: open Secrets, open System Settings, open a `logs` verb in the Log window, or run a §2.2 verb **after a confirmation naming it**; any other argv is shown with Copy |
+| Services | the supervisor (launchd or Docker Compose), Restart All, Stop All | `doctor --json` → the `supervisor` / `compose` row; `metistry restart\|stop --json` (M5), both confirmed |
+| Services | one line per service: state, uptime or reason, port; Restart · Stop · Log | the `deployment` row's plan, matched to the `child:`, `compose:`, `launchd:…` and manifest rows by name — the worst state, `meta.uptime_sec`, the remediation verbatim; `metistry restart\|start <svc> --json` at once, `stop <svc>` confirmed, `logs <svc>` in the Log window |
+| Services | Start at Login | `SMAppService.mainApp` — macOS keeps the registration; the app writes nothing (above) |
+| Services | Run in the Background | `SMAppService.agent(plistName:)` on the plist sealed in this bundle — the install's ONE background item; macOS keeps this registration too (above) |
+| Services | Keep this Mac Awake; Allow sleep on battery; Allow sleep when the lid is closed | `metistry deployment --json` → `keep_awake_setting` (the object form, T4-20); whether it holds and whether the lid half is in effect from doctor's `keep-awake` row (`lid_closed`) |
+| Services | changing a switch | `metistry deployment set-keep-awake --enabled\|--sleep-on-battery\|--sleep-lid-closed true\|false --yes` (M4), confirmed with what the value it becomes costs. Turning the lid switch off opens **the lid dialog, which runs nothing** (below) |
 | Compute | providers, their base URL, locality, ZDR claim and whether the key each NAMES is present | `metistry compute show --json` |
 | Compute | Add Provider… (template, name, base URL, key) | `metistry compute providers add --from <t> [--name] [--base-url] --json`, **key on stdin** |
 | Compute | Test / Remove, per provider | `metistry compute providers test\|remove <name> --json` |
@@ -707,15 +744,21 @@ does not — and should not — see.
 | Compute | the local model servers, with what each has loaded | `doctor --json` → the `local:lmstudio\|ollama\|llamaserver\|applefm` rows |
 | Compute | install a model; load / unload (LM Studio only) | `metistry compute models install\|load\|unload <provider/model> --json` |
 | Compute | RAM headroom | `ProcessInfo.physicalMemory` minus a documented reserve, **labelled an estimate** — nothing here reads free memory |
+| Account | console sign-in: who this Mac is, with `via`, the remedy, and the argument array | `metistry console whoami --json` — the app never resolves, holds or displays the token ("Signing in" above) |
+| Account | instance repo status, HEAD, queue depth | `doctor --json` → the `reconciler` row's `meta`. The reconciler is the sole committer, so the app runs no git of its own |
+| Connections | bridges | `doctor --json` → the `bridge` rows, until T6-13a's pane |
 | Secrets | names, scope, and the account each was found under | `metistry secrets list --json` — names only; the verb has no code path that can print a value, and neither has the pane |
-| Updates | version, channel, feed, automatic checks, Check Now | Sparkle, which owns those preferences itself |
-| Updates | instance pin | `metistry version --json` → its `lock` block |
-| Advanced | resolved runtime, product directory | the runtime locator (below) |
-| Advanced | product and bundled-runtime versions | `metistry version --json` |
-| Advanced | developer runtime override | the persisted pointer |
-| Advanced | Run doctor | `metistry doctor --json` |
-| Advanced | passkey diagnostic ("Ask macOS") | `ASAuthorization` against the console's relying party with a LOCAL challenge — nothing is sent and nothing can be enrolled. It was wizard step 6 until 2026-09-10; it is a diagnostic, not a setup step |
-| Advanced | log folder | the launchd plists' `StandardOutPath` convention (`/tmp/metistry-<name>.log`), labelled as a convention. The menu's **View Log** uses `metistry logs <name> --lines 200` instead, because a container's or a systemd unit's log is not a file here |
+| Variables, Live Capture, Sessions | what the pane will hold, and the verb that does it today | not built yet (T6-14, T6-15): a sentence, never a dead end (C138) |
+| Updates | this app: version, channel, automatic checks, Check Now | Sparkle, which owns those preferences itself |
+| Updates | the runtime: running version, channel, instance pin | `metistry version --json` → `product_version`, `lock.channel`, `lock.version` |
+| Updates | a newer runtime | `release.available` on `GET /api/events` (T2-18), heard while the app is open — nothing serves it otherwise, so the row says *none announced since the app opened* |
+| Updates | Update Runtime…, Roll Back… | `metistry update` / `metistry update --rollback` (M2), confirmed; Roll Back only on the release channel, which keeps the previous release. A failure is the CLI's own last line, with View Log |
+| Keyboard | Shortcuts in any app, and the five | components-02 §2's suggestions, **off and dimmed** until T6-16 registers them — nothing is registered; Show All opens Help ▸ Keyboard Shortcuts (⌘/) |
+| Advanced | runtime from (Releases · Git checkout), located, command, product folder | the pin's channel, and the runtime locator (below) |
+| Advanced | product and runtime-pack versions, instance pin | `metistry version --json` |
+| Advanced | developer override | the persisted pointer |
+| Advanced | Passkeys: the diagnostic ("Ask macOS") | `ASAuthorization` against the console's relying party with a LOCAL challenge — nothing is sent and nothing can be enrolled |
+| Advanced | log folder | the launchd plists' `StandardOutPath` convention (`/tmp/metistry-<name>.log`), labelled as a convention. Each service's **Log** runs `metistry logs <name>` instead, because a container's or a systemd unit's log is not a file here |
 
 **There are no file reads left.** The scaffold read `.metistry/identity.yaml` and
 `metistry.lock` with a ~60-line YAML scalar reader, read the checkout's

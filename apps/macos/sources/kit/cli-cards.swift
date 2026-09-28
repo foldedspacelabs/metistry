@@ -207,7 +207,7 @@ public struct SettingsSection<Content: View>: View {
 }
 
 /// The console sign-in state, rendered the same way everywhere it appears —
-/// the Status header, Settings → Connections and the wizard's door step all
+/// the Status header, Settings ▸ Account and the wizard's door step all
 /// show one of `ConsoleSignIn`'s five answers, so they show it identically.
 ///
 /// The token's value is not a thing this view could render: `ConsoleWhoami` has

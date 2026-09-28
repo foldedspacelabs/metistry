@@ -16,7 +16,7 @@
 // so the console takes the local owner token as the `user` principal over
 // loopback and there is nothing for a ceremony to add (docs/ops/auth.md). The
 // step therefore LEADS with `consoleSignIn` — the same state the Status header
-// and Settings → Connections show — and offers the console's enrolment code for
+// and Settings ▸ Account show — and offers the console's enrolment code for
 // browsers and the phone. The `ASAuthorization` probe is still real measured
 // behaviour and is still reachable, under Settings → Advanced, where a
 // diagnostic belongs.

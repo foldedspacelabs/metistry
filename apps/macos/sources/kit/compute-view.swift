@@ -384,7 +384,7 @@ public struct ComputePaneView: View {
     private func localModelsSection(_ p: Palette) -> some View {
         SettingsSection("Local Models") {
             if model.localServers.isEmpty {
-                Text("No `local:` rows in the last doctor report — run Doctor from Status or Advanced, and this fills in.")
+                Text("No `local:` rows in the last doctor report — run Doctor from Status or Services, and this fills in.")
                     .metistryText(.footnote, p, .textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }

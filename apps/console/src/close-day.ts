@@ -149,7 +149,7 @@ export interface CloseDayDeps {
   /** `plan-tomorrow`, enqueued with the day closed. Absent → the close still writes the section and says the plan was not enqueued. */
   plan?: RoutineTrigger<string> | undefined;
   /** The instant "today" and the stamp are taken from. Injectable for tests. */
-  now?: () => Date;
+  now?: (() => Date) | undefined;
   /** The zone the day is counted in — `METISTRY_TZ`, as the Tick door stamps `done <date>`. */
   timeZone?: string | undefined;
 }

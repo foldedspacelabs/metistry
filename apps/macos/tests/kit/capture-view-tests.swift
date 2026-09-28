@@ -249,6 +249,143 @@ import AppKit
     #expect(model.line == .none)
 }
 
+// MARK: - The queue file survives a relaunch (X-19, ruling 19)
+
+@MainActor
+@Test func aCaptureQueuedOfflineSurvivesARelaunchAndIsSentExactlyOnce() async throws {
+    let (store, dir) = try tempQueueStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    // Before the relaunch: offline, so the capture is queued and written to disk.
+    let console = CaptureConsole(script: [.down, .answer])
+    let session = ConsoleSession(transport: console, management: nil)
+    let model = CaptureComposerModel(session: session, queueStore: store)
+    model.announce = { _ in }
+    model.currentInstanceID = { "instance-a" }
+    model.draft = "Renew the passport"
+    await model.capture()
+    #expect(model.line == .queued(count: 1))
+    let mintedKey = try #require(console.calls.first?.key)
+    let onDisk = store.load()
+    #expect(onDisk.count == 1 && onDisk[0].idempotencyKey == mintedKey && onDisk[0].text == "Renew the passport" && onDisk[0].instanceID == "instance-a")
+
+    // The relaunch: a fresh model over the same store (and the same console,
+    // standing in for the same server) reads the file back and resends.
+    let restarted = CaptureComposerModel(session: session, queueStore: store)
+    restarted.announce = { _ in }
+    restarted.currentInstanceID = { "instance-a" }
+    let scheduled = Scheduled()
+    restarted.scheduleRetry = { scheduled.add($0, $1) }
+    restarted.loadPersistedQueue()
+    #expect(restarted.captures.count == 1 && restarted.line == .queued(count: 1), "the loaded item is queued, exactly as it was")
+    #expect(scheduled.delays == [CaptureComposerModel.retryPolicy.interval], "a resend is scheduled, same as any other queued capture")
+
+    await scheduled.runAll()
+    #expect(console.calls.count == 2 && console.calls.last?.key == mintedKey, "the resend carries the key minted before the relaunch")
+    #expect(restarted.captures.isEmpty, "sent exactly once")
+    #expect(store.load().isEmpty, "a sent capture is never left in the file")
+}
+
+@MainActor
+@Test func aReplayAfterARelaunchReusesTheKeyAndRendersTheOriginalRow() async throws {
+    let (store, dir) = try tempQueueStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    // The console writes the row, but the reply never reaches this launch.
+    let console = CaptureConsole(script: [.lose, .answer])
+    let session = ConsoleSession(transport: console, management: nil)
+    let model = CaptureComposerModel(session: session, queueStore: store)
+    model.announce = { _ in }
+    model.currentInstanceID = { "instance-a" }
+    model.draft = "Pick up the prescription"
+    await model.capture()
+    #expect(console.written.count == 1, "the console did write it, even though this launch never heard back")
+
+    // The relaunch resends the same key; the console answers with the ORIGINAL
+    // row. `CaptureComposerModel` holds its session weakly (`AppModel` is the
+    // strong owner in production), so the test keeps this one alive itself.
+    let restartedSession = ConsoleSession(transport: console, management: nil)
+    defer { withExtendedLifetime(restartedSession) {} }
+    let restarted = CaptureComposerModel(session: restartedSession, queueStore: store)
+    restarted.announce = { _ in }
+    restarted.currentInstanceID = { "instance-a" }
+    restarted.loadPersistedQueue()
+    await restarted.flushQueue()
+
+    #expect(console.replays == 1, "a replay, not a second row")
+    let original = try #require(console.written.first)
+    #expect(restarted.lastReceipt == original)
+    #expect(restarted.captures.isEmpty)
+    #expect(store.load().isEmpty)
+}
+
+@MainActor
+@Test func aCorruptQueueFileIsIgnoredNotFatal() async throws {
+    let (_, dir) = try tempQueueStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let url = dir.appendingPathComponent("capture-queue.json")
+    try "not json at all — a crash mid-write, or an older version's file".write(to: url, atomically: true, encoding: .utf8)
+
+    let store = JSONCaptureQueueStore(url: url)
+    #expect(store.load().isEmpty, "corrupt is an empty queue, never a crash")
+
+    // The store still works afterwards: a write replaces the corrupt file cleanly.
+    store.replace(instanceID: "instance-a", with: [PersistedCapture(text: "a note", idempotencyKey: "key-1", instanceID: "instance-a", createdAt: Date())])
+    #expect(store.load().map(\.idempotencyKey) == ["key-1"])
+}
+
+@MainActor
+@Test func anInstanceSwitchLeavesOtherInstancesQueuedItemsOnDisk() async throws {
+    let (store, dir) = try tempQueueStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    // A second instance already has something queued from an earlier launch.
+    let untouched = PersistedCapture(text: "for instance C", idempotencyKey: "key-c", instanceID: "instance-c", createdAt: Date())
+    store.replace(instanceID: "instance-c", with: [untouched])
+
+    let console = CaptureConsole(script: [.down])
+    let session = ConsoleSession(transport: console, management: nil)
+    let model = CaptureComposerModel(session: session, queueStore: store)
+    model.announce = { _ in }
+    model.currentInstanceID = { "instance-a" }
+    model.draft = "for instance A"
+    await model.capture()
+    #expect(store.load().count == 2, "instance A's queued capture landed beside instance C's")
+
+    // The switch: A's queued capture is no longer queued (it is back in the
+    // field), so its bucket clears — C's is never even read for this.
+    session.adopt(transport: CaptureConsole(script: []), management: nil)
+
+    #expect(store.load() == [untouched], "instance C's entry is exactly what it was")
+}
+
+@MainActor
+@Test func theQueueFileIsOwnerOnlyAfterAWriteAndStaysThatWayAfterARewrite() async throws {
+    let (store, dir) = try tempQueueStore()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let url = dir.appendingPathComponent("capture-queue.json")
+
+    store.replace(instanceID: "instance-a", with: [PersistedCapture(text: "a note", idempotencyKey: "key-1", instanceID: "instance-a", createdAt: Date())])
+    let firstMode = try #require(FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? Int)
+    #expect(firstMode & 0o777 == 0o600, "it holds raw capture text, owner-only like the watchdog's control socket — mode was \(String(firstMode, radix: 8))")
+
+    // A re-write goes through the same `.atomic` temp-file-and-rename path —
+    // the mode has to be reapplied every time, not just the first.
+    store.replace(instanceID: "instance-a", with: [PersistedCapture(text: "a second note", idempotencyKey: "key-2", instanceID: "instance-a", createdAt: Date())])
+    let secondMode = try #require(FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? Int)
+    #expect(secondMode & 0o777 == 0o600, "a rewrite keeps it owner-only — mode was \(String(secondMode, radix: 8))")
+}
+
+/// A fresh, empty queue file under a scratch directory this test owns —
+/// never the real Application Support (`JSONCaptureQueueStore.defaultURL()`
+/// is never called here). Returns the directory too, so the caller can clean
+/// up everything this test wrote in one `removeItem`.
+private func tempQueueStore() throws -> (JSONCaptureQueueStore, URL) {
+    let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("metistry-capture-queue-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    return (JSONCaptureQueueStore(url: dir.appendingPathComponent("capture-queue.json")), dir)
+}
+
 // MARK: - The shell's +
 
 @MainActor

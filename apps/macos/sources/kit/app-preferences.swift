@@ -16,7 +16,9 @@
 //                              bundled inside it (Advanced; see below)
 //   pinnedItems.<instance_id>  the sidebar's Pinned area, per instance
 //
-// plus Sparkle's own preferences, which Sparkle owns and reads itself.
+// plus Sparkle's own preferences, which Sparkle owns and reads itself, and one
+// FILE, not a default (owner ruling 19, 2026-09-27 — see `AppFileStore`
+// below): the offline capture queue, because unsent work is not a setting.
 //
 // WHAT WAS REMOVED. The scaffold's `productDirectory` was a *preference*: the
 // app asked where the product was, and the answer was the first thing first run
@@ -44,6 +46,20 @@ public enum AppPreference: String, CaseIterable, Sendable {
 
     /// The scaffold's key, read once and removed (see the file header).
     public static let legacyProductDirectory = "productDirectory"
+}
+
+/// The one approved exception to the rule above (owner ruling 19,
+/// 2026-09-27): a store beyond this allowlist, because the offline capture
+/// queue (T5-5's `CaptureComposerModel`, persisted by
+/// `stores/capture-store.swift`'s `JSONCaptureQueueStore`) is unsent work,
+/// not a setting — a `UserDefaults` domain is not where that belongs. A FILE,
+/// not a key, so it is named here rather than added to `AppPreference`:
+/// adding it there would make `settings-model-tests.swift`'s "nothing else
+/// appears in this defaults domain" assertion false for the wrong reason.
+public enum AppFileStore {
+    /// Under this app's own Application Support directory — never the
+    /// instance's, which is a vault, not app state.
+    public static let captureQueueFilename = "capture-queue.json"
 }
 
 /// The active instance and the ones before it.

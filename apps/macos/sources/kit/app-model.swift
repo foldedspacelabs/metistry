@@ -156,11 +156,16 @@ public final class AppModel {
         // not at the shell's next tick.
         needsYou.onQueueChanged = { [weak shell] in await shell?.refreshCount() }
         self.activity = ActivityModel(session: console)
-        let composer = CaptureComposerModel(session: console)
+        let composer = CaptureComposerModel(session: console, queueStore: JSONCaptureQueueStore())
         self.composer = composer
         // The one door the composer opens by: Capture ▸ New Capture, the
         // toolbar's + and ⌘N are all this entry.
         shell.captureActions[.newCapture] = { [weak composer] in composer?.present() }
+        // The queue file's key (ruling 19): the same pointer every recents
+        // list and `METISTRY_INSTANCE_DIR` use, not `metistry identity`'s id
+        // — that resolves over a CLI round trip, this is already known.
+        composer.currentInstanceID = { [weak instances] in instances?.active?.path }
+        composer.loadPersistedQueue()
         self.today = TodayModel(session: console, defaults: defaults)
         let knowledge = KnowledgeModel(session: console)
         self.knowledge = knowledge

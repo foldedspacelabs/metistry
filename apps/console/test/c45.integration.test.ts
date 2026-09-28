@@ -10,7 +10,8 @@
 // consequence that THROWS (`internal`, with no detail on the row). The doors
 // that answer through another system (F-5's `pr_review`, `rsvp`, `draft`,
 // `resolve_conflict`, `act`, `today`, `delegate`) each add their describe here
-// when they land (the ticket's acceptance) — `resolve_conflict` has (T2-10).
+// when they land (the ticket's acceptance) — `resolve_conflict` has (T2-10),
+// and `pr_review` (T2-13).
 //
 // Failures that cannot be provoked honestly through the API — a unique
 // violation in the tasks service, a grants write that throws — are injected
@@ -20,7 +21,9 @@ import { createHash } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import { QueryStore } from "@foldedspacelabs/metistry-queries";
-import { knowledgeConflictSource, mintToken, raiseMirror } from "@foldedspacelabs/metistry-core";
+import { githubPullSource, knowledgeConflictSource, mintToken, raiseMirror } from "@foldedspacelabs/metistry-core";
+import type { GithubWriteClient } from "../src/github-write.js";
+import { fakeGithub, fakeWriteClient } from "./github-fake.js";
 import { VaultError, type VaultClient } from "@foldedspacelabs/metistry-artifacts";
 import { ACCESS_REQUEST_KIND } from "@foldedspacelabs/metistry-mcp-brain";
 import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
@@ -75,6 +78,22 @@ describe.skipIf(!hasDb)("C45 — a failed answer leaves the request pending, wit
   const reconciler = `c45-reconciler-${suffix}`; // raises the conflict reviews, as the reconciler does
   /** What the reconciler's /vault/conflicts/resolve does with the next settle. */
   const conflicts = { mode: "ok" as "ok" | "refuse" | "throw" | "stale", calls: 0 };
+  /** GitHub, for the PR doors (T2-13); and whether the owner's client falls over outright on its next read. */
+  const gh = fakeGithub();
+  const githubMode = { throw: false };
+  const realGithub = fakeWriteClient(gh);
+  const githubWrite = new Proxy(realGithub, {
+    get(target, prop, receiver) {
+      if (prop === "pull" && githubMode.throw) {
+        return async () => {
+          githubMode.throw = false;
+          throw new Error("ECONNRESET api.github.com 10.0.0.9 secret-ish detail");
+        };
+      }
+      const v = Reflect.get(target, prop, receiver);
+      return typeof v === "function" ? v.bind(target) : v;
+    },
+  }) as GithubWriteClient;
   let askerToken: string;
   let rpcId = 1;
 
@@ -150,6 +169,7 @@ describe.skipIf(!hasDb)("C45 — a failed answer leaves the request pending, wit
     server = makeServer(db, new QueryStore(pool), {
       ...common,
       vault: vault.client,
+      githubWrite,
       knowledgeConflicts: {
         async resolve(path: string, keep: ConflictSide) {
           conflicts.calls++;
@@ -429,6 +449,65 @@ describe.skipIf(!hasDb)("C45 — a failed answer leaves the request pending, wit
       } finally {
         conflicts.mode = "ok";
       }
+      const row = await rowOf(id);
+      expect(row.decision).toBe("pending");
+      expect(row.payload.error).toBeUndefined();
+      await stillAnswerable(id);
+    });
+  });
+
+  // ---- Approve / Request Changes on a pull request: the pr_review door (T2-13) ----
+
+  describe("Approve and Request Changes on a pull request (the pr_review door, T2-13)", () => {
+    const REPO = `c45-pr-${suffix}/metistry`;
+    const HEAD = "c".repeat(40);
+    let n = 0;
+    /** A PR waiting on review, raised as the GitHub sync raises it: a mirror of the PR. */
+    const pullRequest = async () => {
+      const number = ++n;
+      gh.pulls.set(`${REPO}#${number}`, { repo: REPO, number, head: HEAD, state: "open" });
+      const { id } = await raiseMirror(pool, { kind: "pull_request", source_agent: "github-state", trust: "external", source: githubPullSource(REPO, number, "dana"), payload: { title: `Review #${number}`, repo: REPO, number, head_sha: HEAD } });
+      return { id, number };
+    };
+    const review = (number: number, event: string, body: string, at = base) => owner("POST", `/api/github/pulls/${REPO}/${number}/review`, { event, body, head_sha: HEAD }, at);
+
+    afterAll(async () => {
+      await pool.query(`DELETE FROM proposals WHERE source->>'external_ref' LIKE $1`, [`gh:${REPO}#%`]);
+    });
+
+    it("no write client in this deployment: 503, the request pending with the reason — Approve is the request's `allow`", async () => {
+      const { id, number } = await pullRequest();
+      const error = await expectLeftPending(id, await review(number, "approve", "", bare), "not_available", "allow", { status: 503 });
+      expect(error).toMatchObject({ door: "pr_review", event: "approve" });
+      await stillAnswerable(id);
+    });
+
+    it("GitHub refuses the review: its code, pending — Request Changes is the request's Revise", async () => {
+      const { id, number } = await pullRequest();
+      gh.refuseNext = { status: 422, message: "Review cannot be requested from pull request author" };
+      const error = await expectLeftPending(id, await review(number, "request_changes", "Rename it."), "invalid_request", "accept_with_changes", { status: 400 });
+      expect(error).toMatchObject({ door: "pr_review", event: "request_changes" });
+      // the owner posts again, it lands, and the request is theirs, answered — the error gone with the question
+      const again = await review(number, "request_changes", "Rename it.");
+      expect(again.status).toBe(201);
+      const row = await rowOf(id);
+      expect(row).toMatchObject({ decision: "accept_with_changes", feedback: "Rename it." });
+      expect(row.payload.error).toBeUndefined();
+    });
+
+    it("the client falls over: 500, pending, `internal` with no detail on the row", async () => {
+      const { id, number } = await pullRequest();
+      githubMode.throw = true;
+      await expectLeftPending(id, await review(number, "approve", ""), "internal", "allow", { status: 500, internal: true });
+      await stillAnswerable(id);
+    });
+
+    it("stale is not a failed answer: 409, and nothing written on the row", async () => {
+      const { id, number } = await pullRequest();
+      gh.pulls.get(`${REPO}#${number}`)!.head = "e".repeat(40);
+      const r = await review(number, "approve", "");
+      expect(r.status).toBe(409);
+      expect(await r.json()).toMatchObject({ reason: "stale", pull: { head_sha: "e".repeat(40) } });
       const row = await rowOf(id);
       expect(row.decision).toBe("pending");
       expect(row.payload.error).toBeUndefined();

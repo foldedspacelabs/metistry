@@ -362,9 +362,9 @@ takes a `since` cursor and answers with the next one.
 | `GET /api/secrets` | owner | session · local_owner | natural | — | — | served | secret names, hosts, grants, last used — never a value |
 | `GET /api/variables` | owner | session · local_owner | natural | — | — | served | the variables agents read — name, value, read by, used in |
 | `GET /api/recordings/:id` | owner | session · local_owner | natural | — | — | T8-4 | one recording's retention state |
-| `POST /api/github/pulls/:owner/:repo/:number/review` | owner | session · local_owner | no | stale | — | T2-13 | post a review; the head SHA must match the one shown |
-| `POST /api/github/pulls/:owner/:repo/:number/threads/:id/reply` | owner | session · local_owner | no | stale | — | T2-13 | reply to a review thread; the head SHA must match |
-| `POST /api/github/pulls/:owner/:repo/:number/threads/:id/resolve` | owner | session · local_owner | no | stale | — | T2-13 | resolve a review thread; the head SHA must match |
+| `POST /api/github/pulls/:owner/:repo/:number/review` | owner | session · local_owner | no | stale | — | served | post a review; the head SHA must match the one shown |
+| `POST /api/github/pulls/:owner/:repo/:number/threads/:id/reply` | owner | session · local_owner | no | stale | — | served | reply to a review thread; the head SHA must match |
+| `POST /api/github/pulls/:owner/:repo/:number/threads/:id/resolve` | owner | session · local_owner | no | stale | — | served | resolve a review thread; the head SHA must match |
 | `POST /api/trackers/:connection/issues` | owner | session · local_owner | natural | — | — | T4-25 | create an issue from a task; idempotent by task key |
 | `POST /api/trackers/:connection/issues/:key/complete` | owner | session · local_owner | natural | — | — | T4-26 | close an issue |
 | `POST /api/prose/:id/feedback` | owner | session · local_owner | natural | — | — | served | rate one piece of generated prose |
@@ -2956,12 +2956,60 @@ POST /api/trackers/:connection/issues                               T4-25 — an
 POST /api/trackers/:connection/issues/:key/complete                 T4-26 — close an issue
 ```
 
-The pull request doors post through an owner-only client holding the
-`github_write` secret, and each checks the head SHA the owner was shown — a
-pull request that moved is `409 stale` and sends nothing (§2.12). The tracker
-doors go through a `tracker` connection's own tool modes (Linear first); *Send
-to Linear* is two doors, one service each — create the issue, then link it on
-the line with `POST /api/vault-tasks/:task_key/link`.
+The tracker doors go through a `tracker` connection's own tool modes (Linear
+first); *Send to Linear* is two doors, one service each — create the issue,
+then link it on the line with `POST /api/vault-tasks/:task_key/link`.
+
+#### Pull requests
+
+```
+POST /api/github/pulls/:owner/:repo/:number/review                {event: approve|request_changes|comment, body?, head_sha}
+     201 {ok, review_id, url, head_sha}
+POST /api/github/pulls/:owner/:repo/:number/threads/:id/reply     {body, head_sha}
+     201 {ok, comment_id, thread_id, url}
+POST /api/github/pulls/:owner/:repo/:number/threads/:id/resolve   {head_sha}
+     200 {ok, thread_id, resolved}
+400 — no head_sha, or not the full 40-character SHA; an event outside the three; Request Changes, a comment or a reply without words; a field the door does not take
+404 — a thread that is not on this pull request (or none this token can see)
+409 {error, reason: "stale", pull: {repo, number, head_sha, state}} — the PR's head is not the one shown, or it is no longer open; nothing was posted
+503 — no github_write for this console, or its Sent only to list does not name api.github.com; GitHub unreachable or refusing the token
+```
+
+A pull request request's answers (§2.12: Approve, Request Changes, Reply) are
+not decisions on the request row — `POST /api/proposals/:id` refuses them —
+they are these doors, which post to GitHub **as the owner** through the one
+client holding the owner's `github_write` secret (§2.11, T2-13). That client
+is handed to these doors alone: never to the MCP mount, never to a sync (the
+GitHub sync reads with its own read-only token and can send nothing but GETs
+and GraphQL queries). `github_write` is delivered to the console by
+`metistry secrets sync --to env` when `secrets.yaml` names it, and is sent
+only to `api.github.com`, only while its *Sent only to* list says so
+(`docs/ops/cli.md`).
+
+**The head SHA shown must match.** `head_sha` is the request's
+`payload.head_sha` — the head the sync read when it raised the request, the
+one the card's diff is of — and it is required. Each door reads the PR (a
+thread door, the thread's PR) from GitHub itself before it posts; a head that
+is not the one shown, or a PR no longer open, is `409 stale` with the PR as it
+stands, and nothing is posted. A review is also pinned to that commit
+(`commit_id`), so GitHub refuses it if the PR moves between the check and the
+post. A thread id is the node id the request's `payload.threads[].id` carries
+(`PRRT_…`), and must be a thread of the PR in the path.
+
+**What a landed review settles.** Approve stores `allow` on the PR's waiting
+request, Request Changes `accept_with_changes` with the owner's words as
+`feedback`, and both record `payload.review {id, url, event, head_sha, at}` —
+the GitHub sync does not ask again for that head, and asks again when the PR
+is pushed. A comment, a reply or a resolve posts and leaves the request
+waiting. The request also resolves at its source (`resolved_at_source`) when
+the review lands on GitHub another way, the PR goes back to draft, or it
+closes. A post GitHub refused, or one that could not be sent, leaves the
+request pending with `payload.error {code, message, decision, door:
+"pr_review", action, at}` (C45); a stale answer writes nothing on the row.
+
+GitHub does not let an account approve its own pull request: a PR an agent
+opened under the owner's account is answered `400` with GitHub's words, and
+the request keeps waiting with them.
 
 ### Prose feedback
 

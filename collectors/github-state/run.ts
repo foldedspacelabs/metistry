@@ -274,10 +274,14 @@ async function fetchThreads(ctx: GithubCtx, get: typeof fetch, repo: string, num
   return out;
 }
 
-/** The newest request ever raised for a PR, with the head it was raised for. */
+/**
+ * The newest request ever raised for a PR, with the head it is about: the
+ * head the owner's door reviewed when it settled it (`payload.review`,
+ * apps/console/src/github-pulls-route.ts), else the head it was raised for.
+ */
 async function lastPullRequest(db: Db, ref: string): Promise<{ decision: string; head_sha: string | null } | null> {
   const { rows } = await db.query(
-    `SELECT decision, payload->>'head_sha' AS head_sha FROM proposals
+    `SELECT decision, coalesce(payload->'review'->>'head_sha', payload->>'head_sha') AS head_sha FROM proposals
      WHERE source IS NOT NULL AND source->>'kind' = 'github' AND source->>'external_ref' = $1
      ORDER BY id DESC LIMIT 1`,
     [ref],

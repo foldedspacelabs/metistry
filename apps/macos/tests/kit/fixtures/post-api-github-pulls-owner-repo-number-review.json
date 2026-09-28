@@ -1,15 +1,14 @@
 {
   "route": "POST /api/github/pulls/:owner/:repo/:number/review",
-  "source": "contract",
-  "ticket": "T2-13",
-  "note": "409 stale unless head_sha is the head the owner was shown — and nothing is sent",
+  "source": "recorded",
+  "ticket": null,
   "request": {
     "method": "POST",
     "path": "/api/github/pulls/example/metistry/281/review",
     "body": {
-      "body": "Looks right.",
       "event": "approve",
-      "head_sha": "adf440c1"
+      "body": "Looks right.",
+      "head_sha": "adf440c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7"
     },
     "idempotency_key": null
   },
@@ -18,6 +17,6 @@
     "ok": true,
     "review_id": 991,
     "url": "https://github.com/example/metistry/pull/281#pullrequestreview-991",
-    "head_sha": "adf440c1"
+    "head_sha": "adf440c1d2e3f4a5b6c7d8e9f0a1b2c3d4e5f6a7"
   }
 }

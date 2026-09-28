@@ -688,6 +688,17 @@ export const computeSchema = z
         }
       }
     }
+    // The private tier (plan §2.15) answers the turns a capture session is
+    // in scope for — the transcript of a meeting the owner recorded — so it
+    // may only name a provider on this machine. Refused HERE, at load, so a
+    // hand edit, the CLI, the console and the reconciler all meet the same
+    // wall, and so repointing the provider off the machine later refuses too.
+    const privateTier = cfg.assignments?.tiers[PRIVATE_TIER];
+    if (privateTier && modelRefIssue(privateTier.model) === undefined) {
+      const providerName = privateTier.model.slice(0, privateTier.model.indexOf("/"));
+      const why = privateTierIssue(providerName, Object.hasOwn(cfg.providers, providerName) ? cfg.providers[providerName] : undefined);
+      if (why !== undefined) ctx.addIssue({ code: "custom", path: ["assignments", "tiers", PRIVATE_TIER, "model"], message: why });
+    }
     for (const name of Object.keys(cfg.budgets?.providers ?? {})) {
       if (!Object.hasOwn(cfg.providers, name)) {
         ctx.addIssue({
@@ -766,8 +777,16 @@ export interface ResolvedShadow extends ModelRef {
  */
 export function resolveAssignment(cfg: Compute, tierOrCrew?: string | null): ResolvedAssignment | undefined {
   const a = cfg.assignments;
-  if (!a) return undefined;
   const name = typeof tierOrCrew === "string" ? tierOrCrew : DEFAULT_TIER;
+  // `private` is the one name that never falls back — not to `default`, not
+  // to `rules.yaml` (undefined, below) — because both may be off this
+  // machine, and a capture session's turn must not quietly leave it.
+  if (name === PRIVATE_TIER) {
+    const p = resolvePrivateTier(cfg);
+    if (!p.ok) throw new PrivateTierUnavailable(p.reason);
+    return p.assignment;
+  }
+  if (!a) return undefined;
   const crew = name.startsWith("crew:") ? name.slice("crew:".length) : undefined;
   const picked =
     crew !== undefined
@@ -872,6 +891,91 @@ export function resolveIntentTier(cfg: Compute): ResolvedIntentTier | undefined 
   const config = cfg.providers[parsed.provider];
   if (!config) return undefined; // the schema refuses this at load; a hand-built object could still get here
   return { ...parsed, config };
+}
+
+// ---- the private tier (plan §2.15, T8-6) ----------------------------------------
+
+/**
+ * The tier a capture session's turns run on: `assignments.tiers.private`.
+ *
+ * While a capture session is in scope — a recording's transcript, a
+ * `recording_review` answer — the assistant's turn runs HERE, and here may
+ * only be a provider with `locality: on_machine`. That is enforced twice,
+ * never by prompting: the schema refuses an off-machine provider at load
+ * (so `metistry compute assign private`, the console's assign and a hand edit
+ * all meet it), and `resolvePrivateTier` re-checks the provider block it
+ * hands back, for an object that never went through the schema.
+ */
+export const PRIVATE_TIER = "private";
+
+/**
+ * Why a provider may not serve the private tier, or undefined when it may —
+ * the one sentence the schema and `metistry compute assign private` both
+ * say. An undeclared provider (undefined) is refused by name elsewhere.
+ */
+export function privateTierIssue(providerName: string, p: { readonly locality: string } | undefined): string | undefined {
+  if (!p || p.locality === "on_machine") return undefined;
+  return (
+    `assignments.tiers.${PRIVATE_TIER} names ${providerName}, which is locality: ${p.locality} — the ${PRIVATE_TIER} tier answers every turn a capture session is in scope for ` +
+    `(a recording's transcript), so it may only name an on_machine provider: nothing recorded leaves this Mac to be answered (docs/ops/compute.md "The private tier"). ` +
+    `Assign a local model instead: \`metistry compute assign ${PRIVATE_TIER} <on-machine-provider>/<model>\``
+  );
+}
+
+/** Thrown by `resolveAssignment(cfg, "private")` when there is nowhere on this machine to run the turn — the turn is refused, never moved. */
+export class PrivateTierUnavailable extends Error {
+  override readonly name = "PrivateTierUnavailable";
+}
+
+/** What a capture-session turn runs on, or why it cannot run at all. */
+export type PrivateTierResolution = { readonly ok: true; readonly assignment: ResolvedAssignment } | { readonly ok: false; readonly reason: string };
+
+/**
+ * `assignments.tiers.private`, resolved — or a refusal.
+ *
+ * **There is no fallback**, the way `resolveIntentTier` has none, and for a
+ * sharper reason: `default` may be off this machine, and even an on-machine
+ * `default` may carry a `shadow:` that runs the turn a second time somewhere
+ * else. A turn with a capture session in scope that has nowhere private to
+ * run is refused with the command that fixes it, never answered elsewhere.
+ */
+export function resolvePrivateTier(cfg: Compute): PrivateTierResolution {
+  const fix = `\`metistry compute assign ${PRIVATE_TIER} <on-machine-provider>/<model>\` (docs/ops/compute.md "The private tier")`;
+  const a = cfg.assignments?.tiers[PRIVATE_TIER];
+  if (!a) {
+    return { ok: false, reason: `a capture session is in scope, so this turn runs on the ${PRIVATE_TIER} tier, and compute.yaml assigns none — it never falls back to default, which may be off this machine: ${fix}` };
+  }
+  const ref = parseModelRef(a.model);
+  const config = Object.hasOwn(cfg.providers, ref.provider) ? cfg.providers[ref.provider] : undefined;
+  if (!config) return { ok: false, reason: `assignments.tiers.${PRIVATE_TIER} names ${ref.provider}, which compute.yaml does not declare: ${fix}` };
+  // The schema refuses both of these at load; a hand-built object could still get here.
+  const offMachine = privateTierIssue(ref.provider, config);
+  if (offMachine !== undefined) return { ok: false, reason: offMachine };
+  if (!providerEnabled(config)) {
+    return { ok: false, reason: `assignments.tiers.${PRIVATE_TIER} names ${ref.provider}, which is switched off (enabled: false): switch it on or ${fix}` };
+  }
+  return {
+    ok: true,
+    assignment: {
+      ...ref,
+      effort: a.effort,
+      from: PRIVATE_TIER,
+      config,
+      critical: a.critical === true,
+      max_output_tokens: a.max_output_tokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
+    },
+  };
+}
+
+/**
+ * The tier a turn runs on, given what the rules or the policy chose and
+ * whether a capture session is in scope. In scope wins over any choice —
+ * the rules bound the policy, never the reverse (invariant 4) — so the
+ * answer is `private`, which `resolveAssignment` then resolves on this
+ * machine or refuses.
+ */
+export function turnTier(chosen: string | null | undefined, scope: { readonly captureSession: boolean }): string | null | undefined {
+  return scope.captureSession ? PRIVATE_TIER : chosen;
 }
 
 /** The `shadow:` block as (provider, model, fraction, provider block) — the same resolution the assignment itself gets. */

@@ -61,6 +61,7 @@ import { isTodayRoute, todayRoutes } from "./today-routes.js";
 import type { ConsoleVaultClient } from "./vault-client.js";
 import { isScheduledRoute, scheduledRoutes, type ScheduledAdmin } from "./scheduled-routes.js";
 import { isMeetingNoteRoute, meetingNoteRoute, MeetingNotes } from "./meeting-note-route.js";
+import { CALENDAR_SYNC, isMeetingMoveRoute, meetingMoveRoute, type EventkitDoor } from "./meeting-move-route.js";
 import { agentList, commandList } from "./commands.js";
 import { purgeArchive, purgePreview } from "@metistry-apps/routines";
 import type { EventHub } from "./events.js";
@@ -112,6 +113,13 @@ export interface ConsoleConfig {
   vault?: ConsoleVaultClient;
   /** `plan-tomorrow`, run on demand by Close the Day (close-day.ts). Absent = the close still writes the section and says the plan was not enqueued. */
   planTomorrow?: RoutineTrigger | undefined;
+  /**
+   * The Move-a-meeting door's way to the calendar (meeting-move-route.ts,
+   * §2.11, T2-12): the eventkit bridge's URL and bearer, and the owner-door
+   * token the bridge requires on a confirm that moves an event with others
+   * in it. Only that door reads it. Absent = the door answers 503.
+   */
+  eventkit?: EventkitDoor | undefined;
   /** The owner's zone for Today's routes (T2-7): `METISTRY_TZ` (core `configuredTimeZone`), never `TZ`. Null or absent → Today counts days in UTC. */
   timeZone?: string | null | undefined;
   /** The instant Today, Close the Day and the task doors take "today" from (and Tick its `done <date>`). Absent = the wall clock; the fixture recorder pins it so recordings do not move with the date. */
@@ -1134,6 +1142,8 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         isCloseDayRoute(key) ||
         // …and so does the meeting-note door (T2-11)
         isMeetingNoteRoute(key) ||
+        // moving a meeting re-times other people's day: the owner's hand, and the bridge holds the rule (T2-12)
+        isMeetingMoveRoute(key) ||
         // Today reads the owner's own day — their notes' task lines, their calendar — and stores their order
         isTodayRoute(key)
       ) {
@@ -1453,6 +1463,16 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     if (isVaultTaskRoute(key)) return vaultTaskRoutes(req, res, key, { queries, vault: cfg.vault, audit, replays: vaultTaskReplays, now: cfg.now });
     // ----- the meeting-note door: one note per event, from the owner's template, as `user` (T2-11) -----
     if (isMeetingNoteRoute(key)) return meetingNoteRoute(req, res, key, { queries, vault: cfg.vault, audit, notes: meetingNotes });
+    // ----- Move a meeting: preview → confirm through the eventkit bridge, which gates events with others in them (T2-12) -----
+    if (isMeetingMoveRoute(key)) {
+      const runNow = cfg.scheduled?.runNow;
+      return meetingMoveRoute(req, res, key, {
+        queries,
+        eventkit: cfg.eventkit,
+        audit,
+        ...(runNow ? { refresh: async () => (await runNow(CALENDAR_SYNC)).started } : {}),
+      });
+    }
 
     // ----- Close the Day (§2.11, §2.13; T2-8) -----
     // The daily note's section through the reconciler's section operation as

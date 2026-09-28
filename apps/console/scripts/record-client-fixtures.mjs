@@ -58,6 +58,9 @@ import { loadPublicIdentity } from "../dist/identity.js";
 import { EventHub, startEventFeed } from "../dist/events.js";
 import { parseVaultStatus } from "../dist/vault-status.js";
 import { RoutineTrigger } from "../dist/close-day.js";
+// Move a meeting (T2-12): the REAL eventkit bridge, in this process, over a
+// scripted helper in place of EventKit — its rules answer, no calendar is touched
+import { makeBridge as makeEventkitBridge } from "../../../packages/mcp-eventkit/dist/index.js";
 import { loadSchedules, overlayFromText, runNow } from "../dist/runner.js";
 import { SCHEDULED_PATH } from "../dist/profile-tidy.js";
 import { loadCollectors } from "@metistry-apps/collectors";
@@ -306,6 +309,33 @@ const policy = { idleDays: 30, maxDays: 365 };
 // below write is in it.
 const STREAM_FIRST_ID = 4100;
 const events = new EventHub({ firstId: STREAM_FIRST_ID });
+// The day's standup as EventKit holds it, for Move a meeting's preview: the
+// owner and Dana in it, so the preview names Dana and the confirm would need
+// the owner door's token. The helper only reads here — the recording is of
+// the preview, which moves nothing.
+const EK_STANDUP = {
+  id: "evt-standup-0928",
+  title: "Standup",
+  start: "2026-09-28T13:30:00Z",
+  end: "2026-09-28T13:45:00Z",
+  all_day: false,
+  location: "",
+  calendar: "Work",
+  attendees: ["Dana", "Me"],
+  participants: [
+    { name: "Dana", email: "dana@example.com", status: "accepted", role: "chair", type: "person", self: false },
+    { name: "Me", email: "me@example.com", status: "accepted", role: "required", type: "person", self: true },
+  ],
+  organizer: { name: "Dana", email: "dana@example.com", status: "accepted", role: "chair", type: "person", self: false },
+  recurring: false,
+  writable: true,
+};
+const ekHelper = { request: async (p) => (p.op === "get_event" ? { id: 1, ok: true, event: p.event_id === EK_STANDUP.id ? EK_STANDUP : null } : { id: 1, ok: false, error: "the recording only previews" }) };
+const ekToken = mintToken();
+const ekDoorToken = mintToken();
+const ekBridge = makeEventkitBridge(ekHelper, { token: ekToken, ownerDoorToken: ekDoorToken });
+await new Promise((r) => ekBridge.listen(0, "127.0.0.1", r));
+
 const server = makeServer(pool, queries, {
   origin: "http://127.0.0.1:8080",
   events,
@@ -319,6 +349,7 @@ const server = makeServer(pool, queries, {
   rules: loadRules(await readFile(layout.path("rules"), "utf8")),
   targets,
   vault,
+  eventkit: { url: `http://127.0.0.1:${ekBridge.address().port}`, token: ekToken, ownerDoorToken: ekDoorToken },
   // Close the Day's plan-tomorrow, enqueued — a pass that does nothing here: the recording is of the door
   planTomorrow: new RoutineTrigger("plan-tomorrow", async () => {}),
   // the recording's clock, not the wall's: see RECORDING_NOW
@@ -726,6 +757,8 @@ const REQUESTS = [
   ["POST /api/today/close", () => ({ path: "/api/today/close", body: { day: RECORDING_DAY, line: "Store interface frozen; recorder next." } })],
   // Open notes on the day's standup (T2-11): the first call, which writes the note
   ["POST /api/meetings/:event_id/note", () => ({ path: "/api/meetings/evt-standup-0928/note", body: {} })],
+  // Move the standup half an hour later (T2-12): the preview, which names Dana and moves nothing
+  ["POST /api/calendar/events/:id/move", () => ({ path: "/api/calendar/events/evt-standup-0928/move", body: { start: "2026-09-28T14:00:00.000Z", end: "2026-09-28T14:15:00.000Z" } })],
 
 
   // the reads that show the writes above: a room with a comment, a feed with a capture in it
@@ -774,7 +807,7 @@ const PLACEHOLDER_TOKEN = "fixture-token-not-a-secret";
 /** A minted bearer never lands in the repository, and neither does this machine's temp path. */
 function redact(value) {
   if (Array.isArray(value)) return value.map(redact);
-  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, k === "token" && typeof v === "string" ? PLACEHOLDER_TOKEN : redact(v)]));
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, (k === "token" || k === "confirm_token") && typeof v === "string" ? PLACEHOLDER_TOKEN : redact(v)]));
   if (typeof value === "string") return value.split(instanceDir).join("<instance>").split(root).join("<scratch>").split(REPO_ROOT).join("<product>");
   return value;
 }
@@ -938,6 +971,7 @@ for (const f of table) {
 }
 
 await new Promise((r) => server.close(() => r()));
+await new Promise((r) => ekBridge.close(() => r()));
 await pool.end();
 await rm(root, { recursive: true, force: true });
 if (outbound.some((u) => !u.startsWith("http://127.0.0.1:1/") && !u.startsWith("https://api.github.com/repos/example/fixtures") && !u.includes("/models"))) {

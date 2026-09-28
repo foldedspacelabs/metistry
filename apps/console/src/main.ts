@@ -546,6 +546,18 @@ const server = makeServer(pool, queries, {
   ...(knowledgeConflicts ? { knowledgeConflicts } : {}),
   ...(computeAdmin ? { computeAdmin } : {}),
   ...(vault ? { vault } : {}),
+  // Move a meeting (T2-12): the eventkit bridge, and the owner-door token only
+  // this door presents — the bridge refuses a confirm for an event with others
+  // in it without it, and nothing else in this process is handed it
+  ...(process.env.METISTRY_EK_URL && process.env.METISTRY_BRIDGE_TOKEN_EVENTKIT
+    ? {
+        eventkit: {
+          url: process.env.METISTRY_EK_URL,
+          token: process.env.METISTRY_BRIDGE_TOKEN_EVENTKIT,
+          ...(process.env.METISTRY_OWNER_DOOR_TOKEN_EVENTKIT?.trim() ? { ownerDoorToken: process.env.METISTRY_OWNER_DOOR_TOKEN_EVENTKIT.trim() } : {}),
+        },
+      }
+    : {}),
   ...(planTomorrow ? { planTomorrow } : {}),
   // GET /api/vault/status: the reconciler's sync status over the same bridge (T10-2)
   ...(reconcilerUrl && reconcilerToken ? { vaultStatus: httpVaultStatus({ url: reconcilerUrl, token: reconcilerToken }) } : {}),

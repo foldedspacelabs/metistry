@@ -149,7 +149,7 @@ export async function moveStandupFacts(deps: TidyDeps): Promise<TidyOutcome> {
   if (keys.state === "none") {
     // The lines are gone — Approved, or deleted by hand. A request still
     // waiting for them has nothing left to ask.
-    const cleared = await resolveAtSource(deps.db, TIDY_SOURCE);
+    const cleared = await resolveAtSource(deps.db, TIDY_SOURCE, `${PROFILE_PATH} no longer has the standup lines`);
     return cleared.length > 0
       ? { state: "resolved", done: true, detail: `${PROFILE_PATH} no longer has the standup lines — request #${cleared.join(", #")} cleared at its source` }
       : { state: "none", done: true, detail: `${PROFILE_PATH} has no standup_days or standup_time — nothing to move` };

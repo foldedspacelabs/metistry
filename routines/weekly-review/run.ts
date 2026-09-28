@@ -13,7 +13,7 @@
 // every query takes it as $1 rather than calling now() so the real-db test
 // is deterministic too.
 
-import { SKIP_FEEDBACK } from "@foldedspacelabs/metistry-core";
+import { RESOLVED_AT_SOURCE, SKIP_FEEDBACK } from "@foldedspacelabs/metistry-core";
 import type { Db, RoutineCtx } from "../morning-brief/run.js";
 
 export interface WeeklyCtx extends RoutineCtx {
@@ -99,11 +99,16 @@ async function sectionDecisions(db: Db, now: Date): Promise<string[]> {
     [now],
   );
   if (rows.length === 0) return ["• none this week — nothing needed you"];
-  const total = rows.reduce((s: number, r: any) => s + num(r.n), 0);
-  const made = rows.filter((r: any) => r.decision !== "expired");
-  const expired = rows.find((r: any) => r.decision === "expired");
+  // A mirror its source resolved (the PR merged, the invitation answered in
+  // Calendar — `resolved_at_source`, T1-8) is not the owner's decision: it
+  // is neither counted as decided nor listed as one, only noted (T4-23).
+  const cleared = rows.find((r: any) => r.decision === RESOLVED_AT_SOURCE);
+  const counted = rows.filter((r: any) => r.decision !== RESOLVED_AT_SOURCE);
+  const total = counted.reduce((s: number, r: any) => s + num(r.n), 0);
+  const made = counted.filter((r: any) => r.decision !== "expired");
+  const expired = counted.find((r: any) => r.decision === "expired");
   const lines = [
-    `• ${total} decided: ${made.map((r: any) => `${num(r.n)} ${DECISION_LABEL[r.decision] ?? r.decision}`).join(", ") || "none by you"}${expired ? `; ${num(expired.n)} auto-expired (still searchable)` : ""}`,
+    `• ${total} decided: ${made.map((r: any) => `${num(r.n)} ${DECISION_LABEL[r.decision] ?? r.decision}`).join(", ") || "none by you"}${expired ? `; ${num(expired.n)} auto-expired (still searchable)` : ""}${cleared ? `; ${num(cleared.n)} cleared at their source, not by you` : ""}`,
   ];
   const reasons = await db.query(
     // `skipped` is the marker the `skip` verb writes (docs/ops/reply-feedback.md),

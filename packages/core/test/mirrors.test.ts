@@ -3,7 +3,7 @@
 // one migration 0027's index answers. The dedupe itself is Postgres's, proved
 // against the real table in routines/test/mirrors.integration.test.ts.
 import { describe, expect, it } from "vitest";
-import { REDACTED, REQUEST_DECISIONS, RESOLVED_AT_SOURCE, parseRequestSource, raiseMirror, resolveAtSource, type MirrorExecutor } from "../src/index.js";
+import { ALSO_ASKED_MAX, DEFAULT_SOURCE_RECEIPT, REDACTED, REQUEST_DECISIONS, RESOLVED_AT_SOURCE, SOURCE_RECEIPT_MAX, parseRequestSource, raiseMirror, resolveAtSource, sourceReceipt, type MirrorExecutor } from "../src/index.js";
 
 type Call = { text: string; values: unknown[] };
 
@@ -45,11 +45,39 @@ describe("raiseMirror", () => {
     expect(db.calls[0]!.values).toEqual(["pull_request", "github-state", "internal", JSON.stringify(raise.payload), JSON.stringify(pr), "meeting:abc", null]);
   });
 
-  it("a second raise returns the waiting row's id and writes nothing", async () => {
-    const db = fake([], [{ id: 12 }]);
+  it("a second raise by the same asker returns the waiting row's id and writes nothing", async () => {
+    const db = fake([], [{ id: 12, source_agent: "github-state", also_asked: null }]);
     expect(await raiseMirror(db, raise)).toEqual({ id: 12, raised: false });
-    expect(db.calls[1]!.text).toMatch(/^SELECT id FROM proposals WHERE decision = 'pending'/);
+    expect(db.calls[1]!.text).toMatch(/^SELECT id, source_agent, payload->'also_asked' AS also_asked FROM proposals WHERE decision = 'pending'/);
     expect(db.calls[1]!.values).toEqual([pr.kind, pr.external_ref]);
+    expect(db.calls).toHaveLength(2);
+  });
+
+  it("a second raise by ANOTHER asker lands on the same card and adds its asker — once, atomically, bounded", async () => {
+    const db = fake([], [{ id: 12, source_agent: "github-state", also_asked: null }], []);
+    const ask = { ...raise, source_agent: "agent-a", trust: "external" as const, payload: { title: "Review please", event: "review_asked", context: { prose: "tests pass" }, api_key: "sk-live-9" } };
+    expect(await raiseMirror(db, ask)).toEqual({ id: 12, raised: false });
+    expect(db.calls).toHaveLength(3);
+    const text = db.calls[2]!.text.replace(/\s+/g, " ");
+    expect(text).toContain("SET payload = jsonb_set(payload, '{also_asked}', coalesce(payload->'also_asked', '[]'::jsonb) || jsonb_build_array($2::jsonb))");
+    expect(text).toContain("WHERE id = $1 AND decision = 'pending' AND source_agent <> $3");
+    expect(text).toContain("@> jsonb_build_array(jsonb_build_object('source_agent', $3::text))");
+    const [id, asker, agent, max] = db.calls[2]!.values as [number, string, string, number];
+    expect([id, agent, max]).toEqual([12, "agent-a", ALSO_ASKED_MAX]);
+    expect(JSON.parse(asker)).toMatchObject({ source_agent: "agent-a", trust: "external", title: "Review please", event: "review_asked", context: { prose: "tests pass" } });
+    expect(asker).not.toContain("sk-live-9"); // only named fields travel, and those redacted
+
+    // already on the card: nothing is sent
+    const again = fake([], [{ id: 12, source_agent: "github-state", also_asked: [{ source_agent: "agent-a" }] }]);
+    expect(await raiseMirror(again, ask)).toEqual({ id: 12, raised: false });
+    expect(again.calls).toHaveLength(2);
+  });
+
+  it("refuses a raise that writes the mirror's own keys — the askers and the receipt are never an asker's to say", async () => {
+    const db = fake();
+    await expect(raiseMirror(db, { ...raise, payload: { title: "t", also_asked: [] } })).rejects.toThrow(/also_asked/);
+    await expect(raiseMirror(db, { ...raise, payload: { title: "t", cleared: { what: "x" } } })).rejects.toThrow(/cleared/);
+    expect(db.calls).toHaveLength(0);
   });
 
   it("the waiting row answered mid-raise frees the subject: the next insert takes it", async () => {
@@ -89,7 +117,23 @@ describe("resolveAtSource", () => {
     const text = db.calls[0]!.text.replace(/\s+/g, " ");
     expect(text).toContain(`SET decision = '${RESOLVED_AT_SOURCE}'`);
     expect(text).toContain("WHERE decision = 'pending' AND source IS NOT NULL");
-    expect(db.calls[0]!.values).toEqual([pr.kind, pr.external_ref]);
+    expect(db.calls[0]!.values).toEqual([pr.kind, pr.external_ref, DEFAULT_SOURCE_RECEIPT]);
+  });
+
+  it("writes a receipt beside the decision: what happened, and the source it happened in", async () => {
+    const db = fake([{ id: 12 }]);
+    await resolveAtSource(db, pr, "  You approved it on GitHub ");
+    expect(db.calls[0]!.text.replace(/\s+/g, " ")).toContain("payload = payload || jsonb_build_object('cleared', jsonb_build_object('what', $3::text, 'where', source->>'kind'))");
+    expect(db.calls[0]!.values).toEqual([pr.kind, pr.external_ref, "You approved it on GitHub"]);
+  });
+
+  it("refuses a receipt that is blank, multi-line or longer than a line — never cut", async () => {
+    const db = fake();
+    for (const bad of ["", "   ", "a\nb", "x".repeat(SOURCE_RECEIPT_MAX + 1)]) {
+      await expect(resolveAtSource(db, pr, bad), JSON.stringify(bad)).rejects.toThrow(TypeError);
+    }
+    expect(() => sourceReceipt(7)).toThrow(TypeError);
+    expect(db.calls).toHaveLength(0);
   });
 
   it("refuses a blank subject rather than match nothing — or everything", async () => {

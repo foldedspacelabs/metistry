@@ -1350,6 +1350,14 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
     const rows = (await store.run("activity_feed", { hours: 1, limit: 500, agent: tag, kind: "decision" })).rows;
     expect(rows).toHaveLength(1);
     expect(rows[0]!.detail).toBe("resolved at its source (github) — nobody decided it here");
+
+    // with the receipt resolveAtSource writes (T4-23), it says what happened there
+    await pool.query(
+      `INSERT INTO proposals (kind, source_agent, trust, payload, source, decision, decided_at) VALUES ('pull_request', $1, 'external', $2::jsonb, $3::jsonb, 'resolved_at_source', now())`,
+      [tag, JSON.stringify({ cleared: { what: "You approved it on GitHub", where: "github" } }), JSON.stringify({ kind: "github", external_ref: `gh:${tag}#2` })],
+    );
+    const withReceipt = (await store.run("activity_feed", { hours: 1, limit: 500, agent: tag, kind: "decision" })).rows.map((r) => r.detail);
+    expect(withReceipt).toContain("resolved at its source (github): You approved it on GitHub — nobody decided it here");
   });
 
   // docs/product/desktop-app-plan.md "The window" — Agents panel: the state

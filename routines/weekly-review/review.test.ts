@@ -99,6 +99,17 @@ describe("weekly review", () => {
     expect(sent[0]).not.toMatch(/^• #\d+/m); // no per-item pending lines
   });
 
+  it("decisions: a mirror its source resolved is not the owner's decision — noted, never counted or listed as one (T4-23)", async () => {
+    const { db, sent } = fakeDb([["GROUP BY decision", [{ decision: "resolved_at_source", n: "5" }, { decision: "allow", n: "2" }, { decision: "expired", n: "1" }]]]);
+    await run(db, { now });
+    expect(sent[0]).toContain("• 3 decided: 2 approved; 1 auto-expired (still searchable); 5 cleared at their source, not by you\n");
+    expect(sent[0]).not.toContain("resolved_at_source");
+
+    const only = fakeDb([["GROUP BY decision", [{ decision: "resolved_at_source", n: "2" }]]]);
+    await run(only.db, { now });
+    expect(only.sent[0]).toContain("• 0 decided: none by you; 2 cleared at their source, not by you\n");
+  });
+
   it("decisions: the reasons line is omitted when no feedback was left", async () => {
     const { db, sent } = fakeDb([["GROUP BY decision", [{ decision: "allow", n: "2" }]]]);
     await run(db, { now });

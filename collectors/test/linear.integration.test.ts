@@ -96,6 +96,15 @@ describe.skipIf(!hasDb)("linear sync (real db)", () => {
       ["linear:ENG-103", "resolved_at_source"],
       ["linear:OPS-7", "pending"],
     ]);
+    // each clear carries its receipt: what became of the issue, in Linear (T4-23)
+    const receipts = await pool.query(
+      `SELECT source->>'external_ref' AS ref, payload->'cleared' AS cleared FROM proposals WHERE source->>'kind' = $1 AND decision = 'resolved_at_source' ORDER BY id`,
+      [SOURCE_KIND],
+    );
+    expect(receipts.rows).toEqual([
+      { ref: "linear:ENG-102", cleared: { what: "Completed in Linear", where: "linear" } },
+      { ref: "linear:ENG-103", cleared: { what: "Assigned to someone else in Linear", where: "linear" } },
+    ]);
   });
 
   it("an issue that comes back is raised again; one the owner answered is not raised again while it stays", async () => {

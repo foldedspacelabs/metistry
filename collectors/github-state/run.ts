@@ -32,8 +32,19 @@
 //     raised again for the same head;
 //   * a viewer this token cannot name (`/user` degraded) claims nothing and
 //     clears nothing.
+//
+// **Issues assigned to me** (R7, T4-23): with `syncs.github-state.raise.assigned`
+// on (the default), an open issue assigned to the token's own login raises
+// one `task` mirror — once per assignment, as `linear` does: one the owner
+// answered is not raised again while it stays assigned. It resolves at
+// source when the issue is closed or given to someone else.
+//
+// **Every clear carries a receipt** (core's `resolveAtSource`, T4-23): what
+// happened on GitHub — *You approved it on GitHub*, *Merged on GitHub*,
+// *Assigned to someone else on GitHub* — so the card that leaves the queue
+// says where it was settled.
 
-import { GITHUB_API_ORIGIN, PULL_REQUEST_KIND, RESOLVED_AT_SOURCE, githubPullRef, githubPullSource, raiseMirror, resolveAtSource } from "@foldedspacelabs/metistry-core";
+import { GITHUB_API_ORIGIN, GITHUB_SOURCE_KIND, PULL_REQUEST_KIND, RESOLVED_AT_SOURCE, githubPullRef, githubPullSource, lastMirror, raiseMirror, resolveAtSource, type RequestSource } from "@foldedspacelabs/metistry-core";
 
 export interface Db {
   query(text: string, values?: unknown[]): Promise<{ rows: any[] }>;
@@ -51,12 +62,25 @@ export interface GithubCtx {
 export const COMPONENT = "github-state";
 /** `payload.event` of the request a PR waiting on my review raises. */
 export const REVIEW_EVENT = "review_requested";
+/** `payload.event` of the request an issue assigned to me raises. */
+export const ASSIGNED_EVENT = "github_assigned";
+/** The request kind an assigned issue raises (§2.12's `task` row). */
+export const ASSIGNED_KIND = "task";
 /**
- * The manifest's `needs_you` default for the rule this collector reads. A
- * test holds it to `manifest.yaml`. (`assigned` is declared there too, and
- * is T4-23's to read.)
+ * The manifest's `needs_you` defaults for the rules this collector reads. A
+ * test holds them to `manifest.yaml`, so the two cannot drift.
  */
-export const RAISE_DEFAULTS: Readonly<Record<"review_requested", boolean>> = { review_requested: true };
+export const RAISE_DEFAULTS: Readonly<Record<"review_requested" | "assigned", boolean>> = { review_requested: true, assigned: true };
+
+/** What a clear says happened on GitHub — the receipt `resolveAtSource` writes (module header). */
+export const RECEIPTS = {
+  approved: "You approved it on GitHub",
+  draft: "Back to draft on GitHub",
+  pushed: "Pushed again on GitHub — the new head is a new request",
+  merged: "Merged on GitHub",
+  closed: "Closed on GitHub",
+  reassigned: "Assigned to someone else on GitHub",
+} as const;
 
 const PATCH_CHARS = 60_000; // limit: fixed — the card shows the diff; a larger one is truncated and marked, the PR is one click away
 const THREADS_MAX = 50; // limit: fixed — GitHub's page; a PR with more open threads is reviewed on GitHub
@@ -72,6 +96,8 @@ interface GhItem {
   updated_at: string;
   user?: { login: string } | null;
   assignee?: { login: string } | null;
+  assignees?: { login: string }[] | null;
+  body?: string | null;
   milestone?: { due_on: string | null } | null;
 }
 
@@ -279,15 +305,17 @@ async function fetchThreads(ctx: GithubCtx, get: typeof fetch, repo: string, num
  * head the owner's door reviewed when it settled it (`payload.review`,
  * apps/console/src/github-pulls-route.ts), else the head it was raised for.
  */
-async function lastPullRequest(db: Db, ref: string): Promise<{ decision: string; head_sha: string | null } | null> {
+async function lastPullRequest(db: Db, ref: string): Promise<{ decision: string; head_sha: string | null; ours: boolean } | null> {
   const { rows } = await db.query(
-    `SELECT decision, coalesce(payload->'review'->>'head_sha', payload->>'head_sha') AS head_sha FROM proposals
+    `SELECT decision, coalesce(payload->'review'->>'head_sha', payload->>'head_sha') AS head_sha,
+            (source_agent = $2 OR coalesce(payload->'also_asked', '[]'::jsonb) @> jsonb_build_array(jsonb_build_object('source_agent', $2::text))) AS ours
+     FROM proposals
      WHERE source IS NOT NULL AND source->>'kind' = 'github' AND source->>'external_ref' = $1
      ORDER BY id DESC LIMIT 1`,
-    [ref],
+    [ref, COMPONENT],
   );
-  const r = rows[0] as { decision: string; head_sha: string | null } | undefined;
-  return r ? { decision: String(r.decision), head_sha: r.head_sha ?? null } : null;
+  const r = rows[0] as { decision: string; head_sha: string | null; ours: boolean | null } | undefined;
+  return r ? { decision: String(r.decision), head_sha: r.head_sha ?? null, ours: r.ours !== false } : null;
 }
 
 export interface OpenPull {
@@ -299,7 +327,71 @@ export interface OpenPull {
   /** the viewer is known, so `needs` is an answer and not a degradation */
   known: boolean;
   requested: boolean;
+  /** GitHub says it is a draft — what a clear's receipt names when `needs` went false */
+  draft: boolean;
   threads: ReviewThread[];
+}
+
+const EXCERPT_CHARS = 280; // limit: fixed — a task request's body is an excerpt (§2.12); the issue itself is one click away
+
+/** Is this issue assigned to `me` — the single assignee, or one of several? */
+export function assignedTo(it: Pick<GhItem, "assignee" | "assignees">, me: string): boolean {
+  return it.assignee?.login === me || (it.assignees ?? []).some((a) => a?.login === me);
+}
+
+/** The request an issue assigned to me raises: §2.12's `task` — an excerpt, the link, and where it lives. */
+export function assignedPayload(repo: string, it: GhItem): Record<string, unknown> {
+  const excerpt = (it.body ?? "").replace(/\s+/g, " ").trim();
+  return {
+    title: `${repo}#${it.number} · ${it.title}`,
+    body: clip(excerpt || it.title, EXCERPT_CHARS),
+    event: ASSIGNED_EVENT,
+    repo,
+    number: it.number,
+    url: it.html_url,
+    author: it.user?.login ?? null,
+  };
+}
+
+/** The subject an issue's mirror names: the same `gh:owner/repo#n` its work row has (issue and PR numbers never collide in one repo). */
+function issueSource(repo: string, it: GhItem): RequestSource {
+  return { kind: GITHUB_SOURCE_KIND, external_ref: githubPullRef(repo, it.number), person: it.user?.login ?? null };
+}
+
+/** One issue assigned to me: raise its `task` once per assignment (module header). Returns 1 when it raised. */
+async function raiseAssigned(db: Db, repo: string, it: GhItem, workId: number | null): Promise<number> {
+  const source = issueSource(repo, it);
+  const last = await lastMirror(db, source);
+  if (last && last.decision !== RESOLVED_AT_SOURCE) return 0; // waiting, or answered: once per assignment
+  const r = await raiseMirror(db, {
+    kind: ASSIGNED_KIND,
+    source_agent: COMPONENT,
+    trust: "external", // the words are GitHub's, not the owner's or the assistant's
+    source,
+    payload: assignedPayload(repo, it),
+    work_id: workId,
+  });
+  return r.raised ? 1 : 0;
+}
+
+/**
+ * The waiting issue mirrors of this repo that are no longer an open issue
+ * assigned to me: closed, or given to someone else. One read per repo, not
+ * one per issue; a PR's mirror is never touched here (`kind = 'task'`).
+ */
+async function clearUnassigned(db: Db, repo: string, mine: ReadonlySet<string>, open: ReadonlySet<string>): Promise<number> {
+  const prefix = `gh:${repo}#`;
+  const { rows } = await db.query(
+    `SELECT DISTINCT source->>'external_ref' AS ref FROM proposals
+     WHERE decision = 'pending' AND kind = $1 AND source->>'kind' = $2 AND left(source->>'external_ref', $3) = $4`,
+    [ASSIGNED_KIND, GITHUB_SOURCE_KIND, prefix.length, prefix],
+  );
+  let cleared = 0;
+  for (const r of rows as { ref: string }[]) {
+    if (mine.has(r.ref)) continue;
+    cleared += (await resolveAtSource(db, { kind: GITHUB_SOURCE_KIND, external_ref: r.ref }, open.has(r.ref) ? RECEIPTS.reassigned : RECEIPTS.closed)).length;
+  }
+  return cleared;
 }
 
 /** The request a PR waiting on my review raises: what the card draws (§2.12's diff body), and the head it was shown at. */
@@ -325,13 +417,19 @@ async function reconcileMirror(db: Db, ctx: GithubCtx, get: typeof fetch, p: Ope
   const last = await lastPullRequest(db, source.external_ref);
   if (!p.needs) {
     // the review landed (my approval), or it went back to draft
-    return last?.decision === "pending" ? (await resolveAtSource(db, source)).length : 0;
+    return last?.decision === "pending" ? (await resolveAtSource(db, source, p.draft ? RECEIPTS.draft : RECEIPTS.approved)).length : 0;
   }
   let cleared = 0;
   if (last?.decision === "pending") {
-    if (last.head_sha !== null && last.head_sha === p.head) return 0; // waiting, on this head
+    if (last.head_sha !== null && last.head_sha === p.head) {
+      // waiting, on this head. An agent asked first (T4-23): GitHub asks too,
+      // so the one card names both — once; the raise lands on the same row.
+      if (last.ours || !raiseOn) return 0;
+      await raiseMirror(db, { kind: PULL_REQUEST_KIND, source_agent: COMPONENT, trust: "external", source, payload: reviewPayload(p, null), work_id: p.workId });
+      return 1;
+    }
     // it was pushed again: the question the owner may be reading is not this one
-    cleared = (await resolveAtSource(db, source)).length;
+    cleared = (await resolveAtSource(db, source, RECEIPTS.pushed)).length;
   } else if (last && last.decision !== RESOLVED_AT_SOURCE && last.head_sha === p.head) {
     return 0; // answered, for this head
   }
@@ -352,6 +450,7 @@ export async function run(db: Db, ctx: GithubCtx = {}): Promise<number> {
   if (!ctx.githubToken || !ctx.githubRepos?.length) return 0; // degrades absent
   const get = readOnlyGithub(ctx.fetchFn ?? fetch);
   const raiseOn = ctx.raise && Object.hasOwn(ctx.raise, "review_requested") ? ctx.raise.review_requested === true : RAISE_DEFAULTS.review_requested;
+  const raiseIssues = ctx.raise && Object.hasOwn(ctx.raise, "assigned") ? ctx.raise.assigned === true : RAISE_DEFAULTS.assigned;
   let touched = 0;
   const me = await fetchViewer(ctx, get);
   for (const repo of ctx.githubRepos) {
@@ -360,6 +459,7 @@ export async function run(db: Db, ctx: GithubCtx = {}): Promise<number> {
     const area = repo.split("/")[1] ?? repo;
     const refs: string[] = [];
     const openPulls: OpenPull[] = [];
+    const mine = new Set<string>(); // open issues assigned to me, by ref
     for (const it of open) {
       const ref = githubPullRef(repo, it.number);
       refs.push(ref);
@@ -386,7 +486,7 @@ export async function run(db: Db, ctx: GithubCtx = {}): Promise<number> {
         // reply to or resolve (the thread doors), read on every pass
         const threads = needs ? await fetchThreads(ctx, get, repo, it.number) : [];
         if (needs) meta.threads = threads;
-        pull = { repo, item: it, head, needs, known: !!me, requested: !!me && reviewers.includes(me), threads };
+        pull = { repo, item: it, head, needs, known: !!me, requested: !!me && reviewers.includes(me), draft: !!p?.draft, threads };
       }
       const { rows } = await db.query(
         `INSERT INTO work (title, area, kind, status, external_ref, owner, due, updated_at, meta)
@@ -399,9 +499,16 @@ export async function run(db: Db, ctx: GithubCtx = {}): Promise<number> {
          it.milestone?.due_on ? it.milestone.due_on.slice(0, 10) : null, it.updated_at, JSON.stringify(meta)],
       );
       touched++;
-      if (pull) openPulls.push({ ...pull, workId: rows[0] ? Number(rows[0].id) : null });
+      const workId = rows[0] ? Number(rows[0].id) : null;
+      if (pull) openPulls.push({ ...pull, workId });
+      else if (me && assignedTo(it, me)) {
+        mine.add(ref);
+        if (raiseIssues) touched += await raiseAssigned(db, repo, it, workId);
+      }
     }
     for (const p of openPulls) touched += await reconcileMirror(db, ctx, get, p, raiseOn);
+    // an unknown viewer claims nothing and clears nothing (module header)
+    if (me) touched += await clearUnassigned(db, repo, mine, new Set(refs));
     // anything we track for this repo that is no longer open → closed
     const closed = await db.query(
       `UPDATE work SET status = 'closed', updated_at = now()
@@ -423,7 +530,7 @@ export async function run(db: Db, ctx: GithubCtx = {}): Promise<number> {
         row.id,
         JSON.stringify({ merged: !!state.merged_at, merged_at: state.merged_at ?? null }),
       ]);
-      await resolveAtSource(db, githubPullSource(repo, Number(m[1])));
+      await resolveAtSource(db, githubPullSource(repo, Number(m[1])), state.merged_at ? RECEIPTS.merged : RECEIPTS.closed);
     }
   }
   return touched;

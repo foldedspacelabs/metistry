@@ -58,7 +58,10 @@ describe("github-state collector", () => {
     });
     const close = db.q.find((x) => x.text.startsWith("UPDATE work"))!;
     expect(close.values[1]).toEqual(["gh:foldedspacelabs/metistry#7", "gh:foldedspacelabs/metistry#9"]);
-    expect(n).toBe(4); // 2 upserts + 1 request raised + 1 closed
+    // 2 upserts + 2 requests raised (the PR waiting on my review; #7, assigned to me, a task — T4-23) + 1 closed
+    expect(n).toBe(5);
+    const raised = db.q.filter((x) => x.text.startsWith("INSERT INTO proposals")).map((x) => x.values[0]);
+    expect(raised.sort()).toEqual(["pull_request", "task"]);
   });
 
   it("surfaces API failure as an error (the runner records it), never silent", async () => {
@@ -198,11 +201,12 @@ describe("the collector's PAT stays read-only (T2-13)", () => {
 });
 
 describe("the github-state manifest", () => {
-  it("loads through the collector registry, and the review_requested default is the one the code applies", async () => {
+  it("loads through the collector registry, and its needs_you defaults are the ones the code applies", async () => {
     const reg = await loadKind("collector", { productDir: fileURLToPath(new URL("../..", import.meta.url)) });
     const m = reg.get("github-state")?.manifest;
     expect(m, JSON.stringify(reg.skipped)).toBeDefined();
     expect(m?.needs_you?.review_requested?.default).toBe(RAISE_DEFAULTS.review_requested);
+    expect(Object.fromEntries(Object.entries(m?.needs_you ?? {}).map(([k, v]) => [k, v.default]))).toEqual(RAISE_DEFAULTS);
   });
 });
 

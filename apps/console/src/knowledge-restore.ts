@@ -217,7 +217,7 @@ export async function raiseRestore(deps: RestoreDeps, ask: { path: string; sha: 
     const existing = (await deps.db.query(`SELECT payload FROM proposals WHERE id = $1`, [raised.id])).rows[0];
     const base = (existing?.payload as { restore?: { base_sha256?: unknown } } | undefined)?.restore?.base_sha256;
     if (base !== now) {
-      await resolveAtSource(deps.db, source);
+      await resolveAtSource(deps.db, source, `${ask.path} changed since it was asked — the new request asks about it now`);
       raised = await raise();
     }
   }

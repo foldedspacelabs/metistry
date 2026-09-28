@@ -95,6 +95,7 @@ describe.skipIf(!hasDb)("events become requests (C96, T2-9, integration)", () =>
     await tick(pool, [c], {}, at({ maxStreak: 9 }));
     expect((await requestsFor(first.external_ref)).map((r) => r.decision)).toEqual([RESOLVED_AT_SOURCE]);
     expect((await requestsFor(second.external_ref)).map((r) => r.decision)).toEqual([RESOLVED_AT_SOURCE]);
+    expect((await requestsFor(first.external_ref))[0].payload.cleared).toEqual({ what: "Ran cleanly again", where: "metistry" });
   });
 
   it("a Dismiss holds while the fault lasts; the same fault after a recovery is asked again", async () => {
@@ -130,13 +131,27 @@ describe.skipIf(!hasDb)("events become requests (C96, T2-9, integration)", () =>
     const later: ScheduledCollector = { ...routine(nameFor("sec-c"), { error: null }), requires: needs };
     const ref = secretFailedSource(SECRET).external_ref;
 
-    await tick(pool, [one, two], {}, at());
-    await tick(pool, [one, two], {}, at()); // still missing: the same request
+    // a daily one that ran a moment ago: not due this tick, but it depends on the secret all the same
+    const daily: ScheduledCollector = { ...routine(nameFor("sec-d"), { error: null }), schedule: { every: "6h" }, requires: needs };
+    const bystander = routine(nameFor("sec-x"), { error: null }); // needs nothing: not a dependent
+    await pool.query(`INSERT INTO runs (component, kind, ok, ts) VALUES ($1, 'routine_run', true, now())`, [daily.name]);
+
+    await tick(pool, [one, two, daily, bystander], {}, at());
+    await tick(pool, [one, two, daily, bystander], {}, at()); // still missing: the same request
     let rows = await requestsFor(ref);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ kind: "secret_failure", decision: "pending" });
     expect(rows[0].payload).toMatchObject({ title: `${SECRET} is not set`, event: "secret_failed", variable: SECRET, stopped: [one.name, two.name].sort(), last_ok_at: null });
-    expect(rows[0].payload.body).toMatchObject({ kind: "before_after", heading: SECRET, before: { label: "Stopped", text: [one.name, two.name].sort().join("\n") } });
+    // ONE request naming its dependents: everything that needs it, stopped yet or not — never the bystander
+    const deps = [
+      { component: one.name, title: one.name, kind: "routine" },
+      { component: two.name, title: two.name, kind: "collector" },
+      { component: daily.name, title: daily.name, kind: "routine" },
+    ].sort((a, b) => (a.component < b.component ? -1 : 1));
+    expect(rows[0].payload.dependents).toEqual(deps);
+    expect(rows[0].payload.used_by).toBe("2 routines and 1 sync use it");
+    expect(rows[0].payload.body).toMatchObject({ kind: "before_after", heading: SECRET, before: { label: "Waiting on it" } });
+    expect(rows[0].payload.body.before.text.split("\n")).toEqual(deps.map((d) => `${d.title}${d.component === daily.name ? " — stops when its time comes" : " — stopped"}`));
     expect(describeRequest("secret_failure", rows[0].payload)).toMatchObject({ type: "access", word: "access", body: "before_after" });
 
     // a component stopped since joins the list — it is not a request of its own
@@ -144,10 +159,12 @@ describe.skipIf(!hasDb)("events become requests (C96, T2-9, integration)", () =>
     rows = await requestsFor(ref);
     expect(rows).toHaveLength(1);
     expect(rows[0].payload.stopped).toEqual([one.name, two.name, later.name].sort());
+    expect(rows[0].payload.dependents.map((d: { component: string }) => d.component)).toEqual([one.name, two.name, daily.name, later.name].sort());
 
-    // set: the request leaves the queue at its source, and the components run
+    // set: the request leaves the queue at its source, with a receipt, and the components run
     await tick(pool, [one, two, later], {}, at({ env: { [SECRET]: "k" } }));
     expect((await requestsFor(ref)).map((r) => r.decision)).toEqual([RESOLVED_AT_SOURCE]);
+    expect((await requestsFor(ref))[0].payload.cleared).toEqual({ what: `${SECRET} is set again`, where: "metistry" });
     const ran = await pool.query(`SELECT count(*)::int AS n FROM runs WHERE component = ANY($1) AND kind IN ('routine_run', 'collector_run') AND ok`, [[one.name, two.name, later.name]]);
     expect(ran.rows[0].n).toBe(3);
 

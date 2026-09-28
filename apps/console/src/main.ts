@@ -17,6 +17,7 @@ import {
   resolveInstanceLayout,
   intEnv,
   optionalEnv,
+  parseSecretsFile,
   requireEnv,
   resolveLocalModelUrl,
   ROUTINE_TIER,
@@ -49,7 +50,8 @@ import type { ComputeAdmin } from "./compute-routes.js";
 import type { SecretsView } from "./secrets-route.js";
 import type { VariablesView } from "./variables-route.js";
 import type { ConnectionsView } from "./connections-route.js";
-import { instanceSyncOpener } from "@foldedspacelabs/metistry-connections";
+import { envSecretSource, instanceSyncOpener } from "@foldedspacelabs/metistry-connections";
+import { GithubWriteClient } from "./github-write.js";
 import { readInstanceId, securityPresence, realExec } from "@foldedspacelabs/metistry-cli";
 import { CrewRegistry } from "./crews.js";
 import { assistantPromptFiles, loadAssistantDefinition } from "./actors.js";
@@ -322,6 +324,18 @@ console.log(
     : "secrets absent: METISTRY_INSTANCE_DIR is unset or not readable — GET /api/secrets answers 503; `metistry secrets list --named` still works (degrades: absent)",
 );
 
+// The owner's GitHub client (plan §2.11, T2-13): the pull request doors post
+// a review, a thread reply or a resolve through it, as the owner, with the
+// `github_write` secret `metistry secrets sync --to env` delivers
+// (METISTRY_SECRET_GITHUB_WRITE) — only while secrets.yaml, read per call,
+// sends it to api.github.com. Built here and handed to the doors alone; the
+// github-state sync reads with its own read-only token and never sees it. No
+// instance directory → no secrets.yaml → every door says what is missing.
+const githubWrite = new GithubWriteClient({
+  secrets: envSecretSource(process.env),
+  policy: async () => (secrets && existsSync(secrets.file) ? parseSecretsFile(await readFile(secrets.file, "utf8")) : undefined),
+});
+
 // GET /api/variables (plan §2.14): the instance's `.metistry/variables.yaml`,
 // and its `.metistry/` walked for *used in*. No instance directory → 503.
 const variables: VariablesView | undefined = computeAdmin
@@ -519,6 +533,7 @@ if (!planTomorrow) console.warn(`${PLAN_ROUTINE} is not loaded: Close the Day wr
 const server = makeServer(pool, queries, {
   origin,
   ...(secrets ? { secrets } : {}),
+  githubWrite,
   ...(variables ? { variables } : {}),
   ...(connections ? { connections } : {}),
   origins,

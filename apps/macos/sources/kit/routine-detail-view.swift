@@ -212,7 +212,7 @@ struct RoutineScheduleEditor: View {
                     Text(verbatim: ScheduledWords.weekdayShort[i])
                 }
                 .toggleStyle(.button)
-                .accessibilityLabel(Text(verbatim: Calendar(identifier: .gregorian).weekdaySymbols[i]))
+                .accessibilityLabel(Text(verbatim: ScheduledWords.weekdayLong[i]))
                 .disabled(!model.allowsDecisions)
             }
         }
@@ -227,6 +227,8 @@ struct RoutineScheduleEditor: View {
                 }),
                 displayedComponents: .hourAndMinute
             )
+            // The field alone: the stepper's arrows are AppKit's and unnamed.
+            .datePickerStyle(.field)
             .fixedSize()
             .environment(\.timeZone, Self.utc)
             .disabled(!model.allowsDecisions)

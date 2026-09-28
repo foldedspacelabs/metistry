@@ -467,6 +467,7 @@ public enum ScheduledWords {
     public static let noConnection = "Not connected — a sync starts when its connection is added (`metistry connections add`)."
     static let weekdayCodes = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"]
     static let weekdayShort = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+    static let weekdayLong = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
     static let weekdayPlural = ["Sundays", "Mondays", "Tuesdays", "Wednesdays", "Thursdays", "Fridays", "Saturdays"]
 
     /// `07:00` → *7:00 AM*; spoken, *7 AM* (components-02 §3).
@@ -826,7 +827,7 @@ public final class ScheduledModel {
     /// *Today* · *Tomorrow · Monday* · *Sunday · 4 Oct*.
     func dayTitle(_ day: Date, today: Date) -> String {
         let cal = calendar
-        let weekday = cal.weekdaySymbols[cal.component(.weekday, from: day) - 1]
+        let weekday = ScheduledWords.weekdayLong[cal.component(.weekday, from: day) - 1]
         if day == today { return "Today" }
         if let tomorrow = cal.date(byAdding: .day, value: 1, to: today), day == tomorrow { return "Tomorrow · \(weekday)" }
         return "\(weekday) · \(clock.day(day))"
@@ -860,7 +861,7 @@ public final class ScheduledModel {
             days.append(WeekAxis.Day(
                 start: dayStart,
                 label: ScheduledWords.weekdayShort[weekday],
-                longLabel: "\(cal.weekdaySymbols[weekday]) \(clock.day(dayStart))",
+                longLabel: "\(ScheduledWords.weekdayLong[weekday]) \(clock.day(dayStart))",
                 marks: marks,
                 runs: runs.map { WeekAxis.Run(time: clock.time($0.0), title: $0.1) }
             ))

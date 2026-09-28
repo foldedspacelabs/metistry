@@ -570,6 +570,15 @@ turn's state, one of five:
 A client that does not know a status draws no turn state for it rather than
 guessing. An outbound row's `status` is its `kind` (`reply`, `alert`, …).
 
+**`turn_id`** (ruling 18, additive — `api_version` stays 1). An outbound row
+carries the `turn_id` of the `runs` row that produced it — joined exactly on
+`runs.meta.message_id` = the reply's own `in_reply_to`, the same key
+`run_detail` already joins tool calls on, never adjacency or a time window —
+or `null` where its turn left none (or none is found). Always `null` on an
+inbound row. A reply's `turn_id` is what a client hands to `GET
+/api/turns/:turn_id/progress` to draw its tool strip, so a reply need not be
+inside any recent-activity window to draw one.
+
 `POST /message` is durable before the `202`. `tier` is the composer's picker —
 a tier name from the instance's `tiers:` — for this message only; a command or
 a fast path still wins, and an unknown name is ignored rather than invented.

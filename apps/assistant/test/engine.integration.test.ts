@@ -78,8 +78,9 @@ describe.skipIf(!hasDb)("engine against the scratch db", () => {
       choices: [{ message: { role: "assistant", content: "noted" }, finish_reason: "stop" }],
       usage: { prompt_tokens: 10, completion_tokens: 2, cost: 0.001 },
     };
-    const fetchFn = (async () => ({ ok: true, status: 200, headers: new Headers(), json: async () => reply, text: async () => "" }) as unknown as Response) as unknown as typeof fetch;
-    const engine = makeOpenAiEngine({ tools: () => NO_TOOLS, sessions: pgSessionStore(pool), fetchFn, env: { METISTRY_TEST_OPENROUTER_KEY: "k" } });
+    // a real Response: the provider's answer comes back through the egress door, which reads and redacts its body (X-7)
+    const fetchFn = (async () => new Response(JSON.stringify(reply), { status: 200, headers: { "content-type": "application/json" } })) as unknown as typeof fetch;
+    const engine = makeOpenAiEngine({ tools: () => NO_TOOLS, sessions: pgSessionStore(pool), fetchFn, env: { METISTRY_TEST_OPENROUTER_KEY: "sk-or-test-integration-key-0001" } });
 
     const r = await engine("hello", { model: assignment.model, effort: assignment.effort, assignment, thread });
     const stored = await pool.query(`SELECT thread, provider, model, messages, turns, rolled_at FROM assistant_sessions WHERE id = $1`, [r.session_id]);

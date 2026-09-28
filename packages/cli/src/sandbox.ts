@@ -97,17 +97,21 @@ export function realPathish(p: string, realpath: (x: string) => string = realpat
 /**
  * The instance files the engine reads, and the ONLY ones the profile lets
  * it open outside its own dist and state: its identity, its system-prompt
- * template, the router's tier map and `compute.yaml`.
+ * template, the router's tier map, `compute.yaml`, and `secrets.yaml` — the
+ * last so the engine can check a provider key's grant to `provider:<name>`
+ * before it dials (ruling 2 of the W2 checkpoint, X-7). `secrets.yaml` holds
+ * names and policy, never a value: its schema is strict, so a file that
+ * tried to carry one would not load.
  *
  * Grants are per FILE, not a directory. `<instance>/.metistry/` would be a
  * one-line rule and would also hand the engine `instances.yaml`,
  * `metistry.lock` and the whole Postgres cluster under `state/`; and on a
  * legacy instance the machinery IS the vault root, so a directory grant
  * there would hand it every note in the vault — which is precisely what D5
- * says it may never read from disk. Four literals say the same thing in
+ * says it may never read from disk. Five literals say the same thing in
  * both layouts and say nothing more.
  */
-export const ENGINE_CONFIG_KEYS = ["identity", "assistantPrompt", "rules", "compute"] as const satisfies readonly InstancePathKey[];
+export const ENGINE_CONFIG_KEYS = ["identity", "assistantPrompt", "rules", "compute", "secrets"] as const satisfies readonly InstancePathKey[];
 
 /** `identity` → `CONFIG_IDENTITY`: the `-D` parameter ops/sandbox/assistant.sb reads it as. */
 export function configParamName(key: (typeof ENGINE_CONFIG_KEYS)[number]): string {
@@ -115,7 +119,7 @@ export function configParamName(key: (typeof ENGINE_CONFIG_KEYS)[number]): strin
 }
 
 /**
- * The four `-D CONFIG_*` values for one install: this instance's copy of
+ * The five `-D CONFIG_*` values for one install: this instance's copy of
  * each file as THIS instance spells it (flat or legacy), falling back to the
  * product's seed when there is no instance directory — a grant on a file the
  * profile already allows, rather than an empty parameter `renderPlist` would
@@ -149,7 +153,7 @@ export interface SandboxInputs {
   productDir: string;
   nodeBin: string;
   stateDir: string;
-  /** the instance directory, so the four config files it holds can be granted by name */
+  /** the instance directory, so the five config files it holds can be granted by name */
   instanceDir?: string | undefined;
   consolePort: number;
   /**
@@ -184,6 +188,7 @@ export interface SandboxParams {
   CONFIG_ASSISTANT_PROMPT: string;
   CONFIG_RULES: string;
   CONFIG_COMPUTE: string;
+  CONFIG_SECRETS: string;
 }
 
 export function sandboxParams(inputs: SandboxInputs): SandboxParams {
@@ -202,6 +207,7 @@ export function sandboxParams(inputs: SandboxInputs): SandboxParams {
       CONFIG_ASSISTANT_PROMPT: string;
       CONFIG_RULES: string;
       CONFIG_COMPUTE: string;
+      CONFIG_SECRETS: string;
     }),
   };
 }

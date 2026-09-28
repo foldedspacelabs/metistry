@@ -2,8 +2,11 @@
 // model). Everything asserted here is a control rather than a behaviour:
 // what goes on the wire, what stops the loop, what the turn cost, and what a
 // refusal says.
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { DEFAULT_MAX_OUTPUT_TOKENS, parseCompute, resolveAssignment, type ResolvedAssignment } from "@foldedspacelabs/metistry-core";
+import { DEFAULT_MAX_OUTPUT_TOKENS, EgressRefused, parseCompute, parseSecretsFile, resolveAssignment, type ResolvedAssignment } from "@foldedspacelabs/metistry-core";
 import {
   CredentialError,
   EngineHttpError,
@@ -13,6 +16,7 @@ import {
   credentialFor,
   makeChatClient,
   makeOpenAiEngine,
+  secretsPolicyFromEnv,
 } from "../src/engine-openai.js";
 import { memorySessionStore } from "../src/sessions.js";
 import type { ToolHost, ToolSpec } from "../src/tools.js";
@@ -453,7 +457,7 @@ describe("sessions", () => {
   it("a resumed session replays its history; a session built on another model is not resumed", async () => {
     const sessions = memorySessionStore();
     const s = server([{ body: chat("first") }, { body: chat("second") }, { body: chat("third") }]);
-    const engine = makeOpenAiEngine({ tools: () => host({}), sessions, fetchFn: s.fetchFn, sleep: s.sleep, env: { METISTRY_OPENROUTER_API_KEY: "k" } });
+    const engine = makeOpenAiEngine({ tools: () => host({}), sessions, fetchFn: s.fetchFn, sleep: s.sleep, env: { METISTRY_OPENROUTER_API_KEY: "sk-or-test-key-0001" } });
     const one = await engine("hello", { model: cloud.model, effort: cloud.effort, assignment: cloud, thread: "t" });
     await engine("again", { model: cloud.model, effort: cloud.effort, assignment: cloud, thread: "t", resume: one.session_id });
     expect(s.requests[1]!.body.messages.map((m: any) => m.content)).toEqual(["hello", "first", "again"]);
@@ -472,7 +476,7 @@ describe("completeJson", () => {
 
   it("sends response_format: json_schema and validates the answer with zod anyway", async () => {
     const s = server([{ body: chat('{"tier":"deep","why":"it needs judgement"}') }]);
-    const client = makeChatClient({ assignment: cloud, apiKey: "k", fetchFn: s.fetchFn, sleep: s.sleep });
+    const client = makeChatClient({ assignment: cloud, env: { METISTRY_OPENROUTER_API_KEY: "sk-or-test-key-0001" }, fetchFn: s.fetchFn, sleep: s.sleep });
     const r = await completeJson(client, { messages: [{ role: "user", content: "which tier?" }], schema, jsonSchema, name: "tier_pick" });
     expect(r.value).toEqual({ tier: "deep", why: "it needs judgement" });
     expect(r.repaired).toBe(false);
@@ -481,7 +485,7 @@ describe("completeJson", () => {
 
   it("repairs ONCE when the provider treated the schema as a hint, carrying the validation error back", async () => {
     const s = server([{ body: chat('```json\n{"tier":"medium"}\n```') }, { body: chat('{"tier":"fast","why":"a lookup"}') }]);
-    const client = makeChatClient({ assignment: cloud, apiKey: "k", fetchFn: s.fetchFn, sleep: s.sleep });
+    const client = makeChatClient({ assignment: cloud, env: { METISTRY_OPENROUTER_API_KEY: "sk-or-test-key-0001" }, fetchFn: s.fetchFn, sleep: s.sleep });
     const r = await completeJson(client, { messages: [{ role: "user", content: "which tier?" }], schema, jsonSchema });
     expect(r.value.tier).toBe("fast");
     expect(r.repaired).toBe(true);
@@ -492,7 +496,7 @@ describe("completeJson", () => {
 
   it("two failures is a failure — it never returns unvalidated JSON", async () => {
     const s = server([{ body: chat("not json at all") }, { body: chat('{"tier":"nope"}') }]);
-    const client = makeChatClient({ assignment: cloud, apiKey: "k", fetchFn: s.fetchFn, sleep: s.sleep });
+    const client = makeChatClient({ assignment: cloud, env: { METISTRY_OPENROUTER_API_KEY: "sk-or-test-key-0001" }, fetchFn: s.fetchFn, sleep: s.sleep });
     await expect(completeJson(client, { messages: [{ role: "user", content: "x" }], schema, jsonSchema })).rejects.toThrow(/structured output failed twice/);
   });
 });
@@ -618,5 +622,57 @@ assignments:
     expect(r.text).toBe("the real answer");
     expect(r.shadow?.shadow.error).toContain("returned 500");
     expect(r.shadow?.shadow.cost_usd).toBe(0);
+  });
+});
+
+// ---- a provider key's grantee (ruling 2 of the W2 checkpoint; X-7) ------------------
+//
+// The engine never puts the key on a request itself: every call goes through
+// core's `computeFetch`, which attaches a `{{ secret.x }}` key only when
+// `secrets.yaml` grants it to `provider:<name>`, and only for the provider's
+// own host.
+
+describe("**a provider key without its grant is refused before dialling** (the engine)", () => {
+  const KEY = "sk-or-SENTINEL-engine-key-4242";
+  const named = resolveAssignment(parseCompute(FILE.replace("auth: { secret: METISTRY_OPENROUTER_API_KEY }", 'auth: { secret: "{{ secret.openrouter_api_key }}" }')), "default")!;
+  const env = { METISTRY_SECRET_OPENROUTER_API_KEY: KEY };
+  const turn = { model: named.model, effort: named.effort, assignment: named, thread: "t" };
+  const withGrant = (grant: string) => () => ({ ok: true as const, file: parseSecretsFile(`secrets:\n  openrouter_api_key:\n    hosts: [openrouter.ai]\n    grants:\n${grant}`) });
+
+  it("no grant: the turn is refused by the door, nothing reaches the provider, and it is not retried", async () => {
+    const s = server([{ body: chat("never") }]);
+    const err = await engineOn(named, s, host({}), { env, secretsPolicy: withGrant("      agent:assistant: on\n") })("hi", turn).catch((e) => e);
+    expect(err).toBeInstanceOf(EgressRefused);
+    expect((err as EgressRefused).code).toBe("not_granted");
+    expect((err as Error).message).not.toContain(KEY);
+    expect(s.requests).toEqual([]);
+    expect(s.slept).toEqual([]);
+  });
+
+  it("granted to provider:openrouter: the door attaches the key", async () => {
+    const s = server([{ body: chat("done") }]);
+    const r = await engineOn(named, s, host({}), { env, secretsPolicy: withGrant("      provider:openrouter: on\n") })("hi", turn);
+    expect(r.text).toBe("done");
+    expect(s.requests[0]!.headers.authorization).toBe(`Bearer ${KEY}`);
+  });
+
+  it("by default the engine reads this instance's secrets.yaml under METISTRY_INSTANCE_DIR — per call — and with no instance directory refuses", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "metistry-x7-engine-"));
+    await mkdir(join(dir, ".metistry"), { recursive: true });
+    await writeFile(join(dir, ".metistry", "identity.yaml"), "name: Aide\n");
+    const file = join(dir, ".metistry", "secrets.yaml");
+    await writeFile(file, "secrets:\n  openrouter_api_key:\n    hosts: [openrouter.ai]\n    grants:\n      provider:openrouter: on\n");
+    const s = server([{ body: chat("one") }, { body: chat("two") }]);
+    const engine = engineOn(named, s, host({}), { env: { ...env, METISTRY_INSTANCE_DIR: dir } });
+    expect((await engine("hi", turn)).text).toBe("one");
+    // the owner revokes it: the next turn is refused, with no restart
+    await writeFile(file, "secrets:\n  openrouter_api_key:\n    hosts: [openrouter.ai]\n    grants:\n      provider:openrouter: off\n");
+    expect(await engine("again", turn).catch((e) => (e as EgressRefused).code)).toBe("not_granted");
+    expect(s.requests).toHaveLength(1);
+
+    expect(await secretsPolicyFromEnv({})()).toMatchObject({ ok: false, why: expect.stringContaining("METISTRY_INSTANCE_DIR") });
+    const none = server([{ body: chat("never") }]);
+    expect(await engineOn(named, none, host({}), { env })("hi", turn).catch((e) => (e as EgressRefused).code)).toBe("not_granted");
+    expect(none.requests).toEqual([]);
   });
 });

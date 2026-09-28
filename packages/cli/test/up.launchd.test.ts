@@ -479,12 +479,14 @@ describe("the rendered plists", () => {
     // and answered as the seed identity (#198)
     expect(assistant.env.METISTRY_INSTANCE_DIR).toBe(I);
     expect(assistant.env.METISTRY_SEED_DIR).toBe(`${P}/seed`);
-    // …and the sandbox lets it open the four files it will find there, by
+    // …and the sandbox lets it open the five files it will find there, by
     // name: the vault beside them stays denied (D5)
     expect(assistant.argv).toContain(`CONFIG_IDENTITY=${realPathish(join(I, ".metistry", "identity.yaml"))}`);
     expect(assistant.argv).toContain(`CONFIG_ASSISTANT_PROMPT=${realPathish(join(I, ".metistry", "assistant-prompt.md"))}`);
     expect(assistant.argv).toContain(`CONFIG_RULES=${realPathish(join(I, ".metistry", "rules.yaml"))}`);
     expect(assistant.argv).toContain(`CONFIG_COMPUTE=${realPathish(join(I, ".metistry", "compute.yaml"))}`);
+    // X-7: and secrets.yaml, so a provider key's grant is checked before it dials
+    expect(assistant.argv).toContain(`CONFIG_SECRETS=${realPathish(join(I, ".metistry", "secrets.yaml"))}`);
     // the engine's environment is still an ALLOWLIST, and a child's
     // environment is the spec's whole: the supervisor's own never leaks in
     expect(assistant.env.METISTRY_ORIGIN).toBeUndefined();

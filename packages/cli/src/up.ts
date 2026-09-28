@@ -391,7 +391,7 @@ export function plistValuesFor(t: PlistTemplate, v: ShapeValues): PlistValues {
         // `HTTPS_PROXY` plus `NODE_USE_ENV_PROXY=1`, because Node's global
         // fetch ignores the former without the latter (core's egressProxyEnv)
         env: { ...assistantEnv(v, v.compute), ...(v.egress ? egressProxyEnv("assistant", { port: v.egress.port, tokens: v.egress.tokens ?? {} }) : {}) },
-        // CONFIG_*: the four instance files the engine reads, granted BY
+        // CONFIG_*: the five instance files the engine reads, granted BY
         // NAME (sandbox.ts). Without them the profile's deny-default makes
         // an absolute instance path an EPERM, so the overlay that now finds
         // this install's identity.yaml would crash the job instead.
@@ -411,6 +411,9 @@ export function plistValuesFor(t: PlistTemplate, v: ShapeValues): PlistValues {
           CONFIG_ASSISTANT_PROMPT: p.CONFIG_ASSISTANT_PROMPT,
           CONFIG_RULES: p.CONFIG_RULES,
           CONFIG_COMPUTE: p.CONFIG_COMPUTE,
+          // secrets.yaml — policy, never a value — so the engine can check a
+          // provider key's grant before it dials (X-7)
+          CONFIG_SECRETS: p.CONFIG_SECRETS,
         },
       };
     }

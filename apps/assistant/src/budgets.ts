@@ -130,35 +130,43 @@ export function makeBudgetGuard(deps: BudgetDeps): TurnGuard {
   };
 }
 
+/** `payload.event` on the report `offerBudgetWindow` raises — a chat turn's own budget refusal, distinct from the runner's `budget_stopped` (apps/console/src/runner.ts) for a paused routine. */
+export const BUDGET_REFUSED_EVENT = "budget_refused";
+
 /**
- * The Eve adopt: a CHAT turn refused by a budget offers one more window as a
+ * The Eve adopt: a CHAT turn refused by a budget raises a `report` as a
  * Needs You item instead of dying quietly; a routine or crew turn just fails
  * with `budget_exceeded` (the runner's preflight has already stopped
  * scheduling them — docs/ops/compute.md "Budgets").
  *
- * The offer is a `decision` proposal in the one queue (D7) plus the alert
- * that carries it to the phone. It does NOT raise the budget itself and
+ * It is a `report` (C96, ruling 12), not a `decision`: nothing here is a
+ * choice put to the owner, just what stopped and its act — the same shape
+ * as the runner's `BUDGET_STOPPED_KIND` report for a paused routine
+ * (apps/console/src/runner.ts). It does NOT raise the budget itself and
  * could not: `compute.yaml` is a §4.7 protected path, so the limit moves by
  * the user's hand or not at all (invariant 2). What the item buys is that
  * the user hears about it where they already read things, with the exact
- * field to edit in front of them.
+ * field to change and a door straight to Settings › Compute.
  *
  * Once per window: a refusal storm must not become a notification storm.
  */
 export async function offerBudgetWindow(db: BudgetDb, thread: string, hit: BudgetHit, now: Date = new Date()): Promise<boolean> {
   const key = `offer:${budgetWindowKey(hit, now)}`;
   if (await alreadyRecorded(db, "offer", key)) return false;
-  const title = `Compute is over its ${hit.scope} ${hit.window} budget — allow one more window?`;
+  const title = hit.scope === "instance" ? `Compute is over its ${hit.window} budget` : `${hit.scope.replace(/^provider:/, "")} is over its ${hit.window} budget`;
   const body =
     `${budgetRefusalMessage(hit)}\n\n` +
     `Nothing is running on this budget until the window resets or ${hit.field} changes in compute.yaml ` +
     `(\`metistry compute budget ${hit.scope === "instance" ? "instance" : hit.scope} --${hit.window} <usd>\`).`;
-  await db.query(`INSERT INTO proposals (kind, source_agent, trust, payload) VALUES ('decision', 'assistant', 'internal', $1)`, [
+  await db.query(`INSERT INTO proposals (kind, source_agent, trust, payload) VALUES ('report', 'assistant', 'internal', $1)`, [
     JSON.stringify({
       title,
-      options: [`Allow one more ${hit.window} window (raise ${hit.field})`, "Leave it stopped until the window resets"],
+      body,
+      event: BUDGET_REFUSED_EVENT,
       thread,
       budget: { scope: hit.scope, window: hit.window, field: hit.field, limit: hit.limit, spent: hit.spent },
+      // Settings › Compute › Spending limits (C138): the limit is the owner's hand, never this request's
+      act: { label: "Raise", kind: "open_settings", pane: "compute", section: "spending_limits" },
     }),
   ]);
   await db.query(`INSERT INTO outbound_messages (thread, text, kind) VALUES ($1, $2, 'alert')`, [thread, body]);

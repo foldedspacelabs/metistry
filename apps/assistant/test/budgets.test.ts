@@ -133,7 +133,7 @@ describe("the budget guard", () => {
 });
 
 describe("the Needs You window (a chat turn's refusal)", () => {
-  it("writes one decision proposal and one alert, once per window", async () => {
+  it("raises one `report` and no `decision`, plus one alert, once per window", async () => {
     const db = fakeDb();
     const hit = { scope: "instance", window: "daily" as const, field: "budgets.instance.daily_usd", limit: 5, spent: 6, fraction: 1.2, over: true, action: "stop" as const };
     const now = new Date("2026-09-16T12:00:00Z");
@@ -142,9 +142,13 @@ describe("the Needs You window (a chat turn's refusal)", () => {
 
     const proposals = db.inserted(/INSERT INTO proposals/);
     expect(proposals).toHaveLength(1);
+    expect(proposals[0]!.text).toContain("'report'");
+    expect(proposals[0]!.text).not.toContain("'decision'");
     const payload = JSON.parse(String(proposals[0]!.values[0]));
-    expect(payload.title).toContain("allow one more");
-    expect(payload.options[0]).toContain("budgets.instance.daily_usd");
+    expect(payload.title).toContain("over its daily budget");
+    expect(payload.options).toBeUndefined(); // a report offers no choices — its act is the primary
+    expect(payload.act).toEqual({ label: "Raise", kind: "open_settings", pane: "compute", section: "spending_limits" });
+    expect(payload.body).toContain("budgets.instance.daily_usd");
     expect(db.inserted(/INSERT INTO outbound_messages/)).toHaveLength(1);
     expect(String(db.inserted(/INSERT INTO outbound_messages/)[0]!.values[1])).toContain("metistry compute budget");
   });

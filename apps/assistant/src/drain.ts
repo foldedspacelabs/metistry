@@ -6,10 +6,10 @@
 // Phase 3+ when brain-query exists — for now continuity is the SDK
 // transcript, per §4.17 rule 6's fast-path).
 
-import { DEFAULT_CACHING, emptyCompute, finishRun, parseDecisionBlock, rollSession, startRun, v1Options, type Compute, type TierMap } from "@foldedspacelabs/metistry-core";
+import { DEFAULT_CACHING, emptyCompute, finishRun, parseDecisionBlock, PRIVATE_TIER, PrivateTierUnavailable, rollSession, startRun, v1Options, type Compute, type TierMap } from "@foldedspacelabs/metistry-core";
 import { isBudgetRefusal, offerBudgetWindow, BudgetRefusal } from "./budgets.js";
 import { recordShadow } from "./shadow.js";
-import { resolveTurn } from "./tiers.js";
+import { captureSessionInScope, resolveTurnFor, type ResolvedTurn } from "./tiers.js";
 import type { Engine } from "./engine.js";
 import { newTurnId } from "./brain.js";
 import { deferredCalls, skippedMeta, skippedReport } from "./deferred.js";
@@ -91,7 +91,27 @@ export async function drainOne(db: Db, engine: Engine, tiers: TierMap, opts: Dra
   // so there is exactly one place a tier becomes a (model, effort) pair, and an
   // unknown name lands on `default` rather than on an invented model.
   const compute = opts.compute?.() ?? emptyCompute();
-  const { tier, model, effort, assignment } = resolveTurn(compute, tiers, routeMeta.kind === "model" ? routeMeta.tier : msg.meta?.tier);
+  // A capture session in scope moves the turn to the private tier before
+  // anything else is decided (plan §2.15): what a recording heard is answered
+  // on this Mac or not at all. With nowhere private to run it, the turn is
+  // REFUSED — recorded and said — never answered on another tier.
+  const captureSession = captureSessionInScope(msg.meta);
+  let turn: ResolvedTurn;
+  try {
+    turn = resolveTurnFor(compute, tiers, routeMeta.kind === "model" ? routeMeta.tier : msg.meta?.tier, { captureSession });
+  } catch (err) {
+    if (!(err instanceof PrivateTierUnavailable)) throw err;
+    const runId = await startRun(db, {
+      component: "assistant",
+      kind: "turn",
+      meta: { message_id: msg.id, thread: msg.thread, routed_by: routeMeta.routed_by ?? "rule", tier: PRIVATE_TIER, capture_session: true, refused: "private_tier_unavailable" },
+    });
+    await finishRun(db, runId, { ok: false, error: err.message });
+    await db.query(`UPDATE inbound_messages SET status = 'failed' WHERE id = $1`, [msg.id]);
+    await db.query(`INSERT INTO outbound_messages (thread, text, in_reply_to, kind) VALUES ($1, $2, $3, 'alert')`, [msg.thread, `not answered: ${err.message}`, msg.id]);
+    return true;
+  }
+  const { tier, model, effort, assignment } = turn;
 
   // A provider that refused the account (402 out of credits, 401/403 a key
   // it does not accept) is PAUSED while its report waits: the turn is held,
@@ -138,6 +158,8 @@ export async function drainOne(db: Db, engine: Engine, tiers: TierMap, opts: Dra
       routed_by: routeMeta.routed_by ?? "rule",
       tier,
       effort,
+      // the reason the tier is `private`, when it is: recorded, not inferred
+      ...(captureSession ? { capture_session: true } : {}),
       // `caching:` as it stood FOR THIS TURN. `compute.yaml` is hot-reloaded,
       // so the file cannot answer later what was in force earlier — and a
       // turn taken while caching was off must not be read by the

@@ -19,6 +19,7 @@ import {
   parseTiers,
   resolveAssignment,
   resolveTier,
+  turnTier,
   type Compute,
   type Effort,
   type ResolvedAssignment,
@@ -98,4 +99,34 @@ export function resolveTurn(cfg: Compute, tiers: TierMap, name?: string | null, 
   if (fallback) return { tier: typeof name === "string" ? name : DEFAULT_TIER, model: fallback.model, effort: fallback.effort };
   const t = resolveTier(tiers, name);
   return { tier: t.tier, model: t.model, effort: t.effort };
+}
+
+// ---- a capture session in scope: the private tier, with no way round it ------
+
+/**
+ * Is a capture session in scope for this turn? The row says so: a turn that
+ * belongs to a recording — its transcript, a question asked about it — names
+ * the session in `meta.capture_session` (or the router's `meta.route`).
+ *
+ * Fail closed: ANY value there other than null/undefined counts, so a marker
+ * a writer got wrong (an empty string, a number, `false`) still keeps the turn
+ * on this Mac. Getting the marker wrong can only make a turn more private,
+ * never less.
+ */
+export function captureSessionInScope(meta: unknown): boolean {
+  if (typeof meta !== "object" || meta === null) return false;
+  const m = meta as { capture_session?: unknown; route?: { capture_session?: unknown } | null };
+  return m.capture_session != null || (typeof m.route === "object" && m.route !== null && m.route.capture_session != null);
+}
+
+/**
+ * What a turn runs as, with the capture-session rule applied FIRST (plan
+ * §2.15, T8-6's `turnTier`): in scope, the tier is `private` whatever the
+ * router, the composer's picker or a routine chose — and `private` resolves
+ * on an `on_machine` provider or throws `PrivateTierUnavailable`. It never
+ * falls back to `default`, to rules.yaml, or to a shadow (invariant 4: the
+ * rules bound every choice). The drain calls this and nothing else.
+ */
+export function resolveTurnFor(cfg: Compute, tiers: TierMap, chosen: string | null | undefined, scope: { readonly captureSession: boolean }): ResolvedTurn {
+  return resolveTurn(cfg, tiers, turnTier(chosen, scope));
 }

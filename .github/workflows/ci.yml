@@ -29,6 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       macos: ${{ steps.diff.outputs.macos }}
+      sandbox: ${{ steps.diff.outputs.sandbox }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -40,13 +41,18 @@ jobs:
           else
             base="${{ github.event.before }}"
           fi
-          if ! git cat-file -e "$base" 2>/dev/null; then echo "macos=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          if ! git cat-file -e "$base" 2>/dev/null; then echo "macos=true" >> "$GITHUB_OUTPUT"; echo "sandbox=true" >> "$GITHUB_OUTPUT"; exit 0; fi
           changed=$(git diff --name-only "$base" "${{ github.sha }}")
           echo "$changed" | sed 's/^/  /'
           if echo "$changed" | grep -qE '^(apps/macos/|\.github/workflows/ci\.yml|docs/product/design/tokens|ops/scripts/build-design-tokens)'; then
             echo "macos=true" >> "$GITHUB_OUTPUT"
           else
             echo "macos=false" >> "$GITHUB_OUTPUT"
+          fi
+          if echo "$changed" | grep -qE '^(ops/sandbox/|packages/cli/src/sandbox\.ts|\.github/workflows/ci\.yml)'; then
+            echo "sandbox=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "sandbox=false" >> "$GITHUB_OUTPUT"
           fi
 
   checks:
@@ -159,3 +165,21 @@ jobs:
       # fail on a stale one rather than quietly resolving something else.
       - run: swift build --package-path apps/macos --disable-automatic-resolution
       - run: swift test --package-path apps/macos --disable-automatic-resolution
+
+  # The Seatbelt profiles, exercised by a real process on the macOS the
+  # product ships to. 0.14.2's reconciler.sb granted `network-bind` alone,
+  # and on macOS 26 `listen()` also needs `network-inbound` — the reconciler
+  # crash-looped with `listen EPERM` and no Linux run could have seen it.
+  # macos-26, not 15: the behaviour is the OS's, so the runner must be the
+  # OS. Zero dependencies (node:test), so nothing is installed.
+  sandbox-profiles:
+    needs: changes
+    if: needs.changes.outputs.sandbox == 'true'
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - run: sw_vers
+      - run: node --test 'ops/sandbox/*.test.mjs'

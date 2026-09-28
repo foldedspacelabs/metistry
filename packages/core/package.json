@@ -1,6 +1,6 @@
 {
   "name": "@foldedspacelabs/metistry-core",
-  "version": "0.14.3",
+  "version": "0.14.4",
   "description": "Metistry component contracts: manifest schema + runtime, check() interface, uniform error envelope, config-from-env, deterministic redaction, bridge caller auth. Usable standalone.",
   "license": "Apache-2.0",
   "type": "module",

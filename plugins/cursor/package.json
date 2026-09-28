@@ -1,7 +1,7 @@
 {
   "name": "@metistry-apps/plugin-cursor",
   "private": true,
-  "version": "0.14.3",
+  "version": "0.14.4",
   "description": "The `metistry` Cursor plugin (plan refresh §4b W4): a `sessionEnd` hook that POSTs a session summary to a Metistry instance's /capture, with the same frontmatter and idempotency key as the Claude Code plugin. Dependency-free .mjs; this package exists only to test it.",
   "license": "Apache-2.0",
   "type": "module",

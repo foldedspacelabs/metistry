@@ -6,11 +6,11 @@
 // of subcommands and flags does not justify a dependency this project would
 // maintain for years (CLAUDE.md).
 
-import { realpathSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { KEEP_AWAKE_VALUES, instanceFile, loadCompute, parseKeepAwake, parsePullArg, parsePushArg, providerSecretNames, type DeploymentShape, type Effort, type KeepAwake } from "@foldedspacelabs/metistry-core";
 import {
   assign,
@@ -127,6 +127,8 @@ import { up } from "./up.js";
 import { gitHead, update } from "./update.js";
 import { parseContinueFrom, type ContinueFrom } from "./update-reexec.js";
 import { jobFilesFor, retireLegacyEnv } from "./legacy-env.js";
+import { followEnvFile, type FollowEnvResult } from "./env-follow.js";
+import { supervisorConfigPath } from "./supervisor.js";
 import { collectVersionInfo, renderVersionInfo } from "./version.js";
 
 export interface ParsedArgs {
@@ -1242,6 +1244,32 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
     }
     case "secrets": {
       const sub = positional[0];
+      // Every verb below that rewrites `.env` ends here: under the launchd
+      // shape the supervisor's plist and supervisor.json carry `.env` as `up`
+      // last rendered it, so a changed token or key reaches nothing until
+      // they are re-rendered (env-follow.ts). A no-op anywhere else.
+      const followEnv = async (loadedF: LoadedEnv, outF: (l: string) => void): Promise<FollowEnvResult | undefined> => {
+        if (!productDir || !loadedF.paths) return undefined;
+        try {
+          return await followEnvFile({
+            productDir,
+            envFiles: loadedF.paths.read.length > 0 ? loadedF.paths.read : [loadedF.paths.write],
+            envFileFlag: str(flags, "env-file"),
+            instanceDir: loadedF.instanceDir,
+            home: io.home ?? process.env.HOME,
+            platform: io.platform ?? process.platform,
+            env: process.env,
+            exec: io.exec ?? realExec,
+            out: outF,
+            // this very CLI, on this very node: the `up` that renders is the code that just wrote `.env`
+            cli: { node: process.execPath, main: fileURLToPath(import.meta.url) },
+            dryRun: flags["dry-run"] === true,
+          });
+        } catch (e) {
+          outF(`launchd: could not compare the running jobs with .env (${e instanceof Error ? e.message : String(e)}) — run \`metistry up\` so they carry its values`);
+          return undefined;
+        }
+      };
       if ((sub !== undefined && NAMED_SECRET_VERBS.has(sub)) || (sub === "list" && flags.named === true)) {
         // An owner-named secret needs the instance, not a `.env`: its value
         // is in the Keychain under the instance's id, its policy in the
@@ -1289,6 +1317,8 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
                 exampleFile: productDir ? join(productDir, ".env.example") : undefined,
               });
               done(r);
+              // it rewrites `.env`'s references, so the running jobs follow
+              await followEnv(loadedNamed, namedOpts.out);
               // an original the Keychain would not hand over is a failure;
               // a reference waiting on a schema that reads {{ secret.name }} is not
               return r.unreadable.length > 0 ? 1 : 0;
@@ -1345,6 +1375,9 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
           });
           // the file this run deleted is not "still being read": drop the notice collected before it went
           if (r.deleted) for (let i = notices.length - 1; i >= 0; i--) if (notices[i]!.includes(paths.legacy)) notices.splice(i, 1);
+          // lines moved into the instance's `.env`: the jobs follow it (only
+          // the file that is left is read now)
+          if (flags.yes === true) await followEnv({ ...loaded, paths: { ...paths, read: r.deleted ? [paths.write] : paths.read } }, out);
           return r.kept ? 1 : 0;
         } catch (e) {
           err(`metistry secrets retire-legacy-env: ${e instanceof Error ? e.message : String(e)}`);
@@ -1391,8 +1424,13 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
           out(`the connection types could not be read, so no sync's secret is delivered this run (${e instanceof Error ? e.message : String(e)})`);
         }
       }
+      // an installed launchd shape (this instance's supervisor.json): the
+      // verb re-renders the jobs from `.env` itself, below
+      const followRoot = loaded.instanceDir ?? productDir;
+      const restartFollows = (io.platform ?? process.platform) === "darwin" && followRoot !== undefined && existsSync(supervisorConfigPath(followRoot));
       const secretsOpts = {
         envFile,
+        restartFollows,
         envTarget: paths.write,
         exampleFile: productDir ? join(productDir, ".env.example") : undefined,
         instanceId,
@@ -1410,9 +1448,13 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
       };
       try {
         switch (sub) {
-          case "sync":
-            await syncSecrets(syncDirection(str(flags, "from"), str(flags, "to")), secretsOpts);
+          case "sync": {
+            const direction = syncDirection(str(flags, "from"), str(flags, "to"));
+            await syncSecrets(direction, secretsOpts);
+            // `--to keychain` never writes `.env`
+            if (direction === "env") await followEnv(loaded, out);
             return 0;
+          }
           case "mint": {
             const name = positional[1];
             if (!name) {
@@ -1420,6 +1462,7 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
               return 2;
             }
             await mintSecret(name, secretsOpts);
+            await followEnv(loaded, out);
             return 0;
           }
           case "list": {

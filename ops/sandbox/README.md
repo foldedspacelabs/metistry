@@ -18,7 +18,9 @@ test). Parameters are computed in exactly one place so the tests confine a
 probe with the same values the install runs with.
 
 Misuse tests: `packages/cli/test/sandbox.test.ts` (engine),
-`packages/cli/test/reconciler-sandbox.test.ts` (committer). Both launch a
+`packages/cli/test/reconciler-sandbox.test.ts` (committer), and
+`ops/sandbox/bind.test.mjs` — every profile listens where it binds and
+nowhere else, run on a `macos-26` runner (`node --test 'ops/sandbox/*.test.mjs'`). Both launch a
 real process under the real profile; both skip on Linux rather than silently
 passing. Denials are visible with
 `log stream --predicate 'sender == "Sandbox"'`.
@@ -79,7 +81,7 @@ on macOS 26.4; the same shape has worked since 14.
 
 ## Writing a rule
 
-Three things that cost time to learn, recorded so they cost nobody else any:
+The things that cost time to learn, recorded so they cost nobody else any:
 
 1. **Subpaths must be REAL paths.** `/tmp` is a symlink to `/private/tmp`;
    the kernel matches after resolution. `realPathish()` does this.
@@ -90,7 +92,11 @@ Three things that cost time to learn, recorded so they cost nobody else any:
    of `EPERM`.
 3. **The process's working directory must be inside a granted subpath**, or
    git dies with `fatal: Unable to read current working directory`.
-4. **git runs every credential helper through `/bin/sh`** — including the
+4. **A listener needs `network-bind` AND `network-inbound`** on macOS 26:
+   with the bind rule alone `listen()` is `EPERM` (the 0.14.2 reconciler
+   crash-loop). `bind.test.mjs` fails a profile that has one without the
+   other.
+5. **git runs every credential helper through `/bin/sh`** — including the
    built-in `osxkeychain` inside `GIT_PREFIX` — so a profile with no shell
    has no helper. `GIT_ASKPASS` is exec'd *directly*, by absolute path, with
    no shell, and is therefore the way a confined process authenticates:

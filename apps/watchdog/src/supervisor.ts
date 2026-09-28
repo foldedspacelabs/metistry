@@ -25,7 +25,7 @@
 // tests drive it with fakes rather than real processes.
 
 import { spawn as nodeSpawn, type ChildProcess } from "node:child_process";
-import { openSync } from "node:fs";
+import { closeSync, openSync, readSync, statSync } from "node:fs";
 import { connect } from "node:net";
 import {
   CRASH_LOOP_RESTARTS,
@@ -40,6 +40,28 @@ import {
 
 export type Spawner = (spec: ChildSpec, stdio: number | "ignore") => ChildProcess;
 
+/**
+ * THE RESTART RACE (owner's 0.14.2 instance). `metistry up` and `restart`
+ * kickstart this job while the PREVIOUS supervisor's children may still be
+ * exiting — launchd has let go of the old supervisor, but its reconciler is
+ * still holding 7812 for a moment. The new reconciler died on
+ * `listen EADDRINUSE` three times in two seconds, which is a crash loop by
+ * the numbers, and the child sat at the 60 s ceiling for no fault of its own.
+ *
+ * So: for STARTUP_GRACE_MS after this supervisor starts, a child that exits
+ * early having logged a port it could not take (EADDRINUSE, or EPERM on a
+ * listen) is retried every PORT_BUSY_RETRY_MS and does NOT count toward
+ * CRASH_LOOP_RESTARTS. Every other exit, and any exit after the window, is
+ * counted exactly as before — a profile that really forbids the listen
+ * still ends up `crash-looping` and named in doctor, just 30 s later.
+ */
+export const STARTUP_GRACE_MS = 30_000; // limit: fixed — covers a previous generation's graceful stop (children stop in reverse, each with its own grace)
+export const PORT_BUSY_RETRY_MS = 500; // limit: fixed — a poll for a port to free, not a policy
+/** What a child that could not take its port writes: node's EADDRINUSE / EPERM, and Postgres' "could not bind … Address already in use". */
+export const PORT_BUSY_PATTERN = /\bEADDRINUSE\b|\blisten EPERM\b|Address already in use/;
+/** How much of a child's log, from where this spawn started writing, is read to classify its exit. */
+const PORT_BUSY_READ_BYTES = 16 * 1024;
+
 export interface SupervisorDeps {
   spawn?: Spawner;
   now?: () => number;
@@ -48,6 +70,10 @@ export interface SupervisorDeps {
   log?: (line: string) => void;
   /** test seam: the per-child log file descriptor (default: append to spec.log) */
   openLog?: (path: string) => number | "ignore";
+  /** test seam: how many bytes the child's log holds now (default: its size on disk, 0 when absent) */
+  logSize?: (path: string) => number;
+  /** test seam: what the child's log gained since `offset` (default: read it, at most 16 KiB) */
+  readLogSince?: (path: string, offset: number) => string;
 }
 
 interface ChildRuntime {
@@ -62,6 +88,10 @@ interface ChildRuntime {
   lastExit?: ChildStatus["lastExit"] | undefined;
   /** set while a deliberate stop is in flight, so the exit handler does not restart it */
   stopping?: boolean | undefined;
+  /** the child log's size when this process was spawned: what it wrote is after this */
+  logOffset?: number | undefined;
+  /** early exits on a port the previous generation still held — retried, not counted (STARTUP_GRACE_MS) */
+  portRetries: number;
   timer?: ReturnType<typeof setTimeout> | undefined;
 }
 
@@ -71,6 +101,32 @@ function defaultOpenLog(path: string): number | "ignore" {
     return openSync(path, "a");
   } catch {
     return "ignore";
+  }
+}
+
+function defaultLogSize(path: string): number {
+  try {
+    return statSync(path).size;
+  } catch {
+    return 0;
+  }
+}
+
+function defaultReadLogSince(path: string, offset: number): string {
+  try {
+    const size = statSync(path).size;
+    const from = Math.max(offset, size - PORT_BUSY_READ_BYTES);
+    if (size <= from) return "";
+    const fd = openSync(path, "r");
+    try {
+      const buf = Buffer.alloc(size - from);
+      readSync(fd, buf, 0, buf.length, from);
+      return buf.toString("utf8");
+    } finally {
+      closeSync(fd);
+    }
+  } catch {
+    return "";
   }
 }
 
@@ -110,7 +166,11 @@ export class Supervisor {
   private readonly probe: (host: string, port: number, timeoutMs: number) => Promise<boolean>;
   private readonly log: (line: string) => void;
   private readonly openLog: (path: string) => number | "ignore";
+  private readonly logSize: (path: string) => number;
+  private readonly readLogSince: (path: string, offset: number) => string;
   private shuttingDown = false;
+  /** when `start()` began: the restart race can only happen inside STARTUP_GRACE_MS of it */
+  private bootAt: number | undefined;
 
   constructor(
     public readonly config: SupervisorConfig,
@@ -121,9 +181,11 @@ export class Supervisor {
     this.probe = deps.probe ?? tcpProbe;
     this.log = deps.log ?? ((l) => console.log(l));
     this.openLog = deps.openLog ?? defaultOpenLog;
+    this.logSize = deps.logSize ?? defaultLogSize;
+    this.readLogSince = deps.readLogSince ?? defaultReadLogSince;
     this.order = config.children.map((c) => c.name);
     for (const spec of config.children) {
-      this.children.set(spec.name, { spec, state: "pending", restarts: 0, recent: [], backoffMs: RESTART_BACKOFF_MS });
+      this.children.set(spec.name, { spec, state: "pending", restarts: 0, recent: [], backoffMs: RESTART_BACKOFF_MS, portRetries: 0 });
     }
   }
 
@@ -146,6 +208,7 @@ export class Supervisor {
    * whose Postgres is slow must still end up with a console.
    */
   async start(): Promise<void> {
+    this.bootAt = this.now();
     for (const name of this.order) {
       const c = this.children.get(name)!;
       this.startChild(c);
@@ -168,6 +231,7 @@ export class Supervisor {
   private startChild(c: ChildRuntime): void {
     if (c.proc) return;
     c.stopping = false;
+    c.logOffset = this.logSize(c.spec.log);
     const stdio = this.openLog(c.spec.log);
     let proc: ChildProcess;
     try {
@@ -196,6 +260,17 @@ export class Supervisor {
       this.log(`[${c.spec.name}] stopped (code ${code ?? "null"}${signal ? `, signal ${signal}` : ""})`);
       return;
     }
+    // the restart race: a port the previous supervisor's child still holds.
+    // Retried quickly and NOT counted, but only inside the startup window
+    // and only when the child said so in its own log.
+    if (this.portStillHeld(c, this.now(), upFor)) {
+      c.restarts += 1;
+      c.portRetries += 1;
+      c.state = "backoff";
+      this.log(`[${c.spec.name}] its port is still held — the previous generation is still stopping (exit code ${code ?? "null"}); retrying in ${PORT_BUSY_RETRY_MS}ms, not counted toward crash-looping`);
+      this.scheduleRestart(c, PORT_BUSY_RETRY_MS);
+      return;
+    }
     // a child that stayed up is healthy: its backoff and its crash-loop
     // history start again, so a restart six months from now is not "the
     // sixth crash"
@@ -219,10 +294,17 @@ export class Supervisor {
     this.scheduleRestart(c);
   }
 
-  private scheduleRestart(c: ChildRuntime): void {
+  /** Inside the startup window, an early exit whose log names a port it could not take. */
+  private portStillHeld(c: ChildRuntime, at: number, upFor: number): boolean {
+    if (this.bootAt === undefined || at - this.bootAt >= STARTUP_GRACE_MS || upFor >= STARTUP_GRACE_MS) return false;
+    return PORT_BUSY_PATTERN.test(this.readLogSince(c.spec.log, c.logOffset ?? 0));
+  }
+
+  /** `fixedMs`: a port-busy retry, which leaves the exponential backoff where it was. */
+  private scheduleRestart(c: ChildRuntime, fixedMs?: number): void {
     if (this.shuttingDown) return;
-    const wait = c.backoffMs;
-    c.backoffMs = Math.min(c.backoffMs * 2, RESTART_BACKOFF_MAX_MS);
+    const wait = fixedMs ?? c.backoffMs;
+    if (fixedMs === undefined) c.backoffMs = Math.min(c.backoffMs * 2, RESTART_BACKOFF_MAX_MS);
     c.timer = setTimeout(() => {
       c.timer = undefined;
       if (this.shuttingDown || c.stopping) return;

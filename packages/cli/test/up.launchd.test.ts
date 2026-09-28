@@ -6,7 +6,7 @@
 import { statSync } from "node:fs";
 import { cp, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { EGRESS_PROXY_DEFAULT_PORT } from "@foldedspacelabs/metistry-core";
@@ -14,6 +14,8 @@ import { CLT_GIT, realPathish } from "../src/sandbox.js";
 import { engineAbsentNote } from "../src/deployment.js";
 import { parsePlistTemplate } from "../src/launchd.js";
 import { nodeFor, up } from "../src/up.js";
+import { loadNamespace } from "../src/namespace.js";
+import { supervisorConfigPath } from "../src/supervisor.js";
 import { checkout, fakeExec, okDoctor, shown } from "./fixtures.js";
 
 const REPO = resolve(fileURLToPath(import.meta.url), "..", "..", "..", "..");
@@ -105,6 +107,64 @@ describe("metistry up --dry-run, launchd shape", () => {
     expect(plan).toContain(`${CLT_GIT}`);
     expect(plan).toMatch(/egress: one CONNECT proxy on 127\.0\.0\.1:7814 in the supervisor/);
     expect(plan).toContain("openrouter.ai");
+  });
+
+  it("renders THIS install's ports and a password minted this run into what the jobs carry — never the defaults, never a stale .env", async () => {
+    // Found rehearsing 0.14.3: `values.env` is a COPY of the environment,
+    // and the namespace's ports and a freshly minted db password were applied
+    // to the original only. A namespaced install rendered 8080/7812/5432 into
+    // supervisor.json and the reconciler's profile (its bind rule named 7812
+    // while the process was told to listen on its own port), and a fresh
+    // install's supervisor and console started without METISTRY_DB_PASSWORD.
+    const P = await launchdCheckout();
+    const I = await mkdtemp(join(tmpdir(), "mi-"));
+    const home = await mkdtemp(join(tmpdir(), "metistry-home-"));
+    await mkdir(join(P, "apps", "console", "dist"), { recursive: true });
+    // --namespace hashes the instance_id into its block
+    await writeFile(join(I, "identity.yaml"), "name: Scratch\ninstance_id: 3f1c2b9e-0000-4000-8000-000000000001\n");
+    const { METISTRY_DB_PASSWORD: _unset, ...noPassword } = env(I);
+    const lines: string[] = [];
+    const r = await up({
+      productDir: P,
+      env: noPassword,
+      exec: fakeExec(),
+      out: (l) => lines.push(l),
+      platform: "darwin",
+      uid: 501,
+      home,
+      node: NODE,
+      deployment: launchd,
+      exists: pgInstalled(),
+      mintPassword: () => "minted-this-run",
+      namespace: true,
+      portFree: async () => true,
+      doctorFn: okDoctor,
+      cliShim: false,
+    });
+    if (r.code !== 0) console.error(lines.join("\n"));
+    expect(r.code).toBe(0);
+    const ns = (await loadNamespace(I))!;
+    const [consolePort, dbPort, reconcilerPort] = [String(ns.ports.console), String(ns.ports.db), String(ns.ports.reconciler)];
+    expect(consolePort).not.toBe("8080");
+    const config = JSON.parse(await readFile(supervisorConfigPath(I), "utf8"));
+    expect(config.env.METISTRY_CONSOLE_PORT).toBe(consolePort);
+    expect(config.env.METISTRY_DB_PORT).toBe(dbPort);
+    expect(config.env.METISTRY_DB_PASSWORD).toBe("minted-this-run");
+    const console_ = config.children.find((c: { name: string }) => c.name === "console");
+    expect(console_.env.METISTRY_CONSOLE_PORT).toBe(consolePort);
+    expect(console_.env.METISTRY_DB_PASSWORD).toBe("minted-this-run");
+    // the confined reconciler may bind the port it is told to listen on
+    const reconciler = config.children.find((c: { name: string }) => c.name === "reconciler");
+    const argv = reconciler.argv.join(" ");
+    expect(argv).toContain(`RECONCILER_TCP=localhost:${reconcilerPort}`);
+    expect(argv).toContain(`CONSOLE_TCP=localhost:${consolePort}`);
+    expect(argv).toContain(`DB_TCP=localhost:${dbPort}`);
+    expect(argv).not.toContain("localhost:7812");
+    // …and it can RUN the git the profile names: with no bundled runtime that
+    // is the Command Line Tools', and a launchd PATH starts at /usr/bin — the
+    // xcode-select shim the profile refuses (`spawn EPERM` at startup)
+    expect(reconciler.env.PATH.split(":")[0]).toBe(dirname(CLT_GIT));
+    expect(lines.join("\n")).toContain(`execs only node and ${CLT_GIT}`);
   });
 
   it("arranges the confined reconciler's push credential: an askpass shim, and a keychain item for the supervisor to fetch", async () => {

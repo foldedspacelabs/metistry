@@ -190,4 +190,8 @@
 ;; SDK's proxy detection).
 (allow sysctl-read)
 (allow system-socket)
+;; A bind, not a listener: the engine opens no server. There is deliberately
+;; no `network-inbound` rule, and on macOS 26 a `listen()` needs one (see
+;; reconciler.sb's network section), so the engine cannot accept a
+;; connection — ops/sandbox/bind.test.mjs asserts that too.
 (allow network-bind (local ip "localhost:*"))

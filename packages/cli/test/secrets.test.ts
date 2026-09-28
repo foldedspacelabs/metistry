@@ -251,6 +251,18 @@ describe("metistry secrets sync", () => {
     expect(readFileSync(file, "utf8")).toBe("X=1\nMETISTRY_LOCAL_OWNER_TOKEN=keychain-value\n");
   });
 
+  it("under an installed launchd shape the restart is the verb's own (env-follow.ts): no `metistry restart`, which would respawn the child with supervisor.json's stale environment", async () => {
+    const file = await envFile("METISTRY_LOCAL_OWNER_TOKEN=console-was-started-with-this\n");
+    const kc = fakeSecurity({ [key(INSTANCE_ID, "METISTRY_LOCAL_OWNER_TOKEN")]: "the-keychain-differs" });
+    const out: string[] = [];
+    const r = await syncSecrets("env", { envFile: file, instanceId: INSTANCE_ID, exec: kc.exec, out: (l) => out.push(l), platform: "darwin", env: {}, mint: () => "FRESH", restartFollows: true, serviceRunning: async () => true });
+    expect(r.rotated).toEqual(["METISTRY_LOCAL_OWNER_TOKEN"]);
+    expect(r.restart).toEqual([]);
+    const said = out.join("\n");
+    expect(said).toContain("METISTRY_LOCAL_OWNER_TOKEN changed — the console is restarted onto it below, with the rest of the launchd jobs");
+    expect(said).not.toContain("metistry restart");
+  });
+
   it("**a changed token with its service running is never silent: RESTART NEEDED and the exact command**", async () => {
     const file = await envFile("METISTRY_LOCAL_OWNER_TOKEN=console-was-started-with-this\nMETISTRY_BRIDGE_TOKEN_RECONCILER_USER=\n");
     const kc = fakeSecurity({ [key(INSTANCE_ID, "METISTRY_LOCAL_OWNER_TOKEN")]: "the-keychain-differs" });

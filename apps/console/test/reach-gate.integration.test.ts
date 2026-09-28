@@ -10,6 +10,7 @@
 // conformance test (client-api.conformance.integration.test.ts) holds every
 // row's reach generally; this file is the ticket's own misuse tests, with
 // bodies that WOULD succeed, so a refusal here is the gate and not a 400.
+import { createHash } from "node:crypto";
 import { rmSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { networkInterfaces, tmpdir } from "node:os";
@@ -21,6 +22,7 @@ import { QueryStore } from "@foldedspacelabs/metistry-queries";
 import { CLIENT_API, isLocalRoute, mintToken, routeKey, tokenHash } from "@foldedspacelabs/metistry-core";
 import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
 import { connect } from "@foldedspacelabs/metistry-cli";
+import { VaultError, type VaultClient } from "@foldedspacelabs/metistry-artifacts";
 import { makeServer } from "../src/server.js";
 import * as store from "../src/auth-store.js";
 import * as agents from "../src/agents.js";
@@ -29,6 +31,14 @@ const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url));
 const policy = { idleDays: 30, maxDays: 365 };
 const MARK = "itest-reach-gate";
 const suffix = mintToken(6).toLowerCase().replaceAll(/[^a-z0-9]/g, "").slice(0, 6) || "x";
+const sha256 = (s: string): string => createHash("sha256").update(s, "utf8").digest("hex");
+
+/** Restore's fixed probe (T10-5, X-9): one note now, and an earlier version at a fixed commit — just enough for the local owner token to raise a request; the route never writes. */
+const RESTORE_PATH = `Areas/${MARK}-restore.md`;
+const RESTORE_NOW_TEXT = "the reach gate probe, as it stands\n";
+const RESTORE_OLD_TEXT = "the reach gate probe, before\n";
+const RESTORE_SHA = "1a".repeat(20); // a full commit id, never a real one
+const RESTORE_DATE = "2026-09-27T08:00:00-04:00";
 
 /** One of this host's real, non-loopback IPv4 addresses — the peer a request over it genuinely has. */
 const external = Object.values(networkInterfaces())
@@ -67,6 +77,7 @@ describe.skipIf(!hasDb)("the reach gate: `local` routes are the owner on this Ma
       return { id, display_name: "reach gate probe", kind: "external" };
     }
     if (routeKey(r) === "POST /api/vault/rollback") return { to: "2026-09-26" };
+    if (routeKey(r) === "POST /api/knowledge/restore") return { path: RESTORE_PATH, sha: RESTORE_SHA, seen_sha: sha256(RESTORE_NOW_TEXT) };
     return {};
   }
 
@@ -106,6 +117,27 @@ describe.skipIf(!hasDb)("the reach gate: `local` routes are the owner on this Ma
         skipped_config: [],
         message: "Roll back\n",
       }),
+      // Restore's fixed fake (X-9): the note as it stands, and the same note earlier at RESTORE_SHA
+      vault: {
+        read: async (path: string) =>
+          path === RESTORE_PATH ? { path, content: Buffer.from(RESTORE_NOW_TEXT, "utf8"), sha256: sha256(RESTORE_NOW_TEXT), bytes: Buffer.byteLength(RESTORE_NOW_TEXT) } : null,
+        write: async () => {
+          throw new Error("reach gate probe: restore never writes");
+        },
+        flush: async () => ({}),
+      } as unknown as VaultClient,
+      knowledgeHistory: {
+        async log() {
+          return [];
+        },
+        async show(path: string, want: string) {
+          if (path === RESTORE_PATH && RESTORE_SHA.startsWith(want)) {
+            const content = Buffer.from(RESTORE_OLD_TEXT, "utf8");
+            return { sha: RESTORE_SHA, author: "Metistry owner", date: RESTORE_DATE, subject: "reach gate probe", path, content, sha256: sha256(RESTORE_OLD_TEXT), bytes: content.length };
+          }
+          throw new VaultError("not_found", `${path} does not exist at ${want}`);
+        },
+      },
       ...extra,
     };
   }
@@ -129,6 +161,7 @@ describe.skipIf(!hasDb)("the reach gate: `local` routes are the owner on this Ma
   afterAll(async () => {
     await pool.query(`DELETE FROM agents WHERE id = ANY($1) OR id = 'devin'`, [minted]);
     await pool.query(`DELETE FROM proposals WHERE source->>'kind' = 'metistry' AND source->>'external_ref' = $1`, [`rollback:to=2026-09-26@${"a".repeat(40)}`]);
+    await pool.query(`DELETE FROM proposals WHERE source->>'kind' = 'metistry' AND source->>'external_ref' = $1`, [`restore:${RESTORE_PATH}@${RESTORE_SHA}`]);
     await pool.query(`DELETE FROM owner_tokens WHERE label = $1`, [MARK]).catch(() => undefined);
     await pool.query(`DELETE FROM auth_sessions WHERE passkey_id = ANY($1)`, [passkeyIds]).catch(() => undefined);
     await pool.query(`DELETE FROM passkeys WHERE id = ANY($1)`, [passkeyIds]).catch(() => undefined);
@@ -142,8 +175,15 @@ describe.skipIf(!hasDb)("the reach gate: `local` routes are the owner on this Ma
     return { status: r.status, body: (await r.json()) as { error?: { code: string; message: string }; token?: string } };
   }
 
-  it("the table files minting a bearer under `local` — and Purge Now, which cannot be undone (T3-9), and Roll Back (T10-6)", () => {
-    expect(LOCAL.map(routeKey)).toEqual(["POST /api/agents", "POST /api/agents/:id/rotate", "POST /api/sessions/purge", "PUT /api/scheduled/routines/:name/assignment", "POST /api/vault/rollback"]);
+  it("the table files minting a bearer under `local` — Purge Now (T3-9), Restore (X-9, ruling 7) and Roll Back (T10-6)", () => {
+    expect(LOCAL.map(routeKey)).toEqual([
+      "POST /api/agents",
+      "POST /api/agents/:id/rotate",
+      "POST /api/sessions/purge",
+      "POST /api/knowledge/restore",
+      "PUT /api/scheduled/routines/:name/assignment",
+      "POST /api/vault/rollback",
+    ]);
   });
 
   it("**a passkey session from 127.0.0.1 is refused on every local route** — 403 local_only, naming the Mac app, and nothing is minted", async () => {
@@ -206,9 +246,10 @@ describe.skipIf(!hasDb)("the reach gate: `local` routes are the owner on this Ma
       const p = await post(base, pathFor(r.path, agentId), { authorization: `Bearer ${localOwnerToken}` }, bodyFor(r), r.method);
       expect([200, 201, 202], `${routeKey(r)}: ${JSON.stringify(p.body)}`).toContain(p.status);
       // the two mint routes answer a bearer; Purge Now's empty body is its preview (sessions-purge.integration.test.ts);
-      // the assignment door answers the routine as it now stands (scheduled-routes.integration.test.ts); Roll Back raises a request (vault-rollback.integration.test.ts)
+      // the assignment door answers the routine as it now stands (scheduled-routes.integration.test.ts); Restore and
+      // Roll Back each raise a Needs You request (knowledge-restore.integration.test.ts, vault-rollback.integration.test.ts)
       if (routeKey(r) === "PUT /api/scheduled/routines/:name/assignment") expect(overlay.toString("utf8")).toContain(`actor: ${agentId}`);
-      else if (routeKey(r) !== "POST /api/sessions/purge" && routeKey(r) !== "POST /api/vault/rollback") expect(typeof p.body.token, routeKey(r)).toBe("string");
+      else if (routeKey(r) !== "POST /api/sessions/purge" && routeKey(r) !== "POST /api/vault/rollback" && routeKey(r) !== "POST /api/knowledge/restore") expect(typeof p.body.token, routeKey(r)).toBe("string");
       if (routeKey(r) === "POST /api/agents/:id/rotate") {
         expect(await storedHash(agentId)).toBe(tokenHash(p.body.token!));
         expect(await storedHash(agentId)).not.toBe(before);

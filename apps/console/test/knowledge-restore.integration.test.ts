@@ -251,7 +251,10 @@ describe.skipIf(!hasDb)("restore a file (integration)", () => {
 
   const rows = async () =>
     (await pool.query(`SELECT id, kind, source_agent, trust, decision, payload, source FROM proposals WHERE source->>'kind' = 'metistry' AND source->>'external_ref' LIKE 'restore:%' ORDER BY id`)).rows;
-  const restore = (body: unknown, headers: Record<string, string> = { cookie }) =>
+  // Reach `local` (X-9, ruling 7): the door's own default credential is the
+  // local owner token, not the passkey session — `answer` (Approve) stays
+  // reach `owner`, so its default is still the session cookie.
+  const restore = (body: unknown, headers: Record<string, string> = { authorization: `Bearer ${localOwnerToken}` }) =>
     fetch(`${base}/api/knowledge/restore`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
   const answer = (id: number | string, decision: string, headers: Record<string, string> = { cookie }) =>
     fetch(`${base}/api/proposals/${id}`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify({ decision }) });
@@ -415,7 +418,7 @@ describe.skipIf(!hasDb)("restore a file (integration)", () => {
     expect(after[0].decision).toBe("pending");
   });
 
-  it("misuse (U2): the restore door — 401 bare, 403 for an agent bearer and the capture token, the local owner token reaches it", async () => {
+  it("misuse (U2): the restore door — 401 bare, 403 for an agent bearer and the capture token, local_only for a passkey session (reach `local`, X-9, ruling 7), the local owner token reaches it", async () => {
     const bare = await restore(ask(), {});
     expect(bare.status).toBe(401);
     expect(await bare.json()).toEqual({ error: { code: "unauthenticated", message: "authentication required" } });
@@ -423,6 +426,9 @@ describe.skipIf(!hasDb)("restore a file (integration)", () => {
     expect(agent.status).toBe(403);
     expect((await agent.json()).error).toEqual({ code: "forbidden", message: "not granted" });
     expect((await restore(ask(), { authorization: `Bearer ${captureToken}` })).status).toBe(403);
+    const session = await restore(ask(), { cookie });
+    expect(session.status).toBe(403);
+    expect((await session.json()).error?.code).toBe("local_only");
     expect(await rows()).toEqual([]);
     expect(history.calls).toEqual([]);
     const local = await restore(ask(), { authorization: `Bearer ${localOwnerToken}` });

@@ -342,7 +342,7 @@ takes a `since` cursor and answers with the next one.
 | `POST /api/vault-tasks/:task_key/link` | owner | session · local_owner | no | stale | — | T4-25 | add one tracker ref to one task line |
 | `POST /api/today/close` | owner | session · local_owner | no | stale | — | served | Close the Day: write the section, then plan tomorrow |
 | `POST /api/meetings/:event_id/note` | owner | session · local_owner | natural | — | — | served | the meeting note for one event; a second call returns the first |
-| `POST /api/calendar/events/:id/move` | owner | session · local_owner | no | — | — | T2-12 | move an event: preview, then confirm with a single-use token |
+| `POST /api/calendar/events/:id/move` | owner | session · local_owner | no | stale | — | served | move an event: preview (who is in it, the new time), then confirm with a single-use token |
 | `POST /api/calendar/invitations/:id/respond` | owner | session · local_owner | no | — | — | T4-17 | answer an invitation through the connection that can |
 | `POST /api/mail/messages/:id/draft` | owner | session · local_owner | no | — | — | T4-17 | draft a reply through the connection that can; never sends |
 | `GET /api/scheduled` | owner | session · local_owner | natural | — | — | served | every routine and sync with its schedule and last run |
@@ -2538,7 +2538,8 @@ PUT /api/today/order
 
 ```
 POST /api/meetings/:event_id/note                 {}   201 {ok, event_id, path, created: true} · 200 {…, created: false}
-POST /api/calendar/events/:id/move                T2-12 — preview, then confirm with a single-use token
+POST /api/calendar/events/:id/move                {start, end}                 200 {ok, preview: {event_id, title, from, to, attendees}, others, warning, confirm_token, expires_in_sec, moved: false}
+                                                  {start, end, confirm_token}  200 {ok, moved: true, event_id, event, others, refreshing}
 POST /api/calendar/invitations/:id/respond        T4-17 — through the connection's `rsvp` capability
 POST /api/mail/messages/:id/draft                 T4-17 — through the connection's `draft` capability; never sends mail
 ```
@@ -2591,10 +2592,54 @@ an agent reads.
   row (`kind: meeting_note`) carries the id and the outcome, never the title
   or the path.
 
-Moving an event previews its attendees and the new time, and the bridge
-refuses a confirm for an event with others in it unless it carries the
-owner-door token (B10). Where no connection offers the capability, the client
-offers *Open in Calendar* instead.
+**Move a meeting** (`POST /api/calendar/events/:id/move`, T2-12; §2.11, B10,
+D7). The id is the event's `event_id` exactly as `GET /api/today` serves it.
+Two calls, as every destructive tool is:
+
+- **Preview — `{start, end}`** (ISO 8601 instants). Nothing moves. `200`,
+  `moved: false`, with `preview` — the event as the calendar holds it now:
+  `event_id`, `title`, `from: {start, end}`, `to: {start, end}` (UTC, to the
+  second) and `attendees` as Today spells them (`{name, email, person, self}`;
+  an organizer the calendar does not list among them is added) — plus `others`
+  (how many people besides the owner are in it), `warning` — one sentence
+  naming them, or **`null` when the event is the owner's alone**, so a focus
+  block moves without one — and a single-use `confirm_token` valid for
+  `expires_in_sec` (300).
+- **Confirm — `{start, end, confirm_token}`**, the same times. The event moves
+  — this occurrence only, never the series — and the answer is `200` with the
+  event as moved, `moved: true`, and `refreshing: true` when the calendar sync was started so
+  Today shows the new time at once (otherwise the next pass, within five
+  minutes, does).
+- **The rule lives at the bridge** (packages/mcp-eventkit `POST /events/move`):
+  a confirm for an event with anyone else in it — every participant not marked
+  as the owner, a room included, and an organizer who is not the owner — is
+  refused unless it carries the **owner-door token** in `Metistry-Owner-Door`.
+  This door presents it, on a confirm only; the assistant reaches the bridge
+  with the bearer alone and never holds it, so its own confirm of such a move
+  is refused (`403`) whatever it was told. Others are counted again at the
+  confirm, so a guest added since the preview counts too.
+- **The token.** `METISTRY_OWNER_DOOR_TOKEN_EVENTKIT`, in the install's `.env`,
+  read by the eventkit bridge and the console and handed to nothing else (the
+  assistant's environment is an allowlist). Mint it with
+  `metistry secrets mint METISTRY_OWNER_DOOR_TOKEN_EVENTKIT`, then restart
+  eventkit and the console. The bridge refuses to start with it equal to its
+  bearer. Unset, owner-only events still move and an event with others in it
+  answers `503` naming the command.
+- **Refused, nothing moved:** an id no calendar holds (`404`); an event from a
+  source this console cannot move through — anything but the eventkit sync's
+  (`503`; the client offers *Open in Calendar*); a read-only calendar
+  (`400`); a body with any other field, times that are not instants,
+  or an end not after the start (`400`); no calendar bridge, or one not
+  answering (`503`). A spent, expired or mismatched `confirm_token`, or an
+  event whose times, people or organizer changed since the preview, is `409`
+  with `reason: "stale"` and, where the bridge read it, the `event` as it
+  stands — preview again.
+- **Owner only**, like Tick: an agent bearer and the capture owner token get
+  the uniform `403`. Not an action — no proposal can move a meeting. The
+  ledger row (`kind: meeting_move`, tool `preview` or `confirm`) carries the
+  id, the outcome and the count of others — never the title, the people or
+  the times. Never the invite body: neither the bridge nor the table carries
+  one.
 
 ### Scheduled — routines and syncs
 

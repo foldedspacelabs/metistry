@@ -30,9 +30,9 @@
           "word": "report",
           "body": "excerpt",
           "primary": {
-            "label": null,
+            "label": "Acknowledge",
             "sends": {
-              "door": "act"
+              "decision": "acknowledge"
             }
           },
           "revise": null,
@@ -44,6 +44,7 @@
           },
           "grouped": false,
           "decisions": [
+            "acknowledge",
             "skip"
           ]
         },

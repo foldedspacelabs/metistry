@@ -386,6 +386,7 @@ each routine's manifest:
 | Reply Review (`reply-review`) | every day at 23:00 |
 | Weekly Review (`weekly-review`) | Sunday at 18:00 |
 | Session Purge (`session-purge`) | every day at 04:00 — the session archive's retention (`retention_days`, 1–30, default 30; T3-9) |
+| Session Fold (`session-fold`) | every hour — the chat turns not yet folded, quiet for an hour, become ONE assistant turn; its checked answer becomes at most one request per file for `Me/Working Style.md` or `Me/profile.md`, written only on Approve (C79, T3-10); Pause it to stop learning; not one of §2.5's defaults |
 | Update Check (`update-check`) | every day at 06:00 — §2.20's check for a newer release (T2-18); not one of §2.5's defaults |
 | Inbox Sort (`inbox-drain`) | every 5 min — a collector that presents as a routine |
 | Usage Rollup (`claude-usage`) | hourly — likewise |

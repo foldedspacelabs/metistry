@@ -335,9 +335,13 @@ export function makeBridge(deps: BridgeDeps, cfg: BridgeConfig): Server {
         return send(res, 200, { ...result, hits: result.hits.filter((h) => isVaultPath(h.path)) });
       }
 
+      // Narrowed to the owner (ruled 2026-09-27, X-6): `.metistry/`'s own
+      // commits — subject, trailers, the fact one happened at all — are the
+      // owner's alone through this door, same as `show`'s bytes; vault.ts's
+      // `log()` does the refusing and the filtering, keyed off `caller`.
       if (key === "GET /vault/log") {
         const limit = clampInt(q.get("limit"), 20, 1, 200);
-        return reply(res, await vault.log(q.get("path"), limit), 200, (entries) => ({ path: q.get("path") ?? null, entries }));
+        return reply(res, await vault.log(q.get("path"), limit, caller), 200, (entries) => ({ path: q.get("path") ?? null, entries }));
       }
 
       // Branch, ahead and behind, last commit, last push and pull, any

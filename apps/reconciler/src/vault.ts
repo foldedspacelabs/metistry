@@ -197,6 +197,52 @@ export function parseLog(out: string, rel: string | null): LogEntry[] {
   return entries;
 }
 
+/**
+ * Every path one `--name-status -z` record names, old and new sides both —
+ * unlike `parseLog`'s own walk, which assumes the single followed file
+ * `--follow` restricts a commit to. The whole-tree log carries no pathspec,
+ * so one commit's record may hold any number of (status, path) or (status,
+ * old, new) groups; this walks all of them rather than just the first.
+ * Read-only bookkeeping for `commitsTouchingProtected` below — never exposed
+ * on an entry, so it cannot become a second, drifting copy of `parseLog`'s
+ * shape.
+ */
+function nameStatusPaths(tokens: string[]): string[] {
+  const paths: string[] = [];
+  for (let i = 0; i < tokens.length; ) {
+    const letter = tokens[i]?.[0];
+    if (!letter || !CHANGES[letter]) {
+      i++;
+      continue;
+    }
+    const two = letter === "R" || letter === "C";
+    if (tokens[i + 1] !== undefined) paths.push(tokens[i + 1]!);
+    if (two && tokens[i + 2] !== undefined) paths.push(tokens[i + 2]!);
+    i += two ? 3 : 2;
+  }
+  return paths;
+}
+
+/**
+ * The whole-tree log's own narrowing (ruling 1, X-6): every commit sha that
+ * touched a §4.7 protected path, from the SAME raw `--name-status -z` output
+ * `parseLog` reads — a second pass over it, not a second git call. Only
+ * meaningful when `log()` asked for `--name-status` on a whole-tree query,
+ * which it does exactly when it is about to need this (a non-owner caller).
+ */
+function commitsTouchingProtected(raw: string): Set<string> {
+  const shas = new Set<string>();
+  for (const record of raw.split("\x1e")) {
+    if (!record.trim()) continue;
+    const nul = record.indexOf("\0");
+    if (nul < 0) continue; // no file list at all — nothing changed, or --name-status was not asked for
+    const sha = record.slice(0, nul).replace(/\n+$/, "").split("\x1f")[0] ?? "";
+    const tokens = record.slice(nul + 1).replace(/^\n/, "").split("\0").filter(Boolean);
+    if (sha && nameStatusPaths(tokens).some((p) => isProtectedPath(p))) shas.add(sha);
+  }
+  return shas;
+}
+
 function listOf(raw: string): string[] {
   return [...new Set(raw.split(",").map((v) => v.trim()).filter((v) => validActId(v)))];
 }
@@ -354,18 +400,46 @@ export class Vault {
    * With a path, each entry also says what the commit did to the file and
    * what the file was CALLED then (`--follow` crosses a rename, and the old
    * name is the one `show` needs for an older commit).
+   *
+   * **Narrowed to the owner (ruled 2026-09-27, X-6).** `.metistry/`'s own
+   * history is the CLI's, with the owner's hand on it (`show`'s docstring) —
+   * this door agreed with that for BYTES from day one but not for the fact
+   * that a commit happened, so a whole-tree read or a path-scoped one could
+   * still hand any caller a protected commit's subject and trailers. For
+   * every caller but `owner`: a path that is itself `isProtectedPath` is
+   * `forbidden`, exactly as `show` refuses it (a subject about a file you may
+   * not be told exists is the same leak as its bytes); a whole-tree read
+   * drops any commit that touched a protected path at all, rather than
+   * redacting it — a dropped entry says nothing, a redacted one still says
+   * "something happened here". `Artifacts/` is deliberately NOT swept in
+   * (unlike `show`'s blanket "not a vault note"): the console's artifacts
+   * service resolves a version's commit through exactly this door with its
+   * own (non-owner) bearer, and `Artifacts/` was never the confidentiality
+   * boundary `.metistry/` is.
    */
-  async log(path: unknown, limit: number): Promise<Outcome<LogEntry[]>> {
+  async log(path: unknown, limit: number, caller: CallerClass): Promise<Outcome<LogEntry[]>> {
     const args = ["log", `--max-count=${limit}`, `--format=${LOG_FORMAT}`];
     let rel: string | null = null;
+    const owner = caller === "owner";
     if (path !== undefined && path !== "" && path !== null) {
       const c = await this.confined(path);
       if (!c.ok) return c;
       rel = c.value.rel;
+      if (!owner && isProtectedPath(rel)) return fail("forbidden", `${rel} is not a vault note — file history is served for notes only`);
       args.push("--follow", "--name-status", "-z", "--", rel);
+    } else if (!owner) {
+      // Only fetched for the narrowing below — the owner's whole-tree query
+      // stays exactly the git call it always was.
+      args.push("--name-status", "-z");
     }
     if ((await this.git.head()) === null) return { ok: true, value: [] };
-    return { ok: true, value: parseLog(await this.git.run(args), rel) };
+    const raw = await this.git.run(args);
+    let entries = parseLog(raw, rel);
+    if (rel === null && !owner) {
+      const hidden = commitsTouchingProtected(raw);
+      entries = entries.filter((e) => !hidden.has(e.sha));
+    }
+    return { ok: true, value: entries };
   }
 
   /**

@@ -25,19 +25,19 @@
     "@foldedspacelabs/metistry-tasks": "workspace:*",
     "@metistry-apps/collectors": "workspace:*",
     "@metistry-apps/routines": "workspace:*",
-    "chokidar": "^4.0.3",
-    "@simplewebauthn/browser": "^13.3.0",
-    "@simplewebauthn/server": "^13.2.2",
+    "chokidar": "^5.0.0",
+    "@simplewebauthn/browser": "^14.0.0",
+    "@simplewebauthn/server": "^14.0.2",
     "pg": "^8.16.0",
     "web-push": "^3.6.7",
     "yaml": "^2.9.1",
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@types/node": "^22.20.1",
+    "@types/node": "^26.6.2",
     "@types/pg": "^8.16.0",
     "@types/web-push": "^3.6.4",
     "typescript": "^7.0.2",
-    "vitest": "^4.0.18"
+    "vitest": "^5.0.1"
   }
 }

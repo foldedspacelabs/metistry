@@ -18,11 +18,11 @@
       "path": "Journal/2026-09-28.md",
       "task_key": "mt-7f3k2a",
       "anchor": "mt-7f3k2a",
-      "line_no": 3,
+      "line_no": 5,
       "text": "Send Dana the fixture format",
       "checked": true,
-      "done_on": "2026-09-26"
+      "done_on": "2026-09-28"
     },
-    "line": "- [x] Send Dana the fixture format due 2026-09-28 p2 size s done 2026-09-26 ^mt-7f3k2a"
+    "line": "- [x] Send Dana the fixture format due 2026-09-28 p2 size s done 2026-09-28 ^mt-7f3k2a"
   }
 }

@@ -1284,3 +1284,23 @@ dl.fields dd { margin: 0; overflow-wrap: anywhere; }
 }
 #messages .fb button.on { opacity: 1; }
 #messages .fb button:hover { background: none; opacity: .8; }
+
+/* ------ offline (T7-4; screen 18 §4) ------
+   The band sits under the header while Metistry can't be reached: what is
+   wrong in the primary ink, when the view was read and what still works in
+   the secondary. The neutral surface, never `failed`'s red — nothing the owner
+   did failed. It sticks under the header, above Next Up. */
+.offline-band {
+  position: sticky; top: calc(var(--mt-size-touch-target) + env(safe-area-inset-top)); z-index: calc(var(--mt-z-sticky) + 1);
+  margin: 0 0 var(--mt-space-3); padding: var(--mt-space-2) var(--mt-space-3);
+  background: var(--mt-color-sunken); color: var(--mt-color-text-primary);
+  border: 1px solid var(--mt-color-border); border-radius: var(--mt-radius-sm);
+}
+.offline-band p { margin: 0; overflow-wrap: anywhere; }
+.band-title { font-weight: 600; font-size: var(--mt-text-subhead-size); }
+.band-detail { color: var(--mt-color-text-secondary); font-size: var(--mt-text-footnote-size); }
+@media (min-width: 900px) { .offline-band { top: var(--mt-size-touch-target); } }
+/* what is said only while offline — Needs You's *Decisions need the connection* */
+body:not([data-reach="offline"]) .offline-only { display: none; }
+.offline-note { color: var(--mt-color-text-secondary); font-size: var(--mt-text-footnote-size); margin: var(--mt-space-1) 0; }
+.receipt.waiting { color: var(--mt-color-text-secondary); }

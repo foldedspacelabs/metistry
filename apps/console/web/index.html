@@ -87,6 +87,16 @@
   </nav>
 
   <main id="main">
+    <!-- Offline (T7-4; screen 18 §4): a band under the header while Metistry
+         cannot be reached — what is wrong, when the view on screen was read,
+         and what still works. Written by app.js; a disabled control points
+         here for its reason. What the outbox sent when it came back is said
+         once below it. -->
+    <div id="offline-band" class="offline-band" role="status" hidden>
+      <p id="offline-title" class="band-title">Can't reach Metistry</p>
+      <p id="offline-why" class="band-detail"></p>
+    </div>
+    <p id="reach-receipt" class="receipt" role="status" aria-live="polite"></p>
     <!-- The large title collapses into the header as it scrolls away. -->
     <h1 id="title" class="large-title">Metistry</h1>
     <!-- Work's children, a segmented control at the top of the tab. No Rooms
@@ -126,6 +136,8 @@
     <section id="chat" hidden>
       <!-- polite, never assertive (P2): a reply is announced, never scrolled to -->
       <ul id="messages" aria-live="polite"></ul>
+      <!-- Offline a message is refused, never queued (screen 18 §4); the draft stays in the field below. -->
+      <p id="send-refused" class="offline-note" role="status" hidden><span id="send-refused-text"></span> <button type="button" id="send-retry" class="secondary">Try Again</button></p>
       <div id="composer">
         <!-- P9: the transcript never moves under the reader. A reply that lands
              while they are scrolled up raises this pill; only a tap on it (or
@@ -196,11 +208,13 @@
         <button id="triage-select" type="button" class="secondary" aria-pressed="false">Select</button>
         <p id="triage-batch" hidden>
           <span id="triage-selected" class="muted"></span>
-          <button id="triage-later" type="button">Later</button>
-          <button id="triage-skip" type="button">Skip</button>
+          <button id="triage-later" type="button" data-needs-connection>Later</button>
+          <button id="triage-skip" type="button" data-needs-connection>Skip</button>
           <button id="triage-clear" type="button">Clear</button>
         </p>
       </div>
+      <!-- offline, answers are not offered (screen 18 §4) -->
+      <p class="offline-only offline-note">Decisions need the connection.</p>
       <!-- what the last answer did, said once (components-01 §2.5) -->
       <p id="triage-receipt" class="receipt" role="status" aria-live="polite"></p>
       <ul id="proposal-list" aria-label="Requests"></ul>
@@ -242,7 +256,7 @@
       <p id="agent-msg" class="receipt" role="status" aria-live="polite"></p>
       <p id="agent-acts" class="acts">
         <button type="button" class="secondary" data-act="edit">Edit Permissions</button>
-        <button type="button" class="destructive" data-act="revoke">Revoke</button>
+        <button type="button" class="destructive" data-act="revoke" data-needs-connection>Revoke</button>
       </p>
       <form id="agent-grants" hidden>
         <h3>Edit Permissions</h3>
@@ -270,7 +284,7 @@
         </label>
         <div id="agent-actions"></div>
         <p id="agent-grants-msg" class="muted" role="status" aria-live="polite"></p>
-        <span><button type="submit">Save</button> <button type="button" id="agent-grants-cancel" class="secondary">Cancel</button></span>
+        <span><button type="submit" data-needs-connection>Save</button> <button type="button" id="agent-grants-cancel" class="secondary">Cancel</button></span>
       </form>
     </section>
 
@@ -400,8 +414,8 @@
       <div id="card-body"></div>
       <p id="card-msg" class="board-msg" role="status" aria-live="polite" hidden></p>
       <p id="card-bar" class="card-bar">
-        <button type="button" id="card-move" class="secondary" data-act="move">Move to…</button>
-        <button type="button" id="card-release" class="secondary" data-act="release" hidden>Release</button>
+        <button type="button" id="card-move" class="secondary" data-act="move" data-needs-connection>Move to…</button>
+        <button type="button" id="card-release" class="secondary" data-act="release" data-needs-connection hidden>Release</button>
       </p>
     </section>
 

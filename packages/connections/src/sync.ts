@@ -17,7 +17,11 @@
 //
 //   * the connection's URL must be the provider's own origin (the provider
 //     passes it: `https://api.linear.app` for Linear). A file that points
-//     the connection elsewhere is refused before anything is sent;
+//     the connection elsewhere is refused before anything is sent. A
+//     provider with no origin of its own — an ICS feed can live anywhere
+//     (T4-12) — passes none, and the pin is the connection's own URL's
+//     origin: the owner's file says where it goes, and a secret still goes
+//     only to its listed hosts;
 //   * the returned `fetch` refuses a request to any other origin, and a
 //     redirect is never followed — both `other_host`;
 //   * every request goes through core's `guardedFetch` with the connection
@@ -173,8 +177,8 @@ export interface OpenSyncOptions {
   catalog: Pick<ConnectionCatalog, "entries" | "scheduled" | "secrets">;
   /** the sync (collector unit) opening its connection */
   sync: string;
-  /** the provider's own origin (`https://api.linear.app`): the connection's URL must be it, and nothing else is reached */
-  origin: string;
+  /** the provider's own origin (`https://api.linear.app`): the connection's URL must be it, and nothing else is reached. Absent (a provider that lives anywhere, like an ICS feed): the connection's own URL's origin is the only one reached */
+  origin?: string | undefined;
   /** the builtin module that must implement the connection's provider (`linear`) */
   module: string;
   /** where a value comes from — `envSecretSource(process.env)` in the console */
@@ -212,7 +216,7 @@ export function openSyncHttp(opts: OpenSyncOptions): OpenedSync {
   } catch {
     return { ok: false, status: "failed", why: `connection ${c.name}: reach.http.url is not a URL (a {{ variable }} there is not read by ${opts.sync})` };
   }
-  if (url.origin !== opts.origin) {
+  if (opts.origin !== undefined && url.origin !== opts.origin) {
     return { ok: false, status: "failed", why: `connection ${c.name}: ${entry.provider.name} is reached at ${opts.origin} and nowhere else — reach.http.url is ${url.origin}` };
   }
   if (Object.keys(http.query).length > 0) return { ok: false, status: "failed", why: `connection ${c.name}: ${opts.sync} sends no query parameters` };
@@ -279,7 +283,7 @@ export function openSyncHttp(opts: OpenSyncOptions): OpenedSync {
 }
 
 /** How a collector opens its connection: the console builds one per process; a test hands in its own. */
-export type SyncOpener = (req: { sync: string; origin: string; module: string }) => Promise<OpenedSync>;
+export type SyncOpener = (req: { sync: string; origin?: string | undefined; module: string }) => Promise<OpenedSync>;
 
 /**
  * The console's opener: reads the instance's catalog afresh on every open

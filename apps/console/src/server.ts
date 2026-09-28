@@ -18,7 +18,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
-import { API_VERSION, API_VERSION_HEADER, AREA_PREFIX_REFUSAL, knowledgeConflictSource, runCheck, startRun, finishRun, errorEnvelope, intEnv, may, parseAction, noRouteMessage, PROJECT_SLUG_RE, rollSession, statusFor, servedRoute, isLocalRoute, localOnlyMessage, routeKey, resolveActor, SKIP_FEEDBACK, answersText, checkAnswers, describeRequest, parseSubjectFingerprint, requestSubjectOf, subjectUnchanged, validAgentAreaGrant, type QuestionAnswer, type RequestShape, type RequestSubject, type SubjectReading, type CheckResult, type Compute, type ErrorCode, type ErrorEnvelope, type Principal } from "@foldedspacelabs/metistry-core";
+import { API_VERSION, API_VERSION_HEADER, AREA_PREFIX_REFUSAL, knowledgeConflictSource, runCheck, startRun, finishRun, errorEnvelope, intEnv, may, parseAction, noRouteMessage, PROJECT_SLUG_RE, rollSession, statusFor, servedRoute, isLocalRoute, routineGrantsFor, localOnlyMessage, routeKey, resolveActor, SKIP_FEEDBACK, answersText, checkAnswers, describeRequest, parseSubjectFingerprint, requestSubjectOf, subjectUnchanged, validAgentAreaGrant, type QuestionAnswer, type RequestShape, type RequestSubject, type SubjectReading, type CheckResult, type Compute, type ErrorCode, type ErrorEnvelope, type Principal } from "@foldedspacelabs/metistry-core";
 import { QueryError, QueryStore } from "@foldedspacelabs/metistry-queries";
 import { captureToInbox, createBrainServer, dirSink, type CaptureSink, type KnowledgeLister, type KnowledgeReader, type KnowledgeVaultSearcher, type KnowledgeWriter, type QueryEmbedder } from "@foldedspacelabs/metistry-mcp-brain";
 import { TasksError, TasksService } from "@foldedspacelabs/metistry-tasks";
@@ -61,6 +61,7 @@ import { closeDayRoute, isCloseDayRoute, type RoutineTrigger } from "./close-day
 import { isTodayRoute, todayRoutes } from "./today-routes.js";
 import type { ConsoleVaultClient } from "./vault-client.js";
 import { isScheduledRoute, scheduledRoutes, type ScheduledAdmin } from "./scheduled-routes.js";
+import { overlayFromText } from "./runner.js";
 import { isMeetingNoteRoute, meetingNoteRoute, MeetingNotes } from "./meeting-note-route.js";
 import { CALENDAR_SYNC, isMeetingMoveRoute, meetingMoveRoute, type EventkitDoor } from "./meeting-move-route.js";
 import { githubPullRoute, isGithubPullRoute } from "./github-pulls-route.js";
@@ -1817,7 +1818,29 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       crews: cfg.crews,
       assistant: cfg.assistantDefinition ? await cfg.assistantDefinition() : { identity: undefined, files: [] },
       compute: cfg.compute?.(),
+      routineGrants: await routineGrantsNow(),
     });
+  }
+
+  /**
+   * The per-run grants New Routines give each actor (T3-8), from the overlay
+   * the runner reads — `routineGrantsFor` over a VALID file only (an invalid
+   * one is never applied, so it grants nothing). No Scheduled wired: none.
+   */
+  async function routineGrantsNow(): Promise<((id: string) => { routine: string; areas: string[] }[]) | undefined> {
+    const admin = cfg.scheduled;
+    if (!admin) return undefined;
+    let bytes: Buffer | null | undefined;
+    try {
+      bytes = await admin.overlay.read();
+    } catch {
+      return undefined; // the permission table is a rendering: an unreadable overlay draws no routine grants rather than failing the door
+    }
+    if (!bytes) return undefined;
+    const o = overlayFromText(bytes.toString("utf8"));
+    if (!o.ok) return undefined;
+    const names = admin.components.map((c) => c.name);
+    return (id) => routineGrantsFor(o.value, names, id);
   }
 
   async function audit(kind: string, tool: string, ok: boolean, meta: Record<string, unknown>): Promise<void> {

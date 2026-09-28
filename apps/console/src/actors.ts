@@ -132,6 +132,12 @@ export interface ConsoleActorInputs {
   crews?: CrewRegistry | undefined;
   assistant: AssistantDefinitionSource;
   compute?: Compute | undefined;
+  /**
+   * The per-run read grants New Routines give each actor (T3-8, §2.5) —
+   * core's `routineGrantsFor` over `.metistry/scheduled.yaml`. Drawn as
+   * *while this routine runs*, never in the base scope. Absent = none.
+   */
+  routineGrants?: ((id: string) => readonly { readonly routine: string; readonly areas: readonly string[] }[]) | undefined;
 }
 
 /** A registry row as an actor source reads it. `AgentRow` carries more; this is the part the door reads. */
@@ -166,7 +172,7 @@ export async function consoleActorSources(db: Db, input: ConsoleActorInputs): Pr
     compute: input.compute ?? emptyCompute(),
     // F-3 / T4-8: the connections an actor may reach. None exist yet.
     connections: () => [],
-    grantHistory: (id) => ({ approved: (byId.get(id)?.kind === "internal" ? overrides : asks).get(id) ?? [], routines: [] }),
+    grantHistory: (id) => ({ approved: (byId.get(id)?.kind === "internal" ? overrides : asks).get(id) ?? [], routines: input.routineGrants?.(id) ?? [] }),
     // T4-7: a member inherits its projects' grants; resolveActor draws them "via project"
     projectGrants: await listProjectGrants(db),
   };

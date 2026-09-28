@@ -18,8 +18,9 @@
 // Chat (chat-view.swift, T6-2), Today's top — the brief, Next Up,
 // calendar help, Close the Day (today-view.swift, T6-1b) — Knowledge
 // (knowledge-view.swift, T6-4), Work ▸ Board with its card detail and
-// rooms (board-view.swift, T6-7) and Work ▸ Projects (projects-view.swift,
-// T6-8) have landed.
+// rooms (board-view.swift, T6-7), Work ▸ Projects (projects-view.swift,
+// T6-8) and Run detail over Activity and Projects (run-detail-view.swift,
+// T6-10) have landed.
 //
 // ACCESSIBILITY (§2.18). Every control speaks its name, and a glyph-only one its
 // shortcut too; the Needs You row says *Needs You, 10 waiting*; the gauge says
@@ -54,7 +55,7 @@ public struct RootView: View {
             ShellSidebar(shell: shell, chatIsWorking: model.chat.isWorking)
                 .navigationSplitViewColumnWidth(min: 180, ideal: MetistrySize.sidebar, max: 320)
         } detail: {
-            ShellDetail(shell: shell, needsYou: model.needsYou, activity: model.activity, chat: model.chat, today: model.today, instanceDir: model.instances.active, consoleURL: PasskeyRouting.consoleURL(in: model.status.report).flatMap(URL.init(string:)), knowledge: model.knowledge, onChooseFolder: chooseFolder, scheduled: model.scheduled, agents: model.agents, onOpenConnections: showConnections, board: model.board, projects: model.projects, onRaiseBudget: showSpendingLimits)
+            ShellDetail(shell: shell, needsYou: model.needsYou, activity: model.activity, chat: model.chat, today: model.today, instanceDir: model.instances.active, consoleURL: PasskeyRouting.consoleURL(in: model.status.report).flatMap(URL.init(string:)), knowledge: model.knowledge, onChooseFolder: chooseFolder, scheduled: model.scheduled, agents: model.agents, onOpenConnections: showConnections, board: model.board, projects: model.projects, onRaiseBudget: showSpendingLimits, runDetail: model.runDetail)
                 // The detail landmark, named for where the owner is.
                 .accessibilityElement(children: .contain)
                 .accessibilityLabel(shell.selection.title)
@@ -274,10 +275,20 @@ struct ShellDetail: View {
     var projects: ProjectsModel? = nil
     /// Raise Budget on a project over its budget: Settings › Compute (C138).
     var onRaiseBudget: (() -> Void)? = nil
+    /// Run detail, drawn over the screen a run was opened from (T6-10).
+    var runDetail: RunDetailModel? = nil
 
     var body: some View {
         let destination = shell.selection
-        if destination == .today {
+        if let runDetail, runDetail.isShowing(over: destination) {
+            // One page for any run (screen 12), over the screen it was opened
+            // from: that screen stays selected, and its name is the way back.
+            RunDetailView(
+                model: runDetail,
+                assistantName: shell.assistantName,
+                onOpenPath: instanceDir.map { dir in { path in if let url = ObsidianLink.url(for: path, in: dir) { openURL(url) } } }
+            )
+        } else if destination == .today {
             // A vault path — the meeting's note — opens where the owner reads
             // the vault. Record waits for the capture bar (#253), so it is
             // dimmed with its reason. The close's request is in Needs You.
@@ -288,10 +299,11 @@ struct ShellDetail: View {
                 onGoToNeedsYou: { Task { await shell.refreshCount(); shell.goToNeedsYou() } }
             )
         } else if destination == .activity {
-            // A row's destination is a screen the Mac does not draw yet — the
-            // capture, the request, the task, the message — so it opens in the
-            // web app, which has them. A run's detail is drawn nowhere (§6.2).
-            ActivityView(model: activity, assistantName: shell.assistantName, onOpen: consoleURL.map { url in { _ in openURL(url) } })
+            // A run opens its detail over Activity (T6-10). Any other row's
+            // destination is a screen the Mac does not draw yet — the capture,
+            // the request, the task, the message — so it opens in the web app,
+            // which has them.
+            ActivityView(model: activity, assistantName: shell.assistantName, onOpen: activityOpen)
         } else if destination == .needsYou {
             // C110: answering the last request leaves the owner here, on
             // *Nothing needs you*, with the row still in the sidebar until they
@@ -356,14 +368,13 @@ struct ShellDetail: View {
             BoardView(model: board, assistantName: shell.assistantName, onCapture: { shell.perform(.newCapture) })
         } else if destination == .projects, let projects {
             // A project's folder opens where the owner reads the vault; a
-            // run's detail is drawn nowhere on the Mac yet, so it opens in
-            // the web app, as Activity's rows do.
+            // run opens its detail over Projects (T6-10).
             ProjectsView(
                 model: projects,
                 assistantName: shell.assistantName,
                 onOpenInObsidian: instanceDir.map { dir in { path in if let url = ObsidianLink.url(for: path, in: dir) { openURL(url) } } },
                 onRaiseBudget: onRaiseBudget,
-                onOpenRun: consoleURL.map { url in { _ in openURL(url) } },
+                onOpenRun: runDetail.map { runs in { id in runs.open(id, over: .projects) } } ?? consoleURL.map { url in { _ in openURL(url) } },
                 onGoToBoard: { shell.navigate(to: .board) }
             )
         } else {
@@ -375,6 +386,18 @@ struct ShellDetail: View {
                 if let consoleURL {
                     Link("Open in Browser", destination: consoleURL)
                 }
+            }
+        }
+    }
+
+    /// Where an Activity row goes: a run to its detail, the rest to the web app.
+    private var activityOpen: ((ActivityDestination) -> Void)? {
+        guard runDetail != nil || consoleURL != nil else { return nil }
+        return { destination in
+            if case .run(let id) = destination, let runDetail {
+                runDetail.open(id, over: .activity)
+            } else if let consoleURL {
+                openURL(consoleURL)
             }
         }
     }

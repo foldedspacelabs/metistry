@@ -335,7 +335,7 @@ public enum ActivityDestination: Sendable, Hashable {
     case request(Int)
     case work(Int)
     case message(Int)
-    /// Run detail, which is not drawn yet (§6 fault 2, §7): not openable.
+    /// Run detail (screen 12, T6-10).
     case run(Int)
 
     public init?(ref: String?) {
@@ -350,11 +350,9 @@ public enum ActivityDestination: Sendable, Hashable {
         }
     }
 
-    /// Whether there is anything to open. A run's detail has no screen yet.
-    public var isOpenable: Bool {
-        if case .run = self { return false }
-        return true
-    }
+    /// Whether there is anything to open — every ref names a screen now that
+    /// Run detail is drawn (T6-10).
+    public var isOpenable: Bool { true }
 }
 
 // MARK: - What a run says about itself

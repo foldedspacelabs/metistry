@@ -74,7 +74,7 @@ describe("every row", () => {
   });
 
   it("serves exactly N rows — a ticket flipping a row to served/unserved must update this number", () => {
-    expect(CLIENT_API.filter((r) => r.served).length).toBe(115); // T2-13: the three pull request doors; T2-12: POST /api/calendar/events/:id/move; T2-10: POST /api/knowledge/conflicts/resolve; T4-8a: GET /api/connections, GET /api/connections/:name; T4-18: GET /api/compute/catalogue, POST /api/compute/unassign; T4-1: GET /api/secrets; T2-5: the Defer door; T4-6: GET /api/agents/:id/definition; T4-4: GET /api/variables; T3-9: POST /api/sessions/purge; T2-18: GET /api/events; T1-7: GET /api/needs-you/count; T1-6: the fold, the drafts, the areas; T10-2: GET /api/vault/status; T1-12: POST|DELETE /api/prose/:id/feedback; T2-17: GET /api/turns/:turn_id/progress, GET /api/sessions/:id; T10-4: GET /api/knowledge/history, GET /api/knowledge/version; T10-6: POST /api/vault/rollback; T2-11: POST /api/meetings/:event_id/note; T2-7: GET /api/today, GET /api/vault-tasks, PUT /api/today/order
+    expect(CLIENT_API.filter((r) => r.served).length).toBe(116); // T2-13: the three pull request doors; T2-12: POST /api/calendar/events/:id/move; T2-10: POST /api/knowledge/conflicts/resolve; T4-8a: GET /api/connections, GET /api/connections/:name; T4-18: GET /api/compute/catalogue, POST /api/compute/unassign; T4-1: GET /api/secrets; T2-5: the Defer door; T4-6: GET /api/agents/:id/definition; T4-4: GET /api/variables; T3-9: POST /api/sessions/purge; T2-18: GET /api/events; T1-7: GET /api/needs-you/count; T1-6: the fold, the drafts, the areas; T10-2: GET /api/vault/status; T1-12: POST|DELETE /api/prose/:id/feedback; T2-17: GET /api/turns/:turn_id/progress, GET /api/sessions/:id; T10-4: GET /api/knowledge/history, GET /api/knowledge/version; T10-6: POST /api/vault/rollback; T2-11: POST /api/meetings/:event_id/note; T2-7: GET /api/today, GET /api/vault-tasks, PUT /api/today/order; T3-8: POST /api/scheduled/routines
   });
 
   it("takes a cursor only on a read, and an Idempotency-Key only on a write", () => {
@@ -101,7 +101,7 @@ describe("reach and principals", () => {
     }
   });
 
-  it("minting a bearer is `local` — registering an agent and rotating its token (F-13) — and so is Purge Now, which cannot be undone (T3-9), restoring a file (X-9, ruling 7), what a routine runs (T3-3), and a rollback of the vault's history (T10-6)", () => {
+  it("minting a bearer is `local` — registering an agent and rotating its token (F-13) — and so is Purge Now, which cannot be undone (T3-9), restoring a file (X-9, ruling 7), what a routine runs and a New Routine (T3-3, T3-8), and a rollback of the vault's history (T10-6)", () => {
     const local = CLIENT_API.filter((r) => r.served && isLocalRoute(r)).map(key);
     expect(local).toEqual([
       "POST /api/agents",
@@ -109,6 +109,7 @@ describe("reach and principals", () => {
       "POST /api/sessions/purge",
       "POST /api/knowledge/restore",
       "PUT /api/scheduled/routines/:name/assignment",
+      "POST /api/scheduled/routines",
       "POST /api/vault/rollback",
     ]);
     // a routine's timing stays reachable from any owner client; what it runs does not

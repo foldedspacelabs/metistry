@@ -551,6 +551,8 @@ ids.task = Number((await one(`INSERT INTO work (title, project, kind, status, cr
 ids.dispatchTask = Number((await one(`INSERT INTO work (title, project, kind, status, created_by) VALUES ('Open the release checklist', $1, 'task', 'open', 'user') RETURNING id`, [P])).id);
 // a card its creator described (T1-1, C85) — the board's `description`, set at create
 ids.roomTask = Number((await one(`INSERT INTO work (title, project, kind, status, created_by, description) VALUES ('Decide the fixture format', $1, 'task', 'in_progress', 'user', 'One JSON per route, recorded from a scratch console; the views are built against them.') RETURNING id`, [P])).id);
+// a Linear issue, as the sync leaves it (T4-24) — `kind` `issue`, never `task`, so `day_work` never serves it; Add to Today (X-12) is the only door that reads it
+ids.linearIssue = Number((await one(`INSERT INTO work (title, kind, status, created_by, external_ref, meta) VALUES ('ENG-42 · Fix the fixture path', 'issue', 'open', 'user', 'linear:ENG-42', '{}'::jsonb) RETURNING id`)).id);
 
 const outboundMessage = async (text, inReplyTo = null) => Number((await one(`INSERT INTO outbound_messages (thread, text, kind, in_reply_to) VALUES ('default', $1, 'reply', $2) RETURNING id`, [text, inReplyTo])).id);
 ids.inbound = Number((await one(`INSERT INTO inbound_messages (thread, text, status) VALUES ('default', 'what is on today?', 'done') RETURNING id`)).id);
@@ -851,6 +853,8 @@ const REQUESTS = [
 
   // Today (T2-7): the owner's drag order — the day's task and the Blocked card waiting on it — then the day, and All's filter
   ["PUT /api/today/order", () => ({ path: "/api/today/order", body: { date: RECORDING_DAY, task_keys: ["mt-7f3k2a", `work:${ids.blockedTask}`] } })],
+  // Add to Today (X-12, ruling 11): the mirrored issue's own key; no `date` — the owner's current day, exactly as the door's own default reads it
+  ["POST /api/today/add", () => ({ path: "/api/today/add", body: { key: "ENG-42" } })],
   ["GET /api/today", () => ({ path: `/api/today?date=${RECORDING_DAY}` })],
   ["GET /api/vault-tasks", () => ({ path: `/api/vault-tasks?where=${encodeURIComponent(`due <= ${RECORDING_DAY}`)}` })],
 

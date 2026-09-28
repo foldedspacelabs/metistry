@@ -52,6 +52,7 @@
 // leaves Monday's for Monday night.
 
 import {
+  ACKNOWLEDGED,
   DEFAULT_TEMPLATE_MAX_BYTES,
   FOLD_SOURCE,
   calendarDate,
@@ -116,7 +117,7 @@ export interface Handle {
 }
 
 const GROUP_HEADINGS: Record<Group, string> = {
-  proposals: "accepted proposals (queries_run for the payload):",
+  proposals: "accepted proposals and acknowledged reports (queries_run for the payload):",
   work: "work closed:",
   artifacts: "artifacts published (artifacts_get):",
   sessions: "sessions captured (inbox):",
@@ -304,17 +305,22 @@ async function anchor(db: Db): Promise<Date | null> {
 async function newHandles(db: Db, since: Date): Promise<Handle[]> {
   const out: Handle[] = [];
 
-  // Decisions the user made: proposals allowed (or allowed with changes).
+  // Decisions the user made: proposals allowed (or allowed with changes),
+  // and reports ACKNOWLEDGED (X-10, ruling 8 of 2026-09-27) — a report
+  // cannot be approved (T2-3), so Acknowledge is the owner's *keep this*, and
+  // this is the one reader of it. A Dismissed report (`deny` + the skip
+  // marker) is not folded, nor one still waiting. A report approved before
+  // T2-3 still folds by its `allow`.
   // `source_agent <> knowledge-fold` is the never-read-your-own-output rule
   // in SQL as well as by construction.
   const proposals = await db.query(
     `SELECT id, kind, source_agent, payload FROM proposals
-     WHERE decision IN ('allow', 'accept_with_changes')
+     WHERE (decision IN ('allow', 'accept_with_changes') OR (kind = 'report' AND decision = $4))
        AND kind IN ('knowledge', 'report', 'session', 'review')
        AND source_agent <> $2
        AND coalesce(decided_at, ts) > $1::timestamptz
      ORDER BY coalesce(decided_at, ts) LIMIT $3`,
-    [since, COMPONENT, PER_GROUP_LIMIT],
+    [since, COMPONENT, PER_GROUP_LIMIT, ACKNOWLEDGED],
   );
   for (const r of proposals.rows) {
     const p = r.payload ?? {};

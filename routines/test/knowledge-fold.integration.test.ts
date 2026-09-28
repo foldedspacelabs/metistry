@@ -1,5 +1,6 @@
 // knowledge-fold against the real (scratch) database: only Postgres can prove
-// the four windowed reads (proposals decided, work closed, artifact_versions
+// the four windowed reads (proposals decided — reports acknowledged among
+// them, X-10 — work closed, artifact_versions
 // published, inbox sessions), the anchor row it writes for itself, and that a
 // second pass with nothing new stays silent. The fake-db suite proves the
 // gates and the rendering. Every fixture carries an `itest-fold` marker and is
@@ -55,6 +56,22 @@ describe.skipIf(!hasDb)("knowledge-fold (real db)", () => {
        VALUES ('knowledge', $1, 'internal', $2, 'allow', now() - interval '30 minutes', now() - interval '40 minutes') RETURNING id`,
       [AGENT, JSON.stringify({ title: `${MARK} accepted a fact` })],
     );
+    // an acknowledged report (X-10): a report cannot be approved (T2-3), so
+    // Acknowledge is how the owner keeps one, and the fold reads it
+    const acknowledged = await pool.query(
+      `INSERT INTO proposals (kind, source_agent, trust, payload, decision, decided_at, ts)
+       VALUES ('report', $1, 'external', $2, 'acknowledged', now() - interval '25 minutes', now() - interval '45 minutes') RETURNING id`,
+      [AGENT, JSON.stringify({ title: `${MARK} an acknowledged finding`, body: "the drafts fold drops them", kind: "finding" })],
+    );
+    // …and reports that must not be: Dismissed (deny + the skip marker), still waiting,
+    // and `acknowledged` on a kind that is not a report (only a report's acknowledgement is one)
+    await pool.query(
+      `INSERT INTO proposals (kind, source_agent, trust, payload, decision, feedback, decided_at, ts) VALUES
+         ('report',    $1, 'external', $2, 'deny',         'skipped', now() - interval '25 minutes', now() - interval '45 minutes'),
+         ('report',    $1, 'external', $3, 'pending',      NULL,      NULL,                          now() - interval '45 minutes'),
+         ('knowledge', $1, 'internal', $4, 'acknowledged', NULL,      now() - interval '25 minutes', now() - interval '45 minutes')`,
+      [AGENT, JSON.stringify({ title: `${MARK} a dismissed report` }), JSON.stringify({ title: `${MARK} an unread report` }), JSON.stringify({ title: `${MARK} not a report` })],
+    );
     // …plus three that must NOT be folded: still pending, denied, and the fold's own output
     await pool.query(
       `INSERT INTO proposals (kind, source_agent, trust, payload, decision, ts) VALUES
@@ -95,6 +112,10 @@ describe.skipIf(!hasDb)("knowledge-fold (real db)", () => {
     expect(rows[0].status).toBe("new"); // the drain picks it up like any other message
     expect(rows[0].meta).toMatchObject({ kind: "fold", source: COMPONENT });
     expect(text).toContain(`proposal #${accepted.rows[0].id} — ${MARK} accepted a fact`);
+    expect(text).toContain(`proposal #${acknowledged.rows[0].id} — ${MARK} an acknowledged finding · report from ${AGENT}`);
+    expect(text).not.toContain("a dismissed report");
+    expect(text).not.toContain("an unread report");
+    expect(text).not.toContain("not a report");
     expect(text).toContain(`work #${work.rows[0].id} — ${MARK} shipped the bridge`);
     expect(text).toContain(`${ART} ${VER} — ${MARK} published v2`);
     expect(text).toContain(`inbox #${inbox.rows[0].id} — ${MARK} 3h in metistry`);
@@ -109,7 +130,7 @@ describe.skipIf(!hasDb)("knowledge-fold (real db)", () => {
       [COMPONENT],
     );
     expect(anchor.rows[0].meta).toMatchObject({ folded: true, thread: "fold", inbound_id: Number(rows[0].id) });
-    expect(Number(anchor.rows[0].meta.items)).toBeGreaterThanOrEqual(4);
+    expect(Number(anchor.rows[0].meta.items)).toBeGreaterThanOrEqual(5);
 
     // second pass: the anchor has moved past everything above
     const second = await knowledgeFold(pool, { now: eveningAfter() });

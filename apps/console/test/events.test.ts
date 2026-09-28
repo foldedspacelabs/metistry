@@ -407,4 +407,50 @@ describe("startEventFeed — one LISTEN, batched, and honest about gaps", () => 
     expect("replay" in r && r.replay.map((e) => e.type)).toEqual(["resync"]);
     await feed.stop();
   });
+
+  it("ruling 17 (X-17): a snooze ending writes no row, so the poll — not a notice — is the one thing that ever says so", async () => {
+    const hub = new EventHub({ firstId: 0 });
+    const heard: unknown[] = [];
+    hub.subscribe((e) => {
+      if (e.type === "needs_you.changed") heard.push(e.data);
+    });
+    const c = new FakeListen();
+    // one proposal still snoozed, one already due — the count the door's own WAITING_SQL would answer, moved by hand as if a snoozed_until crossed now()
+    let waiting = 1;
+    const db = { query: async (sql: string) => (sql.includes("FROM proposals WHERE decision") ? { rows: [{ waiting }] } : { rows: [] }) };
+    const feed = startEventFeed({ hub, db, connect: async () => c, coalesceMs: 5, snoozePollMs: 15, log: () => undefined });
+    await feed.ready;
+
+    await new Promise((r) => setTimeout(r, 40)); // several polls at the unchanged count: nothing to say yet
+    expect(heard).toEqual([]);
+
+    waiting = 2; // its snooze just ended — no INSERT or UPDATE happened, so no notice ever arrives for this
+    await until(() => heard.length === 1);
+    expect(heard).toEqual([{ waiting: 2 }]);
+
+    await new Promise((r) => setTimeout(r, 40)); // steady afterwards: the poll does not repeat itself
+    expect(heard).toEqual([{ waiting: 2 }]);
+
+    await feed.stop();
+  });
+
+  it("a batch that already said the count moves the poll's baseline too — no duplicate right behind it", async () => {
+    const hub = new EventHub({ firstId: 0 });
+    const heard: unknown[] = [];
+    hub.subscribe((e) => {
+      if (e.type === "needs_you.changed") heard.push(e.data);
+    });
+    const c = new FakeListen();
+    const waiting = 4;
+    const db = { query: async (sql: string) => (sql.includes("FROM proposals WHERE decision") ? { rows: [{ waiting }] } : { rows: [] }) };
+    const feed = startEventFeed({ hub, db, connect: async () => c, coalesceMs: 5, snoozePollMs: 15, log: () => undefined });
+    await feed.ready;
+    c.notify({ table: "proposals", op: "update", id: 1 }); // a `later` snooze, or a decision — a real write
+    await until(() => heard.length === 1);
+    expect(heard).toEqual([{ waiting: 4 }]);
+
+    await new Promise((r) => setTimeout(r, 60)); // the count never moved again; the poll has nothing new to say
+    expect(heard).toEqual([{ waiting: 4 }]);
+    await feed.stop();
+  });
 });

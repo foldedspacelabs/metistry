@@ -3063,6 +3063,16 @@ contract those writers meet. Whatever a rule would emit passes one guard
 before it is numbered (`payloadRefusal`): exactly the type's fields, each an
 id, a name, a state token or a count. Anything else is logged and never sent.
 
+**A snooze ending is the one change the trigger cannot see** (ruling 17,
+X-17): `later` writes `snoozed_until` into the future, so that write already
+notifies like any other; but the moment it *ends* is only `snoozed_until <=
+now()` becoming true, and nothing writes a row for the clock moving. The
+console re-asks the same pending, un-snoozed count on its own — every
+`SNOOZE_POLL_MS` (default 30 s, `apps/console/src/events.ts`) — and says
+`needs_you.changed` only when that count has actually moved since the last
+time either it or a trigger-driven batch said so. Until this, a snooze coming
+due reached the Mac only on its own five-minute poll.
+
 The catalogue is `packages/core/src/events.ts` (`EVENT_CATALOGUE`, the payload
 types in `EventPayloads`), one row per type. Numeric ids are JSON numbers; a
 count "is not a body".

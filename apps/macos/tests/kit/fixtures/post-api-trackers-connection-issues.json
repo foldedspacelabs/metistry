@@ -1,14 +1,12 @@
 {
   "route": "POST /api/trackers/:connection/issues",
-  "source": "contract",
-  "ticket": "T4-25",
-  "note": "idempotent by task key: a second call answers the first issue with created: false",
+  "source": "recorded",
+  "ticket": null,
   "request": {
     "method": "POST",
     "path": "/api/trackers/linear/issues",
     "body": {
-      "task_key": "mt-7f3k2a",
-      "title": "Send Dana the fixture format"
+      "task_key": "mt-8s2l4k"
     },
     "idempotency_key": null
   },
@@ -18,7 +16,10 @@
     "connection": "linear",
     "key": "MET-42",
     "ref": "linear:MET-42",
-    "url": "https://linear.app/example/issue/MET-42",
-    "created": true
+    "url": "https://linear.app/example/issue/MET-42/file-the-export-bug",
+    "created": true,
+    "title": "File the export bug",
+    "task_key": "mt-8s2l4k",
+    "path": "Projects/Metistry/Exports.md"
   }
 }

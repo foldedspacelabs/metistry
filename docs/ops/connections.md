@@ -291,8 +291,8 @@ opens is `openSyncHttp` (`packages/connections`, `sync.ts`):
 The first `tracker` provider (plan §2.6, §4 Q22): GraphQL at
 `https://api.linear.app/graphql`, a **personal API key** sent as
 `Authorization: <API_KEY>` — no `Bearer`, which Linear's OAuth tokens take.
-Capability `read` in this release; *Send to Linear* (`create`, T4-25) and
-*Close in Linear* (`complete`, T4-26) add theirs when they land.
+Capabilities `read` (the sync) and `create` (*Send to Linear*, T4-25);
+*Close in Linear* (`complete`, T4-26) adds its own when it lands.
 
 ```sh
 metistry secrets set linear_api_key                    # the value on stdin
@@ -309,9 +309,9 @@ issues assigned to the key's own user into `work` — `external_ref
 linear:<KEY>`, kind `issue`, with `meta` naming the connection, state,
 priority and url — as `github-state` does for GitHub. An issue that leaves the
 list is looked up once by id and its row closed with `meta.closed_reason`
-(`completed`, `canceled`, `unassigned` or `gone`). The client sends read
-queries only: a document that is not a `query` operation is refused before it
-leaves (`not_a_query`).
+(`completed`, `canceled`, `unassigned` or `gone`). The sync's client sends
+read queries only: a document that is not a `query` operation is refused
+before it leaves (`not_a_query`).
 
 **Needs You.** With `syncs.linear.raise.assigned` on (the default), each
 assigned issue raises one `task` request — a mirror (T1-8): source `linear`,
@@ -328,6 +328,22 @@ second press returns the first capture and writes nothing. The title is the
 one the sync recorded, never text the caller sends; nothing writes the owner's
 own notes. *The console door that calls it is not built yet* — the frozen
 route table (plan §2.1) has no route for the `today` door.
+
+**Send to Linear** — from a task line, two doors, one service each
+(docs/ops/client-api.md): `POST /api/trackers/<connection>/issues
+{task_key, title?, team?}` files the issue, and `POST
+/api/vault-tasks/<task_key>/link {ref, seen_text}` writes `linear:<KEY>` on the
+line. The first goes through the connection the sync reads, only while its
+provider declares `create`, with the same door as the sync: the key filled for
+`api.linear.app` only, no redirect followed. It sends one fixed mutation
+(`issueCreate` with an id, a team and a title — `createLinearIssue`,
+`packages/connections/src/linear-issue.ts`) and nothing else of the note. It is
+**idempotent by task key** with no state of its own: the issue's id is derived
+from the connection, the note and the task key, and looked up before anything
+is created, so a second press answers the first issue and two presses racing
+meet at Linear, which refuses the second id. The team is the one named, or the
+owner's only team; with several, the answer lists them. The issue is filed
+unassigned and without a due date or priority — the title alone.
 
 ## ICS feeds
 

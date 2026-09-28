@@ -195,11 +195,11 @@ The table's **Idempotent** column is one of:
 | `natural` | the route is idempotent by its own identity — a read, a replace, an upsert, a set — and needs no key |
 | `no` | a replay is a second act, or a `409`: never replay one blindly, and never queue one offline |
 
-`POST /capture`, the Tick door (`POST /api/vault-tasks/:task_key/check`) and
-the Defer door (`…/schedule`) honour the header. The PWA's offline outbox
-replays only the first two (§2.17, screen 18 §4); Defer is not offered
-offline. The two vault-task doors hold their keys in the console's memory —
-see *Tick* below for why that is enough.
+`POST /capture`, the Tick door (`POST /api/vault-tasks/:task_key/check`),
+the Defer door (`…/schedule`) and the Link door (`…/link`) honour the header.
+The PWA's offline outbox replays only the first two (§2.17, screen 18 §4);
+Defer and Link are not offered offline. The vault-task doors hold their keys
+in the console's memory — see *Tick* below for why that is enough.
 
 ### `since` cursors on the polled lists — a reconnect is one bounded pull
 
@@ -340,7 +340,7 @@ takes a `since` cursor and answers with the next one.
 | `PUT /api/today/order` | owner | session · local_owner | natural | — | — | served | the owner's order for the day |
 | `POST /api/vault-tasks/:task_key/check` | owner | session · local_owner | key | stale | — | served | tick or untick one task line |
 | `POST /api/vault-tasks/:task_key/schedule` | owner | session · local_owner | key | stale | — | served | defer one task line: a `do` date or someday |
-| `POST /api/vault-tasks/:task_key/link` | owner | session · local_owner | no | stale | — | T4-25 | add one tracker ref to one task line |
+| `POST /api/vault-tasks/:task_key/link` | owner | session · local_owner | key | stale | — | served | add one tracker ref to one task line |
 | `POST /api/today/close` | owner | session · local_owner | no | stale | — | served | Close the Day: write the section, then plan tomorrow |
 | `POST /api/meetings/:event_id/note` | owner | session · local_owner | natural | — | — | served | the meeting note for one event; a second call returns the first |
 | `POST /api/calendar/events/:id/move` | owner | session · local_owner | no | stale | — | served | move an event: preview (who is in it, the new time), then confirm with a single-use token |
@@ -366,7 +366,7 @@ takes a `since` cursor and answers with the next one.
 | `POST /api/github/pulls/:owner/:repo/:number/review` | owner | session · local_owner | no | stale | — | served | post a review; the head SHA must match the one shown |
 | `POST /api/github/pulls/:owner/:repo/:number/threads/:id/reply` | owner | session · local_owner | no | stale | — | served | reply to a review thread; the head SHA must match |
 | `POST /api/github/pulls/:owner/:repo/:number/threads/:id/resolve` | owner | session · local_owner | no | stale | — | served | resolve a review thread; the head SHA must match |
-| `POST /api/trackers/:connection/issues` | owner | session · local_owner | natural | — | — | T4-25 | create an issue from a task; idempotent by task key |
+| `POST /api/trackers/:connection/issues` | owner | session · local_owner | natural | stale | — | served | create an issue from a task; idempotent by task key |
 | `POST /api/trackers/:connection/issues/:key/complete` | owner | session · local_owner | natural | — | — | T4-26 | close an issue |
 | `POST /api/prose/:id/feedback` | owner | session · local_owner | natural | — | — | served | rate one piece of generated prose |
 | `DELETE /api/prose/:id/feedback` | owner | session · local_owner | natural | — | — | served | clear a prose rating |
@@ -2488,7 +2488,7 @@ GET  /api/vault-tasks?where=&order=&limit=&offset=   vault tasks by any filter (
 PUT  /api/today/order                        {date, task_keys}: the owner's order for the day; a key outside the day is 400
 POST /api/vault-tasks/:task_key/check        {checked, seen_text, path?}   Idempotency-Key   409 stale, with the current line
 POST /api/vault-tasks/:task_key/schedule     {do | someday, seen_text, path?}   Idempotency-Key   409 stale, with the current line
-POST /api/vault-tasks/:task_key/link         T4-25 — {ref}: one `linear:` (or `gh:`) ref onto one line   409 stale
+POST /api/vault-tasks/:task_key/link         {ref, seen_text, path?}   Idempotency-Key   409 stale, with the current line
 POST /api/today/close                        {day, line?}   409 stale · 409 section_missing, with the request's id
 ```
 
@@ -2596,6 +2596,37 @@ word. What differs is the one edit, core's `setTaskScheduled`:
   bulk-only and belongs to Needs You (K2).
 - **Finding them again:** the filter vocabulary's `someday` flag
   (`where: "someday"`) — `vault_tasks.someday`, written by the walk.
+
+#### Link — `POST /api/vault-tasks/:task_key/link` (T4-25)
+
+```
+POST /api/vault-tasks/mt-7f3k2a/link
+Idempotency-Key: link-0928-0001                    (optional; client-minted, ≤200 chars)
+{"ref": "linear:MET-42", "seen_text": "Send Dana the fixture format"}
+
+200 {"ok": true,
+     "line": "- [ ] Send Dana the fixture format due 2026-09-28 linear:MET-42 ^mt-7f3k2a",
+     "task": {"path", "task_key", "anchor", "line_no", "text", "checked", "done_on", "ext_refs"}}
+409 {"error": {"code": "conflict", …}, "reason": "stale", "line": "<as it stands>" | null, "task": {…} | null}
+```
+
+The second half of *Send to Linear*: the tracker door files the issue
+(`POST /api/trackers/:connection/issues`, below) and answers its `ref`; this
+door writes it on the line. Everything *Tick* says about the key, `path`,
+`seen_text`, the refusals before any read, the read's hash, `Idempotency-Key`
+and `503` holds here word for word. It never calls the tracker. What differs
+is the one edit, core's `setTaskRef`:
+
+- **`ref`** is `linear:<TEAM-123>` or `gh:<owner>/<repo>#<n>` — exactly one;
+  any other shape is `400`.
+- **The write** adds the ref and one space at the end of the trailing run,
+  before the anchor, and nothing else — the text, and so a hash key, is
+  unchanged. Commit: `link "<text>" to <ref>`, as `user`.
+- **Stale** (`409`, with the line): the text changed or the line is gone
+  since the client drew it, or the line already carries this ref — or another
+  of the same scheme (one issue per line, so a tick names one issue to close).
+- **Refused** (`400`, nothing written): a recurrence rule line, and any line
+  that would not re-parse as the same task with only the ref added.
 
 #### Close the Day — `POST /api/today/close` (T2-8)
 
@@ -3166,13 +3197,59 @@ the instance's own secrets.
 POST /api/github/pulls/:owner/:repo/:number/review                  T2-13 — 409 stale unless the head SHA is the one shown
 POST /api/github/pulls/:owner/:repo/:number/threads/:id/reply       T2-13 — the same guard
 POST /api/github/pulls/:owner/:repo/:number/threads/:id/resolve     T2-13 — the same guard
-POST /api/trackers/:connection/issues                               T4-25 — an issue from a task line; idempotent by task key
+POST /api/trackers/:connection/issues                               T4-25 — an issue from a task line; idempotent by task key; 409 stale when the line is linked
 POST /api/trackers/:connection/issues/:key/complete                 T4-26 — close an issue
 ```
 
-The tracker doors go through a `tracker` connection's own tool modes (Linear
+The tracker doors go through a `tracker` connection's capability (Linear
 first); *Send to Linear* is two doors, one service each — create the issue,
 then link it on the line with `POST /api/vault-tasks/:task_key/link`.
+
+#### Send to Linear — `POST /api/trackers/:connection/issues` (T4-25)
+
+```
+POST /api/trackers/linear/issues
+{"task_key": "mt-7f3k2a"}
+{"task_key": "mt-7f3k2a", "title": "Send Dana the fixture format", "team": "MET", "path": "Journal/2026-09-28.md"}
+
+201 {"ok": true, "connection": "linear", "key": "MET-42", "ref": "linear:MET-42", "url": "https://linear.app/…/issue/MET-42/…",
+     "created": true, "title", "task_key", "path"}
+200 — the same body with "created": false: this task's issue, filed before
+400 {"error": {…}, "reason": "team_required" | "unknown_team", "teams": [{"key", "name"}]} — nothing filed; send one of those keys as team
+404 — :connection is not the connection the Linear sync reads; no task has the key
+403 — the task's note is not a knowledge note; the connection's provider does not declare `create`
+409 {"error": {…}, "reason": "stale", "line", "task": {…, "ext_refs"}} — the line already carries a `linear:` ref; nothing filed
+429 — Linear's rate limit;  503 — no instance or no Linear connection, no vault bridge, or Linear refused or could not be reached
+```
+
+- **The task** is named by its key exactly as `GET /api/today` returns it,
+  and the line is read **in the note** (the vault bridge, as *Tick* reads
+  it; `path` where a key names two notes). The issue's title is the line's
+  text as it stands — or `title`, when the client lets the owner edit it —
+  made one line and cut to Linear's 255 characters. Nothing else of the note
+  leaves: no description, no path, no other field. This door writes nothing
+  of the owner's; the client then calls the Link door with the answer's `ref`
+  and `path`, and the line's `seen_text`.
+- **Idempotent by task key**, with no state of its own: the issue is created
+  with an id derived from the connection, the note and the task key
+  (`trackerIssueId`), and that id is looked up first. A second press, a retry
+  after a lost answer, or another client answers the issue already filed —
+  `200`, `created: false`, no mutation sent. Two sends that race meet at
+  Linear, which refuses the second id; the door looks it up and answers it.
+  So a failed Link can always be retried from the start.
+- **The team** is `team` (a key the owner's Linear user is in), or their only
+  team. With several and none named, or a key that is not theirs, the answer
+  is `400` with the teams to choose from, and nothing is filed.
+- **The connection** is the one the Linear sync reads (a `.metistry/scheduled.yaml`
+  `syncs.linear.connection`, or the one Linear connection), named in the path;
+  its provider must declare the `create` capability. Every request goes
+  through core's `guardedFetch` with the connection as the grantee: the key
+  is filled at the door for `api.linear.app` only, never on a URL; no redirect
+  is followed; everything that comes back is redacted. The audit row names the
+  connection, the task key, the issue and the secret used — never the text.
+- **Not an action.** No proposal can file an issue at any autonomy level; an
+  agent bearer and the capture owner token get the management gate's uniform
+  `403`.
 
 #### Pull requests
 

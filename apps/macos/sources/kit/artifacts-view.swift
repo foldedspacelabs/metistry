@@ -232,7 +232,7 @@ struct ArtifactPage: View {
     let assistantName: String?
     let onOpenInObsidian: ((String) -> Void)?
 
-    static let railWidth: CGFloat = 220
+    nonisolated static let railWidth: CGFloat = 220
 
     var body: some View {
         let p = Palette(scheme)
@@ -396,7 +396,7 @@ struct ReadingView: View {
     let assistantName: String?
     let onOpenInObsidian: ((String) -> Void)?
 
-    static let marginWidth: CGFloat = 280
+    nonisolated static let marginWidth: CGFloat = 280
 
     var body: some View {
         let p = Palette(scheme)
@@ -487,7 +487,7 @@ struct ArtifactTextWithMargin: View {
     /// Where each thread's line sits, from the lines' own frames.
     @State private var tops: [Int: CGFloat] = [:]
 
-    static let space = "artifact-page"
+    nonisolated static let space = "artifact-page"
 
     var body: some View {
         let p = Palette(scheme)

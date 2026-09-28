@@ -475,7 +475,7 @@ private func threadJSON(_ id: String, version: String, line: Int?, body: String,
 /// Frames reported from inside a layout, in its own coordinate space.
 @MainActor
 private final class FrameBox {
-    static let space = "margin-probe"
+    nonisolated static let space = "margin-probe"
     var frames: [Int: CGRect] = [:]
 }
 

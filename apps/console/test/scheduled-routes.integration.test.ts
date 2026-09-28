@@ -31,7 +31,7 @@ import { loadRoutines } from "@metistry-apps/routines";
 import { makeServer } from "../src/server.js";
 import { loadSchedules, overlayFromText, runNow, type ScheduledCollector } from "../src/runner.js";
 import { SCHEDULED_PATH } from "../src/profile-tidy.js";
-import type { ScheduledAdmin } from "../src/scheduled-routes.js";
+import { ASSIGNMENT_NOT_RUN, type ScheduledAdmin } from "../src/scheduled-routes.js";
 import * as store from "../src/auth-store.js";
 import * as agents from "../src/agents.js";
 
@@ -80,6 +80,7 @@ describe.skipIf(!hasDb)("the Scheduled doors", () => {
   let probeRuns = 0;
   let budget: PreflightMiss | null = null;
   let components: ScheduledCollector[];
+  let admin: ScheduledAdmin;
 
   const readOverlay = async (): Promise<Buffer | null> => (await vault.read(SCHEDULED_PATH))?.content ?? null;
   const setOverlay = async (text: string): Promise<void> => {
@@ -118,7 +119,7 @@ describe.skipIf(!hasDb)("the Scheduled doors", () => {
     };
     components = [...loaded, probe, costly];
     const overlayRead = async () => overlayFromText((await readOverlay())?.toString("utf8") ?? "");
-    const admin: ScheduledAdmin = {
+    admin = {
       components,
       overlay: {
         read: readOverlay,
@@ -186,9 +187,9 @@ describe.skipIf(!hasDb)("the Scheduled doors", () => {
 
   // ---- U2 --------------------------------------------------------------------------
 
-  it("serves the eleven Scheduled rows of the table, one of them local", () => {
-    expect(SCHEDULED_ROWS).toHaveLength(11);
-    expect(SCHEDULED_ROWS.filter(isLocalRoute).map(routeKey)).toEqual(["PUT /api/scheduled/routines/:name/assignment"]);
+  it("serves the twelve Scheduled rows of the table, two of them local", () => {
+    expect(SCHEDULED_ROWS).toHaveLength(12);
+    expect(SCHEDULED_ROWS.filter(isLocalRoute).map(routeKey)).toEqual(["PUT /api/scheduled/routines/:name/assignment", "POST /api/scheduled/routines"]);
   });
 
   it("U2: no credential is the uniform 401; an agent bearer and the capture owner token are the uniform 403 — and nothing is written", async () => {
@@ -367,7 +368,89 @@ describe.skipIf(!hasDb)("the Scheduled doors", () => {
     const ok = await call("PUT", "/api/scheduled/routines/weekly-digest/assignment", LOCAL, { ...base, grants: { read: ["Projects"] } });
     expect(ok.status).toBe(200);
     expect(ok.body.routine).toMatchObject({ source: "assignment", title: "Weekly Digest", grants: { read: ["Projects"] }, next_run: null });
-    expect(ok.body.routine.held).toContain("T3-8");
+    expect(ok.body.routine.held).toBe(ASSIGNMENT_NOT_RUN); // this console's runner has no crew queue
+  });
+
+  // ---- New Routine (T3-8) -----------------------------------------------------------
+
+  const NEW = { name: "weekly-digest", actor: "researcher", task: "Summarise the week's Projects/ changes.", grants: { read: ["Projects"] }, schedule: { days: ["fri"], at: ["16:00"] } };
+
+  it("**New Routine is the Mac's alone**: a passkey session is 403 local_only and nothing is written; the local owner token creates it — 201, as the listing shows it", async () => {
+    const phone = await call("POST", "/api/scheduled/routines", { cookie: sessionCookie }, NEW);
+    expect(phone.status).toBe(403);
+    expect(phone.body.error.code).toBe("local_only");
+    expect(await overlayText()).toBe("");
+    expect(writes).toEqual([]);
+
+    const mac = await call("POST", "/api/scheduled/routines", LOCAL, NEW);
+    expect(mac.status).toBe(201);
+    expect(mac.body).toMatchObject({
+      ok: true,
+      routine: {
+        name: "weekly-digest",
+        kind: "routine",
+        source: "assignment",
+        title: "Weekly Digest",
+        actor: "researcher",
+        task: NEW.task,
+        grants: { read: ["Projects"] },
+        schedule: { value: { days: ["fri"], at: ["16:00"] }, origin: "yours" },
+        paused: { value: false, origin: "default" },
+        config: {},
+        last_run: null,
+        is_default: false,
+      },
+      as_of: NOW.toISOString(),
+    });
+    expect(writes).toEqual([{ path: SCHEDULED_PATH, principal: "user" }]);
+    expect(await overlayText()).toBe(`routines:\n  weekly-digest:\n    actor: researcher\n    task: Summarise the week's Projects/ changes.\n    grants: { read: [ Projects ] }\n    schedule: { days: [ fri ], at: [ "16:00" ] }\n`);
+    // the listing agrees
+    const listed = (await call("GET", "/api/scheduled")).body.routines.find((x: { name: string }) => x.name === "weekly-digest");
+    expect(listed).toMatchObject({ source: "assignment", actor: "researcher", grants: { read: ["Projects"] } });
+  });
+
+  it("New Routine refuses, naming the field, and writes nothing: a taken name, a manifest's name, a bad name, a write grant, an actor that is no crew", async () => {
+    await setOverlay(`# mine\nroutines:\n  weekly-digest:\n    actor: researcher\n    task: Summarise\n    schedule: { every: 6h }\n`);
+    const before = await overlayText();
+    const cases: [unknown, number, RegExp][] = [
+      [NEW, 409, /already has an entry named weekly-digest/],
+      [{ ...NEW, name: "standup" }, 409, /Standup, a routine with a manifest/],
+      [{ ...NEW, name: "github-state" }, 409, /a sync with a manifest/],
+      [{ ...NEW, name: "Weekly Digest" }, 400, /^name: /],
+      [{ ...NEW, name: undefined }, 400, /^name: /],
+      [{ ...NEW, name: "fresh", grants: { read: ["Projects"], write: ["Journal/Digest/"] } }, 400, /grants: write: per-run grants are read-only/],
+      [{ ...NEW, name: "fresh", grants: { read: [".metistry"] } }, 400, /grants\.read\.0: /],
+      [{ ...NEW, name: "fresh", actor: "nobody-here" }, 400, /^actor: no crew is named nobody-here/],
+      [{ ...NEW, name: "fresh", schedule: { every: "10m" } }, 400, /schedule/],
+      [{ ...NEW, name: "fresh", config: { template: "Templates/X.md" } }, 400, /config/],
+      [{ ...NEW, name: "fresh", task: "" }, 400, /task/],
+    ];
+    for (const [b, status, message] of cases) {
+      const r = await call("POST", "/api/scheduled/routines", LOCAL, b);
+      expect(r.status, JSON.stringify(b)).toBe(status);
+      expect(r.body.error.message, JSON.stringify(b)).toMatch(message);
+      expect(r.body.error.message, JSON.stringify(b)).toMatch(/nothing was written/);
+    }
+    expect(await overlayText()).toBe(before);
+    expect(writes).toEqual([]);
+  });
+
+  it("with the crew queue wired, a New Routine is not held: it has a next run, and Run Now reaches the runner", async () => {
+    await setOverlay(`routines:\n  weekly-digest:\n    actor: researcher\n    task: Summarise\n    schedule: { days: [fri], at: ["16:00"] }\n`);
+    const runNowBefore = admin.runNow;
+    const asked: string[] = [];
+    admin.runsAssignments = true;
+    admin.runNow = async (name) => (asked.push(name), { started: false, reason: "blocked", message: "stubbed" });
+    try {
+      const r = await call("GET", "/api/scheduled/routines/weekly-digest");
+      expect(r.body.routine).toMatchObject({ source: "assignment", held: null, next_run: "2026-10-02T20:00:00.000Z" }); // Friday 16:00 in New York
+      const run = await call("POST", "/api/scheduled/routines/weekly-digest/run", LOCAL, {});
+      expect(run.body.refused).toEqual({ reason: "blocked", message: "stubbed" });
+      expect(asked).toEqual(["weekly-digest"]);
+    } finally {
+      admin.runsAssignments = undefined;
+      admin.runNow = runNowBefore;
+    }
   });
 
   it("a sync's cadence, pause and raise — never its connection, never a rule it does not declare", async () => {

@@ -18,7 +18,7 @@
           "value": false,
           "origin": "default"
         },
-        "next_run": "2026-09-27T04:18:49.902Z",
+        "next_run": "2026-09-28T21:41:45.793Z",
         "next_refused": null,
         "last_run": null,
         "is_default": true,
@@ -46,7 +46,7 @@
           "value": false,
           "origin": "default"
         },
-        "next_run": "2026-09-27T04:18:49.902Z",
+        "next_run": "2026-09-28T21:41:45.793Z",
         "next_refused": null,
         "last_run": null,
         "is_default": true,
@@ -74,11 +74,11 @@
           "value": false,
           "origin": "default"
         },
-        "next_run": "2026-09-28T01:00:00.000Z",
+        "next_run": "2026-09-29T01:00:00.000Z",
         "next_refused": null,
         "last_run": {
           "run_id": "7",
-          "at": "2026-09-27T04:18:49.512Z",
+          "at": "2026-09-28T21:41:45.468Z",
           "ok": false,
           "outcome": null,
           "cost_usd": null,
@@ -134,11 +134,11 @@
           "value": false,
           "origin": "default"
         },
-        "next_run": "2026-09-28T11:00:00.000Z",
+        "next_run": "2026-09-29T11:00:00.000Z",
         "next_refused": null,
         "last_run": {
           "run_id": "8",
-          "at": "2026-09-27T04:18:49.512Z",
+          "at": "2026-09-28T21:41:45.468Z",
           "ok": true,
           "outcome": "silent",
           "cost_usd": null,
@@ -158,7 +158,12 @@
           },
           "origin": "default"
         },
-        "config": {},
+        "config": {
+          "template": {
+            "value": "Templates/Brief.md",
+            "origin": "default"
+          }
+        },
         "actor": null,
         "task": null,
         "grants": null,
@@ -184,11 +189,11 @@
           "value": false,
           "origin": "default"
         },
-        "next_run": "2026-09-28T03:00:00.000Z",
+        "next_run": "2026-09-29T03:00:00.000Z",
         "next_refused": null,
         "last_run": {
           "run_id": "6",
-          "at": "2026-09-27T04:18:49.512Z",
+          "at": "2026-09-28T21:41:45.468Z",
           "ok": true,
           "outcome": "acted",
           "cost_usd": null,
@@ -234,7 +239,7 @@
           "value": false,
           "origin": "default"
         },
-        "next_run": "2026-09-28T03:00:00.000Z",
+        "next_run": "2026-09-29T03:00:00.000Z",
         "next_refused": null,
         "last_run": null,
         "is_default": true,
@@ -287,7 +292,7 @@
           "value": false,
           "origin": "default"
         },
-        "next_run": "2026-09-27T08:00:00.000Z",
+        "next_run": "2026-09-29T08:00:00.000Z",
         "next_refused": null,
         "last_run": null,
         "is_default": true,
@@ -345,9 +350,16 @@
           "value": false,
           "origin": "default"
         },
-        "next_run": "2026-09-28T12:00:00.000Z",
+        "next_run": "2026-09-29T12:00:00.000Z",
         "next_refused": null,
-        "last_run": null,
+        "last_run": {
+          "run_id": "10",
+          "at": "2026-09-28T21:41:45.468Z",
+          "ok": true,
+          "outcome": "acted",
+          "cost_usd": "0.001900",
+          "error": null
+        },
         "is_default": true,
         "held": null,
         "describe": "working days at 08:00",
@@ -397,7 +409,7 @@
           "value": false,
           "origin": "default"
         },
-        "next_run": "2026-09-27T10:00:00.000Z",
+        "next_run": "2026-09-29T10:00:00.000Z",
         "next_refused": null,
         "last_run": null,
         "is_default": true,
@@ -477,11 +489,11 @@
           "value": "America/New_York",
           "origin": "profile"
         },
-        "next_run": null,
+        "next_run": "2026-10-02T19:00:00.000Z",
         "next_refused": null,
         "last_run": null,
         "is_default": false,
-        "held": "a New Routine is an assignment the runner does not start yet — agent routines (T3-8) run it; until then it is kept, listed, and not run",
+        "held": null,
         "describe": "fri at 15:00"
       },
       {
@@ -491,7 +503,7 @@
           "value": false,
           "origin": "default"
         },
-        "next_run": "2026-09-27T22:00:00.000Z",
+        "next_run": "2026-10-04T22:00:00.000Z",
         "next_refused": null,
         "last_run": null,
         "is_default": true,
@@ -534,7 +546,28 @@
           "value": false,
           "origin": "default"
         },
-        "next_run": "2026-09-27T04:18:49.902Z",
+        "next_run": "2026-09-28T21:41:45.793Z",
+        "next_refused": null,
+        "last_run": null,
+        "is_default": true,
+        "held": null,
+        "describe": "every 5m",
+        "kind": "sync",
+        "connection": null,
+        "every": {
+          "value": "5m",
+          "origin": "default"
+        },
+        "raise": {}
+      },
+      {
+        "name": "eventkit-calendar",
+        "title": "Calendar",
+        "paused": {
+          "value": false,
+          "origin": "default"
+        },
+        "next_run": "2026-09-28T21:41:45.793Z",
         "next_refused": null,
         "last_run": null,
         "is_default": true,
@@ -555,7 +588,7 @@
           "value": false,
           "origin": "default"
         },
-        "next_run": "2026-09-27T04:18:49.902Z",
+        "next_run": "2026-09-28T21:41:45.793Z",
         "next_refused": null,
         "last_run": null,
         "is_default": false,
@@ -579,13 +612,39 @@
         }
       },
       {
+        "name": "linear",
+        "title": "Linear",
+        "paused": {
+          "value": false,
+          "origin": "default"
+        },
+        "next_run": "2026-09-28T21:41:45.793Z",
+        "next_refused": null,
+        "last_run": null,
+        "is_default": true,
+        "held": null,
+        "describe": "every 15m",
+        "kind": "sync",
+        "connection": null,
+        "every": {
+          "value": "15m",
+          "origin": "default"
+        },
+        "raise": {
+          "assigned": {
+            "value": true,
+            "origin": "default"
+          }
+        }
+      },
+      {
         "name": "devin-knowledge",
         "title": "Devin Knowledge",
         "paused": {
           "value": false,
           "origin": "default"
         },
-        "next_run": "2026-09-27T04:18:49.902Z",
+        "next_run": "2026-09-28T21:41:45.793Z",
         "next_refused": null,
         "last_run": null,
         "is_default": true,
@@ -606,7 +665,7 @@
           "value": false,
           "origin": "default"
         },
-        "next_run": "2026-09-27T04:18:49.902Z",
+        "next_run": "2026-09-28T21:41:45.793Z",
         "next_refused": null,
         "last_run": null,
         "is_default": true,
@@ -624,6 +683,6 @@
     "timezone": "America/New_York",
     "problems": [],
     "errors": [],
-    "as_of": "2026-09-27T04:18:49.905Z"
+    "as_of": "2026-09-28T21:41:45.796Z"
   }
 }

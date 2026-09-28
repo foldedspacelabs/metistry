@@ -284,7 +284,7 @@ export const CLIENT_API: readonly ClientRoute[] = [
   route("POST", "/api/scheduled/routines/:name/run", "Run Now, under the budget preflight"),
   route("DELETE", "/api/scheduled/routines/:name", "Reset to Default: delete the owner's entry", { idempotent: "natural" }),
   route("PUT", "/api/scheduled/routines/:name/assignment", "a routine's actor, task and per-run grants", { reach: ["local"], idempotent: "natural" }),
-  planned("POST", "/api/scheduled/routines", "T3-8", "New Routine: an actor, a task and per-run grants", { reach: ["local"] }),
+  route("POST", "/api/scheduled/routines", "New Routine: an actor, a task and per-run grants", { reach: ["local"] }),
   route("PUT", "/api/scheduled/syncs/:name", "a sync's cadence, pause and raise toggles", { idempotent: "natural" }),
   route("POST", "/api/scheduled/syncs/:name/run", "run a sync now"),
 

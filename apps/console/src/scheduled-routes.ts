@@ -19,10 +19,12 @@
 //     file is never rewritten — the owner fixes it first.
 //   * **Timing is inside the boundary; what runs is not.** A schedule, a
 //     pause, Reset to Default, a sync's cadence and raise toggles, Run Now:
-//     `owner` — a phone may change them. A routine's actor, task and per-run
-//     grants: `local`, the Mac alone (the table's reach; the gate in
+//     `owner` — a phone may change them. A New Routine — creating one
+//     (`POST /api/scheduled/routines`, T3-8) and its actor, task and per-run
+//     grants — `local`, the Mac alone (the table's reach; the gate in
 //     server.ts enforces it before this file runs). Per-run grants are
-//     read-only (owner ruling, W1): a `write` grant is refused here.
+//     read-only (owner ruling, W1): core's schema refuses `write:` by name,
+//     and a New Routine's actor is a crew — its run is one crew run.
 //   * **Run Now is the runner's tick for one component** (`runNow`,
 //     runner.ts): the owner's pause and a held entry apply, and so does the
 //     preflight, budget included.
@@ -45,6 +47,7 @@ import {
   isAssignment,
   isInterval,
   isLegacyCron,
+  newRoutines,
   parseScheduled,
   resolveUnit,
   routineAssignmentSchema,
@@ -66,7 +69,9 @@ import {
 import { VaultError } from "@foldedspacelabs/metistry-artifacts";
 import type { QueryStore } from "@foldedspacelabs/metistry-queries";
 import { readBody, sendError, sendJson, sendUnrouted } from "./http-util.js";
-import { overlayFromText, unitOf, type OverlayRead, type RunNowResult, type ScheduledCollector } from "./runner.js";
+import { overlayFromText, titleOf, unitOf, type OverlayRead, type RunNowResult, type ScheduledCollector } from "./runner.js";
+
+export { titleOf }; // a New Routine's display name — the runner's, so a run's label and the listing's are one
 
 // ---- what the console hands this file ---------------------------------------------
 
@@ -98,8 +103,18 @@ export interface ScheduledAdmin {
   timeZone: string | null;
   /** Run Now: the runner's tick for one component (runner.ts `runNow`, bound to the runner's ctx and options). Absent = 503. */
   runNow?: ((name: string) => Promise<RunNowResult>) | undefined;
-  /** Whether an agent id names a live (unrevoked) actor — a New Routine's `actor`. Absent = not checked. */
+  /**
+   * Whether an agent id names a live CREW this console can run — a New
+   * Routine's `actor`, since its run is one crew run (T3-8). Absent = not
+   * checked (the runner still refuses a run whose actor is no crew).
+   */
   actorExists?: ((id: string) => Promise<boolean>) | undefined;
+  /**
+   * Whether this console's runner runs New Routines — it was given the crew
+   * queue (`RunnerOptions.agentRoutines`). False or absent: a New Routine is
+   * kept and listed, held with `ASSIGNMENT_NOT_RUN`, and not run.
+   */
+  runsAssignments?: boolean | undefined;
   /** The clock `next_run` counts from; tests pin it. */
   now?: (() => Date) | undefined;
 }
@@ -120,8 +135,12 @@ export function isScheduledRoute(pathname: string): boolean {
 const NOT_WIRED =
   "Scheduled is not wired into this console — it lists and changes what the console's runner schedules, and this process was started without one (docs/ops/scheduled.md)";
 
-/** A New Routine is listed and its assignment kept, but nothing runs it until agent routines land. */
-export const ASSIGNMENT_NOT_RUN = "a New Routine is an assignment the runner does not start yet — agent routines (T3-8) run it; until then it is kept, listed, and not run";
+/** A New Routine on a console whose runner has no crew queue: kept and listed, and nothing here can run it. */
+export const ASSIGNMENT_NOT_RUN =
+  "a New Routine runs as one crew run, and this console's runner was started without the crew queue — it is kept, listed, and not run here (docs/ops/scheduled.md)";
+
+/** `POST /api/scheduled/routines` — New Routine (T3-8, reach local). */
+const CREATE_KEY = "POST /api/scheduled/routines";
 
 const ROUTE_RE = /^(GET|PUT|POST|DELETE) \/api\/scheduled(?:\/(routines|syncs)\/([^/]+)(?:\/(schedule|pause|resume|run|assignment))?)?$/;
 
@@ -243,15 +262,6 @@ async function lastRuns(queries: QueryStore, names: readonly string[]): Promise<
   return out;
 }
 
-/** `weekly-digest` → `Weekly Digest`: what a person reads for a New Routine, which has no manifest to carry a display name. */
-export function titleOf(name: string): string {
-  return name
-    .split("-")
-    .filter(Boolean)
-    .map((w) => w[0]!.toUpperCase() + w.slice(1))
-    .join(" ");
-}
-
 interface Layers {
   units: ScheduledUnit[];
   byName: Map<string, ScheduledCollector>;
@@ -324,8 +334,11 @@ function unitView(unit: ScheduledUnit, l: Layers, runs: Map<string, Record<strin
   };
 }
 
-function assignmentView(name: string, a: RoutineAssignment, l: Layers, runs: Map<string, Record<string, unknown>>): RoutineView {
+function assignmentView(name: string, a: RoutineAssignment, l: Layers, runs: Map<string, Record<string, unknown>>, runsAssignments: boolean): RoutineView {
   const tod = timeOfDayFields(a.schedule, "yours", l.ctx);
+  const held = l.fileHeld(name) ?? (runsAssignments ? null : ASSIGNMENT_NOT_RUN);
+  // when it runs next: the same resolution a manifest's routine gets, over its own schedule (an assignment has no layers below it)
+  const next = held !== null || a.paused === true ? null : resolveUnit({ name, section: "routines", displayName: titleOf(name), schedule: a.schedule, config: {}, raise: {} }, emptyScheduled, l.ctx).next;
   return {
     name,
     title: titleOf(name),
@@ -339,19 +352,17 @@ function assignmentView(name: string, a: RoutineAssignment, l: Layers, runs: Map
     grants: a.grants ?? null,
     days: tod.days,
     time_zone: tod.timeZone,
-    next_run: null,
-    next_refused: null,
+    ...nextOf(next),
     last_run: lastRunOf(runs.get(name)),
     is_default: false,
-    held: l.fileHeld(name) ?? ASSIGNMENT_NOT_RUN,
+    held,
     describe: describeSchedule(a.schedule),
   };
 }
 
-/** The New Routines in a valid file: assignments under a name no manifest has. */
+/** The New Routines in a valid file: assignments under a name no manifest has (core's `newRoutines` — the runner's own reading). */
 function assignments(file: Scheduled, units: readonly ScheduledUnit[]): [string, RoutineAssignment][] {
-  const known = new Set(units.map((u) => u.name));
-  return Object.entries(file.routines ?? {}).filter((e): e is [string, RoutineAssignment] => !known.has(e[0]) && isAssignment(e[1]));
+  return newRoutines(file, units.map((u) => u.name));
 }
 
 // ---- the edit: one YAML document, validated, compare-and-swapped ----------------------
@@ -454,9 +465,85 @@ function noFields(b: Record<string, unknown>): string | null {
 const issues = (err: { issues: readonly { path: readonly PropertyKey[]; message: string }[] }, at: string): string =>
   err.issues.map((i) => `${[at, ...i.path.map(String)].filter(Boolean).join(".")}: ${i.message}`).join("; ");
 
+// ---- a New Routine's assignment: validated once, for create and change alike -------------
+
+/**
+ * An assignment body, validated: core's closed schema (a `write:` grant is
+ * refused by name — per-run grants are read-only), then its actor — a live
+ * crew, since a New Routine's run is one crew run. The message names the
+ * field and says nothing was written.
+ */
+async function validAssignment(admin: ScheduledAdmin, b: Record<string, unknown>): Promise<{ ok: true; value: RoutineAssignment } | { ok: false; message: string }> {
+  const parsed = routineAssignmentSchema.safeParse(b);
+  if (!parsed.success) return { ok: false, message: `${issues(parsed.error, "")} — nothing was written` };
+  const a = parsed.data;
+  if (!AGENT_NAME_RE.test(a.actor) || (admin.actorExists && !(await admin.actorExists(a.actor)))) {
+    return {
+      ok: false,
+      message: `actor: no crew is named ${a.actor} — a New Routine runs as one crew run, so its actor is a crew's id (GET /api/agents, kind crew); nothing was written`,
+    };
+  }
+  return { ok: true, value: a };
+}
+
+/** The whole assignment, written over whatever the entry held — the schedule as a flow map, the grants as one. */
+function writeAssignment(doc: Document, name: string, a: RoutineAssignment): void {
+  doc.setIn(["routines", name, "actor"], a.actor);
+  doc.setIn(["routines", name, "task"], a.task);
+  if (a.grants) doc.setIn(["routines", name, "grants"], doc.createNode(a.grants, { flow: true }));
+  else drop(doc, ["routines", name, "grants"]);
+  doc.setIn(["routines", name, "schedule"], scheduleNode(doc, a.schedule));
+  if (a.paused !== undefined) doc.setIn(["routines", name, "paused"], a.paused);
+}
+
+/**
+ * `POST /api/scheduled/routines` — **New Routine** (T3-8; reach `local`, the
+ * gate in server.ts has refused anything but the local owner token). A name
+ * of its own — never a manifest's, never one the file already has — and an
+ * assignment `validAssignment` accepts; written as one new entry through the
+ * same compare-and-swap every door here uses. 201 with the routine as
+ * Scheduled lists it.
+ */
+async function createRoutine(req: IncomingMessage, res: ServerResponse, admin: ScheduledAdmin, deps: ScheduledDeps): Promise<void> {
+  const read = await body(req);
+  if (!read.ok) return sendError(res, "invalid_request", read.message);
+  const { name, ...rest } = read.value;
+  if (typeof name !== "string" || !SCHEDULED_NAME_RE.test(name)) {
+    return sendError(res, "invalid_request", "name: a New Routine's name is lowercase kebab-case (weekly-digest) — it is its key in .metistry/scheduled.yaml; nothing was written");
+  }
+  const units = admin.components.map(unitOf);
+  const unit = units.find((u) => u.name === name);
+  if (unit) {
+    return sendError(res, "conflict", `name: ${name} is ${unit.displayName}, a ${unit.section === "routines" ? "routine" : "sync"} with a manifest — a New Routine takes a name of its own; nothing was written`);
+  }
+  const a = await validAssignment(admin, rest);
+  if (!a.ok) return sendError(res, "invalid_request", a.message);
+  const r = await applyEdit(admin, units, name, `new routine ${titleOf(name)}`, (doc, file) => {
+    if ((file.routines && Object.hasOwn(file.routines, name)) || (file.syncs && Object.hasOwn(file.syncs, name))) {
+      return refuse("conflict", `name: .metistry/scheduled.yaml already has an entry named ${name} — PUT /api/scheduled/routines/${name}/assignment changes a New Routine; nothing was written`);
+    }
+    writeAssignment(doc, name, a.value);
+  });
+  const audit = (ok: boolean, meta: Record<string, unknown>) => deps.audit("scheduled", "create", ok, { name, ...meta });
+  if (!r.ok) {
+    await audit(false, { code: r.refusal.code });
+    return sendJson(res, statusFor(r.refusal.code), errorEnvelope(r.refusal.code, r.refusal.message));
+  }
+  await audit(true, { actor: a.value.actor, grants: a.value.grants ?? null });
+  const cur = await current(admin);
+  const runs = await lastRuns(deps.queries, [name]);
+  const l = await layers(admin, { ...cur, overlay: { ok: true, value: r.file } }, runs);
+  const entry = r.file.routines![name] as RoutineAssignment;
+  return sendJson(res, 201, { ok: true, routine: assignmentView(name, entry, { ...l, fileHeld: () => null }, runs, admin.runsAssignments === true), as_of: (admin.now ?? (() => new Date()))().toISOString() });
+}
+
 // ---- the routes ----------------------------------------------------------------------------
 
 export async function scheduledRoutes(req: IncomingMessage, res: ServerResponse, key: string, deps: ScheduledDeps): Promise<void> {
+  if (key === CREATE_KEY) {
+    if (!deps.admin) return sendError(res, "not_available", NOT_WIRED);
+    return createRoutine(req, res, deps.admin, deps);
+  }
   const m = ROUTE_RE.exec(key);
   if (!m) return sendUnrouted(res);
   const [, method, section, rawName, verb] = m as unknown as [string, string, "routines" | "syncs" | undefined, string | undefined, string | undefined];
@@ -474,7 +561,7 @@ export async function scheduledRoutes(req: IncomingMessage, res: ServerResponse,
     const runs = await lastRuns(queries, names);
     const l = await layers(admin, cur, runs);
     const views = l.units.map((u) => unitView(u, l, runs));
-    const routines = [...views.filter((v): v is RoutineView => v.kind === "routine"), ...assignments(l.file, l.units).map(([n, a]) => assignmentView(n, a, l, runs))];
+    const routines = [...views.filter((v): v is RoutineView => v.kind === "routine"), ...assignments(l.file, l.units).map(([n, a]) => assignmentView(n, a, l, runs, admin.runsAssignments === true))];
     routines.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     return sendJson(res, 200, {
       routines,
@@ -501,7 +588,7 @@ export async function scheduledRoutes(req: IncomingMessage, res: ServerResponse,
     const l = file ? { ...l0, file, fileHeld: () => null, errors: [] } : l0;
     if (unit) return unitView(unit, l, runs);
     const entry = l.file.routines?.[name];
-    return section === "routines" && entry !== undefined && Object.hasOwn(l.file.routines!, name) && isAssignment(entry) ? assignmentView(name, entry, l, runs) : null;
+    return section === "routines" && entry !== undefined && Object.hasOwn(l.file.routines!, name) && isAssignment(entry) ? assignmentView(name, entry, l, runs, admin.runsAssignments === true) : null;
   };
   const answer = async (status: number, file: Scheduled | undefined, extra: Record<string, unknown> = {}): Promise<void> => {
     const view = await viewOf(file);
@@ -544,7 +631,7 @@ export async function scheduledRoutes(req: IncomingMessage, res: ServerResponse,
   if (method === "POST" && verb === "run") {
     const extra = noFields(b);
     if (extra) return sendError(res, "invalid_request", extra);
-    if (assignment) return sendJson(res, 200, { ok: false, name, run_id: null, started: false, refused: { reason: "held", message: `${titleOf(name)} was not started: ${ASSIGNMENT_NOT_RUN}` } });
+    if (assignment && admin.runsAssignments !== true) return sendJson(res, 200, { ok: false, name, run_id: null, started: false, refused: { reason: "held", message: `${titleOf(name)} was not started: ${ASSIGNMENT_NOT_RUN}` } });
     if (!admin.runNow) return sendError(res, "not_available", "Run Now needs this console's runner, and it was started without one");
     const r = await admin.runNow(name);
     await audited("run", r.started, r.started ? { run_id: r.runId } : { reason: r.reason });
@@ -639,29 +726,10 @@ export async function scheduledRoutes(req: IncomingMessage, res: ServerResponse,
         `${label} is a ${unit.section === "routines" ? "routine" : "sync"} with a manifest — what it runs is its manifest's, and a manifest is never written here. A New Routine takes a name of its own; nothing was written`,
       );
     }
-    if (!assignment) return sendError(res, "not_found", `no New Routine named ${name} — a New Routine is created with POST /api/scheduled/routines (T3-8)`);
-    const grants = b.grants;
-    if (isPlain(grants) && grants.write !== undefined) {
-      return sendError(
-        res,
-        "invalid_request",
-        "grants.write: per-run grants are read-only (owner ruling, W1) — a routine's reserved subfolder is its own ownership, written through the reconciler under its own principal, never a grant; nothing was written",
-      );
-    }
-    const parsed = routineAssignmentSchema.safeParse(b);
-    if (!parsed.success) return sendError(res, "invalid_request", `${issues(parsed.error, "")} — nothing was written`);
-    const a = parsed.data;
-    if (!AGENT_NAME_RE.test(a.actor) || (admin.actorExists && !(await admin.actorExists(a.actor)))) {
-      return sendError(res, "invalid_request", `actor: no live agent is named ${a.actor} — an actor is an agent id from GET /api/agents; nothing was written`);
-    }
-    const r = await applyEdit(admin, units, name, `${label}'s actor, task and per-run grants`, (doc) => {
-      doc.setIn(["routines", name, "actor"], a.actor);
-      doc.setIn(["routines", name, "task"], a.task);
-      if (a.grants) doc.setIn(["routines", name, "grants"], doc.createNode(a.grants, { flow: true }));
-      else drop(doc, ["routines", name, "grants"]);
-      doc.setIn(["routines", name, "schedule"], scheduleNode(doc, a.schedule));
-      if (a.paused !== undefined) doc.setIn(["routines", name, "paused"], a.paused);
-    });
+    if (!assignment) return sendError(res, "not_found", `no New Routine named ${name} — a New Routine is created with POST /api/scheduled/routines`);
+    const a = await validAssignment(admin, b);
+    if (!a.ok) return sendError(res, "invalid_request", a.message);
+    const r = await applyEdit(admin, units, name, `${label}'s actor, task and per-run grants`, (doc) => writeAssignment(doc, name, a.value));
     return done("assignment", r);
   }
 

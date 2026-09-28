@@ -267,7 +267,7 @@ set yourself):
 
 | check | what it means | costs |
 | --- | --- | --- |
-| this target date is **settled** | a scheduled or manual pass already decided that day, whichever way. A Close the Day row never settles a date (the 23:00 run supersedes it), and a close never asks | one indexed `runs` read |
+| this target date is **settled** | only the SCHEDULED (23:00) pass asks: has an earlier non-close pass already decided that day, whichever way. A Close the Day row never settles a date (the 23:00 run supersedes it), and a close never asks. Run Now never asks either (ruling 15, X-15) — the owner asked for this one by hand, so it always re-renders, even a date the 23:00 run already settled | one indexed `runs` read, skipped entirely for `close` and `manual` |
 | tonight is **not a working eve** | tomorrow is not in `working_days:` in `Me/profile.md` → `not_a_working_eve`; absent, **nothing is written at all** and the run says `no_working_days` rather than guessing Monday-to-Friday | one small vault read; recorded, and the evening goes quiet |
 
 With no `working_days` at all, the runner refuses the schedule first
@@ -295,11 +295,14 @@ file under compare-and-swap; nothing is ever appended.
 ### Reading the ledger
 
 One `runs` row per pass that decides a target date: Close the Day's early
-renders, then the scheduled (or manual) one that settles it.
-`meta.planned_for` is the discriminator (the runner's own per-run
-`routine_run` row carries none; it carries `meta.scheduled_for`, the slot).
-`meta.trigger` says who asked — `close`, `schedule` or `manual` — and only a
-row that is not `close` settles the date. `meta.outcome` (T1-4: every routine and the
+renders, then the scheduled one that settles it, and any Run Now on top —
+Run Now (ruling 15, X-15) always writes its own row and never stays silent
+for a date some earlier pass already settled. `meta.planned_for` is the
+discriminator (the runner's own per-run `routine_run` row carries none; it
+carries `meta.scheduled_for`, the slot). `meta.trigger` says who asked —
+`close`, `schedule` or `manual` — and only the scheduled pass ASKS whether a
+non-close row has already settled the date; a close or a manual (Run Now)
+pass never asks, and always renders. `meta.outcome` (T1-4: every routine and the
 runner share this vocabulary — `acted | silent | skipped:<reason>`) is
 `acted` when the plan was written, or `skipped:<reason>` with `<reason>` one
 of `no_working_days`, `not_a_working_eve`, `template_missing`,

@@ -252,6 +252,14 @@ row.
   a child has been up a minute. Five restarts inside two minutes and the child
   is reported `crash-looping` — retried at the ceiling rather than hammered,
   and named in `doctor` instead of scrolling past in a log.
+- **The restart race is not a crash loop.** `up`, `restart` and `update`
+  kickstart the supervisor while the previous one's children may still be
+  letting go of their ports. For 30 s after it starts, a child that exits
+  early having written `EADDRINUSE`, `listen EPERM` or "Address already in
+  use" to its own log (only what that spawn wrote) is retried every 500 ms
+  and not counted toward the five restarts; after the window, and for any
+  other exit, the policy above is unchanged. 0.14.2's reconciler hit
+  `EADDRINUSE` on 7812 three times and sat at the 60 s ceiling.
 - **Per-child logs**, at the same `/tmp/metistry-<service>.log` paths
   `metistry logs <service>` has always tailed.
 - **Graceful stop.** SIGTERM, the child's grace period, then SIGKILL —
@@ -776,7 +784,8 @@ until this it had ambient authority over the whole disk:
 | filesystem read | the product checkout (its own `dist/`, `node_modules/`, `seed/` — and its working directory), the node runtime, **a real git's installation prefix**, system frameworks, and `~/.gitconfig` **by name**. |
 | filesystem write | **the instance repo — the vault, `.metistry/` and `.git/`** — and tmp. Nothing else: not `~/Documents`, not `~/.ssh`, not the product checkout, not another instance's vault. |
 | exec | node, that git, and the askpass shim (below). **No shell.** |
-| network out | the console, Postgres and the on-machine embedder on loopback, plus the egress proxy. It binds exactly its own bridge port. |
+| network out | the console, Postgres and the on-machine embedder on loopback, plus the egress proxy. |
+| network in | exactly its own bridge port — `network-bind` **and** `network-inbound` on `RECONCILER_TCP` (below). |
 | off switch | `METISTRY_RECONCILER_SANDBOX=0` renders `ops/sandbox/unconfined.sb` instead — a real file that says `(allow default)`, so "not confined" is legible in the plist, in `supervisor.json`, in `up --dry-run` and in doctor's `sandbox` row. |
 
 **`/usr/bin/git` is not a git.** Measured on macOS 26.4: it links against
@@ -787,7 +796,11 @@ to load libxcrun (… file system sandbox blocked open())`. So `up` resolves a
 non-shim git on PATH, then the Command Line Tools — and grants its whole
 prefix (`bin/git`, `libexec/git-core/`'s 172 helpers, `share/git-core`'s
 templates). On a Mac with none of those, `up` declines to confine the job and
-says why: a reconciler that cannot run git is not a reconciler.
+says why: a reconciler that cannot run git is not a reconciler. The reconciler
+spawns `git` by name, so when that git is not the bundled one `up` also puts
+its directory at the front of the job's `PATH` — a launchd `PATH` starts at
+`/usr/bin`, whose `git` is the shim, and the confined job would otherwise die
+at startup with `spawn EPERM`.
 
 **Pushing while confined** works over HTTPS, and the path is worth knowing
 because it is not the obvious one (`docs/ops/reconciler.md` has the table).
@@ -803,6 +816,22 @@ never in argv, never in `supervisor.json` and never on disk. `git.ts` adds
 `-c credential.helper=` — git's documented reset — only when there is an
 askpass, so an unconfined install keeps using the Keychain helper exactly as
 before.
+
+**Listening takes two rules on macOS 26.** `network-bind` lets a socket take
+an address; on macOS 26 (Darwin 25) `listen()` on it is then refused with
+`EPERM` unless `network-inbound` names the same local address. 0.14.2 shipped
+the bind rule alone, and the first install that found a real git — and so
+chose confinement over `unconfined.sb` — crash-looped the reconciler on
+`listen EPERM 127.0.0.1:7812`. Both rules are in `reconciler.sb` now, and
+`ops/sandbox/bind.test.mjs` is the guard: for every profile it finds, every
+parameterised `network-bind` must have its `network-inbound` twin, and a real
+`sandbox-exec -f <profile> -D … node -e '<listen>'` must succeed on a free
+high port in that parameter and be refused on a port the profile does not
+name. It runs on a `macos-26` runner — CI's `sandbox-profiles` job whenever
+`ops/sandbox/` or `sandbox.ts` changes, and the release's darwin runtime job
+every time — because the behaviour is the OS's and no Linux run can see it.
+The engine (`assistant.sb`) has a bind rule and deliberately no inbound one:
+it opens no server, and the same test asserts it cannot.
 
 **SSH remotes are the one shape confinement cannot serve.** `ssh` is not
 exec-able, granting it would mean granting the sole committer `~/.ssh`, and
@@ -939,6 +968,33 @@ The two secret-bearing dicts are built differently on purpose:
   a provider key in the operator's shell that this file does not name cannot
   reach the engine and buy tokens on somebody else's account.
 
+### The jobs follow `.env`
+
+The supervisor's plist dict and `supervisor.json` (its own `env` and every
+child's) are **rendered copies** of `.env`, made by `up`. A verb that
+rewrites `.env` does not touch them, so until 0.14.3 a rotated bridge token
+or a newly delivered provider key reached nothing: on the owner's 0.14.2
+install the bridges 401'd the watchdog and the console, and the OpenRouter
+key never reached the supervisor, so `supervisor.json` had no assistant
+child at all.
+
+Now every writer of `.env` (`secrets sync --to env`, `mint`,
+`migrate-scope`, `retire-legacy-env --yes`, and `update`) ends with
+`packages/cli/src/env-follow.ts`: it compares `.env`'s values with both
+installed copies for the same names — every `METISTRY_*` the console
+passes through, minus the owner bearer it is never given and the names the
+job sets itself (`METISTRY_DB_HOST`, the console's host and port, the inbox,
+instance and seed directories, keep-awake) — and, when they differ, runs
+`metistry up --no-compose` with `.env`'s names removed from its environment
+(this process loaded the OLD values at start, and `loadEnvFile` never
+overwrites a set variable). `up` is the one renderer, so a plist is never
+rendered two ways. The gate is this instance's `supervisor.json`: a plist
+in the shared `~/Library/LaunchAgents` alone could be another install's.
+
+Doctor carries the same comparison as the **`launchd env`** row: `degraded`
+with the drifted names (never a value — the meta carries a short sha256 of
+each side) and `metistry up` as the fix.
+
 ## Doctor
 
 `doctor`'s first row is the shape and where it was read from, and every
@@ -954,6 +1010,14 @@ to one `status` call on the control socket — and a `child:<name>` row for each
 child, with its state, pid, restart count and log path. `launchctl print`
 cannot see those processes, so without this doctor would be blind to
 everything except the agent itself.
+
+The **`assistant`** row under this shape is the supervisor's answer, not
+compute.yaml's: `failed` unless a child named `assistant` is running — "not
+started" when `supervisor.json` has no such child (the supervisor logs the
+same at start; `up` rendered it from an environment with no engine), or the
+child's state and last exit. It used to say `ok` whenever compute.yaml
+named an engine, which is how 0.14.2 reported an assistant that did not
+exist. The **`launchd env`** row is "The jobs follow `.env`" above.
 
 On macOS it also adds a `keep-awake` row — this install's power policy and
 whether anything is actually holding the assertion right now ("Keeping the

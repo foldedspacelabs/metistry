@@ -15,7 +15,7 @@
 
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   COMPUTE_FILENAME,
   EGRESS_PROXY_HOST,
@@ -86,7 +86,7 @@ import { allocateBase, applyPorts, loadNamespace, portEnv, PORTED_SERVICES, port
 import { llamaServerChild } from "./local-models.js";
 import { instanceLockPath, readLock, type LockFile, type LockSource } from "./lock.js";
 import { currentLink, imageEnv, imageRef, IMAGE_SERVICES } from "./release.js";
-import { installRuntimeDeps, pathWithRuntimeGit, runtimeDepsEnabled, runtimeNodeBin, RUNTIME_DIRNAME } from "./runtime-deps.js";
+import { installRuntimeDeps, LAUNCHD_BASE_PATH, pathWithRuntimeGit, runtimeDepsEnabled, runtimeNodeBin, RUNTIME_DIRNAME } from "./runtime-deps.js";
 import {
   applyManagedBlock,
   findPgToolchain,
@@ -825,6 +825,13 @@ export async function planConfinement(r: StepRunner, installRoot: string, values
     );
   } else {
     r.note(`reconciler: confined by ops/sandbox/reconciler.sb — writes only ${values.instanceDir} and tmp; execs only node and ${gitBin}; no shell.`);
+    // …and the reconciler must RUN that git. It spawns `git` by name, and a
+    // launchd job's PATH is /usr/bin first — the xcode-select shim, which
+    // the profile deliberately does not allow — so a git resolved from the
+    // Command Line Tools or a non-shim PATH entry (anything but the bundled
+    // runtime, which `gitPath` already carries) goes on the front of the
+    // job's PATH. Without it: `Error: spawn EPERM` at startup, every time.
+    if (gitBin && !values.gitPath?.split(":").includes(dirname(gitBin))) values.gitPath = `${dirname(gitBin)}:${LAUNCHD_BASE_PATH}`;
   }
   if (values.confineReconciler) {
     // The push credential. git runs every credential helper through /bin/sh
@@ -1212,6 +1219,13 @@ export async function up(opts: UpOptions): Promise<UpResult> {
   if (ns) {
     values.namespace = ns;
     const applied = applyPorts(env, ns);
+    // …and into the environment the jobs are RENDERED from, which is a copy
+    // (keep-awake is added to it above). Without this a namespaced install
+    // rendered the default ports into supervisor.json, the console's env and
+    // both sandbox profiles' parameters — a second instance's console on
+    // 8080 and a confined reconciler allowed to bind 7812 but told to use
+    // its own port.
+    applyPorts(values.env, ns);
     r.note(`namespace: labels ${LABEL_PREFIX}${ns.labelSuffix}.<service>, ports ${ns.base}-${ns.base + PORTED_SERVICES.length - 1} — from ${ns.from}`);
     r.note(applied.length ? `namespace → environment: ${applied.join(" ")}` : "namespace → environment: nothing to fill; .env already sets every port and URL");
   }
@@ -1261,6 +1275,10 @@ export async function up(opts: UpOptions): Promise<UpResult> {
         // the install root, not the release: `.env`, `state/pg` and any
         // bundled runtime/postgres live where the install does
         pg = await preparePostgres(r, opts.productDir, { exists: opts.exists, mintPassword: opts.mintPassword ?? mintPassword, runtimeDeps, envFile });
+        // a password this run minted into `.env` goes into what the jobs are
+        // rendered from too — else a fresh install's supervisor and console
+        // start without it until a second `up` (doctor's `launchd env` row)
+        values.env.METISTRY_DB_PASSWORD = pg.password;
         values.pgBin = pg.plan.toolchain.bin;
         values.pgData = pg.plan.dataDir;
         await r.run("mkdir", ["-p", values.stateDir], { comment: "the assistant's state dir — HOME, and the only path its sandbox may write" });

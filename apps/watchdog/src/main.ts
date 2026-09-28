@@ -128,6 +128,11 @@ export function auditPool(env: NodeJS.ProcessEnv = process.env): pg.Pool | undef
   return sharedPool;
 }
 
+/** The supervisor's one line when it has no assistant child. */
+export function assistantNotStartedLine(): string {
+  return "[assistant] not started — supervisor.json has no assistant child: there was no engine (compute.yaml's default provider and its key) in the environment `metistry up` rendered from. `metistry up` re-renders it from .env";
+}
+
 /** Returns the config it started, so the probe half can read the child set. */
 async function runSupervisor(path: string): Promise<{ children: { name: string }[] }> {
   const config = parseSupervisorConfig(JSON.parse(await readFile(path, "utf8")), path);
@@ -144,6 +149,11 @@ async function runSupervisor(path: string): Promise<{ children: { name: string }
   for (const line of await injectGitCredentials(config.children, config.gitCredentials)) console.log(line);
   const sup = new Supervisor(config);
   console.log(startupSummary(config));
+  // said at start, because nothing else will say it: `up` leaves the engine
+  // out when the environment it rendered from had no engine, and a key that
+  // reached `.env` afterwards reaches nothing until `up` renders again.
+  // doctor's `assistant` row points here.
+  if (!config.children.some((c) => c.name === "assistant")) console.log(assistantNotStartedLine());
   const control = await listenControl(sup);
   // The egress door, BEFORE any child is spawned: a confined child's profile
   // allows exactly this loopback port and nothing else off the machine, so a

@@ -181,9 +181,19 @@
   (subpath (param "TMP_DIR")))
 
 ;; ---- network ------------------------------------------------------------
-;; It binds ONE port — its own bridge — and dials four destinations, three of
-;; them loopback.
+;; It listens on ONE port — its own bridge — and dials four destinations,
+;; three of them loopback.
+;;
+;; Listening takes TWO rules on macOS 26, not one. `network-bind` lets the
+;; socket take the address; `listen()` is then refused with EPERM unless
+;; `network-inbound` names the same local address. Measured on Darwin 25.4,
+;; 2026-09-28: with the bind rule alone, `createServer().listen(7812,
+;; "127.0.0.1")` fails `listen EPERM`, the reconciler crash-loops, and
+;; nobody saw it before 0.14.2 because earlier installs had no real git and
+;; so ran unconfined.sb. ops/sandbox/bind.test.mjs listens under this exact
+;; profile on every CI run that touches it, so this cannot quietly regress.
 (allow network-bind (local ip (param "RECONCILER_TCP")))
+(allow network-inbound (local ip (param "RECONCILER_TCP")))
 
 ;; 1. The console, on loopback.
 (allow network-outbound (remote tcp (param "CONSOLE_TCP")))

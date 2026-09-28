@@ -8,6 +8,8 @@ import Foundation
 public protocol WorkStore: Sendable {
     /// route: GET /api/q/board
     func board(project: String?, limit: Int?) async -> Result<Board, ConsoleError>
+    /// route: GET /api/q/board_projects
+    func boardProjects(limit: Int?) async -> Result<BoardProjects, ConsoleError>
     /// route: GET /api/q/rooms
     func rooms(state: String?, project: String?, anchor: String?, limit: Int?) async -> Result<RoomList, ConsoleError>
     /// route: GET /api/projects
@@ -43,6 +45,74 @@ public protocol WorkStore: Sendable {
 }
 
 // MARK: - Replies
+
+/// `GET /api/q/board_projects` — one row per project × column: the column
+/// headers' totals and escalation counts, and the project filter's options.
+/// Counted by the same `CASE` as `board`, never from the capped cards (T6-7).
+public struct BoardProjects: Codable, Sendable, Equatable {
+    public let rows: [BoardProjectCount]
+    public let asOf: String?
+
+    enum CodingKeys: String, CodingKey {
+        case rows
+        case asOf = "as_of"
+    }
+
+    public init(rows: [BoardProjectCount], asOf: String? = nil) {
+        self.rows = rows
+        self.asOf = asOf
+    }
+
+    /// The projects that have cards, in the query's order. A row with no
+    /// project is the owner's default project: counted under all projects,
+    /// with no option of its own (docs/ops/board.md).
+    public var projects: [String] {
+        var seen: [String] = []
+        for row in rows { if let p = row.project, !p.isEmpty, !seen.contains(p) { seen.append(p) } }
+        return seen
+    }
+
+    /// One column's cards and escalations, for one project or all of them.
+    public func total(column: String, project: String?) -> (cards: Int, escalations: Int) {
+        rows.filter { $0.column == column && (project == nil || $0.project == project) }
+            .reduce((0, 0)) { ($0.0 + $1.cards, $0.1 + $1.escalations) }
+    }
+}
+
+public struct BoardProjectCount: Codable, Sendable, Equatable {
+    public let project: String?
+    public let column: String
+    public let cards: Int
+    public let escalations: Int
+    public let oldestAgeHours: Double?
+    public let lastActivity: String?
+
+    enum CodingKeys: String, CodingKey {
+        case project, column, cards, escalations
+        case oldestAgeHours = "oldest_age_hours"
+        case lastActivity = "last_activity"
+    }
+
+    public init(project: String?, column: String, cards: Int, escalations: Int, oldestAgeHours: Double? = nil, lastActivity: String? = nil) {
+        self.project = project
+        self.column = column
+        self.cards = cards
+        self.escalations = escalations
+        self.oldestAgeHours = oldestAgeHours
+        self.lastActivity = lastActivity
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        project = try c.decodeIfPresent(String.self, forKey: .project)
+        column = try c.decodeIfPresent(String.self, forKey: .column) ?? "backlog"
+        // `count(*)` is a bigint, which the driver sends as text
+        cards = c.wireInt(.cards) ?? 0
+        escalations = c.wireInt(.escalations) ?? 0
+        oldestAgeHours = c.wireDouble(.oldestAgeHours)
+        lastActivity = try c.decodeIfPresent(String.self, forKey: .lastActivity)
+    }
+}
 
 /// `GET /api/projects` — `{projects, as_of}`: each with its mode, budget, caps and rollup.
 public struct ProjectList: ConsoleBody { public let json: JSONValue; public init(json: JSONValue) { self.json = json } }
@@ -140,6 +210,10 @@ public struct PullRequestReview: ConsoleRequestBody {
 
 extension ConsoleStores: WorkStore {
     public func board(project: String?, limit: Int?) async -> Result<Board, ConsoleError> { await api.board(project: project, limit: limit) }
+
+    public func boardProjects(limit: Int?) async -> Result<BoardProjects, ConsoleError> {
+        await get("/api/q/board_projects", ["limit": limit.map(String.init)])
+    }
 
     public func rooms(state: String?, project: String?, anchor: String?, limit: Int?) async -> Result<RoomList, ConsoleError> {
         await api.rooms(state: state, project: project, anchor: anchor, limit: limit)

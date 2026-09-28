@@ -1,0 +1,57 @@
+{
+  "route": "GET /api/q/:name",
+  "source": "recorded",
+  "ticket": null,
+  "request": {
+    "method": "GET",
+    "path": "/api/q/board_projects",
+    "body": null,
+    "idempotency_key": null
+  },
+  "status": 200,
+  "body": {
+    "rows": [
+      {
+        "project": "metistry",
+        "column": "backlog",
+        "cards": "1",
+        "escalations": "0",
+        "oldest_age_hours": 0,
+        "last_activity": "2026-09-28T21:30:56.879Z"
+      },
+      {
+        "project": "metistry",
+        "column": "assigned",
+        "cards": "1",
+        "escalations": "0",
+        "oldest_age_hours": 0,
+        "last_activity": "2026-09-28T21:30:56.911Z"
+      },
+      {
+        "project": "metistry",
+        "column": "in_progress",
+        "cards": "2",
+        "escalations": "0",
+        "oldest_age_hours": 0,
+        "last_activity": "2026-09-28T21:30:56.883Z"
+      },
+      {
+        "project": "metistry",
+        "column": "blocked",
+        "cards": "1",
+        "escalations": "1",
+        "oldest_age_hours": 0,
+        "last_activity": "2026-09-28T21:30:56.693Z"
+      },
+      {
+        "project": "metistry",
+        "column": "done",
+        "cards": "1",
+        "escalations": "0",
+        "oldest_age_hours": 0,
+        "last_activity": "2026-09-28T21:30:56.694Z"
+      }
+    ],
+    "as_of": "2026-09-28T21:30:56.998Z"
+  }
+}

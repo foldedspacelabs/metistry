@@ -243,7 +243,7 @@ private let drives: [String: Drive] = [
     "DELETE /api/messages/:id/feedback": { s, a in done(await s.clearRating(message: a.pInt("id"))) },
     "GET /api/commands": { s, _ in done(await s.commands()) },
     "GET /api/turns/:turn_id/progress": { s, a in done(await s.turnProgress(a.p("turn_id"))) },
-    "GET /api/sessions/:id": { s, a in done(await s.session(a.p("id"))) },
+    "GET /api/sessions/:id": { s, a in done(await s.session(a.p("id"), turnID: a.q("turn_id"))) },
     // Activity
     "GET /api/q/activity_feed": { s, a in
         done(await s.activityFeed(hours: a.qInt("hours"), limit: a.qInt("limit"), kind: a.q("kind"), project: a.q("project"), agent: a.q("agent"), since: a.q("since"), turnID: a.q("turn_id")))

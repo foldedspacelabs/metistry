@@ -127,6 +127,12 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm -r build
+      # The Seatbelt profiles ship in this pack; a profile that cannot listen
+      # where it says it may (0.14.2's reconciler.sb on macOS 26) never ships
+      # again. macOS only — sandbox-exec does not exist elsewhere.
+      - if: matrix.target == 'darwin-arm64'
+        name: sandbox profiles listen where they say (macOS 26)
+        run: node --test 'ops/sandbox/*.test.mjs'
       # The Swift TCC helpers (calendar, apple-fm) ship in the darwin pack as
       # signed app bundles, so a release install has something for `metistry
       # up` to pin its bridges at (packages/cli/src/tcc-pin.ts). Signed under

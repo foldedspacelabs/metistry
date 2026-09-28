@@ -776,7 +776,8 @@ until this it had ambient authority over the whole disk:
 | filesystem read | the product checkout (its own `dist/`, `node_modules/`, `seed/` — and its working directory), the node runtime, **a real git's installation prefix**, system frameworks, and `~/.gitconfig` **by name**. |
 | filesystem write | **the instance repo — the vault, `.metistry/` and `.git/`** — and tmp. Nothing else: not `~/Documents`, not `~/.ssh`, not the product checkout, not another instance's vault. |
 | exec | node, that git, and the askpass shim (below). **No shell.** |
-| network out | the console, Postgres and the on-machine embedder on loopback, plus the egress proxy. It binds exactly its own bridge port. |
+| network out | the console, Postgres and the on-machine embedder on loopback, plus the egress proxy. |
+| network in | exactly its own bridge port — `network-bind` **and** `network-inbound` on `RECONCILER_TCP` (below). |
 | off switch | `METISTRY_RECONCILER_SANDBOX=0` renders `ops/sandbox/unconfined.sb` instead — a real file that says `(allow default)`, so "not confined" is legible in the plist, in `supervisor.json`, in `up --dry-run` and in doctor's `sandbox` row. |
 
 **`/usr/bin/git` is not a git.** Measured on macOS 26.4: it links against
@@ -803,6 +804,22 @@ never in argv, never in `supervisor.json` and never on disk. `git.ts` adds
 `-c credential.helper=` — git's documented reset — only when there is an
 askpass, so an unconfined install keeps using the Keychain helper exactly as
 before.
+
+**Listening takes two rules on macOS 26.** `network-bind` lets a socket take
+an address; on macOS 26 (Darwin 25) `listen()` on it is then refused with
+`EPERM` unless `network-inbound` names the same local address. 0.14.2 shipped
+the bind rule alone, and the first install that found a real git — and so
+chose confinement over `unconfined.sb` — crash-looped the reconciler on
+`listen EPERM 127.0.0.1:7812`. Both rules are in `reconciler.sb` now, and
+`ops/sandbox/bind.test.mjs` is the guard: for every profile it finds, every
+parameterised `network-bind` must have its `network-inbound` twin, and a real
+`sandbox-exec -f <profile> -D … node -e '<listen>'` must succeed on a free
+high port in that parameter and be refused on a port the profile does not
+name. It runs on a `macos-26` runner — CI's `sandbox-profiles` job whenever
+`ops/sandbox/` or `sandbox.ts` changes, and the release's darwin runtime job
+every time — because the behaviour is the OS's and no Linux run can see it.
+The engine (`assistant.sb`) has a bind rule and deliberately no inbound one:
+it opens no server, and the same test asserts it cannot.
 
 **SSH remotes are the one shape confinement cannot serve.** `ssh` is not
 exec-able, granting it would mean granting the sole committer `~/.ssh`, and

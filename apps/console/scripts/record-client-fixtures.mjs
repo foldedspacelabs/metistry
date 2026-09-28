@@ -497,9 +497,19 @@ ids.dispatchTask = Number((await one(`INSERT INTO work (title, project, kind, st
 // a card its creator described (T1-1, C85) — the board's `description`, set at create
 ids.roomTask = Number((await one(`INSERT INTO work (title, project, kind, status, created_by, description) VALUES ('Decide the fixture format', $1, 'task', 'in_progress', 'user', 'One JSON per route, recorded from a scratch console; the views are built against them.') RETURNING id`, [P])).id);
 
-const outboundMessage = async (text) => Number((await one(`INSERT INTO outbound_messages (thread, text, kind) VALUES ('default', $1, 'reply') RETURNING id`, [text])).id);
-await pool.query(`INSERT INTO inbound_messages (thread, text, status) VALUES ('default', 'what is on today?', 'done')`);
-ids.reply = await outboundMessage("Three things today: the store interface, the fixture recorder, and a review.");
+const outboundMessage = async (text, inReplyTo = null) => Number((await one(`INSERT INTO outbound_messages (thread, text, kind, in_reply_to) VALUES ('default', $1, 'reply', $2) RETURNING id`, [text, inReplyTo])).id);
+ids.inbound = Number((await one(`INSERT INTO inbound_messages (thread, text, status) VALUES ('default', 'what is on today?', 'done') RETURNING id`)).id);
+ids.reply = await outboundMessage("Three things today: the store interface, the fixture recorder, and a review.", ids.inbound);
+// its own `runs` row (X-18): `message_id` is what `GET /api/messages` joins
+// `turn_id` onto the reply above — exactly `ids.inbound`, never `ids.run`
+// below, which every OTHER route's fixture already reads by id or by its own
+// `turn_id`; a second row here means re-recording just this one route never
+// moves theirs.
+const replyTurnId = `turn-${mintToken(6).replaceAll(/[^A-Za-z0-9]/g, "")}`;
+await pool.query(
+  `INSERT INTO runs (component, kind, ok, duration_ms, meta) VALUES ('assistant', 'turn', true, 1800, jsonb_build_object('turn_id', $1::text, 'message_id', $2::text, 'tier', 'default'))`,
+  [replyTurnId, String(ids.inbound)],
+);
 
 const proposal = async (kind, payload) => Number((await one(`INSERT INTO proposals (kind, source_agent, trust, payload) VALUES ($1, 'assistant', 'internal', $2::jsonb) RETURNING id`, [kind, JSON.stringify(payload)])).id);
 // its own thread: a message into a decision's thread answers it (docs/ops/reply-feedback.md)

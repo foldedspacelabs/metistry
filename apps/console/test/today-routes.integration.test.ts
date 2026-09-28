@@ -37,6 +37,16 @@ const ZONE = "America/New_York";
 const DAY = "2001-02-03";
 const PREV = "2001-02-02";
 const NEXT = "2001-02-04";
+// Add to Today (X-12): `work` rows of its own, kind `issue`, the shape T4-24's sync leaves.
+// Two issues — one the U2 door check presses (its exact capture state is not this file's
+// business), one the dedicated tests below own outright, so neither disturbs the other's count.
+const LINEAR_TEAM = `T${suffix.toUpperCase()}`;
+const LINEAR_KEY = `${LINEAR_TEAM}-1`;
+const LINEAR_KEY2 = `${LINEAR_TEAM}-2`;
+const LINEAR_KEY_UNKNOWN = `${LINEAR_TEAM}-9`; // never inserted — the 404 case
+const LINEAR_REF = `linear:${LINEAR_KEY}`;
+const LINEAR_REF2 = `linear:${LINEAR_KEY2}`;
+const LINEAR_TITLE2 = `${LINEAR_KEY2} · ${MARK} fixture`;
 const FIXTURE = JSON.parse(readFileSync(fileURLToPath(new URL("../../macos/tests/kit/fixtures/get-api-today.json", import.meta.url)), "utf8")) as { body: Record<string, unknown> };
 
 type Body = Record<string, any>;
@@ -114,6 +124,12 @@ describe.skipIf(!hasDb)("Today: GET /api/today, GET /api/vault-tasks, PUT /api/t
     await work("undated", "in_progress");
     await work("later", "open", { due: NEXT });
 
+    // Add to Today's own rows: an `issue`, as the Linear sync leaves it (T4-24) — not a `task`, so neither appears in `day_work`'s own rows above.
+    await pool.query(
+      `INSERT INTO work (title, kind, status, created_by, external_ref, meta) VALUES ($1, 'issue', 'open', 'user', $2, '{}'::jsonb), ($3, 'issue', 'open', 'user', $4, '{}'::jsonb)`,
+      [`${LINEAR_KEY} · ${MARK} fixture`, LINEAR_REF, LINEAR_TITLE2, LINEAR_REF2],
+    );
+
     // one meeting on the day in the owner's zone, one the evening before, as a calendar sync leaves them
     await pool.query(
       `INSERT INTO calendar_events (connection, event_id, starts_at, ends_at, title, attendees, self_status) VALUES
@@ -130,6 +146,9 @@ describe.skipIf(!hasDb)("Today: GET /api/today, GET /api/vault-tasks, PUT /api/t
   afterAll(async () => {
     await pool.query(`DELETE FROM vault_tasks WHERE path LIKE $1`, [`${DIR}/%`]);
     await pool.query(`DELETE FROM work WHERE id = ANY($1::bigint[])`, [Object.values(workIds)]);
+    await pool.query(`DELETE FROM work WHERE external_ref = ANY($1::text[])`, [[LINEAR_REF, LINEAR_REF2]]);
+    await pool.query(`DELETE FROM inbox WHERE idempotency_principal = 'tracker:linear' AND idempotency_key = ANY($1::text[])`, [[LINEAR_REF, LINEAR_REF2]]);
+    await pool.query(`DELETE FROM runs WHERE kind = 'today_add' AND meta->>'key' = ANY($1::text[])`, [[LINEAR_KEY, LINEAR_KEY2]]);
     await pool.query(`DELETE FROM calendar_events WHERE connection = 'itest-today'`);
     await pool.query(`DELETE FROM today_order WHERE day IN ($1::date, $2::date, $3::date)`, [DAY, NEXT, PREV]);
     await pool.query(`DELETE FROM runs WHERE kind = 'today_order' AND meta->>'day' IN ($1, $2, $3)`, [DAY, NEXT, PREV]);
@@ -151,6 +170,10 @@ describe.skipIf(!hasDb)("Today: GET /api/today, GET /api/vault-tasks, PUT /api/t
     const r = await fetch(`${base}/api/today/order`, { method: "PUT", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
     return { status: r.status, body: (await r.json()) as Body };
   }
+  async function post(path: string, body: unknown, headers: Record<string, string> = local) {
+    const r = await fetch(`${base}${path}`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
+    return { status: r.status, body: (await r.json()) as Body };
+  }
   const stored = async (day = DAY) => (await pool.query(`SELECT task_key FROM today_order WHERE day = $1::date ORDER BY position`, [day])).rows.map((r) => String(r.task_key));
   const mine = (rows: Body[]) => rows.filter((r) => String(r.path ?? "").startsWith(`${DIR}/`));
   const myWork = (rows: Body[]) => rows.filter((r) => Object.values(workIds).includes(String(r.id)));
@@ -162,6 +185,7 @@ describe.skipIf(!hasDb)("Today: GET /api/today, GET /api/vault-tasks, PUT /api/t
     ["GET /api/today", (h) => get(`/api/today?date=${DAY}`, h)],
     ["GET /api/vault-tasks", (h) => get(`/api/vault-tasks?where=${encodeURIComponent(`due <= ${DAY}`)}`, h)],
     ["PUT /api/today/order", (h) => put({ date: NEXT, task_keys: [] }, h)],
+    ["POST /api/today/add", (h) => post("/api/today/add", { key: LINEAR_KEY }, h)],
   ];
   describe.each(doors)("who may reach %s (U2)", (_route, call) => {
     it("no credential is the uniform 401", async () => {
@@ -421,6 +445,89 @@ describe.skipIf(!hasDb)("Today: GET /api/today, GET /api/vault-tasks, PUT /api/t
       expect((await q({ offset: "-1" })).status).toBe(400);
       expect((await q({ path_prefix: "Journal" })).status).toBe(400); // the scope is the route's, never the caller's
       expect((await q({ where: "x".repeat(501) })).status).toBe(400);
+    });
+  });
+
+  // ---- POST /api/today/add (X-12, ruling 11) -----------------------------------------------
+  //
+  // `LINEAR_KEY2` is this block's own issue, untouched by the U2 door check above (which
+  // presses `LINEAR_KEY` and does not care what state that leaves it in) — so every "nothing
+  // was written" assertion here reads a count this block alone can move, and the tests that
+  // refuse before a capture run before the one that succeeds.
+
+  describe("POST /api/today/add", () => {
+    const add = (body: unknown) => post("/api/today/add", body);
+    const captured = async (ref = LINEAR_REF2) => (await pool.query(`SELECT count(*)::int AS n FROM inbox WHERE idempotency_principal = 'tracker:linear' AND idempotency_key = $1`, [ref])).rows[0].n as number;
+
+    it("an issue the sync has not seen is 404, naming it — nothing written", async () => {
+      const r = await add({ key: LINEAR_KEY_UNKNOWN });
+      expect(r.status).toBe(404);
+      expect(r.body.error.code).toBe("not_found");
+      expect(r.body.error.message).toContain(LINEAR_KEY_UNKNOWN);
+      expect(await captured(`linear:${LINEAR_KEY_UNKNOWN}`)).toBe(0);
+    });
+
+    it("a key that is not a Linear key (TEAM-123) is 400, and nothing is written", async () => {
+      const r = await add({ key: "not-a-key" });
+      expect(r.status).toBe(400);
+      expect(r.body.error.code).toBe("invalid_request");
+      expect(await captured("linear:not-a-key")).toBe(0);
+    });
+
+    it("**an item added to a day outside Today's window is refused**, and nothing is written", async () => {
+      for (const date of [DAY, PREV, NEXT]) {
+        const r = await add({ key: LINEAR_KEY2, date });
+        expect(r.status, date).toBe(400);
+        expect(r.body.error.code, date).toBe("invalid_request");
+        expect(r.body.error.message, date).toContain("outside Today's window");
+        expect(r.body.error.message, date).toContain(date);
+      }
+      expect(await captured()).toBe(0);
+    });
+
+    it("refuses a body that is not an add — each 400, nothing written", async () => {
+      const bad: [unknown, string][] = [
+        [{}, "key is required"],
+        [{ key: "" }, "key is required"],
+        [{ key: 7 }, "key is required"],
+        [{ key: LINEAR_KEY2, date: "2001-02-30" }, "date must be a calendar day"],
+        [{ key: LINEAR_KEY2, date: "tomorrow" }, "date must be a calendar day"],
+        [{ key: LINEAR_KEY2, where: "overdue" }, "unknown field where"],
+      ];
+      for (const [body, says] of bad) {
+        const r = await add(body);
+        expect(r.status, JSON.stringify(body)).toBe(400);
+        expect(r.body.error.message, JSON.stringify(body)).toContain(says);
+      }
+      const notJson = await fetch(`${base}/api/today/add`, { method: "POST", headers: { "content-type": "application/json", ...local }, body: "{" });
+      expect(notJson.status).toBe(400);
+      expect(await captured()).toBe(0);
+    });
+
+    it("captures the issue's task line for today, through T4-24's own service", async () => {
+      const r = await add({ key: LINEAR_KEY2 });
+      expect(r.status).toBe(200);
+      expect(r.body.ok).toBe(true);
+      expect(r.body.replayed).toBe(false);
+      // this harness's sink is a bare `dirSink` (no vault prefix), so the path
+      // this test server records is the sink's own timestamped filename, not
+      // production's `Inbox/…` (which `vaultSink`'s prefix gives it, main.ts)
+      expect(r.body.path).toMatch(new RegExp(`^\\d+-linear-${LINEAR_KEY2}\\.md$`));
+      expect(r.body.line).toContain(LINEAR_TITLE2);
+      expect(r.body.line).toContain(`linear:${LINEAR_KEY2}`);
+      expect(typeof r.body.sha256).toBe("string");
+      const inbox = await pool.query(`SELECT source, source_agent, note FROM inbox WHERE idempotency_principal = 'tracker:linear' AND idempotency_key = $1`, [LINEAR_REF2]);
+      expect(inbox.rows[0]).toMatchObject({ source: "linear", source_agent: null });
+      const audit = await pool.query(`SELECT ok, meta FROM runs WHERE kind = 'today_add' AND tool = 'add' AND meta->>'key' = $1 ORDER BY id DESC LIMIT 1`, [LINEAR_KEY2]);
+      expect(audit.rows[0]).toMatchObject({ ok: true, meta: { key: LINEAR_KEY2, outcome: "captured" } });
+    });
+
+    it("a second Add to Today for the same issue returns the FIRST capture and writes nothing new", async () => {
+      const first = await add({ key: LINEAR_KEY2 });
+      const second = await add({ key: LINEAR_KEY2 });
+      expect(second.status).toBe(200);
+      expect(second.body).toEqual({ ...first.body, replayed: true });
+      expect(await captured()).toBe(1);
     });
   });
 });

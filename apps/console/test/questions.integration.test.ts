@@ -222,14 +222,14 @@ describe.skipIf(!hasDb)("questions v2 and the table's answers (integration, T2-3
     expect(await rowOf(again)).toMatchObject({ decision: "deny", feedback: null });
   });
 
-  it("a report cannot take `allow` — nor Approve as Work, Revise or Decline: it is Dismissed (`skip`), and acted on at its own door", async () => {
+  it("a report cannot take `allow` — nor Approve as Work, Revise or Decline: it is Acknowledged (X-10) or Dismissed (`skip`), and acted on at its own door", async () => {
     const id = await plant("report", { title: "Nightly fold finished", body: "12 pages touched", kind: "finding", suggested_work: { title: "look into the two skipped pages" } });
     const served = ((await (await owner("GET", "/api/proposals?limit=200")).json()).proposals as any[]).find((p) => Number(p.id) === id);
-    expect(served.request).toMatchObject({ type: "report", primary: { label: null, sends: { door: "act" } }, revise: null, decline: { label: "Dismiss", sends: { decision: "skip" } }, decisions: ["skip"] });
+    expect(served.request).toMatchObject({ type: "report", primary: { label: "Acknowledge", sends: { decision: "acknowledge" } }, revise: null, decline: { label: "Dismiss", sends: { decision: "skip" } }, decisions: ["acknowledge", "skip"] });
     for (const decision of ["allow", "accept_as_work", "accept_with_changes", "deny", "answers", "approve"]) {
       const r = await answer(id, { decision, feedback: "x" });
       expect(r.status, decision).toBe(400);
-      expect((await r.json()).error.message, decision).toMatch(/this report takes skip \| later/);
+      expect((await r.json()).error.message, decision).toMatch(/this report takes acknowledge \| skip \| later/);
     }
     expect(await batch([id], "deny")).toEqual([expect.objectContaining({ id, ok: false, error: expect.objectContaining({ code: "invalid_request" }) })]);
     expect(await rowOf(id)).toMatchObject({ decision: "pending", work_id: null });

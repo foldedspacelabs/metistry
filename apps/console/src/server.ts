@@ -18,7 +18,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
-import { API_VERSION, API_VERSION_HEADER, AREA_PREFIX_REFUSAL, knowledgeConflictSource, runCheck, startRun, finishRun, errorEnvelope, intEnv, may, parseAction, noRouteMessage, PROJECT_SLUG_RE, rollSession, statusFor, servedRoute, isLocalRoute, routineGrantsFor, localOnlyMessage, routeKey, resolveActor, SKIP_FEEDBACK, answersText, checkAnswers, describeRequest, parseSubjectFingerprint, requestSubjectOf, subjectUnchanged, validAgentAreaGrant, type QuestionAnswer, type RequestShape, type RequestSubject, type SubjectReading, type CheckResult, type Compute, type ErrorCode, type ErrorEnvelope, type Principal } from "@foldedspacelabs/metistry-core";
+import { API_VERSION, API_VERSION_HEADER, AREA_PREFIX_REFUSAL, knowledgeConflictSource, runCheck, startRun, finishRun, errorEnvelope, intEnv, may, parseAction, noRouteMessage, PROJECT_SLUG_RE, rollSession, statusFor, servedRoute, isLocalRoute, routineGrantsFor, localOnlyMessage, routeKey, resolveActor, ACKNOWLEDGED, SKIP_FEEDBACK, answersText, checkAnswers, describeRequest, parseSubjectFingerprint, requestSubjectOf, subjectUnchanged, validAgentAreaGrant, type QuestionAnswer, type RequestShape, type RequestSubject, type SubjectReading, type CheckResult, type Compute, type ErrorCode, type ErrorEnvelope, type Principal } from "@foldedspacelabs/metistry-core";
 import { QueryError, QueryStore } from "@foldedspacelabs/metistry-queries";
 import { captureToInbox, createBrainServer, dirSink, type CaptureSink, type ConnectionLimits, type ConnectionsProxy, type KnowledgeLister, type KnowledgeReader, type KnowledgeVaultSearcher, type KnowledgeWriter, type QueryEmbedder } from "@foldedspacelabs/metistry-mcp-brain";
 import { TasksError, TasksService } from "@foldedspacelabs/metistry-tasks";
@@ -2005,8 +2005,9 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
 
     // What this row may record is F-5's table, read for this kind and THIS
     // stored payload (`describeRequest(...).decisions`, plan §2.12; T2-3) —
-    // never a list built here, and never the request's. A report is Dismissed
-    // (`skip`) or acted on at its own door, so it cannot be approved; `later`
+    // never a list built here, and never the request's. A report is
+    // Acknowledged where it names no act (X-10), Dismissed (`skip`), or acted
+    // on at its own door, so it cannot be approved; `later`
     // is not an answer and every row takes it; Skip is bulk-only (K2, above).
     const shape = describeRequest(String(row.kind), row.payload);
     const verbs = new Set<string>([...shape.decisions, "later", ...(opts.bulk === true ? ["skip"] : [])]);
@@ -2036,6 +2037,12 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       const takes = `${[...verbs].join(" | ")}${shape.type === "question" && questions.length === 1 && !questions[0]!.multi ? ", or one of its options" : ""}`;
       const why = verb === "skip" ? `Skip is bulk-only (K2) — POST /api/proposals/batch. ` : "";
       return { status: 400, body: errorEnvelope("invalid_request", `${why}this ${shape.word} takes ${takes}`) };
+    }
+    // Acknowledge carries no words (X-10): it is *I have read this*, and the
+    // agent that filed the report reads back only that. Words beside it would
+    // be stored where nobody reads them, so they are refused rather than kept.
+    if (verb === "acknowledge" && body.feedback !== undefined) {
+      return { status: 400, body: errorEnvelope("invalid_request", "Acknowledge carries no words: it says you have read the report, and nothing more") };
     }
     // Approve as Work builds a row only from a suggestion this server
     // validates itself — never merely because the payload has the key.
@@ -2429,7 +2436,10 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     // fixed marker (never the user's words — a skip is not a reason, and
     // SKIP_FEEDBACK is what keeps it out of the paths that route feedback
     // back to the source agent), `accept_as_work` stores an `allow` and the
-    // work id it just created.
+    // work id it just created. A report's `acknowledge` (X-10) stores its own
+    // word, ACKNOWLEDGED — never `allow`, which a report cannot take — and
+    // fires nothing: knowledge-fold reads it, and the agent that filed the
+    // report reads it back (requests_create).
     //
     // A question's answers store `answered` — what answering it in chat has
     // always stored — with the per-question record in `payload.answers` and
@@ -2439,7 +2449,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     // registry pane's settling writes too (`settleEnrollment`) — and no words:
     // its option is a verb there, and `deny` + feedback is what the weekly
     // review reads as a reason the owner gave.
-    const storedDecision = verb === "skip" ? "deny" : verb === "accept_as_work" ? "allow" : (enrolment ?? (answered ? "answered" : verb));
+    const storedDecision = verb === "skip" ? "deny" : verb === "accept_as_work" ? "allow" : verb === "acknowledge" ? ACKNOWLEDGED : (enrolment ?? (answered ? "answered" : verb));
     const storedFeedback = verb === "skip" ? SKIP_FEEDBACK : answered && enrolment === undefined ? answersText(questions, answered) : (body.feedback ?? null);
     const { rows } = await db.query(
       `UPDATE proposals SET decision = $2, feedback = $3, decided_at = now(), snoozed_until = NULL,

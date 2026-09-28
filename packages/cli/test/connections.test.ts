@@ -111,6 +111,26 @@ describe("metistry connections add", () => {
     expect(shown.issues.join(" ")).toContain("does not grant linear_api_key to connection:linear");
   });
 
+  it("the ICS recipe (docs/ops/connections.md) writes an ok calendar connection the ics-calendar sync reads, with no dial (T4-12)", async () => {
+    const dir = await instance("ics");
+    const r = await run(["connections", "add", "holidays", "--type", "calendar", "--provider", "ics", "--url", "https://example.com/holidays.ics", "--no-discover", "--instance", dir]);
+    expect(r.code, r.all).toBe(0);
+    expect(yamlOf(dir, "holidays")).toMatchObject({ type: "calendar", provider: "ics", reach: { http: { url: "https://example.com/holidays.ics" } }, secrets: [] });
+    const show = await run(["connections", "show", "holidays", "--json", "--instance", dir]);
+    expect(show.code, show.all).toBe(0);
+    expect(JSON.parse(show.out).connection).toMatchObject({ status: "ok", provider_unit: { provides: "calendar", implementation: "builtin", sync: "ics-calendar" }, used_by: [{ kind: "sync", name: "ics-calendar" }] });
+  });
+
+  it("**a feed address that carries a token is a secret**: refused — nothing written, the address never echoed (T4-12)", async () => {
+    const dir = await instance("ics-token");
+    const url = `https://calendar.google.com/calendar/ical/owner%40gmail.com/private-${["3f9a1c0b", "7e2d4a6f", "8b1c3e5d", "7f9a0b2c"].join("")}/basic.ics`;
+    const r = await run(["connections", "add", "gcal", "--type", "calendar", "--provider", "ics", "--url", url, "--no-discover", "--instance", dir]);
+    expect(r.code).toBe(1);
+    expect(r.err).toMatch(/reach\.http\.url: this looks like a key/);
+    expect(r.all).not.toContain(url.split("private-")[1]);
+    expect(existsSync(file(dir, "gcal"))).toBe(false);
+  });
+
   it("**a key pasted where a name belongs** is refused — nothing written, nothing dialled, the value never echoed", async () => {
     const dir = await instance("key");
     const r = await run(["connections", "add", "gh", "--type", "mcp", "--env", `GITHUB_TOKEN=${KEY}`, "--instance", dir, "--", "npx", "-y", "@modelcontextprotocol/server-github"]);

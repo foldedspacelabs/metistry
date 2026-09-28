@@ -98,6 +98,10 @@ public final class AppModel {
     /// outlives a trip to another screen; dropped with everything else on an
     /// instance switch.
     public let agents: AgentsModel
+    /// Work ▸ Board: the columns, the filter, the moves, the open card and its
+    /// room (board-view.swift). Held here so the board the owner left — its
+    /// filter, a refused move's sentence — is the board they come back to.
+    public let board: BoardModel
 
     public init(
         bundleResourceURL: URL?,
@@ -173,6 +177,7 @@ public final class AppModel {
         knowledge.onQueueChanged = { [weak shell] in await shell?.refreshCount() }
         self.scheduled = ScheduledModel(session: console)
         self.agents = AgentsModel(session: console)
+        self.board = BoardModel(session: console)
 
         // The wizard's step 2 hands the folder back the moment it is known, so
         // every later verb runs against it.

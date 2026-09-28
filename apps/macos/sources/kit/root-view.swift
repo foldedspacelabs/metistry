@@ -16,8 +16,9 @@
 // (mac-app.md, "Not yet, and labelled as such on screen"). Needs You
 // (needs-you-view.swift, T5-4a), Activity (activity-view.swift, T6-3),
 // Chat (chat-view.swift, T6-2), Today's top — the brief, Next Up,
-// calendar help, Close the Day (today-view.swift, T6-1b) — and Knowledge
-// (knowledge-view.swift, T6-4) have landed.
+// calendar help, Close the Day (today-view.swift, T6-1b) — Knowledge
+// (knowledge-view.swift, T6-4) and Work ▸ Board with its card detail and
+// rooms (board-view.swift, T6-7) have landed.
 //
 // ACCESSIBILITY (§2.18). Every control speaks its name, and a glyph-only one its
 // shortcut too; the Needs You row says *Needs You, 10 waiting*; the gauge says
@@ -52,7 +53,7 @@ public struct RootView: View {
             ShellSidebar(shell: shell, chatIsWorking: model.chat.isWorking)
                 .navigationSplitViewColumnWidth(min: 180, ideal: MetistrySize.sidebar, max: 320)
         } detail: {
-            ShellDetail(shell: shell, needsYou: model.needsYou, activity: model.activity, chat: model.chat, today: model.today, instanceDir: model.instances.active, consoleURL: PasskeyRouting.consoleURL(in: model.status.report).flatMap(URL.init(string:)), knowledge: model.knowledge, onChooseFolder: chooseFolder, scheduled: model.scheduled, agents: model.agents, onOpenConnections: showConnections)
+            ShellDetail(shell: shell, needsYou: model.needsYou, activity: model.activity, chat: model.chat, today: model.today, instanceDir: model.instances.active, consoleURL: PasskeyRouting.consoleURL(in: model.status.report).flatMap(URL.init(string:)), knowledge: model.knowledge, onChooseFolder: chooseFolder, scheduled: model.scheduled, agents: model.agents, onOpenConnections: showConnections, board: model.board)
                 // The detail landmark, named for where the owner is.
                 .accessibilityElement(children: .contain)
                 .accessibilityLabel(shell.selection.title)
@@ -268,6 +269,7 @@ struct ShellDetail: View {
     let scheduled: ScheduledModel
     var agents: AgentsModel? = nil
     var onOpenConnections: (() -> Void)? = nil
+    var board: BoardModel? = nil
 
     var body: some View {
         let destination = shell.selection
@@ -343,6 +345,11 @@ struct ShellDetail: View {
             // Give It One and a routine's row lead to Scheduled; Connect an
             // Agent to Settings › Connections (C138).
             AgentsView(model: agents, assistantName: shell.assistantName, onGoToScheduled: { shell.go(to: .scheduled) }, onOpenConnections: onOpenConnections)
+        } else if destination == .board, let board {
+            // Every card opens its detail; Open Room is a pane over the board,
+            // Board still selected (C89). An empty board's one action is the
+            // composer.
+            BoardView(model: board, assistantName: shell.assistantName, onCapture: { shell.perform(.newCapture) })
         } else {
             ContentUnavailableView {
                 Label(destination.title, systemImage: destination.symbolName)

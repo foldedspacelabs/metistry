@@ -803,6 +803,8 @@ const REQUESTS = [
 
   // the reads that show the writes above: a room with a comment, a feed with a capture in it
   ["GET /api/q/board", () => ({ path: `/api/q/board?project=${P}` })],
+  // the board's column totals and project filter (T6-7): counts, never the capped cards
+  ["GET /api/q/board_projects", () => ({ path: "/api/q/board_projects" })],
   ["GET /api/q/rooms", () => ({ path: "/api/q/rooms" })],
   ["GET /api/q/agent_presence", () => ({ path: "/api/q/agent_presence" })],
   ["GET /api/q/activity_feed", () => ({ path: "/api/q/activity_feed?hours=24" })],

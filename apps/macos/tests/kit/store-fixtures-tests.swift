@@ -292,6 +292,7 @@ private let drives: [String: Drive] = [
     "POST /api/scheduled/syncs/:name/run": { s, a in done(await s.runNow(sync: a.p("name"))) },
     // Work
     "GET /api/q/board": { s, a in done(await s.board(project: a.q("project"), limit: a.qInt("limit"))) },
+    "GET /api/q/board_projects": { s, a in done(await s.boardProjects(limit: a.qInt("limit"))) },
     "GET /api/q/rooms": { s, a in done(await s.rooms(state: a.q("state"), project: a.q("project"), anchor: a.q("anchor"), limit: a.qInt("limit"))) },
     "GET /api/projects": { s, _ in done(await s.projects()) },
     "PUT /api/projects/:slug": { s, a in

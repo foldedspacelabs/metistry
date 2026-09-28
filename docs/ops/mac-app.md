@@ -24,7 +24,8 @@ path.
   Dock. The screens behind the rows are their own tickets; until one lands its
   detail says so and offers the web app. Needs You, Today (the brief, Next Up,
   Close the Day, and the day's spine and All — "Today" below), Chat, Activity,
-  Knowledge, the Usage popover and the capture composer have landed.
+  Knowledge, the Usage popover and the capture composer have landed. So has Work ▸
+  Board, with the card detail and a task's room ("Work ▸ Board" below).
 - **Status.** Its own window now (Window ▸ Status), no longer a sidebar row.
   Runs `metistry doctor --json` and renders the rows to the design
   system's §3.13 — grouped by doctor's own `kind`, `absent` shown in absent
@@ -1455,6 +1456,66 @@ with `agent`, and `GET /api/compute` for the model dropdown. No route was added.
   an editor, keeping the draft). Screen 7 §7's ⌘S and ⌘⌫ are not in the closed
   menu table (C119), so they are not bound — Save and Revoke are focusable
   controls, as ruled for Activity's keys at the W2 checkpoint.
+
+## Work ▸ Board, the card, and a task's room
+
+`sources/kit/board-view.swift` is Work ▸ Board (T6-7, screen-06-board.md;
+`docs/ops/board.md`), `board-model.swift` its model and rules,
+`card-detail-view.swift` the popover every card opens (screen 14, C84) and
+`room-view.swift` a task's room (screen 16 §2, C89). It reads `WorkStore` —
+`board`, and `board_projects` for the column totals and the project filter
+(the one method this ticket added: counts come from the query, never from the
+capped cards) — and `GET /api/agents` for the assign step. `AppModel.board`
+holds the model, so the filter and a refused move's sentence are there when
+the owner comes back; an instance switch drops it.
+
+- **Five columns.** Backlog · Assigned · In Progress · Blocked share the width;
+  Done is 168 pt with compact rows and folds to a strip under 760 pt. Headers
+  count every card (*showing 50 of 212* when capped, or when Has Thread is on)
+  and put the escalations beside the count in `degraded` — nothing on the
+  board is red (C36). Each card shows its column's one facet — *2d in
+  backlog*, who it is for, *held by … · 4m left*, the blocked reason (*Waiting
+  on you: …*, never the word Blocked again), *closed 2 hours ago* — plus
+  *Overdue* or *Reported* where it applies; the bubble and its count, and the
+  note glyph for a card promoted from the vault, are marks. Polls every 10 s
+  (`cache_ttl: 0`), and a `board` event asks at once.
+- **No drop the service would refuse.** `BoardRules` is the PWA's `movesFor()`
+  in Swift, sentence for sentence: claim takes an unclaimed open card as the
+  owner; release and close are the holder's; assign, unassign and the unblock
+  are the board arm; a released or unblocked card lands in its home. A column
+  draws a target, and its drop delegate accepts, only where a route would
+  succeed; each drop is one route. A drop on Done sends `status: "closed"` —
+  `TaskPatch.moving(to:)` used to send `done`, which is no task status —
+  Assigned → Backlog sends `owner: null` (`TaskPatch.unassigning`), and
+  Backlog → Assigned asks for the name first (the owner, then every agent not
+  revoked). Moves are decisions: none is offered while the console is not
+  answering (O3).
+- **Optimistic, then authoritative.** The card is drawn where it was dropped,
+  the route runs, the board is asked again either way. A refusal puts it back
+  and prints *Couldn't move "…" — <the server's sentence>* under the board;
+  Try Again appears only for a move that never reached the service.
+- **Keys** (components-02 §1): ← → between columns, ↑ ↓ within one, Item ▸
+  Move… (M) opens the move list — offered moves say what they do, refused ones
+  are dimmed with the service's reason, read with the row — Item ▸ Open (↩)
+  opens the card, Esc closes a picker. Screen 6's `[` `]` are not in the menu
+  table (C119), so they are not bound; the project picker is a control.
+- **The card** (screen 14). A work row: the board glyph in `agent`, the title,
+  the facet row, Description (the owner edits it — `PATCH {description}`, a
+  board-arm field; a failed save keeps the edit with Try Again), Held By,
+  Waiting On, the Thread with its last message and **Open Room →**, Comment,
+  and the review artifact in the footer. A card that moved while open says
+  *Moved elsewhere: Done, by collator* with **Open in Done**. A markdown task
+  (`CardSubject.task`) draws its checkbox, *In Its File* — the heading above
+  the line and its neighbours, the line highlighted, from `GET
+  /api/knowledge/page` — and Complete (the Tick door) · Open in Obsidian ·
+  Delegate. **Not drawn:** History and a `depends_on` Blocked By — the `board`
+  row carries neither and no route serves one task; Delegate is dimmed (no
+  door yet). Today does not open this popover yet — its rows are T6-1a's.
+- **The room** is a pane over the board, Board still selected: the
+  came-to-you band when the agent tail reached the cap, agent turns on the
+  2px rule in the serif, the owner's in the accent wash, the pips with *yours
+  resets it*, and *Add to the Room* — no recipient. Resolve and Reopen are
+  the owner's; a message that did not post stays in the composer.
 
 ## Build and run it
 

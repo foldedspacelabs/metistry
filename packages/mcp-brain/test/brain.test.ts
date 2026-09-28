@@ -117,6 +117,11 @@ describe("definition size (docs/research/2026-08-tool-discovery.md's other axis)
     // Asking for a review (T2-13) cost 23 (4,565 → 4,588) and moved no
     // ceiling: `requests_create` takes kind `pull_request` with the PR in the
     // `refs` it already had — one enum value and a clause, no new property.
+    //
+    // Reading back the owner's answer (X-10, ruling 8) cost 1 (4,596 → 4,597)
+    // and moved nothing: a replay of `requests_create` returns it, so the
+    // price is one clause of description — no tool, no property — and the
+    // replay sentence was reworded around it to fit.
     expect(tokens).toBeLessThan(4600);
   });
 

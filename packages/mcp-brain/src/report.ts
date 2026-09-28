@@ -22,8 +22,19 @@
 // owner's door checks before it posts, and that head is the sync's reading of
 // GitHub, never the agent's word. Asking posts nothing: the review is the
 // owner's, through their own door.
+//
+// And the same tool READS BACK the owner's answer (X-10, ruling 8 of
+// 2026-09-27) — still no new tool: a replay (the same idempotency_key, or the
+// same title within 24h) returns the existing id and, beside it, `answer`:
+// core's `readBackOf` reading of the row — waiting, answered with each
+// question's answer, acknowledged, revised or declined in the owner's words,
+// dismissed. It is the precedent `request_access` set (a repeat ask tells you
+// where your ask stands). Only ever the caller's own row: both lookups and
+// the read itself are keyed on the credential's agent id and on nothing the
+// call carries, so another agent's question — however exactly it is echoed —
+// is never found, and a replay of it is a new request of the caller's own.
 
-import { checkQuestions, githubPullSource, parseGithubPullRef, raiseMirror, redactSecrets, v1Options, type Question } from "@foldedspacelabs/metistry-core";
+import { checkQuestions, githubPullSource, parseGithubPullRef, raiseMirror, readBackOf, redactSecrets, v1Options, type Question, type RequestReadBack } from "@foldedspacelabs/metistry-core";
 import type { Db } from "./types.js";
 
 /**
@@ -63,6 +74,8 @@ export interface ReportResult {
   id: number;
   /** false = a new row; otherwise which rule matched an existing one — `subject`: a request for the same pull request was already waiting. */
   deduplicated: false | "idempotency_key" | "title" | "subject";
+  /** A replay's only: where the owner's answer stands (X-10). A new row has none to read — it is waiting. */
+  answer?: RequestReadBack;
 }
 
 export interface PullRequestAskInput {
@@ -83,10 +96,10 @@ export async function submitReport(db: Db, agentId: string, input: ReportInput):
   const key = input.idempotency_key ?? null;
   if (key !== null) {
     const hit = await byKey(db, "report", agentId, key);
-    if (hit !== null) return { id: hit, deduplicated: "idempotency_key" };
+    if (hit !== null) return replayed(db, agentId, hit, "idempotency_key");
   }
   const dup = await byTitle(db, "report", agentId, input.title);
-  if (dup !== null) return { id: dup, deduplicated: "title" };
+  if (dup !== null) return replayed(db, agentId, dup, "title");
 
   // Secret-named fields never land in the queue (§4.3 default 3).
   const payload = redactSecrets({
@@ -107,7 +120,7 @@ export async function submitReport(db: Db, agentId: string, input: ReportInput):
   // Lost the race on the key: the earlier insert wins.
   const again = key !== null ? await byKey(db, "report", agentId, key) : null;
   if (again === null) throw new Error("report insert returned no row and no key match"); // unreachable unless the row vanished mid-flight
-  return { id: again, deduplicated: "idempotency_key" };
+  return replayed(db, agentId, again, "idempotency_key");
 }
 
 /**
@@ -127,10 +140,10 @@ export async function submitQuestion(db: Db, agentId: string, input: QuestionInp
   const key = input.idempotency_key ?? null;
   if (key !== null) {
     const hit = await byKey(db, "decision", agentId, key);
-    if (hit !== null) return { ok: true, id: hit, deduplicated: "idempotency_key" };
+    if (hit !== null) return { ok: true, ...(await replayed(db, agentId, hit, "idempotency_key")) };
   }
   const dup = await byTitle(db, "decision", agentId, input.title);
-  if (dup !== null) return { ok: true, id: dup, deduplicated: "title" };
+  if (dup !== null) return { ok: true, ...(await replayed(db, agentId, dup, "title")) };
 
   const questions: Question[] = checked.questions;
   const payload = redactSecrets({
@@ -143,6 +156,31 @@ export async function submitQuestion(db: Db, agentId: string, input: QuestionInp
   });
   const ins = await db.query(`INSERT INTO proposals (kind, source_agent, trust, payload) VALUES ('decision', $1, 'external', $2::jsonb) RETURNING id`, [agentId, JSON.stringify(payload)]);
   return { ok: true, id: Number(ins.rows[0]?.id), deduplicated: false };
+}
+
+/**
+ * The owner's answer to one of the caller's OWN requests (X-10): core's
+ * `readBackOf` over the row, or null when `id` is not a report or question
+ * `agentId` raised — another agent's is the same null as no row at all, so
+ * the read cannot tell a caller that one exists. Selects only what the
+ * reading needs (the decision, its words and time, the questions and their
+ * answers) — never the rest of the payload.
+ */
+export async function readBack(db: Db, agentId: string, id: number): Promise<RequestReadBack | null> {
+  const { rows } = await db.query(
+    `SELECT decision, feedback, decided_at,
+            jsonb_strip_nulls(jsonb_build_object('title', payload->'title', 'questions', payload->'questions', 'options', payload->'options', 'answers', payload->'answers')) AS payload
+     FROM proposals WHERE id = $1 AND source_agent = $2 AND kind IN ('report', 'decision')`,
+    [id, agentId],
+  );
+  const row = rows[0];
+  return row ? readBackOf({ decision: row.decision, feedback: row.feedback, decided_at: row.decided_at, payload: row.payload }) : null;
+}
+
+/** A replay's result: the existing id, and where its answer stands. */
+async function replayed(db: Db, agentId: string, id: number, rule: "idempotency_key" | "title"): Promise<ReportResult> {
+  const answer = await readBack(db, agentId, id);
+  return { id, deduplicated: rule, ...(answer !== null ? { answer } : {}) };
 }
 
 async function byKey(db: Db, kind: "report" | "decision", agentId: string, key: string): Promise<number | null> {

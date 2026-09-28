@@ -61,11 +61,15 @@ public struct QuestionSteps: Sendable, Equatable {
         self.other = Array(repeating: "", count: questions.count)
     }
 
-    /// The questions a payload asks: v2's `questions` (or the same under a
-    /// `choices` body), else v1's `title` and `options`. Nil when it asks none.
-    public init?(payload: JSONValue?) {
-        let v2 = payload?["questions"]?.arrayValue ?? payload?["body"]?["questions"]?.arrayValue
-        if let v2 {
+    /// The questions a request asks: **`request.questions`** (ruling 26,
+    /// X-22) — core's own `questionsOf` reading of the row, v2's several
+    /// questions or a row from before v2 read as its one pick-one question —
+    /// never re-derived from `payload` here. Only a console old enough to
+    /// send no `request` at all (pre-X-5, `requestQuestions` nil) falls back
+    /// to reading v1's `title` and `options` straight off the payload. Nil
+    /// when neither carries a question.
+    public init?(payload: JSONValue?, requestQuestions: JSONValue? = nil) {
+        if let v2 = requestQuestions?.arrayValue {
             let questions = v2.compactMap { q -> RequestQuestion? in
                 guard let prompt = q.string("prompt", "title") else { return nil }
                 return RequestQuestion(
@@ -76,7 +80,11 @@ public struct QuestionSteps: Sendable, Equatable {
                 )
             }
             guard !questions.isEmpty else { return nil }
-            self.init(questions: questions)
+            // v1's wire (the option itself as `decision`) still answers a row
+            // the console stores under v1's shape alone — `payload.questions`
+            // absent — asking exactly one pick-one question (checked below,
+            // in the struct's own `init`).
+            self.init(questions: questions, optionIsTheDecision: payload?["questions"] == nil)
             return
         }
         guard let title = payload?.string("title") else { return nil }

@@ -60,7 +60,10 @@ private func tree(_ model: RequestAnswering, allowsDecisions: Bool = true) async
 
 @MainActor
 @Test func somethingElsesFieldHasAName() async throws {
-    let model = answering(try requestRow(1, "decision", payload: #"{"title":"Which fixture format?","options":["one file per route","one file per store"]}"#))
+    // `questions` (allow_other true, drain.ts's shape) — not a bare
+    // `title`/`options` row, which reads with no *Something else…* (ruling 26,
+    // X-22; docs/ops/client-api.md).
+    let model = answering(try requestRow(1, "decision", payload: #"{"title":"Which fixture format?","questions":[{"prompt":"Which fixture format?","options":["one file per route","one file per store"],"multi":false,"allow_other":true}],"options":["one file per route","one file per store"]}"#))
     await model.choose(2)
     let t = try await tree(model)
     defer { t.close() }

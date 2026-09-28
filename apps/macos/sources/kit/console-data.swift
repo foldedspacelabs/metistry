@@ -406,6 +406,12 @@ public struct RequestShape: Codable, Sendable, Equatable {
     public let grouped: Bool
     /// What this row's answers may store on it, `later` aside.
     public let decisions: [String]
+    /// A question's questions (`type == "question"` only): core's own
+    /// `questionsOf` reading of the row, v2's `payload.questions` or a row
+    /// from before v2 read as its one pick-one question — served here so a
+    /// client reads it from `request.questions`, never re-derives it from
+    /// `payload` itself (ruling 26, X-22). Nil for every other type.
+    public let questions: JSONValue?
 
     public init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -417,10 +423,11 @@ public struct RequestShape: Codable, Sendable, Equatable {
         decline = try c.decodeIfPresent(Answer.self, forKey: .decline)
         grouped = try c.decodeIfPresent(Bool.self, forKey: .grouped) ?? false
         decisions = try c.decodeIfPresent([String].self, forKey: .decisions) ?? []
+        questions = try c.decodeIfPresent(JSONValue.self, forKey: .questions)
     }
 
     enum CodingKeys: String, CodingKey {
-        case type, word, body, grouped, decisions
+        case type, word, body, grouped, decisions, questions
         case primary, revise, decline
     }
 }

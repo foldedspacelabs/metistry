@@ -24,9 +24,11 @@
 // again (§4).
 //
 // ROUTINES (§12). `routine_run` rows are the eighth chip. Its subject is the
-// routine's display name, not the raw component id — `activity_feed` reads
-// `plan-tomorrow` as `Plan Tomorrow` (Ruling 25, X-21), so the query never
-// hands the panel a slug to un-hyphenate. A routine that wrote something
+// routine's display name, not the raw component id — `plan-tomorrow` reads
+// `Tomorrow's Plan` (Ruling 25, X-21), stamped into `meta.display_name` by
+// the runner from the manifest it already has loaded and read straight back
+// by `activity_feed`, so the query never hands the panel a slug to
+// un-hyphenate. A routine that wrote something
 // carries the spark — what it produced is prose, and P1 says that shows
 // before it is read — and opening it reads the file it names (its run's
 // `meta.path`, through `GET /api/knowledge/page`) into the one prose component.

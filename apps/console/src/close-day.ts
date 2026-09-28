@@ -117,16 +117,18 @@ export interface TriggerableRoutine {
 /**
  * One close-triggered pass of `plan-tomorrow` for the day closed, recorded
  * as the runner records a scheduled one (runner.ts step 3): a two-phase
- * `routine_run` row with `meta.outcome` — plus `meta.trigger: "close"` and
- * `meta.closed_day`, so Activity and Scheduled's history can say what
- * started it. The routine is handed the same capabilities the runner hands
- * it (`ctx`) plus `closedDay` — the routine's own close shape (T3-7): it
- * renders the plan for the day after `closedDay` early, always, and its
+ * `routine_run` row with `meta.outcome` — plus `meta.trigger: "close"`,
+ * `meta.closed_day` and `meta.display_name` (Ruling 25, X-21: the same word
+ * Scheduled and Activity show, from the caller's own manifest — this
+ * module has none to read), so Activity and Scheduled's history can say
+ * what started it. The routine is handed the same capabilities the runner
+ * hands it (`ctx`) plus `closedDay` — the routine's own close shape (T3-7):
+ * it renders the plan for the day after `closedDay` early, always, and its
  * 11:00 PM run supersedes that render.
  */
-export function closeTriggeredPass(db: Db, routine: TriggerableRoutine, ctx: Record<string, unknown>): (closedDay: string) => Promise<void> {
+export function closeTriggeredPass(db: Db, routine: TriggerableRoutine, ctx: Record<string, unknown>, displayName: string): (closedDay: string) => Promise<void> {
   return async (closedDay) => {
-    const id = await startRun(db, { component: routine.name, kind: "routine_run", meta: { trigger: "close", closed_day: closedDay } });
+    const id = await startRun(db, { component: routine.name, kind: "routine_run", meta: { trigger: "close", closed_day: closedDay, display_name: displayName } });
     try {
       const n = await routine.run(db, { ...ctx, closedDay });
       await finishRun(db, id, { ok: true, meta: { processed: n, outcome: n > 0 ? "acted" : "silent" } });

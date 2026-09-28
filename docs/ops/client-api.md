@@ -1688,9 +1688,11 @@ draws failure from the column, never from `detail`. A `routine_run` is in the
 `meta.outcome` is `silent` never appears, and a failed one (`ok = false`,
 which carries no outcome) always does. A `routine_run` row's `subject` is the
 routine's display name, not its raw component id — `plan-tomorrow` reads
-`Plan Tomorrow` (Ruling 25, X-21); `actor` still carries the component id
-unchanged. `turn_id` returns every call one reply made, whatever the
-window's `limit` left out.
+`Tomorrow's Plan` (Ruling 25, X-21), the runner's own `meta.display_name`
+stamp read straight from the manifest, or (a row from before that stamp
+existed) the same identifier-to-title fallback a manifest-less New Routine
+gets. `actor` still carries the component id unchanged. `turn_id` returns
+every call one reply made, whatever the window's `limit` left out.
 
 #### `GET /api/runs/export` — the audit ledger as NDJSON (S5)
 

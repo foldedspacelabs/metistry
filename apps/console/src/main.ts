@@ -33,7 +33,7 @@ import { makeServer } from "./server.js";
 import { pushConfigFromEnv, startNotifier } from "./push.js";
 import { loadCollectors } from "@metistry-apps/collectors";
 import { loadRoutines } from "@metistry-apps/routines";
-import { PROFILE_PATH, loadSchedules, profileFacts, readOverlay, routineCapabilities, runNow, startRunner, type ComponentCtx, type RunnerOptions } from "./runner.js";
+import { PROFILE_PATH, loadSchedules, profileFacts, readOverlay, routineCapabilities, runNow, startRunner, unitOf, type ComponentCtx, type RunnerOptions } from "./runner.js";
 import type { ScheduledAdmin } from "./scheduled-routes.js";
 import { PLAN_ROUTINE, RoutineTrigger, closeTriggeredPass } from "./close-day.js";
 import { loadRules, makeRoutePolicy } from "./router.js";
@@ -560,7 +560,7 @@ const scheduledAdmin: ScheduledAdmin = {
 // scheduled one. Not loaded here (a trimmed routines directory) → the close
 // still writes the section and says the plan was not enqueued.
 const planRoutine = scheduled.find((c) => c.name === PLAN_ROUTINE && c.runKind === "routine_run");
-const planTomorrow = planRoutine ? new RoutineTrigger(PLAN_ROUTINE, closeTriggeredPass(pool, planRoutine, componentCtx as Record<string, unknown>)) : undefined;
+const planTomorrow = planRoutine ? new RoutineTrigger(PLAN_ROUTINE, closeTriggeredPass(pool, planRoutine, componentCtx as Record<string, unknown>, unitOf(planRoutine).displayName)) : undefined;
 if (!planTomorrow) console.warn(`${PLAN_ROUTINE} is not loaded: Close the Day writes the section but cannot render tomorrow's plan early`);
 
 const server = makeServer(pool, queries, {

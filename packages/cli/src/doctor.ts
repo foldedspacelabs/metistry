@@ -82,6 +82,7 @@ import { applyPorts, loadNamespace, type Namespace } from "./namespace.js";
 import { defaultUi, padTo, statusName, visibleWidth, type Ui } from "./ui.js";
 import { envPaths, readInstanceId } from "./instance.js";
 import { securityPresence } from "./keychain.js";
+import { driftedNames, launchdEnvDrift } from "./env-follow.js";
 import { MIGRATE_SCOPE_COMMAND, sharedScopeStatus } from "./secrets.js";
 import { appDmgAssetName, compareVersions, resolveAppPath } from "./mac-app.js";
 import { instanceLockPath, readLock } from "./lock.js";
@@ -344,7 +345,13 @@ function actionForBridgeOutcome(o: Outcome & { cause?: ProbeCause }, tokenVar: s
 /** One component row: manifest validity first; then the network probe for anything that declares an http surface. */
 async function componentRow(
   m: FoundManifest,
-  deps: Required<Pick<DoctorDeps, "env" | "fetchFn" | "timeoutMs">> & { shape: DeploymentShape; labelSuffix?: string | undefined; compute: Compute },
+  deps: Required<Pick<DoctorDeps, "env" | "fetchFn" | "timeoutMs">> & {
+    shape: DeploymentShape;
+    labelSuffix?: string | undefined;
+    compute: Compute;
+    /** the launchd shape's supervisor, asked once (`supervisorSnapshot`); undefined under any other shape */
+    supervisor?: Promise<SupervisorSnapshot> | undefined;
+  },
 ): Promise<DoctorRow> {
   const kind = m.result.ok ? m.result.manifest.type : m.type;
   if (!m.result.ok) {
@@ -433,6 +440,12 @@ async function componentRow(
         }))),
       };
     }
+    // Under the launchd shape "there is an engine" is only half the answer:
+    // the supervisor runs the children `supervisor.json` lists, rendered
+    // from the environment `up` last saw. On the owner's 0.14.2 instance the
+    // key reached `.env` after that render, so there was no assistant child
+    // at all while this row said ok. The row is the RUNNING child now.
+    if (deps.supervisor) return { kind, ...(await runCheck(man.name, "the supervisor is running the assistant child", async () => assistantChildOutcome(await deps.supervisor!))) };
   }
 
   const httpSurface = (man.type === "bridge" && man.transport === "http") || (man.type === "service" && man.port !== undefined);
@@ -471,6 +484,68 @@ async function componentRow(
         : `process state: compose:${man.name}`
       : undefined;
   return { kind, ...(await runCheck(man.name, `${m.dir}/manifest.yaml validates${via ? `; ${via}` : ""}`, async () => {})) };
+}
+
+/**
+ * The assistant row under the launchd shape, from the supervisor's own
+ * answer: `failed` unless a child named `assistant` is RUNNING. The reason is
+ * the one the supervisor has — no such child (it logs that at start), or the
+ * child's state and last exit.
+ */
+export function assistantChildOutcome(snap: SupervisorSnapshot): Partial<Pick<CheckResult, "status" | "remediation" | "meta">> {
+  const logs = "metistry logs supervisor";
+  if (!snap.config) return { status: "failed", remediation: `not started — there is no ${snap.configPath}, so no supervisor runs an assistant: metistry up` };
+  if (!snap.config.children.some((c) => c.name === "assistant")) {
+    return {
+      status: "failed",
+      remediation: `not started — the supervisor has no assistant child: ${snap.configPath} was rendered when this install had no engine (compute.yaml's default provider key was not in the environment \`up\` rendered from; \`${logs}\` says "not started"). \`metistry up\` re-renders it from .env`,
+      meta: { child: "absent" },
+    };
+  }
+  if (!snap.children) return { status: "failed", remediation: `the supervisor did not answer (${snap.error ?? "no status"}), so nothing confirms the assistant is running — ${logs}` };
+  const st = snap.children.find((c) => c.name === "assistant");
+  if (!st) return { status: "failed", remediation: `not started — the supervisor did not report an assistant child — ${logs}`, meta: { child: "unreported" } };
+  if (st.state !== "running") {
+    return {
+      status: "failed",
+      remediation: `state = ${st.state}${st.lastExit ? ` (last exit code ${st.lastExit.code ?? "null"}${st.lastExit.signal ? `, signal ${st.lastExit.signal}` : ""} at ${st.lastExit.at})` : ""} — metistry logs assistant; log: ${st.log}`,
+      meta: { child: st.state, restarts: st.restarts },
+    };
+  }
+  return { meta: { child: "running", pid: st.pid, restarts: st.restarts } };
+}
+
+// ---- the launchd jobs' environment against .env -----------------------------
+
+/**
+ * Do the running launchd jobs carry `.env`'s values?
+ *
+ * The supervisor's LaunchAgent plist and `supervisor.json` embed the
+ * environment `up` rendered them from, and a verb that rewrites `.env` does
+ * not touch either (env-follow.ts): new bridge tokens in the file, old ones
+ * in the jobs, and 401s everywhere. This hashes both installed copies
+ * against `.env`'s values for the same names — names in the report, never a
+ * value — and is `degraded` with the one command that re-renders them.
+ */
+export async function launchdEnvRow(o: { stateRoot: string; home: string | undefined; labelSuffix?: string | undefined; envFiles: readonly string[] }): Promise<DoctorRow> {
+  let action: DoctorAction | undefined;
+  const row: DoctorRow = {
+    kind: "launchd",
+    ...(await runCheck("launchd env", "the supervisor's plist and supervisor.json carry .env's values (hashed, never printed)", async () => {
+      const { installed, drift } = await launchdEnvDrift(o);
+      if (!installed) return { status: "absent", remediation: `no ${supervisorConfigPath(o.stateRoot)} — this install has not been brought up under the launchd shape: metistry up` };
+      const drifted = driftedNames(drift);
+      const meta = { sources: drift.map((d) => ({ source: d.source, compared: d.compared.length, differs: d.differs, missing: d.missing, hash: d.hash })) };
+      if (drifted.length === 0) return { meta };
+      action = runVerb(["metistry", "up"], "Re-render from .env");
+      return {
+        status: "degraded",
+        remediation: `.env has ${drifted.length} value(s) the running jobs do not carry: ${drifted.join(", ")} (${drift.filter((d) => d.differs.length + d.missing.length > 0).map((d) => basename(d.source)).join(", ")}) — they still run on what \`up\` last rendered; \`metistry up\` re-renders them from .env and restarts the supervisor`,
+        meta,
+      };
+    })),
+  };
+  return action ? { ...row, action } : row;
 }
 
 // ---- instance layout --------------------------------------------------------
@@ -1550,9 +1625,37 @@ export async function composeRows(productDir: string, exec: Exec): Promise<Docto
  * restores the rows — each child's state, pid, restart count and log path —
  * and a supervisor that does not answer is itself the finding.
  */
-export async function supervisorRows(stateRoot: string): Promise<DoctorRow[]> {
+export interface SupervisorSnapshot {
+  configPath: string;
+  config?: SupervisorConfig | undefined;
+  /** the supervisor's answer to `status`; undefined when it did not give one (`error` says why) */
+  children?: ChildStatus[] | undefined;
+  error?: string | undefined;
+}
+
+/**
+ * `supervisor.json` and ONE `status` call, shared by every row that needs
+ * either: the supervisor's own rows, and the `assistant` row, which must
+ * report the child the supervisor is actually running rather than what
+ * compute.yaml says it could run.
+ */
+export async function supervisorSnapshot(stateRoot: string): Promise<SupervisorSnapshot> {
   const configPath = supervisorConfigPath(stateRoot);
   const config = await readSupervisorConfig(configPath).catch(() => undefined);
+  if (!config) return { configPath };
+  try {
+    const res = await controlRequest(config.socket, { op: "status", token: config.token }, 5_000);
+    if (!res.ok) return { configPath, config, error: res.error ?? "the supervisor refused a status request" };
+    return { configPath, config, children: res.children ?? [] };
+  } catch (err) {
+    return { configPath, config, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export async function supervisorRows(stateRoot: string, snapshot?: Promise<SupervisorSnapshot> | SupervisorSnapshot): Promise<DoctorRow[]> {
+  const snap = await (snapshot ?? supervisorSnapshot(stateRoot));
+  const configPath = snap.configPath;
+  const config = snap.config;
   if (!config) {
     return [
       {
@@ -1569,10 +1672,9 @@ export async function supervisorRows(stateRoot: string): Promise<DoctorRow[]> {
     {
       kind: "supervisor",
       ...(await runCheck(`supervisor:${config.label}`, `${config.socket} answers status with ${config.children.length} child(ren)`, async () => {
-        const res = await controlRequest(config.socket, { op: "status", token: config.token }, 5_000);
-        if (!res.ok) throw new Error(res.error ?? "the supervisor refused a status request");
-        children = res.children;
-        return { meta: { socket: config.socket, children: (res.children ?? []).length } };
+        if (!snap.children) throw new Error(snap.error ?? "the supervisor refused a status request");
+        children = snap.children;
+        return { meta: { socket: config.socket, children: snap.children.length } };
       })),
     },
   ];
@@ -1772,8 +1874,12 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
   // model servers. Concurrently it is the slowest single probe. Nothing about
   // any one check changes — no timeout was shortened to buy this, because a
   // slow-but-healthy bridge reported as down would be a worse table.
-  const [componentRows, registries, layout, inbox, profile, vaultCase, cli, app, dbAndSchedules, launchd, keepAwake, supervisor, containers, localModels, sharedScope, vaultSync, connections] = await Promise.all([
-    (async () => Promise.all((await walkManifests(deps.productDir)).map((m) => componentRow(m, { env, fetchFn, timeoutMs, shape, labelSuffix, compute }))))(),
+  // the launchd shape's supervisor, asked ONCE and shared: its own rows and
+  // the assistant's row both read this answer
+  const supervised = platform === "darwin" && shape === "launchd" ? supervisorSnapshot(instanceDir) : undefined;
+  const envFiles = envPaths({ instanceDir, productDir: deps.productDir })?.read ?? [];
+  const [componentRows, registries, layout, inbox, profile, vaultCase, cli, app, dbAndSchedules, launchd, keepAwake, supervisor, launchdEnv, containers, localModels, sharedScope, vaultSync, connections] = await Promise.all([
+    (async () => Promise.all((await walkManifests(deps.productDir)).map((m) => componentRow(m, { env, fetchFn, timeoutMs, shape, labelSuffix, compute, supervisor: supervised }))))(),
     // the registries over product + extensions: overlays and skips (plan §2.7)
     registriesRow(deps.productDir, env),
     layoutRow(instanceDir),
@@ -1803,7 +1909,9 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
     // unmet (docs/ops/deployment-shapes.md, "Keeping the Mac awake")
     keepAwakeRow({ deployment: loaded.deployment, instanceDir, exec, platform }),
     // the launchd shape's core is ONE agent with children launchd cannot see
-    platform === "darwin" && shape === "launchd" ? supervisorRows(instanceDir) : Promise.resolve([]),
+    supervised ? supervisorRows(instanceDir, supervised) : Promise.resolve([]),
+    // the jobs' embedded environment against `.env` (env-follow.ts)
+    supervised ? launchdEnvRow({ stateRoot: instanceDir, home: env.HOME, labelSuffix, envFiles }) : Promise.resolve(undefined),
     // no container runtime is consulted when no service runs in one: a
     // launchd install must not report "docker not found" as a finding
     usesCompose(loaded.deployment) ? composeRows(deps.productDir, exec) : Promise.resolve([]),
@@ -1823,7 +1931,7 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
     // someone else's server (docs/ops/connections.md)
     env.METISTRY_INSTANCE_DIR ? connectionRows({ instanceDir, productDir: deps.productDir, env, platform, uid, exec, ...(deps.keychain ? { keychain: deps.keychain } : {}) }) : Promise.resolve([]),
   ]);
-  rows.push(...componentRows, registries, layout, inbox, ...(profile ? [profile] : []), ...(vaultCase ? [vaultCase] : []), cli, ...(app ? [app] : []), ...dbAndSchedules, ...launchd, ...(keepAwake ? [keepAwake] : []), ...supervisor, ...containers, ...localModels, ...(sharedScope ? [sharedScope] : []), vaultSync, ...connections);
+  rows.push(...componentRows, registries, layout, inbox, ...(profile ? [profile] : []), ...(vaultCase ? [vaultCase] : []), cli, ...(app ? [app] : []), ...dbAndSchedules, ...launchd, ...(keepAwake ? [keepAwake] : []), ...supervisor, ...(launchdEnv ? [launchdEnv] : []), ...containers, ...localModels, ...(sharedScope ? [sharedScope] : []), vaultSync, ...connections);
 
   return { as_of: new Date().toISOString(), product_dir: deps.productDir, shape, ok: !rows.some((r) => r.status === "failed"), rows };
 }

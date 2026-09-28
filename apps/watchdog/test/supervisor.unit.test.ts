@@ -31,6 +31,9 @@ const child = (name: string, extra: Partial<ChildSpec> = {}) => ({ name, argv: [
 function make(children: ReturnType<typeof child>[], deps: { probe?: (h: string, p: number, t: number) => Promise<boolean> } = {}) {
   const spawned: FakeChild[] = [];
   const log: string[] = [];
+  // each child's log file, in memory: what a child "writes" before it exits
+  // is what the supervisor reads to classify the exit
+  const logs = new Map<string, string>();
   const config = parseSupervisorConfig({ schema: 1, label: "com.foldedspacelabs.metistry", socket: "/tmp/x.sock", token: "t".repeat(32), children });
   const sup = new Supervisor(config, {
     spawn: () => {
@@ -39,10 +42,13 @@ function make(children: ReturnType<typeof child>[], deps: { probe?: (h: string, 
       return c as unknown as ChildProcess;
     },
     openLog: () => "ignore",
+    logSize: (p) => (logs.get(p) ?? "").length,
+    readLogSince: (p, offset) => (logs.get(p) ?? "").slice(offset),
     log: (l) => log.push(l),
     probe: deps.probe ?? (async () => true),
   });
-  return { sup, spawned, log };
+  const write = (name: string, text: string) => logs.set(`/tmp/metistry-${name}.log`, (logs.get(`/tmp/metistry-${name}.log`) ?? "") + text);
+  return { sup, spawned, log, write };
 }
 
 describe("ordered start", () => {
@@ -113,6 +119,135 @@ describe("the restart policy", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("the restart race: a port the previous generation still holds", () => {
+  // The owner's 0.14.2 `metistry up`: the supervisor was kickstarted while
+  // the previous one's reconciler was still exiting, the new reconciler hit
+  // EADDRINUSE on 7812 three times, and the supervisor declared it
+  // CRASH-LOOPING and backed off to 60 s.
+  const EADDRINUSE = "Error: listen EADDRINUSE: address already in use 127.0.0.1:7812\n    at Server.setupListenHandle\n";
+
+  it("an early exit that logged EADDRINUSE is retried every 500ms and is NOT counted toward crash-looping", async () => {
+    vi.useFakeTimers();
+    try {
+      const { sup, spawned, log, write } = make([child("reconciler")]);
+      await sup.start();
+      // eight fast failures — more than CRASH_LOOP_RESTARTS — while the old one lets go
+      for (let i = 0; i < 8; i++) {
+        write("reconciler", EADDRINUSE);
+        spawned[spawned.length - 1]!.exit(1);
+        expect(sup.status()[0]!.state).toBe("backoff");
+        await vi.advanceTimersByTimeAsync(499);
+        expect(spawned.length).toBe(i + 1); // not before the retry interval
+        await vi.advanceTimersByTimeAsync(2);
+      }
+      // …and then the port is free and it stays up
+      expect(spawned.length).toBe(9);
+      expect(sup.status()[0]).toMatchObject({ state: "running", restarts: 8 });
+      expect(log.join("\n")).not.toContain("CRASH-LOOPING");
+      expect(log.join("\n")).toContain("its port is still held");
+      // the exponential backoff was left where it was: an ordinary crash now waits 1 s, not 2^8
+      spawned[8]!.exit(1);
+      await vi.advanceTimersByTimeAsync(1001);
+      expect(spawned.length).toBe(10);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("EPERM on a listen is treated the same way inside the window (a sandbox that forbids it still ends up crash-looping, later)", async () => {
+    vi.useFakeTimers();
+    try {
+      const { sup, spawned, log, write } = make([child("reconciler")]);
+      await sup.start();
+      write("reconciler", "Error: listen EPERM: operation not permitted 127.0.0.1:7812\n");
+      spawned[0]!.exit(1);
+      await vi.advanceTimersByTimeAsync(501);
+      expect(spawned.length).toBe(2);
+      expect(log.join("\n")).toContain("its port is still held");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("after the startup window the same exit counts exactly as before", async () => {
+    vi.useFakeTimers();
+    try {
+      const { sup, spawned, log, write } = make([child("reconciler")]);
+      await sup.start();
+      await vi.advanceTimersByTimeAsync(31_000); // up past STARTUP_GRACE_MS, healthy
+      for (let i = 0; i < 5; i++) {
+        write("reconciler", EADDRINUSE);
+        spawned[spawned.length - 1]!.exit(1);
+        if (i < 4) await vi.advanceTimersByTimeAsync(2 ** i * 1000 + 5);
+      }
+      expect(sup.status()[0]!.state).toBe("crash-looping");
+      expect(log.join("\n")).toContain("CRASH-LOOPING: 5 restarts");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("an early exit that did NOT name a port is counted — and a port error from a PREVIOUS spawn's log does not excuse it", async () => {
+    vi.useFakeTimers();
+    try {
+      const { sup, spawned, write } = make([child("reconciler")]);
+      // the log already says EADDRINUSE before this spawn started writing
+      write("reconciler", EADDRINUSE);
+      await sup.start();
+      for (let i = 0; i < 5; i++) {
+        write("reconciler", "TypeError: something else entirely\n");
+        spawned[spawned.length - 1]!.exit(1);
+        if (i < 4) await vi.advanceTimersByTimeAsync(2 ** i * 1000 + 5);
+      }
+      expect(sup.status()[0]!.state).toBe("crash-looping");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reads the child's REAL log file from where this spawn began (default readers)", async () => {
+    const { mkdtemp, appendFile } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const dir = await mkdtemp(join(tmpdir(), "metistry-sup-"));
+    const logPath = join(dir, "reconciler.log");
+    await appendFile(logPath, "an earlier generation: " + EADDRINUSE);
+    const lines: string[] = [];
+    const spawned: FakeChild[] = [];
+    const config = parseSupervisorConfig({ schema: 1, label: "com.foldedspacelabs.metistry", socket: "/tmp/x.sock", token: "t".repeat(32), children: [child("reconciler", { log: logPath })] });
+    const sup = new Supervisor(config, {
+      spawn: () => {
+        const c = new FakeChild();
+        spawned.push(c);
+        return c as unknown as ChildProcess;
+      },
+      openLog: () => "ignore",
+      log: (l) => lines.push(l),
+      probe: async () => true,
+    });
+    await sup.start();
+    // nothing new written: an ordinary, counted exit
+    spawned[0]!.exit(1);
+    expect(lines.join("\n")).toContain("restarting in 1000ms");
+    await sup.shutdown();
+    const sup2 = new Supervisor(config, {
+      spawn: () => {
+        const c = new FakeChild();
+        spawned.push(c);
+        return c as unknown as ChildProcess;
+      },
+      openLog: () => "ignore",
+      log: (l) => lines.push(l),
+      probe: async () => true,
+    });
+    await sup2.start();
+    await appendFile(logPath, EADDRINUSE);
+    spawned[spawned.length - 1]!.exit(1);
+    expect(lines[lines.length - 1]).toContain("its port is still held");
+    await sup2.shutdown();
   });
 });
 

@@ -356,17 +356,17 @@ function assignments(file: Scheduled, units: readonly ScheduledUnit[]): [string,
 
 // ---- the edit: one YAML document, validated, compare-and-swapped ----------------------
 
-type Refusal = { readonly code: ErrorCode; readonly message: string };
-const refuse = (code: ErrorCode, message: string): Refusal => ({ code, message });
+export type Refusal = { readonly code: ErrorCode; readonly message: string };
+export const refuse = (code: ErrorCode, message: string): Refusal => ({ code, message });
 
-type Edit = (doc: Document, file: Scheduled) => Refusal | void;
+export type Edit = (doc: Document, file: Scheduled) => Refusal | void;
 
-type EditResult = { ok: true; file: Scheduled; changed: boolean } | { ok: false; refusal: Refusal };
+export type EditResult = { ok: true; file: Scheduled; changed: boolean } | { ok: false; refusal: Refusal };
 
 const WRITE_ATTEMPTS = 3; // limit: fixed — a compare-and-swap lost to a concurrent edit is re-read and re-applied; three losses in a row is somebody else editing the file right now
 
 /** A schedule as a flow map, its times double-quoted — as the file's own examples are, so `08:00` can never be read as a sexagesimal number. */
-function scheduleNode(doc: Document, schedule: Schedule): YAMLMap {
+export function scheduleNode(doc: Document, schedule: Schedule): YAMLMap {
   const node = doc.createNode(schedule, { flow: true }) as YAMLMap;
   const at: unknown = node.get("at", true);
   if (isSeq(at)) for (const item of at.items) if (isScalar(item)) item.type = Scalar.QUOTE_DOUBLE;
@@ -374,12 +374,12 @@ function scheduleNode(doc: Document, schedule: Schedule): YAMLMap {
 }
 
 /** `deleteIn` that is a no-op when the path is not there (the library throws for a missing parent). */
-function drop(doc: Document, path: readonly (string | number)[]): void {
+export function drop(doc: Document, path: readonly (string | number)[]): void {
   if (doc.hasIn(path)) doc.deleteIn(path);
 }
 
 /** Remove a routine's or sync's entry if nothing is left in it, and the section if nothing is left in that. */
-function prune(doc: Document, section: "routines" | "syncs", name: string): void {
+export function prune(doc: Document, section: "routines" | "syncs", name: string): void {
   const entry = doc.getIn([section, name], true);
   if (isYamlMap(entry) && entry.items.length === 0) drop(doc, [section, name]);
   const sec = doc.getIn([section], true);
@@ -393,7 +393,7 @@ function prune(doc: Document, section: "routines" | "syncs", name: string): void
  * identity), when the file does not validate (it is never rewritten), or
  * when the result would not validate or would hold `name`'s component.
  */
-async function applyEdit(admin: ScheduledAdmin, units: readonly ScheduledUnit[], name: string, what: string, edit: Edit): Promise<EditResult> {
+export async function applyEdit(admin: ScheduledAdmin, units: readonly ScheduledUnit[], name: string, what: string, edit: Edit): Promise<EditResult> {
   for (let attempt = 0; attempt < WRITE_ATTEMPTS; attempt++) {
     const cur = await current(admin);
     if (cur.bytes === undefined) return { ok: false, refusal: refuse("not_available", admin.overlay.readOnly ?? "this console cannot see .metistry/scheduled.yaml") };

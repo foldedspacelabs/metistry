@@ -45,6 +45,15 @@ pause and the preflight, budget included. **Each run is handed its resolved
 config** (`ctx.config`: every key the manifest declares, your value over the
 default).
 
+**A routine suggestion** (T3-11, `apps/console/src/routine-suggestions.ts`)
+is a request in Needs You — an *improvement* — showing one entry of this file
+before and after: a routine's schedule or pause, a sync's cadence, pause or
+raise toggles, never what runs or a sync's connection. Nothing is written
+until you Approve; Approve then writes exactly the "after" through the same
+Scheduled door, as you, and is refused, writing nothing, if the entry changed
+since you were shown it (`docs/ops/client-api.md`, "`allow` on a routine
+suggestion"). Revise, Decline and Later write nothing.
+
 Still to come, each a ticket in the plan's §3.3: agent routines — a New
 Routine is kept and listed, but the runner starts only components that have
 code until T3-8; creating a New Routine (`POST /api/scheduled/routines`, T3-8).

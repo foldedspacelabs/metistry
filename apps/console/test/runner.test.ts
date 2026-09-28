@@ -7,7 +7,7 @@
 import { describe, expect, it } from "vitest";
 import { errorSignature, parseCompute } from "@foldedspacelabs/metistry-core";
 import type { PlanVault } from "@metistry-apps/routines";
-import { budgetStopKey, routineCapabilities, scheduleToSeconds, tick, type BudgetStop, type ComponentStop, type RoutineFailure, type RunnerRequests, type ScheduledCollector, type SecretFailure } from "../src/runner.js";
+import { budgetStopKey, dependentsSentence, routineCapabilities, secretDependents, scheduleToSeconds, tick, type BudgetStop, type ComponentStop, type RoutineFailure, type RunnerRequests, type ScheduledCollector, type SecretFailure } from "../src/runner.js";
 import { FakeRuns as Fake } from "./runs-fake.js";
 
 const NOW = new Date("2026-09-15T12:00:00Z");
@@ -294,7 +294,20 @@ describe("events become requests (C96, T2-9) — what the tick raises", () => {
     const url = collector({ name: "ek", dir: "collectors/ek", requires: { env: [], reachable: ["METISTRY_EK_URL"], engine: false } });
     const fold = collector({ name: "knowledge-fold", dir: "routines/knowledge-fold", runKind: "routine_run", requires: { env: [], reachable: [], engine: true } });
     await tick(db, [a, b, url, fold], {}, opts({ requests }));
-    expect(calls.secrets).toEqual([[{ name: "METISTRY_DEVIN_API_KEY", why: "METISTRY_DEVIN_API_KEY is unset", stopped: ["devin-knowledge", "devin-sessions"] }]]);
+    expect(calls.secrets).toEqual([
+      [
+        {
+          name: "METISTRY_DEVIN_API_KEY",
+          why: "METISTRY_DEVIN_API_KEY is unset",
+          stopped: ["devin-knowledge", "devin-sessions"],
+          // its dependents (T4-23): what requires it by name — never the URL's component or the engine's
+          dependents: [
+            { component: "devin-knowledge", title: "devin-knowledge", kind: "collector" },
+            { component: "devin-sessions", title: "devin-sessions", kind: "collector" },
+          ],
+        },
+      ],
+    ]);
 
     // the engine's own key is a secret like any other
     const compute = parseCompute(`
@@ -311,6 +324,21 @@ assignments:
     const engine = recordingRequests();
     await tick(new Fake(NOW), [fold], {}, opts({ requests: engine.requests, compute: () => compute, budget: async () => ({ name: "budgets.stop", why: "stopped", fix: "raise it" }) }));
     expect(engine.calls.secrets.flat().map((f) => [f.name, f.stopped])).toEqual([["METISTRY_OPENROUTER_API_KEY", ["knowledge-fold"]]]);
+
+    // the engine's secret names every component that requires the engine — whether or not its time came
+    const planner = collector({ name: "plan-tomorrow", dir: "routines/plan-tomorrow", runKind: "routine_run", requires: { env: [], reachable: [], engine: true } });
+    expect(secretDependents([fold, planner, a], "METISTRY_OPENROUTER_API_KEY", true).map((d) => d.component)).toEqual(["knowledge-fold", "plan-tomorrow"]);
+    expect(secretDependents([fold, planner, a], "METISTRY_OPENROUTER_API_KEY", false)).toEqual([]);
+    expect(secretDependents([fold, planner, a, b], "METISTRY_DEVIN_API_KEY", false).map((d) => [d.component, d.kind])).toEqual([["devin-knowledge", "collector"], ["devin-sessions", "collector"]]);
+  });
+
+  it("names a secret's dependents in one line a card shows", () => {
+    const d = (component: string, kind: "routine" | "collector") => ({ component, title: component, kind });
+    expect(dependentsSentence([])).toBe("");
+    expect(dependentsSentence([d("Morning Brief", "routine")])).toBe("Morning Brief uses it");
+    expect(dependentsSentence([d("GitHub", "collector"), d("Morning Brief", "routine")])).toBe("GitHub and Morning Brief use it");
+    expect(dependentsSentence([d("a", "collector"), d("b", "routine"), d("c", "routine")])).toBe("2 routines and 1 sync use it");
+    expect(dependentsSentence([d("a", "collector"), d("b", "collector"), d("c", "collector")])).toBe("3 syncs use it");
   });
 
   it("every tick asks whether a waiting secret is set again — against the install's environment", async () => {

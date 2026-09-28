@@ -44,8 +44,10 @@
 // per error signature, with two timestamps (when it last succeeded, when it
 // failed), and it clears itself the next time the routine succeeds. A secret
 // that is missing raises ONE `secret_failure` request (read as access)
-// naming every component it stopped, and it clears itself once the secret is
-// set. Both are mirrors of this instance's own state (core's `raiseMirror`),
+// naming every component that depends on it — its DEPENDENTS, every
+// scheduled component whose manifest requires it, due this tick or not
+// (T4-23) — and the ones it has already stopped, and it clears itself, with
+// a receipt, once the secret is set. Both are mirrors of this instance's own state (core's `raiseMirror`),
 // so a waiting one is never raised twice, and one the owner answered is not
 // raised again until what it was about has recovered.
 //
@@ -788,7 +790,7 @@ export async function tick(db: Db, scheduled: ScheduledCollector[], ctx: Compone
 
   // every secret a preflight found missing this tick, and what it stopped —
   // raised as one request per secret once the whole tick has been seen
-  const secretMisses = new Map<string, { why: string; stopped: Set<string> }>();
+  const secretMisses = new Map<string, SecretMiss>();
   // every budget that paused a routine this tick, and which routines (C133)
   const budgetStops = new Map<string, BudgetStop>();
 
@@ -887,7 +889,7 @@ export async function tick(db: Db, scheduled: ScheduledCollector[], ctx: Compone
   }
 
   if (secretMisses.size > 0) {
-    const failures = [...secretMisses].map(([name, m]) => ({ name, why: m.why, stopped: [...m.stopped].sort() }));
+    const failures = [...secretMisses].map(([name, m]) => ({ name, why: m.why, stopped: [...m.stopped].sort(), dependents: secretDependents(scheduled, name, m.engine) }));
     await tell(opts, (r) => r.secretsFailed(failures, opts.now));
   }
   await tell(opts, (r) => r.secretsRestored((name) => (opts.env[name] ?? "").trim() !== ""));
@@ -927,13 +929,34 @@ function noteBudgetStop(into: Map<string, BudgetStop>, c: ScheduledCollector, hi
  * (compute.yaml assigns nothing, a budget stopped it): those are not the
  * owner's secret to set, and the budget stop has a request of its own (C133).
  */
-function noteSecretMisses(into: Map<string, { why: string; stopped: Set<string> }>, c: ScheduledCollector, pre: PreflightResult): void {
+/** A secret a preflight found missing this tick: why, what it stopped, and whether it is the engine's (a `requires.engine` miss) rather than a named `requires.env`. */
+interface SecretMiss {
+  why: string;
+  stopped: Set<string>;
+  engine: boolean;
+}
+
+function noteSecretMisses(into: Map<string, SecretMiss>, c: ScheduledCollector, pre: PreflightResult): void {
   for (const m of pre.missing) {
     if (m.fix !== undefined || c.requires.reachable.includes(m.name)) continue;
-    const seen = into.get(m.name) ?? { why: m.why, stopped: new Set<string>() };
+    const seen = into.get(m.name) ?? { why: m.why, stopped: new Set<string>(), engine: false };
     seen.stopped.add(c.name);
+    if (!c.requires.env.includes(m.name)) seen.engine = true; // named by the engine check, not by the manifest's env
     into.set(m.name, seen);
   }
+}
+
+/**
+ * Everything scheduled that depends on the secret `name` — a manifest that
+ * requires it by name, and, for the engine's secret, every component that
+ * requires the engine — whether or not its time came this tick. Sorted by
+ * name, so the same set is the same list.
+ */
+export function secretDependents(scheduled: readonly ScheduledCollector[], name: string, engine: boolean): SecretDependent[] {
+  return scheduled
+    .filter((c) => c.requires.env.includes(name) || (engine && c.requires.engine))
+    .map((c) => ({ component: c.name, title: unitOf(c).displayName, kind: c.runKind === "routine_run" ? ("routine" as const) : ("collector" as const) }))
+    .sort((a, b) => (a.component < b.component ? -1 : a.component > b.component ? 1 : 0));
 }
 
 /** Raise or clear through `opts.requests`. A queue write that fails is logged and never costs the tick: the run row and the alert already hold the fact. */
@@ -965,6 +988,10 @@ export const ROUTINE_FAILED_EVENT = "routine_failed";
 export const SECRET_FAILED_EVENT = "secret_failed";
 export const COLLECTOR_FAILED_EVENT = "collector_failed";
 export const BUDGET_STOPPED_EVENT = "budget_stopped";
+/** The receipt a failure's request clears with when the component next runs cleanly (core's `resolveAtSource`, T4-23). */
+export const RAN_CLEANLY_RECEIPT = "Ran cleanly again";
+/** The receipt a Stop-limit request clears with once its budget no longer stops the routines. */
+export const BUDGET_RESUMED_RECEIPT = "The budget window reset, or its limit moved";
 /** How much of a failed run's error the report carries — the run row has all of it. */
 export const ROUTINE_ERROR_EXCERPT = 600; // limit: fixed — an excerpt a phone can show without scrolling; Activity has the run
 
@@ -1012,12 +1039,22 @@ export interface RoutineFailure {
   readonly failedAt: Date;
 }
 
+/** One component that cannot run while a secret is missing. */
+export interface SecretDependent {
+  readonly component: string;
+  /** The name the owner reads (the manifest's display name). */
+  readonly title: string;
+  readonly kind: "routine" | "collector";
+}
+
 export interface SecretFailure {
   /** The variable that is unset — the name the owner sets. */
   readonly name: string;
   readonly why: string;
   /** Every component it stopped this tick, by name. */
   readonly stopped: readonly string[];
+  /** Everything scheduled that depends on it, stopped yet or not (`secretDependents`). Absent = its stopped components are all it names. */
+  readonly dependents?: readonly SecretDependent[];
 }
 
 /** A component the runner has stopped running: its streak reached the limit (C135). */
@@ -1134,11 +1171,11 @@ export function runnerRequests(db: Db): RunnerRequests {
     },
 
     async routineSucceeded(component) {
-      for (const ref of await pendingRefs(db, `${ROUTINE_REF}${component}#`)) await resolveAtSource(db, { kind: RUNNER_SOURCE_KIND, external_ref: ref });
+      for (const ref of await pendingRefs(db, `${ROUTINE_REF}${component}#`)) await resolveAtSource(db, { kind: RUNNER_SOURCE_KIND, external_ref: ref }, RAN_CLEANLY_RECEIPT);
     },
 
     async collectorSucceeded(component) {
-      for (const ref of await pendingRefs(db, `${COLLECTOR_REF}${component}#`)) await resolveAtSource(db, { kind: RUNNER_SOURCE_KIND, external_ref: ref });
+      for (const ref of await pendingRefs(db, `${COLLECTOR_REF}${component}#`)) await resolveAtSource(db, { kind: RUNNER_SOURCE_KIND, external_ref: ref }, RAN_CLEANLY_RECEIPT);
     },
 
     async componentStopped(s) {
@@ -1186,15 +1223,17 @@ export function runnerRequests(db: Db): RunnerRequests {
         // component stopped since (a routine whose time came round) is added
         // to the list rather than raised on its own.
         const { rows } = await db.query(
-          `SELECT id, payload->'stopped' AS stopped FROM proposals WHERE decision = 'pending' AND source->>'kind' = $1 AND source->>'external_ref' = $2 LIMIT 1`,
+          `SELECT id, payload->'stopped' AS stopped, payload->'dependents' AS dependents FROM proposals WHERE decision = 'pending' AND source->>'kind' = $1 AND source->>'external_ref' = $2 LIMIT 1`,
           [source.kind, source.external_ref],
         );
         const waiting = rows[0];
         if (waiting) {
           const had = Array.isArray(waiting.stopped) ? (waiting.stopped as unknown[]).map(String) : [];
           const all = [...new Set([...had, ...f.stopped])].sort();
-          if (all.length !== had.length) {
-            await db.query(`UPDATE proposals SET payload = payload || $2::jsonb WHERE id = $1 AND decision = 'pending'`, [waiting.id, JSON.stringify(secretStopped(f.name, all))]);
+          const hadDeps = dependentsIn(waiting.dependents);
+          const deps = mergeDependents(hadDeps, f.dependents ?? []);
+          if (all.length !== had.length || deps.length !== hadDeps.length) {
+            await db.query(`UPDATE proposals SET payload = payload || $2::jsonb WHERE id = $1 AND decision = 'pending'`, [waiting.id, JSON.stringify(secretStopped(f.name, all, deps))]);
           }
           continue;
         }
@@ -1210,7 +1249,7 @@ export function runnerRequests(db: Db): RunnerRequests {
             event: SECRET_FAILED_EVENT,
             variable: f.name, // not `secret`: a field of that name is redacted on the way in (redact.ts)
             why: f.why,
-            ...secretStopped(f.name, f.stopped),
+            ...secretStopped(f.name, f.stopped, mergeDependents([], f.dependents ?? [])),
             last_ok_at: lastOk,
             failed_at: at.toISOString(),
             fix: `Set ${f.name} in this install's .env (\`metistry secrets sync --to env\`); what it stopped runs again on its next window.`,
@@ -1221,7 +1260,8 @@ export function runnerRequests(db: Db): RunnerRequests {
 
     async secretsRestored(isSet) {
       for (const ref of await pendingRefs(db, SECRET_REF)) {
-        if (isSet(ref.slice(SECRET_REF.length))) await resolveAtSource(db, { kind: RUNNER_SOURCE_KIND, external_ref: ref });
+        const name = ref.slice(SECRET_REF.length);
+        if (isSet(name)) await resolveAtSource(db, { kind: RUNNER_SOURCE_KIND, external_ref: ref }, `${name} is set again`);
       }
     },
 
@@ -1271,7 +1311,7 @@ export function runnerRequests(db: Db): RunnerRequests {
       const now = await current();
       if (now === undefined) return;
       for (const ref of waiting) {
-        if (ref !== `${BUDGET_REF}${now}`) await resolveAtSource(db, { kind: RUNNER_SOURCE_KIND, external_ref: ref });
+        if (ref !== `${BUDGET_REF}${now}`) await resolveAtSource(db, { kind: RUNNER_SOURCE_KIND, external_ref: ref }, BUDGET_RESUMED_RECEIPT);
       }
     },
   };
@@ -1295,14 +1335,50 @@ function budgetPaused(paused: readonly string[]): Record<string, unknown> {
   };
 }
 
-/** The part of a secret's request that names what it stopped — the list, and the before-and-after body an access request draws. */
-function secretStopped(name: string, stopped: readonly string[]): Record<string, unknown> {
+/** A stored `payload.dependents`, read back — anything malformed is dropped rather than trusted. */
+function dependentsIn(v: unknown): SecretDependent[] {
+  if (!Array.isArray(v)) return [];
+  return v.flatMap((d) => {
+    const o = d as Partial<SecretDependent> | null;
+    return o && typeof o.component === "string" && typeof o.title === "string" && (o.kind === "routine" || o.kind === "collector") ? [{ component: o.component, title: o.title, kind: o.kind }] : [];
+  });
+}
+
+/** Two lists of dependents as one, by component — what was named stays named — sorted by component. */
+function mergeDependents(had: readonly SecretDependent[], now: readonly SecretDependent[]): SecretDependent[] {
+  const by = new Map<string, SecretDependent>();
+  for (const d of [...had, ...now]) by.set(d.component, d);
+  return [...by.values()].sort((a, b) => (a.component < b.component ? -1 : a.component > b.component ? 1 : 0));
+}
+
+/** "Morning Brief and 2 collectors use it" — the one line an access card names its dependents in. */
+export function dependentsSentence(deps: readonly SecretDependent[]): string {
+  if (deps.length === 0) return "";
+  if (deps.length === 1) return `${deps[0]!.title} uses it`;
+  if (deps.length === 2) return `${deps[0]!.title} and ${deps[1]!.title} use it`;
+  const routines = deps.filter((d) => d.kind === "routine").length;
+  const collectors = deps.length - routines;
+  const parts = [...(routines ? [`${routines} routine${routines === 1 ? "" : "s"}`] : []), ...(collectors ? [`${collectors} sync${collectors === 1 ? "" : "s"}`] : [])];
+  return `${parts.join(" and ")} use it`;
+}
+
+/**
+ * The part of a secret's request that names what depends on it — the
+ * dependents (everything scheduled that needs it), the ones it has stopped
+ * so far, and the before-and-after body an access request draws: before,
+ * every dependent, each marked stopped or waiting its turn.
+ */
+function secretStopped(name: string, stopped: readonly string[], dependents: readonly SecretDependent[]): Record<string, unknown> {
+  const named = dependents.length > 0 ? dependents : stopped.map((component) => ({ component, title: component, kind: "collector" as const }));
+  const hit = new Set(stopped);
   return {
     stopped,
+    dependents,
+    ...(dependents.length > 0 ? { used_by: dependentsSentence(dependents) } : {}),
     body: {
       kind: "before_after",
       heading: name,
-      before: { label: "Stopped", text: stopped.join("\n") },
+      before: { label: "Waiting on it", text: named.map((d) => `${d.title}${hit.has(d.component) ? " — stopped" : " — stops when its time comes"}`).join("\n") },
       after: { label: `Once ${name} is set`, text: "Each runs again on its next window." },
     },
   };

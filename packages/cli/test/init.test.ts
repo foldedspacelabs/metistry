@@ -275,6 +275,36 @@ describe("metistry init", () => {
     expect(linux.envLines).toContain("METISTRY_RECONCILER_URL=http://host.docker.internal:7812");
   });
 
+  it("on macOS with no --shape, the keep-awake answer is recorded against launchd (ruling 23)", async () => {
+    const dir = join(await fresh(), "instance");
+    const r = await init({ dir, seedDir, version: "0.0.1", mint: () => MINTED, platform: "darwin", keepAwake: "always" });
+    expect(r.keepAwake).toBe("always");
+    expect(readFileSync(join(dir, ".metistry", "deployment.yaml"), "utf8")).toContain("shape: launchd");
+
+    // an explicit --shape always wins over the platform guess, on any platform
+    const linuxDir = join(await fresh(), "instance");
+    await init({ dir: linuxDir, seedDir, version: "0.0.1", mint: () => MINTED, platform: "linux", shape: "launchd", keepAwake: "never" });
+    expect(readFileSync(join(linuxDir, ".metistry", "deployment.yaml"), "utf8")).toContain("shape: launchd");
+  });
+
+  it("--keep-awake is refused for a shape that cannot hold the Mac awake — compose installs no supervisor", async () => {
+    const dir = join(await fresh(), "instance");
+    // the platform guess resolves to compose (a non-darwin platform)
+    await expect(init({ dir, seedDir, version: "0.0.1", mint: () => MINTED, platform: "linux", keepAwake: "always" })).rejects.toThrow(
+      /--keep-awake is refused for --shape compose/,
+    );
+    expect(existsSync(dir)).toBe(false); // refused before anything is stamped
+
+    // an explicit --shape compose refuses it even on darwin
+    await expect(
+      init({ dir, seedDir, version: "0.0.1", mint: () => MINTED, platform: "darwin", shape: "compose", keepAwake: "never" }),
+    ).rejects.toThrow(/--keep-awake is refused for --shape compose/);
+
+    // --shape launchd (or its platform guess) still answers the question normally
+    const r = await init({ dir, seedDir, version: "0.0.1", mint: () => MINTED, platform: "darwin", shape: "launchd", keepAwake: "always" });
+    expect(r.keepAwake).toBe("always");
+  });
+
   it("a namespaced instance's launchd lines use its own ports (state/ports.yaml), not the fixed defaults", async () => {
     const dir = join(await fresh(), "instance");
     const namespace: Namespace = { labelSuffix: "a1b2c3d4", base: 8460, ports: portsOf(8460), from: "test" };

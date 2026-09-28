@@ -188,7 +188,7 @@ describe("no badge on a tab (P2)", () => {
       expect(src).not.toMatch(/#tabs[^\n]*(textContent|innerHTML)/);
     }
     expect(NEEDS_YOU).toContain("setNeeds(proposals.length); // the bell and the Needs You row — never a tab (P2)");
-    expect(SRC).toContain("mountNeedsYou({ $, api, setNeeds, show })");
+    expect(SRC).toContain("mountNeedsYou({ $, api, setNeeds, show, offline: isOffline })");
   });
 
   it("no stylesheet draws one either", () => {

@@ -54,7 +54,7 @@ afterEach(() => vi.unstubAllGlobals());
 
 /** The rows of a Move to… list: its column, whether it is a door, and what it says. */
 function listed(card: Card) {
-  return [...moveListHtml(card).matchAll(/<li><button type="button" class="row move"( data-act="move")? data-column="([a-z_]+)"( disabled)?><span class="label">([^<]*)<\/span><span class="sub( why)?">([^<]*)<\/span><\/button><\/li>/g)]
+  return [...moveListHtml(card).matchAll(/<li><button type="button" class="row move"( data-act="move")? data-column="([a-z_]+)"(?: data-needs-connection)?( disabled)?><span class="label">([^<]*)<\/span><span class="sub( why)?">([^<]*)<\/span><\/button><\/li>/g)]
     .map((m) => ({ column: m[2], door: Boolean(m[1]), disabled: Boolean(m[3]), label: m[4], says: m[6], why: Boolean(m[5]) }));
 }
 

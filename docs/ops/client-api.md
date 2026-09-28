@@ -196,9 +196,10 @@ The table's **Idempotent** column is one of:
 | `no` | a replay is a second act, or a `409`: never replay one blindly, and never queue one offline |
 
 `POST /capture`, the Tick door (`POST /api/vault-tasks/:task_key/check`) and
-the Defer door (`…/schedule`) honour the header, because the PWA's offline
-outbox replays them (§2.17). The two vault-task doors hold their keys in the
-console's memory — see *Tick* below for why that is enough.
+the Defer door (`…/schedule`) honour the header. The PWA's offline outbox
+replays only the first two (§2.17, screen 18 §4); Defer is not offered
+offline. The two vault-task doors hold their keys in the console's memory —
+see *Tick* below for why that is enough.
 
 ### `since` cursors on the polled lists — a reconnect is one bounded pull
 

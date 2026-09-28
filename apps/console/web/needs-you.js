@@ -297,7 +297,7 @@ export function questionsHtml(p, st = {}) {
     const left = leftToAnswer(qs, answers);
     return `<div class="q-steps" data-step="summary"><p class="q-count">Your Answers</p><ol class="q-summary">${rows}</ol>` +
       `${left ? `<p class="muted">${left} left to answer</p>` : ""}` +
-      `<button type="button" class="answer primary" data-act="send-answers" data-id="${id}"${left || st.busy ? " disabled" : ""}>${glyph("check")}Send Answers</button></div>`;
+      `<button type="button" class="answer primary" data-act="send-answers" data-id="${id}" data-needs-connection${left || st.busy ? " disabled" : ""}>${glyph("check")}Send Answers</button></div>`;
   }
 
   const q = qs[step];
@@ -310,7 +310,7 @@ export function questionsHtml(p, st = {}) {
   // One question whose choice is its whole answer: each option is a button that sends.
   const sends = choosingSends(qs);
   const options = q.options.map((o, j) => sends
-    ? `<button type="button" class="q-option" data-act="choose" data-id="${id}" data-q="${step}" data-o="${j}"${busy}>${esc(o)}</button>`
+    ? `<button type="button" class="q-option" data-act="choose" data-id="${id}" data-q="${step}" data-o="${j}" data-needs-connection${busy}>${esc(o)}</button>`
     : `<label class="q-option"><input type="${q.multi ? "checkbox" : "radio"}" name="${name}" data-act="pick" data-id="${id}" data-q="${step}" data-o="${j}"${(a.chosen ?? []).includes(o) ? " checked" : ""}${busy}> ${esc(o)}</label>`).join("");
   const other = q.other
     ? `<label class="q-other">Something else…<input type="text" data-act="other" data-id="${id}" data-q="${step}" value="${attr(a.other ?? "")}" autocomplete="off"${busy}></label>`
@@ -321,7 +321,7 @@ export function questionsHtml(p, st = {}) {
       `<button type="button" data-act="next" data-id="${id}"${answered ? "" : " disabled"}>Next</button></div>`
     : sends
       ? ""
-      : `<div class="q-nav"><button type="button" class="answer primary" data-act="send-answers" data-id="${id}"${answered && !st.busy ? "" : " disabled"}>${glyph("check")}Send Answers</button></div>`;
+      : `<div class="q-nav"><button type="button" class="answer primary" data-act="send-answers" data-id="${id}" data-needs-connection${answered && !st.busy ? "" : " disabled"}>${glyph("check")}Send Answers</button></div>`;
   // a v1 question's prompt IS the card's ask: said once on screen, still the group's name to VoiceOver
   const legend = !q.prompt || q.prompt === askOf(p) ? ` class="visually-hidden"` : "";
   return `<div class="q-steps" data-step="${step}">${progress}<fieldset class="q"><legend${legend}>${esc(q.prompt || askOf(p))}</legend>${options}${other}</fieldset>${nav}</div>`;
@@ -345,7 +345,7 @@ function answerButton(p, which, a, busy) {
   const d = decisionOf(a);
   if (!d || !a.label) return "";
   const cls = which === "primary" ? "answer primary" : `answer ${which}`;
-  return `<button type="button" class="${cls}" data-act="${which}" data-id="${attr(p.id)}" data-d="${attr(d)}"${busy ? " disabled" : ""}>${glyph(ANSWER_GLYPH[which])}${esc(a.label)}</button>`;
+  return `<button type="button" class="${cls}" data-act="${which}" data-id="${attr(p.id)}" data-d="${attr(d)}" data-needs-connection${busy ? " disabled" : ""}>${glyph(ANSWER_GLYPH[which])}${esc(a.label)}</button>`;
 }
 
 /** The answers row: primary · Revise · Decline, then Later (C92). A question's primary is Send Answers, inside its steps. */
@@ -354,7 +354,7 @@ export function answersHtml(p, st = {}) {
   const busy = Boolean(st.busy);
   const question = p?.request?.body === "choices" && questionsOf(p).length > 0;
   const primary = question ? "" : answerButton(p, "primary", a.primary, busy);
-  const later = `<button type="button" class="answer later" data-act="later" data-id="${attr(p.id)}" data-d="${LATER.d}"${busy ? " disabled" : ""}>${LATER.label}</button>`;
+  const later = `<button type="button" class="answer later" data-act="later" data-id="${attr(p.id)}" data-d="${LATER.d}" data-needs-connection${busy ? " disabled" : ""}>${LATER.label}</button>`;
   return `<div class="answers">${primary}${answerButton(p, "revise", a.revise, busy)}${answerButton(p, "decline", a.decline, busy)}<span class="spacer"></span>${later}</div>`;
 }
 
@@ -366,7 +366,7 @@ function reviseFormHtml(p) {
     ? `<input type="text" name="text" value="${attr(p.payload?.area ?? "")}" autocomplete="off" autocapitalize="none">`
     : `<textarea name="text"></textarea>`;
   return `<form class="revise-form" data-id="${attr(p.id)}"><label>${area ? "Grant which folder instead?" : "What should change?"}${field}</label>` +
-    `<span><button type="submit">Send</button><button type="button" class="secondary" data-act="revise-cancel" data-id="${attr(p.id)}">Cancel</button></span></form>`;
+    `<span><button type="submit" data-needs-connection>Send</button><button type="button" class="secondary" data-act="revise-cancel" data-id="${attr(p.id)}">Cancel</button></span></form>`;
 }
 
 /**
@@ -420,13 +420,17 @@ export function receiptText(label, ask, action) {
 // The view — wired to the DOM when app.js mounts it
 // ============================================================================
 
+/** What an answer says while the console cannot be reached (screen 18 §4): it is not offered, and never waits. */
+export const OFFLINE_REFUSAL = "Decisions need the connection — nothing was sent.";
+
 /**
  * Mount Needs You on #triage. `ctx` is the shell's: `$`, `api`, `setNeeds`
- * (the bell and the sidebar row — never a tab, P2) and `show` (for *Back to
- * Today*). Returns `{ load }`, which the shell calls each time the view or the
- * sheet opens.
+ * (the bell and the sidebar row — never a tab, P2), `show` (for *Back to
+ * Today*) and `offline()` — while it says so, no answer is sent by any way in:
+ * a button, a swipe or a key (T7-4). Returns `{ load }`, which the shell calls
+ * each time the view or the sheet opens.
  */
-export function mountNeedsYou({ $, api, setNeeds, show }) {
+export function mountNeedsYou({ $, api, setNeeds, show, offline = () => false }) {
   // From 600px the narrow window shows the list, then pushes the detail (C109); under it the sheet holds the cards.
   const LIST_WIDTH = window.matchMedia("(min-width: 600px)");
   // At 900px it is the Mac's list and detail, side by side, with a request always open.
@@ -508,6 +512,7 @@ export function mountNeedsYou({ $, api, setNeeds, show }) {
   async function decide(id, body, label) {
     const p = rows.get(id);
     if (!p || busy.has(id)) return;
+    if (offline()) { refusals.set(id, OFFLINE_REFUSAL); return paint(); }
     busy.add(id);
     refusals.delete(id);
     stale.delete(id);
@@ -552,6 +557,7 @@ export function mountNeedsYou({ $, api, setNeeds, show }) {
   /** One verb, many rows. The server answers per row; anything it refused stays in the queue and says so. */
   async function batchDecide(decision) {
     if (picked.size === 0) return;
+    if (offline()) { receipt = OFFLINE_REFUSAL; return paint(); }
     const ids = [...picked].map(Number);
     const res = await api("/api/proposals/batch", { method: "POST", body: JSON.stringify({ ids, decision }) });
     if (res.ok) {
@@ -653,6 +659,7 @@ export function mountNeedsYou({ $, api, setNeeds, show }) {
     const given = answers.get(id) ?? [];
     const step = steps.get(id) ?? 0;
     for (const b of document.querySelectorAll(`[data-card="${CSS.escape(id)}"] [data-act="next"], [data-card="${CSS.escape(id)}"] .q-nav [data-act="send-answers"]`)) {
+      if (b.dataset.heldOffline !== undefined) continue; // held by the shell while offline (T7-4)
       b.disabled = !isAnswered(qs[step], given[step]);
     }
   }

@@ -151,7 +151,7 @@ const landsIn = (op, card, target) => (op === "release" || op === "unblock" ? bo
 export function moveListHtml(card) {
   return movesFor(card)
     .map((m) => m.op
-      ? `<li><button type="button" class="row move" data-act="move" data-column="${attr(m.column)}"><span class="label">${esc(m.label)}</span><span class="sub">${esc(m.what)}</span></button></li>`
+      ? `<li><button type="button" class="row move" data-act="move" data-column="${attr(m.column)}" data-needs-connection><span class="label">${esc(m.label)}</span><span class="sub">${esc(m.what)}</span></button></li>`
       : `<li><button type="button" class="row move" data-column="${attr(m.column)}" disabled><span class="label">${esc(m.label)}</span><span class="sub why">${esc(m.why)}</span></button></li>`)
     .join("");
 }
@@ -159,7 +159,7 @@ export function moveListHtml(card) {
 /** The assign step: me, then every agent that is not revoked (a HUMAN may address a card to any crew — collaboration rule 4). */
 export function ownerListHtml(names, current) {
   return [["user", "Me"], ...names.map((n) => [n, n])]
-    .map(([v, l]) => `<li><button type="button" class="row" data-act="assign-to" data-owner="${attr(v)}"${v === current ? ' aria-current="true"' : ""}><span class="label${v === "user" ? "" : " mono"}">${esc(l)}</span>${v === current ? `<span class="sub">assigned now</span>` : ""}</button></li>`)
+    .map(([v, l]) => `<li><button type="button" class="row" data-act="assign-to" data-owner="${attr(v)}" data-needs-connection${v === current ? ' aria-current="true"' : ""}><span class="label${v === "user" ? "" : " mono"}">${esc(l)}</span>${v === current ? `<span class="sub">assigned now</span>` : ""}</button></li>`)
     .join("");
 }
 
@@ -347,7 +347,7 @@ export function projectHtml(p, blocked = null) {
     ...(p.last_activity ? [["Last active", dateTime(p.last_activity)]] : []),
   ];
   return `<p>${modeChipHtml(p)}</p><p class="muted">${esc(why)}</p>` +
-    `<p><button type="button" class="secondary" data-act="mode" data-to="${flip}">${flip === "review" ? "Set to Review" : "Set to Autonomous"}</button></p>` +
+    `<p><button type="button" class="secondary" data-act="mode" data-to="${flip}" data-needs-connection>${flip === "review" ? "Set to Review" : "Set to Autonomous"}</button></p>` +
     `<h3>Spend</h3><p>${spendHtml(p)}</p>` +
     `<h3>Members</h3><p>${(p.members ?? []).length ? p.members.map((m) => `<span class="chip agent">${esc(m)}</span>`).join(" ") : `<span class="muted">No agents in it yet.</span>`}</p>` +
     `<h3>Work</h3><dl class="fields">${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")}</dl>`;
@@ -463,6 +463,9 @@ export const WHY_LINE = {
 
 const STORE_COLUMN = "metistry.board.column";
 
+/** What a move says while the console cannot be reached (screen 18 §4): it is not offered, and never waits. */
+export const OFFLINE_MOVE = "Moves need the connection — nothing moved.";
+
 /**
  * `$`, `api` and `show` are the shell's doors; `closeSheet` puts the sheet
  * away when a move has been chosen, and `retitle` names a pushed view once
@@ -470,8 +473,10 @@ const STORE_COLUMN = "metistry.board.column";
  * each view's `load` for the shell's `loadView`.
  */
 // `poll(fn, ms)` is the shell's door onto live.js: the board's fallback timer,
-// which runs only while the live-changes stream is down (T7-7).
-export function mountWork({ $, api, show, closeSheet, retitle = () => {}, poll: registerPoll = () => {} }) {
+// which runs only while the live-changes stream is down (T7-7). `offline()`
+// is the shell's too: while it says so no move and no mode is sent, by any
+// way in (T7-4).
+export function mountWork({ $, api, show, closeSheet, retitle = () => {}, poll: registerPoll = () => {}, offline = () => false }) {
   const store = {
     get: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
     set: (k, v) => { try { localStorage.setItem(k, v); } catch { /* private mode: the chip is simply not remembered */ } },
@@ -547,6 +552,7 @@ export function mountWork({ $, api, show, closeSheet, retitle = () => {}, poll: 
    * again: the server owns the columns.
    */
   async function run(op, card, target, extra = {}) {
+    if (offline()) { boardMsg(OFFLINE_MOVE); return false; } // a drag, a key or a row: no move waits (T7-4)
     const row = cardById(card.id);
     const was = row ? row.column : null;
     if (row) row.column = landsIn(op, card, target);
@@ -763,7 +769,8 @@ export function mountWork({ $, api, show, closeSheet, retitle = () => {}, poll: 
     const release = Object.entries(drops).find(([, op]) => op === "release");
     $("card-release").hidden = !release;
     $("card-release").dataset.column = release ? release[0] : "";
-    $("card-move").disabled = false; // a closed card still opens Move to…, which says why nothing is offered
+    // a closed card still opens Move to…, which says why nothing is offered — unless the shell holds it offline (T7-4)
+    if ($("card-move").dataset.heldOffline === undefined) $("card-move").disabled = false;
   }
 
   $("card").addEventListener("click", (e) => {
@@ -880,7 +887,7 @@ export function mountWork({ $, api, show, closeSheet, retitle = () => {}, poll: 
   // The kill switch (§4.21): one toggle, confirmed with its consequence named.
   $("project").addEventListener("click", async (e) => {
     const el = e.target.closest("[data-act]");
-    if (!el || el.dataset.act !== "mode" || !project) return;
+    if (!el || el.dataset.act !== "mode" || !project || offline()) return; // a mode is not offered offline (T7-4)
     const to = el.dataset.to;
     const warn = to === "review"
       ? `Set ${project} to Review? Every agent-to-agent review will come to you until you set it back.`

@@ -147,7 +147,14 @@ export async function refusalText(res, fallback) {
 // The view — wired to the DOM when app.js mounts it
 // ============================================================================
 
-export function mountMore({ $, api, show }) {
+/** What a grant says while the console cannot be reached (screen 18 §4): it is not offered, and never waits. */
+export const OFFLINE_GRANT = "Permissions need the connection — nothing was saved.";
+
+/**
+ * Mount More ▸ Agents. `offline()` is the shell's: while it says so, neither
+ * a grant nor a revoke is sent (T7-4).
+ */
+export function mountMore({ $, api, show, offline = () => false }) {
   let agents = [];
   let asked = new Map();
   let presence = new Map();
@@ -206,6 +213,7 @@ export function mountMore({ $, api, show }) {
     if (!el || el.disabled || !open) return;
     if (el.dataset.act === "edit") return openGrants(open);
     if (el.dataset.act === "revoke") {
+      if (offline()) return; // not offered offline (T7-4)
       if (!confirm(`Revoke ${open}? Its token stops working now, and this cannot be undone — a new agent has to be registered on the Mac to let it back in.`)) return;
       const r = await api(`/api/agents/${encodeURIComponent(open)}/revoke`, { method: "POST" });
       $("agent-msg").textContent = r.ok ? `${open} is revoked.` : await refusalText(r, `Not revoked — the console answered ${r.status}.`);
@@ -276,6 +284,7 @@ export function mountMore({ $, api, show }) {
     e.preventDefault();
     const id = open;
     if (!id) return;
+    if (offline()) { $("agent-grants-msg").textContent = OFFLINE_GRANT; return; } // a grant never waits (T7-4)
     const tier = $("agent-tier").value;
     const areas = tier === "areas" ? $("agent-areas").value.split("\n").map((s) => s.trim()).filter(Boolean) : [];
     const queries = $("agent-queries").checked;

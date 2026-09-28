@@ -15,6 +15,8 @@ import { mountToday } from "./today.js";
 import { artifactRoute, mountWork, roomRoute } from "./work.js";
 // The live-changes stream and the polls it stands in for (T7-7, §2.20).
 import { EVENTS_CAPABILITY, createLive, createRefresher, viewsFor } from "./live.js";
+// Offline: the outbox for captures and ticks, and whether the console answers (T7-4, screen 18 §4).
+import { NotQueueable, READS_CACHE, bandText, createOutbox, drainedText, keptStore, readAt, unreached } from "./offline.js";
 
 const { startRegistration, startAuthentication } = window.SimpleWebAuthnBrowser;
 
@@ -22,9 +24,33 @@ const $ = (id) => document.getElementById(id);
 const enrollCode = new URLSearchParams(location.hash.slice(1)).get("enroll");
 
 async function api(path, opts = {}) {
-  const res = await fetch(path, { ...opts, headers: { "content-type": "application/json", ...opts.headers } });
-  if (res.status === 401) { showAuth(); throw new Error("unauthenticated"); }
+  const res = await net(path, { ...opts, headers: { "content-type": "application/json", ...opts.headers } });
+  if (res.status === 401) { forgetReads(); showAuth(); throw new Error("unauthenticated"); }
   return res;
+}
+
+/**
+ * Every request the shell makes, and what it says about the connection
+ * (T7-4): a fetch that throws, a gateway's 502/504, or a read the worker
+ * answered from its cache is the console not reached; anything else is the
+ * console answering.
+ */
+async function net(path, init) {
+  let res;
+  try {
+    res = await fetch(path, init);
+  } catch (e) {
+    lost();
+    throw e;
+  }
+  if (unreached(res)) lost(readAt(res));
+  else found();
+  return res;
+}
+
+/** A 401: the session is over, so the reads the worker kept for it go too. */
+function forgetReads() {
+  if (typeof caches === "object" && caches) caches.delete(READS_CACHE).catch(() => {});
 }
 
 // ===== the shell (screen 18 §1; design-build-plan §2.17) =====
@@ -107,6 +133,7 @@ function show(view, { title = null, back = null } = {}) {
   pushed = { title, back };
   if (view !== "triage") beneath = view;
   if (v.segment) lastWork = view;
+  if (moved) { shownAt = null; $("reach-receipt").textContent = ""; paintReach(); } // the stamp is the view's own
   $("auth").hidden = true;
   for (const id of SECTIONS) $(id).hidden = !v.sections.includes(id);
   dropRouteHash(view);
@@ -316,7 +343,7 @@ $("login-btn").onclick = async () => {
   const { key, options } = await start.json();
   const response = await startAuthentication({ optionsJSON: options });
   const fin = await fetch("/auth/login/finish", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ key, response }) });
-  if (fin.ok) { show(hasDraft() ? "chat" : HOME); replayDraft(); goLive(); } else alert("sign-in failed");
+  if (fin.ok) { show(hasDraft() ? "chat" : HOME); replayDraft(); goLive(); drainOutbox(); } else alert("sign-in failed");
 };
 
 // ----- chat -----
@@ -433,13 +460,25 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && !$("chat").hidden) loadMessages().catch(() => {});
 });
 
+// Offline, a message is refused with the reason and never queued (screen 18
+// §4): a reply three hours late into a moved-on thread is worse than none
+// (docs/ops/client-api.md). The draft stays in the field; Try Again sends it.
+function refuseSend(why) {
+  $("send-refused-text").textContent = `Not sent — ${why} Your message is still here.`;
+  $("send-refused").hidden = false;
+}
+$("send-retry").onclick = () => $("send-form").requestSubmit();
+
 $("send-form").onsubmit = async (e) => {
   e.preventDefault();
   const text = $("send-text").value.trim();
   if (!text) return;
   localStorage.setItem("draft", text); // survives a re-auth bounce
+  $("send-refused").hidden = true;
+  if (offline) return refuseSend("Metistry can't be reached.");
   try {
-    await api("/message", { method: "POST", body: JSON.stringify({ text }) });
+    const res = await api("/message", { method: "POST", body: JSON.stringify({ text }) });
+    if (unreached(res)) return refuseSend("Metistry can't be reached.");
     localStorage.removeItem("draft");
     $("send-text").value = "";
     atBottom = true; // sending is an explicit intent to be at the end of the thread
@@ -448,7 +487,9 @@ $("send-form").onsubmit = async (e) => {
     loadMessages();
     pollChat(1000); // burst while the reply is in flight
     setTimeout(() => pollChat(), 20000);
-  } catch {}
+  } catch (err) {
+    if (err?.message !== "unauthenticated") refuseSend("Metistry can't be reached.");
+  }
 };
 
 // ----- §3.6 composer: insertion at the caret, and autocomplete -----
@@ -684,19 +725,41 @@ function hasDraft() {
 }
 
 // ----- capture -----
+// A capture carries an Idempotency-Key minted before its first attempt. When
+// the console cannot be reached it waits in the outbox with that key, and
+// sends when it is back (screen 18 §4); a retry of one that did arrive is the
+// first answer again, never a second note (docs/ops/client-api.md).
+const newKey = (verb) => `${verb}-${crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
+
 $("capture-form").onsubmit = async (e) => {
   e.preventDefault();
   const file = $("capture-file").files[0];
-  let res;
-  if (file) {
-    res = await fetch("/capture", { method: "POST", headers: { "content-type": file.type || "application/octet-stream", "x-metistry-filename": file.name }, body: file });
-    if (res.status === 401) { showAuth(); return; }
-  } else {
-    res = await api("/capture", { method: "POST", body: JSON.stringify({ note: $("capture-note").value }) });
+  const note = $("capture-note").value;
+  const key = newKey("capture");
+  const req = file
+    ? { method: "POST", headers: { "content-type": file.type || "application/octet-stream", "x-metistry-filename": file.name, "idempotency-key": key }, body: file }
+    : { method: "POST", headers: { "content-type": "application/json", "idempotency-key": key }, body: JSON.stringify({ note }) };
+  const done = () => { $("capture-note").value = ""; $("capture-file").value = ""; };
+  let res = null;
+  if (!offline && !outbox.size) {
+    try { res = await net("/capture", req); } catch { res = null; }
   }
-  const body = await res.json();
+  if (!res || unreached(res)) {
+    try {
+      await outbox.add({ path: "/capture", ...req, meta: { label: file ? file.name : note.trim().split("\n")[0].slice(0, 80) } });
+    } catch (err) {
+      $("capture-result").textContent = `Not captured — ${err instanceof NotQueueable ? err.message : "it could not be kept on this device"}.`;
+      return;
+    }
+    done();
+    $("capture-result").textContent = "Waiting to send — it goes to your inbox when Metistry is back.";
+    if (!offline) drainOutbox();
+    return;
+  }
+  if (res.status === 401) { forgetReads(); showAuth(); return; }
+  const body = await res.json().catch(() => ({}));
   $("capture-result").textContent = res.ok ? `captured → inbox #${body.id}` : "capture failed";
-  $("capture-note").value = ""; $("capture-file").value = "";
+  if (res.ok) done();
 };
 
 // ----- status + push -----
@@ -758,16 +821,114 @@ $("push-test").onclick = async () => {
   if (result !== "sent") alert(`push: ${result}`);
 };
 
+// ===== offline (T7-4; screen 18 §4; design-build-plan §2.17) =====
+// One rule per verb. Reading shows the last view, stamped with when it was
+// read (sw.js keeps the reads). A capture and a tick wait in the outbox and
+// replay with their Idempotency-Key — the tick through the Tick door's 409.
+// An answer, a move, Run Now, a mode and a grant are not offered: a control
+// marked `data-needs-connection` is disabled while the console cannot be
+// reached, and the views' own doors refuse too (a swipe, a drag). The outbox
+// itself holds nothing else (offline.js), so no path through the PWA queues
+// one. A message is refused with its reason, and its draft stays.
+let offline = false;
+let shownAt = null; // when the view on screen was read, while it is a kept read
+let walled = false; // the app opened to the sign-in wall only because the console could not be reached
+const PROBE_MS = 15000; // how often, while it cannot be reached, the shell asks again (the "reach" poll, below)
+const isOffline = () => offline;
+
+const outbox = createOutbox({
+  store: keptStore(typeof indexedDB === "object" ? indexedDB : null),
+  send: (e) => net(e.path, { method: e.method, headers: e.headers, body: e.body }),
+  onChange: () => { paintReach(); today.outboxChanged(); },
+  onResult: (r) => { if (r.entry.verb === "tick") today.replayed(r); },
+});
+
+/** The console did not answer. `at` is when a kept read was read, for the stamp. */
+function lost(at = null) {
+  if (at && (!shownAt || new Date(at) < new Date(shownAt))) shownAt = at;
+  if (!offline) {
+    offline = true;
+    holdControls();
+  }
+  paintReach();
+}
+
+/** The console answered: send what waited, then read what is on screen again. */
+function found() {
+  if (!offline) return;
+  if (walled) return location.reload(); // it can be reached now: open the app the way a launch does
+  offline = false;
+  shownAt = null;
+  holdControls();
+  paintReach();
+  drainOutbox();
+  if (signedIn) {
+    liveRefresher.queue(Object.keys(LIVE_REFRESH)); // what is on screen was read while it could not be
+    live.nudge();
+  }
+}
+
+/** Is the console there? `/api/identity` is public and small; the worker answers it from its cache only when the network does not. */
+function probe() {
+  net("/api/identity", { cache: "no-store" }).catch(() => {});
+}
+
+async function drainOutbox() {
+  if (!outbox.size) return;
+  const r = await outbox.drain();
+  const said = drainedText(r.done);
+  if (said) $("reach-receipt").textContent = said;
+  if (r.reason === "unauthenticated") { forgetReads(); showAuth(); }
+  else if (r.reason === "later") setTimeout(() => { if (!offline) drainOutbox(); }, 30000);
+}
+
+/** The band under the header: what is wrong, and what still works (screen 18 §4). */
+function paintReach() {
+  document.body.dataset.reach = offline ? "offline" : "online";
+  $("offline-band").hidden = !offline;
+  if (!offline) return;
+  const b = bandText({ shownAt, waiting: outbox.size });
+  $("offline-title").textContent = b.title;
+  $("offline-why").textContent = b.detail;
+}
+
+/**
+ * What needs the console's answer is not offered while it cannot be reached:
+ * disabled — the disabled ink — and described by the band. A view that
+ * repaints while offline is held again as it lands; what was held is given
+ * back when the console answers, and nothing a view disabled itself.
+ */
+function holdControls() {
+  for (const el of document.querySelectorAll("[data-needs-connection]")) {
+    if (offline && !el.disabled) {
+      el.disabled = true;
+      el.dataset.heldOffline = "";
+      el.setAttribute("aria-describedby", "offline-title");
+    } else if (!offline && el.dataset.heldOffline !== undefined) {
+      el.disabled = false;
+      delete el.dataset.heldOffline;
+      el.removeAttribute("aria-describedby");
+    }
+  }
+}
+new MutationObserver(() => { if (offline) holdControls(); }).observe(document.body, { childList: true, subtree: true });
+
+window.addEventListener("offline", () => lost());
+window.addEventListener("online", probe);
+document.addEventListener("visibilitychange", () => { if (offline && document.visibilityState === "visible") probe(); });
+
 // ----- Today and Needs You: their own files (T7-3a; screen 18 §2–§3) -----
-// Mounted with the shell's doors; `loadView` calls their `load`.
-const today = mountToday({ $, api, show });
-const needsYou = mountNeedsYou({ $, api, setNeeds, show });
+// Mounted with the shell's doors; `loadView` calls their `load`. Today ticks
+// through the outbox when the console cannot be reached; no other view is
+// handed it.
+const today = mountToday({ $, api, show, outbox, offline: isOffline });
+const needsYou = mountNeedsYou({ $, api, setNeeds, show, offline: isOffline });
 
 // ----- Work, Knowledge and More ▸ Agents: their own files (T7-3b; screen 18 §5) -----
 // Each returns its views' `load`s by view name, for `loadView`.
-const work = mountWork({ $, api, show, closeSheet, retitle, poll: (fn, ms) => live.poll("board", fn, ms) });
+const work = mountWork({ $, api, show, closeSheet, retitle, poll: (fn, ms) => live.poll("board", fn, ms), offline: isOffline });
 const knowledge = mountKnowledge({ $, api, show, retitle });
-const more = mountMore({ $, api, show });
+const more = mountMore({ $, api, show, offline: isOffline });
 
 // ----- devices -----
 async function loadDevices() {
@@ -1133,8 +1294,17 @@ const live = createLive({
     refreshNeeds().catch(() => {});
     liveRefresher.queue(Object.keys(LIVE_REFRESH));
   },
-  onState(state) { document.body.dataset.stream = state; },
+  onState(state) {
+    document.body.dataset.stream = state;
+    if (state === "live") found();
+    else if (state === "down") probe(); // the stream dropping is the first sign; the probe says whether it is the console
+  },
 });
+
+// While the console cannot be reached, ask again every PROBE_MS (T7-4). The
+// stream is down whenever the console is, so like every poll here this runs
+// only then; and it asks only while the shell believes it offline.
+live.poll("reach", () => { if (offline) probe(); }, PROBE_MS);
 
 /**
  * Signed in: the chat's and the count's fallback polls, and the stream —
@@ -1165,9 +1335,13 @@ window.addEventListener("online", () => live.nudge());
 // from the middle of the module loaded a view into constants the module had
 // not reached yet — the feed's chips were in their temporal dead zone, and the
 // home tab never painted on first load.
-if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {}); // push degrades absent
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {}); // push and the offline shell degrade absent
+await outbox.load().catch(() => {}); // what waited when the app last closed: Today draws its ticks as waiting
+if (navigator.onLine === false) lost();
 try {
-  const probe = await fetch("/api/status");
+  // with no network the worker answers from the last read: the app opens on what it last showed, with the band
+  const status = await net("/api/status");
   // a #/artifacts/… or #/rooms/work/… link (what a proposal carries) opens straight there; Today is home
-  if (probe.ok) { show(artifactRoute(location.hash) ? "artifact" : roomRoute(location.hash) ? "rooms" : HOME); replayDraft(); goLive(); } else showAuth();
-} catch { showAuth(); }
+  if (status.ok) { show(artifactRoute(location.hash) ? "artifact" : roomRoute(location.hash) ? "rooms" : HOME); replayDraft(); goLive(); drainOutbox(); }
+  else { if (status.status === 401) forgetReads(); showAuth(); }
+} catch { walled = offline; showAuth(); } // never read and not reachable: the sign-in wall, under the band that says why

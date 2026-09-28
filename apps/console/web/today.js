@@ -19,9 +19,15 @@
 //
 // Every value reaches markup through esc()/attr(); the brief and the standup
 // through md.js (escape first, whitelisted tags only) (CRIT-7).
+//
+// Offline (T7-4, screen 18 §4): a tick **waits** in the shell's outbox with
+// the line it saw, and replays through the Tick door's `409 stale` — the row
+// says *Waiting to send* until it does, and Don't Send takes it back. Defer is
+// not offered offline: it is not one of the outbox's two routes.
 
 import { attr, clockTime, dateTime, esc } from "./lib.js";
 import { renderMarkdown } from "./md.js";
+import { unreached } from "./offline.js";
 
 // ============================================================================
 // The day as a spine — pure, so a test drives it with the recorded fixture
@@ -130,19 +136,21 @@ const words = (s) => String(s ?? "").replaceAll("_", " ");
  * line and chips, and Defer. `note` is what the last write left on it: the
  * receipt with Undo, a stale refusal with the line as it stands, or an error.
  */
-export function taskHtml(it, { n, today, note, deferring, busy, now = new Date() } = {}) {
+export function taskHtml(it, { n, today, note, deferring, busy, waiting = null, now = new Date() } = {}) {
   const r = it.row;
   const k = attr(it.key);
-  const done = Boolean(r.checked);
-  const dis = busy ? " disabled" : "";
+  // a tick that waits shows what it will write, and holds the box until it is sent or taken back
+  const done = waiting ? Boolean(waiting.meta.checked) : Boolean(r.checked);
+  const dis = busy || waiting ? " disabled" : "";
+  if (waiting) note = { kind: "waiting", checked: done, id: waiting.id };
   const choices = deferring && !done
-    ? `<div class="defer-choices" role="group" aria-label="Defer to">${deferChoices(now).map((c) => `<button type="button" class="secondary" data-act="defer-to" data-key="${k}" data-when="${c.when}"${dis}>${c.label}</button>`).join("")}</div>`
+    ? `<div class="defer-choices" role="group" aria-label="Defer to">${deferChoices(now).map((c) => `<button type="button" class="secondary" data-act="defer-to" data-key="${k}" data-when="${c.when}" data-needs-connection${dis}>${c.label}</button>`).join("")}</div>`
     : "";
   return `<li class="spine-item task${done ? " done" : ""}${r.priority_effective === 1 ? " p1" : ""}" data-key="${k}">` +
     `<input type="checkbox" id="tick-${n}" data-act="tick" data-key="${k}"${done ? " checked" : ""}${dis}>` +
     `<div class="item-body"><label class="item-title" for="tick-${n}">${esc(r.text)}</label>` +
     `<span class="item-meta">${esc(taskMeta(r, today))}${taskChips(r, today)}</span>` +
-    (done ? "" : `<div class="item-acts"><button type="button" class="quiet" data-act="defer" data-key="${k}" aria-expanded="${deferring ? "true" : "false"}"${dis}>Defer</button></div>`) +
+    (done ? "" : `<div class="item-acts"><button type="button" class="quiet" data-act="defer" data-key="${k}" aria-expanded="${deferring ? "true" : "false"}" data-needs-connection${dis}>Defer</button></div>`) +
     `${choices}${noteHtml(it.key, note)}</div></li>`;
 }
 
@@ -152,6 +160,10 @@ export function noteHtml(key, note) {
   const k = attr(key);
   if (note.kind === "ticked") return `<p class="receipt" role="status">Ticked in <span class="mono">${esc(note.path)}</span> <button type="button" class="link" data-act="undo" data-key="${k}">Undo</button></p>`;
   if (note.kind === "reopened") return `<p class="receipt" role="status">Reopened in <span class="mono">${esc(note.path)}</span></p>`;
+  if (note.kind === "waiting") {
+    return `<p class="receipt waiting" role="status">Waiting to send — ${note.checked ? "ticked" : "reopened"} here, written to your note when Metistry is back. ` +
+      `<button type="button" class="link" data-act="unqueue" data-id="${attr(note.id)}">Don't Send</button></p>`;
+  }
   if (note.kind === "stale") {
     return `<p class="stale-note" role="status">This line changed in your note since it was shown. Nothing was written.` +
       `${note.line ? `<br><span class="mono">${esc(note.line)}</span>` : "<br>The line is gone from the note."}</p>`;
@@ -186,7 +198,7 @@ export function spineHtml(s, day, view = {}) {
   const today = day?.date ?? ymd(now);
   let n = 0;
   const row = (it) => {
-    const opts = { n: n++, today, note: view.notes?.get(it.key), deferring: view.deferring === it.key, busy: view.busy?.has(it.key), now };
+    const opts = { n: n++, today, note: view.notes?.get(it.key), deferring: view.deferring === it.key, busy: view.busy?.has(it.key), waiting: view.waiting?.get(it.key) ?? null, now };
     return it.type === "task" ? taskHtml(it, opts) : it.type === "work" ? workHtml(it) : eventHtml(it, { inNextUp: s.nextUp?.key === it.key });
   };
   const out = [];
@@ -285,11 +297,13 @@ const store = {
 const newKey = (verb) => `${verb}-${crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
 
 /**
- * Mount Today on #today. `ctx` is the shell's: `$`, `api`, `show`. Returns
- * `{ load, refresh }`: the shell calls `load` each time Today opens, and
- * `refresh` when a live event says something on it changed.
+ * Mount Today on #today. `ctx` is the shell's: `$`, `api`, `show`, and for
+ * offline its `outbox` and `offline()`. Returns `{ load, refresh, replayed,
+ * outboxChanged }`: the shell calls `load` each time Today opens, `refresh`
+ * when a live event says something on it changed, `replayed` with each tick
+ * the outbox sent, and `outboxChanged` when what waits changed.
  */
-export function mountToday({ $, api, show }) {
+export function mountToday({ $, api, show, outbox = null, offline = () => false }) {
   let day = null;
   let brief = { loaded: false, text: null, standup: null, failed: null };
   let briefOpen = false;
@@ -386,10 +400,15 @@ export function mountToday({ $, api, show }) {
     $("today-asof").textContent = "";
   }
 
+  /** The ticks the outbox holds, by the line they are for. */
+  const waitingTicks = () => new Map((outbox?.waiting("tick") ?? []).map((e) => [String(e.meta.task_key), e]));
+
   function paint() {
     if (!day) return;
     const now = new Date();
-    const s = spineOf(day, now, new Set([...notes].filter(([, n]) => n.kind === "ticked").map(([k]) => k)));
+    const waiting = waitingTicks();
+    // a line ticked a moment ago, or ticked and waiting, stays where it was (P9)
+    const s = spineOf(day, now, new Set([...[...notes].filter(([, n]) => n.kind === "ticked").map(([k]) => k), ...waiting.keys()]));
     const empty = !s.calendar && !(day.tasks ?? []).length && !(day.work ?? []).length;
     $("today-state").hidden = !empty;
     $("today-state").className = "panel-state empty";
@@ -399,7 +418,7 @@ export function mountToday({ $, api, show }) {
     const next = nextUpHtml(s, now);
     $("today-next").hidden = !next;
     $("today-next").innerHTML = next;
-    $("today-spine").innerHTML = spineHtml(s, day, { now, notes, deferring, busy });
+    $("today-spine").innerHTML = spineHtml(s, day, { now, notes, deferring, busy, waiting });
     $("today-asof").textContent = day.as_of ? `as of ${clockTime(day.as_of)}` : "";
     paintBrief();
   }
@@ -428,28 +447,60 @@ export function mountToday({ $, api, show }) {
     }).observe($("today-brief"));
   }
 
-  /** Tick and Undo: the same door, the two directions (§2.11, T2-4). */
+  /**
+   * Tick and Undo: the same door, the two directions (§2.11, T2-4). The key
+   * is minted before the first attempt; when the console cannot be reached
+   * the tick waits in the outbox with that key and the text it saw, and
+   * replays through the door's 409 (T7-4).
+   */
   async function tick(key, checked) {
     const it = orderedItems(day).find((i) => i.key === key && i.type === "task");
-    if (!it || busy.has(key)) return;
+    if (!it || busy.has(key) || waitingTicks().has(key)) return;
     busy.add(key);
     notes.delete(key);
     paint();
-    const res = await api(`/api/vault-tasks/${encodeURIComponent(key)}/check`, {
-      method: "POST",
-      headers: { "idempotency-key": newKey(checked ? "tick" : "undo") },
-      body: JSON.stringify({ checked, seen_text: it.row.text }),
-    }).catch((e) => ({ ok: false, status: 0, json: async () => ({ error: { message: `Couldn't reach Metistry — nothing was written (${e?.message ?? e})` } }) }));
+    const headers = { "content-type": "application/json", "idempotency-key": newKey(checked ? "tick" : "undo") };
+    const body = JSON.stringify({ checked, seen_text: it.row.text });
+    const later = () => wait(key, it, checked, { method: "POST", path: `/api/vault-tasks/${encodeURIComponent(key)}/check`, headers, body });
+    if (outbox && offline()) return later();
+    let res;
+    try {
+      res = await api(`/api/vault-tasks/${encodeURIComponent(key)}/check`, { method: "POST", headers, body });
+    } catch (e) {
+      if (outbox && e?.message !== "unauthenticated") return later();
+      res = { ok: false, status: 0, json: async () => ({ error: { message: `Couldn't reach Metistry — nothing was written (${e?.message ?? e})` } }) };
+    }
+    if (outbox && unreached(res)) return later();
     const out = await res.json().catch(() => ({}));
     busy.delete(key);
     await settle(key, res, out, checked ? { kind: "ticked", path: it.row.path } : { kind: "reopened", path: it.row.path });
   }
 
-  /** Defer: a `do` day or someday, one field on one line (T2-5). */
+  /** The tick waits: in the outbox, with its key and the line it saw; the row says so. */
+  async function wait(key, it, checked, req) {
+    try {
+      await outbox.add({ ...req, meta: { task_key: key, checked, seen_text: it.row.text, path: it.row.path } });
+    } catch (e) {
+      notes.set(key, { kind: "error", message: `Not written — ${e?.message ?? e}` });
+    }
+    busy.delete(key);
+    paint();
+  }
+
+  /** A tick the outbox sent (or that the console would not take): the same notes a live tick leaves, then the day as it now is. */
+  async function replayed({ entry, outcome, body }) {
+    const key = String(entry.meta.task_key);
+    if (outcome === "sent") notes.set(key, entry.meta.checked ? { kind: "ticked", path: entry.meta.path } : { kind: "reopened", path: entry.meta.path });
+    else if (outcome === "stale") notes.set(key, { kind: "stale", line: body?.line ?? null });
+    else notes.set(key, { kind: "error", message: `Not written — ${body?.error?.message ?? "Metistry refused it"}` });
+    if (day) await loadDay({ again: true }).catch(() => paint());
+  }
+
+  /** Defer: a `do` day or someday, one field on one line (T2-5). Not offered offline: it never waits. */
   async function defer(key, when) {
     const it = orderedItems(day).find((i) => i.key === key && i.type === "task");
     const choice = deferChoices(new Date()).find((c) => c.when === when);
-    if (!it || !choice || busy.has(key)) return;
+    if (!it || !choice || busy.has(key) || offline()) return;
     busy.add(key);
     notes.delete(key);
     paint();
@@ -486,6 +537,7 @@ export function mountToday({ $, api, show }) {
     if (!el || el.disabled) return;
     const act = el.dataset.act;
     if (act === "undo") return tick(el.dataset.key, false);
+    if (act === "unqueue") { await outbox?.cancel(el.dataset.id); return paint(); }
     if (act === "defer") { deferring = deferring === el.dataset.key ? null : el.dataset.key; return paint(); }
     if (act === "defer-to") return defer(el.dataset.key, el.dataset.when);
     if (act === "board") return show("board");
@@ -502,5 +554,5 @@ export function mountToday({ $, api, show }) {
     }
   });
 
-  return { load, refresh };
+  return { load, refresh, replayed, outboxChanged: () => paint() };
 }

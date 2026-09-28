@@ -34,6 +34,7 @@
     <symbol id="g-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5.5v13M5.5 12h13"/></symbol>
     <symbol id="g-bell" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10.5a5 5 0 0110 0c0 4 1.4 5.2 1.4 5.2H5.6S7 14.5 7 10.5z"/><path d="M10.4 18.6a1.9 1.9 0 003.2 0"/></symbol>
     <symbol id="g-back" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 5.5L8 12l6.5 6.5"/></symbol>
+    <symbol id="g-share" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5v11M8 7.5l4-4 4 4"/><path d="M8.5 10.5H6v10h12v-10h-2.5"/></symbol>
     <symbol id="g-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></symbol>
     <!-- the answers' glyphs (components-01 §2.4: Approve's check and Decline's
          cross carry the pair in greyscale; Revise's pencil) and the board's,
@@ -106,10 +107,18 @@
       <button type="button" data-view="projects">Projects</button>
       <button type="button" data-view="artifacts">Artifacts</button>
     </div>
+    <!-- The wall (screen 18 §0, §7.4): sign in with a passkey, or — opened from
+         a one-time link (#enroll=) — name this device and enrol it. Every
+         refusal is the line under the buttons, never a browser alert. -->
     <section id="auth" hidden>
-      <p id="auth-msg">sign in to your instance</p>
-      <button id="login-btn">Sign In with Passkey</button>
-      <button id="enroll-btn" hidden>Enroll This Device</button>
+      <h2 id="auth-msg">Sign In</h2>
+      <div id="enroll-form" class="field" hidden>
+        <label for="enroll-label">Device name</label>
+        <input id="enroll-label" type="text" autocomplete="off" maxlength="60" />
+      </div>
+      <button id="enroll-btn" type="button" hidden>Enroll This Device</button>
+      <button id="login-btn" type="button">Sign In with Passkey</button>
+      <p id="auth-error" class="auth-error" role="alert"></p>
     </section>
 
     <!-- Activity (the feed's name since 09-18, N1; its id stays `feed`), under
@@ -204,6 +213,19 @@
          first and pushes the card (C109); at 900px they sit side by side.
          Skip is bulk-only (K2): the selection bar and its `s` key. -->
     <section id="triage" hidden>
+      <!-- The notifications ask (screen 18 §6; notify.js): in context, the first
+           time something waits here — never on first launch. On iPhone in a
+           Safari tab it is the way to install instead, since push needs the
+           Home Screen app. -->
+      <div id="push-ask" class="push-ask" hidden>
+        <p id="push-ask-text"></p>
+        <p class="push-ask-actions">
+          <button id="push-ask-on" type="button">Turn On Notifications</button>
+          <button id="push-ask-install" type="button" aria-haspopup="dialog" hidden>How to Install</button>
+          <button id="push-ask-later" type="button" class="secondary">Not Now</button>
+        </p>
+      </div>
+      <p id="push-ask-status" class="receipt" role="status" aria-live="polite"></p>
       <div id="triage-tools" class="triage-tools" hidden>
         <button id="triage-select" type="button" class="secondary" aria-pressed="false">Select</button>
         <p id="triage-batch" hidden>
@@ -232,8 +254,10 @@
       <ul id="reviews" class="reviews"><li class="muted">none</li></ul>
       <h3>Components</h3>
       <ul id="checks"></ul>
-      <button id="push-enable">Enable Notifications</button>
-      <button id="push-test">Test Push</button>
+      <h3>Notifications</h3>
+      <p id="push-status" class="receipt" role="status" aria-live="polite"></p>
+      <button id="push-enable" type="button">Turn On Notifications</button>
+      <button id="push-test" type="button" class="secondary" hidden>Send a Test</button>
     </section>
 
     <section id="devices" hidden>
@@ -382,6 +406,23 @@
         <li><button type="button" class="row" data-view="usage"><svg class="glyph" aria-hidden="true" focusable="false"><use href="#g-usage"/></svg><span class="label">Usage</span><svg class="chev" aria-hidden="true" focusable="false"><use href="#g-chevron"/></svg></button></li>
         <li><button type="button" class="row" data-view="settings"><svg class="glyph" aria-hidden="true" focusable="false"><use href="#g-settings"/></svg><span class="label">Settings</span><svg class="chev" aria-hidden="true" focusable="false"><use href="#g-chevron"/></svg></button></li>
       </ul>
+      <!-- Install (screen 18 §6; notify.js): the iPhone's three-step sheet, or
+           Chrome and Edge's own prompt, offered here once. Hidden where there
+           is nothing to offer — installed already, or no prompt. -->
+      <ul id="install-group" class="group" hidden>
+        <li><button type="button" class="row" id="install-row"><svg class="glyph" aria-hidden="true" focusable="false"><use href="#g-share"/></svg><span class="label" id="install-label">Install Metistry</span><svg class="chev" aria-hidden="true" focusable="false"><use href="#g-chevron"/></svg></button></li>
+      </ul>
+    </section>
+
+    <!-- Install on iPhone (screen 18 §6): Safari has no install prompt, and
+         push needs the installed app, so the sheet says the three steps. -->
+    <section id="install" hidden>
+      <p>Safari has no install button, and notifications need the app on your Home Screen.</p>
+      <ol class="install-steps">
+        <li>Tap <b>Share</b> <svg class="glyph" role="img" aria-label="(the square with an arrow)" focusable="false"><use href="#g-share"/></svg> in Safari's toolbar.</li>
+        <li>Choose <b>Add to Home Screen</b>, then <b>Add</b>.</li>
+        <li>Open <b>Metistry</b> from your Home Screen, and turn notifications on there.</li>
+      </ol>
     </section>
 
     <!-- Work ▸ Board (screen 18 §5; screen 6; work.js). Columns are derived

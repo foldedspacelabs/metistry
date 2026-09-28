@@ -103,7 +103,9 @@ describe("five tabs — Today · Chat · Work · Knowledge · More (ruled 2026-0
 
   it("More holds Activity and Agents, then Usage and Settings, in the Mac's order", () => {
     expect([...MORE.matchAll(/data-view="([^"]+)"/g)].map((m) => m[1])).toEqual(["feed", "agents", "usage", "settings"]);
-    expect([...MORE.matchAll(/<span class="label">([^<]*)</g)].map((m) => m[1])).toEqual(["Activity", "Agents", "Usage", "Settings"]);
+    // …and, last, the install row (T7-5, screen 18 §6) — no view of its own: the iPhone sheet or the browser's prompt
+    expect([...MORE.matchAll(/<span class="label"[^>]*>([^<]*)</g)].map((m) => m[1])).toEqual(["Activity", "Agents", "Usage", "Settings", "Install Metistry"]);
+    expect(MORE).toMatch(/<ul id="install-group" class="group" hidden>/);
     // every More row is a push back to More — except Usage, which is a sheet
     for (const v of ["feed", "agents", "settings"]) expect(shell.VIEWS[v]!.back, v).toBe("more");
     expect(shell.VIEWS.usage!.sheet).toBe("always");
@@ -152,6 +154,7 @@ function counter() {
     "document",
     "$",
     `let current = "today"; let sheetView = null;
+     const notify = { needs() {} }; // the notifications ask (notify.js, T7-5) — pwa-notify.test.ts holds it
      ${["needsCount", "needsBadge", "paintNeeds", "setNeeds"].map(lift).join("\n")}
      return { setNeeds, paintNeeds, needsBadge, at(v) { current = v; }, sheet(v) { sheetView = v; } };`,
   )(document, $) as {
@@ -390,7 +393,7 @@ describe("glyphs, not emoji", () => {
 
 describe("the views split out of app.js (T7-3a)", () => {
   it("every element a module binds by id ships in index.html — a missing one throws on load and stops the shell", () => {
-    for (const m of ["app.js", "today.js", "needs-you.js", "work.js", "knowledge.js", "more.js"]) {
+    for (const m of ["app.js", "today.js", "needs-you.js", "work.js", "knowledge.js", "more.js", "notify.js"]) {
       const src = read(`../web/${m}`);
       const ids = [...new Set([...src.matchAll(/\$\("([^"]+)"\)/g)].map((x) => x[1]!))];
       expect(ids.length, m).toBeGreaterThan(5);
@@ -404,7 +407,8 @@ describe("the views split out of app.js (T7-3a)", () => {
     expect(SRC).toContain('import { artifactRoute, mountWork, roomRoute } from "./work.js";');
     expect(SRC).toContain('import { mountKnowledge } from "./knowledge.js";');
     expect(SRC).toContain('import { mountMore } from "./more.js";');
-    for (const m of ["today.js", "needs-you.js", "work.js", "knowledge.js", "more.js", "lib.js"]) expect(read(`../web/${m}`), m).not.toMatch(/from "\.\/app\.js"/);
+    expect(SRC).toContain('import { mountNotify } from "./notify.js";');
+    for (const m of ["today.js", "needs-you.js", "work.js", "knowledge.js", "more.js", "notify.js", "lib.js"]) expect(read(`../web/${m}`), m).not.toMatch(/from "\.\/app\.js"/);
     expect(read("../web/lib.js")).not.toMatch(/\bdocument\.|\bwindow\./); // DOM-free: a test imports it as it is
   });
 });

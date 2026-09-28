@@ -603,6 +603,15 @@ POST /api/push/test                         200 {"result":"sent" | "no_subscript
 A subscription is stored on the session row, so revoking the device ends its
 pushes (`docs/ops/auth.md`).
 
+**What a notification shows** is the PWA service worker's (`sw.js`, T7-5),
+not the sender's: it reads a payload's `type`, `title` and `url` and nothing
+else — a `body`, `actions`, an `image` are never shown. `type` (≤ 40
+characters) heads the notification and `title` (≤ 120) is its line; each is
+one line with key-shaped runs and six-digit runs blanked. A payload with no
+`type` shows its `title` alone. `url` is followed only when it is a path on
+the console's own origin — anything else opens `/`. A sender that wants a
+tap to open Needs You sends `url: "/#/needs-you"`.
+
 ### Status
 
 ```

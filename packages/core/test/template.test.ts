@@ -271,6 +271,53 @@ describe("{{ calendar }}", () => {
     await render("{{ calendar day: tomorrow }}", { calendar: { events: async (d) => (asked.push(d), []) } });
     expect(asked).toEqual([TOMORROW]);
   });
+
+  // Ruling 16 (decisions-log.md): an event's title is written by whoever
+  // sends the invite, not the owner, so a hostile one must render inert
+  // rather than reach the Journal note as live markdown/frontmatter/HTML.
+  describe("a hostile title renders inert (Ruling 16)", () => {
+    const eventWith = (title: string): CalendarEvent[] => [
+      { title, start: "2026-09-18T13:30:00Z", end: "2026-09-18T14:00:00Z" },
+    ];
+    const lines = (markdown: string): string[] => markdown.split("\n");
+
+    it("a newline cannot start a new heading, frontmatter delimiter or task line", async () => {
+      const out = await render("{{ calendar day: today }}", {
+        calendar: { events: async () => eventWith("Evil\n# Gotcha\n---\n- [ ] pwned") },
+      });
+      expect(out.markdown).toContain("- 09:30–10:00 Evil # Gotcha --- - [ ] pwned");
+      expect(lines(out.markdown).some((l) => /^#/.test(l.trim()))).toBe(false);
+      expect(lines(out.markdown).some((l) => l.trim() === "---")).toBe(false);
+      expect(lines(out.markdown).some((l) => /^- \[ \]/.test(l.trim()))).toBe(false);
+    });
+
+    it("a leading heading marker with no newline is already inert mid-line", async () => {
+      const out = await render("{{ calendar day: today }}", { calendar: { events: async () => eventWith("# Gotcha") } });
+      expect(out.markdown).toContain("- 09:30–10:00 # Gotcha");
+      expect(lines(out.markdown).some((l) => /^#/.test(l.trim()))).toBe(false);
+    });
+
+    it("a wikilink cannot link anywhere — its bracket pair is broken", async () => {
+      const out = await render("{{ calendar day: today }}", {
+        calendar: { events: async () => eventWith("Sync re: [[Journal/2026-09-18]]") },
+      });
+      expect(out.markdown).not.toContain("[[Journal/2026-09-18]]");
+      expect(out.markdown).not.toMatch(/\[\[|\]\]/);
+    });
+
+    it("raw HTML is escaped, not rendered", async () => {
+      const out = await render("{{ calendar day: today }}", {
+        calendar: { events: async () => eventWith("<script>alert(1)</script>") },
+      });
+      expect(out.markdown).not.toContain("<script>");
+      expect(out.markdown).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
+    });
+
+    it("a carriage return alone is collapsed the same way", async () => {
+      const out = await render("{{ calendar day: today }}", { calendar: { events: async () => eventWith("Evil\r\n# Gotcha") } });
+      expect(out.markdown).toContain("- 09:30–10:00 Evil # Gotcha");
+    });
+  });
 });
 
 describe("{{ work }} and {{ requests }}", () => {

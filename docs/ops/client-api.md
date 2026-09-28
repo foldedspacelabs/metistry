@@ -332,7 +332,7 @@ takes a `since` cursor and answers with the next one.
 | `POST /api/knowledge/conflicts/resolve` | owner | session · local_owner | no | stale | — | served | settle a conflicted file: keep one side |
 | `GET /api/knowledge/history` | owner | session · local_owner | natural | — | — | served | a file's commits |
 | `GET /api/knowledge/version` | owner | session · local_owner | natural | — | — | served | one file at one commit |
-| `POST /api/knowledge/restore` | owner | session · local_owner | no | stale | — | served | raise a Needs You request to restore a file; Approve restores as `user` |
+| `POST /api/knowledge/restore` | local | local_owner | no | stale | — | served | raise a Needs You request to restore a file; Approve restores as `user` |
 | `GET /api/q/:name` | owner | session · local_owner · owner_token | natural | — | — | served | run a named query exposed `generic` |
 | `GET /api/today` | owner | session · local_owner | natural | — | — | served | the day: tasks, work, order, events, brief, standup and plan |
 | `GET /api/vault-tasks` | owner | session · local_owner | natural | — | — | served | vault tasks by filter: Slipping, Owed, Waiting on Others |
@@ -1797,7 +1797,7 @@ GET  /api/knowledge/fold | drafts | areas            see below — the owner's a
 POST /api/knowledge/conflicts/resolve      served — {path, keep, seen_sha}   409 stale — only a path in `conflict`   the owner's alone
 GET  /api/knowledge/history?path=&limit=   served — a file's commits, through the bridge's `GET /vault/log`   the owner's alone
 GET  /api/knowledge/version?path=&sha=     served — one file at one commit, through the bridge's `GET /vault/show`   the owner's alone
-POST /api/knowledge/restore                served — {path, sha, seen_sha}: raises a Needs You request, never writes   409 stale   the owner's alone
+POST /api/knowledge/restore                served — {path, sha, seen_sha}: raises a Needs You request, never writes   409 stale   reach `local` — the owner on this Mac alone, not the phone (ruling 7)
 ```
 
 **Resolving a conflict** writes one note through the vault bridge as `user`,
@@ -2149,7 +2149,7 @@ first place, so the practical effect is on a caller that reaches the bridge
 some other way (`apps/reconciler/src/vault.ts`,
 `apps/reconciler/test/history.test.ts`).
 
-#### `POST /api/knowledge/restore` — put a note back as it was (`user` principal; T10-5)
+#### `POST /api/knowledge/restore` — put a note back as it was (`user` principal; T10-5; reach `local`, ruling 7)
 
 ```
 POST /api/knowledge/restore   {"path":"Areas/Health/sleep.md","sha":"4c1d2e3f","seen_sha":"<sha256 as rendered>" | ""}
@@ -2161,7 +2161,7 @@ POST /api/knowledge/restore   {"path":"Areas/Health/sleep.md","sha":"4c1d2e3f","
 409 {"error":{"code":"conflict",…},"reason":"stale","file":{"path","sha256","bytes"} | null}
 400 a missing path / a sha that is not a commit id / a seen_sha that is not a sha256 or "" — by name;
     the file is already that version; or, for the owner, a path this door does not serve (the classification)
-403 any principal that is not the owner — decided in the route before the body is read
+403 local_only for a passkey session (the owner's too, §2.3); forbidden for the capture token and an agent
 404 no such commit, a commit not on this vault's branch, or the file absent at it
 503 no vault bridge configured
 ```
@@ -2195,11 +2195,15 @@ by its `payload.restore.path` and answers it at the same door — answering it
 there answers it in Needs You (screen 10 §3.1). Like every mirror, it does not
 expire at 14 days.
 
-**Notes only, the owner only — at the tool.** The path must be one `page`
-serves; `.metistry/`, `Artifacts/` and the root instructions are refused here
-for the owner too — configuration is rolled back with the CLI's owner caller
-class (T10-6, M18). Every other principal is refused `403` in the route
-itself, whatever the gate before it did. And Approve restores only a request
+**Notes only, the local owner only — at the tool.** Reach `local` (§2.1, §2.3
+wins over §2.1's earlier "owner" draw — ruling 7, 2026-09-27): the owner on
+THIS Mac alone, by the local owner token, so restore is not reachable from
+the phone; a passkey session is `403 local_only` before the route runs at
+all, the capture token and every agent bearer meet their own uniform
+`forbidden` earlier still. The path must be one `page` serves; `.metistry/`,
+`Artifacts/` and the root instructions are refused here for the owner too —
+configuration is rolled back with the CLI's owner caller class (T10-6, M18).
+And Approve restores only a request
 **this console raised** (`source_agent: console`, stamped server-side) whose
 `source` names the same path and commit: a restore-shaped payload on any other
 row restores nothing and is refused, never read as a prompt improvement. No

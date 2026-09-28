@@ -31,6 +31,21 @@ describe("agent grants validation (pure)", () => {
     expect(() => agents.validateGrants({ tier: "none", queries: "yes" })).toThrow(agents.AgentError);
   });
 
+  // Ruling 5 (X-8, T4-8b #374): the console's `validateGrants` and
+  // `coerceGrants` used to drop `connections` silently — a third, independent
+  // axis (like `queries`), never inherited, never shape-checked against an
+  // area rule.
+  it("accepts an optional `connections` list (T4-8b's lazy pair grant, a third axis), default omitted (empty)", () => {
+    expect(agents.validateGrants({ tier: "none" })).toEqual({ tier: "none", areas: [] }); // default: no `connections` key at all
+    expect(agents.validateGrants({ tier: "none", connections: [] })).toEqual({ tier: "none", areas: [] });
+    expect(agents.validateGrants({ tier: "none", connections: ["github", "github"] })).toEqual({ tier: "none", areas: [], connections: ["github"] }); // deduped
+    expect(agents.validateGrants({ tier: "areas", areas: ["Areas/Fsl"], connections: ["github", "linear"] }))
+      .toEqual({ tier: "areas", areas: ["Areas/Fsl"], connections: ["github", "linear"] });
+    for (const bad of [7, "github", [7], ["Github"], ["github/"], ["../secrets"]]) {
+      expect(() => agents.validateGrants({ tier: "none", connections: bad }), JSON.stringify(bad)).toThrow(agents.AgentError);
+    }
+  });
+
   it("rejects lowercase roots, the machinery, traversal, and the bare vault", () => {
     // `.metistry/` is unspellable here: an area starts with an uppercase letter
     for (const bad of ["areas/Fsl", "Areas/fsl", "inbox/", "/Areas", "/", "Areas/../secrets", "Areas/Fsl/", "../Areas", ".metistry/queries"]) {
@@ -70,6 +85,9 @@ describe("agent grants validation (pure)", () => {
     // `queries` is a separate axis: carried across, never granted
     expect(agents.widenedGrants({ tier: "index", areas: [], queries: true }, "Areas/Fsl")).toEqual({ tier: "areas", areas: ["Areas/Fsl"], queries: true });
     expect(agents.widenedGrants({ tier: "index", areas: [] }, "Areas/Fsl")).not.toHaveProperty("queries");
+    // `connections` (ruling 5): carried across too — approving an area ask must never read as revoking a lent connection
+    expect(agents.widenedGrants({ tier: "index", areas: [], connections: ["github"] }, "Areas/Fsl")).toEqual({ tier: "areas", areas: ["Areas/Fsl"], connections: ["github"] });
+    expect(agents.widenedGrants({ tier: "index", areas: [] }, "Areas/Fsl")).not.toHaveProperty("connections");
     // whatever it produces is what the grants validator would admit anyway
     expect(agents.validateGrants(agents.widenedGrants({ tier: "none", areas: [] }, "Areas/Fsl"))).toEqual({ tier: "areas", areas: ["Areas/Fsl"] });
   });
@@ -354,6 +372,49 @@ describe.skipIf(!hasDb)("agent registry (integration)", () => {
     // turning it back off drops the key entirely (default shape, byte for byte with a never-granted agent)
     const off = await json("PUT", `/api/agents/${agentId}/grants`, { tier: "areas", areas: ["Areas/Fsl"] });
     expect((await off.json()).grants).toEqual({ tier: "areas", areas: ["Areas/Fsl"] });
+  });
+
+  // Ruling 5 (X-8, T4-8b #374): a `connections` grant written through the
+  // console's ONE grants door round-trips unchanged — `validateGrants` and
+  // `coerceGrants` used to drop it silently, which meant a lent connection
+  // could never actually reach `/mcp` no matter what the owner clicked.
+  it("grants: `connections` (T4-8b's lazy-pair lending) round-trips through the same route, unchanged by an unrelated write", async () => {
+    expect((await json("PUT", `/api/agents/${agentId}/grants`, { tier: "none", connections: "github" })).status).toBe(400);
+    const ok = await json("PUT", `/api/agents/${agentId}/grants`, { tier: "areas", areas: ["Areas/Fsl"], connections: ["github"] });
+    expect(ok.status).toBe(200);
+    expect((await ok.json()).grants).toEqual({ tier: "areas", areas: ["Areas/Fsl"], connections: ["github"] });
+    const principal = await agents.authenticateAgent(pool, { headers: { authorization: `Bearer ${agentToken}` } });
+    expect(principal?.grants).toEqual({ tier: "areas", areas: ["Areas/Fsl"], connections: ["github"] });
+    // a second write on the SAME door, naming only the OTHER axis, drops it —
+    // `PUT` replaces the whole grant, so a lent connection that matters
+    // across an unrelated write must be named again, exactly like `queries`
+    const off = await json("PUT", `/api/agents/${agentId}/grants`, { tier: "areas", areas: ["Areas/Fsl"] });
+    expect((await off.json()).grants).toEqual({ tier: "areas", areas: ["Areas/Fsl"] });
+  });
+
+  // The other half of the ticket's bold test: the grant alone is not enough.
+  // mcp-brain's `mayToolset` + `mayConnection` (packages/core/src/access.ts,
+  // T4-8b) refuse a crew that holds the grant but whose manifest never named
+  // the `connections` tool group — proved here against the REAL principal
+  // this console hands to `/mcp` (`agents.authenticateAgent`), so the wiring
+  // this ticket fixed cannot quietly satisfy one half and starve the other.
+  it("a crew still needs both `uses: [connections]` and the grant — the console hands mcp-brain both facts, independently", async () => {
+    const crewId = `${agentId}-conn`;
+    const crewToken = mintToken(32);
+    await pool.query(`INSERT INTO agents (id, display_name, kind, token_hash, grants, grant_source) VALUES ($1, $2, 'crew', $3, $4::jsonb, 'manifest')`, [
+      crewId, "itest connections crew", tokenHash(crewToken), JSON.stringify({ tier: "none", areas: [], connections: ["github"] }),
+    ]);
+    const header = { headers: { authorization: `Bearer ${crewToken}` } };
+    // the manifest names the group: both facts present on the one principal
+    const admitted = await agents.authenticateAgent(pool, header, (id) => (id === crewId ? { uses: ["connections"], manifest: `agents/itest/${crewId}.md` } : undefined));
+    expect(admitted).toMatchObject({ kind: "crew", uses: ["connections"], grants: { connections: ["github"] } });
+    // the SAME grant, but a manifest that never named the group: the grant
+    // rides along on the row exactly as before — nothing here silently
+    // widens `uses` to match it — so `mayToolset` still has nothing to admit
+    const noGroup = await agents.authenticateAgent(pool, header, (id) => (id === crewId ? { uses: ["knowledge"], manifest: `agents/itest/${crewId}.md` } : undefined));
+    expect(noGroup).toMatchObject({ kind: "crew", uses: ["knowledge"], grants: { connections: ["github"] } });
+    expect(noGroup?.uses).not.toContain("connections");
+    await pool.query(`DELETE FROM agents WHERE id = $1`, [crewId]);
   });
 
   // T4-6 (docs/ops/actors.md, open question 2): the plan has exactly one

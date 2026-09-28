@@ -263,8 +263,22 @@ it already read. A `secrets.yaml` it cannot read is no grant. `providers add`
 writes `provider:<name>: on` with the host, `providers set --secret` writes it
 for the secret it names, and `metistry update` (and `secrets migrate-scope`)
 backfill it for every key `compute.yaml` already references that has no grant
-for its provider — idempotently, leaving a grant you wrote alone — so no
-install loses compute on the update that brings the refusal. The install's
+for its provider — idempotently, leaving a grant you wrote alone — so a
+launchd install (the default on macOS) does not lose compute on the update
+that brings the refusal.
+
+**The exception: the compose shape.** `docker-compose.yml` mounts no instance
+directory into the assistant or console containers (D5), so
+`METISTRY_INSTANCE_DIR` is empty there, the engine has no `secrets.yaml` to
+read a grant from, and **every `{{ secret.x }}` provider key is refused**
+(`not_granted`, naming that cause) — including the seed's `openrouter`
+template. The backfill writes the *host's* `secrets.yaml`, which the container
+cannot read. Until the owner decides whether compose mounts a read-only
+`secrets.yaml`, a compose install points each provider at an install
+variable instead — `metistry compute providers set <provider> --secret
+env:METISTRY_SECRET_<NAME>` (or the legacy `env:METISTRY_<NAME>` line) — with
+the key delivered into the container's environment. An `env:` credential has
+no grant to check; the door still binds it to the provider's host. The install's
 egress proxy still refuses any host `compute.yaml` does not name: two walls,
 the door in the process and the proxy outside it.
 

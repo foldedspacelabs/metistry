@@ -223,7 +223,17 @@ export function redactProviderText(text: string, apiKey: string | undefined, nam
  */
 export function secretsPolicyFromEnv(env: NodeJS.ProcessEnv): SecretsPolicySource {
   const dir = env.METISTRY_INSTANCE_DIR?.trim();
-  if (!dir) return () => ({ ok: false, why: "METISTRY_INSTANCE_DIR is unset, so there is no secrets.yaml to read a grant from" });
+  if (!dir) {
+    // The compose shape never mounts the instance directory into the
+    // container (D5), so this is where a `{{ secret.x }}` provider key lands
+    // there: refused, with the cause and the fix in the message.
+    return () => ({
+      ok: false,
+      why:
+        "METISTRY_INSTANCE_DIR is unset, so this process has no secrets.yaml to read the grant from (the compose shape mounts no instance directory) — " +
+        "point the provider at an install variable instead (`metistry compute providers set <provider> --secret env:METISTRY_SECRET_<NAME>`), which is bound to the provider's host but needs no grant",
+    });
+  }
   const path = instanceFile(dir, "secrets");
   return () => readSecretsPolicy(path);
 }

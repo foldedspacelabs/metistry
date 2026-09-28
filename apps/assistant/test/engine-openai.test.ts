@@ -672,7 +672,11 @@ describe("**a provider key without its grant is refused before dialling** (the e
 
     expect(await secretsPolicyFromEnv({})()).toMatchObject({ ok: false, why: expect.stringContaining("METISTRY_INSTANCE_DIR") });
     const none = server([{ body: chat("never") }]);
-    expect(await engineOn(named, none, host({}), { env })("hi", turn).catch((e) => (e as EgressRefused).code)).toBe("not_granted");
+    // the compose shape: no instance directory in the container — the refusal names the cause and the fix, not just a code
+    const refused = (await engineOn(named, none, host({}), { env })("hi", turn).catch((e) => e)) as EgressRefused;
+    expect(refused.code).toBe("not_granted");
+    expect(refused.message).toContain("compose shape mounts no instance directory");
+    expect(refused.message).toContain("--secret env:METISTRY_SECRET_<NAME>");
     expect(none.requests).toEqual([]);
   });
 });

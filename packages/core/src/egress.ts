@@ -727,7 +727,7 @@ export function computeFetch(opts: ComputeEgressOptions, fetchFn: typeof fetch =
     // `{{ secret.x }}`: the owner's grant to THIS provider, or nothing is sent
     const read = opts.policy ? await opts.policy() : undefined;
     if (!read || !read.ok) {
-      const why = !read ? "no secrets.yaml was handed to this door" : read.why;
+      const why = !read ? "this process was handed no secrets.yaml to read the grant from — METISTRY_INSTANCE_DIR is unset or unreadable here" : read.why;
       throw new EgressRefused("not_granted", [cred.name], dest.entry, `${grantee} may not use ${cred.name}: its grant cannot be checked (${why}) — a provider key is sent only on a grant the owner wrote (\`metistry secrets grant ${cred.name} ${grantee} on\`)`);
     }
     const source: SecretSource = { value: async (n) => (n === cred.name ? credentialFromEnv(cred, opts.env) : undefined) };

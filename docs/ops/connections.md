@@ -376,10 +376,96 @@ a URL is refused at the file and at the egress door (`secret_in_url`). **So
 this release reads public feed addresses only**; how a secret that *is* a URL
 reaches the wire is open for the owner (T4-12's PR). For a private Google or
 iCloud calendar today: the eventkit bridge reads whatever the Mac's Calendar
-shows, and CalDAV (T4-13) and Google (T4-14) are the read-and-reply providers.
+shows, and CalDAV (*CalDAV* below; T4-13) and Google (T4-14) are the
+read-and-reply providers.
 
 One sync reads one connection: with two ICS connections, name the one it reads
 in `scheduled.yaml` (`syncs.ics-calendar.connection`).
+
+## CalDAV — iCloud, Fastmail, any RFC 6638 server
+
+The first calendar Metistry can **answer** (plan §2.6, §4 Q7 first; T4-13):
+CalDAV with an **app password**, capabilities `read`, `write_own` and `rsvp`.
+Three connection types over one builtin module (`caldav`): `icloud-calendar`
+and `fastmail-calendar` — known services, each naming its server — and
+`caldav` for any other.
+
+```sh
+metistry secrets set icloud_app_password                  # an app-specific password, on stdin
+metistry secrets hosts icloud_app_password caldav.icloud.com
+metistry secrets grant icloud_app_password connection:icloud on
+metistry connections add icloud --type calendar --provider icloud-calendar \
+  --url https://caldav.icloud.com/ \
+  --auth basic --username you@icloud.com --secret icloud_app_password --no-discover
+metistry secrets sync --to env                            # delivers it to the console; restart the console
+```
+
+| Type | Server | Username | Password |
+| --- | --- | --- | --- |
+| `icloud-calendar` | `https://caldav.icloud.com/` (and the account's own `p<NN>-caldav.icloud.com`) | the Apple Account's email | an app-specific password (account.apple.com) |
+| `fastmail-calendar` | `https://caldav.fastmail.com/dav/` | the account's email | an app password with CalDAV access |
+| `caldav` | the server's CalDAV address | as the server says | an app password, where the server has them |
+
+**Sign-in** is Basic (RFC 7617) with the app password as a secret of the
+connection: the file says `auth: { scheme: basic, username, secret }`, the
+sync holds `Basic {{ secret.<name> }}`, and the egress door encodes and fills
+it — for a host on the secret's *Sent only to* list, over https, when granted
+to `connection:<name>` — or refuses (`sync.ts`, *A sync reading its
+connection*). The password is never in a URL, the file, a log, a run or an
+error; a server that echoes it gets the secret's name back.
+
+**Refused at the file** (`caldavConnectionIssues`, before anything is sent or
+written): **a Google address — *Google needs sign-in with Google*** (Google's
+CalDAV takes OAuth only and answers Basic with a 401; Google Calendar is its
+own type, T4-14); a known service pointed anywhere but its own hosts; plain
+`http://` off this Mac; any sign-in but an app password.
+
+**iCloud's numbered host.** iCloud keeps each account's calendars on a host of
+its own (`p<NN>-caldav.icloud.com`). A connection reaches one origin, so the
+first sync names that host and fails, sending it nothing: `metistry
+connections set icloud --url https://p<NN>-caldav.icloud.com/` and `metistry
+secrets hosts icloud_app_password p<NN>-caldav.icloud.com`, and the next run
+reads it. The same holds for any server that names an address on another
+origin (`other_host`).
+
+**The sync** (`collectors/caldav-calendar/`, every 15 minutes): discovery
+(the principal, its calendar home, its **calendar user addresses** and whether
+it schedules), every calendar in the home that holds events, and a
+`calendar-query` for today and the next two weeks — each event expanded by the
+ICS provider (recurrence, zones and keys exactly as *ICS feeds* reads them)
+into `calendar_events` under the connection's name. Unlike a feed, the server
+says who the owner is: the attendee whose address is one of the owner's is
+`self`, and their answer is `self_status` — what an invitation request (T4-17)
+reads. `sync_state` records the window, the calendars and resources read, and
+whether the server schedules. Never the invite body.
+
+**Reply** (`rsvp`; `previewReply`, then `respondToInvitation`): RFC 6638
+§3.2.2 — an attendee changes `PARTSTAT` in its own copy and the server "MUST
+deliver an iTIP REPLY". **Only the owner's own attendee line changes** — in the
+event and in each moved occurrence the owner is in: `PARTSTAT` set, `RSVP` and
+`SCHEDULE-STATUS` dropped, the line refolded at 75 octets. Every other byte is
+the server's, a VALARM's attendee (an email alarm) included. Answers:
+`accepted`, `tentative`, `declined`; a series is answered whole. Refused:
+`not_invited` (the owner organises it, or is not an attendee), `no_scheduling`
+(the server does not implement RFC 6638, names no address for the owner, or
+the organizer's copy says `SCHEDULE-AGENT=CLIENT` — a reply that would never
+arrive), `not_found`.
+
+**Write own** (`write_own`): create (`previewCreateEvent` / `createOwnEvent`,
+`If-None-Match: *`, the resource named for its UID, no organizer and no
+attendee), change a title, place or time (`previewChangeEvent` /
+`changeOwnEvent`) and delete (`previewDeleteEvent` / `deleteOwnEvent`) — **only
+an event nobody else is in**: changing a meeting would send every attendee an
+update, which this capability never does (`not_own`). A series is not
+rewritten (`unsupported`).
+
+**Preview, then confirm.** Every change previews first — which lines change,
+as whom, to whom — with the event's ETag; the confirm names that ETag, is
+re-derived from the server's copy (never a body the caller sends) and written
+with `If-Match`, so an event that changed in between is refused (`changed`),
+never overwritten. The confirm token and who may press it belong to the
+console door (T4-17 for Respond; `write_own`'s door is not built yet). No
+agent reaches any of it: a calendar connection is not dialled as MCP.
 
 ## Decisions made here
 

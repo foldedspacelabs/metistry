@@ -359,7 +359,8 @@ list. **Done (T4-5):**
 - the proposal kind → request type mapping (→ the F-5 table, open to new types
   that pick a closed body)
 - the connection known-service list → the connection-type units that ship them
-  (T4-13, T4-15)
+  (T4-15 for mail; the calendar's — `icloud-calendar`, `fastmail-calendar` — shipped
+  with T4-13)
 - `inbox.source` values (a capture-source registry — no ticket yet)
 - Swift's per-service setting forms, and the Mac app's `ComputeTemplate` enum
   (→ rendered from field schemas and the provider registry)

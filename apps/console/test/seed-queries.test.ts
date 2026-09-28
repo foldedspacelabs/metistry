@@ -591,6 +591,30 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
     expect((await store.run("turn_progress", { turn_id: `${turnId}-nope` })).rows).toHaveLength(0);
   });
 
+  // Ruling 28 (X-23): a connections_call is still a call the turn made — the
+  // strip must not go quiet while an agent waits on a connection. It joins
+  // the same exact meta.turn_id key as any other tool row, and the query
+  // returns nothing beyond id/tool/timing/ok/error/duration — no argument or
+  // secret rides along, whatever the row's own `meta` (connection,
+  // connection_tool) held.
+  it("turn_progress: a connection_call run appears beside ordinary tool calls, with no argument or secret value", async () => {
+    const turnId = `tpcc-${Date.now()}`;
+    const meta = { turn_id: turnId, via: "mcp-brain", connection: `${turnId}-gh`, connection_tool: "list_issues", args: { connection: `${turnId}-gh`, tool: "list_issues" } };
+    await pool.query(
+      `INSERT INTO runs (component, kind, tool, ok, started_at, finished_at, meta) VALUES
+         ($1, 'tool',            'search_notes',    true, now() - interval '2 seconds', now() - interval '1 seconds', $2::jsonb),
+         ($1, 'connection_call', 'connections_call', true, now() - interval '1 seconds', now(),                       $3::jsonb)`,
+      ["seedq-agent", JSON.stringify({ turn_id: turnId }), JSON.stringify(meta)],
+    );
+    const rows = (await store.run("turn_progress", { turn_id: turnId })).rows;
+    expect(rows.map((r) => r.tool)).toEqual(["search_notes", "connections_call"]); // oldest first
+    expect(rows[1]).toMatchObject({ ok: true, error: null });
+    const blob = JSON.stringify(rows);
+    expect(blob).not.toContain("connection_tool");
+    expect(blob).not.toContain(`${turnId}-gh`);
+    expect(blob).not.toContain("list_issues");
+  });
+
   // T1-15/T3-3: Scheduled's per-routine history. `outcome` is meta.outcome
   // (T1-4's shared vocabulary) and `steps` is meta.processed (the runner's
   // own per-tick count) — a routine's own detailed row carries neither the
@@ -1109,6 +1133,46 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ kind: "config_write", group: "run", actor: tag, subject: ".metistry/identity.yaml", detail: "metistry identity set: name Iris → Ada" });
     expect(String(rows[0]!.ref)).toMatch(/^runs:\d+$/);
+  });
+
+  // Ruling 28 (X-23): a proxied connection call is on the timeline like any
+  // other run — in the `run` group, since it is nothing else. The subject
+  // and detail name only the connection and the upstream tool (the same
+  // fields `connection_calls` reads out of `meta`), never `meta.args` or a
+  // secret — mcp-brain's `summarizeArgs`/`redactSecrets` never even puts one
+  // there, but the query must not go looking either.
+  it("activity_feed shows a connection_call run, with no argument or secret value", async () => {
+    const tag = `ccf-${Date.now()}`;
+    const meta = { via: "mcp-brain", args: { connection: `${tag}-gh`, tool: "list_issues" }, connection: `${tag}-gh`, connection_tool: "list_issues" };
+    await pool.query(
+      `INSERT INTO runs (component, kind, ok, tool, meta, finished_at) VALUES ($1, 'connection_call', true, 'connections_call', $2::jsonb, now())`,
+      [tag, JSON.stringify(meta)],
+    );
+    const failMeta = {
+      via: "mcp-brain",
+      args: { connection: `${tag}-gh`, tool: "search_code", args: { q: "secret_token=abc123" } },
+      connection: `${tag}-gh`,
+      connection_tool: "search_code",
+      detail: "upstream said 500 with token ghp_shouldneverappear",
+    };
+    await pool.query(
+      `INSERT INTO runs (component, kind, ok, error, tool, meta, finished_at) VALUES ($1, 'connection_call', false, 'internal', 'connections_call', $2::jsonb, now())`,
+      [tag, JSON.stringify(failMeta)],
+    );
+    const rows = (await store.run("activity_feed", { hours: 1, limit: 500, agent: tag })).rows;
+    expect(rows).toHaveLength(2);
+    for (const r of rows) expect(r.group).toBe("run");
+    const ok = rows.find((r) => r.ok === true)!;
+    expect(ok).toMatchObject({ kind: "connection_call", subject: `${tag}-gh/list_issues`, detail: `called list_issues on ${tag}-gh` });
+    const failed = rows.find((r) => r.ok === false)!;
+    expect(failed).toMatchObject({ kind: "connection_call", subject: `${tag}-gh/search_code` });
+    expect(failed.detail).toContain("called search_code on");
+    expect(failed.detail).toContain("(failed)");
+    // never an argument value or a secret, whatever the row's own meta held
+    const blob = JSON.stringify(rows);
+    expect(blob).not.toContain("secret_token");
+    expect(blob).not.toContain("ghp_shouldneverappear");
+    expect(blob).not.toContain("upstream said 500");
   });
 
   // ADOPT 1 (docs/research/2026-09-16-taskuary-review.md): the feed is the

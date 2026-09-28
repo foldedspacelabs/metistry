@@ -18,6 +18,7 @@ type: connection-type
 description: Fastmail Calendar over CalDAV with an app password — your events on Today, and replies to invitations from Metistry.
 provides: calendar
 transports: [http]
+auth: [basic]                    # an app password — the only sign-in a CalDAV connection takes
 fields:
   - key: server
     kind: url

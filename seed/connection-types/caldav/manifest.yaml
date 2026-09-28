@@ -28,6 +28,7 @@ type: connection-type
 description: A CalDAV calendar (RFC 6638) with an app password — your events on Today, and replies to invitations from Metistry. For iCloud or Fastmail, use their own entries.
 provides: calendar
 transports: [http]
+auth: [basic]                    # an app password — the only sign-in a CalDAV connection takes
 capabilities: [read, write_own, rsvp]
 sync: caldav-calendar
 implementation: { kind: builtin, module: caldav }

@@ -278,6 +278,13 @@ export const connectionTypeShape = {
   fields: z.array(connectionFieldSchema).default([]),
   capabilities: z.array(z.string()).default([]),
   tools: z.record(toolName, connectionTypeToolSchema).default({}),
+  /**
+   * The sign-in schemes a connection of this type may use (T4-13). Absent: any
+   * but `basic`. `basic` — a username and a password — is accepted only by a
+   * type that lists it (an app password: CalDAV), so nothing else ever sends
+   * one; a type that lists schemes is held to exactly those.
+   */
+  auth: z.array(z.enum(AUTH_SCHEMES)).min(1).optional(),
   /** The sync (a collector unit) that reads connections of this type; its default schedule lives in that unit's manifest (§2.5). */
   sync: kebab.optional(),
   implementation: connectionImplementationSchema.default({ kind: "native" }),
@@ -541,7 +548,10 @@ function soleRef(value: string, ns: "secret" | "variable"): string | undefined {
  * `changes` tool as `reads` is refused, not believed.
  */
 export function connectionIssues(c: ConnectionFile, type: ConnectionTypeManifest | undefined): string[] {
-  if (c.provider === CUSTOM_PROVIDER) return [];
+  const scheme = c.reach.http?.auth.scheme;
+  if (c.provider === CUSTOM_PROVIDER) {
+    return scheme === "basic" ? [`reach.http.auth: basic sign-in is accepted only by a connection type that declares it (auth: [basic] — CalDAV's), not by a custom connection`] : [];
+  }
   if (!type) return [`provider "${c.provider}" is not installed — the connection is absent until it is`];
   const issues: string[] = [];
   if (type.provides !== c.type) issues.push(`provider "${type.name}" provides ${type.provides}, not ${c.type}`);
@@ -576,6 +586,17 @@ export function connectionIssues(c: ConnectionFile, type: ConnectionTypeManifest
       issues.push(`config.${f.key}: a variable field's value is a {{ variable.name }} reference`);
     } else if (f.kind === "choice" && !f.options.some((o) => o.value === value)) {
       issues.push(`config.${f.key}: "${value}" is not one of ${f.options.map((o) => o.value).join(", ")}`);
+    }
+  }
+
+  if (scheme !== undefined) {
+    const allowed = type.auth;
+    if (allowed ? !allowed.includes(scheme) : scheme === "basic") {
+      issues.push(
+        allowed
+          ? `reach.http.auth: ${type.name} signs in with ${allowed.join(" or ")}, not ${scheme}`
+          : `reach.http.auth: ${type.name} does not accept basic sign-in — only a connection type that declares it (auth: [basic]) does`,
+      );
     }
   }
 

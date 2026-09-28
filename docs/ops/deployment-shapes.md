@@ -796,7 +796,11 @@ to load libxcrun (… file system sandbox blocked open())`. So `up` resolves a
 non-shim git on PATH, then the Command Line Tools — and grants its whole
 prefix (`bin/git`, `libexec/git-core/`'s 172 helpers, `share/git-core`'s
 templates). On a Mac with none of those, `up` declines to confine the job and
-says why: a reconciler that cannot run git is not a reconciler.
+says why: a reconciler that cannot run git is not a reconciler. The reconciler
+spawns `git` by name, so when that git is not the bundled one `up` also puts
+its directory at the front of the job's `PATH` — a launchd `PATH` starts at
+`/usr/bin`, whose `git` is the shim, and the confined job would otherwise die
+at startup with `spawn EPERM`.
 
 **Pushing while confined** works over HTTPS, and the path is worth knowing
 because it is not the obvious one (`docs/ops/reconciler.md` has the table).

@@ -21,6 +21,7 @@ import { join, relative } from "node:path";
 import { INSTANCE_LAYOUT, LEGACY_VAULT_DIR, TEMPLATES_DIR, detectLayout, intEnv, usesCompose, type Deployment, type InstanceLayoutShape, type KeychainBackend } from "@foldedspacelabs/metistry-core";
 import { writeCliShim } from "./cli-shim.js";
 import { SEED_VAULT_DIR } from "./init.js";
+import { renameCaseMismatches, type VaultCaseResult } from "./vault-case.js";
 import { loadDeployment } from "./deployment.js";
 import { doctor, hostLocal, renderTable, type DoctorDeps, type DoctorReport } from "./doctor.js";
 import { productVersion } from "./env.js";
@@ -134,6 +135,8 @@ export interface UpdateResult {
   runDir: string;
   /** the seed templates the vault lacked, copied in by this run (`Templates/Brief.md`, …) — never one it already had */
   seededTemplates?: SeedTemplatesResult;
+  /** product files the vault had under another case only, renamed to the seed's spelling (`Me/Profile.md` → `Me/profile.md`) */
+  vaultCase?: VaultCaseResult;
   /** the shared-scope migration (plan §2.14), when it ran — names only */
   sharedScope?: MigrateScopeResult;
   /** how far the restart step got, and which jobs it owed a kickstart */
@@ -373,6 +376,7 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
   let reexec: ReexecOutcome | undefined;
   let sharedScope: MigrateScopeResult | undefined;
   let seededTemplates: SeedTemplatesResult | undefined;
+  let vaultCase: VaultCaseResult | undefined;
   /** how far the restart step got, and what it owed — the summary is written from this, so an interrupted restart is never "nothing kickstarted" */
   const restart: RestartProgress = { reached: false, completed: false, owed: [] };
   /** what this run could not do and did not stop for — each is named at the end with its commands, and makes the exit code non-zero */
@@ -706,6 +710,14 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
     r.section("templates");
     seededTemplates = await seedTemplates(r, { seedDir: join(runDir, "seed"), instanceDir: instanceDir.instanceDir, env, platform, uid, fetchFn });
 
+    // A product file the vault has under another CASE only (`Me/Profile.md`,
+    // seeded before the name was `Me/profile.md`) is invisible to the
+    // product: reads are case-exact. Renamed to the seed's spelling, through
+    // the reconciler as the owner like the templates above; the owner's own
+    // files are never looked at (vault-case.ts).
+    r.section("vault case");
+    vaultCase = await renameCaseMismatches(r, { seedDir: join(runDir, "seed"), instanceDir: instanceDir.instanceDir, env, platform, uid, fetchFn });
+
     // After the lock, because it writes secrets.yaml through the same
     // reconciler as the owner, which the restart above has just given the
     // owner bearer. It can never fail the update: an instance that has not
@@ -749,7 +761,7 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
   }
   r.out("");
   r.out(updateSummary({ ui: r.ui, dryRun: r.dryRun, failure, code, source, version: lock?.product.version ?? releaseVersion, migrations, restarted, kickstartFailed: kickFailed.length, app, restart, deferred }));
-  return { code, source, runDir, commands: r.commands, ...(lock ? { lock } : {}), restarted, restart, deferred, ...(reexec ? { reexec } : {}), ...(migrations ? { migrations } : {}), ...(release ? { release } : {}), ...(runtimeDeps ? { runtimeDeps } : {}), ...(app ? { app } : {}), ...(sharedScope ? { sharedScope } : {}), ...(seededTemplates ? { seededTemplates } : {}) };
+  return { code, source, runDir, commands: r.commands, ...(lock ? { lock } : {}), restarted, restart, deferred, ...(reexec ? { reexec } : {}), ...(migrations ? { migrations } : {}), ...(release ? { release } : {}), ...(runtimeDeps ? { runtimeDeps } : {}), ...(app ? { app } : {}), ...(sharedScope ? { sharedScope } : {}), ...(seededTemplates ? { seededTemplates } : {}), ...(vaultCase ? { vaultCase } : {}) };
 }
 
 // ---- seed templates the vault lacks ---------------------------------------------------

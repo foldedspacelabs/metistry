@@ -548,6 +548,24 @@ describe("vault bridge — a read whose only fault is its casing", () => {
     expect((await post("/vault/write", { path: "Me/profile.md", content: "x", intent: intent("user", "m") })).status).toBe(400);
   });
 
+  it("the fix `metistry update` makes — two renames through a temporary name, flushed between — lands in git as the new spelling, on either filesystem", async () => {
+    await mkdir(join(repo.root, "Journal"), { recursive: true });
+    await writeFile(join(repo.root, "Journal", "Readme.md"), "seeded\n");
+    await repo.git.run(["add", "-A", "--", "Journal"]);
+    await repo.git.run(["-c", "user.name=seed", "-c", "user.email=seed@test", "commit", "-q", "-m", "seeded", "--", "Journal"]);
+    const tmp = "Journal/Readme.md.metistry-case-rename";
+    const step = async (from: string, to: string) => {
+      expect((await post("/vault/rename", { from, to, intent: intent("user", `rename ${from} to ${to}`) })).status).toBe(200);
+      const f = await (await post("/flush", {})).json();
+      expect(f.commits).toHaveLength(1);
+    };
+    await step("Journal/Readme.md", tmp);
+    await step(tmp, "Journal/README.md");
+    expect((await repo.git.run(["ls-files", "Journal"])).trim()).toBe("Journal/README.md");
+    expect((await repo.git.run(["status", "--porcelain", "--", "Journal"])).trim()).toBe("");
+    expect((await (await get("/vault/read?path=Journal/README.md")).json()).content).toBe("seeded\n");
+  });
+
   it("a case-mismatch onto a path the bridge does not serve says not_found and nothing more", async () => {
     // `.obsidian/` is real and confinable but never served (isReadableByBridge): no hint may name it
     await mkdir(join(repo.root, ".obsidian"), { recursive: true });

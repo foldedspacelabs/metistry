@@ -727,6 +727,20 @@ public struct Board: Codable, Sendable, Equatable {
     /// not among them: it is `BoardCard.reported`, a facet of a Done card (C39).
     public static let columnOrder = ["backlog", "assigned", "in_progress", "blocked", "done"]
 
+    /// The task status a column's cards hold — what `PATCH /api/tasks/:id`
+    /// must send to land a card there. The column keys are not all statuses:
+    /// Done is `closed` (a status `packages/tasks` knows; `done` is not one),
+    /// and Backlog and Assigned are both `open`, told apart by `owner`.
+    public static func status(forColumn column: String) -> String? {
+        switch column {
+        case "done": return "closed"
+        case "blocked": return "blocked"
+        case "in_progress": return "in_progress"
+        case "backlog", "assigned": return "open"
+        default: return nil
+        }
+    }
+
     /// Column key → the label. Each label is the word its key says (C2, C38):
     /// a label that disagrees with its own value is a bug waiting for someone
     /// to fix the wrong side of it, and "Needs You" names the request queue.
@@ -876,6 +890,9 @@ public struct TaskPatch: Sendable, Equatable {
     /// What the card is about (C85) — the owner's to rewrite; no agent verb
     /// has the key. An empty string clears it: the route stores blank as none.
     public var description: String?
+    /// Sends `owner: null` — the Assigned → Backlog drop. `owner` alone cannot
+    /// say it: nil there means "leave the owner alone".
+    public var clearsOwner: Bool = false
 
     public static let statuses = ["open", "in_progress", "blocked", "closed"]
     public static let mixedArmsRefusal = "a status change and an owner/title/project/description change are two different arms of PATCH /api/tasks/:id and cannot travel in one body — send them as two requests"
@@ -894,10 +911,27 @@ public struct TaskPatch: Sendable, Equatable {
         TaskPatch(description: description)
     }
 
-    /// The drag a board column makes: one status, nothing else. The column
-    /// keys that are statuses are the statuses' own words, `blocked` included.
+    /// The drag a board column makes: one status, nothing else — the status
+    /// that column holds (`Board.status(forColumn:)`). A drop on Done sends
+    /// `closed`: `done` is a column, never a task status, and the route
+    /// refuses it. A key that is no column is passed through for the route
+    /// to refuse in its own words.
     public static func moving(to column: String) -> TaskPatch {
-        TaskPatch(status: column)
+        TaskPatch(status: Board.status(forColumn: column) ?? column)
+    }
+
+    /// Any open column → Done: the holder arm's `closed`.
+    public static var closing: TaskPatch { TaskPatch(status: "closed") }
+
+    /// Blocked → Backlog or Assigned: `open`, legal from `blocked` only, and it
+    /// hands the row back the way a release does.
+    public static var unblocking: TaskPatch { TaskPatch(status: "open") }
+
+    /// Assigned → Backlog: clears the assignee; the row stays `open`.
+    public static var unassigning: TaskPatch {
+        var patch = TaskPatch()
+        patch.clearsOwner = true
+        return patch
     }
 
     /// Assigning a card to a crew — human-only by the collaboration rule, and
@@ -906,16 +940,16 @@ public struct TaskPatch: Sendable, Equatable {
         TaskPatch(owner: owner)
     }
 
-    public var isEmpty: Bool { status == nil && owner == nil && project == nil && title == nil && description == nil }
+    public var isEmpty: Bool { status == nil && owner == nil && !clearsOwner && project == nil && title == nil && description == nil }
 
     /// Nil when the patch mixes the two arms, or says nothing.
     public var wireBody: [String: Any]? {
         if isEmpty { return nil }
-        let carriesAttributes = owner != nil || project != nil || title != nil || description != nil
+        let carriesAttributes = owner != nil || clearsOwner || project != nil || title != nil || description != nil
         if status != nil && carriesAttributes { return nil }
         var body: [String: Any] = [:]
         if let status { body["status"] = status }
-        if let owner { body["owner"] = owner }
+        if let owner { body["owner"] = owner } else if clearsOwner { body["owner"] = NSNull() }
         if let project { body["project"] = project }
         if let title { body["title"] = title }
         if let description { body["description"] = description }

@@ -93,7 +93,7 @@ import {
 import { readInstanceId } from "./instance.js";
 import { Keychain, keychainAccount, securityKeychain, securityPresence } from "./keychain.js";
 import { protectedRel, writeProtected, type ProtectedWrite } from "./protected-write.js";
-import { secretsFilePath, secretsReplace, secretsSet, type NamedSecretsOptions } from "./secrets.js";
+import { grantProviderSecrets, secretsFilePath, secretsReplace, secretsSet, type NamedSecretsOptions } from "./secrets.js";
 import { StepFailed, StepRunner } from "./steps.js";
 import { defaultUi, type Ui } from "./ui.js";
 
@@ -208,6 +208,11 @@ export function instanceComputeFile(instanceDir: string): string {
 /** This instance's `instance_id` — the one Keychain account its secrets are filed under — or undefined when identity.yaml has none yet. */
 async function instanceIdOf(opts: Pick<ComputeOptions, "instanceDir">): Promise<string | undefined> {
   return readInstanceId(opts.instanceDir).catch(() => undefined);
+}
+
+/** `provider:<name>: on` for the key `compute` gives that provider, through `metistry secrets`' own code (X-7). */
+async function grantProviderKey(opts: ComputeOptions, compute: Compute, provider: string): Promise<void> {
+  await grantProviderSecrets({ instanceDir: opts.instanceDir, instanceId: await instanceIdOf(opts), env: opts.env, platform: opts.platform, uid: opts.uid, exec: opts.exec, fetchFn: opts.fetchFn, dryRun: opts.dryRun, out: opts.out, compute, only: [provider] });
 }
 
 /** Is there a login Keychain to ask? darwin only; a container and CI's Linux have none. */
@@ -619,7 +624,11 @@ export async function providersAdd(opts: ProvidersAddOptions): Promise<Providers
     }
   }
 
-  const { delivery } = await commit(opts, edit, `metistry compute providers add ${name} (--from ${opts.template})`);
+  const { compute: written, delivery } = await commit(opts, edit, `metistry compute providers add ${name} (--from ${opts.template})`);
+  // The key's grantee (X-7): the engine attaches a provider key only on the
+  // owner's grant to `provider:<name>`, and adding the provider with this
+  // key IS that decision — written into secrets.yaml beside the host.
+  if (cred?.kind === "secret") await grantProviderKey(opts, written, name);
   const test = opts.skipTest === true || opts.dryRun === true ? undefined : await providerTest({ ...opts, name }).catch((e) => ({ name, ok: false, listingOk: false, url: provider.base_url, detail: e instanceof Error ? e.message : String(e), models: [] }) as ProviderTestResult);
   return { name, provider, ...(provider.auth ? { secret: provider.auth.secret } : {}), secretStatus, ...(test ? { test } : {}), delivery, ...(secretDelivery ? { secret_delivery: secretDelivery } : {}) };
 }
@@ -735,6 +744,8 @@ export async function providersSet(opts: ProvidersSetOptions): Promise<Providers
   const { compute, delivery } = await commit(opts, edit, `metistry compute providers set ${opts.name} (${changed.join(", ")})`);
   const provider = compute.providers[opts.name]!;
   const cred = reference ? credentialOf(reference) : undefined;
+  // pointing the provider at a secret grants that secret to the provider (X-7), as `providers add` does
+  if (cred?.kind === "secret") await grantProviderKey(opts, compute, opts.name);
   if (cred?.kind === "secret" && !(await credentialPresent(opts, cred, await instanceIdOf(opts)))) {
     opts.out(`this instance has no secret ${cred.name} yet — \`metistry secrets set ${cred.name}\` stores it (the key on stdin); until then \`compute show\` reports it MISSING.`);
   }

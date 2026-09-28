@@ -67,6 +67,8 @@ import { overlayFromText } from "./runner.js";
 import { isMeetingNoteRoute, meetingNoteRoute, MeetingNotes } from "./meeting-note-route.js";
 import { CALENDAR_SYNC, isMeetingMoveRoute, meetingMoveRoute, type EventkitDoor } from "./meeting-move-route.js";
 import { githubPullRoute, isGithubPullRoute } from "./github-pulls-route.js";
+import { isTrackerCompleteRoute, trackerCompleteRoute } from "./tracker-complete-route.js";
+import type { TrackerOpener } from "@metistry-apps/collectors";
 import type { GithubWriteClient } from "./github-write.js";
 import { agentList, commandList } from "./commands.js";
 import { purgeArchive, purgePreview } from "@metistry-apps/routines";
@@ -186,6 +188,12 @@ export interface ConsoleConfig {
    * `POST /api/trackers/:connection/issues` answers 503.
    */
   openTracker?: SyncOpener | undefined;
+  /**
+   * Close in Linear (tracker-complete-route.ts, T4-26): opens a tracker
+   * connection by name through the egress door, with the owner's mode for
+   * its `complete_issue` tool. Read by that door alone. Absent = it answers 503.
+   */
+  trackers?: TrackerOpener | undefined;
   /**
    * The pooled client behind the connections proxy (plan §2.6): handed to
    * `/mcp` as `connections_list` / `connections_call`'s proxy, and to the
@@ -1206,6 +1214,8 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         isGithubPullRoute(key) ||
         // …and Send to Linear files an issue through the owner's tracker connection (T4-25)
         isTrackerIssueRoute(key) ||
+        // Close in Linear changes the owner's issue in their tracker, with their key (T4-26)
+        isTrackerCompleteRoute(key) ||
         // Today reads the owner's own day — their notes' task lines, their calendar — and stores their order
         isTodayRoute(key)
       ) {
@@ -1540,6 +1550,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     // ----- Send to Linear: one issue per task, idempotent by task key, through the tracker connection's `create` (T4-25) -----
     // The line is linked by the other door (`POST /api/vault-tasks/:task_key/link`); this one writes nothing of the owner's.
     if (isTrackerIssueRoute(key)) return trackerIssueRoute(req, res, key, { queries, vault: cfg.vault, openTracker: cfg.openTracker, audit, inflight: trackerSends, now: cfg.now });
+    if (isTrackerCompleteRoute(key)) return trackerCompleteRoute(req, res, key, { db, audit, open: cfg.trackers });
 
     // ----- Close the Day (§2.11, §2.13; T2-8) -----
     // The daily note's section through the reconciler's section operation as

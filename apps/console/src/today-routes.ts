@@ -11,7 +11,7 @@
 //
 // **One read path, one filter language.** Every row comes out of a named
 // query (invariant 3): `vault_tasks_query`, `day_work`, `today_order`,
-// `day_events` — all `expose: route`, so this owner-only door is the only
+// `day_events`, `tracker_closed` — all `expose: route`, so this owner-only door is the only
 // door onto them. Both task reads compile their filter with core's
 // `compileTaskFilter` (D15) — Today's preset is a `where:` string like any
 // other, so what Today shows is a view the owner could paste into a template
@@ -57,6 +57,7 @@ import type { VaultClient } from "@foldedspacelabs/metistry-artifacts";
 import type { QueryStore } from "@foldedspacelabs/metistry-queries";
 import type { Db } from "./auth-store.js";
 import { readJson, sendJson } from "./http-util.js";
+import { trackerClosedForDay } from "./tracker-complete-route.js";
 
 export const TODAY_ROUTE = "GET /api/today";
 export const VAULT_TASKS_ROUTE = "GET /api/vault-tasks";
@@ -232,12 +233,16 @@ async function getToday(res: ServerResponse, url: URL, deps: TodayDeps, c: Clock
   // another day, the row closed) is not served: the order is an arrangement
   // of THIS day's rows, and the next drag clears it from the table.
   const keys = dayKeys(rows);
+  // *Done in Linear* (T4-26): the day's open lines whose issue the tracker
+  // closed — named here, never ticked here; the owner's Tick is the write
+  const trackerClosed = await trackerClosedForDay(rows.tasks, deps.queries);
   return sendJson(res, 200, {
     date: day,
     tasks: rows.tasks,
     work: rows.work,
     order: order.rows.map((r) => String(r.task_key)).filter((k) => keys.has(k)),
     events: events.rows,
+    tracker_closed: trackerClosed,
     brief,
     standup,
     plan,

@@ -72,8 +72,11 @@ export {
 } from "./sync.js";
 export {
   ASSIGNED_ISSUES_QUERY,
+  COMPLETE_ISSUE_MUTATION,
   ISSUES_BY_ID_QUERY,
+  ISSUE_TO_COMPLETE_QUERY,
   LINEAR_CLOSED_STATE_TYPES,
+  LINEAR_COMPLETE_TOOL,
   LINEAR_ERROR_CODES,
   LINEAR_GRAPHQL_URL,
   LINEAR_KEY_RE,
@@ -83,10 +86,12 @@ export {
   LINEAR_SYNC,
   LinearError,
   assignedOpenIssues,
+  completeIssue,
   issuesById,
   linearQuery,
   linearRef,
   readIssue,
+  type CompletedIssue,
   type LinearErrorCode,
   type LinearIssue,
 } from "./linear.js";

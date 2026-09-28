@@ -69,3 +69,18 @@ export {
   todayLine as linearTodayLine,
   type AddToTodayResult,
 } from "./linear/today.js";
+
+// Close in Linear (T4-26): the service behind
+// `POST /api/trackers/:connection/issues/:key/complete`, and the console's
+// opener for a tracker connection by name — the connection's tool mode for
+// `complete_issue` is the owner's Ask First · Allow · Never.
+export {
+  COMPLETE_REFUSAL_CODES as LINEAR_COMPLETE_REFUSAL_CODES,
+  CompleteRefused as LinearCompleteRefused,
+  completeLinearIssue,
+  linearTrackerOpener,
+  type CompleteRefusalCode as LinearCompleteRefusalCode,
+  type CompleteResult as LinearCompleteResult,
+  type OpenedTracker,
+  type TrackerOpener,
+} from "./linear/complete.js";

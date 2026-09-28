@@ -1,8 +1,7 @@
 {
   "route": "POST /api/trackers/:connection/issues/:key/complete",
-  "source": "contract",
-  "ticket": "T4-26",
-  "note": "closes the issue through the tracker connection's own tool mode",
+  "source": "recorded",
+  "ticket": null,
   "request": {
     "method": "POST",
     "path": "/api/trackers/linear/issues/MET-42/complete",
@@ -16,6 +15,7 @@
     "key": "MET-42",
     "ref": "linear:MET-42",
     "url": "https://linear.app/example/issue/MET-42",
-    "state": "done"
+    "state": "done",
+    "changed": true
   }
 }

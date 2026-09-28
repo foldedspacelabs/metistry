@@ -300,7 +300,7 @@ export const CLIENT_API: readonly ClientRoute[] = [
   route("POST", "/api/github/pulls/:owner/:repo/:number/threads/:id/reply", "reply to a review thread; the head SHA must match", { conflict: ["stale"] }),
   route("POST", "/api/github/pulls/:owner/:repo/:number/threads/:id/resolve", "resolve a review thread; the head SHA must match", { conflict: ["stale"] }),
   route("POST", "/api/trackers/:connection/issues", "create an issue from a task; idempotent by task key", { idempotent: "natural", conflict: ["stale"] }),
-  planned("POST", "/api/trackers/:connection/issues/:key/complete", "T4-26", "close an issue", { idempotent: "natural" }),
+  route("POST", "/api/trackers/:connection/issues/:key/complete", "close an issue in its tracker; the connection's `complete_issue` mode decides (Never is 403)", { idempotent: "natural" }),
 
   // ----- prose feedback (T1-12) -----
   route("POST", "/api/prose/:id/feedback", "rate one piece of generated prose", { idempotent: "natural" }),

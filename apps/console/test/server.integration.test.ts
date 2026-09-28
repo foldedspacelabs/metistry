@@ -234,6 +234,29 @@ sql: SELECT id, title FROM work WHERE status <> 'closed' ORDER BY updated_at DES
     expect(list.messages.find((m: any) => m.direction === "in" && Number(m.id) === Number(deep.message_id)).tier).toBe("deep");
   });
 
+  // Ruling 18 (X-18): additive, `api_version` unchanged. The join is exact —
+  // the reply's `in_reply_to` to the turn's own `runs.meta.message_id`, the
+  // same key `run_detail` and the Mac's own bind already use — never
+  // adjacency, so a second turn on the thread can never be misattributed.
+  it("GET /api/messages carries a reply's `turn_id`, and `null` where its turn left none (or it isn't a reply)", async () => {
+    const thread = `turn-id-${mintToken(6)}`;
+    const inbound = await pool.query(`INSERT INTO inbound_messages (thread, text, status) VALUES ($1, 'what is on today?', 'done') RETURNING id`, [thread]);
+    const inboundID = inbound.rows[0].id;
+    const turnID = `turn-${mintToken(6)}`;
+    await pool.query(`INSERT INTO runs (component, kind, ok, meta) VALUES ('assistant', 'turn', true, jsonb_build_object('message_id', $1::text, 'turn_id', $2::text))`, [String(inboundID), turnID]);
+    const withTurn = await pool.query(`INSERT INTO outbound_messages (thread, text, in_reply_to) VALUES ($1, 'three things today', $2) RETURNING id`, [thread, inboundID]);
+    // a reply with no turn behind it at all (an ack, or one from before this ruling)
+    const withoutTurn = await pool.query(`INSERT INTO outbound_messages (thread, text) VALUES ($1, 'ack') RETURNING id`, [thread]);
+
+    const page = await (await fetch(`${base}/api/messages?limit=50`, { headers: { cookie: sessionCookie } })).json();
+    const replies = page.messages.filter((m: any) => m.direction === "out" && (Number(m.id) === Number(withTurn.rows[0].id) || Number(m.id) === Number(withoutTurn.rows[0].id)));
+    expect(replies.find((m: any) => Number(m.id) === Number(withTurn.rows[0].id))?.turn_id).toBe(turnID);
+    expect(replies.find((m: any) => Number(m.id) === Number(withoutTurn.rows[0].id))?.turn_id ?? null).toBeNull();
+    // an inbound (owner) row never carries one either
+    const inboundRow = page.messages.find((m: any) => m.direction === "in" && Number(m.id) === Number(inboundID));
+    expect(inboundRow?.turn_id ?? null).toBeNull();
+  });
+
   // Cost research decision 3: answering a blocking decision is a task
   // boundary, so the thread's session rolls and the answering turn starts fresh.
   it("answering a `decision` rolls the thread's session and logs a session_roll run", async () => {

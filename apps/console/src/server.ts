@@ -1008,17 +1008,35 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       // rather than only in `runs`. `changed_at` is the cursor column: an
       // outbound row moves when its feedback does, so a rating given from
       // the Mac resurfaces on the phone's next `since` pull.
+      //
+      // `turn_id` (ruling 18, X-18): additive — `api_version` stays 1. Null
+      // on every inbound row (an owner message never has one) and on an
+      // outbound row whose turn left none, `null` reads the same on the wire
+      // either way. The join is the exact one `run_detail` and T6-2's own
+      // client-side bind already use — `runs.meta.message_id` to the reply's
+      // `in_reply_to` — never adjacency or a time window, so a second turn on
+      // the same thread can never be attributed to this reply. This is what
+      // lets an older reply, loaded straight off this route with no
+      // recent-activity window behind it, still draw its tool strip.
       const { rows } = await db.query(
-        `SELECT id, ts, thread, text, status, direction, feedback, tier, changed_at::text || '|' || direction || '|' || id AS cursor FROM (
+        `SELECT id, ts, thread, text, status, direction, feedback, tier, turn_id, changed_at::text || '|' || direction || '|' || id AS cursor FROM (
            SELECT id, ts, thread, text, status, 'in'  AS direction, NULL::jsonb AS feedback,
-                  coalesce(meta->'route'->>'tier', meta->>'tier') AS tier, ts AS changed_at
+                  coalesce(meta->'route'->>'tier', meta->>'tier') AS tier, NULL::text AS turn_id, ts AS changed_at
            FROM inbound_messages
            UNION ALL
            SELECT o.id, o.ts, o.thread, o.text, o.kind, 'out' AS direction,
                   CASE WHEN f.id IS NULL THEN NULL
                        ELSE jsonb_build_object('rating', f.rating, 'note', f.note, 'ts', f.ts) END,
-                  NULL::text, greatest(o.ts, f.ts)
-           FROM outbound_messages o LEFT JOIN reply_feedback f ON f.outbound_message_id = o.id
+                  NULL::text, t.turn_id, greatest(o.ts, f.ts)
+           FROM outbound_messages o
+           LEFT JOIN reply_feedback f ON f.outbound_message_id = o.id
+           LEFT JOIN LATERAL (
+             SELECT r.meta ->> 'turn_id' AS turn_id
+             FROM runs r
+             WHERE r.kind = 'turn' AND o.in_reply_to IS NOT NULL AND r.meta ->> 'message_id' = o.in_reply_to::text
+             ORDER BY r.ts DESC
+             LIMIT 1
+           ) t ON true
          ) m
          WHERE $2::text IS NULL OR (changed_at, direction, id) > ($2::timestamptz, $3::text, $4::bigint)
          ORDER BY changed_at ${since === null ? "DESC" : "ASC"}, direction ${since === null ? "DESC" : "ASC"}, id ${since === null ? "DESC" : "ASC"} LIMIT $1`,

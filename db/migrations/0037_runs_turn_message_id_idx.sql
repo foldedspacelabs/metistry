@@ -1,0 +1,23 @@
+-- 0037_runs_turn_message_id_idx — the index X-18's join needed.
+--
+-- `GET /api/messages` (apps/console/src/server.ts) joins each outbound row
+-- to its `turn_id` with `LEFT JOIN LATERAL … FROM runs WHERE kind = 'turn'
+-- AND meta ->> 'message_id' = o.in_reply_to::text` — exactly the same key
+-- `run_detail` already joins tool calls on. Without an index that is a
+-- sequential scan of the whole (unbounded, ever-growing) `runs` ledger for
+-- every outbound row on every page of every thread. This is the index that
+-- scan wants: an expression index on `meta ->> 'message_id'`, partial to
+-- `kind = 'turn'` rows (the only ones the join ever matches), so it stays
+-- small and cheap to maintain as `runs` fills with `tool`, `crew_run`,
+-- `routine_run`, … rows the join never looks at.
+--
+-- Durability: NO DATA (invariant 1) — an index, not a table. `down -v`
+-- loses nothing; the next migrate rebuilds it from this file.
+--
+-- Idempotent: `CREATE INDEX IF NOT EXISTS`, so `metistry update` can apply
+-- this twice under its advisory lock and the second pass is a no-op.
+--
+-- ROLLBACK (nothing to restore — no data is written):
+--   DROP INDEX IF EXISTS runs_turn_message_id_idx;
+
+CREATE INDEX IF NOT EXISTS runs_turn_message_id_idx ON runs ((meta ->> 'message_id')) WHERE kind = 'turn';

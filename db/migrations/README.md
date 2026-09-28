@@ -65,4 +65,4 @@ number.
 | 0034 | `calendar_events.sql` | `calendar_events (connection, event_id, ical_uid, series_id, starts_at, ends_at, all_day, title, location, organizer, attendees jsonb, self_status, updated_at)` + `sync_state (connection, key, value, updated_at)` — **every** calendar source syncs here, so Today has one read path; `all_day` is the F-7 Today fixture's field; no invite body, ever | derived | T2-11 |
 | 0035 | `event_notify.sql` | `metistry_notify()` and `AFTER INSERT OR UPDATE` triggers on `runs`, `proposals`, `work`, `inbox`, `artifact_comments`, `outbound_messages`, `agents` — `pg_notify` with `{table, op, id}` only (§2.20) | no data | T2-18 |
 | 0036 | `vault_tasks_someday.sql` | `vault_tasks.someday boolean NOT NULL DEFAULT false` — the `someday` token (K6) | derived | T2-5 |
-| 0037 | — | spare | | |
+| 0037 | `runs_turn_message_id_idx.sql` | `runs_turn_message_id_idx` — partial expression index on `runs ((meta ->> 'message_id')) WHERE kind = 'turn'`, for `GET /api/messages`'s `turn_id` join | no data | X-18 |

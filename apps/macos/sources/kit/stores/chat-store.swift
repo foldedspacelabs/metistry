@@ -49,7 +49,15 @@ public struct MessageAccepted: Codable, Sendable, Equatable {
     }
 }
 
-/// `GET /api/messages?limit=&since=` — `{messages, cursor, more}`, inbound and outbound.
+/// `GET /api/messages?limit=&since=` — `{messages, cursor, more}`, inbound and
+/// outbound. Ruling 18 (X-18, additive — `api_version` unchanged): an
+/// outbound row now also carries `turn_id`, the exact `runs.meta.message_id`
+/// join (`apps/assistant/src/drain.ts`) done server-side — `null` on every
+/// inbound row and on an outbound row whose turn left none — so a reply read
+/// straight off this route, older than T6-2's own live-activity bind reaches,
+/// can still be handed to `GET /api/turns/:turn_id/progress` for its tool
+/// strip. Decoding it onto `ChatMessage` and wiring it into that bind
+/// (`chat-model.swift`) is outside this file, and stays unread from here.
 public struct MessagePage: ConsoleBody { public let json: JSONValue; public init(json: JSONValue) { self.json = json } }
 /// `POST|DELETE /api/messages/:id/feedback` — `{ok, feedback}`; `feedback` is null once cleared.
 public struct MessageFeedbackResult: ConsoleBody { public let json: JSONValue; public init(json: JSONValue) { self.json = json } }

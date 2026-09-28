@@ -242,6 +242,7 @@ describe("shipped manifests schedule through the runner", () => {
       ["devin-sessions", "Devin Sessions", "every 5m"],
       ["eventkit-calendar", "Calendar", "every 5m"], // T2-11: the owner's calendars on this Mac into calendar_events
       ["github-state", "GitHub", "every 15m"],
+      ["ics-calendar", "Calendar Feed", "every 15m"], // T4-12: an ICS connection's feed into the same calendar_events
       ["linear", "Linear", "every 15m"],
     ]);
     expect(listing.syncs.find((s) => s.name === "github-state")?.raise).toEqual({

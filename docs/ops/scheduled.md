@@ -397,7 +397,9 @@ T2-11) every 5 min — the owner's calendars on this Mac, today and the next two
 weeks, through the eventkit bridge into `calendar_events` (connection
 `eventkit`), the one table every calendar source syncs into and Today reads;
 it degrades absent without `METISTRY_EK_URL` and the bridge token, and a
-helper built before T2-11 is a failed run naming the rebuild; Devin Sessions
+helper built before T2-11 is a failed run naming the rebuild; Calendar Feed
+(`ics-calendar`, T4-12) every 15 min — an ICS connection's feed into the same
+table under the connection's name, absent until one is added; Devin Sessions
 every 5 min; Devin Knowledge hourly; AWS Costs every 6 hours. No shipped
 manifest carries a cron string any more.
 

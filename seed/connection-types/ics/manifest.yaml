@@ -1,0 +1,29 @@
+# The ICS connection type (plan §2.6; T4-12) — an iCalendar subscription
+# feed, the `calendar` provider every calendar app can publish. A connection
+# of this type is added with
+#
+#   metistry connections add holidays --type calendar --provider ics \
+#     --url https://example.com/holidays.ics --no-discover
+#
+# and read by the `ics-calendar` sync (collectors/ics-calendar/), which
+# expands the feed's events — recurrences and time zones included — into
+# `calendar_events` under the connection's name, today and the next two
+# weeks, so Today reads one table for every calendar source.
+#
+# `read` only, by construction: a subscription feed has no way back.
+#
+# **A feed address that carries a token is a secret** — Google's *secret
+# address in iCal format*, a published iCloud calendar, a `?token=` link.
+# The connection file refuses one (a key-shaped value is never written
+# there), and a secret is never put in a URL (the egress door's
+# `secret_in_url`), so this release reads feeds whose address is public
+# (docs/ops/connections.md, *ICS feeds*). Write `webcal://` as `https://`.
+schema: 1
+name: ics
+type: connection-type
+description: An iCalendar feed (.ics) — a published calendar's events, read-only, on Today with every other calendar. Public feed addresses only in this release.
+provides: calendar
+transports: [http]
+capabilities: [read]
+sync: ics-calendar
+implementation: { kind: builtin, module: ics }

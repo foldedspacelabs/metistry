@@ -2569,7 +2569,9 @@ POST /api/mail/messages/:id/draft                 T4-17 — through the connecti
 **Where the calendar comes from.** Every calendar source syncs into one table,
 `calendar_events` (0034), under its own `connection` — the eventkit sync
 (`collectors/eventkit-calendar`, every 5 minutes, today and the next two weeks,
-connection `eventkit`) now; ICS, CalDAV and Google later (T4-12…T4-14). Today
+connection `eventkit`) and an ICS feed (`collectors/ics-calendar`, T4-12, under
+the connection's own name; `docs/ops/connections.md`, *ICS feeds*) now; CalDAV
+and Google later (T4-13, T4-14). Today
 reads a day of it through the route-only `day_events` query; this door reads
 one event through `calendar_event`. A row is one **occurrence**: its
 `event_id` is the source's key for that one meeting — for EventKit, the

@@ -3,8 +3,9 @@
 // Connection files read against the connection-type registry (`load.ts`,
 // `catalog.ts`), the listing every surface renders (`describe.ts`), the
 // pooled MCP client (`pool.ts`, `plan.ts`) and its check (`check.ts`); what a
-// sync opens to read a builtin provider's connection (`sync.ts`) and the
-// `linear` provider itself (`linear.ts`, T4-24).
+// sync opens to read a builtin provider's connection (`sync.ts`), the
+// `linear` provider itself (`linear.ts`, T4-24) and the `ics` provider — an
+// iCalendar feed, parsed and expanded (`ics.ts`, T4-12).
 // docs/ops/connections.md is the same contract in words.
 
 export { CONNECTION_REFUSAL_CODES, ConnectionRefused, type ConnectionRefusalCode } from "./errors.js";
@@ -87,3 +88,31 @@ export {
   type LinearErrorCode,
   type LinearIssue,
 } from "./linear.js";
+export {
+  ICS_ERROR_CODES,
+  ICS_MAX_BYTES,
+  ICS_MODULE,
+  ICS_SYNC,
+  IcsError,
+  Zones,
+  expandRule,
+  icsOccurrences,
+  knownZone,
+  parseDuration,
+  parseIcs,
+  parseRule,
+  readIcsFeed,
+  timeOf,
+  unescapeText,
+  zonedMidnight,
+  zonedToday,
+  type ExpandOptions,
+  type IcsComponent,
+  type IcsErrorCode,
+  type IcsOccurrence,
+  type IcsParticipant,
+  type IcsProperty,
+  type IcsSkipped,
+  type IcsTime,
+  type Rule,
+} from "./ics.js";

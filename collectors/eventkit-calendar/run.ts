@@ -180,6 +180,25 @@ INSERT INTO sync_state (connection, key, value, updated_at)
 SELECT $1, k, v, now() FROM unnest($2::text[], $3::text[]) AS s(k, v)
 ON CONFLICT (connection, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`;
 
+/**
+ * Replace one source's window in `calendar_events`: `rows` in, every row of
+ * `connection` starting inside [start, end) that `rows` does not name out —
+ * one statement. Returns rows inserted, changed or removed. Every calendar
+ * sync writes through this (the ICS sync, T4-12, too), so the semantics
+ * above are the table's, not one source's.
+ */
+export async function replaceCalendarWindow(db: Db, connection: string, rows: readonly CalendarRow[], start: string, end: string): Promise<number> {
+  const { rows: out } = await db.query(REPLACE_WINDOW, [connection, JSON.stringify(rows), start, end]);
+  return Number(out[0]?.upserted ?? 0) + Number(out[0]?.removed ?? 0);
+}
+
+/** Record where a source's sync got to (`sync_state`), one row per key. */
+export async function saveSyncState(db: Db, connection: string, entries: Readonly<Record<string, string>>): Promise<void> {
+  const keys = Object.keys(entries);
+  if (keys.length === 0) return;
+  await db.query(SAVE_STATE, [connection, keys, keys.map((k) => entries[k]!)]);
+}
+
 export async function run(db: Db, ctx: EventkitCtx = {}): Promise<number> {
   if (!ctx.ekUrl || !ctx.ekToken) return 0; // degrades absent
   const base = ctx.ekUrl.replace(/\/+$/, "");
@@ -206,8 +225,7 @@ export async function run(db: Db, ctx: EventkitCtx = {}): Promise<number> {
     seen.add(row.event_id);
     rows.push(row);
   }
-  const { rows: out } = await db.query(REPLACE_WINDOW, [EVENTKIT_CONNECTION, JSON.stringify(rows), start, end]);
-  const changed = Number(out[0]?.upserted ?? 0) + Number(out[0]?.removed ?? 0);
-  await db.query(SAVE_STATE, [EVENTKIT_CONNECTION, ["window_start", "window_end", "events"], [start, end, String(rows.length)]]);
+  const changed = await replaceCalendarWindow(db, EVENTKIT_CONNECTION, rows, start, end);
+  await saveSyncState(db, EVENTKIT_CONNECTION, { window_start: start, window_end: end, events: String(rows.length) });
   return changed;
 }

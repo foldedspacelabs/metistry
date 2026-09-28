@@ -11,9 +11,10 @@ connections` (M13, `docs/ops/cli.md`); the read routes are `GET
 **This release dials MCP servers** — over Streamable HTTP or by starting a
 command (stdio). The other types have their own consumers and tickets: agent
 connections (targets, T4-11), tools generated for API, feed and files
-connections (T4-10), calendar and mail providers (T4-12…T4-15). A
-**tracker** is read by its provider's sync — Linear is the first (T4-24,
-*Linear* below). Asking the pool to dial any of those is refused `not_built`,
+connections (T4-10), calendar and mail providers (T4-13…T4-15). A
+**tracker** or **calendar** connection is read by its provider's sync —
+Linear is the first tracker (T4-24, *Linear* below), an ICS feed the first
+calendar (T4-12, *ICS feeds* below). Asking the pool to dial any of those is refused `not_built`,
 naming where it arrives.
 
 ## The file, read
@@ -239,7 +240,8 @@ opens is `openSyncHttp` (`packages/connections`, `sync.ts`):
   winning; none at all is `absent`, and the sync writes nothing.
 - **Where it may go.** The connection's URL must be the provider's own origin
   (Linear: `https://api.linear.app`) or the sync refuses it before anything is
-  sent. The `fetch` it hands the sync refuses any other origin and follows no
+  sent. A provider with no origin of its own — an ICS feed lives anywhere —
+  names none, and the pin is the connection's own URL's origin. The `fetch` it hands the sync refuses any other origin and follows no
   redirect (`other_host`), and every request goes through core's
   `guardedFetch` with `connection:<name>` as the grantee — the same door the
   pool uses: filled only for a host on the secret's *Sent only to* list, over
@@ -296,6 +298,61 @@ second press returns the first capture and writes nothing. The title is the
 one the sync recorded, never text the caller sends; nothing writes the owner's
 own notes. *The console door that calls it is not built yet* — the frozen
 route table (plan §2.1) has no route for the `today` door.
+
+## ICS feeds
+
+The first `calendar` provider (plan §2.6; T4-12): an iCalendar subscription
+feed (`.ics`), capability `read` — a subscription has no way back. Any
+calendar that publishes one: a team or holiday calendar, a sports schedule, a
+calendar made public in Google or iCloud.
+
+```sh
+metistry connections add holidays --type calendar --provider ics \
+  --url https://example.com/holidays.ics --no-discover
+```
+
+Write a `webcal://` address as `https://`; plain `http://` is refused
+(`not_https`).
+
+**The sync** (`collectors/ics-calendar/`, every 15 minutes) reads the feed
+through the door — pinned to the feed's own origin, no redirect followed, the
+body capped at 10 MB — and writes today and the next two weeks into
+`calendar_events` under the connection's name, beside the eventkit sync's rows
+(T2-11): the same row, the same window, the same one-statement replacement, so
+Today reads one table for every source. What it reads:
+
+- **Recurrence** — `RRULE` (DAILY, WEEKLY, MONTHLY, YEARLY; INTERVAL, COUNT,
+  UNTIL, BYDAY with ordinals, BYMONTHDAY, BYMONTH, BYSETPOS, WKST), `RDATE`,
+  `EXDATE`, and `RECURRENCE-ID` overrides (a moved, retitled or cancelled
+  occurrence). A rule it does not expand (BYYEARDAY, BYWEEKNO, BYHOUR…, an
+  HOURLY or finer FREQ) skips that series and is counted in `sync_state`
+  (`skipped_rules`), never guessed at.
+- **Time zones** — `…Z` is UTC; a `TZID` is an IANA zone when the runtime
+  knows it, else the feed's own `VTIMEZONE` rules (Outlook's "Pacific Standard
+  Time"), else the calendar's zone, and `sync_state.unknown_zones` names it; a
+  floating time is the calendar's zone (`X-WR-TIMEZONE`), else the owner's
+  (`METISTRY_TZ`); **an all-day date is the owner's midnight to midnight**. A
+  series keeps its wall time across DST; a time DST skips moves forward by the
+  gap, one it repeats is the earlier.
+- **Keys** — an occurrence is keyed as EventKit's bridge keys one: the UID for
+  a one-off, `<uid>_<original start>` for a series' occurrence
+  (`_20260928T130000Z`, or `_20260928` all-day), so a moved occurrence keeps
+  its meeting note.
+- **Never the invite body.** `DESCRIPTION`, `COMMENT`, `ATTACH` and an alarm's
+  text are never read, and `calendar_events` has no column for one. A feed does
+  not say which attendee is the owner, so `self_status` is null.
+
+**A feed address that carries a token is a secret** — Google's *secret address
+in iCal format*, a published iCloud calendar, a `?token=` link. The file
+refuses one (`reach.http.url: this looks like a key`), and `{{ secret.x }}` in
+a URL is refused at the file and at the egress door (`secret_in_url`). **So
+this release reads public feed addresses only**; how a secret that *is* a URL
+reaches the wire is open for the owner (T4-12's PR). For a private Google or
+iCloud calendar today: the eventkit bridge reads whatever the Mac's Calendar
+shows, and CalDAV (T4-13) and Google (T4-14) are the read-and-reply providers.
+
+One sync reads one connection: with two ICS connections, name the one it reads
+in `scheduled.yaml` (`syncs.ics-calendar.connection`).
 
 ## Decisions made here
 

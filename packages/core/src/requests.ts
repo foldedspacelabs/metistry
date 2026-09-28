@@ -32,7 +32,7 @@
 //     other type's answers.
 
 import { createHash } from "node:crypto";
-import { questionsOf, type Question } from "./decision-block.js";
+import { SKIP_FEEDBACK, questionsOf, type Question } from "./decision-block.js";
 
 /** The twelve types the owner reads, in §2.12's order. Closed: a new type is a product change that picks a body from `REQUEST_BODIES` (plan §2.7). */
 export const REQUEST_TYPES = [
@@ -61,11 +61,13 @@ export type RequestBody = (typeof REQUEST_BODIES)[number];
  * is a question's: one answer per question, its options and/or `other` + text
  * (T2-3, `checkAnswers`), stored as `answered` — what a question answered in
  * chat has always stored — with the record in `payload.answers` and its words
- * in `feedback`. `skip` is stored as `deny` + `SKIP_FEEDBACK` and fires none of
- * `deny`'s consequences. `later` is absent on purpose: it is not an answer
- * (it sets `snoozed_until`) and every type takes it.
+ * in `feedback`. `acknowledge` is a report's (X-10, ruling 8 of 2026-09-27):
+ * stored as `ACKNOWLEDGED`, it fires nothing, and it is what knowledge-fold
+ * reads a report by. `skip` is stored as `deny` + `SKIP_FEEDBACK` and fires
+ * none of `deny`'s consequences. `later` is absent on purpose: it is not an
+ * answer (it sets `snoozed_until`) and every type takes it.
  */
-export const REQUEST_DECISIONS = ["answers", "allow", "accept_as_work", "accept_with_changes", "deny", "skip"] as const;
+export const REQUEST_DECISIONS = ["answers", "allow", "accept_as_work", "acknowledge", "accept_with_changes", "deny", "skip"] as const;
 export type RequestDecision = (typeof REQUEST_DECISIONS)[number];
 
 /**
@@ -111,6 +113,25 @@ export interface RequestTypeSpec {
   /** The answers apply to every row of the group, one per row, in order (a meeting's Accept All; Decline All after a 10 s Undo the client holds). */
   readonly grouped?: true;
 }
+
+/**
+ * What `acknowledge` stores in `proposals.decision` — its own word, never
+ * `allow`: a report is not approved (T2-3), and nothing reads an
+ * acknowledgement as consent to anything. Knowledge-fold reads it
+ * (routines/knowledge-fold/run.ts), and the agent that filed the report
+ * reads it back (`requests_create`, packages/mcp-brain/src/report.ts).
+ */
+export const ACKNOWLEDGED = "acknowledged";
+
+/**
+ * A report's primary where it names no act (X-10, ruling 8 of 2026-09-27):
+ * *I have read this, keep it*. §2.12 gives a report its act (Try Again,
+ * Reconnect) — the events that raise one name it in `payload.act` (C96) — and
+ * a report no event raised, an agent's finding or a routine's own note, has
+ * none, so until this it had Dismiss alone and knowledge-fold could never be
+ * given one. It fires nothing: it settles the row as `ACKNOWLEDGED`.
+ */
+export const ACKNOWLEDGE_ANSWER: RequestAnswer = { label: "Acknowledge", sends: { decision: "acknowledge" } };
 
 const approve: RequestAnswer = { label: "Approve", sends: { decision: "allow" } };
 const revise: RequestAnswer = { label: "Revise", sends: { decision: "accept_with_changes" }, carries: "feedback" };
@@ -278,6 +299,17 @@ export function requestBodyOf(kind: string, payload?: unknown): RequestBody {
   return bodyAnswersOf(kind, payload)?.body ?? UNKNOWN_KIND_BODY;
 }
 
+/** Does the payload name a report's act (`payload.act {label, …}`, C96 — the events of T2-9 and T3-12)? The label is the act's button, so an act without one is none. */
+function namesAct(payload: unknown): boolean {
+  if (typeof payload !== "object" || payload === null) return false;
+  const act = (payload as { act?: unknown }).act;
+  if (typeof act !== "object" || act === null || Array.isArray(act)) return false;
+  const label = (act as { label?: unknown }).label;
+  return typeof label === "string" && label.trim() !== "";
+}
+
+const sendsDoor = (a: RequestAnswer | null, d: RequestDoor): boolean => a !== null && "door" in a.sends && a.sends.door === d;
+
 /** `payload.suggested_work` is what makes Approve mean Approve as Work (§1.4) — a flag, never a row. */
 function suggestsWork(payload: unknown): boolean {
   return typeof payload === "object" && payload !== null && Object.hasOwn(payload, "suggested_work");
@@ -310,8 +342,10 @@ export interface RequestShape {
  * Everything a client needs to draw one row and offer its answers. Approve
  * sends `accept_as_work` where the payload suggests work (§1.4), and `allow`
  * stays valid beside it — §2.12's answer set makes both Approve's wire. A
- * question carries its questions, read from the payload. A kind this table
- * does not know is a report with no act: Dismiss is its only answer.
+ * question carries its questions, read from the payload. A report's primary
+ * is its act where the payload names one, and Acknowledge where it names none
+ * (X-10). A kind this table does not know is a report with no act and no
+ * Acknowledge: Dismiss is its only answer.
  */
 export function describeRequest(kind: string, payload?: unknown): RequestShape {
   const type = requestTypeOf(kind);
@@ -320,7 +354,13 @@ export function describeRequest(kind: string, payload?: unknown): RequestShape {
   const questions = type === "question" ? questionsOf(payload) : null;
   const asWork = suggestsWork(payload) && sendsDecision(at.primary, "allow");
   const primary: RequestAnswer | null =
-    questions !== null && questions.length === 0 ? null : asWork && at.primary !== null ? { ...at.primary, sends: { decision: "accept_as_work" } } : at.primary;
+    questions !== null && questions.length === 0
+      ? null
+      : asWork && at.primary !== null
+        ? { ...at.primary, sends: { decision: "accept_as_work" } }
+        : sendsDoor(at.primary, "act") && !namesAct(payload)
+          ? ACKNOWLEDGE_ANSWER
+          : at.primary;
   const decisions = new Set<RequestDecision>(asWork ? ["allow"] : []);
   for (const a of [primary, at.revise, at.decline]) if (a !== null && "decision" in a.sends) decisions.add(a.sends.decision);
   return {
@@ -334,6 +374,90 @@ export function describeRequest(kind: string, payload?: unknown): RequestShape {
     decisions: REQUEST_DECISIONS.filter((d) => decisions.has(d)),
     ...(questions !== null ? { questions } : {}),
   };
+}
+
+// ----- the read-back: what the agent that asked is told of the answer (X-10) -----
+//
+// Ruling 8 of 2026-09-27: an agent can read back the owner's answer to its
+// own question — never another agent's. The WHO is the caller's (mcp-brain's
+// report.ts looks a row up by the credential's own id and nothing else); this
+// is the WHAT, and it is deliberately narrower than the row. The stored
+// decision is machinery (`deny` + SKIP_FEEDBACK is a Dismiss, `answered` is a
+// question's, `approve` is an enrolment's), so the agent reads one of a
+// closed set of states instead, with the owner's words only where the owner
+// gave them TO it: a question's answers, and the words of a Revise or a
+// Decline. A Dismiss carries none — SKIP_FEEDBACK is a marker, not a reason
+// (docs/ops/reply-feedback.md) — and nothing else on the row (who else was
+// asked, what the owner's other requests hold) is read at all.
+
+/** What the agent that raised a request reads of its answer. `closed`: settled some other way (cleared at its source, or a decision this reading does not name) — never guessed at. */
+export const REQUEST_READ_STATES = ["pending", "answered", "acknowledged", "revised", "declined", "dismissed", "expired", "closed"] as const;
+export type RequestReadState = (typeof REQUEST_READ_STATES)[number];
+
+/** One question with the owner's answer to it: `choices` from its options, `other` their own words. */
+export interface ReadBackAnswer {
+  readonly prompt: string;
+  readonly choices: readonly string[];
+  readonly other?: string;
+}
+
+export interface RequestReadBack {
+  readonly state: RequestReadState;
+  /** When the owner settled it; absent while it waits. */
+  readonly decided_at?: string;
+  /** `answered` only: one entry per question, in the order asked. */
+  readonly answers?: readonly ReadBackAnswer[];
+  /** `revised` or `declined` only, and only when the owner wrote something: their words. */
+  readonly feedback?: string;
+}
+
+/** The stored row, as far as the read-back needs it. */
+export interface ReadBackRow {
+  readonly decision: unknown;
+  readonly feedback?: unknown;
+  readonly decided_at?: unknown;
+  readonly payload?: unknown;
+}
+
+const iso = (v: unknown): string | undefined => (v instanceof Date ? v.toISOString() : typeof v === "string" && v !== "" ? v : undefined);
+const words = (v: unknown): string | undefined => (typeof v === "string" && v.trim() !== "" && v !== SKIP_FEEDBACK ? v : undefined);
+
+/** A question's answers as stored (`payload.answers`), paired with the prompts as asked. An entry that is not an answer is dropped, never guessed at. */
+function answersOf(payload: unknown): ReadBackAnswer[] {
+  const stored = typeof payload === "object" && payload !== null ? (payload as { answers?: unknown }).answers : undefined;
+  if (!Array.isArray(stored)) return [];
+  const questions = questionsOf(payload);
+  const out: ReadBackAnswer[] = [];
+  stored.forEach((a: unknown, i) => {
+    if (typeof a !== "object" || a === null) return;
+    const { choices, other } = a as { choices?: unknown; other?: unknown };
+    const picked = Array.isArray(choices) ? choices.filter((c): c is string => typeof c === "string") : [];
+    out.push({ prompt: questions[i]?.prompt ?? "", choices: picked, ...(typeof other === "string" ? { other } : {}) });
+  });
+  return out;
+}
+
+/** What the agent that raised this row reads of its answer — see the section header. */
+export function readBackOf(row: ReadBackRow): RequestReadBack {
+  const decision = typeof row.decision === "string" ? row.decision : "";
+  if (decision === "pending") return { state: "pending" };
+  const at = iso(row.decided_at);
+  const when = at === undefined ? {} : { decided_at: at };
+  const said = words(row.feedback);
+  switch (decision) {
+    case "answered":
+      return { state: "answered", ...when, answers: answersOf(row.payload) };
+    case ACKNOWLEDGED:
+      return { state: "acknowledged", ...when };
+    case "accept_with_changes":
+      return { state: "revised", ...when, ...(said === undefined ? {} : { feedback: said }) };
+    case "deny":
+      return row.feedback === SKIP_FEEDBACK ? { state: "dismissed", ...when } : { state: "declined", ...when, ...(said === undefined ? {} : { feedback: said }) };
+    case "expired":
+      return { state: "expired", ...when };
+    default:
+      return { state: "closed", ...when };
+  }
 }
 
 // ----- the subject: what a request is ABOUT, and whether it moved (T2-14) -----

@@ -201,8 +201,10 @@ describe("the card answers with its type's own verbs (C92, §2.12)", () => {
     ]);
   });
 
-  it("a report offers what its type offers: Dismiss, then Later — no Approve it never had", () => {
-    expect(buttons(cardHtml(served("report", { summary: "x" })))).toEqual([["decline", "Dismiss"], ["later", "Later"]]);
+  it("a report offers what its type offers: Acknowledge where it names no act (X-10), Dismiss, then Later — no Approve it never had", () => {
+    expect(buttons(cardHtml(served("report", { summary: "x" })))).toEqual([["primary", "Acknowledge"], ["decline", "Dismiss"], ["later", "Later"]]);
+    // a report that names its act is answered at the act's door, which the phone does not open yet
+    expect(buttons(cardHtml(served("report", { summary: "x", act: { label: "Try Again", kind: "run_now", component: "standup" } })))).toEqual([["decline", "Dismiss"], ["later", "Later"]]);
   });
 
   it("an answer through another system's door is not offered from the phone yet — the card still says what it is", () => {

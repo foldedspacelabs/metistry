@@ -376,10 +376,12 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
     // You. A question is not a new tool on purpose: the brain is at its
     // definition budget, and asking is the same act as reporting (it grants
     // nothing; `ASKING_IS_NOT_A_POWER`, access.ts). `decided` and `decision`
-    // are one report kind (C104, report.ts).
+    // are one report kind (C104, report.ts). A replay reads back the owner's
+    // answer to the caller's own request (X-10) — the read is report.ts's,
+    // keyed on this credential alone.
     reg(
       "requests_create",
-      "Raise a request in the user's Needs You queue: a report (finding, decided, gotcha, progress), kind question with 1-5 questions of 2-8 options that you wait on, or kind pull_request with the PR in refs (gh:owner/name#n) for the user's review. Same idempotency_key, or the same title within 24h, returns the existing id.",
+      "Raise a request in the user's Needs You queue: a report (finding, decided, gotcha, progress), kind question with 1-5 questions of 2-8 options that you wait on, or kind pull_request with the PR in refs (gh:owner/name#n) for the user's review. A repeat (same idempotency_key, or title within 24h) returns its id and answer.",
       {
         title: z.string().min(1).max(200),
         body: z.string().min(1).max(50_000),
@@ -392,7 +394,9 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
         if (a.kind === "question") {
           if (a.questions === undefined) return fail("invalid_request", "kind question needs questions: [{prompt, options, multi?, allow_other?}]");
           const q = await submitQuestion(db, principal.id, { title: a.title, body: a.body, questions: a.questions, refs: a.refs, idempotency_key: a.idempotency_key });
-          return q.ok ? done({ id: q.id, deduplicated: q.deduplicated }, { proposal_id: q.id, deduplicated: q.deduplicated, questions: (a.questions as unknown[]).length }) : fail("invalid_request", q.error);
+          return q.ok
+            ? done({ id: q.id, deduplicated: q.deduplicated, ...(q.answer ? { answer: q.answer } : {}) }, { proposal_id: q.id, deduplicated: q.deduplicated, questions: (a.questions as unknown[]).length, ...(q.answer ? { answer: q.answer.state } : {}) })
+            : fail("invalid_request", q.error);
         }
         if (a.questions !== undefined) return fail("invalid_request", "questions ride only with kind question — a report asks nothing");
         if (a.kind === "pull_request") {
@@ -400,7 +404,7 @@ export function createBrainServer(cfg: BrainConfig): BrainServer {
           return p.ok ? done({ id: p.id, deduplicated: p.deduplicated }, { proposal_id: p.id, deduplicated: p.deduplicated, kind: "pull_request" }) : fail(p.code, p.error);
         }
         const r = await submitReport(db, principal.id, { title: a.title, body: a.body, kind: a.kind, refs: a.refs, idempotency_key: a.idempotency_key });
-        return done(r, { proposal_id: r.id, deduplicated: r.deduplicated });
+        return done(r, { proposal_id: r.id, deduplicated: r.deduplicated, ...(r.answer ? { answer: r.answer.state } : {}) });
       },
     );
 

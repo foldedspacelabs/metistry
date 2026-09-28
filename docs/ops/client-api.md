@@ -644,7 +644,8 @@ which is not an answer and every row takes:
 | access | `allow`, `accept_with_changes` + `area` (narrower only), `deny` |
 | action · note · improvement · review (preview) | `allow`, `accept_with_changes`, `deny` — and `accept_as_work` where the row carries a valid `payload.suggested_work` |
 | review (before and after) | `deny` — Keep Mine and Take the Other go through the conflict door |
-| report, and any kind the table does not know | `skip` (Dismiss) — its act goes through its own door; a report cannot be approved, revised or declined |
+| report that names no act (`payload.act`) — an agent's finding, a routine's own note | `acknowledge` (Acknowledge, X-10), `skip` (Dismiss) — a report cannot be approved, revised or declined |
+| report that names its act — an event's (below) — and any kind the table does not know | `skip` (Dismiss) — the act goes through its own door |
 | message | `skip` (Not Mine) — Draft Reply goes through the mail door |
 | pull request · invitation · task | nothing on the row: every answer goes through that system's door |
 
@@ -665,6 +666,28 @@ type offers there, the decisions those answers store, and on a question its
 no answer list, of its own (the PWA cannot import core; this is how it reads
 the one table, X-5, T2-3). A kind the table does not know arrives as a
 `report` with Dismiss its only answer — the stored `kind` is never the word.
+
+**Acknowledge** (X-10, ruling 8 of 2026-09-27) is a report's primary where its
+payload names no act: `decision: "acknowledge"`, stored as its own word,
+`acknowledged` (core's `ACKNOWLEDGED`) — never `allow`, which a report cannot
+take. It carries no words (`feedback` beside it is a `400`), it is not a batch
+verb, and it fires nothing: knowledge-fold reads an acknowledged report as it
+reads an approved note (`docs/ops/knowledge-fold.md`), and the agent that filed
+it reads back that it was acknowledged (below). A report that names its act
+(`payload.act {label, …}` — the events below) keeps the act as its primary and
+is not acknowledged; a kind the table does not know is still Dismiss alone.
+
+**The asker reads back the answer** (X-10). An agent learns where the owner's
+answer to its own report or question stands by replaying `requests_create`
+(`packages/mcp-brain`) — the same `idempotency_key`, or the same title within
+24 hours — which returns the existing `id` and `answer`: `{state, decided_at?,
+answers?, feedback?}`, `state` one of `pending`, `answered` (with each
+question's `{prompt, choices, other?}`), `acknowledged`, `revised` or
+`declined` (with the owner's words, where they wrote any), `dismissed`,
+`expired`, or `closed`. No route and no tool was added; the lookup and the read
+are keyed on the calling credential's agent id alone, so another agent's
+request — however exactly its call is echoed — is never found, and the echo is
+a new request of the caller's own.
 The field is additive: every stored column is still there beside it. Skip is a
 bulk verb in every client (K2): the PWA offers it on the selection bar and its
 `s` shortcut, never on a row.
@@ -971,8 +994,8 @@ POST /api/proposals/17  {"decision":"accept_as_work"}
 Offered only on a `knowledge` proposal whose payload carries
 `suggested_work: {title, project?, kind?}` — validated **server-side against
 the stored row**, never against the request, exactly like a question's
-options. (A `report` is Dismissed, never approved — T2-3 — so a suggestion on
-one is no longer an answer.) Where it is offered it is what Approve sends
+options. (A `report` is Acknowledged or Dismissed, never approved — T2-3,
+X-10 — so a suggestion on one is no longer an answer.) Where it is offered it is what Approve sends
 (§1.4); `allow` stays valid beside it. It inserts the `work` row (owner-less, unclaimed), sets
 `proposals.work_id`, and decides the proposal `allow`. `project` that is not a
 project slug is dropped rather than invented; an unknown `kind` is a refusal

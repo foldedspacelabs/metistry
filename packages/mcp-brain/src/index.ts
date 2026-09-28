@@ -17,7 +17,7 @@ export {
   type CaptureVault,
   type SinkOptions,
 } from "./capture.js";
-export { submitPullRequest, submitQuestion, submitReport, pullRequestRefOf, reportKindOf, REPORT_KINDS, REQUEST_CREATE_KINDS, type PullRequestAskInput, type QuestionInput, type ReportInput, type ReportKind, type ReportResult, type RequestCreateKind } from "./report.js";
+export { readBack, submitPullRequest, submitQuestion, submitReport, pullRequestRefOf, reportKindOf, REPORT_KINDS, REQUEST_CREATE_KINDS, type PullRequestAskInput, type QuestionInput, type ReportInput, type ReportKind, type ReportResult, type RequestCreateKind } from "./report.js";
 export { requestAccess, ACCESS_REQUEST_KIND, ACCESS_CEILING_KIND, type AccessCeilingMeta, type AccessRequestInput, type AccessRequestOutcome, type AccessRequestPayload } from "./access.js";
 export {
   searchKnowledge,

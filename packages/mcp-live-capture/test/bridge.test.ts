@@ -4,12 +4,15 @@
 import { readFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { parse as parseYaml } from "yaml";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { checkResultSchema, mintToken, validateManifest } from "@foldedspacelabs/metistry-core";
 import { makeBridge, ROUTES, startPayload, TOOL_OPS, type HelperResponse } from "../src/index.js";
 
 const token = mintToken();
 const controlToken = mintToken();
+const inboxToken = mintToken();
+/** The console, faked at the fetch seam: delivery's own tests (delivery.test.ts) use a real socket. */
+const consoleFetch = (async () => new Response(JSON.stringify({ id: 7, path: "Inbox/x.md", sha256: "0" }), { status: 201 })) as typeof fetch;
 
 /** Every request the bridge made of the helper — to prove what it never asks for. */
 const asked: Record<string, unknown>[] = [];
@@ -27,6 +30,7 @@ const fakeHelper = {
       case "start": return startAnswer;
       case "stop": return { id: 1, ok: true, session: { session_id: "20260928-120000-00ab", ended_reason: "owner" } };
       case "keep_going": return { id: 1, ok: true, answered: true };
+      case "owed": return { id: 1, ok: true, sessions: [] };
       default: return { id: 1, ok: false, code: "invalid_request", error: `unknown op ${String(p.op)}` };
     }
   },
@@ -47,7 +51,7 @@ describe("live-capture bridge", () => {
   const ops = () => asked.map((p) => p.op);
 
   beforeAll(async () => {
-    server = makeBridge(fakeHelper, { token, controlToken });
+    server = makeBridge(fakeHelper, { token, controlToken, delivery: { consoleUrl: "http://127.0.0.1:9", inboxToken, fetchFn: consoleFetch } });
     // port 0: never 7815, so a run can never collide with a bridge this Mac is running
     await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -77,6 +81,21 @@ describe("live-capture bridge", () => {
     expect(() => makeBridge(fakeHelper, { token, controlToken: token })).toThrow(/must not be the bridge token/);
     expect(() => makeBridge(fakeHelper, { token, controlToken: "" })).toThrow(/both/);
     expect(() => makeBridge(fakeHelper, { token: "", controlToken })).toThrow(/both/);
+  });
+
+  it("refuses to serve when the inbox token is either of the bridge's own — a console credential is its own reach", () => {
+    const delivery = (t: string) => ({ consoleUrl: "http://127.0.0.1:9", inboxToken: t, fetchFn: consoleFetch });
+    expect(() => makeBridge(fakeHelper, { token, controlToken, delivery: delivery(token) })).toThrow(/inbox token must not be the bridge token/);
+    expect(() => makeBridge(fakeHelper, { token, controlToken, delivery: delivery(controlToken) })).toThrow(/inbox token must not be the control token/);
+    expect(() => makeBridge(fakeHelper, { token, controlToken, delivery: delivery("") })).toThrow(/capture owner token/);
+  });
+
+  it("the inbox token is not a credential here: presented to the bridge it is a stranger's, 401 on every route", async () => {
+    for (const r of ROUTES) {
+      const res = await call(r.method, r.path, inboxToken, r.method === "POST" ? { apps: ["us.zoom.xos"] } : undefined);
+      expect(res.status, `${r.method} ${r.path}`).toBe(401);
+    }
+    expect(asked).toEqual([]);
   });
 
   // ---- the ticket's test: no `exposes` entry starts a recording ----
@@ -126,7 +145,8 @@ describe("live-capture bridge", () => {
     const stopped = await call("POST", "/recording/stop", controlToken);
     expect(stopped.status).toBe(200);
     expect((await stopped.json()).session.ended_reason).toBe("owner");
-    expect(ops()).toEqual(["start", "keep_going", "stop"]);
+    // …and the end of the session starts its delivery (after the answer: Stop never waits on the console)
+    await vi.waitFor(() => expect(ops()).toEqual(["start", "keep_going", "stop", "owed"]));
   });
 
   it("the control credential reads check and status too", async () => {
@@ -223,9 +243,24 @@ describe("live-capture bridge", () => {
     expect(c.remediation).toMatch(/lc-helper/);
   });
 
+  it("check() is degraded when there is nowhere to deliver a transcript, and names the variable", async () => {
+    const off = makeBridge(fakeHelper, { token, controlToken });
+    await new Promise<void>((r) => off.listen(0, "127.0.0.1", r));
+    try {
+      const res = await fetch(`http://127.0.0.1:${(off.address() as AddressInfo).port}/check`, { headers: as(token) });
+      expect(res.status).toBe(503);
+      const c = await res.json();
+      expect(c.status).toBe("degraded");
+      expect(c.remediation).toMatch(/METISTRY_LIVE_CAPTURE_INBOX_TOKEN/);
+      expect(c.meta.delivery).toBe("off");
+    } finally {
+      await new Promise<void>((r) => off.close(() => r()));
+    }
+  });
+
   it("status is a read with an as_of stamp, and never carries a transcript", async () => {
     const s = await (await call("GET", "/status", token)).json();
-    expect(s).toMatchObject({ state: "idle" });
+    expect(s).toMatchObject({ state: "idle", delivery: { owed: 0 } });
     expect(s.as_of).toBeTruthy();
     expect(JSON.stringify(s)).not.toMatch(/transcript|"text"/);
   });

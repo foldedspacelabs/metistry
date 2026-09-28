@@ -11,6 +11,11 @@
 //                        "controlling a recording — the app talks to the
 //                        local live-capture bridge directly"). Reaches start,
 //                        stop and Keep Going as well.
+//   the inbox token      METISTRY_LIVE_CAPTURE_INBOX_TOKEN — not a credential
+//                        this bridge ACCEPTS at all: the capture owner token it
+//                        PRESENTS to the console's POST /capture when a
+//                        session ends (src/delivery.ts, T8-2b). Optional; must
+//                        differ from both of the above.
 //
 // A tool caller that asks to start a recording is refused 403 before the
 // helper hears anything: the route is not in `exposes:` AND the credential
@@ -19,16 +24,27 @@
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { errorEnvelope, parseBearer, runCheck, statusFor, tokenEquals, type CheckResult, type ErrorCode } from "@foldedspacelabs/metistry-core";
+import { Deliverer, type DeliveryConfig, type DeliveryState } from "./delivery.js";
 import type { HelperClient, HelperResponse } from "./helper.js";
 
 export { DEFAULT_HELPER_TIMEOUT_MS, Helper, type HelperClient, type HelperResponse } from "./helper.js";
+export { clock, Deliverer, idempotencyKey, IDEMPOTENCY_PREFIX, renderTranscript, type DeliveryConfig, type DeliveryState, type SessionRecordJson, type TranscriptLine } from "./delivery.js";
 
 export interface BridgeConfig {
   /** The bridge token: tool callers, the router, doctor. */
   token: string;
   /** The owner's control credential: the capture bar. Never the bridge token. */
   controlToken: string;
+  /**
+   * Where an ended session's transcript goes (`POST /capture`) and the
+   * capture owner token it is sent with. Absent: transcripts stay on this
+   * Mac, and `check` says so.
+   */
+  delivery?: DeliveryConfig | undefined;
 }
+
+/** The bridge, and its delivery loop when it has one (`main.ts` runs the timer; tests call `sweep`). */
+export type Bridge = Server & { deliverer?: Deliverer };
 
 /** Who a request is from, by the credential it carries. */
 export type Caller = "tool" | "control";
@@ -115,7 +131,10 @@ function helperFailure(res: ServerResponse, r: HelperResponse): void {
       return fail(res, "invalid_request", r.error);
     case "already_recording":
     case "disk_full":
+    case "still_recording":
       return fail(res, "conflict", r.error);
+    case "unknown_session":
+      return fail(res, "not_found", r.error);
     case "stream_failed":
     case "unreachable":
       return fail(res, "not_available", r.error);
@@ -136,28 +155,42 @@ function body(r: HelperResponse): Record<string, unknown> {
  * recording would work without a transcript, or without the owner's side;
  * `failed` when the helper does not answer.
  */
-export async function check(helper: HelperClient): Promise<CheckResult> {
-  return runCheck("live-capture", "asked the helper for its grant states and the on-device transcriber's readiness", async () => {
+export async function check(helper: HelperClient, deliverer?: Deliverer): Promise<CheckResult> {
+  return runCheck("live-capture", "asked the helper for its grant states and the on-device transcriber's readiness; read the transcript delivery's last sweep", async () => {
     const r = await helper.request({ op: "check" });
-    if (!r.ok) throw new Error(`${r.error ?? "helper failed"} — is lc-helper running? (its launchd job: T8-2b)`);
+    if (!r.ok) throw new Error(`${r.error ?? "helper failed"} — is lc-helper running? (its launchd job: com.foldedspacelabs.metistry.recorder — metistry doctor names it)`);
     const grants = (r.grants ?? {}) as Record<string, string>;
     const transcriber = (r.transcriber ?? {}) as { available?: boolean; reason?: string };
-    const meta = { grants, transcriber: r.transcriber, recording: r.recording, os: r.os };
+    const delivery: DeliveryState | "off" = deliverer ? deliverer.state() : "off";
+    const meta = { grants, transcriber: r.transcriber, recording: r.recording, os: r.os, delivery };
     if (transcriber.available !== true) {
       return { status: "degraded" as const, remediation: transcriber.reason ?? "the on-device transcriber is not available", meta };
     }
     if (grants.microphone === "denied" || grants.microphone === "restricted") {
       return { status: "degraded" as const, remediation: "the microphone is not allowed — System Settings ▸ Privacy & Security ▸ Microphone; recordings keep app audio only", meta };
     }
+    if (delivery === "off") {
+      return { status: "degraded" as const, remediation: "transcripts are kept on this Mac and never reach Metistry — set METISTRY_LIVE_CAPTURE_INBOX_TOKEN to a capture owner token (docs/ops/capture-shortcut.md §1) and restart the bridge", meta };
+    }
+    if (delivery.last_error !== undefined && delivery.owed > 0) {
+      return { status: "degraded" as const, remediation: `${delivery.owed} recording${delivery.owed === 1 ? "" : "s"} not yet delivered: ${delivery.last_error}`, meta };
+    }
     return { meta };
   });
 }
 
-export function makeBridge(helper: HelperClient, cfg: BridgeConfig): Server {
+export function makeBridge(helper: HelperClient, cfg: BridgeConfig): Bridge {
   // Two credentials are two reaches only if they differ: refuse to start
   // otherwise, rather than serve a bridge where a tool caller holds the bar's key.
   if (!cfg.token || !cfg.controlToken) throw new Error("live-capture needs both the bridge token and the control token");
   if (tokenEquals(cfg.token, cfg.controlToken)) throw new Error("the control token must not be the bridge token — a tool caller would hold the owner's hand");
+  // …and the console credential is a third thing: a caller presenting it here
+  // must be refused like any stranger, which only holds if it is neither key.
+  if (cfg.delivery) {
+    if (tokenEquals(cfg.delivery.inboxToken, cfg.token)) throw new Error("the inbox token must not be the bridge token — a tool caller would hold a console credential");
+    if (tokenEquals(cfg.delivery.inboxToken, cfg.controlToken)) throw new Error("the inbox token must not be the control token — each credential is one reach");
+  }
+  const deliverer = cfg.delivery ? new Deliverer(helper, cfg.delivery) : undefined;
 
   function callerOf(header: string | undefined): Caller | null {
     const presented = parseBearer(header);
@@ -168,7 +201,7 @@ export function makeBridge(helper: HelperClient, cfg: BridgeConfig): Server {
     return control ? "control" : tool ? "tool" : null;
   }
 
-  return createServer(async (req, res) => {
+  const server: Bridge = createServer(async (req, res) => {
     try {
       const caller = callerOf(req.headers.authorization);
       if (caller === null) return fail(res, "unauthenticated");
@@ -179,12 +212,13 @@ export function makeBridge(helper: HelperClient, cfg: BridgeConfig): Server {
 
       switch (route.path) {
         case "/check": {
-          const result = await check(helper);
+          const result = await check(helper, deliverer);
           return send(res, result.status === "ok" ? 200 : 503, result);
         }
         case "/status": {
           const r = await helper.request({ op: "status" });
-          return r.ok ? send(res, 200, { ...body(r), as_of: new Date().toISOString() }) : helperFailure(res, r);
+          // `delivery`: how many ended recordings still owe their transcript — a count, never text
+          return r.ok ? send(res, 200, { ...body(r), delivery: deliverer ? { owed: deliverer.state().owed } : "off", as_of: new Date().toISOString() }) : helperFailure(res, r);
         }
         case "/recording/start": {
           const parsed = startPayload(await readJson(req));
@@ -194,7 +228,12 @@ export function makeBridge(helper: HelperClient, cfg: BridgeConfig): Server {
         }
         case "/recording/stop": {
           const r = await helper.request({ op: "stop" });
-          return r.ok ? send(res, 200, body(r)) : helperFailure(res, r);
+          if (!r.ok) return helperFailure(res, r);
+          send(res, 200, body(r));
+          // The end of a session: its transcript goes now, not at the next
+          // tick. After the answer — the owner's Stop never waits on the console.
+          void deliverer?.sweep().catch(() => undefined);
+          return;
         }
         case "/recording/keep-going": {
           const r = await helper.request({ op: "keep_going" });
@@ -207,4 +246,6 @@ export function makeBridge(helper: HelperClient, cfg: BridgeConfig): Server {
       fail(res, "internal");
     }
   });
+  if (deliverer) server.deliverer = deliverer;
+  return server;
 }

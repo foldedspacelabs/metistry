@@ -49,7 +49,8 @@ import { dispatch, type TargetRegistry } from "./dispatch.js";
 import { DEVIN_PURPOSES, isDevinPurpose } from "./devin.js";
 import { listProjects, updateProject, validateProjectPatch } from "./projects.js";
 import { applyImprovement } from "./prompt-overlay.js";
-import { applyMeEdit, meEditOf } from "./profile-tidy.js";
+import { SCHEDULED_PATH, applyMeEdit, meEditOf } from "./profile-tidy.js";
+import { applySuggestion, carriesSuggestion, suggestionOf } from "./routine-suggestions.js";
 import { applyRestore, carriesRestore, restoreOf } from "./knowledge-restore.js";
 import { crewDispatcher, type CrewRegistry } from "./crews.js";
 import { runAction, type ActionServices } from "./actions.js";
@@ -2050,9 +2051,55 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     // never read as a prompt improvement either. Revise and Decline write nothing.
     const restoring = row.kind === "improvement" && carriesRestore(row.payload);
     let restored: { path: string; sha: string; sha256: string } | undefined;
-    const meEdit = row.kind === "improvement" && !restoring && !rollingBack ? meEditOf(row.payload) : null;
+    // A routine suggestion (T3-11, routine-suggestions.ts) is an improvement
+    // pointed at one entry of `.metistry/scheduled.yaml`: Approve writes
+    // exactly the "after" the owner was shown, through the Scheduled door
+    // (`applyEdit`) as `user`, refused `stale` (nothing written, the request
+    // still waiting) if the entry is no longer the "before". A row that
+    // carries one is never read as a `Me/` edit or a prompt improvement, and
+    // an agent's (`trust: external`) changes nothing. Revise, Decline and
+    // Later write nothing.
+    const suggesting = row.kind === "improvement" && !restoring && !rollingBack && carriesSuggestion(row.payload);
+    let scheduledApplied: { section: string; name: string; path: string } | undefined;
+    const meEdit = row.kind === "improvement" && !restoring && !rollingBack && !suggesting ? meEditOf(row.payload) : null;
     if (rollingBack) {
       // handled above
+    } else if (suggesting) {
+      if (verb === "allow") {
+        const suggestion = suggestionOf(row.payload);
+        if (suggestion === null || row.trust === "external") {
+          await audit("triage", "scheduled_suggestion", false, { proposal: row.id, error: suggestion === null ? "malformed" : "external" });
+          return refuseAnswer(
+            id,
+            verb,
+            "invalid_request",
+            suggestion === null
+              ? "this request's routine change is not one Approve can carry out as shown — Decline it"
+              : "an agent's request cannot change a routine — Decline it, and change the routine in Scheduled if you want to",
+          );
+        }
+        if (!cfg.scheduled) return refuseAnswer(id, verb, "not_available", "approving this changes .metistry/scheduled.yaml, and this console has no Scheduled wired in (docs/ops/scheduled.md)");
+        let r: Awaited<ReturnType<typeof applySuggestion>>;
+        try {
+          r = await applySuggestion(cfg.scheduled, suggestion, row.id);
+        } catch (err) {
+          return failedAnswer(id, verb, err);
+        }
+        const { section, name } = suggestion.edit;
+        if (!r.ok) {
+          await audit("triage", "scheduled_suggestion", false, { proposal: row.id, name, error: r.refusal.code });
+          const refused = await refuseAnswer(id, verb, r.refusal.code, r.refusal.message);
+          // the entry moved under the owner: F-1's `stale`, as every other door's 409 says
+          return r.refusal.code === "conflict" ? { status: 409, body: conflictBody("stale", r.refusal.message, row) } : refused;
+        }
+        // the Scheduled door's own audit row — the change is recorded where every Scheduled change is
+        await audit("scheduled", "suggestion", true, { name, section, proposal: row.id });
+        scheduledApplied = { section, name, path: SCHEDULED_PATH };
+        await db.query(`UPDATE proposals SET payload = payload || jsonb_build_object('scheduled_applied', $2::jsonb) WHERE id = $1 AND decision = 'pending'`, [
+          id,
+          JSON.stringify({ section, name, at: new Date().toISOString(), by: "user" }),
+        ]);
+      }
     } else if (restoring) {
       if (verb === "allow") {
         const restore = restoreOf(row);
@@ -2331,7 +2378,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       ...(rolledBack ? { rolled_back: rolledBack.runs_in === "console" ? rolledBack.sha : "runs_in_cli" } : {}),
     });
     if (rows.length === 1) {
-      return { status: 200, body: { ok: true, ...(applied ? { applied } : {}), ...(restored ? { restored } : {}), ...(rolledBack ? { rolled_back: rolledBack } : {}), ...(enrolled ? { enrolled } : {}), ...(created ? { work: created } : {}), ...(acted ? { action: acted } : {}), ...(granted ? { granted } : {}) } };
+      return { status: 200, body: { ok: true, ...(applied ? { applied } : {}), ...(restored ? { restored } : {}), ...(rolledBack ? { rolled_back: rolledBack } : {}), ...(scheduledApplied ? { scheduled: scheduledApplied } : {}), ...(enrolled ? { enrolled } : {}), ...(created ? { work: created } : {}), ...(acted ? { action: acted } : {}), ...(granted ? { granted } : {}) } };
     }
     // lost the race between the read above and this update: someone else decided it
     const now = (await db.query(PROPOSAL_FOR_DECISION_SQL, [id])).rows[0];

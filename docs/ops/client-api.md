@@ -367,7 +367,7 @@ takes a `since` cursor and answers with the next one.
 | `POST /api/github/pulls/:owner/:repo/:number/threads/:id/reply` | owner | session · local_owner | no | stale | — | served | reply to a review thread; the head SHA must match |
 | `POST /api/github/pulls/:owner/:repo/:number/threads/:id/resolve` | owner | session · local_owner | no | stale | — | served | resolve a review thread; the head SHA must match |
 | `POST /api/trackers/:connection/issues` | owner | session · local_owner | natural | stale | — | served | create an issue from a task; idempotent by task key |
-| `POST /api/trackers/:connection/issues/:key/complete` | owner | session · local_owner | natural | — | — | T4-26 | close an issue |
+| `POST /api/trackers/:connection/issues/:key/complete` | owner | session · local_owner | natural | — | — | served | close an issue in its tracker; the connection's `complete_issue` mode decides (Never is 403) |
 | `POST /api/prose/:id/feedback` | owner | session · local_owner | natural | — | — | served | rate one piece of generated prose |
 | `DELETE /api/prose/:id/feedback` | owner | session · local_owner | natural | — | — | served | clear a prose rating |
 | `GET /api/events` | owner | session · local_owner | natural | — | — | served | Server-Sent Events: what changed, as ids; `Last-Event-ID` resumes |
@@ -2745,6 +2745,8 @@ GET /api/today?date=2026-09-28
      "work":   [<day_work row>, …],
      "order":  ["mt-7f3k2a", "work:214"],
      "events": [<day_events row>, …],
+     "tracker_closed": [{"task_key": "mt-7f3k2a", "ref": "linear:MET-41", "connection": "linear",
+                         "key": "MET-41", "state": "done" | "canceled", "url": "https://linear.app/…"}, …],
      "brief": "Journal/Brief/2026-09-28.md" | null,
      "standup": "Journal/Standup/2026-09-28.md" | null,
      "plan": "Journal/Plan/2026-09-28.md" | null,
@@ -2764,7 +2766,7 @@ PUT /api/today/order
 
 - **Every row comes from a named query**, each `expose: route` so this
   owner-only door is the only one onto it: `vault_tasks_query`, `day_work`,
-  `today_order`, `day_events`. Rows are those queries' rows unchanged — a
+  `today_order`, `day_events`, `tracker_closed`. Rows are those queries' rows unchanged — a
   task row is exactly what `GET /api/vault-tasks` returns, and carries
   `someday` and `row_flags`.
 - **The day** is `date`, or — left out — today in `METISTRY_TZ` (never `TZ`;
@@ -2781,6 +2783,13 @@ PUT /api/today/order
 - **`work`** is `day_work` for the day with the flags `waiting_on_me`
   (an agent is waiting on a line of yours), `blocked` (only your hand leaves
   it), `due`, `overdue` and `closed` (closed on the day), joined by `or`.
+- **`tracker_closed`** — *Done in Linear* (T4-26): each OPEN line of the
+  day (not ticked, not dropped) whose `linear:<KEY>` names an issue the
+  tracker closed — its `work` row closed as `completed` (`state: "done"`) or
+  `canceled` — by the Linear sync or by Close in Linear. The client shows
+  *Done in Linear* on that row with a one-click Tick, which is the Tick door
+  as `user`. **Nothing writes the owner's note from the source**: the line
+  stays open, and on the day, until the owner ticks it. `[]` when none.
 - **`order`** is the owner's drag order (`today_order`): a `task_key` or
   `work:<id>` each. Only keys the day still holds are served — a key whose
   line moved off the day is dropped, and the next drag clears it. Rows not
@@ -3242,7 +3251,7 @@ POST /api/github/pulls/:owner/:repo/:number/review                  T2-13 — 40
 POST /api/github/pulls/:owner/:repo/:number/threads/:id/reply       T2-13 — the same guard
 POST /api/github/pulls/:owner/:repo/:number/threads/:id/resolve     T2-13 — the same guard
 POST /api/trackers/:connection/issues                               T4-25 — an issue from a task line; idempotent by task key; 409 stale when the line is linked
-POST /api/trackers/:connection/issues/:key/complete                 T4-26 — close an issue
+POST /api/trackers/:connection/issues/:key/complete                 {}   200 {ok, connection, key, ref, url, state, changed} · 403 tool_off
 ```
 
 The tracker doors go through a `tracker` connection's capability (Linear
@@ -3294,6 +3303,57 @@ POST /api/trackers/linear/issues
 - **Not an action.** No proposal can file an issue at any autonomy level; an
   agent bearer and the capture owner token get the management gate's uniform
   `403`.
+
+#### Close in Linear — `POST /api/trackers/:connection/issues/:key/complete` (T4-26)
+
+```
+POST /api/trackers/linear/issues/MET-42/complete
+{}
+
+200 {"ok": true, "connection": "linear", "key": "MET-42", "ref": "linear:MET-42",
+     "url": "https://linear.app/example/issue/MET-42", "state": "done", "changed": true}
+403 {"error": {"code": "forbidden", "message": "Close in Linear is set to Never for linear — …"}, "reason": "tool_off"}
+```
+
+- **When a client calls it.** Ticking a task whose line carries `linear:<KEY>`
+  (the Tick door, `POST /api/vault-tasks/:task_key/check`) offers *Close
+  <KEY> in Linear*. The setting is the connection's tool mode for
+  `complete_issue` — `GET /api/connections/:name`'s `tools` row, and unlisted
+  means Ask First (the provider declares the tool; `metistry connections
+  policy <name> complete_issue allow|ask|never` sets it):
+  **Ask First** — the client offers it, and the owner's press is this call;
+  **Allow** (*always*) — the client makes this call itself right after the
+  tick, the second call; **Never** — the client does not offer it, and this
+  door refuses `403` with `reason: "tool_off"` and sends nothing. The Tick
+  door never calls Linear, and this door never writes the note.
+- **The path names everything.** `:connection` is a connection's name (a
+  `tracker` connection whose provider is `linear` and declares `complete`);
+  `:key` is the issue's key as the line spells it (`TEAM-123`). The body is
+  `{}` or empty — a field is `400`.
+- **What leaves**, through the connection's egress door (the key filled for
+  `api.linear.app` only, `Authorization: <API_KEY>`, no redirect followed):
+  a read of the issue, then — only if it is still open — one fixed mutation
+  moving it to its team's first `completed` workflow state (Linear's *Done*,
+  unless the team reordered them). The issue is named by Linear's own id
+  when the sync has seen it, else by its key.
+- **Idempotent by nature.** An issue Linear already has completed — or
+  canceled — is answered as it stands, `changed: false`, and only the read
+  is sent. `state` is `done`, or `canceled` for one Linear had canceled.
+- **What it writes** is Postgres: the issue's `work` row closes
+  (`meta.closed_reason: completed`, as the sync would record it) and its
+  `task` request resolves at source. Never a vault file. Audited as `runs`
+  kind `tracker`, tool `complete_issue`: the connection, the key and the
+  secret's name — never its value.
+- **Refusals**, each before anything changes: `400` a key that is not one or
+  a body with fields; `404` no connection by that name, one that is not a
+  Linear tracker, or an issue Linear does not have (`reason: not_found`);
+  `403` the connection's provider cannot `complete` (`no_capability`) or the
+  owner set Never (`tool_off`); `503` the connection cannot be opened or its
+  key is not delivered (`connection_failed` — `metistry secrets sync --to
+  env`, then restart the console), Linear refused the key or failed
+  (`linear`), or no instance directory in this deployment; `429` Linear's
+  rate limit. An agent bearer and the capture owner token get the uniform
+  `403`; no credential, `401`.
 
 #### Pull requests
 

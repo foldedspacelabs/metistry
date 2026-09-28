@@ -306,8 +306,8 @@ opens is `openSyncHttp` (`packages/connections`, `sync.ts`):
 The first `tracker` provider (plan §2.6, §4 Q22): GraphQL at
 `https://api.linear.app/graphql`, a **personal API key** sent as
 `Authorization: <API_KEY>` — no `Bearer`, which Linear's OAuth tokens take.
-Capabilities `read` (the sync) and `create` (*Send to Linear*, T4-25);
-*Close in Linear* (`complete`, T4-26) adds its own when it lands.
+Capabilities `read` (the sync), `create` (*Send to Linear*, T4-25) and
+`complete` (*Close in Linear*, T4-26).
 
 ```sh
 metistry secrets set linear_api_key                    # the value on stdin
@@ -324,9 +324,10 @@ issues assigned to the key's own user into `work` — `external_ref
 linear:<KEY>`, kind `issue`, with `meta` naming the connection, state,
 priority and url — as `github-state` does for GitHub. An issue that leaves the
 list is looked up once by id and its row closed with `meta.closed_reason`
-(`completed`, `canceled`, `unassigned` or `gone`). The sync's client sends
-read queries only: a document that is not a `query` operation is refused
-before it leaves (`not_a_query`).
+(`completed`, `canceled`, `unassigned` or `gone`). The sync sends read
+queries only: a document that is not a `query` operation is refused before it
+leaves (`not_a_query`); the one change the client can send is Close in
+Linear's fixed mutation, below.
 
 **Needs You.** With `syncs.linear.raise.assigned` on (the default), each
 assigned issue raises one `task` request — a mirror (T1-8): source `linear`,
@@ -359,6 +360,30 @@ is created, so a second press answers the first issue and two presses racing
 meet at Linear, which refuses the second id. The team is the one named, or the
 owner's only team; with several, the answer lists them. The issue is filed
 unassigned and without a due date or priority — the title alone.
+
+**Completion both ways** (T4-26). *Metistry → Linear:* ticking a task whose
+line carries `linear:<KEY>` offers *Close <KEY> in Linear* —
+`POST /api/trackers/<connection>/issues/<KEY>/complete`
+(`collectors/linear/complete.ts`), which reads the issue and, if it is still
+open, sends one fixed mutation moving it to its team's first `completed`
+state; an issue already closed is left as it is. The setting is the
+connection's tool `complete_issue`, which the `linear` type declares under
+*Changes things*:
+
+```sh
+metistry connections policy linear complete_issue ask     # Ask First (the default): the client offers it
+metistry connections policy linear complete_issue allow   # always: the client closes it after every tick
+metistry connections policy linear complete_issue never   # the door refuses, and nothing is sent
+```
+
+Never is enforced at the door, not in the client. The door opens the
+connection the path names through the same egress door the sync reads
+through, and writes Postgres only — the issue's `work` row closes and its
+request resolves at source. *Linear → Metistry:* an issue closed in Linear
+closes its `work` row on the sync's next pass, and `GET /api/today` names
+each open line carrying its key in `tracker_closed`, which the client shows
+as *Done in Linear* with a one-click Tick. **No sync path writes a vault
+file**: the owner's line stays open until the owner ticks it.
 
 ## ICS feeds
 

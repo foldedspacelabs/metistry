@@ -104,8 +104,9 @@ export const SECRET_NAME_RE = /^[A-Z][A-Z0-9_]*$/;
 /**
  * How a provider is billed (C128, screen-15 §5.3): `token` — by the token,
  * the default for anything off this machine — or `subscription`, a plan
- * whose own window is its limit (T4-19). An on_machine provider bills
- * nothing, so it has no `billing:` at all.
+ * whose own window is its limit, so `budgets.providers.<name>` is refused on
+ * one (T4-19). An on_machine provider bills nothing, so it has no `billing:`
+ * at all.
  */
 export const BILLINGS = ["token", "subscription"] as const;
 export type Billing = (typeof BILLINGS)[number];
@@ -694,6 +695,18 @@ export const computeSchema = z
           code: "custom",
           path: ["budgets", "providers", name],
           message: `budgets.providers.${name} budgets a provider this file does not declare (${known.join(", ") || "none"})`,
+        });
+      } else if (cfg.providers[name]?.billing === "subscription") {
+        // A subscription's calls cost nothing beyond the plan, so a dollar
+        // limit on one could never fire: its plan's window is its limit
+        // (C128, C133; T4-19). Refused rather than recorded, so no pane can
+        // show a limit that does nothing.
+        ctx.addIssue({
+          code: "custom",
+          path: ["budgets", "providers", name],
+          message:
+            `budgets.providers.${name} sets a dollar spending limit on ${name}, which is billed by subscription — a subscription's plan window is its limit, not a dollar amount. ` +
+            `Remove budgets.providers.${name}, or set providers.${name}.billing: token if it is billed by the token.`,
         });
       }
     }

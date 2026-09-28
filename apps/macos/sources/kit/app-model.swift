@@ -161,7 +161,7 @@ public final class AppModel {
         self.firstRun = firstRun
         let console = ConsoleSession(cli: cli, spawner: sessionSpawner, defaults: defaults)
         self.console = console
-        self.settings = SettingsModel(status: status, cli: cli, instanceDir: instances.active, consoleSignIn: consoleSignIn)
+        self.settings = SettingsModel(status: status, cli: cli, instanceDir: instances.active, consoleSignIn: consoleSignIn, session: console)
         self.wizard = WizardModel(steps: firstRun)
         self.menu = MenuBarModel(status: status, cli: cli)
         self.logs = LogViewerModel(cli: cli)

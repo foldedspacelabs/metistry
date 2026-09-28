@@ -197,7 +197,8 @@ public struct SettingsSection<Content: View>: View {
     public var body: some View {
         let p = Palette(scheme)
         VStack(alignment: .leading, spacing: MetistrySpace.s2) {
-            Text(title).metistryText(.headline, p)
+            // each section a heading (§2.18.3): VoiceOver's rotor walks a pane by them
+            Text(title).metistryText(.headline, p).accessibilityAddTraits(.isHeader)
             VStack(alignment: .leading, spacing: MetistrySpace.s3) { content }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .metistryCard(p)

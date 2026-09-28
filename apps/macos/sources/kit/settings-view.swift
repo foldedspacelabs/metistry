@@ -1,546 +1,278 @@
-// Settings, in the place macOS users look for it: the app menu, ⌘, and a
-// tabbed window (`Settings` scene in the executable target).
+// Settings, in the place macOS users look for it: the app menu, ⌘, and its own
+// window (`Settings` scene in the executable target) — never a pane in the main
+// one (T6-11, screen-15-settings.md).
 //
-// Six panes. Every value on them is one of three things, and the pane says which:
-// a POINTER the app remembers (the instance directory, the recents, the developer
+// THE WINDOW (screen-15 §2–§4). A sidebar, grouped (§1), at a FIXED 840 × 600 —
+// a 200 pt sidebar and a 640 pt pane — because the owner ruled it is not
+// resizable. So larger text cannot widen it, and every pane is a vertical
+// `ScrollView`: at the largest macOS text size a pane grows LONGER, never
+// wider (§3, C62; plan §2.18.5), and rows whose controls cannot fit side by
+// side stack instead (`SettingsControls`).
+//
+// Every value on a pane is one of three things, and the pane says which: a
+// POINTER the app remembers (the instance directory, the recents, the developer
 // override), a READ-THROUGH of a file or a verb the CLI owns, or a labelled
 // "not yet". There is no fourth category — no app-private configuration, and no
-// second copy of anything in identity.yaml, deployment.yaml or .env.
+// second copy of anything in identity.yaml, deployment.yaml or .env. Every
+// write is a §2.2 verb, confirmed here with the exact command before it runs
+// (settings-model.swift).
 //
 // docs/ops/mac-app.md carries the same split as a table.
 
 import SwiftUI
-import UniformTypeIdentifiers
+
+/// The window's fixed size (screen-15 §2).
+public enum SettingsLayout {
+    public static let width: CGFloat = 840
+    public static let height: CGFloat = 600
+    public static let sidebar: CGFloat = 200
+    /// What a pane is given — the widest pane was tightened to fit it.
+    public static let pane: CGFloat = 640
+}
+
+/// What a pane asks the platform to do: things only the app target can (the
+/// Finder, a window, System Settings).
+public struct SettingsActions {
+    public var openInFinder: (URL) -> Void
+    public var setUpAgain: () -> Void
+    /// A service's log, in the Log window.
+    public var openLog: (String) -> Void
+    /// Help ▸ Keyboard Shortcuts (⌘/).
+    public var showShortcuts: () -> Void
+    public var openSystemSettings: () -> Void
+
+    public init(
+        openInFinder: @escaping (URL) -> Void = { _ in },
+        setUpAgain: @escaping () -> Void = {},
+        openLog: @escaping (String) -> Void = { _ in },
+        showShortcuts: @escaping () -> Void = {},
+        openSystemSettings: @escaping () -> Void = {}
+    ) {
+        self.openInFinder = openInFinder
+        self.setUpAgain = setUpAgain
+        self.openLog = openLog
+        self.showShortcuts = showShortcuts
+        self.openSystemSettings = openSystemSettings
+    }
+}
 
 public struct SettingsView: View {
-    @Environment(\.colorScheme) private var scheme
     private let model: AppModel
-    private let onOpenInFinder: (URL) -> Void
-    private let onSetUpAgain: () -> Void
-
-    @State private var pickingInstance = false
-    @State private var pickingProductDir = false
+    private let actions: SettingsActions
 
     public init(
         model: AppModel,
         onOpenInFinder: @escaping (URL) -> Void,
-        onSetUpAgain: @escaping () -> Void
+        onSetUpAgain: @escaping () -> Void,
+        onOpenLog: @escaping (String) -> Void = { _ in },
+        onShowShortcuts: @escaping () -> Void = {},
+        onOpenSystemSettings: @escaping () -> Void = {}
     ) {
         self.model = model
-        self.onOpenInFinder = onOpenInFinder
-        self.onSetUpAgain = onSetUpAgain
+        self.actions = SettingsActions(
+            openInFinder: onOpenInFinder,
+            setUpAgain: onSetUpAgain,
+            openLog: onOpenLog,
+            showShortcuts: onShowShortcuts,
+            openSystemSettings: onOpenSystemSettings
+        )
     }
 
     private var settings: SettingsModel { model.settings }
-    /// Where doctor probed the console, for the passkey diagnostic under
-    /// Advanced. The same source the wizard's step 6 uses.
-    private var consoleURL: String? { PasskeyRouting.consoleURL(in: model.status.report) }
 
     public var body: some View {
-        TabView(selection: Binding(get: { settings.section }, set: { settings.section = $0 })) {
-            ForEach(SettingsModel.Section.allCases) { section in
-                pane(section)
-                    .tabItem { Label(section.title, systemImage: section.symbolName) }
-                    .tag(section)
+        NavigationSplitView(columnVisibility: .constant(.all)) {
+            SettingsSidebar(settings: settings)
+                .navigationSplitViewColumnWidth(SettingsLayout.sidebar)
+                .toolbar(removing: .sidebarToggle)
+        } detail: {
+            SettingsPaneView(section: settings.section, model: model, actions: actions)
+                .navigationTitle(settings.section.title)
+        }
+        .frame(width: SettingsLayout.width, height: SettingsLayout.height)
+        .settingsDialogs(settings)
+    }
+}
+
+/// The grouped sidebar (screen-15 §1).
+struct SettingsSidebar: View {
+    let settings: SettingsModel
+
+    var body: some View {
+        List(selection: Binding<SettingsModel.Section?>(get: { settings.section }, set: { if let s = $0 { settings.section = s } })) {
+            ForEach(SettingsModel.SectionGroup.allCases) { group in
+                section(group)
             }
         }
-        .frame(width: 640, height: 520)
+        .listStyle(.sidebar)
     }
 
     @ViewBuilder
-    private func pane(_ section: SettingsModel.Section) -> some View {
+    private func section(_ group: SettingsModel.SectionGroup) -> some View {
+        if let title = group.title {
+            SwiftUI.Section(title) { rows(group) }
+        } else {
+            SwiftUI.Section { rows(group) }
+        }
+    }
+
+    @ViewBuilder
+    private func rows(_ group: SettingsModel.SectionGroup) -> some View {
+        ForEach(group.sections) { section in
+            Label(section.title, systemImage: section.symbolName).tag(section)
+        }
+    }
+}
+
+/// One pane: the verb running or its answer, then the pane's own sections, in
+/// a vertical scroll view at the pane's width.
+public struct SettingsPaneView: View {
+    @Environment(\.colorScheme) private var scheme
+    let section: SettingsModel.Section
+    let model: AppModel
+    let actions: SettingsActions
+
+    public init(section: SettingsModel.Section, model: AppModel, actions: SettingsActions = SettingsActions()) {
+        self.section = section
+        self.model = model
+        self.actions = actions
+    }
+
+    public var body: some View {
         let p = Palette(scheme)
-        ScrollView {
-            VStack(alignment: .leading, spacing: MetistrySpace.s5) {
-                switch section {
-                case .instance: instancePane(p)
-                case .services: servicesPane(p)
-                case .connections: connectionsPane(p)
-                case .compute: computePane(p)
-                case .secrets: secretsPane(p)
-                case .updates: updatesPane(p)
-                case .advanced: advancedPane(p)
-                }
-            }
-            .padding(MetistrySpace.s5)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        ScrollView(.vertical) {
+            SettingsPaneContent(section: section, model: model, actions: actions)
+                .padding(MetistrySpace.s5)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(p[.bg])
     }
+}
 
-    // MARK: - Instance
+/// A pane's sections, unscrolled — what the window scrolls, and what a test
+/// measures at the pane's width.
+struct SettingsPaneContent: View {
+    let section: SettingsModel.Section
+    let model: AppModel
+    let actions: SettingsActions
 
-    @ViewBuilder
-    private func instancePane(_ p: Palette) -> some View {
-        SettingsSection("Active Instance") {
-            HStack(spacing: MetistrySpace.s2) {
-                Text(model.instances.active?.path ?? "none chosen")
-                    .metistryText(.mono, p, model.instances.active == nil ? .textTertiary : .textPrimary)
-                    .lineLimit(1)
-                    .truncationMode(.head)
-                    .textSelection(.enabled)
-                Spacer(minLength: MetistrySpace.s2)
-                Button("Choose…") { pickingInstance = true }
-                if let active = model.instances.active {
-                    Button("Open in Finder") { onOpenInFinder(active) }
-                }
-            }
-            Text("Every `metistry` verb the app runs is given METISTRY_INSTANCE_DIR=<this path>. An inherited variable wins over the product checkout's .env, so this is the one place that decides which install the app is talking to.")
-                .metistryText(.caption1, p, .textTertiary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .fileImporter(isPresented: $pickingInstance, allowedContentTypes: [.folder]) { result in
-            if case .success(let url) = result { model.activateInstance(url) }
-        }
-
-        if !model.instances.recents.isEmpty {
-            SettingsSection("Recents") {
-                ForEach(model.instances.recents, id: \.path) { url in
-                    HStack(spacing: MetistrySpace.s2) {
-                        Image(systemName: url.path == model.instances.active?.path ? "checkmark.circle.fill" : "folder")
-                            .foregroundStyle(p[url.path == model.instances.active?.path ? .ok : .textTertiary])
-                        Button(url.path) { model.activateInstance(url) }
-                            .buttonStyle(.plain)
-                            .metistryText(.footnote, p, .textPrimary)
-                            .lineLimit(1)
-                            .truncationMode(.head)
-                        Spacer(minLength: MetistrySpace.s2)
-                        Button("Forget") { model.forgetInstance(url) }
-                            .metistryText(.caption1, p, .textSecondary)
-                    }
-                }
+    var body: some View {
+        VStack(alignment: .leading, spacing: MetistrySpace.s5) {
+            SettingsRunBanner(settings: model.settings)
+            switch section {
+            case .instance: InstancePane(model: model, actions: actions)
+            case .services: ServicesPane(model: model, actions: actions)
+            case .compute:
+                ComputePaneView(model: model.settings.computePane)
+                    // Re-read on open and on every instance switch. There is no
+                    // file watcher anywhere in this app, so this IS the refresh.
+                    .task(id: model.instances.active) { await model.settings.computePane.refresh() }
+            case .updates: UpdatesPane(model: model)
+            case .account: AccountPane(model: model, actions: actions)
+            case .connections: ConnectionsPane(settings: model.settings)
+            case .secrets: SecretsPane(settings: model.settings)
+            case .variables, .liveCapture, .sessions: PendingPane(section: section)
+            case .keyboard: KeyboardPane(assistantName: model.settings.identity?.assistantName, actions: actions)
+            case .advanced: AdvancedPane(model: model, actions: actions)
             }
         }
+    }
+}
 
-        SettingsSection("Assistant") {
-            if case .unavailable(let why) = settings.identityPhase {
-                UnavailableCard(what: "Could not read the identity", reason: why, command: settings.identityCommand)
-            } else if settings.identityPhase == .reading {
-                Text("reading `metistry identity --json`…").metistryText(.footnote, p, .textSecondary)
-            } else {
-                FactRow("Name", settings.assistantNameDisplay, mono: true)
-                if let mention = settings.identity?.mention {
-                    FactRow("Mention", mention, mono: true)
+// MARK: - The dialogs every pane shares
+
+extension View {
+    /// The confirmation, the lid dialog, and the two editors — attached once,
+    /// to the window, so a pane only sets the model's state.
+    func settingsDialogs(_ settings: SettingsModel) -> some View {
+        self
+            .alert(
+                settings.confirmation?.title ?? "",
+                isPresented: Binding(get: { settings.confirmation != nil }, set: { if !$0 { settings.cancelConfirmation() } }),
+                presenting: settings.confirmation
+            ) { pending in
+                Button(pending.actionTitle, role: pending.destructive ? .destructive : nil) {
+                    Task { await settings.confirm(pending) }
                 }
-                if let icon = settings.identity?.icon {
-                    FactRow("Icon", icon)
-                }
-                FactRow(
-                    "Instance id",
-                    settings.identity?.instanceID ?? "not reported",
-                    help: SettingsModel.instanceIdNote,
-                    mono: true,
-                    role: settings.identity?.instanceID == nil ? .absent : .textPrimary
+                Button("Cancel", role: .cancel) { settings.cancelConfirmation() }
+            } message: { pending in
+                Text("\(pending.cost)\n\n\(pending.said)")
+            }
+            .sheet(isPresented: Binding(get: { settings.lidDialogPresented }, set: { if !$0 { settings.dismissLidDialog() } })) {
+                LidClosedDialogView(
+                    onCopy: { settings.copyLidCommand() },
+                    onCancel: { settings.dismissLidDialog() },
+                    onTurnOff: { Task { await settings.storeLidClosedAwake() } }
                 )
             }
-            Text("From `metistry identity --json`. The assistant is named in the instance's identity.yaml and nowhere else; it is a protected path — only your own hand writes it — so this pane shows the name and offers no field to change it. `metistry init --name` sets it on a new instance.")
-                .metistryText(.caption1, p, .textTertiary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .task(id: model.instances.active) { await settings.refreshIdentity() }
-
-        // The vault's git: sync, and Roll Back… (T10-7). Its own file, as the
-        // Compute pane is — it renders a model rather than holding one.
-        InstanceHistorySection(model: model.vaultHistory, assistantName: model.shell.assistantName)
-
-        SettingsSection("Set Up Again") {
-            Text("Runs the first-launch steps over: create or adopt an instance, connect a repository, sync secrets, bring the services up. Nothing happens until you press Run on a step.")
-                .metistryText(.footnote, p, .textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-            Button("Set Up Again…", action: onSetUpAgain)
-        }
+            .sheet(isPresented: Binding(get: { settings.identityDraft != nil }, set: { if !$0 { settings.identityDraft = nil } })) {
+                IdentityEditorView(settings: settings)
+            }
+            .sheet(isPresented: Binding(get: { settings.linkOrigin != nil }, set: { if !$0 { settings.linkOrigin = nil } })) {
+                LinkInstanceView(settings: settings)
+            }
     }
+}
 
-    // MARK: - Services
+/// While a verb runs: which one. After: its answer in the CLI's words, and
+/// everything it printed under View Log.
+struct SettingsRunBanner: View {
+    @Environment(\.colorScheme) private var scheme
+    let settings: SettingsModel
 
-    @ViewBuilder
-    private func servicesPane(_ p: Palette) -> some View {
-        if let deployment = settings.deployment {
-            SettingsSection("Shape") {
-                FactRow("Shape", deployment.shape, help: "From \(deployment.from) — the D4 overlay: the product's seed/deployment.yaml, then the instance's own file if it has one.", mono: true)
-            }
-            SettingsSection("Services") {
-                ForEach(deployment.ordered, id: \.name) { service in
-                    serviceRow(name: service.name, plannedShape: service.shape, p)
-                }
-            }
-        } else {
-            UnavailableCard(
-                what: "No deployment shape reported yet",
-                reason: "It comes from `metistry doctor --json`'s deployment row. Run doctor from the Status window, or from Advanced.",
-                command: model.status.lastCommand
-            )
-        }
-
-        SettingsSection("Start at Login") {
-            Toggle("Start Metistry at login", isOn: Binding(
-                get: { model.loginItem.isOn },
-                set: { model.loginItem.set($0) }
-            ))
-            .disabled(!model.loginItem.isSupported)
+    var body: some View {
+        let p = Palette(scheme)
+        if let running = settings.running {
             HStack(spacing: MetistrySpace.s2) {
-                StatusDot(loginDot)
-                Text(model.loginItem.status.label)
-                    .metistryText(.footnote, p, model.loginItem.status.colorRole)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            // `requiresApproval` is the normal first-time answer: macOS holds
-            // the registration until the person allows it, and there is exactly
-            // one place to do that.
-            if model.loginItem.status.needsApproval {
-                Button("Open Login Items…") { model.loginItem.openSystemSettings() }
-            }
-            if model.loginItem.status == .notFound {
-                Text(LoginItemModel.notAnAppBundleNote)
-                    .metistryText(.caption1, p, .textTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if let error = model.loginItem.lastError {
-                UnavailableCard(what: "SMAppService refused", reason: error)
-            }
-            Text(LoginItemModel.note)
-                .metistryText(.caption1, p, .textTertiary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .task { model.loginItem.refresh() }
-
-        // The OTHER registration, and the one that matters: the install's
-        // services. Deliberately its own section, below Start at Login, because
-        // the two are constantly confused and the prose on each says which is
-        // which (background-agent.swift).
-        SettingsSection("Background") {
-            Toggle(BackgroundAgentModel.title, isOn: Binding(
-                get: { model.backgroundAgent.isOn },
-                set: { model.backgroundAgent.set($0) }
-            ))
-            .disabled(!model.backgroundAgent.isSupported || !model.backgroundAgent.bundlesAgent)
-            HStack(spacing: MetistrySpace.s2) {
-                StatusDot(agentDot)
-                Text(model.backgroundAgent.statusLabel)
-                    .metistryText(.footnote, p, model.backgroundAgent.colorRole)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if model.backgroundAgent.needsApproval {
-                Button("Open Login Items…") { model.backgroundAgent.openSystemSettings() }
-            }
-            if model.backgroundAgent.status == .notFound {
-                Text(BackgroundAgentModel.notAnAppBundleNote)
-                    .metistryText(.caption1, p, .textTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(BackgroundAgentModel.terminalNote)
-                    .metistryText(.caption1, p, .textTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if let error = model.backgroundAgent.lastError {
-                UnavailableCard(what: "SMAppService refused", reason: error)
-            }
-            Text(BackgroundAgentModel.note)
-                .metistryText(.caption1, p, .textTertiary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .task { model.backgroundAgent.refresh() }
-    }
-
-    private var loginDot: CheckStatus {
-        switch model.loginItem.status {
-        case .enabled: return .ok
-        case .requiresApproval: return .degraded
-        case .notRegistered: return .absent
-        case .notFound, .unknown: return .failed
-        }
-    }
-
-    private var agentDot: CheckStatus {
-        switch model.backgroundAgent.status {
-        case .enabled: return .ok
-        case .requiresApproval: return .degraded
-        case .notRegistered: return .absent
-        case .notFound, .unknown: return .failed
-        }
-    }
-
-    private func serviceRow(name: String, plannedShape: String, _ p: Palette) -> some View {
-        let row = settings.serviceRow(named: name)
-        return HStack(alignment: .top, spacing: MetistrySpace.s3) {
-            StatusDot(row?.status ?? .absent)
-            VStack(alignment: .leading, spacing: MetistrySpace.s1) {
-                Text(name).metistryText(.mono, p)
-                Text(row?.remediation ?? row?.probe ?? "not in this doctor report")
-                    .metistryText(.caption1, p, .textTertiary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: MetistrySpace.s2)
-            VStack(alignment: .trailing, spacing: MetistrySpace.s1) {
-                Text(plannedShape).metistryText(.caption2, p, plannedShape == "disabled" ? .absent : .textSecondary)
-                if let row {
-                    Text(row.status.label).metistryText(.caption1, p, row.status.colorRole)
-                }
-            }
-        }
-        .accessibilityElement(children: .combine)
-    }
-
-    // MARK: - Connections
-
-    @ViewBuilder
-    private func connectionsPane(_ p: Palette) -> some View {
-        SettingsSection("Console Sign-In") {
-            ConsoleSignInCard(model: settings.consoleSignIn, title: "This Mac")
-            Text(SettingsModel.consoleSignInNote)
-                .metistryText(.caption1, p, .textTertiary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .task(id: model.instances.active) { await settings.consoleSignIn.refreshIfNeeded() }
-
-        SettingsSection("Instance Repository") {
-            FactRow("Status", settings.repositoryStatus)
-            if let facts = settings.reconciler {
-                if let head = facts.head {
-                    FactRow("HEAD", String(head.prefix(12)), mono: true)
-                }
-                if let depth = facts.queueDepth {
-                    FactRow("Queue depth", String(depth), help: "Writes waiting for the reconciler's next commit.", mono: true)
-                }
-            }
-            Text("Reported by the reconciler, which is the sole committer — the app runs no git of its own. `metistry connect-repo` is what adds or changes a remote; the wizard's step 3 runs it.")
-                .metistryText(.caption1, p, .textTertiary)
-                .fixedSize(horizontal: false, vertical: true)
-            Button("Connect a Repository…", action: onSetUpAgain)
-        }
-
-        SettingsSection("Compute") {
-            if let facts = settings.compute {
-                FactRow("Default", facts.engineSummary, mono: true, role: facts.assignsNothing ? .absent : .ok)
-                ForEach(facts.providers) { provider in
-                    FactRow(provider.name, provider.baseURL, help: provider.summary, mono: true, role: provider.secretPresent == false ? .absent : .textPrimary)
-                }
-                if let file = facts.file {
-                    FactRow("From", file, mono: true)
-                }
-            } else if case .unavailable(let why) = settings.computePhase {
-                UnavailableCard(what: "Could not read the compute configuration", reason: why, command: settings.computeCommand)
-            } else {
-                Text(settings.computePhase == .reading ? "reading `metistry compute show`…" : "not read yet — press Read below.")
+                ProgressView().controlSize(.small)
+                Text("Running \(running)…")
                     .metistryText(.footnote, p, .textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            ForEach(settings.providerSecretListings) { listing in
-                FactRow(listing.name, listing.isSet ? "set" : "not set", help: listing.scopeLabel, mono: true, role: listing.isSet ? .ok : .absent)
-            }
-            Text("Where the assistant's turns run, from `metistry compute show --json`. No key's value is requested or displayed — a provider's `auth.secret` is a NAME, and the only thing the app learns about it is whether it is in the Keychain. `metistry compute assign default <provider/model>` changes the engine; the wizard's step 7 is the same two verbs.")
-                .metistryText(.caption1, p, .textTertiary)
-                .fixedSize(horizontal: false, vertical: true)
-            Button("Read Compute") { Task { await settings.refreshCompute(); await settings.refreshSecrets() } }
-                .disabled(settings.computePhase == .reading)
-        }
-
-        SettingsSection("Bridges") {
-            if settings.bridges.isEmpty {
-                Text("No bridges in the last doctor report.")
-                    .metistryText(.footnote, p, .textSecondary)
-            } else {
-                ForEach(settings.bridges) { row in
-                    HStack(alignment: .top, spacing: MetistrySpace.s3) {
-                        StatusDot(row.status)
-                        VStack(alignment: .leading, spacing: MetistrySpace.s1) {
-                            Text(row.name).metistryText(.mono, p)
-                            Text(row.remediation ?? row.probe)
-                                .metistryText(.caption1, p, .textTertiary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        Spacer(minLength: MetistrySpace.s2)
-                        Text(row.status.label).metistryText(.caption2, p, row.status.colorRole)
-                    }
-                    .accessibilityElement(children: .combine)
-                }
-            }
-        }
-    }
-
-    // MARK: - Compute
-
-    /// The whole pane is `ComputePaneView` — it has enough state of its own
-    /// (four editors and a sheet) to be its own file, and this keeps the rule
-    /// that a Settings pane renders a model rather than holding one.
-    @ViewBuilder
-    private func computePane(_ p: Palette) -> some View {
-        ComputePaneView(model: settings.computePane)
-            // Re-read on open and on every instance switch. There is no file
-            // watcher anywhere in this app, so this IS the refresh: a
-            // compute.yaml changed in a terminal shows up when the pane is
-            // next opened, and "Read Again" covers the pane that never closed.
-            .task(id: model.instances.active) { await settings.computePane.refresh() }
-    }
-
-    // MARK: - Secrets
-
-    @ViewBuilder
-    private func secretsPane(_ p: Palette) -> some View {
-        SettingsSection("Secrets") {
-            HStack(spacing: MetistrySpace.s3) {
-                Button("Read List") { Task { await settings.refreshSecrets() } }
-                    .disabled(settings.secretsPhase == .reading)
-                if settings.secretsPhase == .reading {
-                    ProgressView().controlSize(.small)
-                }
-                Spacer(minLength: 0)
-                Text("\(settings.secrets.count) named")
-                    .metistryText(.caption1, p, .textTertiary)
-                    .monospacedDigit()
-            }
-            if case .unavailable(let why) = settings.secretsPhase {
-                UnavailableCard(what: "Could not read the secret list", reason: why, command: settings.secretsCommand)
-            }
-            ForEach(settings.secrets) { listing in
-                HStack(alignment: .top, spacing: MetistrySpace.s3) {
-                    Image(systemName: listing.isSet ? "key.fill" : "key")
-                        .foregroundStyle(p[listing.isSet ? .ok : .absent])
-                    VStack(alignment: .leading, spacing: MetistrySpace.s1) {
-                        Text(listing.name).metistryText(.mono, p)
-                        Text(listing.scopeLabel)
-                            .metistryText(.caption1, p, .textTertiary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+            .accessibilityElement(children: .combine)
+        } else if let outcome = settings.outcome {
+            VStack(alignment: .leading, spacing: MetistrySpace.s2) {
+                HStack(alignment: .firstTextBaseline, spacing: MetistrySpace.s2) {
+                    Image(systemName: (outcome.ok ? CheckStatus.ok : CheckStatus.failed).symbolName)
+                        .foregroundStyle(p[outcome.ok ? .ok : .failed])
+                        .accessibilityHidden(true)
+                    Text(outcome.words)
+                        .metistryText(.callout, p)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityLabel("\(outcome.ok ? "Done" : "Failed"): \(outcome.words)")
                     Spacer(minLength: 0)
+                    Button("Dismiss") { settings.dismissOutcome() }
                 }
-                .accessibilityElement(children: .combine)
-            }
-            Text("Names and scope only. `metistry secrets list --json` has no code path that can print a value, and neither has this pane. The login Keychain is the canonical store — instance-scoped items under this instance's instance_id, user-scoped ones under the per-Mac account — and .env is generated from it by `metistry secrets sync`.")
-                .metistryText(.caption1, p, .textTertiary)
-                .fixedSize(horizontal: false, vertical: true)
-            if let command = settings.secretsCommand {
-                Text(command).metistryText(.caption1, p, .textTertiary).textSelection(.enabled)
-            }
-        }
-    }
-
-    // MARK: - Updates
-
-    @ViewBuilder
-    private func updatesPane(_ p: Palette) -> some View {
-        SettingsSection("This App") {
-            FactRow("Version", model.updates.appVersion, mono: true)
-            FactRow("Channel", model.updates.channel, help: "One signed appcast today, so one channel.", mono: true)
-            if let feed = model.updates.feedURL {
-                FactRow("Feed", feed, help: "Read by Sparkle from Info.plist, alongside the public EdDSA key the release workflow signs with.", mono: true)
-            }
-            if let available = model.updates.availableVersion {
-                FactRow("Update available", available, role: .accent)
-            }
-            HStack(spacing: MetistrySpace.s3) {
-                Button("Check Now") { model.updates.checkNow() }
-                    .disabled(!model.updates.canCheck)
-                if let last = model.updates.lastCheckedAt {
-                    Text("last checked \(last.formatted(date: .abbreviated, time: .shortened))")
-                        .metistryText(.caption1, p, .textTertiary)
-                }
-            }
-            Toggle("Check for updates automatically", isOn: Binding(
-                get: { model.updates.automaticChecksEnabled },
-                set: { model.updates.setAutomaticChecks($0) }
-            ))
-            .disabled(!model.updates.canCheck)
-            Text("Sparkle owns this preference and reads it itself; the app does not keep a copy.")
-                .metistryText(.caption1, p, .textTertiary)
-        }
-
-        SettingsSection("The Product Runtime") {
-            Text("The app and the product update on two channels, both signed. This app updates itself from the appcast above; the product runtime updates through `metistry update` — pinned artifacts, migrations under an advisory lock, the new pin written into the instance repo.")
-                .metistryText(.footnote, p, .textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
-            if let pin = settings.pin {
-                FactRow("Instance pin", pin.version ?? "unknown", help: "metistry.lock, source \(pin.source ?? "unknown"). Updated \(pin.updatedAt ?? "unknown").", mono: true)
-            } else if case .unavailable(let why) = settings.versionsPhase {
-                Text(why).metistryText(.caption1, p, .textTertiary).fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .task(id: model.instances.active) { await settings.refreshVersions() }
-    }
-
-    // MARK: - Advanced
-
-    @ViewBuilder
-    private func advancedPane(_ p: Palette) -> some View {
-        SettingsSection("Runtime") {
-            if let runtime = model.runtime {
-                FactRow("Source", runtime.source.label)
-                FactRow("Runs", runtime.describedCommand, mono: true)
-                if let dir = runtime.productDir {
-                    FactRow("Product directory", dir.path, mono: true)
-                }
-            } else {
-                UnavailableCard(
-                    what: "No metistry runtime located",
-                    reason: model.resolution.attempts.joined(separator: "\n")
-                )
-            }
-            Button("Look Again") { model.relocate() }
-        }
-
-        SettingsSection("Versions") {
-            FactRow("App", model.updates.appVersion, mono: true)
-            if case .unavailable(let why) = settings.versionsPhase {
-                UnavailableCard(what: "Could not read the versions", reason: why, command: settings.versionsCommand)
-            }
-            if let product = settings.versions?.product {
-                FactRow("Product runtime", product, help: "What `metistry version --json` reports for the runtime this app is driving.", mono: true)
-            }
-            if let runtime = settings.versions?.runtime {
-                FactRow("Bundled runtime", runtime, help: "The Node/Postgres/git pack beside it, when there is one.", mono: true)
-            }
-            if let pin = settings.pin {
-                FactRow("Instance pin", "\(pin.version ?? "unknown") (\(pin.source ?? "unknown"))", help: "metistry.lock, \(pin.migrationsApplied) migrations applied.", mono: true)
-            }
-            Button("Read Versions") { Task { await settings.refreshVersions() } }
-                .disabled(settings.versionsPhase == .reading)
-        }
-        .task(id: model.instances.active) { await settings.refreshVersions() }
-
-        SettingsSection("Developer Runtime Override") {
-            HStack(spacing: MetistrySpace.s2) {
-                Text(model.developerProductDir?.path ?? "none — the app uses the runtime bundled inside it")
-                    .metistryText(.footnote, p, model.developerProductDir == nil ? .textTertiary : .textPrimary)
-                    .lineLimit(1)
-                    .truncationMode(.head)
-                    .textSelection(.enabled)
-                Spacer(minLength: MetistrySpace.s2)
-                Button("Choose…") { pickingProductDir = true }
-                if model.developerProductDir != nil {
-                    Button("Clear") { model.chooseDeveloperProductDirectory(nil) }
-                }
-            }
-            Text("For a build with no runtime inside it: a Metistry checkout with packages/cli/dist/main.js built. A downloaded Metistry.app never needs this — its own bundle is the product, which is why there is no product-directory setting anywhere else.")
-                .metistryText(.caption1, p, .textTertiary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .fileImporter(isPresented: $pickingProductDir, allowedContentTypes: [.folder]) { result in
-            if case .success(let url) = result { model.chooseDeveloperProductDirectory(url) }
-        }
-
-        SettingsSection("Doctor") {
-            HStack(spacing: MetistrySpace.s3) {
-                Button("Run Doctor") { Task { await model.status.refresh() } }
-                    .disabled(model.status.isChecking)
-                if model.status.isChecking { ProgressView().controlSize(.small) }
-                Spacer(minLength: 0)
-                Text(model.status.report?.summary ?? "not run yet")
+                Text(outcome.command)
                     .metistryText(.caption1, p, .textTertiary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                if !outcome.lines.isEmpty {
+                    DisclosureGroup("View Log") {
+                        Text(outcome.lines.joined(separator: "\n"))
+                            .metistryText(.mono, p, .textSecondary)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
             }
-            if let command = model.status.lastCommand {
-                Text(command).metistryText(.caption1, p, .textTertiary).textSelection(.enabled)
-            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .metistryCard(p)
         }
+    }
+}
 
-        SettingsSection("Passkey Diagnostic") {
-            PasskeyDiagnosticView(model: model.firstRun.passkey)
-        }
-        .task(id: consoleURL) { model.firstRun.passkey.adopt(consoleURL: consoleURL) }
+/// A row of controls that stacks when it cannot fit side by side — how a
+/// fixed-width pane stays whole at the largest text size.
+struct SettingsControls<Content: View>: View {
+    @ViewBuilder let content: () -> Content
 
-        SettingsSection("Logs") {
-            FactRow("Log folder", MetistryLogs.conventionalDirectory, mono: true)
-            Text(MetistryLogs.note)
-                .metistryText(.caption1, p, .textTertiary)
-                .fixedSize(horizontal: false, vertical: true)
-            Button("Open in Finder") { onOpenInFinder(URL(fileURLWithPath: MetistryLogs.conventionalDirectory)) }
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: MetistrySpace.s3) { content() }
+            VStack(alignment: .leading, spacing: MetistrySpace.s2) { content() }
         }
     }
 }
@@ -550,13 +282,13 @@ public struct SettingsView: View {
 ///
 /// `ops/launchd/*.plist` sets `StandardOutPath` to `/tmp/metistry-<name>.log`.
 /// That is a convention, not an interface: a container's log is docker's, and a
-/// future systemd unit's is journald's. `metistry logs` is the read path the menu
-/// uses for exactly that reason, and "Open in Finder" here is a convenience for
-/// the shape this Mac happens to run.
+/// future systemd unit's is journald's. `metistry logs` is the read path each
+/// service's Log button uses for exactly that reason, and "Open in Finder" here
+/// is a convenience for the shape this Mac happens to run.
 public enum MetistryLogs {
     public static let conventionalDirectory = "/tmp"
     public static let note =
         "Where the launchd jobs write today (StandardOutPath in ops/launchd/*.plist: /tmp/metistry-<name>.log). "
-        + "The menu bar's View Log runs `metistry logs <name>` instead, because a container's or a systemd unit's log is not a file here — "
+        + "Each service's Log in Services — like the menu bar's View Log — runs `metistry logs <name>` instead, because a container's or a systemd unit's log is not a file here — "
         + "and once `metistry logs --json` reports its own paths, this row can stop assuming one."
 }

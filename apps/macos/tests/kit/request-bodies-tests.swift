@@ -38,12 +38,39 @@ let requestShapes: [String: String] = [
 
 /// One row through the wire's own `Decodable`, `request` and all.
 func requestRow(_ id: Int, _ kind: String, shape: String? = nil, payload: String, ts: String = "2026-09-28T12:00:00.000Z", trust: String = "internal", agent: String = "assistant") throws -> RequestRow {
-    let request = shape.map { requestShapes[$0]! } ?? requestShapes[kind] ?? "null"
+    var request = shape.map { requestShapes[$0]! } ?? requestShapes[kind] ?? "null"
+    // `request.questions` is core's own `questionsOf` reading of THIS row's
+    // payload (packages/core/src/decision-block.ts), never a fixed table
+    // entry — every `decision` row gets it spliced in here so a fixture that
+    // pins the rest of `request`'s shared reading still hands the client an
+    // honest `questions` for whatever payload the test gives it (ruling 26,
+    // X-22 — the Mac now reads questions from here, not from `payload`).
+    if kind == "decision", request.hasSuffix("}") {
+        request = String(request.dropLast()) + ",\"questions\":\(try decisionQuestions(payload))}"
+    }
     let json = """
     {"id": "\(id)", "ts": "\(ts)", "kind": "\(kind)", "source_agent": "\(agent)", "trust": "\(trust)", "payload": \(payload),
      "decision": "pending", "decided_at": null, "work_id": null, "snoozed_until": null, "request": \(request)}
     """
     return try JSONDecoder().decode(RequestRow.self, from: Data(json.utf8))
+}
+
+/// Mirrors `questionsOf` (packages/core/src/decision-block.ts): v2's
+/// `payload.questions` verbatim, or a row from before v2 read as its one
+/// pick-one question from `payload.title`/`options`, with no *Something
+/// else…*. Empty when the payload holds neither — the reading that makes a
+/// question row's Send Answers empty.
+private func decisionQuestions(_ payloadJSON: String) throws -> String {
+    let payload = try JSONValue.parse(Data(payloadJSON.utf8))
+    let questions: JSONValue
+    if let v2 = payload["questions"]?.arrayValue {
+        questions = .array(v2)
+    } else if let title = payload.string("title"), let options = payload["options"]?.arrayValue?.compactMap(\.stringValue), !options.isEmpty {
+        questions = .array([.object(["prompt": .string(title), "options": .array(options.map(JSONValue.string)), "multi": .bool(false), "allow_other": .bool(false)])])
+    } else {
+        questions = .array([])
+    }
+    return String(decoding: try JSONEncoder().encode(questions), as: UTF8.self)
 }
 
 let assistantName = "Aide"
@@ -156,8 +183,11 @@ private func present(_ model: RequestAnswering, allowsDecisions: Bool = true) ->
 
 /// Real payloads, as their producers write them (the file is named on each).
 private let payloads: [String: String] = [
-    // apps/assistant/src/drain.ts
-    "question": #"{"title":"Which fixture format?","options":["one file per route","one file per store"],"thread":"t"}"#,
+    // apps/assistant/src/drain.ts — `questions` (`allow_other` defaults true,
+    // parseDecisionBlock's v1 state) with `options` beside it (`v1Options`,
+    // decision-block.ts), not a bare `title`/`options` row: those are only
+    // what a row from truly before this feature carries (ruling 26, X-22).
+    "question": #"{"title":"Which fixture format?","questions":[{"prompt":"Which fixture format?","options":["one file per route","one file per store"],"multi":false,"allow_other":true}],"options":["one file per route","one file per store"],"thread":"t"}"#,
     // T2-13's pull request, with its patch
     "pull_request": #"{"title":"Review foldedspacelabs/metistry#418","repo":"foldedspacelabs/metistry","number":418,"patch":"@@ -1,2 +1,2 @@\n context\n-old line\n+new line"}"#,
     "pull_request+thread": #"{"title":"Dana replied on #418","body":{"kind":"thread","location":"apps/console/src/server.ts:630","code":["return refuse(409)"],"messages":[{"author":"dana","at":"2026-09-28T12:40:00.000Z","text":"409 or 422?"},{"author":"cursor","by_agent":true,"text":"409."}]}}"#,
@@ -534,14 +564,28 @@ private let threeQuestions = #"{"title":"Three things about the Connections pane
 }
 
 @Test func aRepaintKeepsAnswersOnlyToTheSameQuestions() throws {
-    var old = try #require(QuestionSteps(payload: try JSONValue.parse(Data(threeQuestions.utf8))))
+    // `request.questions`, never the payload (ruling 26, X-22) — passed here
+    // as the wire actually carries it, on the request shape, not on the row.
+    var old = try #require(QuestionSteps(payload: nil, requestQuestions: try JSONValue.parse(Data(threeQuestions.utf8))["questions"]))
     old.choose(1)
-    var same = try #require(QuestionSteps(payload: try JSONValue.parse(Data(threeQuestions.utf8))))
+    var same = try #require(QuestionSteps(payload: nil, requestQuestions: try JSONValue.parse(Data(threeQuestions.utf8))["questions"]))
     same.carry(from: old)
     #expect(same.isAnswered(0))
-    var changed = try #require(QuestionSteps(payload: try JSONValue.parse(Data(#"{"questions":[{"prompt":"Something different?","options":["a","b"]}]}"#.utf8))))
+    var changed = try #require(QuestionSteps(payload: nil, requestQuestions: try JSONValue.parse(Data(#"{"questions":[{"prompt":"Something different?","options":["a","b"]}]}"#.utf8))["questions"]))
     changed.carry(from: old)
     #expect(!changed.isAnswered(0), "an answer to a different question is not an answer to this one")
+}
+
+@Test func aRequestWhosePayloadHasNoQuestionsStillDrawsThem() throws {
+    // Ruling 26 (X-22): the Mac reads a request's questions from
+    // `request.questions`, not `payload` — so a row whose payload carries
+    // none of the v2 shape (no `questions`, no v1 `title`/`options` either)
+    // still draws them, from the request's own reading.
+    let payload = try JSONValue.parse(Data(#"{"thread":"t"}"#.utf8))
+    let requestQuestions = try JSONValue.parse(Data(#"[{"prompt":"Which fixture format?","options":["one file per route","one file per store"],"multi":false,"allow_other":false}]"#.utf8))
+    let steps = try #require(QuestionSteps(payload: payload, requestQuestions: requestQuestions))
+    #expect(steps.questions.map(\.prompt) == ["Which fixture format?"])
+    #expect(steps.questions.first?.options == ["one file per route", "one file per store"])
 }
 
 @Test func underReduceMotionTheNextQuestionCrossFades() {

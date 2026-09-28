@@ -45,7 +45,9 @@
 //   which model runs, and a `request:` that could repoint the call would hand
 //   that back. (This is also the hook the 2026-09-12 addendum's `grammar`
 //   field lands in when a `llama-server` provider exposes GBNF — nothing
-//   here has to change for it.)
+//   here has to change for it.) And except `max_tokens`: the tier's
+//   `max_output_tokens` is sent on every call, and `request:` may lower it,
+//   never raise it.
 //
 // The outbound surface is one URL: `<base_url>/chat/completions` on the
 // provider this turn was assigned. There is no other host this file can
@@ -54,9 +56,12 @@
 
 import {
   costOf,
+  redactedSecret,
   credentialEnvNames,
+  DEFAULT_MAX_OUTPUT_TOKENS,
   credentialFromEnv,
   providerCredential,
+  SecretRedactor,
   unpricedNote,
   usageFromResponse,
   type CallCost,
@@ -163,6 +168,33 @@ function retryAfterMs(headers: Headers, fallback: number): number {
   return Number.isFinite(when) ? Math.max(0, when - Date.now()) : fallback;
 }
 
+/** The most output a call on this assignment may ask for: the tier's `max_output_tokens`, else core's default — never the model's own maximum. */
+export function outputCap(assignment: Pick<ResolvedAssignment, "max_output_tokens">): number {
+  const n = assignment.max_output_tokens;
+  return typeof n === "number" && Number.isInteger(n) && n > 0 ? n : DEFAULT_MAX_OUTPUT_TOKENS;
+}
+
+/** An operator's own `max_tokens`, kept only when it asks for less than the cap. */
+function lowered(asked: unknown, cap: number): number {
+  return typeof asked === "number" && Number.isInteger(asked) && asked > 0 ? Math.min(asked, cap) : cap;
+}
+
+/**
+ * A provider's error text with the credential this call presented taken out
+ * — the whole key in every form core's `SecretRedactor` knows, and any run of
+ * eight or more of its characters (a provider that echoes `sk-or-v1-…a1b2c3d4`
+ * names a fragment no value match catches). This text becomes `runs.error`,
+ * a Needs You report and a reply in the thread; none of them may carry the key.
+ */
+export function redactProviderText(text: string, apiKey: string | undefined, name = "provider_credential"): string {
+  if (!apiKey) return text;
+  const redactor = new SecretRedactor();
+  const safeName = /^[a-z][a-z0-9_]{0,63}$/.test(name) ? name : "provider_credential";
+  redactor.learn(safeName, apiKey);
+  const whole = redactor.redactText(text);
+  return whole.replace(/[A-Za-z0-9_\-]{8,}/g, (run) => (apiKey.includes(run) ? redactedSecret(safeName) : run));
+}
+
 /** `<base_url>/chat/completions`, with the trailing slash question settled once. */
 export function completionsUrl(baseUrl: string): string {
   return `${baseUrl.replace(/\/+$/, "")}/chat/completions`;
@@ -183,6 +215,7 @@ export function makeChatClient(cfg: ChatClientConfig): ChatClient {
   const attempts = cfg.attempts ?? DEFAULT_ATTEMPTS;
   const backoff = cfg.backoffMs ?? DEFAULT_BACKOFF_MS;
   const url = completionsUrl(provider.base_url);
+  const credName = (providerCredential(provider)?.name ?? "provider_credential").toLowerCase().replace(/[^a-z0-9_]/g, "_");
 
   const body = (messages: readonly ChatMessage[], opts: ChatOptions): Record<string, unknown> => {
     const out: Record<string, unknown> = {};
@@ -219,6 +252,14 @@ export function makeChatClient(cfg: ChatClientConfig): ChatClient {
     // model runs, and messages are what the data policy was checked against.
     out.model = assignment.model;
     out.messages = messages;
+    // … and the output ceiling. Left out, the ask is the model's whole
+    // window (65,536 on a Claude model through OpenRouter), and a provider
+    // that reserves credit against the ask refuses a two-line answer with
+    // 402 once the balance is below it. The tier's `max_output_tokens` is
+    // sent on every call; a `request:` block may ask for LESS, never more.
+    const cap = outputCap(assignment);
+    out.max_tokens = lowered(out.max_tokens, cap);
+    if (out.max_completion_tokens !== undefined) out.max_completion_tokens = lowered(out.max_completion_tokens, cap);
     return out;
   };
 
@@ -252,7 +293,9 @@ export function makeChatClient(cfg: ChatClientConfig): ChatClient {
         if (res.ok) return parseCompletion(await res.json(), provider, assignment.model);
         const text = await res.text().catch(() => "");
         const retryable = res.status === 429 || res.status >= 500;
-        lastErr = new EngineHttpError(res.status, text, url);
+        // redacted HERE, before the error exists: everything downstream (the
+        // runs row, a Needs You report, the thread) reads `body`/`message`
+        lastErr = new EngineHttpError(res.status, redactProviderText(text, cfg.apiKey, credName), url);
         if (!retryable || attempt === attempts - 1) throw lastErr;
         await sleep(retryAfterMs(res.headers, backoff * 2 ** attempt));
       }
@@ -586,6 +629,8 @@ export function makeOpenAiEngine(cfg: OpenAiEngineConfig): Engine {
         from: `shadow:${assignment.from}`,
         config: candidate.config,
         critical: false,
+        // the experiment asks for no more than the turn it re-runs
+        max_output_tokens: outputCap(assignment),
       };
       let allowed = true;
       try {

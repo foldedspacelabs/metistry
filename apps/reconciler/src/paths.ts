@@ -10,6 +10,18 @@ export type PathRefusal =
   | "invalid_request" // malformed / traversal / absolute / bad casing / control chars
   | "forbidden"; // .git, .metistry/instance-migrations/, symlink component, outside the repo
 
+/**
+ * A confine refusal. `caseOf` is set when the path was refused ONLY for its
+ * casing and a file or directory differing from it by case alone exists:
+ * that spelling, vault-relative. Reads stay case-exact — this is what lets a
+ * reader say what is actually there instead of `invalid_request`.
+ */
+export interface ConfineRefusal {
+  ok: false;
+  code: PathRefusal;
+  caseOf?: string;
+}
+
 export interface Confined {
   /** Vault-relative POSIX path exactly as it will be stored. */
   rel: string;
@@ -212,7 +224,7 @@ export function isProtectedFromRemote(rel: string): boolean {
  * which also catches a case-mismatched prefix on a case-insensitive
  * filesystem (`areas/…` when `Areas/` exists).
  */
-export async function confine(repoRoot: string, input: unknown): Promise<{ ok: true; path: Confined } | { ok: false; code: PathRefusal }> {
+export async function confine(repoRoot: string, input: unknown): Promise<{ ok: true; path: Confined } | ConfineRefusal> {
   const parsed = parseVaultPath(input);
   if (!parsed.ok) return parsed;
   const root = await realpath(repoRoot);
@@ -229,7 +241,7 @@ export async function confine(repoRoot: string, input: unknown): Promise<{ ok: t
       // case-sensitive fs (Linux container) and silently merge on a
       // case-insensitive one (macOS): refuse on both, by rule not by fs.
       const siblings = await readdir(cur).catch(() => [] as string[]);
-      if (siblings.some((e) => e !== seg && e.toLowerCase() === seg.toLowerCase())) return { ok: false, code: "invalid_request" };
+      if (siblings.some((e) => e !== seg && e.toLowerCase() === seg.toLowerCase())) return caseRefusal(root, parsed.segments);
       break;
     }
     if (st.isSymbolicLink()) return { ok: false, code: "forbidden" };
@@ -240,11 +252,43 @@ export async function confine(repoRoot: string, input: unknown): Promise<{ ok: t
   if (existingDepth > 0) {
     const real = await realpath(cur);
     // differs only by case → a casing error; differs otherwise → something escaped
-    if (real !== cur) return { ok: false, code: real.toLowerCase() === cur.toLowerCase() ? "invalid_request" : "forbidden" };
+    if (real !== cur) return real.toLowerCase() === cur.toLowerCase() ? caseRefusal(root, parsed.segments) : { ok: false, code: "forbidden" };
   }
   const abs = join(root, ...parsed.segments);
   if (!abs.startsWith(root + sep)) return { ok: false, code: "forbidden" };
   return { ok: true, path: { rel: parsed.rel, abs, segments: parsed.segments } };
+}
+
+/** A casing refusal, naming what is there when the whole path exists under another spelling. */
+async function caseRefusal(root: string, segments: readonly string[]): Promise<ConfineRefusal> {
+  const actual = await spelledOnDisk(root, segments);
+  return actual !== null && actual !== segments.join("/") ? { ok: false, code: "invalid_request", caseOf: actual } : { ok: false, code: "invalid_request" };
+}
+
+/**
+ * The path as it is spelled on disk, matching each segment exactly or else
+ * by case alone — by directory listing, so it answers the same on a
+ * case-insensitive (macOS) and a case-sensitive (Linux) filesystem. Null
+ * when any segment has no match, or more than one differing only by case
+ * (a case-sensitive tree holding both `profile.md` and `Profile.md` is not
+ * a spelling question).
+ */
+export async function spelledOnDisk(root: string, segments: readonly string[]): Promise<string | null> {
+  let cur = root;
+  const out: string[] = [];
+  for (const seg of segments) {
+    const entries = await readdir(cur).catch(() => null);
+    if (entries === null) return null;
+    let name: string | undefined = entries.includes(seg) ? seg : undefined;
+    if (name === undefined) {
+      const folded = entries.filter((e) => e.toLowerCase() === seg.toLowerCase());
+      if (folded.length !== 1) return null;
+      name = folded[0]!;
+    }
+    out.push(name);
+    cur = join(cur, name);
+  }
+  return out.join("/");
 }
 
 /**

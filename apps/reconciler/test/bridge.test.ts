@@ -1,7 +1,7 @@
 // Vault bridge wire contract + committer, against a throwaway git repo.
 // No database: the index loop has its own integration test.
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -506,4 +506,73 @@ describe("config_write: every accepted protected-path change is on the record", 
       await r2.cleanup();
     }
   });
+});
+
+describe("vault bridge — a read whose only fault is its casing", () => {
+  let repo: TempRepo;
+  let base: string;
+  let server: ReturnType<typeof makeBridge>;
+  const H = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+  const post = (path: string, body: unknown, headers: Record<string, string> = H) => fetch(`${base}${path}`, { method: "POST", headers, body: JSON.stringify(body) });
+  const get = (path: string, headers: Record<string, string> = H) => fetch(`${base}${path}`, { headers });
+
+  beforeAll(async () => {
+    repo = await tempRepo();
+    const committer = new Committer(repo.git, { authorPrefix: "Metistry", authorEmail: "metistry@test", sourceTrailer: "Brain-Source" });
+    const vault = new Vault(repo.root, repo.git, committer, { maxBytes: 4096 });
+    server = makeBridge({ vault, committer }, { token, ownerToken, maxBodyBytes: 64 * 1024 });
+    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  });
+  afterAll(async () => {
+    await new Promise<void>((r) => server.close(() => r()));
+    await repo.cleanup();
+  });
+
+  it("is not_found — reads stay case-exact — with a hint naming what IS there (0.14.2: Me/Profile.md vs Me/profile.md)", async () => {
+    // on disk, as an instance seeded on 2026-09-06 has it — not through the bridge, so no commit rides into the flush tests below
+    await mkdir(join(repo.root, "Me"), { recursive: true });
+    await writeFile(join(repo.root, "Me", "Profile.md"), "---\nworking_days: [mon]\n---\n");
+    for (const q of ["path=Me/profile.md", "path=Me/profile.md&encoding=base64", "path=me/profile.md"]) {
+      const r = await get(`/vault/read?${q}`);
+      expect(r.status, q).toBe(404);
+      const b = await r.json();
+      expect(b.error.code, q).toBe("not_found");
+      expect(b.hint, q).toBe(`Me/Profile.md exists — the product's name is ${q.startsWith("path=me/") ? "me/profile.md" : "Me/profile.md"}`);
+      expect(b.content, q).toBeUndefined();
+    }
+    // the exact spelling still reads, and a name that is simply absent carries no hint
+    expect((await get("/vault/read?path=Me/Profile.md")).status).toBe(200);
+    expect(await (await get("/vault/read?path=Me/nobody.md")).json()).toEqual({ error: { code: "not_found", message: "not found" } });
+    // a write keeps refusing the mis-cased name: it would fork the tree on Linux
+    expect((await post("/vault/write", { path: "Me/profile.md", content: "x", intent: intent("user", "m") })).status).toBe(400);
+  });
+
+  it("the fix `metistry update` makes — two renames through a temporary name, flushed between — lands in git as the new spelling, on either filesystem", async () => {
+    await mkdir(join(repo.root, "Journal"), { recursive: true });
+    await writeFile(join(repo.root, "Journal", "Readme.md"), "seeded\n");
+    await repo.git.run(["add", "-A", "--", "Journal"]);
+    await repo.git.run(["-c", "user.name=seed", "-c", "user.email=seed@test", "commit", "-q", "-m", "seeded", "--", "Journal"]);
+    const tmp = "Journal/Readme.md.metistry-case-rename";
+    const step = async (from: string, to: string) => {
+      expect((await post("/vault/rename", { from, to, intent: intent("user", `rename ${from} to ${to}`) })).status).toBe(200);
+      const f = await (await post("/flush", {})).json();
+      expect(f.commits).toHaveLength(1);
+    };
+    await step("Journal/Readme.md", tmp);
+    await step(tmp, "Journal/README.md");
+    expect((await repo.git.run(["ls-files", "Journal"])).trim()).toBe("Journal/README.md");
+    expect((await repo.git.run(["status", "--porcelain", "--", "Journal"])).trim()).toBe("");
+    expect((await (await get("/vault/read?path=Journal/README.md")).json()).content).toBe("seeded\n");
+  });
+
+  it("a case-mismatch onto a path the bridge does not serve says not_found and nothing more", async () => {
+    // `.obsidian/` is real and confinable but never served (isReadableByBridge): no hint may name it
+    await mkdir(join(repo.root, ".obsidian"), { recursive: true });
+    await writeFile(join(repo.root, ".obsidian", "App.json"), "{}");
+    const r = await get("/vault/read?path=.obsidian/app.json");
+    expect(r.status).toBe(404);
+    expect(await r.json()).toEqual({ error: { code: "not_found", message: "not found" } });
+  });
+
 });

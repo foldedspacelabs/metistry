@@ -87,6 +87,17 @@ export type BudgetAction = (typeof BUDGET_ACTIONS)[number];
 /** `stop` by default: an unstated budget action must be the safe one (C5). */
 export const DEFAULT_BUDGET_ACTION: BudgetAction = "stop";
 
+/**
+ * `max_tokens` on every chat completion when an assignment names no
+ * `max_output_tokens`. A request that leaves the field out is asked for the
+ * model's whole output window — 65,536 tokens on a Claude model through
+ * OpenRouter — and a provider that bills by the ask refuses the turn with
+ * `402` once the balance cannot cover it, however short the answer would
+ * have been (0.14.2 owner report). Enough for a long answer; nowhere near a
+ * model's maximum.
+ */
+export const DEFAULT_MAX_OUTPUT_TOKENS = 8192; // limit: fixed — the default ask; `assignments.<tier>.max_output_tokens` is the knob
+
 /** An environment-variable NAME — what an `env:` reference (and the pre-T4-18 bare spelling) takes. A value can never match it, which is the point. */
 export const SECRET_NAME_RE = /^[A-Z][A-Z0-9_]*$/;
 
@@ -492,6 +503,18 @@ export const assignmentSchema = z.strictObject({
    * the pause is meant to apply to it.
    */
   critical: z.boolean().optional(),
+  /**
+   * The most output a turn on this assignment may ask for: sent as
+   * `max_tokens` on every call, and the ceiling a provider's `request:` block
+   * can lower but never raise. Absent = `DEFAULT_MAX_OUTPUT_TOKENS` (8192) —
+   * never the model's own maximum, which is what a provider that bills by
+   * the ask reserves credit against.
+   */
+  max_output_tokens: z
+    .number({ error: "max_output_tokens is a whole number of tokens — the most a turn on this assignment may ask the model for (default 8192)" })
+    .int("max_output_tokens is a whole number of tokens")
+    .min(1, "max_output_tokens must be at least 1")
+    .optional(),
   /** Stage-2 shadow mode. Only legal on `assignments.default` (checked below) — it is the only place the engine reads it. */
   shadow: shadowSchema.optional(),
 });
@@ -719,6 +742,8 @@ export interface ResolvedAssignment extends ModelRef {
   /** the provider's block, so a caller never has to look it up again */
   config: Provider;
   critical: boolean;
+  /** `max_tokens` for every call this assignment makes — the file's `max_output_tokens`, else `DEFAULT_MAX_OUTPUT_TOKENS`. Optional only so a hand-built assignment (a test, a crew's) still type-checks; the engine applies the same default. */
+  max_output_tokens?: number;
   /** The stage-2 shadow candidate, resolved the same way. Present only where the file declared one (`assignments.default`). */
   shadow?: ResolvedShadow;
 }
@@ -764,6 +789,7 @@ export function resolveAssignment(cfg: Compute, tierOrCrew?: string | null): Res
     from,
     config: cfg.providers[ref.provider]!,
     critical: assignment.critical === true,
+    max_output_tokens: assignment.max_output_tokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
     ...(shadow ? { shadow: resolveShadow(cfg, shadow) } : {}),
   };
 }

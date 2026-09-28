@@ -68,6 +68,7 @@ import {
   type ProfileFacts,
   type SupervisorConfig,
 } from "@foldedspacelabs/metistry-core";
+import { CASE_RENAME_SUFFIX, describeMismatch, vaultCaseMismatches } from "./vault-case.js";
 import { COMPUTE_FILENAME, INSTANCE_LAYOUT, LEGACY_VAULT_DIR, PROFILE_PATH, REGISTRY_KINDS, TEMPLATE_MISSING, describeVaultSync, detectLayout, pushOverrideNote, readStandupKeys, emptyCompute, extensionsDirFor, instanceFile, loadCompute, loadKind, resolveInstanceLayout, vaultStatusSchema, type Compute, type RegistryKindName, type VaultStatus } from "@foldedspacelabs/metistry-core";
 import { cliShimLinkHint, cliShimPath } from "./cli-shim.js";
 import { engineStatus, loadDeployment } from "./deployment.js";
@@ -540,6 +541,28 @@ export async function profileRow(instanceDir: string): Promise<DoctorRow | null>
   return {
     kind: "instance",
     ...(await runCheck("profile", `${PROFILE_PATH} holds facts about you, not when a routine runs (no standup_days, standup_time)`, async () => ({ meta: { info, ignored: [...keys.keys] } }))),
+  };
+}
+
+/**
+ * Product files the vault has under another CASE only — `Me/Profile.md`
+ * where the product reads `Me/profile.md` (vault-case.ts). Reads are
+ * case-exact, so each one is a file the product cannot see: a finding, with
+ * the fix. Null (no row at all) when there is none, or nothing to compare.
+ */
+export async function vaultCaseRow(instanceDir: string, seedDir: string): Promise<DoctorRow | null> {
+  if (detectLayout(instanceDir) !== "flat") return null;
+  const found = await vaultCaseMismatches(seedDir, instanceDir).catch(() => []);
+  if (found.length === 0) return null;
+  return {
+    kind: "instance",
+    ...(await runCheck("vault case", "every product file is spelled as the seed spells it (reads are case-exact)", async () => ({
+      status: "degraded" as const,
+      remediation:
+        `${found.map(describeMismatch).join(", ")} — the product reads ${found.length === 1 ? "that name" : "those names"} exactly, so ${found.length === 1 ? "this file is" : "these files are"} invisible to it. ` +
+        `\`metistry update\` renames ${found.length === 1 ? "it" : "them"} to the seed's spelling (two commits each, through the reconciler); by hand, rename through a temporary name — \`git mv "${found[0]!.actual}" "${found[0]!.actual}${CASE_RENAME_SUFFIX}" && git mv "${found[0]!.actual}${CASE_RENAME_SUFFIX}" "${found[0]!.canonical}"\` — since macOS sees a one-step rename as no change.`,
+      meta: { mismatches: found },
+    }))),
   };
 }
 
@@ -1749,13 +1772,14 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
   // model servers. Concurrently it is the slowest single probe. Nothing about
   // any one check changes — no timeout was shortened to buy this, because a
   // slow-but-healthy bridge reported as down would be a worse table.
-  const [componentRows, registries, layout, inbox, profile, cli, app, dbAndSchedules, launchd, keepAwake, supervisor, containers, localModels, sharedScope, vaultSync, connections] = await Promise.all([
+  const [componentRows, registries, layout, inbox, profile, vaultCase, cli, app, dbAndSchedules, launchd, keepAwake, supervisor, containers, localModels, sharedScope, vaultSync, connections] = await Promise.all([
     (async () => Promise.all((await walkManifests(deps.productDir)).map((m) => componentRow(m, { env, fetchFn, timeoutMs, shape, labelSuffix, compute }))))(),
     // the registries over product + extensions: overlays and skips (plan §2.7)
     registriesRow(deps.productDir, env),
     layoutRow(instanceDir),
     inboxRow(instanceDir),
     profileRow(instanceDir),
+    vaultCaseRow(instanceDir, env.METISTRY_SEED_DIR?.trim() || join(deps.productDir, "seed")),
     // whether typing `metistry` finds this install's shim: a filesystem
     // look, so it costs nothing to start with everything else
     cliRow(deps.productDir, env),
@@ -1799,7 +1823,7 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
     // someone else's server (docs/ops/connections.md)
     env.METISTRY_INSTANCE_DIR ? connectionRows({ instanceDir, productDir: deps.productDir, env, platform, uid, exec, ...(deps.keychain ? { keychain: deps.keychain } : {}) }) : Promise.resolve([]),
   ]);
-  rows.push(...componentRows, registries, layout, inbox, ...(profile ? [profile] : []), cli, ...(app ? [app] : []), ...dbAndSchedules, ...launchd, ...(keepAwake ? [keepAwake] : []), ...supervisor, ...containers, ...localModels, ...(sharedScope ? [sharedScope] : []), vaultSync, ...connections);
+  rows.push(...componentRows, registries, layout, inbox, ...(profile ? [profile] : []), ...(vaultCase ? [vaultCase] : []), cli, ...(app ? [app] : []), ...dbAndSchedules, ...launchd, ...(keepAwake ? [keepAwake] : []), ...supervisor, ...containers, ...localModels, ...(sharedScope ? [sharedScope] : []), vaultSync, ...connections);
 
   return { as_of: new Date().toISOString(), product_dir: deps.productDir, shape, ok: !rows.some((r) => r.status === "failed"), rows };
 }

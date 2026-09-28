@@ -5,7 +5,10 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import { drainOne } from "../src/drain.js";
 import type { Engine } from "../src/engine.js";
-import type { TierMap } from "@foldedspacelabs/metistry-core";
+import { parseCompute, type TierMap } from "@foldedspacelabs/metistry-core";
+import { makeOpenAiEngine } from "../src/engine-openai.js";
+import { memorySessionStore } from "../src/sessions.js";
+import { NO_TOOLS } from "../src/tools.js";
 import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
 
 // The tier map the drain resolves against — (model, effort) pairs, as
@@ -253,5 +256,202 @@ describe.skipIf(!hasDb)("assistant drain", () => {
     const next: Engine = async (_p, spec) => { sawResume = spec.resume; return { text: "fresh", session_id: second }; };
     expect(await drainOne(pool, next, tiers)).toBe(true);
     expect(sawResume).toBeUndefined();
+  });
+});
+
+// ---- a provider that refuses the account (402 / 401 / 403) -------------------
+//
+// The 0.14.2 owner report, as a fixture: OpenRouter answered 402 "requires
+// more credits", and the turn was tried again, failed quietly and left
+// nothing that said what to do. A fake OpenAI-compatible server stands in for
+// the provider; the engine is the real in-house loop.
+
+const REFUSING_FILE = `
+providers:
+  openrouter:
+    kind: openai-compatible
+    base_url: https://openrouter.ai/api/v1
+    locality: off_machine
+    auth: { secret: METISTRY_OPENROUTER_API_KEY }
+    zdr: true
+    data_policy: { allow: [Projects], deny_sources: [], max_brief_bytes: 4096 }
+assignments:
+  default: { model: openrouter/anthropic/claude-sonnet-5, effort: medium, max_output_tokens: 4096 }
+`;
+
+/** A fake key, long enough that a provider echoing part of it is a fragment worth catching. */
+const FAKE_KEY = "sk-or-v1-9f8e7d6c5b4a39281706f5e4d3c2b1a0";
+
+const CREDITS_402 = {
+  status: 402,
+  body: { error: { code: 402, message: "This request requires more credits, or fewer max_tokens. You requested up to 65536 tokens, but can only afford 3999." } },
+};
+
+describe.skipIf(!hasDb)("assistant drain — a provider that refused the account", () => {
+  let pool: pg.Pool;
+  const thread = `refused-${Date.now()}`;
+  const compute = parseCompute(REFUSING_FILE);
+  /** Every request the fake provider saw, and what it answers next (the last entry repeats). */
+  let answers: Array<{ status: number; body: unknown }> = [];
+  const seen: any[] = [];
+  const fetchFn = (async (_url: unknown, init: any) => {
+    seen.push(JSON.parse(String(init.body)));
+    const next = answers.length > 1 ? answers.shift()! : answers[0]!;
+    return {
+      ok: next.status < 400,
+      status: next.status,
+      headers: new Headers(),
+      json: async () => next.body,
+      text: async () => JSON.stringify(next.body),
+    } as unknown as Response;
+  }) as unknown as typeof fetch;
+  const engine = makeOpenAiEngine({
+    tools: () => NO_TOOLS,
+    sessions: memorySessionStore(),
+    env: { METISTRY_OPENROUTER_API_KEY: FAKE_KEY },
+    fetchFn,
+    sleep: async () => {},
+  });
+  const LONG = 60 * 60_000; // no probe falls due inside a test
+  /** Reports from earlier runs of this suite on the same scratch db are not this run's. */
+  let since = 0;
+  const drain = (probeMs = LONG) => drainOne(pool, engine, tiers, { compute: () => compute, probeMs });
+  const reports = async () =>
+    (
+      await pool.query(
+        `SELECT id, decision, payload FROM proposals WHERE id > $1 AND kind = 'report' AND source->>'kind' = 'metistry' AND source->>'external_ref' = 'provider-refused:openrouter#credits' ORDER BY id`,
+        [since],
+      )
+    ).rows;
+  const status = async (id: number) => (await pool.query(`SELECT status FROM inbound_messages WHERE id = $1`, [id])).rows[0].status;
+  const enqueue = async (text: string) =>
+    Number((await pool.query(`INSERT INTO inbound_messages (thread, text, meta) VALUES ($1, $2, '{}') RETURNING id`, [thread, text])).rows[0].id);
+
+  beforeAll(async () => {
+    pool = await testDb(pg.Pool);
+    await pool.query(`UPDATE inbound_messages SET status = 'done' WHERE status IN ('new', 'held')`);
+    await pool.query(`UPDATE proposals SET decision = 'skip' WHERE decision = 'pending' AND source->>'external_ref' LIKE 'provider-refused:%'`);
+    since = Number((await pool.query(`SELECT coalesce(max(id), 0) AS id FROM proposals`)).rows[0].id);
+  });
+  afterAll(async () => pool.end());
+
+  it("a 402 is tried ONCE — not again on a fresh session — fails the message with the provider's words, and raises ONE report", async () => {
+    answers = [CREDITS_402];
+    seen.length = 0;
+    // an active session on the thread: the stale-session fallback would have
+    // been the second attempt
+    await pool.query(`INSERT INTO sessions (id, thread) VALUES ($1, $2)`, [randomUUID(), thread]);
+    const id = await enqueue("what's on today?");
+    expect(await drain()).toBe(true);
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0].max_tokens).toBe(4096); // the tier's ceiling, never the model's 65536
+    expect(await status(id)).toBe("failed");
+    const runs = await pool.query(`SELECT ok, error FROM runs WHERE component = 'assistant' AND kind = 'turn' AND (meta->>'message_id')::bigint = $1`, [id]);
+    expect(runs.rows).toHaveLength(1);
+    expect(runs.rows[0].ok).toBe(false);
+    expect(runs.rows[0].error).toMatch(/returned 402/);
+    const reply = await pool.query(`SELECT text, kind FROM outbound_messages WHERE in_reply_to = $1`, [id]);
+    expect(reply.rows).toHaveLength(1);
+    expect(reply.rows[0].kind).toBe("alert");
+    expect(reply.rows[0].text).toContain("requires more credits");
+    expect(reply.rows[0].text).not.toContain("that turn failed");
+
+    const [report, ...more] = await reports();
+    expect(more).toEqual([]);
+    expect(report.decision).toBe("pending");
+    expect(report.payload).toMatchObject({ event: "provider_refused", provider: "openrouter", status: 402, error_class: "credits", top_up: "https://openrouter.ai/settings/credits", waiting: 0 });
+    expect(report.payload.title).toBe("openrouter: out of credits — top up at https://openrouter.ai/settings/credits; 0 turns waiting");
+    expect(report.payload.body).toContain("can only afford 3999");
+  });
+
+  it("while the report waits, turns for that provider are HELD — never sent — and counted on the one report", async () => {
+    seen.length = 0;
+    const a = await enqueue("and tomorrow?");
+    const b = await enqueue("hello?");
+    expect(await drain()).toBe(true);
+    expect(await drain()).toBe(true);
+    expect(await drain()).toBe(false); // nothing left to claim: held is not new
+
+    expect(seen).toHaveLength(0);
+    expect(await status(a)).toBe("held");
+    expect(await status(b)).toBe("held");
+    const rows = await reports();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].payload.waiting).toBe(2);
+    expect(rows[0].payload.title).toMatch(/; 2 turns waiting$/);
+  });
+
+  it("the probe: once due, the oldest held turn is tried alone; refused again, it goes back to waiting and no second report is raised", async () => {
+    seen.length = 0;
+    const [a] = (await pool.query(`SELECT id FROM inbound_messages WHERE status = 'held' ORDER BY ts LIMIT 1`)).rows.map((r) => Number(r.id));
+    expect(await drain(0)).toBe(true);
+    expect(seen).toHaveLength(1);
+    expect(await status(a!)).toBe("held");
+    const rows = await reports();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].payload.waiting).toBe(2);
+    // no alert per probe: the report is the one place it is said
+    const alerts = await pool.query(`SELECT 1 FROM outbound_messages WHERE in_reply_to = $1`, [a]);
+    expect(alerts.rows).toHaveLength(0);
+  });
+
+  it("a later turn that gets through clears the report at its source, and every held turn is released and answered", async () => {
+    seen.length = 0;
+    answers = [{ status: 200, body: { choices: [{ message: { role: "assistant", content: "topped up, here you go" }, finish_reason: "stop" }], usage: { prompt_tokens: 10, completion_tokens: 5 } } }];
+    const held = (await pool.query(`SELECT id FROM inbound_messages WHERE status = 'held' ORDER BY ts`)).rows.map((r) => Number(r.id));
+    expect(held).toHaveLength(2);
+    expect(await drain(0)).toBe(true); // the probe, which succeeds
+    const rows = await reports();
+    expect(rows[0].decision).toBe("resolved_at_source");
+    while (await drain()) {} // the rest were released on the next pass
+    for (const id of held) expect(await status(id)).toBe("done");
+    expect(seen).toHaveLength(2);
+  });
+
+  it("dismissing the report releases the held turns too", async () => {
+    answers = [CREDITS_402];
+    await enqueue("first after the top-up ran out again");
+    expect(await drain()).toBe(true);
+    const waiting = await enqueue("second");
+    expect(await drain()).toBe(true);
+    expect(await status(waiting)).toBe("held");
+    const [, report] = await reports();
+    expect(report.decision).toBe("pending");
+    await pool.query(`UPDATE proposals SET decision = 'skip', decided_at = now() WHERE id = $1`, [report.id]);
+
+    answers = [{ status: 200, body: { choices: [{ message: { role: "assistant", content: "ok" }, finish_reason: "stop" }], usage: { prompt_tokens: 1, completion_tokens: 1 } } }];
+    expect(await drain()).toBe(true);
+    expect(await status(waiting)).toBe("done");
+  });
+
+  it("a 401 is its own report — the key, not the credits — and is not retried either", async () => {
+    seen.length = 0;
+    answers = [{ status: 401, body: { error: { message: "No auth credentials found" } } }];
+    const id = await enqueue("key?");
+    expect(await drain()).toBe(true);
+    expect(seen).toHaveLength(1);
+    expect(await status(id)).toBe("failed");
+    const r = await pool.query(`SELECT payload FROM proposals WHERE id > $1 AND decision = 'pending' AND source->>'external_ref' = 'provider-refused:openrouter#credential'`, [since]);
+    expect(r.rows).toHaveLength(1);
+    expect(r.rows[0].payload.title).toBe("openrouter: the key was refused (HTTP 401) — replace it in Settings › Secrets; 0 turns waiting");
+    await pool.query(`UPDATE proposals SET decision = 'skip' WHERE decision = 'pending' AND source->>'external_ref' LIKE 'provider-refused:%'`);
+  });
+
+  it("the key never reaches runs.error, the report or the reply — not whole, not a fragment the provider echoed", async () => {
+    const fragment = FAKE_KEY.slice(-12);
+    answers = [{ status: 403, body: { error: { message: `Key ${FAKE_KEY} is disabled (key ending …${fragment}); header was Bearer ${FAKE_KEY}` } } }];
+    const id = await enqueue("still there?");
+    expect(await drain()).toBe(true);
+    const run = (await pool.query(`SELECT error FROM runs WHERE component = 'assistant' AND kind = 'turn' AND (meta->>'message_id')::bigint = $1`, [id])).rows[0];
+    const report = (await pool.query(`SELECT payload::text AS p FROM proposals WHERE id > $1 AND source->>'external_ref' = 'provider-refused:openrouter#credential' AND (payload->>'message_id')::bigint = $2`, [since, id])).rows[0];
+    const reply = (await pool.query(`SELECT text FROM outbound_messages WHERE in_reply_to = $1`, [id])).rows[0];
+    for (const [where, text] of [["runs.error", run.error], ["report", report.p], ["reply", reply.text]] as const) {
+      expect(text, where).toContain("is disabled");
+      expect(text, where).not.toContain(FAKE_KEY);
+      expect(text, where).not.toContain(fragment);
+      expect(text, where).toContain("***REDACTED secret.");
+    }
+    await pool.query(`UPDATE proposals SET decision = 'skip' WHERE decision = 'pending' AND source->>'external_ref' LIKE 'provider-refused:%'`);
   });
 });

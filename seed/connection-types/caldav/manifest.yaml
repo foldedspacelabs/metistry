@@ -1,0 +1,33 @@
+# The CalDAV connection type (plan §2.6, §4 Q7; T4-13) — any calendar server
+# that speaks CalDAV and RFC 6638 scheduling, signed in with an app password.
+# iCloud and Fastmail are known services with their own entries
+# (icloud-calendar, fastmail-calendar), which name their server; this is
+# every other one. A connection of this type is added with
+#
+#   metistry secrets set calendar_app_password          (the value on stdin)
+#   metistry secrets hosts calendar_app_password dav.example.com
+#   metistry secrets grant calendar_app_password connection:calendar on
+#   metistry connections add calendar --type calendar --provider caldav \
+#     --url https://dav.example.com/ \
+#     --auth basic --username you@example.com --secret calendar_app_password --no-discover
+#   metistry secrets sync --to env                      (then restart the console)
+#
+# and read by the `caldav-calendar` sync (collectors/caldav-calendar/), which
+# writes today and the next two weeks into `calendar_events` under the
+# connection's name, the owner's own answer included.
+#
+# `rsvp` answers an invitation by changing the owner's own PARTSTAT in the
+# server's copy — RFC 6638 §3.2.2: the server "MUST deliver an iTIP REPLY" —
+# and nothing else; `write_own` creates, changes and deletes events nobody
+# else is in. Both preview first and confirm against the event's ETag
+# (packages/connections `caldav.ts`). A Google address is refused: Google's
+# CalDAV takes OAuth only — Google needs sign-in with Google.
+schema: 1
+name: caldav
+type: connection-type
+description: A CalDAV calendar (RFC 6638) with an app password — your events on Today, and replies to invitations from Metistry. For iCloud or Fastmail, use their own entries.
+provides: calendar
+transports: [http]
+capabilities: [read, write_own, rsvp]
+sync: caldav-calendar
+implementation: { kind: builtin, module: caldav }

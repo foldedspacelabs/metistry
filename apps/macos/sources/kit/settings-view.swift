@@ -139,6 +139,10 @@ public struct SettingsView: View {
         }
         .task(id: model.instances.active) { await settings.refreshIdentity() }
 
+        // The vault's git: sync, and Roll Back… (T10-7). Its own file, as the
+        // Compute pane is — it renders a model rather than holding one.
+        InstanceHistorySection(model: model.vaultHistory, assistantName: model.shell.assistantName)
+
         SettingsSection("Set Up Again") {
             Text("Runs the first-launch steps over: create or adopt an instance, connect a repository, sync secrets, bring the services up. Nothing happens until you press Run on a step.")
                 .metistryText(.footnote, p, .textSecondary)

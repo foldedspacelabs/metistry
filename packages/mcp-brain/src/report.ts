@@ -12,8 +12,18 @@
 // stays at its definition budget). Its bounds are the block's own
 // (`checkQuestions`), and its answers are checked against what is stored here
 // and never executed (C105).
+//
+// And it asks for a REVIEW (T2-13, R6): `kind: "pull_request"` with the PR as
+// its one ref (`gh:owner/name#41`, or the PR's github.com URL) raises the
+// `pull_request` request the GitHub sync raises for the same PR — the same
+// subject (core's `githubPullSource`), so an agent's ask and the sync's are
+// one card (0027's index), whoever asked first. Only a PR the sync already
+// tracks: the request carries the head SHA the owner will be shown, which the
+// owner's door checks before it posts, and that head is the sync's reading of
+// GitHub, never the agent's word. Asking posts nothing: the review is the
+// owner's, through their own door.
 
-import { checkQuestions, redactSecrets, v1Options, type Question } from "@foldedspacelabs/metistry-core";
+import { checkQuestions, githubPullSource, parseGithubPullRef, raiseMirror, redactSecrets, v1Options, type Question } from "@foldedspacelabs/metistry-core";
 import type { Db } from "./types.js";
 
 /**
@@ -26,8 +36,8 @@ import type { Db } from "./types.js";
 export const REPORT_KINDS = ["finding", "decided", "decision", "gotcha", "progress"] as const;
 export type ReportKind = (typeof REPORT_KINDS)[number];
 
-/** `requests_create`'s `kind`: a report's, or `question` — the one that asks. */
-export const REQUEST_CREATE_KINDS = [...REPORT_KINDS, "question"] as const;
+/** `requests_create`'s `kind`: a report's, `question` — the one that asks — or `pull_request`, which asks for the owner's review. */
+export const REQUEST_CREATE_KINDS = [...REPORT_KINDS, "question", "pull_request"] as const;
 export type RequestCreateKind = (typeof REQUEST_CREATE_KINDS)[number];
 
 export interface ReportInput {
@@ -51,8 +61,17 @@ export interface QuestionInput {
 
 export interface ReportResult {
   id: number;
-  /** false = a new row; otherwise which rule matched an existing one. */
-  deduplicated: false | "idempotency_key" | "title";
+  /** false = a new row; otherwise which rule matched an existing one — `subject`: a request for the same pull request was already waiting. */
+  deduplicated: false | "idempotency_key" | "title" | "subject";
+}
+
+export interface PullRequestAskInput {
+  /** The one line the owner's queue shows. */
+  title: string;
+  /** Why the agent asks: the context the owner reads above the diff. */
+  body: string;
+  /** Exactly one of them names the pull request. */
+  refs?: string[] | undefined;
 }
 
 const NEAR_DUP_WINDOW = "24 hours";
@@ -142,4 +161,60 @@ async function byTitle(db: Db, kind: "report" | "decision", agentId: string, tit
     [kind, agentId, title],
   );
   return rows[0] ? Number(rows[0].id) : null;
+}
+
+/** `gh:owner/name#41`, or `https://github.com/owner/name/pull/41` — the PR a ref names, spelled as the work row's `external_ref`. */
+export function pullRequestRefOf(ref: string): string | undefined {
+  const t = ref.trim();
+  if (parseGithubPullRef(t)) return t;
+  const m = /^https:\/\/github\.com\/([^/\s]+\/[^/\s]+)\/pull\/([1-9][0-9]{0,9})(?:[/?#].*)?$/.exec(t);
+  const spelled = m ? `gh:${m[1]}#${m[2]}` : undefined;
+  return spelled !== undefined && parseGithubPullRef(spelled) ? spelled : undefined;
+}
+
+/**
+ * Ask the owner to review a pull request (T2-13; module header). Refused —
+ * never trimmed or guessed — unless exactly one ref names a PR, and that PR
+ * is an open one the GitHub sync tracks with a head SHA.
+ */
+export async function submitPullRequest(db: Db, agentId: string, input: PullRequestAskInput): Promise<({ ok: true } & ReportResult) | { ok: false; code: "invalid_request" | "not_found"; error: string }> {
+  const named = [...new Set((input.refs ?? []).map(pullRequestRefOf).filter((r): r is string => r !== undefined))];
+  if (named.length !== 1) {
+    return { ok: false, code: "invalid_request", error: `kind pull_request names exactly one pull request in refs — gh:owner/name#41 or its github.com URL (${named.length === 0 ? "none" : named.join(", ")} given)` };
+  }
+  const ref = named[0]!;
+  const pr = parseGithubPullRef(ref)!;
+  const { rows } = await db.query(
+    `SELECT id, meta->>'head_sha' AS head_sha, meta->>'url' AS url, meta->>'author' AS author FROM work
+     WHERE external_ref = $1 AND kind = 'pr' AND status = 'open' LIMIT 1`,
+    [ref],
+  );
+  const work = rows[0] as { id: number | string; head_sha: string | null; url: string | null; author: string | null } | undefined;
+  if (!work || !work.head_sha) {
+    return {
+      ok: false,
+      code: "not_found",
+      error: `${ref} is not an open pull request Metistry tracks yet — the GitHub sync reads the repositories it is configured for and records each PR's head; ask again once it has read this one`,
+    };
+  }
+  const payload = redactSecrets({
+    title: input.title,
+    event: "review_asked",
+    repo: pr.repo,
+    number: pr.number,
+    url: work.url,
+    head_sha: work.head_sha,
+    author: work.author,
+    context: { prose: input.body, refs: input.refs ?? [] },
+    provenance: { agent: agentId, via: "mcp-brain", submitted_at: new Date().toISOString() },
+  });
+  const r = await raiseMirror(db, {
+    kind: "pull_request",
+    source_agent: agentId,
+    trust: "external",
+    source: githubPullSource(pr.repo, pr.number, work.author),
+    payload,
+    work_id: Number(work.id),
+  });
+  return { ok: true, id: r.id, deduplicated: r.raised ? false : "subject" };
 }

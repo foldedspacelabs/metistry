@@ -20,7 +20,7 @@ import { join } from "node:path";
 
 import { API_VERSION, API_VERSION_HEADER, AREA_PREFIX_REFUSAL, knowledgeConflictSource, runCheck, startRun, finishRun, errorEnvelope, intEnv, may, parseAction, noRouteMessage, PROJECT_SLUG_RE, rollSession, statusFor, servedRoute, isLocalRoute, localOnlyMessage, routeKey, resolveActor, SKIP_FEEDBACK, answersText, checkAnswers, describeRequest, parseSubjectFingerprint, requestSubjectOf, subjectUnchanged, validAgentAreaGrant, type QuestionAnswer, type RequestShape, type RequestSubject, type SubjectReading, type CheckResult, type Compute, type ErrorCode, type ErrorEnvelope, type Principal } from "@foldedspacelabs/metistry-core";
 import { QueryError, QueryStore } from "@foldedspacelabs/metistry-queries";
-import { captureToInbox, createBrainServer, dirSink, type CaptureSink, type KnowledgeLister, type KnowledgeReader, type KnowledgeVaultSearcher, type KnowledgeWriter, type QueryEmbedder } from "@foldedspacelabs/metistry-mcp-brain";
+import { captureToInbox, createBrainServer, dirSink, type CaptureSink, type ConnectionLimits, type ConnectionsProxy, type KnowledgeLister, type KnowledgeReader, type KnowledgeVaultSearcher, type KnowledgeWriter, type QueryEmbedder } from "@foldedspacelabs/metistry-mcp-brain";
 import { TasksError, TasksService } from "@foldedspacelabs/metistry-tasks";
 import { ArtifactsService, VaultError, type VaultClient } from "@foldedspacelabs/metistry-artifacts";
 import { artifactRoutes, isArtifactRoute } from "./artifacts-routes.js";
@@ -174,6 +174,15 @@ export interface ConsoleConfig {
    * else — never handed to the MCP mount. Absent = those doors answer 503.
    */
   githubWrite?: GithubWriteClient | undefined;
+  /**
+   * The pooled client behind the connections proxy (plan §2.6): handed to
+   * `/mcp` as `connections_list` / `connections_call`'s proxy, and to the
+   * action executor, which runs an Ask First `connection_call` on the owner's
+   * Approve (T4-9, actions.ts). Absent = both answer `not_available`.
+   */
+  connectionsProxy?: ConnectionsProxy | undefined;
+  /** The proxy's confirm-token lifetime and hourly limits (`METISTRY_CONNECTION_*`, main.ts). Absent = mcp-brain's defaults. */
+  connectionLimits?: ConnectionLimits | undefined;
   /**
    * The live-changes hub `GET /api/events` streams from (events.ts, §2.20):
    * `main.ts` builds it and starts the one `LISTEN` that feeds it. Absent =
@@ -583,7 +592,14 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
   /** The meeting-note door's per-event queue and the notes it wrote ahead of the walk — per server, in memory (meeting-note-route.ts says why that is enough). */
   const meetingNotes = new MeetingNotes();
   /** The services one action may reach. Read per call: `cfg.targets` and the vault bridge are hot-reloaded, and an action must follow the file rather than the process's startup. */
-  const actionServices = (): ActionServices => ({ db, tasks, inbox, ...(cfg.targets ? { targets: cfg.targets } : {}), ...(artifacts ? { artifacts } : {}) });
+  const actionServices = (): ActionServices => ({
+    db,
+    tasks,
+    inbox,
+    ...(cfg.targets ? { targets: cfg.targets } : {}),
+    ...(artifacts ? { artifacts } : {}),
+    ...(cfg.connectionsProxy ? { connections: cfg.connectionsProxy } : {}),
+  });
 
   /**
    * **One agent-principal source for both doors** (the `/mcp` mount and this
@@ -610,6 +626,9 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     crews: cfg.crews ? crewDispatcher(db, tasks, cfg.crews, cfg.targets, cfg.compute) : undefined,
     // queries_list/queries_run: the SAME QueryStore the dashboard reads through (invariant 3, one read path)
     queries,
+    // connections_list / connections_call (plan §2.6): the same pooled client an Approve runs a connection call through
+    ...(cfg.connectionsProxy ? { connections: cfg.connectionsProxy } : {}),
+    ...(cfg.connectionLimits ? { connectionLimits: cfg.connectionLimits } : {}),
     // propose_action at mode `allow` (docs/ops/actions.md): the bridge asks,
     // this console runs it — through the same service call the owner's own
     // click goes through, never a second implementation.
@@ -2133,7 +2152,16 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         await audit("triage", "action", false, { proposal: row.id, error: parsed.error });
         return refuseAnswer(id, verb, "invalid_request", `this proposal does not carry a valid action — ${parsed.error}`);
       }
-      const r = await runAction(actionServices(), parsed.action, { proposalId: Number(row.id), onBehalfOf: String(row.source_agent) }).catch((err: unknown) => failedAnswer(id, verb, err));
+      // A connection call's Approve redeems the confirm record on the runs row
+      // the proxy wrote with this request — named by the stored payload, and
+      // bound there to this proposal and this agent (actions.ts). Nothing in
+      // the answer's body reaches the call: what runs is the stored action.
+      const previewRun = Number((row.payload as { preview_run?: unknown } | null)?.preview_run);
+      const r = await runAction(actionServices(), parsed.action, {
+        proposalId: Number(row.id),
+        onBehalfOf: String(row.source_agent),
+        ...(Number.isSafeInteger(previewRun) && previewRun > 0 ? { previewRun } : {}),
+      }).catch((err: unknown) => failedAnswer(id, verb, err));
       if (!r.ok) {
         // the row stays pending, carrying why: the user still has a decision
         await audit("triage", `action:${parsed.action.kind}`, false, { proposal: row.id, action: parsed.action.kind, on_behalf_of: row.source_agent, error: r.code });

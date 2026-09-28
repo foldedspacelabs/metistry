@@ -461,6 +461,9 @@ const componentCtx: ComponentCtx = {
   // the egress door for each secret's listed hosts, never put on a request
   // here. The `linear` collector is the first reader. No instance: absent.
   ...(connections ? { openSync: instanceSyncOpener({ instanceDir: connections.instanceDir, seedDir: connections.seedDir, env: process.env }) } : {}),
+  // The owner's zone for a sync that must say which day something is on —
+  // the ICS sync's all-day dates and window (T4-12). METISTRY_TZ, never TZ.
+  ...(runnerZone ? { ownerTimeZone: runnerZone } : {}),
   ...(process.env.METISTRY_AWS_ACCESS_KEY_ID && process.env.METISTRY_AWS_SECRET_ACCESS_KEY
     ? { aws: { accessKeyId: process.env.METISTRY_AWS_ACCESS_KEY_ID, secretAccessKey: process.env.METISTRY_AWS_SECRET_ACCESS_KEY, ...(process.env.METISTRY_AWS_SESSION_TOKEN ? { sessionToken: process.env.METISTRY_AWS_SESSION_TOKEN } : {}) } }
     : {}),

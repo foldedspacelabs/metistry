@@ -204,6 +204,14 @@ export interface CollectorCtx extends ComputeAccess {
    * the egress door. The `linear` collector reads its connection through it.
    */
   openSync?: SyncOpener;
+  /**
+   * The owner's zone (`METISTRY_TZ`, core `configuredTimeZone`), for a sync
+   * that must say which DAY something is on: the ICS sync reads an all-day
+   * date as the owner's midnight to midnight, and its window starts at the
+   * owner's midnight. Absent: UTC. Not `timeZone`, which is a routine's
+   * scheduled slot's zone.
+   */
+  ownerTimeZone?: string;
 }
 
 export interface FmResult {

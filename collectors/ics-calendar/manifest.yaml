@@ -1,0 +1,22 @@
+schema: 1
+name: ics-calendar
+type: collector
+display_name: Calendar Feed
+description: >-
+  An iCalendar feed (.ics) into calendar_events under the connection's own
+  name — the one connection whose provider is `ics` (or the one
+  scheduled.yaml names), read through the egress door at its own address
+  and nowhere else. Today and the next two weeks, every occurrence — a
+  series expanded by its RRULE, RDATE and EXDATE, a moved occurrence where
+  its override puts it, each time in the zone the feed gives it — with its
+  attendees (address and answer) and organizer, so Today and the
+  meeting-note door read one table for every calendar source (design-build-
+  plan §2.6, T4-12). A cancelled event inside the window is removed; the
+  past is left as it was last seen. Never the invite body — DESCRIPTION is
+  never read. Degrades absent without an ICS connection.
+# A sync (§2.5's closed shape): a published feed is a static file its
+# server regenerates on its own clock — Google's every few hours — so a
+# quarter-hour is as fresh as the feed itself, and polite to its host.
+schedule: { every: 15m }
+writes: [calendar_events, sync_state]
+reads: []

@@ -63,7 +63,7 @@ import { RoutineTrigger } from "../dist/close-day.js";
 import { makeBridge as makeEventkitBridge } from "../../../packages/mcp-eventkit/dist/index.js";
 import { loadSchedules, overlayFromText, runNow } from "../dist/runner.js";
 import { SCHEDULED_PATH } from "../dist/profile-tidy.js";
-import { loadCollectors } from "@metistry-apps/collectors";
+import { linearTrackerOpener, loadCollectors } from "@metistry-apps/collectors";
 import { loadRoutines } from "@metistry-apps/routines";
 import { ConflictMoved } from "../dist/knowledge-routes.js";
 import { GithubWriteClient } from "../dist/github-write.js";
@@ -248,6 +248,28 @@ const githubWrite = new GithubWriteClient({
   fetch: githubFake,
 });
 
+// Close in Linear (T4-26): a Linear connection in an instance of its own —
+// so the Connections and Secrets lists above record exactly what they did —
+// opened through the real opener and egress door; Linear itself is this fake:
+// MET-42, open, and its team's Done state
+const trackerDir = join(root, "tracker");
+await mkdir(join(trackerDir, ".metistry", "connections"), { recursive: true });
+await writeFile(
+  join(trackerDir, ".metistry", "connections", "linear.yaml"),
+  "name: linear\ntype: tracker\nprovider: linear\nreach:\n  http:\n    url: https://api.linear.app/graphql\n    auth: { scheme: api_key, header: Authorization, secret: linear_api_key }\nsecrets: [linear_api_key]\n",
+);
+await writeFile(join(trackerDir, ".metistry", "secrets.yaml"), 'secrets:\n  linear_api_key:\n    hosts: [api.linear.app]\n    grants: { "connection:linear": on }\n');
+const MET_42 = { id: "3c2b1a09-8f7e-4d6c-9b5a-493827160542", identifier: "MET-42", title: "Send Dana the fixture format", url: "https://linear.app/example/issue/MET-42", priority: 2, priorityLabel: "High", dueDate: null, updatedAt: "2026-09-28T12:00:00.000Z", description: null, team: { key: "MET", name: "Metistry" }, creator: { name: "Dana" }, assignee: { name: "Me", isMe: true } };
+const linearFake = async (input, init) => {
+  outbound.push(String(input));
+  const op = /(?:query|mutation)\s+(\w+)/.exec(String(JSON.parse(String(init?.body ?? "{}")).query ?? ""))?.[1];
+  const json = (v) => new Response(JSON.stringify(v), { status: 200, headers: { "content-type": "application/json" } });
+  if (op === "MetistryIssueToComplete") return json({ data: { issue: { ...MET_42, state: { name: "In Progress", type: "started" }, team: { ...MET_42.team, states: { nodes: [{ id: "st-met-done", name: "Done", type: "completed", position: 3 }] } } } } });
+  if (op === "MetistryCompleteIssue") return json({ data: { issueUpdate: { success: true, issue: { ...MET_42, state: { name: "Done", type: "completed" } } } } });
+  return json({ errors: [{ message: "the recording answers Close in Linear only" }] });
+};
+const trackers = linearTrackerOpener({ instanceDir: trackerDir, seedDir: join(REPO_ROOT, "seed"), extensions: false, env: { METISTRY_SECRET_LINEAR_API_KEY: "fixture-not-a-key" }, fetch: linearFake });
+
 const vault = memoryVault();
 const PAGE = "Projects/Metistry/Roadmap.md";
 const HISTORY = [
@@ -419,6 +441,7 @@ const server = makeServer(pool, queries, {
     ok: true,
     sync: { connection: "linear", provider: "linear", url: "https://api.linear.app/graphql", origin: "https://api.linear.app", headers: {}, fetch: fakeLinear, capabilities: ["read", "create"], raise: {}, secretsUsed: () => [] },
   }),
+  trackers,
   variables: { instanceDir, file: layout.path("variables") },
   connections: { instanceDir, seedDir: join(REPO_ROOT, "seed"), presence: instanceSecrets.presence() },
   // the reconciler's GET /vault/status, as a week of use leaves it: two
@@ -841,6 +864,7 @@ const REQUESTS = [
   ["POST /api/github/pulls/:owner/:repo/:number/review", () => ({ path: "/api/github/pulls/example/metistry/281/review", body: { event: "approve", body: "Looks right.", head_sha: PR_HEAD } })],
   ["POST /api/github/pulls/:owner/:repo/:number/threads/:id/reply", () => ({ path: "/api/github/pulls/example/metistry/281/threads/PRRT_kw1/reply", body: { body: "Fixed in the next push.", head_sha: PR_HEAD } })],
   ["POST /api/github/pulls/:owner/:repo/:number/threads/:id/resolve", () => ({ path: "/api/github/pulls/example/metistry/281/threads/PRRT_kw1/resolve", body: { head_sha: PR_HEAD } })],
+  ["POST /api/trackers/:connection/issues/:key/complete", () => ({ path: "/api/trackers/linear/issues/MET-42/complete", body: {} })],
 
 
   // the reads that show the writes above: a room with a comment, a feed with a capture in it
@@ -1059,7 +1083,7 @@ await new Promise((r) => server.close(() => r()));
 await new Promise((r) => ekBridge.close(() => r()));
 await pool.end();
 await rm(root, { recursive: true, force: true });
-const PR_DOOR_CALLS = ["https://api.github.com/repos/example/metistry/pulls/281", "https://api.github.com/graphql"]; // the pull request doors' fake GitHub (T2-13)
+const PR_DOOR_CALLS = ["https://api.github.com/repos/example/metistry/pulls/281", "https://api.github.com/graphql", "https://api.linear.app/graphql"]; // the pull request doors' fake GitHub (T2-13); Close in Linear's fake Linear (T4-26)
 if (outbound.some((u) => !u.startsWith("http://127.0.0.1:1/") && !u.startsWith("https://api.github.com/repos/example/fixtures") && !u.includes("/models") && !PR_DOOR_CALLS.some((p) => u.startsWith(p)))) {
   failures.push(`an outbound call went somewhere unexpected: ${outbound.join(", ")}`);
 }

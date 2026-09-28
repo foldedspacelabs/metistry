@@ -1,0 +1,46 @@
+# Seeded default (D4 overlay: an instance file of the same name wins).
+#
+# Which of the given tracker refs the source has closed (T4-26: *Done in
+# Linear* on a Today row). `GET /api/today` collects the `ext_refs` of the
+# day's OPEN task lines (`linear:ENG-123`) and asks this query which of them
+# name an issue whose `work` row the tracker's sync — or the Close in Linear
+# door — closed as `completed` or `canceled` (`meta.closed_reason`,
+# collectors/linear). The day's answer names the task, and the client shows
+# *Done in Linear* with a one-click Tick — the Tick door, as `user`.
+#
+# **Read-only, and never a write into the note.** An issue closed in Linear
+# changes this row and nothing else; the owner's line stays open until the
+# owner ticks it (plan §4, "Linear completion never writes the owner's note
+# from a sync").
+#
+# `refs` is comma-separated, because `packages/queries` binds no arrays
+# (int, text, boolean); a tracker ref never holds a comma (`linear:ENG-123`,
+# `gh:owner/repo#41`). Blank is no refs, and no rows.
+#
+# **`expose: route`.** It is the owner's issues and where they live — Today's
+# to read, never a second way in for the generic `/api/q/<name>` door or an
+# agent's `queries_run` to probe which refs exist.
+name: tracker_closed
+expose: route
+description: >-
+  The tracker issues among the given refs (comma-separated `linear:<KEY>`)
+  whose work row is closed as completed or canceled at the source — what
+  Today marks *Done in Linear* on an open task line.
+params:
+  refs: { type: text, default: "" } # comma-separated external refs; blank = none
+sql: |
+  SELECT
+    w.external_ref AS ref,
+    w.meta->>'connection' AS connection,
+    w.meta->>'key' AS key,
+    w.meta->>'url' AS url,
+    w.meta->>'closed_reason' AS closed_reason,
+    w.meta->>'state' AS state_name,
+    w.updated_at AS closed_at
+  FROM work w
+  WHERE w.external_ref = ANY(string_to_array(nullif(:refs::text, ''), ','))
+    AND w.kind = 'issue'
+    AND w.status = 'closed'
+    AND w.meta->>'closed_reason' IN ('completed', 'canceled')
+  ORDER BY w.external_ref
+cache_ttl: 0 # an issue closed a moment ago is exactly the one Today should say so for

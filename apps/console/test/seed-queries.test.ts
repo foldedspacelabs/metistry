@@ -186,6 +186,9 @@ describe("seed queries", () => {
     // `connection_calls` (T4-8b, §2.10) says which agent reached which of the
     // owner's services, with which credential names, and when: the audit and
     // a connection's *Used by* — the owner's to read, never an agent's.
+    // `tracker_closed` (T4-26) says which of the owner's tracker issues the
+    // source closed — Today's *Done in Linear*, for Today to read, never a
+    // way for an agent to probe which refs exist.
     expect(routeBacked.sort()).toEqual([
       "board",
       "calendar_event",
@@ -207,6 +210,7 @@ describe("seed queries", () => {
       "secret_last_used",
       "session_detail",
       "today_order",
+      "tracker_closed",
       "turn_progress",
       "vault_task_by_key",
       "vault_tasks_query",

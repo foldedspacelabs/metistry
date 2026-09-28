@@ -31,7 +31,7 @@ import { QueryStore } from "@foldedspacelabs/metistry-queries";
 import { makePool } from "./db.js";
 import { makeServer } from "./server.js";
 import { pushConfigFromEnv, startNotifier } from "./push.js";
-import { loadCollectors } from "@metistry-apps/collectors";
+import { linearTrackerOpener, loadCollectors } from "@metistry-apps/collectors";
 import { loadRoutines } from "@metistry-apps/routines";
 import { PROFILE_PATH, loadSchedules, profileFacts, readOverlay, routineCapabilities, runNow, startRunner, type ComponentCtx, type RunnerOptions } from "./runner.js";
 import type { ScheduledAdmin } from "./scheduled-routes.js";
@@ -573,6 +573,11 @@ const server = makeServer(pool, queries, {
   githubWrite,
   ...(variables ? { variables } : {}),
   ...(connections ? { connections } : {}),
+  // Close in Linear (T4-26): the tracker connection the path names, opened
+  // through the same egress door the linear sync reads through — its key
+  // delivered by `metistry secrets sync --to env`, filled for api.linear.app
+  // only. No instance: the door answers 503.
+  ...(connections ? { trackers: linearTrackerOpener({ instanceDir: connections.instanceDir, seedDir: connections.seedDir, env: process.env }) } : {}),
   connectionLimits,
   origins,
   ...(identity ? { identity } : {}),

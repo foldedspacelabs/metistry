@@ -15,8 +15,9 @@
 // app — a labelled "not yet", never an empty pane pretending to be a screen
 // (mac-app.md, "Not yet, and labelled as such on screen"). Needs You
 // (needs-you-view.swift, T5-4a), Activity (activity-view.swift, T6-3),
-// Chat (chat-view.swift, T6-2) and Today's top — the brief, Next Up,
-// calendar help, Close the Day (today-view.swift, T6-1b) — have landed.
+// Chat (chat-view.swift, T6-2), Today's top — the brief, Next Up,
+// calendar help, Close the Day (today-view.swift, T6-1b) — and Knowledge
+// (knowledge-view.swift, T6-4) have landed.
 //
 // ACCESSIBILITY (§2.18). Every control speaks its name, and a glyph-only one its
 // shortcut too; the Needs You row says *Needs You, 10 waiting*; the gauge says
@@ -51,7 +52,7 @@ public struct RootView: View {
             ShellSidebar(shell: shell, chatIsWorking: model.chat.isWorking)
                 .navigationSplitViewColumnWidth(min: 180, ideal: MetistrySize.sidebar, max: 320)
         } detail: {
-            ShellDetail(shell: shell, needsYou: model.needsYou, activity: model.activity, chat: model.chat, today: model.today, instanceDir: model.instances.active, consoleURL: PasskeyRouting.consoleURL(in: model.status.report).flatMap(URL.init(string:)))
+            ShellDetail(shell: shell, needsYou: model.needsYou, activity: model.activity, chat: model.chat, today: model.today, instanceDir: model.instances.active, consoleURL: PasskeyRouting.consoleURL(in: model.status.report).flatMap(URL.init(string:)), knowledge: model.knowledge, onChooseFolder: chooseFolder)
                 // The detail landmark, named for where the owner is.
                 .accessibilityElement(children: .contain)
                 .accessibilityLabel(shell.selection.title)
@@ -114,6 +115,14 @@ public struct RootView: View {
     private func showSpendingLimits() {
         isUsagePresented = false
         Self.showSpendingLimits(in: model.settings)
+        #if os(macOS)
+        openSettings()
+        #endif
+    }
+
+    /// Knowledge's *vault not found* leads here: Settings, on the instance.
+    private func chooseFolder() {
+        model.settings.section = .instance
         #if os(macOS)
         openSettings()
         #endif
@@ -246,6 +255,8 @@ struct ShellDetail: View {
     let today: TodayModel
     let instanceDir: URL?
     let consoleURL: URL?
+    var knowledge: KnowledgeModel? = nil
+    var onChooseFolder: (() -> Void)? = nil
 
     var body: some View {
         let destination = shell.selection
@@ -297,6 +308,15 @@ struct ShellDetail: View {
             }
         } else if destination == .chat {
             ChatView(model: chat, assistantName: shell.assistantName)
+        } else if destination == .knowledge, let knowledge {
+            // A page opens where the owner reads the vault; the vault missing
+            // leads to the instance's folder in Settings.
+            KnowledgeView(
+                model: knowledge,
+                assistantName: shell.assistantName,
+                onOpenInObsidian: instanceDir.map { dir in { path in if let url = ObsidianLink.url(for: path, in: dir) { openURL(url) } } },
+                onChooseFolder: onChooseFolder
+            )
         } else {
             ContentUnavailableView {
                 Label(destination.title, systemImage: destination.symbolName)

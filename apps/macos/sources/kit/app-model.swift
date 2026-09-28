@@ -83,6 +83,11 @@ public final class AppModel {
     /// dismissed offer outlive a trip to another screen; dropped with
     /// everything else on an instance switch.
     public let today: TodayModel
+    /// Knowledge: the fold, Needs your eye, the areas, the sources line, and
+    /// where in the vault the owner is (knowledge-view.swift). Held here so a
+    /// conflict's Keep Mine, held ten seconds for Undo, is still sent — or
+    /// undone — after the owner walks away; dropped on an instance switch.
+    public let knowledge: KnowledgeModel
 
     public init(
         bundleResourceURL: URL?,
@@ -147,6 +152,10 @@ public final class AppModel {
         // toolbar's + and ⌘N are all this entry.
         shell.captureActions[.newCapture] = { [weak composer] in composer?.present() }
         self.today = TodayModel(session: console, defaults: defaults)
+        let knowledge = KnowledgeModel(session: console)
+        self.knowledge = knowledge
+        // An answer or a settled conflict on Knowledge is Needs You's too: the row and the Dock hear it now.
+        knowledge.onQueueChanged = { [weak shell] in await shell?.refreshCount() }
 
         // The wizard's step 2 hands the folder back the moment it is known, so
         // every later verb runs against it.

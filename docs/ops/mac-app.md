@@ -24,7 +24,7 @@ path.
   Dock. The screens behind the rows are their own tickets; until one lands its
   detail says so and offers the web app. Needs You, Today (the brief, Next Up,
   Close the Day, and the day's spine and All — "Today" below), Chat, Activity,
-  the Usage popover and the capture composer have landed.
+  Knowledge, the Usage popover and the capture composer have landed.
 - **Status.** Its own window now (Window ▸ Status), no longer a sidebar row.
   Runs `metistry doctor --json` and renders the rows to the design
   system's §3.13 — grouped by doctor's own `kind`, `absent` shown in absent
@@ -112,7 +112,7 @@ path.
 | `connect-repo --auth token` | it reads the PAT from **stdin**, and the app gives every child an empty stdin on purpose so no verb can hang a progress view waiting for a paste | the wizard shows the option, disabled, with that reason; run it in a terminal |
 | **Minting an enrolment code** | there is no HTTP route that mints one, deliberately — whoever can run the host command already controls Postgres and the vault, so shell access is the root of trust for a first passkey (plan §4.2) — and `metistry enroll` is on the CLI's own "not yet" list | step 6 shows the exact `scripts/enroll.mjs` command and takes the code you paste back |
 | **A QR code** for the phone | nothing in this product renders one yet; `apps/console/scripts/enroll.mjs` says the same about itself ("QR rendering arrives with `packages/cli`"), and an encoder is a dependency nobody has asked for | step 6 shows the enrolment URL, selectable, to type or hand over |
-| **The screens behind the rest of the sidebar's rows** | the shell has the rows (T5-2); each screen is its own ticket, and until it lands the row's detail names the gap and offers the web app. Landed in W2, each with its section below: Needs You (T5-4a's list, T5-4b's bodies), Today (T6-1a's spine, T6-1b's brief, Next Up and Close the Day), Chat (T6-2), Activity (T6-3), the Usage popover (T5-6) and the capture composer (T5-5). Still to come: Work ▸, Knowledge, Agents and Scheduled (W3, T6-4…T6-11) | the PWA — "Add to Dock" in Safari, or the detail's **Open in Browser** |
+| **The screens behind the rest of the sidebar's rows** | the shell has the rows (T5-2); each screen is its own ticket, and until it lands the row's detail names the gap and offers the web app. Landed in W2, each with its section below: Needs You (T5-4a's list, T5-4b's bodies), Today (T6-1a's spine, T6-1b's brief, Next Up and Close the Day), Chat (T6-2), Activity (T6-3), the Usage popover (T5-6) and the capture composer (T5-5); in W3, Knowledge (T6-4). Still to come: Work ▸, Agents and Scheduled (W3, T6-5…T6-11) | the PWA — "Add to Dock" in Safari, or the detail's **Open in Browser** |
 | **Attachments and live capture in the composer** | New Capture is the text composer (T5-5, "The capture composer" below); the owner held audio and screen capture until the designer's floating action bar returns (#253), and the attachment chip, ⌘⇧A and the window's drop target are not built. The Capture menu's Ask · Note · To-do and Start/Stop Recording stay dimmed for the bar (T8) | the PWA's +, or `metistry console call POST /capture` with `filename` and `content_base64` |
 | **The keep-awake control** (Services) | the model half is shipped — `KeepAwakeSetting` (four values, each with what it costs), `KeepAwakeFacts` (doctor's row) and `deploymentSetKeepAwake` — and the pane is a switch with a radio pair under it, which is the designer's. First run can pass `--keep-awake` and does not ask on its own | a terminal: `metistry deployment set-keep-awake <value> --yes`, or `metistry init --keep-awake <value>` |
 | **An iOS target** | `MetistryKit` is already free of AppKit and of `Process` so it can be shared; there is no iOS target in `Package.swift` | — |
@@ -1292,6 +1292,70 @@ switch drops it.
   views: **Waiting on Others** is `where: waiting`; **Slipping** and
   **Owed** are drawn dimmed with why — the grammar has no carry count and
   no "names a person" yet (T2-7's open item), so neither is approximated.
+
+## Knowledge
+
+`sources/kit/knowledge-view.swift` is the Knowledge row's screen (T6-4,
+screen-10-knowledge.md); its model is `knowledge-model.swift`, held by
+`AppModel.knowledge` so a held Keep Mine outlives a trip elsewhere, and
+dropped on an instance switch. It is where the owner reads what the system
+learned and settles what it could not — not a file browser; Obsidian is that.
+Top to bottom, in the order the owner's questions arrive:
+
+- **The fold.** `GET /api/knowledge/fold` names the newest
+  `Journal/Fold/*.md` and its links; its words are that file's own bytes
+  (`GET /api/knowledge/page`), split at its `##` sections, a slot still pending
+  drawn as *Still being written*. The agent wash, the serif, the configured
+  name with the spark; page names in the prose are links that open the page
+  here (a path is a reference, not an action). *Open the Fold* opens it in
+  Obsidian; *Earlier Folds* asks for the newest on or before the day before.
+  No thumbs: the route carries no `prose_id`, and a rating needs one.
+- **Needs your eye** — Draft · Conflict · Suggestion, one row each (*what ·
+  which page · why · the verb*), the count in the heading and never a badge.
+  The rows are the Needs You queue's `draft_settle`, knowledge-conflict
+  `review` and `knowledge` requests, plus the owner-only
+  `GET /api/knowledge/drafts` — a draft reaches the screen through that route
+  and nothing else. A draft or suggestion opens the **Needs You card itself**
+  (Approve · Revise · Decline, the same `POST /api/proposals/:id`), so
+  answering it here answers it there, and the shell's count asks again. A
+  draft nothing has raised a request for says so, its verbs dimmed with the
+  fact.
+- **A conflict, in place** (§4). Whose file is whose, from the request alone
+  (the note, the copy a sync kept beside it, when it was found); that neither
+  version was lost; the line diff — `−` yours, `+` the other; and **Keep Mine
+  · Take the Other · Merge in Obsidian**, the first two with the words the
+  request is served with. The choice is **held ten seconds with Undo and only
+  then sent** to T2-10's `POST /api/knowledge/conflicts/resolve` with
+  `seen_sha` the hash of the side given up (C136: the Undo is the client's, so
+  Undo sends nothing). A `409 stale` repaints the hashes and says so; one with
+  nothing in conflict says it was settled elsewhere. Item ▸ Approve and Revise
+  choose the two sides.
+- **Areas**, each with its written line (its `README.md` description, or *No
+  line written for this area yet*, C68) and why it is in front of the owner —
+  *Named by the latest fold* or *Changed 2 hours ago*, provenance and never a
+  count or a rank (P5). An area opens its page table.
+- **The sources line.** `GET /api/scheduled`'s syncs: *4 sources · freshness
+  unknown*, folded. It says *all current* only when every source's
+  `collector_health` answers it — and **no route serves that query yet**
+  (`expose: route`, no route), so today it never does. A sync whose last run
+  failed is a fault the line can name without it (*last run failed … · last
+  success not known*); a fault opens the line by itself.
+- **A page**: its words (page names as links), *Open in Obsidian* (Item ▸
+  ⌘O), and two lists — links from it and links to it — each with its `kind`
+  (link, frontmatter, embed); an unwritten target is shown, not followed.
+- **Search** is Go ▸ Filter (⌘F): `GET /api/knowledge/search`, the page
+  table of hits, the bridge's `degraded` note said, and components-03's *no
+  match* — *Nothing matches “zebra”*.
+- **States.** Placeholder rows only on the very first load (*Reading your
+  vault*); a failed refresh over what is shown is the stale band; nothing at
+  all is *Knowledge Isn't Answering* (Try Again), or — when the refusal says
+  the vault is missing — *Vault Not Found* · Choose Folder, which opens
+  Settings on Instance.
+- **Accessibility (§2.18).** Every row is one spoken element (*Draft,
+  Areas/Health/Sleep.md, the taper. Review*; *Sources, 4 sources · freshness
+  unknown, collapsed*); each section is a heading; nothing moves; no key is
+  bound outside the menu table; text is `metistryFont`, so the largest size
+  grows a row longer, never wider; the root frame is flexible to zero (#392).
 
 ## Build and run it
 

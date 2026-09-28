@@ -63,6 +63,11 @@ struct MetistryApp: App {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(text, forType: .string)
         }
+        // A token shown once on Agents: copied, never kept.
+        model.agents.copyText = { text in
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+        }
         #if os(macOS)
         // Sparkle fills in the kit's plain UpdateStatus box: the kit stays free
         // of the framework, and the Updates pane and the menu read one type.

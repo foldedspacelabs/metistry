@@ -52,7 +52,7 @@ public struct RootView: View {
             ShellSidebar(shell: shell, chatIsWorking: model.chat.isWorking)
                 .navigationSplitViewColumnWidth(min: 180, ideal: MetistrySize.sidebar, max: 320)
         } detail: {
-            ShellDetail(shell: shell, needsYou: model.needsYou, activity: model.activity, chat: model.chat, today: model.today, instanceDir: model.instances.active, consoleURL: PasskeyRouting.consoleURL(in: model.status.report).flatMap(URL.init(string:)), knowledge: model.knowledge, onChooseFolder: chooseFolder, scheduled: model.scheduled)
+            ShellDetail(shell: shell, needsYou: model.needsYou, activity: model.activity, chat: model.chat, today: model.today, instanceDir: model.instances.active, consoleURL: PasskeyRouting.consoleURL(in: model.status.report).flatMap(URL.init(string:)), knowledge: model.knowledge, onChooseFolder: chooseFolder, scheduled: model.scheduled, agents: model.agents, onOpenConnections: showConnections)
                 // The detail landmark, named for where the owner is.
                 .accessibilityElement(children: .contain)
                 .accessibilityLabel(shell.selection.title)
@@ -115,6 +115,14 @@ public struct RootView: View {
     private func showSpendingLimits() {
         isUsagePresented = false
         Self.showSpendingLimits(in: model.settings)
+        #if os(macOS)
+        openSettings()
+        #endif
+    }
+
+    /// Agents ▸ New Agent ▸ Connect an Agent: Settings, on Connections (M13).
+    private func showConnections() {
+        model.settings.section = .connections
         #if os(macOS)
         openSettings()
         #endif
@@ -258,6 +266,8 @@ struct ShellDetail: View {
     var knowledge: KnowledgeModel? = nil
     var onChooseFolder: (() -> Void)? = nil
     let scheduled: ScheduledModel
+    var agents: AgentsModel? = nil
+    var onOpenConnections: (() -> Void)? = nil
 
     var body: some View {
         let destination = shell.selection
@@ -329,6 +339,10 @@ struct ShellDetail: View {
                 onGoToAgents: { shell.go(to: .agents) },
                 onGoToNeedsYou: { Task { await shell.refreshCount(); shell.goToNeedsYou() } }
             )
+        } else if destination == .agents, let agents {
+            // Give It One and a routine's row lead to Scheduled; Connect an
+            // Agent to Settings › Connections (C138).
+            AgentsView(model: agents, assistantName: shell.assistantName, onGoToScheduled: { shell.go(to: .scheduled) }, onOpenConnections: onOpenConnections)
         } else {
             ContentUnavailableView {
                 Label(destination.title, systemImage: destination.symbolName)

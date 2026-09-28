@@ -1262,9 +1262,15 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
     // a row from before T1-4, with no outcome: shown, not silently dropped by a NULL comparison
     await settle({ ok: true, meta: { processed: 2 } });
 
+    // X-21 (Ruling 25): the subject is the routine's display name, not its
+    // raw component id — `rt-<ts>` reads as `Rt <ts>`; `actor` is untouched
+    const displayName = tag
+      .split("-")
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+      .join(" ");
     const rows = await rowsOf();
     expect(rows).toHaveLength(4);
-    for (const r of rows) expect(r).toMatchObject({ kind: "routine_run", group: "routine", actor: tag, subject: tag });
+    for (const r of rows) expect(r).toMatchObject({ kind: "routine_run", group: "routine", actor: tag, subject: displayName });
     const f = rows.find((r) => r.ref === `runs:${failed}`)!;
     expect(f.ok).toBe(false);
     expect(f.detail).toBe("routine failed vault bridge unreachable");

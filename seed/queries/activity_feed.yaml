@@ -42,7 +42,7 @@
 # the second of them forever. The caller de-duplicates on (ref, ts, kind),
 # which is cheap; losing an event is not.
 name: activity_feed
-description: Time-ordered "what happened" across the system (docs/product/desktop-app-plan.md "The window" — home panel) — a union of inbox captures, runs (tool/turn/crew_run/dispatch/task_op/agent_admin/project_mode/config_write, plus collector_run failures only, plus settled routine_run rows except silent ticks), proposals (created + decided), work.history entries, and outbound_messages (brief/review/alert). Filterable by agent/project/kind/turn_id; `since` returns only what is at or after a timestamp already seen. The weekly review is this feed summarised. `ok` is false where a run failed, NULL where the source cannot fail. `turn_id` (mcp-brain tool calls only; null elsewhere) groups the calls one reply made.
+description: Time-ordered "what happened" across the system (docs/product/desktop-app-plan.md "The window" — home panel) — a union of inbox captures, runs (tool/turn/crew_run/dispatch/task_op/agent_admin/project_mode/config_write/connection_call, plus collector_run failures only, plus settled routine_run rows except silent ticks), proposals (created + decided), work.history entries, and outbound_messages (brief/review/alert). Filterable by agent/project/kind/turn_id; `since` returns only what is at or after a timestamp already seen. The weekly review is this feed summarised. `ok` is false where a run failed, NULL where the source cannot fail. `turn_id` (mcp-brain tool calls only; null elsewhere) groups the calls one reply made.
 params:
   hours:   { type: int,  default: 24 }
   limit:   { type: int,  default: 100 }
@@ -84,6 +84,7 @@ sql: |
       CASE WHEN r.kind = 'config_write' THEN coalesce(r.meta->>'principal', r.component) ELSE r.component END AS actor,
       CASE
         WHEN r.kind IN ('tool', 'dispatch')  THEN r.tool
+        WHEN r.kind = 'connection_call'      THEN concat_ws('/', r.meta->>'connection', r.meta->>'connection_tool')
         WHEN r.kind = 'config_write'         THEN r.meta->>'path'
         WHEN r.kind = 'task_op'              THEN 'work:' || (r.meta->>'id')
         WHEN r.kind = 'agent_admin'          THEN r.meta->>'agent'
@@ -93,6 +94,11 @@ sql: |
       END                                                                                 AS subject,
       CASE
         WHEN r.kind = 'tool'          THEN concat_ws(' ', 'called', r.tool, CASE WHEN r.ok = false THEN '(failed)' END)
+        -- never args or a secret value (U2/Ruling 28): only the connection
+        -- name and the upstream tool it named, both of which `meta` already
+        -- carries at the top level (server.ts's `wrap`) — the same fields
+        -- `connection_calls` reads, never `meta.args`.
+        WHEN r.kind = 'connection_call' THEN concat_ws(' ', 'called', r.meta->>'connection_tool', 'on', r.meta->>'connection', CASE WHEN r.ok = false THEN '(failed)' END)
         WHEN r.kind = 'turn'          THEN concat_ws(' ', 'turn', r.model, CASE WHEN r.cost_usd IS NOT NULL THEN '$' || r.cost_usd::text END)
         WHEN r.kind = 'crew_run'      THEN concat_ws(' ', 'crew run', r.model, CASE WHEN r.ok = false THEN 'failed: ' || coalesce(r.error, '') ELSE 'ok' END)
         WHEN r.kind = 'dispatch'      THEN concat_ws(' ', 'dispatched to', r.tool, CASE WHEN r.ok = false THEN 'refused: ' || coalesce(r.error, '') ELSE 'ok' END)
@@ -118,12 +124,12 @@ sql: |
       CASE
         WHEN r.kind = 'task_op'      THEN 'work'
         WHEN r.kind = 'routine_run'  THEN 'routine'
-        ELSE 'run'   -- config_write included: a protected write is on the ledger (T2-16)
+        ELSE 'run'   -- config_write included: a protected write is on the ledger (T2-16); connection_call too (Ruling 28, X-23)
       END                                                                                 AS grp
     FROM runs r
     WHERE r.ts > now() - make_interval(hours => (:hours)::int)
       AND (
-        r.kind IN ('tool', 'turn', 'crew_run', 'dispatch', 'task_op', 'agent_admin', 'project_mode', 'config_write')
+        r.kind IN ('tool', 'turn', 'crew_run', 'dispatch', 'task_op', 'agent_admin', 'project_mode', 'config_write', 'connection_call')
         OR (r.kind = 'collector_run' AND r.ok = false)
         -- settled only (NULL `ok` is in flight), and never a silent tick.
         -- IS DISTINCT FROM, not <>: a row with no outcome (a failure, or one

@@ -221,7 +221,10 @@ did: `call`, `preview`, `ask`, `confirmed`) and `meta.dialled`. An Approve is a
 `connection_call` row too, written by the console (`tool: approve`, `mode:
 approved`). The
 `connection_calls` named query (`expose: route`) reads them back by
-connection, principal, since and ok.
+connection, principal, since and ok. `activity_feed` (Ruling 28) shows the
+same row on the timeline — connection and upstream tool named, never an
+argument or a secret — and `turn_progress` joins it into the strip of one
+turn's calls like any other tool row.
 
 **Not yet wired — said plainly.** This release ships the gate, the tools and
 the record, and the console takes a `connectionsProxy` it hands to both `/mcp`

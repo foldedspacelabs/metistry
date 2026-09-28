@@ -7,6 +7,14 @@
 # stamped by every `wrap()`ed tool call) — never a time window, so a second
 # turn running at the same moment can never bleed into this one's strip.
 #
+# `kind = 'connection_call'` joins here too (Ruling 28, X-23): a
+# `connections_call` is still a tool call the turn made, just recorded under
+# its own `runs.kind` (server.ts's `wrap`) rather than `tool` — so without it
+# the strip would go quiet while a turn waits on a connection. `r.tool` reads
+# `connections_call` on those rows either way; the connection and the
+# upstream tool it named live in `meta`, never read here, so nothing this
+# query returns is an argument or a secret value.
+#
 # What the client does with these rows is deliberately left to the client:
 # the query hands back facts (a tool name, whether it has finished, how it
 # went, how long it took) and never a computed "still working" verdict. The
@@ -30,8 +38,9 @@ description: >-
   Every tool call belonging to one assistant turn (joined on meta.turn_id,
   exact, never a time window), oldest first: the tool name, whether it is
   still running (finished_at IS NULL), its outcome and duration once it has
-  one. Chat's working indicator and tool strip. An unknown or blank turn_id
-  returns no rows.
+  one. Includes connection_call rows (a connections_call proxied through the
+  pool) alongside ordinary tool rows. Chat's working indicator and tool
+  strip. An unknown or blank turn_id returns no rows.
 params:
   turn_id: { type: text, default: "" }
 sql: |
@@ -44,7 +53,7 @@ sql: |
     r.error,
     r.duration_ms
   FROM runs r
-  WHERE r.kind = 'tool'
+  WHERE r.kind IN ('tool', 'connection_call')
     AND r.meta ->> 'turn_id' = (:turn_id)::text
   ORDER BY r.started_at, r.id
 cache_ttl: 0

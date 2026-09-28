@@ -17,8 +17,9 @@
 // (needs-you-view.swift, T5-4a), Activity (activity-view.swift, T6-3),
 // Chat (chat-view.swift, T6-2), Today's top — the brief, Next Up,
 // calendar help, Close the Day (today-view.swift, T6-1b) — Knowledge
-// (knowledge-view.swift, T6-4) and Work ▸ Board with its card detail and
-// rooms (board-view.swift, T6-7) have landed.
+// (knowledge-view.swift, T6-4), Work ▸ Board with its card detail and
+// rooms (board-view.swift, T6-7) and Work ▸ Projects (projects-view.swift,
+// T6-8) have landed.
 //
 // ACCESSIBILITY (§2.18). Every control speaks its name, and a glyph-only one its
 // shortcut too; the Needs You row says *Needs You, 10 waiting*; the gauge says
@@ -53,7 +54,7 @@ public struct RootView: View {
             ShellSidebar(shell: shell, chatIsWorking: model.chat.isWorking)
                 .navigationSplitViewColumnWidth(min: 180, ideal: MetistrySize.sidebar, max: 320)
         } detail: {
-            ShellDetail(shell: shell, needsYou: model.needsYou, activity: model.activity, chat: model.chat, today: model.today, instanceDir: model.instances.active, consoleURL: PasskeyRouting.consoleURL(in: model.status.report).flatMap(URL.init(string:)), knowledge: model.knowledge, onChooseFolder: chooseFolder, scheduled: model.scheduled, agents: model.agents, onOpenConnections: showConnections, board: model.board)
+            ShellDetail(shell: shell, needsYou: model.needsYou, activity: model.activity, chat: model.chat, today: model.today, instanceDir: model.instances.active, consoleURL: PasskeyRouting.consoleURL(in: model.status.report).flatMap(URL.init(string:)), knowledge: model.knowledge, onChooseFolder: chooseFolder, scheduled: model.scheduled, agents: model.agents, onOpenConnections: showConnections, board: model.board, projects: model.projects, onRaiseBudget: showSpendingLimits)
                 // The detail landmark, named for where the owner is.
                 .accessibilityElement(children: .contain)
                 .accessibilityLabel(shell.selection.title)
@@ -270,6 +271,9 @@ struct ShellDetail: View {
     var agents: AgentsModel? = nil
     var onOpenConnections: (() -> Void)? = nil
     var board: BoardModel? = nil
+    var projects: ProjectsModel? = nil
+    /// Raise Budget on a project over its budget: Settings › Compute (C138).
+    var onRaiseBudget: (() -> Void)? = nil
 
     var body: some View {
         let destination = shell.selection
@@ -350,6 +354,18 @@ struct ShellDetail: View {
             // Board still selected (C89). An empty board's one action is the
             // composer.
             BoardView(model: board, assistantName: shell.assistantName, onCapture: { shell.perform(.newCapture) })
+        } else if destination == .projects, let projects {
+            // A project's folder opens where the owner reads the vault; a
+            // run's detail is drawn nowhere on the Mac yet, so it opens in
+            // the web app, as Activity's rows do.
+            ProjectsView(
+                model: projects,
+                assistantName: shell.assistantName,
+                onOpenInObsidian: instanceDir.map { dir in { path in if let url = ObsidianLink.url(for: path, in: dir) { openURL(url) } } },
+                onRaiseBudget: onRaiseBudget,
+                onOpenRun: consoleURL.map { url in { _ in openURL(url) } },
+                onGoToBoard: { shell.navigate(to: .board) }
+            )
         } else {
             ContentUnavailableView {
                 Label(destination.title, systemImage: destination.symbolName)

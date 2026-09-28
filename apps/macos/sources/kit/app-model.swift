@@ -102,6 +102,11 @@ public final class AppModel {
     /// room (board-view.swift). Held here so the board the owner left — its
     /// filter, a refused move's sentence — is the board they come back to.
     public let board: BoardModel
+    /// Work ▸ Projects: the list, the project on screen, its recent runs and
+    /// the confirmation waiting for the owner (projects-view.swift). Held here
+    /// so the project the owner left is the one they come back to; dropped
+    /// with everything else on an instance switch.
+    public let projects: ProjectsModel
 
     public init(
         bundleResourceURL: URL?,
@@ -178,6 +183,7 @@ public final class AppModel {
         self.scheduled = ScheduledModel(session: console)
         self.agents = AgentsModel(session: console)
         self.board = BoardModel(session: console)
+        self.projects = ProjectsModel(session: console)
 
         // The wizard's step 2 hands the folder back the moment it is known, so
         // every later verb runs against it.

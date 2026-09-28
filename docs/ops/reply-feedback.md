@@ -18,13 +18,14 @@ over the wire (plan §2.12):
 | Decline | `deny`, **always** — never a different wire per kind, though its consequences are per-kind (below) |
 | Later | `snoozed_until` is set. The row stays `pending`, leaves the queue, and comes back by itself (`METISTRY_SNOOZE_HOURS`, default 3). |
 | Skip | `deny` + `feedback = 'skipped'` (the fixed marker `SKIP_FEEDBACK`, `packages/core`) — the bulk list only, ≤ 100 rows "on this page" |
+| Acknowledge (a report that names no act) | `acknowledge` — stored `acknowledged`, carries no words, fires nothing; knowledge-fold reads it (X-10) |
 | Send Answers (a question) | `answers`: per question, its options and/or `other` + text — stored `answered` ([client-api.md](client-api.md)); v1's option-as-`decision` still answers a one-question request |
 | *(the source cleared it)* | `resolved_at_source` — mirrors only |
 | *(14 days pass)* | `expired` — rows without a `source` |
 
 Approve, Revise and Decline are the three answers to the request itself —
 each type's own words for them, and only the ones its row in the table has: a
-report is Dismissed (`skip`) and never approved (T2-3).
+report is Acknowledged or Dismissed (`skip`) and never approved (T2-3, X-10).
 Later and Skip are not answers at all — Needs You once had only Approve,
 Revise and Decline, with no way to say *not now* for one row or *nothing to
 say* for many, and an item you can neither answer nor put down stays at the
@@ -97,8 +98,8 @@ vault page and nothing else: there was no capture → `work` path at all.
   the first body line, or the `todo` verdict its rules already reached. No
   model is consulted; the Apple FM tier's `has_action` is deliberately **not**
   an input, because a model must not be what puts an extra button under a
-  proposal (invariant 4). (A report is Dismissed, never approved, so the
-  field on a report is not an answer — T2-3.)
+  proposal (invariant 4). (A report is Acknowledged or Dismissed, never
+  approved, so the field on a report is not an answer — T2-3, X-10.)
 - **§4.12 is intact.** Nothing auto-creates. A suggestion nobody accepts stays
   a suggestion forever; the drain still emits only proposals.
 - **The row is owner-less and unclaimed.** Any agent may take it (collaboration

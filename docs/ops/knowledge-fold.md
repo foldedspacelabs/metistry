@@ -38,7 +38,7 @@ Since the anchor:
 
 | source | what counts |
 | --- | --- |
-| `proposals` | decided `allow` or `accept_with_changes`, kind `knowledge`, `report`, `session`, `review` |
+| `proposals` | decided `allow` or `accept_with_changes`, kind `knowledge`, `report`, `session`, `review` — and a `report` the owner **acknowledged** (`acknowledged`, X-10: a report cannot be approved since T2-3, so Acknowledge is how one is kept). A Dismissed or waiting report is not read. |
 | `work` | rows that reached `status = 'closed'` |
 | `artifact_versions` | versions published (with their artifact's project/slug) |
 | `inbox` | captures of kind `session` (`metistry import-sessions`); captures live at `Inbox/` (`docs/ops/inbox.md`) |

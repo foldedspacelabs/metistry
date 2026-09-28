@@ -17,6 +17,7 @@ backups/
 # built helper bundles (scripts/build-helper.sh) — build output is never tracked
 packages/mcp-apple-fm/helper/afm-helper.app/
 packages/mcp-eventkit/helper/ek-helper.app/
+packages/mcp-live-capture/helper/lc-helper.app/
 
 # release build output (ops/release/pack-runtime.sh); assets live on GitHub Releases
 dist-release/

@@ -125,6 +125,47 @@ describe.skipIf(!hasDb)("crew drain (integration)", () => {
     expect(run_.meta).toMatchObject({ work_id: id, brief_sha: "d".repeat(64), task_id: 77, attempt: 1, effort: "medium", fresh_session: true, crew_sha: "c".repeat(64), outcome: "ok", num_turns: 4, reports: 1, tools_used: ok.tools_used, uses: ["brain-read", "brain-report"] });
   });
 
+  it("a New Routine's run: its read grant is bound to THIS run's bearer while it runs, and gone — stamp and bearer — after (T3-8)", async () => {
+    const id = await enqueue("Summarise Areas/Finance since yesterday", { routine: { name: "vendor-sweep", run_id: 9001, grants: { read: ["Areas/Finance"] } } });
+    const grantsBefore = (await pool.query(`SELECT grants FROM agents WHERE id = $1`, [crewId])).rows[0].grants;
+    let stampDuringRun: unknown;
+    let liveHash = "";
+    let token = "";
+    const run = async (input: CrewRunInput) => {
+      token = input.brain.token;
+      liveHash = await hashOf();
+      stampDuringRun = (await workRow(id)).meta.run_bearer_sha256;
+      return ok;
+    };
+    expect(await drainCrewOne(pool, { ...cfg, runAssigned: run })).toBe(true);
+
+    // during the run: the row names exactly the live bearer
+    expect(stampDuringRun).toBe(tokenHash(token));
+    expect(stampDuringRun).toBe(liveHash);
+    // after: the bearer is burnt and the stamp is gone, so no hash can match the grant again
+    const after = await workRow(id);
+    expect(after.status).toBe("closed");
+    expect(after.meta).not.toHaveProperty("run_bearer_sha256");
+    expect(after.meta.routine).toEqual({ name: "vendor-sweep", run_id: 9001, grants: { read: ["Areas/Finance"] } });
+    expect(await hashOf()).not.toBe(tokenHash(token));
+    // the crew's own registry row was never widened
+    expect((await pool.query(`SELECT grants FROM agents WHERE id = $1`, [crewId])).rows[0].grants).toEqual(grantsBefore);
+    // the run row says which routine this was and what its bearer read beyond the crew's scope
+    const run_ = (await pool.query(`SELECT meta FROM runs WHERE component = $1 AND kind = 'crew_run' AND (meta->>'work_id')::bigint = $2`, [crewId, id])).rows[0];
+    expect(run_.meta).toMatchObject({ routine: "vendor-sweep", routine_run_id: 9001, run_grants: { read: ["Areas/Finance"] } });
+  });
+
+  it("a routine run that fails still leaves no stamp behind; a dispatched (non-routine) row is never stamped", async () => {
+    const failing = await enqueue("routine that throws", { routine: { name: "vendor-sweep", run_id: 9002, grants: { read: ["Areas/Finance"] } } });
+    await drainCrewOne(pool, { ...cfg, maxAttempts: 1, runAssigned: async () => { throw new Error("engine fell over"); } });
+    expect((await workRow(failing)).meta).not.toHaveProperty("run_bearer_sha256");
+
+    const plain = await enqueue("dispatched, not a routine");
+    let stamp: unknown = "unset";
+    await drainCrewOne(pool, { ...cfg, runAssigned: async () => { stamp = (await workRow(plain)).meta.run_bearer_sha256; return ok; } });
+    expect(stamp).toBeUndefined();
+  });
+
   it("a second run gets a different token, and the first one's hash is nowhere", async () => {
     const tokens: string[] = [];
     const run = async (input: CrewRunInput) => {

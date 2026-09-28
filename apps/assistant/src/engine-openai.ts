@@ -45,7 +45,9 @@
 //   which model runs, and a `request:` that could repoint the call would hand
 //   that back. (This is also the hook the 2026-09-12 addendum's `grammar`
 //   field lands in when a `llama-server` provider exposes GBNF — nothing
-//   here has to change for it.)
+//   here has to change for it.) And except `max_tokens`: the tier's
+//   `max_output_tokens` is sent on every call, and `request:` may lower it,
+//   never raise it.
 //
 // The outbound surface is one URL: `<base_url>/chat/completions` on the
 // provider this turn was assigned. There is no other host this file can
@@ -55,6 +57,7 @@
 import {
   costOf,
   credentialEnvNames,
+  DEFAULT_MAX_OUTPUT_TOKENS,
   credentialFromEnv,
   providerCredential,
   unpricedNote,
@@ -163,6 +166,17 @@ function retryAfterMs(headers: Headers, fallback: number): number {
   return Number.isFinite(when) ? Math.max(0, when - Date.now()) : fallback;
 }
 
+/** The most output a call on this assignment may ask for: the tier's `max_output_tokens`, else core's default — never the model's own maximum. */
+export function outputCap(assignment: Pick<ResolvedAssignment, "max_output_tokens">): number {
+  const n = assignment.max_output_tokens;
+  return typeof n === "number" && Number.isInteger(n) && n > 0 ? n : DEFAULT_MAX_OUTPUT_TOKENS;
+}
+
+/** An operator's own `max_tokens`, kept only when it asks for less than the cap. */
+function lowered(asked: unknown, cap: number): number {
+  return typeof asked === "number" && Number.isInteger(asked) && asked > 0 ? Math.min(asked, cap) : cap;
+}
+
 /** `<base_url>/chat/completions`, with the trailing slash question settled once. */
 export function completionsUrl(baseUrl: string): string {
   return `${baseUrl.replace(/\/+$/, "")}/chat/completions`;
@@ -219,6 +233,14 @@ export function makeChatClient(cfg: ChatClientConfig): ChatClient {
     // model runs, and messages are what the data policy was checked against.
     out.model = assignment.model;
     out.messages = messages;
+    // … and the output ceiling. Left out, the ask is the model's whole
+    // window (65,536 on a Claude model through OpenRouter), and a provider
+    // that reserves credit against the ask refuses a two-line answer with
+    // 402 once the balance is below it. The tier's `max_output_tokens` is
+    // sent on every call; a `request:` block may ask for LESS, never more.
+    const cap = outputCap(assignment);
+    out.max_tokens = lowered(out.max_tokens, cap);
+    if (out.max_completion_tokens !== undefined) out.max_completion_tokens = lowered(out.max_completion_tokens, cap);
     return out;
   };
 
@@ -586,6 +608,8 @@ export function makeOpenAiEngine(cfg: OpenAiEngineConfig): Engine {
         from: `shadow:${assignment.from}`,
         config: candidate.config,
         critical: false,
+        // the experiment asks for no more than the turn it re-runs
+        max_output_tokens: outputCap(assignment),
       };
       let allowed = true;
       try {

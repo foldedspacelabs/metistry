@@ -3,9 +3,10 @@
 // what goes on the wire, what stops the loop, what the turn cost, and what a
 // refusal says.
 import { describe, expect, it } from "vitest";
-import { parseCompute, resolveAssignment, type ResolvedAssignment } from "@foldedspacelabs/metistry-core";
+import { DEFAULT_MAX_OUTPUT_TOKENS, parseCompute, resolveAssignment, type ResolvedAssignment } from "@foldedspacelabs/metistry-core";
 import {
   CredentialError,
+  EngineHttpError,
   UNPRODUCTIVE_VETO,
   completeJson,
   completionsUrl,
@@ -138,6 +139,33 @@ describe("the request", () => {
     expect(s.requests[0]!.body.model).toBe("anthropic/claude-sonnet-5");
     expect(s.requests[0]!.body.messages.at(-1)).toEqual({ role: "user", content: "hi" });
     expect(s.requests[0]!.body.temperature).toBe(0.2); // everything else IS verbatim
+  });
+
+  it("max_tokens is the tier's max_output_tokens — 8192 when the file names none, never the model's own maximum", async () => {
+    const s = server([{ body: chat("ok") }, { body: chat("ok") }]);
+    await engineOn(cloud, s, host({}))("hi", { model: cloud.model, effort: cloud.effort, assignment: cloud, thread: "t" });
+    expect(cloud.max_output_tokens).toBe(DEFAULT_MAX_OUTPUT_TOKENS);
+    expect(s.requests[0]!.body.max_tokens).toBe(8192);
+    const capped = resolveAssignment(parseCompute(FILE.replace("routine: { model: lmstudio/google/gemma-3n-e4b, effort: low }", "routine: { model: lmstudio/google/gemma-3n-e4b, effort: low, max_output_tokens: 2048 }")), "routine")!;
+    await engineOn(capped, s, host({}))("hi", { model: capped.model, effort: capped.effort, assignment: capped, thread: "t" });
+    expect(s.requests[1]!.body.max_tokens).toBe(2048);
+  });
+
+  it("a request: block may ask for LESS output than the tier allows, never more (max_tokens and max_completion_tokens)", async () => {
+    const more = resolveAssignment(parseCompute(FILE.replace("request: { provider: { order: [anthropic], allow_fallbacks: false } }", "request: { max_tokens: 65536, max_completion_tokens: 65536 }")), "default")!;
+    const less = resolveAssignment(parseCompute(FILE.replace("request: { provider: { order: [anthropic], allow_fallbacks: false } }", "request: { max_tokens: 300 }")), "default")!;
+    const s = server([{ body: chat("ok") }, { body: chat("ok") }]);
+    await engineOn(more, s, host({}))("hi", { model: more.model, effort: more.effort, assignment: more, thread: "t" });
+    await engineOn(less, s, host({}))("hi", { model: less.model, effort: less.effort, assignment: less, thread: "t" });
+    expect(s.requests[0]!.body.max_tokens).toBe(8192);
+    expect(s.requests[0]!.body.max_completion_tokens).toBe(8192);
+    expect(s.requests[1]!.body.max_tokens).toBe(300);
+  });
+
+  it("max_output_tokens is a positive whole number, refused by name otherwise", () => {
+    for (const bad of ["0", "-5", "1.5", '"lots"']) {
+      expect(() => parseCompute(FILE.replace("effort: high }", `effort: high, max_output_tokens: ${bad} }`))).toThrow(/max_output_tokens/);
+    }
   });
 
   it("a declared credential that is unset refuses by name, before anything is sent", () => {
@@ -372,6 +400,15 @@ describe("backoff and cost", () => {
     const s = server([{ status: 400, body: "no such model" }]);
     const client = makeChatClient({ assignment: local, fetchFn: s.fetchFn, sleep: s.sleep });
     await expect(client.chat([{ role: "user", content: "hi" }])).rejects.toThrow(/returned 400/);
+    expect(s.slept).toEqual([]);
+  });
+
+  it("a 402 (out of credits) is not retried — the same ask would buy the same refusal — and carries the provider's status", async () => {
+    const s = server([{ status: 402, body: { error: { code: 402, message: "This request requires more credits, or fewer max_tokens. You requested up to 65536 tokens, but can only afford 3999." } } }]);
+    const err = await engineOn(cloud, s, host({}))("hi", { model: cloud.model, effort: cloud.effort, assignment: cloud, thread: "t" }).catch((e) => e);
+    expect(err).toBeInstanceOf(EngineHttpError);
+    expect(err.status).toBe(402);
+    expect(s.requests).toHaveLength(1);
     expect(s.slept).toEqual([]);
   });
 

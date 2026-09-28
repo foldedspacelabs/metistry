@@ -70,6 +70,14 @@
 #   #
 #   # and read it back with the `shadow_agreement` named query, or wait for
 #   # the weekly review (docs/ops/compute.md "Shadow mode").
+#   #
+#   # `max_output_tokens` (optional, any assignment) is the most a turn may
+#   # ask the model for — sent as `max_tokens` on every call. Absent, it is
+#   # 8192, never the model's own maximum: a provider that reserves credit
+#   # against the ask refuses a short answer with 402 once the balance is
+#   # below it. Raise it on a tier that writes long documents:
+#   #
+#   #   deep: { model: openrouter/anthropic/claude-sonnet-5, effort: high, max_output_tokens: 16384 }
 #   default: { model: openrouter/anthropic/claude-sonnet-5, effort: medium, critical: true }
 #   tiers:
 #     fast:    { model: local/qwen/qwen3-coder-30b, effort: low }

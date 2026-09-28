@@ -1733,7 +1733,7 @@ in the repo holds the menu and the router together.
 GET  /api/compute                                     the same report as `metistry compute show --json`
 GET  /api/compute/models[?provider=<name>]            live /v1/models, per provider, plus unconfigured local servers
 GET  /api/compute/catalogue[?q=&provider=&refresh=true]   T4-18 — `compute models search --json`: grouped by model
-POST /api/compute/assign          {tier|crew, model, effort?}
+POST /api/compute/assign          {tier|crew, model, effort?}   T8-6 — `tier: private` refuses an off_machine provider (400, naming assignments.tiers.private)
 POST /api/compute/unassign        {tier|crew}            T4-18 — `compute unassign`; `default` is refused
 POST /api/compute/budget          {scope, daily?, monthly?, action}
 POST /api/compute/providers/test  {name, complete?}

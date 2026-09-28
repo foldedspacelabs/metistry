@@ -31,6 +31,10 @@ import {
   providerSecretNames,
   providerTag,
   resolveCrewAssignment,
+  PRIVATE_TIER,
+  PrivateTierUnavailable,
+  resolvePrivateTier,
+  turnTier,
   SECRET_DELIVERY_PREFIX,
   startComputeWatch,
   validateCompute,
@@ -630,6 +634,110 @@ assignments:
       assignments: { default: { model: "ollama/a" }, intent: { model: "ollama/a", effort: "low" } },
     });
     expect(r.ok).toBe(false);
+  });
+});
+
+// ---- T8-6: the private tier (plan §2.15) -----------------------------------------
+//
+// A capture session's turns run on `assignments.tiers.private`, and that tier
+// may only be on this machine. The refusals are the point: at load, at
+// resolution, and — the case the whole tier exists for — no fallback to a
+// `default` that is off the machine or shadowed there.
+describe("the private tier — a capture session's turns stay on this machine (T8-6)", () => {
+  const BOTH = `
+providers:
+  ollama: { kind: openai-compatible, base_url: http://127.0.0.1:11434/v1, locality: on_machine }
+  openrouter:
+    kind: openai-compatible
+    base_url: https://openrouter.ai/api/v1
+    locality: off_machine
+    data_policy: { allow: [Areas], deny_sources: [], max_brief_bytes: 1024 }
+assignments:
+  default: { model: openrouter/anthropic/claude-sonnet-5 }
+`;
+
+  it("is the tier named `private`", () => {
+    expect(PRIVATE_TIER).toBe("private");
+  });
+
+  it("resolves an on-machine private tier to (provider, model, effort) with the provider's block", () => {
+    const cfg = parseCompute(`${BOTH}  tiers:\n    private: { model: ollama/gemma4:e4b-it-qat, effort: high, max_output_tokens: 2048 }\n`);
+    const r = resolvePrivateTier(cfg);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.assignment).toMatchObject({ provider: "ollama", model: "gemma4:e4b-it-qat", effort: "high", from: "private", max_output_tokens: 2048, critical: false });
+    expect(r.assignment.config.locality).toBe("on_machine");
+    expect(r.assignment.shadow).toBeUndefined();
+    expect(resolveAssignment(cfg, "private")).toMatchObject({ provider: "ollama", from: "private" });
+  });
+
+  it("REFUSES assigning a cloud model to `private` at load, naming the field", () => {
+    const r = validateCompute(parseYaml(`${BOTH}  tiers:\n    private: { model: openrouter/anthropic/claude-sonnet-5 }\n`));
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    const all = r.errors.join(" ");
+    expect(all).toContain("assignments.tiers.private.model");
+    expect(all).toContain("locality: off_machine");
+    expect(all).toContain("metistry compute assign private");
+  });
+
+  it("refuses at load when the provider it names is later repointed off the machine", () => {
+    const moved = BOTH.replace("ollama: { kind: openai-compatible, base_url: http://127.0.0.1:11434/v1, locality: on_machine }", "ollama: { kind: openai-compatible, base_url: https://ollama.example/v1, locality: off_machine, data_policy: { allow: [], deny_sources: [], max_brief_bytes: 1 } }");
+    expect(moved).not.toBe(BOTH);
+    expect(() => parseCompute(`${moved}  tiers:\n    private: { model: ollama/gemma4:e4b-it-qat }\n`)).toThrow(/assignments\.tiers\.private\.model.*off_machine/);
+  });
+
+  it("NEVER falls back to an off-machine default: unassigned is a refusal, not a turn answered elsewhere", () => {
+    const cfg = parseCompute(BOTH);
+    const r = resolvePrivateTier(cfg);
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.reason).toContain("never falls back to default");
+    expect(r.reason).toContain("metistry compute assign private");
+    // the resolver every turn goes through refuses too — the ordinary unknown-name rule would have answered on openrouter
+    expect(resolveAssignment(cfg, "nonesuch")?.provider).toBe("openrouter");
+    expect(() => resolveAssignment(cfg, "private")).toThrow(PrivateTierUnavailable);
+  });
+
+  it("does not fall back to an ON-machine default either — its shadow could still run the turn off the machine", () => {
+    const cfg = parseCompute(`
+providers:
+  ollama: { kind: openai-compatible, base_url: http://127.0.0.1:11434/v1, locality: on_machine }
+  openrouter:
+    kind: openai-compatible
+    base_url: https://openrouter.ai/api/v1
+    locality: off_machine
+    data_policy: { allow: [Areas], deny_sources: [], max_brief_bytes: 1024 }
+assignments:
+  default: { model: ollama/gemma4:e4b-it-qat, shadow: { model: openrouter/anthropic/claude-sonnet-5, fraction: 1 } }
+`);
+    expect(resolveAssignment(cfg, "default")?.shadow?.provider).toBe("openrouter");
+    expect(resolvePrivateTier(cfg).ok).toBe(false);
+    expect(() => resolveAssignment(cfg, "private")).toThrow(PrivateTierUnavailable);
+  });
+
+  it("with no assignments at all it refuses rather than handing the turn to rules.yaml's tiers", () => {
+    expect(resolveAssignment(emptyCompute(), "nonesuch")).toBeUndefined(); // the ordinary rule: the caller falls back to rules.yaml
+    expect(() => resolveAssignment(emptyCompute(), "private")).toThrow(/never falls back/);
+  });
+
+  it("re-checks a hand-built object that never went through the schema", () => {
+    const cfg = parseCompute(BOTH);
+    const forged = { ...cfg, assignments: { ...cfg.assignments!, tiers: { private: { model: "openrouter/anthropic/claude-sonnet-5", effort: "medium" as const } } } };
+    const r = resolvePrivateTier(forged);
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.reason).toContain("locality: off_machine");
+    const switchedOff = parseCompute(`${BOTH}  tiers:\n    private: { model: ollama/gemma4:e4b-it-qat }\n`);
+    switchedOff.providers.ollama = { ...switchedOff.providers.ollama!, enabled: false };
+    expect(resolvePrivateTier(switchedOff)).toMatchObject({ ok: false });
+  });
+
+  it("a capture session in scope overrides whatever tier the rules or the policy chose", () => {
+    expect(turnTier("deep", { captureSession: true })).toBe("private");
+    expect(turnTier(null, { captureSession: true })).toBe("private");
+    expect(turnTier("deep", { captureSession: false })).toBe("deep");
+    expect(turnTier(undefined, { captureSession: false })).toBeUndefined();
   });
 });
 

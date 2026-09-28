@@ -45,11 +45,13 @@ import {
   loadKind,
   loadModelIdentities,
   PROVIDER_NAME_RE,
+  PRIVATE_TIER,
   loadCompute,
   modelRefIssue,
   parseCompute,
   parseModelRef,
   parseSecretsFile,
+  privateTierIssue,
   providerCredential,
   providerEnabled,
   providerSchema,
@@ -1279,6 +1281,15 @@ export async function assign(opts: ComputeOptions & { target: AssignmentTarget; 
   if (opts.target.kind !== "default" && plainAt(edit, ["assignments", "default"]) === undefined) {
     throw new StepFailed(`assignments.default is not set yet, and it is where every unnamed and unknown tier lands — run \`metistry compute assign default <provider/model>\` first; ${edit.path} was NOT changed`);
   }
+  // The private tier (plan §2.15): a capture session's turns run on it, so
+  // an off-machine provider is refused HERE, before anything is written —
+  // and again by the schema in `commit`, which is what also holds for the
+  // console's assign and a hand edit.
+  if (opts.target.kind === "tier" && opts.target.name === PRIVATE_TIER) {
+    const provider = plainAt(edit, ["providers", ref.provider]);
+    const why = privateTierIssue(ref.provider, typeof provider?.locality === "string" ? { locality: provider.locality } : undefined);
+    if (why !== undefined) throw new StepFailed(`${why}; ${edit.path} was NOT changed`);
+  }
   const existing = plainAt(edit, path);
   const effort = opts.effort ?? (typeof existing?.effort === "string" ? (existing.effort as Effort) : "medium");
   edit.doc.setIn(path, { model: opts.model, effort });
@@ -1315,6 +1326,12 @@ export async function unassign(opts: ComputeOptions & { target: AssignmentTarget
   if (!edit.doc.hasIn(path)) throw new StepFailed(`${path.join(".")} is not assigned in ${edit.path} — nothing to remove`);
   edit.doc.deleteIn(path);
   const { delivery } = await commit(opts, edit, `metistry compute unassign ${path.join(".")}`);
+  if (opts.target.kind === "tier" && opts.target.name === PRIVATE_TIER) {
+    // The one tier that does NOT fall back to default (core `resolvePrivateTier`).
+    const then = "a turn with a capture session in scope is refused until it is assigned again — it never falls back to assignments.default";
+    opts.out(opts.dryRun === true ? `[dry-run] ${path.join(".")} would be removed — ${then}.` : `${path.join(".")} removed — ${then}.`);
+    return { target: path.join("."), delivery };
+  }
   const who = opts.target.kind === "tier" ? `a turn that names ${opts.target.name}` : `crew ${opts.target.name}, where its definition still says a legacy haiku|sonnet|opus,`;
   opts.out(opts.dryRun === true ? `[dry-run] ${path.join(".")} would be removed — ${who} would then run on assignments.default.` : `${path.join(".")} removed — ${who} now runs on assignments.default.`);
   return { target: path.join("."), delivery };

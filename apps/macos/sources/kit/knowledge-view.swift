@@ -121,7 +121,7 @@ public struct KnowledgeView: View {
         case .search(let q):
             KnowledgeScroll { KnowledgeSearchResults(model: model, query: q) }
         case .page(let path):
-            KnowledgeScroll { KnowledgePageDetail(model: model, path: path, onOpenInObsidian: onOpenInObsidian) }
+            KnowledgeScroll { KnowledgePageDetail(model: model, path: path, assistantName: assistantName, onOpenInObsidian: onOpenInObsidian) }
         case .item(let id):
             KnowledgeScroll { KnowledgeItemDetail(model: model, id: id, assistantName: assistantName, onOpenInObsidian: onOpenInObsidian) }
         }
@@ -136,6 +136,10 @@ public struct KnowledgeView: View {
         switch model.place {
         case .page(let path):
             if onOpenInObsidian != nil { table[.openInObsidian] = { open(path) } }
+            // A restore waiting for this page: the same card's verbs as its buttons.
+            if let row = model.restoreRequest(for: path), let name = assistantName, let cards = model.cards(assistantName: name) {
+                table.merge(cards.card(for: row).itemActions(allowsDecisions: model.allowsDecisions)) { a, _ in a }
+            }
         case .item(let id):
             guard let item = model.eye.first(where: { $0.id == id }) else { break }
             if onOpenInObsidian != nil, !item.path.isEmpty { table[.openInObsidian] = { open(item.path) } }
@@ -688,6 +692,7 @@ struct KnowledgePageDetail: View {
     @Environment(\.colorScheme) private var scheme
     @Bindable var model: KnowledgeModel
     let path: String
+    var assistantName: String? = nil
     let onOpenInObsidian: ((String) -> Void)?
 
     var body: some View {
@@ -709,6 +714,9 @@ struct KnowledgePageDetail: View {
             ControlButton(ControlSpec(KnowledgeWords.openInObsidian, role: .secondary, shortcut: "⌘O", disabledBecause: onOpenInObsidian == nil ? "Obsidian isn't reachable from here" : nil)) {
                 onOpenInObsidian?(page.path)
             }
+            if let row = model.restoreRequest(for: page.path) {
+                KnowledgeRestoreWaiting(model: model, row: row, path: page.path, assistantName: assistantName)
+            }
             Text(FoldText.attributed(page.content))
                 .knowledgeText(.body, p)
                 .tint(p[.accent])
@@ -723,7 +731,157 @@ struct KnowledgePageDetail: View {
                 KnowledgeLinkList(title: KnowledgeWords.outgoing, empty: KnowledgeWords.noOutgoing, links: page.outgoing) { path in Task { await model.open(path: path) } }
                 KnowledgeLinkList(title: KnowledgeWords.incoming, empty: KnowledgeWords.noIncoming, links: page.incoming) { path in Task { await model.open(path: path) } }
             }
+            KnowledgePageHistory(model: model, path: page.path, assistantName: assistantName)
         }
+    }
+}
+
+// MARK: - A page's history (T10-7)
+
+/// A restore asked for on this page, waiting in Needs You — drawn here with
+/// the Needs You card itself, so answering it here answers it there (screen
+/// 10 §3.1, the drafts pattern).
+struct KnowledgeRestoreWaiting: View {
+    @Environment(\.colorScheme) private var scheme
+    @Bindable var model: KnowledgeModel
+    let row: RequestRow
+    let path: String
+    let assistantName: String?
+
+    var body: some View {
+        let p = Palette(scheme)
+        VStack(alignment: .leading, spacing: MetistrySpace.s2) {
+            KnowledgeSectionHeading(title: KnowledgeWords.restoreWaiting, trailing: row.payload?.string("title"))
+            Text(verbatim: KnowledgeWords.answeredThere).knowledgeText(.footnote, p, .textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if let name = assistantName, let cards = model.cards(assistantName: name) {
+                let card = cards.card(for: row)
+                RequestCardView(card, allowsDecisions: model.allowsDecisions, today: model.today, now: model.now(), clock: model.clock)
+                    // Approve wrote the old words back: the page and its history are read again.
+                    .task(id: card.isSettled) { if card.isSettled { await model.restoreAnswered(path) } }
+            } else {
+                // The name is not known yet; the card would print none.
+                Text(verbatim: row.payload?.string("summary") ?? KnowledgeWords.restoreWaiting).knowledgeText(.body, p)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+
+/// The page's commits, newest first: who, when, what — each one's words on
+/// request, and Restore on the owner's own Mac.
+struct KnowledgePageHistory: View {
+    @Environment(\.colorScheme) private var scheme
+    @Bindable var model: KnowledgeModel
+    let path: String
+    let assistantName: String?
+
+    var body: some View {
+        let p = Palette(scheme)
+        VStack(alignment: .leading, spacing: MetistrySpace.s2) {
+            switch model.history {
+            case .loading?, nil:
+                KnowledgeSectionHeading(title: VaultHistoryWords.history)
+                PlaceholderRows(count: 2, waitingFor: "Reading the history of \(path)")
+            case .failed(let why)?:
+                KnowledgeSectionHeading(title: VaultHistoryWords.history)
+                FactNote(FactNoteModel("History: \(why)"))
+            case .loaded(let commits)?:
+                KnowledgeSectionHeading(title: VaultHistoryWords.history, trailing: commits.isEmpty ? nil : "\(commits.count)")
+                if commits.isEmpty {
+                    Text(verbatim: VaultHistoryWords.noHistory).knowledgeText(.footnote, p, .textSecondary)
+                }
+                if let note = model.restoreNote, note.path == path, case .refused(let why) = note.phase {
+                    FactNote(FactNoteModel(why))
+                }
+                ForEach(Array(commits.enumerated()), id: \.element.id) { index, commit in
+                    KnowledgeCommitRow(model: model, commit: commit, offer: model.restoreOffer(commit, isNewest: index == 0, on: path), assistantName: assistantName)
+                }
+                if case .remote = model.reach {
+                    FactNote(FactNoteModel(VaultHistoryWords.onlyTheMac))
+                }
+                KnowledgeRule(text: VaultHistoryWords.restoreRule)
+            }
+        }
+    }
+}
+
+/// One commit: the row is one spoken element; its two verbs are their own.
+struct KnowledgeCommitRow: View {
+    @Environment(\.colorScheme) private var scheme
+    @Bindable var model: KnowledgeModel
+    let commit: KnowledgeCommit
+    let offer: KnowledgeRestoreOffer
+    let assistantName: String?
+
+    var body: some View {
+        let p = Palette(scheme)
+        let shown = model.versions[commit.sha]
+        VStack(alignment: .leading, spacing: MetistrySpace.s1) {
+            VStack(alignment: .leading, spacing: MetistrySpace.s1) {
+                Text(verbatim: commit.subject.isEmpty ? commit.short : commit.subject).knowledgeText(.body, p)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(verbatim: facts).knowledgeText(.caption1, p, .textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if commit.path != model.pagePath {
+                    Text(verbatim: commit.path).knowledgeText(.caption1, p, .textSecondary, design: .mono)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text(verbatim: commit.spoken(assistantName: assistantName, clock: model.clock, now: model.now())))
+            FlowLayout(spacing: MetistrySpace.s2) {
+                if offer != .deleted {
+                    ControlButton(ControlSpec(shown == nil ? VaultHistoryWords.showVersion : VaultHistoryWords.hideVersion, role: .plain)) {
+                        Task { await model.toggleVersion(commit) }
+                    }
+                }
+                switch offer {
+                case .current:
+                    Text(verbatim: VaultHistoryWords.current).knowledgeText(.caption1, p, .textSecondary)
+                case .offered(let why):
+                    ControlButton(ControlSpec(VaultHistoryWords.restore, role: .secondary, disabledBecause: why)) {
+                        Task { await model.restore(commit) }
+                    }
+                case .renamed, .deleted, .notHere:
+                    EmptyView()
+                }
+            }
+            switch offer {
+            case .renamed: Text(verbatim: VaultHistoryWords.renamedFrom).knowledgeText(.caption1, p, .textSecondary).fixedSize(horizontal: false, vertical: true)
+            case .deleted: Text(verbatim: VaultHistoryWords.deletedHere).knowledgeText(.caption1, p, .textSecondary).fixedSize(horizontal: false, vertical: true)
+            // Off because of a fact, so the fact is said (components-01 §1.3).
+            case .offered(let why?): FactNote(FactNoteModel(why))
+            default: EmptyView()
+            }
+            switch shown {
+            case .loading?:
+                PlaceholderRows(count: 2, waitingFor: "Reading \(commit.short)")
+            case .failed(let why)?:
+                FactNote(FactNoteModel(why))
+            case .loaded(let words)?:
+                Text(verbatim: words)
+                    .knowledgeText(.body, p)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+                    .padding(MetistrySpace.s3)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(p[.elevated], in: RoundedRectangle(cornerRadius: MetistryRadius.md, style: .continuous))
+            case nil:
+                EmptyView()
+            }
+        }
+        .padding(.vertical, MetistrySpace.s1)
+    }
+
+    /// *by You · 28 Sep, 1:10 PM · renamed · 4c1d2e3*.
+    private var facts: String {
+        var parts: [String] = []
+        if let who = VaultWho.name(source: commit.source, author: commit.author, assistantName: assistantName) { parts.append("by \(who)") }
+        if let at = commit.at { parts.append(model.clock.moment(at, now: model.now())) }
+        if let change = commit.change { parts.append(change) }
+        parts.append(commit.short)
+        return parts.joined(separator: " · ")
     }
 }
 

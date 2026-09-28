@@ -1426,6 +1426,15 @@ member on its next request; removing the slug from the agent's projects
 (`PUT /api/agents/:id/projects`) removes the inherited reach. The instance's
 assistant inherits nothing (its reach is configuration).
 
+`GET /api/projects` serves each project's stored **`grants`** beside its
+rollup (T6-8, additive; `{tier: "none", areas: []}` when none was ever set),
+so the Projects screen draws *every member gets these* from the same read as
+the rest of the row. It is read from the `projects` row itself, not the
+`projects_rollup` seed query, so an instance's overlay of that query cannot
+drop it. `members` is the rollup's: an internal assistant row with no project
+list is a member of every project, and — per the rule above — inherits none of
+them; the Mac draws it apart from the members that do.
+
 ### Work — the board and dispatch
 
 ```

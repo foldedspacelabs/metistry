@@ -72,6 +72,10 @@ public enum MetistryGlyph: String, CaseIterable, Sendable {
     /// and not by fill alone (components-01 §2.4).
     case approve = "checkmark"
     case decline = "xmark"
+    /// A project in Review the owner chose (C83): the weight channel's mark —
+    /// a heavier outline and this raised hand (handoffs wait for you), never a
+    /// tint (screen 13 §1). Not the eye: that is Needs You's *review* request.
+    case reviewMode = "hand.raised"
 
     /// The symbol drawn when a control holding this glyph is selected (a lit rating).
     public var selectedName: String {
@@ -109,6 +113,7 @@ public enum MetistryGlyph: String, CaseIterable, Sendable {
         case .edit: return "Edit"
         case .approve: return "Approve"
         case .decline: return "Decline"
+        case .reviewMode: return "in review"
         }
     }
 }

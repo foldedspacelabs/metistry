@@ -435,7 +435,7 @@ describe("Projects: the mode chip and the spend bar carry the row", () => {
     const html = projectRowHtml(p, 1);
     expect(html).toContain("<b>Metistry</b>");
     expect(html).toContain('<span class="chip review">Review</span>');
-    expect(html).toContain("3 open · 1 blocked · 0 agents");
+    expect(html).toContain("4 open · 1 blocked · 2 agents");
     expect(html).toContain("$0.00 today · no budget");
     expect(html).toContain('data-act="project" data-id="metistry"');
     expect(html).not.toMatch(/Supervised|>Auto</); // the old words (glossary.md: Autonomous · Review)

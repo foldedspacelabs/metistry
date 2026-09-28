@@ -102,7 +102,7 @@ describe.skipIf(!hasDb)("projects routes (integration)", () => {
     expect(r.status).toBe(200);
     const { projects } = await r.json();
     const p = projects.find((x: { id: string }) => x.id === P);
-    expect(p).toMatchObject({ id: P, mode: "autonomous", daily_budget_usd: null, max_open_bundles: 20, open_tasks: 0, bundles_in_flight: 0, bundles_queued: 0, open_threads: 0, pending_reviews: 0, spend_today_usd: 0, last_mode_change: null });
+    expect(p).toMatchObject({ id: P, mode: "autonomous", daily_budget_usd: null, max_open_bundles: 20, open_tasks: 0, bundles_in_flight: 0, bundles_queued: 0, open_threads: 0, pending_reviews: 0, spend_today_usd: 0, last_mode_change: null, grants: { tier: "none", areas: [] } });
     // members = agentIsMember's rule: this agent, plus any internal agent with no project list (a member of every project) another suite may have made
     expect(p.members).toContain(agentId);
     expect(p.members.filter((m: string) => m.startsWith("itest-proj-"))).toEqual([agentId]);
@@ -139,6 +139,9 @@ describe.skipIf(!hasDb)("projects routes (integration)", () => {
     expect(r.status).toBe(200);
     expect((await r.json()).project).toMatchObject({ id: P, grants: { tier: "areas", areas: ["Areas/Fsl"] } });
     expect((await pool.query(`SELECT grants FROM projects WHERE id = $1`, [P])).rows[0]).toEqual({ grants: { tier: "areas", areas: ["Areas/Fsl"] } });
+    // …and the list serves it beside the rollup (T6-8: *every member gets these*)
+    const listed = (await (await json("GET", "/api/projects")).json()).projects.find((x: { id: string }) => x.id === P);
+    expect(listed.grants).toEqual({ tier: "areas", areas: ["Areas/Fsl"] });
     // a grant outside the vault's content: machinery, artifacts, and the bare vault (internal rows only) are all refused before anything is written
     for (const areas of [[".metistry/state"], ["Artifacts/Reports"], ["/"]]) {
       const bad = await json("PUT", `/api/projects/${P}`, { grants: { tier: "areas", areas } });

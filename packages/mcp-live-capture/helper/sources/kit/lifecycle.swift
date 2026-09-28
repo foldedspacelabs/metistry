@@ -50,6 +50,9 @@ public enum StopReason: String, Equatable {
     case crashed
     /// A stream could not be reopened after the Mac woke.
     case resumeFailed = "resume_failed"
+    /// The helper was told to quit (launchd stopping it, a logout): a clean
+    /// save, not a crash.
+    case helperStopped = "helper_stopped"
 }
 
 public enum LifecycleAction: Equatable {

@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import { mintToken } from "@foldedspacelabs/metistry-core";
 import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
-import { run } from "../github-state/run.js";
+import { RECEIPTS, run } from "../github-state/run.js";
 
 const { hasDb } = loadTestEnv(new URL("../../.env", import.meta.url)); // METISTRY_DB_* only (docs/ops/testing.md)
 const suffix = mintToken(6).toLowerCase().replaceAll(/[^a-z0-9]/g, "").slice(0, 6) || "x";
@@ -69,6 +69,8 @@ describe.skipIf(!hasDb)("the pull request mirror (real db)", () => {
       )
     ).rows as { id: number; decision: string; head: string; work_id: number | null }[];
 
+  const receipt = async (id: number) => (await pool.query(`SELECT payload->'cleared' AS cleared FROM proposals WHERE id = $1`, [id])).rows[0].cleared;
+
   beforeAll(async () => {
     pool = await testDb(pg.Pool);
   });
@@ -103,6 +105,7 @@ describe.skipIf(!hasDb)("the pull request mirror (real db)", () => {
       ["resolved_at_source", sha("a")],
       ["pending", sha("b")],
     ]);
+    expect(await receipt(rows[0]!.id)).toEqual({ what: RECEIPTS.pushed, where: "github" }); // T4-23
   });
 
   it("an answer the owner gave is not asked again for the same head — a new push asks again", async () => {
@@ -119,6 +122,7 @@ describe.skipIf(!hasDb)("the pull request mirror (real db)", () => {
     s.reviews = [{ user: { login: "me" }, state: "APPROVED" }];
     await pass();
     expect((await requests()).at(-1)).toMatchObject({ decision: "resolved_at_source", head: sha("c") });
+    expect(await receipt((await requests()).at(-1)!.id)).toEqual({ what: RECEIPTS.approved, where: "github" });
     s.reviewers = ["me"]; // a fresh request re-opens it, even after an approval
     await pass();
     expect((await requests()).at(-1)).toMatchObject({ decision: "pending", head: sha("c") });
@@ -128,6 +132,7 @@ describe.skipIf(!hasDb)("the pull request mirror (real db)", () => {
     s.draft = true;
     await pass();
     expect((await requests()).filter((r) => r.decision === "pending")).toHaveLength(0);
+    expect(await receipt((await requests()).at(-1)!.id)).toEqual({ what: RECEIPTS.draft, where: "github" });
     s.draft = false;
     await pass();
     expect((await requests()).filter((r) => r.decision === "pending")).toHaveLength(1);
@@ -135,6 +140,7 @@ describe.skipIf(!hasDb)("the pull request mirror (real db)", () => {
     s.merged = true;
     await pass();
     expect((await requests()).filter((r) => r.decision === "pending")).toHaveLength(0);
+    expect(await receipt((await requests()).at(-1)!.id)).toEqual({ what: RECEIPTS.merged, where: "github" });
     expect((await pool.query(`SELECT status, meta->>'merged' AS merged FROM work WHERE external_ref = $1`, [REF])).rows[0]).toEqual({ status: "closed", merged: "true" });
   });
 });

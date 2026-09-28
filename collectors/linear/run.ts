@@ -11,7 +11,8 @@
 //   * an issue that leaves the list — closed, or given to someone else — is
 //     looked up once by id, its row closed with what became of it
 //     (`meta.closed_reason`: completed · canceled · unassigned · gone), and
-//     its request resolved at source (core's `resolveAtSource`);
+//     its request resolved at source (core's `resolveAtSource`) with a
+//     receipt naming what became of it (*Completed in Linear*);
 //   * with `syncs.linear.raise.assigned` on (the default), an issue with no
 //     request yet — or whose last one its source resolved, i.e. it was
 //     closed or unassigned and is back — raises one `task` mirror (core's
@@ -104,6 +105,22 @@ export function assignedPayload(issue: LinearIssue, connection: string): Record<
   };
 }
 
+/** The receipt a clear writes (core's `resolveAtSource`, T4-23): what became of the issue, in Linear. */
+export function clearedReceipt(reason: string): string {
+  switch (reason) {
+    case "completed":
+      return "Completed in Linear";
+    case "canceled":
+      return "Canceled in Linear";
+    case "unassigned":
+      return "Assigned to someone else in Linear";
+    case "gone":
+      return "No longer in Linear";
+    default:
+      return `Closed in Linear (${reason})`;
+  }
+}
+
 /** Why an issue left the owner's list, from what Linear says of it now (null: it has not left). */
 export function closedReason(now: LinearIssue | undefined): string | null {
   if (!now) return "gone";
@@ -169,7 +186,7 @@ export async function run(db: Db, ctx: LinearCtx = {}): Promise<number> {
     if (reason === null) continue; // assigned and open after all (it moved between the two reads): the next pass sees it
     const patch: Record<string, unknown> = { closed_reason: reason, ...(issue ? { state: issue.state.name, state_type: issue.state.type, url: issue.url } : {}) };
     await db.query(`UPDATE work SET status = 'closed', updated_at = now(), meta = coalesce(meta, '{}'::jsonb) || $2::jsonb WHERE id = $1`, [row.id, JSON.stringify(patch)]);
-    await resolveAtSource(db, { kind: SOURCE_KIND, external_ref: row.external_ref });
+    await resolveAtSource(db, { kind: SOURCE_KIND, external_ref: row.external_ref }, clearedReceipt(reason));
     touched++;
   }
   return touched;

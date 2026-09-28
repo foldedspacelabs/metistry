@@ -19,8 +19,6 @@ import { join, resolve } from "node:path";
 import { parse as parseYaml } from "yaml";
 import {
   COMPUTE_FILENAME,
-  DEFAULT_DEPLOYMENT,
-  DEPLOYMENT_FILENAME,
   INSTANCE_CONFIG_DIRS,
   INSTANCE_GITIGNORE,
   INSTANCE_LAYOUT,
@@ -30,12 +28,11 @@ import {
   keepAwakeChoice,
   metistryPath,
   mintToken,
-  parseDeployment,
   parseKeepAwake,
   type DeploymentShape,
   type KeepAwake,
 } from "@foldedspacelabs/metistry-core";
-import { applyKeepAwakeToYaml } from "./deployment.js";
+import { applyKeepAwakeToYaml, applyShapeToYaml } from "./deployment.js";
 import { realExec, type Exec } from "./exec.js";
 import { mintInstanceId, withInstanceId } from "./instance.js";
 import { LOCK_FILENAME, serializeLock, type LockFile, type LockSource } from "./lock.js";
@@ -57,10 +54,15 @@ export interface InitOptions {
   /** How the product got here (docs/ops/cli.md): a git checkout `update` fast-forwards, or a pinned release. */
   productSource?: LockSource | undefined;
   /**
-   * Which deployment shape the printed `.env` lines target (`--shape`,
-   * docs/ops/deployment-shapes.md). Undefined = guess from `platform`: this
-   * is only a printing decision — the instance's actual `deployment.yaml`
-   * shape is still set by `metistry deployment set-shape`, unchanged here.
+   * Which deployment shape this instance targets (`--shape`, ruling 23 —
+   * docs/product/decisions-log.md): decides the printed `.env` lines below,
+   * AND — when `--keep-awake` is answered — the shape that answer is
+   * recorded against in `.metistry/deployment.yaml`, so the two can never
+   * disagree. Undefined = guess from `platform`: `launchd` on macOS (what
+   * the Mac app installs, no Docker Desktop hurdle), `compose` everywhere
+   * else. Never the seed's own shape, which is a product default and not a
+   * decision about THIS instance. Changed later with
+   * `metistry deployment set-shape`, which moves the data.
    */
   shape?: DeploymentShape | undefined;
   /** test seam: which OS this is stamping on, for the `shape` guess above. */
@@ -183,23 +185,6 @@ export async function askKeepAwake(ask: Ask, out: (line: string) => void, opts: 
   throw new Error(`no usable answer to the keep-awake question after ${attempts} tries — rerun with \`--keep-awake <${numbered.join("|")}>\``);
 }
 
-/**
- * The shape this install ALREADY has, from the product's seed, because the
- * file `init` writes for the keep-awake answer must carry it: a
- * deployment.yaml with only `keep_awake` in it parses with `shape` defaulted
- * to compose and would quietly move the install. The answer to one question is
- * never a decision about the other.
- */
-export async function seedShape(seedDir: string): Promise<DeploymentShape> {
-  const file = join(seedDir, DEPLOYMENT_FILENAME);
-  if (!existsSync(file)) return DEFAULT_DEPLOYMENT.shape;
-  try {
-    return parseDeployment(parseYaml(await readFile(file, "utf8")), `seed/${DEPLOYMENT_FILENAME}`).shape;
-  } catch {
-    return DEFAULT_DEPLOYMENT.shape;
-  }
-}
-
 /** The mention trigger follows the name: "Metis" → "@metis". */
 export function mentionFor(name: string): string {
   return `@${name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
@@ -252,6 +237,27 @@ export async function init(opts: InitOptions): Promise<InitResult> {
     throw new Error(`${opts.seedDir} is not a Metistry seed/ (identity.yaml + ${SEED_VAULT_DIR}/ expected)`);
   }
 
+  // The shape this instance targets (ruling 23): `--shape` wins outright;
+  // undefined guesses from the platform — `launchd` on macOS, what the Mac
+  // app installs and a fresh checkout runs with no Docker Desktop hurdle,
+  // `compose` everywhere else. The SAME value now decides both the printed
+  // `.env` lines below and, when `--keep-awake` is answered, the shape that
+  // answer is recorded against — never the seed's own shape, which is a
+  // product default and not a decision about THIS instance.
+  const shape: DeploymentShape = opts.shape ?? ((opts.platform ?? process.platform) === "darwin" ? "launchd" : "compose");
+
+  // The compose shape installs no supervisor — the process a keep-awake
+  // assertion's lifetime is tied to (docs/ops/deployment-shapes.md) — so
+  // answering the question at all would record a promise this install can
+  // never keep. Refuse rather than write a setting that silently holds
+  // nothing: pick `--shape launchd`, or leave `--keep-awake` unanswered and
+  // decide later, after `metistry deployment set-shape launchd`.
+  if (opts.keepAwake !== undefined && shape === "compose") {
+    throw new Error(
+      `--keep-awake is refused for --shape compose: the compose shape installs no supervisor, so nothing would ever be held (docs/ops/deployment-shapes.md) — pick --shape launchd, or leave --keep-awake unanswered.`,
+    );
+  }
+
   await mkdir(dir, { recursive: true });
 
   // the vault starter, AT THE ROOT: now.md (where brain-commit writes),
@@ -294,13 +300,19 @@ export async function init(opts: InitOptions): Promise<InitResult> {
     await writeFile(metistryPath(dir, d, ".gitkeep"), "");
   }
 
-  // The keep-awake answer, when there is one. `deployment.yaml` is a §4.7
-  // protected path, and this is the same moment `init` stamps the other two
-  // (identity.yaml, metistry.lock) by hand: there is no repo and no
-  // reconciler yet, and the first commit below is what makes them the record.
-  if (opts.keepAwake !== undefined) {
-    await writeFile(instancePath(dir, "deployment"), applyKeepAwakeToYaml(undefined, opts.keepAwake, await seedShape(opts.seedDir)));
-  }
+  // `deployment.yaml` is a §4.7 protected path, and this is the same moment
+  // `init` stamps the other two (identity.yaml, metistry.lock) by hand: there
+  // is no repo and no reconciler yet, and the first commit below is what
+  // makes them the record. ALWAYS written — the resolved shape above (ruling
+  // 23) must never be left implicit in the seed's own default, or the most
+  // common path (a plain macOS `init`, no `--shape`, keep-awake unanswered —
+  // the Mac app's first run) would print launchd-shaped lines while `up`
+  // silently installs whatever the seed says (`compose`). The keep-awake
+  // field is added only when the question was actually answered.
+  await writeFile(
+    instancePath(dir, "deployment"),
+    opts.keepAwake !== undefined ? applyKeepAwakeToYaml(undefined, opts.keepAwake, shape) : applyShapeToYaml(undefined, shape),
+  );
 
   await writeFile(
     instancePath(dir, "readme"),
@@ -327,14 +339,12 @@ export async function init(opts: InitOptions): Promise<InitResult> {
   await git("commit", "-q", "-m", "Instance created");
   const commit = await git("rev-parse", "HEAD");
 
-  // Which shape the printed lines target (docs/ops/deployment-shapes.md):
-  // launchd is what the Mac app installs and what a fresh macOS checkout
-  // runs by default (no Docker Desktop hurdle); `--shape compose` keeps the
-  // old compose-shaped line for a container install. Namespacing
-  // (`metistry up --namespace`) only ever applies to the launchd shape
-  // (`docs/ops/deployment-shapes.md`, "A second instance on one Mac") —
-  // compose's ports stay the fixed defaults docker-compose.yml publishes.
-  const shape: DeploymentShape = opts.shape ?? ((opts.platform ?? process.platform) === "darwin" ? "launchd" : "compose");
+  // The printed lines target the same shape a keep-awake answer, if any, was
+  // just recorded against above (docs/ops/deployment-shapes.md), so the two
+  // can never disagree. Namespacing (`metistry up --namespace`) only ever
+  // applies to the launchd shape (`docs/ops/deployment-shapes.md`, "A second
+  // instance on one Mac") — compose's ports stay the fixed defaults
+  // docker-compose.yml publishes.
   const ns = shape === "launchd" ? await loadNamespace(dir) : undefined;
   const consolePort = shape === "launchd" ? (ns?.ports.console ?? DEFAULT_PORTS.console) : DEFAULT_PORTS.console;
   const reconcilerUrl =

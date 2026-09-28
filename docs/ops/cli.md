@@ -506,6 +506,28 @@ reconciler cannot commit (a merge in progress) is put back. Idempotent, and it
 never fails the update. `metistry doctor`'s **vault case** row lists any such
 file with the fix.
 
+**`--shape <compose|launchd>` and `--keep-awake <value>` (ruling 23,
+`docs/product/decisions-log.md`).** `--shape` decides which deployment shape
+THIS instance targets — never a guess borrowed from the product's own
+`seed/deployment.yaml`, which is only a shipped default. Undefined guesses
+from the platform: `launchd` on macOS (what the Mac app installs, no Docker
+Desktop hurdle) and `compose` everywhere else; a typo (anything but
+`compose`/`launchd`) is a usage error, never a silent fall-back to the guess.
+
+`--keep-awake <value>` answers the onboarding question against that same
+shape — the value it writes to `.metistry/deployment.yaml` is recorded
+alongside whichever shape `--shape` named or the platform guess picked, so
+the two settings can never disagree about which install they describe. The
+compose shape installs no supervisor — the process a keep-awake assertion's
+lifetime is tied to (`docs/ops/deployment-shapes.md`, "The supervisor holds
+it, so the `launchd` shape holds it") — so **`--keep-awake` is refused
+outright when the resolved shape is `compose`**: answering the question
+would record a promise this install can never keep, rather than the honest
+"not configured" an unanswered question leaves. Pick `--shape launchd`, or
+leave `--keep-awake` unanswered and decide later with
+`metistry deployment set-keep-awake`, once the instance is on a shape that
+can hold it.
+
 What it prints at the end is the next step —
 six lines for `<dir>/.metistry/state/.env`, this instance's own environment,
 shaped for `--shape compose|launchd` (default: launchd on macOS, compose

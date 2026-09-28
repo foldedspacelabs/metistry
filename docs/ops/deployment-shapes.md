@@ -461,6 +461,21 @@ choice costs, and writes the answer. `--keep-awake <value>` answers it
 without a terminal, and a run with neither — a pipe, a script, the Mac
 app's first run — asks nothing and writes nothing.
 
+**`init --shape` and `--keep-awake` (ruling 23,
+`docs/product/decisions-log.md`).** The shape a keep-awake answer is
+recorded against is the one THIS instance targets — `--shape`, or the
+platform's default (`launchd` on macOS, `compose` elsewhere) when it is
+absent — never `seed/deployment.yaml`'s own shape, which is a product
+default and not a decision about this install. Because the compose shape
+installs no supervisor (below) — nothing a keep-awake assertion could ever
+attach to — **`metistry init --keep-awake` is refused outright when the
+resolved shape is `compose`**, on the terminal question or the flag alike:
+recording an answer that can never be honoured would be worse than the
+honest "not configured" an unanswered question leaves. `docs/ops/cli.md`
+documents the exact refusal message; move the instance to `launchd`
+(`--shape launchd` at `init`, or `metistry deployment set-shape launchd`
+afterwards) to answer the question for real.
+
 **What is held.** `caffeinate -i -w <supervisor pid>`, which is exactly
 `IOPMAssertionCreateWithName(kIOPMAssertPreventUserIdleSystemSleep)` — the
 same IOKit call, no privileges, no TCC grant, no `sudo`. Never `-d` (that

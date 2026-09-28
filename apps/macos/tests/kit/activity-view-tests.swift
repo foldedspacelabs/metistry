@@ -101,7 +101,7 @@ import Testing
     let items = model.items
     let turn = try #require(items.first { if case .turn = $0 { return true } else { return false } })
     guard case .turn(let head, let turnID, let calls) = turn else { return }
-    #expect(turnID == "turn-SBGnE9jc")
+    #expect(turnID == "turn-FsBUg1CO")
     #expect(calls.map(\.subject) == ["knowledge_search", "tasks_update"])
     // the calls are not rows of their own
     #expect(!items.contains { $0.head.kind == "tool" })
@@ -119,7 +119,7 @@ import Testing
     console.reset()
     await model.setExpanded(turn, true)
     let asked = try #require(console.calls.first { $0.path.hasPrefix("/api/q/activity_feed") })
-    #expect(query(asked.path)["turn_id"] == "turn-SBGnE9jc", "\(asked.path)")
+    #expect(query(asked.path)["turn_id"] == "turn-FsBUg1CO", "\(asked.path)")
     #expect(model.presentation(turn, assistantName: "Aide").spoken.contains("expanded"))
     #expect(!model.calls(of: turn).rows.contains { $0.kind == "turn" }, "the turn is the disclosure, not one of its calls")
 }
@@ -454,7 +454,7 @@ import Testing
 
 private let utc = TimeZone(identifier: "UTC")!
 /// Two minutes after the recorded feed's `as_of`.
-private let recordedNow = WireTime.date("2026-09-28T22:45:29.462Z")!
+private let recordedNow = WireTime.date("2026-09-28T23:07:56.988Z")!
 
 @MainActor
 private func activityModel(_ console: any ConsoleCallTransport) -> (ActivityModel, ConsoleSession) {

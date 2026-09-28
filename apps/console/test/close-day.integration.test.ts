@@ -553,7 +553,7 @@ describe.skipIf(!hasDb)("Close the Day: POST /api/today/close", () => {
     const planRoutine = routines.find((r) => r.name === "plan-tomorrow")!;
     const trigger = new RoutineTrigger(
       "plan-tomorrow",
-      closeTriggeredPass(pool, planRoutine as never, { queries, vault: planVault, calendar: null, env: { METISTRY_TZ: "UTC" }, get now() { return clockAt; } }),
+      closeTriggeredPass(pool, planRoutine as never, { queries, vault: planVault, calendar: null, env: { METISTRY_TZ: "UTC" }, get now() { return clockAt; } }, planRoutine.manifest.display_name ?? planRoutine.name),
     );
     directDeps = { plan: trigger };
 

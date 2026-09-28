@@ -1262,8 +1262,11 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
     // a row from before T1-4, with no outcome: shown, not silently dropped by a NULL comparison
     await settle({ ok: true, meta: { processed: 2 } });
 
-    // X-21 (Ruling 25): the subject is the routine's display name, not its
-    // raw component id — `rt-<ts>` reads as `Rt <ts>`; `actor` is untouched
+    // X-21 (Ruling 25): none of these rows carry the runner's meta.display_name
+    // stamp (they are written the way a row from before that existed would
+    // be), so the subject falls back to the same identifier-to-title
+    // transform `titleOf` gives a New Routine with no manifest — `rt-<ts>`
+    // reads as `Rt <ts>`. `actor` is untouched either way.
     const displayName = tag
       .split("-")
       .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
@@ -1290,6 +1293,26 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
     await finishRun(pool, inFlight, { ok: true, meta: { processed: 3, outcome: "acted" } });
     const late = (await store.run("activity_feed", { hours: 1, limit: 500, agent: tag, since: cursor })).rows;
     expect(late.map((r) => r.ref)).toContain(`runs:${inFlight}`);
+  });
+
+  // X-21 (Ruling 25): the runner stamps meta.display_name on a routine_run row
+  // from the manifest it already has loaded (apps/console/src/runner.ts,
+  // close-day.ts) — activity_feed reads THAT, not a transform of the id, so a
+  // routine whose display name reorders its words (plan-tomorrow's is
+  // "Tomorrow's Plan", not "Plan Tomorrow") still reads correctly. The
+  // manifest is read here, not copied as a literal, so this fails the moment
+  // the two disagree.
+  it("activity_feed: a routine_run row's subject is meta.display_name, the manifest's own word — not a transform of its id", async () => {
+    const manifest = parse(readFileSync(join(REPO, "routines/plan-tomorrow/manifest.yaml"), "utf8")) as { display_name?: string };
+    const displayName = manifest.display_name;
+    expect(displayName).toBe("Tomorrow's Plan"); // guards the fixture below against a manifest edit landing unnoticed
+
+    const tag = `pt-${Date.now()}`;
+    const id = await startRun(pool, { component: tag, kind: "routine_run", meta: { display_name: displayName } });
+    await finishRun(pool, id, { ok: true, meta: { processed: 1, outcome: "acted", path: "Journal/Plan/2026-09-29.md" } });
+    const rows = (await store.run("activity_feed", { hours: 1, limit: 500, agent: tag })).rows;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ subject: displayName, actor: tag });
   });
 
   it("activity_feed: `ok` is on every row — the run's own for a run, NULL where the source cannot fail", async () => {

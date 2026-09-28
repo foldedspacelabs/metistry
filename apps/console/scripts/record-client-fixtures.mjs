@@ -565,12 +565,16 @@ await pool.query(`INSERT INTO runs (component, kind, tool, ok, finished_at, dura
 ]);
 // routines on Activity (T1-3, C43): the plan a routine wrote, one that threw
 // (`ok = false`, no `meta.outcome` — the runner's catch, T1-4) and a silent
-// tick, which the feed must leave out
+// tick, which the feed must leave out. `meta.display_name` is stamped the
+// way the runner stamps it (Ruling 25, X-21) — read straight from each
+// routine's own manifest, not the id un-hyphenated — so the recorded feed
+// shows the real word (`plan-tomorrow`'s is "Tomorrow's Plan", not "Plan
+// Tomorrow").
 await pool.query(
   `INSERT INTO runs (component, kind, ok, error, started_at, finished_at, meta) VALUES
-     ('plan-tomorrow', 'routine_run', true, NULL, now(), now(), '{"planned_for":"2026-09-29","outcome":"acted","path":"Journal/Plan/2026-09-29.md"}'),
-     ('knowledge-fold', 'routine_run', false, 'vault bridge unreachable', now(), now(), '{"error_signature":"fixture"}'),
-     ('morning-brief', 'routine_run', true, NULL, now(), now(), '{"processed":0,"outcome":"silent"}')`,
+     ('plan-tomorrow', 'routine_run', true, NULL, now(), now(), '{"planned_for":"2026-09-29","outcome":"acted","path":"Journal/Plan/2026-09-29.md","display_name":"Tomorrow''s Plan"}'),
+     ('knowledge-fold', 'routine_run', false, 'vault bridge unreachable', now(), now(), '{"error_signature":"fixture","display_name":"Knowledge Fold"}'),
+     ('morning-brief', 'routine_run', true, NULL, now(), now(), '{"processed":0,"outcome":"silent","display_name":"Morning Brief"}')`,
 );
 // Usage (T5-6, screen 17): what `spend`, `spend_by_actor` and
 // `aws_costs_daily` read. A crew's call on the 1st of this month (so the day
@@ -580,7 +584,7 @@ await pool.query(
 await pool.query(
   `INSERT INTO runs (ts, component, kind, provider, model, tokens_in, tokens_out, cache_read_tokens, cost_usd, ok, started_at, finished_at, meta) VALUES
      (date_trunc('month', now()) + interval '12 hours', 'crew:fixtures', 'crew_run', 'openrouter', 'anthropic/claude-sonnet-4', 4200, 610, 3100, 0.018400, true, now(), now(), '{"tier":"deep"}'),
-     (now(), 'standup', 'routine_run', 'lmstudio', 'gemma', 1800, 240, 0, 0.001900, true, now(), now(), '{"outcome":"acted","tier":"default"}'),
+     (now(), 'standup', 'routine_run', 'lmstudio', 'gemma', 1800, 240, 0, 0.001900, true, now(), now(), '{"outcome":"acted","tier":"default","display_name":"Standup"}'),
      (now(), 'assistant', 'turn', 'openrouter', 'mistralai/unpriced-fixture', 600, 80, NULL, 0, true, now(), now(), '{"cost_source":"unknown","tier":"default"}')`,
 );
 await pool.query(

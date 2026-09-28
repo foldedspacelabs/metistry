@@ -438,13 +438,13 @@ button:active { background: var(--mt-color-border); }
 button:disabled { opacity: .55; cursor: not-allowed; }
 
 /* Primary: the one action a form exists for. */
-button[type="submit"], #login-btn, #enroll-btn, .answer.primary {
+button[type="submit"], #login-btn, #enroll-btn, #push-ask-on, .answer.primary {
   background: var(--mt-color-accent);
   border-color: transparent;
   color: var(--mt-color-on-accent);
   font-weight: 600;
 }
-button[type="submit"]:hover, #login-btn:hover, #enroll-btn:hover, .answer.primary:hover {
+button[type="submit"]:hover, #login-btn:hover, #enroll-btn:hover, #push-ask-on:hover, .answer.primary:hover {
   background: var(--mt-color-accent-hover);
 }
 
@@ -527,7 +527,28 @@ label { display: flex; flex-direction: column; gap: var(--mt-space-1);
   margin-top: var(--mt-space-6);
   max-width: 420px;
 }
-#auth-msg { font-size: var(--mt-text-headline-size); font-weight: var(--mt-text-headline-weight); }
+#auth-msg { font-size: var(--mt-text-headline-size); font-weight: var(--mt-text-headline-weight); margin: 0; }
+#auth .field { display: flex; flex-direction: column; gap: var(--mt-space-1); align-self: stretch; }
+/* Enrolling, the one filled button is Enroll; Sign In steps back to quiet. */
+#auth:has(#enroll-btn:not([hidden])) #login-btn { background: var(--mt-color-sunken); color: var(--mt-color-text-primary); font-weight: 400; }
+.auth-error { color: var(--mt-color-failed); margin: 0; max-width: var(--mt-size-reading-measure); }
+.auth-error:empty { display: none; }
+
+/* ---------------------------------------------- notifications and install - */
+/* The ask (screen 18 §6): a quiet band at the top of Needs You, not a modal. */
+.push-ask {
+  background: var(--mt-color-surface);
+  border: 1px solid var(--mt-color-border);
+  border-radius: var(--mt-radius-md);
+  padding: var(--mt-space-3) var(--mt-space-4);
+  margin: 0 0 var(--mt-space-3);
+  max-width: var(--mt-size-reading-measure);
+}
+.push-ask p { margin: 0; }
+.push-ask .push-ask-actions { display: flex; flex-wrap: wrap; gap: var(--mt-space-2); margin-top: var(--mt-space-3); }
+.install-steps { padding-inline-start: var(--mt-space-6); max-width: var(--mt-size-reading-measure); }
+.install-steps li { margin: var(--mt-space-3) 0; }
+.install-steps .glyph { width: 1.1em; height: 1.1em; vertical-align: -0.15em; color: var(--mt-color-accent); }
 
 /* ------------------------------------------------------------------ chips - */
 .chip {

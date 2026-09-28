@@ -11,6 +11,8 @@ import { asNum, attr, barHtml, bodyClass, clockTime, dateTime, esc, fmtUsd } fro
 import { mountKnowledge } from "./knowledge.js";
 import { mountMore } from "./more.js";
 import { mountNeedsYou } from "./needs-you.js";
+// Notifications and install (T7-5, screen 18 §6): the ask, the install sheet, Settings' push rows.
+import { mountNotify } from "./notify.js";
 import { mountToday } from "./today.js";
 import { artifactRoute, mountWork, roomRoute } from "./work.js";
 // The live-changes stream and the polls it stands in for (T7-7, §2.20).
@@ -21,7 +23,7 @@ import { NotQueueable, READS_CACHE, bandText, createOutbox, drainedText, keptSto
 const { startRegistration, startAuthentication } = window.SimpleWebAuthnBrowser;
 
 const $ = (id) => document.getElementById(id);
-const enrollCode = new URLSearchParams(location.hash.slice(1)).get("enroll");
+let enrollCode = new URLSearchParams(location.hash.slice(1)).get("enroll"); // spent once the device is enrolled
 
 async function api(path, opts = {}) {
   const res = await net(path, { ...opts, headers: { "content-type": "application/json", ...opts.headers } });
@@ -95,6 +97,8 @@ const VIEWS = {
   // Move to… (a card's action sheet) and an artifact's thread (screen 18 §5).
   move: { tab: null, title: "Move to…", sections: ["move"], sheet: "always" },
   thread: { tab: null, title: "Comments", sections: ["art-thread"], sheet: "always" },
+  // Install on iPhone (screen 18 §6): three steps, from More or from the ask.
+  install: { tab: null, title: "Install", sections: ["install"], sheet: "always" },
 };
 const SECTIONS = [...new Set(Object.values(VIEWS).flatMap((v) => v.sections))];
 
@@ -211,8 +215,10 @@ function showAuth() {
   $("title").textContent = "Metistry";
   $("bar-title").textContent = "";
   $("auth").hidden = false;
+  $("enroll-form").hidden = !enrollCode;
   $("enroll-btn").hidden = !enrollCode;
-  if (enrollCode) $("auth-msg").textContent = "enroll this device (one-time code detected)";
+  if (enrollCode && !$("enroll-label").value) $("enroll-label").value = deviceName(navigator.userAgent);
+  $("auth-msg").textContent = enrollCode ? "Enroll This Device" : "Sign In";
 }
 
 // ----- the sheet: the bell's Needs You, Capture and Usage (screen 18 §1) -----
@@ -281,6 +287,7 @@ function setNeeds(count) {
   const changed = needsCount !== null && n !== needsCount;
   needsCount = n;
   paintNeeds();
+  notify.needs(n); // the notifications ask comes in context: the first time something waits
   if (changed && current !== "triage" && sheetView !== "triage") $("needs-announce").textContent = needsBadge(n).label;
 }
 
@@ -327,24 +334,79 @@ $("capture-btn").onclick = () => show("capture");
 $("bell").onclick = () => show("triage");
 $("usage-btn").onclick = () => show("usage");
 
-// ----- auth -----
-$("enroll-btn").onclick = async () => {
-  const start = await fetch("/auth/enroll/start", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: enrollCode }) });
-  if (!start.ok) return alert("code invalid or expired — mint a new one on the host");
-  const { options } = await start.json();
-  const response = await startRegistration({ optionsJSON: options });
-  const label = prompt("name this device (e.g. Matt's iPhone)", "device") ?? "device";
-  const fin = await fetch("/auth/enroll/finish", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: enrollCode, label, response }) });
-  if (fin.ok) { history.replaceState(null, "", "/"); show(HOME); goLive(); } else alert("enrollment failed");
+// ----- auth: a wall, not an alert (screen 18 §0, §7.4) -----
+// Enrolment is a one-time link opened on the device (`#enroll=`), then a
+// passkey. No window.alert and no window.prompt: the device's name is a field on the
+// wall, and every refusal is a line under the buttons in the owner's words.
+const AUTH_WORDS = {
+  code: "This link has expired or was already used. Make a new one on your Mac.",
+  enroll: "This device couldn't be enrolled. The link may have expired — make a new one on your Mac.",
+  signin: "Sign-in didn't work. Try again.",
+  cancelled: "No passkey was used. Try again when you're ready.",
+  network: "Can't reach Metistry. Check the connection and try again.",
 };
 
-$("login-btn").onclick = async () => {
+/** The line a failed step leaves on the wall: a cancelled passkey sheet, no network, or the step's own. */
+function authFailure(step, err) {
+  if (err?.name === "NotAllowedError" || err?.name === "AbortError") return AUTH_WORDS.cancelled;
+  if (err instanceof TypeError) return AUTH_WORDS.network; // fetch rejects with a TypeError when it cannot connect
+  return AUTH_WORDS[step];
+}
+
+/** A first guess at the device's name, which the owner can change before enrolling. */
+function deviceName(ua) {
+  const s = String(ua ?? "");
+  if (/iPhone|iPod/.test(s)) return "iPhone";
+  if (/iPad/.test(s)) return "iPad";
+  if (/Android/.test(s)) return "Android";
+  if (/Macintosh/.test(s)) return "Mac";
+  if (/Windows/.test(s)) return "Windows";
+  return "This Device";
+}
+
+function authSay(text) {
+  $("auth-error").textContent = text;
+}
+
+/** Run one wall step with its buttons held, so a second tap cannot start a second ceremony. */
+async function authStep(step, run) {
+  authSay("");
+  for (const id of ["login-btn", "enroll-btn"]) $(id).disabled = true;
+  try {
+    await run();
+  } catch (err) {
+    authSay(authFailure(step, err));
+  } finally {
+    for (const id of ["login-btn", "enroll-btn"]) $(id).disabled = false;
+  }
+}
+
+$("enroll-btn").onclick = () => authStep("enroll", async () => {
+  const label = $("enroll-label").value.trim() || deviceName(navigator.userAgent);
+  const start = await fetch("/auth/enroll/start", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: enrollCode }) });
+  if (!start.ok) return authSay(AUTH_WORDS.code);
+  const { options } = await start.json();
+  const response = await startRegistration({ optionsJSON: options });
+  const fin = await fetch("/auth/enroll/finish", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: enrollCode, label, response }) });
+  if (!fin.ok) return authSay(AUTH_WORDS.enroll);
+  enrollCode = null;
+  history.replaceState(null, "", "/");
+  show(HOME);
+  goLive();
+});
+
+$("login-btn").onclick = () => authStep("signin", async () => {
   const start = await fetch("/auth/login/start", { method: "POST" });
+  if (!start.ok) return authSay(AUTH_WORDS.signin);
   const { key, options } = await start.json();
   const response = await startAuthentication({ optionsJSON: options });
   const fin = await fetch("/auth/login/finish", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ key, response }) });
-  if (fin.ok) { show(hasDraft() ? "chat" : HOME); replayDraft(); goLive(); drainOutbox(); } else alert("sign-in failed");
-};
+  if (!fin.ok) return authSay(AUTH_WORDS.signin);
+  show(hasDraft() ? "chat" : HOME);
+  replayDraft();
+  goLive();
+  drainOutbox();
+});
 
 // ----- chat -----
 // P9 (docs/product/design-system.md): the transcript never moves under the
@@ -796,30 +858,9 @@ async function loadStatus() {
   $("reviews").innerHTML = reviewListHtml(rows); // shared with the dashboard panel
 }
 
-$("push-enable").onclick = async () => {
-  try {
-    // iOS allows web push only from the installed Home Screen app
-    if (!window.matchMedia("(display-mode: standalone)").matches && navigator.standalone !== true) {
-      return alert("open the Home Screen app to enable notifications — iOS doesn't allow push from a Safari tab");
-    }
-    if (!("Notification" in window) || !("PushManager" in window)) return alert("push not supported here");
-    const perm = await Notification.requestPermission(); // must be in the tap gesture
-    if (perm !== "granted") return alert(`notification permission: ${perm} — check Settings > Notifications > metistry`);
-    const reg = await navigator.serviceWorker.register("/sw.js"); // explicit; don't hang on .ready
-    const { key, push } = await (await api("/api/push/vapid-key")).json();
-    if (push === "absent") return alert("server has no VAPID keys configured");
-    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
-    await api("/api/push/subscribe", { method: "POST", body: JSON.stringify({ subscription: sub }) });
-    alert("subscribed — try test push");
-  } catch (err) {
-    alert(`push setup failed: ${err?.message ?? err}`);
-  }
-};
-
-$("push-test").onclick = async () => {
-  const { result } = await (await api("/api/push/test", { method: "POST" })).json();
-  if (result !== "sent") alert(`push: ${result}`);
-};
+// Notifications and install: their own file (T7-5; screen 18 §6). Settings'
+// Enable and Test buttons are its too — every outcome is a line, never window.alert.
+const notify = mountNotify({ $, api, show });
 
 // ===== offline (T7-4; screen 18 §4; design-build-plan §2.17) =====
 // One rule per verb. Reading shows the last view, stamped with when it was
@@ -1045,7 +1086,7 @@ function loadUsage() {
 }
 
 async function loadSettings() {
-  await Promise.all([loadStatus(), loadDevices()]);
+  await Promise.all([loadStatus(), loadDevices(), notify.settings()]);
 }
 
 // ===== feed (home) + agent presence =====
@@ -1330,6 +1371,22 @@ document.addEventListener("visibilitychange", () => {
 });
 window.addEventListener("online", () => live.nudge());
 
+// A tapped notification, with this window already open: sw.js focuses it and names the page (T7-5).
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.addEventListener("message", (e) => {
+    if (e.data?.type === "metistry.open" && signedIn) openLink(e.data.url);
+  });
+}
+
+/** A notification's link: Needs You, or the card or room it names (work.js follows the hash); anything else is home. */
+function openLink(url) {
+  let hash = "";
+  try { hash = new URL(String(url), location.origin).hash; } catch { /* home */ }
+  if (hash.startsWith("#/needs-you")) return show("triage");
+  if (artifactRoute(hash) || roomRoute(hash)) { location.hash = hash; return; }
+  show(HOME);
+}
+
 // ----- boot -----
 // Last, so that everything above exists before the first view loads. Booting
 // from the middle of the module loaded a view into constants the module had
@@ -1342,6 +1399,12 @@ try {
   // with no network the worker answers from the last read: the app opens on what it last showed, with the band
   const status = await net("/api/status");
   // a #/artifacts/… or #/rooms/work/… link (what a proposal carries) opens straight there; Today is home
-  if (status.ok) { show(artifactRoute(location.hash) ? "artifact" : roomRoute(location.hash) ? "rooms" : HOME); replayDraft(); goLive(); drainOutbox(); }
-  else { if (status.status === 401) forgetReads(); showAuth(); }
+  // #/needs-you (a notification's tap, sw.js) opens Needs You over home
+  if (status.ok) {
+    show(artifactRoute(location.hash) ? "artifact" : roomRoute(location.hash) ? "rooms" : HOME);
+    if (location.hash.startsWith("#/needs-you")) { history.replaceState(null, "", location.pathname + location.search); show("triage"); }
+    replayDraft();
+    goLive();
+    drainOutbox();
+  } else { if (status.status === 401) forgetReads(); showAuth(); }
 } catch { walled = offline; showAuth(); } // never read and not reachable: the sign-in wall, under the band that says why

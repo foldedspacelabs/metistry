@@ -3315,7 +3315,7 @@ GET /api/secrets
 
 One row per secret in the instance's `.metistry/secrets.yaml`, sorted by
 name (plan §2.14): `hosts` is *Sent only to*; `grants` is *Who may use it*,
-each `{to: "connection:<name>" | "agent:<id>", mode: "on" | "ask" | "off"}` —
+each `{to: "connection:<name>" | "agent:<id>" | "provider:<name>", mode: "on" | "ask" | "off"}` —
 a grantee not listed is Off; `expires` is where the service says the value
 stops working, or null. `present` is whether **this instance's** Keychain
 account holds an item for the name, and `null` where the console has no

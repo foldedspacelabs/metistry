@@ -917,7 +917,8 @@ never a value:
 | `secret_in_url` | a reference, a known value in any encoding, or userinfo in the URL — URLs land in logs and histories |
 | `secret_in_model_body` | `purpose: "model"` and a reference or known value in the body. The body is the model's context; the provider key goes in a header. |
 | `cleartext` | a secret over plain http to anything but loopback |
-| `not_granted` · `needs_approval` | the caller's grant (`connection:<name>` or `agent:<id>`) is Off, or Ask without the owner's approval of this call |
+| `not_granted` · `needs_approval` | the caller's grant (`connection:<name>`, `agent:<id>` or `provider:<name>`) is Off, or Ask without the owner's approval of this call |
+| `not_provider_host` | a compute call (`computeFetch`, X-7) to anything but its provider's `base_url` destination — the key is only ever attached after this passes |
 | `missing_secret` · `malformed_reference` | all or nothing: one missing item or one bad `{{ secret… }}` and nothing is filled or sent |
 | `uninspectable_body` | a body the door cannot read (a stream, a Blob, FormData) |
 | `bad_url` | not an http(s) URL |

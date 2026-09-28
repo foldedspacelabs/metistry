@@ -1357,6 +1357,54 @@ Top to bottom, in the order the owner's questions arrive:
   bound outside the menu table; text is `metistryFont`, so the largest size
   grows a row longer, never wider; the root frame is flexible to zero (#392).
 
+## Scheduled
+
+`sources/kit/scheduled-view.swift` is the Scheduled row's screen,
+`routine-detail-view.swift` the detail beside its list (one routine, one
+sync), and `scheduled-model.swift` the model under both (T6-6,
+screen-08-routines.md §10–§11, design-build-plan §2.5). It reads
+`ScheduledStore` — T3-3's doors — plus `GET /api/runs/:id` for the latest
+run's steps and `GET /api/whoami` for whether this client may change what
+runs. `AppModel.scheduled` holds the model; an instance switch drops it.
+
+- **The list is the schedule.** A routine appears once per time it acts —
+  its resolved `days` (the console's, which already follow the profile) at
+  each `at`, in its `time_zone` — in bands: *Throughout the day* (interval
+  housekeeping: Inbox Sort, Usage Rollup), *Today*, *Tomorrow · Monday*, the
+  day a weekly one next acts, then *Inactive* (paused, held, or with no next
+  run it can place, each saying why). A row never comes from a run, so a
+  silent tick is not an occurrence; where the console's `next_run` differs,
+  it is added. Rows speak components-02 §3: *7:00 AM, Morning Brief, default,
+  run by Aide, working days at 7 AM. Nothing to do* — the configured name,
+  left out until known. *Silent* is never said.
+- **The week on one axis** — the next seven days, a mark per run, a marker
+  per day, a faint noon line — speaks one sentence (*This week: 44 runs, 5
+  between 7 AM and 6 PM*) and **Show as Table** draws the same runs per day.
+- **A routine.** Run Now and Pause/Resume; the schedule (weekday toggles and
+  the time, each with its origin — *default* · *from your profile* · *yours*
+  — the zone, the next three runs; a day set left alone is saved by its name,
+  so it keeps following the profile; an interval routine is a segmented
+  cadence); what it's asked to do (a product routine's config, read-only; a
+  New Routine's task, added to its agent's definition); reads and writes;
+  History with the latest run opened to its calls, model call and write;
+  Reset to Default, which asks nothing, when it is not at its default.
+- **Changing what runs is the Mac's.** The task editor (and New Routine)
+  exist only while `whoami` says `local_owner_token`; `saveAssignment`
+  refuses with nothing sent otherwise, and a `403 local_only` answer takes
+  the editor away. New Routine is shown disabled (*isn't in this build yet*)
+  until T3-8 serves `POST /api/scheduled/routines`.
+- **A sync.** Sync Now, Pause, *Every* as the closed four, *What reaches
+  Needs You* as toggles — `PUT /api/scheduled/syncs/:name`, never the
+  connection. A sync with no connection says `metistry connections add` and
+  offers nothing its door would refuse. Three failures in a row in its
+  history (T3-12) is drawn as the stop, with **Go to Needs You**.
+- **Keys.** ⌘R (Run Now / Sync Now) and ⌥⌘P (Pause) are the Item menu's,
+  answered through `shellItemActions`; screen 8 §7's `r` and `p` are not in
+  the closed menu table (C119), so they are not bound.
+- **Not on the wire yet.** A product routine's task, actor and reads/writes
+  (only `config` is served, and no door writes it), renaming, who paused a
+  routine and when, and a stopped sync's streak (drawn from its history).
+
 ## Build and run it
 
 ```sh

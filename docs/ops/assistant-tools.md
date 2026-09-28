@@ -278,6 +278,24 @@ does. One seam decides for all of them — core's `engineStatus` — so `up`,
 `doctor`, the routine runner's preflight and the watchdog cannot disagree
 about whether this install has a model.
 
+### When the provider refuses the account
+
+A `402` (out of credits) or `401`/`403` (the key) from the provider a turn is
+assigned to is a **state to report, not an outage to retry** (C96). The drain
+does not try the turn again; it marks the message `failed`, replies with the
+provider's own words (never *that turn failed*), and raises **one** Needs You
+`report` per (provider, error class) while one waits — *openrouter: out of
+credits — top up at https://openrouter.ai/settings/credits; N turns waiting*.
+Until that report is dismissed, or a later turn on the provider succeeds, the
+provider is **paused**: turns assigned to it are held
+(`inbound_messages.status = 'held'`) and counted on the report instead of
+being sent. One held turn is tried every ten minutes, so topping up is enough
+to get going again; either way the held turns are then answered oldest first.
+Rules and budgets still decide first (invariant 4) — the pause only stops a
+provider that has already said no from being asked again. The mechanism is
+`apps/assistant/src/provider-refusal.ts`; the `max_tokens` every call now
+carries is `docs/ops/compute.md`'s `max_output_tokens`.
+
 ## Tiers: (model, effort) pairs
 
 A **tier** is a model *and* an effort level, chosen together — a stronger

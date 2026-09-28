@@ -2,14 +2,14 @@ schema: 1
 name: github-state
 type: collector
 display_name: GitHub
-description: Reconcile open issues/PRs from configured repos into the work table (§4.8 — collectors reconcile status from the source; nothing invents it)
+description: "Reconcile open issues/PRs from configured repos into the work table (§4.8 — collectors reconcile status from the source; nothing invents it), with each PR's head SHA and open review threads, and raise a pull request request for each PR waiting on your review — cleared when your review lands, the PR goes to draft, or it closes. Reads only: the token is sent to api.github.com in GETs and GraphQL queries, never a write; posting a review is the owner's door (github_write)."
 schedule: { every: 15m }
 # The Needs You rules this sync may raise, each a toggle under Scheduled
-# (§2.5: `syncs.github-state.raise`). Declared here so the owner's file can
-# switch them and cannot name any other; the raises themselves are
-# `pull_request` mirrors (T2-13) and assigned-issue `task` mirrors (T4-23),
-# which read these toggles when they land. Until then this collector
-# reconciles `work` and raises nothing.
+# (§2.5: `syncs.github-state.raise`), handed to the run by the runner.
+# Declared here so the owner's file can switch them and cannot name any
+# other. `review_requested` raises the `pull_request` mirrors (T2-13): one
+# per PR waiting on your review, for its current head. `assigned` is the
+# assigned-issue `task` mirror (T4-23), read when that lands.
 needs_you:
   review_requested:
     label: A pull request asks for your review
@@ -17,6 +17,6 @@ needs_you:
   assigned:
     label: An issue is assigned to you
     default: true
-writes: [work]
-reads: []
+writes: [work, proposals]
+reads: [proposals]
 requires: [github-token]

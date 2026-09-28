@@ -421,7 +421,8 @@ export class ConnectionPool {
     if (err instanceof ConnectionRefused || err instanceof EgressRefused || live.stderr.length === 0) return err;
     const e = err instanceof Error ? err : new Error(String(err));
     const out = new Error(`${e.message} — the command said: ${this.#redactor.redactText(live.stderr.slice(-3).join(" | "))}`);
-    if ((e as NodeJS.ErrnoException).code) (out as NodeJS.ErrnoException).code = (e as NodeJS.ErrnoException).code;
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code) (out as NodeJS.ErrnoException).code = code;
     return out;
   }
 

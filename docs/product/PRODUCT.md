@@ -3087,3 +3087,5 @@ launchd cannot even see.
   running because each is a code path with a test: rules and budgets still
   decide first, the pause only stops asking a provider that already said no,
   and a rename the reconciler cannot commit is put back.
+
+- 2026-09-28 — **A sandbox profile that cannot listen can no longer ship, and a rotated token reaches the running install by itself.** 0.14.2's confined reconciler crash-looped on macOS 26 (`listen` needs `network-inbound` as well as `network-bind` there); every Seatbelt profile is now exercised by a real `sandbox-exec` listen on a `macos-26` runner in CI and in every release, so the kernel's answer is checked rather than assumed. And every verb that rewrites `.env` now re-renders the launchd jobs from it and restarts the supervisor (or names `metistry up`), with doctor's `launchd env` row and a truthful `assistant` row as the backstop — the owner no longer discovers a stale token as a wall of 401s.

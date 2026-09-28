@@ -49,6 +49,8 @@ export interface HelperEvent {
   recurring?: boolean;
   occurrence?: string | null;
   notes?: string | null;
+  /** The event's calendar accepts changes (`allowsContentModifications`). Arrived with T2-12; `move_event` refuses a read-only calendar. */
+  writable?: boolean;
 }
 
 /** A participant as `GET /events` serves it: the address as EventKit gave it (the sync lowercases), the owner's own row marked. */

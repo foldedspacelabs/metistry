@@ -6,7 +6,7 @@ transport: http
 port: 7811
 runs_on: host            # TCC-bound: its own launchd service is its own responsible process (PoC-1)
 requires_tcc: [calendars, reminders]
-discovery: eager         # 4 tools — under the PoC-17 lazy threshold
+discovery: eager         # 5 tools — under the PoC-17 lazy threshold
 degrades: absent         # router stops offering calendar when the Mac is away
 exposes:
   - name: list_events
@@ -18,4 +18,12 @@ exposes:
     destructive: true
   - name: create_reminder
     description: Create a reminder — preview-then-confirm
+    destructive: true
+  - name: move_event
+    description: >-
+      Move one event (this occurrence only) to a new start and end —
+      preview-then-confirm; the preview names who is in it and the new time.
+      A confirm for an event with others in it is refused unless it carries
+      the owner-door token (Metistry-Owner-Door), which only the console's
+      owner door holds
     destructive: true

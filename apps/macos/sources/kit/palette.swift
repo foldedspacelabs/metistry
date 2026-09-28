@@ -33,7 +33,12 @@ public extension View {
             )
     }
 
+    /// A type step and its ink. The step grows with the text size on the Mac
+    /// too (`metistryFont`, component-kit.swift): at `.large` it is the
+    /// platform's semantic font, untouched; at any other size the Mac's own
+    /// point size scaled by Dynamic Type's ratios — so Settings, drawn in this,
+    /// grows longer at the largest text (plan §2.18.5) rather than not at all.
     func metistryText(_ style: MetistryTextStyle, _ p: Palette, _ role: MetistryColorRole = .textPrimary) -> some View {
-        self.font(style.font).fontWeight(style.weight).foregroundStyle(p[role])
+        self.metistryFont(style).foregroundStyle(p[role])
     }
 }

@@ -4,19 +4,22 @@
 // Unix socket (METISTRY_LC_SOCKET); the node bridge is its one client. With
 // no socket it answers stdin line by line (a one-shot `check`).
 //
-//   METISTRY_CAPTURE_DIR   where sessions live: <instance>/.metistry/state/capture (required)
+//   METISTRY_CAPTURE_DIR   where sessions live (default: <METISTRY_INSTANCE_DIR>/.metistry/state/capture)
 //   METISTRY_LC_SOCKET     serve this Unix socket
 //   METISTRY_LC_LOCALE     the transcriber's language (default: the Mac's)
 //
-// The bundle, its usage strings, signing and the launchd job are T8-2b's.
+// It ships as lc-helper.app — a bundle, so TCC keys the three grants on its
+// bundle identifier and signature rather than on a path (scripts/build-helper.sh,
+// helper/Info.plist) — and runs as its own launchd job,
+// ops/launchd/com.foldedspacelabs.metistry.recorder.plist.
 
 import AppKit
 import Foundation
 
 setvbuf(stdout, nil, _IOLBF, 0)
 let env = ProcessInfo.processInfo.environment
-guard let captureDir = env["METISTRY_CAPTURE_DIR"], !captureDir.isEmpty else {
-    FileHandle.standardError.write(Data("METISTRY_CAPTURE_DIR is required (<instance>/.metistry/state/capture)\n".utf8))
+guard let captureDir = captureDirectory(env) else {
+    FileHandle.standardError.write(Data("set METISTRY_CAPTURE_DIR, or METISTRY_INSTANCE_DIR for <instance>/.metistry/state/capture\n".utf8))
     exit(2)
 }
 
@@ -26,7 +29,10 @@ let recorder = Recorder(backend: SystemBackend(), store: store, disk: SystemDisk
 let os = ProcessInfo.processInfo.operatingSystemVersion
 let service = HelperService(recorder: recorder, grants: SystemGrants(), transcriber: SystemTranscriberProbe(), osVersion: "\(os.majorVersion).\(os.minorVersion)")
 
-// A session left recording by a crash is ended at its last write, first.
+// A session left recording by a crash is ended at its last write, first. It
+// is then owed like any ended session: the bridge's delivery loop hands its
+// transcript to POST /capture marked `ended_reason: crashed`, and the inbox
+// drain raises the one report (C137).
 for r in recorder.recoverInterrupted() {
     print("recovered session \(r.sessionID): ended \(r.endedReason ?? "") at \(r.endedAt.map { ISO8601DateFormatter().string(from: $0) } ?? "?")")
 }

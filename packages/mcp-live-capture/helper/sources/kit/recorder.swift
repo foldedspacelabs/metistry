@@ -78,6 +78,28 @@ public enum RecorderError: Error, Equatable {
     }
 }
 
+public enum DeliveryError: Error, Equatable {
+    case invalid(String)
+    case unknown(String)
+    case stillRecording(String)
+
+    public var code: String {
+        switch self {
+        case .invalid: return "invalid_request"
+        case .unknown: return "unknown_session"
+        case .stillRecording: return "still_recording"
+        }
+    }
+
+    public var message: String {
+        switch self {
+        case .invalid(let why): return why
+        case .unknown(let id): return "no session \(id)"
+        case .stillRecording(let id): return "session \(id) is still recording — its transcript is not finished"
+        }
+    }
+}
+
 /// The read-back the bar and `status` show.
 public struct RecorderStatus: Equatable {
     public let state: String
@@ -314,6 +336,48 @@ public final class Recorder {
             out.append(r)
         }
         return out
+    }
+
+    // MARK: - Delivery (T8-2b): the transcript owed to POST /capture
+
+    /// Every session whose transcript has not reached the console yet: ended
+    /// — by the owner, the ten-hour stop, the disk, a failed wake or a crash —
+    /// and not delivered. A session that never started recording has nothing
+    /// to deliver. Oldest first.
+    public func owed() -> [SessionRecord] {
+        lock.lock(); defer { lock.unlock() }
+        return store.sessions().filter { $0.state == .ended && $0.delivery == nil && $0.endedReason != "failed_to_start" }
+    }
+
+    /// One ended session's record and its transcript, for delivery. Refused
+    /// for a malformed id (no path is built from it), an unknown one, and the
+    /// session still recording — its transcript is not finished.
+    public func transcript(of sessionID: String) throws -> (SessionRecord, [[String: Any]]) {
+        lock.lock(); defer { lock.unlock() }
+        let record = try endedRecord(sessionID)
+        return (record, store.transcript(sessionID))
+    }
+
+    /// The console has the transcript: record where it went. Written once —
+    /// a second report for the same session keeps the first (a retried
+    /// delivery answers with the same inbox row anyway, by its key).
+    @discardableResult
+    public func markDelivered(_ sessionID: String, inboxID: Int) throws -> SessionRecord {
+        lock.lock(); defer { lock.unlock() }
+        var record = try endedRecord(sessionID)
+        guard inboxID > 0 else { throw DeliveryError.invalid("inbox_id is the console's positive row id") }
+        if record.delivery != nil { return record }
+        record.delivery = Delivery(inboxID: inboxID, at: clock())
+        do { try store.update(record) } catch { throw DeliveryError.invalid("cannot write the session: \(error.localizedDescription)") }
+        return record
+    }
+
+    private func endedRecord(_ sessionID: String) throws -> SessionRecord {
+        guard isSessionID(sessionID) else { throw DeliveryError.invalid("session_id is not a session id") }
+        if active?.record.sessionID == sessionID { throw DeliveryError.stillRecording(sessionID) }
+        guard let record = store.sessions().first(where: { $0.sessionID == sessionID }) else { throw DeliveryError.unknown(sessionID) }
+        guard record.state == .ended else { throw DeliveryError.stillRecording(sessionID) }
+        return record
     }
 
     // MARK: - Read-back

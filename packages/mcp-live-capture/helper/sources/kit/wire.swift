@@ -7,6 +7,13 @@
 //   {"id":4,"op":"stop"}
 //   {"id":5,"op":"keep_going"}     answers the two-hour reminder
 //
+// and three the bridge's own delivery loop sends, never a caller of the
+// bridge (src/delivery.ts — no route reaches them):
+//
+//   {"id":6,"op":"owed"}                                   ended sessions not yet delivered
+//   {"id":7,"op":"transcript","session_id":"…"}            one ended session's record and lines
+//   {"id":8,"op":"delivered","session_id":"…","inbox_id":42}   POST /capture took it
+//
 // The socket is owner-only (0600) and its one client is the bridge, which
 // admits `start`, `stop` and `keep_going` only on the control credential the
 // owner's bar holds (src/index.ts). Every refusal is `ok: false` with a
@@ -105,6 +112,31 @@ public final class HelperService {
 
         case "keep_going":
             return ["id": id, "ok": true, "answered": recorder.keepGoing()]
+
+        case "owed":
+            return ["id": id, "ok": true, "sessions": recorder.owed().map(recordJSON)]
+
+        case "transcript":
+            guard let sessionID = req["session_id"] as? String else { return refusal(id, "invalid_request", "session_id is required") }
+            do {
+                let (record, lines) = try recorder.transcript(of: sessionID)
+                return ["id": id, "ok": true, "session": recordJSON(record), "lines": lines]
+            } catch let e as DeliveryError {
+                return refusal(id, e.code, e.message)
+            } catch {
+                return refusal(id, "invalid_request", "\(error)")
+            }
+
+        case "delivered":
+            guard let sessionID = req["session_id"] as? String else { return refusal(id, "invalid_request", "session_id is required") }
+            guard let inboxID = req["inbox_id"] as? Int else { return refusal(id, "invalid_request", "inbox_id is the console's row id") }
+            do {
+                return ["id": id, "ok": true, "session": recordJSON(try recorder.markDelivered(sessionID, inboxID: inboxID))]
+            } catch let e as DeliveryError {
+                return refusal(id, e.code, e.message)
+            } catch {
+                return refusal(id, "invalid_request", "\(error)")
+            }
 
         default:
             return refusal(id, "invalid_request", "unknown op \(op)")

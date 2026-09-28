@@ -28,7 +28,9 @@
 //     as the grantee: a `{{ secret.x }}` in a header is filled only for a
 //     host on that secret's *Sent only to* list, over https, and only when
 //     the owner granted it to `connection:<name>`; everything that comes
-//     back is redacted.
+//     back is redacted. Basic sign-in (`auth: basic`, an app password —
+//     CalDAV, T4-13) is the same reference: `Basic {{ secret.x }}`, encoded
+//     with the file's username inside the door (`basicSource`).
 //
 // **Where a value comes from.** A sync runs inside the console, which never
 // reads the Keychain. A secret reaches it the way a provider key reaches the
@@ -72,6 +74,26 @@ export function envSecretSource(env: NodeJS.ProcessEnv): SecretSource {
       }
       const v = env[key];
       return v === undefined || v.trim() === "" ? undefined : v.trim();
+    },
+  };
+}
+
+/**
+ * Basic sign-in (RFC 7617) at the door: the header the sync holds is
+ * `Basic {{ secret.<name> }}`, and this source fills that reference with
+ * `base64(<username>:<value>)` — so the encoding happens inside the door,
+ * for a listed host or not at all, and the pair never exists outside it.
+ * The redactor learns the value itself as well as the encoded pair, so a
+ * server that echoes either shows the secret's name, never the value.
+ * Every other name reads through unchanged.
+ */
+function basicSource(source: SecretSource, basic: { secret: string; username: string }, redactor: SecretRedactor): SecretSource {
+  return {
+    async value(name) {
+      const v = await source.value(name);
+      if (name !== basic.secret || v === undefined) return v;
+      redactor.learn(name, v);
+      return Buffer.from(`${basic.username}:${v}`, "utf8").toString("base64");
     },
   };
 }
@@ -226,9 +248,17 @@ export function openSyncHttp(opts: OpenSyncOptions): OpenedSync {
     headers[k.toLowerCase()] = v;
   }
   const auth = http.auth;
+  let basic: { secret: string; username: string } | undefined;
   if (auth.scheme === "bearer") headers.authorization = `Bearer {{ secret.${auth.secret} }}`;
   else if (auth.scheme === "api_key") headers[auth.header.toLowerCase()] = `{{ secret.${auth.secret} }}`;
-  else if (auth.scheme !== "none") return { ok: false, status: "failed", why: `connection ${c.name}: ${auth.scheme} sign-in is not sent by ${opts.sync}` };
+  else if (auth.scheme === "basic") {
+    // RFC 7617: the user-id cannot contain a colon — the server would split it there
+    if (auth.username.includes(":") || /[\u0000-\u001f\u007f]/.test(auth.username)) {
+      return { ok: false, status: "failed", why: `connection ${c.name}: reach.http.auth.username cannot contain a colon or a control character (RFC 7617)` };
+    }
+    headers.authorization = `Basic {{ secret.${auth.secret} }}`;
+    basic = { secret: auth.secret, username: auth.username };
+  } else if (auth.scheme !== "none") return { ok: false, status: "failed", why: `connection ${c.name}: ${auth.scheme} sign-in is not sent by ${opts.sync}` };
 
   const secretsFile: SecretsFile = opts.catalog.secrets.ok ? opts.catalog.secrets.file : parseSecretsFile("");
   const redactor = opts.redactor ?? new SecretRedactor();
@@ -242,7 +272,7 @@ export function openSyncHttp(opts: OpenSyncOptions): OpenedSync {
       grantee: connectionGrantee(name),
       purpose: "service",
       redactor,
-      source: opts.secrets,
+      source: basic ? basicSource(opts.secrets, basic, redactor) : opts.secrets,
       onUse: ({ names }) => {
         for (const n of names) used.add(n);
       },

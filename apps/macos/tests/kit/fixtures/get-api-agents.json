@@ -27,11 +27,11 @@
           "metistry"
         ],
         "autonomy": {},
-        "created_at": "2026-09-27T02:32:12.917Z",
+        "created_at": "2026-09-28T22:02:07.836Z",
         "last_seen_at": null,
         "revoked": false,
         "remote": false,
-        "approved_at": "2026-09-27T02:32:12.917Z",
+        "approved_at": "2026-09-28T22:02:07.836Z",
         "grant_source": "registry",
         "pending": false,
         "scope": {
@@ -56,7 +56,8 @@
               "dispatch": "deny",
               "task_update": "deny",
               "comment": "deny",
-              "capture": "deny"
+              "capture": "deny",
+              "connection_call": "propose"
             },
             "detailed": {
               "dispatch": {
@@ -78,6 +79,11 @@
                 "mode": "deny",
                 "source": "defaulted",
                 "ceiling": "deny"
+              },
+              "connection_call": {
+                "mode": "propose",
+                "source": "defaulted",
+                "ceiling": "propose"
               }
             }
           },
@@ -258,11 +264,11 @@
         },
         "projects": [],
         "autonomy": {},
-        "created_at": "2026-09-27T02:32:12.918Z",
+        "created_at": "2026-09-28T22:02:07.837Z",
         "last_seen_at": null,
         "revoked": false,
         "remote": false,
-        "approved_at": "2026-09-27T02:32:12.918Z",
+        "approved_at": "2026-09-28T22:02:07.837Z",
         "grant_source": "registry",
         "pending": false,
         "scope": {
@@ -282,7 +288,8 @@
               "dispatch": "deny",
               "task_update": "deny",
               "comment": "deny",
-              "capture": "deny"
+              "capture": "deny",
+              "connection_call": "propose"
             },
             "detailed": {
               "dispatch": {
@@ -304,6 +311,11 @@
                 "mode": "deny",
                 "source": "defaulted",
                 "ceiling": "deny"
+              },
+              "connection_call": {
+                "mode": "propose",
+                "source": "defaulted",
+                "ceiling": "propose"
               }
             }
           },
@@ -347,11 +359,11 @@
         "autonomy": {
           "level": "propose"
         },
-        "created_at": "2026-09-27T02:32:12.918Z",
+        "created_at": "2026-09-28T22:02:07.838Z",
         "last_seen_at": null,
         "revoked": false,
         "remote": false,
-        "approved_at": "2026-09-27T02:32:12.918Z",
+        "approved_at": "2026-09-28T22:02:07.838Z",
         "grant_source": "registry",
         "pending": false,
         "scope": {
@@ -371,7 +383,8 @@
               "dispatch": "propose",
               "task_update": "propose",
               "comment": "propose",
-              "capture": "propose"
+              "capture": "propose",
+              "connection_call": "propose"
             },
             "detailed": {
               "dispatch": {
@@ -390,6 +403,11 @@
                 "ceiling": "propose"
               },
               "capture": {
+                "mode": "propose",
+                "source": "defaulted",
+                "ceiling": "propose"
+              },
+              "connection_call": {
                 "mode": "propose",
                 "source": "defaulted",
                 "ceiling": "propose"
@@ -490,7 +508,7 @@
         },
         "projects": [],
         "autonomy": {},
-        "created_at": "2026-09-27T02:32:12.920Z",
+        "created_at": "2026-09-28T22:02:07.847Z",
         "last_seen_at": null,
         "revoked": false,
         "remote": false,
@@ -516,7 +534,8 @@
               "dispatch": "deny",
               "task_update": "deny",
               "comment": "deny",
-              "capture": "deny"
+              "capture": "deny",
+              "connection_call": "propose"
             },
             "detailed": {
               "dispatch": {
@@ -538,6 +557,11 @@
                 "mode": "deny",
                 "source": "defaulted",
                 "ceiling": "deny"
+              },
+              "connection_call": {
+                "mode": "propose",
+                "source": "defaulted",
+                "ceiling": "propose"
               }
             }
           },
@@ -739,7 +763,7 @@
         },
         "projects": [],
         "autonomy": {},
-        "created_at": "2026-09-27T02:32:12.922Z",
+        "created_at": "2026-09-28T22:02:07.851Z",
         "last_seen_at": null,
         "revoked": false,
         "remote": false,
@@ -769,7 +793,8 @@
               "dispatch": "deny",
               "task_update": "deny",
               "comment": "deny",
-              "capture": "deny"
+              "capture": "deny",
+              "connection_call": "propose"
             },
             "detailed": {
               "dispatch": {
@@ -791,6 +816,11 @@
                 "mode": "deny",
                 "source": "defaulted",
                 "ceiling": "deny"
+              },
+              "connection_call": {
+                "mode": "propose",
+                "source": "defaulted",
+                "ceiling": "propose"
               }
             }
           },

@@ -291,17 +291,33 @@ import Testing
         #expect(offenders.isEmpty, "\(needle) appears in \(offenders)")
     }
 
-    // 4. And no file is opened at all — which is what makes "the app does not
-    //    parse <instance>/state/.env" a fact rather than a promise. Every value
-    //    on every screen arrives from a `metistry` verb's stdout.
+    // 4. And no file is opened for a CONSOLE OR CLI VALUE — which is what makes
+    //    "the app does not parse <instance>/state/.env" a fact rather than a
+    //    promise. Every value on every screen still arrives from a `metistry`
+    //    verb's stdout.
     //
-    //    `FileHandle.write(contentsOf:)` is the one `contentsOf:` that reads
-    //    nothing: it is how a pasted API key reaches `metistry compute
-    //    providers add`'s STDIN without ever passing through argv
-    //    (compute-step.swift, process-command-runner.swift). Excluded by name
-    //    so the rest of the guard stays a guard.
+    //    Three matches are not that:
+    //      * `FileHandle.write(contentsOf:)` reads nothing: it is how a pasted
+    //        API key reaches `metistry compute providers add`'s STDIN without
+    //        ever passing through argv (compute-step.swift, process-command-
+    //        runner.swift).
+    //      * `Array.append(contentsOf:)` (and the like) is not file I/O at all
+    //        — `capture-view.swift` uses it to fold the reloaded queue back
+    //        into `captures`.
+    //      * `capture-store.swift`'s `JSONCaptureQueueStore` is ruling 19's
+    //        named, documented exception (`app-preferences.swift`'s
+    //        `AppFileStore`): the offline capture queue is this app's OWN
+    //        state, never a console or CLI value, so this guard is not the
+    //        one ruling 19 needed to clear.
+    //    All three are excluded by name so the rest of the guard stays a guard.
     let readsFiles = sources
-        .filter { $0.body.replacingOccurrences(of: "write(contentsOf:", with: "").contains("contentsOf:") }
+        .filter { $0.name != "capture-store.swift" }
+        .filter {
+            $0.body
+                .replacingOccurrences(of: "write(contentsOf:", with: "")
+                .replacingOccurrences(of: "append(contentsOf:", with: "")
+                .contains("contentsOf:")
+        }
         .map(\.name)
     #expect(readsFiles.isEmpty, "these read a file directly: \(readsFiles)")
 }

@@ -242,6 +242,7 @@ describe("shipped manifests schedule through the runner", () => {
     expect(listing.routines.filter((r) => ["inbox-drain", "claude-usage"].includes(r.name)).map((r) => r.section)).toEqual(["routines", "routines"]);
     expect(listing.syncs.map((s) => [s.name, s.displayName, s.describe])).toEqual([
       ["aws-costs", "AWS Costs", "every 6h"],
+      ["caldav-calendar", "CalDAV Calendar", "every 15m"], // T4-13: a CalDAV account into the same calendar_events
       ["devin-knowledge", "Devin Knowledge", "every 1h"],
       ["devin-sessions", "Devin Sessions", "every 5m"],
       ["eventkit-calendar", "Calendar", "every 5m"], // T2-11: the owner's calendars on this Mac into calendar_events

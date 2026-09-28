@@ -1,0 +1,22 @@
+schema: 1
+name: caldav-calendar
+type: collector
+display_name: CalDAV Calendar
+description: >-
+  A CalDAV account's calendars (iCloud, Fastmail, any RFC 6638 server) into
+  calendar_events under the connection's own name — the one connection whose
+  provider is a CalDAV type (or the one scheduled.yaml names), read through
+  the egress door at its own address and nowhere else, signed in with an
+  app password filled at that door. Today and the next two weeks, every
+  occurrence expanded as the ICS sync expands a feed, with its attendees and
+  organizer and the owner's own answer (self_status) — the owner found by
+  the addresses the server says are theirs — so Today, the meeting-note door
+  and invitation requests read one table for every calendar source
+  (design-build-plan §2.6, T4-13). A cancelled event inside the window is
+  removed; the past is left as it was last seen. Never the invite body.
+  Degrades absent without a CalDAV connection.
+# A sync (§2.5's closed shape): a quarter-hour, as the ICS sync — fresh
+# enough for Today and Next Up, and a handful of requests per run.
+schedule: { every: 15m }
+writes: [calendar_events, sync_state]
+reads: []

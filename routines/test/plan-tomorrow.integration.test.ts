@@ -200,14 +200,34 @@ describe.skipIf(!hasDb)("plan-tomorrow (real db)", () => {
     expect(rows[0]?.meta).toMatchObject({ outcome: "skipped:user_owned", source: "user" });
   });
 
-  it("an evening this routine has already settled is not planned twice", async () => {
+  it("an evening this routine has already settled is not planned twice by another scheduled pass", async () => {
     await pool.query(
       `INSERT INTO runs (component, kind, ok, started_at, finished_at, meta) VALUES ($1, 'routine_run', true, now(), now(), $2)`,
       [COMPONENT, JSON.stringify({ planned_for: TARGET, outcome: "acted" })],
     );
     const vault = fakeVault();
-    expect(await planTomorrow(pool, { vault, queries, calendar, now: EVENING, env: ENV })).toBe(0);
+    expect(await planTomorrow(pool, { vault, queries, calendar, now: EVENING, scheduledFor: EVENING, timeZone: "America/New_York", env: ENV })).toBe(0);
     expect(vault.writes).toHaveLength(0);
+  });
+
+  // Ruling 15 (X-15): Run Now never asks whether the date is settled — only
+  // the scheduled pass does. The owner asked for this one by hand.
+  it("…but Run Now re-renders a date a scheduled pass already settled", async () => {
+    await pool.query(
+      `INSERT INTO runs (component, kind, ok, started_at, finished_at, meta) VALUES ($1, 'routine_run', true, now(), now(), $2)`,
+      [COMPONENT, JSON.stringify({ planned_for: TARGET, outcome: "acted", trigger: "schedule" })],
+    );
+    const vault = fakeVault();
+    expect(await planTomorrow(pool, { vault, queries, calendar, now: EVENING, env: ENV })).toBe(1); // no scheduledFor, no closedDay: Run Now
+    expect(vault.writes.map((w) => w.path)).toEqual([PLAN_FILE]);
+    const { rows } = await pool.query(
+      `SELECT meta->>'trigger' AS trigger, meta->>'outcome' AS outcome FROM runs WHERE component = $1 AND meta->>'planned_for' = $2 ORDER BY ts, id`,
+      [COMPONENT, TARGET],
+    );
+    expect(rows).toEqual([
+      { trigger: "schedule", outcome: "acted" },
+      { trigger: "manual", outcome: "acted" },
+    ]);
   });
 
   // T3-7: Close the Day renders early; the 23:00 run supersedes it. The

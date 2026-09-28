@@ -19,9 +19,12 @@
 //     can reach a machine file (D4).
 //  4. **Early, then superseded** (§2.5, T3-7). Close the Day renders the plan
 //     early and never asks whether the date is settled; the 23:00 run
-//     replaces that render with tonight's fold; only a non-close row settles
-//     a date. The fake `runs` table below answers the settled read the way
-//     its SQL does, so one fake carries a whole evening.
+//     replaces that render with tonight's fold. Only the SCHEDULED pass asks
+//     whether a date is already settled — a close never asks, and since
+//     ruling 15 (X-15) neither does Run Now: it always re-renders, even after
+//     the 23:00 run has settled the date. The fake `runs` table below answers
+//     the settled read the way its SQL does, so one fake carries a whole
+//     evening.
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -235,12 +238,20 @@ describe("plan-tomorrow: one plan an evening", () => {
     expect(vault.writes.map((w) => w.path)).toEqual([`${PLAN_DIR}/2026-09-23.md`]);
   });
 
-  it("a target date this routine has already settled is not planned twice", async () => {
+  it("a target date already settled by a scheduled pass is not planned twice by another one", async () => {
     const db = fakeDb([{ meta: { planned_for: TARGET, outcome: "acted" } }]);
     const vault = vaultWithSeed();
-    expect(await run(db, ctxWith(vault, new FakeQueries()))).toBe(0);
+    expect(await run(db, ctxWith(vault, new FakeQueries(), { scheduledFor: EVENING, timeZone: TZ }))).toBe(0);
     expect(vault.writes).toHaveLength(0);
     expect(db.rows()).toHaveLength(0); // the settled row is the record; a second is noise
+  });
+
+  it("…but Run Now never asks — ruling 15 (X-15): it always re-renders, settled or not", async () => {
+    const db = fakeDb([{ meta: { planned_for: TARGET, outcome: "acted", trigger: "schedule" } }]);
+    const vault = vaultWithSeed();
+    expect(await run(db, ctxWith(vault, new FakeQueries()))).toBe(1); // no scheduledFor, no closedDay → manual
+    expect(vault.writes.map((w) => w.path)).toEqual([PLAN_FILE]);
+    expect(db.rows()).toEqual([expect.objectContaining({ planned_for: TARGET, outcome: "acted", trigger: "manual" })]);
   });
 
   it("a night it decides NOT to plan is recorded once, with the reason", async () => {
@@ -616,15 +627,31 @@ describe("plan-tomorrow: Close the Day renders early, and the 23:00 run supersed
     ]);
   });
 
-  it("…and once the 23:00 run has settled the date, a second scheduled or manual pass stays silent", async () => {
+  it("…and once the 23:00 run has settled the date, a second scheduled pass stays silent", async () => {
     const db = fakeDb();
     const vault = vaultWithSeed();
     await run(db, ctxWith(vault, new FakeQueries(), close()));
     await run(db, ctxWith(vault, new FakeQueries(), at2300()));
     expect(await run(db, ctxWith(vault, new FakeQueries(), at2300({ now: new Date("2026-09-22T03:01:00Z") })))).toBe(0);
-    expect(await run(db, ctxWith(vault, new FakeQueries(), { now: new Date("2026-09-22T03:05:00Z") }))).toBe(0); // Run Now
     expect(vault.writes).toHaveLength(2);
     expect(db.rows()).toHaveLength(2);
+  });
+
+  it("…but Run Now after that 23:00 run re-renders the plan instead of staying silent (ruling 15, X-15)", async () => {
+    const db = fakeDb();
+    const vault = vaultWithSeed();
+    await run(db, ctxWith(vault, new FakeQueries(), close()));
+    await run(db, ctxWith(vault, new FakeQueries(), at2300()));
+    const settled = vault.files.get(PLAN_FILE) ?? "";
+
+    expect(await run(db, ctxWith(vault, new FakeQueries(), { now: new Date("2026-09-22T03:05:00Z") }))).toBe(1); // Run Now
+    expect(vault.writes).toHaveLength(3);
+    expect(vault.writes[2]).toMatchObject({ path: PLAN_FILE, expected: sha(settled) }); // CAS on the 23:00 render it replaces
+    expect(db.rows().map((r) => [r["trigger"], r["outcome"]])).toEqual([
+      ["close", "acted"],
+      ["schedule", "acted"],
+      ["manual", "acted"],
+    ]);
   });
 
   it("a close after 23:00 still re-renders — the owner's act, not a duplicate", async () => {

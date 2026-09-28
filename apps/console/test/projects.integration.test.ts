@@ -226,11 +226,12 @@ describe.skipIf(!hasDb)("projects routes (integration)", () => {
     const r = await json("PUT", `/api/agents/${agentId}/autonomy`, { may_dispatch_to: ["qa"], accept_from: ["user"], max_open_bundles: 2 });
     expect(r.status).toBe(200);
     // the answer carries the RESOLVED action table too (docs/ops/actions.md);
-    // with no level every kind is deny, so a §4.21-only change widens nothing
+    // with no level every kind propose_action raises is deny, so a §4.21-only
+    // change widens nothing; connection_call is Ask First at every level (T4-9)
     expect(await r.json()).toEqual({
       ok: true,
       autonomy: { may_dispatch_to: ["qa"], accept_from: ["user"], max_open_bundles: 2 },
-      actions: { dispatch: "deny", task_update: "deny", comment: "deny", capture: "deny" },
+      actions: { dispatch: "deny", task_update: "deny", comment: "deny", capture: "deny", connection_call: "propose" },
     });
     const list = await (await json("GET", "/api/agents")).json();
     expect(list.agents.find((a: { id: string }) => a.id === agentId).autonomy).toEqual({ may_dispatch_to: ["qa"], accept_from: ["user"], max_open_bundles: 2 });

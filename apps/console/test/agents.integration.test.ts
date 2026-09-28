@@ -126,7 +126,7 @@ describe("agentScope (pure) — GET /api/agents carries the resolved table AND w
 
   it("carries `detailed` beside the plain table, set/defaulted/clamped named per kind", () => {
     const view = agents.agentScope(fakeRow({ level: "propose", actions: { comment: "allow", task_update: "propose" } }));
-    expect(view.autonomy.actions).toEqual({ dispatch: "propose", task_update: "propose", comment: "propose", capture: "propose" });
+    expect(view.autonomy.actions).toEqual({ dispatch: "propose", task_update: "propose", comment: "propose", capture: "propose", connection_call: "propose" });
     // nothing named it: the level's own default
     expect(view.autonomy.detailed.dispatch).toEqual({ mode: "propose", source: "defaulted", ceiling: "propose" });
     // named, and it survives the ceiling unchanged

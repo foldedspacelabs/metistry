@@ -7,15 +7,22 @@ import { parse as parseYaml } from "yaml";
 import {
   FIELD_ORIGINS,
   FIELD_ORIGIN_LABELS,
+  GRANTS_READ_ONLY_REFUSAL,
   MAX_TASK_CHARS,
+  ROUTINE_RUN_META_KEY,
   emptyScheduled,
   isAssignment,
+  newRoutines,
   parseScheduled,
+  routineAssignmentSchema,
+  routineGrantsFor,
+  routineRunMeta,
+  routineRunReads,
   validateScheduled,
   type ScheduledResult,
 } from "../src/index.js";
 
-/** design-build-plan.md §2.5's example, byte for byte (at cc5c75c) — the ticket's acceptance. */
+/** design-build-plan.md §2.5's example, byte for byte (at 0daa014 — per-run grants read-only, W2 checkpoint item 4) — the ticket's acceptance. */
 const PLAN_EXAMPLE = `# .metistry/scheduled.yaml (F-4 freezes the schema)
 routines:
   standup:
@@ -25,7 +32,7 @@ routines:
   vendor-sweep:                       # a New Routine: an assignment, no product code
     actor: vendor-research
     task: "Summarise everything added to Areas/Finance since yesterday…"
-    grants: { read: [Areas/Finance], write: [Journal/Digest/] }
+    grants: { read: [Areas/Finance] }   # per-run grants are read-only; Journal/Digest/ is the routine's own subfolder — ownership, not a grant (below)
     schedule: { days: [mon, tue, wed, thu, fri], at: ["07:00"] }
 syncs:
   github-state:
@@ -160,7 +167,7 @@ describe("scheduled.yaml — routines", () => {
 
   it("per-run grants are vault prefixes an agent may hold — never the machinery, Artifacts/, or a traversal", () => {
     const ok = (grants: string) => parseScheduled(routine("sweep", `actor: a\ntask: go\nschedule: { every: 6h }\ngrants: ${grants}`));
-    expect(ok("{ read: [Areas/Finance, Areas/Finance/], write: [Journal/Digest/] }").errors).toEqual([]);
+    expect(ok("{ read: [Areas/Finance, Areas/Finance/] }").errors).toEqual([]);
     expect(ok("{}").errors).toEqual([]);
     for (const bad of [".metistry/queries", "Artifacts/Reports", "Areas/../Me", "areas/finance", "/Areas/Finance", "Areas//Finance", ""]) {
       const r = ok(`{ read: ["${bad}"] }`);
@@ -170,6 +177,64 @@ describe("scheduled.yaml — routines", () => {
       ]);
     }
     expect(ok("{ read: [Areas/Finance], admin: [Areas] }").errors).toEqual([`routines.sweep.grants: Unrecognized key: "admin"`]);
+  });
+
+  it("per-run grants are read-only: `write:` is refused by name, with the ruling, and the file is never applied (W2 checkpoint item 4)", () => {
+    for (const write of ["[Journal/Digest/]", "[]", "[Areas/Finance]"]) {
+      expect(refused(routine("sweep", `actor: a\ntask: go\nschedule: { every: 6h }\ngrants: { read: [Areas/Finance], write: ${write} }`))).toEqual([
+        `routines.sweep.grants: write: ${GRANTS_READ_ONLY_REFUSAL}`,
+      ]);
+    }
+    expect(routineAssignmentSchema.safeParse({ actor: "a", task: "go", schedule: { every: "6h" }, grants: { write: ["Journal/Digest/"] } }).success).toBe(false);
+  });
+});
+
+describe("agent routines — what a New Routine's run carries (T3-8)", () => {
+  const file = parseScheduled(`routines:
+  standup:
+    actor: vendor-research
+    task: named like a product routine, so it is held and runs nothing
+    schedule: { every: 6h }
+  vendor-sweep:
+    actor: vendor-research
+    task: sweep
+    grants: { read: [Areas/Finance/, Areas/Finance, Projects] }
+    schedule: { every: 6h }
+  no-grants:
+    actor: vendor-research
+    task: nothing extra
+    schedule: { every: 1h }
+  other:
+    actor: someone-else
+    task: theirs
+    grants: { read: [Areas/Ops] }
+    schedule: { every: 1h }
+  morning-brief:
+    paused: true
+`).value!;
+
+  it("a New Routine is an assignment under a name no manifest has — one named like a manifest is not one", () => {
+    expect(newRoutines(file, ["standup", "morning-brief"]).map(([n]) => n)).toEqual(["vendor-sweep", "no-grants", "other"]);
+  });
+
+  it("the run's meta carries its read grants, one spelling per prefix, and nothing else", () => {
+    const meta = routineRunMeta("vendor-sweep", 42, file.routines!["vendor-sweep"] as never);
+    expect(meta).toEqual({ name: "vendor-sweep", run_id: 42, grants: { read: ["Areas/Finance", "Projects"] } });
+    expect(routineRunReads({ [ROUTINE_RUN_META_KEY]: meta })).toEqual(["Areas/Finance", "Projects"]);
+  });
+
+  it("reading a row's grant back admits only prefixes an agent may hold — a row written by another hand cannot carry the machinery", () => {
+    const row = (read: unknown) => ({ [ROUTINE_RUN_META_KEY]: { name: "x", run_id: 1, grants: { read } } });
+    expect(routineRunReads(row([".metistry", "Artifacts/Reports", "Areas/../Me", "areas/x", 7, "Areas/Ops/"]))).toEqual(["Areas/Ops"]);
+    for (const meta of [null, undefined, "x", [], {}, { routine: null }, { routine: { grants: { read: "Areas/Ops" } } }, row(undefined)]) {
+      expect(routineRunReads(meta)).toEqual([]);
+    }
+  });
+
+  it("an actor's routine grants: every New Routine naming it that grants something", () => {
+    expect(routineGrantsFor(file, ["standup"], "vendor-research")).toEqual([{ routine: "vendor-sweep", areas: ["Areas/Finance", "Projects"] }]);
+    expect(routineGrantsFor(file, ["standup"], "someone-else")).toEqual([{ routine: "other", areas: ["Areas/Ops"] }]);
+    expect(routineGrantsFor(file, ["standup"], "nobody")).toEqual([]);
   });
 });
 

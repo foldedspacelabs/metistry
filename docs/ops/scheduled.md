@@ -70,7 +70,7 @@ routines:
   vendor-sweep:                       # a New Routine: an assignment, no product code
     actor: vendor-research
     task: "Summarise everything added to Areas/Finance since yesterday…"
-    grants: { read: [Areas/Finance], write: [Journal/Digest/] }
+    grants: { read: [Areas/Finance] }   # per-run grants are read-only; Journal/Digest/ is the routine's own subfolder — ownership, not a grant (below)
     schedule: { days: [mon, tue, wed, thu, fri], at: ["07:00"] }
 syncs:
   github-state:

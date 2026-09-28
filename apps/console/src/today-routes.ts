@@ -23,9 +23,9 @@
 // lines ticked on that day (`done = <day> and status = done`), so a row
 // ticked a moment ago is still on the day after the next walk, struck. A
 // `#someday` line leaves Today (screen-05 §15.5.1) — it carries no `do`,
-// but it may still carry a `due`, and the grammar has no negation, so the
-// preset drops `someday` rows by their `row_flags`-backed column after the
-// query. Ordered by priority, then due — the order a day falls back to until
+// but it may still carry a `due`, and `not someday` (ruling 14) cannot join
+// an `or` under an `and` — the grammar has no brackets — so the preset drops
+// `someday` rows by their `row_flags`-backed column after the query. Ordered by priority, then due — the order a day falls back to until
 // the owner drags it (`today_order`).
 //
 // **The work on the day** is `day_work` narrowed to what the owner's day
@@ -99,6 +99,26 @@ export function todayPreset(day: string): { open: { where: string; order: string
     done: { where: `done = ${day} and status = done`, order: "priority, due" },
   };
 }
+
+/**
+ * All's saved views (screen-05 §15.6), each a `where:` string in the one
+ * language — so each compiles, with `compileTaskFilter`, to ONE run of
+ * `vault_tasks_query` and nothing else, and the owner can paste any of them
+ * into a template or the All box and get the same list. Ruling 14 (X-14)
+ * gave the grammar the carry count, `names_person` and `not <flag>` that
+ * Slipping and Owed need:
+ *
+ *   - **Slipping** — carried three or more times (days owed past the day it
+ *     was owed on), overdue, or owed to or by a person (review-01 §5.7).
+ *   - **Owed** — the line names a person and is the owner's move: owed TO
+ *     them. With `waiting` it is owed BY them, which is the next view.
+ *   - **Waiting on Others** — `waiting`.
+ */
+export const SAVED_TASK_VIEWS: readonly { name: string; where: string }[] = Object.freeze([
+  { name: "Slipping", where: "carried >= 3 or overdue or names_person" },
+  { name: "Owed", where: "names_person and not waiting" },
+  { name: "Waiting on Others", where: "waiting" },
+]);
 
 type Audit = (kind: string, tool: string, ok: boolean, meta: Record<string, unknown>) => Promise<void>;
 type Row = Record<string, unknown>;

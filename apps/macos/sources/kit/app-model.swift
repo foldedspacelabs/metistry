@@ -112,6 +112,10 @@ public final class AppModel {
     /// keeps its preview while the Settings window is closed and reopened;
     /// dropped on an instance switch.
     public let vaultHistory: VaultHistoryModel
+    /// Run detail: the run on screen and the screen it was opened over
+    /// (run-detail-view.swift). Held here so any screen that lists runs opens
+    /// the same page; closed on an instance switch.
+    public let runDetail: RunDetailModel
 
     public init(
         bundleResourceURL: URL?,
@@ -193,6 +197,7 @@ public final class AppModel {
         self.vaultHistory = vaultHistory
         // A rollback asked for is a request: the row and the Dock hear it now.
         vaultHistory.onQueueChanged = { [weak shell] in await shell?.refreshCount() }
+        self.runDetail = RunDetailModel(session: console)
 
         // The wizard's step 2 hands the folder back the moment it is known, so
         // every later verb runs against it.

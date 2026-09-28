@@ -1148,8 +1148,8 @@ come back to, and an instance switch drops it.
   failed (*Couldn't Load Activity*, the error verbatim, Try Again) are three
   panels; a failed refresh over rows is the stale band.
 - **Keys.** ↑↓ and ←→ are the list's own; ↩ is Item ▸ Open for a row with a
-  destination, which opens the web app (the capture, request, task and message
-  screens are not in the Mac yet; a run's detail is drawn nowhere). Screen 2
+  destination: a run opens Run detail over Activity (T6-10); the capture,
+  request, task and message open the web app, which has them. Screen 2
   §8's `1`–`7`, `/`, ⌘R and ⌘↩ are not in the closed menu table (C119), so they
   are not bound; the chips and the pill are focusable controls instead.
 
@@ -1594,8 +1594,7 @@ there is no New Project.
   *Named queries*); **Agents**, each with only what it holds **beyond** the
   project — *+ Areas/Ops (Approved in Needs You · #4)*, *+ Areas/Beta (via
   project beta)* — or *project access only*; and **Recent Runs** from
-  `activity_feed` for the project, each opening its detail in the web app
-  until Run detail is on the Mac.
+  `activity_feed` for the project, each opening Run detail over Projects.
 - **The instance's own agent.** The rollup lists an internal row with no
   project list as a member of every project, and it inherits nothing from any
   (T4-7: its reach is its configuration). It is not counted among a project's
@@ -1617,6 +1616,67 @@ there is no New Project.
   says its mode (and *over budget*) in words; the switch is one control, *Review,
   on*, with the focus ring; each section is a heading; nothing moves; no key is
   bound outside the menu table; the root frame is flexible to zero (#392).
+
+## Run detail
+
+`sources/kit/run-detail-view.swift` is Run detail (T6-10,
+screen-12-run-detail.md, C78, C79, C95); its model is `run-detail-model.swift`,
+held by `AppModel.runDetail`. It is **one page for any run**, drawn by
+`ShellDetail` over the screen the run was opened from — an Activity row
+(`runs:<id>` is openable now), a project's Recent Runs — with that screen still
+selected in the sidebar and its name as the way back (*Activity ▸ Morning
+Brief ▸ 6:02 AM*). An instance switch closes it.
+
+Three reads, each through its own door:
+
+| Part | Door | What it gives |
+| --- | --- | --- |
+| The run, *The run*, *Tool calls* | `GET /api/runs/:id` (`run_detail`) | the row, model and provider, time, tokens, cache, cost, `meta.tier`, shadow, and the calls of its turn joined exactly on `meta.turn_id` |
+| The conversation | `GET /api/sessions/:id?turn_id=` (`session_detail`) | the turn as the archive kept it: the system prompt as sent, the messages, each call's arguments and result. Keyed by the run's `meta.session_id` and `meta.turn_id` (drain.ts). `ChatStore.session(_:turnID:)` now sends the route's existing `turn_id` |
+| *What … took from this* | `GET /api/proposals` | the session fold's waiting requests whose `payload.items` name this session and turn |
+
+- **The conversation leads**, at reading width: the definition layer (the
+  system prompt) collapsed, the task, the replies in the transcript rule
+  (C69), and each tool call where the message that asked for it stands, on the
+  `agent-quiet` wash, opening to **Asked** and **Got** (a `tool` message its
+  call already shows is not drawn twice; a value past 4,000 characters is
+  clipped and says how much is left). A failed call is **open**, its refusal
+  as its result (§3). Durations are not joined into the conversation by
+  guess: they are the ledger's, and stay in the side column.
+- **The side column**: *What <name> took from this* (the configured name,
+  C88) — each item's kind, where it lands, the line and *In Needs You*; empty,
+  the session's own `folded_at` says whether the fold has read it and until
+  when it is kept. Then **The Run**, **The Route** for a `kind: route` row
+  (T9-1: served, policy outcome, would serve, bounded by, agrees), and **Tool
+  Calls · n** — each call with a bar for its share of the longest, a failed
+  one in `failed` with its mark and its error. The header's pill is *ran
+  clean*, or *failed* in `failed` with its mark (C95), and a failed run says
+  so in one sentence with the ledger's error.
+- **The transcript gone is not a failure** (components-03 §2, review-01
+  R2.7). `session_detail` answers nothing past the archive's 30 days, and the
+  route says `404`: the page says *The transcript expired after 30 days. The
+  summary and cost remain.* (or, younger than 30 days, *purged, or never
+  kept*) and still draws the run, its cost and its tool calls. A run that
+  names no session — a routine's own `routine_run` row, a tool call, the
+  recorded fixture's turn — says that instead. Only a run the console will
+  not answer is the failed panel, with Try Again.
+- **What is not drawn, because it is not served.** *Accepted* and *Declined*:
+  only the waiting queue is served per session, so decided fold items do not
+  appear. A turn's route decision: the `kind: route` row is its own ledger row
+  keyed by `meta.message_id`, and `run_detail` joins only `kind: tool` rows,
+  so a turn shows its `meta.tier` and a route row shows its decision.
+  A routine's conversation: a `routine_run` row carries no `session_id` or
+  `turn_id`, so Routines history would open a page with no transcript; the
+  prose turn it enqueues is its own `turn` row in Activity. Scheduled's
+  History and an agent's recent work are not wired to the page yet.
+- **Accessibility (§2.18).** Screen 12 carries no Spoken table; C121's rules
+  stand in: each section is a heading; the pill says *failed* in words; a call
+  is a button saying its tool and *failed*, with *open*/*closed* as its value;
+  a tool-sequence row says *knowledge_read, 200 milliseconds, failed, …* (the
+  bars are the chart, the rows its table); a taken item says its kind, line,
+  destination and status. Nothing moves; no key is bound outside the menu
+  table — Item ▸ Open in Obsidian (⌘O) opens the file a routine run wrote;
+  the root frame is flexible to zero (#392).
 
 ## Build and run it
 

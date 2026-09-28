@@ -17,12 +17,14 @@ public protocol ChatStore: Sendable {
     /// route: GET /api/turns/:turn_id/progress
     func turnProgress(_ turnID: String) async -> Result<TurnProgress, ConsoleError>
     /// route: GET /api/sessions/:id
-    func session(_ sessionID: String) async -> Result<SessionDetail, ConsoleError>
+    func session(_ sessionID: String, turnID: String?) async -> Result<SessionDetail, ConsoleError>
 }
 
 public extension ChatStore {
     func send(_ text: String) async -> Result<MessageAccepted, ConsoleError> { await send(text, threadID: nil, tier: nil) }
     func messages() async -> Result<MessagePage, ConsoleError> { await messages(limit: nil, since: nil) }
+    /// Every turn of the session, oldest first.
+    func session(_ sessionID: String) async -> Result<SessionDetail, ConsoleError> { await session(sessionID, turnID: nil) }
 }
 
 /// `POST /message`'s `202`: `{message_id, reply?}` — durable before it
@@ -63,7 +65,10 @@ public struct MessagePage: ConsoleBody { public let json: JSONValue; public init
 public struct MessageFeedbackResult: ConsoleBody { public let json: JSONValue; public init(json: JSONValue) { self.json = json } }
 /// `GET /api/turns/:turn_id/progress` (T2-17): the `turn_progress` named query — the tool calls of a turn so far.
 public struct TurnProgress: ConsoleBody { public let json: JSONValue; public init(json: JSONValue) { self.json = json } }
-/// `GET /api/sessions/:id` (T2-17): the `session_detail` named query — Run detail's conversation.
+/// `GET /api/sessions/:id?turn_id=` (T2-17): the `session_detail` named query —
+/// Run detail's conversation. `turn_id` narrows it to one turn's full record;
+/// absent is every turn. Typed where Run detail reads it (`ArchivedTurn`,
+/// run-detail-model.swift), so this stays the console's JSON whole.
 public struct SessionDetail: ConsoleBody { public let json: JSONValue; public init(json: JSONValue) { self.json = json } }
 
 extension ConsoleStores: ChatStore {
@@ -89,7 +94,7 @@ extension ConsoleStores: ChatStore {
         await get("/api/turns/\(Self.segment(turnID))/progress")
     }
 
-    public func session(_ sessionID: String) async -> Result<SessionDetail, ConsoleError> {
-        await get("/api/sessions/\(Self.segment(sessionID))")
+    public func session(_ sessionID: String, turnID: String?) async -> Result<SessionDetail, ConsoleError> {
+        await get("/api/sessions/\(Self.segment(sessionID))", ["turn_id": turnID])
     }
 }

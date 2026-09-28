@@ -272,7 +272,7 @@ import Testing
     #expect(ActivityDestination(ref: "work:4") == .work(4))
     #expect(ActivityDestination(ref: "outbound_messages:2") == .message(2))
     #expect(ActivityDestination(ref: "runs:3") == .run(3))
-    #expect(ActivityDestination(ref: "runs:3")?.isOpenable == false, "run detail is not drawn yet (§6 fault 2)")
+    #expect(ActivityDestination(ref: "runs:3")?.isOpenable == true, "a run opens its detail (T6-10)")
     #expect(ActivityDestination(ref: "vault:x") == nil)
     #expect(ActivityDestination(ref: nil) == nil)
 }

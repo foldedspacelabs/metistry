@@ -15,7 +15,7 @@
 
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   COMPUTE_FILENAME,
   EGRESS_PROXY_HOST,
@@ -86,7 +86,7 @@ import { allocateBase, applyPorts, loadNamespace, portEnv, PORTED_SERVICES, port
 import { llamaServerChild } from "./local-models.js";
 import { instanceLockPath, readLock, type LockFile, type LockSource } from "./lock.js";
 import { currentLink, imageEnv, imageRef, IMAGE_SERVICES } from "./release.js";
-import { installRuntimeDeps, pathWithRuntimeGit, runtimeDepsEnabled, runtimeNodeBin, RUNTIME_DIRNAME } from "./runtime-deps.js";
+import { installRuntimeDeps, LAUNCHD_BASE_PATH, pathWithRuntimeGit, runtimeDepsEnabled, runtimeNodeBin, RUNTIME_DIRNAME } from "./runtime-deps.js";
 import {
   applyManagedBlock,
   findPgToolchain,
@@ -825,6 +825,13 @@ export async function planConfinement(r: StepRunner, installRoot: string, values
     );
   } else {
     r.note(`reconciler: confined by ops/sandbox/reconciler.sb — writes only ${values.instanceDir} and tmp; execs only node and ${gitBin}; no shell.`);
+    // …and the reconciler must RUN that git. It spawns `git` by name, and a
+    // launchd job's PATH is /usr/bin first — the xcode-select shim, which
+    // the profile deliberately does not allow — so a git resolved from the
+    // Command Line Tools or a non-shim PATH entry (anything but the bundled
+    // runtime, which `gitPath` already carries) goes on the front of the
+    // job's PATH. Without it: `Error: spawn EPERM` at startup, every time.
+    if (gitBin && !values.gitPath?.split(":").includes(dirname(gitBin))) values.gitPath = `${dirname(gitBin)}:${LAUNCHD_BASE_PATH}`;
   }
   if (values.confineReconciler) {
     // The push credential. git runs every credential helper through /bin/sh

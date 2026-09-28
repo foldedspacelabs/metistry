@@ -6,7 +6,7 @@
 import { statSync } from "node:fs";
 import { cp, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { EGRESS_PROXY_DEFAULT_PORT } from "@foldedspacelabs/metistry-core";
@@ -160,6 +160,11 @@ describe("metistry up --dry-run, launchd shape", () => {
     expect(argv).toContain(`CONSOLE_TCP=localhost:${consolePort}`);
     expect(argv).toContain(`DB_TCP=localhost:${dbPort}`);
     expect(argv).not.toContain("localhost:7812");
+    // …and it can RUN the git the profile names: with no bundled runtime that
+    // is the Command Line Tools', and a launchd PATH starts at /usr/bin — the
+    // xcode-select shim the profile refuses (`spawn EPERM` at startup)
+    expect(reconciler.env.PATH.split(":")[0]).toBe(dirname(CLT_GIT));
+    expect(lines.join("\n")).toContain(`execs only node and ${CLT_GIT}`);
   });
 
   it("arranges the confined reconciler's push credential: an askpass shim, and a keychain item for the supervisor to fetch", async () => {

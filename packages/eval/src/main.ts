@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// `metistry-eval` — validate | tools | run | report (PoC-18, §3.6), and
-// `intents` (PoC-20 phase 1, docs/poc/poc20-intent-tier/README.md).
+// `metistry-eval` — validate | tools | run | report (PoC-18, §3.6),
+// `intents` (PoC-20 phase 1, docs/poc/poc20-intent-tier/README.md), and
+// `complexity` (T9-3, the router's confirmatory eval — docs/ops/dynamic-router.md §7.2).
 //
 // Hand-rolled argument parsing, matching `packages/cli`: a handful of
 // subcommands does not justify a dependency this project would maintain for
@@ -15,7 +16,25 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { CHOICE_SERVERS, INTENT_OPTIONS, INTENT_PHRASINGS, codesFor, type ChoiceServer, type IntentPhrasing } from "@foldedspacelabs/metistry-core";
+import { CHOICE_SERVERS, INTENT_OPTIONS, INTENT_PHRASINGS, POLICY_TIMEOUT_DEFAULT_MS, POLICY_TIMEOUT_MAX_MS, POLICY_TIMEOUT_MIN_MS, codesFor, parseCompute, type ChoiceServer, type IntentPhrasing } from "@foldedspacelabs/metistry-core";
+import {
+  CacheReportJson,
+  RouteReportJson,
+  buildComplexityReport,
+  buildCostReport,
+  fitComplexityThreshold,
+  isCorrect,
+  loadComplexityFixtures,
+  loadEvalRules,
+  parseRecording,
+  recordingFetch,
+  renderComplexityReport,
+  replayFetch,
+  runComplexityEval,
+  servedScorer,
+  type ComplexityFixture,
+  type EvalRules,
+} from "./complexity.js";
 import { axisCounts, loadFixturesFromText, type Axis, type Fixture, AXES } from "./fixtures.js";
 import { buildIntentReport, liveScorer, loadIntentFixtures, renderIntentReport, runIntentEval, type IntentFixture } from "./intents.js";
 import { judgeFromEnv, JudgeFamilyError, JudgeNotConfiguredError } from "./judge.js";
@@ -69,6 +88,7 @@ const USAGE = `metistry-eval — the PoC-18 bake-off harness
   run <fixtures...> --engine <m>  run every fixture against one candidate, appending to a run file
   report <runs...> [--bar <name>] pass rate per axis, agreement with the bar, and the promotion line
   intents <file...>               score YOUR labelled messages through the intent tier, and FIT the threshold
+  complexity [<file...>]          the router's confirmatory eval: YOUR labelled messages through the planner as served, against the pre-registered bar
 
 run flags
   --engine <module>      a JS/TS module exporting createEngine(ctx) => EngineFactory   (required)
@@ -102,6 +122,19 @@ intents flags  (PoC-20 phase 1 — docs/poc/poc20-intent-tier/README.md)
   --top-logprobs <n>     default: one per intent; the server's own ceiling still applies
   --no-warm-up           do not discard the first call per phrasing (cold start then lands in p95)
   --out <file>           write the report instead of printing it
+
+complexity flags  (T9-3 — docs/ops/dynamic-router.md §7.2; exit 0 only on PASS)
+  --instance <dir>       read .metistry/eval/complexity.jsonl, .metistry/compute.yaml and .metistry/rules.yaml from it
+  --compute <file>       compute.yaml — the planner is its assignments.intent, called exactly as the router calls it
+  --rules <file>         rules.yaml — policy.timeout_ms, policy.tiers, policy.complexity.min_confidence
+  --fit                  sweep complexity.min_confidence and evaluate at the fitted value (an OUTPUT, never an input)
+  --threshold <0..1>     evaluate at this min_confidence instead
+  --timeout-ms <n>       the policy.timeout_ms you will serve with (default: rules.yaml's, else ${POLICY_TIMEOUT_DEFAULT_MS})
+  --route-report <file>  \`metistry compute route-report --since 14d --json\` — the real mix and the shadow rows
+  --cache-report <file>  \`metistry compute cache-report --since 14d --json\` — each tier's observed cost per turn
+  --record <file>        write every server response, so the run can be replayed offline
+  --replay <file>        answer from a recording instead of the server — no network at all
+  --no-warm-up / --json / --out <file>
 `;
 
 function str(flags: Record<string, string | true>, name: string): string | undefined {
@@ -377,6 +410,138 @@ async function cmdIntents(args: ParsedArgs): Promise<number> {
   return 0;
 }
 
+/**
+ * `metistry-eval complexity` — the router's confirmatory eval (T9-3,
+ * docs/ops/dynamic-router.md §7.2). The owner runs it: the fixtures, the
+ * `compute.yaml` and the local server are the instance's.
+ *
+ * Every refusal that can be made before a model is dialled is made first — no
+ * fixtures, an unreadable line, no `assignments.intent` — so a misconfigured
+ * run costs nothing. The planner is on-machine by construction: the schema
+ * refuses an off-machine `assignments.intent` at load and core's
+ * `scoreChoice` refuses it again at the call.
+ */
+async function cmdComplexity(args: ParsedArgs): Promise<number> {
+  const instance = str(args.flags, "instance");
+  const inInstance = (rel: string): string | undefined => (instance ? join(resolve(instance), ".metistry", rel) : undefined);
+  const fixturePaths = args.positional.length > 0 ? args.positional : [inInstance(join("eval", "complexity.jsonl"))].filter((p): p is string => p !== undefined);
+  if (fixturePaths.length === 0) throw new Error("complexity needs your fixture file (or --instance <dir>) — one labelled message per line, docs/ops/dynamic-router.md §7.2");
+
+  const fixtures: ComplexityFixture[] = [];
+  const issues: string[] = [];
+  for (const path of fixturePaths) {
+    const loaded = loadComplexityFixtures(readFileSync(resolve(path), "utf8"), path);
+    fixtures.push(...loaded.fixtures);
+    for (const i of loaded.issues) issues.push(`${i.source}:${i.line}: ${i.message}`);
+  }
+  for (const issue of issues) process.stderr.write(`${issue}\n`);
+  if (issues.length > 0) throw new Error(`${issues.length} unreadable fixture line(s) — fix them before measuring anything`);
+  if (fixtures.length === 0) {
+    throw new Error(
+      `no fixtures in ${fixturePaths.join(", ")}. The fixtures are YOURS: one JSON object per line, ` +
+        `{"text": "<a message you actually wrote>", "label": "simple" | "moderate" | "demanding"}, labelled from the class names alone. ` +
+        `Claude may not write the labels (C11), so the shipped example is empty on purpose — docs/ops/dynamic-router.md §7.2`,
+    );
+  }
+
+  const computePath = str(args.flags, "compute") ?? inInstance("compute.yaml");
+  if (!computePath) throw new Error("--compute <compute.yaml> (or --instance <dir>) is required: the planner is its assignments.intent, called exactly as the router calls it");
+  const compute = parseCompute(readFileSync(resolve(computePath), "utf8"));
+  const modelRef = compute.assignments?.intent?.model;
+  if (!modelRef) throw new Error(`${computePath} assigns no model to assignments.intent, so there is no planner to measure — the router's policy scores complexity on that model`);
+
+  const rulesPath = str(args.flags, "rules") ?? inInstance("rules.yaml");
+  const rules: EvalRules = rulesPath && existsSync(resolve(rulesPath)) ? loadEvalRules(readFileSync(resolve(rulesPath), "utf8")) : {};
+  if (str(args.flags, "rules") !== undefined && rulesPath && !existsSync(resolve(rulesPath))) throw new Error(`--rules ${rulesPath} does not exist`);
+
+  const timeoutFlag = str(args.flags, "timeout-ms");
+  let timeoutMs = rules.policy?.timeout_ms ?? POLICY_TIMEOUT_DEFAULT_MS;
+  let timeoutSource = rules.policy ? "rules.yaml policy.timeout_ms" : "the spec's default — rules.yaml has no policy: block";
+  if (timeoutFlag !== undefined) {
+    timeoutMs = Number.parseInt(timeoutFlag, 10);
+    if (!Number.isInteger(timeoutMs) || timeoutMs < POLICY_TIMEOUT_MIN_MS || timeoutMs > POLICY_TIMEOUT_MAX_MS) throw new Error(`--timeout-ms is ${POLICY_TIMEOUT_MIN_MS}–${POLICY_TIMEOUT_MAX_MS}, as policy.timeout_ms is`);
+    timeoutSource = "--timeout-ms";
+  }
+  const thresholdFlag = str(args.flags, "threshold");
+  if (thresholdFlag !== undefined) {
+    const t = Number.parseFloat(thresholdFlag);
+    if (!Number.isFinite(t) || t < 0 || t > 1) throw new Error("--threshold is between 0 and 1");
+  }
+  const readJson = <T,>(flag: string, schema: { parse: (v: unknown) => T }): T | undefined => {
+    const path = str(args.flags, flag);
+    return path === undefined ? undefined : schema.parse(JSON.parse(readFileSync(resolve(path), "utf8")));
+  };
+  const routeReport = readJson("route-report", RouteReportJson);
+  const cacheReport = readJson("cache-report", CacheReportJson);
+
+  const replayPath = str(args.flags, "replay");
+  const recordPath = str(args.flags, "record");
+  if (replayPath && recordPath) throw new Error("--record and --replay are two different runs; pass one");
+  const replay = replayPath ? replayFetch(parseRecording(readFileSync(resolve(replayPath), "utf8"), replayPath)) : undefined;
+  let fetchFn: typeof fetch | undefined = replay?.fetchFn;
+  if (recordPath) {
+    mkdirSync(dirname(resolve(recordPath)), { recursive: true });
+    writeFileSync(resolve(recordPath), "");
+    fetchFn = recordingFetch(fetch, (call) => appendFileSync(resolve(recordPath), `${JSON.stringify(call)}\n`));
+  }
+
+  const score = servedScorer({
+    access: { compute: () => compute, secretEnv: process.env, ...(fetchFn ? { fetchFn } : {}) },
+    ...(replay ? { latencyOf: replay.lastLatency } : {}),
+  });
+  const result = await runComplexityEval({
+    fixtures,
+    score,
+    warmUp: args.flags["no-warm-up"] !== true,
+    onAnswer: (f, a, pass) => {
+      const what = a.outcome === "scored" ? `${a.class} conf=${(a.confidence ?? 0).toFixed(3)}` : `${a.outcome}${a.reason ? ` (${a.reason})` : ""}`;
+      const mark = a.outcome !== "scored" ? "----" : a.class !== undefined && isCorrect(f, a.class) ? " ok " : "MISS";
+      process.stdout.write(`${String(Math.round(a.latency_ms ?? 0)).padStart(6)} ms  run ${pass}  ${mark}  ${f.label.padEnd(9)} → ${what}${f.id ? `  ${f.id}` : ""}\n`);
+    },
+  });
+  if (replay && replay.unused() > 0) process.stderr.write(`the recording has ${replay.unused()} response(s) this run never asked for — it was recorded against different fixtures or flags\n`);
+
+  const fit = args.flags.fit === true ? fitComplexityThreshold(result.rows) : null;
+  let threshold = 0;
+  let thresholdSource = "raw classes — no threshold; pass --fit, --threshold, or a rules.yaml with policy.complexity";
+  if (thresholdFlag !== undefined) {
+    threshold = Number.parseFloat(thresholdFlag);
+    thresholdSource = "--threshold";
+  } else if (fit?.fitted) {
+    threshold = fit.fitted.threshold;
+    thresholdSource = "fitted by --fit";
+  } else if (rules.policy?.complexity) {
+    threshold = rules.policy.complexity.min_confidence;
+    thresholdSource = "rules.yaml policy.complexity.min_confidence";
+  }
+
+  const cost =
+    routeReport && cacheReport
+      ? buildCostReport({ routeReport, cacheReport, compute, policyTiers: rules.policy?.tiers, rows: result.rows, threshold })
+      : null;
+  const report = buildComplexityReport(result, {
+    threshold,
+    thresholdSource,
+    timeoutMs,
+    timeoutSource,
+    fit,
+    cost,
+    ...(cost ? {} : { costAbsent: "Not computed — pass --route-report and --cache-report (each `metistry compute … --since 14d --json`); cost is reported, never gated." }),
+    shadow: routeReport ?? null,
+    model: modelRef,
+    replay: replay !== undefined,
+  });
+  const body = args.flags.json === true ? `${JSON.stringify(report, null, 2)}\n` : `\n${renderComplexityReport(report)}\n`;
+  const out = str(args.flags, "out");
+  if (out) {
+    mkdirSync(dirname(resolve(out)), { recursive: true });
+    writeFileSync(resolve(out), body);
+    process.stdout.write(`${report.verdict.line}\nreport → ${out}\n`);
+  } else process.stdout.write(body);
+  // PASS is the only answer that lets T9-4 proceed, so it is the only exit 0.
+  return report.verdict.pass ? 0 : 1;
+}
+
 export async function main(argv: readonly string[]): Promise<number> {
   const args = parseArgs(argv);
   if (args.flags.help === true || args.command === undefined || args.command === "help") {
@@ -395,6 +560,8 @@ export async function main(argv: readonly string[]): Promise<number> {
         return await cmdReport(args);
       case "intents":
         return await cmdIntents(args);
+      case "complexity":
+        return await cmdComplexity(args);
       default:
         process.stderr.write(`unknown command: ${args.command}\n\n${USAGE}`);
         return 2;

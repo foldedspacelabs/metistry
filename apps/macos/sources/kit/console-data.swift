@@ -1043,8 +1043,68 @@ public struct Room: Codable, Sendable, Equatable, Identifiable {
 /// `GET /api/agents`.
 public struct AgentList: Codable, Sendable, Equatable {
     public let agents: [AgentRecord]
+    /// The asks the escalation ceiling refused (C42, T2-2): after two
+    /// declines a third `request_access` for the same area is refused at the
+    /// tool and writes no proposal, so Needs You goes quiet — this list is the
+    /// only place that quiet is said. `[]` against a console older than T2-2.
+    public let accessCeilings: [AgentAccessCeiling]
 
-    public init(agents: [AgentRecord]) { self.agents = agents }
+    enum CodingKeys: String, CodingKey {
+        case agents
+        case accessCeilings = "access_ceilings"
+    }
+
+    public init(agents: [AgentRecord], accessCeilings: [AgentAccessCeiling] = []) {
+        self.agents = agents
+        self.accessCeilings = accessCeilings
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        agents = try c.decode([AgentRecord].self, forKey: .agents)
+        accessCeilings = try c.decodeIfPresent([AgentAccessCeiling].self, forKey: .accessCeilings) ?? []
+    }
+}
+
+/// One (agent, area) pair the ceiling closed — `GET /api/agents`'
+/// `access_ceilings` (docs/ops/client-api.md): `declines` is how many times
+/// the owner said no, `hits` how many asks the ceiling has refused since.
+public struct AgentAccessCeiling: Codable, Sendable, Equatable {
+    public let agent: String
+    public let area: String
+    public let declines: Int
+    public let hits: Int
+    public let lastProposal: Int?
+    public let lastDeclinedAt: String?
+    public let lastAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case agent, area, declines, hits
+        case lastProposal = "last_proposal"
+        case lastDeclinedAt = "last_declined_at"
+        case lastAt = "last_at"
+    }
+
+    public init(agent: String, area: String, declines: Int, hits: Int, lastProposal: Int? = nil, lastDeclinedAt: String? = nil, lastAt: String? = nil) {
+        self.agent = agent
+        self.area = area
+        self.declines = declines
+        self.hits = hits
+        self.lastProposal = lastProposal
+        self.lastDeclinedAt = lastDeclinedAt
+        self.lastAt = lastAt
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        agent = try c.decode(String.self, forKey: .agent)
+        area = try c.decode(String.self, forKey: .area)
+        declines = c.wireInt(.declines) ?? 0
+        hits = c.wireInt(.hits) ?? 0
+        lastProposal = c.wireInt(.lastProposal)
+        lastDeclinedAt = try c.decodeIfPresent(String.self, forKey: .lastDeclinedAt)
+        lastAt = try c.decodeIfPresent(String.self, forKey: .lastAt)
+    }
 }
 
 public struct AgentRecord: Codable, Sendable, Equatable, Identifiable {

@@ -1405,6 +1405,57 @@ runs. `AppModel.scheduled` holds the model; an instance switch drops it.
   (only `config` is served, and no door writes it), renaming, who paused a
   routine and when, and a stopped sync's streak (drawn from its history).
 
+## Agents
+
+`sources/kit/agents-view.swift` (the roster, New Agent) and
+`sources/kit/agent-detail-view.swift` (one agent) are the Agents row's screen
+(T6-5, screen-07-agents.md); `sources/kit/agents-model.swift` is what both
+draw from, held as `AppModel.agents` so a draft kept with Esc outlives a trip
+to another screen. It reads `GET /api/agents` (with `access_ceilings`, which
+`AgentList` now decodes), `agent_presence`, `GET /api/scheduled` (a routine's
+`actor`), and for one agent `GET /api/agents/:id/definition`, `activity_feed`
+with `agent`, and `GET /api/compute` for the model dropdown. No route was added.
+
+- **The assistant is never listed** (C52): its row is dropped by `kind:
+  internal` and by its principal id. **Yours** (crews) and **Connected**
+  (external) are two groups; revoked credentials a third, collapsed and
+  `absent`. A row is who, what (its routine, *when <name> delegates*, or
+  *paused*; a connected agent's project or reach) and presence — filled for
+  working and queued, hollow and wordless for idle, `degraded` only for
+  interrupted and over-cap. Presence's age rides the header when stale.
+- **A local agent** shows its definition file as prose with its path and
+  *versioned in the vault*, its compute line, the permissions table, its
+  routines (each leading to Scheduled) and the last 7 days of what it did.
+  **Edit Definition** runs `metistry agents define <id> … --if-sha256 <hex>
+  --json` (M12) with the prompt on standard input; a `stale:` refusal reads
+  the file again and offers the edit against it. **Esc closes the editor and
+  keeps a draft** (C136). The editor, Rotate Token and New Agent's three
+  paths are drawn only when the session has a management runner — the Mac that
+  runs Metistry; a remote client sees *The definition is edited on the Mac
+  that runs Metistry* and no editor at all.
+- **A connected agent** shows how it connects, Approve while pending, the
+  permissions table with **Edit** (grant tier and folders, named queries,
+  projects, autonomy level and per-kind modes), the escalation ceiling (C42:
+  *Asked twice for Areas/Finance · declined both · it can no longer ask*),
+  Rotate Token and Revoke.
+- **Changing things** (§5). The registry is read again before anything is
+  sent; a record that moved sends nothing and offers the edit again. A
+  narrowing goes at once. A widening confirms first, listing core's
+  `autonomyWidenings` strings verbatim — `AgentAutonomy.widenings` is that
+  function carried over, held to core's own test cases and to the recorded
+  PUT's `widened` — plus reach added in the same `key a → b` shape; the button
+  says **Widen**. Revoke and Rotate confirm, naming the cascade.
+- **Run Now** (C138) runs the agent's one routine (Item ▸ Run Now ⌘R); with
+  none it is dimmed with *Nothing is scheduled for <id>.* beside **Give It
+  One** (Scheduled). **New Agent** asks the kind first: a local agent (blank or
+  from one you have, `agents define --area --model --prompt-file -`), connect an
+  agent (Settings › Connections) or a tool that works for you (`POST
+  /api/agents`, the token shown once and copied, never kept).
+- **Keys.** ↑↓ are the list's own; ↩ is Item ▸ Open; Esc goes back (or closes
+  an editor, keeping the draft). Screen 7 §7's ⌘S and ⌘⌫ are not in the closed
+  menu table (C119), so they are not bound — Save and Revoke are focusable
+  controls, as ruled for Activity's keys at the W2 checkpoint.
+
 ## Build and run it
 
 ```sh

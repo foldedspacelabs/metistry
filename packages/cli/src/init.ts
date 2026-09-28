@@ -32,7 +32,7 @@ import {
   type DeploymentShape,
   type KeepAwake,
 } from "@foldedspacelabs/metistry-core";
-import { applyKeepAwakeToYaml } from "./deployment.js";
+import { applyKeepAwakeToYaml, applyShapeToYaml } from "./deployment.js";
 import { realExec, type Exec } from "./exec.js";
 import { mintInstanceId, withInstanceId } from "./instance.js";
 import { LOCK_FILENAME, serializeLock, type LockFile, type LockSource } from "./lock.js";
@@ -300,15 +300,19 @@ export async function init(opts: InitOptions): Promise<InitResult> {
     await writeFile(metistryPath(dir, d, ".gitkeep"), "");
   }
 
-  // The keep-awake answer, when there is one. `deployment.yaml` is a §4.7
-  // protected path, and this is the same moment `init` stamps the other two
-  // (identity.yaml, metistry.lock) by hand: there is no repo and no
-  // reconciler yet, and the first commit below is what makes them the
-  // record. The shape it carries is the one just resolved above (ruling
-  // 23) — `--shape`, or the platform default — never the seed's.
-  if (opts.keepAwake !== undefined) {
-    await writeFile(instancePath(dir, "deployment"), applyKeepAwakeToYaml(undefined, opts.keepAwake, shape));
-  }
+  // `deployment.yaml` is a §4.7 protected path, and this is the same moment
+  // `init` stamps the other two (identity.yaml, metistry.lock) by hand: there
+  // is no repo and no reconciler yet, and the first commit below is what
+  // makes them the record. ALWAYS written — the resolved shape above (ruling
+  // 23) must never be left implicit in the seed's own default, or the most
+  // common path (a plain macOS `init`, no `--shape`, keep-awake unanswered —
+  // the Mac app's first run) would print launchd-shaped lines while `up`
+  // silently installs whatever the seed says (`compose`). The keep-awake
+  // field is added only when the question was actually answered.
+  await writeFile(
+    instancePath(dir, "deployment"),
+    opts.keepAwake !== undefined ? applyKeepAwakeToYaml(undefined, opts.keepAwake, shape) : applyShapeToYaml(undefined, shape),
+  );
 
   await writeFile(
     instancePath(dir, "readme"),

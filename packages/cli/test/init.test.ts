@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import { describe, expect, it } from "vitest";
+import { loadDeployment } from "../src/deployment.js";
 import { applyName, init, lockFile, mentionFor, INSTANCE_DIRS } from "../src/init.js";
 import { readInstanceId, INSTANCE_ID_RE } from "../src/instance.js";
 import { parseLock } from "../src/lock.js";
@@ -17,6 +18,7 @@ import { main } from "../src/main.js";
 import { portsFile, portsOf, serializeNamespace, type Namespace } from "../src/namespace.js";
 
 const seedDir = fileURLToPath(new URL("../../../seed/", import.meta.url));
+const productDir = fileURLToPath(new URL("../../../", import.meta.url));
 const git = (dir: string, ...args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8" }).trim();
 const fresh = () => mkdtemp(join(tmpdir(), "metistry-init-"));
 const MINTED = "TEST-TOKEN-NEVER-ON-DISK";
@@ -66,6 +68,7 @@ describe("metistry init", () => {
       [
         ".gitignore",
         ".metistry/compute.yaml",
+        ".metistry/deployment.yaml",
         ".metistry/identity.yaml",
         ".metistry/metistry.lock",
         ".metistry/rules.yaml",
@@ -285,6 +288,21 @@ describe("metistry init", () => {
     const linuxDir = join(await fresh(), "instance");
     await init({ dir: linuxDir, seedDir, version: "0.0.1", mint: () => MINTED, platform: "linux", shape: "launchd", keepAwake: "never" });
     expect(readFileSync(join(linuxDir, ".metistry", "deployment.yaml"), "utf8")).toContain("shape: launchd");
+  });
+
+  it("deployment.yaml always carries the resolved shape, even with keep-awake never answered — the Mac app's first run, most common path", async () => {
+    const darwinDir = join(await fresh(), "instance");
+    const darwin = await init({ dir: darwinDir, seedDir, version: "0.0.1", mint: () => MINTED, platform: "darwin" });
+    expect(darwin.keepAwake).toBeUndefined(); // the question was never answered
+    expect(readFileSync(join(darwinDir, ".metistry", "deployment.yaml"), "utf8")).toContain("shape: launchd");
+    // and `up`/doctor read the same thing `init` printed — never the seed's compose default
+    expect((await loadDeployment(productDir, { METISTRY_INSTANCE_DIR: darwinDir })).deployment.shape).toBe("launchd");
+
+    const composeDir = join(await fresh(), "instance");
+    const compose = await init({ dir: composeDir, seedDir, version: "0.0.1", mint: () => MINTED, platform: "linux" });
+    expect(compose.keepAwake).toBeUndefined();
+    expect(readFileSync(join(composeDir, ".metistry", "deployment.yaml"), "utf8")).toContain("shape: compose");
+    expect((await loadDeployment(productDir, { METISTRY_INSTANCE_DIR: composeDir })).deployment.shape).toBe("compose");
   });
 
   it("--keep-awake is refused for a shape that cannot hold the Mac awake — compose installs no supervisor", async () => {

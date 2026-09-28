@@ -409,12 +409,16 @@ describe("metistry init", () => {
     expect(await readFile(join(dir, ".metistry", "deployment.yaml"), "utf8")).toContain("shape: launchd");
   });
 
-  it("no flag and nobody to ask (a pipe, a script, the Mac app): no question, no file, nothing held", async () => {
+  it("no flag and nobody to ask (a pipe, a script, the Mac app): no question, no keep_awake key, nothing held — but the shape is still stamped", async () => {
     const P = await seeded();
     const dir = join(await fresh(), "i3");
     const out: string[] = [];
-    expect(await main(initArgs(dir, P), { out: (l) => out.push(l), err: () => {} })).toBe(0);
-    await expect(readFile(join(dir, ".metistry", "deployment.yaml"), "utf8")).rejects.toThrow();
+    expect(await main(initArgs(dir, P), { out: (l) => out.push(l), err: () => {}, platform: "linux" })).toBe(0);
+    // deployment.yaml is always written (ruling 23 — the shape must never be
+    // left implicit in the seed's own default), just with no keep_awake key
+    const written = await readFile(join(dir, ".metistry", "deployment.yaml"), "utf8");
+    expect(written).toContain("shape: compose");
+    expect(written).not.toMatch(/^keep_awake:/m);
     expect(out.join("\n")).toContain("keep-awake: not configured");
   });
 

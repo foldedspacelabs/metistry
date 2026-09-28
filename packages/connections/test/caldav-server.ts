@@ -37,6 +37,8 @@ export interface FakeCaldavOptions {
   redirectTo?: string;
   /** wrap calendar-data in CDATA rather than escaping it */
   cdata?: boolean;
+  /** refuse every PUT as RFC 6638 refuses an attendee change it does not allow (403) */
+  forbidWrites?: boolean;
   /** resources: path under the work calendar → text */
   events?: Record<string, string>;
 }
@@ -153,6 +155,9 @@ export async function fakeCaldav(opts: FakeCaldavOptions): Promise<FakeCaldav> {
       if (!r) return send(404);
       res.writeHead(200, { "content-type": "text/calendar; charset=utf-8", etag: r.etag }).end(r.data);
       return;
+    }
+    if (req.method === "PUT" && opts.forbidWrites) {
+      return send(403, `<?xml version="1.0"?><D:error xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav"><C:allowed-attendee-scheduling-object-change/></D:error>`);
     }
     if (req.method === "PUT") {
       const ifMatch = req.headers["if-match"];

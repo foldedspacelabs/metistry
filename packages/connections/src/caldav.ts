@@ -221,7 +221,9 @@ async function dav(sync: Http, method: string, url: URL, call: DavCall = {}): Pr
     ...(call.body !== undefined ? { body: call.body } : {}),
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
-  if (res.status === 401 || res.status === 403) {
+  // 401 is the sign-in; a 403 on a read is too (some servers answer a wrong password so). A 403 on a
+  // write is the server refusing that change (RFC 6638's attendee rules) — the caller's to say.
+  if (res.status === 401 || (res.status === 403 && (method === "PROPFIND" || method === "REPORT" || method === "GET"))) {
     void res.body?.cancel().catch(() => undefined); // not awaited: nothing here waits on a body it will not read
     throw new CaldavError(
       "unauthorized",

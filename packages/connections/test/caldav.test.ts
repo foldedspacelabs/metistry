@@ -345,6 +345,16 @@ describe("rsvp — the owner's PARTSTAT, and nothing else", () => {
     expect([...s.requests, ...plain.requests].some((r) => r.method === "PUT")).toBe(false);
   });
 
+  it("a server that refuses the change (RFC 6638's 403) is http_status naming it — not a sign-in failure", async () => {
+    const s = await server({ forbidWrites: true });
+    const sync = open(s);
+    const preview = await previewReply(sync, { uid: "vendor-review-0929@example.com", response: "accepted" });
+    const err = await respondToInvitation(sync, { uid: "vendor-review-0929@example.com", response: "accepted", etag: preview.etag }).catch((e: unknown) => e);
+    expect(err).toMatchObject({ code: "http_status" });
+    expect(String(err)).toContain("refused the reply (HTTP 403)");
+    neverTheSecret(String(err));
+  });
+
   it("a UID lookup is a substring match on the server, so the UID is compared exactly after", async () => {
     const s = await server();
     await expect(previewReply(open(s), { uid: "vendor-review", response: "accepted" })).rejects.toMatchObject({ code: "not_found" });

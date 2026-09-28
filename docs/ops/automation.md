@@ -418,20 +418,25 @@ run does three things, then sends the chat message it always sent:
    No slot, no turn: a template with no `prose` and a day with no meetings
    asks no model. The routine never calls one itself (invariant 4).
 
-**How the slots are filled, and why the assistant can do nothing else.** The
-turn tells the assistant to `knowledge_read` the file and `knowledge_write` it
-back with each `<!-- metistry:prose N --> _pending…_` replaced by one line. In
-a routine's own folder (`Journal/Brief/`, `Journal/Standup/`; core's
-`JOURNAL_ROUTINE_DIRS`) `knowledge_write` accepts exactly that: it compares
-the content with the file on disk (`fillProseSlots`) and refuses any other
-changed byte, any slot text that is not one line of prose (no heading, list
-item, task box, quote, fence, table, HTML comment, control character), any
-file that is not the routine's, any create, and any stale hash. What it writes
-is built from the checked lines, in the **routine's** name with the reply's
-turn as the act — a second commit, touching the brief only. Each filled line
-keeps `<!-- metistry:written N -->` at its end: the file says which words were
+**How the slots are filled, and why the assistant can do nothing else to that
+file.** The turn tells the assistant to `knowledge_read` the file and
+`knowledge_write` it back with each `<!-- metistry:prose N --> _pending…_`
+replaced by one line. In a routine's own folder (`Journal/Brief/`,
+`Journal/Standup/`; core's `JOURNAL_ROUTINE_DIRS`), once the routine has
+written its file there, `knowledge_write` accepts exactly that fill: it
+compares the content with the file on disk (`fillProseSlots`) and refuses any
+other changed byte, any slot text that is not one line of prose (no heading,
+list item, task box, quote, fence, table, HTML comment, control character),
+any file that is not the routine's, and any stale hash. What it writes is
+built from the checked lines, in the **routine's** name with the reply's turn
+as the act — a second commit, touching the brief only. Each filled line keeps
+`<!-- metistry:written N -->` at its end: the file says which words were
 written, not retrieved (C103). `Journal/Plan/` takes no fill at all —
-Tomorrow's Plan is model-free.
+Tomorrow's Plan is model-free. A path in any of the three folders with no file
+there yet is an ordinary create (ruling 9, W2 checkpoint, 2026-09-27: X-11
+relaxes the blanket create refusal T3-6 shipped), stamped and committed under
+the assistant's own name — the routine still writes its own dated file, so
+this only ever reaches a name the routine has not used yet.
 
 Then the chat message: the D10 soft budget over Needs You, reviews, areas and
 system, opening with `📄 Journal/Brief/<date>.md` when the file was written

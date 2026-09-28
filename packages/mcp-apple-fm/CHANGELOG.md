@@ -1,5 +1,11 @@
 # @foldedspacelabs/metistry-mcp-apple-fm
 
+## 0.14.2
+
+### Patch Changes
+
+- @foldedspacelabs/metistry-core@0.14.2
+
 ## 0.14.1
 
 ### Patch Changes

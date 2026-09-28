@@ -988,7 +988,10 @@ metistry agents autonomy researcher --allow comment,capture --json
 ```
 
 What one agent may do with an **action** — `dispatch`, `task_update`,
-`comment`, `capture` ([actions.md](actions.md)). `--level` sets the ceiling
+`comment`, `capture`, `connection_call` ([actions.md](actions.md)).
+`connection_call` is Ask First at every level and never more — `--allow` on it
+prints as clamped — and `--deny connection_call` turns that agent's Ask First
+requests to a connection off (T4-9). `--level` sets the ceiling
 (`observe | propose | act_within_scope`); `--allow` / `--propose` / `--deny`
 set one kind each and may repeat or take a comma-separated list. With no flags
 it prints what is stored and what that resolves to.

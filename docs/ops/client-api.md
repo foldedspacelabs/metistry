@@ -651,6 +651,30 @@ The field is additive: every stored column is still there beside it. Skip is a
 bulk verb in every client (K2): the PWA offers it on the selection bar and its
 `s` shortcut, never on a row.
 
+#### A connection call — Approve runs the proxy's payload (T4-9)
+
+```
+GET /api/proposals → {…, "kind":"action", "payload":{"title":"call comment_issue on tracker",
+                        "action":{"kind":"connection_call","args":{"connection":"tracker","tool":"comment_issue",
+                                  "args":{"issue":42,"body":"…"},"confirm_token":"…"}},
+                        "preview_run":123, "provenance":{…}},
+                      "request":{"type":"action","body":"preview", …}}
+
+POST /api/proposals/7  {"decision":"allow"}
+200 {"ok":true,"action":{"kind":"connection_call","connection":"tracker","tool":"comment_issue",
+                         "is_error":false,"connection_run":456,"content":[…]}}
+409 the token is spent or not this request's, or the arguments are not the ones previewed — nothing ran
+404 · 503 the pool refused before dialling (the token comes back: Approve again once fixed) ·
+          the call was sent and failed (the token stays spent: never repeated)
+```
+
+An Ask First call an agent made through `connections_call`. Draw
+`payload.action.args` as the preview: it is exactly what Approve runs — the
+console holds it to the digest recorded when the agent asked, and **nothing in
+the answer's body reaches the call**. A refusal leaves the row pending with
+`payload.error` (C45). Revise and Decline run nothing. `docs/ops/actions.md`
+has the whole rule.
+
 #### A question — several per request, answered per question (T2-3)
 
 ```
@@ -940,7 +964,7 @@ POST /api/proposals/31  {"decision":"allow"}
 ```
 
 An `action` proposal carries a closed `payload.action = {kind, args}`
-(`dispatch | task_update | comment | capture`). Allowing it runs the action
+(`dispatch | task_update | comment | capture | connection_call`). Allowing it runs the action
 through the **same service call the owner's own route makes**, as the `user`
 principal, with the proposal's `source_agent` recorded as `on_behalf_of`; the
 result lands in `payload.result` and in a `runs` row. The action runs *before*
@@ -3279,7 +3303,7 @@ already call (`docs/ops/actions.md`, `packages/core`'s `ACTION_KINDS`):
 | `task_update` | the tasks service — status, owner, project, title, as `PATCH /api/tasks/:id` |
 | `comment` | a message into a task's room or onto an artifact version — `POST /api/work/:id/comments`, `POST /api/artifacts/:id/comments` |
 | `capture` | the capture sink — `POST /capture` |
-| `connection_call` | a connection's tool, args closed to `{connection, tool, args, confirm_token}`; its effective mode is never `allow` in its first release (Q5) |
+| `connection_call` | the connections pool — one tool of one connection, `approved`; args closed to `{connection, tool, args, confirm_token}`; its effective mode is never `allow` (Q5). Raised only by `connections_call` on an Ask First tool, never by `propose_action`; Approve runs the payload the proxy previewed (T4-9, below) |
 
 A new action is a product change — a row here, a case in `runAction`, a test —
 never a prompt or a config line. The console's **configuration** routes

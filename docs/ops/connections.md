@@ -105,7 +105,7 @@ each a `ConnectionRefused` with a code:
 | --- | --- |
 | `tool_not_listed` | the tool is not in the file's `tools:`. **The file is the allowlist**: the server is never asked about a tool the owner did not list |
 | `tool_off` | the tool is at Never |
-| `needs_approval` | the tool is at Ask First and the caller holds no approval of this call (T4-9's Approve sets it) |
+| `needs_approval` | the tool is at Ask First and the caller holds no approval of this call — only the console's Approve of the Needs You request sets it (T4-9) |
 | `caller_credential` | the caller's own bearer is in the arguments |
 | `unknown_connection`, `not_ready` | no such file; a file that is `failed` or `absent`, with its issues |
 | `variable` | a `{{ variable.x }}` that does not fill |
@@ -175,12 +175,33 @@ A connection the caller cannot reach answers exactly like one that does not
 exist (`not_found`, *no such connection: <name>*): which connections the owner
 holds is not a borrower's to learn.
 
-**Which tools run in this release: a connection's Reads set to Allow.** A tool
-at Never, or one the file does not list, is *no such tool* — refused and not
-offered. Ask First, and every Changes things or Starts an agent tool whatever
-its mode, is refused with the sentence saying so: approving a call is
-preview-then-confirm, which arrives with T4-9. The pool refuses the same modes
-again before it dials.
+**How a tool runs is the owner's per-tool policy** (T4-9). A tool at Never, or
+one the file does not list, is *no such tool* — refused and not offered, token
+or not. `connections_list` names every other tool with how it runs:
+
+| `runs` | The tool | `connections_call` |
+| --- | --- | --- |
+| `now` | a Read at Allow | runs at once |
+| `confirm` | Changes things / Starts an agent at Allow | **preview-then-confirm** (CLAUDE.md): the first call answers `{status: "preview", arguments, confirm_token, expires_in_sec}` and dials nothing; the call runs when the caller sends the same `connection`, `tool` and `arguments` with `confirm_token` |
+| `owner` | anything at Ask First | answers `{status: "pending", proposal_id}` and raises an `action` of kind `connection_call` in Needs You; nothing runs until the owner's Approve, and no caller's token runs it (`docs/ops/actions.md`) |
+
+**The confirm token** is 32 random bytes, returned once. The server keeps its
+SHA-256 and the SHA-256 of the canonical `{principal, connection, tool, args}`
+it previewed, on the preview's own `runs` row (`meta.confirm`), never the token.
+It runs **once**: the presentation that spends it is one atomic `UPDATE`, so a
+replayed token — or one presented for other arguments, by another caller, or
+after `METISTRY_CONNECTION_CONFIRM_TTL_S` (default 900 s) — is `409 conflict`
+and runs nothing (`meta.refusal`: `confirm_spent`, `confirm_other_payload`,
+`confirm_expired`, `confirm_unknown`). A preview whose arguments carry the
+caller's own bearer is refused before anything is recorded. The pool refuses
+Ask First again before it dials unless the console says the owner approved.
+
+**Rate limits come from `runs`**, per caller, per connection, over the last
+hour: `METISTRY_CONNECTION_CALLS_PER_HOUR` (default 120) counts calls that were
+dialled — a preview is not one — and `METISTRY_CONNECTION_ASKS_PER_HOUR`
+(default 20) counts Ask First requests raised, because Needs You is the owner's
+attention. Over either is `rate_limited` (429) naming the limit, before anything
+is dialled or queued.
 
 **What crosses the wire.** The answer is the pool's redacted content, every
 string through the §4.20 sanitizer. A refusal from the pool or the egress door
@@ -194,12 +215,18 @@ is refused `caller_credential`; it is never sent upstream.
 row of kind `connection_call`: the principal as `component`,
 `meta.connection`, `meta.connection_tool`, the secret NAMES it carried in
 `meta.secrets` (so *last used* on the Secrets list counts it), and
-`meta.is_error` when the upstream's tool reported failure. The
+`meta.is_error` when the upstream's tool reported failure — plus
+`meta.group`, `meta.tool_mode` (the owner's policy), `meta.mode` (what the call
+did: `call`, `preview`, `ask`, `confirmed`) and `meta.dialled`. An Approve is a
+`connection_call` row too, written by the console (`tool: approve`, `mode:
+approved`). The
 `connection_calls` named query (`expose: route`) reads them back by
 connection, principal, since and ok.
 
 **Not yet wired — said plainly.** This release ships the gate, the tools and
-the record. The console does not yet hand mcp-brain a `ConnectionsProxy`, and
+the record, and the console takes a `connectionsProxy` it hands to both `/mcp`
+and the Approve path. Its `main.ts` does not yet build one (a `ConnectionPool`
+over the instance's catalog), and
 an agent's registry `grants` do not yet carry `connections` (the console's
 grant validator and a crew's manifest are where they will), so today both
 tools answer `not_available` on a live console and no agent is lent anything

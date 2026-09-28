@@ -1,0 +1,8 @@
+schema: 1
+name: session-fold
+type: routine
+display_name: Session Fold
+description: What the assistant learns about you arrives as a proposal (C79). Hourly, it reads the chat turns not yet folded — quiet for an hour, before the archive (migration 0030) expires them — and enqueues ONE assistant turn that suggests preferences, lessons and profile facts in a checked ```learned block. The next pass reads the answer back, keeps only what quotes your own words from a turn it showed (and profile values in Me/profile.md's exact shape), and raises at most one request per file with the before and after. Only your Approve writes Me/Working Style.md or Me/profile.md, as you. Model-free itself (invariant 4); it reads Me/ and never writes it. Pause it to stop learning — the archive is still kept for reading until the purge.
+# Hourly, so a turn is folded within hours of going quiet — long before its
+# 30 days, and before the shortest retention Session Purge allows (1 day).
+schedule: { every: 1h }

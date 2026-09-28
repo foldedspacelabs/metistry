@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 import {
   TASK_FILTER_FIELDS,
   TASK_FILTER_FLAGS,
+  TASK_FILTER_NOT,
   TASK_FILTER_PARAM_SPEC,
   TASK_QUERY_NAME,
   TASK_STATUSES,
@@ -133,12 +134,64 @@ describe("every clause the vocabulary has", () => {
     expect(out.ok && out.filter).toEqual({
       clauses: [
         { kind: "field", field: "due", op: "<=", value: "today" },
-        { kind: "flag", flag: "overdue" },
+        { kind: "flag", flag: "overdue", negated: false },
       ],
       join: "or",
       order: [{ field: "due", desc: true }],
       limit: 50,
     });
+  });
+});
+
+describe("ruling 14 (X-14): the carry count, `names_person` and `not <flag>`", () => {
+  it("`carried` alone is the flag; followed by an operator it is the carry count, in days", () => {
+    expect(changed("carried")).toEqual({ carried: true });
+    expect(changed("carried and overdue")).toEqual({ carried: true, overdue: true });
+    expect(changed("carried >= 3")).toEqual({ carried_min: 3 });
+    expect(changed("carried > 2")).toEqual({ carried_min: 3 }); // a strict bound folds into the inclusive one
+    expect(changed("carried <= 2")).toEqual({ carried_max: 2 });
+    expect(changed("carried < 3")).toEqual({ carried_max: 2 });
+    expect(changed("carried = 4")).toEqual({ carried_eq: 4 });
+    expect(changed("carried:4")).toEqual({ carried_eq: 4 });
+    expect(changed("CARRIED >= 3")).toEqual({ carried_min: 3 });
+    // `=` has its own param, so `carried = 3 or …` cannot turn into two bounds that `or` would widen to everything
+    expect(changed("carried = 3 or overdue")).toEqual({ carried_eq: 3, overdue: true, match_any: true });
+    expect(changed("", "carried desc")).toEqual({ order_1: "carried", order_1_desc: true });
+  });
+
+  it("`names_person` is a flag: the line names someone who is not the owner", () => {
+    expect(changed("names_person")).toEqual({ names_person: true });
+    expect(changed("names_person or waiting")).toEqual({ names_person: true, waiting: true, match_any: true });
+  });
+
+  it("`not <flag>` sets that flag's own `not_` boolean, for every flag, and joins like any clause", () => {
+    for (const flag of TASK_FILTER_FLAGS) expect(changed(`not ${flag}`)).toEqual({ [`not_${flag}`]: true });
+    expect(changed("NOT Waiting")).toEqual({ not_waiting: true });
+    expect(changed("names_person and not waiting")).toEqual({ names_person: true, not_waiting: true });
+    expect(changed("overdue or not someday")).toEqual({ overdue: true, not_someday: true, match_any: true });
+    expect(changed("not carried and not someday")).toEqual({ not_carried: true, not_someday: true });
+    const out = compileTaskFilter({ where: "names_person and not waiting" }, at);
+    expect(out.ok && out.filter.clauses).toEqual([
+      { kind: "flag", flag: "names_person", negated: false },
+      { kind: "flag", flag: "waiting", negated: true },
+    ]);
+  });
+
+  it("Slipping and Owed each compile to one run of the one query — its bind params and nothing else", () => {
+    const slipping = compileTaskFilter({ where: "carried >= 3 or overdue or names_person" }, at);
+    const owed = compileTaskFilter({ where: "names_person and not waiting" }, at);
+    for (const out of [slipping, owed]) {
+      expect(out.ok).toBe(true);
+      if (!out.ok) continue;
+      // exactly the declared shape: no key the query does not declare, every value a declared type
+      expect(Object.keys(out.params).sort()).toEqual(Object.keys(TASK_FILTER_PARAM_SPEC).sort());
+      for (const [k, v] of Object.entries(out.params)) {
+        const type = TASK_FILTER_PARAM_SPEC[k as keyof TaskFilterParams].type;
+        expect(typeof v, k).toBe(type === "int" ? "number" : type === "text" ? "string" : "boolean");
+      }
+    }
+    expect(changed("carried >= 3 or overdue or names_person")).toEqual({ carried_min: 3, overdue: true, names_person: true, match_any: true });
+    expect(changed("names_person and not waiting")).toEqual({ names_person: true, not_waiting: true });
   });
 });
 
@@ -212,6 +265,71 @@ describe("misuse: a `where:` is refused, never escaped (invariant 8)", () => {
     expect(refusal("overdue and")).toMatch(/ends with `and`/);
   });
 
+  it("a negated facet never interpolates a value: `not` only ever chooses one closed boolean", () => {
+    const text = Object.entries(TASK_FILTER_PARAM_SPEC).filter(([, spec]) => spec.type === "text").map(([k]) => k);
+    for (const flag of TASK_FILTER_FLAGS) {
+      const out = compileTaskFilter({ where: `not ${flag}` }, at);
+      if (!out.ok) throw new Error(out.error);
+      // the one change is a boolean the query declares — no text param moved,
+      // so no character the caller typed can reach the SQL
+      expect(changed(`not ${flag}`)).toEqual({ [`not_${flag}`]: true });
+      for (const k of text) expect(out.params[k as keyof TaskFilterParams], k).toBe("");
+    }
+  });
+
+  it("refuses `not` anywhere but in front of a flag, and an unknown facet after it", () => {
+    expect(refusal("not")).toMatch(/ends with `not` and no flag after it/);
+    expect(refusal("overdue and not")).toMatch(/ends with `not`/);
+    expect(refusal("not not waiting")).toMatch(/cannot read `not not`/);
+    expect(refusal("not due <= today")).toMatch(/negates only a flag/);
+    expect(refusal("not carried >= 3")).toMatch(/negates only a flag/);
+    expect(refusal("not carried:3")).toMatch(/negates only a flag/);
+    expect(refusal("not type = coding")).toMatch(/negates only a flag/);
+    expect(refusal("not assigned:[[Jim Fallon]]")).toMatch(/negates only a flag/);
+    expect(refusal("not urgency")).toMatch(/cannot negate `urgency`/); // an unknown facet is refused, never passed through
+    expect(refusal("not blocked")).toMatch(/cannot negate `blocked`/);
+    expect(refusal("not [[People/Jim]]")).toMatch(/cannot negate/);
+    expect(refusal("not select")).toMatch(/not SQL/);
+    expect(refusal("waiting and not waiting")).toMatch(/`waiting` and `not waiting` together/);
+    expect(refusal("not someday or someday")).toMatch(/`someday` and `not someday` together/);
+    expect(refusal("names_person and not waiting or overdue")).toMatch(/cannot mix `and` with `or`/); // still no brackets
+  });
+
+  it("refuses a carry count it cannot read, or one that would quietly drop out of the filter", () => {
+    expect(refusal("carried >= three")).toMatch(/cannot read the carry count `three`/);
+    expect(refusal("carried >= -1")).toMatch(/cannot read the carry count `-1`/);
+    expect(refusal("carried >= 3.5")).toMatch(/cannot read the carry count `3.5`/);
+    expect(refusal("carried >= 1e3")).toMatch(/cannot read the carry count `1e3`/);
+    expect(refusal("carried >= 99999")).toMatch(/cannot read the carry count `99999`/);
+    expect(refusal("carried >= [[x]]")).toMatch(/cannot read the carry count/);
+    expect(refusal("carried = 0")).toMatch(/say `not carried`/);
+    expect(refusal("carried <= 0")).toMatch(/say `not carried`/);
+    expect(refusal("carried < 1")).toMatch(/say `not carried`/);
+    expect(refusal("carried >= 0")).toMatch(/is every line/);
+  });
+
+  it("refuses SQL after `not` and in a carry count, in every shape it can be written", () => {
+    const attempts = [
+      "not overdue; DROP TABLE vault_tasks",
+      "not 'waiting'",
+      "not waiting--",
+      "not waiting /* x */",
+      "not waiting) or (1=1",
+      "not pg_sleep",
+      "not overdue:1 or 1=1",
+      "not waiting UNION SELECT token FROM bridge_tokens",
+      "carried >= 3 OR 1=1",
+      "carried >= 3; DELETE FROM vault_tasks",
+      "carried >= (SELECT 1)",
+      "carried >= 3::text",
+    ];
+    for (const where of attempts) {
+      const out = compileTaskFilter({ where }, at);
+      expect(out.ok, where).toBe(false);
+      expect(out).not.toHaveProperty("params");
+    }
+  });
+
   it("refuses a value it cannot read rather than guessing one (§1.4)", () => {
     expect(refusal("due <= soonish")).toMatch(/cannot read the date `soonish`/);
     expect(refusal("due <= nextweek")).toMatch(/cannot read the date `nextweek`/);
@@ -237,8 +355,11 @@ describe("misuse: a `where:` is refused, never escaped (invariant 8)", () => {
   });
 
   it("every field and flag the spec lists is reachable, and nothing else is", () => {
-    expect([...TASK_FILTER_FIELDS]).toEqual(["due", "do", "start", "done", "priority", "size", "type", "assigned", "project", "area", "source", "status"]);
-    // §6.2's seven, and `someday` — ruled by the owner (K6) and added with the Defer door (T2-5)
-    expect([...TASK_FILTER_FLAGS]).toEqual(["overdue", "unscheduled", "waiting", "recurring", "carried", "blocking_agent", "assigned_to_me", "someday"]);
+    // §6.2's twelve, and the carry count (ruling 14, X-14)
+    expect([...TASK_FILTER_FIELDS]).toEqual(["due", "do", "start", "done", "priority", "size", "type", "assigned", "project", "area", "source", "status", "carried"]);
+    // §6.2's seven, `someday` — ruled by the owner (K6) and added with the Defer
+    // door (T2-5) — and `names_person` (ruling 14, X-14)
+    expect([...TASK_FILTER_FLAGS]).toEqual(["overdue", "unscheduled", "waiting", "recurring", "carried", "blocking_agent", "assigned_to_me", "someday", "names_person"]);
+    expect(TASK_FILTER_NOT).toBe("not");
   });
 });

@@ -40,7 +40,9 @@
 //   source_prefix | status                              text
 //   overdue | unscheduled | waiting | recurring         boolean
 //   carried | blocking_agent | assigned_to_me           boolean
-//   someday                                             boolean
+//   someday | names_person                              boolean
+//   not_<flag>, one per flag above                      boolean (`not <flag>`)
+//   carried_eq | carried_min | carried_max              int, days (the carry count)
 //   order_1 | order_2 | order_3                         text (a field name)
 //   order_1_desc | order_2_desc | order_3_desc          boolean
 //   limit                                               int
@@ -140,6 +142,34 @@
 //                   `unscheduled` means: a someday line with no date is
 //                   both, because `task_ageing` counts `unscheduled` the
 //                   same way and the two must not drift
+//   names_person    the line names a person who is not the owner: `assigned`
+//                   is set and is not `me` — exactly the rows
+//                   `assigned_to_me` does not hold, said positively so a
+//                   view can ask for them (ruling 14, X-14). With `waiting`
+//                   it is owed BY them (Waiting on Others); without, it is
+//                   owed TO them (Owed)
+//
+// THE CARRY COUNT (ruling 14). `carried` is also a FIELD, compared with a
+// whole number of days: how many days the line has been carried past the day
+// it was owed on — `today - coalesce(scheduled_for, due)`, the row's
+// `carried_days`, the same number the Today chip reads as "carried 3 days".
+// Each morning an open line is still owed is one more carry. `carried` alone
+// stays the flag (carried at least once); `carried >= 3` is the field.
+// Three params, like priority: `carried_eq`, `carried_min`, `carried_max`,
+// inclusive, 0 = not filtering — so a bound that lands on 0 (`carried <= 0`,
+// `carried = 0`) is REFUSED and points at `not carried`, and `carried >= 0`
+// (every line) is refused rather than dropped, because a dropped clause under
+// `or` would quietly narrow the view. A line that is not carried counts 0.
+//
+// NEGATION (ruling 14). `not <flag>` — and only a flag. Each flag has a
+// `not_<flag>` boolean beside it, so a negated facet is one more fixed bind
+// param and never a value: nothing the caller typed after `not` reaches the
+// query except the choice of which closed boolean to set. It joins like any
+// clause (`a or not b` is "a, or not b"; the grammar still has no brackets
+// and still refuses to mix `and` with `or`). A field is narrowed by its
+// operator, not negated (`carried <= 2`, never `not carried >= 3`), so `not`
+// before a field is refused, as is `not not`, a bare `not`, and a flag asked
+// for together with its own negation.
 // `status` is `open` (not checked, not dropped) | `done` | `dropped` |
 // `waiting` | `any`; `''` means the query's own default, which is open tasks.
 // It SCOPES rather than joining the predicate (see `path_prefix` above).
@@ -191,15 +221,22 @@ export const TASK_QUERY_NAME = "vault_tasks_query";
 
 /** §6.2's `field` list, closed. A new field is a product decision and a migration, not a config line. */
 export const TASK_FILTER_FIELDS = [
-  "due", "do", "start", "done", "priority", "size", "type", "assigned", "project", "area", "source", "status",
+  "due", "do", "start", "done", "priority", "size", "type", "assigned", "project", "area", "source", "status", "carried",
 ] as const;
 export type TaskFilterField = (typeof TASK_FILTER_FIELDS)[number];
 
 /** §6.2's `flag` list, closed. Each one is a predicate the query owns; the chips and the plugin offer exactly these. */
 export const TASK_FILTER_FLAGS = [
-  "overdue", "unscheduled", "waiting", "recurring", "carried", "blocking_agent", "assigned_to_me", "someday",
+  "overdue", "unscheduled", "waiting", "recurring", "carried", "blocking_agent", "assigned_to_me", "someday", "names_person",
 ] as const;
 export type TaskFilterFlag = (typeof TASK_FILTER_FLAGS)[number];
+
+/** The word that negates the flag after it (ruling 14). Only a flag — a field is narrowed by its operator. */
+export const TASK_FILTER_NOT = "not";
+
+/** Each flag's negated bind param: `not overdue` sets `not_overdue`, and that is all `not` can ever do. */
+export type TaskFilterNotParam = `not_${TaskFilterFlag}`;
+const notParam = (flag: TaskFilterFlag): TaskFilterNotParam => `not_${flag}`;
 
 /** `:` is `=` spelled the way §2.1 spells it (`assigned:[[Jim Fallon]]`), so both forms mean one thing. */
 export const TASK_FILTER_OPS = ["<=", "<", "=", ">=", ">", ":"] as const;
@@ -220,6 +257,9 @@ const isDateField = (f: TaskFilterField): f is DateField => (DATE_FIELDS as read
 
 /** Fields that are names, not quantities: ordering them means nothing, so only `=` is admitted. */
 const TEXT_FIELDS = ["type", "assigned", "project", "area", "source", "status"] as const;
+
+/** A carry count: a whole number of days, at most four digits — a line carried for longer than that is not slipping, it is lost. */
+const CARRY_RE = /^\d{1,4}$/;
 
 const MAX_WHERE_CHARS = 400; // limit: fixed — a `where:` longer than this is a saved view or an injection attempt, and neither is a filter
 const MAX_CLAUSES = 12;      // limit: fixed — one chip per clause; a twelve-chip view is already unreadable
@@ -270,6 +310,23 @@ export interface TaskFilterParams {
   blocking_agent: boolean;
   assigned_to_me: boolean;
   someday: boolean;
+  names_person: boolean;
+
+  /** `not <flag>` (ruling 14): the flag's predicate must NOT hold. One closed boolean per flag — a negation never carries a value. */
+  not_overdue: boolean;
+  not_unscheduled: boolean;
+  not_waiting: boolean;
+  not_recurring: boolean;
+  not_carried: boolean;
+  not_blocking_agent: boolean;
+  not_assigned_to_me: boolean;
+  not_someday: boolean;
+  not_names_person: boolean;
+
+  /** The carry count, in days (ruling 14): inclusive, 0 = not filtering. A line that is not carried counts 0. */
+  carried_eq: number;
+  carried_min: number;
+  carried_max: number;
 
   order_1: string;
   order_1_desc: boolean;
@@ -294,7 +351,7 @@ export interface TaskFilterParams {
 
 export type TaskFilterClause =
   | { kind: "field"; field: TaskFilterField; op: TaskFilterOp; value: string }
-  | { kind: "flag"; flag: TaskFilterFlag };
+  | { kind: "flag"; flag: TaskFilterFlag; negated: boolean };
 
 export interface TaskOrderTerm {
   field: TaskOrderField;
@@ -341,7 +398,10 @@ export function taskFilterParams(): TaskFilterParams {
     size: "", size_rank_max: 0, size_rank_min: 0,
     type: "", assigned: "", project: "", area_prefix: "", source_prefix: "", status: "",
     overdue: false, unscheduled: false, waiting: false, recurring: false,
-    carried: false, blocking_agent: false, assigned_to_me: false, someday: false,
+    carried: false, blocking_agent: false, assigned_to_me: false, someday: false, names_person: false,
+    not_overdue: false, not_unscheduled: false, not_waiting: false, not_recurring: false,
+    not_carried: false, not_blocking_agent: false, not_assigned_to_me: false, not_someday: false, not_names_person: false,
+    carried_eq: 0, carried_min: 0, carried_max: 0,
     order_1: "", order_1_desc: false, order_2: "", order_2_desc: false, order_3: "", order_3_desc: false,
     limit: DEFAULT_TASK_LIMIT,
     today: "", me: "", path_prefix: "", offset: 0,
@@ -427,7 +487,7 @@ function tokenizeFilter(input: string): FToken[] | string {
 
 // --- the parse ----------------------------------------------------------------
 
-const VOCABULARY = `fields: ${TASK_FILTER_FIELDS.join(" ")} · flags: ${TASK_FILTER_FLAGS.join(" ")}`;
+const VOCABULARY = `fields: ${TASK_FILTER_FIELDS.join(" ")} · flags: ${TASK_FILTER_FLAGS.join(" ")} · \`not <flag>\``;
 const refused = (why: string): { ok: false; error: string } => ({ ok: false, error: why });
 
 const isField = (w: string): w is TaskFilterField => (TASK_FILTER_FIELDS as readonly string[]).includes(w);
@@ -463,15 +523,36 @@ function parseWhere(where: string): { ok: true; clauses: TaskFilterClause[]; joi
       word = word.slice(0, colon);
     }
 
-    if (glued !== null && isField(word)) {
+    if (word === TASK_FILTER_NOT) {
+      // `not <flag>` (ruling 14) — the one negation there is. What follows
+      // `not` is looked up in the closed flag list and nothing else: it can
+      // only ever choose which `not_<flag>` boolean to set.
+      const target = toks[i + 1];
+      if (!target) return refused(`\`where:\` ends with \`${TASK_FILTER_NOT}\` and no flag after it`);
+      const negate = target.kind === "word" ? target.text.toLowerCase() : "";
+      if (negate === TASK_FILTER_NOT) return refused("`where:` cannot read `not not` — say the flag itself, or `not` once");
+      const at = negate.indexOf(":");
+      const fieldish = isField(at > 0 ? negate.slice(0, at) : negate) && (at > 0 || !isFlag(negate) || toks[i + 2]?.kind === "op");
+      if (fieldish) {
+        return refused(`\`where:\` negates only a flag — \`${TASK_FILTER_NOT} ${target.text}\` names a field, and a field is narrowed by its operator (\`carried <= 2\`, \`priority >= p3\`), not by \`${TASK_FILTER_NOT}\``);
+      }
+      if (!isFlag(negate)) {
+        const sql = SQL_SHAPED.test(negate) ? " — `where:` is a closed filter vocabulary, not SQL" : "";
+        return refused(`\`where:\` cannot negate \`${target.text}\`${sql} — \`${TASK_FILTER_NOT}\` takes one of the flags: ${TASK_FILTER_FLAGS.join(" ")}`);
+      }
+      clauses.push({ kind: "flag", flag: negate, negated: true });
+      i += 2;
+    } else if (glued !== null && isField(word)) {
       const inline = glued !== "" ? { kind: "word" as TokKind, text: glued } : toks[i + 1];
       if (!inline || (inline.kind !== "word" && inline.kind !== "link")) {
         return refused(`\`where:\` expected a value after \`${word}:\``);
       }
       clauses.push({ kind: "field", field: word, op: ":", value: inline.kind === "link" ? `[[${inline.text}]]` : inline.text });
       i += glued !== "" ? 1 : 2;
-    } else if (isFlag(word)) {
-      clauses.push({ kind: "flag", flag: word });
+    } else if (isFlag(word) && !(isField(word) && toks[i + 1]?.kind === "op")) {
+      // `carried` is both: alone it is the flag, followed by an operator it
+      // is the carry count (`carried >= 3`)
+      clauses.push({ kind: "flag", flag: word, negated: false });
       i += 1;
     } else if (isField(word)) {
       const op = toks[i + 1];
@@ -503,6 +584,13 @@ function parseWhere(where: string): { ok: true; clauses: TaskFilterClause[]; joi
     if (i >= toks.length) return refused(`\`where:\` ends with \`${joiner}\` and no clause after it`);
   }
 
+  // A flag and its own negation is no filter: under `and` it is nothing, under
+  // `or` it is everything, and neither is what anyone meant to type.
+  for (const c of clauses) {
+    if (c.kind === "flag" && c.negated && clauses.some((d) => d.kind === "flag" && !d.negated && d.flag === c.flag)) {
+      return refused(`\`where:\` asks for \`${c.flag}\` and \`${TASK_FILTER_NOT} ${c.flag}\` together — one or the other`);
+    }
+  }
   return { ok: true, clauses, join: join ?? "and" };
 }
 
@@ -574,7 +662,9 @@ export function compileTaskFilter(input: TaskFilterInput = {}, opts: TaskDateOpt
 
   for (const clause of where.clauses) {
     if (clause.kind === "flag") {
-      params[clause.flag] = true;
+      // a negation sets the flag's own closed `not_` boolean — the only thing
+      // `not` can reach (ruling 14)
+      params[clause.negated ? notParam(clause.flag) : clause.flag] = true;
       continue;
     }
     const { field, op, value } = clause;
@@ -622,6 +712,25 @@ export function compileTaskFilter(input: TaskFilterInput = {}, opts: TaskDateOpt
       if (bound < 1 || bound > 3) return refused(`\`where:\` asks for a size outside s..l with \`${field} ${op} ${value}\``);
       if (op === "<=" || op === "<") params.size_rank_max = bound;
       else params.size_rank_min = bound;
+      continue;
+    }
+
+    if (field === "carried") {
+      // The carry count (ruling 14): whole days, inclusive bounds, 0 = not
+      // filtering — so a clause that would land on 0 is refused rather than
+      // silently dropped (under `or`, a dropped clause narrows the view).
+      if (!CARRY_RE.test(value)) return refused(`\`where:\` cannot read the carry count \`${value}\` in \`${field} ${op} ${value}\` — a whole number of days, like \`carried >= 3\``);
+      const n = Number(value);
+      const bound = op === "<" ? n - 1 : op === ">" ? n + 1 : n;
+      if ((eq || op === "<=" || op === "<") && bound < 1) {
+        return refused(`\`where:\` asks for lines never carried with \`${field} ${op} ${value}\` — say \`not carried\``);
+      }
+      if ((op === ">=" || op === ">") && bound < 1) {
+        return refused(`\`where:\` \`${field} ${op} ${value}\` is every line — leave it out`);
+      }
+      if (eq) params.carried_eq = bound;
+      else if (op === "<=" || op === "<") params.carried_max = bound;
+      else params.carried_min = bound;
       continue;
     }
 

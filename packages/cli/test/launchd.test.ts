@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { launchdCommands, loadPlistTemplates, nodeOnPath, parsePlistTemplate, readPlistTemplates, renderPlist, renderSystemdUnit } from "../src/launchd.js";
+import { HELPER_SERVICES, launchdCommands, loadPlistTemplates, loadSupervisedTemplates, nodeOnPath, parsePlistTemplate, readPlistTemplates, renderPlist, renderSystemdUnit } from "../src/launchd.js";
 
 const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
 
@@ -114,6 +114,43 @@ describe("launchd templates", () => {
       const unquoted = shell.replace(/'[^']*'/g, "''");
       expect(unquoted, t.file).not.toContain("/Users/x/Library/Application Support");
     }
+  });
+
+  // T8-2b: the live-capture recorder and its bridge. Rendered as text only —
+  // no plist is loaded, nothing is signed, no permission is asked.
+  it("the recorder is the signed lc-helper as the job's ONE program argument, and the bridge is an ordinary node job", async () => {
+    const byLabel = Object.fromEntries((await readPlistTemplates(repoRoot)).map((t) => [t.label, t]));
+    const recorder = byLabel["com.foldedspacelabs.metistry.recorder"]!;
+    expect(recorder.service).toBe("recorder");
+    // nothing — sh, node — in front of it: a TCC grant attaches to the job's root binary (PoC-1)
+    expect(recorder.programArguments).toEqual(["__REPO__/packages/mcp-live-capture/helper/lc-helper.app/Contents/MacOS/lc-helper"]);
+    expect(recorder.repoPaths).toEqual(["packages/mcp-live-capture/helper/lc-helper.app/Contents/MacOS/lc-helper"]);
+    // the socket the bridge dials; the capture directory is the instance's, added by `up`
+    expect(recorder.environment).toEqual({ METISTRY_LC_SOCKET: "/tmp/metistry-live-capture.sock" });
+    expect(recorder.standardOutPath).toBe("/tmp/metistry-recorder.log");
+    expect(recorder.template).toContain("<key>KeepAlive</key><true/>"); // a crash restarts it, and the restart recovers the session
+    const bridge = byLabel["com.foldedspacelabs.metistry.live-capture"]!;
+    expect(bridge.repoPaths).toEqual(["packages/mcp-live-capture/dist/main.js"]);
+    expect(bridge.programArguments.slice(0, 2)).toEqual(["/bin/sh", "-c"]);
+    const unit = renderSystemdUnit(recorder, { repo: "/srv/metistry", node: "/usr/bin/node", envFile: "/i/state/.env" });
+    expect(unit).toContain("ExecStart=/srv/metistry/packages/mcp-live-capture/helper/lc-helper.app/Contents/MacOS/lc-helper");
+    expect(HELPER_SERVICES).toContain("recorder");
+  });
+
+  it("live capture is opt-in under EVERY shape: no recorder and no bridge until METISTRY_LIVE_CAPTURE_URL is set", async () => {
+    const services = async (shape: "compose" | "launchd", env: NodeJS.ProcessEnv) => (await loadPlistTemplates(repoRoot, shape, undefined, env)).map((t) => t.service);
+    const on = { METISTRY_LIVE_CAPTURE_URL: "http://127.0.0.1:7815" };
+    expect(await services("compose", {})).not.toContain("recorder");
+    expect(await services("compose", {})).not.toContain("live-capture");
+    expect(await services("compose", on)).toEqual(expect.arrayContaining(["recorder", "live-capture"]));
+    // launchd: the recorder is an agent, the bridge a supervisor child
+    expect(await services("launchd", {})).not.toContain("recorder");
+    expect(await services("launchd", on)).toContain("recorder");
+    expect(await services("launchd", on)).not.toContain("live-capture");
+    expect((await loadSupervisedTemplates(repoRoot, undefined, {})).map((t) => t.service)).not.toContain("live-capture");
+    expect((await loadSupervisedTemplates(repoRoot, undefined, on)).map((t) => t.service)).toContain("live-capture");
+    // the older bridges' compose behaviour is unchanged
+    expect(await services("compose", {})).toContain("calendar");
   });
 
   it("refuses values that would leave or introduce placeholders, and templates with unknown ones", () => {

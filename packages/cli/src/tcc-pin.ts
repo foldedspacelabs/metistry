@@ -1,4 +1,4 @@
-// The two Developer-ID-signed Swift helper bundles a release does not carry
+// The Developer-ID-signed Swift helper bundles a release does not carry
 // (D3, invariant 6): `pack-runtime.sh` copies each `mcp-<name>/helper`, but
 // the `.app` bundles inside it are gitignored build output that no release
 // runner builds, so a release ships the sources and the Info.plist and
@@ -62,7 +62,19 @@ export const TCC_HELPERS: TccHelper[] = [
     exe: join("Contents", "MacOS", "afm-helper"),
     envVar: "METISTRY_AFM_HELPER",
   },
+  {
+    // the live-capture recorder (T8-2b): its own agent, the calendar's shape
+    service: "recorder",
+    bundle: join("packages", "mcp-live-capture", "helper", "lc-helper.app"),
+    exe: join("Contents", "MacOS", "lc-helper"),
+  },
 ];
+
+/** `packages/<pkg>/scripts/build-helper.sh` — named from the bundle's own path, so a new helper cannot be sent to another's script. */
+export function buildScriptFor(h: TccHelper): string {
+  const [root, pkg] = h.bundle.split(/[\\/]/);
+  return `${root}/${pkg}/scripts/build-helper.sh`;
+}
 
 /**
  * Everything `pinTccHelpers`/`pinSupervisorChild` need from a caller's
@@ -123,7 +135,7 @@ export async function pinSupervisorChild(ctx: TccPinCtx, service: string, envVar
 }
 
 /**
- * Pin the two bridge jobs at the signed helper bundles that already hold
+ * Pin the bridge and helper jobs at the signed helper bundles that already hold
  * the TCC grant (see `TCC_HELPERS`).
  *
  * Called from two places: `up`, right after it writes the calendar plist
@@ -165,7 +177,7 @@ export async function pinTccHelpers(ctx: TccPinCtx, templates: PlistTemplate[], 
     if (!exists(onHost)) {
       ctx.r.note(
         `${h.service}: no signed helper at ${onHost} and none in the release — this bridge will not start. ` +
-          `Build it (packages/${h.service === "apple-fm" ? "mcp-apple-fm" : "mcp-eventkit"}/scripts/build-helper.sh) and re-run \`metistry up\`; ` +
+          `Build it (${buildScriptFor(h)}) and re-run \`metistry up\`; ` +
           `doctor reports the bridge absent until then.`,
       );
       continue;

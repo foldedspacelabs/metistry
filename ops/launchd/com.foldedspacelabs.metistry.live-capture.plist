@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- live-capture bridge (T8-2b): the node half of live capture. It holds no
+     grant — the recorder job (com.foldedspacelabs.metistry.recorder) does —
+     so, unlike that helper, it is an ordinary service: under the launchd
+     shape a supervisor child like the eventkit and apple-fm bridges, under
+     compose its own agent. It connects to the recorder's socket, serves
+     check/status to tool callers and the recording controls to the owner's
+     bar, and delivers every ended session's transcript to the console's
+     POST /capture (METISTRY_LIVE_CAPTURE_INBOX_TOKEN).
+
+     Installed only once METISTRY_LIVE_CAPTURE_URL is set. Install by hand:
+       sed "s|__REPO__|$PWD|g; s|__NODE__|$(which node)|g; s|__ENV_FILE__|$METISTRY_INSTANCE_DIR/.metistry/state/.env|g" ops/launchd/com.foldedspacelabs.metistry.live-capture.plist \
+         > ~/Library/LaunchAgents/com.foldedspacelabs.metistry.live-capture.plist
+       launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.foldedspacelabs.metistry.live-capture.plist -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.foldedspacelabs.metistry.live-capture</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>-c</string>
+    <string>set -a; . '__ENV_FILE__'; set +a; exec '__NODE__' '__REPO__/packages/mcp-live-capture/dist/main.js'</string>
+  </array>
+  <key>WorkingDirectory</key><string>__REPO__</string>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/tmp/metistry-live-capture.log</string>
+  <key>StandardErrorPath</key><string>/tmp/metistry-live-capture.log</string>
+</dict>
+</plist>

@@ -31,15 +31,17 @@ export const SUPERVISOR_PLIST_FILE = `${SUPERVISOR_LABEL}.plist`;
  * has its plist template in ops/launchd — `up` renders it and turns it into
  * a child spec rather than installing an agent for it.
  */
-export const SUPERVISED_SERVICES = ["db", "console", "reconciler", "assistant", "eventkit", "apple-fm"] as const;
+export const SUPERVISED_SERVICES = ["db", "console", "reconciler", "assistant", "eventkit", "apple-fm", "live-capture"] as const;
 
 /**
  * The TCC helper agents. `calendar` is the EventKit helper (renamed from
  * `eventkit-helper`: the label is what System Settings shows, and a label is
  * not part of a TCC requirement — the bundle id and the signing identifier
- * are untouched, so no install has to consent again).
+ * are untouched, so no install has to consent again). `recorder` is the
+ * live-capture helper (T8-2b): Microphone, Audio Capture and Screen Recording
+ * attach to it, so it is its own job for the same reason.
  */
-export const HELPER_SERVICES = ["calendar"] as const;
+export const HELPER_SERVICES = ["calendar", "recorder"] as const;
 
 /**
  * A bridge is installed only when this install has opted into it, which is
@@ -49,7 +51,23 @@ export const HELPER_SERVICES = ["calendar"] as const;
  * crash-loop is not started at all (docs/ops/deployment-shapes.md, "What is
  * still missing" #2).
  */
-export const BRIDGE_URL_VARS: Record<string, string> = { eventkit: "METISTRY_EK_URL", "apple-fm": "METISTRY_AFM_URL", calendar: "METISTRY_EK_URL" };
+export const BRIDGE_URL_VARS: Record<string, string> = {
+  eventkit: "METISTRY_EK_URL",
+  "apple-fm": "METISTRY_AFM_URL",
+  calendar: "METISTRY_EK_URL",
+  "live-capture": "METISTRY_LIVE_CAPTURE_URL",
+  recorder: "METISTRY_LIVE_CAPTURE_URL",
+};
+
+/**
+ * Jobs that are opt-in under EVERY shape, not only the launchd one: live
+ * capture is off unless this install asked for it (`degrades: absent`,
+ * screen 11 §8), and a compose install that never set
+ * METISTRY_LIVE_CAPTURE_URL must not grow a recorder agent holding — or
+ * prompting for — a microphone. The older bridges keep their compose
+ * behaviour, unchanged.
+ */
+export const OPT_IN_SERVICES: ReadonlySet<string> = new Set(["live-capture", "recorder"]);
 
 /**
  * Labels an install may still be running from BEFORE the supervisor, which
@@ -200,7 +218,7 @@ export async function loadPlistTemplates(
   // compose: unchanged — db/console/assistant are containers, and there is no
   // supervisor (its whole reason is the launchd shape's agent count)
   const shaped = new Set<string>(SHAPED_SERVICES);
-  return all.filter((t) => t.service !== SUPERVISOR_SERVICE && !shaped.has(t.service));
+  return all.filter((t) => t.service !== SUPERVISOR_SERVICE && !shaped.has(t.service) && (!OPT_IN_SERVICES.has(t.service) || bridgeEnabled(t.service, env)));
 }
 
 /** Every template in `ops/launchd`, parsed and namespaced, before any shape decides which of them apply. */

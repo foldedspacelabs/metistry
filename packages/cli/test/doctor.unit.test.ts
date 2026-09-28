@@ -12,11 +12,13 @@ import {
   doctor,
   hostLocal,
   inboxRow,
+  launchdRows,
   parseComposePs,
   parseComposeUptimeSec,
   parseLaunchctlPrint,
   processUptimeSec,
   probeTargetFor,
+  restartHint,
   registriesRow,
   renderTable,
   walkManifests,
@@ -30,6 +32,7 @@ import { parseDotEnv } from "../src/env.js";
 import { BOOLEAN_FLAGS, main, parseArgs } from "../src/main.js";
 import { actualName } from "../src/migrate-inbox.js";
 import type { Exec } from "../src/exec.js";
+import { fileURLToPath } from "node:url";
 
 const PLIST = (label: string) => `<?xml version="1.0"?><plist version="1.0"><dict><key>Label</key><string>${label}</string></dict></plist>`;
 
@@ -724,8 +727,34 @@ describe("parsers and conventions", () => {
     expect(probeTargetFor("eventkit")).toMatchObject({ urlVar: "METISTRY_EK_URL", tokenVar: "METISTRY_BRIDGE_TOKEN_EVENTKIT" });
     expect(probeTargetFor("reconciler")).toMatchObject({ urlVar: "METISTRY_RECONCILER_URL", tokenVar: "METISTRY_BRIDGE_TOKEN_RECONCILER" });
     expect(probeTargetFor("my-thing")).toEqual({ urlVar: "METISTRY_MY_THING_URL", tokenVar: "METISTRY_BRIDGE_TOKEN_MY_THING" });
+    // T8-2b: the live-capture bridge is a supervisor child, so its row's remediation restarts it through the supervisor
+    expect(probeTargetFor("live-capture")).toEqual({ urlVar: "METISTRY_LIVE_CAPTURE_URL", tokenVar: "METISTRY_BRIDGE_TOKEN_LIVE_CAPTURE", launchdService: "live-capture" });
+    expect(restartHint("live-capture", "launchd")).toBe("metistry restart live-capture");
+    // …and its recorder is a TCC agent of its own, addressed by launchctl
+    expect(restartHint("recorder", "launchd", "a1b2c3d4")).toBe("launchctl kickstart -k gui/$(id -u)/com.foldedspacelabs.metistry.a1b2c3d4.recorder");
     expect(hostLocal("http://host.docker.internal:7812/")).toBe("http://127.0.0.1:7812");
     expect(hostLocal("http://10.0.0.5:7812")).toBe("http://10.0.0.5:7812");
+  });
+
+  it("the recorder's launchd row (T8-2b): its own job, running or not bootstrapped — and no row at all until live capture is configured", async () => {
+    const repoRoot = fileURLToPath(new URL("../../../", import.meta.url)); // the shipped templates, read only
+    const state: Record<string, string> = { "com.foldedspacelabs.metistry.recorder": "state = running\npid = 4242\n" };
+    const exec: Exec = async (cmd, args) => {
+      if (cmd === "launchctl") {
+        const out = state[args[1]!.replace("gui/501/", "")];
+        return out ? { code: 0, stdout: out, stderr: "" } : { code: 113, stdout: "", stderr: "Could not find service" };
+      }
+      return { code: 1, stdout: "", stderr: "" };
+    };
+    const on = { METISTRY_LIVE_CAPTURE_URL: "http://127.0.0.1:7815" };
+    const rows = await launchdRows(repoRoot, exec, 501, "launchd", undefined, on);
+    const recorder = rows.find((r) => r.name === "launchd:com.foldedspacelabs.metistry.recorder")!;
+    expect(recorder).toMatchObject({ kind: "launchd", status: "ok", meta: { pid: 4242 } });
+    delete state["com.foldedspacelabs.metistry.recorder"];
+    const absent = (await launchdRows(repoRoot, exec, 501, "launchd", undefined, on)).find((r) => r.name === "launchd:com.foldedspacelabs.metistry.recorder")!;
+    expect(absent.status).toBe("absent");
+    expect(absent.remediation).toMatch(/not bootstrapped — metistry up/);
+    expect((await launchdRows(repoRoot, exec, 501, "launchd", undefined, {})).map((r) => r.name)).not.toContain("launchd:com.foldedspacelabs.metistry.recorder");
   });
 
   it("dotenv: comments, export, quotes; unset-only load semantics live in loadDotEnv", () => {

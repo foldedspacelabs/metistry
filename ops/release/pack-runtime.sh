@@ -78,7 +78,7 @@ for d in apps/* packages/* plugins/*; do
   copy "$d/package.json" "$d/manifest.yaml" "$d/dist" "$d/README.md"
 done
 copy apps/console/web packages/cli/seed
-copy packages/mcp-apple-fm/helper packages/mcp-eventkit/helper
+copy packages/mcp-apple-fm/helper packages/mcp-eventkit/helper packages/mcp-live-capture/helper
 
 # 4. collectors/ and routines/ are one workspace package each whose
 #    SUBDIRECTORIES are the manifests doctor walks and the runner reads

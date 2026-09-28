@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- The live-capture helper as its OWN service — the recorder (T8-2b). The
+     same shape as the calendar agent beside it, for the same reason: a TCC
+     grant attaches to the job's ROOT binary, so the signed helper is
+     ProgramArguments[0] and nothing (sh, node) stands in front of it
+     (PoC-1). It holds Microphone, Audio Capture and Screen Recording; the
+     bridge (com.foldedspacelabs.metistry.live-capture, a supervisor child
+     under the launchd shape) is its one client, over the socket below.
+
+     ProgramArguments points INSIDE an app bundle: lc-helper.app, so TCC keys
+     each grant on the bundle identifier + the signature's designated
+     requirement and the grants survive a rebuild (docs/ops/apple-signing.md
+     §3). The bundle is build output, not tracked:
+       packages/mcp-live-capture/scripts/build-helper.sh
+
+     Where sessions are written: `metistry up` adds METISTRY_INSTANCE_DIR to
+     this job's environment, and the helper keeps them under
+     <instance>/.metistry/state/capture — never the vault. Installed only once
+     METISTRY_LIVE_CAPTURE_URL is set: an install without live capture has no
+     recorder at all (degrades: absent).
+
+     KeepAlive restarts it after a crash; the new process ends the session
+     the old one left recording at its last write, and the bridge delivers
+     it (C137: saved up to the crash, one report).
+
+     By hand (the capture directory is the one line `up` would add):
+       sed "s|__REPO__|$PWD|g" ops/launchd/com.foldedspacelabs.metistry.recorder.plist \
+         > ~/Library/LaunchAgents/com.foldedspacelabs.metistry.recorder.plist
+       plutil -insert EnvironmentVariables.METISTRY_CAPTURE_DIR -string "$METISTRY_INSTANCE_DIR/.metistry/state/capture" \
+         ~/Library/LaunchAgents/com.foldedspacelabs.metistry.recorder.plist
+       launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.foldedspacelabs.metistry.recorder.plist -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.foldedspacelabs.metistry.recorder</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>__REPO__/packages/mcp-live-capture/helper/lc-helper.app/Contents/MacOS/lc-helper</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>METISTRY_LC_SOCKET</key><string>/tmp/metistry-live-capture.sock</string>
+  </dict>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/tmp/metistry-recorder.log</string>
+  <key>StandardErrorPath</key><string>/tmp/metistry-recorder.log</string>
+</dict>
+</plist>

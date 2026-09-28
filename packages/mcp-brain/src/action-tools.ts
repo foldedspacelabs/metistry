@@ -27,7 +27,7 @@
 
 import { z } from "zod";
 import {
-  ACTION_KINDS,
+  PROPOSABLE_ACTION_KINDS,
   actionWorkId,
   describeAction,
   effectiveActions,
@@ -71,13 +71,13 @@ export function registerActionTools(reg: Register, db: Db, principal: AgentPrinc
   // surface than a tool that always refuses.
   if (!may(principalOf(principal), "act", { kind: "tool", name: "propose_action" }).ok) return;
   const table = effectiveActions(principal.autonomy);
-  const admitted = ACTION_KINDS.filter((k) => table[k] !== "deny");
+  const admitted = PROPOSABLE_ACTION_KINDS.filter((k) => table[k] !== "deny");
 
   reg(
     "propose_action",
     `Ask the user's console to do one thing on a work row: ${admitted.join(", ")}. Runs at once where your autonomy allows it, otherwise it waits in Needs You; either way it is recorded. args is the kind's own object (docs/ops/actions.md).`,
     {
-      kind: z.enum(ACTION_KINDS),
+      kind: z.enum(PROPOSABLE_ACTION_KINDS), // connection_call is not offered here: connections_call raises it
       args: z.record(z.string(), z.unknown()).describe("dispatch {work_id,target,brief} · task_update {work_id,patch} · comment {work_id|artifact_id+version_id, body} · capture {note,filename?}"),
       reason: z.string().min(1).max(2_000).describe("Why — the user reads this before allowing it."),
     },
@@ -97,6 +97,17 @@ export async function proposeAction(
   args: unknown,
   reason: string,
 ): Promise<Outcome> {
+  // A connection call's payload is the server's: `connections_call` gates it,
+  // builds it, previews it and binds the confirm token to it (T4-9). One
+  // written here would be the caller's — so this door never raises one, and
+  // says where the call goes instead. Decided before the arguments are read.
+  if (kind === "connection_call") {
+    return fail(
+      "invalid_request",
+      "a connection call is raised by connections_call {connection, tool, arguments}, which previews it and puts it in Needs You when the tool is set to Ask First — never by propose_action (docs/ops/actions.md)",
+      { action: kind },
+    );
+  }
   const parsed = parseAction({ kind, args });
   if (!parsed.ok) return fail("invalid_request", parsed.error);
   const action = parsed.action;

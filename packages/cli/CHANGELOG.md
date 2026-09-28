@@ -1,5 +1,14 @@
 # @foldedspacelabs/metistry-cli
 
+## 0.14.4
+
+### Patch Changes
+
+- f5b8f24: **The launchd jobs follow `.env`, and doctor says when they do not.** The supervisor's plist and `supervisor.json` embed `.env` as `metistry up` rendered it, so a token or key that `secrets sync --to env`, `secrets mint`, `secrets migrate-scope`, `secrets retire-legacy-env --yes` or `update` wrote afterwards reached nothing — bridges 401'd the watchdog and the console, and a provider key never reached the supervisor. Each of those verbs now compares the installed jobs with `.env` (names only, hashed) and, when they differ, runs `metistry up --no-compose` to re-render them and restart the supervisor, or prints `metistry up` when it cannot. Doctor adds a `launchd env` row (degraded, with the drifted names), and its `assistant` row under the launchd shape now reports the supervisor's running child — "not started" when there is none — instead of `ok` whenever compute.yaml named an engine. And `up` itself now renders what it just decided: a namespaced (second) instance's own ports — it rendered 8080/5432/7812 into `supervisor.json` and the reconciler's sandbox parameters — and a database password it minted this run, which a fresh install's supervisor and console started without.
+- f5b8f24: **The confined reconciler can listen on macOS 26.** `ops/sandbox/reconciler.sb` granted `network-bind` on its bridge port, and on macOS 26 `listen()` is refused with EPERM unless `network-inbound` names the same address — so the first install that found a real git (and so confined the reconciler instead of running `unconfined.sb`) crash-looped on `listen EPERM 127.0.0.1:7812`. The profile now carries both rules, and `ops/sandbox/bind.test.mjs` runs every profile under a real `sandbox-exec` on a `macos-26` runner (CI when a profile changes, and every release): it must listen on its own port and be refused on any other, and the engine must not listen at all. A confined reconciler whose git came from the Command Line Tools (no bundled runtime) also gets that git's directory at the front of its PATH — it spawns `git` by name, and `/usr/bin/git` is the xcode-select shim the profile refuses (`spawn EPERM` at startup).
+- @foldedspacelabs/metistry-connections@0.14.4
+  - @foldedspacelabs/metistry-core@0.14.4
+
 ## 0.14.3
 
 ### Patch Changes

@@ -1,5 +1,12 @@
 # @metistry-apps/assistant
 
+## 0.14.4
+
+### Patch Changes
+
+- @foldedspacelabs/metistry-core@0.14.4
+  - @foldedspacelabs/metistry-queries@0.14.4
+
 ## 0.14.3
 
 ### Patch Changes

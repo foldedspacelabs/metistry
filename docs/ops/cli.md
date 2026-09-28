@@ -1039,10 +1039,17 @@ metistry compute providers set <name> [--enabled on|off] [--billing token|subscr
 metistry compute models list [--provider <name>]
 metistry compute models search [<query>] [--provider <name>]
 metistry compute assign default lmstudio/google/gemma-3n-e4b
+metistry compute assign private ollama/gemma4:e4b-it-qat   # on-machine only: a capture session's turns run here
 metistry compute unassign <tier|crew:<name>>
 metistry compute budget instance --monthly 60 --action stop
 metistry compute show [--json]
 ```
+
+`assign private` is the one target with a locality rule: the `private` tier
+answers every turn a capture session is in scope for, so an `off_machine`
+provider is **refused** (plan §2.15), and the tier never falls back to
+`default` — with none assigned, such a turn is refused rather than answered
+off the machine (`docs/ops/compute.md`, "The private tier").
 
 A §4.7 protected path like `.metistry/deployment.yaml`: every write goes through the
 reconciler as the `user` principal, and an edit whose RESULT would not

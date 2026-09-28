@@ -93,6 +93,7 @@ so a validation error tells you what to edit.
 | Unknown keys are errors | A typo must fail loudly rather than silently do nothing. |
 | `assignments.default` is required whenever `assignments:` exists | It is where every unnamed and unknown tier lands; half here and half in `rules.yaml` is the split "one read path into state" exists to prevent. |
 | `shadow:` needs a `fraction`, belongs to `default`, and may not name the model already assigned | The rate is the spend, the engine reads the block in one place, and a shadow of the incumbent measures nothing while costing twice ("Shadow mode" below). |
+| `assignments.tiers.private` may only name an `on_machine` provider | It answers every turn a capture session is in scope for — a recording's transcript — so nothing recorded leaves the Mac to be answered ("The private tier" below). |
 | `caching: auto` only on an `off_machine` provider | It is a field sent to something that bills for the prompt. A local server keeps its own prefix cache with no field to send, so the key would be a line that does nothing ("Prompt caching" below). |
 
 `zdr: false` (or absent) on an `off_machine` provider is **a warning, never a
@@ -1182,6 +1183,40 @@ text before returning it; `/v1` cannot, because a provider surface has to
 hand back exactly what the model said. The deterministic scrub now runs in
 the caller — `completeJson()` applies it to every string leaf of the parsed
 result, which covers every collector rather than one route.
+
+### The private tier — `assignments.tiers.private`
+
+Plan §2.15. While a **capture session** is in scope — a recording's
+transcript, a `recording_review` answer — the assistant's turn runs on the
+`private` tier, whatever the rules or the router's policy chose for it
+(core `turnTier`). It is an ordinary tier line, assigned like any other,
+with one rule the others do not have: **it may only name a provider with
+`locality: on_machine`**.
+
+```sh
+metistry compute assign private ollama/gemma4:e4b-it-qat --effort medium
+metistry compute assign private openrouter/anthropic/claude-sonnet-5
+# refused: assignments.tiers.private names openrouter, which is locality: off_machine — …; compute.yaml was NOT changed
+```
+
+Enforced at the tool, three times, never by prompting:
+
+- **`metistry compute assign private`** refuses an off-machine provider
+  before anything is written (and so does the console's
+  `POST /api/compute/assign`, which runs the same verb).
+- **The schema** refuses it at load, naming `assignments.tiers.private.model`
+  — so a hand edit, or repointing the provider off the machine later, fails
+  the same way.
+- **The resolution** (`resolvePrivateTier`, and `resolveAssignment` for the
+  name `private`) **never falls back**: not to `assignments.default`, which
+  may be off the machine or carry a `shadow:` that runs the turn a second time
+  somewhere else, and not to `rules.yaml`. With no private tier assigned, a
+  turn with a capture session in scope is **refused** with the command that
+  fixes it — never answered elsewhere.
+
+`metistry compute unassign private` removes it; the next capture-session turn
+is then refused until it is assigned again. Capture sessions themselves are
+T8-2b's, and the engine consults `turnTier` once one exists.
 
 ### What a collector may call
 

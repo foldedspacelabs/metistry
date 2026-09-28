@@ -65,12 +65,25 @@
 #     children and `source: meeting` finds every `meeting:<path>`. Matched
 #     with `left(…)`, never `LIKE`, so a `_` in a slug is a `_` and not a
 #     wildcard.
-#   * **The flags are BOOLEANS** — §6.2's seven and K6's `someday` — one per flag, not a
+#   * **The flags are BOOLEANS** — §6.2's seven, K6's `someday` and ruling 14's `names_person` — one per flag, not a
 #     comma-separated set. A set param is shorter to declare and worse to
 #     use: it is a second little language inside a bind param, nothing can
 #     typecheck a member of it, and the parser already has a field per flag.
 #     A new flag is a product decision either way (§6.2's vocabulary is
 #     closed; `someday` was ruled, K6), so the set bought nothing.
+#   * **The carry count and negation (ruling 14, X-14).** `carried_eq` /
+#     `carried_min` / `carried_max` bound `carried_days` — the days a line
+#     has been carried past the day it was owed — inclusively, 0 = not
+#     filtering, and a line that is not carried counts 0 (so `carried <= 2`
+#     keeps it). `not <flag>` is one more BOOLEAN per flag, `not_<flag>`,
+#     judged as `NOT` of the very column `row_flags` is built from: a
+#     negation is a choice among fixed params and never a value, so nothing
+#     after `not` can reach this SQL. `names_person` is the line naming a
+#     person who is not the owner (`assigned` set, and not `me`) — the rows
+#     `assigned_to_me` does not hold, said positively. Together they make
+#     All's saved views real: Slipping is
+#     `carried >= 3 or overdue or names_person`, Owed is
+#     `names_person and not waiting` (apps/console/src/today-routes.ts).
 #   * `match_any` is how the clauses join — false is `and`, true is `or`. It
 #     is the honest limit of a fixed param shape: `due <= today or overdue`
 #     compiles, and so does every all-`and` predicate, but a predicate that
@@ -146,8 +159,9 @@ description: >-
   (daily-flow-spec §6.2) compiled to bind params — which are exactly
   `TASK_FILTER_PARAM_SPEC` in `packages/core/src/task-filter.ts`: three
   inclusive date params per comparable field, numeric priority and size-rank
-  bounds, exact slugs, prefix matches for area and source, one boolean per
-  flag, and `match_any` for how the clauses join. Scoped by `status`
+  bounds, inclusive carry-count bounds, exact slugs, prefix matches for area
+  and source, one boolean per flag and one per its negation (`not <flag>`),
+  and `match_any` for how the clauses join. Scoped by `status`
   (open | done | dropped | waiting | any) and `path_prefix` (a path prefix,
   segment-wise), which always apply under `and`, plus the caller's `today`
   and `me`. Each row carries the line's text, its fields, the flags it
@@ -193,7 +207,7 @@ params:
   area_prefix: { type: text, default: "" } # the value, or the value followed by `/`
   source_prefix: { type: text, default: "" } # the value, or the value followed by `:`
   status: { type: text, default: "" } # SCOPE: open | done | dropped | waiting | any; blank = open
-  # the seven flags of §6.2, and `someday` (K6, T2-5), one boolean each
+  # the seven flags of §6.2, `someday` (K6, T2-5) and `names_person` (ruling 14), one boolean each
   overdue: { type: boolean, default: false }
   unscheduled: { type: boolean, default: false }
   waiting: { type: boolean, default: false }
@@ -202,6 +216,21 @@ params:
   blocking_agent: { type: boolean, default: false }
   assigned_to_me: { type: boolean, default: false }
   someday: { type: boolean, default: false } # the `someday` token: deferred by the owner to no day
+  names_person: { type: boolean, default: false } # names someone who is not the owner: assigned set and not `me` (ruling 14)
+  # `not <flag>` (ruling 14): one boolean per flag, judged as NOT of the same column
+  not_overdue: { type: boolean, default: false }
+  not_unscheduled: { type: boolean, default: false }
+  not_waiting: { type: boolean, default: false }
+  not_recurring: { type: boolean, default: false }
+  not_carried: { type: boolean, default: false }
+  not_blocking_agent: { type: boolean, default: false }
+  not_assigned_to_me: { type: boolean, default: false }
+  not_someday: { type: boolean, default: false }
+  not_names_person: { type: boolean, default: false }
+  # the carry count (ruling 14): days carried past the day owed, inclusive; 0 = not filtering
+  carried_eq: { type: int, default: 0 }
+  carried_min: { type: int, default: 0 }
+  carried_max: { type: int, default: 0 }
   # order: three slots, then the total-order tie-break. Blank = the vault's own order.
   order_1: { type: text, default: "" }
   order_1_desc: { type: boolean, default: false }
@@ -247,7 +276,10 @@ sql: |
       nullif(:assigned::text, '')                             AS assigned,
       nullif(lower(:project::text), '')                       AS project,
       nullif(rtrim(:area_prefix::text, '/'), '')              AS area_prefix,
-      nullif(lower(:source_prefix::text), '')                 AS source_prefix
+      nullif(lower(:source_prefix::text), '')                 AS source_prefix,
+      nullif((:carried_eq)::int, 0)                           AS carried_eq,
+      nullif((:carried_min)::int, 0)                          AS carried_min,
+      nullif((:carried_max)::int, 0)                          AS carried_max
   ),
   -- Scope, applied before anything `match_any` can touch (see the header):
   -- the caller's path prefix, the status, and §4's rule that a recurrence
@@ -268,7 +300,7 @@ sql: |
           END
   ),
   -- What the row IS, before what the caller asked for: every flag (§6.2's
-  -- seven and `someday`) computed ONCE (the boolean param below judges the same column the
+  -- seven, `someday` and `names_person`) computed ONCE (the boolean param below judges the same column the
   -- `row_flags` output is built from, so the chip and the filter can never
   -- disagree), the work on either side of it (§3), and the size of its
   -- duplicate group (§2.3).
@@ -292,6 +324,8 @@ sql: |
       (b.id IS NOT NULL)                                                      AS is_blocking_agent,
       (s.assigned IS NULL OR (f.me IS NOT NULL AND s.assigned = f.me))        AS is_assigned_to_me,
       s.someday                                                               AS is_someday,
+      -- the exact complement of is_assigned_to_me, said positively (ruling 14)
+      (s.assigned IS NOT NULL AND (f.me IS NULL OR s.assigned <> f.me))       AS is_names_person,
       b.id                                                                    AS blocks_work_id,
       b.title                                                                 AS blocks_work_title,
       b.status                                                                AS blocks_work_status,
@@ -321,7 +355,7 @@ sql: |
     LEFT JOIN work w ON w.id = s.work_id
   ),
   -- The flags the row satisfies, as the set the caller renders as chips, and
-  -- the twelve sort keys, as one object the three `order:` slots index into
+  -- the thirteen sort keys, as one object the three `order:` slots index into
   -- by name — so the key for a field is written ONCE rather than three times.
   flagged AS (
     SELECT m.*,
@@ -333,7 +367,8 @@ sql: |
         CASE WHEN m.is_carried        THEN 'carried' END,
         CASE WHEN m.is_blocking_agent THEN 'blocking_agent' END,
         CASE WHEN m.is_assigned_to_me THEN 'assigned_to_me' END,
-        CASE WHEN m.is_someday        THEN 'someday' END
+        CASE WHEN m.is_someday        THEN 'someday' END,
+        CASE WHEN m.is_names_person   THEN 'names_person' END
       ], NULL) AS row_flags,
       jsonb_build_object(
         'priority', lpad(coalesce(m.priority, 3)::text, 2, '0'),
@@ -348,7 +383,8 @@ sql: |
         'area',     coalesce(m.area, '~'),
         'source',   coalesce(lower(m.source), '~'),
         'status',   CASE WHEN m.dropped THEN '3' WHEN m.checked THEN '2'
-                         WHEN m.waiting THEN '1' ELSE '0' END
+                         WHEN m.waiting THEN '1' ELSE '0' END,
+        'carried',  lpad(coalesce(m.carried_days, 0)::text, 6, '0')
       ) AS sort_keys
     FROM marked m
   ),
@@ -405,7 +441,24 @@ sql: |
       CASE WHEN (:carried)::boolean        THEN g.is_carried END,
       CASE WHEN (:blocking_agent)::boolean THEN g.is_blocking_agent END,
       CASE WHEN (:assigned_to_me)::boolean THEN g.is_assigned_to_me END,
-      CASE WHEN (:someday)::boolean        THEN g.is_someday END
+      CASE WHEN (:someday)::boolean        THEN g.is_someday END,
+      CASE WHEN (:names_person)::boolean   THEN g.is_names_person END,
+      -- `not <flag>` (ruling 14): NOT of the same column, and nothing else —
+      -- a negation chooses one of these fixed booleans and never carries a value
+      CASE WHEN (:not_overdue)::boolean        THEN coalesce(NOT g.is_overdue, false) END,
+      CASE WHEN (:not_unscheduled)::boolean    THEN coalesce(NOT g.is_unscheduled, false) END,
+      CASE WHEN (:not_waiting)::boolean        THEN coalesce(NOT g.is_waiting, false) END,
+      CASE WHEN (:not_recurring)::boolean      THEN coalesce(NOT g.is_recurring, false) END,
+      CASE WHEN (:not_carried)::boolean        THEN coalesce(NOT g.is_carried, false) END,
+      CASE WHEN (:not_blocking_agent)::boolean THEN coalesce(NOT g.is_blocking_agent, false) END,
+      CASE WHEN (:not_assigned_to_me)::boolean THEN coalesce(NOT g.is_assigned_to_me, false) END,
+      CASE WHEN (:not_someday)::boolean        THEN coalesce(NOT g.is_someday, false) END,
+      CASE WHEN (:not_names_person)::boolean   THEN coalesce(NOT g.is_names_person, false) END,
+      -- the carry count: a line that is not carried counts 0, so it passes a
+      -- `max` and fails a `min` or an `eq` (each of which is at least 1)
+      CASE WHEN f.carried_eq  IS NOT NULL THEN coalesce(g.carried_days, 0) =  f.carried_eq END,
+      CASE WHEN f.carried_min IS NOT NULL THEN coalesce(g.carried_days, 0) >= f.carried_min END,
+      CASE WHEN f.carried_max IS NOT NULL THEN coalesce(g.carried_days, 0) <= f.carried_max END
     ], NULL) AS clauses
     FROM flagged g, f
   ),

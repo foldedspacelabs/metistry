@@ -1245,6 +1245,7 @@ export {
 export {
   TASK_FILTER_FIELDS,
   TASK_FILTER_FLAGS,
+  TASK_FILTER_NOT,
   TASK_FILTER_OPS,
   TASK_FILTER_PARAM_SPEC,
   TASK_ORDER_FIELDS,
@@ -1257,6 +1258,7 @@ export {
   type TaskFilterField,
   type TaskFilterFlag,
   type TaskFilterInput,
+  type TaskFilterNotParam,
   type TaskFilterOp,
   type TaskFilterParams,
   type TaskFilterResult,

@@ -24,7 +24,7 @@ import { memoryVault, type MemoryVault } from "@foldedspacelabs/metistry-artifac
 import { calendarDate, compileTaskFilter, mintToken } from "@foldedspacelabs/metistry-core";
 import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
 import { makeServer } from "../src/server.js";
-import { DAY_FILES, todayPreset } from "../src/today-routes.js";
+import { DAY_FILES, SAVED_TASK_VIEWS, todayPreset } from "../src/today-routes.js";
 import * as store from "../src/auth-store.js";
 import * as agents from "../src/agents.js";
 
@@ -82,11 +82,11 @@ describe.skipIf(!hasDb)("Today: GET /api/today, GET /api/vault-tasks, PUT /api/t
     agentToken = (await agents.createAgent(pool, { id: agentId, display_name: "itest today" })).token;
 
     // the walk's rows: what the index would hold for one day note after one pass
-    const task = (name: string, line: number, text: string, f: { due?: string; do?: string; checked?: boolean; done?: string; priority?: number; someday?: boolean; waiting?: boolean }) =>
+    const task = (name: string, line: number, text: string, f: { due?: string; do?: string; checked?: boolean; done?: string; priority?: number; someday?: boolean; waiting?: boolean; assigned?: string }) =>
       pool.query(
-        `INSERT INTO vault_tasks (path, task_key, anchor, line_no, text, text_norm, checked, due, scheduled_for, done_on, priority, someday, waiting, parsed_on, first_seen_on, last_seen_at)
-         VALUES ($1, $2, $2, $3, $4, lower($4), $5, $6, $7, $8, $9, $10, $11, $12, $12, now())`,
-        [`${DIR}/${DAY}.md`, K(name), line, text, f.checked ?? false, f.due ?? null, f.do ?? null, f.done ?? null, f.priority ?? null, f.someday ?? false, f.waiting ?? false, PREV],
+        `INSERT INTO vault_tasks (path, task_key, anchor, line_no, text, text_norm, checked, due, scheduled_for, done_on, priority, someday, waiting, assigned, parsed_on, first_seen_on, last_seen_at)
+         VALUES ($1, $2, $2, $3, $4, lower($4), $5, $6, $7, $8, $9, $10, $11, $12, $13, $13, now())`,
+        [`${DIR}/${DAY}.md`, K(name), line, text, f.checked ?? false, f.due ?? null, f.do ?? null, f.done ?? null, f.priority ?? null, f.someday ?? false, f.waiting ?? false, f.assigned ?? null, PREV],
       );
     await task("due", 1, "Send Dana the fixture format", { due: DAY, priority: 2 });
     await task("carried", 2, "Renew the passport", { due: PREV, priority: 1 });
@@ -97,6 +97,9 @@ describe.skipIf(!hasDb)("Today: GET /api/today, GET /api/vault-tasks, PUT /api/t
     await task("donetoday", 7, "Call the dentist", { due: DAY, checked: true, done: DAY });
     await task("donebefore", 8, "Pay the plumber", { due: PREV, checked: true, done: PREV });
     await task("waiting", 9, "Hear back from the landlord", { due: NEXT, waiting: true });
+    // two undated lines that name a person (ruling 14): one the owner owes, one they wait on
+    await task("owed", 10, "Send Dana the notes", { assigned: "People/Dana.md" });
+    await task("waitingon", 11, "Hear from Sam about the lease", { assigned: "People/Sam.md", waiting: true });
 
     const work = async (name: string, status: string, extra: { due?: string; closed_at?: string; blocked_by?: string } = {}) => {
       const { rows } = await pool.query(
@@ -357,7 +360,30 @@ describe.skipIf(!hasDb)("Today: GET /api/today, GET /api/vault-tasks, PUT /api/t
     it("Waiting on Others is the `waiting` flag", async () => {
       const r = await q({ where: "waiting" });
       expect(r.status).toBe(200);
-      expect(mine(r.body.rows).map((t) => t.task_key)).toEqual([K("waiting")]);
+      expect(mine(r.body.rows).map((t) => t.task_key)).toEqual([K("waiting"), K("waitingon")]);
+    });
+
+    // Ruling 14 (X-14): the saved views are real `where:` strings now — each
+    // compiles to one run of vault_tasks_query and the route serves it as typed
+    const view = (name: string) => SAVED_TASK_VIEWS.find((v) => v.name === name)!.where;
+
+    it("All's saved views are Slipping, Owed and Waiting on Others, and each compiles", () => {
+      expect(SAVED_TASK_VIEWS.map((v) => v.name)).toEqual(["Slipping", "Owed", "Waiting on Others"]);
+      for (const v of SAVED_TASK_VIEWS) expect(compileTaskFilter({ where: v.where }, { timeZone: ZONE }).ok, v.name).toBe(true);
+    });
+
+    it("Slipping: carried three or more days, overdue, or names a person — the undated, unnamed line is not in it", async () => {
+      const r = await q({ where: view("Slipping"), limit: "500" });
+      expect(r.status).toBe(200);
+      // the day is 2001, so every dated open line is long carried; the ticked lines are out of scope
+      expect(mine(r.body.rows).map((t) => t.task_key)).toEqual([K("due"), K("carried"), K("planned"), K("later"), K("someday"), K("waiting"), K("owed"), K("waitingon")]);
+      expect(mine(r.body.rows).find((t) => t.task_key === K("owed"))!.row_flags).toContain("names_person");
+    });
+
+    it("Owed: names a person and is the owner's move — the line waiting on Sam is not owed", async () => {
+      const r = await q({ where: view("Owed") });
+      expect(r.status).toBe(200);
+      expect(mine(r.body.rows).map((t) => t.task_key)).toEqual([K("owed")]);
     });
 
     it("the saved views' flags run: carried or overdue; someday finds the deferred line", async () => {
@@ -378,7 +404,7 @@ describe.skipIf(!hasDb)("Today: GET /api/today, GET /api/vault-tasks, PUT /api/t
     });
 
     it("a filter outside the grammar is 400 with the parser's refusal, naming the token — never guessed or passed through", async () => {
-      for (const where of ["overdue; DROP TABLE vault_tasks", "priority <= p9", "colour = red", "due <= today and waiting or overdue"]) {
+      for (const where of ["overdue; DROP TABLE vault_tasks", "priority <= p9", "colour = red", "due <= today and waiting or overdue", "not colour", "not due <= today", "carried >= 0", "not waiting; DROP TABLE vault_tasks"]) {
         const r = await q({ where });
         expect(r.status, where).toBe(400);
         expect(r.body.error.code, where).toBe("invalid_request");

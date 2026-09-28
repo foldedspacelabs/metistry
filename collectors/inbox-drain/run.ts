@@ -181,6 +181,14 @@ export interface CollectorCtx extends ComputeAccess {
    * act on.
    */
   intentRules?: IntentRules;
+  /**
+   * A sync's Needs You switches, resolved by the runner: each rule its
+   * manifest's `needs_you` declares, the owner's `syncs.<name>.raise` in
+   * `.metistry/scheduled.yaml` over the manifest's default (§2.5). Absent for
+   * a component that declares none, or one run outside the runner (a test) —
+   * the sync then applies its manifest's defaults itself.
+   */
+  raise?: Readonly<Record<string, boolean>>;
   ekUrl?: string; // eventkit bridge (routines use it for schedule/meeting prep)
   ekToken?: string;
   githubToken?: string; // github-state collector (fine-grained read-only PAT)

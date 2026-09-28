@@ -418,6 +418,27 @@ describe(".metistry/scheduled.yaml, read every tick", () => {
     expect((fired["github-state"] ?? []).map((f) => f.at)).toEqual(["2026-09-21T12:00:00.000Z", "2026-09-21T13:00:00.000Z"]);
   });
 
+  it("a sync is handed its Needs You switches — the owner's raise over its manifest's defaults (T2-13)", async () => {
+    const db = new FakeRuns(new Date("2026-09-21T12:00:00Z"));
+    const seen: (Readonly<Record<string, boolean>> | undefined)[] = [];
+    const unit = { name: "github-state", section: "syncs" as const, displayName: "GitHub", schedule: { every: "1h" as const }, config: {}, raise: { review_requested: { label: "r", default: true }, assigned: { label: "a", default: true } } };
+    const gh: ScheduledCollector = {
+      name: "github-state",
+      dir: "collectors/github-state",
+      schedule: { every: "1h" },
+      runKind: "collector_run",
+      requires: NOTHING,
+      unit,
+      run: async (_db, ctx) => {
+        seen.push(ctx?.raise);
+        return 0;
+      },
+    };
+    await runClock(db, [gh], { from: "2026-09-21T12:00:00Z", to: "2026-09-21T12:00:00Z", scheduled: overlay({ syncs: { "github-state": { connection: "github", raise: { review_requested: false } } } }) });
+    await runClock(db, [gh], { from: "2026-09-21T13:00:00Z", to: "2026-09-21T13:00:00Z", scheduled: overlay({}) });
+    expect(seen).toEqual([{ review_requested: false, assigned: true }, { review_requested: true, assigned: true }]);
+  });
+
   it("an invalid file is never applied — what it names is HELD, not run on defaults; the rest run; one alert", async () => {
     const db = new FakeRuns(new Date("2026-09-21T04:00:00Z"));
     const fired: Record<string, Fired[]> = {};
@@ -477,6 +498,10 @@ describe(".metistry/scheduled.yaml, read every tick", () => {
     // GitHub is a sync: a routines: entry for it is not applied, and says so
     expect(effectiveSchedule(get("github-state"), ok({ routines: { "github-state": { paused: true } } }))).toMatchObject({ held: true, why: "routines.github-state: github-state is a sync — its changes live under syncs.github-state" });
     expect(effectiveSchedule(get("github-state"), ok({ syncs: { "github-state": { connection: "github", every: "1h", raise: { assigned: false } } } }))).toMatchObject({ held: false, schedule: { every: "1h" }, paused: false });
+    // …and the sync is handed its Needs You switches: the owner's over the manifest's defaults (T2-13)
+    expect(effectiveSchedule(get("github-state"), ok({ syncs: { "github-state": { connection: "github", raise: { review_requested: false } } } }))).toMatchObject({ raise: { review_requested: false, assigned: true } });
+    expect(effectiveSchedule(get("github-state"), ok({}))).toMatchObject({ raise: { review_requested: true, assigned: true } });
+    expect(effectiveSchedule(get("knowledge-fold"), ok({}))).not.toHaveProperty("raise"); // a routine declares no Needs You rule
     expect(effectiveSchedule(get("github-state"), ok({ syncs: { "github-state": { connection: "github", raise: { merged: true } } } }))).toMatchObject({ held: true, why: expect.stringContaining("GitHub raises no merged") });
     // no shipped routine declares config yet, so any key is one it does not take
     expect(effectiveSchedule(get("knowledge-fold"), ok({ routines: { "knowledge-fold": { config: { template: "Templates/Fold.md" } } } }))).toMatchObject({

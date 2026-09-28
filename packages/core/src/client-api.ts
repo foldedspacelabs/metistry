@@ -235,7 +235,7 @@ export const CLIENT_API: readonly ClientRoute[] = [
   route("GET", "/api/commands", "the composer's commands and agents, generated from the rules and the registry"),
 
   // ----- compute -----
-  route("GET", "/api/compute", "providers, assignments, budgets and spend"),
+  route("GET", "/api/compute", "providers, assignments, spending limits and spend"),
   route("GET", "/api/compute/models", "the models each provider serves"),
   route("GET", "/api/compute/catalogue", "every switched-on provider's catalogue grouped by model, one line per place; `refresh` re-reads them", { ticket: "T4-18" }),
   route("POST", "/api/compute/assign", "assign a model and effort to a tier or a crew", { idempotent: "natural" }),

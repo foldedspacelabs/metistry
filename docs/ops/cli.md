@@ -1061,7 +1061,9 @@ Keychain. Budgets are enforced in the engine, before the call — see
 console route): its **switch** (`--enabled off` = neither searched nor
 offered, and nothing may be assigned to it — switching off a provider an
 assignment names is refused, naming the assignment), its `billing`
-(`subscription` is a cloud plan whose window is its limit; refused on a local
+(`subscription` is a cloud plan whose window is its limit, so it takes no
+dollar limit — `compute budget provider:<name>` on one is refused, and so is
+switching a provider that has one to `subscription`; refused on a local
 server), its base URL, and which secret its key is. `models search` groups every
 switched-on provider's catalogue by **model** through
 `seed/model-identities.yaml` (overlaid by the instance's own

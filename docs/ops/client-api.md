@@ -316,7 +316,7 @@ takes a `since` cursor and answers with the next one.
 | `POST /api/sessions/purge` | local | local_owner | no | — | — | served | purge the session archive now; the confirm names unfolded sessions |
 | `GET /api/instances` | owner | session · local_owner | natural | — | — | served | the linked instances (`instances.yaml`) |
 | `GET /api/commands` | owner | session · local_owner | natural | — | — | served | the composer's commands and agents, generated from the rules and the registry |
-| `GET /api/compute` | owner | session · local_owner | natural | — | — | served | providers, assignments, budgets and spend |
+| `GET /api/compute` | owner | session · local_owner | natural | — | — | served | providers, assignments, spending limits and spend |
 | `GET /api/compute/models` | owner | session · local_owner | natural | — | — | served | the models each provider serves |
 | `GET /api/compute/catalogue` | owner | session · local_owner | natural | — | — | served · T4-18 | every switched-on provider's catalogue grouped by model, one line per place; `refresh` re-reads them |
 | `POST /api/compute/assign` | owner | session · local_owner | natural | — | — | served | assign a model and effort to a tier or a crew |
@@ -1718,7 +1718,7 @@ in the repo holds the menu and the router together.
 
 ### Compute
 
-#### `/api/compute*` — providers, assignments and budgets (`user` principal)
+#### `/api/compute*` — providers, assignments and spending limits (`user` principal)
 
 ```
 GET  /api/compute                                     the same report as `metistry compute show --json`
@@ -1819,13 +1819,43 @@ of editing the tiers the dynamic router chooses from (Q1). `{tier: "default"}`
 is `400`: `default` is reassigned, never removed. A target the file does not
 assign is `400`, and nothing is written.
 
-`GET /api/compute` adds two fields the CLI report does not carry:
+`GET /api/compute` adds three fields the CLI report does not carry:
 
 - **`spend`** — `{instance:{daily,monthly}, providers:{<name>:{daily,monthly}}}`,
   folded from the **`spend` named query** (invariant 3: the same read path the
   engine checks before every billable call), so the pane shows a budget beside
   what has been spent against it. `null` when that query is not loaded — never
   a guessed zero.
+- **`limits`** (T4-19, C130, C133) — every spending limit side by side, what
+  Settings › Compute › Spending limits and the Usage popover read: this
+  instance's, each provider's, and each project's daily budget, each beside
+  what has been spent against it. Core's `spendingLimits` folds it from the
+  `spend` and `projects_rollup` named queries (the read `GET /api/projects`
+  makes, so the two panes cannot disagree about a project):
+
+  ```json
+  {"instance":{"kind":"usd","scope":"instance","field":"budgets.instance",
+               "daily_usd":5,"monthly_usd":60,"action":"stop","spent":{"daily":1.25,"monthly":14.1}},
+   "providers":[
+     {"name":"openrouter","tag":"cloud","enabled":true,"kind":"usd","scope":"provider:openrouter",
+      "field":"budgets.providers.openrouter","daily_usd":null,"monthly_usd":20,"action":"stop",
+      "spent":{"daily":1.25,"monthly":14.1}},
+     {"name":"plan","tag":"subscription","enabled":true,"kind":"window","scope":"provider:plan",
+      "used":{"calls_today":7,"calls_this_month":37}}],
+   "projects":[{"kind":"usd","scope":"project:drey","id":"drey","title":"Drey","daily_usd":2.5,
+                "spent":{"daily":1.1},"mode":"autonomous","at_limit":"review"}]}
+  ```
+
+  A `usd` limit with nothing set reads `null` for both amounts and for
+  `action` — state, not a default. **A provider billed by subscription has no
+  dollar limit**: its plan's window is its limit, enforced by the provider, so
+  its line is `kind: "window"` with the calls made in each window and no
+  amount or action — and `POST /api/compute/budget` with `scope:
+  "provider:<it>"` is `400` naming `budgets.providers.<it>` (the schema
+  refuses it, so the CLI refuses it identically). A project's daily budget is
+  set by `PUT /api/projects/:id`, not here; at it an autonomous project flips
+  to review (`at_limit`), it is never a refusal. `spent`, `used` and
+  `projects` are `null` when their query is not loaded.
 - **`writable`** — whether the write verbs will work here, so a client greys
   the controls instead of discovering it on submit.
 

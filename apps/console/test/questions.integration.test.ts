@@ -285,7 +285,8 @@ describe.skipIf(!hasDb)("questions v2 and the table's answers (integration, T2-3
     const tools: { name: string; inputSchema: { properties: Record<string, any> } }[] = (await list.json()).result.tools;
     expect(tools.map((t) => t.name).filter((n) => /(^|_)(questions?|ask|answers?|decide|triage|proposals?)(_|$)/.test(n))).toEqual([]);
     const create = tools.find((t) => t.name === "requests_create")!;
-    expect(create.inputSchema.properties.kind.enum).toEqual(["finding", "decided", "decision", "gotcha", "progress", "question"]);
+    // …and a review is asked the same way, the PR in `refs` (T2-13) — still no new tool, and no new property
+    expect(create.inputSchema.properties.kind.enum).toEqual(["finding", "decided", "decision", "gotcha", "progress", "question", "pull_request"]);
     expect(Object.keys(create.inputSchema.properties)).toContain("questions");
   });
 

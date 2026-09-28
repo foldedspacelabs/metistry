@@ -707,9 +707,12 @@ export async function knowledgeRoutes(
 /**
  * `POST /api/knowledge/restore {path, sha, seen_sha}` — raise ONE Needs You
  * request to put a note back as it was at `sha`; Approve does the write, as
- * `user` (knowledge-restore.ts). The owner's alone, refused to everyone else
- * here before the body is read — whatever server.ts's gate did first — and
- * notes only, for the owner too: the machinery's history is the CLI's.
+ * `user` (knowledge-restore.ts). Reach `local` (§2.1, §2.3, ruling 7): the
+ * owner on THIS Mac alone, not reachable from the phone — server.ts's gate
+ * has already refused a passkey session, the capture token and every agent
+ * bearer before dispatch ever reaches here, off the same `local` row this
+ * door's own check below still holds it to. And notes only, for the owner
+ * too: the machinery's history is the CLI's.
  */
 async function restoreRoute(req: IncomingMessage, res: ServerResponse, key: string, deps: KnowledgeDeps, principal: Principal, audit: Audit): Promise<void> {
   const owner = may(principal, "act", { kind: "console", door: "console_management", route: key });

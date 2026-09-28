@@ -185,7 +185,7 @@ describe("createLinearIssue through the connection's door", () => {
   it("the provider declares `create`, and the key is filled at the door for api.linear.app — never by the caller, never on a URL", async () => {
     const f = fakeLinear();
     const sync = open(f.fetch);
-    expect(sync.capabilities).toEqual(["read", "create"]);
+    expect(sync.capabilities).toEqual(["read", "create", "complete"]);
     expect(sync.headers.authorization).toBe("{{ secret.linear_api_key }}");
     await createLinearIssue(sync, { id: ID, title: "Through the door" });
     expect(f.calls).toHaveLength(3);

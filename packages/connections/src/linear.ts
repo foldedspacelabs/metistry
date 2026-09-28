@@ -7,12 +7,17 @@
 // secret: <name>}`, so the header this client sends holds a reference and the
 // egress door fills it for `api.linear.app` or not at all (`sync.ts`).
 //
-// **Read-only, by construction.** The sync's client below has fixed query
-// documents and no way to send another — `linearQuery` refuses any document
-// that is not a `query` operation, so a mutation cannot leave through it even
-// by a later edit that forgets. Creating an issue (`create`, T4-25) is its
-// own module and its own fixed document (`linear-issue.ts`), sent through the
-// same transport (`sendLinearDocument`), which no index export reaches.
+// **Reads, and two fixed changes, by construction.** The sync's client
+// below has fixed query documents and no way to send another — `linearQuery`
+// refuses any document that is not a `query` operation, so a mutation cannot
+// leave through it even by a later edit that forgets. Each change is a fixed
+// document sent through the one transport (`sendLinearDocument`), which no
+// index export reaches: creating an issue (`create`, T4-25) in its own module
+// (`linear-issue.ts`), and completing one (`complete`, T4-26) here —
+// `completeIssue` sends `COMPLETE_ISSUE_MUTATION`, moving one issue to its
+// team's first `completed` state. Whether the owner's connection lets that
+// happen at all is its tool mode for `complete_issue`, checked before
+// anything is sent (`collectors/linear/complete.ts`).
 //
 // Pure over a `fetch`: no Postgres, no vault (the dependency arrow). The
 // sync that writes `work` and raises requests is `collectors/linear/`.
@@ -67,7 +72,7 @@ export interface LinearIssue {
 }
 
 /** Why a Linear call failed. Messages carry no value: responses are redacted by the door before they are read. */
-export const LINEAR_ERROR_CODES = ["http", "unauthorized", "rate_limited", "graphql", "bad_response", "not_a_query"] as const;
+export const LINEAR_ERROR_CODES = ["http", "unauthorized", "rate_limited", "graphql", "bad_response", "not_a_query", "not_found", "no_completed_state"] as const;
 export type LinearErrorCode = (typeof LINEAR_ERROR_CODES)[number];
 
 export class LinearError extends Error {
@@ -104,12 +109,12 @@ export const ISSUES_BY_ID_QUERY = `query MetistryIssuesById($ids: [ID!]) {
 const MAX_PAGES = 10; // limit: fixed — 1000 assigned open issues is past any one person's queue; the walk stops rather than paging forever
 const TIMEOUT_MS = 30_000; // limit: fixed — github-state's per-request bound
 
-/** The one way a document leaves: a `query` operation and nothing else (module header). */
+/** The one way a caller's document leaves: a `query` operation and nothing else (module header). */
 export async function linearQuery<T>(sync: Pick<SyncHttp, "fetch" | "headers">, document: string, variables: Record<string, unknown> = {}): Promise<T> {
   // strip comments and leading whitespace; the operation keyword is the first token
   const first = document.replace(/#[^\n]*/g, "").trimStart();
   if (!/^query\b/.test(first) || /\bmutation\b|\bsubscription\b/.test(first)) {
-    throw new LinearError("not_a_query", "this client sends read queries only — creating or changing an issue is its own door (T4-25, T4-26)");
+    throw new LinearError("not_a_query", "this client sends read queries only — creating or changing an issue is its own door, with its own fixed document (T4-25, T4-26)");
   }
   return sendLinearDocument<T>(sync, document, variables);
 }
@@ -231,4 +236,63 @@ export async function issuesById(sync: Pick<SyncHttp, "fetch" | "headers">, ids:
     for (const n of data.issues.nodes) out.push(readIssue(n));
   }
   return out;
+}
+
+// --- complete (T4-26) ------------------------------------------------------------
+
+/** The tool a Linear connection's owner sets to Allow · Ask First · Never for *Close in Linear* (`metistry connections policy <name> complete_issue allow|ask|never`). Declared by the connection type, group `changes`. */
+export const LINEAR_COMPLETE_TOOL = "complete_issue";
+
+/** One issue — by its UUID or its key, both of which Linear's `issue(id:)` takes — with its team's completed workflow states. */
+export const ISSUE_TO_COMPLETE_QUERY = `query MetistryIssueToComplete($id: String!) {
+  issue(id: $id) {
+    ${ISSUE_FIELDS}
+    team { key name states(filter: { type: { eq: "completed" } }) { nodes { id name type position } } }
+  }
+}`;
+
+/** The one change this module can send: one issue to one workflow state. Fixed — the caller supplies the two ids and nothing else. */
+export const COMPLETE_ISSUE_MUTATION = `mutation MetistryCompleteIssue($id: String!, $stateId: String!) {
+  issueUpdate(id: $id, input: { stateId: $stateId }) {
+    success
+    issue { ${ISSUE_FIELDS} }
+  }
+}`;
+
+export interface CompletedIssue {
+  /** the issue as Linear has it after the call */
+  issue: LinearIssue;
+  /** true when this call moved it; false when it was already closed (completed or canceled) and nothing was sent */
+  changed: boolean;
+}
+
+interface RawState {
+  id?: unknown;
+  type?: unknown;
+  position?: unknown;
+}
+
+/**
+ * Close one issue in Linear: move it to its team's first `completed`
+ * workflow state (lowest `position` — Linear's *Done* unless the team
+ * reordered it). Idempotent by nature: an issue already completed or
+ * canceled is left as it is, and only the read is sent. Two requests at
+ * most — the read, then the fixed mutation — both through the connection's
+ * door (`sync.fetch`).
+ */
+export async function completeIssue(sync: Pick<SyncHttp, "fetch" | "headers">, idOrKey: string): Promise<CompletedIssue> {
+  const data: { issue?: (RawIssue & { team?: { states?: { nodes?: RawState[] } } | null }) | null } = await linearQuery(sync, ISSUE_TO_COMPLETE_QUERY, { id: idOrKey });
+  if (!data.issue) throw new LinearError("not_found", "Linear has no such issue for this key");
+  const before = readIssue(data.issue);
+  if (LINEAR_CLOSED_STATE_TYPES.includes(before.state.type)) return { issue: before, changed: false };
+  const states = (data.issue.team?.states?.nodes ?? [])
+    .filter((n): n is { id: string; type: string; position?: unknown } => typeof n.id === "string" && n.id !== "" && n.type === "completed")
+    .sort((a, b) => (typeof a.position === "number" ? a.position : 0) - (typeof b.position === "number" ? b.position : 0));
+  const done = states[0];
+  if (!done) throw new LinearError("no_completed_state", `${before.key}: its team has no completed workflow state to move it to`);
+  const out: { issueUpdate?: { success?: unknown; issue?: RawIssue | null } | null } = await sendLinearDocument(sync, COMPLETE_ISSUE_MUTATION, { id: before.id, stateId: done.id });
+  if (out.issueUpdate?.success !== true || !out.issueUpdate.issue) throw new LinearError("bad_response", `${before.key}: Linear did not confirm the change`);
+  const after = readIssue(out.issueUpdate.issue);
+  if (after.id !== before.id || after.state.type !== "completed") throw new LinearError("bad_response", `${before.key}: Linear answered with an issue that is not completed`);
+  return { issue: after, changed: true };
 }

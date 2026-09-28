@@ -83,7 +83,7 @@ describe("the shipped linear connection type", () => {
   it("validates, and a connection made the documented way is ok", () => {
     const c = catalog();
     expect(c.entries[0]?.status).toBe("ok");
-    expect(c.entries[0]?.provider?.manifest).toMatchObject({ provides: "tracker", capabilities: ["read", "create"], sync: "linear", implementation: { kind: "builtin", module: "linear" } });
+    expect(c.entries[0]?.provider?.manifest).toMatchObject({ provides: "tracker", capabilities: ["read", "create", "complete"], tools: { complete_issue: { group: "changes" } }, sync: "linear", implementation: { kind: "builtin", module: "linear" } });
   });
 });
 

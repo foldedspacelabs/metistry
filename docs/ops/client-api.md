@@ -759,18 +759,22 @@ oldest request's time and nothing else — the sidebar row and the Dock badge
 
 #### Events become requests (C96, T2-9, T3-12)
 
-Five things the owner used to learn about only on their own screens arrive in
+Six things the owner used to learn about only on their own screens arrive in
 this queue too, as rows of existing types. No route changed: they are rows
-`GET /api/proposals` already serves, each a **mirror** (`source.kind =
-"metistry"`) — one row per subject while it waits, cleared as
-`resolved_at_source` when the thing it is about recovers, never `expired`.
-`payload.event` says which one a row is.
+`GET /api/proposals` already serves. Five of the six are **mirrors**
+(`source.kind = "metistry"`) — one row per subject while it waits, cleared as
+`resolved_at_source` when the thing it is about recovers, never `expired`; a
+budget's refusal of a **chat turn** (ruling 12, C96) is the one exception —
+it carries no `source` and is not cleared programmatically, deduped instead
+on the calendar window (`docs/ops/compute.md` "Budgets"). `payload.event`
+says which one a row is.
 
 | Event | `kind` → type | `source.external_ref` | Clears when |
 | --- | --- | --- | --- |
 | A scheduled **routine** failed | `report` → report | `routine-failed:<routine>#<error signature>` | the routine next runs cleanly |
 | A **collector** failed three times in a row and stopped (C135) | `report` → report | `collector-failed:<collector>#<error signature>` | the collector next runs cleanly |
 | A **Stop limit** paused the routines (C133) | `report` → report | `budget-stop:<scope>:<window>:<YYYY-MM-DD or YYYY-MM>@<limit>` | the budget no longer stops them (the window reset, the limit or its action changed) |
+| A **budget** refused a chat turn (ruling 12, C96) | `report` → report | *(none — not a mirror)* | never on its own; the next calendar window raises a new row |
 | A **secret** a component needs is unset | `secret_failure` → access | `secret:<VARIABLE>` | the variable is set |
 | A sync **conflict copy** is in the vault | `review` → review | `conflict:<vault path of the copy>` | the copy is gone |
 
@@ -784,6 +788,9 @@ collector_failed {title: "<name> stopped after N failures", body, component, run
 budget_stopped   {title: "Compute stopped at the $60.00 monthly budget", body: "Paused … : <routines>.",
                   budget: {scope, window, field, limit, spent, action}, paused: ["<routine>", …],
                   stopped_at, fix: "<the refusal, naming the compute.yaml field>",
+                  act: {label: "Raise", kind: "open_settings", pane: "compute", section: "spending_limits"}}
+budget_refused   {title: "Compute is over its daily budget", body: "<the refusal, naming the field, plus how nothing spent>",
+                  thread, budget: {scope, window, field, limit, spent},
                   act: {label: "Raise", kind: "open_settings", pane: "compute", section: "spending_limits"}}
 secret_failed    {title, variable, why, stopped: ["<component>", …], fix, last_ok_at | null, failed_at,
                   body: {kind: "before_after", heading, before: {label: "Stopped", text}, after: {label, text}}}
@@ -804,7 +811,9 @@ knowledge_conflict {title, refs,
   routine paused later is added to `paused` on the waiting row — and a limit
   raised and spent again is a new key, so a new row. A secret is one row
   however many components it stopped — a component stopped later is added to
-  `stopped` on the waiting row. A conflict copy is one row.
+  `stopped` on the waiting row. A conflict copy is one row. A chat turn's
+  **budget refusal** is once per calendar window (`compute.md` "Budgets") —
+  not per signature, since it carries no `source` to key on.
 - **An answer sticks while the fault lasts.** Dismissed (or any other answer)
   and still broken: not raised again. Recovered and broken again: a new row.
   A routine's failure dismissed before three strikes is not raised again when

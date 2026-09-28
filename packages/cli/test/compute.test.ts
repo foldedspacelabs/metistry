@@ -396,6 +396,32 @@ describe("assign / budget: the file is edited in place and never left invalid", 
     expect(await readFile(file(dir), "utf8")).toContain("model: cloud/example-model");
   });
 
+  it("REFUSES assigning a cloud model to `private` — a capture session's turns run there — and writes nothing (T8-6)", async () => {
+    const dir = await instance();
+    const kc = fakeSecurity({ [`${INSTANCE_ID}/metistry:secret:cloud_api_key`]: KEY });
+    const { o } = harness(dir, { exec: kc.exec });
+    await writeFile(file(await withMetistryDir(dir)), HANDWRITTEN_CLOUD);
+    await assign({ ...o, target: parseAssignmentTarget("default"), model: "cloud/example-model" });
+    // the same model is fine on an ordinary tier…
+    await assign({ ...o, target: parseAssignmentTarget("deep"), model: "cloud/example-model" });
+    const before = await readFile(file(dir), "utf8");
+    // …and refused on the private one, naming the field and the fix, before anything is written
+    await expect(assign({ ...o, target: parseAssignmentTarget("private"), model: "cloud/example-model" })).rejects.toThrow(/assignments\.tiers\.private names cloud, which is locality: off_machine.*was NOT changed/s);
+    await expect(assign({ ...o, target: parseAssignmentTarget("private"), model: "cloud/example-model", dryRun: true })).rejects.toThrow(/off_machine/);
+    expect(await readFile(file(dir), "utf8")).toBe(before);
+  });
+
+  it("assigns an on-machine model to `private`, and unassigning it says the turn is refused, not moved to default (T8-6)", async () => {
+    const { dir, o, lines } = await withLocal();
+    await assign({ ...o, target: parseAssignmentTarget("default"), model: "lmstudio/a" });
+    const r = await assign({ ...o, target: parseAssignmentTarget("private"), model: "lmstudio/google/gemma-3n-e4b" });
+    expect(r).toMatchObject({ target: "assignments.tiers.private", provider: "lmstudio", warn_non_zdr: false });
+    expect(parseCompute(await readFile(file(dir), "utf8")).assignments?.tiers.private?.model).toBe("lmstudio/google/gemma-3n-e4b");
+    await unassign({ ...o, target: parseAssignmentTarget("private") });
+    expect(lines.join("\n")).toContain("never falls back to assignments.default");
+    expect(parseCompute(await readFile(file(dir), "utf8")).assignments?.tiers.private).toBeUndefined();
+  });
+
   it("budgets: an action with no limit is refused; --daily and --monthly accumulate", async () => {
     const { dir, o } = await withLocal();
     await expect(setBudget({ ...o, target: parseBudgetTarget("instance"), action: "stop" })).rejects.toThrow(/budgets\.instance.*never fires/s);

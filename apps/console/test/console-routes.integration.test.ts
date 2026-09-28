@@ -412,6 +412,7 @@ describe.skipIf(!hasDb)("the console's compute, knowledge, commands and run-deta
       ["/api/compute/assign", { tier: "deep" }, "<provider>/<model>"],
       ["/api/compute/assign", { tier: "deep", model: "gemma" }, "provider"],
       ["/api/compute/assign", { tier: "deep", model: "lmstudio/gemma", effort: "extreme" }, "low | medium | high"],
+      ["/api/compute/assign", { tier: "private", model: "openrouter/anthropic/claude-opus-4" }, "assignments.tiers.private names openrouter, which is locality: off_machine"], // T8-6
       ["/api/compute/budget", { daily: 5, action: "stop" }, '"instance"'],
       ["/api/compute/budget", { scope: "instance", action: "stop" }, "--daily"],
       ["/api/compute/budget", { scope: "instance", daily: 5, action: "shrug" }, "allow | stop | critical_only"],

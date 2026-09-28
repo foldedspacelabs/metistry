@@ -973,6 +973,42 @@ outside `Me/` is not this edit at all. Revise and Decline write nothing. `Me/`
 is the owner's alone (`isUserOwnedPath`): this answer is the only way anything
 but the owner's own editor changes it.
 
+#### `allow` on a routine suggestion — a change to one Scheduled entry
+
+```
+POST /api/proposals/61  {"decision":"allow"}
+200 {"ok":true,"scheduled":{"section":"routines","name":"standup","path":".metistry/scheduled.yaml"}}
+409 {"error":{"code":"conflict",…},"reason":"stale","decision":"pending","proposal":{…}}
+    the entry is no longer the "before" you were shown (or its manifest's
+    defaults changed since): nothing was written, and the request still waits
+400 invalid_request — an agent's request (trust external), a malformed one,
+    or an "after" the Scheduled door refuses (it would not validate, or would
+    hold the routine) — nothing written
+503 not_available — no Scheduled wired in, or this console cannot write the overlay
+```
+
+A routine suggestion (T3-11, `apps/console/src/routine-suggestions.ts`; screen
+8 §10.4) is an `improvement` pointed at one entry of `.metistry/scheduled.yaml`.
+Its payload carries the ask (`title`), why (`summary`), what it is about
+(`subject: {kind: "routine" | "sync", name, title}`), the before-and-after body
+(`body: {kind: "before_after", heading, before: {label: "Now", text}, after:
+{label: "Suggested", text}}`) and the entry itself
+(`scheduled_edit: {section, name, before, after}` — each side the entry as the
+file holds it, or `null` for none: the manifest's defaults). **It changes only
+when something runs** — a routine's `schedule` and `paused`; a sync's `every`,
+`paused` and `raise` — the fields the owner's phone may change at the
+Scheduled doors. A New Routine's actor, task and grants are the Mac's alone,
+and a sync's connection is never Scheduled's, so neither is ever suggested.
+
+**Approve writes exactly the "after", through the Scheduled door, as `user`**:
+the same read, validate-against-the-manifests and compare-and-swap write
+`PUT /api/scheduled/…` makes, with the owner's comments kept and the change in
+the `scheduled` audit, and `payload.scheduled_applied` recording it on the row.
+It re-draws the words from the entries and refuses one whose words are not
+what they draw. Raising one, Later, Revise and Decline write nothing. A row
+that carries `scheduled_edit` is never read as a `Me/` edit or a prompt
+improvement.
+
 #### `POST /api/proposals/batch` — one verb, many rows
 
 ```

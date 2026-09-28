@@ -216,6 +216,7 @@ private let drives: [String: Drive] = [
     "GET /api/today": { s, a in done(await s.today(date: a.q("date"))) },
     "GET /api/vault-tasks": { s, a in done(await s.vaultTasks(where: a.q("where") ?? "")) },
     "PUT /api/today/order": { s, a in done(await s.setOrder(date: a.b("date") ?? "", taskKeys: a.bTexts("task_keys") ?? [])) },
+    "POST /api/today/add": { s, a in done(await s.addToToday(key: a.b("key") ?? "", date: a.b("date"))) },
     "POST /api/vault-tasks/:task_key/check": { s, a in
         done(await s.check(a.p("task_key"), checked: a.bBool("checked") ?? false, seenText: a.b("seen_text") ?? "", idempotencyKey: a.key))
     },
@@ -442,6 +443,14 @@ private let drives: [String: Drive] = [
 
     let count = try await stores.waitingCount().get()
     #expect(count.waiting == 4) // the queue at the moment it was recorded: three requests and T2-3's three-question one
+
+    // Add to Today (X-12): the captured line and its idempotency flag — a
+    // ConsoleBody, since the ticket that renders it (a later, Mac-side one)
+    // is the one to give these fields named properties.
+    let added = try await stores.addToToday(key: "ENG-42", date: nil).get()
+    #expect(added["replayed"]?.boolValue == false)
+    #expect(added["path"]?.stringValue?.hasPrefix("Inbox/") == true)
+    #expect(added["line"]?.stringValue?.contains("linear:ENG-42") == true)
 }
 
 @Test func noFixtureIsReadAsAnAnswerForARouteItDoesNotServe() async throws {

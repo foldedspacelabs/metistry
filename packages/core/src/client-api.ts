@@ -263,6 +263,7 @@ export const CLIENT_API: readonly ClientRoute[] = [
   route("GET", "/api/today", "the day: tasks, work, order, events, brief, standup and plan"),
   route("GET", "/api/vault-tasks", "vault tasks by filter: Slipping, Owed, Waiting on Others"),
   route("PUT", "/api/today/order", "the owner's order for the day", { idempotent: "natural" }),
+  route("POST", "/api/today/add", "Add to Today: capture a work item's task line onto the owner's current day (ruling 11); a second call for the same item returns the first capture", { idempotent: "natural" }),
   route("POST", "/api/vault-tasks/:task_key/check", "tick or untick one task line", { idempotent: "key", conflict: ["stale"] }),
   route("POST", "/api/vault-tasks/:task_key/schedule", "defer one task line: a `do` date or someday", { idempotent: "key", conflict: ["stale"] }),
   route("POST", "/api/vault-tasks/:task_key/link", "add one tracker ref to one task line", { idempotent: "key", conflict: ["stale"] }),

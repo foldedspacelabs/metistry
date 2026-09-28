@@ -7,6 +7,13 @@
 // are `ConsoleBody` types whose recorded-to-be shape is the contract fixture
 // beside the route (`tests/kit/fixtures/`), which T2-7 and the rest must
 // match when they serve it.
+//
+// `POST /api/today/add` (X-12, ruling 11) is the one exception: Ruling 11
+// added it to the plan on 2026-09-27, after this file's own routes were
+// frozen, with no scaffolding ticket ahead of X-12 — so its fixture is
+// recorded, not a contract, from the day this method lands. Add to Today's
+// own control (`request-answering.swift`'s `RequestDoorHandling`) is a
+// separate, later ticket; this store method is plumbing only, no UI.
 
 import Foundation
 
@@ -17,6 +24,8 @@ public protocol TodayStore: Sendable {
     func vaultTasks(where filter: String) async -> Result<VaultTaskList, ConsoleError>
     /// route: PUT /api/today/order
     func setOrder(date: String, taskKeys: [String]) async -> Result<TodayOrderResult, ConsoleError>
+    /// route: POST /api/today/add
+    func addToToday(key: String, date: String?) async -> Result<AddToTodayResult, ConsoleError>
     /// route: POST /api/vault-tasks/:task_key/check
     func check(_ taskKey: String, checked: Bool, seenText: String, idempotencyKey: String) async -> Result<VaultTaskWrite, ConsoleError>
     /// route: POST /api/vault-tasks/:task_key/schedule
@@ -52,6 +61,8 @@ public struct TodayReply: ConsoleBody { public let json: JSONValue; public init(
 public struct VaultTaskList: ConsoleBody { public let json: JSONValue; public init(json: JSONValue) { self.json = json } }
 /// `PUT /api/today/order` (T2-7): the order as stored.
 public struct TodayOrderResult: ConsoleBody { public let json: JSONValue; public init(json: JSONValue) { self.json = json } }
+/// `POST /api/today/add` (X-12, ruling 11): the captured line — `id`, `path`, `sha256` and `line` — and `replayed`, true when this is the first Add to Today's own capture returned again, not a new one.
+public struct AddToTodayResult: ConsoleBody { public let json: JSONValue; public init(json: JSONValue) { self.json = json } }
 /// Tick, Defer and Link (T2-4, T2-5, T4-25): the line as written. A `409 stale` carries the line as it stands.
 public struct VaultTaskWrite: ConsoleBody { public let json: JSONValue; public init(json: JSONValue) { self.json = json } }
 /// `POST /api/today/close` (T2-8): the section written, and `plan-tomorrow` enqueued.
@@ -126,6 +137,10 @@ extension ConsoleStores: TodayStore {
 
     public func setOrder(date: String, taskKeys: [String]) async -> Result<TodayOrderResult, ConsoleError> {
         await perform("PUT", "/api/today/order", .fields(["date": .string(date), "task_keys": .texts(taskKeys)]))
+    }
+
+    public func addToToday(key: String, date: String?) async -> Result<AddToTodayResult, ConsoleError> {
+        await perform("POST", "/api/today/add", .fields(["key": .string(key), "date": .text(date)]))
     }
 
     public func check(_ taskKey: String, checked: Bool, seenText: String, idempotencyKey: String) async -> Result<VaultTaskWrite, ConsoleError> {

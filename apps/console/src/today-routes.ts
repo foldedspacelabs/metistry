@@ -1,5 +1,5 @@
-// Today's three routes (design-build-plan §2.1, §2.10; screen-05-today
-// §2, §8, §15.6; decision D10; ticket T2-7):
+// Today's four routes (design-build-plan §2.1, §2.10; screen-05-today
+// §2, §8, §15.6; decision D10; tickets T2-7, X-12):
 //
 //   GET /api/today?date=        the day, composed: the vault's tasks (Today's
 //                               preset), the work rows, the owner's drag
@@ -8,6 +8,8 @@
 //   GET /api/vault-tasks?where= the vault's tasks by any filter in the one
 //                               `where:` language — All, and its saved views
 //   PUT /api/today/order        the owner's drag order for one day
+//   POST /api/today/add         Add to Today: a mirrored work item onto the
+//                               owner's current day (ruling 11; X-12)
 //
 // **One read path, one filter language.** Every row comes out of a named
 // query (invariant 3): `vault_tasks_query`, `day_work`, `today_order`,
@@ -48,6 +50,25 @@
 // day is UTC's, said plainly in `docs/ops/client-api.md`; a client that
 // knows its own day sends `date`.
 //
+// **Add to Today (X-12).** Ruling 11 (2026-09-27): Linear issues stay in
+// `work` and Needs You, not the Board — accepted separately (T4-24) — and a
+// route puts a work item onto Today. The mirrored `task` request's primary
+// answer (`sends: {door: "today"}`, `packages/core/src/requests.ts`) names
+// the issue by its Linear key (`payload.key`), so this door takes the same
+// key and calls the service T4-24 already built and tested
+// (`collectors/linear/today.ts`'s `addIssueToToday`, through the capture
+// service): idempotent per issue, never writes the owner's own notes, and
+// the title is Linear's as the sync recorded it, never text the caller
+// sends. The route is this ticket's whole scope — the service, and the
+// mirror that raises the request, are T4-24's.
+//
+// **The day it lands on is always the owner's current one.** Add to Today
+// means today, not some day: an explicit `date` is accepted only to let a
+// client that already knows its own day say so plainly, and it must equal
+// the console's own `today` (§'s clock) or the request is refused, naming
+// the window — a client cannot backdate or future-date a capture through
+// this door.
+//
 // Reached only by the `user` principal: server.ts's management gate runs
 // first, so an agent bearer and the capture owner token get the uniform 403.
 
@@ -55,6 +76,8 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { calendarDate, compileTaskFilter, errorEnvelope, statusFor, TASK_KEY_RE, TASK_QUERY_NAME, type ErrorCode, type TaskFilterParams } from "@foldedspacelabs/metistry-core";
 import type { VaultClient } from "@foldedspacelabs/metistry-artifacts";
 import type { QueryStore } from "@foldedspacelabs/metistry-queries";
+import type { CaptureSink } from "@foldedspacelabs/metistry-mcp-brain";
+import { addIssueToToday, LinearTodayRefused } from "@metistry-apps/collectors";
 import type { Db } from "./auth-store.js";
 import { readJson, sendJson } from "./http-util.js";
 import { trackerClosedForDay } from "./tracker-complete-route.js";
@@ -62,7 +85,8 @@ import { trackerClosedForDay } from "./tracker-complete-route.js";
 export const TODAY_ROUTE = "GET /api/today";
 export const VAULT_TASKS_ROUTE = "GET /api/vault-tasks";
 export const TODAY_ORDER_ROUTE = "PUT /api/today/order";
-const ROUTES: ReadonlySet<string> = new Set([TODAY_ROUTE, VAULT_TASKS_ROUTE, TODAY_ORDER_ROUTE]);
+export const TODAY_ADD_ROUTE = "POST /api/today/add";
+const ROUTES: ReadonlySet<string> = new Set([TODAY_ROUTE, VAULT_TASKS_ROUTE, TODAY_ORDER_ROUTE, TODAY_ADD_ROUTE]);
 
 /** The named queries Today composes (seed/queries/). */
 export const DAY_WORK_QUERY = "day_work";
@@ -134,6 +158,8 @@ export interface TodayDeps {
   now?: (() => Date) | undefined;
   /** `METISTRY_TZ` (core `configuredTimeZone`) — never `TZ`. Null or absent → UTC. */
   timeZone?: string | null | undefined;
+  /** Where Add to Today's capture lands — the console's one capture sink (X-12). */
+  inbox: CaptureSink;
 }
 
 /** True when the request is for this module. Used by server.ts's management gate so a non-`user` credential gets the uniform 403. */
@@ -209,6 +235,7 @@ export async function todayRoutes(req: IncomingMessage, res: ServerResponse, key
   if (!c.ok) return refuse(res, "not_available", c.message);
   if (key === TODAY_ROUTE) return getToday(res, url, deps, c);
   if (key === VAULT_TASKS_ROUTE) return getVaultTasks(res, url, deps, c);
+  if (key === TODAY_ADD_ROUTE) return addToToday(req, res, deps, c);
   return putOrder(req, res, deps, c);
 }
 
@@ -340,4 +367,51 @@ async function putOrder(req: IncomingMessage, res: ServerResponse, deps: TodayDe
   // the day and the count, never the keys: an anchor is harmless, but a hash key is derived from the owner's own words
   await deps.audit("today_order", "order", true, { day, outcome: "stored", keys: order.length });
   return sendJson(res, 200, { ok: true, date: day, order });
+}
+
+const ADD_FIELDS = ["key", "date"];
+const ADD_BODY = "{key: <linear-key>, date?: YYYY-MM-DD}";
+
+/**
+ * `POST /api/today/add` — Add to Today (X-12, ruling 11): a work item, named
+ * by the same key its mirrored Needs You request carries, captured onto the
+ * owner's day through T4-24's service. `date`, if given, must be the
+ * console's own `today` — this door only ever adds to the current day; any
+ * other day is refused, naming the window.
+ */
+async function addToToday(req: IncomingMessage, res: ServerResponse, deps: TodayDeps, c: Clock): Promise<void> {
+  let body: Record<string, unknown>;
+  try {
+    const raw = await readJson(req);
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return refuse(res, "invalid_request", `body must be a JSON object: ${ADD_BODY}`);
+    body = raw as Record<string, unknown>;
+  } catch {
+    return refuse(res, "invalid_request", "request body is not JSON");
+  }
+  const unknown = Object.keys(body).filter((k) => !ADD_FIELDS.includes(k));
+  if (unknown.length > 0) return refuse(res, "invalid_request", `unknown field${unknown.length > 1 ? "s" : ""} ${unknown.join(", ")} — the body is ${ADD_BODY}`);
+  if (typeof body.key !== "string" || body.key === "") return refuse(res, "invalid_request", `key is required: the issue key its Needs You request names (e.g. a Linear key, TEAM-123) — the body is ${ADD_BODY}`);
+
+  let day = c.today;
+  if (body.date !== undefined) {
+    if (typeof body.date !== "string" || !isCalendarDay(body.date)) return refuse(res, "invalid_request", "date must be a calendar day, YYYY-MM-DD — or leave it out for the owner's current day");
+    if (body.date !== c.today) {
+      await deps.audit("today_add", "add", false, { key: body.key, outcome: "outside_window", date: body.date, today: c.today });
+      return refuse(res, "invalid_request", `${body.date} is outside Today's window — Add to Today only ever adds to the owner's current day (${c.today}); GET /api/today?date=${body.date} views another day, but this door cannot write to one`);
+    }
+    day = body.date;
+  }
+
+  try {
+    const r = await addIssueToToday(deps.db, deps.inbox, { key: body.key, today: day });
+    await deps.audit("today_add", "add", true, { key: body.key, date: day, outcome: r.replayed ? "replayed" : "captured" });
+    return sendJson(res, 200, { ok: true, date: day, id: r.id, path: r.path, sha256: r.sha256, replayed: r.replayed, line: r.line });
+  } catch (e) {
+    if (e instanceof LinearTodayRefused) {
+      const code: ErrorCode = e.code === "unknown_issue" ? "not_found" : "invalid_request";
+      await deps.audit("today_add", "add", false, { key: body.key, outcome: e.code });
+      return refuse(res, code, e.message);
+    }
+    throw e;
+  }
 }

@@ -141,7 +141,8 @@ import Testing
     let (model, _, session) = try await fixtureModel()
     defer { withExtendedLifetime(session) {} }
     let bands = model.routineBands
-    #expect(bands.map(\.title) == [ScheduledWords.throughoutTheDay, "Today", "Tomorrow · Monday", ScheduledWords.inactive], "\(bands.map(\.title))")
+    // The New Routine runs since T3-8: it sits on the day it next acts, and nothing is inactive.
+    #expect(bands.map(\.title) == [ScheduledWords.throughoutTheDay, "Today", "Tomorrow · Monday", "Friday · 2 Oct"], "\(bands.map(\.title))")
     let today = try #require(bands.first { $0.title == "Today" })
     let titles = { (band: ScheduledBand) in band.rows.compactMap { model.presentation($0, assistantName: "Aide").map { "\($0.when) \($0.title)" } } }
     #expect(titles(today) == ["4:00 AM Session Purge", "6:00 AM Update Check", "6:00 PM Weekly Review", "9:00 PM Knowledge Fold", "11:00 PM Reply Review", "11:00 PM Tomorrow's Plan"], "\(titles(today))")
@@ -153,17 +154,39 @@ import Testing
     let reviews = allRows.filter { $0.name == "weekly-review" }.count
     #expect(folds == 2)
     #expect(reviews == 1)
-    // Held, with why, at the bottom.
-    let inactive = try #require(bands.last)
+    // A New Routine appears once, on the day it next acts, run by its crew — not held (T3-8).
+    let friday = try #require(bands.last)
+    #expect(friday.rows.map(\.name) == ["weekly-digest"])
+    #expect(!bands.contains { $0.title == ScheduledWords.inactive })
+    let digest = try #require(model.presentation(friday.rows[0], assistantName: "Aide"))
+    #expect(digest.when == "3:00 PM")
+    #expect(digest.runBy == "researcher" && digest.runByIsAgent)
+    #expect(digest.glyph == nil, "it has not run yet")
+    #expect(digest.detail == nil, "nothing holds it")
+    // The tabs' counts.
+    #expect(model.count(.routines) == 11)
+    #expect(model.count(.syncs) == 4)
+}
+
+@MainActor
+@Test func aHeldRoutineSitsInInactiveWithWhy() async throws {
+    // The recorded New Routine runs (T3-8); a console whose runner has no crew queue still holds one, and says why.
+    let why = "a New Routine runs as one crew run, and this console's runner was started without the crew queue — it is kept, listed, and not run here (docs/ops/scheduled.md)"
+    let console = try ScheduledConsole()
+    console.serve("GET", "/api/scheduled", try listing { name, fields in
+        if name == "weekly-digest" { fields["held"] = .string(why); fields["next_run"] = .null }
+    })
+    let (model, session) = scheduledModel(console)
+    defer { withExtendedLifetime(session) {} }
+    await model.refreshIfDue()
+    let inactive = try #require(model.routineBands.last)
+    #expect(inactive.title == ScheduledWords.inactive)
     #expect(inactive.rows.map(\.name) == ["weekly-digest"])
     let digest = try #require(model.presentation(inactive.rows[0], assistantName: "Aide"))
     #expect(digest.when == "—")
     #expect(digest.runBy == "researcher" && digest.runByIsAgent)
     #expect(digest.glyph == .absent)
-    #expect(digest.detail?.hasPrefix("a New Routine is an assignment the runner does not start yet") == true)
-    // The tabs' counts.
-    #expect(model.count(.routines) == 11)
-    #expect(model.count(.syncs) == 4)
+    #expect(digest.detail == why)
 }
 
 @MainActor
@@ -194,10 +217,10 @@ import Testing
     let week = model.week
     #expect(week.days.count == 7)
     #expect(week.days.map(\.label) == ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"])
-    // Four every day, the brief and the standup on five, the plan on five eves, the review once.
-    #expect(week.count == 44)
-    #expect(week.duringTheDay == 5, "the standup at 8:00 is the only run in the working day")
-    #expect(week.sentence == "This week: 44 runs, 5 between 7 AM and 6 PM")
+    // Four every day, the brief and the standup on five, the plan on five eves, the review once — and the New Routine on Friday (T3-8).
+    #expect(week.count == 45)
+    #expect(week.duringTheDay == 6, "the standup at 8:00 and the New Routine's Friday 3:00 PM are the runs in the working day")
+    #expect(week.sentence == "This week: 45 runs, 6 between 7 AM and 6 PM")
     #expect(week.days[0].summary.hasPrefix("6 runs: Session Purge at 4:00 AM"), "\(week.days[0].summary)")
     #expect(week.days.allSatisfy { $0.marks.allSatisfy { (0...1).contains($0) } })
 
@@ -500,10 +523,10 @@ import Testing
     let (model, _, session) = try await fixtureModel()
     defer { withExtendedLifetime(session) {} }
     let failed = try #require(model.routineBands.flatMap(\.rows).first { $0.name == "knowledge-fold" })
-    let held = try #require(model.routineBands.flatMap(\.rows).first { $0.name == "weekly-digest" })
+    let digest = try #require(model.routineBands.flatMap(\.rows).first { $0.name == "weekly-digest" })
     let pieces: [(String, AnyView, CGFloat)] = [
         ("failed row", AnyView(ScheduledRowView(model.presentation(failed, assistantName: "Aide")!)), 320),
-        ("held row", AnyView(ScheduledRowView(model.presentation(held, assistantName: "Aide")!)), 320),
+        ("New Routine row", AnyView(ScheduledRowView(model.presentation(digest, assistantName: "Aide")!)), 320),
         ("week", AnyView(WeekAxisView(week: model.week, showsTable: .constant(true))), 360),
         ("stopped", AnyView(StoppedNote(onGoToNeedsYou: {}, retry: ScheduledWords.syncNow)), 360),
     ]

@@ -19,8 +19,8 @@
 // calendar help, Close the Day (today-view.swift, T6-1b) — Knowledge
 // (knowledge-view.swift, T6-4), Work ▸ Board with its card detail and
 // rooms (board-view.swift, T6-7), Work ▸ Projects (projects-view.swift,
-// T6-8) and Run detail over Activity and Projects (run-detail-view.swift,
-// T6-10) have landed.
+// T6-8), Work ▸ Artifacts (artifacts-view.swift, T6-9) and Run detail over
+// Activity and Projects (run-detail-view.swift, T6-10) have landed.
 //
 // ACCESSIBILITY (§2.18). Every control speaks its name, and a glyph-only one its
 // shortcut too; the Needs You row says *Needs You, 10 waiting*; the gauge says
@@ -55,7 +55,7 @@ public struct RootView: View {
             ShellSidebar(shell: shell, chatIsWorking: model.chat.isWorking)
                 .navigationSplitViewColumnWidth(min: 180, ideal: MetistrySize.sidebar, max: 320)
         } detail: {
-            ShellDetail(shell: shell, needsYou: model.needsYou, activity: model.activity, chat: model.chat, today: model.today, instanceDir: model.instances.active, consoleURL: PasskeyRouting.consoleURL(in: model.status.report).flatMap(URL.init(string:)), knowledge: model.knowledge, onChooseFolder: chooseFolder, scheduled: model.scheduled, agents: model.agents, onOpenConnections: showConnections, board: model.board, projects: model.projects, onRaiseBudget: showSpendingLimits, runDetail: model.runDetail)
+            ShellDetail(shell: shell, needsYou: model.needsYou, activity: model.activity, chat: model.chat, today: model.today, instanceDir: model.instances.active, consoleURL: PasskeyRouting.consoleURL(in: model.status.report).flatMap(URL.init(string:)), knowledge: model.knowledge, onChooseFolder: chooseFolder, scheduled: model.scheduled, agents: model.agents, onOpenConnections: showConnections, board: model.board, projects: model.projects, onRaiseBudget: showSpendingLimits, artifacts: model.artifacts, runDetail: model.runDetail)
                 // The detail landmark, named for where the owner is.
                 .accessibilityElement(children: .contain)
                 .accessibilityLabel(shell.selection.title)
@@ -275,6 +275,7 @@ struct ShellDetail: View {
     var projects: ProjectsModel? = nil
     /// Raise Budget on a project over its budget: Settings › Compute (C138).
     var onRaiseBudget: (() -> Void)? = nil
+    var artifacts: ArtifactsModel? = nil
     /// Run detail, drawn over the screen a run was opened from (T6-10).
     var runDetail: RunDetailModel? = nil
 
@@ -376,6 +377,14 @@ struct ShellDetail: View {
                 onRaiseBudget: onRaiseBudget,
                 onOpenRun: runDetail.map { runs in { id in runs.open(id, over: .projects) } } ?? consoleURL.map { url in { _ in openURL(url) } },
                 onGoToBoard: { shell.navigate(to: .board) }
+            )
+        } else if destination == .artifacts, let artifacts {
+            // A version's file opens where the owner reads the vault — and
+            // an image or a PDF opens only there.
+            ArtifactsView(
+                model: artifacts,
+                assistantName: shell.assistantName,
+                onOpenInObsidian: instanceDir.map { dir in { path in if let url = ObsidianLink.url(for: path, in: dir) { openURL(url) } } }
             )
         } else {
             ContentUnavailableView {

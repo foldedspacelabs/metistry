@@ -26,7 +26,7 @@ path.
   Close the Day, and the day's spine and All — "Today" below), Chat, Activity,
   Knowledge, Scheduled, Agents, the Usage popover and the capture composer
   have landed. So have Work ▸ Board, with the card detail and a task's room
-  ("Work ▸ Board" below), and Work ▸ Projects.
+  ("Work ▸ Board" below), Work ▸ Projects and Work ▸ Artifacts.
 - **Status.** Its own window now (Window ▸ Status), no longer a sidebar row.
   Runs `metistry doctor --json` and renders the rows to the design
   system's §3.13 — grouped by doctor's own `kind`, `absent` shown in absent
@@ -114,7 +114,7 @@ path.
 | `connect-repo --auth token` | it reads the PAT from **stdin**, and the app gives every child an empty stdin on purpose so no verb can hang a progress view waiting for a paste | the wizard shows the option, disabled, with that reason; run it in a terminal |
 | **Minting an enrolment code** | there is no HTTP route that mints one, deliberately — whoever can run the host command already controls Postgres and the vault, so shell access is the root of trust for a first passkey (plan §4.2) — and `metistry enroll` is on the CLI's own "not yet" list | step 6 shows the exact `scripts/enroll.mjs` command and takes the code you paste back |
 | **A QR code** for the phone | nothing in this product renders one yet; `apps/console/scripts/enroll.mjs` says the same about itself ("QR rendering arrives with `packages/cli`"), and an encoder is a dependency nobody has asked for | step 6 shows the enrolment URL, selectable, to type or hand over |
-| **The screens behind the rest of the sidebar's rows** | the shell has the rows (T5-2); each screen is its own ticket, and until it lands the row's detail names the gap and offers the web app. Landed in W2, each with its section below: Needs You (T5-4a's list, T5-4b's bodies), Today (T6-1a's spine, T6-1b's brief, Next Up and Close the Day), Chat (T6-2), Activity (T6-3), the Usage popover (T5-6) and the capture composer (T5-5); in W3, Knowledge (T6-4), Agents (T6-5), Scheduled (T6-6), Work ▸ Board (T6-7) and Work ▸ Projects (T6-8). Still to come: Work ▸ Artifacts and the rest of W3 (T6-9…T6-11) | the PWA — "Add to Dock" in Safari, or the detail's **Open in Browser** |
+| **The screens behind the rest of the sidebar's rows** | the shell has the rows (T5-2); each screen is its own ticket, and until it lands the row's detail names the gap and offers the web app. Landed in W2, each with its section below: Needs You (T5-4a's list, T5-4b's bodies), Today (T6-1a's spine, T6-1b's brief, Next Up and Close the Day), Chat (T6-2), Activity (T6-3), the Usage popover (T5-6) and the capture composer (T5-5); in W3, Knowledge (T6-4), Agents (T6-5), Scheduled (T6-6), Work ▸ Board (T6-7), Work ▸ Projects (T6-8), Work ▸ Artifacts (T6-9) and Run detail (T6-10). Still to come: the rest of W3 (T6-11) | the PWA — "Add to Dock" in Safari, or the detail's **Open in Browser** |
 | **Attachments and live capture in the composer** | New Capture is the text composer (T5-5, "The capture composer" below); the owner held audio and screen capture until the designer's floating action bar returns (#253), and the attachment chip, ⌘⇧A and the window's drop target are not built. The Capture menu's Ask · Note · To-do and Start/Stop Recording stay dimmed for the bar (T8) | the PWA's +, or `metistry console call POST /capture` with `filename` and `content_base64` |
 | **The keep-awake control** (Services) | the model half is shipped — `KeepAwakeSetting` (four values, each with what it costs), `KeepAwakeFacts` (doctor's row) and `deploymentSetKeepAwake` — and the pane is a switch with a radio pair under it, which is the designer's. First run can pass `--keep-awake` and does not ask on its own | a terminal: `metistry deployment set-keep-awake <value> --yes`, or `metistry init --keep-awake <value>` |
 | **An iOS target** | `MetistryKit` is already free of AppKit and of `Process` so it can be shared; there is no iOS target in `Package.swift` | — |
@@ -1625,6 +1625,74 @@ there is no New Project.
   says its mode (and *over budget*) in words; the switch is one control, *Review,
   on*, with the focus ring; each section is a heading; nothing moves; no key is
   bound outside the menu table; the root frame is flexible to zero (#392).
+
+## Work ▸ Artifacts
+
+`sources/kit/artifacts-view.swift` is Work ▸ Artifacts (T6-9,
+screen-16-artifacts-and-rooms.md §1); its model is `artifacts-model.swift`,
+held by `AppModel.artifacts` so the version the owner left is the one they
+come back to, and dropped on an instance switch. It reads the §2.16
+`ArtifactsStore` and one named query, and writes nothing — every read is a
+route that was already served, and no console route was added.
+
+- **The list** is `GET /api/artifacts`: the slug, then *project · kind ·
+  updated 1 hour ago*, and the open threads across every version — one
+  `GET /api/q/rooms?anchor=artifact&state=open&limit=500` for the whole list,
+  counted per artifact (and per version for the rail), said as *500+* when
+  the read hits its limit. ↩ opens one. Empty: *No Artifacts Yet*. No event
+  names a publication, so the list polls (30 s); `thread.changed` re-reads the
+  counts and, for the artifact on screen, its threads.
+- **Not drawn, because nothing serves it** (spec §1 asks for them): a
+  **title** — an artifact has none, the slug is its name — and the list's
+  **latest version and who made it** — `GET /api/artifacts` carries
+  `current_version` as an id and `created_by` (the first author), not the
+  latest version's number or author. Both appear once an artifact is open,
+  from its versions; drawing them on the list would take one versions read
+  per row.
+- **An artifact**: the **version rail** on the left — *v2 · latest*, who made
+  it (*You*, the configured name for the instance's own agent, an agent by its
+  id), when, the message, and that version's open threads; versions are ids
+  on the wire and are numbered here oldest-first, as the PWA numbers them.
+  The **version at reading width**, line by line (markdown headings as
+  headings; text, JSON and CSV in mono; HTML as its source — agent markup
+  never renders on the Mac); an image, PDF or binary says so and opens in
+  Obsidian (⌘O opens the file on screen, whatever its kind). A bundle's files
+  are a picker; a version opens on its entry file (`index.md`, `README.md`,
+  `index.html`, `index.json`, else the first).
+- **The margin (§1).** A thread's anchor is the client's `{line}`, as the PWA
+  writes it. Each thread whose line is on screen sits in the right margin
+  **level with its highlighted line** (`accent-quiet`); when two would
+  collide, **the lower moves down, 8 pt below the card above, and keeps a
+  leader** to its line (`ThreadMarginLayout` over
+  `ThreadMarginPlacement.place`, measured in the tests: the first at 0 from
+  its line, the pushed one 35 below with 8 between). Replies fold to a count
+  (*Show 2 replies*). A thread with no line here — another file, no anchor, a
+  line past the end — is listed under the text, never placed on a line it is
+  not about. Switching version shows that version's threads: the comments
+  route is asked per version, and a thread is only ever drawn on its own.
+- **Compare** is `GET …/diff?from=&to=`, drawn per file with + on `ok-quiet`
+  and − on `failed-quiet`, the glyph carrying it too. It opens from the
+  version before the one on screen to it (from v1, to the latest), with From
+  and To pickers. The diff is read for which lines of the FROM version it
+  changed (git's `@@ -a,b` hunks, or the header-only form from line 1), and
+  when open threads on that version sit on such a line: *1 thread on v1 is
+  about a line v2 changed. It stays on v1.* with **Open on v1 →**.
+- **The states (components-03 §2).** A wait past a second: *Opening
+  store-interface · v2 · 66 bytes*. An older version's file is served only
+  while its hash still matches the working tree (`readFile`), so an older
+  version is usually unreadable: the failed panel says *notes.md at v1 was
+  replaced on disk, so it can't be shown*, offers **Show v2** (the latest, or
+  the version before the latest when the latest itself fails), and lists
+  that version's threads. No stale state: versions are commits and do not
+  age. A console with no vault bridge (503) is the failed panel in the
+  console's words with Try Again.
+- **Accessibility (§2.18).** A row is one element — *store-interface,
+  metistry, markdown, 1 open thread, updated 1 hour ago*; a version row says
+  its number, author, when, message and threads; a highlighted line says
+  *Line 3, 1 thread* after its words; a card says *You, 10:54 PM, Line 3:*
+  and the words, its replies control *Show 2 replies*; each section is a
+  heading; nothing moves; no key is bound outside the menu table; the root
+  frame is flexible to zero (#392).
 
 ## Run detail
 

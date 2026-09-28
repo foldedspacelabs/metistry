@@ -112,6 +112,11 @@ public final class AppModel {
     /// keeps its preview while the Settings window is closed and reopened;
     /// dropped on an instance switch.
     public let vaultHistory: VaultHistoryModel
+    /// Work ▸ Artifacts: the list, the artifact on screen, its version, its
+    /// threads and Compare (artifacts-view.swift). Held here so the version
+    /// the owner left is the one they come back to; dropped with everything
+    /// else on an instance switch.
+    public let artifacts: ArtifactsModel
     /// Run detail: the run on screen and the screen it was opened over
     /// (run-detail-view.swift). Held here so any screen that lists runs opens
     /// the same page; closed on an instance switch.
@@ -197,6 +202,7 @@ public final class AppModel {
         self.vaultHistory = vaultHistory
         // A rollback asked for is a request: the row and the Dock hear it now.
         vaultHistory.onQueueChanged = { [weak shell] in await shell?.refreshCount() }
+        self.artifacts = ArtifactsModel(session: console)
         self.runDetail = RunDetailModel(session: console)
 
         // The wizard's step 2 hands the folder back the moment it is known, so

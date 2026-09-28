@@ -90,7 +90,82 @@
         }
       }
     },
+    "limits": {
+      "instance": {
+        "kind": "usd",
+        "scope": "instance",
+        "field": "budgets.instance",
+        "daily_usd": null,
+        "monthly_usd": null,
+        "action": null,
+        "spent": {
+          "daily": 0.0042,
+          "monthly": 0.0042
+        }
+      },
+      "providers": [
+        {
+          "name": "openrouter",
+          "tag": "cloud",
+          "enabled": true,
+          "kind": "usd",
+          "scope": "provider:openrouter",
+          "field": "budgets.providers.openrouter",
+          "daily_usd": null,
+          "monthly_usd": null,
+          "action": null,
+          "spent": {
+            "daily": 0,
+            "monthly": 0
+          }
+        },
+        {
+          "name": "lmstudio",
+          "tag": "local",
+          "enabled": true,
+          "kind": "usd",
+          "scope": "provider:lmstudio",
+          "field": "budgets.providers.lmstudio",
+          "daily_usd": null,
+          "monthly_usd": null,
+          "action": null,
+          "spent": {
+            "daily": 0.0042,
+            "monthly": 0.0042
+          }
+        },
+        {
+          "name": "ollama",
+          "tag": "local",
+          "enabled": false,
+          "kind": "usd",
+          "scope": "provider:ollama",
+          "field": "budgets.providers.ollama",
+          "daily_usd": null,
+          "monthly_usd": null,
+          "action": null,
+          "spent": {
+            "daily": 0,
+            "monthly": 0
+          }
+        }
+      ],
+      "projects": [
+        {
+          "kind": "usd",
+          "scope": "project:metistry",
+          "id": "metistry",
+          "title": "Metistry",
+          "daily_usd": null,
+          "spent": {
+            "daily": 0
+          },
+          "mode": "review",
+          "at_limit": "review"
+        }
+      ]
+    },
     "writable": true,
-    "as_of": "2026-09-27T03:23:35.603Z"
+    "as_of": "2026-09-28T22:08:11.297Z"
   }
 }

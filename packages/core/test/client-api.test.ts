@@ -101,9 +101,16 @@ describe("reach and principals", () => {
     }
   });
 
-  it("minting a bearer is `local` — registering an agent and rotating its token (F-13) — and so is Purge Now, which cannot be undone (T3-9), and what a routine runs (T3-3), and a rollback of the vault's history (T10-6)", () => {
+  it("minting a bearer is `local` — registering an agent and rotating its token (F-13) — and so is Purge Now, which cannot be undone (T3-9), restoring a file (X-9, ruling 7), what a routine runs (T3-3), and a rollback of the vault's history (T10-6)", () => {
     const local = CLIENT_API.filter((r) => r.served && isLocalRoute(r)).map(key);
-    expect(local).toEqual(["POST /api/agents", "POST /api/agents/:id/rotate", "POST /api/sessions/purge", "PUT /api/scheduled/routines/:name/assignment", "POST /api/vault/rollback"]);
+    expect(local).toEqual([
+      "POST /api/agents",
+      "POST /api/agents/:id/rotate",
+      "POST /api/sessions/purge",
+      "POST /api/knowledge/restore",
+      "PUT /api/scheduled/routines/:name/assignment",
+      "POST /api/vault/rollback",
+    ]);
     // a routine's timing stays reachable from any owner client; what it runs does not
     for (const k of ["PUT /api/scheduled/routines/:name/schedule", "POST /api/scheduled/routines/:name/pause", "POST /api/scheduled/routines/:name/run", "PUT /api/scheduled/syncs/:name"]) {
       expect(CLIENT_API.find((r) => key(r) === k)!.reach, k).toEqual(["owner"]);

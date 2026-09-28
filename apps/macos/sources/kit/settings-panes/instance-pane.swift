@@ -1,3 +1,207 @@
+// Settings ▸ Instance (screen-15 §5.1): the assistant, this instance, the
+// recents, the vault's History (T10-7, below), and the instances this one is
+// linked to.
+//
+// The assistant is named in identity.yaml and nowhere else, and that file is a
+// protected path: Edit… changes it only through `metistry identity set` (M10,
+// T2-16) — confirmed with the exact command, written as the owner through the
+// reconciler, and shown in Activity as a `config_write` run. The pane holds no
+// copy of the name; it reads `metistry identity --json` again after the write.
+//
+// Linked instances are read over the API (`GET /api/instances`) and changed
+// only by `metistry instances add|remove|refresh` (M11): a trust relationship
+// with another origin is a management verb, never a route (invariant 10).
+
+import SwiftUI
+import UniformTypeIdentifiers
+
+struct InstancePane: View {
+    @Environment(\.colorScheme) private var scheme
+    let model: AppModel
+    let actions: SettingsActions
+
+    @State private var pickingInstance = false
+
+    private var settings: SettingsModel { model.settings }
+
+    var body: some View {
+        let p = Palette(scheme)
+        assistant(p)
+        thisInstance(p)
+        recents(p)
+        // The vault's git: sync, and Roll Back… (T10-7). It renders a model
+        // rather than holding one.
+        InstanceHistorySection(model: model.vaultHistory, assistantName: model.shell.assistantName)
+        linkedInstances(p)
+    }
+
+    // MARK: The assistant
+
+    @ViewBuilder
+    private func assistant(_ p: Palette) -> some View {
+        SettingsSection("Assistant") {
+            if case .unavailable(let why) = settings.identityPhase {
+                UnavailableCard(what: "Could not read the identity", reason: why, command: settings.identityCommand)
+            } else if settings.identityPhase == .reading {
+                Text("Reading `metistry identity --json`…").metistryText(.footnote, p, .textSecondary)
+            } else {
+                FactRow("Name", settings.assistantNameDisplay, mono: true)
+                FactRow("Mention", settings.identity?.mention ?? "not set", mono: true, role: settings.identity?.mention == nil ? .absent : .textPrimary)
+                FactRow("Mark", settings.identity?.icon ?? "not set", role: settings.identity?.icon == nil ? .absent : .textPrimary)
+                FactRow(
+                    "Instance ID",
+                    settings.identity?.instanceID ?? "not reported",
+                    help: SettingsModel.instanceIdNote,
+                    mono: true,
+                    role: settings.identity?.instanceID == nil ? .absent : .textPrimary
+                )
+                Button("Edit…") { settings.beginIdentityEdit() }
+                    .disabled(settings.identity == nil || settings.management == nil)
+                    .accessibilityLabel("Edit the name, mention and mark")
+            }
+            Text("identity.yaml is a protected file. Edit… changes it with `metistry identity set` — written as you through the reconciler, and shown in Activity.")
+                .metistryText(.caption1, p, .textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .task(id: model.instances.active) { await settings.refreshIdentity() }
+    }
+
+    // MARK: This instance
+
+    @ViewBuilder
+    private func thisInstance(_ p: Palette) -> some View {
+        SettingsSection("This Instance") {
+            Text(model.instances.active?.path ?? "None chosen")
+                .metistryText(.mono, p, model.instances.active == nil ? .textTertiary : .textPrimary)
+                .lineLimit(2)
+                .truncationMode(.head)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+            SettingsControls {
+                Button("Choose…") { pickingInstance = true }
+                    .accessibilityLabel("Choose an instance folder")
+                if let active = model.instances.active {
+                    Button("Open in Finder") { actions.openInFinder(active) }
+                }
+                Button("Set Up Again…", action: actions.setUpAgain)
+            }
+            if let namespace = settings.deployment?.namespace {
+                FactRow("Namespace", namespace.labelSuffix, help: "Its own launchd labels and ports (state/ports.yaml), so it runs beside another instance on this Mac.", mono: true)
+                FactRow("Ports", SettingsWords.ports(namespace), mono: true)
+            } else if settings.deployment != nil {
+                FactRow("Namespace", "none — the default labels and ports", role: .textSecondary)
+            }
+            Text("Every `metistry` verb the app runs is given METISTRY_INSTANCE_DIR=<this path>, so this is the one place that decides which install the app is talking to. Set Up Again… runs the first-launch steps over; nothing happens until you press Run on a step.")
+                .metistryText(.caption1, p, .textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .fileImporter(isPresented: $pickingInstance, allowedContentTypes: [.folder]) { result in
+            if case .success(let url) = result { model.activateInstance(url) }
+        }
+    }
+
+    // MARK: Recent
+
+    @ViewBuilder
+    private func recents(_ p: Palette) -> some View {
+        if !model.instances.recents.isEmpty {
+            SettingsSection("Recent") {
+                ForEach(model.instances.recents, id: \.path) { url in
+                    let active = url.path == model.instances.active?.path
+                    HStack(spacing: MetistrySpace.s2) {
+                        Image(systemName: active ? "checkmark.circle.fill" : "folder")
+                            .foregroundStyle(p[active ? .ok : .textTertiary])
+                            .accessibilityHidden(true)
+                        Button(url.path) { model.activateInstance(url) }
+                            .buttonStyle(.plain)
+                            .metistryText(.footnote, p, .textPrimary)
+                            .lineLimit(1)
+                            .truncationMode(.head)
+                            .accessibilityLabel(active ? "\(url.path), active" : "Switch to \(url.path)")
+                        Spacer(minLength: MetistrySpace.s2)
+                        Button("Forget") { model.forgetInstance(url) }
+                            .accessibilityLabel("Forget \(url.lastPathComponent)")
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: Linked instances
+
+    @ViewBuilder
+    private func linkedInstances(_ p: Palette) -> some View {
+        SettingsSection("Linked Instances") {
+            if case .unavailable(let why) = settings.linkedPhase {
+                UnavailableCard(what: "Could not read the linked instances", reason: why)
+            } else if settings.linkedPhase == .read, settings.linked.isEmpty {
+                Text("No instances linked. Linking one lets this instance know who it is and what it offers.")
+                    .metistryText(.footnote, p, .textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            ForEach(settings.linked) { instance in
+                LinkedInstanceRow(instance: instance, now: Date(), settings: settings)
+            }
+            SettingsControls {
+                Button("Link an Instance…") { settings.beginLink() }
+                Button("Refresh") { Task { await settings.refreshLinkedOrigins() } }
+                    .accessibilityLabel("Refresh linked instances")
+            }
+            .disabled(settings.management == nil || settings.running != nil)
+            Text("From instances.yaml, a protected file. Link, Refresh and Remove are `metistry instances add|refresh|remove`; Refresh re-asks every origin who it is and leaves an unreachable one as it was.")
+                .metistryText(.caption1, p, .textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .task(id: model.instances.active) { await settings.refreshLinked() }
+    }
+}
+
+struct LinkedInstanceRow: View {
+    @Environment(\.colorScheme) private var scheme
+    let instance: LinkedInstance
+    let now: Date
+    let settings: SettingsModel
+
+    var body: some View {
+        let p = Palette(scheme)
+        let stale = instance.notSeen(now: now)
+        VStack(alignment: .leading, spacing: MetistrySpace.s1) {
+            Text(instance.name).metistryText(.headline, p)
+            Text(instance.origin)
+                .metistryText(.mono, p, .textSecondary)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+            if !instance.capabilities.isEmpty {
+                Text(instance.capabilities.joined(separator: " · "))
+                    .metistryText(.caption1, p, .textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Text(stale ?? instance.lastSeen.map { "Last seen \($0.formatted(date: .abbreviated, time: .shortened))" } ?? "")
+                .metistryText(.caption1, p, stale == nil ? .textTertiary : .stale)
+            SettingsControls {
+                if stale != nil {
+                    Button("Check Now") { Task { await settings.refreshLinkedOrigins() } }
+                        .accessibilityLabel("Check \(instance.name) now")
+                }
+                Button("Remove") { settings.proposeRemove(instance) }
+                    .accessibilityLabel("Remove \(instance.name)")
+            }
+            .disabled(settings.management == nil || settings.running != nil)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// Words the panes share.
+enum SettingsWords {
+    /// `console 18080 · db 18081 …`, in a stable order.
+    static func ports(_ namespace: DeploymentNamespace) -> String {
+        namespace.ports.sorted { $0.key < $1.key }.map { "\($0.key) \($0.value)" }.joined(separator: " · ")
+    }
+}
+
+// MARK: - History
+
 // Settings ▸ Instance ▸ History (design-build-plan T10-7, §2.21).
 //
 // Where the vault's git stands, read from `GET /api/vault/status` (T10-2):
@@ -14,8 +218,6 @@
 // value, ahead and behind in words rather than arrows; the section's title
 // is a heading; every control is a named Button; nothing moves; no key is
 // bound. The pane scrolls, so the largest text makes it longer, never wider.
-
-import SwiftUI
 
 /// The History section of Settings ▸ Instance.
 public struct InstanceHistorySection: View {

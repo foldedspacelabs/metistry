@@ -63,6 +63,11 @@ struct MetistryApp: App {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(text, forType: .string)
         }
+        // The lid dialog's Copy, and a doctor fix to run in Terminal.
+        model.settings.copyText = { text in
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+        }
         // A token shown once on Agents: copied, never kept.
         model.agents.copyText = { text in
             NSPasteboard.general.clearContents()
@@ -103,13 +108,24 @@ struct MetistryApp: App {
         #endif
 
         #if os(macOS)
+        // A fixed 840 × 600 window, never resizable (screen-15 §2): the view
+        // sets the size and the scene takes it.
         Settings {
             SettingsView(
                 model: model,
                 onOpenInFinder: { url in NSWorkspace.shared.activateFileViewerSelecting([url]) },
-                onSetUpAgain: { model.wizard.present(); openWindow(id: Self.mainWindowID) }
+                onSetUpAgain: { model.wizard.present(); openWindow(id: Self.mainWindowID) },
+                onOpenLog: { service in
+                    Task { await model.logs.load(component: service) }
+                    openWindow(id: Self.logWindowID)
+                },
+                onShowShortcuts: { openWindow(id: ShellWindowID.keyboardShortcuts) },
+                onOpenSystemSettings: {
+                    if let url = URL(string: "x-apple.systempreferences:") { NSWorkspace.shared.open(url) }
+                }
             )
         }
+        .windowResizability(.contentSize)
 
         Window("Log", id: Self.logWindowID) {
             LogWindowView(model: model.logs)

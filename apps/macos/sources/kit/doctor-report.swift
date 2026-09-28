@@ -70,11 +70,16 @@ public struct DoctorRow: Codable, Sendable, Identifiable, Equatable {
     /// is held as JSON and read through the typed accessors below rather than
     /// modelled per kind (json-value.swift explains why).
     public let meta: JSONValue?
+    /// The fix doctor can NAME, as a button (T4-21): open Secrets, open System
+    /// Settings, or run a verb. Absent when the row is `ok` or doctor has
+    /// nothing more specific than `remediation` — never derived here by
+    /// reading the prose.
+    public let action: DoctorAction?
 
     public var id: String { "\(kind)/\(name)" }
 
     enum CodingKeys: String, CodingKey {
-        case name, kind, status, probe, remediation, meta
+        case name, kind, status, probe, remediation, meta, action
         case latencyMs = "latency_ms"
     }
 
@@ -85,7 +90,8 @@ public struct DoctorRow: Codable, Sendable, Identifiable, Equatable {
         latencyMs: Double,
         probe: String,
         remediation: String? = nil,
-        meta: JSONValue? = nil
+        meta: JSONValue? = nil,
+        action: DoctorAction? = nil
     ) {
         self.name = name
         self.kind = kind
@@ -94,6 +100,63 @@ public struct DoctorRow: Codable, Sendable, Identifiable, Equatable {
         self.probe = probe
         self.remediation = remediation
         self.meta = meta
+        self.action = action
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try c.decode(String.self, forKey: .name)
+        kind = try c.decode(String.self, forKey: .kind)
+        status = try c.decode(CheckStatus.self, forKey: .status)
+        latencyMs = try c.decode(Double.self, forKey: .latencyMs)
+        probe = try c.decode(String.self, forKey: .probe)
+        remediation = try c.decodeIfPresent(String.self, forKey: .remediation)
+        meta = try c.decodeIfPresent(JSONValue.self, forKey: .meta)
+        // An action of a kind this build does not know is no button, never a
+        // report that fails to decode: the row and its remediation still show.
+        action = try? c.decodeIfPresent(DoctorAction.self, forKey: .action)
+    }
+}
+
+/// `packages/cli/src/doctor.ts`'s `DoctorAction` (T4-21). `command` is argv
+/// beginning with `metistry`, never a shell string; doctor never appends
+/// `--yes`, so the app's own preview-then-confirm stands between the button
+/// and any mutation.
+public enum DoctorAction: Codable, Sendable, Equatable {
+    case openSecrets(label: String)
+    case openSystemSettings(label: String)
+    case runVerb(command: [String], label: String)
+
+    public var label: String {
+        switch self {
+        case .openSecrets(let label), .openSystemSettings(let label), .runVerb(_, let label): return label
+        }
+    }
+
+    enum CodingKeys: String, CodingKey { case kind, label, command }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let label = try c.decode(String.self, forKey: .label)
+        switch try c.decode(String.self, forKey: .kind) {
+        case "open_secrets": self = .openSecrets(label: label)
+        case "open_system_settings": self = .openSystemSettings(label: label)
+        case "run_verb": self = .runVerb(command: try c.decode([String].self, forKey: .command), label: label)
+        case let other:
+            throw DecodingError.dataCorruptedError(forKey: .kind, in: c, debugDescription: "unknown doctor action \(other)")
+        }
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(label, forKey: .label)
+        switch self {
+        case .openSecrets: try c.encode("open_secrets", forKey: .kind)
+        case .openSystemSettings: try c.encode("open_system_settings", forKey: .kind)
+        case .runVerb(let command, _):
+            try c.encode("run_verb", forKey: .kind)
+            try c.encode(command, forKey: .command)
+        }
     }
 }
 
@@ -180,11 +243,16 @@ public struct DeploymentFacts: Sendable, Equatable {
     public let from: String
     /// service name → the shape it runs in, or `disabled`.
     public let services: [String: String]
+    /// This instance's own labels and ports, when `metistry up --namespace`
+    /// gave it some (`state/ports.yaml`). `nil` is the un-namespaced install:
+    /// the product's default labels and ports, which the app does not copy.
+    public let namespace: DeploymentNamespace?
 
-    public init(shape: String, from: String, services: [String: String]) {
+    public init(shape: String, from: String, services: [String: String], namespace: DeploymentNamespace? = nil) {
         self.shape = shape
         self.from = from
         self.services = services
+        self.namespace = namespace
     }
 
     public init?(row: DoctorRow) {
@@ -196,12 +264,36 @@ public struct DeploymentFacts: Sendable, Equatable {
             for (name, value) in o { services[name] = value.stringValue }
         }
         self.services = services
+        self.namespace = meta["namespace"].flatMap(DeploymentNamespace.init(json:))
     }
 
     /// Name and shape, ordered the way a person reads an install: the data
     /// store, then the things that talk to it.
     public var ordered: [(name: String, shape: String)] {
         services.keys.sorted().map { (name: $0, shape: services[$0] ?? "unknown") }
+    }
+}
+
+/// The deployment row's `meta.namespace`: `{label_suffix, base, ports}`.
+public struct DeploymentNamespace: Sendable, Equatable {
+    public let labelSuffix: String
+    public let base: Int?
+    /// service → port, for the services that bind one.
+    public let ports: [String: Int]
+
+    public init(labelSuffix: String, base: Int?, ports: [String: Int]) {
+        self.labelSuffix = labelSuffix
+        self.base = base
+        self.ports = ports
+    }
+
+    init?(json: JSONValue) {
+        guard let suffix = json["label_suffix"]?.stringValue else { return nil }
+        var ports: [String: Int] = [:]
+        if case .object(let o)? = json["ports"] {
+            for (name, value) in o { if let port = value.intValue { ports[name] = port } }
+        }
+        self.init(labelSuffix: suffix, base: json["base"]?.intValue, ports: ports)
     }
 }
 

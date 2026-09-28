@@ -180,7 +180,8 @@ public struct VersionFacts: Sendable, Equatable {
         // CLI's to decide.
         self.init(
             product: json.string("product", "product_version", "version") ?? json["product"]?.string("version"),
-            runtime: json.string("runtime", "runtime_version") ?? json["runtime"]?.string("version"),
+            // the verb says `runtime_pack: {version, commit, built_at}` (packages/cli/src/version.ts)
+            runtime: json.string("runtime", "runtime_version") ?? json["runtime"]?.string("version") ?? json["runtime_pack"]?.string("version"),
             lock: json["lock"].map(InstancePin.init(json:))
         )
     }
@@ -209,7 +210,8 @@ public struct InstancePin: Sendable, Equatable {
         self.init(
             version: json.string("version"),
             commit: json.string("commit"),
-            source: json.string("source"),
+            // `version --json` calls it `channel`; metistry.lock itself, `source`
+            source: json.string("source", "channel"),
             updatedAt: json.string("updated_at", "updatedAt"),
             migrationsApplied: json.int("migrations_applied", "migrationsApplied")
                 ?? json["migrations_applied"]?.arrayValue?.count
@@ -230,15 +232,28 @@ public struct DeploymentShapeFacts: Sendable, Equatable {
     public let shape: String
     /// e.g. `seed/deployment.yaml`, `<instance>/deployment.yaml`.
     public let from: String
+    /// The keep-awake switch and its two sub-switches as stored — the
+    /// verb's `keep_awake_setting` (T4-20), else its legacy `keep_awake`
+    /// value. `nil` from a CLI that reports neither.
+    public let keepAwake: KeepAwakeSwitches?
+    /// The CLI's own sentence for this setting on this install, when it has one.
+    public let keepAwakeNote: String?
 
-    public init(shape: String, from: String) {
+    public init(shape: String, from: String, keepAwake: KeepAwakeSwitches? = nil, keepAwakeNote: String? = nil) {
         self.shape = shape
         self.from = from
+        self.keepAwake = keepAwake
+        self.keepAwakeNote = keepAwakeNote
     }
 
     public init?(json: JSONValue) {
         guard let shape = json.string("shape") else { return nil }
-        self.init(shape: shape, from: json.string("from") ?? "unknown")
+        self.init(
+            shape: shape,
+            from: json.string("from") ?? "unknown",
+            keepAwake: json["keep_awake_setting"].flatMap(KeepAwakeSwitches.init(json:)) ?? json["keep_awake"].flatMap(KeepAwakeSwitches.init(json:)),
+            keepAwakeNote: json.string("keep_awake_note")
+        )
     }
 }
 

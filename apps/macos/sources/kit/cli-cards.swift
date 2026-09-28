@@ -197,7 +197,8 @@ public struct SettingsSection<Content: View>: View {
     public var body: some View {
         let p = Palette(scheme)
         VStack(alignment: .leading, spacing: MetistrySpace.s2) {
-            Text(title).metistryText(.headline, p)
+            // each section a heading (§2.18.3): VoiceOver's rotor walks a pane by them
+            Text(title).metistryText(.headline, p).accessibilityAddTraits(.isHeader)
             VStack(alignment: .leading, spacing: MetistrySpace.s3) { content }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .metistryCard(p)
@@ -206,7 +207,7 @@ public struct SettingsSection<Content: View>: View {
 }
 
 /// The console sign-in state, rendered the same way everywhere it appears —
-/// the Status header, Settings → Connections and the wizard's door step all
+/// the Status header, Settings ▸ Account and the wizard's door step all
 /// show one of `ConsoleSignIn`'s five answers, so they show it identically.
 ///
 /// The token's value is not a thing this view could render: `ConsoleWhoami` has

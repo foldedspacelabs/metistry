@@ -241,6 +241,16 @@ describe("the app password — Basic sign-in at the egress door", () => {
     expect(text).toContain("REDACTED secret.caldav_password");
   });
 
+  it("**basic sign-in on a provider that does not declare it is refused at the file, and never opened**", async () => {
+    const linearType = seedType("linear");
+    const s = await server();
+    const bad = { name: "linear", type: "tracker", provider: "linear", reach: { http: { url: "https://api.linear.app/graphql", auth: { scheme: "basic", username: USER, secret: "caldav_password" } } }, secrets: ["caldav_password"] };
+    const catalog = catalogOf([bad], { secrets: policy(["api.linear.app"], "connection:linear"), types: [linearType] });
+    expect(catalog.entries[0]).toMatchObject({ status: "failed", issues: [expect.stringContaining("linear does not accept basic sign-in")] });
+    expect(openSyncHttp({ catalog: { ...catalog, scheduled: null }, sync: "linear", module: "linear", secrets: envSecretSource(ENV) })).toMatchObject({ ok: false });
+    expect(s.requests).toHaveLength(0);
+  });
+
   it("a username with a colon is refused — the server would split the pair there", async () => {
     const s = await server();
     const catalog = catalogOf([file(s.url, { reach: { http: { url: s.url, auth: { scheme: "basic", username: "me:x", secret: "caldav_password" } } } })], { secrets: policy([s.host]), types: TYPES });
@@ -434,6 +444,18 @@ describe("write_own — the owner's events, nobody else's, bound to the preview"
       "",
     ]);
     expect(OWN).toContain("DURATION:PT1H");
+  });
+
+  it("**a change is bound to the previewed ETag: an event changed since is refused, and nothing is written**", async () => {
+    const s = await server();
+    const sync = open(s);
+    const change = { title: "Dentist (moved)" };
+    const preview = await previewChangeEvent(sync, { uid: "dentist-1@example.com", change });
+    s.touch(`${WORK}dentist.ics`);
+    await expect(changeOwnEvent(sync, { uid: "dentist-1@example.com", change, etag: preview.etag! })).rejects.toMatchObject({ code: "changed" });
+    await expect(changeOwnEvent(sync, { uid: "dentist-1@example.com", change, etag: "" })).rejects.toMatchObject({ code: "bad_request" });
+    expect(s.requests.some((r) => r.method === "PUT")).toBe(false);
+    expect(s.resources.get(`${WORK}dentist.ics`)!.data).toBe(OWN);
   });
 
   it("**an event with anyone else in it is not the owner's to change or delete**, and a series is not rewritten", async () => {

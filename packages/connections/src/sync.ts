@@ -252,6 +252,10 @@ export function openSyncHttp(opts: OpenSyncOptions): OpenedSync {
   if (auth.scheme === "bearer") headers.authorization = `Bearer {{ secret.${auth.secret} }}`;
   else if (auth.scheme === "api_key") headers[auth.header.toLowerCase()] = `{{ secret.${auth.secret} }}`;
   else if (auth.scheme === "basic") {
+    // only a provider that declares basic sign-in sends one (core's connectionIssues refuses the file too)
+    if (!entry.provider.manifest.auth?.includes("basic")) {
+      return { ok: false, status: "failed", why: `connection ${c.name}: ${entry.provider.name} does not accept basic sign-in` };
+    }
     // RFC 7617: the user-id cannot contain a colon — the server would split it there
     if (auth.username.includes(":") || /[\u0000-\u001f\u007f]/.test(auth.username)) {
       return { ok: false, status: "failed", why: `connection ${c.name}: reach.http.auth.username cannot contain a colon or a control character (RFC 7617)` };

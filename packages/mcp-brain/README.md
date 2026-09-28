@@ -92,7 +92,7 @@ optional nudge line. Errors set `isError` and carry core's uniform envelope
 | `queries_list` | — | `{ queries: [{ name, description, params: { <param>: { type, default? } } }] }` — every named query loaded into the injected `QueryStore` (invariant 3) |
 | `queries_run` | `name`, `params?: Record<string, string \| number \| boolean>` | `{ name, params, rows, as_of, row_count, truncated? }` — rows capped at 200 (`truncated: true` past the cap); `not_found` for an unknown query, `invalid_request` for a bad/unknown param. Internal principals always; external agents need a `queries: true` grant. |
 | `connections_list` | `connection?` | no argument: `{ connections: [{ name, type, description?, status, tools }] }` — the connections lent to you, each with the tools you may call, read without dialling anything; with `connection`: `{ connection, tools: [{ name, description, inputSchema }] }` — the upstream's own definitions, fetched on demand (the lazy half: none of them is ever in this bridge's `tools/list`). A connection is lent when the owner offered it to agents **and** your credential's `grants.connections` names it; a crew also needs `uses: [connections]`; the internal assistant reaches every connection. |
-| `connections_call` | `connection`, `tool`, `arguments?`, `confirm_token?` | A Read at Allow: `{ connection, tool, content, structuredContent?, isError? }` — the upstream's answer, redacted, with every string through the sanitizer. Changes things / Starts an agent at Allow: first `{ status: "preview", arguments, confirm_token, expires_in_sec }`, nothing dialled; the same call with `confirm_token` runs it, once (a replayed, mismatched, foreign or expired token is `conflict`). Ask First: `{ status: "pending", proposal_id }` — an `action` of kind `connection_call` in Needs You, run only by the owner's Approve. A tool at Never or not listed is `not_found` (`no such tool: <connection>/<tool>`). Over the hourly limits (`ConnectionLimits`, counted from `runs`) is `rate_limited`. A connection you cannot reach is `not_found` (`no such connection: <name>`), exactly like one that does not exist. One `runs` row of kind `connection_call` per call, refusals included. |
+| `connections_call` | `connection`, `tool`, `arguments?`, `confirm_token?` | A Read at Allow: `{ connection, tool, content, structuredContent?, isError? }` — the upstream's answer, redacted, with every string through the sanitizer. Changes things / Starts an agent at Allow: first `{ status: "preview", arguments, confirm_token, expires_in_sec }`, nothing dialled; the same call with `confirm_token` runs it, once (a replayed, mismatched, foreign or expired token is `conflict`). Ask First: `{ status: "pending", proposal_id }` — an `action` of kind `connection_call` in Needs You, run only by the owner's Approve; from a run that said nobody is there (`_meta` interactive `false`, below), `{ skipped: true, reason: "waits_for_you", proposal_id }` — the same request, deferred. A tool at Never or not listed is `not_found` (`no such tool: <connection>/<tool>`). Over the hourly limits (`ConnectionLimits`, counted from `runs`) is `rate_limited`. A connection you cannot reach is `not_found` (`no such connection: <name>`), exactly like one that does not exist. One `runs` row of kind `connection_call` per call, refusals included. |
 
 **Correlating one reply's calls.** Put a handle in the `_meta` of each
 `tools/call` — key `com.foldedspacelabs.metistry/turn_id`, value `≤ 64 chars`
@@ -113,6 +113,16 @@ and stored, never trusted for anything else, and a malformed one is dropped
 rather than failing the call. *Until 0.10.0 it was an optional `turn_id`
 argument on every tool; that still works for one release and is not
 advertised.*
+
+**Saying nobody is there.** Beside it, `com.foldedspacelabs.metistry/interactive:
+false` in a call's `_meta` says the run that made it has no one to ask — a
+scheduled job, not a conversation. It changes one answer: an Ask First
+`connections_call` is **deferred** rather than paused — `{ skipped: true,
+reason: "waits_for_you", proposal_id }`, the same request raised, nothing
+dialled — and its `runs` row carries `outcome: "deferred"`, `unattended: true`
+and your turn handle, so your run can report what it skipped. Absent, or any
+value but the boolean `false`, is interactive. It grants nothing either way:
+an Ask First call runs only on the owner's Approve.
 
 Policy refusals from the task list (`claimed`, `dependencies_open`,
 `not_holder`, `lease_expired`, …) are *outcomes*, returned as data; only a

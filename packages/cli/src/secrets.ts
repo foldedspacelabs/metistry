@@ -288,6 +288,14 @@ export interface SecretsOptions {
    * delivered: a secret no service reads stays in the Keychain.
    */
   deliver?: readonly string[] | undefined;
+  /**
+   * `--to env` under an installed launchd shape: the verb re-renders the
+   * jobs from `.env` and restarts the supervisor right after this
+   * (env-follow.ts), so a changed token's restart is not the operator's to
+   * do — and `metistry restart <service>` would not do it anyway, because
+   * the child is respawned with supervisor.json's environment, not `.env`'s.
+   */
+  restartFollows?: boolean | undefined;
 }
 
 export type SyncDirection = "keychain" | "env";
@@ -488,6 +496,10 @@ export async function syncSecrets(direction: SyncDirection, opts: SecretsOptions
     if (svc) byService.set(svc, [...(byService.get(svc) ?? []), n]);
   }
   for (const [svc, vars] of byService) {
+    if (opts.restartFollows) {
+      opts.out(`${vars.join(", ")} changed — the ${svc} is restarted onto it below, with the rest of the launchd jobs`);
+      continue;
+    }
     const running = opts.serviceRunning ? await opts.serviceRunning(svc) : undefined;
     const cmd = `\`metistry restart ${svc}\``;
     if (running === true) {
@@ -500,7 +512,7 @@ export async function syncSecrets(direction: SyncDirection, opts: SecretsOptions
     }
   }
   const others = rotated.filter((n) => !GENERATED_SECRET_READERS[n] && before.has(n));
-  if (others.length) opts.out(`changed in ${target} from the Keychain: ${others.join(", ")} — a service started before this run holds the previous value until it is restarted (\`metistry restart <service>\`)`);
+  if (others.length) opts.out(`changed in ${target} from the Keychain: ${others.join(", ")} — ${opts.restartFollows ? "the running jobs are re-rendered onto it below" : "a service started before this run holds the previous value until it is restarted (`metistry restart <service>`)"}`);
   if (missing.length) opts.out(`appended (no line existed): ${missing.join(", ")}`);
   if (skipped.length) opts.out(`not in this instance's Keychain, left as they are: ${skipped.join(", ")}`);
   if (unmigrated.length) opts.out(`still only in the retired shared scope, so not read: ${unmigrated.join(", ")} — \`${MIGRATE_SCOPE_COMMAND}\` copies them into this instance`);

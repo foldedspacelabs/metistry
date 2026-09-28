@@ -460,7 +460,9 @@ misconfigured install stops looking like a broken one.
 ## Rotating and revoking
 
 - **The local owner token:** `metistry secrets mint METISTRY_LOCAL_OWNER_TOKEN`
-  (Keychain + `.env`), then `metistry restart console`. The old value stops
+  (Keychain + `.env`), then `metistry restart console` — under the launchd
+  shape the mint does that itself, by re-rendering the jobs from `.env`
+  (`metistry up`; `docs/ops/cli.md`, "Secrets"). The old value stops
   working the moment the console restarts — there is no revocation list
   because there is no row: the environment *is* the record.
   Note that `secrets sync --to env` will mint one again if it finds none —
@@ -473,6 +475,7 @@ misconfigured install stops looking like a broken one.
   now() WHERE label = '…'`.
 - **An agent token:** the agents tab, or `POST /api/agents/<id>/revoke`.
 - **The vault bridge's owner bearer:** `metistry secrets mint
-  METISTRY_BRIDGE_TOKEN_RECONCILER_USER`, then `metistry restart reconciler`.
-  Same story as the local owner token: no revocation list, because the
+  METISTRY_BRIDGE_TOKEN_RECONCILER_USER`, then `metistry restart reconciler`
+  (under the launchd shape the mint re-renders the jobs and restarts the
+  supervisor itself). Same story as the local owner token: no revocation list, because the
   environment is the record.

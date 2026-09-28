@@ -27,7 +27,7 @@ import { doctor, hostLocal, renderTable, type DoctorDeps, type DoctorReport } fr
 import { productVersion } from "./env.js";
 import { envPaths, readInstanceId } from "./instance.js";
 import { applyPorts, loadNamespace } from "./namespace.js";
-import type { Exec } from "./exec.js";
+import { realExec, type Exec } from "./exec.js";
 import { rollbackApp, updateApp, type UpdateAppResult } from "./mac-app.js";
 import { labelFor, loadPlistTemplates, loadSupervisedTemplates, type PlistTemplate } from "./launchd.js";
 import { jobFilesFor, legacyEnvReport, RETIRE_LEGACY_ENV_COMMAND } from "./legacy-env.js";
@@ -43,6 +43,7 @@ import { StepFailed, StepRunner } from "./steps.js";
 import { type Ui } from "./ui.js";
 import { acknowledgeContinuation, reexecIntoRelease, releaseCliMain, type ContinueFrom, type ReexecOutcome } from "./update-reexec.js";
 import { closingDoctor, composeUp, COMPOSE_TIMEOUT_MS, nodeFor, runDirFor } from "./up.js";
+import { followEnvFile } from "./env-follow.js";
 
 export interface UpdateOptions {
   productDir: string;
@@ -729,6 +730,30 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
     // only it has (names, never values) and the verb that retires it. Never
     // moved or deleted here — the preview and the --yes are the owner's.
     if (envPathsFound?.legacy && instanceDir.instanceDir) await noteLegacyEnv(r, { legacy: envPathsFound.legacy, target: envPathsFound.write, instanceDir: instanceDir.instanceDir, home: env.HOME });
+
+    // The owner bearer above and the shared-scope migration both rewrite
+    // `.env`, and nothing in `update` renders a plist: under the launchd
+    // shape the supervisor's plist and supervisor.json still carry the
+    // values they replaced (0.14.2: bridges 401'd the watchdog and the
+    // console, and the engine's key never reached the supervisor). When
+    // they have drifted, the updated CLI's `up` re-renders them from `.env`
+    // and restarts the supervisor (env-follow.ts); otherwise one line.
+    if (deployment.shape === "launchd" && platform === "darwin" && envPathsFound) {
+      r.section("launchd env");
+      await followEnvFile({
+        productDir,
+        envFiles: envPathsFound.read.length > 0 ? envPathsFound.read : [envPathsFound.write],
+        envFileFlag: opts.envFile,
+        instanceDir: instanceDir.instanceDir,
+        home: env.HOME,
+        platform,
+        env,
+        exec: opts.exec ?? realExec,
+        out: (l) => r.note(l),
+        cli: { node: nodeFor(productDir, env).node, main: updatedCliMain(runDir) },
+        dryRun: r.dryRun,
+      }).catch((err: unknown) => r.note(`launchd: could not compare the running jobs with .env (${err instanceof Error ? err.message : String(err)}) — run \`metistry up\``));
+    }
 
     // `update` shares no code path with `up` (it never renders a plist or
     // touches the supervisor), so a checkout that only ever runs `update`

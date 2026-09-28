@@ -675,6 +675,11 @@ copy. `apps/macos/tests/kit/settings-model-tests.swift` drives the models throug
 a fresh defaults suite and asserts exactly those three keys reach disk, so a
 fourth one fails CI rather than appearing quietly.
 
+One FILE, not a fourth key (ruling 19, X-19): the offline capture queue
+(`AppFileStore.captureQueueFilename`, "The capture composer" above) is unsent
+work, not a setting, so it is a `UserDefaults` domain the settings test above
+does not — and should not — see.
+
 | Pane | Value | Read through |
 | --- | --- | --- |
 | Instance | active directory, recents, Open in Finder | the persisted pointers above |
@@ -852,10 +857,23 @@ refusal (a 4xx, a 5xx, a 401) is a failure instead: its words on the line, the
 text back in the field, and **Retry** with the same key — so is Capture on the
 unchanged words; edited words are a new capture with a new key. A failure
 always wins the line; otherwise it shows the oldest unresolved capture with a
-count (*capturing… (2)*). The queue lives in memory: a capture still queued
-when the app quits is not kept. An instance switch never sends a queued or
-failed capture to the other instance — its words come back into the field with
-a line saying why.
+count (*capturing… (2)*). **The queue survives a relaunch (X-19, ruling 19,
+2026-09-27).** A capture still queued when the app quits is written to
+`stores/capture-store.swift`'s `JSONCaptureQueueStore` — one JSON file under
+this app's own Application Support directory, never the instance's — the
+moment it goes offline, and read back at launch (`AppModel` wires
+`CaptureComposerModel.currentInstanceID` to `InstanceBookmarks.active?.path`
+and calls `loadPersistedQueue()` once, the same pattern `startShell` uses).
+It resends through the same gate and the same key as any other queued
+capture, so a replay dedupes on the console exactly as it would have before
+the relaunch. Nothing but a queued capture is ever written there: a sent one
+is gone the instant it lands, and a failed one lives in the field, not on
+disk. An instance switch never sends a queued or failed capture to the other
+instance — its words come back into the field with a line saying why, and the
+switched-from instance's disk entry clears the same moment; a store beyond
+`app-preferences.swift`'s allowlist for exactly this is `AppFileStore`'s
+documented exception, and every OTHER instance's entries in the file are left
+untouched.
 
 **The menus (C119).** Every shortcut is a menu item, and every menu item is one
 case of `ShellCommand` — the menus, the Keyboard Shortcuts page and the tests

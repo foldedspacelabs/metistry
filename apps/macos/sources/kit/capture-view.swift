@@ -45,6 +45,18 @@
 // back into the field, with a line saying why, and nothing is typed twice. One
 // already in flight lands where it was going.
 //
+// THE QUEUE SURVIVES A RELAUNCH (ruling 19, 2026-09-27). A capture still
+// queued — offline, no answer yet — is written to `stores/capture-store.swift`'s
+// `JSONCaptureQueueStore` the moment it becomes queued, and read back at
+// `init`, so quitting the app is not a way to lose it. It resends through the
+// same gate and the same key as any other queued capture — a replay dedupes
+// on the console exactly as it would have if the app had stayed open. Nothing
+// but a QUEUED capture is ever written there: a sent one is gone the instant
+// it lands, a failed one lives in the field, not on disk, and an instance
+// switch's `returnToField` clears its bucket the same moment it clears the
+// words from `captures` — the file for another instance is never touched by
+// either.
+//
 // ACCESSIBILITY (§2.18). The field says *Note*; the button *Capture,
 // Command-Return*; the receipt line speaks as one element and is announced
 // when it changes to a result; the composer is one group named *New Capture*.
@@ -78,6 +90,13 @@ public struct PendingCapture: Identifiable, Sendable, Equatable {
     public let idempotencyKey: String
     /// The session generation (the instance) it was written for.
     let generation: Int
+    /// The instance's stable id, for the queue file (`PersistedCapture`) — a
+    /// generation resets every launch, so it cannot be what a resend on disk
+    /// is grouped by. `nil` with no identity read yet: nothing this capture
+    /// does is persisted, same as any instance with no id (`PinnedItems`).
+    let instanceID: String?
+    /// When this capture was minted — the queue file's `createdAt`.
+    let createdAt: Date
     public internal(set) var state: State
     /// How many times it has been put on the wire.
     public internal(set) var attempts: Int
@@ -173,6 +192,13 @@ public final class CaptureComposerModel {
     }
     /// Mints a capture's key. Injected so a test can name it.
     @ObservationIgnored public var mintKey: @MainActor () -> String = { UUID().uuidString.lowercased() }
+    /// The active instance's stable id, for the queue file — `AppModel` wires
+    /// this to `InstanceBookmarks.active?.path` (the same pointer
+    /// `METISTRY_INSTANCE_DIR` and every recents list use), because that
+    /// resolves at launch with no round trip, unlike `metistry identity`'s
+    /// instance id. `nil` — no active instance — persists nothing, the same
+    /// gate `PinnedItems` uses. Injected so a test can name it.
+    @ObservationIgnored public var currentInstanceID: @MainActor () -> String? = { nil }
     /// Runs `work` after `delay` seconds. Injected so a test decides when.
     @ObservationIgnored public var scheduleRetry: @MainActor (TimeInterval, @escaping @MainActor () async -> Void) -> Void = { delay, work in
         Task { @MainActor in
@@ -187,14 +213,48 @@ public final class CaptureComposerModel {
     @ObservationIgnored private var retryScheduled = false
     @ObservationIgnored private var offlineAttempts = 0
     @ObservationIgnored private var watchingReachability = false
+    /// Where a queued capture survives a relaunch (ruling 19). A test that
+    /// does not pass one gets `NullCaptureQueueStore` — nothing persisted,
+    /// on disk or anywhere else — so every existing test keeps its in-memory
+    /// behaviour unchanged; `AppModel` is the only production caller that
+    /// passes a real `JSONCaptureQueueStore`.
+    @ObservationIgnored private let queueStore: any CaptureQueuePersistence
 
-    public init(session: ConsoleSession) {
+    public init(session: ConsoleSession, queueStore: any CaptureQueuePersistence = NullCaptureQueueStore()) {
         self.session = session
+        self.queueStore = queueStore
         session.register { [weak self] in
             guard let self else { return false }
             self.instanceChanged()
             return true
         }
+    }
+
+    /// Reads the queue file for `currentInstanceID()` and resumes each entry
+    /// as a queued capture, retried on the same backoff as any other. Called
+    /// once by the app (`AppModel`), after `currentInstanceID` and
+    /// `queueStore` are wired — never from `init`: a model built by a test
+    /// starts nothing until it asks (same rule as `AppModel.startShell`).
+    public func loadPersistedQueue() {
+        guard let session, let instanceID = currentInstanceID() else { return }
+        let restored = queueStore.load()
+            .filter { $0.instanceID == instanceID }
+            .sorted { $0.createdAt < $1.createdAt }
+        guard !restored.isEmpty else { return }
+        captures.append(contentsOf: restored.map {
+            PendingCapture(
+                id: UUID(),
+                text: $0.text,
+                idempotencyKey: $0.idempotencyKey,
+                generation: session.generation,
+                instanceID: $0.instanceID,
+                createdAt: $0.createdAt,
+                state: .queued(CaptureLine.queuedWords),
+                attempts: 0
+            )
+        })
+        scheduleNextRetry()
+        watchReachability()
     }
 
     // MARK: Reading
@@ -258,7 +318,7 @@ public final class CaptureComposerModel {
             // were never written (a refusal writes nothing), so a new key is right.
             captures.removeAll { $0.id == failedID }
         }
-        let pending = PendingCapture(id: UUID(), text: text, idempotencyKey: mintKey(), generation: session.generation, state: .sending, attempts: 0)
+        let pending = PendingCapture(id: UUID(), text: text, idempotencyKey: mintKey(), generation: session.generation, instanceID: currentInstanceID(), createdAt: Date(), state: .sending, attempts: 0)
         captures.append(pending)
         draft = ""
         await send(pending.id)
@@ -286,6 +346,7 @@ public final class CaptureComposerModel {
     private func send(_ id: UUID) async {
         guard let session, let index = captures.firstIndex(where: { $0.id == id }) else { return }
         let capture = captures[index]
+        defer { persistQueue(alsoClearing: capture.instanceID) }
         guard capture.generation == session.generation else {
             returnToField([capture])
             return
@@ -382,6 +443,27 @@ public final class CaptureComposerModel {
         }
     }
 
+    // MARK: The queue file (ruling 19)
+
+    /// Rewrites `instanceID`'s bucket in the queue file to exactly the
+    /// captures now `.queued` for it — nothing else in the file is read back
+    /// or rewritten. `alsoClearing` names an id to write as empty even when
+    /// nothing in `captures` mentions it any more (a capture that just
+    /// succeeded, failed, or was returned to the field by an instance switch
+    /// is gone from `captures` before this runs, so it would otherwise never
+    /// get cleared).
+    private func persistQueue(alsoClearing instanceID: String?) {
+        var touched = Set([instanceID].compactMap { $0 })
+        let queued = captures.filter { if case .queued = $0.state { return true } else { return false } }
+        touched.formUnion(queued.compactMap(\.instanceID))
+        for id in touched {
+            let mine = queued
+                .filter { $0.instanceID == id }
+                .map { PersistedCapture(text: $0.text, idempotencyKey: $0.idempotencyKey, instanceID: id, createdAt: $0.createdAt) }
+            queueStore.replace(instanceID: id, with: mine)
+        }
+    }
+
     // MARK: Switching instance
 
     private func instanceChanged() {
@@ -390,6 +472,12 @@ public final class CaptureComposerModel {
         let waiting = captures.filter { $0.state != .sending }
         returnToField(waiting)
         restoredFailure = nil
+        // The words are back in the field, not queued any more — the file
+        // agrees. Every OTHER instance's bucket is untouched (ruling 19):
+        // `persistQueue` rewrites only the ids named here.
+        for instanceID in Set(waiting.compactMap(\.instanceID)) {
+            persistQueue(alsoClearing: instanceID)
+        }
     }
 
     /// Words that cannot go where they were written for come back to the field

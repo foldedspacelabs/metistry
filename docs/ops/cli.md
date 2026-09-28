@@ -488,6 +488,24 @@ one that is there, edited or not. Everything else — the journal tree, `Me/`,
 copy it out of `seed/vault/` in a current checkout into the instance
 directory and commit it yourself, the same way you would add any other note.
 
+**The other narrow exception: a product file under another case.** Reads
+are case-exact, so a file the seed ships that the vault has spelled
+differently — an instance seeded on 2026-09-06 has `Me/Profile.md`, and the
+product has read `Me/profile.md` since — is a file the product cannot see
+(every working-day and timezone read failed). `update`'s **vault case** step
+renames each such file to the seed's spelling. The canonical list is
+`seed/vault/` itself, so nothing else in the vault is looked at; a file
+counts only when its directory is spelled exactly and exactly one file
+differs from the seed's name by case alone (a case-sensitive tree holding
+both spellings is left for you). A one-step rename is no change on a
+case-insensitive filesystem, to the OS or to git, so it goes through
+`<name>.metistry-case-rename` — two renames, each flushed as its own commit
+through the reconciler (`POST /vault/rename` as `user`), or `git mv` and a
+pathspec commit per step when no bridge is configured. A first step the
+reconciler cannot commit (a merge in progress) is put back. Idempotent, and it
+never fails the update. `metistry doctor`'s **vault case** row lists any such
+file with the fix.
+
 What it prints at the end is the next step —
 six lines for `<dir>/.metistry/state/.env`, this instance's own environment,
 shaped for `--shape compose|launchd` (default: launchd on macOS, compose
@@ -2287,6 +2305,7 @@ install forward, in this order:
 | restart | `docker compose up -d --build`; `launchctl kickstart -k` for each host job whose code changed | `docker compose pull` + `up -d --no-build` in `current`, with the versioned ghcr images; same kickstart rule |
 | lock | write `.metistry/metistry.lock` into the instance repo | same, pinned to the release actually installed |
 | templates | copy each `seed/vault/Templates/*.md` the vault **lacks** — create-only, never over a file that is there (below) | same, from `current`'s seed |
+| vault case | rename each `seed/vault/` file the vault has under another **case** only (`Me/Profile.md` → `Me/profile.md`) to the seed's spelling — two renames through a temporary name, each its own commit, through the reconciler as `user` (else `git mv` directly); the owner's other files are never looked at (below) | same, from `current`'s seed |
 | doctor | the verdict, as for `up` — run by the **updated** CLI (below) | same, against `current` |
 
 **A legacy instance is refused past 0.8.x.** Before the product step —

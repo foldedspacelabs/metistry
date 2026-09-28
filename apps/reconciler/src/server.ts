@@ -151,6 +151,11 @@ function isReadableByBridge(rel: string): boolean {
   return isVaultPath(rel) || rel === INSTANCE_LAYOUT.artifactsDir || rel.startsWith(`${INSTANCE_LAYOUT.artifactsDir}/`);
 }
 
+/** The hint a case-mismatched read answers with: what is on disk, and the name that was asked for. */
+export function caseHint(actual: string, asked: string): string {
+  return `${actual} exists — the product's name is ${asked}`;
+}
+
 async function readJson(req: IncomingMessage, maxBytes: number): Promise<Record<string, unknown> | null> {
   const chunks: Buffer[] = [];
   let size = 0;
@@ -282,9 +287,23 @@ export function makeBridge(deps: BridgeDeps, cfg: BridgeConfig): Server {
       }
 
       if (key === "GET /vault/read") {
+        // A case-mismatch is `not_found` — there is no file of THAT name, and
+        // reads stay case-exact (the casing rule) — with a hint naming the
+        // spelling that IS there, when that spelling is itself readable here.
+        // `invalid_request` said the caller's request was malformed, which
+        // hid the real problem (`Me/Profile.md` on disk, `Me/profile.md`
+        // asked for — 0.14.2 owner report).
+        const miscased = (out: Outcome<unknown>): boolean => {
+          if (out.ok || out.caseOf === undefined) return false;
+          const actual = out.caseOf;
+          if (!isReadableByBridge(actual)) fail(res, "not_found");
+          else send(res, statusFor("not_found"), { ...errorEnvelope("not_found"), hint: caseHint(actual, String(q.get("path"))) });
+          return true;
+        };
         // `encoding=base64` hands back the bytes untouched (binary artifacts); default stays utf8 `content`.
         if (q.get("encoding") === "base64") {
           const out = await vault.readBytes(q.get("path"));
+          if (miscased(out)) return;
           // Checked on the CONFINED path, after confine() has already produced its own
           // 400/403 for traversal, `.git`, and `.metistry/instance-migrations/` — this
           // only narrows what a path that already resolved cleanly may be.
@@ -292,6 +311,7 @@ export function makeBridge(deps: BridgeDeps, cfg: BridgeConfig): Server {
           return reply(res, out, 200, (v) => ({ path: v.path, content_base64: v.content.toString("base64"), sha256: v.sha256, bytes: v.bytes }));
         }
         const out = await vault.read(q.get("path"));
+        if (miscased(out)) return;
         if (out.ok && !isReadableByBridge(out.value.path)) return fail(res, "not_found");
         return reply(res, out);
       }

@@ -98,6 +98,15 @@ public enum ChatMarks {
         Mark(text, style: .body, design: .serif, ink: .textPrimary, on: .bg)
     }
 
+    /// A held turn's line (`inbound_messages.status = held`): the provider
+    /// refused the account, so the turn waits unsent on a Needs You report.
+    public static func held() -> [Mark] {
+        [
+            Mark("waiting on the provider", style: .subhead, ink: .textPrimary, on: .degradedQuiet),
+            Mark("· see Needs You", style: .subhead, ink: .textSecondary, on: .degradedQuiet),
+        ]
+    }
+
     /// The working turn's line on its `agent-quiet` band, moment by moment (§5.1).
     public static func waiting(_ moment: ChatWaitingMoment) -> [Mark] {
         switch moment {
@@ -469,9 +478,24 @@ struct ChatActivityView: View {
                 // now stays frozen and the wall clock never leaks into the words
                 working(now: model.now())
             }
+        } else if activity.state == .held {
+            held
         } else {
             ChatToolStrip(activity: activity, model: model)
         }
+    }
+
+    /// Static on purpose: nothing is running, so nothing moves or counts.
+    private var held: some View {
+        let p = Palette(scheme)
+        return HStack(alignment: .center, spacing: MetistrySpace.s2) {
+            ForEach(Array(ChatMarks.held().enumerated()), id: \.offset) { MarkView($0.element) }
+        }
+        .padding(.vertical, MetistrySpace.s1)
+        .padding(.horizontal, MetistrySpace.s2 + 2)
+        .background(p[.degradedQuiet], in: RoundedRectangle(cornerRadius: MetistryRadius.sm, style: .continuous))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(verbatim: "Waiting on the provider — see Needs You"))
     }
 
     private func working(now: Date) -> some View {

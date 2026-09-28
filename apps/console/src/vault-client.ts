@@ -79,7 +79,19 @@ export function httpVaultClient(cfg: VaultHttpConfig): VaultClient & NoteSection
   return {
     async read(path) {
       const r = await request("GET", "/vault/read", { path, encoding: "base64" });
-      if (r.status === 404) return null;
+      if (r.status === 404) {
+        // Absent is null — except when the bridge says a file differing only
+        // by case IS there (reads are case-exact): that is not "absent" to
+        // anyone reading it, and the hint is the one line that says what to
+        // do (`Me/Profile.md exists — the product's name is Me/profile.md`).
+        const hint = await r
+          .json()
+          .then((j) => ((j as { hint?: unknown } | null)?.hint))
+          .then((h) => (typeof h === "string" ? h : undefined))
+          .catch(() => undefined);
+        if (hint !== undefined) throw new VaultError("not_found", hint);
+        return null;
+      }
       if (!r.ok) return refuse(r);
       const j = (await r.json()) as { path: string; content_base64: string; sha256: string; bytes: number };
       return { path: j.path, content: Buffer.from(j.content_base64, "base64"), sha256: j.sha256, bytes: j.bytes };

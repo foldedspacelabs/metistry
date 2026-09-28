@@ -9,6 +9,7 @@ import pg from "pg";
 import { mintToken, tokenHash } from "@foldedspacelabs/metistry-core";
 import { emptyCompute, parseCompute, type ResolvedAssignment } from "@foldedspacelabs/metistry-core";
 import { briefThreadBlock, claimCrewRow, drainCrewOne, issueRunToken } from "../src/crew-drain.js";
+import { EngineHttpError } from "../src/engine-openai.js";
 import { crewSystemPrompt, crewToolNames, type CrewRunInput, type CrewRunResult, type CrewSnapshot } from "../src/crew.js";
 import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
 
@@ -177,6 +178,18 @@ describe.skipIf(!hasDb)("crew drain (integration)", () => {
     expect(row.history.at(-1).note).toMatch(/max_budget, 5 turns, 1 report, \$0\.1100 — budget exceeded/);
     const r = (await pool.query(`SELECT ok, error, meta->>'outcome' AS outcome FROM runs WHERE component = $1 AND kind = 'crew_run' AND (meta->>'work_id')::bigint = $2`, [crewId, id])).rows[0];
     expect(r).toEqual({ ok: false, error: "crew run max_budget: budget exceeded", outcome: "max_budget" });
+  });
+
+  it("a provider refusing the account (402) is final too: parked as blocked on the first attempt, never retried", async () => {
+    const id = await enqueue("no credits");
+    const refused = async () => {
+      throw new EngineHttpError(402, JSON.stringify({ error: { message: "This request requires more credits" } }), "https://openrouter.ai/api/v1/chat/completions");
+    };
+    expect(await drainCrewOne(pool, { ...cfg, runAssigned: refused })).toBe(true);
+    const row = await workRow(id);
+    expect(row.status).toBe("blocked");
+    expect(row.meta.attempts).toBe(1);
+    expect(row.history.at(-1).note).toMatch(/returned 402/);
   });
 
   // --- the prior-work block (0016; "the brief is the context transfer") ---------

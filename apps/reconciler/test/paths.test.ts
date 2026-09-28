@@ -9,7 +9,7 @@ import { mkdir, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { INSTANCE_CONFIG_DIRS, INSTANCE_LAYOUT, LEGACY_MACHINERY_ROOTS, PROTECTED_ROOT_FILES } from "@foldedspacelabs/metistry-core";
-import { CALLER_AUTHORITY, SECTION_WRITERS, confine, isDailyNotePath, isProtected, isProtectedFromRemote, mayClaim, parseVaultPath, sectionWriteAllowed, writeAllowed } from "../src/paths.js";
+import { CALLER_AUTHORITY, SECTION_WRITERS, confine, spelledOnDisk, isDailyNotePath, isProtected, isProtectedFromRemote, mayClaim, parseVaultPath, sectionWriteAllowed, writeAllowed } from "../src/paths.js";
 import { tempRepo, type TempRepo } from "./helpers.js";
 
 describe("parseVaultPath (syntactic)", () => {
@@ -338,5 +338,16 @@ describe("confine (filesystem)", () => {
     // on a case-insensitive fs this would silently land inside Areas/; on Linux it would fork the tree
     const r = await confine(repo.root, "areas/Real.md");
     expect(r.ok).toBe(false);
+  });
+  it("a case-mismatch is still refused, and names the spelling that IS there — on either kind of filesystem", async () => {
+    expect(await confine(repo.root, "areas/Real.md")).toEqual({ ok: false, code: "invalid_request", caseOf: "Areas/Real.md" });
+    expect(await confine(repo.root, "Areas/real.md")).toEqual({ ok: false, code: "invalid_request", caseOf: "Areas/Real.md" });
+    // a mis-cased prefix under which nothing of that name exists names nothing
+    expect(await confine(repo.root, "areas/Nothing.md")).toEqual({ ok: false, code: "invalid_request" });
+  });
+  it("spelledOnDisk matches each segment exactly, else by case alone, and gives up on no match", async () => {
+    expect(await spelledOnDisk(repo.root, ["areas", "REAL.md"])).toBe("Areas/Real.md");
+    expect(await spelledOnDisk(repo.root, ["Areas", "Real.md"])).toBe("Areas/Real.md");
+    expect(await spelledOnDisk(repo.root, ["Areas", "Gone.md"])).toBeNull();
   });
 });

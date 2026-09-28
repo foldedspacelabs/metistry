@@ -555,6 +555,20 @@ DELETE /api/messages/:id/feedback                                200 {"ok":true,
 404 — the message is not an outbound reply;  400 — a rating that is not 1 or -1, a note that is not a string
 ```
 
+**A message's `status`.** An inbound row (`direction: "in"`) carries its
+turn's state, one of five:
+
+| `status` | the turn |
+| --- | --- |
+| `new` | waiting for the assistant to pick it up |
+| `processing` | being answered now |
+| `done` | answered — the reply is the outbound row with this `in_reply_to` |
+| `failed` | not answered; an `alert` row in the thread says why |
+| `held` | waiting, unsent, because the provider its tier is assigned to refused the account (out of credits, a key it will not take) and that provider's Needs You `report` is pending; it goes back to `new` when the report is dismissed or a later turn on the provider succeeds (docs/ops/assistant-tools.md, "When the provider refuses the account") |
+
+A client that does not know a status draws no turn state for it rather than
+guessing. An outbound row's `status` is its `kind` (`reply`, `alert`, …).
+
 `POST /message` is durable before the `202`. `tier` is the composer's picker —
 a tier name from the instance's `tiers:` — for this message only; a command or
 a fast path still wins, and an unknown name is ignored rather than invented.

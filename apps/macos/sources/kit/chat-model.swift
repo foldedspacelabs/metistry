@@ -131,12 +131,17 @@ public enum ChatTurnState: String, Sendable, Equatable {
     case finished
     /// `failed` — the server said so, which is the only way a turn fails here.
     case failed
+    /// `held`: the provider this turn is assigned to refused the account (out
+    /// of credits, a key it will not take). The turn is waiting, unsent, on a
+    /// Needs You report — not working, not failed, and never nothing.
+    case held
 
     public init?(inboundStatus status: String) {
         switch status {
         case "new", "processing": self = .working
         case "done": self = .finished
         case "failed": self = .failed
+        case "held": self = .held
         default: return nil
         }
     }
@@ -656,10 +661,10 @@ public final class ChatModel {
                     activity.state = state
                     activity.lastNewsAt = at
                     activities[message.messageID] = activity
-                    if state != .working { settled.append(message.messageID) }
+                    if state != .working && state != .held { settled.append(message.messageID) }
                 }
-            } else if state == .working {
-                activities[message.messageID] = ChatTurnActivity(messageID: message.messageID, startedAt: message.ts ?? at, state: .working)
+            } else if state == .working || state == .held {
+                activities[message.messageID] = ChatTurnActivity(messageID: message.messageID, startedAt: message.ts ?? at, state: state)
             }
         }
         attachTurns()

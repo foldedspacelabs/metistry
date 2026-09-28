@@ -5,13 +5,15 @@
 // GraphQL fixtures in `collectors/linear/fixtures/`.
 //
 // The fixtures are written from Linear's GraphQL schema, in the shape
-// `https://api.linear.app/graphql` answers `MetistryAssignedIssues` and
-// `MetistryIssuesById` — not captured from a live workspace: no test calls
+// `https://api.linear.app/graphql` answers `MetistryAssignedIssues`,
+// `MetistryIssuesById`, `MetistryIssueToComplete` and `MetistryCompleteIssue` — not captured from a live workspace: no test calls
 // the real API, and no key or workspace data is in the repository.
 //
 //   assigned-1a.json, assigned-1b.json  the first pass, two pages (the cursor is followed)
 //   assigned-2.json                     the second pass: ENG-101 renamed; ENG-102 and ENG-103 gone from the list
 //   issues-by-id-2.json                 what became of those two: ENG-102 completed, ENG-103 given to someone else
+//   complete-read.json                  Close in Linear's read (`MetistryIssueToComplete`): OPS-7, open, and its team's two completed states
+//   complete-update.json                its one change (`MetistryCompleteIssue`): OPS-7 moved to Done
 
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -66,14 +68,16 @@ export interface Sent {
  * `byId` what `MetistryIssuesById` returns. Records every request as it
  * reached the wire — after the door filled it.
  */
-export function fakeLinear(script: { assigned: unknown[]; byId?: unknown }): { fetch: typeof fetch; sent: Sent[] } {
+export function fakeLinear(script: { assigned: unknown[]; byId?: unknown; complete?: { read: unknown; update?: unknown } }): { fetch: typeof fetch; sent: Sent[] } {
   const sent: Sent[] = [];
   let page = 0;
   const f = (async (input: RequestInfo | URL, init: RequestInit = {}) => {
     const body = JSON.parse(String(init.body ?? "{}")) as { query?: string; variables?: Record<string, unknown> };
-    const operation = /query\s+(\w+)/.exec(body.query ?? "")?.[1] ?? "";
+    const operation = /(?:query|mutation)\s+(\w+)/.exec(body.query ?? "")?.[1] ?? "";
     sent.push({ url: String(input), authorization: new Headers(init.headers).get("authorization"), operation, variables: body.variables ?? {} });
     if (operation === "MetistryIssuesById") return Response.json(script.byId ?? { data: { issues: { nodes: [] } } });
+    if (operation === "MetistryIssueToComplete") return Response.json(script.complete?.read ?? { data: { issue: null } });
+    if (operation === "MetistryCompleteIssue") return Response.json(script.complete?.update ?? { errors: [{ message: "no update scripted" }] });
     const answer = script.assigned[Math.min(page, script.assigned.length - 1)];
     page++;
     return Response.json(answer);

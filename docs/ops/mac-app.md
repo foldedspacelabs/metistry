@@ -686,6 +686,8 @@ does not — and should not — see.
 | --- | --- | --- |
 | Instance | active directory, recents, Open in Finder | the persisted pointers above |
 | Instance | instance id, assistant name, mention, icon | `metistry identity --json`, **read only** — the file behind it is a §4.7 protected path, so there is no field to edit any of it |
+| Instance | History: the sync policy in force, branch, ahead and behind, the last commit, the last push and pull, any conflict | `GET /api/vault/status` (T10-2), **read only** — the policy is `deployment.yaml`'s `vault:` block, changed with `metistry vault settings` (M18); the pane names the verb and offers no field |
+| Instance | History: Roll Back… (the last commit, one commit, or a day) | `POST /api/vault/rollback` (T10-6) — raises a Needs You request with the preview and changes nothing; the sheet names what Approve would undo. Reach `local`: drawn and sent only while `GET /api/whoami`'s `via` is `local_owner_token` (ruling 7) |
 | Instance | Set up again… | re-enters the wizard |
 | Services | shape, and which file it came from | `doctor --json` → the `deployment` row's `meta` (the CLI resolved the D4 overlay) |
 | Services | the service list with status | the same `meta`'s service plan, matched against doctor's `service` rows |
@@ -1363,6 +1365,25 @@ Top to bottom, in the order the owner's questions arrive:
 - **A page**: its words (page names as links), *Open in Obsidian* (Item ▸
   ⌘O), and two lists — links from it and links to it — each with its `kind`
   (link, frontmatter, embed); an unwritten target is shown, not followed.
+- **A page's history** (T10-7): its commits, newest first, from
+  `GET /api/knowledge/history` — the subject, who made it (*You*, the
+  configured name, an agent id; no name known, no author — never a default),
+  when, and what it did (`added`, `modified`, `renamed`, …). *Show This
+  Version* reads `GET /api/knowledge/version` under the name the commit knew
+  the page by, so a version from before a rename still opens. **Restore**
+  sends `POST /api/knowledge/restore` with the hash of the page as it was
+  drawn (`seen_sha`) and writes nothing: it raises one Needs You request,
+  which the page then draws inline — found by `payload.restore.path` — with
+  the Needs You card itself, so Approve · Revise · Decline there is the same
+  `POST /api/proposals/:id` Needs You sends (Item ▸ has the same verbs); an
+  Approve re-reads the page. The newest commit is *Current*; a commit that
+  knew the page by an earlier name, or deleted it, offers no Restore and says
+  why (the door restores a page under its own name); one restore waits at a
+  time. A `409 stale` says the page changed and re-reads it, raising nothing.
+  **Reach `local` (ruling 7):** Restore is drawn, and sent, only while
+  `GET /api/whoami` says this client is the local owner token; any other
+  client sees the history and the sentence saying where restoring happens,
+  and a `403 local_only` answer takes the control away.
 - **Search** is Go ▸ Filter (⌘F): `GET /api/knowledge/search`, the page
   table of hits, the bridge's `degraded` note said, and components-03's *no
   match* — *Nothing matches “zebra”*.

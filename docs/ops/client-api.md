@@ -3368,7 +3368,7 @@ and `error` while the file does not validate — the last good policy keeps
 running. The policy is set with `metistry vault settings` on the Mac (M18,
 `docs/ops/cli.md`), never through a route. Every commit, push, pull that
 brought something, and conflict is a `vault.sync` event; a client refetches
-here.
+here. The Mac draws this route as Settings ▸ Instance ▸ History (T10-7).
 
 #### `POST /api/vault/rollback` — roll back, through Needs You (reach `local`)
 
@@ -3412,7 +3412,11 @@ never reverted by the console: its bearer cannot. A request raised with
 previews configuration as `config`, and its Approve answers
 `rolled_back: {runs_in: "cli"}` and reverts nothing — the waiting CLI makes
 the change with the owner-class bearer (M18, `docs/ops/cli.md`). The route is
-`local`: history and the remote are the boundary (§2.21).
+`local`: history and the remote are the boundary (§2.21). The Mac's
+Settings ▸ Instance ▸ History ▸ Roll Back… asks it for the last commit, one
+commit or a day (never with `include_config`), and shows the answer's
+`preview` — the commits undone and the files put back — before anything is
+approved (T10-7); it draws the control only for the local owner token.
 
 ## The closed action set
 

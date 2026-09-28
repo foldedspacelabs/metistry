@@ -88,6 +88,11 @@ public final class AppModel {
     /// conflict's Keep Mine, held ten seconds for Undo, is still sent — or
     /// undone — after the owner walks away; dropped on an instance switch.
     public let knowledge: KnowledgeModel
+    /// Scheduled: the routines and syncs, the week, the selection and what
+    /// each detail read (scheduled-view.swift). Held here so the routine the
+    /// owner left open is the one they come back to; dropped with everything
+    /// else on an instance switch.
+    public let scheduled: ScheduledModel
 
     public init(
         bundleResourceURL: URL?,
@@ -156,6 +161,7 @@ public final class AppModel {
         self.knowledge = knowledge
         // An answer or a settled conflict on Knowledge is Needs You's too: the row and the Dock hear it now.
         knowledge.onQueueChanged = { [weak shell] in await shell?.refreshCount() }
+        self.scheduled = ScheduledModel(session: console)
 
         // The wizard's step 2 hands the folder back the moment it is known, so
         // every later verb runs against it.

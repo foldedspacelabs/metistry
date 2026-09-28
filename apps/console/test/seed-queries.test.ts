@@ -1960,6 +1960,58 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
     await pool.query(`DELETE FROM vault_tasks WHERE path LIKE $1`, [`${tag}%`]);
   });
 
+  // Ruling 14 (X-14): the carry count, `names_person` and `not <flag>`, as
+  // the query judges them — and Slipping and Owed through `compileTaskFilter`
+  // into ONE `QueryStore.run` each, with no translation in between.
+  it("vault_tasks_query: the carry count, names_person and not_<flag> — Slipping and Owed are one parameterised run each", async () => {
+    const tag = `vtq-r14-${Date.now()}`;
+    const me = `${tag}/People/Me.md`;
+    // carried days are `today - coalesce(do, due)` for an open line
+    await task(pool, { path: `${tag}/s.md`, task_key: "c1", line_no: 1, text: "Carried one day", text_norm: "carried one day", scheduled_for: "2026-09-19" });
+    await task(pool, { path: `${tag}/s.md`, task_key: "c3", line_no: 2, text: "Carried three days", text_norm: "carried three days", scheduled_for: "2026-09-17" });
+    await task(pool, { path: `${tag}/s.md`, task_key: "o5", line_no: 3, text: "Overdue by five", text_norm: "overdue by five", due: "2026-09-15" });
+    await task(pool, { path: `${tag}/s.md`, task_key: "owed", line_no: 4, text: "Send Jim the deck", text_norm: "send jim the deck", assigned: "People/Jim Fallon.md", due: "2026-09-25" });
+    await task(pool, { path: `${tag}/s.md`, task_key: "wait", line_no: 5, text: "Hear back from Jim", text_norm: "hear back from jim", assigned: "People/Jim Fallon.md", waiting: true });
+    await task(pool, { path: `${tag}/s.md`, task_key: "self", line_no: 6, text: "My own line", text_norm: "my own line", assigned: me });
+    await task(pool, { path: `${tag}/s.md`, task_key: "plain", line_no: 7, text: "Nothing special", text_norm: "nothing special" });
+    try {
+      const run = (p: Record<string, unknown>) => store.run(TASK_QUERY_NAME, { today: DAY, path_prefix: tag, limit: 500, ...p });
+      const keys = async (p: Record<string, unknown>) => (await run(p)).rows.map((r) => String(r.task_key));
+
+      // the carry count, inclusive, and a line that is not carried counts 0
+      expect(await keys({ carried_min: 3 })).toEqual(["c3", "o5"]);
+      expect(await keys({ carried_max: 1 })).toEqual(["c1", "owed", "wait", "self", "plain"]);
+      expect(await keys({ carried_eq: 3 })).toEqual(["c3"]);
+      expect(await keys({ carried_min: 2, carried_max: 4 })).toEqual(["c3"]);
+      expect(await keys({ order_1: "carried", order_1_desc: true, limit: 2 })).toEqual(["o5", "c3"]);
+
+      // names_person: someone who is not the owner — with `me` blank, anyone named
+      expect(await keys({ names_person: true })).toEqual(["owed", "wait", "self"]);
+      expect(await keys({ names_person: true, me })).toEqual(["owed", "wait"]);
+      const all = await run({ me });
+      expect(all.rows.find((r) => r.task_key === "owed")!.row_flags).toContain("names_person");
+      expect(all.rows.find((r) => r.task_key === "self")!.row_flags).not.toContain("names_person");
+      // it is exactly the rows `assigned_to_me` does not hold
+      expect(await keys({ names_person: true, me })).toEqual(await keys({ not_assigned_to_me: true, me }));
+
+      // not_<flag>: NOT of the same column, under either joiner
+      expect(await keys({ not_carried: true })).toEqual(["owed", "wait", "self", "plain"]);
+      expect(await keys({ not_waiting: true, names_person: true })).toEqual(["owed", "self"]);
+      expect(await keys({ overdue: true, not_unscheduled: true, match_any: true })).toEqual(["c1", "c3", "o5", "owed"]);
+
+      // Slipping and Owed, as a caller runs them: compiled, then one run
+      const view = async (where: string) => {
+        const out = compileTaskFilter({ where }, { now: new Date(`${DAY}T12:00:00Z`), timeZone: "UTC" });
+        if (!out.ok) throw new Error(out.error);
+        return (await store.run(TASK_QUERY_NAME, { ...out.params, today: DAY, me, path_prefix: tag, limit: 500 })).rows.map((r) => String(r.task_key));
+      };
+      expect(await view("carried >= 3 or overdue or names_person")).toEqual(["c3", "o5", "owed", "wait"]);
+      expect(await view("names_person and not waiting")).toEqual(["owed"]);
+    } finally {
+      await pool.query(`DELETE FROM vault_tasks WHERE path LIKE $1`, [`${tag}%`]);
+    }
+  });
+
   // D15 END TO END, which is the whole point of P1-2 and P1-5 being one
   // contract: a `where:`/`order:` a user could type in a template goes
   // through `compileTaskFilter` and straight into `QueryStore.run` with NO

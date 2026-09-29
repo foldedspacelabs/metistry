@@ -268,6 +268,50 @@ export async function writeProtected(r: StepRunner, rel: string, content: string
   return { how: "none", detail: "no instance dir" };
 }
 
+export interface CommitPending {
+  /** the reconciler answered and its flush ran (it may still have been paused or had a failure — see `detail`) */
+  ok: boolean;
+  /** commits the flush made */
+  commits: number;
+  /** one line for the plan */
+  detail: string;
+}
+
+/**
+ * Ask the reconciler to commit its queue NOW (`POST /flush`), rather than
+ * on its next interval — so a verb that wrote protected files and is about
+ * to restart the reconciler leaves them committed, not merely written
+ * (W3 checkpoint D1: `update`'s lock and secrets writes, then its restart).
+ * The reconciler flushes on SIGTERM and commits a killed run's queue at its
+ * next start as well; this makes the commit part of the verb, where the
+ * owner sees it. Never throws: a reconciler that does not answer is a line,
+ * and the queue it holds is still committed by one of those two.
+ */
+export async function commitPending(r: StepRunner, opts: { env: NodeJS.ProcessEnv; fetchFn: typeof fetch; timeoutMs?: number }): Promise<CommitPending> {
+  const url = opts.env.METISTRY_RECONCILER_URL;
+  if (!url) return { ok: false, commits: 0, detail: "no reconciler bridge configured — nothing queued to commit" };
+  const base = hostLocal(url);
+  if (!r.action(`POST ${base}/flush (commit what this run wrote before anything restarts the reconciler)`)) return { ok: true, commits: 0, detail: "the reconciler would commit this run's writes now" };
+  const token = opts.env[OWNER_BRIDGE_TOKEN] ?? opts.env.METISTRY_BRIDGE_TOKEN_RECONCILER;
+  if (!token) return { ok: false, commits: 0, detail: `neither ${OWNER_BRIDGE_TOKEN} nor METISTRY_BRIDGE_TOKEN_RECONCILER is set — the reconciler commits this run's writes on its next flush` };
+  try {
+    const res = await opts.fetchFn(`${base}/flush`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: "{}",
+      signal: AbortSignal.timeout(opts.timeoutMs ?? 30_000),
+    });
+    if (!res.ok) return { ok: false, commits: 0, detail: `reconciler POST /flush answered ${res.status} — it commits this run's writes on its next flush, or at its stop` };
+    const body = (await res.json().catch(() => null)) as { commits?: unknown[]; failed?: number; paused?: string } | null;
+    const commits = Array.isArray(body?.commits) ? body.commits.length : 0;
+    if (body?.paused) return { ok: true, commits, detail: `nothing committed: a git ${body.paused} is in progress in the instance repo — the reconciler commits this run's writes once it is finished` };
+    const failed = body?.failed ? `, ${body.failed} failed (retried on its next flush)` : "";
+    return { ok: true, commits, detail: commits ? `committed ${commits} change${commits === 1 ? "" : "s"} this run wrote, as user${failed}` : `nothing left to commit${failed}` };
+  } catch (err) {
+    return { ok: false, commits: 0, detail: `reconciler at ${base} did not answer POST /flush (${err instanceof Error ? err.message : String(err)}) — it commits this run's writes at its stop or its next start` };
+  }
+}
+
 /**
  * Delete a §4.7 protected file — the other half of `writeProtected`, on the
  * same rules: through the reconciler as `user` when a bridge is configured

@@ -166,7 +166,7 @@ Generated from `docs/product/design-build-plan.md` by `ops/scripts/tickets.mjs`.
 - [x] [X-22](x/x-22.md) · The Mac reads `request.questions` · S · sonnet · after T5-4b
 - [x] [X-23](x/x-23.md) · `connection_call` on Activity and turn progress · S · sonnet · after T1-3, T2-17, T4-8b
 
-- [ ] **W3 checkpoint** — merged, main green, scratch-instance upgrade, conformance test, Mac smoke, release
+- [ ] **W3 checkpoint** — merged, main green, scratch-instance upgrade, conformance test, Mac smoke, release · waiting on X-7 (in-review)
 
 ## W4 — 17 tickets, 65 agent-days
 

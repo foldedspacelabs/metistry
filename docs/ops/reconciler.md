@@ -379,7 +379,36 @@ commit back to `runs.meta.turn_id` and the activity feed. `knowledge_write`
 sends the reply's turn and its own call's `runs` row, never a group.
 
 A failed commit is unstaged and retried on later flushes; all-or-nothing
-per commit. **Push and pull run on the vault sync policy** — the `vault:`
+per commit.
+
+**A stop commits the queue, and a start commits what a killed run owed**
+(W3 checkpoint D1). The queue lives in memory for the flush window, and a
+restart inside it used to lose it: the bytes stayed on disk, uncommitted
+for good — the sweep never takes `.metistry/`, so `metistry update`'s lock
+and `secrets.yaml`, written seconds before the update restarted the
+supervisor, were left dirty. Now:
+
+- **SIGTERM / SIGINT** (the supervisor's stop, `launchctl kickstart -k`,
+  `docker stop`) stops the intervals and the bridge's listener, commits
+  the queue through the ordinary flush — same identity, messages and
+  trailers — waiting at most 8 s (the supervisor SIGKILLs 10 s after its
+  SIGTERM), then exits. A second signal exits at once.
+- **The queue is journalled** at `.git/metistry-pending-commits.json`,
+  rewritten on every change to it (atomically, before the write's 200).
+  It is under `.git/`, which the bridge can never write, and it is not the
+  record — only the list of commits this process still owes. A flush the
+  deadline cut short, a SIGKILL or a crash leaves it behind.
+- **At start**, before the bridge listens, the reconciler re-queues what the
+  journal holds and commits it as it would have been: `Metistry user:
+  metistry update → 0.15.0`, not a sweep. Only paths this process queued
+  are in it, so nothing becomes committable that was not already — an
+  owner's own uncommitted edit to `.metistry/` stays theirs, and a note typed
+  in Obsidian is still the sweep's. An entry the bridge would have refused
+  (a `.git/` or `instance-migrations/` path, a protected path under any
+  principal but `user`) is dropped and counted in the log line.
+
+`metistry update` also asks for the commit itself, with `POST /flush` after
+its last write and before its launchd env step (`docs/ops/releases.md`). **Push and pull run on the vault sync policy** — the `vault:`
 block of `.metistry/deployment.yaml`, set with `metistry vault settings`
 (`docs/ops/cli.md`; plan §2.21): push `after_commit` (the default: once a
 flush has made commits; commits still unpushed are retried every five

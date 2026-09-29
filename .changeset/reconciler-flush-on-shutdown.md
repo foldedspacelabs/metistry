@@ -1,0 +1,6 @@
+---
+"@metistry-apps/reconciler": patch
+"@foldedspacelabs/metistry-cli": patch
+---
+
+**A restart no longer leaves the reconciler's writes uncommitted (W3 checkpoint D1).** The commit queue lived in memory for its 30 s flush window and SIGTERM took node's default — exit at once — so `metistry update`, which writes `.metistry/metistry.lock` and `.metistry/secrets.yaml` and then restarts the supervisor, left both dirty for good (the sweep never takes `.metistry/`). Now: on SIGTERM/SIGINT the reconciler stops its intervals and listener, commits the queue through the ordinary flush (at most 8 s, inside the supervisor's 10 s grace), then exits; the queue is journalled at `.git/metistry-pending-commits.json` on every change, and at start the reconciler commits whatever a killed run left there, with the principal, message and trailers it was queued with — only paths it queued itself, each re-checked against the bridge's path rules and `user`-only for a protected path, so nothing becomes committable that was not already. `metistry update` also asks for the commit itself (`POST /flush`, the new `commit` step) after its last write and before the launchd env step, so the lock and secrets are in history when the update ends.

@@ -1892,6 +1892,16 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
   async function audit(kind: string, tool: string, ok: boolean, meta: Record<string, unknown>): Promise<void> {
     const id = await startRun(db, { component: "console", kind, tool, meta });
     await finishRun(db, id, { ok });
+    // An injected clock (`cfg.now`: the fixture recorder, tests) is the instant
+    // the act happened at on the record too. `day_close` counts the Tick and
+    // Defer doors' rows by the day of `runs.ts`; stamped by Postgres's wall
+    // clock instead, they fall out of the injected day at real midnight and
+    // Close the Day stops seeing what moved. Absent (every install) = the wall
+    // clock, which `now()` already wrote.
+    if (cfg.now) {
+      const at = cfg.now();
+      await db.query(`UPDATE runs SET ts = $2, started_at = $2, finished_at = $2 WHERE id = $1`, [id, at]);
+    }
   }
 
   /**

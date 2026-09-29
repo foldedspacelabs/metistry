@@ -342,8 +342,8 @@ do <today> linear:<KEY>` into `Inbox/` through the capture service
 idempotent per issue (principal `tracker:linear`, key `linear:<KEY>`), so a
 second press returns the first capture and writes nothing. The title is the
 one the sync recorded, never text the caller sends; nothing writes the owner's
-own notes. *The console door that calls it is not built yet* — the frozen
-route table (plan §2.1) has no route for the `today` door.
+own notes. The console door that calls it is `POST /api/today/add` (X-12,
+`docs/ops/client-api.md`); a GitHub `task` mirror is not wired to it yet (X-58).
 
 **Send to Linear** — from a task line, two doors, one service each
 (docs/ops/client-api.md): `POST /api/trackers/<connection>/issues

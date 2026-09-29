@@ -5,7 +5,13 @@
 #
 # Credentials, in the order this script looks for them (docs/ops/apple-signing.md §4):
 #
-#   1. CI: APPLE_API_KEY_P8 (base64 of the .p8), APPLE_API_KEY_ID, APPLE_API_ISSUER_ID.
+#   1. CI: APPLE_API_KEY_P8, APPLE_API_KEY_ID, APPLE_API_ISSUER_ID.
+#      APPLE_API_KEY_P8 is the AuthKey_<KEY_ID>.p8 file's contents exactly as
+#      Apple issued them, `-----BEGIN PRIVATE KEY-----` and `-----END PRIVATE
+#      KEY-----` lines included; base64 of that file is accepted too (the
+#      format these docs used to ask for). Anything that does not come out as
+#      a PEM private key is refused here, naming the format, rather than
+#      reaching notarytool as `invalidPrivateKeyContents` (v0.15.0).
 #      The key is written to a private temp file, used, and deleted — it never
 #      lands in the workspace and never reaches a log.
 #   2. Locally: the `metistry-notary` keychain profile stored once with
@@ -48,7 +54,16 @@ if [ -n "${APPLE_API_KEY_P8:-}" ]; then
   [ -n "${APPLE_API_ISSUER_ID:-}" ] || die "APPLE_API_KEY_P8 is set but APPLE_API_ISSUER_ID is not"
   keyfile="$(mktemp -t metistry-notary-key)"
   chmod 600 "$keyfile"
-  printf '%s' "$APPLE_API_KEY_P8" | base64 --decode > "$keyfile"
+  case "$APPLE_API_KEY_P8" in
+    *"-----BEGIN PRIVATE KEY-----"*) printf '%s\n' "$APPLE_API_KEY_P8" > "$keyfile" ;;
+    *) printf '%s' "$APPLE_API_KEY_P8" | tr -d ' \r\n' | base64 --decode > "$keyfile" 2>/dev/null || : ;;
+  esac
+  if ! grep -q -- "-----BEGIN PRIVATE KEY-----" "$keyfile" || ! grep -q -- "-----END PRIVATE KEY-----" "$keyfile"; then
+    die "APPLE_API_KEY_P8 is not an App Store Connect API key. It must be the AuthKey_${APPLE_API_KEY_ID}.p8 file's
+  contents, BEGIN/END PRIVATE KEY lines included (or base64 of that file). Re-set it with:
+    gh secret set APPLE_API_KEY_P8 --env release --repo <owner>/<repo> < AuthKey_${APPLE_API_KEY_ID}.p8
+  (docs/ops/apple-signing.md §4)"
+  fi
   creds=(--key "$keyfile" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER_ID")
   say "notarytool submit --wait  (App Store Connect API key $APPLE_API_KEY_ID)"
 else

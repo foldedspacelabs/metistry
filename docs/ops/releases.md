@@ -54,6 +54,41 @@ The workflow refuses a tag whose number does not match `package.json` and
 `packages/cli/package.json` (`node ops/scripts/sync-root-version.mjs
 --check`), so a hand-made tag cannot produce a mislabelled release.
 
+## Immutable releases, and re-running a release
+
+The repository has GitHub's **immutable releases** on. Once a release is
+*published*, its assets can never be added, replaced or deleted and its tag
+is locked to its commit; the title and notes stay editable. A deleted
+immutable release's tag name can **never be used again** — not after
+deleting the tag, not even in a recreated repository. (v0.15.0 is the lesson:
+the old `publish` job created the release and then uploaded to it, which an
+immutable release refuses with HTTP 422, so it went out with no assets.)
+
+So `publish` creates the release as a **draft** with every asset attached
+(`gh release create vX assets/* --draft --verify-tag`) and only then
+publishes it (`gh release edit vX --draft=false`). It never creates a tag.
+
+Re-running (**Re-run failed jobs** on the run, or `workflow_dispatch` with the
+version) is safe, and `publish` does the right thing for what it finds:
+
+| the release is… | `publish` |
+| --- | --- |
+| absent | creates the draft with every asset, then publishes it |
+| a draft (an earlier attempt was held or interrupted) | refreshes the notes, re-uploads every asset (`--clobber`), publishes |
+| published, immutable, has every asset | refreshes the notes only |
+| published, immutable, **missing** an asset | **fails**, saying so — nothing can be added. That version is lost: cut the next patch version (a changeset, `pnpm release:version`, tag). Optionally `gh release delete vX` (keep the tag) so *latest* points back at a complete release |
+| published, immutability off | the old path: edit the notes, `gh release upload --clobber` |
+
+**A failed Mac app holds the release.** When `macos-app` or `appcast`
+*fails* (as opposed to skipping for want of secrets), `publish` leaves the
+release as a **draft** and fails: publishing would freeze a release without
+the DMG for good. Fix the cause the failed job's `::error::` names (a secret,
+usually — see "Secrets"), then **Re-run failed jobs** on the same run: the
+app, the appcast and `publish` run again, and `publish` finds the draft and
+publishes it. To ship without the DMG instead: `gh release edit vX
+--draft=false`. The `npm` and `images` jobs publish independently of this —
+a held draft does not hold them.
+
 `release:version` also runs `ops/scripts/fold-product-record.mjs`, folding
 every PR's fragment under `docs/product/record/` into `docs/product/PRODUCT.md`
 and deleting them — the reason `PRODUCT.md` only changes on a release branch
@@ -279,7 +314,7 @@ a fork that has not made the environment.)
 | `SPARKLE_PRIVATE_KEY` | `appcast` | the EdDSA key Sparkle's `sign_update` signs the DMG with. **Never** in the repo or an artifact; it reaches `sign_update` on stdin so it never touches disk. `ops/release/appcast.mjs` refuses to emit an unsigned feed. Absent → the job skips with a notice and no appcast is published |
 | `SPARKLE_PUBLIC_ED_KEY` | — | the matching public key. Not sensitive, and it **is** committed: `SUPublicEDKey` in `apps/macos/resources/Info.plist` and `SPARKLE_PUBLIC_ED_KEY` in `ops/release/runtime-versions.env`, which a test asserts are the same string. The secret is redundant now; harmless to leave set |
 | `APPLE_CERTIFICATE_P12`, `APPLE_CERTIFICATE_PASSWORD` | `macos-app` | the Developer ID Application certificate, imported into a temporary keychain; `METISTRY_SIGN_IDENTITY` is then derived from it as the identity's **SHA-1 hash**, not its display name (two valid certs for one team have identical names and `codesign -s` fails with "ambiguous"). Absent → the job skips with a notice |
-| `APPLE_API_KEY_ID`, `APPLE_API_ISSUER_ID`, `APPLE_API_KEY_P8` | `macos-app` | notarization via the App Store Connect API key (`xcrun notarytool submit --key --key-id --issuer --wait`, then `stapler staple`) — **not** an Apple ID + app-specific password. Absent → the DMG is signed but not notarized, and the run says so |
+| `APPLE_API_KEY_ID`, `APPLE_API_ISSUER_ID`, `APPLE_API_KEY_P8` | `macos-app` | notarization via the App Store Connect API key (`xcrun notarytool submit --key --key-id --issuer --wait`, then `stapler staple`) — **not** an Apple ID + app-specific password. `APPLE_API_KEY_P8` is the **raw contents** of `AuthKey_<KEY_ID>.p8`, `-----BEGIN PRIVATE KEY-----`/`-----END PRIVATE KEY-----` lines included: `gh secret set APPLE_API_KEY_P8 --env release --repo foldedspacelabs/metistry < AuthKey_<KEY_ID>.p8`. (Base64 of the file is also accepted — `ops/release/notarize.sh` decodes it — but the raw file is the format to set.) Anything else fails the job naming the format, instead of notarytool's bare `invalidPrivateKeyContents` (v0.15.0). Absent → the DMG is signed but not notarized, and the run says so |
 | `APPLE_TEAM_ID` | — | unused. It was for the `xcodebuild archive` in the old stub; there is no Xcode project |
 
 The Developer ID certificate is also what fixes the ad-hoc-signed TCC
@@ -330,15 +365,17 @@ that long-lived tokens stop being a way in at all. Then revoke the bootstrap
 token from Account → Access Tokens; it was only ever needed to get each
 package's first version onto the registry.
 
-**Packages to bootstrap** (every `packages/*/package.json` with a public
-name — none in this repo are private):
+**Packages to bootstrap** (every `packages/*/package.json` without
+`"private": true` — `packages/eval` is the one private package):
 
 - `@foldedspacelabs/metistry-artifacts`
 - `@foldedspacelabs/metistry-cli`
+- `@foldedspacelabs/metistry-connections` — not on the registry yet (2026-09-28)
 - `@foldedspacelabs/metistry-core`
 - `@foldedspacelabs/metistry-mcp-apple-fm`
 - `@foldedspacelabs/metistry-mcp-brain`
 - `@foldedspacelabs/metistry-mcp-eventkit`
+- `@foldedspacelabs/metistry-mcp-live-capture` — not on the registry yet (2026-09-28)
 - `@foldedspacelabs/metistry-queries`
 - `@foldedspacelabs/metistry-tasks`
 
@@ -348,10 +385,29 @@ specific public CI run. `release.yml` passes `--provenance` when
 repository; npm does not generate provenance for a private repository, so a
 private fork's publish silently omits it rather than failing.
 
+The registry checks the provenance against the package's manifest, and
+refuses (E422, `"repository.url" is "", expected to match
+"https://github.com/foldedspacelabs/metistry"`) a package that does not name
+the repository the provenance came from. So every published
+`package.json` carries
+
+```json
+"repository": { "type": "git", "url": "git+https://github.com/foldedspacelabs/metistry.git", "directory": "packages/<dir>" }
+```
+
+— npm's canonical form, which it normalises to the plain `https://` URL
+before comparing (case-sensitively). `ops/scripts/check-package-metadata.mjs`
+holds every package to it, in CI and in the release's `verify` job, so a new
+package without it fails a PR rather than a release. (v0.15.0 published
+nothing to npm for want of it.)
+
 Until a package is configured, or on a fork that doesn't own the
 `foldedspacelabs` scope, npm answers the publish with a 404/403; the job
-logs an `::notice::` naming the package and continues rather than failing
-the release.
+logs an `::notice::` naming the package and continues. A version already on
+the registry is skipped before publishing, so a re-run is safe. **Any other
+failure fails the job** — E422 above all — after it has tried every package,
+with an `::error::` per package: a provenance or manifest rejection is ours
+to fix and must not read as a skip.
 
 ## The macOS app
 

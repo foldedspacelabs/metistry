@@ -577,4 +577,65 @@ describe.skipIf(!hasDb)("Close the Day: POST /api/today/close", () => {
     );
     expect(passes.map((p) => [p.ok, p.meta.outcome])).toEqual([[true, "acted"], [true, "acted"]]);
   });
+
+  // The fixture recorder pins the console's clock (`cfg.now`) so a recording
+  // does not move with the date. The Defer door's audit row is what "moved"
+  // is counted from, by the day of `runs.ts` — stamped with Postgres's wall
+  // clock, it fell out of the pinned day at real midnight and
+  // post-api-today-close drifted in CI every day after 2026-09-28.
+  describe("an injected clock: what moved is counted on the console's clock, never the wall's", () => {
+    let clock = new Date("2032-06-10T12:00:00Z");
+    let pinned: ReturnType<typeof makeServer>;
+    let pinnedBase: string;
+
+    beforeAll(async () => {
+      const inboxDir = await mkdtemp(join(tmpdir(), "metistry-close-pinned-"));
+      inboxDirs.push(inboxDir);
+      pinned = makeServer(pool, queries, {
+        origin: "http://127.0.0.1:0",
+        inboxDir,
+        policy,
+        secureCookies: false,
+        localOwner: { token: localOwnerToken, trusted: [] },
+        vault,
+        now: () => new Date(clock),
+      });
+      await new Promise<void>((r) => pinned.listen(0, "127.0.0.1", r));
+      pinnedBase = `http://127.0.0.1:${(pinned.address() as AddressInfo).port}`;
+    });
+    afterAll(() => new Promise<void>((r) => pinned.close(() => r())));
+
+    const post = async (path: string, body: Record<string, unknown>) => {
+      const r = await fetch(`${pinnedBase}${path}`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${localOwnerToken}` }, body: JSON.stringify(body) });
+      return { status: r.status, body: (await r.json()) as Record<string, any> };
+    };
+
+    /** On the pinned clock's day: defer one line two days on through the real Defer door, then close the day. */
+    async function deferThenClose(day: string, key: string): Promise<{ to: string; moved: unknown; ts: Date }> {
+      clock = at(day, "12:00");
+      const text = `Pinned line ${key}`;
+      const taskPath = `Areas/${MARK}-${suffix}/${key}.md`;
+      await base.write(taskPath, Buffer.from(`- [ ] ${text} ^${key}\n`), { principal: "user", message: "seed" }, "");
+      await indexed(taskPath, key, text);
+      await pool.query(`UPDATE vault_tasks SET line_no = 1 WHERE path = $1`, [taskPath]);
+      const to = addTaskDays(day, 2)!;
+      const d = await post(`/api/vault-tasks/${key}/schedule`, { do: to, seen_text: text });
+      expect(d.status).toBe(200);
+      await note(day, "# day\n");
+      const c = await post("/api/today/close", { day });
+      expect(c.status).toBe(200);
+      const { rows } = await pool.query(`SELECT ts FROM runs WHERE kind = 'vault_task' AND tool = 'schedule' AND meta->>'task_key' = $1 ORDER BY id DESC LIMIT 1`, [key]);
+      return { to, moved: c.body.moved, ts: rows[0]!.ts as Date };
+    }
+
+    it("two injected days give two keys, each its own day's deferral, however far the wall clock is from either", async () => {
+      const a = await deferThenClose("2032-06-10", `mt-${suffix}pa`);
+      const b = await deferThenClose("2032-06-11", `mt-${suffix}pb`);
+      expect(a).toEqual({ to: "2032-06-12", moved: { "2032-06-12": 1 }, ts: at("2032-06-10", "12:00") });
+      expect(b).toEqual({ to: "2032-06-13", moved: { "2032-06-13": 1 }, ts: at("2032-06-11", "12:00") });
+      // the wall clock is years from both days — and it was never read: closing the first day again says the same
+      clock = at("2032-06-10", "12:00");
+      expect((await post("/api/today/close", { day: "2032-06-10" })).body.moved).toEqual({ "2032-06-12": 1 });
+    });
+  });
 });

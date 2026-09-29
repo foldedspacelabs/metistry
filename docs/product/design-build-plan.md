@@ -432,6 +432,7 @@ console cannot or must not do it (credentials, the machine, code that runs):
 | M16 | Compute providers | `metistry compute providers add\|remove\|set` | keys and base URLs — where prompts go |
 | M17 | Models on this Mac | `metistry compute models install\|load\|unload` | this Mac's disk and memory |
 | M18 | The vault's git policy and rollback | `metistry vault settings`, `metistry vault rollback <commit\|--to date\|--file path>` (T10-2, T10-6) | the repository's history and its remote; a rollback still waits for Approve in Needs You |
+| M19 | Add a phone: mint a passkey enrolment code | `metistry enroll [--json]`, `metistry enroll --cancel <id>` (X-75; §2.22) *(ruled 2026-09-28)* | a first credential for a new device; shell access to this Mac is its root of trust (plan §4.2), so no HTTP route mints one |
 
 **Device-local, no CLI and no API:** global hot keys, the capture bar's placement
 and window preferences, the login item, reading TCC state, the instance chooser
@@ -466,7 +467,8 @@ exist. Reach (§2.1) enforces it; a client hiding a control is never the control
 | Services: restart, stop, start, logs; Keep Awake | — | write | the machine; a remote stop locks the owner out |
 | Updates: versions | read | read | |
 | Updates: update, roll back, runtime source | — | write | replaces running code |
-| Account: devices, revoke a device, Sign Out Everywhere | write | write | a lost phone is revoked from another device |
+| Devices: the list, remove a device, Sign Out Everywhere (in Account until §2.22) | write | write | a lost phone is revoked from another device |
+| Devices: Add a Phone (an enrolment code, M19) | — | write | a new credential; shell access to the Mac is the root of trust *(ruled 2026-09-28, §2.22)* |
 | Account: console sign-in, instance repository | — | write | |
 | Sessions: *Let Metis learn*, retention | write | write | the session-fold and purge routines' settings, through the Scheduled doors (§2.5) |
 | Sessions: Purge Now | — | write | irreversible |
@@ -929,6 +931,7 @@ lands it in `CLAUDE.md` and in `metistry-build-plan.md` §1, which is kept in sy
 | 0035 | `event_notify.sql` | `metistry_notify()` and `AFTER INSERT OR UPDATE` triggers on `runs`, `proposals`, `work`, `inbox`, `artifact_comments`, `outbound_messages`, `agents` — `pg_notify` with `{table, op, id}` only (§2.20) | no data | T2-18 |
 | 0036 | — | spare | | |
 | 0037 | — | spare | | |
+| 0038 | `passkey_revocation.sql` | `passkeys.revoked_at timestamptz` — a removed device's passkey never signs in again (§2.22) *(ruled 2026-09-28)* | durable, like `auth_sessions.revoked_at` | X-76 |
 
 **No migration needed:** `inbox.source = 'app'` (no CHECK); `runs.kind` values
 `connection_call`, `route`, `config_write`, `access_ceiling`; `runs.meta.outcome`;
@@ -1356,6 +1359,207 @@ reports branch, ahead/behind, last commit, last push, and any conflict.
   tool exposes it, the rollback route is `local`, and the reconciler refuses the
   revert operation for any principal but `user`.
 
+### 2.22 Add a Phone — enrolment from the Mac *(ruled 2026-09-28)*
+
+**Why this exists.** The metistry.ai Download page (`foldedspacelabs/metistry-website`,
+`design/Download.dc.html`, section *Phone*; the *Phone · Download* board in
+`Phone Layouts.dc.html`) promises a phone setup that the product did not have:
+
+> **Add your phone.** Once Metistry is running on your Mac, your iPhone can use it
+> too, as a web app on your Home Screen. It's the same instance, so everything
+> stays in sync.
+>
+> 1. **Let your phone reach your Mac** *(BEING DESIGNED)* — Metistry only answers
+>    on your home network to start with. To use it from anywhere, connect your
+>    devices privately with a service like Tailscale, or forward a port on your
+>    router.
+> 2. **Start from your Mac** — In Metistry, open Settings, then Devices, and
+>    choose Add a Phone. A QR code appears.
+> 3. **Scan it with your iPhone** — Open the link, then choose Add to Home Screen
+>    from the share menu.
+> 4. **Sign in with Face ID** — Your phone gets its own passkey. You can remove
+>    it from Devices anytime.
+
+The owner ruled to **build the flow rather than cut it from the site**. Today
+enrolment is `apps/console/scripts/enroll.mjs`, run from the wizard's step 6, which
+shows a URL and takes a pasted code; `docs/ops/mac-app.md` lists *Minting an
+enrolment code* and *A QR code* under "Not yet". This section is what closes both.
+Step 1 — reaching the Mac from outside — is **not** this section: it stays
+research (§5, *Remote access for the phone*).
+
+**The root of trust does not move.** Plan §4.2: shell access to the host is the
+root of trust for a first passkey, so **no HTTP route mints an enrolment code** —
+not an unauthenticated one, and not a `local` one either. The Mac app already
+drives the CLI for exactly this class of act (§2.2), so minting is a CLI verb, M19,
+and the app runs it through the transport it uses for every other management verb.
+
+**Entry point (Mac).** Settings gains a **Devices** pane in the ACCESS group —
+`Account · Devices · Connections · Secrets · Variables` — which takes the device
+list and **Sign Out Everywhere** from Account (screen 15 §1 draws no Devices pane;
+this ruling adds it, so the website's "Settings, then Devices" is the product's
+path). The pane's primary button is **Add a Phone…**; the app menu's *Set up…*
+and the wizard's step 6 open the same sheet, so there is one way in, drawn once.
+
+**Minting — `metistry enroll` (M19).**
+
+- Runs where `enroll.mjs` runs today and calls the same `mintEnrollmentCode`
+  (`apps/console/src/auth-store.ts`): **single-use, 10 minutes, stored hashed**
+  (`auth_enrollment_codes`, `0003`). No new table, no new lifetime; the 10 minutes
+  stays a fixed security parameter.
+- Prints the enrolment URL — `<first METISTRY_ORIGIN entry>/#enroll=<code>` — and
+  its expiry. `--json` writes exactly one document: `{url, code_id, origin,
+  expires_at}`. `code_id` is the row's id, never the code.
+- `metistry enroll --cancel <code_id>` expires an unused code at once; the Mac's
+  sheet runs it when it closes, so a QR left on screen or in a screenshot is dead
+  as soon as the owner is done with it.
+- **Refuses before minting** when the phone cannot possibly complete the ceremony
+  (below). A refusal mints nothing.
+- `enroll.mjs` keeps `--owner-token` (the capture Shortcut) and its code path for
+  enrolment calls the same function, so the two can never disagree; `docs/ops/cli.md`
+  drops `metistry enroll` from "Not yet".
+- The CLI prints the URL only. **A terminal QR is not in scope**: it needs an
+  encoder, a dependency nobody has asked for (open question 1, below).
+
+**The QR code (Mac).** Rendered with CoreImage's `CIQRCodeGenerator` — part of
+macOS, **no dependency** (the objection `mac-app.md` recorded was to an encoder
+package, which this avoids). Error-correction level `M`; scaled by an integer
+factor with no interpolation so the modules stay sharp; drawn dark-on-light in
+both appearances with a quiet zone (scanners need contrast, not the theme). The
+URL is printed selectable under the code, with **Copy Link**, for a phone that
+cannot scan. VoiceOver reads the image as "QR code for adding a phone" and the URL
+is the accessible alternative (§2.18).
+
+**The sheet (Mac), in order.**
+
+1. **Checking** — the app runs `metistry enroll --json`.
+2. **Refused** — the refusal's own words, the fix it names, and **Learn How**
+   (the phone guide, `docs/ops/phone.md`, X-79). No QR is drawn.
+3. **Ready** — the QR, the URL, *Expires in 9:41* counting down, **Make a New
+   Code** (cancels the old one first) and **Done**.
+4. **Expired** — the QR is replaced, not dimmed, by *This code expired* and
+   **Make a New Code**.
+5. **Added** — when `GET /api/devices` (refetched on `GET /api/events`, polled
+   while the stream is down, §2.20) shows a passkey enrolled after the sheet
+   opened: *"iPhone" was added* with the label the phone chose, and **Done**.
+
+Closing the sheet from any state runs `--cancel` for a code that is still live.
+
+**When `METISTRY_ORIGIN` is not reachable from the phone.** The Mac cannot prove
+a phone can reach it, but it can prove when a phone **cannot**, and it refuses
+those cases by name rather than drawing a QR that leads nowhere. The first
+`METISTRY_ORIGIN` entry is checked; each refusal is a code path with a test (U3):
+
+| Case | Refusal (the wording to build) |
+| --- | --- |
+| host is loopback (`127.0.0.0/8`, `::1`, `localhost`) — **every install's default** (`init` writes `http://127.0.0.1:<port>`, and the console binds `METISTRY_CONSOLE_HOST=127.0.0.1`) | "Your phone can't reach this Mac yet: Metistry only answers on this Mac (METISTRY_ORIGIN is <origin>). Give it an HTTPS address your phone can open — for example a Tailscale name — then set METISTRY_ORIGIN to it." |
+| scheme is `http:` | "A passkey needs HTTPS. METISTRY_ORIGIN is <origin>; set it to the https:// address your phone will open." |
+| host is an IP literal | "A passkey needs a name, not an IP address. METISTRY_ORIGIN is <origin>; set it to a hostname your phone can open." |
+| `GET <origin>/health` does not answer from this Mac within 5 s, or `GET <origin>/api/identity` (public) names another instance's `instance_id` | "<origin> doesn't answer from this Mac, so your phone won't reach it either. Check the address, or the service in front of Metistry." |
+
+Every refusal ends with the same pointer: the phone guide, and — for the "from
+anywhere" half — `docs/research/2026-09-28-reaching-your-mac-remotely.md` (§5).
+The checks are necessary, not sufficient: a name that resolves only on this Mac
+still passes, which is why the sheet says under the QR *"Your phone must be able
+to open <host>."* and the phone's own wall says the rest (below).
+
+**The phone, in order.** The ceremony happens in Safari, because an installed
+web app on iOS does not share Safari's storage and the code lives in the URL:
+
+1. **Scan** — the Camera opens `<origin>/#enroll=<code>` in Safari. The PWA reads
+   the code, then **removes it from the address bar** (`history.replaceState`), so
+   Add to Home Screen never saves a spent code and it never sits in history.
+2. **Create the passkey** — the enrolment wall (exists: `app.js`, *auth: a wall*)
+   with the device's name prefilled; one **Face ID** (Touch ID, or the passcode)
+   creates this phone's own passkey, bound to `METISTRY_ORIGIN`'s rpID.
+3. **Add to Home Screen** — when not running standalone, the wall is followed by
+   screen 18 §6's install sheet (Share → Add to Home Screen → open it), the
+   T7-5 sheet, not a new one. Safari has no install prompt; push needs the
+   installed app.
+4. **Sign in with Face ID** — the installed app opens on the sign-in wall
+   (*Welcome to Metistry · Sign In with Face ID*, the *Phone* board) and signs in
+   with the passkey from step 2 — a login ceremony, not a second enrolment.
+5. **Notifications** — asked **in context, the first time something reaches Needs
+   You**, never during setup (screen 18 §6, ratified). The install sheet's last
+   line says so, so the owner is not surprised by the question later.
+
+If the phone cannot load the origin, Safari shows its own error — the product
+cannot draw anything there. What it can do is the Mac's refusal above and a
+guide that tells the owner what the Mac's line *"Your phone must be able to open
+<host>"* means.
+
+**Devices — the list and removal.** A device is a **passkey**, with its sessions
+under it. `GET /api/devices` today lists session rows and `POST
+/api/devices/:id/revoke` revokes one session — the passkey stays valid and the
+phone can sign straight back in, so the website's *"You can remove it from Devices
+anytime"* is not yet true. X-76 makes it true: **Remove** revokes the passkey
+(`passkeys.revoked_at`, migration `0038`) and every session under it, and drops
+their push subscriptions; a revoked passkey's login is refused with the same
+uniform 401 as an unknown one (no existence leak). The Mac's Devices pane and the
+PWA's Settings (T7-6) list each device's label, when it was added, when it was
+last seen, and *This device* on the caller's own row; **Remove** is irreversible,
+so it confirms naming the device (C136). **Sign Out Everywhere** keeps its meaning:
+sessions only, passkeys kept. Every add and remove lands in `runs` (`auth`).
+
+**CLI parity.** Every app act is a CLI verb:
+
+| App | CLI |
+| --- | --- |
+| Add a Phone… (mint, show) | `metistry enroll [--json]` |
+| closing the sheet, Make a New Code | `metistry enroll --cancel <code_id>` |
+| the device list | `metistry console call GET /api/devices` |
+| Remove | `metistry console call POST /api/devices/<id>/revoke` |
+
+The list and Remove stay client-API acts (§2.3: the phone may do them too), so
+their CLI form is `console call` like every other API act; only minting is a
+management verb.
+
+**Acceptance — the flow is done when:**
+
+- On a fresh install (loopback origin), **Add a Phone…** draws no QR and shows the
+  loopback refusal naming `METISTRY_ORIGIN`; `metistry enroll` prints the same
+  refusal and exits non-zero; no row is written to `auth_enrollment_codes`.
+- With an HTTPS origin the phone can open, scanning the QR on a real iPhone
+  enrols a passkey, the Mac's sheet turns to *Added* by itself, and the installed
+  app signs in with Face ID — the four website steps, end to end, on the owner's
+  second instance.
+- A code works once, for 10 minutes; closing the sheet or **Make a New Code**
+  kills the old one at once (**a cancelled code's URL is refused**).
+- **No console route mints a code** — a test enumerates the route table.
+- **A removed phone cannot sign in again** with its passkey; its push stops.
+- The enrolment URL is gone from the phone's address bar and history once read.
+- `docs/ops/cli.md`, `docs/ops/auth.md`, `docs/ops/mac-app.md` and
+  `docs/ops/client-api.md` say what shipped, and `mac-app.md`'s two "Not yet" rows
+  (minting, the QR) are gone.
+- **The metistry.ai Download page's copy is re-checked against the shipped flow**
+  (X-79) and every difference is fixed on the site or here.
+
+**What the site says that the product does not, as of this ruling** — for X-79 to
+settle, not for the site to fix blind:
+
+1. Step 1 says Metistry "only answers on your home network to start with". It
+   answers **only on this Mac** (loopback), and a home-network address cannot hold
+   a passkey anyway (HTTPS and a hostname are required). Step 1 is a prerequisite
+   for **every** phone, not only for "from anywhere".
+2. Steps 3–4 put Add to Home Screen before Face ID. The passkey is created in
+   Safari **before** installing (step 2 above); Face ID in the installed app signs
+   in with it. The copy can stay four steps if step 3 reads "Open the link and use
+   Face ID to create your phone's passkey, then Add to Home Screen" — the designer's
+   call.
+3. "Settings, then Devices" is true once X-77 lands; "remove it from Devices
+   anytime" once X-76 lands.
+
+**Open for the owner.**
+
+1. A terminal QR for `metistry enroll` (plan §4.2 says "QR/URL in the terminal")
+   needs an encoder package, or a hand-rolled one. Until ruled, the CLI prints the
+   URL only.
+2. Settings ▸ Devices and the Add a Phone sheet are not drawn on any board. X-77
+   builds them from this section with screen 15's pane grammar unless the designer
+   draws them first.
+3. Approving another device from an already signed-in phone (plan §4.2, *More
+   devices*) stays out: it would be an HTTP route that mints, and this ruling
+   keeps minting on the Mac.
+
 ---
 
 ## 3. Execution plan
@@ -1435,7 +1639,7 @@ agent's pass, per the PR close rule; the owner reviews at checkpoints.
 | W3 | T2-12, T2-13 · T3-8, T3-10, T3-11 · T4-9, T4-12 → T4-13, T4-19, T4-22, T4-23, T4-25, T4-26 · T6-4…T6-11 · T7-4, T7-5 · T8-2a → T8-2b, T8-6 · T9-3 · T10-7 · X-6…X-23 |
 | W4 | X-24, X-29, X-31, X-32, X-41 (CI stability, dispatched first — owner 2026-09-30) · T4-10 → T4-11, T4-14; T4-15 → T4-17 · T6-12, T6-13a, T6-13b, T6-14, T6-15, T6-16 · T7-6 · T8-3, T8-4, T8-5, T8-7 · T9-4 (merges after the eval clears its bar) |
 | W5 | X-1 |
-| Candidates | X-25…X-28, X-30, X-33…X-40, X-42…X-74, X-80…X-102 — specified, not scheduled; the owner assigns each a wave at a checkpoint (W3 housekeeping; five CI-stability candidates went to W4 on 2026-09-30; X-80…X-102 added at W4 housekeeping) |
+| Candidates | X-25…X-28, X-30, X-33…X-40, X-42…X-74, X-80…X-102 — specified, not scheduled; the owner assigns each a wave at a checkpoint (W3 housekeeping; five CI-stability candidates went to W4 on 2026-09-30; X-80…X-102 added at W4 housekeeping) · X-75…X-79 — Add a Phone (§2.22), ruled 2026-09-28, not yet scheduled |
 
 ### 3.3 The tickets
 
@@ -3743,6 +3947,90 @@ before it seeds.
 *Tests:* **two consecutive runs on one database both pass**.
 *Accept:* —
 
+#### X — Add a Phone (ruled 2026-09-28)
+
+The metistry.ai Download page promises Settings ▸ Devices ▸ Add a Phone, a QR code,
+and a passkey the owner can remove; the owner ruled to build it rather than cut it
+from the site. **Every ticket here builds §2.22** — read it whole; it holds the
+refusal wording, the sheet's states and the acceptance. None is in a wave: §3.2's
+*Candidates* row holds them until the owner schedules them. Reaching the Mac from
+outside the home is **not** here (§5, *Remote access for the phone*).
+
+**X-75 · `metistry enroll` — an enrolment code minted on this Mac** · M —
+*Spec:* §2.22 *Minting* and *When `METISTRY_ORIGIN` is not reachable*: the M19
+verb in `packages/cli`, calling `auth-store`'s `mintEnrollmentCode` exactly as
+`apps/console/scripts/enroll.mjs` does; `--json` (`{url, code_id, origin,
+expires_at}`, one document, U7's rule); `--cancel <code_id>`; the four refusals,
+checked before anything is minted, each naming `METISTRY_ORIGIN` and the fix.
+`enroll.mjs`'s enrolment path calls the same function. **No console route**.
+*Files:* `packages/cli/src/` (a new `enroll.ts`, `main.ts`), `apps/console/src/auth-store.ts`
+(a cancel function), `apps/console/scripts/enroll.mjs`, `docs/ops/cli.md` (the verb;
+drop it from "Not yet"), `docs/ops/auth.md`.
+*Tests:* **a loopback, an `http:` and an IP-literal origin are each refused and
+write no `auth_enrollment_codes` row; a code is refused after one use, after 10
+minutes, and after `--cancel`; the console's route table has no route that mints
+a code**; `--json` writes exactly one document.
+*Accept:* `metistry enroll` on the owner's second instance prints a URL that enrols
+a real iPhone.
+
+**X-76 · Removing a device revokes its passkey** · M —
+*Spec:* §2.22 *Devices*: migration `0038` (`passkeys.revoked_at`, §2.9);
+`getPasskey` refuses a revoked passkey with the uniform 401; `POST
+/api/devices/:id/revoke` revokes the session's passkey and every session under it,
+dropping their push subscriptions; `GET /api/devices` serves a device per passkey
+(label, added, last seen, `this_device`, its sessions) — an additive change to the
+body, recorded in `client-api.md`. Sign Out Everywhere stays sessions-only.
+*Files:* `db/migrations/0038_passkey_revocation.sql`, `apps/console/src/auth-store.ts`,
+`apps/console/src/server.ts`, `docs/ops/client-api.md`, `docs/ops/auth.md`.
+*Tests:* U2; **a removed device's passkey cannot sign in again and its push
+subscription is gone; a revoked passkey's login is indistinguishable from an
+unknown one's; Sign Out Everywhere leaves passkeys valid**.
+*Accept:* F-7's devices fixture re-recorded.
+
+**X-77 · Settings ▸ Devices and the Add a Phone sheet** · L · deps X-75, X-76 —
+*Spec:* §2.22 *Entry point*, *The QR code* and *The sheet*: a **Devices** pane in
+ACCESS (the list, Remove with its confirm, Sign Out Everywhere moved from Account);
+**Add a Phone…** opens the sheet — Checking, Refused, Ready, Expired, Added — driving
+`metistry enroll --json` and `--cancel` over the CLI transport; the QR from CoreImage
+`CIQRCodeGenerator` (no dependency); *Added* from `GET /api/devices` on live events.
+The app menu's *Set up…* and wizard step 6 open the same sheet; step 6 stops
+showing the `enroll.mjs` command.
+*Files:* `apps/macos/sources/kit/settings-model.swift`, a new
+`apps/macos/sources/kit/devices-pane.swift` and `add-phone-sheet.swift`,
+`apps/macos/sources/kit/wizard-step-views.swift`, `docs/ops/mac-app.md` (drop the
+two "Not yet" rows), `docs/product/design/screen-15-settings.md` §1 (the ACCESS
+group gains Devices).
+*Tests:* **the sheet never draws a QR for a refused origin; closing it in any state
+cancels a live code**; the QR decodes (`CIDetector`) to exactly the verb's URL; the
+countdown reaches Expired on an injected clock.
+*Accept:* U9 — VoiceOver reads the QR's label and the URL; the pane at the
+largest text size.
+
+**X-78 · The phone's half: enrol, install, sign in** · M —
+*Spec:* §2.22 *The phone, in order*: the PWA removes `#enroll=` from the URL once
+read; after a successful enrolment in a browser that is not standalone, the wall
+hands on to T7-5's install sheet, whose last line says notifications are asked the
+first time something needs the owner; the installed app's sign-in wall uses the
+existing passkey. No new wording beyond the install sheet's line; refusals keep
+`AUTH_WORDS`.
+*Files:* `apps/console/web/app.js`, `apps/console/web/index.html`.
+*Tests:* **the enrolment code is not in `location` or history after it is read**;
+a standalone launch shows sign-in, never the enrolment wall.
+*Accept:* on a real iPhone: scan, Face ID, Add to Home Screen, open, Face ID.
+
+**X-79 · The phone guide, and the website's copy re-checked** · S · deps X-75, X-76, X-77, X-78 —
+*Spec:* write `docs/ops/phone.md` — the owner's guide to Add a Phone, each Mac
+refusal and its fix, removal, and a pointer to
+`docs/research/2026-09-28-reaching-your-mac-remotely.md` for reaching the Mac from
+outside (the website's Docs are built from this repo's markdown, so this page is
+what metistry.ai renders). Then compare the Download page's *Add your phone* steps
+(`foldedspacelabs/metistry-website`) with the shipped flow — §2.22's three known
+differences first — and open a PR there with the copy that matches.
+*Files:* `docs/ops/phone.md`, `docs/ops/auth.md` (link it).
+*Tests:* —
+*Accept:* the site's four steps describe the shipped flow, and its step 1 no
+longer says Metistry answers on the home network by default.
+
 #### W5 — Acceptance
 
 **X-1 · The document sweep** · S · W5 — glossary, `reply-feedback.md`, `board.md`,
@@ -3814,7 +4102,7 @@ coordinator should not have to hold it.
    *Design-heavy* regardless of size, because a wrong call there is expensive:
    F-1…F-8, T2-6 (the section operation), T2-18 (events), T4-6 (actors), T4-9
    (`connection_call`), T9-2 (the policy), T10-3 (integrate before pushing), T10-6
-   (rollback).
+   (rollback), X-75 (minting a first credential) and X-76 (passkey revocation).
 4. **A status on every ticket**, in its frontmatter — `todo`, `in-progress`,
    `in-review`, `merged`, `blocked` — plus `pr:`. The implementing agent sets it in
    its own PR; the generator preserves it. After a compaction the coordinator
@@ -3935,6 +4223,20 @@ places later, with no ticket in this program:
 item for everything else — GitHub pull request reviews, calendar invites and the
 like — with Needs You as a sidebar on Inbox. Designed after the UX build
 completes; no ticket (`decisions-log.md`, *Later*).
+
+**Remote access for the phone — research, not scheduled** (ruled 2026-09-28)**.**
+The website's step 1, *Let your phone reach your Mac*, is marked BEING DESIGNED,
+and Add a Phone (§2.22) refuses until the phone can open an HTTPS origin. An
+**opt-in relay** that gets a phone to the owner's Mac from anywhere is being
+researched in `docs/research/2026-09-28-reaching-your-mac-remotely.md`. The owner's
+constraints, which any design must meet: **opt-in** (off until the owner turns it
+on, from the Mac); **default-deny** (nothing reaches the console through it that
+the console would not already authenticate — invariant 8 still holds end to end);
+**near-free to run** — it carries signalling only and never pays for the owner's
+bandwidth; **serverless preferred** over a service someone must keep running. It is
+never the only way: an owner may instead use **Tailscale**, **port forwarding** on
+their router, or a **commercial tunnel**, and the phone guide (X-79) documents
+those without the relay. No ticket until the research is accepted.
 
 **Also after this program:** the **token broker** (§2.6), built when Slack, Notion,
 Atlassian or another confidential-only provider is scheduled; **OAuth from the

@@ -411,6 +411,20 @@ waits on one names it by letter.
 The 27 questions of the W3 checkpoint that the 2026-09-30 rulings did not
 answer remain open as written above.
 
+## Ruled 2026-09-28 — the phone, from the website
+
+The metistry.ai Download page (`foldedspacelabs/metistry-website`) describes a
+phone setup the product did not have: Settings ▸ Devices ▸ Add a Phone, a QR code,
+a passkey removable from Devices, and a step for reaching the Mac from outside.
+
+| # | Item | Ruling | Where it lands |
+| --- | --- | --- | --- |
+| 1 | Build the Download page's phone flow, or cut it from the site | **Build it.** Minting stays on the Mac (a CLI verb, M19), never an HTTP route; the QR is CoreImage's, no dependency; removing a device revokes its passkey. | §2.22; X-75…X-79 |
+| 2 | Reaching the Mac from outside the home (the site's step 1) | Research an **opt-in relay**: default-deny, signalling only (never pays for bandwidth), serverless preferred; Tailscale, port forwarding and commercial tunnels stay documented alternatives. | plan §5; `docs/research/2026-09-28-reaching-your-mac-remotely.md` |
+
+**Still open** (§2.22): a terminal QR (an encoder dependency); whether the designer
+draws Settings ▸ Devices and the sheet before X-77; the site's step 1 and step 3–4
+wording (X-79).
 
 ## Rulings the owner must make
 

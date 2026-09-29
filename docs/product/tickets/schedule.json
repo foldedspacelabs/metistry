@@ -3464,6 +3464,74 @@
       "file": "docs/product/tickets/x/x-102.md",
       "status": "todo"
     },
+    "X-75": {
+      "title": "`metistry enroll` — an enrolment code minted on this Mac",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-75.md",
+      "status": "todo"
+    },
+    "X-76": {
+      "title": "Removing a device revokes its passkey",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-76.md",
+      "status": "todo"
+    },
+    "X-77": {
+      "title": "Settings ▸ Devices and the Add a Phone sheet",
+      "track": "X",
+      "wave": "candidate",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "X-75",
+        "X-76"
+      ],
+      "file": "docs/product/tickets/x/x-77.md",
+      "status": "todo"
+    },
+    "X-78": {
+      "title": "The phone's half: enrol, install, sign in",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-78.md",
+      "status": "todo"
+    },
+    "X-79": {
+      "title": "The phone guide, and the website's copy re-checked",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-75",
+        "X-76",
+        "X-77",
+        "X-78"
+      ],
+      "file": "docs/product/tickets/x/x-79.md",
+      "status": "todo"
+    },
     "X-1": {
       "title": "The document sweep",
       "track": "X",
@@ -3481,7 +3549,7 @@
     "tickets": 167,
     "agent_days": 487.5,
     "waves": 6,
-    "candidates": 69
+    "candidates": 74
   },
   "critical_path": {
     "days": 35,
@@ -3566,9 +3634,14 @@
       "X-99",
       "X-100",
       "X-101",
-      "X-102"
+      "X-102",
+      "X-75",
+      "X-76",
+      "X-77",
+      "X-78",
+      "X-79"
     ],
-    "count": 69,
-    "agent_days": 93
+    "count": 74,
+    "agent_days": 106.5
   }
 }

@@ -201,7 +201,7 @@ Generated from `docs/product/design-build-plan.md` by `ops/scripts/tickets.mjs`.
 
 - [ ] **W5 checkpoint** — merged, main green, scratch-instance upgrade, conformance test, Mac smoke, release
 
-## W4 candidates — 69 tickets, 93 agent-days, no wave yet
+## W4 candidates — 74 tickets, 106.5 agent-days, no wave yet
 
 Follow-ups specified in the plan (§3.2's *Candidates* row) that nobody has scheduled. The owner assigns each one a wave at a checkpoint; until then none is dispatched.
 
@@ -274,3 +274,8 @@ Follow-ups specified in the plan (§3.2's *Candidates* row) that nobody has sche
 - [ ] [X-100](x/x-100.md) · The "held to core" Swift tests cannot drift · S · sonnet · after T6-14, T6-5
 - [ ] [X-101](x/x-101.md) · Bare `metistry doctor` resolves the product directory it runs from · S · sonnet
 - [ ] [X-102](x/x-102.md) · The recorder leaves no fixed-id rows behind · S · sonnet · after X-31
+- [ ] [X-75](x/x-75.md) · `metistry enroll` — an enrolment code minted on this Mac · M · opus high
+- [ ] [X-76](x/x-76.md) · Removing a device revokes its passkey · M · opus high
+- [ ] [X-77](x/x-77.md) · Settings ▸ Devices and the Add a Phone sheet · L · opus high · after X-75, X-76
+- [ ] [X-78](x/x-78.md) · The phone's half: enrol, install, sign in · M · opus
+- [ ] [X-79](x/x-79.md) · The phone guide, and the website's copy re-checked · S · sonnet · after X-75, X-76, X-77, X-78

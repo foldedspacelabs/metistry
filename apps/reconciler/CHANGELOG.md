@@ -1,5 +1,28 @@
 # @metistry-apps/reconciler
 
+## 0.15.0
+
+### Patch Changes
+
+- f40d905: **A restart no longer leaves the reconciler's writes uncommitted (W3 checkpoint D1).** The commit queue lived in memory for its 30 s flush window and SIGTERM took node's default — exit at once — so `metistry update`, which writes `.metistry/metistry.lock` and `.metistry/secrets.yaml` and then restarts the supervisor, left both dirty for good (the sweep never takes `.metistry/`). Now: on SIGTERM/SIGINT the reconciler stops its intervals and listener, commits the queue through the ordinary flush (at most 8 s, inside the supervisor's 10 s grace), then exits; the queue is journalled at `.git/metistry-pending-commits.json` on every change, and at start the reconciler commits whatever a killed run left there, with the principal, message and trailers it was queued with — only paths it queued itself, each re-checked against the bridge's path rules and `user`-only for a protected path, so nothing becomes committable that was not already. `metistry update` also asks for the commit itself (`POST /flush`, the new `commit` step) after its last write and before the launchd env step, so the lock and secrets are in history when the update ends.
+- eda799a: **`GET /vault/log` is narrowed to the owner (ruled 2026-09-27, X-6).** `GET /vault/show` has always refused a `.metistry/` (or other protected/non-vault) path for every bearer; `GET /vault/log` did not, so a path-scoped request for a protected path, or a whole-tree read that happened to include a commit touching one, handed its subject and provenance trailers to any caller — including whatever fronts an agent. `vault.log()` now takes the caller class: for anyone but the owner bearer, a protected `path` is `403 forbidden` and a whole-tree read silently drops any commit that touched one. `Artifacts/` is left out on purpose — the console's artifacts service resolves a version's commit through this same door with its own (non-owner) bearer, and was never the confidentiality boundary `.metistry/` is.
+- Updated dependencies [4099fcb]
+- Updated dependencies [aee4e7f]
+- Updated dependencies [1985d5e]
+- Updated dependencies [e41aa66]
+- Updated dependencies [2e53e7f]
+- Updated dependencies [e55613d]
+- Updated dependencies [86d9b8f]
+- Updated dependencies [c552e43]
+- Updated dependencies [09962c8]
+- Updated dependencies [23e173d]
+- Updated dependencies [f4b7c13]
+- Updated dependencies [d161c43]
+- Updated dependencies [301ce2c]
+- Updated dependencies [c40fd66]
+- Updated dependencies [e0d2891]
+  - @foldedspacelabs/metistry-core@0.15.0
+
 ## 0.14.4
 
 ### Patch Changes

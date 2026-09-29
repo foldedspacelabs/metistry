@@ -1,5 +1,55 @@
 # @metistry-apps/macos
 
+## 0.15.0
+
+### Minor Changes
+
+- 25e440a: **Agents is in the Mac app.** The roster lists what the assistant delegates to and what connects in — never the assistant itself — with presence in two colours, a local agent's definition file (edited with `metistry agents define`, Esc keeping a draft), its model, routines and recent runs, and a connected agent's connection facts, permissions, escalation ceiling and revoke cascade. A widening is confirmed first, in the console's own words, with a button that says Widen; a record that changed while the editor was open sends nothing. Run Now with nothing scheduled says why and leads to Scheduled; New Agent asks which kind first. The definition editor, token rotation and New Agent are drawn only on the Mac that runs Metistry.
+- f66c930: **Artifacts is in the Mac app.** Work ▸ Artifacts lists every artifact with its project, kind, when it was updated and its open threads across every version. An artifact opens on its latest version: the version rail on the left, the text at reading width, and each comment thread in the right margin level with the line it is about — when two would collide the lower one moves down and keeps a leader to its line, and replies fold to a count. Switching version shows that version's threads. Compare draws the diff between two versions and, when a thread on the older one sits on a line the newer one changed, says the thread stays on its version and offers to open it there. An older version whose file was replaced on disk says so and offers the latest.
+- 0e2c3e5: **Knowledge is in the Mac app.** The Knowledge row opens screen 10: the newest fold in the assistant's own words, with its page names as links; Needs your eye — drafts, conflicts and suggestions — whose drafts and suggestions open the Needs You card itself, so answering one here answers it there; a conflict's diff with Keep Mine and Take the Other held ten seconds under Undo before anything is sent; Areas with their written line and why each is in front of you; one sources line that says *freshness unknown* rather than infer *current*; and, behind them, an area's pages, search (⌘F) and a page with its outgoing and incoming links.
+- f9b66cd: **Projects is in the Mac app.** Work ▸ Projects lists every project with its mode read first — a quiet outline for Autonomous, a heavier outline for a Review you chose, and the warning tint with *over budget* only for a Review the budget forced — then its agents, open and blocked work, and today's spend against its budget. A project shows why it is in its mode, the Review switch, what is in flight, the permissions every member inherits, each agent with only what it holds beyond the project, and its recent runs. Switching modes and adding an agent confirm first, naming exactly what changes and what the agent would inherit. `GET /api/projects` now serves each project's own read grant beside its rollup.
+- fd9d264: **Run detail is in the Mac app.** A run opened from Activity or a project's Recent Runs is one page drawn over the screen it came from: the working conversation from the session archive — the system prompt collapsed, the task, the replies, and each tool call where it happened with what it asked and what it got, a failed call open with its refusal — beside what the session fold proposed from it (waiting in Needs You), the run's model, time, tokens, cache and cost, a route record's decision, and the tool sequence with proportional durations. Past the archive's 30 days the page says the transcript expired and still shows the cost and every tool call. `ChatStore.session` now takes the route's `turn_id`.
+- 2e8ce0c: **Settings is its own window, with a sidebar.** The toolbar tabs become a grouped sidebar — Instance, Services, Compute, Updates; Access (Account, Connections, Secrets, Variables); Capture (Live Capture, Sessions); Keyboard, Advanced — at a fixed 840 × 600, and every pane scrolls, so the largest text makes a pane longer and never wider. Connections is renamed Account. Instance edits the assistant's name, mention and mark through `metistry identity set`, shows the namespace and ports, and lists linked instances with Link, Refresh and Remove. Services leads with Doctor — each problem with the fix doctor names — then the supervisor and one line per service with Restart, Stop and Log, then When it runs: Start at Login, Run in the Background, and Keep this Mac Awake with *Allow sleep on battery* and *Allow sleep when the lid is closed* under it. Turning the lid switch off opens a dialog with the administrator command to copy, how to undo it and the warning; the app never runs it. Updates offers Update Runtime and, on a release install, Roll Back. Every change is confirmed with the exact command before it runs. Text drawn with `metistryText` now grows with the text size on the Mac.
+- ddf086c: **Scheduled on the Mac (T6-6).** The Scheduled row now opens everything Metistry runs on its own: routines listed once per time they act, in day bands (*Throughout the day*, *Today*, *Tomorrow · Monday*, …, *Inactive*), with the week on one axis above them and *Show as Table*; and syncs with their connection, cadence and what they raise. A routine's detail edits its days and time with where each came from (*default* · *from your profile* · *yours*), shows its task and its per-run reads, opens its latest run to its steps, and resets to default. A sync's detail sets its cadence and raise toggles. Run Now / Sync Now (⌘R) and Pause (⌥⌘P) are the Item menu's. A New Routine's task is edited only on the instance's own Mac.
+- 8ab169f: **History in the app (T10-7).** Settings ▸ Instance gains *History*: the vault's sync policy in force, ahead and behind, the last commit, the last push and pull (a failed one with git's own line), any conflict holding the sync — and **Roll Back…**, a sheet that chooses the last commit, one commit or a day, asks in Needs You (`POST /api/vault/rollback`), and names what Approve would undo, commit by commit and file by file. A Knowledge page gains its history — who made each commit, when, what it did, each version on request under the name it had then — and **Restore**, which raises the Needs You request and writes nothing; the request is drawn on the page with the Needs You card itself, so answering it there answers it in Needs You. Restore and Roll Back are reach `local` (ruling 7): neither is drawn, or sent, unless `GET /api/whoami` says this client is the local owner token, and a `local_only` answer takes the control away.
+- 356a97f: **Work ▸ Board on the Mac, with the card detail and a task's room (T6-7).** Five columns — Done compact and folding to a strip in a narrow window — each card showing its column's one facet; headers counted from `board_projects`, never from the capped cards; the project filter and Has Thread. A column draws a drop target only where the task service would accept the move, each drop is one route, and a refused move goes back with the server's own sentence. Every card opens its detail (description editable by the owner, who holds it, what it waits on, its thread and Open Room); a task's room opens as a pane over the board with *Add to the Room*, the came-to-you band and Resolve. Fixes `TaskPatch.moving(to: "done")`, which sent `status: "done"` — not a task status — and now sends `closed`; Assigned → Backlog sends `owner: null`. The fixture recorder records `board_projects` for the kit.
+
+### Patch Changes
+
+- d161c43: **`POST /api/today/add` — Add to Today (ruled 2026-09-27, ruling 11; X-12).** A
+  route for the mirrored `task` request's primary answer (`sends: {door:
+  "today"}`): `{key, date?}` captures the named work item's task line onto the
+  owner's current day, through T4-24's own service
+  (`addIssueToToday`/`collectors/linear/today.ts`) unchanged — a Linear issue is
+  the one kind wired today. Idempotent by the issue: a second call for the same
+  key returns the first capture. `date`, left out, is the owner's current day
+  in `METISTRY_TZ`; given, it must equal that day exactly, or the request is
+  refused `400` naming the window — this door only ever adds to Today, never an
+  arbitrary date. Additive; `api_version` stays 1.
+  
+  `TodayStore` gains `addToToday(key:date:)`, plumbing only — a store method,
+  its `AddToTodayResult` reply and its fixture-driven test, over the session
+  transport, matching this route's recorded fixture. No UI: the Mac's *Add to
+  Today* control is a separate, later ticket.
+- 1ee6c6a: Ruling 19 (X-19): the offline capture queue survives a relaunch. A capture
+  still queued — offline, no answer yet — is written to
+  `stores/capture-store.swift`'s `JSONCaptureQueueStore`, one JSON file under
+  this app's own Application Support directory (never the instance's, and
+  never a `UserDefaults` key), and read back at launch through the same gate
+  and the same `Idempotency-Key`, so a replay dedupes on the console exactly as
+  it would have before the relaunch. A sent capture is never left in the file,
+  and an instance switch clears only the switched-from instance's entries —
+  every other instance's queued captures are untouched.
+- f65866a: **A routine's Activity subject is its display name, not its raw component id (ruled at the W2 checkpoint, ruling 25, X-21).** `activity_feed`'s `routine_run` subject was `r.component` verbatim — the runner's own slug (`plan-tomorrow`, `knowledge-fold`) — which every client's Title Case pass already left alone, since a hyphenated id reads as an identifier, not composed prose. The runner (`apps/console/src/runner.ts`, `close-day.ts`) now stamps `meta.display_name` on every `routine_run` row from the manifest it already has loaded — the same word Scheduled shows — and the query reads it: `plan-tomorrow` reads `Tomorrow's Plan`, `knowledge-fold` reads `Knowledge Fold`. `actor` is unchanged. A row written before this stamp existed falls back to `initcap(replace(component, '-', ' '))`, the same identifier-to-title transform the console's own `titleOf` gives a New Routine with no manifest.
+- f52ed6f: Ruling 26 (X-22): the Mac reads a question's questions from `request.questions`
+  — core's own `questionsOf` reading of the row — never re-derives them from
+  `payload` itself. A row the console still stores under v1's shape alone
+  (`payload.options`, no `payload.questions`) now reads exactly as core says:
+  one pick-one question with no *Something else…*, since those rows were
+  written under v1's rule that the options are the only answers. A console old
+  enough to send no `request` at all still falls back to `payload.title`/
+  `options` directly.
+
 ## 0.14.4
 
 No changes in this release.

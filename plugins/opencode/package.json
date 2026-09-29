@@ -1,7 +1,7 @@
 {
   "name": "@metistry-apps/plugin-opencode",
   "private": true,
-  "version": "0.14.4",
+  "version": "0.15.0",
   "description": "The `metistry` OpenCode plugin (plan refresh §4b W5): a `session.idle` hook that POSTs a session summary to a Metistry instance's /capture, with the same frontmatter and idempotency key as the Claude Code and Cursor plugins. Dependency-free; this package exists only to test it.",
   "license": "Apache-2.0",
   "type": "module",

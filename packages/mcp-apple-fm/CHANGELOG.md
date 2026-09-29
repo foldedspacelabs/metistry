@@ -1,5 +1,26 @@
 # @foldedspacelabs/metistry-mcp-apple-fm
 
+## 0.15.0
+
+### Patch Changes
+
+- Updated dependencies [4099fcb]
+- Updated dependencies [aee4e7f]
+- Updated dependencies [1985d5e]
+- Updated dependencies [e41aa66]
+- Updated dependencies [2e53e7f]
+- Updated dependencies [e55613d]
+- Updated dependencies [86d9b8f]
+- Updated dependencies [c552e43]
+- Updated dependencies [09962c8]
+- Updated dependencies [23e173d]
+- Updated dependencies [f4b7c13]
+- Updated dependencies [d161c43]
+- Updated dependencies [301ce2c]
+- Updated dependencies [c40fd66]
+- Updated dependencies [e0d2891]
+  - @foldedspacelabs/metistry-core@0.15.0
+
 ## 0.14.4
 
 ### Patch Changes

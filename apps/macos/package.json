@@ -1,7 +1,7 @@
 {
   "name": "@metistry-apps/macos",
   "private": true,
-  "version": "0.14.4",
+  "version": "0.15.0",
   "description": "The SwiftUI front end for the metistry CLI. A name and a version only: this package ships no JavaScript — it exists so changesets versions the Mac app in step with the product and gives it its own CHANGELOG line (docs/ops/releases.md). The app itself is built by ops/release/build-app.sh from apps/macos/Package.swift.",
   "license": "Apache-2.0"
 }

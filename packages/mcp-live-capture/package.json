@@ -1,6 +1,6 @@
 {
   "name": "@foldedspacelabs/metistry-mcp-live-capture",
-  "version": "0.14.4",
+  "version": "0.15.0",
   "description": "Metistry live-capture bridge: app audio through a Core Audio process tap scoped to the apps you choose, your microphone, and on-device transcription as it records — over the §4.3 wire contract (HTTP + bearer auth + check()). Recording is started only by the owner's control credential; no tool starts one. Ships a Swift helper; TCC-bound — runs as its own launchd service. Usable standalone.",
   "license": "Apache-2.0",
   "type": "module",

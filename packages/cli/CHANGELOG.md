@@ -1,5 +1,72 @@
 # @foldedspacelabs/metistry-cli
 
+## 0.15.0
+
+### Minor Changes
+
+- 5008ef6: **The live-capture recorder: the end of a session (T8-2b).** When a recording ends — Stop, the ten-hour stop, the disk, or a crash the helper finds when it next starts — the bridge sends its transcript to the console's `POST /capture` as one Markdown capture (`kind: transcript`), with `Idempotency-Key: live-capture:<session>`, using a capture owner token of its own (`METISTRY_LIVE_CAPTURE_INBOX_TOKEN`) that it never accepts and that must differ from its other two. A session stays owed on the Mac until the console answers with a row; a refusal or an outage leaves it there, `check` says why, and the next pass retries with the same key. The helper ships as a signed `lc-helper.app` ("Metistry Recorder") with its microphone and app-audio usage strings, built and signed the way the calendar helper is. `metistry up` installs it as its own launchd job, `com.foldedspacelabs.metistry.recorder`, and the bridge beside the other bridges — only once `METISTRY_LIVE_CAPTURE_URL` is set, under every shape — and `metistry doctor` reports both. The inbox drain classifies a transcript without a model, and a crashed recording raises one report in Needs You. The assistant now routes every turn that names a capture session onto the private tier — an on-machine provider — whatever was chosen, and refuses the turn when no private tier is assigned; it never falls back.
+- e41aa66: **Pull requests, reviewed in Metistry and posted as you (T2-13, R6).** The
+  GitHub sync now raises a *pull request* request in Needs You for each open PR
+  waiting on your review — with its head SHA, its diff and its open review
+  threads — and clears it when your review lands on GitHub, the PR goes back to
+  draft, or it closes; a new push is a new question. An agent asks for the same
+  review with `requests_create` kind `pull_request` and the PR in `refs`, and
+  the two asks are one card. You answer through three new doors —
+  `POST /api/github/pulls/:owner/:repo/:number/review` and
+  `…/threads/:id/{reply,resolve}` — which post to GitHub as you, through the one
+  client holding your `github_write` secret, and only after checking that the
+  PR's head is still the one you were shown (`409 stale` otherwise, and nothing
+  is posted). The sync's own token stays read-only by construction: it can send
+  nothing but GETs and GraphQL queries. `metistry secrets sync --to env` delivers
+  `github_write` to the console when `secrets.yaml` names it; store it with
+  `metistry secrets set github_write --hosts api.github.com`. A sync is now
+  handed its Needs You switches (`syncs.<name>.raise`) by the runner.
+- accfc70: T4-13: CalDAV with replies. A `caldav` calendar connection type, with iCloud
+  (`icloud-calendar`) and Fastmail (`fastmail-calendar`) as known services that
+  name their servers, signed in with an app password: read (the
+  `caldav-calendar` sync writes the owner's two weeks into `calendar_events`,
+  the owner's own answer as `self_status`), `rsvp` (only the owner's own
+  ATTENDEE line changes — its PARTSTAT — and the RFC 6638 server delivers the
+  REPLY) and `write_own` (events nobody else is in). Every change previews
+  first and is confirmed against the event's ETag with `If-Match`. A Google
+  address is refused: Google needs sign-in with Google. `openSyncHttp` sends
+  Basic sign-in — `Basic {{ secret.x }}`, encoded and filled at the egress
+  door — and `metistry connections add|set` take `--auth basic --username`.
+  The WebDAV XML subset is hand-rolled (no dependency; a DOCTYPE is refused).
+- 09962c8: **The private tier** (plan §2.15, T8-6). `assignments.tiers.private` is the tier a capture session's turns run on, and it may only name a provider with `locality: on_machine`: `metistry compute assign private` (and the console's `POST /api/compute/assign`, which runs the same verb) refuses an off-machine provider before anything is written, and the schema refuses it at load, naming `assignments.tiers.private.model`. Core gains `PRIVATE_TIER`, `resolvePrivateTier`, `privateTierIssue`, `turnTier` and `PrivateTierUnavailable`; `resolveAssignment(cfg, "private")` never falls back — not to `assignments.default` (which may be off the machine, or shadowed there) and not to `rules.yaml` — and throws `PrivateTierUnavailable` with the command that fixes it instead.
+
+### Patch Changes
+
+- 4099fcb: **Connections P2: Ask First and preview-then-confirm (T4-9).** `connection_call` joins the closed action kinds, held at `propose` at every level (`ACTION_KIND_CEILING`) — never `allow` — and raised only by the proxy, never by `propose_action` (`PROPOSABLE_ACTION_KINDS`). `connections_call` now follows the owner's per-tool policy: a Read at Allow runs at once; a Changes or Starts-an-agent tool at Allow answers a preview and a single-use `confirm_token` first (nothing dialled) and runs when the same arguments come back with it; Ask First raises an `action` of kind `connection_call` in Needs You. The confirm record is a digest pair on the preview's own `runs` row (no migration), redeemed by one atomic update, so a replayed, mismatched, foreign or expired token runs nothing. The console's Approve runs the payload the proxy previewed — never anything in the answer's body — through the pool with `approved: true`, and gives the token back only when the pool refused before dialling (C45). Hourly limits per caller per connection are counted from `runs` (`METISTRY_CONNECTION_CALLS_PER_HOUR`, `METISTRY_CONNECTION_ASKS_PER_HOUR`, `METISTRY_CONNECTION_CONFIRM_TTL_S`). `metistry agents autonomy` pads to the longest kind.
+- f40d905: **A restart no longer leaves the reconciler's writes uncommitted (W3 checkpoint D1).** The commit queue lived in memory for its 30 s flush window and SIGTERM took node's default — exit at once — so `metistry update`, which writes `.metistry/metistry.lock` and `.metistry/secrets.yaml` and then restarts the supervisor, left both dirty for good (the sweep never takes `.metistry/`). Now: on SIGTERM/SIGINT the reconciler stops its intervals and listener, commits the queue through the ordinary flush (at most 8 s, inside the supervisor's 10 s grace), then exits; the queue is journalled at `.git/metistry-pending-commits.json` on every change, and at start the reconciler commits whatever a killed run left there, with the principal, message and trailers it was queued with — only paths it queued itself, each re-checked against the bridge's path rules and `user`-only for a protected path, so nothing becomes committable that was not already. `metistry update` also asks for the commit itself (`POST /flush`, the new `commit` step) after its last write and before the launchd env step, so the lock and secrets are in history when the update ends.
+- 04f558b: **`init --shape` and `--keep-awake`'s contract, written down (X-20, ruling 23).** `metistry init`'s `--shape` now decides the deployment shape THIS
+  instance targets — `launchd` on macOS, `compose` elsewhere, when it is not given — rather than only shaping the printed `.env` lines while the actual
+  decision quietly came from the product's own `seed/deployment.yaml`. `--keep-awake`'s answer is now recorded against that same resolved shape, never the
+  seed's. Because the `compose` shape installs no supervisor to hold a keep-awake assertion, `metistry init --keep-awake` is now refused outright when the
+  resolved shape is `compose` — recording a setting that can never be honoured would be worse than the honest "not configured" an unanswered question
+  leaves. Docs updated in `docs/ops/cli.md` and `docs/ops/deployment-shapes.md`.
+- f65866a: **A routine's Activity subject is its display name, not its raw component id (ruled at the W2 checkpoint, ruling 25, X-21).** `activity_feed`'s `routine_run` subject was `r.component` verbatim — the runner's own slug (`plan-tomorrow`, `knowledge-fold`) — which every client's Title Case pass already left alone, since a hyphenated id reads as an identifier, not composed prose. The runner (`apps/console/src/runner.ts`, `close-day.ts`) now stamps `meta.display_name` on every `routine_run` row from the manifest it already has loaded — the same word Scheduled shows — and the query reads it: `plan-tomorrow` reads `Tomorrow's Plan`, `knowledge-fold` reads `Knowledge Fold`. `actor` is unchanged. A row written before this stamp existed falls back to `initcap(replace(component, '-', ' '))`, the same identifier-to-title transform the console's own `titleOf` gives a New Routine with no manifest.
+- Updated dependencies [4099fcb]
+- Updated dependencies [0c07861]
+- Updated dependencies [aee4e7f]
+- Updated dependencies [1985d5e]
+- Updated dependencies [e41aa66]
+- Updated dependencies [2e53e7f]
+- Updated dependencies [290cc20]
+- Updated dependencies [accfc70]
+- Updated dependencies [e55613d]
+- Updated dependencies [86d9b8f]
+- Updated dependencies [c552e43]
+- Updated dependencies [09962c8]
+- Updated dependencies [23e173d]
+- Updated dependencies [f4b7c13]
+- Updated dependencies [d161c43]
+- Updated dependencies [301ce2c]
+- Updated dependencies [c40fd66]
+- Updated dependencies [e0d2891]
+  - @foldedspacelabs/metistry-core@0.15.0
+  - @foldedspacelabs/metistry-connections@0.15.0
+
 ## 0.14.4
 
 ### Patch Changes

@@ -1,5 +1,43 @@
 # @metistry-apps/eval
 
+## 0.15.0
+
+### Minor Changes
+
+- 7dfa6c9: T9-3: `metistry-eval complexity`, the router's confirmatory eval
+  (docs/ops/dynamic-router.md §7.2). It scores the owner's labelled messages
+  through the planner exactly as the router's policy calls it — core's
+  `scoreRouteFeatures` on `assignments.intent`, twice for determinism — and
+  reports against the pre-registered bar (accuracy, deep-miss, the two traps,
+  determinism, unscored, warm latency against `policy.timeout_ms`), after
+  checking the fixture set itself against §7.2. `--fit` sweeps
+  `complexity.min_confidence`; the cost table (reported, never gated) prices
+  today's router, the policy and always-the-top at the shadow window's real mix
+  from `route-report --json` and `cache-report --json`. `--record`/`--replay`
+  run it offline. The shipped example file is empty (C11).
+
+### Patch Changes
+
+- Updated dependencies [4099fcb]
+- Updated dependencies [6dd922a]
+- Updated dependencies [aee4e7f]
+- Updated dependencies [1985d5e]
+- Updated dependencies [e41aa66]
+- Updated dependencies [2e53e7f]
+- Updated dependencies [e55613d]
+- Updated dependencies [86d9b8f]
+- Updated dependencies [c552e43]
+- Updated dependencies [09962c8]
+- Updated dependencies [23e173d]
+- Updated dependencies [f4b7c13]
+- Updated dependencies [f3d8db3]
+- Updated dependencies [d161c43]
+- Updated dependencies [301ce2c]
+- Updated dependencies [c40fd66]
+- Updated dependencies [e0d2891]
+  - @foldedspacelabs/metistry-core@0.15.0
+  - @foldedspacelabs/metistry-mcp-brain@0.15.0
+
 ## 0.14.4
 
 ### Patch Changes

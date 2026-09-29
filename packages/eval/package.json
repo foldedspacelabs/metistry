@@ -1,7 +1,7 @@
 {
   "name": "@metistry-apps/eval",
   "private": true,
-  "version": "0.14.4",
+  "version": "0.15.0",
   "description": "The bake-off harness (PoC-18): fixture format, runner, scorers and report. Private \u2014 never published.",
   "license": "Apache-2.0",
   "scripts": {

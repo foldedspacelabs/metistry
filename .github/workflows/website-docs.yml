@@ -1,0 +1,40 @@
+# Tell metistry.ai to rebuild its Docs when this repo's documentation changes
+# on main. The website (foldedspacelabs/metistry-website) renders its Docs from
+# this repo's markdown and rebuilds on `repository_dispatch: metistry-content`;
+# release.yml's `notify-website` job sends the same event for a release.
+#
+# It holds no permissions of its own: the dispatch authenticates with
+# WEBSITE_DISPATCH_TOKEN, a token scoped to the website repo alone
+# (docs/ops/releases.md, "Secrets"). Absent → a notice, never a failure.
+name: website-docs
+
+on:
+  push:
+    branches: [main]
+    paths: ["docs/**", "README.md"]
+  workflow_dispatch:
+
+permissions: {}
+
+# A burst of doc merges needs one rebuild, of the newest commit.
+concurrency:
+  group: website-docs
+  cancel-in-progress: true
+
+jobs:
+  notify-website:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: repository_dispatch to foldedspacelabs/metistry-website
+        env:
+          GH_TOKEN: ${{ secrets.WEBSITE_DISPATCH_TOKEN }}
+          REF: ${{ github.sha }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::notice::WEBSITE_DISPATCH_TOKEN is not set — metistry.ai was not told about $REF; its Docs update on its next build"
+            exit 0
+          fi
+          jq -n --arg ref "$REF" '{event_type: "metistry-content", client_payload: {reason: "docs", ref: $ref}}' \
+            | gh api --method POST repos/foldedspacelabs/metistry-website/dispatches --input -
+          echo "asked metistry.ai to rebuild its Docs for $REF"

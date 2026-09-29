@@ -1,5 +1,34 @@
 # @metistry-apps/assistant
 
+## 0.15.0
+
+### Minor Changes
+
+- 6dd922a: **Defer and report (T4-22, C59).** A `tools/call` may say nobody is there to ask: `_meta` `com.foldedspacelabs.metistry/interactive: false`, beside the turn handle. An Ask First `connections_call` from such a run is deferred rather than paused — it answers `{ skipped: true, reason: "waits_for_you", proposal_id }` at once, dials nothing, raises the same `connection_call` request in Needs You (provenance `deferred: true`), and its `runs` row carries `outcome: "deferred"` and `unattended: true`. Absent or malformed is interactive, T4-9's `pending` unchanged; the bit grants nothing — the call runs only on the owner's Approve. The assistant sends `false` for a routine's turn and a New Routine's crew run, `true` for a chat turn and a delegated crew, and after an unattended run reads its own deferred rows back into the run's row (`meta.skipped`, `meta.skipped_count`) and the foot of its output.
+- 5008ef6: **The live-capture recorder: the end of a session (T8-2b).** When a recording ends — Stop, the ten-hour stop, the disk, or a crash the helper finds when it next starts — the bridge sends its transcript to the console's `POST /capture` as one Markdown capture (`kind: transcript`), with `Idempotency-Key: live-capture:<session>`, using a capture owner token of its own (`METISTRY_LIVE_CAPTURE_INBOX_TOKEN`) that it never accepts and that must differ from its other two. A session stays owed on the Mac until the console answers with a row; a refusal or an outage leaves it there, `check` says why, and the next pass retries with the same key. The helper ships as a signed `lc-helper.app` ("Metistry Recorder") with its microphone and app-audio usage strings, built and signed the way the calendar helper is. `metistry up` installs it as its own launchd job, `com.foldedspacelabs.metistry.recorder`, and the bridge beside the other bridges — only once `METISTRY_LIVE_CAPTURE_URL` is set, under every shape — and `metistry doctor` reports both. The inbox drain classifies a transcript without a model, and a crashed recording raises one report in Needs You. The assistant now routes every turn that names a capture session onto the private tier — an on-machine provider — whatever was chosen, and refuses the turn when no private tier is assigned; it never falls back.
+- 2e53e7f: **New Routines run, and their per-run grants are read-only** (T3-8). `routineAssignmentSchema`'s `grants` loses `write:` — a `write:` key is refused by name with the owner's ruling, since a routine's reserved subfolder is an ownership fact, never a grant. New exports carry the contract the console's runner, the crew drain and the console's door share for a New Routine's run: `ROUTINE_RUN_META_KEY`, `RUN_BEARER_META_KEY`, `routineRunMeta`, `routineRunReads` (only agent-grantable prefixes survive a read-back), `grantArea`, `newRoutines`, `routineGrantsFor`, `GRANTS_READ_ONLY_REFUSAL`. `POST /api/scheduled/routines` is served in the client API table (reach `local`).
+
+### Patch Changes
+
+- ce96dda: **A budget refusal is now a `report`, not a `decision` (ruled at the W2 checkpoint, ruling 12, X-13).** A chat turn stopped by a budget used to raise a `decision` proposal with two options ("allow one more window" / "leave it stopped") — a choice this queue never actually offers, since `compute.yaml` is a protected path and the limit moves only by the owner's own hand (invariant 2). `apps/assistant/src/budgets.ts`'s `offerBudgetWindow` now raises a `report` instead, matching the shape the runner already uses for a routine paused by the same budget (`BUDGET_STOPPED_KIND`, `apps/console/src/runner.ts`): a title and excerpt naming what stopped and why, and one `act` — Raise, straight to Settings › Compute › Spending limits — rather than a false choice.
+- Updated dependencies [4099fcb]
+- Updated dependencies [aee4e7f]
+- Updated dependencies [1985d5e]
+- Updated dependencies [e41aa66]
+- Updated dependencies [2e53e7f]
+- Updated dependencies [e55613d]
+- Updated dependencies [86d9b8f]
+- Updated dependencies [c552e43]
+- Updated dependencies [09962c8]
+- Updated dependencies [23e173d]
+- Updated dependencies [f4b7c13]
+- Updated dependencies [d161c43]
+- Updated dependencies [301ce2c]
+- Updated dependencies [c40fd66]
+- Updated dependencies [e0d2891]
+  - @foldedspacelabs/metistry-core@0.15.0
+  - @foldedspacelabs/metistry-queries@0.15.0
+
 ## 0.14.4
 
 ### Patch Changes

@@ -1,5 +1,66 @@
 # @metistry-apps/routines
 
+## 0.15.0
+
+### Minor Changes
+
+- e2adbe2: The session fold (T3-10, C79): what the assistant learns about the owner arrives as a request. The new hourly `session-fold` routine reads the owner's chat turns not yet folded — quiet for an hour, before they expire — and enqueues ONE assistant turn (thread `session-fold`, tier `routine`) asking for preferences, lessons and profile facts in a ```learned block. The next pass reads the answer back and checks it model-free: a closed set of kinds, only turns the fold showed, a quote found verbatim in what the owner typed (a preference is written as the owner's own span), and profile values in `Me/profile.md`'s exact shape. What survives becomes at most one `improvement` request per file — `Me/Working Style.md` (under `## Preferences` / `## Lessons`) or `Me/profile.md` (one key set, provably) — with the whole-file before and after the console's existing `Me/` Approve path writes as `user`, refused stale. A later harvest supersedes a waiting request with both sets of lines; a declined line is never proposed again; a machine's turn is folded unread; a failed or abandoned fold turn loses nothing. The routine reads `Me/` and never writes it. `foldPass` and `foldSource` are exported for a Fold First.
+
+### Patch Changes
+
+- 86d9b8f: **Mirrors and secret failures (T4-23, R7).** One subject is one card with every
+  asker on it: a raise that lands on a waiting mirror raised by someone else is
+  appended once to `payload.also_asked` ({source_agent, trust, at, title?, event?,
+  context?}), so an agent's `requests_create` kind `pull_request` and the GitHub
+  sync's review request for the same PR are one card naming both, in either order
+  (the sync now joins an agent's waiting card too). A source change resolves its
+  mirror **with a receipt**: `resolveAtSource(db, source, receipt?)` writes
+  `payload.cleared = {what, where}` — *You approved it on GitHub*, *Merged on
+  GitHub*, *Completed in Linear*, *GITHUB_TOKEN is set again* — which rides on the
+  `409 already_decided` a late answer gets and in Activity's detail. A raise may
+  not carry `also_asked` or `cleared` itself. The GitHub sync's *An issue is
+  assigned to you* rule now raises: one `task` mirror per open issue assigned to
+  the token's login, once per assignment, cleared when it closes or is
+  reassigned. A missing secret's one request now names its **dependents** —
+  every scheduled component whose manifest requires it, due this tick or not —
+  as `payload.dependents`, a `used_by` line and the before list. The weekly
+  review no longer counts `resolved_at_source` rows as the owner's decisions; it
+  notes them apart.
+- f4b7c13: Ruling 8 (X-10): **a report is acknowledged, and an agent reads back its answer.**
+  A report that names no act is now answered **Acknowledge** beside Dismiss
+  (`decision: "acknowledge"`, stored `acknowledged` — core's `ACKNOWLEDGED`,
+  `ACKNOWLEDGE_ANSWER`); it carries no words and fires nothing, and
+  knowledge-fold reads an acknowledged report the way it reads an approved note.
+  A report that names its act (an event's Try Again, Raise) keeps it. And a
+  `requests_create` replay — the same `idempotency_key`, or the same title
+  within 24 hours — now returns `answer` beside the existing id: core's
+  `readBackOf` reading of where the owner's answer stands (`pending`,
+  `answered` with each question's answer, `acknowledged`, `revised` or
+  `declined` with the owner's words, `dismissed`, `expired`, `closed`).
+  mcp-brain's `readBack` keys the lookup and the read on the calling agent
+  alone, so another agent's request is never found. No tool was added.
+- 962911f: Ruling 15 (X-15): Run Now on Tomorrow's Plan no longer stays silent after the
+  23:00 run has already settled the date. Only the scheduled pass asks whether
+  an earlier non-close row already settled a target date — a close never asked,
+  and now Run Now doesn't either, so it always re-renders `Journal/Plan/<tomorrow>.md`
+  when the owner asks for it by hand, same as closing the day twice.
+- Updated dependencies [4099fcb]
+- Updated dependencies [aee4e7f]
+- Updated dependencies [1985d5e]
+- Updated dependencies [e41aa66]
+- Updated dependencies [2e53e7f]
+- Updated dependencies [e55613d]
+- Updated dependencies [86d9b8f]
+- Updated dependencies [c552e43]
+- Updated dependencies [09962c8]
+- Updated dependencies [23e173d]
+- Updated dependencies [f4b7c13]
+- Updated dependencies [d161c43]
+- Updated dependencies [301ce2c]
+- Updated dependencies [c40fd66]
+- Updated dependencies [e0d2891]
+  - @foldedspacelabs/metistry-core@0.15.0
+
 ## 0.14.4
 
 ### Patch Changes

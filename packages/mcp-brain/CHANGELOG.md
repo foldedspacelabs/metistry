@@ -1,5 +1,72 @@
 # @foldedspacelabs/metistry-mcp-brain
 
+## 0.15.0
+
+### Minor Changes
+
+- 4099fcb: **Connections P2: Ask First and preview-then-confirm (T4-9).** `connection_call` joins the closed action kinds, held at `propose` at every level (`ACTION_KIND_CEILING`) — never `allow` — and raised only by the proxy, never by `propose_action` (`PROPOSABLE_ACTION_KINDS`). `connections_call` now follows the owner's per-tool policy: a Read at Allow runs at once; a Changes or Starts-an-agent tool at Allow answers a preview and a single-use `confirm_token` first (nothing dialled) and runs when the same arguments come back with it; Ask First raises an `action` of kind `connection_call` in Needs You. The confirm record is a digest pair on the preview's own `runs` row (no migration), redeemed by one atomic update, so a replayed, mismatched, foreign or expired token runs nothing. The console's Approve runs the payload the proxy previewed — never anything in the answer's body — through the pool with `approved: true`, and gives the token back only when the pool refused before dialling (C45). Hourly limits per caller per connection are counted from `runs` (`METISTRY_CONNECTION_CALLS_PER_HOUR`, `METISTRY_CONNECTION_ASKS_PER_HOUR`, `METISTRY_CONNECTION_CONFIRM_TTL_S`). `metistry agents autonomy` pads to the longest kind.
+- 6dd922a: **Defer and report (T4-22, C59).** A `tools/call` may say nobody is there to ask: `_meta` `com.foldedspacelabs.metistry/interactive: false`, beside the turn handle. An Ask First `connections_call` from such a run is deferred rather than paused — it answers `{ skipped: true, reason: "waits_for_you", proposal_id }` at once, dials nothing, raises the same `connection_call` request in Needs You (provenance `deferred: true`), and its `runs` row carries `outcome: "deferred"` and `unattended: true`. Absent or malformed is interactive, T4-9's `pending` unchanged; the bit grants nothing — the call runs only on the owner's Approve. The assistant sends `false` for a routine's turn and a New Routine's crew run, `true` for a chat turn and a delegated crew, and after an unattended run reads its own deferred rows back into the run's row (`meta.skipped`, `meta.skipped_count`) and the foot of its output.
+- e41aa66: **Pull requests, reviewed in Metistry and posted as you (T2-13, R6).** The
+  GitHub sync now raises a *pull request* request in Needs You for each open PR
+  waiting on your review — with its head SHA, its diff and its open review
+  threads — and clears it when your review lands on GitHub, the PR goes back to
+  draft, or it closes; a new push is a new question. An agent asks for the same
+  review with `requests_create` kind `pull_request` and the PR in `refs`, and
+  the two asks are one card. You answer through three new doors —
+  `POST /api/github/pulls/:owner/:repo/:number/review` and
+  `…/threads/:id/{reply,resolve}` — which post to GitHub as you, through the one
+  client holding your `github_write` secret, and only after checking that the
+  PR's head is still the one you were shown (`409 stale` otherwise, and nothing
+  is posted). The sync's own token stays read-only by construction: it can send
+  nothing but GETs and GraphQL queries. `metistry secrets sync --to env` delivers
+  `github_write` to the console when `secrets.yaml` names it; store it with
+  `metistry secrets set github_write --hosts api.github.com`. A sync is now
+  handed its Needs You switches (`syncs.<name>.raise`) by the runner.
+- f4b7c13: Ruling 8 (X-10): **a report is acknowledged, and an agent reads back its answer.**
+  A report that names no act is now answered **Acknowledge** beside Dismiss
+  (`decision: "acknowledge"`, stored `acknowledged` — core's `ACKNOWLEDGED`,
+  `ACKNOWLEDGE_ANSWER`); it carries no words and fires nothing, and
+  knowledge-fold reads an acknowledged report the way it reads an approved note.
+  A report that names its act (an event's Try Again, Raise) keeps it. And a
+  `requests_create` replay — the same `idempotency_key`, or the same title
+  within 24 hours — now returns `answer` beside the existing id: core's
+  `readBackOf` reading of where the owner's answer stands (`pending`,
+  `answered` with each question's answer, `acknowledged`, `revised` or
+  `declined` with the owner's words, `dismissed`, `expired`, `closed`).
+  mcp-brain's `readBack` keys the lookup and the read on the calling agent
+  alone, so another agent's request is never found. No tool was added.
+
+### Patch Changes
+
+- f3d8db3: **Ruling 9 (X-11): the assistant may create files in `Journal/Brief/`,
+  `Journal/Standup/` and `Journal/Plan/` again.** `knowledge_write` previously
+  refused any write to a path in one of these three folders that had no file on
+  disk yet — a blanket create refusal shipped with T3-6. That refusal is
+  relaxed: a path with no file there yet now takes an ordinary create, stamped
+  and committed under the assistant's own name like any other new note. A file
+  the routine already wrote is untouched by this — it is still written under
+  the routine's own principal, and the assistant's one move on it is still to
+  fill its pending prose slots (`fillProseSlots`), nothing else.
+- Updated dependencies [4099fcb]
+- Updated dependencies [aee4e7f]
+- Updated dependencies [1985d5e]
+- Updated dependencies [e41aa66]
+- Updated dependencies [2e53e7f]
+- Updated dependencies [e55613d]
+- Updated dependencies [86d9b8f]
+- Updated dependencies [c552e43]
+- Updated dependencies [09962c8]
+- Updated dependencies [23e173d]
+- Updated dependencies [f4b7c13]
+- Updated dependencies [d161c43]
+- Updated dependencies [301ce2c]
+- Updated dependencies [c40fd66]
+- Updated dependencies [e0d2891]
+  - @foldedspacelabs/metistry-core@0.15.0
+  - @foldedspacelabs/metistry-artifacts@0.15.0
+  - @foldedspacelabs/metistry-tasks@0.15.0
+  - @foldedspacelabs/metistry-queries@0.15.0
+
 ## 0.14.4
 
 ### Patch Changes

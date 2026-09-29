@@ -1,5 +1,243 @@
 # @metistry-apps/console
 
+## 0.15.0
+
+### Minor Changes
+
+- 4099fcb: **Connections P2: Ask First and preview-then-confirm (T4-9).** `connection_call` joins the closed action kinds, held at `propose` at every level (`ACTION_KIND_CEILING`) — never `allow` — and raised only by the proxy, never by `propose_action` (`PROPOSABLE_ACTION_KINDS`). `connections_call` now follows the owner's per-tool policy: a Read at Allow runs at once; a Changes or Starts-an-agent tool at Allow answers a preview and a single-use `confirm_token` first (nothing dialled) and runs when the same arguments come back with it; Ask First raises an `action` of kind `connection_call` in Needs You. The confirm record is a digest pair on the preview's own `runs` row (no migration), redeemed by one atomic update, so a replayed, mismatched, foreign or expired token runs nothing. The console's Approve runs the payload the proxy previewed — never anything in the answer's body — through the pool with `approved: true`, and gives the token back only when the pool refused before dialling (C45). Hourly limits per caller per connection are counted from `runs` (`METISTRY_CONNECTION_CALLS_PER_HOUR`, `METISTRY_CONNECTION_ASKS_PER_HOUR`, `METISTRY_CONNECTION_CONFIRM_TTL_S`). `metistry agents autonomy` pads to the longest kind.
+- f9b66cd: **Projects is in the Mac app.** Work ▸ Projects lists every project with its mode read first — a quiet outline for Autonomous, a heavier outline for a Review you chose, and the warning tint with *over budget* only for a Review the budget forced — then its agents, open and blocked work, and today's spend against its budget. A project shows why it is in its mode, the Review switch, what is in flight, the permissions every member inherits, each agent with only what it holds beyond the project, and its recent runs. Switching modes and adding an agent confirm first, naming exactly what changes and what the agent would inherit. `GET /api/projects` now serves each project's own read grant beside its rollup.
+- 43567d8: The PWA works offline, one rule per verb (T7-4, screen 18 §4). **Reading**
+  shows the last view: the service worker keeps each successful `GET /api/…`
+  read and answers from it when the network does not, marked, so the band says
+  *Showing 9:04 AM* (`no-store` answers are never kept; a 401 forgets them; the
+  live-changes stream and sign-in pass through untouched). The shell itself is
+  installed with the worker, so the app opens with no network. **A capture and
+  a tick wait** in an outbox (`web/offline.js`, IndexedDB, memory where a
+  private window refuses it) with the `Idempotency-Key` minted before their
+  first attempt, and replay head first when the console answers again — a tick
+  through the Tick door's `409 stale`, which the row shows with the line as it
+  stands; *Don't Send* takes a waiting tick back. The outbox holds exactly those
+  two routes and refuses anything else before storing it, so **an answer, a
+  move, Run Now, a mode or a grant is never queued**: while the console cannot
+  be reached they are not offered (disabled, and each view's own door refuses a
+  swipe, a drag or a key), and Defer with them. **A message** is refused with
+  its reason; the draft stays, with Try Again. A band under the header says
+  *Can't reach Metistry*, when the view was read and what still works.
+- aee4e7f: **Send to Linear: a task becomes an issue (T4-25).** Two owner doors, one service each. `POST /api/trackers/:connection/issues {task_key, title?, team?, path?}` reads the task's line in its note and files one Linear issue through the connection the Linear sync reads — only while its provider declares `create` (the `linear` type now does), with the key filled at the egress door for `api.linear.app` only. It is idempotent by task key with no state of its own: `createLinearIssue` (connections) creates the issue under an id derived from the connection, the note and the key (`trackerIssueId`), looks that id up first, and looks it up again when a create fails — so a second press, a race or a lost answer answers the first issue (`200`, `created: false`). One fixed mutation (id, team, title); the sync's read door still refuses every mutation. `POST /api/vault-tasks/:task_key/link {ref, seen_text}` writes the ref on the line through core's new `setTaskRef` — one `linear:`/`gh:` ref at the end of the trailing run, proven by re-parse — as `user` with the read's hash, `409 stale` when the text changed or the line already carries a ref of that scheme, `Idempotency-Key` honoured. An opened connection (`SyncHttp`) now carries its provider's `capabilities`.
+- 1985d5e: **Move a meeting (T2-12).** The eventkit bridge gains `move_event` (`POST /events/move`): preview-then-confirm like create, the preview naming the event, the new time and everyone else in it; the confirm moves this occurrence only, bound to the move and to the event as previewed (`409` when its times or people changed). A confirm for an event with anyone else in it must also carry the owner-door token (`METISTRY_OWNER_DOOR_TOKEN_EVENTKIT`, header `Metistry-Owner-Door`), so the assistant's own confirm of such a move is refused at the bridge; an event on a read-only calendar never moves. The Swift helper gains `get_event` and `move_event` — rebuild it (`pnpm --filter @foldedspacelabs/metistry-mcp-eventkit build:helper`). The console serves `POST /api/calendar/events/:id/move` — owner only, presenting the owner-door token on a confirm and nothing else in the process holding it — in the shape MetistryKit's recorded fixture holds (`preview: {event_id, title, from, to, attendees}`, `moved`), plus a `warning` that is null for an event that is the owner's alone, and asks the calendar sync to run after a move. Core's client-API row flips to served.
+- e41aa66: **Pull requests, reviewed in Metistry and posted as you (T2-13, R6).** The
+  GitHub sync now raises a *pull request* request in Needs You for each open PR
+  waiting on your review — with its head SHA, its diff and its open review
+  threads — and clears it when your review lands on GitHub, the PR goes back to
+  draft, or it closes; a new push is a new question. An agent asks for the same
+  review with `requests_create` kind `pull_request` and the PR in `refs`, and
+  the two asks are one card. You answer through three new doors —
+  `POST /api/github/pulls/:owner/:repo/:number/review` and
+  `…/threads/:id/{reply,resolve}` — which post to GitHub as you, through the one
+  client holding your `github_write` secret, and only after checking that the
+  PR's head is still the one you were shown (`409 stale` otherwise, and nothing
+  is posted). The sync's own token stays read-only by construction: it can send
+  nothing but GETs and GraphQL queries. `metistry secrets sync --to env` delivers
+  `github_write` to the console when `secrets.yaml` names it; store it with
+  `metistry secrets set github_write --hosts api.github.com`. A sync is now
+  handed its Needs You switches (`syncs.<name>.raise`) by the runner.
+- 9ac52c0: T3-11: routine suggestions. A suggestion about a routine is an `improvement`
+  request carrying one `.metistry/scheduled.yaml` entry before and after — a
+  routine's schedule or pause, a sync's cadence, pause or raise toggles, never
+  what runs or a sync's connection. Nothing is written until the owner
+  Approves; Approve writes exactly the "after" through the Scheduled door as
+  `user`, refused `409 stale` when the entry changed since. Revise, Decline and
+  Later write nothing.
+- 2e53e7f: **New Routines run, and their per-run grants are read-only** (T3-8). `routineAssignmentSchema`'s `grants` loses `write:` — a `write:` key is refused by name with the owner's ruling, since a routine's reserved subfolder is an ownership fact, never a grant. New exports carry the contract the console's runner, the crew drain and the console's door share for a New Routine's run: `ROUTINE_RUN_META_KEY`, `RUN_BEARER_META_KEY`, `routineRunMeta`, `routineRunReads` (only agent-grantable prefixes survive a read-back), `grantArea`, `newRoutines`, `routineGrantsFor`, `GRANTS_READ_ONLY_REFUSAL`. `POST /api/scheduled/routines` is served in the client API table (reach `local`).
+- e55613d: **Spending limits, side by side — and a subscription has no dollar limit (T4-19, C130, C133).** `GET /api/compute` gains `limits`: this instance's limit, each provider's, and each project's daily budget, each beside what has been spent against it — what Settings › Compute › Spending limits and the Usage popover read. Core's new `spendingLimits` is the fold, over rows read through the `spend` and `projects_rollup` named queries (the same read `GET /api/projects` makes); a query that is not loaded is `null`, never a guessed zero. A provider billed by subscription is its plan's window — `kind: "window"`, the calls made in each window, no amount and no action — and `compute.yaml`'s schema now refuses `budgets.providers.<name>` on one, naming the field and the two ways out, so `metistry compute budget`, `POST /api/compute/budget` and `providers set --billing subscription` all refuse it identically. A file that already carries a dollar limit on a subscription provider no longer loads until that limit is removed (the hot reload keeps the last good configuration and records why).
+- 86d9b8f: **Mirrors and secret failures (T4-23, R7).** One subject is one card with every
+  asker on it: a raise that lands on a waiting mirror raised by someone else is
+  appended once to `payload.also_asked` ({source_agent, trust, at, title?, event?,
+  context?}), so an agent's `requests_create` kind `pull_request` and the GitHub
+  sync's review request for the same PR are one card naming both, in either order
+  (the sync now joins an agent's waiting card too). A source change resolves its
+  mirror **with a receipt**: `resolveAtSource(db, source, receipt?)` writes
+  `payload.cleared = {what, where}` — *You approved it on GitHub*, *Merged on
+  GitHub*, *Completed in Linear*, *GITHUB_TOKEN is set again* — which rides on the
+  `409 already_decided` a late answer gets and in Activity's detail. A raise may
+  not carry `also_asked` or `cleared` itself. The GitHub sync's *An issue is
+  assigned to you* rule now raises: one `task` mirror per open issue assigned to
+  the token's login, once per assignment, cleared when it closes or is
+  reassigned. A missing secret's one request now names its **dependents** —
+  every scheduled component whose manifest requires it, due this tick or not —
+  as `payload.dependents`, a `used_by` line and the before list. The weekly
+  review no longer counts `resolved_at_source` rows as the owner's decisions; it
+  notes them apart.
+- c552e43: **Linear: completion both ways (T4-26).** `POST /api/trackers/:connection/issues/:key/complete` (owner reach) closes an issue in Linear: `completeIssue` reads it and, only if it is still open, sends one fixed mutation moving it to its team's first `completed` state — through the connection's egress door, the key filled for `api.linear.app` only; an issue already completed or canceled is answered as it stands (`changed: false`). `linearQuery` still refuses every mutation, so no caller can send another change. The owner's setting is the connection's `complete_issue` tool mode, which the `linear` connection type now declares (capability `complete`): Ask First (the default) — the client offers *Close <KEY> in Linear* after a tick; Allow — the client makes the call itself; Never — the door refuses `403 tool_off` and sends nothing. The door closes the issue's `work` row and resolves its `task` request at source, and writes no vault file. The other way, `GET /api/today` gains `tracker_closed`: the day's open lines whose `linear:` issue the tracker closed, for *Done in Linear* with a one-click Tick (named query `tracker_closed`, route-only) — the sync never writes the owner's note. The client-API row is served.
+- f256a87: Push and enrolment in the PWA without `alert()` (T7-5, screen 18 §6). **A
+  notification says the card's type and title and nothing more, and never a
+  secret:** the service worker reads a payload's `type`, `title` and `url`
+  only, blanks anything key-shaped (core's `looksLikeKey` shapes) or a run of
+  six digits, clips each to one line, and follows a tap only to a page on its
+  own origin — in the window already open when there is one. Notifications
+  are **asked for in context**, at the top of Needs You the first time
+  something waits there, never on first launch, with the permission prompt
+  only from the owner's tap; Not Now is remembered on the device. On iPhone in
+  a Safari tab the ask becomes a three-step **install sheet** (Share → Add to
+  Home Screen → open it); Chrome and Edge's own install prompt is offered once
+  from More. **Enrolment is a wall**: a Device name field instead of
+  `prompt()`, and every refusal — a spent link, a cancelled passkey sheet, no
+  connection — is a line under the buttons. Settings' Turn On and Send a Test
+  say their outcome on the page.
+- f4b7c13: Ruling 8 (X-10): **a report is acknowledged, and an agent reads back its answer.**
+  A report that names no act is now answered **Acknowledge** beside Dismiss
+  (`decision: "acknowledge"`, stored `acknowledged` — core's `ACKNOWLEDGED`,
+  `ACKNOWLEDGE_ANSWER`); it carries no words and fires nothing, and
+  knowledge-fold reads an acknowledged report the way it reads an approved note.
+  A report that names its act (an event's Try Again, Raise) keeps it. And a
+  `requests_create` replay — the same `idempotency_key`, or the same title
+  within 24 hours — now returns `answer` beside the existing id: core's
+  `readBackOf` reading of where the owner's answer stands (`pending`,
+  `answered` with each question's answer, `acknowledged`, `revised` or
+  `declined` with the owner's words, `dismissed`, `expired`, `closed`).
+  mcp-brain's `readBack` keys the lookup and the read on the calling agent
+  alone, so another agent's request is never found. No tool was added.
+
+### Patch Changes
+
+- 290cc20: T4-12: an `ics` calendar connection type and its `ics-calendar` sync. A public
+  iCalendar feed is read through the egress door — pinned to the feed's own
+  origin, no redirect followed, https only, capped at 10 MB — and its events
+  (RRULE, RDATE, EXDATE and RECURRENCE-ID overrides; IANA and VTIMEZONE zones,
+  DST-correct; all-day dates in the owner's `METISTRY_TZ`) are written into
+  `calendar_events` beside the eventkit sync's, so Today reads one table for
+  every source. The invite body is never read. A feed address carrying a token
+  is refused at the connection file as a key; private feeds wait on a ruling.
+  `openSyncHttp` accepts a provider with no origin of its own (the pin is then
+  the connection's own URL), and collectors receive the owner's zone as
+  `ownerTimeZone`.
+- accfc70: T4-13: CalDAV with replies. A `caldav` calendar connection type, with iCloud
+  (`icloud-calendar`) and Fastmail (`fastmail-calendar`) as known services that
+  name their servers, signed in with an app password: read (the
+  `caldav-calendar` sync writes the owner's two weeks into `calendar_events`,
+  the owner's own answer as `self_status`), `rsvp` (only the owner's own
+  ATTENDEE line changes — its PARTSTAT — and the RFC 6638 server delivers the
+  REPLY) and `write_own` (events nobody else is in). Every change previews
+  first and is confirmed against the event's ETag with `If-Match`. A Google
+  address is refused: Google needs sign-in with Google. `openSyncHttp` sends
+  Basic sign-in — `Basic {{ secret.x }}`, encoded and filled at the egress
+  door — and `metistry connections add|set` take `--auth basic --username`.
+  The WebDAV XML subset is hand-rolled (no dependency; a DOCTYPE is refused).
+- 356a97f: **Work ▸ Board on the Mac, with the card detail and a task's room (T6-7).** Five columns — Done compact and folding to a strip in a narrow window — each card showing its column's one facet; headers counted from `board_projects`, never from the capped cards; the project filter and Has Thread. A column draws a drop target only where the task service would accept the move, each drop is one route, and a refused move goes back with the server's own sentence. Every card opens its detail (description editable by the owner, who holds it, what it waits on, its thread and Open Room); a task's room opens as a pane over the board with *Add to the Room*, the came-to-you band and Resolve. Fixes `TaskPatch.moving(to: "done")`, which sent `status: "done"` — not a task status — and now sends `closed`; Assigned → Backlog sends `owner: null`. The fixture recorder records `board_projects` for the kit.
+- 7a78df7: **The console's audit rows follow an injected clock.** With `cfg.now` set (the fixture recorder, tests), `audit()` stamps the row's `ts`, `started_at` and `finished_at` with that instant instead of Postgres's `now()`. `day_close` counts the Defer door's rows by the day of `runs.ts`, so the recorder's pinned 2026-09-28 lost its deferral at real UTC midnight and `post-api-today-close` drifted (`moved` came back `{}`) on every PR. No change for an install: without `cfg.now` the wall clock is still the clock.
+- d161c43: **`POST /api/today/add` — Add to Today (ruled 2026-09-27, ruling 11; X-12).** A
+  route for the mirrored `task` request's primary answer (`sends: {door:
+  "today"}`): `{key, date?}` captures the named work item's task line onto the
+  owner's current day, through T4-24's own service
+  (`addIssueToToday`/`collectors/linear/today.ts`) unchanged — a Linear issue is
+  the one kind wired today. Idempotent by the issue: a second call for the same
+  key returns the first capture. `date`, left out, is the owner's current day
+  in `METISTRY_TZ`; given, it must equal that day exactly, or the request is
+  refused `400` naming the window — this door only ever adds to Today, never an
+  arbitrary date. Additive; `api_version` stays 1.
+  
+  `TodayStore` gains `addToToday(key:date:)`, plumbing only — a store method,
+  its `AddToTodayResult` reply and its fixture-driven test, over the session
+  transport, matching this route's recorded fixture. No UI: the Mac's *Add to
+  Today* control is a separate, later ticket.
+- 301ce2c: **The `where:` grammar reaches Slipping and Owed (ruling 14, X-14).**
+  `compileTaskFilter` gains three things, each compiling to fixed bind params
+  of `vault_tasks_query` and never to SQL text:
+  
+  - **A carry count.** `carried` followed by an operator is a whole number of
+    days carried past the day owed (`carried >= 3`, `carried <= 2`,
+    `carried = 4`) → `carried_eq` / `carried_min` / `carried_max`; `carried`
+    alone stays the flag. A bound that would land on "not filtering" is
+    refused (`carried = 0` points at `not carried`; `carried >= 0` is every
+    line). `order: carried` sorts by it.
+  - **`names_person`**, a flag: the line names a person who is not the owner
+    (`assigned` set and not `me`) — the rows `assigned_to_me` does not hold.
+    Rows carry it in `row_flags`.
+  - **`not <flag>`**, for every flag, as one `not_<flag>` boolean each: a
+    negation chooses a closed param and never carries a value. `not` before a
+    field, `not not`, a bare `not`, an unknown word after it, and a flag with
+    its own negation are refused.
+  
+  `TASK_FILTER_FIELDS` gains `carried`, `TASK_FILTER_FLAGS` gains
+  `names_person`, `TASK_FILTER_PARAM_SPEC` gains the thirteen params, and a
+  parsed flag clause now carries `negated`. The console names All's saved
+  views as `SAVED_TASK_VIEWS`: Slipping is
+  `carried >= 3 or overdue or names_person`, Owed is
+  `names_person and not waiting`, Waiting on Others is `waiting`.
+- a35a40d: **A snooze ending is now an event (ruled at the W2 checkpoint, ruling 17, X-17).** `later` writes `snoozed_until` into the future, and that write already notified every subscriber like any other proposals change; but the moment the snooze itself *ends* is nothing but the clock passing `snoozed_until`, and no row is written for it — so the trigger `apps/console/src/events.ts` listens on had nothing to say, and the Mac only ever noticed on its own five-minute poll. The event feed now re-asks the pending, un-snoozed count on its own every `SNOOZE_POLL_MS` (30 s) and publishes `needs_you.changed` only when that count has actually moved since the last time either the poll or a trigger-driven batch said so — one event when a snooze expires, none before it and none duplicated behind a batch that already said the same count.
+- 31e8040: **`GET /api/messages` carries `turn_id` (ruled 2026-09-27, X-18).** An
+  outbound row now names the `turn_id` of the `runs` row that produced it —
+  joined exactly on `runs.meta.message_id` to the reply's own `in_reply_to`,
+  the same key `run_detail` already joins tool calls on — or `null` where its
+  turn left none. Additive; `api_version` stays 1. This lets a client hand an
+  older reply straight to `GET /api/turns/:turn_id/progress` for its tool
+  strip, without needing it to fall inside a recent-activity window first.
+  
+  Migration `0037_runs_turn_message_id_idx.sql` adds the partial expression
+  index the join needed — `runs ((meta ->> 'message_id')) WHERE kind = 'turn'`
+  — so this route's join is an index scan against `runs`, not a sequential
+  one over the whole (unbounded) ledger.
+- f65866a: **A routine's Activity subject is its display name, not its raw component id (ruled at the W2 checkpoint, ruling 25, X-21).** `activity_feed`'s `routine_run` subject was `r.component` verbatim — the runner's own slug (`plan-tomorrow`, `knowledge-fold`) — which every client's Title Case pass already left alone, since a hyphenated id reads as an identifier, not composed prose. The runner (`apps/console/src/runner.ts`, `close-day.ts`) now stamps `meta.display_name` on every `routine_run` row from the manifest it already has loaded — the same word Scheduled shows — and the query reads it: `plan-tomorrow` reads `Tomorrow's Plan`, `knowledge-fold` reads `Knowledge Fold`. `actor` is unchanged. A row written before this stamp existed falls back to `initcap(replace(component, '-', ' '))`, the same identifier-to-title transform the console's own `titleOf` gives a New Routine with no manifest.
+- f27e4a5: **`activity_feed` and `turn_progress` surface `connection_call` rows (Ruling 28, X-23).** A `connections_call` proxied through the connection pool used to vanish from both: `activity_feed` never listed `connection_call` among the `runs` kinds it admits, and `turn_progress` filtered to `kind = 'tool'` only, so the working strip went quiet while a turn waited on a connection. Both now include it — in `activity_feed`'s existing `run` group (nothing new to widen a chip for), and joined into `turn_progress` by the same exact `meta.turn_id` key as any other tool row. The subject and detail `activity_feed` renders for a `connection_call` name only the connection and the upstream tool (`meta.connection` / `meta.connection_tool`, the same fields `connection_calls` already reads) — never `meta.args` or a secret value. No route, column or wire shape changed.
+- bbba118: **An agent's connection grant persists (X-8, ruling 5).** `validateGrants` and
+  `coerceGrants` used to silently drop a `connections` field on an agent's
+  grant — the connection names a credential is lent through `/mcp`'s lazy pair
+  (`connections_list`, `connections_call`, T4-8b) — so a connection the owner
+  lent through `PUT /api/agents/:id/grants` never actually reached the
+  credential's principal: `authenticateAgent` handed mcp-brain a grant with no
+  `connections` key no matter what was written. `connections` is now a third
+  grant axis, exactly like `queries`: shape-validated on write, kept on read,
+  carried untouched across an access-request approval (`widenedGrants`) and
+  across the assistant's own start-time grant merge (`mergeGrantOverrides`), and
+  dropped only by a write that omits it (a `PUT` replaces the whole grant). A
+  crew still needs both its manifest's `uses: [connections]` and this grant —
+  neither alone reaches anything (core's `mayToolset` + `mayConnection`,
+  unchanged).
+- e0d2891: **Restore is the Mac's (X-9, ruling 7).** `POST /api/knowledge/restore`'s reach
+  narrows from `owner` to `local`: only the local owner token — the Metistry Mac
+  app, or the `metistry` command line, on the Mac the console runs on — can raise
+  a restore request now. A passkey session, even from the Mac's own PWA, is
+  refused `403 local_only` before the route runs; the capture token and every
+  agent bearer meet their usual uniform `forbidden` earlier still. §2.3 already
+  drew "—" for restore on the phone; this closes the gap §2.1's table left open.
+  Nothing about what the door does — one Needs You request, never a write —
+  changes.
+- Updated dependencies [4099fcb]
+- Updated dependencies [6dd922a]
+- Updated dependencies [0c07861]
+- Updated dependencies [5008ef6]
+- Updated dependencies [f40d905]
+- Updated dependencies [aee4e7f]
+- Updated dependencies [e2adbe2]
+- Updated dependencies [1985d5e]
+- Updated dependencies [e41aa66]
+- Updated dependencies [2e53e7f]
+- Updated dependencies [290cc20]
+- Updated dependencies [accfc70]
+- Updated dependencies [e55613d]
+- Updated dependencies [86d9b8f]
+- Updated dependencies [c552e43]
+- Updated dependencies [09962c8]
+- Updated dependencies [23e173d]
+- Updated dependencies [f4b7c13]
+- Updated dependencies [f3d8db3]
+- Updated dependencies [d161c43]
+- Updated dependencies [301ce2c]
+- Updated dependencies [962911f]
+- Updated dependencies [c40fd66]
+- Updated dependencies [04f558b]
+- Updated dependencies [f65866a]
+- Updated dependencies [e0d2891]
+  - @foldedspacelabs/metistry-core@0.15.0
+  - @foldedspacelabs/metistry-mcp-brain@0.15.0
+  - @foldedspacelabs/metistry-cli@0.15.0
+  - @foldedspacelabs/metistry-connections@0.15.0
+  - @metistry-apps/collectors@0.15.0
+  - @metistry-apps/routines@0.15.0
+  - @foldedspacelabs/metistry-artifacts@0.15.0
+  - @foldedspacelabs/metistry-tasks@0.15.0
+  - @foldedspacelabs/metistry-queries@0.15.0
+
 ## 0.14.4
 
 ### Patch Changes

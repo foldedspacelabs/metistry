@@ -1,5 +1,95 @@
 # @metistry-apps/collectors
 
+## 0.15.0
+
+### Minor Changes
+
+- 5008ef6: **The live-capture recorder: the end of a session (T8-2b).** When a recording ends — Stop, the ten-hour stop, the disk, or a crash the helper finds when it next starts — the bridge sends its transcript to the console's `POST /capture` as one Markdown capture (`kind: transcript`), with `Idempotency-Key: live-capture:<session>`, using a capture owner token of its own (`METISTRY_LIVE_CAPTURE_INBOX_TOKEN`) that it never accepts and that must differ from its other two. A session stays owed on the Mac until the console answers with a row; a refusal or an outage leaves it there, `check` says why, and the next pass retries with the same key. The helper ships as a signed `lc-helper.app` ("Metistry Recorder") with its microphone and app-audio usage strings, built and signed the way the calendar helper is. `metistry up` installs it as its own launchd job, `com.foldedspacelabs.metistry.recorder`, and the bridge beside the other bridges — only once `METISTRY_LIVE_CAPTURE_URL` is set, under every shape — and `metistry doctor` reports both. The inbox drain classifies a transcript without a model, and a crashed recording raises one report in Needs You. The assistant now routes every turn that names a capture session onto the private tier — an on-machine provider — whatever was chosen, and refuses the turn when no private tier is assigned; it never falls back.
+- e41aa66: **Pull requests, reviewed in Metistry and posted as you (T2-13, R6).** The
+  GitHub sync now raises a *pull request* request in Needs You for each open PR
+  waiting on your review — with its head SHA, its diff and its open review
+  threads — and clears it when your review lands on GitHub, the PR goes back to
+  draft, or it closes; a new push is a new question. An agent asks for the same
+  review with `requests_create` kind `pull_request` and the PR in `refs`, and
+  the two asks are one card. You answer through three new doors —
+  `POST /api/github/pulls/:owner/:repo/:number/review` and
+  `…/threads/:id/{reply,resolve}` — which post to GitHub as you, through the one
+  client holding your `github_write` secret, and only after checking that the
+  PR's head is still the one you were shown (`409 stale` otherwise, and nothing
+  is posted). The sync's own token stays read-only by construction: it can send
+  nothing but GETs and GraphQL queries. `metistry secrets sync --to env` delivers
+  `github_write` to the console when `secrets.yaml` names it; store it with
+  `metistry secrets set github_write --hosts api.github.com`. A sync is now
+  handed its Needs You switches (`syncs.<name>.raise`) by the runner.
+- 290cc20: T4-12: an `ics` calendar connection type and its `ics-calendar` sync. A public
+  iCalendar feed is read through the egress door — pinned to the feed's own
+  origin, no redirect followed, https only, capped at 10 MB — and its events
+  (RRULE, RDATE, EXDATE and RECURRENCE-ID overrides; IANA and VTIMEZONE zones,
+  DST-correct; all-day dates in the owner's `METISTRY_TZ`) are written into
+  `calendar_events` beside the eventkit sync's, so Today reads one table for
+  every source. The invite body is never read. A feed address carrying a token
+  is refused at the connection file as a key; private feeds wait on a ruling.
+  `openSyncHttp` accepts a provider with no origin of its own (the pin is then
+  the connection's own URL), and collectors receive the owner's zone as
+  `ownerTimeZone`.
+- accfc70: T4-13: CalDAV with replies. A `caldav` calendar connection type, with iCloud
+  (`icloud-calendar`) and Fastmail (`fastmail-calendar`) as known services that
+  name their servers, signed in with an app password: read (the
+  `caldav-calendar` sync writes the owner's two weeks into `calendar_events`,
+  the owner's own answer as `self_status`), `rsvp` (only the owner's own
+  ATTENDEE line changes — its PARTSTAT — and the RFC 6638 server delivers the
+  REPLY) and `write_own` (events nobody else is in). Every change previews
+  first and is confirmed against the event's ETag with `If-Match`. A Google
+  address is refused: Google needs sign-in with Google. `openSyncHttp` sends
+  Basic sign-in — `Basic {{ secret.x }}`, encoded and filled at the egress
+  door — and `metistry connections add|set` take `--auth basic --username`.
+  The WebDAV XML subset is hand-rolled (no dependency; a DOCTYPE is refused).
+- 86d9b8f: **Mirrors and secret failures (T4-23, R7).** One subject is one card with every
+  asker on it: a raise that lands on a waiting mirror raised by someone else is
+  appended once to `payload.also_asked` ({source_agent, trust, at, title?, event?,
+  context?}), so an agent's `requests_create` kind `pull_request` and the GitHub
+  sync's review request for the same PR are one card naming both, in either order
+  (the sync now joins an agent's waiting card too). A source change resolves its
+  mirror **with a receipt**: `resolveAtSource(db, source, receipt?)` writes
+  `payload.cleared = {what, where}` — *You approved it on GitHub*, *Merged on
+  GitHub*, *Completed in Linear*, *GITHUB_TOKEN is set again* — which rides on the
+  `409 already_decided` a late answer gets and in Activity's detail. A raise may
+  not carry `also_asked` or `cleared` itself. The GitHub sync's *An issue is
+  assigned to you* rule now raises: one `task` mirror per open issue assigned to
+  the token's login, once per assignment, cleared when it closes or is
+  reassigned. A missing secret's one request now names its **dependents** —
+  every scheduled component whose manifest requires it, due this tick or not —
+  as `payload.dependents`, a `used_by` line and the before list. The weekly
+  review no longer counts `resolved_at_source` rows as the owner's decisions; it
+  notes them apart.
+- c552e43: **Linear: completion both ways (T4-26).** `POST /api/trackers/:connection/issues/:key/complete` (owner reach) closes an issue in Linear: `completeIssue` reads it and, only if it is still open, sends one fixed mutation moving it to its team's first `completed` state — through the connection's egress door, the key filled for `api.linear.app` only; an issue already completed or canceled is answered as it stands (`changed: false`). `linearQuery` still refuses every mutation, so no caller can send another change. The owner's setting is the connection's `complete_issue` tool mode, which the `linear` connection type now declares (capability `complete`): Ask First (the default) — the client offers *Close <KEY> in Linear* after a tick; Allow — the client makes the call itself; Never — the door refuses `403 tool_off` and sends nothing. The door closes the issue's `work` row and resolves its `task` request at source, and writes no vault file. The other way, `GET /api/today` gains `tracker_closed`: the day's open lines whose `linear:` issue the tracker closed, for *Done in Linear* with a one-click Tick (named query `tracker_closed`, route-only) — the sync never writes the owner's note. The client-API row is served.
+
+### Patch Changes
+
+- Updated dependencies [4099fcb]
+- Updated dependencies [6dd922a]
+- Updated dependencies [0c07861]
+- Updated dependencies [aee4e7f]
+- Updated dependencies [1985d5e]
+- Updated dependencies [e41aa66]
+- Updated dependencies [2e53e7f]
+- Updated dependencies [290cc20]
+- Updated dependencies [accfc70]
+- Updated dependencies [e55613d]
+- Updated dependencies [86d9b8f]
+- Updated dependencies [c552e43]
+- Updated dependencies [09962c8]
+- Updated dependencies [23e173d]
+- Updated dependencies [f4b7c13]
+- Updated dependencies [f3d8db3]
+- Updated dependencies [d161c43]
+- Updated dependencies [301ce2c]
+- Updated dependencies [c40fd66]
+- Updated dependencies [e0d2891]
+  - @foldedspacelabs/metistry-core@0.15.0
+  - @foldedspacelabs/metistry-mcp-brain@0.15.0
+  - @foldedspacelabs/metistry-connections@0.15.0
+
 ## 0.14.4
 
 ### Patch Changes

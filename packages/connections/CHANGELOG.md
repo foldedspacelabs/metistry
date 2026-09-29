@@ -1,5 +1,55 @@
 # @foldedspacelabs/metistry-connections
 
+## 0.15.0
+
+### Minor Changes
+
+- aee4e7f: **Send to Linear: a task becomes an issue (T4-25).** Two owner doors, one service each. `POST /api/trackers/:connection/issues {task_key, title?, team?, path?}` reads the task's line in its note and files one Linear issue through the connection the Linear sync reads — only while its provider declares `create` (the `linear` type now does), with the key filled at the egress door for `api.linear.app` only. It is idempotent by task key with no state of its own: `createLinearIssue` (connections) creates the issue under an id derived from the connection, the note and the key (`trackerIssueId`), looks that id up first, and looks it up again when a create fails — so a second press, a race or a lost answer answers the first issue (`200`, `created: false`). One fixed mutation (id, team, title); the sync's read door still refuses every mutation. `POST /api/vault-tasks/:task_key/link {ref, seen_text}` writes the ref on the line through core's new `setTaskRef` — one `linear:`/`gh:` ref at the end of the trailing run, proven by re-parse — as `user` with the read's hash, `409 stale` when the text changed or the line already carries a ref of that scheme, `Idempotency-Key` honoured. An opened connection (`SyncHttp`) now carries its provider's `capabilities`.
+- 290cc20: T4-12: an `ics` calendar connection type and its `ics-calendar` sync. A public
+  iCalendar feed is read through the egress door — pinned to the feed's own
+  origin, no redirect followed, https only, capped at 10 MB — and its events
+  (RRULE, RDATE, EXDATE and RECURRENCE-ID overrides; IANA and VTIMEZONE zones,
+  DST-correct; all-day dates in the owner's `METISTRY_TZ`) are written into
+  `calendar_events` beside the eventkit sync's, so Today reads one table for
+  every source. The invite body is never read. A feed address carrying a token
+  is refused at the connection file as a key; private feeds wait on a ruling.
+  `openSyncHttp` accepts a provider with no origin of its own (the pin is then
+  the connection's own URL), and collectors receive the owner's zone as
+  `ownerTimeZone`.
+- accfc70: T4-13: CalDAV with replies. A `caldav` calendar connection type, with iCloud
+  (`icloud-calendar`) and Fastmail (`fastmail-calendar`) as known services that
+  name their servers, signed in with an app password: read (the
+  `caldav-calendar` sync writes the owner's two weeks into `calendar_events`,
+  the owner's own answer as `self_status`), `rsvp` (only the owner's own
+  ATTENDEE line changes — its PARTSTAT — and the RFC 6638 server delivers the
+  REPLY) and `write_own` (events nobody else is in). Every change previews
+  first and is confirmed against the event's ETag with `If-Match`. A Google
+  address is refused: Google needs sign-in with Google. `openSyncHttp` sends
+  Basic sign-in — `Basic {{ secret.x }}`, encoded and filled at the egress
+  door — and `metistry connections add|set` take `--auth basic --username`.
+  The WebDAV XML subset is hand-rolled (no dependency; a DOCTYPE is refused).
+- c552e43: **Linear: completion both ways (T4-26).** `POST /api/trackers/:connection/issues/:key/complete` (owner reach) closes an issue in Linear: `completeIssue` reads it and, only if it is still open, sends one fixed mutation moving it to its team's first `completed` state — through the connection's egress door, the key filled for `api.linear.app` only; an issue already completed or canceled is answered as it stands (`changed: false`). `linearQuery` still refuses every mutation, so no caller can send another change. The owner's setting is the connection's `complete_issue` tool mode, which the `linear` connection type now declares (capability `complete`): Ask First (the default) — the client offers *Close <KEY> in Linear* after a tick; Allow — the client makes the call itself; Never — the door refuses `403 tool_off` and sends nothing. The door closes the issue's `work` row and resolves its `task` request at source, and writes no vault file. The other way, `GET /api/today` gains `tracker_closed`: the day's open lines whose `linear:` issue the tracker closed, for *Done in Linear* with a one-click Tick (named query `tracker_closed`, route-only) — the sync never writes the owner's note. The client-API row is served.
+
+### Patch Changes
+
+- 0c07861: **Builds against the dependency majors from #386** (`@types/node` 26, vitest 5, chokidar 5, `@simplewebauthn/*` 14). The only source change is a typing one in `connections`: an errno `code` carried onto a stdio child's failure is copied through a local, because `@types/node` 26 no longer lets an optional `code` be assigned to another under `exactOptionalPropertyTypes`. Behaviour is unchanged.
+- Updated dependencies [4099fcb]
+- Updated dependencies [aee4e7f]
+- Updated dependencies [1985d5e]
+- Updated dependencies [e41aa66]
+- Updated dependencies [2e53e7f]
+- Updated dependencies [e55613d]
+- Updated dependencies [86d9b8f]
+- Updated dependencies [c552e43]
+- Updated dependencies [09962c8]
+- Updated dependencies [23e173d]
+- Updated dependencies [f4b7c13]
+- Updated dependencies [d161c43]
+- Updated dependencies [301ce2c]
+- Updated dependencies [c40fd66]
+- Updated dependencies [e0d2891]
+  - @foldedspacelabs/metistry-core@0.15.0
+
 ## 0.14.4
 
 ### Patch Changes

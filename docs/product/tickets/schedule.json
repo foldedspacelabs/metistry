@@ -749,7 +749,7 @@
         "T2-11"
       ],
       "file": "docs/product/tickets/t2/t2-12.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T2-13": {
       "title": "Pull requests",
@@ -764,7 +764,7 @@
         "T4-1"
       ],
       "file": "docs/product/tickets/t2/t2-13.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T2-14": {
       "title": "Stale requests",
@@ -950,7 +950,7 @@
         "T3-3"
       ],
       "file": "docs/product/tickets/t3/t3-8.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T3-9": {
       "title": "Writing the session archive",
@@ -978,7 +978,7 @@
         "T3-9"
       ],
       "file": "docs/product/tickets/t3/t3-10.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T3-11": {
       "title": "Routine suggestions",
@@ -992,7 +992,7 @@
         "T3-3"
       ],
       "file": "docs/product/tickets/t3/t3-11.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T3-12": {
       "title": "Three strikes and a Stop limit",
@@ -1149,7 +1149,7 @@
         "T4-8b"
       ],
       "file": "docs/product/tickets/t4/t4-9.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T4-10": {
       "title": "Connections P3: HTTP, OAuth, generated tools",
@@ -1192,7 +1192,7 @@
         "T4-8a"
       ],
       "file": "docs/product/tickets/t4/t4-12.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T4-13": {
       "title": "Calendar: CalDAV with replies",
@@ -1206,7 +1206,7 @@
         "T4-12"
       ],
       "file": "docs/product/tickets/t4/t4-13.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T4-14": {
       "title": "Google Calendar through Metistry's client",
@@ -1279,7 +1279,7 @@
         "T4-18"
       ],
       "file": "docs/product/tickets/t4/t4-19.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T4-20": {
       "title": "Keep awake and the lid",
@@ -1317,7 +1317,7 @@
         "T4-9"
       ],
       "file": "docs/product/tickets/t4/t4-22.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T4-23": {
       "title": "Mirrors and secret failures",
@@ -1332,7 +1332,7 @@
         "T4-1"
       ],
       "file": "docs/product/tickets/t4/t4-23.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T4-24": {
       "title": "Linear: the connection and its sync",
@@ -1363,7 +1363,7 @@
         "T2-5"
       ],
       "file": "docs/product/tickets/t4/t4-25.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T4-26": {
       "title": "Linear: completion both ways",
@@ -1378,7 +1378,7 @@
         "T2-4"
       ],
       "file": "docs/product/tickets/t4/t4-26.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T5-1": {
       "title": "The stores",
@@ -1571,7 +1571,7 @@
         "T1-5"
       ],
       "file": "docs/product/tickets/t6/t6-4.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T6-5": {
       "title": "Agents",
@@ -1585,7 +1585,7 @@
         "T4-6"
       ],
       "file": "docs/product/tickets/t6/t6-5.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T6-6": {
       "title": "Scheduled",
@@ -1599,7 +1599,7 @@
         "T3-3"
       ],
       "file": "docs/product/tickets/t6/t6-6.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T6-7": {
       "title": "Board and card detail",
@@ -1614,7 +1614,7 @@
         "T1-2"
       ],
       "file": "docs/product/tickets/t6/t6-7.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T6-8": {
       "title": "Projects",
@@ -1628,7 +1628,7 @@
         "T4-7"
       ],
       "file": "docs/product/tickets/t6/t6-8.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T6-9": {
       "title": "Artifacts",
@@ -1642,7 +1642,7 @@
         "T5-3"
       ],
       "file": "docs/product/tickets/t6/t6-9.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T6-10": {
       "title": "Run detail",
@@ -1656,7 +1656,7 @@
         "T2-17"
       ],
       "file": "docs/product/tickets/t6/t6-10.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T6-11": {
       "title": "The Settings window",
@@ -1673,7 +1673,7 @@
         "T2-16"
       ],
       "file": "docs/product/tickets/t6/t6-11.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T6-12": {
       "title": "Compute",
@@ -1828,7 +1828,7 @@
         "T2-4"
       ],
       "file": "docs/product/tickets/t7/t7-4.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T7-5": {
       "title": "Push and enrolment",
@@ -1840,7 +1840,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/t7/t7-5.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T7-6": {
       "title": "Settings",
@@ -1895,7 +1895,7 @@
         "T8-1"
       ],
       "file": "docs/product/tickets/t8/t8-2a.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T8-2b": {
       "title": "The recorder: the session",
@@ -1909,7 +1909,7 @@
         "T8-2a"
       ],
       "file": "docs/product/tickets/t8/t8-2b.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T8-3": {
       "title": "Screen and window",
@@ -1967,7 +1967,7 @@
         "T4-18"
       ],
       "file": "docs/product/tickets/t8/t8-6.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T8-7": {
       "title": "Meeting groups and anchors",
@@ -2024,7 +2024,7 @@
         "T9-2"
       ],
       "file": "docs/product/tickets/t9/t9-3.md",
-      "status": "todo"
+      "status": "merged"
     },
     "T9-4": {
       "title": "Wire the composer",
@@ -2139,7 +2139,7 @@
         "T5-3"
       ],
       "file": "docs/product/tickets/t10/t10-7.md",
-      "status": "todo"
+      "status": "merged"
     },
     "X-2": {
       "title": "`hasDb` needs the scratch name",
@@ -2204,7 +2204,7 @@
         "T10-4"
       ],
       "file": "docs/product/tickets/x/x-6.md",
-      "status": "todo"
+      "status": "merged"
     },
     "X-7": {
       "title": "A provider key's grantee, and compute through the egress guard",
@@ -2219,7 +2219,7 @@
         "T4-2"
       ],
       "file": "docs/product/tickets/x/x-7.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-8": {
       "title": "An agent's connection grants persist",
@@ -2233,7 +2233,7 @@
         "T4-8b"
       ],
       "file": "docs/product/tickets/x/x-8.md",
-      "status": "todo"
+      "status": "merged"
     },
     "X-9": {
       "title": "Restore is the Mac's",
@@ -2247,7 +2247,7 @@
         "T10-5"
       ],
       "file": "docs/product/tickets/x/x-9.md",
-      "status": "todo"
+      "status": "merged"
     },
     "X-10": {
       "title": "A report is acknowledged; an agent reads its answer",
@@ -2261,7 +2261,7 @@
         "T2-3"
       ],
       "file": "docs/product/tickets/x/x-10.md",
-      "status": "todo"
+      "status": "merged"
     },
     "X-11": {
       "title": "The routine folders take a create again",
@@ -2275,7 +2275,7 @@
         "T3-6"
       ],
       "file": "docs/product/tickets/x/x-11.md",
-      "status": "todo"
+      "status": "merged"
     },
     "X-12": {
       "title": "Add to Today",
@@ -2290,7 +2290,7 @@
         "T4-24"
       ],
       "file": "docs/product/tickets/x/x-12.md",
-      "status": "todo"
+      "status": "merged"
     },
     "X-13": {
       "title": "A budget refusal is a report",
@@ -2304,7 +2304,7 @@
         "T3-12"
       ],
       "file": "docs/product/tickets/x/x-13.md",
-      "status": "todo"
+      "status": "merged"
     },
     "X-14": {
       "title": "The `where:` grammar reaches Slipping and Owed",
@@ -2319,7 +2319,7 @@
         "T6-1a"
       ],
       "file": "docs/product/tickets/x/x-14.md",
-      "status": "todo"
+      "status": "merged"
     },
     "X-15": {
       "title": "Run Now after 23:00 re-renders the plan",
@@ -2333,7 +2333,7 @@
         "T3-7"
       ],
       "file": "docs/product/tickets/x/x-15.md",
-      "status": "todo"
+      "status": "merged"
     },
     "X-16": {
       "title": "`{{ calendar }}` sanitises its titles",
@@ -2347,7 +2347,7 @@
         "T3-6"
       ],
       "file": "docs/product/tickets/x/x-16.md",
-      "status": "todo"
+      "status": "merged"
     },
     "X-17": {
       "title": "A snooze that expires is an event",
@@ -2361,7 +2361,7 @@
         "T5-7"
       ],
       "file": "docs/product/tickets/x/x-17.md",
-      "status": "todo"
+      "status": "merged"
     },
     "X-18": {
       "title": "`GET /api/messages` carries `turn_id`",
@@ -2375,7 +2375,7 @@
         "T6-2"
       ],
       "file": "docs/product/tickets/x/x-18.md",
-      "status": "todo"
+      "status": "merged"
     },
     "X-19": {
       "title": "The offline capture queue is persisted",
@@ -2389,7 +2389,7 @@
         "T5-5"
       ],
       "file": "docs/product/tickets/x/x-19.md",
-      "status": "todo"
+      "status": "merged"
     },
     "X-20": {
       "title": "`init --shape` and `--keep-awake`",
@@ -2401,7 +2401,7 @@
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/x/x-20.md",
-      "status": "todo"
+      "status": "merged"
     },
     "X-21": {
       "title": "A routine's display name on Activity",
@@ -2416,7 +2416,7 @@
         "T6-3"
       ],
       "file": "docs/product/tickets/x/x-21.md",
-      "status": "todo"
+      "status": "merged"
     },
     "X-22": {
       "title": "The Mac reads `request.questions`",
@@ -2430,7 +2430,7 @@
         "T5-4b"
       ],
       "file": "docs/product/tickets/x/x-22.md",
-      "status": "todo"
+      "status": "merged"
     },
     "X-23": {
       "title": "`connection_call` on Activity and turn progress",
@@ -2446,6 +2446,693 @@
         "T4-8b"
       ],
       "file": "docs/product/tickets/x/x-23.md",
+      "status": "merged"
+    },
+    "X-24": {
+      "title": "Plan-tomorrow's test runs on its own clock",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-15"
+      ],
+      "file": "docs/product/tickets/x/x-24.md",
+      "status": "todo"
+    },
+    "X-25": {
+      "title": "DB-backed suites survive file parallelism",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-25.md",
+      "status": "todo"
+    },
+    "X-26": {
+      "title": "Linear's sync reads in a stable order",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "T4-26"
+      ],
+      "file": "docs/product/tickets/x/x-26.md",
+      "status": "todo"
+    },
+    "X-27": {
+      "title": "The router-policy test has no wall-clock bound",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-27.md",
+      "status": "todo"
+    },
+    "X-28": {
+      "title": "The chat viewport test is deterministic",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-28.md",
+      "status": "todo"
+    },
+    "X-29": {
+      "title": "Main's Mac fixtures match the recorder",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-29.md",
+      "status": "todo"
+    },
+    "X-30": {
+      "title": "The recorder checks the values a contract depends on",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "X-29"
+      ],
+      "file": "docs/product/tickets/x/x-30.md",
+      "status": "todo"
+    },
+    "X-31": {
+      "title": "The recorder's seeds are pinned to its clock",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-31.md",
+      "status": "todo"
+    },
+    "X-32": {
+      "title": "A push carries Needs You only, and no text",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-32.md",
+      "status": "todo"
+    },
+    "X-33": {
+      "title": "The PWA's last browser dialogs",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-33.md",
+      "status": "todo"
+    },
+    "X-34": {
+      "title": "Ask First raises one card per subject",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T4-9"
+      ],
+      "file": "docs/product/tickets/x/x-34.md",
+      "status": "todo"
+    },
+    "X-35": {
+      "title": "Approve re-checks the agent",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "T4-9"
+      ],
+      "file": "docs/product/tickets/x/x-35.md",
+      "status": "todo"
+    },
+    "X-36": {
+      "title": "Run detail shows connection calls",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "T6-10",
+        "X-23"
+      ],
+      "file": "docs/product/tickets/x/x-36.md",
+      "status": "todo"
+    },
+    "X-37": {
+      "title": "A crew keeps its caller's interactivity",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "T3-8"
+      ],
+      "file": "docs/product/tickets/x/x-37.md",
+      "status": "todo"
+    },
+    "X-38": {
+      "title": "The owner sees an actor's connections in its scope",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-38.md",
+      "status": "todo"
+    },
+    "X-39": {
+      "title": "A revoked connection grant refuses the next call",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-8"
+      ],
+      "file": "docs/product/tickets/x/x-39.md",
+      "status": "todo"
+    },
+    "X-40": {
+      "title": "A failed connection call in turn progress",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-23"
+      ],
+      "file": "docs/product/tickets/x/x-40.md",
+      "status": "todo"
+    },
+    "X-41": {
+      "title": "An owner-door secret refuses a connection or agent grant",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "T2-13"
+      ],
+      "file": "docs/product/tickets/x/x-41.md",
+      "status": "todo"
+    },
+    "X-42": {
+      "title": "An owner door is a grantee kind",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "X-41"
+      ],
+      "file": "docs/product/tickets/x/x-42.md",
+      "status": "todo"
+    },
+    "X-43": {
+      "title": "`private` is a reserved tier name",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "T8-6"
+      ],
+      "file": "docs/product/tickets/x/x-43.md",
+      "status": "todo"
+    },
+    "X-44": {
+      "title": "Every compute call goes through the egress guard",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "X-7"
+      ],
+      "file": "docs/product/tickets/x/x-44.md",
+      "status": "todo"
+    },
+    "X-45": {
+      "title": "A secret too short to redact safely is refused when stored",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-7"
+      ],
+      "file": "docs/product/tickets/x/x-45.md",
+      "status": "todo"
+    },
+    "X-46": {
+      "title": "A provider refusal is one request per secret",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "T4-23"
+      ],
+      "file": "docs/product/tickets/x/x-46.md",
+      "status": "todo"
+    },
+    "X-47": {
+      "title": "`secrets sync` restarts only what changed",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-47.md",
+      "status": "todo"
+    },
+    "X-48": {
+      "title": "Doctor's sandbox row reports what runs",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-48.md",
+      "status": "todo"
+    },
+    "X-49": {
+      "title": "The brain's eager surface has headroom",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-49.md",
+      "status": "todo"
+    },
+    "X-50": {
+      "title": "Session-purge is quiet while the Session Fold is paused",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "T3-10"
+      ],
+      "file": "docs/product/tickets/x/x-50.md",
+      "status": "todo"
+    },
+    "X-51": {
+      "title": "A routine's dated file the assistant created",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-11"
+      ],
+      "file": "docs/product/tickets/x/x-51.md",
+      "status": "todo"
+    },
+    "X-52": {
+      "title": "The weekly review counts only the owner's decisions",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-52.md",
+      "status": "todo"
+    },
+    "X-53": {
+      "title": "The meeting note reads `METISTRY_TZ` only",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-53.md",
+      "status": "todo"
+    },
+    "X-54": {
+      "title": "Calendar location and name chips are sanitised",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-16"
+      ],
+      "file": "docs/product/tickets/x/x-54.md",
+      "status": "todo"
+    },
+    "X-55": {
+      "title": "Moving a meeting someone else organised",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "T2-12"
+      ],
+      "file": "docs/product/tickets/x/x-55.md",
+      "status": "todo"
+    },
+    "X-56": {
+      "title": "An iCloud CalDAV account needs no second step",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T4-13"
+      ],
+      "file": "docs/product/tickets/x/x-56.md",
+      "status": "todo"
+    },
+    "X-57": {
+      "title": "CalDAV's own-event write has a door",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T4-13"
+      ],
+      "file": "docs/product/tickets/x/x-57.md",
+      "status": "todo"
+    },
+    "X-58": {
+      "title": "Add to Today for GitHub tasks",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-12",
+        "T4-23"
+      ],
+      "file": "docs/product/tickets/x/x-58.md",
+      "status": "todo"
+    },
+    "X-59": {
+      "title": "Linear's Close offer and Done chip in the clients",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T4-26"
+      ],
+      "file": "docs/product/tickets/x/x-59.md",
+      "status": "todo"
+    },
+    "X-60": {
+      "title": "The PWA does not count the assistant as a project member",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-60.md",
+      "status": "todo"
+    },
+    "X-61": {
+      "title": "Add to Today on the Mac",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-12"
+      ],
+      "file": "docs/product/tickets/x/x-61.md",
+      "status": "todo"
+    },
+    "X-62": {
+      "title": "The Mac names a connection call",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-23"
+      ],
+      "file": "docs/product/tickets/x/x-62.md",
+      "status": "todo"
+    },
+    "X-63": {
+      "title": "SavedTaskView reads Slipping and Owed",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-14"
+      ],
+      "file": "docs/product/tickets/x/x-63.md",
+      "status": "todo"
+    },
+    "X-64": {
+      "title": "The Mac's receipt knows \"acknowledged\"",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-10"
+      ],
+      "file": "docs/product/tickets/x/x-64.md",
+      "status": "todo"
+    },
+    "X-65": {
+      "title": "A route for collector health",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "T6-4"
+      ],
+      "file": "docs/product/tickets/x/x-65.md",
+      "status": "todo"
+    },
+    "X-66": {
+      "title": "Run detail carries its route and a routine run's session",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T6-10"
+      ],
+      "file": "docs/product/tickets/x/x-66.md",
+      "status": "todo"
+    },
+    "X-67": {
+      "title": "The board row carries why it is blocked, and one task has a route",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T6-7"
+      ],
+      "file": "docs/product/tickets/x/x-67.md",
+      "status": "todo"
+    },
+    "X-68": {
+      "title": "The artifacts list says what each one is",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T6-9"
+      ],
+      "file": "docs/product/tickets/x/x-68.md",
+      "status": "todo"
+    },
+    "X-69": {
+      "title": "Settings can name a release and count doctor's checks",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T6-11"
+      ],
+      "file": "docs/product/tickets/x/x-69.md",
+      "status": "todo"
+    },
+    "X-70": {
+      "title": "A session's fold items are served",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "T3-10",
+        "T6-10"
+      ],
+      "file": "docs/product/tickets/x/x-70.md",
+      "status": "todo"
+    },
+    "X-71": {
+      "title": "`init` resolves the shape before it asks about keep-awake",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-20"
+      ],
+      "file": "docs/product/tickets/x/x-71.md",
+      "status": "todo"
+    },
+    "X-72": {
+      "title": "The recorder's sockets live under the instance",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "T8-2b"
+      ],
+      "file": "docs/product/tickets/x/x-72.md",
+      "status": "todo"
+    },
+    "X-73": {
+      "title": "Transcripts land where the ruling says",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "T8-2b"
+      ],
+      "file": "docs/product/tickets/x/x-73.md",
+      "status": "todo"
+    },
+    "X-74": {
+      "title": "CI's Swift-helper filter is anchored",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-74.md",
       "status": "todo"
     },
     "X-1": {
@@ -2464,7 +3151,8 @@
   "totals": {
     "tickets": 162,
     "agent_days": 479.5,
-    "waves": 6
+    "waves": 6,
+    "candidates": 51
   },
   "critical_path": {
     "days": 35,
@@ -2478,5 +3166,62 @@
       "T4-10",
       "T4-11"
     ]
+  },
+  "candidates": {
+    "tickets": [
+      "X-24",
+      "X-25",
+      "X-26",
+      "X-27",
+      "X-28",
+      "X-29",
+      "X-30",
+      "X-31",
+      "X-32",
+      "X-33",
+      "X-34",
+      "X-35",
+      "X-36",
+      "X-37",
+      "X-38",
+      "X-39",
+      "X-40",
+      "X-41",
+      "X-42",
+      "X-43",
+      "X-44",
+      "X-45",
+      "X-46",
+      "X-47",
+      "X-48",
+      "X-49",
+      "X-50",
+      "X-51",
+      "X-52",
+      "X-53",
+      "X-54",
+      "X-55",
+      "X-56",
+      "X-57",
+      "X-58",
+      "X-59",
+      "X-60",
+      "X-61",
+      "X-62",
+      "X-63",
+      "X-64",
+      "X-65",
+      "X-66",
+      "X-67",
+      "X-68",
+      "X-69",
+      "X-70",
+      "X-71",
+      "X-72",
+      "X-73",
+      "X-74"
+    ],
+    "count": 51,
+    "agent_days": 75
   }
 }

@@ -149,6 +149,196 @@ agent, permission and Metistry items; everything else (GitHub pull request
 reviews, calendar invites, …) moves to Inbox, with Needs You as a sidebar on
 Inbox. To be designed after the UX build completes; no ticket (plan §5).
 
+## W3 — the third build wave
+
+46 tickets, PRs #403–#449 (#417 is CI, not a ticket). 45 merged; **X-7 (#437)
+is held open for the owner** (question 1 below). Follow-ups with no ticket
+became **X-24…X-74**, specified in `design-build-plan.md` §3.3 (*Follow-ups
+found in W3*) and listed as **W4 candidates** — no wave until the owner assigns
+one.
+
+### Calls the coordinator made in flight
+
+Each is the coordinator's call; **the owner to confirm** or reverse.
+
+| Date | Where | The call |
+| --- | --- | --- |
+| 2026-09-28 | X-6 (#404) | `Artifacts/` stays readable on `/vault/log` for a non-owner bearer: the console's artifacts service reads it with one. Only `.metistry/` subjects are narrowed to the owner. |
+| 2026-09-28 | T4-12 (#408) | Public ICS feeds only, parsed by a hand-rolled RFC 5545 reader (no dependency). Private feeds wait on question 8. |
+| 2026-09-28 | T2-12 (#407) | Moving a meeting with attendees goes through an owner-door token, `METISTRY_OWNER_DOOR_TOKEN_EVENTKIT` (new in `compose` and `.env.example`); until it is minted such a move answers `503`, naming the command. |
+| 2026-09-28 | T3-8 (#413) | An agent routine's actor must be a crew. |
+| 2026-09-28 | T6-6 (#410) | A paused routine is shown in words only — the paused glyph collided with Ask First's. |
+| 2026-09-28 | T7-4 (#414) | The offline outbox replays captures and Tick only; Defer is not offered offline (`client-api.md` says so). Question 22 asks whether it should be. |
+| 2026-09-28 | T4-19 (#423) | The instance spending limit counts and stops subscription calls too (`costOf` ignores billing); `projects_rollup` defaults to 50 rows; an existing `compute.yaml` with a `$` limit on a subscription provider now fails loudly at startup — **an upgrade hazard the 0.15.0 release notes must name**. |
+| 2026-09-28 | T4-9 (#415) | A proxied `connection_call` is capped at `propose`, with Ask First the default at every autonomy level (the research doc said deny). To stay under the brain's 4,600-token ratchet the eager surface was trimmed to 4,596. |
+| 2026-09-28 | X-7 (#437) | The builder stopped under U10 (the engine's sandbox cannot read `secrets.yaml`, so installs would lose compute). The coordinator widened the ticket: a sandbox parameter or an env-delivered grant, `providers add` writes the grant, `update` backfills it, `score-choice.ts` included. The review then held it for the owner (question 1). |
+| 2026-09-28 | X-18 (#419) | Migration 0037: a partial index on `runs (meta->>'message_id') WHERE kind = 'turn'`, for the `turn_id` join. |
+| 2026-09-28 | X-19 (#424) | The Mac's `capture-queue.json` is written `0600`. |
+| 2026-09-28 | T8-6 (#426), T8-2b (#448) | Capture-session turns resolve their tier through `turnTier()`; T8-2b wires the call site T8-6 left open. The private tier has no fallback — it refuses (`PrivateTierUnavailable`). |
+| 2026-09-28 | T4-13 (#430) | `--auth basic` is accepted only for providers whose manifest says `auth: basic`, checked in the CLI and in core. |
+| 2026-09-28 | X-20 (#434) | `deployment.yaml` is always stamped at `init`, and `--keep-awake` is refused for the compose shape, which installs no supervisor. |
+| 2026-09-28 | X-10 (#433) | A report that names its act keeps the act; only a report with none is served Acknowledge, stored as `acknowledged`. The proposals fixture took that one shape change alone, so the Mac's relative-time tests kept their timestamps. |
+| 2026-09-28 | X-13 (#428) | `budget_refused` joins `client-api.md`'s report-event catalogue. |
+| 2026-09-28 | T6-7 (#420) | Dropping a card on Done sends `closed`. |
+| 2026-09-28 | T9-3 (#432) | No tuning mode: the complexity wording is frozen by fingerprint (§7.2), and `router-policy.ts`'s comment now says so. Recorded as built: the `d08: true` marker, below-threshold answers `moderate`, the threshold precedence and the rescued-turn formula. |
+| 2026-09-28 | X-21 (#442) | The runner stamps `meta.display_name` from the manifest and `activity_feed` coalesces it, rather than title-casing the component id. |
+| 2026-09-28 | X-12 (#443) | `TodayStore.addToToday` ships as a store method with no control; the control is X-61. |
+| 2026-09-28 | T4-25, T4-26 (#444, #445) | One Linear transport (`post` / `linearQuery`) serves create and complete; the manifest's capabilities are read, create and complete. |
+| 2026-09-28 | T4-26 (#445) | For the owner-only tracker doors, Ask First and Allow are the same at the server — the difference is the client's confirmation (§2.3). |
+| 2026-09-28 | T6-11 (#449) | Settings ▸ Connections is renamed **Account** (sign-in and the instance repository); the real Connections pane is T6-13a. No console route was added. |
+| 2026-09-28 | #417 | CI runs the TCC helpers' Swift tests, path-gated with the macOS job. |
+| 2026-09-28 | W3 | Research PRs #400–#402 stay open for the owner; the coordinator merges tickets only. |
+
+### Open for the owner at the W3 checkpoint
+
+Questions, not decisions: each says what is built meanwhile. Where an answer
+unblocks a W4 candidate, the ticket names this number.
+
+**1. X-7 (#437) — the compose shape and a provider key's grantee.** X-7 makes
+every compute call go through the egress guard with a `provider:<name>` grant.
+Under compose, `docker-compose.yml` mounts no instance directory (D5), so the
+engine has no `secrets.yaml` to read a grant from and **every `{{ secret.x }}`
+provider call is refused** — including the seed's only cloud template,
+`openrouter`. The PR refuses with the fix named (`env:` credentials) and
+`compute.md` states the exception. Which option?
+   1. **Mount `.metistry/secrets.yaml` read-only** into the assistant and console
+      containers — it holds policy, never a value; mirrors launchd's
+      `CONFIG_SECRETS`.
+   2. **Deliver the grant through env at `up`** — no mount, but a revoke takes
+      effect only at the next `up`.
+   3. **Accept the break** with a migration note: compose installs move their
+      providers to `env:` credentials (host-bound, no grant).
+
+   Also yours: approve the launchd sandbox profile gaining `CONFIG_SECRETS`
+   (read access to `secrets.yaml`); accept core's API break for importers
+   (`ResolvedOnMachineCall.bearer` → `fetchFn`, `makeChatClient.apiKey` → `env`;
+   a minor bump); and confirm the coordinator's widened scope (above). Held
+   open, unmerged; X-44 and X-45 follow it.
+
+#### Agents, crews and routines
+
+2. **T3-8 (#413):** a routine's task is not run through `checkBrief`, so
+   owner-authored text reaches a crew with a widened read grant unscanned. Scan
+   it, or treat the owner's text as trusted? And is "the actor must be a crew"
+   right?
+3. **T3-10 (#412):** assistant- and routine-tier chat turns pass no
+   `data_policy` check; the Knowledge Fold has the same gap. Intended?
+4. **X-10 (#433):** the read-back returns the owner's Revise/Decline words to
+   the agent that asked (the decision-block convention). Confirm?
+5. **T3-11 (#422):** nothing raises a routine suggestion yet. A deterministic
+   routine or a brain tool? The shipped scope is schedule / paused / every /
+   raise only.
+6. **X-11 (#425):** the assistant may now create today's `Journal/Brief|Standup|Plan`
+   file before the routine runs, and the routine then skips the day as
+   `user_owned`. Accept the skip (and rename the outcome), or should the
+   routine fill its slots in that file? → X-51.
+
+#### Connections, secrets and calendar
+
+7. **T4-9 (#415):** `connection_call` is capped at `propose` with Ask First the
+   default at every autonomy level, where the research doc said deny. Confirm?
+   F-5's table stores the kind while §2.6 says `action` — which wins?
+8. **T4-12 (#408):** a private ICS feed carries its secret **in the URL**, which
+   T4-2 refuses (`secret_in_url`). Add a secret-as-URL door to T4-2, or leave
+   private feeds to EventKit, CalDAV and Google? Built meanwhile: public feeds
+   only.
+9. **T2-13 (#421):** `github_write` has no grantee-kind check — an owner door is
+   neither `connection:` nor `agent:`. Add an owner-door grantee kind? → X-42
+   (X-41 refuses the wrong grantees either way).
+10. **Carried from W2:** the live console still builds no `ConnectionPool`
+    (`main.ts`, open since #374), so proxied tools answer `not_available`
+    outside tests — X-8 did not change that. Which ticket wires it? And a
+    secret's last-used is still not stamped for syncs (T4-24).
+11. **T4-13 (#430):** an iCloud account's `pNN-caldav` host needs two owner
+    commands after the first sync (X-56 automates it), and no console route
+    calls CalDAV's own-event write yet (X-57). Schedule both with W4's
+    calendar work?
+12. **T2-12 (#407):** may the owner door move a meeting someone else
+    organised? → X-55.
+
+#### Mac screens
+
+13. **T6-4 (#409):** the conflict word — "Take the Other" (served) or "Take the
+    Fold's"? Who raises `draft_settle` (nothing does)? The fold has no
+    `prose_id` for thumbs. Should Needs You's `resolve_conflict` door use the
+    held-Undo model?
+14. **T6-4 (#409):** `collector_health` is not served — which door serves it,
+    and to whom? → X-65.
+15. **T6-5 (#418):** Esc keeps the draft (C136) where screen 7 discards it;
+    ⌘S / ⌘⌫ stay unbound (ruling 24); trust and per-run cost are not served;
+    Permissions Edit only for connected agents. Confirm each.
+16. **T6-6 (#410):** §10.2 makes a product routine's task, actor and name
+    editable, but no door writes them — add one, or keep them read-only? Also:
+    no `stopped` field on the wire; Week scale only.
+17. **T6-7 (#420):** Delegate has no route; Today does not open the card popover
+    (that is T6-1a's files); `[` / `]` are unbound (C119). Which wave takes
+    each?
+18. **T6-10 (#446):** screen 12 draws no Spoken table (C121 applied). Confirm?
+19. **T10-7 (#441):** Restore works only under a page's current name; commits
+    from before a rename are view-only. Allow restore across renames (a
+    server-side T10-5/T10-6 follow-up)?
+20. **X-14 (#436):** Slipping is "owed to or by" (review-01) or "owed to
+    someone" (screen-05 §15.6)? Someday lines still appear in Slipping, against
+    §15.5; "carried three times" is built as `carried_days >= 3`. The grammar
+    has no brackets inside `or`.
+21. **T6-11 (#449):** Connections → **Account**, and the interim panes
+    (Connections, Secrets, Variables, Live Capture, Sessions) until T6-13a,
+    T6-14 and T6-15. Confirm the name.
+
+#### Offline and the PWA
+
+22. **T7-4 (#414):** should Defer queue offline like Tick? And cached reads
+    survive on a device revoked while it was offline until its next `401` —
+    accept?
+
+#### Compute and the private tier
+
+23. **T8-6 (#426):** "on-machine" is the provider's self-declared
+    `locality: on_machine` (the intent tier's trust model). Derive it from a
+    loopback `base_url` instead? And the private tier has no fallback — it
+    refuses. Confirm.
+24. **T4-19 (#423):** an exhausted subscription plan window comes back as a
+    provider `429` that is retried blindly, not reported. Report it? And
+    confirm the instance limit counting subscription calls (above).
+25. **T9-3 (#432):** confirm the eval's built calls (above): no tuning mode,
+    the `d08: true` marker, below-threshold = `moderate`, the threshold
+    precedence and the rescued-turn formula.
+26. **The brain's eager surface** is at 4,597 of 4,600 tokens and 28 of 28
+    tools. Move tools behind lazy discovery, or raise the ceiling? → X-49.
+27. **X-45:** a one-character secret collides with every model body. The
+    proposal refuses secrets below a minimum length when they are stored,
+    rather than letting the redactor skip short values. Agree?
+
+#### The recorder
+
+28. **T8-2a (#411):** does #253's "no capture UI" hold cover the record sheet
+    and whoever holds the control token? (T8-2b and T8-5 build the bar.)
+29. **T8-2b (#448):** the recorder's socket is not namespaced per instance and
+    `METISTRY_LC_SOCKET` defaults under `/tmp` (→ X-72); transcripts land in
+    `Inbox/`, not `Journal/Transcripts/` (→ X-73); `meta.capture_session` stays
+    unset until T8-5/T8-7. Which folder? **Owner's hand after 0.15.0:** the
+    real-recording checklist in #448's body (TCC grants for Metistry
+    Recorder).
+
+#### Linear and GitHub
+
+30. **T2-13 (#421):** GitHub refuses self-approval, so an agent's PR opened
+    under the owner's account cannot be approved by the owner (`400`, GitHub's
+    words kept). Accept, or give agents their own GitHub account?
+31. **T4-25, T4-26 (#444, #445):** Send to Linear and `complete_issue` carry no
+    server-side confirm token (the frozen single-call contract): create is
+    idempotent by task key, complete is gated by the tool mode. Confirm? Race
+    safety rests on Linear rejecting a duplicate `issueCreate.input.id`,
+    unverified against real Linear — check it on the second instance?
+
+#### Fixtures and tests
+
+32. **Priority:** the flakes (X-24…X-28) and fixture drift (X-29…X-31) cost W3
+    several CI reruns and one refused merge. Run them as a small batch before
+    W4 dispatches, or inside W4? X-24 (plan-tomorrow, four occurrences), X-29
+    (stale Mac fixtures) and X-32 (push carries message text) are the ones the
+    coordinator would take first.
+
 ## Rulings the owner must make
 
 (a), (b) and (c) were ruled in W1 — see *Rulings made by the owner in W1* above.

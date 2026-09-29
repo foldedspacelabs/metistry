@@ -14,6 +14,9 @@ ticket, and the §2 sections your ticket names** — not the whole plan.
 - **Never `git stash` in a worktree** — the stash is shared across every
   worktree of the repo, so another agent can pop yours. Make a WIP commit
   instead and amend or squash it before you push.
+- **Diff against the merge-base, not main's tip**: `git diff $(git merge-base
+  origin/main HEAD)`. Main moves under you while you work; a diff against its tip
+  shows other tickets' changes as yours, reversed.
 - **Never the live instance.** Do not run a `metistry` verb against the owner's
   instance, do not read its `.metistry/state/.env`, do not connect to its
   console, reconciler or database, and do not use its ports. If a step seems to
@@ -24,7 +27,12 @@ ticket, and the §2 sections your ticket names** — not the whole plan.
   temporary instance lives under `os.tmpdir()`.
   A test opens Postgres **only** with `await testDb(pg.Pool)` from
   `@foldedspacelabs/metistry-core/test-env` — never `new pg.Pool(…)`; CI's
-  `check-test-db.mjs` fails the PR otherwise.
+  `check-test-db.mjs` fails the PR otherwise. A throwaway Postgres of your own
+  is made with `initdb -E UTF8` — the suites assume a UTF-8 database.
+- **Swift tests, one at a time.** Run `pgrep -x swift-test` first; if another
+  agent's `swift test` is running, wait for it — two at once contend and time
+  out. Judge `swift build` and `swift test` by their **exit status**, never by a
+  grep of their output: `swift build | grep error:` exits 0 on a match.
 - **A scratch instance** for anything end to end: `metistry init <tmp dir>` with
   `--namespace`, never a real one.
 - **GitHub CLI** as `env -u GH_TOKEN gh …`.
@@ -46,12 +54,17 @@ ticket, and the §2 sections your ticket names** — not the whole plan.
   Anything else: stop and ask.
 - **U6** Casing: the vault is TitleCase; `.metistry/` and the repo are lowercase.
 - **U7** A route, action or CLI verb that changes updates `docs/ops/client-api.md`
-  or `docs/ops/cli.md` in the same PR.
+  or `docs/ops/cli.md` in the same PR. A ticket that serves a **new** route also
+  adds, in the same PR, its recorded fixture, the Mac store method that reads it
+  and that method's drive line in `store-fixtures-tests.swift` — an orphaned
+  fixture fails `macos-app`.
 - **U8** A package change carries a changeset; a change with product significance
   carries one fragment under `docs/product/record/`.
 - **U9** A view meets plan §2.18 (keyboard, VoiceOver, Reduce Motion, the largest
   text size) and its screen's state row, built first against the recorded
-  fixtures.
+  fixtures. The recorder's `--check` compares **shape only**: after you
+  re-record a fixture, run the Swift tests that read it — a moved value passes
+  `--check` and breaks them.
 - **U10** If the spec is wrong, stop and report the contradiction — do not route
   around it.
 

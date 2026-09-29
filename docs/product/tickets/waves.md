@@ -119,54 +119,54 @@ Generated from `docs/product/design-build-plan.md` by `ops/scripts/tickets.mjs`.
 
 ## W3 — 46 tickets, 127.5 agent-days
 
-- [ ] [T2-12](t2/t2-12.md) · Move a meeting · M · opus · after T2-11
-- [ ] [T2-13](t2/t2-13.md) · Pull requests · L · opus high · after T1-8, T4-1
-- [ ] [T3-8](t3/t3-8.md) · Agent routines · L · opus high · after T4-6, T3-3
-- [ ] [T3-10](t3/t3-10.md) · The session fold · L · opus high · after T3-9
-- [ ] [T3-11](t3/t3-11.md) · Routine suggestions · M · opus · after T3-3
-- [ ] [T4-9](t4/t4-9.md) · Connections P2: Ask · L · opus high · after T4-8b
-- [ ] [T4-12](t4/t4-12.md) · Calendar: ICS feeds · M · opus · after T2-11, T4-8a
-- [ ] [T4-13](t4/t4-13.md) · Calendar: CalDAV with replies · L · opus high · after T4-12
-- [ ] [T4-19](t4/t4-19.md) · Spending limits data · M · opus · after T4-18
-- [ ] [T4-22](t4/t4-22.md) · Defer and report · M · opus · after T4-9
-- [ ] [T4-23](t4/t4-23.md) · Mirrors and secret failures · M · opus · after T1-8, T4-1
-- [ ] [T4-25](t4/t4-25.md) · Linear: a task becomes an issue · M · opus · after T4-24, T2-5
-- [ ] [T4-26](t4/t4-26.md) · Linear: completion both ways · M · opus · after T4-24, T2-4
-- [ ] [T6-4](t6/t6-4.md) · Knowledge · L · opus high · after T1-6, T2-10, T1-5
-- [ ] [T6-5](t6/t6-5.md) · Agents · L · opus high · after T4-6
-- [ ] [T6-6](t6/t6-6.md) · Scheduled · L · opus high · after T3-3
-- [ ] [T6-7](t6/t6-7.md) · Board and card detail · L · opus high · after T1-1, T1-2
-- [ ] [T6-8](t6/t6-8.md) · Projects · M · opus · after T4-7
-- [ ] [T6-9](t6/t6-9.md) · Artifacts · L · opus high · after T5-3
-- [ ] [T6-10](t6/t6-10.md) · Run detail · M · opus · after T2-17
-- [ ] [T6-11](t6/t6-11.md) · The Settings window · L · opus high · after T5-1, T4-20, T4-21, T2-16
-- [ ] [T7-4](t7/t7-4.md) · Offline · L · opus high · after T2-4
-- [ ] [T7-5](t7/t7-5.md) · Push and enrolment · M · opus
-- [ ] [T8-2a](t8/t8-2a.md) · The recorder: audio · L · opus high · after T8-1
-- [ ] [T8-2b](t8/t8-2b.md) · The recorder: the session · L · opus high · after T8-2a
-- [ ] [T8-6](t8/t8-6.md) · The private tier · M · opus · after T4-18
-- [ ] [T9-3](t9/t9-3.md) · The confirmatory eval · M · opus · after T9-2
-- [ ] [T10-7](t10/t10-7.md) · History in the app · M · opus · after T10-2, T10-4, T5-3
-- [ ] [X-6](x/x-6.md) · `/vault/log` is the owner's · S · sonnet · after T10-4
-- [ ] [X-7](x/x-7.md) · A provider key's grantee, and compute through the egress guard · M · opus · after T4-18, T4-2
-- [ ] [X-8](x/x-8.md) · An agent's connection grants persist · S · sonnet · after T4-8b
-- [ ] [X-9](x/x-9.md) · Restore is the Mac's · S · sonnet · after T10-5
-- [ ] [X-10](x/x-10.md) · A report is acknowledged; an agent reads its answer · M · opus · after T2-3
-- [ ] [X-11](x/x-11.md) · The routine folders take a create again · S · sonnet · after T3-6
-- [ ] [X-12](x/x-12.md) · Add to Today · S · sonnet · after T2-7, T4-24
-- [ ] [X-13](x/x-13.md) · A budget refusal is a report · S · sonnet · after T3-12
-- [ ] [X-14](x/x-14.md) · The `where:` grammar reaches Slipping and Owed · M · opus · after T2-7, T6-1a
-- [ ] [X-15](x/x-15.md) · Run Now after 23:00 re-renders the plan · S · sonnet · after T3-7
-- [ ] [X-16](x/x-16.md) · `{{ calendar }}` sanitises its titles · S · sonnet · after T3-6
-- [ ] [X-17](x/x-17.md) · A snooze that expires is an event · S · sonnet · after T5-7
-- [ ] [X-18](x/x-18.md) · `GET /api/messages` carries `turn_id` · S · sonnet · after T6-2
-- [ ] [X-19](x/x-19.md) · The offline capture queue is persisted · S · sonnet · after T5-5
-- [ ] [X-20](x/x-20.md) · `init --shape` and `--keep-awake` · S · sonnet
-- [ ] [X-21](x/x-21.md) · A routine's display name on Activity · S · sonnet · after T1-3, T6-3
-- [ ] [X-22](x/x-22.md) · The Mac reads `request.questions` · S · sonnet · after T5-4b
-- [ ] [X-23](x/x-23.md) · `connection_call` on Activity and turn progress · S · sonnet · after T1-3, T2-17, T4-8b
+- [x] [T2-12](t2/t2-12.md) · Move a meeting · M · opus · after T2-11
+- [x] [T2-13](t2/t2-13.md) · Pull requests · L · opus high · after T1-8, T4-1
+- [x] [T3-8](t3/t3-8.md) · Agent routines · L · opus high · after T4-6, T3-3
+- [x] [T3-10](t3/t3-10.md) · The session fold · L · opus high · after T3-9
+- [x] [T3-11](t3/t3-11.md) · Routine suggestions · M · opus · after T3-3
+- [x] [T4-9](t4/t4-9.md) · Connections P2: Ask · L · opus high · after T4-8b
+- [x] [T4-12](t4/t4-12.md) · Calendar: ICS feeds · M · opus · after T2-11, T4-8a
+- [x] [T4-13](t4/t4-13.md) · Calendar: CalDAV with replies · L · opus high · after T4-12
+- [x] [T4-19](t4/t4-19.md) · Spending limits data · M · opus · after T4-18
+- [x] [T4-22](t4/t4-22.md) · Defer and report · M · opus · after T4-9
+- [x] [T4-23](t4/t4-23.md) · Mirrors and secret failures · M · opus · after T1-8, T4-1
+- [x] [T4-25](t4/t4-25.md) · Linear: a task becomes an issue · M · opus · after T4-24, T2-5
+- [x] [T4-26](t4/t4-26.md) · Linear: completion both ways · M · opus · after T4-24, T2-4
+- [x] [T6-4](t6/t6-4.md) · Knowledge · L · opus high · after T1-6, T2-10, T1-5
+- [x] [T6-5](t6/t6-5.md) · Agents · L · opus high · after T4-6
+- [x] [T6-6](t6/t6-6.md) · Scheduled · L · opus high · after T3-3
+- [x] [T6-7](t6/t6-7.md) · Board and card detail · L · opus high · after T1-1, T1-2
+- [x] [T6-8](t6/t6-8.md) · Projects · M · opus · after T4-7
+- [x] [T6-9](t6/t6-9.md) · Artifacts · L · opus high · after T5-3
+- [x] [T6-10](t6/t6-10.md) · Run detail · M · opus · after T2-17
+- [x] [T6-11](t6/t6-11.md) · The Settings window · L · opus high · after T5-1, T4-20, T4-21, T2-16
+- [x] [T7-4](t7/t7-4.md) · Offline · L · opus high · after T2-4
+- [x] [T7-5](t7/t7-5.md) · Push and enrolment · M · opus
+- [x] [T8-2a](t8/t8-2a.md) · The recorder: audio · L · opus high · after T8-1
+- [x] [T8-2b](t8/t8-2b.md) · The recorder: the session · L · opus high · after T8-2a
+- [x] [T8-6](t8/t8-6.md) · The private tier · M · opus · after T4-18
+- [x] [T9-3](t9/t9-3.md) · The confirmatory eval · M · opus · after T9-2
+- [x] [T10-7](t10/t10-7.md) · History in the app · M · opus · after T10-2, T10-4, T5-3
+- [x] [X-6](x/x-6.md) · `/vault/log` is the owner's · S · sonnet · after T10-4
+- [ ] [X-7](x/x-7.md) · A provider key's grantee, and compute through the egress guard · M · opus · after T4-18, T4-2 · **in-review**
+- [x] [X-8](x/x-8.md) · An agent's connection grants persist · S · sonnet · after T4-8b
+- [x] [X-9](x/x-9.md) · Restore is the Mac's · S · sonnet · after T10-5
+- [x] [X-10](x/x-10.md) · A report is acknowledged; an agent reads its answer · M · opus · after T2-3
+- [x] [X-11](x/x-11.md) · The routine folders take a create again · S · sonnet · after T3-6
+- [x] [X-12](x/x-12.md) · Add to Today · S · sonnet · after T2-7, T4-24
+- [x] [X-13](x/x-13.md) · A budget refusal is a report · S · sonnet · after T3-12
+- [x] [X-14](x/x-14.md) · The `where:` grammar reaches Slipping and Owed · M · opus · after T2-7, T6-1a
+- [x] [X-15](x/x-15.md) · Run Now after 23:00 re-renders the plan · S · sonnet · after T3-7
+- [x] [X-16](x/x-16.md) · `{{ calendar }}` sanitises its titles · S · sonnet · after T3-6
+- [x] [X-17](x/x-17.md) · A snooze that expires is an event · S · sonnet · after T5-7
+- [x] [X-18](x/x-18.md) · `GET /api/messages` carries `turn_id` · S · sonnet · after T6-2
+- [x] [X-19](x/x-19.md) · The offline capture queue is persisted · S · sonnet · after T5-5
+- [x] [X-20](x/x-20.md) · `init --shape` and `--keep-awake` · S · sonnet
+- [x] [X-21](x/x-21.md) · A routine's display name on Activity · S · sonnet · after T1-3, T6-3
+- [x] [X-22](x/x-22.md) · The Mac reads `request.questions` · S · sonnet · after T5-4b
+- [x] [X-23](x/x-23.md) · `connection_call` on Activity and turn progress · S · sonnet · after T1-3, T2-17, T4-8b
 
-- [ ] **W3 checkpoint** — merged, main green, scratch-instance upgrade, conformance test, Mac smoke, release
+- [ ] **W3 checkpoint** — merged, main green, scratch-instance upgrade, conformance test, Mac smoke, release · waiting on X-7 (in-review)
 
 ## W4 — 17 tickets, 65 agent-days
 
@@ -195,3 +195,59 @@ Generated from `docs/product/design-build-plan.md` by `ops/scripts/tickets.mjs`.
 - [ ] [X-1](x/x-1.md) · The document sweep · S · sonnet
 
 - [ ] **W5 checkpoint** — merged, main green, scratch-instance upgrade, conformance test, Mac smoke, release
+
+## W4 candidates — 51 tickets, 75 agent-days, no wave yet
+
+Follow-ups specified in the plan (§3.2's *Candidates* row) that nobody has scheduled. The owner assigns each one a wave at a checkpoint; until then none is dispatched.
+
+- [ ] [X-24](x/x-24.md) · Plan-tomorrow's test runs on its own clock · S · sonnet · after X-15
+- [ ] [X-25](x/x-25.md) · DB-backed suites survive file parallelism · M · opus
+- [ ] [X-26](x/x-26.md) · Linear's sync reads in a stable order · S · sonnet · after T4-26
+- [ ] [X-27](x/x-27.md) · The router-policy test has no wall-clock bound · S · sonnet
+- [ ] [X-28](x/x-28.md) · The chat viewport test is deterministic · S · sonnet
+- [ ] [X-29](x/x-29.md) · Main's Mac fixtures match the recorder · M · opus
+- [ ] [X-30](x/x-30.md) · The recorder checks the values a contract depends on · M · opus · after X-29
+- [ ] [X-31](x/x-31.md) · The recorder's seeds are pinned to its clock · S · sonnet
+- [ ] [X-32](x/x-32.md) · A push carries Needs You only, and no text · M · opus
+- [ ] [X-33](x/x-33.md) · The PWA's last browser dialogs · S · sonnet
+- [ ] [X-34](x/x-34.md) · Ask First raises one card per subject · M · opus · after T4-9
+- [ ] [X-35](x/x-35.md) · Approve re-checks the agent · S · sonnet · after T4-9
+- [ ] [X-36](x/x-36.md) · Run detail shows connection calls · S · sonnet · after T6-10, X-23
+- [ ] [X-37](x/x-37.md) · A crew keeps its caller's interactivity · S · sonnet · after T3-8
+- [ ] [X-38](x/x-38.md) · The owner sees an actor's connections in its scope · S · sonnet
+- [ ] [X-39](x/x-39.md) · A revoked connection grant refuses the next call · S · sonnet · after X-8
+- [ ] [X-40](x/x-40.md) · A failed connection call in turn progress · S · sonnet · after X-23
+- [ ] [X-41](x/x-41.md) · An owner-door secret refuses a connection or agent grant · S · sonnet · after T2-13
+- [ ] [X-42](x/x-42.md) · An owner door is a grantee kind · M · opus · after X-41
+- [ ] [X-43](x/x-43.md) · `private` is a reserved tier name · S · sonnet · after T8-6
+- [ ] [X-44](x/x-44.md) · Every compute call goes through the egress guard · M · opus · after X-7
+- [ ] [X-45](x/x-45.md) · A secret too short to redact safely is refused when stored · S · sonnet · after X-7
+- [ ] [X-46](x/x-46.md) · A provider refusal is one request per secret · S · sonnet · after T4-23
+- [ ] [X-47](x/x-47.md) · `secrets sync` restarts only what changed · M · opus
+- [ ] [X-48](x/x-48.md) · Doctor's sandbox row reports what runs · S · sonnet
+- [ ] [X-49](x/x-49.md) · The brain's eager surface has headroom · M · opus
+- [ ] [X-50](x/x-50.md) · Session-purge is quiet while the Session Fold is paused · S · sonnet · after T3-10
+- [ ] [X-51](x/x-51.md) · A routine's dated file the assistant created · S · sonnet · after X-11
+- [ ] [X-52](x/x-52.md) · The weekly review counts only the owner's decisions · S · sonnet
+- [ ] [X-53](x/x-53.md) · The meeting note reads `METISTRY_TZ` only · S · sonnet
+- [ ] [X-54](x/x-54.md) · Calendar location and name chips are sanitised · S · sonnet · after X-16
+- [ ] [X-55](x/x-55.md) · Moving a meeting someone else organised · S · sonnet · after T2-12
+- [ ] [X-56](x/x-56.md) · An iCloud CalDAV account needs no second step · M · opus · after T4-13
+- [ ] [X-57](x/x-57.md) · CalDAV's own-event write has a door · M · opus · after T4-13
+- [ ] [X-58](x/x-58.md) · Add to Today for GitHub tasks · S · sonnet · after X-12, T4-23
+- [ ] [X-59](x/x-59.md) · Linear's Close offer and Done chip in the clients · M · opus · after T4-26
+- [ ] [X-60](x/x-60.md) · The PWA does not count the assistant as a project member · S · sonnet
+- [ ] [X-61](x/x-61.md) · Add to Today on the Mac · S · sonnet · after X-12
+- [ ] [X-62](x/x-62.md) · The Mac names a connection call · S · sonnet · after X-23
+- [ ] [X-63](x/x-63.md) · SavedTaskView reads Slipping and Owed · S · sonnet · after X-14
+- [ ] [X-64](x/x-64.md) · The Mac's receipt knows "acknowledged" · S · sonnet · after X-10
+- [ ] [X-65](x/x-65.md) · A route for collector health · S · sonnet · after T6-4
+- [ ] [X-66](x/x-66.md) · Run detail carries its route and a routine run's session · M · opus · after T6-10
+- [ ] [X-67](x/x-67.md) · The board row carries why it is blocked, and one task has a route · M · opus · after T6-7
+- [ ] [X-68](x/x-68.md) · The artifacts list says what each one is · M · opus · after T6-9
+- [ ] [X-69](x/x-69.md) · Settings can name a release and count doctor's checks · M · opus · after T6-11
+- [ ] [X-70](x/x-70.md) · A session's fold items are served · S · sonnet · after T3-10, T6-10
+- [ ] [X-71](x/x-71.md) · `init` resolves the shape before it asks about keep-awake · S · sonnet · after X-20
+- [ ] [X-72](x/x-72.md) · The recorder's sockets live under the instance · S · sonnet · after T8-2b
+- [ ] [X-73](x/x-73.md) · Transcripts land where the ruling says · S · sonnet · after T8-2b
+- [ ] [X-74](x/x-74.md) · CI's Swift-helper filter is anchored · S · sonnet

@@ -18,9 +18,9 @@
 //   * the title is Linear's as the sync recorded it in `work`, never text the
 //     caller sends — the caller names an issue by its key and nothing else.
 //
-// The door that calls this (a console route answering `{door: "today"}`) is
-// not in the frozen route table (plan §2.1) and not this ticket's files; the
-// service is here, tested, for that door to call.
+// The door that calls this is `POST /api/today/add`
+// (`apps/console/src/today-routes.ts`, X-12), the console route answering
+// `{door: "today"}`.
 
 import { captureToInbox, type CaptureSink } from "@foldedspacelabs/metistry-mcp-brain";
 import { LINEAR_KEY_RE, linearRef } from "@foldedspacelabs/metistry-connections";

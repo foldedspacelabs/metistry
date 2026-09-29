@@ -13,6 +13,12 @@
 //                                          critical path
 //   docs/product/tickets/waves.md          the wave checklist the coordinator ticks
 //
+// A ticket is in exactly one wave of §3.2's table, or in its *Candidates* row:
+// a follow-up the plan specifies but nobody has scheduled yet. A candidate has
+// a file (`wave: candidate`) and a list of its own in waves.md; it counts in
+// no wave's total and on no critical path, and no scheduled ticket may depend
+// on one.
+//
 // The plan is the source of the ticket TEXT; the ticket file is the source of its
 // STATUS. `status:` and `pr:` are the only lines an agent edits, and a rewrite
 // preserves them, so regenerating never loses progress.
@@ -108,9 +114,12 @@ export function parsePlan(text) {
   // the wave table (§3.2) is authoritative for waves
   const waveTable = section(text, "### 3.2 Waves, ticket by ticket", "### 3.3");
   const waves = new Map();
+  const candidates = [];
   for (const line of waveTable.split("\n")) {
     const m = /^\| (W\d) \| (.*) \|$/.exec(line);
     if (m) waves.set(m[1], [...new Set(idsIn(m[2], known))]);
+    const c = /^\| Candidates \| (.*) \|$/.exec(line);
+    if (c) candidates.push(...idsIn(c[1], known));
   }
 
   // design-heavy (§3.6)
@@ -118,13 +127,14 @@ export function parsePlan(text) {
   const heavyLine = econ.slice(econ.indexOf("*Design-heavy*"));
   const heavy = new Set(idsIn(heavyLine.split("\n\n")[0], known));
 
-  return { tickets, preambles, waves, heavy };
+  return { tickets, preambles, waves, candidates: [...new Set(candidates)], heavy };
 }
 
 /** Every problem with the graph, as sentences. Empty = valid. */
-export function validate({ tickets, waves }) {
+export function validate({ tickets, waves, candidates = [] }) {
   const problems = [];
   const waveOf = new Map();
+  const candidate = new Set(candidates);
   for (const [w, ids] of waves) {
     for (const id of ids) {
       if (!tickets.has(id)) problems.push(`${w} lists ${id}, which is not a ticket`);
@@ -132,10 +142,16 @@ export function validate({ tickets, waves }) {
       else waveOf.set(id, w);
     }
   }
+  for (const id of candidate) {
+    if (!tickets.has(id)) problems.push(`Candidates lists ${id}, which is not a ticket`);
+    else if (waveOf.has(id)) problems.push(`${id} is in ${waveOf.get(id)} and also a candidate`);
+  }
   const n = (w) => Number(w.slice(1));
   for (const t of tickets.values()) {
     const w = waveOf.get(t.id);
-    if (!w) problems.push(`${t.id} is in no wave`);
+    if (!w && !candidate.has(t.id)) problems.push(`${t.id} is in no wave`);
+    if (candidate.has(t.id) && t.headerWave) problems.push(`${t.id} is a candidate but its heading says ${t.headerWave}`);
+    if (w) for (const d of t.deps) if (candidate.has(d)) problems.push(`${t.id} (${w}) depends on ${d}, which is only a candidate`);
     const expected = t.headerWave ?? (t.id.startsWith("F-") ? "W0" : null);
     if (w && expected && expected !== w) problems.push(`${t.id} says ${expected} but the wave table puts it in ${w}`);
     for (const d of t.deps) {
@@ -231,7 +247,7 @@ export function renderTicket(t, { wave, model, preamble, keep }) {
     `Generated from \`${PLAN}\` §3.3 by \`ops/scripts/tickets.mjs\` — edit the plan, not this file; only \`status:\` and \`pr:\` are yours.`,
     "",
     `**Read first:** \`docs/ops/agent-brief.md\`${sections.length ? `, then ${sections.join(", ")} of \`${PLAN}\`` : ""}.`,
-    `**Run as:** ${model.model}, ${model.effort === "high" ? "high effort" : "default effort"} · **Size:** ${t.size} (${DAYS[t.size]} agent-days) · **Wave:** ${wave} · **Depends on:** ${t.deps.length ? t.deps.join(", ") : "nothing"}`,
+    `**Run as:** ${model.model}, ${model.effort === "high" ? "high effort" : "default effort"} · **Size:** ${t.size} (${DAYS[t.size]} agent-days) · **Wave:** ${wave === "candidate" ? "none yet (a W4 candidate)" : wave} · **Depends on:** ${t.deps.length ? t.deps.join(", ") : "nothing"}`,
     "",
   ];
   if (preamble.length) lines.push("## Rules for this track", "", ...preamble.flatMap((p) => [p, ""]));
@@ -243,10 +259,11 @@ export function renderTicket(t, { wave, model, preamble, keep }) {
 export function build(root = ROOT) {
   const plan = parsePlan(readFileSync(join(root, PLAN), "utf8"));
   const { problems, waveOf } = validate(plan);
+  const candidate = new Set(plan.candidates);
   const files = new Map();
   const schedule = { generated_from: PLAN, waves: {}, tickets: {}, totals: {}, critical_path: null };
   for (const t of plan.tickets.values()) {
-    const wave = waveOf.get(t.id) ?? t.headerWave ?? "W?";
+    const wave = waveOf.get(t.id) ?? (candidate.has(t.id) ? "candidate" : (t.headerWave ?? "W?"));
     const model = plan.heavy.has(t.id) ? HEAVY : MODEL[t.size];
     const path = fileOf(t.id);
     const existing = existsSync(join(root, path)) ? readFileSync(join(root, path), "utf8") : null;
@@ -260,8 +277,11 @@ export function build(root = ROOT) {
     schedule.waves[w] = { tickets: ids, count: ids.length, agent_days: days };
     total += days;
   }
-  schedule.totals = { tickets: plan.tickets.size, agent_days: total, waves: plan.waves.size };
-  schedule.critical_path = criticalPath(plan.tickets);
+  const scheduled = new Map([...plan.tickets].filter(([id]) => !candidate.has(id)));
+  const candidateDays = plan.candidates.reduce((s, id) => s + (plan.tickets.has(id) ? DAYS[plan.tickets.get(id).size] : 0), 0);
+  schedule.candidates = { tickets: plan.candidates, count: plan.candidates.length, agent_days: candidateDays };
+  schedule.totals = { tickets: scheduled.size, agent_days: total, waves: plan.waves.size, candidates: plan.candidates.length };
+  schedule.critical_path = criticalPath(scheduled);
   files.set(join(OUT, "schedule.json"), `${JSON.stringify(schedule, null, 2)}\n`);
 
   const check = [
@@ -272,14 +292,28 @@ export function build(root = ROOT) {
     `**${schedule.totals.tickets} tickets · ${schedule.totals.waves} waves · ≈ ${total} agent-days · critical path ${schedule.critical_path.days} agent-days** (${schedule.critical_path.path.join(" → ")})`,
     "",
   ];
+  const line = (id) => {
+    const t = schedule.tickets[id];
+    return `- [${t.status === "merged" ? "x" : " "}] [${id}](${relative(OUT, t.file)}) · ${t.title} · ${t.size} · ${t.model}${t.effort === "high" ? " high" : ""}${t.deps.length ? ` · after ${t.deps.join(", ")}` : ""}${t.status !== "todo" && t.status !== "merged" ? ` · **${t.status}**` : ""}`;
+  };
   for (const [w, ids] of plan.waves) {
     check.push(`## ${w} — ${schedule.waves[w].count} tickets, ${schedule.waves[w].agent_days} agent-days`, "");
-    for (const id of ids) {
-      const t = schedule.tickets[id];
-      if (!t) continue;
-      check.push(`- [${t.status === "merged" ? "x" : " "}] [${id}](${relative(OUT, t.file)}) · ${t.title} · ${t.size} · ${t.model}${t.effort === "high" ? " high" : ""}${t.deps.length ? ` · after ${t.deps.join(", ")}` : ""}${t.status !== "todo" && t.status !== "merged" ? ` · **${t.status}**` : ""}`);
-    }
-    check.push("", `- [ ] **${w} checkpoint** — merged, main green, scratch-instance upgrade, conformance test, Mac smoke, release`, "");
+    const known = ids.filter((id) => schedule.tickets[id]);
+    for (const id of known) check.push(line(id));
+    // A wave under way names what its checkpoint still waits on.
+    const open = known.filter((id) => schedule.tickets[id].status !== "merged");
+    const waiting = open.length && open.length < known.length ? ` · waiting on ${open.map((id) => `${id} (${schedule.tickets[id].status})`).join(", ")}` : "";
+    check.push("", `- [ ] **${w} checkpoint** — merged, main green, scratch-instance upgrade, conformance test, Mac smoke, release${waiting}`, "");
+  }
+  if (plan.candidates.length) {
+    check.push(
+      `## W4 candidates — ${schedule.candidates.count} tickets, ${candidateDays} agent-days, no wave yet`,
+      "",
+      "Follow-ups specified in the plan (§3.2's *Candidates* row) that nobody has scheduled. The owner assigns each one a wave at a checkpoint; until then none is dispatched.",
+      "",
+      ...plan.candidates.filter((id) => schedule.tickets[id]).map(line),
+      "",
+    );
   }
   files.set(join(OUT, "waves.md"), check.join("\n"));
   return { files, problems, schedule };
@@ -304,7 +338,7 @@ function strays(root, files) {
 export function check(root = ROOT) {
   const { files, problems } = build(root);
   const drift = [];
-  const strip = (s) => s.replace(/^status: .*$/m, "").replace(/^pr: .*$/m, "").replace(/^- \[[ x]\]/gm, "- [ ]").replace(/ · \*\*(?:in-progress|in-review|blocked)\*\*/g, "").replace(/"status": "[a-z-]+"/g, "");
+  const strip = (s) => s.replace(/^status: .*$/m, "").replace(/^pr: .*$/m, "").replace(/^- \[[ x]\]/gm, "- [ ]").replace(/ · \*\*(?:in-progress|in-review|blocked)\*\*/g, "").replace(/ · waiting on .*$/gm, "").replace(/"status": "[a-z-]+"/g, "");
   for (const [path, content] of files) {
     const full = join(root, path);
     if (!existsSync(full)) drift.push(`${path} is missing — run: node ops/scripts/tickets.mjs`);
@@ -322,7 +356,7 @@ function main() {
       process.exit(1);
     }
     const { schedule } = build();
-    console.log(`tickets: ok (${schedule.totals.tickets} tickets, ${schedule.totals.waves} waves, ≈ ${schedule.totals.agent_days} agent-days, critical path ${schedule.critical_path.days})`);
+    console.log(`tickets: ok (${schedule.totals.tickets} tickets${schedule.totals.candidates ? ` + ${schedule.totals.candidates} candidates` : ""}, ${schedule.totals.waves} waves, ≈ ${schedule.totals.agent_days} agent-days, critical path ${schedule.critical_path.days})`);
     return;
   }
   const { files, problems, schedule } = build();
@@ -335,7 +369,7 @@ function main() {
     mkdirSync(dirname(join(ROOT, path)), { recursive: true });
     writeFileSync(join(ROOT, path), content);
   }
-  console.log(`tickets: wrote ${schedule.totals.tickets} tickets, schedule.json and waves.md (${schedule.totals.waves} waves, ≈ ${schedule.totals.agent_days} agent-days, critical path ${schedule.critical_path.days})`);
+  console.log(`tickets: wrote ${schedule.totals.tickets} tickets${schedule.totals.candidates ? ` + ${schedule.totals.candidates} candidates` : ""}, schedule.json and waves.md (${schedule.totals.waves} waves, ≈ ${schedule.totals.agent_days} agent-days, critical path ${schedule.critical_path.days})`);
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) main();

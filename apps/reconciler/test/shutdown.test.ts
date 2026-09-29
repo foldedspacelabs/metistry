@@ -126,7 +126,9 @@ describe("the stop commits the queue (SIGTERM / SIGINT)", () => {
     expect(rec).toMatchObject({ replayed: 1, dropped: 0 });
     expect(await commitsSince(before)).toEqual([{ author: "Metistry user", subject: "secrets: shared scope", trailers: "Brain-Source: user", files: [".metistry/secrets.yaml"] }]);
     expect(await dirty()).toEqual([]);
+    // let the first process's held chain finish before the repo is removed (its flush finds nothing left)
     release();
+    await committer.flush();
   });
 });
 

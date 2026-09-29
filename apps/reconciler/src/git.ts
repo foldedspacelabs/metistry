@@ -278,6 +278,12 @@ export class Git {
     return r.code === 0 ? r.stdout.trim() : null;
   }
 
+  /** The absolute path of `name` inside this repo's git directory (`git rev-parse --git-path`) — where the commit journal lives. */
+  async gitPath(name: string): Promise<string> {
+    const p = (await this.run(["rev-parse", "--git-path", name])).trim();
+    return isAbsolute(p) ? p : join(this.root, p);
+  }
+
   /**
    * The operation the owner has in progress in this working tree — a merge
    * they are resolving, a rebase, a cherry-pick — or null. While one is,

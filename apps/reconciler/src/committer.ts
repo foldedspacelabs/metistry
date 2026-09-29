@@ -35,12 +35,31 @@
 //   Brain-Source: <principal>
 //   Metistry-Run: <runs.id>     one per distinct run, where known
 //   Metistry-Turn: <turn id>    one per distinct turn, where known
+//
+// The queue survives the process (W3 checkpoint D1). It lives in memory for
+// the flush window, and a restart inside that window used to lose it: the
+// bytes were on disk, the commit never happened, and nothing would ever
+// make it — the sweep leaves `.metistry/` to the owner's hand, so a
+// `metistry update` whose lock and secrets writes were followed by a
+// restart left both dirty for good. So:
+//   - every change to the queue is mirrored, synchronously, into a JOURNAL
+//     under `.git/` (`cfg.journal`) — outside the vault, never writable
+//     through the bridge (`.git` is a never-writable segment), and not the
+//     record: it only says which commits this process still owes;
+//   - `drain()` is the shutdown flush (main.ts runs it on SIGTERM/SIGINT);
+//   - `recover()` at startup re-queues what the journal holds and commits
+//     it with the principal, message and trailers it was queued with. Only
+//     paths this process itself queued are ever in it, so nothing becomes
+//     committable that was not already: an owner's own uncommitted edit to
+//     `.metistry/` is still theirs.
 
+import { readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename } from "node:path";
-import { isVaultPath } from "@foldedspacelabs/metistry-core";
+import { isProtectedPath, isVaultPath } from "@foldedspacelabs/metistry-core";
 import { Git, GitError, type GitIdentity } from "./git.js";
 import { integrate, type IntegrateConflict, type IntegrateOutcome, type RawCommit } from "./integrate.js";
 import { isConflictFile } from "./notes.js";
+import { parseVaultPath, USER_PRINCIPAL, validPrincipal } from "./paths.js";
 
 export interface CommitIntent {
   paths: string[]; // vault-relative
@@ -65,6 +84,32 @@ export interface CommitterConfig {
   sweepExternalEdits?: boolean;
   /** Fetch-integrate-push rounds when the remote moves between our fetch and our push (default 3). */
   maxPushAttempts?: number;
+  /**
+   * An absolute path the pending queue is mirrored into after every change
+   * (main.ts: `<git dir>/metistry-pending-commits.json`), so a restart or a
+   * crash inside the flush window loses no commit — `recover()` reads it
+   * back at start. Absent: the queue is memory only (the unit tests).
+   */
+  journal?: string;
+}
+
+/** What `recover()` found in the journal and did with it. */
+export interface RecoverResult {
+  /** Intents re-queued from the journal. */
+  replayed: number;
+  /** Journal entries refused as malformed (a bad path, a principal that may not hold a protected path). */
+  dropped: number;
+  /** The flush that committed them, or null when there was nothing to replay. */
+  flush: FlushResult | null;
+}
+
+/** What `drain()` managed before its deadline. */
+export interface DrainResult {
+  /** The flush's result, or null when the deadline came first (the journal keeps what is left). */
+  flush: FlushResult | null;
+  timedOut: boolean;
+  /** Intents still queued afterwards — each is in the journal for the next start. */
+  left: number;
 }
 
 export interface FlushResult {
@@ -132,6 +177,9 @@ export interface SyncHooks {
   integrated?(changed: string[]): void;
 }
 
+/** The commit journal's file name inside the repo's git directory (`git rev-parse --git-path`). */
+export const COMMIT_JOURNAL = "metistry-pending-commits.json";
+
 const MAX_MESSAGE = 4000;  // limit: fixed — a commit message, not a document; git's own conventions bound it
 
 /** The principal trailer main.ts configures (§4.7 commit hygiene) — and the one file history reads back (vault.ts `log`). */
@@ -180,6 +228,8 @@ export function sweepMessage(paths: string[]): string {
 
 export class Committer {
   private queue: CommitIntent[] = [];
+  /** The batch a flush has taken off the queue and not finished — still owed, so still journalled. */
+  private inFlight: CommitIntent[] = [];
   private retries = new Map<string, number>();
   private seq = 0;
   private chain: Promise<unknown> = Promise.resolve();
@@ -252,6 +302,97 @@ export class Committer {
       message: intent.message.slice(0, MAX_MESSAGE),
       enqueuedAt: Date.now(),
     });
+    this.persist();
+  }
+
+  /**
+   * Mirror what is owed into the journal: the batch in flight and the
+   * queue. Synchronous, so a write's 200 is never sent before its commit
+   * intent is on disk; atomic (write, then rename), so a kill mid-write
+   * leaves the previous journal rather than half of one. A journal that
+   * cannot be written costs durability, never the write: logged, not thrown.
+   */
+  private persist(): void {
+    const path = this.cfg.journal;
+    if (!path) return;
+    const owed = [...this.inFlight, ...this.queue];
+    try {
+      if (owed.length === 0) rmSync(path, { force: true });
+      else {
+        writeFileSync(`${path}.tmp`, `${JSON.stringify({ version: 1, intents: owed })}\n`, { mode: 0o600 });
+        renameSync(`${path}.tmp`, path);
+      }
+    } catch (err) {
+      console.error(`reconciler: could not write the commit journal ${path}: ${err instanceof Error ? err.message : String(err)} — a restart before the next flush would leave these writes uncommitted`);
+    }
+  }
+
+  /**
+   * Startup: commit what a previous process queued and never committed —
+   * killed inside its flush window, or crashed. Each journalled intent is
+   * re-queued with the principal, message, run and turn it had, and flushed
+   * now, so the commit reads exactly as it would have. An intent whose paths
+   * are no longer dirty (committed before the kill, or reverted since) makes
+   * no commit. Refused, and logged: a path the bridge would refuse, or a
+   * protected path under any principal but `user` (invariant 2 — the same
+   * rule `writeAllowed` applied when the write came in).
+   */
+  async recover(): Promise<RecoverResult> {
+    const path = this.cfg.journal;
+    if (!path) return { replayed: 0, dropped: 0, flush: null };
+    let raw: string;
+    try {
+      raw = readFileSync(path, "utf8");
+    } catch {
+      return { replayed: 0, dropped: 0, flush: null }; // no journal: nothing was owed
+    }
+    let entries: unknown[] = [];
+    try {
+      const parsed = JSON.parse(raw) as { intents?: unknown };
+      if (Array.isArray(parsed.intents)) entries = parsed.intents;
+    } catch (err) {
+      console.error(`reconciler: the commit journal ${path} does not parse (${err instanceof Error ? err.message : String(err)}) — ignored; the sweep still sees any dirty vault path`);
+    }
+    let replayed = 0;
+    let dropped = 0;
+    for (const e of entries) {
+      const intent = journalEntry(e);
+      if (!intent) {
+        dropped++;
+        continue;
+      }
+      // a fresh process numbers its own acts from 1 again: keep a replayed act apart from them
+      this.queue.push({ ...intent, group: `recovered:${intent.group ?? intent.principal}`, enqueuedAt: Date.now() });
+      replayed++;
+    }
+    if (dropped) console.error(`reconciler: ${dropped} commit journal entr${dropped === 1 ? "y" : "ies"} refused (a path or principal the bridge would not take)`);
+    this.persist();
+    if (replayed === 0) return { replayed, dropped, flush: null };
+    const flush = await this.flush();
+    return { replayed, dropped, flush };
+  }
+
+  /**
+   * Shutdown: commit everything queued, waiting at most `timeoutMs` (the
+   * supervisor SIGKILLs ten seconds after its SIGTERM). Never throws. What
+   * the deadline cuts off stays in the journal, and `recover()` commits it
+   * at the next start.
+   */
+  async drain(timeoutMs: number): Promise<DrainResult> {
+    let timer: NodeJS.Timeout | undefined;
+    const deadline = new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), timeoutMs);
+    });
+    try {
+      const flush = await Promise.race([this.flush().catch((err: unknown) => {
+        console.error(`reconciler: the shutdown flush failed: ${err instanceof Error ? err.message : String(err)}`);
+        return null;
+      }), deadline]);
+      const timedOut = flush === null && this.depth + this.inFlight.length > 0;
+      return { flush, timedOut, left: this.depth + this.inFlight.length };
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /** Queue a sweep of edits made outside the bridge: one `user` act, its subject naming the files. */
@@ -310,6 +451,16 @@ export class Committer {
     }
     const batch = this.queue;
     this.queue = [];
+    this.inFlight = batch;
+    try {
+      return await this.commitBatch(batch, result);
+    } finally {
+      this.inFlight = [];
+      this.persist();
+    }
+  }
+
+  private async commitBatch(batch: CommitIntent[], result: FlushResult): Promise<FlushResult> {
 
     for (const { key, principal, group, intents } of actsOf(batch)) {
       const paths = [...new Set(intents.flatMap((i) => i.paths))].sort();
@@ -608,4 +759,36 @@ export function composeMessage(intents: CommitIntent[], principal: string, trail
   ];
   if (trailers.length) parts.push("", trailers.join("\n"));
   return parts.join("\n");
+}
+
+/**
+ * One journal entry as an intent, or null when it is not one this process
+ * could have queued: every path must pass the bridge's own syntax check
+ * (`parseVaultPath` — no `.git`, no `instance-migrations/`, no `..`), the
+ * principal must be well formed, and a §4.7 protected path is `user`'s or
+ * nobody's. The journal is written by this process alone, under `.git/`;
+ * these checks are so that a file there can never be the way a commit is
+ * made that the bridge would have refused. Exported for the tests.
+ */
+export function journalEntry(e: unknown): Omit<CommitIntent, "enqueuedAt"> | null {
+  if (typeof e !== "object" || e === null) return null;
+  const o = e as Record<string, unknown>;
+  if (!validPrincipal(o.principal) || typeof o.message !== "string") return null;
+  if (!Array.isArray(o.paths) || o.paths.length === 0) return null;
+  const paths: string[] = [];
+  for (const p of o.paths) {
+    const parsed = parseVaultPath(p);
+    if (!parsed.ok) return null;
+    if (isProtectedPath(parsed.rel) && o.principal !== USER_PRINCIPAL) return null;
+    paths.push(parsed.rel);
+  }
+  if (o.group !== undefined && (typeof o.group !== "string" || o.group.length > 200 || /[\r\n]/.test(o.group))) return null;
+  return {
+    paths,
+    principal: o.principal,
+    message: o.message.slice(0, MAX_MESSAGE),
+    group: typeof o.group === "string" ? o.group : undefined,
+    run: validActId(o.run) ? o.run : undefined,
+    turn: validActId(o.turn) ? o.turn : undefined,
+  };
 }

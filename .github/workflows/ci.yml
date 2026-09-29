@@ -86,6 +86,9 @@ jobs:
       # A migration number is reserved to one file in db/migrations/README.md
       # before anyone writes it, so parallel tickets cannot collide on one (F-6).
       - run: node ops/scripts/check-migration-numbers.mjs
+      # Every published package names this repo in `repository`: npm refuses a
+      # provenance publish whose manifest does not match (E422, v0.15.0).
+      - run: node ops/scripts/check-package-metadata.mjs
       # A test's only way into Postgres is testDb() (core/test-env), which
       # refuses anything but a metistry_test_* scratch database and checks
       # current_database(). A suite building its own pool walks around that,

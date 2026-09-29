@@ -81,6 +81,8 @@ jobs:
           fi
       - run: ops/scripts/check-path-case.sh
       - run: node ops/scripts/fold-product-record.mjs --check
+      # npm provenance refuses a package whose repository.url is not this repo
+      - run: node ops/scripts/check-package-metadata.mjs
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v7
         with:
@@ -215,7 +217,10 @@ jobs:
   # one-time bootstrap a package needs before that page will let you).
   # Skipped (not failed) for a package that isn't configured yet, or on a
   # fork: the registry 404s/403s the publish and this job says so rather
-  # than failing the release.
+  # than failing the release. A version already on the registry is skipped
+  # too, so a re-run is safe. Anything else — E422 above all, which is npm
+  # refusing the provenance bundle (v0.15.0: no `repository` in package.json)
+  # — FAILS the job, after trying every package, so it cannot pass as a skip.
   npm:
     needs: verify
     runs-on: ubuntu-latest
@@ -251,10 +256,18 @@ jobs:
           pack_dir="$RUNNER_TEMP/npm-pack"
           mkdir -p "$pack_dir"
           published_any=false
+          failed=""
           for dir in packages/*/; do
             name="$(node -p "(()=>{try{const p=require('./${dir}package.json');return (!p.private && p.name && p.name.startsWith('@foldedspacelabs/metistry-')) ? p.name : '';}catch{return '';}})()")"
             [ -z "$name" ] && continue
-            echo "== $name =="
+            version="$(node -p "require('./${dir}package.json').version")"
+            echo "== $name@$version =="
+            # Already on the registry (a re-run, or a partial earlier run):
+            # nothing to do. A 404 here just means "not yet" — publish it.
+            if [ "$(npm view "$name@$version" version 2>/dev/null)" = "$version" ]; then
+              echo "::notice::$name@$version is already on npm — skipped"
+              continue
+            fi
             # `pnpm pack` rewrites workspace:* deps to real versions in the
             # packed manifest; `npm publish` then does the actual registry
             # call so it is npm's own OIDC exchange that authenticates it,
@@ -265,15 +278,25 @@ jobs:
             status="${PIPESTATUS[0]}"
             set -e
             if [ "$status" -ne 0 ]; then
-              if grep -qE 'code E40[0-9]|HTTP 4[0-9]{2}' /tmp/npm-publish.log; then
-                echo "::notice::npm publish skipped for $name — trusted publishing isn't configured for it yet, or the registry otherwise rejected it with a 4xx (see the log above; docs/ops/releases.md, "Publishing to npm", has the setup). The release's other assets are unaffected."
+              # Tolerated: E404 / E403 (no trusted publisher configured for this
+              # package yet, or a fork), E409 (a concurrent publish won the race).
+              # NOT tolerated: E422 (provenance or manifest rejected) and every
+              # other error — those are ours to fix, and a skip would hide them.
+              if grep -qE 'code E40[349]\b' /tmp/npm-publish.log && ! grep -qE 'code E422\b' /tmp/npm-publish.log; then
+                echo "::notice::npm publish skipped for $name — trusted publishing isn't configured for it yet, or the version already exists (see the log above; docs/ops/releases.md, \"Publishing to npm\", has the setup). The release's other assets are unaffected."
                 continue
               fi
-              exit "$status"
+              echo "::error::npm publish FAILED for $name@$version (exit $status) — see the log above. E422 is npm refusing the provenance bundle: check the package.json \`repository\` (docs/ops/releases.md, \"Publishing to npm\")."
+              failed="${failed:+$failed }$name"
+              continue
             fi
             published_any=true
           done
           echo "published=$published_any" >> "$GITHUB_OUTPUT"
+          if [ -n "$failed" ]; then
+            echo "::error::npm publish failed for: $failed"
+            exit 1
+          fi
 
   # Container images for the apps that ship as images. The watchdog is a
   # host job under launchd (runs_on: host) and has no Dockerfile — it ships
@@ -390,7 +413,10 @@ jobs:
             echo "::notice::APPLE_API_KEY_P8 is not set — the DMG is signed but NOT notarized. Gatekeeper will refuse it on a machine that has not seen it before (docs/ops/apple-signing.md §4)."
             exit 0
           fi
-          ops/release/notarize.sh "dist-app/Metistry-$VERSION.dmg"
+          if ! ops/release/notarize.sh "dist-app/Metistry-$VERSION.dmg"; then
+            echo "::error::notarization FAILED — no DMG this run, and the \`publish\` job holds the release as a draft rather than publish it without one (an immutable release can never gain the DMG later). Fix the cause above — \`invalidPrivateKeyContents\` means APPLE_API_KEY_P8 is not a .p8 key (docs/ops/releases.md, \"Secrets\") — then use \"Re-run failed jobs\" on this run."
+            exit 1
+          fi
 
       - if: steps.gate.outputs.ok == 'true'
         uses: actions/upload-artifact@v7
@@ -511,8 +537,12 @@ jobs:
       - name: record which of npm/images this run actually published
         env:
           NPM_PUBLISHED: ${{ needs.npm.outputs.published }}
+          NPM_RESULT: ${{ needs.npm.result }}
           IMAGES_PUBLISHED: ${{ needs.images.outputs.published }}
         run: |
+          if [ "$NPM_RESULT" = "failure" ]; then
+            echo "::warning::the npm job failed — some @foldedspacelabs/metistry-* packages may be missing this version (see that job's ::error::s)"
+          fi
           parts=""
           [ "$NPM_PUBLISHED" = "true" ] && parts="${parts:+$parts, }npm"
           [ "$IMAGES_PUBLISHED" = "true" ] && parts="${parts:+$parts, }images"
@@ -524,15 +554,68 @@ jobs:
               echo "**Published:** neither npm nor images this run — see the run's \`::notice::\`s for why"
             fi
           } >> RELEASE_NOTES.md
-      - name: create or update the release
+      # Immutable releases are ON for this repo: once a release is published
+      # its assets and tag are frozen, and a deleted release's tag name can
+      # never be used again. So the release is created as a DRAFT carrying
+      # every asset, and only then published. Re-runs:
+      #   - a draft (an earlier attempt held or interrupted): assets are
+      #     re-uploaded (--clobber), then it is published;
+      #   - a published immutable release that already has every asset: only
+      #     the notes are refreshed (notes and title stay editable);
+      #   - a published immutable release MISSING assets: this fails with the
+      #     remedy — nothing can be added to it; cut the next patch version;
+      #   - a published release with immutability off: the old edit + upload.
+      # A macOS app or appcast job that FAILED (as opposed to skipped for want
+      # of secrets) holds the release as a draft, so fixing the secret and
+      # "Re-run failed jobs" completes it rather than shipping it without the DMG.
+      - name: create the release as a draft with every asset, then publish it
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.verify.outputs.version }}
+          MACOS_APP_RESULT: ${{ needs['macos-app'].result }}
+          APPCAST_RESULT: ${{ needs.appcast.result }}
         run: |
           tag="v${VERSION}"
-          if gh release view "$tag" >/dev/null 2>&1; then
-            gh release edit "$tag" --notes-file RELEASE_NOTES.md
-          else
-            gh release create "$tag" --title "Metistry ${VERSION}" --notes-file RELEASE_NOTES.md
+          hold=""
+          [ "$MACOS_APP_RESULT" = "failure" ] && hold="the macOS app job failed (no Metistry-${VERSION}.dmg)"
+          [ "$APPCAST_RESULT" = "failure" ] && hold="${hold:+$hold; }the Sparkle appcast job failed (no appcast.xml)"
+
+          draft=""
+          if gh release view "$tag" --json isDraft >/dev/null 2>&1; then
+            draft="$(gh release view "$tag" --json isDraft --jq .isDraft)"
           fi
-          gh release upload "$tag" assets/* --clobber
+
+          if [ -z "$draft" ]; then
+            # --verify-tag: never create the tag here; the owner's push made it.
+            gh release create "$tag" assets/* --draft --verify-tag \
+              --title "Metistry ${VERSION}" --notes-file RELEASE_NOTES.md
+          elif [ "$draft" = "true" ]; then
+            echo "::notice::$tag exists as a draft — refreshing its notes and assets"
+            gh release edit "$tag" --notes-file RELEASE_NOTES.md
+            gh release upload "$tag" assets/* --clobber
+          else
+            immutable="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/$tag" --jq '.immutable // false')"
+            if [ "$immutable" = "true" ]; then
+              have="$(gh release view "$tag" --json assets --jq '.assets[].name' | sort)"
+              missing="$(cd assets && ls | sort | comm -23 - <(printf '%s\n' "$have"))"
+              if [ -n "$missing" ]; then
+                echo "::error::$tag is already PUBLISHED as an immutable release and is missing: $(printf '%s\n' "$missing" | paste -sd' ' -). GitHub will not add assets to it, and a deleted immutable release's tag can never be reused — so this version cannot be repaired. Cut the next patch version instead (docs/ops/releases.md, \"Re-running a release\"). Optionally delete this release (gh release delete $tag, keeping the tag) so 'latest' points back at a complete release."
+                exit 1
+              fi
+              gh release edit "$tag" --notes-file RELEASE_NOTES.md
+              echo "::notice::$tag is already published with every asset — notes refreshed, nothing else to do"
+              exit 0
+            fi
+            # immutability off: the release is mutable, so edit it in place
+            gh release edit "$tag" --notes-file RELEASE_NOTES.md
+            gh release upload "$tag" assets/* --clobber
+            [ -n "$hold" ] && echo "::warning::$tag was already published, so it stays published without: $hold"
+            exit 0
+          fi
+
+          if [ -n "$hold" ]; then
+            echo "::error::$tag is a DRAFT and was NOT published: $hold. Publishing now would freeze an immutable release without it. Fix the failing job's cause (its ::error:: says what), then \"Re-run failed jobs\" on this run — this job re-runs and publishes the draft. To ship without it instead: gh release edit $tag --draft=false"
+            exit 1
+          fi
+          gh release edit "$tag" --draft=false
+          echo "published $tag with: $(cd assets && ls | paste -sd' ' -)"

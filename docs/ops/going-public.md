@@ -36,6 +36,10 @@ git ls-remote --heads origin                       # note every remote branch (s
 Stop every agent session, scheduled task and loop that can push to the
 repository, and do not start one until step 8. Do not enable GitHub's
 immutable releases before step 5 — it locks tags, and the tags must move.
+After the flip they are supported and on: `release.yml` builds each release
+as a draft with every asset and only then publishes it, and a deleted
+immutable release's tag can never be reused (`docs/ops/releases.md`,
+"Immutable releases, and re-running a release").
 
 ## 3. Rewrite the history, in a fresh clone
 
@@ -247,6 +251,10 @@ Then, in Settings:
    `APPLE_API_ISSUER_ID`, `APPLE_API_KEY_P8` and `SPARKLE_PRIVATE_KEY` into it,
    then delete the repository-level copies. `release.yml`'s four signing jobs
    already declare `environment: release` (`docs/ops/releases.md`, "Secrets").
+   A secret's value cannot be read back to move it — set each one again from
+   its source. `APPLE_API_KEY_P8` is the raw `AuthKey_<KEY_ID>.p8` file,
+   BEGIN/END lines included:
+   `env -u GH_TOKEN gh secret set APPLE_API_KEY_P8 --env release --repo foldedspacelabs/metistry < AuthKey_<KEY_ID>.p8`.
 6. **Rules → Rulesets → Main:** keep deletion, non-fast-forward and
    pull-request required; add **required status checks** — `checks` and,
    because it runs only when the Mac app changes, not `macos-app`.
@@ -265,7 +273,13 @@ Settings → General → Danger Zone → Change visibility → Public.
 - **Confirm the release path** on the next release: the appcast URL still
   answers, the DMG still auto-updates from the previous version, and npm now
   publishes **with provenance** (`release.yml` adds `--provenance` for a
-  public repository; the package page shows the provenance badge).
+  public repository; the package page shows the provenance badge). The first
+  release after the flip, v0.15.0, failed all three ways this can: npm
+  refused the provenance (no `repository` in the package manifests), the
+  immutable release refused its assets after creation (it shipped empty), and
+  notarization refused `APPLE_API_KEY_P8`. All three are handled now
+  (`docs/ops/releases.md`, "Publishing to npm", "Immutable releases, and
+  re-running a release", "Secrets"); v0.15.0 itself cannot be repaired.
 - **Watch the first outside PR**: CI waits for approval, runs with a
   read-only token, and reads no secret.
 - **Announce.**

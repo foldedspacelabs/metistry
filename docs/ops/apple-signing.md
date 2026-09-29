@@ -321,7 +321,8 @@ which matters once it's a CI credential rather than a by-hand one.
 never committed): the Developer ID Application certificate exported as
 `APPLE_CERTIFICATE_P12` (base64-encoded) plus `APPLE_CERTIFICATE_PASSWORD`
 (its export password), `APPLE_TEAM_ID`, and the three notarytool API-key
-values — `APPLE_API_KEY_P8` (the `.p8` contents, base64-encoded),
+values — `APPLE_API_KEY_P8` (the `.p8` file's raw contents, BEGIN/END lines
+included; base64 of it is still accepted),
 `APPLE_API_KEY_ID`, `APPLE_API_ISSUER_ID`. Export the `.p12` from Keychain
 Access (select the cert → right-click → Export) directly into
 `gh secret set` — pipe it, don't save it to disk first:
@@ -334,7 +335,7 @@ so set its secret straight from that file and then delete it — it should
 never persist anywhere but Keychain Access's own record and the GitHub
 secret:
 ```sh
-base64 < AuthKey_XXXXXXXXXX.p8 | gh secret set APPLE_API_KEY_P8 --repo foldedspacelabs/metistry
+gh secret set APPLE_API_KEY_P8 --env release --repo foldedspacelabs/metistry < AuthKey_XXXXXXXXXX.p8
 rm -f AuthKey_XXXXXXXXXX.p8
 ```
 Same rule for any `.p12` that does land on disk (a re-export, a backup

@@ -1435,6 +1435,7 @@ agent's pass, per the PR close rule; the owner reviews at checkpoints.
 | W3 | T2-12, T2-13 · T3-8, T3-10, T3-11 · T4-9, T4-12 → T4-13, T4-19, T4-22, T4-23, T4-25, T4-26 · T6-4…T6-11 · T7-4, T7-5 · T8-2a → T8-2b, T8-6 · T9-3 · T10-7 · X-6…X-23 |
 | W4 | T4-10 → T4-11, T4-14; T4-15 → T4-17 · T6-12, T6-13a, T6-13b, T6-14, T6-15, T6-16 · T7-6 · T8-3, T8-4, T8-5, T8-7 · T9-4 (merges after the eval clears its bar) |
 | W5 | X-1 |
+| Candidates | X-24…X-74 — specified, not scheduled; the owner assigns each a wave at a checkpoint (W3 housekeeping) |
 
 ### 3.3 The tickets
 
@@ -2943,6 +2944,502 @@ rows.
 *Files:* `seed/queries/activity_feed.yaml`, `seed/queries/turn_progress.yaml`.
 *Tests:* **a `connection_call` run appears in both queries, with no argument or
 secret value**.
+*Accept:* —
+
+#### X — Follow-ups found in W3
+
+What the W3 builders and reviewers reported outside their tickets (PRs
+#403–#449; `docs/product/decisions-log.md`, *W3*). None is in a wave: §3.2's
+*Candidates* row holds them until the owner schedules them at a checkpoint. A
+ticket that waits on one of the owner's open W3 questions says so by number.
+Each is its own PR, outside any track's files.
+
+**X-24 · Plan-tomorrow's test runs on its own clock** · S · deps X-15 —
+*Spec:* `routines/test/plan-tomorrow.integration.test.ts` writes real `now()`
+into `runs` while asserting against a fixed clock, so "two closes re-render, the
+23:00 run supersedes them" fails by time of day — the most frequent W3 flake
+(four PRs). The test pins every `runs` timestamp it writes to its clock.
+*Files:* `routines/test/plan-tomorrow.integration.test.ts`.
+*Tests:* **the suite passes with the wall clock at 22:59, 23:01 and 00:30**.
+*Accept:* —
+
+**X-25 · DB-backed suites survive file parallelism** · M —
+*Spec:* suites sharing one scratch database collide under vitest's default file
+parallelism: the console's `work_pkey` duplicate, `crews.integration` beside an
+inbox suite, `today-routes` and the C45 suite; `routines`' `reply-review` (the
+`reply_feedback_outbound_message_id_fkey` violation) and `weekly-review` (rows
+another suite left at the real `now()`); `packages/cli`'s `up.perf`. Each suite
+owns its rows — keys of its own and cleanup scoped to them — or its package
+runs DB-backed files serially; a test-only change.
+*Files:* the named suites under `apps/console/test/`, `routines/test/`,
+`packages/cli/test/`; each package's vitest config.
+*Tests:* **every named suite passes ten consecutive full `pnpm test` runs with
+default file parallelism**.
+*Accept:* —
+
+**X-26 · Linear's sync reads in a stable order** · S · deps T4-26 —
+*Spec:* `collectors/linear/run.ts` selects without `ORDER BY`, so its result
+depends on Postgres's row order — the root cause of the `linear.integration`
+flake. Every read that feeds a decision orders by a key.
+*Files:* `collectors/linear/run.ts`.
+*Tests:* **the sync's outcome is identical whatever order Postgres returns the
+rows in**.
+*Accept:* —
+
+**X-27 · The router-policy test has no wall-clock bound** · S —
+*Spec:* `packages/core/test/router-policy.test.ts` asserts a real elapsed time
+(115 ms, measured 161 ms once), so a loaded runner fails it. The timeout is
+proven on an injected clock.
+*Files:* `packages/core/test/router-policy.test.ts`.
+*Tests:* as spec.
+*Accept:* —
+
+**X-28 · The chat viewport test is deterministic** · S —
+*Spec:* `apps/macos/tests/kit/chat-view-tests.swift` —
+`theViewportNeverMovesOnAnArrivingReply` fails intermittently in several W3
+PRs. Find the race and remove it; the behaviour it pins stays.
+*Files:* `apps/macos/tests/kit/chat-view-tests.swift`,
+`apps/macos/sources/kit/chat-view.swift` only if the race is in the view.
+*Tests:* **the test passes 50 runs in a row**.
+*Accept:* —
+
+**X-29 · Main's Mac fixtures match the recorder** · M —
+*Spec:* main's fixtures predate the recorder's current seed (it seeds seven
+syncs plus standup and session-fold runs; `get-api-scheduled` has four), so any
+full re-record breaks `macos-app`. Re-record every fixture on main in one PR and
+move the Swift tests that pin the old values (T6-4's Knowledge and T6-6's
+Scheduled) with them.
+*Files:* `apps/macos/tests/kit/fixtures/`,
+`apps/macos/tests/kit/knowledge-view-tests.swift`,
+`apps/macos/tests/kit/scheduled-view-tests.swift` (and any other test the
+re-record moves).
+*Tests:* **a full re-record on main leaves `swift test` green**.
+*Accept:* `record-client-fixtures.mjs --check` and `swift test` green.
+
+**X-30 · The recorder checks the values a contract depends on** · M · deps X-29 —
+*Spec:* `record-client-fixtures.mjs --check` compares shape only, so a fixture
+whose values moved (a count, a word, an order) passes while the Swift tests
+reading it break. Contract-critical fixtures — named in the recorder, with the
+reason — are also compared by value, clocks and ids aside.
+*Files:* `apps/console/scripts/record-client-fixtures.mjs`, `docs/ops/testing.md`.
+*Tests:* **a changed value in a named fixture fails `--check`; a changed
+timestamp does not**.
+*Accept:* —
+
+**X-31 · The recorder's seeds are pinned to its clock** · S —
+*Spec:* three sources of drift between recordings: raw proposal `INSERT`s use
+Postgres `now()`, not `RECORDING_NOW`; the seeded crew call lands on the
+recording day, so a re-record on the 1st changes the daily spend; and
+`get-api-runs-export` reads the newest rows, so leftovers in the scratch
+database change it. Every seeded timestamp derives from `RECORDING_NOW`, and
+the export fixture selects its seeded ids.
+*Files:* `apps/console/scripts/record-client-fixtures.mjs`.
+*Tests:* **two recordings with different wall clocks, one on a dirty scratch
+database, produce identical fixtures**.
+*Accept:* —
+
+**X-32 · A push carries Needs You only, and no text** · M —
+*Spec:* `apps/console/src/push.ts`'s `startNotifier` pushes every
+`outbound_messages` row — 160 characters of its text, url `/`, no type. Screen 18
+§6: only Needs You items push, the payload is type, title and the card's deep
+link, never a body. The worker ignores the body today, but the text still leaves
+the console for the push service.
+*Files:* `apps/console/src/push.ts`, `apps/console/web/sw.js`,
+`docs/ops/client-api.md`.
+*Tests:* **an outbound message never pushes; a Needs You push carries type,
+title and its card's url and nothing else**.
+*Accept:* —
+
+**X-33 · The PWA's last browser dialogs** · S —
+*Spec:* `prompt()` and `confirm()` survive in `app.js` (the thumbs-down note, a
+device revoke), `more.js` (agent revoke) and `work.js`. Each becomes the PWA's
+own in-page confirmation, which the owner can read and VoiceOver can reach.
+*Files:* `apps/console/web/app.js`, `apps/console/web/more.js`,
+`apps/console/web/work.js`.
+*Tests:* **no `prompt(` or `confirm(` remains under `apps/console/web/`**.
+*Accept:* —
+
+**X-34 · Ask First raises one card per subject** · M · deps T4-9 —
+*Spec:* an Ask First connection call raises a new request every time it is
+attempted, so a daily routine files a daily card for the same call. One
+subject, one card: a pending request for the same agent, connection, tool and
+arguments is reused (its `last_seen` moved), never duplicated.
+*Files:* `packages/core/src/actions.ts`, `packages/mcp-brain/src/connection-confirm.ts`.
+*Tests:* **the same call attempted twice while pending leaves one request;
+after it is answered, the next attempt raises a new one**.
+*Accept:* —
+
+**X-35 · Approve re-checks the agent** · S · deps T4-9 —
+*Spec:* approving an Ask First `connection_call` runs it even when the agent that
+asked was revoked since; T2-15 already refuses the same case for enrolment. A
+revoked agent's call answers 404 and stays pending.
+*Files:* `apps/console/src/actions.ts`.
+*Tests:* **Approve after the agent is revoked runs nothing and stays pending**.
+*Accept:* —
+
+**X-36 · Run detail shows connection calls** · S · deps T6-10, X-23 —
+*Spec:* `seed/queries/run_detail.yaml` lists only `kind = 'tool'` rows, so a
+turn's `connection_call` rows are invisible in Run detail while Activity shows
+them (X-23).
+*Files:* `seed/queries/run_detail.yaml`, its fixture.
+*Tests:* **a turn's `connection_call` appears in its run detail with no argument
+or secret value**.
+*Accept:* F-7's run-detail fixture re-recorded.
+
+**X-37 · A crew keeps its caller's interactivity** · S · deps T3-8 —
+*Spec:* `apps/console/src/crews.ts`'s `dispatchCrew` does not pass the
+interactive bit to a nested crew, so a crew a routine delegated to can pause
+for an owner who is not there. The bit is threaded through every dispatch.
+*Files:* `apps/console/src/crews.ts`.
+*Tests:* **a routine-started crew's nested crew runs non-interactive**.
+*Accept:* —
+
+**X-38 · The owner sees an actor's connections in its scope** · S —
+*Spec:* `packages/core/src/actor.ts`'s `scopeOfRegistryRow` never copies
+`connections` into the owner-facing `Scope`, so an agent's connection grants
+are enforced but not shown. Display only.
+*Files:* `packages/core/src/actor.ts`.
+*Tests:* **an agent granted a connection shows it in its scope**.
+*Accept:* —
+
+**X-39 · A revoked connection grant refuses the next call** · S · deps X-8 —
+*Spec:* X-8 persists an agent's connection grants but no test revokes one: after
+the owner removes the grant, the agent's next `authenticateAgent` carries no
+such connection and its next call is refused. A test-only ticket unless the
+test finds a bug.
+*Files:* `apps/console/test/`.
+*Tests:* as spec, bold.
+*Accept:* —
+
+**X-40 · A failed connection call in turn progress** · S · deps X-23 —
+*Spec:* X-23 surfaces `connection_call` rows in `turn_progress` but tests only
+the successful one: a failed call shows its bounded error code, never the
+upstream's text or an argument.
+*Files:* `seed/queries/turn_progress.yaml`, its test.
+*Tests:* **a failed `connection_call` row carries `r.error`'s bounded code
+only**.
+*Accept:* —
+
+**X-41 · An owner-door secret refuses a connection or agent grant** · S · deps T2-13 —
+*Spec:* `metistry secrets grant github_write connection:*` (or `agent:*`) is
+refused only by convention, and `docs/ops/cli.md` even documents it as valid. A
+secret an owner door holds refuses any `connection:` or `agent:` grantee at the
+tool, modelled on X-7's `provider:` grantee check; `cli.md` says so and drops
+its "no connection or agent is granted it" claim.
+*Files:* `packages/core/src/secrets.ts`, `packages/cli/src/secrets.ts`,
+`docs/ops/cli.md`.
+*Tests:* **granting `github_write` to a connection or an agent is refused; the
+owner door still reads it**.
+*Accept:* —
+
+**X-42 · An owner door is a grantee kind** · M · deps X-41 —
+*Spec:* waits on the owner's W3 question 9. Owner doors (`github_write`, the
+eventkit move token) are neither `connection:` nor `agent:`, so `secrets.yaml`
+cannot say which door holds a secret. If ruled, `secrets.yaml` gains an
+`owner-door:<name>` grantee and each owner door reads only a secret granted to
+it.
+*Files:* `packages/core/src/secrets.ts`, `packages/cli/src/secrets.ts`,
+`apps/console/src/github-write.ts`, `docs/ops/cli.md`.
+*Tests:* **a door reads only a secret granted to it**.
+*Accept:* —
+
+**X-43 · `private` is a reserved tier name** · S · deps T8-6 —
+*Spec:* a `rules.yaml` tier named `private` parses but is shadowed by T8-6's
+private tier and refused only at resolution. `packages/core/src/tiers.ts`'s
+schema reserves the name.
+*Files:* `packages/core/src/tiers.ts`.
+*Tests:* **a `rules.yaml` tier named `private` is refused when parsed, naming
+the reserved word**.
+*Accept:* —
+
+**X-44 · Every compute call goes through the egress guard** · M · deps X-7 —
+*Spec:* X-7 routes compute through T4-2's guard, but three callers still build
+their own `Authorization: Bearer`: `packages/eval` (`judge.ts`, `intents.ts`,
+the key from `main.ts`'s `--api-key-env`) sends it to any `--url`; and the
+CLI's `compute providers test` / `models list` (`local-models.ts`,
+`compute.ts`) probe `GET <base_url>/models`. Each goes through the guard with
+the provider's grant and host binding.
+*Files:* `packages/eval/src/judge.ts`, `packages/eval/src/intents.ts`,
+`packages/eval/src/main.ts`, `packages/cli/src/local-models.ts`,
+`packages/cli/src/compute.ts`.
+*Tests:* **no file outside the guard builds an `Authorization` header for a
+compute call** (a source scan), and each caller's host binding is enforced.
+*Accept:* —
+
+**X-45 · A secret too short to redact safely is refused when stored** · S · deps X-7 —
+*Spec:* `SecretRedactor.find` (`packages/core/src/redact.ts`) is a plain
+`includes()`, so a one- or two-character credential is "found" in every model
+body and refused as `secret_in_model_body`. Redaction never skips a value;
+instead a secret shorter than a minimum length is refused at `secrets set`, so
+no stored secret can collide with ordinary text (the owner's W3 question 27).
+*Files:* `packages/core/src/secrets.ts`, `packages/cli/src/secrets.ts`,
+`packages/core/src/redact.ts`.
+*Tests:* **a too-short secret is refused at set, and redaction still finds every
+stored secret**.
+*Accept:* —
+
+**X-46 · A provider refusal is one request per secret** · S · deps T4-23 —
+*Spec:* `apps/assistant/src/provider-refusal.ts` raises one Needs You request
+per provider, so two failing secrets on one provider share a card and the
+second's fix is invisible. One request per secret.
+*Files:* `apps/assistant/src/provider-refusal.ts`.
+*Tests:* **two failing secrets on one provider raise two requests; the same
+secret failing twice raises one**.
+*Accept:* —
+
+**X-47 · `secrets sync` restarts only what changed** · M —
+*Spec:* `metistry secrets sync --to env` re-renders and restarts the whole
+supervisor (`env-follow.ts`) when one value changed, taking every service down
+for a single token. Only the children whose environment changed are restarted.
+*Files:* `packages/cli/src/env-follow.ts`, `packages/cli/src/secrets.ts`.
+*Tests:* **changing one service's token restarts that service and no other**.
+*Accept:* —
+
+**X-48 · Doctor's sandbox row reports what runs** · S —
+*Spec:* doctor's sandbox row reported the reconciler unconfined on the live
+instance when it was not; `confinementRow` (`packages/cli/src/doctor.ts`)
+derives the answer from `supervisor.json`'s argv, not the running child.
+Reproduce first; the row then reads the running process's argv (or says it
+could not), and never calls a confined child unconfined.
+*Files:* `packages/cli/src/doctor.ts`.
+*Tests:* **a stale `supervisor.json` beside a confined running child does not
+report it unconfined**.
+*Accept:* —
+
+**X-49 · The brain's eager surface has headroom** · M —
+*Spec:* waits on the owner's W3 question 26. The eager-surface ratchet is at
+4,597 of 4,600 tokens and the tool count at its ceiling of 28 (T2-13 pushed it
+over; T4-9 and X-10 trimmed it back). Either move rarely used tools behind lazy
+discovery or raise the ceiling by ruling, with the ratchet's comment saying
+which.
+*Files:* `packages/mcp-brain/src/`, `packages/mcp-brain/test/brain.test.ts`,
+`ops/scripts/check-tool-surface.mjs`.
+*Tests:* the ratchet, with at least 300 tokens of headroom.
+*Accept:* —
+
+**X-50 · Session-purge is quiet while the Session Fold is paused** · S · deps T3-10 —
+*Spec:* `routines/session-purge/run.ts` warns every night that sessions wait
+for the fold while the owner has paused the Session Fold. While it is paused,
+the purge says so once, not as a nightly warning.
+*Files:* `routines/session-purge/run.ts`.
+*Tests:* **a paused fold produces no nightly warning; resumed, the warning
+returns**.
+*Accept:* —
+
+**X-51 · A routine's dated file the assistant created** · S · deps X-11 —
+*Spec:* waits on the owner's W3 question 6. Since X-11 the assistant may create
+today's `Journal/Brief/`, `Journal/Standup/` or `Journal/Plan/` file before the
+routine runs; the routine then skips the day with outcome `user_owned`, which
+misnames an assistant-created file. The outcome names its source — or, if
+ruled, the routine fills its slots in that file instead of skipping.
+*Files:* `routines/morning-brief/run.ts`, `routines/plan-tomorrow/run.ts`,
+`routines/standup/run.ts`.
+*Tests:* **an assistant-created dated file is not reported `user_owned`**.
+*Accept:* —
+
+**X-52 · The weekly review counts only the owner's decisions** · S —
+*Spec:* `routines/weekly-review/run.ts` counts automatic decisions (the policy's,
+a routine's) as the owner's.
+*Files:* `routines/weekly-review/run.ts`.
+*Tests:* **an automatic decision is not in the owner's count**.
+*Accept:* —
+
+**X-53 · The meeting note reads `METISTRY_TZ` only** · S —
+*Spec:* `apps/console/src/meeting-note-route.ts` (and its caller in `server.ts`)
+still falls back to `TZ`, against the ruling that the zone fallback is
+`METISTRY_TZ` only.
+*Files:* `apps/console/src/meeting-note-route.ts`, `apps/console/src/server.ts`.
+*Tests:* **with `TZ` set and `METISTRY_TZ` unset the route refuses
+`no_timezone`**.
+*Accept:* —
+
+**X-54 · Calendar location and name chips are sanitised** · S · deps X-16 —
+*Spec:* X-16 sanitises event titles in `{{ calendar }}`; an event's location and
+its calendar's name reach the same prompt through the same injection surface.
+They are sanitised the same way.
+*Files:* the file X-16 changed in `packages/core/src/`.
+*Tests:* **a location or calendar name carrying an instruction is rendered
+inert**.
+*Accept:* —
+
+**X-55 · Moving a meeting someone else organised** · S · deps T2-12 —
+*Spec:* waits on the owner's W3 question 12. T2-12's owner door moves a meeting
+the owner did not organise. The door follows the ruling — refused with the
+organiser named, or moved with the attendees told — at the tool.
+*Files:* `apps/console/src/meeting-move-route.ts`.
+*Tests:* **a meeting organised by someone else is handled as ruled**.
+*Accept:* —
+
+**X-56 · An iCloud CalDAV account needs no second step** · M · deps T4-13 —
+*Spec:* after the first sync, iCloud's per-account `pNN-caldav` host needs two
+owner commands before writes work. The setup flow discovers the host and
+records it (host allowlist included) itself.
+*Files:* `collectors/caldav-calendar/run.ts`, `packages/connections/src/caldav.ts`,
+`packages/cli/src/` (the connection setup).
+*Tests:* **a discovered `pNN-caldav` host is recorded and allowed with no owner
+command, and only an `icloud.com` host is accepted**.
+*Accept:* —
+
+**X-57 · CalDAV's own-event write has a door** · M · deps T4-13 —
+*Spec:* T4-13 ships `changeOwnEvent`, but no console route calls it, so no client
+can move or edit the owner's own CalDAV event. A route, owner-only, through the
+connection.
+*Files:* `apps/console/src/`, `docs/ops/client-api.md`.
+*Tests:* U2; **a stale ETag answers `409 stale`**.
+*Accept:* F-7's fixture recorded, and the Mac store method in the same PR.
+
+**X-58 · Add to Today for GitHub tasks** · S · deps X-12, T4-23 —
+*Spec:* ruling 11's door (X-12, `POST /api/today/add`) calls Linear's
+`addIssueToToday` only; T4-23's GitHub `task` mirror serves the same Add to
+Today primary answer, which the door refuses. The door takes a GitHub mirror's
+key through its own idempotent service, never writing the owner's notes.
+*Files:* `apps/console/src/today-routes.ts`, `collectors/` (the GitHub
+mirror's service), `docs/ops/client-api.md`.
+*Tests:* **Add to Today on a GitHub task puts it on Today once; a second press
+replays the first**.
+*Accept:* —
+
+**X-59 · Linear's Close offer and Done chip in the clients** · M · deps T4-26 —
+*Spec:* T4-26 serves completion both ways, but no client draws it: the Close
+offer on a ticked task linked to a Linear issue, and the *Done in Linear* chip.
+*Files:* `apps/console/web/today.js`, `apps/macos/sources/kit/today-view.swift`.
+*Tests:* §2.18; **Close sends the tracker door once, after the owner's press**.
+*Accept:* —
+
+**X-60 · The PWA does not count the assistant as a project member** · S —
+*Spec:* the PWA's project view counts the assistant among a project's members;
+the Mac does not.
+*Files:* `apps/console/web/work.js`.
+*Tests:* **a project whose only other member is the assistant shows one
+member**.
+*Accept:* —
+
+**X-61 · Add to Today on the Mac** · S · deps X-12 —
+*Spec:* X-12 added `TodayStore.addToToday` with no control. A task card's primary
+answer calls it.
+*Files:* `apps/macos/sources/kit/request-bodies/`,
+`apps/macos/sources/kit/today-model.swift`.
+*Tests:* §2.18; **the control sends the door once**.
+*Accept:* —
+
+**X-62 · The Mac names a connection call** · S · deps X-23 —
+*Spec:* `activity-view.swift` has no glyph for `connection_call` (it falls to
+`circle.dotted`), and the chat tool strip shows `connections_call` for every
+proxied call because the upstream tool is only in `meta`. Activity gets a glyph;
+the strip binds by `turn_id` (X-18) and names the upstream tool, never an
+argument.
+*Files:* `apps/macos/sources/kit/activity-view.swift`,
+`apps/macos/sources/kit/chat-view.swift`.
+*Tests:* §2.18; **a proxied call's strip entry names its connection and tool
+only**.
+*Accept:* —
+
+**X-63 · SavedTaskView reads Slipping and Owed** · S · deps X-14 —
+*Spec:* X-14 made Slipping and Owed real `where:` views, but the Mac's
+`today-model.swift` `SavedTaskView` still passes `filter: nil` and dims them.
+*Files:* `apps/macos/sources/kit/today-model.swift`,
+`apps/macos/tests/kit/today-view-tests.swift`.
+*Tests:* **Slipping and Owed load their `where:` filter**.
+*Accept:* —
+
+**X-64 · The Mac's receipt knows "acknowledged"** · S · deps X-10 —
+*Spec:* a `409 already_decided` receipt words the earlier decision, but has no
+word for X-10's `acknowledged`.
+*Files:* `apps/macos/sources/kit/console-data.swift`,
+`apps/macos/sources/kit/needs-you-view.swift`.
+*Tests:* **a report acknowledged elsewhere reads "Acknowledged"**.
+*Accept:* —
+
+**X-65 · A route for collector health** · S · deps T6-4 —
+*Spec:* waits on the owner's W3 question 14 (which door serves it). T6-4's
+Knowledge draws source health, but `collector_health` is not served, so the
+Mac shows none.
+*Files:* `seed/queries/collector_health.yaml`, `docs/ops/client-api.md`.
+*Tests:* U2; the fixture.
+*Accept:* F-7's fixture recorded, and the Mac store method in the same PR.
+
+**X-66 · Run detail carries its route and a routine run's session** · M · deps T6-10 —
+*Spec:* `run_detail` does not join a turn's `kind: route` row, so Run detail
+shows the tier but not why; and `routine_run` rows carry no `session_id` or
+`turn_id`, so Scheduled's History and an agent's recent work cannot open Run
+detail.
+*Files:* `seed/queries/run_detail.yaml`, `apps/console/src/runner.ts`.
+*Tests:* **a routed turn shows its route's reasons; a routine run opens its run
+detail**.
+*Accept:* F-7's fixtures re-recorded.
+
+**X-67 · The board row carries why it is blocked, and one task has a route** · M · deps T6-7 —
+*Spec:* T6-7's card detail cannot draw History, `depends_on` or a blocked
+reason — the board row serves none — and there is no single-task route to
+refresh one card.
+*Files:* `seed/queries/board.yaml`, `apps/console/src/task-routes.ts`,
+`docs/ops/client-api.md`.
+*Tests:* U2; **a blocked card names what blocks it**.
+*Accept:* F-7's fixtures recorded, and the Mac store method in the same PR.
+
+**X-68 · The artifacts list says what each one is** · M · deps T6-9 —
+*Spec:* screen 16 §1 asks for each artifact's title and its latest version and
+author; `GET /api/artifacts` serves a slug, `current_version` as an id and the
+first author. An older version's file is served only while its hash matches the
+working tree, so older versions are mostly unreadable.
+*Files:* `apps/console/src/artifacts-routes.ts`, `docs/ops/client-api.md`.
+*Tests:* **the list carries title, latest version number and author; an older
+version is readable after the file changed**.
+*Accept:* F-7's fixtures re-recorded.
+
+**X-69 · Settings can name a release and count doctor's checks** · M · deps T6-11 —
+*Spec:* nothing serves the latest or the previous runtime release, so §5.4's
+What's New is not drawn and Roll Back cannot name the version it returns to;
+and `doctor --json` streams no progress count for components-03's *Checking 9 of
+16*.
+*Files:* `apps/console/src/`, `packages/cli/src/doctor.ts`,
+`docs/ops/client-api.md`, `docs/ops/cli.md`.
+*Tests:* U2; **the release route names the running, latest and previous
+versions**.
+*Accept:* F-7's fixture recorded, and the Mac store method in the same PR.
+
+**X-70 · A session's fold items are served** · S · deps T3-10, T6-10 —
+*Spec:* the Session Fold's accepted and declined items are not served per
+session, so Run detail cannot show what a session taught.
+*Files:* `seed/queries/`, `docs/ops/client-api.md`.
+*Tests:* **a folded session lists its accepted and declined items**.
+*Accept:* F-7's fixture recorded.
+
+**X-71 · `init` resolves the shape before it asks about keep-awake** · S · deps X-20 —
+*Spec:* interactive `metistry init` (`packages/cli/src/main.ts`) asks the
+keep-awake question before `init()` resolves the shape, so a compose install is
+asked and then refused (X-20).
+*Files:* `packages/cli/src/main.ts`, `packages/cli/src/init.ts`.
+*Tests:* **an interactive compose init is never asked about keep-awake**.
+*Accept:* —
+
+**X-72 · The recorder's sockets live under the instance** · S · deps T8-2b —
+*Spec:* waits on the owner's W3 question 29. The recorder's socket is not
+namespaced per instance, `METISTRY_LC_SOCKET` defaults under `/tmp` rather than
+the state directory, and `ek-helper` truncates a socket path of 104 bytes or
+more (fixed only in the new helper). Sockets live under
+`.metistry/state/`, per instance, and a path too long is refused, never
+truncated.
+*Files:* `packages/mcp-live-capture/src/main.ts`,
+`packages/mcp-live-capture/helper/sources/helper/main.swift`,
+`packages/mcp-eventkit/helper/ek-helper.swift`.
+*Tests:* **two instances' recorders never share a socket; a too-long path is
+refused**.
+*Accept:* —
+
+**X-73 · Transcripts land where the ruling says** · S · deps T8-2b —
+*Spec:* waits on the owner's W3 question 29. T8-2b delivers transcripts to
+`Inbox/`; the design names `Journal/Transcripts/`.
+*Files:* `packages/mcp-live-capture/src/`.
+*Tests:* **a finished session's transcript lands in the ruled folder**.
+*Accept:* —
+
+**X-74 · CI's Swift-helper filter is anchored** · S —
+*Spec:* #417's path filter `.*Package\.swift$` is unanchored, so any
+`Package.swift` anywhere runs the helper tests. It names
+`packages/*/Package.swift`.
+*Files:* `.github/workflows/ci.yml`.
+*Tests:* as spec.
 *Accept:* —
 
 #### W5 — Acceptance

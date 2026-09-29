@@ -95,6 +95,7 @@ describe("metistry update", () => {
       `launchctl kickstart -k gui/501/${RECONCILER}`,
       `launchctl kickstart -k gui/501/${WATCHDOG}`,
       `POST http://127.0.0.1:7812/vault/write .metistry/metistry.lock (principal user, "metistry update → 0.0.9")`,
+      "POST http://127.0.0.1:7812/flush (commit what this run wrote before anything restarts the reconciler)",
       "metistry doctor",
     ]);
     expect(r.lock).toEqual({ product: { version: "0.0.9", commit: "<HEAD after pull>", source: "git" }, updated_at: NOW.toISOString(), migrations_applied: [] });
@@ -140,7 +141,9 @@ describe("metistry update", () => {
     // the lock: through the bridge, on the OWNER bearer (the console's `tok`
     // is not a fallback for a §4.7 path), principal user, the documented
     // message, the documented shape
-    expect(f.calls.length).toBe(1);
+    // …and then the flush that commits it before anything can restart the reconciler (W3 D1)
+    expect(f.calls.map((c) => c.url)).toEqual(["http://127.0.0.1:7812/vault/write", "http://127.0.0.1:7812/flush"]);
+    expect((f.calls[1]!.init.headers as Record<string, string>).authorization).toBe("Bearer owner-tok");
     expect(f.calls[0]!.url).toBe("http://127.0.0.1:7812/vault/write");
     expect((f.calls[0]!.init.headers as Record<string, string>).authorization).toBe("Bearer owner-tok");
     const body = JSON.parse(String(f.calls[0]!.init.body)) as { path: string; content: string; intent: unknown };
@@ -280,7 +283,7 @@ describe("metistry update", () => {
     const r = await update({ ...base(P, noOwner()), out: (l) => lines.push(l), exec: fakeExec(), skipBuild: true, skipMigrate: true, fetchFn, mintOwnerToken: () => "fresh-owner", doctorFn: okDoctor, reconcilerReady: { intervalMs: 1, timeoutMs: 5_000 } });
     expect(r.code).toBe(0);
     expect(r.restarted).toEqual([RECONCILER]);
-    expect(calls).toEqual([...Array(4).fill("http://127.0.0.1:7812/check"), "http://127.0.0.1:7812/vault/write"]);
+    expect(calls).toEqual([...Array(4).fill("http://127.0.0.1:7812/check"), "http://127.0.0.1:7812/vault/write", "http://127.0.0.1:7812/flush"]);
     expect(lines.join("\n")).toContain("reconciler: answering again at http://127.0.0.1:7812 after its restart");
 
     // one that never comes back (the owner's 0.14.1 run gave up at 60 s,
@@ -301,6 +304,62 @@ describe("metistry update", () => {
     expect(r2.lock?.product.source).toBe("git"); // the lock it WOULD have written is still the result's
     expect(text2).toContain("update incomplete");
     expect(text2).not.toContain("did not answer (fetch failed http://127.0.0.1:7812/vault/write)");
+  });
+
+  // W3 checkpoint D1: the lock and secrets.yaml were written through the
+  // reconciler, then the launchd env step restarted the supervisor inside
+  // the reconciler's 30 s flush window, and both stayed uncommitted for
+  // good. The update now asks for the commit itself, after the last write
+  // and before anything that can restart the process holding the queue.
+  it("launchd shape: the reconciler is asked to commit this run's writes after the last one and before the launchd env step", async () => {
+    const P = await checkout({ git: true });
+    await put(P, "seed/deployment.yaml", "shape: launchd\nservices: {}\n");
+    const inst = await mkdtemp(join(tmpdir(), "mi-"));
+    await mkdir(join(inst, ".metistry", "state"), { recursive: true });
+    await writeFile(join(inst, ".metistry", "state", ".env"), "METISTRY_A=1\n");
+    const home = await mkdtemp(join(tmpdir(), "mh-"));
+    const timeline: string[] = [];
+    const fetchFn = (async (url: string | URL | Request, init?: RequestInit) => {
+      const path = new URL(String(url)).pathname;
+      timeline.push(`fetch ${path}${path === "/vault/write" ? ` ${(JSON.parse(String(init?.body)) as { path: string }).path}` : ""}`);
+      const body = path === "/flush" ? { commits: [{ sha: "a", principal: "user", group: "write:1", paths: [".metistry/metistry.lock"] }, { sha: "b", principal: "user", group: "write:2", paths: [".metistry/secrets.yaml"] }], skipped: 0, failed: 0 } : { queued: true };
+      return new Response(JSON.stringify(body), { status: path === "/flush" ? 200 : 201, headers: { "content-type": "application/json" } });
+    }) as unknown as typeof fetch;
+    const env: NodeJS.ProcessEnv = { HOME: home, METISTRY_INSTANCE_DIR: inst, ...BRIDGE };
+    const r = await update({ ...base(P, env), out: (l) => timeline.push(l.trim()), exec: fakeExec(), skipBuild: true, skipMigrate: true, fetchFn, doctorFn: okDoctor });
+
+    expect(r.code).toBe(0);
+    const at = (entry: string) => timeline.findIndex((l) => l.includes(entry));
+    const flush = at("fetch /flush");
+    expect(at("fetch /vault/write .metistry/metistry.lock")).toBeGreaterThanOrEqual(0);
+    expect(flush).toBeGreaterThan(at("fetch /vault/write .metistry/metistry.lock"));
+    expect(flush).toBeGreaterThan(at("== secrets"));
+    expect(at("== launchd env")).toBeGreaterThan(flush);
+    expect(timeline.filter((l) => l === "fetch /flush")).toHaveLength(1);
+    expect(r.pendingCommit).toEqual({ ok: true, commits: 2, detail: "committed 2 changes this run wrote, as user" });
+    expect(timeline).toContain("committed 2 changes this run wrote, as user");
+  });
+
+  it("the commit step never fails the update: a reconciler that does not answer, or is mid-merge, is one line", async () => {
+    const P = await checkout({ git: true });
+    const inst = await mkdtemp(join(tmpdir(), "mi-"));
+    const answer = (status: number, body: unknown) =>
+      (async (url: string | URL | Request) =>
+        String(url).endsWith("/flush") ? new Response(JSON.stringify(body), { status }) : new Response(JSON.stringify({ queued: true }), { status: 201 })) as unknown as typeof fetch;
+    const run = (fetchFn: typeof fetch) => update({ ...base(P, { METISTRY_INSTANCE_DIR: inst, ...BRIDGE }), exec: fakeExec(), skipBuild: true, skipMigrate: true, fetchFn, doctorFn: okDoctor });
+
+    const paused = await run(answer(200, { commits: [], skipped: 0, failed: 0, paused: "merge" }));
+    expect(paused.code).toBe(0);
+    expect(paused.pendingCommit?.detail).toContain("a git merge is in progress");
+    const refused = await run(answer(500, { error: { code: "internal" } }));
+    expect(refused.code).toBe(0);
+    expect(refused.pendingCommit).toMatchObject({ ok: false, commits: 0 });
+    const down = await run((async (url: string | URL | Request) => {
+      if (String(url).endsWith("/flush")) throw new TypeError("fetch failed");
+      return new Response(JSON.stringify({ queued: true }), { status: 201 });
+    }) as unknown as typeof fetch);
+    expect(down.code).toBe(0);
+    expect(down.pendingCommit?.detail).toContain("commits this run's writes at its stop or its next start");
   });
 
   // The owner's 0.14.1 run: after minting the owner bearer, update ran
@@ -396,7 +455,8 @@ describe("metistry update", () => {
     expect(text).not.toContain("metistry update: could not mint"); // not a step failure
     expect(env.METISTRY_BRIDGE_TOKEN_RECONCILER_USER).toBeUndefined();
     // the lock is a protected path: no POST on a bearer the bridge would refuse…
-    expect(f.calls).toEqual([]);
+    // (the one call is the flush, which any bridge bearer may ask for and which writes nothing)
+    expect(f.calls.map((c) => c.url)).toEqual(["http://127.0.0.1:7812/flush"]);
     expect(text).toContain(".metistry/metistry.lock NOT written");
     // …and the steps after it that do not need the bearer still ran
     expect(r.seededTemplates).toBeDefined();

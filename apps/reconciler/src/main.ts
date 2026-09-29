@@ -20,13 +20,14 @@ import {
   pushOverrideNote,
 } from "@foldedspacelabs/metistry-core";
 import { Git } from "./git.js";
-import { Committer, SOURCE_TRAILER, type PushResult } from "./committer.js";
+import { COMMIT_JOURNAL, Committer, SOURCE_TRAILER, type PushResult } from "./committer.js";
 import { Vault } from "./vault.js";
 import { Embeddings } from "./embeddings.js";
 import { Indexer } from "./indexer.js";
 import { makeBridge } from "./server.js";
 import { syncRecorder } from "./sync-record.js";
 import { aheadBehind, commitRecorder, readVaultStatus, SyncScheduler, VaultPolicySource } from "./sync-policy.js";
+import { installShutdown } from "./shutdown.js";
 
 const instanceDir = requireEnv("METISTRY_INSTANCE_DIR");
 const token = requireEnv("METISTRY_BRIDGE_TOKEN_RECONCILER");
@@ -85,7 +86,16 @@ const committer = new Committer(git, {
   authorEmail: optionalEnv("METISTRY_GIT_AUTHOR_EMAIL", "metistry@localhost"),
   sourceTrailer: SOURCE_TRAILER, // §4.7 commit hygiene: self-declared provenance, never authorization
   sweepExternalEdits: commitExternalEdits, // swept before every integrate, as on every walk (§2.21 rule 2)
+  // the queue, mirrored where a restart cannot lose it and the bridge cannot write (W3 checkpoint D1)
+  journal: await git.gitPath(COMMIT_JOURNAL),
 });
+// What a previous process queued and never committed — stopped inside its
+// flush window, or killed — committed now, as it would have been, before
+// this one takes a write or sweeps the tree.
+{
+  const r = await committer.recover();
+  if (r.replayed || r.dropped) console.log(`reconciler: commit journal: ${r.replayed} intent(s) from the last run, ${r.flush?.commits.length ?? 0} commit(s) made${r.flush?.paused ? ` (paused: the owner has a ${r.flush.paused} in progress)` : ""}${r.dropped ? `, ${r.dropped} refused` : ""}`);
+}
 const vault = new Vault(instanceDir, git, committer, { maxBytes: intEnv("METISTRY_VAULT_MAX_BYTES", 2 * 1024 * 1024) });
 
 // Phase 6: embeddings are on by default and cost nothing when the embedder
@@ -181,7 +191,7 @@ server.listen(port, host, () => {
   console.log(`reconciler listening on ${host}:${port} (repo: ${instanceDir}; commit every ${commitIntervalSec}s; reconcile every ${reconcileIntervalSec}s; ${describeVaultSync(vaultPolicy.current().policy)}; protected paths: ${ownerToken ? "the owner bearer only" : "NO caller — mint METISTRY_BRIDGE_TOKEN_RECONCILER_USER"})`);
 });
 
-setInterval(() => {
+const flushTimer = setInterval(() => {
   committer.flush().then(
     (r) => {
       if (r.commits.length || r.failed) console.log(`reconciler: flushed ${r.commits.length} commit(s)${r.failed ? `, ${r.failed} failed` : ""}`);
@@ -199,8 +209,8 @@ const reconcile = (trigger: string) =>
     },
     (err) => console.error("reconciler: reconcile failed:", err instanceof Error ? err.message : err),
   );
-setTimeout(() => reconcile("startup"), 2000);
-setInterval(() => reconcile("interval"), reconcileIntervalSec * 1000);
+const startupWalk = setTimeout(() => reconcile("startup"), 2000);
+const reconcileTimer = setInterval(() => reconcile("interval"), reconcileIntervalSec * 1000);
 
 // §2.21: every sync act is a `runs` row (and a conflict its one Needs You
 // report); an integrate that changed files is followed by a walk that
@@ -214,4 +224,21 @@ committer.hooks = {
 
 // push and pull on the policy in force (policyNow re-reads deployment.yaml,
 // so `metistry vault settings` takes effect without a restart)
-sync.start();
+const stopSync = sync.start();
+
+// SIGTERM (the supervisor's stop, `launchctl kickstart -k`, `docker stop`)
+// and SIGINT: nothing new starts, the queue is committed, then exit — so a
+// restart right after a write (`metistry update`'s lock and secrets) no
+// longer leaves the write uncommitted. shutdown.ts has the deadline.
+installShutdown({
+  committer,
+  stop: () => {
+    clearInterval(flushTimer);
+    clearInterval(reconcileTimer);
+    clearTimeout(startupWalk);
+    stopSync();
+    server.close();
+  },
+  close: () => pool.end(),
+  exit: (code) => process.exit(code),
+});

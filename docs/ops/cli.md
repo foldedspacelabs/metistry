@@ -2440,7 +2440,8 @@ node <product-dir>/current/packages/cli/dist/main.js update --continue-from=swit
 on the bundled runtime's `node`, with the same environment plus
 `METISTRY_UPDATE_REEXEC=1`, streams its output and exits with its code. The
 child skips the product step and runs build, migrations, restart, lock,
-templates, secrets, the shim and doctor on the new code; its "what changed"
+templates, secrets, the commit of those writes, the shim and doctor on the
+new code; its "what changed"
 baseline is the release `current` pointed at before (`releases/.previous`).
 Guards, each with a test (`update-reexec.test.ts`, `release.test.ts`):
 

@@ -34,7 +34,7 @@ import { jobFilesFor, legacyEnvReport, RETIRE_LEGACY_ENV_COMMAND } from "./legac
 import { SUPERVISOR_SERVICE } from "./supervisor.js";
 import { restartSupervisorChild } from "./service-control.js";
 import { instanceLockPath, readLock, serializeLock, type LockFile, type LockSource } from "./lock.js";
-import { ensureOwnerBridgeToken, OWNER_BRIDGE_TOKEN, OWNER_BRIDGE_TOKEN_FIX, OwnerTokenMintFailed, protectedRel, writeProtected, type EnsureOwnerTokenResult, type ProtectedWrite } from "./protected-write.js";
+import { commitPending, ensureOwnerBridgeToken, OWNER_BRIDGE_TOKEN, OWNER_BRIDGE_TOKEN_FIX, OwnerTokenMintFailed, protectedRel, writeProtected, type CommitPending, type EnsureOwnerTokenResult, type ProtectedWrite } from "./protected-write.js";
 import { listMigrationFiles, MIGRATION_LOCK_KEY, openMigrationSession, runMigrations, type MigrateResult, type MigrationSession } from "./migrate.js";
 import { CURRENT_LINK, currentVersion, installRelease, previousVersion, releaseDir, RELEASES_DIRNAME, rollbackRelease, releaseTarget, runtimePackCommit, type InstallReleaseResult } from "./release.js";
 import { installRuntimeDeps, runtimeDepsEnabled, RUNTIME_DIRNAME, type InstallRuntimeDepsResult } from "./runtime-deps.js";
@@ -138,6 +138,8 @@ export interface UpdateResult {
   seededTemplates?: SeedTemplatesResult;
   /** product files the vault had under another case only, renamed to the seed's spelling (`Me/Profile.md` → `Me/profile.md`) */
   vaultCase?: VaultCaseResult;
+  /** the `commit` step: the reconciler's flush of this run's writes, before the launchd env step can restart it */
+  pendingCommit?: CommitPending;
   /** the shared-scope migration (plan §2.14), when it ran — names only */
   sharedScope?: MigrateScopeResult;
   /** how far the restart step got, and which jobs it owed a kickstart */
@@ -378,6 +380,7 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
   let sharedScope: MigrateScopeResult | undefined;
   let seededTemplates: SeedTemplatesResult | undefined;
   let vaultCase: VaultCaseResult | undefined;
+  let pendingCommit: CommitPending | undefined;
   /** how far the restart step got, and what it owed — the summary is written from this, so an interrupted restart is never "nothing kickstarted" */
   const restart: RestartProgress = { reached: false, completed: false, owed: [] };
   /** what this run could not do and did not stop for — each is named at the end with its commands, and makes the exit code non-zero */
@@ -731,6 +734,19 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
     // moved or deleted here — the preview and the --yes are the owner's.
     if (envPathsFound?.legacy && instanceDir.instanceDir) await noteLegacyEnv(r, { legacy: envPathsFound.legacy, target: envPathsFound.write, instanceDir: instanceDir.instanceDir, home: env.HOME });
 
+    // Everything above wrote through the reconciler — the lock, templates,
+    // renames, secrets.yaml — and the step below may restart it. Committed
+    // HERE, so the update's own writes are in history before anything
+    // bounces the process holding their queue (W3 checkpoint D1: both files
+    // were left uncommitted for good). The reconciler also flushes on its
+    // SIGTERM and replays a killed run's queue at start; this is the part
+    // the owner sees.
+    if (env.METISTRY_RECONCILER_URL) {
+      r.section("commit");
+      pendingCommit = await commitPending(r, { env, fetchFn });
+      r.note(pendingCommit.detail);
+    }
+
     // The owner bearer above and the shared-scope migration both rewrite
     // `.env`, and nothing in `update` renders a plist: under the launchd
     // shape the supervisor's plist and supervisor.json still carry the
@@ -786,7 +802,7 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
   }
   r.out("");
   r.out(updateSummary({ ui: r.ui, dryRun: r.dryRun, failure, code, source, version: lock?.product.version ?? releaseVersion, migrations, restarted, kickstartFailed: kickFailed.length, app, restart, deferred }));
-  return { code, source, runDir, commands: r.commands, ...(lock ? { lock } : {}), restarted, restart, deferred, ...(reexec ? { reexec } : {}), ...(migrations ? { migrations } : {}), ...(release ? { release } : {}), ...(runtimeDeps ? { runtimeDeps } : {}), ...(app ? { app } : {}), ...(sharedScope ? { sharedScope } : {}), ...(seededTemplates ? { seededTemplates } : {}), ...(vaultCase ? { vaultCase } : {}) };
+  return { code, source, runDir, commands: r.commands, ...(lock ? { lock } : {}), restarted, restart, deferred, ...(reexec ? { reexec } : {}), ...(migrations ? { migrations } : {}), ...(release ? { release } : {}), ...(runtimeDeps ? { runtimeDeps } : {}), ...(app ? { app } : {}), ...(sharedScope ? { sharedScope } : {}), ...(seededTemplates ? { seededTemplates } : {}), ...(vaultCase ? { vaultCase } : {}), ...(pendingCommit ? { pendingCommit } : {}) };
 }
 
 // ---- seed templates the vault lacks ---------------------------------------------------

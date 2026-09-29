@@ -207,8 +207,12 @@ run with `--channel release`.
 8. kickstarts the launchd jobs whose code changed, writes `metistry.lock`
    through the reconciler, copies each `seed/vault/Templates/*.md` the vault
    **lacks** (create-only — a template that is there is never touched;
-   `docs/ops/cli.md`, "Seeding the templates the vault lacks"), and runs
-   `doctor`.
+   `docs/ops/cli.md`, "Seeding the templates the vault lacks"), writes
+   `secrets.yaml`, then **asks the reconciler to commit those writes**
+   (`POST /flush`, the `commit` step) before the launchd env step can
+   restart it — so the lock and secrets are in the instance repo's history
+   when the update ends, as `Metistry user` commits (`docs/ops/reconciler.md`,
+   "The committer") — and runs `doctor`.
 
 Because everything after the switch runs against `current`, going back is
 a symlink flip:

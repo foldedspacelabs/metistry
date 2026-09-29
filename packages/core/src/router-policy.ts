@@ -58,9 +58,10 @@ import { DEFAULT_TIER, resolveTier, type TierMap } from "./tiers.js";
  * names on purpose: `tier: { demanding: deep }` reads as a decision,
  * `tier: { deep: deep }` as a typo.
  *
- * The wording is the spec's starting wording. It is T9-3's harness that tunes
- * it on the owner's fixtures and then freezes it before the scored run; a
- * change here after that voids the run (§7.2).
+ * The wording is frozen. T9-3's confirmatory eval has no tuning mode: its
+ * report prints a sha256 fingerprint of this wording beside the
+ * pre-registered bar, so a change here after a scored run is visible and
+ * voids that run (§7.2).
  */
 export const COMPLEXITY = [
   { name: "simple", description: "it asks for one small thing: a fact, a short reply, a lookup, a quick change" },

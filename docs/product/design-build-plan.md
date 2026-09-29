@@ -148,7 +148,7 @@ specs — with its status on main at `0b20767` and the ticket that builds it.
 | R5 | Questions **step one at a time** | screen 3 §13.2 | Not started | T5-4 |
 | R6 | **Pull requests** reviewed in Metistry, posted as the owner, from agents and GitHub | C106, C107 | Not started | T2-13 |
 | R7 | **Hub rule**: a sync raises a request only when the source names the owner; mirrors clear with the source | C108 | Not started | T1-8, T4-23 |
-| R8 | Owner events become requests | C96 | Partial — budget stop is a question (`apps/assistant/src/budgets.ts`); sync-conflict copies are `report` (`indexer.ts:286–302`) | T2-9 |
+| R8 | Owner events become requests | C96 | Partial — budget stop is a report (`apps/assistant/src/budgets.ts`; X-13, W3 housekeeping); sync-conflict copies are `report` (`indexer.ts:286–302`) | T2-9 |
 | R9 | Revise on access **only grants less** | C40 | Not started (`server.ts:1389–1390`) | T2-2 |
 | R10 | A failed consequential operation leaves the request pending | C45 | Done in behaviour; not tested per door | T2-15 |
 | R11 | Needs You is a **list-and-detail view** | C109 → C110 | Not started | T5-4 |
@@ -1019,7 +1019,7 @@ mapping that exist today:
 | review | `review`; knowledge conflict | before and after · preview | `allow` / Keep Mine | Take the Other | `deny` |
 | note | `knowledge`, `draft_settle` | preview | `allow` | `accept_with_changes` | `deny` |
 | improvement | `improvement` (+ routine suggestions) | before and after | `allow` | `accept_with_changes` | `deny` |
-| report | `report`; failed routine | excerpt | its act (Try Again, Reconnect) | — | Dismiss → `skip` |
+| report | `report`; failed routine | excerpt | its act (Try Again, Reconnect); Acknowledge → `acknowledge` when it names none (X-10, W3 housekeeping) | — | Dismiss → `skip` |
 | invitation | `invitation` (calendar mirror) | preview | Accept (→ `rsvp`) | Maybe | Decline |
 | task | `task` (tracker mirror) | excerpt | Add to Today | — | Delegate |
 | message | `message` (Metis, from mail) | excerpt + reason | Draft Reply (→ `draft`) | — | Not Mine → `skip` |

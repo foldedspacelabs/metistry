@@ -78,6 +78,8 @@ export interface DevinWorkMeta {
   purpose: string;
   target: string;
   dispatch_run_id: number;
+  /** the agent connection it was dispatched through (T4-11) — whose key polls it home; absent for a `targets/` dispatch */
+  connection?: string;
   /** Written by this collector on every poll, so a stuck session is visible without an API call. */
   status?: string;
   status_detail?: string | null;

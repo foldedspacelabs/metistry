@@ -13,7 +13,6 @@ import {
   devinFooter,
   devinPrompt,
   devinSessionBody,
-  isDevinPurpose,
   resolveMaxAcu,
   schemaIssues,
 } from "../src/devin.js";
@@ -21,6 +20,9 @@ import { DEVIN_SUBMIT_KIND, dispatch, TargetRegistry } from "../src/dispatch.js"
 
 const root = fileURLToPath(new URL("../../../", import.meta.url));
 const shipped = parseYaml(readFileSync(`${root}targets/devin-sessions/manifest.yaml`, "utf8")) as Record<string, unknown>;
+// The purposes are the Devin connection type's (T4-11) — read from the seed, so the test holds the shipped words.
+const DEVIN_TYPE = parseYaml(readFileSync(`${root}seed/connection-types/devin/manifest.yaml`, "utf8")) as { dispatch: { purposes: Record<string, { preamble: string }> } };
+const preamble = (purpose: string) => DEVIN_TYPE.dispatch.purposes[purpose]!.preamble;
 
 const env = { METISTRY_DEVIN_API_KEY: "cog_x", METISTRY_DEVIN_ORG_ID: "org-abc" };
 const task = { id: 7, title: "why does the deploy hang", status: "open", external_ref: null };
@@ -91,7 +93,7 @@ describe("structured output — the Draft 7 contract Devin documents", () => {
 
 describe("devin session request shape", () => {
   it("a knowledge-research brief becomes a prompt that asks for the structured answer and forbids changing anything", () => {
-    const body = devinSessionBody({ brief: "What deploys the payments service?", taskId: 7, target: "devin-sessions", purpose: "knowledge_research", title: "how deploys work", maxAcu: 3 });
+    const body = devinSessionBody({ brief: "What deploys the payments service?", taskId: 7, target: "devin-sessions", purpose: "knowledge_research", preamble: preamble("knowledge_research"), title: "how deploys work", maxAcu: 3 });
     const prompt = String(body.prompt);
     expect(prompt).toContain("**Knowledge research.**");
     expect(prompt).toContain("Do not open a pull request");
@@ -108,11 +110,11 @@ describe("devin session request shape", () => {
   });
 
   it("a work brief gets the other preamble and its own tag; both ask for the same structured answer", () => {
-    const work = devinPrompt({ brief: "Fix the flake in test X.", taskId: 9, target: "devin-sessions", purpose: "work" });
+    const work = devinPrompt({ brief: "Fix the flake in test X.", taskId: 9, target: "devin-sessions", purpose: "work", preamble: preamble("work") });
     expect(work).toContain("**Work brief.**");
     expect(work).not.toContain("Do not open a pull request");
     expect(work).toContain("provide_structured_output");
-    expect(String(devinSessionBody({ brief: "b", taskId: 9, target: "t", purpose: "work", title: "t", maxAcu: 1 }).tags)).toContain("metistry:purpose:work");
+    expect(String(devinSessionBody({ brief: "b", taskId: 9, target: "t", purpose: "work", preamble: preamble("work"), title: "t", maxAcu: 1 }).tags)).toContain("metistry:purpose:work");
   });
 
   it("the ACU cap is the dispatch call, else the manifest, else the small default", () => {
@@ -121,8 +123,8 @@ describe("devin session request shape", () => {
     expect(resolveMaxAcu(undefined, undefined)).toBe(DEFAULT_MAX_ACU);
     expect(resolveMaxAcu(0, "nonsense")).toBe(DEFAULT_MAX_ACU); // a zero ceiling is not a budget
     expect(resolveMaxAcu(-1, undefined)).toBe(DEFAULT_MAX_ACU);
-    expect(isDevinPurpose("knowledge_research")).toBe(true);
-    expect(isDevinPurpose("anything-else")).toBe(false);
+    // the purposes live on the Devin connection type now (plan §2.7), not in a list in code
+    expect(Object.keys(DEVIN_TYPE.dispatch.purposes).sort()).toEqual(["knowledge_research", "work"]);
   });
 });
 

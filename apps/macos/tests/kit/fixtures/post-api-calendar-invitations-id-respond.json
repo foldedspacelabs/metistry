@@ -1,8 +1,7 @@
 {
   "route": "POST /api/calendar/invitations/:id/respond",
-  "source": "contract",
-  "ticket": "T4-17",
-  "note": "through the connection's rsvp capability; 503 names Open in Calendar where no connection can",
+  "source": "recorded",
+  "ticket": null,
   "request": {
     "method": "POST",
     "path": "/api/calendar/invitations/evt-review-0929/respond",
@@ -16,6 +15,19 @@
     "ok": true,
     "event_id": "evt-review-0929",
     "response": "accepted",
-    "connection": "calendar"
+    "connection": "calendar",
+    "preview": {
+      "event_id": "evt-review-0929",
+      "connection": "calendar",
+      "title": "Vendor review",
+      "response": "accepted",
+      "organizer": "dana@example.com",
+      "as": "me@example.com",
+      "series": false,
+      "unchanged": false
+    },
+    "confirm_token": "fixture-token-not-a-secret",
+    "expires_in_sec": 300,
+    "responded": false
   }
 }

@@ -230,9 +230,9 @@ private let drives: [String: Drive] = [
         done(await s.moveEvent(a.p("id"), EventMove(start: a.b("start") ?? "", end: a.b("end") ?? "", confirmToken: a.b("confirm_token"))))
     },
     "POST /api/calendar/invitations/:id/respond": { s, a in
-        done(await s.respond(toInvitation: a.p("id"), InvitationResponse(rawValue: a.b("response") ?? "") ?? .tentative))
+        done(await s.respond(toInvitation: a.p("id"), InvitationResponse(rawValue: a.b("response") ?? "") ?? .tentative, confirmToken: a.b("confirm_token")))
     },
-    "POST /api/mail/messages/:id/draft": { s, a in done(await s.draftReply(toMessage: a.p("id"), body: a.b("body") ?? "")) },
+    "POST /api/mail/messages/:id/draft": { s, a in done(await s.draftReply(toMessage: a.p("id"), body: a.b("body") ?? "", confirmToken: a.b("confirm_token"))) },
     "POST /api/trackers/:connection/issues": { s, a in done(await s.createIssue(connection: a.p("connection"), taskKey: a.b("task_key") ?? "", title: a.b("title"))) },
     "POST /api/trackers/:connection/issues/:key/complete": { s, a in done(await s.completeIssue(connection: a.p("connection"), key: a.p("key"))) },
     "POST /api/prose/:id/feedback": { s, a in done(await s.rateProse(a.p("id"), Rating(rawValue: a.bInt("rating") ?? 0) ?? .up, note: a.b("note"))) },

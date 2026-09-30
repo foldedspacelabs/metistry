@@ -334,7 +334,11 @@ and Settings ▸ Services shows the two doctor rows it adds, the recorder's
 `launchd:` job and the bridge's `live-capture` check. A recording's
 transcript reaches the console from the bridge through `POST /capture`, so
 the app sends nothing when a session ends. No capture UI is drawn here; the
-bar is T8-5's.
+bar is T8-5's. *Window* and *Screen* (T8-3) are chosen in the system picker,
+which the recorder — not the app — presents, so the start the bar sends
+names only the mode (`{"mode":"window"}`); the bridge's `status` carries
+`senses` (`display`, `app_audio`, `microphone`) — the open streams the rail
+draws its display glyph from.
 
 The routes `ConsoleAPI` already spoke keep their names and typed replies. A
 reply the contract spells out field by field is typed; every other reply is a

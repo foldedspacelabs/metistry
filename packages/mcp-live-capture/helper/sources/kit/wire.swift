@@ -4,6 +4,12 @@
 //   {"id":1,"op":"check"}          grants, the transcriber, whether recording
 //   {"id":2,"op":"status"}         the session read-back (no transcript text)
 //   {"id":3,"op":"start","apps":["us.zoom.xos"],"app_audio":true,"microphone":true}
+//                                  Audio only (`"mode":"audio_only"`, the default)
+//   {"id":3,"op":"start","mode":"window","app_audio":true,"microphone":true}
+//   {"id":3,"op":"start","mode":"screen","app_audio":true,"microphone":true}
+//                                  the system picker asks the owner; the start
+//                                  names no content — no apps, no window or
+//                                  display id — and a line that does is refused
 //   {"id":4,"op":"stop"}
 //   {"id":5,"op":"keep_going"}     answers the two-hour reminder
 //
@@ -93,12 +99,33 @@ public final class HelperService {
             return ["id": id, "ok": true].merging(statusJSON(recorder.status())) { a, _ in a }
 
         case "start":
-            guard let apps = req["apps"] as? [String] else { return refusal(id, "invalid_request", "apps must be a list of bundle identifiers") }
+            // A closed set of fields: nothing else in the line can reach the
+            // recorder — in particular no window, display or filter.
+            let unknown = req.keys.filter { !startFields.contains($0) }.sorted()
+            guard unknown.isEmpty else { return refusal(id, "invalid_request", "unknown field\(unknown.count > 1 ? "s" : ""): \(unknown.joined(separator: ", "))") }
+            let mode: CaptureMode
+            if let raw = req["mode"] {
+                guard let word = raw as? String, let m = CaptureMode(rawValue: word) else {
+                    return refusal(id, "invalid_request", "mode is one of \(CaptureMode.allCases.map(\.rawValue).joined(separator: ", "))")
+                }
+                mode = m
+            } else {
+                mode = .audioOnly
+            }
+            let apps: [String]
+            if mode.takesPicture {
+                // Only the picker chooses what a picture recording sees.
+                guard req["apps"] == nil else { return refusal(id, RecorderError.contentNamed.code, RecorderError.contentNamed.message) }
+                apps = []
+            } else {
+                guard let list = req["apps"] as? [String] else { return refusal(id, "invalid_request", "apps must be a list of bundle identifiers") }
+                apps = list
+            }
             for key in ["app_audio", "microphone"] where req[key] != nil && !(req[key] is Bool) {
                 return refusal(id, "invalid_request", "\(key) must be true or false")
             }
             do {
-                let r = try recorder.start(StartRequest(apps: apps, appAudio: (req["app_audio"] as? Bool) ?? true, microphone: (req["microphone"] as? Bool) ?? true))
+                let r = try recorder.start(StartRequest(mode: mode, apps: apps, appAudio: (req["app_audio"] as? Bool) ?? true, microphone: (req["microphone"] as? Bool) ?? true))
                 return ["id": id, "ok": true, "session": recordJSON(r), "transcriber": transcriberJSON(transcriber.status())]
             } catch let e as RecorderError {
                 return refusal(id, e.code, e.message)
@@ -148,6 +175,9 @@ public final class HelperService {
     }
 }
 
+/// The only fields a `start` line may carry.
+let startFields: Set<String> = ["id", "op", "mode", "apps", "app_audio", "microphone"]
+
 public func transcriberJSON(_ t: TranscriberStatus) -> [String: Any] {
     var o: [String: Any] = ["engine": t.engine, "available": t.available, "assets": t.assets, "locale": t.locale ?? NSNull()]
     if let r = t.reason { o["reason"] = r }
@@ -170,6 +200,8 @@ public func statusJSON(_ s: RecorderStatus) -> [String: Any] {
         "stops_at": s.stopsAt.map { iso.string(from: $0) } ?? NSNull(),
         "reminder_due_hours": s.reminderDueHours ?? NSNull(),
         "disk_low_free_bytes": s.diskLowFreeBytes ?? NSNull(),
+        // What the rail draws beneath the mark: open streams, never content.
+        "senses": ["display": s.senses.display, "app_audio": s.senses.appAudio, "microphone": s.senses.microphone],
     ]
 }
 

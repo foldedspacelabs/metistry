@@ -8,7 +8,8 @@
 //   transcript.jsonl  one line per finished segment or gap, appended and
 //                     synchronised as it arrives — so a crash keeps
 //                     everything up to the crash (C137)
-//   <source>.m4a      the audio (the Core Audio adapter writes it)
+//   <source>.m4a      the audio (the adapters write it; `-2`, `-3`… after a wake)
+//   screen.mp4        Window / Screen: the frames (`-2`… after a wake)
 //
 // When a session has ended, the bridge hands its transcript to the console's
 // `POST /capture` and tells the helper so (`delivery`, below): the record is
@@ -85,11 +86,17 @@ public struct SessionRecord: Codable, Equatable {
     /// nil until the transcript has reached the console (T8-2b). A
     /// session.json written before this field existed reads as owed.
     public var delivery: Delivery? = nil
+    /// What the session took (T8-3). nil in a session.json written before
+    /// this field existed, which was Audio only.
+    public var mode: CaptureMode? = nil
+    /// *Window* / *Screen*: what the picker chose — its kind and app, never a
+    /// title or a frame. nil for Audio only.
+    public var picture: PictureRecord? = nil
 
     enum CodingKeys: String, CodingKey {
         case sessionID = "session_id", startedAt = "started_at", state, endedAt = "ended_at", endedReason = "ended_reason"
         case apps, tapMode = "tap_mode", processes, appAudio = "app_audio", microphone, gaps
-        case appAudioObserved = "app_audio_observed", remindersRaised = "reminders_raised", delivery
+        case appAudioObserved = "app_audio_observed", remindersRaised = "reminders_raised", delivery, mode, picture
     }
 }
 

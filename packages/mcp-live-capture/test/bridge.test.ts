@@ -26,7 +26,7 @@ const fakeHelper = {
     if (!reachable) return { id: 1, ok: false, code: "unreachable", error: "helper unreachable: ENOENT" };
     switch (p.op) {
       case "check": return checkAnswer;
-      case "status": return { id: 1, ok: true, state: "idle", session: null, elapsed_s: null, stops_at: null, reminder_due_hours: null, disk_low_free_bytes: null };
+      case "status": return { id: 1, ok: true, state: "idle", session: null, elapsed_s: null, stops_at: null, reminder_due_hours: null, disk_low_free_bytes: null, senses: { display: false, app_audio: false, microphone: false } };
       case "start": return startAnswer;
       case "stop": return { id: 1, ok: true, session: { session_id: "20260928-120000-00ab", ended_reason: "owner" } };
       case "keep_going": return { id: 1, ok: true, answered: true };
@@ -139,7 +139,7 @@ describe("live-capture bridge", () => {
     const started = await call("POST", "/recording/start", controlToken, { apps: ["us.zoom.xos"], microphone: false });
     expect(started.status).toBe(201);
     expect((await started.json()).session.session_id).toBe("20260928-120000-00ab");
-    expect(asked[0]).toEqual({ op: "start", apps: ["us.zoom.xos"], app_audio: true, microphone: false });
+    expect(asked[0]).toEqual({ op: "start", mode: "audio_only", apps: ["us.zoom.xos"], app_audio: true, microphone: false });
 
     expect((await call("POST", "/recording/keep-going", controlToken)).status).toBe(200);
     const stopped = await call("POST", "/recording/stop", controlToken);
@@ -175,7 +175,69 @@ describe("live-capture bridge", () => {
     expect((await call("POST", "/recording/start", controlToken, "{not json")).status).toBe(400);
     expect((await call("POST", "/recording/start", controlToken, JSON.stringify({ apps: ["a.b"], pad: "x".repeat(20_000) }))).status).toBe(400);
     expect(asked).toEqual([]);
-    expect(startPayload({ apps: ["us.zoom.xos"] })).toEqual({ ok: true, payload: { op: "start", apps: ["us.zoom.xos"], app_audio: true, microphone: true } });
+    expect(startPayload({ apps: ["us.zoom.xos"] })).toEqual({ ok: true, payload: { op: "start", mode: "audio_only", apps: ["us.zoom.xos"], app_audio: true, microphone: true } });
+  });
+
+  // ---- T8-3: Window and Screen — the picker's choice is the only filter ----
+
+  it("the tool credential cannot start a window or screen recording: 403, and the picker is never asked", async () => {
+    for (const body of [{ mode: "window" }, { mode: "screen" }, { mode: "window", app_audio: true, microphone: true }]) {
+      for (const [t, status] of [[token, 403], [null, 401], [inboxToken, 401], [mintToken(), 401]] as const) {
+        const res = await call("POST", "/recording/start", t, body);
+        expect(res.status, `${JSON.stringify(body)} as ${t === token ? "the tool" : "a stranger"}`).toBe(status);
+      }
+    }
+    expect(asked).toEqual([]);
+  });
+
+  it("the control credential starts Window and Screen with a body that names no content", async () => {
+    startAnswer = { id: 1, ok: true, session: { session_id: "20260930-120000-00ab", mode: "window", picture: { kind: "window", bundle_id: "us.zoom.xos" }, apps: ["us.zoom.xos"], state: "recording" } };
+    const w = await call("POST", "/recording/start", controlToken, { mode: "window", microphone: false });
+    expect(w.status).toBe(201);
+    expect((await w.json()).session.picture).toEqual({ kind: "window", bundle_id: "us.zoom.xos" });
+    const s = await call("POST", "/recording/start", controlToken, { mode: "screen" });
+    expect(s.status).toBe(201);
+    // exactly the mode and two switches reach the helper — no apps, no window, no display
+    expect(asked).toEqual([
+      { op: "start", mode: "window", app_audio: true, microphone: false },
+      { op: "start", mode: "screen", app_audio: true, microphone: true },
+    ]);
+  });
+
+  it("a Window or Screen start that names content is refused before the helper hears it", async () => {
+    for (const bad of [
+      { mode: "window", apps: ["us.zoom.xos"] },
+      { mode: "screen", apps: [] },
+      { mode: "window", window_id: 12 },
+      { mode: "screen", display_id: 1 },
+      { mode: "window", bundle_ids: ["us.zoom.xos"] },
+      { mode: "window", filter: { display: 1, excluding: [] } },
+      { mode: "screen", exclude: ["com.foldedspacelabs.metistry.live-capture"] },
+      { mode: "display" },
+      { mode: "everything" },
+      { mode: "" },
+      { mode: null },
+      { mode: 1 },
+      { mode: ["window"] },
+      { mode: "window", microphone: "yes" },
+    ]) {
+      const res = await call("POST", "/recording/start", controlToken, bad);
+      expect(res.status, JSON.stringify(bad)).toBe(400);
+      expect((await res.json()).error.code).toBe("invalid_request");
+    }
+    expect(asked).toEqual([]);
+  });
+
+  it("the helper's picture refusals reach the owner: a cancelled picker, a wrong pick, no ScreenCaptureKit", async () => {
+    startAnswer = { id: 1, ok: false, code: "invalid_scope", error: "nothing was chosen in the picker — a recording never sees everything" };
+    const cancelled = await call("POST", "/recording/start", controlToken, { mode: "window" });
+    expect(cancelled.status).toBe(400);
+    expect(await cancelled.json()).toEqual({ error: { code: "invalid_request", message: "nothing was chosen in the picker — a recording never sees everything" } });
+
+    startAnswer = { id: 1, ok: false, code: "not_available", error: "recording a window or the screen is not available on this Mac — use Audio only" };
+    const unavailable = await call("POST", "/recording/start", controlToken, { mode: "screen" });
+    expect(unavailable.status).toBe(503);
+    expect((await unavailable.json()).error.message).toMatch(/use Audio only/);
   });
 
   it("the helper's refusals reach the owner in its words, on core's envelope", async () => {
@@ -260,7 +322,7 @@ describe("live-capture bridge", () => {
 
   it("status is a read with an as_of stamp, and never carries a transcript", async () => {
     const s = await (await call("GET", "/status", token)).json();
-    expect(s).toMatchObject({ state: "idle", delivery: { owed: 0 } });
+    expect(s).toMatchObject({ state: "idle", delivery: { owed: 0 }, senses: { display: false, app_audio: false, microphone: false } });
     expect(s.as_of).toBeTruthy();
     expect(JSON.stringify(s)).not.toMatch(/transcript|"text"/);
   });

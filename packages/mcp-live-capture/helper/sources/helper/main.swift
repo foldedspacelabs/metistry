@@ -8,6 +8,11 @@
 //   METISTRY_LC_SOCKET     serve this Unix socket
 //   METISTRY_LC_LOCALE     the transcriber's language (default: the Mac's)
 //
+// Window and Screen present the system picker (SCContentSharingPicker) from
+// here, so the helper runs as an accessory app — no Dock icon, no menu —
+// with AppKit's run loop: the picker's answers and the main queue both need
+// it.
+//
 // It ships as lc-helper.app — a bundle, so TCC keys the three grants on its
 // bundle identifier and signature rather than on a path (scripts/build-helper.sh,
 // helper/Info.plist) — and runs as its own launchd job,
@@ -25,7 +30,7 @@ guard let captureDir = captureDirectory(env) else {
 
 let ownBundleID = Bundle.main.bundleIdentifier ?? "com.foldedspacelabs.metistry.live-capture"
 let store = FileSessionStore(root: URL(fileURLWithPath: captureDir, isDirectory: true))
-let recorder = Recorder(backend: SystemBackend(), store: store, disk: SystemDisk(), ownBundleID: ownBundleID)
+let recorder = Recorder(backend: SystemBackend(), picture: SystemPicture(), store: store, disk: SystemDisk(), ownBundleID: ownBundleID)
 let os = ProcessInfo.processInfo.operatingSystemVersion
 let service = HelperService(recorder: recorder, grants: SystemGrants(), transcriber: SystemTranscriberProbe(), osVersion: "\(os.majorVersion).\(os.minorVersion)")
 
@@ -96,14 +101,15 @@ func serve(socketPath: String) {
     }
 }
 
+let app = NSApplication.shared
+app.setActivationPolicy(.accessory)
 if let socketPath = env["METISTRY_LC_SOCKET"], !socketPath.isEmpty {
     Thread { serve(socketPath: socketPath) }.start()
-    RunLoop.main.run()
 } else {
     Thread {
         while let line = readLine(strippingNewline: true) { print(service.handle(line)) }
         recorder.stop(.helperStopped)
         exit(0)
     }.start()
-    RunLoop.main.run()
 }
+app.run()

@@ -9,7 +9,7 @@ import { connect } from "node:net";
 export interface HelperResponse {
   id: number;
   ok: boolean;
-  /** The helper's refusal word (`invalid_scope`, `already_recording`, …). */
+  /** The helper's refusal word (`invalid_scope`, `already_recording`, `not_available`, …). */
   code?: string;
   error?: string;
   [k: string]: unknown;
@@ -21,8 +21,9 @@ export interface HelperClient {
 
 /**
  * How long the bridge waits on the helper (`METISTRY_LC_HELPER_TIMEOUT_MS`).
- * A start can wait on the OS: the transcriber's first set-up, and the
- * microphone prompt the first time it is asked.
+ * A start can wait on the OS and the owner: the transcriber's first set-up,
+ * the microphone prompt the first time it is asked, and — for Window and
+ * Screen — the system picker, which the helper abandons after 120 s.
  */
 export const DEFAULT_HELPER_TIMEOUT_MS = 150_000;
 

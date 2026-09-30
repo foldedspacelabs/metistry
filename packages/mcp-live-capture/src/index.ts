@@ -17,6 +17,13 @@
 //                        session ends (src/delivery.ts, T8-2b). Optional; must
 //                        differ from both of the above.
 //
+// What a recording takes (C76): `audio_only` — a process tap over the apps
+// the body names — or `window` / `screen`, where the body names NOTHING and
+// the system picker, presented by the helper, is the only chooser. A window
+// id, display id or app list on a picture start is refused here, and again
+// by the helper (helper/sources/kit/picture.swift): the picker's choice is
+// the only filter the helper builds.
+//
 // A tool caller that asks to start a recording is refused 403 before the
 // helper hears anything: the route is not in `exposes:` AND the credential
 // cannot reach it (plan §2.15: no `exposes` entry starts a recording;
@@ -66,7 +73,11 @@ export const ROUTES = [
 /** The helper ops a tool caller can ever cause. Nothing that starts, stops or answers a recording. */
 export const TOOL_OPS = ["check", "status"] as const;
 
-// limit: fixed — a start body is a short list of bundle identifiers and two switches.
+/** The record sheet's three acts (C76). */
+export const CAPTURE_MODES = ["audio_only", "window", "screen"] as const;
+export type CaptureMode = (typeof CAPTURE_MODES)[number];
+
+// limit: fixed — a start body is a mode, a short list of bundle identifiers and two switches.
 const MAX_BODY_BYTES = 16 * 1024;
 // limit: fixed — the record sheet's list, matched by the helper's own cap (helper/sources/kit/scope.swift).
 const MAX_SCOPE_APPS = 16;
@@ -99,27 +110,37 @@ async function readJson(req: IncomingMessage): Promise<unknown> {
   }
 }
 
+export type StartPayload =
+  | { op: "start"; mode: "audio_only"; apps: string[]; app_audio: boolean; microphone: boolean }
+  | { op: "start"; mode: "window" | "screen"; app_audio: boolean; microphone: boolean };
+
 /**
  * The record sheet's body, checked, and rebuilt from its known fields only —
  * nothing else in the body reaches the helper (an `op` in it cannot turn a
- * start into anything else).
+ * start into anything else, and no window, display or filter can ride along).
+ * `window` and `screen` take no `apps`: the picker chooses.
  */
-export function startPayload(body: unknown): { ok: true; payload: { op: "start"; apps: string[]; app_audio: boolean; microphone: boolean } } | { ok: false; message: string } {
-  if (typeof body !== "object" || body === null || Array.isArray(body)) return { ok: false, message: "the body is an object: {apps, app_audio?, microphone?}" };
+export function startPayload(body: unknown): { ok: true; payload: StartPayload } | { ok: false; message: string } {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) return { ok: false, message: "the body is an object: {mode?, apps?, app_audio?, microphone?}" };
   const b = body as Record<string, unknown>;
-  const unknown = Object.keys(b).filter((k) => !["apps", "app_audio", "microphone"].includes(k));
+  const unknown = Object.keys(b).filter((k) => !["mode", "apps", "app_audio", "microphone"].includes(k));
   if (unknown.length > 0) return { ok: false, message: `unknown field${unknown.length > 1 ? "s" : ""}: ${unknown.join(", ")}` };
+  const mode = b.mode ?? "audio_only";
+  if (typeof mode !== "string" || !(CAPTURE_MODES as readonly string[]).includes(mode)) return { ok: false, message: `mode is one of ${CAPTURE_MODES.join(", ")}` };
+  for (const key of ["app_audio", "microphone"] as const) {
+    if (b[key] !== undefined && typeof b[key] !== "boolean") return { ok: false, message: `${key} is true or false` };
+  }
+  const app_audio = (b.app_audio as boolean | undefined) ?? true;
+  const microphone = (b.microphone as boolean | undefined) ?? true;
+  if (mode === "window" || mode === "screen") {
+    if (b.apps !== undefined) return { ok: false, message: `${mode} is chosen in the macOS picker — a start names no apps, window or display` };
+    return { ok: true, payload: { op: "start", mode, app_audio, microphone } };
+  }
   if (!Array.isArray(b.apps) || b.apps.length === 0 || !b.apps.every((a) => typeof a === "string")) {
     return { ok: false, message: "apps is a non-empty list of bundle identifiers — a recording never hears everything" };
   }
   if (b.apps.length > MAX_SCOPE_APPS) return { ok: false, message: `at most ${MAX_SCOPE_APPS} apps` };
-  for (const key of ["app_audio", "microphone"] as const) {
-    if (b[key] !== undefined && typeof b[key] !== "boolean") return { ok: false, message: `${key} is true or false` };
-  }
-  return {
-    ok: true,
-    payload: { op: "start", apps: b.apps as string[], app_audio: (b.app_audio as boolean | undefined) ?? true, microphone: (b.microphone as boolean | undefined) ?? true },
-  };
+  return { ok: true, payload: { op: "start", mode: "audio_only", apps: b.apps as string[], app_audio, microphone } };
 }
 
 /** A helper refusal, onto core's envelope, in the owner's words. */
@@ -137,6 +158,7 @@ function helperFailure(res: ServerResponse, r: HelperResponse): void {
       return fail(res, "not_found", r.error);
     case "stream_failed":
     case "unreachable":
+    case "not_available":
       return fail(res, "not_available", r.error);
     default:
       return fail(res, "internal");

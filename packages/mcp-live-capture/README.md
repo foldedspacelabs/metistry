@@ -75,6 +75,14 @@ Microphone, Audio Capture (*Audio only*) and Screen Recording (*Window* and
 | `METISTRY_LIVE_CAPTURE_CONTROL_TOKEN` | all of those, plus `POST /recording/start` (every mode — *Audio only*, *Window*, *Screen*), `/recording/stop`, `/recording/keep-going` and `/recording/purge`. This is the person at the Mac, pressing Record or Purge Now |
 | `METISTRY_LIVE_CAPTURE_INBOX_TOKEN` | nothing here — the bridge refuses it like a stranger's. It is the capture owner token the bridge **presents** to the console's `POST /capture` when a session ends (capture and messages only; `docs/ops/capture-shortcut.md` §1 mints one) |
 
+On a Metistry install the control token is minted like every install
+variable — `metistry secrets mint METISTRY_LIVE_CAPTURE_CONTROL_TOKEN` puts it
+in the login Keychain (`metistry:METISTRY_LIVE_CAPTURE_CONTROL_TOKEN`, under
+the instance's id) and in `.env`, then `metistry restart live-capture` — and
+the Mac app's floating bar reads it from that one Keychain item and presents
+it to `127.0.0.1:7815` only. The bar never holds the bridge token
+(`apps/macos`, `docs/ops/mac-app.md` "The floating bar").
+
 The bridge token is refused `403` on every route that is the owner's hand,
 before the helper is asked anything. A model with this bridge's tools can
 see whether something is being recorded and re-read what was said, and can

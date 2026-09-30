@@ -115,7 +115,7 @@ path.
 | **Minting an enrolment code** | there is no HTTP route that mints one, deliberately — whoever can run the host command already controls Postgres and the vault, so shell access is the root of trust for a first passkey (plan §4.2) — and `metistry enroll` is on the CLI's own "not yet" list | step 6 shows the exact `scripts/enroll.mjs` command and takes the code you paste back |
 | **A QR code** for the phone | nothing in this product renders one yet; `apps/console/scripts/enroll.mjs` says the same about itself ("QR rendering arrives with `packages/cli`"), and an encoder is a dependency nobody has asked for | step 6 shows the enrolment URL, selectable, to type or hand over |
 | **The screens behind the rest of the sidebar's rows** | the shell has the rows (T5-2); each screen is its own ticket, and until it lands the row's detail names the gap and offers the web app. Landed in W2, each with its section below: Needs You (T5-4a's list, T5-4b's bodies), Today (T6-1a's spine, T6-1b's brief, Next Up and Close the Day), Chat (T6-2), Activity (T6-3), the Usage popover (T5-6) and the capture composer (T5-5); in W3, Knowledge (T6-4), Agents (T6-5), Scheduled (T6-6), Work ▸ Board (T6-7), Work ▸ Projects (T6-8), Work ▸ Artifacts (T6-9) and Run detail (T6-10). Still to come: the rest of W3 (T6-11) | the PWA — "Add to Dock" in Safari, or the detail's **Open in Browser** |
-| **Attachments and live capture in the composer** | New Capture is the text composer (T5-5, "The capture composer" below); the owner held audio and screen capture until the designer's floating action bar returns (#253), and the attachment chip, ⌘⇧A and the window's drop target are not built. The Capture menu's Ask · Note · To-do and Start/Stop Recording stay dimmed for the bar (T8) | the PWA's +, or `metistry console call POST /capture` with `filename` and `content_base64` |
+| **Attachments in the composer** | New Capture is the text composer (T5-5, "The capture composer" below); live capture is the floating bar's ("The floating bar" below — the #253 hold was lifted 2026-09-30, Q28), and the attachment chip, ⌘⇧A and the window's drop target are not built | the PWA's +, or `metistry console call POST /capture` with `filename` and `content_base64` |
 | **The keep-awake control** (Services) | the model half is shipped — `KeepAwakeSetting` (four values, each with what it costs), `KeepAwakeFacts` (doctor's row) and `deploymentSetKeepAwake` — and the pane is a switch with a radio pair under it, which is the designer's. First run can pass `--keep-awake` and does not ask on its own | a terminal: `metistry deployment set-keep-awake <value> --yes`, or `metistry init --keep-awake <value>` |
 | **An iOS target** | `MetistryKit` is already free of AppKit and of `Process` so it can be shared; there is no iOS target in `Package.swift` | — |
 
@@ -158,9 +158,14 @@ header** anywhere. The CLI is the one place that knows where
 `METISTRY_LOCAL_OWNER_TOKEN` lives, and it presents it over loopback without the
 value ever reaching this process — `ConsoleWhoami` has no field a token could
 land in. `apps/macos/tests/kit/console-sign-in-tests.swift` walks
-`apps/macos/sources` and asserts all of that: one file uses `URLSession`, no
-file sets a header other than `content-type`/`cookie`, no file names a Keychain
-API, and no file opens a file at all.
+`apps/macos/sources` and asserts all of that: one file uses `URLSession` for
+the console, no file sets a header toward it other than `content-type`/`cookie`,
+no file names a Keychain API, and no file opens a file at all. The one
+exception is the floating bar's door to the live-capture bridge on this Mac
+("The floating bar" below): two named files — a loopback-only transport that
+presents the recorder's control key, and one read-only Keychain query for that
+key — each held to its own rules by the same walk. The console's local owner
+token is still read by the CLI alone.
 
 **The five states, and what each says on screen.** Told apart by the CLI's exit
 code and by three phrases in its own message — never by the variable's name,
@@ -333,12 +338,14 @@ Security), holds the Microphone, Audio Capture and Screen Recording grants —
 and Settings ▸ Services shows the two doctor rows it adds, the recorder's
 `launchd:` job and the bridge's `live-capture` check. A recording's
 transcript reaches the console from the bridge through `POST /capture`, so
-the app sends nothing when a session ends. No capture UI is drawn here; the
-bar is T8-5's. *Window* and *Screen* (T8-3) are chosen in the system picker,
+the app sends nothing when a session ends. The bar is T8-5's ("The floating
+bar" below). *Window* and *Screen* (T8-3) are chosen in the system picker,
 which the recorder — not the app — presents, so the start the bar sends
-names only the mode (`{"mode":"window"}`); the bridge's `status` carries
-`senses` (`display`, `app_audio`, `microphone`) — the open streams the rail
-draws its display glyph from.
+names only the mode and two switches (`{"mode":"window","app_audio":true,
+"microphone":true}`) — `LiveCaptureScope` has no case that could carry a
+window or display id; the bridge's `status` carries `senses` (`display`,
+`app_audio`, `microphone`) — the open streams the rail draws its display
+glyph from.
 
 The routes `ConsoleAPI` already spoke keep their names and typed replies. A
 reply the contract spells out field by field is typed; every other reply is a
@@ -1084,6 +1091,116 @@ never "unlabeled" to VoiceOver — the system names it for its glyph, so `plus`
 says *Add* — which is why the shell's glyph controls are held to their exact
 names, not merely to saying something. macOS's text size is the system's: the
 shell uses semantic text styles only and fixes no height a label must fit in.
+
+## The floating bar
+
+Screen 11 §2–§7 (T8-5; the #253 hold lifted by Q28, 2026-09-30). Metistry's
+second interface: a 34pt glass rail on the right edge of the main display —
+the mark, then **Ask · Note · To-do**, then **Record** — drawn **only while
+the live-capture bridge answers on this Mac**. No bridge, no bar, and the
+Capture menu's bar items stay dimmed (screen 11 §8, "absent, not off").
+`capture-bar-model.swift` decides, `capture-bar-view.swift` draws, and
+`sources/app/capture-bar-panel.swift` is the window: a floating,
+non-activating panel on every Space and over full-screen apps, exactly the
+size of what it shows and anchored at its top-right corner, so a panel
+opening beside the rail grows leftward and nothing transparent sits over the
+desktop catching clicks. The edge and the display are Settings ▸ Live
+Capture's (screen 11 §8), not built here; *Hide Capture Bar* hides it for
+this launch.
+
+| | what it does |
+| --- | --- |
+| **Note · To-do** | a field beside the rail, already focused; Return saves and closes, Esc closes and keeps the words; a one-second *Noted 1:02 PM* (or *Queued …*), then nothing. Each jot is `CaptureComposerModel.jot` — the composer's `POST /capture`, one `Idempotency-Key` minted once, the same offline queue. A refused jot keeps its words in the bar's field with the console's reason; the composer's own draft is never touched |
+| **Ask** | the tail of **the** conversation — `ChatModel`, the same thread and the same draft as the window's Chat — at 328pt; a reply past four lines is drawn to four with **Open in Chat** (the window, on Chat). While recording, one line counts the session's jots |
+| **Record** | the sheet: *Screen · Window · Audio only*, then the audio switch (*App audio* for a window, *System audio* otherwise) and *Your microphone — your side only*, both on by default. A picture mode says, once, that macOS picks the window and the permission is not per-window (§6); *Audio only* lists the running apps. The start is `LiveCaptureStart.body`: a mode and two switches, or `audio_only` with bundle ids. A picture start that fails with the Screen Recording grant not given says *Metistry can't see your screen yet* with **Open System Settings** and **Audio Only** |
+| **Stop · Keep Going** | Record becomes Stop in the same place while a session runs; the two-hour reminder (*Still recording · 2 hours*) offers Keep Going; *Disk low* is said under 10 GB; a session that ended by itself (`picture_lost`, the ten-hour stop, the disk, a crash) is said once, with **Record Again** |
+
+**Live.** The mark breathes — 2.6 s, ease-in-out, scale 1 → 1.5, opacity
+0.85 → 0.12, one `agent` ring at 1.5pt — and stays filled throughout, so the
+state never depends on the animation; under Reduce Motion the ring holds at
+its widest (1.5, 0.4), still (`CaptureBarBreath`). The senses under it are
+the recorder's `senses` — a display while a picture is taken, a microphone
+while the owner is heard — never what was asked for (P5). The status is read
+every 2 s while a session runs, every 15 s at rest, and every 60 s while no
+bridge answers.
+
+**Glass at the measured floors (§7).** The platform's behind-window blur, a
+`surface` scrim that never dips under its floor — 0.75 on the rail (marks
+only; `text-tertiary` needs 0.81, so the rail carries no words), 0.86 on
+every panel (text) — a 0.5pt edge with a 1pt specular highlight, and a
+contact shadow under a wide soft one. After ten idle seconds only the
+decoration fades (highlight and shadows), never while recording.
+
+**The control key, and why it never reaches an agent.** The bridge admits
+start, stop and Keep Going only on `METISTRY_LIVE_CAPTURE_CONTROL_TOKEN`
+(T8-2a); its bridge token — the one any tool caller presents — reaches
+`check` and `status` only. Plan §2.2 puts "controlling a recording" in the
+device-local column (no CLI verb, no console route), so the app presents the
+control key itself, and it is kept exactly where every install variable is:
+the login Keychain, service `metistry:METISTRY_LIVE_CAPTURE_CONTROL_TOKEN`,
+account = the instance's `instance_id` — the item `metistry secrets mint
+METISTRY_LIVE_CAPTURE_CONTROL_TOKEN` writes beside `.env`, which is what the
+bridge is started with. One value, so the two cannot drift without the
+bridge saying so. What holds it (each a test that reads the source or drives
+a fake):
+
+- `live-capture-key.swift` is the one file that touches the Keychain: one
+  read-only `SecItemCopyMatching` for that one service; no add, update or
+  delete; it names no other credential. The console's local owner token is
+  still read by the CLI alone.
+- `live-capture-transport.swift` is the one file that sets an
+  `Authorization` header: loopback `127.0.0.1:7815` only (the manifest's
+  port), a route from a closed enum, redirects refused, an ephemeral session.
+  The console client never touches the key.
+- The key lives in memory for the instance it was read for, is dropped on an
+  instance switch, and prints as `<live-capture control key>` everywhere.
+  Nothing sends it through the console, a `metistry` verb's argv, a
+  preference, a file or a log line — so no agent, no model and no tool call
+  can see it.
+- The bar never holds the bridge's tool token: no source names it. If the
+  item filed as the control key held a read-only key, the bridge answers a
+  start `403` and the bar turns Record off with the reason — once, never
+  retried.
+
+**When the key is wrong, the bar says so.** Record stays pressable and opens
+the sheet with the reason and **Try Again**; Ask, Note and To-do keep
+working (they go through the console, not the recorder). Nothing is polled
+or retried until the owner acts.
+
+| state | what it says |
+| --- | --- |
+| no item for this instance | *This Mac has no key for the recorder, so it can't start or stop a recording. Run `metistry secrets mint METISTRY_LIVE_CAPTURE_CONTROL_TOKEN`, then `metistry restart live-capture`.* |
+| the bridge answers `401` (read afresh once) | *The recorder refused this Mac's key — it was started with a different one. Run `metistry restart live-capture`.* |
+| the bridge answers a start `403` | *The key filed for the recorder only reads it; …* and the same two verbs |
+| the Keychain declines | *The Keychain did not give the recorder's key (…)* |
+
+The first read may show macOS's own *"Metistry wants to use … in your
+keychain"* sheet, because `security` made the item: that is the Keychain's
+access list, answered once with *Always Allow* — not a permission the app
+asks for.
+
+**Jots during a session (C77).** At rest a Note is its words and a To-do is
+`- [ ] <words>` — the inbox drain's explicit cue. During a recording both
+carry the anchor T8-7 promotes on Approve: frontmatter `kind: "jot"`, `jot:
+"note"|"todo"`, a `title`, `capture_session` and `offset_s` (seconds from
+Record) — `docs/ops/inbox.md`, "Jots from the floating bar".
+
+**Not drawn, and why.** Screen 11 §4 has the Ask panel say *staying on this
+Mac* while recording. The assistant routes a turn to the private tier only
+when its message names the capture session (`meta.capture_session`), and
+`POST /message` has no field that lets the bar say so — so the line would be
+a claim nothing enforces (§9.2). It is left out until the route can carry
+the session.
+
+**Accessibility (§2.18).** The bar is one group, *Metistry capture bar*;
+each glyph-only control speaks its name (*Ask <name>*, *Note*, *To-do*,
+*Start recording. Window and microphone*, *Stop recording*) and its
+shortcut when one is on (T6-16's `shortcut` hook); the live mark speaks
+*Recording, 4 minutes. Window and microphone*, announced once per session;
+the sheet's switches are drawn buttons that say their name and *on/off*
+(AppKit's switch is a platform view SwiftUI cannot name). Panels have fixed
+widths — 270, 328, 360 — and grow longer at the largest text.
+`tests/kit/capture-bar-tests.swift`.
 
 ## The menu bar
 

@@ -368,6 +368,50 @@ autonomy. Owner-hand credentials (the Google OAuth client, an IMAP app
 password, the recorder's TCC grants) are supplied at test time, after the
 tickets land.
 
+### Calls the coordinator made in flight
+
+Each is the coordinator's call; **the owner to confirm** or reverse. Twenty-two
+tickets merged (PRs #460–#482 plus X-7's #437; #466 T9-4 is held by its plan
+gate); the questions each call left are in the table that follows.
+
+| Date | Where | The call |
+| --- | --- | --- |
+| 2026-09-30 | T6-13b (#481) | No route listed the connection types and no verb set a manifest field, so `GET /api/connections` gains `types` (and `provider_unit.type`) — a widening, no new route — and `connections add\|set --config KEY=VALUE` is validated against the type's manifest: an unknown key or a bad shape is refused, and a `secret`-kind field is refused outright, naming `secrets set`. T4-11 had built a `--config` of its own in parallel; the two were folded into this one validated flag (question Q-h). |
+| 2026-09-30 | T4-10 (#473) | The console's `.env` holds every dialled connection's secrets — a broader posture than question 10 asked about, taken so one sync mechanism (`secrets sync --to env`) serves every connection rather than one per transport. |
+| 2026-09-30 | T8-4 (#474) | `recording_review` is unreachable by the assistant — it is a Mac door, not a tool — and transcripts land under `Journal/Transcripts/`, per the Q29 ruling. |
+| 2026-09-30 | T8-5 (#475) | The recorder's control token is read from the login Keychain only (`metistry:METISTRY_LIVE_CAPTURE_CONTROL_TOKEN`), never written by the app, and the bar talks to the recorder pinned to `127.0.0.1:7815`. The console-only sign-in guard takes two named exceptions for that host, each held by its own test. |
+| 2026-09-30 | T8-7 (#476) | `group_id` is served on `GET /api/proposals` and on the restore and rollback answers — existing routes widened, no new route — so a meeting's rows are one card wherever they are read. |
+| 2026-09-30 | T4-17 (#478) | A message card is inferred from headers only — sender, subject, recipients, thread — and its copy says so. Reading the body waits on §4.12's on-device reduction (the PoC-13 bar); §2.12's "with an excerpt" is the goal, not what ships (question Q-a). |
+| 2026-09-30 | T4-14 (#479) | Metistry ships no Google client id yet: each owner brings their own through `--client-id-secret` until the maintainer's client exists, and the connection-type manifest schema refuses a `client_secret` field, so a client secret can never be a config value (question Q-e). |
+| 2026-09-30 | T4-11 (#480) | A one-release compatibility shim: `METISTRY_GITHUB_TOKEN` and `METISTRY_DEVIN_API_KEY` and the `targets/` manifests still load, but only when no connection of that name exists — a connection wins (D4). `local-crew` stays a target. `aws-costs` (SigV4) and `eventkit-calendar` (a bridge token) stay outside connections: neither is a bearer the egress guard can fill. |
+| 2026-09-30 | T6-16 (#477) | The any-app shortcuts are device-local: `anyAppShortcuts` in `UserDefaults`, the first configuration key in a store that until now held only three pointers. T6-15 put `captureBar` beside it (question Q-f). |
+| 2026-09-30 | T6-15 (#482) | Kept recordings are listed through `GET /api/knowledge/pages?prefix=Journal/Transcripts` plus one read per id — no list route was added — capped at 100. A route is candidate X-81. |
+| 2026-09-30 | T7-6 (#465) | Screen 18 says *Secrets: Mac-only* and §2.3 says a phone changes nothing that widens the boundary, so the phone reads secret **names** only — never a value, never a grant. |
+| 2026-09-30 | T6-14 (#467) | Screen 19 offers *rotate* only, and M7 says the app never mints: the pane has no Mint control. The wizard's example variables `standup_time` and `timezone` are refused by the key-shape check as ruling 2 requires — an example is not an exemption. |
+| 2026-09-30 | T6-12…T6-16, T7-6 | Merge order for the Settings panes: the first approved pane merges, every other rebases onto it. No pane waits for another's review. |
+| 2026-09-30 | W4 dispatch | The flake batch went first (X-24, X-29, X-31, X-32, X-41), answering W3 question 32, with X-29 before X-31 so the recorder's clock pin landed on fixtures that already matched main. |
+
+### Open for the owner at the W4 checkpoint
+
+Questions, not decisions: each says what is built meanwhile. A candidate that
+waits on one names it by letter.
+
+| # | The question | What is built meanwhile | Needed before |
+| --- | --- | --- | --- |
+| Q-a | §2.12 says a message card is "inferred with an excerpt", but T4-17 ships it header-only. Change the wording, or keep the excerpt as the goal behind §4.12's on-device reduction? | Header-only inference; the card's copy says so. | The §2.12 wording, or the §4.12 reduction ticket |
+| Q-b | Screen 11 §4, "staying on this Mac": `POST /message` carries no session-turn marker, so an Ask-panel turn inside a capture session cannot be held to the private tier. Today the panel says so honestly rather than faking it. Add the field? | No marker; the Ask panel is not drawn as private. | X-84 |
+| Q-c | A pre-existing private-tier leak: `seed/queries/activity_feed.yaml`'s capture branch derives `subject` from the note's first line, so a transcript's first spoken line is servable through `queries_run` on any tier — unlike `recording_review`, which the assistant cannot reach. Gate the branch, or take the subject from the title only? | The leak stands, documented. | X-83 |
+| Q-d | A capture proposal's payload carries the full note text (T8-2b), so a transcript's whole text sits on its request row. Acceptable under the private-tier rule, or must the row carry a reference only? | Full text on the row. | The T8-2b follow-up, if any |
+| Q-e | May Metistry ship a Desktop OAuth client secret for Google? Google may require it at token exchange even with PKCE. | Owners bring their own client; the manifest schema refuses a `client_secret`. | The maintainer's Google client |
+| Q-f | Device-local preferences (`anyAppShortcuts`, `captureBar`) live in `UserDefaults`. Accept the store, or move them to a device-local file? | `UserDefaults`, tested to hold those two keys beside the three pointers. | X-91 |
+| Q-g | T9-4 (#466): run `metistry-eval complexity` and accept, or hold? | Open, rebased, waiting on the eval's bar. | The W4 release |
+| Q-h | `--config`: T6-13b's manifest-validated flag replaced T4-11's. Confirm the one flag and its refusals (unknown key, bad shape, secret kind). | The validated flag. | — |
+| Q-i | The connections `types` payload also carries `description`, `provides`, `capabilities`, `tools` and per-field help — more than the ruling's literal field list (no secrets). Accept? | The wider payload is served. | — |
+
+The 27 questions of the W3 checkpoint that the 2026-09-30 rulings did not
+answer remain open as written above.
+
+
 ## Rulings the owner must make
 
 (a), (b) and (c) were ruled in W1 — see *Rulings made by the owner in W1* above.

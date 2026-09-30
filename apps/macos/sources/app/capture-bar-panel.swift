@@ -5,13 +5,15 @@
 // joins every Space and sits over full-screen apps, and the running apps
 // *Audio only* may list.
 //
-// PLACEMENT. The right edge of the main display, centred vertically, until
-// Settings ▸ Live Capture offers the edge and the display (screen 11 §8 —
-// not this ticket's). Top and bottom are never offered: the menu bar owns
-// the top, the Dock and the system's recording pill the bottom. The panel
-// is exactly the size of what it shows, anchored at its top-right corner, so
-// a panel opening beside the rail grows leftward and the rail never moves —
-// and nothing transparent sits over the desktop catching clicks.
+// PLACEMENT (Settings ▸ Live Capture, screen 11 §8, T6-15). The edge and the
+// display are `CaptureBarPreferences`' — left or right, centred vertically on
+// the chosen display (the main one when none is chosen or it is unplugged) —
+// and its switch off is no panel at all, whatever the bridge says. Top and
+// bottom are never offered: the menu bar owns the top, the Dock and the
+// system's recording pill the bottom. The panel is exactly the size of what it
+// shows, anchored at the corner on the screen's edge, so a panel opening
+// beside the rail grows toward the screen and the rail never moves — and
+// nothing transparent sits over the desktop catching clicks.
 //
 // FOCUS. The panel never activates the app: a click on the rail leaves the
 // meeting's window where it was. It becomes key only when a field needs the
@@ -28,16 +30,20 @@ import SwiftUI
 @MainActor
 final class CaptureBarPanelController {
     private let model: CaptureBarModel
+    private let placement: CaptureBarPreferences
     private let panel: CaptureBarWindow
     private let host: NSHostingView<AnyView>
-    /// The bar's top-right corner, kept while its content changes size.
+    /// The bar's top corner on the screen's edge, kept while its content changes size.
     private var anchor: NSPoint?
+    /// The placement the anchor was computed for; a change recomputes it.
+    private var anchoredFor: CaptureBarPlacement?
 
     /// The gap between the rail and the screen's edge (the board's 9pt).
     static let edgeGap: CGFloat = 9
 
-    init(model: CaptureBarModel) {
+    init(model: CaptureBarModel, placement: CaptureBarPreferences) {
         self.model = model
+        self.placement = placement
         host = NSHostingView(rootView: AnyView(EmptyView()))
         panel = CaptureBarWindow(
             contentRect: NSRect(x: 0, y: 0, width: 60, height: 200),
@@ -67,16 +73,24 @@ final class CaptureBarPanelController {
         follow()
     }
 
-    /// Shows or hides the panel as the model says, and gives it the keyboard
-    /// when a field is open — re-armed on every change it reads.
+    /// Shows or hides the panel as the model and the placement say, and gives
+    /// it the keyboard when a field is open — re-armed on every change it reads.
     private func follow() {
         withObservationTracking {
             _ = model.isShown
             _ = model.panel
+            _ = placement.placement
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in self?.follow() }
         }
-        if model.isShown {
+        let where_ = placement.placement
+        if model.edge != where_.edge { model.edge = where_.edge }
+        if anchoredFor != where_ {
+            anchor = nil
+            anchoredFor = where_
+            if panel.isVisible { fit(host.fittingSize) }
+        }
+        if model.isShown && where_.enabled {
             if !panel.isVisible {
                 fit(host.fittingSize)
                 panel.orderFrontRegardless()
@@ -90,20 +104,39 @@ final class CaptureBarPanelController {
         }
     }
 
-    /// Resizes the panel to its content, keeping the top-right corner where it
-    /// was — the rail stays put while a panel opens beside it.
+    /// Resizes the panel to its content, keeping the corner on the screen's
+    /// edge where it was — the rail stays put while a panel opens beside it.
     private func fit(_ size: CGSize) {
         guard size.width > 0, size.height > 0 else { return }
         let top = anchor ?? defaultAnchor()
         anchor = top
-        let frame = NSRect(x: top.x - size.width, y: top.y - size.height, width: size.width, height: size.height)
+        let x = placement.placement.edge == .left ? top.x : top.x - size.width
+        let frame = NSRect(x: x, y: top.y - size.height, width: size.width, height: size.height)
         if panel.frame != frame { panel.setFrame(frame, display: true) }
     }
 
-    /// The right edge of the main display, the rail centred on it.
+    /// The chosen edge of the chosen display, the rail centred on it. The
+    /// display falls back to the main one when none is chosen or it is gone.
     private func defaultAnchor() -> NSPoint {
-        let screen = (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-        return NSPoint(x: screen.maxX - Self.edgeGap + MetistrySpace.s3, y: screen.midY + 150)
+        let chosen = placement.placement.displayID.flatMap { id in NSScreen.screens.first { Self.displayID(of: $0) == id } }
+        let screen = (chosen ?? NSScreen.main ?? NSScreen.screens.first)?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let y = screen.midY + 150
+        switch placement.placement.edge {
+        case .left: return NSPoint(x: screen.minX + Self.edgeGap - MetistrySpace.s3, y: y)
+        case .right: return NSPoint(x: screen.maxX - Self.edgeGap + MetistrySpace.s3, y: y)
+        }
+    }
+
+    /// `NSScreenNumber` — the id `CaptureBarDisplay` carries and the preference stores.
+    static func displayID(of screen: NSScreen) -> Int? {
+        (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.intValue
+    }
+
+    /// The displays Settings ▸ Live Capture offers.
+    static func displays() -> [CaptureBarDisplay] {
+        NSScreen.screens.compactMap { screen in
+            displayID(of: screen).map { CaptureBarDisplay(id: $0, name: screen.localizedName, isMain: screen == NSScreen.main) }
+        }
     }
 
     /// The regular apps running now — what *Audio only* may tap. Never

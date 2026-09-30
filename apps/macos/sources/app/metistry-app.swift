@@ -105,7 +105,7 @@ struct MetistryApp: App {
         bar.openScreenSettings = {
             if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") { NSWorkspace.shared.open(url) }
         }
-        _captureBarPanel = State(initialValue: CaptureBarPanelController(model: bar))
+        _captureBarPanel = State(initialValue: CaptureBarPanelController(model: bar, placement: model.barPlacement))
         model.startCaptureBar()
         #endif
     }
@@ -152,7 +152,9 @@ struct MetistryApp: App {
                 onShowShortcuts: { openWindow(id: ShellWindowID.keyboardShortcuts) },
                 onOpenSystemSettings: {
                     if let url = URL(string: "x-apple.systempreferences:") { NSWorkspace.shared.open(url) }
-                }
+                },
+                // The capture bar's placement (Settings ▸ Live Capture): the displays, by the id the panel places by.
+                displays: { CaptureBarPanelController.displays() }
             )
         }
         .windowResizability(.contentSize)

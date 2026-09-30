@@ -6,9 +6,10 @@
 // Metistry from the bridge through `POST /capture`, so the app sends nothing
 // when a session ends.
 //
-// THE WIRE (packages/mcp-live-capture/README.md, T8-2a/T8-2b/T8-3). Four
-// bridge routes the bar drives, and `/check` it reads — `LiveCaptureRoute` is
-// the closed set, so no caller of this file can name another:
+// THE WIRE (packages/mcp-live-capture/README.md, T8-2a/T8-2b/T8-3/T8-4). Four
+// bridge routes the bar drives, one Settings ▸ Live Capture drives, and
+// `/check` they read — `LiveCaptureRoute` is the closed set, so no caller of
+// this file can name another:
 //
 //   GET  /status                the session read-back: state, elapsed, the
 //                               senses that are open, the reminder, the disk
@@ -16,6 +17,8 @@
 //                               or {"mode":"audio_only","apps":[bundle ids], …}
 //   POST /recording/stop
 //   POST /recording/keep-going  answers the two-hour reminder
+//   POST /recording/purge       Purge Now (T8-4) — one recording's media, now;
+//                               Settings ▸ Live Capture's, never the bar's
 //   GET  /check                 read only to say why a picture could not start
 //
 // *Window* and *Screen* NAME NOTHING: the recorder presents the macOS picker
@@ -50,6 +53,11 @@ public protocol LiveCaptureClient: Sendable {
     func keepGoing() async -> Result<Bool, LiveCaptureError>
     /// The grants as the recorder can know them (bridge `GET /check`'s `meta.grants`).
     func grants() async -> Result<[String: String], LiveCaptureError>
+    /// Purge Now (T8-4, plan §2.15; Settings ▸ Live Capture): delete one ended
+    /// recording's audio and frames at once, whatever the retention rule would
+    /// have allowed — bridge `POST /recording/purge {session_id}`, the control
+    /// credential. The answer is the recording's retention record, never its words.
+    func purge(_ sessionID: String) async -> Result<LiveCapturePurged, LiveCaptureError>
     /// Drop the key read before, so the next call reads it afresh — an
     /// instance switch, or the owner's *Try Again* after minting one.
     func forgetKey() async
@@ -196,6 +204,36 @@ public struct LiveCaptureSession: Sendable, Equatable, Decodable {
     }
 }
 
+/// `POST /recording/purge`'s answer, typed: the recording's retention record —
+/// what is left of it and why. Never a word of the transcript.
+public struct LiveCapturePurged: Sendable, Equatable, Decodable {
+    public let sessionID: String
+    /// The media still on disk after the purge — 0 when it went.
+    public let mediaBytes: Int
+    public let audioDeletedAt: String?
+    /// `retention` or `owner` (Purge Now).
+    public let audioDeletedReason: String?
+
+    public init(sessionID: String, mediaBytes: Int, audioDeletedAt: String?, audioDeletedReason: String?) {
+        self.sessionID = sessionID
+        self.mediaBytes = mediaBytes
+        self.audioDeletedAt = audioDeletedAt
+        self.audioDeletedReason = audioDeletedReason
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case sessionID = "session_id", mediaBytes = "media_bytes", audioDeletedAt = "audio_deleted_at", audioDeletedReason = "audio_deleted_reason"
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        sessionID = try c.decode(String.self, forKey: .sessionID)
+        mediaBytes = (try? c.decodeIfPresent(Int.self, forKey: .mediaBytes)) ?? 0
+        audioDeletedAt = (try? c.decodeIfPresent(String.self, forKey: .audioDeletedAt)) ?? nil
+        audioDeletedReason = (try? c.decodeIfPresent(String.self, forKey: .audioDeletedReason)) ?? nil
+    }
+}
+
 /// `GET /status`, typed: what is running now, never what it took.
 public struct LiveCaptureState: Sendable, Equatable, Decodable {
     public enum Phase: String, Sendable, Equatable {
@@ -312,6 +350,8 @@ public enum LiveCaptureRoute: String, Sendable, CaseIterable {
     case start = "POST /recording/start"
     case stop = "POST /recording/stop"
     case keepGoing = "POST /recording/keep-going"
+    /// Settings ▸ Live Capture's Purge Now (T8-4) — the bar never sends it.
+    case purge = "POST /recording/purge"
 
     public var method: String { String(rawValue.split(separator: " ")[0]) }
     public var path: String { String(rawValue.split(separator: " ")[1]) }
@@ -384,6 +424,12 @@ public final class BridgeLiveCaptureClient: LiveCaptureClient {
         // `/check` answers 503 with the same body when the bridge is degraded:
         // the grants are in it either way.
         await call(.check, body: nil, acceptingDegraded: true).flatMap { Self.decode(CheckReply.self, $0).map { $0.meta?.grants ?? [:] } }
+    }
+
+    public func purge(_ sessionID: String) async -> Result<LiveCapturePurged, LiveCaptureError> {
+        // The body is `{session_id}` and nothing else — the bridge refuses any other field.
+        let body = try? JSONEncoder().encode(["session_id": sessionID])
+        return await call(.purge, body: body).flatMap { Self.decode(LiveCapturePurged.self, $0) }
     }
 
     // MARK: The one path every call takes
@@ -471,4 +517,5 @@ public struct AbsentLiveCaptureClient: LiveCaptureClient {
     public func stop() async -> Result<LiveCaptureSession?, LiveCaptureError> { .failure(.absent) }
     public func keepGoing() async -> Result<Bool, LiveCaptureError> { .failure(.absent) }
     public func grants() async -> Result<[String: String], LiveCaptureError> { .failure(.absent) }
+    public func purge(_ sessionID: String) async -> Result<LiveCapturePurged, LiveCaptureError> { .failure(.absent) }
 }

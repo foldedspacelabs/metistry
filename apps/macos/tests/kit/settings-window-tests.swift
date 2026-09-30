@@ -34,7 +34,7 @@ import Testing
     #expect(SettingsLayout.width == SettingsLayout.sidebar + SettingsLayout.pane)
     #expect((SettingsLayout.width, SettingsLayout.height) == (840, 600))
     // a pane whose own ticket has not landed says what it will hold — never a dead end
-    for section in [SettingsModel.Section.variables, .liveCapture, .sessions] {
+    for section in [SettingsModel.Section.liveCapture, .sessions] {
         #expect((section.pendingNote?.count ?? 0) > 40, "\(section)")
     }
 }

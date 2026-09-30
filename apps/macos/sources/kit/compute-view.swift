@@ -43,8 +43,8 @@ public struct ComputePaneView: View {
         self.onReplaceKey = onReplaceKey
     }
 
-    /// *Metis uses* — the configured name, never a hardcoded one.
-    static func usesTitle(_ assistantName: String?) -> String {
+    /// *<the assistant> uses* — the configured name, never a hardcoded one.
+    nonisolated static func usesTitle(_ assistantName: String?) -> String {
         "\(assistantName ?? "The Assistant") Uses"
     }
 
@@ -568,13 +568,13 @@ public struct ComputePaneView: View {
         }
     }
 
-    static func spent(today: Double?, month: Double?) -> String {
+    nonisolated static func spent(today: Double?, month: Double?) -> String {
         guard let today, let month else { return "spend not known" }
         return "\(ComputeModelLine.dollars(today)) today \u{00B7} \(ComputeModelLine.dollars(month)) this month"
     }
 
     /// A subscription's window is its limit (C133).
-    static func windowWords(_ provider: ComputeLimits.Provider) -> String {
+    nonisolated static func windowWords(_ provider: ComputeLimits.Provider) -> String {
         let used = provider.callsToday.map { today in
             " \u{00B7} \(today) \(today == 1 ? "call" : "calls") today, \(provider.callsThisMonth ?? 0) this month"
         } ?? ""
@@ -731,7 +731,7 @@ struct ModelMenu: View {
     }
 
     /// The same words as `ModelLineText`, as a menu can hold them.
-    static func menuText(_ line: ComputeModelLine) -> String {
+    nonisolated static func menuText(_ line: ComputeModelLine) -> String {
         line.price.map { "\(line.text)    \($0)" } ?? line.text
     }
 }
@@ -823,7 +823,7 @@ struct SearchResultView: View {
     /// What a place adds under its line: ZDR and *Cheapest* for a cloud
     /// place, the plan for a subscription's. *Add* on a cloud place, and a
     /// local place's size and fit, are drawn and not served yet.
-    static func placeWords(line: ComputeModelLine, place: ComputeCatalogueReply.Place) -> String {
+    nonisolated static func placeWords(line: ComputeModelLine, place: ComputeCatalogueReply.Place) -> String {
         var parts: [String] = []
         switch line.tag {
         case .local:

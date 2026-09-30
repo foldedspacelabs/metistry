@@ -19,8 +19,8 @@
 //
 //   * Inside the boundary — the assistant's model and effort, a tier, a
 //     spending limit, a project's daily budget, a provider test — are client
-//     API writes a phone may also make (§2.3, "Compute: Metis's model and
-//     effort, spending limits"): `POST /api/compute/assign|unassign|budget|
+//     API writes a phone may also make (§2.3's row for the assistant's model
+//     and effort, and spending limits): `POST /api/compute/assign|unassign|budget|
 //     providers/test`, `PUT /api/projects/:slug`. Each is reversible and acts
 //     at once, its answer said at the control (components-03 §3).
 //   * The boundary itself — a provider's switch, its base URL, which secret

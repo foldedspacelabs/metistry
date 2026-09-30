@@ -3,18 +3,21 @@
 // under the advisory lock, compose, kickstart only the host jobs whose code
 // changed, lock written through the reconciler as `user`); the refusal
 // paths; the no-bridge direct write; release mode; the lock round trip.
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { cp, mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { instanceLockPath, parseLock, readLock, serializeLock, type LockFile } from "../src/lock.js";
 import { main } from "../src/main.js";
 import { MIGRATION_LOCK_KEY, type MigrationSession } from "../src/migrate.js";
 import { realExec, type Exec } from "../src/exec.js";
-import { hashHostJobs, legacyLayoutRefusal, parseDoctorJson, pastLegacyLayoutSupport, publishedPackages, RECONCILER_READY_TIMEOUT_MS, trackedPathFor, update, waitForReconciler } from "../src/update.js";
+import { hashHostJobs, legacyLayoutRefusal, parseDoctorJson, pastLegacyLayoutSupport, publishedPackages, RECONCILER_READY_TIMEOUT_MS, reconcilerLogTail, supervisorProductDirs, trackedPathFor, update, waitForReconciler } from "../src/update.js";
 import { StepRunner } from "../src/steps.js";
-import { supervisorConfig, supervisorConfigPath, writeSupervisorConfig } from "../src/supervisor.js";
+import { readSupervisorConfig, supervisorConfig, supervisorConfigPath, writeSupervisorConfig } from "../src/supervisor.js";
+import { switchCurrent } from "../src/release.js";
+import { CLT_GIT } from "../src/sandbox.js";
 import { createServer } from "node:net";
 import { loadPlistTemplates } from "../src/launchd.js";
 import { checkout, failDoctor, fakeExec, HELPER, okDoctor, put, RECONCILER, shown, SUPERVISOR, WATCHDOG } from "./fixtures.js";
@@ -295,6 +298,12 @@ describe("metistry update", () => {
     }) as unknown as typeof fetch;
     const calls2: string[] = [];
     const lines2: string[] = [];
+    // …and says WHY, from the reconciler's own log — the one supervisor.json
+    // names for it — rather than only "did not answer" (the owner's
+    // 0.14.2 → 0.14.4 run: an EPERM on the new release's main.js)
+    const log = join(await mkdtemp(join(tmpdir(), "mlog-")), "reconciler.log");
+    await writeFile(log, ["reconciler: starting", "Error: EPERM: operation not permitted, open '/p/releases/0.14.4/apps/reconciler/dist/main.js'", "    at Object.openSync (node:fs:573:18)", ""].join("\n"));
+    await writeSupervisorConfig(supervisorConfigPath(P), supervisorConfig({ label: SUPERVISOR, socket: join(P, "s.sock"), token: "sup-tok-0123456789abcdef", env: {}, children: [{ name: "reconciler", argv: ["/bin/sh", "-c", "exec node main.js"], log }] }));
     const r2 = await update({ ...base(P, noOwner()), out: (l) => lines2.push(l), exec: fakeExec(), skipBuild: true, skipMigrate: true, fetchFn: never, mintOwnerToken: () => "fresh-owner", doctorFn: okDoctor, reconcilerReady: { intervalMs: 1, timeoutMs: 20 } });
     expect(r2.code).toBe(1);
     const text2 = lines2.join("\n");
@@ -304,6 +313,22 @@ describe("metistry update", () => {
     expect(r2.lock?.product.source).toBe("git"); // the lock it WOULD have written is still the result's
     expect(text2).toContain("update incomplete");
     expect(text2).not.toContain("did not answer (fetch failed http://127.0.0.1:7812/vault/write)");
+    expect(text2).toContain(`reconciler log ${log} — its last error line(s):`);
+    expect(text2).toContain("| Error: EPERM: operation not permitted, open '/p/releases/0.14.4/apps/reconciler/dist/main.js'");
+    expect(r2.deferred[0]!.why).toContain("its log says: Error: EPERM: operation not permitted");
+  });
+
+  it("reconcilerLogTail: the last error lines, else the last lines, and a missing log said to be missing", async () => {
+    const root = await mkdtemp(join(tmpdir(), "mi-"));
+    const log = join(root, "r.log");
+    await writeSupervisorConfig(supervisorConfigPath(root), supervisorConfig({ label: SUPERVISOR, socket: join(root, "s.sock"), token: "sup-tok-0123456789abcdef", env: {}, children: [{ name: "reconciler", argv: ["node"], log }] }));
+    expect(await reconcilerLogTail({ stateRoot: root })).toEqual({ path: log, exists: false, lines: [], errors: false });
+    await writeFile(log, "a\nb\nc\n");
+    expect(await reconcilerLogTail({ stateRoot: root, lines: 2 })).toEqual({ path: log, exists: true, lines: ["b", "c"], errors: false });
+    await writeFile(log, "Error: one\nok\nfatal: two\nlistening\n");
+    expect(await reconcilerLogTail({ stateRoot: root })).toEqual({ path: log, exists: true, lines: ["Error: one", "fatal: two"], errors: true });
+    // no supervisor.json: the job's own log path, as `metistry logs reconciler` has it
+    expect((await reconcilerLogTail({ stateRoot: await mkdtemp(join(tmpdir(), "mi-")), labelSuffix: "abc123" })).path).toBe("/tmp/metistry-abc123-reconciler.log");
   });
 
   // W3 checkpoint D1: the lock and secrets.yaml were written through the
@@ -871,5 +896,199 @@ describe("update's closing doctor runs the updated CLI", () => {
   it("parseDoctorJson takes a report and nothing else", () => {
     expect(parseDoctorJson('{"ok":true,"rows":[],"as_of":"x","product_dir":"p","shape":"compose"}')?.ok).toBe(true);
     for (const bad of ["", "not json", "null", '{"ok":"yes","rows":[]}', '{"ok":true}', '{"ok":true,"rows":[]'] as const) expect(parseDoctorJson(bad)).toBeUndefined();
+  });
+});
+
+// The owner's 0.14.2 → 0.14.4 run (launchd shape): the update switched
+// `current`, handed over to the new CLI, and its restart step kickstarted
+// the supervisor onto the supervisor.json the LAST `up` wrote — whose
+// confined children were granted releases/0.14.2 by real path. The
+// assistant and the reconciler died at start with EPERM on
+// releases/0.14.4/…/main.js, the lock wait ran out, and only a manual
+// `metistry up` brought the install back. The restart step now re-renders
+// with `up`'s own code first.
+describe("update, launchd shape: the LaunchAgent and supervisor.json are re-rendered before anything restarts", () => {
+  const REPO = resolve(fileURLToPath(import.meta.url), "..", "..", "..", "..");
+  const NODE = "/usr/local/bin/node";
+  const PG = "/opt/homebrew/opt/postgresql@17/bin";
+  const COMPUTE = `providers:
+  openrouter:
+    kind: openai-compatible
+    base_url: https://openrouter.ai/api/v1
+    locality: off_machine
+    auth: { secret: METISTRY_OPENROUTER_API_KEY }
+    data_policy: { allow: [Projects], deny_sources: [comms], max_brief_bytes: 65536 }
+assignments:
+  default: { model: openrouter/anthropic/claude-sonnet-5 }
+`;
+  /** a Postgres toolchain and the Command Line Tools' git are "installed"; the rest of the filesystem is real */
+  const launchdUp = { node: NODE, exists: (p: string) => p.startsWith(PG) || p === CLT_GIT || existsSync(p) };
+
+  /** One unpacked release: this repo's real plists and sandbox profiles, the launchd shape, an engine assigned. */
+  async function launchdRelease(P: string, version: string, watchdog: string): Promise<void> {
+    const src = await checkout();
+    await cp(join(REPO, "ops", "launchd"), join(src, "ops", "launchd"), { recursive: true });
+    await cp(join(REPO, "ops", "sandbox"), join(src, "ops", "sandbox"), { recursive: true });
+    await put(src, "seed/deployment.yaml", "shape: launchd\nservices: {}\n");
+    await put(src, "seed/compute.yaml", COMPUTE);
+    await put(src, "apps/watchdog/dist/lib/util.js", watchdog);
+    await cp(src, join(P, "releases", version), { recursive: true });
+  }
+
+  /** 0.1.0 then 0.2.0 unpacked, `current` already switched to 0.2.0 (the parent's half), and an instance still rendered for 0.1.0. */
+  async function switchedInstall() {
+    const P = await mkdtemp(join(tmpdir(), "metistry-rel-"));
+    await launchdRelease(P, "0.1.0", "v1");
+    await launchdRelease(P, "0.2.0", "v2"); // the watchdog changed: the supervisor tracks it, so it is owed a restart
+    await switchCurrent(P, "0.1.0");
+    await switchCurrent(P, "0.2.0");
+    const inst = await mkdtemp(join(tmpdir(), "mi-"));
+    const home = await mkdtemp(join(tmpdir(), "mh-"));
+    await mkdir(join(inst, ".metistry", "state"), { recursive: true });
+    await writeFile(join(inst, ".metistry", "state", ".env"), "METISTRY_DB_PASSWORD=pw\n");
+    const prior: LockFile = { product: { version: "0.1.0", commit: "unknown", source: "release" }, updated_at: "2026-09-01T00:00:00.000Z", migrations_applied: [] };
+    await writeFile(join(inst, ".metistry", "metistry.lock"), serializeLock(prior));
+    // what the last `up` (on 0.1.0) left: both confined children granted 0.1.0 by its REAL path
+    const old = realpathSync(join(P, "releases", "0.1.0"));
+    await writeSupervisorConfig(
+      supervisorConfigPath(inst),
+      supervisorConfig({
+        label: SUPERVISOR,
+        socket: join(inst, "s.sock"),
+        token: "sup-tok-0123456789abcdef",
+        env: {},
+        children: [
+          { name: "reconciler", argv: ["/bin/sh", "-c", `exec '/usr/bin/sandbox-exec' -f '${P}/current/ops/sandbox/reconciler.sb' -D 'PRODUCT_DIR=${old}' -D 'INSTANCE_DIR=${inst}' '${NODE}' '${P}/current/apps/reconciler/dist/main.js'`], log: join(inst, "reconciler.log") },
+          { name: "assistant", argv: ["/usr/bin/sandbox-exec", "-f", `${P}/current/ops/sandbox/assistant.sb`, "-D", `PRODUCT_DIR=${old}`, NODE, `${P}/current/apps/assistant/dist/main.js`], log: join(inst, "assistant.log") },
+        ],
+      }),
+    );
+    const env: NodeJS.ProcessEnv = { HOME: home, TMPDIR: "/tmp", METISTRY_INSTANCE_DIR: inst, METISTRY_DB_PASSWORD: "pw", METISTRY_RUNTIME_DEPS: "0", METISTRY_OPENROUTER_API_KEY: "sk-or-x", METISTRY_ASSISTANT_TOKEN: "tok", ...BRIDGE };
+    return { P, inst, home, env, old, now: realpathSync(join(P, "releases", "0.2.0")) };
+  }
+
+  /** The reconciler answers everything; GitHub answers v0.2.0 with a pack that must never be downloaded here. */
+  function bridge() {
+    const calls: string[] = [];
+    const fn = (async (url: string | URL | Request, init?: RequestInit) => {
+      const u = String(url);
+      calls.push(u.endsWith("/vault/write") ? `${u} ${(JSON.parse(String(init?.body)) as { path: string; content?: string }).path}` : u);
+      if (u.endsWith("/releases/tags/v0.2.0"))
+        return new Response(JSON.stringify({ tag_name: "v0.2.0", prerelease: false, assets: [{ name: "metistry-runtime-0.2.0-darwin-arm64.tar.gz", browser_download_url: "https://example.test/dl/pack.tar.gz" }, { name: "checksums.txt", browser_download_url: "https://example.test/dl/checksums.txt" }] }), { status: 200 });
+      if (u.startsWith("https://example.test/")) throw new Error(`downloaded ${u} — the release is already unpacked`);
+      if (u.endsWith("/flush")) return new Response(JSON.stringify({ commits: [], skipped: 0, failed: 0 }), { status: 200 });
+      return new Response(JSON.stringify({ queued: true }), { status: u.endsWith("/check") ? 200 : 201 });
+    }) as unknown as typeof fetch;
+    return { fn, calls };
+  }
+
+  it("--continue-from=switched: the plist and supervisor.json are written, for the new release, BEFORE the supervisor is kickstarted — once", async () => {
+    const t = await switchedInstall();
+    const exec = fakeExec();
+    const f = bridge();
+    const lines: string[] = [];
+    const r = await update({ ...base(t.P, t.env), version: "0.2.0", out: (l) => lines.push(l), exec, fetchFn: f.fn, continueFrom: "switched", skipMigrate: true, doctorFn: okDoctor, launchdUp, reconcilerReady: { intervalMs: 1, timeoutMs: 1_000 } });
+    if (r.code !== 0) console.error(lines.join("\n"));
+    expect(r.code).toBe(0);
+
+    const plist = join(t.home, "Library", "LaunchAgents", `${SUPERVISOR}.plist`);
+    const at = (pred: (c: string) => boolean) => r.commands.findIndex(pred);
+    const wrotePlist = at((c) => c.startsWith(`write ${plist} `));
+    const wroteConfig = at((c) => c.startsWith(`write ${supervisorConfigPath(t.inst)} `));
+    const kickstart = at((c) => c === `launchctl kickstart -k gui/501/${SUPERVISOR}`);
+    expect(wrotePlist).toBeGreaterThanOrEqual(0);
+    expect(wroteConfig).toBeGreaterThanOrEqual(0);
+    expect(kickstart).toBeGreaterThan(wrotePlist);
+    expect(kickstart).toBeGreaterThan(wroteConfig);
+    // the exact tail of the supervisor's half: rendered, booted out, bootstrapped from the new plist, kickstarted — and never kickstarted a second time by the restart loop
+    const sup = r.commands.filter((c) => c.includes(`gui/501/${SUPERVISOR}`) || c === `launchctl bootstrap gui/501 ${plist}`);
+    expect(sup).toEqual([`launchctl bootout gui/501/${SUPERVISOR}`, `launchctl bootstrap gui/501 ${plist}`, `launchctl kickstart -k gui/501/${SUPERVISOR}`]);
+    expect(exec.calls.filter((c) => c.cmd === "launchctl" && c.args[0] === "kickstart" && c.args[2] === `gui/501/${SUPERVISOR}`)).toHaveLength(1);
+    expect(r.restart.owed).toContain(SUPERVISOR);
+    expect(r.restarted).toContain(SUPERVISOR);
+
+    // every confined child is granted the release `current` resolves to now, and nothing else
+    const config = (await readSupervisorConfig(supervisorConfigPath(t.inst)))!;
+    expect(supervisorProductDirs(config)).toEqual([t.now]);
+    expect(readFileSync(supervisorConfigPath(t.inst), "utf8")).not.toContain(t.old);
+    expect(config.token).toBe("sup-tok-0123456789abcdef"); // the control token is kept
+    expect(lines.join("\n")).toContain(`supervisor.json grants ${t.old}, and the sandbox profiles match the REAL path, which is ${t.now} now`);
+
+    // …and so the reconciler answered and the lock moved
+    expect(f.calls).toContain("http://127.0.0.1:7812/vault/write .metistry/metistry.lock");
+    expect(r.lock?.product.version).toBe("0.2.0");
+    expect(r.deferred).toEqual([]);
+  });
+
+  it("a stale supervisor.json is rewritten on the same-version rerun — no download, nothing owed — and a current one is left alone while the deferred lock is written", async () => {
+    const t = await switchedInstall();
+    const run = async () => {
+      const exec = fakeExec();
+      const f = bridge();
+      const lines: string[] = [];
+      // not a continuation: the rerun `metistry update` an owner types after an update whose restart went wrong
+      const r = await update({ ...base(t.P, t.env), version: "0.2.0", out: (l) => lines.push(l), exec, fetchFn: f.fn, releaseVersion: "0.2.0", target: "darwin-arm64", appPath: null, skipMigrate: true, doctorFn: okDoctor, launchdUp, reconcilerReady: { intervalMs: 1, timeoutMs: 1_000 } });
+      if (r.code !== 0) console.error(lines.join("\n"));
+      return { r, exec, f, text: lines.join("\n") };
+    };
+
+    const first = await run();
+    expect(first.r.code).toBe(0);
+    expect(first.text).toContain("already running 0.2.0 (current -> releases/0.2.0) — nothing to download");
+    expect(first.f.calls.filter((u) => u.startsWith("https://example.test/"))).toEqual([]);
+    expect(first.r.release).toMatchObject({ version: "0.2.0", installed: false });
+    expect(first.r.reexec).toBeUndefined();
+    // no code moved (before and after are the same release) — the stale config alone owes the restart
+    expect(first.r.restart.owed).toEqual([SUPERVISOR]);
+    expect(supervisorProductDirs((await readSupervisorConfig(supervisorConfigPath(t.inst)))!)).toEqual([t.now]);
+    expect(first.r.commands.findIndex((c) => c.startsWith(`write ${supervisorConfigPath(t.inst)} `))).toBeLessThan(first.r.commands.indexOf(`launchctl kickstart -k gui/501/${SUPERVISOR}`));
+    expect(first.f.calls).toContain("http://127.0.0.1:7812/vault/write .metistry/metistry.lock");
+    expect(first.r.lock?.product.version).toBe("0.2.0");
+
+    // and once it is current: nothing is rendered or restarted, and the lock is still written — the rerun that finishes a deferred lock
+    const second = await run();
+    expect(second.r.code).toBe(0);
+    expect(second.text).toContain(`launchd: ${supervisorConfigPath(t.inst)} already grants ${t.now} — nothing to re-render`);
+    expect(second.exec.calls.filter((c) => c.cmd === "launchctl" && ["kickstart", "bootstrap", "bootout"].includes(c.args[0]!))).toEqual([]);
+    expect(second.r.commands.some((c) => c.startsWith(`write ${supervisorConfigPath(t.inst)} `))).toBe(false);
+    expect(second.f.calls.filter((u) => u.startsWith("https://example.test/"))).toEqual([]);
+    expect(second.f.calls).toContain("http://127.0.0.1:7812/vault/write .metistry/metistry.lock");
+    expect(second.r.lock?.product.version).toBe("0.2.0");
+    expect(second.r.deferred).toEqual([]);
+  });
+
+  it("a render that does not land is deferred with `metistry up`, and the supervisor is still kickstarted", async () => {
+    const t = await switchedInstall();
+    const exec = fakeExec();
+    const lines: string[] = [];
+    // no Postgres anywhere: `up`'s launchd step stops before it writes a plist
+    const noPg = { node: NODE, exists: (p: string) => p === CLT_GIT || existsSync(p) };
+    const r = await update({ ...base(t.P, t.env), version: "0.2.0", out: (l) => lines.push(l), exec, fetchFn: bridge().fn, continueFrom: "switched", skipMigrate: true, doctorFn: okDoctor, launchdUp: noPg, reconcilerReady: { intervalMs: 1, timeoutMs: 1_000 } });
+    expect(r.code).toBe(1);
+    expect(r.deferred).toContainEqual({ what: "the LaunchAgent plists and supervisor.json", why: expect.stringContaining("not re-rendered for 0.2.0"), fix: ["metistry up"] });
+    expect(exec.calls.filter((c) => c.cmd === "launchctl" && c.args[0] === "kickstart").map((c) => c.args[2])).toEqual([`gui/501/${SUPERVISOR}`]);
+  });
+
+  it("supervisorProductDirs reads both argv shapes: a -D pair of its own, and inside the reconciler's sh -c line", () => {
+    expect(
+      supervisorProductDirs({
+        children: [
+          { argv: ["/bin/sh", "-c", "exec '/usr/bin/sandbox-exec' -f 'x' -D 'PRODUCT_DIR=/a b/releases/0.1.0' -D 'INSTANCE_DIR=/i' 'node'"] },
+          { argv: ["/usr/bin/sandbox-exec", "-D", "PRODUCT_DIR=/a b/releases/0.1.0", "node"] },
+          { argv: ["node", "main.js"] },
+        ],
+      }),
+    ).toEqual(["/a b/releases/0.1.0"]);
+  });
+
+  it("--dry-run says the re-render is planned before any kickstart, and renders nothing", async () => {
+    const t = await switchedInstall();
+    const exec = fakeExec();
+    const r = await update({ ...base(t.P, t.env), version: "0.2.0", exec, fetchFn: bridge().fn, continueFrom: "switched", dryRun: true, skipMigrate: true, doctorFn: okDoctor, launchdUp });
+    const plan = r.commands.findIndex((c) => c.startsWith("re-render the LaunchAgent plists and"));
+    expect(plan).toBeGreaterThanOrEqual(0);
+    expect(plan).toBeLessThan(r.commands.indexOf(`launchctl kickstart -k gui/501/${SUPERVISOR}`));
+    expect(exec.calls).toEqual([]);
+    expect(supervisorProductDirs((await readSupervisorConfig(supervisorConfigPath(t.inst)))!)).toEqual([t.old]);
   });
 });

@@ -29,9 +29,9 @@ import { envPaths, readInstanceId } from "./instance.js";
 import { applyPorts, loadNamespace } from "./namespace.js";
 import { realExec, type Exec } from "./exec.js";
 import { rollbackApp, updateApp, type UpdateAppResult } from "./mac-app.js";
-import { labelFor, loadPlistTemplates, loadSupervisedTemplates, type PlistTemplate } from "./launchd.js";
+import { labelFor, loadPlistTemplates, loadSupervisedTemplates, logPathFor, type PlistTemplate } from "./launchd.js";
 import { jobFilesFor, legacyEnvReport, RETIRE_LEGACY_ENV_COMMAND } from "./legacy-env.js";
-import { SUPERVISOR_SERVICE } from "./supervisor.js";
+import { readSupervisorConfig, supervisorConfigPath, SUPERVISOR_SERVICE } from "./supervisor.js";
 import { restartSupervisorChild } from "./service-control.js";
 import { instanceLockPath, readLock, serializeLock, type LockFile, type LockSource } from "./lock.js";
 import { commitPending, ensureOwnerBridgeToken, OWNER_BRIDGE_TOKEN, OWNER_BRIDGE_TOKEN_FIX, OwnerTokenMintFailed, protectedRel, writeProtected, type CommitPending, type EnsureOwnerTokenResult, type ProtectedWrite } from "./protected-write.js";
@@ -42,7 +42,8 @@ import { MIGRATE_SCOPE_COMMAND, migrateScope, type MigrateScopeResult } from "./
 import { StepFailed, StepRunner } from "./steps.js";
 import { type Ui } from "./ui.js";
 import { acknowledgeContinuation, reexecIntoRelease, releaseCliMain, type ContinueFrom, type ReexecOutcome } from "./update-reexec.js";
-import { closingDoctor, composeUp, COMPOSE_TIMEOUT_MS, nodeFor, runDirFor } from "./up.js";
+import { closingDoctor, composeUp, COMPOSE_TIMEOUT_MS, nodeFor, runDirFor, stateRoot, up, type UpOptions, type UpResult } from "./up.js";
+import { realPathish } from "./sandbox.js";
 import { followEnvFile } from "./env-follow.js";
 
 export interface UpdateOptions {
@@ -115,6 +116,8 @@ export interface UpdateOptions {
   forwardFlags?: Record<string, string | true> | undefined;
   /** test seam: where the hand-over's handshake file is made (default: os.tmpdir()) */
   reexecTmpDir?: string | undefined;
+  /** test seam: options for the `up` the restart step re-renders the launchd shape with (its filesystem probe, its node) — see `rerenderLaunchd` */
+  launchdUp?: Partial<UpOptions> | undefined;
 }
 
 export interface UpdateResult {
@@ -603,6 +606,26 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
     }
     if (usesCompose(deployment)) await composeUp(r, runDir, source, source === "release" ? releaseVersion : undefined, envFile);
     else r.note("shape launchd: no containers, so docker is never called — console, assistant and db are kickstarted below with the other host jobs");
+    // The launchd shape's plists and supervisor.json, re-rendered BEFORE
+    // anything is restarted onto them — by `up`'s own renderer, run here
+    // (`rerenderLaunchd`). A kickstart alone restarts the supervisor on the
+    // supervisor.json the LAST `up` wrote, whose confined children are
+    // granted the release being left: the owner's 0.14.2 → 0.14.4 run
+    // kickstarted exactly that, and the assistant and the reconciler died at
+    // start with EPERM on the new release's main.js.
+    let rendered: string[] = [];
+    if (deployment.shape === "launchd" && platform === "darwin") {
+      const supervisorLabel = labelFor(SUPERVISOR_SERVICE, labelSuffix);
+      const render = await rerenderLaunchd(r, { productDir, runDir, env, exec: opts.exec, source, version: releaseVersion, envFile: opts.envFile, platform, uid, fetchFn, labelSuffix, owed: restart.owed, upOptions: opts.launchdUp });
+      rendered = render.bootstrapped;
+      for (const l of rendered) if (!restarted.includes(l)) restarted.push(l);
+      // a stale supervisor.json is owed a restart whether or not any code
+      // moved — the same-version rerun that finishes a failed update is
+      // exactly that case — and an agent the Mac app registered is not
+      // bootstrapped by `up`, so the loop below kickstarts it
+      if (render.stale.length > 0 && !restart.owed.includes(supervisorLabel)) restart.owed.push(supervisorLabel);
+      if (render.failed) deferred.push({ what: "the LaunchAgent plists and supervisor.json", why: `not re-rendered for ${releaseVersion} (${render.failed}) — the confined children are still granted the release they were rendered for`, fix: ["metistry up"] });
+    }
     if (platform === "darwin") {
       for (const t of templates) {
         if (r.dryRun) {
@@ -610,7 +633,9 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
           // tracks nothing here — an update never bounces the database
           const tracked = [...new Set(t.repoPaths.map(trackedPathFor))];
           await r.run("launchctl", ["kickstart", "-k", `gui/${uid}/${t.label}`], { comment: tracked.length ? `only if ${tracked.join(", ")} changed` : "no product code of its own — never kickstarted by update" });
-        } else if (restart.owed.includes(t.label)) {
+        } else if (restart.owed.includes(t.label) && !rendered.includes(t.label)) {
+          // (a job the re-render above bootstrapped is already running on
+          // what it rendered — a second kickstart would only bounce it)
           // tolerated so one job cannot stop the update, but only a kickstart
           // that SUCCEEDED counts: `restarted` is what the summary reports as
           // "kickstarted", and a job that failed was not
@@ -698,7 +723,18 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
       if (!ready) {
         const rel = protectedRel(instanceDir.instanceDir ?? env.METISTRY_INSTANCE_DIR, "lock");
         r.note(`${rel} NOT written — the reconciler it goes through did not answer; ${prior ? `it still pins ${prior.product.version}` : "there is none yet"} while this install runs ${releaseVersion}`);
-        deferred.push({ what: rel, why: `not moved to ${releaseVersion} — the reconciler did not answer at ${hostLocal(env.METISTRY_RECONCILER_URL!)} after its restart (\`metistry logs reconciler\` says why)`, fix: ["metistry update"] });
+        // "did not answer" is the symptom; the cause is in its log (an EPERM
+        // on its own main.js, a port in use, a refused config), so the lines
+        // that say so are printed here rather than left for the owner to find
+        const log = await reconcilerLogTail({ stateRoot: stateRoot(productDir, env), labelSuffix });
+        if (!log.exists) r.note(`reconciler log: no file at ${log.path} — \`metistry logs reconciler\``);
+        else if (log.lines.length === 0) r.note(`reconciler log ${log.path}: empty`);
+        else {
+          r.note(`reconciler log ${log.path} — its last ${log.errors ? "error " : ""}line(s):`);
+          for (const l of log.lines) r.note(`  | ${l}`);
+        }
+        const cause = log.errors ? `; its log says: ${log.lines.at(-1)}` : "";
+        deferred.push({ what: rel, why: `not moved to ${releaseVersion} — the reconciler did not answer at ${hostLocal(env.METISTRY_RECONCILER_URL!)} after its restart${cause} (\`metistry logs reconciler\`)`, fix: ["metistry update"] });
       } else {
         const delivery = await writeLock(r, lock, { env, platform, uid, fetchFn });
         r.note(delivery.detail);
@@ -748,9 +784,9 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
     }
 
     // The owner bearer above and the shared-scope migration both rewrite
-    // `.env`, and nothing in `update` renders a plist: under the launchd
-    // shape the supervisor's plist and supervisor.json still carry the
-    // values they replaced (0.14.2: bridges 401'd the watchdog and the
+    // `.env`, the shared-scope migration AFTER the restart step's re-render:
+    // under the launchd shape the supervisor's plist and supervisor.json can
+    // still carry the values they replaced (0.14.2: bridges 401'd the watchdog and the
     // console, and the engine's key never reached the supervisor). When
     // they have drifted, the updated CLI's `up` re-renders them from `.env`
     // and restarts the supervisor (env-follow.ts); otherwise one line.
@@ -771,8 +807,8 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
       }).catch((err: unknown) => r.note(`launchd: could not compare the running jobs with .env (${err instanceof Error ? err.message : String(err)}) — run \`metistry up\``));
     }
 
-    // `update` shares no code path with `up` (it never renders a plist or
-    // touches the supervisor), so a checkout that only ever runs `update`
+    // `update` runs `up` only for the launchd shape's re-render, with the
+    // shim left to this step, so a checkout that only ever runs `update`
     // still needs this written — but, like everything else in this block,
     // not once a step above has failed (nothing runs "after the failure"
     // except doctor's diagnosis, below).
@@ -1006,6 +1042,159 @@ export async function waitForReconciler(r: StepRunner, o: { url: string; fetchFn
       wait = Math.min(wait * 2, o.maxIntervalMs ?? wait);
     }
   }
+}
+
+/** How many of the reconciler log's lines a deferred lock prints. */
+export const RECONCILER_LOG_LINES = 5; // limit: fixed — a screenful of cause, not the log
+/** A line of the reconciler's log that names a failure rather than progress. */
+const LOG_ERROR = /\b(error|eperm|eacces|enoent|eaddrinuse|denied|not permitted|fatal|refus|cannot|could not|failed|exception)\b/i;
+
+/**
+ * The reconciler's log, for a lock write that waited for it and gave up:
+ * its last error lines (or, with none, its last lines). The path is the
+ * one supervisor.json gives its reconciler child — what the supervisor
+ * actually writes — else the job's own (`/tmp/metistry[-<suffix>]-reconciler.log`),
+ * the same file `metistry logs reconciler` tails. Reads the file, never
+ * runs anything; a log that is not there is said to be not there.
+ */
+export async function reconcilerLogTail(o: { stateRoot: string; labelSuffix?: string | undefined; lines?: number | undefined }): Promise<{ path: string; exists: boolean; lines: string[]; errors: boolean }> {
+  const config = await readSupervisorConfig(supervisorConfigPath(o.stateRoot)).catch(() => undefined);
+  const path = config?.children.find((c) => c.name === "reconciler")?.log ?? logPathFor("reconciler", o.labelSuffix);
+  let text: string;
+  try {
+    text = await readFile(path, "utf8");
+  } catch {
+    return { path, exists: false, lines: [], errors: false };
+  }
+  const n = o.lines ?? RECONCILER_LOG_LINES;
+  const all = text.split("\n").map((l) => l.trimEnd()).filter((l) => l !== "").slice(-400);
+  const errors = all.filter((l) => LOG_ERROR.test(l));
+  const pick = (errors.length > 0 ? errors : all).slice(-n).map((l) => (l.length > 300 ? `${l.slice(0, 300)}…` : l));
+  return { path, exists: true, lines: pick, errors: errors.length > 0 };
+}
+
+// ---- the launchd shape: re-rendered before anything restarts onto it ----------------
+
+/**
+ * Every release directory the installed supervisor.json grants its confined
+ * children — each `PRODUCT_DIR=` in their argv, whether it is its own
+ * argument (the assistant's `-D` pair) or inside the `sh -c` line that
+ * sources `.env` first (the reconciler's, single-quoted).
+ */
+export function supervisorProductDirs(config: { children: ReadonlyArray<{ argv: readonly string[] }> }): string[] {
+  const out = new Set<string>();
+  for (const c of config.children) for (const a of c.argv) for (const m of a.matchAll(/PRODUCT_DIR=([^']+)/g)) out.add(m[1]!);
+  return [...out].sort();
+}
+
+export interface RerenderResult {
+  /** whether `up`'s launchd step ran */
+  ran: boolean;
+  /** the LaunchAgents it bootstrapped — restarted onto what it rendered, so the restart step does not kickstart them again */
+  bootstrapped: string[];
+  /** the release directories supervisor.json granted that are not where `current` resolves now (before the render) */
+  stale: string[];
+  /** why the render did not land, when it did not */
+  failed?: string | undefined;
+}
+
+/**
+ * `update`'s restart step, launchd shape: re-render the LaunchAgent plists
+ * and `supervisor.json` with `up`'s OWN code — `up` itself, run in this
+ * process on this runner (`UpOptions.within`) — so the two verbs can never
+ * render a job two ways.
+ *
+ * WHY a release switch needs it: the confined children's profiles are
+ * granted the release directory by its REAL path, `releases/<version>`,
+ * never `current`. That is not a choice this could make differently:
+ * sandbox-exec evaluates a `(subpath …)` rule against the resolved path, so
+ * a parameter naming the `current` symlink matches nothing and the child
+ * cannot read its own entry point (sandbox.ts `realPathish`; re-measured on
+ * macOS 26.4 on 2026-09-29 — `-D PRODUCT_DIR=<…>/current` denies
+ * `cat current/f`, the realpath allows it, and a realpath that `current` no
+ * longer points at denies it again). So every switch — an update, and a
+ * `--rollback` — leaves supervisor.json granting the release being left,
+ * and the kickstart that follows starts the assistant and the reconciler
+ * on an EPERM.
+ *
+ * It runs when the supervisor's code moved (it is owed a kickstart), or
+ * when supervisor.json grants any directory but the one `current` resolves
+ * to now — which also covers the rerun that finishes an update whose
+ * restart went wrong: same version, nothing to download, nothing owed, and
+ * still a stale supervisor.json. Everything `up` does on the way is
+ * idempotent on a running install (a present Postgres is not re-initialised,
+ * the control token is kept); its bootstrap of each agent IS the restart.
+ * Never fails the update: a render that did not land is `failed`, and the
+ * caller defers it with `metistry up`.
+ */
+export async function rerenderLaunchd(
+  r: StepRunner,
+  o: {
+    productDir: string;
+    runDir: string;
+    env: NodeJS.ProcessEnv;
+    exec?: Exec | undefined;
+    source: LockSource;
+    version: string;
+    envFile?: string | undefined;
+    platform: NodeJS.Platform;
+    uid: number;
+    fetchFn: typeof fetch;
+    labelSuffix?: string | undefined;
+    /** the host jobs the restart step owes a kickstart */
+    owed: readonly string[];
+    upOptions?: Partial<UpOptions> | undefined;
+    /** test seam */
+    upFn?: ((opts: UpOptions) => Promise<UpResult>) | undefined;
+  },
+): Promise<RerenderResult> {
+  const supervisorLabel = labelFor(SUPERVISOR_SERVICE, o.labelSuffix);
+  const configPath = supervisorConfigPath(stateRoot(o.productDir, o.env));
+  if (r.dryRun) {
+    r.action(`re-render the LaunchAgent plists and ${configPath} with \`metistry up\`'s launchd step, before any kickstart — when the supervisor's code moved, or supervisor.json grants a release other than the one ${o.runDir} resolves to`);
+    return { ran: false, bootstrapped: [], stale: [] };
+  }
+  const want = realPathish(o.runDir);
+  const installed = await readSupervisorConfig(configPath).catch(() => undefined);
+  const stale = installed ? supervisorProductDirs(installed).filter((d) => d !== want) : [];
+  const owed = o.owed.includes(supervisorLabel);
+  if (!owed && stale.length === 0) {
+    if (installed) r.note(`launchd: ${configPath} already grants ${want} — nothing to re-render`);
+    return { ran: false, bootstrapped: [], stale };
+  }
+  r.note(
+    `launchd: re-rendering the plists and supervisor.json with \`metistry up\`'s launchd step before anything restarts — ${[
+      ...(owed ? ["the supervisor's code moved"] : []),
+      ...(stale.length > 0 ? [`supervisor.json grants ${stale.join(", ")}, and the sandbox profiles match the REAL path, which is ${want} now`] : []),
+    ].join("; ")}`,
+  );
+  let res: UpResult;
+  try {
+    res = await (o.upFn ?? up)({
+      productDir: o.productDir,
+      env: o.env,
+      exec: o.exec,
+      platform: o.platform,
+      uid: o.uid,
+      home: o.env.HOME,
+      fetchFn: o.fetchFn,
+      compose: false,
+      cliShim: false,
+      ...(o.envFile ? { envFile: o.envFile } : {}),
+      ...o.upOptions,
+      within: { runner: r, source: o.source, version: o.version },
+    });
+  } catch (err) {
+    return { ran: true, bootstrapped: [], stale, failed: err instanceof Error ? err.message : String(err) };
+  }
+  if (res.code !== 0) return { ran: true, bootstrapped: res.bootstrapped, stale, failed: `\`up\`'s launchd step exited ${res.code}; its output is above` };
+  // checked, not assumed: the promise is that no child is granted a
+  // release `current` does not resolve to
+  const after = await readSupervisorConfig(configPath).catch(() => undefined);
+  const still = after ? supervisorProductDirs(after).filter((d) => d !== want) : [];
+  if (still.length > 0) return { ran: true, bootstrapped: res.bootstrapped, stale, failed: `supervisor.json still grants ${still.join(", ")}` };
+  r.note(`launchd: re-rendered — supervisor.json grants ${want}${res.bootstrapped.length > 0 ? `; bootstrapped ${res.bootstrapped.join(", ")} onto it` : ""}`);
+  return { ran: true, bootstrapped: res.bootstrapped, stale };
 }
 
 // ---- the product checkout's .env ----------------------------------------------------

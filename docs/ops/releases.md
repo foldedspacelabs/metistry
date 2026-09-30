@@ -256,7 +256,22 @@ run with `--channel release`.
 7. `docker compose pull && up -d --no-build` in `current`, with
    `METISTRY_CONSOLE_IMAGE` / `METISTRY_ASSISTANT_IMAGE` set to the
    versioned ghcr images,
-8. kickstarts the launchd jobs whose code changed, writes `metistry.lock`
+8. under the launchd shape, **re-renders the LaunchAgent plists and
+   `supervisor.json` first** — with `up`'s own launchd step, run inside
+   `update` — whenever the supervisor's code moved or `supervisor.json`
+   grants a release other than the one `current` resolves to. The confined
+   children's sandbox profiles name the release by its REAL path
+   (`releases/<version>`; `sandbox-exec` matches the resolved path, so a
+   rule naming `current` matches nothing), and a kickstart onto the config
+   rendered for the release being left starts the assistant and the
+   reconciler on an EPERM (the 0.14.2 → 0.14.4 run). The same check makes a
+   same-version rerun — nothing to download — rewrite a stale config and
+   then write the lock that a failed restart deferred; a render that does
+   not land is deferred with `metistry up`. Then it
+   kickstarts the launchd jobs whose code changed (those the re-render just
+   bootstrapped are not bounced twice), waits for the reconciler — and when
+   it never answers, prints its log's last error lines instead of only
+   "did not answer" — writes `metistry.lock`
    through the reconciler, copies each `seed/vault/Templates/*.md` the vault
    **lacks** (create-only — a template that is there is never touched;
    `docs/ops/cli.md`, "Seeding the templates the vault lacks"), writes

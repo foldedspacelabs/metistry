@@ -35,8 +35,12 @@ import {
   describeConnections,
   decodeMailboxName,
   imapCommandLine,
+  MAIL_SYNC,
   openImap,
+  openSyncImap,
   parseAddresses,
+  parseImapRef,
+  syncSecretNames,
   parseInternalDate,
   planDraft,
   quoted,
@@ -495,6 +499,82 @@ describe("the connection file and check()", () => {
     } finally {
       await pool.close();
     }
+  });
+});
+
+describe("one message by its reference, and the mail sync's opener (T4-17)", () => {
+  const mailFile = (s: FixtureImap, over: Record<string, unknown> = {}) => ({
+    name: "mail",
+    type: "mail",
+    provider: "imap",
+    reach: { imap: { host: s.host, port: s.port, security: "plain", username: USER, secret: "mail_password" } },
+    secrets: ["mail_password"],
+    ...over,
+  });
+  const secretsYaml = (s: FixtureImap, grantee = "mail") => `secrets:\n  mail_password:\n    hosts: ["${s.host}:${s.port}"]\n    grants: { "connection:${grantee}": on }\n`;
+
+  it("a reference comes apart one way only, and anything else is no reference", () => {
+    expect(parseImapRef("mail/INBOX/1700/12")).toEqual({ connection: "mail", mailbox: "INBOX", uid_validity: 1700, uid: 12 });
+    expect(parseImapRef("gmail/%5BGmail%5D%2FAll%20Mail/9/3")).toEqual({ connection: "gmail", mailbox: "[Gmail]/All Mail", uid_validity: 9, uid: 3 });
+    for (const bad of ["", "mail/INBOX/1700", "mail/INBOX/1700/0", "mail/INBOX/x/12", "mail//1700/12", "mail/INBOX/1700/12/13", "mail/%E0%A4%A/1/2", "mail/[Gmail]%2FAll/1/2", "mail/INBOX/1/99999999999", "mail/IN\nBOX/1/2", 12, null]) {
+      expect(parseImapRef(bad), JSON.stringify(bad)).toBeNull();
+    }
+  });
+
+  it("reads one message's headers by UID from a mailbox opened read-only — never its body — and refuses a renumbered or missing one", async () => {
+    const s = await server();
+    const session = await openImap(options(s));
+    try {
+      const m = await session.readMessage("INBOX", 12, 1700);
+      expect(m).toMatchObject({ ref: "mail/INBOX/1700/12", subject: "Café plans ☕", message_id: "<a-12@example.net>", from: { address: "ada@example.net" } });
+      expect(JSON.stringify(m)).not.toMatch(/BODY-MARKER|secret recipe/);
+      expect(await session.readMessage("INBOX", 12, 1699).catch((e: ImapError) => e.code)).toBe("changed");
+      expect(await session.readMessage("INBOX", 99, 1700).catch((e: ImapError) => e.code)).toBe("not_found");
+      expect(await session.readMessage("INBOX", 0).catch((e: ImapError) => e.code)).toBe("not_found");
+      expect(s.commands.some((l) => / SELECT /.test(l))).toBe(false);
+      expect(s.commands.filter((l) => / UID FETCH /.test(l)).every((l) => l.includes("BODY.PEEK[HEADER.FIELDS ("))).toBe(true);
+      expect(s.mailboxes[0]!.messages.map((m) => m.flags)).toEqual([[], ["\\Seen"], []]);
+    } finally {
+      await session.close();
+    }
+  });
+
+  it("the imap types are read by the mail sync, so their app password is one the console is delivered", async () => {
+    const s = await server();
+    const catalog = catalogOf([mailFile(s)], { types: TYPES, secrets: secretsYaml(s) });
+    expect(TYPES.map((t) => t.sync)).toEqual([MAIL_SYNC, MAIL_SYNC]);
+    expect(syncSecretNames(catalog)).toEqual(["mail_password"]);
+  });
+
+  it("opens the one mailbox the sync reads — or the one named — through the host guard, and dials nothing until asked", async () => {
+    const s = await server();
+    const catalog = catalogOf([mailFile(s)], { types: TYPES, secrets: secretsYaml(s) });
+    const opened = openSyncImap({ catalog, sync: MAIL_SYNC, module: "imap", secrets: source() });
+    expect(opened.ok).toBe(true);
+    if (!opened.ok) return;
+    expect(s.connections).toBe(0);
+    expect(opened.sync).toMatchObject({ connection: "mail", provider: "imap", server: `${s.host}:${s.port}`, username: USER, capabilities: ["read", "draft"], raise: {} });
+    const session = await opened.sync.open();
+    await session.close();
+    expect(opened.sync.secretsUsed()).toEqual(["mail_password"]);
+    expect(JSON.stringify(opened.sync)).not.toContain(PASSWORD);
+
+    // by name: another sync's reading does not matter, and an unknown name is absent
+    expect(openSyncImap({ catalog, sync: MAIL_SYNC, module: "imap", connection: "mail", secrets: source() }).ok).toBe(true);
+    expect(openSyncImap({ catalog, sync: MAIL_SYNC, module: "imap", connection: "nope", secrets: source() })).toMatchObject({ ok: false, status: "absent" });
+    // no mail connection at all: absent, not an error
+    expect(openSyncImap({ catalog: catalogOf([], { types: TYPES }), sync: MAIL_SYNC, module: "imap", secrets: source() })).toMatchObject({ ok: false, status: "absent" });
+    // a module that does not implement it is the file's fault
+    expect(openSyncImap({ catalog, sync: MAIL_SYNC, module: "caldav", secrets: source() })).toMatchObject({ ok: false, status: "failed" });
+  });
+
+  it("a password not granted to this connection is refused at open, before anything is dialled", async () => {
+    const s = await server();
+    const catalog = catalogOf([mailFile(s)], { types: TYPES, secrets: secretsYaml(s, "someone-else") });
+    const opened = openSyncImap({ catalog, sync: MAIL_SYNC, module: "imap", secrets: source() });
+    if (!opened.ok) throw new Error(opened.why);
+    await expect(opened.sync.open()).rejects.toBeInstanceOf(EgressRefused);
+    expect(s.connections).toBe(0);
   });
 });
 

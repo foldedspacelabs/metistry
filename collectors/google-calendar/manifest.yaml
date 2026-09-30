@@ -16,9 +16,20 @@ description: >-
   calendar source (design-build-plan §2.6, T4-14). A cancelled event inside
   the window is removed; the past is left as it was last seen. Never the
   description: it is not asked for. Degrades absent without a Google
-  Calendar connection.
+  Calendar connection. Raises an invitation request for each meeting still
+  waiting on your answer that someone else organises, cleared when you
+  answer, it is cancelled or it passes (T4-17).
 # A sync (§2.5's closed shape): a quarter-hour, as the ICS and CalDAV syncs —
 # one or two requests a run, and an access token minted about once an hour.
 schedule: { every: 15m }
-writes: [calendar_events, sync_state]
-reads: []
+# The Needs You rule this sync may raise, a toggle under Scheduled
+# (`syncs.google-calendar.raise.invitation`, §2.5). The raise is an
+# `invitation` mirror (T4-17): one per meeting while Google shows your answer
+# as needs-action and someone else organises it, cleared when you answer
+# (here or in Google Calendar), when it is cancelled, or when it passes.
+needs_you:
+  invitation:
+    label: A meeting invitation waits on your answer
+    default: true
+writes: [calendar_events, sync_state, proposals]
+reads: [calendar_events, proposals]

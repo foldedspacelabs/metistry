@@ -67,6 +67,7 @@ import { linearTrackerOpener, loadCollectors } from "@metistry-apps/collectors";
 import { loadRoutines } from "@metistry-apps/routines";
 import { ConflictMoved } from "../dist/knowledge-routes.js";
 import { GithubWriteClient } from "../dist/github-write.js";
+import { planDraft } from "@foldedspacelabs/metistry-connections";
 import { FIXTURE_DIR, REPO_ROOT, expectedFixtures, fixtureBody, recordingMonthStart, runsExportCursor, shapeDiff } from "./client-fixtures.mjs";
 
 // ---- arguments -------------------------------------------------------------------
@@ -280,6 +281,66 @@ const linearFake = async (input, init) => {
 };
 const trackers = linearTrackerOpener({ instanceDir: trackerDir, seedDir: join(REPO_ROOT, "seed"), extensions: false, env: { METISTRY_SECRET_LINEAR_API_KEY: "fixture-not-a-key" }, fetch: linearFake });
 
+// Respond to an invitation (T4-17): the CalDAV account named `calendar`, as
+// the opener hands it over when its provider can answer — a fake behind it
+// that previews the owner's own attendee line and changes nothing. The Mac's
+// calendar and anything else is absent: it cannot answer.
+const calendars = async (connection) =>
+  connection === "calendar"
+    ? {
+        ok: true,
+        rsvp: {
+          connection: "calendar",
+          provider: "icloud-calendar",
+          targetOf: (row) => row.ical_uid,
+          preview: async () => ({ title: "Vendor review", organizer: "dana@example.com", as: "me@example.com", etag: '"fixture-etag"', unchanged: false }),
+          respond: async () => ({ unchanged: false }),
+          secretsUsed: () => [],
+        },
+      }
+    : { ok: false, status: "absent", why: `${connection} is not a connection of this instance — it cannot answer an invitation` };
+
+// Draft Reply (T4-17): the mailbox named `mail`, as the opener hands it over —
+// a fake session whose one message is Ada's, headers only, and whose Drafts
+// renders with the provider's own planDraft. Nothing is appended in the
+// recording (the preview is the recorded call), and nothing can send.
+const ADA_MESSAGE = {
+  ref: "mail/INBOX/1700/5521",
+  source: "comms",
+  mailbox: "INBOX",
+  uid: 5521,
+  uid_validity: 1700,
+  date: "2026-09-28T14:01:00.000Z",
+  received: "2026-09-28T14:02:00.000Z",
+  from: { name: "Ada Lovelace", address: "ada@example.net" },
+  reply_to: [],
+  to: [{ name: null, address: "me@example.com" }],
+  cc: [],
+  subject: "Thursday?",
+  message_id: "<a-5521@example.net>",
+  in_reply_to: "<root-5520@example.net>",
+  references: ["<root-5520@example.net>"],
+  flags: ["\\seen"],
+  size: 1024,
+  automated: false,
+};
+const mailSession = {
+  readMessage: async (mailbox, uid) => {
+    if (mailbox !== "INBOX" || uid !== 5521) throw new Error("the recording's mailbox holds one message");
+    return ADA_MESSAGE;
+  },
+  previewDraft: async (input) => {
+    const plan = planDraft(input, { username: "me@example.com", fixed: { date: "Mon, 28 Sep 2026 12:00:00 +0000", message_id: "<draft-8812@example.com>" } });
+    return { connection: "mail", mailbox: "Drafts", mailbox_label: "Drafts", plan, confirm: { digest: plan.digest, date: plan.date, message_id: plan.message_id } };
+  },
+  appendDraft: async (_input, confirm) => ({ connection: "mail", mailbox: "Drafts", uid: 8812, message_id: confirm.message_id, digest: confirm.digest }),
+  close: async () => {},
+};
+const mail = async ({ connection }) =>
+  connection === "mail"
+    ? { ok: true, sync: { connection: "mail", provider: "imap", server: "imap.example.com:993", username: "me@example.com", capabilities: ["read", "draft"], raise: {}, open: async () => mailSession, secretsUsed: () => [] } }
+    : { ok: false, status: "absent", why: `there is no mail connection named ${connection}` };
+
 const vault = memoryVault();
 const PAGE = "Projects/Metistry/Roadmap.md";
 const HISTORY = [
@@ -456,6 +517,8 @@ const server = makeServer(pool, queries, {
     sync: { connection: "linear", provider: "linear", url: "https://api.linear.app/graphql", origin: "https://api.linear.app", headers: {}, fetch: fakeLinear, capabilities: ["read", "create"], raise: {}, secretsUsed: () => [] },
   }),
   trackers,
+  calendars,
+  mail,
   variables: { instanceDir, file: layout.path("variables") },
   connections: { instanceDir, seedDir: join(REPO_ROOT, "seed"), presence: instanceSecrets.presence() },
   // the reconciler's GET /vault/status, as a week of use leaves it: two
@@ -708,6 +771,19 @@ await pool.query(
   ])],
 );
 
+// an invitation (T4-17): tomorrow's vendor review on the owner's CalDAV
+// account, organised by Dana, the owner's answer still needs-action — the
+// event Respond answers through the account that can
+await pool.query(
+  `INSERT INTO calendar_events (connection, event_id, ical_uid, starts_at, ends_at, title, organizer, attendees, self_status)
+   VALUES ('calendar', 'evt-review-0929', 'vendor-review-0929@example.com', '2026-09-29T18:00:00Z', '2026-09-29T19:00:00Z', 'Vendor review', 'dana@example.com', $1::jsonb, 'pending')
+   ON CONFLICT (connection, event_id) DO NOTHING`,
+  [JSON.stringify([
+    { name: "Dana", email: "dana@example.com", status: "accepted", role: "chair", type: "person", self: false },
+    { name: "Me", email: "me@example.com", status: "pending", role: "required", type: "person", self: true },
+  ])],
+);
+
 // the board's other two shapes (T1-2): a Blocked card waiting on that todo
 // (`meta.blocked_by`, resolved to its text), and a Done card whose crew
 // reported back — the `reported` facet, from the one work→runs join. Ids
@@ -922,6 +998,10 @@ const REQUESTS = [
   ["POST /api/github/pulls/:owner/:repo/:number/threads/:id/reply", () => ({ path: "/api/github/pulls/example/metistry/281/threads/PRRT_kw1/reply", body: { body: "Fixed in the next push.", head_sha: PR_HEAD } })],
   ["POST /api/github/pulls/:owner/:repo/:number/threads/:id/resolve", () => ({ path: "/api/github/pulls/example/metistry/281/threads/PRRT_kw1/resolve", body: { head_sha: PR_HEAD } })],
   ["POST /api/trackers/:connection/issues/:key/complete", () => ({ path: "/api/trackers/linear/issues/MET-42/complete", body: {} })],
+  // Accept tomorrow's vendor review (T4-17): the preview, which names the calendar that answers and sends nothing
+  ["POST /api/calendar/invitations/:id/respond", () => ({ path: "/api/calendar/invitations/evt-review-0929/respond", body: { response: "accepted" } })],
+  // Draft Reply to Ada (T4-17): the preview, addressed from her message's headers; nothing is appended, nothing sends
+  ["POST /api/mail/messages/:id/draft", () => ({ path: `/api/mail/messages/${encodeURIComponent("mail/INBOX/1700/5521")}/draft`, body: { body: "Thanks — Thursday works." } })],
 
 
   // the reads that show the writes above: a room with a comment, a feed with a capture in it

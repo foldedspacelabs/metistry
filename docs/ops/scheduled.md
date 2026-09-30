@@ -451,9 +451,21 @@ T2-11) every 5 min — the owner's calendars on this Mac, today and the next two
 weeks, through the eventkit bridge into `calendar_events` (connection
 `eventkit`), the one table every calendar source syncs into and Today reads;
 it degrades absent without `METISTRY_EK_URL` and the bridge token, and a
-helper built before T2-11 is a failed run naming the rebuild; Calendar Feed
+helper built before T2-11 is a failed run naming the rebuild — raising *A
+meeting invitation waits on your answer* (on; T4-17): one `invitation` request
+per meeting still to come whose answer is needs-action and which someone else
+organises, cleared when you answer, it is cancelled or it passes; Calendar Feed
 (`ics-calendar`, T4-12) every 15 min — an ICS connection's feed into the same
-table under the connection's name, absent until one is added; Devin Sessions
+table under the connection's name, absent until one is added (a feed never
+says who you are, so it raises nothing); CalDAV Calendar (`caldav-calendar`,
+T4-13) every 15 min — a CalDAV account into the same table, raising the same
+*invitation* rule (on); Google Calendar (`google-calendar`, T4-14) every 15
+min — likewise, the same rule (on); Mail (`mail-messages`, T4-17) every 15 min — the
+headers of an IMAP connection's last week of inbox, raising *A message written
+to you looks like it waits on your reply* (on): one `message` request per
+message, inferred from the headers alone and saying so, cleared when you
+reply, it leaves the inbox or it is a week old; absent until a mail
+connection is added (`docs/ops/connections.md`, *Mail over IMAP*); Devin Sessions
 every 5 min; Devin Knowledge hourly; AWS Costs every 6 hours. No shipped
 manifest carries a cron string any more.
 

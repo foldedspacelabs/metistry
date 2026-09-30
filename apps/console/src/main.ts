@@ -32,7 +32,7 @@ import { QueryStore } from "@foldedspacelabs/metistry-queries";
 import { makePool } from "./db.js";
 import { makeServer } from "./server.js";
 import { pushConfigFromEnv, startNotifier } from "./push.js";
-import { linearTrackerOpener, loadCollectors } from "@metistry-apps/collectors";
+import { calendarRsvpOpener, linearTrackerOpener, loadCollectors } from "@metistry-apps/collectors";
 import { loadRoutines } from "@metistry-apps/routines";
 import { PROFILE_PATH, loadSchedules, profileFacts, readOverlay, routineCapabilities, runNow, startRunner, unitOf, type ComponentCtx, type RunnerOptions } from "./runner.js";
 import type { ScheduledAdmin } from "./scheduled-routes.js";
@@ -63,7 +63,7 @@ import type { ComputeAdmin } from "./compute-routes.js";
 import type { SecretsView } from "./secrets-route.js";
 import type { VariablesView } from "./variables-route.js";
 import type { ConnectionsView } from "./connections-route.js";
-import { envSecretSource, instanceSyncOpener, loadInstanceCatalog } from "@foldedspacelabs/metistry-connections";
+import { envSecretSource, instanceImapOpener, instanceSyncOpener, loadInstanceCatalog } from "@foldedspacelabs/metistry-connections";
 import { consoleConnections } from "./connections-proxy.js";
 import { GithubWriteClient } from "./github-write.js";
 import { readInstanceId, securityPresence, realExec } from "@foldedspacelabs/metistry-cli";
@@ -416,6 +416,11 @@ if (connections) {
   const roots = { instanceDir: connections.instanceDir, seedDir: connections.seedDir };
   targets.bindConnections({ catalog: () => loadInstanceCatalog(roots), secrets: envSecretSource(process.env) });
 }
+// The mail sync and Draft Reply (T4-17): a mail connection's IMAP session,
+// the app password `metistry secrets sync --to env` delivered filled into
+// the one LOGIN, for the connection's listed host:port only. Headers and
+// drafts; nothing sends. No instance: absent.
+const openImap = connections ? instanceImapOpener({ instanceDir: connections.instanceDir, seedDir: connections.seedDir, env: process.env }) : undefined;
 console.log(
   connections
     ? `connections: ${resolveInstanceLayout(connections.instanceDir).path("connectionsDir")} (read-only; every write is \`metistry connections\`)`
@@ -542,6 +547,8 @@ const componentCtx: ComponentCtx = {
   // the egress door for each secret's listed hosts, never put on a request
   // here. The `linear` collector is the first reader. No instance: absent.
   ...(openSync ? { openSync } : {}),
+  // the mail sync's mailbox (T4-17): headers only, through the IMAP provider's host guard
+  ...(openImap ? { openImap } : {}),
   // The owner's zone for a sync that must say which day something is on —
   // the ICS sync's all-day dates and window (T4-12). METISTRY_TZ, never TZ.
   ...(runnerZone ? { ownerTimeZone: runnerZone } : {}),
@@ -615,6 +622,12 @@ const server = makeServer(pool, queries, {
   // only. No instance: the door answers 503.
   ...(connections ? { trackers: linearTrackerOpener({ instanceDir: connections.instanceDir, seedDir: connections.seedDir, env: process.env }) } : {}),
   ...(connectionsProxy ? { connectionsProxy } : {}),
+  // Respond to an invitation (T4-17): a calendar connection that can answer
+  // (`rsvp`), by name, through the egress door the CalDAV sync reads
+  // through; and Draft Reply, through the mail sync's own opener. No
+  // instance: both answer 503 (Respond with Open in Calendar).
+  ...(connections ? { calendars: calendarRsvpOpener({ instanceDir: connections.instanceDir, seedDir: connections.seedDir, env: process.env }) } : {}),
+  ...(openImap ? { mail: openImap } : {}),
   connectionLimits,
   origins,
   ...(identity ? { identity } : {}),

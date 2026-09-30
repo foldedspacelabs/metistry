@@ -272,8 +272,8 @@ export const CLIENT_API: readonly ClientRoute[] = [
   // ----- calendar and mail -----
   route("POST", "/api/meetings/:event_id/note", "the meeting note for one event; a second call returns the first", { idempotent: "natural" }),
   route("POST", "/api/calendar/events/:id/move", "move an event: preview (who is in it, the new time), then confirm with a single-use token", { conflict: ["stale"] }),
-  planned("POST", "/api/calendar/invitations/:id/respond", "T4-17", "answer an invitation through the connection that can"),
-  planned("POST", "/api/mail/messages/:id/draft", "T4-17", "draft a reply through the connection that can; never sends"),
+  route("POST", "/api/calendar/invitations/:id/respond", "answer an invitation through a connection that can (`rsvp`): preview, then confirm with a single-use token; 503 names Open in Calendar where none can", { conflict: ["stale"] }),
+  route("POST", "/api/mail/messages/:id/draft", "draft a reply into Drafts through the connection's `draft` capability: preview, then confirm with a single-use token; never sends", { conflict: ["stale"] }),
 
   // ----- Scheduled -----
   route("GET", "/api/scheduled", "every routine and sync with its schedule and last run"),

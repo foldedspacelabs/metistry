@@ -67,7 +67,11 @@ import { isMeetingNoteRoute, meetingNoteRoute, MeetingNotes } from "./meeting-no
 import { CALENDAR_SYNC, isMeetingMoveRoute, meetingMoveRoute, type EventkitDoor } from "./meeting-move-route.js";
 import { githubPullRoute, isGithubPullRoute } from "./github-pulls-route.js";
 import { isTrackerCompleteRoute, trackerCompleteRoute } from "./tracker-complete-route.js";
-import type { TrackerOpener } from "@metistry-apps/collectors";
+import type { DraftBinding, RespondBinding, RsvpOpener, TrackerOpener } from "@metistry-apps/collectors";
+import type { ImapSyncOpener } from "@foldedspacelabs/metistry-connections";
+import { ConfirmTokens } from "./door-confirm.js";
+import { invitationRespondRoute, isInvitationRespondRoute } from "./invitation-respond-route.js";
+import { isMailDraftRoute, mailDraftRoute } from "./mail-draft-route.js";
 import type { GithubWriteClient } from "./github-write.js";
 import { agentList, commandList } from "./commands.js";
 import { purgeArchive, purgePreview } from "@metistry-apps/routines";
@@ -195,6 +199,20 @@ export interface ConsoleConfig {
    * its `complete_issue` tool. Read by that door alone. Absent = it answers 503.
    */
   trackers?: TrackerOpener | undefined;
+  /**
+   * Respond to an invitation (invitation-respond-route.ts, T4-17): opens a
+   * calendar connection by name when its provider can answer (`rsvp`),
+   * through the egress door the CalDAV sync reads through. Absent = the door
+   * answers 503 with Open in Calendar.
+   */
+  calendars?: RsvpOpener | undefined;
+  /**
+   * Draft Reply (mail-draft-route.ts, T4-17): opens a mail connection by
+   * name — the IMAP provider's session, whose host guard sends the app
+   * password to its host:port or nowhere, and which cannot send. Absent =
+   * the door answers 503.
+   */
+  mail?: ImapSyncOpener | undefined;
   /**
    * The pooled client behind the connections proxy (plan §2.6): handed to
    * `/mcp` as `connections_list` / `connections_call`'s proxy, and to the
@@ -611,6 +629,9 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
   /** `Idempotency-Key` replays for the vault-task doors — per server, in memory (vault-task-routes.ts says why that is enough). */
   const vaultTaskReplays = new ReplayCache();
   const trackerSends = new Map<string, Promise<CreateIssueResult>>();
+  /** Respond's and Draft Reply's single-use confirm tokens — per server, in memory (door-confirm.ts says why that is enough). */
+  const respondTokens = new ConfirmTokens<RespondBinding>(cfg.now ? () => cfg.now!().getTime() : Date.now);
+  const draftTokens = new ConfirmTokens<DraftBinding>(cfg.now ? () => cfg.now!().getTime() : Date.now);
   /** The meeting-note door's per-event queue and the notes it wrote ahead of the walk — per server, in memory (meeting-note-route.ts says why that is enough). */
   const meetingNotes = new MeetingNotes();
   /** The services one action may reach. Read per call: `cfg.targets` and the vault bridge are hot-reloaded, and an action must follow the file rather than the process's startup. */
@@ -1227,6 +1248,10 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         isTrackerIssueRoute(key) ||
         // Close in Linear changes the owner's issue in their tracker, with their key (T4-26)
         isTrackerCompleteRoute(key) ||
+        // answering an invitation replies to its organizer as the owner (T4-17)
+        isInvitationRespondRoute(key) ||
+        // …and Draft Reply writes into the owner's Drafts, with their app password (T4-17)
+        isMailDraftRoute(key) ||
         // Today reads the owner's own day — their notes' task lines, their calendar — and stores their order
         isTodayRoute(key)
       ) {
@@ -1566,6 +1591,9 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     // The line is linked by the other door (`POST /api/vault-tasks/:task_key/link`); this one writes nothing of the owner's.
     if (isTrackerIssueRoute(key)) return trackerIssueRoute(req, res, key, { queries, vault: cfg.vault, openTracker: cfg.openTracker, audit, inflight: trackerSends, now: cfg.now });
     if (isTrackerCompleteRoute(key)) return trackerCompleteRoute(req, res, key, { db, audit, open: cfg.trackers });
+    // ----- Respond to an invitation and Draft Reply: preview → confirm through the connection that can; nothing sends mail (T4-17) -----
+    if (isInvitationRespondRoute(key)) return invitationRespondRoute(req, res, key, { db, audit, open: cfg.calendars, tokens: respondTokens });
+    if (isMailDraftRoute(key)) return mailDraftRoute(req, res, key, { db, audit, open: cfg.mail, tokens: draftTokens });
 
     // ----- Close the Day (§2.11, §2.13; T2-8) -----
     // The daily note's section through the reconciler's section operation as

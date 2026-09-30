@@ -349,8 +349,8 @@ takes a `since` cursor and answers with the next one.
 | `POST /api/today/close` | owner | session · local_owner | no | stale | — | served | Close the Day: write the section, then plan tomorrow |
 | `POST /api/meetings/:event_id/note` | owner | session · local_owner | natural | — | — | served | the meeting note for one event; a second call returns the first |
 | `POST /api/calendar/events/:id/move` | owner | session · local_owner | no | stale | — | served | move an event: preview (who is in it, the new time), then confirm with a single-use token |
-| `POST /api/calendar/invitations/:id/respond` | owner | session · local_owner | no | — | — | T4-17 | answer an invitation through the connection that can |
-| `POST /api/mail/messages/:id/draft` | owner | session · local_owner | no | — | — | T4-17 | draft a reply through the connection that can; never sends |
+| `POST /api/calendar/invitations/:id/respond` | owner | session · local_owner | no | stale | — | served | answer an invitation through a connection that can (`rsvp`): preview, then confirm with a single-use token; 503 names Open in Calendar where none can |
+| `POST /api/mail/messages/:id/draft` | owner | session · local_owner | no | stale | — | served | draft a reply into Drafts through the connection's `draft` capability: preview, then confirm with a single-use token; never sends |
 | `GET /api/scheduled` | owner | session · local_owner | natural | — | — | served | every routine and sync with its schedule and last run |
 | `GET /api/scheduled/routines/:name` | owner | session · local_owner | natural | — | — | served | one routine |
 | `GET /api/scheduled/syncs/:name` | owner | session · local_owner | natural | — | — | served | one sync |
@@ -3072,8 +3072,10 @@ today).
 POST /api/meetings/:event_id/note                 {}   201 {ok, event_id, path, created: true} · 200 {…, created: false}
 POST /api/calendar/events/:id/move                {start, end}                 200 {ok, preview: {event_id, title, from, to, attendees}, others, warning, confirm_token, expires_in_sec, moved: false}
                                                   {start, end, confirm_token}  200 {ok, moved: true, event_id, event, others, refreshing}
-POST /api/calendar/invitations/:id/respond        T4-17 — through the connection's `rsvp` capability (CalDAV's: packages/connections `previewReply` / `respondToInvitation`, T4-13; Google Calendar's: `previewGoogleReply` / `respondToGoogleInvitation`, T4-14 — the owner's own responseStatus and nothing else)
-POST /api/mail/messages/:id/draft                 T4-17 — through the connection's `draft` capability (IMAP's: packages/connections `previewDraft` / `appendDraft`, APPEND to \Drafts, T4-15); never sends mail
+POST /api/calendar/invitations/:id/respond        {response}                   200 {ok, event_id, response, connection, preview: {event_id, connection, title, response, organizer, as, series, unchanged}, confirm_token, expires_in_sec, responded: false}
+                                                  {response, confirm_token}    200 {ok, event_id, response, connection, responded: true, unchanged, cleared}
+POST /api/mail/messages/:id/draft                 {body}                       200 {ok, message_id, connection, sent: false, preview: {mailbox, from, to, cc, subject, in_reply_to, body}, confirm_token, expires_in_sec, drafted: false}
+                                                  {confirm_token, body?}       201 {ok, message_id, connection, sent: false, drafted: true, draft_id, mailbox, uid, cleared}
 ```
 
 **Where the calendar comes from.** Every calendar source syncs into one table,
@@ -3177,6 +3179,100 @@ Two calls, as every destructive tool is:
   id, the outcome and the count of others — never the title, the people or
   the times. Never the invite body: neither the bridge nor the table carries
   one.
+
+**Invitation and message requests** (T4-17; §2.12, R7, C108) are mirrors: they
+exist while the source says the owner is needed and clear when it stops.
+
+- **`invitation`** — raised by a calendar sync that knows who the owner is
+  (the eventkit sync, a CalDAV account, Google Calendar; an ICS feed never
+  names the owner and never raises one) for a meeting still to come whose owner's answer is
+  needs-action (`self_status: pending`) and which someone else organises. One
+  per meeting — `source {kind: "calendar", external_ref:
+  "invite:uid/<ical_uid>"}` — so a series is one card and the same meeting on
+  the Mac's calendar and a CalDAV account is one card with both askers on it
+  (`payload.also_asked`). An answer on any calendar wins. The payload:
+  `title`, `summary` (the card's preview line — who invites, when, where, how
+  many others), `event_id`, `connection`, `ical_uid`, `start`, `end`,
+  `all_day`, `location`, `organizer {name, email}`, `others`, `series`, and
+  `rsvp` — a hint that the raising calendar can answer; the door decides. It
+  resolves at source when the owner answers (*You accepted it in your
+  calendar*), the meeting is cancelled (*No longer on your calendar*) or it
+  passes (*The meeting has passed*). Never the invite body.
+- **`message`** — raised by the mail sync (`mail-messages`) from the inbox's
+  **headers alone**: the owner's address (the connection's sign-in name) in
+  To, from a person (not a list, an automatic sender or a no-reply address),
+  unanswered (no `\Answered`, no reply to it in Sent), and a reply in a
+  conversation or written to the owner alone. **Inferred, and it says so**:
+  `payload.inferred: {from: "headers", by: "rules"}`, and `reason` in words
+  (*Written to you alone — inferred from its headers; the message itself was
+  not read*). The payload: `title` and `summary` (the subject), `from`
+  (*Name &lt;address&gt;*), `reason`, `why` (`reply` · `direct`), `ref` (the
+  door's id), `message_id`, `date`, `connection`, `source: "comms"`. A run of
+  six or more digits is scrubbed from what it carries. No body is ever
+  fetched, so none can arrive. Once per message (by Message-ID); it resolves
+  at source when the owner replies (*You replied in your mail*), it leaves
+  the inbox, or it is a week old. *Not Mine* is the row's `skip`.
+
+**Respond** (`POST /api/calendar/invitations/:id/respond`, T4-17; §2.11, K16,
+Q9) — the invitation's Accept · Maybe · Decline. `:id` is the event's
+`event_id`, as the request (`payload.event_id`) and Today carry it.
+
+- **Two calls.** `{response}` (`accepted` · `tentative` · `declined`) is the
+  preview: nothing is written; it names the calendar that will answer, the
+  meeting, the organizer the reply goes to and the owner's address it
+  answers as, and returns a single-use `confirm_token` (five minutes).
+  `{response, confirm_token}` is the confirm: the owner's own attendee line
+  changes in that calendar's copy — re-derived from the server's copy, and
+  written only if it is still the one previewed — and the server delivers
+  the reply (RFC 6638). A series is answered as a whole. The request clears
+  (*You accepted — the reply went to the organizer*).
+- **Through the connection that can, or not at all.** The answer goes through
+  a calendar connection whose provider declares **`rsvp`** (CalDAV, by the
+  meeting's UID; Google Calendar, by the series or the event, T4-14) and
+  that holds the same meeting — the event's own, or
+  another with the same UID. The Mac's calendar cannot answer (EventKit's
+  participant status is read-only). **Without an `rsvp` capability it is
+  refused** — `503`, `reason: "no_rsvp"`, `open_in_calendar: true` — before
+  anything is sent, and the client offers *Open in Calendar*. So is a server
+  that does not schedule (`no_scheduling`).
+- **Refused, nothing sent:** a body with any other field, an answer that is
+  not one (`400`); an id no calendar holds (`404`); the owner organises it or
+  is not an attendee (`400`, `not_invited`). A spent, expired or mismatched
+  token, or an event that changed since the preview, is `409` with
+  `reason: "stale"` — preview again. A refused answer leaves the request
+  pending with `payload.error` (door `rsvp`, C45).
+- **Owner only**: an agent bearer and the capture owner token get the uniform
+  `403`; not an action, so no proposal can answer an invitation. The ledger
+  row (`kind: invitation_respond`, tool `preview` or `confirm`) carries the id,
+  the outcome and the connection — never the title or an address.
+
+**Draft Reply** (`POST /api/mail/messages/:id/draft`, T4-17; §2.6, §2.11) —
+the message's primary answer. **It never sends mail**: the reply goes into the
+owner's Drafts mailbox and they send it from their own mail app.
+
+- **`:id` is the message's reference** — `payload.ref` on its request,
+  `<connection>/<mailbox>/<uidvalidity>/<uid>`, percent-encoded as one path
+  segment.
+- **Two calls.** `{body}` is the preview: the message's headers are read
+  again from the server and the reply is addressed from them — its Reply-To,
+  else its From; `Re:` its subject; threaded by its Message-ID — with `body`
+  as the owner's words. Nothing is appended. `{confirm_token}` (with the same
+  `body`, if sent) is the confirm: the exact draft previewed — checked by
+  digest — is APPENDed to the mailbox the server marks `\Drafts`, flagged
+  `\Draft`, and the request clears (*You drafted a reply — it is in your
+  Drafts, unsent*). `draft_id` is the draft's Message-ID.
+- **Who it goes to is never the caller's**: a body naming a recipient, a
+  subject, a mailbox — anything but `body` and `confirm_token` — is `400`.
+- **Refused, nothing appended:** a reference that is not one (`400`); a
+  connection that is not here, a message the server no longer has (`404`); a
+  mailbox renumbered since the reference was made (`409 stale`); a
+  connection without a `draft` capability, one that cannot be signed in to,
+  no Drafts mailbox, no mail here at all (`503`). A spent or mismatched
+  token, or other words than the preview's, is `409 stale`. A refused draft
+  leaves the request pending with `payload.error` (door `draft`, C45).
+- **Owner only**, as Respond. The ledger row (`kind: mail_draft`) carries the
+  connection and the outcome — never the reference, an address, the subject
+  or the words.
 
 ### Scheduled — routines and syncs
 

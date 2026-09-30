@@ -523,6 +523,26 @@ export interface ImapMessage {
   automated: boolean;
 }
 
+/** A message reference (`ImapMessage.ref`) taken apart — or null when it is not one. The connection name is checked by whoever opens it. */
+export function parseImapRef(ref: unknown): { connection: string; mailbox: string; uid_validity: number; uid: number } | null {
+  if (typeof ref !== "string" || ref.length > 2_048 || /[\u0000-\u001f\u007f]/.test(ref)) return null;
+  const parts = ref.split("/");
+  if (parts.length !== 4) return null;
+  const [connection, box, validity, uid] = parts as [string, string, string, string];
+  if (connection === "" || !/^[0-9]{1,10}$/.test(validity) || !/^[1-9][0-9]{0,9}$/.test(uid)) return null;
+  let mailbox: string;
+  try {
+    mailbox = decodeURIComponent(box);
+  } catch {
+    return null;
+  }
+  if (mailbox === "" || encodeURIComponent(mailbox) !== box) return null; // one spelling per reference: the one a read gives
+  const n = Number(uid);
+  const v = Number(validity);
+  if (n > 0xffffffff || v > 0xffffffff) return null;
+  return { connection, mailbox, uid_validity: v, uid: n };
+}
+
 /** Headers of the newest messages in one mailbox. */
 export interface ImapRead {
   connection: string;
@@ -829,6 +849,28 @@ export class ImapSession {
     }
     messages.sort((a, b) => b.uid - a.uid);
     return { ...base, messages, matched: uids.length };
+  }
+
+  /**
+   * One message's headers, by the reference a read gave it (T4-17: what
+   * Draft Reply answers). The mailbox is opened read-only and the fetch items
+   * are `IMAP_FETCH_ITEMS` — never a body. `changed` when the server
+   * renumbered the mailbox (UIDVALIDITY) since the reference was made, so it
+   * names nothing now; `not_found` when the message is not there.
+   */
+  async readMessage(mailbox: string, uid: number, uidValidity?: number): Promise<ImapMessage> {
+    this.#need("read");
+    if (!Number.isInteger(uid) || uid < 1 || uid > 0xffffffff) throw new ImapError("not_found", `${this.#opts.connection}: a message is named by its UID, a positive integer`);
+    const box = await this.examine(mailbox);
+    if (uidValidity !== undefined && box.uid_validity !== uidValidity) {
+      throw new ImapError("changed", `${this.#opts.connection}: the server renumbered ${JSON.stringify(decodeMailboxName(mailbox))} since this message was read (UIDVALIDITY) — its reference names nothing now`);
+    }
+    const fetched = await this.#run("UID FETCH", `${uid} ${IMAP_FETCH_ITEMS}`);
+    for (const raw of fetched.untagged) {
+      const m = fetchedMessage(raw, this.#opts.connection, mailbox, box.uid_validity ?? 0);
+      if (m && m.uid === uid) return m;
+    }
+    throw new ImapError("not_found", `${this.#opts.connection}: no message ${uid} in ${JSON.stringify(decodeMailboxName(mailbox))}`);
   }
 
   /** Render a draft and say where it would go. Sends nothing; appends nothing. */

@@ -121,6 +121,11 @@ public final class AppModel {
     /// (run-detail-view.swift). Held here so any screen that lists runs opens
     /// the same page; closed on an instance switch.
     public let runDetail: RunDetailModel
+    /// The floating bar (capture-bar-model.swift, T8-5): drawn only while the
+    /// live-capture bridge answers on this Mac. Its Note and To-do go through
+    /// `composer`, its Ask is `chat`, and it lights the Capture menu's bar
+    /// items through `shell.captureActions`.
+    public let captureBar: CaptureBarModel
 
     public init(
         bundleResourceURL: URL?,
@@ -130,7 +135,8 @@ public final class AppModel {
         loginItemService: (any LoginItemService)? = nil,
         backgroundAgentService: (any BackgroundAgentService)? = nil,
         passkeyRegistrar: (any PasskeyRegistrar)? = nil,
-        sessionSpawner: (any SessionSpawner)? = nil
+        sessionSpawner: (any SessionSpawner)? = nil,
+        liveCapture: (transport: any LiveCaptureTransport, keys: any LiveCaptureKeySource)? = nil
     ) {
         let instances = InstanceBookmarks(defaults: defaults)
         let developerProductDir = Self.loadDeveloperProductDir(defaults)
@@ -174,7 +180,8 @@ public final class AppModel {
         self.shell = shell
         let needsYou = NeedsYouModel(session: console)
         self.needsYou = needsYou
-        self.chat = ChatModel(session: console)
+        let chat = ChatModel(session: console)
+        self.chat = chat
         // An answer here moves the count: the row and the Dock hear it now,
         // not at the shell's next tick.
         needsYou.onQueueChanged = { [weak shell] in await shell?.refreshCount() }
@@ -204,6 +211,18 @@ public final class AppModel {
         vaultHistory.onQueueChanged = { [weak shell] in await shell?.refreshCount() }
         self.artifacts = ArtifactsModel(session: console)
         self.runDetail = RunDetailModel(session: console)
+        // The bar: no bridge wired (every test) is no bar. The key is filed
+        // under the instance's id, which only the console's identity says.
+        let liveCaptureClient: any LiveCaptureClient = liveCapture.map { wired in
+            BridgeLiveCaptureClient(transport: wired.transport, keys: wired.keys, instanceID: { [weak shell] in shell?.identity?.instanceID })
+        } ?? AbsentLiveCaptureClient()
+        let captureBar = CaptureBarModel(client: liveCaptureClient, composer: composer, chat: chat)
+        captureBar.assistantName = { [weak shell] in shell?.assistantName }
+        captureBar.onActions = { [weak shell] lit in
+            guard let shell else { return }
+            for command in CaptureBarModel.menuItems { shell.captureActions[command] = lit[command] }
+        }
+        self.captureBar = captureBar
 
         // The wizard's step 2 hands the folder back the moment it is known, so
         // every later verb runs against it.
@@ -237,6 +256,12 @@ public final class AppModel {
         shell.follow(console.events)
         shell.start()
         console.events.start()
+    }
+
+    /// Starts following the live-capture bridge — the bar appears once it
+    /// answers. Called once by the app, never from `init`.
+    public func startCaptureBar() {
+        captureBar.start()
     }
 
     public var runtime: MetistryRuntime? { resolution.runtime }
@@ -306,5 +331,7 @@ public final class AppModel {
         // reads through the new session, and asks now rather than at its next tick.
         shell.adopt(stores: console.stores)
         Task { await shell.refresh() }
+        // The bar's key belongs to the instance it was read for.
+        captureBar.adopt()
     }
 }

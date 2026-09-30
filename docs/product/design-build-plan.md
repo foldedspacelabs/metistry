@@ -1435,7 +1435,7 @@ agent's pass, per the PR close rule; the owner reviews at checkpoints.
 | W3 | T2-12, T2-13 · T3-8, T3-10, T3-11 · T4-9, T4-12 → T4-13, T4-19, T4-22, T4-23, T4-25, T4-26 · T6-4…T6-11 · T7-4, T7-5 · T8-2a → T8-2b, T8-6 · T9-3 · T10-7 · X-6…X-23 |
 | W4 | X-24, X-29, X-31, X-32, X-41 (CI stability, dispatched first — owner 2026-09-30) · T4-10 → T4-11, T4-14; T4-15 → T4-17 · T6-12, T6-13a, T6-13b, T6-14, T6-15, T6-16 · T7-6 · T8-3, T8-4, T8-5, T8-7 · T9-4 (merges after the eval clears its bar) |
 | W5 | X-1 |
-| Candidates | X-25…X-28, X-30, X-33…X-40, X-42…X-74 — specified, not scheduled; the owner assigns each a wave at a checkpoint (W3 housekeeping; five CI-stability candidates went to W4 on 2026-09-30) |
+| Candidates | X-25…X-28, X-30, X-33…X-40, X-42…X-74, X-80…X-102 — specified, not scheduled; the owner assigns each a wave at a checkpoint (W3 housekeeping; five CI-stability candidates went to W4 on 2026-09-30; X-80…X-102 added at W4 housekeeping) |
 
 ### 3.3 The tickets
 
@@ -3454,6 +3454,293 @@ refused**.
 `packages/*/Package.swift`.
 *Files:* `.github/workflows/ci.yml`.
 *Tests:* as spec.
+*Accept:* —
+
+#### X — Follow-ups found in W4
+
+What the W4 builders and reviewers reported outside their tickets (PRs
+#460–#482; `docs/product/decisions-log.md`, *W4*). None is in a wave: §3.2's
+*Candidates* row holds them until the owner schedules them at a checkpoint. A
+ticket that waits on one of the owner's W4 questions names it by letter
+(Q-a…Q-i). Each is its own PR, outside any track's files. X-75…X-79 are the
+owner's, in #456.
+
+**X-80 · `metistry up` mints the recorder's control token** · S · deps T8-5 —
+*Spec:* an install that configures the recorder still mints
+`METISTRY_LIVE_CAPTURE_CONTROL_TOKEN` by hand (`metistry secrets mint`), the
+one owner-hand step the 0.16.0 morning report could not remove. `up` mints it
+when the live-capture bridge is configured and none exists — the way it already
+mints the supervisor's control token (`packages/cli/src/up.ts`,
+`mintControlToken`) — into the login Keychain item the bar reads
+(`metistry:METISTRY_LIVE_CAPTURE_CONTROL_TOKEN`), and never replaces one that
+is there.
+*Files:* `packages/cli/src/up.ts`, `packages/cli/src/secrets.ts`,
+`docs/ops/cli.md`.
+*Tests:* **`up` with the recorder configured and no token mints one; a second
+`up` keeps it; `up` without the recorder mints nothing**.
+*Accept:* —
+
+**X-81 · Kept recordings have a list route** · S · deps T6-15, T8-4 —
+*Spec:* the Mac lists recordings through `GET /api/knowledge/pages?prefix=Journal/Transcripts`
+and then reads each page by id (`live-capture-model.swift`, capped at 100), so
+the Sessions pane costs one request per recording and stops at the cap. One
+route — the live-capture bridge's or the console's, the owner's call — serves
+the kept recordings with their retention state, and the Mac reads that.
+*Files:* `apps/console/src/`, `seed/queries/`, `docs/ops/client-api.md`,
+`apps/macos/sources/kit/live-capture-model.swift`.
+*Tests:* U2; **a hundred and one kept recordings list in one call**.
+*Accept:* F-7's fixture recorded, and the Mac store method in the same PR.
+
+**X-82 · The Mac's meeting group decodes `group_id`** · S · deps T8-7 —
+*Spec:* T8-7 serves `group_id` on `GET /api/proposals`, but
+`apps/macos/sources/kit/request-bodies/meeting-group.swift` still groups a
+meeting's rows by what the list says; it decodes `group_id` and Needs You shows
+a recording's rows as one card.
+*Files:* `apps/macos/sources/kit/request-bodies/meeting-group.swift`,
+`apps/macos/sources/kit/request-bodies/request-shape.swift`.
+*Tests:* **two proposals sharing a `group_id` are one card; a null group is one
+card each**.
+*Accept:* —
+
+**X-83 · The activity feed's capture subject reads the title only** · S · deps T8-6 —
+*Spec:* waits on the owner's W4 question Q-c. `seed/queries/activity_feed.yaml`'s
+capture branch derives `subject` from the note body's first line, so a
+transcript's first spoken line is servable through `queries_run` on any tier,
+unlike `recording_review`, which the assistant cannot reach. The subject comes
+from the path (the title) alone, or the branch is gated to the private tier —
+whichever Q-c rules.
+*Files:* `seed/queries/activity_feed.yaml`.
+*Tests:* **a capture whose note begins with a spoken line shows its file name
+as the subject, and no line of the note reaches the feed**.
+*Accept:* —
+
+**X-84 · `POST /message` carries a session-turn marker** · M · deps T8-6, T6-15 —
+*Spec:* waits on the owner's W4 question Q-b. Screen 11 §4 ("staying on this
+Mac") wants an Ask-panel turn inside a capture session held to the private
+tier, but `POST /message` has no field that says the turn belongs to a
+session, so `turnTier()` cannot see it. The route takes a session marker,
+checked against the open capture session, and the turn resolves its tier
+through `turnTier()` as a capture-session turn does — refusing, never falling
+back (T8-6).
+*Files:* `apps/console/src/server.ts`, `apps/console/src/router.ts`,
+`packages/core/src/client-api.ts`, `docs/ops/client-api.md`,
+`apps/macos/sources/kit/live-capture-model.swift`.
+*Tests:* **a marked turn with the private tier unavailable answers
+`PrivateTierUnavailable`; an unmarked turn is routed as before; a marker
+naming a session that is not open is refused**.
+*Accept:* —
+
+**X-85 · The targets shim comes out** · S · deps T4-11 —
+*Spec:* T4-11 kept `METISTRY_GITHUB_TOKEN`, `METISTRY_DEVIN_API_KEY` and the
+`targets/` manifests loading for one release, only where no connection of the
+name exists (`apps/console/src/dispatch.ts`, `apps/console/src/main.ts`,
+`packages/cli/src/secrets.ts`). The release after 0.16.0 removes the shim:
+the env keys are ignored with a doctor row naming `connections add`, and a
+`targets/` manifest other than `local-crew` is refused at load.
+*Files:* `apps/console/src/dispatch.ts`, `apps/console/src/main.ts`,
+`packages/cli/src/secrets.ts`, `packages/cli/src/doctor.ts`, `docs/ops/cli.md`.
+*Tests:* **an env key alone dispatches nothing and doctor names the verb;
+`local-crew` still loads**.
+*Accept:* the 0.17.0 release notes name the removal.
+
+**X-86 · The Mac's Secrets pane hides Grant for an owner-door secret** · S · deps X-41, T6-14 —
+*Spec:* X-41 makes the server refuse a connection or agent grant on an
+owner-door secret (`github_write`), but `secrets-view.swift` still draws the
+Grant row for it, so the owner is offered a control that can only fail. The
+pane reads the secret's kind and shows the owner-door sentence instead.
+*Files:* `apps/macos/sources/kit/secrets-view.swift`,
+`apps/macos/sources/kit/secrets-model.swift`.
+*Tests:* **an owner-door secret has no Grant row and says why; an ordinary
+secret keeps its rows**.
+*Accept:* —
+
+**X-87 · The calendar collectors export `check()`** · S · deps T4-14 —
+*Spec:* CLAUDE.md says every collector exports `check()` so `metistry doctor`
+is generic; `collectors/google-calendar`, `ics-calendar`, `caldav-calendar`
+and `eventkit-calendar` export none (the Devin collectors do). Each reports
+its connection's reachability and credential state the way
+`collectors/devin-sessions/run.ts` does, and doctor shows the row.
+*Files:* `collectors/google-calendar/run.ts`, `collectors/ics-calendar/run.ts`,
+`collectors/caldav-calendar/run.ts`, `collectors/eventkit-calendar/run.ts`,
+`ops/scripts/` (the manifest check, if it does not already require `check()`).
+*Tests:* **every collector manifest's entry exports `check()`, held by one CI
+check**.
+*Accept:* —
+
+**X-88 · The workspace test script isolates each package's database** · M —
+*Spec:* the root `pnpm test` runs `pnpm -r --workspace-concurrency=1 run test`
+against one scratch database; a `--no-file-parallelism` passed to it never
+reaches vitest, so every package's DB-backed suites share rows — the root
+cause of the cross-suite flakes W4 saw again (morning-brief, tasks
+`external_ref`, reply-review's FK, linear-order, push-needs-you). The
+workspace script gives each package its own scratch database
+(`recreateScratchDb` with the package name as suffix) and drops it after.
+X-25's per-suite ownership stays worthwhile; this removes the shared row space
+they collide in.
+*Files:* `package.json`, `ops/scripts/test-db.sh`,
+`packages/core/src/test-env.ts`, `docs/ops/testing.md`.
+*Tests:* **two packages' DB suites run at once against different databases;
+ten consecutive `pnpm test` runs pass**.
+*Accept:* —
+
+**X-89 · A request raised while the console is down still pushes** · S · deps X-32 —
+*Spec:* `needsYouNotifier` (`apps/console/src/push.ts`) learns the queue on its
+first pass, so a request raised while the console was down is "already
+waiting" at startup and never pushes. Migration: `proposals.notified_at`
+(additive, nullable); the notifier pushes every showing row with a null
+`notified_at` and stamps it, so a restart pushes what arrived meanwhile,
+once.
+*Files:* `apps/console/src/push.ts`, `apps/console/migrations/`,
+`docs/ops/client-api.md`.
+*Tests:* **a pending row with null `notified_at` pushes on the first pass and
+not the second; a row stamped before the restart does not push again**.
+*Accept:* U4's rollback note.
+
+**X-90 · The hot-key and accessibility audits see what they miss** · S · deps T6-16 —
+*Spec:* T6-16's hot-key audit (`apps/macos/tests/kit/hotkeys-tests.swift`,
+`bindingCalls`) matches the SwiftUI binding calls and misses a raw
+`keyDown(with:)` override, so an AppKit view can bind a key the audit never
+sees. The accessibility audit's view regex
+(`accessibility-audit-tests.swift:267`) is anchored at line start, so a `View`
+struct nested in another type escapes coverage. Both audits find those, and a
+fixture of each shape fails them.
+*Files:* `apps/macos/tests/kit/hotkeys-tests.swift`,
+`apps/macos/tests/kit/accessibility-audit-tests.swift`.
+*Tests:* **a `keyDown(with:)` override is a binding; a nested `View` struct is
+audited**.
+*Accept:* —
+
+**X-91 · The three-pointers test tolerates the device-local keys** · S · deps T6-16, T6-15 —
+*Spec:* waits on the owner's W4 question Q-f. `theAppPersistsThreePointersAndNothingElse`
+(`settings-model-tests.swift`) enumerates the exact `UserDefaults` keys, so
+T6-16's `anyAppShortcuts` and T6-15's `captureBar` had to be listed by hand;
+the next device-local key breaks it again. `AppPreference` names which keys are
+pointers and which are device-local, and the test holds the store to that
+enumeration rather than to a literal list.
+*Files:* `apps/macos/sources/kit/app-preferences.swift`,
+`apps/macos/tests/kit/settings-model-tests.swift`.
+*Tests:* **a key outside both sets fails; a device-local key passes**.
+*Accept:* —
+
+**X-92 · Dispatch's `REPO_RE` has a misuse test** · S · deps T4-11 —
+*Spec:* `apps/console/src/dispatch.ts`'s `REPO_RE` refuses `../x` and `x/..`
+for a connection's `config.repo`, but no test holds it, so a loosened pattern
+would pass CI. The misuse test names each shape it refuses (`../x`, `x/..`,
+`./x`, an absolute path, a third segment) and each it accepts.
+*Files:* `apps/console/test/dispatch.test.ts`.
+*Tests:* as spec, **bold: `../x` is refused**.
+*Accept:* —
+
+**X-93 · `socketDestination` keeps IMAP's port** · S · deps T4-15 —
+*Spec:* `packages/core/src/egress.ts`'s `socketDestination` collapses port 443
+to the bare host, an HTTPS convention; `packages/connections/src/describe.ts`
+calls it for an IMAP host too, so an IMAP server on 443 would be described as
+the host alone and could match an HTTPS allowlist entry. The collapse applies
+to HTTPS only; a socket destination always carries its port.
+*Files:* `packages/core/src/egress.ts`, `packages/connections/src/describe.ts`.
+*Tests:* **an IMAP destination on 443 keeps `:443`; an HTTPS one still
+collapses**.
+*Accept:* —
+
+**X-94 · The wizard's copy templates the configured name** · S · deps T6-12 —
+*Spec:* `apps/macos/sources/kit/wizard-step-views.swift` and
+`wizard-model.swift` say "the assistant" in copy the owner reads, where the
+rest of the app says the configured name (`identity.yaml`). The wizard reads
+the name once it is known and uses the generic word only before it is.
+*Files:* `apps/macos/sources/kit/wizard-step-views.swift`,
+`apps/macos/sources/kit/wizard-model.swift`.
+*Tests:* **with a name configured, no wizard string contains "the assistant"**.
+*Accept:* —
+
+**X-95 · The Mac's loopback set matches core's** · S · deps T6-13a —
+*Spec:* `apps/macos/sources/kit/connections-model.swift:314` hand-lists the
+loopback hosts (`localhost`, `127.0.0.1`, `::1`, `[::1]`, …) that core's
+`isLoopbackHost` (`packages/core/src/egress.ts`) decides; the two can drift.
+The Swift set is held to core's by a test that reads core's cases, as the
+"held to core" tests do (X-100).
+*Files:* `apps/macos/sources/kit/connections-model.swift`,
+`apps/macos/tests/kit/connections-view-tests.swift`.
+*Tests:* **every host core calls loopback the Mac calls loopback, and no other**.
+*Accept:* —
+
+**X-96 · A connection's detail says who uses it and when it was checked** · S · deps T6-13a —
+*Spec:* `GET /api/connections`' `used_by` (`packages/connections/src/describe.ts`,
+`usersOf`) lists syncs only, so an agent or routine granted the connection is
+not shown; `last checked` is not served; and a connection with a header per
+secret shows one. The detail serves every user kind, the last check's time and
+verdict, and each header's secret name.
+*Files:* `packages/connections/src/describe.ts`, `apps/console/src/`,
+`docs/ops/client-api.md`, `apps/macos/sources/kit/connections-model.swift`.
+*Tests:* **an agent granted a connection appears in `used_by`; a check stamps
+`last_checked`; two headers list two secret names**.
+*Accept:* F-7's fixture re-recorded, and the Mac reads the new fields.
+
+**X-97 · Variables: when it was set, the preview an agent sees, and a key's expiry** · S · deps T6-14 —
+*Spec:* T6-14's leftovers. The Variables pane shows no *set* time; there is no
+preview of a value as an agent sees it after templating; and a provider key's
+expiry, where the provider says one, is not surfaced in Secrets. Each is a
+served field or a read of one — no new route.
+*Files:* `apps/macos/sources/kit/variables-view.swift`,
+`apps/macos/sources/kit/variables-model.swift`,
+`apps/macos/sources/kit/secrets-view.swift`, `docs/ops/client-api.md`.
+*Tests:* **a variable shows when it was set; the preview renders the template;
+a key with an expiry shows it**.
+*Accept:* —
+
+**X-98 · Agents and Compute: the model line, the key note and the download** · S · deps T6-12, T6-5 —
+*Spec:* three small gaps. `agents-model.swift`'s dropdown labels a model
+`model — provider` while Compute writes `provider/model` everywhere else
+(T6-12's one-way rule); the wizard's `keyNote` (`compute-step.swift`) still
+describes the pre-T4-18 key path; and Compute shows no model size and offers
+no cancel while a model downloads.
+*Files:* `apps/macos/sources/kit/agents-model.swift`,
+`apps/macos/sources/kit/compute-step.swift`,
+`apps/macos/sources/kit/compute-view.swift`.
+*Tests:* **the dropdown's label is the one line T6-12 holds; a download shows
+its size and can be cancelled**.
+*Accept:* —
+
+**X-99 · The phone's writable rows have controls** · S · deps T7-6 —
+*Spec:* T7-6 leaves rows the phone may change without a control: the
+assistant's model and effort, and Scheduled's pause. Each goes through the
+console route the Mac already uses; nothing that widens the boundary is
+offered (§2.3).
+*Files:* `apps/console/web/`.
+*Tests:* **the phone changes the model and pauses a routine through the
+existing routes; no Secrets or provider control is drawn**.
+*Accept:* —
+
+**X-100 · The "held to core" Swift tests cannot drift** · S · deps T6-14, T6-5 —
+*Spec:* `autonomyWideningsSaysWhatCoreSays` (`agents-view-tests.swift`) and
+`theKeyShapeCheckIsCoresPatternForPattern` (`secrets-variables-tests.swift`)
+hold Swift to core by hand-copied cases, so a change in core passes until
+someone recopies. The cases are generated from core's tests into a fixture
+the Swift tests read, or pinned by a CI check that diffs the two.
+*Files:* `apps/macos/tests/kit/agents-view-tests.swift`,
+`apps/macos/tests/kit/secrets-variables-tests.swift`, `ops/scripts/`.
+*Tests:* **a changed core case fails CI before the Swift copy is updated**.
+*Accept:* —
+
+**X-101 · Bare `metistry doctor` resolves the product directory it runs from** · S —
+*Spec:* `resolveProductDir` (`packages/cli/src/env.ts`) falls back to the
+checkout above the package, so a bare `metistry doctor` from an installed CLI
+beside a development checkout reads that checkout's manifests, not the
+release's. Without `--product-dir` or `METISTRY_PRODUCT_DIR`, doctor resolves
+the release the instance runs and says which it read.
+*Files:* `packages/cli/src/env.ts`, `packages/cli/src/doctor.ts`,
+`docs/ops/cli.md`.
+*Tests:* **doctor beside a checkout names the release's product dir, not the
+checkout's**.
+*Accept:* —
+
+**X-102 · The recorder leaves no fixed-id rows behind** · S · deps X-31 —
+*Spec:* `apps/console/scripts/record-client-fixtures.mjs` inserts rows with
+fixed ids (`work` 41 and 42, `external_ref` `linear:ENG-42`), so a second run
+on the same scratch database — `--check` after a record — collides on them.
+The recorder recreates its database (`recreateScratchDb`) or resets those rows
+before it seeds.
+*Files:* `apps/console/scripts/record-client-fixtures.mjs`.
+*Tests:* **two consecutive runs on one database both pass**.
 *Accept:* —
 
 #### W5 — Acceptance

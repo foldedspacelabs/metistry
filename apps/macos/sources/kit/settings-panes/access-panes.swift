@@ -1,45 +1,13 @@
-// Settings ▸ Connections, Secrets, and the panes whose own tickets have not
-// landed (Variables, Live Capture, Sessions).
+// Settings ▸ Secrets, and the panes whose own tickets have not landed
+// (Variables, Live Capture, Sessions). Connections is connections-view.swift
+// (T6-13a).
 //
-// Connections and Secrets keep what they showed before the window became a
-// sidebar — doctor's bridge rows, and `metistry secrets list --json`'s names —
-// until their own panes replace them (screens 9 and 19). A pane not built yet
-// says what it will hold and which verb does it today: never a dead end (C138).
+// Secrets keeps what it showed before the window became a sidebar —
+// `metistry secrets list --json`'s names — until its own pane replaces it
+// (screen 19). A pane not built yet says what it will hold and which verb
+// does it today: never a dead end (C138).
 
 import SwiftUI
-
-struct ConnectionsPane: View {
-    @Environment(\.colorScheme) private var scheme
-    let settings: SettingsModel
-
-    var body: some View {
-        let p = Palette(scheme)
-        SettingsSection("Bridges") {
-            if settings.bridges.isEmpty {
-                Text("No bridges in the last doctor report.")
-                    .metistryText(.footnote, p, .textSecondary)
-            } else {
-                ForEach(settings.bridges) { row in
-                    HStack(alignment: .top, spacing: MetistrySpace.s3) {
-                        StatusDot(row.status)
-                        VStack(alignment: .leading, spacing: MetistrySpace.s1) {
-                            Text(row.name).metistryText(.mono, p)
-                            Text(row.remediation ?? row.probe)
-                                .metistryText(.caption1, p, .textTertiary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        Spacer(minLength: MetistrySpace.s2)
-                        Text(row.status.label).metistryText(.caption2, p, row.status.colorRole)
-                    }
-                    .accessibilityElement(children: .combine)
-                }
-            }
-            Text("From `metistry doctor --json`. Adding and configuring a connection is `metistry connections` in Terminal until this pane does it.")
-                .metistryText(.caption1, p, .textTertiary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-}
 
 struct SecretsPane: View {
     @Environment(\.colorScheme) private var scheme

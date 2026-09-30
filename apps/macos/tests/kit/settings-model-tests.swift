@@ -274,7 +274,7 @@ private struct FixedRunner: CommandRunner {
     // The repository's state is the reconciler's own report, not a git call.
     #expect(model.repositoryStatus.contains("pushed to origin"))
     #expect(model.reconciler?.queueDepth == 0)
-    #expect(model.bridges.map(\.name) == ["apple-fm"])
+    #expect(model.status.report?.bridges.map(\.name) == ["apple-fm"])
 }
 
 @MainActor

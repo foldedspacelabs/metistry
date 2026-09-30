@@ -169,7 +169,7 @@ struct SettingsPaneContent: View {
                     .task(id: model.instances.active) { await model.settings.computePane.refresh() }
             case .updates: UpdatesPane(model: model)
             case .account: AccountPane(model: model, actions: actions)
-            case .connections: ConnectionsPane(settings: model.settings)
+            case .connections: ConnectionsPane(model: model)
             case .secrets: SecretsPane(settings: model.settings)
             case .variables, .liveCapture, .sessions: PendingPane(section: section)
             case .keyboard: KeyboardPane(assistantName: model.settings.identity?.assistantName, actions: actions)

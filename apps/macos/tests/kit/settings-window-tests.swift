@@ -431,6 +431,7 @@ private func appReading() async throws -> (AppModel, RecordedSession, () -> Void
     await app.settings.refreshDeployment()
     await app.settings.refreshSecrets()
     await app.settings.refreshLinked()
+    await app.settings.connectionsPane.refresh()
     return (app, recorded, { UserDefaults.standard.removePersistentDomain(forName: id) })
 }
 

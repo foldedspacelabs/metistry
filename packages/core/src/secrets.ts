@@ -46,6 +46,7 @@ import { z } from "zod";
 import { parseDocument } from "yaml";
 import { TOOL_MODES, type ToolMode } from "./connections.js";
 import { parseEgressEntry } from "./egress.js";
+import { GITHUB_WRITE_SECRET } from "./github-pulls.js";
 import { AGENT_NAME_RE, INSTANCE_ID_RE } from "./instances.js";
 import { instanceFile, instanceStatePath } from "./instance-layout.js";
 import { PROVIDER_NAME_RE } from "./model-ref.js";
@@ -143,6 +144,32 @@ export function providerGrantee(providerName: string): string {
   return g;
 }
 
+// ---- owner doors: a secret with no *Who may use it* line to check -----------------------
+
+/**
+ * The secret names an owner door reads directly, never through a
+ * `connection:`, `agent:` or `provider:` grant (X-41; T2-13's
+ * `github_write`). Exact names, not a prefix — a test's
+ * `github_write_${suffix}` fixture (a unique name for Keychain isolation,
+ * unrelated to the real door) is not one. The one list either check below
+ * reads, so X-42 (an `owner-door:<name>` grantee kind) has one place to
+ * extend rather than a scattered convention.
+ */
+const OWNER_DOOR_SECRETS: ReadonlySet<string> = new Set([GITHUB_WRITE_SECRET]);
+
+/**
+ * Whether `name` is an owner door's secret: read only through its own door
+ * (apps/console's `github-write.ts` for `github_write`), because the door
+ * IS the grant — there is no *Who may use it* line to widen it with. A
+ * `connection:`, `agent:` or `provider:` grant for one is refused wherever a grant could
+ * take effect: parsing `secrets.yaml` (below), `metistry secrets grant`
+ * (packages/cli), and `secretGrant` itself, so no delivery path can hand one
+ * out even if a file that predates this check still names one.
+ */
+export function isOwnerDoorSecret(name: string): boolean {
+  return OWNER_DOOR_SECRETS.has(name);
+}
+
 // ---- where it may go --------------------------------------------------------------
 
 /**
@@ -189,7 +216,23 @@ export const secretsFileSchema = z
   .object({
     secrets: keyedRecord(policySchema, isSecretName, (k) => secretNameIssue(k)!).default({}),
   })
-  .strict();
+  .strict()
+  .superRefine((file, ctx) => {
+    // An owner-door secret (X-41, modelled on X-7's `provider:` grantee
+    // check) has no *Who may use it* line to widen: the door itself is the
+    // grant. A hand-written file that grants one to a connection or an
+    // agent does not load — it names the offending grantee and the fix.
+    for (const [name, policy] of Object.entries(file.secrets)) {
+      if (!isOwnerDoorSecret(name)) continue;
+      for (const grantee of Object.keys(policy.grants)) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["secrets", name, "grants", grantee],
+          message: `${name} is an owner-door secret — it is read only through its own door, never granted to a connection, an agent or a provider; remove \`grants: { ${JSON.stringify(grantee)}: … }\` (its *Sent only to* hosts still apply)`,
+        });
+      }
+    }
+  });
 
 export type SecretPolicy = z.infer<typeof policySchema>;
 export type SecretsFile = z.infer<typeof secretsFileSchema>;
@@ -353,8 +396,16 @@ export function secretsPolicyFromEnv(env: NodeJS.ProcessEnv): () => Promise<Secr
   return () => readSecretsPolicy(path);
 }
 
-/** The mode `grantee` has for `name`: what the file says, else Off. An unknown secret is Off for everyone. */
+/**
+ * The mode `grantee` has for `name`: what the file says, else Off. An unknown
+ * secret is Off for everyone. An owner-door secret is Off for every
+ * `connection:`, `agent:` or `provider:` grantee no matter what the file says — the
+ * schema already refuses writing such a grant, but this is the one function
+ * every delivery path (a command connection's environment, `guardedFetch`)
+ * calls to decide, so it holds even for a file from before that check.
+ */
 export function secretGrant(file: SecretsFile, name: string, grantee: string): SecretGrantMode {
+  if (isOwnerDoorSecret(name)) return DEFAULT_SECRET_GRANT;
   const policy = Object.hasOwn(file.secrets, name) ? file.secrets[name] : undefined;
   if (!policy || !Object.hasOwn(policy.grants, grantee)) return DEFAULT_SECRET_GRANT;
   return policy.grants[grantee] ?? DEFAULT_SECRET_GRANT;

@@ -120,6 +120,7 @@ function reachLine(r: ConnectionRow["reach"]): string {
   if (!r) return "-";
   if (r.class === "http") return `${r.url}${r.auth !== "none" ? ` (${r.auth})` : ""}`;
   if (r.class === "command") return `${[r.command, ...r.args].join(" ")}${r.runs_on === "container" ? " (in a container)" : ""}`;
+  if (r.class === "imap") return `imap${r.security === "tls" ? "s" : ""}://${r.host}:${r.port}${r.security === "plain" ? " (no TLS: this Mac only)" : ""}`;
   return r.path;
 }
 
@@ -288,6 +289,10 @@ export interface AddSpec extends AuthFlags {
   type: string | undefined;
   provider?: string | undefined;
   url?: string | undefined;
+  /** `host[:port]` of an IMAP server (T4-15) — signed in with `--username` and the app password `--secret` names */
+  imap?: string | undefined;
+  /** reach the IMAP server without TLS — accepted for a server on this Mac only */
+  plain?: boolean | undefined;
   /** argv: the command and its arguments (everything after `--`) */
   command?: string[] | undefined;
   env?: string[] | undefined;
@@ -305,7 +310,23 @@ export interface AddResult {
   delivery?: ProtectedWrite | undefined;
 }
 
-/** `connections add <name> --type <type> (--url <url> | -- <command…>)`. */
+/**
+ * `--imap host[:port] --username <user> --secret <name> [--plain]` → the file's
+ * `reach.imap` (T4-15). The username is written; the app password is the
+ * secret, by name. Port 993 (implicit TLS) unless given; `--plain` only for a
+ * server on this Mac — the file check refuses it anywhere else, and a mail
+ * submission port, before anything is written.
+ */
+function imapReachOf(spec: AddSpec): { host: string; port?: number; security?: "plain"; username: string; secret: string } {
+  const m = /^([^:\s/]+)(?::(\d{1,5}))?$/.exec(spec.imap ?? "");
+  if (!m) throw new StepFailed(`--imap takes host or host:port (imap.gmail.com:993) — no scheme, no path`);
+  if (spec.auth !== undefined && spec.auth !== "basic") throw new StepFailed("an IMAP connection signs in with --username and an app password (--secret) — --auth takes nothing else");
+  if (!spec.username || !spec.secret) throw new StepFailed("--imap needs --username <user> and --secret <name> — the secret holds the app password, never the command line");
+  const port = m[2] === undefined ? undefined : Number(m[2]);
+  return { host: m[1]!.toLowerCase(), ...(port !== undefined && port !== 993 ? { port } : {}), ...(spec.plain ? { security: "plain" as const } : {}), username: spec.username, secret: spec.secret };
+}
+
+/** `connections add <name> --type <type> (--url <url> | --imap <host[:port]> | -- <command…>)`. */
 export async function connectionsAdd(spec: AddSpec, opts: ConnectionsOptions): Promise<AddResult> {
   const name = spec.name;
   if (!name || !NAME_RE.test(name)) throw new StepFailed(`${JSON.stringify(name ?? "")} is not a connection name — lowercase kebab-case, e.g. github`);
@@ -315,18 +336,22 @@ export async function connectionsAdd(spec: AddSpec, opts: ConnectionsOptions): P
   if (catalog.entries.some((e) => e.name === name) || existsSync(`${catalog.dir}/${name}.yaml`) || existsSync(`${catalog.dir}/${name}.yml`)) {
     throw new StepFailed(`there is already a connection named ${name} — \`metistry connections set ${name} …\` changes it, \`remove\` deletes it`);
   }
-  if ((spec.url === undefined) === (spec.command === undefined || spec.command.length === 0)) {
-    throw new StepFailed("say how it is reached: --url <url>, or -- <command> [args…] after everything else");
+  const hows = [spec.url !== undefined, spec.command !== undefined && spec.command.length > 0, spec.imap !== undefined].filter(Boolean).length;
+  if (hows !== 1) {
+    throw new StepFailed("say how it is reached: --url <url>, --imap <host[:port]> (a mailbox), or -- <command> [args…] after everything else");
   }
+  if (spec.plain && spec.imap === undefined) throw new StepFailed("--plain is for a connection reached by --imap");
   const provider = spec.provider ?? CUSTOM_PROVIDER;
-  const auth = authOf(spec);
+  const imap = spec.imap !== undefined ? imapReachOf(spec) : undefined;
+  const auth = imap ? undefined : authOf(spec);
   basicAllowed(auth, provider, catalog);
   const env = Object.fromEntries((spec.env ?? []).map((p) => parsePair(p, "--env")));
   const headers = Object.fromEntries((spec.headers ?? []).map((p) => parsePair(p, "--header")));
   if (spec.url === undefined && (auth || Object.keys(headers).length)) throw new StepFailed("--auth and --header are for a connection reached by --url");
-  if (spec.url !== undefined && Object.keys(env).length) throw new StepFailed("--env is for a connection reached by a command");
-  const reach =
-    spec.url !== undefined
+  if ((spec.command === undefined || spec.command.length === 0) && Object.keys(env).length) throw new StepFailed("--env is for a connection reached by a command");
+  const reach = imap
+    ? { imap }
+    : spec.url !== undefined
       ? { http: { url: spec.url, ...(auth ? { auth } : {}), ...(Object.keys(headers).length ? { headers } : {}) } }
       : { command: { command: spec.command![0]!, ...(spec.command!.length > 1 ? { args: spec.command!.slice(1) } : {}), ...(Object.keys(env).length ? { env } : {}), ...(spec.runsOn ? { runs_on: spec.runsOn } : {}) } };
   const obj: { name: string; type: ConnectionType; provider: string; description?: string; reach: unknown; secrets: string[]; variables: string[]; tools: Record<string, { group: ToolGroup; mode: ToolMode }>; offer_to_agents: boolean } = {
@@ -340,7 +365,7 @@ export async function connectionsAdd(spec: AddSpec, opts: ConnectionsOptions): P
     tools: {},
     offer_to_agents: false,
   };
-  referencedNames(obj, auth);
+  referencedNames(obj, auth ?? imap);
 
   // judge the file with no tools first: a refusal here names the field and dials nothing
   const bare = [...HEADER, stringify(obj)].join("\n");
@@ -348,7 +373,8 @@ export async function connectionsAdd(spec: AddSpec, opts: ConnectionsOptions): P
   const declared = catalog.types.get(provider)?.manifest.tools ?? {};
 
   let found: UpstreamTool[] | undefined;
-  if (spec.discover !== false && opts.dryRun !== true) {
+  // a mailbox is not an MCP server — nothing to discover; `connections test` signs in
+  if (spec.discover !== false && opts.dryRun !== true && !imap) {
     const entry = judgeConnection(name, `${catalog.dir}/${name}.yaml`, parseDocument(bare).toJS(), catalog.types);
     // the one dial `add` makes: initialize and tools/list, through the same pool
     // and door as every later call — no tool is called
@@ -377,11 +403,17 @@ export async function connectionsAdd(spec: AddSpec, opts: ConnectionsOptions): P
   const content = [...HEADER, stringify(obj)].join("\n");
   judged(name, content, catalog);
 
-  opts.out(`add ${name} (${type}${provider !== CUSTOM_PROVIDER ? ` · ${provider}` : ""}): ${tools.length} tool${tools.length === 1 ? "" : "s"}${found ? " the server offers" : spec.discover === false ? " (not dialled: --no-discover)" : " (not dialled: dry run)"}, offer to agents off`);
+  const how = found ? " the server offers" : imap ? ` (a mailbox — \`metistry connections test ${name}\` signs in)` : spec.discover === false ? " (not dialled: --no-discover)" : " (not dialled: dry run)";
+  opts.out(`add ${name} (${type}${provider !== CUSTOM_PROVIDER ? ` · ${provider}` : ""}): ${tools.length} tool${tools.length === 1 ? "" : "s"}${how}, offer to agents off`);
   for (const t of tools) opts.out(`  ${t.name.padEnd(28)} ${TOOL_GROUP_LABEL[t.group].padEnd(16)} ${TOOL_MODE_LABEL[t.mode]}${t.read_only_hint && t.group !== "reads" ? "   (the server says read-only)" : ""}`);
   const hinted = tools.filter((t) => t.read_only_hint && t.group !== "reads").map((t) => t.name);
   if (hinted.length) opts.out(`the server marks ${hinted.length} tool${hinted.length === 1 ? "" : "s"} read-only — a hint, not a control; \`metistry connections policy ${name} <tool> allow --group reads\` files one under Reads`);
-  if (obj.secrets.length) opts.out(`secrets it uses: ${obj.secrets.join(", ")} — each must be granted to connection:${name} (\`metistry secrets grant <name> connection:${name} on\`)${reach && "http" in reach ? " and list its host (`metistry secrets hosts <name> <host>`)" : ""}`);
+  const hostEntry = imap ? `${imap.host}:${imap.port ?? 993}` : undefined;
+  if (obj.secrets.length) {
+    opts.out(
+      `secrets it uses: ${obj.secrets.join(", ")} — each must be granted to connection:${name} (\`metistry secrets grant <name> connection:${name} on\`)${hostEntry ? ` and list ${hostEntry} (\`metistry secrets hosts <name> ${hostEntry}\`)` : reach && "http" in reach ? " and list its host (`metistry secrets hosts <name> <host>`)" : ""}`,
+    );
+  }
   const delivery = await commit(opts, name, content, `connections: add ${name}`);
   return { name, file: connectionRel(opts.instanceDir, name), tools, delivery };
 }
@@ -429,18 +461,19 @@ export async function connectionsSet(name: string | undefined, spec: SetSpec, op
   const reach = doc.getIn(["reach"]) as unknown;
   const isHttp = doc.hasIn(["reach", "http"]);
   const isCommand = doc.hasIn(["reach", "command"]);
+  const reachedBy = isHttp ? "URL" : isCommand ? "a command" : doc.hasIn(["reach", "imap"]) ? "IMAP" : "a path";
   if (!reach) throw new StepFailed(`${e.path} has no reach: — fix it by hand`);
   if (spec.description !== undefined) {
     doc.setIn(["description"], spec.description);
     changed.push("description");
   }
   if (spec.url !== undefined) {
-    if (!isHttp) throw new StepFailed(`${e.name} is reached by a command, not a URL — remove it and add it again to change how it is reached`);
+    if (!isHttp) throw new StepFailed(`${e.name} is reached by ${reachedBy}, not a URL — remove it and add it again to change how it is reached`);
     doc.setIn(["reach", "http", "url"], spec.url);
     changed.push("url");
   }
   if (spec.command !== undefined && spec.command.length > 0) {
-    if (!isCommand) throw new StepFailed(`${e.name} is reached by URL, not a command — remove it and add it again to change how it is reached`);
+    if (!isCommand) throw new StepFailed(`${e.name} is reached by ${reachedBy}, not a command — remove it and add it again to change how it is reached`);
     doc.setIn(["reach", "command", "command"], spec.command[0]);
     if (spec.command.length > 1) doc.setIn(["reach", "command", "args"], spec.command.slice(1));
     else doc.deleteIn(["reach", "command", "args"]);

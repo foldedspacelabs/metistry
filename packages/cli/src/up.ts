@@ -14,12 +14,14 @@
 // `release` pulls the pinned ones and never builds (plan §4.16).
 
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
   COMPUTE_FILENAME,
   COMPOSE_SECRETS_SOURCE_VAR,
-  COMPOSE_SECRETS_TARGET,
+  COMPOSE_POLICY_TARGET_DIR,
+  mirrorSecretsPolicy,
+  secretsMirrorDir,
   EGRESS_PROXY_HOST,
   KEEP_AWAKE_ENV,
   emptyCompute,
@@ -232,26 +234,36 @@ export function composeEnvArgs(productDir: string, envFile: string | undefined):
 }
 
 /**
- * What compose is told about `secrets.yaml` (X-7, the owner's ruling of
- * 2026-09-30): `METISTRY_SECRETS_YAML` = this instance's
- * `.metistry/secrets.yaml`, which docker-compose.yml bind-mounts READ-ONLY
- * into the console and assistant as their grant policy. Only when the file
- * exists: a bind of a missing path would be refused (`create_host_path:
- * false`), and with no file there is no grant to check — the containers get
- * /dev/null, an empty METISTRY_SECRETS_FILE, and refuse every
+ * What compose is told about `secrets.yaml` (X-7, the owner's rulings of
+ * 2026-09-30): `METISTRY_SECRETS_POLICY_DIR` = this instance's policy mirror
+ * directory, `.metistry/state/policy/`, which docker-compose.yml bind-mounts
+ * READ-ONLY into the console and assistant. A directory, not the file: a
+ * single-file bind pins an inode every writer replaces by rename, so a
+ * revoke would not reach a running container; a directory bind sees the
+ * replaced entry. The directory holds nothing but the mirror (core's
+ * `mirrorSecretsPolicy`, which the reconciler refreshes every second); `up`
+ * creates it and mirrors once before compose starts, so the bind's
+ * `create_host_path: false` always finds it. No instance, no mount: the
+ * containers get an empty METISTRY_SECRETS_FILE and refuse every
  * `{{ secret.x }}` provider key naming the mount.
  */
-export function composeSecretsEnv(instanceDir: string | undefined, exists: (p: string) => boolean = existsSync): { env: Record<string, string>; note: string } {
-  if (!instanceDir) return { env: {}, note: `secrets.yaml: no instance directory — the containers get no grant policy, and a {{ secret.x }} provider key is refused` };
-  const path = instanceFile(instanceDir, "secrets");
-  if (!exists(path)) return { env: {}, note: `secrets.yaml: ${path} does not exist yet — nothing is mounted, so a {{ secret.x }} provider key is refused until \`metistry secrets set <name>\` creates it and \`metistry up\` runs again` };
-  return { env: { [COMPOSE_SECRETS_SOURCE_VAR]: path }, note: `secrets.yaml: ${path} mounted read-only at ${COMPOSE_SECRETS_TARGET} in console and assistant (a grant change reaches them on \`metistry restart console assistant\`)` };
+export async function prepareComposePolicy(r: StepRunner, instanceDir: string | undefined): Promise<Record<string, string>> {
+  if (!instanceDir) {
+    r.note("secrets policy: no instance directory — the containers get no grant policy, and a {{ secret.x }} provider key is refused");
+    return {};
+  }
+  const dir = secretsMirrorDir(instanceDir);
+  if (r.action(`mirror ${instanceFile(instanceDir, "secrets")} → ${dir}/secrets.yaml`)) {
+    await mkdir(dir, { recursive: true });
+    const outcome = await mirrorSecretsPolicy(instanceDir);
+    r.note(`secrets policy: ${dir} mounted read-only at ${COMPOSE_POLICY_TARGET_DIR} in console and assistant (${outcome === "absent" ? "no secrets.yaml yet — every provider key refused until one grants it" : `mirror ${outcome}`}; the reconciler keeps it current, so a revoke reaches the containers within a second)`);
+  }
+  return { [COMPOSE_SECRETS_SOURCE_VAR]: dir };
 }
 
 export async function composeUp(r: StepRunner, productDir: string, source: LockSource, version?: string | undefined, envFile?: string | undefined, instanceDir?: string | undefined): Promise<void> {
   const base = ["compose", ...composeEnvArgs(productDir, envFile)];
-  const secrets = composeSecretsEnv(instanceDir);
-  r.note(secrets.note);
+  const secrets = { env: await prepareComposePolicy(r, instanceDir) };
   if (source === "release") {
     // the released, versioned images — docker-compose.yml reads
     // METISTRY_<SERVICE>_IMAGE and falls back to the dev tags a checkout builds

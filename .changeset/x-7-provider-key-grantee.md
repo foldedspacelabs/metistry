@@ -4,6 +4,7 @@
 "@metistry-apps/assistant": minor
 "@metistry-apps/console": patch
 "@metistry-apps/collectors": patch
+"@metistry-apps/reconciler": patch
 ---
 
 Ruling 2 (X-7): a provider key has a grantee, and every compute call goes
@@ -21,8 +22,10 @@ through the egress door.
   `env`/`secretsPolicy` instead of `apiKey`.
 - The engine's sandbox now reads `secrets.yaml` by name (`CONFIG_SECRETS`),
   per call, so a revoked grant stops the next request. Under compose,
-  `docker-compose.yml` bind-mounts the instance's `.metistry/secrets.yaml`
-  read-only into the console and assistant (`METISTRY_SECRETS_FILE`); core's
+  `docker-compose.yml` bind-mounts the policy mirror directory
+  (`.metistry/state/policy/`, a copy of `secrets.yaml` the reconciler keeps
+  current every second) read-only into the console and assistant, so a
+  revoke reaches a running container on its next call; core's
   `secretsPolicyFromEnv` resolves the file for both shapes.
 - `metistry compute providers add|set` write `provider:<name>: on` for the
   key; `metistry update` and `metistry secrets migrate-scope` backfill it,

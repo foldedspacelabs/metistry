@@ -680,7 +680,7 @@ describe("**a provider key without its grant is refused before dialling** (the e
 
   it("the compose shape: the mounted file (METISTRY_SECRETS_FILE) is read per call; mounted nothing is refused naming the mount", async () => {
     const dir = await mkdtemp(join(tmpdir(), "metistry-x7-compose-"));
-    const mounted = join(dir, "secrets.yaml"); // stands in for /run/metistry/secrets.yaml
+    const mounted = join(dir, "secrets.yaml"); // stands in for /run/metistry/policy/secrets.yaml
     await writeFile(mounted, "secrets:\n  openrouter_api_key:\n    hosts: [openrouter.ai]\n    grants:\n      provider:openrouter: on\n");
     const s = server([{ body: chat("via the mount") }]);
     // a host path in METISTRY_INSTANCE_DIR (compose passes the host's through) is ignored: the mount wins
@@ -691,7 +691,7 @@ describe("**a provider key without its grant is refused before dialling** (the e
     const refused = (await engineOn(named, none, host({}), { env: { ...env, METISTRY_SECRETS_FILE: "", METISTRY_INSTANCE_DIR: "/Users/someone/instance" } })("hi", turn).catch((e) => e)) as EgressRefused;
     expect(refused.code).toBe("not_granted");
     expect(refused.message).toContain("no secrets.yaml is mounted into this container");
-    expect(refused.message).toContain("/run/metistry/secrets.yaml");
+    expect(refused.message).toContain("/run/metistry/policy");
     expect(refused.message).toContain("metistry up");
     expect(none.requests).toEqual([]);
   });

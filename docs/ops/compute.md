@@ -267,17 +267,26 @@ for its provider — idempotently, leaving a grant you wrote alone — so no
 install loses compute on the update that brings the refusal.
 
 **Under compose** the containers mount no instance directory (D5), so
-`docker-compose.yml` bind-mounts exactly one instance file into the
-`console` and `assistant` containers: `.metistry/secrets.yaml`, **read-only**,
-at `/run/metistry/secrets.yaml`, named by `METISTRY_SECRETS_FILE` (the
-owner's ruling of 2026-09-30). It holds names and policy, never a value — the
-same file the launchd sandbox grants as `CONFIG_SECRETS`. `metistry up` and
-`metistry update` mount it when it exists; with no file, nothing is mounted
-and every `{{ secret.x }}` provider key is refused, the message naming the
-mount (`metistry secrets set <name>` creates the file, then `metistry up`).
-One difference from launchd: a single-file bind follows the file's inode and
-the reconciler writes by rename, so a grant change reaches the containers on
-`metistry restart console assistant` rather than on the next call. The install's
+`docker-compose.yml` bind-mounts exactly one instance path into the
+`console` and `assistant` containers, **read-only**: the policy mirror
+directory `.metistry/state/policy/` at `/run/metistry/policy`, with
+`METISTRY_SECRETS_FILE=/run/metistry/policy/secrets.yaml` (the owner's
+rulings of 2026-09-30). The directory holds nothing but a byte-for-byte copy
+of `secrets.yaml` — names and policy, never a value. **A directory, not the
+file**: a single-file bind pins the inode it was given, and every writer of
+`secrets.yaml` (the reconciler, git, an editor) replaces it by rename, so a
+file mount would keep a revoked grant alive until a restart. A directory
+bind resolves the entry by name, so the replaced mirror is what the next call
+reads. `.metistry/` itself is never mounted — it holds `state/.env`.
+
+The reconciler refreshes the mirror every second and at start (core's
+`mirrorSecretsPolicy`), so a change by any writer — a `metistry secrets`
+verb, a hand edit, a pull — reaches a running container within about a
+second; a deleted `secrets.yaml` removes the mirror, never leaving a grant
+behind. `metistry up` / `update` create the directory and mirror once before
+compose starts. Unmounted (compose run by hand without
+`METISTRY_SECRETS_POLICY_DIR`), `METISTRY_SECRETS_FILE` is empty and every
+`{{ secret.x }}` provider key is refused, the message naming the mount. The install's
 egress proxy still refuses any host `compute.yaml` does not name: two walls,
 the door in the process and the proxy outside it.
 

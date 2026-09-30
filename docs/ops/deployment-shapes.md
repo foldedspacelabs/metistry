@@ -957,13 +957,17 @@ that file and nothing more of the instance:
 | shape | how the process reads `secrets.yaml` |
 |---|---|
 | `launchd` | the engine's sandbox profile grants the instance's `.metistry/secrets.yaml` by name (`CONFIG_SECRETS`, a fifth literal beside the four config files); the console is unconfined and reads it under `METISTRY_INSTANCE_DIR` |
-| `compose` | `docker-compose.yml` bind-mounts the instance's `.metistry/secrets.yaml` **read-only** at `/run/metistry/secrets.yaml` in the `console` and `assistant` containers and sets `METISTRY_SECRETS_FILE` to it (the owner's ruling of 2026-09-30). `metistry up` passes the host path as `METISTRY_SECRETS_YAML` only when the file exists; otherwise `/dev/null` is mounted, `METISTRY_SECRETS_FILE` is empty, and every `{{ secret.x }}` provider key is refused with a message naming the mount. The bind never creates a host path (`create_host_path: false`), and no other instance file is mounted (D5). |
+| `compose` | `docker-compose.yml` bind-mounts the policy mirror DIRECTORY `.metistry/state/policy/` **read-only** at `/run/metistry/policy` in the `console` and `assistant` containers, with `METISTRY_SECRETS_FILE=/run/metistry/policy/secrets.yaml` (the owner's rulings of 2026-09-30). It holds only a copy of `secrets.yaml`, which the reconciler refreshes every second (and removes when the policy is deleted). `metistry up` creates it, mirrors once, and passes it as `METISTRY_SECRETS_POLICY_DIR`; unset, the product's `seed/` is mounted in its place, `METISTRY_SECRETS_FILE` is empty, and every `{{ secret.x }}` provider key is refused naming the mount. The bind never creates a host path (`create_host_path: false`); `.metistry/` itself, with `state/.env`, is never mounted (D5). |
 
-A single-file bind follows the file's inode, and the reconciler writes by
-rename — so under compose a grant change reaches the containers when they
-restart (`metistry restart console assistant`), not on the next call as it
-does under launchd. The proxy above still refuses any host `compute.yaml`
-does not name.
+Why a directory: a single-file bind pins the inode it was given, and every
+writer of `secrets.yaml` replaces it by rename, so a file mount would keep a
+revoked grant until the container restarted. A directory bind resolves the
+entry by name, so a revoke reaches a running container on its next call
+(within the mirror's one-second refresh) — the same as under launchd.
+`packages/core/test/compute-egress.test.ts` holds the difference: a hardlink
+(the pinned-inode view) keeps the old grant after a rename-replaced revoke,
+the directory view does not. The proxy above still refuses any host
+`compute.yaml` does not name.
 
 ## Secrets in plists
 

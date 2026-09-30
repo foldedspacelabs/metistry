@@ -8,7 +8,8 @@
 // Bold (the ticket's own): **a provider key without its grant is refused
 // before dialling** and **a compute call to a host outside the provider's is
 // refused by the guard**.
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { link, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -26,6 +27,8 @@ import {
   readSecretsPolicy,
   redactedSecret,
   secretsPolicyFromEnv,
+  mirrorSecretsPolicy,
+  secretsMirrorDir,
   resolveOnMachineCall,
   type Provider,
   type SecretsPolicyRead,
@@ -326,9 +329,82 @@ describe("secretsPolicyFromEnv: where a process reads the grant", () => {
     // set but empty: compose mounted nothing — never falls through to a host path it cannot see
     const unmounted = await secretsPolicyFromEnv({ METISTRY_SECRETS_FILE: "", METISTRY_INSTANCE_DIR: dir })();
     expect(unmounted.ok).toBe(false);
-    if (!unmounted.ok) expect(unmounted.why).toMatch(/no secrets\.yaml is mounted into this container .*METISTRY_SECRETS_YAML.*\/run\/metistry\/secrets\.yaml/);
+    if (!unmounted.ok) expect(unmounted.why).toMatch(/no secrets\.yaml is mounted into this container .*METISTRY_SECRETS_POLICY_DIR.*\/run\/metistry\/policy/);
 
     const nothing = await secretsPolicyFromEnv({})();
     expect(nothing.ok).toBe(false);
+  });
+});
+
+// ---- the compose policy mirror: a revoke must reach a running container ----------------
+//
+// A single-file bind mount pins the inode it was given; a directory bind
+// resolves the entry by name. A HARDLINK to the mirror behaves as the
+// single-file bind would (same inode, never re-resolved); a read by the
+// mirror's path behaves as the directory bind does. The revoke below is
+// written the way every real writer writes — tmp + rename — and only the
+// directory view sees it. That is why compose mounts `.metistry/state/policy/`
+// and not a file.
+
+describe("mirrorSecretsPolicy — the directory compose mounts", () => {
+  const GRANT_ON = "secrets:\n  openrouter_api_key:\n    hosts: [openrouter.ai]\n    grants:\n      provider:openrouter: on\n";
+  const GRANT_OFF = "secrets:\n  openrouter_api_key:\n    hosts: [openrouter.ai]\n    grants:\n      provider:openrouter: off\n";
+
+  async function instance(): Promise<string> {
+    const dir = await mkdtemp(join(tmpdir(), "metistry-x7-mirror-"));
+    await mkdir(join(dir, ".metistry", "state"), { recursive: true });
+    await writeFile(join(dir, ".metistry", "identity.yaml"), "name: Aide\n");
+    return dir;
+  }
+
+  it("a revoke replaces the mirror by rename: the directory view sees it on the next read; a pinned inode (what a single-file bind is) never does", async () => {
+    const dir = await instance();
+    const canonical = join(dir, ".metistry", "secrets.yaml");
+    await writeFile(canonical, GRANT_ON);
+    expect(await mirrorSecretsPolicy(dir)).toBe("written");
+    const mirrored = join(secretsMirrorDir(dir), "secrets.yaml");
+    expect(secretsMirrorDir(dir)).toBe(join(dir, ".metistry", "state", "policy"));
+
+    const pinned = join(dir, "pinned-inode.yaml");
+    await link(mirrored, pinned); // the single-file bind's view: this inode, forever
+
+    // the owner revokes — by rename, as the reconciler, git and editors all write
+    await writeFile(`${canonical}.tmp`, GRANT_OFF);
+    const { rename } = await import("node:fs/promises");
+    await rename(`${canonical}.tmp`, canonical);
+    expect(await mirrorSecretsPolicy(dir)).toBe("written");
+
+    const byDirectory = await readSecretsPolicy(mirrored);
+    expect(byDirectory.ok && byDirectory.file.secrets.openrouter_api_key!.grants["provider:openrouter"]).toBe("off");
+    const byPinnedInode = await readSecretsPolicy(pinned);
+    expect(byPinnedInode.ok && byPinnedInode.file.secrets.openrouter_api_key!.grants["provider:openrouter"]).toBe("on"); // the stale grant a file mount would keep
+
+    // and the door, reading the directory view, refuses the next call
+    const net: string[] = [];
+    const d = computeFetch({ providerName: "openrouter", provider: OPENROUTER, env: ENV, policy: () => readSecretsPolicy(mirrored) }, (async (u: string) => (net.push(u), new Response("{}"))) as typeof fetch);
+    expect((await refusal(d("https://openrouter.ai/api/v1/chat/completions", post()))).code).toBe("not_granted");
+    expect(net).toEqual([]);
+  });
+
+  it("unchanged is not rewritten; a deleted policy removes the mirror (never a lingering grant); an invalid one is mirrored and refused by the reader", async () => {
+    const dir = await instance();
+    const canonical = join(dir, ".metistry", "secrets.yaml");
+    const mirrored = join(secretsMirrorDir(dir), "secrets.yaml");
+    expect(await mirrorSecretsPolicy(dir)).toBe("absent");
+    await writeFile(canonical, GRANT_ON);
+    expect(await mirrorSecretsPolicy(dir)).toBe("written");
+    expect(await mirrorSecretsPolicy(dir)).toBe("unchanged");
+    expect(await readFile(mirrored, "utf8")).toBe(GRANT_ON);
+
+    await writeFile(canonical, "secrets: [not, a, map]\n");
+    expect(await mirrorSecretsPolicy(dir)).toBe("written");
+    expect((await readSecretsPolicy(mirrored)).ok).toBe(false);
+
+    await rm(canonical);
+    expect(await mirrorSecretsPolicy(dir)).toBe("removed");
+    expect(existsSync(mirrored)).toBe(false);
+    // the directory holds nothing but the mirror (no tmp left behind)
+    const { readdir } = await import("node:fs/promises");
+    expect(await readdir(secretsMirrorDir(dir))).toEqual([]);
   });
 });

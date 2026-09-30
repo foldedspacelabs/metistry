@@ -40,13 +40,14 @@
 // host hands in (`packages/cli/src/keychain.ts` drives `security`; tests use
 // `memoryKeychain()` and never the real login Keychain).
 
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { z } from "zod";
 import { parseDocument } from "yaml";
 import { TOOL_MODES, type ToolMode } from "./connections.js";
 import { parseEgressEntry } from "./egress.js";
 import { AGENT_NAME_RE, INSTANCE_ID_RE } from "./instances.js";
-import { instanceFile } from "./instance-layout.js";
+import { instanceFile, instanceStatePath } from "./instance-layout.js";
 import { PROVIDER_NAME_RE } from "./model-ref.js";
 import { INSTANCE_SECRET_NAME_RE, SECRET_DELIVERY_PREFIX, SECRET_REF_EXACT_RE, SECRET_REF_RE, parseSecretReference, secretDeliveryVar, type SecretReference } from "./secret-ref.js";
 
@@ -249,10 +250,74 @@ export async function readSecretsPolicy(path: string, readFileFn: (p: string) =>
  * compose saying "nothing was mounted" (`METISTRY_SECRETS_YAML` unset).
  */
 export const SECRETS_FILE_VAR = "METISTRY_SECRETS_FILE";
-/** Where docker-compose.yml mounts the instance's `secrets.yaml`, read-only, in the assistant and console containers. */
-export const COMPOSE_SECRETS_TARGET = "/run/metistry/secrets.yaml";
-/** The host-side compose variable naming the file to mount — `metistry up` sets it to the instance's `.metistry/secrets.yaml` when that exists. */
-export const COMPOSE_SECRETS_SOURCE_VAR = "METISTRY_SECRETS_YAML";
+/** Where docker-compose.yml mounts the policy DIRECTORY, read-only, in the assistant and console containers. */
+export const COMPOSE_POLICY_TARGET_DIR = "/run/metistry/policy";
+/** …and so where the mirrored `secrets.yaml` is read from inside them. */
+export const COMPOSE_SECRETS_TARGET = `${COMPOSE_POLICY_TARGET_DIR}/secrets.yaml`;
+/** The host-side compose variable naming the directory to mount — `metistry up` sets it to the instance's `secretsMirrorDir`. */
+export const COMPOSE_SECRETS_SOURCE_VAR = "METISTRY_SECRETS_POLICY_DIR";
+
+// ---- the policy mirror: what a container can see, and see CHANGE ---------------------
+//
+// A single-file bind mount pins the inode it was given, and every writer of
+// `secrets.yaml` (the reconciler, git, an editor) replaces the file by
+// rename — so a container mounting the file itself would keep reading the
+// grant it started with, and a REVOKE would not reach it until a restart.
+// That is not enforcement at the tool. A DIRECTORY bind sees a
+// rename-replaced entry, but the directory holding `secrets.yaml` is
+// `.metistry/`, which also holds `state/.env` with values — never mounted.
+//
+// So the policy is mirrored into a directory that holds nothing else,
+// `<instance>/.metistry/state/policy/`, and THAT directory is mounted. The
+// mirror is derived state (gitignored, like all of `state/`): the reconciler
+// refreshes it every `SECRETS_MIRROR_INTERVAL_MS` and at start, so a CLI
+// verb, a hand edit and a pull all reach it; `metistry up` writes it before
+// compose starts. A missing canonical file removes the mirror — a deleted
+// policy must never linger as a grant.
+
+/** The directory the mirror lives in (and compose mounts): `<instance>/.metistry/state/policy`. Nothing else is ever written here. */
+export function secretsMirrorDir(instanceDir: string): string {
+  return instanceStatePath(instanceDir, "policy");
+}
+
+/** How often the reconciler refreshes the mirror: the most a hand-edited revoke waits to reach a compose container. */
+export const SECRETS_MIRROR_INTERVAL_MS = 1000; // limit: fixed — a revoke's worst-case latency under compose; a read of one small file, and a knob here would only widen the window
+
+export type MirrorOutcome = "written" | "unchanged" | "removed" | "absent";
+
+/**
+ * Bring `<instance>/.metistry/state/policy/secrets.yaml` in line with the
+ * instance's `secrets.yaml`, byte for byte: written by tmp + rename in the
+ * same directory (so a reader never sees half a file, and a directory mount
+ * sees the new entry), removed when the canonical file is gone. The bytes
+ * are copied as they are — a file that does not validate is mirrored, and
+ * the reader refuses on it, rather than the mirror keeping an older grant.
+ */
+export async function mirrorSecretsPolicy(instanceDir: string): Promise<MirrorOutcome> {
+  const src = instanceFile(instanceDir, "secrets");
+  const dir = secretsMirrorDir(instanceDir);
+  const dst = join(dir, "secrets.yaml");
+  const read = async (p: string): Promise<string | undefined> => {
+    try {
+      return await readFile(p, "utf8");
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+      throw e;
+    }
+  };
+  const [want, have] = await Promise.all([read(src), read(dst)]);
+  if (want === undefined) {
+    if (have === undefined) return "absent";
+    await rm(dst, { force: true });
+    return "removed";
+  }
+  if (want === have) return "unchanged";
+  await mkdir(dirname(dst), { recursive: true });
+  const tmp = join(dir, `.secrets.yaml.${process.pid}.tmp`);
+  await writeFile(tmp, want, { mode: 0o600 });
+  await rename(tmp, dst);
+  return "written";
+}
 
 /**
  * Where a process reads `secrets.yaml` for a grant, from its environment —
@@ -276,7 +341,7 @@ export function secretsPolicyFromEnv(env: NodeJS.ProcessEnv): () => Promise<Secr
   if (explicit !== undefined) {
     const why =
       `no secrets.yaml is mounted into this container (${SECRETS_FILE_VAR} is empty because ${COMPOSE_SECRETS_SOURCE_VAR} was unset when compose created it) — ` +
-      `docker-compose.yml mounts the instance's .metistry/secrets.yaml read-only at ${COMPOSE_SECRETS_TARGET} when it exists: \`metistry secrets set <name>\` creates it, then \`metistry up\` recreates the containers with the mount`;
+      `docker-compose.yml mounts the instance's policy mirror (.metistry/state/policy/, which holds only a copy of secrets.yaml) read-only at ${COMPOSE_POLICY_TARGET_DIR}: \`metistry up\` sets ${COMPOSE_SECRETS_SOURCE_VAR} and recreates the containers with the mount`;
     return async () => ({ ok: false, why });
   }
   const dir = env.METISTRY_INSTANCE_DIR?.trim();

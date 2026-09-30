@@ -61,6 +61,7 @@ const REQUIRED = [
   "knowledge_areas", // GET /api/knowledge/areas — the area rollup the Knowledge screen lists
   "secret_last_used", // GET /api/secrets — *last used*, from the names the egress fill stamps on its run (never a value)
   "day_close", // POST /api/today/close — what the day did to the owner's tasks, the section Close the Day writes
+  "recording_state", // GET /api/recordings/:id — a recording's retention state, the dates computed in the query (T8-4)
 ];
 
 // The daily flow's five (docs/product/daily-flow-spec.md §11, P1-5). Listed
@@ -189,6 +190,9 @@ describe("seed queries", () => {
     // `tracker_closed` (T4-26) says which of the owner's tracker issues the
     // source closed — Today's *Done in Linear*, for Today to read, never a
     // way for an agent to probe which refs exist.
+    // `recording_state` (T8-4) is a recording's retention state — when the
+    // owner recorded a meeting, which apps it heard, where its transcript
+    // is: `GET /api/recordings/:id`'s alone, never an agent's.
     expect(routeBacked.sort()).toEqual([
       "board",
       "calendar_event",
@@ -205,6 +209,7 @@ describe("seed queries", () => {
       "pending_count",
       "pending_requests",
       "people_by_email",
+      "recording_state",
       "route_features",
       "routine_history",
       "secret_last_used",

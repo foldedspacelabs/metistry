@@ -92,6 +92,7 @@ describe.skipIf(!hasDb)("agent connections as targets (T4-11)", () => {
   const passkeyIds: string[] = [];
   const sent: Sent[] = [];
   let secretsYaml: string;
+  let targets: TargetRegistry;
 
   const writeSecrets = (text: string) => writeFile(join(dir, ".metistry/secrets.yaml"), text);
 
@@ -117,7 +118,7 @@ describe.skipIf(!hasDb)("agent connections as targets (T4-11)", () => {
     await writeSecrets(secretsYaml);
 
     const env = { METISTRY_SECRET_DEVIN_API_KEY: DEVIN_KEY, METISTRY_SECRET_GITHUB_WRITE_TOKEN: GH_KEY };
-    const targets = new TargetRegistry({ env: {}, fetchFn: fakeServices(sent) });
+    targets = new TargetRegistry({ env: {}, fetchFn: fakeServices(sent) });
     await targets.loadDir(`${root}targets`); // the product's targets/ still load beside the connections
     targets.bindConnections({ catalog: () => loadInstanceCatalog({ instanceDir: dir, seedDir: `${root}seed` }), secrets: envSecretSource(env) });
     server = makeServer(pool, new QueryStore(pool), {
@@ -283,6 +284,15 @@ describe.skipIf(!hasDb)("agent connections as targets (T4-11)", () => {
     } finally {
       await writeSecrets(secretsYaml);
     }
+  });
+
+  it("a dispatch in flight keeps its connection's door when a listing refreshes the registry under it", async () => {
+    await targets.refresh();
+    const m = targets.get("devin")!;
+    await targets.refresh(); // a GET /api/targets between the lookup and the send
+    expect(targets.get("devin")).not.toBe(m);
+    await targets.submitDevin(m, { brief: "b", title: "t", taskId: 1, purpose: "work" });
+    expect(posts().at(-1)).toMatchObject({ url: "https://api.devin.ai/v3/organizations/org-abc/sessions", authorization: `Bearer ${DEVIN_KEY}` });
   });
 
   it("an agent connection whose file is wrong is unavailable, naming why — never quietly a target of another shape", async () => {

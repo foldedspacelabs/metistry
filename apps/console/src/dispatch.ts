@@ -236,6 +236,13 @@ export class TargetRegistry {
   private bound = new Map<string, { manifest: TargetManifest; agent: AgentHttp }>();
   /** agent connections that could not be presented, with why */
   private unbound = new Map<string, { status: "absent" | "failed"; why: string }>();
+  /**
+   * Every connection-backed manifest this registry has presented, to its
+   * door — by the manifest object, not its name, so a dispatch in flight
+   * keeps the door it started with when a refresh replaces the listing, and
+   * a connection's manifest can never fall through to the `env:` path.
+   */
+  private readonly doors = new WeakMap<TargetManifest, AgentHttp>();
   private readonly env: NodeJS.ProcessEnv;
   private readonly fetchFn: typeof fetch;
   private connections: AgentConnectionSource | undefined;
@@ -327,6 +334,7 @@ export class TargetRegistry {
         continue;
       }
       bound.set(e.name, { manifest, agent: opened.agent });
+      this.doors.set(manifest, opened.agent);
     }
     this.bound = bound;
     this.unbound = unbound;
@@ -340,9 +348,9 @@ export class TargetRegistry {
     return this.bound.get(name)?.manifest ?? this.targets.get(name);
   }
 
-  /** The agent connection `name` is, when it is one (after the last refresh). */
-  connectionOf(name: string): AgentHttp | undefined {
-    return this.bound.get(name)?.agent;
+  /** The agent connection a target is, when it is one — by the manifest `get()` returned. */
+  connectionOf(m: TargetManifest): AgentHttp | undefined {
+    return this.doors.get(m);
   }
 
   /** Why the agent connection `name` cannot be dispatched to, when it is one that cannot (after the last refresh). */
@@ -364,8 +372,8 @@ export class TargetRegistry {
    * overlay of it); anything else takes none, and records `work`.
    */
   async purposesOf(m: TargetManifest): Promise<PurposeSet> {
-    const bound = this.bound.get(m.name);
-    if (bound && bound.manifest === m) return bound.agent.dispatch;
+    const agent = this.doors.get(m);
+    if (agent) return agent.dispatch;
     if (!TargetRegistry.isDevin(m)) return { purposes: {} };
     const types = await this.typesInForce();
     const devin = types.find((t) => t.name === "devin" && t.dispatch?.dispatcher === DEVIN_SUBMIT_KIND) ?? types.find((t) => t.dispatch?.dispatcher === DEVIN_SUBMIT_KIND);
@@ -382,8 +390,8 @@ export class TargetRegistry {
 
   /** Resolved github config, or the reason it is unavailable. */
   private github(m: TargetManifest): { ok: true; access: Access; repo: string } | { ok: false; remediation: string } {
-    const bound = this.bound.get(m.name);
-    if (bound && bound.manifest === m) return { ok: true, access: { fetch: bound.agent.fetch, authorization: bound.agent.headers.authorization ?? "", agent: bound.agent }, repo: String(m.submit.repo) };
+    const agent = this.doors.get(m);
+    if (agent) return { ok: true, access: { fetch: agent.fetch, authorization: agent.headers.authorization ?? "", agent }, repo: String(m.submit.repo) };
     const token = resolveRef(m.auth, this.env);
     const repo = resolveRef(m.submit.repo, this.env);
     if (!token) {
@@ -411,9 +419,9 @@ export class TargetRegistry {
    * charged to is not something to infer.
    */
   private devin(m: TargetManifest): { ok: true; access: Access; org: string; base: string } | { ok: false; remediation: string } {
-    const bound = this.bound.get(m.name);
-    if (bound && bound.manifest === m) {
-      return { ok: true, access: { fetch: bound.agent.fetch, authorization: bound.agent.headers.authorization ?? "", agent: bound.agent }, org: String(m.submit.org), base: String(m.submit.url) };
+    const agent = this.doors.get(m);
+    if (agent) {
+      return { ok: true, access: { fetch: agent.fetch, authorization: agent.headers.authorization ?? "", agent }, org: String(m.submit.org), base: String(m.submit.url) };
     }
     const token = resolveRef(m.auth, this.env);
     const org = resolveRef(m.submit.org, this.env);
@@ -663,7 +671,7 @@ export async function dispatch(
   }
   const target = registry.get(targetName);
   if (!target) return { ok: false, code: "not_found", message: "unknown target" };
-  const agent = registry.connectionOf(target.name);
+  const agent = registry.connectionOf(target);
   if (!Number.isInteger(taskId) || taskId <= 0) return { ok: false, code: "not_found", message: "no such task" };
 
   const { rows } = await db.query(`SELECT id, title, status, external_ref FROM work WHERE id = $1`, [taskId]);

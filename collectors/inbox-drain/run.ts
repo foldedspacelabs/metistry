@@ -199,7 +199,7 @@ export function crashReport(row: InboxRow, c: Classification): MirrorRaise | und
     source: { kind: RECORDING_CRASH_SOURCE, external_ref: `crash:${session}` },
     payload: {
       title: "A recording stopped unexpectedly",
-      body: `The recorder stopped${upTo} without being told to. Everything it heard up to then was saved: the transcript is in your inbox (${row.path}). To keep recording, Record again from the capture bar.`,
+      body: `The recorder stopped${upTo} without being told to. Everything it heard up to then was saved: the transcript is saved at ${row.path}. To keep recording, Record again from the capture bar.`,
       event: "recording_crashed",
       capture_session: session,
       inbox_id: Number(row.id),

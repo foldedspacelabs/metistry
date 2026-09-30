@@ -41,7 +41,26 @@ transcribe it on the Mac as it records.
   `Idempotency-Key: live-capture:<session>`, so a retry lands once. A
   session stays owed until the console has answered with a row; a console
   that is down or refuses the credential leaves it on this Mac, and the
-  next pass (every minute) tries again.
+  next pass (every minute) tries again. A Metistry console files it at
+  `Journal/Transcripts/<date>-<session>.md` in the owner's name.
+- **Retention you can read.** The audio (and a *Window* / *Screen*
+  session's frames) stays under the session's directory until the
+  transcript is ingested (the meeting's proposals decided, or the fold has
+  read it) plus 7 days, and never more than 30 days after the recording
+  ended; this Mac's transcript copy goes at 30 days once it was delivered.
+  The helper applies that rule itself, every hour — the 30-day ceiling
+  needs no console. The console's `recording-retention` routine reports
+  ingestion (`POST /recording/retention`), which can only bring a deletion
+  forward. Purge Now (`POST /recording/purge`, the control credential)
+  deletes a session's media at once. `session.json` stays, saying when and
+  why.
+- **Re-review — "check the audio again".** `recording_review` re-transcribes
+  a span of the kept audio (at most 15 minutes) with the transcriber's most
+  careful setting and answers **text with timestamps, never audio**: the
+  answer is rebuilt field by field, so nothing but a source, two times and a
+  line of text per line leaves the bridge. After the audio is deleted it
+  says when, and that the transcript remains. It is the assistant's alone:
+  core's `CREW_NEVER_TOOLS` names it.
 
 Requires macOS 14.2 or later for app audio, macOS 14 for *Window* and
 *Screen*, and macOS 26 for transcription. It needs three permissions:
@@ -52,14 +71,14 @@ Microphone, Audio Capture (*Audio only*) and Screen Recording (*Window* and
 
 | credential | reaches |
 | --- | --- |
-| `METISTRY_BRIDGE_TOKEN_LIVE_CAPTURE` | `GET /check` and `GET /status`, both reads. These are the manifest's `exposes:` — what a tool caller may invoke |
-| `METISTRY_LIVE_CAPTURE_CONTROL_TOKEN` | those two, plus `POST /recording/start` (every mode — *Audio only*, *Window*, *Screen*), `/recording/stop` and `/recording/keep-going`. This is the person at the Mac, pressing Record |
+| `METISTRY_BRIDGE_TOKEN_LIVE_CAPTURE` | `GET /check`, `GET /status` and `GET /recording/review` (`recording_review`), all reads — the manifest's `exposes:`, what a tool caller may invoke — and `POST /recording/retention`, which is not a tool: the console's retention routine reporting ingestion |
+| `METISTRY_LIVE_CAPTURE_CONTROL_TOKEN` | all of those, plus `POST /recording/start` (every mode — *Audio only*, *Window*, *Screen*), `/recording/stop`, `/recording/keep-going` and `/recording/purge`. This is the person at the Mac, pressing Record or Purge Now |
 | `METISTRY_LIVE_CAPTURE_INBOX_TOKEN` | nothing here — the bridge refuses it like a stranger's. It is the capture owner token the bridge **presents** to the console's `POST /capture` when a session ends (capture and messages only; `docs/ops/capture-shortcut.md` §1 mints one) |
 
-The bridge token is refused `403` on every recording route, before the
-helper is asked anything. A model with this bridge's tools can see whether
-something is being recorded, and can never start a recording or cause a
-delivery. The bridge will not start if any two of the three are the same.
+The bridge token is refused `403` on every route that is the owner's hand,
+before the helper is asked anything. A model with this bridge's tools can
+see whether something is being recorded and re-read what was said, and can
+never start a recording, delete audio or cause a delivery. The bridge will not start if any two of the three are the same.
 
 ## Standalone
 
@@ -106,6 +125,22 @@ curl -sS -X POST http://127.0.0.1:7815/recording/start \
   -d '{"mode":"window","app_audio":true,"microphone":true}'
 ```
 
+Re-review a span of a kept recording (the bridge token — `recording_review`):
+
+```sh
+curl -sS "http://127.0.0.1:7815/recording/review?session_id=20260928-133000-00ab&from_s=160&to_s=170" \
+  -H "authorization: Bearer $METISTRY_BRIDGE_TOKEN_LIVE_CAPTURE"
+```
+
+```json
+{"session_id":"20260928-133000-00ab","from_s":160,"to_s":170,"audio":"kept",
+ "lines":[{"source":"app","speaker":"apps","from_s":160.5,"to_s":162,"at":"00:02:40","text":"the numbers are in"}],
+ "text":"[00:02:40] (apps) the numbers are in","as_of":"…"}
+```
+
+Once the media is gone: `"audio":"deleted"`, no lines, and
+`"note":"Audio deleted on 2026-10-05 after the fold; the transcript remains."`.
+
 | start body | |
 | --- | --- |
 | `mode` | `audio_only` (the default), `window` or `screen` |
@@ -137,7 +172,7 @@ and a tap without it records silence.
 | `METISTRY_LC_HELPER_TIMEOUT_MS` | `150000` | a start can wait on the transcriber's first set-up and the microphone prompt |
 | `METISTRY_LIVE_CAPTURE_INBOX_TOKEN` | — | the capture owner token transcripts are posted with; unset, they stay on this Mac and `check` is `degraded` |
 | `METISTRY_LC_CONSOLE_URL` | `METISTRY_CONSOLE_URL`, else `http://127.0.0.1:$METISTRY_CONSOLE_PORT` (8080) | where `POST /capture` is |
-| `METISTRY_CAPTURE_DIR` (helper) | `<METISTRY_INSTANCE_DIR>/.metistry/state/capture` | where sessions are written: `<session>/session.json`, `transcript.jsonl`, `app.m4a`, `mic.m4a`, `screen.mp4` (after a sleep, `app-2.m4a`… beside the first); the helper refuses to start with neither set |
+| `METISTRY_CAPTURE_DIR` (helper) | `<METISTRY_INSTANCE_DIR>/.metistry/state/capture` | where sessions are written: `<session>/session.json`, `transcript.jsonl`, `app.m4a`, `mic.m4a`, `screen.mp4` (after a sleep, `app-2.m4a`… beside the first — each file's place in the session is read from when it was created, which `recording_review` uses); the helper refuses to start with neither set |
 | `METISTRY_LC_LOCALE` (helper) | the Mac's | the transcriber's language |
 
 ## Tests

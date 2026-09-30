@@ -282,6 +282,8 @@ describe("the caller's credential, and what the wire says about a failure", () =
     for (const [code, want] of [
       ["secret", "not_available"],
       ["caller_credential", "invalid_request"],
+      ["secret_reference", "invalid_request"],
+      ["sign_in", "not_available"],
       ["tool_off", "not_found"],
       ["needs_approval", "forbidden"],
       ["unknown_connection", "not_found"],

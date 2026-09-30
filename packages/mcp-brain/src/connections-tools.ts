@@ -232,6 +232,8 @@ function fromProxyError(connection: string, tool: string | undefined, err: unkno
         return fail("forbidden", `${tool ?? ""} on ${connection} is set to Ask First — it runs only when the owner approves it in Needs You`, meta);
       case "caller_credential":
         return fail("invalid_request", "the arguments carry your own credential — it is never sent upstream; remove it and call again", meta);
+      case "secret_reference":
+        return fail("invalid_request", "the arguments carry a {{ secret.… }} reference — a caller never names a secret, and nothing was sent; remove it and call again", meta);
       default:
         return fail("not_available", `${connection} cannot be reached right now (${err.code}) — the owner sees why in Connections`, meta);
     }

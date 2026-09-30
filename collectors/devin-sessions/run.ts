@@ -1,4 +1,5 @@
-// devin-sessions: the RETURN path of `targets/devin-sessions` (W6 of
+// devin-sessions: the RETURN path of a Devin dispatch — the `devin` agent
+// connection's (T4-11), and `targets/devin-sessions`' for one release (W6 of
 // docs/plan-refresh-2026-09-13.md §4b). The console dispatches a work row by
 // creating a Devin session and binding `external_ref = devin:<session_id>`;
 // this collector polls those rows and, when a session is done, files the
@@ -34,7 +35,7 @@
 
 import { runCheck, type CheckResult } from "@foldedspacelabs/metistry-core";
 import { submitReport } from "@foldedspacelabs/metistry-mcp-brain";
-import { DEVIN_API, RateLimited, type DevinCtx } from "../devin-knowledge/run.js";
+import { RateLimited, devinAccess, type DevinAccess, type DevinCtx } from "../devin-knowledge/run.js";
 
 export interface Db {
   query(text: string, values?: unknown[]): Promise<{ rows: any[] }>;
@@ -198,14 +199,15 @@ export function provenanceBlock(p: Provenance, confidence?: string | undefined):
  */
 export async function check(ctx: DevinSessionsCtx = {}): Promise<CheckResult> {
   return runCheck(COMPONENT, "count work rows with an open devin: external_ref (the poll surface)", async () => {
-    if (!ctx.devinApiKey) {
+    const access = await devinAccess(ctx, COMPONENT);
+    if (!access) {
       return {
         status: "absent" as const,
         remediation:
-          "METISTRY_DEVIN_API_KEY is unset — the same key collectors/devin-knowledge uses. Nothing can be dispatched to targets/devin-sessions without it, so there is nothing to poll; add it to <instance>/state/.env and run `metistry secrets sync --to keychain`",
+          "no Devin connection — the one devin-knowledge reads, and the one a task is dispatched to. Nothing can be dispatched to Devin without it, so there is nothing to poll; `metistry connections add devin --type agent --provider devin …` (docs/ops/connections.md, Agent connections); for one release METISTRY_DEVIN_API_KEY still works",
       };
     }
-    return { status: "ok" as const };
+    return { status: "ok" as const, ...(access.connection ? { meta: { connection: access.connection } } : {}) };
   });
 }
 
@@ -220,11 +222,11 @@ interface OpenRow {
   created_at: string;
 }
 
-async function getSession(ctx: DevinSessionsCtx, base: string, org: string, sessionId: string): Promise<DevinSession> {
-  const url = `${base}/v3/organizations/${encodeURIComponent(org)}/sessions/${encodeURIComponent(sessionId)}`;
-  const res = await (ctx.fetchFn ?? fetch)(url, {
+async function getSession(access: DevinAccess, org: string, sessionId: string): Promise<DevinSession> {
+  const url = `${access.base}/v3/organizations/${encodeURIComponent(org)}/sessions/${encodeURIComponent(sessionId)}`;
+  const res = await access.fetch(url, {
     headers: {
-      authorization: `Bearer ${ctx.devinApiKey}`,
+      authorization: access.authorization,
       accept: "application/json",
       "user-agent": "metistry-devin-sessions",
     },
@@ -244,9 +246,10 @@ function historyEntry(op: "update", note: string, status: string, now: Date): st
  * (a pending session counts for nothing, so a quiet tick returns 0).
  */
 export async function run(db: Db, ctx: DevinSessionsCtx = {}): Promise<number> {
-  if (!ctx.devinApiKey) return 0; // degrades absent
+  const access = await devinAccess(ctx, COMPONENT);
+  if (!access) return 0; // degrades absent
   const now = ctx.now ?? new Date();
-  const base = ctx.devinApiUrl ?? DEVIN_API;
+  const base = access.base;
   const timeoutMs = (ctx.devinSessionTimeoutHours ?? DEFAULT_TIMEOUT_HOURS) * 3_600_000;
 
   // Only rows this target still holds. `dispatch()` sets in_progress; every
@@ -264,7 +267,9 @@ export async function run(db: Db, ctx: DevinSessionsCtx = {}): Promise<number> {
     const sessionId = parseDevinRef(row.external_ref);
     const meta = (row.meta ?? {}) as { devin?: DevinWorkMeta };
     const dev = meta.devin;
-    const org = dev?.org ?? ctx.devinOrgId;
+    // a session goes home with the key it went out with: a row dispatched through a connection is polled through that connection only
+    if (dev?.connection !== undefined && dev.connection !== access.connection) continue;
+    const org = dev?.org ?? access.orgId;
     if (!sessionId || !org) {
       // A ref we cannot poll is not something to guess at: leave the row
       // alone and say so once per pass.
@@ -274,7 +279,7 @@ export async function run(db: Db, ctx: DevinSessionsCtx = {}): Promise<number> {
 
     let session: DevinSession;
     try {
-      session = await getSession(ctx, base, org, sessionId);
+      session = await getSession(access, org, sessionId);
     } catch (err) {
       if (err instanceof RateLimited) {
         console.warn(`devin-sessions: ${err.message}`);

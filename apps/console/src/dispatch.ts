@@ -176,7 +176,8 @@ const GITHUB_API = "https://api.github.com";
 export const DEVIN_SUBMIT_KIND = "devin-session";
 /** The target crews are checked against (crews.ts) — a connection never takes its name. */
 const CREW_TARGET = "local-crew";
-const REPO_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+/** owner/repo — each part GitHub's own characters, and never `.` or `..`, since it goes in a URL path. */
+const REPO_RE = /^(?!\.{1,2}\/)[A-Za-z0-9_.-]+\/(?!\.{1,2}$)[A-Za-z0-9_.-]+$/;
 const ORG_RE = /^[A-Za-z0-9_-]+$/;
 /** A `{{ secret.… }}` or `{{ variable.… }}` reference: the door fills the first wherever it finds one, so a brief never carries one to a connection. */
 const REFERENCE = /\{\{\s*(?:secret|variable)\.[^{}]*\}\}/;

@@ -349,8 +349,8 @@ takes a `since` cursor and answers with the next one.
 | `POST /api/today/close` | owner | session · local_owner | no | stale | — | served | Close the Day: write the section, then plan tomorrow |
 | `POST /api/meetings/:event_id/note` | owner | session · local_owner | natural | — | — | served | the meeting note for one event; a second call returns the first |
 | `POST /api/calendar/events/:id/move` | owner | session · local_owner | no | stale | — | served | move an event: preview (who is in it, the new time), then confirm with a single-use token |
-| `POST /api/calendar/invitations/:id/respond` | owner | session · local_owner | no | — | — | T4-17 | answer an invitation through the connection that can |
-| `POST /api/mail/messages/:id/draft` | owner | session · local_owner | no | — | — | T4-17 | draft a reply through the connection that can; never sends |
+| `POST /api/calendar/invitations/:id/respond` | owner | session · local_owner | no | stale | — | served | answer an invitation through a connection that can (`rsvp`): preview, then confirm with a single-use token; 503 names Open in Calendar where none can |
+| `POST /api/mail/messages/:id/draft` | owner | session · local_owner | no | stale | — | served | draft a reply into Drafts through the connection's `draft` capability: preview, then confirm with a single-use token; never sends |
 | `GET /api/scheduled` | owner | session · local_owner | natural | — | — | served | every routine and sync with its schedule and last run |
 | `GET /api/scheduled/routines/:name` | owner | session · local_owner | natural | — | — | served | one routine |
 | `GET /api/scheduled/syncs/:name` | owner | session · local_owner | natural | — | — | served | one sync |

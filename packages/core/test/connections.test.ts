@@ -289,8 +289,8 @@ describe("connection files (§2.6)", () => {
     expect(templateRefs("Bearer {{ secret.a }} {{variable.b}} {{ date }}")).toEqual({ secrets: ["a"], variables: ["b"], invalid: ["{{ date }}"] });
   });
 
-  it("refuses a reach that is not exactly one of http, command, path", () => {
-    expect(fileErrors(devin({ reach: {} }))).toMatch(/exactly one of http, command, path — got none/);
+  it("refuses a reach that is not exactly one of http, command, path, imap", () => {
+    expect(fileErrors(devin({ reach: {} }))).toMatch(/exactly one of http, command, path, imap — got none/);
     expect(fileErrors(devin({ reach: { http: { url: "https://x.test" }, path: { path: "/tmp" } } }))).toMatch(/got http, path/);
     expect(fileErrors(devin({ reach: { http: { url: "file:///etc/passwd" } } }))).toMatch(/http\(s\) URL/);
   });
@@ -392,5 +392,60 @@ describe("a connection joined to its connection type", () => {
   it("refuses config for a field the type does not have", () => {
     const c = conn({ ...workCalendar(), config: { ...(workCalendar().config as object), colour: "blue" } });
     expect(connectionIssues(c, type())).toEqual(['config.colour: google-calendar has no field "colour"']);
+  });
+});
+
+// T4-15: IMAP is a reach class of its own — a mailbox is neither an HTTP
+// service, a command nor a path — with its own guard: a submission port is
+// never a reach, TLS off this Mac, and only a mail type that declares basic
+// sign-in is reached by it.
+describe("the imap reach class (T4-15)", () => {
+  const mail = (imap: Record<string, unknown> = {}, patch: Record<string, unknown> = {}) => ({
+    name: "gmail",
+    type: "mail",
+    provider: "gmail-mail",
+    reach: { imap: { host: "imap.gmail.com", username: "me@gmail.com", secret: "gmail_app_password", ...imap } },
+    secrets: ["gmail_app_password"],
+    ...patch,
+  });
+  const imapType = (patch: Record<string, unknown> = {}) => ({
+    schema: 1,
+    name: "gmail-mail",
+    type: "connection-type",
+    provides: "mail",
+    transports: ["imap"],
+    auth: ["basic"],
+    capabilities: ["read", "draft"],
+    implementation: { kind: "builtin", module: "imap" },
+    ...patch,
+  });
+
+  it("defaults to implicit TLS on 993 and names the secret, which must be listed", () => {
+    expect(conn(mail()).reach.imap).toEqual({ host: "imap.gmail.com", port: 993, security: "tls", username: "me@gmail.com", secret: "gmail_app_password" });
+    expect(fileErrors(mail({}, { secrets: [] }))).toMatch(/secret "gmail_app_password" is used but not listed in secrets/);
+    expect(fileErrors(mail({}, { reach: { imap: mail().reach.imap, http: { url: "https://x.test" } } }))).toMatch(/got http, imap/);
+  });
+
+  it("refuses a submission port, plain off this Mac, a host that is not a host name, and a username that could be a template", () => {
+    for (const port of [25, 465, 587, 2525]) expect(fileErrors(mail({ port }))).toMatch(/mail submission port/);
+    expect(fileErrors(mail({ security: "plain" }))).toMatch(/security: plain is for a server on this Mac only/);
+    expect(conn(mail({ host: "127.0.0.1", port: 1143, security: "plain" })).reach.imap!.security).toBe("plain");
+    for (const host of ["imaps://imap.gmail.com", "imap.gmail.com:993", "IMAP.GMAIL.COM", "*.gmail.com", "imap.gmail.com/x"]) expect(fileErrors(mail({ host }))).toMatch(/lowercase host name/);
+    for (const username of ["{{ secret.gmail_app_password }}", 'a"b', "a\r\nb"]) expect(fileErrors(mail({ username }))).toMatch(/no control character/);
+    expect(fileErrors(mail({ security: "starttls" }))).toMatch(/security/);
+  });
+
+  it("a connection type reached by imap provides mail and declares basic sign-in", () => {
+    expect(validateManifest(imapType()).ok).toBe(true);
+    expect(errorsOf(imapType({ auth: undefined }))).toMatch(/declare auth: \[basic\]/);
+    expect(errorsOf(imapType({ provides: "calendar", capabilities: ["read"] }))).toMatch(/only a mail connection type is reached by imap/);
+    const t = asType(imapType());
+    expect(connectionIssues(conn(mail()), t)).toEqual([]);
+    // a type that does not declare basic: the file is refused against it
+    const noBasic = { ...t, auth: ["none"] as ConnectionTypeManifest["auth"] };
+    expect(connectionIssues(conn(mail()), noBasic).join(" ")).toMatch(/does not declare basic sign-in/);
+    // a custom connection has nothing to reach a mailbox with
+    expect(fileErrors(mail({}, { provider: "custom", type: "mcp" }))).toMatch(/a custom mcp connection is reached by http or command/);
+    expect(fileErrors(mail({}, { provider: "custom" }))).toMatch(/a mail connection needs a connection type/);
   });
 });

@@ -215,11 +215,11 @@ type (somewhere work is sent). One key cannot mean both, so the kind is
 | Key | Is |
 | --- | --- |
 | `provides` | one of `mcp` · `agent` · `api` · `feed` · `files` · `calendar` · `mail` · `tracker` |
-| `transports` | the reach classes a connection of this type may use: `http` · `command` · `path` (C118) |
+| `transports` | the reach classes a connection of this type may use: `http` · `command` · `path` (C118) · `imap` (a mailbox, T4-15 — only a `mail` type that declares `auth: [basic]`) |
 | `fields` | the config the app renders — each a `key` (snake_case), `kind`, `label`, optional `help`, `required` (default true) |
 | `capabilities` | from the type's closed vocabulary (below) |
 | `tools` | `<tool>: { group, description? }` — no mode; the mode is the owner's |
-| `auth` | optional: the sign-in schemes a connection of this type may use (`none` · `bearer` · `basic` · `api_key` · `oauth`). Absent: any but `basic`. **`basic` is accepted only by a type that lists it** (CalDAV's app password, T4-13) — the CLI and the file check both refuse it elsewhere |
+| `auth` | optional: the sign-in schemes a connection of this type may use (`none` · `bearer` · `basic` · `api_key` · `oauth`). Absent: any but `basic`. **`basic` is accepted only by a type that lists it** (CalDAV's app password, T4-13; IMAP's, T4-15) — the CLI and the file check both refuse it elsewhere |
 | `sync` | the sync unit that reads connections of this type; its default schedule lives in that unit's manifest (§2.5) |
 | `implementation` | `native` (the type's own handler — a data-only extension) · `builtin` + `module` (product code in `packages/connections`) · `bridge` + `bridge` (an existing bridge, e.g. `eventkit`). Default `native` |
 
@@ -349,6 +349,9 @@ list. **Done (T4-5):**
 - targets → the target registry (the console's `TargetRegistry` loads through it)
 - connection types → the registry is ready (`loadKind("connection-type", …)`);
   its first units and its consumer come with T4-8a and T4-12–T4-15
+- the connection known-service list → the connection-type units that ship them:
+  the calendar's (`icloud-calendar`, `fastmail-calendar`) with T4-13, the
+  mail's (`gmail-mail`) with T4-15
 
 **Still to move, each with the ticket that owns it:**
 
@@ -359,9 +362,6 @@ list. **Done (T4-5):**
 - `SECRET_SCOPES` (→ removed, §2.14, T4-3)
 - the proposal kind → request type mapping (→ the F-5 table, open to new types
   that pick a closed body)
-- the connection known-service list → the connection-type units that ship them
-  (T4-15 for mail; the calendar's — `icloud-calendar`, `fastmail-calendar` — shipped
-  with T4-13)
 - `inbox.source` values (a capture-source registry — no ticket yet)
 - Swift's per-service setting forms, and the Mac app's `ComputeTemplate` enum
   (→ rendered from field schemas and the provider registry)

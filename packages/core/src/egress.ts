@@ -375,6 +375,36 @@ export interface EgressPlan {
 }
 
 /**
+ * The three questions every secret a call carries must pass, wherever it goes
+ * — HTTP (`planEgress`) or a socket (`planSocketEgress`): is the destination
+ * on the secret's *Sent only to* list, is the channel encrypted, and did the
+ * owner grant it to this caller. Throws the refusal; returns nothing.
+ */
+function checkSecretDestination(names: readonly string[], destination: EgressDestination, rules: SecretEgressRules, channel: "http" | "socket" = "http"): void {
+  const dest = destination.entry;
+
+  // ---- only to listed hosts
+  const unlisted = names.filter((n) => {
+    const policy = Object.hasOwn(rules.secrets.secrets, n) ? rules.secrets.secrets[n] : undefined;
+    return !policy || !policy.hosts.includes(dest);
+  });
+  if (unlisted.length > 0) {
+    throw new EgressRefused("host_not_listed", unlisted, dest, `${unlisted.join(", ")} may not be sent to ${dest} — it is not on the secret's *Sent only to* list (\`metistry secrets hosts <name>\`)`);
+  }
+  if (destination.cleartext) {
+    const how = channel === "http" ? "over plain http — a secret goes off this machine over https only" : "without TLS — a secret goes off this machine over TLS only";
+    throw new EgressRefused("cleartext", names, dest, `${names.join(", ")} would go to ${dest} ${how}`);
+  }
+
+  // ---- who may use it
+  const approved = new Set(rules.approved ?? []);
+  const off = names.filter((n) => secretGrant(rules.secrets, n, rules.grantee) === "off");
+  if (off.length > 0) throw new EgressRefused("not_granted", off, dest, `${rules.grantee} is not granted ${off.join(", ")} (\`metistry secrets grant <name> ${rules.grantee} on|ask\`)`);
+  const ask = names.filter((n) => secretGrant(rules.secrets, n, rules.grantee) === "ask" && !approved.has(n));
+  if (ask.length > 0) throw new EgressRefused("needs_approval", ask, dest, `${rules.grantee} may use ${ask.join(", ")} only with the owner's approval of this call`);
+}
+
+/**
  * Every check, and no value read: the refusal a call would get, or the plan
  * of what it would send. `guardedFetch` runs exactly this before it fills;
  * an Ask preview (T4-8b) can run it to say "sends github_write to
@@ -422,26 +452,36 @@ export function planEgress(call: EgressCall, rules: SecretEgressRules): EgressPl
   const names = unionSorted(refs, bodyLiteral, headerLiteral);
   if (names.length === 0) return { destination, refs, names };
 
-  // ---- only to listed hosts
-  const unlisted = names.filter((n) => {
-    const policy = Object.hasOwn(rules.secrets.secrets, n) ? rules.secrets.secrets[n] : undefined;
-    return !policy || !policy.hosts.includes(dest);
-  });
-  if (unlisted.length > 0) {
-    throw new EgressRefused("host_not_listed", unlisted, dest, `${unlisted.join(", ")} may not be sent to ${dest} — it is not on the secret's *Sent only to* list (\`metistry secrets hosts <name>\`)`);
-  }
-  if (destination.cleartext) {
-    throw new EgressRefused("cleartext", names, dest, `${names.join(", ")} would go to ${dest} over plain http — a secret goes off this machine over https only`);
-  }
-
-  // ---- who may use it
-  const approved = new Set(rules.approved ?? []);
-  const off = names.filter((n) => secretGrant(rules.secrets, n, rules.grantee) === "off");
-  if (off.length > 0) throw new EgressRefused("not_granted", off, dest, `${rules.grantee} is not granted ${off.join(", ")} (\`metistry secrets grant <name> ${rules.grantee} on|ask\`)`);
-  const ask = names.filter((n) => secretGrant(rules.secrets, n, rules.grantee) === "ask" && !approved.has(n));
-  if (ask.length > 0) throw new EgressRefused("needs_approval", ask, dest, `${rules.grantee} may use ${ask.join(", ")} only with the owner's approval of this call`);
-
+  checkSecretDestination(names, destination, rules);
   return { destination, refs, names };
+}
+
+/** Where a socket goes (an IMAP server, T4-15), spelled as a *Sent only to* entry. `tls: false` to anything but loopback is cleartext. */
+export function socketDestination(host: string, port: number, tls: boolean): EgressDestination {
+  const h = host.toLowerCase();
+  return { entry: port === EGRESS_DEFAULT_PORT ? h : `${h}:${port}`, host: h, port, cleartext: !tls && !isLoopbackHost(h) };
+}
+
+/**
+ * **The host guard for a connection that is not HTTP** — IMAP (T4-15). A
+ * socket has no URL, header or body for `planEgress` to read: the caller
+ * names the secrets it will send and where the socket goes, and gets the
+ * same three refusals HTTP gets, before it dials — `host_not_listed` (the
+ * exact `host:port` must be on each secret's *Sent only to* list),
+ * `cleartext` (TLS, except to loopback) and `not_granted` / `needs_approval`
+ * (the owner's grant to this caller). The caller fills the value only after
+ * this returns, learns it into the redactor, and never writes it anywhere
+ * but the socket.
+ */
+export function planSocketEgress(to: { host: string; port: number; tls: boolean }, names: readonly string[], rules: SecretEgressRules): EgressPlan {
+  if (!parseSecretGrantee(rules.grantee)) throw new Error(`${JSON.stringify(rules.grantee)} is not a grantee — connection:<name> or agent:<id>`);
+  if (!/^[A-Za-z0-9.-]+$/.test(to.host) || !Number.isInteger(to.port) || to.port < 1 || to.port > 65535) {
+    throw new EgressRefused("bad_url", [], null, `${JSON.stringify(`${to.host}:${to.port}`.slice(0, 200))} is not a host and port`);
+  }
+  const destination = socketDestination(to.host, to.port, to.tls);
+  const sorted = unionSorted(names);
+  if (sorted.length > 0) checkSecretDestination(sorted, destination, rules, "socket");
+  return { destination, refs: sorted, names: sorted };
 }
 
 /** Text of a request body the door can inspect; undefined when it cannot. */

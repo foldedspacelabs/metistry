@@ -14,8 +14,10 @@ connections (targets, T4-11), tools generated for API, feed and files
 connections (T4-10), calendar and mail providers (T4-13…T4-15). A
 **tracker** or **calendar** connection is read by its provider's sync —
 Linear is the first tracker (T4-24, *Linear* below), an ICS feed the first
-calendar (T4-12, *ICS feeds* below). Asking the pool to dial any of those is refused `not_built`,
-naming where it arrives.
+calendar (T4-12, *ICS feeds* below). A **mail** connection is a mailbox over
+IMAP (T4-15, *Mail over IMAP* below) — a reach class of its own. Asking the
+pool to dial any of those as MCP is refused `not_built`, naming where it
+arrives.
 
 ## The file, read
 
@@ -69,7 +71,12 @@ would meet, **before any call is made**:
   read a value);
 - `failed` — `secrets.yaml` does not grant a secret to `connection:<name>`, or
   an HTTP connection sends a secret to a host that is not on the secret's
-  *Sent only to* list (the same refusal the egress door makes).
+  *Sent only to* list (the same refusal the egress door makes) — or an IMAP
+  connection's app password is not listed for its exact `host:port`.
+
+The reach is summarised by class: `http` (URL, auth scheme, header and query
+names), `command` (command, arguments, environment names), `path`, and `imap`
+(host, port, `tls` or `plain`, `auth: basic` — never the username).
 
 *Used by* is what reads it today: the syncs in `scheduled.yaml` that name it,
 and the sync its provider declares when that sync reads it (the rule *A sync
@@ -529,6 +536,106 @@ with `If-Match`, so an event that changed in between is refused (`changed`),
 never overwritten. The confirm token and who may press it belong to the
 console door (T4-17 for Respond; `write_own`'s door is not built yet). No
 agent reaches any of it: a calendar connection is not dialled as MCP.
+
+## Mail over IMAP — Gmail, any IMAP server
+
+The first `mail` provider (plan §2.6, §4 Q8; T4-15): IMAP with an **app
+password**, capabilities `read` and `draft`. **Nothing sends mail** — there is
+no SMTP anywhere, and IMAP cannot send. Two connection types over one builtin
+module (`imap`): `gmail-mail`, a known service pinned to `imap.gmail.com:993`,
+and `imap` for any other server. The Gmail API is not used (§4 Q8).
+
+**Gmail needs 2-Step Verification and an app password.** Google ended
+password sign-in for IMAP on 2025-03-14, except for app passwords (Google
+Workspace, *Transition from less secure apps*). Turn on 2-Step Verification
+(myaccount.google.com → Security), make an app password
+(myaccount.google.com/apppasswords — 16 letters, without the spaces Google
+shows), and check IMAP is on in Gmail (Settings → Forwarding and POP/IMAP; a
+Workspace admin can turn it off). Then:
+
+```sh
+metistry secrets set gmail_app_password                   # the app password, on stdin
+metistry secrets hosts gmail_app_password imap.gmail.com:993
+metistry secrets grant gmail_app_password connection:gmail on
+metistry connections add gmail --type mail --provider gmail-mail \
+  --imap imap.gmail.com:993 --username you@gmail.com --secret gmail_app_password
+metistry connections test gmail                           # signs in, lists folders, finds [Gmail]/Drafts
+```
+
+| Type | Server | Username | Password |
+| --- | --- | --- | --- |
+| `gmail-mail` | `imap.gmail.com:993`, TLS — nowhere else | the Google Account's address | an app password (2-Step Verification on) |
+| `imap` | the server's IMAP host (`--imap host[:port]`, 993 unless given) | as the server says | an app password, where the server has them |
+
+**A reach class of its own.** A mailbox is not an HTTP service, a command or a
+path, so the file says `reach: { imap: { host, port, security, username,
+secret } }` (core's `reachSchema`; port 993, `security: tls` by default). A
+connection type reached by `imap` must provide `mail` and declare `auth:
+[basic]` — a username and an app password is the only sign-in.
+
+**The host guard** (core's `planSocketEgress`, run before anything is dialled —
+the socket's counterpart of `guardedFetch`): the app password goes only to the
+exact `host:port` on the secret's *Sent only to* list (`imap.gmail.com:993`,
+not `imap.gmail.com`), only over TLS — verified certificate and host name, TLS
+1.2 or later — and only when granted to `connection:<name>`; each refusal is
+the door's own code (`host_not_listed`, `cleartext`, `not_granted`,
+`needs_approval`, `missing_secret`). The value is written into the one LOGIN
+command and nowhere else, and learned by the redactor first: a server that
+echoes it, or an error that carries it, shows `***REDACTED
+secret.<name>***`. `security: plain` (`--plain`) is for a server on this Mac —
+a local mail bridge — and is refused for any other host.
+
+**Refused at the file** (before anything is written or dialled): a mail
+submission port (25, 465, 587, 2525); plain off loopback; a host that is not a
+lowercase host name (no scheme, port or path); a username with a quote,
+backslash, control character or template; Gmail pointed anywhere but
+`imap.gmail.com:993` over TLS; an `imap` type without `auth: [basic]`; a
+custom mail connection (nothing runs it).
+
+**No code path can send — a closed command set.** Every command line passes
+one function (`imapCommandLine`) that knows nine commands — `CAPABILITY`,
+`LOGIN`, `LIST`, `EXAMINE`, `UID SEARCH`, `UID FETCH`, `APPEND`, `NOOP`,
+`LOGOUT` — each with one fixed argument shape. `SELECT`, `STORE`, `COPY`,
+`MOVE`, `EXPUNGE`, `DELETE`, `CREATE`, `RENAME`, `STARTTLS` and `AUTHENTICATE`
+are refused by name; a body fetch, a flag store, or a second command after a
+line break is refused before a byte is written (`command_refused`). A
+submission port is never dialled, even when handed one directly.
+
+**Read** (`readHeaders`): `EXAMINE` — read-only, so reading never marks a
+message read — then `UID SEARCH` (all, or since a day) and one `UID FETCH` of
+fixed items: `UID FLAGS INTERNALDATE RFC822.SIZE BODY.PEEK[HEADER.FIELDS (DATE
+FROM SENDER REPLY-TO TO CC SUBJECT MESSAGE-ID IN-REPLY-TO REFERENCES LIST-ID
+AUTO-SUBMITTED PRECEDENCE)]`. The items are a constant, so **no body is ever
+fetched** — §4.12's rule, *the reference, not the content*. Each message comes
+back with a `ref` (`<connection>/<mailbox>/<uidvalidity>/<uid>`), its header
+text decoded (RFC 2047, RFC 6532), stripped of bidi and zero-width controls and
+a leading slash (core's `sanitizeForAgent`) and capped, `automated` when a list
+or an automatic sender says so (the deterministic prefilter §4.12 asks for),
+and **`source: comms`** — the provenance the data policy's `deny_sources`
+names, so a brief that carries it never leaves the machine (`checkBrief`,
+`docs/ops/targets.md`). At most 500 messages per read, the newest.
+
+**Draft** (`draft`; `previewDraft`, then `appendDraft`): a plain-text RFC 5322
+message (UTF-8, base64 body; To and Cc as addresses only — no Bcc), threaded
+with `In-Reply-To` and `References`. The preview returns the exact bytes, a
+digest and where it would go; the confirm re-renders from the same input with
+the preview's date and Message-ID and **refuses a different digest**
+(`changed`), writing nothing. `APPEND` takes no mailbox from the caller: it
+writes to the one mailbox the server marks `\Drafts` (RFC 6154) — else a
+top-level `Drafts` — flagged `\Draft \Seen`, and never to Sent or an Outbox
+(`no_drafts` when there is none). The owner sends it from their mail app. The
+confirm token and who may press it belong to the console door (`POST
+/api/mail/messages/:id/draft`, T4-17).
+
+**`check()`** (`metistry connections test`, doctor): sign in, `LIST`, find
+Drafts, `EXAMINE INBOX` — no message fetched — `LOGOUT`. `ok`; `degraded`
+when there is no Drafts mailbox (reading works, a draft would be refused);
+`failed` on a refused sign-in — *sign in with an app password (for Gmail:
+2-Step Verification on, then an app password)* — or an unreachable server or
+certificate; `absent` with no app password in this instance's Keychain.
+`meta` is `{ mailboxes, drafts, inbox_messages }`. The pool opens a mailbox
+only for the IMAP module (`openImap`) and never dials one as MCP; no agent
+reaches it. The sync that raises `message` requests is T4-17's.
 
 ## Decisions made here
 

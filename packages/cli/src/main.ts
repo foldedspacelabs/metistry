@@ -147,7 +147,7 @@ export interface ParsedArgs {
  * `--version <x.y.z>` silently installed the latest release instead
  * (#198, "not fixed here" #2).
  */
-export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "dry-run", "allow-dirty", "no-launchd", "no-compose", "no-color", "skip-build", "skip-migrate", "rollback", "allow-legacy", "yes", "follow", "namespace", "rotate", "list", "complete", "skip-test", "remote", "json-lines", "stdio", "named", "clear", "no-discover", "include-config", "no-app", "relaunch", "no-reexec"]);
+export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "dry-run", "allow-dirty", "no-launchd", "no-compose", "no-color", "skip-build", "skip-migrate", "rollback", "allow-legacy", "yes", "follow", "namespace", "rotate", "list", "complete", "skip-test", "remote", "json-lines", "stdio", "named", "clear", "no-discover", "plain", "include-config", "no-app", "relaunch", "no-reexec"]);
 
 /** The §2.14 verbs over owner-named secrets (M7), and the shared scope's migration (T4-3). `list --named` joins them; `sync|mint|list|purge` are the install's own variables. */
 export const NAMED_SECRET_VERBS = new Set(["set", "replace", "remove", "hosts", "grant", "migrate-scope", "purge-shared"]);
@@ -535,6 +535,7 @@ const USAGE = `metistry — Metistry command line
   metistry connections show <name> [--json]
   metistry connections add <name> --type mcp (--url <url> [--auth bearer|api_key|basic
                            --secret <name> [--auth-header <Header>] [--username <user>]] [--header K=V]…
+                         | --imap <host[:port]> --username <user> --secret <name> [--plain]
                          | [--env K=V]… [--runs-on host|container] -- <command> [args…])
                            [--provider <type>] [--description <text>] [--no-discover] [--dry-run]
   metistry connections set <name> [--url <url>] [--auth …] [--header K=V]… [--unset-header K]…
@@ -561,7 +562,10 @@ const USAGE = `metistry — Metistry command line
       --auth basic writes --username beside the secret that holds an app
       password (a CalDAV calendar: --provider caldav, icloud-calendar or
       fastmail-calendar); the password is filled at the egress door, never
-      written. A §4.7 protected path: every write goes through the reconciler as the
+      written. --imap reaches a mailbox (--type mail --provider imap or
+      gmail-mail) with --username and the app password --secret names, over
+      TLS on 993 unless a port is given (--plain: a server on this Mac only);
+      nothing is dialled on add, "test" signs in, and nothing ever sends mail. A §4.7 protected path: every write goes through the reconciler as the
       "user" principal. The console reads the same files at GET
       /api/connections and never writes them.
 
@@ -1921,6 +1925,8 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
               type: str(flags, "type"),
               provider: str(flags, "provider"),
               url: str(flags, "url"),
+              imap: str(flags, "imap"),
+              plain: flags.plain === true,
               command,
               env: repeatedFlag(argv, "env"),
               headers: repeatedFlag(argv, "header"),

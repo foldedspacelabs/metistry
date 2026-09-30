@@ -1,0 +1,33 @@
+# The IMAP connection type (plan §2.6, §4 Q8; T4-15) — any mail server that
+# speaks IMAP4rev1 over TLS, signed in with an app password. Gmail is a known
+# service with its own entry (gmail-mail), which names its server; this is
+# every other one. A connection of this type is added with
+#
+#   metistry secrets set mail_app_password              (the value on stdin)
+#   metistry secrets hosts mail_app_password imap.example.com:993
+#   metistry secrets grant mail_app_password connection:mail on
+#   metistry connections add mail --type mail --provider imap \
+#     --imap imap.example.com:993 --username you@example.com --secret mail_app_password
+#   metistry connections test mail                       (signs in, lists folders, finds Drafts)
+#
+# `read` is headers only — who, to whom, the subject, the date, the thread —
+# fetched with BODY.PEEK from a mailbox opened read-only (EXAMINE), so reading
+# never marks a message read and never fetches a body. `draft` APPENDs a
+# message the owner previewed to the mailbox the server marks \Drafts, and
+# nowhere else. **Nothing sends mail**: there is no SMTP anywhere, and a
+# submission port (25, 465, 587, 2525) is refused at the file and at the
+# door (packages/connections `imap.ts`).
+#
+# The password goes only to the exact host:port on the secret's *Sent only
+# to* list, over TLS (implicit TLS, port 993 unless the server says
+# otherwise). A server on this Mac — a local mail bridge — may be reached
+# without TLS with --plain; nowhere else may.
+schema: 1
+name: imap
+type: connection-type
+description: A mailbox over IMAP with an app password — who wrote and about what (headers, never bodies), and drafts you send yourself. Nothing sends mail. For Gmail, use its own entry.
+provides: mail
+transports: [imap]
+auth: [basic]                    # a username and an app password — the only sign-in an IMAP connection takes
+capabilities: [read, draft]
+implementation: { kind: builtin, module: imap }

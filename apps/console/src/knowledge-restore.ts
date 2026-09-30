@@ -179,7 +179,7 @@ export type RaiseOutcome =
   | { ok: false; code: ErrorCode; message: string; stale?: { path: string; sha256: string; bytes: number } | null };
 
 /** The row as `GET /api/proposals` serves it — so Knowledge draws the request inline from the answer, and answers it at `POST /api/proposals/:id` with its `ts`. */
-const PROPOSAL_ROW_SQL = `SELECT id, ts, kind, source_agent, trust, payload, decision, decided_at, work_id, snoozed_until FROM proposals WHERE id = $1`;
+const PROPOSAL_ROW_SQL = `SELECT id, ts, kind, source_agent, trust, payload, decision, decided_at, work_id, snoozed_until, group_id FROM proposals WHERE id = $1`;
 
 /**
  * Raise the request, or find the one already waiting for this path and

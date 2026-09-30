@@ -53,6 +53,7 @@
       "decided_at": null,
       "work_id": null,
       "snoozed_until": null,
+      "group_id": null,
       "request": {
         "type": "improvement",
         "word": "improvement",

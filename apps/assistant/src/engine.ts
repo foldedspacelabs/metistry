@@ -27,7 +27,7 @@
 // Invariant 9 holds by construction: the engine's only tools are the
 // console's `/mcp`, and there is no shell and no raw git.
 
-import type { CostSource, Effort, EngineKind, ResolvedAssignment } from "@foldedspacelabs/metistry-core";
+import type { CostSource, Effort, EngineKind, ResolvedAssignment, RouteOperation } from "@foldedspacelabs/metistry-core";
 import { makeOpenAiEngine, type OpenAiEngineConfig } from "./engine-openai.js";
 import type { ShadowRun } from "./shadow.js";
 
@@ -50,11 +50,12 @@ export interface TurnResult {
   turns?: number;
   /**
    * Why the loop stopped early, when it did: the turn cap, the per-run
-   * budget, or the no-progress veto (Atomic ADOPT 4). Absent = the model
-   * finished on its own. Every one of the three still ANSWERS — the run ends
-   * in a reply, not a stack trace.
+   * budget, or the no-progress veto (Atomic ADOPT 4) — and, on a turn the
+   * router's policy served, its `tool_calls` and `tokens` caps
+   * (docs/ops/dynamic-router.md §1). Absent = the model finished on its own.
+   * Every one still ANSWERS — the run ends in a reply, not a stack trace.
    */
-  stopped?: "max_turns" | "max_budget" | "veto";
+  stopped?: "max_turns" | "max_budget" | "veto" | "max_tool_calls" | "max_tokens";
   /** Lines worth keeping on the `runs` row — an unpriced call, a non-ZDR warning. Never user-facing text. */
   notes?: string[];
   /** Tool calls the turn made, by name (`mcp__brain__capture`), with counts. Absent when none. */
@@ -92,6 +93,20 @@ export interface TurnSpec {
   maxCostUsd?: number | undefined;
   /** Agentic turns for this turn only — a crew manifest's `max_turns`. Absent = the engine's own default. */
   maxTurns?: number | undefined;
+  /**
+   * The operation a turn the router's policy served runs
+   * (docs/ops/dynamic-router.md §3). The engine EXECUTES only that
+   * operation's tools (core's `operationTools`) — a call outside them is not
+   * made, it is answered with one fixed refusal and counted toward
+   * `maxToolCalls` — and `answer` goes out with `tool_choice: "none"`. The
+   * definitions sent do not change (the cached prefix). Absent = `tools`,
+   * today's turn: the whole surface. Nothing is added to the prompt.
+   */
+  operation?: RouteOperation | undefined;
+  /** Tool calls this turn may make, refused ones included — `policy.caps.tool_calls`, or a row's smaller grant. Absent = no count cap (every rule-served turn). */
+  maxToolCalls?: number | undefined;
+  /** Prompt + completion tokens over this turn's whole loop — `policy.caps.tokens`. Checked between requests. Absent = none (every rule-served turn). */
+  maxTokens?: number | undefined;
   /**
    * The turn correlation handle: what every tool call of this reply carries
    * in `_meta`, what the turn's `runs` row carries in `meta.turn_id`, and the

@@ -20,8 +20,8 @@
       "next_run": "2026-09-30T11:00:00.000Z",
       "next_refused": null,
       "last_run": {
-        "run_id": "9",
-        "at": "2026-09-30T04:49:51.757Z",
+        "run_id": "10",
+        "at": "2026-09-30T07:23:47.830Z",
         "ok": true,
         "outcome": "silent",
         "cost_usd": null,
@@ -67,8 +67,8 @@
     },
     "history": [
       {
-        "run_id": "9",
-        "at": "2026-09-30T04:49:51.757Z",
+        "run_id": "10",
+        "at": "2026-09-30T07:23:47.830Z",
         "ok": true,
         "outcome": "silent",
         "cost_usd": null,
@@ -77,6 +77,6 @@
         "trigger": null
       }
     ],
-    "as_of": "2026-09-30T04:49:52.117Z"
+    "as_of": "2026-09-30T07:23:48.223Z"
   }
 }

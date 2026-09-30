@@ -735,6 +735,72 @@ line in the pane's banner, and the pane re-read after it. No console route
 writes a connection (invariant 10). Adding and configuring one is T6-13b's
 editor; until then the empty state names `metistry connections add`.
 
+## The Secrets and Variables panes
+
+Screen 19 and plan §2.14, built as T6-14 (`sources/kit/secrets-model.swift`,
+`secrets-view.swift`, `variables-model.swift`, `variables-view.swift`).
+
+**Read from the console, written through the CLI.** The lists are
+`GET /api/secrets` and `GET /api/variables` — routes that already existed, so
+the panes add no door (invariant 10). Every write is a §2.2 verb run as an
+argument array through the session's `ManagementRunner`: `metistry secrets
+set|replace|remove|hosts|grant` (M7) and `metistry variables set|unset` (M14),
+each with `--instance <dir>` so the command says which instance it changes.
+
+**A secret's value exists in the app for one keystroke's worth of time.** The
+rows the pane draws (`NamedSecret`) mirror the route's row — name, hosts,
+grants, expiry, presence, last used — and have no field a value could go in;
+the Value section is dots. The only place a value is typed is the New Secret /
+Replace sheet's `SecureField`, bound to `SecretDraft.value`. `saveSecret()`
+copies it into the command's standard input and clears the draft **before**
+the process starts; the command is a local that goes out of scope when the CLI
+returns. It is never an argument (the CLI takes it from stdin only), never in
+an outcome, a log line or a confirmation, and `SecretDraft` and
+`ManagementCommand` print, dump and interpolate as `<redacted>`. A refused
+save reopens the sheet with the name, hosts and expiry kept and the value
+field **empty** — the owner pastes it again rather than the app holding it
+across a failure. `secrets-variables-tests.swift` asserts all of it, and walks
+the pane's accessibility tree, every secret opened up, for the value.
+
+**Confirmed, naming the cost.** New Secret and Replace are confirmed by their
+sheet, which shows the exact command before its button runs it (an alert over
+a closing sheet is not reliably presented on the Mac). Save Hosts…, a grant and
+Delete… use the window's confirmation. **Delete… runs `secrets remove <name>
+--json` first** — without `--yes` it deletes nothing and names every file
+under `.metistry/` that references `{{ secret.<name> }}` — and the
+confirmation says what stops: each file as what it is (*the github connection
+(.metistry/connections/github.yaml)*, *agent triage (…)*), then anyone still
+granted it that no file named (*agent devin, granted Ask*).
+
+**A refused grant reads on its own row.** The pane checks no name, host or
+grantee — the CLI does. When it refuses a grant (X-41 will refuse a
+`connection:` or `agent:` grantee for a secret an owner door holds), its words,
+without the `metistry secrets grant:` prefix, sit under that grantee's On ·
+Ask · Off, which stays where the file has it; the next accepted change there
+clears them. Grantees are this instance's connections and agents (the
+assistant's own row and revoked ones left out) plus anyone the file grants —
+`provider:<name>` included, shown as spelled.
+
+**A key-shaped variable is refused with Store as Secret — and nothing else.**
+Screen 19 §2 drew *Save as Variable* beside it; the plan and T4-4's CLI refuse
+the value outright, and the plan wins, so no override is drawn. The app checks
+**first**, with `KeyShape` — core's `looksLikeKey`, pattern for pattern, held
+to core's own examples by a test — because a value that reaches `variables
+set` is in that process's argv. While the value looks like a key the sheet
+draws no command at all; Save shows *This looks like a key. Variables can be
+read by agents.* with **Store as Secret**, which moves the name and value into
+New Secret and runs nothing until that sheet's own button. A key the copy
+misses is still the CLI's to refuse, and the sheet reads the same. The CLI's
+other refusals (a schedule or a time — ruling 2; a secret's name; a value
+equal to one of this instance's secrets) reopen the sheet in its words.
+
+**Not here yet:** *Preview as the agent sees it* (screen 19 §2) belongs with
+an agent's instructions; the Value section's *when set* has no field on the
+route to read it from; the *Devin's key expired* request (§1.2) is a Needs You
+body. *Metistry's own* is names only: rotating one is `metistry secrets` in
+Terminal, because §2.2's M7 lists `set`, `replace`, `remove`, `hosts` and
+`grant`, not `mint` or `sync`.
+
 ## Settings: persisted vs read-through
 
 **The rule (owner direction 2026-09-09):** every setting is a front for a file
@@ -825,8 +891,11 @@ core's (`LID_CLOSED_*` in `packages/core/src/power.ts`), mirrored in
 | Connections | one connection: how it is reached, its secrets with *Sent only to*, *What it sends*, the tools by group, Used By | `GET /api/connections/:name` and `GET /api/secrets`; *What it sends* is worked out from them as core's egress door would, and nothing is dialled |
 | Connections | a tool's mode, the offer switch, Test | `metistry connections policy <name> <tool> allow\|ask\|never`, `policy <name> --offer on\|off`, `connections test <name>` (M13), each **confirmed with the exact command** |
 | Connections | *Allow <host>*, *Grant* on a secret's row; Replace Key | `metistry secrets hosts <name> <hosts…>` / `secrets grant <name> connection:<c> on` (M7), confirmed; Replace Key opens Secrets |
-| Secrets | names, scope, and the account each was found under | `metistry secrets list --json` — names only; the verb has no code path that can print a value, and neither has the pane |
-| Variables, Live Capture, Sessions | what the pane will hold, and the verb that does it today | not built yet (T6-14, T6-15): a sentence, never a dead end (C138) |
+| Secrets | name · Used by · Sent only to · last used or *Expired*; per secret its Value (dots), Sent Only To and Who May Use It | `GET /api/secrets` — never a value; the grantees offered are `GET /api/connections` and `GET /api/agents` plus whoever the file already grants ("The Secrets and Variables panes" below) |
+| Secrets | New Secret…, Replace…, Save Hosts…, a grant's On · Ask · Off, Delete… | `metistry secrets set\|replace <name>` with the value **on stdin**, `secrets hosts\|grant\|remove` (M7) — each shown with its exact command first |
+| Secrets | *Metistry's own* (collapsed): names, scope, and the account each was found under | `metistry secrets list --json` — names only; rotating one is a Terminal step, not an M7 verb |
+| Variables | name · value · used in; New Variable…, Edit…, Remove… | `GET /api/variables`; `metistry variables set\|unset` (M14), shown with its exact command first |
+| Live Capture, Sessions | what the pane will hold, and the verb that does it today | not built yet (T6-15): a sentence, never a dead end (C138) |
 | Updates | this app: version, channel, automatic checks, Check Now | Sparkle, which owns those preferences itself |
 | Updates | the runtime: running version, channel, instance pin | `metistry version --json` → `product_version`, `lock.channel`, `lock.version` |
 | Updates | a newer runtime | `release.available` on `GET /api/events` (T2-18), heard while the app is open — nothing serves it otherwise, so the row says *none announced since the app opened* |

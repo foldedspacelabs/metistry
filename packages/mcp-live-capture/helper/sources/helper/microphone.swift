@@ -28,7 +28,7 @@ final class MicrophoneStream: CaptureStream {
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
         guard format.channelCount > 0 else { throw HelperFailure("no input device") }
-        let sink = try SourceSink(url: directory.appendingPathComponent("\(AudioSource.mic.rawValue).m4a"), format: format, onSegment: onSegment)
+        let sink = try SourceSink(url: nextMediaURL(in: directory, base: AudioSource.mic.rawValue, ext: "m4a"), format: format, onSegment: onSegment)
         self.sink = sink
         input.installTap(onBus: 0, bufferSize: 4096, format: format) { [lock] buffer, _ in
             lock.withLock { sink.consume(buffer) }

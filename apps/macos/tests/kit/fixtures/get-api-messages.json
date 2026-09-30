@@ -13,7 +13,7 @@
     "messages": [
       {
         "id": "2",
-        "ts": "2026-09-28T21:53:03.779Z",
+        "ts": "2026-09-30T04:49:51.926Z",
         "thread": "default",
         "text": "agent cursor was given more room: level observe → propose; actions.dispatch deny → propose; actions.task_update deny → propose; actions.comment deny → propose; actions.capture deny → propose — it can now act on its own within that table (dashboard → agents, docs/ops/actions.md)",
         "status": "alert",
@@ -24,7 +24,7 @@
       },
       {
         "id": "2",
-        "ts": "2026-09-28T21:53:03.747Z",
+        "ts": "2026-09-30T04:49:51.898Z",
         "thread": "default",
         "text": "What's on today?",
         "status": "new",
@@ -35,18 +35,18 @@
       },
       {
         "id": "1",
-        "ts": "2026-09-28T21:53:03.602Z",
+        "ts": "2026-09-30T04:49:51.753Z",
         "thread": "default",
         "text": "Three things today: the store interface, the fixture recorder, and a review.",
         "status": "reply",
         "direction": "out",
         "feedback": null,
         "tier": null,
-        "turn_id": "turn-Yr7AtgAW"
+        "turn_id": "turn-7DVv1J4d"
       },
       {
         "id": "1",
-        "ts": "2026-09-28T21:53:03.602Z",
+        "ts": "2026-09-30T04:49:51.753Z",
         "thread": "default",
         "text": "what is on today?",
         "status": "done",
@@ -56,7 +56,7 @@
         "turn_id": null
       }
     ],
-    "cursor": "2026-09-28 17:53:03.779688-04|out|2",
+    "cursor": "2026-09-30 04:49:51.926151+00|out|2",
     "more": false
   }
 }

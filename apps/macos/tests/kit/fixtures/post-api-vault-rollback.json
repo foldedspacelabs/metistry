@@ -13,7 +13,7 @@
   "status": 202,
   "body": {
     "ok": true,
-    "proposal_id": "7",
+    "proposal_id": "8",
     "raised": true,
     "preview": {
       "reverts": [
@@ -51,8 +51,8 @@
       ]
     },
     "proposal": {
-      "id": "7",
-      "ts": "2026-09-27T04:56:58.409Z",
+      "id": "8",
+      "ts": "2026-09-30T04:49:52.009Z",
       "kind": "improvement",
       "source_agent": "console",
       "trust": "user",

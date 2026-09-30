@@ -4,13 +4,13 @@
   "ticket": null,
   "request": {
     "method": "GET",
-    "path": "/api/artifacts/art_01M3FYT8N8HRG4S2W4Q0GN28F1/diff?from=ver_01M3FYT8N761CDC5HKE1J3H2NZ",
+    "path": "/api/artifacts/art_01M3RABJAG6CMDVZX5F7YCR8KW/diff?from=ver_01M3RABJAG8C88BM1VZE7SY3XA",
     "body": null,
     "idempotency_key": null
   },
   "status": 200,
   "body": {
-    "from": "ver_01M3FYT8N761CDC5HKE1J3H2NZ",
+    "from": "ver_01M3RABJAG8C88BM1VZE7SY3XA",
     "to": null,
     "diff": "--- a/Artifacts/metistry/store-interface/notes.md\n+++ b/Artifacts/metistry/store-interface/notes.md\n-# Store interface\n-\n-One protocol per domain.\n-\n+# Store interface\n+\n+One protocol per domain, one method per route.\n+\n"
   }

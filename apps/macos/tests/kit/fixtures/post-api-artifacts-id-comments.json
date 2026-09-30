@@ -4,9 +4,9 @@
   "ticket": null,
   "request": {
     "method": "POST",
-    "path": "/api/artifacts/art_01M3FYT8N8HRG4S2W4Q0GN28F1/comments",
+    "path": "/api/artifacts/art_01M3RABJAG6CMDVZX5F7YCR8KW/comments",
     "body": {
-      "version": "ver_01M3FYT8NB0W22G5J1H3A71PTY",
+      "version": "ver_01M3RABJAKM99M4CHEYREJKCBT",
       "body": "Name the owning ticket beside each placeholder.",
       "path": "notes.md",
       "anchor": {
@@ -18,9 +18,9 @@
   "status": 201,
   "body": {
     "comment": {
-      "id": "cmt_01M3FYT8NVNX3ZGBZH481KTHGE",
-      "artifact_id": "art_01M3FYT8N8HRG4S2W4Q0GN28F1",
-      "version_id": "ver_01M3FYT8NB0W22G5J1H3A71PTY",
+      "id": "cmt_01M3RABJAZCEKEX9QP4BD5G79R",
+      "artifact_id": "art_01M3RABJAG6CMDVZX5F7YCR8KW",
+      "version_id": "ver_01M3RABJAKM99M4CHEYREJKCBT",
       "work_id": null,
       "path": "notes.md",
       "anchor": {
@@ -33,7 +33,7 @@
       "resolved_by": null,
       "resolved_at": null,
       "parent_id": null,
-      "created_at": "2026-09-26T22:54:15.227Z"
+      "created_at": "2026-09-30T04:49:51.968Z"
     }
   }
 }

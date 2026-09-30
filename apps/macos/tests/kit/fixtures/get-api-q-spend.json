@@ -12,7 +12,7 @@
   "body": {
     "rows": [
       {
-        "day": "2026-09-26T04:00:00.000Z",
+        "day": "2026-09-30T00:00:00.000Z",
         "is_today": true,
         "is_this_month": true,
         "provider": "lmstudio",
@@ -26,21 +26,7 @@
         "cost_usd": "0.006100"
       },
       {
-        "day": "2026-09-26T04:00:00.000Z",
-        "is_today": true,
-        "is_this_month": true,
-        "provider": "openrouter",
-        "model": "mistralai/unpriced-fixture",
-        "tier": "default",
-        "crew": "",
-        "calls": "1",
-        "tokens_in": "600",
-        "tokens_out": "80",
-        "cache_read": "0",
-        "cost_usd": "0.000000"
-      },
-      {
-        "day": "2026-09-26T04:00:00.000Z",
+        "day": "2026-09-30T00:00:00.000Z",
         "is_today": true,
         "is_this_month": true,
         "provider": "",
@@ -54,7 +40,21 @@
         "cost_usd": "0.000000"
       },
       {
-        "day": "2026-09-01T04:00:00.000Z",
+        "day": "2026-09-30T00:00:00.000Z",
+        "is_today": true,
+        "is_this_month": true,
+        "provider": "openrouter",
+        "model": "mistralai/unpriced-fixture",
+        "tier": "default",
+        "crew": "",
+        "calls": "1",
+        "tokens_in": "600",
+        "tokens_out": "80",
+        "cache_read": "0",
+        "cost_usd": "0.000000"
+      },
+      {
+        "day": "2026-09-01T00:00:00.000Z",
         "is_today": false,
         "is_this_month": true,
         "provider": "openrouter",
@@ -68,6 +68,6 @@
         "cost_usd": "0.018400"
       }
     ],
-    "as_of": "2026-09-27T03:43:07.938Z"
+    "as_of": "2026-09-30T04:49:52.098Z"
   }
 }

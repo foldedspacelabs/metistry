@@ -18,7 +18,7 @@
           "value": false,
           "origin": "default"
         },
-        "next_run": "2026-09-27T04:18:49.902Z",
+        "next_run": "2026-09-30T04:49:52.112Z",
         "next_refused": null,
         "last_run": null,
         "is_default": true,
@@ -46,7 +46,7 @@
           "value": false,
           "origin": "default"
         },
-        "next_run": "2026-09-27T04:18:49.902Z",
+        "next_run": "2026-09-30T04:49:52.112Z",
         "next_refused": null,
         "last_run": null,
         "is_default": true,
@@ -74,11 +74,11 @@
           "value": false,
           "origin": "default"
         },
-        "next_run": "2026-09-28T01:00:00.000Z",
+        "next_run": "2026-10-01T01:00:00.000Z",
         "next_refused": null,
         "last_run": {
-          "run_id": "7",
-          "at": "2026-09-27T04:18:49.512Z",
+          "run_id": "8",
+          "at": "2026-09-30T04:49:51.757Z",
           "ok": false,
           "outcome": null,
           "cost_usd": null,
@@ -134,11 +134,11 @@
           "value": false,
           "origin": "default"
         },
-        "next_run": "2026-09-28T11:00:00.000Z",
+        "next_run": "2026-09-30T11:00:00.000Z",
         "next_refused": null,
         "last_run": {
-          "run_id": "8",
-          "at": "2026-09-27T04:18:49.512Z",
+          "run_id": "9",
+          "at": "2026-09-30T04:49:51.757Z",
           "ok": true,
           "outcome": "silent",
           "cost_usd": null,
@@ -158,7 +158,12 @@
           },
           "origin": "default"
         },
-        "config": {},
+        "config": {
+          "template": {
+            "value": "Templates/Brief.md",
+            "origin": "default"
+          }
+        },
         "actor": null,
         "task": null,
         "grants": null,
@@ -184,11 +189,11 @@
           "value": false,
           "origin": "default"
         },
-        "next_run": "2026-09-28T03:00:00.000Z",
+        "next_run": "2026-10-01T03:00:00.000Z",
         "next_refused": null,
         "last_run": {
-          "run_id": "6",
-          "at": "2026-09-27T04:18:49.512Z",
+          "run_id": "7",
+          "at": "2026-09-30T04:49:51.757Z",
           "ok": true,
           "outcome": "acted",
           "cost_usd": null,
@@ -234,7 +239,7 @@
           "value": false,
           "origin": "default"
         },
-        "next_run": "2026-09-28T03:00:00.000Z",
+        "next_run": "2026-10-01T03:00:00.000Z",
         "next_refused": null,
         "last_run": null,
         "is_default": true,
@@ -281,13 +286,41 @@
         }
       },
       {
+        "name": "session-fold",
+        "title": "Session Fold",
+        "paused": {
+          "value": false,
+          "origin": "default"
+        },
+        "next_run": "2026-09-30T04:49:52.112Z",
+        "next_refused": null,
+        "last_run": null,
+        "is_default": true,
+        "held": null,
+        "describe": "every 1h",
+        "kind": "routine",
+        "source": "product",
+        "schedule": {
+          "value": {
+            "every": "1h"
+          },
+          "origin": "default"
+        },
+        "config": {},
+        "actor": null,
+        "task": null,
+        "grants": null,
+        "days": null,
+        "time_zone": null
+      },
+      {
         "name": "session-purge",
         "title": "Session Purge",
         "paused": {
           "value": false,
           "origin": "default"
         },
-        "next_run": "2026-09-27T08:00:00.000Z",
+        "next_run": "2026-09-30T08:00:00.000Z",
         "next_refused": null,
         "last_run": null,
         "is_default": true,
@@ -345,9 +378,16 @@
           "value": false,
           "origin": "default"
         },
-        "next_run": "2026-09-28T12:00:00.000Z",
+        "next_run": "2026-09-30T12:00:00.000Z",
         "next_refused": null,
-        "last_run": null,
+        "last_run": {
+          "run_id": "11",
+          "at": "2026-09-30T04:49:51.757Z",
+          "ok": true,
+          "outcome": "acted",
+          "cost_usd": "0.001900",
+          "error": null
+        },
         "is_default": true,
         "held": null,
         "describe": "working days at 08:00",
@@ -397,7 +437,7 @@
           "value": false,
           "origin": "default"
         },
-        "next_run": "2026-09-27T10:00:00.000Z",
+        "next_run": "2026-09-30T10:00:00.000Z",
         "next_refused": null,
         "last_run": null,
         "is_default": true,
@@ -491,7 +531,7 @@
           "value": false,
           "origin": "default"
         },
-        "next_run": "2026-09-27T22:00:00.000Z",
+        "next_run": "2026-10-04T22:00:00.000Z",
         "next_refused": null,
         "last_run": null,
         "is_default": true,
@@ -534,7 +574,7 @@
           "value": false,
           "origin": "default"
         },
-        "next_run": "2026-09-27T04:18:49.902Z",
+        "next_run": "2026-09-30T04:49:52.112Z",
         "next_refused": null,
         "last_run": null,
         "is_default": true,
@@ -549,13 +589,55 @@
         "raise": {}
       },
       {
+        "name": "eventkit-calendar",
+        "title": "Calendar",
+        "paused": {
+          "value": false,
+          "origin": "default"
+        },
+        "next_run": "2026-09-30T04:49:52.112Z",
+        "next_refused": null,
+        "last_run": null,
+        "is_default": true,
+        "held": null,
+        "describe": "every 5m",
+        "kind": "sync",
+        "connection": null,
+        "every": {
+          "value": "5m",
+          "origin": "default"
+        },
+        "raise": {}
+      },
+      {
+        "name": "caldav-calendar",
+        "title": "CalDAV Calendar",
+        "paused": {
+          "value": false,
+          "origin": "default"
+        },
+        "next_run": "2026-09-30T04:49:52.112Z",
+        "next_refused": null,
+        "last_run": null,
+        "is_default": true,
+        "held": null,
+        "describe": "every 15m",
+        "kind": "sync",
+        "connection": null,
+        "every": {
+          "value": "15m",
+          "origin": "default"
+        },
+        "raise": {}
+      },
+      {
         "name": "github-state",
         "title": "GitHub",
         "paused": {
           "value": false,
           "origin": "default"
         },
-        "next_run": "2026-09-27T04:18:49.902Z",
+        "next_run": "2026-09-30T04:49:52.112Z",
         "next_refused": null,
         "last_run": null,
         "is_default": false,
@@ -579,13 +661,60 @@
         }
       },
       {
+        "name": "ics-calendar",
+        "title": "Calendar Feed",
+        "paused": {
+          "value": false,
+          "origin": "default"
+        },
+        "next_run": "2026-09-30T04:49:52.112Z",
+        "next_refused": null,
+        "last_run": null,
+        "is_default": true,
+        "held": null,
+        "describe": "every 15m",
+        "kind": "sync",
+        "connection": null,
+        "every": {
+          "value": "15m",
+          "origin": "default"
+        },
+        "raise": {}
+      },
+      {
+        "name": "linear",
+        "title": "Linear",
+        "paused": {
+          "value": false,
+          "origin": "default"
+        },
+        "next_run": "2026-09-30T04:49:52.112Z",
+        "next_refused": null,
+        "last_run": null,
+        "is_default": true,
+        "held": null,
+        "describe": "every 15m",
+        "kind": "sync",
+        "connection": null,
+        "every": {
+          "value": "15m",
+          "origin": "default"
+        },
+        "raise": {
+          "assigned": {
+            "value": true,
+            "origin": "default"
+          }
+        }
+      },
+      {
         "name": "devin-knowledge",
         "title": "Devin Knowledge",
         "paused": {
           "value": false,
           "origin": "default"
         },
-        "next_run": "2026-09-27T04:18:49.902Z",
+        "next_run": "2026-09-30T04:49:52.112Z",
         "next_refused": null,
         "last_run": null,
         "is_default": true,
@@ -606,7 +735,7 @@
           "value": false,
           "origin": "default"
         },
-        "next_run": "2026-09-27T04:18:49.902Z",
+        "next_run": "2026-09-30T04:49:52.112Z",
         "next_refused": null,
         "last_run": null,
         "is_default": true,
@@ -624,6 +753,6 @@
     "timezone": "America/New_York",
     "problems": [],
     "errors": [],
-    "as_of": "2026-09-27T04:18:49.905Z"
+    "as_of": "2026-09-30T04:49:52.114Z"
   }
 }

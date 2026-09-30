@@ -4,20 +4,20 @@
   "ticket": null,
   "request": {
     "method": "GET",
-    "path": "/api/dispatches/4",
+    "path": "/api/dispatches/5",
     "body": null,
     "idempotency_key": null
   },
   "status": 200,
   "body": {
-    "work_id": 4,
-    "artifact": "art_01M3FYT8N8HRG4S2W4Q0GN28F1",
-    "version": "ver_01M3FYT8NB0W22G5J1H3A71PTY",
+    "work_id": 5,
+    "artifact": "art_01M3RABJAG6CMDVZX5F7YCR8KW",
+    "version": "ver_01M3RABJAKM99M4CHEYREJKCBT",
     "to_agent": "cursor",
     "from": "user",
     "threads": [
       {
-        "id": "cmt_01M3FYT8NVNX3ZGBZH481KTHGE",
+        "id": "cmt_01M3RABJAZCEKEX9QP4BD5G79R",
         "state": "open"
       }
     ],

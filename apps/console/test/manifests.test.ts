@@ -198,6 +198,10 @@ describe("shipped manifests schedule through the runner", () => {
       // not a §2.5 default: T3-10's fold of the session archive, hourly so a
       // turn is folded within hours of going quiet — before any retention
       "session-fold": "every 1h",
+      // not a §2.5 default: T8-4's recording retention, hourly — the Mac
+      // enforces the audio's 30-day ceiling itself; this reports ingestion
+      // and deletes a transcript on its 30th day
+      "recording-retention": "every 1h",
       // not a §2.5 default: §2.20's daily Update Check (T2-18), in the same
       // closed time-of-day shape — every day at 06:00
       "update-check": "every day at 06:00",
@@ -224,6 +228,7 @@ describe("shipped manifests schedule through the runner", () => {
       ["Knowledge Fold", "every day at 21:00", "2026-09-20 21:00", true],
       ["Morning Brief", "working days at 07:00", "2026-09-21 07:00", true], // Monday — Sunday is not a working day
       ["Tomorrow's Plan", "the eve of working days at 23:00", "2026-09-20 23:00", true], // Sunday plans Monday
+      ["Recording Retention", "every 1h", "2026-09-20 12:00", true], // T8-4; never run: due now
       ["Reply Review", "every day at 23:00", "2026-09-20 23:00", true],
       ["Session Fold", "every 1h", "2026-09-20 12:00", true], // T3-10; never run: due now
       ["Session Purge", "every day at 04:00", "2026-09-21 04:00", true], // T3-9's archive retention; Monday 04:00 is the next 04:00 after Sunday noon

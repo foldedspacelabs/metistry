@@ -402,7 +402,7 @@ describe("the views split out of app.js (T7-3a)", () => {
   });
 
   it("the shell imports the views; a view never imports the shell", () => {
-    expect(SRC).toContain('import { mountNeedsYou } from "./needs-you.js";');
+    expect(SRC).toContain('import { mountNeedsYou, needsYouRoute } from "./needs-you.js";');
     expect(SRC).toContain('import { mountToday } from "./today.js";');
     expect(SRC).toContain('import { artifactRoute, mountWork, roomRoute } from "./work.js";');
     expect(SRC).toContain('import { mountKnowledge } from "./knowledge.js";');

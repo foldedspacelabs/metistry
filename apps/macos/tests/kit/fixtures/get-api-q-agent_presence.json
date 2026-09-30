@@ -12,6 +12,18 @@
   "body": {
     "rows": [
       {
+        "id": "assistant",
+        "display_name": "assistant (internal)",
+        "kind": "internal",
+        "last_seen_at": null,
+        "projects": [],
+        "current_claims": [],
+        "interrupted_claims": [],
+        "blocked_bundles": [],
+        "spend_today_usd": 0.0042,
+        "state": "working"
+      },
+      {
         "id": "cursor",
         "display_name": "Cursor",
         "kind": "external",
@@ -48,8 +60,20 @@
         "blocked_bundles": [],
         "spend_today_usd": 0,
         "state": "idle"
+      },
+      {
+        "id": "researcher",
+        "display_name": "researcher (crew, example)",
+        "kind": "crew",
+        "last_seen_at": null,
+        "projects": [],
+        "current_claims": [],
+        "interrupted_claims": [],
+        "blocked_bundles": [],
+        "spend_today_usd": 0,
+        "state": "idle"
       }
     ],
-    "as_of": "2026-09-26T22:54:15.273Z"
+    "as_of": "2026-09-30T04:49:52.093Z"
   }
 }

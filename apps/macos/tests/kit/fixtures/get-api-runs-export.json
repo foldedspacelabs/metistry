@@ -11,8 +11,8 @@
   "status": 200,
   "body_ndjson": [
     {
-      "instance_id": "aaa6dc35-5b12-4dc7-bc12-fb965ae9f707",
-      "id": "9",
+      "instance_id": "9198ee4a-cbb7-426d-9897-be30bb3ab31b",
+      "id": "10",
       "ts": {},
       "component": "crew:fixtures",
       "kind": "crew_run",
@@ -30,52 +30,55 @@
       "meta": {
         "tier": "deep"
       },
-      "cursor": "2026-09-01 12:00:00-04|9"
+      "cursor": "2026-09-01 12:00:00+00|10"
     },
     {
-      "instance_id": "aaa6dc35-5b12-4dc7-bc12-fb965ae9f707",
+      "instance_id": "9198ee4a-cbb7-426d-9897-be30bb3ab31b",
+      "id": "5",
+      "ts": {},
+      "component": "egress-proxy",
+      "kind": "egress",
+      "session_id": null,
+      "tool": null,
+      "model": null,
+      "tokens_in": null,
+      "tokens_out": null,
+      "cost_usd": null,
+      "duration_ms": null,
+      "started_at": null,
+      "finished_at": null,
+      "ok": true,
+      "error": null,
+      "meta": {
+        "secrets": [
+          "***REDACTED***"
+        ]
+      },
+      "cursor": "2026-09-28 13:00:02+00|5"
+    },
+    {
+      "instance_id": "9198ee4a-cbb7-426d-9897-be30bb3ab31b",
       "id": "1",
       "ts": {},
       "component": "assistant",
       "kind": "turn",
       "session_id": null,
       "tool": null,
-      "model": "gemma",
-      "tokens_in": "***REDACTED***",
-      "tokens_out": "***REDACTED***",
-      "cost_usd": "0.004200",
-      "duration_ms": 2300,
+      "model": null,
+      "tokens_in": null,
+      "tokens_out": null,
+      "cost_usd": null,
+      "duration_ms": 1800,
       "started_at": null,
       "finished_at": null,
       "ok": true,
       "error": null,
       "meta": {
         "tier": "default",
-        "turn_id": "turn-fvwkBMzs"
+        "turn_id": "turn-7DVv1J4d",
+        "message_id": "1"
       },
-      "cursor": "2026-09-27 15:30:28.761975-04|1"
-    },
-    {
-      "instance_id": "aaa6dc35-5b12-4dc7-bc12-fb965ae9f707",
-      "id": "2",
-      "ts": {},
-      "component": "assistant",
-      "kind": "tool",
-      "session_id": null,
-      "tool": "knowledge_search",
-      "model": null,
-      "tokens_in": null,
-      "tokens_out": null,
-      "cost_usd": null,
-      "duration_ms": 12,
-      "started_at": null,
-      "finished_at": null,
-      "ok": true,
-      "error": null,
-      "meta": {
-        "turn_id": "turn-fvwkBMzs"
-      },
-      "cursor": "2026-09-27 15:30:28.762506-04|2"
+      "cursor": "2026-09-30 04:49:51.754632+00|1"
     }
   ]
 }

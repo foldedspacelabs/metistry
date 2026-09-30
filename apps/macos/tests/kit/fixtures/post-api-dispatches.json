@@ -6,10 +6,10 @@
     "method": "POST",
     "path": "/api/dispatches",
     "body": {
-      "artifact": "art_01M3G4NMXMNV51E19PMRCARA23",
-      "version": "ver_01M3G4NMXQ1DY61VBBPM145FXV",
+      "artifact": "art_01M3RABJAG6CMDVZX5F7YCR8KW",
+      "version": "ver_01M3RABJAKM99M4CHEYREJKCBT",
       "thread_ids": [
-        "cmt_01M3G4NMY72YF8HCT4GE5BMSMB"
+        "cmt_01M3RABJAZCEKEX9QP4BD5G79R"
       ],
       "to_agent": "cursor",
       "message": "One comment to address."
@@ -20,8 +20,8 @@
   "body": {
     "route": "work",
     "work": {
-      "id": 4,
-      "title": "review: metistry/store-interface ver_01M3G4NMXQ1DY61VBBPM145FXV (1 thread)",
+      "id": 5,
+      "title": "review: metistry/store-interface ver_01M3RABJAKM99M4CHEYREJKCBT (1 thread)",
       "project": "metistry",
       "area": null,
       "kind": "review",
@@ -36,38 +36,38 @@
       "history": [
         {
           "op": "create",
-          "ts": "2026-09-27T00:36:35.410Z",
+          "ts": "2026-09-30T04:49:51.972Z",
           "agent": "user"
         }
       ],
       "created_by": "user",
       "closed_at": null,
-      "created_at": "2026-09-27T00:36:35.410Z",
-      "updated_at": "2026-09-27T00:36:35.410Z",
+      "created_at": "2026-09-30T04:49:51.972Z",
+      "updated_at": "2026-09-30T04:49:51.972Z",
       "meta": {
         "bundle": {
           "from": "user",
           "links": {
-            "review": "http://127.0.0.1:8080/#/artifacts/art_01M3G4NMXMNV51E19PMRCARA23/ver_01M3G4NMXQ1DY61VBBPM145FXV/review",
-            "version": "http://127.0.0.1:8080/#/artifacts/art_01M3G4NMXMNV51E19PMRCARA23/ver_01M3G4NMXQ1DY61VBBPM145FXV",
-            "artifact": "http://127.0.0.1:8080/#/artifacts/art_01M3G4NMXMNV51E19PMRCARA23"
+            "review": "http://127.0.0.1:8080/#/artifacts/art_01M3RABJAG6CMDVZX5F7YCR8KW/ver_01M3RABJAKM99M4CHEYREJKCBT/review",
+            "version": "http://127.0.0.1:8080/#/artifacts/art_01M3RABJAG6CMDVZX5F7YCR8KW/ver_01M3RABJAKM99M4CHEYREJKCBT",
+            "artifact": "http://127.0.0.1:8080/#/artifacts/art_01M3RABJAG6CMDVZX5F7YCR8KW"
           },
           "module": "artifacts",
           "message": "One comment to address.",
-          "version": "ver_01M3G4NMXQ1DY61VBBPM145FXV",
-          "artifact": "art_01M3G4NMXMNV51E19PMRCARA23",
+          "version": "ver_01M3RABJAKM99M4CHEYREJKCBT",
+          "artifact": "art_01M3RABJAG6CMDVZX5F7YCR8KW",
           "to_agent": "cursor",
           "thread_ids": [
-            "cmt_01M3G4NMY72YF8HCT4GE5BMSMB"
+            "cmt_01M3RABJAZCEKEX9QP4BD5G79R"
           ]
         }
       },
       "description": null
     },
     "links": {
-      "artifact": "http://127.0.0.1:8080/#/artifacts/art_01M3G4NMXMNV51E19PMRCARA23",
-      "version": "http://127.0.0.1:8080/#/artifacts/art_01M3G4NMXMNV51E19PMRCARA23/ver_01M3G4NMXQ1DY61VBBPM145FXV",
-      "review": "http://127.0.0.1:8080/#/artifacts/art_01M3G4NMXMNV51E19PMRCARA23/ver_01M3G4NMXQ1DY61VBBPM145FXV/review"
+      "artifact": "http://127.0.0.1:8080/#/artifacts/art_01M3RABJAG6CMDVZX5F7YCR8KW",
+      "version": "http://127.0.0.1:8080/#/artifacts/art_01M3RABJAG6CMDVZX5F7YCR8KW/ver_01M3RABJAKM99M4CHEYREJKCBT",
+      "review": "http://127.0.0.1:8080/#/artifacts/art_01M3RABJAG6CMDVZX5F7YCR8KW/ver_01M3RABJAKM99M4CHEYREJKCBT/review"
     },
     "queued": null
   }

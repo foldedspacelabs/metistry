@@ -48,6 +48,9 @@ const BOARD = fixture<{ rows: Card[]; as_of: string }>("get-api-q-board");
 const PROJECTS = fixture<{ projects: Record<string, unknown>[] }>("get-api-projects");
 const COMMENTS = fixture<{ threads: Record<string, unknown>[] }>("get-api-artifacts-id-comments");
 const FILE = fixture<{ path: string; content: string }>("get-api-artifacts-id-versions-version-file");
+// the recorded review card waiting on its owner — found by its column, not its id,
+// which moves whenever the recorder seeds another task ahead of it (X-29)
+const ASSIGNED = BOARD.body.rows.find((r) => r.column === "assigned")!.id;
 const cardOf = (id: string, patch: Partial<Card> = {}): Card => ({ ...structuredClone(BOARD.body.rows.find((r) => r.id === id)!), ...patch });
 
 afterEach(() => vi.unstubAllGlobals());
@@ -91,7 +94,7 @@ describe("an illegal move is listed disabled with its reason (screen 18 §5)", (
   });
 
   it("Assigned: clear the name or claim it", () => {
-    const rows = listed(cardOf("4"));
+    const rows = listed(cardOf(ASSIGNED));
     expect(rows.find((r) => r.column === "backlog")).toMatchObject({ door: true, says: "clears cursor's name" });
     expect(rows.find((r) => r.column === "in_progress")).toMatchObject({ door: true, says: "you claim it" });
     expect(rows.filter((r) => r.disabled).map((r) => r.column)).toEqual(["blocked", "done"]);
@@ -202,7 +205,7 @@ describe("Move to… offers exactly the moves the service accepts", () => {
     expect(boardRoute("close", card, {})).toEqual(["/api/tasks/1", { method: "PATCH", body: '{"status":"closed"}' }]);
     expect(boardRoute("claim", card, {})).toEqual(["/api/tasks/1/claim", { method: "POST", body: "{}" }]);
     expect(boardRoute("release", card, {})).toEqual(["/api/tasks/1/release", { method: "POST", body: "{}" }]);
-    expect(boardHome(cardOf("4"))).toBe("assigned");
+    expect(boardHome(cardOf(ASSIGNED))).toBe("assigned");
     expect(boardHome(cardOf("1"))).toBe("backlog");
   });
 });
@@ -501,14 +504,14 @@ describe("an artifact's threads become counts on their lines, opening a sheet", 
     expect(sheet).not.toContain("<img");
     expect(sheet).toContain('data-act="resolve"');
     expect(sheet).toContain('<div class="body agent-prose">done</div>'); // an agent's reply in the serif (C32)
-    expect(sheet).toContain('data-reply="cmt_01M3FYT8NVNX3ZGBZH481KTHGE"');
+    expect(sheet).toContain(`data-reply="${String(threads[0]!.id)}"`);
   });
 
   it("a thread on no line of this file is listed under the file, never lost", () => {
     const loose = { ...threads[0]!, id: "cmt_loose", anchor: null, path: null };
     const html = otherThreadsHtml([threads[0]!, loose], "notes.md", threadsByLine([threads[0]!, loose], "notes.md"));
     expect(html).toContain('data-thread="cmt_loose"');
-    expect(html).not.toContain('data-thread="cmt_01M3FYT8NVNX3ZGBZH481KTHGE"');
+    expect(html).not.toContain(`data-thread="${String(threads[0]!.id)}"`);
   });
 
   it("the links a proposal carries still open the artifact and the room", () => {

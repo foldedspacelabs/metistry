@@ -128,7 +128,9 @@ import Testing
     #expect(model.isWorking)
     // one day, then the four turns and what the working one set going
     let rows = model.rows(calendar: utcCalendar)
-    #expect(rows.map(\.id) == ["day:2026-09-28", "in:1", "out:1", "in:2", "turn:2", "out:2"], "rows: \(rows.map(\.id))")
+    // the day the recording sent them — its wall clock's, so read from the fixture (X-29)
+    let sent = try #require(ConsoleFixture.load("get-api-messages").replyJSON?["messages"]?.arrayValue?.last?["ts"]?.stringValue)
+    #expect(rows.map(\.id) == ["day:\(sent.prefix(10))", "in:1", "out:1", "in:2", "turn:2", "out:2"], "rows: \(rows.map(\.id))")
     // an `alert` says what it is; a reply does not
     #expect(ChatMarks.attribution(name: "Aide", at: nil, kind: "alert", clock: ClockTime(timeZone: utc)).map(\.text) == ["Aide", "alert"])
     #expect(ChatMarks.attribution(name: "Aide", at: nil, kind: "reply", clock: ClockTime(timeZone: utc)).map(\.text) == ["Aide"])

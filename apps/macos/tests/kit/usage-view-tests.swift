@@ -1,8 +1,9 @@
 // Usage — the gauge's popover (screen 17, T5-6), against the recorded
 // fixtures (U9): `GET /api/compute` and the `spend`, `spend_by_actor` and
-// `aws_costs_daily` queries, recorded on 26 September from a scratch console
-// seeded with a crew's call on the 1st, a routine's and chat's today, one call
-// nothing could price, and two days of AWS.
+// `aws_costs_daily` queries, recorded from a scratch console seeded with a
+// crew's call on the 1st, a routine's and chat's today, one call nothing could
+// price, and two days of AWS. "Today" is the day of the recording, so it is
+// read from the fixture rather than written here (X-29).
 //
 // The ticket's own test is the first: **no projection drawn** — the chart
 // stops at today, and a row the server dates after today is not drawn.
@@ -13,10 +14,11 @@ import Testing
 @testable import MetistryKit
 
 enum UsageFixture {
-    /// The console that recorded the fixtures ran in New York; so does this.
+    /// The recorder runs its console in UTC (record-client-fixtures.mjs pins
+    /// TZ, and CI's Postgres is UTC); so does this.
     static let calendar: Calendar = {
         var c = Calendar(identifier: .gregorian)
-        c.timeZone = TimeZone(identifier: "America/New_York")!
+        c.timeZone = TimeZone(identifier: "UTC")!
         return c
     }()
 
@@ -26,8 +28,26 @@ enum UsageFixture {
         calendar.date(from: DateComponents(year: 2026, month: month, day: day, hour: hour))!
     }
 
-    /// The day the fixtures were recorded.
-    static let now = date(26)
+    /// The day the fixtures were recorded: the spend row the console marked
+    /// today.
+    static let today: DateComponents = {
+        let rows = (try? ConsoleFixture.load("get-api-q-spend"))?.replyJSON?["rows"]?.arrayValue ?? []
+        let day = rows.first { $0["is_today"]?.boolValue == true }?["day"]?.stringValue ?? ""
+        return UsageReport.calendarDay(day, calendar: calendar) ?? DateComponents(year: 1970, month: 1, day: 1)
+    }()
+
+    /// Noon on the day the fixtures were recorded.
+    static let now = date(today.day!, month: today.month!)
+
+    /// How the day axis spells the recording's month ("Sep").
+    static let month: String = {
+        let f = DateFormatter()
+        f.locale = locale
+        f.calendar = calendar
+        f.timeZone = calendar.timeZone
+        f.dateFormat = "MMM"
+        return f.string(from: now)
+    }()
 
     @MainActor
     static func model() async throws -> (UsageModel, FixtureConsole) {
@@ -49,14 +69,16 @@ enum UsageFixture {
 @Test func theDayChartStopsAtTodayAndDrawsNoProjection() async throws {
     let report = try await UsageFixture.report()
     let days = try #require(report.days.value)
-    #expect(days.count == 26, "the 1st to today, and not a day more")
-    #expect(days.map(\.day) == Array(1...26))
-    #expect(days.last?.label == "Sep 26")
-    #expect(days.first?.label == "Sep 1")
+    let today = try #require(UsageFixture.today.day)
+    try #require(today > 1, "a recording on the 1st puts the crew's call and today's on one day")
+    #expect(days.count == today, "the 1st to today, and not a day more")
+    #expect(days.map(\.day) == Array(1...today))
+    #expect(days.last?.label == "\(UsageFixture.month) \(today)")
+    #expect(days.first?.label == "\(UsageFixture.month) 1")
     #expect(abs(days[0].amount - 0.0184) < 1e-9, "the crew's call on the 1st")
-    #expect(abs(days[25].amount - 0.0061) < 1e-9, "chat and the routine today; the unpriced call adds $0")
-    #expect(days[1..<25].allSatisfy { $0.amount == 0 }, "a day with no rows is a day with nothing spent")
-    #expect(report.peakLine == "peak $0.02 · Sep 1")
+    #expect(abs(days[today - 1].amount - 0.0061) < 1e-9, "chat and the routine today; the unpriced call adds $0")
+    #expect(days[1..<(today - 1)].allSatisfy { $0.amount == 0 }, "a day with no rows is a day with nothing spent")
+    #expect(report.peakLine == "peak $0.02 · \(UsageFixture.month) 1")
 
     // a row the server dates after the client's today (clocks either side of
     // midnight) is not a bar: nothing stands for a day that has not happened
@@ -66,7 +88,7 @@ enum UsageFixture {
             SpendRow(day: "2026-09-27", isToday: true, isThisMonth: true, costUSD: 4),
             SpendRow(day: "2026-09-26", isToday: false, isThisMonth: true, costUSD: 1),
         ])),
-        actors: .waiting, aws: .waiting, now: UsageFixture.now, calendar: UsageFixture.calendar, locale: UsageFixture.locale
+        actors: .waiting, aws: .waiting, now: UsageFixture.date(26), calendar: UsageFixture.calendar, locale: UsageFixture.locale
     )
     let drawn = try #require(ahead.days.value)
     #expect(drawn.count == 26)
@@ -176,11 +198,12 @@ enum UsageFixture {
 @Test func theModelAsksEachReadBackToTheFirst() async throws {
     let (model, console) = try await UsageFixture.model()
     let paths = Set(console.calls.map(\.path))
+    let window = try #require(UsageFixture.today.day) - 1 // the days before today, back to the 1st
     #expect(paths == [
         "/api/compute",
-        "/api/q/spend?days=25",
-        "/api/q/spend_by_actor?days=25",
-        "/api/q/aws_costs_daily?days=25",
+        "/api/q/spend?days=\(window)",
+        "/api/q/spend_by_actor?days=\(window)",
+        "/api/q/aws_costs_daily?days=\(window)",
     ], "calls: \(paths.sorted())")
     #expect(console.calls.allSatisfy { $0.servedBy != nil })
     #expect(model.compute.value != nil)

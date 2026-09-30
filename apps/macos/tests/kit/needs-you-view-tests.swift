@@ -527,8 +527,13 @@ import Testing
 private let utc = TimeZone(identifier: "UTC")!
 /// The clock the scripted queues are read at.
 private let recordedNow = WireTime.date("2026-09-27T02:37:12.911Z")!
-/// Five minutes after the recorded queue's newest rows were raised.
-private let fixtureNow = WireTime.date("2026-09-27T03:24:34.940Z")!
+/// Five minutes after the recorded queue's newest rows were raised — read from
+/// the fixture, since every recording raises them at its own wall clock (X-29).
+private let fixtureNow: Date = {
+    let rows = (try? ConsoleFixture.load("get-api-proposals"))?.replyJSON?["proposals"]?.arrayValue ?? []
+    let newest = rows.compactMap { $0["ts"]?.stringValue.flatMap(WireTime.date) }.max()
+    return newest!.addingTimeInterval(5 * 60)
+}()
 
 /// What every text field in a window says it is. The probe reads AppKit's
 /// attribute form, where a SwiftUI text field's label does not appear (its

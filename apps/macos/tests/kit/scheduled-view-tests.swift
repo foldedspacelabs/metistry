@@ -1,4 +1,4 @@
-// Scheduled (T6-6). Built against the recorded fixtures first — T3-3's eleven
+// Scheduled (T6-6). Built against the recorded fixtures first — T3-3's
 // doors as the console served them, `GET /api/runs/:id` and `GET /api/whoami`
 // — and a scripted console where a fixture cannot say it (a routine that
 // ticked silently all day, a remote client, a sync that stopped, a console
@@ -42,7 +42,7 @@ import Testing
     // An interval routine is one row, in its own band, never an occurrence.
     let throughout = try #require(model.routineBands.first)
     #expect(throughout.title == ScheduledWords.throughoutTheDay)
-    #expect(throughout.rows.map(\.name) == ["inbox-drain", "claude-usage"])
+    #expect(throughout.rows.map(\.name) == ["inbox-drain", "session-fold", "claude-usage"])
     #expect(rows.filter { $0.name == "inbox-drain" }.map(\.kind) == [.throughout])
     // The week counts what the schedule places: five working days of the brief, whatever ticked.
     let week = model.week
@@ -163,9 +163,9 @@ import Testing
     #expect(digest.runBy == "researcher" && digest.runByIsAgent)
     #expect(digest.glyph == nil, "it has not run yet")
     #expect(digest.detail == nil, "nothing holds it")
-    // The tabs' counts.
-    #expect(model.count(.routines) == 11)
-    #expect(model.count(.syncs) == 4)
+    // The tabs' counts: the recorder seeds twelve routines and eight syncs.
+    #expect(model.count(.routines) == 12)
+    #expect(model.count(.syncs) == 8)
 }
 
 @MainActor
@@ -195,7 +195,7 @@ import Testing
     defer { withExtendedLifetime(session) {} }
     let rows = model.routineBands.flatMap(\.rows)
     func spoken(_ name: String) -> ScheduledRowPresentation? { rows.first { $0.name == name }.flatMap { model.presentation($0, assistantName: "Aide") } }
-    #expect(spoken("standup")?.spoken == "8:00 AM, Standup, default, run by Aide, working days at 8 AM. Hasn't run yet")
+    #expect(spoken("standup")?.spoken == "8:00 AM, Standup, default, run by Aide, working days at 8 AM. Succeeded", "the recorder seeds a standup run")
     #expect(spoken("plan-tomorrow")?.spoken == "11:00 PM, Tomorrow's Plan, default, run by Aide, evenings before working days at 11 PM. Succeeded")
     let fold = try #require(spoken("knowledge-fold"))
     #expect(fold.spoken == "9:00 PM, Knowledge Fold, default, run by Aide, every day at 9 PM. Failed, vault bridge unreachable", "\(fold.spoken)")
@@ -277,9 +277,10 @@ import Testing
     #expect(reading.routine.schedule.origin == .default)
     #expect(reading.routine.timeZone == Sourced(value: "America/New_York", origin: .profile))
     #expect(reading.routine.config == [ScheduledConfigField(key: "template", value: "Templates/Brief.md", origin: .default)])
-    // The latest run is read for its steps.
-    #expect(console.calls.contains { $0.method == "GET" && $0.path == "/api/runs/8" })
-    let steps = try #require(model.steps[8]?.value)
+    // The latest run is read for its steps — the one the recorded list names.
+    let latest = try #require(routineFromListing("morning-brief")["last_run"]?["run_id"]?.stringValue.flatMap { Int($0) })
+    #expect(console.calls.contains { $0.method == "GET" && $0.path == "/api/runs/\(latest)" })
+    let steps = try #require(model.steps[latest]?.value)
     #expect(steps.model == "gemma")
 
     let tree = try await AccessibilityProbe.snapshot(detail(model).frame(width: 640, height: 1600))
@@ -363,7 +364,11 @@ import Testing
 @Test func aRoutineNotRunYetSaysSoWithItsFirstRunAndRunNow() async throws {
     let console = try ScheduledConsole()
     var standup = try detailBody("morning-brief")
-    standup["routine"] = try routineFromListing("standup")
+    var routine = try routineFromListing("standup").objectFields
+    // its first run after this screen's clock: Monday 8:00 in New York (the
+    // recording's own next_run is its wall clock's, X-29)
+    routine["next_run"] = .string("2026-09-28T12:00:00.000Z")
+    standup["routine"] = .object(routine)
     standup["history"] = .array([])
     console.serve("GET", "/api/scheduled/routines/standup", .object(standup))
     let (model, session) = scheduledModel(console)
@@ -387,7 +392,7 @@ import Testing
     let (model, console, session) = try await fixtureModel()
     defer { withExtendedLifetime(session) {} }
     model.tab = .syncs
-    #expect(model.syncRows.map(\.name) == ["aws-costs", "devin-knowledge", "devin-sessions", "github-state"])
+    #expect(model.syncRows.map(\.name) == ["aws-costs", "caldav-calendar", "eventkit-calendar", "ics-calendar", "devin-knowledge", "devin-sessions", "github-state", "linear"])
     let github = try #require(model.presentation(ScheduledRow(name: "github-state", kind: .sync), assistantName: "Aide"))
     #expect(github.spoken == "GitHub, from github, every 15 minutes, raises assigned, review requested. Hasn't run yet", "\(github.spoken)")
     let unconnected = try #require(model.presentation(ScheduledRow(name: "aws-costs", kind: .sync), assistantName: "Aide"))
@@ -513,7 +518,7 @@ import Testing
     for control in ["Show as Table", "Run Now, ⌘R", "Pause, ⌥⌘P"] {
         #expect(tree.controlNames.contains(control), "controls: \(tree.controlNames)")
     }
-    #expect(tree.controlNames.contains { $0.hasPrefix("Routines 11") || $0 == "Show" }, "the tabs: \(tree.controlNames)")
+    #expect(tree.controlNames.contains { $0.hasPrefix("Routines 12") || $0 == "Show" }, "the tabs: \(tree.controlNames)")
     // the principal id is never a name on this screen
     #expect(!said.contains { $0.localizedCaseInsensitiveContains("run by assistant") }, "said: \(said)")
 }
@@ -601,7 +606,9 @@ import Testing
 
 // MARK: - Helpers
 
-/// The recorded list's `as_of`: Sunday 27 Sep 2026, 00:18 in New York.
+/// Sunday 27 Sep 2026, 00:18 in New York — the list's `as_of` when it was
+/// first recorded. The screen places each routine by its rule from this clock,
+/// so it stays put when a re-record moves the fixture's `as_of` (X-29).
 private let recordedNow = WireTime.date("2026-09-27T04:18:49.905Z")!
 
 private func repoRoot() -> URL {
@@ -619,7 +626,7 @@ private func fixtureModel() async throws -> (ScheduledModel, ScheduledConsole, C
     let console = try ScheduledConsole()
     let (model, session) = scheduledModel(console)
     await model.refreshIfDue()
-    #expect(model.listing?.routines.count == 11, "the recorded list")
+    #expect(model.listing?.routines.count == 12, "the recorded list")
     return (model, console, session)
 }
 

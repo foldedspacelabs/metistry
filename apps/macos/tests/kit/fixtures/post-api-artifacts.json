@@ -23,19 +23,19 @@
   "status": 201,
   "body": {
     "artifact": {
-      "id": "art_01M3FYT8N8HRG4S2W4Q0GN28F1",
+      "id": "art_01M3RABJAG6CMDVZX5F7YCR8KW",
       "project": "metistry",
       "slug": "store-interface",
       "kind": "markdown",
-      "current_version": "ver_01M3FYT8N761CDC5HKE1J3H2NZ",
+      "current_version": "ver_01M3RABJAG8C88BM1VZE7SY3XA",
       "visibility": "project",
       "created_by": "user",
-      "created_at": "2026-09-26T22:54:15.208Z",
-      "updated_at": "2026-09-26T22:54:15.208Z"
+      "created_at": "2026-09-30T04:49:51.952Z",
+      "updated_at": "2026-09-30T04:49:51.952Z"
     },
     "version": {
-      "id": "ver_01M3FYT8N761CDC5HKE1J3H2NZ",
-      "artifact_id": "art_01M3FYT8N8HRG4S2W4Q0GN28F1",
+      "id": "ver_01M3RABJAG8C88BM1VZE7SY3XA",
+      "artifact_id": "art_01M3RABJAG6CMDVZX5F7YCR8KW",
       "commit": null,
       "path_prefix": "Artifacts/metistry/store-interface",
       "manifest": {
@@ -47,14 +47,14 @@
       },
       "author_principal": "user",
       "author_kind": "user",
-      "message": "first cut (ver_01M3FYT8N761CDC5HKE1J3H2NZ)",
+      "message": "first cut (ver_01M3RABJAG8C88BM1VZE7SY3XA)",
       "idempotency_key": "fixture-store-interface-1",
-      "created_at": "2026-09-26T22:54:15.208Z"
+      "created_at": "2026-09-30T04:49:51.952Z"
     },
     "links": {
-      "artifact": "http://127.0.0.1:8080/#/artifacts/art_01M3FYT8N8HRG4S2W4Q0GN28F1",
-      "version": "http://127.0.0.1:8080/#/artifacts/art_01M3FYT8N8HRG4S2W4Q0GN28F1/ver_01M3FYT8N761CDC5HKE1J3H2NZ",
-      "review": "http://127.0.0.1:8080/#/artifacts/art_01M3FYT8N8HRG4S2W4Q0GN28F1/ver_01M3FYT8N761CDC5HKE1J3H2NZ/review"
+      "artifact": "http://127.0.0.1:8080/#/artifacts/art_01M3RABJAG6CMDVZX5F7YCR8KW",
+      "version": "http://127.0.0.1:8080/#/artifacts/art_01M3RABJAG6CMDVZX5F7YCR8KW/ver_01M3RABJAG8C88BM1VZE7SY3XA",
+      "review": "http://127.0.0.1:8080/#/artifacts/art_01M3RABJAG6CMDVZX5F7YCR8KW/ver_01M3RABJAG8C88BM1VZE7SY3XA/review"
     },
     "deduplicated": false
   }

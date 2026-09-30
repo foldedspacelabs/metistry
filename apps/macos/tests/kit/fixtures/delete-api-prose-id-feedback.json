@@ -4,7 +4,7 @@
   "ticket": null,
   "request": {
     "method": "DELETE",
-    "path": "/api/prose/1/feedback",
+    "path": "/api/prose/2/feedback",
     "body": null,
     "idempotency_key": null
   },

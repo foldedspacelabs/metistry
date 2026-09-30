@@ -250,7 +250,7 @@ private enum TasksService {
     let card = try #require(model.card(1))
     console.down = "connect ECONNREFUSED 127.0.0.1:1"
     await model.load()
-    #expect(model.panel == .board(staleSince: WireTime.date("2026-09-27T00:36:35.462Z")), "stale annotates; the last board stays")
+    #expect(model.panel == .board(staleSince: ConsoleFixture.asOf("get-api-q-board")), "stale annotates; the last board stays")
     #expect(model.dropTargets(for: card).isEmpty)
     #expect(model.moves(for: card).allSatisfy { $0.op == nil && $0.why == StateWords.unreachable })
 }
@@ -565,19 +565,22 @@ private enum TasksService {
 // MARK: - Helpers
 
 private let utc = TimeZone(identifier: "UTC")!
-/// Two hours and three quarters after the recorded board's `as_of`.
+/// The clock the scripted boards are read at.
 private let recordedNow = WireTime.date("2026-09-27T03:21:35.215Z")!
+/// Two hours and three quarters after the recorded board's `as_of` — read from
+/// the fixture, since every recording stamps its board at its own wall clock (X-29).
+private let fixtureNow = ConsoleFixture.asOf("get-api-q-board").addingTimeInterval(2 * 3600 + 45 * 60)
 
 @MainActor
-private func boardModel(_ console: any ConsoleCallTransport) -> (BoardModel, ConsoleSession) {
+private func boardModel(_ console: any ConsoleCallTransport, now: Date = recordedNow) -> (BoardModel, ConsoleSession) {
     let session = ConsoleSession(transport: console, management: nil)
-    return (BoardModel(session: session, timeZone: utc, now: { recordedNow }), session)
+    return (BoardModel(session: session, timeZone: utc, now: { now }), session)
 }
 
 @MainActor
 private func fixtureModel() async throws -> (BoardModel, FixtureConsole, ConsoleSession) {
     let console = try FixtureConsole.recorded()
-    let (model, session) = boardModel(console)
+    let (model, session) = boardModel(console, now: fixtureNow)
     await model.load()
     #expect(model.cards.count == 6, "the recorded board")
     return (model, console, session)

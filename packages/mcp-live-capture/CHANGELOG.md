@@ -1,5 +1,27 @@
 # @foldedspacelabs/metistry-mcp-live-capture
 
+## 0.16.0
+
+### Minor Changes
+
+- 89e9af5: *Window* and *Screen* recordings: `POST /recording/start` takes `mode` (`audio_only`, `window`, `screen`). For a picture, the helper presents the macOS picker (`SCContentSharingPicker` — one window or one display, the helper excluded, the choice fixed for the recording) and opens one `SCStream` from the filter the picker handed back, with `capturesAudio` and, on macOS 15, `captureMicrophone` (a second microphone session below that). A picture start names no content — `apps`, a window or display id, or any other field is refused `400` — and a cancelled picker records nothing; the helper has no code that constructs a content filter or lists what is on screen. Frames are kept at one a second as `screen.mp4` in the session directory and never leave the Mac; the transcript is delivered as before. `status` gains `senses` (`display`, `app_audio`, `microphone`), read from the open streams, for the bar's display glyph, and a picture the system stops ends the session as `picture_lost`. Also fixed: a stream reopened after a sleep wrote over the audio recorded before it; each reopen now writes beside the first file (`app-2.m4a`, …).
+- eadd0df: **A recording's retention and re-review (T8-4).** The recorder helper keeps a session's audio (and frames) until its transcript is ingested plus 7 days, never more than 30 days after it ended, and deletes this Mac's transcript copy at 30 days once delivered — on its own hourly clock, so the ceiling needs no console. The bridge gains `recording_review` (`GET /recording/review`, its third tool): a span of kept audio re-transcribed at the careful setting, answered as text with timestamps rebuilt field by field, never audio; after deletion it says when and why, and that the transcript remains. It joins core's `CREW_NEVER_TOOLS`. `POST /recording/retention` (bridge token, not a tool) takes the console's ingestion report, clamped to the delivery and to now; `POST /recording/purge` is Purge Now on the control credential. A Window / Screen session's frames (`screen.mp4`) go with its audio, and a span after a sleep is read from the file that holds it (`app-2.m4a`…), placed by when it was created.
+  
+  **Transcripts are filed at `Journal/Transcripts/<date>-<session>.md`** (Q29, X-73 folded in): an owner credential's transcript capture is placed there, create-only, in the owner's name, and records its `capture_sessions` row (migration 0033). `Journal/Transcripts/` is outside every default read grant — core's `underAreas` and mcp-brain's SQL `areaFilter` say the same thing. A capture can be placed at an exact path (`captureToInbox`'s `place`). The console serves `GET /api/recordings/:id` (owner reach) through the route-only `recording_state` query, and the hourly `recording-retention` routine rebuilds rows from the vault, records ingestion from the transcript's proposals, reports it to the Mac, and deletes a transcript on its 30th day as a commit in the owner's name, clearing its words from the inbox row and proposal. The crashed-recording report says where the transcript is saved.
+
+### Patch Changes
+
+- f58c163: **The floating bar (T8-5).** While the live-capture bridge answers on this Mac, a 34pt glass rail sits on the right edge of the main display — the mark, then Ask · Note · To-do, then Record — and the Capture menu's Ask, Note, To-do, Start Recording, Stop Recording and Hide Capture Bar light up with it (Stop only while recording). Note and To-do save with Return through the composer's own capture (one key minted once, the offline queue); during a recording each jot carries the session and its offset in seconds, the anchor the meeting's Approve promotes. Ask is the tail of the one conversation at 328pt, with Open in Chat past four lines. Record opens a sheet — Screen · Window · Audio only, the audio and microphone switches — and the start it sends names a mode and two switches, never a window or display: the recorder's macOS picker chooses. While a session runs the mark breathes (held still under Reduce Motion), the open senses sit beneath it, Record becomes Stop, and the two-hour reminder, a low disk and a session that ended by itself are said beside the rail. The bar presents the recorder's control key, read from the one login-Keychain item `metistry secrets mint METISTRY_LIVE_CAPTURE_CONTROL_TOKEN` writes, to the loopback bridge only; a missing, refused or read-only key turns Record off with the reason and the verbs that fix it, and is never retried on its own. `LiveCaptureClient` is typed to the shipped wire, and F-7's `.window(id:)` / `.screen(displayID:)` are gone. The live-capture README says where the bar's key comes from.
+- Updated dependencies [5a6ad9e]
+- Updated dependencies [822a0c7]
+- Updated dependencies [eadd0df]
+- Updated dependencies [e6f16eb]
+- Updated dependencies [0ff5643]
+- Updated dependencies [f6a8e5d]
+- Updated dependencies [cbfb1a9]
+- Updated dependencies [7b979ef]
+  - @foldedspacelabs/metistry-core@0.16.0
+
 ## 0.15.1
 
 ### Patch Changes

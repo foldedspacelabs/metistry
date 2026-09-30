@@ -1,6 +1,6 @@
 {
   "name": "@foldedspacelabs/metistry-mcp-apple-fm",
-  "version": "0.15.1",
+  "version": "0.16.0",
   "description": "Metistry Apple Foundation Models bridge: an OpenAI-compatible /v1 surface (runtime JSON schemas) plus free on-device classification, over the §4.3 wire contract (HTTP + bearer auth + check()). Ships a compiled Swift helper; no TCC grants required. Usable standalone.",
   "license": "Apache-2.0",
   "repository": { "type": "git", "url": "git+https://github.com/foldedspacelabs/metistry.git", "directory": "packages/mcp-apple-fm" },

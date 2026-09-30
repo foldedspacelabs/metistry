@@ -1,5 +1,0 @@
----
-"@metistry-apps/macos": minor
----
-
-Hot keys and the audit (T6-16). Settings ▸ Keyboard's *Shortcuts in any app* works: one switch, off by default, and five recorders — Ask, Note, To-do, Start Recording, Stop Recording, suggested on ⌃⌥⌘ A N T R S. Each row is checked as it is set — two of ⌃ ⌥ ⌘, none of this app's menu keys or another row's, none of macOS's own shortcuts (the symbolic-hotkeys domain: *macOS uses this to …*) — and registered with `RegisterEventHotKey`, whose `eventHotKeyExistsErr` reads *Another app already uses this. Pick another.* Nothing registers until every row is clear, and off registers nothing at all. Every key the app binds is now a row of one closed table (`hotkeys.swift`), held by a test that scans the sources; a key the design documents and the build does not bind says so, with why, on Help ▸ Keyboard Shortcuts. Chat's bare `/` is no longer bound (it is not in components-02's table). A new test names the accessibility probe for every view file and probes the ones nothing reached: the Status and log windows, the menu bar's menu, every wizard step, the CLI cards, the shared components and the Keyboard pane.

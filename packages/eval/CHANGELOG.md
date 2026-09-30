@@ -1,5 +1,20 @@
 # @metistry-apps/eval
 
+## 0.16.0
+
+### Patch Changes
+
+- Updated dependencies [5a6ad9e]
+- Updated dependencies [822a0c7]
+- Updated dependencies [eadd0df]
+- Updated dependencies [e6f16eb]
+- Updated dependencies [0ff5643]
+- Updated dependencies [f6a8e5d]
+- Updated dependencies [cbfb1a9]
+- Updated dependencies [7b979ef]
+  - @foldedspacelabs/metistry-core@0.16.0
+  - @foldedspacelabs/metistry-mcp-brain@0.16.0
+
 ## 0.15.1
 
 ### Patch Changes

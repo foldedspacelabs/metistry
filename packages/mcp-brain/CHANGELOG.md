@@ -1,5 +1,29 @@
 # @foldedspacelabs/metistry-mcp-brain
 
+## 0.16.0
+
+### Minor Changes
+
+- eadd0df: **A recording's retention and re-review (T8-4).** The recorder helper keeps a session's audio (and frames) until its transcript is ingested plus 7 days, never more than 30 days after it ended, and deletes this Mac's transcript copy at 30 days once delivered — on its own hourly clock, so the ceiling needs no console. The bridge gains `recording_review` (`GET /recording/review`, its third tool): a span of kept audio re-transcribed at the careful setting, answered as text with timestamps rebuilt field by field, never audio; after deletion it says when and why, and that the transcript remains. It joins core's `CREW_NEVER_TOOLS`. `POST /recording/retention` (bridge token, not a tool) takes the console's ingestion report, clamped to the delivery and to now; `POST /recording/purge` is Purge Now on the control credential. A Window / Screen session's frames (`screen.mp4`) go with its audio, and a span after a sleep is read from the file that holds it (`app-2.m4a`…), placed by when it was created.
+  
+  **Transcripts are filed at `Journal/Transcripts/<date>-<session>.md`** (Q29, X-73 folded in): an owner credential's transcript capture is placed there, create-only, in the owner's name, and records its `capture_sessions` row (migration 0033). `Journal/Transcripts/` is outside every default read grant — core's `underAreas` and mcp-brain's SQL `areaFilter` say the same thing. A capture can be placed at an exact path (`captureToInbox`'s `place`). The console serves `GET /api/recordings/:id` (owner reach) through the route-only `recording_state` query, and the hourly `recording-retention` routine rebuilds rows from the vault, records ingestion from the transcript's proposals, reports it to the Mac, and deletes a transcript on its 30th day as a commit in the owner's name, clearing its words from the inbox row and proposal. The crashed-recording report says where the transcript is saved.
+
+### Patch Changes
+
+- e6f16eb: Connections P3 (T4-10). **OAuth as a public client**: `metistry connections authorize <name>` signs a connection in — a listener on 127.0.0.1 for exactly one callback, the browser at the provider, the `state` checked before any code is exchanged, the code exchanged with its PKCE verifier through the egress door, and the refresh token kept in this instance's Keychain; the process that dials mints the access token at the door and holds it in memory. The client id comes from the connection type's manifest or is the owner's own (a secret, `--client-id-secret`); a custom connection carries its own client model (C118, core's `customOAuthClientSchema`); the broker redirect is modelled and refused. **Every HTTP auth shortcut dials** — Basic and OAuth join bearer and the API-key header. **Generated tools** for API (`get`, `request`), feed (`list_items`, `get_item`, `search_items`) and files (`list_files`, `read_file`, `search_files`, `read_page`) connections, served lazily through the proxy's pair and added at Ask First. **The console builds the connections pool** (open since #374, ruled 2026-09-30), so `connections_list` / `connections_call` answer on a live console; `metistry secrets sync --to env` now delivers the secrets of every connection the console dials. **The permissions table** draws each connection an actor reaches as a row with the new `proxy` provenance, *reached through Metistry*. `connections add` writes a sync's first `connection:` into `scheduled.yaml`. And a call whose arguments carry a `{{ secret.… }}` reference is refused (`secret_reference`) before anything is dialled — the door would have filled it.
+- Updated dependencies [5a6ad9e]
+- Updated dependencies [822a0c7]
+- Updated dependencies [eadd0df]
+- Updated dependencies [e6f16eb]
+- Updated dependencies [0ff5643]
+- Updated dependencies [f6a8e5d]
+- Updated dependencies [cbfb1a9]
+- Updated dependencies [7b979ef]
+  - @foldedspacelabs/metistry-core@0.16.0
+  - @foldedspacelabs/metistry-artifacts@0.16.0
+  - @foldedspacelabs/metistry-tasks@0.16.0
+  - @foldedspacelabs/metistry-queries@0.16.0
+
 ## 0.15.1
 
 ### Patch Changes

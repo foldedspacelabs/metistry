@@ -520,6 +520,12 @@ const componentCtx: ComponentCtx = {
   ...routineCapabilities(queries, vault),
   ...(process.env.METISTRY_EK_URL ? { ekUrl: process.env.METISTRY_EK_URL } : {}),
   ...(process.env.METISTRY_BRIDGE_TOKEN_EVENTKIT ? { ekToken: process.env.METISTRY_BRIDGE_TOKEN_EVENTKIT } : {}),
+  // Recording Retention (T8-4): the live-capture bridge and its bridge token —
+  // the routine reports ingestion to the Mac, which deletes the audio. Both or
+  // neither; absent, the Mac's own 30-day ceiling still holds.
+  ...(process.env.METISTRY_LIVE_CAPTURE_URL && process.env.METISTRY_BRIDGE_TOKEN_LIVE_CAPTURE
+    ? { liveCapture: { url: process.env.METISTRY_LIVE_CAPTURE_URL, token: process.env.METISTRY_BRIDGE_TOKEN_LIVE_CAPTURE } }
+    : {}),
   ...(process.env.METISTRY_GITHUB_TOKEN ? { githubToken: process.env.METISTRY_GITHUB_TOKEN } : {}),
   // A sync reading its connection (T4-24, packages/connections `sync.ts`):
   // the instance's catalog, read afresh per run, and the secrets `metistry

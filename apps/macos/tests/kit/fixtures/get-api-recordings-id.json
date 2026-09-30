@@ -1,17 +1,17 @@
 {
   "route": "GET /api/recordings/:id",
-  "source": "contract",
-  "ticket": "T8-4",
-  "note": "retention state: audio kept until ingested + 7 days, never more than 30 (§2.15)",
+  "source": "recorded",
+  "ticket": null,
   "request": {
     "method": "GET",
-    "path": "/api/recordings/rec-0928-standup",
+    "path": "/api/recordings/20260928-133000-00ab",
     "body": null,
     "idempotency_key": null
   },
   "status": 200,
   "body": {
-    "id": "rec-0928-standup",
+    "id": "20260928-133000-00ab",
+    "event_id": null,
     "started_at": "2026-09-28T13:30:00.000Z",
     "ended_at": "2026-09-28T13:45:00.000Z",
     "scope": {
@@ -21,14 +21,18 @@
       ]
     },
     "transcript": {
-      "path": "Inbox/rec-0928-standup.md",
-      "ingested_at": "2026-09-28T13:47:00.000Z"
+      "path": "Journal/Transcripts/2026-09-28-20260928-133000-00ab.md",
+      "ingested_at": "2026-09-28T13:47:00.000Z",
+      "delete_after": "2026-10-28T13:45:00.000Z",
+      "deleted_at": null
     },
     "audio": {
       "kept": true,
+      "bytes": 26214400,
       "delete_after": "2026-10-05T13:47:00.000Z",
-      "deleted_at": null
+      "deleted_at": null,
+      "deleted_reason": null
     },
-    "as_of": "2026-09-28T13:05:00.000Z"
+    "as_of": "2026-09-30T05:10:31.279Z"
   }
 }

@@ -41,6 +41,17 @@ land on top of a file that is already there, whoever wrote it.
 Each capture is committed on the next flush, principal `capture`, group
 `capture` (so a burst is one commit).
 
+**A recording's transcript is the one capture that is not dropped here**
+(T8-4; the owner's ruling on W3 question 29). When an owner credential
+delivers a live-capture transcript (`kind: transcript`, `source:
+live-capture`), the console files it at
+`Journal/Transcripts/<date>-<session>.md` instead — the same bridge, the same
+must-not-exist write, committed in the owner's name because `Journal/` is the
+owner's at the tool — and keeps its inbox row, so it is classified like any
+capture. It is kept 30 days after the recording, then deleted as a commit by
+the `recording-retention` routine (`docs/ops/scheduled.md`). With no bridge,
+a transcript lands in `METISTRY_INBOX_DIR` like any capture.
+
 **With no bridge configured** (`METISTRY_RECONCILER_URL` /
 `METISTRY_BRIDGE_TOKEN_RECONCILER` unset) the console degrades to writing
 files in `METISTRY_INBOX_DIR` — capture keeps working, because one silent

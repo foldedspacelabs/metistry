@@ -435,6 +435,7 @@ each routine's manifest:
 | Session Purge (`session-purge`) | every day at 04:00 — the session archive's retention (`retention_days`, 1–30, default 30; T3-9) |
 | Session Fold (`session-fold`) | every hour — the chat turns not yet folded, quiet for an hour, become ONE assistant turn; its checked answer becomes at most one request per file for `Me/Working Style.md` or `Me/profile.md`, written only on Approve (C79, T3-10); Pause it to stop learning; not one of §2.5's defaults |
 | Update Check (`update-check`) | every day at 06:00 — §2.20's check for a newer release (T2-18); not one of §2.5's defaults |
+| Recording Retention (`recording-retention`) | every hour — a live-capture recording kept to the owner's rulings: audio until the transcript is ingested + 7 days, never over 30; the transcript 30 days (T8-4, §2.15); not one of §2.5's defaults |
 | Inbox Sort (`inbox-drain`) | every 5 min — a collector that presents as a routine |
 | Usage Rollup (`claude-usage`) | hourly — likewise |
 
@@ -477,6 +478,41 @@ calendar has no event titled like *standup* gets no file,
 skip). Every other key in a routine's `config:` is held. The runner hands
 each run its resolved config (`ctx.config`) — your value over the manifest's
 default, key by key.
+
+**Recording Retention** keeps a live-capture recording to the owner's
+rulings (plan §2.15, Q7, C91). One `capture_sessions` row per recording
+(migration 0033) says where each part is; `GET /api/recordings/:id` reads it.
+Each hourly pass:
+
+1. **Rebuilds** a row for any transcript under `Journal/Transcripts/` the
+   table does not have, from the file's own frontmatter — the table is
+   derived, so a `down -v` never leaves a transcript no purge will find. A
+   file whose name does not match the recording its frontmatter declares is
+   left alone.
+2. **Records ingestion** — `folded_at` — when every proposal raised from the
+   transcript's inbox row is decided (allowed, allowed with changes, or
+   denied; never pending, never merely expired). A value the fold wrote first
+   stands.
+3. **Tells the Mac.** For each recording whose audio is not yet known gone,
+   `POST /recording/retention {session_id, ingested_at}` on the live-capture
+   bridge (`METISTRY_LIVE_CAPTURE_URL`, the bridge token), and stores what
+   the recorder answers: the bytes it keeps, and when and why it deleted
+   them. **The Mac decides**: its recorder applies the same rule every hour
+   on its own clock, so the 30-day ceiling holds with no console at all, and
+   an ingestion report is clamped to the delivery and to now — it can bring
+   a deletion forward, never past the ceiling and never earlier than 7 days
+   after the console took the transcript. No bridge configured: this step is
+   skipped and the run says so.
+4. **Deletes a transcript on its 30th day** as a commit through the
+   reconciler in the owner's name (`user`) — `Journal/` is the owner's at the
+   tool, and git is the record, so it is never a raw unlink — with the
+   run's act key, so one pass is one commit. Its words are cleared from the
+   capture's `inbox.note` and its proposal's `payload.note` in the same pass.
+   Git history still holds the file: a transcript that must be gone from
+   history too is the owner's to rewrite.
+
+It returns what it deleted (0 is silent) and warns for each recording it
+could not finish, trying again next hour. Model-free.
 
 A routine on `working_days` or `eve_of_working_days` runs only once
 `Me/profile.md` says which days you work — the seeded profile says nothing,

@@ -74,6 +74,7 @@ import { agentList, commandList } from "./commands.js";
 import { purgeArchive, purgePreview } from "@metistry-apps/routines";
 import type { EventHub } from "./events.js";
 import { createRequire } from "node:module";
+import { RECORDING_ROUTE, TRANSCRIPT_PRINCIPAL, recordCaptureSession, recordingRoute, transcriptOf, transcriptPath } from "./recordings.js";
 
 const require_ = createRequire(import.meta.url);
 
@@ -851,8 +852,15 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         // An owner credential (a passkey session or the local owner token — the Mac app and the PWA) is
         // captured "from the apps" (T2-1); the Shortcut's owner_token and an agent bearer are unchanged.
         const source = isUser(auth) ? "app" : "http";
-        const r = await captureToInbox(db, inbox, { bytes, filename, mime: req.headers["content-type"] ?? null, note, source, sourceAgent, idempotency });
-        await finishRun(db, runId, { ok: true, meta: { inbox_id: r.id, bytes: bytes.length, ...(r.replayed ? { replayed: true } : {}) } });
+        // A recording's transcript (T8-4, Q29): an OWNER credential's capture
+        // that declares one is filed at Journal/Transcripts/, in the owner's
+        // name — decided here from the credential, never from the body. An
+        // agent bearer's lands in Inbox/ like any capture (recordings.ts).
+        const transcript = sourceAgent === null ? transcriptOf(note) : undefined;
+        const place = transcript ? { path: transcriptPath(transcript, cfg.timeZone), principal: TRANSCRIPT_PRINCIPAL } : undefined;
+        const r = await captureToInbox(db, inbox, { bytes, filename, mime: req.headers["content-type"] ?? null, note, source, sourceAgent, idempotency, ...(place ? { place } : {}) });
+        if (transcript) await recordCaptureSession(db, transcript, { captureId: r.id, path: r.path });
+        await finishRun(db, runId, { ok: true, meta: { inbox_id: r.id, bytes: bytes.length, ...(transcript ? { capture_session: transcript.session } : {}), ...(r.replayed ? { replayed: true } : {}) } });
         // a replay is the ORIGINAL response — same status, same id — with one header saying so
         if (r.replayed) res.setHeader("idempotency-replayed", "true");
         return sendJson(res, 201, { id: r.id, path: r.path, sha256: r.sha256 });
@@ -1181,6 +1189,8 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         key === "GET /api/variables" ||
         key === "GET /api/connections" ||
         CONNECTION_ROUTE.test(key) ||
+        // a recording's retention state: when the owner recorded whom (T8-4)
+        RECORDING_ROUTE.test(key) ||
         key === "GET /api/vault/status" ||
         // a rollback of the vault's history: the local owner's hand alone (T10-6)
         key === "POST /api/vault/rollback" ||
@@ -1424,6 +1434,10 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       if (result.rows.length === 0) return sendError(res, "not_found", `no session ${sessionDetail[1]} in the archive (expired, purged, or never existed)`);
       return sendJson(res, 200, { session_id: sessionDetail[1], turns: result.rows, as_of: result.as_of.toISOString() });
     }
+
+    // ----- one recording's retention state (T8-4, §2.15): the owner's read, through `recording_state` -----
+    const recording = RECORDING_ROUTE.exec(key);
+    if (recording) return recordingRoute(res, queries, decodeURIComponent(recording[1]!));
 
     // ----- live changes (§2.20, T2-18): what changed, as ids — the owner's, and nobody else's -----
     // Past the management gate, so an agent bearer and the capture token have

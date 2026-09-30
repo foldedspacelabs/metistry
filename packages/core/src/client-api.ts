@@ -294,7 +294,7 @@ export const CLIENT_API: readonly ClientRoute[] = [
   route("GET", "/api/connections/:name", "one connection, with its file and its provider's unit"),
   route("GET", "/api/secrets", "secret names, hosts, grants, last used — never a value"),
   route("GET", "/api/variables", "the variables agents read — name, value, read by, used in"),
-  planned("GET", "/api/recordings/:id", "T8-4", "one recording's retention state"),
+  route("GET", "/api/recordings/:id", "one recording's retention state"),
 
   // ----- outbound doors through a connection -----
   route("POST", "/api/github/pulls/:owner/:repo/:number/review", "post a review; the head SHA must match the one shown", { conflict: ["stale"] }),

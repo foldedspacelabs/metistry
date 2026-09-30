@@ -419,6 +419,7 @@ export {
   NON_VAULT_ROOTS,
   PROTECTED_ROOT_FILES,
   SEED_DIR,
+  TRANSCRIPTS_DIR,
   USER_OWNED_ROOTS,
   VAULT_ROOT_AREA,
   detectLayout,
@@ -1387,3 +1388,5 @@ export {
   type ValidateOptions,
   type WorkFlag,
 } from "./template.js";
+// A recording's transcript as its capture declares it, and where it is filed (T8-4, Q29).
+export { recordCaptureSession, RECORDING_ID_RE, transcriptOf, transcriptPath, type TranscriptCapture, type TranscriptDb } from "./transcripts.js";

@@ -1,0 +1,53 @@
+# Seeded default (D4 overlay: an instance file of the same name wins).
+#
+# One recording's retention state (migration 0033, plan §2.15, T8-4) — what
+# `GET /api/recordings/:id` answers and Settings ▸ Live Capture shows: when it
+# ran, what it heard, where the transcript is and whether it was ingested,
+# and whether the audio is still kept on the Mac and until when.
+#
+# The dates are computed HERE from the owner's rulings (Q7), so the door and
+# the routine that enforces them cannot disagree about "when":
+#
+#   audio_delete_after       min(folded_at + 7 days, ended_at + 30 days) —
+#                            ended_at + 30 days until it is ingested
+#   transcript_delete_after  ended_at + 30 days
+#
+# The Mac's recorder applies the same rule on its own clock
+# (packages/mcp-live-capture/helper/sources/kit/retention.swift); this row is
+# what it last reported, plus what the routine derived.
+#
+# `expose: route`: a recording is other people's words, so its state is read
+# through its own door only, never the generic `/api/q/…` an agent's
+# `queries: true` reaches. No text of the transcript is selected here.
+name: recording_state
+expose: route
+description: >-
+  One recording's retention state — started/ended, the apps it heard, the
+  transcript's path and when it was ingested and is due to be deleted, and
+  whether the audio is still kept on the Mac and until when. No row for an id
+  no recording has.
+params:
+  id: { type: text, default: "" } # blank matches nothing
+sql: |
+  SELECT
+    c.id,
+    c.event_id,
+    c.started_at,
+    c.ended_at,
+    c.apps,
+    c.media_bytes,
+    c.transcript_capture_id,
+    c.transcript_path,
+    c.folded_at AS ingested_at,
+    c.transcript_deleted_at,
+    c.ended_at + interval '30 days' AS transcript_delete_after,
+    c.audio_deleted_at,
+    c.audio_deleted_reason,
+    CASE
+      WHEN c.ended_at IS NULL THEN NULL
+      WHEN c.folded_at IS NULL THEN c.ended_at + interval '30 days'
+      ELSE LEAST(c.folded_at + interval '7 days', c.ended_at + interval '30 days')
+    END AS audio_delete_after
+  FROM capture_sessions c
+  WHERE c.id = :id
+cache_ttl: 0

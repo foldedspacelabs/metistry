@@ -367,7 +367,7 @@ takes a `since` cursor and answers with the next one.
 | `GET /api/connections/:name` | owner | session · local_owner | natural | — | — | served | one connection, with its file and its provider's unit |
 | `GET /api/secrets` | owner | session · local_owner | natural | — | — | served | secret names, hosts, grants, last used — never a value |
 | `GET /api/variables` | owner | session · local_owner | natural | — | — | served | the variables agents read — name, value, read by, used in |
-| `GET /api/recordings/:id` | owner | session · local_owner | natural | — | — | T8-4 | one recording's retention state |
+| `GET /api/recordings/:id` | owner | session · local_owner | natural | — | — | served | one recording's retention state |
 | `POST /api/github/pulls/:owner/:repo/:number/review` | owner | session · local_owner | no | stale | — | served | post a review; the head SHA must match the one shown |
 | `POST /api/github/pulls/:owner/:repo/:number/threads/:id/reply` | owner | session · local_owner | no | stale | — | served | reply to a review thread; the head SHA must match |
 | `POST /api/github/pulls/:owner/:repo/:number/threads/:id/resolve` | owner | session · local_owner | no | stale | — | served | resolve a review thread; the head SHA must match |
@@ -497,6 +497,20 @@ the Mac app and the PWA, never a request field — records `source: "app"`
 (T2-1), so Activity can tell the owner's own captures apart from the
 Shortcut's (`owner_token`, still `"http"`) and an agent bearer's (still
 `"http"`; the bridge's own `capture` tool still records `"mcp"`).
+
+**A recording's transcript is filed, not dropped in the inbox** (T8-4; the
+owner's ruling on W3 question 29). A capture from an **owner** credential —
+the Shortcut's owner token included, which is what the live-capture bridge
+presents — whose note carries the recorder's frontmatter (`kind:
+transcript`, `source: live-capture`, a `capture_session` id and a
+`started_at`) lands at `Journal/Transcripts/<date>-<session>.md` — the day it
+started, in `METISTRY_TZ` — committed in the owner's name, create-only, and
+records the recording's `capture_sessions` row; the answer's `path` says
+where. It keeps its inbox row, so the inbox drain still classifies it and
+raises a crashed recording's one report. The folder is the owner's at the
+tool (no agent can edit a transcript) and outside every default read grant:
+an area grant of `Journal` does not reach it. The same frontmatter on an
+**agent** bearer is an ordinary capture into `Inbox/`.
 
 #### `Idempotency-Key` on `POST /capture` — a retry is not a second note
 
@@ -3217,7 +3231,7 @@ GET /api/connections           served — status, reach, tools and modes, used b
 GET /api/connections/:name     served — one connection, its file and its provider's unit
 GET /api/secrets               served — names, hosts, grants, last used: never a value
 GET /api/variables             served — name, value, read by, used in: never a secret
-GET /api/recordings/:id        T8-4 — a recording's retention state
+GET /api/recordings/:id        served — a recording's retention state: never its words
 ```
 
 Every write here is a CLI verb with the owner caller class (M7, M13, M14 below):
@@ -3378,6 +3392,41 @@ variable and the reason, the ledger row records only that it failed, and no
 row of that file is served. Every write is `metistry variables set|unset` on
 the Mac (M14, `docs/ops/cli.md`), which also refuses a value equal to one of
 the instance's own secrets.
+
+#### `GET /api/recordings/:id` — a recording's retention state (`user` principal)
+
+```
+GET /api/recordings/20260928-133000-00ab
+200 {"id":"20260928-133000-00ab","event_id":null,
+     "started_at":"2026-09-28T13:30:00.000Z","ended_at":"2026-09-28T13:45:00.000Z",
+     "scope":{"kind":"audio_only","apps":["us.zoom.xos"]},
+     "transcript":{"path":"Journal/Transcripts/2026-09-28-20260928-133000-00ab.md",
+                   "ingested_at":"2026-09-28T13:47:00.000Z",
+                   "delete_after":"2026-10-28T13:45:00.000Z","deleted_at":null},
+     "audio":{"kept":true,"bytes":26214400,"delete_after":"2026-10-05T13:47:00.000Z",
+              "deleted_at":null,"deleted_reason":null},
+     "as_of":"…"}
+400 an id that is not a recorder session id (lowercase letters, digits, hyphens)
+404 no recording with that id
+```
+
+Settings ▸ Live Capture's read (plan §2.15, T8-4): one row of
+`capture_sessions` (migration 0033) through the route-only named query
+`recording_state`, which also computes the owner's rulings — `audio.delete_after`
+is the ingestion + 7 days, never more than 30 days after `ended_at` (30 days
+after it while the transcript is not ingested); `transcript.delete_after` is
+30 days after `ended_at`. `ingested_at` is when the transcript's proposals
+were decided (or the fold read it); `audio.deleted_reason` is `retention` or
+`owner` (Purge Now). The row is what the Mac's recorder last reported through
+the `recording-retention` routine (`docs/ops/scheduled.md`), so `kept` can
+lag the Mac by up to an hour. Owner reach, in the management family: an
+agent bearer and the capture owner token are the uniform `403`. It never
+carries a word of the transcript.
+
+**Purge Now** is on the Mac, not here: the app sends the live-capture
+bridge's `POST /recording/purge` with the control credential
+(`packages/mcp-live-capture/README.md`), and this row says so after the
+routine's next pass.
 
 ### Outbound doors through a connection
 

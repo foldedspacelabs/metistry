@@ -5,8 +5,8 @@ import { readFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { parse as parseYaml } from "yaml";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { checkResultSchema, mintToken, validateManifest } from "@foldedspacelabs/metistry-core";
-import { makeBridge, ROUTES, startPayload, TOOL_OPS, type HelperResponse } from "../src/index.js";
+import { checkResultSchema, CREW_NEVER_TOOLS, mintToken, validateManifest } from "@foldedspacelabs/metistry-core";
+import { makeBridge, ROUTES, startPayload, SYSTEM_OPS, TOOL_OPS, type HelperResponse } from "../src/index.js";
 
 const token = mintToken();
 const controlToken = mintToken();
@@ -18,6 +18,8 @@ const consoleFetch = (async () => new Response(JSON.stringify({ id: 7, path: "In
 const asked: Record<string, unknown>[] = [];
 let checkAnswer: HelperResponse;
 let startAnswer: HelperResponse;
+let reviewAnswerFake: HelperResponse;
+let retentionAnswer: HelperResponse;
 let reachable = true;
 
 const fakeHelper = {
@@ -31,9 +33,18 @@ const fakeHelper = {
       case "stop": return { id: 1, ok: true, session: { session_id: "20260928-120000-00ab", ended_reason: "owner" } };
       case "keep_going": return { id: 1, ok: true, answered: true };
       case "owed": return { id: 1, ok: true, sessions: [] };
+      case "review": return reviewAnswerFake;
+      case "retention":
+      case "purge": return retentionAnswer;
       default: return { id: 1, ok: false, code: "invalid_request", error: `unknown op ${String(p.op)}` };
     }
   },
+};
+
+/** An ended, delivered session record as the helper's retention ops answer it. */
+const ended = {
+  session_id: "20260928-120000-00ab", started_at: "2026-09-28T12:00:00Z", state: "ended", ended_at: "2026-09-28T12:10:00Z", ended_reason: "owner",
+  apps: ["us.zoom.xos"], gaps: [], delivery: { inbox_id: 42, at: "2026-09-28T12:11:00Z" },
 };
 
 const healthy: HelperResponse = {
@@ -62,6 +73,8 @@ describe("live-capture bridge", () => {
     reachable = true;
     checkAnswer = healthy;
     startAnswer = { id: 1, ok: true, session: { session_id: "20260928-120000-00ab", apps: ["us.zoom.xos"], state: "recording" }, transcriber: healthy.transcriber };
+    reviewAnswerFake = { id: 1, ok: true, session_id: "20260928-120000-00ab", from_s: 160, to_s: 170, audio: "kept", lines: [{ source: "app", from_s: 160.5, to_s: 162, text: "the numbers are in" }] };
+    retentionAnswer = { id: 1, ok: true, session: { ...ended, media_bytes: 2000, audio_delete_after: "2026-10-05T12:30:00Z", audio_deleted_at: null, transcript_delete_after: "2026-10-28T12:10:00Z" } };
   });
 
   // ---- CRIT-9: every route authenticates ----
@@ -124,9 +137,9 @@ describe("live-capture bridge", () => {
     expect(ops()).not.toContain("start");
   });
 
-  it("the tool credential is refused 403 on every route that is not a tool, and the helper hears nothing", async () => {
+  it("the tool credential is refused 403 on every route that is the owner's hand, and the helper hears nothing", async () => {
     const control = ROUTES.filter((r) => r.reach === "control");
-    expect(control.map((r) => r.path).sort()).toEqual(["/recording/keep-going", "/recording/start", "/recording/stop"]);
+    expect(control.map((r) => r.path).sort()).toEqual(["/recording/keep-going", "/recording/purge", "/recording/start", "/recording/stop"]);
     for (const r of control) {
       const res = await call(r.method, r.path, token, { apps: ["us.zoom.xos"] });
       expect(res.status, r.path).toBe(403);
@@ -325,5 +338,123 @@ describe("live-capture bridge", () => {
     expect(s).toMatchObject({ state: "idle", delivery: { owed: 0 }, senses: { display: false, app_audio: false, microphone: false } });
     expect(s.as_of).toBeTruthy();
     expect(JSON.stringify(s)).not.toMatch(/transcript|"text"/);
+  });
+  // ---- T8-4: recording_review, the retention report, Purge Now ----
+
+  const review = (t: string | null, q: string) => call("GET", `/recording/review?${q}`, t);
+  const span = "session_id=20260928-120000-00ab&from_s=160&to_s=170";
+
+  it("recording_review returns text only — rebuilt field by field, so nothing the helper adds rides out to a model", async () => {
+    reviewAnswerFake = {
+      id: 1, ok: true, audio: "kept", session_id: "20260928-120000-00ab",
+      // what a confused or compromised helper might add: audio, a path, a buffer
+      audio_base64: "UklGRg==", file: "/Users/x/.metistry/state/capture/20260928-120000-00ab/app.m4a",
+      lines: [
+        { source: "mic", from_s: 161, to_s: 163, text: "send them\nover", samples: [0.1, 0.2] },
+        { source: "app", from_s: 160.5, to_s: 162, text: "the numbers are in", pcm: "AAAA" },
+        { source: "screen", from_s: 1, to_s: 2, text: "not a source" },
+        { source: "app", from_s: "1", to_s: 2, text: "a string time" },
+        { source: "app", from_s: 1, to_s: 2, text: { audio: "x" } },
+      ],
+    };
+    const res = await review(token, `${span}&question=${encodeURIComponent("did they say Q3 or Q4?")}`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("application/json");
+    const a = await res.json();
+    expect(Object.keys(a).sort()).toEqual(["as_of", "audio", "from_s", "lines", "question", "session_id", "text", "to_s"]);
+    expect(a.lines).toEqual([
+      { source: "app", speaker: "apps", from_s: 160.5, to_s: 162, at: "00:02:40", text: "the numbers are in" },
+      { source: "mic", speaker: "you", from_s: 161, to_s: 163, at: "00:02:41", text: "send them over" },
+    ]);
+    expect(a.text).toBe("[00:02:40] (apps) the numbers are in\n[00:02:41] (you) send them over");
+    expect(a.question).toBe("did they say Q3 or Q4?");
+    const wire = JSON.stringify(a);
+    for (const leak of ["UklGRg", "app.m4a", "samples", "pcm", "AAAA", "screen", "state/capture"]) expect(wire).not.toContain(leak);
+    // the helper was asked for the span and nothing else — the question never reaches it
+    expect(asked).toEqual([{ op: "review", session_id: "20260928-120000-00ab", from_s: 160, to_s: 170 }]);
+  });
+
+  it("recording_review says when the audio was deleted — after the fold, by the ceiling, or by Purge Now — and that the transcript remains", async () => {
+    const deleted = (session: Record<string, unknown>) => ({ id: 1, ok: true, audio: "deleted", lines: [], session: { ...ended, audio_deleted_at: "2026-10-05T12:11:00Z", ...session } });
+    reviewAnswerFake = deleted({ audio_deleted_reason: "retention", ingested_at: "2026-09-28T13:00:00Z" });
+    const a = await (await review(token, span)).json();
+    expect(a).toMatchObject({ audio: "deleted", lines: [], text: "", audio_deleted_at: "2026-10-05T12:11:00.000Z", note: "Audio deleted on 2026-10-05 after the fold; the transcript remains." });
+
+    reviewAnswerFake = deleted({ audio_deleted_reason: "retention", audio_deleted_at: "2026-10-28T12:10:00Z" });
+    expect((await (await review(token, span)).json()).note).toBe("Audio deleted on 2026-10-28 30 days after the recording; the transcript remains.");
+    reviewAnswerFake = deleted({ audio_deleted_reason: "owner" });
+    expect((await (await review(token, span)).json()).note).toBe("Audio deleted on 2026-10-05 by Purge Now; the transcript remains.");
+    reviewAnswerFake = deleted({ audio_deleted_reason: "retention", audio_deleted_at: "2026-10-28T12:10:00Z", transcript_deleted_at: "2026-10-28T12:10:00Z" });
+    expect((await (await review(token, span)).json()).note).toBe("Audio deleted on 2026-10-28 30 days after the recording; the transcript was deleted on 2026-10-28.");
+  });
+
+  it("recording_review refuses a malformed span before the helper hears anything", async () => {
+    for (const q of [
+      "",
+      "session_id=../etc&from_s=0&to_s=10",
+      "session_id=ABC&from_s=0&to_s=10",
+      "session_id=20260928-120000-00ab&from_s=-1&to_s=10",
+      "session_id=20260928-120000-00ab&from_s=10&to_s=10",
+      "session_id=20260928-120000-00ab&from_s=1e3&to_s=2e3",
+      "session_id=20260928-120000-00ab&from_s=0&to_s=901",
+      "session_id=20260928-120000-00ab&from_s=0&to_s=10&from_s=5",
+      "session_id=20260928-120000-00ab&from_s=0&to_s=10&op=start",
+      `session_id=20260928-120000-00ab&from_s=0&to_s=10&question=${"x".repeat(501)}`,
+      "session_id=20260928-120000-00ab&from_s=0&to_s=10&question=",
+    ]) {
+      const res = await review(token, q);
+      expect(res.status, q).toBe(400);
+      expect((await res.json()).error.code).toBe("invalid_request");
+    }
+    expect(asked).toEqual([]);
+  });
+
+  it("recording_review: the helper's refusals in its words — no transcriber, an unknown session, one still recording", async () => {
+    reviewAnswerFake = { id: 1, ok: false, code: "no_transcriber", error: "the on-device transcriber is not available on this Mac (macOS 26)" };
+    const none = await review(token, span);
+    expect(none.status).toBe(503);
+    expect((await none.json()).error).toEqual({ code: "not_available", message: "the on-device transcriber is not available on this Mac (macOS 26)" });
+    reviewAnswerFake = { id: 1, ok: false, code: "unknown_session", error: "no session 20260928-120000-00ab" };
+    expect((await review(token, span)).status).toBe(404);
+    reviewAnswerFake = { id: 1, ok: false, code: "still_recording", error: "still recording" };
+    expect((await review(token, span)).status).toBe(409);
+  });
+
+  it("recording_review is never a crew's: core's CREW_NEVER_TOOLS names it", () => {
+    expect(CREW_NEVER_TOOLS as readonly string[]).toContain("recording_review");
+  });
+
+  it("the retention report (system reach): the bridge token reaches it, off the tool list, rebuilt from its two fields", async () => {
+    const r = ROUTES.find((x) => x.path === "/recording/retention")!;
+    expect(r.reach).toBe("system");
+    expect("tool" in r).toBe(false);
+    for (const t of [token, controlToken]) {
+      asked.length = 0;
+      const res = await call("POST", "/recording/retention", t, { session_id: "20260928-120000-00ab", ingested_at: "2026-09-28T13:00:00+00:00" });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body).toMatchObject({ session_id: "20260928-120000-00ab", media_bytes: 2000, audio_delete_after: "2026-10-05T12:30:00.000Z", delivered_inbox_id: 42 });
+      expect(JSON.stringify(body)).not.toMatch(/"text"|"lines"/);
+      expect(asked).toEqual([{ op: "retention", session_id: "20260928-120000-00ab", ingested_at: "2026-09-28T13:00:00.000Z" }]);
+    }
+    asked.length = 0;
+    for (const bad of [{}, { session_id: "../x" }, { session_id: "20260928-120000-00ab", ingested_at: "soon" }, { session_id: "20260928-120000-00ab", op: "purge" }, []]) {
+      const res = await call("POST", "/recording/retention", token, bad);
+      expect(res.status, JSON.stringify(bad)).toBe(400);
+    }
+    expect(asked).toEqual([]);
+    // what the bridge token can cause, at most: reads, the review, and this report — never a purge
+    expect([...TOOL_OPS, ...SYSTEM_OPS]).not.toContain("purge");
+  });
+
+  it("Purge Now is the owner's hand: the control credential only, {session_id} and nothing else", async () => {
+    expect((await call("POST", "/recording/purge", token, { session_id: "20260928-120000-00ab" })).status).toBe(403);
+    expect(asked).toEqual([]);
+    retentionAnswer = { id: 1, ok: true, session: { ...ended, media_bytes: 0, audio_deleted_at: "2026-09-30T09:00:00Z", audio_deleted_reason: "owner" } };
+    const res = await call("POST", "/recording/purge", controlToken, { session_id: "20260928-120000-00ab" });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ session_id: "20260928-120000-00ab", media_bytes: 0, audio_deleted_reason: "owner", audio_deleted_at: "2026-09-30T09:00:00.000Z" });
+    expect(asked).toEqual([{ op: "purge", session_id: "20260928-120000-00ab" }]);
+    expect((await call("POST", "/recording/purge", controlToken, { session_id: "20260928-120000-00ab", all: true })).status).toBe(400);
   });
 });

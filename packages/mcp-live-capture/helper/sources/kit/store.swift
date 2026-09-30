@@ -16,8 +16,12 @@
 // the one place that says a transcript reached Metistry, so a crash, a
 // console that was down or a refused credential leaves it owed, never lost.
 //
-// Retention (the purge after ingestion + 7 days) is T8-4's; nothing here
-// deletes.
+// Retention (T8-4, plan §2.15) deletes two things here and nothing else: the
+// media files (`deleteMedia` — the audio, and a Window / Screen session's
+// frames) once the session is due, and `transcript.jsonl`
+// (`deleteTranscript`) once the transcript's 30 days are up. `session.json`
+// stays — it is the record that says when, and why, the audio went, which is
+// what `recording_review` answers after it has.
 
 import Foundation
 
@@ -92,11 +96,25 @@ public struct SessionRecord: Codable, Equatable {
     /// *Window* / *Screen*: what the picker chose — its kind and app, never a
     /// title or a frame. nil for Audio only.
     public var picture: PictureRecord? = nil
+    /// When the transcript was ingested — the meeting's proposals decided, or
+    /// the fold has read it — as the console reported it (T8-4). The audio
+    /// goes 7 days after this, never later than 30 days after the end.
+    /// Written once; never before the delivery.
+    public var ingestedAt: Date? = nil
+    /// When the media was deleted, and why: `retention` (the rule) or
+    /// `owner` (Purge Now). nil while it is kept.
+    public var audioDeletedAt: Date? = nil
+    public var audioDeletedReason: String? = nil
+    /// When this Mac's copy of the transcript (`transcript.jsonl`) was
+    /// deleted — 30 days after the end, and only once it was delivered.
+    public var transcriptDeletedAt: Date? = nil
 
     enum CodingKeys: String, CodingKey {
         case sessionID = "session_id", startedAt = "started_at", state, endedAt = "ended_at", endedReason = "ended_reason"
         case apps, tapMode = "tap_mode", processes, appAudio = "app_audio", microphone, gaps
         case appAudioObserved = "app_audio_observed", remindersRaised = "reminders_raised", delivery, mode, picture
+        case ingestedAt = "ingested_at", audioDeletedAt = "audio_deleted_at", audioDeletedReason = "audio_deleted_reason"
+        case transcriptDeletedAt = "transcript_deleted_at"
     }
 }
 
@@ -115,6 +133,41 @@ public struct TranscriptSegment: Equatable {
     }
 }
 
+/// One media file of a session: its source (`app`, `mic` or `screen`), and
+/// where in the session it starts, in seconds from Record — read from when
+/// the file was created, which is when its stream wrote its first sample (0
+/// for the first, the end of the sleep it followed for a `-2`, `-3`…).
+public struct MediaFile: Equatable {
+    public let base: String
+    public let offsetS: Double
+    public let url: URL
+    public let bytes: Int64
+
+    public init(base: String, offsetS: Double, url: URL, bytes: Int64) {
+        self.base = base
+        self.offsetS = offsetS
+        self.url = url
+        self.bytes = bytes
+    }
+
+    /// The audio source, for an audio file; nil for the frames.
+    public var source: AudioSource? { AudioSource(rawValue: base) }
+}
+
+/// The media file names a session holds (`nextMediaURL`'s): `app.m4a`,
+/// `app-2.m4a`…, the same for `mic`, and `screen.mp4`, `screen-2.mp4`…. nil
+/// for anything else — `session.json` and `transcript.jsonl` are never media.
+public func parseMediaFileName(_ name: String) -> (base: String, n: Int)? {
+    for (base, ext) in [("app", "m4a"), ("mic", "m4a"), ("screen", "mp4")] {
+        if name == "\(base).\(ext)" { return (base, 1) }
+        let prefix = "\(base)-", suffix = ".\(ext)"
+        guard name.hasPrefix(prefix), name.hasSuffix(suffix), name.count > prefix.count + suffix.count else { continue }
+        let digits = String(name.dropFirst(prefix.count).dropLast(suffix.count))
+        if let n = Int(digits), n >= 2, String(n) == digits { return (base, n) }
+    }
+    return nil
+}
+
 public protocol SessionStore: AnyObject {
     /// The capture directory every session lives under.
     var root: URL { get }
@@ -130,6 +183,14 @@ public protocol SessionStore: AnyObject {
     /// in the order they were appended. A torn last line — the crash landed
     /// mid-write — is skipped, never guessed at.
     func transcript(_ sessionID: String) -> [[String: Any]]
+    /// The session's media files, by source and then by where they start.
+    /// `startedAt` is the session's start, which each file's offset is from.
+    func media(_ sessionID: String, startedAt: Date) -> [MediaFile]
+    /// Delete every media file of the session; the bytes it freed. Nothing
+    /// else in the directory is touched.
+    func deleteMedia(_ sessionID: String) throws -> Int64
+    /// Delete this Mac's copy of the transcript (`transcript.jsonl`).
+    func deleteTranscript(_ sessionID: String) throws
 }
 
 public let sessionFile = "session.json"
@@ -225,6 +286,38 @@ public final class FileSessionStore: SessionStore {
         return data.split(separator: 0x0A).compactMap { line in
             (try? JSONSerialization.jsonObject(with: Data(line))) as? [String: Any]
         }
+    }
+
+    public func media(_ sessionID: String, startedAt: Date) -> [MediaFile] {
+        let dir = directory(for: sessionID)
+        guard let names = try? fm.contentsOfDirectory(atPath: dir.path) else { return [] }
+        return names.compactMap { name -> MediaFile? in
+            guard let (base, _) = parseMediaFileName(name) else { return nil }
+            let url = dir.appendingPathComponent(name)
+            let attrs = (try? fm.attributesOfItem(atPath: url.path)) ?? [:]
+            let bytes = (attrs[.size] as? NSNumber)?.int64Value ?? 0
+            let created = (attrs[.creationDate] as? Date) ?? startedAt
+            return MediaFile(base: base, offsetS: round2(max(0, created.timeIntervalSince(startedAt))), url: url, bytes: bytes)
+        }.sorted { ($0.base, $0.offsetS) < ($1.base, $1.offsetS) }
+    }
+
+    public func deleteMedia(_ sessionID: String) throws -> Int64 {
+        lock.lock(); defer { lock.unlock() }
+        let dir = directory(for: sessionID)
+        guard let names = try? fm.contentsOfDirectory(atPath: dir.path) else { return 0 }
+        var freed: Int64 = 0
+        for name in names where parseMediaFileName(name) != nil {
+            let url = dir.appendingPathComponent(name)
+            freed += ((try? fm.attributesOfItem(atPath: url.path))?[.size] as? NSNumber)?.int64Value ?? 0
+            try fm.removeItem(at: url)
+        }
+        return freed
+    }
+
+    public func deleteTranscript(_ sessionID: String) throws {
+        lock.lock(); defer { lock.unlock() }
+        let url = directory(for: sessionID).appendingPathComponent(transcriptFile)
+        if fm.fileExists(atPath: url.path) { try fm.removeItem(at: url) }
     }
 }
 

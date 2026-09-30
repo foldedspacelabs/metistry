@@ -147,6 +147,8 @@ public struct RecorderStatus: Equatable {
 public final class Recorder {
     public let ownBundleID: String
     public let policy: LifecyclePolicy
+    /// T8-4's rule (retention.swift) — the owner's rulings unless a test says otherwise.
+    public let retention: RetentionPolicy
     private let backend: CaptureBackend
     /// ScreenCaptureKit; nil where there is none — *Window* and *Screen* are refused.
     private let picture: PictureBackend?
@@ -174,7 +176,8 @@ public final class Recorder {
     /// The last session that ended, so `status` can say how (e.g. the 10-hour stop).
     public private(set) var lastEnded: SessionRecord?
 
-    public init(backend: CaptureBackend, picture: PictureBackend? = nil, store: SessionStore, disk: DiskProbe, clock: @escaping () -> Date = Date.init, policy: LifecyclePolicy = .c137, ownBundleID: String) {
+    public init(backend: CaptureBackend, picture: PictureBackend? = nil, store: SessionStore, disk: DiskProbe, clock: @escaping () -> Date = Date.init, policy: LifecyclePolicy = .c137, retention: RetentionPolicy = .q7, ownBundleID: String) {
+        self.retention = retention
         self.backend = backend
         self.picture = picture
         self.store = store
@@ -510,6 +513,115 @@ public final class Recorder {
         record.delivery = Delivery(inboxID: inboxID, at: clock())
         do { try store.update(record) } catch { throw DeliveryError.invalid("cannot write the session: \(error.localizedDescription)") }
         return record
+    }
+
+    // MARK: - Retention and re-review (T8-4): see retention.swift for the rule
+
+    /// Apply the rule to every ended session — the bridge's timer calls this
+    /// each sweep, so the 30-day ceiling holds with no console at all. The
+    /// records it changed.
+    @discardableResult
+    public func applyRetention() -> [SessionRecord] {
+        lock.lock(); defer { lock.unlock() }
+        return store.sessions().filter { $0.state == .ended }.compactMap { r in
+            guard let after = try? enforce(r), after != r else { return nil }
+            return after
+        }
+    }
+
+    /// The console's report that a session's transcript was ingested, at
+    /// `at` (nil: no report, just the rule). Recorded once, clamped to the
+    /// delivery and to now — so it can bring the deletion forward to no
+    /// earlier than 7 days after the console took the transcript — and then
+    /// the rule is applied to the session. Refused for a session never
+    /// delivered: nothing can have ingested a transcript it never received.
+    public func reportIngestion(_ sessionID: String, at: Date?) throws -> SessionRecord {
+        lock.lock(); defer { lock.unlock() }
+        var r = try endedRecord(sessionID)
+        if let at, r.ingestedAt == nil {
+            guard let kept = clampIngestion(at, record: r, now: clock()) else {
+                throw DeliveryError.invalid("session \(sessionID) has not reached Metistry yet — nothing can have ingested its transcript")
+            }
+            r.ingestedAt = kept
+            do { try store.update(r) } catch { throw DeliveryError.invalid("cannot write the session: \(error.localizedDescription)") }
+        }
+        do { return try enforce(r) } catch { throw DeliveryError.invalid("cannot apply retention: \(error.localizedDescription)") }
+    }
+
+    /// Purge Now — the owner's hand, from Settings ▸ Live Capture: the
+    /// session's audio goes at once, whatever the rule says. Ended sessions
+    /// only; a second purge is a no-op that answers the first one's record.
+    public func purgeNow(_ sessionID: String) throws -> SessionRecord {
+        lock.lock(); defer { lock.unlock() }
+        var r = try endedRecord(sessionID)
+        if r.audioDeletedAt != nil { return r }
+        do {
+            _ = try store.deleteMedia(sessionID)
+            r.audioDeletedAt = clock()
+            r.audioDeletedReason = "owner"
+            try store.update(r)
+        } catch { throw DeliveryError.invalid("cannot delete the audio: \(error.localizedDescription)") }
+        return r
+    }
+
+    /// Delete whatever of `record` is due now; the record as it stands after.
+    private func enforce(_ record: SessionRecord) throws -> SessionRecord {
+        var r = record
+        let now = clock()
+        var changed = false
+        if r.audioDeletedAt == nil, let due = audioDeleteAfter(r, policy: retention), now >= due {
+            _ = try store.deleteMedia(r.sessionID)
+            r.audioDeletedAt = now
+            r.audioDeletedReason = "retention"
+            changed = true
+        }
+        // Only a DELIVERED transcript is deleted here: an undelivered one is
+        // the only copy, and `check` already says it is owed.
+        if r.transcriptDeletedAt == nil, r.delivery != nil, let due = transcriptDeleteAfter(r, policy: retention), now >= due {
+            try store.deleteTranscript(r.sessionID)
+            r.transcriptDeletedAt = now
+            changed = true
+        }
+        if changed { try store.update(r) }
+        return r
+    }
+
+    /// The audio bytes a session still keeps on this Mac.
+    public func mediaBytes(_ sessionID: String) -> Int64 {
+        guard isSessionID(sessionID) else { return 0 }
+        guard let started = store.sessions().first(where: { $0.sessionID == sessionID })?.startedAt else { return 0 }
+        return store.media(sessionID, startedAt: started).reduce(0) { $0 + $1.bytes }
+    }
+
+    /// `recording_review`: re-transcribe `[fromS, toS)` (seconds from Record)
+    /// of an ended session's kept audio. Text only: the lines the
+    /// transcriber wrote, with their source and times — or, once the audio
+    /// is gone, when and why it went. The span's files are read outside the
+    /// recorder's lock, so a re-review never holds the bar's Stop.
+    public func review(_ sessionID: String, fromS: Double, toS: Double, with transcriber: SpanTranscribing) throws -> ReviewResult {
+        guard fromS.isFinite, toS.isFinite, fromS >= 0, toS > fromS else {
+            throw ReviewError.invalid("from_s and to_s are seconds from Record, with from_s before to_s")
+        }
+        guard toS - fromS <= maxReviewSpanS else {
+            throw ReviewError.invalid("a review re-reads at most \(Int(maxReviewSpanS / 60)) minutes at a time")
+        }
+        let (record, media): (SessionRecord, [MediaFile])
+        do {
+            lock.lock(); defer { lock.unlock() }
+            record = try endedRecord(sessionID)
+            media = store.media(sessionID, startedAt: record.startedAt)
+        }
+        if record.audioDeletedAt != nil { return .audioDeleted(record) }
+        var lines: [ReviewLine] = []
+        for (file, lo, hi) in reviewPlan(media, fromS: fromS, toS: toS) {
+            guard let source = file.source else { continue }
+            let heard: [TimedText]
+            do { heard = try transcriber.transcribe(file: file.url, fromS: lo, toS: hi) } catch let e as ReviewError { throw e } catch { throw ReviewError.failed("\(error)") }
+            for t in heard where !t.text.isEmpty {
+                lines.append(ReviewLine(source: source, fromS: round2(file.offsetS + t.fromS), toS: round2(file.offsetS + t.toS), text: t.text))
+            }
+        }
+        return .text(lines.sorted { ($0.fromS, $0.source.rawValue) < ($1.fromS, $1.source.rawValue) })
     }
 
     private func endedRecord(_ sessionID: String) throws -> SessionRecord {

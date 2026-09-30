@@ -720,6 +720,14 @@ await pool.query(
    ON CONFLICT (session_id, turn_id) DO NOTHING`,
 );
 
+// a recording (T8-4): its transcript filed under Journal/Transcripts/ and
+// ingested two minutes after it ended; its audio still kept on the Mac
+await pool.query(
+  `INSERT INTO capture_sessions (id, started_at, ended_at, apps, media_bytes, transcript_path, folded_at)
+   VALUES ('20260928-133000-00ab', '2026-09-28T13:30:00Z', '2026-09-28T13:45:00Z', '{us.zoom.xos}', 26214400, 'Journal/Transcripts/2026-09-28-20260928-133000-00ab.md', '2026-09-28T13:47:00Z')
+   ON CONFLICT (id) DO NOTHING`,
+);
+
 // devices: two sessions on one passkey — one to list, one to revoke
 const pkId = `fixture-${mintToken(6)}`;
 await authStore.storePasskey(pool, { id: pkId, publicKey: new Uint8Array([1]), signCount: 0, transports: ["internal"], origin: "http://127.0.0.1:8080", label: "iPhone" });
@@ -805,6 +813,8 @@ const REQUESTS = [
   ["GET /api/turns/:turn_id/progress", () => ({ path: `/api/turns/${turnId}/progress` })],
   // Run detail's conversation (T2-17): the unfolded session seeded below, two turns.
   ["GET /api/sessions/:id", () => ({ path: "/api/sessions/7b1f2c9e-0000-4000-8000-000000000001" })],
+  // Settings ▸ Live Capture (T8-4): the recording seeded above — transcript ingested, audio kept for 7 more days
+  ["GET /api/recordings/:id", () => ({ path: "/api/recordings/20260928-133000-00ab" })],
   ["GET /api/compute", () => ({ path: "/api/compute" })],
   ["GET /api/compute/models", () => ({ path: "/api/compute/models" })],
   // T4-18: grouped by model, the switched-off ollama skipped, every listing read now

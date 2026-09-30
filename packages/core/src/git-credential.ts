@@ -62,12 +62,14 @@ export const gitCredentialSchema = z
 export type GitCredentialLookup = z.infer<typeof gitCredentialSchema>;
 
 /**
- * The account from `security find-internet-password -g`'s **stdout**.
+ * The account from `security find-internet-password`'s **stdout**.
  *
- * Which stream matters and is asserted by a test: `security` prints the
- * attributes on stdout and `password: "…"` on **stderr**, so a caller that
- * reads only stdout learns the account and cannot accidentally log the
- * token. The value itself is fetched separately with `-w`.
+ * The watchdog asks with neither `-g` nor `-w` — attributes only, so the
+ * item's data is never read and its access list is never consulted (a `-g`
+ * is a data read, and an item whose ACL refuses a background read refuses
+ * it too). Even with `-g`, `security` prints the attributes on stdout and
+ * `password: "…"` on **stderr**, so a caller that reads only stdout cannot
+ * log the token. The value itself is fetched separately with `-w`.
  */
 export function accountFromKeychainAttributes(stdout: string): string | undefined {
   const m = /^\s*"acct"<blob>="((?:[^"\\]|\\.)*)"/m.exec(stdout);

@@ -15,11 +15,26 @@
 //     `METISTRY_GITHUB_OAUTH_CLIENT_ID`; a device-flow app has no secret,
 //     which is why this can ship in open source at all.
 //
+//   * The token is filed BEFORE anything talks to the remote, and this
+//     command's own ls-remote and push do not go through the osxkeychain
+//     helper: they reset the helper list (`-c credential.helper=`) and
+//     answer git through `GIT_ASKPASS` with the token just obtained — the
+//     mechanism the confined reconciler uses. A helper that ran here could
+//     create (or, on a refused token, erase and re-create) the Keychain
+//     item itself, with an access list that trusts only the helper — and
+//     the supervisor's background read at spawn is refused by that list
+//     (2026-09-29: "could not read Username" on every reconciler push).
+//
 // Every git call is an argument array through the exec seam (invariant:
 // no shell, so no URL fragment is ever interpreted). The instance repo is
 // the reconciler's working tree (D5), so the queue is flushed through the
 // bridge before this command's own push.
 
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { CREDENTIAL_HELPER_RESET, GIT_ASKPASS_TOKEN_VAR, GIT_ASKPASS_USER_VAR } from "@foldedspacelabs/metistry-core";
+import { ASKPASS_FILENAME, ASKPASS_MODE, askpassScript } from "./askpass.js";
 import { realExec, type Exec, type ExecResult } from "./exec.js";
 import { Keychain } from "./keychain.js";
 
@@ -178,6 +193,8 @@ export interface ConnectRepoOptions {
   /** `--auth token` reads the PAT here — stdin, so it is never in argv or shell history. */
   readSecret?: (() => Promise<string>) | undefined;
   sleep?: ((ms: number) => Promise<void>) | undefined;
+  /** The interpreter the one-shot askpass shim names in its shebang. Defaults to this process's node. */
+  nodeBin?: string | undefined;
 }
 
 export interface ConnectRepoResult {
@@ -204,78 +221,121 @@ export async function connectRepo(opts: ConnectRepoOptions): Promise<ConnectRepo
   const dir = opts.instanceDir;
   const out = opts.out;
 
+  // Set once the token is known: how this command's own network git calls
+  // authenticate — helper list reset, askpass answering from the child's
+  // environment. Undefined = git finds credentials the way it always does
+  // (a local or ssh remote, `--auth ssh`, or a non-macOS host).
+  let remoteAuth: { args: string[]; env: NodeJS.ProcessEnv } | undefined;
+  let askpassDir: string | undefined;
+
   const git = async (args: string[], timeoutMs = 30_000): Promise<ExecResult> => exec("git", ["-c", "commit.gpgsign=false", ...args], { cwd: dir, timeoutMs });
   const gitOk = async (args: string[], timeoutMs?: number): Promise<string> => {
     const r = await git(args, timeoutMs);
     if (r.code !== 0) throw new Error(`git ${args[0]} failed (${r.code}): ${(r.stderr || r.stdout).trim().split("\n").slice(-2).join(" ")}`);
     return r.stdout.trim();
   };
+  /** A git call that reaches the remote. */
+  const gitRemote = async (args: string[], timeoutMs: number): Promise<ExecResult> =>
+    remoteAuth
+      ? exec("git", ["-c", "commit.gpgsign=false", ...remoteAuth.args, ...args], { cwd: dir, timeoutMs, env: remoteAuth.env })
+      : git(args, timeoutMs);
 
-  if ((await git(["rev-parse", "--git-dir"])).code !== 0) {
-    throw new Error(`${dir} is not a git repository — run \`metistry init <dir>\` first, or pass --instance <dir> / set METISTRY_INSTANCE_DIR`);
-  }
-  const remote = parseRemote(opts.url);
-  const auth: AuthMode = opts.auth ?? (remote.kind === "ssh" ? "ssh" : "device");
-  if (remote.kind === "ssh" && auth !== "ssh") throw new Error(`${opts.url} is an ssh remote, so --auth ${auth} has nothing to store — use --auth ssh (the key is the credential)`);
-
-  // 1. the remote itself — refuse to silently repoint an instance at a different repo
-  const existing = (await gitOk(["remote"])).split("\n").map((s) => s.trim()).filter(Boolean);
-  if (existing.includes("origin") && !opts.force) {
-    const url = await gitOk(["remote", "get-url", "origin"]);
-    throw new Error(`${dir} already has an origin (${url}) — pass --force to repoint it`);
-  }
-  await gitOk(["remote", existing.includes("origin") ? "set-url" : "add", "origin", opts.url]);
-  out(`origin ${existing.includes("origin") ? "repointed to" : "set to"} ${opts.url}`);
-
-  // 2. credentials, BEFORE the reachability check — a private repo answers nothing without them
-  let credential: ConnectRepoResult["credential"] = "none";
-  if (remote.kind === "https") {
-    if (platform === "darwin") {
-      await gitOk(["config", "credential.helper", "osxkeychain"]);
-      out("credential.helper=osxkeychain set on this repo (git and the reconciler both read the login Keychain)");
-    } else {
-      out(`no Keychain on ${platform}: run \`git -C ${dir} config credential.helper 'store --file ~/.git-credentials'\` and put the token in that file (chmod 600) — the reconciler pushes with whatever git finds.`);
-    }
-    let token: string | undefined;
-    if (auth === "device") {
-      // The product ships Folded Space Labs' OAuth App as the default: a
-      // device-flow client id is public (no secret exists), and it grants the
-      // app nothing — each user approves the `repo` scope on their own
-      // account. An instance may override it with its own app in .env.
-      const clientId = env.METISTRY_GITHUB_OAUTH_CLIENT_ID || DEFAULT_GITHUB_OAUTH_CLIENT_ID;
-      token = await deviceFlow({ clientId, fetchFn, out, ...(opts.sleep ? { sleep: opts.sleep } : {}) });
-      credential = "device";
-    } else if (auth === "token") {
-      out("paste a personal access token with `repo` scope, then Ctrl-D (it is read from stdin and never echoed):");
-      token = (await (opts.readSecret ?? readStdin)()).trim();
-      if (!token) throw new Error("no token on stdin");
-      credential = "token";
-    }
-    if (token) {
-      if (platform !== "darwin") throw new Error(`--auth ${auth} stores the token in the macOS Keychain; on ${platform} use the git-credential-store remediation printed above`);
-      const account = remote.user ?? (await tokenLogin(fetchFn, remote.host!, token)) ?? "x-access-token";
-      await new Keychain(exec, env.METISTRY_KEYCHAIN_ACCOUNT || "metistry").setGitCredential(remote.host!, account, token);
-      out(`token stored in the login Keychain for ${account}@${remote.host} (not printed, not written to .env, not in .git/config)`);
-    }
-  } else if (remote.kind === "ssh") {
-    out("ssh remote: the credential is your key — `git ls-remote` below is the check that the agent or ~/.ssh key works.");
+  try {
+    return await connect();
+  } finally {
+    if (askpassDir) await rm(askpassDir, { recursive: true, force: true });
   }
 
-  // 3. reachability, through the same execFile path
-  const ls = await git(["ls-remote", "origin"], 60_000);
-  if (ls.code !== 0) throw new Error(`git ls-remote origin failed (${ls.code}): ${(ls.stderr || ls.stdout).trim().split("\n").slice(-2).join(" ")}`);
-  out(`git ls-remote origin: reachable (${ls.stdout.trim() === "" ? "empty repository" : `${ls.stdout.trim().split("\n").length} ref(s)`})`);
+  async function connect(): Promise<ConnectRepoResult> {
+    if ((await git(["rev-parse", "--git-dir"])).code !== 0) {
+      throw new Error(`${dir} is not a git repository — run \`metistry init <dir>\` first, or pass --instance <dir> / set METISTRY_INSTANCE_DIR`);
+    }
+    const remote = parseRemote(opts.url);
+    const auth: AuthMode = opts.auth ?? (remote.kind === "ssh" ? "ssh" : "device");
+    if (remote.kind === "ssh" && auth !== "ssh") throw new Error(`${opts.url} is an ssh remote, so --auth ${auth} has nothing to store — use --auth ssh (the key is the credential)`);
 
-  // 4. the reconciler owns this working tree — let it land its queue before we push
-  const flushed = await flushReconciler(env, fetchFn, out);
+    // 1. the remote itself — refuse to silently repoint an instance at a different repo
+    const existing = (await gitOk(["remote"])).split("\n").map((s) => s.trim()).filter(Boolean);
+    if (existing.includes("origin") && !opts.force) {
+      const url = await gitOk(["remote", "get-url", "origin"]);
+      throw new Error(`${dir} already has an origin (${url}) — pass --force to repoint it`);
+    }
+    await gitOk(["remote", existing.includes("origin") ? "set-url" : "add", "origin", opts.url]);
+    out(`origin ${existing.includes("origin") ? "repointed to" : "set to"} ${opts.url}`);
 
-  // 5. one push, so the remote is proven end to end and the branch is tracking
-  const branch = (await git(["symbolic-ref", "--short", "-q", "HEAD"])).stdout.trim() || "main";
-  const push = await git(["push", "-u", "origin", branch], 180_000);
-  if (push.code !== 0) throw new Error(`git push -u origin ${branch} failed (${push.code}): ${(push.stderr || push.stdout).trim().split("\n").slice(-2).join(" ")}`);
-  out(`pushed ${branch} to origin; the reconciler pushes and pulls from here on the vault sync policy (metistry vault settings)`);
+    // 2. credentials, BEFORE the reachability check — a private repo answers nothing without them
+    let credential: ConnectRepoResult["credential"] = "none";
+    if (remote.kind === "https") {
+      if (platform === "darwin") {
+        await gitOk(["config", "credential.helper", "osxkeychain"]);
+        // Kept for the git that is NOT this command: your own `git push` in a
+        // terminal, and an unconfined reconciler (docs/ops/reconciler.md —
+        // "an unconfined install keeps using the Keychain helper"). Both
+        // read the item filed below. A confined reconciler resets it.
+        out("credential.helper=osxkeychain set on this repo (your own git and an unconfined reconciler read the login Keychain through it; this command's own push does not)");
+      } else {
+        out(`no Keychain on ${platform}: run \`git -C ${dir} config credential.helper 'store --file ~/.git-credentials'\` and put the token in that file (chmod 600) — the reconciler pushes with whatever git finds.`);
+      }
+      let token: string | undefined;
+      if (auth === "device") {
+        // The product ships Folded Space Labs' OAuth App as the default: a
+        // device-flow client id is public (no secret exists), and it grants the
+        // app nothing — each user approves the `repo` scope on their own
+        // account. An instance may override it with its own app in .env.
+        const clientId = env.METISTRY_GITHUB_OAUTH_CLIENT_ID || DEFAULT_GITHUB_OAUTH_CLIENT_ID;
+        token = await deviceFlow({ clientId, fetchFn, out, ...(opts.sleep ? { sleep: opts.sleep } : {}) });
+        credential = "device";
+      } else if (auth === "token") {
+        out("paste a personal access token with `repo` scope, then Ctrl-D (it is read from stdin and never echoed):");
+        token = (await (opts.readSecret ?? readStdin)()).trim();
+        if (!token) throw new Error("no token on stdin");
+        credential = "token";
+      }
+      if (token) {
+        if (platform !== "darwin") throw new Error(`--auth ${auth} stores the token in the macOS Keychain; on ${platform} use the git-credential-store remediation printed above`);
+        const account = remote.user ?? (await tokenLogin(fetchFn, remote.host!, token)) ?? "x-access-token";
+        // Filed FIRST, before any git call reaches the remote — delete then
+        // add with `-A`, so the item's access list is ours whatever was there.
+        await new Keychain(exec, env.METISTRY_KEYCHAIN_ACCOUNT || "metistry").setGitCredential(remote.host!, account, token);
+        out(`token stored in the login Keychain for ${account}@${remote.host}, readable by the supervisor without a prompt (not printed, not written to .env, not in .git/config)`);
+        // This command's own ls-remote and push: no helper (so none can file
+        // or erase an item of its own), the token through askpass.
+        askpassDir = await mkdtemp(join(tmpdir(), "metistry-askpass-"));
+        const shim = join(askpassDir, ASKPASS_FILENAME);
+        await writeFile(shim, askpassScript(opts.nodeBin ?? process.execPath), { mode: ASKPASS_MODE });
+        await chmod(shim, ASKPASS_MODE);
+        remoteAuth = { args: ["-c", CREDENTIAL_HELPER_RESET], env: askpassEnv(shim, account, token) };
+      }
+    } else if (remote.kind === "ssh") {
+      out("ssh remote: the credential is your key — `git ls-remote` below is the check that the agent or ~/.ssh key works.");
+    }
 
-  return { remote, branch, credential, pushed: true, flushed };
+    // 3. reachability, through the same execFile path
+    const ls = await gitRemote(["ls-remote", "origin"], 60_000);
+    if (ls.code !== 0) throw new Error(`git ls-remote origin failed (${ls.code}): ${(ls.stderr || ls.stdout).trim().split("\n").slice(-2).join(" ")}`);
+    out(`git ls-remote origin: reachable (${ls.stdout.trim() === "" ? "empty repository" : `${ls.stdout.trim().split("\n").length} ref(s)`})`);
+
+    // 4. the reconciler owns this working tree — let it land its queue before we push
+    const flushed = await flushReconciler(env, fetchFn, out);
+
+    // 5. one push, so the remote is proven end to end and the branch is tracking
+    const branch = (await git(["symbolic-ref", "--short", "-q", "HEAD"])).stdout.trim() || "main";
+    const push = await gitRemote(["push", "-u", "origin", branch], 180_000);
+    if (push.code !== 0) throw new Error(`git push -u origin ${branch} failed (${push.code}): ${(push.stderr || push.stdout).trim().split("\n").slice(-2).join(" ")}`);
+    out(`pushed ${branch} to origin; the reconciler pushes and pulls from here on the vault sync policy (metistry vault settings)`);
+
+    return { remote, branch, credential, pushed: true, flushed };
+  }
+}
+
+/**
+ * The environment of a git call that authenticates through the askpass
+ * shim: git execs `GIT_ASKPASS` directly (no shell), and the shim prints one
+ * of the two variables — the token never in argv, never on disk.
+ * `GIT_TERMINAL_PROMPT=0` so a refused token is an error, not a prompt.
+ */
+export function askpassEnv(shim: string, user: string, token: string, base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return { ...base, GIT_ASKPASS: shim, GIT_TERMINAL_PROMPT: "0", [GIT_ASKPASS_USER_VAR]: user, [GIT_ASKPASS_TOKEN_VAR]: token };
 }
 
 /** Best-effort: a reconciler that is not running is not an error — its queue is empty by definition. */

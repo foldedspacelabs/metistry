@@ -668,7 +668,7 @@ absolute path, with no shell** — the exec allowlist is its only gate. So:
 | | |
 | --- | --- |
 | **where the token lives** | unchanged: the login Keychain, where `metistry connect-repo` put it. No token in `.env`, none in a URL, none in `.git/config`. |
-| **who reads it** | the **supervisor**, once, at spawn. It is unconfined and it is the parent. The read is promptless because `connect-repo` files the item with `-A` — a trade already made and documented in `packages/cli/src/keychain.ts`, because per-binary trust is invalidated by every git update and would turn an unattended push into a GUI prompt nobody is there to click. |
+| **who reads it** | the **supervisor**, once, at spawn. It is unconfined and it is the parent. The read is promptless because `connect-repo` files the item with `-A` — a trade already made and documented in `packages/cli/src/keychain.ts`, because per-binary trust is invalidated by every git update and would turn an unattended push into a GUI prompt nobody is there to click. `-A` only takes on an item that is **created**, so `connect-repo` deletes any existing item for the host and account first (never `add -U`, which keeps the old access list), and its own ls-remote and push run through askpass rather than the helper, so the helper never files an item of its own. |
 | **how it reaches git** | the child's environment, as `METISTRY_GIT_ASKPASS_{USER,TOKEN}`, and then a `#!<node>` shim `up` generates at `<instance>/.metistry/state/bin/git-askpass` which prints one of those two and can do nothing else. **Never in argv** — `ps` shows argv to every process on the Mac, and a push runs every hour. |
 | **what `up` records** | `supervisor.json` gains `gitCredentials: [{ child: "reconciler", host: "<your remote's host>" }]` — which item to fetch, never what it holds. |
 | **the helper** | reset for this job with `-c credential.helper=` (git's documented reset), so the repo's `osxkeychain` line cannot fail first. An **unconfined** install is untouched and keeps using the Keychain helper exactly as before. |
@@ -680,9 +680,25 @@ under `sandbox-exec` — and the same push, without the reset, failing on
 through the tunnel after someone else pushed, `merge-tree`, `commit-tree`,
 `merge --ff-only` and the push that follows.
 
-If the supervisor finds no keychain item it says so in its log and the child
-starts anyway; the push then fails with `could not read Username`, and
-`metistry connect-repo <url>` files one.
+If the supervisor gets no credential it says why in its log and the child
+starts anyway; the push then fails with `could not read Username`. The
+lookup asks for the item's attributes first (no `-g`, no `-w`: that
+reads no data, so the access list is not consulted), then for the value,
+so the log tells the two causes apart:
+
+- `[credential] github.com: no login Keychain item` — `metistry
+  connect-repo <url>` files one.
+- `[credential] github.com: item exists but its access list refuses a
+  background read` — the item was created by `git-credential-osxkeychain`
+  (your own push, or a push through the helper), which trusts only
+  itself; an in-place update kept that list (2026-09-29). Run `metistry
+  connect-repo <url> --force`: it deletes the item and re-creates it with
+  `-A`. If the delete is refused, remove the item in Keychain Access
+  (login → the *Internet password* for your remote's host) and run it
+  again. A login keychain that was locked at spawn reads the same way.
+
+`metistry doctor`'s `vault sync` row names this cause when the last push
+or pull failed with `could not read Username`.
 
 **SSH remotes are still unsupported while confined.** `/usr/bin/ssh` is not
 exec-able under the profile. Allowing it would mean granting the process

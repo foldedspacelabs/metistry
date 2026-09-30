@@ -597,12 +597,16 @@ The instance repo comes from `--instance`, else `METISTRY_INSTANCE_DIR`
 1. **`origin`.** Refuses to repoint an existing `origin` without
    `--force` — silently moving an instance to a different repository is
    how a vault goes missing.
-2. **Credentials**, before the reachability check (a private repo answers
-   nothing without them). For an `https` remote on macOS:
-   `credential.helper=osxkeychain` is set **at the repo level**, and the
-   token is written into the login Keychain as an internet password for
-   the host (`security add-internet-password -r htps`) — exactly the item
-   `git-credential-osxkeychain` looks for.
+2. **Credentials**, before anything talks to the remote (a private repo
+   answers nothing without them). For an `https` remote on macOS:
+   `credential.helper=osxkeychain` is set **at the repo level** — for
+   your own `git` in a terminal and for an unconfined reconciler, which
+   push through it (docs/ops/reconciler.md) — and the token is written
+   into the login Keychain as an internet password for the host
+   (`security add-internet-password -r htps -A`) — exactly the item
+   `git-credential-osxkeychain` looks for. Any existing item for that
+   host, account and protocol is **deleted first**, then the new one is
+   added with `-A`; it is never updated in place (below).
    - `--auth device` runs GitHub's **device-authorization flow**: it
      prints a user code and `https://github.com/login/device`, then polls
      (honouring `authorization_pending` and `slow_down`) until you
@@ -614,6 +618,13 @@ The instance repo comes from `--instance`, else `METISTRY_INSTANCE_DIR`
    - `--auth ssh` writes no credential; `ls-remote` in step 3 is the
      check that your key or agent works.
 3. **`ls-remote origin`** — reachability, proven rather than assumed.
+   When step 2 obtained a token, this and the push in step 5 run with
+   the helper list reset (`-c credential.helper=`) and answer git through
+   `GIT_ASKPASS` with that token — the confined reconciler's mechanism,
+   with a one-shot copy of its shim in a temp directory that is removed
+   when the command ends. No helper runs, so none can create (or, on a
+   refused token, erase and re-create) the Keychain item behind our
+   back.
 4. **`POST /flush`** to the reconciler when `METISTRY_RECONCILER_URL` +
    `METISTRY_BRIDGE_TOKEN_RECONCILER` are set, so the sole committer
    lands its queue before anyone else touches the tree (D5). A reconciler
@@ -641,6 +652,41 @@ lands only in your Keychain. To use your own app instead, register one
 (GitHub → Settings → Developer settings → OAuth Apps, tick **Enable Device
 Flow**) and set `METISTRY_GITHUB_OAUTH_CLIENT_ID` in `.env`. `--auth token`
 and `--auth ssh` work unchanged.
+
+### Why the item is re-created, and the recovery
+
+The supervisor reads the item at every reconciler spawn, in the
+background, with no one there to click a dialog — so the item's access
+list must say "any application". `-A` sets that only when an item is
+**created**: `add-internet-password -U` updates an existing item's value
+and keeps its old access list. An item `git-credential-osxkeychain`
+created first (your own push, or a push through the helper) trusts only
+the helper, and the old `-U` write left the new token behind it. The
+supervisor's log then said `[credential] github.com: item exists but its
+access list refuses a background read` (older releases: `no login
+Keychain item`), and every reconciler push failed with `could not read
+Username for 'https://github.com'`. Clicking "Allow" once does not help
+the next spawn.
+
+`connect-repo` now deletes and re-adds, so running it again repairs an
+install in that state:
+
+```sh
+metistry connect-repo <url> --force
+```
+
+Deleting a helper-owned item may raise one Keychain dialog in your
+session — allow it. If it cannot be deleted (a refused dialog, a locked
+keychain), `connect-repo` stops before writing and says so; remove the
+item by hand — Keychain Access → login → the *Internet password* whose
+Where is your remote's host — and run the command again. `metistry
+doctor`'s `vault sync` row names the same cause when the reconciler
+reports `could not read Username`.
+
+Your own terminal `git` still goes through the helper. It reads the item
+without a prompt; it re-files one of its own only if a push is refused
+(git then erases the credential and, next time, stores what you type) —
+the same recovery applies.
 
 ### The Keychain trade-off, on the record
 

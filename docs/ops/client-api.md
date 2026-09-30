@@ -560,6 +560,21 @@ Content-Type: application/json
   `ended_reason: crashed` from an owner credential raises **one** `report`
   in Needs You, keyed on the session (C137). An agent bearer's capture
   raises none.
+- **Window and Screen recordings** (T8-3) arrive the same way, through the
+  same door: the transcript is the picked content's sound (`(apps)`) and the
+  owner's microphone (`(you)`). The picture itself (`screen.mp4`) stays in
+  the session directory on the Mac — no route carries a frame, and
+  `ended_reason: picture_lost` (the system stopped the stream: the window
+  closed, the grant was withdrawn) is delivered like any other end.
+
+The recording itself is started on the Mac, never here: the bar sends
+`POST /recording/start` to the local bridge with the control credential —
+`{"mode":"audio_only","apps":[…]}`, or `{"mode":"window"}` /
+`{"mode":"screen"}`, which name no content because the system picker the
+recorder presents is the only chooser. A start that names a window, a
+display or apps for those modes is refused `400`; the bridge token is
+refused `403` on every recording route. The bridge's own contract is
+`packages/mcp-live-capture/README.md`.
 
 `POST /api/messages/:id/feedback` needs no key: it is an upsert on the
 message id, so a replay is already the same row. `POST /message` is not

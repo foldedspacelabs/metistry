@@ -264,15 +264,21 @@ import Testing
     let sources = try swiftSources()
     #expect(sources.count > 20, "the source scan found almost nothing — the path is wrong, not the app")
 
-    // 1. The HTTP transport lives in exactly one file.
-    let usesURLSession = sources.filter { $0.body.contains("URLSession.shared") }.map(\.name)
-    #expect(usesURLSession == ["console-client.swift"])
+    // 1. The console's HTTP transport lives in exactly one file. The one
+    //    other HTTP client is the capture bar's wire to the live-capture
+    //    bridge on this Mac (plan §2.2: controlling a recording is
+    //    device-local — no CLI verb, no console route), held to its own
+    //    rules by `theBarsBridgeWireIsTheOnlyOtherDoorAndReachesOnlyTheRecorder` below.
+    let usesURLSession = sources.filter { $0.body.contains("URLSession.shared") || $0.body.contains("URLSession(configuration") }.map(\.name)
+    #expect(usesURLSession == ["console-client.swift", LiveCaptureDoor.transport])
 
-    // 2. Nothing anywhere sets an Authorization header. There is no CLI verb
-    //    that hands this app a bearer scoped to the calling process (PR #119
-    //    added `console whoami` and nothing else), so the app has none to send —
-    //    and it must not invent one by reading the Keychain or .env.
-    for source in sources {
+    // 2. Nothing sets an Authorization header toward the CONSOLE. There is no
+    //    CLI verb that hands this app a bearer scoped to the calling process
+    //    (PR #119 added `console whoami` and nothing else), so the app has none
+    //    to send — and it must not invent one by reading the Keychain or .env.
+    //    The bar's bridge wire is the one file that sets one, and only the
+    //    recorder's control key, only to loopback (checked below).
+    for source in sources where source.name != LiveCaptureDoor.transport {
         for match in source.body.ranges(of: "forHTTPHeaderField:") {
             let tail = source.body[match.upperBound...].prefix(40).lowercased()
             #expect(
@@ -284,10 +290,13 @@ import Testing
         #expect(!source.body.contains("Bearer "), "\(source.name) builds a bearer token")
     }
 
-    // 3. No Keychain, from Swift, ever. The CLI is the one place that knows
-    //    where the local owner token lives.
+    // 3. No Keychain, from Swift, but one read. The CLI is the one place
+    //    that knows where the local owner token lives. The recorder's control
+    //    key is the single exception (live-capture-key.swift): one read-only
+    //    query for one service, held below to never writing and never naming
+    //    another item.
     for needle in ["SecItem", "kSecClass", "SecKeychain", "find-generic-password"] {
-        let offenders = sources.filter { $0.body.contains(needle) }.map(\.name)
+        let offenders = sources.filter { $0.body.contains(needle) && $0.name != LiveCaptureDoor.key }.map(\.name)
         #expect(offenders.isEmpty, "\(needle) appears in \(offenders)")
     }
 
@@ -320,6 +329,46 @@ import Testing
         }
         .map(\.name)
     #expect(readsFiles.isEmpty, "these read a file directly: \(readsFiles)")
+}
+
+/// The two files the source walk above names as the capture bar's door to
+/// the live-capture bridge (T8-5), and nothing else.
+enum LiveCaptureDoor {
+    static let transport = "live-capture-transport.swift"
+    static let key = "live-capture-key.swift"
+}
+
+@Test func theBarsBridgeWireIsTheOnlyOtherDoorAndReachesOnlyTheRecorder() throws {
+    let sources = try swiftSources()
+    let transport = try #require(sources.first { $0.name == LiveCaptureDoor.transport }?.body)
+    let key = try #require(sources.first { $0.name == LiveCaptureDoor.key }?.body)
+
+    // The wire: loopback, the bridge's port, a route from a closed enum, and
+    // two headers — the body's type and the control key's bearer.
+    #expect(transport.contains("host = \"127.0.0.1\""), "the bridge wire is loopback only")
+    #expect(!transport.contains("URL(string:"), "no caller-supplied URL")
+    #expect(transport.contains("willPerformHTTPRedirection") && transport.contains("-> URLRequest? {\n        nil"), "redirects are refused, so the bearer never follows one")
+    for match in transport.ranges(of: "forHTTPHeaderField:") {
+        let tail = String(transport[match.upperBound...].prefix(40))
+        #expect(tail.contains("\"Content-Type\"") || tail.contains("LiveCaptureBearer.field"), "an unexpected header: \(tail)")
+    }
+    #expect(transport.contains("static func header(_ key: LiveCaptureControlKey)"), "the bearer is only ever the control key")
+    #expect(LiveCaptureBridge.url(.status).absoluteString == "http://127.0.0.1:7815/status")
+    #expect(Set(LiveCaptureRoute.allCases.map { LiveCaptureBridge.url($0).host }) == ["127.0.0.1"])
+
+    // The Keychain read: one query, read-only, one service.
+    #expect(key.contains("SecItemCopyMatching"))
+    for write in ["SecItemAdd", "SecItemUpdate", "SecItemDelete", "SecKeychain", "find-generic-password", "kSecUseDataProtectionKeychain"] {
+        #expect(!key.contains(write), "\(write) in the key source")
+    }
+    let services = key.ranges(of: "\"metistry:").map { key[$0.lowerBound...].prefix(60).split(separator: "\"")[0] }
+    #expect(Set(services).count == 1, "exactly one Keychain service is named: \(services)")
+    #expect(KeychainLiveCaptureKeySource.service == "metistry:METISTRY_LIVE_CAPTURE_CONTROL_TOKEN")
+    #expect(!key.contains("OWNER_TOKEN") && !key.contains("BRIDGE_TOKEN"), "the key source names no other credential")
+
+    // …and the console's own client still sets none of this.
+    let client = try #require(sources.first { $0.name == "console-client.swift" }?.body)
+    #expect(!client.contains("LiveCapture"), "the console client never touches the recorder's key")
 }
 
 @Test func theHttpRoutesTheAppSpeaksAreAllPublicBootstrapOnes() throws {

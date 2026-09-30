@@ -147,7 +147,9 @@ import Testing
     #expect(model.registered == Set(AnyAppShortcut.allCases))
     #expect(registrar.live.count == 5)
     // ⌃⌥⌘N: kVK_ANSI_N with controlKey | optionKey | cmdKey
-    #expect(registrar.live[AnyAppShortcut.note.hotKeyID] == .init(keyCode: 0x2D, modifiers: 0x1000 | 0x0800 | 0x0100))
+    let controlOptionCommand: UInt32 = 0x1000 | 0x0800 | 0x0100
+    let note = FakeHotKeys.Key(keyCode: 0x2D, modifiers: controlOptionCommand)
+    #expect(registrar.live[AnyAppShortcut.note.hotKeyID] == note)
     model.setOn(false)
     #expect(registrar.live.isEmpty)
     #expect(model.registered.isEmpty)

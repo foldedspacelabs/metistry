@@ -114,6 +114,36 @@ export type RouteOperation = "answer" | "retrieve:knowledge" | "retrieve:queries
 /** The operation the rules' default serves: today's whole turn. */
 export const DEFAULT_OPERATION = "tools" satisfies RouteOperation;
 
+/** The four vault reads — core's `CREW_TOOL_GROUPS.knowledge`, spelled here so this file imports no manifest code. */
+const KNOWLEDGE_TOOLS = ["knowledge_search", "knowledge_read", "knowledge_list", "knowledge_grep"] as const;
+
+/**
+ * The tools a turn serving this operation may EXECUTE (§3), as the brain
+ * names them (unqualified). `undefined` is the whole surface — `tools`, the
+ * rules' default, today's turn. `[]` is none — `answer`, and a fast path,
+ * which runs no model at all.
+ *
+ * Every list is a subset of the assistant's surface: an operation narrows
+ * what a turn may do and never widens what the assistant may do (invariant
+ * 9). The engine is handed the list and refuses a call outside it at the
+ * tool; the definitions it sends do not change (the cached prefix).
+ */
+export function operationTools(op: ParsedOperation): readonly string[] | undefined {
+  switch (op.form) {
+    case "tools":
+      return undefined;
+    case "answer":
+    case "fast_path:<query>":
+      return [];
+    case "retrieve:knowledge":
+      return KNOWLEDGE_TOOLS;
+    case "retrieve:queries":
+      return ["queries_list", "queries_run"];
+    case "delegate:<crew>":
+      return ["agents_delegate", ...KNOWLEDGE_TOOLS];
+  }
+}
+
 export type ParsedOperation =
   | { form: "answer" }
   | { form: "fast_path:<query>"; query: string }
@@ -304,7 +334,8 @@ export type PolicyValidation = { ok: true; policy: RoutePolicyConfig } | { ok: f
  * vocabulary; a `fast_path:<query>` no `fast_path:` rule names; a `tool_calls`
  * above the cap; a tier map missing a class; a row reading `intent` while
  * `rules.yaml` has no `intent:` block; a row reading `complexity` with no
- * `complexity.min_confidence`; `mode: serve` before T9-4.
+ * `complexity.min_confidence`. (`mode: serve` was refused until T9-4; it is
+ * now the owner's to write.)
  */
 export function validateRoutePolicy(input: unknown, ctx: PolicyContext): PolicyValidation {
   const parsed = policySchema.safeParse(input);
@@ -315,9 +346,9 @@ export function validateRoutePolicy(input: unknown, ctx: PolicyContext): PolicyV
   const errors: string[] = [];
   const refuse = (path: readonly PropertyKey[], message: string): void => void errors.push(`${fieldOf(path)}: ${message}`);
 
-  if (p.mode === "serve") {
-    refuse(["mode"], "serve is refused until T9-4 wires the composer (docs/ops/dynamic-router.md §7.3); the policy runs in shadow — write mode: shadow");
-  }
+  // `mode: serve` was refused here until T9-4 wired the composer
+  // (docs/ops/dynamic-router.md §7.3). It is the owner's to write: an install
+  // stays in `shadow` — the default — until its owner writes `serve`.
 
   const seenTier = new Set<string>();
   p.tiers.forEach((t, i) => {

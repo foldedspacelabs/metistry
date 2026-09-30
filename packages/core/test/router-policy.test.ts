@@ -25,6 +25,7 @@ import {
   decide,
   intentValue,
   isComplexity,
+  operationTools,
   parseOperation,
   policyReads,
   scoreRouteFeatures,
@@ -160,6 +161,18 @@ describe("the operation vocabulary (§3)", () => {
 
 // ---- the table: load-time refusals (§4) ----------------------------------------
 
+describe("operationTools (§3): what a served turn may execute, a subset of the whole surface", () => {
+  it("tools is the whole surface; answer and a fast path none; the rest their lists, and delegate carries the vault reads to write the brief", () => {
+    const tools = (s: string) => operationTools(parseOperation(s)!);
+    expect(tools("tools")).toBeUndefined();
+    expect(tools("answer")).toEqual([]);
+    expect(tools("fast_path:open_work")).toEqual([]);
+    expect(tools("retrieve:knowledge")).toEqual(["knowledge_search", "knowledge_read", "knowledge_list", "knowledge_grep"]);
+    expect(tools("retrieve:queries")).toEqual(["queries_list", "queries_run"]);
+    expect(tools("delegate:reviewer")).toEqual(["agents_delegate", "knowledge_search", "knowledge_read", "knowledge_list", "knowledge_grep"]);
+  });
+});
+
 describe("validateRoutePolicy (§4)", () => {
   it("accepts the spec's example and fills the defaults", () => {
     expect(example).toMatchObject({ mode: "shadow", tiers: ["fast", "default", "deep"], timeout_ms: 400, caps: { tool_calls: 12, tokens: 150000, cost_usd: 0.5 }, complexity: { min_confidence: 0.7 } });
@@ -170,6 +183,12 @@ describe("validateRoutePolicy (§4)", () => {
     delete d.mode;
     delete d.timeout_ms;
     expect(validateRoutePolicy(d, CTX)).toMatchObject({ ok: true, policy: { mode: "shadow", timeout_ms: 400 } });
+  });
+
+  it("mode: serve is the owner's to write since T9-4 wired the composer (§7.3); anything else is still refused", () => {
+    const d = exampleDoc();
+    d.mode = "serve";
+    expect(validateRoutePolicy(d, CTX)).toMatchObject({ ok: true, policy: { mode: "serve" } });
   });
 
   it("reads the model features only where a row reads them — a tier map reads complexity", () => {
@@ -222,7 +241,6 @@ table:
     ["a complexity outside the enum", (d) => (d.table[4].when.complexity = ["simple", "deep"]), "policy.table[4].when.complexity", /one of: simple, moderate, demanding/],
     ["a row reading complexity with no min_confidence", (d) => delete d.complexity, "policy.complexity.min_confidence", /required/],
     ["min_confidence above 1", (d) => (d.complexity.min_confidence = 1.2), "policy.complexity.min_confidence", /between 0 and 1/],
-    ["mode: serve before T9-4", (d) => (d.mode = "serve"), "policy.mode", /T9-4/],
     ["a mode that is neither", (d) => (d.mode = "live"), "policy.mode", /shadow or serve/],
     ["timeout_ms below 50", (d) => (d.timeout_ms = 49), "policy.timeout_ms", /50–2000/],
     ["timeout_ms above 2000", (d) => (d.timeout_ms = 2001), "policy.timeout_ms", /50–2000/],

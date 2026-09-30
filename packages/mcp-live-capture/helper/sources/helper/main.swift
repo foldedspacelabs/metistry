@@ -32,7 +32,7 @@ let ownBundleID = Bundle.main.bundleIdentifier ?? "com.foldedspacelabs.metistry.
 let store = FileSessionStore(root: URL(fileURLWithPath: captureDir, isDirectory: true))
 let recorder = Recorder(backend: SystemBackend(), picture: SystemPicture(), store: store, disk: SystemDisk(), ownBundleID: ownBundleID)
 let os = ProcessInfo.processInfo.operatingSystemVersion
-let service = HelperService(recorder: recorder, grants: SystemGrants(), transcriber: SystemTranscriberProbe(), osVersion: "\(os.majorVersion).\(os.minorVersion)")
+let service = HelperService(recorder: recorder, grants: SystemGrants(), transcriber: SystemTranscriberProbe(), osVersion: "\(os.majorVersion).\(os.minorVersion)", reviewer: SpanTranscriber())
 
 // A session left recording by a crash is ended at its last write, first. It
 // is then owed like any ended session: the bridge's delivery loop hands its
@@ -47,6 +47,19 @@ let lifecycle = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "meti
 lifecycle.schedule(deadline: .now() + 5, repeating: 5)
 lifecycle.setEventHandler { recorder.tick() }
 lifecycle.resume()
+
+// Retention (T8-4): the rule runs here, on the machine that holds the audio,
+// at start and every hour — so the 30-day ceiling needs no console, no bridge
+// and nobody's word. The console's ingestion report (the `retention` op) only
+// ever brings a deletion forward.
+let retention = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "metistry.live-capture.retention"))
+retention.schedule(deadline: .now() + 10, repeating: 3600)
+retention.setEventHandler {
+    for r in recorder.applyRetention() where r.audioDeletedAt != nil {
+        print("retention: session \(r.sessionID)'s media deleted (\(r.audioDeletedReason ?? "retention"))")
+    }
+}
+retention.resume()
 
 // Sleep pauses and marks the gap; wake resumes (or stops, past ten hours).
 let workspace = NSWorkspace.shared.notificationCenter

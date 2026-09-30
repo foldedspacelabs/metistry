@@ -17,7 +17,12 @@ final class LiveTranscriber {
     private let converter: AVAudioConverter?
     private let target: AVAudioFormat
 
-    init(locale requested: Locale, input: AVAudioFormat, onSegment: @escaping (Double, Double, String) -> Void) throws {
+    /// `careful`: `recording_review`'s setting (T8-4) — final results only,
+    /// never `fastResults`, each with its confidence, at user-initiated
+    /// priority. The live path keeps the same final-only results at the
+    /// default priority, so a re-review is never slower to start than it has
+    /// to be and never less careful than the recording was.
+    init(locale requested: Locale, input: AVAudioFormat, careful: Bool = false, onSegment: @escaping (Double, Double, String) -> Void) throws {
         let (locale, format) = try blocking(timeout: 20) { () async throws -> (Locale, AVAudioFormat) in
             guard let l = await SpeechTranscriber.supportedLocale(equivalentTo: requested) else { throw HelperFailure("no on-device transcriber for \(requested.identifier)") }
             let probe = SpeechTranscriber(locale: l, preset: .transcription)
@@ -25,8 +30,10 @@ final class LiveTranscriber {
             return (l, f)
         }
         // Final results only, each with its time range in the stream.
-        let transcriber = SpeechTranscriber(locale: locale, transcriptionOptions: [], reportingOptions: [], attributeOptions: [.audioTimeRange])
-        let analyzer = SpeechAnalyzer(modules: [transcriber])
+        let transcriber = SpeechTranscriber(locale: locale, transcriptionOptions: [], reportingOptions: [], attributeOptions: careful ? [.audioTimeRange, .transcriptionConfidence] : [.audioTimeRange])
+        let analyzer = careful
+            ? SpeechAnalyzer(modules: [transcriber], options: SpeechAnalyzer.Options(priority: .userInitiated, modelRetention: .whileInUse))
+            : SpeechAnalyzer(modules: [transcriber])
         let (stream, continuation) = AsyncStream<AnalyzerInput>.makeStream()
         self.analyzer = analyzer
         self.continuation = continuation
@@ -74,11 +81,11 @@ final class LiveTranscriber {
     /// End of input: the analyzer finalises what it heard and the last
     /// segments are written before this returns (bounded — a stuck model
     /// never holds a stop).
-    func finish() {
+    func finish(timeout: TimeInterval = 30) {
         continuation.finish()
         let analyzer = self.analyzer
         let work = self.work
-        _ = try? blocking(timeout: 30) {
+        _ = try? blocking(timeout: timeout) {
             try await analyzer.finalizeAndFinishThroughEndOfInput()
             await work.value
         }
@@ -95,6 +102,44 @@ final class LiveTranscriber {
             if let sp = s.mData, let dp = d.mData { memcpy(dp, sp, Int(min(s.mDataByteSize, d.mDataByteSize))) }
         }
         return c
+    }
+}
+
+/// `recording_review`'s transcriber (T8-4): one span of one kept audio file,
+/// read from the file and handed to a fresh analyzer at the careful setting.
+/// Only text comes back — the lines and their times, in seconds from the
+/// file's start. The audio is read here and goes nowhere else.
+struct SpanTranscriber: SpanTranscribing {
+    /// How long the analyzer may take to finish a span once it has all of it.
+    /// limit: fixed — under the bridge's 150 s wait on the helper, so a slow
+    /// model answers as a refusal the bridge can name, never a hung socket.
+    static let finishTimeout: TimeInterval = 120
+
+    func transcribe(file: URL, fromS: Double, toS: Double) throws -> [TimedText] {
+        guard #available(macOS 26.0, *), SpeechTranscriber.isAvailable else { throw ReviewError.noTranscriber }
+        let audio = try AVAudioFile(forReading: file)
+        let format = audio.processingFormat
+        let rate = format.sampleRate
+        let start = AVAudioFramePosition(fromS * rate)
+        guard start < audio.length else { return [] } // the span starts after this file's audio ends
+        let end = min(audio.length, AVAudioFramePosition(toS * rate))
+        audio.framePosition = start
+        let lock = NSLock()
+        var lines: [TimedText] = []
+        let t = try LiveTranscriber(locale: transcriptionLocale(), input: format, careful: true) { from, to, text in
+            lock.withLock { lines.append(TimedText(fromS: fromS + from, toS: fromS + to, text: text)) }
+        }
+        var remaining = end - start
+        while remaining > 0 {
+            let n = AVAudioFrameCount(min(remaining, 16_384))
+            guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: n) else { break }
+            try audio.read(into: buffer, frameCount: n)
+            if buffer.frameLength == 0 { break }
+            t.feed(buffer)
+            remaining -= AVAudioFramePosition(buffer.frameLength)
+        }
+        t.finish(timeout: Self.finishTimeout)
+        return lock.withLock { lines }
     }
 }
 

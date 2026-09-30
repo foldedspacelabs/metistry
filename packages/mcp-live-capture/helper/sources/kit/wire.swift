@@ -20,6 +20,13 @@
 //   {"id":7,"op":"transcript","session_id":"…"}            one ended session's record and lines
 //   {"id":8,"op":"delivered","session_id":"…","inbox_id":42}   POST /capture took it
 //
+// and four for retention and re-review (T8-4, retention.swift):
+//
+//   {"id":9,"op":"retention"}                                   apply the rule to every ended session (the timer)
+//   {"id":10,"op":"retention","session_id":"…","ingested_at":"…"}   the console's report, then the rule
+//   {"id":11,"op":"purge","session_id":"…"}                      Purge Now — the owner's hand
+//   {"id":12,"op":"review","session_id":"…","from_s":60,"to_s":90}   re-transcribe a span: text, never audio
+//
 // The socket is owner-only (0600) and its one client is the bridge, which
 // admits `start`, `stop` and `keep_going` only on the control credential the
 // owner's bar holds (src/index.ts). Every refusal is `ok: false` with a
@@ -63,12 +70,14 @@ public final class HelperService {
     private let grants: GrantProbe
     private let transcriber: TranscriberProbe
     private let osVersion: String
+    private let reviewer: SpanTranscribing
 
-    public init(recorder: Recorder, grants: GrantProbe, transcriber: TranscriberProbe, osVersion: String) {
+    public init(recorder: Recorder, grants: GrantProbe, transcriber: TranscriberProbe, osVersion: String, reviewer: SpanTranscribing = NoSpanTranscriber()) {
         self.recorder = recorder
         self.grants = grants
         self.transcriber = transcriber
         self.osVersion = osVersion
+        self.reviewer = reviewer
     }
 
     /// One request line → one response line (without the newline).
@@ -147,7 +156,7 @@ public final class HelperService {
             guard let sessionID = req["session_id"] as? String else { return refusal(id, "invalid_request", "session_id is required") }
             do {
                 let (record, lines) = try recorder.transcript(of: sessionID)
-                return ["id": id, "ok": true, "session": recordJSON(record), "lines": lines]
+                return ["id": id, "ok": true, "session": retentionJSON(record, mediaBytes: recorder.mediaBytes(sessionID)), "lines": lines]
             } catch let e as DeliveryError {
                 return refusal(id, e.code, e.message)
             } catch {
@@ -163,6 +172,58 @@ public final class HelperService {
                 return refusal(id, e.code, e.message)
             } catch {
                 return refusal(id, "invalid_request", "\(error)")
+            }
+
+        case "retention":
+            guard let sessionID = req["session_id"] else {
+                return ["id": id, "ok": true, "changed": recorder.applyRetention().map { retentionJSON($0, mediaBytes: recorder.mediaBytes($0.sessionID)) }]
+            }
+            guard let sessionID = sessionID as? String else { return refusal(id, "invalid_request", "session_id is a session id") }
+            var ingested: Date?
+            if let raw = req["ingested_at"], !(raw is NSNull) {
+                guard let text = raw as? String, let at = parseInstant(text) else { return refusal(id, "invalid_request", "ingested_at is an ISO 8601 instant") }
+                ingested = at
+            }
+            do {
+                let r = try recorder.reportIngestion(sessionID, at: ingested)
+                return ["id": id, "ok": true, "session": retentionJSON(r, mediaBytes: recorder.mediaBytes(sessionID))]
+            } catch let e as DeliveryError {
+                return refusal(id, e.code, e.message)
+            } catch {
+                return refusal(id, "invalid_request", "\(error)")
+            }
+
+        case "purge":
+            guard let sessionID = req["session_id"] as? String else { return refusal(id, "invalid_request", "session_id is required") }
+            do {
+                let r = try recorder.purgeNow(sessionID)
+                return ["id": id, "ok": true, "session": retentionJSON(r, mediaBytes: recorder.mediaBytes(sessionID))]
+            } catch let e as DeliveryError {
+                return refusal(id, e.code, e.message)
+            } catch {
+                return refusal(id, "invalid_request", "\(error)")
+            }
+
+        case "review":
+            guard let sessionID = req["session_id"] as? String else { return refusal(id, "invalid_request", "session_id is required") }
+            guard let from = jsonNumber(req["from_s"]), let to = jsonNumber(req["to_s"])
+            else { return refusal(id, "invalid_request", "from_s and to_s are seconds from Record") }
+            do {
+                switch try recorder.review(sessionID, fromS: from, toS: to, with: reviewer) {
+                case .text(let lines):
+                    return [
+                        "id": id, "ok": true, "session_id": sessionID, "from_s": from, "to_s": to, "audio": "kept",
+                        "lines": lines.map { ["source": $0.source.rawValue, "from_s": $0.fromS, "to_s": $0.toS, "text": $0.text] as [String: Any] },
+                    ]
+                case .audioDeleted(let r):
+                    return ["id": id, "ok": true, "session_id": sessionID, "from_s": from, "to_s": to, "audio": "deleted", "session": retentionJSON(r, mediaBytes: 0), "lines": [] as [Any]]
+                }
+            } catch let e as ReviewError {
+                return refusal(id, e.code, e.message)
+            } catch let e as DeliveryError {
+                return refusal(id, e.code, e.message)
+            } catch {
+                return refusal(id, "review_failed", "\(error)")
             }
 
         default:
@@ -189,6 +250,33 @@ public func recordJSON(_ r: SessionRecord) -> [String: Any] {
           let o = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
     else { return [:] }
     return o
+}
+
+/// A session record with what retention says about it: the audio bytes
+/// still kept, and when each part is due to go.
+public func retentionJSON(_ r: SessionRecord, mediaBytes: Int64) -> [String: Any] {
+    let iso = ISO8601DateFormatter()
+    var o = recordJSON(r)
+    o["media_bytes"] = mediaBytes
+    o["audio_delete_after"] = audioDeleteAfter(r).map { iso.string(from: $0) } ?? NSNull()
+    o["transcript_delete_after"] = transcriptDeleteAfter(r).map { iso.string(from: $0) } ?? NSNull()
+    return o
+}
+
+/// A JSON number — never a JSON boolean, which Foundation also hands back
+/// as an NSNumber (and which `is Bool` cannot tell from 0 and 1).
+public func jsonNumber(_ v: Any?) -> Double? {
+    guard let n = v as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID() else { return nil }
+    return n.doubleValue
+}
+
+/// An ISO 8601 instant, with or without fractional seconds.
+public func parseInstant(_ s: String) -> Date? {
+    let plain = ISO8601DateFormatter()
+    if let d = plain.date(from: s) { return d }
+    let frac = ISO8601DateFormatter()
+    frac.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return frac.date(from: s)
 }
 
 public func statusJSON(_ s: RecorderStatus) -> [String: Any] {

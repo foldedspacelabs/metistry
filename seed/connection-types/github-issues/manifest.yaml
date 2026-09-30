@@ -1,0 +1,49 @@
+# The GitHub Issues connection type (plan §2.6, §2.7; T4-11) — an `agent`
+# connection: a task dispatched to it opens an issue in one repository, the
+# external work queue whoever watches that repo picks up. It is what
+# `targets/github-issues/manifest.yaml` was: this TYPE carries how a brief is
+# dispatched and what it may carry; the CONNECTION carries the repository and
+# the write token. Added with
+#
+#   metistry secrets set github_write_token              (on stdin)
+#   metistry secrets hosts github_write_token api.github.com
+#   metistry secrets grant github_write_token connection:github-issues on
+#   metistry connections add github-issues --type agent --provider github-issues \
+#     --url https://api.github.com --auth bearer --secret github_write_token \
+#     --config repo=owner/repo --no-discover
+#
+# The token is a fine-grained PAT with Issues read/write + Metadata read on
+# that one repository — separate from the read-only token the `github` sync
+# reads with, so a leaked write token is not also the one that reads every
+# repo. It is filled at the egress door for api.github.com only; the
+# dispatcher reaches https://api.github.com and nothing else. The issue's
+# status comes home through the `github` connection's sync (github-state),
+# which must read the same repository.
+#
+# The data policy is the TYPE's; the owner widens `allow` by overlaying this
+# type in `.metistry/extensions/github-issues/manifest.yaml` (D4).
+schema: 1
+name: github-issues
+type: connection-type
+description: GitHub Issues — a task sent here opens an issue in one repository; closing the issue closes the task. A fine-grained write token for that repository, sent to api.github.com only.
+provides: agent
+transports: [http]
+auth: [bearer]
+fields:
+  - key: repo
+    kind: text
+    label: Repository
+    help: "owner/repo — the one repository issues are opened in. The github sync must read it too, so the issue's status comes home."
+implementation: { kind: builtin, module: github-issues }
+dispatch:
+  dispatcher: github-issue
+  result:
+    via: report_queue
+    status_via: github-state
+  cost:
+    per_run_estimate_usd: 0 # the issue is free; whatever picks it up pays its own way
+  data_policy:
+    # Personal areas (Journal, People, Me, …) are absent on purpose.
+    allow: [Projects, Resources, Techniques]
+    deny_sources: [comms]
+    max_brief_bytes: 16384

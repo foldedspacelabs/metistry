@@ -17,7 +17,9 @@ import {
   memoryKeychain,
   parseSecretsFile,
   planEgress,
+  planSocketEgress,
   recordSecretUse,
+  socketDestination,
   redactedSecret,
   secretRefsIn,
   type KeychainBackend,
@@ -444,5 +446,60 @@ describe("recordSecretUse — *last used* is stamped on the run", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]!.values).toEqual([42, JSON.stringify(["github_write"]), SECRET_USE_META_KEY]);
     expect(calls[0]!.text).toMatch(/UPDATE runs SET meta = jsonb_set/);
+  });
+});
+
+// T4-15: a connection that is not HTTP (IMAP) has no URL, header or body for
+// planEgress to read — its guard takes the socket's host, port and TLS and
+// the names it will send, and asks the same three questions before a dial.
+describe("the socket guard (planSocketEgress, T4-15)", () => {
+  const SOCKETS = parseSecretsFile(`
+secrets:
+  gmail_app_password:
+    hosts: ["imap.gmail.com:993"]
+    grants:
+      connection:gmail: on
+      connection:asked: ask
+  bridge_password:
+    hosts: ["127.0.0.1:1143"]
+    grants:
+      connection:bridge: on
+`);
+  const rules = (grantee: string, extra: Record<string, unknown> = {}) => ({ secrets: SOCKETS, grantee, purpose: "service" as const, redactor: new SecretRedactor(), ...extra });
+  const code = (f: () => unknown): string => {
+    try {
+      f();
+    } catch (err) {
+      expect(err).toBeInstanceOf(EgressRefused);
+      return (err as EgressRefused).code;
+    }
+    return "passed";
+  };
+
+  it("passes for the exact host:port, over TLS, when granted — and names what it sends", () => {
+    const plan = planSocketEgress({ host: "imap.gmail.com", port: 993, tls: true }, ["gmail_app_password"], rules("connection:gmail"));
+    expect(plan).toEqual({ destination: { entry: "imap.gmail.com:993", host: "imap.gmail.com", port: 993, cleartext: false }, refs: ["gmail_app_password"], names: ["gmail_app_password"] });
+    expect(socketDestination("IMAP.Example.com", 443, true).entry).toBe("imap.example.com");
+  });
+
+  it("refuses another host, another port, cleartext off loopback, no grant, Ask without approval", () => {
+    expect(code(() => planSocketEgress({ host: "imap.evil.example", port: 993, tls: true }, ["gmail_app_password"], rules("connection:gmail")))).toBe("host_not_listed");
+    expect(code(() => planSocketEgress({ host: "imap.gmail.com", port: 143, tls: true }, ["gmail_app_password"], rules("connection:gmail")))).toBe("host_not_listed");
+    expect(code(() => planSocketEgress({ host: "imap.gmail.com", port: 993, tls: false }, ["gmail_app_password"], rules("connection:gmail")))).toBe("cleartext");
+    expect(code(() => planSocketEgress({ host: "imap.gmail.com", port: 993, tls: true }, ["gmail_app_password"], rules("connection:other")))).toBe("not_granted");
+    expect(code(() => planSocketEgress({ host: "imap.gmail.com", port: 993, tls: true }, ["gmail_app_password"], rules("connection:asked")))).toBe("needs_approval");
+    expect(code(() => planSocketEgress({ host: "imap.gmail.com", port: 993, tls: true }, ["gmail_app_password"], rules("connection:asked", { approved: ["gmail_app_password"] })))).toBe("passed");
+    expect(code(() => planSocketEgress({ host: "imap.gmail.com", port: 993, tls: true }, ["undescribed"], rules("connection:gmail")))).toBe("host_not_listed");
+    expect(code(() => planSocketEgress({ host: "imap.gmail.com/x", port: 993, tls: true }, ["gmail_app_password"], rules("connection:gmail")))).toBe("bad_url");
+    // loopback without TLS is a destination like any other — listed with its port
+    expect(code(() => planSocketEgress({ host: "127.0.0.1", port: 1143, tls: false }, ["bridge_password"], rules("connection:bridge")))).toBe("passed");
+  });
+
+  it("the cleartext refusal says TLS, not https", () => {
+    try {
+      planSocketEgress({ host: "imap.gmail.com", port: 993, tls: false }, ["gmail_app_password"], rules("connection:gmail"));
+    } catch (err) {
+      expect((err as Error).message).toMatch(/without TLS — a secret goes off this machine over TLS only/);
+    }
   });
 });

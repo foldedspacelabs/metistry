@@ -69,8 +69,14 @@ export function capabilityIssue(type: ConnectionType, capability: string): strin
     : `unknown ${type} capability "${capability}" — one of ${vocabulary.join(", ")}`;
 }
 
-/** How Metistry reaches a connection (C118): over HTTP, by running a command, or at a path. The bridges' `transport: http | stdio` are the first two. */
-export const REACH_CLASSES = ["http", "command", "path"] as const;
+/**
+ * How Metistry reaches a connection (C118): over HTTP, by running a command,
+ * at a path — the bridges' `transport: http | stdio` are the first two — or
+ * over IMAP (T4-15): a mail server is neither an HTTP service, a command nor
+ * a path, so it is a reach class of its own, with its own host guard
+ * (`imapReach` below; the egress door's `planSocketEgress`).
+ */
+export const REACH_CLASSES = ["http", "command", "path", "imap"] as const;
 export type ReachClass = (typeof REACH_CLASSES)[number];
 
 /**
@@ -105,6 +111,17 @@ export type ToolMode = (typeof TOOL_MODES)[number];
 
 /** A proxied connection tool's mode when the owner has not set one: Ask (CLAUDE.md, Packages — ratified 2026-09-26). A manifest cannot choose it. */
 export const DEFAULT_TOOL_MODE: ToolMode = "ask";
+
+/**
+ * The ports an IMAP reach never points at: SMTP (25), submission over TLS
+ * (465) and submission (587), and 2525, the submission port some providers
+ * offer beside 587. Nothing sends mail (§2.6): an IMAP reach that names one
+ * is refused at the file, and the IMAP client refuses to dial one.
+ */
+export const MAIL_SUBMISSION_PORTS: readonly number[] = [25, 465, 587, 2525];
+
+/** IMAP over implicit TLS (RFC 8314 §3.3) — the one port an IMAP reach takes by default. */
+export const IMAP_TLS_PORT = 993;
 
 /** The authentication shortcuts an HTTP reach offers (screen-09 §10.5). */
 export const AUTH_SCHEMES = ["none", "bearer", "basic", "api_key", "oauth"] as const;
@@ -292,7 +309,7 @@ export const connectionTypeShape = {
 
 /** The cross-field rules of a connection-type manifest, run by its schema's superRefine. */
 export function refineConnectionType(
-  m: { name: string; provides: ConnectionType; transports: ReachClass[]; fields: ConnectionField[]; capabilities: string[]; implementation: ConnectionImplementation },
+  m: { name: string; provides: ConnectionType; transports: ReachClass[]; fields: ConnectionField[]; capabilities: string[]; implementation: ConnectionImplementation; auth?: AuthScheme[] | undefined },
   ctx: z.RefinementCtx,
 ): void {
   if (m.name === CUSTOM_PROVIDER) {
@@ -307,6 +324,13 @@ export function refineConnectionType(
   }
   if (new Set(m.transports).size !== m.transports.length) {
     ctx.addIssue({ code: "custom", path: ["transports"], message: "transports are listed once each" });
+  }
+  if (m.transports.includes("imap")) {
+    // IMAP reaches a mailbox and nothing else, and signs in with a username and an app password — basic, declared (T4-15)
+    if (m.provides !== "mail") ctx.addIssue({ code: "custom", path: ["transports"], message: `imap reaches a mailbox — only a mail connection type is reached by imap, not ${m.provides}` });
+    if (!m.auth?.includes("basic")) {
+      ctx.addIssue({ code: "custom", path: ["auth"], message: "a type reached by imap signs in with a username and an app password — declare auth: [basic]" });
+    }
   }
   const keys = m.fields.map((f) => f.key);
   keys.forEach((k, i) => {
@@ -399,9 +423,48 @@ const pathReach = z.strictObject({
   watch: z.boolean().default(false),
 });
 
-/** Exactly one of `http`, `command`, `path` (C118). */
+/** A host name as DNS spells it, lowercase — no scheme, no port, no path, no template, no wildcard. */
+const imapHost = z
+  .string()
+  .regex(/^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/, "an IMAP host is a lowercase host name — no scheme, no port (that is port:), no path");
+
+/** Loopback, where a local server (a mail bridge on this Mac) may be reached without TLS — and nowhere else. */
+function isLoopbackName(host: string): boolean {
+  return host === "localhost" || /^127(?:\.[0-9]{1,3}){3}$/.test(host);
+}
+
+/**
+ * An IMAP mailbox (T4-15). The sign-in is always a username and an app
+ * password — the password is a secret of the connection, named here and
+ * filled only at the door (`planSocketEgress`): for a listed `host:port`,
+ * over TLS, when granted. `security: plain` is for a server on this Mac
+ * alone (a local mail bridge); off loopback it is refused, as the HTTP door
+ * refuses a secret over plain http.
+ */
+const imapReach = z
+  .strictObject({
+    host: imapHost,
+    port: z.number().int().min(1).max(65535).default(IMAP_TLS_PORT),
+    security: z.enum(["tls", "plain"]).default("tls"),
+    username: z
+      .string()
+      .min(1)
+      .max(320)
+      .regex(/^[^\u0000-\u001f\u007f"\\{}]+$/, "an IMAP username has no control character, quote, backslash or template — it is written as it is"),
+    secret: secretName,
+  })
+  .superRefine((r, ctx) => {
+    if (MAIL_SUBMISSION_PORTS.includes(r.port)) {
+      ctx.addIssue({ code: "custom", path: ["port"], message: `port ${r.port} is a mail submission port — an IMAP reach never points at one; nothing sends mail (§2.6)` });
+    }
+    if (r.security === "plain" && !isLoopbackName(r.host)) {
+      ctx.addIssue({ code: "custom", path: ["security"], message: `security: plain is for a server on this Mac only — ${r.host} is reached over TLS, so the app password never crosses the network in the clear` });
+    }
+  });
+
+/** Exactly one of `http`, `command`, `path`, `imap` (C118; imap: T4-15). */
 export const reachSchema = z
-  .strictObject({ http: httpReach.optional(), command: commandReach.optional(), path: pathReach.optional() })
+  .strictObject({ http: httpReach.optional(), command: commandReach.optional(), path: pathReach.optional(), imap: imapReach.optional() })
   .superRefine((r, ctx) => {
     const given = REACH_CLASSES.filter((c) => r[c] !== undefined);
     if (given.length !== 1) {
@@ -413,7 +476,7 @@ export type Reach = z.infer<typeof reachSchema>;
 
 /** The class of a (valid) reach. */
 export function reachClassOf(r: Reach): ReachClass {
-  return r.http ? "http" : r.command ? "command" : "path";
+  return r.http ? "http" : r.command ? "command" : r.imap ? "imap" : "path";
 }
 
 /** An `oauth` field's value on a connection: where the token is kept, and a bring-your-own client, each a secret reference. */
@@ -507,6 +570,10 @@ export const connectionFileSchema = z
     if (auth && "secret" in auth && !c.secrets.includes(auth.secret)) {
       ctx.addIssue({ code: "custom", path: ["reach", "http", "auth", "secret"], message: `secret "${auth.secret}" is used but not listed in secrets` });
     }
+    const imap = c.reach.imap;
+    if (imap && !c.secrets.includes(imap.secret)) {
+      ctx.addIssue({ code: "custom", path: ["reach", "imap", "secret"], message: `secret "${imap.secret}" is used but not listed in secrets` });
+    }
     if (c.provider === CUSTOM_PROVIDER) {
       const speaks = NATIVE_REACH[c.type];
       if (speaks.length === 0) {
@@ -598,6 +665,10 @@ export function connectionIssues(c: ConnectionFile, type: ConnectionTypeManifest
           : `reach.http.auth: ${type.name} does not accept basic sign-in — only a connection type that declares it (auth: [basic]) does`,
       );
     }
+  }
+
+  if (c.reach.imap && !type.auth?.includes("basic")) {
+    issues.push(`reach.imap: ${type.name} does not declare basic sign-in (auth: [basic]) — an IMAP connection signs in with a username and an app password, so only a type that declares it is reached by imap`);
   }
 
   const auth = c.reach.http?.auth;

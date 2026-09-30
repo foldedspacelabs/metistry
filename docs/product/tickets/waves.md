@@ -148,7 +148,7 @@ Generated from `docs/product/design-build-plan.md` by `ops/scripts/tickets.mjs`.
 - [x] [T9-3](t9/t9-3.md) · The confirmatory eval · M · opus · after T9-2
 - [x] [T10-7](t10/t10-7.md) · History in the app · M · opus · after T10-2, T10-4, T5-3
 - [x] [X-6](x/x-6.md) · `/vault/log` is the owner's · S · sonnet · after T10-4
-- [ ] [X-7](x/x-7.md) · A provider key's grantee, and compute through the egress guard · M · opus · after T4-18, T4-2 · **in-review**
+- [x] [X-7](x/x-7.md) · A provider key's grantee, and compute through the egress guard · M · opus · after T4-18, T4-2
 - [x] [X-8](x/x-8.md) · An agent's connection grants persist · S · sonnet · after T4-8b
 - [x] [X-9](x/x-9.md) · Restore is the Mac's · S · sonnet · after T10-5
 - [x] [X-10](x/x-10.md) · A report is acknowledged; an agent reads its answer · M · opus · after T2-3
@@ -166,34 +166,34 @@ Generated from `docs/product/design-build-plan.md` by `ops/scripts/tickets.mjs`.
 - [x] [X-22](x/x-22.md) · The Mac reads `request.questions` · S · sonnet · after T5-4b
 - [x] [X-23](x/x-23.md) · `connection_call` on Activity and turn progress · S · sonnet · after T1-3, T2-17, T4-8b
 
-- [ ] **W3 checkpoint** — merged, main green, scratch-instance upgrade, conformance test, Mac smoke, release · waiting on X-7 (in-review)
+- [ ] **W3 checkpoint** — merged, main green, scratch-instance upgrade, conformance test, Mac smoke, release
 
 ## W4 — 22 tickets, 73 agent-days
 
-- [ ] [X-24](x/x-24.md) · Plan-tomorrow's test runs on its own clock · S · sonnet · after X-15
-- [ ] [X-29](x/x-29.md) · Main's Mac fixtures match the recorder · M · opus
-- [ ] [X-31](x/x-31.md) · The recorder's seeds are pinned to its clock · S · sonnet
-- [ ] [X-32](x/x-32.md) · A push carries Needs You only, and no text · M · opus
-- [ ] [X-41](x/x-41.md) · An owner-door secret refuses a connection or agent grant · S · sonnet · after T2-13
-- [ ] [T4-10](t4/t4-10.md) · Connections P3: HTTP, OAuth, generated tools · L · opus high · after T4-9
-- [ ] [T4-11](t4/t4-11.md) · Targets and syncs as connections · L · opus high · after T4-10
-- [ ] [T4-14](t4/t4-14.md) · Google Calendar through Metistry's client · L · opus high · after T4-10, T4-12
-- [ ] [T4-15](t4/t4-15.md) · Mail: IMAP · L · opus high · after T4-8a
-- [ ] [T4-17](t4/t4-17.md) · Invitation and message requests · M · opus · after T4-12, T4-15, T1-8
-- [ ] [T6-12](t6/t6-12.md) · Compute · L · opus high · after T4-18, T4-19
-- [ ] [T6-13a](t6/t6-13a.md) · Connections: list and detail · L · opus high · after T4-8a
-- [ ] [T6-13b](t6/t6-13b.md) · Connections: add and configure · L · opus high · after T4-10
-- [ ] [T6-14](t6/t6-14.md) · Secrets and Variables · M · opus · after T4-1, T4-4
-- [ ] [T6-15](t6/t6-15.md) · Live Capture and Sessions · M · opus · after T8-4, T3-9
-- [ ] [T6-16](t6/t6-16.md) · Hot keys and the audit · M · opus · after T5-2
-- [ ] [T7-6](t7/t7-6.md) · Settings · M · opus · after F-13
-- [ ] [T8-3](t8/t8-3.md) · Screen and window · L · opus high · after T8-2a
-- [ ] [T8-4](t8/t8-4.md) · Retention and re-review · M · opus · after T8-2b, F-6
-- [ ] [T8-5](t8/t8-5.md) · The bar · L · opus high · after T8-2a, T5-5
-- [ ] [T8-7](t8/t8-7.md) · Meeting groups and anchors · M · opus · after T1-8, T8-2b
-- [ ] [T9-4](t9/t9-4.md) · Wire the composer · M · opus · after T9-3, F-0
+- [x] [X-24](x/x-24.md) · Plan-tomorrow's test runs on its own clock · S · sonnet · after X-15
+- [x] [X-29](x/x-29.md) · Main's Mac fixtures match the recorder · M · opus
+- [x] [X-31](x/x-31.md) · The recorder's seeds are pinned to its clock · S · sonnet
+- [x] [X-32](x/x-32.md) · A push carries Needs You only, and no text · M · opus
+- [x] [X-41](x/x-41.md) · An owner-door secret refuses a connection or agent grant · S · sonnet · after T2-13
+- [x] [T4-10](t4/t4-10.md) · Connections P3: HTTP, OAuth, generated tools · L · opus high · after T4-9
+- [x] [T4-11](t4/t4-11.md) · Targets and syncs as connections · L · opus high · after T4-10
+- [x] [T4-14](t4/t4-14.md) · Google Calendar through Metistry's client · L · opus high · after T4-10, T4-12
+- [x] [T4-15](t4/t4-15.md) · Mail: IMAP · L · opus high · after T4-8a
+- [x] [T4-17](t4/t4-17.md) · Invitation and message requests · M · opus · after T4-12, T4-15, T1-8
+- [x] [T6-12](t6/t6-12.md) · Compute · L · opus high · after T4-18, T4-19
+- [x] [T6-13a](t6/t6-13a.md) · Connections: list and detail · L · opus high · after T4-8a
+- [x] [T6-13b](t6/t6-13b.md) · Connections: add and configure · L · opus high · after T4-10
+- [x] [T6-14](t6/t6-14.md) · Secrets and Variables · M · opus · after T4-1, T4-4
+- [x] [T6-15](t6/t6-15.md) · Live Capture and Sessions · M · opus · after T8-4, T3-9
+- [x] [T6-16](t6/t6-16.md) · Hot keys and the audit · M · opus · after T5-2
+- [x] [T7-6](t7/t7-6.md) · Settings · M · opus · after F-13
+- [x] [T8-3](t8/t8-3.md) · Screen and window · L · opus high · after T8-2a
+- [x] [T8-4](t8/t8-4.md) · Retention and re-review · M · opus · after T8-2b, F-6
+- [x] [T8-5](t8/t8-5.md) · The bar · L · opus high · after T8-2a, T5-5
+- [x] [T8-7](t8/t8-7.md) · Meeting groups and anchors · M · opus · after T1-8, T8-2b
+- [ ] [T9-4](t9/t9-4.md) · Wire the composer · M · opus · after T9-3, F-0 · **in-review**
 
-- [ ] **W4 checkpoint** — merged, main green, scratch-instance upgrade, conformance test, Mac smoke, release
+- [ ] **W4 checkpoint** — merged, main green, scratch-instance upgrade, conformance test, Mac smoke, release · waiting on T9-4 (in-review)
 
 ## W5 — 1 tickets, 1 agent-days
 
@@ -201,7 +201,7 @@ Generated from `docs/product/design-build-plan.md` by `ops/scripts/tickets.mjs`.
 
 - [ ] **W5 checkpoint** — merged, main green, scratch-instance upgrade, conformance test, Mac smoke, release
 
-## W4 candidates — 46 tickets, 67 agent-days, no wave yet
+## W4 candidates — 69 tickets, 93 agent-days, no wave yet
 
 Follow-ups specified in the plan (§3.2's *Candidates* row) that nobody has scheduled. The owner assigns each one a wave at a checkpoint; until then none is dispatched.
 
@@ -251,3 +251,26 @@ Follow-ups specified in the plan (§3.2's *Candidates* row) that nobody has sche
 - [ ] [X-72](x/x-72.md) · The recorder's sockets live under the instance · S · sonnet · after T8-2b
 - [ ] [X-73](x/x-73.md) · Transcripts land where the ruling says · S · sonnet · after T8-2b
 - [ ] [X-74](x/x-74.md) · CI's Swift-helper filter is anchored · S · sonnet
+- [ ] [X-80](x/x-80.md) · `metistry up` mints the recorder's control token · S · sonnet · after T8-5
+- [ ] [X-81](x/x-81.md) · Kept recordings have a list route · S · sonnet · after T6-15, T8-4
+- [ ] [X-82](x/x-82.md) · The Mac's meeting group decodes `group_id` · S · sonnet · after T8-7
+- [ ] [X-83](x/x-83.md) · The activity feed's capture subject reads the title only · S · sonnet · after T8-6
+- [ ] [X-84](x/x-84.md) · `POST /message` carries a session-turn marker · M · opus · after T8-6, T6-15
+- [ ] [X-85](x/x-85.md) · The targets shim comes out · S · sonnet · after T4-11
+- [ ] [X-86](x/x-86.md) · The Mac's Secrets pane hides Grant for an owner-door secret · S · sonnet · after X-41, T6-14
+- [ ] [X-87](x/x-87.md) · The calendar collectors export `check()` · S · sonnet · after T4-14
+- [ ] [X-88](x/x-88.md) · The workspace test script isolates each package's database · M · opus
+- [ ] [X-89](x/x-89.md) · A request raised while the console is down still pushes · S · sonnet · after X-32
+- [ ] [X-90](x/x-90.md) · The hot-key and accessibility audits see what they miss · S · sonnet · after T6-16
+- [ ] [X-91](x/x-91.md) · The three-pointers test tolerates the device-local keys · S · sonnet · after T6-16, T6-15
+- [ ] [X-92](x/x-92.md) · Dispatch's `REPO_RE` has a misuse test · S · sonnet · after T4-11
+- [ ] [X-93](x/x-93.md) · `socketDestination` keeps IMAP's port · S · sonnet · after T4-15
+- [ ] [X-94](x/x-94.md) · The wizard's copy templates the configured name · S · sonnet · after T6-12
+- [ ] [X-95](x/x-95.md) · The Mac's loopback set matches core's · S · sonnet · after T6-13a
+- [ ] [X-96](x/x-96.md) · A connection's detail says who uses it and when it was checked · S · sonnet · after T6-13a
+- [ ] [X-97](x/x-97.md) · Variables: when it was set, the preview an agent sees, and a key's expiry · S · sonnet · after T6-14
+- [ ] [X-98](x/x-98.md) · Agents and Compute: the model line, the key note and the download · S · sonnet · after T6-12, T6-5
+- [ ] [X-99](x/x-99.md) · The phone's writable rows have controls · S · sonnet · after T7-6
+- [ ] [X-100](x/x-100.md) · The "held to core" Swift tests cannot drift · S · sonnet · after T6-14, T6-5
+- [ ] [X-101](x/x-101.md) · Bare `metistry doctor` resolves the product directory it runs from · S · sonnet
+- [ ] [X-102](x/x-102.md) · The recorder leaves no fixed-id rows behind · S · sonnet · after X-31

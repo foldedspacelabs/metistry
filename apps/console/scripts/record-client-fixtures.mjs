@@ -153,11 +153,16 @@ await writeFile(
 );
 
 // the Secrets list (§2.14): a policy file, and a Keychain in memory — never the
-// login Keychain — holding this instance's item, so `present` reads true
+// login Keychain — holding this instance's item, so `present` reads true.
+// github_write is the owner-door secret (X-41): it carries no grants — a
+// connection or an agent is refused one at the tool — so github_mcp_key
+// (the MCP server's own, narrower token) is what demonstrates a grant here.
 await writeFile(
   layout.path("secrets"),
   `secrets:
   github_write:
+    hosts: [api.github.com]
+  github_mcp_key:
     hosts: [api.github.com]
     grants:
       connection:github: on
@@ -168,7 +173,7 @@ await writeFile(
 // so `read_by` and `used_in` have something to say
 await writeFile(layout.path("variables"), `variables:\n  team_name: Platform\n  company: Acme\n`);
 // the Connections list (§2.6, T4-8a): a stdio MCP server whose token is the
-// github_write secret above (granted to connection:github, and held), with a
+// github_mcp_key secret above (granted to connection:github, and held), with a
 // tool at each mode; and a sync in scheduled.yaml that reads it, for *used by*.
 // Nothing dials it: a read of the list never starts the command.
 await mkdir(join(layout.path("metistryDir"), "connections"), { recursive: true });
@@ -183,9 +188,9 @@ reach:
     command: npx
     args: [-y, "@modelcontextprotocol/server-github"]
     env:
-      GITHUB_PERSONAL_ACCESS_TOKEN: "{{ secret.github_write }}"
+      GITHUB_PERSONAL_ACCESS_TOKEN: "{{ secret.github_mcp_key }}"
       GITHUB_TEAM: "{{ variable.team_name }}"
-secrets: [github_write]
+secrets: [github_mcp_key]
 variables: [team_name]
 tools:
   search_issues: { group: reads, mode: on }
@@ -199,6 +204,7 @@ await writeFile(join(layout.path("metistryDir"), "scheduled.yaml"), `syncs:\n  g
 const fixtureKeychain = memoryKeychain();
 const instanceSecrets = new InstanceSecrets(fixtureKeychain, await readInstanceId(instanceDir));
 await instanceSecrets.set("github_write", "fixture-value-never-recorded");
+await instanceSecrets.set("github_mcp_key", "fixture-value-never-recorded");
 
 // ---- the outside world, faked in-process ------------------------------------------
 

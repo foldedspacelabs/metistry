@@ -32,7 +32,7 @@
         "runs_on": "host"
       },
       "secrets": [
-        "github_write"
+        "github_mcp_key"
       ],
       "variables": [
         "team_name"
@@ -64,6 +64,6 @@
       "file": ".metistry/connections/github.yaml",
       "provider_unit": null
     },
-    "as_of": "2026-09-30T04:49:51.816Z"
+    "as_of": "2026-09-30T05:16:02.422Z"
   }
 }

@@ -2973,7 +2973,7 @@ POST /api/meetings/:event_id/note                 {}   201 {ok, event_id, path, 
 POST /api/calendar/events/:id/move                {start, end}                 200 {ok, preview: {event_id, title, from, to, attendees}, others, warning, confirm_token, expires_in_sec, moved: false}
                                                   {start, end, confirm_token}  200 {ok, moved: true, event_id, event, others, refreshing}
 POST /api/calendar/invitations/:id/respond        T4-17 — through the connection's `rsvp` capability (CalDAV's: packages/connections `previewReply` / `respondToInvitation`, T4-13)
-POST /api/mail/messages/:id/draft                 T4-17 — through the connection's `draft` capability; never sends mail
+POST /api/mail/messages/:id/draft                 T4-17 — through the connection's `draft` capability (IMAP's: packages/connections `previewDraft` / `appendDraft`, APPEND to \Drafts, T4-15); never sends mail
 ```
 
 **Where the calendar comes from.** Every calendar source syncs into one table,
@@ -3242,7 +3242,9 @@ One row per file in the instance's `.metistry/connections/`, sorted by name
 `calendar`, …) and `provider` the connection-type unit that reaches it, or
 `custom`. `reach` is how Metistry reaches it — `http` (`url`, `auth` scheme,
 header and query-parameter **names**, `timeout_s`), `command` (`command`,
-`args`, `cwd`, environment-variable **names**, `runs_on`) or `path`. `tools`
+`args`, `cwd`, environment-variable **names**, `runs_on`), `path`, or `imap`
+(`host`, `port`, `security` `tls` · `plain`, `auth: "basic"` — a mailbox,
+T4-15; never the username or the password). `tools`
 is the owner's per-tool policy: each tool's `group` (`reads` · `changes` ·
 `starts_agent`) and `mode` (`on` · `ask` · `off`, drawn *Allow · Ask First ·
 Never*). `used_by` is what reads it today — the syncs in `scheduled.yaml` that
@@ -3256,7 +3258,7 @@ true answer (*Nobody yet*).
 | --- | --- |
 | `ok` | the file validates against its provider's unit and the door would let it through |
 | `absent` | something it needs is not here: its provider's connection type (not installed — the file is not deleted), a variable it uses, or a secret's item in **this instance's** Keychain (a presence probe; never a value) |
-| `failed` | the file does not validate or breaks a rule (a key pasted where a name belongs, a secret in a URL or on a command line), or `secrets.yaml` does not grant a secret to `connection:<name>`, or does not list the host an HTTP connection sends it to — exactly what the egress door would refuse, said before any call |
+| `failed` | the file does not validate or breaks a rule (a key pasted where a name belongs, a secret in a URL or on a command line), or `secrets.yaml` does not grant a secret to `connection:<name>`, or does not list the host an HTTP connection sends it to (or the exact `host:port` an IMAP connection signs in to) — exactly what the egress door would refuse, said before any call |
 
 **Names, never values, by construction.** A row is built field by field; it
 carries header, query and environment **names** and never a header or

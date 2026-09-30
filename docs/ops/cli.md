@@ -1703,7 +1703,8 @@ leaving `{{ secret.x }}` for the egress fill.
 M13 (plan §2.2, §2.6): servers Metistry reaches for you, one file each in
 `.metistry/connections/<name>.yaml` (`docs/ops/connections.md` is the whole
 contract). This release dials **MCP servers**, by URL or by command; a
-calendar or tracker connection is read by its sync (`--no-discover`).
+calendar or tracker connection is read by its sync (`--no-discover`), and a
+mailbox is reached over IMAP (`--imap`, T4-15).
 
 ```sh
 metistry connections add github --type mcp \
@@ -1714,6 +1715,9 @@ metistry connections add linear --type mcp --url https://mcp.linear.app/mcp \
 metistry connections add icloud --type calendar --provider icloud-calendar \
     --url https://caldav.icloud.com/ --auth basic --username you@icloud.com \
     --secret icloud_app_password --no-discover             # CalDAV: an app password, by name
+metistry connections add gmail --type mail --provider gmail-mail \
+    --imap imap.gmail.com:993 --username you@gmail.com \
+    --secret gmail_app_password                            # IMAP: an app password, by name; nothing is dialled
 metistry connections list [--json]                        # every connection: status, reach, tools, used by
 metistry connections show github [--json]                 # one, in full
 metistry connections policy github                        # the tool table, by group
@@ -1751,12 +1755,23 @@ before anything is written and without repeating the value:
 - a Google address for a CalDAV calendar — *Google needs sign-in with Google*
   (its CalDAV takes OAuth only), and a known service (`icloud-calendar`,
   `fastmail-calendar`) pointed anywhere but its own server;
+- for a mailbox (`--imap host[:port]`, T4-15 — port 993 and TLS unless given):
+  no `--username` or `--secret` (the secret holds the app password); an
+  `--auth` other than `basic`; a scheme or path in `--imap`; a mail submission
+  port (25, 465, 587, 2525 — nothing sends mail); `--plain` for any host but
+  this Mac's; Gmail (`gmail-mail`) anywhere but `imap.gmail.com:993`; a
+  connection type that is not reached by imap. `--imap` goes with exactly one
+  way of reaching it — not beside `--url` or a command — and `--plain` only
+  with `--imap`;
 - a name already taken; a provider (`--provider`) that no connection type
   installed provides.
 
 **`add` dials once** — `initialize` and `tools/list`, through the same pool and
 egress door the console uses, calling no tool — and writes nothing if the
-server does not answer (`--no-discover` writes it without dialling). A secret
+server does not answer (`--no-discover` writes it without dialling). A
+mailbox (`--imap`) is not an MCP server, so `add` dials nothing for it and
+says to `test` it; the line it prints names the `host:port` its secret must
+list (`metistry secrets hosts <name> imap.gmail.com:993`). A secret
 the dial needs must already be granted to `connection:<name>` — `metistry
 secrets grant <secret> connection:<name> on` first, or add it with
 `--no-discover`, grant, then `test`. The owner's defaults (Q15, 2026-09-26): a tool the connection type declares keeps
@@ -1781,7 +1796,12 @@ on this Mac, a secret has no item, a variable is unset, its connection type is
 not installed), `failed` (the credential is refused at the door — not granted
 to `connection:<name>`, or its host is not on the secret's *Sent only to* list —
 or the server cannot be reached). It lists what the server offers that is not
-listed, and what it marks read-only. `metistry doctor` runs the same check for
+listed, and what it marks read-only. For a mailbox, `test` signs in with the
+app password from this instance's Keychain (through the IMAP host guard: the
+exact `host:port` listed, TLS, granted), lists its folders, finds Drafts and
+examines INBOX — reading no message — then logs out: `meta` is `{ mailboxes,
+drafts, inbox_messages }`, `degraded` when there is no Drafts mailbox, `failed`
+on a refused sign-in (*sign in with an app password*). `metistry doctor` runs the same check for
 every connection (never `failed` there: a connection is someone else's
 server, so its outage does not fail the install).
 

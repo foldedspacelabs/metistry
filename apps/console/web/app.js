@@ -10,7 +10,7 @@ import { asNum, attr, barHtml, bodyClass, clockTime, dateTime, esc, fmtUsd } fro
 // them; they never import it.
 import { mountKnowledge } from "./knowledge.js";
 import { mountMore } from "./more.js";
-import { mountNeedsYou } from "./needs-you.js";
+import { mountNeedsYou, needsYouRoute } from "./needs-you.js";
 // Notifications and install (T7-5, screen 18 §6): the ask, the install sheet, Settings' push rows.
 import { mountNotify } from "./notify.js";
 import { mountToday } from "./today.js";
@@ -1382,11 +1382,12 @@ if ("serviceWorker" in navigator) {
   });
 }
 
-/** A notification's link: Needs You, or the card or room it names (work.js follows the hash); anything else is home. */
+/** A notification's link: Needs You with the card it names open, or a room or artifact (work.js follows the hash); anything else is home. */
 function openLink(url) {
   let hash = "";
   try { hash = new URL(String(url), location.origin).hash; } catch { /* home */ }
-  if (hash.startsWith("#/needs-you")) return show("triage");
+  const request = needsYouRoute(hash);
+  if (request) { needsYou.open(request.id); return show("triage"); }
   if (artifactRoute(hash) || roomRoute(hash)) { location.hash = hash; return; }
   show(HOME);
 }
@@ -1403,10 +1404,11 @@ try {
   // with no network the worker answers from the last read: the app opens on what it last showed, with the band
   const status = await net("/api/status");
   // a #/artifacts/… or #/rooms/work/… link (what a proposal carries) opens straight there; Today is home
-  // #/needs-you (a notification's tap, sw.js) opens Needs You over home
+  // #/needs-you[/<id>] (a notification's tap, sw.js) opens Needs You over home, with that card open
   if (status.ok) {
     show(artifactRoute(location.hash) ? "artifact" : roomRoute(location.hash) ? "rooms" : HOME);
-    if (location.hash.startsWith("#/needs-you")) { history.replaceState(null, "", location.pathname + location.search); show("triage"); }
+    const request = needsYouRoute(location.hash);
+    if (request) { needsYou.open(request.id); history.replaceState(null, "", location.pathname + location.search); show("triage"); }
     replayDraft();
     goLive();
     drainOutbox();

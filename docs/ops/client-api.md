@@ -640,14 +640,41 @@ POST /api/push/test                         200 {"result":"sent" | "no_subscript
 A subscription is stored on the session row, so revoking the device ends its
 pushes (`docs/ops/auth.md`).
 
+**What the console pushes** (screen 18 §6, X-32): Needs You, and nothing
+else. The notifier reads the queue as `GET /api/proposals` lists it — pending,
+and not put down until later — and pushes each request that was not in it on
+its last pass: one just raised, or one whose Later has run out. A reply, an
+ack, a brief, a review or an alert (`outbound_messages`) never pushes; the
+thread and the feed are where activity is read. Every push is exactly:
+
+```
+{"type":"Question","title":"Needs You","url":"/#/needs-you/412"}
+```
+
+`type` is the request's word from core's type table in Title Case — a closed
+vocabulary; an unknown kind reads as `Report`, never as itself. `title` is
+always `Needs You`: a request's own title is written by whoever raised it and
+can hold anything, so it never leaves the console. `url` opens the PWA on
+Needs You with that card open (`#/needs-you/<id>`; a card answered since
+opens the queue). There is no `body`, and `wirePayload` copies these three
+fields and no other onto the wire. A meeting's rows (`group_id`) push once,
+and more than three new cards in one pass push once, for the queue:
+`{"title":"Needs You","url":"/#/needs-you"}`. The notifier learns the queue
+on its first pass, so a request raised while the console was down does not
+push when it comes back — the count and the badge still show it.
+`POST /api/push/test` sends `{"type":"Metistry","title":"This device is
+reachable","url":"/"}`.
+
 **What a notification shows** is the PWA service worker's (`sw.js`, T7-5),
 not the sender's: it reads a payload's `type`, `title` and `url` and nothing
 else — a `body`, `actions`, an `image` are never shown. `type` (≤ 40
 characters) heads the notification and `title` (≤ 120) is its line; each is
 one line with key-shaped runs and six-digit runs blanked. A payload with no
 `type` shows its `title` alone. `url` is followed only when it is a path on
-the console's own origin — anything else opens `/`. A sender that wants a
-tap to open Needs You sends `url: "/#/needs-you"`.
+the console's own origin — anything else opens `/`. A tap opens Needs You
+for `url: "/#/needs-you"`, and that card for `"/#/needs-you/<id>"`. The
+reading and the scrub stay although the console no longer sends a request's
+text: a sender that gets it wrong must still not reach a lock screen.
 
 ### Status
 

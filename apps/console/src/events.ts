@@ -493,7 +493,7 @@ function subjectOf(e: Emit): string {
  *                   `presence.changed` too (a claim, a lease)
  *   inbox           any change → `capture.new` (it landed, or was classified)
  *   artifact_comments any change → `thread.changed` for its task or artifact
- *   outbound_messages insert → `message.new` (an update is the notifier's `notified_at`)
+ *   outbound_messages insert → `message.new` (an update — `notified_at`, from an older console — is not news)
  *   agents          any change the trigger lets through → `presence.changed`
  *
  * Pure: the notices and what the lookups found go in, events come out, and

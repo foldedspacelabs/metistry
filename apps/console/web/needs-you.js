@@ -53,6 +53,12 @@ export function answersOf(p) {
 /** What an answer stores on the row, or null when it goes through another system's door (§2.11). */
 export const decisionOf = (a) => (a && a.sends && typeof a.sends.decision === "string" ? a.sends.decision : null);
 
+/** `#/needs-you/<id>` opens that request's card — the link its push carries (X-32); `#/needs-you` alone, the queue. Null for any other hash. */
+export function needsYouRoute(hash) {
+  const m = /^#\/needs-you(?:\/([1-9][0-9]{0,18}))?$/.exec(hash ?? "");
+  return m ? { id: m[1] ?? null } : null;
+}
+
 /** The one line the card is about: the classification's action or title, the payload's title, else the table's word. */
 export function askOf(p) {
   const c = p?.payload?.classification ?? {};
@@ -428,7 +434,8 @@ export const OFFLINE_REFUSAL = "Decisions need the connection — nothing was se
  * (the bell and the sidebar row — never a tab, P2), `show` (for *Back to
  * Today*) and `offline()` — while it says so, no answer is sent by any way in:
  * a button, a swipe or a key (T7-4). Returns `{ load }`, which the shell calls
- * each time the view or the sheet opens.
+ * each time the view or the sheet opens, and `{ open }`, which names the card
+ * the next load opens — a notification's tap (`needsYouRoute`).
  */
 export function mountNeedsYou({ $, api, setNeeds, show, offline = () => false }) {
   // From 600px the narrow window shows the list, then pushes the detail (C109); under it the sheet holds the cards.
@@ -448,6 +455,7 @@ export function mountNeedsYou({ $, api, setNeeds, show, offline = () => false })
   let revising = null;
   let selecting = false;
   let detail = null;
+  let wanted = null; // the card a link asked for, opened by the next load if it still waits
   let receipt = "";
 
   const stateOf = (id) => ({
@@ -465,6 +473,10 @@ export function mountNeedsYou({ $, api, setNeeds, show, offline = () => false })
     for (const id of [...picked]) if (!rows.has(id)) picked.delete(id); // a row that left the queue leaves the selection
     for (const m of [steps, answers, refusals]) for (const id of [...m.keys()]) if (!rows.has(id)) m.delete(id);
     for (const id of [...stale]) if (!rows.has(id)) stale.delete(id);
+    if (wanted !== null) {
+      if (rows.has(wanted)) detail = wanted; // answered since the push: the queue opens instead
+      wanted = null;
+    }
     if (detail !== null && !rows.has(detail)) detail = null;
     if (detail === null && SIDE_BY_SIDE.matches && rows.size) detail = groupRows([...rows.values()])[0][1][0].id.toString();
     if (revising !== null && !rows.has(revising)) revising = null;
@@ -748,5 +760,5 @@ export function mountNeedsYou({ $, api, setNeeds, show, offline = () => false })
     drag = null;
   });
 
-  return { load };
+  return { load, open: (id) => { wanted = id === null || id === undefined ? null : String(id); } };
 }

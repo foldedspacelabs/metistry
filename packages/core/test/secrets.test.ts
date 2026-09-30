@@ -305,9 +305,9 @@ describe("owner-door secrets refuse a connection or agent grant (X-41)", () => {
     expect(secretGrant(file, "github_write", "agent:devin")).toBe("off");
   });
 
-  it("isOwnerDoorSecret names github_write (and a future github_write_* door) and nothing else", () => {
+  it("isOwnerDoorSecret names github_write exactly — not a prefix, so a test's github_write_<suffix> fixture is not one", () => {
     expect(isOwnerDoorSecret("github_write")).toBe(true);
-    expect(isOwnerDoorSecret("github_write_staging")).toBe(true);
+    expect(isOwnerDoorSecret("github_write_rrzciw")).toBe(false);
     expect(isOwnerDoorSecret("githubwrite")).toBe(false);
     expect(isOwnerDoorSecret("github_writer")).toBe(false);
     expect(isOwnerDoorSecret("lmstudio_key")).toBe(false);

@@ -5,14 +5,18 @@
 //
 //   the bar, its edge, its display   `CaptureBarPreferences` — device-local by
 //                                    contract ("no CLI and no API",
-//                                    docs/ops/client-api.md); the bar (T8-5)
-//                                    reads it, this pane writes it
-//   permissions                      doctor's `live-capture` bridge row: the
-//                                    recorder's own `check()` reports each
-//                                    grant's state (`bridge_meta.grants`). The
-//                                    rows are a read-through — macOS holds the
-//                                    grants, and a pane that pretended to grant
-//                                    one would be lying about who decides
+//                                    docs/ops/client-api.md); this pane writes
+//                                    it, the bar's window reads it
+//   whether there is a bridge        the bar's own client (`LiveCaptureClient`,
+//                                    T8-5): the same read that shows or hides
+//                                    the bar, so the pane and the bar cannot
+//                                    disagree about whether this Mac records
+//   permissions                      the recorder's own `check()` through that
+//                                    client (`grants()`): each grant's state as
+//                                    the recorder can know it. A read-through —
+//                                    macOS holds the grants, and a pane that
+//                                    pretended to grant one would be lying
+//                                    about who decides
 //   what is kept                     the rulings (§2.15, Q7, C91), templated
 //                                    with the assistant's name; no path
 //   the recordings                   the transcripts under Journal/Transcripts/
@@ -26,15 +30,13 @@
 //                                    credential, this Mac's alone. Confirmed
 //                                    first, naming each recording (C136)
 //
-// ABSENT, NOT OFF, WITHOUT THE BRIDGE (screen-11 §8). No `live-capture` row,
-// or one doctor reports `absent`: the pane is the absent state — no switch,
-// no grants, no count — because there is no bar to switch and nobody holding
-// a grant. That is a fact about this Mac, not a fault (design-system §3.13).
-//
-// The app does not hold the recorder's control credential yet — the bar is
-// T8-5's, and the credential arrives with it. Until a `LiveCaptureClient` is
-// wired in, Purge Now is off and says so, and the recorder's own hourly rule
-// keeps deleting on time regardless (packages/mcp-live-capture/README.md).
+// ABSENT, NOT OFF, WITHOUT THE BRIDGE (screen-11 §8). The client says
+// `.absent` — nothing listens on the bridge's port — and the pane is the absent
+// state: no switch, no grants, no count, because there is no bar to switch
+// and nobody holding a grant. That is a fact about this Mac, not a fault
+// (design-system §3.13). A bridge that is there but refuses this Mac's key is
+// PRESENT: the pane draws its rows and says, in the client's own words, why
+// the recorder cannot be asked — those words name the verbs that fix it.
 
 import Foundation
 import Observation
@@ -106,13 +108,10 @@ public struct CaptureGrant: Sendable, Equatable, Identifiable {
         }
     }
 
-    /// The three rows, from the bridge row's `bridge_meta.grants`. Nil when the
-    /// row carries none — a bridge that did not answer.
-    public static func read(_ bridgeRow: DoctorRow?) -> [CaptureGrant]? {
-        guard let grants = bridgeRow?.meta?["bridge_meta"]?["grants"], case .object(let fields) = grants else { return nil }
-        return Kind.allCases.map { kind in
-            CaptureGrant(kind: kind, wire: fields[kind.rawValue]?.stringValue ?? "unknown")
-        }
+    /// The three rows, from the recorder's `grants` map. A grant the recorder
+    /// did not name is `unknown`, said as such — never guessed at.
+    public static func rows(_ grants: [String: String]) -> [CaptureGrant] {
+        Kind.allCases.map { CaptureGrant(kind: $0, wire: grants[$0.rawValue] ?? "unknown") }
     }
 }
 
@@ -239,7 +238,7 @@ public struct CaptureBarDisplay: Sendable, Equatable, Identifiable {
 
 // MARK: - The words
 
-public enum LiveCaptureWords {
+public enum LiveCapturePaneWords {
     public static let purgeNow = "Purge Now"
     /// The three *What <name> keeps* rows (§2.15; screen-11 §8, corrected by Q7 and C91).
     public static let keepsAudio = "Until the transcript is folded, plus 7 days — never more than 30"
@@ -247,10 +246,8 @@ public enum LiveCaptureWords {
     public static let keepsNotes = "Only what you approve, in your vault"
     /// Under the permissions: who holds them.
     public static let permissionsNote = "macOS holds these; Metistry Recorder asks the first time it needs one. Nothing here can grant a permission — System Settings can."
-    /// Under the bar switch: the bar is T8-5's.
-    public static let barNote = "The bar is not drawn yet. This switch and placement are what it reads when it is — and off means off: no bar, whatever else is set."
-    /// Purge Now with no client to send it through.
-    public static let purgeNeedsTheRecorder = "This app cannot reach the recorder's Purge yet; the retention rule above still deletes audio on time."
+    /// Under the bar switch.
+    public static let barNote = "Off means off: no bar on any display, whatever else is set. The bar can also be hidden for one launch from its own menu."
     /// The absent state (screen-11 §8).
     public static let absentTitle = "Live Capture Isn't Set Up"
     public static let absentSentence = "This Mac has no live-capture bridge, so there is no bar and nothing to grant. `metistry up` starts the bridge and its recorder once they are configured."
@@ -262,16 +259,23 @@ public enum LiveCaptureWords {
 @Observable
 public final class LiveCaptureModel {
     public enum Presence: Sendable, Equatable {
-        /// Doctor has not answered.
+        /// The recorder has not been asked yet.
         case unknown
         /// No bridge on this Mac — a fact.
         case absent
-        /// A bridge, in whatever state doctor found it.
-        case present(CheckStatus)
+        /// A bridge answers on this Mac.
+        case present
     }
 
-    /// The recorder's door, once the bar wires one in. Nil today: Purge Now is off and says why.
-    @ObservationIgnored public var client: (any LiveCaptureClient)?
+    /// The recorder's door — the bar's own client, handed in by `AppModel`.
+    /// A test's default asks nothing and says absent.
+    @ObservationIgnored public var client: any LiveCaptureClient = AbsentLiveCaptureClient()
+    public private(set) var presence: Presence = .unknown
+    /// The three grants, once the recorder has said them.
+    public private(set) var grants: [CaptureGrant]?
+    /// Why the recorder could not be asked for them — the client's own words,
+    /// which name the fix (a missing or refused key, no answer).
+    public private(set) var recorderProblem: String?
     public private(set) var recordings: [RecordingRetention] = []
     public private(set) var phase: ReadPhase = .idle
     /// The confirm on screen. `nil`: none. Presenting it sends nothing.
@@ -280,19 +284,19 @@ public final class LiveCaptureModel {
     public private(set) var busy = false
 
     public static let transcriptsPrefix = RecordingRetention.transcriptsPrefix
-    public static let bridgeName = "live-capture"
 
     @ObservationIgnored private let session: ConsoleSession?
-    @ObservationIgnored private let status: StatusModel
     @ObservationIgnored public var now: () -> Date = Date.init
     @ObservationIgnored public var clock = ClockTime()
 
-    public init(session: ConsoleSession?, status: StatusModel) {
+    public init(session: ConsoleSession?) {
         self.session = session
-        self.status = status
     }
 
     public func reset() {
+        presence = .unknown
+        grants = nil
+        recorderProblem = nil
         recordings = []
         phase = .idle
         confirmation = nil
@@ -300,25 +304,46 @@ public final class LiveCaptureModel {
         busy = false
     }
 
-    // MARK: The bridge, from doctor
+    // MARK: Reading
 
-    public var bridgeRow: DoctorRow? {
-        status.report?.bridges.first { $0.name == Self.bridgeName }
+    /// Everything the pane shows: the recorder first (is there one, and what
+    /// it can say of its grants), then the recordings through the API.
+    public func refresh() async {
+        await readRecorder()
+        guard presence == .present else {
+            recordings = []
+            phase = .idle
+            return
+        }
+        await readRecordings()
     }
 
-    public var presence: Presence {
-        guard status.report != nil else { return .unknown }
-        guard let row = bridgeRow, row.status != .absent else { return .absent }
-        return .present(row.status)
+    /// One read of the recorder: `.absent` is no bridge; every other answer —
+    /// the state, or a refusal about the key — is a bridge that is there.
+    public func readRecorder() async {
+        switch await client.state() {
+        case .success:
+            presence = .present
+        case .failure(.absent):
+            presence = .absent
+            grants = nil
+            recorderProblem = nil
+            return
+        case .failure:
+            presence = .present
+        }
+        switch await client.grants() {
+        case .success(let map):
+            grants = CaptureGrant.rows(map)
+            recorderProblem = nil
+        case .failure(let error):
+            grants = nil
+            recorderProblem = error.errorDescription ?? "The recorder did not answer."
+        }
     }
-
-    /// The three grants, or nil when the bridge did not report them.
-    public var grants: [CaptureGrant]? { CaptureGrant.read(bridgeRow) }
-
-    // MARK: The recordings
 
     /// The transcripts name the recordings; each one's retention state is read.
-    public func refresh() async {
+    public func readRecordings() async {
         guard let session else {
             phase = .unavailable("no console session for this instance")
             return
@@ -361,7 +386,7 @@ public final class LiveCaptureModel {
     /// Why the button is off — a fact, always shown (components-01 §1.3). Nil
     /// when Purge Now may be pressed.
     public var purgeUnavailableReason: String? {
-        if client == nil { return LiveCaptureWords.purgeNeedsTheRecorder }
+        if let recorderProblem { return recorderProblem }
         if case .unavailable(let why) = phase { return why }
         if phase == .read, kept.isEmpty { return "Nothing to purge — no audio is kept." }
         return nil
@@ -375,20 +400,20 @@ public final class LiveCaptureModel {
             title: "Purge \(rows.count) Recording\(rows.count == 1 ? "" : "s") Now?",
             costHeading: "The audio of \(rows.count == 1 ? "this recording" : "these recordings") is deleted now — \(RecordingRetention.size(keptBytes)). Each transcript remains until its own 30 days:",
             costs: rows.map { $0.line(clock: clock, now: now) },
-            confirm: LiveCaptureWords.purgeNow
+            confirm: LiveCapturePaneWords.purgeNow
         )
     }
 
     /// Purge Now pressed: the confirm. Sends nothing.
     public func purgeNow() {
-        guard purgeUnavailableReason == nil else { return }
+        guard purgeUnavailableReason == nil, phase == .read else { return }
         confirmation = confirmation(now: now())
     }
 
     /// The dialog's answer. Only `.confirm` reaches the recorder — one purge per kept recording.
     public func choose(_ choice: CostConfirmView.Choice) async {
         confirmation = nil
-        guard choice == .confirm, let client else { return }
+        guard choice == .confirm, purgeUnavailableReason == nil else { return }
         busy = true
         defer { busy = false }
         var purged = 0
@@ -396,7 +421,7 @@ public final class LiveCaptureModel {
         for row in kept {
             switch await client.purge(row.id) {
             case .success: purged += 1
-            case .failure(let error): failed.append(error.localizedDescription)
+            case .failure(let error): failed.append(error.errorDescription ?? "the recorder refused")
             }
         }
         if failed.isEmpty {

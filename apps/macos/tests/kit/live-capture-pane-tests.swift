@@ -1,13 +1,13 @@
 // Settings ▸ Live Capture (T6-15; screen-11 §8, plan §2.15).
 //
 // The bar's switch and placement are the one thing this Mac stores, and the
-// only defaults key they touch is their own; the permissions are the
-// recorder's words read off doctor's bridge row, never granted here; the
-// recordings are read through the API (the transcripts name them, T8-4's
+// only defaults key they touch is their own; whether there is a recorder and
+// what it grants are read through the bar's own client, never granted here;
+// the recordings are read through the API (the transcripts name them, T8-4's
 // route says what each still keeps); and Purge Now — the bridge's door,
 // through `LiveCaptureClient.purge` — confirms first, naming each recording,
-// sends nothing until then, and is off with its reason when the app holds no
-// client. Absent, not off, without the bridge.
+// sends nothing until then, and is off with the client's reason while the
+// recorder cannot be asked. Absent, not off, without the bridge.
 
 #if os(macOS)
 import Foundation
@@ -49,11 +49,22 @@ import Testing
     #expect(CaptureBarPreferences(defaults: defaults).placement == CaptureBarPlacement())
 }
 
+@MainActor
+@Test func theBarModelTakesTheEdgeAndDrawsTheRailOnIt() async throws {
+    // the view mirrors by the model's edge: the rail is spoken either way, on either side
+    let model = CaptureBarModel(client: AbsentLiveCaptureClient(), composer: nil, chat: nil)
+    #expect(model.edge == .right, "the right edge until Settings says otherwise")
+    model.edge = .left
+    let tree = try await AccessibilityProbe.snapshot(CaptureBarView(model: model).frame(width: 400))
+    defer { tree.close() }
+    #expect(tree.unlabeledControls.isEmpty, "\(tree.unlabeledControls)")
+    #expect(tree.controlNames.contains("Note") && tree.controlNames.contains("To-do"), "\(tree.controlNames)")
+}
+
 // MARK: - Permissions: the recorder's words, read through
 
-@Test func theGrantsAreReadOffDoctorsBridgeRowAndSayWhetherNotWhen() throws {
-    let row = try bridgeRow(status: "ok", grants: ["microphone": "granted", "audio_capture": "unverified", "screen_recording": "not_granted"])
-    let grants = try #require(CaptureGrant.read(row))
+@Test func theGrantsAreTheRecordersWordsAndSayWhetherNotWhen() {
+    let grants = CaptureGrant.rows(["microphone": "granted", "audio_capture": "unverified", "screen_recording": "not_granted"])
     #expect(grants.map(\.kind.title) == ["Microphone", "Audio Capture", "Screen Recording"])
     #expect(grants.map(\.state) == ["Approved", "Not yet verified", "Not approved"])
     #expect(grants.map(\.isApproved) == [true, false, false])
@@ -62,23 +73,34 @@ import Testing
     #expect(CaptureGrant(kind: .microphone, wire: "denied").state == "Denied")
     // a word this build does not know is shown as the recorder said it, never guessed at
     #expect(CaptureGrant(kind: .microphone, wire: "pending_review").state == "pending_review")
-    // no grants on the row: nil, and the pane says the recorder did not report them
-    #expect(CaptureGrant.read(try bridgeRow(status: "failed", grants: nil)) == nil)
-    #expect(CaptureGrant.read(nil) == nil)
+    // a grant the recorder did not name is unknown, said as such
+    #expect(CaptureGrant.rows([:]).map(\.wire) == ["unknown", "unknown", "unknown"])
 }
 
 @MainActor
 @Test func withoutTheBridgeThePaneIsAbsentNotOff() async throws {
-    // doctor has not answered: unknown
-    let none = StatusModel(cli: nil)
-    let model = LiveCaptureModel(session: nil, status: none)
+    // not asked yet: unknown
+    let model = LiveCaptureModel(session: nil)
     #expect(model.presence == .unknown)
-    // doctor answered with no live-capture row, or one that is absent: absent
-    #expect(try await presence(rows: []) == .absent)
-    #expect(try await presence(rows: [bridgeRowJSON(status: "absent", grants: nil)]) == .absent)
-    // a bridge in any other state is present, whatever doctor thinks of it
-    #expect(try await presence(rows: [bridgeRowJSON(status: "degraded", grants: ["microphone": "not_asked"])]) == .present(.degraded))
-    #expect(try await presence(rows: [bridgeRowJSON(status: "ok", grants: ["microphone": "granted"])]) == .present(.ok))
+    // the client says absent — nothing listens: the pane is absent, and asks the API nothing
+    let (absent, console) = try liveCaptureReading(client: FakeRecorder(status: .absent), transcripts: ["Journal/Transcripts/2026-09-28-20260928-133000-00ab.md"])
+    await absent.refresh()
+    #expect(absent.presence == .absent)
+    #expect(absent.grants == nil && absent.recorderProblem == nil)
+    #expect(absent.recordings.isEmpty)
+    #expect(console.calls.isEmpty, "no bridge: nothing to count — \(console.calls)")
+    // a bridge that refuses this Mac's key is PRESENT, and the pane says so in the client's words
+    let (noKey, _) = try liveCaptureReading(client: FakeRecorder(status: .noKey), transcripts: [])
+    await noKey.refresh()
+    #expect(noKey.presence == .present)
+    #expect(noKey.grants == nil)
+    #expect(noKey.recorderProblem == LiveCaptureWords.noKey)
+    #expect(noKey.purgeUnavailableReason == LiveCaptureWords.noKey, "Purge Now is off with the key's own words")
+    // a healthy bridge: present, with its grants
+    let (ok, _) = try liveCaptureReading(client: FakeRecorder(), transcripts: [])
+    await ok.refresh()
+    #expect(ok.presence == .present)
+    #expect(ok.grants?.map(\.state) == ["Approved", "Not yet verified", "Not approved"])
 }
 
 // MARK: - The recordings, and the count beside Purge Now
@@ -94,7 +116,7 @@ import Testing
 
 @MainActor
 @Test func theRecordingsAreReadThroughTheAPIAndCountedBesidePurgeNow() async throws {
-    let (model, console, _) = try await liveCaptureReading(transcripts: ["Journal/Transcripts/2026-09-28-20260928-133000-00ab.md"])
+    let (model, console) = try liveCaptureReading(client: FakeRecorder(), transcripts: ["Journal/Transcripts/2026-09-28-20260928-133000-00ab.md"])
     await model.refresh()
     #expect(model.phase == .read)
     let paths = console.calls.map { "\($0.method) \($0.path)" }
@@ -110,10 +132,11 @@ import Testing
     #expect(recording.line(clock: clock, now: model.now()) == "28 Sep, 1:30 PM · 15m · 26 MB")
     #expect(recording.retentionLine(clock: clock, now: model.now()) == "Audio kept until 5 Oct, 1:47 PM")
     // no transcripts: nothing kept, and the button says so
-    let (empty, _, _) = try await liveCaptureReading(transcripts: [])
+    let (empty, _) = try liveCaptureReading(client: FakeRecorder(), transcripts: [])
     await empty.refresh()
     #expect(empty.countLine == "No audio kept")
     #expect(empty.recordings.isEmpty)
+    #expect(empty.purgeUnavailableReason == "Nothing to purge — no audio is kept.")
 }
 
 @Test func retentionLinesSayWhyTheAudioWent() {
@@ -131,13 +154,12 @@ import Testing
     #expect(RecordingRetention.size(512) == "512 B")
 }
 
-// MARK: - Purge Now: confirmed first, one door, off without the recorder
+// MARK: - Purge Now: confirmed first, one door
 
 @MainActor
 @Test func purgeNowNamesEachRecordingAndReachesTheRecorderOnlyOnConfirm() async throws {
-    let (model, console, _) = try await liveCaptureReading(transcripts: ["Journal/Transcripts/2026-09-28-20260928-133000-00ab.md"])
-    let recorder = RecordingPurger()
-    model.client = recorder
+    let recorder = FakeRecorder()
+    let (model, console) = try liveCaptureReading(client: recorder, transcripts: ["Journal/Transcripts/2026-09-28-20260928-133000-00ab.md"])
     await model.refresh()
     #expect(model.purgeUnavailableReason == nil)
     console.reset()
@@ -146,7 +168,7 @@ import Testing
     model.purgeNow()
     let confirm = try #require(model.confirmation)
     #expect(confirm.title == "Purge 1 Recording Now?")
-    #expect(confirm.confirm == LiveCaptureWords.purgeNow)
+    #expect(confirm.confirm == LiveCapturePaneWords.purgeNow)
     #expect(confirm.alternative == nil, "there is no fold to run first for audio — the transcript is already in the vault")
     #expect(confirm.destructive)
     #expect(confirm.costHeading.contains("26 MB"))
@@ -169,24 +191,9 @@ import Testing
 }
 
 @MainActor
-@Test func withoutARecorderClientPurgeNowIsOffWithItsReasonAndSendsNothing() async throws {
-    let (model, console, _) = try await liveCaptureReading(transcripts: ["Journal/Transcripts/2026-09-28-20260928-133000-00ab.md"])
-    await model.refresh()
-    #expect(model.client == nil)
-    #expect(model.countLine == "26 MB in 1 recording", "the count is still read — the rule still applies")
-    #expect(model.purgeUnavailableReason == LiveCaptureWords.purgeNeedsTheRecorder)
-    console.reset()
-    model.purgeNow()
-    #expect(model.confirmation == nil)
-    await model.choose(.confirm)
-    #expect(console.calls.isEmpty)
-}
-
-@MainActor
 @Test func aRefusedPurgeIsSaidInTheRecordersWords() async throws {
-    let (model, _, _) = try await liveCaptureReading(transcripts: ["Journal/Transcripts/2026-09-28-20260928-133000-00ab.md"])
-    let recorder = RecordingPurger(refusing: "session 20260928-133000-00ab is still recording")
-    model.client = recorder
+    let recorder = FakeRecorder(refusingPurge: "session 20260928-133000-00ab is still recording")
+    let (model, _) = try liveCaptureReading(client: recorder, transcripts: ["Journal/Transcripts/2026-09-28-20260928-133000-00ab.md"])
     await model.refresh()
     model.purgeNow()
     await model.choose(.confirm)
@@ -195,11 +202,30 @@ import Testing
     #expect(model.note?.text.contains("still recording") == true, "\(String(describing: model.note))")
 }
 
+@MainActor
+@Test func theBridgeClientSendsPurgeAsTheControlRouteWithTheIdAlone() async throws {
+    // the real client over a scripted transport: POST /recording/purge, body {session_id}, the control key as bearer
+    let wire = ScriptedTransport()
+    let client = BridgeLiveCaptureClient(transport: wire, keys: ScriptedKeys(), instanceID: { "inst-1" })
+    let answer = await client.purge("20260928-133000-00ab")
+    let purged = try #require(try? answer.get())
+    #expect(purged.sessionID == "20260928-133000-00ab" && purged.mediaBytes == 0 && purged.audioDeletedReason == "owner")
+    let sent = try #require(wire.sent.last)
+    #expect(sent.route == .purge && sent.route.isControl)
+    #expect(sent.key == "control-key")
+    let body = try JSONSerialization.jsonObject(with: try #require(sent.body)) as? [String: String]
+    #expect(body == ["session_id": "20260928-133000-00ab"], "the body is the id and nothing else")
+    // a read-only key is refused before anything is asked of the recorder: the client says so
+    wire.forbid = true
+    let refused = await client.purge("20260928-133000-00ab")
+    #expect(refused == .failure(.notControlKey))
+}
+
 // MARK: - The view
 
 @MainActor
 @Test func theLiveCapturePaneSpeaksEveryControlInBothStates() async throws {
-    let (model, _, status) = try await liveCaptureReading(transcripts: ["Journal/Transcripts/2026-09-28-20260928-133000-00ab.md"])
+    let (model, _) = try liveCaptureReading(client: FakeRecorder(), transcripts: ["Journal/Transcripts/2026-09-28-20260928-133000-00ab.md"])
     await model.refresh()
     let id = "com.foldedspacelabs.metistry.tests.capture-bar-view.\(UUID().uuidString)"
     defer { UserDefaults.standard.removePersistentDomain(forName: id) }
@@ -208,7 +234,7 @@ import Testing
     let actions = SettingsActions(openSystemSettings: { opened += 1 }, displays: { [CaptureBarDisplay(id: 1, name: "Built-in Retina Display", isMain: true), CaptureBarDisplay(id: 2, name: "Studio Display", isMain: false)] })
 
     let present = try await AccessibilityProbe.snapshot(
-        LiveCapturePaneBody(pane: model, bar: bar, status: status, actions: actions, assistantName: "Aide").frame(width: SettingsLayout.pane)
+        LiveCapturePaneBody(pane: model, bar: bar, actions: actions, assistantName: "Aide").frame(width: SettingsLayout.pane)
     )
     defer { present.close() }
     #expect(present.unlabeledBesidesFields.isEmpty, "unlabeled: \(present.unlabeledBesidesFields)")
@@ -220,100 +246,101 @@ import Testing
     #expect(present.nodes.contains { $0.name.hasPrefix("Microphone: Approved") }, "\(present.nodes.map(\.name).filter { $0.hasPrefix("Micro") })")
     #expect(present.nodes.contains { $0.name.hasPrefix("Screen Recording: Not approved") })
     // the verb says what it will destroy
-    #expect(present.controlNames.contains("\(LiveCaptureWords.purgeNow): 26 MB in 1 recording"), "\(present.controlNames)")
+    #expect(present.controlNames.contains("\(LiveCapturePaneWords.purgeNow): 26 MB in 1 recording"), "\(present.controlNames)")
     // what is kept: the rulings, no path
     let said = present.nodes.map(\.name).joined(separator: "\n")
-    #expect(said.contains(LiveCaptureWords.keepsAudio) && said.contains(LiveCaptureWords.keepsTranscript) && said.contains(LiveCaptureWords.keepsNotes))
+    #expect(said.contains(LiveCapturePaneWords.keepsAudio) && said.contains(LiveCapturePaneWords.keepsTranscript) && said.contains(LiveCapturePaneWords.keepsNotes))
     #expect(!said.contains(".metistry"), "no paths in a settings pane (screen-11 §8)")
 
     // absent: no bridge — the panel, and none of the controls
-    let absentStatus = try statusReporting(rows: [])
-    await absentStatus.refresh()
-    let absentModel = LiveCaptureModel(session: nil, status: absentStatus)
+    let (absentModel, _) = try liveCaptureReading(client: FakeRecorder(status: .absent), transcripts: [])
+    await absentModel.refresh()
     #expect(absentModel.presence == .absent)
     let absent = try await AccessibilityProbe.snapshot(
-        LiveCapturePaneBody(pane: absentModel, bar: bar, status: absentStatus, actions: actions, assistantName: "Aide").frame(width: SettingsLayout.pane)
+        LiveCapturePaneBody(pane: absentModel, bar: bar, actions: actions, assistantName: "Aide").frame(width: SettingsLayout.pane)
     )
     defer { absent.close() }
     #expect(absent.unlabeledBesidesFields.isEmpty)
-    #expect(absent.nodes.contains { $0.name.contains(LiveCaptureWords.absentTitle) }, "\(absent.nodes.map(\.name))")
+    #expect(absent.nodes.contains { $0.name.contains(LiveCapturePaneWords.absentTitle) }, "\(absent.nodes.map(\.name))")
     #expect(!absent.controlNames.contains("Show the floating bar"), "no bridge, no bar switch: \(absent.controlNames)")
-    #expect(!absent.controlNames.contains { $0.hasPrefix(LiveCaptureWords.purgeNow) })
+    #expect(!absent.controlNames.contains { $0.hasPrefix(LiveCapturePaneWords.purgeNow) })
 }
 
 // MARK: - Fixtures
 
-/// A recorder that records what it was asked to purge and answers as told.
-private final class RecordingPurger: LiveCaptureClient, @unchecked Sendable {
+/// A recorder as the pane sees it through the bar's client: there or not, its
+/// grants, and what it was asked to purge.
+private final class FakeRecorder: LiveCaptureClient, @unchecked Sendable {
+    enum Status { case ok, absent, noKey }
+
     private let lock = NSLock()
     private var _purged: [String] = []
-    let refusal: String?
+    let status: Status
+    let purgeRefusal: String?
 
-    init(refusing: String? = nil) { refusal = refusing }
+    init(status: Status = .ok, refusingPurge: String? = nil) {
+        self.status = status
+        purgeRefusal = refusingPurge
+    }
 
     var purged: [String] { lock.withLock { _purged } }
 
-    func state() async -> Result<LiveCaptureState, LiveCaptureError> { .failure(.absent) }
-    func start(_ scope: LiveCaptureScope) async -> Result<LiveCaptureState, LiveCaptureError> { .failure(.absent) }
-    func stop() async -> Result<LiveCaptureStopped, LiveCaptureError> { .failure(.absent) }
+    private var refusal: LiveCaptureError? {
+        switch status {
+        case .ok: return nil
+        case .absent: return .absent
+        case .noKey: return .noKey(LiveCaptureWords.noKey)
+        }
+    }
 
-    func purge(_ sessionID: String) async -> Result<LiveCaptureRetention, LiveCaptureError> {
+    func state() async -> Result<LiveCaptureState, LiveCaptureError> {
+        refusal.map { .failure($0) } ?? .success(LiveCaptureState(phase: .idle))
+    }
+
+    func start(_ request: LiveCaptureStart) async -> Result<LiveCaptureSession, LiveCaptureError> { .failure(refusal ?? .absent) }
+    func stop() async -> Result<LiveCaptureSession?, LiveCaptureError> { .failure(refusal ?? .absent) }
+    func keepGoing() async -> Result<Bool, LiveCaptureError> { .failure(refusal ?? .absent) }
+
+    func grants() async -> Result<[String: String], LiveCaptureError> {
+        refusal.map { .failure($0) } ?? .success(["microphone": "granted", "audio_capture": "unverified", "screen_recording": "not_granted"])
+    }
+
+    func purge(_ sessionID: String) async -> Result<LiveCapturePurged, LiveCaptureError> {
         lock.withLock { _purged.append(sessionID) }
-        if let refusal { return .failure(.refused(refusal)) }
-        return .success(LiveCaptureRetention(json: .object(["session_id": .string(sessionID), "media_bytes": .number(0), "audio_deleted_reason": .string("owner")])))
+        if let refusal { return .failure(refusal) }
+        if let purgeRefusal { return .failure(.refused(code: "recording", message: purgeRefusal)) }
+        return .success(LiveCapturePurged(sessionID: sessionID, mediaBytes: 0, audioDeletedAt: "2026-09-30T12:30:00Z", audioDeletedReason: "owner"))
     }
 }
 
-/// Answers `metistry doctor --json` with one canned report.
-private struct DoctorRunner: CommandRunner {
-    let report: String
+/// The wire under the real client, scripted: records what was sent and
+/// answers a purge as the bridge would.
+private final class ScriptedTransport: LiveCaptureTransport, @unchecked Sendable {
+    struct Sent { let route: LiveCaptureRoute; let body: Data?; let key: String? }
+    private let lock = NSLock()
+    private var _sent: [Sent] = []
+    var forbid = false
+    var sent: [Sent] { lock.withLock { _sent } }
 
-    func run(
-        executable: URL, arguments: [String], environment: [String: String],
-        currentDirectory: URL?, standardInput: String?, onOutput: @escaping @Sendable (OutputLine) -> Void
-    ) async throws -> CommandResult {
-        CommandResult(exitCode: 0, stdout: arguments.first == "doctor" ? report : "", stderr: "")
+    func send(_ route: LiveCaptureRoute, body: Data?, key: LiveCaptureControlKey?) async -> LiveCaptureWireResult {
+        lock.withLock { _sent.append(Sent(route: route, body: body, key: key?.value)) }
+        if forbid && route.isControl {
+            return .answered(status: 403, body: Data(#"{"error":{"code":"forbidden","message":"not granted"}}"#.utf8))
+        }
+        let id = (body.flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any])?["session_id"] as? String ?? "?"
+        return .answered(status: 200, body: Data(#"{"session_id":"\#(id)","media_bytes":0,"audio_deleted_at":"2026-09-30T12:30:00Z","audio_deleted_reason":"owner","as_of":"2026-09-30T12:30:00Z"}"#.utf8))
     }
 }
 
-private func doctorJSON(rows: [String]) -> String {
-    #"{"as_of":"2026-09-30T05:00:00.000Z","product_dir":"/tmp/product","shape":"launchd","ok":true,"rows":[\#(rows.joined(separator: ","))]}"#
-}
-
-/// A `live-capture` bridge row as doctor reports it: the recorder's `check()` meta under `bridge_meta`.
-private func bridgeRowJSON(status: String, grants: [String: String]?) -> String {
-    var meta = "{\"probe\":\"asked the helper for its grant states\""
-    if let grants {
-        let pairs = grants.sorted { $0.key < $1.key }.map { "\"\($0.key)\":\"\($0.value)\"" }.joined(separator: ",")
-        meta += ",\"bridge_meta\":{\"grants\":{\(pairs)},\"recording\":false,\"os\":\"26.4\"}"
-    }
-    meta += "}"
-    return "{\"name\":\"live-capture\",\"kind\":\"bridge\",\"status\":\"\(status)\",\"latency_ms\":3,\"probe\":\"GET /check\",\"remediation\":\"the bridge said so\",\"meta\":\(meta)}"
-}
-
-private func bridgeRow(status: String, grants: [String: String]?) throws -> DoctorRow {
-    try JSONDecoder().decode(DoctorRow.self, from: Data(bridgeRowJSON(status: status, grants: grants).utf8))
-}
-
-@MainActor
-private func statusReporting(rows: [String]) throws -> StatusModel {
-    let runtime = MetistryRuntime(source: .path, executable: URL(fileURLWithPath: "/usr/local/bin/metistry"))
-    let cli = MetistryCLI(runtime: runtime, runner: DoctorRunner(report: doctorJSON(rows: rows)), instanceDir: URL(fileURLWithPath: "/tmp/instance"))
-    return StatusModel(cli: cli)
-}
-
-@MainActor
-private func presence(rows: [String]) async throws -> LiveCaptureModel.Presence {
-    let status = try statusReporting(rows: rows)
-    await status.refresh()
-    return LiveCaptureModel(session: nil, status: status).presence
+private struct ScriptedKeys: LiveCaptureKeySource {
+    func controlKey(instanceID: String) async -> LiveCaptureKeyLookup { .found(LiveCaptureControlKey("control-key")) }
 }
 
 /// A `LiveCaptureModel` over the recorded console with the transcripts list
 /// replaced — the recorder never records a `Journal/Transcripts` window — and
-/// doctor reporting a healthy bridge whose grants are one of each.
+/// the recorder as given.
 @MainActor
-private func liveCaptureReading(transcripts: [String]) async throws -> (LiveCaptureModel, FixtureConsole, StatusModel) {
+private func liveCaptureReading(client: any LiveCaptureClient, transcripts: [String]) throws -> (LiveCaptureModel, FixtureConsole) {
     let fixtures = try ConsoleFixture.loadAll().map { f -> ConsoleFixture in
         guard f.stem == "get-api-knowledge-pages" else { return f }
         let pages: [[String: Any]] = transcripts.map { path in
@@ -323,11 +350,10 @@ private func liveCaptureReading(transcripts: [String]) async throws -> (LiveCapt
     }
     let console = FixtureConsole(fixtures)
     let session = ConsoleSession(transport: console, management: nil)
-    let status = try statusReporting(rows: [bridgeRowJSON(status: "ok", grants: ["microphone": "granted", "audio_capture": "unverified", "screen_recording": "not_granted"])])
-    await status.refresh()
-    let model = LiveCaptureModel(session: session, status: status)
+    let model = LiveCaptureModel(session: session)
+    model.client = client
     model.clock = ClockTime(timeZone: TimeZone(identifier: "UTC")!)
     model.now = { ConsoleFixture.asOf("get-api-recordings-id") }
-    return (model, console, status)
+    return (model, console)
 }
 #endif

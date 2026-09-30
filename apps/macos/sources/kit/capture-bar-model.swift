@@ -298,6 +298,10 @@ public final class CaptureBarModel {
     /// The owner's *Hide Capture Bar*, for this launch (placement and the
     /// on/off switch are Settings ▸ Live Capture's, screen 11 §8).
     public private(set) var isHidden = false
+    /// Which screen edge the rail rests on (Settings ▸ Live Capture, T6-15):
+    /// the window sets it from `CaptureBarPreferences`, and the view puts the
+    /// rail on that side so a panel opens toward the screen, never off it.
+    public var edge: CaptureBarEdge = .right
     /// The decoration's idle fade (review 01): after ten seconds the shadow
     /// and the specular edge fade; the scrim and the ink never do. Never
     /// while recording, never with a panel open.

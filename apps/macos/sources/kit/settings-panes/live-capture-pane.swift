@@ -12,7 +12,7 @@ struct LiveCapturePane: View {
     private var settings: SettingsModel { model.settings }
 
     var body: some View {
-        LiveCapturePaneBody(pane: settings.liveCapturePane, bar: model.captureBar, status: model.status, actions: actions, assistantName: settings.identity?.assistantName)
+        LiveCapturePaneBody(pane: settings.liveCapturePane, bar: model.barPlacement, actions: actions, assistantName: settings.identity?.assistantName)
             // Re-read on open and on every instance switch — this IS the refresh.
             .task(id: model.instances.active) { await settings.liveCapturePane.refresh() }
     }
@@ -23,7 +23,6 @@ struct LiveCapturePaneBody: View {
     @Environment(\.colorScheme) private var scheme
     let pane: LiveCaptureModel
     let bar: CaptureBarPreferences
-    let status: StatusModel
     let actions: SettingsActions
     let assistantName: String?
 
@@ -34,12 +33,14 @@ struct LiveCapturePaneBody: View {
         switch pane.presence {
         case .absent:
             // screen-11 §8: no bridge, no pane, no bar, no grants (`degrades: absent`)
-            StatePanel(StatePanelModel(.absent, title: LiveCaptureWords.absentTitle, sentence: LiveCaptureWords.absentSentence))
+            SettingsSection("Live Capture") {
+                StatePanel(StatePanelModel(.absent, title: LiveCapturePaneWords.absentTitle, sentence: LiveCapturePaneWords.absentSentence))
+            }
         case .unknown:
             SettingsSection("Live Capture") {
                 HStack(spacing: MetistrySpace.s2) {
                     ProgressView().controlSize(.small)
-                    Text("Waiting for doctor to say whether this Mac has a recorder…")
+                    Text("Asking the recorder whether this Mac has one…")
                         .metistryText(.footnote, p, .textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -76,7 +77,7 @@ struct LiveCapturePaneBody: View {
             }
             .disabled(!bar.placement.enabled)
             .frame(maxWidth: 320, alignment: .leading)
-            Text(LiveCaptureWords.barNote)
+            Text(LiveCapturePaneWords.barNote)
                 .metistryText(.caption1, p, .textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -105,17 +106,17 @@ struct LiveCapturePaneBody: View {
                     .accessibilityElement(children: .combine)
                     .accessibilityLabel("\(grant.kind.title): \(grant.state). \(grant.detail ?? grant.kind.purpose)")
                 }
-            } else if let row = pane.bridgeRow {
-                UnavailableCard(what: "The recorder did not report its permissions", reason: row.remediation ?? row.probe, command: "metistry doctor")
+            } else if let problem = pane.recorderProblem {
+                // the recorder is there and could not be asked: its own words, which name the fix
+                UnavailableCard(what: "The recorder could not be asked for its permissions", reason: problem)
             }
             SettingsControls {
                 Button("Open System Settings", action: actions.openSystemSettings)
                     .accessibilityLabel("Open System Settings, Privacy and Security")
-                Button("Read Again") { Task { await status.refresh() } }
-                    .disabled(status.isChecking)
+                Button("Read Again") { Task { await pane.readRecorder() } }
                     .accessibilityLabel("Read the permissions again")
             }
-            Text(LiveCaptureWords.permissionsNote)
+            Text(LiveCapturePaneWords.permissionsNote)
                 .metistryText(.caption1, p, .textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -126,9 +127,9 @@ struct LiveCapturePaneBody: View {
     @ViewBuilder
     private func keeps(_ p: Palette) -> some View {
         SettingsSection("What \(name) Keeps") {
-            FactRow("Audio", LiveCaptureWords.keepsAudio)
-            FactRow("Transcript", LiveCaptureWords.keepsTranscript)
-            FactRow("Notes", LiveCaptureWords.keepsNotes)
+            FactRow("Audio", LiveCapturePaneWords.keepsAudio)
+            FactRow("Transcript", LiveCapturePaneWords.keepsTranscript)
+            FactRow("Notes", LiveCapturePaneWords.keepsNotes)
         }
     }
 
@@ -138,9 +139,9 @@ struct LiveCapturePaneBody: View {
     private func recordings(_ p: Palette) -> some View {
         SettingsSection("Recordings") {
             SettingsControls {
-                Button(LiveCaptureWords.purgeNow, role: .destructive) { pane.purgeNow() }
+                Button(LiveCapturePaneWords.purgeNow, role: .destructive) { pane.purgeNow() }
                     .disabled(pane.purgeUnavailableReason != nil || pane.busy || pane.phase == .reading)
-                    .accessibilityLabel("\(LiveCaptureWords.purgeNow): \(pane.countLine)")
+                    .accessibilityLabel("\(LiveCapturePaneWords.purgeNow): \(pane.countLine)")
                 if pane.busy || pane.phase == .reading {
                     ProgressView().controlSize(.small).accessibilityLabel("Counting the recordings")
                 }

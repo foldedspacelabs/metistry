@@ -132,8 +132,12 @@ public struct CaptureBarView: View {
     }
 
     public var body: some View {
+        // The rail sits on the screen's edge and whatever opens sits beside it,
+        // toward the screen: panels on the left of a right-edge rail, on the
+        // right of a left-edge one (Settings ▸ Live Capture's placement).
         HStack(alignment: .top, spacing: MetistrySpace.s2) {
-            VStack(alignment: .trailing, spacing: MetistrySpace.s2) {
+            if model.edge == .left { CaptureBarRail(model: model) }
+            VStack(alignment: model.edge == .left ? .leading : .trailing, spacing: MetistrySpace.s2) {
                 if let panel = model.panel {
                     switch panel {
                     case .note, .todo: CaptureBarJotField(model: model)
@@ -144,7 +148,7 @@ public struct CaptureBarView: View {
                     CaptureBarNotices(model: model)
                 }
             }
-            CaptureBarRail(model: model)
+            if model.edge == .right { CaptureBarRail(model: model) }
         }
         .padding(MetistrySpace.s3)
         #if os(macOS)

@@ -105,7 +105,7 @@ struct MetistryApp: App {
         bar.openScreenSettings = {
             if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") { NSWorkspace.shared.open(url) }
         }
-        _captureBarPanel = State(initialValue: CaptureBarPanelController(model: bar))
+        _captureBarPanel = State(initialValue: CaptureBarPanelController(model: bar, placement: model.barPlacement))
         model.startCaptureBar()
         #endif
     }
@@ -153,14 +153,8 @@ struct MetistryApp: App {
                 onOpenSystemSettings: {
                     if let url = URL(string: "x-apple.systempreferences:") { NSWorkspace.shared.open(url) }
                 },
-                displays: {
-                    // The capture bar's placement (Settings ▸ Live Capture): each
-                    // screen's CGDirectDisplayID and the name macOS gives it.
-                    NSScreen.screens.compactMap { screen in
-                        guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { return nil }
-                        return CaptureBarDisplay(id: number.intValue, name: screen.localizedName, isMain: screen == NSScreen.main)
-                    }
-                }
+                // The capture bar's placement (Settings ▸ Live Capture): the displays, by the id the panel places by.
+                displays: { CaptureBarPanelController.displays() }
             )
         }
         .windowResizability(.contentSize)

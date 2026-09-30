@@ -181,7 +181,8 @@ public final class AppModel {
         self.firstRun = firstRun
         let console = ConsoleSession(cli: cli, spawner: sessionSpawner, defaults: defaults)
         self.console = console
-        self.settings = SettingsModel(status: status, cli: cli, instanceDir: instances.active, consoleSignIn: consoleSignIn, session: console)
+        let settings = SettingsModel(status: status, cli: cli, instanceDir: instances.active, consoleSignIn: consoleSignIn, session: console)
+        self.settings = settings
         self.wizard = WizardModel(steps: firstRun)
         self.menu = MenuBarModel(status: status, cli: cli)
         self.logs = LogViewerModel(cli: cli)
@@ -225,6 +226,9 @@ public final class AppModel {
         let liveCaptureClient: any LiveCaptureClient = liveCapture.map { wired in
             BridgeLiveCaptureClient(transport: wired.transport, keys: wired.keys, instanceID: { [weak shell] in shell?.identity?.instanceID })
         } ?? AbsentLiveCaptureClient()
+        // Settings ▸ Live Capture asks the same client whether there is a
+        // recorder, what it grants, and — Purge Now — to delete a recording.
+        settings.liveCapturePane.client = liveCaptureClient
         let captureBar = CaptureBarModel(client: liveCaptureClient, composer: composer, chat: chat)
         captureBar.assistantName = { [weak shell] in shell?.assistantName }
         captureBar.onActions = { [weak shell] lit in

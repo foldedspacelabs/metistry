@@ -36,11 +36,12 @@
 //   Variables    variables-model.swift (T6-14's pane): `GET /api/variables`,
 //                and `metistry variables set|unset` (M14)
 //   Live Capture  live-capture-model.swift (T6-15): the bar's switch and
-//                placement (device-local, `CaptureBarPreferences`), the
-//                recorder's grants from doctor's `live-capture` row, the
-//                retention rulings, and the recordings from
-//                `GET /api/knowledge/pages` + `GET /api/recordings/:id`;
-//                Purge Now through the bridge, confirmed first
+//                placement (device-local, `CaptureBarPreferences`), whether
+//                there is a recorder and its grants through the bar's own
+//                `LiveCaptureClient`, the retention rulings, and the
+//                recordings from `GET /api/knowledge/pages` +
+//                `GET /api/recordings/:id`; Purge Now through the bridge's
+//                `POST /recording/purge`, confirmed first
 //   Sessions     sessions-model.swift (T6-15): `session-fold`'s pause and
 //                `session-purge`'s retention from the Scheduled doors, and
 //                Purge Now — `POST /api/sessions/purge`, preview then confirm
@@ -248,7 +249,7 @@ public final class SettingsModel {
         self.consoleSignIn = consoleSignIn ?? ConsoleSignInModel(cli: cli)
         self.computePane = computePane ?? ComputeModel(status: status, cli: cli, session: session, management: management)
         self.connectionsPane = ConnectionsModel(session: session)
-        self.liveCapturePane = LiveCaptureModel(session: session, status: status)
+        self.liveCapturePane = LiveCaptureModel(session: session)
         self.sessionsPane = SessionsModel(session: session)
         self.session = session
         self.managementOverride = management

@@ -113,3 +113,26 @@ export function fixtureBody(f) {
   if ("stream" in f) return f.stream;
   return f.body;
 }
+
+/**
+ * Usage's two-bar month (X-31): noon on the first of `recordingNow`'s month —
+ * never the real wall clock's, or a re-record on the real 1st truncates the
+ * "first of the month" row onto the same day as the "today" rows and the
+ * chart loses a bar. Pure, so the no-database test and the recorder read one
+ * definition.
+ */
+export function recordingMonthStart(recordingNow) {
+  return new Date(Date.UTC(recordingNow.getUTCFullYear(), recordingNow.getUTCMonth(), 1, 12, 0, 0)).toISOString();
+}
+
+/**
+ * `GET /api/runs/export`'s `since` cursor (X-31), from a `{ts, id}` row —
+ * `runs_export.yaml`'s own grammar (`r.ts::text || '|' || r.id`). Read before
+ * the recorder inserts its own `runs` rows, this is the floor a dirty scratch
+ * database's leftovers — another run's rows still sitting in the table —
+ * never cross: the export page starts exactly where THIS recording's own
+ * rows begin, fresh database or dirty one alike.
+ */
+export function runsExportCursor({ ts, id }) {
+  return `${ts}|${id}`;
+}

@@ -290,6 +290,7 @@ import AppKit
 
 // MARK: - The breath, the glass, the idle fade
 
+@MainActor
 @Test func theBreathHoldsStillUnderReduceMotion() {
     let still = CaptureBarBreath(reduceMotion: true)
     #expect(!still.breathes)

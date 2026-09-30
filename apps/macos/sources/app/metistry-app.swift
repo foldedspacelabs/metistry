@@ -152,6 +152,14 @@ struct MetistryApp: App {
                 onShowShortcuts: { openWindow(id: ShellWindowID.keyboardShortcuts) },
                 onOpenSystemSettings: {
                     if let url = URL(string: "x-apple.systempreferences:") { NSWorkspace.shared.open(url) }
+                },
+                displays: {
+                    // The capture bar's placement (Settings ▸ Live Capture): each
+                    // screen's CGDirectDisplayID and the name macOS gives it.
+                    NSScreen.screens.compactMap { screen in
+                        guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { return nil }
+                        return CaptureBarDisplay(id: number.intValue, name: screen.localizedName, isMain: screen == NSScreen.main)
+                    }
                 }
             )
         }

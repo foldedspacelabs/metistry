@@ -74,15 +74,21 @@ public struct SessionPurgeResult: ConsoleBody { public let json: JSONValue; publ
 
 /// Purge Now (T3-9, reach `local`): irreversible, so the first call is a
 /// preview naming the sessions not yet folded into knowledge, and only a
-/// confirmed call purges. T3-9 freezes the remaining fields.
+/// confirmed call purges. `asOf` is the preview's own `as_of`, passed back
+/// so the confirmed call deletes exactly what the confirm named — a turn
+/// archived while the dialog was open is kept (docs/ops/client-api.md,
+/// "Purge Now"). Omitted from the wire when nil, so a preview's body is
+/// `{confirm: false}` and nothing else.
 public struct SessionPurge: ConsoleRequestBody {
     public var confirm: Bool
+    public var asOf: String?
 
-    public init(confirm: Bool) {
+    public init(confirm: Bool, asOf: String? = nil) {
         self.confirm = confirm
+        self.asOf = asOf
     }
 
-    public var json: JSONValue { .fields(["confirm": .bool(confirm)]) }
+    public var json: JSONValue { .fields(["confirm": .bool(confirm), "as_of": .text(asOf)]) }
 }
 
 // MARK: - Over the transport

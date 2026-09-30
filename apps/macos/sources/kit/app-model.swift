@@ -130,6 +130,10 @@ public final class AppModel {
     /// the owner turns them on, and registered only once the app target
     /// attaches `RegisterEventHotKey` — a model built by a test registers nothing.
     public let hotKeys: AnyAppShortcutsModel
+    /// The floating bar's switch and placement — this Mac's, not an
+    /// instance's (app-preferences.swift, T6-15): Settings ▸ Live Capture
+    /// writes it, the bar's window reads it.
+    public let barPlacement: CaptureBarPreferences
 
     public init(
         bundleResourceURL: URL?,
@@ -164,6 +168,7 @@ public final class AppModel {
         self.bundleResourceURL = bundleResourceURL
         self.runner = runner
         self.defaults = defaults
+        self.barPlacement = CaptureBarPreferences(defaults: defaults)
         self.instances = instances
         self.developerProductDir = developerProductDir
         self.updates = UpdateStatus(appVersion: appVersion)

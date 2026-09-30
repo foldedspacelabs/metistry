@@ -194,7 +194,7 @@ import AppKit
         .appendingPathComponent("packages/mcp-live-capture/manifest.yaml")
     let text = try String(contentsOf: manifest, encoding: .utf8)
     #expect(text.contains("\nport: \(LiveCaptureBridge.port) "), "the manifest's port is \(LiveCaptureBridge.port)")
-    #expect(LiveCaptureRoute.allCases.filter(\.isControl).map(\.path).sorted() == ["/recording/keep-going", "/recording/start", "/recording/stop"])
+    #expect(LiveCaptureRoute.allCases.filter(\.isControl).map(\.path).sorted() == ["/recording/keep-going", "/recording/purge", "/recording/start", "/recording/stop"])
 }
 
 // MARK: - Note and To-do
@@ -544,6 +544,10 @@ private final class FakeBridge: @unchecked Sendable {
                 _status = .ended("owner")
                 return reply(200, ["session": session("ended", "owner")])
             case .keepGoing: return reply(200, ["answered": true])
+            case .purge:
+                // Settings ▸ Live Capture's (T6-15): the recording's retention record, its media gone
+                let id = (body.flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any])?["session_id"] as? String ?? "?"
+                return reply(200, ["session_id": id, "media_bytes": 0, "audio_deleted_at": "2026-09-30T12:30:00Z", "audio_deleted_reason": "owner"])
             }
         }
     }

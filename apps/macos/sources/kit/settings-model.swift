@@ -35,9 +35,15 @@
 //                `metistry secrets set|replace|remove|hosts|grant` (M7)
 //   Variables    variables-model.swift (T6-14's pane): `GET /api/variables`,
 //                and `metistry variables set|unset` (M14)
-//   Live Capture, Sessions
-//                their own tickets' panes; until each lands, the pane says what
-//                it will hold and which verb does it today
+//   Live Capture  live-capture-model.swift (T6-15): the bar's switch and
+//                placement (device-local, `CaptureBarPreferences`), the
+//                recorder's grants from doctor's `live-capture` row, the
+//                retention rulings, and the recordings from
+//                `GET /api/knowledge/pages` + `GET /api/recordings/:id`;
+//                Purge Now through the bridge, confirmed first
+//   Sessions     sessions-model.swift (T6-15): `session-fold`'s pause and
+//                `session-purge`'s retention from the Scheduled doors, and
+//                Purge Now — `POST /api/sessions/purge`, preview then confirm
 //   Keyboard     the any-app shortcuts (T6-16 registers them) and Show All ⌘/
 //   Advanced     the resolved runtime, the developer override, versions, logs,
 //                the passkey diagnostic
@@ -123,19 +129,6 @@ public final class SettingsModel {
         public var group: SectionGroup {
             SectionGroup.allCases.first { $0.sections.contains(self) } ?? .general
         }
-
-        /// A pane whose own ticket has not landed yet: it says what it will
-        /// hold and which verb does it today, rather than a dead end (C138).
-        public var pendingNote: String? {
-            switch self {
-            case .liveCapture:
-                return "The capture bar's switch, its placement, the permissions macOS has granted and how long recordings are kept get their own pane here."
-            case .sessions:
-                return "Recorded sessions, what each one produced, and Purge Now get their own pane here."
-            default:
-                return nil
-            }
-        }
     }
 
     /// The sidebar's groups, in order (screen-15 §1). The first and the last
@@ -185,6 +178,10 @@ public final class SettingsModel {
     public let secretsPane = SecretsModel()
     /// The Variables pane (T6-14).
     public let variablesPane = VariablesModel()
+    /// The Live Capture pane (T6-15): the recorder's grants from doctor, the recordings over the API.
+    public let liveCapturePane: LiveCaptureModel
+    /// The Sessions pane (T6-15): the archive's routines, and Purge Now.
+    public let sessionsPane: SessionsModel
     public private(set) var cli: MetistryCLI?
     public private(set) var instanceDir: URL?
 
@@ -251,6 +248,8 @@ public final class SettingsModel {
         self.consoleSignIn = consoleSignIn ?? ConsoleSignInModel(cli: cli)
         self.computePane = computePane ?? ComputeModel(status: status, cli: cli, session: session, management: management)
         self.connectionsPane = ConnectionsModel(session: session)
+        self.liveCapturePane = LiveCaptureModel(session: session, status: status)
+        self.sessionsPane = SessionsModel(session: session)
         self.session = session
         self.managementOverride = management
         // `release.available` names the version and nothing else; Settings ▸
@@ -296,6 +295,8 @@ public final class SettingsModel {
         connectionsPane.adopt()
         secretsPane.reset()
         variablesPane.reset()
+        liveCapturePane.reset()
+        sessionsPane.reset()
     }
 
     // MARK: - Instance

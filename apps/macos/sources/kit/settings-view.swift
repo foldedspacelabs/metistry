@@ -40,19 +40,25 @@ public struct SettingsActions {
     /// Help ▸ Keyboard Shortcuts (⌘/).
     public var showShortcuts: () -> Void
     public var openSystemSettings: () -> Void
+    /// The displays this Mac has, for the capture bar's placement (Live
+    /// Capture) — `NSScreen` is the app target's; the kit has no AppKit.
+    /// Empty: the main display alone.
+    public var displays: () -> [CaptureBarDisplay]
 
     public init(
         openInFinder: @escaping (URL) -> Void = { _ in },
         setUpAgain: @escaping () -> Void = {},
         openLog: @escaping (String) -> Void = { _ in },
         showShortcuts: @escaping () -> Void = {},
-        openSystemSettings: @escaping () -> Void = {}
+        openSystemSettings: @escaping () -> Void = {},
+        displays: @escaping () -> [CaptureBarDisplay] = { [] }
     ) {
         self.openInFinder = openInFinder
         self.setUpAgain = setUpAgain
         self.openLog = openLog
         self.showShortcuts = showShortcuts
         self.openSystemSettings = openSystemSettings
+        self.displays = displays
     }
 }
 
@@ -66,7 +72,8 @@ public struct SettingsView: View {
         onSetUpAgain: @escaping () -> Void,
         onOpenLog: @escaping (String) -> Void = { _ in },
         onShowShortcuts: @escaping () -> Void = {},
-        onOpenSystemSettings: @escaping () -> Void = {}
+        onOpenSystemSettings: @escaping () -> Void = {},
+        displays: @escaping () -> [CaptureBarDisplay] = { [] }
     ) {
         self.model = model
         self.actions = SettingsActions(
@@ -74,7 +81,8 @@ public struct SettingsView: View {
             setUpAgain: onSetUpAgain,
             openLog: onOpenLog,
             showShortcuts: onShowShortcuts,
-            openSystemSettings: onOpenSystemSettings
+            openSystemSettings: onOpenSystemSettings,
+            displays: displays
         )
     }
 
@@ -172,7 +180,8 @@ struct SettingsPaneContent: View {
             case .connections: ConnectionsPane(model: model)
             case .secrets: SecretsPaneView(model: model)
             case .variables: VariablesPaneView(model: model)
-            case .liveCapture, .sessions: PendingPane(section: section)
+            case .liveCapture: LiveCapturePane(model: model, actions: actions)
+            case .sessions: SessionsPane(model: model)
             case .keyboard: KeyboardPane(assistantName: model.settings.identity?.assistantName, actions: actions, shortcuts: model.hotKeys, isAnswered: model.shell.canPerform)
             case .advanced: AdvancedPane(model: model, actions: actions)
             }
@@ -211,6 +220,20 @@ extension View {
             }
             .sheet(isPresented: Binding(get: { settings.linkOrigin != nil }, set: { if !$0 { settings.linkOrigin = nil } })) {
                 LinkInstanceView(settings: settings)
+            }
+            // Purge Now, twice over (C136): the confirm names the cost — the
+            // unfolded sessions with Fold First, or each recording whose audio goes.
+            .sheet(isPresented: Binding(get: { settings.sessionsPane.confirmation != nil }, set: { if !$0 { settings.sessionsPane.confirmation = nil } })) {
+                if let confirmation = settings.sessionsPane.confirmation {
+                    CostConfirmView(confirmation) { choice in Task { await settings.sessionsPane.choose(choice) } }
+                        .frame(width: 480)
+                }
+            }
+            .sheet(isPresented: Binding(get: { settings.liveCapturePane.confirmation != nil }, set: { if !$0 { settings.liveCapturePane.confirmation = nil } })) {
+                if let confirmation = settings.liveCapturePane.confirmation {
+                    CostConfirmView(confirmation) { choice in Task { await settings.liveCapturePane.choose(choice) } }
+                        .frame(width: 480)
+                }
             }
     }
 }

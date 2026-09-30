@@ -33,10 +33,6 @@ import Testing
     // the window is fixed and set by its widest pane (§2)
     #expect(SettingsLayout.width == SettingsLayout.sidebar + SettingsLayout.pane)
     #expect((SettingsLayout.width, SettingsLayout.height) == (840, 600))
-    // a pane whose own ticket has not landed says what it will hold — never a dead end
-    for section in [SettingsModel.Section.liveCapture, .sessions] {
-        #expect((section.pendingNote?.count ?? 0) > 40, "\(section)")
-    }
 }
 
 // MARK: - The lid dialog never runs a command

@@ -1,5 +1,42 @@
 # @metistry-apps/reconciler
 
+## 0.16.0
+
+### Patch Changes
+
+- 7b979ef: Ruling 2 (X-7): a provider key has a grantee, and every compute call goes
+  through the egress door.
+  
+  - `secrets.yaml` takes `provider:<name>` beside `connection:<name>` and
+    `agent:<id>`.
+  - core's new `computeFetch` is the one `fetch` for a compute call: it refuses
+    any host but the provider's `base_url` destination (`not_provider_host`),
+    attaches the credential itself, and attaches a `{{ secret.x }}` key only
+    while `secrets.yaml` grants it to `provider:<name>` and lists the provider's
+    host. The engine, `completeJson`, `scoreChoice` and the embedder all call
+    through it. **Breaking for importers of core:** `resolveOnMachineCall`
+    returns `fetchFn` (the door) instead of `bearer`, and `makeChatClient` takes
+    `env`/`secretsPolicy` instead of `apiKey`.
+  - The engine's sandbox now reads `secrets.yaml` by name (`CONFIG_SECRETS`),
+    per call, so a revoked grant stops the next request. Under compose,
+    `docker-compose.yml` bind-mounts the policy mirror directory
+    (`.metistry/state/policy/`, a copy of `secrets.yaml` the reconciler keeps
+    current every second) read-only into the console and assistant, so a
+    revoke reaches a running container on its next call; core's
+    `secretsPolicyFromEnv` resolves the file for both shapes.
+  - `metistry compute providers add|set` write `provider:<name>: on` for the
+    key; `metistry update` and `metistry secrets migrate-scope` backfill it,
+    idempotently, for every provider key `compute.yaml` already uses.
+- Updated dependencies [5a6ad9e]
+- Updated dependencies [822a0c7]
+- Updated dependencies [eadd0df]
+- Updated dependencies [e6f16eb]
+- Updated dependencies [0ff5643]
+- Updated dependencies [f6a8e5d]
+- Updated dependencies [cbfb1a9]
+- Updated dependencies [7b979ef]
+  - @foldedspacelabs/metistry-core@0.16.0
+
 ## 0.15.1
 
 ### Patch Changes

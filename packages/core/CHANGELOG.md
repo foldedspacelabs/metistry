@@ -1,5 +1,75 @@
 # @foldedspacelabs/metistry-core
 
+## 0.16.0
+
+### Minor Changes
+
+- 5a6ad9e: A recording is one card in Needs You, and the jots made during it find their place (T8-7; C77, C81). Core gains `meeting-group.ts`: `meetingGroupId(session)` (`meeting:<session id>`), `recordedSessionOf` (a transcript's session, from its frontmatter), `jotAnchorOf` and `promoteJotAnchor` (a jot's `capture_session` line rewritten to `source: "meeting:<transcript path>"`, only into `Journal/Transcripts/`, proved by parsing its own output) and `pickMeetingEvent` (the timed, not-declined calendar event a recording overlapped the most). The inbox drain opens the card from an owner credential's transcript — `group_id` plus `payload.meeting`, named from the calendar through `day_events` — and settles the owner's `kind: jot` captures with their anchor and no proposal; an agent's capture that claims either is an ordinary capture. The console serves `group_id` on `GET /api/proposals`, and Approve of a meeting's transcript promotes that session's jots through the vault bridge as `user`, compare-and-swap, before the row is settled, answering and keeping an `anchored` receipt. Accept All stays one `allow` per row.
+- eadd0df: **A recording's retention and re-review (T8-4).** The recorder helper keeps a session's audio (and frames) until its transcript is ingested plus 7 days, never more than 30 days after it ended, and deletes this Mac's transcript copy at 30 days once delivered — on its own hourly clock, so the ceiling needs no console. The bridge gains `recording_review` (`GET /recording/review`, its third tool): a span of kept audio re-transcribed at the careful setting, answered as text with timestamps rebuilt field by field, never audio; after deletion it says when and why, and that the transcript remains. It joins core's `CREW_NEVER_TOOLS`. `POST /recording/retention` (bridge token, not a tool) takes the console's ingestion report, clamped to the delivery and to now; `POST /recording/purge` is Purge Now on the control credential. A Window / Screen session's frames (`screen.mp4`) go with its audio, and a span after a sleep is read from the file that holds it (`app-2.m4a`…), placed by when it was created.
+  
+  **Transcripts are filed at `Journal/Transcripts/<date>-<session>.md`** (Q29, X-73 folded in): an owner credential's transcript capture is placed there, create-only, in the owner's name, and records its `capture_sessions` row (migration 0033). `Journal/Transcripts/` is outside every default read grant — core's `underAreas` and mcp-brain's SQL `areaFilter` say the same thing. A capture can be placed at an exact path (`captureToInbox`'s `place`). The console serves `GET /api/recordings/:id` (owner reach) through the route-only `recording_state` query, and the hourly `recording-retention` routine rebuilds rows from the vault, records ingestion from the transcript's proposals, reports it to the Mac, and deletes a transcript on its 30th day as a commit in the owner's name, clearing its words from the inbox row and proposal. The crashed-recording report says where the transcript is saved.
+- e6f16eb: Connections P3 (T4-10). **OAuth as a public client**: `metistry connections authorize <name>` signs a connection in — a listener on 127.0.0.1 for exactly one callback, the browser at the provider, the `state` checked before any code is exchanged, the code exchanged with its PKCE verifier through the egress door, and the refresh token kept in this instance's Keychain; the process that dials mints the access token at the door and holds it in memory. The client id comes from the connection type's manifest or is the owner's own (a secret, `--client-id-secret`); a custom connection carries its own client model (C118, core's `customOAuthClientSchema`); the broker redirect is modelled and refused. **Every HTTP auth shortcut dials** — Basic and OAuth join bearer and the API-key header. **Generated tools** for API (`get`, `request`), feed (`list_items`, `get_item`, `search_items`) and files (`list_files`, `read_file`, `search_files`, `read_page`) connections, served lazily through the proxy's pair and added at Ask First. **The console builds the connections pool** (open since #374, ruled 2026-09-30), so `connections_list` / `connections_call` answer on a live console; `metistry secrets sync --to env` now delivers the secrets of every connection the console dials. **The permissions table** draws each connection an actor reaches as a row with the new `proxy` provenance, *reached through Metistry*. `connections add` writes a sync's first `connection:` into `scheduled.yaml`. And a call whose arguments carry a `{{ secret.… }}` reference is refused (`secret_reference`) before anything is dialled — the door would have filled it.
+- 0ff5643: Targets and syncs as connections (T4-11). **Targets become agent connections**: a connection-type manifest gains a `dispatch:` block for `provides: agent` — the dispatcher (closed `AGENT_DISPATCHERS`: `devin-session`, `github-issue`), the data policy, the purposes with their preambles (Devin's `DEVIN_PURPOSES` move here), the result path — and the product ships `devin` and `github-issues` agent types beside the `github` tracker type. The console's target registry reads the instance's agent connections afresh and presents each as the target `dispatch()` already knows (dispatch unchanged), sending through the connection's own egress door (`openAgentHttp`): the key a `{{ secret.x }}` reference filled for its listed hosts when granted to `connection:<name>`, the response redacted. A brief or title carrying a secret or variable reference is refused before anything is sent. **Collectors become syncs bound to a connection and its secret**: `github-state` reads the `github` connection, `devin-sessions` and `devin-knowledge` the `devin` one (a type may name further syncs in `also_read_by`, and a sync further origins its code reaches); a connection always wins, and the legacy environment keys still work for one release. `metistry connections add|set --config KEY=VALUE` sets a connection type's fields.
+- f6a8e5d: T4-15: Mail over IMAP. A fourth reach class, `imap` (host, port 993, TLS —
+  plain only to loopback — username and the app password's secret name; a mail
+  submission port is refused), and `planSocketEgress`, the host guard for a
+  secret sent over a socket rather than HTTP: the exact `host:port` on its *Sent
+  only to* list, TLS, granted, before anything is dialled. The `imap` connection
+  type and Gmail (`gmail-mail`, pinned to `imap.gmail.com:993`; 2-Step
+  Verification and an app password) over a hand-rolled IMAP4rev1 client (no
+  dependency) whose commands are a closed set with fixed shapes — so no code
+  path can send, move, flag or delete mail. `read` is headers only (EXAMINE,
+  BODY.PEEK of fixed fields), stamped `source: comms` and sanitised; `draft`
+  previews, then APPENDs to the `\Drafts` mailbox only when the digest matches.
+  `check()` signs in, lists folders, finds Drafts and examines INBOX.
+  `metistry connections add` takes `--imap host[:port] --username --secret
+  [--plain]`.
+- cbfb1a9: T4-17: Invitation and message requests. The eventkit, CalDAV and Google Calendar syncs raise
+  one `invitation` mirror per meeting still to come whose owner's answer is
+  needs-action and which someone else organises (R7) — a series is one card,
+  the same meeting on two calendars one card with both askers — cleared with a
+  receipt when the owner answers, it is cancelled or it passes; an ICS feed
+  names no owner and raises none. A new sync, `mail-messages`, reads the last
+  week of an IMAP inbox's headers (and Sent's, for what was answered) and
+  raises one `message` mirror per message that waits on the owner's reply,
+  inferred from the headers alone and saying so (`payload.inferred`), cleared
+  when the owner replies, it leaves the inbox or it is a week old. The imap
+  types declare `sync: mail-messages`, so their app password is delivered to
+  the console; `openSyncImap` / `instanceImapOpener` open the mailbox through
+  the IMAP host guard, and `ImapSession.readMessage` re-reads one message's
+  headers by reference. `POST /api/calendar/invitations/:id/respond` answers
+  through a connection whose provider declares `rsvp` — CalDAV or Google
+  Calendar — (refused with Open in Calendar where none can) and `POST /api/mail/messages/:id/draft` writes a
+  reply to Drafts, addressed from the message's own headers; both preview,
+  then confirm with a single-use token, and never send mail.
+- 7b979ef: Ruling 2 (X-7): a provider key has a grantee, and every compute call goes
+  through the egress door.
+  
+  - `secrets.yaml` takes `provider:<name>` beside `connection:<name>` and
+    `agent:<id>`.
+  - core's new `computeFetch` is the one `fetch` for a compute call: it refuses
+    any host but the provider's `base_url` destination (`not_provider_host`),
+    attaches the credential itself, and attaches a `{{ secret.x }}` key only
+    while `secrets.yaml` grants it to `provider:<name>` and lists the provider's
+    host. The engine, `completeJson`, `scoreChoice` and the embedder all call
+    through it. **Breaking for importers of core:** `resolveOnMachineCall`
+    returns `fetchFn` (the door) instead of `bearer`, and `makeChatClient` takes
+    `env`/`secretsPolicy` instead of `apiKey`.
+  - The engine's sandbox now reads `secrets.yaml` by name (`CONFIG_SECRETS`),
+    per call, so a revoked grant stops the next request. Under compose,
+    `docker-compose.yml` bind-mounts the policy mirror directory
+    (`.metistry/state/policy/`, a copy of `secrets.yaml` the reconciler keeps
+    current every second) read-only into the console and assistant, so a
+    revoke reaches a running container on its next call; core's
+    `secretsPolicyFromEnv` resolves the file for both shapes.
+  - `metistry compute providers add|set` write `provider:<name>: on` for the
+    key; `metistry update` and `metistry secrets migrate-scope` backfill it,
+    idempotently, for every provider key `compute.yaml` already uses.
+
+### Patch Changes
+
+- 822a0c7: An owner-door secret (`github_write`) now refuses a `connection:` or `agent:` grant at the tool, not just by convention: `secrets.yaml`'s own schema refuses a hand-written grant naming the fix, `metistry secrets grant` refuses writing one, and `secretGrant` itself reads Off for one no matter what a file says — so a misconfigured or pre-existing `secrets.yaml` can never hand the owner's GitHub PAT to a connection's or an agent's environment. `docs/ops/cli.md` drops its "no connection or agent is granted it" claim (a fact of today's config) in favor of the enforced one.
+
 ## 0.15.1
 
 ### Patch Changes

@@ -1,8 +1,0 @@
----
-"@foldedspacelabs/metistry-connections": minor
-"@foldedspacelabs/metistry-cli": minor
-"@metistry-apps/console": minor
-"@metistry-apps/macos": minor
----
-
-Connections: add and configure (T6-13b, screen 9 §10.5). **The Mac's Add Connection** starts with the type, then a known service or custom: a known service's form is **rendered from its connection type's fields** — text, URL, choice, a variable's name, a secret's name (a picker of the names `GET /api/secrets` serves, never a text field), an OAuth sign-in — so a type an extension installs renders with no per-service Swift; custom is configured by how it is reached (HTTP with *None · Bearer · Basic · API Key · OAuth*, a command with its environment, a path, a mailbox over IMAP). *What it sends* and the host guards draw on the draft as they do on a connection, and the whole `metistry connections add|set …` command is shown before the button runs it; *Sign In…* is `connections authorize`, confirmed. Two small doors close the gap the ticket found (coordinator call 2026-09-30, no new route, no new §2.2 verb): **`GET /api/connections` serves `types`** — the installed connection types, seed and extensions through one registry, each with its fields by kind and nothing of an OAuth client or a value — and `GET /api/connections/:name`'s `provider_unit` gains the same `type`; **`metistry connections add|set` take a repeatable `--config KEY=VALUE`**, judged against the type's manifest before anything is written — an unknown key, a wrong kind or a required field left out is exit 2 naming the field, a `secret` field takes only the NAME of a secret (a value is refused pointing at `secrets set`, never echoed), an `oauth` field is never typed. The detail also draws an IMAP reach as a mailbox.

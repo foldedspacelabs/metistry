@@ -67,7 +67,7 @@ import { linearTrackerOpener, loadCollectors } from "@metistry-apps/collectors";
 import { loadRoutines } from "@metistry-apps/routines";
 import { ConflictMoved } from "../dist/knowledge-routes.js";
 import { GithubWriteClient } from "../dist/github-write.js";
-import { FIXTURE_DIR, REPO_ROOT, expectedFixtures, fixtureBody, shapeDiff } from "./client-fixtures.mjs";
+import { FIXTURE_DIR, REPO_ROOT, expectedFixtures, fixtureBody, recordingMonthStart, runsExportCursor, shapeDiff } from "./client-fixtures.mjs";
 
 // ---- arguments -------------------------------------------------------------------
 
@@ -91,6 +91,10 @@ for (const a of argv) {
 // "today" here once overwrote the task note on the one date the two matched.
 const RECORDING_NOW = new Date("2026-09-28T12:00:00.000Z");
 const RECORDING_DAY = "2026-09-28"; // RECORDING_NOW's day in UTC, the zone the doors count days in here
+// Usage's two-bar month (X-31): the 1st of RECORDING_NOW's month, not the
+// real wall clock's — a re-record on the real 1st used to move this to the
+// current month's start and collapse the two bars into one.
+const RECORDING_MONTH_START = recordingMonthStart(RECORDING_NOW);
 process.env.TZ = "UTC"; // the doors fall back to TZ for their zone; the recording's is UTC, whatever this shell's is
 
 // ---- the scratch database ---------------------------------------------------------
@@ -360,7 +364,11 @@ const runsStarted = [];
 // the owner's meeting template (T2-11), as `metistry init` seeds it — what the meeting-note door renders
 await vault.write("Templates/Meeting.md", readFileSync(join(REPO_ROOT, "seed/vault/Templates/Meeting.md")), { principal: "user", message: "fixture" });
 
-const queries = new QueryStore(pool);
+// `as_of` is RECORDING_NOW (X-31), not `Date.now()` — every named-query
+// fixture (`GET /api/q/*`, `GET /api/needs-you/count`, …) carries this field,
+// and left to the wall clock it moved on every re-record regardless of
+// anything the query itself read.
+const queries = new QueryStore(pool, () => RECORDING_NOW.getTime());
 await queries.loadDir(join(REPO_ROOT, "seed/queries"));
 const targets = new TargetRegistry({ env: { METISTRY_GITHUB_WRITE_TOKEN: "fixture-not-a-token", METISTRY_GITHUB_DISPATCH_REPO: "example/fixtures" }, fetchFn: fakeFetch });
 await targets.loadDir(join(REPO_ROOT, "targets"));
@@ -543,6 +551,15 @@ const P = "metistry";
 const ids = {};
 const one = async (sql, params = []) => (await pool.query(sql, params)).rows[0];
 
+// get-api-runs-export (X-31): `runs_export` orders oldest-first with no
+// floor, so on a dirty scratch database — this script run again on the rows
+// an earlier one left behind — its first page is whatever ancient leftover
+// sorts first, never this run's own seed. Captured before this run inserts
+// its first `runs` row, so the export request below starts exactly where
+// this recording's own rows begin, on a fresh database or a dirty one alike.
+const runsBaseline = await one(`SELECT coalesce(max(ts)::text, '1970-01-01 00:00:00+00') AS ts, coalesce(max(id), 0) AS id FROM runs`);
+const RUNS_EXPORT_SINCE = runsExportCursor(runsBaseline);
+
 // …with its own read grant (0032), which every member inherits (T4-7) and the
 // Projects screen draws as *every member gets these* (T6-8). cursor, the member
 // below, already holds `Projects`, so it inherits nothing new from it.
@@ -568,7 +585,10 @@ await pool.query(
   [replyTurnId, String(ids.inbound)],
 );
 
-const proposal = async (kind, payload) => Number((await one(`INSERT INTO proposals (kind, source_agent, trust, payload) VALUES ($1, 'assistant', 'internal', $2::jsonb) RETURNING id`, [kind, JSON.stringify(payload)])).id);
+// `ts` is RECORDING_NOW (X-31), not the row's default `now()` — left to the
+// default, `GET /api/proposals` moves its `ts` field on every re-record even
+// though nothing about the proposal changed.
+const proposal = async (kind, payload) => Number((await one(`INSERT INTO proposals (ts, kind, source_agent, trust, payload) VALUES ($1, $2, 'assistant', 'internal', $3::jsonb) RETURNING id`, [RECORDING_NOW.toISOString(), kind, JSON.stringify(payload)])).id);
 // its own thread: a message into a decision's thread answers it (docs/ops/reply-feedback.md)
 ids.decision = await proposal("decision", { title: "Which fixture format?", options: ["one file per route", "one file per store"], thread: "fixtures-triage" });
 ids.knowledge = await proposal("knowledge", { title: "Add the store list to the roadmap", path: PAGE, summary: "fourteen domain stores, one per screen family" });
@@ -606,15 +626,18 @@ await pool.query(
 // chart has two bars whatever day the recorder runs), a routine's, one call
 // nothing could price (`cost_source: unknown`, recorded at $0 — the popover's
 // *count as $0* line), and two days of AWS spend, which is not compute.
+// RECORDING_MONTH_START and RECORDING_NOW (X-31), not `date_trunc('month',
+// now())` and `now()` — a re-record on the real 1st of a month used to
+// truncate the "first of the month" row onto the same day as the "today"
+// rows, collapsing Usage's two-bar chart into one.
 await pool.query(
   `INSERT INTO runs (ts, component, kind, provider, model, tokens_in, tokens_out, cache_read_tokens, cost_usd, ok, started_at, finished_at, meta) VALUES
-     (date_trunc('month', now()) + interval '12 hours', 'crew:fixtures', 'crew_run', 'openrouter', 'anthropic/claude-sonnet-4', 4200, 610, 3100, 0.018400, true, now(), now(), '{"tier":"deep"}'),
-     (now(), 'standup', 'routine_run', 'lmstudio', 'gemma', 1800, 240, 0, 0.001900, true, now(), now(), '{"outcome":"acted","tier":"default","display_name":"Standup"}'),
-     (now(), 'assistant', 'turn', 'openrouter', 'mistralai/unpriced-fixture', 600, 80, NULL, 0, true, now(), now(), '{"cost_source":"unknown","tier":"default"}')`,
+     ($1, 'crew:fixtures', 'crew_run', 'openrouter', 'anthropic/claude-sonnet-4', 4200, 610, 3100, 0.018400, true, $1, $1, '{"tier":"deep"}'),
+     ($2, 'standup', 'routine_run', 'lmstudio', 'gemma', 1800, 240, 0, 0.001900, true, $2, $2, '{"outcome":"acted","tier":"default","display_name":"Standup"}'),
+     ($2, 'assistant', 'turn', 'openrouter', 'mistralai/unpriced-fixture', 600, 80, NULL, 0, true, $2, $2, '{"cost_source":"unknown","tier":"default"}')`,
+  [RECORDING_MONTH_START, RECORDING_NOW.toISOString()],
 );
-await pool.query(
-  `INSERT INTO metrics (ts, name, value) VALUES (date_trunc('month', now()) + interval '12 hours', 'aws.cost_usd', 1.37), (now(), 'aws.cost_usd', 0.41)`,
-);
+await pool.query(`INSERT INTO metrics (ts, name, value) VALUES ($1, 'aws.cost_usd', 1.37), ($2, 'aws.cost_usd', 0.41)`, [RECORDING_MONTH_START, RECORDING_NOW.toISOString()]);
 
 await pool.query(
   `INSERT INTO knowledge_files (path, title, description, draft, status, mtime, indexed_at) VALUES
@@ -716,17 +739,19 @@ ids.rotateAgent = await agent("opencode", "OpenCode");
 await agents.setGrants(pool, ids.agent, { tier: "areas", areas: ["Projects", "Areas/Ops"], queries: true });
 await agents.setProjects(pool, ids.agent, [P]);
 await agents.setAutonomy(pool, ids.rotateAgent, { level: "propose" }, { allowWidening: true });
+// `ts`/`decided_at` are RECORDING_NOW (X-31), not `now()`.
 await pool.query(
-  `INSERT INTO proposals (kind, source_agent, trust, payload, decision, decided_at) VALUES ('access_request', $1, 'external', $2::jsonb, 'allow', now())`,
-  [ids.agent, JSON.stringify({ area: "Areas/Ops", reason: "the runbooks live there", granted: { area: "Areas/Ops", by: "user" } })],
+  `INSERT INTO proposals (ts, kind, source_agent, trust, payload, decision, decided_at) VALUES ($1, 'access_request', $2, 'external', $3::jsonb, 'allow', $1)`,
+  [RECORDING_NOW.toISOString(), ids.agent, JSON.stringify({ area: "Areas/Ops", reason: "the runbooks live there", granted: { area: "Areas/Ops", by: "user" } })],
 );
 // three questions in one request (T2-3): pick one, pick any with Something
 // else…, and one that takes its own options only — as `requests_create` kind
 // `question` stores them (context, provenance), asked by the assistant; the
 // stepped card's fixture. Seeded after every other proposal so no recorded id
 // moves, and a minute older than them so the queue's newest question is still
-// the one the component samples draw.
-ids.questions = Number((await one(`INSERT INTO proposals (ts, kind, source_agent, trust, payload) VALUES (now() - interval '1 minute', 'decision', 'assistant', 'external', $1::jsonb) RETURNING id`, [
+// the one the component samples draw. A minute off RECORDING_NOW (X-31), not
+// off `now()`.
+ids.questions = Number((await one(`INSERT INTO proposals (ts, kind, source_agent, trust, payload) VALUES ($2, 'decision', 'assistant', 'external', $1::jsonb) RETURNING id`, [
   JSON.stringify({
     title: "Three things before I open the fixtures PR",
     questions: [
@@ -737,6 +762,7 @@ ids.questions = Number((await one(`INSERT INTO proposals (ts, kind, source_agent
     context: { prose: "The recorder writes one file per route; the PR needs a home and reviewers.", refs: ["gh:foldedspacelabs/metistry#339"] },
     provenance: { agent: "assistant", via: "mcp-brain", submitted_at: "2026-09-28T12:50:00.000Z" },
   }),
+  new Date(RECORDING_NOW.getTime() - 60_000).toISOString(),
 ])).id);
 // the instance's own assistant, registered from its configuration as the console does at start
 await agents.ensureInternalAgent(pool, agents.INTERNAL_ASSISTANT_ID, { token: mintToken(32) });
@@ -772,7 +798,9 @@ const REQUESTS = [
   ["GET /api/projects", () => ({ path: "/api/projects" })],
   ["GET /api/targets", () => ({ path: "/api/targets" })],
   ["GET /api/runs/:id", () => ({ path: `/api/runs/${ids.run}` })],
-  ["GET /api/runs/export", () => ({ path: "/api/runs/export?limit=3", ndjson: true })],
+  // `since` is this run's own baseline (RUNS_EXPORT_SINCE, X-31): a dirty
+  // scratch database's leftover rows sort before it and never enter the page.
+  ["GET /api/runs/export", () => ({ path: `/api/runs/export?since=${encodeURIComponent(RUNS_EXPORT_SINCE)}&limit=3`, ndjson: true })],
   // Chat's working indicator (T2-17): the same turn_id `run_detail`'s tool calls above carry.
   ["GET /api/turns/:turn_id/progress", () => ({ path: `/api/turns/${turnId}/progress` })],
   // Run detail's conversation (T2-17): the unfolded session seeded below, two turns.

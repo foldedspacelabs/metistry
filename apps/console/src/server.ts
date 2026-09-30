@@ -2100,10 +2100,17 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     // an `until`. It leaves the queue, it comes back on its own, and nothing
     // downstream ever sees a decision the user did not make.
     if (verb === "later") {
+      // An injected clock (`cfg.now`: the fixture recorder, tests) stamps
+      // `snoozed_until` from it too — the response hands this value straight
+      // back (`POST /api/proposals/batch`'s `results[].snoozed_until`), so
+      // Postgres's wall clock left it moving on every re-record, the same
+      // way #451 found for audit rows. Absent (every install) = the wall
+      // clock, which `now()` already wrote.
+      const snoozedUntil = cfg.now ? new Date(cfg.now().getTime() + SNOOZE_HOURS * 3_600_000).toISOString() : null;
       const { rows } = await db.query(
-        `UPDATE proposals SET snoozed_until = now() + make_interval(hours => $2)
+        `UPDATE proposals SET snoozed_until = coalesce($3::timestamptz, now() + make_interval(hours => $2))
          WHERE id = $1 AND decision = 'pending' RETURNING snoozed_until`,
-        [id, SNOOZE_HOURS],
+        [id, SNOOZE_HOURS, snoozedUntil],
       );
       await audit("triage", "later", rows.length === 1, { proposal: row.id, kind: row.kind, hours: SNOOZE_HOURS });
       if (rows.length === 1) return { status: 200, body: { ok: true, snoozed_until: rows[0]!.snoozed_until } };

@@ -255,6 +255,7 @@ describe("shipped manifests schedule through the runner", () => {
       ["google-calendar", "Google Calendar", "every 15m"], // T4-14: the owner's primary Google calendar into the same calendar_events
       ["ics-calendar", "Calendar Feed", "every 15m"], // T4-12: an ICS connection's feed into the same calendar_events
       ["linear", "Linear", "every 15m"],
+      ["mail-messages", "Mail", "every 15m"], // T4-17: an IMAP inbox's headers, and a message request for each that waits on a reply
     ]);
     expect(listing.syncs.find((s) => s.name === "github-state")?.raise).toEqual({
       review_requested: { value: true, origin: "default" },

@@ -74,7 +74,7 @@ describe("every row", () => {
   });
 
   it("serves exactly N rows — a ticket flipping a row to served/unserved must update this number", () => {
-    expect(CLIENT_API.filter((r) => r.served).length).toBe(121); // T8-4: GET /api/recordings/:id; T4-26: POST /api/trackers/:connection/issues/:key/complete; T4-25: POST /api/trackers/:connection/issues, POST /api/vault-tasks/:task_key/link; X-12: POST /api/today/add; T2-13: the three pull request doors; T2-12: POST /api/calendar/events/:id/move; T2-10: POST /api/knowledge/conflicts/resolve; T4-8a: GET /api/connections, GET /api/connections/:name; T4-18: GET /api/compute/catalogue, POST /api/compute/unassign; T4-1: GET /api/secrets; T2-5: the Defer door; T4-6: GET /api/agents/:id/definition; T4-4: GET /api/variables; T3-9: POST /api/sessions/purge; T2-18: GET /api/events; T1-7: GET /api/needs-you/count; T1-6: the fold, the drafts, the areas; T10-2: GET /api/vault/status; T1-12: POST|DELETE /api/prose/:id/feedback; T2-17: GET /api/turns/:turn_id/progress, GET /api/sessions/:id; T10-4: GET /api/knowledge/history, GET /api/knowledge/version; T10-6: POST /api/vault/rollback; T2-11: POST /api/meetings/:event_id/note; T2-7: GET /api/today, GET /api/vault-tasks, PUT /api/today/order; T3-8: POST /api/scheduled/routines
+    expect(CLIENT_API.filter((r) => r.served).length).toBe(123); // T4-17: POST /api/calendar/invitations/:id/respond, POST /api/mail/messages/:id/draft; T8-4: GET /api/recordings/:id; T4-26: POST /api/trackers/:connection/issues/:key/complete; T4-25: POST /api/trackers/:connection/issues, POST /api/vault-tasks/:task_key/link; X-12: POST /api/today/add; T2-13: the three pull request doors; T2-12: POST /api/calendar/events/:id/move; T2-10: POST /api/knowledge/conflicts/resolve; T4-8a: GET /api/connections, GET /api/connections/:name; T4-18: GET /api/compute/catalogue, POST /api/compute/unassign; T4-1: GET /api/secrets; T2-5: the Defer door; T4-6: GET /api/agents/:id/definition; T4-4: GET /api/variables; T3-9: POST /api/sessions/purge; T2-18: GET /api/events; T1-7: GET /api/needs-you/count; T1-6: the fold, the drafts, the areas; T10-2: GET /api/vault/status; T1-12: POST|DELETE /api/prose/:id/feedback; T2-17: GET /api/turns/:turn_id/progress, GET /api/sessions/:id; T10-4: GET /api/knowledge/history, GET /api/knowledge/version; T10-6: POST /api/vault/rollback; T2-11: POST /api/meetings/:event_id/note; T2-7: GET /api/today, GET /api/vault-tasks, PUT /api/today/order; T3-8: POST /api/scheduled/routines
   });
 
   it("takes a cursor only on a read, and an Idempotency-Key only on a write", () => {
@@ -194,8 +194,9 @@ describe("matchRoute", () => {
 
   it("servedRoute answers only for what is served", () => {
     expect(servedRoute("GET", "/api/devices") && key(servedRoute("GET", "/api/devices")!)).toBe("GET /api/devices");
-    expect(servedRoute("POST", "/api/mail/messages/m1/draft")).toBeUndefined(); // T4-17's, frozen ahead of it
-    expect(matchRoute("POST", "/api/mail/messages/m1/draft")?.route.served).toBe(false);
+    expect(servedRoute("POST", "/api/mail/messages/m1/draft") && key(servedRoute("POST", "/api/mail/messages/m1/draft")!)).toBe("POST /api/mail/messages/:id/draft"); // T4-17 serves it
+    expect(servedRoute("GET", "/api/mail/messages/m1/draft")).toBeUndefined(); // the path, not the method
+    expect(matchRoute("POST", "/api/calendar/invitations/i1/respond")?.route.served).toBe(true);
     expect(servedRoute("GET", "/api/recordings/r1") && key(servedRoute("GET", "/api/recordings/r1")!)).toBe("GET /api/recordings/:id"); // T8-4 serves it
   });
 });
@@ -212,8 +213,10 @@ describe("noRouteMessage", () => {
   });
 
   it("says a frozen route is not served yet, rather than that it does not exist", () => {
-    expect(noRouteMessage("POST", "/api/mail/messages/m1/draft")).toBe("POST /api/mail/messages/:id/draft is in the client API but this console does not serve it yet (docs/ops/client-api.md)");
-    expect(noRouteMessage("POST", "/api/calendar/invitations/i1/respond")).toContain("POST /api/calendar/invitations/:id/respond is in the client API");
+    // T4-17 served the last frozen rows, so none is left to say "not yet" of — a row frozen ahead of its ticket again is named here
+    expect(CLIENT_API.filter((r) => !r.served).map(key)).toEqual([]);
+    // …and a served path with the wrong method offers the one it serves
+    expect(noRouteMessage("GET", "/api/mail/messages/m1/draft")).toContain("this console serves POST /api/mail/messages/:id/draft");
   });
 
   it("falls back to the document when nothing is near", () => {

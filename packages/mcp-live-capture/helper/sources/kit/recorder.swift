@@ -386,6 +386,10 @@ public final class Recorder {
     public func tick() {
         lock.lock(); defer { lock.unlock() }
         guard var a = active else { return }
+        if let p = a.pictureStream, !p.isRunning {
+            stop(.pictureLost)
+            return
+        }
         let actions = evaluate(&a.lifecycle, now: clock(), freeBytes: disk.freeBytes(at: store.directory(for: a.record.sessionID)), policy: policy)
         for action in actions {
             switch action {
@@ -523,7 +527,7 @@ public final class Recorder {
         guard let a = active else {
             return RecorderStatus(state: choosing ? "choosing" : "idle", session: lastEnded, elapsedS: nil, stopsAt: nil, reminderDueHours: nil, diskLowFreeBytes: nil)
         }
-        let inStream = a.pictureStream != nil
+        let inStream = a.pictureStream?.isRunning ?? false
         return RecorderStatus(
             state: a.pausedAt == nil ? "recording" : "paused",
             session: a.record,

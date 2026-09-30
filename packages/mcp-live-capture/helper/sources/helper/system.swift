@@ -39,7 +39,8 @@ struct SystemGrants: GrantProbe {
             // it delivers silence. What the helper can say is whether a tap has
             // ever delivered sound.
             "audio_capture": lastAppAudioObserved == true ? "observed" : "unverified",
-            // Screen and Window are T8-3's; the grant is read so Settings can show it.
+            // Window and Screen (T8-3). Read, never requested: the first
+            // picture stream is what makes macOS ask.
             "screen_recording": CGPreflightScreenCaptureAccess() ? "granted" : "not_granted",
         ]
     }

@@ -140,6 +140,9 @@ public struct PictureRecord: Codable, Equatable {
 public protocol PictureStream: CaptureStream {
     /// True once any frame has been written.
     var observedFrames: Bool { get }
+    /// False once the stream has stopped — by `stop`, or by the system (the
+    /// window closed, the grant was withdrawn). The display sense reads this.
+    var isRunning: Bool { get }
 }
 
 /// What the recorder needs from ScreenCaptureKit.

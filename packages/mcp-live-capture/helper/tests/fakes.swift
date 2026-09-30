@@ -163,7 +163,10 @@ final class FakePictureStream: PictureStream {
 
     var observedAudio: Bool { !heard.isEmpty }
     var observedFrames: Bool { !frames.isEmpty }
+    var isRunning: Bool { open }
     func stop() { open = false }
+    /// The system ends the stream (the window closed).
+    func systemStops() { open = false }
 
     /// The system's rule for a filter, modelled: a window filter sees that
     /// window; a display filter sees every window on it (one display here).

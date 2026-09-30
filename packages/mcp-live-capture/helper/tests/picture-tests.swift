@@ -194,6 +194,22 @@ func pictureTests() {
         expectEqual(store.sessions().first?.endedReason, "max_duration", "why it ended")
     }
 
+    test("a picture the system stops ends the session — the display sense is read, never assumed") {
+        let world = FakeAudioWorld(processes: [], bundleIDTaps: true)
+        let screen = FakeScreenWorld(streamMicrophone: false)
+        screen.ownerChooses = meetingWindow
+        let (recorder, store) = makePictureRecorder(world, screen)
+        _ = try recorder.start(StartRequest(mode: .window, apps: []))
+        expectEqual(recorder.status().senses.display, true, "the display while the stream runs")
+        screen.streams[0].systemStops()
+        expectEqual(recorder.status().senses.display, false, "the display after the system stopped the stream")
+        recorder.tick()
+        expect(!recorder.isRecording, "a picture recording with no picture kept going")
+        expectEqual(store.sessions().first?.endedReason, "picture_lost", "why it ended")
+        expectEqual(world.openStreams, 0, "the microphone's second session left open")
+        expectEqual(screen.released, [7], "the filter let go")
+    }
+
     test("while the picker is open nothing else starts, and the read-back says so") {
         let world = FakeAudioWorld(processes: [zoom], bundleIDTaps: true)
         let screen = FakeScreenWorld(streamMicrophone: true)

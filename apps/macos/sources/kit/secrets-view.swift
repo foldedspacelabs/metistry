@@ -133,12 +133,15 @@ struct SecretDetailView: View {
                     Button("Replace…") { settings.beginReplace(secret.name) }
                         .accessibilityLabel("Replace the value of \(secret.name)")
                 }
+                let presenceRole: MetistryColorRole = secret.present == false ? .absent : .textSecondary
                 Text(secret.presenceLine)
-                    .metistryText(.caption1, p, secret.present == false ? .absent : .textSecondary)
+                    .metistryText(.caption1, p, presenceRole)
                     .fixedSize(horizontal: false, vertical: true)
                 if let expires = secret.expires {
-                    Text(secret.isExpired(now: now) ? "Expired \(expires), as the service reported" : "Expires \(expires), as the service reported")
-                        .metistryText(.caption1, p, secret.isExpired(now: now) ? .failed : .textSecondary)
+                    let expired: Bool = secret.isExpired(now: now)
+                    let role: MetistryColorRole = expired ? .failed : .textSecondary
+                    Text("\(expired ? "Expired" : "Expires") \(expires), as the service reported")
+                        .metistryText(.caption1, p, role)
                 }
             }
 

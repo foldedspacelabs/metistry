@@ -57,6 +57,13 @@ private let plain = [
 
 private let instance = URL(fileURLWithPath: "/tmp/instance")
 
+/// Whether a node says `text` in any of what VoiceOver reads.
+private func says(_ node: AXNode, _ text: String) -> Bool {
+    if node.label.contains(text) { return true }
+    if node.title.contains(text) { return true }
+    return node.value.contains(text)
+}
+
 // MARK: - A value is never rendered after save
 
 @MainActor
@@ -77,7 +84,9 @@ private let instance = URL(fileURLWithPath: "/tmp/instance")
     // and a draft printed, dumped or interpolated does not either
     var dumped = ""
     dump(draft, to: &dumped)
-    #expect(!String(describing: draft).contains(value) && !"\(draft)".contains(value) && !dumped.contains(value))
+    #expect(!String(describing: draft).contains(value))
+    #expect(!"\(draft)".contains(value))
+    #expect(!dumped.contains(value))
 
     await settings.saveSecret()
 
@@ -89,21 +98,25 @@ private let instance = URL(fileURLWithPath: "/tmp/instance")
     #expect(!command.arguments.contains { $0.contains(value) })
     var commandDump = ""
     dump(command, to: &commandDump)
-    #expect(!command.description.contains(value) && !commandDump.contains(value) && !"\(command)".contains(value))
+    #expect(!command.description.contains(value))
+    #expect(!commandDump.contains(value))
+    #expect(!"\(command)".contains(value))
 
     // after save: no draft, no confirmation, and the outcome is the CLI's words and the command — not the value
     #expect(settings.secretsPane.draft == nil)
     #expect(settings.confirmation == nil)
     let outcome = try #require(settings.outcome)
     #expect(outcome.ok)
-    #expect(!outcome.command.contains(value) && !outcome.words.contains(value) && !outcome.lines.joined().contains(value))
+    #expect(!outcome.command.contains(value))
+    #expect(!outcome.words.contains(value))
+    #expect(!outcome.lines.joined().contains(value))
 
     // the pane, every secret opened up, says no value anywhere a person or VoiceOver could read one
     for secret in settings.secretsPane.rows { settings.secretsPane.expanded.insert(secret.name) }
     let pane = try await AccessibilityProbe.snapshot(SettingsPaneContent(section: .secrets, model: app, actions: SettingsActions()).frame(width: SettingsLayout.pane))
     defer { pane.close() }
     #expect(!pane.nodes.isEmpty)
-    #expect(!pane.nodes.contains { $0.label.contains(value) || $0.title.contains(value) || $0.value.contains(value) })
+    #expect(!pane.nodes.contains { says($0, value) })
     #expect(pane.nodes.contains { $0.name.contains("Value hidden") }, "the Value section is dots, said as hidden")
 
     // a refused save reopens the sheet with the name and hosts kept, and the value field EMPTY
@@ -114,11 +127,12 @@ private let instance = URL(fileURLWithPath: "/tmp/instance")
     await settings.saveSecret()
     let reopened = try #require(settings.secretsPane.draft)
     #expect(reopened.value.isEmpty)
-    #expect(reopened.name == "linear_key" && reopened.hosts == "mcp.linear.app")
+    #expect(reopened.name == "linear_key")
+    #expect(reopened.hosts == "mcp.linear.app")
     #expect(reopened.refusal?.contains("already set") == true)
     let sheet = try await AccessibilityProbe.snapshot(SecretEditorView(settings: settings))
     defer { sheet.close() }
-    #expect(!sheet.nodes.contains { $0.label.contains(value) || $0.title.contains(value) || $0.value.contains(value) })
+    #expect(!sheet.nodes.contains { says($0, value) })
     #expect(sheet.unlabeledBesidesFields.isEmpty, "unlabeled: \(sheet.unlabeledBesidesFields)")
     #expect(sheet.fieldsWithoutAPrompt.isEmpty)
 
@@ -281,7 +295,8 @@ private let instance = URL(fileURLWithPath: "/tmp/instance")
     // who a grant can name: every connection and agent the console knows, and every grantee the file has
     let grantees = pane.grantees(for: secret).map(\.id)
     #expect(grantees.first == "connection:github")
-    #expect(grantees.contains("agent:devin") && grantees.contains("agent:cursor"))
+    #expect(grantees.contains("agent:devin"))
+    #expect(grantees.contains("agent:cursor"))
     #expect(grantees == grantees.sorted { SecretGrantee($0) < SecretGrantee($1) })
 
     // Expired, in the failed ink, when the service's date has passed
@@ -384,7 +399,9 @@ private let instance = URL(fileURLWithPath: "/tmp/instance")
     // Edit keeps the name; Remove names what stops filling in
     let team = try #require(settings.variablesPane.rows.first { $0.name == "team_name" })
     settings.beginEditVariable(team)
-    #expect(settings.variablesPane.draft?.name == "team_name" && settings.variablesPane.draft?.value == "Platform")
+    let editing = try #require(settings.variablesPane.draft)
+    #expect(editing.name == "team_name")
+    #expect(editing.value == "Platform")
     settings.cancelVariableDraft()
     settings.proposeVariableRemoval(team)
     let pending = try #require(settings.confirmation)

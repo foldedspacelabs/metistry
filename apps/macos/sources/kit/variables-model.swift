@@ -42,12 +42,12 @@ public struct SharedVariable: Identifiable, Equatable, Sendable {
 
     public init?(json: JSONValue) {
         guard let name = json.string("name"), let value = json.string("value") else { return nil }
-        self.init(
-            name: name,
-            value: value,
-            readBy: json["read_by"]?.arrayValue?.compactMap(\.stringValue) ?? json["readBy"]?.arrayValue?.compactMap(\.stringValue) ?? [],
-            usedIn: json["used_in"]?.arrayValue?.compactMap(\.stringValue) ?? json["usedIn"]?.arrayValue?.compactMap(\.stringValue) ?? []
-        )
+        self.init(name: name, value: value, readBy: Self.strings(json, "read_by", "readBy"), usedIn: Self.strings(json, "used_in", "usedIn"))
+    }
+
+    private static func strings(_ json: JSONValue, _ snake: String, _ camel: String) -> [String] {
+        let rows: [JSONValue] = json[snake]?.arrayValue ?? json[camel]?.arrayValue ?? []
+        return rows.compactMap(\.stringValue)
     }
 
     public static func list(_ json: JSONValue) -> [SharedVariable] {
@@ -87,7 +87,9 @@ public struct VariableDraft: Equatable, Sendable {
     public var canSave: Bool { !trimmedName.isEmpty && !trimmedValue.isEmpty }
 
     public func arguments(instanceDir: URL?) -> [String] {
-        ["variables", "set", trimmedName, trimmedValue] + (instanceDir.map { ["--instance", $0.path] } ?? [])
+        var out: [String] = ["variables", "set", trimmedName, trimmedValue]
+        if let instanceDir { out += ["--instance", instanceDir.path] }
+        return out
     }
 }
 
@@ -114,7 +116,7 @@ public struct VariableRefusal: Equatable, Sendable {
 /// Biased to refuse, like core's: the cost of a false refusal is Store as
 /// Secret. Core stays the control; this copy keeps a key out of argv.
 public enum KeyShape {
-    private static let patterns: [NSRegularExpression] = [
+    private static let sources: [String] = [
         #"(?:^|[^A-Za-z0-9])sk-[A-Za-z0-9_-]{16,}"#,
         #"(?:^|[^A-Za-z0-9])(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9]{10,}"#,
         #"(?:^|[^A-Za-z0-9])gh[pousr]_[A-Za-z0-9]{20,}"#,
@@ -133,7 +135,8 @@ public enum KeyShape {
         #"(?i)^\s*(?:bearer|basic|token)\s+\S{8,}"#,
         #"(?i)[a-z][a-z0-9+.-]*://[^\s/@:]+:[^\s/@]+@"#,
         #"(?i)[?&#][A-Za-z_]*(?:token|key|secret|sig|signature|password|passwd|auth|credential)[A-Za-z_]*=[^&#\s]{6,}"#,
-    ].map { try! NSRegularExpression(pattern: $0) }
+    ]
+    private static let patterns: [NSRegularExpression] = sources.map { try! NSRegularExpression(pattern: $0) }
 
     private static let run = try! NSRegularExpression(pattern: #"[A-Za-z0-9+=_-]{20,}"#)
     private static let uuid = try! NSRegularExpression(pattern: #"(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"#)
@@ -152,18 +155,28 @@ public enum KeyShape {
     /// a handful of times; hex is judged by length.
     static func looksRandom(_ run: String) -> Bool {
         if uuid.firstMatch(in: run, range: NSRange(run.startIndex..., in: run)) != nil { return false }
-        let alnum = run.unicodeScalars.filter { ("a"..."z").contains($0) || ("A"..."Z").contains($0) || ("0"..."9").contains($0) }
-        guard alnum.count >= 20 else { return false }
-        let digits = alnum.contains { ("0"..."9").contains($0) }
-        let letters = alnum.contains { ("a"..."z").contains($0) || ("A"..."Z").contains($0) }
-        guard digits && letters else { return false }
-        let hex = alnum.allSatisfy { ("0"..."9").contains($0) || ("a"..."f").contains($0) || ("A"..."F").contains($0) }
-        if alnum.count >= 32 && hex { return true }
-        func kind(_ c: Unicode.Scalar) -> Int { ("a"..."z").contains(c) ? 0 : ("A"..."Z").contains(c) ? 1 : 2 }
-        let scalars = Array(alnum)
+        // 0 lower, 1 upper, 2 digit; separators dropped
+        let kinds: [Int] = run.unicodeScalars.compactMap(Self.kind)
+        guard kinds.count >= 20, kinds.contains(2), kinds.contains(where: { $0 != 2 }) else { return false }
+        if kinds.count >= 32 && run.unicodeScalars.allSatisfy(Self.isHexOrSeparator) { return true }
         var changes = 0
-        for i in 1..<scalars.count where kind(scalars[i]) != kind(scalars[i - 1]) { changes += 1 }
-        return Double(changes) / Double(scalars.count - 1) >= 0.3
+        for i in 1..<kinds.count where kinds[i] != kinds[i - 1] { changes += 1 }
+        return Double(changes) / Double(kinds.count - 1) >= 0.3
+    }
+
+    private static func kind(_ c: Unicode.Scalar) -> Int? {
+        let v: UInt32 = c.value
+        if v >= 97 && v <= 122 { return 0 } // a–z
+        if v >= 65 && v <= 90 { return 1 } // A–Z
+        if v >= 48 && v <= 57 { return 2 } // 0–9
+        return nil
+    }
+
+    /// Hex, judged on the letters and digits alone — a separator is not a letter.
+    private static func isHexOrSeparator(_ c: Unicode.Scalar) -> Bool {
+        let v: UInt32 = c.value
+        if kind(c) == nil { return true }
+        return (v >= 48 && v <= 57) || (v >= 97 && v <= 102) || (v >= 65 && v <= 70)
     }
 }
 
@@ -265,10 +278,16 @@ extension SettingsModel {
 
     /// Remove…: confirmed, naming every file whose reference stops filling in.
     public func proposeVariableRemoval(_ variable: SharedVariable) {
-        guard let command = ManagementCommand(.variables, ["variables", "unset", variable.name] + (instanceDir.map { ["--instance", $0.path] } ?? [])) else { return }
-        let stops = variable.usedIn.isEmpty
-            ? "Nothing references it."
-            : "\(variable.reference) stops filling in: \(variable.usedIn.joined(separator: ", "))\(variable.readBy.isEmpty ? "" : " (read by \(variable.readBy.joined(separator: ", ")))")."
+        var arguments: [String] = ["variables", "unset", variable.name]
+        if let instanceDir { arguments += ["--instance", instanceDir.path] }
+        guard let command = ManagementCommand(.variables, arguments) else { return }
+        let stops: String
+        if variable.usedIn.isEmpty {
+            stops = "Nothing references it."
+        } else {
+            let readers: String = variable.readBy.isEmpty ? "" : " (read by \(variable.readBy.joined(separator: ", ")))"
+            stops = "\(variable.reference) stops filling in: \(variable.usedIn.joined(separator: ", "))\(readers)."
+        }
         confirmation = SettingsConfirmation(
             title: "Remove \(variable.name)?",
             cost: "\(stops) variables.yaml is a protected file: this is written as you, through the reconciler, and shows in Activity.",

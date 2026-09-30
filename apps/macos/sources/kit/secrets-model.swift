@@ -284,7 +284,8 @@ public struct SecretDraft: Equatable, Sendable, CustomStringConvertible, CustomD
     /// `metistry secrets set|replace …` — without the value, which is not an
     /// argument and cannot become one.
     public func arguments(instanceDir: URL?) -> [String] {
-        var out = ["secrets", isReplace ? "replace" : "set", trimmedName]
+        let verb: String = isReplace ? "replace" : "set"
+        var out: [String] = ["secrets", verb, trimmedName]
         if !isReplace {
             let list = Self.hostList(hosts)
             if !list.isEmpty { out += ["--hosts", list.joined(separator: ",")] }
@@ -308,14 +309,18 @@ public struct SecretDraft: Equatable, Sendable, CustomStringConvertible, CustomD
 
     // A draft printed, dumped or interpolated says whether it holds a value —
     // never the value (a `#expect` failure or a stray `print` included).
+    private var modeWord: String { isReplace ? "replace" : "new" }
+    private var valueWord: String { value.isEmpty ? "empty" : "<redacted>" }
+
     public var description: String {
-        "SecretDraft(\(isReplace ? "replace" : "new") \(trimmedName), value: \(value.isEmpty ? "empty" : "<redacted>"))"
+        "SecretDraft(\(modeWord) \(trimmedName), value: \(valueWord))"
     }
 
     public var debugDescription: String { description }
 
     public var customMirror: Mirror {
-        Mirror(self, children: ["mode": isReplace ? "replace" : "new", "name": trimmedName, "value": value.isEmpty ? "empty" : "<redacted>"])
+        let children: KeyValuePairs<String, Any> = ["mode": modeWord, "name": trimmedName, "value": valueWord]
+        return Mirror(self, children: children)
     }
 }
 
@@ -324,13 +329,17 @@ public struct SecretDraft: Equatable, Sendable, CustomStringConvertible, CustomD
 // runner's pipe to the child (management-runner.swift).
 extension ManagementCommand: CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable {
     public var description: String {
-        (["metistry"] + arguments).joined(separator: " ") + (standardInput == nil ? "" : " < <redacted stdin>")
+        let said: String = (["metistry"] + arguments).joined(separator: " ")
+        let stdin: String = standardInput == nil ? "" : " < <redacted stdin>"
+        return said + stdin
     }
 
     public var debugDescription: String { description }
 
     public var customMirror: Mirror {
-        Mirror(self, children: ["row": row.rawValue, "arguments": arguments, "standardInput": standardInput == nil ? "none" : "<redacted>"])
+        let stdin: String = standardInput == nil ? "none" : "<redacted>"
+        let children: KeyValuePairs<String, Any> = ["row": row.rawValue, "arguments": arguments, "standardInput": stdin]
+        return Mirror(self, children: children)
     }
 }
 
@@ -358,9 +367,16 @@ public struct SecretRemovalCost: Equatable, Sendable {
     }
 
     /// A file, said as the thing it stands for.
+    /// `.metistry/connections/github.yaml` → `github`.
+    static func stem(_ file: String) -> String {
+        let last: Substring = file.split(separator: "/").last ?? Substring(file)
+        let first: Substring = last.split(separator: ".").first ?? last
+        return String(first)
+    }
+
     public static func thing(_ file: String) -> String {
-        let parts = file.split(separator: "/").map(String.init)
-        let base = (parts.last ?? file).split(separator: ".").first.map(String.init) ?? file
+        let parts: [String] = file.split(separator: "/").map(String.init)
+        let base = stem(file)
         if parts.contains("connections") { return "the \(base) connection (\(file))" }
         if parts.contains("agents") { return "agent \(base) (\(file))" }
         if base == "compute" { return "compute — a provider's key (\(file))" }
@@ -369,11 +385,11 @@ public struct SecretRemovalCost: Equatable, Sendable {
 
     /// The things that stop, in order: the files, then grantees no file named.
     public var stops: [String] {
-        var out = referencedBy.map(Self.thing)
+        var out: [String] = referencedBy.map(Self.thing)
+        let stems = Set<String>(referencedBy.map(Self.stem))
         for grant in granted {
             let who = SecretGrantee(grant.to)
-            let named = referencedBy.contains { $0.split(separator: "/").map(String.init).contains { $0.split(separator: ".").first.map(String.init) == who.name } }
-            if !named { out.append("\(who.spoken), granted \(grant.mode.title)") }
+            if !stems.contains(who.name) { out.append("\(who.spoken), granted \(grant.mode.title)") }
         }
         return out
     }
@@ -453,7 +469,9 @@ public final class SecretsModel {
     /// Everyone a secret's *Who may use it* lists: this instance's connections
     /// and agents, and anyone the file grants whom neither read named.
     public func grantees(for secret: NamedSecret) -> [SecretGrantee] {
-        Array(Set(known + secret.grants.map { SecretGrantee($0.to) })).sorted()
+        let granted: [SecretGrantee] = secret.grants.map { SecretGrantee($0.to) }
+        let all: Set<SecretGrantee> = Set(known).union(granted)
+        return all.sorted()
     }
 
     public static func refusalKey(_ name: String, _ grantee: String) -> String { "\(name)|\(grantee)" }
@@ -509,11 +527,16 @@ extension SettingsModel {
         }
         var known: [SecretGrantee] = []
         if case .success(let list) = await session.stores.connections() {
-            known += (list.json["connections"]?.arrayValue ?? []).compactMap { $0.string("name") }.map { SecretGrantee("connection:\($0)") }
+            let rows: [JSONValue] = list.json["connections"]?.arrayValue ?? []
+            for row in rows {
+                if let name = row.string("name") { known.append(SecretGrantee("connection:" + name)) }
+            }
         }
         if case .success(let list) = await session.stores.agents() {
             // the assistant's own row is the instance, not a grantee; a revoked one authenticates nothing
-            known += list.agents.filter { $0.kind != "internal" && !$0.revoked }.map { SecretGrantee("agent:\($0.id)") }
+            for agent in list.agents where agent.kind != "internal" && !agent.revoked {
+                known.append(SecretGrantee("agent:" + agent.id))
+            }
         }
         secretsPane.adopt(known: known)
     }
@@ -567,16 +590,24 @@ extension SettingsModel {
     // MARK: Sent only to, a grant, Delete (confirmed by the window's alert)
 
     public func proposeHosts(_ secret: NamedSecret) {
-        let hosts = SecretDraft.hostList(secretsPane.hostText(secret))
-        guard hosts != secret.hosts,
-              let command = ManagementCommand(.secrets, ["secrets", "hosts", secret.name] + (hosts.isEmpty ? ["--clear"] : hosts) + instanceArguments)
-        else { return }
+        let hosts: [String] = SecretDraft.hostList(secretsPane.hostText(secret))
+        guard hosts != secret.hosts else { return }
+        var arguments: [String] = ["secrets", "hosts", secret.name]
+        arguments += hosts.isEmpty ? ["--clear"] : hosts
+        arguments += instanceArguments
+        guard let command = ManagementCommand(.secrets, arguments) else { return }
+        let title: String
+        let effect: String
+        if hosts.isEmpty {
+            title = "Send \(secret.name) to no server?"
+            effect = "Metistry fills it in for no server; a local agent granted it still gets it as \(secret.environmentName)."
+        } else {
+            title = "Send \(secret.name) only to \(hosts.joined(separator: ", "))?"
+            effect = "Metistry refuses to fill it in for any other host."
+        }
         confirmation = SettingsConfirmation(
-            title: hosts.isEmpty ? "Send \(secret.name) to no server?" : "Send \(secret.name) only to \(hosts.joined(separator: ", "))?",
-            cost: (hosts.isEmpty
-                ? "Metistry fills it in for no server; a local agent granted it still gets it as \(secret.environmentName)."
-                : "Metistry refuses to fill it in for any other host.")
-                + " secrets.yaml is a protected file: this is written as you, through the reconciler, and shows in Activity.",
+            title: title,
+            cost: "\(effect) secrets.yaml is a protected file: this is written as you, through the reconciler, and shows in Activity.",
             actionTitle: "Change Hosts",
             command: command,
             after: .secrets
@@ -584,13 +615,15 @@ extension SettingsModel {
     }
 
     public func proposeGrant(_ secret: NamedSecret, to grantee: SecretGrantee, _ mode: SecretGrantMode) {
-        guard secret.mode(for: grantee.id) != mode,
-              let command = ManagementCommand(.secrets, ["secrets", "grant", secret.name, grantee.id, mode.rawValue] + instanceArguments)
-        else { return }
+        guard secret.mode(for: grantee.id) != mode else { return }
+        let arguments: [String] = ["secrets", "grant", secret.name, grantee.id, mode.rawValue] + instanceArguments
+        guard let command = ManagementCommand(.secrets, arguments) else { return }
+        let how: String = mode == .off ? "" : grantee.howUsed(secret) + " "
+        let action: String = mode == .off ? "Turn Off" : "Allow"
         confirmation = SettingsConfirmation(
             title: "\(mode.title) for \(grantee.spoken)?",
-            cost: "\(mode.meaning) \(mode == .off ? "" : grantee.howUsed(secret) + " ")Written to secrets.yaml as you, through the reconciler. Metistry may refuse a grantee a secret cannot have, and says why on its row.",
-            actionTitle: mode == .off ? "Turn Off" : "Allow",
+            cost: "\(mode.meaning) \(how)Written to secrets.yaml as you, through the reconciler. Metistry may refuse a grantee a secret cannot have, and says why on its row.",
+            actionTitle: action,
             command: command,
             after: .secrets
         )
@@ -601,9 +634,11 @@ extension SettingsModel {
     /// confirmation, naming what stops.
     public func proposeSecretRemoval(_ secret: NamedSecret) async {
         secretsPane.removalRefusal = nil
+        let previewArguments: [String] = ["secrets", "remove", secret.name, "--json"] + instanceArguments
+        let removeArguments: [String] = ["secrets", "remove", secret.name, "--yes"] + instanceArguments
         guard let runner = management,
-              let preview = ManagementCommand(.secrets, ["secrets", "remove", secret.name, "--json"] + instanceArguments),
-              let remove = ManagementCommand(.secrets, ["secrets", "remove", secret.name, "--yes"] + instanceArguments)
+              let preview = ManagementCommand(.secrets, previewArguments),
+              let remove = ManagementCommand(.secrets, removeArguments)
         else {
             secretsPane.removalRefusal = SecretRowRefusal(name: secret.name, words: "No metistry runtime located — finish step 1 of first run.")
             return

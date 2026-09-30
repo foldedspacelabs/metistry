@@ -332,6 +332,17 @@ opens is `openSyncHttp` (`packages/connections`, `sync.ts`):
   sync so it holds the line.
 - **The owner's switches.** `syncs.<sync>.raise` in `scheduled.yaml`; a rule
   the file does not mention takes the collector manifest's default.
+- **OAuth sign-in** (`auth: oauth` — Google Calendar, T4-14). The delivered
+  secret is the connection's **refresh token**; the sync's door fills
+  `Bearer {{ secret.<token> }}` with an **access token** minted from it at the
+  token endpoint (T4-10's `OAuthTokens`: its own guarded request, pinned to
+  that endpoint, no redirect) and held in the console's memory — one per
+  connection, reused across runs until a minute before it expires. A sync
+  that knows its provider's hosts passes them (`tokenHosts`), and the token
+  secret's *Sent only to* list must be **exactly** those, or the connection
+  is not opened and nothing is sent (`failed`, naming the `metistry secrets
+  hosts` line). A refused refresh is `sign_in`, naming `metistry connections
+  authorize <name>`.
 
 ## Linear
 
@@ -464,11 +475,12 @@ Today reads one table for every source. What it reads:
 in iCal format*, a published iCloud calendar, a `?token=` link. The file
 refuses one (`reach.http.url: this looks like a key`), and `{{ secret.x }}` in
 a URL is refused at the file and at the egress door (`secret_in_url`). **So
-this release reads public feed addresses only**; how a secret that *is* a URL
-reaches the wire is open for the owner (T4-12's PR). For a private Google or
-iCloud calendar today: the eventkit bridge reads whatever the Mac's Calendar
-shows, and CalDAV (*CalDAV* below; T4-13) and Google (T4-14) are the
-read-and-reply providers.
+ICS reads public feed addresses only** — and stays that way: the owner ruled
+on 2026-09-30 (Q8) that there is **no secret-in-URL door** and private ICS
+feeds stay out. For a private Google or iCloud calendar: the eventkit bridge
+reads whatever the Mac's Calendar shows, and CalDAV (*CalDAV* below; T4-13)
+and Google Calendar (*Google Calendar* below; T4-14, signed in with Google)
+are the read-and-reply providers.
 
 One sync reads one connection: with two ICS connections, name the one it reads
 in `scheduled.yaml` (`syncs.ics-calendar.connection`).
@@ -561,6 +573,103 @@ with `If-Match`, so an event that changed in between is refused (`changed`),
 never overwritten. The confirm token and who may press it belong to the
 console door (T4-17 for Respond; `write_own`'s door is not built yet). No
 agent reaches any of it: a calendar connection is not dialled as MCP.
+
+## Google Calendar — signed in with Google (T4-14)
+
+Google Calendar through the Calendar API v3 (plan §2.6, §4 Q7 second; ruling
+2026-09-30, Q8): the `google-calendar` connection type, capabilities `read`,
+`write_own` and `rsvp`, over one builtin module (`google-calendar`). Google's
+CalDAV takes OAuth only, so this is the one way Metistry answers a Google
+invitation — and there is **no secret-in-URL door**: Google's *secret address
+in iCal format* stays out.
+
+```sh
+metistry connections add google --type calendar --provider google-calendar \
+  --url https://www.googleapis.com/calendar/v3/ --auth oauth
+metistry connections authorize google                    # the browser opens at accounts.google.com
+metistry secrets sync --to env                           # delivers the sign-in to the console; restart the console
+```
+
+**Sign-in is Metistry's own OAuth door** (*OAuth* below, T4-10): PKCE, a
+one-shot listener on 127.0.0.1, the `state` checked, the code exchanged at
+`oauth2.googleapis.com` through the egress door; the **refresh token** kept in
+this instance's Keychain as the connection's token secret, the **access
+token** only in the memory of the process that dials. The scope is
+`https://www.googleapis.com/auth/calendar.events` and nothing else — events
+on calendars the owner can reach, no calendar list, no settings, no Gmail —
+so the sync reads the owner's **primary** calendar.
+
+**The client.** The type's manifest ships **Metistry's public client id** — the
+maintainer's *Desktop* client in Folded Space Labs' Google Cloud project,
+public by design: an installed app cannot keep a secret, Google says so, and
+PKCE is what binds a code to its sign-in. **Until that client exists the
+manifest ships none**, and a connection signs in with the owner's own
+(`metistry secrets set google_client_id`, `metistry secrets hosts
+google_client_id accounts.google.com oauth2.googleapis.com`, `metistry
+secrets grant google_client_id connection:google on`, then `add … --client-id-secret
+google_client_id` or `metistry connections set google --client-id-secret
+google_client_id`). **A bring-your-own client id always overrides the
+shipped one.** A client secret — Google may ask for the one its Desktop
+clients carry — is always the owner's secret (`--client-secret-secret`,
+hosts `oauth2.googleapis.com` only), never a manifest's.
+
+***Google hasn't verified this app.*** Until Google verifies Metistry's
+client, Google shows that warning for its sensitive `calendar.events` scope.
+The connection type says so — the oauth field's `help`, which `metistry
+connections authorize` prints before the browser opens when the shipped
+client is used (and the Mac's connection sheet shows) — *choose Advanced,
+then Go to Metistry*. Removed from the manifest when verification completes.
+
+**Exactly two hosts.** The first sign-in writes the token secret's policy:
+sent only to `oauth2.googleapis.com` (the refresh token, to mint an access
+token) and `www.googleapis.com` (the access token), granted to the connection
+alone. The sync holds it to **exactly** those two (`GOOGLE_TOKEN_HOSTS`): a
+list that says more or less, and the connection is not opened. Every request
+is pinned to `https://www.googleapis.com` and follows no redirect.
+
+**Refused at the file** (`googleCalendarConnectionIssues`): a connection
+anywhere but `https://www.googleapis.com/calendar/v3/`; any sign-in but
+Google's (`auth: [oauth]` — never an app password); headers or query
+parameters of its own.
+
+**The sync** (`collectors/google-calendar/`, every 15 minutes):
+`events.list` on the primary calendar for today and the next two weeks, with
+`singleEvents=true` — Google expands each series, and each occurrence's own id
+(`<series>_20260928T133000Z`) is its `event_id` — into `calendar_events` under
+the connection's name. It asks with `fields=` for named fields only: **the
+description, the meeting link and the dial-in are never requested**, and
+never read if a server sends them. Google marks the owner's attendee
+(`self`), so `self_status` is the owner's own answer. A cancelled occurrence
+and a working-location marker are skipped and counted in `sync_state`.
+
+**Reply** (`rsvp`; `previewGoogleReply`, then `respondToGoogleInvitation`):
+the Calendar API's `attendees[].responseStatus` is writable, and
+`attendeesOmitted` "can be used to only update the participant's response".
+**The PATCH body is exactly** `{"attendeesOmitted": true, "attendees":
+[{"email": "<the owner's address>", "responseStatus": "<answer>"}]}` — the
+owner's own answer and the address that names it; no other attendee, no
+time, no title. `sendUpdates=all`, so the organizer hears it as they would
+from Calendar. Answers `accepted`, `tentative`, `declined`, for the
+occurrence named (a series' id answers the series). Refused: `not_invited`
+(the owner organises it, or is not an attendee), `unsupported` (not a
+meeting, or Google left out the guest list), `not_found`.
+
+**Write own** (`write_own`): create (`previewCreateGoogleEvent` /
+`createOwnGoogleEvent` — the preview mints the event's id, so a second
+confirm finds it made, `exists`), move or retitle (`previewChangeGoogleEvent`
+/ `changeOwnGoogleEvent` — one occurrence of a series moves alone) and
+delete (`previewDeleteGoogleEvent` / `deleteOwnGoogleEvent`), each with
+`sendUpdates=none` — **only an event nobody else is in**, organised by the
+owner (`not_own`); a series itself is not rewritten, and an out-of-office or
+working-location event is changed in Google Calendar (`unsupported`).
+
+**Preview, then confirm** — as CalDAV's: the preview reads the event now and
+says the exact body the confirm will send, with the event's ETag; the confirm
+names that ETag, re-reads the event, re-derives the body from Google's copy
+and writes with `If-Match`, so an event that changed in between is refused
+(`changed`), never overwritten. The console doors that call these — Respond
+(T4-17) and own-event changes — hold the confirm token; no agent reaches any
+of it (a calendar connection is not dialled as MCP).
 
 ## Mail over IMAP — Gmail, any IMAP server
 

@@ -29,7 +29,11 @@
 //                `GET /api/secrets`; tool modes, the offer switch and Test are
 //                `metistry connections` (M13), a secret's hosts and grant
 //                `metistry secrets` (M7)
-//   Secrets, Variables, Live Capture, Sessions
+//   Secrets      secrets-model.swift (T6-14's pane): `GET /api/secrets`, and
+//                `metistry secrets set|replace|remove|hosts|grant` (M7)
+//   Variables    variables-model.swift (T6-14's pane): `GET /api/variables`,
+//                and `metistry variables set|unset` (M14)
+//   Live Capture, Sessions
 //                their own tickets' panes; until each lands, the pane says what
 //                it will hold and which verb does it today
 //   Keyboard     the any-app shortcuts (T6-16 registers them) and Show All ⌘/
@@ -122,8 +126,6 @@ public final class SettingsModel {
         /// hold and which verb does it today, rather than a dead end (C138).
         public var pendingNote: String? {
             switch self {
-            case .variables:
-                return "Variables — the text your agents read — get their own pane here. Until then they are `metistry variables set <name> <value>` and `metistry variables unset <name>` in Terminal (.metistry/variables.yaml, a protected path)."
             case .liveCapture:
                 return "The capture bar's switch, its placement, the permissions macOS has granted and how long recordings are kept get their own pane here."
             case .sessions:
@@ -177,6 +179,10 @@ public final class SettingsModel {
     public let computePane: ComputeModel
     /// The Connections pane: read over the API, changed through M13 and M7.
     public let connectionsPane: ConnectionsModel
+    /// The Secrets pane (T6-14): the owner's named secrets, never a value.
+    public let secretsPane = SecretsModel()
+    /// The Variables pane (T6-14).
+    public let variablesPane = VariablesModel()
     public private(set) var cli: MetistryCLI?
     public private(set) var instanceDir: URL?
 
@@ -286,6 +292,8 @@ public final class SettingsModel {
         outcome = nil
         computePane.adopt(cli: cli)
         connectionsPane.adopt()
+        secretsPane.reset()
+        variablesPane.reset()
     }
 
     // MARK: - Instance
@@ -823,6 +831,8 @@ public final class SettingsModel {
         case .linked: await refreshLinked()
         case .versions: await refreshVersions()
         case .connections: await connectionsPane.refresh()
+        case .secrets: await secretsWriteFinished(command)
+        case .variables: await refreshVariablesPane()
         }
     }
 
@@ -843,7 +853,7 @@ public final class SettingsModel {
 public struct SettingsConfirmation: Identifiable, Equatable, Sendable {
     /// Which read the verb changes, re-done after it.
     public enum After: Sendable, Equatable {
-        case doctor, deployment, identity, linked, versions, connections
+        case doctor, deployment, identity, linked, versions, connections, secrets, variables
     }
 
     public let id = UUID()

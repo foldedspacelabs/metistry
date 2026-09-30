@@ -36,16 +36,18 @@
 // No model is anywhere in this, and nothing here reads a transcript's words:
 // only its frontmatter, which our own door writes.
 
+import { TRANSCRIPTS_DIR } from "./instance-layout.js";
 import { profileFrontmatter } from "./scheduled.js";
+import { RECORDING_ID_RE } from "./transcripts.js";
 
 /** The `group_id` prefix a meeting's rows share. */
 export const MEETING_GROUP_PREFIX = "meeting:";
 
-/** A recorder session id — the recorder's own shape (lowercase letters, digits, hyphens), never a path. */
-export const CAPTURE_SESSION_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+/** A recorder session id — T8-4's `RECORDING_ID_RE`, one definition: lowercase letters, digits, hyphens, never a path. */
+export const CAPTURE_SESSION_RE = RECORDING_ID_RE;
 
-/** Where transcripts live (Q29, ruled 2026-09-30) — the only folder an anchor is promoted into. */
-const TRANSCRIPT_FOLDER = "Journal/Transcripts/";
+/** Where transcripts live (Q29, ruled 2026-09-30; `TRANSCRIPTS_DIR`) — the only folder an anchor is promoted into. */
+const TRANSCRIPT_FOLDER = `${TRANSCRIPTS_DIR}/`;
 
 /** The frontmatter `kind:` of a jot. */
 export const JOT_KIND = "jot";

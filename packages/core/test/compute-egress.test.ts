@@ -8,7 +8,7 @@
 // Bold (the ticket's own): **a provider key without its grant is refused
 // before dialling** and **a compute call to a host outside the provider's is
 // refused by the guard**.
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -25,6 +25,7 @@ import {
   providerGrantee,
   readSecretsPolicy,
   redactedSecret,
+  secretsPolicyFromEnv,
   resolveOnMachineCall,
   type Provider,
   type SecretsPolicyRead,
@@ -305,5 +306,29 @@ describe("readSecretsPolicy", () => {
       throw Object.assign(new Error("operation not permitted"), { code: "EPERM" });
     });
     expect(eperm).toEqual({ ok: false, why: "/x/secrets.yaml could not be read (EPERM)" });
+  });
+});
+
+describe("secretsPolicyFromEnv: where a process reads the grant", () => {
+  it("the compose mount, else the instance's file, else a refusal naming the cause", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "metistry-x7-where-"));
+    await mkdir(join(dir, ".metistry"), { recursive: true });
+    await writeFile(join(dir, ".metistry", "identity.yaml"), "name: Aide\n");
+    await writeFile(join(dir, ".metistry", "secrets.yaml"), "secrets:\n  k:\n    grants:\n      provider:instance: on\n");
+    await writeFile(join(dir, "mounted.yaml"), "secrets:\n  k:\n    grants:\n      provider:mounted: on\n");
+
+    const mounted = await secretsPolicyFromEnv({ METISTRY_SECRETS_FILE: join(dir, "mounted.yaml"), METISTRY_INSTANCE_DIR: dir })();
+    expect(mounted.ok && mounted.file.secrets.k!.grants).toEqual({ "provider:mounted": "on" });
+
+    const instance = await secretsPolicyFromEnv({ METISTRY_INSTANCE_DIR: dir })();
+    expect(instance.ok && instance.file.secrets.k!.grants).toEqual({ "provider:instance": "on" });
+
+    // set but empty: compose mounted nothing — never falls through to a host path it cannot see
+    const unmounted = await secretsPolicyFromEnv({ METISTRY_SECRETS_FILE: "", METISTRY_INSTANCE_DIR: dir })();
+    expect(unmounted.ok).toBe(false);
+    if (!unmounted.ok) expect(unmounted.why).toMatch(/no secrets\.yaml is mounted into this container .*METISTRY_SECRETS_YAML.*\/run\/metistry\/secrets\.yaml/);
+
+    const nothing = await secretsPolicyFromEnv({})();
+    expect(nothing.ok).toBe(false);
   });
 });

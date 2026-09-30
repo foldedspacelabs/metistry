@@ -46,6 +46,7 @@ import { parseDocument } from "yaml";
 import { TOOL_MODES, type ToolMode } from "./connections.js";
 import { parseEgressEntry } from "./egress.js";
 import { AGENT_NAME_RE, INSTANCE_ID_RE } from "./instances.js";
+import { instanceFile } from "./instance-layout.js";
 import { PROVIDER_NAME_RE } from "./model-ref.js";
 import { INSTANCE_SECRET_NAME_RE, SECRET_DELIVERY_PREFIX, SECRET_REF_EXACT_RE, SECRET_REF_RE, parseSecretReference, secretDeliveryVar, type SecretReference } from "./secret-ref.js";
 
@@ -237,6 +238,54 @@ export async function readSecretsPolicy(path: string, readFileFn: (p: string) =>
   } catch (e) {
     return { ok: false, why: e instanceof Error ? e.message : String(e) };
   }
+}
+
+/**
+ * `METISTRY_SECRETS_FILE`: an explicit path to the `secrets.yaml` a process
+ * reads grants from. The compose shape sets it (docker-compose.yml): the
+ * containers mount no instance directory (D5), so the instance's
+ * `.metistry/secrets.yaml` — policy, never a value — is bind-mounted
+ * read-only at `COMPOSE_SECRETS_TARGET` and this names it. Set but EMPTY is
+ * compose saying "nothing was mounted" (`METISTRY_SECRETS_YAML` unset).
+ */
+export const SECRETS_FILE_VAR = "METISTRY_SECRETS_FILE";
+/** Where docker-compose.yml mounts the instance's `secrets.yaml`, read-only, in the assistant and console containers. */
+export const COMPOSE_SECRETS_TARGET = "/run/metistry/secrets.yaml";
+/** The host-side compose variable naming the file to mount — `metistry up` sets it to the instance's `.metistry/secrets.yaml` when that exists. */
+export const COMPOSE_SECRETS_SOURCE_VAR = "METISTRY_SECRETS_YAML";
+
+/**
+ * Where a process reads `secrets.yaml` for a grant, from its environment —
+ * read afresh at each call, so a changed grant is seen on the next request:
+ *
+ *   1. `METISTRY_SECRETS_FILE`, when set and non-empty (the compose mount);
+ *   2. set but empty: compose mounted nothing — refused, naming the mount;
+ *   3. else `<METISTRY_INSTANCE_DIR>/.metistry/secrets.yaml` (launchd; the
+ *      engine's sandbox grants that one file by name, CONFIG_SECRETS);
+ *   4. else no file at all — refused, naming the cause.
+ *
+ * Every refusal is fail-closed: a `{{ secret.x }}` provider key is never
+ * sent on a guess.
+ */
+export function secretsPolicyFromEnv(env: NodeJS.ProcessEnv): () => Promise<SecretsPolicyRead> {
+  const explicit = env[SECRETS_FILE_VAR];
+  if (explicit !== undefined && explicit.trim() !== "") {
+    const path = explicit.trim();
+    return () => readSecretsPolicy(path);
+  }
+  if (explicit !== undefined) {
+    const why =
+      `no secrets.yaml is mounted into this container (${SECRETS_FILE_VAR} is empty because ${COMPOSE_SECRETS_SOURCE_VAR} was unset when compose created it) — ` +
+      `docker-compose.yml mounts the instance's .metistry/secrets.yaml read-only at ${COMPOSE_SECRETS_TARGET} when it exists: \`metistry secrets set <name>\` creates it, then \`metistry up\` recreates the containers with the mount`;
+    return async () => ({ ok: false, why });
+  }
+  const dir = env.METISTRY_INSTANCE_DIR?.trim();
+  if (!dir) {
+    const why = `METISTRY_INSTANCE_DIR and ${SECRETS_FILE_VAR} are both unset, so this process has no secrets.yaml to read the grant from — \`metistry up\` sets one of them for every service`;
+    return async () => ({ ok: false, why });
+  }
+  const path = instanceFile(dir, "secrets");
+  return () => readSecretsPolicy(path);
 }
 
 /** The mode `grantee` has for `name`: what the file says, else Off. An unknown secret is Off for everyone. */

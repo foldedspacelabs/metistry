@@ -946,12 +946,24 @@ names)`, which merges them into `meta.secrets` as a sorted set. The
 to say "sends `github_write` to `api.github.com`" without touching the
 Keychain.
 
-**Not yet on a compute provider's chat client.** Since T4-18 a provider's
-key is a `{{ secret.name }}`, but the engine sends the key it was delivered
-(`METISTRY_SECRET_<NAME>`, docs/ops/compute.md "Secrets") rather than
-filling it here: a provider key has no grantee in `secrets.yaml`'s
-vocabulary, and the engine's sandbox does not read `secrets.yaml`. The
-proxy above still refuses any host `compute.yaml` does not name.
+**On every compute call, too** (X-7, ruling 2 of the W2 checkpoint). A
+provider key's grantee is `provider:<name>`, and the engine, the
+collectors, the router's scorer and the embedder call through core's
+`computeFetch`, which binds each call to its provider's host and fills a
+`{{ secret.x }}` key only on that grant (docs/ops/compute.md). The grant is
+read from `secrets.yaml` on every call, and each shape gives the process
+that file and nothing more of the instance:
+
+| shape | how the process reads `secrets.yaml` |
+|---|---|
+| `launchd` | the engine's sandbox profile grants the instance's `.metistry/secrets.yaml` by name (`CONFIG_SECRETS`, a fifth literal beside the four config files); the console is unconfined and reads it under `METISTRY_INSTANCE_DIR` |
+| `compose` | `docker-compose.yml` bind-mounts the instance's `.metistry/secrets.yaml` **read-only** at `/run/metistry/secrets.yaml` in the `console` and `assistant` containers and sets `METISTRY_SECRETS_FILE` to it (the owner's ruling of 2026-09-30). `metistry up` passes the host path as `METISTRY_SECRETS_YAML` only when the file exists; otherwise `/dev/null` is mounted, `METISTRY_SECRETS_FILE` is empty, and every `{{ secret.x }}` provider key is refused with a message naming the mount. The bind never creates a host path (`create_host_path: false`), and no other instance file is mounted (D5). |
+
+A single-file bind follows the file's inode, and the reconciler writes by
+rename — so under compose a grant change reaches the containers when they
+restart (`metistry restart console assistant`), not on the next call as it
+does under launchd. The proxy above still refuses any host `compute.yaml`
+does not name.
 
 ## Secrets in plists
 

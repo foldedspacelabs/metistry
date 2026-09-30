@@ -61,8 +61,7 @@ import {
   computeFetch,
   costOf,
   EgressRefused,
-  instanceFile,
-  readSecretsPolicy,
+  secretsPolicyFromEnv as coreSecretsPolicyFromEnv,
   redactedSecret,
   credentialEnvNames,
   DEFAULT_MAX_OUTPUT_TOKENS,
@@ -215,27 +214,14 @@ export function redactProviderText(text: string, apiKey: string | undefined, nam
 }
 
 /**
- * This instance's `secrets.yaml`, read afresh at each call: the file under
- * `METISTRY_INSTANCE_DIR` (which `metistry up` sets, and whose path the
- * sandbox grants by name as CONFIG_SECRETS). No instance directory, no file
- * to read a grant from — so a `{{ secret.x }}` key is refused, never sent on
- * a guess.
+ * This instance's `secrets.yaml`, read afresh at each call — core's
+ * `secretsPolicyFromEnv`: the compose mount (`METISTRY_SECRETS_FILE`), else
+ * the file under `METISTRY_INSTANCE_DIR` (launchd; the sandbox grants it by
+ * name as CONFIG_SECRETS). No file, no grant — so a `{{ secret.x }}` key is
+ * refused, never sent on a guess, and the refusal names why.
  */
 export function secretsPolicyFromEnv(env: NodeJS.ProcessEnv): SecretsPolicySource {
-  const dir = env.METISTRY_INSTANCE_DIR?.trim();
-  if (!dir) {
-    // The compose shape never mounts the instance directory into the
-    // container (D5), so this is where a `{{ secret.x }}` provider key lands
-    // there: refused, with the cause and the fix in the message.
-    return () => ({
-      ok: false,
-      why:
-        "METISTRY_INSTANCE_DIR is unset, so this process has no secrets.yaml to read the grant from (the compose shape mounts no instance directory) — " +
-        "point the provider at an install variable instead (`metistry compute providers set <provider> --secret env:METISTRY_SECRET_<NAME>`), which is bound to the provider's host but needs no grant",
-    });
-  }
-  const path = instanceFile(dir, "secrets");
-  return () => readSecretsPolicy(path);
+  return coreSecretsPolicyFromEnv(env);
 }
 
 /** `<base_url>/chat/completions`, with the trailing slash question settled once. */

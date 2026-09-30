@@ -18,6 +18,8 @@ import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
   COMPUTE_FILENAME,
+  COMPOSE_SECRETS_SOURCE_VAR,
+  COMPOSE_SECRETS_TARGET,
   EGRESS_PROXY_HOST,
   KEEP_AWAKE_ENV,
   emptyCompute,
@@ -229,17 +231,36 @@ export function composeEnvArgs(productDir: string, envFile: string | undefined):
   return envFile && envFile !== join(productDir, ".env") ? ["--env-file", envFile] : [];
 }
 
-export async function composeUp(r: StepRunner, productDir: string, source: LockSource, version?: string | undefined, envFile?: string | undefined): Promise<void> {
+/**
+ * What compose is told about `secrets.yaml` (X-7, the owner's ruling of
+ * 2026-09-30): `METISTRY_SECRETS_YAML` = this instance's
+ * `.metistry/secrets.yaml`, which docker-compose.yml bind-mounts READ-ONLY
+ * into the console and assistant as their grant policy. Only when the file
+ * exists: a bind of a missing path would be refused (`create_host_path:
+ * false`), and with no file there is no grant to check — the containers get
+ * /dev/null, an empty METISTRY_SECRETS_FILE, and refuse every
+ * `{{ secret.x }}` provider key naming the mount.
+ */
+export function composeSecretsEnv(instanceDir: string | undefined, exists: (p: string) => boolean = existsSync): { env: Record<string, string>; note: string } {
+  if (!instanceDir) return { env: {}, note: `secrets.yaml: no instance directory — the containers get no grant policy, and a {{ secret.x }} provider key is refused` };
+  const path = instanceFile(instanceDir, "secrets");
+  if (!exists(path)) return { env: {}, note: `secrets.yaml: ${path} does not exist yet — nothing is mounted, so a {{ secret.x }} provider key is refused until \`metistry secrets set <name>\` creates it and \`metistry up\` runs again` };
+  return { env: { [COMPOSE_SECRETS_SOURCE_VAR]: path }, note: `secrets.yaml: ${path} mounted read-only at ${COMPOSE_SECRETS_TARGET} in console and assistant (a grant change reaches them on \`metistry restart console assistant\`)` };
+}
+
+export async function composeUp(r: StepRunner, productDir: string, source: LockSource, version?: string | undefined, envFile?: string | undefined, instanceDir?: string | undefined): Promise<void> {
   const base = ["compose", ...composeEnvArgs(productDir, envFile)];
+  const secrets = composeSecretsEnv(instanceDir);
+  r.note(secrets.note);
   if (source === "release") {
     // the released, versioned images — docker-compose.yml reads
     // METISTRY_<SERVICE>_IMAGE and falls back to the dev tags a checkout builds
-    const env = version ? { ...r.env, ...imageEnv(version, r.env) } : r.env;
+    const env = { ...(version ? { ...r.env, ...imageEnv(version, r.env) } : r.env), ...secrets.env };
     if (version) r.note(`images: ${IMAGE_SERVICES.map((s) => imageRef(s, version, r.env)).join(", ")}`);
     await r.run("docker", [...base, "pull"], { cwd: productDir, env, timeoutMs: COMPOSE_TIMEOUT_MS, inherit: true, comment: version ? `pinned to ${version}` : "metistry.lock pins released images" });
     await r.run("docker", [...base, "up", "-d", "--no-build"], { cwd: productDir, env, timeoutMs: COMPOSE_TIMEOUT_MS, inherit: true });
   } else {
-    await r.run("docker", [...base, "up", "-d", "--build"], { cwd: productDir, timeoutMs: COMPOSE_TIMEOUT_MS, inherit: true });
+    await r.run("docker", [...base, "up", "-d", "--build"], { cwd: productDir, env: { ...r.env, ...secrets.env }, timeoutMs: COMPOSE_TIMEOUT_MS, inherit: true });
   }
 }
 
@@ -1269,7 +1290,7 @@ export async function up(opts: UpOptions): Promise<UpResult> {
       r.note("--no-compose: containers left as they are");
     } else if (usesCompose(deployment)) {
       r.section("compose");
-      await composeUp(r, runDir, source, pinnedVersion, envFile);
+      await composeUp(r, runDir, source, pinnedVersion, envFile, values.env.METISTRY_INSTANCE_DIR?.replace(/\/+$/, "") || undefined);
     } else {
       r.note("shape launchd: no containers, so docker is never called");
     }

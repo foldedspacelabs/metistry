@@ -20,7 +20,10 @@ through the egress door.
   returns `fetchFn` (the door) instead of `bearer`, and `makeChatClient` takes
   `env`/`secretsPolicy` instead of `apiKey`.
 - The engine's sandbox now reads `secrets.yaml` by name (`CONFIG_SECRETS`),
-  per call, so a revoked grant stops the next request.
+  per call, so a revoked grant stops the next request. Under compose,
+  `docker-compose.yml` bind-mounts the instance's `.metistry/secrets.yaml`
+  read-only into the console and assistant (`METISTRY_SECRETS_FILE`); core's
+  `secretsPolicyFromEnv` resolves the file for both shapes.
 - `metistry compute providers add|set` write `provider:<name>: on` for the
   key; `metistry update` and `metistry secrets migrate-scope` backfill it,
   idempotently, for every provider key `compute.yaml` already uses.

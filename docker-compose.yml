@@ -115,6 +115,12 @@ services:
       METISTRY_ASSISTANT_TOKEN: ${METISTRY_ASSISTANT_TOKEN:-}
       METISTRY_ASSISTANT_PROJECTS: ${METISTRY_ASSISTANT_PROJECTS:-}
       METISTRY_ASSISTANT_AREAS: ${METISTRY_ASSISTANT_AREAS:-}
+      # secrets.yaml (X-7, owner's ruling 2026-09-30): the instance's
+      # `.metistry/secrets.yaml` — names and policy, NEVER a value — mounted
+      # read-only below so a provider key's grant to `provider:<name>` can be
+      # checked before a model call dials (docs/ops/compute.md). Empty when
+      # nothing is mounted, which the door reads as "no grant" and refuses.
+      METISTRY_SECRETS_FILE: ${METISTRY_SECRETS_YAML:+/run/metistry/secrets.yaml}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
@@ -122,6 +128,15 @@ services:
       - "127.0.0.1:${METISTRY_CONSOLE_PORT:-8080}:8080"
     volumes:
       - inbox:/data/inbox   # fallback only (see METISTRY_INBOX_DIR above)
+      # the ONE instance file this container sees, read-only: `metistry up`
+      # sets METISTRY_SECRETS_YAML to the instance's .metistry/secrets.yaml
+      # when it exists. Unset, /dev/null is mounted and the variable above is
+      # empty — never the instance directory (D5), never a created path.
+      - type: bind
+        source: ${METISTRY_SECRETS_YAML:-/dev/null}
+        target: /run/metistry/secrets.yaml
+        read_only: true
+        bind: { create_host_path: false }
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8080/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))\""]
       interval: 15s
@@ -162,8 +177,17 @@ services:
       # overlay default resolves its instance half against this, never
       # against the container's working directory. Unset = the seed alone.
       METISTRY_INSTANCE_DIR: ${METISTRY_INSTANCE_DIR:-}
+      # secrets.yaml, read-only, as for the console above (X-7): the engine
+      # checks a provider key's grant on every call. Empty = nothing mounted
+      # = every `{{ secret.x }}` provider key refused, naming the mount.
+      METISTRY_SECRETS_FILE: ${METISTRY_SECRETS_YAML:+/run/metistry/secrets.yaml}
     volumes:
       - assistant-home:/home/node   # writable HOME; sessions themselves live in Postgres
+      - type: bind
+        source: ${METISTRY_SECRETS_YAML:-/dev/null}
+        target: /run/metistry/secrets.yaml
+        read_only: true
+        bind: { create_host_path: false }
 
 volumes:
   db-data:

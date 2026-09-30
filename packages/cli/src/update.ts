@@ -604,7 +604,7 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
       deferred.push({ what: OWNER_BRIDGE_TOKEN, why: `not minted — ${err.reason}`, fix: [...OWNER_BRIDGE_TOKEN_FIX] });
       r.note(`${r.ui.paint("failed", `${r.ui.icon("fail")} ${err.message}`)} — the restart goes on without it`);
     }
-    if (usesCompose(deployment)) await composeUp(r, runDir, source, source === "release" ? releaseVersion : undefined, envFile);
+    if (usesCompose(deployment)) await composeUp(r, runDir, source, source === "release" ? releaseVersion : undefined, envFile, instanceDir.instanceDir);
     else r.note("shape launchd: no containers, so docker is never called — console, assistant and db are kickstarted below with the other host jobs");
     // The launchd shape's plists and supervisor.json, re-rendered BEFORE
     // anything is restarted onto them — by `up`'s own renderer, run here

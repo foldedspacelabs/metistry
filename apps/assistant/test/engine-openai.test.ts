@@ -672,11 +672,27 @@ describe("**a provider key without its grant is refused before dialling** (the e
 
     expect(await secretsPolicyFromEnv({})()).toMatchObject({ ok: false, why: expect.stringContaining("METISTRY_INSTANCE_DIR") });
     const none = server([{ body: chat("never") }]);
-    // the compose shape: no instance directory in the container — the refusal names the cause and the fix, not just a code
     const refused = (await engineOn(named, none, host({}), { env })("hi", turn).catch((e) => e)) as EgressRefused;
     expect(refused.code).toBe("not_granted");
-    expect(refused.message).toContain("compose shape mounts no instance directory");
-    expect(refused.message).toContain("--secret env:METISTRY_SECRET_<NAME>");
+    expect(refused.message).toContain("METISTRY_INSTANCE_DIR and METISTRY_SECRETS_FILE are both unset");
+    expect(none.requests).toEqual([]);
+  });
+
+  it("the compose shape: the mounted file (METISTRY_SECRETS_FILE) is read per call; mounted nothing is refused naming the mount", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "metistry-x7-compose-"));
+    const mounted = join(dir, "secrets.yaml"); // stands in for /run/metistry/secrets.yaml
+    await writeFile(mounted, "secrets:\n  openrouter_api_key:\n    hosts: [openrouter.ai]\n    grants:\n      provider:openrouter: on\n");
+    const s = server([{ body: chat("via the mount") }]);
+    // a host path in METISTRY_INSTANCE_DIR (compose passes the host's through) is ignored: the mount wins
+    expect((await engineOn(named, s, host({}), { env: { ...env, METISTRY_SECRETS_FILE: mounted, METISTRY_INSTANCE_DIR: "/Users/someone/instance" } })("hi", turn)).text).toBe("via the mount");
+    expect(s.requests[0]!.headers.authorization).toBe(`Bearer ${KEY}`);
+
+    const none = server([{ body: chat("never") }]);
+    const refused = (await engineOn(named, none, host({}), { env: { ...env, METISTRY_SECRETS_FILE: "", METISTRY_INSTANCE_DIR: "/Users/someone/instance" } })("hi", turn).catch((e) => e)) as EgressRefused;
+    expect(refused.code).toBe("not_granted");
+    expect(refused.message).toContain("no secrets.yaml is mounted into this container");
+    expect(refused.message).toContain("/run/metistry/secrets.yaml");
+    expect(refused.message).toContain("metistry up");
     expect(none.requests).toEqual([]);
   });
 });

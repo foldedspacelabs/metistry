@@ -254,6 +254,29 @@ describe("metistry secrets replace, hosts, grant", () => {
       { to: "agent:devin", mode: "ask" },
     ]);
   });
+
+  it("**refuses granting github_write to a connection or an agent; the owner door still reads it** (X-41)", async () => {
+    const kc = fakeSecurity();
+    const a = await instance(ID_A, "grant-owner-door");
+    await run(["secrets", "set", "github_write", "--hosts", "api.github.com", "--instance", a], kc, VALUE_A);
+    for (const [grantee, mode] of [
+      ["connection:github", "on"],
+      ["agent:devin", "ask"],
+      ["agent:devin", "off"],
+    ] as const) {
+      const r = await run(["secrets", "grant", "github_write", grantee, mode, "--instance", a], kc);
+      expect(r.code, `${grantee} ${mode}`).toBe(1);
+      expect(r.err, `${grantee} ${mode}`).toMatch(/owner-door secret/);
+    }
+    // nothing was written: no grants line, and the value is untouched
+    expect(parseSecretsFile(secretsYaml(a)).secrets.github_write).toEqual({ hosts: ["api.github.com"], grants: {}, expires: undefined });
+    const listed = JSON.parse((await run(["secrets", "list", "--named", "--json", "--instance", a], kc)).out);
+    expect(listed.secrets).toEqual([{ name: "github_write", hosts: ["api.github.com"], grants: [], expires: null, present: true, last_used: null }]);
+    // the owner door still reads it: an ordinary secret grant on the same instance is unaffected
+    expect((await run(["secrets", "grant", "github_write", "connection:github", "on", "--instance", a], kc)).err).toMatch(/owner-door secret/);
+    expect((await run(["secrets", "set", "other", "--instance", a], kc, VALUE_B)).code).toBe(0);
+    expect((await run(["secrets", "grant", "other", "connection:github", "on", "--instance", a], kc)).code).toBe(0);
+  });
 });
 
 describe("metistry secrets remove", () => {

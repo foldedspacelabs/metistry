@@ -41,6 +41,7 @@ import {
   describeSecrets,
   instanceFile,
   instancePresence,
+  isOwnerDoorSecret,
   mintToken,
   normalizeSecretHost,
   SECRET_GRANTEE_FORMS,
@@ -1035,6 +1036,13 @@ export async function secretsGrant(rawName: string | undefined, grantee: string 
   const name = checkName(rawName);
   if (!grantee || !parseSecretGrantee(grantee)) throw new StepFailed(`${JSON.stringify(grantee ?? "")} is not a grantee — ${SECRET_GRANTEE_FORMS} (e.g. connection:github, agent:devin, provider:openrouter)`);
   if (!mode || !(SECRET_GRANT_MODES as readonly string[]).includes(mode)) throw new StepFailed(`the mode is one of ${SECRET_GRANT_MODES.join(", ")} — not ${JSON.stringify(mode ?? "")}`);
+  // X-41: an owner-door secret (`github_write`) has no *Who may use it* line
+  // to widen — the door itself is the grant, and it is never a connection's
+  // or an agent's. Refused here at the source, so it never reaches
+  // secrets.yaml to be caught only by the schema.
+  if (isOwnerDoorSecret(name)) {
+    throw new StepFailed(`${name} is an owner-door secret — it is read only through its own door (docs/ops/cli.md), and \`metistry secrets grant\` never grants it to ${grantee}; no connection or agent may be granted it`);
+  }
   const edit = await openSecrets(opts);
   requireNamed(edit.file, name, edit.path);
   // setIn with a key holding `:` — the yaml library quotes it where it must

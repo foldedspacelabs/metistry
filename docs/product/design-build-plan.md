@@ -1370,7 +1370,7 @@ reports branch, ahead/behind, last commit, last push, and any conflict.
 | **W1** Foundations | data, the first doors, the scheduler, per-instance secrets, the actor model, the Mac shell, live events, commits and sync; the W0 freeze fixes | 119.5 | week 3 |
 | **W2** The day | Needs You, Today, Chat, Activity; Scheduled routes and the day's routines; connections P1; Linear; file history and rollback | 128.5 | week 5 |
 | **W3** Work and agents | Knowledge, Agents, Scheduled, Board, Projects, Artifacts, Run detail, the Settings window; connections P2; ICS and CalDAV; sessions; PR reviews; the recorder | 105 | week 6½ |
-| **W4** Reach | connections P3, Google Calendar, IMAP, the remaining panes, the capture bar, the router wiring | 65 | week 7½ |
+| **W4** Reach | CI stability (X-24, X-29, X-31, X-32, X-41); connections P3, Google Calendar, IMAP, the remaining panes, the capture bar, the router wiring | 73 | week 7½ |
 | **W5** Acceptance | the owner's walkthrough, the doc sweep, the 1.0 decision | 1 | week 8 |
 
 **Waves are checkpoints, not start gates.** A ticket starts the moment its
@@ -1433,9 +1433,9 @@ agent's pass, per the PR close rule; the owner reviews at checkpoints.
 | W1 | T1-1, T1-2, T1-3, T1-6, T1-7, T1-8, T1-9, T1-11, T1-12, T1-14, T1-15 · T2-1, T2-2, T2-4 → T2-5, T2-6, T2-15, T2-16, T2-17, T2-18 · T3-1, T3-2, T3-4, T3-9 · T4-1 → T4-2, T4-3; T4-4, T4-5, T4-6, T4-20, T4-21 · T5-1, T5-2, T5-3 · T7-2 · T9-1 · T10-1 → T10-3, T10-2 · X-2, X-3, X-4, X-5 |
 | W2 | T1-10, T1-13 · T2-3, T2-7, T2-8, T2-9, T2-10, T2-11, T2-14 · T3-3, T3-5 → T3-6, T3-7, T3-12 · T4-7, T4-8a → T4-8b, T4-24; T4-18 · T5-4a, T5-4b, T5-5, T5-6, T5-7 · T6-1a, T6-1b, T6-2, T6-3 · T7-3a, T7-3b, T7-7 · T9-2 · T10-4 → T10-5, T10-6 |
 | W3 | T2-12, T2-13 · T3-8, T3-10, T3-11 · T4-9, T4-12 → T4-13, T4-19, T4-22, T4-23, T4-25, T4-26 · T6-4…T6-11 · T7-4, T7-5 · T8-2a → T8-2b, T8-6 · T9-3 · T10-7 · X-6…X-23 |
-| W4 | T4-10 → T4-11, T4-14; T4-15 → T4-17 · T6-12, T6-13a, T6-13b, T6-14, T6-15, T6-16 · T7-6 · T8-3, T8-4, T8-5, T8-7 · T9-4 (merges after the eval clears its bar) |
+| W4 | X-24, X-29, X-31, X-32, X-41 (CI stability, dispatched first — owner 2026-09-30) · T4-10 → T4-11, T4-14; T4-15 → T4-17 · T6-12, T6-13a, T6-13b, T6-14, T6-15, T6-16 · T7-6 · T8-3, T8-4, T8-5, T8-7 · T9-4 (merges after the eval clears its bar) |
 | W5 | X-1 |
-| Candidates | X-24…X-74 — specified, not scheduled; the owner assigns each a wave at a checkpoint (W3 housekeeping) |
+| Candidates | X-25…X-28, X-30, X-33…X-40, X-42…X-74 — specified, not scheduled; the owner assigns each a wave at a checkpoint (W3 housekeeping; five CI-stability candidates went to W4 on 2026-09-30) |
 
 ### 3.3 The tickets
 
@@ -2133,6 +2133,8 @@ keeps refusing to set it (ruled 2026-09-27, the coordinator's call; §2.5).
 checked**.
 *Accept:* —
 
+*Ruling 2026-09-30 (Q10):* the console still builds no `ConnectionPool` (`apps/console/src/main.ts`, open since #374), so proxied connection tools answer `not_available` outside tests; wiring it is this ticket's first task.
+
 **T4-11 · Targets and syncs as connections** · L · W4 · deps T4-10 —
 *Spec:* Targets become Agent connections behind an adapter (dispatch unchanged);
 collectors become syncs bound to a connection and its secret; Devin's purposes
@@ -2169,6 +2171,8 @@ this app* while that is true.
 *Tests:* recorded API fixtures; **only `responseStatus` of the self attendee is
 sent**; a bring-your-own client id overrides the shipped one.
 *Accept:* the maintainer's client exists and is published (§3.4).
+
+*Ruling 2026-09-30 (Q8):* Google gets its own OAuth door; there is no secret-in-URL door, and private ICS feeds stay out.
 
 **T4-15 · Mail: IMAP** · L · W4 · deps T4-8a —
 *Spec:* §2.6 (§4 Q8): `imap` type with an app password: read, `draft` by APPEND to
@@ -2610,6 +2614,8 @@ filter-construction path, the display glyph on the rail.
 *Tests:* the picker's choice is the only filter the helper builds.
 *Accept:* —
 
+*Ruling 2026-09-30 (Q28):* the #253 "no capture UI" hold is lifted; this ticket proceeds in W4.
+
 **T8-4 · Retention and re-review** · M · W4 · deps T8-2b, F-6 —
 *Spec:* §2.15: migration 0033; the purge after ingestion + 7 days (never over 30);
 `recording_review`; `GET /api/recordings/:id`.
@@ -2619,6 +2625,8 @@ filter-construction path, the display glyph on the rail.
 when the audio was deleted**.
 *Accept:* —
 
+*Ruling 2026-09-30 (Q29):* transcripts live in `Journal/Transcripts/`, not `Inbox/`; retention and re-review read from there (X-73 is the move).
+
 **T8-5 · The bar** · L · W4 · deps T8-2a, T5-5 —
 *Spec:* `screen-11-capture-bar.md` §2–§7: the rail, glass at the measured floors,
 the one breath, Note and To-do with session anchors, Ask as the conversation's
@@ -2626,6 +2634,8 @@ tail at 328px with *Open in Chat*, the record sheet.
 *Files:* `capture-bar-panel.swift`.
 *Tests:* §2.18; the breath holds still under Reduce Motion.
 *Accept:* as T6's.
+
+*Ruling 2026-09-30 (Q28):* the #253 "no capture UI" hold is lifted; this ticket proceeds in W4.
 
 **T8-6 · The private tier** · M · W3 · deps T4-18 —
 *Spec:* §2.15: `metistry compute assign private` refuses an off-machine provider;
@@ -2640,6 +2650,8 @@ turns in a capture session run on it.
 *Files:* `apps/console/src/`, `collectors/inbox-drain`.
 *Tests:* Accept All keeps every receipt.
 *Accept:* —
+
+*Ruling 2026-09-30 (Q29):* transcripts live in `Journal/Transcripts/`; anchors point there.
 
 #### T9 — The dynamic router
 
@@ -2954,7 +2966,7 @@ What the W3 builders and reviewers reported outside their tickets (PRs
 ticket that waits on one of the owner's open W3 questions says so by number.
 Each is its own PR, outside any track's files.
 
-**X-24 · Plan-tomorrow's test runs on its own clock** · S · deps X-15 —
+**X-24 · Plan-tomorrow's test runs on its own clock** · S · W4 · deps X-15 —
 *Spec:* `routines/test/plan-tomorrow.integration.test.ts` writes real `now()`
 into `runs` while asserting against a fixed clock, so "two closes re-render, the
 23:00 run supersedes them" fails by time of day — the most frequent W3 flake
@@ -3003,7 +3015,7 @@ PRs. Find the race and remove it; the behaviour it pins stays.
 *Tests:* **the test passes 50 runs in a row**.
 *Accept:* —
 
-**X-29 · Main's Mac fixtures match the recorder** · M —
+**X-29 · Main's Mac fixtures match the recorder** · M · W4 —
 *Spec:* main's fixtures predate the recorder's current seed (it seeds seven
 syncs plus standup and session-fold runs; `get-api-scheduled` has four), so any
 full re-record breaks `macos-app`. Re-record every fixture on main in one PR and
@@ -3026,7 +3038,7 @@ reason — are also compared by value, clocks and ids aside.
 timestamp does not**.
 *Accept:* —
 
-**X-31 · The recorder's seeds are pinned to its clock** · S —
+**X-31 · The recorder's seeds are pinned to its clock** · S · W4 —
 *Spec:* three sources of drift between recordings: raw proposal `INSERT`s use
 Postgres `now()`, not `RECORDING_NOW`; the seeded crew call lands on the
 recording day, so a re-record on the 1st changes the daily spend; and
@@ -3038,7 +3050,7 @@ the export fixture selects its seeded ids.
 database, produce identical fixtures**.
 *Accept:* —
 
-**X-32 · A push carries Needs You only, and no text** · M —
+**X-32 · A push carries Needs You only, and no text** · M · W4 —
 *Spec:* `apps/console/src/push.ts`'s `startNotifier` pushes every
 `outbound_messages` row — 160 characters of its text, url `/`, no type. Screen 18
 §6: only Needs You items push, the payload is type, title and the card's deep
@@ -3120,7 +3132,7 @@ upstream's text or an argument.
 only**.
 *Accept:* —
 
-**X-41 · An owner-door secret refuses a connection or agent grant** · S · deps T2-13 —
+**X-41 · An owner-door secret refuses a connection or agent grant** · S · W4 · deps T2-13 —
 *Spec:* `metistry secrets grant github_write connection:*` (or `agent:*`) is
 refused only by convention, and `docs/ops/cli.md` even documents it as valid. A
 secret an owner door holds refuses any `connection:` or `agent:` grantee at the
@@ -3433,6 +3445,8 @@ refused**.
 *Files:* `packages/mcp-live-capture/src/`.
 *Tests:* **a finished session's transcript lands in the ruled folder**.
 *Accept:* —
+
+*Ruling 2026-09-30 (Q29):* the folder is `Journal/Transcripts/`; this ticket is the move from `Inbox/`.
 
 **X-74 · CI's Swift-helper filter is anchored** · S —
 *Spec:* #417's path filter `.*Package\.swift$` is unanchored, so any

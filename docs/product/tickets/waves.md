@@ -170,6 +170,11 @@ Generated from `docs/product/design-build-plan.md` by `ops/scripts/tickets.mjs`.
 
 ## W4 — 22 tickets, 73 agent-days
 
+- [ ] [X-24](x/x-24.md) · Plan-tomorrow's test runs on its own clock · S · sonnet · after X-15
+- [ ] [X-29](x/x-29.md) · Main's Mac fixtures match the recorder · M · opus
+- [ ] [X-31](x/x-31.md) · The recorder's seeds are pinned to its clock · S · sonnet
+- [ ] [X-32](x/x-32.md) · A push carries Needs You only, and no text · M · opus
+- [ ] [X-41](x/x-41.md) · An owner-door secret refuses a connection or agent grant · S · sonnet · after T2-13
 - [ ] [T4-10](t4/t4-10.md) · Connections P3: HTTP, OAuth, generated tools · L · opus high · after T4-9
 - [ ] [T4-11](t4/t4-11.md) · Targets and syncs as connections · L · opus high · after T4-10
 - [ ] [T4-14](t4/t4-14.md) · Google Calendar through Metistry's client · L · opus high · after T4-10, T4-12
@@ -187,11 +192,6 @@ Generated from `docs/product/design-build-plan.md` by `ops/scripts/tickets.mjs`.
 - [ ] [T8-5](t8/t8-5.md) · The bar · L · opus high · after T8-2a, T5-5
 - [ ] [T8-7](t8/t8-7.md) · Meeting groups and anchors · M · opus · after T1-8, T8-2b
 - [ ] [T9-4](t9/t9-4.md) · Wire the composer · M · opus · after T9-3, F-0
-- [ ] [X-24](x/x-24.md) · Plan-tomorrow's test runs on its own clock · S · sonnet · after X-15
-- [ ] [X-29](x/x-29.md) · Main's Mac fixtures match the recorder · M · opus
-- [ ] [X-31](x/x-31.md) · The recorder's seeds are pinned to its clock · S · sonnet
-- [ ] [X-32](x/x-32.md) · A push carries Needs You only, and no text · M · opus
-- [ ] [X-41](x/x-41.md) · An owner-door secret refuses a connection or agent grant · S · sonnet · after T2-13
 
 - [ ] **W4 checkpoint** — merged, main green, scratch-instance upgrade, conformance test, Mac smoke, release
 

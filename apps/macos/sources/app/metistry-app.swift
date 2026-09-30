@@ -28,6 +28,8 @@ struct MetistryApp: App {
     @State private var model: AppModel
     #if os(macOS)
     @State private var updater: UpdaterController
+    /// The floating bar's window (capture-bar-panel.swift), held for the app's lifetime.
+    @State private var captureBarPanel: CaptureBarPanelController
     #endif
     @Environment(\.openWindow) private var openWindow
 
@@ -51,7 +53,11 @@ struct MetistryApp: App {
             passkeyRegistrar: ASAuthorizationPasskeyRegistrar(),
             // …and `Process` a second time, held open: the one
             // `metistry console session --stdio` child the stores speak through.
-            sessionSpawner: runner
+            sessionSpawner: runner,
+            // The floating bar's wire to the live-capture bridge on this Mac,
+            // and the one Keychain read that gives it the recorder's control
+            // key (stores/live-capture-transport.swift, live-capture-key.swift).
+            liveCapture: (transport: LoopbackLiveCaptureTransport(), keys: KeychainLiveCaptureKeySource())
         )
         _model = State(initialValue: model)
         // The shell polls for the app's lifetime, not a window's, and the Dock
@@ -77,6 +83,20 @@ struct MetistryApp: App {
         // Sparkle fills in the kit's plain UpdateStatus box: the kit stays free
         // of the framework, and the Updates pane and the menu read one type.
         _updater = State(initialValue: UpdaterController(status: model.updates))
+        // The floating bar: the running apps *Audio only* may list, Open in
+        // Chat, the Screen Recording pane — the three things only AppKit has.
+        let bar = model.captureBar
+        bar.listApps = { CaptureBarPanelController.runningApps() }
+        bar.openChat = { [shell = model.shell] in
+            shell.go(to: .chat)
+            NSApplication.shared.activate(ignoringOtherApps: true)
+            NSApplication.shared.windows.first { $0.identifier?.rawValue.hasPrefix(Self.mainWindowID) == true }?.makeKeyAndOrderFront(nil)
+        }
+        bar.openScreenSettings = {
+            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") { NSWorkspace.shared.open(url) }
+        }
+        _captureBarPanel = State(initialValue: CaptureBarPanelController(model: bar))
+        model.startCaptureBar()
         #endif
     }
 

@@ -59,6 +59,30 @@ drop ends the trust (SHOULD-10) — but those files are not in the vault and
 Obsidian will not see them. The recovery is a plain `mv` into
 `<instance>/Inbox/`: the scan below picks them up.
 
+## Jots from the floating bar
+
+The Mac's floating bar (`docs/ops/mac-app.md`, "The floating bar") captures
+through the same `POST /capture` as every door, with the composer's
+`Idempotency-Key`. At rest a **Note** is its words and a **To-do** is
+`- [ ] <words>`, the explicit cue the classifier already reads. During a
+recording each jot also says where in the recording it was made (C77) —
+the only stable anchor while the meeting's file does not exist yet:
+
+```
+---
+kind: "jot"
+jot: "note"                          # or "todo"
+title: "Volume tier claim needs checking"
+capture_session: "20260930-120000-00ab"
+offset_s: 754                        # seconds from Record
+---
+Volume tier claim needs checking
+```
+
+Scalars only, JSON-quoted, one per line. The meeting's Approve rewrites
+`capture_session` to the transcript's path (T8-7); nothing else in the jot
+changes.
+
 ## Files you write yourself are first-class
 
 A note you add in Obsidian, an edit you make to a capture that is already

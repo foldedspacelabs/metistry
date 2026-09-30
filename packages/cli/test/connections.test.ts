@@ -167,11 +167,11 @@ describe("metistry connections add", () => {
     expect(again.err).toMatch(/already a connection named fake/);
   });
 
-  it("OAuth sign-in is refused as not built yet, naming T4-10", async () => {
+  it("OAuth sign-in on a custom connection needs its client — nothing supplies one (T4-10, C118; connections-p3.test.ts has the rest)", async () => {
     const dir = await instance("oauth");
     const r = await run(["connections", "add", "remote", "--type", "mcp", "--url", "https://x.example.com/mcp", "--auth", "oauth", "--no-discover", "--instance", dir]);
     expect(r.code).toBe(1);
-    expect(r.err).toMatch(/oauth sign-in arrives with T4-10/);
+    expect(r.err).toMatch(/a custom OAuth connection names its client/);
   });
 
   it("the iCloud recipe (docs/ops/connections.md) writes an ok CalDAV connection: basic sign-in, the username written, the app password by name only (T4-13)", async () => {

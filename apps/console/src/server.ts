@@ -18,7 +18,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
-import { API_VERSION, API_VERSION_HEADER, AREA_PREFIX_REFUSAL, knowledgeConflictSource, runCheck, startRun, finishRun, errorEnvelope, intEnv, may, parseAction, noRouteMessage, PROJECT_SLUG_RE, rollSession, statusFor, servedRoute, isLocalRoute, routineGrantsFor, localOnlyMessage, routeKey, resolveActor, ACKNOWLEDGED, SKIP_FEEDBACK, answersText, checkAnswers, describeRequest, parseSubjectFingerprint, requestSubjectOf, subjectUnchanged, validAgentAreaGrant, type QuestionAnswer, type RequestShape, type RequestSubject, type SubjectReading, type CheckResult, type Compute, type ErrorCode, type ErrorEnvelope, type Principal } from "@foldedspacelabs/metistry-core";
+import { API_VERSION, API_VERSION_HEADER, AREA_PREFIX_REFUSAL, knowledgeConflictSource, runCheck, startRun, finishRun, errorEnvelope, intEnv, may, parseAction, noRouteMessage, PROJECT_SLUG_RE, rollSession, statusFor, servedRoute, isLocalRoute, routineGrantsFor, localOnlyMessage, routeKey, resolveActor, ACKNOWLEDGED, SKIP_FEEDBACK, answersText, checkAnswers, describeRequest, parseSubjectFingerprint, requestSubjectOf, subjectUnchanged, validAgentAreaGrant, type QuestionAnswer, type RequestShape, type RequestSubject, type SubjectReading, type CheckResult, type Compute, type ErrorCode, type ErrorEnvelope, type Principal, type ToolGroup, type ToolMode } from "@foldedspacelabs/metistry-core";
 import { QueryError, QueryStore } from "@foldedspacelabs/metistry-queries";
 import { captureToInbox, createBrainServer, dirSink, type CaptureSink, type ConnectionLimits, type ConnectionsProxy, type KnowledgeLister, type KnowledgeReader, type KnowledgeVaultSearcher, type KnowledgeWriter, type QueryEmbedder } from "@foldedspacelabs/metistry-mcp-brain";
 import { TasksError, TasksService } from "@foldedspacelabs/metistry-tasks";
@@ -1862,7 +1862,23 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       assistant: cfg.assistantDefinition ? await cfg.assistantDefinition() : { identity: undefined, files: [] },
       compute: cfg.compute?.(),
       routineGrants: await routineGrantsNow(),
+      connections: await connectionsForActors(),
     });
+  }
+
+  /**
+   * Every connection with its tools and the offer switch (T4-10), from the
+   * proxy's own listing — `describePermissions` draws those each actor
+   * reaches as rows *reached through Metistry*. A listing that fails is no
+   * rows, never a failed request: the table is then only what the scope says.
+   */
+  async function connectionsForActors(): Promise<{ name: string; offered: boolean; tools: { name: string; group: ToolGroup; mode: ToolMode }[] }[]> {
+    if (!cfg.connectionsProxy) return [];
+    try {
+      return (await cfg.connectionsProxy.list()).map((c) => ({ name: c.name, offered: c.offer_to_agents, tools: c.tools.map((t) => ({ name: t.name, group: t.group, mode: t.mode })) }));
+    } catch {
+      return [];
+    }
   }
 
   /**

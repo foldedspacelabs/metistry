@@ -236,6 +236,10 @@ describe("agents list — the permissions table (T4-6)", () => {
   it("says an actor that holds nothing holds nothing — and draws no table for a revoked row", () => {
     const ui = createUi({ env: { NO_COLOR: "1" } });
     expect(renderPermissions([], ui)).toContain("holds nothing — anything not listed is not granted");
+    // a connection row: the relay glyph's words, once (T4-10 — Through Metistry)
+    const conn = [{ resource: { kind: "connection" as const, name: "gh" }, label: "gh", read: [{ key: "list", label: "list", asks: false, provenance: { kind: "proxy" as const } }], write: [] }];
+    expect(renderPermissions(conn, ui)).toMatch(/gh ⧉ +list +—\n⧉ reached through Metistry — its tools are called by Metistry with your credential$/);
+    expect(renderPermissions([{ resource: { kind: "inbox" as const }, label: "Inbox", read: [], write: [] }], ui)).not.toContain("reached through Metistry");
     const revoked = renderAgents([{ id: "gone", display_name: "Gone", ...base, revoked: true, permissions, asked: [] }], ui);
     expect(revoked).not.toContain("Knowledge");
   });

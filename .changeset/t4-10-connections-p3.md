@@ -1,0 +1,9 @@
+---
+"@foldedspacelabs/metistry-core": minor
+"@foldedspacelabs/metistry-connections": minor
+"@foldedspacelabs/metistry-cli": minor
+"@foldedspacelabs/metistry-mcp-brain": patch
+"@metistry-apps/console": minor
+---
+
+Connections P3 (T4-10). **OAuth as a public client**: `metistry connections authorize <name>` signs a connection in — a listener on 127.0.0.1 for exactly one callback, the browser at the provider, the `state` checked before any code is exchanged, the code exchanged with its PKCE verifier through the egress door, and the refresh token kept in this instance's Keychain; the process that dials mints the access token at the door and holds it in memory. The client id comes from the connection type's manifest or is the owner's own (a secret, `--client-id-secret`); a custom connection carries its own client model (C118, core's `customOAuthClientSchema`); the broker redirect is modelled and refused. **Every HTTP auth shortcut dials** — Basic and OAuth join bearer and the API-key header. **Generated tools** for API (`get`, `request`), feed (`list_items`, `get_item`, `search_items`) and files (`list_files`, `read_file`, `search_files`, `read_page`) connections, served lazily through the proxy's pair and added at Ask First. **The console builds the connections pool** (open since #374, ruled 2026-09-30), so `connections_list` / `connections_call` answer on a live console; `metistry secrets sync --to env` now delivers the secrets of every connection the console dials. **The permissions table** draws each connection an actor reaches as a row with the new `proxy` provenance, *reached through Metistry*. `connections add` writes a sync's first `connection:` into `scheduled.yaml`. And a call whose arguments carry a `{{ secret.… }}` reference is refused (`secret_reference`) before anything is dialled — the door would have filled it.

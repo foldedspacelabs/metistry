@@ -18,6 +18,7 @@ import {
   openSyncHttp,
   syncReaders,
   syncSecretNames,
+  consoleSecretNames,
   syncTarget,
   type OpenedSync,
   type SyncHttp,
@@ -127,9 +128,12 @@ describe("syncTarget — which connection a sync reads", () => {
     expect(rows[0]?.used_by).toEqual([{ kind: "sync", name: "linear" }]);
   });
 
-  it("the secrets a sync-read connection lists are the ones delivered to the console — an MCP connection's are not", () => {
+  it("a sync-read connection's secrets are the sync's; the console's are those and every connection its pool dials (T4-10)", () => {
     const mcp = { name: "gh", type: "mcp", provider: "custom", reach: { http: { url: "https://mcp.example.test/mcp", auth: { scheme: "bearer", secret: "github_read" } } }, secrets: ["github_read"] };
+    const feed = { name: "news", type: "feed", provider: "custom", reach: { http: { url: "https://example.test/feed.xml", headers: { "X-Key": "{{ secret.feed_key }}" } } }, secrets: ["feed_key"] };
+    const broken = { name: "bad", type: "mcp", provider: "custom", reach: { http: { url: "https://mcp.example.test/mcp", auth: { scheme: "bearer", secret: "unlisted" } } }, secrets: [] };
     expect(syncSecretNames(catalog([linearFile(), mcp]))).toEqual(["linear_api_key"]);
+    expect(consoleSecretNames(catalog([linearFile(), mcp, feed, broken]))).toEqual(["feed_key", "github_read", "linear_api_key"]);
   });
 });
 

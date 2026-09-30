@@ -1285,15 +1285,23 @@ Every row of `GET /api/agents` carries `permissions`: the actor's
 ```
 
 - Rows come Knowledge, Work, Artifacts, Inbox, Queries, Agents, then one per
-  connection (`resource.kind: "connection"`, `name`). A row with both cells
-  empty is left out; **`[]` holds nothing** — a revoked row, or a crew whose
-  manifest is gone. Anything not listed is not granted.
+  connection the actor reaches (`resource.kind: "connection"`, `name`) — the
+  assistant every one, a borrower only those the owner offered to agents AND
+  granted it (a crew also needs its `connections` group): the proxy's own
+  rule, asked through `may()` (T4-10). Its tools fill Read (Reads) and Write
+  (Changes things, Starts an agent) by the owner's mode — Never absent, Ask
+  First ⏱. A row with both cells empty is left out; **`[]` holds nothing** — a
+  revoked row, or a crew whose manifest is gone. Anything not listed is not
+  granted.
 - The table **renders `may()`**: a tool fills its cell only when the door
   would admit it, so a line here is a door that says yes.
 - `asks` is ⏱: the owner answers first. `provenance` is `base` (no marker),
-  `approved` (*approved in Needs You · #n*), `routine` (*during … only*) or
+  `approved` (*approved in Needs You · #n*), `routine` (*during … only*),
   `project` (*via project \<slug\>* — inherited from a project the actor is a
-  member of, T4-7; see *Projects*).
+  member of, T4-7; see *Projects*) or `proxy` (*reached through Metistry* —
+  every entry of a connection row, T4-10; said once, by the row's ⧉, never
+  after each tool). A client that does not know a kind prints no marker for
+  it.
 - A client prints `label` and never re-derives a cell. The CLI, the console's
   panel and MetistryKit print the same words — core's `permissionRowText`,
   an empty cell `—` — held together by a test on the recorded fixture.

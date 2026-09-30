@@ -449,3 +449,60 @@ describe("the imap reach class (T4-15)", () => {
     expect(fileErrors(mail({}, { provider: "custom" }))).toMatch(/a mail connection needs a connection type/);
   });
 });
+
+// C118 (T4-10): a custom connection signs in with OAuth by carrying the client
+// model no connection type's manifest supplies — and the client id is the
+// owner's own, a secret, because nothing ships one.
+describe("the OAuth client of a custom connection (C118)", () => {
+  const client = {
+    authorize_url: "https://auth.example.com/authorize",
+    token_url: "https://auth.example.com/token",
+    scopes: ["read"],
+    pkce: true,
+    redirect: "loopback",
+  };
+  const custom = (auth: Record<string, unknown>, secrets = ["ex_token", "ex_client_id"]) => ({
+    name: "example",
+    type: "mcp",
+    provider: "custom",
+    reach: { http: { url: "https://mcp.example.com/mcp", auth: { scheme: "oauth", ...auth } } },
+    secrets,
+  });
+  const refs = { token: "{{ secret.ex_token }}", client_id: "{{ secret.ex_client_id }}" };
+
+  it("accepts a client, a token and a bring-your-own client id, each a secret reference", () => {
+    const c = conn(custom({ client, ...refs }));
+    expect(c.reach.http?.auth).toMatchObject({ scheme: "oauth", client: { redirect: "loopback", pkce: true }, token: "{{ secret.ex_token }}" });
+    expect(connectionIssues(c, undefined)).toEqual([]);
+    expect(conn(custom({ client, ...refs, client_secret: "{{ secret.ex_secret }}" }, ["ex_token", "ex_client_id", "ex_secret"])).reach.http?.auth).toMatchObject({ client_secret: "{{ secret.ex_secret }}" });
+  });
+
+  it("refuses a custom OAuth connection with no client, no token or no client id — nothing supplies them", () => {
+    expect(fileErrors(custom({ ...refs }))).toMatch(/auth\.client: a custom OAuth connection names its client/);
+    expect(fileErrors(custom({ client, client_id: refs.client_id }))).toMatch(/auth\.token: a custom OAuth connection names the secret/);
+    expect(fileErrors(custom({ client, token: refs.token }))).toMatch(/auth\.client_id: a custom OAuth connection has no shipped client id/);
+    expect(fileErrors(custom({ client, ...refs, field: "account" }))).toMatch(/a custom connection has no fields/);
+  });
+
+  it("refuses a client id, a client secret or a token written as text — each is a secret", () => {
+    expect(fileErrors(custom({ client: { ...client, client_id: "abc.apps.example" }, ...refs }))).toMatch(/client id is the owner's own — store it as a secret/);
+    expect(fileErrors(custom({ client: { ...client, client_secret: "s3cret" }, ...refs }))).toMatch(/a client secret is a secret/);
+    expect(fileErrors(custom({ client, ...refs, token: "ya29.literal" }))).toMatch(/auth\.token: must be a \{\{ secret\.name \}\} reference/);
+    expect(fileErrors(custom({ client, ...refs, client_id: "{{ secret.not_listed }}" }))).toMatch(/secret "not_listed" is used but not listed/);
+  });
+
+  it("holds the client to the manifest's rules: https endpoints, scopes, PKCE on a loopback", () => {
+    expect(fileErrors(custom({ client: { ...client, token_url: "http://auth.example.com/token" }, ...refs }))).toMatch(/https only/);
+    expect(fileErrors(custom({ client: { ...client, scopes: [] }, ...refs }))).toMatch(/declare the scopes/);
+    expect(fileErrors(custom({ client: { ...client, pkce: false }, ...refs }))).toMatch(/pkce must be true/);
+    // the broker is modelled: the file may name it, and the flow refuses it (packages/connections)
+    expect(conn(custom({ client: { ...client, redirect: "broker", pkce: false }, ...refs })).reach.http?.auth).toMatchObject({ client: { redirect: "broker" } });
+  });
+
+  it("refuses the custom shape on a typed connection — its type supplies the client, its oauth field keeps the token", () => {
+    const c = conn({ ...workCalendar(), secrets: ["google_calendar_token", "ex_token"], reach: { http: { url: "https://www.googleapis.com/calendar/v3", auth: { scheme: "oauth", token: "{{ secret.ex_token }}" } } } });
+    expect(connectionIssues(c, asType(googleCalendar()))).toEqual([
+      "reach.http.auth: google-calendar supplies the OAuth client — token belongs to a custom connection; this one keeps its token and any client of your own in its oauth field (config.<field>)",
+    ]);
+  });
+});

@@ -519,8 +519,8 @@ describe("instance-scoped secrets", () => {
   });
 });
 
-describe("metistry secrets sync --to env — a sync-read connection's secret (T4-24)", () => {
-  it("delivers the Linear key as METISTRY_SECRET_LINEAR_API_KEY for the console's sync — and never an MCP connection's", async () => {
+describe("metistry secrets sync --to env — a connection's secret the console fills (T4-24, T4-10)", () => {
+  it("delivers the Linear key for the console's sync, and an MCP connection's for the pool the console holds — never one nothing fills", async () => {
     const dir = await mkdtemp(join(tmpdir(), "metistry-sync-linear-"));
     const files: Record<string, string> = {
       ".metistry/identity.yaml": `name: Aide\ninstance_id: "${INSTANCE_ID}"\n`,
@@ -528,6 +528,8 @@ describe("metistry secrets sync --to env — a sync-read connection's secret (T4
       ".metistry/connections/linear.yaml":
         "name: linear\ntype: tracker\nprovider: linear\nreach:\n  http:\n    url: https://api.linear.app/graphql\n    auth: { scheme: api_key, header: Authorization, secret: linear_api_key }\nsecrets: [linear_api_key]\n",
       ".metistry/connections/gh.yaml": "name: gh\ntype: mcp\nprovider: custom\nreach:\n  http:\n    url: https://mcp.example.test/mcp\n    auth: { scheme: bearer, secret: github_read }\nsecrets: [github_read]\n",
+      // a secret this instance holds that no connection lists stays in the Keychain
+      ".metistry/secrets.yaml": "secrets:\n  unused_key: { hosts: [x.example.test] }\n",
     };
     for (const [rel, text] of Object.entries(files)) {
       await mkdir(join(dir, rel, ".."), { recursive: true });
@@ -535,7 +537,8 @@ describe("metistry secrets sync --to env — a sync-read connection's secret (T4
     }
     const kc = fakeSecurity({
       [`${INSTANCE_ID}/metistry:secret:linear_api_key`]: "linear-value-for-the-sync",
-      [`${INSTANCE_ID}/metistry:secret:github_read`]: "mcp-value-stays-in-the-keychain",
+      [`${INSTANCE_ID}/metistry:secret:github_read`]: "mcp-value-for-the-pool",
+      [`${INSTANCE_ID}/metistry:secret:unused_key`]: "unused-value-stays-in-the-keychain",
     });
     const out: string[] = [];
     const code = await main(["secrets", "sync", "--to", "env", "--instance", dir, "--product-dir", fileURLToPath(new URL("../../..", import.meta.url))], {
@@ -551,8 +554,10 @@ describe("metistry secrets sync --to env — a sync-read connection's secret (T4
     expect(code, out.join("\n")).toBe(0);
     const env = readFileSync(join(dir, ".metistry/state/.env"), "utf8");
     expect(env).toContain("METISTRY_SECRET_LINEAR_API_KEY=linear-value-for-the-sync");
-    expect(env).not.toContain("mcp-value-stays-in-the-keychain"); // the pool fills an MCP connection's secret where it dials
-    expect(env).not.toContain("METISTRY_SECRET_GITHUB_READ");
+    // the console holds the pool the proxy dials through (T4-10): an MCP connection's secret is filled there, at the door
+    expect(env).toContain("METISTRY_SECRET_GITHUB_READ=mcp-value-for-the-pool");
+    expect(env).not.toContain("unused-value-stays-in-the-keychain");
+    expect(env).not.toContain("METISTRY_SECRET_UNUSED_KEY");
     for (const l of out) expect(l).not.toContain("linear-value-for-the-sync");
   });
 });

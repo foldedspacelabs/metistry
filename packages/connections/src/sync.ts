@@ -56,7 +56,7 @@ import {
 import { loadInstanceCatalog, type CatalogRoots, type ConnectionCatalog } from "./catalog.js";
 import { ConnectionRefused } from "./errors.js";
 import type { ConnectionEntry } from "./load.js";
-import { connectionGrantee } from "./pool.js";
+import { basicSource, connectionGrantee } from "./door.js";
 
 /**
  * A `SecretSource` over an environment: `{{ secret.x }}` is
@@ -74,26 +74,6 @@ export function envSecretSource(env: NodeJS.ProcessEnv): SecretSource {
       }
       const v = env[key];
       return v === undefined || v.trim() === "" ? undefined : v.trim();
-    },
-  };
-}
-
-/**
- * Basic sign-in (RFC 7617) at the door: the header the sync holds is
- * `Basic {{ secret.<name> }}`, and this source fills that reference with
- * `base64(<username>:<value>)` — so the encoding happens inside the door,
- * for a listed host or not at all, and the pair never exists outside it.
- * The redactor learns the value itself as well as the encoded pair, so a
- * server that echoes either shows the secret's name, never the value.
- * Every other name reads through unchanged.
- */
-function basicSource(source: SecretSource, basic: { secret: string; username: string }, redactor: SecretRedactor): SecretSource {
-  return {
-    async value(name) {
-      const v = await source.value(name);
-      if (name !== basic.secret || v === undefined) return v;
-      redactor.learn(name, v);
-      return Buffer.from(`${basic.username}:${v}`, "utf8").toString("base64");
     },
   };
 }
@@ -162,14 +142,32 @@ export function syncReaders(catalog: Pick<ConnectionCatalog, "entries" | "schedu
 
 /**
  * The secrets every sync-read connection lists — what `metistry secrets sync
- * --to env` delivers so the console's syncs can be filled at the door.
- * Only `ok` connections whose provider is product code a sync reads: an MCP
- * connection's secrets are filled by the pool in the process that dials it,
- * and never delivered to the console's environment.
+ * --to env` delivers so the console's syncs can be filled at the door. Only
+ * `ok` connections whose provider is product code a sync reads.
  */
 export function syncSecretNames(catalog: Pick<ConnectionCatalog, "entries">): string[] {
   const out = new Set<string>();
   for (const e of catalog.entries) if (e.status === "ok" && e.connection && declaredSync(e) !== undefined) for (const s of e.connection.secrets) out.add(s);
+  return [...out].sort();
+}
+
+/**
+ * Every secret the console fills (T4-10): a sync's (above) and, because the
+ * console holds the pool the proxy dials through, every `ok` MCP, API, feed
+ * or files connection's — its headers, a command's environment, an OAuth
+ * sign-in's refresh token and the owner's own client. What `metistry secrets
+ * sync --to env` delivers as `METISTRY_SECRET_<NAME>`. A calendar, mail or
+ * tracker connection nothing syncs, an agent connection and a bridge's are
+ * not the console's to fill, and are not delivered.
+ */
+export function consoleSecretNames(catalog: Pick<ConnectionCatalog, "entries">): string[] {
+  const out = new Set(syncSecretNames(catalog));
+  for (const e of catalog.entries) {
+    if (e.status !== "ok" || !e.connection) continue;
+    const impl = e.provider?.manifest.implementation.kind ?? "native";
+    const dialled = impl === "native" && (e.connection.type === "mcp" || e.connection.type === "api" || e.connection.type === "feed" || e.connection.type === "files");
+    if (dialled) for (const s of e.connection.secrets) out.add(s);
+  }
   return [...out].sort();
 }
 

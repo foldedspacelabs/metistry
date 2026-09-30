@@ -296,6 +296,23 @@ offer_to_agents: false
 - **`auth`** is a shortcut: `none` · `bearer` + `secret` · `basic` + `username`,
   `secret` · `api_key` + `header`, `secret` · `oauth` (+ `field` when the type
   has more than one oauth field). A bare string is shorthand: `auth: oauth`.
+  A **custom** connection signing in with OAuth (C118, T4-10) has no field to
+  take its client from, so the shortcut carries it: `client` (the model
+  above — `authorize_url`, `token_url`, `scopes`, `pkce`, `redirect` — with no
+  `client_id` or `client_secret` in it), `token`, `client_id` and an optional
+  `client_secret`, each a `{{ secret.name }}`; the client id is always the
+  owner's own. A typed connection is refused these keys:
+
+  ```yaml
+  reach:
+    http:
+      url: https://mcp.example.com/mcp
+      auth:
+        scheme: oauth
+        client: { authorize_url: "https://auth.example.com/authorize", token_url: "https://auth.example.com/token", scopes: [read], pkce: true, redirect: loopback }
+        token: "{{ secret.example_oauth_token }}"
+        client_id: "{{ secret.example_client_id }}"
+  ```
 - **Values take text, `{{ secret.name }}` and `{{ variable.name }}`** — nothing
   else in double braces. Every secret or variable a value uses must be listed in
   `secrets` / `variables`, because those lists are what the grant check and the

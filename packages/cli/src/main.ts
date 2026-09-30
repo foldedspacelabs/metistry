@@ -54,6 +54,7 @@ import {
   CONNECTION_VERBS,
   afterDoubleDash,
   connectionsAdd,
+  connectionsAuthorize,
   connectionsList,
   connectionsPolicy,
   connectionsRemove,
@@ -69,7 +70,7 @@ import {
   type ConnectionsOptions,
 } from "./connections.js";
 import { loadInstallEnv, productVersion, resolveProductDir, resolveSeedDir, type LoadedEnv } from "./env.js";
-import { loadInstanceCatalog, syncSecretNames } from "@foldedspacelabs/metistry-connections";
+import { consoleSecretNames, loadInstanceCatalog } from "@foldedspacelabs/metistry-connections";
 import { realExec, type Exec } from "./exec.js";
 import { AUTH_MODES, connectRepo, readStdin, type AuthMode } from "./connect-repo.js";
 import { connect, connectList, CONNECT_TOOLS, parseTool, renderConnect, renderConnectList } from "./connect.js";
@@ -147,7 +148,7 @@ export interface ParsedArgs {
  * `--version <x.y.z>` silently installed the latest release instead
  * (#198, "not fixed here" #2).
  */
-export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "dry-run", "allow-dirty", "no-launchd", "no-compose", "no-color", "skip-build", "skip-migrate", "rollback", "allow-legacy", "yes", "follow", "namespace", "rotate", "list", "complete", "skip-test", "remote", "json-lines", "stdio", "named", "clear", "no-discover", "plain", "include-config", "no-app", "relaunch", "no-reexec"]);
+export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "dry-run", "allow-dirty", "no-launchd", "no-compose", "no-color", "skip-build", "skip-migrate", "rollback", "allow-legacy", "yes", "follow", "namespace", "rotate", "list", "complete", "skip-test", "remote", "json-lines", "stdio", "named", "clear", "no-discover", "no-browser", "plain", "include-config", "no-app", "relaunch", "no-reexec"]);
 
 /** The §2.14 verbs over owner-named secrets (M7), and the shared scope's migration (T4-3). `list --named` joins them; `sync|mint|list|purge` are the install's own variables. */
 export const NAMED_SECRET_VERBS = new Set(["set", "replace", "remove", "hosts", "grant", "migrate-scope", "purge-shared"]);
@@ -533,14 +534,20 @@ const USAGE = `metistry — Metistry command line
 
   metistry connections list [--json] [--instance <dir>]
   metistry connections show <name> [--json]
-  metistry connections add <name> --type mcp (--url <url> [--auth bearer|api_key|basic
-                           --secret <name> [--auth-header <Header>] [--username <user>]] [--header K=V]…
-                         | --imap <host[:port]> --username <user> --secret <name> [--plain]
-                         | [--env K=V]… [--runs-on host|container] -- <command> [args…])
+  metistry connections add <name> --type mcp|api|feed|files|mail
+                           (--url <url> [--auth bearer|api_key|basic --secret <name> [--auth-header <Header>]
+                                          [--username <user>]] [--header K=V]…
+                           | --url <url> --auth oauth [--client-id-secret <name>] [--client-secret-secret <name>]
+                                          [--token-secret <name>] [--authorize-url <url> --token-url <url> --scope <s>…]
+                           | --imap <host[:port]> --username <user> --secret <name> [--plain]
+                           | --path <folder|file> [--include <glob>]… [--skip <glob>]…
+                           | [--env K=V]… [--runs-on host|container] -- <command> [args…])
                            [--provider <type>] [--description <text>] [--no-discover] [--dry-run]
   metistry connections set <name> [--url <url>] [--auth …] [--header K=V]… [--unset-header K]…
                            [--env K=V]… [--unset-env K]… [--runs-on …] [--description <text>]
+                           [--client-id-secret <name>] [--client-secret-secret <name>] [--token-secret <name>]
                            [-- <command> [args…]] [--dry-run]
+  metistry connections authorize <name> [--no-browser] [--timeout <seconds>]
   metistry connections policy <name> [<tool> allow|ask|never [--group reads|changes|starts_agent]]
                               [--offer on|off] [--dry-run]
   metistry connections remove <name> [--dry-run]
@@ -565,7 +572,21 @@ const USAGE = `metistry — Metistry command line
       written. --imap reaches a mailbox (--type mail --provider imap or
       gmail-mail) with --username and the app password --secret names, over
       TLS on 993 unless a port is given (--plain: a server on this Mac only);
-      nothing is dialled on add, "test" signs in, and nothing ever sends mail. A §4.7 protected path: every write goes through the reconciler as the
+      nothing is dialled on add, "test" signs in, and nothing ever sends mail.
+      An api, feed or files connection is written with the tools
+      Metistry generates for it (api: get, request; feed: list_items,
+      get_item, search_items; files: list_files, read_file, search_files, or
+      read_page for a URL), every one at Ask First. --auth oauth signs in with
+      the connection type's client, or your own (--client-id-secret, the NAME
+      of a secret); a custom connection names its client (--authorize-url,
+      --token-url, --scope) and always brings its own id. "authorize" signs
+      in: it listens on 127.0.0.1 for one callback, opens the browser at the
+      provider (--no-browser prints the address), checks the state, exchanges
+      the code with its PKCE verifier through the egress door, and keeps the
+      refresh token in this instance's Keychain — never printed. "add" also
+      points a sync at its first connection in scheduled.yaml when the
+      provider is read by one and nothing names a connection for it yet. A
+      §4.7 protected path: every write goes through the reconciler as the
       "user" principal. The console reads the same files at GET
       /api/connections and never writes them.
 
@@ -982,7 +1003,7 @@ export const HELP_GROUPS: Array<{ title: string; verbs: Array<[string, string]> 
       ["instances list|add|remove|refresh", "the peer registry: which other instances this one knows"],
       ["extensions list|add|remove", "your own units — templates, connection types, targets, overlays"],
       ["variables list|set|unset", "plain shared values agents read — never a secret, never a schedule"],
-      ["connections list|show|add|set|policy|remove|test", "servers Metistry reaches for you, and which of their tools may run"],
+      ["connections list|show|add|set|policy|remove|test|authorize", "what Metistry reaches for you, which of its tools may run, and signing in"],
     ],
   },
   {
@@ -1034,6 +1055,8 @@ export interface MainIo {
   home?: string;
   /** test seam: the console request of `console whoami|call|session`, `connect`, `agents` and `runs export` */
   fetchFn?: typeof fetch;
+  /** test seam: the base fetch a connection's dials and an OAuth sign-in go through, under the egress guard (a fixture server on loopback) */
+  dialFetch?: typeof fetch;
   /** test seam: `console call --body -` reads this instead of the real stdin */
   readStdin?: () => Promise<string>;
   /** test seam: `console session --stdio` reads its request lines from this instead of the real stdin */
@@ -1423,11 +1446,14 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
         } catch (e) {
           out(`compute.yaml does not validate, so no provider key is delivered this run (${e instanceof Error ? e.message : String(e)})`);
         }
-        // ...and every secret a sync-read connection lists (T4-24: the Linear
-        // key), so the console's sync can be filled at the egress door — for
-        // the secret's listed hosts only; the console never reads the Keychain
+        // ...and every secret a connection the console reaches lists: a sync's
+        // (T4-24: the Linear key) and, since the console holds the pool the
+        // proxy dials through (T4-10), an MCP, API, feed or files
+        // connection's — an OAuth sign-in's refresh token and the owner's own
+        // client included. Each is filled at the egress door, for the secret's
+        // listed hosts only; the console never reads the Keychain
         try {
-          const syncSecrets = syncSecretNames(await loadInstanceCatalog({ instanceDir: loaded.instanceDir, seedDir: resolveSeedDir(productDir) }));
+          const syncSecrets = consoleSecretNames(await loadInstanceCatalog({ instanceDir: loaded.instanceDir, seedDir: resolveSeedDir(productDir) }));
           deliver = [...new Set([...deliver, ...syncSecrets])];
         } catch (e) {
           out(`the connection types could not be read, so no sync's secret is delivered this run (${e instanceof Error ? e.message : String(e)})`);
@@ -1896,12 +1922,25 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
         platform: io.platform ?? process.platform,
         uid: io.uid ?? (typeof process.getuid === "function" ? process.getuid() : 0),
         fetchFn: io.fetchFn ?? fetch,
+        ...(io.dialFetch ? { dialFetch: io.dialFetch } : {}),
         ...(io.exec ? { exec: io.exec } : {}),
         dryRun: flags["dry-run"] === true,
         // --json is a wire contract (docs/ops/cli.md): progress to stderr
         out: json ? err : out,
       };
-      const auth = { auth: str(flags, "auth"), secret: str(flags, "secret"), authHeader: str(flags, "auth-header"), username: str(flags, "username") };
+      const scopes = repeatedFlag(argv, "scope");
+      const auth = {
+        auth: str(flags, "auth"),
+        secret: str(flags, "secret"),
+        authHeader: str(flags, "auth-header"),
+        username: str(flags, "username"),
+        authorizeUrl: str(flags, "authorize-url"),
+        tokenUrl: str(flags, "token-url"),
+        ...(scopes.length ? { scopes } : {}),
+        clientIdSecret: str(flags, "client-id-secret"),
+        clientSecretSecret: str(flags, "client-secret-secret"),
+        tokenSecret: str(flags, "token-secret"),
+      };
       try {
         if (verb === "list") {
           const rows = await connectionsList(connOpts);
@@ -1927,6 +1966,9 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
               url: str(flags, "url"),
               imap: str(flags, "imap"),
               plain: flags.plain === true,
+              path: str(flags, "path"),
+              include: repeatedFlag(argv, "include"),
+              skip: repeatedFlag(argv, "skip"),
               command,
               env: repeatedFlag(argv, "env"),
               headers: repeatedFlag(argv, "header"),
@@ -1937,7 +1979,15 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
             },
             connOpts,
           );
-          out(json ? JSON.stringify(r, null, 2) : (r.delivery?.detail ?? ""));
+          out(json ? JSON.stringify(r, null, 2) : [r.delivery?.detail ?? "", ...(r.sync ? [r.sync.delivery.detail] : [])].filter(Boolean).join("\n"));
+          return 0;
+        }
+        if (verb === "authorize") {
+          const t = str(flags, "timeout");
+          const timeoutS = t === undefined ? undefined : Number(t);
+          if (timeoutS !== undefined && (!Number.isFinite(timeoutS) || timeoutS <= 0 || timeoutS > 3600)) throw new StepFailed("--timeout is seconds, more than 0 and at most 3600");
+          const r = await connectionsAuthorize(args[1], { browser: flags["no-browser"] !== true, ...(timeoutS !== undefined ? { timeoutS } : {}) }, connOpts);
+          out(json ? JSON.stringify(r, null, 2) : (r.policy?.delivery.detail ?? ""));
           return 0;
         }
         if (verb === "set") {

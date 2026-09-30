@@ -37,6 +37,17 @@
 // sync's FIRST `connection:` into `scheduled.yaml` when the provider is read
 // by one and nothing names a connection for it yet (ruled 2026-09-27; the
 // Scheduled door keeps refusing to set it).
+//
+// **T6-13b.** `add` and `set` take a repeatable `--config KEY=VALUE` (T4-11's flag, one flag for both) for a
+// known service's config fields, judged against its connection type's
+// manifest BEFORE anything is written — an unknown key, a value of the wrong
+// kind, a required field left out are each a usage error (exit 2) with one
+// line naming the field. A `secret` field takes the NAME of a secret and
+// nothing else: a value on a command line is in every process's argv and
+// the shell's history, so it is refused pointing at `metistry secrets set`,
+// and never echoed. An `oauth` field is not typed at all — `--auth oauth`
+// writes it and `authorize` signs in. The Mac's editor builds exactly these
+// arguments (coordinator call 2026-09-30, closing the gap the ticket found).
 
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
@@ -48,11 +59,13 @@ import {
   SCHEDULED_FILENAME,
   SecretRedactor,
   TOOL_GROUPS,
+  looksLikeKey,
   parseScheduled,
   parseSecretsFile,
   secretRefsIn,
   variableRefsIn,
   type CheckResult,
+  type ConnectionField,
   type ConnectionType,
   type ToolGroup,
   type ToolMode,
@@ -63,6 +76,7 @@ import {
   checkConnection,
   connectionGrantee,
   describeConnectionDetail,
+  describeConnectionTypes,
   describeConnections,
   generatedToolsFor,
   isGeneratedType,
@@ -73,6 +87,7 @@ import {
   type ConnectionCatalog,
   type ConnectionDetail,
   type ConnectionRow,
+  type ConnectionTypeSummary,
   type InstanceCatalog,
   type UpstreamTool,
 } from "@foldedspacelabs/metistry-connections";
@@ -140,8 +155,13 @@ export function connectionRel(instanceDir: string, name: string): string {
 
 /** `connections list`: the rows `GET /api/connections` serves. */
 export async function connectionsList(opts: ConnectionsOptions): Promise<ConnectionRow[]> {
+  return (await connectionsListing(opts)).connections;
+}
+
+/** `connections list --json`: the body `GET /api/connections` serves — the rows, and the connection types this instance has installed (T6-13b). */
+export async function connectionsListing(opts: ConnectionsOptions): Promise<{ connections: ConnectionRow[]; types: ConnectionTypeSummary[] }> {
   const catalog = await catalogFor(opts);
-  return describeConnections(catalog, { presence: presenceOf(opts) });
+  return { connections: await describeConnections(catalog, { presence: presenceOf(opts) }), types: describeConnectionTypes(catalog.types) };
 }
 
 /** `connections show <name>`: the body `GET /api/connections/:name` serves. */
@@ -386,6 +406,116 @@ function basicAllowed(auth: { scheme: string } | undefined, provider: string, ca
   }
 }
 
+/** A usage error: the command line is wrong, so nothing was judged or written — exit 2 (a StepFailed that names the flag). */
+function usage(message: string): StepFailed {
+  return new StepFailed(message, 2);
+}
+
+const REF_RE = /^\{\{\s*(secret|variable)\.([a-z][a-z0-9_]*)\s*\}\}$/;
+
+/**
+ * `--config KEY=VALUE`, judged against the provider's connection type (T6-13b).
+ * Returns the `config` values to write — every value a string, a secret or a
+ * variable field written as its reference. Refuses, as a usage error and
+ * naming the field but never the value:
+ *
+ *   - a field on a custom connection (it has none — its settings are its reach);
+ *   - a key the type does not declare, or one given twice;
+ *   - a `secret` field given anything but the NAME of a secret (bare, or as
+ *     `{{ secret.name }}`) — a value on a command line lands in argv and the
+ *     shell's history, so it points at `metistry secrets set`;
+ *   - an `oauth` field — signed in, never typed;
+ *   - a `variable` field given anything but a variable's name;
+ *   - a `url` field that is not an http(s) URL (or a variable holding one), or carries a secret;
+ *   - a `choice` outside its options; a `text` that looks like a key;
+ *   - and, once merged with what the file holds, a required field with no
+ *     default still missing.
+ */
+export function configFieldsOf(
+  pairs: readonly string[] | undefined,
+  provider: string,
+  catalog: { types: InstanceCatalog["types"] },
+  existing: Readonly<Record<string, unknown>> = {},
+): Record<string, string> {
+  const given = pairs ?? [];
+  if (provider === CUSTOM_PROVIDER) {
+    if (given.length > 0) throw usage("--config sets a connection type's fields — a custom connection has none (its settings are its reach); pass --provider <type>");
+    return {};
+  }
+  const unit = catalog.types.get(provider);
+  if (!unit) {
+    if (given.length > 0) throw usage(`--config: no connection type named ${provider} is installed, so its fields are not known (\`metistry extensions list\`)`);
+    return {};
+  }
+  const fields = new Map<string, ConnectionField>(unit.manifest.fields.map((f) => [f.key, f]));
+  const keys = [...fields.keys()];
+  const out: Record<string, string> = {};
+  for (const raw of given) {
+    const eq = raw.indexOf("=");
+    if (eq <= 0) throw usage("--config takes KEY=VALUE"); // never echoing what was given: it may be a value
+    const key = raw.slice(0, eq);
+    const value = raw.slice(eq + 1);
+    const field = fields.get(key);
+    if (!field) throw usage(keys.length ? `config.${key}: ${provider} has no field "${key}" — its fields: ${keys.join(", ")}` : `config.${key}: ${provider} has no fields`);
+    if (Object.hasOwn(out, key)) throw usage(`--config ${key} is given twice`);
+    out[key] = fieldValue(field, value, provider);
+  }
+  const merged = { ...existing, ...out };
+  for (const f of unit.manifest.fields) {
+    if (f.kind === "oauth" || !f.required || ("default" in f && f.default !== undefined) || merged[f.key] !== undefined) continue;
+    throw usage(`config.${f.key}: required by ${provider} — --config ${f.key}=… (${f.label}${f.help ? ` — ${f.help}` : ""})`);
+  }
+  return out;
+}
+
+/** One field's value, judged by its kind — the reference written for a secret or a variable. The value is never in the message. */
+function fieldValue(field: ConnectionField, value: string, provider: string): string {
+  const key = field.key;
+  const ref = REF_RE.exec(value.trim());
+  switch (field.kind) {
+    case "secret": {
+      const name = ref?.[1] === "secret" ? ref[2]! : SECRET_NAME_RE.test(value.trim()) && !looksLikeKey(value) ? value.trim() : undefined;
+      if (!name) {
+        throw usage(
+          `--config ${key}: a secret never goes on a command line (every process can read argv, and the shell keeps it) — store it with \`metistry secrets set <name>\` (the value on stdin), then name it: --config ${key}=<name>`,
+        );
+      }
+      return `{{ secret.${name} }}`;
+    }
+    case "oauth":
+      throw usage(`--config ${key}: an oauth field is signed in, not typed — \`--auth oauth\` writes it and \`metistry connections authorize <name>\` signs in`);
+    case "variable": {
+      const name = ref?.[1] === "variable" ? ref[2]! : SECRET_NAME_RE.test(value.trim()) ? value.trim() : undefined;
+      if (!name) throw usage(`--config ${key}: a variable field names a variable — --config ${key}=<name> or {{ variable.<name> }} (\`metistry variables set <name> <value>\` sets one)`);
+      return `{{ variable.${name} }}`;
+    }
+    case "url": {
+      const v = value.trim();
+      if (secretRefsIn(v).names.length > 0) throw usage(`--config ${key}: a URL never carries a secret — a URL lands in logs and histories`);
+      if (ref?.[1] === "variable") return v;
+      let u: URL | undefined;
+      try {
+        u = new URL(v);
+      } catch {
+        u = undefined;
+      }
+      if (!u || (u.protocol !== "https:" && u.protocol !== "http:")) throw usage(`--config ${key}: ${field.label} is an http(s) URL, or a {{ variable.<name> }} that holds one`);
+      if (u.username || u.password) throw usage(`--config ${key}: a URL never carries credentials`);
+      return v;
+    }
+    case "choice": {
+      const values = field.options.map((o) => o.value);
+      if (!values.includes(value)) throw usage(`--config ${key}: ${field.label} is one of ${values.join(", ")}`);
+      return value;
+    }
+    case "text":
+      if (looksLikeKey(value.replace(/\{\{[^{}]*\}\}/g, " "))) {
+        throw usage(`--config ${key}: this looks like a key — a connection file holds names, never values; store it as a secret (\`metistry secrets set <name>\`) and reference it (${provider} declares ${key} as text)`);
+      }
+      return value;
+  }
+}
+
 export interface AddSpec extends AuthFlags {
   name: string | undefined;
   type: string | undefined;
@@ -405,21 +535,10 @@ export interface AddSpec extends AuthFlags {
   headers?: string[] | undefined;
   runsOn?: string | undefined;
   description?: string | undefined;
-  /** `KEY=VALUE` for the provider's config fields (`--config org=org-abc`, T4-11) — text the file keeps; a secret field takes `{{ secret.<name> }}` */
+  /** `--config KEY=VALUE`, repeatable: a known service's config fields, judged against its connection type (T6-13b; T4-11's flag) */
   config?: string[] | undefined;
   /** dial it and list what it offers (default); false writes it with no tools, or the provider's declared ones */
   discover?: boolean | undefined;
-}
-
-/** `--config KEY=VALUE`… → the file's `config:`. The provider's fields judge the keys and values when the file is judged. */
-function configOf(pairs: readonly string[] | undefined): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const raw of pairs ?? []) {
-    const [k, v] = parsePair(raw, "--config");
-    if (Object.hasOwn(out, k)) throw new StepFailed(`--config ${k} is given twice`);
-    out[k] = v;
-  }
-  return out;
 }
 
 export interface AddResult {
@@ -471,12 +590,12 @@ export async function connectionsAdd(spec: AddSpec, opts: ConnectionsOptions): P
   if (spec.url === undefined && (auth || Object.keys(headers).length)) throw new StepFailed("--auth and --header are for a connection reached by --url");
   if ((spec.command === undefined || spec.command.length === 0) && Object.keys(env).length) throw new StepFailed("--env is for a connection reached by a command");
   if (spec.path === undefined && (spec.include?.length || spec.skip?.length)) throw new StepFailed("--include and --skip are for a files connection reached by --path");
-  const config = configOf(spec.config);
-  if (Object.keys(config).length > 0 && provider === CUSTOM_PROVIDER) throw new StepFailed("--config sets a connection type's fields — a custom connection has none (its settings are its reach); pass --provider <type>");
   const oauth = auth?.scheme === "oauth" ? oauthAuth(name, provider, spec, catalog) : undefined;
   if (!oauth && (spec.authorizeUrl || spec.tokenUrl || spec.scopes?.length || spec.clientIdSecret || spec.clientSecretSecret || spec.tokenSecret)) {
     throw new StepFailed("--authorize-url, --token-url, --scope, --client-id-secret, --client-secret-secret and --token-secret are for --auth oauth");
   }
+  // the known service's fields (T6-13b): judged against its manifest before anything else is
+  const config: Record<string, unknown> = { ...configFieldsOf(spec.config, provider, catalog, oauth?.config ?? {}), ...(oauth?.config ?? {}) };
   const reach = imap
     ? { imap }
     : spec.url !== undefined
@@ -503,7 +622,7 @@ export async function connectionsAdd(spec: AddSpec, opts: ConnectionsOptions): P
     reach,
     secrets: [],
     variables: [],
-    ...(Object.keys(config).length || (oauth && Object.keys(oauth.config).length) ? { config: { ...config, ...(oauth?.config ?? {}) } } : {}),
+    ...(Object.keys(config).length ? { config } : {}),
     tools: {},
     offer_to_agents: false,
   };
@@ -641,10 +760,11 @@ async function write(e: Editable & { name: string }, opts: ConnectionsOptions, m
 }
 
 export interface SetSpec extends AuthFlags {
-  url?: string | undefined;
-  /** `KEY=VALUE` for the provider's config fields (T4-11) */
+  /** `--config KEY=VALUE`, repeatable (T6-13b; T4-11's flag) */
   config?: string[] | undefined;
+  /** `--unset-config KEY`: remove a field's value — the file is then judged, so a required one is refused (T4-11) */
   unsetConfig?: string[] | undefined;
+  url?: string | undefined;
   command?: string[] | undefined;
   env?: string[] | undefined;
   unsetEnv?: string[] | undefined;
@@ -685,19 +805,6 @@ export async function connectionsSet(name: string | undefined, spec: SetSpec, op
     doc.setIn(["reach", "command", "runs_on"], spec.runsOn);
     changed.push("runs_on");
   }
-  const config = configOf(spec.config);
-  if ((Object.keys(config).length > 0 || (spec.unsetConfig ?? []).length > 0) && String(doc.getIn(["provider"]) ?? CUSTOM_PROVIDER) === CUSTOM_PROVIDER) {
-    throw new StepFailed("--config sets a connection type's fields — a custom connection has none (its settings are its reach)");
-  }
-  for (const [k, v] of Object.entries(config)) {
-    doc.setIn(["config", k], v);
-    changed.push(`config ${k}`);
-  }
-  for (const k of spec.unsetConfig ?? []) {
-    if (!doc.hasIn(["config", k])) throw new StepFailed(`${e.name} has no config ${k}`);
-    doc.deleteIn(["config", k]);
-    changed.push(`config ${k} removed`);
-  }
   for (const pair of spec.env ?? []) {
     if (!isCommand) throw new StepFailed("--env is for a connection reached by a command");
     const [k, v] = parsePair(pair, "--env");
@@ -722,6 +829,20 @@ export async function connectionsSet(name: string | undefined, spec: SetSpec, op
   }
   const auth = authOf(spec);
   const provider = String(doc.getIn(["provider"]) ?? CUSTOM_PROVIDER);
+  if (spec.config?.length) {
+    const held = doc.getIn(["config"]) as { toJSON?: () => unknown } | undefined;
+    const existing = (held && typeof held === "object" && typeof held.toJSON === "function" ? held.toJSON() : {}) as Record<string, unknown>;
+    for (const [k, v] of Object.entries(configFieldsOf(spec.config, provider, e.catalog, existing ?? {}))) {
+      doc.setIn(["config", k], v);
+      changed.push(`config ${k}`);
+    }
+  }
+  for (const k of spec.unsetConfig ?? []) {
+    if (provider === CUSTOM_PROVIDER) throw usage("--unset-config is for a known service's fields — a custom connection has none");
+    if (!doc.hasIn(["config", k])) throw usage(`${e.name} has no config ${k}`);
+    doc.deleteIn(["config", k]); // a required field is then refused by the file's judge (`config.<key>: required by <type>`)
+    changed.push(`config ${k} removed`);
+  }
   if (auth) {
     if (!isHttp) throw new StepFailed("--auth is for a connection reached by --url");
     basicAllowed(auth, provider, e.catalog);

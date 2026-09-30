@@ -55,7 +55,7 @@ import {
   afterDoubleDash,
   connectionsAdd,
   connectionsAuthorize,
-  connectionsList,
+  connectionsListing,
   connectionsPolicy,
   connectionsRemove,
   connectionsSet,
@@ -546,7 +546,7 @@ const USAGE = `metistry — Metistry command line
   metistry connections set <name> [--url <url>] [--auth …] [--header K=V]… [--unset-header K]…
                            [--config KEY=VALUE]… [--unset-config KEY]…
                            [--env K=V]… [--unset-env K]… [--runs-on …] [--description <text>]
-                           [--client-id-secret <name>] [--client-secret-secret <name>] [--token-secret <name>]
+                           [--config KEY=VALUE]… [--unset-config KEY]… [--client-id-secret <name>] [--client-secret-secret <name>] [--token-secret <name>]
                            [-- <command> [args…]] [--dry-run]
   metistry connections authorize <name> [--no-browser] [--timeout <seconds>]
   metistry connections policy <name> [<tool> allow|ask|never [--group reads|changes|starts_agent]]
@@ -587,15 +587,18 @@ const USAGE = `metistry — Metistry command line
       refresh token in this instance's Keychain — never printed. "add" also
       points a sync at its first connection in scheduled.yaml when the
       provider is read by one and nothing names a connection for it yet.
-      --config KEY=VALUE sets one of the connection type's fields (an agent
-      connection's --config org=… or repo=owner/repo, a GitHub tracker's
-      repos=owner/a,owner/b); set --unset-config KEY removes one. An agent
+      --config KEY=VALUE fills a known service's config fields (--provider),
+      each judged against its connection type before anything is written: an
+      unknown key, a value of the wrong kind or a required field left out is
+      a usage error (exit 2); a secret field takes the NAME of a secret
+      (metistry secrets set), never a value — a value on a command line is
+      refused and not echoed; set --unset-config KEY removes one. An agent
       connection (--type agent --provider devin|github-issues) is a target a
       task is dispatched to (POST /api/tasks/:id/dispatch), never dialled —
-      pass --no-discover. A
-      §4.7 protected path: every write goes through the reconciler as the
-      "user" principal. The console reads the same files at GET
-      /api/connections and never writes them.
+      pass --no-discover. A §4.7 protected path: every write goes
+      through the reconciler as the "user" principal. The console reads the
+      same files at GET /api/connections (with the installed connection
+      types under "types") and never writes them.
 
   metistry runs export [--since <cursor|timestamp>] [--until <timestamp>]
                        [--component <name>] [--limit N] [--json-lines]
@@ -1950,8 +1953,8 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
       };
       try {
         if (verb === "list") {
-          const rows = await connectionsList(connOpts);
-          out(json ? JSON.stringify({ connections: rows }, null, 2) : renderConnections(rows));
+          const listing = await connectionsListing(connOpts);
+          out(json ? JSON.stringify(listing, null, 2) : renderConnections(listing.connections));
           return 0;
         }
         if (verb === "show") {
@@ -2029,7 +2032,7 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
         return 0;
       } catch (e) {
         err(`metistry connections ${verb}: ${e instanceof Error ? e.message : String(e)}`);
-        return 1;
+        return e instanceof StepFailed ? e.code : 1; // 2: a usage error (a --config the type refuses), nothing judged or written
       }
     }
     case "runs": {

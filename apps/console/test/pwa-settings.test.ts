@@ -86,7 +86,8 @@ describe("§2.3's table as a grouped list", () => {
     expect(page).not.toContain("Reading ");
     expect(page).toContain("Aide's Model");
     expect(page).toContain("gemma");
-    expect(page).toContain("Metistry 0.11.0");
+    // the recorded version, read from the recording — a re-record moves the value, never the shape (X-29)
+    expect(page).toContain(`Metistry ${String(fixture("get-api-identity").version)}`);
     expect(page).toContain("all 2 healthy");
     expect(page).toContain("github_write");
     expect(page).toContain("sent only to api.github.com");

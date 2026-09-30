@@ -41,8 +41,10 @@ import {
 import type { ConnectionCatalog } from "./catalog.js";
 import { ConnectionRefused } from "./errors.js";
 import { typedValues, type ConnectionEntry, type ConnectionStatus } from "./load.js";
-import { planDial } from "./plan.js";
-import { connectionGrantee } from "./pool.js";
+import { connectionGrantee } from "./door.js";
+import { isGeneratedType } from "./generated.js";
+import { oauthClientOf, oauthSecretNames } from "./oauth.js";
+import { planHttp } from "./plan.js";
 import { syncReaders } from "./sync.js";
 
 /** Who reads a connection. Syncs today; agents and the assistant once the lazy pair lands (T4-8b). */
@@ -145,25 +147,43 @@ async function runtimeIssues(entry: ConnectionEntry, catalog: ConnectionCatalog,
   const grantee = connectionGrantee(c.name);
   const envSecrets = new Set<string>();
   for (const v of Object.values(c.reach.command?.env ?? {})) for (const n of secretRefsIn(v).names) envSecrets.add(n);
+  // an OAuth connection's token secret is filled by signing in, not by hand
+  let signIn: string | undefined;
+  try {
+    signIn = c.reach.http?.auth.scheme === "oauth" ? oauthClientOf(entry).tokenSecret : undefined;
+  } catch {
+    signIn = undefined; // why it cannot sign in is the dial's to say
+  }
   for (const n of c.secrets) {
-    if (opts.presence && !(await opts.presence.has(n))) absent.push(`secret ${n} has no item in this instance's Keychain — \`metistry secrets set ${n}\``);
+    if (opts.presence && !(await opts.presence.has(n))) {
+      absent.push(n === signIn ? `${c.name} is not signed in yet — \`metistry connections authorize ${c.name}\`` : `secret ${n} has no item in this instance's Keychain — \`metistry secrets set ${n}\``);
+    }
     const mode = secretGrant(file, n, grantee);
     if (mode === "off") failed.push(`secrets.yaml does not grant ${n} to ${grantee} — \`metistry secrets grant ${n} ${grantee} on\``);
     else if (mode === "ask" && envSecrets.has(n)) failed.push(`${n} is Ask First for ${grantee}, but a command's environment is filled once, when it starts — grant it on`);
   }
 
-  // an HTTP MCP connection: every secret its requests carry must be allowed to go where it dials
-  if (c.type === "mcp" && c.reach.http && absent.length === 0) {
+  // an HTTP MCP connection, or one reached through generated tools: every secret its
+  // requests carry must be allowed to go where it dials — and an OAuth sign-in's to
+  // the token endpoint too (and a client id of your own to the authorize page)
+  if ((c.type === "mcp" || isGeneratedType(c.type)) && c.reach.http && entry.provider?.manifest.implementation.kind !== "builtin" && absent.length === 0) {
     try {
-      const plan = planDial(entry, catalog.variables, catalog.baseDir);
-      if (plan.kind === "http") {
-        const dest = egressDestination(plan.url)?.entry;
-        const carried = new Set<string>();
-        for (const v of Object.values(plan.headers)) for (const n of secretRefsIn(v).names) carried.add(n);
-        for (const n of [...carried].sort()) {
-          const hosts = Object.hasOwn(file.secrets, n) ? file.secrets[n]!.hosts : [];
-          if (dest && !hosts.includes(dest)) failed.push(`${n} may not be sent to ${dest} — it is not on the secret's *Sent only to* list (\`metistry secrets hosts ${n} ${[...hosts, dest].join(" ")}\`)`);
-        }
+      const plan = planHttp(entry, catalog.variables);
+      const dest = egressDestination(plan.url)?.entry;
+      const needs = new Map<string, Set<string>>();
+      const need = (n: string, host: string | undefined) => {
+        if (host) needs.set(n, new Set([...(needs.get(n) ?? []), host]));
+      };
+      for (const v of Object.values(plan.headers)) for (const n of secretRefsIn(v).names) need(n, dest);
+      if (plan.oauth) {
+        const tokenHost = egressDestination(plan.oauth.tokenUrl)?.entry;
+        for (const n of oauthSecretNames(plan.oauth)) need(n, tokenHost);
+        if (plan.oauth.clientId.kind === "secret") need(plan.oauth.clientId.name, egressDestination(plan.oauth.authorizeUrl)?.entry);
+      }
+      for (const [n, want] of [...needs].sort(([a], [b]) => a.localeCompare(b))) {
+        const hosts = Object.hasOwn(file.secrets, n) ? file.secrets[n]!.hosts : [];
+        const missing = [...want].filter((h) => !hosts.includes(h)).sort();
+        if (missing.length) failed.push(`${n} may not be sent to ${missing.join(", ")} — it is not on the secret's *Sent only to* list (\`metistry secrets hosts ${n} ${[...hosts, ...missing].join(" ")}\`)`);
       }
     } catch (err) {
       if (err instanceof ConnectionRefused && err.code !== "not_built") failed.push(err.message);

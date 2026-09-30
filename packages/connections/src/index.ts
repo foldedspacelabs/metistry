@@ -33,7 +33,59 @@ export {
   type InstanceCatalog,
   type Parsed,
 } from "./catalog.js";
-export { planDial, planFingerprint, type CommandDial, type DialPlan, type HttpDial } from "./plan.js";
+export { planDial, planFingerprint, planHttp, variableFiller, type CommandDial, type DialPlan, type HttpDial } from "./plan.js";
+export { basicSource, pinnedDoor, type PinnedDoorOptions } from "./door.js";
+export {
+  DEFAULT_OAUTH_FLOW_TIMEOUT_MS,
+  OAUTH_CALLBACK_PATH,
+  OAUTH_ERROR_CODES,
+  OAUTH_LOOPBACK_HOST,
+  OAuthError,
+  OAuthTokens,
+  authorizationUrl,
+  authorizeConnection,
+  exchangeCode,
+  newState,
+  oauthClientOf,
+  oauthSecretNames,
+  oauthSource,
+  openLoopback,
+  pkceChallenge,
+  pkcePair,
+  refreshAccess,
+  sameState,
+  type AuthorizeOptions,
+  type AuthorizeResult,
+  type Loopback,
+  type OAuthClientId,
+  type OAuthClientPlan,
+  type OAuthErrorCode,
+  type TokenDoor,
+  type TokenGrant,
+  type TokenStore,
+} from "./oauth.js";
+export {
+  GENERATED_BODY_MAX_BYTES,
+  GENERATED_FEED_MAX_BYTES,
+  GENERATED_FILE_MAX_BYTES,
+  GENERATED_TYPES,
+  GENERATED_WALK_MAX_FILES,
+  apiUrl,
+  callGenerated,
+  generatedToolsFor,
+  globMatcher,
+  htmlText,
+  isGeneratedType,
+  parseFeed,
+  planGenerated,
+  probeGenerated,
+  type FeedItem,
+  type GeneratedContext,
+  type GeneratedPlan,
+  type GeneratedResult,
+  type GeneratedToolDef,
+  type GeneratedType,
+} from "./generated.js";
 export {
   ConnectionPool,
   DEFAULT_CONNECTION_CALL_TIMEOUT_MS,
@@ -48,6 +100,7 @@ export {
   type UpstreamTool,
 } from "./pool.js";
 export { checkConnection, type ConnectionCheckMeta, type ImapCheckMeta } from "./check.js";
+export { poolProxy, type PoolProxy } from "./proxy.js";
 export {
   describeConnection,
   describeConnectionDetail,

@@ -50,6 +50,7 @@ function refusalVerdict(err: ConnectionRefused | EgressRefused): Verdict {
   }
   const absent =
     err.code === "not_built" ||
+    (err.code === "sign_in" && /not signed in|no item/.test(err.message)) ||
     err.code === "runs_elsewhere" ||
     err.code === "variable" ||
     (err.code === "secret" && /no item in this instance/.test(err.message));
@@ -59,6 +60,10 @@ function refusalVerdict(err: ConnectionRefused | EgressRefused): Verdict {
 function describeReach(catalog: ConnectionCatalog, name: string): string {
   const c = catalog.entries.find((e) => e.name === name)?.connection;
   if (!c) return "read the connection file";
+  if (c.type === "api" || c.type === "feed" || c.type === "files") {
+    // no server to list tools: reach the service once, and list the tools Metistry generates for it
+    return c.reach.http ? `GET ${c.reach.http.url}, and the tools Metistry generates for a ${c.type} connection` : `read ${c.reach.path?.path ?? "the folder"}, and the tools Metistry generates for a files connection`;
+  }
   if (c.reach.http) return `initialize + tools/list over HTTP (${c.reach.http.url})`;
   if (c.reach.command) return `initialize + tools/list over stdio (${c.reach.command.command})`;
   if (c.reach.imap) return `LOGIN + LIST over IMAP${c.reach.imap.security === "tls" ? "S" : ""} (${c.reach.imap.host}:${c.reach.imap.port})`;
@@ -133,7 +138,9 @@ export async function checkConnection(pool: ConnectionPool, catalog: ConnectionC
     } catch (err) {
       if (err instanceof ConnectionRefused || err instanceof EgressRefused) return refusalVerdict(err);
       if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
-        return { status: "absent", remediation: `the command is not on this Mac (${entry.connection.reach.command?.command ?? "?"}) — install it, or give its full path in the connection` };
+        return entry.connection.reach.path
+          ? { status: "absent", remediation: `the folder or file is not on this Mac (${entry.connection.reach.path.path})` }
+          : { status: "absent", remediation: `the command is not on this Mac (${entry.connection.reach.command?.command ?? "?"}) — install it, or give its full path in the connection` };
       }
       return { status: "failed", remediation: err instanceof Error ? err.message : String(err) };
     }

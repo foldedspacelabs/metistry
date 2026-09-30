@@ -64,6 +64,272 @@
         ]
       }
     ],
-    "as_of": "2026-09-30T05:36:18.505Z"
+    "types": [
+      {
+        "name": "caldav",
+        "title": "A CalDAV calendar (RFC 6638) with an app password",
+        "description": "A CalDAV calendar (RFC 6638) with an app password — your events on Today, and replies to invitations from Metistry. For iCloud or Fastmail, use their own entries.",
+        "origin": "product",
+        "provides": "calendar",
+        "transports": [
+          "http"
+        ],
+        "auth": [
+          "basic"
+        ],
+        "capabilities": [
+          "read",
+          "write_own",
+          "rsvp"
+        ],
+        "fields": [],
+        "tools": []
+      },
+      {
+        "name": "devin",
+        "title": "Devin (Cognition)",
+        "description": "Devin (Cognition) — send a task to a Devin session; its structured answer comes back as a report. Its knowledge notes and repo wikis come into the inbox. A cog_ key, sent to api.devin.ai and mcp.devin.ai only.",
+        "origin": "product",
+        "provides": "agent",
+        "transports": [
+          "http"
+        ],
+        "auth": [
+          "bearer"
+        ],
+        "capabilities": [],
+        "fields": [
+          {
+            "key": "org",
+            "kind": "text",
+            "label": "Organization",
+            "help": "The org-… id a session is charged to. Required: a session is a spend, and which organization pays is not inferred.",
+            "required": true
+          },
+          {
+            "key": "repos",
+            "kind": "text",
+            "label": "Repository wikis",
+            "help": "owner/repo, comma-separated — the repos whose Devin wikis devin-knowledge reads. Empty: knowledge notes only.",
+            "required": false
+          }
+        ],
+        "tools": []
+      },
+      {
+        "name": "fastmail-calendar",
+        "title": "Fastmail Calendar over CalDAV with an app password",
+        "description": "Fastmail Calendar over CalDAV with an app password — your events on Today, and replies to invitations from Metistry.",
+        "origin": "product",
+        "provides": "calendar",
+        "transports": [
+          "http"
+        ],
+        "auth": [
+          "basic"
+        ],
+        "capabilities": [
+          "read",
+          "write_own",
+          "rsvp"
+        ],
+        "fields": [
+          {
+            "key": "server",
+            "kind": "url",
+            "label": "Server",
+            "help": null,
+            "required": false,
+            "default": "https://caldav.fastmail.com/dav/"
+          }
+        ],
+        "tools": []
+      },
+      {
+        "name": "github",
+        "title": "GitHub",
+        "description": "GitHub — the issues and pull requests of the repositories you name, on the Board as work, with a request for each review asked of you and each issue assigned to you. A read-only token, sent to api.github.com only.",
+        "origin": "product",
+        "provides": "tracker",
+        "transports": [
+          "http"
+        ],
+        "auth": [
+          "bearer"
+        ],
+        "capabilities": [
+          "read"
+        ],
+        "fields": [
+          {
+            "key": "repos",
+            "kind": "text",
+            "label": "Repositories",
+            "help": "owner/repo, comma-separated — the repositories reconciled into work.",
+            "required": true
+          }
+        ],
+        "tools": []
+      },
+      {
+        "name": "github-issues",
+        "title": "GitHub Issues",
+        "description": "GitHub Issues — a task sent here opens an issue in one repository; closing the issue closes the task. A fine-grained write token for that repository, sent to api.github.com only.",
+        "origin": "product",
+        "provides": "agent",
+        "transports": [
+          "http"
+        ],
+        "auth": [
+          "bearer"
+        ],
+        "capabilities": [],
+        "fields": [
+          {
+            "key": "repo",
+            "kind": "text",
+            "label": "Repository",
+            "help": "owner/repo — the one repository issues are opened in. The github sync must read it too, so the issue's status comes home.",
+            "required": true
+          }
+        ],
+        "tools": []
+      },
+      {
+        "name": "gmail-mail",
+        "title": "Gmail over IMAP with an app password (2-Step Verification on)",
+        "description": "Gmail over IMAP with an app password (2-Step Verification on) — who wrote and about what (headers, never bodies), and drafts you send yourself. Nothing sends mail.",
+        "origin": "product",
+        "provides": "mail",
+        "transports": [
+          "imap"
+        ],
+        "auth": [
+          "basic"
+        ],
+        "capabilities": [
+          "read",
+          "draft"
+        ],
+        "fields": [],
+        "tools": []
+      },
+      {
+        "name": "google-calendar",
+        "title": "Google Calendar, signed in with Google",
+        "description": "Google Calendar, signed in with Google — your events on Today, replies to invitations and changes to your own events from Metistry. Metistry's sign-in client, or your own.",
+        "origin": "product",
+        "provides": "calendar",
+        "transports": [
+          "http"
+        ],
+        "auth": [
+          "oauth"
+        ],
+        "capabilities": [
+          "read",
+          "write_own",
+          "rsvp"
+        ],
+        "fields": [
+          {
+            "key": "google",
+            "kind": "oauth",
+            "label": "Sign in with Google",
+            "help": "Google hasn't verified this app yet. Google will say \"Google hasn't verified this app\" — choose Advanced, then Go to Metistry, to continue. Metistry asks only to see and change your calendar events, and your sign-in goes straight from Google to this Mac.",
+            "required": true
+          }
+        ],
+        "tools": []
+      },
+      {
+        "name": "icloud-calendar",
+        "title": "iCloud Calendar over CalDAV with an app-specific password",
+        "description": "iCloud Calendar over CalDAV with an app-specific password — your events on Today, and replies to invitations from Metistry.",
+        "origin": "product",
+        "provides": "calendar",
+        "transports": [
+          "http"
+        ],
+        "auth": [
+          "basic"
+        ],
+        "capabilities": [
+          "read",
+          "write_own",
+          "rsvp"
+        ],
+        "fields": [
+          {
+            "key": "server",
+            "kind": "url",
+            "label": "Server",
+            "help": "Where discovery starts. iCloud may name a numbered host (p<NN>-caldav.icloud.com) for your account; the connection then points there.",
+            "required": false,
+            "default": "https://caldav.icloud.com/"
+          }
+        ],
+        "tools": []
+      },
+      {
+        "name": "ics",
+        "title": "An iCalendar feed (.ics)",
+        "description": "An iCalendar feed (.ics) — a published calendar's events, read-only, on Today with every other calendar. Public feed addresses only in this release.",
+        "origin": "product",
+        "provides": "calendar",
+        "transports": [
+          "http"
+        ],
+        "auth": null,
+        "capabilities": [
+          "read"
+        ],
+        "fields": [],
+        "tools": []
+      },
+      {
+        "name": "imap",
+        "title": "A mailbox over IMAP with an app password",
+        "description": "A mailbox over IMAP with an app password — who wrote and about what (headers, never bodies), and drafts you send yourself. Nothing sends mail. For Gmail, use its own entry.",
+        "origin": "product",
+        "provides": "mail",
+        "transports": [
+          "imap"
+        ],
+        "auth": [
+          "basic"
+        ],
+        "capabilities": [
+          "read",
+          "draft"
+        ],
+        "fields": [],
+        "tools": []
+      },
+      {
+        "name": "linear",
+        "title": "Linear",
+        "description": "Linear — the issues assigned to you, on the Board as work and in Needs You as tasks. A personal API key, sent to api.linear.app only.",
+        "origin": "product",
+        "provides": "tracker",
+        "transports": [
+          "http"
+        ],
+        "auth": null,
+        "capabilities": [
+          "read",
+          "create",
+          "complete"
+        ],
+        "fields": [],
+        "tools": [
+          {
+            "name": "complete_issue",
+            "group": "changes"
+          }
+        ]
+      }
+    ],
+    "as_of": "2026-09-30T06:54:06.424Z"
   }
 }

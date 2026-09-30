@@ -113,6 +113,7 @@ export {
   type ReachSummary,
 } from "./describe.js";
 export {
+  consoleSecretNames,
   envSecretSource,
   instanceSyncOpener,
   openSyncHttp,

@@ -33,6 +33,7 @@
 // which the runner records and alerts on; the table keeps what it had.
 
 import type { Db } from "../github-state/run.js";
+import { INVITATION_RULE, reconcileInvitations } from "../invitations.js";
 
 /** The `connection` every row this sync writes carries — the bridge's name (manifest.yaml), until the eventkit bridge becomes a connection of its own (§2.6). */
 export const EVENTKIT_CONNECTION = "eventkit";
@@ -49,7 +50,18 @@ export interface EventkitCtx {
   ekUrl?: string;
   ekToken?: string;
   fetchFn?: typeof fetch;
+  /** the runner's resolved Needs You switches (`syncs.eventkit-calendar.raise`); absent = the manifest's defaults */
+  raise?: Readonly<Record<string, boolean>> | undefined;
+  /** the owner's zone (`METISTRY_TZ`), for an invitation card's time; absent = UTC */
+  ownerTimeZone?: string | undefined;
+  /** the clock (a test's) */
+  now?: () => number;
 }
+
+/** This collector's name — the `source_agent` of every invitation it raises. */
+export const COMPONENT = "eventkit-calendar";
+/** The manifest's `needs_you` defaults (a test holds this to manifest.yaml). */
+export const RAISE_DEFAULTS: Readonly<Record<typeof INVITATION_RULE, boolean>> = { invitation: true };
 
 interface BridgeParticipant {
   name?: unknown;
@@ -227,5 +239,10 @@ export async function run(db: Db, ctx: EventkitCtx = {}): Promise<number> {
   }
   const changed = await replaceCalendarWindow(db, EVENTKIT_CONNECTION, rows, start, end);
   await saveSyncState(db, EVENTKIT_CONNECTION, { window_start: start, window_end: end, events: String(rows.length) });
-  return changed;
+  // invitations (T4-17): the owner's NEEDS-ACTION, as the Mac's calendars say it. EventKit cannot
+  // answer one (its participant status is read-only), so the card offers Open in Calendar unless
+  // a connection that can — a CalDAV account holding the same meeting — is there to answer it
+  const raise = ctx.raise && Object.hasOwn(ctx.raise, INVITATION_RULE) ? ctx.raise[INVITATION_RULE] === true : RAISE_DEFAULTS.invitation;
+  const asked = await reconcileInvitations(db, { component: COMPONENT, connection: EVENTKIT_CONNECTION, raise, rsvp: false, zone: ctx.ownerTimeZone, now: (ctx.now ?? Date.now)() });
+  return changed + asked.raised + asked.cleared;
 }

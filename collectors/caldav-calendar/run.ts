@@ -34,6 +34,7 @@ import { CALDAV_MODULE, CALDAV_SYNC, knownZone, readCaldav, type SyncOpener } fr
 import type { Db } from "../github-state/run.js";
 import { replaceCalendarWindow, saveSyncState, toRow, type CalendarRow } from "../eventkit-calendar/run.js";
 import { SYNC_DAYS, syncWindow } from "../ics-calendar/run.js";
+import { INVITATION_RULE, RSVP_CAPABILITY, reconcileInvitations } from "../invitations.js";
 
 export { SYNC_DAYS };
 
@@ -47,7 +48,14 @@ export interface CaldavCtx {
   ownerTimeZone?: string | undefined;
   /** the clock (a test's) */
   now?: () => number;
+  /** the runner's resolved Needs You switches (`syncs.caldav-calendar.raise`); absent = the manifest's defaults */
+  raise?: Readonly<Record<string, boolean>> | undefined;
 }
+
+/** This collector's name — the `source_agent` of every invitation it raises. */
+export const COMPONENT = "caldav-calendar";
+/** The manifest's `needs_you` defaults (a test holds this to manifest.yaml). */
+export const RAISE_DEFAULTS: Readonly<Record<typeof INVITATION_RULE, boolean>> = { invitation: true };
 
 /** One pass. Returns rows inserted, changed or removed. */
 export async function run(db: Db, ctx: CaldavCtx = {}): Promise<number> {
@@ -59,7 +67,8 @@ export async function run(db: Db, ctx: CaldavCtx = {}): Promise<number> {
   }
   const sync = opened.sync;
   const zone = ctx.ownerTimeZone && knownZone(ctx.ownerTimeZone) ? ctx.ownerTimeZone : "UTC";
-  const window = syncWindow((ctx.now ?? Date.now)(), zone);
+  const now = (ctx.now ?? Date.now)();
+  const window = syncWindow(now, zone);
 
   const read = await readCaldav(sync, { windowStart: window.start, windowEnd: window.end, ownerZone: zone });
   const rows: CalendarRow[] = [];
@@ -90,5 +99,8 @@ export async function run(db: Db, ctx: CaldavCtx = {}): Promise<number> {
     unreadable: String(unreadable),
     unknown_zones: read.skipped.unknown_zones.join(","),
   });
-  return changed;
+  // invitations (T4-17): the owner's NEEDS-ACTION, as this server says it — raised once per meeting, cleared when it changes
+  const raise = ctx.raise && Object.hasOwn(ctx.raise, INVITATION_RULE) ? ctx.raise[INVITATION_RULE] === true : RAISE_DEFAULTS.invitation;
+  const asked = await reconcileInvitations(db, { component: COMPONENT, connection: sync.connection, raise, rsvp: sync.capabilities.includes(RSVP_CAPABILITY), zone, now });
+  return changed + asked.raised + asked.cleared;
 }

@@ -11,10 +11,21 @@ description: >-
   meeting cancelled inside the window is removed; the past is left as it was
   last seen. Never the invite body — the bridge does not serve it and the
   table has no column for it. Degrades absent without METISTRY_EK_URL and
-  METISTRY_BRIDGE_TOKEN_EVENTKIT.
+  METISTRY_BRIDGE_TOKEN_EVENTKIT. Raises an invitation request for each
+  meeting still waiting on your answer that someone else organises, cleared
+  when you answer, it is cancelled or it passes (T4-17).
 # A sync (§2.5's closed shape): Today should show a meeting added a few
 # minutes ago, and the read is local — the helper asks EventKit on this Mac.
 schedule: { every: 5m }
-writes: [calendar_events, sync_state]
-reads: []
+# The Needs You rule this sync may raise, a toggle under Scheduled
+# (`syncs.eventkit-calendar.raise.invitation`, §2.5). The raise is an `invitation`
+# mirror (T4-17): one per meeting while the Mac's calendars show your answer as
+# needs-action and someone else organises it, cleared when you answer (here
+# or in your calendar), when it is cancelled, or when it passes.
+needs_you:
+  invitation:
+    label: A meeting invitation waits on your answer
+    default: true
+writes: [calendar_events, sync_state, proposals]
+reads: [calendar_events, proposals]
 requires: [eventkit-bridge]

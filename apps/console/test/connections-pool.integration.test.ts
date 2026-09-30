@@ -10,8 +10,10 @@
 // listing, the generated tools fetched lazily and never on the eager
 // surface, a call answered with the service's data, its secret filled at
 // the door from the delivered environment and redacted on the way back, and
-// the call audited as a `connection_call` row; a borrower that was lent
-// nothing is told there is no such connection.
+// the call audited as a `connection_call` row; the permissions table draws
+// each connection an actor reaches as a row reached through Metistry; a
+// borrower granted a connection the owner did not offer is told there is no
+// such connection.
 
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
@@ -43,6 +45,7 @@ describe.skipIf(!hasDb)("the console's connections proxy (integration)", () => {
   const assistantId = `pool-itest-a-${suffix}`;
   const borrowerId = `pool-itest-b-${suffix}`;
   const pools: Array<{ close(): Promise<void> }> = [];
+  const localOwnerToken = mintToken(32);
   let rpc = 1;
 
   async function tool(token: string, name: string, args: Record<string, unknown> = {}): Promise<{ error?: { code: string; message: string } } & Record<string, unknown>> {
@@ -83,12 +86,21 @@ describe.skipIf(!hasDb)("the console's connections proxy (integration)", () => {
     pools.push(wired.pool);
 
     db = await testDb(pg.Pool);
-    server = makeServer(db, new QueryStore(db), { origin: "http://127.0.0.1:0", inboxDir: join(dir, "inbox"), policy, secureCookies: false, connectionsProxy: wired.proxy });
+    server = makeServer(db, new QueryStore(db), {
+      origin: "http://127.0.0.1:0",
+      inboxDir: join(dir, "inbox"),
+      policy,
+      secureCookies: false,
+      connectionsProxy: wired.proxy,
+      localOwner: { token: localOwnerToken, trusted: [] },
+    });
     await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     ({ token: assistantToken } = await agents.createAgent(db, { id: assistantId, display_name: "pool itest assistant" }));
     await db.query(`UPDATE agents SET kind = 'internal' WHERE id = $1`, [assistantId]);
     ({ token: borrowerToken } = await agents.createAgent(db, { id: borrowerId, display_name: "pool itest borrower" }));
+    // lent `svc` — which the owner has not offered to agents — so the table has nothing to draw for it
+    await db.query(`UPDATE agents SET grants = grants || '{"connections": ["svc"]}'::jsonb WHERE id = $1`, [borrowerId]);
   });
 
   afterAll(async () => {
@@ -131,7 +143,23 @@ describe.skipIf(!hasDb)("the console's connections proxy (integration)", () => {
     expect(row.meta).toMatchObject({ connection: "svc", connection_tool: "get", secrets: ["svc_token"] });
   });
 
-  it("a borrower that was lent nothing is told there is no such connection — nothing is dialled for it", async () => {
+  it("**the permissions table draws each connection an actor reaches as a row reached through Metistry** — the assistant's every one; a borrower's none it may not call", async () => {
+    const res = await fetch(`${base}/api/agents`, { headers: { authorization: `Bearer ${localOwnerToken}` } });
+    expect(res.status).toBe(200);
+    const list = (await res.json()) as { agents: Array<{ id: string; permissions?: Array<{ resource: { kind: string; name?: string }; label: string; read: Array<{ key: string; asks: boolean; provenance: { kind: string } }>; write: Array<{ key: string; asks: boolean }> }> }> };
+    const rowsOf = (id: string) => (list.agents.find((a) => a.id === id)?.permissions ?? []).filter((r) => r.resource.kind === "connection");
+    const mine = rowsOf(assistantId);
+    expect(mine.map((r) => r.label)).toEqual(["news", "svc"]);
+    const news = mine.find((r) => r.label === "news")!;
+    // Never is absent; Ask First asks; every entry reached through Metistry
+    expect(news.read.map((e) => [e.key, e.asks])).toEqual([["get_item", true], ["list_items", false]]);
+    expect(news.read.every((e) => e.provenance.kind === "proxy")).toBe(true);
+    expect(mine.find((r) => r.label === "svc")!.write.map((e) => [e.key, e.asks])).toEqual([["request", true]]);
+    // granted svc, but svc is not offered to agents: no row, exactly as the proxy refuses it
+    expect(rowsOf(borrowerId)).toEqual([]);
+  });
+
+  it("a borrower granted a connection the owner did not offer is told there is no such connection — nothing is dialled for it", async () => {
     const r = await tool(borrowerToken, "connections_call", { connection: "svc", tool: "get", arguments: {} });
     expect(r.error).toMatchObject({ code: "not_found", message: "no such connection: svc" });
   });

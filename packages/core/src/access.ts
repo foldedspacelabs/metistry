@@ -1490,6 +1490,23 @@ export const TITLES_ONLY_LABEL = "Titles only";
 export interface PermissionConnection {
   readonly name: string;
   readonly tools?: readonly { readonly name: string; readonly group: ToolGroup; readonly mode: ToolMode }[] | undefined;
+  /**
+   * The owner's offer switch (C115). Given: the table asks `may()` whether
+   * THIS principal reaches the connection — the assistant always, a borrower
+   * only when offered and granted — so a host may hand every connection to
+   * every actor. Absent: the caller has already decided, and it is drawn.
+   */
+  readonly offered?: boolean | undefined;
+}
+
+/**
+ * The connections a principal reaches, of those a host handed it: a name as
+ * it is, and a connection that says whether it is offered only when `may()`
+ * admits this principal to call it (T4-10) — the proxy's own rule, asked the
+ * proxy's way, so the table and the door cannot disagree.
+ */
+export function reachableConnections(p: Principal, list: readonly (string | PermissionConnection)[]): (string | PermissionConnection)[] {
+  return list.filter((c) => typeof c === "string" || c.offered === undefined || may(p, "act", { kind: "connection", door: "connections_call", name: c.name, offered: c.offered }).ok);
 }
 
 export interface DescribePermissionsOptions {
@@ -1637,13 +1654,18 @@ export function describePermissions(p: Principal, opts: DescribePermissionsOptio
   }
 
   // ---- connections: one row per name, tools by group and mode -----------------
-  const connections = (opts.connections ?? []).map((c) => (typeof c === "string" ? { name: c } : c));
+  //
+  // Only those `may()` admits (reachableConnections), each entry marked
+  // *Through Metistry* (screen 7 §10): Metistry calls the tool with the
+  // owner's credential; the actor never holds it.
+  const proxied: PermissionProvenance = { kind: "proxy" };
+  const connections = reachableConnections(p, opts.connections ?? []).map((c) => (typeof c === "string" ? { name: c } : c));
   for (const c of [...connections].sort((a, b) => a.name.localeCompare(b.name))) {
     const read: PermissionEntry[] = [];
     const write: PermissionEntry[] = [];
     for (const t of c.tools ?? []) {
       if (t.mode === "off") continue;
-      (t.group === "reads" ? read : write).push({ key: t.name, label: t.name, asks: t.mode === "ask", provenance: base });
+      (t.group === "reads" ? read : write).push({ key: t.name, label: t.name, asks: t.mode === "ask", provenance: proxied });
     }
     if (read.length === 0 && write.length === 0) continue;
     rows.push({ resource: { kind: "connection", name: c.name }, label: c.name, read, write });
@@ -1664,10 +1686,17 @@ export function describePermissions(p: Principal, opts: DescribePermissionsOptio
 export const PERMISSION_EMPTY_CELL = "—";
 /** The owner answers first: an action at `propose`, a connection tool at `ask`. */
 export const PERMISSION_ASKS_MARK = "⏱";
-/** A connection's row (§2.6). */
+/** A connection's row (§2.6): the relay glyph, *reached through Metistry*. */
 export const PERMISSION_CONNECTION_MARK = "⧉";
+/** What the relay glyph says, in a legend and to VoiceOver — the *Through Metistry* provenance, said once per row (MetistryKit's `PermissionWords.relayed`). */
+export const PERMISSION_CONNECTION_WORDS = "reached through Metistry";
 
-/** Where an entry came from, in words — nothing for `base`: a marker on everything is a marker on nothing. */
+/**
+ * Where an entry came from, in words — nothing for `base`: a marker on
+ * everything is a marker on nothing. Nothing for `proxy` either: every entry
+ * of a connection row is reached through Metistry, so the row's ⧉ says it
+ * once instead of every tool saying it again.
+ */
 export function permissionProvenanceText(p: PermissionProvenance): string | null {
   if (p.kind === "approved") return p.proposalId === null ? "approved in Needs You" : `approved in Needs You · #${p.proposalId}`;
   if (p.kind === "routine") return `during ${p.routine} only`;

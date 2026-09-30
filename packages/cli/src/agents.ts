@@ -27,6 +27,8 @@ import {
   effectiveActions,
   effectiveActionsDetailed,
   parseCrewDefinition,
+  PERMISSION_CONNECTION_MARK,
+  PERMISSION_CONNECTION_WORDS,
   permissionRowText,
   resolveInstanceLayout,
   type ActionKind,
@@ -297,7 +299,9 @@ export function renderAgents(rows: readonly AgentListRow[], ui: Ui = defaultUi()
  */
 export function renderPermissions(rows: readonly PermissionRow[], ui: Ui = defaultUi(), indent = 0): string {
   if (rows.length === 0) return `${" ".repeat(indent)}${ui.dim("holds nothing — anything not listed is not granted")}`;
-  return ui.table(["", "Read", "Write"], rows.map((r) => [...permissionRowText(r)]), { indent, ragged: [2] });
+  const table = ui.table(["", "Read", "Write"], rows.map((r) => [...permissionRowText(r)]), { indent, ragged: [2] });
+  // the relay glyph's words, once, where a connection row is drawn (T4-10: *Through Metistry*)
+  return rows.some((r) => r.resource.kind === "connection") ? `${table}\n${" ".repeat(indent)}${ui.dim(`${PERMISSION_CONNECTION_MARK} ${PERMISSION_CONNECTION_WORDS} — its tools are called by Metistry with your credential`)}` : table;
 }
 
 // ---------------------------------------------------------------------------

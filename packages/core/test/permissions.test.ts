@@ -24,6 +24,7 @@ import {
   ROLES,
   RULED_TOOLS,
   TOOL_PERMISSION_CELLS,
+  PERMISSION_CONNECTION_WORDS,
   describePermissions,
   may,
   permissionRowText,
@@ -242,6 +243,29 @@ describe("describePermissions — the table renders may(), never repeats it", ()
     expect(conns[0]!.read.map((e) => [e.key, e.asks])).toEqual([["events", true]]);
     // after the six resources, never among them
     expect(rows.findIndex((r) => r.resource.kind === "connection")).toBe(rows.length - 2);
+  });
+
+  it("**a connection row is reached Through Metistry** (T4-10): every entry says so, and only a connection `may()` admits is drawn — the assistant's every one, a borrower's the offered and granted", () => {
+    const tools = [{ name: "list_issues", group: "reads" as const, mode: "on" as const }];
+    const all = [
+      { name: "gh", offered: true, tools },
+      { name: "private", offered: false, tools },
+      { name: "cal", offered: true, tools },
+    ];
+    const lent: Scope = { ...WIDE_SCOPE, connections: ["gh", "private"] };
+    const names = (p: Principal) => describePermissions(p, { connections: all }).filter((r) => r.resource.kind === "connection").map((r) => r.label);
+    expect(names(principal("assistant"))).toEqual(["cal", "gh", "private"]);
+    // offered AND granted: `private` is granted but not offered, `cal` offered but not granted
+    expect(names(principal("agent", lent))).toEqual(["gh"]);
+    // a crew needs its `connections` group too
+    expect(names(principal("crew", lent))).toEqual(["gh"]);
+    expect(names(principal("crew", lent, { uses: ALL_GROUPS.filter((g) => g !== "connections") }))).toEqual([]);
+    expect(names(principal("tool", lent))).toEqual([]);
+    const gh = describePermissions(principal("agent", lent), { connections: all }).find((r) => r.label === "gh")!;
+    expect(gh.read.map((e) => e.provenance)).toEqual([{ kind: "proxy" }]);
+    // said once, by the row's ⧉ — never repeated on every tool
+    expect(permissionRowText(gh)).toEqual(["gh ⧉", "list_issues", "—"]);
+    expect(PERMISSION_CONNECTION_WORDS).toBe("reached through Metistry");
   });
 
   it("every entry is backed by a door that says yes — for every role, widest and narrowest", () => {

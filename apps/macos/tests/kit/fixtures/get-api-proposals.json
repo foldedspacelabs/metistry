@@ -25,6 +25,7 @@
         "decided_at": null,
         "work_id": null,
         "snoozed_until": null,
+        "group_id": null,
         "request": {
           "type": "report",
           "word": "report",
@@ -65,6 +66,7 @@
         "decided_at": null,
         "work_id": null,
         "snoozed_until": null,
+        "group_id": null,
         "request": {
           "type": "note",
           "word": "note",
@@ -115,6 +117,7 @@
         "decided_at": null,
         "work_id": null,
         "snoozed_until": null,
+        "group_id": null,
         "request": {
           "type": "question",
           "word": "question",
@@ -212,6 +215,7 @@
         "decided_at": null,
         "work_id": null,
         "snoozed_until": null,
+        "group_id": null,
         "request": {
           "type": "question",
           "word": "question",

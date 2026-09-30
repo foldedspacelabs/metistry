@@ -1391,3 +1391,23 @@ export {
 } from "./template.js";
 // A recording's transcript as its capture declares it, and where it is filed (T8-4, Q29).
 export { recordCaptureSession, RECORDING_ID_RE, transcriptOf, transcriptPath, type TranscriptCapture, type TranscriptDb } from "./transcripts.js";
+export {
+  CAPTURE_SESSION_RE,
+  JOT_KIND,
+  JOT_TYPES,
+  MEETING_GROUP_PREFIX,
+  isTranscriptPath,
+  jotAnchorOf,
+  meetingGroupId,
+  meetingSource,
+  pickMeetingEvent,
+  promoteJotAnchor,
+  recordedSessionOf,
+  sessionOfMeetingGroup,
+  type JotAnchor,
+  type JotPromotion,
+  type JotType,
+  type MeetingEvent,
+  type MeetingEventRow,
+  type RecordedSession,
+} from "./meeting-group.js";

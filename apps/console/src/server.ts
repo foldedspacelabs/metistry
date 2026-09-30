@@ -75,6 +75,7 @@ import { purgeArchive, purgePreview } from "@metistry-apps/routines";
 import type { EventHub } from "./events.js";
 import { createRequire } from "node:module";
 import { RECORDING_ROUTE, TRANSCRIPT_PRINCIPAL, recordCaptureSession, recordingRoute, transcriptOf, transcriptPath } from "./recordings.js";
+import { meetingAnchorOf, promoteMeetingJots, type AnchorReceipt } from "./meeting-anchors.js";
 
 const require_ = createRequire(import.meta.url);
 
@@ -448,7 +449,7 @@ const SUBJECT_COLUMN_NAMES = ["subject_work_updated_at", "subject_work_title", "
  * was raised.
  */
 const PROPOSAL_FOR_DECISION_SQL = `
-  SELECT p.id, p.ts, p.kind, p.source_agent, p.trust, p.payload, p.source, p.decision, p.feedback, p.decided_at, p.work_id, p.snoozed_until,
+  SELECT p.id, p.ts, p.kind, p.source_agent, p.trust, p.payload, p.source, p.group_id, p.decision, p.feedback, p.decided_at, p.work_id, p.snoozed_until,
          greatest(
            p.ts,
            coalesce(p.decided_at, p.ts),
@@ -1596,11 +1597,11 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       // judged against.
       const { rows } = await db.query(
         since === null
-          ? `SELECT p.id, p.ts, p.kind, p.source_agent, p.trust, p.payload, p.decision, p.decided_at, p.work_id, p.snoozed_until, ${SUBJECT_COLUMNS},
+          ? `SELECT p.id, p.ts, p.kind, p.source_agent, p.trust, p.payload, p.decision, p.decided_at, p.work_id, p.snoozed_until, p.group_id, ${SUBJECT_COLUMNS},
                     p.ts::text || '|' || p.id AS cursor
              FROM proposals p ${SUBJECT_JOINS}
              WHERE p.decision = 'pending' AND (p.snoozed_until IS NULL OR p.snoozed_until <= now()) ORDER BY p.ts DESC, p.id DESC LIMIT $1`
-          : `SELECT p.id, p.ts, p.kind, p.source_agent, p.trust, p.payload, p.decision, p.decided_at, p.work_id, p.snoozed_until, ${SUBJECT_COLUMNS},
+          : `SELECT p.id, p.ts, p.kind, p.source_agent, p.trust, p.payload, p.decision, p.decided_at, p.work_id, p.snoozed_until, p.group_id, ${SUBJECT_COLUMNS},
                     greatest(p.ts, p.decided_at)::text || '|' || p.id AS cursor
              FROM proposals p ${SUBJECT_JOINS}
              WHERE (greatest(p.ts, p.decided_at), p.id) > ($2::timestamptz, $3::bigint) ORDER BY greatest(p.ts, p.decided_at) ASC, p.id ASC LIMIT $1`,
@@ -2304,6 +2305,33 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       }
     }
 
+    // A meeting's transcript (T8-7, C77 and C81; meeting-anchors.ts): the
+    // owner's Approve is where the jots they made during the recording move
+    // from (session, offset) to the transcript's path in Journal/Transcripts/.
+    // Only on a card the inbox drain raised from the owner's own door — an
+    // agent's row with the same group promotes nothing — and before the row
+    // is settled, so a vault that cannot be reached leaves it pending (C45).
+    // Accept All is one of these per row, in order, never a batch: the batch
+    // refuses `allow` because this is exactly the kind of per-row consequence
+    // it cannot carry.
+    let anchored: AnchorReceipt | undefined;
+    const meetingAnchor = verb === "allow" ? meetingAnchorOf(row) : undefined;
+    if (meetingAnchor) {
+      try {
+        anchored = await promoteMeetingJots(db, cfg.vault, meetingAnchor, Number(row.id));
+      } catch (err) {
+        if (err instanceof VaultError) {
+          await audit("triage", "meeting_anchors", false, { proposal: row.id, session: meetingAnchor.session, error: err.code });
+          return refuseAnswer(id, verb, err.code, err.message);
+        }
+        return failedAnswer(id, verb, err);
+      }
+      await db.query(`UPDATE proposals SET payload = payload || jsonb_build_object('anchored', $2::jsonb) WHERE id = $1 AND decision = 'pending'`, [
+        id,
+        JSON.stringify({ ...anchored, at: new Date().toISOString(), by: "user" }),
+      ]);
+    }
+
     // Allowing an `action` is the second executable verb (ADOPT 6,
     // docs/ops/actions.md). Like the improvement path above it runs BEFORE
     // the row is decided, so a refusal leaves the proposal pending with the
@@ -2538,9 +2566,10 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       ...(acted ? { action: acted.kind } : {}),
       ...(granted ? { granted: granted.area, agent: granted.agent } : {}),
       ...(rolledBack ? { rolled_back: rolledBack.runs_in === "console" ? rolledBack.sha : "runs_in_cli" } : {}),
+      ...(anchored ? { meeting: anchored.session, anchored: anchored.promoted.length } : {}),
     });
     if (rows.length === 1) {
-      return { status: 200, body: { ok: true, ...(applied ? { applied } : {}), ...(restored ? { restored } : {}), ...(rolledBack ? { rolled_back: rolledBack } : {}), ...(scheduledApplied ? { scheduled: scheduledApplied } : {}), ...(enrolled ? { enrolled } : {}), ...(created ? { work: created } : {}), ...(acted ? { action: acted } : {}), ...(granted ? { granted } : {}) } };
+      return { status: 200, body: { ok: true, ...(applied ? { applied } : {}), ...(restored ? { restored } : {}), ...(rolledBack ? { rolled_back: rolledBack } : {}), ...(scheduledApplied ? { scheduled: scheduledApplied } : {}), ...(enrolled ? { enrolled } : {}), ...(created ? { work: created } : {}), ...(acted ? { action: acted } : {}), ...(granted ? { granted } : {}), ...(anchored ? { anchored } : {}) } };
     }
     // lost the race between the read above and this update: someone else decided it
     const now = (await db.query(PROPOSAL_FOR_DECISION_SQL, [id])).rows[0];

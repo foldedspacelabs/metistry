@@ -31,7 +31,23 @@
 
 import type { CaptureSink } from "@foldedspacelabs/metistry-mcp-brain";
 import type { SyncOpener } from "@foldedspacelabs/metistry-connections";
-import { finishRun, intentStage, raiseMirror, resolveIntentTier, startRun, type IntentRules, type MirrorRaise } from "@foldedspacelabs/metistry-core";
+import {
+  calendarDate,
+  finishRun,
+  intentStage,
+  jotAnchorOf,
+  meetingGroupId,
+  pickMeetingEvent,
+  raiseMirror,
+  recordedSessionOf,
+  resolveIntentTier,
+  startRun,
+  type IntentRules,
+  type JotAnchor,
+  type MeetingEvent,
+  type MirrorRaise,
+  type TemplateQueries,
+} from "@foldedspacelabs/metistry-core";
 import { completeJson, type ComputeAccess } from "../compute-client.js";
 import { intentMeta, intentPlacement, scoreIntent, type IntentOutcome } from "./intent-tier.js";
 
@@ -49,7 +65,7 @@ export interface InboxRow {
 }
 
 export interface Classification {
-  kind: "todo" | "url" | "image" | "document" | "note" | "session" | "transcript";
+  kind: "todo" | "url" | "image" | "document" | "note" | "session" | "transcript" | "jot";
   reason: string; // which rule fired — auditable, not vibes
   title: string;
 }
@@ -117,6 +133,17 @@ export function classify(row: InboxRow): Classification {
   // §8.4) declares itself the same way — and being placed here, it never
   // falls through to a model tier.
   if (fm.kind === "transcript") return { kind: "transcript", reason: "frontmatter kind: transcript", title };
+  // A jot the owner made during a recording (T8-7, C77) is the owner's own
+  // words, saved when typed: never a proposal, never a model's to read. Only
+  // from the owner's door, and only when its anchor reads — an agent's
+  // capture that says `kind: jot` is an ordinary capture, placed by the rules
+  // like any other, so no agent can put words in the owner's mouth on a
+  // meeting's card.
+  if (fm.kind === "jot") {
+    if (row.source_agent) return { kind: "note", reason: "frontmatter kind: jot from an agent credential — an ordinary capture", title };
+    if (!jotAnchorOf(note)) return { kind: "note", reason: "frontmatter kind: jot without a readable anchor — an ordinary capture", title };
+    return { kind: "jot", reason: "frontmatter kind: jot", title };
+  }
 
   if (note && URL_RE.test(note)) return { kind: "url", reason: "note is a bare url", title };
   if (note && TODO_RE.test(note)) return { kind: "todo", reason: "leading action verb", title };
@@ -268,6 +295,13 @@ export interface CollectorCtx extends ComputeAccess {
    * scheduled slot's zone.
    */
   ownerTimeZone?: string;
+  /**
+   * The named-query store (`packages/queries`, invariant 3) — the runner
+   * hands every component the same one. The inbox drain reads the owner's
+   * calendar through `day_events` to name a recording's meeting (T8-7).
+   * Absent: a meeting keeps the recorder's own title.
+   */
+  queries?: TemplateQueries | undefined;
 }
 
 export interface FmResult {
@@ -396,13 +430,87 @@ async function recordIntent(db: Db, inboxId: number | string, outcome: IntentOut
   }).catch(() => undefined);
 }
 
+/** The named query a recording's meeting is found through: one day of the owner's calendar, every source (seed/queries/day_events.yaml). */
+export const DAY_EVENTS_QUERY = "day_events";
+
+/** How many jots one meeting's card lists. */
+const MAX_LISTED_JOTS = 50; // limit: fixed — a card lists the owner's jots by id; past fifty in one meeting the count still says how many, and the anchors are promoted by session, never from this list
+
+/**
+ * The calendar event a recording was of, read through `day_events` for each
+ * day the recording touches in the owner's zone. Undefined when the store is
+ * not wired, the query is not loaded, or it fails — a meeting keeps the
+ * recorder's own title rather than failing the pass.
+ */
+async function meetingEventOf(ctx: CollectorCtx, startedAt: Date, endedAt: Date | null): Promise<MeetingEvent | undefined> {
+  const queries = ctx.queries;
+  if (!queries) return undefined;
+  const tz = ctx.ownerTimeZone || "UTC";
+  const days = [...new Set([calendarDate(startedAt, tz), calendarDate(endedAt ?? startedAt, tz)])];
+  const rows: Record<string, unknown>[] = [];
+  try {
+    for (const day of days) rows.push(...(await queries.run(DAY_EVENTS_QUERY, { day, tz })).rows);
+  } catch {
+    return undefined;
+  }
+  return pickMeetingEvent(rows, startedAt, endedAt);
+}
+
+/**
+ * The meeting a recording's transcript opens: one group per session (C81),
+ * named from the calendar (`day_events`) and the recorder's own record (the
+ * transcript's frontmatter), carrying the owner's jots made during it as
+ * handles — ids and offsets, never their words and never the transcript's.
+ * Only from the owner's door: an agent's capture that claims to be a
+ * transcript opens no meeting.
+ */
+export async function meetingOf(db: Db, ctx: CollectorCtx, row: InboxRow, c: Classification): Promise<{ groupId: string; meeting: Record<string, unknown> } | undefined> {
+  if (c.kind !== "transcript" || row.source_agent) return undefined;
+  const rec = recordedSessionOf(row.note);
+  if (!rec) return undefined;
+  const event = await meetingEventOf(ctx, rec.startedAt, rec.endedAt);
+  const jots = (
+    await db.query(
+      `SELECT id, proposal FROM inbox
+       WHERE proposal->>'kind' = 'jot' AND proposal->>'capture_session' = $1 AND source_agent IS NULL AND status <> 'archived'
+       ORDER BY (proposal->>'offset_s')::int, id LIMIT $2`,
+      [rec.session, MAX_LISTED_JOTS],
+    )
+  ).rows as { id: number | string; proposal: { jot?: string; offset_s?: number } }[];
+  return {
+    groupId: meetingGroupId(rec.session),
+    meeting: {
+      session_id: rec.session,
+      session_title: event?.title || rec.title || "Recording",
+      started_at: rec.startedAt.toISOString(),
+      ended_at: rec.endedAt?.toISOString() ?? null,
+      event_id: event?.event_id ?? null,
+      event: event ?? null,
+      transcript_path: row.path,
+      jots: jots.map((j) => ({ inbox_id: Number(j.id), jot: j.proposal.jot, offset_s: j.proposal.offset_s })),
+    },
+  };
+}
+
+/** A jot's inbox classification: what the console's Approve finds it by (the session) and what the card counts it as. */
+function jotClassification(c: Classification, anchor: JotAnchor): Record<string, unknown> {
+  return {
+    ...c,
+    jot: anchor.jot,
+    offset_s: anchor.offsetS,
+    ...(anchor.state === "session" ? { capture_session: anchor.session } : { source: `meeting:${anchor.path}` }),
+  };
+}
+
 /** One drain pass. Returns how many rows were classified. */
 export async function run(db: Db, ctx: CollectorCtx = {}): Promise<number> {
   const { rows } = await db.query(
     `SELECT id, path, mime, note, source, source_agent FROM inbox WHERE status = 'new' ORDER BY ts LIMIT 50`,
   );
-  const items = rows as InboxRow[];
-  const deterministic = new Map(items.map((r) => [r.id, classify(r)]));
+  const deterministic = new Map((rows as InboxRow[]).map((r) => [r.id, classify(r)]));
+  // Jots first, so a meeting whose transcript arrives in the same pass as its
+  // last jots lists them all. Otherwise the order the rows arrived in.
+  const items = [...(rows as InboxRow[])].sort((a, b) => Number(deterministic.get(b.id)!.kind === "jot") - Number(deterministic.get(a.id)!.kind === "jot"));
 
   // The model tiers refine only what the rules couldn't place (reason "default")
   const fallthroughs = items.filter((r) => deterministic.get(r.id)!.reason === "default" && (r.note ?? "").trim()).slice(0, FM_MAX_ITEMS);
@@ -444,6 +552,14 @@ export async function run(db: Db, ctx: CollectorCtx = {}): Promise<number> {
 
   for (const row of items) {
     const det = deterministic.get(row.id)!;
+    // The owner's jot (T8-7, C77): saved when typed, so it asks nothing — no
+    // proposal. It is settled here with its anchor on the row, which is how
+    // the meeting's card counts it and how Approve finds it to promote.
+    const anchor = det.kind === "jot" ? jotAnchorOf(row.note) : undefined;
+    if (anchor) {
+      await db.query(`UPDATE inbox SET status = 'classified', proposal = $2, triaged_at = now() WHERE id = $1`, [row.id, JSON.stringify(jotClassification(det, anchor))]);
+      continue;
+    }
     const byIntent = placed.get(Number(row.id));
     const refined = fm.get(Number(row.id));
     const intentOutcome = intents.get(Number(row.id));
@@ -464,8 +580,10 @@ export async function run(db: Db, ctx: CollectorCtx = {}): Promise<number> {
     // different — `suggestedWork` has never read a model and does not start
     // here.
     const work = suggestedWork(row, det);
+    // A recording's transcript opens its meeting's card (T8-7, C81).
+    const meeting = await meetingOf(db, ctx, row, det);
     await db.query(
-      `INSERT INTO proposals (kind, source_agent, trust, payload) VALUES ('knowledge', $2, $3, $1)`,
+      `INSERT INTO proposals (kind, source_agent, trust, payload, group_id) VALUES ('knowledge', $2, $3, $1, $4)`,
       [
         JSON.stringify({
           inbox_id: row.id,
@@ -478,9 +596,11 @@ export async function run(db: Db, ctx: CollectorCtx = {}): Promise<number> {
           // (§4.3): a card the owner corrects is only reviewable if what the
           // classifier said is on it.
           ...(intentOutcome ? { intent: intentMeta(intentOutcome) } : {}),
+          ...(meeting ? { meeting: meeting.meeting } : {}),
         }),
         sourceAgent,
         trust,
+        meeting?.groupId ?? null,
       ],
     );
     const crash = crashReport(row, det);

@@ -166,6 +166,18 @@ export interface UpOptions {
   doctorDeps?: Partial<DoctorDeps> | undefined;
   /** default true; `false` is a test seam — every real `up` writes the cli shim (cli-shim.ts) */
   cliShim?: boolean | undefined;
+  /**
+   * `update`'s restart step runs `up` INSIDE itself under the launchd shape
+   * (update.ts, `rerenderLaunchd`), so a new release's plists and
+   * supervisor.json come from this one renderer and never from a second
+   * copy of it. On `runner`, so the commands and the transcript are one
+   * list; with the product source and version `update` resolved (the
+   * instance's lock still pins the release being LEFT until update's own
+   * lock step); and without the steps that are `update`'s own: the owner
+   * bearer (already ensured — or deliberately deferred — by `update`), the
+   * closing doctor and the timings.
+   */
+  within?: { runner: StepRunner; source: LockSource; version?: string | undefined } | undefined;
 }
 
 export interface UpResult {
@@ -177,6 +189,8 @@ export interface UpResult {
   timings: SectionTiming[];
   /** wall clock for the whole verb */
   elapsedMs: number;
+  /** the LaunchAgents this run bootstrapped — and so restarted onto what it just rendered (a dry run: the ones it would) */
+  bootstrapped: string[];
 }
 
 /** The instance's metistry.lock, when there is an instance dir holding one. */
@@ -495,11 +509,11 @@ export const CONFINED_CHILDREN = ["assistant", "reconciler"] as const;
  * ordering bug, not a fundamental one, and this is the fix: write
  * everything, correct the two TCC jobs, THEN bootstrap everything once.
  */
-export async function installLaunchd(r: StepRunner, productDir: string, le: LaunchdEnv, deployment: Deployment, values: ShapeValues, exists: (p: string) => boolean = existsSync): Promise<void> {
+export async function installLaunchd(r: StepRunner, productDir: string, le: LaunchdEnv, deployment: Deployment, values: ShapeValues, exists: (p: string) => boolean = existsSync): Promise<string[]> {
   const templates = await loadPlistTemplates(productDir, deployment.shape, values.namespace?.labelSuffix, values.env);
   if (templates.length === 0) {
     r.note("no ops/launchd/*.plist in this checkout — nothing to install");
-    return;
+    return [];
   }
   if (le.platform !== "darwin") {
     r.note(`no launchd on ${le.platform}: the equivalent systemd user units follow — NOT written (docs/ops/cli.md, "Linux hosts")`);
@@ -508,7 +522,7 @@ export async function installLaunchd(r: StepRunner, productDir: string, le: Laun
       r.out("");
       r.out(renderSystemdUnit(t, { repo: productDir, node: le.node, envFile: values.envFile }));
     }
-    return;
+    return [];
   }
   // an install that predates the supervisor is still running the old agents:
   // boot them out ONCE, or the same services run twice
@@ -567,6 +581,7 @@ export async function installLaunchd(r: StepRunner, productDir: string, le: Laun
       await r.run(c.cmd, c.args, { tolerateFailure: c.tolerateFailure, comment: c.tolerateFailure ? "ok if not loaded" : undefined });
     }
   }
+  return installable.map((t) => t.label);
 }
 
 /**
@@ -1104,9 +1119,12 @@ export async function closingDoctor(r: StepRunner, productDir: string, deps: Par
 
 export async function up(opts: UpOptions): Promise<UpResult> {
   const env = opts.env ?? process.env;
-  const r = new StepRunner({ dryRun: opts.dryRun === true, out: opts.out ?? ((s) => process.stdout.write(s + "\n")), exec: opts.exec, env });
+  const r = opts.within?.runner ?? new StepRunner({ dryRun: opts.dryRun === true, out: opts.out ?? ((s) => process.stdout.write(s + "\n")), exec: opts.exec, env });
   const lock = await instanceLock(env);
-  const source = lock?.product.source ?? "git";
+  const source = opts.within?.source ?? lock?.product.source ?? "git";
+  // the release the images and a fetched runtime are pinned to: the lock's,
+  // except inside an `update`, whose lock step has not moved it yet
+  const pinnedVersion = opts.within ? opts.within.version : lock?.product.version;
   // release mode: everything below runs against `current`, so a rollback is a symlink flip
   const runDir = runDirFor(opts.productDir, source);
   // the shape is product configuration, read from the running code; the
@@ -1139,15 +1157,21 @@ export async function up(opts: UpOptions): Promise<UpResult> {
   // scope table: `metistry secrets purge` must not orphan it). A brand-new
   // instance has none yet — `ensureInstanceId` below is what mints it — and
   // the next `secrets sync --to env` copies the item across.
-  const knownInstanceId = instanceDir.instanceDir ? await readInstanceId(instanceDir.instanceDir).catch(() => undefined) : undefined;
-  const ownerBearer = await ensureOwnerBridgeToken(r, {
-    env,
-    envFile,
-    platform: le.platform,
-    ...(knownInstanceId ? { instanceId: knownInstanceId } : {}),
-    ...(opts.mintOwnerToken ? { mint: opts.mintOwnerToken } : {}),
-  });
-  r.note(ownerBearer.detail);
+  //
+  // Inside `update` this is already done: `update` ensured the bearer before
+  // its restart step, and a Keychain that refused it there is a deferred
+  // failure of `update`'s, which must not become a throw out of the render.
+  if (!opts.within) {
+    const knownInstanceId = instanceDir.instanceDir ? await readInstanceId(instanceDir.instanceDir).catch(() => undefined) : undefined;
+    const ownerBearer = await ensureOwnerBridgeToken(r, {
+      env,
+      envFile,
+      platform: le.platform,
+      ...(knownInstanceId ? { instanceId: knownInstanceId } : {}),
+      ...(opts.mintOwnerToken ? { mint: opts.mintOwnerToken } : {}),
+    });
+    r.note(ownerBearer.detail);
+  }
   // compute.yaml, once: the same file `servedLocalModelChildren` reads, the
   // same one doctor reads. A file that does not parse is a NOTE and an
   // engine-less install for this run — `up` bringing the whole install down
@@ -1185,7 +1209,7 @@ export async function up(opts: UpOptions): Promise<UpResult> {
     home: le.home,
     compute,
   };
-  r.note(`product: ${runDir} (${source === "release" ? `pinned release${lock ? ` ${lock.product.version}` : ""} — images pulled, not built` : "git checkout — images built from source"})`);
+  r.note(`product: ${runDir} (${source === "release" ? `pinned release${pinnedVersion ? ` ${pinnedVersion}` : ""} — images pulled, not built` : "git checkout — images built from source"})`);
   r.note(`shape: ${deployment.shape} — from ${loaded.from}`);
   // said out loud, because it is a machine-level behaviour and the operator
   // should never discover it from `pmset` (docs/ops/deployment-shapes.md)
@@ -1235,13 +1259,14 @@ export async function up(opts: UpOptions): Promise<UpResult> {
   const engine = engineStatus(values.compute, env);
   if (!engine.ok) r.note(engineAbsentNote(engine.why as string, engine.fix as string));
   let failure: StepFailed | undefined;
+  let bootstrapped: string[] = [];
 
   try {
     if (opts.compose === false) {
       r.note("--no-compose: containers left as they are");
     } else if (usesCompose(deployment)) {
       r.section("compose");
-      await composeUp(r, runDir, source, lock?.product.version, envFile);
+      await composeUp(r, runDir, source, pinnedVersion, envFile);
     } else {
       r.note("shape launchd: no containers, so docker is never called");
     }
@@ -1270,7 +1295,7 @@ export async function up(opts: UpOptions): Promise<UpResult> {
         // a checkout never does — that operator has Homebrew and a plan
         const runtimeDeps: RuntimeDepsFetch | undefined =
           source === "release" && runtimeDepsEnabled(env) && !r.dryRun
-            ? { fetchFn: opts.fetchFn ?? fetch, ...(lock?.product.version ? { version: lock.product.version } : {}), ...(opts.target ? { target: opts.target } : {}) }
+            ? { fetchFn: opts.fetchFn ?? fetch, ...(pinnedVersion ? { version: pinnedVersion } : {}), ...(opts.target ? { target: opts.target } : {}) }
             : undefined;
         // the install root, not the release: `.env`, `state/pg` and any
         // bundled runtime/postgres live where the install does
@@ -1289,7 +1314,7 @@ export async function up(opts: UpOptions): Promise<UpResult> {
       if (values.gitPath) r.note(`git: ${values.gitPath.split(":")[0]} (bundled) — prefixed onto the reconciler's PATH`);
       await planConfinement(r, opts.productDir, values, opts.exists ?? existsSync);
       r.section("launchd");
-      await installLaunchd(r, runDir, le, deployment, values, opts.exists ?? existsSync);
+      bootstrapped = await installLaunchd(r, runDir, le, deployment, values, opts.exists ?? existsSync);
       if (pg) {
         r.section("database");
         await finishPostgres(r, pg);
@@ -1311,13 +1336,17 @@ export async function up(opts: UpOptions): Promise<UpResult> {
     r.out(`metistry up: ${err.message}`);
   }
 
+  // inside `update`, whose own closing doctor and summary come after the
+  // rest of its steps: the answer is only whether the render landed
+  if (opts.within) return { code: failure ? failure.code || 1 : 0, source, commands: r.commands, timings: [], elapsedMs: r.elapsedMs(), bootstrapped };
+
   // doctor runs even after a failed step — its table is the diagnosis; the failure keeps the exit code
   const doctorCode = await closingDoctor(r, runDir, opts.doctorDeps, opts.doctorFn ?? doctor);
   const timings = r.timings();
   r.section("timings");
   r.note(renderTimings(timings, r.elapsedMs()));
   r.note(runningNote(deployment.shape));
-  return { code: failure ? failure.code || 1 : doctorCode, source, commands: r.commands, timings, elapsedMs: r.elapsedMs() };
+  return { code: failure ? failure.code || 1 : doctorCode, source, commands: r.commands, timings, elapsedMs: r.elapsedMs(), bootstrapped };
 }
 
 /** A Postgres superuser password: 256 bits of randomness, alphanumeric so no conf or connection string ever needs to quote it. */

@@ -51,7 +51,7 @@ export type DialPlan = HttpDial | CommandDial;
 
 /** The types that are not dialled as MCP, and what reaches them instead — the refusal names it rather than pretending. */
 const NOT_DIALLED: Readonly<Record<string, string>> = {
-  agent: "an agent connection is dispatched to, not dialled — targets become agent connections in T4-11",
+  agent: "an agent connection is dispatched to, not dialled — a task is sent to it through the owner's dispatch door (POST /api/tasks/:id/dispatch), never by an agent through this proxy",
   api: "an API connection is reached through the tools Metistry generates for it (generated.ts), not dialled as MCP",
   feed: "a feed is reached through the tools Metistry generates for it (generated.ts), not dialled as MCP",
   files: "a files connection is reached through the tools Metistry generates for it (generated.ts), not dialled as MCP",

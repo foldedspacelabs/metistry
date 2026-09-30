@@ -608,7 +608,12 @@ ids.run = Number((await one(
 )).id);
 await pool.query(`INSERT INTO runs (component, kind, tool, ok, duration_ms, meta) VALUES ('assistant', 'tool', 'knowledge_search', true, 12, jsonb_build_object('turn_id', $1::text)), ('assistant', 'tool', 'tasks_update', true, 30, jsonb_build_object('turn_id', $1::text))`, [turnId]);
 // the egress fill's stamp: the NAMES a run filled in, which is where *last used* comes from
-await pool.query(`INSERT INTO runs (ts, component, kind, ok, meta) VALUES ('2026-09-28T13:00:02.000Z', 'egress-proxy', 'egress', true, jsonb_build_object($1::text, jsonb_build_array('github_write')))`, [SECRET_USE_META_KEY]);
+await pool.query(
+  `INSERT INTO runs (ts, component, kind, ok, meta) VALUES
+     ('2026-09-28T13:00:02.000Z', 'egress-proxy', 'egress', true, jsonb_build_object($1::text, jsonb_build_array('github_write'))),
+     ('2026-09-27T09:00:02.000Z', 'connections', 'egress', true, jsonb_build_object($1::text, jsonb_build_array('github_mcp_key')))`,
+  [SECRET_USE_META_KEY],
+);
 // a rename through `metistry identity set` (T2-16): the reconciler records every
 // protected write it accepts as a `config_write` run, which is how Activity shows it
 await pool.query(`INSERT INTO runs (component, kind, tool, ok, finished_at, duration_ms, meta) VALUES ('reconciler', 'config_write', 'vault_write', true, now(), 3, $1::jsonb)`, [

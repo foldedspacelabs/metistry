@@ -885,10 +885,10 @@ core's (`LID_CLOSED_*` in `packages/core/src/power.ts`), mirrored in
 | Secrets | New Secret…, Replace…, Save Hosts…, a grant's On · Ask · Off, Delete… | `metistry secrets set\|replace <name>` with the value **on stdin**, `secrets hosts\|grant\|remove` (M7) — each shown with its exact command first |
 | Secrets | *Metistry's own* (collapsed): names, scope, and the account each was found under | `metistry secrets list --json` — names only; rotating one is a Terminal step, not an M7 verb |
 | Variables | name · value · used in; New Variable…, Edit…, Remove… | `GET /api/variables`; `metistry variables set\|unset` (M14), shown with its exact command first |
-| Live Capture | Show the floating bar; which edge (left or right, drawn); which display | `CaptureBarPreferences` — the one device-local setting this app owns (`captureBar` in its defaults; docs/ops/client-api.md "Device-local"). The bar (T8-5) reads it; **off means no bar**. Absent, not off, without the bridge: no `live-capture` row from doctor, or an `absent` one, and the pane is the absent state — no switch, no grants, no count |
-| Live Capture | Microphone · Audio Capture · Screen Recording — *Approved*, *Not yet asked*, *Not approved*, *Not yet verified* | `doctor --json` → the `live-capture` bridge row's `meta.bridge_meta.grants`, the recorder's own `check()` words; **whether, not when**, and a read-through — Open System Settings is the only control, and it grants nothing |
+| Live Capture | Show the floating bar; which edge (left or right, drawn); which display | `CaptureBarPreferences` — device-local, like Keyboard's shortcuts (`captureBar` in the app's defaults; docs/ops/client-api.md "Device-local"). The bar's window reads it: the rail sits on that edge of that display and panels open toward the screen; **off means no bar**, whatever the bridge says. Absent, not off, without the bridge: the bar's own client says `.absent` and the pane is the absent state — no switch, no grants, no count |
+| Live Capture | Microphone · Audio Capture · Screen Recording — *Approved*, *Not yet asked*, *Not approved*, *Not yet verified* | the recorder's own `check()` words through the bar's client (`LiveCaptureClient.grants`, bridge `GET /check`); **whether, not when**, and a read-through — Open System Settings is the only control, and it grants nothing. A bridge that refuses this Mac's key is present, and the pane says so in the client's words (which name the fix) |
 | Live Capture | What the assistant keeps: audio, transcript, notes | the rulings (plan §2.15, Q7, C91), templated with the assistant's name; **no path** |
-| Live Capture | the recordings and the amount kept; Purge Now | the transcripts under `Journal/Transcripts/` (`GET /api/knowledge/pages?prefix=…`) name the recordings; `GET /api/recordings/:id` (T8-4) says of each whether the audio is kept, how much and until when. Purge Now confirms first, naming each recording (C136), then sends the bridge's `POST /recording/purge` once per kept recording through `LiveCaptureClient.purge` — the control credential. **No client is wired yet** (it arrives with the bar), so the button is off with that reason; the recorder's own hourly rule deletes on time regardless |
+| Live Capture | the recordings and the amount kept; Purge Now | the transcripts under `Journal/Transcripts/` (`GET /api/knowledge/pages?prefix=…`) name the recordings; `GET /api/recordings/:id` (T8-4) says of each whether the audio is kept, how much and until when. Purge Now confirms first, naming each recording (C136), then sends the bridge's `POST /recording/purge` once per kept recording through `LiveCaptureClient.purge` — the sixth `LiveCaptureRoute`, the control credential, the one route the bar itself never sends. Off, with the client's reason, while the recorder cannot be asked |
 | Sessions | Let the assistant learn from them | `GET /api/scheduled/routines/session-fold`'s `paused`, flipped with `POST …/pause` and `…/resume` at once — reversible (C136) |
 | Sessions | Keep sessions | `GET /api/scheduled/routines/session-purge` → `config.retention_days` with its origin (*30 days (default)*); no client door writes a routine's config, so the row says where it is set (the routine's own configuration) and offers no field |
 | Sessions | Purge Now, with the count beside it | `POST /api/sessions/purge` (T3-9, reach `local`): `{confirm: false}` on open and after every act — the count (*2 sessions · 3 turns*, *1 not folded yet*) and the unfolded sessions; pressing Purge Now opens a `CostConfirmView` that **lists the unfolded sessions and offers Fold First** (C136) — Fold First is `POST /api/scheduled/routines/session-fold/run` then the preview again; only Purge Now sends `{confirm: true, as_of: <the preview's>}`, so exactly what was counted is deleted. Off, with its reason, for a client that is not the Mac |
@@ -1151,7 +1151,7 @@ shell uses semantic text styles only and fixes no height a label must fit in.
 ## The floating bar
 
 Screen 11 §2–§7 (T8-5; the #253 hold lifted by Q28, 2026-09-30). Metistry's
-second interface: a 34pt glass rail on the right edge of the main display —
+second interface: a 34pt glass rail on a screen edge (the right edge of the main display until Settings ▸ Live Capture says otherwise) —
 the mark, then **Ask · Note · To-do**, then **Record** — drawn **only while
 the live-capture bridge answers on this Mac**. No bridge, no bar, and the
 Capture menu's bar items stay dimmed (screen 11 §8, "absent, not off").
@@ -1161,8 +1161,10 @@ non-activating panel on every Space and over full-screen apps, exactly the
 size of what it shows and anchored at its top-right corner, so a panel
 opening beside the rail grows leftward and nothing transparent sits over the
 desktop catching clicks. The edge and the display are Settings ▸ Live
-Capture's (screen 11 §8), not built here; *Hide Capture Bar* hides it for
-this launch.
+Capture's (screen 11 §8, T6-15): the window reads `CaptureBarPreferences`
+and re-anchors on change — the rail on the chosen edge of the chosen
+display, panels opening toward the screen — and the pane's switch off is no
+panel at all; *Hide Capture Bar* hides it for this launch.
 
 | | what it does |
 | --- | --- |

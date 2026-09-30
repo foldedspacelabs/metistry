@@ -43,7 +43,7 @@ import { CONNECTION_ROUTE, CONNECTIONS_NOT_AVAILABLE, listConnections, oneConnec
 import { VAULT_STATUS_NOT_AVAILABLE, VaultStatusUnavailable, type VaultStatusReader } from "./vault-status.js";
 import { applyRollback, carriesRollback, parseRollbackAsk, raiseRollback, rollbackOf, type VaultReverter } from "./vault-rollback.js";
 import { NDJSON_CONTENT_TYPE, RUNS_EXPORT_QUERY, parseExportParams, streamRunsExport } from "./runs-export.js";
-import { consultRoute, route as routeMessage, servedKindOf, threadFactsOf, type RoutePolicy, type Rules } from "./router.js";
+import { consultRoute, route as routeMessage, servedKindOf, serveRoute, threadFactsOf, type RoutePolicy, type Rules } from "./router.js";
 import { sendToSession, storeSubscription, type PushConfig } from "./push.js";
 import { dispatch, type TargetRegistry } from "./dispatch.js";
 import { DEVIN_PURPOSES, isDevinPurpose } from "./devin.js";
@@ -920,13 +920,54 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       const body = (await readJson(req)) as { thread_id?: string; text?: string; tier?: string };
       if (!body.text) return sendError(res, "invalid_request");
       const thread = body.thread_id ?? "default";
-      const decision = cfg.rules ? routeMessage(cfg.rules, body.text, body.tier) : null;
+      let decision = cfg.rules ? routeMessage(cfg.rules, body.text, body.tier) : null;
       const decidedAt = new Date();
+      const phase = cfg.routePolicy?.mode ?? "shadow";
+      // `policy.mode: serve` (docs/ops/dynamic-router.md §7.3, T9-4): on the
+      // rules' fall-through — and only there — the policy is consulted BEFORE
+      // the message is written, inside its deadline, and its route row is
+      // written first; its choice is the route only once it is on the record
+      // (`serveRoute`). The message's id is reserved first so that row names
+      // it. Every other rule — /note, a fast path, /model, /deep, the picker
+      // — is served exactly as in shadow, and consulted after the 202.
+      let reservedId: number | undefined;
+      if (decision && cfg.rules && cfg.routePolicy && phase === "serve" && servedKindOf(decision) === "default") {
+        const rules = cfg.rules;
+        const idRow = await db.query(`SELECT nextval(pg_get_serial_sequence('inbound_messages', 'id'))::bigint AS id`);
+        const id = Number(idRow.rows[0]?.id);
+        reservedId = id;
+        decision = await serveRoute(
+          {
+            rules,
+            route: decision,
+            text: body.text,
+            attachments: 0, // POST /message takes none today (§2)
+            thread,
+            messageId: id,
+            policy: cfg.routePolicy,
+            // `exclude_id` 0 at serve (§2): the message is not written yet
+            loadFacts: async () => threadFactsOf((await queries.run("route_features", { thread, exclude_id: 0 })).rows[0]),
+            at: decidedAt,
+            phase,
+          },
+          {
+            start: (meta, tool) => startRun(db, { component: "console", kind: "route", tool, meta }),
+            // `tool` is the SERVED kind, known only now: `policy` when the
+            // choice is served. Set before the finish, which is the write
+            // that puts the choice on the record — if either fails, it is
+            // not served (§5).
+            finish: async (runId, rec) => {
+              await db.query(`UPDATE runs SET tool = $2 WHERE id = $1`, [runId, rec.tool]);
+              await finishRun(db, runId, { ok: rec.ok, ...(rec.error !== undefined ? { error: rec.error } : {}), meta: rec.meta });
+            },
+          },
+        );
+      }
       // Durable BEFORE the 202 (SHOULD-7). Routing decision rides in meta.
-      const { rows } = await db.query(
-        `INSERT INTO inbound_messages (thread, text, meta) VALUES ($1, $2, $3) RETURNING id`,
-        [thread, body.text, JSON.stringify(decision ? { route: decision } : {})],
-      );
+      const { rows } =
+        reservedId === undefined
+          ? await db.query(`INSERT INTO inbound_messages (thread, text, meta) VALUES ($1, $2, $3) RETURNING id`, [thread, body.text, JSON.stringify(decision ? { route: decision } : {})])
+          : await db.query(`INSERT INTO inbound_messages (id, thread, text, meta) OVERRIDING SYSTEM VALUE VALUES ($1, $2, $3, $4) RETURNING id`, [reservedId, thread, body.text, JSON.stringify(decision ? { route: decision } : {})]);
       const messageId = rows[0]?.id;
       // The route record (docs/ops/dynamic-router.md §6, T9-1): one `runs` row
       // of kind `route` per message the rules routed. IN SHADOW it is called
@@ -935,18 +976,20 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       // the record existed, whatever the policy does. A record that fails to
       // write is logged and lost; it never fails a message already answered.
       const recordRoute = (): void => {
-        if (!decision || !cfg.rules) return;
+        // at serve the fall-through's row was written before the message was
+        if (!decision || !cfg.rules || reservedId !== undefined) return;
         const rules = cfg.rules;
+        const served = decision;
         void (async () => {
           const runId = await startRun(db, {
             component: "console",
             kind: "route",
-            tool: servedKindOf(decision),
-            meta: { v: 1, message_id: Number(messageId), thread, phase: "shadow" },
+            tool: servedKindOf(served),
+            meta: { v: 1, message_id: Number(messageId), thread, phase },
           });
           const rec = await consultRoute({
             rules,
-            route: decision,
+            route: served,
             text: body.text!,
             attachments: 0, // POST /message takes none today (§2: the feature is defined so adding them is one line)
             thread,
@@ -954,6 +997,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
             policy: cfg.routePolicy,
             loadFacts: async () => threadFactsOf((await queries.run("route_features", { thread, exclude_id: Number(messageId) })).rows[0]),
             at: decidedAt,
+            phase,
           });
           await finishRun(db, runId, { ok: rec.ok, ...(rec.error !== undefined ? { error: rec.error } : {}), meta: rec.meta });
         })().catch((err: unknown) => console.error(`route record for message ${String(messageId)} not written: ${err instanceof Error ? err.message : String(err)}`));

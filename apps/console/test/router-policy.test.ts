@@ -113,7 +113,8 @@ describe("rules.yaml `policy:` loads with the rest of the file", () => {
     const bad = (policy: string, intent?: string) => () => rulesWith(policy, intent);
     const base = "tiers: [fast, default]\ncaps: { tool_calls: 4, tokens: 1000, cost_usd: 0.1 }\n";
     expect(bad(`${base}table:\n  - { id: x, then: { operation: tools, tier: deep } }`)).toThrow(/^invalid rules\.yaml: policy\.table\[0\]\.then\.tier: "deep" is not in policy\.tiers/);
-    expect(bad(`${base}mode: serve`)).toThrow(/policy\.mode: .*T9-4/);
+    expect(bad(`${base}mode: live`)).toThrow(/policy\.mode: mode is shadow or serve/);
+    expect(bad(`${base}mode: serve`)).not.toThrow(); // lifted by T9-4 (docs/ops/dynamic-router.md §7.3)
     expect(bad(`${base}table:\n  - { id: x, when: { intent: smalltalk }, then: { operation: answer, tier: fast } }`, "")).toThrow(/policy\.table\[0\]\.when\.intent: .*no intent: block/);
     expect(bad(`${base}table:\n  - { id: x, then: { operation: "fast_path:secrets", tier: fast } }`)).toThrow(/policy\.table\[0\]\.then\.operation: no fast_path: rule names the query secrets/);
     expect(bad("tiers: [fast, gpt99]\ncaps: { tool_calls: 4, tokens: 1000, cost_usd: 0.1 }")).toThrow(/policy\.tiers\[1\]: "gpt99" is not a key of tiers:/);

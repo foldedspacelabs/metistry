@@ -20,6 +20,7 @@ import {
   resolveAssignment,
   resolveTier,
   turnTier,
+  validateRoutePolicy,
   type Compute,
   type Effort,
   type ResolvedAssignment,
@@ -40,10 +41,40 @@ export function fallbackTiers(model: string): TierMap {
   return { default: { model, effort: "medium" } };
 }
 
+/** `rules.yaml` `policy.caps` — what every turn the router's policy served may spend (docs/ops/dynamic-router.md §1). */
+export interface PolicyCaps {
+  tool_calls: number;
+  tokens: number;
+  cost_usd: number;
+}
+
 export interface LoadedTiers {
   tiers: TierMap;
   /** The file the map came from; absent = the fallback. */
   path?: string;
+  /**
+   * `policy.caps` from the SAME file, when it has a `policy:` block. The drain
+   * reads the caps from its own copy rather than trusting the route on the
+   * row (docs/ops/dynamic-router.md §6): a row cannot grant itself more than
+   * the owner's file allows. Absent = no policy, and a policy-routed row
+   * takes the rules' default.
+   */
+  policyCaps?: PolicyCaps;
+}
+
+/**
+ * `policy.caps` out of a parsed `rules.yaml`, through core's
+ * `validateRoutePolicy` — the SAME parse the console refuses a bad block
+ * with, so a block the console would not start on does not start this
+ * process either. Absent or empty `policy:` = undefined.
+ */
+export function policyCapsOf(doc: Record<string, unknown>, tiers: TierMap): PolicyCaps | undefined {
+  const block = doc.policy;
+  if (block === undefined || block === null) return undefined;
+  const fastPath = Array.isArray(doc.fast_path) ? doc.fast_path.map((r) => (r as { query?: unknown } | null)?.query).filter((q): q is string => typeof q === "string") : [];
+  const p = validateRoutePolicy(block, { tiers: Object.keys(tiers), fastPathQueries: fastPath, intentRules: doc.intent !== undefined && doc.intent !== null });
+  if (!p.ok) throw new Error(`invalid rules.yaml: ${p.errors.join("; ")}`);
+  return { ...p.policy.caps };
 }
 
 /** Load the tier map from the colon-separated candidate paths; later files win (D4). A file that exists but is invalid throws — a bad tier map is a startup failure, not a silent default. */
@@ -58,7 +89,9 @@ export async function loadTiers(paths: string, fallbackModel: string): Promise<L
       throw err;
     }
     const doc = (parseYaml(text) ?? {}) as Record<string, unknown>;
-    loaded = { tiers: parseTiers(doc.tiers), path: p };
+    const tiers = parseTiers(doc.tiers);
+    const policyCaps = policyCapsOf(doc, tiers);
+    loaded = { tiers, path: p, ...(policyCaps ? { policyCaps } : {}) };
   }
   return loaded ?? { tiers: fallbackTiers(fallbackModel) };
 }

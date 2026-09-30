@@ -709,19 +709,20 @@ because a 40 % line decided by three messages either way is not a reading.
 install's number in it; whether PoC-20 phase 1 gets built is the owner's, and
 so is the invariant-4 question it would raise (§3.2 of the research).
 
-### The policy, in shadow — the route record (T9-1, T9-2)
+### The policy — the route record (T9-1, T9-2), and serving (T9-4)
 
 Invariant 4, as ratified on 2026-09-26, says every routing choice is recorded
 with its reasons. `docs/ops/dynamic-router.md` is the whole spec; this is
 what the report shows of it. For **every** `POST /message` the console routed
 with a ruleset loaded, it writes one `runs` row: `component: console`, `kind:
 route`, `tool` the served kind (`note`, `fast_path`, `override`, `default`, or
-`policy` once T9-4 serves), no `provider` or `model` (a route row buys
+`policy` when the policy's choice was served), no `provider` or `model` (a route row buys
 nothing), and `meta` v1 — the rules' route, the cheap features (`words`,
 `attachments`, `thread_turns`, `recent_failures`, `reask`), and what the
 policy did (`meta.policy.outcome`, one of §5's eight).
 
-**In shadow, and after the 202.** The row is written once the message is
+**In shadow, and after the 202** (the default, `mode: shadow`; at `mode:
+serve` the fall-through's row is written *first* — below). The row is written once the message is
 filed and answered, so nothing the policy answers, throws or fails to
 answer can reach the served route, the 202 body or the reply — T9-1's tests
 hold that byte for byte at the door. The consultation has one deadline,
@@ -744,7 +745,7 @@ so in a sentence instead of seven tables of zeroes. With it:
 
 ```yaml
 policy:
-  mode: shadow                     # serve is refused at load until T9-4
+  mode: shadow                     # shadow records; serve makes the choice the route (below)
   tiers: [fast, default, deep]     # the allow-list, cheapest first — tier names, never models
   timeout_ms: 400                  # the whole consultation; 50–2000
   caps: { tool_calls: 12, tokens: 150000, cost_usd: 0.50 }   # no defaults
@@ -797,13 +798,56 @@ It prints, each over its own denominator:
 
 Every label from a closed vocabulary is a row even at zero; the owner's own
 names (tiers, table ids) appear once seen. Under 30 consultations the
-section says "widen `--since`". The fifth kind, `policy`, reads 0 until T9-4
+section says "widen `--since`". The fifth kind, `policy`, reads 0 in shadow
 and is not counted as a fall-through: the exit rule above stays about the
 rules alone.
 
+### Serving — `policy.mode: serve` (T9-4)
+
+`serve` is yours to write, and only after the eval below clears the bar you
+accepted — an install stays in `shadow` until its owner writes it
+(`docs/ops/dynamic-router.md` §7.3). What changes, and what does not:
+
+- **Only the fall-through.** `/note`, a fast path, `/model`, `/deep` and the
+  composer's picker are served exactly as in shadow, and your overrides are
+  still consulted only afterwards, as a counterfactual.
+- **The record comes first.** On the fall-through the consultation runs
+  *before* the message is filed, inside `timeout_ms`, and its route row is
+  written before the message is. A choice whose row cannot be written is not
+  served. Absent, timed out, thrown, garbage, no row matched, held by a bound:
+  the message takes today's route, byte for byte.
+- **What a served choice looks like.** `fast_path:<query>` is answered by the
+  console as a fast-path rule is. Every other operation is filed with
+  `meta.route` `{ routed_by: "policy", tier, model, effort, operation,
+  tool_calls, policy_row }` — `model` is the tier's, resolved from your
+  `tiers:`; the policy never names one — and the thread's tier chip shows
+  which tier answered.
+- **The drain builds the turn from it, bounded by its OWN copy of
+  `rules.yaml`.** The assistant reads `policy.caps` from the file (the same
+  validation the console refuses a bad block with) and never from the row: the
+  turn gets the smaller of the row's and the file's `tool_calls`, and the
+  file's `tokens` and `cost_usd`. A policy-routed message the assistant has no
+  caps for runs on the rules' default, with `meta.route_fallback: { from,
+  reason: "no_caps" }` on its `turn` row.
+- **The engine enforces all four.** A call outside the operation's tools
+  (`answer`: none; `retrieve:knowledge`: the four vault reads;
+  `retrieve:queries`: `queries_list`, `queries_run`; `delegate:<crew>`:
+  `agents_delegate` pinned to that crew, plus the vault reads; `tools`:
+  everything) is not made — it gets one fixed refusal and counts toward
+  `tool_calls`. The tool definitions sent do not change (the cached prefix),
+  and nothing is added to the prompt. `tool_calls`, `tokens` and `cost_usd`
+  are checked between requests; past one the loop asks once more with tools
+  off and answers, and the `turn` row says `meta.stopped: max_tool_calls |
+  max_tokens | max_budget`. Turns the rules served keep today's limits.
+- **Budgets still win.** The guard runs on the tier the policy chose; if it
+  refuses it, the drain re-resolves the turn **once** to the rules' default
+  and asks again — so under `critical_only` your message is answered exactly
+  as it would be with no policy — and the `turn` row carries
+  `meta.route_fallback: { from, reason: "budget" }`. It never retries twice.
+
 ### The confirmatory eval — `metistry-eval complexity` (T9-3)
 
-`mode: serve` waits on the bar you accepted (plan §4 Q2): two weeks of shadow,
+Write `mode: serve` only once the bar you accepted is cleared (plan §4 Q2): two weeks of shadow,
 then this eval (`docs/ops/dynamic-router.md` §7.2). It is yours to run — the
 fixtures, `compute.yaml` and the local server are the instance's:
 
@@ -1413,11 +1457,12 @@ above is PoC-20 phase 0, the measurement that says whether this tier is worth
 turning on at all.
 
 **What it is not.** The tier emits a FACT — what the message says — and never
-a destination. It names no tier and no model, `route()` does not read it, and
-the console's composer still routes by regex alone. Since invariant 4 was
-ratified (2026-09-26) the router's policy may read a verdict as one feature
-among several — the table in `rules.yaml` decides what it means, in shadow
-until T9-4 ("The policy, in shadow" above).
+a destination. It names no tier and no model, and `route()` — the rules —
+does not read it. Since invariant 4 was ratified (2026-09-26) the router's
+policy may read a verdict as one feature among several — the table in
+`rules.yaml` decides what it means, recorded in shadow and served only once
+you write `mode: serve` ("The policy — the route record" and "Serving"
+above).
 
 ### Embeddings
 

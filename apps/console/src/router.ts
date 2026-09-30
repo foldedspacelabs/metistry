@@ -1,6 +1,12 @@
-// The router (invariant 4): deterministic — prefix, regex, explicit
-// commands only. No model decides which model to use. Lives in the console
-// (CRIT-3: no third container). First match wins.
+// The router (invariant 4): the RULES are deterministic — prefix, regex,
+// explicit commands only — and they run first and always win. Lives in the
+// console (CRIT-3: no third container). First match wins.
+//
+// Invariant 4 as ratified on 2026-09-26: inside the rules' bounds a local
+// policy may choose the operations and the tier for a request. That policy is
+// consulted only on the rules' fall-through, and only in `policy.mode: serve`
+// does its choice become the route (T9-4, `serveRoute` below) — never inside
+// `route()`, which is the rules alone.
 //
 // What the router picks is a TIER NAME. A tier is a (model, effort) pair
 // (core's `tiers.ts`, cost research decision 2); the router resolves it here
@@ -32,6 +38,8 @@ import {
   type ComplexityFeature,
   type Effort,
   type IntentFeature,
+  type PolicyMode,
+  type RouteOperation,
   type ModelFeatureOutcome,
   type ModelFeatures,
   type RoutePolicyConfig,
@@ -74,10 +82,28 @@ const rulesSchema = z.object({
 export type Rules = z.infer<typeof rulesSchema> & { policy?: RoutePolicyConfig };
 export type { TierMap };
 
+/**
+ * What a message is served as. `route()` makes the first three shapes with
+ * `routed_by: "rule" | "override"`; a `policy`-routed one is made only by
+ * `serveRoute` at `policy.mode: serve` (docs/ops/dynamic-router.md §6,
+ * "`inbound_messages.meta.route` at serve"), and carries the three additive
+ * fields the drain builds the turn from — never a model the policy named:
+ * `model` is the tier's, resolved here exactly as for any other route.
+ */
 export type Route =
-  | { kind: "fast_path"; query: string; routed_by: "rule" }
+  | { kind: "fast_path"; query: string; routed_by: "rule" | "policy"; policy_row?: string }
   | { kind: "note"; text: string; routed_by: "rule" }
-  | { kind: "model"; tier: string; model: string; effort: Effort; text: string; routed_by: "rule" | "override" };
+  | {
+      kind: "model";
+      tier: string;
+      model: string;
+      effort: Effort;
+      text: string;
+      routed_by: "rule" | "override" | "policy";
+      operation?: RouteOperation;
+      tool_calls?: number;
+      policy_row?: string;
+    };
 
 export function loadRules(yamlText: string): Rules {
   const doc: unknown = parseYaml(yamlText);
@@ -98,7 +124,7 @@ export function loadRules(yamlText: string): Rules {
 }
 
 /** A model route for a tier NAME, resolved through the map (an unknown name lands on `default`, never on an invented model). */
-function modelRoute(tiers: TierMap, name: string | undefined, text: string, routed_by: "rule" | "override"): Route {
+function modelRoute(tiers: TierMap, name: string | undefined, text: string, routed_by: "rule" | "override"): Route & { kind: "model" } {
   const t = resolveTier(tiers, name);
   return { kind: "model", tier: t.tier, model: t.model, effort: t.effort, text, routed_by };
 }
@@ -119,13 +145,14 @@ function modelRoute(tiers: TierMap, name: string | undefined, text: string, rout
 // served route untouched, and T9-1's tests hold that at the HTTP door. The
 // policy that fills it is the owner's table in `rules.yaml` `policy:`
 // (T9-2, `makeRoutePolicy` below, over core's `router-policy.ts`); with no
-// block every row reads `policy.outcome: "absent"`, as before. It is still
-// SHADOW: it chooses, the choice is recorded, and the rules' route is what
-// is served until T9-4.
+// block every row reads `policy.outcome: "absent"`, as before. In
+// `mode: shadow` (the default) it chooses, the choice is recorded, and the
+// rules' route is what is served. In `mode: serve` (T9-4, `serveRoute`) a
+// choice on the fall-through is served — written to the record first.
 //
-// It sits above `route()` on purpose: collectors/test/invariant4.test.ts reads
-// `route()` to the end of this file and requires it to stay blind to any
-// classifier, and the record is not part of the rules.
+// It sits above `route()` on purpose: `route()` is the rules alone, and
+// apps/console/test/invariant4.test.ts holds that every rule is served
+// identically with any policy wired.
 
 /** The five words `route_report` counts a served route by — the four the rules make, and `policy` (T9-4; reads 0 until then). */
 export type ServedKind = "note" | "fast_path" | "override" | "default" | "policy";
@@ -193,6 +220,8 @@ export interface ThreadFacts {
  * sees counts and names only, never the message.
  */
 export interface RoutePolicy {
+  /** `policy.mode`: `shadow` (absent) records what it would choose and serves the rules' route; `serve` makes its choice on the fall-through the route (T9-4). */
+  mode?: PolicyMode;
   decide(input: { features: RouteFeatures; session: SessionFacts; served: ServedKind }): PolicyAnswer | Promise<PolicyAnswer>;
   /**
    * The model features the table reads (§2) — `intent`, `complexity` — from
@@ -283,7 +312,8 @@ const ROW_ID_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
  * the policy's own allow-list, a tool budget above its cap — none of them
  * is a choice, and none of them reaches the record as one.
  */
-function checkAnswer(a: unknown, tiers: TierMap, policy: Pick<RoutePolicy, "tiers" | "toolCallsCap">): PolicyAnswer | string {
+function checkAnswer(a: unknown, rules: Rules, policy: Pick<RoutePolicy, "tiers" | "toolCallsCap">): PolicyAnswer | string {
+  const tiers = rules.tiers;
   if (typeof a !== "object" || a === null) return "the policy answered something that is not a decision";
   const o = a as Record<string, unknown>;
   if (o.outcome === "no_match") return { outcome: "no_match" };
@@ -297,6 +327,16 @@ function checkAnswer(a: unknown, tiers: TierMap, policy: Pick<RoutePolicy, "tier
   if (typeof c.operation !== "string" || c.operation.length > 80) return "the policy chose no operation";
   if (!parseOperation(c.operation)) return "the policy chose an operation outside the vocabulary";
   const chosen: PolicyChoice = { operation: c.operation };
+  const op = parseOperation(c.operation)!;
+  const runsModel = op.form !== "fast_path:<query>";
+  // A fast path runs no model, so it has no tier and no tool budget; every
+  // other operation runs one on a tier the allow-list names (§4, `then`).
+  if (runsModel && c.tier === undefined) return "the policy chose a model operation with no tier";
+  if (!runsModel && c.tier !== undefined) return "the policy gave a tier to an operation that runs no model";
+  // A fast path the policy chooses is one the owner's rules already answer
+  // from (§3) — it can reach no query the rules could not.
+  if (op.form === "fast_path:<query>" && !rules.fast_path.some((r) => r.query === op.query)) return "the policy chose a fast path no fast_path: rule names";
+  if (c.tool_calls !== undefined && (op.form === "answer" || !runsModel)) return "the policy gave a tool_calls to an operation that makes no tool calls";
   if (c.tier !== undefined) {
     if (typeof c.tier !== "string" || !Object.hasOwn(tiers, c.tier)) return "the policy named a tier outside tiers:";
     if (policy.tiers && !policy.tiers.includes(c.tier)) return "the policy named a tier outside policy.tiers";
@@ -358,6 +398,19 @@ export interface RouteRecord {
   meta: Record<string, unknown>;
 }
 
+/**
+ * A consultation: its record, and what is served. `route` is the rules'
+ * route, byte for byte, in every case but one — `phase: "serve"`, the rules'
+ * fall-through, and a `chosen` decision — when it is the policy's. Every
+ * failure, timeout, no-match or bound serves the rules' default (§5). Kept
+ * apart from the record because a `Route` carries the text and the record
+ * never does.
+ */
+interface Consultation {
+  record: RouteRecord;
+  route: Route;
+}
+
 export interface ConsultInput {
   rules: Rules;
   /** the route the rules served — already written, already answered */
@@ -373,13 +426,41 @@ export interface ConsultInput {
   loadFacts: () => Promise<ThreadFacts | null>;
   /** when the rules decided — what `reask`'s thirty minutes are measured to */
   at: Date;
+  /** `policy.mode` in force: `serve` lets a chosen decision on the fall-through become the route. Absent = `shadow` */
+  phase?: PolicyMode | undefined;
 }
 
 /** What the served route was, in the record's words: counts and names, and never the `text` a `Route` carries. */
 function servedOf(r: Route): Record<string, unknown> {
   if (r.kind === "note") return { kind: "note", routed_by: r.routed_by };
-  if (r.kind === "fast_path") return { kind: "fast_path", query: r.query, operation: `fast_path:${r.query}`, routed_by: r.routed_by };
-  return { kind: "model", tier: r.tier, operation: "tools", routed_by: r.routed_by };
+  const row = r.policy_row !== undefined ? { policy_row: r.policy_row } : {};
+  if (r.kind === "fast_path") return { kind: "fast_path", query: r.query, operation: `fast_path:${r.query}`, routed_by: r.routed_by, ...row };
+  return { kind: "model", tier: r.tier, operation: r.operation ?? "tools", ...(r.tool_calls !== undefined ? { tool_calls: r.tool_calls } : {}), routed_by: r.routed_by, ...row };
+}
+
+/**
+ * A chosen decision as the route it serves (§6, §7.3). The operation and the
+ * tier are the policy's — already checked against the vocabulary, `tiers:`,
+ * `policy.tiers` and the caps (`checkAnswer`), and against the session and
+ * the registries (`boundDecision`) — and the MODEL is the tier's, resolved
+ * through the same map every other route resolves through. A fast path is
+ * answered by the console as an R4 match is.
+ */
+function policyRoute(rules: Rules, fallThrough: Route & { kind: "model" }, row: string, chosen: PolicyChoice): Route {
+  const op = parseOperation(chosen.operation)!;
+  if (op.form === "fast_path:<query>") return { kind: "fast_path", query: op.query, routed_by: "policy", policy_row: row };
+  const t = resolveTier(rules.tiers, chosen.tier);
+  return {
+    kind: "model",
+    tier: t.tier,
+    model: t.model,
+    effort: t.effort,
+    text: fallThrough.text,
+    routed_by: "policy",
+    operation: chosen.operation as RouteOperation,
+    ...(chosen.tool_calls !== undefined ? { tool_calls: chosen.tool_calls } : {}),
+    policy_row: row,
+  };
 }
 
 const TIMED_OUT = Symbol("timed out");
@@ -399,23 +480,28 @@ async function withDeadline<T>(work: () => Promise<T>, ms: number): Promise<T | 
 }
 
 /**
- * The consultation, in shadow: the features, then the policy if there is
- * one, all under one deadline — and a record of it. It returns a record and
- * nothing else; it cannot change a route, because the route was served
- * before it was called (docs/ops/dynamic-router.md §6, "Shadow does not
- * wait"). Every failure is a value here, never a throw: a policy that throws,
- * answers garbage or never answers is `failed` or `timeout`, and the served
- * route is what the rules said.
+ * The consultation: the features, then the policy if there is one, all under
+ * one deadline — and a record of it. In shadow it cannot change a route,
+ * because the route was served before it was called (docs/ops/dynamic-router.md
+ * §6, "Shadow does not wait"); at serve its `route` is what `serveRoute`
+ * writes onto the message. Every failure is a value here, never a throw: a
+ * policy that throws, answers garbage or never answers is `failed` or
+ * `timeout`, and the served route is what the rules said.
  */
 export async function consultRoute(input: ConsultInput): Promise<RouteRecord> {
+  return (await consult(input)).record;
+}
+
+async function consult(input: ConsultInput): Promise<Consultation> {
   const { rules, route: served, policy } = input;
   const kind = servedKindOf(served);
   const defaultTier = resolveTier(rules.tiers, undefined).tier;
+  const phase: PolicyMode = input.phase ?? "shadow";
   const base: Record<string, unknown> = {
     v: 1,
     message_id: input.messageId,
     thread: input.thread,
-    phase: "shadow",
+    phase,
     rules: { served: kind, default_tier: defaultTier },
     served: servedOf(served),
   };
@@ -446,7 +532,7 @@ export async function consultRoute(input: ConsultInput): Promise<RouteRecord> {
     let answer: PolicyAnswer | string;
     try {
       if (scoring) Object.assign(features, modelFeaturesOf(await scoring));
-      answer = checkAnswer(await policy.decide({ features, session, served: kind }), rules.tiers, policy);
+      answer = checkAnswer(await policy.decide({ features, session, served: kind }), rules, policy);
     } catch (err) {
       answer = `the policy threw: ${err instanceof Error ? err.message : String(err)}`;
     }
@@ -461,32 +547,39 @@ export async function consultRoute(input: ConsultInput): Promise<RouteRecord> {
     const factsError = got === TIMED_OUT ? `route_features ran past ${timeoutMs} ms` : got.factsError;
     const bounded_by = kind === "note" ? ["command:note"] : served.kind === "fast_path" ? [`fast_path:${served.query}`] : [];
     return {
-      tool: kind,
-      ok: true,
-      meta: {
-        ...base,
-        features,
-        ...(factsError !== undefined ? { features_error: factsError } : {}),
-        policy: { outcome: kind === "note" || kind === "fast_path" ? "not_consulted" : "absent", bounded_by },
-        agrees: null,
+      record: {
+        tool: kind,
+        ok: true,
+        meta: {
+          ...base,
+          features,
+          ...(factsError !== undefined ? { features_error: factsError } : {}),
+          policy: { outcome: kind === "note" || kind === "fast_path" ? "not_consulted" : "absent", bounded_by },
+          agrees: null,
+        },
       },
+      route: served,
     };
   }
 
   if (got === TIMED_OUT) {
     const error = `the consultation ran past ${timeoutMs} ms`;
-    return { tool: kind, ok: false, error, meta: { ...base, features: cheap, policy: { outcome: "timeout", bounded_by: ["timeout"] }, agrees: null } };
+    return { record: { tool: kind, ok: false, error, meta: { ...base, features: cheap, policy: { outcome: "timeout", bounded_by: ["timeout"] }, agrees: null } }, route: served };
   }
   const session = got.session;
   const tiersOf = policy.tiers ? { tiers: [...policy.tiers] } : {};
   if (got.factsError !== undefined || typeof got.answer !== "object") {
     const error = got.factsError ?? (typeof got.answer === "string" ? got.answer : "the policy did not answer");
-    return { tool: kind, ok: false, error, meta: { ...base, features: got.features, policy: { outcome: "failed", bounded_by: ["failed"], session, ...tiersOf }, agrees: null } };
+    return { record: { tool: kind, ok: false, error, meta: { ...base, features: got.features, policy: { outcome: "failed", bounded_by: ["failed"], session, ...tiersOf }, agrees: null } }, route: served };
   }
 
   const answer = got.answer;
-  const servedTier = served.kind === "model" ? served.tier : null;
-  const servedOp = served.kind === "model" ? "tools" : `fast_path:${served.kind === "fast_path" ? served.query : ""}`;
+  // At serve, and only on the fall-through, a chosen decision IS the route
+  // (§7.3). An override stays counterfactual whatever the mode: the owner
+  // chose, and the rules win.
+  const route: Route = phase === "serve" && kind === "default" && served.kind === "model" && answer.outcome === "chosen" ? policyRoute(rules, served, answer.row, answer.chosen) : served;
+  const servedTier = route.kind === "model" ? route.tier : null;
+  const servedOp = route.kind === "model" ? (route.operation ?? "tools") : `fast_path:${route.kind === "fast_path" ? route.query : ""}`;
   // What serve would have done with this answer: the row's choice when it
   // passed the bounds, and the rules' default otherwise (§5).
   const would = answer.outcome === "chosen" ? answer.chosen : { operation: "tools", tier: defaultTier };
@@ -500,7 +593,61 @@ export async function consultRoute(input: ConsultInput): Promise<RouteRecord> {
     session,
     ...tiersOf,
   };
-  return { tool: kind, ok: true, meta: { ...base, features: got.features, policy: policyMeta, agrees } };
+  const policyServed = route !== served;
+  return {
+    record: { tool: servedKindOf(route), ok: true, meta: { ...base, ...(policyServed ? { served: servedOf(route) } : {}), features: got.features, policy: policyMeta, agrees } },
+    route,
+  };
+}
+
+/** Where `serveRoute` writes the route row: the two phases of `runs` (core's `startRun`/`finishRun`), injected so a failed write is testable. */
+export interface RouteRecorder {
+  start(meta: Record<string, unknown>, tool: ServedKind): Promise<number>;
+  finish(runId: number, rec: RouteRecord): Promise<void>;
+}
+
+/**
+ * The consultation at `policy.mode: serve` (docs/ops/dynamic-router.md §7.3):
+ * it runs BEFORE the message is written, inside `timeout_ms`, and its row is
+ * written first — so no choice is served that is not on the record (§5, "a
+ * recording failure is a failure"). What it returns is the route to write
+ * onto the message:
+ *
+ *   * the policy's, when the rules fell through, a row was chosen, it passed
+ *     the bounds, and its record was written;
+ *   * the rules' own route, byte for byte, in every other case — the rules
+ *     decided (a command, a fast path, an override, the picker); the policy
+ *     is absent, timed out, threw, answered garbage, matched no row or was
+ *     held by a bound; or either phase of its row could not be written.
+ *
+ * It never throws: a failure here is the rules' default, never a failed
+ * message.
+ */
+export async function serveRoute(input: ConsultInput, recorder: RouteRecorder, log: (line: string) => void = (l) => console.error(l)): Promise<Route> {
+  const rules = input.route;
+  if (servedKindOf(rules) !== "default" || input.policy === undefined) return rules;
+  let runId: number;
+  try {
+    runId = await recorder.start({ v: 1, message_id: input.messageId, thread: input.thread, phase: "serve" }, servedKindOf(rules));
+  } catch (err) {
+    log(`route record not started, so the rules' route is served: ${err instanceof Error ? err.message : String(err)}`);
+    return rules;
+  }
+  let c: Consultation;
+  try {
+    c = await consult({ ...input, phase: "serve" });
+  } catch (err) {
+    // consultRoute turns every failure into a value; this is the belt to its braces
+    log(`route consultation threw, so the rules' route is served: ${err instanceof Error ? err.message : String(err)}`);
+    return rules;
+  }
+  try {
+    await recorder.finish(runId, c.record);
+  } catch (err) {
+    log(`route record not written, so the policy's choice is not served: ${err instanceof Error ? err.message : String(err)}`);
+    return rules;
+  }
+  return c.route;
 }
 
 // ---- The policy (T9-2): the owner's table, bounded, in shadow ----------------
@@ -529,8 +676,9 @@ export interface RoutePolicyDeps {
 
 /**
  * The owner's table as a `RoutePolicy`, or undefined when `rules.yaml` has
- * no `policy:` block. `mode: serve` never gets here — `loadRules` refuses it
- * until T9-4 — so whatever this chooses is recorded and not served.
+ * no `policy:` block. In `mode: shadow` whatever this chooses is recorded and
+ * not served; in `mode: serve` a chosen decision on the fall-through is the
+ * route (`serveRoute`).
  *
  * The scorer is asked only for what some row reads (`policyReads`, once),
  * with each call cut off inside the owner's deadline (`scorerTimeoutMs`), so
@@ -549,6 +697,7 @@ export function makeRoutePolicy(deps: RoutePolicyDeps): RoutePolicy | undefined 
   const modelFeatures = (text: string, at: Date): Promise<ModelFeatures> =>
     scoreRouteFeatures(access, text, { reads, intentRules: deps.rules.intent, complexityMinConfidence: policy.complexity?.min_confidence, timeoutMs, now: at });
   return {
+    mode: policy.mode,
     timeoutMs: policy.timeout_ms,
     tiers: policy.tiers,
     toolCallsCap: policy.caps.tool_calls,

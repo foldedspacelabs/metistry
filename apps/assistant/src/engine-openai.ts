@@ -13,6 +13,12 @@
 // - `max_turns`, and a graceful ending when it is reached: the last request
 //   goes out with `tool_choice: "none"`, so a run that ran out of turns still
 //   answers instead of throwing.
+// - A POLICY-SERVED TURN'S BOUNDS (docs/ops/dynamic-router.md §1, §3): the
+//   operation's tool allow-list, enforced at the call (a call outside it is
+//   not made and gets one fixed refusal), and the `tool_calls`, `tokens` and
+//   cost caps, checked between requests with the same graceful ending as
+//   `max_turns`. The definitions sent never change, and nothing is added to
+//   the prompt. A turn the rules served has none of them.
 // - THE NO-PROGRESS VETO (Atomic ADOPT 4). "Unproductive" is defined, not
 //   sensed: a turn is unproductive when every tool call it made repeats a
 //   (name, arguments) already made in this run AND comes back byte-identical
@@ -60,6 +66,8 @@ import {
   credentialEnvNames,
   DEFAULT_MAX_OUTPUT_TOKENS,
   credentialFromEnv,
+  operationTools,
+  parseOperation,
   providerCredential,
   SecretRedactor,
   unpricedNote,
@@ -71,7 +79,7 @@ import {
 } from "@foldedspacelabs/metistry-core";
 import type { z } from "zod";
 import type { ChatMessage, SessionStore } from "./sessions.js";
-import { toolCallKey, type ToolHost, type ToolSpec } from "./tools.js";
+import { qualify, toolCallKey, type ToolHost, type ToolSpec } from "./tools.js";
 import type { Engine, TurnGuard, TurnResult, TurnSpec } from "./engine.js";
 import { runShadow, shouldShadow, type ShadowRubric, type ShadowRun } from "./shadow.js";
 import type { ArchivedToolCall, SessionArchive } from "./archive.js";
@@ -441,6 +449,39 @@ export interface OpenAiEngineConfig {
 
 const callKey = (c: ToolCall): string => toolCallKey(c.name, c.args);
 
+/**
+ * What a call outside a policy-served turn's operation gets back instead of
+ * being made (docs/ops/dynamic-router.md §3). ONE fixed string: it names no
+ * tool and no list, because it is a refusal at the tool, not an instruction —
+ * nothing in the prompt asks the model to stay inside the operation.
+ */
+export const OPERATION_REFUSAL = "not called: this turn's operation does not include that call";
+/** What a call past the turn's `tool_calls` cap gets back instead of being made. */
+export const TOOL_CALLS_REFUSAL = "not called: this turn has made every tool call it may make";
+
+/**
+ * The turn's narrowing, from its spec: which calls it may EXECUTE. `null` is
+ * the whole surface (`tools`, and every turn the rules served). An operation
+ * that does not parse executes nothing — fail closed; the drain has already
+ * refused to hand one over.
+ */
+export function turnNarrowing(spec: Pick<TurnSpec, "operation">): { allow: ReadonlySet<string>; crew?: string } | null {
+  if (spec.operation === undefined) return null;
+  const op = parseOperation(spec.operation);
+  if (!op) return { allow: new Set() };
+  const names = operationTools(op);
+  if (names === undefined) return null;
+  return { allow: new Set(names.map(qualify)), ...(op.form === "delegate:<crew>" ? { crew: op.crew } : {}) };
+}
+
+/** Would this call be refused by the narrowing? `agents_delegate` under `delegate:<crew>` is held to that one crew. */
+function outsideOperation(narrowing: { allow: ReadonlySet<string>; crew?: string } | null, call: ToolCall): boolean {
+  if (narrowing === null) return false;
+  if (!narrowing.allow.has(call.name)) return true;
+  if (narrowing.crew !== undefined && call.name === qualify("agents_delegate")) return call.args.crew !== narrowing.crew;
+  return false;
+}
+
 const NUDGE =
   `Those calls returned nothing you had not already seen. Either take a different action or answer with what you have — ` +
   `repeating a call you have already made does not add information.`;
@@ -470,6 +511,12 @@ export function makeOpenAiEngine(cfg: OpenAiEngineConfig): Engine {
     const host = cfg.tools({ ...spec, turnId });
     const maxTurns = spec.maxTurns ?? cfg.maxTurns ?? DEFAULT_MAX_TURNS;
     const thread = spec.thread ?? "default";
+    // A policy-served turn (docs/ops/dynamic-router.md §1, §3): what it may
+    // execute, and whether it may use tools at all. Enforced below at the
+    // tool and between requests — never by a line in the prompt.
+    const narrowing = turnNarrowing(spec);
+    const toolsOff = narrowing?.allow.size === 0 || spec.maxToolCalls === 0;
+    let callsMade = 0;
 
     const resumed = spec.resume ? await cfg.sessions.load(spec.resume, assignment.provider, assignment.model) : null;
     const sessionId = resumed?.id ?? cfg.sessions.newId();
@@ -527,8 +574,21 @@ export function makeOpenAiEngine(cfg: OpenAiEngineConfig): Engine {
           stopped = "max_budget";
           break;
         }
+        // A policy-served turn's other two caps (§1), checked the same way:
+        // the request that crossed one has completed, and the closing
+        // request below follows it.
+        if (spec.maxTokens !== undefined && usage.tokens_in + usage.tokens_out >= spec.maxTokens) {
+          stopped = "max_tokens";
+          break;
+        }
+        if (spec.maxToolCalls !== undefined && turns > 0 && callsMade >= spec.maxToolCalls) {
+          stopped = "max_tool_calls";
+          break;
+        }
         turns++;
-        const res = await client.chat([...system, ...history], { tools, toolChoice: "auto" });
+        // The definitions go out on every request whatever the operation (the
+        // cached prefix); `answer`, or a budget of no tool calls, asks for none.
+        const res = await client.chat([...system, ...history], { tools, toolChoice: toolsOff ? "none" : "auto" });
         account(res);
         history.push(res.message);
         if (res.toolCalls.length === 0) {
@@ -540,7 +600,12 @@ export function makeOpenAiEngine(cfg: OpenAiEngineConfig): Engine {
         for (const call of res.toolCalls) {
           toolsUsed[call.name] = (toolsUsed[call.name] ?? 0) + 1;
           toolSequence.push(call.name);
-          const out = await host.call(call.name, call.args);
+          // Refused calls count toward `tool_calls` (§1): the cap is on what
+          // the turn ASKS for, so a model cannot spend it past the limit by
+          // asking for things it may not have.
+          callsMade++;
+          const refused = outsideOperation(narrowing, call) ? OPERATION_REFUSAL : spec.maxToolCalls !== undefined && callsMade > spec.maxToolCalls ? TOOL_CALLS_REFUSAL : undefined;
+          const out = refused !== undefined ? { text: refused, isError: true } : await host.call(call.name, call.args);
           calls.push({ id: call.id, tool: call.name, args: call.args, result: out.text, is_error: out.isError });
           const key = callKey(call);
           const before = seen.get(key);
@@ -574,7 +639,11 @@ export function makeOpenAiEngine(cfg: OpenAiEngineConfig): Engine {
               ? "Stop using tools. Answer now with what you already know, and say plainly what you could not find out."
               : stopped === "max_budget"
                 ? "This run has reached its cost limit. Answer now with what you have, and say what is still open."
-                : "You have run out of tool turns. Answer now with what you have, and say what is still open.",
+                : stopped === "max_tokens"
+                  ? "This turn has reached its token limit. Answer now with what you have, and say what is still open."
+                  : stopped === "max_tool_calls"
+                    ? "This turn has made every tool call it may make. Answer now with what you have, and say what is still open."
+                    : "You have run out of tool turns. Answer now with what you have, and say what is still open.",
         };
         closing = { at: history.length, message: ask };
         const final = await client.chat([...system, ...history, ask], { toolChoice: "none" });

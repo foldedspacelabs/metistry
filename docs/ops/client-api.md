@@ -578,6 +578,11 @@ Content-Type: application/json
   `ended_reason: crashed` from an owner credential raises **one** `report`
   in Needs You, keyed on the session (C137). An agent bearer's capture
   raises none.
+- **The meeting's card** (T8-7): from an owner credential the transcript
+  opens one card in Needs You — `group_id: "meeting:<session id>"`, named
+  from the calendar — and the Notes and To-dos the owner made from the bar
+  during the recording are captures too, anchored to the session until the
+  card's Approve moves them (*A meeting*, below; `docs/ops/inbox.md`).
 - **Window and Screen recordings** (T8-3) arrive the same way, through the
   same door: the transcript is the picked content's sound (`(apps)`) and the
   owner's microphone (`(you)`). The picture itself (`screen.mp4`) stays in
@@ -722,7 +727,7 @@ local probes, are `metistry doctor` on the Mac (M6).
 ### Needs You — requests and their answers
 
 ```
-GET  /api/proposals[?since=&limit=]   200 {"proposals":[{…the stored row…, "request":{type, word, body, primary, revise, decline, grouped, decisions, questions?}, "subject":{basis, fingerprint} | null}],"cursor":"…","more":false}
+GET  /api/proposals[?since=&limit=]   200 {"proposals":[{…the stored row, with group_id…, "request":{type, word, body, primary, revise, decline, grouped, decisions, questions?}, "subject":{basis, fingerprint} | null}],"cursor":"…","more":false}
 POST /api/proposals/batch             {ids, decision: later | skip | deny, feedback?}   200 {"results":[…]}
 POST /api/proposals/:id               {decision, feedback?, area?, answers?, if_unchanged?: {seen_at?, subject?}}
                                       200 {"ok":true, …}   409 already_decided | stale   404   400
@@ -849,6 +854,65 @@ rows `GET /api/proposals` already serves.
   already_decided` a late answer gets (`proposal.payload.cleared`) and in
   Activity's detail. A mirror its source cleared is nobody's decision here:
   the weekly review notes it apart from what the owner decided.
+
+#### A meeting — one card, Accept All in order, and the jots' anchors (T8-7)
+
+A recording is **one card** (C81, screen 3 §10.3): its rows share
+`group_id: "meeting:<session id>"`, served on every row of `GET /api/proposals`
+(`null` for a row that is its own card), so a client groups without a second
+read. No route was added; `group_id` is a column the list now returns, beside
+the stored row.
+
+```
+GET /api/proposals → {…, "kind":"knowledge", "source_agent":"inbox-drain", "trust":"user",
+                      "group_id":"meeting:20260928-120000-00ab",
+                      "payload":{…, "classification":{"kind":"transcript", …},
+                                 "meeting":{"session_id":"20260928-120000-00ab", "session_title":"Vendor review",
+                                            "started_at":"…", "ended_at":"…", "event_id":"…" | null,
+                                            "event":{event_id, title, start, end, note} | null,
+                                            "transcript_path":"Journal/Transcripts/2026-09-28-20260928-120000-00ab.md",
+                                            "jots":[{"inbox_id":41, "jot":"note", "offset_s":754}, …]}}}
+
+POST /api/proposals/42  {"decision":"allow"}        ← the transcript's row
+200 {"ok":true, "anchored":{"session":"20260928-120000-00ab",
+                            "path":"Journal/Transcripts/2026-09-28-20260928-120000-00ab.md" | null,
+                            "promoted":[41, 43], "already":[], "kept":[{"inbox_id":44, "why":"…"}]}}
+```
+
+- **The inbox drain opens it**, from a transcript an owner credential
+  delivered (`docs/ops/inbox.md`). `session_title` is the calendar event the
+  recording overlapped the most (`day_events`), else the recorder's own title;
+  the Mac's `MeetingGroup` reads it. Whatever raises another row for the
+  session later — the notes and to-dos drafted from it — uses the same id
+  (core `meetingGroupId`) and lands on the same card.
+- **Accept All is one `allow` per row, in order** — each its own request,
+  its own receipt and its own audit row — **never the batch**, which refuses
+  `allow` because each approval carries its own consequence. A row answered
+  elsewhere meanwhile is its own `409 already_decided`, and the rest are still
+  answered: *4 of 5 accepted*. Decline All is one `deny` per row after the
+  client-held Undo (§2.12).
+- **The owner's jots are not rows.** A Note or To-do made from the bar during
+  the recording is a `POST /capture` like any other, saved when typed, with
+  `kind: "jot"`, `jot: "note" | "todo"`, `capture_session` and `offset_s` in
+  its frontmatter (`docs/ops/inbox.md` has the file). It asks nothing; the
+  card counts it (`payload.meeting.jots`).
+- **Approve of the transcript's row moves the anchors** (C77): each of the
+  session's jots has its `capture_session` line rewritten to
+  `source: "meeting:<transcript path>"`, `offset_s` kept, committed as `user`
+  through the vault bridge, compare-and-swap on the bytes it read — a jot the
+  owner edited a moment before is read again and promoted with the edit, never
+  overwritten. The receipt is `anchored`, answered and kept on the row
+  (`payload.anchored`, with `at` and `by`). `promoted` are the jots this
+  Approve moved; `already`, those an earlier answer did; `kept`, those left on
+  their session anchor and why. **Anchors point into `Journal/Transcripts/`
+  and nowhere else** (the owner's ruling on W3 question 29): a transcript
+  filed anywhere else moves nothing (`path: null`, every jot `kept`).
+- **Only the drain's own card, only the owner's jots.** A row an agent raised
+  with the same group and payload moves nothing and is answered like any
+  note; an agent's capture with a jot's frontmatter is never a jot; Revise,
+  Decline and Later move nothing. A vault that cannot be reached leaves the
+  row pending with `payload.error` (C45), and Approve again moves what is
+  left.
 
 #### A question — several per request, answered per question (T2-3)
 

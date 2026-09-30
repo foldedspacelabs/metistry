@@ -13,6 +13,8 @@ import { mountMore } from "./more.js";
 import { mountNeedsYou } from "./needs-you.js";
 // Notifications and install (T7-5, screen 18 §6): the ask, the install sheet, Settings' push rows.
 import { mountNotify } from "./notify.js";
+// Settings (T7-6, design-build-plan §2.3): the grouped list; Mac-only rows are their reason, never a control.
+import { mountSettings } from "./settings.js";
 import { mountToday } from "./today.js";
 import { artifactRoute, mountWork, roomRoute } from "./work.js";
 // The live-changes stream and the polls it stands in for (T7-7, §2.20).
@@ -89,7 +91,7 @@ const VIEWS = {
   feed: { tab: "more", title: "Activity", sections: ["feed"], back: "more" },
   agents: { tab: "more", title: "Agents", sections: ["agents"], back: "more" },
   agent: { tab: "more", title: "Agent", sections: ["agent"], back: "agents" },
-  settings: { tab: "more", title: "Settings", sections: ["status", "devices"], back: "more" },
+  settings: { tab: "more", title: "Settings", sections: ["settings"], back: "more" },
   // The bell's sheet under 900px; at 900px a view, reached from its sidebar row.
   triage: { tab: null, title: "Needs You", sections: ["triage"], sheet: "narrow" },
   capture: { tab: null, title: "Capture", sections: ["capture"], sheet: "always" },
@@ -824,38 +826,12 @@ $("capture-form").onsubmit = async (e) => {
   if (res.ok) done();
 };
 
-// ----- status + push -----
-// The four states of core's check() contract, each its own word and its own
-// ink (P5, design-system §3.13). `absent` is "not configured" — a fact, not a
-// fault — so it never reads as `failed`, and `degraded` (answering, not
-// healthy) never reads as either (C10). A word outside the contract is shown
-// as it came, in the neutral ink: never a guess at a colour.
-const CHECK_STATES = ["ok", "degraded", "failed", "absent"];
-const CHECK_WORD = { ok: "ok", degraded: "degraded", failed: "failed", absent: "not configured" };
-function checkRowHtml(c) {
-  const known = CHECK_STATES.includes(c.status);
-  return `<li><span>${esc(c.name)} <span class="muted">${esc(c.probe)}</span></span><span class="${known ? c.status : "absent"}">${esc(known ? CHECK_WORD[c.status] : c.status)} · ${esc(String(c.latency_ms))}ms</span></li>`;
-}
-// The line above the rows, so the page answers before it is read: "9 ok ·
-// 1 degraded · 2 not configured", or that everything is healthy.
-function checksSummary(checks) {
-  if (checks.length === 0) return "no checks reported";
-  const n = (s) => checks.filter((c) => c.status === s).length;
-  if (n("ok") === checks.length) return `all ${checks.length} healthy`;
-  const other = checks.length - CHECK_STATES.reduce((t, s) => t + n(s), 0);
-  return [...CHECK_STATES.map((s) => [n(s), CHECK_WORD[s]]), [other, "unrecognised"]]
-    .filter(([count]) => count > 0)
-    .map(([count, word]) => `${count} ${word}`)
-    .join(" · ");
-}
-
-async function loadStatus() {
-  const res = await api("/api/status");
-  const { checks } = await res.json();
-  $("checks").innerHTML = `<li class="checks-summary">${esc(checksSummary(checks))}</li>` + checks.map(checkRowHtml).join("");
-  // one review list across every configured repo (github-state → prs_for_review)
+// ----- reviews -----
+// The review list across every configured repo (github-state → prs_for_review),
+// read beside Settings as it always was; Settings itself is settings.js (T7-6).
+async function loadReviews() {
   const { rows } = await (await api("/api/q/prs_for_review")).json();
-  $("reviews").innerHTML = reviewListHtml(rows); // shared with the dashboard panel
+  $("reviews").innerHTML = reviewListHtml(rows);
 }
 
 // Notifications and install: their own file (T7-5; screen 18 §6). Settings'
@@ -971,18 +947,11 @@ const work = mountWork({ $, api, show, closeSheet, retitle, poll: (fn, ms) => li
 const knowledge = mountKnowledge({ $, api, show, retitle });
 const more = mountMore({ $, api, show, offline: isOffline });
 
-// ----- devices -----
-async function loadDevices() {
-  const res = await api("/api/devices");
-  const { devices } = await res.json();
-  $("device-list").innerHTML = devices
-    .map((d) => `<li><span>${esc(d.label)} <span class="muted">seen ${new Date(d.last_seen_at).toLocaleDateString()}</span></span>
-      ${d.revoked ? '<span class="muted">revoked</span>' : `<button data-revoke="${d.id}">revoke</button>`}</li>`)
-    .join("");
-  document.querySelectorAll("[data-revoke]").forEach((b) => (b.onclick = async () => {
-    if (confirm("revoke this device session?")) { await api(`/api/devices/${b.dataset.revoke}/revoke`, { method: "POST" }); loadDevices(); }
-  }));
-}
+// ----- Settings: its own file (T7-6; design-build-plan §2.3) -----
+// The grouped list, its reads, and its writes — spending limits, a project's
+// daily budget, a device revoked or every device signed out — each through a
+// door the console already has, confirmed in the page, never offline.
+const settings = mountSettings({ $, api, show, notify, offline: isOffline });
 
 // ===== Usage and the review list (the Phase 4 dashboard, placed by the shell) =====
 // Every server value is output-encoded via esc() before it touches the DOM
@@ -1086,7 +1055,7 @@ function loadUsage() {
 }
 
 async function loadSettings() {
-  await Promise.all([loadStatus(), loadDevices(), notify.settings()]);
+  await Promise.all([settings.settings(), loadReviews().catch(() => {})]);
 }
 
 // ===== feed (home) + agent presence =====
@@ -1306,7 +1275,7 @@ const LIVE_REFRESH = {
   agents: () => more.refresh(),
   agent: () => more.refresh(),
   usage: () => loadUsage(),
-  settings: () => loadSettings(),
+  settings: () => Promise.all([settings.refresh(), loadReviews().catch(() => {})]),
 };
 
 /** A text field with focus inside one of these sections: a repaint would take what is being typed. */

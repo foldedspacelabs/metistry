@@ -247,22 +247,21 @@
       </div>
     </section>
 
-    <!-- Status and Devices are Settings (More ▸ Settings; the sidebar's foot at
-         900px) until Settings is §2.3's grouped list. -->
-    <section id="status" hidden>
+    <!-- Settings (More ▸ Settings; the sidebar's foot at 900px): design-build-plan
+         §2.3's table as a grouped list, drawn by settings.js — the Mac's panes in
+         its order. A row §2.3 keeps on the Mac is its reason and never a control:
+         the `local` routes behind them refuse a passkey session (F-13). The
+         Notifications block is this device's, and notify.js's. -->
+    <section id="settings" hidden>
+      <div id="settings-head"></div>
+      <h3>Notifications</h3>
+      <ul class="group settings-group" aria-label="Notifications">
+        <li class="kv push"><span class="k">This Device<span id="push-status" class="sub" role="status" aria-live="polite"></span></span>
+          <span class="v"><button id="push-enable" type="button">Turn On Notifications</button><button id="push-test" type="button" class="secondary" hidden>Send a Test</button></span></li>
+      </ul>
+      <div id="settings-rest"></div>
       <h3>Reviews Waiting on You</h3>
       <ul id="reviews" class="reviews"><li class="muted">none</li></ul>
-      <h3>Components</h3>
-      <ul id="checks"></ul>
-      <h3>Notifications</h3>
-      <p id="push-status" class="receipt" role="status" aria-live="polite"></p>
-      <button id="push-enable" type="button">Turn On Notifications</button>
-      <button id="push-test" type="button" class="secondary" hidden>Send a Test</button>
-    </section>
-
-    <section id="devices" hidden>
-      <h3>Devices</h3>
-      <ul id="device-list"></ul>
     </section>
 
     <!-- More ▸ Agents (screen 18 §5; more.js): Yours and Connected, each a

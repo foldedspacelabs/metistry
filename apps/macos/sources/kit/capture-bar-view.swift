@@ -455,7 +455,7 @@ public struct CaptureBarAskPanel: View {
                     row(turn, p)
                 }
                 if model.askIsWorking {
-                    Text(verbatim: "\(model.assistantName() ?? "It") is working on it…")
+                    Text(verbatim: model.assistantName().map { "\($0) is working on it…" } ?? "Working on it…")
                         .metistryFont(.callout)
                         .foregroundStyle(p[.textSecondary])
                 }

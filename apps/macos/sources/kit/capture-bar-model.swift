@@ -609,13 +609,18 @@ public final class CaptureBarModel {
             ended = CaptureBarEnded(reason: session.endedReason ?? "", words: words)
             announce(words)
         }
-        if !state.isRunning { noteActivity() }
+        // A session that just ended brings the decoration back; an idle read
+        // every fifteen seconds must not, or the bar would never fade.
+        if was?.isRunning == true && !state.isRunning { noteActivity() }
     }
 
     // MARK: Opening and closing
 
     public func open(_ kind: CaptureBarPanelKind) {
-        isHidden = false
+        if isHidden {
+            isHidden = false
+            publishActions()
+        }
         noteActivity()
         if panel == kind {
             panel = nil

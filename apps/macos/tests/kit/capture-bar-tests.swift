@@ -329,6 +329,8 @@ import AppKit
     bar.noteActivity()
     for work in pending { await work() }
     #expect(bar.decorationFaded, "ten quiet seconds")
+    await bar.refresh()
+    #expect(bar.decorationFaded, "an idle read of the recorder is not activity")
     bar.noteActivity()
     #expect(!bar.decorationFaded, "the pointer came back")
 

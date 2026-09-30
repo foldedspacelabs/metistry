@@ -61,7 +61,7 @@ export const OAUTH_LOOPBACK_HOST = "127.0.0.1";
 /** The one path the listener answers. Anything else is 404 and does not count as the callback. */
 export const OAUTH_CALLBACK_PATH = "/callback";
 /** How long the owner has to finish signing in before the listener closes. The CLI passes its own (`--timeout`). */
-export const DEFAULT_OAUTH_FLOW_TIMEOUT_MS = 5 * 60_000;
+export const DEFAULT_OAUTH_FLOW_TIMEOUT_MS = 5 * 60_000; // limit: fixed — the default a sign-in waits for the owner; `connections authorize --timeout` overrides it per run
 /** A cached access token is refreshed this long before the provider says it expires. */
 const EXPIRY_SKEW_MS = 60_000; // limit: fixed — clock skew between this Mac and the provider, not a policy
 /** A token response larger than this is not a token response. */

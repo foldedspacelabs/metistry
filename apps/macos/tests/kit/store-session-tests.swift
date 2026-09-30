@@ -305,11 +305,19 @@ func adoptingEndsTheOldChildAndTheNextRequestStartsOneForTheNewInstance() async 
 @Test func aRoomsIdsAreTheTextTheConsoleSends() async throws {
     let stores = ConsoleStores(transport: try FixtureConsole.recorded())
     let rooms = try await stores.rooms(state: nil, project: nil, anchor: nil, limit: nil).get()
-    #expect(rooms.rows.map(\.threadID) == ["cmt_01M3FYT8PDPMAX22C9X769GV7Q", "cmt_01M3FYT8NVNX3ZGBZH481KTHGE"])
+    // the recorded text, character for character — read from the fixture, whose
+    // ids are minted afresh on every recording
+    let sent = try ConsoleFixture.load("get-api-q-rooms").replyJSON?["rows"]?.arrayValue ?? []
+    #expect(sent.count == 2)
+    #expect(rooms.rows.map(\.threadID) == sent.compactMap { $0["thread_id"]?.stringValue })
+    #expect(rooms.rows.allSatisfy { $0.threadID.hasPrefix("cmt_") })
     #expect(Set(rooms.rows.map(\.id)).count == rooms.rows.count, "every room had the same id")
     let artifactRoom = try #require(rooms.rows.first { $0.anchor == "artifact" })
-    #expect(artifactRoom.artifactID == "art_01M3FYT8N8HRG4S2W4Q0GN28F1")
-    #expect(artifactRoom.versionID == "ver_01M3FYT8NB0W22G5J1H3A71PTY")
+    let sentArtifact = try #require(sent.first { $0["anchor"]?.stringValue == "artifact" })
+    #expect(artifactRoom.artifactID == sentArtifact["artifact_id"]?.stringValue)
+    #expect(artifactRoom.versionID == sentArtifact["version_id"]?.stringValue)
+    #expect(artifactRoom.artifactID?.hasPrefix("art_") == true)
+    #expect(artifactRoom.versionID?.hasPrefix("ver_") == true)
     let workRoom = try #require(rooms.rows.first { $0.anchor == "work" })
     #expect(workRoom.workID == 3)
 

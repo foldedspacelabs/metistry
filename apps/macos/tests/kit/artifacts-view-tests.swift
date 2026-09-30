@@ -176,7 +176,7 @@ import Testing
     defer { withExtendedLifetime(session) {} }
     #expect(model.list.map(\.slug) == ["store-interface"])
     let a = try #require(model.artifact(artifactID))
-    let row = ArtifactRowWords(a, openThreads: model.openThreadCount(a.id), now: recordedNow)
+    let row = ArtifactRowWords(a, openThreads: model.openThreadCount(a.id), now: fixtureNow)
     #expect(row.facts == "metistry · markdown · updated 1 hour ago")
     #expect(row.threads == "1 open thread", "the rooms query's artifact rows, counted")
     #expect(row.spoken == "store-interface, metistry, markdown, 1 open thread, updated 1 hour ago")
@@ -225,12 +225,12 @@ import Testing
     await model.open(artifactID)
     #expect(model.versionList.map(\.label) == ["v2", "v1"], "newest first, numbered from the oldest")
     let v2 = try #require(model.version(artifactV2))
-    let row = VersionRowWords(v2, latest: true, openThreads: model.openThreadCount(version: v2.id), assistantName: "Aide", now: recordedNow)
+    let row = VersionRowWords(v2, latest: true, openThreads: model.openThreadCount(version: v2.id), assistantName: "Aide", now: fixtureNow)
     #expect(row.title == "v2 · latest")
     #expect(row.byline == "You · 1 hour ago")
-    #expect(row.message == "second cut (ver_01M3FYT8NB0W22G5J1H3A71PTY)")
+    #expect(row.message == "second cut (\(artifactV2))")
     #expect(row.threads == "1 open thread")
-    #expect(row.spoken == "v2, latest, You, 1 hour ago, second cut (ver_01M3FYT8NB0W22G5J1H3A71PTY), 1 open thread")
+    #expect(row.spoken == "v2, latest, You, 1 hour ago, second cut (\(artifactV2)), 1 open thread")
     // The recorded thread is on v2, line 3 — in the margin.
     #expect(model.shownPath == "notes.md")
     #expect(model.marginThreads.map(\.line) == [3])
@@ -315,7 +315,14 @@ import Testing
     let said = page.labels + page.texts
     #expect(said.contains { $0.hasPrefix("v2, latest, You, 1 hour ago") }, "\(said)")
     #expect(said.contains("One protocol per domain, one method per route. Line 3, 1 thread"), "a highlighted line says it has a thread: \(said)")
-    #expect(said.contains("You, 10:54 PM, Line 3: Name the owning ticket beside each placeholder."), "\(said)")
+    // the recorded thread's clock time, in the zone the model reads in
+    let thread = try #require(ConsoleFixture.load("get-api-artifacts-id-comments").replyJSON?["threads"]?.arrayValue?.first)
+    let raised = try #require(thread["created_at"]?.stringValue.flatMap(WireTime.date))
+    let clock = DateFormatter()
+    clock.locale = Locale(identifier: "en_US_POSIX")
+    clock.timeZone = utc
+    clock.dateFormat = "h:mm a"
+    #expect(said.contains("You, \(clock.string(from: raised)), Line 3: Name the owning ticket beside each placeholder."), "\(said)")
     #expect(page.saysAssistant.isEmpty, "the configured name, never the internal word: \(page.saysAssistant)")
 }
 
@@ -408,12 +415,18 @@ import Testing
 // MARK: - Helpers
 
 private let utc = TimeZone(identifier: "UTC")!
-private let artifactID = "art_01M3FYT8N8HRG4S2W4Q0GN28F1"
-private let artifactV2 = "ver_01M3FYT8NB0W22G5J1H3A71PTY"
+/// The recorded artifact and its two versions. Their ids are minted afresh on
+/// every recording, so they are read from the fixtures, never written here (X-29).
+private let recordedVersions: [JSONValue] = (try? ConsoleFixture.load("get-api-artifacts-id-versions"))?.replyJSON?["versions"]?.arrayValue ?? []
+private let artifactID = recordedVersions.first?["artifact_id"]?.stringValue ?? "art_missing"
+private let artifactV2 = recordedVersions.first?["id"]?.stringValue ?? "ver_missing_2"
 private let v2 = artifactV2
-private let v1 = "ver_01M3FYT8N761CDC5HKE1J3H2NZ"
-/// An hour after the recorded artifacts.
+private let v1 = recordedVersions.last?["id"]?.stringValue ?? "ver_missing_1"
+/// The clock the scripted consoles are read at.
 private let recordedNow = WireTime.date("2026-09-26T23:54:20.000Z")!
+/// An hour after the recorded artifacts — read from the fixture, since every
+/// recording stamps them at its own wall clock.
+private let fixtureNow = ConsoleFixture.asOf("get-api-artifacts").addingTimeInterval(60 * 60)
 
 /// `git diff` of two versions, as the reconciler runs it: two files, the
 /// second new, the first changed in two hunks.
@@ -453,7 +466,7 @@ private func artifactsModel(_ console: any ConsoleCallTransport, now: Date = rec
 @MainActor
 private func fixtureModel() async throws -> (ArtifactsModel, FixtureConsole, ConsoleSession) {
     let console = try FixtureConsole.recorded()
-    let (model, session) = artifactsModel(console)
+    let (model, session) = artifactsModel(console, now: fixtureNow)
     await model.load()
     return (model, console, session)
 }

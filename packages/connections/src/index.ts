@@ -9,7 +9,8 @@
 // parsed and expanded (`ics.ts`, T4-12) — and the `caldav` provider: read,
 // write own and reply over RFC 6638 (`caldav.ts`, `dav-xml.ts`, T4-13) — and
 // the `imap` provider: headers read and drafts appended over IMAP, with no
-// path that sends (`imap.ts`, `imap-wire.ts`, T4-15).
+// path that sends (`imap.ts`, `imap-wire.ts`, T4-15), opened by the mail
+// sync and the Draft Reply door through `openSyncImap` (T4-17).
 // docs/ops/connections.md is the same contract in words.
 
 export { CONNECTION_REFUSAL_CODES, ConnectionRefused, type ConnectionRefusalCode } from "./errors.js";
@@ -113,20 +114,27 @@ export {
   type ReachSummary,
 } from "./describe.js";
 export {
+  MAIL_SYNC,
   agentConnections,
   consoleSecretNames,
   envSecretSource,
+  instanceImapOpener,
   instanceSyncOpener,
   openAgentHttp,
   openSyncHttp,
+  openSyncImap,
   syncReaders,
   syncSecretNames,
   syncTarget,
   type AgentHttp,
   type OAuthCache,
+  type ImapSync,
+  type ImapSyncOpener,
   type OpenAgentOptions,
+  type OpenImapSyncOptions,
   type OpenSyncOptions,
   type OpenedAgent,
+  type OpenedImapSync,
   type OpenedSync,
   type SyncHttp,
   type SyncOpener,
@@ -262,6 +270,7 @@ export {
   imapConnectionIssues,
   openImap,
   parseAddresses,
+  parseImapRef,
   parseInternalDate,
   planDraft,
   searchDate,

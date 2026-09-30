@@ -9,6 +9,7 @@
 #   metistry connections add mail --type mail --provider imap \
 #     --imap imap.example.com:993 --username you@example.com --secret mail_app_password
 #   metistry connections test mail                       (signs in, lists folders, finds Drafts)
+#   metistry secrets sync --to env                       (then restart the console: the mail sync reads it)
 #
 # `read` is headers only — who, to whom, the subject, the date, the thread —
 # fetched with BODY.PEEK from a mailbox opened read-only (EXAMINE), so reading
@@ -30,4 +31,10 @@ provides: mail
 transports: [imap]
 auth: [basic]                    # a username and an app password — the only sign-in an IMAP connection takes
 capabilities: [read, draft]
+# read by the `mail-messages` sync (collectors/mail-messages/, T4-17): the
+# headers of the inbox's last week, and a `message` request for each one
+# written to you that looks like it waits on your reply — inferred from the
+# headers alone, never a body. Declaring it is what delivers the app
+# password to the console (`metistry secrets sync --to env`).
+sync: mail-messages
 implementation: { kind: builtin, module: imap }

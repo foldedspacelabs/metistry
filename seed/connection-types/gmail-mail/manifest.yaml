@@ -19,6 +19,7 @@
 #   metistry connections add gmail --type mail --provider gmail-mail \
 #     --imap imap.gmail.com:993 --username you@gmail.com --secret gmail_app_password
 #   metistry connections test gmail                      (signs in, lists folders, finds [Gmail]/Drafts)
+#   metistry secrets sync --to env                       (then restart the console: the mail sync reads it)
 #
 # A connection of this type anywhere but imap.gmail.com:993 over TLS is
 # refused. Drafts go to the folder Gmail marks \Drafts ([Gmail]/Drafts, or
@@ -32,4 +33,10 @@ provides: mail
 transports: [imap]
 auth: [basic]                    # an app password — Google's one exception to its end of password access for IMAP
 capabilities: [read, draft]
+# read by the `mail-messages` sync (collectors/mail-messages/, T4-17): the
+# headers of the inbox's last week, and a `message` request for each one
+# written to you that looks like it waits on your reply — inferred from the
+# headers alone, never a body. Declaring it is what delivers the app
+# password to the console (`metistry secrets sync --to env`).
+sync: mail-messages
 implementation: { kind: builtin, module: imap }

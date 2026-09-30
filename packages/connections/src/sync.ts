@@ -71,6 +71,7 @@ import { ConnectionRefused } from "./errors.js";
 import type { ConnectionEntry } from "./load.js";
 import { basicSource, connectionGrantee } from "./door.js";
 import { OAuthError, OAuthTokens, oauthClientOf, oauthSource, type OAuthClientPlan, type TokenDoor } from "./oauth.js";
+import { openImap, type ImapDialer, type ImapSession } from "./imap.js";
 
 /**
  * A `SecretSource` over an environment: `{{ secret.x }}` is
@@ -503,5 +504,127 @@ export function instanceSyncOpener(roots: CatalogRoots & { env: NodeJS.ProcessEn
   return async (req) => {
     const catalog = await loadInstanceCatalog(roots);
     return openSyncHttp({ catalog, ...req, secrets, oauth, ...(roots.fetch ? { fetch: roots.fetch } : {}) });
+  };
+}
+
+// ---- a mail sync reading its mailbox (T4-17) -------------------------------------------------
+//
+// An IMAP connection is not reached over HTTP (core's `imap` reach class,
+// T4-15), so a sync that reads one opens it here rather than through
+// `openSyncHttp`: the same choice of connection (`syncTarget`), the same
+// delivered secrets (`envSecretSource`), and the IMAP provider's own door —
+// `openImap`, whose host guard sends the app password to the exact
+// host:port on the secret's *Sent only to* list, over TLS, for this
+// connection, or nowhere. Nothing is dialled until the caller opens a
+// session; a session reads headers and appends drafts, and cannot send.
+
+/** The sync (collector unit) that reads IMAP connections — named by the imap types' `sync:`. */
+export const MAIL_SYNC = "mail-messages";
+
+/** What a mail sync — or the Draft Reply door — holds while it reads one mailbox. Carries names, never a value. */
+export interface ImapSync {
+  /** the connection's name */
+  connection: string;
+  /** its provider's connection-type name */
+  provider: string;
+  /** the server, for a message: `host:port` */
+  server: string;
+  /** the sign-in name — the owner's address, when it is one */
+  username: string;
+  /** what its provider declares it can do (`read`, `draft`) — checked again by the session before anything is sent */
+  capabilities: readonly string[];
+  /** the owner's Needs You switches for this sync from `scheduled.yaml` (`syncs.<sync>.raise`) — only what the file says */
+  raise: Readonly<Record<string, boolean>>;
+  /** sign in and return the session (`close()` it). Every refusal of the host guard happens here, before a byte is sent */
+  open(): Promise<ImapSession>;
+  /** the secret names the sessions so far carried — for the run's `meta.secrets` */
+  secretsUsed(): string[];
+}
+
+export type OpenedImapSync = { ok: true; sync: ImapSync } | { ok: false; status: "absent" | "failed"; why: string };
+
+export interface OpenImapSyncOptions {
+  catalog: Pick<ConnectionCatalog, "entries" | "scheduled" | "secrets">;
+  /** the sync opening its connection (`MAIL_SYNC`) */
+  sync: string;
+  /** the builtin module that must implement the connection's provider (`imap`) */
+  module: string;
+  /** open exactly this connection (the Draft Reply door names one) rather than the one the sync reads */
+  connection?: string | undefined;
+  /** where a value comes from — `envSecretSource(process.env)` in the console */
+  secrets: SecretSource;
+  redactor?: SecretRedactor | undefined;
+  /** the socket under the door (a test's; default Node's TLS) */
+  dial?: ImapDialer | undefined;
+  timeoutMs?: number | undefined;
+}
+
+/**
+ * Open the mailbox a sync reads — or the one named — or say why there is
+ * none. Never dials: the first byte goes out when the caller opens a
+ * session. Refusals that are the file's fault (a provider this module does
+ * not implement, a reach that is not imap) are `failed`.
+ */
+export function openSyncImap(opts: OpenImapSyncOptions): OpenedImapSync {
+  const catalog =
+    opts.connection === undefined ? opts.catalog : { ...opts.catalog, scheduled: { ...(opts.catalog.scheduled ?? {}), syncs: { ...(opts.catalog.scheduled?.syncs ?? {}), [opts.sync]: { ...(opts.catalog.scheduled?.syncs?.[opts.sync] ?? {}), connection: opts.connection } } } as Scheduled };
+  const target = syncTarget(catalog, opts.sync);
+  if (!target.ok) return target;
+  const { entry } = target;
+  const c = entry.connection;
+  const impl = entry.provider.manifest.implementation;
+  if (impl.kind !== "builtin" || impl.module !== opts.module) {
+    return { ok: false, status: "failed", why: `connection ${c.name}: provider ${entry.provider.name} is not implemented by ${opts.module}` };
+  }
+  const reach = c.reach.imap;
+  if (!reach) return { ok: false, status: "failed", why: `connection ${c.name}: ${opts.sync} reads it over imap — its reach is not imap` };
+  const secretsFile: SecretsFile = opts.catalog.secrets.ok ? opts.catalog.secrets.file : parseSecretsFile("");
+  const redactor = opts.redactor ?? new SecretRedactor();
+  const used = new Set<string>();
+  const capabilities = [...entry.provider.manifest.capabilities];
+  const scheduled: Scheduled | null | undefined = opts.catalog.scheduled;
+  const raise = scheduled?.syncs && Object.hasOwn(scheduled.syncs, opts.sync) ? { ...(scheduled.syncs[opts.sync]?.raise ?? {}) } : {};
+  return {
+    ok: true,
+    sync: {
+      connection: c.name,
+      provider: entry.provider.name,
+      server: `${reach.host}:${reach.port}`,
+      username: reach.username,
+      capabilities,
+      raise,
+      open: () =>
+        openImap({
+          connection: c.name,
+          reach,
+          capabilities,
+          secretsFile,
+          source: opts.secrets,
+          redactor,
+          ...(opts.dial ? { dial: opts.dial } : {}),
+          ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
+          onUse: ({ names }) => {
+            for (const n of names) used.add(n);
+          },
+        }),
+      secretsUsed: () => [...used].sort(),
+    },
+  };
+}
+
+/** How a mail sync (or the Draft Reply door) opens a mailbox: the console builds one per process; a test hands in its own. */
+export type ImapSyncOpener = (req: { sync: string; module: string; connection?: string | undefined }) => Promise<OpenedImapSync>;
+
+/**
+ * The console's mailbox opener: the instance's catalog afresh on every
+ * open, the app password from the environment `metistry secrets sync --to
+ * env` delivered — filled into the one LOGIN, for the listed host:port, or
+ * nowhere.
+ */
+export function instanceImapOpener(roots: CatalogRoots & { env: NodeJS.ProcessEnv; dial?: ImapDialer | undefined; timeoutMs?: number | undefined }): ImapSyncOpener {
+  const secrets = envSecretSource(roots.env);
+  return async (req) => {
+    const catalog = await loadInstanceCatalog(roots);
+    return openSyncImap({ catalog, ...req, secrets, ...(roots.dial ? { dial: roots.dial } : {}), ...(roots.timeoutMs !== undefined ? { timeoutMs: roots.timeoutMs } : {}) });
   };
 }

@@ -27,8 +27,10 @@ import { access, constants, mkdir, mkdtemp, rename, rm } from "node:fs/promises"
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import type { Exec } from "./exec.js";
-import { downloadVerified, releaseRepo, resolveRelease } from "./release.js";
+import { compareVersions, downloadVerified, releaseRepo, resolveRelease } from "./release.js";
 import { StepFailed, type StepRunner } from "./steps.js";
+
+export { compareVersions };
 
 /** Info.plist's CFBundleIdentifier (apps/macos/resources/Info.plist) — an app at the path that is not this is never touched. */
 export const APP_BUNDLE_ID = "com.foldedspacelabs.metistry";
@@ -55,16 +57,6 @@ export function previousAppPath(appPath: string): string {
 export function appCandidates(env: NodeJS.ProcessEnv): string[] {
   if (env.METISTRY_APP_PATH) return [env.METISTRY_APP_PATH];
   return [join(SYSTEM_APPLICATIONS, APP_BUNDLE_NAME), ...(env.HOME ? [join(env.HOME, "Applications", APP_BUNDLE_NAME)] : [])];
-}
-
-/** `0.14.0` vs `0.13.2` → 1; undefined when either is not a plain x.y.z (never a guess). */
-export function compareVersions(a: string, b: string): number | undefined {
-  const parse = (v: string) => /^v?(\d+)\.(\d+)\.(\d+)$/.exec(v.trim())?.slice(1).map(Number);
-  const x = parse(a);
-  const y = parse(b);
-  if (!x || !y) return a.trim() === b.trim() ? 0 : undefined;
-  for (let i = 0; i < 3; i++) if (x[i]! !== y[i]!) return x[i]! > y[i]! ? 1 : -1;
-  return 0;
 }
 
 export interface BundleInfo {

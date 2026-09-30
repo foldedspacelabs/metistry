@@ -2415,8 +2415,19 @@ lines to run. `--allow-legacy` pins it anyway. 0.8.x reads both layouts
 been run against the old one, and compatibility nobody tests is not
 compatibility.
 
+Which release an unpinned update installs: GitHub's *Latest* when it has
+this platform's runtime pack and `checksums.txt`; otherwise the newest of
+the last 10 releases (drafts and prereleases skipped) that has both, with
+one line per release passed over (`v0.15.0 has no pack for darwin-arm64 —
+installing v0.14.4`). It never downgrades — when that release is older than
+the one running it prints `already on the newest release with a pack` and
+changes nothing — and it fails only when none of the 10 has a pack (a
+release whose workflow failed after publishing is immutable and stays empty
+for good; `docs/ops/releases.md`).
+
 Release-mode flags: `--version 0.2.0` installs a specific release instead
-of the latest; `--rollback` flips `current` back to the previous release
+of the latest — exactly that one: a pinned release with no pack for this
+platform fails, it is never swapped for another; `--rollback` flips `current` back to the previous release
 without downloading anything (migrations are additive-first and are **not**
 reverted); `--channel git|release` overrides the lock's `product.source`
 for one run. `metistry init --channel release` writes `source: release` in

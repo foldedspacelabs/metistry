@@ -79,6 +79,19 @@ version) is safe, and `publish` does the right thing for what it finds:
 | published, immutable, **missing** an asset | **fails**, saying so — nothing can be added. That version is lost: cut the next patch version (a changeset, `pnpm release:version`, tag). Optionally `gh release delete vX` (keep the tag) so *latest* points back at a complete release |
 | published, immutability off | the old path: edit the notes, `gh release upload --clobber` |
 
+**An installed product survives a lost release.** `metistry update` (unpinned)
+does not take GitHub's *Latest* blindly: when Latest has no runtime pack for
+this platform, or no `checksums.txt`, it walks the last 10 releases (drafts
+and prereleases skipped, newest version first) and installs the newest one
+that has both, printing one line for each it passed over —
+`v0.15.0 has no pack for darwin-arm64 — installing v0.14.4`. It never moves
+an install backwards: if the newest release with a pack is older than the one
+running, it says `already on the newest release with a pack` and changes
+nothing. It fails only when none of those 10 has a pack. `--version X` is
+exempt — a pin means X, and X without a pack still fails naming what X lacks.
+So a lost release needs no action from installs; deleting it (above) is
+housekeeping, not a fix.
+
 **A failed Mac app holds the release.** When `macos-app` or `appcast`
 *fails* (as opposed to skipping for want of secrets), `publish` leaves the
 release as a **draft** and fails: publishing would freeze a release without
@@ -203,7 +216,11 @@ run with `--channel release`.
 
 `metistry update` then:
 
-1. resolves the latest release from GitHub (`--version 0.2.0` pins one),
+1. resolves the latest release from GitHub that carries this platform's
+   runtime pack and `checksums.txt` — Latest, or, when Latest lacks them,
+   the newest of the last 10 releases that has them, never one older than
+   what runs ("Immutable releases, and re-running a release" above);
+   `--version 0.2.0` pins one exactly, with no substitute,
 2. downloads its runtime pack **and `checksums.txt`**, and verifies the
    sha256. A mismatch aborts with the two digests and leaves `current`
    exactly where it was — nothing is unpacked, nothing restarts, the lock

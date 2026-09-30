@@ -40,6 +40,17 @@
 // and `envSecretSource` reads it back. Unlike the engine's provider key,
 // the value is never put on a request by the caller: it is filled by the
 // door, for the listed host, or not at all.
+//
+// **OAuth sign-in** (`auth: oauth`, Google Calendar — T4-14). The delivered
+// secret is the REFRESH token; what the door fills into
+// `Bearer {{ secret.<token> }}` is an access token minted from it at the
+// token endpoint (`oauth.ts`: `OAuthTokens`, `oauthSource` — through its own
+// guarded request, pinned to that endpoint, no redirect) and held in this
+// process's memory until a minute before it expires. The opener keeps one
+// per connection across runs (`OAuthCache`). A sync that knows its
+// provider's hosts passes them (`tokenHosts`), and the token secret's *Sent
+// only to* list must be EXACTLY those — the access token and the refresh
+// token go to nothing else, even if the owner's list says more.
 
 import {
   SecretRedactor,
@@ -57,6 +68,7 @@ import { loadInstanceCatalog, type CatalogRoots, type ConnectionCatalog } from "
 import { ConnectionRefused } from "./errors.js";
 import type { ConnectionEntry } from "./load.js";
 import { basicSource, connectionGrantee } from "./door.js";
+import { OAuthError, OAuthTokens, oauthClientOf, oauthSource, type OAuthClientPlan, type TokenDoor } from "./oauth.js";
 
 /**
  * A `SecretSource` over an environment: `{{ secret.x }}` is
@@ -208,6 +220,28 @@ export interface OpenSyncOptions {
   redactor?: SecretRedactor | undefined;
   /** the base fetch under the door (a test's fake; default global fetch) */
   fetch?: typeof fetch | undefined;
+  /**
+   * An OAuth connection: the exact hosts its token secret's *Sent only to*
+   * list must be — the token endpoint's and the service's (Google:
+   * `GOOGLE_TOKEN_HOSTS`). Absent: the list is the owner's, held by the door.
+   */
+  tokenHosts?: readonly string[] | undefined;
+  /** where an OAuth connection's access token is kept between runs (the opener's); absent = minted afresh on each open */
+  oauth?: OAuthCache | undefined;
+}
+
+/** One process's OAuth access tokens, by connection — kept while the sign-in's plan is the same, so a run every 15 minutes mints one an hour, not one a run. */
+export type OAuthCache = Map<string, { key: string; tokens: OAuthTokens; door: { current: TokenDoor } }>;
+
+/** The exact-hosts rule for an OAuth sign-in's token secret, or why it is broken. Names hosts and secrets, never a value. */
+function tokenHostsIssue(name: string, plan: OAuthClientPlan, secrets: SecretsFile, want: readonly string[]): string | undefined {
+  const expected = [...new Set(want)].sort();
+  const tokenHost = new URL(plan.tokenUrl).host;
+  if (!expected.includes(tokenHost)) return `connection ${name}: its sign-in's token endpoint (${tokenHost}) is not one of the hosts this sync signs in at (${expected.join(", ")})`;
+  const policy = Object.hasOwn(secrets.secrets, plan.tokenSecret) ? secrets.secrets[plan.tokenSecret] : undefined;
+  const listed = [...new Set(policy?.hosts ?? [])].sort();
+  if (listed.length === expected.length && listed.every((h, i) => h === expected[i])) return undefined;
+  return `connection ${name}: its sign-in (${plan.tokenSecret}) is sent to exactly ${expected.join(" and ")} — its *Sent only to* list is ${listed.length ? listed.join(", ") : "empty"}, so nothing is sent (\`metistry secrets hosts ${plan.tokenSecret} ${expected.join(" ")}\`)`;
 }
 
 function urlOf(input: Parameters<typeof fetch>[0]): string {
@@ -249,6 +283,7 @@ export function openSyncHttp(opts: OpenSyncOptions): OpenedSync {
   }
   const auth = http.auth;
   let basic: { secret: string; username: string } | undefined;
+  let oauth: OAuthClientPlan | undefined;
   if (auth.scheme === "bearer") headers.authorization = `Bearer {{ secret.${auth.secret} }}`;
   else if (auth.scheme === "api_key") headers[auth.header.toLowerCase()] = `{{ secret.${auth.secret} }}`;
   else if (auth.scheme === "basic") {
@@ -262,7 +297,20 @@ export function openSyncHttp(opts: OpenSyncOptions): OpenedSync {
     }
     headers.authorization = `Basic {{ secret.${auth.secret} }}`;
     basic = { secret: auth.secret, username: auth.username };
-  } else if (auth.scheme !== "none") return { ok: false, status: "failed", why: `connection ${c.name}: ${auth.scheme} sign-in is not sent by ${opts.sync}` };
+  } else if (auth.scheme === "oauth") {
+    // the client the owner signed in with — the type's shipped one, or the owner's own (oauth.ts)
+    try {
+      oauth = oauthClientOf(entry);
+    } catch (err) {
+      if (err instanceof OAuthError || err instanceof ConnectionRefused) return { ok: false, status: "failed", why: `connection ${c.name}: ${err.message}` };
+      throw err;
+    }
+    if (opts.tokenHosts !== undefined) {
+      const why = tokenHostsIssue(c.name, oauth, opts.catalog.secrets.ok ? opts.catalog.secrets.file : parseSecretsFile(""), opts.tokenHosts);
+      if (why) return { ok: false, status: "failed", why };
+    }
+    headers.authorization = `Bearer {{ secret.${oauth.tokenSecret} }}`;
+  } // `none`: no sign-in header — every scheme core has is handled above
 
   const secretsFile: SecretsFile = opts.catalog.secrets.ok ? opts.catalog.secrets.file : parseSecretsFile("");
   const redactor = opts.redactor ?? new SecretRedactor();
@@ -270,13 +318,14 @@ export function openSyncHttp(opts: OpenSyncOptions): OpenedSync {
   const base = opts.fetch ?? fetch;
   const origin = url.origin;
   const name = c.name;
+  const source = basic ? basicSource(opts.secrets, basic, redactor) : oauth ? oauthSourceFor(name, oauth, opts, secretsFile, redactor, used) : opts.secrets;
   const door = guardedFetch(
     {
       secrets: secretsFile,
       grantee: connectionGrantee(name),
       purpose: "service",
       redactor,
-      source: basic ? basicSource(opts.secrets, basic, redactor) : opts.secrets,
+      source,
       onUse: ({ names }) => {
         for (const n of names) used.add(n);
       },
@@ -317,8 +366,44 @@ export function openSyncHttp(opts: OpenSyncOptions): OpenedSync {
   };
 }
 
+/**
+ * An OAuth connection's source: its token secret is the access token, minted
+ * from the delivered refresh token (and reused from `opts.oauth` while the
+ * plan is the same); a refusal at the token endpoint is the connection's
+ * `sign_in`, naming `authorize`.
+ */
+function oauthSourceFor(name: string, plan: OAuthClientPlan, opts: OpenSyncOptions, secrets: SecretsFile, redactor: SecretRedactor, used: Set<string>): SecretSource {
+  const door: TokenDoor = {
+    secrets,
+    source: opts.secrets,
+    redactor,
+    ...(opts.fetch ? { fetch: opts.fetch } : {}),
+    onUse: (names) => names.forEach((n) => used.add(n)),
+  };
+  const key = JSON.stringify(plan);
+  let held = opts.oauth?.get(name);
+  if (!held || held.key !== key) {
+    const ref = { current: door };
+    held = { key, tokens: new OAuthTokens(plan, () => ref.current), door: ref };
+    opts.oauth?.set(name, held);
+  }
+  // this open's grants, redactor and run: a token minted now is told to this run
+  held.door.current = door;
+  const wrapped = oauthSource(opts.secrets, held.tokens);
+  return {
+    async value(n) {
+      try {
+        return await wrapped.value(n);
+      } catch (err) {
+        if (err instanceof OAuthError) throw new ConnectionRefused("sign_in", name, err.message);
+        throw err;
+      }
+    },
+  };
+}
+
 /** How a collector opens its connection: the console builds one per process; a test hands in its own. */
-export type SyncOpener = (req: { sync: string; origin?: string | undefined; module: string }) => Promise<OpenedSync>;
+export type SyncOpener = (req: { sync: string; origin?: string | undefined; module: string; tokenHosts?: readonly string[] | undefined }) => Promise<OpenedSync>;
 
 /**
  * The console's opener: reads the instance's catalog afresh on every open
@@ -328,8 +413,9 @@ export type SyncOpener = (req: { sync: string; origin?: string | undefined; modu
  */
 export function instanceSyncOpener(roots: CatalogRoots & { env: NodeJS.ProcessEnv; fetch?: typeof fetch | undefined }): SyncOpener {
   const secrets = envSecretSource(roots.env);
+  const oauth: OAuthCache = new Map();
   return async (req) => {
     const catalog = await loadInstanceCatalog(roots);
-    return openSyncHttp({ catalog, ...req, secrets, ...(roots.fetch ? { fetch: roots.fetch } : {}) });
+    return openSyncHttp({ catalog, ...req, secrets, oauth, ...(roots.fetch ? { fetch: roots.fetch } : {}) });
   };
 }

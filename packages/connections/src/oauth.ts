@@ -121,6 +121,13 @@ export interface OAuthClientPlan {
   clientSecret: string | undefined;
   /** the secret the refresh token is kept in */
   tokenSecret: string;
+  /**
+   * What the connection type says about signing in with its SHIPPED client —
+   * the oauth field's `help` (Google Calendar: *Google hasn't verified this
+   * app* while that is true). Said before the browser opens; undefined for
+   * the owner's own client and for a custom connection.
+   */
+  notice?: string | undefined;
 }
 
 const SOLE_SECRET = /^\{\{\s*secret\.([a-z][a-z0-9_]*)\s*\}\}$/;
@@ -187,6 +194,7 @@ export function oauthClientOf(entry: ConnectionEntry): OAuthClientPlan {
       clientId: own ? { kind: "secret", name: own } : { kind: "shipped", value: shipped! },
       clientSecret: secretNameOf(refs?.client_secret),
       tokenSecret: token,
+      ...(!own && field.help !== undefined ? { notice: field.help } : {}),
     };
   }
   if (plan.redirect === "broker") {
@@ -566,12 +574,14 @@ export interface AuthorizeOptions extends TokenDoor {
   open: (url: string) => void | Promise<void>;
   timeoutMs?: number | undefined;
   /** told once the listener is up, before the browser opens (a test drives the callback from here) */
-  onListening?: ((l: { redirectUri: string; address: string; port: number; authorizationUrl: string }) => void | Promise<void>) | undefined;
+  onListening?: ((l: { redirectUri: string; address: string; port: number; authorizationUrl: string; notice: string | undefined }) => void | Promise<void>) | undefined;
   random?: ((n: number) => Buffer) | undefined;
 }
 
 export interface AuthorizeResult {
   connection: string;
+  /** what the connection type says about its shipped client, said before the browser opened (`OAuthClientPlan.notice`) */
+  notice?: string | undefined;
   /** the secret the refresh token was stored in — its name, never its value */
   stored: string;
   from: OAuthClientPlan["from"];
@@ -594,7 +604,7 @@ export async function authorizeConnection(entry: ConnectionEntry, opts: Authoriz
   const loop = await openLoopback({ state, timeoutMs: opts.timeoutMs });
   try {
     const url = authorizationUrl(plan, { clientId, redirectUri: loop.redirectUri, state, challenge });
-    await opts.onListening?.({ redirectUri: loop.redirectUri, address: loop.address, port: loop.port, authorizationUrl: url });
+    await opts.onListening?.({ redirectUri: loop.redirectUri, address: loop.address, port: loop.port, authorizationUrl: url, notice: plan.notice });
     await opts.open(url);
     const { code } = await loop.callback;
     const grant = await exchangeCode(plan, { code, redirectUri: loop.redirectUri, verifier }, opts);
@@ -605,7 +615,7 @@ export async function authorizeConnection(entry: ConnectionEntry, opts: Authoriz
       );
     }
     await opts.store.set(plan.tokenSecret, grant.refreshToken);
-    return { connection: plan.connection, stored: plan.tokenSecret, from: plan.from, client: plan.clientId.kind === "shipped" ? "shipped" : "yours", scopes: plan.scopes };
+    return { connection: plan.connection, stored: plan.tokenSecret, from: plan.from, client: plan.clientId.kind === "shipped" ? "shipped" : "yours", scopes: plan.scopes, ...(plan.notice !== undefined ? { notice: plan.notice } : {}) };
   } finally {
     await loop.close();
   }

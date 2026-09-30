@@ -534,7 +534,7 @@ const USAGE = `metistry — Metistry command line
 
   metistry connections list [--json] [--instance <dir>]
   metistry connections show <name> [--json]
-  metistry connections add <name> --type mcp|api|feed|files|mail
+  metistry connections add <name> --type mcp|api|feed|files|mail|agent|tracker
                            (--url <url> [--auth bearer|api_key|basic --secret <name> [--auth-header <Header>]
                                           [--username <user>]] [--header K=V]…
                            | --url <url> --auth oauth [--client-id-secret <name>] [--client-secret-secret <name>]
@@ -542,8 +542,9 @@ const USAGE = `metistry — Metistry command line
                            | --imap <host[:port]> --username <user> --secret <name> [--plain]
                            | --path <folder|file> [--include <glob>]… [--skip <glob>]…
                            | [--env K=V]… [--runs-on host|container] -- <command> [args…])
-                           [--provider <type>] [--description <text>] [--no-discover] [--dry-run]
+                           [--provider <type> [--config KEY=VALUE]…] [--description <text>] [--no-discover] [--dry-run]
   metistry connections set <name> [--url <url>] [--auth …] [--header K=V]… [--unset-header K]…
+                           [--config KEY=VALUE]… [--unset-config KEY]…
                            [--env K=V]… [--unset-env K]… [--runs-on …] [--description <text>]
                            [--client-id-secret <name>] [--client-secret-secret <name>] [--token-secret <name>]
                            [-- <command> [args…]] [--dry-run]
@@ -585,7 +586,13 @@ const USAGE = `metistry — Metistry command line
       the code with its PKCE verifier through the egress door, and keeps the
       refresh token in this instance's Keychain — never printed. "add" also
       points a sync at its first connection in scheduled.yaml when the
-      provider is read by one and nothing names a connection for it yet. A
+      provider is read by one and nothing names a connection for it yet.
+      --config KEY=VALUE sets one of the connection type's fields (an agent
+      connection's --config org=… or repo=owner/repo, a GitHub tracker's
+      repos=owner/a,owner/b); set --unset-config KEY removes one. An agent
+      connection (--type agent --provider devin|github-issues) is a target a
+      task is dispatched to (POST /api/tasks/:id/dispatch), never dialled —
+      pass --no-discover. A
       §4.7 protected path: every write goes through the reconciler as the
       "user" principal. The console reads the same files at GET
       /api/connections and never writes them.
@@ -1974,6 +1981,7 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
               headers: repeatedFlag(argv, "header"),
               runsOn: str(flags, "runs-on"),
               description: str(flags, "description"),
+              config: repeatedFlag(argv, "config"),
               discover: flags["no-discover"] !== true,
               ...auth,
             },
@@ -2002,6 +2010,8 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
               unsetHeaders: repeatedFlag(argv, "unset-header"),
               runsOn: str(flags, "runs-on"),
               description: str(flags, "description"),
+              config: repeatedFlag(argv, "config"),
+              unsetConfig: repeatedFlag(argv, "unset-config"),
               ...auth,
             },
             connOpts,

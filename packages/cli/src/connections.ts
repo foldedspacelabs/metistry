@@ -405,8 +405,21 @@ export interface AddSpec extends AuthFlags {
   headers?: string[] | undefined;
   runsOn?: string | undefined;
   description?: string | undefined;
+  /** `KEY=VALUE` for the provider's config fields (`--config org=org-abc`, T4-11) — text the file keeps; a secret field takes `{{ secret.<name> }}` */
+  config?: string[] | undefined;
   /** dial it and list what it offers (default); false writes it with no tools, or the provider's declared ones */
   discover?: boolean | undefined;
+}
+
+/** `--config KEY=VALUE`… → the file's `config:`. The provider's fields judge the keys and values when the file is judged. */
+function configOf(pairs: readonly string[] | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const raw of pairs ?? []) {
+    const [k, v] = parsePair(raw, "--config");
+    if (Object.hasOwn(out, k)) throw new StepFailed(`--config ${k} is given twice`);
+    out[k] = v;
+  }
+  return out;
 }
 
 export interface AddResult {
@@ -458,6 +471,8 @@ export async function connectionsAdd(spec: AddSpec, opts: ConnectionsOptions): P
   if (spec.url === undefined && (auth || Object.keys(headers).length)) throw new StepFailed("--auth and --header are for a connection reached by --url");
   if ((spec.command === undefined || spec.command.length === 0) && Object.keys(env).length) throw new StepFailed("--env is for a connection reached by a command");
   if (spec.path === undefined && (spec.include?.length || spec.skip?.length)) throw new StepFailed("--include and --skip are for a files connection reached by --path");
+  const config = configOf(spec.config);
+  if (Object.keys(config).length > 0 && provider === CUSTOM_PROVIDER) throw new StepFailed("--config sets a connection type's fields — a custom connection has none (its settings are its reach); pass --provider <type>");
   const oauth = auth?.scheme === "oauth" ? oauthAuth(name, provider, spec, catalog) : undefined;
   if (!oauth && (spec.authorizeUrl || spec.tokenUrl || spec.scopes?.length || spec.clientIdSecret || spec.clientSecretSecret || spec.tokenSecret)) {
     throw new StepFailed("--authorize-url, --token-url, --scope, --client-id-secret, --client-secret-secret and --token-secret are for --auth oauth");
@@ -488,7 +503,7 @@ export async function connectionsAdd(spec: AddSpec, opts: ConnectionsOptions): P
     reach,
     secrets: [],
     variables: [],
-    ...(oauth && Object.keys(oauth.config).length ? { config: oauth.config } : {}),
+    ...(Object.keys(config).length || (oauth && Object.keys(oauth.config).length) ? { config: { ...config, ...(oauth?.config ?? {}) } } : {}),
     tools: {},
     offer_to_agents: false,
   };
@@ -627,6 +642,9 @@ async function write(e: Editable & { name: string }, opts: ConnectionsOptions, m
 
 export interface SetSpec extends AuthFlags {
   url?: string | undefined;
+  /** `KEY=VALUE` for the provider's config fields (T4-11) */
+  config?: string[] | undefined;
+  unsetConfig?: string[] | undefined;
   command?: string[] | undefined;
   env?: string[] | undefined;
   unsetEnv?: string[] | undefined;
@@ -666,6 +684,19 @@ export async function connectionsSet(name: string | undefined, spec: SetSpec, op
     if (!isCommand) throw new StepFailed("--runs-on is for a connection reached by a command");
     doc.setIn(["reach", "command", "runs_on"], spec.runsOn);
     changed.push("runs_on");
+  }
+  const config = configOf(spec.config);
+  if ((Object.keys(config).length > 0 || (spec.unsetConfig ?? []).length > 0) && String(doc.getIn(["provider"]) ?? CUSTOM_PROVIDER) === CUSTOM_PROVIDER) {
+    throw new StepFailed("--config sets a connection type's fields — a custom connection has none (its settings are its reach)");
+  }
+  for (const [k, v] of Object.entries(config)) {
+    doc.setIn(["config", k], v);
+    changed.push(`config ${k}`);
+  }
+  for (const k of spec.unsetConfig ?? []) {
+    if (!doc.hasIn(["config", k])) throw new StepFailed(`${e.name} has no config ${k}`);
+    doc.deleteIn(["config", k]);
+    changed.push(`config ${k} removed`);
   }
   for (const pair of spec.env ?? []) {
     if (!isCommand) throw new StepFailed("--env is for a connection reached by a command");

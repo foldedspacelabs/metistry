@@ -30,7 +30,7 @@
 // before it is correct governance.
 
 import type { CaptureSink } from "@foldedspacelabs/metistry-mcp-brain";
-import type { SyncOpener } from "@foldedspacelabs/metistry-connections";
+import type { ImapSyncOpener, SyncOpener } from "@foldedspacelabs/metistry-connections";
 import {
   calendarDate,
   finishRun,
@@ -287,6 +287,13 @@ export interface CollectorCtx extends ComputeAccess {
    * the egress door. The `linear` collector reads its connection through it.
    */
   openSync?: SyncOpener;
+  /**
+   * How the mail sync opens the mailbox it reads (packages/connections
+   * `instanceImapOpener`, T4-17): the instance's catalog afresh per run, and
+   * a session whose host guard sends the app password to the connection's
+   * host:port over TLS or nowhere. Headers only; it cannot send.
+   */
+  openImap?: ImapSyncOpener;
   /**
    * The owner's zone (`METISTRY_TZ`, core `configuredTimeZone`), for a sync
    * that must say which DAY something is on: the ICS sync reads an all-day

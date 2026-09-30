@@ -14,21 +14,44 @@
 // polled home by `collectors/devin-sessions` — Devin publishes no completion
 // webhook, so the return is a poll, and the answer lands as a `report`
 // proposal rather than as a status change.
+//
+// **Targets as connections (plan §2.6, §2.7; T4-11).** A target is now also
+// an `agent` connection — `.metistry/connections/<name>.yaml` whose type
+// (`seed/connection-types/devin`, `…/github-issues`) carries the dispatcher,
+// the data policy and the purposes. This file's adapter reads the instance's
+// agent connections afresh on every listing and dispatch and presents each
+// as the target `dispatch()` already knows: dispatch is unchanged. What
+// changes is where the key comes from: a connection's request goes through
+// its door (packages/connections `openAgentHttp`) — the key is a
+// `{{ secret.x }}` reference filled by core's `guardedFetch` for the hosts
+// its *Sent only to* list names, granted to `connection:<name>`, and never
+// put on a request here; what comes back is redacted. The `targets/`
+// manifests and their `env:` keys still load, for one release, beside them;
+// a connection of the same name wins (D4), except the crews' `local-crew`.
 
+import { existsSync } from "node:fs";
+import { resolve as resolvePath } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
+  EgressRefused,
   finishRun,
+  loadKind,
   loadRegistry,
   manifestKind,
   runCheck,
   startRun,
   validateManifest,
+  type AgentPurpose,
   type CheckResult,
+  type ConnectionTypeManifest,
   type RegistrySkip,
   type RegistrySource,
   type DataPolicy,
   type ErrorCode,
+  type SecretSource,
   type TargetManifest,
 } from "@foldedspacelabs/metistry-core";
+import { ConnectionRefused, agentConnections, openAgentHttp, type AgentHttp, type ConnectionCatalog } from "@foldedspacelabs/metistry-connections";
 import { DEVIN_API, devinRef, type DevinWorkMeta } from "@metistry-apps/collectors";
 import {
   DEFAULT_PURPOSE,
@@ -110,9 +133,20 @@ export function checkBrief(policy: DataPolicy, brief: string, declaredSources: s
 
 // --- registry -----------------------------------------------------------------
 
+/** Where the instance's agent connections come from (T4-11): its catalog, read afresh per call, and the values the console holds. */
+export interface AgentConnectionSource {
+  catalog(): Promise<Pick<ConnectionCatalog, "entries" | "secrets"> & { types: { units(): readonly { name: string; manifest: ConnectionTypeManifest }[] } }>;
+  /** the delivered `METISTRY_SECRET_*` values (`envSecretSource`) — filled at the door, never read here */
+  secrets: SecretSource;
+}
+
 export interface TargetRegistryOptions {
   env?: NodeJS.ProcessEnv;
   fetchFn?: typeof fetch;
+  /** the instance's agent connections; absent = the `targets/` manifests only */
+  connections?: AgentConnectionSource | undefined;
+  /** the product's `seed/`, for the shipped Devin type's purposes when no instance catalog is read. Default: the checkout's `seed/`, else `./seed` */
+  seedDir?: string | undefined;
 }
 
 export interface TargetDescription {
@@ -125,6 +159,8 @@ export interface TargetDescription {
   cost?: TargetManifest["cost"];
   data_policy: DataPolicy;
   check: CheckResult;
+  /** the agent connection this target is (T4-11); absent for a `targets/` manifest */
+  connection?: string;
 }
 
 /** `env:VAR` → the variable's value (undefined when unset/empty); anything else is literal. */
@@ -138,6 +174,19 @@ export function resolveRef(value: unknown, env: NodeJS.ProcessEnv): string | und
 const GITHUB_API = "https://api.github.com";
 /** `submit.kind` of the one http target this console implements (targets/devin-sessions). */
 export const DEVIN_SUBMIT_KIND = "devin-session";
+/** The target crews are checked against (crews.ts) — a connection never takes its name. */
+const CREW_TARGET = "local-crew";
+/** owner/repo — each part GitHub's own characters, and never `.` or `..`, since it goes in a URL path. */
+const REPO_RE = /^(?!\.{1,2}\/)[A-Za-z0-9_.-]+\/(?!\.{1,2}$)[A-Za-z0-9_.-]+$/;
+const ORG_RE = /^[A-Za-z0-9_-]+$/;
+/** A `{{ secret.… }}` or `{{ variable.… }}` reference: the door fills the first wherever it finds one, so a brief never carries one to a connection. */
+const REFERENCE = /\{\{\s*(?:secret|variable)\.[^{}]*\}\}/;
+
+/** The purposes a devin-session dispatch may name, with the default a dispatch that names none gets. */
+export interface PurposeSet {
+  purposes: Readonly<Record<string, AgentPurpose>>;
+  default_purpose?: string | undefined;
+}
 
 export interface DevinSubmitInput {
   brief: string;
@@ -156,14 +205,56 @@ export interface DevinSubmission {
   max_acu: number;
 }
 
+/** Why a dispatch was refused before it was sent, with the envelope code — thrown by a submit, mapped by `dispatch()`. */
+export class DispatchRefused extends Error {
+  constructor(
+    readonly code: ErrorCode,
+    message: string,
+  ) {
+    super(message);
+    this.name = "DispatchRefused";
+  }
+}
+
+/** The checkout's `seed/` (apps/console/{src,dist} → ../../../seed), else `./seed` — both shapes run the console beside it. */
+function defaultSeedDir(): string {
+  const beside = fileURLToPath(new URL("../../../seed", import.meta.url));
+  return existsSync(`${beside}/connection-types`) ? beside : resolvePath("seed");
+}
+
+/** How a request reaches a target: through a connection's door with its sign-in as a reference, or (a `targets/` manifest) with the env key. */
+interface Access {
+  fetch: typeof fetch;
+  authorization: string;
+  /** the connection it goes through, when it does */
+  agent?: AgentHttp | undefined;
+}
+
 export class TargetRegistry {
   private readonly targets = new Map<string, TargetManifest>();
+  /** agent connections presented as targets, by connection name — replaced on every refresh */
+  private bound = new Map<string, { manifest: TargetManifest; agent: AgentHttp }>();
+  /** agent connections that could not be presented, with why */
+  private unbound = new Map<string, { status: "absent" | "failed"; why: string }>();
+  /**
+   * Every connection-backed manifest this registry has presented, to its
+   * door — by the manifest object, not its name, so a dispatch in flight
+   * keeps the door it started with when a refresh replaces the listing, and
+   * a connection's manifest can never fall through to the `env:` path.
+   */
+  private readonly doors = new WeakMap<TargetManifest, AgentHttp>();
   private readonly env: NodeJS.ProcessEnv;
   private readonly fetchFn: typeof fetch;
+  private connections: AgentConnectionSource | undefined;
+  private readonly seedDir: string | undefined;
+  private types: readonly ConnectionTypeManifest[] | undefined;
+  private shipped: Promise<readonly ConnectionTypeManifest[]> | undefined;
 
   constructor(opts: TargetRegistryOptions = {}) {
     this.env = opts.env ?? process.env;
     this.fetchFn = opts.fetchFn ?? fetch;
+    this.connections = opts.connections;
+    this.seedDir = opts.seedDir;
   }
 
   /**
@@ -202,16 +293,105 @@ export class TargetRegistry {
     return this.load([{ dir, origin: "product" }]);
   }
 
+  /** Read the instance's agent connections from now on (main.ts, once the instance's catalog is known). */
+  bindConnections(source: AgentConnectionSource): void {
+    this.connections = source;
+  }
+
+  /**
+   * Re-read the instance's agent connections (T4-11) and present each as a
+   * target. Called before every listing and dispatch, so an edit to a
+   * connection, `secrets.yaml` or an overlaid type lands with no restart.
+   * No connection source: nothing to read.
+   */
+  async refresh(): Promise<void> {
+    if (!this.connections) return;
+    const catalog = await this.connections.catalog();
+    this.types = catalog.types.units().map((u) => u.manifest);
+    const bound = new Map<string, { manifest: TargetManifest; agent: AgentHttp }>();
+    const unbound = new Map<string, { status: "absent" | "failed"; why: string }>();
+    for (const e of agentConnections(catalog)) {
+      if (this.targets.get(e.name)?.transport === "local") {
+        unbound.set(e.name, { status: "failed", why: `${e.name} is the crews' target — rename the connection` });
+        continue;
+      }
+      const dispatcher = e.provider?.manifest.dispatch?.dispatcher;
+      const opened = openAgentHttp({
+        catalog,
+        connection: e.name,
+        // GitHub is one service at one address: the write token goes nowhere else, whatever the file says
+        ...(dispatcher === "github-issue" ? { origin: GITHUB_API } : {}),
+        secrets: this.connections.secrets,
+        fetch: this.fetchFn,
+      });
+      if (!opened.ok) {
+        unbound.set(e.name, { status: opened.status, why: opened.why });
+        continue;
+      }
+      const manifest = targetOf(opened.agent);
+      if (typeof manifest === "string") {
+        unbound.set(e.name, { status: "failed", why: manifest });
+        continue;
+      }
+      bound.set(e.name, { manifest, agent: opened.agent });
+      this.doors.set(manifest, opened.agent);
+    }
+    this.bound = bound;
+    this.unbound = unbound;
+  }
+
   names(): string[] {
-    return [...this.targets.keys()].sort();
+    return [...new Set([...this.targets.keys(), ...this.bound.keys()])].sort();
   }
 
   get(name: string): TargetManifest | undefined {
-    return this.targets.get(name);
+    return this.bound.get(name)?.manifest ?? this.targets.get(name);
+  }
+
+  /** The agent connection a target is, when it is one — by the manifest `get()` returned. */
+  connectionOf(m: TargetManifest): AgentHttp | undefined {
+    return this.doors.get(m);
+  }
+
+  /** Why the agent connection `name` cannot be dispatched to, when it is one that cannot (after the last refresh). */
+  unavailableConnection(name: string): { status: "absent" | "failed"; why: string } | undefined {
+    return this.bound.has(name) ? undefined : this.unbound.get(name);
+  }
+
+  /** The shipped connection types, read once — the purposes a `targets/` Devin manifest dispatches with when no instance catalog is read. */
+  private async typesInForce(): Promise<readonly ConnectionTypeManifest[]> {
+    if (this.types) return this.types;
+    this.shipped ??= loadKind("connection-type", { seedDir: this.seedDir ?? defaultSeedDir() }).then((r) => r.units().map((u) => u.manifest));
+    return this.shipped;
+  }
+
+  /**
+   * The purposes a target takes (plan §2.7: `DEVIN_PURPOSES` → the Devin
+   * connection type). An agent connection's are its type's; a `targets/`
+   * Devin manifest dispatches with the Devin type's (`devin`, or the owner's
+   * overlay of it); anything else takes none, and records `work`.
+   */
+  async purposesOf(m: TargetManifest): Promise<PurposeSet> {
+    const agent = this.doors.get(m);
+    if (agent) return agent.dispatch;
+    if (!TargetRegistry.isDevin(m)) return { purposes: {} };
+    const types = await this.typesInForce();
+    const devin = types.find((t) => t.name === "devin" && t.dispatch?.dispatcher === DEVIN_SUBMIT_KIND) ?? types.find((t) => t.dispatch?.dispatcher === DEVIN_SUBMIT_KIND);
+    return devin?.dispatch ?? { purposes: {} };
+  }
+
+  /** Every purpose any target in force takes, sorted — what the dispatch route accepts before it knows the target. */
+  async purposes(): Promise<string[]> {
+    await this.refresh();
+    const out = new Set<string>();
+    for (const name of this.names()) for (const p of Object.keys((await this.purposesOf(this.get(name)!)).purposes)) out.add(p);
+    return [...out].sort();
   }
 
   /** Resolved github config, or the reason it is unavailable. */
-  private github(m: TargetManifest): { ok: true; token: string; repo: string } | { ok: false; remediation: string } {
+  private github(m: TargetManifest): { ok: true; access: Access; repo: string } | { ok: false; remediation: string } {
+    const agent = this.doors.get(m);
+    if (agent) return { ok: true, access: { fetch: agent.fetch, authorization: agent.headers.authorization ?? "", agent }, repo: String(m.submit.repo) };
     const token = resolveRef(m.auth, this.env);
     const repo = resolveRef(m.submit.repo, this.env);
     if (!token) {
@@ -221,12 +401,12 @@ export class TargetRegistry {
       };
     }
     if (!repo) return { ok: false, remediation: `set ${String(m.submit.repo)} to owner/repo` };
-    return { ok: true, token, repo };
+    return { ok: true, access: { fetch: this.fetchFn, authorization: `Bearer ${token}` }, repo };
   }
 
-  private ghHeaders(token: string): Record<string, string> {
+  private ghHeaders(access: Access): Record<string, string> {
     return {
-      authorization: `Bearer ${token}`,
+      authorization: access.authorization,
       accept: "application/vnd.github+json",
       "user-agent": "metistry-dispatch",
     };
@@ -238,12 +418,16 @@ export class TargetRegistry {
    * from `GET /v3/self`: a session is a spend, and which organization it is
    * charged to is not something to infer.
    */
-  private devin(m: TargetManifest): { ok: true; token: string; org: string; base: string } | { ok: false; remediation: string } {
+  private devin(m: TargetManifest): { ok: true; access: Access; org: string; base: string } | { ok: false; remediation: string } {
+    const agent = this.doors.get(m);
+    if (agent) {
+      return { ok: true, access: { fetch: agent.fetch, authorization: agent.headers.authorization ?? "", agent }, org: String(m.submit.org), base: String(m.submit.url) };
+    }
     const token = resolveRef(m.auth, this.env);
     const org = resolveRef(m.submit.org, this.env);
     if (!token) return { ok: false, remediation: `set ${String(m.auth)} (the same \`cog_\` key collectors/devin-knowledge reads — docs/ops/devin.md)` };
     if (!org) return { ok: false, remediation: `set ${String(m.submit.org)} to the organization id the session should be charged to (\`org-…\`; GET /v3/self reports it for an org-scoped key)` };
-    return { ok: true, token, org, base: resolveRef(m.submit.url, this.env) ?? DEVIN_API };
+    return { ok: true, access: { fetch: this.fetchFn, authorization: `Bearer ${token}` }, org, base: resolveRef(m.submit.url, this.env) ?? DEVIN_API };
   }
 
   /** `http` targets this console implements. An http target with another `submit.kind` validates and lists, and dispatch refuses it by name. */
@@ -253,7 +437,9 @@ export class TargetRegistry {
 
   /** Behavioral probe (Phase 0 rule 3): unset config → absent; set → the repo is actually readable with the write token. */
   async check(name: string): Promise<CheckResult> {
-    const m = this.targets.get(name);
+    const gone = this.unavailableConnection(name);
+    if (gone) return runCheck(name, "read the agent connection", async () => ({ status: gone.status, remediation: gone.why }));
+    const m = this.get(name);
     if (!m) return { name, status: "absent", latency_ms: 0, probe: "registry lookup", remediation: "no such target" };
     if (m.transport === "local") {
       // crews (docs/ops/crews.md): dispatched by the assistant's agents_delegate tool, run by the assistant
@@ -265,15 +451,17 @@ export class TargetRegistry {
     if (TargetRegistry.isDevin(m)) {
       const dv = this.devin(m);
       if (!dv.ok) return runCheck(name, "resolve auth + submit.org from environment", async () => ({ status: "absent", remediation: dv.remediation }));
-      return runCheck(name, "GET /v3/self with the Devin key (session creation itself is not probed — it spends)", async () => {
-        const res = await this.fetchFn(`${dv.base}/v3/self`, {
-          headers: this.devinHeaders(dv.token),
-          signal: AbortSignal.timeout(10_000),
-        });
-        if (res.status === 429) return { status: "degraded" as const, remediation: "Devin answered 429 — the key works but the API is rate limiting; dispatch retries on the next attempt" };
-        if (!res.ok) throw new Error(`devin HTTP ${res.status} — check the key (legacy apk_ keys are dead; use a cog_ service-user key or PAT)`);
-        return { meta: { org: dv.org, base: dv.base } };
-      });
+      return runCheck(name, `GET /v3/self with the Devin key${dv.access.agent ? ` of connection ${name}, filled at its door` : ""} (session creation itself is not probed — it spends)`, async () =>
+        doorVerdict(async () => {
+          const res = await dv.access.fetch(`${dv.base}/v3/self`, {
+            headers: this.devinHeaders(dv.access),
+            signal: AbortSignal.timeout(10_000),
+          });
+          if (res.status === 429) return { status: "degraded" as const, remediation: "Devin answered 429 — the key works but the API is rate limiting; dispatch retries on the next attempt" };
+          if (!res.ok) throw new Error(`devin HTTP ${res.status} — check the key (legacy apk_ keys are dead; use a cog_ service-user key or PAT)`);
+          return { meta: { org: dv.org, base: dv.base } };
+        }),
+      );
     }
     if (m.transport !== "github") {
       return runCheck(name, `dispatcher for transport ${m.transport}`, async () => ({
@@ -285,21 +473,24 @@ export class TargetRegistry {
     if (!gh.ok) {
       return runCheck(name, "resolve auth + submit.repo from environment", async () => ({ status: "absent", remediation: gh.remediation }));
     }
-    return runCheck(name, `GET /repos/${gh.repo} with the write token (issue creation itself is not probed)`, async () => {
-      const res = await this.fetchFn(`${GITHUB_API}/repos/${gh.repo}`, {
-        headers: this.ghHeaders(gh.token),
-        signal: AbortSignal.timeout(10_000),
-      });
-      if (!res.ok) throw new Error(`github HTTP ${res.status} — check the token's repository access and Metadata permission`);
-      return { meta: { repo: gh.repo } };
-    });
+    return runCheck(name, `GET /repos/${gh.repo} with the write token${gh.access.agent ? ` of connection ${name}, filled at its door` : ""} (issue creation itself is not probed)`, async () =>
+      doorVerdict(async () => {
+        const res = await gh.access.fetch(`${GITHUB_API}/repos/${gh.repo}`, {
+          headers: this.ghHeaders(gh.access),
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!res.ok) throw new Error(`github HTTP ${res.status} — check the token's repository access and Metadata permission`);
+        return { meta: { repo: gh.repo } };
+      }),
+    );
   }
 
-  /** Every target with its live check — the GET /api/targets payload. */
+  /** Every target with its live check — the GET /api/targets payload. Agent connections that cannot be dispatched to are left out (their check says why on `metistry connections`). */
   async describe(): Promise<TargetDescription[]> {
+    await this.refresh();
     const out: TargetDescription[] = [];
     for (const name of this.names()) {
-      const m = this.targets.get(name)!;
+      const m = this.get(name)!;
       out.push({
         name: m.name,
         ...(m.description !== undefined ? { description: m.description } : {}),
@@ -310,6 +501,7 @@ export class TargetRegistry {
         ...(m.cost !== undefined ? { cost: m.cost } : {}),
         data_policy: m.data_policy,
         check: await this.check(name),
+        ...(this.bound.has(name) ? { connection: name } : {}),
       });
     }
     return out;
@@ -319,10 +511,12 @@ export class TargetRegistry {
   async submitGithub(m: TargetManifest, title: string, body: string): Promise<{ ref: string; url: string }> {
     const gh = this.github(m);
     if (!gh.ok) throw new Error(`target ${m.name} unavailable: ${gh.remediation}`);
-    const res = await this.fetchFn(`${GITHUB_API}/repos/${gh.repo}/issues`, {
+    const payload = JSON.stringify({ title, body });
+    if (gh.access.agent) refuseReferences(payload);
+    const res = await gh.access.fetch(`${GITHUB_API}/repos/${gh.repo}/issues`, {
       method: "POST",
-      headers: { ...this.ghHeaders(gh.token), "content-type": "application/json" },
-      body: JSON.stringify({ title, body }),
+      headers: { ...this.ghHeaders(gh.access), "content-type": "application/json" },
+      body: payload,
       signal: AbortSignal.timeout(30_000),
     });
     if (!res.ok) throw new Error(`github ${gh.repo} issues: HTTP ${res.status}`);
@@ -330,9 +524,9 @@ export class TargetRegistry {
     return { ref: `gh:${gh.repo}#${issue.number}`, url: issue.html_url };
   }
 
-  private devinHeaders(token: string): Record<string, string> {
+  private devinHeaders(access: Access): Record<string, string> {
     return {
-      authorization: `Bearer ${token}`,
+      authorization: access.authorization,
       accept: "application/json",
       "user-agent": "metistry-dispatch",
     };
@@ -349,12 +543,17 @@ export class TargetRegistry {
     if (!dv.ok) throw new Error(`target ${m.name} unavailable: ${dv.remediation}`);
     const issues = schemaIssues(DEVIN_ANSWER_SCHEMA);
     if (issues.length > 0) throw new Error(`structured_output_schema is not Draft 7: ${issues.join("; ")}`);
+    const set = await this.purposesOf(m);
+    const spec = set.purposes[input.purpose];
+    if (!spec) throw new DispatchRefused("invalid_request", `purpose ${input.purpose} is not one ${m.name} takes — one of ${Object.keys(set.purposes).join(" | ") || "(none)"}`);
     const maxAcu = resolveMaxAcu(input.maxAcu, m.submit.max_acu);
-    const body = devinSessionBody({ ...input, target: m.name, maxAcu });
-    const res = await this.fetchFn(`${dv.base}/v3/organizations/${encodeURIComponent(dv.org)}/sessions`, {
+    const body = devinSessionBody({ ...input, preamble: spec.preamble, target: m.name, maxAcu });
+    const payload = JSON.stringify(body);
+    if (dv.access.agent) refuseReferences(payload);
+    const res = await dv.access.fetch(`${dv.base}/v3/organizations/${encodeURIComponent(dv.org)}/sessions`, {
       method: "POST",
-      headers: { ...this.devinHeaders(dv.token), "content-type": "application/json" },
-      body: JSON.stringify(body),
+      headers: { ...this.devinHeaders(dv.access), "content-type": "application/json" },
+      body: payload,
       signal: AbortSignal.timeout(30_000),
     });
     if (!res.ok) throw new Error(`devin sessions (org ${dv.org}): HTTP ${res.status}`);
@@ -367,6 +566,56 @@ export class TargetRegistry {
   available(m: TargetManifest): boolean {
     if (TargetRegistry.isDevin(m)) return this.devin(m).ok;
     return m.transport === "github" && this.github(m).ok;
+  }
+}
+
+/**
+ * An agent connection as the target `dispatch()` knows, or why it is not
+ * one: the type's dispatch block, the connection's URL, its sign-in as a
+ * reference, and its config — a repository or an organization, which go in
+ * a URL path, so each is held to its shape and can never be a reference.
+ */
+function targetOf(a: AgentHttp): TargetManifest | string {
+  const d = a.dispatch;
+  const common = {
+    schema: 1 as const,
+    name: a.connection,
+    type: "target" as const,
+    ...(a.description !== undefined ? { description: a.description } : {}),
+    result: d.result,
+    ...(a.headers.authorization !== undefined ? { auth: a.headers.authorization.replace(/^Bearer /, "") } : {}),
+    ...(d.cost ? { cost: d.cost } : {}),
+    data_policy: d.data_policy,
+  };
+  if (d.dispatcher === "github-issue") {
+    const repo = a.config.repo?.trim() ?? "";
+    if (!REPO_RE.test(repo)) return `connection ${a.connection}: config.repo must be owner/repo — got ${JSON.stringify(repo)}`;
+    return { ...common, transport: "github", submit: { repo } } as TargetManifest;
+  }
+  const org = a.config.org?.trim() ?? "";
+  if (!ORG_RE.test(org)) return `connection ${a.connection}: config.org must be the organization id (org-…) — got ${JSON.stringify(org)}`;
+  return {
+    ...common,
+    transport: "http",
+    submit: { kind: DEVIN_SUBMIT_KIND, url: a.url.replace(/\/+$/, ""), org, ...(d.max_acu !== undefined ? { max_acu: d.max_acu } : {}) },
+  } as TargetManifest;
+}
+
+/** A request bound for a connection carries no `{{ secret.… }}` or `{{ variable.… }}` — the door would fill the first and send it (the pool's `secret_reference`, T4-10). */
+function refuseReferences(payload: string): void {
+  if (REFERENCE.test(payload)) {
+    throw new DispatchRefused("invalid_request", "the brief or the task's title carries a {{ secret.… }} or {{ variable.… }} reference — the door fills references, so a brief never carries one; nothing was sent");
+  }
+}
+
+/** A door's refusal as a check verdict: a missing item is absent, anything else failed — names, never values. */
+async function doorVerdict<T>(probe: () => Promise<T>): Promise<T | { status: "absent" | "failed"; remediation: string }> {
+  try {
+    return await probe();
+  } catch (err) {
+    if (err instanceof EgressRefused) return { status: err.code === "missing_secret" ? "absent" : "failed", remediation: err.message };
+    if (err instanceof ConnectionRefused) return { status: "failed", remediation: err.message };
+    throw err;
   }
 }
 
@@ -414,8 +663,15 @@ export async function dispatch(
   sources: string[] = [],
   opts: DispatchOptions = {},
 ): Promise<DispatchResult> {
+  await registry.refresh(); // an agent connection edited since the last call is read as it is now
+  const gone = registry.unavailableConnection(targetName);
+  if (gone) {
+    const check: CheckResult = { name: targetName, status: gone.status, latency_ms: 0, probe: "read the agent connection", remediation: gone.why };
+    return { ok: false, code: "conflict", message: "target unavailable", check };
+  }
   const target = registry.get(targetName);
   if (!target) return { ok: false, code: "not_found", message: "unknown target" };
+  const agent = registry.connectionOf(target);
   if (!Number.isInteger(taskId) || taskId <= 0) return { ok: false, code: "not_found", message: "no such task" };
 
   const { rows } = await db.query(`SELECT id, title, status, external_ref FROM work WHERE id = $1`, [taskId]);
@@ -425,12 +681,15 @@ export async function dispatch(
   if (task.status === "closed") return { ok: false, code: "conflict", message: "task is closed" };
 
   // Refusals are runs rows too: the safety mechanism must be visible, not silent.
-  const purpose: DevinPurpose = opts.purpose ?? DEFAULT_PURPOSE;
+  // The purposes are the target's connection type's (plan §2.7, T4-11); a
+  // target that takes none records `work`, as it always did.
+  const purposeSet = await registry.purposesOf(target);
+  const purpose: DevinPurpose = opts.purpose ?? purposeSet.default_purpose ?? DEFAULT_PURPOSE;
   const runId = await startRun(db, {
     component: "console",
     kind: "dispatch",
     tool: target.name,
-    meta: { target: target.name, task: taskId, principal, purpose, brief_bytes: Buffer.byteLength(brief, "utf8") },
+    meta: { target: target.name, task: taskId, principal, purpose, brief_bytes: Buffer.byteLength(brief, "utf8"), ...(agent ? { connection: agent.connection } : {}) },
   });
 
   const violations = checkBrief(target.data_policy, brief, sources);
@@ -456,6 +715,12 @@ export async function dispatch(
     return { ok: false, code: "conflict", message: "target unavailable", check };
   }
 
+  const takes = Object.keys(purposeSet.purposes);
+  if (takes.length > 0 && !takes.includes(purpose)) {
+    await finishRun(db, runId, { ok: false, error: `purpose ${purpose} is not one ${target.name} takes` });
+    return { ok: false, code: "invalid_request", message: `purpose must be one of ${takes.join(" | ")} for ${target.name}` };
+  }
+
   let submitted: { ref: string; url: string };
   let devinMeta: DevinWorkMeta | null = null;
   try {
@@ -472,12 +737,18 @@ export async function dispatch(
         purpose,
         target: target.name,
         dispatch_run_id: runId,
+        // which connection's key polls it home (collectors/devin-sessions): a `targets/` dispatch names none
+        ...(agent ? { connection: agent.connection } : {}),
       };
     } else {
       submitted = await registry.submitGithub(target, task.title, `${brief.trimEnd()}\n\n${returnFooter(taskId, target.name)}\n`);
     }
   } catch (err) {
-    await finishRun(db, runId, { ok: false, error: err instanceof Error ? err.message : String(err) });
+    const secrets = agent ? { meta: { secrets: agent.secretsUsed() } } : {};
+    await finishRun(db, runId, { ok: false, error: err instanceof Error ? err.message : String(err), ...secrets });
+    // refused before anything was sent (a reference in the brief), or at the connection's door (a key not granted, a host not listed): the owner's to fix, said by name
+    if (err instanceof DispatchRefused) return { ok: false, code: err.code, message: err.message };
+    if (err instanceof EgressRefused || err instanceof ConnectionRefused) return { ok: false, code: "conflict", message: `target unavailable: ${err.message}` };
     return { ok: false, code: "internal", message: "target submission failed" };
   }
 
@@ -508,7 +779,13 @@ export async function dispatch(
     // The ACU cap IS the budget for a Devin dispatch; the spend Devin
     // actually reports lands on this same row when the poller sees the
     // session finish (collectors/devin-sessions).
-    meta: { ref: submitted.ref, url: submitted.url, ...(devinMeta ? { session_id: devinMeta.session_id, org: devinMeta.org, max_acu: devinMeta.max_acu } : {}) },
+    meta: {
+      ref: submitted.ref,
+      url: submitted.url,
+      ...(devinMeta ? { session_id: devinMeta.session_id, org: devinMeta.org, max_acu: devinMeta.max_acu } : {}),
+      // the NAMES the connection's door filled (`secret_last_used` reads them) — never a value
+      ...(agent ? { secrets: agent.secretsUsed() } : {}),
+    },
   });
   return { ok: true, ...submitted, run_id: runId };
 }

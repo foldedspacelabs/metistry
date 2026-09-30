@@ -1,12 +1,15 @@
 // The connection model (§2.6) and the connection-type manifest (§2.7):
 // the closed vocabularies are refusals with tests, not sentences (U3).
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { parse as parseYaml } from "yaml";
 import {
+  AGENT_DISPATCHERS,
   CONNECTION_CAPABILITIES,
   FIELD_KINDS,
   capabilityIssue,
   connectionIssues,
+  connectionTypeSyncs,
   templateRefs,
   validateConnectionFile,
   type ConnectionFile,
@@ -504,5 +507,72 @@ describe("the OAuth client of a custom connection (C118)", () => {
     expect(connectionIssues(c, asType(googleCalendar()))).toEqual([
       "reach.http.auth: google-calendar supplies the OAuth client — token belongs to a custom connection; this one keeps its token and any client of your own in its oauth field (config.<field>)",
     ]);
+  });
+});
+
+describe("agent connection types — targets as connections (T4-11)", () => {
+  const agentType = (dispatch: Record<string, unknown> | undefined, patch: Record<string, unknown> = {}) => ({
+    schema: 1,
+    name: "devin",
+    type: "connection-type",
+    provides: "agent",
+    transports: ["http"],
+    implementation: { kind: "builtin", module: "devin" },
+    ...(dispatch ? { dispatch } : {}),
+    ...patch,
+  });
+  const devinDispatch = (patch: Record<string, unknown> = {}) => ({
+    dispatcher: "devin-session",
+    data_policy: { allow: [], deny_sources: ["comms"], max_brief_bytes: 16384 },
+    purposes: { work: { label: "Work", preamble: "Do it." }, knowledge_research: { label: "Research", preamble: "Answer it." } },
+    default_purpose: "work",
+    result: { via: "report_queue", status_via: "devin-sessions" },
+    ...patch,
+  });
+
+  it("the shipped agent and tracker types validate", () => {
+    for (const name of ["devin", "github-issues", "github"]) {
+      const text = readFileSync(new URL(`../../../seed/connection-types/${name}/manifest.yaml`, import.meta.url), "utf8");
+      expect(asType(parseYaml(text)).name).toBe(name);
+    }
+  });
+
+  it("the Devin type carries the purposes that were DEVIN_PURPOSES, each with its preamble", () => {
+    const t = asType(parseYaml(readFileSync(new URL("../../../seed/connection-types/devin/manifest.yaml", import.meta.url), "utf8")));
+    expect(Object.keys(t.dispatch!.purposes).sort()).toEqual(["knowledge_research", "work"]);
+    expect(t.dispatch!.default_purpose).toBe("work");
+    expect(t.dispatch!.purposes.knowledge_research!.preamble).toContain("Do not open a pull request");
+    expect(t.dispatch!.data_policy).toEqual({ allow: [], deny_sources: ["comms", "devin"], max_brief_bytes: 16384 });
+    expect(connectionTypeSyncs(t)).toEqual(["devin-sessions", "devin-knowledge"]);
+  });
+
+  it("a dispatcher is one the console implements — an unknown one is refused, never ignored", () => {
+    expect(errorsOf(agentType(devinDispatch({ dispatcher: "a2a" })))).toMatch(/dispatcher/);
+    expect(AGENT_DISPATCHERS).toEqual(["github-issue", "devin-session"]);
+  });
+
+  it("dispatch is an agent type's, product code's, over http", () => {
+    expect(errorsOf(agentType(devinDispatch(), { provides: "tracker", capabilities: ["read"] }))).toMatch(/dispatch is an agent type's/);
+    expect(errorsOf(agentType(devinDispatch(), { implementation: { kind: "native" } }))).toMatch(/implementation: \{ kind: builtin/);
+    expect(errorsOf(agentType(undefined))).toMatch(/a builtin agent type says how it is dispatched to/);
+  });
+
+  it("purposes need a default that is one of them; max_acu is Devin's alone", () => {
+    expect(errorsOf(agentType(devinDispatch({ default_purpose: undefined })))).toMatch(/name the purpose a dispatch that names none gets/);
+    expect(errorsOf(agentType(devinDispatch({ default_purpose: "exfiltrate" })))).toMatch(/"exfiltrate" is not one of the purposes/);
+    expect(errorsOf(agentType(devinDispatch({ purposes: { Work: { label: "W", preamble: "p" } } })))).toMatch(/snake_case/);
+    expect(errorsOf(agentType(devinDispatch({ dispatcher: "github-issue", purposes: {}, default_purpose: undefined, max_acu: 3 })))).toMatch(/only a devin-session dispatcher takes one/);
+  });
+
+  it("the data policy is a declaration: every field required, vault prefixes only", () => {
+    expect(errorsOf(agentType(devinDispatch({ data_policy: { allow: [] } })))).toMatch(/deny_sources/);
+    expect(errorsOf(agentType(devinDispatch({ data_policy: { allow: [".metistry"], deny_sources: [], max_brief_bytes: 1 } })))).toMatch(/allow/);
+  });
+
+  it("also_read_by names further syncs, after a first one, each once", () => {
+    const tracker = { schema: 1, name: "t", type: "connection-type", provides: "tracker", transports: ["http"], capabilities: ["read"], implementation: { kind: "builtin", module: "t" } };
+    expect(connectionTypeSyncs(asType({ ...tracker, sync: "a", also_read_by: ["b"] }))).toEqual(["a", "b"]);
+    expect(errorsOf({ ...tracker, also_read_by: ["b"] })).toMatch(/declare the first one as sync:/);
+    expect(errorsOf({ ...tracker, sync: "a", also_read_by: ["a"] })).toMatch(/a sync is named once/);
   });
 });

@@ -302,6 +302,13 @@ This is the "what does Devin know about X" path: a question the assistant
 cannot answer is dispatched, and the answer arrives as something the owner
 triages rather than as something a model asserted.
 
+The purposes and their preambles are the **Devin connection type's**
+(`seed/connection-types/devin/manifest.yaml`, `dispatch.purposes`; T4-11) —
+an overlay of that type may add or reword one — and a Devin dispatch goes
+out through the `devin` agent connection's door, its key filled there
+(`docs/ops/connections.md`, *Agent connections*); the environment keys below
+still work for one release when there is no such connection.
+
 It is a **`purpose`, not a new `work.kind`**, because `packages/tasks` owns
 exactly two claimable kinds (`task`, `review`) and `github-state` owns the
 rest — a third would ripple through claiming, the fold and the reconciler for

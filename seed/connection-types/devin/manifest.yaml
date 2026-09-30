@@ -1,0 +1,83 @@
+# The Devin connection type (plan §2.6, §2.7; T4-11) — an `agent` connection:
+# somewhere work is sent. It is what `targets/devin-sessions/manifest.yaml`
+# was, split where it belongs: this TYPE carries how a brief is dispatched
+# (the dispatcher, the data policy, the purposes — `DEVIN_PURPOSES` moved
+# here from apps/console/src/devin.ts), and the CONNECTION carries where it
+# goes and the secret it goes with. Added with
+#
+#   metistry secrets set devin_api_key                  (the cog_ key, on stdin)
+#   metistry secrets hosts devin_api_key api.devin.ai mcp.devin.ai
+#   metistry secrets grant devin_api_key connection:devin on
+#   metistry connections add devin --type agent --provider devin \
+#     --url https://api.devin.ai --auth bearer --secret devin_api_key \
+#     --config org=org-… --no-discover
+#
+# Dispatch (`POST /api/tasks/:id/dispatch {target: devin}`) creates a Devin
+# session through the egress door: the key is filled at the door for the
+# hosts its *Sent only to* list names, granted to `connection:devin`, and
+# never put on a request by the console. The answer comes home through the
+# `devin-sessions` sync, which polls the session and files its structured
+# output as a report; `devin-knowledge` reads the same connection (knowledge
+# notes over REST, repo wikis over mcp.devin.ai) into the inbox.
+#
+# The data policy is the TYPE's, so a connection file cannot widen it. It is
+# EMPTY ON PURPOSE: a third party with a train-on-your-data default may be
+# sent no vault citation at all. The owner widens it by overlaying this type
+# in `.metistry/extensions/devin/manifest.yaml` (an extension wins, D4) —
+# never here.
+schema: 1
+name: devin
+type: connection-type
+description: Devin (Cognition) — send a task to a Devin session; its structured answer comes back as a report. Its knowledge notes and repo wikis come into the inbox. A cog_ key, sent to api.devin.ai and mcp.devin.ai only.
+provides: agent
+transports: [http]
+auth: [bearer]
+fields:
+  - key: org
+    kind: text
+    label: Organization
+    help: "The org-… id a session is charged to. Required: a session is a spend, and which organization pays is not inferred."
+  - key: repos
+    kind: text
+    label: Repository wikis
+    help: "owner/repo, comma-separated — the repos whose Devin wikis devin-knowledge reads. Empty: knowledge notes only."
+    required: false
+sync: devin-sessions
+also_read_by: [devin-knowledge]
+implementation: { kind: builtin, module: devin }
+dispatch:
+  dispatcher: devin-session
+  # The per-session ceiling in ACUs when the dispatch names none — the only
+  # budget a session has; deliberately small, raised per dispatch.
+  max_acu: 5
+  default_purpose: work
+  purposes:
+    # "what does X know about Y" — read, do not change anything.
+    knowledge_research:
+      label: Knowledge research
+      preamble: |-
+        **Knowledge research.** Answer the question below from what you already know and can read.
+
+        Do not open a pull request, push a branch, or modify any repository: this is a research request
+        and its whole output is the structured answer. Prefer what you can cite over what you can infer,
+        and say so in `confidence` when you are inferring.
+    work:
+      label: Work brief
+      preamble: |-
+        **Work brief.** Do the work described below, then report on it.
+
+        Follow the repository's own conventions. If the brief is ambiguous, do the smaller reading of it
+        and put the ambiguity in `open_questions` rather than guessing wide.
+  result:
+    via: report_queue
+    status_via: devin-sessions
+  cost:
+    # Devin bills in ACUs; the spend Devin reports lands on the dispatch's
+    # runs row when the session finishes (collectors/devin-sessions).
+    per_run_estimate_usd: 0
+  data_policy:
+    allow: []
+    # comms never leaves the machine (§4.12); Devin's own knowledge, folded
+    # into the vault, is not re-exported as if it were ours.
+    deny_sources: [comms, devin]
+    max_brief_bytes: 16384

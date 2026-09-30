@@ -4,7 +4,12 @@
 //
 // Status comes from GitHub, never invented. Degrades absent without a
 // token/repos. Uses the REST API (and, for review threads, one GraphQL read)
-// with a fine-grained read-only PAT (env), no SDK dependency. PRs carry their
+// with a fine-grained read-only PAT, no SDK dependency. The PAT is the
+// `github` connection's secret (T4-11): a `{{ secret.x }}` reference in the
+// Authorization header, filled at the connection's egress door for
+// api.github.com only, and the repos are its `repos` config — or, for one
+// release when no GitHub connection is there, METISTRY_GITHUB_TOKEN and
+// METISTRY_GITHUB_REPOS. PRs carry their
 // head SHA and review-request metadata (work.meta) so "what's waiting on my
 // review" is one query (one extra reviews call per open non-draft PR).
 //
@@ -45,17 +50,67 @@
 // says where it was settled.
 
 import { GITHUB_API_ORIGIN, GITHUB_SOURCE_KIND, PULL_REQUEST_KIND, RESOLVED_AT_SOURCE, githubPullRef, githubPullSource, lastMirror, raiseMirror, resolveAtSource, type RequestSource } from "@foldedspacelabs/metistry-core";
+import type { SyncOpener } from "@foldedspacelabs/metistry-connections";
 
 export interface Db {
   query(text: string, values?: unknown[]): Promise<{ rows: any[] }>;
 }
 
 export interface GithubCtx {
+  /** the legacy read-only token (METISTRY_GITHUB_TOKEN) — read for one release, when no GitHub connection opens */
   githubToken?: string;
-  githubRepos?: string[]; // ["owner/repo", ...]
+  githubRepos?: string[]; // ["owner/repo", ...] — the legacy list (METISTRY_GITHUB_REPOS), beside githubToken
   fetchFn?: typeof fetch;
   /** the runner's resolved Needs You switches (`syncs.github-state.raise`); absent = the manifest's defaults */
   raise?: Readonly<Record<string, boolean>>;
+  /**
+   * The console's opener (packages/connections `instanceSyncOpener`): the
+   * GitHub connection this sync reads (T4-11) — its token a `{{ secret.x }}`
+   * reference filled at its egress door for api.github.com only, its repos
+   * its `repos` config. When one opens it wins over the two legacy fields.
+   */
+  openSync?: SyncOpener | undefined;
+}
+
+/** The GitHub connection type's builtin module (seed/connection-types/github). */
+export const GITHUB_MODULE = "github";
+/** owner/repo — each part GitHub's own characters, and never `.` or `..`, since it goes in a URL path. */
+const REPO_RE = /^(?!\.{1,2}\/)[A-Za-z0-9_.-]+\/(?!\.{1,2}$)[A-Za-z0-9_.-]+$/;
+
+/** How one pass reaches GitHub: a fetch, the Authorization header it sends, and the repos it reads. */
+interface GithubAccess {
+  fetch: typeof fetch;
+  /** `Bearer {{ secret.x }}` through a connection's door (filled there), the legacy token otherwise */
+  authorization: string;
+  repos: string[];
+  connection?: string | undefined;
+}
+
+/**
+ * The access this pass reads GitHub with, or null (degrades absent). A
+ * GitHub connection that is there but wrong — another host, a repo that is
+ * not owner/repo — throws, so the run says why instead of falling back to an
+ * old token.
+ */
+export async function githubAccess(ctx: GithubCtx): Promise<GithubAccess | null> {
+  if (ctx.openSync) {
+    const opened = await ctx.openSync({ sync: COMPONENT, origin: GITHUB_API_ORIGIN, module: GITHUB_MODULE });
+    if (opened.ok) {
+      const repos = (opened.sync.config.repos ?? "").split(",").map((r) => r.trim()).filter(Boolean);
+      const bad = repos.filter((r) => !REPO_RE.test(r));
+      if (bad.length > 0) throw new Error(`${COMPONENT}: connection ${opened.sync.connection}: config.repos must be owner/repo, comma-separated — not ${bad.map((b) => JSON.stringify(b)).join(", ")}`);
+      if (repos.length === 0) return null;
+      return { fetch: opened.sync.fetch, authorization: opened.sync.headers.authorization ?? "", repos, connection: opened.sync.connection };
+    }
+    if (opened.status === "failed") throw new Error(`${COMPONENT}: ${opened.why}`);
+  }
+  if (!ctx.githubToken || !ctx.githubRepos?.length) return null;
+  return { fetch: ctx.fetchFn ?? fetch, authorization: `Bearer ${ctx.githubToken}`, repos: ctx.githubRepos };
+}
+
+/** What the reads below hold: the pass's Authorization header. */
+interface ReadCtx {
+  authorization: string;
 }
 
 /** This collector's name — the `source_agent` of every request it raises. */
@@ -164,16 +219,16 @@ export function readOnlyGithub(fetchFn: typeof fetch): typeof fetch {
   };
 }
 
-function ghHeaders(ctx: GithubCtx, accept = "application/vnd.github+json") {
+function ghHeaders(ctx: ReadCtx, accept = "application/vnd.github+json") {
   return {
-    authorization: `Bearer ${ctx.githubToken}`,
+    authorization: ctx.authorization,
     accept,
     "user-agent": "metistry-github-state",
   };
 }
 
 /** The token's own login — "my review" is relative to it. Degrades to null. */
-async function fetchViewer(ctx: GithubCtx, get: typeof fetch): Promise<string | null> {
+async function fetchViewer(ctx: ReadCtx, get: typeof fetch): Promise<string | null> {
   try {
     const res = await get(`${GITHUB_API_ORIGIN}/user`, { headers: ghHeaders(ctx), signal: AbortSignal.timeout(15_000) });
     if (!res.ok) return null;
@@ -184,7 +239,7 @@ async function fetchViewer(ctx: GithubCtx, get: typeof fetch): Promise<string | 
 }
 
 /** Has `login` left an APPROVED review on this PR? One call per open non-draft PR. */
-async function approvedBy(ctx: GithubCtx, get: typeof fetch, repo: string, number: number, login: string): Promise<boolean> {
+async function approvedBy(ctx: ReadCtx, get: typeof fetch, repo: string, number: number, login: string): Promise<boolean> {
   const res = await get(`${GITHUB_API_ORIGIN}/repos/${repo}/pulls/${number}/reviews?per_page=100`, {
     headers: ghHeaders(ctx),
     signal: AbortSignal.timeout(30_000),
@@ -195,7 +250,7 @@ async function approvedBy(ctx: GithubCtx, get: typeof fetch, repo: string, numbe
 }
 
 /** merged_at from the single-PR endpoint — the open-issues listing never carries it. */
-async function fetchPullState(ctx: GithubCtx, get: typeof fetch, repo: string, number: number): Promise<{ merged_at: string | null }> {
+async function fetchPullState(ctx: ReadCtx, get: typeof fetch, repo: string, number: number): Promise<{ merged_at: string | null }> {
   const res = await get(`${GITHUB_API_ORIGIN}/repos/${repo}/pulls/${number}`, {
     headers: ghHeaders(ctx),
     signal: AbortSignal.timeout(30_000),
@@ -205,7 +260,7 @@ async function fetchPullState(ctx: GithubCtx, get: typeof fetch, repo: string, n
 }
 
 /** Open PRs with review-request detail and their heads (the issues listing omits both). */
-async function fetchPulls(ctx: GithubCtx, get: typeof fetch, repo: string): Promise<Map<number, GhPull>> {
+async function fetchPulls(ctx: ReadCtx, get: typeof fetch, repo: string): Promise<Map<number, GhPull>> {
   const out = new Map<number, GhPull>();
   for (let page = 1; page <= 5; page++) {
     const res = await get(`${GITHUB_API_ORIGIN}/repos/${repo}/pulls?state=open&per_page=100&page=${page}`, {
@@ -220,7 +275,7 @@ async function fetchPulls(ctx: GithubCtx, get: typeof fetch, repo: string): Prom
   return out;
 }
 
-async function fetchOpen(ctx: GithubCtx, get: typeof fetch, repo: string): Promise<GhItem[]> {
+async function fetchOpen(ctx: ReadCtx, get: typeof fetch, repo: string): Promise<GhItem[]> {
   const items: GhItem[] = [];
   for (let page = 1; page <= 5; page++) {
     const res = await get(`${GITHUB_API_ORIGIN}/repos/${repo}/issues?state=open&per_page=100&page=${page}`, { headers: ghHeaders(ctx), signal: AbortSignal.timeout(30_000) });
@@ -233,7 +288,7 @@ async function fetchOpen(ctx: GithubCtx, get: typeof fetch, repo: string): Promi
 }
 
 /** The PR's diff, for the card — capped, and marked when it was. Degrades to none: the card still links the PR. */
-async function fetchPatch(ctx: GithubCtx, get: typeof fetch, repo: string, number: number): Promise<{ patch: string; truncated: boolean } | null> {
+async function fetchPatch(ctx: ReadCtx, get: typeof fetch, repo: string, number: number): Promise<{ patch: string; truncated: boolean } | null> {
   try {
     const res = await get(`${GITHUB_API_ORIGIN}/repos/${repo}/pulls/${number}`, { headers: ghHeaders(ctx, "application/vnd.github.diff"), signal: AbortSignal.timeout(30_000) });
     if (!res.ok || typeof res.text !== "function") return null;
@@ -261,7 +316,7 @@ export const REVIEW_THREADS_QUERY = `query MetistryReviewThreads($owner: String!
 const clip = (s: string, n: number): string => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
 /** The PR's open review threads — what the owner may reply to or resolve through the thread doors. */
-async function fetchThreads(ctx: GithubCtx, get: typeof fetch, repo: string, number: number): Promise<ReviewThread[]> {
+async function fetchThreads(ctx: ReadCtx, get: typeof fetch, repo: string, number: number): Promise<ReviewThread[]> {
   const [owner, name] = repo.split("/");
   const res = await get(`${GITHUB_API_ORIGIN}/graphql`, {
     method: "POST",
@@ -411,7 +466,7 @@ export function reviewPayload(p: OpenPull, patch: { patch: string; truncated: bo
 }
 
 /** One PR's mirror, against what GitHub says now (module header). Returns how many requests it raised or cleared. */
-async function reconcileMirror(db: Db, ctx: GithubCtx, get: typeof fetch, p: OpenPull, raiseOn: boolean): Promise<number> {
+async function reconcileMirror(db: Db, ctx: ReadCtx, get: typeof fetch, p: OpenPull, raiseOn: boolean): Promise<number> {
   if (!p.known) return 0; // who "my" is unknown: claim nothing, clear nothing
   const source = githubPullSource(p.repo, p.item.number, p.item.user?.login ?? null);
   const last = await lastPullRequest(db, source.external_ref);
@@ -446,14 +501,17 @@ async function reconcileMirror(db: Db, ctx: GithubCtx, get: typeof fetch, p: Ope
 }
 
 /** One reconcile pass. Returns rows upserted + closed, and requests raised or cleared. */
-export async function run(db: Db, ctx: GithubCtx = {}): Promise<number> {
-  if (!ctx.githubToken || !ctx.githubRepos?.length) return 0; // degrades absent
-  const get = readOnlyGithub(ctx.fetchFn ?? fetch);
+export async function run(db: Db, runCtx: GithubCtx = {}): Promise<number> {
+  const access = await githubAccess(runCtx);
+  if (!access) return 0; // degrades absent
+  // still read-only through a connection's door: readOnlyGithub wraps it, so the door sees only GETs and queries
+  const get = readOnlyGithub(access.fetch);
+  const ctx: ReadCtx & Pick<GithubCtx, "raise"> = { authorization: access.authorization, ...(runCtx.raise ? { raise: runCtx.raise } : {}) };
   const raiseOn = ctx.raise && Object.hasOwn(ctx.raise, "review_requested") ? ctx.raise.review_requested === true : RAISE_DEFAULTS.review_requested;
   const raiseIssues = ctx.raise && Object.hasOwn(ctx.raise, "assigned") ? ctx.raise.assigned === true : RAISE_DEFAULTS.assigned;
   let touched = 0;
   const me = await fetchViewer(ctx, get);
-  for (const repo of ctx.githubRepos) {
+  for (const repo of access.repos) {
     const open = await fetchOpen(ctx, get, repo);
     const pulls = open.some((i) => i.pull_request) ? await fetchPulls(ctx, get, repo) : new Map<number, GhPull>();
     const area = repo.split("/")[1] ?? repo;

@@ -457,6 +457,15 @@ table under the connection's name, absent until one is added; Devin Sessions
 every 5 min; Devin Knowledge hourly; AWS Costs every 6 hours. No shipped
 manifest carries a cron string any more.
 
+GitHub, Devin Sessions and Devin Knowledge read their **connection**
+(T4-11): `github-state` the `github` tracker connection, both Devin syncs
+the one `devin` agent connection (its type names `devin-sessions` in
+`sync:` and `devin-knowledge` in `also_read_by:`). Each finds it as every
+sync does — `syncs.<name>.connection`, or the one `ok` connection its
+provider declares — and its key is filled at the connection's door
+(`docs/ops/connections.md`, *A sync reading its connection*). With no
+connection, each reads its legacy environment for one release.
+
 **Standup** is §2.5's eighth default, working days at 08:00. It renders
 its template into `Journal/Standup/<date>.md` — its own reserved subfolder,
 written through the reconciler as principal `standup`, so the file says

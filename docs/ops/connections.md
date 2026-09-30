@@ -13,8 +13,9 @@ command (stdio) — **and API, feed and files connections through the tools
 Metistry generates for them** (T4-10, *Generated tools* below). Every HTTP
 auth shortcut dials: none, bearer, an API-key header, Basic (a type that
 declares it) and **OAuth** (T4-10, *OAuth* below). The other types have their
-own consumers and tickets: agent connections (targets, T4-11), calendar and
-mail providers (T4-13…T4-15). A **tracker** or **calendar** connection is read
+own consumers and tickets: an **agent** connection is a target a task is
+dispatched to (T4-11, *Agent connections* below), and calendar and mail
+providers are T4-13…T4-15. A **tracker** or **calendar** connection is read
 by its provider's sync — Linear is the first tracker (T4-24, *Linear* below),
 an ICS feed the first calendar (T4-12, *ICS feeds* below). A **mail** connection
 is a mailbox over IMAP (T4-15, *Mail over IMAP* below) — a reach class of its
@@ -343,6 +344,120 @@ opens is `openSyncHttp` (`packages/connections`, `sync.ts`):
   is not opened and nothing is sent (`failed`, naming the `metistry secrets
   hosts` line). A refused refresh is `sign_in`, naming `metistry connections
   authorize <name>`.
+- **One connection, several syncs** (T4-11). A type names its first sync in
+  `sync:` and any others that read the same connection in `also_read_by:` —
+  the Devin connection is read by `devin-sessions` and by `devin-knowledge`.
+  Each finds it by the same rule; `sync:` is the one `add` names in
+  `scheduled.yaml`.
+- **A further origin is the code's, never the file's.** A sync may name an
+  origin its product code reaches for the same service beside the
+  connection's own (`devin-knowledge` names `https://mcp.devin.ai`, where the
+  repo wikis are); nothing in a connection file can add one, and the key is
+  still filled only for the hosts its *Sent only to* list names.
+- **The connection's config.** The sync is handed the connection's text
+  config values (`config.repos`, `config.org`) — never a secret field's.
+
+**Which collectors are syncs of a connection (T4-11).** Beside Linear and
+the calendar providers (ICS, CalDAV, Google Calendar): **GitHub** (`github-state` reads the
+`github` tracker connection — its read-only token, its `repos`; still
+read-only, `readOnlyGithub` wraps the door, and pinned to
+`https://api.github.com`), and **Devin** (`devin-sessions` and
+`devin-knowledge` read the `devin` agent connection — its key, its `org` and
+`repos`). A connection that is there but wrong fails the run by name; it
+never falls back to an older key. **For one release** a collector with no
+connection still reads its legacy environment (`METISTRY_GITHUB_TOKEN` +
+`METISTRY_GITHUB_REPOS`, `METISTRY_DEVIN_API_KEY`), so an install keeps
+running until the owner adds the connection. Two stay outside, and why:
+**AWS Costs** signs each request with SigV4, which needs the secret key's
+value in the process to compute the signature — a door that fills a
+reference cannot sign; and **Calendar** (`eventkit-calendar`) reads the
+eventkit bridge with the bridge's own token, which is the bridge's wire
+contract, not a connection's secret.
+
+```sh
+metistry secrets set github_token                     # a read-only fine-grained PAT, on stdin
+metistry secrets hosts github_token api.github.com
+metistry secrets grant github_token connection:github on
+metistry connections add github --type tracker --provider github \
+    --url https://api.github.com --auth bearer --secret github_token \
+    --config repos=owner/a,owner/b --no-discover
+metistry secrets sync --to env                        # then restart the console
+```
+
+## Agent connections — targets as connections (T4-11)
+
+An **agent** connection is somewhere work is sent (plan §2.6): today's two
+HTTP targets, `targets/devin-sessions` and `targets/github-issues`, moved
+into connection types — `seed/connection-types/devin/` and
+`seed/connection-types/github-issues/`. The split is where each thing
+belongs:
+
+| Where | What |
+| --- | --- |
+| the **type** (`dispatch:`) | the dispatcher (closed: `devin-session`, `github-issue`), the **data policy** a brief is held to, the **purposes** with their preambles (Devin's — `DEVIN_PURPOSES` moved here), the result path, the cost, Devin's ACU ceiling |
+| the **connection** | where it goes (`reach.http.url`), the key it goes with (`secrets`, by name), and its fields: Devin's `org` (and `repos` for its wikis), GitHub Issues' `repo` |
+
+**Dispatch is unchanged.** The console's target registry
+(`apps/console/src/dispatch.ts`) reads the instance's agent connections
+afresh on every `GET /api/targets` and every `POST /api/tasks/:id/dispatch`
+and presents each as the target `dispatch()` already knows: the same data
+policy check, the same `runs` row, the same work-row binding, the same
+return path (`devin-sessions` polls a Devin session home; `github-state`
+reconciles the issue). A connection of the same name as a `targets/`
+manifest wins (D4) — except the crews' `local-crew`, which a connection can
+never take.
+
+**What changes is where the key comes from.** A connection-backed target's
+requests go through the connection's door (`openAgentHttp`,
+`packages/connections`): the key is a `{{ secret.x }}` reference in the
+Authorization header, filled by core's `guardedFetch` for the hosts its
+*Sent only to* list names, only when granted to `connection:<name>`; the
+response is redacted; no redirect is followed. GitHub Issues is pinned to
+`https://api.github.com` whatever the file says. The console fills these
+secrets from `metistry secrets sync --to env` (`consoleSecretNames` lists an
+agent connection's).
+
+**Refused, each before anything is sent:**
+
+| Refusal | Why |
+| --- | --- |
+| a brief or task title carrying `{{ secret.… }}` or `{{ variable.… }}` — 400 | the door fills a reference wherever it finds one, so a brief never carries one (the pool's `secret_reference`, T4-10) |
+| a key not granted to the connection, or bound for a host its list does not name — 409 *target unavailable*, by name | the egress door's rule |
+| a repo that is not `owner/repo` (or a `.`/`..` part), an org that is not an id — the connection is unavailable, naming why | they go in a URL path |
+| a purpose the target's type does not take — 400 | the purposes are the type's |
+| an agent connection named `local-crew` | it is the crews' target |
+
+**The data policy is the type's**, so a connection file cannot widen it.
+Devin's is empty on purpose (a third party with a train-on-your-data
+default may be sent no vault citation); the owner widens it by overlaying
+the type — `.metistry/extensions/devin/manifest.yaml` — exactly as a target
+was widened by overlaying the target.
+
+**Not through the proxy.** An agent may not dispatch through
+`connections_call`: the pool refuses an agent connection `not_built`, and a
+task is sent only by the owner's dispatch door.
+
+```sh
+metistry secrets set devin_api_key                    # the cog_ key, on stdin
+metistry secrets hosts devin_api_key api.devin.ai mcp.devin.ai
+metistry secrets grant devin_api_key connection:devin on
+metistry connections add devin --type agent --provider devin \
+    --url https://api.devin.ai --auth bearer --secret devin_api_key \
+    --config org=org-… [--config repos=owner/repo] --no-discover
+metistry secrets sync --to env                        # then restart the console
+
+metistry secrets set github_write_token               # Issues read/write + Metadata on ONE repo
+metistry secrets hosts github_write_token api.github.com
+metistry secrets grant github_write_token connection:github-issues on
+metistry connections add github-issues --type agent --provider github-issues \
+    --url https://api.github.com --auth bearer --secret github_write_token \
+    --config repo=owner/repo --no-discover
+```
+
+**For one release** the `targets/` manifests and their `env:` keys load
+beside the connections, so an install's dispatch keeps working until the
+owner adds them; a `targets/` Devin manifest dispatches with the Devin
+type's purposes.
 
 ## Linear
 
@@ -906,7 +1021,17 @@ group as well.
   Metistry, and CLAUDE.md's default for a proxied tool is Ask.
 - **The console fills the secrets of every connection it dials** (T4-10):
   `secrets sync --to env` delivers an MCP, API, feed or files connection's
-  secrets, where until the pool was wired it delivered a sync's alone.
+  secrets, where until the pool was wired it delivered a sync's alone — and,
+  from T4-11, an agent connection's, since the console dispatches through it.
+- **An agent type's purposes are not tools** (T4-11). Devin's purposes live
+  in the type's `dispatch.purposes`, not as `starts_agent` tools: dispatch is
+  the owner's own door, so a per-tool Ask would ask the owner about their
+  own click, and a tool would put the connection on the proxy's listing,
+  where it is not reachable.
+- **Legacy keys for one release** (T4-11): a sync with no connection reads
+  its old environment, and the `targets/` manifests still dispatch with
+  `env:` keys, so `metistry update` breaks nothing before the owner adds the
+  connections; a connection, once there, always wins.
 - **A rotated refresh token lives in memory** (T4-10): the process that dials
   cannot write the Keychain, so a provider that rotates refresh tokens hands
   the new one to the running console only; after a restart the stored one is

@@ -46,7 +46,6 @@ import { NDJSON_CONTENT_TYPE, RUNS_EXPORT_QUERY, parseExportParams, streamRunsEx
 import { consultRoute, route as routeMessage, servedKindOf, threadFactsOf, type RoutePolicy, type Rules } from "./router.js";
 import { sendToSession, storeSubscription, type PushConfig } from "./push.js";
 import { dispatch, type TargetRegistry } from "./dispatch.js";
-import { DEVIN_PURPOSES, isDevinPurpose } from "./devin.js";
 import { listProjects, updateProject, validateProjectPatch } from "./projects.js";
 import { applyImprovement } from "./prompt-overlay.js";
 import { SCHEDULED_PATH, applyMeEdit, meEditOf } from "./profile-tidy.js";
@@ -1134,16 +1133,20 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       const body = (await readJson(req)) as { target?: unknown; brief?: unknown; sources?: unknown; purpose?: unknown; max_acu?: unknown };
       if (typeof body.target !== "string" || typeof body.brief !== "string") return sendError(res, "invalid_request", "target and brief are required: target is a name from GET /api/targets, brief is the instruction sent to it (docs/ops/targets.md)");
       const sources = Array.isArray(body.sources) ? body.sources.filter((s): s is string => typeof s === "string") : [];
-      // `purpose` is the W6 knowledge-research brief kind (apps/console/src/devin.ts):
-      // an unknown one is a refusal, not a silent fallback to `work`.
-      if (body.purpose !== undefined && !isDevinPurpose(body.purpose)) return sendError(res, "invalid_request", `purpose must be one of ${DEVIN_PURPOSES.join(" | ")} — an unknown one is refused, never a silent fallback to work`);
+      // `purpose` is the W6 knowledge-research brief kind — the purposes are the
+      // targets' connection types' (plan §2.7, T4-11: the Devin type's): an
+      // unknown one is a refusal, not a silent fallback to `work`.
+      const purposes = body.purpose !== undefined && cfg.targets ? await cfg.targets.purposes() : [];
+      if (body.purpose !== undefined && (typeof body.purpose !== "string" || (cfg.targets && !purposes.includes(body.purpose)))) {
+        return sendError(res, "invalid_request", `purpose must be one of ${purposes.join(" | ") || "(none — no target takes a purpose)"} — an unknown one is refused, never a silent fallback to work`);
+      }
       if (body.max_acu !== undefined && !(Number.isInteger(body.max_acu) && (body.max_acu as number) > 0)) return sendError(res, "invalid_request", "max_acu must be a positive integer — the ACU ceiling for this dispatch; omit it to take the target manifest's");
       if (!cfg.targets) return sendError(res, "not_found", "no compute targets are registered in this deployment — METISTRY_TARGETS_DIRS names the directories to load (default targets/, docs/ops/targets.md)");
       const taskId = Number(DISPATCH_ROUTE.exec(key)![1]);
       // principal is the credential class, never the body (§4.19); the data
       // policy and the runs row are dispatch()'s — nothing is decided here
       const r = await dispatch(db, cfg.targets, taskId, body.target, body.brief, "owner", sources, {
-        ...(body.purpose !== undefined ? { purpose: body.purpose } : {}),
+        ...(typeof body.purpose === "string" ? { purpose: body.purpose } : {}),
         ...(body.max_acu !== undefined ? { max_acu: body.max_acu as number } : {}),
       });
       if (r.ok) return sendJson(res, 201, { ok: true, ref: r.ref, url: r.url, run_id: r.run_id });

@@ -63,7 +63,7 @@ import type { ComputeAdmin } from "./compute-routes.js";
 import type { SecretsView } from "./secrets-route.js";
 import type { VariablesView } from "./variables-route.js";
 import type { ConnectionsView } from "./connections-route.js";
-import { envSecretSource, instanceSyncOpener } from "@foldedspacelabs/metistry-connections";
+import { envSecretSource, instanceSyncOpener, loadInstanceCatalog } from "@foldedspacelabs/metistry-connections";
 import { consoleConnections } from "./connections-proxy.js";
 import { GithubWriteClient } from "./github-write.js";
 import { readInstanceId, securityPresence, realExec } from "@foldedspacelabs/metistry-cli";
@@ -407,6 +407,15 @@ const connections: ConnectionsView | undefined = computeAdmin
 // delivered for sync-read connections — filled at the egress door for each
 // secret's listed hosts, never put on a request here. No instance: absent.
 const openSync = connections ? instanceSyncOpener({ instanceDir: connections.instanceDir, seedDir: connections.seedDir, env: process.env }) : undefined;
+// Targets as connections (T4-11): the instance's agent connections join the
+// target registry, read afresh on every listing and dispatch, each dispatched
+// through its own door with the values `metistry secrets sync --to env`
+// delivered (consoleSecretNames lists an agent connection's). The Devin
+// type's purposes come from the same catalog. No instance: targets/ only.
+if (connections) {
+  const roots = { instanceDir: connections.instanceDir, seedDir: connections.seedDir };
+  targets.bindConnections({ catalog: () => loadInstanceCatalog(roots), secrets: envSecretSource(process.env) });
+}
 console.log(
   connections
     ? `connections: ${resolveInstanceLayout(connections.instanceDir).path("connectionsDir")} (read-only; every write is \`metistry connections\`)`

@@ -34,8 +34,9 @@
 //     credential here is the OWNER's Devin key — not an agent's bearer.
 
 import { runCheck, type CheckResult } from "@foldedspacelabs/metistry-core";
+import type { SyncOpener } from "@foldedspacelabs/metistry-connections";
 import { captureToInbox, INBOX_PREFIX, type CaptureSink } from "@foldedspacelabs/metistry-mcp-brain";
-import { McpWikiSource, type WikiSource } from "./wiki.js";
+import { DEVIN_MCP_URL, McpWikiSource, type WikiSource } from "./wiki.js";
 
 export interface Db {
   query(text: string, values?: unknown[]): Promise<{ rows: any[] }>;
@@ -58,12 +59,78 @@ export interface DevinCtx {
   /** Injectable for tests; the real one is McpWikiSource. */
   wikiSource?: WikiSource | undefined;
   now?: Date | undefined;
+  /**
+   * The console's opener (packages/connections `instanceSyncOpener`): the
+   * Devin connection this sync reads (T4-11). When one opens, it wins over
+   * the `devinApiKey` fields above, which are read for one release only.
+   */
+  openSync?: SyncOpener | undefined;
+}
+
+/** The Devin connection type's builtin module (seed/connection-types/devin). */
+export const DEVIN_MODULE = "devin";
+
+/**
+ * How one run reaches Devin (T4-11). Through the Devin connection: its door
+ * — the key a `{{ secret.x }}` reference filled by the egress guard for the
+ * key's listed hosts, granted to `connection:<name>`, redacted on the way
+ * back — its URL, and its `org` and `repos` config. Without one, for one
+ * release: the legacy `devinApiKey` and plain fetch.
+ */
+export interface DevinAccess {
+  fetch: typeof fetch;
+  /** the Authorization header: `Bearer {{ secret.x }}` through a door, the legacy key otherwise */
+  authorization: string;
+  /** REST base, no trailing slash */
+  base: string;
+  orgId?: string | undefined;
+  repos: string[];
+  /** the connection it reads, when it reads one */
+  connection?: string | undefined;
+}
+
+/** `owner/repo, owner/other` → the list. */
+function repoList(v: string | undefined): string[] {
+  return (v ?? "").split(",").map((r) => r.trim()).filter(Boolean);
+}
+
+/**
+ * The access `sync` reads Devin with, or null when there is none (the
+ * collector degrades absent). A Devin connection that is there but wrong
+ * throws — the run says why rather than falling back to an old key.
+ */
+export async function devinAccess(ctx: DevinCtx & { devinApiUrl?: string | undefined }, sync: string, alsoOrigins?: readonly string[]): Promise<DevinAccess | null> {
+  if (ctx.openSync) {
+    const opened = await ctx.openSync({ sync, module: DEVIN_MODULE, ...(alsoOrigins ? { alsoOrigins } : {}) });
+    if (opened.ok) {
+      const c = opened.sync;
+      return {
+        fetch: c.fetch,
+        authorization: c.headers.authorization ?? "",
+        base: c.url.replace(/\/+$/, ""),
+        ...(c.config.org ? { orgId: c.config.org.trim() } : {}),
+        repos: repoList(c.config.repos),
+        connection: c.connection,
+      };
+    }
+    if (opened.status === "failed") throw new Error(`${sync}: ${opened.why}`);
+  }
+  if (!ctx.devinApiKey) return null;
+  return {
+    fetch: ctx.fetchFn ?? fetch,
+    authorization: `Bearer ${ctx.devinApiKey}`,
+    base: ctx.devinApiUrl ?? DEVIN_API,
+    ...(ctx.devinOrgId ? { orgId: ctx.devinOrgId } : {}),
+    repos: ctx.devinRepos ?? [],
+  };
 }
 
 export const COMPONENT = "devin-knowledge";
 /** The idempotency principal every capture from this collector carries. */
 export const PRINCIPAL = `collector:${COMPONENT}`;
 export const DEVIN_API = "https://api.devin.ai";
+/** The further origin this sync reaches through the Devin connection's door: the repo wikis' MCP server (wiki.ts). Named here, by the product — never by the connection file. */
+const WIKI_ORIGINS = [new URL(DEVIN_MCP_URL).origin];
 const DEFAULT_MAX_ITEMS = 200; // limit: fixed — the floor when ctx.devinMaxItems (METISTRY_DEVIN_MAX_ITEMS, apps/console/src/main.ts) names none
 const PAGE_SIZE = 100; // the endpoint's own default; max is 200
 const MAX_PAGES = 50; // limit: fixed — a bounded walk: 5000 notes is far past any real base
@@ -93,9 +160,9 @@ interface NotesPage {
   end_cursor?: string | null;
 }
 
-function headers(ctx: DevinCtx): Record<string, string> {
+function headers(access: DevinAccess): Record<string, string> {
   return {
-    authorization: `Bearer ${ctx.devinApiKey}`,
+    authorization: access.authorization,
     accept: "application/json",
     "user-agent": "metistry-devin-knowledge",
   };
@@ -107,30 +174,30 @@ export function epochToIso(n: number): string {
   return new Date(n < 1e11 ? n * 1000 : n).toISOString();
 }
 
-async function getJson<T>(ctx: DevinCtx, url: string, where: string): Promise<T> {
-  const res = await (ctx.fetchFn ?? fetch)(url, { headers: headers(ctx), signal: AbortSignal.timeout(30_000) });
+async function getJson<T>(access: DevinAccess, url: string, where: string): Promise<T> {
+  const res = await access.fetch(url, { headers: headers(access), signal: AbortSignal.timeout(30_000) });
   if (res.status === 429) throw new RateLimited(where);
   if (!res.ok) throw new Error(`devin ${where}: HTTP ${res.status} ${(await res.text()).slice(0, 200)}`);
   return (await res.json()) as T;
 }
 
 /** The org the credential resolves to. Org-scoped service-user keys answer here; account-scoped ones return null. */
-export async function fetchOrgId(ctx: DevinCtx): Promise<string | null> {
-  if (ctx.devinOrgId) return ctx.devinOrgId;
-  const self = await getJson<{ org_id?: string | null }>(ctx, `${DEVIN_API}/v3/self`, "GET /v3/self");
+export async function fetchOrgId(access: DevinAccess): Promise<string | null> {
+  if (access.orgId) return access.orgId;
+  const self = await getJson<{ org_id?: string | null }>(access, `${access.base}/v3/self`, "GET /v3/self");
   return self.org_id ?? null;
 }
 
 /** Every note, following `end_cursor` until the server says there is no next page. */
-export async function listNotes(ctx: DevinCtx, orgId: string): Promise<DevinNote[]> {
+export async function listNotes(access: DevinAccess, orgId: string): Promise<DevinNote[]> {
   const out: DevinNote[] = [];
   let after: string | null = null;
   for (let page = 0; page < MAX_PAGES; page++) {
     const qs = new URLSearchParams({ first: String(PAGE_SIZE) });
     if (after) qs.set("after", after);
     const body = await getJson<NotesPage>(
-      ctx,
-      `${DEVIN_API}/v3/organizations/${encodeURIComponent(orgId)}/knowledge/notes?${qs.toString()}`,
+      access,
+      `${access.base}/v3/organizations/${encodeURIComponent(orgId)}/knowledge/notes?${qs.toString()}`,
       "listing knowledge notes",
     );
     out.push(...(body.items ?? []));
@@ -211,16 +278,17 @@ export async function writeWatermark(db: Db, since: number, component = COMPONEN
  */
 export async function check(ctx: DevinCtx = {}): Promise<CheckResult> {
   return runCheck(COMPONENT, "GET /v3/self with the Devin key resolves an organization", async () => {
-    if (!ctx.devinApiKey) {
+    const access = await devinAccess(ctx, COMPONENT, WIKI_ORIGINS);
+    if (!access) {
       return {
         status: "absent" as const,
         remediation:
-          "METISTRY_DEVIN_API_KEY is unset — add it to <instance>/state/.env and run `metistry secrets sync --to keychain`; degrades absent meanwhile (no Devin knowledge reaches the inbox, everything else runs)",
+          "no Devin connection — `metistry connections add devin --type agent --provider devin …` (docs/ops/connections.md, Agent connections); for one release METISTRY_DEVIN_API_KEY still works (`metistry secrets sync --to env`); degrades absent meanwhile (no Devin knowledge reaches the inbox, everything else runs)",
       };
     }
     let orgId: string | null;
     try {
-      orgId = await fetchOrgId(ctx);
+      orgId = await fetchOrgId(access);
     } catch (err) {
       if (err instanceof RateLimited) {
         return { status: "degraded" as const, remediation: "Devin answered 429 — the key works but the API is rate limiting; the next scheduled run retries" };
@@ -234,7 +302,7 @@ export async function check(ctx: DevinCtx = {}): Promise<CheckResult> {
           "the key authenticated but resolves no organization (an enterprise service-user key or a PAT is account-scoped) — set METISTRY_DEVIN_ORG_ID to a child organization id from Settings → Service users",
       };
     }
-    return { status: "ok" as const, meta: { org_id: orgId, repos: ctx.devinRepos?.length ?? 0 } };
+    return { status: "ok" as const, meta: { org_id: orgId, repos: access.repos.length, ...(access.connection ? { connection: access.connection } : {}) } };
   });
 }
 
@@ -245,7 +313,8 @@ export async function check(ctx: DevinCtx = {}): Promise<CheckResult> {
  * for nothing, so a steady state returns 0).
  */
 export async function run(db: Db, ctx: DevinCtx = {}): Promise<number> {
-  if (!ctx.devinApiKey) return 0; // degrades absent
+  const access = await devinAccess(ctx, COMPONENT, WIKI_ORIGINS);
+  if (!access) return 0; // degrades absent
   const sink = ctx.inboxSink ?? ctx.inboxDir ?? `./${INBOX_PREFIX}`;
   const max = ctx.devinMaxItems ?? DEFAULT_MAX_ITEMS;
   const capturedAt = (ctx.now ?? new Date()).toISOString();
@@ -258,9 +327,9 @@ export async function run(db: Db, ctx: DevinCtx = {}): Promise<number> {
   let complete = false;
   let notes: DevinNote[] = [];
   try {
-    const orgId = await fetchOrgId(ctx);
-    if (!orgId) throw new Error("devin: no organization for this credential — set METISTRY_DEVIN_ORG_ID (metistry doctor explains)");
-    notes = await listNotes(ctx, orgId);
+    const orgId = await fetchOrgId(access);
+    if (!orgId) throw new Error("devin: no organization for this credential — set the Devin connection's org (`metistry connections set devin --config org=org-…`; metistry doctor explains)");
+    notes = await listNotes(access, orgId);
     complete = true;
   } catch (err) {
     if (!(err instanceof RateLimited)) throw err;
@@ -311,14 +380,15 @@ export async function run(db: Db, ctx: DevinCtx = {}): Promise<number> {
   if (complete && highWater > (since ?? 0)) await writeWatermark(db, highWater);
 
   // --- repository wikis (MCP; no REST route) ---
-  const repos = ctx.devinRepos ?? [];
+  const repos = access.repos;
   if (repos.length > 0 && !limited) {
     const wiki =
       ctx.wikiSource ??
       new McpWikiSource({
-        apiKey: ctx.devinApiKey,
-        ...(ctx.devinOrgId ? { orgId: ctx.devinOrgId } : {}),
-        ...(ctx.fetchFn ? { fetchFn: ctx.fetchFn } : {}),
+        authorization: access.authorization,
+        ...(access.orgId ? { orgId: access.orgId } : {}),
+        // through a connection: its door, which reaches mcp.devin.ai because this code names it (WIKI_ORIGINS)
+        ...(access.connection ? { fetchFn: access.fetch } : ctx.fetchFn ? { fetchFn: ctx.fetchFn } : {}),
       });
     try {
       for (const repo of repos) {

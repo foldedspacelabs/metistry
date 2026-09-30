@@ -15,10 +15,12 @@
 // an unknown value is refused, never ignored.
 //
 // This module has no I/O and imports nothing from the rest of core except
-// types, so manifest.ts can build the `connection-type` manifest from it
-// without a cycle.
+// types and data-policy.ts (which imports neither this file nor
+// manifest.ts), so manifest.ts can build the `connection-type` manifest from
+// it without a cycle.
 
 import { z } from "zod";
+import { dataPolicySchema } from "./data-policy.js";
 import type { ConnectionTypeManifest } from "./manifest.js";
 
 // --- the closed vocabularies ---------------------------------------------------
@@ -322,6 +324,70 @@ export const connectionImplementationSchema = z.discriminatedUnion("kind", [
 
 export type ConnectionImplementation = z.infer<typeof connectionImplementationSchema>;
 
+// --- agent connections: what dispatch sends a brief through (T4-11) ------------
+
+/**
+ * The dispatchers the console implements for an `agent` connection — today's
+ * two HTTP targets (`targets/github-issues`, `targets/devin-sessions`) moved
+ * into connection types. Code, so closed (§2.7): a new dispatcher is a
+ * product change, never a manifest line. An agent type names one; the
+ * console refuses an agent connection whose type names none it knows.
+ */
+export const AGENT_DISPATCHERS = ["github-issue", "devin-session"] as const;
+export type AgentDispatcher = (typeof AGENT_DISPATCHERS)[number];
+
+/** A dispatch purpose's key: `work`, `knowledge_research`. */
+const purposeKey = snake("purposes");
+
+/**
+ * Why a brief is going (§2.7: `DEVIN_PURPOSES` → the Devin connection type).
+ * The preamble is the instruction the dispatcher puts before the brief; the
+ * answer contract after it stays the dispatcher's code (a structured output
+ * is a control, not a manifest line).
+ */
+export const agentPurposeSchema = z.strictObject({
+  label: z.string().min(1),
+  preamble: z.string().min(1),
+});
+
+/**
+ * An agent type's dispatch block — what `targets/<name>/manifest.yaml`
+ * carried, beside the connection that now carries the reach and the secret.
+ * The data policy is the TYPE's, so a connection file cannot widen it: the
+ * owner widens it by overlaying the type (an extension wins by name, D4),
+ * exactly as a target was widened by overlaying the target.
+ */
+export const agentDispatchSchema = z
+  .strictObject({
+    dispatcher: z.enum(AGENT_DISPATCHERS),
+    /** What a brief bound for a connection of this type may carry — enforced by dispatch() before a byte leaves. */
+    data_policy: dataPolicySchema,
+    /** Why a brief may be sent, each with its preamble. Empty: the dispatcher takes no purpose. */
+    purposes: z.record(purposeKey, agentPurposeSchema).default({}),
+    /** The purpose a dispatch that names none gets; required when there are purposes. */
+    default_purpose: purposeKey.optional(),
+    /** How results come back. `report_queue` is the only return path (§4.18.B); `status_via` names the sync that polls it home. */
+    result: z.strictObject({ via: z.literal("report_queue"), status_via: kebab.optional() }),
+    cost: z.strictObject({ per_run_estimate_usd: z.number().nonnegative() }).optional(),
+    /** The per-dispatch spend ceiling a devin-session dispatch sends when the call names none (Devin ACUs). */
+    max_acu: z.number().int().positive().optional(),
+  })
+  .superRefine((d, ctx) => {
+    const keys = Object.keys(d.purposes);
+    if (keys.length > 0 && d.default_purpose === undefined) {
+      ctx.addIssue({ code: "custom", path: ["default_purpose"], message: `name the purpose a dispatch that names none gets — one of ${keys.join(", ")}` });
+    }
+    if (d.default_purpose !== undefined && !keys.includes(d.default_purpose)) {
+      ctx.addIssue({ code: "custom", path: ["default_purpose"], message: `"${d.default_purpose}" is not one of the purposes${keys.length ? ` (${keys.join(", ")})` : " — there are none"}` });
+    }
+    if (d.max_acu !== undefined && d.dispatcher !== "devin-session") {
+      ctx.addIssue({ code: "custom", path: ["max_acu"], message: "max_acu is a Devin session's ceiling — only a devin-session dispatcher takes one" });
+    }
+  });
+
+export type AgentDispatch = z.infer<typeof agentDispatchSchema>;
+export type AgentPurpose = z.infer<typeof agentPurposeSchema>;
+
 /** The connection-type manifest's body, beside `name`, `type` and `schema` (manifest.ts). */
 export const connectionTypeShape = {
   /** Which connection type this provider provides (§2.6). Not `type` — that is every manifest's kind marker, and `agent` is both a manifest type and a connection type. */
@@ -339,14 +405,52 @@ export const connectionTypeShape = {
   auth: z.array(z.enum(AUTH_SCHEMES)).min(1).optional(),
   /** The sync (a collector unit) that reads connections of this type; its default schedule lives in that unit's manifest (§2.5). */
   sync: kebab.optional(),
+  /**
+   * Further syncs that read a connection of this type (T4-11): one Devin
+   * connection is read by its sessions poller (`sync`) and by its knowledge
+   * sync. `sync` stays the one a new connection is named for in
+   * `scheduled.yaml`; each of these finds it the same way (the one `ok`
+   * connection, or the one `scheduled.yaml` names).
+   */
+  also_read_by: z.array(kebab).min(1).optional(),
   implementation: connectionImplementationSchema.default({ kind: "native" }),
+  /** An agent type's dispatch (T4-11): the dispatcher, the data policy, the purposes. Only `provides: agent`. */
+  dispatch: agentDispatchSchema.optional(),
 };
+
+/** Every sync that reads a connection of this type: `sync`, then `also_read_by`. */
+export function connectionTypeSyncs(m: { sync?: string | undefined; also_read_by?: readonly string[] | undefined }): string[] {
+  return m.sync === undefined ? [] : [m.sync, ...(m.also_read_by ?? [])];
+}
 
 /** The cross-field rules of a connection-type manifest, run by its schema's superRefine. */
 export function refineConnectionType(
-  m: { name: string; provides: ConnectionType; transports: ReachClass[]; fields: ConnectionField[]; capabilities: string[]; implementation: ConnectionImplementation; auth?: AuthScheme[] | undefined },
+  m: {
+    name: string;
+    provides: ConnectionType;
+    transports: ReachClass[];
+    fields: ConnectionField[];
+    capabilities: string[];
+    implementation: ConnectionImplementation;
+    auth?: AuthScheme[] | undefined;
+    sync?: string | undefined;
+    also_read_by?: string[] | undefined;
+    dispatch?: AgentDispatch | undefined;
+  },
   ctx: z.RefinementCtx,
 ): void {
+  if (m.also_read_by !== undefined) {
+    if (m.sync === undefined) ctx.addIssue({ code: "custom", path: ["also_read_by"], message: "also_read_by names further syncs — declare the first one as sync:" });
+    const all = connectionTypeSyncs(m);
+    if (new Set(all).size !== all.length) ctx.addIssue({ code: "custom", path: ["also_read_by"], message: "a sync is named once — in sync: or in also_read_by, not both" });
+  }
+  if (m.dispatch !== undefined) {
+    if (m.provides !== "agent") ctx.addIssue({ code: "custom", path: ["dispatch"], message: `dispatch is an agent type's — a ${m.provides} connection is not dispatched to` });
+    else if (m.implementation.kind !== "builtin") ctx.addIssue({ code: "custom", path: ["implementation"], message: "an agent type with dispatch is product code — implementation: { kind: builtin, module: … }" });
+    if (!m.transports.includes("http")) ctx.addIssue({ code: "custom", path: ["transports"], message: "a dispatcher reaches its service over http" });
+  } else if (m.provides === "agent" && m.implementation.kind === "builtin") {
+    ctx.addIssue({ code: "custom", path: ["dispatch"], message: "a builtin agent type says how it is dispatched to — dispatch: { dispatcher, data_policy, result }" });
+  }
   if (m.name === CUSTOM_PROVIDER) {
     ctx.addIssue({ code: "custom", path: ["name"], message: `"${CUSTOM_PROVIDER}" is reserved for connections configured by hand` });
   }

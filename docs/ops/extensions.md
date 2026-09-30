@@ -26,14 +26,14 @@ kind.
 
 | Kind | Unit | Contract | Registry (replaces) |
 | --- | --- | --- | --- |
-| `connection-type` | `manifest.yaml`: `provides`, `transports`, config `fields`, `capabilities`, `tools` with their group, optional `sync`, `implementation` | `check()`; the bridge wire contract when it runs as a process | connection types (new); known-service forms — the app renders fields, no per-service Swift |
+| `connection-type` | `manifest.yaml`: `provides`, `transports`, config `fields`, `capabilities`, `tools` with their group, optional `sync` (and `also_read_by`), `implementation`, and an agent type's `dispatch` | `check()`; the bridge wire contract when it runs as a process | connection types (new); known-service forms — the app renders fields, no per-service Swift |
 | `provider` (compute) | `manifest.yaml`: `type: provider` and a `provider:` block — exactly what `compute.yaml` carries under `providers.<name>` (base URL, auth as a secret reference, locality, data policy, …) | `providers test` | `COMPUTE_TEMPLATES` → `seed/compute-templates/<name>/` + extensions (T4-5) |
 | `bridge` | `packages/mcp-*/manifest.yaml` | the wire contract, `check()`, lazy discovery, preview-then-confirm, redaction; `requires_tcc` from a closed enum | bridge discovery by manifest |
 | `routine` | manifest + code (product), or no code (an assignment in `scheduled.yaml`) | declared `config` fields, default `schedule`, declared output paths, `requires` | `routines/index.ts`'s array (T4-5) |
 | `collector` / sync | manifest + code | declared `needs_you` raise rules, the connection type it reads | `collectors/index.ts`'s array (T4-5) |
 | `agent` (actor) | `.metistry/agents/**.md` | the agent manifest | exists |
 | named query | `queries/*.yaml` | `expose`, params | exists (overlay) |
-| target | `targets/<name>/manifest.yaml` | folds into connection type `agent` (T4-11) | the target registry (T4-5); the `transport` enum goes with T4-11 |
+| target | `targets/<name>/manifest.yaml` (for one release) | folds into connection type `agent` (T4-11): a type's `dispatch:` block | the target registry (T4-5), which reads agent connections beside `targets/` (T4-11) |
 
 **In this program** the registries and data-only extensions ship. Code from an
 extension never runs inside the console: an extension that needs code runs as a
@@ -221,7 +221,9 @@ type (somewhere work is sent). One key cannot mean both, so the kind is
 | `tools` | `<tool>: { group, description? }` — no mode; the mode is the owner's |
 | `auth` | optional: the sign-in schemes a connection of this type may use (`none` · `bearer` · `basic` · `api_key` · `oauth`). Absent: any but `basic`. **`basic` is accepted only by a type that lists it** (CalDAV's app password, T4-13; IMAP's, T4-15) — the CLI and the file check both refuse it elsewhere |
 | `sync` | the sync unit that reads connections of this type; its default schedule lives in that unit's manifest (§2.5) |
+| `also_read_by` | optional: further sync units that read the same connection (T4-11 — Devin's `devin-knowledge` beside `devin-sessions`); needs `sync`, each named once |
 | `implementation` | `native` (the type's own handler — a data-only extension) · `builtin` + `module` (product code in `packages/connections`) · `bridge` + `bridge` (an existing bridge, e.g. `eventkit`). Default `native` |
+| `dispatch` | an `agent` type's (T4-11), and required on a builtin one: `dispatcher` (closed: `devin-session` · `github-issue` — `AGENT_DISPATCHERS`), `data_policy` (`allow`, `deny_sources`, `max_brief_bytes` — what a brief may carry), `purposes` (`<snake_case>: { label, preamble }`) with `default_purpose`, `result` (`via: report_queue`, `status_via`), optional `cost` and Devin's `max_acu`. An overlay of the type is how the owner widens its data policy (D4) |
 
 **Field kinds** (closed): `text` · `secret` · `variable` · `url` · `choice` ·
 `oauth`. A field of any other kind is refused. A `secret` field can never carry
@@ -364,6 +366,8 @@ list. **Done (T4-5):**
 - `COMPUTE_TEMPLATES` (`packages/cli/src/compute.ts`) → the provider registry,
   `seed/compute-templates/<name>/manifest.yaml` + extensions
 - targets → the target registry (the console's `TargetRegistry` loads through it)
+- `DEVIN_PURPOSES` (`apps/console/src/devin.ts`) → the Devin connection
+  type's `dispatch.purposes` (T4-11)
 - connection types → the registry is ready (`loadKind("connection-type", …)`);
   its first units and its consumer come with T4-8a and T4-12–T4-15
 - the connection known-service list → the connection-type units that ship them:
@@ -372,9 +376,10 @@ list. **Done (T4-5):**
 
 **Still to move, each with the ticket that owns it:**
 
-- `targetManifest.transport` (`packages/core/src/manifest.ts`) and
-  `DEVIN_PURPOSES` (`apps/console/src/devin.ts`) → the `agent` connection type
-  and the Devin connection type (T4-11)
+- `targetManifest.transport` (`packages/core/src/manifest.ts`) → retired with
+  the `targets/` manifests after the one release they still load (T4-11 moved
+  their content into agent connection types; `AGENT_DISPATCHERS` is the
+  closed set that replaces the enum)
 - `CREW_MODELS` (→ compute references, T4-6)
 - `SECRET_SCOPES` (→ removed, §2.14, T4-3)
 - the proposal kind → request type mapping (→ the F-5 table, open to new types

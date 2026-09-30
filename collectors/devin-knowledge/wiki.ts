@@ -87,7 +87,8 @@ export function headingOf(block: string, fallback: string): string {
 }
 
 export interface McpWikiOptions {
-  apiKey: string;
+  /** the Authorization header — `Bearer {{ secret.x }}` when `fetchFn` is a connection's door, which fills it; the legacy key otherwise */
+  authorization: string;
   /** Required for enterprise service-user keys and PATs; org-scoped keys resolve automatically. */
   orgId?: string | undefined;
   url?: string | undefined;
@@ -114,7 +115,7 @@ export class McpWikiSource implements WikiSource {
     const transport = new StreamableHTTPClientTransport(new URL(this.opts.url ?? DEVIN_MCP_URL), {
       requestInit: {
         headers: {
-          authorization: `Bearer ${this.opts.apiKey}`,
+          authorization: this.opts.authorization,
           ...(this.opts.orgId ? { "x-org-id": this.opts.orgId } : {}),
         },
       },

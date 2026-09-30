@@ -1,0 +1,32 @@
+# The GitHub connection type (plan §2.6, §2.5; T4-11) — a `tracker`: the
+# issues and pull requests of the repositories you name, reconciled into
+# `work` by the `github-state` sync, with a Needs You request for each pull
+# request waiting on your review and each issue assigned to you. Added with
+#
+#   metistry secrets set github_token                    (on stdin)
+#   metistry secrets hosts github_token api.github.com
+#   metistry secrets grant github_token connection:github on
+#   metistry connections add github --type tracker --provider github \
+#     --url https://api.github.com --auth bearer --secret github_token \
+#     --config repos=owner/a,owner/b --no-discover
+#
+# The token is read-only (a fine-grained PAT: Contents, Issues, Pull
+# requests, Metadata — read). The sync sends GETs and GraphQL queries and
+# nothing else (collectors/github-state `readOnlyGithub`), through the
+# egress door, to https://api.github.com only. Posting a review is the
+# owner's own door with its own token (github_write), never this one.
+schema: 1
+name: github
+type: connection-type
+description: GitHub — the issues and pull requests of the repositories you name, on the Board as work, with a request for each review asked of you and each issue assigned to you. A read-only token, sent to api.github.com only.
+provides: tracker
+transports: [http]
+auth: [bearer]
+capabilities: [read]
+fields:
+  - key: repos
+    kind: text
+    label: Repositories
+    help: "owner/repo, comma-separated — the repositories reconciled into work."
+sync: github-state
+implementation: { kind: builtin, module: github }

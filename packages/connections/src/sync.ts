@@ -54,9 +54,11 @@
 
 import {
   SecretRedactor,
+  connectionTypeSyncs,
   guardedFetch,
   parseSecretsFile,
   secretDeliveryVar,
+  type AgentDispatch,
   type ConnectionFile,
   type ConnectionTypeManifest,
   type RegistryUnit,
@@ -90,10 +92,10 @@ export function envSecretSource(env: NodeJS.ProcessEnv): SecretSource {
   };
 }
 
-/** The sync a connection's provider declares, when its provider is product code a sync reads. */
-function declaredSync(entry: ConnectionEntry): string | undefined {
+/** The syncs a connection's provider declares (`sync`, then `also_read_by`), when its provider is product code a sync reads. */
+function declaredSyncs(entry: ConnectionEntry): string[] {
   const m = entry.provider?.manifest;
-  return m && m.implementation.kind === "builtin" ? m.sync : undefined;
+  return m && m.implementation.kind === "builtin" ? connectionTypeSyncs(m) : [];
 }
 
 /** What a sync reads, or why it reads nothing. */
@@ -116,12 +118,12 @@ export function syncTarget(catalog: Pick<ConnectionCatalog, "entries" | "schedul
     if (entry.status !== "ok" || !entry.connection || !entry.provider) {
       return { ok: false, status: entry.status === "absent" ? "absent" : "failed", why: `connection ${named} is ${entry.status}: ${entry.issues.join("; ") || "not ready"}` };
     }
-    if (declaredSync(entry) !== sync) {
-      return { ok: false, status: "failed", why: `scheduled.yaml names connection ${named} for ${sync}, but its provider ${entry.provider.name} is read by ${declaredSync(entry) ?? "no sync"}` };
+    if (!declaredSyncs(entry).includes(sync)) {
+      return { ok: false, status: "failed", why: `scheduled.yaml names connection ${named} for ${sync}, but its provider ${entry.provider.name} is read by ${declaredSyncs(entry).join(", ") || "no sync"}` };
     }
     return { ok: true, entry: entry as Extract<SyncTarget, { ok: true }>["entry"] };
   }
-  const mine = catalog.entries.filter((e) => e.status === "ok" && e.connection && declaredSync(e) === sync);
+  const mine = catalog.entries.filter((e) => e.status === "ok" && e.connection && declaredSyncs(e).includes(sync));
   if (mine.length === 1) return { ok: true, entry: mine[0] as Extract<SyncTarget, { ok: true }>["entry"] };
   if (mine.length > 1) {
     return {
@@ -143,7 +145,7 @@ export function syncReaders(catalog: Pick<ConnectionCatalog, "entries" | "schedu
   const out = new Map<string, string[]>();
   const add = (connection: string, sync: string) => out.set(connection, [...new Set([...(out.get(connection) ?? []), sync])].sort());
   for (const [sync, entry] of Object.entries(catalog.scheduled?.syncs ?? {})) add(entry.connection, sync);
-  const syncs = new Set(catalog.entries.map(declaredSync).filter((s): s is string => s !== undefined));
+  const syncs = new Set(catalog.entries.flatMap(declaredSyncs));
   for (const sync of syncs) {
     if (catalog.scheduled?.syncs && Object.hasOwn(catalog.scheduled.syncs, sync)) continue;
     const t = syncTarget(catalog, sync);
@@ -159,18 +161,20 @@ export function syncReaders(catalog: Pick<ConnectionCatalog, "entries" | "schedu
  */
 export function syncSecretNames(catalog: Pick<ConnectionCatalog, "entries">): string[] {
   const out = new Set<string>();
-  for (const e of catalog.entries) if (e.status === "ok" && e.connection && declaredSync(e) !== undefined) for (const s of e.connection.secrets) out.add(s);
+  for (const e of catalog.entries) if (e.status === "ok" && e.connection && declaredSyncs(e).length > 0) for (const s of e.connection.secrets) out.add(s);
   return [...out].sort();
 }
 
 /**
- * Every secret the console fills (T4-10): a sync's (above) and, because the
+ * Every secret the console fills (T4-10): a sync's (above); because the
  * console holds the pool the proxy dials through, every `ok` MCP, API, feed
  * or files connection's — its headers, a command's environment, an OAuth
- * sign-in's refresh token and the owner's own client. What `metistry secrets
- * sync --to env` delivers as `METISTRY_SECRET_<NAME>`. A calendar, mail or
- * tracker connection nothing syncs, an agent connection and a bridge's are
- * not the console's to fill, and are not delivered.
+ * sign-in's refresh token and the owner's own client; and, because dispatch
+ * sends a brief through one (T4-11), every `ok` agent connection's whose
+ * type says how it is dispatched to. What `metistry secrets sync --to env`
+ * delivers as `METISTRY_SECRET_<NAME>`. A calendar, mail or tracker
+ * connection nothing syncs and a bridge's are not the console's to fill, and
+ * are not delivered.
  */
 export function consoleSecretNames(catalog: Pick<ConnectionCatalog, "entries">): string[] {
   const out = new Set(syncSecretNames(catalog));
@@ -178,7 +182,8 @@ export function consoleSecretNames(catalog: Pick<ConnectionCatalog, "entries">):
     if (e.status !== "ok" || !e.connection) continue;
     const impl = e.provider?.manifest.implementation.kind ?? "native";
     const dialled = impl === "native" && (e.connection.type === "mcp" || e.connection.type === "api" || e.connection.type === "feed" || e.connection.type === "files");
-    if (dialled) for (const s of e.connection.secrets) out.add(s);
+    const dispatched = e.connection.type === "agent" && e.provider?.manifest.dispatch !== undefined;
+    if (dialled || dispatched) for (const s of e.connection.secrets) out.add(s);
   }
   return [...out].sort();
 }
@@ -201,6 +206,8 @@ export interface SyncHttp {
   capabilities: readonly string[];
   /** the owner's Needs You switches for this sync from `scheduled.yaml` (`syncs.<sync>.raise`) — only what the file says; the manifest's defaults are the sync's */
   raise: Readonly<Record<string, boolean>>;
+  /** the connection's text config values (`config.<field>`), as the file writes them — never a secret (a secret or oauth field is left out) */
+  config: Readonly<Record<string, string>>;
   /** the secret names the calls so far carried — for the run's `meta.secrets` */
   secretsUsed(): string[];
 }
@@ -213,6 +220,8 @@ export interface OpenSyncOptions {
   sync: string;
   /** the provider's own origin (`https://api.linear.app`): the connection's URL must be it, and nothing else is reached. Absent (a provider that lives anywhere, like an ICS feed): the connection's own URL's origin is the only one reached */
   origin?: string | undefined;
+  /** further origins the provider's code reaches for the same service (Devin's wikis at `https://mcp.devin.ai`) — named by product code, never by the file; a secret still goes only to its listed hosts */
+  alsoOrigins?: readonly string[] | undefined;
   /** the builtin module that must implement the connection's provider (`linear`) */
   module: string;
   /** where a value comes from — `envSecretSource(process.env)` in the console */
@@ -259,26 +268,47 @@ export function openSyncHttp(opts: OpenSyncOptions): OpenedSync {
   const target = syncTarget(opts.catalog, opts.sync);
   if (!target.ok) return target;
   const { entry } = target;
-  const c = entry.connection;
   const impl = entry.provider.manifest.implementation;
   if (impl.kind !== "builtin" || impl.module !== opts.module) {
-    return { ok: false, status: "failed", why: `connection ${c.name}: provider ${entry.provider.name} is not implemented by ${opts.module}` };
+    return { ok: false, status: "failed", why: `connection ${entry.connection.name}: provider ${entry.provider.name} is not implemented by ${opts.module}` };
   }
+  const scheduled: Scheduled | null | undefined = opts.catalog.scheduled;
+  const raise = scheduled?.syncs && Object.hasOwn(scheduled.syncs, opts.sync) ? { ...(scheduled.syncs[opts.sync]?.raise ?? {}) } : {};
+  return connectionHttp(entry, opts.sync, { ...opts, raise });
+}
+
+type ReadyEntry = ConnectionEntry & { connection: ConnectionFile; provider: RegistryUnit<ConnectionTypeManifest> };
+
+/** What a connection's HTTP door is built from — a sync's options, or dispatch's. */
+interface HttpDoorOptions extends Pick<OpenSyncOptions, "origin" | "alsoOrigins" | "secrets" | "redactor" | "fetch" | "tokenHosts" | "oauth"> {
+  catalog: Pick<ConnectionCatalog, "secrets">;
+  raise: Record<string, boolean>;
+}
+
+/**
+ * One `ok` connection's HTTP door, for `who` (a sync, or dispatch): its URL
+ * and headers with every sign-in shortcut written as a `{{ secret.x }}`
+ * reference, and a `fetch` pinned to its origin (and any origin the
+ * product's code names beside it), through core's `guardedFetch` with the
+ * connection as the grantee, following no redirect.
+ */
+function connectionHttp(entry: ReadyEntry, who: string, opts: HttpDoorOptions): OpenedSync {
+  const c = entry.connection;
   const http = c.reach.http;
-  if (!http) return { ok: false, status: "failed", why: `connection ${c.name}: ${opts.sync} reads it over http — its reach is not http` };
+  if (!http) return { ok: false, status: "failed", why: `connection ${c.name}: ${who} reads it over http — its reach is not http` };
   let url: URL;
   try {
     url = new URL(http.url);
   } catch {
-    return { ok: false, status: "failed", why: `connection ${c.name}: reach.http.url is not a URL (a {{ variable }} there is not read by ${opts.sync})` };
+    return { ok: false, status: "failed", why: `connection ${c.name}: reach.http.url is not a URL (a {{ variable }} there is not read by ${who})` };
   }
   if (opts.origin !== undefined && url.origin !== opts.origin) {
     return { ok: false, status: "failed", why: `connection ${c.name}: ${entry.provider.name} is reached at ${opts.origin} and nowhere else — reach.http.url is ${url.origin}` };
   }
-  if (Object.keys(http.query).length > 0) return { ok: false, status: "failed", why: `connection ${c.name}: ${opts.sync} sends no query parameters` };
+  if (Object.keys(http.query).length > 0) return { ok: false, status: "failed", why: `connection ${c.name}: ${who} sends no query parameters` };
   const headers: Record<string, string> = {};
   for (const [k, v] of Object.entries(http.headers)) {
-    if (/\{\{\s*variable\./.test(v)) return { ok: false, status: "failed", why: `connection ${c.name}: reach.http.headers.${k}: a {{ variable }} is not read by ${opts.sync}` };
+    if (/\{\{\s*variable\./.test(v)) return { ok: false, status: "failed", why: `connection ${c.name}: reach.http.headers.${k}: a {{ variable }} is not read by ${who}` };
     headers[k.toLowerCase()] = v;
   }
   const auth = http.auth;
@@ -317,6 +347,7 @@ export function openSyncHttp(opts: OpenSyncOptions): OpenedSync {
   const used = new Set<string>();
   const base = opts.fetch ?? fetch;
   const origin = url.origin;
+  const origins = new Set([origin, ...(opts.alsoOrigins ?? [])]);
   const name = c.name;
   const source = basic ? basicSource(opts.secrets, basic, redactor) : oauth ? oauthSourceFor(name, oauth, opts, secretsFile, redactor, used) : opts.secrets;
   const door = guardedFetch(
@@ -340,16 +371,17 @@ export function openSyncHttp(opts: OpenSyncOptions): OpenedSync {
     } catch {
       throw new ConnectionRefused("other_host", name, "not a URL");
     }
-    if (target.origin !== origin) throw new ConnectionRefused("other_host", name, `a request to ${target.origin} — this connection is ${origin}, and it goes nowhere else`);
+    if (!origins.has(target.origin)) throw new ConnectionRefused("other_host", name, `a request to ${target.origin} — this connection is ${[...origins].join(", ")}, and it goes nowhere else`);
     const res = await door(to, { ...(init ?? {}), redirect: "manual" });
     if (res.status >= 300 && res.status < 400) {
       await res.body?.cancel().catch(() => undefined);
-      throw new ConnectionRefused("other_host", name, `${origin} answered with a redirect (HTTP ${res.status}) — a redirect is not followed`);
+      throw new ConnectionRefused("other_host", name, `${target.origin} answered with a redirect (HTTP ${res.status}) — a redirect is not followed`);
     }
     return res;
   };
-  const scheduled: Scheduled | null | undefined = opts.catalog.scheduled;
-  const raise = scheduled?.syncs && Object.hasOwn(scheduled.syncs, opts.sync) ? { ...(scheduled.syncs[opts.sync]?.raise ?? {}) } : {};
+  const config: Record<string, string> = {};
+  const secretFields = new Set(entry.provider.manifest.fields.filter((f) => f.kind === "secret" || f.kind === "oauth").map((f) => f.key));
+  for (const [k, v] of Object.entries(c.config)) if (typeof v === "string" && !secretFields.has(k)) config[k] = v;
   return {
     ok: true,
     sync: {
@@ -360,10 +392,64 @@ export function openSyncHttp(opts: OpenSyncOptions): OpenedSync {
       headers,
       fetch: pinned,
       capabilities: [...entry.provider.manifest.capabilities],
-      raise,
+      raise: opts.raise,
+      config,
       secretsUsed: () => [...used].sort(),
     },
   };
+}
+
+// --- agent connections: what dispatch sends a brief through (T4-11) ------------
+
+/** An agent connection dispatch may send through: its door, and its type's dispatch block. */
+export interface AgentHttp extends SyncHttp {
+  /** the type's dispatch — dispatcher, data policy, purposes, result, cost */
+  dispatch: AgentDispatch;
+  /** the connection file's description, when it has one */
+  description?: string | undefined;
+}
+
+export type OpenedAgent = { ok: true; agent: AgentHttp } | { ok: false; status: "absent" | "failed"; why: string };
+
+/**
+ * The agent connections dispatch lists: every file that parses as `type:
+ * agent` and is either `ok` with a type that says how it is dispatched to,
+ * or not `ok` (so the listing can say why). A file that does not parse at
+ * all is the connection listing's to report, not dispatch's.
+ */
+export function agentConnections(catalog: Pick<ConnectionCatalog, "entries">): ConnectionEntry[] {
+  return catalog.entries.filter((e) => e.connection?.type === "agent" && (e.status !== "ok" || e.provider?.manifest.dispatch !== undefined));
+}
+
+export interface OpenAgentOptions {
+  catalog: Pick<ConnectionCatalog, "entries" | "secrets">;
+  /** the connection's name */
+  connection: string;
+  /** the provider's own origin, when the dispatcher reaches one service and nowhere else (GitHub: `https://api.github.com`) */
+  origin?: string | undefined;
+  secrets: SecretSource;
+  redactor?: SecretRedactor | undefined;
+  fetch?: typeof fetch | undefined;
+}
+
+/**
+ * Open an agent connection for dispatch, or say why it cannot be. Never
+ * dials. `absent`: no such connection, or its provider is not installed.
+ * `failed`: the file is wrong, it is not an agent connection, or its type
+ * says nothing about dispatch.
+ */
+export function openAgentHttp(opts: OpenAgentOptions): OpenedAgent {
+  const entry = opts.catalog.entries.find((e) => e.name === opts.connection);
+  if (!entry) return { ok: false, status: "absent", why: `no connection named ${opts.connection}` };
+  if (entry.status !== "ok" || !entry.connection || !entry.provider) {
+    return { ok: false, status: entry.status === "absent" ? "absent" : "failed", why: `connection ${opts.connection} is ${entry.status}: ${entry.issues.join("; ") || "not ready"}` };
+  }
+  if (entry.connection.type !== "agent") return { ok: false, status: "failed", why: `connection ${opts.connection} is ${entry.connection.type} — only an agent connection is dispatched to` };
+  const dispatch = entry.provider.manifest.dispatch;
+  if (!dispatch) return { ok: false, status: "failed", why: `connection ${opts.connection}: its provider ${entry.provider.name} says nothing about how it is dispatched to` };
+  const opened = connectionHttp(entry as ReadyEntry, "dispatch", { ...opts, raise: {} });
+  if (!opened.ok) return opened;
+  return { ok: true, agent: { ...opened.sync, dispatch, ...(entry.connection.description !== undefined ? { description: entry.connection.description } : {}) } };
 }
 
 /**
@@ -372,7 +458,7 @@ export function openSyncHttp(opts: OpenSyncOptions): OpenedSync {
  * plan is the same); a refusal at the token endpoint is the connection's
  * `sign_in`, naming `authorize`.
  */
-function oauthSourceFor(name: string, plan: OAuthClientPlan, opts: OpenSyncOptions, secrets: SecretsFile, redactor: SecretRedactor, used: Set<string>): SecretSource {
+function oauthSourceFor(name: string, plan: OAuthClientPlan, opts: Pick<OpenSyncOptions, "secrets" | "fetch" | "oauth">, secrets: SecretsFile, redactor: SecretRedactor, used: Set<string>): SecretSource {
   const door: TokenDoor = {
     secrets,
     source: opts.secrets,
@@ -403,7 +489,7 @@ function oauthSourceFor(name: string, plan: OAuthClientPlan, opts: OpenSyncOptio
 }
 
 /** How a collector opens its connection: the console builds one per process; a test hands in its own. */
-export type SyncOpener = (req: { sync: string; origin?: string | undefined; module: string; tokenHosts?: readonly string[] | undefined }) => Promise<OpenedSync>;
+export type SyncOpener = (req: { sync: string; origin?: string | undefined; alsoOrigins?: readonly string[] | undefined; module: string; tokenHosts?: readonly string[] | undefined }) => Promise<OpenedSync>;
 
 /**
  * The console's opener: reads the instance's catalog afresh on every open

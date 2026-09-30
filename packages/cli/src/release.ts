@@ -77,7 +77,7 @@ export function compareVersions(a: string, b: string): number | undefined {
  * can never be repaired under its tag (docs/ops/releases.md), so "Latest"
  * alone is not enough to go on.
  */
-export const RELEASE_WALK_LIMIT = 10;
+export const RELEASE_WALK_LIMIT = 10; // limit: fixed — how far back a lost release is looked past, not an install's policy; --version reaches anything older
 
 export function releaseRepo(env: NodeJS.ProcessEnv, override?: string | undefined): string {
   return override ?? env.METISTRY_RELEASE_REPO ?? DEFAULT_RELEASE_REPO;

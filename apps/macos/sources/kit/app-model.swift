@@ -126,6 +126,10 @@ public final class AppModel {
     /// `composer`, its Ask is `chat`, and it lights the Capture menu's bar
     /// items through `shell.captureActions`.
     public let captureBar: CaptureBarModel
+    /// Settings ▸ Keyboard's shortcuts in any app (hotkeys.swift): off until
+    /// the owner turns them on, and registered only once the app target
+    /// attaches `RegisterEventHotKey` — a model built by a test registers nothing.
+    public let hotKeys: AnyAppShortcutsModel
 
     public init(
         bundleResourceURL: URL?,
@@ -223,6 +227,15 @@ public final class AppModel {
             for command in CaptureBarModel.menuItems { shell.captureActions[command] = lit[command] }
         }
         self.captureBar = captureBar
+        let hotKeys = AnyAppShortcutsModel(defaults: defaults)
+        // A key pressed in any app runs its Capture item — the same door the
+        // menu uses, so it can light nothing the menu could not.
+        hotKeys.perform = { [weak shell] command in
+            guard let shell, shell.canPerform(command) else { return false }
+            shell.perform(command)
+            return true
+        }
+        self.hotKeys = hotKeys
 
         // The wizard's step 2 hands the folder back the moment it is known, so
         // every later verb runs against it.

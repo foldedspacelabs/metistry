@@ -79,6 +79,16 @@ struct MetistryApp: App {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(text, forType: .string)
         }
+        // Shortcuts in any app (C120): `RegisterEventHotKey` is AppKit-side, so
+        // the kit is handed it, and a key nothing answers yet beeps.
+        model.hotKeys.unanswered = { _ in NSSound.beep() }
+        model.hotKeys.attach(CarbonHotKeyRegistrar())
+        // Capture ▸ Shortcuts in Any App… opens Settings on Keyboard (C127).
+        let settings = model.settings
+        model.shell.captureActions[.shortcutsInAnyApp] = {
+            settings.section = .keyboard
+            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        }
         #if os(macOS)
         // Sparkle fills in the kit's plain UpdateStatus box: the kit stays free
         // of the framework, and the Updates pane and the menu read one type.
@@ -162,7 +172,7 @@ struct MetistryApp: App {
 
         // Help ▸ Keyboard Shortcuts (⌘/): the menus' own table, on one page.
         Window("Keyboard Shortcuts", id: ShellWindowID.keyboardShortcuts) {
-            KeyboardShortcutsView(shell: model.shell)
+            KeyboardShortcutsView(shell: model.shell, anyApp: model.hotKeys)
         }
         .defaultSize(width: 560, height: 640)
 

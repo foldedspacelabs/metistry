@@ -16,6 +16,10 @@
 //                              bundled inside it (Advanced; see below)
 //   pinnedItems.<instance_id>  the sidebar's Pinned area, per instance
 //
+// and ONE setting that fronts no file, because none can exist: the switch
+// and keys of Settings ▸ Keyboard's shortcuts in any app (`anyAppShortcuts`),
+// which plan §2.2 makes device-local — "no CLI and no API" (T6-16);
+//
 // plus Sparkle's own preferences, which Sparkle owns and reads itself, and one
 // FILE, not a default (owner ruling 19, 2026-09-27 — see `AppFileStore`
 // below): the offline capture queue, because unsent work is not a setting.
@@ -43,6 +47,12 @@ public enum AppPreference: String, CaseIterable, Sendable {
     /// pointer rather than configuration — the pinned object lives where it
     /// always did, and losing the list costs one drag (pinned-items.swift).
     case pinnedItemsPrefix = "pinnedItems"
+    /// Settings ▸ Keyboard's switch and the five keys under it (T6-16,
+    /// hotkeys.swift). The one entry here that is configuration rather than a
+    /// pointer, and deliberately so: plan §2.2 lists global hot keys as
+    /// device-local, "no CLI and no API", so there is no file the CLI owns
+    /// for them to front. Written only when the owner changes one.
+    case anyAppShortcuts
 
     /// The scaffold's key, read once and removed (see the file header).
     public static let legacyProductDirectory = "productDirectory"

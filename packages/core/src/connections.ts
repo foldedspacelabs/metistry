@@ -216,6 +216,41 @@ export const oauthClientSchema = z
 
 export type OAuthClient = z.infer<typeof oauthClientSchema>;
 
+/**
+ * **The OAuth client of a custom connection** (C118, T4-10) — the model a
+ * connection type's `oauth` field supplies, written on the connection itself
+ * because no manifest does. The same rules as `oauthClientSchema`, and one
+ * more: **there is no shipped client**, so the client id is the owner's own —
+ * a secret beside it (`client_id: {{ secret.x }}` on the auth shortcut),
+ * never text in the file. `redirect: broker` is modelled and refused where a
+ * flow would start (§5: the broker is not built).
+ */
+export const customOAuthClientSchema = z
+  .strictObject({
+    client_id: z
+      .never({ error: "a custom connection's client id is the owner's own — store it as a secret and write client_id: {{ secret.<name> }} on the auth shortcut, beside client:" })
+      .optional(),
+    client_secret: z
+      .never({ error: "a client secret is a secret — store it and write client_secret: {{ secret.<name> }} on the auth shortcut, beside client:" })
+      .optional(),
+    pkce: z.boolean(),
+    redirect: z.enum(OAUTH_REDIRECTS),
+    authorize_url: httpsUrl,
+    token_url: httpsUrl,
+    scopes: z.array(z.string().regex(/^\S+$/, "a scope has no whitespace")).min(1, "declare the scopes — they are what a reviewer reads"),
+  })
+  .superRefine((c, ctx) => {
+    if (c.redirect === "loopback" && c.pkce !== true) {
+      ctx.addIssue({ code: "custom", path: ["pkce"], message: "a loopback redirect is a public client — pkce must be true" });
+    }
+  });
+
+export type CustomOAuthClient = z.infer<typeof customOAuthClientSchema>;
+
+/** The references an OAuth sign-in holds — a type's `oauth` field value, or a custom connection's auth shortcut. Each is a `{{ secret.name }}`. */
+export const OAUTH_REFS = ["token", "client_id", "client_secret"] as const;
+export type OAuthRef = (typeof OAUTH_REFS)[number];
+
 // --- connection-type pieces (assembled into the manifest in manifest.ts) -------
 
 const fieldCommon = {
@@ -385,8 +420,22 @@ export const httpAuthSchema = z.preprocess(
       z.strictObject({ scheme: z.literal("basic"), username: z.string().min(1), secret: secretName }),
       /** `header` as the service spells it — Linear's personal key is `Authorization: <API_KEY>`, no Bearer. */
       z.strictObject({ scheme: z.literal("api_key"), header: headerName, secret: secretName }),
-      /** The token comes from the provider's `oauth` field; `field` names it when the type has more than one. */
-      z.strictObject({ scheme: z.literal("oauth"), field: fieldKey.optional() }),
+      /**
+       * The token comes from the provider's `oauth` field; `field` names it
+       * when the type has more than one. A **custom** connection has no field:
+       * it carries its own `client` (C118) and the references a field's value
+       * holds — `token`, `client_id`, `client_secret?` — each a
+       * `{{ secret.name }}` (T4-10; `connectionFileSchema` and
+       * `connectionIssues` hold each side to its own).
+       */
+      z.strictObject({
+        scheme: z.literal("oauth"),
+        field: fieldKey.optional(),
+        client: customOAuthClientSchema.optional(),
+        token: z.string().optional(),
+        client_id: z.string().optional(),
+        client_secret: z.string().optional(),
+      }),
     ],
     {
       error: (iss) =>
@@ -506,6 +555,7 @@ function templatedValues(c: {
     for (const [k, v] of Object.entries(http.query)) add(["reach", "http", "query", k], v);
     for (const [k, v] of Object.entries(http.headers)) add(["reach", "http", "headers", k], v);
     if (http.auth.scheme === "basic") add(["reach", "http", "auth", "username"], http.auth.username);
+    if (http.auth.scheme === "oauth") for (const part of OAUTH_REFS) add(["reach", "http", "auth", part], http.auth[part]);
   }
   if (command) {
     add(["reach", "command", "command"], command.command);
@@ -583,6 +633,27 @@ export const connectionFileSchema = z
       }
       if (Object.keys(c.config).length > 0) {
         ctx.addIssue({ code: "custom", path: ["config"], message: "a custom connection has no config fields — its settings are its reach" });
+      }
+      // C118: no manifest supplies a custom connection's OAuth client, so its auth shortcut carries one
+      if (auth?.scheme === "oauth") {
+        const at = ["reach", "http", "auth"];
+        if (auth.field !== undefined) ctx.addIssue({ code: "custom", path: [...at, "field"], message: "a custom connection has no fields — its OAuth client is client:, beside token: and client_id:" });
+        if (!auth.client) ctx.addIssue({ code: "custom", path: [...at, "client"], message: "a custom OAuth connection names its client — authorize_url, token_url, scopes, pkce, redirect — because no connection type supplies one" });
+        for (const part of ["token", "client_id"] as const) {
+          if (auth[part] === undefined) {
+            ctx.addIssue({
+              code: "custom",
+              path: [...at, part],
+              message: part === "token" ? "a custom OAuth connection names the secret its sign-in is kept in: token: {{ secret.<name> }}" : "a custom OAuth connection has no shipped client id — bring your own: client_id: {{ secret.<name> }}",
+            });
+          }
+        }
+      }
+    }
+    if (auth?.scheme === "oauth") {
+      for (const part of OAUTH_REFS) {
+        const v = auth[part];
+        if (v !== undefined && !soleRef(v, "secret")) ctx.addIssue({ code: "custom", path: ["reach", "http", "auth", part], message: `must be a {{ secret.name }} reference — never the ${part === "token" ? "token" : part === "client_id" ? "client id" : "client secret"} itself` });
       }
     }
   });
@@ -673,6 +744,10 @@ export function connectionIssues(c: ConnectionFile, type: ConnectionTypeManifest
 
   const auth = c.reach.http?.auth;
   if (auth?.scheme === "oauth") {
+    const carried = (["client", ...OAUTH_REFS] as const).filter((k) => auth[k] !== undefined);
+    if (carried.length > 0) {
+      issues.push(`reach.http.auth: ${type.name} supplies the OAuth client — ${carried.join(", ")} ${carried.length === 1 ? "belongs" : "belong"} to a custom connection; this one keeps its token and any client of your own in its oauth field (config.<field>)`);
+    }
     const oauthKeys = type.fields.filter((f) => f.kind === "oauth").map((f) => f.key);
     if (auth.field !== undefined && !oauthKeys.includes(auth.field)) {
       issues.push(`reach.http.auth.field: ${type.name} has no oauth field "${auth.field}"`);

@@ -33,9 +33,13 @@ const interval = intEnv("METISTRY_DRAIN_INTERVAL_MS", 1500);
 // `.metistry/rules.yaml` never named the instance's file and the engine
 // resolved tiers from the seed's map while the console resolved them from
 // the instance's — the two are documented to read one file.
-const { tiers: rulesTiers, path: tiersPath } = await loadTiers(optionalEnv("METISTRY_RULES_FILES", overlayFilesFromEnv(process.env, "rules")), model);
+const { tiers: rulesTiers, path: tiersPath, policyCaps } = await loadTiers(optionalEnv("METISTRY_RULES_FILES", overlayFilesFromEnv(process.env, "rules")), model);
 if (tiersPath) console.log(`tiers from ${tiersPath}: ${Object.entries(rulesTiers).map(([k, t]) => `${k}=${t.model}/${t.effort}`).join(" ")}`);
 else console.warn(`no rules.yaml found (METISTRY_RULES_FILES) — one tier only: default=${model}/medium`);
+// The router's policy caps (docs/ops/dynamic-router.md §1): every turn the
+// policy served is bound by these, read from this process's own copy of the
+// file — never from the route on the row.
+if (policyCaps) console.log(`policy caps: tool_calls=${policyCaps.tool_calls} tokens=${policyCaps.tokens} cost_usd=${policyCaps.cost_usd}`);
 
 // compute.yaml (C1), hot-reloaded from the same file the console watches.
 // Its `assignments:` supersede rules.yaml's `tiers:` when they are there, and
@@ -159,7 +163,7 @@ setInterval(async () => {
   if (busy) return;
   busy = true;
   try {
-    while (await drainOne(pool, engine, tiers, { compute: currentCompute })) {} // drain the backlog
+    while (await drainOne(pool, engine, tiers, { compute: currentCompute, policyCaps })) {} // drain the backlog
     while (await drainCrewOne(pool, crewCfg)) {} // then the crew queue
   } catch (err) {
     console.error("drain:", err);

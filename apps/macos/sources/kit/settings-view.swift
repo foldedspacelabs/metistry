@@ -170,8 +170,9 @@ struct SettingsPaneContent: View {
             case .updates: UpdatesPane(model: model)
             case .account: AccountPane(model: model, actions: actions)
             case .connections: ConnectionsPane(model: model)
-            case .secrets: SecretsPane(settings: model.settings)
-            case .variables, .liveCapture, .sessions: PendingPane(section: section)
+            case .secrets: SecretsPaneView(model: model)
+            case .variables: VariablesPaneView(model: model)
+            case .liveCapture, .sessions: PendingPane(section: section)
             case .keyboard: KeyboardPane(assistantName: model.settings.identity?.assistantName, actions: actions)
             case .advanced: AdvancedPane(model: model, actions: actions)
             }

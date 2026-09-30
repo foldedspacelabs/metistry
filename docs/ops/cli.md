@@ -1333,9 +1333,13 @@ in, then restart the console.
 And it delivers **`github_write`** (T2-13) when `secrets.yaml` names it — the
 owner's own fine-grained token with pull-request write, which the console's
 pull request doors post reviews with (`docs/ops/client-api.md`, *Pull
-requests*). It is nobody else's: no connection or agent is granted it, the
-GitHub sync reads with its own read-only token, and the doors send it only to
-`api.github.com`, and only while the secret's *Sent only to* list says so:
+requests*). It is nobody else's: an owner-door secret like `github_write` is
+refused a `connection:`, `agent:` or `provider:` grant at the tool (X-41) — by
+`metistry secrets grant`, by `secrets.yaml`'s own schema, and by `secretGrant`
+itself, so no delivery path can hand it to one even from a file written
+before this check. The GitHub sync reads with its own read-only token, and
+the doors send it only to `api.github.com`, and only while the secret's
+*Sent only to* list says so:
 
 ```sh
 printf %s "$TOKEN" | metistry secrets set github_write --hosts api.github.com
@@ -1480,9 +1484,11 @@ printf %s "$NEW"   | metistry secrets replace github_write [--expires <date>]
 metistry secrets hosts github_write                        # show *Sent only to*
 metistry secrets hosts github_write api.github.com uploads.github.com   # replace the list
 metistry secrets hosts github_write --clear                # sent nowhere
-metistry secrets grant github_write connection:github on   # On · Ask · Off; unlisted = Off
-metistry secrets grant github_write agent:devin ask
+metistry secrets grant linear_api_key connection:linear on  # On · Ask · Off; unlisted = Off
+metistry secrets grant linear_api_key agent:devin ask
 metistry secrets grant openrouter_api_key provider:openrouter off   # a provider key's grantee (X-7): Off = the engine never sends it
+metistry secrets grant github_write connection:github on   # refused — an owner-door secret (X-41):
+                                                             # no connection, agent or provider is ever granted it
 metistry secrets remove github_write                       # preview: what references it
 metistry secrets remove github_write --yes
 metistry secrets list --named [--json]
@@ -1516,16 +1522,22 @@ is validated before anything is written:
 secrets:
   github_write:
     hosts: [ api.github.com ]        # *Sent only to* — host or host:port, no scheme, no wildcard
-    grants: { connection:github: on, agent:devin: ask }   # *Who may use it*
-    expires: 2026-12-31              # where the service reports one
+    expires: 2026-12-31              # where the service reports one — no `grants:`: an owner-door
+                                      # secret has no *Who may use it* line to write (X-41)
+  linear_api_key:
+    hosts: [ api.linear.app ]
+    grants: { connection:linear: on, agent:devin: ask }   # *Who may use it*
 ```
 
 The schema is strict: a file carrying anything else — a `value:` field, a
-string where a policy belongs — does not load, anywhere.
+string where a policy belongs, or a `connection:`/`agent:` grant on an
+owner-door secret like `github_write` — does not load, anywhere.
 
 - `set` refuses a name the file already has (`replace` swaps the value);
   without `--hosts` the secret is filled in for no server until `hosts`
-  names one (a local agent you grant it still gets it as `GITHUB_WRITE`).
+  names one (a local agent granted `linear_api_key` still gets it as
+  `LINEAR_API_KEY` — an owner-door secret like `github_write` is never
+  granted to one, X-41).
 - `replace` keeps the policy and clears an expiry recorded for the old
   value, unless `--expires` gives the new one.
 - `remove` is preview-then-confirm: it names every file under `.metistry/`

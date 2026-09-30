@@ -997,6 +997,7 @@ export {
   describeSecrets,
   fillSecretRefs,
   instancePresence,
+  isOwnerDoorSecret,
   isSecretName,
   memoryKeychain,
   normalizeSecretHost,

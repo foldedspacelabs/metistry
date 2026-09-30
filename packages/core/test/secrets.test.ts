@@ -13,6 +13,7 @@ import {
   describeSecrets,
   fillSecretRefs,
   instancePresence,
+  isOwnerDoorSecret,
   isSecretName,
   memoryKeychain,
   normalizeSecretHost,
@@ -26,6 +27,7 @@ import {
   secretService,
   type KeychainBackend,
   type SecretSource,
+  type SecretsFile,
 } from "../src/index.js";
 
 const A = "11111111-2222-4333-8444-555555555555";
@@ -214,22 +216,25 @@ describe("the resolver: {{ secret.name }}", () => {
 });
 
 describe("secrets.yaml", () => {
+  // github_write carries no grants: it is an owner-door secret (X-41), which
+  // may never be granted to a connection or an agent — lmstudio_key is the
+  // one that demonstrates *Who may use it* here.
   const FILE = `# names and policy — never a value
 secrets:
   github_write:
     hosts: [api.github.com]
-    grants:
-      connection:github: on
-      agent:devin: ask
     expires: 2026-12-31
   lmstudio_key:
     hosts: ["127.0.0.1:1234"]
+    grants:
+      connection:github: on
+      agent:devin: ask
 `;
 
   it("parses names, hosts, grants and expiry", () => {
     const f = parseSecretsFile(FILE);
-    expect(f.secrets.github_write).toEqual({ hosts: ["api.github.com"], grants: { "connection:github": "on", "agent:devin": "ask" }, expires: "2026-12-31" });
-    expect(f.secrets.lmstudio_key).toEqual({ hosts: ["127.0.0.1:1234"], grants: {} });
+    expect(f.secrets.github_write).toEqual({ hosts: ["api.github.com"], grants: {}, expires: "2026-12-31" });
+    expect(f.secrets.lmstudio_key).toEqual({ hosts: ["127.0.0.1:1234"], grants: { "connection:github": "on", "agent:devin": "ask" } });
     expect(parseSecretsFile("")).toEqual({ secrets: {} });
     expect(parseSecretsFile("secrets: {}\n")).toEqual({ secrets: {} });
   });
@@ -264,9 +269,9 @@ secrets:
 
   it("a grantee the file does not name is Off; so is everyone, for a secret it does not name", () => {
     const f = parseSecretsFile(FILE);
-    expect(secretGrant(f, "github_write", "connection:github")).toBe("on");
-    expect(secretGrant(f, "github_write", "agent:devin")).toBe("ask");
-    expect(secretGrant(f, "github_write", "agent:assistant")).toBe(DEFAULT_SECRET_GRANT);
+    expect(secretGrant(f, "lmstudio_key", "connection:github")).toBe("on");
+    expect(secretGrant(f, "lmstudio_key", "agent:devin")).toBe("ask");
+    expect(secretGrant(f, "lmstudio_key", "agent:assistant")).toBe(DEFAULT_SECRET_GRANT);
     expect(DEFAULT_SECRET_GRANT).toBe("off");
     expect(secretGrant(f, "nope", "connection:github")).toBe("off");
     expect(secretGrant(f, "constructor", "connection:github")).toBe("off");
@@ -283,16 +288,42 @@ secrets:
   });
 });
 
+describe("owner-door secrets refuse a connection or agent grant (X-41)", () => {
+  it("a hand-written file granting github_write to a connection or an agent does not load, naming the fix", () => {
+    expect(() => parseSecretsFile("secrets:\n  github_write:\n    hosts: [api.github.com]\n    grants: { connection:github: on }\n")).toThrow(/github_write.*owner-door secret.*connection:github/s);
+    expect(() => parseSecretsFile("secrets:\n  github_write:\n    grants: { agent:devin: ask }\n")).toThrow(/owner-door secret/);
+  });
+
+  it("a file that names only its hosts and expiry still loads — the door itself is the grant", () => {
+    const f = parseSecretsFile("secrets:\n  github_write:\n    hosts: [api.github.com]\n    expires: 2026-12-31\n");
+    expect(f.secrets.github_write).toEqual({ hosts: ["api.github.com"], grants: {}, expires: "2026-12-31" });
+  });
+
+  it("secretGrant is Off for a connection or an agent no matter what the file says — the second door, for a file from before this check", () => {
+    const file = { secrets: { github_write: { hosts: [], grants: { "connection:github": "on", "agent:devin": "ask" } } } } as unknown as SecretsFile;
+    expect(secretGrant(file, "github_write", "connection:github")).toBe("off");
+    expect(secretGrant(file, "github_write", "agent:devin")).toBe("off");
+  });
+
+  it("isOwnerDoorSecret names github_write exactly — not a prefix, so a test's github_write_<suffix> fixture is not one", () => {
+    expect(isOwnerDoorSecret("github_write")).toBe(true);
+    expect(isOwnerDoorSecret("github_write_rrzciw")).toBe(false);
+    expect(isOwnerDoorSecret("githubwrite")).toBe(false);
+    expect(isOwnerDoorSecret("github_writer")).toBe(false);
+    expect(isOwnerDoorSecret("lmstudio_key")).toBe(false);
+  });
+});
+
 describe("the listing", () => {
   it("names, hosts, grants, expiry, presence and last used — and never a value, though the Keychain holds one", async () => {
     const kc = memoryKeychain();
     const a = new InstanceSecrets(kc, A);
     await a.set("github_write", VALUE_A);
-    const f = parseSecretsFile("secrets:\n  zeta: { hosts: [z.test] }\n  github_write:\n    hosts: [api.github.com]\n    grants: { connection:github: on }\n");
+    const f = parseSecretsFile("secrets:\n  zeta: { hosts: [z.test], grants: { connection:github: on } }\n  github_write:\n    hosts: [api.github.com]\n");
     const rows = await describeSecrets(f, a.presence(), new Map([["github_write", "2026-09-28T13:00:02.000Z"]]));
     expect(rows).toEqual([
-      { name: "github_write", hosts: ["api.github.com"], grants: [{ to: "connection:github", mode: "on" }], expires: null, present: true, last_used: "2026-09-28T13:00:02.000Z" },
-      { name: "zeta", hosts: ["z.test"], grants: [], expires: null, present: false, last_used: null },
+      { name: "github_write", hosts: ["api.github.com"], grants: [], expires: null, present: true, last_used: "2026-09-28T13:00:02.000Z" },
+      { name: "zeta", hosts: ["z.test"], grants: [{ to: "connection:github", mode: "on" }], expires: null, present: false, last_used: null },
     ]);
     expect(JSON.stringify(rows)).not.toContain(VALUE_A);
   });

@@ -33,7 +33,7 @@
           "runs_on": "host"
         },
         "secrets": [
-          "github_write"
+          "github_mcp_key"
         ],
         "variables": [
           "team_name"
@@ -64,6 +64,6 @@
         ]
       }
     ],
-    "as_of": "2026-09-30T04:49:51.810Z"
+    "as_of": "2026-09-30T05:36:18.505Z"
   }
 }

@@ -167,24 +167,24 @@ private func says(_ node: AXNode, _ text: String) -> Bool {
     let settings = app.settings
     runner.reply = { command in
         command.arguments.contains("--json")
-            ? CommandResult(exitCode: 0, stdout: #"{"name":"github_write","referencedBy":[".metistry/connections/github.yaml",".metistry/agents/crew/triage.md"],"removed":false,"itemDeleted":false}"#, stderr: "referenced by — these stop working once it is gone: …\n")
-            : CommandResult(exitCode: 0, stdout: "removed github_write — the Keychain item is deleted and its line in secrets.yaml.\n", stderr: "")
+            ? CommandResult(exitCode: 0, stdout: #"{"name":"github_mcp_key","referencedBy":[".metistry/connections/github.yaml",".metistry/agents/crew/triage.md"],"removed":false,"itemDeleted":false}"#, stderr: "referenced by — these stop working once it is gone: …\n")
+            : CommandResult(exitCode: 0, stdout: "removed github_mcp_key — the Keychain item is deleted and its line in secrets.yaml.\n", stderr: "")
     }
-    let secret = try #require(settings.secretsPane.rows.first { $0.name == "github_write" })
+    let secret = try #require(settings.secretsPane.rows.first { $0.name == "github_mcp_key" })
     #expect(secret.usedBy.map(\.to) == ["connection:github", "agent:devin"])
 
     await settings.proposeSecretRemoval(secret)
 
     // the preview ran first — `remove` without --yes deletes nothing
     let preview = try #require(runner.commands.last)
-    #expect(preview.arguments.starts(with: ["secrets", "remove", "github_write", "--json"]))
+    #expect(preview.arguments.starts(with: ["secrets", "remove", "github_mcp_key", "--json"]))
     #expect(!preview.arguments.contains("--yes"))
     #expect(preview.standardInput == nil)
 
     // then the confirmation, naming what stops: each file as what it is, and the grantee no file named
     let pending = try #require(settings.confirmation)
     #expect(pending.destructive)
-    #expect(pending.title == "Delete github_write?")
+    #expect(pending.title == "Delete github_mcp_key?")
     #expect(pending.cost.hasPrefix("What stops: "))
     #expect(pending.cost.contains("the github connection (.metistry/connections/github.yaml)"))
     #expect(pending.cost.contains("agent triage (.metistry/agents/crew/triage.md)"))
@@ -195,7 +195,7 @@ private func says(_ node: AXNode, _ text: String) -> Bool {
 
     await settings.confirm(pending)
     let removal = try #require(runner.commands.last)
-    #expect(removal.arguments == ["secrets", "remove", "github_write", "--yes", "--instance", instance.path])
+    #expect(removal.arguments == ["secrets", "remove", "github_mcp_key", "--yes", "--instance", instance.path])
     #expect(settings.outcome?.ok == true)
 
     // a secret nothing uses says so, rather than naming nothing
@@ -219,7 +219,7 @@ private func says(_ node: AXNode, _ text: String) -> Bool {
     let (app, runner, cleanup) = try await accessApp()
     defer { cleanup() }
     let settings = app.settings
-    let secret = try #require(settings.secretsPane.rows.first)
+    let secret = try #require(settings.secretsPane.rows.first { $0.name == "github_mcp_key" })
 
     // unchanged hosts propose nothing
     settings.proposeHosts(secret)
@@ -228,12 +228,12 @@ private func says(_ node: AXNode, _ text: String) -> Bool {
     #expect(settings.secretsPane.hostsChanged(secret))
     settings.proposeHosts(secret)
     let hosts = try #require(settings.confirmation)
-    #expect(hosts.command.arguments == ["secrets", "hosts", "github_write", "api.github.com", "uploads.github.com", "--instance", instance.path])
+    #expect(hosts.command.arguments == ["secrets", "hosts", "github_mcp_key", "api.github.com", "uploads.github.com", "--instance", instance.path])
     #expect(runner.commands.isEmpty)
     settings.cancelConfirmation()
     settings.secretsPane.hostDrafts[secret.name] = "  "
     settings.proposeHosts(secret)
-    #expect(settings.confirmation?.command.arguments == ["secrets", "hosts", "github_write", "--clear", "--instance", instance.path])
+    #expect(settings.confirmation?.command.arguments == ["secrets", "hosts", "github_mcp_key", "--clear", "--instance", instance.path])
     settings.cancelConfirmation()
 
     // a grant already at that mode asks nothing; an unlisted grantee is Off
@@ -242,8 +242,8 @@ private func says(_ node: AXNode, _ text: String) -> Bool {
     #expect(secret.mode(for: "agent:cursor") == .off)
     settings.proposeGrant(secret, to: SecretGrantee("agent:cursor"), .ask)
     let grant = try #require(settings.confirmation)
-    #expect(grant.command.arguments == ["secrets", "grant", "github_write", "agent:cursor", "ask", "--instance", instance.path])
-    #expect(grant.cost.contains("GITHUB_WRITE"), "an agent is told how it gets it")
+    #expect(grant.command.arguments == ["secrets", "grant", "github_mcp_key", "agent:cursor", "ask", "--instance", instance.path])
+    #expect(grant.cost.contains("GITHUB_MCP_KEY"), "an agent is told how it gets it")
     #expect(runner.commands.isEmpty)
 }
 
@@ -252,28 +252,33 @@ private func says(_ node: AXNode, _ text: String) -> Bool {
     let (app, runner, cleanup) = try await accessApp()
     defer { cleanup() }
     let settings = app.settings
-    let secret = try #require(settings.secretsPane.rows.first)
-    let refusal = "github_write is held by the owner door (the GitHub review routes), so it cannot be granted to agent:devin — only the door fills it in"
+    // github_mcp_key, not github_write: an owner-door secret (X-41) is never
+    // offered agent:devin as a grantee at all (it is refused before the CLI
+    // is even asked), so it cannot demonstrate a CLI-side refusal reaching
+    // this row — github_mcp_key already grants agent:devin Ask, which is
+    // what makes it a known grantee here to propose widening.
+    let secret = try #require(settings.secretsPane.rows.first { $0.name == "github_mcp_key" })
+    let refusal = "github_mcp_key: the reconciler could not reach the vault to write secrets.yaml — try again"
     runner.reply = { _ in CommandResult(exitCode: 1, stdout: "", stderr: "metistry secrets grant: \(refusal)\n") }
 
     settings.proposeGrant(secret, to: SecretGrantee("agent:devin"), .on)
     await settings.confirm(try #require(settings.confirmation))
 
     // the CLI's words, on that grantee's row — without the verb's prefix — and the switch where the file has it
-    #expect(settings.secretsPane.grantRefusal("github_write", "agent:devin") == refusal)
-    #expect(settings.secretsPane.grantRefusal("github_write", "connection:github") == nil)
-    let reread = try #require(settings.secretsPane.rows.first)
+    #expect(settings.secretsPane.grantRefusal("github_mcp_key", "agent:devin") == refusal)
+    #expect(settings.secretsPane.grantRefusal("github_mcp_key", "connection:github") == nil)
+    let reread = try #require(settings.secretsPane.rows.first { $0.name == "github_mcp_key" })
     #expect(reread.mode(for: "agent:devin") == .ask)
-    settings.secretsPane.expanded.insert("github_write")
+    settings.secretsPane.expanded.insert("github_mcp_key")
     let tree = try await AccessibilityProbe.snapshot(SettingsPaneContent(section: .secrets, model: app, actions: SettingsActions()).frame(width: SettingsLayout.pane))
     defer { tree.close() }
     #expect(tree.nodes.contains { $0.name == "Not changed: \(refusal)" }, "the refusal is spoken on its row")
 
     // the next accepted change clears it
-    runner.reply = { _ in CommandResult(exitCode: 0, stdout: "agent:devin may use github_write: off (refused)\n", stderr: "") }
-    settings.proposeGrant(secret, to: SecretGrantee("agent:devin"), .off)
+    runner.reply = { _ in CommandResult(exitCode: 0, stdout: "agent:devin may use github_mcp_key: on\n", stderr: "") }
+    settings.proposeGrant(secret, to: SecretGrantee("agent:devin"), .on)
     await settings.confirm(try #require(settings.confirmation))
-    #expect(settings.secretsPane.grantRefusal("github_write", "agent:devin") == nil)
+    #expect(settings.secretsPane.grantRefusal("github_mcp_key", "agent:devin") == nil)
 }
 
 // MARK: - The recorded rows
@@ -284,8 +289,17 @@ private func says(_ node: AXNode, _ text: String) -> Bool {
     defer { cleanup() }
     let pane = app.settings.secretsPane
     #expect(pane.phase == .read)
-    let secret = try #require(pane.rows.first)
-    #expect(secret.name == "github_write")
+
+    // github_write is an owner door (X-41): present, its own hosts and last
+    // used, but no grants at all — never a connection's or an agent's row.
+    let door = try #require(pane.rows.first { $0.name == "github_write" })
+    #expect(door.hosts == ["api.github.com"])
+    #expect(door.present == true)
+    #expect(door.usedByLine == "No one yet")
+    #expect(door.lastUsed != nil)
+
+    let secret = try #require(pane.rows.first { $0.name == "github_mcp_key" })
+    #expect(secret.name == "github_mcp_key")
     #expect(secret.hosts == ["api.github.com"])
     #expect(secret.present == true)
     #expect(secret.usedByLine == "connection:github, agent:devin (Ask)")

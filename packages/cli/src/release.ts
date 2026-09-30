@@ -60,6 +60,25 @@ export function runtimeAssetName(version: string, target: string): string {
   return `metistry-runtime-${version.replace(/^v/, "")}-${target}.tar.gz`;
 }
 
+/** `0.14.0` vs `0.13.2` → 1; undefined when either is not a plain x.y.z (never a guess). */
+export function compareVersions(a: string, b: string): number | undefined {
+  const parse = (v: string) => /^v?(\d+)\.(\d+)\.(\d+)$/.exec(v.trim())?.slice(1).map(Number);
+  const x = parse(a);
+  const y = parse(b);
+  if (!x || !y) return a.trim() === b.trim() ? 0 : undefined;
+  for (let i = 0; i < 3; i++) if (x[i]! !== y[i]!) return x[i]! > y[i]! ? 1 : -1;
+  return 0;
+}
+
+/**
+ * How many of the newest releases an unpinned update looks through for one
+ * that carries this platform's runtime pack, before it gives up. A release
+ * whose workflow failed publishes with no assets and — immutable releases —
+ * can never be repaired under its tag (docs/ops/releases.md), so "Latest"
+ * alone is not enough to go on.
+ */
+export const RELEASE_WALK_LIMIT = 10; // limit: fixed — how far back a lost release is looked past, not an install's policy; --version reaches anything older
+
 export function releaseRepo(env: NodeJS.ProcessEnv, override?: string | undefined): string {
   return override ?? env.METISTRY_RELEASE_REPO ?? DEFAULT_RELEASE_REPO;
 }
@@ -88,6 +107,7 @@ export interface ResolvedRelease {
 interface GhRelease {
   tag_name?: string;
   draft?: boolean;
+  prerelease?: boolean;
   assets?: { name?: string; id?: number; browser_download_url?: string }[];
 }
 
@@ -179,6 +199,112 @@ export async function resolveRelease(opts: { fetchFn: typeof fetch; repo?: strin
   const tag = body.tag_name;
   if (typeof tag !== "string" || tag === "") throw new StepFailed(`${url} returned a release with no tag_name`);
   return { version: tag.replace(/^v/, ""), tag, ...assetMaps(body.assets), via: "api" };
+}
+
+/**
+ * `GET /repos/<repo>/releases?per_page=<n>` — the newest `n` releases, drafts
+ * and prereleases dropped (an update never lands on either unless pinned with
+ * `--version`). Same auth and `gh` fallback as `resolveRelease`; `viaGh`
+ * skips straight to `gh` when the resolve already needed it.
+ */
+async function listReleases(opts: { fetchFn: typeof fetch; repo: string; env: NodeJS.ProcessEnv; exec: Exec; limit: number; viaGh: boolean }): Promise<ResolvedRelease[]> {
+  const { repo, env, exec, limit } = opts;
+  const toResolved = (body: unknown, via: ResolvedRelease["via"]): ResolvedRelease[] => {
+    if (!Array.isArray(body)) throw new StepFailed(`the releases list of ${repo} was not a JSON array`);
+    return (body as GhRelease[])
+      .filter((b) => !b.draft && !b.prerelease && typeof b.tag_name === "string" && b.tag_name !== "")
+      .map((b) => ({ version: b.tag_name!.replace(/^v/, ""), tag: b.tag_name!, ...assetMaps(b.assets), via }));
+  };
+  const ghPath = `repos/${repo}/releases?per_page=${limit}`;
+  const viaGh = async (): Promise<ResolvedRelease[]> => {
+    const r = await exec("gh", ["api", ghPath]);
+    if (r.code !== 0) throw new StepFailed(`gh api ${ghPath} failed${(r.stderr || r.stdout).trim() ? ` (${(r.stderr || r.stdout).trim().split("\n").slice(-3).join("; ")})` : ""}`);
+    try {
+      return toResolved(JSON.parse(r.stdout), "gh");
+    } catch (err) {
+      throw err instanceof StepFailed ? err : new StepFailed(`gh api ${ghPath} did not return JSON`);
+    }
+  };
+  if (opts.viaGh) return viaGh();
+
+  const api = env.METISTRY_GITHUB_API ?? "https://api.github.com";
+  const url = `${api}/${ghPath}`;
+  const headers: Record<string, string> = { accept: "application/vnd.github+json", "user-agent": "metistry-cli" };
+  if (env.METISTRY_GITHUB_TOKEN) headers.authorization = `Bearer ${env.METISTRY_GITHUB_TOKEN}`;
+  let res: Response;
+  try {
+    res = await opts.fetchFn(url, { headers, signal: AbortSignal.timeout(30_000) });
+  } catch (err) {
+    throw new StepFailed(`could not reach ${url} (${err instanceof Error ? err.message : String(err)})`);
+  }
+  if ((res.status === 401 || res.status === 403) && res.headers.get("x-ratelimit-remaining") !== "0" && (await ghAvailable(exec))) return viaGh();
+  if (!res.ok) throw new StepFailed(`GitHub answered HTTP ${res.status} for ${url}`);
+  return toResolved(await res.json(), "api");
+}
+
+/** The two assets an install cannot go without: this platform's pack, and the checksums it is verified against. */
+function missingInstallAssets(rel: ResolvedRelease, target: string): string[] {
+  return [runtimeAssetName(rel.version, target), CHECKSUMS_ASSET].filter((a) => !rel.assets[a]);
+}
+
+export interface InstallableRelease {
+  rel: ResolvedRelease;
+  /** newer releases passed over because they lack the pack or its checksums, newest first */
+  skipped: Array<{ tag: string; missing: string[] }>;
+}
+
+/**
+ * The release an UNPINNED update installs: GitHub's Latest when it carries
+ * this platform's runtime pack and `checksums.txt`, else the newest older
+ * release (by version, drafts and prereleases excluded) among the last
+ * `RELEASE_WALK_LIMIT` that does. A release whose workflow failed publishes
+ * with no assets and can never be repaired under its tag (immutable
+ * releases), so taking Latest blindly would wedge every update until the
+ * next release is cut. When none of them has a pack, the failure names the
+ * Latest release's own gap — the same message a pinned `--version` gives.
+ * Pinned versions never come through here: `--version X` means X.
+ */
+export async function resolveInstallableRelease(opts: {
+  fetchFn: typeof fetch;
+  env: NodeJS.ProcessEnv;
+  target: string;
+  exec?: Exec | undefined;
+  limit?: number | undefined;
+}): Promise<InstallableRelease> {
+  const { fetchFn, env, target } = opts;
+  const exec = opts.exec ?? realExec;
+  const limit = opts.limit ?? RELEASE_WALK_LIMIT;
+  const latest = await resolveRelease({ fetchFn, env, exec });
+  if (missingInstallAssets(latest, target).length === 0) return { rel: latest, skipped: [] };
+
+  const noPack = (): string => {
+    const names = Object.keys(latest.assets).sort();
+    const missing = missingInstallAssets(latest, target);
+    return missing.includes(runtimeAssetName(latest.version, target))
+      ? `release ${latest.tag} has no ${runtimeAssetName(latest.version, target)} (assets: ${names.length ? names.join(", ") : "none"}) — this platform has no runtime pack in that release`
+      : `release ${latest.tag} has no ${CHECKSUMS_ASSET} — refusing to install an unverifiable runtime pack`;
+  };
+  let listed: ResolvedRelease[];
+  try {
+    listed = await listReleases({ fetchFn, repo: releaseRepo(env), env, exec, limit, viaGh: latest.via === "gh" });
+  } catch (err) {
+    throw new StepFailed(`${noPack()}, and the older releases could not be listed (${err instanceof Error ? err.message : String(err)})`);
+  }
+  // Older than Latest only, newest version first: GitHub lists by creation
+  // date, and a tag that is not a plain x.y.z has no place in the order.
+  const older = listed
+    .filter((c) => compareVersions(c.version, latest.version) === -1)
+    .sort((a, b) => compareVersions(b.version, a.version) ?? 0)
+    .slice(0, Math.max(0, limit - 1));
+  const skipped: InstallableRelease["skipped"] = [{ tag: latest.tag, missing: missingInstallAssets(latest, target) }];
+  for (const c of older) {
+    const missing = missingInstallAssets(c, target);
+    if (missing.length === 0) return { rel: c, skipped };
+    skipped.push({ tag: c.tag, missing });
+  }
+  throw new StepFailed(
+    `${noPack()}; none of the last ${skipped.length} release(s) (${skipped.map((s) => s.tag).join(", ")}) has a ${target} runtime pack with its ${CHECKSUMS_ASSET} — nothing to install. Pin one explicitly with --version <x.y.z> if an older pack exists`,
+  );
 }
 
 /** `<sha256>  <filename>` lines (sha256sum/shasum output) → filename → digest. */
@@ -413,10 +539,25 @@ export async function installRelease(r: StepRunner, opts: InstallReleaseOptions)
   const { productDir, fetchFn, env } = opts;
   const target = opts.target ?? releaseTarget();
   const repo = releaseRepo(env);
-  const rel = await resolveRelease({ fetchFn, version: opts.version, env, exec: r.exec });
+  // `--version X` is X, or a failure — never a substitute. Unpinned, the
+  // newest release that actually carries this platform's pack.
+  const pinned = Boolean(opts.version);
+  const found = pinned ? { rel: await resolveRelease({ fetchFn, version: opts.version, env, exec: r.exec }), skipped: [] } : await resolveInstallableRelease({ fetchFn, env, target, exec: r.exec });
+  const rel = found.rel;
   if (rel.via === "gh") r.note(`${repo}: METISTRY_GITHUB_TOKEN was unauthorized for the Releases API — resolved and downloading via \`gh\` instead`);
+  if (found.skipped.length) {
+    // a missing pack is the headline; checksums alone missing is named as such
+    for (const s of found.skipped) r.note(`${s.tag} has no ${s.missing.includes(CHECKSUMS_ASSET) && s.missing.length === 1 ? CHECKSUMS_ASSET : `pack for ${target}`} — installing ${rel.tag}`);
+  }
   const asset = runtimeAssetName(rel.version, target);
   const before = await currentVersion(productDir);
+
+  // an unpinned update never moves backwards: the newest release with a pack
+  // being older than what runs means there is nothing newer to go to
+  if (!pinned && before && compareVersions(rel.version, before) === -1 && existsSync(releaseDir(productDir, before))) {
+    r.note(`already on the newest release with a pack: running ${before}, and the newest release carrying a ${target} pack is ${rel.version} — nothing to download (pin one with --version to go back on purpose)`);
+    return { version: before, dir: releaseDir(productDir, before), installed: false, previous: await previousVersion(productDir) };
+  }
 
   if (!opts.force && before === rel.version && existsSync(releaseDir(productDir, rel.version))) {
     r.note(`already running ${rel.version} (${CURRENT_LINK} -> ${RELEASES_DIRNAME}/${rel.version}) — nothing to download`);

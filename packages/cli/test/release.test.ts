@@ -47,7 +47,7 @@ const sha256 = (b: Buffer | string) => createHash("sha256").update(b).digest("he
  * every asset. `corrupt` serves a tarball whose bytes do not match the
  * digest the release advertises — the tampering case.
  */
-function releaseServer(opts: { versions: string[]; latest?: string; corrupt?: boolean; omitChecksums?: boolean; target?: string }) {
+function releaseServer(opts: { versions: string[]; latest?: string; corrupt?: boolean; omitChecksums?: boolean; target?: string; empty?: string[]; prerelease?: string[] }) {
   const target = opts.target ?? TARGET;
   const latest = opts.latest ?? opts.versions[opts.versions.length - 1]!;
   const bodyFor = (v: string) => Buffer.from(`runtime pack for ${v}\n`.repeat(4));
@@ -63,10 +63,11 @@ function releaseServer(opts: { versions: string[]; latest?: string; corrupt?: bo
     urls.set(sumUrl, Buffer.from(`${sha256(bytes)}  ${asset}\n${sha256(Buffer.from("x"))}  Metistry-${v}.dmg\n`));
     return {
       tag_name: `v${v}`,
-      assets: [
-        { name: asset, browser_download_url: tarUrl },
-        ...(opts.omitChecksums ? [] : [{ name: CHECKSUMS_ASSET, browser_download_url: sumUrl }]),
-      ],
+      prerelease: opts.prerelease?.includes(v) ?? false,
+      // a release whose workflow failed after publishing: immutable, and empty for good
+      assets: opts.empty?.includes(v)
+        ? []
+        : [{ name: asset, browser_download_url: tarUrl }, ...(opts.omitChecksums ? [] : [{ name: CHECKSUMS_ASSET, browser_download_url: sumUrl }])],
     };
   };
 
@@ -74,6 +75,12 @@ function releaseServer(opts: { versions: string[]; latest?: string; corrupt?: bo
     const url = String(u);
     calls.push(url);
     const tag = /\/releases\/tags\/v(.+)$/.exec(url)?.[1];
+    const page = /\/releases\?per_page=(\d+)$/.exec(url)?.[1];
+    if (page) {
+      // GitHub lists by creation date, newest first — here, the order given
+      const list = [...opts.versions].reverse().slice(0, Number(page)).map(release);
+      return new Response(JSON.stringify(list), { status: 200, headers: { "content-type": "application/json" } });
+    }
     if (url.endsWith("/releases/latest") || tag) {
       const v = tag ?? latest;
       if (!opts.versions.includes(v)) return new Response("{}", { status: 404 });
@@ -423,6 +430,73 @@ describe("installRelease", () => {
     await expect(installRelease(r, { productDir: P, fetchFn: releaseServer({ versions: ["0.2.0"], omitChecksums: true }).fn, env: {}, target: TARGET })).rejects.toThrow(/no checksums.txt/);
     await expect(installRelease(r, { productDir: P, fetchFn: releaseServer({ versions: ["0.2.0"] }).fn, env: {}, target: "sunos-sparc" })).rejects.toThrow(/has no metistry-runtime-0.2.0-sunos-sparc.tar.gz/);
     expect(existsSync(join(P, "current"))).toBe(false);
+  });
+
+  it("skips a Latest release that has no pack (its workflow failed after publishing), says so, and installs the newest one that has", async () => {
+    const P = await mkdtemp(join(tmpdir(), "metistry-rel-"));
+    const src = await checkout();
+    const s = releaseServer({ versions: ["0.14.2", "0.14.4", "0.15.0"], empty: ["0.15.0"] });
+    const { r, out } = runner(await tarInto(src));
+    const res = await installRelease(r, { productDir: P, fetchFn: s.fn, env: {}, target: TARGET });
+    expect(res).toMatchObject({ version: "0.14.4", installed: true });
+    expect(await currentVersion(P)).toBe("0.14.4");
+    expect(out.join("\n")).toContain(`v0.15.0 has no pack for ${TARGET} — installing v0.14.4`);
+    expect(s.calls).toContain(`https://api.github.com/repos/${REPO}/releases?per_page=10`);
+  });
+
+  it("walks by version, not creation date, and never lands on a prerelease or a release missing its checksums", async () => {
+    const P = await mkdtemp(join(tmpdir(), "metistry-rel-"));
+    const src = await checkout();
+    // listed newest-created first: 0.14.3 (a late hotfix of an older line) was cut after 0.14.9
+    const s = releaseServer({ versions: ["0.14.9", "0.14.3", "0.15.0-rc.1", "0.15.0"], latest: "0.15.0", empty: ["0.15.0"], prerelease: ["0.15.0-rc.1"] });
+    const { r } = runner(await tarInto(src));
+    const res = await installRelease(r, { productDir: P, fetchFn: s.fn, env: {}, target: TARGET });
+    expect(res.version).toBe("0.14.9");
+  });
+
+  it("fails clearly when none of the recent releases has a pack — naming Latest's gap and what was checked", async () => {
+    const P = await mkdtemp(join(tmpdir(), "metistry-rel-"));
+    const s = releaseServer({ versions: ["0.14.4", "0.15.0"], empty: ["0.14.4", "0.15.0"] });
+    const { r } = runner();
+    const err = await installRelease(r, { productDir: P, fetchFn: s.fn, env: {}, target: TARGET }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(StepFailed);
+    expect((err as Error).message).toMatch(/release v0.15.0 has no metistry-runtime-0.15.0-linux-x64.tar.gz \(assets: none\)/);
+    expect((err as Error).message).toMatch(/none of the last 2 release\(s\) \(v0.15.0, v0.14.4\) has a linux-x64 runtime pack/);
+    expect(existsSync(join(P, "current"))).toBe(false);
+  });
+
+  it("an explicit --version with no pack still fails with the pinned release's own message — never a substitute", async () => {
+    const P = await mkdtemp(join(tmpdir(), "metistry-rel-"));
+    const s = releaseServer({ versions: ["0.14.4", "0.15.0"], empty: ["0.15.0"] });
+    const { r } = runner();
+    await expect(installRelease(r, { productDir: P, fetchFn: s.fn, env: {}, target: TARGET, version: "0.15.0" })).rejects.toThrow(
+      /^release v0.15.0 has no metistry-runtime-0.15.0-linux-x64.tar.gz \(assets: none\) — this platform has no runtime pack in that release$/,
+    );
+    expect(s.calls.some((c) => c.includes("per_page"))).toBe(false);
+    expect(existsSync(join(P, "current"))).toBe(false);
+  });
+
+  it("never downgrades: when the newest release with a pack is older than what runs, it says so and changes nothing", async () => {
+    const P = await mkdtemp(join(tmpdir(), "metistry-rel-"));
+    const src = await checkout();
+    const { r, out } = runner(await tarInto(src));
+    // 0.14.4 is running (installed by pin); 0.15.0 is Latest and empty
+    await installRelease(r, { productDir: P, fetchFn: releaseServer({ versions: ["0.14.4"] }).fn, env: {}, target: TARGET });
+    const s = releaseServer({ versions: ["0.14.2", "0.14.4", "0.15.0"], empty: ["0.14.4", "0.15.0"] });
+    const res = await installRelease(r, { productDir: P, fetchFn: s.fn, env: {}, target: TARGET });
+    expect(res).toMatchObject({ version: "0.14.4", installed: false });
+    expect(await currentVersion(P)).toBe("0.14.4");
+    expect(existsSync(join(P, "releases", "0.14.2"))).toBe(false);
+    expect(out.join("\n")).toMatch(/already on the newest release with a pack: running 0.14.4, and the newest release carrying a linux-x64 pack is 0.14.2/);
+  });
+
+  it("is a no-op when the fallback release is the one already running", async () => {
+    const P = await mkdtemp(join(tmpdir(), "metistry-rel-"));
+    const src = await checkout();
+    const { r } = runner(await tarInto(src));
+    await installRelease(r, { productDir: P, fetchFn: releaseServer({ versions: ["0.14.4"] }).fn, env: {}, target: TARGET });
+    const res = await installRelease(r, { productDir: P, fetchFn: releaseServer({ versions: ["0.14.4", "0.15.0"], empty: ["0.15.0"] }).fn, env: {}, target: TARGET });
+    expect(res).toMatchObject({ version: "0.14.4", installed: false });
   });
 
   it("is a no-op when the latest release is already current — nothing is downloaded", async () => {

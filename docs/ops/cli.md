@@ -1317,16 +1317,18 @@ engine without the engine touching the Keychain. For one release the engine
 also reads the older `METISTRY_<NAME>` line T4-3 filled from the same secret,
 so `migrate-scope`'s rewrite never cuts off a running engine.
 
-It delivers the same way **every secret a sync-read connection lists** (T4-24)
-— a connection whose type's provider is product code a sync reads, like
-Linear's `linear_api_key` — so the console's sync can use it. Delivering it is
-not sending it: the sync never puts the value on a request itself; core's
-egress door fills `{{ secret.<name> }}` for a host on the secret's *Sent only
-to* list, when the owner granted it to `connection:<name>`, or refuses
-(`docs/ops/connections.md`, *A sync reading its connection*). An MCP
-connection's secrets are never delivered: the pool fills them in the process
-that dials. Run `sync --to env` again after adding such a connection, then
-restart the console.
+It delivers the same way **every secret a connection the console fills
+lists** (T4-24, T4-10; packages/connections `consoleSecretNames`): a
+sync-read connection's — Linear's `linear_api_key` — and, because the console
+holds the pool the `/mcp` proxy dials through, every `ok` MCP, API, feed or
+files connection's: a header's, a command's environment, an OAuth sign-in's
+refresh token and your own client id. Delivering it is not sending it:
+nothing puts the value on a request itself; core's egress door fills
+`{{ secret.<name> }}` for a host on the secret's *Sent only to* list, when the
+owner granted it to `connection:<name>`, or refuses
+(`docs/ops/connections.md`). A secret no such connection lists stays in the
+Keychain. Run `sync --to env` again after adding a connection or signing one
+in, then restart the console.
 
 And it delivers **`github_write`** (T2-13) when `secrets.yaml` names it — the
 owner's own fine-grained token with pull-request write, which the console's
@@ -1713,11 +1715,12 @@ leaving `{{ secret.x }}` for the egress fill.
 
 ## Connections: `metistry connections`
 
-M13 (plan §2.2, §2.6): servers Metistry reaches for you, one file each in
+M13 (plan §2.2, §2.6): what Metistry reaches for you, one file each in
 `.metistry/connections/<name>.yaml` (`docs/ops/connections.md` is the whole
-contract). This release dials **MCP servers**, by URL or by command; a
-calendar or tracker connection is read by its sync (`--no-discover`), and a
-mailbox is reached over IMAP (`--imap`, T4-15).
+contract). An **MCP server** is dialled by URL or by command; an **API**, a
+**feed** or **files** is reached through the tools Metistry generates for it
+(T4-10); a calendar or tracker connection is read by its sync
+(`--no-discover`), and a mailbox is reached over IMAP (`--imap`, T4-15).
 
 ```sh
 metistry connections add github --type mcp \
@@ -1731,6 +1734,15 @@ metistry connections add icloud --type calendar --provider icloud-calendar \
 metistry connections add gmail --type mail --provider gmail-mail \
     --imap imap.gmail.com:993 --username you@gmail.com \
     --secret gmail_app_password                            # IMAP: an app password, by name; nothing is dialled
+metistry connections add changelog --type feed --url https://example.com/feed.xml   # generated: list_items, get_item, search_items
+metistry connections add costs --type api --url https://api.example.com/v1 \
+    --auth bearer --secret costs_key                       # generated: get (Reads), request (Changes things)
+metistry connections add notes --type files --path ~/Documents/Notes \
+    --include '*.md' --skip 'drafts/**'                    # generated: list_files, read_file, search_files
+metistry connections add tracker --type mcp --url https://mcp.example.com/mcp --auth oauth \
+    --authorize-url https://auth.example.com/authorize --token-url https://auth.example.com/token \
+    --scope read --scope offline_access --client-id-secret tracker_client   # a custom OAuth client (C118)
+metistry connections authorize tracker [--no-browser] [--timeout 300]       # sign in: the browser, one callback on 127.0.0.1
 metistry connections list [--json]                        # every connection: status, reach, tools, used by
 metistry connections show github [--json]                 # one, in full
 metistry connections policy github                        # the tool table, by group
@@ -1738,13 +1750,14 @@ metistry connections policy github search_issues allow --group reads
 metistry connections policy github delete_issue never
 metistry connections policy github --offer on             # offer it to agents through Metistry
 metistry connections set github --env 'LOG_LEVEL=warn' [--unset-env K] [--header K=V] [--unset-header K] [--url …] [-- <command…>]
+metistry connections set calendar --client-id-secret my_client_id [--client-secret-secret my_client_secret]   # bring your own OAuth client
 metistry connections test github [--json]                 # dial it: does it answer, and does it still offer every listed tool?
 metistry connections remove github [--dry-run]
 ```
 
 Every verb takes `--instance <dir>` (default: the resolved instance); the
-writing ones take `--dry-run`. `--env` and `--header` repeat. The command and
-its arguments go after `--`.
+writing ones take `--dry-run`. `--env`, `--header`, `--include`, `--skip` and
+`--scope` repeat. The command and its arguments go after `--`.
 
 **Names, never values.** A secret is written as `{{ secret.<name> }}` and a
 variable as `{{ variable.<name> }}`; the file lists every name it uses under
@@ -1757,14 +1770,22 @@ before anything is written and without repeating the value:
 - a `{{ secret.x }}` in a **URL** or its query (a URL lands in logs), on a
   **command line** or in a working directory (every process on the Mac can read
   another's argv) — a secret goes in a header or in `env:`;
-- `--auth oauth` (it arrives with T4-10); this release sends none, a bearer
-  (`--auth bearer --secret <name>`), an API-key header (`--auth api_key
-  --auth-header <Header> --secret <name>`) or Basic sign-in with an app password
-  (`--auth basic --username <user> --secret <name>` — the username is written,
-  the password is the secret, filled at the egress door; a username with a colon
-  is refused). `--auth basic` is accepted only by a connection type that
+- a secret's **value** where its name belongs (`--client-id-secret`,
+  `--client-secret-secret` and `--token-secret` take the NAME of a secret).
+  The auth shortcuts: none, a bearer (`--auth bearer --secret <name>`), an
+  API-key header (`--auth api_key --auth-header <Header> --secret <name>`),
+  Basic sign-in with an app password (`--auth basic --username <user> --secret
+  <name>` — the username is written, the password is the secret, filled at the
+  egress door; a username with a colon is refused) and **OAuth** (`--auth
+  oauth`, T4-10). `--auth basic` is accepted only by a connection type that
   declares it (`auth: [basic]` — the CalDAV calendars, T4-13); any other type,
-  or a custom connection, is refused;
+  or a custom connection, is refused. `--auth oauth` on a known service takes
+  its client from the connection type (Metistry's shipped client id, or your
+  own with `--client-id-secret`); on a **custom** connection it needs
+  `--authorize-url`, `--token-url` (https), at least one `--scope` and your own
+  `--client-id-secret` — nothing supplies one (C118) — or it is refused naming
+  what is missing. The sign-in is kept in `--token-secret` (default
+  `<name>_oauth_token`);
 - a Google address for a CalDAV calendar — *Google needs sign-in with Google*
   (its CalDAV takes OAuth only), and a known service (`icloud-calendar`,
   `fastmail-calendar`) pointed anywhere but its own server;
@@ -1784,7 +1805,15 @@ egress door the console uses, calling no tool — and writes nothing if the
 server does not answer (`--no-discover` writes it without dialling). A
 mailbox (`--imap`) is not an MCP server, so `add` dials nothing for it and
 says to `test` it; the line it prints names the `host:port` its secret must
-list (`metistry secrets hosts <name> imap.gmail.com:993`). A secret
+list (`metistry secrets hosts <name> imap.gmail.com:993`). An API, feed or files connection is reached once the same way (a GET, the feed read,
+the folder listed) and written with **the tools Metistry generates for it,
+every one at Ask First** — the default for a proxied tool (CLAUDE.md); `policy`
+moves one to Allow. An OAuth connection is not dialled: it is written, and
+`authorize` signs it in. And when the provider is read by a sync (Linear, the
+calendars) and `scheduled.yaml` names no connection for that sync yet, `add`
+writes **the sync's first `connection:`** there (ruled 2026-09-27) — an entry
+that already names one is left as it is; the Scheduled pane changes a sync's
+interval and rules, never its connection. A secret
 the dial needs must already be granted to `connection:<name>` — `metistry
 secrets grant <secret> connection:<name> on` first, or add it with
 `--no-discover`, grant, then `test`. The owner's defaults (Q15, 2026-09-26): a tool the connection type declares keeps
@@ -1817,6 +1846,24 @@ drafts, inbox_messages }`, `degraded` when there is no Drafts mailbox, `failed`
 on a refused sign-in (*sign in with an app password*). `metistry doctor` runs the same check for
 every connection (never `failed` there: a connection is someone else's
 server, so its outage does not fail the install).
+
+**`authorize`** signs an OAuth connection in, and nothing else does (T4-10):
+it opens a listener on **127.0.0.1 only**, on a port the system picks, for
+**exactly one callback** (then it closes — or at `--timeout`, default 300 s);
+opens the browser at the provider with a PKCE challenge and a random `state`
+(`--no-browser` prints the address instead; it carries the client id, as
+OAuth does); refuses a callback whose `state` is not the one it sent, before
+any code is exchanged; exchanges the code with its verifier through the egress
+door; and keeps the **refresh token** in this instance's Keychain as the
+connection's token secret — never printed. The first sign-in also writes that
+secret's policy: sent only to the token endpoint's host and the service's,
+granted `on` to the connection alone (an existing line is left as it is). A
+bring-your-own client id must be on its secret's *Sent only to* list for the
+authorize and token hosts, and granted to the connection, before the browser
+opens. The broker redirect (`redirect: broker`) is refused: designed, not
+built (plan §5). Then `metistry secrets sync --to env` so the console can
+reach it. The assistant cannot start a flow: it has no shell (invariant 9),
+and nothing it reaches imports one (`docs/ops/connections.md`, *OAuth*).
 
 **`remove`** deletes the file. What referred to it — a sync in
 `scheduled.yaml`, a secret's grant to `connection:<name>` — is named and left

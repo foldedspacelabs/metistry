@@ -8,16 +8,18 @@ impossible. The file's schema is F-3's (`packages/core/src/connections.ts`,
 connections` (M13, `docs/ops/cli.md`); the read routes are `GET
 /api/connections(/:name)` (`docs/ops/client-api.md`).
 
-**This release dials MCP servers** — over Streamable HTTP or by starting a
-command (stdio). The other types have their own consumers and tickets: agent
-connections (targets, T4-11), tools generated for API, feed and files
-connections (T4-10), calendar and mail providers (T4-13…T4-15). A
-**tracker** or **calendar** connection is read by its provider's sync —
-Linear is the first tracker (T4-24, *Linear* below), an ICS feed the first
-calendar (T4-12, *ICS feeds* below). A **mail** connection is a mailbox over
-IMAP (T4-15, *Mail over IMAP* below) — a reach class of its own. Asking the
-pool to dial any of those as MCP is refused `not_built`, naming where it
-arrives.
+**The pool reaches MCP servers** — over Streamable HTTP or by starting a
+command (stdio) — **and API, feed and files connections through the tools
+Metistry generates for them** (T4-10, *Generated tools* below). Every HTTP
+auth shortcut dials: none, bearer, an API-key header, Basic (a type that
+declares it) and **OAuth** (T4-10, *OAuth* below). The other types have their
+own consumers and tickets: agent connections (targets, T4-11), calendar and
+mail providers (T4-13…T4-15). A **tracker** or **calendar** connection is read
+by its provider's sync — Linear is the first tracker (T4-24, *Linear* below),
+an ICS feed the first calendar (T4-12, *ICS feeds* below). A **mail** connection
+is a mailbox over IMAP (T4-15, *Mail over IMAP* below) — a reach class of its
+own. Asking the pool to
+dial one of those is refused `not_built`, naming what reaches it instead.
 
 ## The file, read
 
@@ -50,6 +52,15 @@ them later, one call at a time:
   that command only.
 - **A `{{ secret.x }}` in a path reach**, which has nowhere to send one.
 - **An `Authorization` header beside an auth shortcut** that writes one.
+- **An OAuth sign-in that names its client in the wrong place** (core's
+  schema, C118): a custom connection carries its client model on the auth
+  shortcut — `client: { authorize_url, token_url, scopes, pkce, redirect }`
+  (https endpoints, scopes declared, PKCE on a loopback) beside `token`,
+  `client_id` and an optional `client_secret`, each a `{{ secret.name }}` — and
+  is refused without one; a typed connection takes its client from its
+  connection type and keeps the references in its `oauth` field
+  (`config.<field>`), and is refused the custom shape. A client id or secret
+  written as text is refused: the owner's client is a secret.
 
 A YAML error is reported by its code and line only — never the parser's
 snippet of the source, which would echo whatever was pasted there.
@@ -78,12 +89,17 @@ The reach is summarised by class: `http` (URL, auth scheme, header and query
 names), `command` (command, arguments, environment names), `path`, and `imap`
 (host, port, `tls` or `plain`, `auth: basic` — never the username).
 
+An **OAuth** connection says more before any call: `absent` — *not signed in
+yet* — until its token secret has an item, and `failed` while a sign-in
+secret may not go where it must (the token secret to the token endpoint and
+the service, the owner's client id to the authorize and token endpoints).
+
 *Used by* is what reads it today: the syncs in `scheduled.yaml` that name it,
 and the sync its provider declares when that sync reads it (the rule *A sync
 reading its connection* below applies).
 Agents reach a connection through the lazy pair `connections_list` /
-`connections_call` (below); until a host mounts the pool behind them and
-agents carry grants, an empty list is the true answer (*Nobody yet*).
+`connections_call` (below), which the console mounts over its own pool
+(T4-10); who reaches which is the owner's offer switch and each agent's grant.
 
 ## The pooled client
 
@@ -95,8 +111,9 @@ environment depends on), with the server's `tools/list` cached until it sends
 `notifications/tools/list_changed`. The pool reads the catalog on every call,
 so an edit takes effect without a restart. It is a library: the process that
 holds it is the one whose calls it makes — `metistry connections add|test` and
-`metistry doctor` in the CLI today, and the console (a supervisor child) once
-it mounts the pool behind the lazy pair. A proxied call's `runs` row is
+`metistry doctor` in the CLI, and **the console**, which builds one pool over
+the instance's catalog and mounts it behind the lazy pair and the Approve path
+(T4-10, *The console's pool* below). A proxied call's `runs` row is
 written by mcp-brain itself (below), so a host does not also write one from
 the pool's `connection_call` event for it; `connection_check` is the CLI's.
 
@@ -114,11 +131,13 @@ each a `ConnectionRefused` with a code:
 | `tool_off` | the tool is at Never |
 | `needs_approval` | the tool is at Ask First and the caller holds no approval of this call — only the console's Approve of the Needs You request sets it (T4-9) |
 | `caller_credential` | the caller's own bearer is in the arguments |
+| `secret_reference` | the arguments carry a `{{ secret.… }}` reference (T4-10). The door fills a reference wherever it finds one, so a reference a caller writes — into an issue body, say — would be a value the caller chose where to send. Refused for every connection, before anything is dialled; the wire says `invalid_request` |
+| `sign_in` | an OAuth connection that cannot sign in: no client id (the type ships none and the owner brought none), the broker (designed, not built), or the provider refused the refresh (`invalid_grant` — sign in again with `metistry connections authorize <name>`). A sign-in with no item is the egress door's `missing_secret`, naming the token secret |
 | `unknown_connection`, `not_ready` | no such file; a file that is `failed` or `absent`, with its issues |
 | `variable` | a `{{ variable.x }}` that does not fill |
 | `secret` | a command's environment needs a secret that is not granted **on** to `connection:<name>` (Ask First cannot hold there: an environment is filled once, at spawn, so there is no call to approve), or has no item |
 | `runs_elsewhere` | `runs_on` names a place this process is not |
-| `not_built` | a type, provider or auth scheme this release does not dial (`basic` and `oauth` sign-in arrive with T4-10) |
+| `not_built` | a connection the pool does not dial: an agent connection (dispatch, T4-11), a calendar, mail or tracker (its provider's sync), a builtin provider's, or a command reach on a type with no generated tools |
 | `other_host` | an HTTP connection's request to another origin, or a redirect — a redirect is not followed |
 
 **The caller's bearer is never forwarded upstream.** The MCP authorization
@@ -248,20 +267,26 @@ same row on the timeline — connection and upstream tool named, never an
 argument or a secret — and `turn_progress` joins it into the strip of one
 turn's calls like any other tool row.
 
-**Not yet wired — said plainly.** This release ships the gate, the tools and
-the record, and the console takes a `connectionsProxy` it hands to both `/mcp`
-and the Approve path. Its `main.ts` does not yet build one (a `ConnectionPool`
-over the instance's catalog), and
-an agent's registry `grants` do not yet carry `connections` (the console's
-grant validator and a crew's manifest are where they will), so today both
-tools answer `not_available` on a live console and no agent is lent anything
-— the fail-closed end of every axis.
+**The console's pool** (T4-10; the owner's ruling of 2026-09-30, Q10 — open
+since #374). The console builds **one** `ConnectionPool` over the instance's
+catalog (`apps/console/src/connections-proxy.ts`) and hands it to `/mcp` and to
+the Approve path that runs an Ask First call. Its values are the ones
+`metistry secrets sync --to env` delivers as `METISTRY_SECRET_<NAME>` — every
+secret an `ok` MCP, API, feed or files connection lists, beside a sync's
+(`consoleSecretNames`) — filled at the egress door for each secret's listed
+hosts; the console never reads the Keychain. After adding a connection or
+signing one in, run `sync --to env` and restart the console. A console with no
+instance directory (the compose shape) builds no pool, and both tools answer
+`not_available` — the fail-closed end. An agent's registry `grants` carry
+`connections` (X-8), and a crew needs its manifest's `connections` group too.
 
 ## `check()`
 
 `checkConnection` is the connection's `check()` (core's frozen shape): dial it
 through the pool, `initialize`, `tools/list`, and compare what the server
-offers with what the file lists.
+offers with what the file lists. A generated type has no server to list
+tools: the check reaches the service once (a GET, the feed read, the folder
+listed) and compares the tools Metistry generates with the file.
 
 | Status | Means |
 | --- | --- |
@@ -637,6 +662,121 @@ certificate; `absent` with no app password in this instance's Keychain.
 only for the IMAP module (`openImap`) and never dials one as MCP; no agent
 reaches it. The sync that raises `message` requests is T4-17's.
 
+## Generated tools — an API, a feed, files (T4-10)
+
+A connection that is not an MCP server is reached through tools Metistry
+generates for it (C115: "non-MCP types get generated tools") — offered by the
+same lazy pair, fetched only by `connections_list { connection }` and never on
+the bridge's eager `tools/list`, and held to every rule above: the file's
+`tools:` is the allowlist, the owner's mode decides how each runs, every
+request leaves through the egress door, every call is a `connection_call`
+row. The set is closed (`packages/connections/src/generated.ts`):
+
+| Type · reach | Tool | Group | Does |
+| --- | --- | --- | --- |
+| api · http | `get` | Reads | GET a path under the connection's URL; answers the status, the content type and the body (JSON parsed) |
+| api · http | `request` | Changes things | POST, PUT, PATCH or DELETE under the URL; a JSON body as JSON, a string as text |
+| feed · http | `list_items` | Reads | RSS 2.0, RSS 1.0 or Atom: id, title, link, date, a short summary |
+| feed · http | `get_item` | Reads | one item by id, its full summary |
+| feed · http | `search_items` | Reads | items whose title or summary holds the words |
+| files · path | `list_files` | Reads | one folder level: path, file or folder, size |
+| files · path | `read_file` | Reads | a text file (a binary one is refused) |
+| files · path | `search_files` | Reads | matching lines, with their paths and line numbers |
+| files · http | `read_page` | Reads | the page at the URL, HTML reduced to text |
+
+`metistry connections add` writes them **every one at Ask First** — the
+default for a proxied tool (CLAUDE.md), taken whole for a service nobody has
+yet seen answer through Metistry; `policy <name> <tool> allow` moves one. A
+tool that changes something (`request`) is preview-then-confirm at Allow and
+waits for the owner's Approve at Ask First, like any proxied tool.
+
+What each makes impossible, before anything is sent: **leaving the
+connection** — an API path is relative and resolves under the URL (same
+origin, same path prefix; a scheme, `//host`, a leading `/`, `..` or an
+encoded climb is refused), a files path resolves under the folder (`..` and an
+absolute path are refused, and a symbolic link that leads outside is refused
+once resolved; a listing and a search do not follow links at all); **a
+caller's query parameter replacing one the file sets**; **a caller's header**
+(the headers are the file's and the auth shortcut's). Hidden files stay hidden
+and the include and skip patterns apply (`*` within a name, `**` across
+folders; a pattern with no `/` matches a name anywhere). Every read is capped
+— 256 KB of an answer or a page, 5 MB of a feed, 1 MB of a file, 5,000 files
+per search — and says so. A redirect is not followed (`other_host`).
+
+## OAuth — a public client, PKCE, a loopback redirect (T4-10)
+
+The plan's model (§2.6): an installed app cannot keep a secret, so a
+connection signs in as a **public client** — PKCE (RFC 7636) and a loopback
+redirect — with no Metistry server in the path. The client comes from:
+
+| Connection | Client id | Client secret |
+| --- | --- | --- |
+| a known service (`google-calendar`, T4-14) | the type's manifest ships one — or **your own**, `config.<field>.client_id: {{ secret.x }}` (`metistry connections set <name> --client-id-secret x`), which overrides it | none; your own, where the provider needs one (`--client-secret-secret`) |
+| a custom connection (C118) | **always your own** — nothing ships one — beside the client model the connection carries (`--authorize-url`, `--token-url`, `--scope`) | your own, where needed |
+
+**Signing in is the owner's hand alone**: `metistry connections authorize
+<name>` (`docs/ops/cli.md`), which the Mac app runs (M13). It listens on
+**127.0.0.1 only** — a rule, not a default: there is no host to pass — on a
+port the system picks, for **exactly one callback**: the first request to
+`/callback` is the answer, whatever it says, and the listener stops accepting
+before it replies (or at the timeout). The `state` it sent is compared in
+constant time before the code is looked at; another state is refused and
+nothing is exchanged. The provider's `error=` is kept by its code alone,
+never its text. The code goes to the token endpoint with the PKCE verifier,
+the loopback it was sent to and the client — **through the egress door**,
+pinned to the token endpoint's origin, no redirect followed, a
+bring-your-own client id or secret filled (form-encoded) only for a host on
+its *Sent only to* list. A bring-your-own client id also goes in the
+authorize address the browser opens (OAuth puts it there), so it must list
+the authorize endpoint's host too, and be granted to the connection, before
+the browser opens.
+
+**What is kept is the refresh token** — the connection's token secret, in this
+instance's Keychain (§2.6: "the refresh token is a credential"). A provider
+that issues none is refused rather than kept: the sign-in would stop working
+within the hour. The first sign-in writes the token secret's policy: sent
+only to the token endpoint's host and the service's, granted `on` to the
+connection alone. **An access token is never stored**: the process that dials
+(the console, or the CLI's `test`) mints one from the refresh token at the
+egress door when a request needs it, holds it in memory until a minute before
+it expires, and fills it as that same token secret — `Authorization: Bearer
+{{ secret.<token> }}` — so the token secret's *Sent only to* list and grant
+decide where the access token may go. Both are redacted wherever they come
+back.
+
+**The assistant cannot start a flow.** It has no shell (invariant 9); the
+proxy it reaches has three doors — list, tools, call — none of which signs
+in; and nothing it runs in or reaches (the console, the bridge, the engine,
+the reconciler, the supervisor) imports the flow — a test holds each of them
+to it (`packages/connections/test/oauth-reach.test.ts`). A call to an OAuth
+connection that is not signed in is refused before anything is sent.
+
+**The broker** (`redirect: broker`) is modelled in the schema and refused
+where a flow would start (`sign_in`): it is designed, not built (§5).
+
+## A sync's first connection (T4-10; ruled 2026-09-27)
+
+A sync reads the one `ok` connection its provider declares, or the one
+`scheduled.yaml` names (*A sync reading its connection* above). `metistry
+connections add` writes that name the first time: when the provider is
+product code a sync reads and `scheduled.yaml` names no connection for the
+sync yet, it adds `syncs.<sync>: { connection: <name> }` — edited as a
+document, so the owner's comments and every other entry survive — through the
+reconciler as the owner. An entry that already names a connection is left as
+it is. The Scheduled pane changes a sync's interval, pause and Needs You
+rules, and keeps refusing to set its connection.
+
+## The permissions table — *Through Metistry* (T4-10)
+
+A proxied connection is one more row of the permissions table
+(`docs/ops/client-api.md`, *permissions*; screen 7 §10): its Reads under
+Read, its Changes things and Starts an agent under Write, by the owner's mode
+(Never absent, Ask First ⏱), and every entry's provenance `proxy` — *reached
+through Metistry*, said once by the row's ⧉. Which rows an actor has is the
+proxy's own rule, asked through `may()`: the assistant every connection, a
+borrower only those offered and granted, a crew only with its `connections`
+group as well.
+
 ## Decisions made here
 
 - **New connection defaults (the owner's answer to Q15, 2026-09-26).** Reads
@@ -652,3 +792,17 @@ reaches it. The sync that raises `message` requests is T4-17's.
   the file keeps F-3's `on | ask | off`, and the CLI accepts both.
 - **A GET never dials.** The console lists files; whether a server answers is
   `test` and `doctor`, and — from T4-8b — the console's own calls.
+- **Generated tools start at Ask First, every group** (T4-10), not Q15's
+  Reads-Allow: they reach a service no one has yet seen answer through
+  Metistry, and CLAUDE.md's default for a proxied tool is Ask.
+- **The console fills the secrets of every connection it dials** (T4-10):
+  `secrets sync --to env` delivers an MCP, API, feed or files connection's
+  secrets, where until the pool was wired it delivered a sync's alone.
+- **A rotated refresh token lives in memory** (T4-10): the process that dials
+  cannot write the Keychain, so a provider that rotates refresh tokens hands
+  the new one to the running console only; after a restart the stored one is
+  used again, and a provider that revoked it answers `invalid_grant` — sign in
+  again.
+- **A caller-written secret reference is refused** (T4-10, found in passing):
+  the door fills `{{ secret.x }}` wherever it finds one, so the pool refuses a
+  call whose arguments carry one (`secret_reference`) for every connection.

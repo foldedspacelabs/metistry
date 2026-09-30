@@ -861,7 +861,8 @@ export async function connectionsAuthorize(name: string | undefined, spec: Autho
   }
   if (opts.dryRun) {
     opts.out(`[dry-run] would listen on 127.0.0.1 for one callback, open ${new URL(plan.authorizeUrl).host} in the browser, and keep the sign-in as ${plan.tokenSecret}`);
-    return { connection: name, stored: plan.tokenSecret, from: plan.from, client: plan.clientId.kind === "shipped" ? "shipped" : "yours", scopes: plan.scopes };
+    if (plan.notice !== undefined) opts.out(`before you sign in: ${plan.notice}`);
+    return { connection: name, stored: plan.tokenSecret, from: plan.from, client: plan.clientId.kind === "shipped" ? "shipped" : "yours", scopes: plan.scopes, ...(plan.notice !== undefined ? { notice: plan.notice } : {}) };
   }
   const timeoutMs = spec.timeoutS !== undefined ? Math.round(spec.timeoutS * 1000) : DEFAULT_OAUTH_FLOW_TIMEOUT_MS;
   opts.out(`signing in ${name} at ${new URL(plan.authorizeUrl).host} with ${plan.clientId.kind === "shipped" ? "Metistry's client for it" : "your own client"} (scopes: ${plan.scopes.join(" ")})`);
@@ -872,7 +873,11 @@ export async function connectionsAuthorize(name: string | undefined, spec: Autho
     ...(opts.dialFetch ? { fetch: opts.dialFetch } : {}),
     store: { set: (n, v) => store.set(n, v) },
     timeoutMs,
-    onListening: ({ redirectUri }) => opts.out(`listening for the answer on ${redirectUri} (127.0.0.1 only, one callback, ${Math.round(timeoutMs / 1000)} s)`),
+    onListening: ({ redirectUri, notice }) => {
+      opts.out(`listening for the answer on ${redirectUri} (127.0.0.1 only, one callback, ${Math.round(timeoutMs / 1000)} s)`);
+      // the connection type's words about its shipped client (Google: not verified yet) — before the browser opens, never after
+      if (notice !== undefined) opts.out(`before you sign in: ${notice}`);
+    },
     open: async (url) => {
       if (spec.browser === false || opts.platform !== "darwin") {
         opts.out(`open this address to sign in (it carries the client id, as OAuth does): ${url}`);

@@ -51,6 +51,7 @@ import {
   type RegistryUnit,
 } from "@foldedspacelabs/metistry-core";
 import { CALDAV_MODULE, caldavConnectionIssues } from "./caldav.js";
+import { GOOGLE_CALENDAR_MODULE, googleCalendarConnectionIssues } from "./google-calendar.js";
 import { IMAP_MODULE, imapConnectionIssues } from "./imap.js";
 
 /** `github.yaml` → `github`. A connection's file is named for it, like a registry unit's directory. */
@@ -153,13 +154,15 @@ export function connectionFileRules(c: ConnectionFile): string[] {
  * The rules a builtin provider adds for its own connections — refused at
  * the file, before anything is dialled or written (CalDAV: a Google address,
  * a known service pointed elsewhere, a sign-in that is not an app password;
- * `caldav.ts`).
+ * `caldav.ts`. Google Calendar: anywhere but the Calendar API, a sign-in
+ * that is not Google's; `google-calendar.ts`).
  */
 function builtinIssues(c: ConnectionFile, unit: RegistryUnit<ConnectionTypeManifest>): string[] {
   const impl = unit.manifest.implementation;
   if (impl.kind !== "builtin") return [];
   if (impl.module === CALDAV_MODULE) return caldavConnectionIssues(c, unit.name);
   if (impl.module === IMAP_MODULE) return imapConnectionIssues(c, unit.name);
+  if (impl.module === GOOGLE_CALENDAR_MODULE) return googleCalendarConnectionIssues(c, unit.name);
   return [];
 }
 

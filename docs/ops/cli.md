@@ -1755,6 +1755,10 @@ metistry connections add tracker --type mcp --url https://mcp.example.com/mcp --
     --authorize-url https://auth.example.com/authorize --token-url https://auth.example.com/token \
     --scope read --scope offline_access --client-id-secret tracker_client   # a custom OAuth client (C118)
 metistry connections authorize tracker [--no-browser] [--timeout 300]       # sign in: the browser, one callback on 127.0.0.1
+metistry connections add google --type calendar --provider google-calendar \
+    --url https://www.googleapis.com/calendar/v3/ --auth oauth \
+    [--client-id-secret google_client_id]                  # Google Calendar (T4-14): Metistry's client, or your own
+metistry connections authorize google                     # sign in with Google
 metistry connections list [--json]                        # every connection: status, reach, tools, used by
 metistry connections show github [--json]                 # one, in full
 metistry connections policy github                        # the tool table, by group
@@ -1801,6 +1805,9 @@ before anything is written and without repeating the value:
 - a Google address for a CalDAV calendar — *Google needs sign-in with Google*
   (its CalDAV takes OAuth only), and a known service (`icloud-calendar`,
   `fastmail-calendar`) pointed anywhere but its own server;
+- a Google Calendar connection (`google-calendar`, T4-14) anywhere but
+  `https://www.googleapis.com/calendar/v3/`, signed in any way but `--auth
+  oauth`, or with headers of its own;
 - for a mailbox (`--imap host[:port]`, T4-15 — port 993 and TLS unless given):
   no `--username` or `--secret` (the secret holds the app password); an
   `--auth` other than `basic`; a scheme or path in `--imap`; a mail submission
@@ -1872,8 +1879,11 @@ secret's policy: sent only to the token endpoint's host and the service's,
 granted `on` to the connection alone (an existing line is left as it is). A
 bring-your-own client id must be on its secret's *Sent only to* list for the
 authorize and token hosts, and granted to the connection, before the browser
-opens. The broker redirect (`redirect: broker`) is refused: designed, not
-built (plan §5). Then `metistry secrets sync --to env` so the console can
+opens. When the connection type ships a client and says something about
+it — Google Calendar's *Google hasn't verified this app* (T4-14) — that line
+is printed **before the browser opens** (`before you sign in: …`), and only
+for the shipped client: your own client is yours to know. The broker
+redirect (`redirect: broker`) is refused: designed, not built (plan §5). Then `metistry secrets sync --to env` so the console can
 reach it. The assistant cannot start a flow: it has no shell (invariant 9),
 and nothing it reaches imports one (`docs/ops/connections.md`, *OAuth*).
 

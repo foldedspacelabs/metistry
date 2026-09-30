@@ -309,7 +309,10 @@ else's server.
 A `calendar`, `mail` or `tracker` connection's provider is product code — a
 connection type whose `implementation` is `builtin` — and a sync (the
 collector the type names in `sync:`) reads it on an interval. What the sync
-opens is `openSyncHttp` (`packages/connections`, `sync.ts`):
+opens is `openSyncHttp` (`packages/connections`, `sync.ts`) — or, for a
+mailbox, `openSyncImap` (T4-17): the same choice of connection and the same
+delivered secret, handed to the IMAP provider's own host guard (*Mail over
+IMAP*, below) instead of an HTTP door:
 
 - **Which connection.** `scheduled.yaml`'s `syncs.<sync>.connection` when the
   owner names one; otherwise the one `ok` connection whose provider declares
@@ -661,6 +664,15 @@ says who the owner is: the attendee whose address is one of the owner's is
 reads. `sync_state` records the window, the calendars and resources read, and
 whether the server schedules. Never the invite body.
 
+**Invitation requests** (T4-17; `syncs.caldav-calendar.raise.invitation`, on by
+default — the eventkit sync raises them too): a meeting still to come whose
+owner's answer is needs-action and which someone else organises raises one
+`invitation` request per meeting (its UID), cleared when the owner answers —
+here or in their calendar — or the meeting is cancelled or passes
+(`collectors/invitations.ts`; `docs/ops/client-api.md`, *Invitation and
+message requests*). The Mac's own calendar cannot answer one; a CalDAV
+connection holding the same meeting answers for it.
+
 **Reply** (`rsvp`; `previewReply`, then `respondToInvitation`): RFC 6638
 §3.2.2 — an attendee changes `PARTSTAT` in its own copy and the server "MUST
 deliver an iTIP REPLY". **Only the owner's own attendee line changes** — in the
@@ -686,8 +698,11 @@ as whom, to whom — with the event's ETag; the confirm names that ETag, is
 re-derived from the server's copy (never a body the caller sends) and written
 with `If-Match`, so an event that changed in between is refused (`changed`),
 never overwritten. The confirm token and who may press it belong to the
-console door (T4-17 for Respond; `write_own`'s door is not built yet). No
-agent reaches any of it: a calendar connection is not dialled as MCP.
+console door — **Respond** is `POST /api/calendar/invitations/:id/respond`
+(T4-17: the connection is found among every calendar holding the meeting, by
+its provider's `rsvp`; refused, *Open in Calendar*, where none can);
+`write_own`'s door is not built yet. No agent reaches any of it: a calendar
+connection is not dialled as MCP.
 
 ## Google Calendar — signed in with Google (T4-14)
 
@@ -809,6 +824,7 @@ metistry secrets grant gmail_app_password connection:gmail on
 metistry connections add gmail --type mail --provider gmail-mail \
   --imap imap.gmail.com:993 --username you@gmail.com --secret gmail_app_password
 metistry connections test gmail                           # signs in, lists folders, finds [Gmail]/Drafts
+metistry secrets sync --to env                            # the mail sync reads it: then restart the console
 ```
 
 | Type | Server | Username | Password |
@@ -884,7 +900,31 @@ when there is no Drafts mailbox (reading works, a draft would be refused);
 certificate; `absent` with no app password in this instance's Keychain.
 `meta` is `{ mailboxes, drafts, inbox_messages }`. The pool opens a mailbox
 only for the IMAP module (`openImap`) and never dials one as MCP; no agent
-reaches it. The sync that raises `message` requests is T4-17's.
+reaches it.
+
+**The sync** (`collectors/mail-messages/`, every 15 minutes, T4-17): both IMAP
+types declare `sync: mail-messages`, so `metistry secrets sync --to env`
+delivers the app password to the console and the sync opens the mailbox
+through `openSyncImap` — the host guard above, nothing dialled until a
+session opens. Each pass reads the headers of the last week of `INBOX`, and
+of the mailbox marked `\Sent` (only its `In-Reply-To` and `References` — which
+messages the owner answered), and raises a **`message` request** for each
+message that looks like it waits on the owner's reply — **inferred from the
+headers alone**, by rules, and saying so (`payload.inferred`, the reason in
+words): the owner's address (the sign-in name) in To — R7, the source names
+the owner; from a person, not the owner, a list, an automatic sender or a
+no-reply address; unanswered; and a reply in a conversation or written to the
+owner alone. Once per message (by Message-ID); cleared when the owner
+replies, it leaves the inbox, or it is a week old. A sign-in name that is not
+an address raises nothing (`sync_state.owner: unknown`). No body is fetched,
+so none can reach a request, the assistant or an agent; reading a body to
+infer from waits on §4.12's PoC-13 re-run bar. `syncs.mail-messages.raise.message`
+turns the raise off.
+
+**Draft Reply** is `POST /api/mail/messages/:id/draft` (T4-17): the message's
+headers read again by its reference (`readMessage`), the reply addressed from
+them — Reply-To, else From; never an address the caller sends — previewed,
+then APPENDed to Drafts only as previewed. Nothing sends.
 
 ## Generated tools — an API, a feed, files (T4-10)
 

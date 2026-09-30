@@ -669,6 +669,68 @@ never less than 4 GB — and labels the remainder an estimate, with "Not a
 measurement" in the same sentence. A model larger than it still loads; it is
 just slow, and that is the person's call.
 
+## The Connections pane
+
+Settings ▸ Connections (T6-13a, screen-09-resources.md §10.1–§10.4, plan
+§2.6). The model is `sources/kit/connections-model.swift`, the view
+`connections-view.swift`; it replaced the interim pane that listed doctor's
+bridge rows (those stay in `metistry doctor` and Services' problems).
+
+**Three served routes, and nothing else.** The list is `GET /api/connections`,
+one connection `GET /api/connections/:name` (its file and its provider's unit
+join the row), and *Sent only to*, the grants and presence come from `GET
+/api/secrets`. Every one carries names — header, query-parameter,
+environment and secret names — and never a value, so the pane has no field a
+value could live in. Nothing is dialled to draw it; a connection's
+`connection.health` event and a write to `.metistry/connections/`,
+`secrets.yaml` or `scheduled.yaml` (`config.changed`) re-read it while it has
+been opened. What the routes do not serve is not drawn: the last check, and
+the agents a connection is lent to (`used_by` serves syncs; *Nobody yet* is
+then the true answer).
+
+**The list** (§10.1): status · the name with its type's glyph · Type (*MCP ·
+By command*, or the provider for a known service) · Used By, with *Key
+expired* first in the failed ink when a key it names has passed its `expires`
+· a shield when it is offered to agents · a chevron. A row is one button that
+speaks all of it and opens the connection; *All Connections* goes back. The
+empty, failed (*Try Again*, the console's reason verbatim) and not-configured
+(503: no instance directory) states are the shared `StatePanel`.
+
+**One connection** (§10.3): how Metistry reaches it (URL, authentication,
+header and parameter names, timeout — or command, folder, environment names,
+runs on — or path), each secret as `{{ secret.name }}` with where it may be
+sent, each variable as `{{ variable.name }}`; *What it sends*; the offer
+switch; the tools under *Reads · Changes things · Starts an agent* (the CLI's
+`TOOL_GROUP_LABEL`, compared by a test), each with three buttons *Allow · Ask
+First · Never* that say the tool they set; Used By; and Test, with **Replace
+Key** when a key it names has expired or has no Keychain item (components-03
+§2) — which opens Secrets, because a value is typed there and nowhere else.
+
+**What it sends blocks, and never over-promises.** For an HTTP connection the
+destination is worked out exactly as core's `egressDestination` does — the
+host lowercased, and `host:port` unless the port is 443 (so plain http is
+`:80`) — and each secret is judged in the door's order: not on its *Sent only
+to* list (**blocked**, with *Allow <host>…*), plain http off this Mac
+(blocked), not granted to `connection:<name>` (blocked, with *Grant…*), no
+Keychain item (blocked); otherwise *Sent to <host>*, or *after you approve
+each call* for Ask First. A command's environment is *given to this command
+only*, and needs Allow (it is filled once, at start). A secret list that did
+not read, or a host that is a `{{ variable }}`, shows nothing as sent. One
+blocked secret blocks the preview. The preview is a drawing of the door's
+rule, not the rule: the door refuses on its own (`EgressRefused`), whatever
+this pane shows.
+
+**Every change is a §2.2 verb, confirmed.** A tool's mode is `metistry
+connections policy <name> <tool> allow|ask|never`, the offer switch `policy
+<name> --offer on|off`, Test `connections test <name>` (it dials, so its
+confirmation says what it starts), *Allow <host>* `secrets hosts <name>
+<every host on the list> <host>` (the verb replaces the list) and *Grant*
+`secrets grant <name> connection:<c> on` — each a `ManagementCommand` shown in
+`SettingsConfirmation` with its exact command, its answer the CLI's own last
+line in the pane's banner, and the pane re-read after it. No console route
+writes a connection (invariant 10). Adding and configuring one is T6-13b's
+editor; until then the empty state names `metistry connections add`.
+
 ## Settings: persisted vs read-through
 
 **The rule (owner direction 2026-09-09):** every setting is a front for a file
@@ -755,7 +817,10 @@ core's (`LID_CLOSED_*` in `packages/core/src/power.ts`), mirrored in
 | Compute | RAM headroom | `ProcessInfo.physicalMemory` minus a documented reserve, **labelled an estimate** — nothing here reads free memory |
 | Account | console sign-in: who this Mac is, with `via`, the remedy, and the argument array | `metistry console whoami --json` — the app never resolves, holds or displays the token ("Signing in" above) |
 | Account | instance repo status, HEAD, queue depth | `doctor --json` → the `reconciler` row's `meta`. The reconciler is the sole committer, so the app runs no git of its own |
-| Connections | bridges | `doctor --json` → the `bridge` rows, until T6-13a's pane |
+| Connections | the list: status, name and type, Used By (*Nobody yet*), *Key expired*, the offer shield | `GET /api/connections` and `GET /api/secrets` — names, never a value ("The Connections pane" above) |
+| Connections | one connection: how it is reached, its secrets with *Sent only to*, *What it sends*, the tools by group, Used By | `GET /api/connections/:name` and `GET /api/secrets`; *What it sends* is worked out from them as core's egress door would, and nothing is dialled |
+| Connections | a tool's mode, the offer switch, Test | `metistry connections policy <name> <tool> allow\|ask\|never`, `policy <name> --offer on\|off`, `connections test <name>` (M13), each **confirmed with the exact command** |
+| Connections | *Allow <host>*, *Grant* on a secret's row; Replace Key | `metistry secrets hosts <name> <hosts…>` / `secrets grant <name> connection:<c> on` (M7), confirmed; Replace Key opens Secrets |
 | Secrets | names, scope, and the account each was found under | `metistry secrets list --json` — names only; the verb has no code path that can print a value, and neither has the pane |
 | Variables, Live Capture, Sessions | what the pane will hold, and the verb that does it today | not built yet (T6-14, T6-15): a sentence, never a dead end (C138) |
 | Updates | this app: version, channel, automatic checks, Check Now | Sparkle, which owns those preferences itself |

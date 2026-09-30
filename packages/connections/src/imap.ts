@@ -130,7 +130,7 @@ const MAX_MAILBOXES = 2_000; // limit: fixed — past any one person's folder li
 /** How many messages one `readHeaders` returns at most — the newest, when more match. */
 export const IMAP_MAX_MESSAGES = 500; // limit: fixed — a window of headers, not a mailbox export
 const DEFAULT_MESSAGES = 50;
-const MAX_SUBJECT = 998; // RFC 5322 §2.1.1: a line is at most 998 characters
+const MAX_SUBJECT = 998; // limit: fixed — RFC 5322 §2.1.1: a line is at most 998 characters
 const MAX_NAME = 256; // limit: fixed — a display name shown in a list
 const MAX_ADDRESSES = 100; // limit: fixed — recipients read from one header
 const MAX_REFERENCES = 100; // limit: fixed — a References chain kept for threading

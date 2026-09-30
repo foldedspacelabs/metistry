@@ -115,6 +115,11 @@ services:
       METISTRY_ASSISTANT_TOKEN: ${METISTRY_ASSISTANT_TOKEN:-}
       METISTRY_ASSISTANT_PROJECTS: ${METISTRY_ASSISTANT_PROJECTS:-}
       METISTRY_ASSISTANT_AREAS: ${METISTRY_ASSISTANT_AREAS:-}
+      # secrets.yaml (X-7, owner's rulings 2026-09-30): a provider key's
+      # grant to `provider:<name>` is checked before every model call
+      # (docs/ops/compute.md), from the policy mirror mounted read-only
+      # below. Empty when nothing is mounted, which the door refuses.
+      METISTRY_SECRETS_FILE: ${METISTRY_SECRETS_POLICY_DIR:+/run/metistry/policy/secrets.yaml}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
@@ -122,6 +127,20 @@ services:
       - "127.0.0.1:${METISTRY_CONSOLE_PORT:-8080}:8080"
     volumes:
       - inbox:/data/inbox   # fallback only (see METISTRY_INBOX_DIR above)
+      # the ONE instance path this container sees, read-only: the policy
+      # mirror, `.metistry/state/policy/` — a directory holding nothing but a
+      # copy of secrets.yaml (names and policy, NEVER a value), kept current
+      # by the reconciler. A DIRECTORY, because a single-file bind pins an
+      # inode every writer replaces by rename and a revoke would never
+      # arrive; never `.metistry/` itself, which holds state/.env (D5).
+      # `metistry up` sets METISTRY_SECRETS_POLICY_DIR and creates it; unset,
+      # the product's own seed/ is mounted in its place and the variable
+      # above is empty. Never a created path.
+      - type: bind
+        source: ${METISTRY_SECRETS_POLICY_DIR:-./seed}
+        target: /run/metistry/policy
+        read_only: true
+        bind: { create_host_path: false }
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:8080/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))\""]
       interval: 15s
@@ -162,8 +181,17 @@ services:
       # overlay default resolves its instance half against this, never
       # against the container's working directory. Unset = the seed alone.
       METISTRY_INSTANCE_DIR: ${METISTRY_INSTANCE_DIR:-}
+      # the policy mirror, read-only, as for the console above (X-7): the
+      # engine checks a provider key's grant on every call. Empty = nothing
+      # mounted = every `{{ secret.x }}` provider key refused, naming the mount.
+      METISTRY_SECRETS_FILE: ${METISTRY_SECRETS_POLICY_DIR:+/run/metistry/policy/secrets.yaml}
     volumes:
       - assistant-home:/home/node   # writable HOME; sessions themselves live in Postgres
+      - type: bind   # the policy mirror directory — see the console's comment
+        source: ${METISTRY_SECRETS_POLICY_DIR:-./seed}
+        target: /run/metistry/policy
+        read_only: true
+        bind: { create_host_path: false }
 
 volumes:
   db-data:

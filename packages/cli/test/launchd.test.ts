@@ -13,7 +13,7 @@ const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
 /** The supervisor plist's own two placeholders — `up` computes them (packages/cli/src/supervisor.ts). */
 const SUPERVISOR_EXTRA = { SUPERVISOR_BIN: "/i/state/bin/Metistry", SUPERVISOR_CONFIG: "/i/state/supervisor.json" };
 /** The assistant job's four config-file sandbox parameters (sandbox.ts `engineConfigParams`). */
-const CONFIG_EXTRA = { CONFIG_IDENTITY: "/i/.metistry/identity.yaml", CONFIG_ASSISTANT_PROMPT: "/i/.metistry/assistant-prompt.md", CONFIG_RULES: "/i/.metistry/rules.yaml", CONFIG_COMPUTE: "/i/.metistry/compute.yaml" };
+const CONFIG_EXTRA = { CONFIG_IDENTITY: "/i/.metistry/identity.yaml", CONFIG_ASSISTANT_PROMPT: "/i/.metistry/assistant-prompt.md", CONFIG_RULES: "/i/.metistry/rules.yaml", CONFIG_COMPUTE: "/i/.metistry/compute.yaml", CONFIG_SECRETS: "/i/.metistry/secrets.yaml" };
 /** The reconciler job's own profile parameters (sandbox.ts `reconcilerSandboxParams`) plus the egress door both confined children name. */
 const RECONCILER_EXTRA = {
   SANDBOX_PROFILE: "/srv/metistry/ops/sandbox/reconciler.sb",

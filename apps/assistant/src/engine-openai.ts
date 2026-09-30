@@ -50,12 +50,18 @@
 //   never raise it.
 //
 // The outbound surface is one URL: `<base_url>/chat/completions` on the
-// provider this turn was assigned. There is no other host this file can
-// reach, which is the in-engine allowlist (R1) as a property of the code
-// rather than an environment variable a subprocess may ignore.
+// provider this turn was assigned — and every call goes through core's
+// `computeFetch` (ruling 2 of the W2 checkpoint, X-7), which refuses any host
+// but that provider's and attaches the credential itself. A `{{ secret.x }}`
+// key is attached only when `secrets.yaml` grants it to `provider:<name>`;
+// the engine reads that file (granted to the sandbox by name, as
+// CONFIG_SECRETS) on every call, so a revoked grant stops the next request.
 
 import {
+  computeFetch,
   costOf,
+  EgressRefused,
+  secretsPolicyFromEnv as coreSecretsPolicyFromEnv,
   redactedSecret,
   credentialEnvNames,
   DEFAULT_MAX_OUTPUT_TOKENS,
@@ -68,6 +74,7 @@ import {
   type CallUsage,
   type Provider,
   type ResolvedAssignment,
+  type SecretsPolicyRead,
 } from "@foldedspacelabs/metistry-core";
 import type { z } from "zod";
 import type { ChatMessage, SessionStore } from "./sessions.js";
@@ -115,10 +122,21 @@ export interface ChatResponse {
   finish_reason?: string;
 }
 
+/** Where the engine reads `secrets.yaml` for a provider key's grant. */
+export type SecretsPolicySource = () => SecretsPolicyRead | Promise<SecretsPolicyRead>;
+
 export interface ChatClientConfig {
   assignment: ResolvedAssignment;
-  /** The bearer, already read from the environment. Absent for a provider with no `auth:` (a local server). */
-  apiKey?: string | undefined;
+  /**
+   * Where the provider's credential was delivered (default: this process's
+   * environment). The client never puts it on a request itself: the door
+   * (`computeFetch`) does, only for the provider's own host and, for a
+   * `{{ secret.x }}` key, only on the owner's grant.
+   */
+  env?: NodeJS.ProcessEnv | undefined;
+  /** `secrets.yaml`, read per call. Default: this instance's file under `METISTRY_INSTANCE_DIR` (`secretsPolicyFromEnv`). */
+  secretsPolicy?: SecretsPolicySource | undefined;
+  /** the network underneath the door (tests) */
   fetchFn?: typeof fetch | undefined;
   sleep?: ((ms: number) => Promise<void>) | undefined;
   attempts?: number | undefined;
@@ -195,6 +213,17 @@ export function redactProviderText(text: string, apiKey: string | undefined, nam
   return whole.replace(/[A-Za-z0-9_\-]{8,}/g, (run) => (apiKey.includes(run) ? redactedSecret(safeName) : run));
 }
 
+/**
+ * This instance's `secrets.yaml`, read afresh at each call — core's
+ * `secretsPolicyFromEnv`: the compose mount (`METISTRY_SECRETS_FILE`), else
+ * the file under `METISTRY_INSTANCE_DIR` (launchd; the sandbox grants it by
+ * name as CONFIG_SECRETS). No file, no grant — so a `{{ secret.x }}` key is
+ * refused, never sent on a guess, and the refusal names why.
+ */
+export function secretsPolicyFromEnv(env: NodeJS.ProcessEnv): SecretsPolicySource {
+  return coreSecretsPolicyFromEnv(env);
+}
+
 /** `<base_url>/chat/completions`, with the trailing slash question settled once. */
 export function completionsUrl(baseUrl: string): string {
   return `${baseUrl.replace(/\/+$/, "")}/chat/completions`;
@@ -210,12 +239,17 @@ export interface ChatClient {
 export function makeChatClient(cfg: ChatClientConfig): ChatClient {
   const { assignment } = cfg;
   const provider = assignment.config;
-  const fetchFn = cfg.fetchFn ?? fetch;
+  const env = cfg.env ?? process.env;
+  const cred = providerCredential(provider);
+  // the value, for redacting a provider's echo of a FRAGMENT of it — never
+  // for sending: the door below is the only thing that attaches it
+  const apiKey = cred ? credentialFromEnv(cred, env) : undefined;
+  const fetchFn = computeFetch({ providerName: assignment.provider, provider, env, policy: cfg.secretsPolicy ?? secretsPolicyFromEnv(env) }, cfg.fetchFn);
   const sleep = cfg.sleep ?? sleepReal;
   const attempts = cfg.attempts ?? DEFAULT_ATTEMPTS;
   const backoff = cfg.backoffMs ?? DEFAULT_BACKOFF_MS;
   const url = completionsUrl(provider.base_url);
-  const credName = (providerCredential(provider)?.name ?? "provider_credential").toLowerCase().replace(/[^a-z0-9_]/g, "_");
+  const credName = (cred?.name ?? "provider_credential").toLowerCase().replace(/[^a-z0-9_]/g, "_");
 
   const body = (messages: readonly ChatMessage[], opts: ChatOptions): Record<string, unknown> => {
     const out: Record<string, unknown> = {};
@@ -270,10 +304,8 @@ export function makeChatClient(cfg: ChatClientConfig): ChatClient {
     async chat(messages, opts = {}) {
       const init: RequestInit = {
         method: "POST",
-        headers: {
-          "content-type": "application/json",
-          ...(cfg.apiKey ? { authorization: `Bearer ${cfg.apiKey}` } : {}),
-        },
+        // no authorization header: `computeFetch` attaches the credential
+        headers: { "content-type": "application/json" },
         body: JSON.stringify(body(messages, opts)),
         ...(cfg.timeoutMs ? { signal: AbortSignal.timeout(cfg.timeoutMs) } : {}),
       };
@@ -283,6 +315,9 @@ export function makeChatClient(cfg: ChatClientConfig): ChatClient {
         try {
           res = await fetchFn(url, init);
         } catch (err) {
+          // A refusal at the door is a decision, not a hiccup: nothing was
+          // sent, and asking again would be refused again.
+          if (err instanceof EgressRefused) throw err;
           // A refused connection is the local-server-not-running case: retry
           // on the same schedule as a 5xx, then give up with the real reason.
           lastErr = err;
@@ -295,7 +330,7 @@ export function makeChatClient(cfg: ChatClientConfig): ChatClient {
         const retryable = res.status === 429 || res.status >= 500;
         // redacted HERE, before the error exists: everything downstream (the
         // runs row, a Needs You report, the thread) reads `body`/`message`
-        lastErr = new EngineHttpError(res.status, redactProviderText(text, cfg.apiKey, credName), url);
+        lastErr = new EngineHttpError(res.status, redactProviderText(text, apiKey, credName), url);
         if (!retryable || attempt === attempts - 1) throw lastErr;
         await sleep(retryAfterMs(res.headers, backoff * 2 ** attempt));
       }
@@ -420,6 +455,8 @@ export interface OpenAiEngineConfig {
    */
   archive?: SessionArchive | undefined;
   env?: NodeJS.ProcessEnv | undefined;
+  /** `secrets.yaml` for a provider key's grant, read per call. Default: `secretsPolicyFromEnv(env)`. */
+  secretsPolicy?: SecretsPolicySource | undefined;
   fetchFn?: typeof fetch | undefined;
   sleep?: ((ms: number) => Promise<void>) | undefined;
   attempts?: number | undefined;
@@ -454,9 +491,12 @@ export function makeOpenAiEngine(cfg: OpenAiEngineConfig): Engine {
   return async (prompt, spec) => {
     const assignment = spec.assignment;
     if (!assignment) throw new Error("the openai-compatible engine needs a resolved compute.yaml assignment (engine.ts picks the engine from provider.kind)");
+    // refuses by name, before anything is built, when the key never reached this process
+    credentialFor(assignment.config, assignment.provider, cfg.env ?? process.env);
     const client = makeChatClient({
       assignment,
-      apiKey: credentialFor(assignment.config, assignment.provider, cfg.env ?? process.env),
+      env: cfg.env ?? process.env,
+      secretsPolicy: cfg.secretsPolicy,
       fetchFn: cfg.fetchFn,
       sleep: cfg.sleep,
       attempts: cfg.attempts,
@@ -640,16 +680,19 @@ export function makeOpenAiEngine(cfg: OpenAiEngineConfig): Engine {
       }
       if (allowed) {
         shadow = await runShadow({
-          makeClient: () =>
-            makeChatClient({
+          makeClient: () => {
+            credentialFor(candidate.config, candidate.provider, cfg.env ?? process.env);
+            return makeChatClient({
               assignment: shadowAssignment,
-              apiKey: credentialFor(candidate.config, candidate.provider, cfg.env ?? process.env),
+              env: cfg.env ?? process.env,
+              secretsPolicy: cfg.secretsPolicy,
               fetchFn: cfg.fetchFn,
               sleep: cfg.sleep,
               attempts: cfg.attempts,
               backoffMs: cfg.backoffMs,
               timeoutMs: cfg.timeoutMs,
-            }),
+            });
+          },
           candidate,
           assignment,
           messages: [...system, ...opening],

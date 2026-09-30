@@ -32,6 +32,7 @@ import {
   type ComplexityFeature,
   type Effort,
   type IntentFeature,
+  type ModelAccess,
   type ModelFeatureOutcome,
   type ModelFeatures,
   type RoutePolicyConfig,
@@ -520,6 +521,8 @@ export interface RoutePolicyDeps {
   compute?: (() => Compute) | undefined;
   /** where a scorer provider's `auth.secret` resolves */
   secretEnv?: NodeJS.ProcessEnv | undefined;
+  /** `secrets.yaml`, read per call: where a scorer provider key's grant to `provider:<name>` is checked (X-7) */
+  secretsPolicy?: ModelAccess["secretsPolicy"] | undefined;
   fetchFn?: typeof fetch | undefined;
   /** the named query is loaded now — a `fast_path:<query>` choice whose query is not is `out_of_bounds` (`queries`) */
   hasQuery: (name: string) => boolean;
@@ -543,6 +546,7 @@ export function makeRoutePolicy(deps: RoutePolicyDeps): RoutePolicy | undefined 
   const access = {
     ...(deps.compute ? { compute: deps.compute } : {}),
     ...(deps.secretEnv ? { secretEnv: deps.secretEnv } : {}),
+    ...(deps.secretsPolicy ? { secretsPolicy: deps.secretsPolicy } : {}),
     ...(deps.fetchFn ? { fetchFn: deps.fetchFn } : {}),
   };
   const timeoutMs = scorerTimeoutMs(policy.timeout_ms);

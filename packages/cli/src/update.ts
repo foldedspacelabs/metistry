@@ -38,7 +38,7 @@ import { commitPending, ensureOwnerBridgeToken, OWNER_BRIDGE_TOKEN, OWNER_BRIDGE
 import { listMigrationFiles, MIGRATION_LOCK_KEY, openMigrationSession, runMigrations, type MigrateResult, type MigrationSession } from "./migrate.js";
 import { CURRENT_LINK, currentVersion, installRelease, previousVersion, releaseDir, RELEASE_WALK_LIMIT, RELEASES_DIRNAME, rollbackRelease, releaseTarget, runtimePackCommit, type InstallReleaseResult } from "./release.js";
 import { installRuntimeDeps, runtimeDepsEnabled, RUNTIME_DIRNAME, type InstallRuntimeDepsResult } from "./runtime-deps.js";
-import { MIGRATE_SCOPE_COMMAND, migrateScope, type MigrateScopeResult } from "./secrets.js";
+import { MIGRATE_SCOPE_COMMAND, grantProviderSecrets, migrateScope, type MigrateScopeResult, type ProviderGrantsResult } from "./secrets.js";
 import { StepFailed, StepRunner } from "./steps.js";
 import { type Ui } from "./ui.js";
 import { acknowledgeContinuation, reexecIntoRelease, releaseCliMain, type ContinueFrom, type ReexecOutcome } from "./update-reexec.js";
@@ -604,7 +604,7 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
       deferred.push({ what: OWNER_BRIDGE_TOKEN, why: `not minted — ${err.reason}`, fix: [...OWNER_BRIDGE_TOKEN_FIX] });
       r.note(`${r.ui.paint("failed", `${r.ui.icon("fail")} ${err.message}`)} — the restart goes on without it`);
     }
-    if (usesCompose(deployment)) await composeUp(r, runDir, source, source === "release" ? releaseVersion : undefined, envFile);
+    if (usesCompose(deployment)) await composeUp(r, runDir, source, source === "release" ? releaseVersion : undefined, envFile, instanceDir.instanceDir);
     else r.note("shape launchd: no containers, so docker is never called — console, assistant and db are kickstarted below with the other host jobs");
     // The launchd shape's plists and supervisor.json, re-rendered BEFORE
     // anything is restarted onto them — by `up`'s own renderer, run here
@@ -765,6 +765,10 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
     // values), and every way it can stop short ends in the one command.
     r.section("secrets");
     sharedScope = await updateSharedScope(r, { instanceDir: instanceDir.instanceDir, envFile, exampleFile: join(runDir, ".env.example"), env, platform, uid, fetchFn, exec: opts.exec, keychain: opts.keychain });
+    // A provider key's grantee (X-7): the release that makes the engine refuse
+    // an ungranted provider key grants the keys this instance already uses —
+    // on every host, Keychain or not, since it writes only secrets.yaml.
+    await updateProviderGrants(r, { instanceDir: instanceDir.instanceDir, env, platform, uid, fetchFn, exec: opts.exec });
     // The product checkout's .env, still read after the instance's: say what
     // only it has (names, never values) and the verb that retires it. Never
     // moved or deleted here — the preview and the --yes are the owner's.
@@ -1263,6 +1267,28 @@ export async function updateSharedScope(
     return res;
   } catch (err) {
     r.note(`shared scope: not migrated (${err instanceof Error ? err.message : String(err)}) — the update is unaffected; run \`${command}\``);
+    return undefined;
+  }
+}
+
+/**
+ * `grantProviderSecrets` for the whole instance, run by `update` — never able
+ * to fail it. Every provider key `compute.yaml` references that has no
+ * `provider:<name>` grant yet gets `on` (and its provider's host), so no
+ * install loses compute on the update that brings the refusal (X-7). A
+ * grant the owner already wrote is left alone; a rerun writes nothing.
+ */
+export async function updateProviderGrants(
+  r: StepRunner,
+  o: { instanceDir: string | undefined; env: NodeJS.ProcessEnv; platform: NodeJS.Platform; uid: number; fetchFn: typeof fetch; exec?: Exec | undefined },
+): Promise<ProviderGrantsResult | undefined> {
+  if (!o.instanceDir) return undefined;
+  try {
+    const res = await grantProviderSecrets({ instanceDir: o.instanceDir, instanceId: undefined, env: o.env, platform: o.platform, uid: o.uid, fetchFn: o.fetchFn, exec: o.exec, dryRun: r.dryRun, out: (l) => r.note(l) });
+    if (res.granted.length === 0 && res.unlisted.length === 0) r.note("provider grants: every provider key already has its provider:<name> grant");
+    return res;
+  } catch (err) {
+    r.note(`provider grants: not written (${err instanceof Error ? err.message : String(err)}) — the update is unaffected; \`metistry secrets grant <name> provider:<provider> on\` for each provider key`);
     return undefined;
   }
 }

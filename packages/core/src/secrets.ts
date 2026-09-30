@@ -7,7 +7,7 @@
 //   the item     service `metistry:secret:<name>`, account `<instance_id>` —
 //                one instance, one account, no shared scope
 //   the policy   *Sent only to* hosts, *Who may use it* (On · Ask · Off per
-//                connection and actor), and an expiry where the service
+//                connection, actor and compute provider), and an expiry where the service
 //                reports one. Never a value: the schema is strict, so a
 //                file that tries to carry one does not load.
 //   a reference  `{{ secret.name }}` in connection files, compute providers
@@ -40,11 +40,15 @@
 // host hands in (`packages/cli/src/keychain.ts` drives `security`; tests use
 // `memoryKeychain()` and never the real login Keychain).
 
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { z } from "zod";
 import { parseDocument } from "yaml";
 import { TOOL_MODES, type ToolMode } from "./connections.js";
 import { parseEgressEntry } from "./egress.js";
 import { AGENT_NAME_RE, INSTANCE_ID_RE } from "./instances.js";
+import { instanceFile, instanceStatePath } from "./instance-layout.js";
+import { PROVIDER_NAME_RE } from "./model-ref.js";
 import { INSTANCE_SECRET_NAME_RE, SECRET_DELIVERY_PREFIX, SECRET_REF_EXACT_RE, SECRET_REF_RE, parseSecretReference, secretDeliveryVar, type SecretReference } from "./secret-ref.js";
 
 // The spelling of a reference lives in a leaf module (compute.ts reads it too,
@@ -107,12 +111,20 @@ export const DEFAULT_SECRET_GRANT: SecretGrantMode = "off";
 
 /**
  * Who a grant is to: a connection (`connection:<name>`, kebab-case like every
- * connection name) or an actor (`agent:<id>`, the registry's id shape — the
- * assistant, a crew or an external agent, §2.4).
+ * connection name), an actor (`agent:<id>`, the registry's id shape — the
+ * assistant, a crew or an external agent, §2.4), or a compute provider
+ * (`provider:<name>`, `compute.yaml`'s provider name — ruling 2 of the W2
+ * checkpoint, 2026-09-27). A provider key is filled in for its provider's
+ * calls only when the owner granted it to that provider (`egress.ts`'s
+ * `computeFetch`).
  */
-export const SECRET_GRANTEE_RE = /^(?:connection:[a-z][a-z0-9-]{0,63}|agent:[a-z][a-z0-9-]{0,39})$/;
+export const SECRET_GRANTEE_RE = /^(?:connection:[a-z][a-z0-9-]{0,63}|agent:[a-z][a-z0-9-]{0,39}|provider:[a-z][a-z0-9_-]{0,63})$/;
 
-export type SecretGrantee = { kind: "connection" | "agent"; name: string };
+export const SECRET_GRANTEE_KINDS = ["connection", "agent", "provider"] as const;
+export type SecretGrantee = { kind: (typeof SECRET_GRANTEE_KINDS)[number]; name: string };
+
+/** What every refusal of a grantee says it should have been. */
+export const SECRET_GRANTEE_FORMS = "connection:<name>, agent:<id> or provider:<name>";
 
 export function parseSecretGrantee(value: string): SecretGrantee | undefined {
   if (!SECRET_GRANTEE_RE.test(value)) return undefined;
@@ -120,7 +132,15 @@ export function parseSecretGrantee(value: string): SecretGrantee | undefined {
   const kind = value.slice(0, colon) as SecretGrantee["kind"];
   const name = value.slice(colon + 1);
   if (kind === "agent" && !AGENT_NAME_RE.test(name)) return undefined;
+  if (kind === "provider" && !PROVIDER_NAME_RE.test(name)) return undefined;
   return { kind, name };
+}
+
+/** `openrouter` → `provider:openrouter`: the grantee a compute provider's calls are made as. Throws on anything that is not a provider name. */
+export function providerGrantee(providerName: string): string {
+  const g = `provider:${providerName}`;
+  if (parseSecretGrantee(g)?.kind !== "provider") throw new Error(`${JSON.stringify(providerName)} is not a provider name that can be a grantee (lowercase, digits, - and _, starting with a letter, at most 64)`);
+  return g;
 }
 
 // ---- where it may go --------------------------------------------------------------
@@ -159,7 +179,7 @@ const policySchema = z
     /** *Sent only to*: the hosts a value may be filled in for. Empty = sent nowhere; a local agent granted it still gets it as an environment variable. */
     hosts: z.array(hostEntry).default([]),
     /** *Who may use it*: grantee → On · Ask · Off. A grantee not listed is Off. */
-    grants: keyedRecord(z.enum(SECRET_GRANT_MODES), (k) => parseSecretGrantee(k) !== undefined, (k) => `${JSON.stringify(k)} is not a grantee — connection:<name> or agent:<id>`).default({}),
+    grants: keyedRecord(z.enum(SECRET_GRANT_MODES), (k) => parseSecretGrantee(k) !== undefined, (k) => `${JSON.stringify(k)} is not a grantee — ${SECRET_GRANTEE_FORMS}`).default({}),
     /** When the value stops working, where the service says. */
     expires: isoDate.optional(),
   })
@@ -191,6 +211,146 @@ export function parseSecretsFile(text: string): SecretsFile {
     throw new Error(`secrets.yaml does not validate — ${issues.join("; ")}`);
   }
   return r.data;
+}
+
+/** `secrets.yaml` as a door reads it: the file, or why there is none to go by. */
+export type SecretsPolicyRead = { ok: true; file: SecretsFile } | { ok: false; why: string };
+
+/**
+ * Read and parse `secrets.yaml` at `path` for a door that checks a grant
+ * (`computeFetch`). A file that does not exist is the EMPTY policy — every
+ * grantee Off — never an error: an install with no named secrets has
+ * nothing granted, which is exactly what the door should find. A file that
+ * cannot be read (a sandbox that was not given it: EPERM) or does not
+ * validate is `ok: false`, and the door refuses on it rather than guessing.
+ * The reason names the code or the field, never the file's text.
+ */
+export async function readSecretsPolicy(path: string, readFileFn: (p: string) => Promise<string> = (p) => readFile(p, "utf8")): Promise<SecretsPolicyRead> {
+  let text: string;
+  try {
+    text = await readFileFn(path);
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException | undefined)?.code;
+    if (code === "ENOENT") return { ok: true, file: parseSecretsFile("") };
+    return { ok: false, why: `${path} could not be read (${code ?? (e instanceof Error ? e.message : String(e))})` };
+  }
+  try {
+    return { ok: true, file: parseSecretsFile(text) };
+  } catch (e) {
+    return { ok: false, why: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/**
+ * `METISTRY_SECRETS_FILE`: an explicit path to the `secrets.yaml` a process
+ * reads grants from. The compose shape sets it (docker-compose.yml): the
+ * containers mount no instance directory (D5), so the instance's
+ * `.metistry/secrets.yaml` — policy, never a value — is bind-mounted
+ * read-only at `COMPOSE_SECRETS_TARGET` and this names it. Set but EMPTY is
+ * compose saying "nothing was mounted" (`METISTRY_SECRETS_YAML` unset).
+ */
+export const SECRETS_FILE_VAR = "METISTRY_SECRETS_FILE";
+/** Where docker-compose.yml mounts the policy DIRECTORY, read-only, in the assistant and console containers. */
+export const COMPOSE_POLICY_TARGET_DIR = "/run/metistry/policy";
+/** …and so where the mirrored `secrets.yaml` is read from inside them. */
+export const COMPOSE_SECRETS_TARGET = `${COMPOSE_POLICY_TARGET_DIR}/secrets.yaml`;
+/** The host-side compose variable naming the directory to mount — `metistry up` sets it to the instance's `secretsMirrorDir`. */
+export const COMPOSE_SECRETS_SOURCE_VAR = "METISTRY_SECRETS_POLICY_DIR";
+
+// ---- the policy mirror: what a container can see, and see CHANGE ---------------------
+//
+// A single-file bind mount pins the inode it was given, and every writer of
+// `secrets.yaml` (the reconciler, git, an editor) replaces the file by
+// rename — so a container mounting the file itself would keep reading the
+// grant it started with, and a REVOKE would not reach it until a restart.
+// That is not enforcement at the tool. A DIRECTORY bind sees a
+// rename-replaced entry, but the directory holding `secrets.yaml` is
+// `.metistry/`, which also holds `state/.env` with values — never mounted.
+//
+// So the policy is mirrored into a directory that holds nothing else,
+// `<instance>/.metistry/state/policy/`, and THAT directory is mounted. The
+// mirror is derived state (gitignored, like all of `state/`): the reconciler
+// refreshes it every `SECRETS_MIRROR_INTERVAL_MS` and at start, so a CLI
+// verb, a hand edit and a pull all reach it; `metistry up` writes it before
+// compose starts. A missing canonical file removes the mirror — a deleted
+// policy must never linger as a grant.
+
+/** The directory the mirror lives in (and compose mounts): `<instance>/.metistry/state/policy`. Nothing else is ever written here. */
+export function secretsMirrorDir(instanceDir: string): string {
+  return instanceStatePath(instanceDir, "policy");
+}
+
+/** How often the reconciler refreshes the mirror: the most a hand-edited revoke waits to reach a compose container. */
+export const SECRETS_MIRROR_INTERVAL_MS = 1000; // limit: fixed — a revoke's worst-case latency under compose; a read of one small file, and a knob here would only widen the window
+
+export type MirrorOutcome = "written" | "unchanged" | "removed" | "absent";
+
+/**
+ * Bring `<instance>/.metistry/state/policy/secrets.yaml` in line with the
+ * instance's `secrets.yaml`, byte for byte: written by tmp + rename in the
+ * same directory (so a reader never sees half a file, and a directory mount
+ * sees the new entry), removed when the canonical file is gone. The bytes
+ * are copied as they are — a file that does not validate is mirrored, and
+ * the reader refuses on it, rather than the mirror keeping an older grant.
+ */
+export async function mirrorSecretsPolicy(instanceDir: string): Promise<MirrorOutcome> {
+  const src = instanceFile(instanceDir, "secrets");
+  const dir = secretsMirrorDir(instanceDir);
+  const dst = join(dir, "secrets.yaml");
+  const read = async (p: string): Promise<string | undefined> => {
+    try {
+      return await readFile(p, "utf8");
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+      throw e;
+    }
+  };
+  const [want, have] = await Promise.all([read(src), read(dst)]);
+  if (want === undefined) {
+    if (have === undefined) return "absent";
+    await rm(dst, { force: true });
+    return "removed";
+  }
+  if (want === have) return "unchanged";
+  await mkdir(dirname(dst), { recursive: true });
+  const tmp = join(dir, `.secrets.yaml.${process.pid}.tmp`);
+  await writeFile(tmp, want, { mode: 0o600 });
+  await rename(tmp, dst);
+  return "written";
+}
+
+/**
+ * Where a process reads `secrets.yaml` for a grant, from its environment —
+ * read afresh at each call, so a changed grant is seen on the next request:
+ *
+ *   1. `METISTRY_SECRETS_FILE`, when set and non-empty (the compose mount);
+ *   2. set but empty: compose mounted nothing — refused, naming the mount;
+ *   3. else `<METISTRY_INSTANCE_DIR>/.metistry/secrets.yaml` (launchd; the
+ *      engine's sandbox grants that one file by name, CONFIG_SECRETS);
+ *   4. else no file at all — refused, naming the cause.
+ *
+ * Every refusal is fail-closed: a `{{ secret.x }}` provider key is never
+ * sent on a guess.
+ */
+export function secretsPolicyFromEnv(env: NodeJS.ProcessEnv): () => Promise<SecretsPolicyRead> {
+  const explicit = env[SECRETS_FILE_VAR];
+  if (explicit !== undefined && explicit.trim() !== "") {
+    const path = explicit.trim();
+    return () => readSecretsPolicy(path);
+  }
+  if (explicit !== undefined) {
+    const why =
+      `no secrets.yaml is mounted into this container (${SECRETS_FILE_VAR} is empty because ${COMPOSE_SECRETS_SOURCE_VAR} was unset when compose created it) — ` +
+      `docker-compose.yml mounts the instance's policy mirror (.metistry/state/policy/, which holds only a copy of secrets.yaml) read-only at ${COMPOSE_POLICY_TARGET_DIR}: \`metistry up\` sets ${COMPOSE_SECRETS_SOURCE_VAR} and recreates the containers with the mount`;
+    return async () => ({ ok: false, why });
+  }
+  const dir = env.METISTRY_INSTANCE_DIR?.trim();
+  if (!dir) {
+    const why = `METISTRY_INSTANCE_DIR and ${SECRETS_FILE_VAR} are both unset, so this process has no secrets.yaml to read the grant from — \`metistry up\` sets one of them for every service`;
+    return async () => ({ ok: false, why });
+  }
+  const path = instanceFile(dir, "secrets");
+  return () => readSecretsPolicy(path);
 }
 
 /** The mode `grantee` has for `name`: what the file says, else Off. An unknown secret is Off for everyone. */

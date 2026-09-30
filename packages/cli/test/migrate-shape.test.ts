@@ -607,6 +607,8 @@ describe("both directions compensate a failed `up` so the install is never left 
       dc(["stop", "db"]),
       "deployment set-shape launchd (deployment.yaml written through the reconciler as user → launchd)",
       "up(launchd) FAILED",
+      // X-7: the compose stack comes back with its secrets policy mirror mounted, as `up` gives it
+      `mirror ${I}/.metistry/secrets.yaml → ${I}/.metistry/state/policy/secrets.yaml`,
       dc(["up", "-d"]),
       "deployment set-shape compose (deployment.yaml written through the reconciler as user → compose)",
     ]);

@@ -43,8 +43,12 @@ import {
   instancePresence,
   mintToken,
   normalizeSecretHost,
+  SECRET_GRANTEE_FORMS,
+  egressDestination,
   parseCompute,
   parseSecretGrantee,
+  providerCredential,
+  providerGrantee,
   parseSecretReference,
   parseSecretsFile,
   resolveInstanceLayout,
@@ -56,6 +60,7 @@ import {
   secretService,
   secretValueIssue,
   validateManifest,
+  type Compute,
   type DeploymentShape,
   type KeychainBackend,
   type SecretGrantMode,
@@ -1028,7 +1033,7 @@ export async function secretsHosts(rawName: string | undefined, args: { hosts: s
 /** `secrets grant <name> <grantee> <on|ask|off>`: *Who may use it*. */
 export async function secretsGrant(rawName: string | undefined, grantee: string | undefined, mode: string | undefined, opts: NamedSecretsOptions): Promise<NamedSecretResult & { grantee: string; mode: SecretGrantMode }> {
   const name = checkName(rawName);
-  if (!grantee || !parseSecretGrantee(grantee)) throw new StepFailed(`${JSON.stringify(grantee ?? "")} is not a grantee — connection:<name> or agent:<id> (e.g. connection:github, agent:devin)`);
+  if (!grantee || !parseSecretGrantee(grantee)) throw new StepFailed(`${JSON.stringify(grantee ?? "")} is not a grantee — ${SECRET_GRANTEE_FORMS} (e.g. connection:github, agent:devin, provider:openrouter)`);
   if (!mode || !(SECRET_GRANT_MODES as readonly string[]).includes(mode)) throw new StepFailed(`the mode is one of ${SECRET_GRANT_MODES.join(", ")} — not ${JSON.stringify(mode ?? "")}`);
   const edit = await openSecrets(opts);
   requireNamed(edit.file, name, edit.path);
@@ -1037,6 +1042,94 @@ export async function secretsGrant(rawName: string | undefined, grantee: string 
   opts.out(`${grantee} may use ${name}: ${mode}${mode === "ask" ? " (each use waits for your answer in Needs You)" : mode === "off" ? " (refused)" : ""}`);
   const delivery = await commitSecrets(opts, edit, `secrets: ${grantee} ${mode} for ${name}`);
   return { name, service: secretService(name), account: opts.instanceId, hosts: edit.file.secrets[name]!.hosts, delivery, grantee, mode: mode as SecretGrantMode };
+}
+
+// ---- a provider key's grant (ruling 2 of the W2 checkpoint, X-7) ----------------------
+
+export interface ProviderGrant {
+  /** the secret a provider's `auth.secret` references */
+  secret: string;
+  /** `compute.yaml`'s provider name; the grantee is `provider:<name>` */
+  provider: string;
+  /** the provider's destination, added to the secret's *Sent only to* when it was not there */
+  host?: string | undefined;
+}
+
+export interface ProviderGrantsResult {
+  /** `provider:<name>: on` written (in a dry run: would be) */
+  granted: ProviderGrant[];
+  /** referenced by a provider but not in secrets.yaml — `metistry secrets set` first; nothing to grant yet */
+  unlisted: ProviderGrant[];
+  /** already had a grant for the provider — On, Ask or Off, the owner's word stands */
+  kept: ProviderGrant[];
+  delivery?: ProtectedWrite | undefined;
+}
+
+/**
+ * Give each provider key its grantee: for every provider in `compute` whose
+ * `auth.secret` is `{{ secret.x }}`, and whose secret `x` names NO grant for
+ * `provider:<name>` yet, write `provider:<name>: on` — and add the provider's
+ * host to `x`'s *Sent only to* if it is missing, since that is where the
+ * key is for. A grant already there (On, Ask or Off) is the owner's word and
+ * is left alone, so this is idempotent: a second run finds nothing to do and
+ * writes nothing.
+ *
+ * Why it exists: `computeFetch` refuses a provider key without its grant
+ * (X-7). An install whose keys predate the grantee must not lose compute on
+ * the update that brings the refusal, so `metistry update` and
+ * `secrets migrate-scope` run this, and `compute providers add|set` run it
+ * for the provider they just wrote. `only` narrows it to those providers.
+ */
+export async function grantProviderSecrets(opts: NamedSecretsOptions & { compute?: Compute | undefined; only?: readonly string[] | undefined }): Promise<ProviderGrantsResult> {
+  const res: ProviderGrantsResult = { granted: [], unlisted: [], kept: [] };
+  let compute = opts.compute;
+  if (!compute) {
+    const path = instanceFile(opts.instanceDir, "compute");
+    if (!existsSync(path)) return res;
+    try {
+      compute = parseCompute(await readFile(path, "utf8"));
+    } catch (e) {
+      opts.out(`provider grants: ${path} does not validate, so no provider key was granted (${e instanceof Error ? e.message : String(e)})`);
+      return res;
+    }
+  }
+  const bindings: ProviderGrant[] = [];
+  for (const [provider, p] of Object.entries(compute.providers)) {
+    if (opts.only && !opts.only.includes(provider)) continue;
+    const cred = providerCredential(p);
+    if (cred?.kind !== "secret") continue;
+    bindings.push({ secret: cred.name, provider, host: egressDestination(p.base_url)?.entry });
+  }
+  if (bindings.length === 0) return res;
+  const edit = await openSecrets(opts);
+  for (const b of bindings) {
+    const grantee = providerGrantee(b.provider);
+    if (!has(edit.file, b.secret)) {
+      res.unlisted.push(b);
+      opts.out(`providers.${b.provider} uses {{ secret.${b.secret} }}, which ${edit.path} does not list — \`metistry secrets set ${b.secret}\` stores it; then \`metistry secrets grant ${b.secret} ${grantee} on\``);
+      continue;
+    }
+    const policy = edit.file.secrets[b.secret]!;
+    if (Object.hasOwn(policy.grants, grantee)) {
+      res.kept.push(b);
+      continue;
+    }
+    edit.doc.setIn(["secrets", b.secret, "grants", grantee], "on");
+    const addHost = b.host !== undefined && !policy.hosts.includes(b.host);
+    if (addHost) {
+      edit.doc.setIn(["secrets", b.secret, "hosts"], [...policy.hosts, b.host]);
+      flowList(edit, b.secret);
+    }
+    // keep the parsed view in step, so a second binding of the same secret sees this one
+    policy.grants[grantee] = "on";
+    if (addHost) policy.hosts.push(b.host!);
+    res.granted.push({ ...b, ...(addHost ? {} : { host: undefined }) });
+    opts.out(`${opts.dryRun ? "[dry-run] would grant" : "granted"} ${b.secret} to ${grantee}: on${addHost ? `, and sent only to ${b.host} as well` : ""} — the provider's key now reaches its provider (\`metistry secrets grant ${b.secret} ${grantee} off\` revokes it)`);
+  }
+  if (res.granted.length > 0 && !opts.dryRun) {
+    res.delivery = await commitSecrets(opts, edit, `secrets: grant provider keys — ${res.granted.map((g) => `${g.secret} → provider:${g.provider}`).join(", ")}`);
+  }
+  return res;
 }
 
 /**
@@ -1241,6 +1334,8 @@ export interface MigrateScopeResult {
   pending: Array<ScopeRewrite & { why: string }>;
   /** step 4: originals still under the per-user account — the migration never deletes one */
   originals: string[];
+  /** after step 2: provider keys given their `provider:<name>` grant (X-7) — see `grantProviderSecrets` */
+  granted: ProviderGrant[];
   /** every original is in this instance: nothing is left for the owner to do. A `pending` reference waits on a release, not on the owner — `metistry update` reruns this and finishes it. */
   complete: boolean;
   deliveries: ProtectedWrite[];
@@ -1271,7 +1366,7 @@ export async function migrateScope(opts: MigrateScopeOptions): Promise<MigrateSc
   const out = opts.out;
   const dry = opts.dryRun === true;
 
-  const res: MigrateScopeResult = { instanceId: store.account, sharedAccount, copied: [], kept: [], unreadable: [], unmappable: [], recorded: [], rewritten: [], pending: [], originals: [], complete: false, deliveries: [] };
+  const res: MigrateScopeResult = { instanceId: store.account, sharedAccount, copied: [], kept: [], unreadable: [], unmappable: [], recorded: [], rewritten: [], pending: [], granted: [], originals: [], complete: false, deliveries: [] };
   out(`shared scope: account ${sharedAccount} → this instance's ${store.account} (${opts.instanceDir})`);
 
   // ---- step 1: copy, instance wins -----------------------------------------------
@@ -1360,6 +1455,15 @@ export async function migrateScope(opts: MigrateScopeOptions): Promise<MigrateSc
       out(`rewrote ${file} ${s.field}: ${s.from} → {{ secret.${to} }}`);
     }
   }
+
+  // ---- after step 2: a provider key's grantee (X-7) ------------------------------------
+  // Step 2 may just have pointed a provider at `{{ secret.x }}`, and the door
+  // refuses a provider key the owner has not granted to that provider — so
+  // the migration that made the reference gives it its grant, exactly as
+  // `compute providers add` does. Idempotent: a grant already there is kept.
+  const grants = await grantProviderSecrets({ ...opts, dryRun: dry });
+  res.granted = grants.granted;
+  if (grants.delivery) res.deliveries.push(grants.delivery);
 
   // ---- step 4: the originals stay --------------------------------------------------------
   if (res.originals.length) out(`left in the shared scope — this migration deletes nothing: ${res.originals.join(", ")}. \`metistry secrets purge-shared\` removes an original once every instance on this Mac has its copy.`);

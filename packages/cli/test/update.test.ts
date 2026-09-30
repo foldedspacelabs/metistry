@@ -93,6 +93,7 @@ describe("metistry update", () => {
       `(cd ${P} && pnpm install --frozen-lockfile)`,
       `(cd ${P} && pnpm -r build)`,
       `apply db/migrations/*.sql not yet in schema_migrations (2 on disk) under pg_advisory_lock(${MIGRATION_LOCK_KEY}), one transaction each`,
+      `mirror ${join(inst, ".metistry", "secrets.yaml")} → ${join(inst, ".metistry", "state", "policy", "secrets.yaml")}`, // X-7: the policy mirror compose mounts
       `(cd ${P} && docker compose ${envFileArg(inst)} up -d --build)`,
       `launchctl kickstart -k gui/501/${HELPER}`,
       `launchctl kickstart -k gui/501/${RECONCILER}`,

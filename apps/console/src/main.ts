@@ -14,6 +14,7 @@ import {
   INSTANCE_LAYOUT,
   instancePresence,
   overlayFilesFromEnv,
+  secretsPolicyFromEnv,
   resolveInstanceLayout,
   intEnv,
   optionalEnv,
@@ -373,10 +374,16 @@ const consoleVersion: string = require_("../package.json").version;
 // (the session rule, and `assignments.intent` for its one local scorer), and
 // checks a chosen query or crew against what is loaded now. No block, no
 // policy: every route row reads `absent`, the shipped behaviour.
+// A provider key's grant to `provider:<name>` (X-7): `secrets.yaml`, read at
+// each model call, so a changed grant is seen on the next one — the compose
+// mount (METISTRY_SECRETS_FILE) or the instance's own file. No file, no
+// grant: a `{{ secret.x }}` key is refused, never guessed (core's resolver).
+const secretsPolicy = secretsPolicyFromEnv(process.env);
 const routePolicy = makeRoutePolicy({
   rules,
   compute: () => compute.store.current,
   secretEnv: process.env,
+  secretsPolicy,
   hasQuery: (name) => queries.names().includes(name),
   hasCrew: (name) => crews.get(name) !== undefined,
 });
@@ -479,6 +486,7 @@ const componentCtx: ComponentCtx = {
   // `uses_model:` picks the provider out of it (runner.ts).
   compute: () => compute.store.current,
   secretEnv: process.env,
+  secretsPolicy,
   // The intent tier's THRESHOLDS (PoC-20 phase 1, research §3.2 P2). They
   // travel from `rules.yaml` — a §4.7 protected path, the owner's own hand —
   // and not from `compute.yaml`, which names the model. Two files, because

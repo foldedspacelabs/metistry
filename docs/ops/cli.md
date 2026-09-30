@@ -1127,12 +1127,18 @@ reconciler as the `user` principal, and an edit whose RESULT would not
 validate is refused rather than written. `providers add` reads the API key
 from stdin into **one of this instance's secrets** — the login Keychain under
 the instance's own account, its name recorded in `secrets.yaml` sent only to
-the provider's host (`secrets set`'s own code) — and writes
+the provider's host (`secrets set`'s own code) and **granted to the provider**,
+`provider:<name>: on` — and writes
 `auth.secret: "{{ secret.<name> }}"`, a reference; it never takes the key as an
 argument (`--secret <name>` picks which secret; an UPPER_SNAKE name is refused
 with the name it became). `secrets sync --to env` then delivers it to the
 engine as `METISTRY_SECRET_<NAME>` — the engine reads its environment, never the
-Keychain. Budgets are enforced in the engine, before the call — see
+Keychain — and every compute call goes through core's egress door
+(`computeFetch`), which attaches the key only for the provider's own host and
+only while that grant is On (ruling 2 of the W2 checkpoint, X-7).
+`providers set <name> --secret <secret>` writes the same grant for the secret
+it points the provider at. A grant already there — On, Ask or Off — is yours
+and is left alone. Budgets are enforced in the engine, before the call — see
 `docs/ops/compute.md`, which is the whole story including what is missing.
 
 `providers set` is the provider's gear (M16 — the Mac's and the CLI's, never a
@@ -1474,6 +1480,7 @@ metistry secrets hosts github_write api.github.com uploads.github.com   # replac
 metistry secrets hosts github_write --clear                # sent nowhere
 metistry secrets grant github_write connection:github on   # On · Ask · Off; unlisted = Off
 metistry secrets grant github_write agent:devin ask
+metistry secrets grant openrouter_api_key provider:openrouter off   # a provider key's grantee (X-7): Off = the engine never sends it
 metistry secrets remove github_write                       # preview: what references it
 metistry secrets remove github_write --yes
 metistry secrets list --named [--json]
@@ -1578,7 +1585,12 @@ metistry secrets purge-shared [--yes] [--instance <dir>] [--json]
    finish it. A reference to a secret the instance does not hold is never
    rewritten. A rewritten `{{ secret.openrouter_api_key }}` still counts its
    original (`METISTRY_OPENROUTER_API_KEY`) as this instance's, so a rerun
-   keeps it and `purge-shared` can find it.
+   keeps it and `purge-shared` can find it. A provider whose `auth.secret`
+   is now `{{ secret.<name> }}` has its key **granted to it**
+   (`provider:<name>: on`, and the provider's host added to *Sent only to*)
+   when the secret names no grant for that provider yet — the engine attaches
+   a provider key only on that grant (X-7). A grant already written is left
+   alone, so a rerun writes nothing.
 3. **Stop reading the per-user account** — `sync`, above.
 4. **Leave the originals.** The migration has no code path that deletes a
    Keychain item (a test hands it a Keychain whose `delete` throws). It
@@ -1591,6 +1603,7 @@ copied METISTRY_DEVIN_API_KEY → devin_api_key (metistry:secret:devin_api_key, 
 copied METISTRY_OPENROUTER_API_KEY → openrouter_api_key (metistry:secret:openrouter_api_key, account 11111111-…). The value is not printed.
 recording in secrets.yaml: devin_api_key, openrouter_api_key — sent to no host and granted to no one until you say (`metistry secrets hosts <name> <host>`, `metistry secrets grant`)
 rewrote .metistry/compute.yaml providers.openrouter.auth.secret: METISTRY_OPENROUTER_API_KEY → {{ secret.openrouter_api_key }}
+granted openrouter_api_key to provider:openrouter: on, and sent only to openrouter.ai as well — the provider's key now reaches its provider (`metistry secrets grant openrouter_api_key provider:openrouter off` revokes it)
 left in the shared scope — this migration deletes nothing: METISTRY_DEVIN_API_KEY, METISTRY_OPENROUTER_API_KEY. `metistry secrets purge-shared` removes an original once every instance on this Mac has its copy.
 shared scope: copied for ~/instances/second.
 ```

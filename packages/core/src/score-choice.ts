@@ -8,7 +8,7 @@
 // verdict and the planner's complexity class are both `assignments.intent`'s
 // answers — and the console cannot import from `collectors/` (the dependency
 // arrow points one way). So it moved, with the half it shares with
-// `completeJson`: the provider resolution, the money rule, the bearer and the
+// `completeJson`: the provider resolution, the money rule, the credential's door and the
 // URL. MOVED, not copied: `completeJson` now resolves through
 // `resolveOnMachineCall` below, so the money rule still has exactly one
 // implementation, and there is still one place for it to be wrong.
@@ -31,7 +31,9 @@
 //     an error body, which may echo the prompt — is scrubbed.
 
 import { collectorProviderIssue, credentialEnvNames, credentialFromEnv, providerCredential, providerEnabled, type Compute, type Provider } from "./compute.js";
+import { computeFetch } from "./egress.js";
 import { parseModelRef, type ModelRef } from "./model-ref.js";
+import type { SecretsPolicyRead } from "./secrets.js";
 import { scrubModelOutput } from "./redact.js";
 import { choiceServerOf, scoreChoiceOver, type ChoiceFetch, type ChoiceMessage, type ChoiceOption, type ChoiceServer } from "./choice.js";
 
@@ -41,6 +43,13 @@ export interface ModelAccess {
   compute?: () => Compute;
   /** where a provider's `auth.secret` is resolved from (the calling process's own environment) */
   secretEnv?: NodeJS.ProcessEnv;
+  /**
+   * The owner's `secrets.yaml`, read per call (`readSecretsPolicy`) — where a
+   * `{{ secret.x }}` credential's grant to `provider:<name>` is checked
+   * (ruling 2, X-7). Absent, such a credential is refused by the door.
+   */
+  secretsPolicy?: () => SecretsPolicyRead | Promise<SecretsPolicyRead>;
+  /** the network underneath the door (tests); every call still goes through `computeFetch` */
   fetchFn?: typeof fetch;
 }
 
@@ -49,14 +58,19 @@ export interface ResolvedOnMachineCall {
   ref: ModelRef;
   provider: Provider;
   url: string;
-  bearer: string | undefined;
+  /**
+   * The ONLY way to make the call: `computeFetch` bound to this provider. It
+   * refuses any host but the provider's and attaches the credential itself —
+   * the caller never holds the key, so it sends no `authorization` header.
+   */
+  fetchFn: typeof fetch;
 }
 
 const skip = (why: string): { ok: false; why: string } => ({ ok: false, why });
 
 /**
  * The half `completeJson` and `scoreChoice` share: the provider resolution,
- * the money rule, the bearer, and the URL.
+ * the money rule, the credential's door (`computeFetch`), and the URL.
  *
  * ONE implementation, because the money rule is the property both callers
  * exist to hold and a second copy of it is a second place for it to be
@@ -88,14 +102,17 @@ export function resolveOnMachineCall(access: ModelAccess, caller: string, modelR
   }
 
   // Read from this process's environment through the one resolver the
-  // engine uses (`credentialFromEnv`) — never the Keychain.
+  // engine uses (`credentialFromEnv`) — never the Keychain. Only its
+  // PRESENCE is asked here, so an unset key degrades with a reason; the value
+  // is attached by the door, never handed to the caller.
   const cred = providerCredential(provider);
-  const bearer = cred ? credentialFromEnv(cred, access.secretEnv ?? {}) : undefined;
-  if (cred && !bearer) {
+  const env = access.secretEnv ?? {};
+  if (cred && !credentialFromEnv(cred, env)) {
     return skip(`providers.${ref.provider}.auth.secret is ${cred.ref}, which is not in this process's environment (${credentialEnvNames(cred).join(" or ")}) — \`metistry secrets sync --to env\` and restart`);
   }
 
-  return { ref, provider, url: `${provider.base_url.replace(/\/+$/, "")}/chat/completions`, bearer };
+  const fetchFn = computeFetch({ providerName: ref.provider, provider, env, policy: access.secretsPolicy }, access.fetchFn);
+  return { ref, provider, url: `${provider.base_url.replace(/\/+$/, "")}/chat/completions`, fetchFn };
 }
 
 export interface ScoreChoiceOptions {
@@ -160,7 +177,7 @@ export async function scoreChoice(access: ModelAccess, opts: ScoreChoiceOptions)
     `compute.yaml assigns no model to the intent tier (assignments.intent), so ${opts.collector} scores nothing — the tier is off, which is a supported install`,
   );
   if ("ok" in resolved) return resolved;
-  const { ref, provider, url, bearer } = resolved;
+  const { ref, provider, url, fetchFn } = resolved;
 
   const scored = await scoreChoiceOver({
     url,
@@ -169,11 +186,10 @@ export async function scoreChoice(access: ModelAccess, opts: ScoreChoiceOptions)
     options: opts.options,
     codes: opts.codes,
     server: choiceServerOf(ref.provider, provider),
-    bearer,
     ...(opts.topLogprobs !== undefined ? { topLogprobs: opts.topLogprobs } : {}),
     ...(opts.timeoutMs !== undefined ? { timeoutMs: opts.timeoutMs } : {}),
     ...(provider.request ? { extra: provider.request } : {}),
-    ...(access.fetchFn ? { fetchFn: access.fetchFn as unknown as ChoiceFetch } : {}),
+    fetchFn: fetchFn as unknown as ChoiceFetch,
   });
   if (!scored.ok) return skip(scrubModelOutput(scored.why));
   return {

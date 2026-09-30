@@ -1,0 +1,24 @@
+schema: 1
+name: google-calendar
+type: collector
+display_name: Google Calendar
+description: >-
+  The owner's primary Google calendar into calendar_events under the
+  connection's own name — the one connection whose provider is
+  google-calendar (or the one scheduled.yaml names), read through the
+  egress door at https://www.googleapis.com and nowhere else, with an
+  access token minted from the sign-in the owner made with Google and
+  filled at that door (its token secret sent to exactly
+  oauth2.googleapis.com and www.googleapis.com). Today and the next two
+  weeks, every occurrence as Google expands it, with its attendees and
+  organizer and the owner's own answer (self_status), so Today, the
+  meeting-note door and invitation requests read one table for every
+  calendar source (design-build-plan §2.6, T4-14). A cancelled event inside
+  the window is removed; the past is left as it was last seen. Never the
+  description: it is not asked for. Degrades absent without a Google
+  Calendar connection.
+# A sync (§2.5's closed shape): a quarter-hour, as the ICS and CalDAV syncs —
+# one or two requests a run, and an access token minted about once an hour.
+schedule: { every: 15m }
+writes: [calendar_events, sync_state]
+reads: []

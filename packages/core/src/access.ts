@@ -15,7 +15,7 @@
 // through the console's `writeGrants`, one validator, one audit row
 // (invariant 2).
 
-import { INSTANCE_LAYOUT, isUserOwnedPath, isVaultPath, validAgentAreaGrant, VAULT_ROOT_AREA } from "./instance-layout.js";
+import { INSTANCE_LAYOUT, isUserOwnedPath, isVaultPath, TRANSCRIPTS_DIR, validAgentAreaGrant, VAULT_ROOT_AREA } from "./instance-layout.js";
 
 /**
  * Read tiers (§4.11): default-deny, user-granted, attached to the token
@@ -97,9 +97,17 @@ export function validKnowledgePath(path: string): boolean {
  * prefix. The console admits that spelling for internal principals only.
  */
 export function underAreas(path: string, areas: readonly string[]): boolean {
+  // A recording's transcript is other people's words (daily-flow-spec §8.4,
+  // T8-4): outside every default grant. An area that CONTAINS
+  // `Journal/Transcripts/` — `Journal` — does not reach into it; only the
+  // whole vault (`/`, which the console admits for the owner's own assistant
+  // alone) or an area at or below the folder itself does.
+  const transcript = path.startsWith(`${TRANSCRIPTS_DIR}/`);
   return areas.some((raw) => {
     const a = raw.endsWith("/") ? raw.slice(0, -1) : raw;
-    return a === "" || path === a || path.startsWith(`${a}/`);
+    if (a === "") return true;
+    if (transcript && !(a === TRANSCRIPTS_DIR || a.startsWith(`${TRANSCRIPTS_DIR}/`))) return false;
+    return path === a || path.startsWith(`${a}/`);
   });
 }
 

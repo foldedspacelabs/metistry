@@ -9,7 +9,7 @@
 // lands, so `knowledge_read` degrades to `not_available` unless the host
 // injects a reader — no vault mount is invented here.
 
-import { EmbedUnavailableError, may, mayListPath, mayReadPath, titlePrefixes, titlesOnly, vectorLiteral, type ErrorCode } from "@foldedspacelabs/metistry-core";
+import { EmbedUnavailableError, may, mayListPath, mayReadPath, titlePrefixes, titlesOnly, TRANSCRIPTS_DIR, vectorLiteral, type ErrorCode } from "@foldedspacelabs/metistry-core";
 import { principalOf } from "./principal.js";
 import type { AgentPrincipal, Db, Tier } from "./types.js";
 
@@ -133,10 +133,21 @@ function escapeLike(s: string): string {
 // `$n` is the areas array; NULL means "no prefix restriction" (tier index).
 // Exported for knowledge-fs.ts's knowledge_list/knowledge_grep, which need
 // the identical filter over `knowledge_files` for their own queries.
+//
+// `Journal/Transcripts/` is core's `underAreas` exception, spelled the same
+// way here (T8-4, daily-flow-spec §8.4): an area that merely CONTAINS the
+// folder (`Journal`) does not reach a transcript; the whole vault or an area
+// at or below the folder does. The folder name is core's constant, checked
+// against a path shape before it is spliced into SQL (invariant 8).
+const TRANSCRIPTS_SQL = /^[A-Za-z]+(\/[A-Za-z]+)*$/.test(TRANSCRIPTS_DIR) ? TRANSCRIPTS_DIR : (() => {
+  throw new Error(`TRANSCRIPTS_DIR ${JSON.stringify(TRANSCRIPTS_DIR)} is not a plain path`);
+})();
 export const areaFilter = (col: string, n: number) =>
   `($${n}::text[] IS NULL OR EXISTS (
       SELECT 1 FROM unnest($${n}::text[]) AS a(raw), LATERAL (SELECT rtrim(a.raw, '/') AS prefix) p
-      WHERE p.prefix = '' OR ${col} = p.prefix OR left(${col}, length(p.prefix) + 1) = p.prefix || '/'))`;
+      WHERE p.prefix = '' OR ((${col} = p.prefix OR left(${col}, length(p.prefix) + 1) = p.prefix || '/')
+        AND (left(${col}, ${TRANSCRIPTS_SQL.length + 1}) <> '${TRANSCRIPTS_SQL}/'
+             OR p.prefix = '${TRANSCRIPTS_SQL}' OR left(p.prefix, ${TRANSCRIPTS_SQL.length + 1}) = '${TRANSCRIPTS_SQL}/'))))`;
 
 /** Frontmatter title, else the basename. `t` is the table alias (empty for none). Exported for knowledge-fs.ts. */
 export const titleSql = (t = "") => `COALESCE(${t}title, regexp_replace(${t}path, '^.*/|\\.md$', '', 'g'))`;

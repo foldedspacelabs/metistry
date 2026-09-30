@@ -115,7 +115,7 @@ import Testing
     #expect(github.tools(in: .changes).map(\.name) == ["create_issue", "delete_issue"])
     #expect(github.tools(in: .reads).map { $0.mode } == [.on])
     #expect(ConnectionListRow.spoken(github, expired: []) == "github, ok, MCP · By command, Used by sync github-state, not offered to agents")
-    #expect(pane.policy(for: "github_write")?.hosts == ["api.github.com"])
+    #expect(pane.policy(for: "github_mcp_key")?.hosts == ["api.github.com"])
 
     // a command's environment: granted On, given to the command only
     let sends = try #require(pane.whatItSends(github))
@@ -192,7 +192,7 @@ import Testing
     #expect(test.cost.contains("starts npx on this Mac"))
 
     // Grant is M7
-    #expect(pane.grant("github_write", to: github)?.command == ManagementCommand(.secrets, ["secrets", "grant", "github_write", "connection:github", "on"]))
+    #expect(pane.grant("github_mcp_key", to: github)?.command == ManagementCommand(.secrets, ["secrets", "grant", "github_mcp_key", "connection:github", "on"]))
 
     // nothing ran until the owner confirmed — then exactly the command they read, and the pane re-read
     #expect(runner.commands.isEmpty)
@@ -265,7 +265,7 @@ import Testing
     #expect(controls.filter { $0.hasPrefix("create_issue: ") } == ["create_issue: Allow", "create_issue: Ask First", "create_issue: Never"])
     // secrets are references, and what the key may reach is on its row
     let said = tree.nodes.map(\.name)
-    #expect(said.contains { $0.contains("{{ secret.github_write }}") && $0.contains("Sent only to: api.github.com") }, "\(said)")
+    #expect(said.contains { $0.contains("{{ secret.github_mcp_key }}") && $0.contains("Sent only to: api.github.com") }, "\(said)")
     #expect(said.contains { $0.contains("Nobody yet") } == false, "github is used by a sync")
 }
 

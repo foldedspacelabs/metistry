@@ -30,12 +30,20 @@ const researcher: CrewSnapshot = {
   sha256: "a".repeat(64),
 };
 
+
+/** The never-tools this brain manifest declares — every one but a bridge's (T8-4's `recording_review`). */
+const brainNever = (all: readonly string[]): string[] => CREW_NEVER_TOOLS.filter((t) => all.includes(t));
+
 describe("allowlist from tool groups", () => {
   it("is exhaustive against mcp-brain's manifest: every tool is in exactly one group, or is a never-tool (knowledge_write, agents_delegate)", () => {
     const all = manifest.exposes.map((t) => t.name);
     const grouped = Object.values(CREW_TOOL_GROUPS).flat() as string[];
     expect(new Set(grouped).size).toBe(grouped.length); // no tool in two groups
-    expect([...grouped, ...CREW_NEVER_TOOLS].sort()).toEqual([...all].sort());
+    // `recording_review` (T8-4) is the live-capture bridge's tool, not the
+    // brain's: it is on the never list so no crew's `uses` can name it, and it
+    // is the one entry there that this manifest does not declare.
+    expect(CREW_NEVER_TOOLS.filter((t) => !all.includes(t))).toEqual(["recording_review"]);
+    expect([...grouped, ...brainNever(all)].sort()).toEqual([...all].sort());
     expect(all).toEqual([...BRAIN_TOOLS]); // and the assistant's own list is still the whole manifest
     for (const t of grouped) expect(brainToolNames()).toContain(`mcp__brain__${t}`);
   });
@@ -53,7 +61,8 @@ describe("allowlist from tool groups", () => {
     const everything = crewToolNames(Object.keys(CREW_TOOL_GROUPS));
     expect(everything).not.toContain("mcp__brain__knowledge_write");
     expect(everything).not.toContain("mcp__brain__agents_delegate");
-    expect(everything).toHaveLength(BRAIN_TOOLS.length - CREW_NEVER_TOOLS.length);
+    expect(everything).not.toContain("mcp__brain__recording_review");
+    expect(everything).toHaveLength(BRAIN_TOOLS.length - brainNever([...BRAIN_TOOLS]).length);
   });
 });
 

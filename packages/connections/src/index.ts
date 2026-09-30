@@ -103,12 +103,18 @@ export {
 export { checkConnection, type ConnectionCheckMeta, type ImapCheckMeta } from "./check.js";
 export { poolProxy, type PoolProxy } from "./proxy.js";
 export {
+  connectionTypeTitle,
   describeConnection,
   describeConnectionDetail,
+  describeConnectionField,
+  describeConnectionType,
+  describeConnectionTypes,
   describeConnections,
   type ConnectionDetail,
   type ConnectionRow,
   type ConnectionToolRow,
+  type ConnectionTypeField,
+  type ConnectionTypeSummary,
   type ConnectionUser,
   type DescribeOptions,
   type ReachSummary,

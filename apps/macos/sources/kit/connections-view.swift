@@ -1,7 +1,8 @@
 // Settings ▸ Connections — the list and one connection (T6-13a,
 // screen-09-resources.md §10.1–§10.4). The model, and why every value on it is
 // a served field and every change a confirmed §2.2 verb, is
-// connections-model.swift.
+// connections-model.swift. Add Connection and Configure (T6-13b, §10.5) are
+// connection-editor-view.swift, shown in this pane in place of the list.
 //
 // The list (§10.1): status · the name with its type's glyph · Type · Used By
 // — *Key expired* first, in the failed ink, when a key it names has expired —
@@ -27,13 +28,20 @@ struct ConnectionsPane: View {
 
     var body: some View {
         Group {
-            if let row = pane.shown {
+            if pane.draft != nil {
+                ConnectionEditorView(pane: pane, settings: settings)
+            } else if let row = pane.shown {
                 ConnectionDetailView(row: row, pane: pane, settings: settings)
             } else {
-                ConnectionsListView(pane: pane)
+                ConnectionsListView(pane: pane, settings: settings)
             }
         }
         .task(id: model.instances.active) { await pane.refresh() }
+        // New Secret… from the editor opens the Secrets sheet here; the pane re-reads the secret list when it closes
+        .accessEditorSheet(settings)
+        .onChange(of: settings.secretsPane.draft == nil) { _, closed in
+            if closed, pane.draft != nil { Task { await pane.refresh() } }
+        }
     }
 }
 
@@ -42,11 +50,17 @@ struct ConnectionsPane: View {
 struct ConnectionsListView: View {
     @Environment(\.colorScheme) private var scheme
     let pane: ConnectionsModel
+    var settings: SettingsModel? = nil
     var now = Date()
 
     var body: some View {
         let p = Palette(scheme)
         SettingsSection("Connections") {
+            SettingsControls {
+                Button("Add Connection…") { pane.beginAdd() }
+                    .disabled(settings?.management == nil || settings?.running != nil || pane.noInstance)
+                    .accessibilityLabel("Add Connection")
+            }
             if case .unavailable(let why) = pane.phase, pane.rows.isEmpty {
                 if pane.noInstance {
                     StatePanel(StatePanelModel(.absent, title: "Not Configured", sentence: "This deployment has no instance directory, so it holds no connections."))
@@ -58,7 +72,7 @@ struct ConnectionsListView: View {
             } else if pane.phase != .read, pane.rows.isEmpty {
                 PlaceholderRows(count: 2, waitingFor: "Reading your connections")
             } else if pane.rows.isEmpty {
-                StatePanel(StatePanelModel(.empty, title: "No Connections Yet", sentence: "Metistry can reach servers your agents cannot, and lend them. Add one with `metistry connections add` in Terminal."))
+                StatePanel(StatePanelModel(.empty, title: "No Connections Yet", sentence: "Metistry can reach servers your agents cannot, and lend them. Add Connection starts with the type — a known service brings its own fields."))
             } else {
                 ForEach(pane.rows) { row in
                     ConnectionListRow(row: row, expired: pane.expiredKeys(row, now: now)) {
@@ -66,7 +80,7 @@ struct ConnectionsListView: View {
                     }
                 }
             }
-            Text("Read from .metistry/connections/ — names, never a value. Adding one is `metistry connections add`; everything else is here, confirmed with its exact command.")
+            Text("Read from .metistry/connections/ — names, never a value. Every change here is a `metistry connections` command, shown before it runs.")
                 .metistryText(.caption1, p, .textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -227,6 +241,10 @@ struct ConnectionDetailView: View {
                 if !include.isEmpty { fact("Include", include.joined(separator: ", "), p) }
                 if !skip.isEmpty { fact("Skip", skip.joined(separator: ", "), p) }
                 fact("Watch for changes", watch ? "On" : "Off", p)
+            case .imap(let host, let port, let security):
+                fact("Mail server", "\(host):\(port)", p)
+                fact("Security", security == "tls" ? "TLS" : "None — this Mac only", p)
+                fact("Authentication", "Basic — a username and an app password, by name", p)
             case nil:
                 Text("How it is reached is not shown: the file did not validate, and a file that broke a rule shows nothing it holds.")
                     .metistryText(.footnote, p, .textSecondary)
@@ -472,10 +490,23 @@ struct ConnectionDetailView: View {
                 Button("Test…") { propose(pane.test(row)) }
                     .disabled(busy)
                     .accessibilityLabel("Test \(row.name)")
+                if pane.signIn(row) != nil {
+                    Button("Sign In…") { propose(pane.signIn(row)) }
+                        .disabled(busy)
+                        .accessibilityLabel("Sign in \(row.name) in the browser")
+                }
+                Button("Configure…") { pane.beginConfigure(row) }
+                    .disabled(busy || row.reach == nil)
+                    .accessibilityLabel("Configure \(row.name)")
                 if pane.keyNeedsReplacing(row, now: now) {
                     Button("Replace Key…") { settings.section = .secrets }
                         .accessibilityLabel("Replace \(row.name)'s key in Secrets")
                 }
+            }
+            if pane.signIn(row) != nil {
+                Text("Sign In opens the browser at the provider and keeps the sign-in in this instance's Keychain: `metistry connections authorize \(row.name)`.")
+                    .metistryText(.caption1, p, .textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Text("Test dials it once from this Mac, asks what it offers and calls no tool: `metistry connections test \(row.name)`. Its answer is the CLI's own words, at the top of this pane.")
                 .metistryText(.caption1, p, .textTertiary)

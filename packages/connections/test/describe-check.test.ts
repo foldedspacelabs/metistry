@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { ConnectionPool, checkConnection, describeConnectionDetail, describeConnections, loadInstanceCatalog, type ConnectionCatalog, type PoolEvent } from "../src/index.js";
+import { ConnectionPool, checkConnection, connectionTypeTitle, describeConnectionDetail, describeConnectionTypes, describeConnections, loadInstanceCatalog, type ConnectionCatalog, type PoolEvent } from "../src/index.js";
 import { FAKE_STDIO, catalogOf, fakeHttpMcp, secretsWith } from "./helpers.js";
 
 const KEY = "gh" + "p_" + "aB3dE6gH9jK2mN5pQ8sT1vW4yZ7bC0";
@@ -160,10 +160,33 @@ describe("loadInstanceCatalog — one instance, its registry and its files", () 
     await mkdir(join(seed, "connection-types", "linear"), { recursive: true });
     await writeFile(join(seed, "connection-types", "linear", "manifest.yaml"), "schema: 1\nname: linear\ntype: connection-type\nprovides: mcp\ntransports: [http]\ntools:\n  list_issues: { group: reads }\n");
     await mkdir(join(instance, ".metistry", "extensions", "jira"), { recursive: true });
-    await writeFile(join(instance, ".metistry", "extensions", "jira", "manifest.yaml"), "schema: 1\nname: jira\ntype: connection-type\nprovides: mcp\ntransports: [http]\n");
+    await writeFile(
+      join(instance, ".metistry", "extensions", "jira", "manifest.yaml"),
+      [
+        "schema: 1",
+        "name: jira",
+        "type: connection-type",
+        "description: Jira — issues at a site of yours. An API token, sent to the site only.",
+        "provides: mcp",
+        "transports: [http]",
+        "auth: [none, bearer, oauth]",
+        "fields:",
+        "  - { key: site, kind: url, label: Site, help: Your Atlassian site, required: true }",
+        "  - { key: project, kind: text, label: Project, required: false, default: OPS }",
+        "  - { key: view, kind: choice, label: View, required: false, default: board, options: [{ value: board, label: Board }, { value: list, label: List }] }",
+        "  - { key: team, kind: variable, label: Team, required: false }",
+        "  - { key: token, kind: secret, label: API token, required: false }",
+        "  - key: account",
+        "    kind: oauth",
+        "    label: Atlassian account",
+        "    required: false",
+        "    oauth: { client_id: jira-public, pkce: true, redirect: loopback, authorize_url: \"https://auth.atlassian.com/authorize\", token_url: \"https://auth.atlassian.com/oauth/token\", scopes: [read:jira-work] }",
+        "",
+      ].join("\n"),
+    );
     await mkdir(join(instance, ".metistry", "connections"), { recursive: true });
     await writeFile(join(instance, ".metistry", "connections", "linear.yaml"), "name: linear\ntype: mcp\nprovider: linear\nreach: { http: { url: \"https://mcp.linear.app/mcp\" } }\ntools:\n  list_issues: { group: reads, mode: on }\n");
-    await writeFile(join(instance, ".metistry", "connections", "jira.yaml"), "name: jira\ntype: mcp\nprovider: jira\nreach: { http: { url: \"https://{{ variable.site }}/mcp\" } }\nvariables: [site]\n");
+    await writeFile(join(instance, ".metistry", "connections", "jira.yaml"), "name: jira\ntype: mcp\nprovider: jira\nreach: { http: { url: \"https://{{ variable.site }}/mcp\" } }\nvariables: [site]\nconfig: { site: \"https://jira.example.com/\" }\n");
     await writeFile(join(instance, ".metistry", "variables.yaml"), "variables:\n  site: jira.example.com\n");
     await writeFile(join(instance, ".metistry", "scheduled.yaml"), "syncs:\n  linear:\n    connection: linear\n");
 
@@ -184,5 +207,38 @@ describe("loadInstanceCatalog — one instance, its registry and its files", () 
 
     const noExt = await loadInstanceCatalog({ instanceDir: instance, seedDir: seed, extensions: false });
     expect(noExt.entries.find((e) => e.name === "jira")?.status).toBe("absent");
+
+    // the installed types (T6-13b): seed and extension through one registry, each field by KIND — nothing of an oauth client, no place for a value
+    const types = describeConnectionTypes(catalog.types);
+    expect(types.map((t) => [t.name, t.origin, t.title, t.provides])).toEqual([
+      ["jira", "extension", "Jira", "mcp"],
+      ["linear", "product", "linear", "mcp"],
+    ]);
+    const jira = types[0]!;
+    expect(jira).toMatchObject({ description: expect.stringContaining("Jira — issues"), transports: ["http"], auth: ["none", "bearer", "oauth"], capabilities: [], tools: [] });
+    expect(jira.fields).toEqual([
+      { key: "site", kind: "url", label: "Site", help: "Your Atlassian site", required: true },
+      { key: "project", kind: "text", label: "Project", help: null, required: false, default: "OPS" },
+      { key: "view", kind: "choice", label: "View", help: null, required: false, default: "board", choices: [{ value: "board", label: "Board" }, { value: "list", label: "List" }] },
+      { key: "team", kind: "variable", label: "Team", help: null, required: false },
+      { key: "token", kind: "secret", label: "API token", help: null, required: false },
+      { key: "account", kind: "oauth", label: "Atlassian account", help: null, required: false },
+    ]);
+    expect(JSON.stringify(types)).not.toContain("jira-public");
+    expect(JSON.stringify(types)).not.toContain("authorize_url");
+    expect(types[1]).toMatchObject({ auth: null, fields: [], tools: [{ name: "list_issues", group: "reads" }] });
+    // the detail's provider_unit carries the same unit
+    const jiraDetail = await describeConnectionDetail("jira", catalog, ".metistry/connections/jira.yaml");
+    expect(jiraDetail?.provider_unit?.type).toEqual(jira);
+    expect(noExt.types.names()).toEqual(["linear"]);
+    expect(describeConnectionTypes(noExt.types).map((t) => t.name)).toEqual(["linear"]);
+  });
+
+  it("a type's title is its description up to the first dash or full stop, or its name", () => {
+    expect(connectionTypeTitle({ name: "linear", description: "Linear — the issues assigned to you, on the Board as work." })).toBe("Linear");
+    expect(connectionTypeTitle({ name: "caldav", description: "A CalDAV calendar (RFC 6638) with an app password. For iCloud, use its own entry." })).toBe("A CalDAV calendar (RFC 6638) with an app password");
+    expect(connectionTypeTitle({ name: "gmail-mail", description: "Gmail over IMAP with an app password (2-Step Verification on) — headers, never bodies." })).toBe("Gmail over IMAP with an app password (2-Step Verification on)");
+    expect(connectionTypeTitle({ name: "ics", description: undefined })).toBe("ics");
+    expect(connectionTypeTitle({ name: "x", description: "y".repeat(81) })).toBe("x");
   });
 });

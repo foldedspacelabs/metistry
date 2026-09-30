@@ -58,7 +58,8 @@ public enum ManagementRow: String, CaseIterable, Sendable, Equatable {
         case .identity: return [["identity", "set"]]
         case .linkedInstances: return ["add", "remove", "refresh"].map { ["instances", $0] }
         case .agentDefinitions: return [["agents", "define"]]
-        case .connections: return ["add", "set", "remove", "policy", "test"].map { ["connections", $0] }
+        // `authorize` is T4-10's sign-in door for an OAuth connection (docs/ops/cli.md), used by T6-13b's editor
+        case .connections: return ["add", "set", "remove", "policy", "test", "authorize"].map { ["connections", $0] }
         case .variables: return ["set", "unset"].map { ["variables", $0] }
         case .extensions: return ["add", "remove", "list"].map { ["extensions", $0] }
         case .computeProviders: return ["add", "remove", "set"].map { ["compute", "providers", $0] }

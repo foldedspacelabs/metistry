@@ -72,7 +72,9 @@ import Testing
     await pane.open("linear")
     let row = try #require(pane.shown)
     #expect(pane.detailPhase == .read)
-    #expect(console.calls.map(\.path) == ["/api/connections", "/api/secrets", "/api/connections/linear"] || console.calls.map(\.path) == ["/api/secrets", "/api/connections", "/api/connections/linear"])
+    // the list, the secret list and the variable names (T6-13b: what a variable field may pick) in any order, then the detail
+    #expect(Set(console.calls.dropLast().map(\.path)) == ["/api/connections", "/api/secrets", "/api/variables"], "\(console.calls.map(\.path))")
+    #expect(console.calls.last?.path == "/api/connections/linear")
 
     let tree = try await AccessibilityProbe.snapshot(
         ConnectionDetailView(row: row, pane: pane, settings: settings).padding(MetistrySpace.s5).frame(width: SettingsLayout.pane)

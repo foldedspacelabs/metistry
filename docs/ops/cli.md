@@ -1760,6 +1760,8 @@ metistry connections add notes --type files --path ~/Documents/Notes \
 metistry connections add tracker --type mcp --url https://mcp.example.com/mcp --auth oauth \
     --authorize-url https://auth.example.com/authorize --token-url https://auth.example.com/token \
     --scope read --scope offline_access --client-id-secret tracker_client   # a custom OAuth client (C118)
+metistry connections add work --type tracker --provider acme-tracker --url https://mcp.acme.example/mcp \
+    --config workspace=platform --config region=eu --config api_key=acme_key --no-discover   # a known service's fields, judged against its manifest
 metistry connections authorize tracker [--no-browser] [--timeout 300]       # sign in: the browser, one callback on 127.0.0.1
 metistry connections add google --type calendar --provider google-calendar \
     --url https://www.googleapis.com/calendar/v3/ --auth oauth \
@@ -1772,6 +1774,7 @@ metistry connections policy github search_issues allow --group reads
 metistry connections policy github delete_issue never
 metistry connections policy github --offer on             # offer it to agents through Metistry
 metistry connections set github --env 'LOG_LEVEL=warn' [--unset-env K] [--header K=V] [--unset-header K] [--url …] [-- <command…>]
+metistry connections set work --config region=us              # one field of a known service; the rest keep what the file holds
 metistry connections set calendar --client-id-secret my_client_id [--client-secret-secret my_client_secret]   # bring your own OAuth client
 metistry connections set devin --config org=org-new [--unset-config repos]   # a connection type's fields
 metistry connections test github [--json]                 # dial it: does it answer, and does it still offer every listed tool?
@@ -1780,10 +1783,38 @@ metistry connections remove github [--dry-run]
 
 Every verb takes `--instance <dir>` (default: the resolved instance); the
 writing ones take `--dry-run`. `--env`, `--header`, `--include`, `--skip`,
-`--scope`, `--config` and `--unset-config` repeat. A `--config` key is one of
-the provider's fields, judged with the file before anything is written (a
-required field missing, a field the type does not have, a key pasted as a
-value); a custom connection has none. The command and its arguments go after `--`.
+`--scope`, `--config` and `--unset-config` repeat. The command and its arguments go after `--`.
+
+**`--config KEY=VALUE` — a known service's fields (T6-13b).** A connection
+type's manifest declares config `fields`, each of a closed kind (`text` ·
+`secret` · `variable` · `url` · `choice` · `oauth`; `docs/ops/extensions.md`),
+and `GET /api/connections` lists them under `types` — what the Mac's Add
+Connection renders. `--config` fills one, on `add` and on `set`, and **each
+value is judged against the manifest before anything is written**; a refusal
+is a **usage error (exit 2)** with one line naming the field, never the value:
+
+- a key the type does not declare, or one given twice (`config.colour: … has
+  no field "colour" — its fields: …`);
+- a value of the wrong kind: a `url` that is not an http(s) URL (or a
+  `{{ variable.<name> }}` holding one), or that carries a secret; a `choice`
+  outside its options; a `text` that looks like a key;
+- a **`secret` field given anything but the NAME of a secret** — bare
+  (`--config api_key=acme_key`) or as `{{ secret.acme_key }}`; the file gets the
+  reference and the name joins `secrets:`. A value on a command line is in
+  every process's argv and the shell's history, so it is refused pointing at
+  `metistry secrets set <name>` (the value on stdin) and is not echoed;
+- a `variable` field given anything but a variable's name (bare or as
+  `{{ variable.<name> }}`);
+- an **`oauth` field** at all — it is signed in, not typed: `--auth oauth`
+  writes it and `authorize` signs in;
+- `--config` on a **custom** connection (it has no fields; its settings are its
+  reach), or naming a provider no installed type provides;
+- a **required** field with no default left out — on `add`, and on `set` once
+  merged with what the file holds (a field left out of `set` keeps its value;
+  `--unset-config KEY` removes one, and removing a required one is refused when
+  the file is judged).
+
+`connections list --json` prints the same `types` the route serves.
 
 **Names, never values.** A secret is written as `{{ secret.<name> }}` and a
 variable as `{{ variable.<name> }}`; the file lists every name it uses under

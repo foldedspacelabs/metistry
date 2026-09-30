@@ -40,6 +40,7 @@ private let viewCoverage: [String: Coverage] = [
     "components/component-kit.swift": Coverage(test: "accessibility-audit-tests.swift", probes: "ControlButton"),
     "compute-view.swift": Coverage(test: "compute-pane-tests.swift", probes: "ComputePaneView"),
     "connections-view.swift": Coverage(test: "connections-view-tests.swift", probes: "ConnectionsListView"),
+    "connection-editor-view.swift": Coverage(test: "connection-editor-tests.swift", probes: "ConnectionEditorView"),
     "keyboard-shortcuts-view.swift": Coverage(test: "shell-accessibility-tests.swift", probes: "KeyboardShortcutsView"),
     "knowledge-view.swift": Coverage(test: "knowledge-view-tests.swift", probes: "KnowledgeView"),
     "log-window-view.swift": Coverage(test: "accessibility-audit-tests.swift", probes: "LogWindowView"),

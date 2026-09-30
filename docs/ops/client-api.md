@@ -3430,6 +3430,13 @@ GET /api/connections
                               {"name":"search_issues","group":"reads","mode":"on"}],
                      "offer_to_agents":false,
                      "used_by":[{"kind":"sync","name":"github-state"}]}],
+     "types":[{"name":"icloud-calendar","title":"iCloud Calendar over CalDAV with an app-specific password",
+               "description":"iCloud Calendar over CalDAV with an app-specific password — your events on Today, …",
+               "origin":"product","provides":"calendar","transports":["http"],"auth":["basic"],
+               "capabilities":["read","write_own","rsvp"],
+               "fields":[{"key":"server","kind":"url","label":"Server","help":"Where discovery starts. …",
+                          "required":false,"default":"https://caldav.icloud.com/"}],
+               "tools":[]}, …],
      "as_of":"2026-09-28T13:05:00.000Z"}
 503 no instance directory in this deployment (degrades: absent)
 ```
@@ -3465,6 +3472,27 @@ name, `status: "failed"` and `issues`, and **nothing it holds** — the rule may
 be a key pasted into the wrong place, and a row that repeated the file would
 repeat the key.
 
+**`types` — the installed connection types (T6-13b).** One per unit the
+connection-type registry loads — the product's `seed/connection-types/` and
+the owner's `.metistry/extensions/` through the same registry (plan §2.7: an
+extension that takes a product unit's name replaces it; a manifest that fails
+validation is skipped, its reason doctor's), sorted by name. This is what *Add
+Connection* offers once the type is chosen, and the form it renders — **no
+per-service Swift**: `name`, a `title` (the manifest's description up to its
+first dash or full stop, or the name), `description`, `origin` (`product` ·
+`extension`), `provides` (the connection type), `transports` (`http` ·
+`command` · `path` · `imap`), `auth` (the sign-in schemes it declares, or
+`null` for any but `basic`), `capabilities`, `tools` (name and group), and
+`fields`: each `{key, kind, label, help, required, default?, choices?}` with
+`kind` from the closed vocabulary `text · secret · variable · url · choice ·
+oauth`. **Kinds, never values:** a `secret` field has no default by schema
+and no value has a place here; an `oauth` field says only that it is one —
+nothing of its client (id, endpoints, scopes) is served. The same object rides
+on `GET /api/connections/:name`'s `provider_unit.type`. Writing a field is
+`metistry connections add|set --config KEY=VALUE` on the Mac (M13,
+`docs/ops/cli.md`), which judges each value against this manifest and takes a
+secret only by name.
+
 **Nothing here dials.** A GET that started a command or reached a server would
 be a read with a side effect; whether a connection answers is `metistry
 connections test <name>` and `metistry doctor` on the Mac. The last check or
@@ -3484,7 +3512,8 @@ GET /api/connections/linear
                    "provider_unit":{"name":"linear","origin":"product",
                                     "provides":"mcp","capabilities":[],
                                     "implementation":"native","sync":null,
-                                    "tools":[{"name":"list_issues","group":"reads"}]}},
+                                    "tools":[{"name":"list_issues","group":"reads"}],
+                                    "type":{…the same object as the list's `types[]` entry for linear…}}},
      "as_of":"2026-09-28T13:05:00.000Z"}
 404 no such connection — no file of that name, or a name that cannot be one
 503 no instance directory in this deployment (degrades: absent)
@@ -3493,9 +3522,11 @@ GET /api/connections/linear
 The row, plus `file` (instance-relative) and `provider_unit`: the
 connection-type unit's name, whether it is the product's or the owner's
 extension, what it provides, its capabilities, how it is implemented, the
-sync that reads it, and the tools it declares with the group each keeps
-(a connection may not relabel one). `null` for a `custom` connection, an
-uninstalled provider, or a file that does not validate.
+sync that reads it, the tools it declares with the group each keeps
+(a connection may not relabel one), and `type` — the unit as the list's
+`types` serves it, its fields by kind (T6-13b), so Configure renders the same
+form Add did. `null` for a `custom` connection, an uninstalled provider, or a
+file that does not validate.
 
 #### `GET /api/secrets` — the Secrets list (`user` principal)
 

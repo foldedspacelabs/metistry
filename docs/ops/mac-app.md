@@ -669,10 +669,11 @@ Settings ▸ Connections (T6-13a, screen-09-resources.md §10.1–§10.4, plan
 `connections-view.swift`; it replaced the interim pane that listed doctor's
 bridge rows (those stay in `metistry doctor` and Services' problems).
 
-**Three served routes, and nothing else.** The list is `GET /api/connections`,
-one connection `GET /api/connections/:name` (its file and its provider's unit
-join the row), and *Sent only to*, the grants and presence come from `GET
-/api/secrets`. Every one carries names — header, query-parameter,
+**Four served routes, and nothing else.** The list is `GET /api/connections`
+(with the installed connection types under `types`, T6-13b), one connection
+`GET /api/connections/:name` (its file and its provider's unit join the row),
+*Sent only to*, the grants and presence come from `GET /api/secrets`, and the
+names a `variable` field may pick from `GET /api/variables`. Every one carries names — header, query-parameter,
 environment and secret names — and never a value, so the pane has no field a
 value could live in. Nothing is dialled to draw it; a connection's
 `connection.health` event and a write to `.metistry/connections/`,
@@ -721,8 +722,61 @@ confirmation says what it starts), *Allow <host>* `secrets hosts <name>
 `secrets grant <name> connection:<c> on` — each a `ManagementCommand` shown in
 `SettingsConfirmation` with its exact command, its answer the CLI's own last
 line in the pane's banner, and the pane re-read after it. No console route
-writes a connection (invariant 10). Adding and configuring one is T6-13b's
-editor; until then the empty state names `metistry connections add`.
+writes a connection (invariant 10).
+
+### Add Connection, and Configure (T6-13b, screen 9 §10.5)
+
+The editor is `connection-editor-model.swift` (the draft: what is chosen, what
+is still missing, and the one argument array it becomes) and
+`connection-editor-view.swift`; it is shown in the pane in place of the list
+from *Add Connection…*, and over one connection from *Configure…*.
+
+**Type first, then a known service or custom.** The eight types (§10.2) are
+tiles that say what each is. Then the **known services** for that type — the
+connection types `GET /api/connections` now lists under `types` (the product's
+`seed/connection-types/` and the owner's `.metistry/extensions/`, through the
+one registry, §2.7; each tagged *Known service* or *Extension*) — and
+**Custom**, configured by how it is reached (C118): **HTTP** (URL ·
+authentication *None · Bearer · Basic · API Key · OAuth* · headers), a
+**command** (the command line · environment · runs in a container), a **path**
+(folder or file · include and skip patterns), or a **mailbox** over IMAP
+(server · port · username · app password by name). A custom calendar, mail or
+tracker has nothing to run it and the editor says so (core's `NATIVE_REACH`);
+a known service offers only the reach classes and sign-in schemes its manifest
+declares.
+
+**A known service's form is rendered from its fields — no per-service Swift.**
+Each field's closed kind has one drawing: `text` and `url` a text field whose
+prompt is the default or the help; `choice` a picker of its options with the
+default named; `variable` a picker of the names `GET /api/variables` serves;
+**`secret` a picker of the names `GET /api/secrets` serves**, with *New
+Secret…* opening the Secrets sheet (the one place a value is typed, onto the
+CLI's stdin) — never a text field; `oauth` a note — the connection is signed
+in after it is written. The ticket's test loads a type with a field of every
+kind from an extension and checks exactly this.
+
+**What it sends, and the guards, on the draft.** The same `WhatItSends.of`
+that draws the detail draws the draft: a secret headed for a host outside its
+*Sent only to* list shows blocked on its row with *Allow <host>…* (M7,
+confirmed); a secret in the URL or on the command line is flagged (the CLI
+refuses both); a secret in a command's environment is *given to this command
+only*; a mailbox's app password goes to exactly `host:port`.
+
+**The button runs one verb, shown first.** The draft is exactly one argument
+array — `metistry connections add <name> --type … [--provider …] (--url … |
+--path … | --imap … | -- <command…>) [--auth …] [--header K=V]… [--config
+key=value]… [--description …] [--no-discover]`, or `connections set <name> …`
+with only what changed — in a `CommandCard` above *Add Connection* / *Save
+Changes*; the editor is the confirmation, as the Secrets sheet is. A secret
+field rides as `--config KEY=<name>`: a name, which the CLI turns into the
+`{{ secret.name }}` reference and refuses anything else (`docs/ops/cli.md`).
+`add` reaches the server once unless *Reach it once* is off (`--no-discover`;
+a mailbox and an OAuth connection are never dialled on add). A refusal keeps
+the editor open with the CLI's own line; success opens the connection. **Sign
+In…** on an OAuth connection is `metistry connections authorize <name>`,
+confirmed — the browser, one callback on 127.0.0.1, the sign-in into this
+instance's Keychain — and M13's verb table in `management-runner.swift` names
+it.
 
 ## The Secrets and Variables panes
 
@@ -881,6 +935,8 @@ core's (`LID_CLOSED_*` in `packages/core/src/power.ts`), mirrored in
 | Connections | one connection: how it is reached, its secrets with *Sent only to*, *What it sends*, the tools by group, Used By | `GET /api/connections/:name` and `GET /api/secrets`; *What it sends* is worked out from them as core's egress door would, and nothing is dialled |
 | Connections | a tool's mode, the offer switch, Test | `metistry connections policy <name> <tool> allow\|ask\|never`, `policy <name> --offer on\|off`, `connections test <name>` (M13), each **confirmed with the exact command** |
 | Connections | *Allow <host>*, *Grant* on a secret's row; Replace Key | `metistry secrets hosts <name> <hosts…>` / `secrets grant <name> connection:<c> on` (M7), confirmed; Replace Key opens Secrets |
+| Connections | Add Connection…: the type, a known service (its fields, rendered from its manifest) or custom (HTTP · command · path · mailbox), *What it sends* | `GET /api/connections` → `types` (the installed connection types, fields by kind), `GET /api/secrets` and `GET /api/variables` for the names a field may pick; then `metistry connections add … [--config KEY=VALUE]…` (M13), the whole command shown before the button runs it ("Add Connection, and Configure" above) |
+| Connections | Configure…, Sign In… | `metistry connections set <name> …` with only what changed; `connections authorize <name>` (M13), confirmed |
 | Secrets | name · Used by · Sent only to · last used or *Expired*; per secret its Value (dots), Sent Only To and Who May Use It | `GET /api/secrets` — never a value; the grantees offered are `GET /api/connections` and `GET /api/agents` plus whoever the file already grants ("The Secrets and Variables panes" below) |
 | Secrets | New Secret…, Replace…, Save Hosts…, a grant's On · Ask · Off, Delete… | `metistry secrets set\|replace <name>` with the value **on stdin**, `secrets hosts\|grant\|remove` (M7) — each shown with its exact command first |
 | Secrets | *Metistry's own* (collapsed): names, scope, and the account each was found under | `metistry secrets list --json` — names only; rotating one is a Terminal step, not an M7 verb |

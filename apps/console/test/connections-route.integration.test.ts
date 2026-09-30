@@ -99,7 +99,20 @@ describe.skipIf(!hasDb)("GET /api/connections, GET /api/connections/:name", () =
       ".metistry/connections/leaky.yaml": `name: leaky\ntype: mcp\nprovider: custom\nreach: { http: { url: "https://mcp.example.com/mcp", headers: { Authorization: "Bearer ${KEY}" } } }\n`,
       ".metistry/secrets.yaml": 'secrets:\n  github_read:\n    grants: { "connection:github": on }\n',
       ".metistry/scheduled.yaml": "syncs:\n  github-state:\n    connection: github\n",
-      ".metistry/extensions/linear/manifest.yaml": "schema: 1\nname: linear\ntype: connection-type\nprovides: mcp\ntransports: [http]\ntools:\n  list_issues: { group: reads }\n",
+      ".metistry/extensions/linear/manifest.yaml": [
+        "schema: 1",
+        "name: linear",
+        "type: connection-type",
+        "description: Linear — the issues assigned to you. A personal API key, sent to api.linear.app only.",
+        "provides: mcp",
+        "transports: [http]",
+        "fields:",
+        "  - { key: workspace, kind: text, label: Workspace, required: false, default: acme }",
+        "  - { key: api_key, kind: secret, label: API key, required: false }",
+        "tools:",
+        "  list_issues: { group: reads }",
+        "",
+      ].join("\n"),
     });
     const view: ConnectionsView = { instanceDir: dir, presence: { has: async (n) => n === "github_read" } };
     base = await listen({ connections: view });
@@ -159,7 +172,7 @@ describe.skipIf(!hasDb)("GET /api/connections, GET /api/connections/:name", () =
   it("the list: status, reach with names only, tools and modes, used by", async () => {
     const r = await get(base, "/api/connections", owner);
     expect(r.status).toBe(200);
-    expect(Object.keys(r.body).sort()).toEqual(["as_of", "connections"]);
+    expect(Object.keys(r.body).sort()).toEqual(["as_of", "connections", "types"]);
     expect(r.body.connections.map((c: { name: string; status: string }) => [c.name, c.status])).toEqual([
       ["github", "ok"],
       ["leaky", "failed"],
@@ -186,6 +199,34 @@ describe.skipIf(!hasDb)("GET /api/connections, GET /api/connections/:name", () =
     expect(r.text).not.toContain("warn");
     expect(r.text).not.toContain("{{ secret.github_read");
     expect(r.text).not.toContain(KEY);
+  });
+
+  it("the list carries the installed connection types — an extension's, its fields by kind, no value anywhere (T6-13b)", async () => {
+    const r = await get(base, "/api/connections", owner);
+    expect(r.body.types).toEqual([
+      {
+        name: "linear",
+        title: "Linear",
+        description: "Linear — the issues assigned to you. A personal API key, sent to api.linear.app only.",
+        origin: "extension",
+        provides: "mcp",
+        transports: ["http"],
+        auth: null,
+        capabilities: [],
+        fields: [
+          { key: "workspace", kind: "text", label: "Workspace", help: null, required: false, default: "acme" },
+          { key: "api_key", kind: "secret", label: "API key", help: null, required: false },
+        ],
+        tools: [{ name: "list_issues", group: "reads" }],
+      },
+    ]);
+    // the same unit rides on the detail's provider_unit
+    const one = await get(base, "/api/connections/linear", owner);
+    expect(one.body.connection.provider_unit.type).toEqual(r.body.types[0]);
+    // an agent bearer learns nothing of the types either (U2: the door is one)
+    const agent = await get(base, "/api/connections", { authorization: `Bearer ${agentToken}` });
+    expect(agent.status).toBe(403);
+    expect(agent.text).not.toContain("workspace");
   });
 
   it("a file with a key pasted into it is listed by name and why — nothing it holds", async () => {

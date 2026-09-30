@@ -1,6 +1,8 @@
 // Settings ▸ Connections: the list and one connection (T6-13a,
 // screen-09-resources.md §10.1–§10.4, plan §2.6). The view is
-// connections-view.swift.
+// connections-view.swift. Adding and configuring one (T6-13b, §10.5) is
+// connection-editor-model.swift and connection-editor-view.swift, over the
+// same rows and the installed connection types this model reads.
 //
 // READ-ONLY OVER THE API. Everything on the pane is what three served routes
 // say — `GET /api/connections`, `GET /api/connections/:name` and
@@ -119,6 +121,8 @@ public enum ConnectionReach: Equatable, Sendable {
     case http(url: String, auth: String?, headers: [String], query: [String], timeoutSeconds: Int?)
     case command(command: String, args: [String], cwd: String?, env: [String], runsOn: String?)
     case path(path: String, include: [String], skip: [String], watch: Bool)
+    /// A mailbox (T4-15): where it goes and how — never the username or the password.
+    case imap(host: String, port: Int, security: String)
 
     /// The Type column's second half when the provider is `custom`.
     var how: String {
@@ -126,7 +130,15 @@ public enum ConnectionReach: Equatable, Sendable {
         case .http: return "By URL"
         case .command: return "By command"
         case .path: return "A path"
+        case .imap: return "A mailbox"
         }
+    }
+
+    /// The exact `host:port` an IMAP connection's app password must be listed for (core's `socketDestination`).
+    var imapDestination: EgressDestination? {
+        guard case .imap(let host, let port, let security) = self else { return nil }
+        let loopback = host == "localhost" || host.hasPrefix("127.")
+        return EgressDestination(entry: "\(host):\(port)", cleartext: security == "plain" && !loopback)
     }
 }
 
@@ -146,6 +158,8 @@ public struct ConnectionProviderUnit: Equatable, Sendable {
     public let capabilities: [String]
     public let sync: String?
     public let tools: [String]
+    /// The same unit as *Add Connection* sees it — its fields, by kind (T6-13b). Nil from a console that predates it.
+    public let type: ConnectionTypeSummary?
 }
 
 /// One row of `GET /api/connections`, or the body of `GET /api/connections/:name`.
@@ -207,7 +221,8 @@ public struct ConnectionRow: Identifiable, Equatable, Sendable {
                 origin: unit.string("origin"),
                 capabilities: strings(unit["capabilities"]),
                 sync: unit.string("sync"),
-                tools: (unit["tools"]?.arrayValue ?? []).compactMap { $0.string("name") }
+                tools: (unit["tools"]?.arrayValue ?? []).compactMap { $0.string("name") },
+                type: unit["type"].flatMap(ConnectionTypeSummary.parse)
             )
         }
         return ConnectionRow(
@@ -243,6 +258,9 @@ public struct ConnectionRow: Identifiable, Equatable, Sendable {
         case "path":
             guard let path = json.string("path") else { return nil }
             return .path(path: path, include: strings(json["include"]), skip: strings(json["skip"]), watch: json.bool("watch") ?? false)
+        case "imap":
+            guard let host = json.string("host") else { return nil }
+            return .imap(host: host, port: json.int("port") ?? 993, security: json.string("security") ?? "tls")
         default:
             return nil
         }
@@ -292,7 +310,7 @@ public struct SecretPolicy: Identifiable, Equatable, Sendable {
     }
 }
 
-private func strings(_ json: JSONValue?) -> [String] {
+func strings(_ json: JSONValue?) -> [String] {
     json?.arrayValue?.compactMap(\.stringValue) ?? []
 }
 
@@ -303,6 +321,12 @@ private func strings(_ json: JSONValue?) -> [String] {
 public struct EgressDestination: Equatable, Sendable {
     public let entry: String
     public let cleartext: Bool
+
+    /// A destination already spelled as the door spells it (`host:port`) — an IMAP mailbox's.
+    init(entry: String, cleartext: Bool) {
+        self.entry = entry
+        self.cleartext = cleartext
+    }
 
     public init?(url: String) {
         guard let parts = URLComponents(string: url),
@@ -428,6 +452,10 @@ public struct WhatItSends: Equatable, Sendable {
             return WhatItSends(target: ([command] + args).joined(separator: " "), names: env, sends: row.secrets.map { SecretSend(secret: $0, verdict: verdict($0, sentTo: nil)) })
         case .path(let path, _, _, _):
             return WhatItSends(target: path, names: [], sends: row.secrets.map { SecretSend(secret: $0, verdict: .cannotTell("a path has nowhere to send a secret")) })
+        case .imap(let host, let port, let security):
+            // the app password goes to exactly host:port (core's socketDestination), over TLS unless the server is this Mac
+            let destination = reach.imapDestination
+            return WhatItSends(target: "imap\(security == "tls" ? "s" : "")://\(host):\(port)", names: [], sends: row.secrets.map { SecretSend(secret: $0, verdict: verdict($0, sentTo: destination)) })
         }
     }
 }
@@ -446,6 +474,12 @@ public final class ConnectionsModel {
     /// Nil: not read, or it did not read — the preview then shows nothing as sent.
     public private(set) var secrets: [SecretPolicy]?
     public private(set) var secretsProblem: String?
+    /// The installed connection types, from the list's `types` (T6-13b) — what *Add Connection* offers once the type is chosen.
+    public private(set) var types: [ConnectionTypeSummary] = []
+    /// `GET /api/variables`' names — what a `variable` field may name. Nil: not read.
+    public private(set) var variables: [String]?
+    /// The editor (Add Connection, or Configure one). Nil: closed.
+    public var draft: ConnectionDraft?
 
     /// The connection open in the pane. Nil: the list.
     public private(set) var selected: String?
@@ -483,6 +517,9 @@ public final class ConnectionsModel {
         asOf = nil
         secrets = nil
         secretsProblem = nil
+        types = []
+        variables = nil
+        draft = nil
         selected = nil
         detail = nil
         detailPhase = .idle
@@ -498,11 +535,13 @@ public final class ConnectionsModel {
         if rows.isEmpty { phase = .reading }
         async let list = session.stores.connections()
         async let named = session.stores.secrets()
-        let (listed, secretList) = await (list, named)
+        async let vars = session.stores.variables()
+        let (listed, secretList, variableList) = await (list, named, vars)
         guard session.generation == generation else { return }
         switch listed {
         case .success(let body):
             rows = (body.json["connections"]?.arrayValue ?? []).compactMap(ConnectionRow.parse)
+            types = (body.json["types"]?.arrayValue ?? []).compactMap(ConnectionTypeSummary.parse)
             asOf = WireTime.date(body.json.string("as_of"))
             noInstance = false
             phase = .read
@@ -518,7 +557,44 @@ public final class ConnectionsModel {
             secrets = nil
             secretsProblem = error.localizedDescription
         }
+        if case .success(let body) = variableList {
+            variables = (body.json["variables"]?.arrayValue ?? []).compactMap { $0.string("name") }
+        } else {
+            variables = nil
+        }
         if let selected { await readDetail(selected) }
+    }
+
+    /// The known services for one type — the installed connection types that provide it, by title.
+    public func types(providing kind: ConnectionKind) -> [ConnectionTypeSummary] {
+        types.filter { $0.provides == kind }.sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+    }
+
+    /// The installed connection type a row names, when it is installed.
+    public func type(named name: String?) -> ConnectionTypeSummary? {
+        guard let name, name != "custom" else { return nil }
+        return types.first { $0.name == name }
+    }
+
+    // MARK: The editor (T6-13b)
+
+    /// *Add Connection*: the editor, type first (screen 9 §10.5).
+    public func beginAdd() {
+        draft = ConnectionDraft(mode: .add)
+    }
+
+    /// *Configure…*: the editor over an existing connection — `metistry connections set`.
+    public func beginConfigure(_ row: ConnectionRow) {
+        draft = ConnectionDraft(configuring: row, type: type(named: row.provider))
+    }
+
+    public func cancelEditing() {
+        draft = nil
+    }
+
+    /// The preview for what the editor would write — the same rule as a served row's.
+    public func whatItSends(_ draft: ConnectionDraft) -> WhatItSends? {
+        draft.previewRow.flatMap { WhatItSends.of($0, secrets: secrets) }
     }
 
     /// Open one connection.
@@ -631,12 +707,30 @@ public final class ConnectionsModel {
         switch row.reach {
         case .command(let cmd, _, _, _, _): reaches = "starts \(cmd) on this Mac"
         case .http(let url, _, _, _, _): reaches = "connects to \(EgressDestination(url: url)?.entry ?? url)"
+        case .imap(let host, let port, _): reaches = "signs in to \(host):\(port) with the app password from this Mac's Keychain, lists its folders and reads no message"
         default: reaches = "reaches it"
         }
         return SettingsConfirmation(
             title: "Test \(row.name)?",
             cost: "This \(reaches), asks what it offers and calls no tool.",
             actionTitle: "Test",
+            command: command,
+            after: .connections
+        )
+    }
+
+    /// *Sign In…*: `metistry connections authorize <name>` — the one door that
+    /// signs an OAuth connection in (T4-10): a listener on 127.0.0.1 for one
+    /// callback, the browser at the provider, the sign-in into this instance's
+    /// Keychain. Nil for a connection that does not sign in with OAuth.
+    public func signIn(_ row: ConnectionRow) -> SettingsConfirmation? {
+        guard case .http(_, let auth, _, _, _) = row.reach, auth == "oauth",
+              let command = ManagementCommand(.connections, ["connections", "authorize", row.name])
+        else { return nil }
+        return SettingsConfirmation(
+            title: "Sign in \(row.name)?",
+            cost: "The browser opens at the provider. Metistry listens on this Mac (127.0.0.1) for exactly one answer, checks it, and keeps the sign-in in this instance's Keychain — never shown. A provider that has not verified Metistry may warn you first; a client id of your own avoids that.",
+            actionTitle: "Sign In",
             command: command,
             after: .connections
         )
@@ -669,5 +763,29 @@ public final class ConnectionsModel {
             command: command,
             after: .connections
         )
+    }
+}
+
+// MARK: - Add Connection / Configure, run from Settings (T6-13b)
+
+extension SettingsModel {
+    /// Add Connection / Save Changes: the draft's one argument array
+    /// (`metistry connections add|set …`, M13) runs exactly as the editor
+    /// showed it — the editor is the confirmation, as the Secrets sheet is. A
+    /// refusal keeps the editor open with the CLI's own line; success closes
+    /// it, re-reads the pane and opens the connection.
+    public func saveConnectionDraft() async {
+        guard let draft = connectionsPane.draft, draft.canRun, let arguments = draft.arguments,
+              let command = ManagementCommand(.connections, arguments)
+        else { return }
+        await run(command, after: .connections)
+        if let outcome, !outcome.ok {
+            var kept = draft
+            kept.refusal = outcome.words
+            connectionsPane.draft = kept
+            return
+        }
+        connectionsPane.draft = nil
+        await connectionsPane.open(draft.trimmedName)
     }
 }

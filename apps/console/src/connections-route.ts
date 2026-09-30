@@ -24,10 +24,12 @@ import { resolveInstanceLayout, type SecretPresence } from "@foldedspacelabs/met
 import {
   CONNECTION_FILE_RE,
   describeConnectionDetail,
+  describeConnectionTypes,
   describeConnections,
   loadInstanceCatalog,
   type ConnectionDetail,
   type ConnectionRow,
+  type ConnectionTypeSummary,
 } from "@foldedspacelabs/metistry-connections";
 
 /** What the console reads connections through. Absent from `ConsoleConfig` = no instance directory here, and both routes are 503. */
@@ -55,9 +57,17 @@ function catalogOf(view: ConnectionsView) {
   return loadInstanceCatalog({ instanceDir: view.instanceDir, ...(view.seedDir ? { seedDir: view.seedDir } : {}) });
 }
 
-/** Every connection, sorted by name. Never throws for a bad file: each is a row that says why. */
-export async function listConnections(view: ConnectionsView): Promise<ConnectionRow[]> {
-  return describeConnections(await catalogOf(view), { presence: view.presence });
+/**
+ * `GET /api/connections` in full: every connection, and every connection type
+ * this instance has installed — the product's seed and the owner's
+ * extensions through the one registry (§2.7) — so *Add Connection* can offer
+ * a known service and render its fields (T6-13b). A type is its manifest's
+ * shape: field KINDS, never a value, and nothing of an OAuth field's client.
+ * One catalog read serves both.
+ */
+export async function connectionsListing(view: ConnectionsView): Promise<{ connections: ConnectionRow[]; types: ConnectionTypeSummary[] }> {
+  const catalog = await catalogOf(view);
+  return { connections: await describeConnections(catalog, { presence: view.presence }), types: describeConnectionTypes(catalog.types) };
 }
 
 /** One connection in full, or undefined when there is no such file. */

@@ -31,7 +31,13 @@ import {
   socketDestination,
   variableRefsIn,
   type AuthScheme,
+  type ConnectionField,
   type ConnectionType,
+  type ConnectionTypeManifest,
+  type FieldKind,
+  type ReachClass,
+  type Registry,
+  type RegistryUnit,
   type Scheduled,
   type SecretPresence,
   type ToolGroup,
@@ -87,6 +93,48 @@ export interface ConnectionRow {
   used_by: ConnectionUser[];
 }
 
+/**
+ * One config field of a connection type, as the app renders it (§2.7: the
+ * app renders a known service's form from these — no per-service Swift).
+ * KINDS ONLY: an `oauth` field says it is one and nothing of its client; a
+ * `secret` field has no default by schema, and a value never has a place here.
+ */
+export interface ConnectionTypeField {
+  key: string;
+  kind: FieldKind;
+  label: string;
+  help: string | null;
+  required: boolean;
+  /** `text`, `url` and `choice` may carry one — never `secret` (the schema refuses it) */
+  default?: string | undefined;
+  /** `choice` only */
+  choices?: Array<{ value: string; label: string }> | undefined;
+}
+
+/**
+ * One installed connection type — what *Add Connection* offers once the type
+ * is chosen (screen 9 §10.5, T6-13b): the unit's name, a title a person reads,
+ * whether it is the product's or the owner's extension, what it provides, how
+ * a connection of it is reached and signs in, and its fields. Built from the
+ * registry every read path loads, so a type an extension adds or replaces
+ * appears here as it does everywhere (§2.7's overlay).
+ */
+export interface ConnectionTypeSummary {
+  name: string;
+  /** the manifest's description up to its first dash or full stop, or the name */
+  title: string;
+  description: string | null;
+  origin: UnitOrigin;
+  provides: ConnectionType;
+  transports: ReachClass[];
+  /** the sign-in schemes it declares; null when it declares none (any but `basic`) */
+  auth: AuthScheme[] | null;
+  capabilities: string[];
+  fields: ConnectionTypeField[];
+  /** the tools it declares, with the group each keeps */
+  tools: Array<{ name: string; group: ToolGroup }>;
+}
+
 /** One connection, in full: the row, where its file is, and what its provider's unit declares. */
 export interface ConnectionDetail extends ConnectionRow {
   /** instance-relative — `.metistry/connections/<name>.yaml` */
@@ -100,7 +148,49 @@ export interface ConnectionDetail extends ConnectionRow {
     sync: string | null;
     /** the tools the type declares, with the group each keeps */
     tools: Array<{ name: string; group: ToolGroup }>;
+    /** the same unit as *Add Connection* sees it — its fields, by kind (T6-13b) */
+    type: ConnectionTypeSummary;
   } | null;
+}
+
+/** A field as the wire carries it: its kind and shape, never a value. */
+export function describeConnectionField(f: ConnectionField): ConnectionTypeField {
+  const out: ConnectionTypeField = { key: f.key, kind: f.kind, label: f.label, help: f.help ?? null, required: f.required };
+  if ((f.kind === "text" || f.kind === "url" || f.kind === "choice") && f.default !== undefined) out.default = f.default;
+  if (f.kind === "choice") out.choices = f.options.map((o) => ({ value: o.value, label: o.label }));
+  return out;
+}
+
+/** `Linear — the issues assigned to you…` → `Linear`; no description → the name. */
+export function connectionTypeTitle(m: Pick<ConnectionTypeManifest, "name" | "description">): string {
+  const text = (m.description ?? "").trim();
+  const cut = text.search(/\s+[—–-]\s+|[.:]\s|[.:]$/);
+  const title = (cut === -1 ? text : text.slice(0, cut)).trim();
+  return title.length > 0 && title.length <= 80 ? title : m.name;
+}
+
+/** One installed connection type, as `GET /api/connections` serves it under `types`. */
+export function describeConnectionType(unit: RegistryUnit<ConnectionTypeManifest>): ConnectionTypeSummary {
+  const m = unit.manifest;
+  return {
+    name: unit.name,
+    title: connectionTypeTitle(m),
+    description: m.description ?? null,
+    origin: unit.origin,
+    provides: m.provides,
+    transports: [...m.transports],
+    auth: m.auth ? [...m.auth] : null,
+    capabilities: [...m.capabilities],
+    fields: m.fields.map(describeConnectionField),
+    tools: Object.entries(m.tools)
+      .map(([n, t]) => ({ name: n, group: t.group }))
+      .sort((a, b) => a.name.localeCompare(b.name)),
+  };
+}
+
+/** Every installed connection type, sorted by name — seed and extensions through one registry, a skipped manifest absent (its reason is doctor's). */
+export function describeConnectionTypes(types: Registry<ConnectionTypeManifest>): ConnectionTypeSummary[] {
+  return types.units().map(describeConnectionType);
 }
 
 export interface DescribeOptions {
@@ -285,6 +375,7 @@ export async function describeConnectionDetail(name: string, catalog: Connection
             tools: Object.entries(unit.manifest.tools)
               .map(([n, t]) => ({ name: n, group: t.group }))
               .sort((a, b) => a.name.localeCompare(b.name)),
+            type: describeConnectionType(unit),
           }
         : null,
   };

@@ -993,37 +993,6 @@ public struct LinkedInstance: Identifiable, Equatable, Sendable {
     }
 }
 
-/// Settings ▸ Keyboard's five: the any-app shortcuts (components-02 §2, C120).
-/// Registering them is T6-16's; until it lands the switch is off and dimmed
-/// with its reason, and nothing is registered (§2.18.2).
-public enum AnyAppShortcut: String, CaseIterable, Sendable {
-    case ask, note, todo, startRecording, stopRecording
-
-    public var command: ShellCommand {
-        switch self {
-        case .ask: return .ask
-        case .note: return .note
-        case .todo: return .todo
-        case .startRecording: return .startRecording
-        case .stopRecording: return .stopRecording
-        }
-    }
-
-    /// components-02 §2's suggestion.
-    public var suggested: String {
-        switch self {
-        case .ask: return "⌃⌥⌘A"
-        case .note: return "⌃⌥⌘N"
-        case .todo: return "⌃⌥⌘T"
-        case .startRecording: return "⌃⌥⌘R"
-        case .stopRecording: return "⌃⌥⌘S"
-        }
-    }
-
-    /// Why the switch is dimmed today.
-    public static let notYet = "Not in this build yet: the recorder that checks each shortcut with macOS comes first, and nothing is registered until every row is clear."
-}
-
 /// Lines a verb prints as it runs, gathered off the main actor.
 private final class LineCollector: @unchecked Sendable {
     private let lock = NSLock()

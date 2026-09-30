@@ -173,7 +173,7 @@ struct SettingsPaneContent: View {
             case .secrets: SecretsPaneView(model: model)
             case .variables: VariablesPaneView(model: model)
             case .liveCapture, .sessions: PendingPane(section: section)
-            case .keyboard: KeyboardPane(assistantName: model.settings.identity?.assistantName, actions: actions)
+            case .keyboard: KeyboardPane(assistantName: model.settings.identity?.assistantName, actions: actions, shortcuts: model.hotKeys, isAnswered: model.shell.canPerform)
             case .advanced: AdvancedPane(model: model, actions: actions)
             }
         }

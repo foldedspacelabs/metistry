@@ -800,6 +800,7 @@ the CLI owns. The app persists three POINTERS and no configuration.
 | Active instance | `activeInstance` | Which install the app is looking at. Reaches every verb as `METISTRY_INSTANCE_DIR`. |
 | Recents | `recentInstances` | The eight it looked at before, most recent first. |
 | Developer runtime override | `developerProductDirectory` | A product checkout, for a build with no runtime bundled inside it. Settings → Advanced only. |
+| Shortcuts in any app | `anyAppShortcuts` | The one exception, and not a pointer: the switch and the five keys of Settings ▸ Keyboard (T6-16). Plan §2.2 makes global hot keys device-local — "no CLI and no API" — so there is no file for them to front. Written only when the owner changes one. |
 
 Sparkle's own preferences (`SUEnableAutomaticChecks`, `SULastCheckTime`) and
 AppKit's window frames live in the same domain and are *theirs*: the app keeps no
@@ -889,7 +890,7 @@ core's (`LID_CLOSED_*` in `packages/core/src/power.ts`), mirrored in
 | Updates | the runtime: running version, channel, instance pin | `metistry version --json` → `product_version`, `lock.channel`, `lock.version` |
 | Updates | a newer runtime | `release.available` on `GET /api/events` (T2-18), heard while the app is open — nothing serves it otherwise, so the row says *none announced since the app opened* |
 | Updates | Update Runtime…, Roll Back… | `metistry update` / `metistry update --rollback` (M2), confirmed; Roll Back only on the release channel, which keeps the previous release. A failure is the CLI's own last line, with View Log |
-| Keyboard | Shortcuts in any app, and the five | components-02 §2's suggestions, **off and dimmed** until T6-16 registers them — nothing is registered; Show All opens Help ▸ Keyboard Shortcuts (⌘/) |
+| Keyboard | Shortcuts in any app, and the five | the app's own `anyAppShortcuts` default — device-local (plan §2.2), off until the owner turns it on; each row a recorder, checked as it is set, and registered with `RegisterEventHotKey` only once every row is clear ("Hot keys and the audit" below). Show All opens Help ▸ Keyboard Shortcuts (⌘/) |
 | Advanced | runtime from (Releases · Git checkout), located, command, product folder | the pin's channel, and the runtime locator (below) |
 | Advanced | product and runtime-pack versions, instance pin | `metistry version --json` |
 | Advanced | developer override | the persisted pointer |
@@ -1077,6 +1078,55 @@ dimmed. The single keys (↩ A R D L Space M) are **attached only while a list
 publishes `shellListFocus()`** — a bare key in the main menu is taken before a
 text field sees it, and even a dimmed item swallows its key, so the key is not
 there at all otherwise.
+
+**Hot keys and the audit (T6-16, `hotkeys.swift`).** Every key the app binds
+is a row of one closed table. The menus are `ShellCommand`; components-02 §1's
+per-screen table is `ScreenKeys`, and each of its keys says how it is bound —
+a menu item, a focused view's handler in a named file, macOS itself — or that
+it is **not bound, and why**: Any list's *Space select* (Space is Item ▸
+Complete), Today's Space, ⇧⌘P and ⌘C, Activity's ⌘R, and Agents' ⌘S and ⌘⌫
+(W2 ruling 24). Help ▸ Keyboard Shortcuts prints that reason under the row,
+so a documented key never silently does nothing; it also lists *Everywhere*
+(↩ and Esc in a sheet, ⌘↩ in New Capture, ← → on a row that folds, ⌘, and ⌘Q
+in the menu bar item) and *In Any App* (the five as they stand).
+`KeyTable.sites` is every `.keyboardShortcut(`, `.onKeyPress(`,
+`.onExitCommand` and `RegisterEventHotKey(` in `sources/`, and
+`hotkeys-tests.swift` scans the sources — comments and string literals
+blanked — and fails on a binding the table does not list, or a row nothing
+binds. Event monitors and event taps are not in the table, so they cannot
+land. The audit removed one key: Chat's bare `/` (screen 1 §6) is not in
+components-02's table, so it is not bound.
+
+*Shortcuts in any app* (C120, C127) is Settings ▸ Keyboard: one switch, off by
+default, and the five — Ask, Note, To-do, Start Recording, Stop Recording —
+suggested on ⌃⌥⌘ A N T R S. Each row is a recorder (*Record Shortcut* ·
+*Press a shortcut…* · the keys with ×; Esc cancels). A row is checked as it
+is set: it needs two of ⌃ ⌥ ⌘ (⌘ alone is every app's menus), it must not be
+one of this app's menu keys or another row's, it must not be one of macOS's
+own (the `com.apple.symbolichotkeys` domain, read and never written, over
+macOS's defaults — *macOS uses this to …*, a warning), and then it is
+registered: `RegisterEventHotKey`'s `eventHotKeyExistsErr` is *Another app
+already uses this. Pick another.* **Nothing registers until every row is
+clear** — a pass that meets a refusal takes back every key it registered —
+and off, or a row recording, means nothing is registered at all. A press runs
+the Capture item through `ShellModel.perform`, so a hot key can light nothing
+the menu could not; a row whose item nothing answers now (the capture bar
+lights them only while the live-capture bridge answers) says so on the pane
+and beeps. The Carbon call is the app target's
+(`sources/app/carbon-hot-keys.swift`); the decision is the kit's
+(`AnyAppShortcutsModel`), tested through a fake registrar. The switch and the
+keys are the app's one device-local setting (`AppPreference.anyAppShortcuts`,
+written only when the owner changes one): plan §2.2 lists global hot keys as
+"no CLI and no API", so there is no file for them to front. A hot key is
+registered by key position, so on a layout other than US the letter printed is
+the US one at that position.
+
+**Every view is probed.** `accessibility-audit-tests.swift` names, for every
+file under `sources/kit/` that declares a view, the test that puts it in a
+window and walks its accessibility tree, and fails on a view file with none;
+it probes the ones no screen's tests reached — the Status and log windows, the
+menu bar's menu, every wizard step, the CLI cards, every shared component's
+samples and Settings ▸ Keyboard.
 
 **Words.** Labels template the configured name from `GET /api/identity`; with
 no name known yet, *Ask* stands alone. No label anywhere says "assistant" —

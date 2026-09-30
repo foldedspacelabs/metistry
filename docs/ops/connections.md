@@ -98,6 +98,16 @@ the service, the owner's client id to the authorize and token endpoints).
 *Used by* is what reads it today: the syncs in `scheduled.yaml` that name it,
 and the sync its provider declares when that sync reads it (the rule *A sync
 reading its connection* below applies).
+
+Beside the rows, the listing serves **the installed connection types**
+(`describeConnectionTypes`; `GET /api/connections` → `types`, and each
+detail's `provider_unit.type`, T6-13b): every unit the registry loads — seed
+and extensions alike — with its fields **by kind** (`text` · `secret` ·
+`variable` · `url` · `choice` · `oauth`), so the Mac renders a known service's
+form from the manifest and no service has Swift of its own. A `secret` field
+carries no default by schema, and an `oauth` field is served as its kind alone
+— nothing of the client. Filling a field is `metistry connections add|set
+--config KEY=VALUE` (`docs/ops/cli.md`), judged against the same manifest.
 Agents reach a connection through the lazy pair `connections_list` /
 `connections_call` (below), which the console mounts over its own pool
 (T4-10); who reaches which is the owner's offer switch and each agent's grant.

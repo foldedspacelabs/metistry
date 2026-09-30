@@ -39,7 +39,7 @@ import { capabilitiesOf, type PublicIdentity } from "./identity.js";
 import { loadInstances } from "./instances.js";
 import { listSecrets, SECRETS_NOT_AVAILABLE, type SecretsView } from "./secrets-route.js";
 import { listVariables, VARIABLES_NOT_AVAILABLE, type VariablesView } from "./variables-route.js";
-import { CONNECTION_ROUTE, CONNECTIONS_NOT_AVAILABLE, listConnections, oneConnection, validConnectionName, type ConnectionsView } from "./connections-route.js";
+import { CONNECTION_ROUTE, CONNECTIONS_NOT_AVAILABLE, connectionsListing, oneConnection, validConnectionName, type ConnectionsView } from "./connections-route.js";
 import { VAULT_STATUS_NOT_AVAILABLE, VaultStatusUnavailable, type VaultStatusReader } from "./vault-status.js";
 import { applyRollback, carriesRollback, parseRollbackAsk, raiseRollback, rollbackOf, type VaultReverter } from "./vault-rollback.js";
 import { NDJSON_CONTENT_TYPE, RUNS_EXPORT_QUERY, parseExportParams, streamRunsExport } from "./runs-export.js";
@@ -1282,10 +1282,12 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
     // ----- the Connections list (§2.6): names, reach, tools and modes — never a value -----
     // Read-only and dial-free: every write is `metistry connections` on the
     // Mac (M13), and whether a server answers is `metistry connections test`
-    // (connections-route.ts).
+    // (connections-route.ts). `types` are the installed connection types —
+    // what Add Connection offers and the fields it renders (T6-13b); kinds, never a value.
     if (key === "GET /api/connections") {
       if (!cfg.connections) return sendError(res, "not_available", CONNECTIONS_NOT_AVAILABLE);
-      return sendJson(res, 200, { connections: await listConnections(cfg.connections), as_of: new Date().toISOString() });
+      const { connections, types } = await connectionsListing(cfg.connections);
+      return sendJson(res, 200, { connections, types, as_of: new Date().toISOString() });
     }
     const connectionOf = CONNECTION_ROUTE.exec(key);
     if (connectionOf) {

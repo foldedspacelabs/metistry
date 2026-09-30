@@ -30,7 +30,7 @@ const EVENTS_PATH = "/api/events"; // live.js EVENTS_PATH
 const SHELL = [
   "/",
   "/app.js", "/lib.js", "/live.js", "/offline.js", "/md.js",
-  "/today.js", "/needs-you.js", "/work.js", "/knowledge.js", "/more.js", "/notify.js",
+  "/today.js", "/needs-you.js", "/work.js", "/knowledge.js", "/more.js", "/notify.js", "/settings.js",
   "/tokens.css", "/style.css",
   "/manifest.webmanifest", "/icon.svg", "/icon-192.png", "/apple-touch-icon.png",
   "/vendor/simplewebauthn.js",

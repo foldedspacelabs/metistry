@@ -115,10 +115,14 @@ before any handler runs, with no second list in the server:
 
 `local_only` is `packages/core`'s error code for this answer, status `403`.
 Served `local` rows today: `POST /api/agents` and `POST /api/agents/:id/rotate`
-— minting a bearer is a boundary change — and `POST /api/sessions/purge`, which
-is irreversible. `metistry connect` mints through the first two
-with the local owner token, so it is unaffected; the legacy PWA's agent panel
-can no longer register or rotate an agent.
+— minting a bearer is a boundary change — `POST /api/sessions/purge`, which is
+irreversible, `PUT /api/scheduled/routines/:name/assignment` and
+`POST /api/scheduled/routines`, which change what runs, and
+`POST /api/knowledge/restore` and `POST /api/vault/rollback`, whose history and
+remote are the boundary. `metistry connect` mints through the first two with
+the local owner token, so it is unaffected. The PWA holds a passkey session, so
+it offers none of them: its Settings (T7-6) shows each as a Mac-only row — the
+reason, never a control — and a request sent anyway meets this answer.
 
 ## Versioning
 
@@ -3872,8 +3876,16 @@ exist. Reach enforces it; a client hiding a control is never the control.
 
 The `local` reach is what makes the Mac column true for the rows a phone may
 only read: agent registration and rotation (F-13), a routine's assignment and
-New Routine, Purge Now and a vault rollback are `local` rows in the table. The
-rest of the Mac-only column is the CLI (above).
+New Routine, Purge Now, restoring a file and a vault rollback are `local` rows
+in the table. The rest of the Mac-only column is the CLI (above).
+
+The PWA draws this table as More ▸ Settings (T7-6), grouped as the Mac's
+panes: what the phone reads, the budgets (`POST /api/compute/budget`,
+`PUT /api/projects/:slug`) and devices (`POST /api/devices/:id/revoke`, and
+Sign Out Everywhere as that door once per live device, the caller's own
+session last) it writes, and every row whose phone column is **—**, or whose
+write is the Mac's, as its reason with no control. `GET /api/whoami`'s
+`session_id` is how it marks *This Device*.
 
 ## Outside the contract
 

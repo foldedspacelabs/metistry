@@ -357,8 +357,8 @@ opens is `openSyncHttp` (`packages/connections`, `sync.ts`):
 - **The connection's config.** The sync is handed the connection's text
   config values (`config.repos`, `config.org`) — never a secret field's.
 
-**Which collectors are syncs of a connection (T4-11).** Beside Linear, the
-ICS, CalDAV and IMAP providers: **GitHub** (`github-state` reads the
+**Which collectors are syncs of a connection (T4-11).** Beside Linear and
+the calendar providers (ICS, CalDAV, Google Calendar): **GitHub** (`github-state` reads the
 `github` tracker connection — its read-only token, its `repos`; still
 read-only, `readOnlyGithub` wraps the door, and pinned to
 `https://api.github.com`), and **Devin** (`devin-sessions` and

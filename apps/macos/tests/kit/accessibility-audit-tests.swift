@@ -32,6 +32,7 @@ private let viewCoverage: [String: Coverage] = [
     "agents-view.swift": Coverage(test: "agents-view-tests.swift", probes: "AgentsView"),
     "artifacts-view.swift": Coverage(test: "artifacts-view-tests.swift", probes: "ArtifactsView"),
     "board-view.swift": Coverage(test: "board-view-tests.swift", probes: "BoardView"),
+    "capture-bar-view.swift": Coverage(test: "capture-bar-tests.swift", probes: "CaptureBarView"),
     "capture-view.swift": Coverage(test: "capture-view-tests.swift", probes: "CaptureComposerView"),
     "card-detail-view.swift": Coverage(test: "board-view-tests.swift", probes: "CardDetailView"),
     "chat-view.swift": Coverage(test: "chat-view-tests.swift", probes: "ChatView"),

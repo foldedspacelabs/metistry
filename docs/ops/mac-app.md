@@ -1110,8 +1110,9 @@ already uses this. Pick another.* **Nothing registers until every row is
 clear** — a pass that meets a refusal takes back every key it registered —
 and off, or a row recording, means nothing is registered at all. A press runs
 the Capture item through `ShellModel.perform`, so a hot key can light nothing
-the menu could not; a row whose item nothing answers yet (the capture bar is
-T8's) says so on the pane and beeps. The Carbon call is the app target's
+the menu could not; a row whose item nothing answers now (the capture bar
+lights them only while the live-capture bridge answers) says so on the pane
+and beeps. The Carbon call is the app target's
 (`sources/app/carbon-hot-keys.swift`); the decision is the kit's
 (`AnyAppShortcutsModel`), tested through a fake registrar. The switch and the
 keys are the app's one device-local setting (`AppPreference.anyAppShortcuts`,

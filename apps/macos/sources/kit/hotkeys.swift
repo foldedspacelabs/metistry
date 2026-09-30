@@ -175,7 +175,7 @@ public enum KeyTable {
     /// and shown on Help ▸ Keyboard Shortcuts under *Everywhere*.
     public static let everywhere: [DocumentedKey] = [
         DocumentedKey("everywhere.default", "↩", "the default button of a sheet", .platform("the sheet's default action")),
-        DocumentedKey("everywhere.escape", "Esc", "cancels a sheet, closes a popover or an editor, leaves a field", .platform("cancel")),
+        DocumentedKey("everywhere.escape", "Esc", "cancels a sheet, closes a popover, the capture bar's panel or an editor, leaves a field", .platform("cancel")),
         DocumentedKey("everywhere.press", "↩", "presses the focused New Reply pill", .platform("a focused control")),
         DocumentedKey("everywhere.fold", "← →", "fold and unfold a row that folds", .platform("an outline's own keys")),
         DocumentedKey("everywhere.capture", "⌘↩", "Capture, in New Capture", .platform("the composer's send")),
@@ -248,6 +248,7 @@ public enum KeyTable {
         KeySite("kit/needs-you-view.swift", ".onExitCommand", "everywhere.escape"),
         KeySite("kit/room-view.swift", ".onExitCommand", "everywhere.escape"),
         KeySite("kit/capture-view.swift", ".onExitCommand", "everywhere.escape"),
+        KeySite("kit/capture-bar-view.swift", ".onExitCommand", "everywhere.escape"),
         KeySite("kit/agents-view.swift", ".onExitCommand", "everywhere.escape"),
         KeySite("kit/agents-view.swift", ".onExitCommand", "everywhere.escape"),
         KeySite("kit/components/undo-and-confirm.swift", ".onExitCommand", "everywhere.escape"),

@@ -8,8 +8,9 @@
 // already uses this* in failed ink when macOS refused the registration,
 // *macOS uses this to …* as a warning for a system shortcut, and nothing is
 // registered until every row is clear. Off registers nothing, and the rows
-// are dimmed. A row whose command nothing answers yet (the capture bar is
-// T8's) says so rather than letting its key do nothing silently.
+// are dimmed. A row whose command nothing answers now (the capture bar, T8-5,
+// lights them only while the live-capture bridge answers) says so rather than
+// letting its key do nothing silently.
 
 import SwiftUI
 
@@ -54,7 +55,7 @@ struct KeyboardPane: View {
 
 /// The pane's sentences, in one place for the tests.
 enum KeyboardPaneWords {
-    static let unanswered = "Nothing answers this yet: the capture bar is not in this build, so the key only beeps."
+    static let unanswered = "Nothing answers this now: the capture bar is not running, so the key only beeps."
     static let recording = "Press a shortcut…"
     static let record = "Record Shortcut"
 

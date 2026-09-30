@@ -271,7 +271,7 @@ import Testing
     app.hotKeys.setOn(true)
     registrar.press(AnyAppShortcut.note.hotKeyID)
     #expect(noted == 1)
-    // To-do has nothing behind it yet (the capture bar is T8's): it says so
+    // To-do has nothing behind it (no bar running): it says so
     registrar.press(AnyAppShortcut.todo.hotKeyID)
     #expect(beeped == [.todo])
     // an id that is not one of the five, and any press while off, do nothing

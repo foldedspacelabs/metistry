@@ -64,6 +64,7 @@ import type { SecretsView } from "./secrets-route.js";
 import type { VariablesView } from "./variables-route.js";
 import type { ConnectionsView } from "./connections-route.js";
 import { envSecretSource, instanceSyncOpener } from "@foldedspacelabs/metistry-connections";
+import { consoleConnections } from "./connections-proxy.js";
 import { GithubWriteClient } from "./github-write.js";
 import { readInstanceId, securityPresence, realExec } from "@foldedspacelabs/metistry-cli";
 import { CrewRegistry, crewRoutineQueue } from "./crews.js";
@@ -412,9 +413,21 @@ console.log(
     : "connections absent: METISTRY_INSTANCE_DIR is unset or not readable — GET /api/connections answers 503; `metistry connections list` still works (degrades: absent)",
 );
 
+// The connections proxy (plan §2.6, C115; wired in T4-10, ruled 2026-09-30
+// Q10): one pooled client over the instance's catalog, handed to `/mcp` and
+// to the Approve path (connections-proxy.ts says what it fills and from
+// where). No instance directory: no pool, and both tools answer
+// `not_available` (the fail-closed end).
+const connectionsProxy = connections ? consoleConnections({ instanceDir: connections.instanceDir, seedDir: connections.seedDir }, { env: process.env, version: consoleVersion }).proxy : undefined;
+console.log(
+  connectionsProxy
+    ? "connections proxy: mounted on /mcp (connections_list, connections_call) and the Approve path, over the instance's catalog; values from METISTRY_SECRET_* (`metistry secrets sync --to env`)"
+    : "connections proxy absent: no instance directory — connections_list and connections_call answer not_available (degrades: absent)",
+);
+
 // The connections proxy's confirm-token lifetime and hourly limits, each
 // counted from `runs` (T4-9; docs/ops/connections.md). They bind whenever a
-// proxy is mounted; the pool itself is not wired on a live console yet.
+// proxy is mounted.
 const connectionLimits: ConnectionLimits = {
   confirmTtlS: intEnv("METISTRY_CONNECTION_CONFIRM_TTL_S", DEFAULT_CONNECTION_CONFIRM_TTL_S),
   callsPerHour: intEnv("METISTRY_CONNECTION_CALLS_PER_HOUR", DEFAULT_CONNECTION_CALLS_PER_HOUR),
@@ -586,6 +599,7 @@ const server = makeServer(pool, queries, {
   // delivered by `metistry secrets sync --to env`, filled for api.linear.app
   // only. No instance: the door answers 503.
   ...(connections ? { trackers: linearTrackerOpener({ instanceDir: connections.instanceDir, seedDir: connections.seedDir, env: process.env }) } : {}),
+  ...(connectionsProxy ? { connectionsProxy } : {}),
   connectionLimits,
   origins,
   ...(identity ? { identity } : {}),

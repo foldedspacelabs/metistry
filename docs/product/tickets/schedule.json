@@ -171,6 +171,11 @@
     },
     "W4": {
       "tickets": [
+        "X-24",
+        "X-29",
+        "X-31",
+        "X-32",
+        "X-41",
         "T4-10",
         "T4-11",
         "T4-14",
@@ -189,8 +194,8 @@
         "T8-7",
         "T9-4"
       ],
-      "count": 17,
-      "agent_days": 65
+      "count": 22,
+      "agent_days": 73
     },
     "W5": {
       "tickets": [
@@ -2451,7 +2456,7 @@
     "X-24": {
       "title": "Plan-tomorrow's test runs on its own clock",
       "track": "X",
-      "wave": "candidate",
+      "wave": "W4",
       "size": "S",
       "days": 1,
       "model": "sonnet",
@@ -2515,7 +2520,7 @@
     "X-29": {
       "title": "Main's Mac fixtures match the recorder",
       "track": "X",
-      "wave": "candidate",
+      "wave": "W4",
       "size": "M",
       "days": 2.5,
       "model": "opus",
@@ -2541,7 +2546,7 @@
     "X-31": {
       "title": "The recorder's seeds are pinned to its clock",
       "track": "X",
-      "wave": "candidate",
+      "wave": "W4",
       "size": "S",
       "days": 1,
       "model": "sonnet",
@@ -2553,7 +2558,7 @@
     "X-32": {
       "title": "A push carries Needs You only, and no text",
       "track": "X",
-      "wave": "candidate",
+      "wave": "W4",
       "size": "M",
       "days": 2.5,
       "model": "opus",
@@ -2674,7 +2679,7 @@
     "X-41": {
       "title": "An owner-door secret refuses a connection or agent grant",
       "track": "X",
-      "wave": "candidate",
+      "wave": "W4",
       "size": "S",
       "days": 1,
       "model": "sonnet",
@@ -3149,10 +3154,10 @@
     }
   },
   "totals": {
-    "tickets": 162,
-    "agent_days": 479.5,
+    "tickets": 167,
+    "agent_days": 487.5,
     "waves": 6,
-    "candidates": 51
+    "candidates": 46
   },
   "critical_path": {
     "days": 35,
@@ -3169,15 +3174,11 @@
   },
   "candidates": {
     "tickets": [
-      "X-24",
       "X-25",
       "X-26",
       "X-27",
       "X-28",
-      "X-29",
       "X-30",
-      "X-31",
-      "X-32",
       "X-33",
       "X-34",
       "X-35",
@@ -3186,7 +3187,6 @@
       "X-38",
       "X-39",
       "X-40",
-      "X-41",
       "X-42",
       "X-43",
       "X-44",
@@ -3221,7 +3221,7 @@
       "X-73",
       "X-74"
     ],
-    "count": 51,
-    "agent_days": 75
+    "count": 46,
+    "agent_days": 67
   }
 }

@@ -1097,11 +1097,8 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         return sendJson(res, 200, { ok: true });
       }
       if (key === "POST /api/push/test") {
-        const result = await sendToSession(db, cfg.push, auth.sessionId, {
-          title: "Metistry",
-          body: "push works — this device is reachable",
-          url: "/",
-        });
+        // fixed words, no body: a test push carries what every push carries (X-32)
+        const result = await sendToSession(db, cfg.push, auth.sessionId, { type: "Metistry", title: "This device is reachable", url: "/" });
         return sendJson(res, 200, { result });
       }
     }

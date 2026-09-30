@@ -622,6 +622,12 @@ a fast path still wins, and an unknown name is ignored rather than invented.
 `/note` and a fast path answer in the `202` itself (`reply`); everything else
 is answered by the assistant into the thread, read back through `GET
 /api/messages`. A message answering a blocking `decision` request settles it.
+The wire does not change when the owner's router policy serves
+(`rules.yaml` `policy.mode: serve`, `docs/ops/compute.md` "Serving"): a
+message the rules leave on the default tier may then be answered in the `202`
+too (a fast path the policy chose), and the `202` may wait up to
+`policy.timeout_ms` (at most 2 s) while the policy is consulted — a client
+already handles both shapes of the body.
 `POST /message` is **not idempotent and not meant to be queued**: a reply three
 hours late into a moved-on thread confuses more than it helps. Feedback is an
 upsert on the message id — the reply row stays immutable, the judgement is

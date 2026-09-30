@@ -15,8 +15,8 @@
 // **Through the connection that can, or not at all.** The event is a row
 // of `calendar_events`; the answer goes through a calendar connection whose
 // provider declares `rsvp` and holds the same meeting — its own calendar,
-// or another that holds the same UID (the Mac's calendar cannot answer:
-// EventKit's participant status is read-only). **Without an `rsvp`
+// or another that holds the same UID (CalDAV, T4-13; Google, T4-14 — the Mac's
+// calendar cannot answer: EventKit's participant status is read-only). **Without an `rsvp`
 // capability it is refused**, `503` with `open_in_calendar: true`, before
 // anything is sent — the client offers *Open in Calendar* (Q9). The rule is
 // `collectors/invitations.ts`'s; this module is the door: the path, the
@@ -157,8 +157,8 @@ export async function invitationRespondRoute(req: IncomingMessage, res: ServerRe
     }
     const done = await confirmInvitationReply(deps.db, deps.open, binding);
     if (done.cleared.length > 0) await deps.db.query(`UPDATE proposals SET payload = payload - 'error' WHERE id = ANY($1::bigint[])`, [done.cleared]);
-    await audited(true, done.result.unchanged ? "unchanged" : "responded", { connection: binding.connection, response: binding.response, ...(done.secrets.length > 0 ? { [SECRET_USE_META_KEY]: done.secrets } : {}) });
-    return sendJson(res, 200, { ok: true, event_id: eventId, response: binding.response, connection: binding.connection, responded: true, unchanged: done.result.unchanged, cleared: done.cleared.length });
+    await audited(true, done.unchanged ? "unchanged" : "responded", { connection: binding.connection, response: binding.response, ...(done.secrets.length > 0 ? { [SECRET_USE_META_KEY]: done.secrets } : {}) });
+    return sendJson(res, 200, { ok: true, event_id: eventId, response: binding.response, connection: binding.connection, responded: true, unchanged: done.unchanged, cleared: done.cleared.length });
   } catch (err) {
     if (err instanceof RespondRefused) {
       await audited(false, err.code);

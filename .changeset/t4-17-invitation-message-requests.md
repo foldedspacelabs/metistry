@@ -5,7 +5,7 @@
 "@metistry-apps/console": minor
 ---
 
-T4-17: Invitation and message requests. The eventkit and CalDAV syncs raise
+T4-17: Invitation and message requests. The eventkit, CalDAV and Google Calendar syncs raise
 one `invitation` mirror per meeting still to come whose owner's answer is
 needs-action and which someone else organises (R7) — a series is one card,
 the same meeting on two calendars one card with both askers — cleared with a
@@ -19,7 +19,7 @@ types declare `sync: mail-messages`, so their app password is delivered to
 the console; `openSyncImap` / `instanceImapOpener` open the mailbox through
 the IMAP host guard, and `ImapSession.readMessage` re-reads one message's
 headers by reference. `POST /api/calendar/invitations/:id/respond` answers
-through a connection whose provider declares `rsvp` (refused with Open in
-Calendar where none can) and `POST /api/mail/messages/:id/draft` writes a
+through a connection whose provider declares `rsvp` — CalDAV or Google
+Calendar — (refused with Open in Calendar where none can) and `POST /api/mail/messages/:id/draft` writes a
 reply to Drafts, addressed from the message's own headers; both preview,
 then confirm with a single-use token, and never send mail.

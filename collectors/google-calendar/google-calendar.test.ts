@@ -34,6 +34,7 @@ import {
 import { INVITE, INVITE_BODY } from "../../packages/connections/test/google-fixtures.js";
 import { fakeGoogle, type FakeGoogle } from "../../packages/connections/test/google-server.js";
 import { run } from "./run.js";
+import { calendarRsvpOpener, confirmInvitationReply, previewInvitationReply } from "../invitations.js";
 
 const { hasDb } = loadTestEnv(new URL("../../.env", import.meta.url)); // METISTRY_DB_* only (docs/ops/testing.md)
 
@@ -104,7 +105,8 @@ describe("the google-calendar collector's manifest", () => {
   it("loads through the collector registry as a sync every 15 minutes", async () => {
     const reg = await loadKind("collector", { productDir: fileURLToPath(new URL("../..", import.meta.url)) });
     const m = reg.get("google-calendar")?.manifest;
-    expect(m, JSON.stringify(reg.skipped)).toMatchObject({ name: "google-calendar", display_name: "Google Calendar", schedule: { every: "15m" }, writes: ["calendar_events", "sync_state"] });
+    expect(m, JSON.stringify(reg.skipped)).toMatchObject({ name: "google-calendar", display_name: "Google Calendar", schedule: { every: "15m" }, writes: ["calendar_events", "sync_state", "proposals"] });
+    expect(m?.type === "collector" ? m.needs_you : null).toEqual({ invitation: { label: "A meeting invitation waits on your answer", default: true } });
   });
 });
 
@@ -186,6 +188,7 @@ describe.skipIf(!hasDb)("the google-calendar sync (real db)", () => {
   const clean = async () => {
     await pool.query(`DELETE FROM calendar_events WHERE connection = $1`, [CONN]);
     await pool.query(`DELETE FROM sync_state WHERE connection = $1`, [CONN]);
+    await pool.query(`DELETE FROM proposals WHERE kind = 'invitation' AND payload->>'connection' = $1`, [CONN]);
   };
 
   beforeAll(async () => {
@@ -215,5 +218,23 @@ describe.skipIf(!hasDb)("the google-calendar sync (real db)", () => {
     expect(await run(pool, ctx)).toBe(1);
     expect(await status()).toBe("accepted");
     expect(JSON.stringify((await pool.query(`SELECT * FROM calendar_events WHERE connection = $1`, [CONN])).rows)).not.toContain(INVITE_BODY);
+  });
+
+  it("raises the invitation, and Respond (T4-17) answers it through Google — the owner's own responseStatus — and clears it", async () => {
+    const s = await signedIn(CONN);
+    const early = Date.parse("2026-09-28T12:00:00Z"); // before the design review starts
+    await run(pool, { openSync: opener(s), ownerTimeZone: ZONE, now: () => early });
+    const mirror = async () =>
+      (await pool.query(`SELECT decision, payload->'cleared' AS cleared, payload->>'rsvp' AS rsvp FROM proposals WHERE kind = 'invitation' AND source->>'external_ref' = $1 AND payload->>'connection' = $2`, [`invite:uid/${INVITE.iCalUID}`, CONN])).rows;
+    expect(await mirror()).toEqual([{ decision: "pending", cleared: null, rsvp: "true" }]);
+
+    const open = calendarRsvpOpener({ instanceDir: s.dir, seedDir: SEED_DIR, extensions: false, env: s.env, fetch: s.g.routeTo() });
+    const p = await previewInvitationReply(pool, open, { event_id: String(INVITE.id), response: "declined" });
+    expect(p).toMatchObject({ connection: CONN, title: "Design review", organizer: "alice@example.com", response: "declined", unchanged: false });
+    expect(p.binding.target).toBe(String(INVITE.id));
+    const done = await confirmInvitationReply(pool, open, p.binding);
+    expect(done.cleared).toHaveLength(1);
+    expect(await mirror()).toEqual([{ decision: "resolved_at_source", cleared: { what: "You declined — the reply went to the organizer", where: "calendar" }, rsvp: "true" }]);
+    expect((await pool.query(`SELECT self_status FROM calendar_events WHERE connection = $1 AND event_id = $2`, [CONN, INVITE.id])).rows).toEqual([{ self_status: "declined" }]);
   });
 });

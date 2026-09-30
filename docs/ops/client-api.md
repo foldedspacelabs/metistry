@@ -3184,8 +3184,8 @@ Two calls, as every destructive tool is:
 exist while the source says the owner is needed and clear when it stops.
 
 - **`invitation`** — raised by a calendar sync that knows who the owner is
-  (the eventkit sync, a CalDAV account; an ICS feed never names the owner and
-  never raises one) for a meeting still to come whose owner's answer is
+  (the eventkit sync, a CalDAV account, Google Calendar; an ICS feed never
+  names the owner and never raises one) for a meeting still to come whose owner's answer is
   needs-action (`self_status: pending`) and which someone else organises. One
   per meeting — `source {kind: "calendar", external_ref:
   "invite:uid/<ical_uid>"}` — so a series is one card and the same meeting on
@@ -3227,8 +3227,9 @@ Q9) — the invitation's Accept · Maybe · Decline. `:id` is the event's
   the reply (RFC 6638). A series is answered as a whole. The request clears
   (*You accepted — the reply went to the organizer*).
 - **Through the connection that can, or not at all.** The answer goes through
-  a calendar connection whose provider declares **`rsvp`** (CalDAV today;
-  Google with T4-14) and that holds the same meeting — the event's own, or
+  a calendar connection whose provider declares **`rsvp`** (CalDAV, by the
+  meeting's UID; Google Calendar, by the series or the event, T4-14) and
+  that holds the same meeting — the event's own, or
   another with the same UID. The Mac's calendar cannot answer (EventKit's
   participant status is read-only). **Without an `rsvp` capability it is
   refused** — `503`, `reason: "no_rsvp"`, `open_in_calendar: true` — before

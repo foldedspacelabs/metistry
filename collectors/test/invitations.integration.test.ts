@@ -12,7 +12,6 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import pg from "pg";
 import { mintToken } from "@foldedspacelabs/metistry-core";
 import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
-import type { ReplyPreview, WriteResult } from "@foldedspacelabs/metistry-connections";
 import {
   CALENDAR_SOURCE_KIND,
   INVITATION_KIND,
@@ -215,10 +214,9 @@ describe.skipIf(!hasDb)("invitation requests (T4-17, real db)", () => {
   });
 
   describe("Respond — through the connection that can", () => {
-    const sent: { connection: string; op: string; response: string; etag?: string }[] = [];
-    const preview = (connection: string, response: string): ReplyPreview => ({ connection, uid: uid("rsvp"), response: response as never, title: "Vendor review", organizer: "dana@example.com", as: "me@example.com", etag: '"e1"', changes: [], unchanged: false });
+    const sent: { connection: string; op: string; target: string; response: string; etag?: string }[] = [];
     const opener =
-      (can: Record<string, OpenedRsvp["ok"] | "absent" | "no_capability">): RsvpOpener =>
+      (can: Record<string, true | "absent" | "no_capability">): RsvpOpener =>
       async (connection) => {
         const how = can[connection] ?? "absent";
         if (how === true) {
@@ -227,11 +225,12 @@ describe.skipIf(!hasDb)("invitation requests (T4-17, real db)", () => {
             rsvp: {
               connection,
               provider: "caldav",
-              preview: async (req) => (sent.push({ connection, op: "preview", response: req.response }), preview(connection, req.response)),
-              respond: async (req): Promise<WriteResult> => (sent.push({ connection, op: "respond", response: req.response, etag: req.etag }), { connection, uid: req.uid, etag: '"e2"', changes: [], unchanged: false }),
+              targetOf: (row) => row.ical_uid,
+              preview: async (req) => (sent.push({ connection, op: "preview", target: req.target, response: req.response }), { title: "Vendor review", organizer: "dana@example.com", as: "me@example.com", etag: '"e1"', unchanged: false }),
+              respond: async (req) => (sent.push({ connection, op: "respond", target: req.target, response: req.response, etag: req.etag }), { unchanged: false }),
               secretsUsed: () => ["caldav_password"],
             },
-          };
+          } satisfies OpenedRsvp;
         }
         return { ok: false, status: how === "no_capability" ? "no_capability" : "absent", why: `${connection} cannot` };
       };
@@ -260,11 +259,11 @@ describe.skipIf(!hasDb)("invitation requests (T4-17, real db)", () => {
       const open = opener({ [MAC]: "absent", [DAV]: true });
       const p = await previewInvitationReply(pool, open, { event_id: "EK-rsvp", response: "tentative" });
       expect(p).toMatchObject({ event_id: "EK-rsvp", connection: DAV, title: "Vendor review", response: "tentative", organizer: "dana@example.com", as: "me@example.com", unchanged: false, secrets: ["caldav_password"] });
-      expect(p.binding).toEqual({ event_id: "EK-rsvp", connection: DAV, uid: uid("rsvp"), response: "tentative", etag: '"e1"' });
-      expect(sent).toEqual([{ connection: DAV, op: "preview", response: "tentative" }]);
+      expect(p.binding).toEqual({ event_id: "EK-rsvp", connection: DAV, target: uid("rsvp"), response: "tentative", etag: '"e1"', subject_ref: `invite:uid/${uid("rsvp")}`, rows: { ical_uid: uid("rsvp"), event_id: uid("rsvp") } });
+      expect(sent).toEqual([{ connection: DAV, op: "preview", target: uid("rsvp"), response: "tentative" }]);
 
       const done = await confirmInvitationReply(pool, open, p.binding);
-      expect(sent.at(-1)).toEqual({ connection: DAV, op: "respond", response: "tentative", etag: '"e1"' });
+      expect(sent.at(-1)).toEqual({ connection: DAV, op: "respond", target: uid("rsvp"), response: "tentative", etag: '"e1"' });
       expect(done.cleared).toHaveLength(1);
       const [m] = await mirrors(uid("rsvp"));
       expect(m.decision).toBe("resolved_at_source");

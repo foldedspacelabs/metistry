@@ -28,9 +28,10 @@
 //
 // **Respond** — the owner's Accept · Maybe · Decline — goes through the
 // connection that can: a calendar connection whose provider declares `rsvp`
-// (CalDAV's `previewReply` / `respondToInvitation`, T4-13). Preview, then
-// confirm against the event's ETag; exactly the owner's own attendee line
-// changes, and the server delivers the reply. **Without an `rsvp`
+// (CalDAV's `previewReply` / `respondToInvitation`, T4-13; Google's
+// `previewGoogleReply` / `respondToGoogleInvitation`, T4-14). Preview, then
+// confirm against the event's ETag; exactly the owner's own answer changes,
+// and the server delivers the reply. **Without an `rsvp`
 // capability it is refused** (`no_rsvp`) before anything is sent, and the
 // client offers *Open in Calendar* (Q9) — the Mac's own calendar cannot
 // answer (EventKit's participant status is read-only). The confirm token
@@ -46,16 +47,22 @@ import {
   CALDAV_SYNC,
   CaldavError,
   ConnectionRefused,
+  GOOGLE_CALENDAR_MODULE,
+  GOOGLE_CALENDAR_ORIGIN,
+  GOOGLE_CALENDAR_SYNC,
+  GOOGLE_TOKEN_HOSTS,
+  GoogleCalendarError,
   RSVP_RESPONSES,
   envSecretSource,
   loadInstanceCatalog,
   openSyncHttp,
+  previewGoogleReply,
   previewReply,
+  respondToGoogleInvitation,
   respondToInvitation,
   type CatalogRoots,
-  type ReplyPreview,
+  type OAuthCache,
   type RsvpResponse,
-  type WriteResult,
 } from "@foldedspacelabs/metistry-connections";
 import type { Db } from "./github-state/run.js";
 
@@ -285,12 +292,27 @@ export async function reconcileInvitations(db: Db, r: ReconcileInvitations): Pro
 
 // ---- Respond: Accept · Maybe · Decline, through the connection that can ------------------------
 
+/** What a provider's preview says, in one shape whichever provider it is. */
+export interface RsvpPreview {
+  title: string;
+  /** who the answer goes to — the organizer's address */
+  organizer: string | null;
+  /** the owner's address it answers as */
+  as: string;
+  /** what the confirm names: the event's version as the preview read it */
+  etag: string;
+  /** the owner already gave this answer: the confirm writes nothing */
+  unchanged: boolean;
+}
+
 /** A calendar connection that can answer an invitation, opened by name. Names, never a value. */
 export interface RsvpConnection {
   connection: string;
   provider: string;
-  preview(req: { uid: string; response: RsvpResponse }): Promise<ReplyPreview>;
-  respond(req: { uid: string; response: RsvpResponse; etag: string }): Promise<WriteResult>;
+  /** what this provider answers one of its own rows by — CalDAV: the meeting's UID; Google: the series' id, else the event's — or null when it cannot */
+  targetOf(row: { event_id: string; ical_uid: string | null; series_id: string | null }): string | null;
+  preview(req: { target: string; response: RsvpResponse }): Promise<RsvpPreview>;
+  respond(req: { target: string; response: RsvpResponse; etag: string }): Promise<{ unchanged: boolean }>;
   secretsUsed(): string[];
 }
 
@@ -302,13 +324,15 @@ export type RsvpOpener = (connection: string) => Promise<OpenedRsvp>;
 /**
  * The console's opener: the instance's catalog afresh on every press, the
  * connection by NAME, and only when its provider declares `rsvp` — then
- * opened through the same door the CalDAV sync reads through (pinned to its
- * own origin, the app password filled at the egress door, no redirect
- * followed). Never dials. A connection that is not a file of the instance
- * (the Mac's own `eventkit` calendar) is absent: it cannot answer.
+ * opened through the same door its sync reads through (CalDAV: pinned to
+ * its own origin, the app password filled at the egress door; Google: the
+ * Calendar API only, signed in with the connection's OAuth token held to
+ * exact hosts — T4-14). Never dials. A connection that is not a file of the
+ * instance (the Mac's own `eventkit` calendar) is absent: it cannot answer.
  */
 export function calendarRsvpOpener(roots: CatalogRoots & { env: NodeJS.ProcessEnv; fetch?: typeof fetch | undefined }): RsvpOpener {
   const secrets = envSecretSource(roots.env);
+  const oauth: OAuthCache = new Map();
   return async (connection) => {
     const catalog = await loadInstanceCatalog(roots);
     const entry = catalog.entries.find((e) => e.name === connection);
@@ -320,31 +344,52 @@ export function calendarRsvpOpener(roots: CatalogRoots & { env: NodeJS.ProcessEn
     if (m.provides !== "calendar" || !m.capabilities.includes(RSVP_CAPABILITY)) {
       return { ok: false, status: "no_capability", why: `connection ${connection}'s provider ${entry.provider.name} cannot answer an invitation (no ${RSVP_CAPABILITY} capability)` };
     }
-    if (m.implementation.kind !== "builtin" || m.implementation.module !== CALDAV_MODULE) {
-      return { ok: false, status: "no_capability", why: `connection ${connection}'s provider ${entry.provider.name} answers invitations through a module this console does not run` };
-    }
+    const module = m.implementation.kind === "builtin" ? m.implementation.module : null;
     // `openSyncHttp` picks the connection a sync reads; naming this one for
-    // the CalDAV sync (in a copy of scheduled.yaml that nothing writes)
+    // its provider's sync (in a copy of scheduled.yaml that nothing writes)
     // opens exactly the connection named, with every check it applies
-    const opened = openSyncHttp({
-      catalog: { ...catalog, scheduled: { syncs: { [CALDAV_SYNC]: { connection } } } },
-      sync: CALDAV_SYNC,
-      module: CALDAV_MODULE,
-      secrets,
-      ...(roots.fetch ? { fetch: roots.fetch } : {}),
-    });
-    if (!opened.ok) return { ok: false, status: opened.status === "absent" ? "absent" : "failed", why: opened.why };
-    const sync = opened.sync;
-    return {
-      ok: true,
-      rsvp: {
-        connection: sync.connection,
-        provider: sync.provider,
-        preview: (req) => previewReply(sync, req),
-        respond: (req) => respondToInvitation(sync, req),
-        secretsUsed: () => sync.secretsUsed(),
-      },
-    };
+    const open = (sync: string, extra: { origin?: string; tokenHosts?: readonly string[] } = {}) =>
+      openSyncHttp({ catalog: { ...catalog, scheduled: { syncs: { [sync]: { connection } } } }, sync, module: module!, secrets, oauth, ...extra, ...(roots.fetch ? { fetch: roots.fetch } : {}) });
+    if (module === CALDAV_MODULE) {
+      const opened = open(CALDAV_SYNC);
+      if (!opened.ok) return { ok: false, status: opened.status === "absent" ? "absent" : "failed", why: opened.why };
+      const sync = opened.sync;
+      return {
+        ok: true,
+        rsvp: {
+          connection: sync.connection,
+          provider: sync.provider,
+          targetOf: (row) => row.ical_uid,
+          preview: async ({ target, response }) => {
+            const p = await previewReply(sync, { uid: target, response });
+            return { title: p.title, organizer: p.organizer, as: p.as, etag: p.etag, unchanged: p.unchanged };
+          },
+          respond: async ({ target, response, etag }) => ({ unchanged: (await respondToInvitation(sync, { uid: target, response, etag })).unchanged }),
+          secretsUsed: () => sync.secretsUsed(),
+        },
+      };
+    }
+    if (module === GOOGLE_CALENDAR_MODULE) {
+      const opened = open(GOOGLE_CALENDAR_SYNC, { origin: GOOGLE_CALENDAR_ORIGIN, tokenHosts: GOOGLE_TOKEN_HOSTS });
+      if (!opened.ok) return { ok: false, status: opened.status === "absent" ? "absent" : "failed", why: opened.why };
+      const sync = opened.sync;
+      return {
+        ok: true,
+        rsvp: {
+          connection: sync.connection,
+          provider: sync.provider,
+          // a series is answered at its master, as the CalDAV reply answers the UID: one card, one answer
+          targetOf: (row) => row.series_id ?? row.event_id,
+          preview: async ({ target, response }) => {
+            const p = await previewGoogleReply(sync, { event_id: target, response });
+            return { title: p.title, organizer: p.organizer, as: p.as, etag: p.etag, unchanged: p.unchanged };
+          },
+          respond: async ({ target, response, etag }) => ({ unchanged: (await respondToGoogleInvitation(sync, { event_id: target, response, etag })).unchanged }),
+          secretsUsed: () => sync.secretsUsed(),
+        },
+      };
+    }
+    return { ok: false, status: "no_capability", why: `connection ${connection}'s provider ${entry.provider.name} answers invitations through a module this console does not run` };
   };
 }
 
@@ -366,9 +411,14 @@ export class RespondRefused extends Error {
 export interface RespondBinding {
   event_id: string;
   connection: string;
-  uid: string;
+  /** what the provider answers by (`RsvpConnection.targetOf`) */
+  target: string;
   response: RsvpResponse;
   etag: string;
+  /** the invitation's request subject, cleared once the answer is in */
+  subject_ref: string;
+  /** the answering connection's rows that take the answer at once */
+  rows: { ical_uid: string | null; event_id: string };
 }
 
 export interface RespondPreview {
@@ -390,10 +440,20 @@ export interface RespondPreview {
 
 const isResponse = (v: unknown): v is RsvpResponse => typeof v === "string" && (RSVP_RESPONSES as readonly string[]).includes(v);
 
-function caldavRefusal(err: unknown): never {
-  if (err instanceof CaldavError) {
+function providerRefusal(err: unknown): never {
+  if (err instanceof CaldavError || err instanceof GoogleCalendarError) {
     const code: RespondRefusalCode =
-      err.code === "not_invited" ? "not_invited" : err.code === "no_scheduling" ? "no_scheduling" : err.code === "changed" ? "changed" : err.code === "not_found" ? "not_found" : "connection_failed";
+      err.code === "not_invited"
+        ? "not_invited"
+        : err.code === "no_scheduling" || err.code === "unsupported"
+          ? "no_scheduling"
+          : err.code === "changed"
+            ? "changed"
+            : err.code === "not_found"
+              ? "not_found"
+              : err.code === "bad_request"
+                ? "bad_request"
+                : "connection_failed";
     throw new RespondRefused(code, err.message);
   }
   // the door's own refusals — another host, a redirect, a secret it will not fill — name names and hosts, never a value
@@ -401,27 +461,33 @@ function caldavRefusal(err: unknown): never {
   throw err;
 }
 
+const COLS = `connection, event_id, ical_uid, series_id, title, starts_at, ends_at, all_day, location, organizer, attendees, self_status`;
+
 /**
  * Which connection answers for this event: the event's own connection when
  * it can, else another that holds the same meeting (its UID) and can —
  * `no_rsvp` when none does, before anything is sent.
  */
-async function rsvpFor(db: Db, open: RsvpOpener, eventId: string): Promise<{ row: EventRow; rsvp: RsvpConnection; rows: EventRow[] }> {
-  const cols = `connection, event_id, ical_uid, series_id, title, starts_at, ends_at, all_day, location, organizer, attendees, self_status`;
-  const mine = (await db.query(`SELECT ${cols} FROM calendar_events WHERE event_id = $1 ORDER BY connection COLLATE "C"`, [eventId])).rows as EventRow[];
+async function rsvpFor(db: Db, open: RsvpOpener, eventId: string): Promise<{ row: EventRow; rsvp: RsvpConnection; target: string; rows: EventRow[] }> {
+  const mine = (await db.query(`SELECT ${COLS} FROM calendar_events WHERE event_id = $1 ORDER BY connection COLLATE "C"`, [eventId])).rows as EventRow[];
   if (mine.length === 0) throw new RespondRefused("not_found", "no calendar holds an event with this id — the calendar sync may not have read it yet");
   const uid = mine.find((r) => r.ical_uid)?.ical_uid ?? null;
-  const rows = uid ? ((await db.query(`SELECT ${cols} FROM calendar_events WHERE ical_uid = $1 ORDER BY connection COLLATE "C"`, [uid])).rows as EventRow[]) : mine;
+  const rows = uid ? ((await db.query(`SELECT ${COLS} FROM calendar_events WHERE ical_uid = $1 ORDER BY starts_at, connection COLLATE "C"`, [uid])).rows as EventRow[]) : mine;
   const order = [...new Set([...mine.map((r) => r.connection), ...rows.map((r) => r.connection)])];
   const why: string[] = [];
-  if (uid) {
-    for (const connection of order) {
-      const opened = await open(connection);
-      if (opened.ok) return { row: rows.find((r) => r.connection === connection) ?? mine[0]!, rsvp: opened.rsvp, rows };
+  for (const connection of order) {
+    const opened = await open(connection);
+    if (!opened.ok) {
       why.push(opened.why);
+      continue;
     }
-  } else {
-    why.push("the event carries no iCalendar UID, so no calendar can be asked to answer it");
+    const row = mine.find((r) => r.connection === connection) ?? rows.find((r) => r.connection === connection);
+    const target = row ? opened.rsvp.targetOf(row) : null;
+    if (!row || !target) {
+      why.push(`connection ${connection} cannot name this event to answer it (it carries no iCalendar UID)`);
+      continue;
+    }
+    return { row, rsvp: opened.rsvp, target, rows };
   }
   throw new RespondRefused("no_rsvp", `no connection that holds this event can answer it — open it in Calendar (${why.join("; ")})`);
 }
@@ -429,24 +495,23 @@ async function rsvpFor(db: Db, open: RsvpOpener, eventId: string): Promise<{ row
 /** Preview an answer (Accept · Maybe · Decline): which calendar, as whom, to whom — nothing is written. */
 export async function previewInvitationReply(db: Db, open: RsvpOpener, req: { event_id: string; response: unknown }): Promise<RespondPreview> {
   if (!isResponse(req.response)) throw new RespondRefused("bad_request", `an answer is one of ${RSVP_RESPONSES.join(", ")}`);
-  const { row, rsvp, rows } = await rsvpFor(db, open, req.event_id);
-  const uid = row.ical_uid!;
-  let p: ReplyPreview;
+  const { row, rsvp, target, rows } = await rsvpFor(db, open, req.event_id);
+  let p: RsvpPreview;
   try {
-    p = await rsvp.preview({ uid, response: req.response });
+    p = await rsvp.preview({ target, response: req.response });
   } catch (err) {
-    caldavRefusal(err);
+    providerRefusal(err);
   }
   return {
     event_id: req.event_id,
     connection: rsvp.connection,
     title: p.title || row.title,
-    response: p.response,
+    response: req.response,
     organizer: p.organizer,
     as: p.as,
     unchanged: p.unchanged,
     series: rows.some((r) => r.series_id !== null) || rows.filter((r) => r.connection === rsvp.connection).length > 1,
-    binding: { event_id: req.event_id, connection: rsvp.connection, uid, response: p.response, etag: p.etag },
+    binding: { event_id: req.event_id, connection: rsvp.connection, target, response: req.response, etag: p.etag, subject_ref: invitationSource(row).external_ref, rows: { ical_uid: row.ical_uid, event_id: row.event_id } },
     secrets: rsvp.secretsUsed(),
   };
 }
@@ -460,16 +525,20 @@ const SAID: Readonly<Record<RsvpResponse, string>> = { accepted: "You accepted",
  * its next pass — so no calendar re-asks in between, and the invitation's
  * request is cleared with a receipt naming what was sent.
  */
-export async function confirmInvitationReply(db: Db, open: RsvpOpener, b: RespondBinding): Promise<{ result: WriteResult; cleared: number[]; secrets: string[] }> {
+export async function confirmInvitationReply(db: Db, open: RsvpOpener, b: RespondBinding): Promise<{ unchanged: boolean; cleared: number[]; secrets: string[] }> {
   const opened = await open(b.connection);
   if (!opened.ok) throw new RespondRefused(opened.status === "failed" ? "connection_failed" : "no_rsvp", opened.why);
-  let result: WriteResult;
+  let done: { unchanged: boolean };
   try {
-    result = await opened.rsvp.respond({ uid: b.uid, response: b.response, etag: b.etag });
+    done = await opened.rsvp.respond({ target: b.target, response: b.response, etag: b.etag });
   } catch (err) {
-    caldavRefusal(err);
+    providerRefusal(err);
   }
-  await db.query(`UPDATE calendar_events SET self_status = $3, updated_at = now() WHERE connection = $1 AND ical_uid = $2 AND self_status IS DISTINCT FROM $3 AND self_status IS NOT NULL`, [b.connection, b.uid, b.response]);
-  const cleared = await resolveAtSource(db, { kind: CALENDAR_SOURCE_KIND, external_ref: `${INVITE_REF_PREFIX}uid/${b.uid}` }, `${SAID[b.response]} — the reply went to the organizer`);
-  return { result, cleared, secrets: opened.rsvp.secretsUsed() };
+  await db.query(
+    `UPDATE calendar_events SET self_status = $4, updated_at = now()
+     WHERE connection = $1 AND (($2::text IS NOT NULL AND ical_uid = $2) OR event_id = $3) AND self_status IS NOT NULL AND self_status IS DISTINCT FROM $4`,
+    [b.connection, b.rows.ical_uid, b.rows.event_id, b.response],
+  );
+  const cleared = await resolveAtSource(db, { kind: CALENDAR_SOURCE_KIND, external_ref: b.subject_ref }, `${SAID[b.response]} — the reply went to the organizer`);
+  return { unchanged: done.unchanged, cleared, secrets: opened.rsvp.secretsUsed() };
 }

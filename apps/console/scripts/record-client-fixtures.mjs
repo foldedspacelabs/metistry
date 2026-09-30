@@ -292,18 +292,9 @@ const calendars = async (connection) =>
         rsvp: {
           connection: "calendar",
           provider: "icloud-calendar",
-          preview: async ({ uid, response }) => ({
-            connection: "calendar",
-            uid,
-            response,
-            title: "Vendor review",
-            organizer: "dana@example.com",
-            as: "me@example.com",
-            etag: '"fixture-etag"',
-            changes: [{ before: "ATTENDEE;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:me@example.com", after: `ATTENDEE;PARTSTAT=${response.toUpperCase()}:mailto:me@example.com` }],
-            unchanged: false,
-          }),
-          respond: async ({ uid }) => ({ connection: "calendar", uid, etag: '"fixture-etag-2"', changes: [], unchanged: false }),
+          targetOf: (row) => row.ical_uid,
+          preview: async () => ({ title: "Vendor review", organizer: "dana@example.com", as: "me@example.com", etag: '"fixture-etag"', unchanged: false }),
+          respond: async () => ({ unchanged: false }),
           secretsUsed: () => [],
         },
       }

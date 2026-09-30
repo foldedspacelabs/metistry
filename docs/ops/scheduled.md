@@ -459,7 +459,8 @@ organises, cleared when you answer, it is cancelled or it passes; Calendar Feed
 table under the connection's name, absent until one is added (a feed never
 says who you are, so it raises nothing); CalDAV Calendar (`caldav-calendar`,
 T4-13) every 15 min — a CalDAV account into the same table, raising the same
-*invitation* rule (on); Mail (`mail-messages`, T4-17) every 15 min — the
+*invitation* rule (on); Google Calendar (`google-calendar`, T4-14) every 15
+min — likewise, the same rule (on); Mail (`mail-messages`, T4-17) every 15 min — the
 headers of an IMAP connection's last week of inbox, raising *A message written
 to you looks like it waits on your reply* (on): one `message` request per
 message, inferred from the headers alone and saying so, cleared when you

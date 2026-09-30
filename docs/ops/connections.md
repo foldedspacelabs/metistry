@@ -798,8 +798,11 @@ says the exact body the confirm will send, with the event's ETag; the confirm
 names that ETag, re-reads the event, re-derives the body from Google's copy
 and writes with `If-Match`, so an event that changed in between is refused
 (`changed`), never overwritten. The console doors that call these — Respond
-(T4-17) and own-event changes — hold the confirm token; no agent reaches any
-of it (a calendar connection is not dialled as MCP).
+(`POST /api/calendar/invitations/:id/respond`, T4-17: a series is answered
+at its master, `recurringEventId`, so one card is one answer) and own-event
+changes — hold the confirm token; no agent reaches any of it (a calendar
+connection is not dialled as MCP). The sync raises invitation requests as the
+CalDAV sync does (`syncs.google-calendar.raise.invitation`, on).
 
 ## Mail over IMAP — Gmail, any IMAP server
 

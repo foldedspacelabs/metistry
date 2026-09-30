@@ -84,6 +84,11 @@ export function interactiveLine(args: readonly string[]): string {
   return line;
 }
 
+/** `security`'s exit status for "the specified item could not be found" (errSecItemNotFound's CSSM mapping). */
+export const SECURITY_ITEM_NOT_FOUND = 44;
+/** How many duplicate git-credential items `deleteGitCredential` removes before it gives up and says so. */
+export const GIT_CREDENTIAL_DELETE_MAX = 8; // limit: fixed — a guard against a loop, not a policy; git files one item per host and account
+
 function security(exec: Exec, args: string[], stdin?: string): Promise<ExecResult> {
   return exec("security", args, { ...(stdin === undefined ? {} : { stdin }), timeoutMs: 20_000 });
 }
@@ -171,10 +176,41 @@ export class Keychain {
    * reconciler push into a silent failure behind a GUI prompt. The item is
    * still gated by the login keychain being unlocked, and anyone running
    * as this user already holds `.env` (docs/ops/cli.md records the trade).
+   *
+   * Delete, then add — never `add -U`. `-U` updates an existing item's
+   * VALUE in place and keeps its access list, and `-A` does not reach an
+   * item that is updated rather than created. An item
+   * `git-credential-osxkeychain` created first (the owner's own push, or a
+   * push through the helper) trusts only the helper, so `-U` left the new
+   * token behind an ACL the supervisor's promptless read is refused by — its
+   * log said "no login Keychain item" and the reconciler "could not read
+   * Username" (2026-09-29). Deleting first means `-A` is on every item this
+   * writes. Deleting a helper-owned item may raise one Keychain dialog in
+   * the owner's session; that is the last prompt the item ever needs.
    */
   async setGitCredential(host: string, account: string, token: string): Promise<void> {
-    const r = await this.run(["-i"], interactiveLine(["add-internet-password", "-U", "-a", account, "-s", host, "-r", "htps", "-A", "-w", token]));
+    await this.deleteGitCredential(host, account);
+    const r = await this.run(["-i"], interactiveLine(["add-internet-password", "-a", account, "-s", host, "-r", "htps", "-A", "-w", token]));
     if (r.code !== 0) throw new Error(`security add-internet-password ${host} failed (${r.code}): ${reason(r)}`);
+  }
+
+  /**
+   * Remove every internet-password item for (host, account, htps). Not
+   * found (`security` exits 44) is the normal first-run answer, not an
+   * error; anything else — a locked keychain, a refused dialog — is thrown,
+   * because an add after a failed delete would meet the old item again.
+   * Bounded: `delete-internet-password` removes one match per call, and a
+   * handful is already more than git ever files for one host and account.
+   */
+  async deleteGitCredential(host: string, account: string): Promise<number> {
+    let removed = 0;
+    for (let i = 0; i < GIT_CREDENTIAL_DELETE_MAX; i++) {
+      const r = await this.run(["delete-internet-password", "-a", account, "-s", host, "-r", "htps"]);
+      if (r.code === SECURITY_ITEM_NOT_FOUND) return removed;
+      if (r.code !== 0) throw new Error(`security delete-internet-password ${host} failed (${r.code}): ${reason(r)} — the old item must go before a background-readable one can be filed`);
+      removed++;
+    }
+    throw new Error(`security delete-internet-password ${host}: still finding items for ${account} after ${GIT_CREDENTIAL_DELETE_MAX} deletions — remove them in Keychain Access (kind "Internet password", where ${host}), then run connect-repo again`);
   }
 
   async hasGitCredential(host: string, account: string): Promise<boolean> {

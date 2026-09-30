@@ -4,14 +4,20 @@
 // exec — where the assertion that matters is negative: the token never
 // reaches stdout, stderr, a command line, or .git/config.
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { afterAll, describe, expect, it } from "vitest";
 import { connectRepo, deviceFlow, parseRemote, DEVICE_CODE_URL, DEVICE_TOKEN_URL, DEVICE_GRANT_TYPE } from "../src/connect-repo.js";
 import { DEFAULT_GITHUB_OAUTH_CLIENT_ID } from "../src/connect-repo.js";
-import type { Exec, ExecOptions } from "../src/exec.js";
+import { realExec, type Exec, type ExecOptions } from "../src/exec.js";
+import { resolveGitBin } from "../src/sandbox.js";
+import { startHttpsGitServer, type HttpsGitServer } from "./https-git-server.js";
+
+const REPO = resolve(fileURLToPath(import.meta.url), "..", "..", "..", "..");
+const GIT_BIN = resolveGitBin({ productDir: REPO, path: process.env.PATH ?? "" });
 
 const git = (dir: string, ...args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8" }).trim();
 
@@ -35,14 +41,18 @@ interface Call {
   cmd: string;
   args: string[];
   opts: ExecOptions;
+  shim?: string;
 }
 
 /** Records every subprocess; answers the ones connect-repo needs on the credential path. */
 function fakeExec(): { exec: Exec; calls: Call[] } {
   const calls: Call[] = [];
   const exec: Exec = async (cmd, args, opts = {}) => {
-    calls.push({ cmd, args, opts });
-    const sub = args.filter((a) => a !== "-c" && a !== "commit.gpgsign=false")[0];
+    // the askpass shim, as it was on disk while git could have run it
+    const askpass = opts.env?.GIT_ASKPASS;
+    calls.push({ cmd, args, opts, ...(askpass && existsSync(askpass) ? { shim: readFileSync(askpass, "utf8") } : {}) });
+    if (cmd === "security" && args[0] === "delete-internet-password") return { code: 44, stdout: "", stderr: "security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain." };
+    const sub = args.filter((a, i) => a !== "-c" && args[i - 1] !== "-c")[0];
     if (cmd === "git" && sub === "remote" && args[args.length - 1] === "remote") return { code: 0, stdout: "", stderr: "" };
     if (cmd === "git" && sub === "ls-remote") return { code: 0, stdout: "abc\tHEAD\n", stderr: "" };
     if (cmd === "git" && sub === "symbolic-ref") return { code: 0, stdout: "main\n", stderr: "" };
@@ -180,17 +190,73 @@ describe("device flow", () => {
     const shown = calls.map((c) => `${c.cmd} ${c.args.join(" ")}`);
     expect(shown).toContain("git -c commit.gpgsign=false config credential.helper osxkeychain");
     expect(shown).toContain("git -c commit.gpgsign=false remote add origin https://github.com/octocat/instance.git");
-    expect(shown.some((s) => s.startsWith("git -c commit.gpgsign=false ls-remote origin"))).toBe(true);
-    expect(shown).toContain("git -c commit.gpgsign=false push -u origin main");
+    expect(shown).toContain("git -c commit.gpgsign=false -c credential.helper= ls-remote origin");
+    expect(shown).toContain("git -c commit.gpgsign=false -c credential.helper= push -u origin main");
 
     // the keychain item is git-credential-osxkeychain's shape, and the value came down stdin
-    const kc = calls.find((c) => c.cmd === "security");
-    expect(kc?.args).toEqual(["-i"]);
-    expect(kc?.opts.stdin).toBe(`"add-internet-password" "-U" "-a" "octocat" "-s" "github.com" "-r" "htps" "-A" "-w" "${TOKEN}"\n`);
+    const kc = calls.find((c) => c.cmd === "security" && c.args[0] === "-i");
+    expect(kc?.opts.stdin).toBe(`"add-internet-password" "-a" "octocat" "-s" "github.com" "-r" "htps" "-A" "-w" "${TOKEN}"\n`);
 
     // the negative assertion this test exists for
     for (const c of calls) for (const a of c.args) expect(a).not.toContain(TOKEN);
     for (const l of lines) expect(l).not.toContain(TOKEN);
+  });
+
+  it("files the item (delete, then add -A) BEFORE anything reaches the remote, and reaches it without the osxkeychain helper", async () => {
+    // 2026-09-29: a push through the helper let git-credential-osxkeychain
+    // create the item with an ACL trusting only itself; the supervisor's
+    // background read was refused from then on.
+    const { fetchFn } = fakeGitHub();
+    const { exec, calls } = fakeExec();
+    await connectRepo({
+      url: "https://github.com/octocat/instance.git",
+      instanceDir: "/tmp/instance",
+      auth: "device",
+      out: () => {},
+      exec,
+      fetchFn,
+      env: { METISTRY_GITHUB_OAUTH_CLIENT_ID: CLIENT_ID },
+      platform: "darwin",
+      sleep: async () => {},
+      nodeBin: "/opt/node/bin/node",
+    });
+
+    const idx = (pred: (c: Call) => boolean) => calls.findIndex(pred);
+    const del = idx((c) => c.cmd === "security" && c.args[0] === "delete-internet-password");
+    const add = idx((c) => c.cmd === "security" && c.args[0] === "-i");
+    const lsRemote = idx((c) => c.cmd === "git" && c.args.includes("ls-remote"));
+    const push = idx((c) => c.cmd === "git" && c.args.includes("push"));
+    expect(calls[del]!.args).toEqual(["delete-internet-password", "-a", "octocat", "-s", "github.com", "-r", "htps"]);
+    expect(del).toBeGreaterThanOrEqual(0);
+    expect(add).toBeGreaterThan(del);
+    expect(lsRemote).toBeGreaterThan(add);
+    expect(push).toBeGreaterThan(add);
+
+    for (const i of [lsRemote, push]) {
+      const c = calls[i]!;
+      // the helper list is reset for this call, so no helper can file or erase an item
+      expect(c.args.slice(0, 4)).toEqual(["-c", "commit.gpgsign=false", "-c", "credential.helper="]);
+      // …and git asks the askpass shim, which answers from the environment
+      expect(c.opts.env?.GIT_ASKPASS).toMatch(/metistry-askpass-.*\/git-askpass$/);
+      expect(c.opts.env?.GIT_TERMINAL_PROMPT).toBe("0");
+      expect(c.opts.env?.METISTRY_GIT_ASKPASS_USER).toBe("octocat");
+      expect(c.opts.env?.METISTRY_GIT_ASKPASS_TOKEN).toBe(TOKEN);
+      // the shim is the reconciler's own, on disk while git ran — and holds no token
+      expect(c.shim).toMatch(/^#!\/opt\/node\/bin\/node\n/);
+      expect(c.shim).not.toContain(TOKEN);
+    }
+    // and it does not outlive the command
+    expect(existsSync(calls[push]!.opts.env!.GIT_ASKPASS!)).toBe(false);
+    // the non-network git calls are untouched
+    expect(calls.filter((c) => c.cmd === "git" && !c.args.includes("push") && !c.args.includes("ls-remote")).every((c) => c.opts.env === undefined)).toBe(true);
+  });
+
+  it("with no token to hand over (a local remote), git finds credentials as it always did", async () => {
+    const { exec, calls } = fakeExec();
+    await connectRepo({ url: "/srv/git/instance.git", instanceDir: "/tmp/instance", out: () => {}, exec, env: {}, platform: "darwin" });
+    const push = calls.find((c) => c.cmd === "git" && c.args.includes("push"))!;
+    expect(push.args).toEqual(["-c", "commit.gpgsign=false", "push", "-u", "origin", "main"]);
+    expect(push.opts.env).toBeUndefined();
   });
 
   it("reads a PAT from stdin under --auth token and refuses an empty one", async () => {
@@ -209,7 +275,7 @@ describe("device flow", () => {
       platform: "darwin",
       readSecret: async () => `${PAT}\n`,
     });
-    expect(calls.find((c) => c.cmd === "security")?.opts.stdin).toBe(`"add-internet-password" "-U" "-a" "octocat" "-s" "github.com" "-r" "htps" "-A" "-w" "${PAT}"\n`);
+    expect(calls.find((c) => c.cmd === "security" && c.args[0] === "-i")?.opts.stdin).toBe(`"add-internet-password" "-a" "octocat" "-s" "github.com" "-r" "htps" "-A" "-w" "${PAT}"\n`);
     for (const l of lines) expect(l).not.toContain(PAT);
 
     await expect(
@@ -253,4 +319,60 @@ describe("device flow", () => {
     expect(r.flushed).toBe(true);
     expect(seen).toEqual(["POST http://127.0.0.1:7812/flush"]);
   });
+});
+
+describe.skipIf(process.platform !== "darwin" || !GIT_BIN || !existsSync("/usr/bin/openssl"))("metistry connect-repo over real HTTPS (macOS)", () => {
+  // The whole path for real — ls-remote and push against an HTTPS remote that
+  // demands Basic auth — with `security` stubbed (the owner's login Keychain
+  // is never touched) and the repo's credential helper swapped for a recorder,
+  // so "the push did not go through the helper" is observed, not inferred.
+  const USER = "octocat";
+  const TOKEN = "tok-connect-repo-e2e-only";
+  let server: HttpsGitServer | undefined;
+
+  afterAll(async () => {
+    await server?.close();
+  });
+
+  it("stores first, then authenticates ls-remote and the push through askpass — the helper never runs", async () => {
+    const { instance } = await repos();
+    const root = join(instance, "..");
+    await mkdir(join(root, "remotes"), { recursive: true });
+    execFileSync(GIT_BIN!, ["init", "-q", "--bare", "-b", "main", join(root, "remotes", "instance.git")]);
+    server = await startHttpsGitServer({ projectRoot: join(root, "remotes"), gitBin: GIT_BIN!, certDir: join(root, "certs"), user: USER, token: TOKEN });
+
+    const helperLog = join(root, "helper-ran");
+    const recorder = join(root, "recording-helper");
+    await writeFile(recorder, `#!/bin/sh\necho "$@" >> '${helperLog}'\n`, { mode: 0o755 });
+
+    const order: string[] = [];
+    const exec: Exec = async (cmd, args, opts = {}) => {
+      if (cmd === "security") {
+        order.push(`security ${args[0]}`);
+        return args[0] === "delete-internet-password" ? { code: 44, stdout: "", stderr: "" } : { code: 0, stdout: "", stderr: "" };
+      }
+      // the helper connect-repo configures, pointed at a recorder instead of the real Keychain
+      const a = args.join(" ") === "-c commit.gpgsign=false config credential.helper osxkeychain" ? ["-c", "commit.gpgsign=false", "config", "credential.helper", recorder] : args;
+      const sub = a.filter((x, i) => x !== "-c" && a[i - 1] !== "-c")[0] ?? "";
+      order.push(`git ${sub}`);
+      // no system or global config: nothing but the repo's own helper could run
+      return realExec(cmd, a, { ...opts, env: { ...(opts.env ?? process.env), GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_SSL_CAINFO: server!.caFile, GIT_TERMINAL_PROMPT: "0" } });
+    };
+
+    const url = server.url("instance").replace("https://", `https://${USER}@`);
+    const r = await connectRepo({ url, instanceDir: instance, auth: "token", readSecret: async () => TOKEN, out: () => {}, exec, env: {}, platform: "darwin", fetchFn: (async () => { throw new Error("no network"); }) as unknown as typeof fetch });
+
+    expect(r.pushed).toBe(true);
+    expect(order.indexOf("security -i")).toBeLessThan(order.indexOf("git ls-remote"));
+    expect(order.indexOf("security -i")).toBeLessThan(order.indexOf("git push"));
+    // the push landed, authenticated with the token askpass supplied
+    expect(git(join(root, "remotes", "instance.git"), "rev-parse", "main")).toBe(git(instance, "rev-parse", "HEAD"));
+    expect(server.seen).toContain("Basic " + Buffer.from(`${USER}:${TOKEN}`).toString("base64"));
+    // the repo still names a helper for the owner's own git…
+    expect(git(instance, "config", "credential.helper")).toBe(recorder);
+    // …but this command never ran it: no get, no store, no erase
+    expect(existsSync(helperLog)).toBe(false);
+    // and the token is nowhere in .git/config
+    expect(readFileSync(join(instance, ".git", "config"), "utf8")).not.toContain(TOKEN);
+  }, 120_000);
 });

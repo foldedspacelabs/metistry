@@ -12,10 +12,9 @@
 //   * **The value never travels in argv.** `security … -w` prints it on
 //     stdout; nothing here puts a secret on a command line, where `ps` would
 //     show it to every process on the Mac.
-//   * **The account lookup never sees the token.** `security … -g` prints
-//     attributes on stdout and `password: "…"` on stderr; this reads stdout
-//     and discards stderr, so the one call that gets logged on failure
-//     cannot carry a credential. Asserted by a test.
+//   * **The account lookup never sees the token.** It asks for attributes
+//     only (no `-g`, no `-w`), so `security` never reads the item's data at
+//     all; stdout is the attributes and nothing else. Asserted by a test.
 //   * **A miss is a log line, not a crash.** An install with no remote, a
 //     locked keychain, a Linux host: the child starts without the variables
 //     and its push fails the way it did before, loudly, in its own log.
@@ -50,25 +49,59 @@ export interface GitCredential {
 }
 
 /**
+ * Why a lookup came back empty — and the log line that says so. The two
+ * causes need telling apart because only one of them is "run connect-repo":
+ * an item that is THERE but whose access list refuses a read without a
+ * session (one `git-credential-osxkeychain` created, trusting only itself)
+ * looked, to this log, exactly like no item at all (2026-09-29).
+ */
+export type GitCredentialMiss = "missing" | "refused" | "empty";
+
+export type GitCredentialLookupResult = { found: GitCredential } | { miss: GitCredentialMiss };
+
+/**
  * The internet-password `connect-repo` filed for this host, in
  * `git-credential-osxkeychain`'s shape.
  *
- * Two calls on purpose. `-g` answers "which account?" from stdout, and its
- * stderr — which carries the password — is thrown away unread. `-w` answers
- * "what is it?" and its stdout is the only place a secret appears.
+ * Two calls on purpose. The first has NO `-g` and no `-w`: `security`
+ * then prints the item's attributes on stdout and never touches its data,
+ * so it answers "is there an item, and which account?" without an
+ * access-list check — `-g` (which also prints the password, on stderr) is a
+ * data read like `-w`, and is refused by the same ACL. `-w` answers "what
+ * is it?" and its stdout is the only place a secret appears. A present item
+ * whose `-w` is refused is therefore an ACL (or locked-keychain) refusal,
+ * not a missing item.
  *
  * No `-a`: `connect-repo` files the account it learned from GitHub and
  * records it nowhere else, so the host is the only key this process has.
  * That is also what git itself does with a remote URL carrying no username.
  */
-export async function lookupGitCredential(host: string, run: Runner = execFileRunner): Promise<GitCredential | undefined> {
-  const attrs = await run(SECURITY_BIN, ["find-internet-password", "-s", host, "-r", "htps", "-g"]);
-  if (attrs.code !== 0) return undefined;
+export async function findGitCredential(host: string, run: Runner = execFileRunner): Promise<GitCredentialLookupResult> {
+  const attrs = await run(SECURITY_BIN, ["find-internet-password", "-s", host, "-r", "htps"]);
+  if (attrs.code !== 0) return { miss: "missing" };
   const user = accountFromKeychainAttributes(attrs.stdout) ?? DEFAULT_GIT_ACCOUNT;
   const secret = await run(SECURITY_BIN, ["find-internet-password", "-s", host, "-r", "htps", "-w"]);
-  if (secret.code !== 0) return undefined;
+  if (secret.code !== 0) return { miss: "refused" };
   const token = secret.stdout.replace(/\n$/, "");
-  return token === "" ? undefined : { user, token };
+  return token === "" ? { miss: "empty" } : { found: { user, token } };
+}
+
+/** `findGitCredential`, as the credential or nothing. */
+export async function lookupGitCredential(host: string, run: Runner = execFileRunner): Promise<GitCredential | undefined> {
+  const r = await findGitCredential(host, run);
+  return "found" in r ? r.found : undefined;
+}
+
+/** The supervisor's log line for a miss — host and cause, never an account or a value. */
+export function missNote(host: string, child: string, miss: GitCredentialMiss): string {
+  switch (miss) {
+    case "refused":
+      return `[credential] ${host}: item exists but its access list refuses a background read — run \`metistry connect-repo <url> --force\` to re-create it (${child}'s push will fail with "could not read Username" until then; a locked login keychain at spawn reads the same way)`;
+    case "empty":
+      return `[credential] ${host}: the login Keychain item has an empty password — ${child}'s push will fail with "could not read Username". Run \`metistry connect-repo <url> --force\` to re-create it.`;
+    case "missing":
+      return `[credential] ${host}: no login Keychain item — ${child}'s push will fail with "could not read Username". \`metistry connect-repo <url>\` files one.`;
+  }
 }
 
 /**
@@ -97,11 +130,12 @@ export async function injectGitCredentials(
       notes.push(`[credential] ${lookup.host}: no child named ${lookup.child} in this config — nothing to hand it to`);
       continue;
     }
-    const found = await lookupGitCredential(lookup.host, opts.run);
-    if (!found) {
-      notes.push(`[credential] ${lookup.host}: no login Keychain item — ${lookup.child}'s push will fail with "could not read Username". \`metistry connect-repo <url>\` files one.`);
+    const r = await findGitCredential(lookup.host, opts.run);
+    if (!("found" in r)) {
+      notes.push(missNote(lookup.host, lookup.child, r.miss));
       continue;
     }
+    const found = r.found;
     child.env = { ...child.env, [GIT_ASKPASS_USER_VAR]: found.user, [GIT_ASKPASS_TOKEN_VAR]: found.token };
     notes.push(`[credential] ${lookup.host}: found, handed to ${lookup.child} in its environment (never written to disk, never in argv)`);
   }

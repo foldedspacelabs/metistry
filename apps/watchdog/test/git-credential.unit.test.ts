@@ -7,9 +7,9 @@
 
 import { describe, expect, it } from "vitest";
 import { accountFromKeychainAttributes, DEFAULT_GIT_ACCOUNT } from "@foldedspacelabs/metistry-core";
-import { injectGitCredentials, lookupGitCredential, SECURITY_BIN, type RunResult, type Runner } from "../src/git-credential.js";
+import { findGitCredential, injectGitCredentials, lookupGitCredential, SECURITY_BIN, type RunResult, type Runner } from "../src/git-credential.js";
 
-/** Verbatim `security find-internet-password -g` STDOUT (the password is on stderr — see the test below). */
+/** Verbatim `security find-internet-password` STDOUT — the same with or without `-g` (whose password goes to stderr — see the test below). */
 const ATTRS = `keychain: "/Users/x/Library/Keychains/login.keychain-db"
 class: "inet"
 attributes:
@@ -39,7 +39,8 @@ describe("reading the credential connect-repo filed", () => {
     const { run, calls } = runner([{ stdout: ATTRS }, { stdout: TOKEN + "\n" }]);
     expect(await lookupGitCredential("github.com", run)).toEqual({ user: "octocat", token: TOKEN });
     expect(calls).toEqual([
-      { bin: SECURITY_BIN, args: ["find-internet-password", "-s", "github.com", "-r", "htps", "-g"] },
+      // attributes only: no -g, no -w — the item's data is not read, so its ACL is not consulted
+      { bin: SECURITY_BIN, args: ["find-internet-password", "-s", "github.com", "-r", "htps"] },
       { bin: SECURITY_BIN, args: ["find-internet-password", "-s", "github.com", "-r", "htps", "-w"] },
     ]);
     // the whole point: nothing this process runs has a secret on its
@@ -66,6 +67,14 @@ describe("reading the credential connect-repo filed", () => {
     expect(await lookupGitCredential("github.com", runner([{ stdout: ATTRS }, { code: 44 }]).run)).toBeUndefined();
     // an item with an empty password is not a credential
     expect(await lookupGitCredential("github.com", runner([{ stdout: ATTRS }, { stdout: "\n" }]).run)).toBeUndefined();
+  });
+
+  it("tells an item whose access list refuses the read apart from no item at all", async () => {
+    // 2026-09-29: git-credential-osxkeychain had created the item, trusting only
+    // itself; the attributes answer, the data read is refused without a session
+    expect(await findGitCredential("github.com", runner([{ code: 44 }]).run)).toEqual({ miss: "missing" });
+    expect(await findGitCredential("github.com", runner([{ stdout: ATTRS }, { code: 51, stderr: "security: SecKeychainSearchCopyNext: User interaction is not allowed." }]).run)).toEqual({ miss: "refused" });
+    expect(await findGitCredential("github.com", runner([{ stdout: ATTRS }, { stdout: "\n" }]).run)).toEqual({ miss: "empty" });
   });
 
   it("unescapes an account name security quoted", () => {
@@ -101,6 +110,17 @@ describe("handing it to the child that asked", () => {
     expect(kids[0]!.env).toEqual({ HOME: "/h" });
     expect(notes.join("\n")).toMatch(/no login Keychain item/);
     expect(notes.join("\n")).toMatch(/metistry connect-repo/);
+  });
+
+  it("an item the supervisor may not read says exactly that, and how to re-create it", async () => {
+    const kids = children();
+    const run = runner([{ stdout: ATTRS }, { code: 51 }]).run;
+    const notes = (await injectGitCredentials(kids, [{ child: "reconciler", host: "github.com" }], { platform: "darwin", run })).join("\n");
+    expect(kids[0]!.env).toEqual({ HOME: "/h" });
+    expect(notes).toContain("[credential] github.com: item exists but its access list refuses a background read — run `metistry connect-repo <url> --force` to re-create it");
+    expect(notes).not.toMatch(/no login Keychain item/);
+    // host and cause only — never the account
+    expect(notes).not.toContain("octocat");
   });
 
   it("no lookups, no calls; a non-darwin host says so rather than shelling out to a `security` that is not there", async () => {

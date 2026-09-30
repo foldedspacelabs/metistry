@@ -14,7 +14,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { realExec, type Exec, type ExecOptions } from "../src/exec.js";
-import { interactiveLine, Keychain, SECURITY_LINE_MAX, securityKeychain, securityQuote } from "../src/keychain.js";
+import { GIT_CREDENTIAL_DELETE_MAX, interactiveLine, Keychain, SECURITY_LINE_MAX, securityKeychain, securityQuote } from "../src/keychain.js";
 import { decodeSecurity, splitSecurityLine } from "./fake-security.js";
 
 const SECRET = "s3cr3t with space, \"quotes\", 'apostrophes', back\\slash and $HOME";
@@ -27,6 +27,56 @@ function recorder(result = { code: 0, stdout: "", stderr: "" }) {
   };
   return { exec, calls };
 }
+
+/** Answers each call from `script` in order, then with success. */
+function scripted(script: Array<Partial<{ code: number; stdout: string; stderr: string }>>) {
+  const calls: Array<{ cmd: string; argv: string[]; opts: ExecOptions }> = [];
+  let i = 0;
+  const exec: Exec = async (cmd, argv, opts = {}) => {
+    calls.push({ cmd, argv, opts });
+    return { code: 0, stdout: "", stderr: "", ...(script[i++] ?? {}) };
+  };
+  return { exec, calls };
+}
+
+describe("a git credential is re-created, never updated in place (its access list must be `-A`)", () => {
+  // 2026-09-29: git-credential-osxkeychain had created the item first, with an
+  // ACL trusting only itself. `add-internet-password -U … -A` updated the
+  // value and KEPT that ACL, so the supervisor's promptless read was refused.
+  const DELETE = ["delete-internet-password", "-a", "octocat", "-s", "github.com", "-r", "htps"];
+
+  it("deletes the (host, account, htps) item first, then adds with -A and without -U", async () => {
+    const { exec, calls } = scripted([{ code: 0 }, { code: 44 }]); // one old item, then not found
+    await new Keychain(exec).setGitCredential("github.com", "octocat", "ghp_TOKEN");
+    expect(calls.map((c) => c.argv)).toEqual([DELETE, DELETE, ["-i"]]);
+    const line = String(calls[2]!.opts.stdin);
+    const words = splitSecurityLine(line.trimEnd());
+    expect(words[0]).toBe("add-internet-password");
+    expect(words).toContain("-A");
+    expect(words).not.toContain("-U");
+    // the deletes carry no value — nothing secret on any command line
+    for (const c of calls) for (const a of c.argv) expect(a).not.toContain("ghp_TOKEN");
+  });
+
+  it("not found is the normal first run: one delete, then the add", async () => {
+    const { exec, calls } = scripted([{ code: 44 }]);
+    await new Keychain(exec).setGitCredential("github.com", "octocat", "ghp_TOKEN");
+    expect(calls.map((c) => c.argv[0])).toEqual(["delete-internet-password", "-i"]);
+  });
+
+  it("a delete that fails for any other reason stops before the add — the old ACL would survive it", async () => {
+    const { exec, calls } = scripted([{ code: 51, stderr: "security: SecKeychainItemDelete: User interaction is not allowed." }]);
+    await expect(new Keychain(exec).setGitCredential("github.com", "octocat", "ghp_TOKEN")).rejects.toThrow(/delete-internet-password github\.com failed \(51\): .*User interaction is not allowed/);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("a delete that never runs out is bounded, and says where to look", async () => {
+    const { exec, calls } = scripted([]); // every delete "succeeds"
+    await expect(new Keychain(exec).setGitCredential("github.com", "octocat", "ghp_TOKEN")).rejects.toThrow(/Keychain Access/);
+    expect(calls.every((c) => c.argv[0] === "delete-internet-password")).toBe(true);
+    expect(calls).toHaveLength(GIT_CREDENTIAL_DELETE_MAX);
+  });
+});
 
 describe("a Keychain write is `security -i` with the command on stdin", () => {
   it("argv is `-i` and nothing else; the value is on the stdin line, quoted so the tool reads it back whole", async () => {
@@ -45,10 +95,11 @@ describe("a Keychain write is `security -i` with the command on stdin", () => {
   });
 
   it("the git credential goes the same way", async () => {
-    const { exec, calls } = recorder();
+    const { exec, calls } = scripted([{ code: 44 }]);
     await new Keychain(exec).setGitCredential("github.com", "octocat", "ghp_TOKEN");
-    expect(calls[0]!.argv).toEqual(["-i"]);
-    expect(calls[0]!.opts.stdin).toBe('"add-internet-password" "-U" "-a" "octocat" "-s" "github.com" "-r" "htps" "-A" "-w" "ghp_TOKEN"\n');
+    const add = calls.at(-1)!;
+    expect(add.argv).toEqual(["-i"]);
+    expect(add.opts.stdin).toBe('"add-internet-password" "-a" "octocat" "-s" "github.com" "-r" "htps" "-A" "-w" "ghp_TOKEN"\n');
   });
 
   it("a value longer than getpass(3)'s 128 characters is carried whole — the prompt form kept only the first 128", async () => {

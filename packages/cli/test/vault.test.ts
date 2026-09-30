@@ -207,6 +207,16 @@ describe("doctor's vault sync row", () => {
     }
   });
 
+  it("a push that had no credential names the precise cause — an item whose access list refuses a background read — and the fix", async () => {
+    const error = "fatal: could not read Username for 'https://github.com': terminal prompts disabled";
+    for (const over of [{ last_push: { at: base.as_of, ok: false, remote: "origin", error } }, { last_pull: { at: base.as_of, ok: false, remote: "origin", error } }]) {
+      const { r } = await row({ ...base, ...over });
+      expect(r.status).toBe("degraded");
+      expect(r.remediation).toContain("exists but its access list refuses a background read — run `metistry connect-repo <url> --force` to re-create it");
+      expect(r.remediation).not.toContain("check the remote and its credentials");
+    }
+  });
+
   it("absent with no remote, with no bridge configured, and when the reconciler does not answer; degraded for an older reconciler", async () => {
     expect((await row({ ...base, remote: null, ahead: null, behind: null })).r).toMatchObject({ status: "absent", remediation: expect.stringContaining("metistry connect-repo") });
     expect((await vaultSyncRow({ env: {}, shape: "launchd", fetchFn: noFetch, timeoutMs: 1000 })).status).toBe("absent");

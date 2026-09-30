@@ -1157,6 +1157,17 @@ export function vaultSyncSummary(v: VaultStatus): string {
   return `${counts}; ${push}; ${conflict}; ${describeVaultSync(v.policy)}`;
 }
 
+/** git's words when it had no credential to answer with — askpass found nothing in the reconciler's environment. */
+export const NO_PUSH_CREDENTIAL = /could not read Username/i;
+/**
+ * What that means on this product: the supervisor's spawn-time Keychain read
+ * handed the reconciler nothing. Most often the item exists but was created by
+ * `git-credential-osxkeychain`, whose access list refuses a background read;
+ * the supervisor's `[credential]` log line names which (docs/ops/reconciler.md).
+ */
+export const NO_PUSH_CREDENTIAL_CAUSE =
+  "the reconciler was handed no push credential: the login Keychain item for the remote's host is missing, or it exists but its access list refuses a background read — run `metistry connect-repo <url> --force` to re-create it (the supervisor log's `[credential]` line says which)";
+
 /**
  * The vault's sync, as the reconciler reports it (`GET /vault/status`):
  * ahead, behind, last push, conflict and the policy in force. Never `failed`
@@ -1191,9 +1202,13 @@ export async function vaultSyncRow(deps: { env: NodeJS.ProcessEnv; shape: Deploy
       }
       if (v.remote === null) return { status: "absent" as const, remediation: "no remote — commits stay on this Mac. `metistry connect-repo <url>` gives the vault a private remote (docs/ops/cli.md)", meta };
       if (v.last_push && !v.last_push.ok) {
-        return { status: "degraded" as const, remediation: `last push failed (${v.last_push.error ?? "no detail"}) — ${v.ahead ?? "some"} commit(s) wait, safe locally; check the remote and its credentials`, meta };
+        const cause = NO_PUSH_CREDENTIAL.test(v.last_push.error ?? "") ? `; ${NO_PUSH_CREDENTIAL_CAUSE}` : "; check the remote and its credentials";
+        return { status: "degraded" as const, remediation: `last push failed (${v.last_push.error ?? "no detail"}) — ${v.ahead ?? "some"} commit(s) wait, safe locally${cause}`, meta };
       }
-      if (v.last_pull && !v.last_pull.ok) return { status: "degraded" as const, remediation: `last pull failed (${v.last_pull.error ?? "no detail"}) — check the remote and its credentials`, meta };
+      if (v.last_pull && !v.last_pull.ok) {
+        const cause = NO_PUSH_CREDENTIAL.test(v.last_pull.error ?? "") ? NO_PUSH_CREDENTIAL_CAUSE : "check the remote and its credentials";
+        return { status: "degraded" as const, remediation: `last pull failed (${v.last_pull.error ?? "no detail"}) — ${cause}`, meta };
+      }
       if (v.policy.error) return { status: "degraded" as const, remediation: `deployment.yaml's vault: block does not validate, so the last good policy is running (${v.policy.error}) — fix it with \`metistry vault settings\``, meta };
       if (v.policy.push_override !== undefined) return { status: "degraded" as const, remediation: pushOverrideNote(v.policy.push_override), meta };
       return { meta };

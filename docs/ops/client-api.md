@@ -1687,7 +1687,17 @@ unknown one is refused rather than defaulted. The data policy and the `runs`
 row are `dispatch()`'s — `400` names the field, `404` no targets are
 registered, `409` the task is already bound or closed or the target is
 unavailable, with `violations` or the target's `check` beside the envelope
-where one applies. T4-11 turns targets into Agent connections.
+where one applies. **Targets are also agent connections** (T4-11,
+`docs/ops/connections.md`, *Agent connections*): each `ok` agent connection
+is a target named for it, carrying `connection: <name>` in `GET
+/api/targets` and its key as a reference (`auth: "{{ secret.<name> }}"`),
+never a value; it is dispatched through its own egress door. `purpose` is
+one of the purposes the targets' connection types take (the Devin type's:
+`work`, `knowledge_research`), and one the chosen target does not take is
+`400`. A brief or task title carrying a `{{ secret.… }}` or
+`{{ variable.… }}` reference is `400` before anything is sent to a
+connection; a key the door refuses is `409` *target unavailable*, naming
+why.
 
 #### The task routes — the board's drags, and nothing else (`user` principal)
 

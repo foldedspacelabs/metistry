@@ -1732,7 +1732,9 @@ M13 (plan §2.2, §2.6): what Metistry reaches for you, one file each in
 contract). An **MCP server** is dialled by URL or by command; an **API**, a
 **feed** or **files** is reached through the tools Metistry generates for it
 (T4-10); a calendar or tracker connection is read by its sync
-(`--no-discover`), and a mailbox is reached over IMAP (`--imap`, T4-15).
+(`--no-discover`), a mailbox is reached over IMAP (`--imap`, T4-15), and an
+**agent** connection is a target a task is dispatched to (`--no-discover`,
+T4-11). `--config KEY=VALUE` sets one of the connection type's fields.
 
 ```sh
 metistry connections add github --type mcp \
@@ -1746,6 +1748,10 @@ metistry connections add icloud --type calendar --provider icloud-calendar \
 metistry connections add gmail --type mail --provider gmail-mail \
     --imap imap.gmail.com:993 --username you@gmail.com \
     --secret gmail_app_password                            # IMAP: an app password, by name; nothing is dialled
+metistry connections add devin --type agent --provider devin --url https://api.devin.ai \
+    --auth bearer --secret devin_api_key --config org=org-abc --no-discover   # a dispatch target (T4-11)
+metistry connections add github --type tracker --provider github --url https://api.github.com \
+    --auth bearer --secret github_token --config repos=owner/a,owner/b --no-discover   # read by github-state
 metistry connections add changelog --type feed --url https://example.com/feed.xml   # generated: list_items, get_item, search_items
 metistry connections add costs --type api --url https://api.example.com/v1 \
     --auth bearer --secret costs_key                       # generated: get (Reads), request (Changes things)
@@ -1767,13 +1773,17 @@ metistry connections policy github delete_issue never
 metistry connections policy github --offer on             # offer it to agents through Metistry
 metistry connections set github --env 'LOG_LEVEL=warn' [--unset-env K] [--header K=V] [--unset-header K] [--url …] [-- <command…>]
 metistry connections set calendar --client-id-secret my_client_id [--client-secret-secret my_client_secret]   # bring your own OAuth client
+metistry connections set devin --config org=org-new [--unset-config repos]   # a connection type's fields
 metistry connections test github [--json]                 # dial it: does it answer, and does it still offer every listed tool?
 metistry connections remove github [--dry-run]
 ```
 
 Every verb takes `--instance <dir>` (default: the resolved instance); the
-writing ones take `--dry-run`. `--env`, `--header`, `--include`, `--skip` and
-`--scope` repeat. The command and its arguments go after `--`.
+writing ones take `--dry-run`. `--env`, `--header`, `--include`, `--skip`,
+`--scope`, `--config` and `--unset-config` repeat. A `--config` key is one of
+the provider's fields, judged with the file before anything is written (a
+required field missing, a field the type does not have, a key pasted as a
+value); a custom connection has none. The command and its arguments go after `--`.
 
 **Names, never values.** A secret is written as `{{ secret.<name> }}` and a
 variable as `{{ variable.<name> }}`; the file lists every name it uses under

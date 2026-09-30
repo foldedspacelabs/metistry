@@ -9,6 +9,14 @@ carry comms-derived content, cite a personal vault path, or exceed the byte
 cap is refused with a machine-readable reason. That is the rule "comms
 never leaves the machine" as code, not as a prompt.
 
+**Targets are also agent connections** (T4-11). An `agent` connection —
+`.metistry/connections/<name>.yaml` whose connection type
+(`seed/connection-types/devin`, `…/github-issues`) carries the dispatcher,
+this `data_policy` and the purposes — is a target named for it, and its key
+is filled at its own egress door rather than read from `env:`. That is now
+the way to add Devin or GitHub Issues (`docs/ops/connections.md`, *Agent
+connections*); the `targets/` manifests below still load for one release.
+
 ## Adding a target
 
 1. Create `targets/<name>/manifest.yaml` (product default) — or, per

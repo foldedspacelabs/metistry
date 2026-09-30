@@ -1,5 +1,14 @@
 # @metistry-apps/collectors
 
+## 0.15.1
+
+### Patch Changes
+
+- Updated dependencies [0025a4a]
+  - @foldedspacelabs/metistry-connections@0.15.1
+  - @foldedspacelabs/metistry-core@0.15.1
+  - @foldedspacelabs/metistry-mcp-brain@0.15.1
+
 ## 0.15.0
 
 ### Minor Changes

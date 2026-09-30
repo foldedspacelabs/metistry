@@ -1,5 +1,0 @@
----
-"@foldedspacelabs/metistry-cli": patch
----
-
-**`metistry update` re-renders the LaunchAgent and `supervisor.json` before it restarts anything onto a new release.** Under the launchd shape the confined assistant and reconciler are granted the release directory by its real path (`releases/<version>` — `sandbox-exec` matches resolved paths, so a rule naming `current` matches nothing), and the restart step used to kickstart the supervisor onto the config rendered for the release being left: on 0.14.2 → 0.14.4 both children died with `EPERM … releases/0.14.4/…/main.js`, the lock wait ran out, and only a manual `metistry up` recovered. The restart step now runs `up`'s own launchd step first — whenever the supervisor's code moved or `supervisor.json` grants a release other than the one `current` resolves to — so a rollback and a same-version rerun (no download; it then writes the lock a failed restart deferred) are covered too. A render that does not land is deferred with `metistry up`, and a reconciler that never answers now has its log's last error lines printed with the deferred lock.

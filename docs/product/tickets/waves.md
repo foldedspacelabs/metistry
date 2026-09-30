@@ -2,7 +2,7 @@
 
 Generated from `docs/product/design-build-plan.md` by `ops/scripts/tickets.mjs`. A ticket is ticked when its file says `status: merged`; the coordinator ticks each checkpoint (§3.1) by hand below the generated list.
 
-**162 tickets · 6 waves · ≈ 479.5 agent-days · critical path 35 agent-days** (F-3 → T4-1 → T4-2 → T4-8a → T4-8b → T4-9 → T4-10 → T4-11)
+**167 tickets · 6 waves · ≈ 487.5 agent-days · critical path 35 agent-days** (F-3 → T4-1 → T4-2 → T4-8a → T4-8b → T4-9 → T4-10 → T4-11)
 
 ## W0 — 19 tickets, 38 agent-days
 
@@ -168,7 +168,7 @@ Generated from `docs/product/design-build-plan.md` by `ops/scripts/tickets.mjs`.
 
 - [ ] **W3 checkpoint** — merged, main green, scratch-instance upgrade, conformance test, Mac smoke, release · waiting on X-7 (in-review)
 
-## W4 — 17 tickets, 65 agent-days
+## W4 — 22 tickets, 73 agent-days
 
 - [ ] [T4-10](t4/t4-10.md) · Connections P3: HTTP, OAuth, generated tools · L · opus high · after T4-9
 - [ ] [T4-11](t4/t4-11.md) · Targets and syncs as connections · L · opus high · after T4-10
@@ -187,6 +187,11 @@ Generated from `docs/product/design-build-plan.md` by `ops/scripts/tickets.mjs`.
 - [ ] [T8-5](t8/t8-5.md) · The bar · L · opus high · after T8-2a, T5-5
 - [ ] [T8-7](t8/t8-7.md) · Meeting groups and anchors · M · opus · after T1-8, T8-2b
 - [ ] [T9-4](t9/t9-4.md) · Wire the composer · M · opus · after T9-3, F-0
+- [ ] [X-24](x/x-24.md) · Plan-tomorrow's test runs on its own clock · S · sonnet · after X-15
+- [ ] [X-29](x/x-29.md) · Main's Mac fixtures match the recorder · M · opus
+- [ ] [X-31](x/x-31.md) · The recorder's seeds are pinned to its clock · S · sonnet
+- [ ] [X-32](x/x-32.md) · A push carries Needs You only, and no text · M · opus
+- [ ] [X-41](x/x-41.md) · An owner-door secret refuses a connection or agent grant · S · sonnet · after T2-13
 
 - [ ] **W4 checkpoint** — merged, main green, scratch-instance upgrade, conformance test, Mac smoke, release
 
@@ -196,19 +201,15 @@ Generated from `docs/product/design-build-plan.md` by `ops/scripts/tickets.mjs`.
 
 - [ ] **W5 checkpoint** — merged, main green, scratch-instance upgrade, conformance test, Mac smoke, release
 
-## W4 candidates — 51 tickets, 75 agent-days, no wave yet
+## W4 candidates — 46 tickets, 67 agent-days, no wave yet
 
 Follow-ups specified in the plan (§3.2's *Candidates* row) that nobody has scheduled. The owner assigns each one a wave at a checkpoint; until then none is dispatched.
 
-- [ ] [X-24](x/x-24.md) · Plan-tomorrow's test runs on its own clock · S · sonnet · after X-15
 - [ ] [X-25](x/x-25.md) · DB-backed suites survive file parallelism · M · opus
 - [ ] [X-26](x/x-26.md) · Linear's sync reads in a stable order · S · sonnet · after T4-26
 - [ ] [X-27](x/x-27.md) · The router-policy test has no wall-clock bound · S · sonnet
 - [ ] [X-28](x/x-28.md) · The chat viewport test is deterministic · S · sonnet
-- [ ] [X-29](x/x-29.md) · Main's Mac fixtures match the recorder · M · opus
 - [ ] [X-30](x/x-30.md) · The recorder checks the values a contract depends on · M · opus · after X-29
-- [ ] [X-31](x/x-31.md) · The recorder's seeds are pinned to its clock · S · sonnet
-- [ ] [X-32](x/x-32.md) · A push carries Needs You only, and no text · M · opus
 - [ ] [X-33](x/x-33.md) · The PWA's last browser dialogs · S · sonnet
 - [ ] [X-34](x/x-34.md) · Ask First raises one card per subject · M · opus · after T4-9
 - [ ] [X-35](x/x-35.md) · Approve re-checks the agent · S · sonnet · after T4-9
@@ -217,7 +218,6 @@ Follow-ups specified in the plan (§3.2's *Candidates* row) that nobody has sche
 - [ ] [X-38](x/x-38.md) · The owner sees an actor's connections in its scope · S · sonnet
 - [ ] [X-39](x/x-39.md) · A revoked connection grant refuses the next call · S · sonnet · after X-8
 - [ ] [X-40](x/x-40.md) · A failed connection call in turn progress · S · sonnet · after X-23
-- [ ] [X-41](x/x-41.md) · An owner-door secret refuses a connection or agent grant · S · sonnet · after T2-13
 - [ ] [X-42](x/x-42.md) · An owner door is a grantee kind · M · opus · after X-41
 - [ ] [X-43](x/x-43.md) · `private` is a reserved tier name · S · sonnet · after T8-6
 - [ ] [X-44](x/x-44.md) · Every compute call goes through the egress guard · M · opus · after X-7

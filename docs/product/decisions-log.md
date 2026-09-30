@@ -215,6 +215,11 @@ provider call is refused** — including the seed's only cloud template,
    a minor bump); and confirm the coordinator's widened scope (above). Held
    open, unmerged; X-44 and X-45 follow it.
 
+   **Ruled 2026-09-30:** option 1 — mount `.metistry/secrets.yaml` read-only
+   into the assistant and console containers (policy only; mirrors launchd's
+   `CONFIG_SECRETS`). The sandbox `CONFIG_SECRETS` change and core's API break
+   (minor bump) are approved. X-44 and X-45 are unblocked.
+
 #### Agents, crews and routines
 
 2. **T3-8 (#413):** a routine's task is not run through `checkBrief`, so
@@ -242,6 +247,9 @@ provider call is refused** — including the seed's only cloud template,
    T4-2 refuses (`secret_in_url`). Add a secret-as-URL door to T4-2, or leave
    private feeds to EventKit, CalDAV and Google? Built meanwhile: public feeds
    only.
+
+   **Ruled 2026-09-30:** Google Calendar gets its own OAuth door (T4-14); no
+   secret-in-URL door is added to T4-2; private ICS feeds stay out.
 9. **T2-13 (#421):** `github_write` has no grantee-kind check — an owner door is
    neither `connection:` nor `agent:`. Add an owner-door grantee kind? → X-42
    (X-41 refuses the wrong grantees either way).
@@ -249,6 +257,9 @@ provider call is refused** — including the seed's only cloud template,
     (`main.ts`, open since #374), so proxied tools answer `not_available`
     outside tests — X-8 did not change that. Which ticket wires it? And a
     secret's last-used is still not stamped for syncs (T4-24).
+
+    **Ruled 2026-09-30:** the console's `ConnectionPool` wiring (`apps/console/src/main.ts`)
+    is folded into T4-10 as its first task.
 11. **T4-13 (#430):** an iCloud account's `pNN-caldav` host needs two owner
     commands after the first sync (X-56 automates it), and no console route
     calls CalDAV's own-event write yet (X-57). Schedule both with W4's
@@ -313,12 +324,17 @@ provider call is refused** — including the seed's only cloud template,
 
 28. **T8-2a (#411):** does #253's "no capture UI" hold cover the record sheet
     and whoever holds the control token? (T8-2b and T8-5 build the bar.)
+
+    **Ruled 2026-09-30:** the hold is **lifted**. T8-3 and T8-5 proceed in W4.
 29. **T8-2b (#448):** the recorder's socket is not namespaced per instance and
     `METISTRY_LC_SOCKET` defaults under `/tmp` (→ X-72); transcripts land in
     `Inbox/`, not `Journal/Transcripts/` (→ X-73); `meta.capture_session` stays
     unset until T8-5/T8-7. Which folder? **Owner's hand after 0.15.0:** the
     real-recording checklist in #448's body (TCC grants for Metistry
     Recorder).
+
+    **Ruled 2026-09-30:** `Journal/Transcripts/`, not `Inbox/`. X-73 resolves
+    that way; T8-4 and T8-7 read from there.
 
 #### Linear and GitHub
 
@@ -338,6 +354,19 @@ provider call is refused** — including the seed's only cloud template,
     W4 dispatches, or inside W4? X-24 (plan-tomorrow, four occurrences), X-29
     (stale Mac fixtures) and X-32 (push carries message text) are the ones the
     coordinator would take first.
+
+## W4 — the fourth build wave
+
+**Rulings of 2026-09-30** answer questions 1, 8, 10, 28 and 29 above (recorded
+inline where each question is asked). Candidates promoted into W4 and
+dispatched first: X-24, X-29, X-31, X-32, X-41. The other 27 questions from
+the W3 checkpoint remain open for the W4 checkpoint.
+
+**Autonomy:** the owner, 2026-09-30 — "make sure you have the autonomy to
+fully execute W4 without waiting." W4 runs with the coordinator's full
+autonomy. Owner-hand credentials (the Google OAuth client, an IMAP app
+password, the recorder's TCC grants) are supplied at test time, after the
+tickets land.
 
 ## Rulings the owner must make
 

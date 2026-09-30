@@ -1,5 +1,22 @@
 # @metistry-apps/console
 
+## 0.15.1
+
+### Patch Changes
+
+- Updated dependencies [0025a4a]
+- Updated dependencies [e78a182]
+- Updated dependencies [586f02c]
+  - @foldedspacelabs/metistry-artifacts@0.15.1
+  - @foldedspacelabs/metistry-cli@0.15.1
+  - @foldedspacelabs/metistry-connections@0.15.1
+  - @foldedspacelabs/metistry-core@0.15.1
+  - @foldedspacelabs/metistry-mcp-brain@0.15.1
+  - @foldedspacelabs/metistry-queries@0.15.1
+  - @foldedspacelabs/metistry-tasks@0.15.1
+  - @metistry-apps/collectors@0.15.1
+  - @metistry-apps/routines@0.15.1
+
 ## 0.15.0
 
 ### Minor Changes

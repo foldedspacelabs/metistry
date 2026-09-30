@@ -1,5 +1,13 @@
 # @foldedspacelabs/metistry-mcp-apple-fm
 
+## 0.15.1
+
+### Patch Changes
+
+- 0025a4a: **Releases publish from the public repository again.** Every published package's `package.json` names its source (`repository` with `directory`, plus `homepage` and `bugs`), which npm's provenance check requires — v0.15.0 published nothing to npm for want of it. The release workflow now builds each GitHub release as a draft with every asset and publishes it only then, so immutable releases no longer refuse the assets; a failed Mac app holds the release as a draft instead of freezing it without the DMG; an npm provenance rejection fails the run instead of passing as a skip; and a malformed `APPLE_API_KEY_P8` is refused naming the format it must be (the raw `.p8` file, BEGIN/END lines included). Metadata and release tooling only; no runtime behaviour changes.
+- Updated dependencies [0025a4a]
+  - @foldedspacelabs/metistry-core@0.15.1
+
 ## 0.15.0
 
 ### Patch Changes

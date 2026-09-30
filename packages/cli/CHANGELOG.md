@@ -1,5 +1,16 @@
 # @foldedspacelabs/metistry-cli
 
+## 0.15.1
+
+### Patch Changes
+
+- 0025a4a: **Releases publish from the public repository again.** Every published package's `package.json` names its source (`repository` with `directory`, plus `homepage` and `bugs`), which npm's provenance check requires — v0.15.0 published nothing to npm for want of it. The release workflow now builds each GitHub release as a draft with every asset and publishes it only then, so immutable releases no longer refuse the assets; a failed Mac app holds the release as a draft instead of freezing it without the DMG; an npm provenance rejection fails the run instead of passing as a skip; and a malformed `APPLE_API_KEY_P8` is refused naming the format it must be (the raw `.p8` file, BEGIN/END lines included). Metadata and release tooling only; no runtime behaviour changes.
+- e78a182: **`metistry update` re-renders the LaunchAgent and `supervisor.json` before it restarts anything onto a new release.** Under the launchd shape the confined assistant and reconciler are granted the release directory by its real path (`releases/<version>` — `sandbox-exec` matches resolved paths, so a rule naming `current` matches nothing), and the restart step used to kickstart the supervisor onto the config rendered for the release being left: on 0.14.2 → 0.14.4 both children died with `EPERM … releases/0.14.4/…/main.js`, the lock wait ran out, and only a manual `metistry up` recovered. The restart step now runs `up`'s own launchd step first — whenever the supervisor's code moved or `supervisor.json` grants a release other than the one `current` resolves to — so a rollback and a same-version rerun (no download; it then writes the lock a failed restart deferred) are covered too. A render that does not land is deferred with `metistry up`, and a reconciler that never answers now has its log's last error lines printed with the deferred lock.
+- 586f02c: **`metistry update` installs the newest release that has a runtime pack.** An unpinned update no longer takes GitHub's Latest blindly: when Latest carries no runtime pack for this platform (or no `checksums.txt`) — as v0.15.0 does, published immutable with no assets after its workflow failed — it walks the last 10 releases, drafts and prereleases skipped, newest version first, installs the newest that has both, and prints one line per release it passed over (`v0.15.0 has no pack for darwin-arm64 — installing v0.14.4`). It never downgrades (`already on the newest release with a pack`), fails only when none of the 10 has a pack, and `--version X` still means exactly X.
+- Updated dependencies [0025a4a]
+  - @foldedspacelabs/metistry-connections@0.15.1
+  - @foldedspacelabs/metistry-core@0.15.1
+
 ## 0.15.0
 
 ### Minor Changes

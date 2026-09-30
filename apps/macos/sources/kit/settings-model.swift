@@ -24,7 +24,12 @@
 //                version --json`, `metistry update` and `--rollback` (M2)
 //   Account      the console sign-in and the instance repository — the old
 //                *Connections* (screen-15 §1)
-//   Connections, Secrets, Variables, Live Capture, Sessions
+//   Connections  connections-model.swift (T6-13a's pane): the list and one
+//                connection from `GET /api/connections(/:name)` and
+//                `GET /api/secrets`; tool modes, the offer switch and Test are
+//                `metistry connections` (M13), a secret's hosts and grant
+//                `metistry secrets` (M7)
+//   Secrets, Variables, Live Capture, Sessions
 //                their own tickets' panes; until each lands, the pane says what
 //                it will hold and which verb does it today
 //   Keyboard     the any-app shortcuts (T6-16 registers them) and Show All ⌘/
@@ -159,7 +164,7 @@ public final class SettingsModel {
 
     public var section: Section = .instance
 
-    /// The shared doctor report. Services and Connections render it; they never
+    /// The shared doctor report. Services and Account render it; they never
     /// run their own probes (invariant 3 — one read path).
     public let status: StatusModel
     /// Who the console takes this Mac to be. The app's one sign-in model, shared
@@ -170,6 +175,8 @@ public final class SettingsModel {
     /// read-only summary the Connections pane has always shown, and both come
     /// from the same `compute show --json`.
     public let computePane: ComputeModel
+    /// The Connections pane: read over the API, changed through M13 and M7.
+    public let connectionsPane: ConnectionsModel
     public private(set) var cli: MetistryCLI?
     public private(set) var instanceDir: URL?
 
@@ -235,6 +242,7 @@ public final class SettingsModel {
         self.instanceDir = instanceDir
         self.consoleSignIn = consoleSignIn ?? ConsoleSignInModel(cli: cli)
         self.computePane = computePane ?? ComputeModel(status: status, cli: cli)
+        self.connectionsPane = ConnectionsModel(session: session)
         self.session = session
         self.managementOverride = management
         // `release.available` names the version and nothing else; Settings ▸
@@ -277,6 +285,7 @@ public final class SettingsModel {
         linkOrigin = nil
         outcome = nil
         computePane.adopt(cli: cli)
+        connectionsPane.adopt()
     }
 
     // MARK: - Instance
@@ -632,8 +641,6 @@ public final class SettingsModel {
         return secrets.filter { named.contains($0.name) }
     }
 
-    public var bridges: [DoctorRow] { status.report?.bridges ?? [] }
-
     /// What the Connections pane says about the console's door, under the
     /// sign-in state itself. The decision, in one paragraph, because "why does
     /// this Mac not need a passkey?" is the question the row provokes.
@@ -815,6 +822,7 @@ public final class SettingsModel {
         case .identity: await refreshIdentity()
         case .linked: await refreshLinked()
         case .versions: await refreshVersions()
+        case .connections: await connectionsPane.refresh()
         }
     }
 
@@ -835,7 +843,7 @@ public final class SettingsModel {
 public struct SettingsConfirmation: Identifiable, Equatable, Sendable {
     /// Which read the verb changes, re-done after it.
     public enum After: Sendable, Equatable {
-        case doctor, deployment, identity, linked, versions
+        case doctor, deployment, identity, linked, versions, connections
     }
 
     public let id = UUID()

@@ -19,7 +19,9 @@
 //                the login item, the background item, and keep-awake through
 //                `metistry deployment set-keep-awake` (M4) — the lid dialog
 //                runs nothing
-//   Compute      compute-model.swift (T6-12's pane)
+//   Compute      compute-model.swift (T6-12): `GET /api/compute` and its
+//                catalogue; limits and the model through the API (§2.3),
+//                providers and local models through M16/M17, confirmed
 //   Updates      Sparkle's own preferences; the runtime through `metistry
 //                version --json`, `metistry update` and `--rollback` (M2)
 //   Account      the console sign-in and the instance repository — the old
@@ -241,7 +243,7 @@ public final class SettingsModel {
         self.cli = cli
         self.instanceDir = instanceDir
         self.consoleSignIn = consoleSignIn ?? ConsoleSignInModel(cli: cli)
-        self.computePane = computePane ?? ComputeModel(status: status, cli: cli)
+        self.computePane = computePane ?? ComputeModel(status: status, cli: cli, session: session, management: management)
         self.connectionsPane = ConnectionsModel(session: session)
         self.session = session
         self.managementOverride = management
@@ -374,18 +376,18 @@ public final class SettingsModel {
 
     // MARK: - Compute
 
-    // ONE read of `compute show --json` for the whole window. The Compute pane
-    // owns it (compute-model.swift); Connections shows the summary through
-    // these three, so the two panes cannot disagree about which model answers a
-    // turn and neither runs the verb the other already ran.
+    // ONE read of `GET /api/compute` for the whole window. The Compute pane
+    // owns it (compute-model.swift, T6-12); other panes read the report through
+    // these, so no two panes can disagree about which model answers a turn and
+    // none makes the read another already made.
 
     public var compute: ComputeFacts? { computePane.report }
     public var computePhase: ReadPhase { computePane.phase }
-    public var computeCommand: String? { computePane.showCommand }
+    public var computeCommand: String? { ComputeModel.readRoute }
 
-    /// `metistry compute show --json` — which provider and model each tier runs
-    /// on, and whether the key each provider NAMES is present. No value of any
-    /// key crosses this boundary, because the verb cannot print one.
+    /// `GET /api/compute` — which provider and model each tier runs on, and
+    /// whether the key each provider NAMES is present. No value of any key
+    /// crosses this boundary, because the route cannot serve one.
     public func refreshCompute() async {
         await computePane.refresh()
     }

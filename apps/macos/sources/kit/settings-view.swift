@@ -163,7 +163,7 @@ struct SettingsPaneContent: View {
             case .instance: InstancePane(model: model, actions: actions)
             case .services: ServicesPane(model: model, actions: actions)
             case .compute:
-                ComputePaneView(model: model.settings.computePane)
+                ComputePaneView(model: model.settings.computePane, assistantName: model.settings.identity?.assistantName, onReplaceKey: { model.settings.section = .secrets })
                     // Re-read on open and on every instance switch. There is no
                     // file watcher anywhere in this app, so this IS the refresh.
                     .task(id: model.instances.active) { await model.settings.computePane.refresh() }

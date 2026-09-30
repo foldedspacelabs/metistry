@@ -367,7 +367,7 @@ takes a `since` cursor and answers with the next one.
 | `GET /api/connections/:name` | owner | session · local_owner | natural | — | — | served | one connection, with its file and its provider's unit |
 | `GET /api/secrets` | owner | session · local_owner | natural | — | — | served | secret names, hosts, grants, last used — never a value |
 | `GET /api/variables` | owner | session · local_owner | natural | — | — | served | the variables agents read — name, value, read by, used in |
-| `GET /api/recordings/:id` | owner | session · local_owner | natural | — | — | T8-4 | one recording's retention state |
+| `GET /api/recordings/:id` | owner | session · local_owner | natural | — | — | served | one recording's retention state |
 | `POST /api/github/pulls/:owner/:repo/:number/review` | owner | session · local_owner | no | stale | — | served | post a review; the head SHA must match the one shown |
 | `POST /api/github/pulls/:owner/:repo/:number/threads/:id/reply` | owner | session · local_owner | no | stale | — | served | reply to a review thread; the head SHA must match |
 | `POST /api/github/pulls/:owner/:repo/:number/threads/:id/resolve` | owner | session · local_owner | no | stale | — | served | resolve a review thread; the head SHA must match |

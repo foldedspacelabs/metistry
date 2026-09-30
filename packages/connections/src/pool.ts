@@ -30,6 +30,11 @@
 //     and nowhere else, and a redirect is not followed: a server that points
 //     the client at another host is refused `other_host`.
 //
+// An IMAP mailbox (T4-15) is not MCP and is never pooled: `openImap` opens
+// one signed-in session for the owner's hand (`check()`), through the IMAP
+// provider's own host guard, with this pool's secrets and redactor, and the
+// caller closes it.
+//
 // A stdio child is given a granted secret in its environment at spawn —
 // §2.14's rule for a local process — and is NOT network-confined in this
 // release: the supervisor's egress proxy has one allowlist for its confined
@@ -59,6 +64,7 @@ import {
 } from "@foldedspacelabs/metistry-core";
 import type { ConnectionCatalog } from "./catalog.js";
 import { ConnectionRefused } from "./errors.js";
+import { IMAP_MODULE, openImap, type ImapDialer, type ImapSession } from "./imap.js";
 import type { ConnectionEntry } from "./load.js";
 import { planDial, planFingerprint, type CommandDial, type DialPlan, type HttpDial } from "./plan.js";
 
@@ -137,6 +143,8 @@ export interface ConnectionPoolOptions {
   redactor?: SecretRedactor | undefined;
   /** the base fetch under the egress guard (a test's fake; default global fetch) */
   fetch?: typeof fetch | undefined;
+  /** how an IMAP connection's socket is opened (a test's fake; default Node's verified TLS) — only after its host guard passed */
+  imapDial?: ImapDialer | undefined;
   /** where THIS process runs: a `runs_on` that names the other place is refused `runs_elsewhere`. Default host */
   runsOn?: "host" | "container" | undefined;
   idleMs?: number | undefined;
@@ -276,6 +284,43 @@ export class ConnectionPool {
     const tools = await this.#listTools(live);
     this.#touch(name, live);
     return tools;
+  }
+
+  /**
+   * Open and sign in to an IMAP connection (T4-15) — for the owner's hand
+   * (`check()`, `metistry connections test`). Not pooled and never offered to
+   * an agent: the caller closes the session. Refused before anything is
+   * dialled for an unknown or not-ready connection and for one whose
+   * provider is not the IMAP module; the host guard, the fill and the
+   * sign-in are `openImap`'s.
+   */
+  async openImap(name: string, opts: { onUse?: ((use: { names: string[]; destination: string }) => void | Promise<void>) | undefined } = {}): Promise<ImapSession> {
+    if (this.#closed) throw new Error("the connection pool is closed");
+    const catalog = await this.#opts.catalog();
+    const entry = catalog.entries.find((e) => e.name === name);
+    if (!entry) throw new ConnectionRefused("unknown_connection", name, `no connection named ${name} (\`metistry connections list\`)`);
+    if (entry.status !== "ok" || !entry.connection || !entry.provider) {
+      throw new ConnectionRefused("not_ready", name, `${entry.status}: ${entry.issues.join("; ") || "the connection is not ready"}`);
+    }
+    const impl = entry.provider.manifest.implementation;
+    const reach = entry.connection.reach.imap;
+    if (impl.kind !== "builtin" || impl.module !== IMAP_MODULE || !reach) {
+      throw new ConnectionRefused("not_built", name, `provider ${entry.provider.name} is not the IMAP module — it is not opened as a mailbox`);
+    }
+    if (!catalog.secrets.ok) {
+      throw new ConnectionRefused("secret", name, `secrets.yaml does not load (${catalog.secrets.message}), so ${reach.secret} may not be used`);
+    }
+    return openImap({
+      connection: name,
+      reach,
+      capabilities: [...entry.provider.manifest.capabilities],
+      secretsFile: catalog.secrets.file,
+      source: this.#opts.secrets,
+      redactor: this.#redactor,
+      ...(this.#opts.imapDial ? { dial: this.#opts.imapDial } : {}),
+      timeoutMs: this.#opts.connectTimeoutMs ?? DEFAULT_CONNECTION_CONNECT_TIMEOUT_MS,
+      ...(opts.onUse ? { onUse: opts.onUse } : {}),
+    });
   }
 
   /** Close one connection now (its file was removed, say) — or every one. */

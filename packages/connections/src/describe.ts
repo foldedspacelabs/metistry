@@ -28,6 +28,7 @@ import {
   egressDestination,
   secretGrant,
   secretRefsIn,
+  socketDestination,
   variableRefsIn,
   type AuthScheme,
   type ConnectionType,
@@ -54,7 +55,9 @@ export interface ConnectionUser {
 export type ReachSummary =
   | { class: "http"; url: string; auth: AuthScheme; headers: string[]; query: string[]; timeout_s: number | null }
   | { class: "command"; command: string; args: string[]; cwd: string | null; env: string[]; runs_on: "host" | "container" }
-  | { class: "path"; path: string; include: string[]; skip: string[]; watch: boolean };
+  | { class: "path"; path: string; include: string[]; skip: string[]; watch: boolean }
+  /** an IMAP mailbox (T4-15): where it goes and how — never the username or the password */
+  | { class: "imap"; host: string; port: number; security: "tls" | "plain"; auth: "basic" };
 
 export interface ConnectionToolRow {
   name: string;
@@ -108,7 +111,8 @@ export interface DescribeOptions {
 function reachOf(entry: ConnectionEntry): ReachSummary | null {
   const c = entry.connection;
   if (!c) return null;
-  const { http, command, path } = c.reach;
+  const { http, command, path, imap } = c.reach;
+  if (imap) return { class: "imap", host: imap.host, port: imap.port, security: imap.security, auth: "basic" };
   if (http) return { class: "http", url: http.url, auth: http.auth.scheme, headers: Object.keys(http.headers).sort(), query: Object.keys(http.query).sort(), timeout_s: http.timeout_s ?? null };
   if (command) return { class: "command", command: command.command, args: [...command.args], cwd: command.cwd ?? null, env: Object.keys(command.env).sort(), runs_on: command.runs_on };
   if (path) return { class: "path", path: path.path, include: [...path.include], skip: [...path.skip], watch: path.watch };
@@ -176,6 +180,13 @@ async function runtimeIssues(entry: ConnectionEntry, catalog: ConnectionCatalog,
       const hosts = Object.hasOwn(file.secrets, n) ? file.secrets[n]!.hosts : [];
       if (dest && !hosts.includes(dest)) failed.push(`${n} may not be sent to ${dest} — it is not on the secret's *Sent only to* list (\`metistry secrets hosts ${n} ${[...hosts, dest].join(" ")}\`)`);
     }
+  }
+  // an IMAP mailbox (T4-15): the app password must be allowed to go to its exact host:port — what the socket guard refuses, said ahead of time
+  const imap = c.reach.imap;
+  if (imap && absent.length === 0) {
+    const dest = socketDestination(imap.host, imap.port, imap.security === "tls").entry;
+    const hosts = Object.hasOwn(file.secrets, imap.secret) ? file.secrets[imap.secret]!.hosts : [];
+    if (!hosts.includes(dest)) failed.push(`${imap.secret} may not be sent to ${dest} — it is not on the secret's *Sent only to* list (\`metistry secrets hosts ${imap.secret} ${[...hosts, dest].join(" ")}\`)`);
   }
   return { absent, failed };
 }

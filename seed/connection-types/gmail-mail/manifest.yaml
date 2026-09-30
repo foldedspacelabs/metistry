@@ -1,0 +1,35 @@
+# Gmail — a known service over the IMAP provider (plan §2.6, §4 Q8; T4-15).
+#
+# **Gmail needs 2-Step Verification and an app password.** Google ended
+# password access for IMAP on 2025-03-14 "with the exception of app
+# passwords" (Google Workspace, *Transition from less secure apps*). So:
+#
+#   1. turn on 2-Step Verification for the Google Account
+#      (myaccount.google.com → Security);
+#   2. make an app password (myaccount.google.com/apppasswords) — 16
+#      letters; spaces as Google shows them are not part of it;
+#   3. make sure IMAP is on in Gmail (Settings → Forwarding and POP/IMAP) —
+#      new accounts have it on; a Workspace admin can turn it off;
+#
+# then, never the account's own password:
+#
+#   metistry secrets set gmail_app_password             (the value on stdin)
+#   metistry secrets hosts gmail_app_password imap.gmail.com:993
+#   metistry secrets grant gmail_app_password connection:gmail on
+#   metistry connections add gmail --type mail --provider gmail-mail \
+#     --imap imap.gmail.com:993 --username you@gmail.com --secret gmail_app_password
+#   metistry connections test gmail                      (signs in, lists folders, finds [Gmail]/Drafts)
+#
+# A connection of this type anywhere but imap.gmail.com:993 over TLS is
+# refused. Drafts go to the folder Gmail marks \Drafts ([Gmail]/Drafts, or
+# its name in the account's language). The Gmail API is not used — its
+# scopes are restricted and need an annual third-party assessment (§4 Q8).
+schema: 1
+name: gmail-mail
+type: connection-type
+description: Gmail over IMAP with an app password (2-Step Verification on) — who wrote and about what (headers, never bodies), and drafts you send yourself. Nothing sends mail.
+provides: mail
+transports: [imap]
+auth: [basic]                    # an app password — Google's one exception to its end of password access for IMAP
+capabilities: [read, draft]
+implementation: { kind: builtin, module: imap }

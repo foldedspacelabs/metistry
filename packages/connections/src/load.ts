@@ -35,7 +35,7 @@
 //   * a `{{ secret.x }}` in a path reach, which has nowhere to send one;
 //   * an Authorization header beside an auth shortcut that writes one;
 //   * and what a builtin provider refuses for its own connections
-//     (`builtinIssues` — CalDAV's, T4-13).
+//     (`builtinIssues` — CalDAV's, T4-13; IMAP's, T4-15).
 
 import { lstat, readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -51,6 +51,7 @@ import {
   type RegistryUnit,
 } from "@foldedspacelabs/metistry-core";
 import { CALDAV_MODULE, caldavConnectionIssues } from "./caldav.js";
+import { IMAP_MODULE, imapConnectionIssues } from "./imap.js";
 
 /** `github.yaml` → `github`. A connection's file is named for it, like a registry unit's directory. */
 export const CONNECTION_FILE_RE = /^([a-z][a-z0-9-]*)\.ya?ml$/;
@@ -87,7 +88,11 @@ export function typedValues(c: ConnectionFile): { path: string; where: Where; va
     if (value !== undefined) out.push({ path, where, value });
   };
   add("description", "description", c.description);
-  const { http, command, path } = c.reach;
+  const { http, command, path, imap } = c.reach;
+  if (imap) {
+    add("reach.imap.host", "url", imap.host);
+    add("reach.imap.username", "auth", imap.username);
+  }
   if (http) {
     add("reach.http.url", "url", http.url);
     for (const [k, v] of Object.entries(http.query)) add(`reach.http.query.${k}`, "query", v);
@@ -154,6 +159,7 @@ function builtinIssues(c: ConnectionFile, unit: RegistryUnit<ConnectionTypeManif
   const impl = unit.manifest.implementation;
   if (impl.kind !== "builtin") return [];
   if (impl.module === CALDAV_MODULE) return caldavConnectionIssues(c, unit.name);
+  if (impl.module === IMAP_MODULE) return imapConnectionIssues(c, unit.name);
   return [];
 }
 

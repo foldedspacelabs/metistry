@@ -7,7 +7,9 @@
 // `linear` provider itself (`linear.ts`, T4-24) and Send to Linear
 // (`linear-issue.ts`, T4-25), and the `ics` provider — an iCalendar feed,
 // parsed and expanded (`ics.ts`, T4-12) — and the `caldav` provider: read,
-// write own and reply over RFC 6638 (`caldav.ts`, `dav-xml.ts`, T4-13).
+// write own and reply over RFC 6638 (`caldav.ts`, `dav-xml.ts`, T4-13) — and
+// the `imap` provider: headers read and drafts appended over IMAP, with no
+// path that sends (`imap.ts`, `imap-wire.ts`, T4-15).
 // docs/ops/connections.md is the same contract in words.
 
 export { CONNECTION_REFUSAL_CODES, ConnectionRefused, type ConnectionRefusalCode } from "./errors.js";
@@ -45,7 +47,7 @@ export {
   type PoolEvent,
   type UpstreamTool,
 } from "./pool.js";
-export { checkConnection, type ConnectionCheckMeta } from "./check.js";
+export { checkConnection, type ConnectionCheckMeta, type ImapCheckMeta } from "./check.js";
 export {
   describeConnection,
   describeConnectionDetail,
@@ -180,3 +182,43 @@ export {
   type WriteResult,
 } from "./caldav.js";
 export { CALDAV_NS, DAV_NS, DavXmlError, parseMultistatus, parseXml, type DavResponse, type XmlElement } from "./dav-xml.js";
+export {
+  IMAP_COMMANDS,
+  IMAP_ERROR_CODES,
+  IMAP_FETCH_ITEMS,
+  IMAP_HEADER_FIELDS,
+  IMAP_KNOWN_SERVICES,
+  IMAP_MAX_DRAFT_BYTES,
+  IMAP_MAX_MESSAGES,
+  IMAP_MODULE,
+  IMAP_PROVENANCE,
+  IMAP_REFUSED_COMMANDS,
+  ImapError,
+  ImapSession,
+  decodeEncodedWords,
+  defaultImapDialer,
+  headerFields,
+  imapCommandLine,
+  imapConnectionIssues,
+  openImap,
+  parseAddresses,
+  parseInternalDate,
+  planDraft,
+  searchDate,
+  type AppendResult,
+  type DraftConfirm,
+  type DraftInput,
+  type DraftPlan,
+  type DraftPreview,
+  type ImapCommand,
+  type ImapDialer,
+  type ImapErrorCode,
+  type ImapExamined,
+  type ImapMailbox,
+  type ImapMessage,
+  type ImapRead,
+  type ImapReach,
+  type MailAddress,
+  type OpenImapOptions,
+} from "./imap.js";
+export { ImapWireError, ResponseFramer, decodeMailboxName, quoted, tokenize, type ImapValue } from "./imap-wire.js";

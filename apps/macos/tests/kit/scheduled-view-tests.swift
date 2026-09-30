@@ -42,7 +42,7 @@ import Testing
     // An interval routine is one row, in its own band, never an occurrence.
     let throughout = try #require(model.routineBands.first)
     #expect(throughout.title == ScheduledWords.throughoutTheDay)
-    #expect(throughout.rows.map(\.name) == ["inbox-drain", "session-fold", "claude-usage"])
+    #expect(throughout.rows.map(\.name) == ["inbox-drain", "recording-retention", "session-fold", "claude-usage"])
     #expect(rows.filter { $0.name == "inbox-drain" }.map(\.kind) == [.throughout])
     // The week counts what the schedule places: five working days of the brief, whatever ticked.
     let week = model.week
@@ -163,9 +163,9 @@ import Testing
     #expect(digest.runBy == "researcher" && digest.runByIsAgent)
     #expect(digest.glyph == nil, "it has not run yet")
     #expect(digest.detail == nil, "nothing holds it")
-    // The tabs' counts: the recorder seeds twelve routines and eight syncs.
-    #expect(model.count(.routines) == 12)
-    #expect(model.count(.syncs) == 8)
+    // The tabs' counts: the recorder seeds thirteen routines and ten syncs.
+    #expect(model.count(.routines) == 13)
+    #expect(model.count(.syncs) == 10)
 }
 
 @MainActor
@@ -392,7 +392,7 @@ import Testing
     let (model, console, session) = try await fixtureModel()
     defer { withExtendedLifetime(session) {} }
     model.tab = .syncs
-    #expect(model.syncRows.map(\.name) == ["aws-costs", "caldav-calendar", "eventkit-calendar", "ics-calendar", "devin-knowledge", "devin-sessions", "github-state", "linear"])
+    #expect(model.syncRows.map(\.name) == ["aws-costs", "caldav-calendar", "eventkit-calendar", "ics-calendar", "devin-knowledge", "devin-sessions", "github-state", "google-calendar", "linear", "mail-messages"])
     let github = try #require(model.presentation(ScheduledRow(name: "github-state", kind: .sync), assistantName: "Aide"))
     #expect(github.spoken == "GitHub, from github, every 15 minutes, raises assigned, review requested. Hasn't run yet", "\(github.spoken)")
     let unconnected = try #require(model.presentation(ScheduledRow(name: "aws-costs", kind: .sync), assistantName: "Aide"))
@@ -518,7 +518,7 @@ import Testing
     for control in ["Show as Table", "Run Now, ⌘R", "Pause, ⌥⌘P"] {
         #expect(tree.controlNames.contains(control), "controls: \(tree.controlNames)")
     }
-    #expect(tree.controlNames.contains { $0.hasPrefix("Routines 12") || $0 == "Show" }, "the tabs: \(tree.controlNames)")
+    #expect(tree.controlNames.contains { $0.hasPrefix("Routines 13") || $0 == "Show" }, "the tabs: \(tree.controlNames)")
     // the principal id is never a name on this screen
     #expect(!said.contains { $0.localizedCaseInsensitiveContains("run by assistant") }, "said: \(said)")
 }
@@ -626,7 +626,7 @@ private func fixtureModel() async throws -> (ScheduledModel, ScheduledConsole, C
     let console = try ScheduledConsole()
     let (model, session) = scheduledModel(console)
     await model.refreshIfDue()
-    #expect(model.listing?.routines.count == 12, "the recorded list")
+    #expect(model.listing?.routines.count == 13, "the recorded list")
     return (model, console, session)
 }
 

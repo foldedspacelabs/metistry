@@ -18,7 +18,7 @@
           "value": false,
           "origin": "default"
         },
-        "next_run": "2026-09-30T04:49:52.112Z",
+        "next_run": "2026-09-30T07:23:48.218Z",
         "next_refused": null,
         "last_run": null,
         "is_default": true,
@@ -46,7 +46,7 @@
           "value": false,
           "origin": "default"
         },
-        "next_run": "2026-09-30T04:49:52.112Z",
+        "next_run": "2026-09-30T07:23:48.218Z",
         "next_refused": null,
         "last_run": null,
         "is_default": true,
@@ -77,8 +77,8 @@
         "next_run": "2026-10-01T01:00:00.000Z",
         "next_refused": null,
         "last_run": {
-          "run_id": "8",
-          "at": "2026-09-30T04:49:51.757Z",
+          "run_id": "9",
+          "at": "2026-09-30T07:23:47.830Z",
           "ok": false,
           "outcome": null,
           "cost_usd": null,
@@ -137,8 +137,8 @@
         "next_run": "2026-09-30T11:00:00.000Z",
         "next_refused": null,
         "last_run": {
-          "run_id": "9",
-          "at": "2026-09-30T04:49:51.757Z",
+          "run_id": "10",
+          "at": "2026-09-30T07:23:47.830Z",
           "ok": true,
           "outcome": "silent",
           "cost_usd": null,
@@ -192,8 +192,8 @@
         "next_run": "2026-10-01T03:00:00.000Z",
         "next_refused": null,
         "last_run": {
-          "run_id": "7",
-          "at": "2026-09-30T04:49:51.757Z",
+          "run_id": "8",
+          "at": "2026-09-30T07:23:47.830Z",
           "ok": true,
           "outcome": "acted",
           "cost_usd": null,
@@ -231,6 +231,34 @@
           "value": "America/New_York",
           "origin": "profile"
         }
+      },
+      {
+        "name": "recording-retention",
+        "title": "Recording Retention",
+        "paused": {
+          "value": false,
+          "origin": "default"
+        },
+        "next_run": "2026-09-30T07:23:48.218Z",
+        "next_refused": null,
+        "last_run": null,
+        "is_default": true,
+        "held": null,
+        "describe": "every 1h",
+        "kind": "routine",
+        "source": "product",
+        "schedule": {
+          "value": {
+            "every": "1h"
+          },
+          "origin": "default"
+        },
+        "config": {},
+        "actor": null,
+        "task": null,
+        "grants": null,
+        "days": null,
+        "time_zone": null
       },
       {
         "name": "reply-review",
@@ -292,7 +320,7 @@
           "value": false,
           "origin": "default"
         },
-        "next_run": "2026-09-30T04:49:52.112Z",
+        "next_run": "2026-09-30T07:23:48.218Z",
         "next_refused": null,
         "last_run": null,
         "is_default": true,
@@ -381,8 +409,8 @@
         "next_run": "2026-09-30T12:00:00.000Z",
         "next_refused": null,
         "last_run": {
-          "run_id": "11",
-          "at": "2026-09-30T04:49:51.757Z",
+          "run_id": "12",
+          "at": "2026-09-28T12:00:00.000Z",
           "ok": true,
           "outcome": "acted",
           "cost_usd": "0.001900",
@@ -574,7 +602,7 @@
           "value": false,
           "origin": "default"
         },
-        "next_run": "2026-09-30T04:49:52.112Z",
+        "next_run": "2026-09-30T07:23:48.218Z",
         "next_refused": null,
         "last_run": null,
         "is_default": true,
@@ -595,7 +623,7 @@
           "value": false,
           "origin": "default"
         },
-        "next_run": "2026-09-30T04:49:52.112Z",
+        "next_run": "2026-09-30T07:23:48.218Z",
         "next_refused": null,
         "last_run": null,
         "is_default": true,
@@ -607,7 +635,12 @@
           "value": "5m",
           "origin": "default"
         },
-        "raise": {}
+        "raise": {
+          "invitation": {
+            "value": true,
+            "origin": "default"
+          }
+        }
       },
       {
         "name": "caldav-calendar",
@@ -616,7 +649,7 @@
           "value": false,
           "origin": "default"
         },
-        "next_run": "2026-09-30T04:49:52.112Z",
+        "next_run": "2026-09-30T07:23:48.218Z",
         "next_refused": null,
         "last_run": null,
         "is_default": true,
@@ -628,7 +661,12 @@
           "value": "15m",
           "origin": "default"
         },
-        "raise": {}
+        "raise": {
+          "invitation": {
+            "value": true,
+            "origin": "default"
+          }
+        }
       },
       {
         "name": "github-state",
@@ -637,7 +675,7 @@
           "value": false,
           "origin": "default"
         },
-        "next_run": "2026-09-30T04:49:52.112Z",
+        "next_run": "2026-09-30T07:23:48.218Z",
         "next_refused": null,
         "last_run": null,
         "is_default": false,
@@ -661,13 +699,39 @@
         }
       },
       {
+        "name": "google-calendar",
+        "title": "Google Calendar",
+        "paused": {
+          "value": false,
+          "origin": "default"
+        },
+        "next_run": "2026-09-30T07:23:48.218Z",
+        "next_refused": null,
+        "last_run": null,
+        "is_default": true,
+        "held": null,
+        "describe": "every 15m",
+        "kind": "sync",
+        "connection": null,
+        "every": {
+          "value": "15m",
+          "origin": "default"
+        },
+        "raise": {
+          "invitation": {
+            "value": true,
+            "origin": "default"
+          }
+        }
+      },
+      {
         "name": "ics-calendar",
         "title": "Calendar Feed",
         "paused": {
           "value": false,
           "origin": "default"
         },
-        "next_run": "2026-09-30T04:49:52.112Z",
+        "next_run": "2026-09-30T07:23:48.218Z",
         "next_refused": null,
         "last_run": null,
         "is_default": true,
@@ -688,7 +752,7 @@
           "value": false,
           "origin": "default"
         },
-        "next_run": "2026-09-30T04:49:52.112Z",
+        "next_run": "2026-09-30T07:23:48.218Z",
         "next_refused": null,
         "last_run": null,
         "is_default": true,
@@ -708,13 +772,39 @@
         }
       },
       {
+        "name": "mail-messages",
+        "title": "Mail",
+        "paused": {
+          "value": false,
+          "origin": "default"
+        },
+        "next_run": "2026-09-30T07:23:48.218Z",
+        "next_refused": null,
+        "last_run": null,
+        "is_default": true,
+        "held": null,
+        "describe": "every 15m",
+        "kind": "sync",
+        "connection": null,
+        "every": {
+          "value": "15m",
+          "origin": "default"
+        },
+        "raise": {
+          "message": {
+            "value": true,
+            "origin": "default"
+          }
+        }
+      },
+      {
         "name": "devin-knowledge",
         "title": "Devin Knowledge",
         "paused": {
           "value": false,
           "origin": "default"
         },
-        "next_run": "2026-09-30T04:49:52.112Z",
+        "next_run": "2026-09-30T07:23:48.218Z",
         "next_refused": null,
         "last_run": null,
         "is_default": true,
@@ -735,7 +825,7 @@
           "value": false,
           "origin": "default"
         },
-        "next_run": "2026-09-30T04:49:52.112Z",
+        "next_run": "2026-09-30T07:23:48.218Z",
         "next_refused": null,
         "last_run": null,
         "is_default": true,
@@ -753,6 +843,6 @@
     "timezone": "America/New_York",
     "problems": [],
     "errors": [],
-    "as_of": "2026-09-30T04:49:52.114Z"
+    "as_of": "2026-09-30T07:23:48.220Z"
   }
 }

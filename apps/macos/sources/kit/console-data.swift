@@ -1425,14 +1425,19 @@ public struct ConsoleCompute: Decodable, Sendable, Equatable {
     /// checks before every billable call. **nil when that query is not
     /// loaded**, never a guessed zero.
     public let spend: ComputeSpend?
+    /// Every spending limit side by side (T4-19): the instance's, each
+    /// provider's — a subscription's is its window — and each project's
+    /// daily budget. Nil from a console older than T4-19.
+    public let limits: ComputeLimits?
     /// Whether the write verbs will work here, so a client greys the controls
     /// instead of discovering it on submit.
     public let writable: Bool
     public let asOf: String?
 
-    public init(facts: ComputeFacts, spend: ComputeSpend? = nil, writable: Bool, asOf: String? = nil) {
+    public init(facts: ComputeFacts, spend: ComputeSpend? = nil, limits: ComputeLimits? = nil, writable: Bool, asOf: String? = nil) {
         self.facts = facts
         self.spend = spend
+        self.limits = limits
         self.writable = writable
         self.asOf = asOf
     }
@@ -1445,6 +1450,7 @@ public struct ConsoleCompute: Decodable, Sendable, Equatable {
         self.init(
             facts: facts,
             spend: json["spend"].flatMap(ComputeSpend.init(json:)),
+            limits: json["limits"].flatMap(ComputeLimits.init(json:)),
             writable: json.bool("writable") ?? false,
             asOf: json.string("as_of")
         )

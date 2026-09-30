@@ -55,6 +55,14 @@ export interface CaptureSink {
   /** Vault-relative directory this sink writes into ("" = a bare directory). */
   readonly prefix: string;
   put(name: string, bytes: Buffer): Promise<string>;
+  /**
+   * Put a capture at an exact vault path instead of under the prefix — a
+   * recording's transcript filed at `Journal/Transcripts/…` (Q29, T8-4), in
+   * the name the caller's credential earned (the console's decision, never
+   * the body's). Still create-only: it never lands on a file that exists.
+   * A sink without it (a bare directory) files every capture under itself.
+   */
+  putAt?(path: string, bytes: Buffer, intent: { principal: string; message: string }): Promise<string>;
   /** Undo a `put` whose row lost an idempotency race. Best effort; never throws. */
   remove(path: string): Promise<void>;
   /** Behavioural probe: this sink can be reached. */
@@ -124,6 +132,10 @@ export function vaultSink(vault: CaptureVault, o?: SinkOptions): CaptureSink {
       await vault.write(rel, bytes, { principal, message: `capture ${name}`, group: "capture" }, "");
       return rel;
     },
+    async putAt(path, bytes, intent) {
+      await vault.write(path, bytes, { principal: intent.principal, message: intent.message, group: "capture" }, "");
+      return path;
+    },
     async remove(path) {
       await vault.delete(path, { principal, message: `capture withdrawn ${path}`, group: "capture" }).catch(() => {});
     },
@@ -149,6 +161,14 @@ export interface CaptureInput {
    * the pair returns the first row; the second file is never kept.
    */
   idempotency?: { principal: string; key: string } | undefined;
+  /**
+   * File the capture at this exact vault path, committed in `principal`'s
+   * name (T8-4: a recording's transcript, `Journal/Transcripts/<date>-<session>.md`,
+   * as `user` — the owner's own recording). Set by the adapter from what the
+   * CREDENTIAL may do, never from the request. Honoured by a sink with
+   * `putAt`; a bare directory files it under itself as usual.
+   */
+  place?: { path: string; principal: string } | undefined;
 }
 
 export interface CaptureResult {
@@ -188,7 +208,22 @@ export async function captureToInbox(db: Db, sink: CaptureSink | string, input: 
   }
   const filename = input.filename ?? `capture-${Date.now()}.bin`;
   const safe = filename.replaceAll(/[^A-Za-z0-9._-]/g, "_").replaceAll(/\.{2,}/g, "_"); // no traversal
-  const rel = await dest.put(`${Date.now()}-${safe}`, input.bytes);
+  let rel: string;
+  if (input.place && dest.putAt) {
+    try {
+      rel = await dest.putAt(input.place.path, input.bytes, { principal: input.place.principal, message: `capture ${input.place.path}` });
+    } catch (err) {
+      // A placed path is the same for every attempt of one capture, so a
+      // second attempt racing the first meets the first's file (create-only)
+      // before it meets the row. If that attempt's row is there now, it is
+      // this capture: answer it, as the index race below does.
+      const prior = idem ? await findByIdempotency(db, idem) : undefined;
+      if (prior) return prior;
+      throw err;
+    }
+  } else {
+    rel = await dest.put(`${Date.now()}-${safe}`, input.bytes);
+  }
   const sha = createHash("sha256").update(input.bytes).digest("hex");
   // A file in the vault may already have an `inbox` row: the reconciler's
   // scan indexes anything that appears under `Inbox/` (a human's

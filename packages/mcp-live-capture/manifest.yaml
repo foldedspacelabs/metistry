@@ -6,15 +6,20 @@ transport: http
 port: 7815                # 7810–7814 are taken (apple-fm, eventkit, reconciler, llama-server, egress)
 runs_on: host            # TCC-bound: its own launchd service is its own responsible process (PoC-1)
 requires_tcc: [microphone, audio_capture, screen_recording]   # §2.15: all three; Screen Recording is Window and Screen's (T8-3)
-discovery: eager         # 2 tools — far under the lazy threshold (PoC-17)
+discovery: eager         # 3 tools — far under the lazy threshold (PoC-17)
 degrades: absent         # no bridge, no bar, no capture surface (screen 11 §8)
 # `exposes:` is the AGENT-facing surface — what a tool caller may invoke.
-# Starting, stopping and answering a recording are deliberately NOT listed:
-# they are the owner's hand, from the bar, on a separate control credential
-# the bridge refuses to any tool caller (403). Invariant 9 by absence —
-# nothing in this list can start a recording (plan §2.15; screen 11 §9.6).
+# Starting, stopping, answering and purging a recording are deliberately NOT
+# listed: they are the owner's hand, from the bar and Settings, on a separate
+# control credential the bridge refuses to any tool caller (403). Invariant 9
+# by absence — nothing in this list can start a recording or delete audio
+# (plan §2.15; screen 11 §9.6). The retention routine's report is not a tool
+# either (src/review.ts). `recording_review` is the assistant's alone: core's
+# CREW_NEVER_TOOLS names it, so no crew can hold it (T8-4).
 exposes:
   - name: check
     description: Health — the microphone, audio-capture and screen grants, and whether the on-device transcriber is ready
   - name: status
     description: Whether a recording is running — its mode, apps, which senses are open, elapsed time and when it stops; never its audio, frames or transcript
+  - name: recording_review
+    description: "Re-transcribe a span of a kept recording with the on-device transcriber's most careful setting — {session_id, from_s, to_s, question?} — and answer text with timestamps, never audio; after the audio is deleted, say when (the transcript remains)"

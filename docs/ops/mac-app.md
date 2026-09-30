@@ -583,95 +583,77 @@ written down, not as a dead end — and Settings → Compute adds one later.
 
 ## The Compute pane
 
-Step 7 in miniature is the wizard's job. The pane is the rest of it: every
-`metistry compute` verb, with the file it edits never opened by this app.
+Settings ▸ Compute (T6-12; screen-15 §5.3, C130–C133) is one column, in the
+spec's order: **\<the assistant\> Uses** — one model and its effort, no
+fallback · **Providers** — one line each · **Your Models** — memory, disk, the
+search with Refresh, the catalogue · **Spending Limits** · **Advanced ▸ Tiers**
+(Q1). The model is `sources/kit/compute-model.swift`, the view
+`compute-view.swift`. The heading templates the name from `identity.yaml`;
+nothing in either file names the assistant.
 
-**Nine verbs, and no tenth thing.** `compute show`, `providers add|remove|test`,
-`models list|install|load|unload`, `assign`, `budget` — each with `--json`,
-each run as an argument array, each answered by decoding what came back
-(`sources/kit/compute-model.swift` lists them in one comment; the JSON shapes
-are `packages/cli/src/compute.ts`'s exported result types). The CLI writes
-`compute.yaml` as the **user**, through the reconciler, after re-parsing the
-result through core's schema — so a change this pane cannot express is a change
-the pane refuses to make up, and a change the CLI will not accept comes back as
-a refusal naming the field.
+**Reads are the client API, and only what it serves.** `GET /api/compute`
+(the providers with their switch, their one tag and whether the key each names
+is present; the assignments; T4-19's `limits`) and `GET /api/compute/catalogue`
+(every switched-on provider's catalogue, grouped by model — T4-18). The pane
+re-reads on open and on an instance switch; there is no file watcher and no
+cache.
 
-**The pane persists nothing.** There is no `UserDefaults` key for a provider, a
-model list or a budget; the editors are drafts of what is about to become
-arguments, seeded from the last `compute show --json` and re-seeded the moment
-it changes. `compute.yaml` is the record, and it is a §4.7 protected path.
+**Writes go through two doors, and §2.3 decides which.**
 
-**It re-reads on open, and there is no watcher.** The app watches no directory —
-it has no file watcher at all, which is the same rule that keeps the file
-*readers* out (`console-sign-in-tests.swift` walks `sources/` and asserts no
-file is opened anywhere). So a `compute.yaml` edited in a terminal shows up the
-next time the pane is opened or the instance is switched, and **Read Again**
-covers the pane that never closed.
+| Change | Door | How |
+| --- | --- | --- |
+| the assistant's model and effort; a tier's; adding and removing a tier | `POST /api/compute/assign`, `/unassign` | at once — reversible, and a phone may do it too (§2.3) |
+| a spending limit: the instance's, a provider's by the token | `POST /api/compute/budget` | Save on the row; an empty field is left as it stands |
+| a project's daily budget | `PUT /api/projects/:slug` | the same door the Projects pane uses |
+| Test | `POST /api/compute/providers/test` | at once; a 401/403 is *Key rejected* · Replace Key, anything else *Not answering* · Retry |
+| a provider's switch, its gear (base URL, which secret is its key, billing), Remove | `metistry compute providers set\|remove … --json` (M16) | **confirmed with the exact command** before it runs |
+| Install a Model…, Load, Unload | `metistry compute models install\|load\|unload … --json` (M17) | confirmed; disk and memory are said before Install; the CLI's own progress lines stream under *Downloading…* / *Loading into memory…* |
+| Add Provider… | `compute providers add` (key on stdin) — the wizard's step-7 model | the sheet shows both commands before its button runs them |
 
-**The key still only goes to stdin, because it is the same model.** The
-add-a-provider sheet is bound to `ComputeStepModel` — the *wizard's* step 7
-model, with three fields the wizard leaves alone (`--name`, `--base-url`, and
-whether the run also assigns the default). One model owns the key's path to a
-child process, so there is one place to read to know the app never puts it in
-argv, a file or a log. The first provider on an install with no engine assigns
-`default` in the same run; every later one does not, because adding a provider
-is not a decision to run every turn on it.
+A `ManagementCommand` cannot hold `compute assign` or `compute budget`, which
+is the point: inside the boundary is the API, the boundary itself is §2.2.
 
-**Prose and JSON come down the same pipe.** Most of these verbs narrate through
-the same `out()` the `--json` result goes to — `providers add` says where it
-filed the key, `assign` warns about a non-ZDR provider, `budget` says nothing
-enforces it yet, every protected write prints its own step lines — so stdout is
-lines of prose and *then* one pretty-printed object. `JSONValue.parseTrailing`
-is that one fact in one place. It is also why **install progress is real**: the
-GGUF download's byte counts and Ollama's pull lines arrive on stdout as they
-happen and are shown verbatim, rather than a progress bar claiming a percentage
-nobody reported.
+**A model is written one way everywhere.** `ComputeModelLine` — **name**
+maker · provider · tag, price on the right — is built in exactly two ways
+(a catalogue place, or a bare reference the catalogue does not hold) and
+drawn by one view (`ModelLineText`); the dropdowns' menus use the same words.
+`compute-pane-tests.swift`'s first test holds the dropdown, Your Models, a
+search result and a tier to the same line. Tags are *Local*, *Cloud*,
+*Subscription* — there is no *By token* tag.
 
-Belt-and-braces, as of the CLI's `--json` purity fix (`docs/ops/cli.md`):
-`parseTrailing` no longer has anything trailing to skip past — under
-`--json` the CLI itself now keeps every prose line (including the install
-progress above) off stdout and puts it on stderr instead — but the parser
-is left as it is, a second line of defense rather than a removed one.
+**A subscription's window is its limit.** The pane renders `limits` and
+decides none of it: a provider the server sends as `kind: window` shows its
+calls today and this month and no dollar field. Local providers with no limit
+set are left out of the list; they cost nothing.
 
-**Exit codes are not the whole answer.** `providers test` and `models install`
-exit 1 when the thing they tested or installed did not work, having printed a
-perfectly good `{"ok": false, …}`. The pane reads `ok` from the JSON when the
-JSON says, and from the exit code when it does not — otherwise a provider that
-answered 401 would read as "the command broke".
+**The state row (components-03 §2).** Empty: *No models match "zebra"*, and a
+provider that did not answer is named with Retry. Waiting: *Loading into
+memory…* and a download's own lines. Stale: *lmstudio's list is from
+yesterday*, from the catalogue's `read_at`. Failed: *Not answering* · Retry,
+*Key rejected* · Replace Key (which opens Settings ▸ Secrets — a key is one of
+this instance's secrets, never a field here), *Not running* from doctor's
+`local:` row, and disk and memory said before Install.
 
-**The non-ZDR badge, and why it is only a badge.** A provider that is
-`off_machine` and does not claim `zdr: true` is badged on its row and on every
-assignment that uses it. It is never blocked (C13): zero data retention is what
-the *provider* states about itself, copied into `compute.yaml`, and nothing any
-client could run verifies it. The engine records one warning row per run.
+**Drawn and not served (C138: said where it would be, never invented).** A
+model's size and *Fits this Mac*; a download's Cancel (the runner has no
+cancel); a provider's headers and data policy (`providers set` has no flag for
+either); removing a model (`compute models` has no remove verb); *Add* on a
+cloud place (nothing records "your" cloud models). Each is dimmed with its
+reason or said once in the section.
 
-**`assistant: absent` is said where it can be acted on.** Doctor decides that an
-install has no engine — the app does not — and the banner quotes doctor's own
-remediation. With no providers at all the one button opens the sheet; with a
-provider but no `assignments.default` it prepares the default's row and asks
-that provider for its model list. There is a second reason doctor says `absent`
-(a default whose key is unset), and the banner says *that* with **no** button,
-because nothing one click here does would fix it: `providers add` refuses to
-re-declare a provider that already exists, which is the CLI being right.
+**The provider switch is a checkbox.** SwiftUI on the Mac gives a `.switch`
+toggle's AppKit control no accessibility name — its label, `.accessibilityLabel`
+and a string title all leave it empty (measured) — and §2.18.7 fails an
+unlabeled control, so it is the platform checkbox, named for the provider.
 
-**The local models section reads doctor, not the servers.** The four
-`local:lmstudio|ollama|llamaserver|applefm` rows carry the URL probed, what is
-loaded, and the `compute.yaml` provider that dials it — so the pane runs no
-probe of its own (invariant 3). `absent` there is never a failure: a Mac that
-runs no local server is a supported install. Install is offered for the three
-Metistry has a mechanism for (`lms get`, Ollama's pull, a Hugging Face GGUF);
-Apple's Foundation Models get none, because there is nothing to pull.
-Load/unload is offered for LM Studio alone — the other two answer `noop` with
-the sentence about what actually governs their residency, and the pane prints
-that sentence instead of a tick it did not earn.
+**Memory is an estimate and says so every time.** `ProcessInfo.physicalMemory`
+less a reserve (a quarter, never under 4 GB) is labelled an estimate; the disk
+bar is the home volume's own figures (`volumeAvailableCapacityForImportantUsage`),
+where LM Studio, Ollama and the bundled server keep their models.
 
-**RAM headroom is an estimate and says so every time.**
-`ProcessInfo.physicalMemory` is how much memory the machine *has*, not how much
-is free; macOS compresses, caches and swaps, and the honest free figure changes
-second to second. The pane subtracts a reserve — a quarter of physical memory,
-never less than 4 GB — and labels the remainder an estimate, with "Not a
-measurement" in the same sentence. A model larger than it still loads; it is
-just slow, and that is the person's call.
+**`assistant: absent` is said where it can be acted on.** Doctor decides it.
+With no providers the banner's one button opens Add Provider…; with a provider
+the fix is the model dropdown already on the pane, so the banner has none.
 
 ## The Connections pane
 
@@ -811,14 +793,14 @@ core's (`LID_CLOSED_*` in `packages/core/src/power.ts`), mirrored in
 | Services | Run in the Background | `SMAppService.agent(plistName:)` on the plist sealed in this bundle — the install's ONE background item; macOS keeps this registration too (above) |
 | Services | Keep this Mac Awake; Allow sleep on battery; Allow sleep when the lid is closed | `metistry deployment --json` → `keep_awake_setting` (the object form, T4-20); whether it holds and whether the lid half is in effect from doctor's `keep-awake` row (`lid_closed`) |
 | Services | changing a switch | `metistry deployment set-keep-awake --enabled\|--sleep-on-battery\|--sleep-lid-closed true\|false --yes` (M4), confirmed with what the value it becomes costs. Turning the lid switch off opens **the lid dialog, which runs nothing** (below) |
-| Compute | providers, their base URL, locality, ZDR claim and whether the key each NAMES is present | `metistry compute show --json` |
+| Compute | the assistant's model and effort, the tiers, the providers (switch, tag, key present), spending limits (instance, provider, project) | `GET /api/compute` — `limits` from T4-19 |
+| Compute | Your Models, the search grouped by model, Refresh | `GET /api/compute/catalogue[?q=…][&refresh=true]` (T4-18) |
+| Compute | the model and effort, a tier, a spending limit, Test | `POST /api/compute/assign\|unassign\|budget\|providers/test`, at once (§2.3); a project's budget `PUT /api/projects/:slug` |
+| Compute | a provider's switch, gear, Remove | `metistry compute providers set\|remove <name> … --json` (M16), **confirmed with the exact command** |
 | Compute | Add Provider… (template, name, base URL, key) | `metistry compute providers add --from <t> [--name] [--base-url] --json`, **key on stdin** |
-| Compute | Test / Remove, per provider | `metistry compute providers test\|remove <name> --json` |
-| Compute | assignments: default, each tier, each `crew:<name>` — provider, model, effort | `metistry compute assign <target> <provider/model> --effort <e> --json`; the model picker is `metistry compute models list --provider <name> --json` |
-| Compute | budgets: the instance's and each provider's — daily, monthly, action | `metistry compute budget <instance\|provider:<name>> [--daily] [--monthly] --action … --json` |
-| Compute | the local model servers, with what each has loaded | `doctor --json` → the `local:lmstudio\|ollama\|llamaserver\|applefm` rows |
-| Compute | install a model; load / unload (LM Studio only) | `metistry compute models install\|load\|unload <provider/model> --json` |
-| Compute | RAM headroom | `ProcessInfo.physicalMemory` minus a documented reserve, **labelled an estimate** — nothing here reads free memory |
+| Compute | Install a Model…, Load, Unload (LM Studio only) | `metistry compute models install\|load\|unload <provider/model> --json` (M17), confirmed; disk and memory said first |
+| Compute | the local model servers and whether each is running | `doctor --json` → the `local:lmstudio\|ollama\|llamaserver\|applefm` rows |
+| Compute | memory and disk | `ProcessInfo.physicalMemory` less a documented reserve, **labelled an estimate**; the home volume's own capacity figures |
 | Account | console sign-in: who this Mac is, with `via`, the remedy, and the argument array | `metistry console whoami --json` — the app never resolves, holds or displays the token ("Signing in" above) |
 | Account | instance repo status, HEAD, queue depth | `doctor --json` → the `reconciler` row's `meta`. The reconciler is the sole committer, so the app runs no git of its own |
 | Connections | the list: status, name and type, Used By (*Nobody yet*), *Key expired*, the offer shield | `GET /api/connections` and `GET /api/secrets` — names, never a value ("The Connections pane" above) |

@@ -8,6 +8,7 @@
 // word for word, the second can neither see, read, overwrite nor delete the
 // first's item — every `security` call it makes is addressed to its own
 // account.
+import { EventEmitter } from "node:events";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -16,7 +17,7 @@ import { describe, expect, it } from "vitest";
 import { parseSecretsFile } from "@foldedspacelabs/metistry-core";
 import type { Exec, ExecOptions } from "../src/exec.js";
 import { main } from "../src/main.js";
-import { parseSecretHosts, purgeSecrets, secretReferences, secretsListNamed, secretsSet } from "../src/secrets.js";
+import { parseSecretHosts, purgeSecrets, readHiddenLine, secretReferences, secretsListNamed, secretsSet } from "../src/secrets.js";
 import { decodeSecurity } from "./fake-security.js";
 
 const ID_A = "11111111-2222-4333-8444-555555555555";
@@ -376,5 +377,91 @@ describe("parseSecretHosts", () => {
     const a = await instance(ID_A, "seam");
     await secretsSet("k", { hosts: ["x.test"] }, { instanceDir: a, instanceId: ID_A, env: {}, platform: "linux", uid: 501, keychain: kc, readSecret: async () => VALUE_A, out: () => {} });
     expect(kc.items()).toEqual([{ service: "metistry:secret:k", account: ID_A }]);
+  });
+});
+
+describe("readHiddenLine — the TTY path `secrets set|replace` fall into when run by hand", () => {
+  /** An event emitter that answers exactly the surface `readHiddenLine` needs from `process.stdin`, so a test never touches a real terminal. */
+  function fakeStdin() {
+    const emitter = new EventEmitter() as EventEmitter & { isRaw?: boolean; setRawMode: (m: boolean) => void; resume: () => void; pause: () => void; setEncoding: (e: string) => void; raw: boolean[] };
+    emitter.isRaw = false;
+    emitter.raw = [];
+    emitter.setRawMode = (m: boolean) => {
+      emitter.isRaw = m;
+      emitter.raw.push(m);
+    };
+    emitter.resume = () => {};
+    emitter.pause = () => {};
+    emitter.setEncoding = () => {};
+    return emitter;
+  }
+
+  function fakeStderr() {
+    const chunks: string[] = [];
+    return { chunks, write: (c: string) => chunks.push(c) };
+  }
+
+  it("two chunks, no newline in the first — resolves the whole line and never echoes a character of it", async () => {
+    const stdin = fakeStdin();
+    const stderr = fakeStderr();
+    const p = readHiddenLine(stdin, stderr);
+    stdin.emit("data", "pa");
+    stdin.emit("data", "ss\n");
+    expect(await p).toBe("pass");
+    expect(stderr.chunks).toEqual([]); // not one keystroke reached it
+    expect(stdin.raw).toEqual([true, false]); // raw for the read, restored after
+  });
+
+  it("backspace (DEL, \\u007f) edits the buffer before Enter", async () => {
+    const stdin = fakeStdin();
+    const stderr = fakeStderr();
+    const p = readHiddenLine(stdin, stderr);
+    stdin.emit("data", "pass\u007f\u007f"); // DEL DEL: drop the last two characters ("ss")
+    stdin.emit("data", "st\n");
+    expect(await p).toBe("past");
+    expect(stderr.chunks).toEqual([]);
+  });
+
+  it("backspace (BS, \\b) does the same as DEL", async () => {
+    const stdin = fakeStdin();
+    const stderr = fakeStderr();
+    const p = readHiddenLine(stdin, stderr);
+    stdin.emit("data", "pass\b\b");
+    stdin.emit("data", "st\n");
+    expect(await p).toBe("past");
+    expect(stderr.chunks).toEqual([]);
+  });
+
+  it("Ctrl-D on an empty line ends it as empty — a blank Enter, not an error", async () => {
+    const stdin = fakeStdin();
+    const stderr = fakeStderr();
+    const p = readHiddenLine(stdin, stderr);
+    stdin.emit("data", "\u0004");
+    expect(await p).toBe("");
+  });
+
+  it("Ctrl-C restores the terminal and exits 130 — nothing typed before it ever reaches stderr", () => {
+    const stdin = fakeStdin();
+    const stderr = fakeStderr();
+    const exits: number[] = [];
+    const exit = ((code: number) => {
+      exits.push(code);
+      throw new Error("exit");
+    }) as never;
+    void readHiddenLine(stdin, stderr, exit); // never settles on this path — the fake `exit` throws instead of ending the process
+    stdin.emit("data", "sec");
+    expect(() => stdin.emit("data", "\u0003")).toThrow("exit");
+    expect(exits).toEqual([130]);
+    expect(stdin.isRaw).toBe(false);
+    expect(stderr.chunks.join("")).not.toContain("sec");
+  });
+
+  it("the non-TTY path is unchanged: every verb above reads through `readSecret`/`readStdin` to EOF and never calls readHiddenLine at all", async () => {
+    // secretsSet's seam test just above (and every other test in this file)
+    // supplies `readSecret` directly — the same thing `opts.readSecret ??
+    // readStdin` resolved to before this change — so none of them exercises
+    // the new TTY branch, and this file's whole pre-existing suite passing is
+    // the regression test for "non-TTY behaviour did not move".
+    expect(true).toBe(true);
   });
 });

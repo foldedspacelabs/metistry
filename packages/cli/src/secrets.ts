@@ -866,8 +866,103 @@ function instanceStore(opts: NamedSecretsOptions): InstanceSecrets {
   return new InstanceSecrets(securityKeychain(opts.exec ?? realExec), opts.instanceId);
 }
 
+/** The minimum a readable stream needs for `readHiddenLine` — a structural type so a fake stdin in a test never has to impersonate all of `NodeJS.ReadStream`. */
+export interface HiddenLineStdin {
+  on(event: "data", listener: (chunk: string) => void): unknown;
+  off(event: "data", listener: (chunk: string) => void): unknown;
+  setRawMode?(mode: boolean): unknown;
+  resume?(): unknown;
+  pause?(): unknown;
+  setEncoding?(encoding: BufferEncoding): unknown;
+  isRaw?: boolean;
+}
+
+/** The minimum a writable stream needs for `readHiddenLine` to report cancellation. */
+export interface HiddenLineStderr {
+  write(chunk: string): unknown;
+}
+
+/**
+ * Read exactly one line from `stdin` with the terminal's echo off — not one
+ * typed character reaches `stderr` (or anywhere else): this is what makes a
+ * pasted secret "hidden" rather than merely unprompted. Backspace/DEL erases
+ * the previous character; Enter (`\r` or `\n`) ends the line; Ctrl-C restores
+ * the terminal and exits the process at 130, the way a shell reports a
+ * SIGINT'd read; Ctrl-D on an empty line ends it as empty, the same as a
+ * blank paste followed by Enter.
+ *
+ * Streams are parameters — never `process.stdin`/`process.stderr` directly —
+ * so this is the piece `readValue`'s TTY path unit-tests with fakes;
+ * `promptHiddenLine` wires the real ones in.
+ */
+export async function readHiddenLine(stdin: HiddenLineStdin, stderr: HiddenLineStderr, exit: (code: number) => never = (code) => process.exit(code)): Promise<string> {
+  const wasRaw = stdin.isRaw === true;
+  stdin.setRawMode?.(true);
+  stdin.setEncoding?.("utf8");
+  stdin.resume?.();
+  let buf = "";
+  return await new Promise<string>((resolve) => {
+    const cleanup = () => {
+      stdin.off("data", onData);
+      stdin.setRawMode?.(wasRaw);
+      stdin.pause?.();
+    };
+    const onData = (chunk: string) => {
+      for (const ch of chunk) {
+        if (ch === "\u0003") {
+          // Ctrl-C: the owner changed their mind mid-paste — leave the
+          // terminal as it was found and stop, rather than store a half-typed
+          // value or keep blocking with no way out.
+          cleanup();
+          stderr.write("\ncancelled\n");
+          exit(130);
+          return;
+        }
+        if (ch === "\r" || ch === "\n") {
+          cleanup();
+          resolve(buf);
+          return;
+        }
+        if (ch === "\u007f" || ch === "\b") {
+          buf = buf.slice(0, -1);
+          continue;
+        }
+        if (ch === "\u0004") {
+          // Ctrl-D: EOF. On an empty line that is "no value" (a blank
+          // Enter); mid-line it is not a key this reader gives meaning to.
+          if (buf.length === 0) {
+            cleanup();
+            resolve("");
+            return;
+          }
+          continue;
+        }
+        buf += ch;
+      }
+    };
+    stdin.on("data", onData);
+  });
+}
+
+/** `readValue`'s TTY path: prompt on STDERR (never stdout, which `--json` reads), read one hidden line, then restore the cursor to its own line for whatever prints next. */
+async function promptHiddenLine(name: string): Promise<string> {
+  process.stderr.write(`Paste the value for ${name} and press Enter (input is hidden): `);
+  const value = await readHiddenLine(process.stdin, process.stderr);
+  process.stderr.write("\n");
+  return value;
+}
+
+/**
+ * Where a secret's value comes from: piped stdin, read to EOF, when this
+ * process is not a terminal (a script, `console call --body -`'s sibling
+ * verbs, the Mac app); a one-line hidden prompt when it is — otherwise the
+ * owner types the value, presses Enter, and the command hangs forever
+ * waiting for an EOF a terminal never sends. `opts.readSecret` is the test
+ * seam either way, so a test never touches a real stream.
+ */
 async function readValue(opts: NamedSecretsOptions, name: string): Promise<string> {
-  const value = (await (opts.readSecret ?? readStdin)()).trim();
+  const read = opts.readSecret ?? (process.stdin.isTTY ? () => promptHiddenLine(name) : readStdin);
+  const value = (await read()).trim();
   const issue = secretValueIssue(value);
   if (issue) throw new StepFailed(`${issue} — pipe the value for ${name} on stdin (it is never taken as an argument)`);
   return value;

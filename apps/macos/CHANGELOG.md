@@ -1,5 +1,9 @@
 # @metistry-apps/macos
 
+## 0.16.1
+
+No changes in this release.
+
 ## 0.16.0
 
 ### Minor Changes

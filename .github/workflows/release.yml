@@ -619,3 +619,33 @@ jobs:
           fi
           gh release edit "$tag" --draft=false
           echo "published $tag with: $(cd assets && ls | paste -sd' ' -)"
+
+  # Tell metistry.ai to rebuild its Changelog and Download pages from the
+  # release just published (foldedspacelabs/metistry-website listens for
+  # `repository_dispatch: metistry-content`). Last, independent, and unable
+  # to hurt the release: it runs only after `publish` succeeded,
+  # `continue-on-error` keeps its failure out of the run's result, and it
+  # holds no permissions of its own — the dispatch authenticates with
+  # WEBSITE_DISPATCH_TOKEN, a token scoped to the website repo alone
+  # (docs/ops/releases.md, "Secrets"). Absent → a notice, and the site picks
+  # the release up on its next build.
+  notify-website:
+    needs: [verify, publish]
+    if: needs.publish.result == 'success'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: repository_dispatch to foldedspacelabs/metistry-website
+        env:
+          GH_TOKEN: ${{ secrets.WEBSITE_DISPATCH_TOKEN }}
+          TAG: v${{ needs.verify.outputs.version }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::notice::WEBSITE_DISPATCH_TOKEN is not set — metistry.ai was not told about $TAG; it will pick it up on its next build"
+            exit 0
+          fi
+          jq -n --arg ref "$TAG" '{event_type: "metistry-content", client_payload: {reason: "release", ref: $ref}}' \
+            | gh api --method POST repos/foldedspacelabs/metistry-website/dispatches --input -
+          echo "asked metistry.ai to rebuild for $TAG"

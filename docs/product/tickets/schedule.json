@@ -3464,6 +3464,342 @@
       "file": "docs/product/tickets/x/x-102.md",
       "status": "todo"
     },
+    "X-75": {
+      "title": "`metistry enroll` — an enrolment code minted on this Mac",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-75.md",
+      "status": "todo"
+    },
+    "X-76": {
+      "title": "Removing a device revokes its passkey",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-76.md",
+      "status": "todo"
+    },
+    "X-77": {
+      "title": "Settings ▸ Devices and the Add a Phone sheet",
+      "track": "X",
+      "wave": "candidate",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "X-75",
+        "X-76"
+      ],
+      "file": "docs/product/tickets/x/x-77.md",
+      "status": "todo"
+    },
+    "X-78": {
+      "title": "The phone's half: enrol, install, sign in",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-78.md",
+      "status": "todo"
+    },
+    "X-79": {
+      "title": "The phone guide, and the website's copy re-checked",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-75",
+        "X-76",
+        "X-77",
+        "X-78"
+      ],
+      "file": "docs/product/tickets/x/x-79.md",
+      "status": "todo"
+    },
+    "X-103": {
+      "title": "The console's proxy listener — the local owner token never crosses a tunnel",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-103.md",
+      "status": "todo"
+    },
+    "X-104": {
+      "title": "Passkeys per origin — the rpID follows the request",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-104.md",
+      "status": "todo"
+    },
+    "X-105": {
+      "title": "`metistry remote` — the record, the adapter interface, and None",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "X-103",
+        "X-104"
+      ],
+      "file": "docs/product/tickets/x/x-105.md",
+      "status": "todo"
+    },
+    "X-106": {
+      "title": "The Tailscale adapter — Funnel by default, tailnet as the alternative",
+      "track": "X",
+      "wave": "candidate",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "X-105",
+        "X-111",
+        "X-112"
+      ],
+      "file": "docs/product/tickets/x/x-106.md",
+      "status": "todo"
+    },
+    "X-107": {
+      "title": "Set Up Remote Access — the guided flow, the wizard step and Settings ▸ Remote Access",
+      "track": "X",
+      "wave": "candidate",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "X-105",
+        "X-106",
+        "X-112",
+        "X-77"
+      ],
+      "file": "docs/product/tickets/x/x-107.md",
+      "status": "todo"
+    },
+    "X-111": {
+      "title": "A console on the internet — rate limits and headers on the proxy listener",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "X-103"
+      ],
+      "file": "docs/product/tickets/x/x-111.md",
+      "status": "todo"
+    },
+    "X-108": {
+      "title": "The Cloudflare Tunnel adapter",
+      "track": "X",
+      "wave": "candidate",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "X-105",
+        "X-111",
+        "X-112"
+      ],
+      "file": "docs/product/tickets/x/x-108.md",
+      "status": "todo"
+    },
+    "X-109": {
+      "title": "The ngrok adapter",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "X-105",
+        "X-111"
+      ],
+      "file": "docs/product/tickets/x/x-109.md",
+      "status": "todo"
+    },
+    "X-110": {
+      "title": "The port-forwarding adapter",
+      "track": "X",
+      "wave": "candidate",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "X-105",
+        "X-111"
+      ],
+      "file": "docs/product/tickets/x/x-110.md",
+      "status": "todo"
+    },
+    "X-112": {
+      "title": "Provider tool packs — pinned, signed, fetched on choice",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "X-105"
+      ],
+      "file": "docs/product/tickets/x/x-112.md",
+      "status": "todo"
+    },
+    "X-113": {
+      "title": "The zrok adapter",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "X-105",
+        "X-111",
+        "X-112"
+      ],
+      "file": "docs/product/tickets/x/x-113.md",
+      "status": "todo"
+    },
+    "X-114": {
+      "title": "Add a Phone sees the phone arrive — *Opened on your phone*",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-75",
+        "X-77",
+        "X-103"
+      ],
+      "file": "docs/product/tickets/x/x-114.md",
+      "status": "todo"
+    },
+    "X-115": {
+      "title": "Metistry Relay data plane — the PoC, then the instance",
+      "track": "X",
+      "wave": "candidate",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "X-112"
+      ],
+      "file": "docs/product/tickets/x/x-115.md",
+      "status": "todo"
+    },
+    "X-116": {
+      "title": "Metistry Relay control plane — CDK, Lambda, DynamoDB, the ACME helper",
+      "track": "X",
+      "wave": "candidate",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "X-115"
+      ],
+      "file": "docs/product/tickets/x/x-116.md",
+      "status": "todo"
+    },
+    "X-117": {
+      "title": "The Metistry Relay adapter — client, certificate, allowance",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "X-105",
+        "X-111",
+        "X-112",
+        "X-116"
+      ],
+      "file": "docs/product/tickets/x/x-117.md",
+      "status": "todo"
+    },
+    "X-118": {
+      "title": "`u.metistry.app` on the Public Suffix List",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-118.md",
+      "status": "todo"
+    },
+    "X-119": {
+      "title": "Device-only relay addresses — one label per phone",
+      "track": "X",
+      "wave": "candidate",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "X-75",
+        "X-77",
+        "X-104",
+        "X-116",
+        "X-117"
+      ],
+      "file": "docs/product/tickets/x/x-119.md",
+      "status": "todo"
+    },
+    "X-120": {
+      "title": "App Attest at relay registration — an extra layer",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "X-116",
+        "X-117"
+      ],
+      "file": "docs/product/tickets/x/x-120.md",
+      "status": "todo"
+    },
     "X-1": {
       "title": "The document sweep",
       "track": "X",
@@ -3481,7 +3817,7 @@
     "tickets": 167,
     "agent_days": 487.5,
     "waves": 6,
-    "candidates": 69
+    "candidates": 92
   },
   "critical_path": {
     "days": 35,
@@ -3566,9 +3902,32 @@
       "X-99",
       "X-100",
       "X-101",
-      "X-102"
+      "X-102",
+      "X-75",
+      "X-76",
+      "X-77",
+      "X-78",
+      "X-79",
+      "X-103",
+      "X-104",
+      "X-105",
+      "X-106",
+      "X-107",
+      "X-108",
+      "X-109",
+      "X-110",
+      "X-111",
+      "X-112",
+      "X-113",
+      "X-114",
+      "X-115",
+      "X-116",
+      "X-117",
+      "X-118",
+      "X-119",
+      "X-120"
     ],
-    "count": 69,
-    "agent_days": 93
+    "count": 92,
+    "agent_days": 166
   }
 }

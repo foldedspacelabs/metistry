@@ -201,7 +201,7 @@ Generated from `docs/product/design-build-plan.md` by `ops/scripts/tickets.mjs`.
 
 - [ ] **W5 checkpoint** — merged, main green, scratch-instance upgrade, conformance test, Mac smoke, release
 
-## W4 candidates — 69 tickets, 93 agent-days, no wave yet
+## W4 candidates — 92 tickets, 166 agent-days, no wave yet
 
 Follow-ups specified in the plan (§3.2's *Candidates* row) that nobody has scheduled. The owner assigns each one a wave at a checkpoint; until then none is dispatched.
 
@@ -274,3 +274,26 @@ Follow-ups specified in the plan (§3.2's *Candidates* row) that nobody has sche
 - [ ] [X-100](x/x-100.md) · The "held to core" Swift tests cannot drift · S · sonnet · after T6-14, T6-5
 - [ ] [X-101](x/x-101.md) · Bare `metistry doctor` resolves the product directory it runs from · S · sonnet
 - [ ] [X-102](x/x-102.md) · The recorder leaves no fixed-id rows behind · S · sonnet · after X-31
+- [ ] [X-75](x/x-75.md) · `metistry enroll` — an enrolment code minted on this Mac · M · opus high
+- [ ] [X-76](x/x-76.md) · Removing a device revokes its passkey · M · opus high
+- [ ] [X-77](x/x-77.md) · Settings ▸ Devices and the Add a Phone sheet · L · opus high · after X-75, X-76
+- [ ] [X-78](x/x-78.md) · The phone's half: enrol, install, sign in · M · opus
+- [ ] [X-79](x/x-79.md) · The phone guide, and the website's copy re-checked · S · sonnet · after X-75, X-76, X-77, X-78
+- [ ] [X-103](x/x-103.md) · The console's proxy listener — the local owner token never crosses a tunnel · M · opus
+- [ ] [X-104](x/x-104.md) · Passkeys per origin — the rpID follows the request · M · opus
+- [ ] [X-105](x/x-105.md) · `metistry remote` — the record, the adapter interface, and None · M · opus · after X-103, X-104
+- [ ] [X-106](x/x-106.md) · The Tailscale adapter — Funnel by default, tailnet as the alternative · L · opus high · after X-105, X-111, X-112
+- [ ] [X-107](x/x-107.md) · Set Up Remote Access — the guided flow, the wizard step and Settings ▸ Remote Access · L · opus high · after X-105, X-106, X-112, X-77
+- [ ] [X-108](x/x-108.md) · The Cloudflare Tunnel adapter · L · opus high · after X-105, X-111, X-112
+- [ ] [X-109](x/x-109.md) · The ngrok adapter · M · opus · after X-105, X-111
+- [ ] [X-110](x/x-110.md) · The port-forwarding adapter · L · opus high · after X-105, X-111
+- [ ] [X-111](x/x-111.md) · A console on the internet — rate limits and headers on the proxy listener · M · opus · after X-103
+- [ ] [X-112](x/x-112.md) · Provider tool packs — pinned, signed, fetched on choice · M · opus · after X-105
+- [ ] [X-113](x/x-113.md) · The zrok adapter · M · opus · after X-105, X-111, X-112
+- [ ] [X-114](x/x-114.md) · Add a Phone sees the phone arrive — *Opened on your phone* · S · sonnet · after X-75, X-77, X-103
+- [ ] [X-115](x/x-115.md) · Metistry Relay data plane — the PoC, then the instance · L · opus high · after X-112
+- [ ] [X-116](x/x-116.md) · Metistry Relay control plane — CDK, Lambda, DynamoDB, the ACME helper · L · opus high · after X-115
+- [ ] [X-117](x/x-117.md) · The Metistry Relay adapter — client, certificate, allowance · M · opus · after X-105, X-111, X-112, X-116
+- [ ] [X-118](x/x-118.md) · `u.metistry.app` on the Public Suffix List · S · sonnet
+- [ ] [X-119](x/x-119.md) · Device-only relay addresses — one label per phone · L · opus high · after X-75, X-77, X-104, X-116, X-117
+- [ ] [X-120](x/x-120.md) · App Attest at relay registration — an extra layer · M · opus · after X-116, X-117

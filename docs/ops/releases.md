@@ -348,6 +348,15 @@ a fork that has not made the environment.)
 | `APPLE_CERTIFICATE_P12`, `APPLE_CERTIFICATE_PASSWORD` | `macos-app` | the Developer ID Application certificate, imported into a temporary keychain; `METISTRY_SIGN_IDENTITY` is then derived from it as the identity's **SHA-1 hash**, not its display name (two valid certs for one team have identical names and `codesign -s` fails with "ambiguous"). Absent → the job skips with a notice |
 | `APPLE_API_KEY_ID`, `APPLE_API_ISSUER_ID`, `APPLE_API_KEY_P8` | `macos-app` | notarization via the App Store Connect API key (`xcrun notarytool submit --key --key-id --issuer --wait`, then `stapler staple`) — **not** an Apple ID + app-specific password. `APPLE_API_KEY_P8` is the **raw contents** of `AuthKey_<KEY_ID>.p8`, `-----BEGIN PRIVATE KEY-----`/`-----END PRIVATE KEY-----` lines included: `gh secret set APPLE_API_KEY_P8 --env release --repo foldedspacelabs/metistry < AuthKey_<KEY_ID>.p8`. (Base64 of the file is also accepted — `ops/release/notarize.sh` decodes it — but the raw file is the format to set.) Anything else fails the job naming the format, instead of notarytool's bare `invalidPrivateKeyContents` (v0.15.0). Absent → the DMG is signed but not notarized, and the run says so |
 | `APPLE_TEAM_ID` | — | unused. It was for the `xcodebuild archive` in the old stub; there is no Xcode project |
+| `WEBSITE_DISPATCH_TOKEN` | `notify-website` (`release.yml`), `website-docs.yml` | telling metistry.ai to rebuild: a `repository_dispatch` (`event_type: metistry-content`) to `foldedspacelabs/metistry-website`, with `client_payload` `{"reason":"release","ref":"v<version>"}` after `publish` succeeds, or `{"reason":"docs","ref":"<sha>"}` when `docs/**` or `README.md` changes on `main`. A **fine-grained PAT or GitHub App token scoped to only `foldedspacelabs/metistry-website`**, with **Contents: read & write** — the permission GitHub requires for `repository_dispatch` — and nothing else. A **repository** secret, not in the `release` environment: it signs nothing, so it waits for no approval. Absent → both skip with a notice. The release job is `continue-on-error` and runs after publishing, so a bad or expired token never fails or holds a release |
+
+`WEBSITE_DISPATCH_TOKEN` is set once, at the repo level:
+`env -u GH_TOKEN gh secret set WEBSITE_DISPATCH_TOKEN --repo foldedspacelabs/metistry`
+(it reads the value from stdin). A fine-grained PAT expires — when it does,
+both jobs start failing the dispatch (a failed `notify-website` step, a
+failed `website-docs` run) and nothing else changes; mint a new one with the
+same single-repo scope and set it again. To rebuild the site's Docs by hand,
+run `website-docs` from the Actions tab (`workflow_dispatch`).
 
 The Developer ID certificate is also what fixes the ad-hoc-signed TCC
 helpers (D3: TCC bridges must be *stably* signed, or every rebuild

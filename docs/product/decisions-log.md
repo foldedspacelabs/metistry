@@ -411,6 +411,128 @@ waits on one names it by letter.
 The 27 questions of the W3 checkpoint that the 2026-09-30 rulings did not
 answer remain open as written above.
 
+## Ruled 2026-09-28 — the phone, from the website
+
+The metistry.ai Download page (`foldedspacelabs/metistry-website`) describes a
+phone setup the product did not have: Settings ▸ Devices ▸ Add a Phone, a QR code,
+a passkey removable from Devices, and a step for reaching the Mac from outside.
+
+| # | Item | Ruling | Where it lands |
+| --- | --- | --- | --- |
+| 1 | Build the Download page's phone flow, or cut it from the site | **Build it.** Minting stays on the Mac (a CLI verb, M19), never an HTTP route; the QR is CoreImage's, no dependency; removing a device revokes its passkey. | §2.22; X-75…X-79 |
+| 2 | Reaching the Mac from outside the home (the site's step 1) | Research an **opt-in relay**: default-deny, signalling only (never pays for bandwidth), serverless preferred; Tailscale, port forwarding and commercial tunnels stay documented alternatives. | plan §5; `docs/research/2026-09-28-reaching-your-mac-remotely.md` — **superseded 2026-09-30**, below |
+
+**Still open** (§2.22): a terminal QR (an encoder dependency); whether the designer
+draws Settings ▸ Devices and the sheet before X-77; the site's step 1 and step 3–4
+wording (X-79).
+
+## Ruled 2026-09-30 — remote access is the owner's choice
+
+The owner read the 2026-09-28 research (Tailscale recommended; an opt-in FSL
+rendezvous relay designed) and ruled:
+
+> "I'm not sure I like any of the designs, to be honest. I don't want to pay to
+> host a service that scales up in cost as user counts grow when I'm not
+> charging anything for the app."
+>
+> "Maybe the better option is to just ask the user, at setup time, what they
+> prefer and then support a number of options they can configure easily. None
+> (local only, default option), Tailscale, Cloudflare tunnel, ngrok, and port
+> forwarding."
+>
+> "I'd want to make it as easy as possible to set these things up... like they
+> create an account with the service they want to use and then OAuth sign into
+> it from Metistry and it gets configured and exposed automatically."
+
+| # | Item | Ruling | Where it lands |
+| --- | --- | --- | --- |
+| 1 | An FSL-run relay (rendezvous, SNI passthrough or TURN) | **Rejected:** an FSL-run service whose cost grows with users, for a free app. Recorded under *Considered and rejected*. | research §6 |
+| 2 | How the phone reaches the Mac | **The owner's choice**, asked in the setup wizard and changeable in Settings ▸ Remote Access: None (default), Tailscale, Cloudflare Tunnel, ngrok, port forwarding. Each as close to *sign in, authorize, done* as its provider allows; every app act has a `metistry remote` verb (M20). | plan §2.23; X-105…X-110 |
+| 3 | The two gaps the research found | **Fixed first, blocking every provider:** a proxy-only console listener where the local owner token is never honoured (X-103), and a per-request passkey rpID (X-104). A console reachable from the internet also gets rate limits and headers (X-111) before Cloudflare, ngrok or port forwarding ships. | plan §2.23; X-103, X-104, X-111 |
+| 4 | Order | Recommended, for the owner to confirm when scheduling: X-103, X-104 → None and Tailscale (X-105…X-107) → Cloudflare Tunnel, then ngrok (X-111, X-108, X-109) → port forwarding (X-110). | §3.2 *Candidates* |
+| 5 | Add a Phone's refusals | The loopback and "doesn't answer" refusals point at Settings ▸ Remote Access instead of the research file. | plan §2.22 |
+
+What the research found on "OAuth sign into it": only **Cloudflare** offers a
+third-party OAuth flow (self-managed OAuth clients with PKCE, June 2026) — to be
+proven hands-on (R-1). **Tailscale**'s sign-in is its own app's, which needs no
+credential in Metistry. **ngrok** has no OAuth or device flow: the owner pastes
+the authtoken. **Port forwarding** needs no account but a DDNS token.
+
+**Still open** after this ruling — see the follow-up ruling below, which
+answers the `cloudflared` question.
+
+### Follow-up, 2026-09-30 — Funnel recommended, zrok added, provider tools bundled
+
+The owner read the revision and asked for more: *"Yes, let's add those. If
+there are things we can do to make it easier on the user, let's do that as
+well. That includes bundling/installing the cloudflared, tailscale tunnel app,
+etc."*
+
+| # | Item | Ruling | Where it lands |
+| --- | --- | --- | --- |
+| 6 | Tailscale Funnel | **Recommended.** A mode of the Tailscale provider — *Any browser (Funnel)*, the default when Tailscale is chosen, beside *Only my devices (tailnet)*. The phone needs no Tailscale app. Funnel is public, so it is held to the internet-facing rules: blocked by X-103 and X-111 like the tunnels. | plan §2.23; X-106 |
+| 7 | zrok | **Added** as a sixth choice (open source; free hosted plan; self-hostable). | plan §2.23; X-113 |
+| 8 | Provider tools | **Metistry may bundle or install them.** Answers the earlier open question on `cloudflared`. Each tool is pinned, checksummed and signed like the runtime pack, fetched when the owner picks that provider, and moved forward by `metistry update`. | plan §2.23; X-112 |
+| 9 | Order | Fixes → None and Tailscale (Funnel, tailnet) → Cloudflare Tunnel → zrok → ngrok → port forwarding. | §3.2 *Candidates* |
+| 10 | One guided flow | The wizard's *Set Up Remote Access* recommends Funnel, opens the provider's sign-up or sign-in, detects completion, proves the phone can reach the Mac, and only then offers Add a Phone. | plan §2.23; X-107, X-114 |
+
+**Still open** (plan §2.23): the Tailscale node — a bundled userspace
+`tailscaled` (recommended) or the owner's Tailscale app only; dependencies for
+port forwarding (NAT-PMP/PCP/UPnP and ACME — hand-roll, approve packages, or
+run Caddy); the ngrok route — the `@ngrok/ngrok` SDK (a dependency; ngrok's
+written consent may be needed) or the owner's own agent; registering FSL's public Cloudflare OAuth client (permanent, needs
+domain verification on `metistry.ai`); the free ngrok and zrok warning pages
+if they break a Home Screen app; and when to schedule X-103…X-114.
+
+### Second follow-up, 2026-09-30 — the Metistry Relay, opt-in and capped
+
+The owner asked for one FSL-hosted provider after Tailscale Funnel, for owners
+who will not make a Tailscale account. This **supersedes ruling 1 above only for
+this capped design**; the WebRTC rendezvous relay, an uncapped SNI relay and
+FSL-paid TURN stay rejected.
+
+| # | Item | Ruling | Where it lands |
+| --- | --- | --- | --- |
+| 11 | An FSL-hosted relay | **Yes, opt-in and capped:** an SNI-routing TLS-passthrough relay (it never decrypts) on one Lightsail instance, the Mac dialling out and terminating TLS with its own certificate for `<id>.metistry.app`; a control plane (API Gateway + Lambda + DynamoDB, CDK) for registration, revocable tokens, usage and an ACME DNS-01 helper in the `metistry.app` Route 53 zone. | plan §2.24; X-115…X-117 |
+| 12 | Hosting | **AWS only** — no other hosting providers. | plan §2.24 |
+| 13 | Cost guard | **A per-host bandwidth limit** (default 5 GB relayed a month), a per-host throttle, a global cap at ~90% of the bundle (≈ 0.9 TB relayed on the $7/2 TB plan, since Lightsail counts both directions), a $10 budget alert and registration limits — the bill stays flat; growth is a deliberate step. | plan §2.24 |
+| 14 | Abuse and cookies | **Agreed:** `metistry.app` on the Public Suffix List, opt-in only, revocable tokens, a per-id kill switch, only registered and active names forwarded, an abuse contact; blocked by X-103 and X-111 like every public provider. | plan §2.24; X-118 |
+| 15 | Order | Fixes → None + Tailscale Funnel → **Metistry Relay** → Cloudflare Tunnel → zrok → ngrok → port forwarding. Funnel stays first: it costs FSL nothing and is end to end without an FSL service. | §3.2 *Candidates* |
+
+**Still open** (plan §2.24): where the CDK lives (ruled below, #24); the relay component (frp or HAProxy + a tunnel client — the PoC
+decides); the cap and throttle numbers after the PoC; when to file the PSL entry
+(permanent); and the ACME dependency question, which now gates both port
+forwarding and the relay.
+
+### Third follow-up, 2026-09-30 — relay sub-paths rejected; owner names under `u.`
+
+| # | Item | Ruling | Where it lands |
+| --- | --- | --- | --- |
+| 16 | Relay sub-paths with one shared certificate (`metistry.app/user/<id>`) | **Rejected.** Routing by path means the relay decrypts, so FSL could read every owner's traffic; a shared certificate puts one private key on every Mac (any owner could impersonate the site, and a compromised key must be revoked within 24 hours under the CA/B Forum Baseline Requirements); one origin shares cookies, storage, service workers and the passkey rpID across owners. A wildcard certificate on the relay has the same decryption problem. | research §6; plan §2.24 |
+| 17 | Owner hostnames | **`<id>.u.metistry.app`** — wildcard `*.u.metistry.app` to the relay; the ACME helper writes only `_acme-challenge.<id>.u.metistry.app`. | plan §2.24; X-116 |
+| 18 | PSL entry | For **`u.metistry.app`**, not the apex: each `<id>.u.metistry.app` is its own registrable domain, which still gives each owner Let's Encrypt's 50-certificates-a-week limit. | X-118 |
+| 19 | Disclosure | A plain page at `metistry.app` (and `u.metistry.app`) says owner names are run by owners, not FSL, with an abuse link — replacing the apex's 301 to metistry.ai **when the relay ships**, as a metistry-website infra follow-up. No banner can be injected: the traffic is end-to-end encrypted, by design. | plan §2.24 |
+
+### Fourth follow-up, 2026-09-30 — keeping the relay Metistry-only
+
+The owner asked how to ensure only Metistry is served at `<id>.u.metistry.app`,
+accepted that it cannot be proven cryptographically (the traffic is end to end
+and the owner controls the Mac), and approved a layered design.
+
+| # | Item | Ruling | Where it lands |
+| --- | --- | --- | --- |
+| 20 | Device-only addresses — the primary control | Each phone gets its own unguessable label, `<label>.<id>.u.metistry.app`, registered by the Mac; the relay forwards only registered labels and refuses the bare name; at most 10 per instance; Remove in Devices revokes it. One wildcard certificate per Mac; the passkey rpID is `<id>.u.metistry.app` for all labels (checked against HTML's registrable-suffix rule; needs the PSL rule to be plain `u.metistry.app`, never `*.u.metistry.app`); per-instance DNS records, because a global wildcard stops matching beside the ACME TXT record. | plan §2.24; X-119, X-116, X-117 |
+| 21 | Behaviour limits at the relay | Distinct client IPs per day, concurrent connections, the bandwidth allowance and a probation period for new instances — numbers from the PoC. | X-115 |
+| 22 | Genuine-app gate | The relay client is bundled and hard-wired to the proxy listener; App Attest at registration is an extra layer if it works for a Developer ID app (R-8), never a dependency; forks and source builds use the other providers. | X-117, X-120 |
+| 23 | Surface and detection | Through the proxy listener only the sign-in and enrolment bootstrap answers without a session; no public share links; CT monitoring, an abuse contact, terms of use (Metistry only), a per-instance kill switch, PSL isolation. | X-111, X-116 |
+
+### Fifth follow-up, 2026-09-30 — where the relay's code lives
+
+| # | Item | Ruling | Where it lands |
+| --- | --- | --- | --- |
+| 24 | The relay's server-side code | A new **private** repository, `foldedspacelabs/metistry-relay`: the CDK (Lightsail, API Gateway, Lambda, DynamoDB, Route 53 under `metistry.app`), the control plane, and operations — abuse thresholds and detection, CT monitoring, budget alarms, runbooks — with its own deploy pipeline and OIDC role, so a website deploy can never touch the relay. Not `metistry` or `metistry-website`. | plan §2.24; X-115, X-116 |
+| 25 | What stays public | The relay **client and protocol** (in this repo; the client ships in the open-source app) and the relay's **forwarding configuration** (`ops/relay/` here — the SNI-routing, never-decrypting frp or HAProxy setup), deployed verbatim by the private repo, so owners can verify that FSL cannot read their traffic. | plan §2.24; X-115, X-117 |
+| 26 | The `metistry.app` zone | When the relay ships, `metistry-relay` owns every record under `metistry.app` (apex, `www`, `u.`) and serves the explanatory page; metistry-website drops its apex/`www` redirect distribution. Until then the website repo keeps the redirect. | plan §2.24 |
 
 ## Rulings the owner must make
 

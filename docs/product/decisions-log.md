@@ -420,11 +420,50 @@ a passkey removable from Devices, and a step for reaching the Mac from outside.
 | # | Item | Ruling | Where it lands |
 | --- | --- | --- | --- |
 | 1 | Build the Download page's phone flow, or cut it from the site | **Build it.** Minting stays on the Mac (a CLI verb, M19), never an HTTP route; the QR is CoreImage's, no dependency; removing a device revokes its passkey. | §2.22; X-75…X-79 |
-| 2 | Reaching the Mac from outside the home (the site's step 1) | Research an **opt-in relay**: default-deny, signalling only (never pays for bandwidth), serverless preferred; Tailscale, port forwarding and commercial tunnels stay documented alternatives. | plan §5; `docs/research/2026-09-28-reaching-your-mac-remotely.md` |
+| 2 | Reaching the Mac from outside the home (the site's step 1) | Research an **opt-in relay**: default-deny, signalling only (never pays for bandwidth), serverless preferred; Tailscale, port forwarding and commercial tunnels stay documented alternatives. | plan §5; `docs/research/2026-09-28-reaching-your-mac-remotely.md` — **superseded 2026-09-30**, below |
 
 **Still open** (§2.22): a terminal QR (an encoder dependency); whether the designer
 draws Settings ▸ Devices and the sheet before X-77; the site's step 1 and step 3–4
 wording (X-79).
+
+## Ruled 2026-09-30 — remote access is the owner's choice
+
+The owner read the 2026-09-28 research (Tailscale recommended; an opt-in FSL
+rendezvous relay designed) and ruled:
+
+> "I'm not sure I like any of the designs, to be honest. I don't want to pay to
+> host a service that scales up in cost as user counts grow when I'm not
+> charging anything for the app."
+>
+> "Maybe the better option is to just ask the user, at setup time, what they
+> prefer and then support a number of options they can configure easily. None
+> (local only, default option), Tailscale, Cloudflare tunnel, ngrok, and port
+> forwarding."
+>
+> "I'd want to make it as easy as possible to set these things up... like they
+> create an account with the service they want to use and then OAuth sign into
+> it from Metistry and it gets configured and exposed automatically."
+
+| # | Item | Ruling | Where it lands |
+| --- | --- | --- | --- |
+| 1 | An FSL-run relay (rendezvous, SNI passthrough or TURN) | **Rejected:** an FSL-run service whose cost grows with users, for a free app. Recorded under *Considered and rejected*. | research §6 |
+| 2 | How the phone reaches the Mac | **The owner's choice**, asked in the setup wizard and changeable in Settings ▸ Remote Access: None (default), Tailscale, Cloudflare Tunnel, ngrok, port forwarding. Each as close to *sign in, authorize, done* as its provider allows; every app act has a `metistry remote` verb (M20). | plan §2.23; X-105…X-110 |
+| 3 | The two gaps the research found | **Fixed first, blocking every provider:** a proxy-only console listener where the local owner token is never honoured (X-103), and a per-request passkey rpID (X-104). A console reachable from the internet also gets rate limits and headers (X-111) before Cloudflare, ngrok or port forwarding ships. | plan §2.23; X-103, X-104, X-111 |
+| 4 | Order | Recommended, for the owner to confirm when scheduling: X-103, X-104 → None and Tailscale (X-105…X-107) → Cloudflare Tunnel, then ngrok (X-111, X-108, X-109) → port forwarding (X-110). | §3.2 *Candidates* |
+| 5 | Add a Phone's refusals | The loopback and "doesn't answer" refusals point at Settings ▸ Remote Access instead of the research file. | plan §2.22 |
+
+What the research found on "OAuth sign into it": only **Cloudflare** offers a
+third-party OAuth flow (self-managed OAuth clients with PKCE, June 2026) — to be
+proven hands-on (R-1). **Tailscale**'s sign-in is its own app's, which needs no
+credential in Metistry. **ngrok** has no OAuth or device flow: the owner pastes
+the authtoken. **Port forwarding** needs no account but a DDNS token.
+
+**Still open** (plan §2.23): dependencies for port forwarding (NAT-PMP/PCP/UPnP
+and ACME — hand-roll, approve packages, or run Caddy); whether Metistry may
+download or bundle `cloudflared`; registering FSL's public Cloudflare OAuth
+client (permanent, needs domain verification on `metistry.ai`); the free ngrok
+plan if its warning page breaks a Home Screen app (R-3); and when to schedule
+X-103…X-111.
 
 ## Rulings the owner must make
 

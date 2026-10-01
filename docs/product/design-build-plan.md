@@ -433,6 +433,7 @@ console cannot or must not do it (credentials, the machine, code that runs):
 | M17 | Models on this Mac | `metistry compute models install\|load\|unload` | this Mac's disk and memory |
 | M18 | The vault's git policy and rollback | `metistry vault settings`, `metistry vault rollback <commit\|--to date\|--file path>` (T10-2, T10-6) | the repository's history and its remote; a rollback still waits for Approve in Needs You |
 | M19 | Add a phone: mint a passkey enrolment code | `metistry enroll [--json]`, `metistry enroll --cancel <id>` (X-75; §2.22) *(ruled 2026-09-28)* | a first credential for a new device; shell access to this Mac is its root of trust (plan §4.2), so no HTTP route mints one |
+| M20 | Remote access: the provider the phone reaches this Mac through | `metistry remote [status]\|set\|authorize\|test\|off` (X-105…X-110; §2.23) *(ruled 2026-09-30)* | the provider's credentials live in the login Keychain, and it decides what is exposed to the internet |
 
 **Device-local, no CLI and no API:** global hot keys, the capture bar's placement
 and window preferences, the login item, reading TCC state, the instance chooser
@@ -932,6 +933,7 @@ lands it in `CLAUDE.md` and in `metistry-build-plan.md` §1, which is kept in sy
 | 0036 | — | spare | | |
 | 0037 | — | spare | | |
 | 0038 | `passkey_revocation.sql` | `passkeys.revoked_at timestamptz` — a removed device's passkey never signs in again (§2.22) *(ruled 2026-09-28)* | durable, like `auth_sessions.revoked_at` | X-76 |
+| 0039 | `passkey_rp_id.sql` | `passkeys.rp_id text` — the host a passkey was created for; null reads as the first origin's host (§2.23) *(ruled 2026-09-30)* | durable | X-104 |
 
 **No migration needed:** `inbox.source = 'app'` (no CHECK); `runs.kind` values
 `connection_call`, `route`, `config_write`, `access_ceiling`; `runs.meta.outcome`;
@@ -947,7 +949,7 @@ new proposal kinds.
 | `.metistry/variables.yaml` *(new)* | name → plain value; no scheduling | CLI (M14) |
 | `.metistry/extensions/<name>/` | §2.7 | CLI (M15) |
 | `.metistry/identity.yaml` | name, mention, mark | CLI (M10) |
-| `.metistry/deployment.yaml` | `keep_awake` gains `{enabled, sleep_on_battery, sleep_lid_closed}`; the four values stay valid | CLI (M4) |
+| `.metistry/deployment.yaml` | `keep_awake` gains `{enabled, sleep_on_battery, sleep_lid_closed}`; the four values stay valid; `remote:` — provider, origin, non-secret settings (§2.23), never a credential | CLI (M4) |
 | `.metistry/compute.yaml` | providers gain `enabled`, `billing`; `auth.secret` takes `{{ secret.x }}` | console + CLI (existing) |
 | `.metistry/agents/<area>/<id>.md` | `model:` takes `<provider>/<model>` | CLI (M12) |
 | `seed/model-identities.yaml` *(new)* | provider model id → one identity (C131); overlayable | product |
@@ -1384,8 +1386,8 @@ The owner ruled to **build the flow rather than cut it from the site**. Today
 enrolment is `apps/console/scripts/enroll.mjs`, run from the wizard's step 6, which
 shows a URL and takes a pasted code; `docs/ops/mac-app.md` lists *Minting an
 enrolment code* and *A QR code* under "Not yet". This section is what closes both.
-Step 1 — reaching the Mac from outside — is **not** this section: it stays
-research (§5, *Remote access for the phone*).
+Step 1 — reaching the Mac from outside — is **not** this section: it is §2.23,
+*Remote access — the owner's choice*.
 
 **The root of trust does not move.** Plan §4.2: shell access to the host is the
 root of trust for a first passkey, so **no HTTP route mints an enrolment code** —
@@ -1451,13 +1453,14 @@ those cases by name rather than drawing a QR that leads nowhere. The first
 
 | Case | Refusal (the wording to build) |
 | --- | --- |
-| host is loopback (`127.0.0.0/8`, `::1`, `localhost`) — **every install's default** (`init` writes `http://127.0.0.1:<port>`, and the console binds `METISTRY_CONSOLE_HOST=127.0.0.1`) | "Your phone can't reach this Mac yet: Metistry only answers on this Mac (METISTRY_ORIGIN is <origin>). Give it an HTTPS address your phone can open — for example a Tailscale name — then set METISTRY_ORIGIN to it." |
+| host is loopback (`127.0.0.0/8`, `::1`, `localhost`) — **every install's default** (`init` writes `http://127.0.0.1:<port>`, and the console binds `METISTRY_CONSOLE_HOST=127.0.0.1`) | "Your phone can't reach this Mac yet: Metistry only answers on this Mac. Choose how your phone reaches it in Settings ▸ Remote Access (`metistry remote set`)." — the remote-access choice is None (§2.23) |
 | scheme is `http:` | "A passkey needs HTTPS. METISTRY_ORIGIN is <origin>; set it to the https:// address your phone will open." |
 | host is an IP literal | "A passkey needs a name, not an IP address. METISTRY_ORIGIN is <origin>; set it to a hostname your phone can open." |
-| `GET <origin>/health` does not answer from this Mac within 5 s, or `GET <origin>/api/identity` (public) names another instance's `instance_id` | "<origin> doesn't answer from this Mac, so your phone won't reach it either. Check the address, or the service in front of Metistry." |
+| `GET <origin>/health` does not answer from this Mac within 5 s, or `GET <origin>/api/identity` (public) names another instance's `instance_id` | "<origin> doesn't answer from this Mac, so your phone won't reach it either. Settings ▸ Remote Access shows what <provider> reports." — naming the provider `metistry remote` records, and its first failing doctor row |
 
-Every refusal ends with the same pointer: the phone guide, and — for the "from
-anywhere" half — `docs/research/2026-09-28-reaching-your-mac-remotely.md` (§5).
+Every refusal ends with the same pointer: Settings ▸ Remote Access on the Mac
+(`metistry remote` in the CLI), and the phone guide, which links
+`docs/ops/remote-access.md` (§2.23, X-105).
 The checks are necessary, not sufficient: a name that resolves only on this Mac
 still passes, which is why the sheet says under the QR *"Your phone must be able
 to open <host>."* and the phone's own wall says the rest (below).
@@ -1560,6 +1563,320 @@ settle, not for the site to fix blind:
    devices*) stays out: it would be an HTTP route that mints, and this ruling
    keeps minting on the Mac.
 
+### 2.23 Remote access — the owner's choice *(ruled 2026-09-30)*
+
+**Why this exists.** Add a Phone (§2.22) refuses until the phone can open an
+HTTPS origin with a stable name, and every install starts loopback-only. The
+2026-09-28 ruling asked for research into an FSL-run opt-in relay; the owner
+read it and on 2026-09-30 ruled against any FSL-hosted service — *"I don't want
+to pay to host a service that scales up in cost as user counts grow when I'm
+not charging anything for the app"* — and for a choice: **the owner picks a
+provider at setup, can change it later in Settings, and Metistry makes each one
+as close to *sign in, authorize, done* as the provider allows.** The facts
+behind every row here, with their sources and the date checked, are in
+`docs/research/2026-09-28-reaching-your-mac-remotely.md` (revised 2026-09-30).
+No choice is an FSL service, and no choice sends anything to FSL.
+
+**The five choices** — in this order wherever they are listed:
+
+| Choice | The owner does | Metistry does | Origin it yields | TLS ends at — who can read traffic | Cost to the owner |
+| --- | --- | --- | --- | --- | --- |
+| **None** *(default)* | nothing | nothing: the console answers on this Mac only | — (`METISTRY_ORIGIN` stays loopback) | — | $0 |
+| **Tailscale** | installs Tailscale on the Mac and the iPhone and signs in to both (Tailscale's own apps); if the tailnet's HTTPS certificates are off, clicks Tailscale's one-click *allow* page | finds the install, reads `tailscale status --json`, runs `tailscale serve` to the proxy listener, reads the MagicDNS name | `https://<mac>.<tailnet>.ts.net` | **the Mac** (Tailscale carries only WireGuard ciphertext) | $0 (Personal plan) |
+| **Cloudflare Tunnel** | has a Cloudflare account **with a domain on it**; signs in once — *Connect to Cloudflare* (OAuth with PKCE, if it proves out) or the browser's `cloudflared tunnel login`; picks a hostname | creates a named tunnel, its ingress and its DNS record over the API, and runs `cloudflared` as a supervised job | `https://<name>.<owner's domain>` | **Cloudflare** | $0; a domain (~$10/yr at cost) |
+| **ngrok** | has an ngrok account; **pastes the authtoken** (no OAuth or device flow exists) | runs the agent against the account's free dev domain, supervised | `https://<dev-domain>.ngrok-free.dev` (a custom domain on a paid plan) | **ngrok** | $0 with a weekly ngrok warning page; $10/mo removes it |
+| **Port forwarding** | has a router that answers PCP/NAT-PMP/UPnP (or forwards a port by hand) and a public IPv4; picks a dynamic-DNS name | maps the port, detects CGNAT, keeps the DNS name current, obtains and renews the certificate (ACME DNS-01), serves TLS itself | `https://<name>.dedyn.io[:port]` or a subdomain of the owner's domain | **the Mac** | $0 |
+
+**Two fixes come first, and block every choice but None.** The research found
+two gaps that make every proxy path unsafe or broken today:
+
+1. **The proxy listener (X-103).** Every provider's agent — `tailscale serve`,
+   `cloudflared`, the ngrok agent, a TLS terminator for port forwarding —
+   connects to the console from `127.0.0.1`, so the loopback-only
+   `METISTRY_LOCAL_OWNER_TOKEN` would be honoured for anything arriving through
+   a tunnel, from the tailnet or the internet, including the `local` routes that
+   mint agent bearers. The console gains a **second listener for proxies only**:
+   a Unix socket (`.metistry/state/console-proxy.sock`, 0600) for providers that
+   can dial one (`cloudflared`, the ngrok agent, the port-forward terminator),
+   and a loopback TCP port (`METISTRY_CONSOLE_PROXY_PORT`, default the console
+   port + 1) for Tailscale Serve, which documents only `http://127.0.0.1` targets.
+   A request on either is **remote by construction**, whatever its peer address:
+   the local owner token is never honoured, no `local` route answers, and its
+   `Host` must be the configured remote host (any other is refused — DNS
+   rebinding and a misrouted tunnel). Every adapter points its provider at the
+   proxy listener, never the main one, and doctor fails a provider whose upstream
+   is the main port.
+2. **Passkeys per origin (X-104).** `rpFromOrigin` takes the rpID from the
+   first `METISTRY_ORIGIN` entry, so a second origin on another host can never
+   finish a ceremony. The rpID becomes **per request**: options are generated
+   with the host of the configured origin the request came from, and
+   verification takes the list (`expectedRPID` as an array,
+   `@simplewebauthn/server` 13). Migration `0039` (`passkeys.rp_id`) records the
+   host each passkey was created for; `GET /api/devices` serves it.
+
+**Where the choice lives.** `.metistry/deployment.yaml` gains `remote:` —
+`provider: none | tailscale | cloudflare | ngrok | port-forward`, the `origin`
+it yields, and the provider's non-secret settings (tunnel id, hostname, DDNS
+name, the mapped port). It changes how the system behaves, so it is written by
+the protected write with preview-then-confirm, as `deployment set-keep-awake`
+is (M4). **No credential is in that file:** an OAuth refresh token, an API
+token, an ngrok authtoken, a DDNS token, an ACME account key or Cloudflare's
+`cert.pem` goes to the login Keychain (`metistry:METISTRY_REMOTE_<NAME>`), and
+into `.env` only when a supervised job needs it. Tailscale keeps its own
+credentials in its own app; Metistry holds none.
+
+**How the origin flows.** The environment renderer (`up`, `secrets sync --to
+env`) derives `METISTRY_ORIGIN` from the record: **the remote origin first**,
+the loopback origin `init` wrote second. So `metistry enroll` — which mints for
+the first entry (§2.22) — and the Add a Phone QR use the remote origin with no
+change to their spec, and a browser on this Mac at `http://127.0.0.1:<port>`
+keeps working. With **None** the list is the loopback origin alone. A passkey is
+bound to the host it was created on, so **changing provider strands the phones
+added under the old one**: the pane says so before it changes anything, and
+Devices marks each passkey whose host is no longer configured (*"Added for
+old.example.com. Remove it and add this phone again."*). Nothing re-enrols
+silently.
+
+**The setup wizard's question.** A new optional step, **Remote Access**, between
+*Services* and *Door* — before step 6, which opens Add a Phone:
+
+> **How should your phone reach this Mac?** Metistry answers only on this Mac
+> until you choose. You can change this later in Settings.
+
+The five choices as a list, **None** selected, each with one line naming what
+it needs (an app, a domain, a router), who can read the traffic, and the cost.
+Continuing with **None** satisfies the step — a knowing choice, as *Compute*'s
+skip is — and *Door* then says the phone waits for a remote-access choice.
+Picking a provider runs the pane's flow inline.
+
+**Settings ▸ Remote Access.** A pane in ACCESS, before Devices — `Account ·
+Remote Access · Devices · Connections · Secrets · Variables` (screen 15 §1 gains
+it). It shows the choice, the origin, and the provider's doctor rows with when
+they were checked; **Change…** opens the same chooser; **Test** re-runs the
+probes; **Turn Off** returns to None, running the adapter's revoke after a
+confirm that names what it undoes and what is left for the owner at the
+provider. A provider's sign-in happens in that provider's app or in the browser:
+**Metistry never asks for a provider password.** Where a token must be pasted
+(ngrok; a Cloudflare API token as the fallback), the field links to the exact
+dashboard page and the value goes to the Keychain.
+
+**The provider adapter.** One interface in `packages/cli/src/remote/`, one
+module per provider. The CLI is the only implementation; the Mac drives it over
+the CLI transport (§2.2, M20):
+
+```ts
+interface RemoteProvider {
+  id: "none" | "tailscale" | "cloudflare" | "ngrok" | "port-forward";
+  /** Read-only: is the provider's tool here, signed in, and what would configure change? */
+  detect(ctx: RemoteContext): Promise<Detection>;
+  /** Idempotent. Sign in (or hand the owner the provider's own sign-in), expose the
+   *  proxy listener, and return the stable origin. Writes nothing on failure. */
+  configure(ctx: RemoteContext, opts: ProviderOptions): Promise<{ origin: string; settings: Record<string, string> }>;
+  /** Doctor rows: core CheckResult, kind "remote", each with a remediation and, where it can name one, an action. */
+  status(ctx: RemoteContext): Promise<CheckResult[]>;
+  /** Undo exactly what configure created; name what only the owner can undo at the provider. */
+  revoke(ctx: RemoteContext): Promise<{ undone: string[]; left_for_owner: string[] }>;
+}
+```
+
+`configure` never widens an earlier exposure without the owner's confirm, and
+**switching configures the new provider first and revokes the old one only once
+the new origin answers**, so the phone is never left with nothing mid-change. A
+provider's tool (`tailscale`, `cloudflared`, `ngrok`) is found where the owner
+installed it; whether Metistry may also download or bundle one is open (below).
+
+**CLI parity** (`docs/ops/cli.md`, U7). Every app act is a verb; every verb
+takes `--instance` and `--json`, the writing ones `--dry-run`:
+
+| App | CLI |
+| --- | --- |
+| the pane's status | `metistry remote [status] [--json]` |
+| the chooser, a provider picked | `metistry remote set <none\|tailscale\|cloudflare\|ngrok\|port-forward> [provider flags] [--yes]` |
+| a provider's browser sign-in | `metistry remote authorize <cloudflare\|tailscale> [--no-browser] [--timeout 300]` — Cloudflare's OAuth on `127.0.0.1` (the `connections authorize` pattern) or `cloudflared tunnel login`; Tailscale's login URL when its app is signed out |
+| a pasted token | `metistry remote set ngrok`, `metistry remote set cloudflare --token` — the value on stdin, hidden at a prompt in a terminal, **never in argv** (the `secrets set` rule) |
+| Test | `metistry remote test [--json]` — `status`, plus `GET <origin>/health` through the provider |
+| Turn Off | `metistry remote off [--yes]` — `set none`, with revoke |
+
+Provider flags: `cloudflare --hostname <name.domain> [--access]`; `ngrok
+[--domain <name>]`; `port-forward [--ddns desec\|cloudflare] [--hostname
+<name>] [--manual <external-port>]`.
+
+**Doctor rows.** Kind `remote`, one row per thing that can be wrong, in the
+product's voice — reported state, each absence its own sentence naming the fix.
+**None** is one `ok` row: *"Remote access: none. Your phone can't reach this
+Mac. Choose a way in Settings ▸ Remote Access."* — `ok`, because it is a choice,
+not a fault. Every provider adds its own rows (below) and these two:
+
+- *proxy listener* — `failed` when the provider forwards to the console's main
+  port: *"Tailscale is forwarding to the console's main port, which accepts this
+  Mac's owner token. Run `metistry remote set tailscale` to point it at the proxy
+  listener."*
+- *origin answers* — `GET <origin>/health` from this Mac returns this instance's
+  `instance_id`; otherwise `failed`: *"<origin> doesn't answer through
+  <provider>."*
+
+**Per provider — what is built, detected and accepted.**
+
+*None.* Nothing is exposed. The phone can do nothing with this install — no PWA,
+no web push (a subscription is made from the installed PWA), no capture
+Shortcut. A home-network-only mode is not offered: a passkey needs HTTPS and a
+stable name, and a LAN address has neither. The Mac app and browsers on this Mac
+work as today. *Accept:* a fresh install's `metistry remote` says *none*, its
+doctor row is `ok`, `METISTRY_ORIGIN` is loopback only, and Add a Phone refuses,
+naming Settings ▸ Remote Access.
+
+*Tailscale* (X-106). There is no OAuth for a third party to act on a tailnet
+(Tailscale's OAuth clients are client-credentials only), and none is needed:
+Tailscale's own apps sign in, and Metistry drives the local CLI. **Detect** the
+App Store or Standalone app (its CLI is `Tailscale.app/Contents/MacOS/Tailscale`)
+or a `tailscale` binary; read `BackendState`, `AuthURL` and `Self.DNSName` from
+`tailscale status --json` (documented as subject to change — the fields read are
+pinned by a fixture test). **Configure:** signed out, open the app or the
+`AuthURL`; then `tailscale serve --bg` to the proxy listener's port; HTTPS off
+for the tailnet makes `serve` offer a page that "prompts you to allow Tailscale
+to enable HTTPS on your behalf" — Metistry shows that link as the one step and
+waits; the origin is `Self.DNSName` without its dot, recorded. Never bundles a
+client. **Revoke:** turn off exactly the handler it added; the Mac stays on the
+tailnet (the owner's to leave). **Doctor rows:** installed · connected (not
+`Stopped`) · signed in (not `NeedsLogin`/`NeedsMachineAuth`) · MagicDNS name
+present · HTTPS certificates · serve → proxy listener · name unchanged since
+configured (*"This Mac's Tailscale name changed from <old> to <new>. Phones
+added under the old name must be added again."*) · node key expiry (`degraded`
+within 14 days). Whether the iPhone is on the tailnet cannot be known from the
+Mac; the Add a Phone sheet says *"Your phone must be signed in to the same
+Tailscale account."* *Accept:* on the owner's second instance, with Tailscale
+signed in on both devices, `remote set tailscale` ends with Add a Phone drawing a
+QR that enrols a real iPhone, which then signs in off Wi-Fi; `remote off` leaves
+no serve handler; a renamed Mac turns its row red.
+
+*Cloudflare Tunnel* (X-108, after X-111). **Needs a domain on the owner's
+Cloudflare DNS** — the chooser says so first; partial (CNAME) zones are
+Business-plan only. A **Quick Tunnel is refused**: its hostname changes on every
+run, which strands every passkey, and it does not carry Server-Sent Events,
+which `GET /api/events` needs. **Sign-in, best first:** (1) *Connect to
+Cloudflare* — Cloudflare's self-managed OAuth clients (June 2026) support
+Authorization Code with PKCE and no client secret, so FSL registers **one
+public client** (verified against `metistry.ai`; no FSL server) and Metistry
+runs a loopback sign-in — **gated on R-1 below**; (2) `cloudflared tunnel login`
+(the browser; an account-wide `cert.pem`, moved into the Keychain after use);
+(3) a pasted API token with exactly the tunnel-edit, DNS-edit and zone-read
+permissions. **Configure:** create a remotely-managed tunnel
+(`config_src: cloudflare`), put its ingress to the proxy listener's socket
+(`unix:`), create the proxied CNAME to `<uuid>.cfargotunnel.com`, and run
+`cloudflared tunnel run --token` as a supervised job with the token from the
+Keychain. `--access` adds a Cloudflare Access application in front — **off by
+default** until R-2. The chooser says plainly **Cloudflare can read the
+traffic**. **Revoke:** delete the tunnel and the DNS record by id, remove the
+job and the Keychain items; revoking the grant, token or `cert.pem` is listed for
+the owner. **Doctor rows:** `cloudflared` present · job running · allowed into
+the account (API 401/403 → *"Metistry is no longer allowed into your Cloudflare
+account. Connect to Cloudflare again."*) · zone present · tunnel connected (the
+API's tunnel status) · DNS record → this tunnel · ingress → proxy listener ·
+Access in front (`degraded`, said as *"Cloudflare Access asks for a sign-in
+before Metistry's."*). *Accept:* with a test zone, `remote set cloudflare
+--hostname` reaches a QR that enrols a real iPhone off Wi-Fi; `remote off` leaves
+no tunnel and no record; a Quick Tunnel is refused with its reason.
+
+*ngrok* (X-109, after X-111). **No OAuth or device flow exists** for the ngrok
+agent; the best is the owner pasting the authtoken from the dashboard page the
+pane links. Metistry reads the account's dev domain — one per account, fixed
+across restarts — and runs the agent to the proxy listener's socket, supervised.
+The agent is closed-source and its terms forbid redistributing it to users with
+their own accounts, so **Metistry finds the owner's install**
+(`brew install ngrok`); the `@ngrok/ngrok` SDK is a dependency (U5) and not
+assumed. The chooser says plainly **ngrok can read the traffic**, and that on
+the free plan ngrok shows its own warning page before Metistry about once a
+week; if R-3 finds a Home Screen app cannot get past it, the chooser offers ngrok
+only with a paid plan and says why. **Revoke:** stop and remove the agent's job,
+delete the token from the Keychain; resetting the token in the dashboard is
+listed for the owner. **Doctor rows:** agent present · authtoken accepted
+(`ERR_NGROK_105`/`107` → *"ngrok didn't accept the authtoken. Copy it again from
+your ngrok dashboard."*) · endpoint online (`ERR_NGROK_334` → *"<domain> is
+already in use by another ngrok agent."*) · plan quota (*"Your ngrok plan's
+monthly limit is used up."*) · upstream → proxy listener. *Accept:* as
+Cloudflare's, with the owner's ngrok account.
+
+*Port forwarding* (X-110, after X-111). **Mapping:** PCP, then NAT-PMP, then
+UPnP-IGD, renewed before the lease ends; the router may grant a different
+external port, and the origin carries whatever port it grants. macOS's own
+port-mapping API has not worked since Monterey, so Metistry has its own client.
+**CGNAT and double NAT are detected and refused by name** before anything is
+mapped — the router's external address in `100.64.0.0/10` or private space, or
+different from the address the DDNS provider saw: *"Your internet provider
+shares one public address among many customers, so nothing outside can reach
+this Mac. Port forwarding can't work here; choose Tailscale or a tunnel."* An
+IPv6 pinhole (PCP, or UPnP IGDv2) is tried first where the router offers one.
+**Name and certificate:** a dynamic-DNS name (deSEC's free `dedyn.io` by
+default, or a subdomain of a Cloudflare zone reusing that sign-in), kept at the
+mapped address; a certificate by ACME DNS-01 through that provider's API,
+renewed in ARI's window. **Serve TLS** on the mapped port in front of the proxy
+listener's socket. The chooser says *"Anyone on the internet can reach this
+Mac's sign-in page, and your home address is in public DNS."* **Revoke:** delete
+the mapping (lifetime 0, or `DeletePortMapping`), stop serving, delete the DNS
+records Metistry created; releasing the DDNS name is the owner's. **Doctor
+rows:** router mapping · public address (CGNAT named) · DNS name → address ·
+certificate expiry (`degraded` within 10 days) · *reachable from outside*,
+which is **reported as not checked**, never `ok` — a test from inside the network
+depends on hairpin NAT — with *"Open <origin> on your phone with Wi-Fi off to
+confirm."* *Accept:* on a router with NAT-PMP or UPnP and a public IPv4, `remote
+set port-forward` reaches a QR that enrols a real iPhone off Wi-Fi; on a CGNAT
+line it refuses before mapping anything.
+
+**A console on the internet (X-111).** Cloudflare Tunnel, ngrok and port
+forwarding all put the sign-in page where any scanner can reach it; Tailscale
+does not. Before any of those three ships, the proxy listener adds: per-client
+rate limits on every unauthenticated route (the passkey ceremonies, enrolment,
+`/api/identity`, `/health`) keyed on the provider's client-address header — read
+**only** on the proxy listener, and only for rate limiting, never for identity —
+and a global ceiling; security headers (HSTS without preload, CSP,
+`X-Content-Type-Options`, `Referrer-Policy`, frame denial); and one audit row per
+refused burst. Invariant 10 already leaves no unauthenticated mutating route.
+
+**Order — recommended.**
+
+1. **X-103 and X-104.** Bugs whatever the owner picks; every provider needs them.
+2. **None and Tailscale** (X-105, X-106, X-107). None is every install's default
+   and costs little. Tailscale is the only provider where **nothing faces the
+   internet and only the Mac reads the traffic**; its own apps do the sign-in so
+   Metistry holds no credential; its HTTPS step is Tailscale's one-click page;
+   PoC-6 proved the path end to end; and it is also the home-network answer.
+3. **Cloudflare Tunnel, then ngrok** (X-111, X-108, X-109). Both put the sign-in
+   page on the internet and both decrypt at the vendor, so both wait on X-111.
+   Cloudflare first: a browser sign-in (and possibly real OAuth) rather than a
+   pasted token, no warning page, a bundleable agent. ngrok second: a pasted
+   token, a closed agent, and a free plan whose weekly warning page may not suit
+   a Home Screen app.
+4. **Port forwarding last** (X-110). The most code (mapping, DDNS, ACME,
+   renewal), the most exposure (the home address in public DNS, the console's TLS
+   facing scanners), dependencies to approve, and it cannot work at all behind
+   CGNAT, which fixed-wireless and satellite lines increasingly use.
+
+**To verify before the ticket that relies on it** (each a hands-on check, no
+product code; the research's §7):
+
+- **R-1** (X-108): register a private Cloudflare OAuth client; confirm a loopback
+  redirect is accepted and the tunnel and DNS permissions are grantable scopes.
+  If not, X-108 ships with `tunnel login` and the token fallback.
+- **R-2** (X-108 `--access`): the PWA's manifest, an expired Access cookie in
+  standalone mode, and a passkey ceremony behind Access, on a real iPhone.
+- **R-3** (X-109): the free plan's warning page on a Home Screen app's first
+  launch, its 7-day cookie in standalone storage, and `GET /api/events`.
+- **R-4** (X-110): PCP/NAT-PMP/UPnP on the owner's router, and one CGNAT line.
+
+**Open for the owner.**
+
+1. **Dependencies for port forwarding** (U5): hand-roll NAT-PMP and PCP (small),
+   and for UPnP and ACME either approve packages (`@achingbrain/nat-port-mapper`,
+   `acme-client`) or run Caddy as an external binary. Until ruled, X-110 is
+   specified and not dispatched.
+2. **Provider tools:** may Metistry download `cloudflared` (Apache-2.0, may be
+   bundled) for the owner, or only find an install? ngrok's agent cannot be
+   bundled either way.
+3. **FSL's Cloudflare OAuth client:** registering a *public* client is permanent
+   and needs domain verification on `metistry.ai` — the maintainer's act, after
+   R-1.
+4. **The free ngrok plan**, if R-3 fails: refuse it, or offer it with the warning.
+
 ---
 
 ## 3. Execution plan
@@ -1639,7 +1956,7 @@ agent's pass, per the PR close rule; the owner reviews at checkpoints.
 | W3 | T2-12, T2-13 · T3-8, T3-10, T3-11 · T4-9, T4-12 → T4-13, T4-19, T4-22, T4-23, T4-25, T4-26 · T6-4…T6-11 · T7-4, T7-5 · T8-2a → T8-2b, T8-6 · T9-3 · T10-7 · X-6…X-23 |
 | W4 | X-24, X-29, X-31, X-32, X-41 (CI stability, dispatched first — owner 2026-09-30) · T4-10 → T4-11, T4-14; T4-15 → T4-17 · T6-12, T6-13a, T6-13b, T6-14, T6-15, T6-16 · T7-6 · T8-3, T8-4, T8-5, T8-7 · T9-4 (merges after the eval clears its bar) |
 | W5 | X-1 |
-| Candidates | X-25…X-28, X-30, X-33…X-40, X-42…X-74, X-80…X-102 — specified, not scheduled; the owner assigns each a wave at a checkpoint (W3 housekeeping; five CI-stability candidates went to W4 on 2026-09-30; X-80…X-102 added at W4 housekeeping) · X-75…X-79 — Add a Phone (§2.22), ruled 2026-09-28, not yet scheduled |
+| Candidates | X-25…X-28, X-30, X-33…X-40, X-42…X-74, X-80…X-102 — specified, not scheduled; the owner assigns each a wave at a checkpoint (W3 housekeeping; five CI-stability candidates went to W4 on 2026-09-30; X-80…X-102 added at W4 housekeeping) · X-75…X-79 — Add a Phone (§2.22), ruled 2026-09-28, not yet scheduled · X-103…X-111 — Remote access (§2.23), ruled 2026-09-30, not yet scheduled |
 
 ### 3.3 The tickets
 
@@ -3954,7 +4271,7 @@ and a passkey the owner can remove; the owner ruled to build it rather than cut 
 from the site. **Every ticket here builds §2.22** — read it whole; it holds the
 refusal wording, the sheet's states and the acceptance. None is in a wave: §3.2's
 *Candidates* row holds them until the owner schedules them. Reaching the Mac from
-outside the home is **not** here (§5, *Remote access for the phone*).
+outside the home is **not** here: it is §2.23 and X-103…X-111, below.
 
 **X-75 · `metistry enroll` — an enrolment code minted on this Mac** · M —
 *Spec:* §2.22 *Minting* and *When `METISTRY_ORIGIN` is not reachable*: the M19
@@ -4021,7 +4338,7 @@ a standalone launch shows sign-in, never the enrolment wall.
 **X-79 · The phone guide, and the website's copy re-checked** · S · deps X-75, X-76, X-77, X-78 —
 *Spec:* write `docs/ops/phone.md` — the owner's guide to Add a Phone, each Mac
 refusal and its fix, removal, and a pointer to
-`docs/research/2026-09-28-reaching-your-mac-remotely.md` for reaching the Mac from
+`docs/ops/remote-access.md` (X-105) for reaching the Mac from
 outside (the website's Docs are built from this repo's markdown, so this page is
 what metistry.ai renders). Then compare the Download page's *Add your phone* steps
 (`foldedspacelabs/metistry-website`) with the shipped flow — §2.22's three known
@@ -4030,6 +4347,175 @@ differences first — and open a PR there with the copy that matches.
 *Tests:* —
 *Accept:* the site's four steps describe the shipped flow, and its step 1 no
 longer says Metistry answers on the home network by default.
+
+#### X — Remote access: the owner's choice (ruled 2026-09-30)
+
+The owner ruled against an FSL-hosted relay and for a choice of provider, asked
+at setup and changeable in Settings. **Every ticket here builds §2.23** — read it
+whole; it holds the chooser's wording, the doctor rows, the refusals and the
+acceptance per provider. X-103 and X-104 are bugs whatever the owner picks and
+**block every provider**; X-111 blocks the three that face the internet. None is
+in a wave: §3.2's *Candidates* row holds them until the owner schedules them.
+§2.23's recommended order is X-103, X-104 → X-105, X-106, X-107 → X-111, X-108,
+X-109 → X-110.
+
+**X-103 · The console's proxy listener — the local owner token never crosses a tunnel** · M —
+*Spec:* §2.23 *Two fixes*, 1: a second console listener for proxies only — a
+Unix socket at `.metistry/state/console-proxy.sock` (0600) and a loopback TCP
+port `METISTRY_CONSOLE_PROXY_PORT` (default the console port + 1). A request on
+either is **remote by construction**: `local-owner.ts` never honours the local
+owner token there whatever the peer, no `local` route answers, and a `Host`
+that is not the configured remote host is refused. The main listener is
+unchanged. Under `shape: compose` the port is published on `127.0.0.1` only. A
+finding against `docs/ops/auth.md` ("cannot be replayed from off the machine"),
+fixed and the doc corrected.
+*Files:* `apps/console/src/main.ts`, `apps/console/src/server.ts`,
+`apps/console/src/local-owner.ts`, `docker-compose.yml`, `packages/cli/src/env.ts`
+(the env), `docs/ops/auth.md`, `docs/ops/deployment-shapes.md`.
+*Tests:* U2 on the proxy listener; **the local owner token from `127.0.0.1` on
+the proxy port is refused exactly as a remote one is, and audited; a `local`
+route answers 403 there; a wrong `Host` is refused; the socket is 0600**; the
+main listener's local door still works.
+*Accept:* `tailscale serve` pointed at the proxy port on the owner's second
+instance: the Mac's owner token sent from a tailnet device is refused.
+
+**X-104 · Passkeys per origin — the rpID follows the request** · M —
+*Spec:* §2.23 *Two fixes*, 2: `rpFromOrigin` stops taking the rpID from the
+first `METISTRY_ORIGIN` entry; registration and authentication options use the
+host of the configured origin the request came from (an unconfigured origin is
+refused as today, naming both sides), and verification passes the list as
+`expectedRPID`. Migration `0039` (`passkeys.rp_id text`, nullable; null reads as
+the first origin's host, the value every existing passkey was created under).
+`GET /api/devices` serves each passkey's `rp_id` — additive, recorded in
+`client-api.md`.
+*Files:* `db/migrations/0039_passkey_rp_id.sql`, `apps/console/src/webauthn.ts`,
+`apps/console/src/server.ts`, `apps/console/src/auth-store.ts`,
+`docs/ops/auth.md` (*Passkeys: origins*), `docs/ops/client-api.md`.
+*Tests:* U2; **a passkey created at the second origin signs in there and is
+refused at the first; an origin outside the list is refused; an existing
+passkey with a null `rp_id` still signs in at the first origin**.
+*Accept:* U4's rollback note; F-7's devices fixture re-recorded.
+
+**X-105 · `metistry remote` — the record, the adapter interface, and None** · M · deps X-103, X-104 —
+*Spec:* §2.23 *Where the choice lives*, *How the origin flows*, *The provider
+adapter*, *CLI parity* and *Doctor rows*: the M20 verbs (`remote [status]`,
+`set`, `authorize`, `test`, `off`) with `--json`, `--dry-run`, `--instance`;
+the `RemoteProvider` interface and its registry in `packages/cli/src/remote/`;
+the **None** adapter; `.metistry/deployment.yaml`'s `remote:` block through the
+protected write (preview-then-confirm); the env renderer putting the remote
+origin first in `METISTRY_ORIGIN`; switching configures the new provider and
+revokes the old only once the new origin answers; doctor's `remote` kind with
+None's `ok` row and the two shared rows. §2.22's loopback refusal names Settings
+▸ Remote Access. A tokens-on-stdin helper shared with `secrets set`.
+*Files:* `packages/cli/src/remote/` (new: `index.ts`, `provider.ts`, `none.ts`),
+`packages/cli/src/main.ts`, `packages/cli/src/deployment.ts`,
+`packages/cli/src/env.ts`, `packages/cli/src/doctor.ts`, `docs/ops/cli.md`,
+`docs/ops/remote-access.md` (new: None, the choices, the proxy listener).
+*Tests:* **a token given in argv is refused and not echoed; a failed `configure`
+writes nothing; `set none` from a provider runs that provider's revoke; with
+None, `METISTRY_ORIGIN` is loopback only; doctor fails a provider whose upstream
+is the main console port**; a fake provider exercises switch ordering (the old
+one is revoked only after the new origin answers).
+*Accept:* a fresh install's `metistry remote --json` says `none` and doctor's
+row is `ok`.
+
+**X-106 · The Tailscale adapter** · M · deps X-105 —
+*Spec:* §2.23 *Tailscale*: detect the app (App Store or Standalone; its CLI in
+the bundle) or a `tailscale` binary; read `BackendState`, `AuthURL` and
+`Self.DNSName` from `status --json`; hand the owner Tailscale's own sign-in; run
+`serve --bg` to the proxy port and surface Tailscale's HTTPS-enable link when
+`serve` offers one; record the name; revoke only its own handler; the doctor
+rows listed there. Never bundles a client and holds no Tailscale credential.
+*Files:* `packages/cli/src/remote/tailscale.ts`,
+`packages/cli/test/remote-tailscale.test.ts` (with recorded `status --json`
+fixtures), `docs/ops/remote-access.md` (the Tailscale section, replacing PoC-6's
+notes as the owner's guide).
+*Tests:* **each `BackendState` maps to its row and sentence; a serve handler
+pointing at the main port fails doctor; a changed `Self.DNSName` fails the
+name row; revoke leaves any handler it did not create**; the fixture pins the
+JSON fields read.
+*Accept:* §2.23's Tailscale acceptance, on the owner's second instance and a
+real iPhone.
+
+**X-107 · Settings ▸ Remote Access and the wizard's question** · L · deps X-105, X-106, X-77 —
+*Spec:* §2.23 *The setup wizard's question* and *Settings ▸ Remote Access*: the
+**Remote Access** step between *Services* and *Door* (`FirstRunStep`), None
+preselected, None satisfying the step; the pane in ACCESS before Devices, with
+the chooser (five rows, each naming what it needs, who reads the traffic, the
+cost), the status rows from `remote status --json`, **Change…**, **Test**, and
+**Turn Off** with its confirm; a provider not yet built is listed and marked
+*Not yet available*. Devices marks a passkey whose `rp_id` is no longer a
+configured host. The flow drives `metistry remote` over the CLI transport.
+*Files:* `apps/macos/sources/kit/first-run-model.swift`,
+`apps/macos/sources/kit/wizard-step-views.swift`,
+`apps/macos/sources/kit/settings-model.swift`, a new
+`apps/macos/sources/kit/remote-access-pane.swift` and `remote-access-model.swift`,
+the Devices pane (X-77), `docs/ops/mac-app.md`,
+`docs/product/design/screen-15-settings.md` §1.
+*Tests:* **None is preselected and Continue satisfies the step; Turn Off's
+confirm names what revoke will undo; a pasted token never reaches the CLI's
+argv**; a passkey for an unconfigured host shows the marker.
+*Accept:* U9; on a fresh install the wizard asks the question once, and
+choosing Tailscale ends with Add a Phone ready.
+
+**X-111 · A console on the internet — rate limits and headers on the proxy listener** · M · deps X-103 —
+*Spec:* §2.23 *A console on the internet*: per-client rate limits on every
+unauthenticated route, keyed on the provider's client-address header read
+**only** on the proxy listener and only for limiting; a global ceiling; HSTS
+(no preload), CSP, `X-Content-Type-Options`, `Referrer-Policy` and frame denial
+on the proxy listener; one `runs` row per refused burst. No credential decision
+reads any forwarded header.
+*Files:* `apps/console/src/server.ts`, `apps/console/src/http-util.ts`, a new
+`apps/console/src/rate-limit.ts`, `docs/ops/auth.md`.
+*Tests:* **a forwarded-address header on the main listener changes nothing; a
+burst past the limit is refused with 429 and audited once; no header can raise
+a principal**; the main listener's behaviour is unchanged.
+*Accept:* —
+
+**X-108 · The Cloudflare Tunnel adapter** · L · deps X-105, X-111 —
+*Spec:* §2.23 *Cloudflare Tunnel*: refuses an account with no zone and any
+Quick Tunnel, by name; sign-in by OAuth with PKCE when R-1 has passed (else
+`cloudflared tunnel login`, then a pasted token); a remotely-managed tunnel,
+ingress to the proxy socket, the proxied CNAME, and `cloudflared tunnel run
+--token` as a supervised job; `--access` off by default until R-2; revoke deletes
+the tunnel and the record by id; the doctor rows listed there.
+*Files:* `packages/cli/src/remote/cloudflare.ts`, `packages/cli/src/launchd.ts`
+(the job), `packages/cli/test/remote-cloudflare.test.ts` (a recorded API
+fixture), `docs/ops/remote-access.md`.
+*Tests:* **a Quick Tunnel hostname is refused; ingress pointing anywhere but the
+proxy socket fails doctor; revoke deletes only the record it created; the token
+is read from the Keychain, never argv**; a 403 from the API reads as *no longer
+allowed*.
+*Accept:* §2.23's Cloudflare acceptance with a test zone and a real iPhone.
+
+**X-109 · The ngrok adapter** · M · deps X-105, X-111 —
+*Spec:* §2.23 *ngrok*: the authtoken pasted on stdin into the Keychain; the
+account's dev domain; the owner's `ngrok` agent run to the proxy socket,
+supervised; the free plan's warning page said in the chooser (and the plan
+refused, if R-3 rules so); the `ERR_NGROK_*` codes mapped to their sentences;
+revoke stops the job and deletes the token.
+*Files:* `packages/cli/src/remote/ngrok.ts`, `packages/cli/src/launchd.ts`,
+`packages/cli/test/remote-ngrok.test.ts`, `docs/ops/remote-access.md`.
+*Tests:* **105, 107 and 334 each map to their sentence; the token never appears
+in argv or a log; an upstream other than the proxy socket fails doctor**.
+*Accept:* §2.23's ngrok acceptance with the owner's ngrok account.
+
+**X-110 · The port-forwarding adapter** · L · deps X-105, X-111 —
+*Spec:* §2.23 *Port forwarding*: waits on the owner's dependency ruling (§2.23
+open question 1). PCP → NAT-PMP → UPnP-IGD with renewal; CGNAT and double NAT
+refused by name before mapping; an IPv6 pinhole where offered; a deSEC (or
+Cloudflare-zone) name kept current; ACME DNS-01 with ARI renewal; TLS served on
+the mapped port to the proxy socket; revoke deletes the mapping and its records;
+*reachable from outside* is reported as not checked, never `ok`.
+*Files:* `packages/cli/src/remote/port-forward/` (new: `mapping.ts`, `ddns.ts`,
+`acme.ts`, `index.ts`), `packages/cli/src/launchd.ts`,
+`docs/ops/remote-access.md`.
+*Tests:* **an external address in `100.64.0.0/10` or RFC 1918 space refuses
+before any mapping; a granted port different from the request becomes the
+origin's port; revoke sends lifetime 0; the outside-reachability row is never
+`ok`**; renewal fires in ARI's window on an injected clock.
+*Accept:* §2.23's port-forwarding acceptance on a NAT-PMP or UPnP router and one
+CGNAT line.
 
 #### W5 — Acceptance
 
@@ -4224,19 +4710,14 @@ item for everything else — GitHub pull request reviews, calendar invites and t
 like — with Needs You as a sidebar on Inbox. Designed after the UX build
 completes; no ticket (`decisions-log.md`, *Later*).
 
-**Remote access for the phone — research, not scheduled** (ruled 2026-09-28)**.**
-The website's step 1, *Let your phone reach your Mac*, is marked BEING DESIGNED,
-and Add a Phone (§2.22) refuses until the phone can open an HTTPS origin. An
-**opt-in relay** that gets a phone to the owner's Mac from anywhere is being
-researched in `docs/research/2026-09-28-reaching-your-mac-remotely.md`. The owner's
-constraints, which any design must meet: **opt-in** (off until the owner turns it
-on, from the Mac); **default-deny** (nothing reaches the console through it that
-the console would not already authenticate — invariant 8 still holds end to end);
-**near-free to run** — it carries signalling only and never pays for the owner's
-bandwidth; **serverless preferred** over a service someone must keep running. It is
-never the only way: an owner may instead use **Tailscale**, **port forwarding** on
-their router, or a **commercial tunnel**, and the phone guide (X-79) documents
-those without the relay. No ticket until the research is accepted.
+**Remote access for the phone — specified** (ruled 2026-09-28; re-ruled
+2026-09-30)**.** The 2026-09-28 item asked for research into an opt-in FSL relay.
+The owner rejected any FSL-hosted service — its cost grows with users, for a free
+app — and ruled for the owner's choice of provider instead (None, Tailscale,
+Cloudflare Tunnel, ngrok, port forwarding). It is no longer "after this
+program": §2.23 specifies it and X-103…X-111 are its candidates. The research
+is `docs/research/2026-09-28-reaching-your-mac-remotely.md` (revised
+2026-09-30), whose §6 records the rejected relay.
 
 **Also after this program:** the **token broker** (§2.6), built when Slack, Notion,
 Atlassian or another confidential-only provider is scheduled; **OAuth from the

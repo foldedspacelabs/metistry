@@ -3532,6 +3532,134 @@
       "file": "docs/product/tickets/x/x-79.md",
       "status": "todo"
     },
+    "X-103": {
+      "title": "The console's proxy listener — the local owner token never crosses a tunnel",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-103.md",
+      "status": "todo"
+    },
+    "X-104": {
+      "title": "Passkeys per origin — the rpID follows the request",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-104.md",
+      "status": "todo"
+    },
+    "X-105": {
+      "title": "`metistry remote` — the record, the adapter interface, and None",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "X-103",
+        "X-104"
+      ],
+      "file": "docs/product/tickets/x/x-105.md",
+      "status": "todo"
+    },
+    "X-106": {
+      "title": "The Tailscale adapter",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "X-105"
+      ],
+      "file": "docs/product/tickets/x/x-106.md",
+      "status": "todo"
+    },
+    "X-107": {
+      "title": "Settings ▸ Remote Access and the wizard's question",
+      "track": "X",
+      "wave": "candidate",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "X-105",
+        "X-106",
+        "X-77"
+      ],
+      "file": "docs/product/tickets/x/x-107.md",
+      "status": "todo"
+    },
+    "X-111": {
+      "title": "A console on the internet — rate limits and headers on the proxy listener",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "X-103"
+      ],
+      "file": "docs/product/tickets/x/x-111.md",
+      "status": "todo"
+    },
+    "X-108": {
+      "title": "The Cloudflare Tunnel adapter",
+      "track": "X",
+      "wave": "candidate",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "X-105",
+        "X-111"
+      ],
+      "file": "docs/product/tickets/x/x-108.md",
+      "status": "todo"
+    },
+    "X-109": {
+      "title": "The ngrok adapter",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "X-105",
+        "X-111"
+      ],
+      "file": "docs/product/tickets/x/x-109.md",
+      "status": "todo"
+    },
+    "X-110": {
+      "title": "The port-forwarding adapter",
+      "track": "X",
+      "wave": "candidate",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "X-105",
+        "X-111"
+      ],
+      "file": "docs/product/tickets/x/x-110.md",
+      "status": "todo"
+    },
     "X-1": {
       "title": "The document sweep",
       "track": "X",
@@ -3549,7 +3677,7 @@
     "tickets": 167,
     "agent_days": 487.5,
     "waves": 6,
-    "candidates": 74
+    "candidates": 83
   },
   "critical_path": {
     "days": 35,
@@ -3639,9 +3767,18 @@
       "X-76",
       "X-77",
       "X-78",
-      "X-79"
+      "X-79",
+      "X-103",
+      "X-104",
+      "X-105",
+      "X-106",
+      "X-107",
+      "X-108",
+      "X-109",
+      "X-110",
+      "X-111"
     ],
-    "count": 74,
-    "agent_days": 106.5
+    "count": 83,
+    "agent_days": 136.5
   }
 }

@@ -3767,6 +3767,39 @@
       "file": "docs/product/tickets/x/x-118.md",
       "status": "todo"
     },
+    "X-119": {
+      "title": "Device-only relay addresses — one label per phone",
+      "track": "X",
+      "wave": "candidate",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "X-75",
+        "X-77",
+        "X-104",
+        "X-116",
+        "X-117"
+      ],
+      "file": "docs/product/tickets/x/x-119.md",
+      "status": "todo"
+    },
+    "X-120": {
+      "title": "App Attest at relay registration — an extra layer",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "X-116",
+        "X-117"
+      ],
+      "file": "docs/product/tickets/x/x-120.md",
+      "status": "todo"
+    },
     "X-1": {
       "title": "The document sweep",
       "track": "X",
@@ -3784,7 +3817,7 @@
     "tickets": 167,
     "agent_days": 487.5,
     "waves": 6,
-    "candidates": 90
+    "candidates": 92
   },
   "critical_path": {
     "days": 35,
@@ -3890,9 +3923,11 @@
       "X-115",
       "X-116",
       "X-117",
-      "X-118"
+      "X-118",
+      "X-119",
+      "X-120"
     ],
-    "count": 90,
-    "agent_days": 158.5
+    "count": 92,
+    "agent_days": 166
   }
 }

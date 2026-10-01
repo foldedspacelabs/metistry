@@ -433,7 +433,7 @@ console cannot or must not do it (credentials, the machine, code that runs):
 | M17 | Models on this Mac | `metistry compute models install\|load\|unload` | this Mac's disk and memory |
 | M18 | The vault's git policy and rollback | `metistry vault settings`, `metistry vault rollback <commit\|--to date\|--file path>` (T10-2, T10-6) | the repository's history and its remote; a rollback still waits for Approve in Needs You |
 | M19 | Add a phone: mint a passkey enrolment code | `metistry enroll [--json]`, `metistry enroll --cancel <id>` (X-75; §2.22) *(ruled 2026-09-28)* | a first credential for a new device; shell access to this Mac is its root of trust (plan §4.2), so no HTTP route mints one |
-| M20 | Remote access: the provider the phone reaches this Mac through | `metistry remote [status]\|set\|authorize\|test\|off` (X-105…X-118; §2.23, §2.24) *(ruled 2026-09-30)* | the provider's credentials live in the login Keychain, and it decides what is exposed to the internet |
+| M20 | Remote access: the provider the phone reaches this Mac through | `metistry remote [status]\|set\|authorize\|test\|off` (X-105…X-120; §2.23, §2.24) *(ruled 2026-09-30)* | the provider's credentials live in the login Keychain, and it decides what is exposed to the internet |
 
 **Device-local, no CLI and no API:** global hot keys, the capture bar's placement
 and window preferences, the login item, reading TCC state, the instance chooser
@@ -935,6 +935,7 @@ lands it in `CLAUDE.md` and in `metistry-build-plan.md` §1, which is kept in sy
 | 0038 | `passkey_revocation.sql` | `passkeys.revoked_at timestamptz` — a removed device's passkey never signs in again (§2.22) *(ruled 2026-09-28)* | durable, like `auth_sessions.revoked_at` | X-76 |
 | 0039 | `passkey_rp_id.sql` | `passkeys.rp_id text` — the host a passkey was created for; null reads as the first origin's host (§2.23) *(ruled 2026-09-30)* | durable | X-104 |
 | 0040 | `enrollment_opened.sql` | `auth_enrollment_codes.opened_at timestamptz`, `opened_via text` — the phone reached the Mac with this code, and through which listener (§2.23) *(ruled 2026-09-30)* | durable, like `used_at` | X-114 |
+| 0041 | `relay_device_labels.sql` | `relay_labels (label, code_id, passkey_id, state, created_at, revoked_at)` — each phone's relay address, pending until its passkey exists (§2.24) *(ruled 2026-09-30)* | durable | X-119 |
 
 **No migration needed:** `inbox.source = 'app'` (no CHECK); `runs.kind` values
 `connection_call`, `route`, `config_write`, `access_ceiling`; `runs.meta.outcome`;
@@ -1866,6 +1867,12 @@ code; the research's §7):
   unprivileged with `--tun=userspace-networking`, serving Funnel to the proxy
   port, beside an installed Tailscale app; `GET /api/events` (SSE) held open through
   Funnel; and the binary sizes the packs add.
+- **R-7** (X-115): the Metistry Relay PoC (§2.24).
+- **R-8** (X-120): whether Apple App Attest (`DCAppAttestService`) works for a
+  Developer ID–signed macOS app distributed outside the App Store.
+- **R-9** (X-116, X-119): per-instance `*.<id>.u.metistry.app` records on Route
+  53 — wildcard synthesis beside `_acme-challenge` TXT records, and the zone's
+  record quota.
 
 **Open for the owner.**
 
@@ -1896,8 +1903,8 @@ rendezvous, an uncapped SNI relay, FSL-paid TURN) stay rejected. The research is
 
 **What the owner gets.** A seventh choice, **Metistry Relay**, after Tailscale
 Funnel: *"No account needed. Metistry's relay passes your encrypted traffic
-through; it can't read it. 5 GB a month."* The origin is
-`https://<id>.u.metistry.app`; the phone needs nothing. Off until the owner turns
+through; it can't read it. 5 GB a month."* Each phone gets its own address,
+`https://<label>.<id>.u.metistry.app` (below); the phone needs nothing else. Off until the owner turns
 it on, from the Mac.
 
 **Data plane — one Lightsail instance.** A $7/month Lightsail Linux bundle
@@ -1908,8 +1915,9 @@ terminates TLS**. The component — frp's `https` vhost mode with `frpc` on the
 Mac, or HAProxy `ssl_preread` with a reverse-tunnel client — is the PoC's
 decision (X-115). The Mac holds the tunnel **outbound** (so CGNAT does not
 matter) with its bundled client (an X-112 pack), and terminates TLS itself, in
-front of the proxy listener, with its own Let's Encrypt certificate for
-`<id>.u.metistry.app`. DNS: `*.u.metistry.app` → the relay's static IP in the
+front of the proxy listener, with its own Let's Encrypt wildcard certificate
+for `*.<id>.u.metistry.app`. DNS: a per-instance `*.<id>.u.metistry.app` record →
+the relay's static IP (below, *Keeping the relay Metistry-only*), in the
 existing Route 53 zone `metistry.app` (`Z03790842KLR6UEFALDPY`); the apex and
 `www` keep redirecting to metistry.ai.
 
@@ -1926,8 +1934,11 @@ DynamoDB, defined in CDK:
   TXT records, only for the authenticated id, then removes them. Whether it
   speaks the acme-dns update API so an off-the-shelf ACME client can use it is a
   PoC decision.
+- **Device labels**: register, activate and revoke each phone's label (at most
+  10 per instance); the relay forwards only active ones.
 - **Revoke and kill switch**: the owner revokes from the Mac; FSL disables an id
-  (abuse) — the relay then forwards nothing for that name.
+  (abuse) — the relay then forwards nothing for that name, and its DNS record is
+  deleted.
 
 Where the CDK lives — `foldedspacelabs/metistry-website`'s infra or a new repo
 — is open. The relay never needs the product repo's code.
@@ -2005,6 +2016,82 @@ answering"* when it is down. FSL operates a service. CloudFront's flat-rate
 plans were considered and rejected: CloudFront must terminate TLS, so FSL would
 see the traffic.
 
+**Keeping the relay Metistry-only** *(ruled 2026-09-30)*. With end-to-end
+encryption and the owner in control of the Mac, nothing can **prove** that only
+Metistry is served at an owner's name — the relay never sees the content. The
+owner accepted that and approved four layers that make anything else
+impractical, visible and revocable:
+
+1. **Device-only addresses — the primary control (X-119).** Each phone paired by
+   Add a Phone gets its own unguessable label: `https://<label>.<id>.u.metistry.app`.
+   The Mac registers the label with the control plane; the relay forwards **only
+   registered, active labels** (by SNI — it still never decrypts); the bare
+   `<id>.u.metistry.app` and every unknown label are refused, so there is **no
+   public front door** to share. At most 10 labels per instance. **Remove** in
+   Settings ▸ Devices (§2.22) revokes the label at the relay as well as the
+   passkey. Knock-on effects, each part of X-119:
+   - **Certificate.** The Mac holds one wildcard, `*.<id>.u.metistry.app`. Its
+     DNS-01 challenge is still `_acme-challenge.<id>.u.metistry.app`, so the
+     helper's scope does not change — and Certificate Transparency logs show only
+     the wildcard, never a device's label.
+   - **DNS.** A global `*.u.metistry.app` wildcard stops matching
+     `<label>.<id>.u.metistry.app` whenever `_acme-challenge.<id>.u.metistry.app`
+     exists: the TXT record makes `<id>.u.metistry.app` an empty non-terminal, and
+     a wildcard is only synthesised below the closest existing name (RFC 4592).
+     So the control plane creates a **per-instance** `*.<id>.u.metistry.app`
+     record at registration and deletes it on revoke — which also makes a killed
+     instance NXDOMAIN. Route 53's per-zone record quota (10,000 by default,
+     adjustable) is the ceiling to watch (R-9).
+   - **Enrolment.** `metistry enroll` with the relay chosen mints the code
+     **and** registers a pending label first; the QR's URL is
+     `https://<label>.<id>.u.metistry.app/#enroll=<code>`; the label turns active
+     when the passkey is created, and is released if the code is cancelled or
+     expires unused. *Opened on your phone* (X-114) works unchanged.
+   - **Passkeys.** The rpID for every label host is **`<id>.u.metistry.app`**,
+     so one owner's passkey (synced by iCloud Keychain, say) works at any of the
+     owner's labels. This is allowed: WebAuthn requires the rpID to be a
+     registrable domain suffix of, or equal to, the origin's host, and HTML's
+     algorithm refuses a suffix only if it **is** a public suffix or sits inside
+     the host's public suffix. With **`u.metistry.app`** on the PSL,
+     `<id>.u.metistry.app` is a registrable domain, not a public suffix, and
+     `.<id>.u.metistry.app` does not fall inside `u.metistry.app` — so it passes
+     (checked 2026-09-30). It passes before the PSL entry lands, too (the
+     registrable domain is then `metistry.app`). **The PSL entry must be the
+     plain `u.metistry.app`, never the wildcard rule `*.u.metistry.app`** — that
+     would make every `<id>.u.metistry.app` a public suffix itself, break the
+     shared rpID, and push Let's Encrypt's limit down to each label. X-104's
+     per-request rpID therefore maps a relay label host to its instance's
+     `<id>.u.metistry.app`, not to the host itself.
+   - **Origins.** `METISTRY_ORIGIN` keeps the loopback origin; the relay's
+     allowed origins are the **registered labels**, read per request from the
+     console's label table (migration `0041`), so a label revoked on the Mac stops
+     passing the ceremony's origin check at once.
+   - **Isolation.** Each label is its own origin under `<id>.u.metistry.app`, so
+     cookies, storage and service workers are per device — fine for a phone that
+     only ever opens its own label.
+   - **What a label is not.** It travels in the clear in SNI (until ECH), so it
+     is a gate against strangers and link sharing, not a credential; the passkey
+     is still the door.
+2. **Behaviour limits at the relay, without decrypting (X-115).** Per instance:
+   distinct client IP addresses per day (about 15), concurrent connections, the
+   bandwidth allowance, and a **probation period** with tighter limits for a new
+   instance. The numbers come from the PoC.
+3. **A genuine-app gate (X-117, X-120).** The relay client ships in the signed
+   app and is **hard-wired to the console's proxy listener** (X-103) — there is
+   no setting that points it anywhere else. Registration can additionally require
+   **Apple App Attest** (X-120) — an extra layer, never a dependency, and only if
+   R-8 shows App Attest works for a Developer ID app outside the App Store.
+   Without it, "forks and source builds can't use the FSL relay" is a term of use,
+   not an enforcement — they can use every other provider.
+4. **The console's surface, and detection (X-111, X-116).** Through the proxy
+   listener, the routes that answer without a session are exactly the sign-in
+   and enrolment bootstrap — the PWA shell's static files, `GET /health`, `GET
+   /api/identity` and the four passkey ceremony routes — and **there are no public
+   share links**; a test enumerates both. FSL watches Certificate Transparency
+   for `*.u.metistry.app` issuance it did not expect, publishes an abuse contact
+   and relay **terms of use** (Metistry only), keeps the per-instance kill
+   switch, and relies on the PSL entry for isolation between owners.
+
 **In the product.** Provider id `relay`; `metistry remote set relay` registers,
 fetches the client pack, obtains the certificate through the helper, starts the
 tunnel and the TLS terminator as supervised jobs, and records the origin; the
@@ -2025,11 +2112,16 @@ SSE stable — or the owner revisits the cap before launch.
 guided flow and reaches *Opened on your phone* on cellular; FSL's console
 cannot decrypt a captured session (only the Mac holds the key); a host at its
 cap is refused and the pane names the reset date; the global cap holds the
-month's bill at the bundle's price; a revoked or killed id gets no traffic.
+month's bill at the bundle's price; a revoked or killed id gets no traffic; the
+bare `<id>.u.metistry.app` and an unregistered label are refused at the relay; a
+removed phone's label stops resolving to anything that answers; and through the
+proxy listener nothing but the sign-in and enrolment bootstrap answers without a
+session, with no public share links.
 
 **Open for the owner.** Where the CDK lives; the PoC's relay component; the
-per-host cap and throttle numbers after the PoC; and when to submit the PSL
-entry for `u.metistry.app` (X-118 — permanent).
+per-host cap, throttle and behaviour-limit numbers after the PoC; when to submit
+the PSL entry for `u.metistry.app` (X-118 — permanent); and whether to require
+App Attest at registration if R-8 shows it works.
 
 ---
 
@@ -2110,7 +2202,7 @@ agent's pass, per the PR close rule; the owner reviews at checkpoints.
 | W3 | T2-12, T2-13 · T3-8, T3-10, T3-11 · T4-9, T4-12 → T4-13, T4-19, T4-22, T4-23, T4-25, T4-26 · T6-4…T6-11 · T7-4, T7-5 · T8-2a → T8-2b, T8-6 · T9-3 · T10-7 · X-6…X-23 |
 | W4 | X-24, X-29, X-31, X-32, X-41 (CI stability, dispatched first — owner 2026-09-30) · T4-10 → T4-11, T4-14; T4-15 → T4-17 · T6-12, T6-13a, T6-13b, T6-14, T6-15, T6-16 · T7-6 · T8-3, T8-4, T8-5, T8-7 · T9-4 (merges after the eval clears its bar) |
 | W5 | X-1 |
-| Candidates | X-25…X-28, X-30, X-33…X-40, X-42…X-74, X-80…X-102 — specified, not scheduled; the owner assigns each a wave at a checkpoint (W3 housekeeping; five CI-stability candidates went to W4 on 2026-09-30; X-80…X-102 added at W4 housekeeping) · X-75…X-79 — Add a Phone (§2.22), ruled 2026-09-28, not yet scheduled · X-103…X-118 — Remote access (§2.23, §2.24), ruled 2026-09-30, not yet scheduled |
+| Candidates | X-25…X-28, X-30, X-33…X-40, X-42…X-74, X-80…X-102 — specified, not scheduled; the owner assigns each a wave at a checkpoint (W3 housekeeping; five CI-stability candidates went to W4 on 2026-09-30; X-80…X-102 added at W4 housekeeping) · X-75…X-79 — Add a Phone (§2.22), ruled 2026-09-28, not yet scheduled · X-103…X-120 — Remote access (§2.23, §2.24), ruled 2026-09-30, not yet scheduled |
 
 ### 3.3 The tickets
 
@@ -4425,7 +4517,7 @@ and a passkey the owner can remove; the owner ruled to build it rather than cut 
 from the site. **Every ticket here builds §2.22** — read it whole; it holds the
 refusal wording, the sheet's states and the acceptance. None is in a wave: §3.2's
 *Candidates* row holds them until the owner schedules them. Reaching the Mac from
-outside the home is **not** here: it is §2.23–§2.24 and X-103…X-118, below.
+outside the home is **not** here: it is §2.23–§2.24 and X-103…X-120, below.
 
 **X-75 · `metistry enroll` — an enrolment code minted on this Mac** · M —
 *Spec:* §2.22 *Minting* and *When `METISTRY_ORIGIN` is not reachable*: the M19
@@ -4513,7 +4605,7 @@ refusals and the acceptance per provider. X-103 and X-104 are bugs whatever the
 owner picks and **block every provider**; X-111 blocks every internet-facing one,
 Funnel included. None is in a wave: §3.2's *Candidates* row holds them until the
 owner schedules them. §2.23's recommended order is X-103, X-104, X-111 → X-105,
-X-112, X-106, X-107, X-114 → X-115, X-116, X-117 (with X-118) → X-108 → X-113 → X-109 → X-110.
+X-112, X-106, X-107, X-114 → X-115, X-116, X-117, X-119 (with X-118, X-120) → X-108 → X-113 → X-109 → X-110.
 
 **X-103 · The console's proxy listener — the local owner token never crosses a tunnel** · M —
 *Spec:* §2.23 *Two fixes*, 1: a second console listener for proxies only — a
@@ -4632,7 +4724,9 @@ reads any forwarded header.
 `apps/console/src/rate-limit.ts`, `docs/ops/auth.md`.
 *Tests:* **a forwarded-address header on the main listener changes nothing; a
 burst past the limit is refused with 429 and audited once; no header can raise
-a principal**; the main listener's behaviour is unchanged.
+a principal; through the proxy listener, the routes answering without a session
+are exactly the shell's static files, `GET /health`, `GET /api/identity` and the
+four passkey ceremony routes, and no route serves a public share link**; the main listener's behaviour is unchanged.
 *Accept:* —
 
 **X-108 · The Cloudflare Tunnel adapter** · L · deps X-105, X-111, X-112 —
@@ -4740,14 +4834,19 @@ phone* before *Added*.
 *Spec:* §2.24 *Data plane* and *PoC first*: one $7 Lightsail instance with a
 static IP; the SNI-routing TLS-passthrough relay (frp `https` vhost or HAProxy
 `ssl_preread` + a reverse-tunnel client — **decided by the PoC**); forwarding
-only registered, active ids; per-id byte counters, the 5 GB monthly cap, the
-~2 Mbps throttle and the ~0.9 TB global cap enforced at the relay; snapshots and
+only registered, active **device labels** (the bare `<id>.u.metistry.app` and
+unknown labels refused, by SNI); per-id byte counters, the 5 GB monthly cap, the
+~2 Mbps throttle and the ~0.9 TB global cap enforced at the relay; per-instance
+limits on distinct client IPs per day (about 15) and concurrent connections, and
+tighter limits during a new instance's probation — numbers from the PoC; snapshots and
 a scripted rebuild. The PoC runs a month with two FSL instances and reports the
 §2.24 gate before the instance is offered to anyone else.
 *Files:* the relay's infrastructure repo (open: `metistry-website`'s infra or a
 new repo); `docs/ops/metistry-relay.md` here (what it is, what FSL sees, the
 caps).
-*Tests:* **an unregistered SNI is refused without a byte forwarded; a TLS
+*Tests:* **an unregistered SNI, the bare instance name and an unknown label are
+each refused without a byte forwarded; the distinct-IP limit refuses the 16th
+address of the day; a TLS
 session through the relay cannot be decrypted with anything on the relay; an
 id past its cap is refused; the global cap refuses everyone**.
 *Accept:* the PoC report — bytes per owner, SSE through the relay, reconnect
@@ -4757,6 +4856,11 @@ after sleep — and the owner's go.
 *Spec:* §2.24 *Control plane* and *Cost guards*: CDK in FSL's AWS account —
 API Gateway HTTP API + Lambda + DynamoDB — for register (an opaque id and a
 hashed, revocable relay token), usage, revoke and the per-id kill switch;
+device labels (register pending, activate, revoke; at most 10 per instance);
+a per-instance `*.<id>.u.metistry.app` record created at registration and deleted
+on revoke or kill (no global wildcard — R-9); Certificate Transparency monitoring
+for unexpected `*.u.metistry.app` issuance; the relay's terms of use (Metistry
+only) and abuse contact;
 per-day registration limits; the ACME DNS-01 helper writing only
 `_acme-challenge.<id>.u.metistry.app` in zone `Z03790842KLR6UEFALDPY` for the
 authenticated id (the `u.` label, never directly under `metistry.app`); the
@@ -4764,7 +4868,8 @@ authenticated id (the `u.` label, never directly under `metistry.app`); the
 explanatory page is the website infra's follow-up); an AWS Budgets alert at $10 and the optional stop Lambda; registrations
 capped at about 40 a week until X-118's PSL entry lands.
 *Files:* the relay's infrastructure repo; `docs/ops/metistry-relay.md`.
-*Tests:* **the helper refuses a name that is not the caller's id; a revoked token
+*Tests:* **the helper refuses a name that is not the caller's id; an 11th label
+is refused; a killed instance's name stops resolving; a revoked token
 registers, renews and reads nothing; the IAM policy grants Route 53 changes only
 on `_acme-challenge.*.u.metistry.app` TXT records**; the registration limits hold.
 *Accept:* `cdk diff` reviewed by the owner; the budget alert fires on a test
@@ -4772,8 +4877,9 @@ threshold.
 
 **X-117 · The Metistry Relay adapter — client, certificate, allowance** · M · deps X-105, X-111, X-112, X-116 —
 *Spec:* §2.24 *In the product*: provider id `relay` in `packages/cli/src/remote/`;
-register (opt-in, the token on the Keychain), the client from its X-112 pack, a
-Let's Encrypt certificate through the helper, the TLS terminator in front of the
+register (opt-in, the token on the Keychain), the client from its X-112 pack —
+**hard-wired to the proxy listener, with no setting to point it elsewhere** — a
+Let's Encrypt wildcard certificate for `*.<id>.u.metistry.app` through the helper, the TLS terminator in front of the
 proxy listener and the tunnel as supervised jobs; the rows *registered*,
 *tunnel connected*, *certificate expiry* and **allowance** (`degraded` at 80%,
 `failed` at the cap, the reset date and **Switch to Tailscale Funnel**); revoke
@@ -4781,7 +4887,8 @@ deletes the registration, the certificate and the jobs. Shares the TLS
 terminator and ACME client with X-110, behind the same dependency ruling.
 *Files:* `packages/cli/src/remote/relay.ts`, `packages/cli/src/launchd.ts`,
 `packages/cli/test/remote-relay.test.ts`, `docs/ops/remote-access.md`.
-*Tests:* **the private key never leaves the Mac; the allowance row reads the
+*Tests:* **the private key never leaves the Mac; the client's upstream is the
+proxy listener and no configuration changes it; the allowance row reads the
 reset date from usage, not the clock alone; at the cap the pane offers Funnel;
 the token never appears in argv or a log**.
 *Accept:* §2.24's acceptance on a real iPhone on cellular.
@@ -4798,7 +4905,45 @@ FSL's; an abuse link) is filed with it as a metistry-website follow-up. **Perman
 registration cap holds.
 *Files:* `docs/ops/metistry-relay.md` (the status of the entry).
 *Tests:* —
-*Accept:* the entry merged upstream and shipped in a browser release.
+*Accept:* the entry merged upstream and shipped in a browser release; the entry
+is the plain rule `u.metistry.app`, **never** `*.u.metistry.app` (which would
+break the shared passkey rpID of §2.24's device labels).
+
+**X-119 · Device-only relay addresses — one label per phone** · L · deps X-75, X-77, X-104, X-116, X-117 —
+*Spec:* §2.24 *Keeping the relay Metistry-only*, 1: migration `0041`
+(`relay_labels`); `metistry enroll` with the relay chosen registers a pending
+label with the control plane before minting, and its URL is
+`https://<label>.<id>.u.metistry.app/#enroll=<code>`; the label turns active
+when the passkey is created and is released on cancel or expiry; **Remove** in
+Settings ▸ Devices revokes the label at the relay with the passkey; at most 10;
+X-104's per-request rpID maps every label host to `<id>.u.metistry.app`; the
+relay's allowed origins are the active labels, read per request.
+*Files:* `db/migrations/0041_relay_device_labels.sql`, `apps/console/src/webauthn.ts`,
+`apps/console/src/server.ts`, `apps/console/src/auth-store.ts`,
+`packages/cli/src/enroll.ts`, `packages/cli/src/remote/relay.ts`,
+`apps/macos/sources/kit/add-phone-sheet.swift`, the Devices pane,
+`docs/ops/auth.md`, `docs/ops/client-api.md`.
+*Tests:* U2; **a passkey created at one label signs in at another of the same
+instance and is refused at another instance's; a revoked label fails the origin
+check; a cancelled code releases its label; the QR's host is the new label**;
+an 11th device is refused by name.
+*Accept:* U4's rollback note; two real iPhones, each on its own label, one
+passkey synced between them signing in at both; removing one phone kills only
+its address.
+
+**X-120 · App Attest at relay registration — an extra layer** · M · deps X-116, X-117 —
+*Spec:* §2.24 *Keeping the relay Metistry-only*, 3: waits on R-8. If App Attest
+works for a Developer ID app, the Mac app attests a key with
+`DCAppAttestService` and the control plane verifies the attestation before
+issuing a relay token; a failure to attest is refused by name. If R-8 fails,
+this ticket is closed with the finding and the gate stays the terms of use.
+Never a dependency of X-117: the relay works without it.
+*Files:* `apps/macos/sources/kit/relay-attest.swift`, the relay's
+infrastructure repo, `docs/ops/metistry-relay.md`.
+*Tests:* **an unattested registration is refused when attestation is required;
+the relay works with attestation turned off**.
+*Accept:* R-8's finding recorded, and, if positive, a signed build registers and
+a source build is refused.
 
 #### W5 — Acceptance
 
@@ -4999,7 +5144,7 @@ The owner rejected an uncapped FSL-hosted service — its cost grows with users,
 for a free app — and ruled for the owner's choice of provider instead (None,
 Tailscale, Cloudflare Tunnel, zrok, ngrok, port forwarding), plus one opt-in,
 capped FSL relay on AWS (§2.24). It is no longer "after this
-program": §2.23 and §2.24 specify it and X-103…X-118 are its candidates. The research
+program": §2.23 and §2.24 specify it and X-103…X-120 are its candidates. The research
 is `docs/research/2026-09-28-reaching-your-mac-remotely.md` (revised
 2026-09-30): §3.9 is the capped relay, §6 the rejected designs.
 

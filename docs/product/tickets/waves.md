@@ -201,7 +201,7 @@ Generated from `docs/product/design-build-plan.md` by `ops/scripts/tickets.mjs`.
 
 - [ ] **W5 checkpoint** — merged, main green, scratch-instance upgrade, conformance test, Mac smoke, release
 
-## W4 candidates — 90 tickets, 158.5 agent-days, no wave yet
+## W4 candidates — 92 tickets, 166 agent-days, no wave yet
 
 Follow-ups specified in the plan (§3.2's *Candidates* row) that nobody has scheduled. The owner assigns each one a wave at a checkpoint; until then none is dispatched.
 
@@ -295,3 +295,5 @@ Follow-ups specified in the plan (§3.2's *Candidates* row) that nobody has sche
 - [ ] [X-116](x/x-116.md) · Metistry Relay control plane — CDK, Lambda, DynamoDB, the ACME helper · L · opus high · after X-115
 - [ ] [X-117](x/x-117.md) · The Metistry Relay adapter — client, certificate, allowance · M · opus · after X-105, X-111, X-112, X-116
 - [ ] [X-118](x/x-118.md) · `u.metistry.app` on the Public Suffix List · S · sonnet
+- [ ] [X-119](x/x-119.md) · Device-only relay addresses — one label per phone · L · opus high · after X-75, X-77, X-104, X-116, X-117
+- [ ] [X-120](x/x-120.md) · App Attest at relay registration — an extra layer · M · opus · after X-116, X-117

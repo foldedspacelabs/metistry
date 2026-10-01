@@ -514,6 +514,19 @@ forwarding and the relay.
 | 18 | PSL entry | For **`u.metistry.app`**, not the apex: each `<id>.u.metistry.app` is its own registrable domain, which still gives each owner Let's Encrypt's 50-certificates-a-week limit. | X-118 |
 | 19 | Disclosure | A plain page at `metistry.app` (and `u.metistry.app`) says owner names are run by owners, not FSL, with an abuse link — replacing the apex's 301 to metistry.ai **when the relay ships**, as a metistry-website infra follow-up. No banner can be injected: the traffic is end-to-end encrypted, by design. | plan §2.24 |
 
+### Fourth follow-up, 2026-09-30 — keeping the relay Metistry-only
+
+The owner asked how to ensure only Metistry is served at `<id>.u.metistry.app`,
+accepted that it cannot be proven cryptographically (the traffic is end to end
+and the owner controls the Mac), and approved a layered design.
+
+| # | Item | Ruling | Where it lands |
+| --- | --- | --- | --- |
+| 20 | Device-only addresses — the primary control | Each phone gets its own unguessable label, `<label>.<id>.u.metistry.app`, registered by the Mac; the relay forwards only registered labels and refuses the bare name; at most 10 per instance; Remove in Devices revokes it. One wildcard certificate per Mac; the passkey rpID is `<id>.u.metistry.app` for all labels (checked against HTML's registrable-suffix rule; needs the PSL rule to be plain `u.metistry.app`, never `*.u.metistry.app`); per-instance DNS records, because a global wildcard stops matching beside the ACME TXT record. | plan §2.24; X-119, X-116, X-117 |
+| 21 | Behaviour limits at the relay | Distinct client IPs per day, concurrent connections, the bandwidth allowance and a probation period for new instances — numbers from the PoC. | X-115 |
+| 22 | Genuine-app gate | The relay client is bundled and hard-wired to the proxy listener; App Attest at registration is an extra layer if it works for a Developer ID app (R-8), never a dependency; forks and source builds use the other providers. | X-117, X-120 |
+| 23 | Surface and detection | Through the proxy listener only the sign-in and enrolment bootstrap answers without a session; no public share links; CT monitoring, an abuse contact, terms of use (Metistry only), a per-instance kill switch, PSL isolation. | X-111, X-116 |
+
 ## Rulings the owner must make
 
 (a), (b) and (c) were ruled in W1 — see *Rulings made by the owner in W1* above.

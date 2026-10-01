@@ -717,6 +717,55 @@ Folded Space Labs, with an abuse report link. Today the apex 301s to
 metistry.ai; changing that is a follow-up for the metistry-website infra when
 the relay ships.
 
+**Keeping the relay Metistry-only** (ruled 2026-09-30). Nothing can prove only
+Metistry is served at an owner's name: the traffic is end to end and the owner
+controls the Mac. Four layers make anything else impractical, visible and
+revocable (plan §2.24):
+
+1. **Device-only addresses.** Each phone paired by Add a Phone gets an
+   unguessable label, `https://<label>.<id>.u.metistry.app`; the relay forwards
+   only registered labels (by SNI) and refuses the bare `<id>.u.metistry.app`, so
+   there is no public front door. At most 10 per instance; removing a phone
+   revokes its label. What it took to check:
+   - **The passkey rpID still works across an owner's devices.** WebAuthn needs
+     the rpID to be a registrable domain suffix of, or equal to, the origin's
+     host. HTML's algorithm rejects a suffix only when it "equals hostSuffix's
+     public suffix" or sits inside the host's public suffix (HTML Standard,
+     checked 2026-09-30). With the PSL rule `u.metistry.app`, the rpID
+     `<id>.u.metistry.app` is a registrable domain and lies outside the public
+     suffix of `<label>.<id>.u.metistry.app`, so it is accepted — and it is
+     accepted before the entry lands, too. **The PSL rule must not be the
+     wildcard `*.u.metistry.app`**: that would make `<id>.u.metistry.app` a public
+     suffix, which breaks the shared rpID and moves Let's Encrypt's limit to
+     each label.
+   - **DNS.** A global `*.u.metistry.app` wildcard does not answer for
+     `<label>.<id>.u.metistry.app` while `_acme-challenge.<id>.u.metistry.app`
+     exists — that name makes `<id>.u.metistry.app` an empty non-terminal, and
+     RFC 4592 synthesises a wildcard only below the closest existing name. So
+     each instance gets its own `*.<id>.u.metistry.app` record, created at
+     registration and deleted on revoke. Route 53's default quota is 10,000
+     records per hosted zone (adjustable) — about 9,000 instances with their TXT
+     records, more than one box carries.
+   - **Certificates.** One wildcard per Mac, `*.<id>.u.metistry.app`, validated
+     at `_acme-challenge.<id>.u.metistry.app` (RFC 8555 validates a wildcard at
+     its base name), so the helper's scope is unchanged and CT logs never show a
+     device's label.
+   - **Enrolment** registers the label before showing the QR, whose host is that
+     label; a label is not a credential (SNI is visible on the path until ECH) —
+     the passkey still is.
+2. **Behaviour limits at the relay**, without decrypting: distinct client IPs
+   per day (about 15), concurrent connections, the bandwidth allowance, and a
+   probation period for new instances — the numbers from the PoC.
+3. **A genuine-app gate.** The relay client is bundled in the signed app and
+   hard-wired to the proxy listener; registration can also require Apple App
+   Attest, if it works for a Developer ID app (R-8). Without that, keeping forks
+   off the relay is a term of use, not an enforcement.
+4. **The console's surface, and detection.** Through the proxy listener, only
+   the sign-in and enrolment bootstrap answers without a session, and there are
+   no public share links. FSL monitors Certificate Transparency for
+   `*.u.metistry.app`, publishes an abuse contact and terms of use, and keeps a
+   per-instance kill switch; the PSL entry isolates owners.
+
 **What FSL sees:** SNI hostnames (opaque ids), IP addresses, timing and volume —
 never content. Each id's certificate appears in Certificate Transparency logs,
 which is why the id is opaque and never `instance_id`.
@@ -861,8 +910,13 @@ Numbered as plan §2.23's R-list.
    open through Funnel; node key expiry's effect on Funnel; pack sizes.
 7. **R-7 Metistry Relay PoC:** relayed bytes per owner per month, SSE through
    the relay, reconnect after sleep, the throttle's effect, and the relay
-   component (frp vs HAProxy + a tunnel client).
-8. **Signing:** `codesign -dv` on each upstream binary before the first pack, and
+   component (frp vs HAProxy + a tunnel client), and the behaviour-limit
+   numbers (distinct IPs per day, concurrent connections, probation).
+8. **R-8 App Attest:** whether `DCAppAttestService` attests a Developer
+   ID–signed macOS app distributed outside the App Store.
+9. **R-9 Route 53:** wildcard synthesis for `*.<id>.u.metistry.app` beside an
+   `_acme-challenge` TXT record, and the zone's record quota.
+10. **Signing:** `codesign -dv` on each upstream binary before the first pack, and
    that the re-signed `cloudflared`, `tailscaled` and zrok run under the hardened
    runtime with no entitlements.
 
@@ -886,6 +940,9 @@ Name only the providers that have shipped at the time.
 - Lightsail pricing (bundles, static IP, both directions count, overage) — <https://aws.amazon.com/lightsail/pricing/>
 - Let's Encrypt rate limits (50 per registered domain per 7 days; the PSL) — <https://letsencrypt.org/docs/rate-limits/>
 - Public Suffix List guidelines (private-section requests) — <https://github.com/publicsuffix/list/wiki/Guidelines>
+- HTML Standard, "is a registrable domain suffix of or is equal to" — <https://html.spec.whatwg.org/multipage/browsers.html#is-a-registrable-domain-suffix-of-or-is-equal-to>; WebAuthn RP ID — <https://www.w3.org/TR/webauthn-3/#rp-id>
+- RFC 4592, wildcards and the closest encloser — <https://www.rfc-editor.org/rfc/rfc4592>; RFC 8555 §8.4 (wildcard validation at the base name) — <https://www.rfc-editor.org/rfc/rfc8555#section-8.4>
+- Apple App Attest — <https://developer.apple.com/documentation/devicecheck/dcappattestservice>
 - CA/Browser Forum Baseline Requirements (§4.9.1.1, key-compromise revocation within 24 hours; the fetched page did not include §4.9) — <https://cabforum.org/working-groups/server/baseline-requirements/requirements/>; secondary summaries — <https://www.digicert.com/blog/a-guide-to-tls-certificate-revocations>, <https://www.ssl.com/faqs/compromised-private-keys/>
 
 **Fetched 2026-09-30, follow-up** (§3.2 Funnel and the node, §3.4 zrok, §3.5, §3.7):

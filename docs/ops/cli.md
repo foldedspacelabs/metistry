@@ -12,7 +12,7 @@ All of them are real.
 | `init <dir>` | create a private instance repo, asking once whether to keep this Mac awake (`--keep-awake <value>` answers it without a terminal) |
 | `connect-repo <url>` | point the instance repo at a remote, mint credentials the reconciler can push with |
 | `secrets sync\|mint\|list [--json]` | move secrets between the Keychain and `.env` |
-| `secrets set\|replace\|remove\|hosts\|grant <name>` | owner-named secrets, per instance: the value on stdin into the Keychain, the policy into `.metistry/secrets.yaml` |
+| `secrets set\|replace\|remove\|hosts\|grant <name>` | owner-named secrets, per instance: the value on stdin — piped, or typed hidden at a prompt when run in a terminal — into the Keychain, the policy into `.metistry/secrets.yaml` |
 | `secrets list --named [--json]` | the owner-named secrets: names, hosts, grants, presence — never a value |
 | `secrets retire-legacy-env [--yes]` | move what only the product checkout's `.env` still has into the instance's, then delete it |
 | `connect <tool> [--rotate]` | give one external dev tool (Cursor, OpenCode, Devin, Claude Code) its own agent token and config |
@@ -1494,6 +1494,12 @@ metistry secrets remove github_write --yes
 metistry secrets list --named [--json]
 ```
 
+`set` and `replace` read the value from stdin either way — piped, as above,
+or typed hidden at a prompt when the command is run directly in a terminal
+with nothing piped in. A shell's own masked read works too, if you would
+rather not type into the CLI's prompt: `read -rs TOKEN && printf %s "$TOKEN" |
+metistry secrets set github_write --hosts api.github.com`.
+
 Every verb takes `--instance <dir>` (default: the resolved instance).
 
 **Per instance only** (the owner's ruling Q3, 2026-09-26: "no bleed between
@@ -1512,6 +1518,15 @@ with `security add-generic-password -w` on the child's stdin, then read back:
 a value the Keychain did not keep whole is removed and refused. Empty values
 and values with a newline are refused. It is never printed, never written to
 `secrets.yaml`, never in a result (`--json` prints names).
+
+Piped stdin is read whole, to EOF, exactly as every other verb above reads
+it. Run directly in a terminal with nothing piped in, stdin never reaches
+EOF on its own — so `set`/`replace` instead prompt on stderr (`Paste the
+value for <name> and press Enter (input is hidden):`) and read one line with
+the terminal's echo off, the same way a password prompt does: backspace
+edits it, Ctrl-C restores the terminal and exits (130, "cancelled"), and
+Ctrl-D on an empty line is an empty value. Nothing typed is ever echoed, to
+the screen or anywhere else.
 
 **The policy** goes into `.metistry/secrets.yaml`, a §4.7 protected path,
 through the reconciler as you (the same protected write `metistry compute`

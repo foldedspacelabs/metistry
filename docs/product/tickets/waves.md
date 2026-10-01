@@ -201,7 +201,7 @@ Generated from `docs/product/design-build-plan.md` by `ops/scripts/tickets.mjs`.
 
 - [ ] **W5 checkpoint** — merged, main green, scratch-instance upgrade, conformance test, Mac smoke, release
 
-## W4 candidates — 86 tickets, 145 agent-days, no wave yet
+## W4 candidates — 90 tickets, 158.5 agent-days, no wave yet
 
 Follow-ups specified in the plan (§3.2's *Candidates* row) that nobody has scheduled. The owner assigns each one a wave at a checkpoint; until then none is dispatched.
 
@@ -291,3 +291,7 @@ Follow-ups specified in the plan (§3.2's *Candidates* row) that nobody has sche
 - [ ] [X-112](x/x-112.md) · Provider tool packs — pinned, signed, fetched on choice · M · opus · after X-105
 - [ ] [X-113](x/x-113.md) · The zrok adapter · M · opus · after X-105, X-111, X-112
 - [ ] [X-114](x/x-114.md) · Add a Phone sees the phone arrive — *Opened on your phone* · S · sonnet · after X-75, X-77, X-103
+- [ ] [X-115](x/x-115.md) · Metistry Relay data plane — the PoC, then the instance · L · opus high · after X-112
+- [ ] [X-116](x/x-116.md) · Metistry Relay control plane — CDK, Lambda, DynamoDB, the ACME helper · L · opus high · after X-115
+- [ ] [X-117](x/x-117.md) · The Metistry Relay adapter — client, certificate, allowance · M · opus · after X-105, X-111, X-112, X-116
+- [ ] [X-118](x/x-118.md) · `metistry.app` on the Public Suffix List · S · sonnet

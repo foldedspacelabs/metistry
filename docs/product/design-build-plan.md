@@ -433,7 +433,7 @@ console cannot or must not do it (credentials, the machine, code that runs):
 | M17 | Models on this Mac | `metistry compute models install\|load\|unload` | this Mac's disk and memory |
 | M18 | The vault's git policy and rollback | `metistry vault settings`, `metistry vault rollback <commit\|--to date\|--file path>` (T10-2, T10-6) | the repository's history and its remote; a rollback still waits for Approve in Needs You |
 | M19 | Add a phone: mint a passkey enrolment code | `metistry enroll [--json]`, `metistry enroll --cancel <id>` (X-75; §2.22) *(ruled 2026-09-28)* | a first credential for a new device; shell access to this Mac is its root of trust (plan §4.2), so no HTTP route mints one |
-| M20 | Remote access: the provider the phone reaches this Mac through | `metistry remote [status]\|set\|authorize\|test\|off` (X-105…X-114; §2.23) *(ruled 2026-09-30)* | the provider's credentials live in the login Keychain, and it decides what is exposed to the internet |
+| M20 | Remote access: the provider the phone reaches this Mac through | `metistry remote [status]\|set\|authorize\|test\|off` (X-105…X-118; §2.23, §2.24) *(ruled 2026-09-30)* | the provider's credentials live in the login Keychain, and it decides what is exposed to the internet |
 
 **Device-local, no CLI and no API:** global hot keys, the capture bar's placement
 and window preferences, the login item, reading TCC state, the instance chooser
@@ -1581,7 +1581,8 @@ zrok**, and **allowed Metistry to bundle or install provider tools** — *"If
 there are things we can do to make it easier on the user, let's do that as
 well."* The facts behind every row, with sources and dates checked, are in
 `docs/research/2026-09-28-reaching-your-mac-remotely.md` (revised 2026-09-30).
-No choice is an FSL service, and no choice sends anything to FSL.
+No choice but **Metistry Relay** (§2.24, opt-in and capped) is an FSL service,
+and no other choice sends anything to FSL.
 
 **The choices** — in this order wherever they are listed:
 
@@ -1590,6 +1591,7 @@ No choice is an FSL service, and no choice sends anything to FSL.
 | **None** *(default)* | this Mac only | — | — (`METISTRY_ORIGIN` stays loopback) | $0 |
 | **Tailscale — Any browser (Funnel)** *(recommended)* | the internet; the phone needs **no app** | **the Mac** (Funnel's relays "do not decrypt the traffic") | `https://<node>.<tailnet>.ts.net` | $0 (all plans) |
 | **Tailscale — Only my devices** | the owner's tailnet; the phone needs the Tailscale app | **the Mac** | same name | $0 |
+| **Metistry Relay** *(§2.24)* | the internet; no account anywhere | **the Mac** (the relay passes TLS through unopened) | `https://<id>.metistry.app` | $0 — 5 GB a month |
 | **Cloudflare Tunnel** | the internet | **Cloudflare** | `https://<name>.<owner's domain>` | $0 + a domain (~$10/yr) |
 | **zrok** | the internet | **zrok's frontend** (NetFoundry) | `https://<name>.share.zrok.io` | $0 (5 GB/day; warning page unless a card is verified) |
 | **ngrok** | the internet | **ngrok** | `https://<dev-domain>.ngrok-free.dev` | $0 with a weekly warning page; $10/mo removes it |
@@ -1605,6 +1607,7 @@ update` (`docs/ops/bundled-runtime.md`).
 | --- | --- | --- | --- | --- |
 | None | — | — | nothing | nothing |
 | Tailscale | **bundled:** upstream `tailscaled` + `tailscale` (BSD-3), built from a pinned tag, run unprivileged with `--tun=userspace-networking`, its own `--statedir` and `--socket`, as a supervised job — **no Tailscale app or system extension on the Mac**. The owner's existing Tailscale app is detected and offered as the alternative. | the node's state (its machine key) in `.metistry/state/tailscale/`, 0700; no account credential | signs up or in at Tailscale's page (Google, Apple, Microsoft, GitHub…); clicks Tailscale's *approve HTTPS* and *approve Funnel* pages if asked; tailnet mode: installs Tailscale on the iPhone | starts the node as `metistry-<instance>`, opens the login URL, waits for `Running`, runs `serve` or `funnel` to the proxy listener, surfaces each approval link, waits for public DNS (up to 10 min) |
+| Metistry Relay | **bundled:** the relay client (frp's `frpc` or the PoC's choice) and the Mac's TLS terminator | a relay token from opt-in registration — Keychain; the certificate's key never leaves the Mac | turns it on; nothing else | registers, gets a certificate through FSL's DNS helper, holds the tunnel, reports the allowance (§2.24) |
 | Cloudflare Tunnel | **bundled:** `cloudflared` (Apache-2.0), the official release binary (published SHA-256), pinned and re-signed with FSL's Developer ID — the upstream macOS binary is not reliably notarized | OAuth refresh token (PKCE, if R-1 passes), else `cert.pem` from `tunnel login`, else a pasted API token — Keychain; the tunnel token — Keychain, passed as `TUNNEL_TOKEN`, never argv | has a Cloudflare account **with a domain on it**; clicks *Connect to Cloudflare* (or the browser sign-in); picks a hostname | creates the tunnel, ingress and DNS record over the API; runs `cloudflared` supervised |
 | zrok | **bundled:** the zrok CLI (Apache-2.0; v2 ships as `zrok2`), pinned and re-signed | the account token, pasted once (no OAuth exists), used for `enable`; the environment in `.metistry/state/zrok/` | signs up at zrok.io (no card); pastes the account token; optionally verifies a card to remove the warning page | enables an environment, creates a reserved name in the `public` namespace, runs the share headless and supervised |
 | ngrok | **not bundleable:** the agent is closed-source and may not be redistributed to users with their own accounts. Either the owner's `ngrok` install (Homebrew or ngrok's zip), or the `@ngrok/ngrok` SDK (MIT/Apache-2.0, a native addon) — a dependency (U5), and ngrok's terms require its written consent to distribute the agent to users with their own accounts, which may extend to the SDK (R-3) | the authtoken, pasted (no OAuth or device flow exists) — Keychain | creates an account; pastes the authtoken; a paid plan to remove the warning page | reads the dev domain; runs the forwarder supervised |
@@ -1642,7 +1645,7 @@ choice but None and tailnet mode puts the sign-in page on the internet:
    per refused burst. Tailnet mode does not need it, but ships with it.
 
 **Where the choice lives.** `.metistry/deployment.yaml` gains `remote:` —
-`provider: none | tailscale | cloudflare | zrok | ngrok | port-forward`, `mode`
+`provider: none | tailscale | relay | cloudflare | zrok | ngrok | port-forward`, `mode`
 (Tailscale: `funnel | tailnet`), the `origin` it yields, and non-secret settings
 (node name, tunnel id, hostname, zrok name, the mapped port), written by the
 protected write with preview-then-confirm, as `deployment set-keep-awake` is
@@ -1711,7 +1714,7 @@ over the CLI transport (§2.2, M20):
 
 ```ts
 interface RemoteProvider {
-  id: "none" | "tailscale" | "cloudflare" | "zrok" | "ngrok" | "port-forward";
+  id: "none" | "tailscale" | "relay" | "cloudflare" | "zrok" | "ngrok" | "port-forward";
   /** Read-only: is the tool here (pack or owner install), signed in, and what would configure change? */
   detect(ctx: RemoteContext): Promise<Detection>;
   /** Idempotent. Fetch the tool (X-112), sign in or hand the owner the provider's sign-in,
@@ -1733,7 +1736,7 @@ the new origin answers**, so the phone is never left with nothing mid-change.
 | App | CLI |
 | --- | --- |
 | the pane's status | `metistry remote [status] [--json]` |
-| the guided flow, a provider picked | `metistry remote set <none\|tailscale\|cloudflare\|zrok\|ngrok\|port-forward> [provider flags] [--yes]` |
+| the guided flow, a provider picked | `metistry remote set <none\|tailscale\|relay\|cloudflare\|zrok\|ngrok\|port-forward> [provider flags] [--yes]` |
 | a provider's browser sign-in | `metistry remote authorize <tailscale\|cloudflare> [--no-browser] [--timeout 300]` |
 | a pasted token | `metistry remote set zrok\|ngrok`, `metistry remote set cloudflare --token` — on stdin, hidden at a prompt in a terminal, **never in argv** (the `secrets set` rule) |
 | Test | `metistry remote test [--json]` — step 6 |
@@ -1834,14 +1837,18 @@ your phone*; on a CGNAT line it refuses before mapping.
    the biggest friction of plain Tailscale — an app and a VPN on the phone —
    while TLS still ends on the Mac; the bundled node removes the Mac app too;
    the owner's only steps are Tailscale's own sign-in and two one-click approvals.
-3. **Cloudflare Tunnel** (X-108): no warning page and the owner's own domain,
+3. **Metistry Relay** (X-115…X-118, §2.24): for owners who will not make a
+   Tailscale account — no account at all, and the relay cannot read the traffic.
+   After Funnel because Funnel costs FSL nothing and needs no FSL service; the
+   relay is capped, operated, and gated on its PoC and the PSL entry.
+4. **Cloudflare Tunnel** (X-108): no warning page and the owner's own domain,
    but the domain is a prerequisite and Cloudflare reads the traffic.
-4. **zrok** (X-113): bundleable, open source, self-hostable, 5 GB a day free and
+5. **zrok** (X-113): bundleable, open source, self-hostable, 5 GB a day free and
    a warning page removable by verifying a card — ahead of ngrok on every count
    but maturity.
-5. **ngrok** (X-109): a pasted token, a closed agent Metistry cannot bundle,
+6. **ngrok** (X-109): a pasted token, a closed agent Metistry cannot bundle,
    1 GB a month free, and a warning page only a paid plan removes.
-6. **Port forwarding** (X-110): the most code, the most exposure (the home
+7. **Port forwarding** (X-110): the most code, the most exposure (the home
    address in public DNS), dependencies to approve, and impossible behind CGNAT.
 
 **To verify before the ticket that relies on it** (hands-on checks, no product
@@ -1867,13 +1874,136 @@ code; the research's §7):
    `ListenFunnel` exists), would add FSL-written Go to the product.
 2. **Dependencies for port forwarding** (U5): hand-roll NAT-PMP and PCP, and for
    UPnP and ACME approve packages or run Caddy. Until ruled, X-110 is not
-   dispatched.
+   dispatched — and nor is X-117, whose certificate needs the same ACME client.
 3. **The ngrok route:** the `@ngrok/ngrok` SDK (a native addon, U5; ngrok's
    consent may be needed, R-3) or the owner's own agent.
 4. **FSL's Cloudflare OAuth client:** making it public is permanent and needs
    domain verification on `metistry.ai` — the maintainer's act, after R-1.
 5. **Free-plan warning pages** (ngrok, zrok), if R-3 or R-5 fail: refuse the free
    plan, or offer it with the warning.
+6. **Metistry Relay** (§2.24): where its CDK lives, the PoC's relay component,
+   the cap and throttle numbers, and when to file the PSL entry.
+
+### 2.24 Metistry Relay — opt-in, capped, FSL-hosted *(ruled 2026-09-30)*
+
+**Why this exists.** §2.23 ruled out an FSL-hosted service whose cost grows
+with users. The owner then asked for one FSL-hosted provider after all — for
+owners who will not make a Tailscale account — **on terms that keep FSL's bill
+flat**: AWS only, a per-host bandwidth limit as the cost guard, `metistry.app` on
+the Public Suffix List, and abuse controls. The earlier relay designs (WebRTC
+rendezvous, an uncapped SNI relay, FSL-paid TURN) stay rejected. The research is
+`docs/research/2026-09-28-reaching-your-mac-remotely.md` §3.9.
+
+**What the owner gets.** A seventh choice, **Metistry Relay**, after Tailscale
+Funnel: *"No account needed. Metistry's relay passes your encrypted traffic
+through; it can't read it. 5 GB a month."* The origin is
+`https://<id>.metistry.app`; the phone needs nothing. Off until the owner turns
+it on, from the Mac.
+
+**Data plane — one Lightsail instance.** A $7/month Lightsail Linux bundle
+(2 TB of transfer, a static IP included) runs an **SNI-routing TLS-passthrough
+relay**: it reads the TLS ClientHello's SNI, forwards the still-encrypted
+stream down the reverse tunnel the matching Mac holds open, and **never
+terminates TLS**. The component — frp's `https` vhost mode with `frpc` on the
+Mac, or HAProxy `ssl_preread` with a reverse-tunnel client — is the PoC's
+decision (X-115). The Mac holds the tunnel **outbound** (so CGNAT does not
+matter) with its bundled client (an X-112 pack), and terminates TLS itself, in
+front of the proxy listener, with its own Let's Encrypt certificate for
+`<id>.metistry.app`. DNS: `*.metistry.app` → the relay's static IP in the
+existing Route 53 zone `metistry.app` (`Z03790842KLR6UEFALDPY`); the apex and
+`www` keep redirecting to metistry.ai.
+
+**Control plane — in FSL's AWS account.** An API Gateway HTTP API + Lambda +
+DynamoDB, defined in CDK:
+
+- **Register** (opt-in, from the Mac): issues an opaque random `<id>` (never
+  `instance_id`, which `GET /api/identity` publishes) and a **relay token**,
+  revocable, stored hashed; rate-limited per day, per source address and
+  globally.
+- **Usage**: per-id monthly relayed bytes, written by the relay, read by the
+  Mac (`GET /v1/usage`, the relay token).
+- **ACME DNS-01 helper**: writes **only** `_acme-challenge.<id>.metistry.app`
+  TXT records, only for the authenticated id, then removes them. Whether it
+  speaks the acme-dns update API so an off-the-shelf ACME client can use it is a
+  PoC decision.
+- **Revoke and kill switch**: the owner revokes from the Mac; FSL disables an id
+  (abuse) — the relay then forwards nothing for that name.
+
+Where the CDK lives — `foldedspacelabs/metistry-website`'s infra or a new repo
+— is open. The relay never needs the product repo's code.
+
+**Cost guards — the bill stays flat.** Lightsail counts **inbound and outbound**
+against the allowance, so a relayed byte counts twice: the $7 bundle's 2 TB is
+about **1 TB relayed**. Overage is $0.09/GB of outbound in US regions, and is
+never allowed to happen silently:
+
+1. **Per-host monthly cap**, default **5 GB** relayed (configurable by FSL). At
+   the cap the relay refuses new sessions for that id until the month resets.
+   Product voice, in the pane and `metistry doctor`: *"This Mac has used its 5 GB
+   relay allowance for September; it resets on 1 October. Tailscale Funnel has
+   no allowance."* — with **Switch to Tailscale Funnel** beside it.
+2. **Per-host throughput throttle**, about 2 Mbps.
+3. **Global monthly cap** at about 90% of the bundle's relayed capacity —
+   **≈ 0.9 TB on the 2 TB plan** — after which the relay refuses new sessions for
+   everyone until the month resets; the product says *"Metistry Relay is full
+   for September; it resets on 1 October."*
+4. **Backstops:** an AWS Budgets alert at $10/month, and an optional Lambda that
+   stops the instance on a breach.
+5. **Registration limits** per day (per address and global).
+
+**Capacity.** At about 200 MB relayed per owner per month (to be measured in the
+PoC), one $7 box carries **≈ 4,500 owners**. Growth is a deliberate step — the
+$12/3 TB bundle or a second instance — **never automatic overage**.
+
+**Abuse and isolation.**
+
+- **`metistry.app` on the Public Suffix List** (private section): each
+  `<id>.metistry.app` becomes its own site, so no owner's page can set or read
+  another's cookies or claim the parent as a passkey rpID; and Let's Encrypt's
+  limit of 50 certificates per registered domain per 7 days applies per id, not
+  to all owners together. Inclusion is permanent and takes weeks: **until it
+  lands, registrations are capped below that limit** (about 40 a week).
+- Opt-in only; revocable tokens; a per-id kill switch; the relay forwards only
+  **registered and active** names and refuses every other SNI; an abuse contact
+  (`abuse@metistry.ai`) on the website.
+- Like every public provider, it is **blocked by X-103 and X-111**: the Mac's
+  sign-in page faces the internet through it.
+
+**What FSL can see:** SNI hostnames (the `<id>`), source and Mac IP addresses,
+connection times and volume — **never content**. The privacy policy says so
+before launch; relay logs keep counters, not connection lists, beyond 24 hours.
+
+**Trade-offs, said plainly.** One instance is a single point of failure —
+snapshots and a scripted rebuild, and the pane says *"Metistry Relay isn't
+answering"* when it is down. FSL operates a service. CloudFront's flat-rate
+plans were considered and rejected: CloudFront must terminate TLS, so FSL would
+see the traffic.
+
+**In the product.** Provider id `relay`; `metistry remote set relay` registers,
+fetches the client pack, obtains the certificate through the helper, starts the
+tunnel and the TLS terminator as supervised jobs, and records the origin; the
+adapter's `status` adds rows for *registered*, *tunnel connected*, *certificate
+expiry* and **allowance** (`degraded` at 80%, `failed` at the cap, with the
+sentence above); `revoke` deletes the registration, the certificate and the
+jobs. The relay token lives in the Keychain. The Mac's TLS terminator and ACME
+client are the same ones port forwarding needs — so §2.23's ACME dependency
+question now gates both.
+
+**PoC first (X-115).** One $7 Lightsail box, two FSL instances behind it, a
+month: measure relayed bytes per owner, `GET /api/events` (SSE) held open
+through the relay, reconnect after the Mac sleeps, and the throttle's effect on
+the PWA. **Gate:** under 1 GB per owner per month at the 95th percentile, and
+SSE stable — or the owner revisits the cap before launch.
+
+**Acceptance.** An owner with no other account turns on Metistry Relay from the
+guided flow and reaches *Opened on your phone* on cellular; FSL's console
+cannot decrypt a captured session (only the Mac holds the key); a host at its
+cap is refused and the pane names the reset date; the global cap holds the
+month's bill at the bundle's price; a revoked or killed id gets no traffic.
+
+**Open for the owner.** Where the CDK lives; the PoC's relay component; the
+per-host cap and throttle numbers after the PoC; and when to submit the PSL
+entry (X-118 — permanent).
 
 ---
 
@@ -1954,7 +2084,7 @@ agent's pass, per the PR close rule; the owner reviews at checkpoints.
 | W3 | T2-12, T2-13 · T3-8, T3-10, T3-11 · T4-9, T4-12 → T4-13, T4-19, T4-22, T4-23, T4-25, T4-26 · T6-4…T6-11 · T7-4, T7-5 · T8-2a → T8-2b, T8-6 · T9-3 · T10-7 · X-6…X-23 |
 | W4 | X-24, X-29, X-31, X-32, X-41 (CI stability, dispatched first — owner 2026-09-30) · T4-10 → T4-11, T4-14; T4-15 → T4-17 · T6-12, T6-13a, T6-13b, T6-14, T6-15, T6-16 · T7-6 · T8-3, T8-4, T8-5, T8-7 · T9-4 (merges after the eval clears its bar) |
 | W5 | X-1 |
-| Candidates | X-25…X-28, X-30, X-33…X-40, X-42…X-74, X-80…X-102 — specified, not scheduled; the owner assigns each a wave at a checkpoint (W3 housekeeping; five CI-stability candidates went to W4 on 2026-09-30; X-80…X-102 added at W4 housekeeping) · X-75…X-79 — Add a Phone (§2.22), ruled 2026-09-28, not yet scheduled · X-103…X-114 — Remote access (§2.23), ruled 2026-09-30, not yet scheduled |
+| Candidates | X-25…X-28, X-30, X-33…X-40, X-42…X-74, X-80…X-102 — specified, not scheduled; the owner assigns each a wave at a checkpoint (W3 housekeeping; five CI-stability candidates went to W4 on 2026-09-30; X-80…X-102 added at W4 housekeeping) · X-75…X-79 — Add a Phone (§2.22), ruled 2026-09-28, not yet scheduled · X-103…X-118 — Remote access (§2.23, §2.24), ruled 2026-09-30, not yet scheduled |
 
 ### 3.3 The tickets
 
@@ -4269,7 +4399,7 @@ and a passkey the owner can remove; the owner ruled to build it rather than cut 
 from the site. **Every ticket here builds §2.22** — read it whole; it holds the
 refusal wording, the sheet's states and the acceptance. None is in a wave: §3.2's
 *Candidates* row holds them until the owner schedules them. Reaching the Mac from
-outside the home is **not** here: it is §2.23 and X-103…X-114, below.
+outside the home is **not** here: it is §2.23–§2.24 and X-103…X-118, below.
 
 **X-75 · `metistry enroll` — an enrolment code minted on this Mac** · M —
 *Spec:* §2.22 *Minting* and *When `METISTRY_ORIGIN` is not reachable*: the M19
@@ -4348,15 +4478,16 @@ longer says Metistry answers on the home network by default.
 
 #### X — Remote access: the owner's choice (ruled 2026-09-30)
 
-The owner ruled against an FSL-hosted relay and for a choice of provider, asked
-at setup and changeable in Settings; Tailscale Funnel is the recommended path, and
-Metistry may bundle or install provider tools. **Every ticket here builds §2.23**
+The owner ruled for a choice of provider, asked at setup and changeable in
+Settings; Tailscale Funnel is the recommended path; Metistry may bundle or
+install provider tools; and one opt-in, capped FSL relay on AWS follows Funnel.
+**Every ticket here builds §2.23** (X-115…X-118: §2.24)
 — read it whole; it holds the guided flow's wording, the doctor rows, the
 refusals and the acceptance per provider. X-103 and X-104 are bugs whatever the
 owner picks and **block every provider**; X-111 blocks every internet-facing one,
 Funnel included. None is in a wave: §3.2's *Candidates* row holds them until the
 owner schedules them. §2.23's recommended order is X-103, X-104, X-111 → X-105,
-X-112, X-106, X-107, X-114 → X-108 → X-113 → X-109 → X-110.
+X-112, X-106, X-107, X-114 → X-115, X-116, X-117 (with X-118) → X-108 → X-113 → X-109 → X-110.
 
 **X-103 · The console's proxy listener — the local owner token never crosses a tunnel** · M —
 *Spec:* §2.23 *Two fixes*, 1: a second console listener for proxies only — a
@@ -4579,6 +4710,66 @@ does not consume the code; an unknown code stamps nothing**.
 *Accept:* U4's rollback note; on a real iPhone the sheet turns to *Opened on your
 phone* before *Added*.
 
+**X-115 · Metistry Relay data plane — the PoC, then the instance** · L · deps X-112 —
+*Spec:* §2.24 *Data plane* and *PoC first*: one $7 Lightsail instance with a
+static IP; the SNI-routing TLS-passthrough relay (frp `https` vhost or HAProxy
+`ssl_preread` + a reverse-tunnel client — **decided by the PoC**); forwarding
+only registered, active ids; per-id byte counters, the 5 GB monthly cap, the
+~2 Mbps throttle and the ~0.9 TB global cap enforced at the relay; snapshots and
+a scripted rebuild. The PoC runs a month with two FSL instances and reports the
+§2.24 gate before the instance is offered to anyone else.
+*Files:* the relay's infrastructure repo (open: `metistry-website`'s infra or a
+new repo); `docs/ops/metistry-relay.md` here (what it is, what FSL sees, the
+caps).
+*Tests:* **an unregistered SNI is refused without a byte forwarded; a TLS
+session through the relay cannot be decrypted with anything on the relay; an
+id past its cap is refused; the global cap refuses everyone**.
+*Accept:* the PoC report — bytes per owner, SSE through the relay, reconnect
+after sleep — and the owner's go.
+
+**X-116 · Metistry Relay control plane — CDK, Lambda, DynamoDB, the ACME helper** · L · deps X-115 —
+*Spec:* §2.24 *Control plane* and *Cost guards*: CDK in FSL's AWS account —
+API Gateway HTTP API + Lambda + DynamoDB — for register (an opaque id and a
+hashed, revocable relay token), usage, revoke and the per-id kill switch;
+per-day registration limits; the ACME DNS-01 helper writing only
+`_acme-challenge.<id>.metistry.app` in zone `Z03790842KLR6UEFALDPY` for the
+authenticated id; the `*.metistry.app` record to the static IP (apex and `www`
+untouched); an AWS Budgets alert at $10 and the optional stop Lambda; registrations
+capped at about 40 a week until X-118's PSL entry lands.
+*Files:* the relay's infrastructure repo; `docs/ops/metistry-relay.md`.
+*Tests:* **the helper refuses a name that is not the caller's id; a revoked token
+registers, renews and reads nothing; the IAM policy grants Route 53 changes only
+on `_acme-challenge.*.metistry.app` TXT records**; the registration limits hold.
+*Accept:* `cdk diff` reviewed by the owner; the budget alert fires on a test
+threshold.
+
+**X-117 · The Metistry Relay adapter — client, certificate, allowance** · M · deps X-105, X-111, X-112, X-116 —
+*Spec:* §2.24 *In the product*: provider id `relay` in `packages/cli/src/remote/`;
+register (opt-in, the token on the Keychain), the client from its X-112 pack, a
+Let's Encrypt certificate through the helper, the TLS terminator in front of the
+proxy listener and the tunnel as supervised jobs; the rows *registered*,
+*tunnel connected*, *certificate expiry* and **allowance** (`degraded` at 80%,
+`failed` at the cap, the reset date and **Switch to Tailscale Funnel**); revoke
+deletes the registration, the certificate and the jobs. Shares the TLS
+terminator and ACME client with X-110, behind the same dependency ruling.
+*Files:* `packages/cli/src/remote/relay.ts`, `packages/cli/src/launchd.ts`,
+`packages/cli/test/remote-relay.test.ts`, `docs/ops/remote-access.md`.
+*Tests:* **the private key never leaves the Mac; the allowance row reads the
+reset date from usage, not the clock alone; at the cap the pane offers Funnel;
+the token never appears in argv or a log**.
+*Accept:* §2.24's acceptance on a real iPhone on cellular.
+
+**X-118 · `metistry.app` on the Public Suffix List** · S —
+*Spec:* §2.24 *Abuse and isolation*: a pull request to `publicsuffix/list`'s
+private section for `metistry.app`, with the `_psl` TXT record its guidelines
+require in the Route 53 zone, and the rationale (per-owner cookie and rpID
+isolation; Let's Encrypt's per-registered-domain limit). **Permanent and slow
+(weeks): the owner confirms before it is filed.** Until it lands, X-116's weekly
+registration cap holds.
+*Files:* `docs/ops/metistry-relay.md` (the status of the entry).
+*Tests:* —
+*Accept:* the entry merged upstream and shipped in a browser release.
+
 #### W5 — Acceptance
 
 **X-1 · The document sweep** · S · W5 — glossary, `reply-feedback.md`, `board.md`,
@@ -4774,12 +4965,13 @@ completes; no ticket (`decisions-log.md`, *Later*).
 
 **Remote access for the phone — specified** (ruled 2026-09-28; re-ruled
 2026-09-30)**.** The 2026-09-28 item asked for research into an opt-in FSL relay.
-The owner rejected any FSL-hosted service — its cost grows with users, for a free
-app — and ruled for the owner's choice of provider instead (None, Tailscale,
-Cloudflare Tunnel, ngrok, port forwarding). It is no longer "after this
-program": §2.23 specifies it and X-103…X-114 are its candidates. The research
+The owner rejected an uncapped FSL-hosted service — its cost grows with users,
+for a free app — and ruled for the owner's choice of provider instead (None,
+Tailscale, Cloudflare Tunnel, zrok, ngrok, port forwarding), plus one opt-in,
+capped FSL relay on AWS (§2.24). It is no longer "after this
+program": §2.23 and §2.24 specify it and X-103…X-118 are its candidates. The research
 is `docs/research/2026-09-28-reaching-your-mac-remotely.md` (revised
-2026-09-30), whose §6 records the rejected relay.
+2026-09-30): §3.9 is the capped relay, §6 the rejected designs.
 
 **Also after this program:** the **token broker** (§2.6), built when Slack, Notion,
 Atlassian or another confidential-only provider is scheduled; **OAuth from the

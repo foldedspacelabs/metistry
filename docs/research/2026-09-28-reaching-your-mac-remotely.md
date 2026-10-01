@@ -43,10 +43,11 @@ relies on it.
 
 ## The short version
 
-1. **Six choices, asked at setup, changeable in Settings.** None (default),
-   Tailscale (Funnel or tailnet), Cloudflare Tunnel, zrok, ngrok, port
-   forwarding. No FSL service sits in any of them, so nothing FSL pays for grows
-   with the number of owners.
+1. **Seven choices, asked at setup, changeable in Settings.** None (default),
+   Tailscale (Funnel or tailnet), Metistry Relay, Cloudflare Tunnel, zrok,
+   ngrok, port forwarding. Only the Metistry Relay is FSL's — opt-in, on one
+   flat-priced Lightsail box, with per-host and global caps so FSL's bill does
+   not grow with owners (§3.9).
 2. **Recommended: Tailscale Funnel, on a node Metistry bundles.** Funnel makes
    the Mac's `ts.net` name a public HTTPS site while TLS still ends on the Mac —
    Tailscale's relays "do not decrypt the traffic" — so the phone needs **no
@@ -58,11 +59,12 @@ relies on it.
    ngrok are *paste a token*; Tailscale's own login page needs no credential in
    Metistry.
 4. **Who can read the traffic:** the Mac alone with Tailscale (both modes) and
-   port forwarding; the vendor with Cloudflare, zrok and ngrok. Only tailnet mode
+   port forwarding, and with the Metistry Relay (TLS passes through it); the
+   vendor with Cloudflare, zrok and ngrok. Only tailnet mode
    keeps the sign-in page off the public internet.
 5. **Recommended order:** the fixes → None + Tailscale (Funnel, tailnet) with
-   the tool packs and the guided flow → Cloudflare Tunnel → zrok → ngrok → port
-   forwarding (§5).
+   the tool packs and the guided flow → Metistry Relay → Cloudflare Tunnel →
+   zrok → ngrok → port forwarding (§5).
 6. **Two existing gaps block every choice but None** (§2), and every
    internet-facing choice — Funnel included — also waits on rate limits and
    headers.
@@ -72,6 +74,7 @@ relies on it.
 | **None** | nothing to do | — | — (loopback) | — | $0 |
 | **Tailscale — Funnel** *(recommended)* | **near**: Tailscale's login page; one-click *allow HTTPS* and *allow Funnel*; no app on the phone | **bundled** userspace `tailscaled` (or the owner's app) | `https://metistry-<instance>.<tailnet>.ts.net` | **the Mac** | $0 |
 | **Tailscale — tailnet** | as Funnel, plus the Tailscale app on the iPhone | **bundled** (or the owner's app) | same | **the Mac** | $0 |
+| **Metistry Relay** | **one click**: turn it on; no account | **bundled** relay client; a relay token from registration | `https://<id>.metistry.app` | **the Mac** (TLS passes through unopened) | $0 — 5 GB a month |
 | **Cloudflare Tunnel** | **near, if OAuth proves out**; else browser `tunnel login` | **bundled** `cloudflared`; OAuth / cert / token | `https://<name>.<owner's domain>` | **Cloudflare** | $0 + a domain |
 | **zrok** | **paste a token** once | **bundled** zrok CLI; account token pasted | `https://<name>.share.zrok.io` | **zrok** (NetFoundry) | $0, 5 GB/day; warning page unless a card is verified |
 | **ngrok** | **paste a token** | owner-installed agent, or the SDK (owner's call); authtoken pasted | `https://<dev-domain>.ngrok-free.dev` | **ngrok** | $0 with a weekly warning page; $10/mo removes it |
@@ -643,6 +646,81 @@ increasing strength:
    *Opened on your phone* — proof from outside, over the phone's real network,
    with no service in between (plan X-114).
 
+### 3.9 Metistry Relay — opt-in, capped, on AWS (ruled 2026-09-30)
+
+A third ruling the same day asked for one FSL-hosted provider after Funnel, for
+owners who will not make a Tailscale account, on terms that keep FSL's bill
+flat: **AWS only**, a **per-host bandwidth limit** as the cost guard, and
+`metistry.app` on the **Public Suffix List** with abuse controls. It replaces
+§6's "rejected" framing **for this capped variant only**; the WebRTC rendezvous,
+an uncapped SNI relay and FSL-paid TURN stay rejected. Plan §2.24 is the spec.
+
+**Shape.**
+
+```
+ iPhone (Safari) ──TLS for <id>.metistry.app──► Lightsail relay ──same TLS, unopened──► Mac
+                                                (SNI → tunnel)       (tunnel dialled OUT by the Mac;
+                                                                      the Mac terminates TLS)
+```
+
+- **Data plane:** one Lightsail Linux instance with a static IP running an
+  SNI-routing **TLS-passthrough** relay — frp's `https` vhost mode, or HAProxy
+  `ssl_preread` plus a reverse-tunnel client (the PoC decides). It never
+  decrypts. The Mac's bundled client holds the tunnel outbound, so CGNAT does
+  not matter, and the Mac serves TLS itself with its own Let's Encrypt
+  certificate for `<id>.metistry.app`. The phone needs nothing.
+- **Control plane:** API Gateway HTTP API + Lambda + DynamoDB in FSL's account,
+  in CDK: opt-in registration (an opaque `<id>`, a revocable relay token),
+  per-id usage, revoke and a kill switch, and an ACME DNS-01 helper that writes
+  only `_acme-challenge.<id>.metistry.app` in the Route 53 zone `metistry.app`
+  for the authenticated id. `*.metistry.app` points at the relay's static IP;
+  the apex and `www` keep redirecting to metistry.ai.
+
+**Lightsail's numbers** (pricing page, checked 2026-09-30): Linux bundles at
+**$5 (1 TB transfer), $7 (2 TB), $12 (3 TB)**; "Static IP address … Included in
+all Lightsail plans"; "Both inbound and outbound data transfer count towards
+your data transfer allowance"; excess outbound is **$0.09/GB** in US regions.
+A relayed byte enters and leaves the box, so it **counts twice**: the $7
+bundle's 2 TB carries about **1 TB relayed**.
+
+**Cost guards.** (1) A per-host monthly cap, default 5 GB relayed, after which
+the relay refuses new sessions for that id until the month resets — said in the
+product as *"This Mac has used its 5 GB relay allowance for September; it resets
+on 1 October. Tailscale Funnel has no allowance."* (2) A per-host throttle of
+about 2 Mbps. (3) A global monthly cap at ~90% of relayed capacity, **≈ 0.9 TB**
+on the 2 TB plan, so the bill stays at $7. (4) An AWS Budgets alert at $10 and an
+optional stop Lambda. (5) Per-day registration limits.
+
+**Capacity** (my estimate, to be measured): at ~200 MB relayed per owner per
+month, 0.9 TB carries **≈ 4,500 owners** per $7 box. A heavy owner hits the
+5 GB cap long before the box fills — 180 owners at their cap would fill it,
+which is what the global cap is for. Growth is a deliberate step ($12/3 TB, or a
+second instance), never automatic overage.
+
+**Public Suffix List.** Let's Encrypt allows "up to 50 certificates … per
+registered domain … every 7 days" and uses the PSL to decide what a registered
+domain is (rate-limits page, checked 2026-09-30). Without a PSL entry every
+owner's certificate counts against `metistry.app`'s 50 a week; with one, each
+`<id>.metistry.app` is its own registered domain. The entry also isolates
+cookies between owners and stops anyone claiming `metistry.app` as a passkey
+rpID. It is permanent and takes weeks, so registrations are capped at about 40 a
+week until it lands.
+
+**What FSL sees:** SNI hostnames (opaque ids), IP addresses, timing and volume —
+never content. Each id's certificate appears in Certificate Transparency logs,
+which is why the id is opaque and never `instance_id`.
+
+**Trade-offs.** A single instance is a single point of failure (snapshots, a
+scripted rebuild). FSL operates a service and an abuse contact. **CloudFront's
+flat-rate plans** were considered and rejected: CloudFront must terminate TLS,
+so FSL would see the traffic. Other hosts were not considered: the owner ruled
+AWS only.
+
+**PoC first.** One $7 box and two FSL instances for a month: relayed bytes per
+owner, SSE (`GET /api/events`) held open through the relay, reconnect after the
+Mac sleeps, and the throttle's effect on the PWA — before the relay is offered
+to anyone else.
+
 ## 4. The common shape
 
 - **The record.** `.metistry/deployment.yaml` `remote:` — provider, origin, and
@@ -677,15 +755,19 @@ increasing strength:
    flow and *Opened on your phone*. Funnel removes the phone's app and VPN while
    TLS stays on the Mac; the bundled node removes the Mac app; PoC-6 proved the
    Serve path; the owner's only steps are Tailscale's own.
-3. **Cloudflare Tunnel** — no warning page, the owner's own domain, a browser
+3. **Metistry Relay** (§3.9) — for owners who won't make a Tailscale account:
+   no account, and the relay cannot read the traffic. After Funnel because
+   Funnel costs FSL nothing and needs no FSL service, while the relay is capped,
+   operated, and gated on its PoC and the PSL entry.
+4. **Cloudflare Tunnel** — no warning page, the owner's own domain, a browser
    sign-in (possibly real OAuth), a bundleable agent; but the domain is a
    prerequisite and Cloudflare reads the traffic.
-4. **zrok** — open source, bundleable, self-hostable, 5 GB a day free, and a
+5. **zrok** — open source, bundleable, self-hostable, 5 GB a day free, and a
    warning page removable by verifying a card; ahead of ngrok on everything but
    maturity (hosted-service 500s and 429s are reported).
-5. **ngrok** — a pasted token, a closed agent Metistry cannot bundle, 1 GB a
+6. **ngrok** — a pasted token, a closed agent Metistry cannot bundle, 1 GB a
    month free, and a warning page only a paid plan removes.
-6. **Port forwarding last** — the most code, the most exposure (the home address
+7. **Port forwarding last** — the most code, the most exposure (the home address
    in public DNS), dependencies to approve, and impossible behind CGNAT.
 
 The owner's suggested order is kept as is; nothing in the research argues for
@@ -707,9 +789,10 @@ rendezvous on every return to the foreground.
 
 **Rejected by the owner, 2026-09-30:** it is an FSL-run service whose cost
 grows with the number of users, for an app that charges nothing. The same
-reason rules out its cousin, a TLS-passthrough SNI relay (Funnel rebuilt at
-FSL's expense, about $900/month of egress at 10,000 owners by my estimate), and
-FSL-paid TURN.
+reason rules out an **uncapped** TLS-passthrough SNI relay (about $900/month of
+egress at 10,000 owners by my estimate) and FSL-paid TURN. A later ruling the
+same day accepts a **capped** SNI relay on a flat-priced Lightsail bundle — §3.9,
+the Metistry Relay — because its caps keep FSL's bill fixed.
 
 **Quick Tunnels** (`trycloudflare.com`) and any random-URL tunnel: the hostname
 changes on every run, which breaks every passkey; Cloudflare's also lack SSE.
@@ -742,7 +825,10 @@ Numbered as plan §2.23's R-list.
    or HTTPS is not yet allowed (prefer a status field over scraping prose);
    whether a new tailnet's default policy grants `funnel`; `GET /api/events` held
    open through Funnel; node key expiry's effect on Funnel; pack sizes.
-7. **Signing:** `codesign -dv` on each upstream binary before the first pack, and
+7. **R-7 Metistry Relay PoC:** relayed bytes per owner per month, SSE through
+   the relay, reconnect after sleep, the throttle's effect, and the relay
+   component (frp vs HAProxy + a tunnel client).
+8. **Signing:** `codesign -dv` on each upstream binary before the first pack, and
    that the re-signed `cloudflared`, `tailscaled` and zrok run under the hardened
    runtime with no entitlements.
 
@@ -760,6 +846,12 @@ Tailscale ship, it can say what is true:
 Name only the providers that have shipped at the time.
 
 ## Sources
+
+**Fetched 2026-09-30, Metistry Relay** (§3.9):
+
+- Lightsail pricing (bundles, static IP, both directions count, overage) — <https://aws.amazon.com/lightsail/pricing/>
+- Let's Encrypt rate limits (50 per registered domain per 7 days; the PSL) — <https://letsencrypt.org/docs/rate-limits/>
+- Public Suffix List guidelines (private-section requests) — <https://github.com/publicsuffix/list/wiki/Guidelines>
 
 **Fetched 2026-09-30, follow-up** (§3.2 Funnel and the node, §3.4 zrok, §3.5, §3.7):
 

@@ -484,6 +484,27 @@ written consent may be needed) or the owner's own agent; registering FSL's publi
 domain verification on `metistry.ai`); the free ngrok and zrok warning pages
 if they break a Home Screen app; and when to schedule X-103…X-114.
 
+### Second follow-up, 2026-09-30 — the Metistry Relay, opt-in and capped
+
+The owner asked for one FSL-hosted provider after Tailscale Funnel, for owners
+who will not make a Tailscale account. This **supersedes ruling 1 above only for
+this capped design**; the WebRTC rendezvous relay, an uncapped SNI relay and
+FSL-paid TURN stay rejected.
+
+| # | Item | Ruling | Where it lands |
+| --- | --- | --- | --- |
+| 11 | An FSL-hosted relay | **Yes, opt-in and capped:** an SNI-routing TLS-passthrough relay (it never decrypts) on one Lightsail instance, the Mac dialling out and terminating TLS with its own certificate for `<id>.metistry.app`; a control plane (API Gateway + Lambda + DynamoDB, CDK) for registration, revocable tokens, usage and an ACME DNS-01 helper in the `metistry.app` Route 53 zone. | plan §2.24; X-115…X-117 |
+| 12 | Hosting | **AWS only** — no other hosting providers. | plan §2.24 |
+| 13 | Cost guard | **A per-host bandwidth limit** (default 5 GB relayed a month), a per-host throttle, a global cap at ~90% of the bundle (≈ 0.9 TB relayed on the $7/2 TB plan, since Lightsail counts both directions), a $10 budget alert and registration limits — the bill stays flat; growth is a deliberate step. | plan §2.24 |
+| 14 | Abuse and cookies | **Agreed:** `metistry.app` on the Public Suffix List, opt-in only, revocable tokens, a per-id kill switch, only registered and active names forwarded, an abuse contact; blocked by X-103 and X-111 like every public provider. | plan §2.24; X-118 |
+| 15 | Order | Fixes → None + Tailscale Funnel → **Metistry Relay** → Cloudflare Tunnel → zrok → ngrok → port forwarding. Funnel stays first: it costs FSL nothing and is end to end without an FSL service. | §3.2 *Candidates* |
+
+**Still open** (plan §2.24): where the CDK lives (`metistry-website`'s infra or
+a new repo); the relay component (frp or HAProxy + a tunnel client — the PoC
+decides); the cap and throttle numbers after the PoC; when to file the PSL entry
+(permanent); and the ACME dependency question, which now gates both port
+forwarding and the relay.
+
 ## Rulings the owner must make
 
 (a), (b) and (c) were ruled in W1 — see *Rulings made by the owner in W1* above.

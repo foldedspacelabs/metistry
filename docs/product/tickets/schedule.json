@@ -3710,6 +3710,63 @@
       "file": "docs/product/tickets/x/x-114.md",
       "status": "todo"
     },
+    "X-115": {
+      "title": "Metistry Relay data plane — the PoC, then the instance",
+      "track": "X",
+      "wave": "candidate",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "X-112"
+      ],
+      "file": "docs/product/tickets/x/x-115.md",
+      "status": "todo"
+    },
+    "X-116": {
+      "title": "Metistry Relay control plane — CDK, Lambda, DynamoDB, the ACME helper",
+      "track": "X",
+      "wave": "candidate",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "X-115"
+      ],
+      "file": "docs/product/tickets/x/x-116.md",
+      "status": "todo"
+    },
+    "X-117": {
+      "title": "The Metistry Relay adapter — client, certificate, allowance",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "X-105",
+        "X-111",
+        "X-112",
+        "X-116"
+      ],
+      "file": "docs/product/tickets/x/x-117.md",
+      "status": "todo"
+    },
+    "X-118": {
+      "title": "`metistry.app` on the Public Suffix List",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-118.md",
+      "status": "todo"
+    },
     "X-1": {
       "title": "The document sweep",
       "track": "X",
@@ -3727,7 +3784,7 @@
     "tickets": 167,
     "agent_days": 487.5,
     "waves": 6,
-    "candidates": 86
+    "candidates": 90
   },
   "critical_path": {
     "days": 35,
@@ -3829,9 +3886,13 @@
       "X-111",
       "X-112",
       "X-113",
-      "X-114"
+      "X-114",
+      "X-115",
+      "X-116",
+      "X-117",
+      "X-118"
     ],
-    "count": 86,
-    "agent_days": 145
+    "count": 90,
+    "agent_days": 158.5
   }
 }

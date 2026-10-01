@@ -499,8 +499,7 @@ FSL-paid TURN stay rejected.
 | 14 | Abuse and cookies | **Agreed:** `metistry.app` on the Public Suffix List, opt-in only, revocable tokens, a per-id kill switch, only registered and active names forwarded, an abuse contact; blocked by X-103 and X-111 like every public provider. | plan §2.24; X-118 |
 | 15 | Order | Fixes → None + Tailscale Funnel → **Metistry Relay** → Cloudflare Tunnel → zrok → ngrok → port forwarding. Funnel stays first: it costs FSL nothing and is end to end without an FSL service. | §3.2 *Candidates* |
 
-**Still open** (plan §2.24): where the CDK lives (`metistry-website`'s infra or
-a new repo); the relay component (frp or HAProxy + a tunnel client — the PoC
+**Still open** (plan §2.24): where the CDK lives (ruled below, #24); the relay component (frp or HAProxy + a tunnel client — the PoC
 decides); the cap and throttle numbers after the PoC; when to file the PSL entry
 (permanent); and the ACME dependency question, which now gates both port
 forwarding and the relay.
@@ -526,6 +525,14 @@ and the owner controls the Mac), and approved a layered design.
 | 21 | Behaviour limits at the relay | Distinct client IPs per day, concurrent connections, the bandwidth allowance and a probation period for new instances — numbers from the PoC. | X-115 |
 | 22 | Genuine-app gate | The relay client is bundled and hard-wired to the proxy listener; App Attest at registration is an extra layer if it works for a Developer ID app (R-8), never a dependency; forks and source builds use the other providers. | X-117, X-120 |
 | 23 | Surface and detection | Through the proxy listener only the sign-in and enrolment bootstrap answers without a session; no public share links; CT monitoring, an abuse contact, terms of use (Metistry only), a per-instance kill switch, PSL isolation. | X-111, X-116 |
+
+### Fifth follow-up, 2026-09-30 — where the relay's code lives
+
+| # | Item | Ruling | Where it lands |
+| --- | --- | --- | --- |
+| 24 | The relay's server-side code | A new **private** repository, `foldedspacelabs/metistry-relay`: the CDK (Lightsail, API Gateway, Lambda, DynamoDB, Route 53 under `metistry.app`), the control plane, and operations — abuse thresholds and detection, CT monitoring, budget alarms, runbooks — with its own deploy pipeline and OIDC role, so a website deploy can never touch the relay. Not `metistry` or `metistry-website`. | plan §2.24; X-115, X-116 |
+| 25 | What stays public | The relay **client and protocol** (in this repo; the client ships in the open-source app) and the relay's **forwarding configuration** (`ops/relay/` here — the SNI-routing, never-decrypting frp or HAProxy setup), deployed verbatim by the private repo, so owners can verify that FSL cannot read their traffic. | plan §2.24; X-115, X-117 |
+| 26 | The `metistry.app` zone | When the relay ships, `metistry-relay` owns every record under `metistry.app` (apex, `www`, `u.`) and serves the explanatory page; metistry-website drops its apex/`www` redirect distribution. Until then the website repo keeps the redirect. | plan §2.24 |
 
 ## Rulings the owner must make
 

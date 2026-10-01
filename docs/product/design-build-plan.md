@@ -1888,7 +1888,7 @@ code; the research's §7):
    domain verification on `metistry.ai` — the maintainer's act, after R-1.
 5. **Free-plan warning pages** (ngrok, zrok), if R-3 or R-5 fail: refuse the free
    plan, or offer it with the warning.
-6. **Metistry Relay** (§2.24): where its CDK lives, the PoC's relay component,
+6. **Metistry Relay** (§2.24): the PoC's relay component,
    the cap and throttle numbers, and when to file the PSL entry.
 
 ### 2.24 Metistry Relay — opt-in, capped, FSL-hosted *(ruled 2026-09-30)*
@@ -1940,8 +1940,17 @@ DynamoDB, defined in CDK:
   (abuse) — the relay then forwards nothing for that name, and its DNS record is
   deleted.
 
-Where the CDK lives — `foldedspacelabs/metistry-website`'s infra or a new repo
-— is open. The relay never needs the product repo's code.
+**Where the code lives** *(ruled 2026-09-30)*: a new **private** repository,
+`foldedspacelabs/metistry-relay`, holds the relay's CDK (Lightsail, API Gateway,
+Lambda, DynamoDB, the Route 53 records under `metistry.app`), the control-plane
+code, and its operations (abuse thresholds and detection, CT monitoring, budget
+alarms, runbooks), with its own deploy pipeline and OIDC role. Two things stay
+**public**, because owners opting in must be able to check the claim that FSL
+cannot read their traffic: the relay **client and protocol** in this repo (the
+client ships in the open-source app regardless), and the relay's **forwarding
+configuration** (the frp or HAProxy setup that routes by SNI and never decrypts),
+published here as `ops/relay/` and deployed verbatim by the private repo. The
+relay never needs the rest of the product repo's code.
 
 **Cost guards — the bill stays flat.** Lightsail counts **inbound and outbound**
 against the allowance, so a relayed byte counts twice: the $7 bundle's 2 TB is
@@ -1985,9 +1994,11 @@ $12/3 TB bundle or a second instance — **never automatic overage**.
 - **An explanatory page** at `https://metistry.app` (and `https://u.metistry.app`)
   says that names under `u.metistry.app` are run by individual Metistry owners on
   their own Macs, not by Folded Space Labs, with an abuse report link. Today the
-  apex 301s to metistry.ai (the website repo's redirect distribution); changing
-  that is a **follow-up for the metistry-website infra when the relay ships**, not
-  now.
+  apex 301s to metistry.ai (the website repo's redirect distribution). When the
+  relay ships, `metistry-relay` takes over **every record under `metistry.app`**
+  (apex, `www`, `u.`) and serves this page, and metistry-website drops its
+  redirect distribution — a follow-up for both repos then, not now. The two
+  stacks share the zone safely only while each owns different records.
 - **No "user content" banner can be injected** into an owner's pages: the relay
   never sees the plaintext. That is the deliberate trade for end-to-end
   encryption; the explanatory page and the PSL entry carry the disclosure
@@ -2118,7 +2129,7 @@ removed phone's label stops resolving to anything that answers; and through the
 proxy listener nothing but the sign-in and enrolment bootstrap answers without a
 session, with no public share links.
 
-**Open for the owner.** Where the CDK lives; the PoC's relay component; the
+**Open for the owner.** The PoC's relay component; the
 per-host cap, throttle and behaviour-limit numbers after the PoC; when to submit
 the PSL entry for `u.metistry.app` (X-118 — permanent); and whether to require
 App Attest at registration if R-8 shows it works.
@@ -4841,8 +4852,9 @@ limits on distinct client IPs per day (about 15) and concurrent connections, and
 tighter limits during a new instance's probation — numbers from the PoC; snapshots and
 a scripted rebuild. The PoC runs a month with two FSL instances and reports the
 §2.24 gate before the instance is offered to anyone else.
-*Files:* the relay's infrastructure repo (open: `metistry-website`'s infra or a
-new repo); `docs/ops/metistry-relay.md` here (what it is, what FSL sees, the
+*Files:* the private `foldedspacelabs/metistry-relay` repo (the instance, its
+deploy); the public forwarding configuration in `ops/relay/` here, deployed
+verbatim; `docs/ops/metistry-relay.md` here (what it is, what FSL sees, the
 caps).
 *Tests:* **an unregistered SNI, the bare instance name and an unknown label are
 each refused without a byte forwarded; the distinct-IP limit refuses the 16th
@@ -4853,7 +4865,8 @@ id past its cap is refused; the global cap refuses everyone**.
 after sleep — and the owner's go.
 
 **X-116 · Metistry Relay control plane — CDK, Lambda, DynamoDB, the ACME helper** · L · deps X-115 —
-*Spec:* §2.24 *Control plane* and *Cost guards*: CDK in FSL's AWS account —
+*Spec:* §2.24 *Control plane* and *Cost guards*: CDK in the private
+`foldedspacelabs/metistry-relay` repo, deployed to FSL's AWS account —
 API Gateway HTTP API + Lambda + DynamoDB — for register (an opaque id and a
 hashed, revocable relay token), usage, revoke and the per-id kill switch;
 device labels (register pending, activate, revoke; at most 10 per instance);

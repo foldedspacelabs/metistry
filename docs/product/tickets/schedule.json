@@ -3572,21 +3572,23 @@
       "status": "todo"
     },
     "X-106": {
-      "title": "The Tailscale adapter",
+      "title": "The Tailscale adapter — Funnel by default, tailnet as the alternative",
       "track": "X",
       "wave": "candidate",
-      "size": "M",
-      "days": 2.5,
+      "size": "L",
+      "days": 5,
       "model": "opus",
-      "effort": "default",
+      "effort": "high",
       "deps": [
-        "X-105"
+        "X-105",
+        "X-111",
+        "X-112"
       ],
       "file": "docs/product/tickets/x/x-106.md",
       "status": "todo"
     },
     "X-107": {
-      "title": "Settings ▸ Remote Access and the wizard's question",
+      "title": "Set Up Remote Access — the guided flow, the wizard step and Settings ▸ Remote Access",
       "track": "X",
       "wave": "candidate",
       "size": "L",
@@ -3596,6 +3598,7 @@
       "deps": [
         "X-105",
         "X-106",
+        "X-112",
         "X-77"
       ],
       "file": "docs/product/tickets/x/x-107.md",
@@ -3625,7 +3628,8 @@
       "effort": "high",
       "deps": [
         "X-105",
-        "X-111"
+        "X-111",
+        "X-112"
       ],
       "file": "docs/product/tickets/x/x-108.md",
       "status": "todo"
@@ -3660,6 +3664,52 @@
       "file": "docs/product/tickets/x/x-110.md",
       "status": "todo"
     },
+    "X-112": {
+      "title": "Provider tool packs — pinned, signed, fetched on choice",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "X-105"
+      ],
+      "file": "docs/product/tickets/x/x-112.md",
+      "status": "todo"
+    },
+    "X-113": {
+      "title": "The zrok adapter",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "X-105",
+        "X-111",
+        "X-112"
+      ],
+      "file": "docs/product/tickets/x/x-113.md",
+      "status": "todo"
+    },
+    "X-114": {
+      "title": "Add a Phone sees the phone arrive — *Opened on your phone*",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-75",
+        "X-77",
+        "X-103"
+      ],
+      "file": "docs/product/tickets/x/x-114.md",
+      "status": "todo"
+    },
     "X-1": {
       "title": "The document sweep",
       "track": "X",
@@ -3677,7 +3727,7 @@
     "tickets": 167,
     "agent_days": 487.5,
     "waves": 6,
-    "candidates": 83
+    "candidates": 86
   },
   "critical_path": {
     "days": 35,
@@ -3776,9 +3826,12 @@
       "X-108",
       "X-109",
       "X-110",
-      "X-111"
+      "X-111",
+      "X-112",
+      "X-113",
+      "X-114"
     ],
-    "count": 83,
-    "agent_days": 136.5
+    "count": 86,
+    "agent_days": 145
   }
 }

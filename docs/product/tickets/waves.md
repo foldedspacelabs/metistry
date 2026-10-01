@@ -201,7 +201,7 @@ Generated from `docs/product/design-build-plan.md` by `ops/scripts/tickets.mjs`.
 
 - [ ] **W5 checkpoint** — merged, main green, scratch-instance upgrade, conformance test, Mac smoke, release
 
-## W4 candidates — 83 tickets, 136.5 agent-days, no wave yet
+## W4 candidates — 86 tickets, 145 agent-days, no wave yet
 
 Follow-ups specified in the plan (§3.2's *Candidates* row) that nobody has scheduled. The owner assigns each one a wave at a checkpoint; until then none is dispatched.
 
@@ -282,9 +282,12 @@ Follow-ups specified in the plan (§3.2's *Candidates* row) that nobody has sche
 - [ ] [X-103](x/x-103.md) · The console's proxy listener — the local owner token never crosses a tunnel · M · opus
 - [ ] [X-104](x/x-104.md) · Passkeys per origin — the rpID follows the request · M · opus
 - [ ] [X-105](x/x-105.md) · `metistry remote` — the record, the adapter interface, and None · M · opus · after X-103, X-104
-- [ ] [X-106](x/x-106.md) · The Tailscale adapter · M · opus · after X-105
-- [ ] [X-107](x/x-107.md) · Settings ▸ Remote Access and the wizard's question · L · opus high · after X-105, X-106, X-77
-- [ ] [X-108](x/x-108.md) · The Cloudflare Tunnel adapter · L · opus high · after X-105, X-111
+- [ ] [X-106](x/x-106.md) · The Tailscale adapter — Funnel by default, tailnet as the alternative · L · opus high · after X-105, X-111, X-112
+- [ ] [X-107](x/x-107.md) · Set Up Remote Access — the guided flow, the wizard step and Settings ▸ Remote Access · L · opus high · after X-105, X-106, X-112, X-77
+- [ ] [X-108](x/x-108.md) · The Cloudflare Tunnel adapter · L · opus high · after X-105, X-111, X-112
 - [ ] [X-109](x/x-109.md) · The ngrok adapter · M · opus · after X-105, X-111
 - [ ] [X-110](x/x-110.md) · The port-forwarding adapter · L · opus high · after X-105, X-111
 - [ ] [X-111](x/x-111.md) · A console on the internet — rate limits and headers on the proxy listener · M · opus · after X-103
+- [ ] [X-112](x/x-112.md) · Provider tool packs — pinned, signed, fetched on choice · M · opus · after X-105
+- [ ] [X-113](x/x-113.md) · The zrok adapter · M · opus · after X-105, X-111, X-112
+- [ ] [X-114](x/x-114.md) · Add a Phone sees the phone arrive — *Opened on your phone* · S · sonnet · after X-75, X-77, X-103

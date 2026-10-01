@@ -23,6 +23,12 @@ designed an opt-in FSL-run rendezvous relay. The owner read it and ruled on
 > create an account with the service they want to use and then OAuth sign into
 > it from Metistry and it gets configured and exposed automatically."
 
+A second ruling the same day: *"Yes, let's add those. If there are things we
+can do to make it easier on the user, let's do that as well. That includes
+bundling/installing the cloudflared, tailscale tunnel app, etc."* — Tailscale
+**Funnel** becomes the recommended path, **zrok** is added, and Metistry may
+**bundle or install provider tools** (§3.6, §3.7, §3.8).
+
 So this revision keeps the analysis of the options, what each provider can
 see, and the two security gaps; drops the relay (recorded under §6,
 *Considered and rejected*); and adds, per provider, how close Metistry can get
@@ -37,35 +43,39 @@ relies on it.
 
 ## The short version
 
-1. **Five choices, asked at setup, changeable in Settings.** None (default),
-   Tailscale, Cloudflare Tunnel, ngrok, port forwarding. No FSL service sits in
-   any of them, so nothing FSL pays for grows with the number of owners.
-2. **No provider offers "Sign in with X" for a third-party app to configure
-   the owner's account — except, newly, Cloudflare.** Tailscale's sign-in is its
-   own app's (Metistry drives the rest, and the HTTPS enablement prompt is
-   Tailscale's own one-click page). Cloudflare launched self-managed OAuth
-   clients with PKCE in June 2026, so a real *Connect to Cloudflare* is
-   plausible; until it is proven, `cloudflared tunnel login`'s browser flow is
-   the fallback. ngrok has no OAuth or device flow: the best is *paste your
-   authtoken*. Port forwarding needs no account but the most machinery.
-3. **Who can read the traffic decides the order.** With Tailscale and port
-   forwarding only the Mac terminates TLS. Cloudflare and ngrok terminate TLS
-   at their edge and see cookies, passkey assertions and bodies in plaintext.
-   Only Tailscale keeps the console's sign-in page off the public internet.
-4. **Recommended order:** None and Tailscale first; then Cloudflare Tunnel,
-   then ngrok; port forwarding last (§5).
-5. **Two existing gaps block every choice but None** (§2): a same-host proxy
-   makes the loopback-only local owner token remote, and a second
-   `METISTRY_ORIGIN` entry cannot complete a passkey ceremony. Both are tickets
-   that land before any provider.
+1. **Six choices, asked at setup, changeable in Settings.** None (default),
+   Tailscale (Funnel or tailnet), Cloudflare Tunnel, zrok, ngrok, port
+   forwarding. No FSL service sits in any of them, so nothing FSL pays for grows
+   with the number of owners.
+2. **Recommended: Tailscale Funnel, on a node Metistry bundles.** Funnel makes
+   the Mac's `ts.net` name a public HTTPS site while TLS still ends on the Mac —
+   Tailscale's relays "do not decrypt the traffic" — so the phone needs **no
+   Tailscale app or VPN**. A bundled, unprivileged `tailscaled` (BSD-3) removes
+   the Mac app too. The owner's steps: Tailscale's sign-in page and up to two
+   one-click approvals (HTTPS, Funnel).
+3. **No provider offers "Sign in with X" to configure the owner's account —
+   except, newly, Cloudflare** (PKCE clients, June 2026, to be proven). zrok and
+   ngrok are *paste a token*; Tailscale's own login page needs no credential in
+   Metistry.
+4. **Who can read the traffic:** the Mac alone with Tailscale (both modes) and
+   port forwarding; the vendor with Cloudflare, zrok and ngrok. Only tailnet mode
+   keeps the sign-in page off the public internet.
+5. **Recommended order:** the fixes → None + Tailscale (Funnel, tailnet) with
+   the tool packs and the guided flow → Cloudflare Tunnel → zrok → ngrok → port
+   forwarding (§5).
+6. **Two existing gaps block every choice but None** (§2), and every
+   internet-facing choice — Funnel included — also waits on rate limits and
+   headers.
 
-| Provider | Closest to one-click | Hostname for `METISTRY_ORIGIN` | TLS ends at (who reads it) | Owner's cost | Needs |
+| Provider | Closest to one-click | Tool: bundled / installed / pasted | Hostname | TLS ends at (who reads it) | Owner's cost |
 | --- | --- | --- | --- | --- | --- |
-| **None** | nothing to do | — (loopback only) | — | $0 | — |
-| **Tailscale** | **near**: provider app signs in; Metistry runs `serve`; HTTPS enablement is one click on Tailscale's page | `https://<mac>.<tailnet>.ts.net` | **the Mac** | $0 | Tailscale app on Mac **and** iPhone |
-| **Cloudflare Tunnel** | **near, if OAuth proves out**: *Connect to Cloudflare* (PKCE) → pick zone → done. Today: browser `cloudflared tunnel login` | `https://<name>.<owner's domain>` | **Cloudflare** | $0 + a domain (~$10/yr) | a domain on Cloudflare DNS |
-| **ngrok** | **paste a token** (no OAuth/device flow) | `https://<dev-domain>.ngrok-free.dev` (free) | **ngrok** | $0 with a weekly warning page; $10/mo removes it | ngrok account |
-| **Port forwarding** | **automatic when the router cooperates**; impossible behind CGNAT | `https://<name>.dedyn.io` (or the owner's domain) | **the Mac** | $0 | a router with PCP/NAT-PMP/UPnP and a public IPv4 |
+| **None** | nothing to do | — | — (loopback) | — | $0 |
+| **Tailscale — Funnel** *(recommended)* | **near**: Tailscale's login page; one-click *allow HTTPS* and *allow Funnel*; no app on the phone | **bundled** userspace `tailscaled` (or the owner's app) | `https://metistry-<instance>.<tailnet>.ts.net` | **the Mac** | $0 |
+| **Tailscale — tailnet** | as Funnel, plus the Tailscale app on the iPhone | **bundled** (or the owner's app) | same | **the Mac** | $0 |
+| **Cloudflare Tunnel** | **near, if OAuth proves out**; else browser `tunnel login` | **bundled** `cloudflared`; OAuth / cert / token | `https://<name>.<owner's domain>` | **Cloudflare** | $0 + a domain |
+| **zrok** | **paste a token** once | **bundled** zrok CLI; account token pasted | `https://<name>.share.zrok.io` | **zrok** (NetFoundry) | $0, 5 GB/day; warning page unless a card is verified |
+| **ngrok** | **paste a token** | owner-installed agent, or the SDK (owner's call); authtoken pasted | `https://<dev-domain>.ngrok-free.dev` | **ngrok** | $0 with a weekly warning page; $10/mo removes it |
+| **Port forwarding** | automatic when the router cooperates; impossible behind CGNAT | in-process (dependencies open); DDNS token pasted | `https://<name>.dedyn.io[:port]` | **the Mac** | $0 |
 
 ## 1. The options, and what each one exposes
 
@@ -91,9 +101,12 @@ on 2026-08-27: Serve, the certificate, the Home Screen PWA and web push
   enable the HTTPS feature if any of your machine names contain sensitive
   information." Renaming the Mac changes its MagicDNS name, and with it the
   rpID.
-- **Funnel is not needed for the phone.** Funnel publishes the node to the whole
-  internet (TLS still ends on the Mac). It only helps a client that cannot join
-  the tailnet; for the phone it adds exposure and nothing else.
+- **Funnel** publishes the node to the whole internet through Tailscale's
+  relays while TLS still ends on the Mac. The 2026-09-28 version called it
+  unnecessary for the phone; the owner's follow-up ruling makes it the
+  recommended mode, because it removes the phone's app and VPN — the biggest
+  friction of plain Tailscale — at the cost of putting the sign-in page on the
+  internet (§3.2).
 
 ### 1.2 Router port forwarding
 
@@ -116,6 +129,7 @@ inbound port).
 | | How | Cost | Who sees plaintext |
 | --- | --- | --- | --- |
 | **Cloudflare Tunnel** | `cloudflared` on the Mac dials out; a hostname on a Cloudflare-managed domain routes to it | free, unmetered; Access free to 50 users | **Cloudflare** — TLS terminates at the edge |
+| **zrok** | the zrok CLI dials out over OpenZiti; a reserved name under `share.zrok.io` | free: 5 GB/day, a browser interstitial unless a card is verified | **zrok** (NetFoundry) at its public frontend |
 | **ngrok** | the agent dials out; a dev domain or a custom domain | free: 1 GB/month, 20k requests, a browser interstitial; Hobbyist $10/month removes it | **ngrok** for HTTPS endpoints; agent-side TLS (paid plans) is end to end but needs the owner's own certificate |
 
 - **Passkeys and origin.** The public hostname becomes `METISTRY_ORIGIN`. That
@@ -206,6 +220,11 @@ third-party app to act on a user's tailnet (checked 2026-09-30). The newer
 service-to-service. **But nothing needs it:** the provider's own app signs
 the Mac in, and Metistry drives the local CLI for everything else.
 
+The steps below were written for the owner's own Tailscale app — the
+`--use-app` path. The recommended path since the follow-up ruling is a bundled
+node in Funnel mode (*Funnel* and *The node*, below); the detection, failures
+and removal carry over, with the node's own login URL in place of the app.
+
 - **Owner does:** installs Tailscale on the Mac (Standalone or App Store
   variant, or the open-source `tailscaled`) and on the iPhone, and signs in to
   both with the same account. If HTTPS certificates are off for the tailnet,
@@ -228,10 +247,9 @@ the Mac in, and Metistry drives the local CLI for everything else.
      MagicDNS must be on (it is the default for new tailnets; an empty
      `Self.DNSName` says it is off).
   4. **Origin.** `https://` + `Self.DNSName` without the dot.
-- **Bundling:** the open-source client is BSD-3-Clause, and tsnet embeds
-  Tailscale in a Go program — but Metistry is TypeScript and Swift, a bundled
-  client still signs in through Tailscale's coordination server, and the iPhone
-  needs the app anyway. **Find the owner's install; never bundle.**
+- **Bundling:** superseded by the follow-up ruling — see *The node*, below:
+  Metistry bundles an unprivileged `tailscaled` and keeps this app path as
+  `--use-app`.
 - **Hostname:** `https://<mac>.<tailnet>.ts.net`. Stable unless the owner renames
   the Mac (MagicDNS follows the rename) or the tailnet name changes. The adapter
   records the name it configured and doctor fails when `Self.DNSName` no longer
@@ -270,6 +288,46 @@ the Mac in, and Metistry drives the local CLI for everything else.
   owns the whole config) removes the handler it added. The Mac stays on the
   tailnet; logging out or removing the device is the owner's, and the pane says
   so.
+
+#### Funnel — the recommended mode (checked 2026-09-30)
+
+- **TLS stays on the Mac.** "Funnel relay servers do not decrypt the traffic
+  between public devices and your device"; the node "terminates the TLS
+  connection". Funnel traffic carries **no** `Tailscale-User-*` identity headers.
+- **Limits.** Ports 443, 8443 and 10000 only; "non-configurable bandwidth
+  limits" (no figure published); "available for all plans".
+- **Requirements.** MagicDNS, HTTPS certificates, and a `funnel` node attribute
+  in the tailnet policy file. Running the command "triggers a web interface that
+  prompts you to approve enabling Funnel" — the flow's one-click step, beside the
+  HTTPS one. A new tailnet's default policy is reported to grant `funnel` to
+  `autogroup:member` (secondary source; §7).
+- **Propagation.** "Public DNS records can take up to 10 minutes to show up."
+- **Status.** `tailscale funnel status --json` reports the handlers.
+- **The phone** opens `https://<node>.<tailnet>.ts.net` in Safari, with no app.
+- **Exposure.** Like Cloudflare, zrok and ngrok, the sign-in page faces the
+  internet, so Funnel waits on the same hardening (plan X-111). Serve and Funnel
+  cannot share a port.
+- **Streaming.** No official word on SSE or idle timeouts through Funnel; an
+  upstream issue reports Serve dropping WebSockets every 10–40 s
+  (tailscale/tailscale#18827). `GET /api/events` must be tested (§7).
+
+#### The node: bundled `tailscaled`, the owner's app, or tsnet
+
+| | Bundled `tailscaled` (recommended) | The owner's Tailscale app | A tsnet helper |
+| --- | --- | --- | --- |
+| What runs | upstream `tailscaled` + `tailscale`, built from a pinned tag, `--tun=userspace-networking`, own `--statedir`/`--socket`, unprivileged, supervised | the App Store or Standalone app (a system or network extension the owner approves in System Settings; no silent path without MDM) | an FSL-written Go program embedding `tailscale.com/tsnet` (`ListenFunnel` exists) |
+| Owner installs | nothing | the app, plus approvals | nothing |
+| Name | `metistry-<instance>` — survives a Mac rename | the Mac's name — changes on rename | as bundled |
+| FSL code | none (packaging only) | none | Go, a new language in the product |
+| What the owner loses | the app's menu and MagicDNS **on the Mac** (the node is Metistry's alone) | — | as bundled |
+| Unverified | unprivileged userspace mode with Funnel on macOS is from secondary sources (§7) | — | no official guidance for desktop embedding |
+
+Userspace mode needs no root and no system extension; it is the mode
+Tailscale's container images use, and incoming Serve/Funnel connections are
+handled by its netstack. A Mac already running the Tailscale app gets a second
+node on the same tailnet, which is harmless. **Recommendation:** bundle the
+node, keep `--use-app` for owners who prefer their app; the tsnet helper is not
+worth adding Go for. Licence: BSD-3-Clause.
 
 ### 3.3 Cloudflare Tunnel
 
@@ -358,7 +416,49 @@ authorize`). That is the one place in this research where the owner's
   the Keychain items. Revoking the OAuth grant or API token (and `cert.pem`'s
   access) is listed for the owner.
 
-### 3.4 ngrok
+### 3.4 zrok (added 2026-09-30)
+
+**True OAuth?** **No.** `zrok enable <token>` with the account token from the
+web console; zrok's OAuth is for *visitors* to a share (Google, GitHub), not
+for signing the CLI in.
+
+- **Owner does:** signs up at zrok.io (no card); pastes the account token once.
+  Optionally verifies a card (no charge) to remove the warning page.
+- **Metistry automates:** with its bundled CLI, `enable` into
+  `.metistry/state/zrok/`; a reserved **name** in the `public` namespace; a
+  headless public share to the proxy listener (zrok's proxy backend takes an
+  HTTP URL, so the loopback proxy port), supervised. zrok's own *agent* mode can
+  carry shares too; Metistry's supervisor is enough.
+- **v2.** zrok 2.0 renamed the binary to `zrok2` (and `~/.zrok` to `~/.zrok2`)
+  so v1 and v2 can coexist, and replaced reserved shares with namespaces and
+  names: `zrok2 create name -n public <name>`, then `zrok2 share public <target>
+  -n public:<name>`. The v1 line still ships. (Two CHANGELOG reads; §7.)
+- **Hostname:** `https://<name>.share.zrok.io`, stable across runs. Custom
+  domains need a paid myzrok.io plan.
+- **TLS:** **zrok's public frontend** (NetFoundry) terminates TLS and can read
+  the traffic. Private shares are end to end but need zrok on the visitor's
+  device — no use to a phone browser.
+- **Warning page:** shown on the free plan to browsers (a `User-Agent` starting
+  `Mozilla/5.0`) on first visit, resetting weekly; `skip_zrok_interstitial`
+  skips it for clients that can set headers (a Safari navigation cannot). The
+  pricing page: "No Interstitials with Verified Credit Card".
+- **Cost:** free — "5 Daily GB" (rolling 24 h), 25 environments, 50 shares, no
+  card. Paid options are through NetFoundry sales.
+- **Tooling:** the Go CLI (Apache-2.0) from GitHub releases or Homebrew; a Go
+  SDK; `@openziti/zrok` on npm (last published before v2; internals unverified).
+  **Bundle the CLI.** Whether the macOS binaries are notarized is unverified —
+  Metistry re-signs them anyway.
+- **Self-hosting:** a controller and public frontend on the owner's own host
+  (wildcard DNS and certificate) — an option for owners who run their own; not
+  automated.
+- **Failures and wording:** 401 `enableUnauthorized` — *"zrok didn't accept the
+  account token. Copy it again from zrok.io."*; name taken — *"<name> is taken on
+  zrok. Choose another."*; the daily limit — *"Your zrok plan's daily limit is
+  used up. Your phone can't reach this Mac until it resets."* Hosted-service 500s
+  and 429s are reported: retry with backoff, and clean up idempotently.
+- **Removal:** stop the share, delete the name, `disable` the environment.
+
+### 3.5 ngrok
 
 **True OAuth?** **No.** The agent's only credential commands are `ngrok config
 add-authtoken` and `add-api-key`; there is no `ngrok login`, no device flow, and
@@ -377,11 +477,13 @@ and Metistry reads it from stdin (hidden) into the Keychain — never argv.
   without one, the adapter asks the owner to paste the domain shown on the
   dashboard's Domains page (inference: the agent's own output also reports the
   URL once online).
-- **The agent is closed-source**, and ngrok's terms require written consent to
-  redistribute it to users with their own accounts, so Metistry **cannot bundle
-  it**: the owner installs it (`brew install ngrok`) or Metistry uses the
-  `@ngrok/ngrok` SDK, a native Node addon — a dependency (U5) for the owner to
-  approve.
+- **The agent is closed-source**, and ngrok's terms let a developer distribute
+  it to "customers who maintain their own accounts with ngrok" only "subject to
+  ngrok's prior written consent", so Metistry **cannot bundle it**: the owner
+  installs it (`brew install ngrok`, or ngrok's zip). The alternative is the
+  `@ngrok/ngrok` SDK (MIT or Apache-2.0, a native Rust addon; authtoken only;
+  forwards to `unix:` sockets) or `ngrok-go` — a dependency (U5), and whether
+  the consent clause reaches an embedded SDK is unverified (§7).
 - **Free-plan interstitial.** ngrok "shows an interstitial page in front of all
   HTML browser traffic on the free tier"; clicking *Visit* sets a cookie that
   suppresses it for 7 days. The skip header (`ngrok-skip-browser-warning`)
@@ -417,7 +519,7 @@ and Metistry reads it from stdin (hidden) into the Keychain — never argv.
   Keychain. Resetting the token and releasing a custom domain are the owner's,
   in the dashboard; the dev domain is the account's and is not released.
 
-### 3.5 Port forwarding
+### 3.6 Port forwarding
 
 **True OAuth?** Not applicable — no account, except the DDNS provider's token.
 Closest to one-click **when the router cooperates**: Metistry asks the router,
@@ -493,13 +595,62 @@ names the result, and stops honestly when it cannot work.
   `DeletePortMapping` for UPnP), stop serving, delete the TXT/A records Metistry
   created, drop the Keychain items. Releasing the DDNS name is the owner's.
 
+### 3.7 Bundling and installing provider tools (ruled allowed 2026-09-30)
+
+Metistry already ships a pinned, signed runtime pack (`docs/ops/bundled-runtime.md`):
+each component pinned by version **and sha256**, every Mach-O signed with FSL's
+Developer ID and the hardened runtime in CI, fetched and unpacked by
+`runtime-deps.ts`'s verify-then-unpack code, moved forward by `metistry update`.
+Provider tools ride the same channel as **one pack per tool, fetched only when
+the owner picks that provider** — nothing extra in the DMG.
+
+| Tool | Licence | Source for the pack | Notes |
+| --- | --- | --- | --- |
+| `tailscaled` + `tailscale` | BSD-3-Clause | built from a pinned upstream tag | Go; arm64 Go binaries are ad-hoc linker-signed, re-signed by FSL |
+| `cloudflared` | Apache-2.0 | the official `darwin-arm64` release binary (SHA-256 published per release) | upstream notarization was attempted and reverted in early 2026, so the binary is likely only ad-hoc signed — FSL re-signs it; releases land every one to two weeks; the token goes in by `TUNNEL_TOKEN` or `--token-file`, never argv |
+| zrok CLI | Apache-2.0 | the official release binary | signing unverified; FSL re-signs |
+| ngrok agent | proprietary | **not bundled** | the owner's install, or the SDK (owner's call) |
+| port forwarding | — | in-process code | NAT-PMP/PCP/UPnP and ACME: dependencies still open |
+
+A tool unpacked by `tar` from the CLI carries no quarantine attribute, so
+Gatekeeper does not assess it; the FSL signature is for attribution and for a
+later DMG that embeds it. The Tailscale *app*, if an owner wants it instead,
+cannot be installed silently: its extension and VPN configuration need the
+owner's approval in System Settings — so the bundled node is the ease win.
+
+### 3.8 The guided flow, and proving the phone can reach the Mac
+
+The wizard's *Set Up Remote Access*: choose (Funnel recommended) → fetch the
+pack → open the provider's sign-up or sign-in page and **detect completion**
+(`BackendState` = `Running`, the OAuth callback, a token that enables) → show the
+provider's own one-click approvals → expose → check → only then Add a Phone.
+
+**Reachability without an FSL or third-party probe.** Three signals, in
+increasing strength:
+
+1. **The provider's own status** — `tailscale funnel status`, the tunnel's
+   connections, the zrok share, the ngrok endpoint. Says the provider is
+   carrying it, not that the internet reaches it.
+2. **`GET <origin>/health` from the Mac**, returning this instance's
+   `instance_id`. Through Cloudflare, zrok and ngrok this goes out to the edge
+   and back, a real public path. Through Funnel it is real when the Mac
+   resolves the name publicly, but a Mac running the Tailscale app with
+   MagicDNS reaches it over the tailnet instead; through port forwarding it
+   depends on hairpin NAT. So it is reported as *"answers from this Mac"*.
+3. **The phone itself.** The Add a Phone QR is the test: when the phone opens
+   the link, its `POST /auth/enroll/start` arrives through the proxy listener,
+   and the console stamps the code (`opened_at`, `opened_via`). The sheet shows
+   *Opened on your phone* — proof from outside, over the phone's real network,
+   with no service in between (plan X-114).
+
 ## 4. The common shape
 
 - **The record.** `.metistry/deployment.yaml` `remote:` — provider, origin, and
   non-secret settings (tunnel id, hostname) — written through the protected
   write, like keep-awake. Credentials (OAuth refresh token, API token,
   authtoken, DDNS token, ACME account key, `cert.pem`) live in the login
-  Keychain. Tailscale's live in Tailscale.
+  Keychain. The bundled Tailscale node keeps its machine key in its own state
+  directory (0700); the owner's app keeps its own.
 - **The origin.** The environment renderer puts the remote origin first in
   `METISTRY_ORIGIN` and keeps the loopback origin second, so `metistry enroll`
   (which mints for the first entry) and the Add a Phone QR pick it up unchanged,
@@ -508,7 +659,8 @@ names the result, and stops honestly when it cannot work.
 - **Switching.** Configure the new provider, wait for its origin to answer,
   then revoke the old one. Passkeys created for the old hostname stop working
   — unavoidable, since the rpID is the hostname — and Devices marks them.
-- **Supervision.** `cloudflared`, the ngrok agent and the port-forward renewer
+- **Supervision.** The Tailscale node, `cloudflared`, the zrok share, the ngrok
+  forwarder and the port-forward renewer
   are supervised jobs under the launchd shape (`metistry restart <service>`
   works on them). Under `shape: compose` the proxy listener is a second
   published port; the provider's agent still runs on the host.
@@ -518,23 +670,27 @@ names the result, and stops honestly when it cannot work.
 
 ## 5. Recommended order, and why
 
-1. **The two fixes** (§2) — bugs whatever the owner picks, and every provider
-   needs them.
-2. **None + Tailscale.** None is every install's default and nearly free to
-   build. Tailscale is the only choice where nothing faces the internet *and*
-   only the Mac sees plaintext; its own apps do the sign-in (Metistry holds no
-   credential); its HTTPS enablement is a one-click page of Tailscale's; PoC-6
-   proved the whole path. It is also the home-network answer.
-3. **Cloudflare Tunnel, then ngrok.** Both put the sign-in page on the internet
-   and both decrypt at the vendor, so both wait on X-111. Cloudflare first: no
-   interstitial, a browser sign-in (and possibly real OAuth) instead of a pasted
-   token, and `cloudflared` may be bundled. ngrok second: token paste only, a
-   closed agent Metistry cannot bundle, and a free plan whose weekly warning
-   page may not suit a Home Screen app.
-4. **Port forwarding last.** The most code (mapping, DDNS, ACME, renewal), the
-   most exposure (the home address in public DNS, the console's TLS facing
-   scanners), dependencies to approve, and it simply cannot work behind CGNAT —
-   a growing share of home connections (fixed-wireless and satellite).
+1. **The two fixes and the hardening** (§2; plan X-103, X-104, X-111) — the
+   gaps are bugs whatever the owner picks, and the recommended default is
+   public.
+2. **None + Tailscale (Funnel and tailnet)**, with the tool packs, the guided
+   flow and *Opened on your phone*. Funnel removes the phone's app and VPN while
+   TLS stays on the Mac; the bundled node removes the Mac app; PoC-6 proved the
+   Serve path; the owner's only steps are Tailscale's own.
+3. **Cloudflare Tunnel** — no warning page, the owner's own domain, a browser
+   sign-in (possibly real OAuth), a bundleable agent; but the domain is a
+   prerequisite and Cloudflare reads the traffic.
+4. **zrok** — open source, bundleable, self-hostable, 5 GB a day free, and a
+   warning page removable by verifying a card; ahead of ngrok on everything but
+   maturity (hosted-service 500s and 429s are reported).
+5. **ngrok** — a pasted token, a closed agent Metistry cannot bundle, 1 GB a
+   month free, and a warning page only a paid plan removes.
+6. **Port forwarding last** — the most code, the most exposure (the home address
+   in public DNS), dependencies to approve, and impossible behind CGNAT.
+
+The owner's suggested order is kept as is; nothing in the research argues for
+moving zrok ahead of Cloudflare: Cloudflare's lack of a warning page matters
+more to a Home Screen app than zrok's no-domain convenience.
 
 ## 6. Considered and rejected
 
@@ -558,24 +714,37 @@ FSL-paid TURN.
 **Quick Tunnels** (`trycloudflare.com`) and any random-URL tunnel: the hostname
 changes on every run, which breaks every passkey; Cloudflare's also lack SSE.
 
-**Bundling a VPN client** (tsnet or the Tailscale CLI inside Metistry.app): Go
-only, still signs in through Tailscale's servers, and the iPhone needs the app
-regardless.
+*Bundling a VPN client* was listed here on the first revision; the follow-up
+ruling reverses that — with Funnel the iPhone needs no app, and a bundled
+userspace node needs no Mac app (§3.2). Only the tsnet *helper* variant stays
+unrecommended (it adds FSL-written Go).
 
 ## 7. To verify hands-on before the tickets rely on it
 
-1. **Cloudflare OAuth:** register a private PKCE client; confirm a loopback
+Numbered as plan §2.23's R-list.
+
+1. **R-1 Cloudflare OAuth:** register a private PKCE client; confirm a loopback
    redirect is accepted and that tunnel and DNS permissions are grantable
    scopes (`GET /client/v4/oauth/scopes`). Then decide public vs `tunnel login`.
-2. **Cloudflare Access + PWA:** manifest fetch, cookie expiry in standalone
+2. **R-2 Cloudflare Access + PWA:** manifest fetch, cookie expiry in standalone
    mode, and a passkey ceremony behind Access, on a real iPhone.
-3. **ngrok free plan + PWA:** the interstitial on first launch of a Home Screen
-   app, the 7-day cookie in standalone storage, and `GET /api/events`.
-4. **Tailscale:** the exact output of `tailscale serve` when HTTPS is off (so
-   the adapter can surface the link without scraping prose — prefer a status
-   field if one exists), and `serve` behaviour when the node key expires.
-5. **Port forwarding:** PCP/NAT-PMP/UPnP support on the owner's router and one
-   CGNAT line (T-Mobile Home Internet or Starlink) to confirm the refusal.
+3. **R-3 ngrok:** the free warning page on a Home Screen app's first launch, its
+   7-day cookie in standalone storage, and `GET /api/events`; whether ngrok's
+   consent clause covers an SDK embedded for users with their own accounts;
+   whether SDK sessions count as agents on the free plan.
+4. **R-4 Port forwarding:** PCP/NAT-PMP/UPnP on the owner's router and one CGNAT
+   line (T-Mobile Home Internet or Starlink) to confirm the refusal.
+5. **R-5 zrok:** the `zrok2` binary and v2 commands; SSE through a public share;
+   the warning page on a Home Screen app; whether the release binaries are signed.
+6. **R-6 Tailscale node and Funnel:** upstream `tailscaled` built for macOS and
+   run unprivileged with `--tun=userspace-networking`, serving Funnel to the
+   proxy port, beside an installed Tailscale app; the exact output when Funnel
+   or HTTPS is not yet allowed (prefer a status field over scraping prose);
+   whether a new tailnet's default policy grants `funnel`; `GET /api/events` held
+   open through Funnel; node key expiry's effect on Funnel; pack sizes.
+7. **Signing:** `codesign -dv` on each upstream binary before the first pack, and
+   that the re-signed `cloudflared`, `tailscaled` and zrok run under the hardened
+   runtime with no entitlements.
 
 ## 8. Website copy
 
@@ -583,13 +752,26 @@ The metistry.ai Download page marks step 1 BEING DESIGNED. Once None and
 Tailscale ship, it can say what is true:
 
 > **Let your phone reach your Mac.** Metistry answers only on your Mac until you
-> choose a way in. When you set it up, pick how your phone should reach it —
-> Tailscale (free and private), a Cloudflare or ngrok tunnel, or your router —
-> and Metistry configures it for you. You can change it later in Settings.
+> choose a way in. When you set it up, Metistry recommends Tailscale Funnel —
+> free, encrypted all the way to your Mac, and nothing to install on your phone
+> — and sets it up for you; Cloudflare, zrok, ngrok or your router work too. You
+> can change it later in Settings.
 
 Name only the providers that have shipped at the time.
 
 ## Sources
+
+**Fetched 2026-09-30, follow-up** (§3.2 Funnel and the node, §3.4 zrok, §3.5, §3.7):
+
+- Tailscale Funnel — <https://tailscale.com/kb/1223/funnel>; Funnel CLI — <https://tailscale.com/docs/reference/tailscale-cli/funnel>; Serve (identity headers absent on Funnel; one port per Serve or Funnel) — <https://tailscale.com/docs/features/tailscale-serve>
+- tsnet (`ListenFunnel`, login fallback) — <https://pkg.go.dev/tailscale.com/tsnet>, <https://tailscale.com/docs/features/tsnet>, examples — <https://github.com/tailscale/tailscale/tree/main/tsnet/example>
+- Userspace networking — <https://tailscale.com/kb/1112/userspace-networking>; unprivileged `tailscaled` on macOS (secondary) — <https://dev.to/devlog/running-tailscale-without-sudo-the-userspace-networking-trade-offs-nobody-mentions-16a3>
+- macOS variants and the standalone `.pkg` — <https://tailscale.com/kb/1065/macos-variants>; system-extension approvals — <https://tailscale.com/docs/concepts/macos-sysext>
+- Serve WebSocket drops — <https://github.com/tailscale/tailscale/issues/18827>
+- zrok pricing — <https://zrok.io/pricing/>; CHANGELOG (v2: `zrok2`, names) — <https://github.com/openziti/zrok/blob/main/CHANGELOG.md>; releases — <https://github.com/openziti/zrok/releases>; names and namespaces — <https://netfoundry.io/docs/zrok/concepts/namespaces/>; public shares — <https://netfoundry.io/docs/zrok/concepts/sharing-public/>; v1→v2 migration — <https://netfoundry.io/docs/zrok/how-tos/migration/migrate-v1-to-v2/>; agent — <https://netfoundry.io/docs/zrok/1.0/guides/agent/>; custom domains — <https://netfoundry.io/docs/zrok/myzrok/custom-domains/>; the interstitial — <https://blog.openziti.io/zrok-is-growing-up>, <https://github.com/openziti/zrok/issues/777>; TLS at the frontend — <https://openziti.discourse.group/t/e2e-tls-termination/4611>; Node SDK — <https://www.npmjs.com/package/@openziti/zrok>
+- cloudflared releases and checksums — <https://github.com/cloudflare/cloudflared/releases>; licence — <https://github.com/cloudflare/cloudflared/blob/HEAD/LICENSE>; reverted notarization (secondary: a CI run) — <https://github.com/cloudflare/cloudflared/actions/runs/21210897471>; run parameters (`TUNNEL_TOKEN`, `--token-file`) — <https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/configure-tunnels/run-parameters/>
+- ngrok JavaScript SDK (MIT/Apache-2.0) — <https://github.com/ngrok/ngrok-javascript>; `forward()` — <https://ngrok.github.io/ngrok-javascript/functions/forward.html>; ngrok-go — <https://pkg.go.dev/golang.ngrok.com/ngrok/v2>; terms (agent redistribution) — <https://ngrok.com/tos>; macOS download — <https://ngrok.com/download/mac-os>
+- Apple: embedding a helper tool — <https://developer.apple.com/documentation/xcode/embedding-a-helper-tool-in-a-sandboxed-app>; placing content in a bundle — <https://developer.apple.com/documentation/bundleresources/placing-content-in-a-bundle>; quarantine — <https://developer.apple.com/forums/thread/683551>
 
 **Fetched 2026-09-30** (§3):
 

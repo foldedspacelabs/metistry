@@ -458,12 +458,31 @@ proven hands-on (R-1). **Tailscale**'s sign-in is its own app's, which needs no
 credential in Metistry. **ngrok** has no OAuth or device flow: the owner pastes
 the authtoken. **Port forwarding** needs no account but a DDNS token.
 
-**Still open** (plan §2.23): dependencies for port forwarding (NAT-PMP/PCP/UPnP
-and ACME — hand-roll, approve packages, or run Caddy); whether Metistry may
-download or bundle `cloudflared`; registering FSL's public Cloudflare OAuth
-client (permanent, needs domain verification on `metistry.ai`); the free ngrok
-plan if its warning page breaks a Home Screen app (R-3); and when to schedule
-X-103…X-111.
+**Still open** after this ruling — see the follow-up ruling below, which
+answers the `cloudflared` question.
+
+### Follow-up, 2026-09-30 — Funnel recommended, zrok added, provider tools bundled
+
+The owner read the revision and asked for more: *"Yes, let's add those. If
+there are things we can do to make it easier on the user, let's do that as
+well. That includes bundling/installing the cloudflared, tailscale tunnel app,
+etc."*
+
+| # | Item | Ruling | Where it lands |
+| --- | --- | --- | --- |
+| 6 | Tailscale Funnel | **Recommended.** A mode of the Tailscale provider — *Any browser (Funnel)*, the default when Tailscale is chosen, beside *Only my devices (tailnet)*. The phone needs no Tailscale app. Funnel is public, so it is held to the internet-facing rules: blocked by X-103 and X-111 like the tunnels. | plan §2.23; X-106 |
+| 7 | zrok | **Added** as a sixth choice (open source; free hosted plan; self-hostable). | plan §2.23; X-113 |
+| 8 | Provider tools | **Metistry may bundle or install them.** Answers the earlier open question on `cloudflared`. Each tool is pinned, checksummed and signed like the runtime pack, fetched when the owner picks that provider, and moved forward by `metistry update`. | plan §2.23; X-112 |
+| 9 | Order | Fixes → None and Tailscale (Funnel, tailnet) → Cloudflare Tunnel → zrok → ngrok → port forwarding. | §3.2 *Candidates* |
+| 10 | One guided flow | The wizard's *Set Up Remote Access* recommends Funnel, opens the provider's sign-up or sign-in, detects completion, proves the phone can reach the Mac, and only then offers Add a Phone. | plan §2.23; X-107, X-114 |
+
+**Still open** (plan §2.23): the Tailscale node — a bundled userspace
+`tailscaled` (recommended) or the owner's Tailscale app only; dependencies for
+port forwarding (NAT-PMP/PCP/UPnP and ACME — hand-roll, approve packages, or
+run Caddy); the ngrok route — the `@ngrok/ngrok` SDK (a dependency; ngrok's
+written consent may be needed) or the owner's own agent; registering FSL's public Cloudflare OAuth client (permanent, needs
+domain verification on `metistry.ai`); the free ngrok and zrok warning pages
+if they break a Home Screen app; and when to schedule X-103…X-114.
 
 ## Rulings the owner must make
 

@@ -505,6 +505,15 @@ decides); the cap and throttle numbers after the PoC; when to file the PSL entry
 (permanent); and the ACME dependency question, which now gates both port
 forwarding and the relay.
 
+### Third follow-up, 2026-09-30 — relay sub-paths rejected; owner names under `u.`
+
+| # | Item | Ruling | Where it lands |
+| --- | --- | --- | --- |
+| 16 | Relay sub-paths with one shared certificate (`metistry.app/user/<id>`) | **Rejected.** Routing by path means the relay decrypts, so FSL could read every owner's traffic; a shared certificate puts one private key on every Mac (any owner could impersonate the site, and a compromised key must be revoked within 24 hours under the CA/B Forum Baseline Requirements); one origin shares cookies, storage, service workers and the passkey rpID across owners. A wildcard certificate on the relay has the same decryption problem. | research §6; plan §2.24 |
+| 17 | Owner hostnames | **`<id>.u.metistry.app`** — wildcard `*.u.metistry.app` to the relay; the ACME helper writes only `_acme-challenge.<id>.u.metistry.app`. | plan §2.24; X-116 |
+| 18 | PSL entry | For **`u.metistry.app`**, not the apex: each `<id>.u.metistry.app` is its own registrable domain, which still gives each owner Let's Encrypt's 50-certificates-a-week limit. | X-118 |
+| 19 | Disclosure | A plain page at `metistry.app` (and `u.metistry.app`) says owner names are run by owners, not FSL, with an abuse link — replacing the apex's 301 to metistry.ai **when the relay ships**, as a metistry-website infra follow-up. No banner can be injected: the traffic is end-to-end encrypted, by design. | plan §2.24 |
+
 ## Rulings the owner must make
 
 (a), (b) and (c) were ruled in W1 — see *Rulings made by the owner in W1* above.

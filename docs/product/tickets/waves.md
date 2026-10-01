@@ -294,4 +294,4 @@ Follow-ups specified in the plan (§3.2's *Candidates* row) that nobody has sche
 - [ ] [X-115](x/x-115.md) · Metistry Relay data plane — the PoC, then the instance · L · opus high · after X-112
 - [ ] [X-116](x/x-116.md) · Metistry Relay control plane — CDK, Lambda, DynamoDB, the ACME helper · L · opus high · after X-115
 - [ ] [X-117](x/x-117.md) · The Metistry Relay adapter — client, certificate, allowance · M · opus · after X-105, X-111, X-112, X-116
-- [ ] [X-118](x/x-118.md) · `metistry.app` on the Public Suffix List · S · sonnet
+- [ ] [X-118](x/x-118.md) · `u.metistry.app` on the Public Suffix List · S · sonnet

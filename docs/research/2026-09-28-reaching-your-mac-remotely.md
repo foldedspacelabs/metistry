@@ -74,7 +74,7 @@ relies on it.
 | **None** | nothing to do | — | — (loopback) | — | $0 |
 | **Tailscale — Funnel** *(recommended)* | **near**: Tailscale's login page; one-click *allow HTTPS* and *allow Funnel*; no app on the phone | **bundled** userspace `tailscaled` (or the owner's app) | `https://metistry-<instance>.<tailnet>.ts.net` | **the Mac** | $0 |
 | **Tailscale — tailnet** | as Funnel, plus the Tailscale app on the iPhone | **bundled** (or the owner's app) | same | **the Mac** | $0 |
-| **Metistry Relay** | **one click**: turn it on; no account | **bundled** relay client; a relay token from registration | `https://<id>.metistry.app` | **the Mac** (TLS passes through unopened) | $0 — 5 GB a month |
+| **Metistry Relay** | **one click**: turn it on; no account | **bundled** relay client; a relay token from registration | `https://<id>.u.metistry.app` | **the Mac** (TLS passes through unopened) | $0 — 5 GB a month |
 | **Cloudflare Tunnel** | **near, if OAuth proves out**; else browser `tunnel login` | **bundled** `cloudflared`; OAuth / cert / token | `https://<name>.<owner's domain>` | **Cloudflare** | $0 + a domain |
 | **zrok** | **paste a token** once | **bundled** zrok CLI; account token pasted | `https://<name>.share.zrok.io` | **zrok** (NetFoundry) | $0, 5 GB/day; warning page unless a card is verified |
 | **ngrok** | **paste a token** | owner-installed agent, or the SDK (owner's call); authtoken pasted | `https://<dev-domain>.ngrok-free.dev` | **ngrok** | $0 with a weekly warning page; $10/mo removes it |
@@ -658,7 +658,7 @@ an uncapped SNI relay and FSL-paid TURN stay rejected. Plan §2.24 is the spec.
 **Shape.**
 
 ```
- iPhone (Safari) ──TLS for <id>.metistry.app──► Lightsail relay ──same TLS, unopened──► Mac
+ iPhone (Safari) ──TLS for <id>.u.metistry.app──► Lightsail relay ──same TLS, unopened──► Mac
                                                 (SNI → tunnel)       (tunnel dialled OUT by the Mac;
                                                                       the Mac terminates TLS)
 ```
@@ -668,12 +668,12 @@ an uncapped SNI relay and FSL-paid TURN stay rejected. Plan §2.24 is the spec.
   `ssl_preread` plus a reverse-tunnel client (the PoC decides). It never
   decrypts. The Mac's bundled client holds the tunnel outbound, so CGNAT does
   not matter, and the Mac serves TLS itself with its own Let's Encrypt
-  certificate for `<id>.metistry.app`. The phone needs nothing.
+  certificate for `<id>.u.metistry.app`. The phone needs nothing.
 - **Control plane:** API Gateway HTTP API + Lambda + DynamoDB in FSL's account,
   in CDK: opt-in registration (an opaque `<id>`, a revocable relay token),
   per-id usage, revoke and a kill switch, and an ACME DNS-01 helper that writes
-  only `_acme-challenge.<id>.metistry.app` in the Route 53 zone `metistry.app`
-  for the authenticated id. `*.metistry.app` points at the relay's static IP;
+  only `_acme-challenge.<id>.u.metistry.app` in the Route 53 zone `metistry.app`
+  for the authenticated id. `*.u.metistry.app` points at the relay's static IP;
   the apex and `www` keep redirecting to metistry.ai.
 
 **Lightsail's numbers** (pricing page, checked 2026-09-30): Linux bundles at
@@ -697,14 +697,25 @@ month, 0.9 TB carries **≈ 4,500 owners** per $7 box. A heavy owner hits the
 which is what the global cap is for. Growth is a deliberate step ($12/3 TB, or a
 second instance), never automatic overage.
 
-**Public Suffix List.** Let's Encrypt allows "up to 50 certificates … per
-registered domain … every 7 days" and uses the PSL to decide what a registered
-domain is (rate-limits page, checked 2026-09-30). Without a PSL entry every
-owner's certificate counts against `metistry.app`'s 50 a week; with one, each
-`<id>.metistry.app` is its own registered domain. The entry also isolates
-cookies between owners and stops anyone claiming `metistry.app` as a passkey
-rpID. It is permanent and takes weeks, so registrations are capped at about 40 a
-week until it lands.
+**Owner names under `u.`, and the Public Suffix List.** Owner hostnames are
+`<id>.u.metistry.app`, so FSL's own names (`metistry.app`, the planned
+`auth.metistry.app`) never share a parent with an owner's. Let's Encrypt allows
+"up to 50 certificates … per registered domain … every 7 days" and uses the PSL
+to decide what a registered domain is (rate-limits page, checked 2026-09-30).
+The PSL entry is for **`u.metistry.app`**: with it listed, the registered domain
+of `<id>.u.metistry.app` is that name itself, so **each owner gets their own 50
+a week — the limit is still lifted** — and owners' cookies and passkey rpIDs are
+isolated from each other. Without the entry every owner's certificate counts
+against `metistry.app`'s 50 a week. Inclusion is permanent and takes weeks, so
+registrations are capped at about 40 a week until it lands.
+
+**Disclosure without a banner.** The relay cannot inject a "this is user
+content" banner — it never sees the plaintext, which is the point. Instead, a
+plain page at `https://metistry.app` (and `u.metistry.app`) says that names under
+`u.metistry.app` are run by individual Metistry owners on their own Macs, not by
+Folded Space Labs, with an abuse report link. Today the apex 301s to
+metistry.ai; changing that is a follow-up for the metistry-website infra when
+the relay ships.
 
 **What FSL sees:** SNI hostnames (opaque ids), IP addresses, timing and volume —
 never content. Each id's certificate appears in Certificate Transparency logs,
@@ -794,6 +805,29 @@ egress at 10,000 owners by my estimate) and FSL-paid TURN. A later ruling the
 same day accepts a **capped** SNI relay on a flat-priced Lightsail bundle — §3.9,
 the Metistry Relay — because its caps keep FSL's bill fixed.
 
+**Relay sub-paths with one shared certificate** (`metistry.app/user/<id>`,
+asked by the owner and rejected 2026-09-30). Three reasons, each sufficient:
+
+1. **The relay would have to decrypt.** The path is inside the TLS stream; only
+   the SNI hostname is visible to a passthrough relay. Routing by path means FSL
+   terminates TLS and can read every owner's traffic, session cookies included —
+   the end-to-end property §3.9 exists for is gone. Keeping TLS on the Macs
+   instead would mean **one certificate's private key on every Mac**: any owner
+   could impersonate `metistry.app` and intercept others, and once a key is known
+   to be compromised the CA must revoke the certificate within 24 hours (the
+   CA/Browser Forum Baseline Requirements' key-compromise rule, §4.9.1.1 — stated
+   from secondary sources checked 2026-09-30, not quoted from the BR text), which
+   would take every owner down at once.
+2. **One origin isolates nothing.** Every owner would share cookies, storage,
+   service workers and script. A page served from one owner's Mac could make
+   same-origin requests to `/user/<victim>/api/...` carrying the victim's session;
+   every passkey would share the rpID `metistry.app`; and iOS Home Screen apps on
+   one origin share storage.
+3. **A wildcard certificate on the relay** has the decryption problem of (1).
+
+Per-owner names under `u.metistry.app`, each with the Mac's own certificate, are
+the design (§3.9).
+
 **Quick Tunnels** (`trycloudflare.com`) and any random-URL tunnel: the hostname
 changes on every run, which breaks every passkey; Cloudflare's also lack SSE.
 
@@ -852,6 +886,7 @@ Name only the providers that have shipped at the time.
 - Lightsail pricing (bundles, static IP, both directions count, overage) — <https://aws.amazon.com/lightsail/pricing/>
 - Let's Encrypt rate limits (50 per registered domain per 7 days; the PSL) — <https://letsencrypt.org/docs/rate-limits/>
 - Public Suffix List guidelines (private-section requests) — <https://github.com/publicsuffix/list/wiki/Guidelines>
+- CA/Browser Forum Baseline Requirements (§4.9.1.1, key-compromise revocation within 24 hours; the fetched page did not include §4.9) — <https://cabforum.org/working-groups/server/baseline-requirements/requirements/>; secondary summaries — <https://www.digicert.com/blog/a-guide-to-tls-certificate-revocations>, <https://www.ssl.com/faqs/compromised-private-keys/>
 
 **Fetched 2026-09-30, follow-up** (§3.2 Funnel and the node, §3.4 zrok, §3.5, §3.7):
 

@@ -1591,7 +1591,7 @@ and no other choice sends anything to FSL.
 | **None** *(default)* | this Mac only | — | — (`METISTRY_ORIGIN` stays loopback) | $0 |
 | **Tailscale — Any browser (Funnel)** *(recommended)* | the internet; the phone needs **no app** | **the Mac** (Funnel's relays "do not decrypt the traffic") | `https://<node>.<tailnet>.ts.net` | $0 (all plans) |
 | **Tailscale — Only my devices** | the owner's tailnet; the phone needs the Tailscale app | **the Mac** | same name | $0 |
-| **Metistry Relay** *(§2.24)* | the internet; no account anywhere | **the Mac** (the relay passes TLS through unopened) | `https://<id>.metistry.app` | $0 — 5 GB a month |
+| **Metistry Relay** *(§2.24)* | the internet; no account anywhere | **the Mac** (the relay passes TLS through unopened) | `https://<id>.u.metistry.app` | $0 — 5 GB a month |
 | **Cloudflare Tunnel** | the internet | **Cloudflare** | `https://<name>.<owner's domain>` | $0 + a domain (~$10/yr) |
 | **zrok** | the internet | **zrok's frontend** (NetFoundry) | `https://<name>.share.zrok.io` | $0 (5 GB/day; warning page unless a card is verified) |
 | **ngrok** | the internet | **ngrok** | `https://<dev-domain>.ngrok-free.dev` | $0 with a weekly warning page; $10/mo removes it |
@@ -1897,7 +1897,7 @@ rendezvous, an uncapped SNI relay, FSL-paid TURN) stay rejected. The research is
 **What the owner gets.** A seventh choice, **Metistry Relay**, after Tailscale
 Funnel: *"No account needed. Metistry's relay passes your encrypted traffic
 through; it can't read it. 5 GB a month."* The origin is
-`https://<id>.metistry.app`; the phone needs nothing. Off until the owner turns
+`https://<id>.u.metistry.app`; the phone needs nothing. Off until the owner turns
 it on, from the Mac.
 
 **Data plane — one Lightsail instance.** A $7/month Lightsail Linux bundle
@@ -1909,7 +1909,7 @@ Mac, or HAProxy `ssl_preread` with a reverse-tunnel client — is the PoC's
 decision (X-115). The Mac holds the tunnel **outbound** (so CGNAT does not
 matter) with its bundled client (an X-112 pack), and terminates TLS itself, in
 front of the proxy listener, with its own Let's Encrypt certificate for
-`<id>.metistry.app`. DNS: `*.metistry.app` → the relay's static IP in the
+`<id>.u.metistry.app`. DNS: `*.u.metistry.app` → the relay's static IP in the
 existing Route 53 zone `metistry.app` (`Z03790842KLR6UEFALDPY`); the apex and
 `www` keep redirecting to metistry.ai.
 
@@ -1922,7 +1922,7 @@ DynamoDB, defined in CDK:
   globally.
 - **Usage**: per-id monthly relayed bytes, written by the relay, read by the
   Mac (`GET /v1/usage`, the relay token).
-- **ACME DNS-01 helper**: writes **only** `_acme-challenge.<id>.metistry.app`
+- **ACME DNS-01 helper**: writes **only** `_acme-challenge.<id>.u.metistry.app`
   TXT records, only for the authenticated id, then removes them. Whether it
   speaks the acme-dns update API so an off-the-shelf ACME client can use it is a
   PoC decision.
@@ -1957,12 +1957,30 @@ $12/3 TB bundle or a second instance — **never automatic overage**.
 
 **Abuse and isolation.**
 
-- **`metistry.app` on the Public Suffix List** (private section): each
-  `<id>.metistry.app` becomes its own site, so no owner's page can set or read
-  another's cookies or claim the parent as a passkey rpID; and Let's Encrypt's
-  limit of 50 certificates per registered domain per 7 days applies per id, not
-  to all owners together. Inclusion is permanent and takes weeks: **until it
-  lands, registrations are capped below that limit** (about 40 a week).
+- **Owner hostnames live under an explicit user-space label, `u.`** —
+  `<id>.u.metistry.app`, never `<id>.metistry.app` — so FSL's own names
+  (`metistry.app`, the planned `auth.metistry.app` token broker, §2.6) never sit
+  beside an owner's.
+- **`u.metistry.app` on the Public Suffix List** (private section): each
+  `<id>.u.metistry.app` becomes its own registrable domain, so no owner's page
+  can set or read another's cookies or claim a parent as a passkey rpID. It
+  **still lifts Let's Encrypt's limit**: that limit is "50 certificates … per
+  registered domain … every 7 days", and Let's Encrypt takes the registered
+  domain from the PSL — with `u.metistry.app` listed, the registered domain of
+  `<id>.u.metistry.app` is `<id>.u.metistry.app` itself, so each owner has their
+  own 50 a week. Inclusion is permanent and takes weeks: **until it lands,
+  registrations are capped below that limit** (about 40 a week, all counted
+  against `metistry.app`).
+- **An explanatory page** at `https://metistry.app` (and `https://u.metistry.app`)
+  says that names under `u.metistry.app` are run by individual Metistry owners on
+  their own Macs, not by Folded Space Labs, with an abuse report link. Today the
+  apex 301s to metistry.ai (the website repo's redirect distribution); changing
+  that is a **follow-up for the metistry-website infra when the relay ships**, not
+  now.
+- **No "user content" banner can be injected** into an owner's pages: the relay
+  never sees the plaintext. That is the deliberate trade for end-to-end
+  encryption; the explanatory page and the PSL entry carry the disclosure
+  instead.
 - Opt-in only; revocable tokens; a per-id kill switch; the relay forwards only
   **registered and active** names and refuses every other SNI; an abuse contact
   (`abuse@metistry.ai`) on the website.
@@ -1972,6 +1990,14 @@ $12/3 TB bundle or a second instance — **never automatic overage**.
 **What FSL can see:** SNI hostnames (the `<id>`), source and Mac IP addresses,
 connection times and volume — **never content**. The privacy policy says so
 before launch; relay logs keep counters, not connection lists, beyond 24 hours.
+
+**Sub-paths rejected** (2026-09-30). `metistry.app/user/<id>` with one shared
+certificate was considered and rejected: routing by path means the relay must
+decrypt, so FSL could read every owner's traffic; a shared certificate means
+every Mac holds the same private key, so any owner could impersonate the site
+and read others' traffic; and one origin for everyone shares cookies, storage,
+service workers and the passkey rpID. A wildcard certificate held by the relay
+has the same decryption problem. The research's §6 has the detail.
 
 **Trade-offs, said plainly.** One instance is a single point of failure —
 snapshots and a scripted rebuild, and the pane says *"Metistry Relay isn't
@@ -2003,7 +2029,7 @@ month's bill at the bundle's price; a revoked or killed id gets no traffic.
 
 **Open for the owner.** Where the CDK lives; the PoC's relay component; the
 per-host cap and throttle numbers after the PoC; and when to submit the PSL
-entry (X-118 — permanent).
+entry for `u.metistry.app` (X-118 — permanent).
 
 ---
 
@@ -4732,14 +4758,15 @@ after sleep — and the owner's go.
 API Gateway HTTP API + Lambda + DynamoDB — for register (an opaque id and a
 hashed, revocable relay token), usage, revoke and the per-id kill switch;
 per-day registration limits; the ACME DNS-01 helper writing only
-`_acme-challenge.<id>.metistry.app` in zone `Z03790842KLR6UEFALDPY` for the
-authenticated id; the `*.metistry.app` record to the static IP (apex and `www`
-untouched); an AWS Budgets alert at $10 and the optional stop Lambda; registrations
+`_acme-challenge.<id>.u.metistry.app` in zone `Z03790842KLR6UEFALDPY` for the
+authenticated id (the `u.` label, never directly under `metistry.app`); the
+`*.u.metistry.app` record to the static IP (apex and `www` untouched; the
+explanatory page is the website infra's follow-up); an AWS Budgets alert at $10 and the optional stop Lambda; registrations
 capped at about 40 a week until X-118's PSL entry lands.
 *Files:* the relay's infrastructure repo; `docs/ops/metistry-relay.md`.
 *Tests:* **the helper refuses a name that is not the caller's id; a revoked token
 registers, renews and reads nothing; the IAM policy grants Route 53 changes only
-on `_acme-challenge.*.metistry.app` TXT records**; the registration limits hold.
+on `_acme-challenge.*.u.metistry.app` TXT records**; the registration limits hold.
 *Accept:* `cdk diff` reviewed by the owner; the budget alert fires on a test
 threshold.
 
@@ -4759,11 +4786,14 @@ reset date from usage, not the clock alone; at the cap the pane offers Funnel;
 the token never appears in argv or a log**.
 *Accept:* §2.24's acceptance on a real iPhone on cellular.
 
-**X-118 · `metistry.app` on the Public Suffix List** · S —
+**X-118 · `u.metistry.app` on the Public Suffix List** · S —
 *Spec:* §2.24 *Abuse and isolation*: a pull request to `publicsuffix/list`'s
-private section for `metistry.app`, with the `_psl` TXT record its guidelines
-require in the Route 53 zone, and the rationale (per-owner cookie and rpID
-isolation; Let's Encrypt's per-registered-domain limit). **Permanent and slow
+private section for **`u.metistry.app`** (not the apex, which FSL's own names
+share), with the `_psl` TXT record its guidelines require in the Route 53 zone,
+and the rationale: per-owner cookie and rpID isolation, and Let's Encrypt's
+per-registered-domain limit applying per `<id>.u.metistry.app`. The
+explanatory page at `metistry.app`/`u.metistry.app` (owners' names are not
+FSL's; an abuse link) is filed with it as a metistry-website follow-up. **Permanent and slow
 (weeks): the owner confirms before it is filed.** Until it lands, X-116's weekly
 registration cap holds.
 *Files:* `docs/ops/metistry-relay.md` (the status of the entry).

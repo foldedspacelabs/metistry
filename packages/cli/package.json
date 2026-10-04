@@ -21,13 +21,13 @@
   "dependencies": {
     "@foldedspacelabs/metistry-connections": "workspace:*",
     "@foldedspacelabs/metistry-core": "workspace:*",
-    "pg": "^8.16.0",
+    "pg": "^8.23.1",
     "yaml": "^2.9.1"
   },
   "devDependencies": {
-    "@types/node": "^26.6.2",
+    "@types/node": "^26.6.3",
     "@types/pg": "^8.16.0",
     "typescript": "^7.0.2",
-    "vitest": "^5.0.1"
+    "vitest": "^5.0.3"
   }
 }

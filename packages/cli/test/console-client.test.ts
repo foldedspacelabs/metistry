@@ -5,11 +5,13 @@
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { Readable } from "node:stream";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { consoleCall, consoleTarget, DEFAULT_CONSOLE_URL, isLoopbackConsoleUrl, renderConsoleCallError, renderWhoami, whoami } from "../src/console-client.js";
 import { portsFile } from "../src/namespace.js";
 import type { Exec } from "../src/exec.js";
 import { main } from "../src/main.js";
+import { fakeTerminal } from "./fake-terminal.js";
 
 const TOKEN = "owner-token-never-printed";
 const INSTANCE_ID = "11111111-2222-4333-8444-555555555555";
@@ -297,6 +299,41 @@ describe("metistry console call (CLI)", () => {
     });
     expect(code).toBe(0);
     expect(c.seen[0]?.body).toBe('{"origin":"https://stdin.example"}');
+  });
+
+  it("**a terminal `--body -` prompts on stderr, never stdout** — says the input ends with Ctrl-D, keeps the echo, and sends what was typed", async () => {
+    process.env.METISTRY_LOCAL_OWNER_TOKEN = TOKEN;
+    const c = fakeCallConsole(TOKEN, { "POST /api/instances": { status: 201, body: { action: "added" } } });
+    const term = fakeTerminal();
+    const out: string[] = [];
+    const err: string[] = [];
+    const run = main(["console", "call", "POST", "/api/instances", "--body", "-", "--json"], { out: (s) => out.push(s), err: (s) => err.push(s), fetchFn: c.fetchFn, terminal: term });
+    await vi.waitFor(() => expect(term.stderrText()).toContain("Ctrl-D"));
+    term.type('{"origin":"https://typed.example"}\n');
+    term.eof();
+    expect(await run).toBe(0);
+    expect(c.seen[0]?.body).toBe('{"origin":"https://typed.example"}');
+    expect(term.stderrText()).toContain("the request body"); // the prompt is on the terminal's stderr…
+    expect(out.join("\n")).not.toMatch(/Ctrl-D|request body/); // …and never on stdout, which --json is read from
+    expect(out.join("\n")).not.toContain("typed.example");
+    expect(JSON.parse(out.join("\n"))).toEqual({ action: "added" });
+    expect(term.raw).toEqual([]); // typed text keeps the terminal's own echo
+  });
+
+  it("piped `--body -` is unchanged: read to EOF with no prompt anywhere", async () => {
+    process.env.METISTRY_LOCAL_OWNER_TOKEN = TOKEN;
+    const c = fakeCallConsole(TOKEN, { "POST /api/instances": { status: 201, body: { action: "added" } } });
+    const stdinBefore = Object.getOwnPropertyDescriptor(process, "stdin")!;
+    Object.defineProperty(process, "stdin", { value: Readable.from(['{"origin":"https://piped.example"}\n']), configurable: true });
+    const out: string[] = [];
+    const err: string[] = [];
+    try {
+      expect(await main(["console", "call", "POST", "/api/instances", "--body", "-", "--json"], { out: (s) => out.push(s), err: (s) => err.push(s), fetchFn: c.fetchFn, terminal: null })).toBe(0);
+    } finally {
+      Object.defineProperty(process, "stdin", stdinBefore);
+    }
+    expect(c.seen[0]?.body).toBe('{"origin":"https://piped.example"}');
+    expect(err).toEqual([]);
   });
 
   it("a >=400 answer exits non-zero and names the envelope's code and message on stderr, nothing on stdout", async () => {

@@ -48,7 +48,7 @@ import { buildDeploymentReport, renderDeploymentReport, setDeploymentShape, setK
 import { loadDeployment } from "./deployment.js";
 import { loadVaultSettings, renderVaultSettings, rollbackVault, setVaultSettings, VAULT_VERBS } from "./vault.js";
 import { parseRemoteProviderId, remoteAuthorize, remoteSet, remoteStatus, remoteTest, renderRemoteRows, renderRemoteStatus, REMOTE_VERBS, REMOTE_WAIT_DEFAULT_MS, type RemoteRegistry } from "./remote/index.js";
-import { valueInArgvRefusal } from "./stdin-value.js";
+import { readTextInput, valueInArgvRefusal, type Terminal } from "./stdin-value.js";
 import { EXTENSION_VERBS, extensionsAdd, extensionsList, extensionsRemove, parseExtensionVerb, renderExtensions, type ExtensionsOptions } from "./extensions.js";
 import { doctor, renderTable, type DoctorDeps } from "./doctor.js";
 import { VARIABLE_VERBS, parseVariableVerb, renderVariables, variablesList, variablesSet, variablesUnset, type VariablesOptions } from "./variables.js";
@@ -74,7 +74,7 @@ import {
 import { loadInstallEnv, productVersion, resolveProductDir, resolveSeedDir, type LoadedEnv } from "./env.js";
 import { consoleSecretNames, loadInstanceCatalog } from "@foldedspacelabs/metistry-connections";
 import { realExec, type Exec } from "./exec.js";
-import { AUTH_MODES, connectRepo, readStdin, type AuthMode } from "./connect-repo.js";
+import { AUTH_MODES, connectRepo, type AuthMode } from "./connect-repo.js";
 import { connect, connectList, connectRemove, CONNECT_TOOLS, parseTool, renderConnect, renderConnectList, renderRemove } from "./connect.js";
 import { consoleCall, renderConsoleCallError, renderWhoami, runConsoleSession, whoami } from "./console-client.js";
 import { agentAutonomy, agentsDefine, agentsList, parseAutonomyFlags, renderAgents, renderAutonomy, renderDefine } from "./agents.js";
@@ -1136,8 +1136,10 @@ export interface MainIo {
   fetchFn?: typeof fetch;
   /** test seam: the base fetch a connection's dials and an OAuth sign-in go through, under the egress guard (a fixture server on loopback) */
   dialFetch?: typeof fetch;
-  /** test seam: `console call --body -` reads this instead of the real stdin */
+  /** test seam: what `console call --body -`, `agents define --prompt-file -`, a secret's value and `connect-repo --auth token` read instead of the real stdin — it stands in for both the pipe and the terminal prompt */
   readStdin?: () => Promise<string>;
+  /** test seam: the terminal those reads prompt at (default this process's, when stdin is one); `null` = none, read the pipe */
+  terminal?: Terminal | null;
   /** test seam: `console session --stdio` reads its request lines from this instead of the real stdin */
   sessionInput?: AsyncIterable<string>;
   /**
@@ -1302,6 +1304,8 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
           force: flags.force === true,
           out,
           ...(io.exec ? { exec: io.exec } : {}),
+          ...(io.readStdin ? { readSecret: io.readStdin } : {}),
+          ...(io.terminal !== undefined ? { terminal: io.terminal } : {}),
         });
         out(`connected: ${instanceDir} → ${url} (branch ${r.branch}, credential ${r.credential})`);
         return 0;
@@ -2314,7 +2318,7 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
         const bodyFlag = str(flags, "body");
         if (bodyFlag !== undefined) {
           try {
-            if (bodyFlag === "-") body = await (io.readStdin ?? readStdin)();
+            if (bodyFlag === "-") body = await (io.readStdin ?? (() => readTextInput("the request body", io.terminal)))();
             else if (bodyFlag.startsWith("@")) body = await readFile(bodyFlag.slice(1), "utf8");
             else throw new Error(`--body takes @<file> or - (stdin), not ${JSON.stringify(bodyFlag)}`);
           } catch (e) {
@@ -2450,7 +2454,7 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
               model: str(flags, "model"),
               effort: effort as Effort | undefined,
               description: str(flags, "description"),
-              prompt: promptFile === undefined ? undefined : promptFile === "-" ? await (io.readStdin ?? readStdin)() : await readFile(promptFile, "utf8"),
+              prompt: promptFile === undefined ? undefined : promptFile === "-" ? await (io.readStdin ?? (() => readTextInput("the operating prompt", io.terminal)))() : await readFile(promptFile, "utf8"),
             },
             ifSha256: str(flags, "if-sha256"),
             instanceDir,

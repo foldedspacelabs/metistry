@@ -90,6 +90,7 @@ import { shellUnsafeEnvLines } from "./env.js";
 import { ensureInstanceId, envPaths, readInstanceId } from "./instance.js";
 import { ensureOwnerBridgeToken } from "./protected-write.js";
 import { describeRecorderTokens, ensureRecorderTokens, recorderConfigured, registerCaptureOwnerToken, type EnsureRecorderTokensResult } from "./recorder-tokens.js";
+import { deliveredSecretNames, renderEnvFile, type RenderEnvResult } from "./secrets.js";
 import type { MigrationSession } from "./migrate.js";
 import { allocateBase, applyPorts, loadNamespace, portEnv, PORTED_SERVICES, portsFile, portsOf, serializeNamespace, suffixFor, type Namespace } from "./namespace.js";
 import { llamaServerChild } from "./local-models.js";
@@ -1361,15 +1362,68 @@ export async function up(opts: UpOptions): Promise<UpResult> {
   /** when each bootstrapped job was started (epoch ms), for the closing doctor */
   const startedAt: Record<string, number> = {};
 
+  // `.env` is DERIVED (X-124; owner ruling 2026-10-04): rendered here, after
+  // every mint of this run and before anything reads the file — compose
+  // interpolates it, four launchd jobs source it — from this instance's
+  // Keychain and what `.metistry/*.yaml` decides (secrets.ts `renderEnvFile`).
+  // The jobs are then rendered from the SAME values, so the file and the
+  // plists cannot disagree (the 0.14.2 drift). A line the file held that
+  // nothing derives yet is carried by name, never dropped; a hand edit since
+  // the last render is named and adopted into the store first. An install
+  // with no instance directory keeps its product-checkout `.env` as it is:
+  // that file is the deprecated environment `secrets retire-legacy-env`
+  // retires, not the derived one.
+  let envFileNow = envFile;
+  let derivedEnv = false;
+  const deriveEnv = async (): Promise<void> => {
+    if (derivedEnv || !instanceDir.instanceDir) return;
+    derivedEnv = true;
+    const target = paths?.write ?? envFile;
+    r.section("env");
+    if (!r.action(`derive ${target} from .metistry/*.yaml and the login Keychain (secret lines adopted into the Keychain, configuration carried, a hand edit named; values never shown)`)) return;
+    const deliver = await deliveredSecretNames({ instanceDir: instanceDir.instanceDir, productDir: runDir });
+    for (const n of deliver.notes) r.note(n);
+    let rendered: RenderEnvResult;
+    try {
+      rendered = await renderEnvFile({
+        envFile,
+        envTarget: target,
+        exampleFile: join(runDir, ".env.example"),
+        ...(instanceId ? { instanceId } : {}),
+        exec: r.exec,
+        env,
+        platform: le.platform,
+        out: (l) => r.note(l),
+        deliver: deliver.names,
+        deliverComplete: deliver.complete,
+        restartFollows: true,
+      });
+    } catch (e) {
+      throw new StepFailed(`could not derive ${target} (${e instanceof Error ? e.message : String(e)}) — nothing was installed; \`metistry doctor\`'s \`env\` row names the file's state`);
+    }
+    // what the jobs are rendered from is exactly what the file now says
+    for (const [k, v] of rendered.values) {
+      values.env[k] = v;
+      env[k] = v;
+    }
+    for (const n of rendered.dropped) {
+      delete values.env[n];
+      delete env[n];
+    }
+    values.envFile = rendered.wrote;
+    envFileNow = rendered.wrote;
+  };
+
   try {
     if (opts.compose === false) {
       r.note("--no-compose: containers left as they are");
     } else if (usesCompose(deployment)) {
+      await deriveEnv();
       r.section("compose");
       // the rendered METISTRY_ORIGIN reaches the compose file's interpolation
       // through the process environment, which compose reads before --env-file
       const origins = consoleOrigins(values);
-      await composeUp(r, runDir, source, pinnedVersion, envFile, values.env.METISTRY_INSTANCE_DIR?.replace(/\/+$/, "") || undefined, origins.value !== undefined ? { METISTRY_ORIGIN: origins.value } : {});
+      await composeUp(r, runDir, source, pinnedVersion, envFileNow, values.env.METISTRY_INSTANCE_DIR?.replace(/\/+$/, "") || undefined, origins.value !== undefined ? { METISTRY_ORIGIN: origins.value } : {});
     } else {
       r.note("shape launchd: no containers, so docker is never called");
     }
@@ -1402,7 +1456,7 @@ export async function up(opts: UpOptions): Promise<UpResult> {
             : undefined;
         // the install root, not the release: `.env`, `state/pg` and any
         // bundled runtime/postgres live where the install does
-        pg = await preparePostgres(r, opts.productDir, { exists: opts.exists, mintPassword: opts.mintPassword ?? mintPassword, runtimeDeps, envFile });
+        pg = await preparePostgres(r, opts.productDir, { exists: opts.exists, mintPassword: opts.mintPassword ?? mintPassword, runtimeDeps, envFile: envFileNow });
         // a password this run minted into `.env` goes into what the jobs are
         // rendered from too — else a fresh install's supervisor and console
         // start without it until a second `up` (doctor's `launchd env` row)
@@ -1411,6 +1465,10 @@ export async function up(opts: UpOptions): Promise<UpResult> {
         values.pgData = pg.plan.dataDir;
         await r.run("mkdir", ["-p", values.stateDir], { comment: "the assistant's state dir — HOME, and the only path its sandbox may write" });
       }
+      // the file every job below sources, derived once the Postgres password
+      // is in it (a password minted a moment ago is adopted into the Keychain
+      // by the same render) — a no-op when the compose branch already did it
+      await deriveEnv();
       // the bundled git, if this install has one, goes on the front of the
       // reconciler's PATH — a clean Mac has no git until Xcode CLT is installed
       values.gitPath = pathWithRuntimeGit(opts.productDir, opts.exists ?? existsSync);

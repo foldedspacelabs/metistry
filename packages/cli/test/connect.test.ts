@@ -743,6 +743,41 @@ describe("the harness registry (Hindsight Q2): every entry passes the same confo
       expect(again).toMatchObject({ agent: "already-revoked", config: "no-entry", token: "absent", problems: [] });
       expect(JSON.parse(readFileSync(file, "utf8"))[cfg.container]).toEqual({ other });
     });
+
+    // X-134's misuse test, held by the registry: `--remove` takes away EXACTLY
+    // what `connect` wrote. An entry under connect's own key that connect did
+    // not write (a hand-made server called `metistry`, with its own bearer) is
+    // the owner's — the row is still revoked and the Keychain item still goes,
+    // but the file is not changed by a byte, the foreign bearer is never
+    // echoed, and the run says so. A second run is the same run.
+    it(`${tool}: an entry under connect's key that connect did not write is left alone and reported — the bearer in it never echoed`, async () => {
+      const { home, instanceDir } = await scratch();
+      const file = cfg.file({ home, env: {} });
+      await mkdir(dirname(file), { recursive: true });
+      const theirs = { type: "http", url: "http://127.0.0.1:8080/mcp", headers: { Authorization: "Bearer theirs-not-ours" } };
+      const before = JSON.stringify({ [cfg.container]: { metistry: theirs, other: { url: "https://mcp.example/mcp" } } });
+      await writeFile(file, before);
+      const varName = agentTokenVar(tool);
+      const sec = fakeSecurity({ [`${INSTANCE_ID}/metistry:${varName}`]: "stored-bearer" });
+      const cl = fakeClaude(sec, home);
+      const c = fakeConsole([{ id: tool }]);
+
+      const r = await connectRemove({ tool, ...base(home, instanceDir, cl.exec, c.fetchFn) });
+      expect(r.agent).toBe("revoked");
+      expect(c.rows.get(tool)?.revoked).toBe(true);
+      expect(r.token).toBe("removed");
+      expect(r.problems).toHaveLength(1);
+      expect(r.problems[0]).toContain("not the one connect wrote");
+      expect(r.problems[0]).toContain(varName);
+      expect(readFileSync(file, "utf8")).toBe(before); // not a byte
+      expect(cl.claudeCalls).toEqual([]); // the tool's own command was not asked to remove it either
+      expect(JSON.stringify(r) + renderRemove(r)).not.toContain("theirs-not-ours");
+
+      const again = await connectRemove({ tool, ...base(home, instanceDir, cl.exec, c.fetchFn) });
+      expect(again).toMatchObject({ agent: "already-revoked", token: "absent" });
+      expect(again.problems).toHaveLength(1);
+      expect(readFileSync(file, "utf8")).toBe(before);
+    });
   }
 });
 

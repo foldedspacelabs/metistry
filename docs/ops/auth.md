@@ -314,9 +314,72 @@ port — is `421 misdirected`, decided before the shell, the ceremonies,
 install's default — configures no remote host, so its proxy listener refuses
 every request with a message naming Settings ▸ Remote Access; the main
 listener is untouched by any of this. A wrong `Host` is not audited per
-request on purpose: an internet-facing listener's refused bursts are X-111's,
-one row per burst, and a row per probe would make `runs` the thing a scanner
-fills.
+request on purpose: a refused burst is one row (below), and a row per probe
+would make `runs` the thing a scanner fills.
+
+**On the internet: rate limits** (plan §2.23, X-111; `apps/console/src/rate-limit.ts`).
+Funnel, Cloudflare Tunnel, zrok, ngrok and a forwarded port all put the
+sign-in page where any scanner can reach it, so the proxy listener bounds how
+often it answers **without a session** — never who gets in, which stays the
+credential's decision:
+
+| | per client | the ceiling |
+| --- | --- | --- |
+| counts | answers given without a session to one address, per window | answers given without a session by the whole listener, per window |
+| default | `METISTRY_CONSOLE_PROXY_CLIENT_LIMIT=120` | `METISTRY_CONSOLE_PROXY_GLOBAL_LIMIT=1200` |
+| window | `METISTRY_CONSOLE_PROXY_WINDOW_S=60`, fixed and aligned to the clock | the same |
+
+- **What is charged**: the shell's files, `GET /health`, `GET /api/identity`,
+  the four ceremonies (every `public` row of the client API table, read off
+  the table), a wrong `Host`, and **every `401`** — a bearer guessed at
+  `/api/whoami` or at `/mcp` spends the same allowance. One request is one
+  charge, however many gates it passes. A request a credential admits — a
+  passkey session, an agent bearer, the capture token — is **never limited**:
+  the credential is checked first, and only a refusal is counted, so the
+  owner's phone keeps working on an address a scanner shares with it. The one
+  exception is `/mcp`, where the bridge checks the bearer after it has the
+  body: an address already past its limit is answered `429` there bearer or
+  not, and an agent on an exhausted address waits one window.
+- **The client** is the *last* entry of the provider's client-address header
+  — `METISTRY_CONSOLE_PROXY_CLIENT_HEADER`, default `x-forwarded-for` — which
+  is the address the hop nearest to us wrote, whatever the client put in
+  front of it (a provider adapter that knows a better header, Cloudflare's
+  `CF-Connecting-IP`, names it). That header is read **on the proxy listener
+  alone, for limiting alone**: no credential decision reads any forwarded
+  header (`local-owner.ts`, `webauthn.ts`), the main listener never reads it
+  at all, and a test holds that no header — forwarded address, `Forwarded`,
+  `Tailscale-User-Login`, anything — can raise a principal on either listener.
+  With no such header every request through that provider shares one bucket
+  (the provider's own loopback dial), which is the fail-closed direction, and
+  the ceiling bounds it.
+- **A refusal** is `429 rate_limited` with `Retry-After` (whole seconds to the
+  window's end) and a message naming what would permit more: signing in. A
+  client past its own limit does not spend the ceiling — a refusal is not an
+  answer — so one scanner cannot close the sign-in page to everyone; a
+  scanner spread over many addresses meets the ceiling, which then closes it
+  to every stranger (and to no session) until the window turns.
+- **One `runs` row per refused burst**: `kind=auth, tool=rate_limited`, meta
+  `{listener: "proxy", scope: "client" | "global", client, route, limit,
+  window_s}`, written by the first refusal of a window and by nothing after it
+  — the next window's burst is the next row. The limiter is one per console,
+  so the port and the socket add up together, and it holds at most 10 000
+  client keys (the oldest make room) so a varying header cannot grow it.
+
+**On the internet: headers** (`apps/console/src/http-util.ts`
+`PROXY_SECURITY_HEADERS`). Every answer on the proxy listener — the shell, a
+`200`, a `401`, a `421`, a `429`, a `500` — carries
+`Strict-Transport-Security: max-age=31536000; includeSubDomains` (**no
+preload**: the name is the provider's or the owner's, and a preload entry
+outlives a Settings change), a `Content-Security-Policy` written for the shell
+as it is (`default-src 'self'`; scripts and connections from this origin
+alone; style attributes allowed because the shell writes them; `data:`/`blob:`
+images and fonts for the artifact viewer's opaque-origin frame, which inherits
+this policy and narrows it further with its own; `object-src 'none'`,
+`base-uri 'none'`, `form-action 'self'`, `frame-ancestors 'none'`),
+`X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer` and
+`X-Frame-Options: DENY`. The main listener sets none of them: loopback, plain
+HTTP, the Mac app and the CLI — HSTS there would be a lie, and nothing frames
+it. The main listener's behaviour is unchanged by all of this.
 
 **Where it binds.** Under `launchd` the console binds the TCP port on
 `127.0.0.1` and the socket in the instance's state directory; a namespaced
@@ -331,9 +394,13 @@ connect, which is the fail-closed direction. There is no fallback to the
 main port anywhere.
 
 **Tests.** `apps/console/test/local-owner.test.ts` (the verdicts),
-`apps/console/test/proxy-listener.test.ts` (the `Host` rule) and
+`apps/console/test/proxy-listener.test.ts` (the `Host` rule),
 `apps/console/test/proxy-listener.integration.test.ts` (the same over the
-port and the socket, with the audit rows they leave and the socket's mode).
+port and the socket, with the audit rows they leave and the socket's mode),
+`apps/console/test/rate-limit.test.ts` (the limiter's arithmetic) and
+`apps/console/test/proxy-limits.integration.test.ts` (the 429s, the one row
+per burst, the headers, every header that cannot raise a principal, the exact
+set of routes that answer without a session, and the main listener unchanged).
 
 ## Checking it
 

@@ -153,7 +153,11 @@ The codes and their statuses are `packages/core/src/errors.ts`: `invalid_request
 asked with a passkey session — "The `local` gate" above), `misdirected` 421 (a
 request on the console's proxy listener whose `Host` is not a remote host
 `METISTRY_ORIGIN` names — `docs/ops/auth.md`, "The proxy listener"), `not_found` 404, `conflict` 409,
-`rate_limited` 429, `internal` 500, `not_available` 503 (the capability is
+`rate_limited` 429 (on the proxy listener, an address — or the listener as a
+whole — answered without a session more often than its window allows; carries
+`Retry-After` in whole seconds, and a session is never limited — `docs/ops/auth.md`,
+"On the internet: rate limits"; a client retries after the header, never
+sooner), `internal` 500, `not_available` 503 (the capability is
 absent in this deployment — degrades: absent — never a permission), and
 `section_missing` 409 — the vault bridge's answer when the daily note's
 `metistry:day` markers are not exactly one clean pair (docs/ops/reconciler.md,

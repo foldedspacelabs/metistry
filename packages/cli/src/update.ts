@@ -998,7 +998,8 @@ export async function childClosingDoctor(
   // the bundled runtime's node when there is one — a release may have just
   // brought a newer one — else the node on PATH, else this one
   const { node } = nodeFor(o.productDir, r.env, exists);
-  const args = [main, "doctor", "--json", "--product-dir", o.runDir, ...(o.envFile ? ["--env-file", o.envFile] : [])];
+  // `--check`: the closing doctor reports and never repairs (X-123) — repair is the owner's `metistry doctor`
+  const args = [main, "doctor", "--check", "--json", "--product-dir", o.runDir, ...(o.envFile ? ["--env-file", o.envFile] : [])];
   let res: { code: number; stdout: string; stderr: string };
   try {
     // exit 1 is "doctor is not happy", a verdict — not a failed step

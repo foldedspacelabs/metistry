@@ -92,18 +92,7 @@ export async function listDevices(db: Db): Promise<any[]> {
   return rows;
 }
 
-/** Host-minted owner access token (Shortcuts/CLI — no WebAuthn there). */
-export async function mintOwnerToken(db: Db, label: string): Promise<string> {
-  const token = mintToken(32);
-  await db.query(`INSERT INTO owner_tokens (token_hash, label) VALUES ($1, $2)`, [tokenHash(token), label]);
-  return token;
-}
-
-export async function checkOwnerToken(db: Db, token: string): Promise<boolean> {
-  const { rows } = await db.query(
-    `UPDATE owner_tokens SET last_used_at = now()
-     WHERE token_hash = $1 AND revoked_at IS NULL RETURNING id`,
-    [tokenHash(token)],
-  );
-  return rows.length === 1;
-}
+// Owner access tokens live in core too (`owner-tokens.ts`): `metistry up`
+// records the recorder's inbox token and scripts/enroll.mjs mints one with the
+// same statements the console checks against.
+export { checkOwnerToken, mintOwnerToken } from "@foldedspacelabs/metistry-core";

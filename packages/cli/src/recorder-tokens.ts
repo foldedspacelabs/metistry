@@ -14,9 +14,11 @@
 //        console with. Its plaintext is kept like the other two; the console
 //        holds only its hash, in `owner_tokens` — the row
 //        `apps/console/scripts/enroll.mjs --owner-token` writes. That script
-//        is not in the release pack, so the CLI owns the mint (a packages/
-//        file cannot import the console; the one INSERT is repeated here and
-//        its hashing is core's `tokenHash`, which the console uses too).
+//        is not in the release pack, so the CLI owns the mint, through core's
+//        `registerOwnerToken` (packages/core/src/owner-tokens.ts) — the one
+//        module the console's check and the script's mint also run; a
+//        packages/ file cannot import the console, so the statement lives
+//        below both rather than being repeated here.
 //
 // Idempotent in every part: a value any store already holds is kept; the
 // `owner_tokens` row is recorded only when the DB has no row for that hash,
@@ -25,7 +27,7 @@
 // Nothing here runs unless `METISTRY_LIVE_CAPTURE_URL` is set: an install that
 // never asked for a microphone gets none of the three.
 
-import { tokenHash } from "@foldedspacelabs/metistry-core";
+import { registerOwnerToken } from "@foldedspacelabs/metistry-core";
 import { bridgeEnabled } from "./launchd.js";
 import { openMigrationSession, type MigrationSession } from "./migrate.js";
 import { ensureSecret, type SecretsOptions } from "./secrets.js";
@@ -108,14 +110,12 @@ export interface RegisterCaptureTokenOptions {
 
 /**
  * Record the inbox token as a capture owner token, if the database has no row
- * for it: `INSERT INTO owner_tokens (token_hash, label)` — the statement
- * `mintOwnerToken` runs — keyed on the hash, so it is a no-op on a token that
- * is already there. A database that is not up, or has not been migrated yet,
- * is a note, not a failure: the token is in the Keychain and `.env`, and the
- * next `metistry up` records it.
+ * for it — core's `registerOwnerToken`, keyed on the hash, so it is a no-op on
+ * a token that is already there. A database that is not up, or has not been
+ * migrated yet, is a note, not a failure: the token is in the Keychain and
+ * `.env`, and the next `metistry up` records it.
  */
 export async function registerCaptureOwnerToken(opts: RegisterCaptureTokenOptions): Promise<CaptureTokenRecord> {
-  const hash = tokenHash(opts.token);
   let session: (MigrationSession & { end(): Promise<void> }) | null;
   try {
     session = await (opts.openSession ?? openMigrationSession)(opts.env);
@@ -128,17 +128,10 @@ export async function registerCaptureOwnerToken(opts: RegisterCaptureTokenOption
     return "unreachable";
   }
   try {
-    const found = await session.query("SELECT revoked_at FROM owner_tokens WHERE token_hash = $1", [hash]);
-    if (found.rows.length > 0) {
-      if (found.rows[0].revoked_at) {
-        opts.out(`${CAPTURE_INBOX_TOKEN} is revoked in the console — transcripts stay on this Mac; \`metistry secrets mint ${CAPTURE_INBOX_TOKEN}\` makes a fresh one`);
-        return "revoked";
-      }
-      return "present";
-    }
-    await session.query("INSERT INTO owner_tokens (token_hash, label) VALUES ($1, $2) ON CONFLICT (token_hash) DO NOTHING", [hash, CAPTURE_TOKEN_LABEL]);
-    opts.out(`${CAPTURE_INBOX_TOKEN} recorded as a capture owner token labelled ${CAPTURE_TOKEN_LABEL}`);
-    return "recorded";
+    const outcome = await registerOwnerToken(session, opts.token, CAPTURE_TOKEN_LABEL);
+    if (outcome === "revoked") opts.out(`${CAPTURE_INBOX_TOKEN} is revoked in the console — transcripts stay on this Mac; \`metistry secrets mint ${CAPTURE_INBOX_TOKEN}\` makes a fresh one`);
+    if (outcome === "recorded") opts.out(`${CAPTURE_INBOX_TOKEN} recorded as a capture owner token labelled ${CAPTURE_TOKEN_LABEL}`);
+    return outcome;
   } catch (err) {
     opts.out(`${CAPTURE_INBOX_TOKEN} is minted but not yet recorded as an owner token (${err instanceof Error ? err.message : String(err)}) — the schema may not be migrated yet; \`metistry up\` records it once it is`);
     return "unreachable";

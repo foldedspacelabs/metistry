@@ -1074,6 +1074,7 @@ export {
   type EnrollmentDb,
   type MintedEnrollmentCode,
 } from "./enrollment-codes.js";
+export { checkOwnerToken, mintOwnerToken, registerOwnerToken, type OwnerTokenDb, type RegisterOwnerTokenOutcome } from "./owner-tokens.js";
 export { sanitizeForAgent } from "./sanitize.js";
 export {
   QUESTION_MAX_OPTION,

@@ -265,8 +265,8 @@ takes a `since` cursor and answers with the next one.
 | `POST /capture` | agent · owner | session · local_owner · owner_token · agent | key | — | — | served | a note or a file into `Inbox/`; `source: "app"` for an owner credential (T2-1) |
 | `GET /api/whoami` | owner | session · local_owner · owner_token | natural | — | — | served | which credential this is and whether it reaches management |
 | `POST /auth/logout` | owner | session | no | — | — | served | end this device's session |
-| `GET /api/devices` | owner | session · local_owner | natural | — | — | served | the enrolled passkeys and their sessions |
-| `POST /api/devices/:id/revoke` | owner | session · local_owner | no | — | — | served | end one device session |
+| `GET /api/devices` | owner | session · local_owner | natural | — | — | served | the devices: a passkey each, its sessions under it (§2.22) |
+| `POST /api/devices/:id/revoke` | owner | session · local_owner | no | — | — | served | remove a device — its passkey and every session under it; `scope: "sessions"` signs it out and keeps the passkey |
 | `POST /message` | owner | session · local_owner · owner_token | no | — | — | served | send a message; `tier` picks the model tier for this one |
 | `GET /api/messages` | owner | session · local_owner · owner_token | natural | — | since | served | the conversation, inbound and outbound |
 | `POST /api/messages/:id/feedback` | owner | session · local_owner | natural | — | — | served | rate one reply, with an optional note |
@@ -610,17 +610,53 @@ moved-on thread is confusing); the research note says why.
 ```
 GET  /api/whoami               200 {"principal":"user","via":"local_owner_token","management":true,"origin":"…","as_of":"…"}
 POST /auth/logout              200 {"ok":true}          403 — the local owner token has no session to end
-GET  /api/devices              200 {"devices":[…]}
-POST /api/devices/:id/revoke   200 {"revoked":true}     404 — no such session
+GET  /api/devices              200 {"devices":[{id, passkey_id, label, added, last_seen, this_device, sessions:[…]}, …]}
+POST /api/devices/:id/revoke   {scope?: "device" | "sessions"}   200 {"revoked":true,"scope":"device","sessions":2}
+                               404 — no such session, or its device is already removed;  400 — a scope that is neither
 ```
 
 `whoami` says which credential the console sees: `via` is `passkey_session`,
 `local_owner_token` or `owner_token` (a capture token answers `principal:
 "owner_token"`, `management: false`); `session_id` rides along for a session.
 It is what `metistry console whoami` and the Mac app's "signed in as" read.
-**Logout** ends the calling device's session row, so it takes a session; a
-device is revoked from any other one with `…/revoke` — a lost phone is revoked
-from the Mac.
+**Logout** ends the calling device's session row, so it takes a session.
+
+**A device is a passkey, with its sessions under it** (design-build-plan
+§2.22). `GET /api/devices` serves one row per enrolled passkey that has not
+been removed, newest seen first:
+
+| field | |
+| --- | --- |
+| `id` | what Remove posts to `…/:id/revoke`: the device's newest session row, live or not — every device has one, because enrolment issues a session |
+| `passkey_id` | the credential id |
+| `label` | the name the device chose at enrolment |
+| `added` | when the passkey was enrolled |
+| `last_seen` | the latest of its sessions' `last_seen_at` and the passkey's last login |
+| `this_device` | `true` on the caller's own row — the passkey of its session; `false` on every row for the local owner token, which has no device |
+| `sessions` | each session under it: `{id, created_at, last_seen_at, absolute_expires_at, revoked, push}` — `push` says a notification subscription is held |
+
+The session-row fields the body carried before §2.22 — `passkey_last_used`,
+`created_at`, `last_seen_at`, `absolute_expires_at`, `revoked` — stay on the
+row (the passkey's dates, the newest session's expiry; `revoked` is always
+false, since a removed device is not listed), so a reader of the old shape
+reads something true. The PWA marks *This Device* from `this_device`, falling
+back to `GET /api/whoami`'s `session_id` against `sessions`.
+
+**Remove** — `POST /api/devices/:id/revoke` with `{}` or no body (`scope:
+"device"`) — is what the website promises ("you can remove it from Devices
+anytime"): the device's **passkey is revoked** (`passkeys.revoked_at`,
+migration 0038), so it never signs in again, and **every session under it is
+revoked**, each losing its push subscription, so its notifications stop. A
+revoked passkey's login is refused with the **same uniform 401 as an unknown
+credential's** — nothing in the answer says whether it ever existed. Remove is
+irreversible, so a client confirms it naming the device (C136); a removed phone
+is set up again as a new device, with a new passkey. **Sign Out Everywhere**
+keeps its meaning — sessions only, passkeys kept: it is this door with `{scope:
+"sessions"}` once per signed-in device, the caller's own last, and each device
+signs in again with the passkey it has. Both land in `runs` (`auth`, `revoke`)
+with the scope, the passkey and the number of sessions ended on the record.
+Any `:id` of the device's sessions names it; a device already removed answers
+404, as an unknown session does.
 
 Each device row is one session joined to its passkey: `id` (the session),
 `label`, `passkey_last_used`, `created_at`, `last_seen_at`,
@@ -4142,7 +4178,7 @@ exist. Reach enforces it; a client hiding a control is never the control.
 | Services: restart, stop, start, logs; Keep Awake | — | write | the machine; a remote stop locks the owner out |
 | Updates: versions | read | read | |
 | Updates: update, roll back, runtime source | — | write | replaces running code |
-| Account: devices, revoke a device, Sign Out Everywhere | write | write | a lost phone is revoked from another device |
+| Account: devices, remove a device (its passkey too, §2.22), Sign Out Everywhere | write | write | a lost phone is removed from another device |
 | Account: console sign-in, instance repository | — | write | |
 | Sessions: *Let the assistant learn*, retention | write | write | the session-fold and purge routines' settings, through the Scheduled doors (§2.5) |
 | Sessions: Purge Now | — | write | irreversible |
@@ -4164,11 +4200,12 @@ chosen from `GET /api/compute/models` on the providers already switched on —
 read only when the form opens), Scheduled's pause (`POST
 /api/scheduled/routines/:name/pause|resume`, and `PUT /api/scheduled/syncs/:name`
 with `{paused}` for a sync, X-99), the budgets (`POST /api/compute/budget`,
-`PUT /api/projects/:slug`) and devices (`POST /api/devices/:id/revoke`, and
-Sign Out Everywhere as that door once per live device, the caller's own
-session last) it writes, and every row whose phone column is **—**, or whose
-write is the Mac's, as its reason with no control. `GET /api/whoami`'s
-`session_id` is how it marks *This Device*.
+`PUT /api/projects/:slug`) and devices (`POST /api/devices/:id/revoke` —
+Remove, and Sign Out Everywhere as that door with `scope: "sessions"` once per
+signed-in device, the caller's own last) it writes, and every row whose phone
+column is **—**, or whose write is the Mac's, as its reason with no control.
+`this_device` on a devices row is how it marks *This Device*, with `GET
+/api/whoami`'s `session_id` as the fallback.
 
 ## Outside the contract
 

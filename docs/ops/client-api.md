@@ -275,7 +275,7 @@ takes a `since` cursor and answers with the next one.
 | `POST /auth/logout` | owner | session | no | — | — | served | end this device's session |
 | `GET /api/devices` | owner | session · local_owner | natural | — | — | served | the devices: a passkey each, its sessions under it (§2.22) |
 | `POST /api/devices/:id/revoke` | owner | session · local_owner | no | — | — | served | remove a device — its passkey and every session under it; `scope: "sessions"` signs it out and keeps the passkey |
-| `POST /message` | owner | session · local_owner · owner_token | no | — | — | served | send a message; `tier` picks the model tier for this one |
+| `POST /message` | owner | session · local_owner · owner_token | no | stale | — | served | send a message; `tier` picks the model tier for this one; `capture_session` holds it to the private tier |
 | `GET /api/messages` | owner | session · local_owner · owner_token | natural | — | since | served | the conversation, inbound and outbound |
 | `POST /api/messages/:id/feedback` | owner | session · local_owner | natural | — | — | served | rate one reply, with an optional note |
 | `DELETE /api/messages/:id/feedback` | owner | session · local_owner | natural | — | — | served | clear a reply's rating |
@@ -670,7 +670,8 @@ Any `:id` of the device's sessions names it; a device already removed answers
 ### Chat
 
 ```
-POST   /message                      {text, thread_id?, tier?}   202 {"message_id":…, "reply"?: "…"}   400 — no text
+POST   /message                      {text, thread_id?, tier?, capture_session?}   202 {"message_id":…, "reply"?: "…"}
+400 — no text, or a capture_session that is not a recorder session id;  409 reason "stale" — capture_session names a recording that has ended
 GET    /api/messages?limit=&since=   200 {"messages":[…],"cursor":"…","more":false}
 POST   /api/messages/:id/feedback    {rating: 1 | -1, note?}     200 {"ok":true,"feedback":{rating,note,ts}}
 DELETE /api/messages/:id/feedback                                200 {"ok":true,"feedback":null}
@@ -710,6 +711,26 @@ is answered by the assistant into the thread, read back through `GET
 hours late into a moved-on thread confuses more than it helps. Feedback is an
 upsert on the message id — the reply row stays immutable, the judgement is
 revisable (`docs/ops/reply-feedback.md`).
+
+**`capture_session` — the session-turn marker** (X-84, ruled 2026-10-04;
+screen 11 §4 *staying on this Mac*). The recorder's session id
+(`20260928-120000-00ab`) of the recording a turn is asked inside; the Mac's
+capture bar sets it on every Ask sent while a recording runs, and nothing
+else sends it. A marked turn runs on the **private tier** whatever the
+router or `tier` chose — the row carries `meta.capture_session`, the drain
+resolves it through core's `turnTier`, and `private` resolves on an
+`on_machine` provider or the turn is refused with an alert naming
+`metistry compute assign private …`; it never falls back
+(`docs/ops/compute.md`, "The private tier"). `GET /api/messages` reads a
+marked model turn's `tier` as `private`. The marker can only make a turn more
+private: a `/note` or a fast path still answers in the `202`, on this Mac,
+and reads no tier, as before. It is
+checked against what the console knows of the session — a value that is not
+a recorder id is `400`, and an id whose recording the console has seen end
+(its transcript delivered through `POST /capture`) is `409` with `reason:
+"stale"`; a recording in progress has no row yet, so the Mac's word is
+taken. An agent bearer is refused the route whole (`403`), field or no
+field; every unmarked turn is routed exactly as before.
 
 ### Push — bound to a device session
 

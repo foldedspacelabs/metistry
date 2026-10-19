@@ -177,6 +177,7 @@ struct SettingsPaneContent: View {
                     .task(id: model.instances.active) { await model.settings.computePane.refresh() }
             case .updates: UpdatesPane(model: model)
             case .account: AccountPane(model: model, actions: actions)
+            case .devices: DevicesPane(model: model)
             case .connections: ConnectionsPane(model: model)
             case .secrets: SecretsPaneView(model: model)
             case .variables: VariablesPaneView(model: model)
@@ -233,6 +234,19 @@ extension View {
                 if let confirmation = settings.liveCapturePane.confirmation {
                     CostConfirmView(confirmation) { choice in Task { await settings.liveCapturePane.choose(choice) } }
                         .frame(width: 480)
+                }
+            }
+            // Remove and Sign Out Everywhere (X-77, C136): the confirm names the device, or every signed-in one.
+            .sheet(isPresented: Binding(get: { settings.devicesPane.confirmation != nil }, set: { if !$0 { Task { await settings.devicesPane.choose(.cancel) } } })) {
+                if let confirmation = settings.devicesPane.confirmation {
+                    CostConfirmView(confirmation) { choice in Task { await settings.devicesPane.choose(choice) } }
+                        .frame(width: 480)
+                }
+            }
+            // Add a Phone… (§2.22): dismissing it, however, cancels a live code.
+            .sheet(isPresented: Binding(get: { settings.devicesPane.addPhone != nil }, set: { if !$0 { settings.devicesPane.closeAddPhone() } })) {
+                if let addPhone = settings.devicesPane.addPhone {
+                    AddPhoneSheet(model: addPhone) { settings.devicesPane.closeAddPhone() }
                 }
             }
     }

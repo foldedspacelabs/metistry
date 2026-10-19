@@ -56,8 +56,12 @@ import Testing
     // measured in seconds, never in turns of a loop.
     let window = host(ChatView(model: model, assistantName: "Aide", clock: ClockTime(timeZone: utc), calendar: utcCalendar), size: CGSize(width: 900, height: 560))
     defer { window.close() }
+    // the transcript is the scroll view whose document has been laid out tall:
+    // the composer's field and the preview pane can add scroll views of their
+    // own, and before layout every one of them is height 0
     let scroll = try await eventuallyFound(in: window) {
-        scrollViews(in: $0).max { $0.documentView?.frame.height ?? 0 < $1.documentView?.frame.height ?? 0 }
+        scrollViews(in: $0).filter { ($0.documentView?.frame.height ?? 0) > 1000 }
+            .max { $0.documentView?.frame.height ?? 0 < $1.documentView?.frame.height ?? 0 }
     }
     // the first paint lands at the end; wait for it to settle there
     try await eventually(in: window) { (scroll.documentView?.frame.height ?? 0) > 1000 && scroll.isAtEnd && model.isAtBottom }

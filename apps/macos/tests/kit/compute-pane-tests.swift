@@ -299,6 +299,9 @@ import Testing
     #expect(read(["  12% · 600 MB of 5.0 GB"]) == DownloadProgress(size: "5.0 GB", percent: 12))
     // Ollama's lines carry a percentage and no size: no size is invented
     #expect(read(["  pulling manifest", "  pulling 4a1b 33%"]) == DownloadProgress(size: nil, percent: 33))
+    // a number with more digits than a percentage is not one
+    #expect(read(["  m.gguf: 1234%"]) == nil)
+    #expect(read(["100%", "1234%"]) == DownloadProgress(size: nil, percent: 100))
     // nothing reported, nothing shown
     #expect(read(["downloading qwen3:8b"]) == nil)
     #expect(read([]) == nil)
@@ -361,6 +364,35 @@ import Testing
     #expect(!loader.cancelRequested, "cancelling with nothing downloading does nothing")
     loading.cancel()
     await loading.value
+}
+
+@MainActor
+@Test func onlyTheDownloadsCommandEndsItsProcessWhenCancelledAndADoctorRefreshIsNeverCut() async throws {
+    // the install is the one command that opts in; nothing else can
+    let install = try #require(ManagementCommand(.localModels, ["compute", "models", "install", "ollama/qwen3:8b"]))
+    #expect(!install.terminateOnCancel)
+    #expect(install.terminatingOnCancel().terminateOnCancel)
+    let load = try #require(ManagementCommand(.localModels, ["compute", "models", "load", "lmstudio/qwen"]))
+    #expect(!load.terminateOnCancel)
+    let (model, _, _) = try await fixtureModel()
+    model.beginInstall()
+    model.install?.model = "qwen/qwen3-8b"
+    model.proposeInstall()
+    #expect(model.confirmation?.command.terminateOnCancel == true)
+    model.proposeLoad(model.line(for: "lmstudio/google/gemma-3-4b"), unload: false)
+    #expect(model.confirmation?.command.terminateOnCancel == false)
+
+    // a status refresh whose task is cancelled (the menu closing, a view
+    // going away) asks for no termination, so doctor finishes and the
+    // panel is answered rather than flipped to unavailable
+    let runner = FakeRunner(results: [CommandResult(exitCode: 0, stdout: localModelDoctorJSON(), stderr: "")])
+    let status = StatusModel(cli: fakeCLI(runner))
+    let refresh = Task { await status.refresh() }
+    refresh.cancel()
+    await refresh.value
+    #expect(runner.terminateOnCancelFlags == [false], "doctor never opts in")
+    #expect(status.phase == .answered)
+    #expect(status.report != nil)
 }
 
 @MainActor
@@ -786,6 +818,21 @@ private final class FakeRunner: CommandRunner, @unchecked Sendable {
     }
 
     var calls: [Call] { lock.withLock { recorded } }
+    /// The `terminateOnCancel` every call asked for, in order.
+    private nonisolated(unsafe) var flags: [Bool] = []
+    var terminateOnCancelFlags: [Bool] { lock.withLock { flags } }
+
+    func run(
+        executable: URL, arguments: [String], environment: [String: String],
+        currentDirectory: URL?, standardInput: String?, terminateOnCancel: Bool,
+        onOutput: @escaping @Sendable (OutputLine) -> Void
+    ) async throws -> CommandResult {
+        lock.withLock { flags.append(terminateOnCancel) }
+        return try await run(
+            executable: executable, arguments: arguments, environment: environment,
+            currentDirectory: currentDirectory, standardInput: standardInput, onOutput: onOutput
+        )
+    }
 
     func run(
         executable: URL, arguments: [String], environment: [String: String],

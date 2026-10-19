@@ -638,8 +638,10 @@ public final class ComputeModel {
         install = nil
         let model = draft.model.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !draft.provider.isEmpty, !model.isEmpty,
-              let command = ManagementCommand(.localModels, ["compute", "models", "install", "\(draft.provider)/\(model)", "--json"])
+              let installing = ManagementCommand(.localModels, ["compute", "models", "install", "\(draft.provider)/\(model)", "--json"])
         else { return }
+        // Cancel Download ends this process; no other command is ended by a cancel
+        let command = installing.terminatingOnCancel()
         confirmation = ComputeConfirmation(
             title: "Install \(model)?",
             cost: "Downloaded onto this Mac. \(diskNote) \(memoryNote) Its size is not known until the download starts; then it shows here with the progress, and Cancel Download stops it.",
@@ -1156,7 +1158,7 @@ public struct DownloadProgress: Sendable, Equatable {
     /// The newest figures in `lines`, each from the newest line that has it.
     public static func read(_ lines: [OutputLine]) -> DownloadProgress? {
         let total = #/\bof\s+(?<n>\d+(?:\.\d+)?)\s?(?<unit>[KMGT]i?B)\b/#
-        let percent = #/(?<p>\d{1,3})%/#
+        let percent = #/(?:^|\D)(?<p>\d{1,3})%/#
         var size: String?
         var pct: Int?
         for line in lines.reversed() {

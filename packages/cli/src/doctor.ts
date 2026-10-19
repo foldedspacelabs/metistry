@@ -89,6 +89,7 @@ import { instanceLockPath, readLock } from "./lock.js";
 import { connectionDoctorRows } from "./connection-check.js";
 import { releaseRootAbove, resolveSeedDir } from "./env.js";
 import { CURRENT_LINK, RELEASES_DIRNAME } from "./release.js";
+import { remoteRows, type RemoteRegistry } from "./remote/rows.js";
 
 export interface Db {
   query(text: string, values?: unknown[]): Promise<{ rows: any[] }>;
@@ -163,6 +164,8 @@ export interface DoctorDeps {
   keychain?: KeychainBackend;
   /** the Mac app the `app` row reads (default: `METISTRY_APP_PATH`, /Applications, ~/Applications — mac-app.ts); null = no `app` row */
   appPath?: string | null;
+  /** test seam: the remote-access adapters the `remote` rows ask (default the ones this release ships — remote/rows.ts) */
+  remoteProviders?: RemoteRegistry;
 }
 
 // ---- manifests ------------------------------------------------------------
@@ -1980,7 +1983,7 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
   // the assistant's row both read this answer
   const supervised = platform === "darwin" && shape === "launchd" ? supervisorSnapshot(instanceDir) : undefined;
   const envFiles = envPaths({ instanceDir, productDir: productDir })?.read ?? [];
-  const [componentRows, registries, layout, inbox, profile, vaultCase, cli, app, dbAndSchedules, launchd, keepAwake, supervisor, launchdEnv, containers, localModels, sharedScope, vaultSync, connections] = await Promise.all([
+  const [componentRows, registries, layout, inbox, profile, vaultCase, cli, app, dbAndSchedules, launchd, keepAwake, remote, supervisor, launchdEnv, containers, localModels, sharedScope, vaultSync, connections] = await Promise.all([
     (async () => Promise.all((await walkManifests(productDir)).map((m) => componentRow(m, { env, fetchFn, timeoutMs, shape, labelSuffix, compute, supervisor: supervised }))))(),
     // the registries over product + extensions: overlays and skips (plan §2.7)
     registriesRow(productDir, env),
@@ -2010,6 +2013,10 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
     // install is running and correct even when a promise about the MACHINE is
     // unmet (docs/ops/deployment-shapes.md, "Keeping the Mac awake")
     keepAwakeRow({ deployment: loaded.deployment, instanceDir, exec, platform }),
+    // how the phone reaches this Mac (plan §2.23): None's one `ok` row, or a
+    // provider's shared rows — tool, proxy listener (`failed` at the main
+    // port), answers from this Mac — and then its own
+    remoteRows({ deployment: loaded.deployment, productDir, instanceDir, env, fetchFn, exec, platform, uid, timeoutMs, providers: deps.remoteProviders }),
     // the launchd shape's core is ONE agent with children launchd cannot see
     supervised ? supervisorRows(instanceDir, supervised) : Promise.resolve([]),
     // the jobs' embedded environment against `.env` (env-follow.ts)
@@ -2034,7 +2041,7 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
     env.METISTRY_INSTANCE_DIR ? connectionRows({ instanceDir, productDir: productDir, env, platform, uid, exec, ...(deps.keychain ? { keychain: deps.keychain } : {}) }) : Promise.resolve([]),
   ]);
   const targetKeys = retiredTargetKeysRow(env);
-  rows.push(...componentRows, registries, layout, inbox, ...(profile ? [profile] : []), ...(vaultCase ? [vaultCase] : []), cli, ...(app ? [app] : []), ...dbAndSchedules, ...launchd, ...(keepAwake ? [keepAwake] : []), ...supervisor, ...(launchdEnv ? [launchdEnv] : []), ...containers, ...localModels, ...(sharedScope ? [sharedScope] : []), ...(targetKeys ? [targetKeys] : []), vaultSync, ...connections);
+  rows.push(...componentRows, registries, layout, inbox, ...(profile ? [profile] : []), ...(vaultCase ? [vaultCase] : []), cli, ...(app ? [app] : []), ...dbAndSchedules, ...launchd, ...(keepAwake ? [keepAwake] : []), ...remote, ...supervisor, ...(launchdEnv ? [launchdEnv] : []), ...containers, ...localModels, ...(sharedScope ? [sharedScope] : []), ...(targetKeys ? [targetKeys] : []), vaultSync, ...connections);
 
   return { as_of: new Date().toISOString(), product_dir: deps.productDir, product, shape, ok: !rows.some((r) => r.status === "failed"), rows };
 }

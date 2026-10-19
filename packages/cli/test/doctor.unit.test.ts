@@ -147,6 +147,9 @@ describe("doctor: everything healthy", () => {
       // macOS: one row for the power policy, and this install has not been
       // asked the question — absent, never a failure (see keep-awake.test.ts)
       "keep-awake:keep-awake=absent",
+      // how the phone reaches this Mac (plan §2.23): never chosen is `none`,
+      // and an install that exposes nothing is correct — ok (remote.test.ts)
+      "remote:remote=ok",
       "container:compose:assistant=ok",
       "container:compose:console=ok",
       "container:compose:db=ok",
@@ -189,7 +192,7 @@ describe("doctor: everything healthy", () => {
     // icon spelling depends on the terminal's locale, so nothing here
     // asserts on the glyph itself.
     expect(text.split("\n")[0]).toContain(`${productDir} — checkout, shape compose`);
-    expect(text).toMatch(/20 checks: 10 ok, 0 degraded, 0 failed, 10 absent — .*healthy/);
+    expect(text).toMatch(/21 checks: 11 ok, 0 degraded, 0 failed, 10 absent — .*healthy/);
     expect(text).toMatch(/^local-model$/m); // the kind is the heading, not a repeated column
     expect(text).toMatch(/^\s+\S+\s+local:llamaserver\s+absent\s+\d+ms$/m);
     expect(text).toMatch(/^\s+\S+\s+local:applefm\s+absent\s+\d+ms$/m);
@@ -202,7 +205,7 @@ describe("doctor: everything healthy", () => {
     expect(json).toHaveLength(1); // --json purity: nothing but the one document reaches stdout
     const parsed = JSON.parse(json.join("\n"));
     expect(parsed.ok).toBe(true);
-    expect(parsed.rows).toHaveLength(20);
+    expect(parsed.rows).toHaveLength(21);
     expect(parsed.shape).toBe("compose");
     expect(parsed.rows.every((r: DoctorRow) => typeof r.latency_ms === "number" && typeof r.probe === "string")).toBe(true);
   });

@@ -47,6 +47,8 @@ import {
 import { buildDeploymentReport, renderDeploymentReport, setDeploymentShape, setKeepAwake, type KeepAwakeFlags } from "./deployment-report.js";
 import { loadDeployment } from "./deployment.js";
 import { loadVaultSettings, renderVaultSettings, rollbackVault, setVaultSettings, VAULT_VERBS } from "./vault.js";
+import { parseRemoteProviderId, remoteAuthorize, remoteSet, remoteStatus, remoteTest, renderRemoteRows, renderRemoteStatus, REMOTE_VERBS, REMOTE_WAIT_DEFAULT_MS, type RemoteRegistry } from "./remote/index.js";
+import { valueInArgvRefusal } from "./stdin-value.js";
 import { EXTENSION_VERBS, extensionsAdd, extensionsList, extensionsRemove, parseExtensionVerb, renderExtensions, type ExtensionsOptions } from "./extensions.js";
 import { doctor, renderTable, type DoctorDeps } from "./doctor.js";
 import { VARIABLE_VERBS, parseVariableVerb, renderVariables, variablesList, variablesSet, variablesUnset, type VariablesOptions } from "./variables.js";
@@ -152,7 +154,7 @@ export interface ParsedArgs {
  * `--version <x.y.z>` silently installed the latest release instead
  * (#198, "not fixed here" #2).
  */
-export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "dry-run", "allow-dirty", "no-launchd", "no-compose", "no-color", "skip-build", "skip-migrate", "rollback", "allow-legacy", "yes", "follow", "namespace", "rotate", "list", "remove", "complete", "skip-test", "remote", "json-lines", "stdio", "named", "clear", "no-discover", "no-browser", "plain", "include-config", "no-app", "relaunch", "no-reexec"]);
+export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "dry-run", "allow-dirty", "no-launchd", "no-compose", "no-color", "skip-build", "skip-migrate", "rollback", "allow-legacy", "yes", "follow", "namespace", "rotate", "list", "remove", "complete", "skip-test", "remote", "json-lines", "stdio", "named", "clear", "no-discover", "no-browser", "plain", "include-config", "no-app", "relaunch", "no-reexec", "token", "use-app", "access"]);
 
 /** The §2.14 verbs over owner-named secrets (M7), and the shared scope's migration (T4-3). `list --named` joins them; `sync|mint|list|purge` are the install's own variables. */
 export const NAMED_SECRET_VERBS = new Set(["set", "replace", "remove", "hosts", "grant", "migrate-scope", "purge-shared"]);
@@ -886,7 +888,31 @@ const USAGE = `metistry — Metistry command line
       is not recommended, and never runs it. doctor reads pmset -g and says
       whether it is in effect (docs/ops/deployment-shapes.md).
 
-  metistry vault settings [--push <after_commit|manual|<n>m|<n>h>] [--pull <n>m|<n>h]
+  metistry remote [status] [--json] [--product-dir <checkout>] [--instance <dir>]
+  metistry remote set <none|tailscale|relay|cloudflare|zrok|ngrok|port-forward> [provider flags]
+                      [--yes] [--dry-run] [--timeout <seconds>] [--json] [--instance <dir>]
+  metistry remote authorize <tailscale|cloudflare> [--no-browser] [--timeout 300] [--json]
+  metistry remote test [--json] [--instance <dir>]
+  metistry remote off [--yes] [--json] [--instance <dir>]
+      How your phone reaches this Mac (docs/ops/remote-access.md). The record is
+      the remote: block of .metistry/deployment.yaml — the provider, its mode,
+      the origin it yields and its non-secret settings; no credential is in it.
+      Every install starts at none: nothing exposed, METISTRY_ORIGIN loopback
+      only, Add a Phone refuses. set previews without --yes; with it, the new
+      provider is configured first, its origin must answer from this Mac, the
+      record is written (the same protected write as deployment set-shape), and
+      only then is the old provider revoked — the phone is never left with
+      nothing mid-change. A failed set-up writes nothing. off is set none
+      with the old provider's revoke. A provider's token is read from stdin
+      (--token for cloudflare; zrok and ngrok always) or typed hidden at a
+      prompt — never as an argument. Provider flags: tailscale [--mode
+      funnel|tailnet] [--use-app]; cloudflare --hostname <name.domain>
+      [--access] [--token]; zrok [--name <name>]; ngrok [--domain <name>];
+      port-forward [--ddns desec|cloudflare] [--hostname <name>] [--manual
+      <external-port>]. This version ships none; the others arrive with their
+      own tickets and set says so until then.
+
+  metistry vault settings [--push <after_commit|manual|<n>m|<n>h>] [--pull <n>m|<n>h>]
                           [--yes] [--json] [--product-dir <checkout>] [--instance <dir>]
       The vault's git sync policy (M18): when the reconciler pushes the
       instance repo to its remote — after_commit (once a flush has made
@@ -1037,6 +1063,7 @@ export const HELP_GROUPS: Array<{ title: string; verbs: Array<[string, string]> 
       ["compute route-report", "where real messages went — the router's fall-through rate, PoC-20 phase 0"],
       ["deployment [set-shape]", "the effective shape (D4 overlay) and its services"],
       ["deployment set-keep-awake", "whether this install holds the Mac awake, and on which power"],
+      ["remote [status|set|authorize|test|off]", "how your phone reaches this Mac: none, or a provider — the record, the chooser, the switch"],
       ["vault settings", "when the reconciler pushes the vault to its remote, and pulls from it"],
       ["vault rollback", "undo a commit, a day or a file — a Needs You request, then one new commit"],
       ["agents list", "every registered agent and what it holds"],
@@ -1092,6 +1119,10 @@ export interface MainIo {
   err?: (s: string) => void;
   /** test seam: fakes for doctor's fetch/db/exec */
   doctorDeps?: Partial<DoctorDeps>;
+  /** test seam: the remote-access adapters `remote` and doctor's `remote` rows use (default the ones this release ships) */
+  remoteProviders?: RemoteRegistry;
+  /** test seam: a pasted provider token, instead of stdin or the hidden prompt */
+  readToken?: (what: string) => Promise<string>;
   /** test seam: every subprocess up/update/init run */
   exec?: Exec;
   /** test seams for restart/stop/start/logs: the host platform decides whether launchd jobs exist at all (CI runs the suite on Linux) */
@@ -1748,6 +1779,106 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
       } catch (e) {
         err(`metistry instances ${verb}: ${e instanceof Error ? e.message : String(e)}`);
         return 1;
+      }
+    }
+    case "remote": {
+      // M20 (plan §2.23): how the phone reaches this Mac. The record is a
+      // §4.7 protected write through the reconciler as `user`, like set-shape;
+      // a token never arrives in argv (stdin-value.ts, the `secrets set` rule).
+      const usage = `usage: metistry remote [${REMOTE_VERBS.join("|")}] … (metistry --help)`;
+      const verb = positional[0] ?? "status";
+      if (!(REMOTE_VERBS as readonly string[]).includes(verb)) {
+        err(usage);
+        return 2;
+      }
+      if (!productDir) {
+        err("remote needs a Metistry checkout: pass --product-dir or set METISTRY_PRODUCT_DIR — the seed's deployment.yaml is half of the record");
+        return 2;
+      }
+      const loadedRemote = loadEnv();
+      const instanceDir = str(flags, "instance") ?? loadedRemote.instanceDir;
+      if (!instanceDir) {
+        err("remote needs the instance repo: pass --instance <dir> or set METISTRY_INSTANCE_DIR (docs/ops/cli.md) — deployment.yaml lives there");
+        return 2;
+      }
+      const json = flags.json === true;
+      const common = {
+        productDir,
+        instanceDir,
+        env: { ...process.env, METISTRY_INSTANCE_DIR: instanceDir },
+        platform: io.platform ?? process.platform,
+        uid: io.uid ?? (typeof process.getuid === "function" ? process.getuid() : 0),
+        fetchFn: io.fetchFn ?? fetch,
+        ...(io.exec ? { exec: io.exec } : {}),
+        ...(io.remoteProviders ? { providers: io.remoteProviders } : {}),
+        ...(io.readToken ? { readToken: io.readToken } : {}),
+        out: json ? () => {} : out,
+      };
+      let timeoutS: number | undefined;
+      try {
+        timeoutS = seconds(flags, "timeout");
+      } catch (e) {
+        err(`${e instanceof Error ? e.message : String(e)}\n${usage}`);
+        return 2;
+      }
+      try {
+        if (verb === "status") {
+          if (positional.length > 1) {
+            err(usage);
+            return 2;
+          }
+          const s = await remoteStatus(common);
+          out(json ? JSON.stringify(s, null, 2) : renderRemoteStatus(s, ui));
+          return s.ok ? 0 : 1;
+        }
+        if (verb === "test") {
+          const t = await remoteTest(common);
+          out(json ? JSON.stringify(t, null, 2) : renderRemoteRows(t.rows, ui));
+          return t.ok ? 0 : 1;
+        }
+        if (verb === "authorize") {
+          const provider = parseRemoteProviderId(positional[1]);
+          if (!provider || positional.length > 2) {
+            err("usage: metistry remote authorize <tailscale|cloudflare> [--no-browser] [--timeout 300] [--json]");
+            return 2;
+          }
+          const a = await remoteAuthorize({ ...common, provider, authorize: { noBrowser: flags["no-browser"] === true, timeoutMs: (timeoutS ?? 300) * 1000 } });
+          out(json ? JSON.stringify(a, null, 2) : `${a.provider}: ${a.signed_in ? "signed in" : "not signed in"} — ${a.detail}`);
+          return a.signed_in ? 0 : 1;
+        }
+        // set | off
+        const provider = verb === "off" ? "none" : parseRemoteProviderId(positional[1]);
+        if (!provider) {
+          err(`usage: metistry remote set <none|tailscale|relay|cloudflare|zrok|ngrok|port-forward> [provider flags] [--yes]${positional[1] !== undefined ? ` — ${JSON.stringify(positional[1])} is not one of them` : ""}`);
+          return 2;
+        }
+        // A VALUE in argv is refused without being repeated: a token pasted
+        // after the provider, or given to --token, would land in shell
+        // history and `ps`. The refusal names stdin as the only way in.
+        if (positional.length > (verb === "off" ? 1 : 2)) {
+          err(valueInArgvRefusal("a provider's token (or anything after the provider's name)", `metistry remote set ${provider} --token < token.txt`));
+          return 2;
+        }
+        if (typeof flags.token === "string") {
+          err(valueInArgvRefusal("a provider's token", `metistry remote set ${provider} --token < token.txt`));
+          return 2;
+        }
+        const providerFlags: Record<string, string | boolean> = {};
+        for (const k of ["mode", "use-app", "hostname", "access", "token", "name", "domain", "ddns", "manual"]) if (flags[k] !== undefined) providerFlags[k] = flags[k]!;
+        const yes = flags.yes === true && flags["dry-run"] !== true;
+        const r = await remoteSet({
+          ...common,
+          provider,
+          options: { ...(typeof flags.mode === "string" ? { mode: flags.mode } : {}), flags: providerFlags },
+          yes,
+          ...(timeoutS !== undefined ? { waitMs: timeoutS * 1000 } : { waitMs: REMOTE_WAIT_DEFAULT_MS }),
+        });
+        if (json) out(JSON.stringify(r, null, 2));
+        if (!yes) out("preview only — pass --yes to do this.");
+        return 0;
+      } catch (e) {
+        err(`metistry remote ${verb}: ${e instanceof Error ? e.message : String(e)}`);
+        return e instanceof StepFailed ? e.code : 1;
       }
     }
     case "vault": {

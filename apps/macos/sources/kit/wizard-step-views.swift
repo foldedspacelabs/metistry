@@ -251,9 +251,11 @@ public struct PasskeyDiagnosticView: View {
 public struct ComputeStepView: View {
     @Environment(\.colorScheme) private var scheme
     @Bindable private var model: ComputeStepModel
+    private let assistantName: String?
 
-    public init(model: ComputeStepModel) {
+    public init(model: ComputeStepModel, assistantName: String? = nil) {
         self.model = model
+        self.assistantName = assistantName
     }
 
     public var body: some View {
@@ -318,7 +320,7 @@ public struct ComputeStepView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .metistryCard(p)
 
-            Text(ComputeStepModel.skipNote)
+            Text(ComputeStepModel.skipNote(assistantName: assistantName))
                 .metistryText(.caption1, p, .textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -353,7 +355,7 @@ public struct ComputeStepView: View {
             case .skipped:
                 HStack(alignment: .top, spacing: MetistrySpace.s2) {
                     StatusDot(.absent)
-                    Text("no engine — the assistant will not be started, and everything else will").metistryText(.footnote, p, .textSecondary)
+                    Text(ComputeStepModel.skippedLine(assistantName: assistantName)).metistryText(.footnote, p, .textSecondary)
                 }
             case .failed(let why):
                 UnavailableCard(what: "Could not set compute", reason: why, command: model.lastCommand)

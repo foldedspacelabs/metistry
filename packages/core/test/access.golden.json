@@ -607,6 +607,66 @@
     }
   },
   {
+    "id": "console_briefing.assistant",
+    "door": "GET /api/briefing (the session-start briefing)",
+    "who": "assistant",
+    "verb": "read",
+    "resource": {
+      "kind": "console",
+      "door": "console_briefing",
+      "route": "GET /api/briefing"
+    },
+    "code": "forbidden",
+    "reason": "role_required",
+    "tell": "hide",
+    "message": "",
+    "before": {
+      "code": "forbidden",
+      "message": null,
+      "at": "new door (X-128) — the session-start briefing did not exist; the review proposed it for external agents alone, so the assistant and a crew meet the console's uniform hidden forbidden"
+    }
+  },
+  {
+    "id": "console_briefing.crew",
+    "door": "GET /api/briefing (the session-start briefing)",
+    "who": "crew",
+    "verb": "read",
+    "resource": {
+      "kind": "console",
+      "door": "console_briefing",
+      "route": "GET /api/briefing"
+    },
+    "code": "forbidden",
+    "reason": "role_required",
+    "tell": "hide",
+    "message": "",
+    "before": {
+      "code": "forbidden",
+      "message": null,
+      "at": "new door (X-128) — the session-start briefing did not exist; the review proposed it for external agents alone, so the assistant and a crew meet the console's uniform hidden forbidden"
+    }
+  },
+  {
+    "id": "console_briefing.capture_token",
+    "door": "GET /api/briefing (the session-start briefing)",
+    "who": "tool",
+    "verb": "read",
+    "resource": {
+      "kind": "console",
+      "door": "console_briefing",
+      "route": "GET /api/briefing"
+    },
+    "code": "forbidden",
+    "reason": "role_required",
+    "tell": "hide",
+    "message": "",
+    "before": {
+      "code": "forbidden",
+      "message": null,
+      "at": "new door (X-128) — the session-start briefing did not exist; the review proposed it for external agents alone, so the assistant and a crew meet the console's uniform hidden forbidden"
+    }
+  },
+  {
     "id": "console.owner_token_on_management",
     "door": "the management surface",
     "who": "tool",

@@ -74,7 +74,7 @@ describe("every row", () => {
   });
 
   it("serves exactly N rows — a ticket flipping a row to served/unserved must update this number", () => {
-    expect(CLIENT_API.filter((r) => r.served).length).toBe(123); // T4-17: POST /api/calendar/invitations/:id/respond, POST /api/mail/messages/:id/draft; T8-4: GET /api/recordings/:id; T4-26: POST /api/trackers/:connection/issues/:key/complete; T4-25: POST /api/trackers/:connection/issues, POST /api/vault-tasks/:task_key/link; X-12: POST /api/today/add; T2-13: the three pull request doors; T2-12: POST /api/calendar/events/:id/move; T2-10: POST /api/knowledge/conflicts/resolve; T4-8a: GET /api/connections, GET /api/connections/:name; T4-18: GET /api/compute/catalogue, POST /api/compute/unassign; T4-1: GET /api/secrets; T2-5: the Defer door; T4-6: GET /api/agents/:id/definition; T4-4: GET /api/variables; T3-9: POST /api/sessions/purge; T2-18: GET /api/events; T1-7: GET /api/needs-you/count; T1-6: the fold, the drafts, the areas; T10-2: GET /api/vault/status; T1-12: POST|DELETE /api/prose/:id/feedback; T2-17: GET /api/turns/:turn_id/progress, GET /api/sessions/:id; T10-4: GET /api/knowledge/history, GET /api/knowledge/version; T10-6: POST /api/vault/rollback; T2-11: POST /api/meetings/:event_id/note; T2-7: GET /api/today, GET /api/vault-tasks, PUT /api/today/order; T3-8: POST /api/scheduled/routines
+    expect(CLIENT_API.filter((r) => r.served).length).toBe(124); // X-128: GET /api/briefing; T4-17: POST /api/calendar/invitations/:id/respond, POST /api/mail/messages/:id/draft; T8-4: GET /api/recordings/:id; T4-26: POST /api/trackers/:connection/issues/:key/complete; T4-25: POST /api/trackers/:connection/issues, POST /api/vault-tasks/:task_key/link; X-12: POST /api/today/add; T2-13: the three pull request doors; T2-12: POST /api/calendar/events/:id/move; T2-10: POST /api/knowledge/conflicts/resolve; T4-8a: GET /api/connections, GET /api/connections/:name; T4-18: GET /api/compute/catalogue, POST /api/compute/unassign; T4-1: GET /api/secrets; T2-5: the Defer door; T4-6: GET /api/agents/:id/definition; T4-4: GET /api/variables; T3-9: POST /api/sessions/purge; T2-18: GET /api/events; T1-7: GET /api/needs-you/count; T1-6: the fold, the drafts, the areas; T10-2: GET /api/vault/status; T1-12: POST|DELETE /api/prose/:id/feedback; T2-17: GET /api/turns/:turn_id/progress, GET /api/sessions/:id; T10-4: GET /api/knowledge/history, GET /api/knowledge/version; T10-6: POST /api/vault/rollback; T2-11: POST /api/meetings/:event_id/note; T2-7: GET /api/today, GET /api/vault-tasks, PUT /api/today/order; T3-8: POST /api/scheduled/routines
   });
 
   it("takes a cursor only on a read, and an Idempotency-Key only on a write", () => {
@@ -153,7 +153,7 @@ describe("reach and principals", () => {
 
   it("no agent bearer reaches anything but the agent surface", () => {
     const agentRows = CLIENT_API.filter((r) => r.principals.includes("agent")).map(key);
-    expect(agentRows).toEqual(["* /mcp", "POST /capture"]);
+    expect(agentRows).toEqual(["* /mcp", "POST /capture", "GET /api/briefing"]); // X-128: the session-start briefing, agent bearers alone
   });
 
   it("the capture owner token reaches the capture door and five owner routes — pinned, so widening it is a decision", () => {

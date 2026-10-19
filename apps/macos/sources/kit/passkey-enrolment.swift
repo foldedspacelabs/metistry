@@ -1,4 +1,4 @@
-// Step 6, the door: enrol a passkey.
+// Step 7, the door: enrol a passkey.
 //
 // THE FINDING, up front, because the whole file is shaped by it. A native
 // `ASAuthorization` passkey ceremony CANNOT be run against this console's local

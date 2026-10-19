@@ -28,7 +28,7 @@ function fakeSecurity(seed: Record<string, string> = {}): Exec {
 }
 
 /** A console that answers /api/whoami for exactly one token. */
-function fakeConsole(expected: string, body: unknown = { principal: "user", via: "local_owner_token", management: true, origin: "https://metis.example" }) {
+function fakeConsole(expected: string, body: unknown = { principal: "user", via: "local_owner_token", management: true, origin: "https://assistant.example" }) {
   const seen: Array<{ url: string; authorization: string | undefined }> = [];
   const fetchFn = (async (url: string | URL | Request, init?: RequestInit) => {
     const authorization = (init?.headers as Record<string, string> | undefined)?.authorization;
@@ -138,7 +138,7 @@ describe("isLoopbackConsoleUrl", () => {
   });
 
   it("is false for anything else, including a malformed URL", () => {
-    for (const u of ["https://metis.example.com", "http://192.168.1.5:8080", "not a url"]) expect(isLoopbackConsoleUrl(u), u).toBe(false);
+    for (const u of ["https://assistant.example.com", "http://192.168.1.5:8080", "not a url"]) expect(isLoopbackConsoleUrl(u), u).toBe(false);
   });
 });
 
@@ -150,7 +150,7 @@ describe("consoleCall (module)", () => {
       throw new Error("must not be called");
     }) as unknown as typeof fetch;
     await expect(
-      consoleCall({ method: "GET", path: "/api/whoami", env: { METISTRY_LOCAL_OWNER_TOKEN: TOKEN, METISTRY_CONSOLE_URL: "https://metis.example.com" }, platform: "linux", fetchFn }),
+      consoleCall({ method: "GET", path: "/api/whoami", env: { METISTRY_LOCAL_OWNER_TOKEN: TOKEN, METISTRY_CONSOLE_URL: "https://assistant.example.com" }, platform: "linux", fetchFn }),
     ).rejects.toThrow(/is not loopback.*refuses to send it anywhere else/s);
     expect(called).toBe(false);
   });
@@ -392,7 +392,7 @@ describe("metistry console call (CLI)", () => {
 
   it("refuses a non-loopback console before sending the token, and prints why", async () => {
     process.env.METISTRY_LOCAL_OWNER_TOKEN = TOKEN;
-    process.env.METISTRY_CONSOLE_URL = "https://metis.example.com";
+    process.env.METISTRY_CONSOLE_URL = "https://assistant.example.com";
     let called = false;
     const fetchFn = (async () => {
       called = true;

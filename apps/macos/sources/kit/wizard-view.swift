@@ -20,7 +20,7 @@ public struct WizardView: View {
     private let model: WizardModel
     private let bridges: [DoctorRow]
     private let resolvedShape: String?
-    /// Where doctor found the console. Step 6 needs it to decide whether an
+    /// Where doctor found the console. Step 7 needs it to decide whether an
     /// `ASAuthorization` ceremony is possible against this install's origin.
     private let consoleURL: String?
     private let developerProductDir: URL?

@@ -29,7 +29,7 @@ import type { Db } from "../src/doctor.js";
 import { main } from "../src/main.js";
 import { createUi } from "../src/ui.js";
 
-const ORIGIN = "https://metis.example";
+const ORIGIN = "https://assistant.example";
 const INSTANCE_ID = "11111111-2222-4333-8444-555555555555";
 
 /** A console at `origin`: /health answers `health`, /api/identity answers `identity`; records every URL asked. */
@@ -85,7 +85,7 @@ describe("firstOrigin", () => {
 describe("isLoopbackHost", () => {
   it("is 127.0.0.0/8, ::1, the IPv4-mapped form and localhost — nothing else", () => {
     for (const h of ["127.0.0.1", "127.255.0.9", "::1", "::ffff:127.0.0.1", "localhost", "LOCALHOST"]) expect(isLoopbackHost(h), h).toBe(true);
-    for (const h of ["128.0.0.1", "10.0.0.1", "192.168.1.4", "::2", "metis.example", "localhost.example", "2001:db8::1"]) expect(isLoopbackHost(h), h).toBe(false);
+    for (const h of ["128.0.0.1", "10.0.0.1", "192.168.1.4", "::2", "assistant.example", "localhost.example", "2001:db8::1"]) expect(isLoopbackHost(h), h).toBe(false);
   });
 });
 
@@ -107,9 +107,9 @@ describe("checkOriginShape — the refusals that need no network", () => {
   });
 
   it("refuses http: in §2.22's words, naming METISTRY_ORIGIN", () => {
-    const r = refusal("http://metis.example");
+    const r = refusal("http://assistant.example");
     expect(r.case).toBe("http");
-    expect(r.message).toBe("A passkey needs HTTPS. METISTRY_ORIGIN is http://metis.example; set it to the https:// address your phone will open.");
+    expect(r.message).toBe("A passkey needs HTTPS. METISTRY_ORIGIN is http://assistant.example; set it to the https:// address your phone will open.");
   });
 
   it("refuses an IP literal — v4 or v6 — in §2.22's words, naming METISTRY_ORIGIN", () => {
@@ -124,17 +124,17 @@ describe("checkOriginShape — the refusals that need no network", () => {
     expect(refusal(undefined)).toMatchObject({ case: "origin_unset", origin: null, fix: ENROLL_FIX });
     expect(refusal(undefined).message).toContain("METISTRY_ORIGIN is not set");
     expect(refusal("not a url")).toMatchObject({ case: "origin_invalid", origin: "not a url" });
-    expect(refusal("ftp://metis.example")).toMatchObject({ case: "origin_invalid" });
+    expect(refusal("ftp://assistant.example")).toMatchObject({ case: "origin_invalid" });
   });
 
   it("passes an https: hostname", () => {
-    const r = checkOriginShape("https://metis.example");
+    const r = checkOriginShape("https://assistant.example");
     expect(r.ok).toBe(true);
-    if (r.ok) expect(r.url.origin).toBe("https://metis.example");
+    if (r.ok) expect(r.url.origin).toBe("https://assistant.example");
   });
 
   it("every refusal ends with the same pointer: Settings ▸ Remote Access and `metistry remote`", () => {
-    for (const origin of [undefined, "http://127.0.0.1:8080", "http://metis.example", "https://10.0.0.7"]) {
+    for (const origin of [undefined, "http://127.0.0.1:8080", "http://assistant.example", "https://10.0.0.7"]) {
       expect(refusal(origin).fix).toContain("Settings ▸ Remote Access");
       expect(refusal(origin).fix).toContain("`metistry remote`");
       expect(renderEnrollRefusal(refusal(origin))).toContain("METISTRY_ORIGIN");
@@ -153,15 +153,15 @@ describe("checkOriginReachable — the fourth refusal", () => {
     const down = fakeOrigin({ health: "throw" });
     const r = await checkOriginReachable(url, { fetchFn: down.fetchFn, provider: "tailscale" });
     expect(r).toMatchObject({ case: "unreachable", origin: ORIGIN, fix: ENROLL_FIX });
-    expect(r!.message).toBe("https://metis.example doesn't answer from this Mac, so your phone won't reach it either. Settings ▸ Remote Access shows what tailscale reports.");
-    expect(r!.detail).toBe("GET https://metis.example/health: fetch failed");
-    expect(down.asked).toEqual(["https://metis.example/health"]);
+    expect(r!.message).toBe("https://assistant.example doesn't answer from this Mac, so your phone won't reach it either. Settings ▸ Remote Access shows what tailscale reports.");
+    expect(r!.detail).toBe("GET https://assistant.example/health: fetch failed");
+    expect(down.asked).toEqual(["https://assistant.example/health"]);
   });
 
   it("says 'no answer within 5 s' on a timeout, and names a generic provider when none is recorded", async () => {
     const slow = fakeOrigin({ health: "timeout" });
     const r = await checkOriginReachable(url, { fetchFn: slow.fetchFn });
-    expect(r!.detail).toBe("GET https://metis.example/health: no answer within 5 s");
+    expect(r!.detail).toBe("GET https://assistant.example/health: no answer within 5 s");
     expect(r!.message).toContain("what your remote-access provider reports");
     expect(providerPhrase("none")).toBe("your remote-access provider");
     expect(providerPhrase(undefined)).toBe("your remote-access provider");
@@ -179,7 +179,7 @@ describe("checkOriginReachable — the fourth refusal", () => {
     expect(r).toMatchObject({ case: "other_instance", origin: ORIGIN });
     expect(r!.message).toContain("doesn't answer from this Mac");
     expect(r!.detail).toContain("names instance 99999999-9999-4999-8999-999999999999, not this one");
-    expect(other.asked).toEqual(["https://metis.example/health", "https://metis.example/api/identity"]);
+    expect(other.asked).toEqual(["https://assistant.example/health", "https://assistant.example/api/identity"]);
 
     const same = fakeOrigin();
     expect(await checkOriginReachable(url, { fetchFn: same.fetchFn, instanceId: INSTANCE_ID })).toBeUndefined();
@@ -188,7 +188,7 @@ describe("checkOriginReachable — the fourth refusal", () => {
   it("skips the identity comparison when this instance has no id to compare, or the identity is not served", async () => {
     const noId = fakeOrigin({ identity: { status: 200, body: { instance_id: "someone-else" } } });
     expect(await checkOriginReachable(url, { fetchFn: noId.fetchFn })).toBeUndefined();
-    expect(noId.asked).toEqual(["https://metis.example/health"]);
+    expect(noId.asked).toEqual(["https://assistant.example/health"]);
     const unstamped = fakeOrigin({ identity: { status: 503, body: { error: { code: "not_available" } } } });
     expect(await checkOriginReachable(url, { fetchFn: unstamped.fetchFn, instanceId: INSTANCE_ID })).toBeUndefined();
   });
@@ -209,7 +209,7 @@ describe("readRemoteProvider", () => {
 
 describe("enroll()", () => {
   it("a refused origin mints nothing: no statement is sent and, for the shape refusals, nothing is fetched", async () => {
-    for (const origin of ["http://127.0.0.1:8080", "http://metis.example", "https://10.0.0.7"]) {
+    for (const origin of ["http://127.0.0.1:8080", "http://assistant.example", "https://10.0.0.7"]) {
       const db = recordingDb();
       const net = fakeOrigin();
       const r = await enroll({ env: { METISTRY_ORIGIN: origin }, db, fetchFn: net.fetchFn });
@@ -288,7 +288,7 @@ describe("rendering", () => {
   it("the minted answer prints the URL, the host the phone must open, and how to cancel — and nothing that is not in the URL", () => {
     const text = renderEnrollMinted({ url: `${ORIGIN}/#enroll=abc`, code_id: 42, origin: ORIGIN, expires_at: "2026-10-18T10:10:00.000Z" }, ui);
     expect(text).toContain(`${ORIGIN}/#enroll=abc`);
-    expect(text).toContain("Your phone must be able to open metis.example.");
+    expect(text).toContain("Your phone must be able to open assistant.example.");
     expect(text).toContain("`metistry enroll --cancel 42`");
     expect(text).toContain("works once, for 10 minutes");
   });
@@ -300,7 +300,7 @@ describe("rendering", () => {
     expect(text).toContain("metistry enroll: refused — Your phone can't reach this Mac yet");
     expect(text).toContain("METISTRY_ORIGIN is http://127.0.0.1:8080");
     expect(text).toContain(ENROLL_FIX);
-    const http = checkOriginShape("http://metis.example");
+    const http = checkOriginShape("http://assistant.example");
     if (http.ok) throw new Error("not refused");
     expect(renderEnrollRefusal(http.refusal).match(/METISTRY_ORIGIN/g)).toHaveLength(2); // the message's own, and the fix's — not a third line repeating it
   });
@@ -377,8 +377,8 @@ describe("metistry enroll (CLI)", () => {
     const err: string[] = [];
     const down = fakeOrigin({ health: "throw" });
     expect(await main(["enroll"], { out: () => {}, err: (s) => err.push(s), fetchFn: down.fetchFn })).toBe(1);
-    expect(err.join("\n")).toContain("https://metis.example doesn't answer from this Mac");
-    expect(err.join("\n")).toContain("GET https://metis.example/health: fetch failed");
+    expect(err.join("\n")).toContain("https://assistant.example doesn't answer from this Mac");
+    expect(err.join("\n")).toContain("GET https://assistant.example/health: fetch failed");
   });
 
   it("is in the help", async () => {

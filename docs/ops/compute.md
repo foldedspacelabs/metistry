@@ -22,7 +22,7 @@ This page describes the file, the verbs over it, and — since PR 3 — the
 engine that dials a provider. Deliberately still absent, each a named PR in
 `docs/plan-refresh-2026-09-13.md` §4:
 
-- **No app pane.** The Compute pane, and wizard step 7 becoming "Choose your
+- **No app pane.** The Compute pane, and wizard step 8 becoming "Choose your
   compute", are PR 1a — deliberately split so the verb surface settles first.
   The *server* half is no longer missing: five of the verbs are console routes
   ("From the console", below), so the pane is a client to write rather than an
@@ -188,7 +188,7 @@ the allow-list the dynamic router chooses from (docs/ops/dynamic-router.md,
 plan §2.4) — and Settings ▸ Compute ▸ Advanced is where it is edited: `assign
 <tier>` adds or changes one, `unassign <tier>` removes it. `default` is
 reassigned, never removed; a turn that still names a removed tier runs on
-`default`, the rule `resolveAssignment` has always followed. **Metis uses** in
+`default`, the rule `resolveAssignment` has always followed. **The assistant uses** in
 Compute is `assignments.default`.
 
 ### Secrets

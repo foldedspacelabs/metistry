@@ -48,6 +48,13 @@ All of them are real.
 | `logs <service>` | tail the job's (or supervisor child's) log file, or `docker compose logs` |
 | `import-sessions` | summarise and post this machine's Claude Code sessions |
 
+The table is the install and day-to-day verbs. The rest each have a section
+below: `compute` (*Choosing compute*), `agents` (*Who is registered*, *A crew's
+definition*, *How much room an agent has*), `connections`, `variables`,
+`extensions`, `instances`, `enroll` (*Adding a phone*), `runs export`,
+and `runtime install` (*Seeding a product directory from an app bundle*).
+`metistry --help` lists every verb the installed CLI has.
+
 ```sh
 # from anywhere, no checkout needed for init
 npx @foldedspacelabs/metistry-cli init ~/metistry-instance --name "Athena"
@@ -121,7 +128,7 @@ Five small, read-mostly verbs exist so the Mac app stops parsing
 `.metistry/identity.yaml`, `package.json` and the `secrets list` table itself
 (`apps/macos/sources/kit/instance-files.swift`,
 `apps/macos/sources/kit/secret-listing.swift`) — the same "a behaviour the
-app needs is a CLI change first" rule as `doctor --json` and the
+app needs is a CLI change first" rule as `doctor --check --json` and the
 `restart|stop|start|logs` verbs above.
 
 `metistry identity [--json] [--instance <dir>]` prints `.metistry/identity.yaml` as the
@@ -148,7 +155,7 @@ run, so the change shows in Activity (`activity_feed`) whichever door made it.
   read back before it is sent — what was asked for landed, and `voice` and
   `instance_id` did not move.
 - **The mention follows the name** when it was the one `init` derived from the
-  old name (`Metis` → `@metis`); a mention set on its own stays until
+  old name (`Athena` → `@athena`); a mention set on its own stays until
   `--mention` moves it. A name that yields no mention (`李`) needs `--mention`.
 - Only the lines that change are rewritten; comments and `voice: >` keep every
   byte. Setting what the file already says writes nothing.
@@ -2231,8 +2238,8 @@ on this Mac — single use, ten minutes, stored hashed in
 ```
 $ metistry enroll
 Open this on the phone — it works once, for 10 minutes (until 14:52):
-  https://metis.example/#enroll=Qm9…
-Your phone must be able to open metis.example.
+  https://assistant.example/#enroll=Qm9…
+Your phone must be able to open assistant.example.
 Code 42 — `metistry enroll --cancel 42` ends it early.
 ```
 
@@ -2267,7 +2274,7 @@ passes, which is what *"Your phone must be able to open `<host>`"* is for.
 **`--json`** writes exactly one document. On a mint:
 
 ```json
-{"url":"https://metis.example/#enroll=Qm9…","code_id":42,"origin":"https://metis.example","expires_at":"2026-10-18T14:52:10.123Z"}
+{"url":"https://assistant.example/#enroll=Qm9…","code_id":42,"origin":"https://assistant.example","expires_at":"2026-10-18T14:52:10.123Z"}
 ```
 
 `code_id` is the row's id, never the code. On a refusal, exit 1 and one
@@ -2418,22 +2425,20 @@ still the directory doctor was given.
 
 bridge
   ✓ apple-fm  ok       920ms
-  ✗ eventkit  failed     4ms
-      → eventkit rejected the token (HTTP 401) — the METISTRY_BRIDGE_TOKEN_* in
-        .env differs from the one the bridge was started with
-
 service
   ✓ reconciler  ok        53ms
   ✓ console     ok         6ms
 
 cli
-  ○ cli on PATH  absent     0ms
+  ○ cli on PATH  absent     0ms  your hand
       → `ln -s /Users/you/instance/.metistry/state/cli/metistry
         ~/.local/bin/metistry` (or add its directory to PATH)
 
 db
   ✓ db          ok        16ms
-  ✓ migrations  ok         3ms
+  ! migrations  degraded   3ms  fixable
+      → 1 migration(s) not applied (0042_example.sql) — `metistry doctor`
+        applies them (the runner `metistry update` uses)
 
 launchd
   ✓ launchd:com.foldedspacelabs.metistry.reconciler  ok         4ms
@@ -2441,8 +2446,14 @@ launchd
 container
   ✓ compose:console  ok         0ms
 
-9 checks: 7 ok, 0 degraded, 1 failed, 1 absent — ✗ FAILED
+8 checks: 6 ok, 1 degraded, 0 failed, 1 absent — ✓ healthy
+1 fixable, 1 needs your hand — `metistry doctor` in a terminal applies the fixes, or `metistry doctor --fix`
 ```
+
+The marker at the end of a row says who puts it right (*Doctor repairs*,
+below): `fixable` — doctor does it, and after a repair run `fixed` or `still
+failing`; `your hand` — the remediation under the row is the step; nothing for
+a fact or an `ok` row. The last line appears only when something is fixable.
 
 One block per `kind`, the remediation — the reason a red row is read at all
 — wrapped directly under its row rather than in a column that runs off the
@@ -2494,8 +2505,9 @@ whether there is a person to ask:
   `failed`, no fix failed, and none is waiting for a `--yes`.
 - **`--check`** is read-only — exactly the report, as before. It is what
   `up`'s and `update`'s closing doctor, CI, the wave checkpoint and the Mac
-  app's refresh run (the app's M6 door is `doctor --json`, which is `--check`
-  by construction: see below).
+  app's refresh run (the app's M6 door is exactly `doctor --check --json`, and
+  Fix All's is exactly `doctor --fix --yes --json` — the app sends no other
+  `doctor` argv).
 - **`--fix [--yes]`** repairs without a terminal. A destructive fix runs only
   with `--yes`; without it, it is previewed, left, and the run exits non-zero.
 - **A bare `doctor` with nobody to ask** — a pipe, a script, an agent, the Mac
@@ -3648,25 +3660,23 @@ started.
 `connect-repo --auth device` has been exercised only against an injected
 fetch: the live GitHub round trip waits on the OAuth App being
 registered.
-Release mode is complete end to end (`docs/ops/releases.md`) but has not
-yet consumed a real published release — the first `v*` tag is its first
-live run. The CLI ships no `manifest.yaml`: `core`'s schema has no type
+Release mode is complete end to end (`docs/ops/releases.md`) and runs against
+real published GitHub releases. The CLI ships no `manifest.yaml`: `core`'s schema has no type
 for a command-line tool and inventing one is worse than the gap.
 
 **These verbs have a second caller now.** The Mac app (`apps/macos`,
 `docs/ops/mac-app.md`) drives `init`, `connect-repo --auth device`,
-`secrets sync`, `up` and `doctor --json` as its first-run flow and its
-Status panel, and is expected to move onto `secrets list --json`,
+`secrets sync`, `up`, `doctor --check --json` and `doctor --fix --yes --json`
+as its first-run flow and its Status window, and reads `secrets list --json`,
 `identity --json`, `version --json`, `deployment --json` and
-`deployment set-shape` for the Settings pane and wizard code that today
-parses `.metistry/identity.yaml`/`package.json`/the `secrets list` table itself
-(`apps/macos/sources/kit/instance-files.swift`,
-`apps/macos/sources/kit/secret-listing.swift`) — the same commands, with
-`--product-dir` always passed
-explicitly because a GUI process has no useful working directory. It is a
+`deployment set-shape` for the Settings pane and the wizard — the same
+commands, with `--product-dir` always passed explicitly because a GUI process
+has no useful working directory. The management verbs it may run are a closed
+table (`ManagementRow`, `apps/macos/sources/kit/stores/management-runner.swift`;
+plan §2.2). It is a
 front end, never a second implementation: a behaviour the app needs is a
 CLI change first. Two things that matter when editing them: `doctor --json`
-is a wire contract the app decodes (a renamed field breaks a panel, and
+(the app runs `--check --json`) is a wire contract the app decodes (a renamed field breaks a panel, and
 `apps/macos/tests/kit/doctor-report-tests.swift` is the misuse test that
 says so), and `connect-repo --auth device` prints its device code as
 `Open <uri> and enter this code:   <code>` — the app parses that line to

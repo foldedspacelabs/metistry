@@ -35,18 +35,20 @@ path.
   replaces the probe on any row that is not `ok`. **Fix All** (X-125,
   "Status: Fix All" below) repairs what doctor can fix; a your-hand row says so
   and has no button.
-- **Settings**, in the `Settings` scene: ⌘, and the app menu, seven panes —
-  Instance, Services, Connections, **Compute**, Secrets, Updates, Advanced.
+- **Settings**, in the `Settings` scene: ⌘, and the app menu, fourteen panes
+  in a grouped sidebar — Instance, Services, **Compute**, Updates · *Access:*
+  Account, Remote Access, Devices, Connections, Secrets, Variables ·
+  *Capture:* Live Capture, Sessions · Keyboard, Advanced.
   Every value on them is one of three things and the pane says which: a pointer
   the app remembers, a read-through of a file or a verb the CLI owns, or a
   labelled "not yet". The table below is the whole contract. Compute is the
   first pane that also **writes** — and it writes the only way anything in this
   product does, by running a `metistry compute` verb ("The Compute pane" below).
-- **The first-launch wizard.** A sheet over the plan's seven steps, shown when
+- **The first-launch wizard.** A sheet over eight steps, shown when
   no instance is selected and re-enterable from **Settings → Instance → Set up
   again…**. Back/Continue/Skip; each choice carries what it gets you and what it
   costs; every step shows the exact argument array *before* running the verb and
-  streams the CLI's own output. **All seven act:**
+  streams the CLI's own output. **All eight act:**
   1. `metistry runtime install --from <bundle> --to <product dir>` when this
      build is running out of its own read-only bundle (below).
   2. `metistry init`, or adopt a folder that already holds a `.metistry/identity.yaml`,
@@ -62,20 +64,23 @@ path.
      disabled until the preview has been on screen** — preview-then-confirm is
      the rule the CLI holds destructive verbs to, and a `--yes` reachable
      without the preview would be the app confirming on the user's behalf.
-  6. The door — **optional, and usually already done**: it opens with this
+  6. **Remote Access** — how a phone reaches this Mac, the guided flow of "Set
+     Up Remote Access" below (`remote status|set|test --json`, M20). It sits
+     between Services and the door because a phone needs somewhere to reach.
+  7. The door — **optional, and usually already done**: it opens with this
      Mac's sign-in state (`metistry console whoami --json`, "Signing in" below)
      and offers the console's enrolment code for a browser or a phone. The
      `ASAuthorization` path is still written and still runs the moment an
      install qualifies; the probe that measures why none does yet moved to
      Settings → Advanced.
-  7. **Compute** — pick a provider template, paste its API key into a secure
+  8. **Compute** — pick a provider template, paste its API key into a secure
      field, name a model, and the app runs `metistry compute providers add
      --from <template> --json` (key on stdin) then `metistry compute assign
      default <provider/model> --json`. "Skip: no engine yet" is a real
      choice, with its consequence on screen.
 
-  Steps 6 and 7 are the two that are **not** a `metistry` verb, so they own
-  their own screens rather than being forced through the generic run row
+  Steps 6, 7 and 8 are the ones that are **not** one `metistry` verb the
+  generic run row can show, so they own their own screens
   (`FirstRunStep.hasOwnScreen`, pinned by a test).
 - **The menu-bar item.** Its glyph is the worst *fault* across components.
   `absent` never drives it — a bridge that was never configured is not a fault,
@@ -114,9 +119,8 @@ path.
 | --- | --- | --- |
 | **A native passkey** (wizard step 7) | measured, not assumed — see "What ASAuthorization actually says" below. `ASAuthorization` refuses *every* relying party from a Developer ID build, because an application identifier comes from an embedded provisioning profile and a DMG from GitHub Releases has none. **This stopped being step 7's problem on 2026-09-10** (it was step 6 until X-107 put Remote Access before it): this Mac needs no passkey at all | for a browser or a phone, **Add a Phone…** — the step's and Settings ▸ Devices' sheet ("Add a Phone" below): a QR and a link, the code minted on this Mac. Same `passkeys` row either way. The probe is under Settings → Advanced |
 | `connect-repo --auth token` | it reads the PAT from **stdin**, and the app gives every child an empty stdin on purpose so no verb can hang a progress view waiting for a paste | the wizard shows the option, disabled, with that reason; run it in a terminal |
-| **The screens behind the rest of the sidebar's rows** | the shell has the rows (T5-2); each screen is its own ticket, and until it lands the row's detail names the gap and offers the web app. Landed in W2, each with its section below: Needs You (T5-4a's list, T5-4b's bodies), Today (T6-1a's spine, T6-1b's brief, Next Up and Close the Day), Chat (T6-2), Activity (T6-3), the Usage popover (T5-6) and the capture composer (T5-5); in W3, Knowledge (T6-4), Agents (T6-5), Scheduled (T6-6), Work ▸ Board (T6-7), Work ▸ Projects (T6-8), Work ▸ Artifacts (T6-9) and Run detail (T6-10). Still to come: the rest of W3 (T6-11) | the PWA — "Add to Dock" in Safari, or the detail's **Open in Browser** |
+| **The screens behind the rest of the sidebar's rows** | the shell has the rows (T5-2); each screen was its own ticket, and a row whose screen has not landed names the gap and offers the web app. Landed in W2, each with its section below: Needs You (T5-4a's list, T5-4b's bodies), Today (T6-1a's spine, T6-1b's brief, Next Up and Close the Day), Chat (T6-2), Activity (T6-3), the Usage popover (T5-6) and the capture composer (T5-5); in W3, Knowledge (T6-4), Agents (T6-5), Scheduled (T6-6), Work ▸ Board (T6-7), Work ▸ Projects (T6-8), Work ▸ Artifacts (T6-9), Run detail (T6-10) and Settings (T6-11, "The window" below) | the PWA — "Add to Dock" in Safari, or the detail's **Open in Browser** |
 | **Attachments in the composer** | New Capture is the text composer (T5-5, "The capture composer" below); live capture is the floating bar's ("The floating bar" below — the #253 hold was lifted 2026-09-30, Q28), and the attachment chip, ⌘⇧A and the window's drop target are not built | the PWA's +, or `metistry console call POST /capture` with `filename` and `content_base64` |
-| **The keep-awake control** (Services) | the model half is shipped — `KeepAwakeSetting` (four values, each with what it costs), `KeepAwakeFacts` (doctor's row) and `deploymentSetKeepAwake` — and the pane is a switch with a radio pair under it, which is the designer's. First run can pass `--keep-awake` and does not ask on its own | a terminal: `metistry deployment set-keep-awake <value> --yes`, or `metistry init --keep-awake <value>` |
 | **An iOS target** | `MetistryKit` is already free of AppKit and of `Process` so it can be shared; there is no iOS target in `Package.swift` | — |
 
 **Four things left this table on 2026-09-10**, and it is worth saying what
@@ -558,7 +562,7 @@ registrars", for the signal and why it is launchd's answer rather than a marker
 file. `metistry doctor` reports the owner on the supervisor's row
 (`meta.registrar`, and in the probe text the Services pane renders).
 
-## Step 7: choosing compute, and what the app never stores
+## Step 8: choosing compute, and what the app never stores
 
 The step is a provider template, a model id and — where the provider needs one
 — an API key. It runs two verbs in order and implements neither

@@ -126,7 +126,7 @@ export function normalizeOrigin(raw: string): string {
   try {
     u = new URL(trimmed);
   } catch {
-    throw new StepFailed(`${JSON.stringify(raw)} is not an origin — give a scheme and a host, e.g. https://metis.example.com`);
+    throw new StepFailed(`${JSON.stringify(raw)} is not an origin — give a scheme and a host, e.g. https://assistant.example.com`);
   }
   if (u.protocol !== "http:" && u.protocol !== "https:") throw new StepFailed(`${JSON.stringify(raw)} is not an http(s) origin`);
   if (u.pathname !== "/" && u.pathname !== "") throw new StepFailed(`${JSON.stringify(raw)} has a path — an origin is the scheme, host and port only (the verb appends /api/identity itself)`);

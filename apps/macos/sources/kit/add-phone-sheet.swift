@@ -1,5 +1,5 @@
 // The Add a Phone sheet (design-build-plan §2.22, X-77), drawn once: Settings
-// ▸ Devices ▸ Add a Phone… and the wizard's step 6 both present this view over
+// ▸ Devices ▸ Add a Phone… and the wizard's step 7 both present this view over
 // an `AddPhoneModel` (add-phone-model.swift holds every decision). The sheet
 // says which state it is in and nothing it has not been told: Checking while
 // `metistry enroll --json` runs; the refusal's own words, with Learn How, and

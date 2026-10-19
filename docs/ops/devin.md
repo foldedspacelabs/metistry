@@ -57,8 +57,10 @@ The 2026-09-15 ruling (`docs/plan-refresh-2026-09-13.md` §4b, "Exposure") is
 that no inbound exposure is assumed: cloud Devin as an MCP *client* needs a
 per-instance inbound path — a tunnel with the console's own auth in front
 (Tailscale Funnel and Cloudflare Tunnel are the candidates; the S6 internal
-mesh is the long-term answer) — **and the owner has not chosen one**. Until
-that is chosen, surface 1 is the local-CLI shape.
+mesh is the long-term answer) — **and the owner has not chosen one for Devin**.
+`metistry remote` (`docs/ops/remote-access.md`) now provides such a path for
+the phone, but nothing points Devin at it. Until that is chosen, surface 1 is
+the local-CLI shape.
 
 When an origin does exist, set `METISTRY_CONSOLE_URL` (or `METISTRY_URL`) in
 `<instance>/.metistry/state/.env` and re-run `metistry connect devin --rotate`: the

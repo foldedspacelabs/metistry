@@ -11,7 +11,7 @@ import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
 import { enroll, enrollCancel, enrollStatus } from "../src/enroll.js";
 
 const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
-const ORIGIN = "https://metis.example";
+const ORIGIN = "https://assistant.example";
 
 /** A reachable console with no identity to compare (this test has no instance dir). */
 const up = (async (url: string | URL | Request) => {
@@ -40,7 +40,7 @@ describe.skipIf(!hasDb)("metistry enroll against the scratch db", () => {
     const before = await count();
     const cases: [string, string][] = [
       ["http://127.0.0.1:8080", "loopback"],
-      ["http://metis.example", "http"],
+      ["http://assistant.example", "http"],
       ["https://192.168.1.4:8443", "ip_literal"],
     ];
     for (const [origin, c] of cases) {

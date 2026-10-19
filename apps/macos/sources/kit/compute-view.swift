@@ -986,7 +986,7 @@ struct InstallModelSheet: View {
 /// The add-a-provider sheet: a template, where it lives, and — where the
 /// template needs one — a key that goes to stdin and nowhere else.
 ///
-/// It is bound to `ComputeStepModel`, the WIZARD's step 7 model, on purpose.
+/// It is bound to `ComputeStepModel`, the WIZARD's step 8 model, on purpose.
 /// One model owns the key's path to a child process, so there is one place to
 /// read to know the app never puts it in argv, a file or a log. Both commands
 /// are on the sheet before its button runs them.

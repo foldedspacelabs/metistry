@@ -545,10 +545,10 @@ private struct RemoteWizardNoop: CommandRunner {
         ["remote", "set", "tailscale", "--json"],
         ["remote", "set", "tailscale", "--mode", "funnel", "--yes", "--json"],
         ["remote", "set", "tailscale", "--mode", "tailnet", "--use-app", "--yes", "--json"],
-        ["remote", "set", "cloudflare", "--hostname", "metis.example.com", "--access", "--token", "--yes", "--json"],
-        ["remote", "set", "zrok", "--name", "metis", "--token", "--yes", "--json"],
-        ["remote", "set", "ngrok", "--domain", "metis.ngrok-free.dev", "--token", "--yes", "--json"],
-        ["remote", "set", "port-forward", "--ddns", "desec", "--hostname", "metis.dedyn.io", "--manual", "8443", "--yes", "--json"],
+        ["remote", "set", "cloudflare", "--hostname", "assistant.example.com", "--access", "--token", "--yes", "--json"],
+        ["remote", "set", "zrok", "--name", "assistant", "--token", "--yes", "--json"],
+        ["remote", "set", "ngrok", "--domain", "assistant.ngrok-free.dev", "--token", "--yes", "--json"],
+        ["remote", "set", "port-forward", "--ddns", "desec", "--hostname", "assistant.dedyn.io", "--manual", "8443", "--yes", "--json"],
     ]
     for argv in accepted {
         #expect(ManagementCommand(.remoteAccess, argv) != nil, "\(argv) is a shape the Mac runs")

@@ -12,11 +12,11 @@ shorthand for `node packages/cli/dist/main.js`, run from the product checkout (s
 
 ## 1. Install
 
-**Not yet available: the signed DMG.** The Mac app is the intended installer
-(`docs/ops/mac-app.md`) — its first-run wizard runs `metistry runtime install --from <bundle>`
-for you. But the next release, v0.8.0, is the **first one carrying the compute changes this
-guide depends on, and it has not been cut yet** (§4b W2). Until it exists, this Mac gets
-`metistry` from a checkout:
+**The Mac app is the intended installer** (`docs/ops/mac-app.md`): download
+`Metistry-<version>.dmg` from the GitHub Releases page, open it, and the first-launch wizard runs
+`metistry runtime install --from <bundle>` and the steps below for you, with the same verbs this
+guide types. The terminal path is identical and stays first-class; it needs `metistry` from a
+checkout or from the runtime pack (`docs/ops/bundled-runtime.md`):
 
 ```sh
 git clone <the metistry product repo> ~/metistry && cd ~/metistry
@@ -142,7 +142,8 @@ node packages/cli/dist/main.js connect --list
 `connect devin` prints `http://127.0.0.1:8080/mcp` — **loopback**: enough for a Devin CLI
 session on this Mac, and reachable from none of Devin's cloud. That is the 2026-09-15 Exposure
 ruling — no inbound path is assumed for this instance, so cloud Devin as an MCP *client* needs
-a per-instance tunnel nobody has chosen yet, deferred until one is
+a per-instance tunnel. `metistry remote` (§9) can now provide one for the phone; pointing Devin
+at it is not ruled, so the loopback shape stays
 (`docs/plan-refresh-2026-09-13.md` §4b, "Exposure").
 
 There is no `doctor` row for an agent — it walks manifests, not the `agents` table. Check with
@@ -207,15 +208,26 @@ and the probe resolves, `failed` naming `config.org` when the connection lacks i
 
 ## 9. The phone
 
-No native app exists yet (an iOS target is "not started", `docs/ops/mac-app.md`; the offline
-outbox `docs/research/2026-09-11-multi-instance-and-offline-client.md` designs for is
-unbuilt). What is real: `GET /api/identity` (unauthenticated, `{instance_id, name, icon,
-capabilities}`) is what any client — the future app, or the PWA today — uses to tell this
-instance apart from the first one, keyed by `instance_id` since an origin can move. Once this
-instance is reachable at some origin, the **first** instance's `metistry instances add
-<origin>` records it in `instances.yaml` (`docs/ops/instances.md`); with no inbound path
-chosen yet (step 6), use the console's PWA — "Add to Dock" in Safari — against whatever
-reaches this Mac meanwhile.
+There is still no native iOS app (an iOS target is "not started", `docs/ops/mac-app.md`). The
+phone is the web app on its Home Screen with a passkey of its own; `docs/ops/phone.md` is the
+owner's guide. It needs an HTTPS origin with a stable name, which a fresh instance does not
+have — it answers on this Mac only — so choose how the phone reaches this one first, in
+**Settings ▸ Remote Access** or in a terminal:
+
+```sh
+node packages/cli/dist/main.js remote                        # the choices, and what this instance has
+node packages/cli/dist/main.js remote set tailscale --yes    # Funnel by default; preview first without --yes
+node packages/cli/dist/main.js up                            # renders the new origin into METISTRY_ORIGIN
+```
+
+(`docs/ops/remote-access.md` lists every provider, what it costs and who can read the traffic.)
+Then **Add a Phone…** in Settings ▸ Devices, or `metistry enroll` (`docs/ops/auth.md`).
+`GET /api/identity` (unauthenticated, `{instance_id, name, icon, capabilities}`) is what any
+client uses to tell this instance apart from the first one, keyed by `instance_id` since an
+origin can move. Once this instance is reachable at an origin, the **first** instance's
+`metistry instances add <origin>` records it in `instances.yaml` (`docs/ops/instances.md`).
+The offline outbox `docs/research/2026-09-11-multi-instance-and-offline-client.md` designs for
+is unbuilt.
 
 ## 10. Daily use
 
@@ -240,14 +252,13 @@ reaches this Mac meanwhile.
 node packages/cli/dist/main.js update            # pull/build, migrate, restart what changed, pin, doctor
 node packages/cli/dist/main.js migrate-layout --dry-run   # only if this instance predates the 2026-09-17 flat layout; says so and changes nothing otherwise
 node packages/cli/dist/main.js migrate-layout            # carries a pre-2026-09-16 bare inbox/ up as well, so migrate-inbox is optional
-node packages/cli/dist/main.js doctor             # weekly; a `degraded` row is a finding even at exit 0
+node packages/cli/dist/main.js doctor             # weekly; in a terminal it applies the fixes it can, then re-checks (`--check` only reads) — a `degraded` row is a finding even at exit 0
 ```
 
 ## What is not there yet
 
-- **A native iOS app** — step 9 is a placeholder for it.
-- **Cloud Devin as an MCP client** — needs the inbound tunnel nobody has chosen (step 6); the
-  local-CLI shape is what exists today.
+- **A native iOS app** — step 9 is the web app until it exists.
+- **Cloud Devin as an MCP client** — an inbound path now exists (step 9), but nobody has ruled
+  that Devin uses it; the local-CLI shape is what exists today.
 - **The bake-off verdict** (`docs/plan-refresh-2026-09-13.md` §3) — which local model earns
   tier assignments beyond "it answers" is still running, on both machines.
-- **v0.8.0 has not been cut** — this whole guide runs from a checkout (step 1) until it is.

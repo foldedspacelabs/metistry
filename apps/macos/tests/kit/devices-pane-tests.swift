@@ -21,7 +21,7 @@ import Testing
 
 // MARK: - What the CLI prints
 
-private let mintedURL = "https://metis.example/#enroll=Qm9yZWFsaXNUZXN0Q29kZQ"
+private let mintedURL = "https://assistant.example/#enroll=Qm9yZWFsaXNUZXN0Q29kZQ"
 private let t0 = WireTime.date("2026-10-19T14:42:10.000Z")!
 
 /// An instant as the console prints it.
@@ -33,7 +33,7 @@ private func iso(_ date: Date) -> String {
 
 /// `metistry enroll --json` on a mint: exactly one document (docs/ops/cli.md, "Adding a phone").
 private func mintedJSON(codeID: Int = 42, expiresAt: Date = t0.addingTimeInterval(600)) -> String {
-    #"{"url":"\#(mintedURL)","code_id":\#(codeID),"origin":"https://metis.example","expires_at":"\#(iso(expiresAt))"}"#
+    #"{"url":"\#(mintedURL)","code_id":\#(codeID),"origin":"https://assistant.example","expires_at":"\#(iso(expiresAt))"}"#
 }
 
 /// `metistry enroll --json` on a fresh install: the loopback refusal, verbatim from `packages/cli/src/enroll.ts`, exit 1.
@@ -45,7 +45,7 @@ private let loopbackRefusal = CommandResult(
 
 private let unreachableRefusal = CommandResult(
     exitCode: 1,
-    stdout: #"{"refused":{"case":"unreachable","message":"https://metis.example doesn't answer from this Mac, so your phone won't reach it either. Settings ▸ Remote Access shows what your remote-access provider reports.","origin":"https://metis.example","fix":"Choose how your phone reaches this Mac in Settings ▸ Remote Access (`metistry remote` in a terminal); docs/ops/auth.md (\"Passkeys: origins\") says what METISTRY_ORIGIN has to be.","detail":"GET https://metis.example/health: no answer within 5 s"}}"# + "\n",
+    stdout: #"{"refused":{"case":"unreachable","message":"https://assistant.example doesn't answer from this Mac, so your phone won't reach it either. Settings ▸ Remote Access shows what your remote-access provider reports.","origin":"https://assistant.example","fix":"Choose how your phone reaches this Mac in Settings ▸ Remote Access (`metistry remote` in a terminal); docs/ops/auth.md (\"Passkeys: origins\") says what METISTRY_ORIGIN has to be.","detail":"GET https://assistant.example/health: no answer within 5 s"}}"# + "\n",
     stderr: ""
 )
 
@@ -171,7 +171,7 @@ private func sheet(mint: CommandResult, console: FixtureConsole? = nil) throws -
         Issue.record("expected refused, got \(unreachable.phase)")
         return
     }
-    #expect(why.detail == "GET https://metis.example/health: no answer within 5 s")
+    #expect(why.detail == "GET https://assistant.example/health: no answer within 5 s")
     #expect(unreachable.qr == nil)
 }
 
@@ -226,7 +226,7 @@ private func sheet(mint: CommandResult, console: FixtureConsole? = nil) throws -
     #expect(added.phase != .added(label: "iPhone"), "nothing new yet: the baseline is the list the sheet opened on")
     swappable.inner = try FixtureConsole(devicesFixtures { devices in
         devices.insert([
-            "id": "9", "passkey_id": "fixture-new-phone", "label": "Matt's iPhone", "rp_id": "metis.example",
+            "id": "9", "passkey_id": "fixture-new-phone", "label": "Matt's iPhone", "rp_id": "assistant.example",
             "added": iso(t0.addingTimeInterval(30)), "last_seen": iso(t0.addingTimeInterval(30)), "this_device": false,
             "sessions": [["id": "9", "created_at": iso(t0.addingTimeInterval(30)), "last_seen_at": iso(t0.addingTimeInterval(30)), "absolute_expires_at": iso(t0.addingTimeInterval(86_400)), "revoked": false, "push": false]],
         ], at: 0)
@@ -344,7 +344,7 @@ private func sheet(mint: CommandResult, console: FixtureConsole? = nil) throws -
     #expect(AddPhoneWords.opened(through: provider) == "Your phone reached this Mac from outside.")
     swappable.inner = try FixtureConsole(devicesFixtures { devices in
         devices.insert([
-            "id": "9", "passkey_id": "fixture-new-phone", "label": "Matt's iPhone", "rp_id": "metis.example",
+            "id": "9", "passkey_id": "fixture-new-phone", "label": "Matt's iPhone", "rp_id": "assistant.example",
             "added": iso(t0.addingTimeInterval(30)), "last_seen": iso(t0.addingTimeInterval(30)), "this_device": false,
             "sessions": [["id": "9", "created_at": iso(t0.addingTimeInterval(30)), "last_seen_at": iso(t0.addingTimeInterval(30)), "absolute_expires_at": iso(t0.addingTimeInterval(86_400)), "revoked": false, "push": false]],
         ], at: 0)
@@ -367,10 +367,10 @@ private func sheet(mint: CommandResult, console: FixtureConsole? = nil) throws -
         return
     }
     #expect(!never.phoneReachedMac)
-    #expect(AddPhoneWords.notReached("https://metis.example") == "Your phone didn't reach https://metis.example. Open it in Safari on your phone with Wi-Fi off to see what it says.")
+    #expect(AddPhoneWords.notReached("https://assistant.example") == "Your phone didn't reach https://assistant.example. Open it in Safari on your phone with Wi-Fi off to see what it says.")
     let tree = try await AccessibilityProbe.snapshot(AddPhoneSheet(model: never, onDone: {}))
     defer { tree.close() }
-    #expect(tree.nodes.contains { $0.name == AddPhoneWords.notReached("https://metis.example") }, "\(tree.nodes.map(\.name).filter { !$0.isEmpty })")
+    #expect(tree.nodes.contains { $0.name == AddPhoneWords.notReached("https://assistant.example") }, "\(tree.nodes.map(\.name).filter { !$0.isEmpty })")
     await never.close()
 
     // opened on this Mac's own listener only: that is not the phone reaching it, so the sentence stands
@@ -383,7 +383,7 @@ private func sheet(mint: CommandResult, console: FixtureConsole? = nil) throws -
     #expect(!mainOnly.phoneReachedMac)
     let t2 = try await AccessibilityProbe.snapshot(AddPhoneSheet(model: mainOnly, onDone: {}))
     defer { t2.close() }
-    #expect(t2.nodes.contains { $0.name == AddPhoneWords.notReached("https://metis.example") })
+    #expect(t2.nodes.contains { $0.name == AddPhoneWords.notReached("https://assistant.example") })
     await mainOnly.close()
 
     // the phone reached it but never finished: Expired, and no claim that it never got there
@@ -407,7 +407,7 @@ private func sheet(mint: CommandResult, console: FixtureConsole? = nil) throws -
     reachedRunner.statusAnswer = statusResult(codeID: 43, openedVia: nil)
     reachedRunner.mint = CommandResult(exitCode: 0, stdout: mintedJSON(codeID: 43) + "\n", stderr: "")
     await reached.makeNewCode()
-    #expect(reached.phase == .ready(EnrollmentCode(url: mintedURL, codeID: 43, origin: "https://metis.example", expiresAt: t0.addingTimeInterval(600))))
+    #expect(reached.phase == .ready(EnrollmentCode(url: mintedURL, codeID: 43, origin: "https://assistant.example", expiresAt: t0.addingTimeInterval(600))))
     #expect(!reached.phoneReachedMac)
     await reached.close()
 }
@@ -572,7 +572,7 @@ private final class PollGate {
     // VoiceOver reads the image as "QR code for adding a phone" and the URL is its value (§2.18)
     let qr = try #require(tree.nodes.first { $0.name == AddPhoneWords.qrLabel || $0.label == AddPhoneWords.qrLabel }, "the QR is named: \(tree.nodes.map(\.name).filter { !$0.isEmpty })")
     #expect(qr.value == mintedURL || tree.nodes.contains { $0.name.contains(mintedURL) }, "the URL is the accessible alternative: \(qr)")
-    #expect(tree.nodes.contains { $0.name.contains("Your phone must be able to open metis.example.") }, "\(tree.nodes.map(\.name).filter { !$0.isEmpty })")
+    #expect(tree.nodes.contains { $0.name.contains("Your phone must be able to open assistant.example.") }, "\(tree.nodes.map(\.name).filter { !$0.isEmpty })")
     #expect(tree.nodes.contains { $0.name.hasPrefix("Expires in ") })
     #expect(tree.controlNames.contains(AddPhoneWords.copyLink))
     #expect(tree.controlNames.contains(AddPhoneWords.makeANewCode))
@@ -600,7 +600,7 @@ private final class PollGate {
     #expect(code.countdown(at: t0.addingTimeInterval(19)) == "Expires in 9:41")
     #expect(code.countdown(at: t0.addingTimeInterval(599.2)) == "Expires in 0:01")
     #expect(code.countdown(at: t0.addingTimeInterval(700)) == "Expires in 0:00")
-    #expect(code.host == "metis.example")
+    #expect(code.host == "assistant.example")
 
     // a second before: still ready, still live
     model.tick(now: t0.addingTimeInterval(599))

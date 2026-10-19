@@ -1798,7 +1798,7 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
         if (verb === "add") {
           const origin = positional[1];
           if (!origin) {
-            err("usage: metistry instances add <origin>   (e.g. https://metis.example.com — the verb asks it who it is)");
+            err("usage: metistry instances add <origin>   (e.g. https://assistant.example.com — the verb asks it who it is)");
             return 2;
           }
           const selfId = await readInstanceId(instanceDir);

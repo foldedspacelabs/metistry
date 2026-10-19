@@ -356,6 +356,13 @@ listed) and compares the tools Metistry generates with the file.
 | `absent` | configured, but something it needs is not here: the command, a secret's item, a variable, its connection type |
 | `failed` | the file is wrong, the credential is refused at the door, or the server cannot be reached — the error verbatim, redacted |
 
+A refusal carries its code as `meta.refused` (`not_built`, `secret`, `sign_in`,
+…), so a reader that must tell "this kind of connection is not dialled here"
+from "missing here" reads a field, not the sentence. A calendar or a tracker is
+read by its provider's sync and is refused `not_built`; the collector that reads
+it reports that as not dialled (X-87, `docs/ops/cli.md`, *Reading a doctor
+report*).
+
 `meta` carries `tools_seen`, `listed`, `missing`, `unlisted` (offered and not
 listed — refused until the owner lists one) and `read_only_hint` (what the
 server marks read-only: a hint, never a control). `metistry connections test`

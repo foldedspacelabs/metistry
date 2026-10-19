@@ -74,19 +74,63 @@ export function poolOver(opts: ConnectionsOptions, catalog: () => Promise<Connec
 }
 
 /**
+ * One run's dials of the instance's connections, shared. `metistry doctor`
+ * asks the same connection twice — its own row, and the check of the collector
+ * that reads it (X-87) — and a connection is dialled ONCE: the answer is
+ * memoised by name, the catalog is read once, and the pool is opened on the
+ * first dial and closed by `close()`. Nothing here throws: a catalog that will
+ * not load is every connection's `failed` verdict, in words.
+ */
+export interface ConnectionChecker {
+  /** the connection's `check()` (packages/connections `checkConnection`) — memoised by name */
+  check(name: string): Promise<CheckResult>;
+  /** every connection in `.metistry/connections/`, by name; empty when there is no such directory */
+  names(): Promise<string[]>;
+  close(): Promise<void>;
+}
+
+export function connectionChecker(opts: ConnectionsOptions): ConnectionChecker {
+  let catalog: Promise<InstanceCatalog | undefined> | undefined;
+  let pool: ConnectionPool | undefined;
+  const seen = new Map<string, Promise<CheckResult>>();
+  const load = (): Promise<InstanceCatalog | undefined> => {
+    catalog ??= existsSync(resolveInstanceLayout(opts.instanceDir).path("connectionsDir")) ? catalogFor(opts) : Promise.resolve(undefined);
+    return catalog;
+  };
+  return {
+    names: async () => (await load())?.entries.map((e) => e.name) ?? [],
+    check(name) {
+      let r = seen.get(name);
+      if (!r) {
+        r = (async (): Promise<CheckResult> => {
+          const cat = await load();
+          if (!cat) return { name, status: "absent", latency_ms: 0, probe: "read .metistry/connections/", remediation: "this instance has no .metistry/connections/ directory" };
+          pool ??= poolOver(opts, async () => cat);
+          return checkConnection(pool, cat, name);
+        })().catch(
+          (err): CheckResult => ({ name, status: "failed", latency_ms: 0, probe: "read .metistry/connections/", remediation: err instanceof Error ? err.message : String(err) }),
+        );
+        seen.set(name, r);
+      }
+      return r;
+    },
+    close: async () => {
+      await pool?.close();
+    },
+  };
+}
+
+/**
  * The rows doctor adds: one per connection, checked. Never `failed` in
  * doctor's verdict — a connection is someone else's server, and its outage
  * is not the install's (like the vault's remote and the local model
  * servers); the check's own verdict rides in `meta.check_status`.
  */
-export async function connectionDoctorRows(opts: ConnectionsOptions): Promise<Array<CheckResult & { kind: "connection" }>> {
-  const layout = resolveInstanceLayout(opts.instanceDir);
-  if (!existsSync(layout.path("connectionsDir"))) return [];
-  const catalog = await catalogFor(opts);
-  if (catalog.entries.length === 0) return [];
-  const pool = poolOver(opts, async () => catalog);
+export async function connectionDoctorRows(opts: ConnectionsOptions, shared?: ConnectionChecker): Promise<Array<CheckResult & { kind: "connection" }>> {
+  const checker = shared ?? connectionChecker(opts);
   try {
-    const results = await Promise.all(catalog.entries.map((entry) => checkConnection(pool, catalog, entry.name)));
+    const names = await checker.names();
+    const results = await Promise.all(names.map((name) => checker.check(name)));
     return results.map((r) =>
       r.status === "failed"
         ? {
@@ -99,6 +143,7 @@ export async function connectionDoctorRows(opts: ConnectionsOptions): Promise<Ar
         : { ...r, kind: "connection" as const },
     );
   } finally {
-    await pool.close();
+    // a checker handed in is the caller's: it closes it after the last reader
+    if (!shared) await checker.close();
   }
 }

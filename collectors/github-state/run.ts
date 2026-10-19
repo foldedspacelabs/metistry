@@ -49,8 +49,9 @@
 // *Assigned to someone else on GitHub* — so the card that leaves the queue
 // says where it was settled.
 
-import { GITHUB_API_ORIGIN, GITHUB_SOURCE_KIND, PULL_REQUEST_KIND, RESOLVED_AT_SOURCE, githubPullRef, githubPullSource, lastMirror, raiseMirror, resolveAtSource, type RequestSource } from "@foldedspacelabs/metistry-core";
+import { GITHUB_API_ORIGIN, GITHUB_SOURCE_KIND, PULL_REQUEST_KIND, RESOLVED_AT_SOURCE, githubPullRef, githubPullSource, lastMirror, raiseMirror, resolveAtSource, runCheck, type CheckResult, type RequestSource } from "@foldedspacelabs/metistry-core";
 import type { SyncOpener } from "@foldedspacelabs/metistry-connections";
+import { connectionReachability, noteUndialled, type CheckExtras } from "../check-context.js";
 
 export interface Db {
   query(text: string, values?: unknown[]): Promise<{ rows: any[] }>;
@@ -498,6 +499,28 @@ async function reconcileMirror(db: Db, ctx: ReadCtx, get: typeof fetch, p: OpenP
     work_id: p.workId,
   });
   return cleared + 1;
+}
+
+/**
+ * Behavioral probe (X-87): the access a pass would read GitHub with resolves
+ * — a GitHub connection with repos (pinned to api.github.com, token filled at
+ * the door) or the legacy token and repo list — and, for a connection, the
+ * shared connection check still answers. Reads no pull request. A connection
+ * the sync cannot use throws exactly as the run would, and reads `failed`.
+ */
+export async function check(ctx: GithubCtx & CheckExtras = {}): Promise<CheckResult> {
+  return noteUndialled(await runCheck(COMPONENT, "a GitHub connection with repos resolves, and answers the shared connection check", async () => {
+    // the legacy token and repo list are not read (the console stopped feeding them, X-85): only a connection counts
+    const access = await githubAccess({ ...ctx, githubToken: undefined as unknown as string, githubRepos: undefined as unknown as string[] });
+    if (!access?.connection) {
+      return {
+        status: "absent" as const,
+        remediation: "no GitHub connection with repos (`metistry connections add` a github connection and set config.repos, docs/ops/connections.md) — nothing is read meanwhile (degrades absent)",
+      };
+    }
+    const seen = await connectionReachability(access.connection, ctx);
+    return { ...seen, meta: { ...(seen.meta ?? {}), source: "connection", repos: access.repos.length } };
+  }));
 }
 
 /** One reconcile pass. Returns rows upserted + closed, and requests raised or cleared. */

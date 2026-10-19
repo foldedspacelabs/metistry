@@ -51,10 +51,11 @@
 // A connection that is there but cannot be read fails the run with the
 // reason — names and hosts, never a value.
 
-import { lastMirror, raiseMirror, resolveAtSource, type RequestSource } from "@foldedspacelabs/metistry-core";
+import { lastMirror, raiseMirror, resolveAtSource, type CheckResult, type RequestSource } from "@foldedspacelabs/metistry-core";
 import { IMAP_MAX_MESSAGES, IMAP_MODULE, IMAP_PROVENANCE, MAIL_SYNC, type ImapMessage, type ImapRead, type ImapSyncOpener } from "@foldedspacelabs/metistry-connections";
 import type { Db } from "../github-state/run.js";
 import { saveSyncState } from "../eventkit-calendar/run.js";
+import { syncConnectionCheck, type CheckExtras } from "../check-context.js";
 
 /** This collector's name — the `source_agent` of every request it raises (and the imap types' `sync:`). */
 export const COMPONENT = MAIL_SYNC;
@@ -148,6 +149,23 @@ export function messagePayload(m: ImapMessage, connection: string, verdict: NonN
     message_id: m.message_id,
     date: m.date,
   };
+}
+
+/**
+ * Behavioral probe (X-87): the mailbox connection resolves (the app password
+ * delivered, the host:port on its listed hosts) and, when doctor hands in the
+ * shared connection check, a sign-in still works. Reads no message.
+ */
+export async function check(ctx: MailCtx & CheckExtras = {}): Promise<CheckResult> {
+  const { openImap } = ctx;
+  return syncConnectionCheck({
+    name: COMPONENT,
+    probe: "the mail connection opens (app password delivered, host guard satisfied) and answers the shared connection check",
+    noInstance: "no instance to read a mailbox from (METISTRY_INSTANCE_DIR is unset) — the sync reads the mail connection of an instance; degrades absent",
+    addHint: "`metistry connections add` a mail (IMAP) connection (docs/ops/connections.md, Mail over IMAP)",
+    open: openImap ? () => openImap({ sync: MAIL_SYNC, module: IMAP_MODULE }) : undefined,
+    extras: ctx,
+  });
 }
 
 /** One pass. Returns requests raised plus requests cleared. */

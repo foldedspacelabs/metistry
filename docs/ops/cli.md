@@ -2269,6 +2269,34 @@ how optional bridges are designed to behave (a Linux box has no apple-fm).
 Something you rely on that shows `absent` is still a finding — read the
 column, not just the exit code.
 
+**A collector's row is the collector's own `check()`** (X-87). Every
+collector exports `check()` (CLAUDE.md; one CI test holds it — no allowlist),
+and doctor asks each one: it loads `collectors/dist/<name>/run.js` from the
+checkout or the release pack, calls `check()` with what the console would hand
+`run()` plus a short timeout, and lays the verdict over that collector's one
+`collector` row (the probe reads `…/manifest.yaml validates; check(): …`; there
+is no second row kind, and the `schedule` row — last run, overdue, failure
+streak — is unchanged). A `check()` is cheap and local-first: configuration and
+credential presence, the connection it reads opened through the same opener the
+console uses (host pinned, secret delivered), then — where the shared connection
+check dials that kind of connection — that check, once per run, shared with the
+`connection` rows. It never syncs, and AWS Cost Explorer is never called (it
+bills per request).
+
+| a collector reports | when |
+| --- | --- |
+| `ok` | it holds what it needs (and its connection answered, where that is dialled) |
+| `absent` | nothing to read yet: no instance, connection, key or bridge — it degrades absent and the remediation names the command |
+| `degraded` | its connection did not answer within the timeout, or answered worse than ok (a connection is someone else's server — the same rule as the `connection` rows) |
+| `failed` | the connection file cannot be used (the words the run would throw), its bridge refused the token, or the check itself broke: a module that will not load, a `check()` that throws, hangs past twice the timeout, or answers something that is not the `check()` shape |
+| `degraded`, "not built" | `collectors/dist/<name>/run.js` is missing: `pnpm -r build` in a checkout, `metistry update` for a pack |
+
+A `check()` that breaks costs its own row and nothing else: the rest of the
+report still runs. Calendar and tracker connections are read by their
+provider's sync and the shared connection check does not dial them (it refuses
+them `not_built`, carried as `meta.refused`), so for those the collector row is
+`ok` with `meta.dialled: false` — what could be verified locally.
+
 **`action`** (T4-21, `packages/cli/src/doctor.ts`). The Mac app's Services
 pane reads `doctor --json` and wants a button beside a red row, not a
 sentence to re-derive one from — so a row that is not `ok`, and for which

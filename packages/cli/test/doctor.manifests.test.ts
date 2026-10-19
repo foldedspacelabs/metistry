@@ -49,7 +49,12 @@ describe("manifest walk over the checkout", () => {
     });
     const rows = Object.fromEntries(report.rows.map((r) => [r.name, r]));
     // manifest-only kinds validate
-    for (const n of ["inbox-drain", "morning-brief", "local-crew", "watchdog"]) expect(rows[n]?.status, n).toBe("ok");
+    for (const n of ["morning-brief", "local-crew", "watchdog"]) expect(rows[n]?.status, n).toBe("ok");
+    // a collector answers for itself (X-87): ok once its entry is built (its
+    // own check() needs nothing configured), degraded — saying how to build
+    // it — in a checkout nobody has built. Never failed either way.
+    expect(["ok", "degraded"], "inbox-drain").toContain(rows["inbox-drain"]?.status);
+    if (rows["inbox-drain"]?.status === "degraded") expect(rows["inbox-drain"]?.remediation).toMatch(/pnpm -r build/);
     // bridges with an env-configured URL are absent until configured, and the
     // assistant is absent until this install has an engine credential (W1)
     for (const n of ["apple-fm", "eventkit", "reconciler", "assistant"]) expect(rows[n]?.status, n).toBe("absent");

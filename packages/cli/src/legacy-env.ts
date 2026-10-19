@@ -26,6 +26,7 @@ import { existsSync } from "node:fs";
 import { chmod, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { parseDotEnv } from "./env.js";
+import { restampIfRendered } from "./env-render.js";
 import { launchAgentsDir, LABEL_PREFIX } from "./launchd.js";
 import { quoteEnvValue } from "./secrets.js";
 
@@ -175,7 +176,9 @@ export async function retireLegacyEnv(o: RetireLegacyEnvOptions): Promise<Retire
     const current = existsSync(o.target) ? await readFile(o.target, "utf8") : "";
     const sep = current === "" || current.endsWith("\n") ? "" : "\n";
     await mkdir(dirname(o.target), { recursive: true });
-    await writeFile(o.target, `${current}${sep}\n# --- moved from ${report.legacy} by \`${RETIRE_LEGACY_ENV_COMMAND}\` ---\n${lines.join("\n")}\n`, { mode: 0o600 });
+    // a rendered target keeps its stamp (env-render.ts): the moved lines are a
+    // CLI write, not a hand edit, and the next `up` carries them by name
+    await writeFile(o.target, restampIfRendered(current, `${current}${sep}\n# --- moved from ${report.legacy} by \`${RETIRE_LEGACY_ENV_COMMAND}\` ---\n${lines.join("\n")}\n`), { mode: 0o600 });
     await chmod(o.target, 0o600);
   }
   o.out(`copied ${copied.length} name(s) into ${o.target} (appended; no line it already had was touched): ${copied.join(", ") || "(none)"}`);

@@ -42,6 +42,10 @@ import Testing
     view.onKeyPress(.tab) { .handled }.onExitCommand { }
     NSEvent.addLocalMonitorForEvents(matching: .keyDown) { $0 }
     RegisterEventHotKey(code, mods, id, target, 0, &ref)
+    final class Field: NSTextField {
+        override func keyDown(with event: NSEvent) { super.keyDown(with: event) }
+        public override func performKeyEquivalent(with event: NSEvent) -> Bool { false }
+    }
     let label = "\(name.isEmpty ? "none" : ".onKeyPress(.a)")"
     """#
     #expect(keyBindings(in: source) == [
@@ -50,7 +54,27 @@ import Testing
         ".onExitCommand",
         "addLocalMonitorForEvents",
         "RegisterEventHotKey(",
+        "func keyDown(with",
+        "func performKeyEquivalent(with",
     ])
+}
+
+@Test func aKeyDownOverrideIsABindingWhateverItsModifiersAndACallToSuperIsNot() {
+    // an AppKit view binds a key by overriding the responder method, with no SwiftUI call
+    let override = """
+    final class Pad: NSView {
+        override func keyDown(with event: NSEvent) { if event.keyCode == 36 { commit() } }
+    }
+    """
+    #expect(keyBindings(in: override) == ["func keyDown(with"])
+    let other = "open override func keyDown(with e: NSEvent) {}"
+    #expect(keyBindings(in: other) == ["func keyDown(with"])
+    // forwarding the event, and a comment about the method, bind nothing
+    let quiet = """
+    // override func keyDown(with event: NSEvent) is how a view would bind one
+    func relay(_ event: NSEvent) { next.keyDown(with: event); super.keyDown(with: event) }
+    """
+    #expect(keyBindings(in: quiet).isEmpty)
 }
 
 @Test func everyRowOfTheTableImplementsADocumentedKey() {
@@ -382,10 +406,13 @@ func scanKeyBindings() throws -> [String] {
 /// The ways SwiftUI, AppKit and Carbon bind a key. A call is taken with its
 /// arguments; the rest are taken by name — `.onExitCommand` has one meaning
 /// whatever it runs, and an event monitor or an event tap is never allowed.
+/// An AppKit view binds a key by overriding the responder method, so the
+/// declaration (`func keyDown(with`) is a binding; a call to it is not.
 private let bindingCalls = [".keyboardShortcut(", ".onKeyPress(", ".onMoveCommand(", ".onDeleteCommand(", ".onCommand("]
 private let bindingNames = [
     ".onExitCommand", "addLocalMonitorForEvents", "addGlobalMonitorForEvents", "tapCreate", "keyEquivalent:",
     "RegisterEventHotKey(", "RegisterEventHotKeyWithOptions",
+    "func keyDown(with", "func performKeyEquivalent(with",
 ]
 
 /// The bindings in one file, in order, outside comments and string literals.

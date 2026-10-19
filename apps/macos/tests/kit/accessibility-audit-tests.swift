@@ -119,6 +119,26 @@ private let viewCoverage: [String: Coverage] = [
     #expect(Set(viewCoverage.keys).isSubset(of: Set(viewFiles.keys)), "a coverage row names a file with no view: \(Set(viewCoverage.keys).subtracting(viewFiles.keys))")
 }
 
+@Test func aViewStructNestedInAnotherTypeIsAViewToo() {
+    let source = """
+    struct Outer: View {
+        var body: some View { Inner() }
+        struct Inner: View { var body: some View { Text("x") } }
+    }
+    enum Namespace {
+        private struct Hidden<Content: View>: View { var body: some View { EmptyView() } }
+        struct Deeper {
+            fileprivate struct Chip: View { var body: some View { EmptyView() } }
+        }
+    }
+    struct NotAView: Equatable {}
+    """
+    #expect(viewTypes(in: source) == ["Outer", "Inner", "Hidden", "Chip"])
+    // a file whose only view is nested still has a view, so it needs its probe
+    let onlyNested = "enum Host {\n    struct Row: View { var body: some View { EmptyView() } }\n}"
+    #expect(viewTypes(in: onlyNested) == ["Row"])
+}
+
 // MARK: - The views no other test reached
 
 @MainActor
@@ -263,9 +283,10 @@ private func auditApp() -> AppModel {
     return AppModel(bundleResourceURL: nil, runner: ShellNoopRunner(), defaults: UserDefaults(suiteName: name)!)
 }
 
-/// The view types a source file declares.
+/// The view types a source file declares — at any depth: a `View` struct
+/// nested in another type is a view too.
 private func viewTypes(in source: String) -> [String] {
-    let pattern = #"(?m)^(?:public |private |fileprivate |internal )?struct ([A-Za-z]+)(?:<[^>]*>)?\s*:\s*View\b"#
+    let pattern = #"(?m)^[ \t]*(?:(?:public|private|fileprivate|internal|package) )?struct ([A-Za-z]+)(?:<[^>]*>)?\s*:\s*View\b"#
     let regex = try! NSRegularExpression(pattern: pattern)
     let range = NSRange(source.startIndex..., in: source)
     return regex.matches(in: source, range: range).compactMap { Range($0.range(at: 1), in: source).map { String(source[$0]) } }

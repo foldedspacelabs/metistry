@@ -26,8 +26,10 @@
 //     and, for a sync, `PUT /api/scheduled/syncs/:name` with `{paused}` (X-99)
 //     — the Mac's own doors; a schedule, Run Now and what a routine runs are
 //     not offered here;
-//   - **devices**: `POST /api/devices/:id/revoke`, one device at a time, and
-//     Sign Out Everywhere as that same door once per device, this one last.
+//   - **devices**: `POST /api/devices/:id/revoke` — Remove, one device at a
+//     time (its passkey and every session under it, §2.22), and Sign Out
+//     Everywhere as that same door with `scope: "sessions"` once per signed-in
+//     device, this one last — the sessions end, every passkey stays.
 // Each is confirmed or edited in the page — never `window.confirm` (X-33) —
 // and none is offered while the console cannot be reached (T7-4).
 //
@@ -376,32 +378,44 @@ export function versionRowHtml(identity) {
   return kv("Version", identity?.version ? `Metistry ${esc(identity.version)}` : '<span class="muted">unknown</span>', identity?.api_version ? `Client API ${identity.api_version}` : "");
 }
 
-/** Which device this is: the passkey session's own row (`GET /api/whoami`). */
-const thisDevice = (who) => (who?.via === "passkey_session" && who.session_id !== undefined ? String(who.session_id) : null);
+/** Which session this is: the passkey session's own (`GET /api/whoami`). */
+const thisSession = (who) => (who?.via === "passkey_session" && who.session_id !== undefined ? String(who.session_id) : null);
 
-/** The devices, newest seen first; this one says so. Revoke on each live one; Sign Out Everywhere when more than one is live. */
+/** A device is a passkey with its sessions under it (§2.22); this one is the row the console marks, or the row holding this session. */
+const isThisDevice = (d, mine) => d.this_device === true || (mine !== null && (String(d.id) === mine || (d.sessions ?? []).some((s) => String(s.id) === mine)));
+
+/** Signed in somewhere: a live session under it. A body from before §2.22 had no `sessions`; its `revoked` says. */
+const signedIn = (d) => (Array.isArray(d.sessions) ? d.sessions.some((s) => !s.revoked) : !d.revoked);
+
+/**
+ * The devices, newest seen first; this one says so. **Remove** on each — the
+ * device's passkey and every session under it are gone, so it never signs in
+ * again (C136: confirmed naming the device) — and **Sign Out Everywhere** when
+ * more than one is signed in: sessions only, every passkey kept.
+ */
 export function devicesRowsHtml(devices, who, confirming = null) {
-  const mine = thisDevice(who);
-  const live = devices.filter((d) => !d.revoked);
+  const mine = thisSession(who);
+  const live = devices.filter(signedIn);
   const rows = devices.map((d) => {
-    const self = String(d.id) === mine;
+    const self = isThisDevice(d, mine);
     if (confirming === `revoke:${d.id}`) {
       const text = self
-        ? `Revoke ${d.label}? This is the device you are using — you are signed out here now, and signing in again takes its passkey.`
-        : `Revoke ${d.label}? It is signed out now, and signing in again takes its passkey.`;
-      return confirmHtml({ id: `revoke-${idOf(d.id)}-q`, text, verb: "Revoke", act: "revoke" });
+        ? `Remove ${d.label}? This is the device you are using — you are signed out here now, and it cannot sign in again until it is added as a new device.`
+        : `Remove ${d.label}? It is signed out now and cannot sign in again until it is added as a new device; its notifications stop.`;
+      return confirmHtml({ id: `revoke-${idOf(d.id)}-q`, text, verb: "Remove", act: "revoke" });
     }
-    const sub = d.revoked ? "Signed out" : d.last_seen_at ? `Last seen ${dateTime(d.last_seen_at)}` : "Never seen";
-    const act = d.revoked ? "" : `<button type="button" class="destructive" data-act="ask-revoke" data-id="${attr(d.id)}" aria-label="${attr(`Revoke ${d.label}${self ? ", this device" : ""}`)}" data-needs-connection>Revoke</button>`;
-    return `<li class="kv device${d.revoked ? " revoked" : ""}"><span class="k">${esc(d.label)}${self ? ' <span class="chip">This Device</span>' : ""}<span class="sub">${esc(sub)}</span></span><span class="v">${act}</span></li>`;
+    const seen = d.last_seen ?? d.last_seen_at;
+    const parts = [d.added ? `Added ${dateTime(d.added)}` : "", signedIn(d) ? (seen ? `Last seen ${dateTime(seen)}` : "Never seen") : "Signed out"].filter(Boolean);
+    const act = `<button type="button" class="destructive" data-act="ask-revoke" data-id="${attr(d.id)}" aria-label="${attr(`Remove ${d.label}${self ? ", this device" : ""}`)}" data-needs-connection>Remove</button>`;
+    return `<li class="kv device${signedIn(d) ? "" : " revoked"}"><span class="k">${esc(d.label)}${self ? ' <span class="chip">This Device</span>' : ""}<span class="sub">${esc(parts.join(" · "))}</span></span><span class="v">${act}</span></li>`;
   });
   if (!devices.length) rows.push(`<li class="kv"><span class="k muted">No devices are enrolled.</span></li>`);
   if (live.length > 1) {
     if (confirming === "everywhere") {
-      const names = live.map((d) => `${d.label}${String(d.id) === mine ? " (this one)" : ""}`).join(", ");
+      const names = live.map((d) => `${d.label}${isThisDevice(d, mine) ? " (this one)" : ""}`).join(", ");
       rows.push(confirmHtml({ id: "everywhere-q", text: `Sign out all ${live.length} devices — ${names}? Each needs its passkey to sign in again.`, verb: "Sign Out Everywhere", act: "everywhere" }));
     } else {
-      rows.push(`<li class="kv"><span class="k">Lost a device?<span class="sub">Revoke it above, or sign out of every device at once.</span></span><span class="v"><button type="button" class="destructive" data-act="ask-everywhere" data-needs-connection>Sign Out Everywhere</button></span></li>`);
+      rows.push(`<li class="kv"><span class="k">Lost a device?<span class="sub">Remove it above, or sign out of every device at once.</span></span><span class="v"><button type="button" class="destructive" data-act="ask-everywhere" data-needs-connection>Sign Out Everywhere</button></span></li>`);
     }
   }
   return rows.join("");
@@ -639,29 +653,30 @@ export function mountSettings({ $, api, show, notify = null, offline = () => fal
     say("compute", n === null ? "Saved — no daily budget." : `Saved — $${money(n)} a day.`);
   }
 
-  async function revoke(id) {
-    const res = await api(`/api/devices/${encodeURIComponent(id)}/revoke`, { method: "POST", body: "{}" });
+  /** `scope: "device"` removes it — passkey and sessions; `scope: "sessions"` signs it out and keeps the passkey. */
+  async function revoke(id, scope) {
+    const res = await api(`/api/devices/${encodeURIComponent(id)}/revoke`, { method: "POST", body: JSON.stringify({ scope }) });
     return res.ok ? null : await refusalText(res, `the console answered ${res.status}`);
   }
 
   async function revokeOne(id) {
     const d = (data.devices?.body?.devices ?? []).find((x) => String(x.id) === String(id));
-    const why = await revoke(id);
+    const why = await revoke(id, "device");
     editing = null;
-    if (why) return say("account", `${d?.label ?? "That device"} was not revoked — ${why}.`);
-    said.account = `${d?.label ?? "That device"} is signed out.`;
-    await Promise.all([read("devices"), read("whoami")]); // revoking this device ends here: the shell's 401 shows the sign-in
+    if (why) return say("account", `${d?.label ?? "That device"} was not removed — ${why}.`);
+    said.account = `${d?.label ?? "That device"} was removed.`;
+    await Promise.all([read("devices"), read("whoami")]); // removing this device ends here: the shell's 401 shows the sign-in
     paint();
   }
 
   async function everywhere() {
-    const mine = thisDevice(data.whoami?.ok ? data.whoami.body : null);
-    const live = (data.devices?.body?.devices ?? []).filter((d) => !d.revoked);
+    const mine = thisSession(data.whoami?.ok ? data.whoami.body : null);
+    const live = (data.devices?.body?.devices ?? []).filter(signedIn);
     // this device last, so the others are gone before this session is
-    const order = [...live.filter((d) => String(d.id) !== mine), ...live.filter((d) => String(d.id) === mine)];
+    const order = [...live.filter((d) => !isThisDevice(d, mine)), ...live.filter((d) => isThisDevice(d, mine))];
     const failed = [];
     for (const d of order) {
-      const why = await revoke(d.id);
+      const why = await revoke(d.id, "sessions");
       if (why) failed.push(`${d.label}: ${why}`);
     }
     editing = null;

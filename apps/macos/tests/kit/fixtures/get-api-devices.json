@@ -12,23 +12,57 @@
   "body": {
     "devices": [
       {
-        "id": "2",
-        "label": "iPhone",
+        "id": "3",
+        "passkey_id": "fixture-VrrmM6mW",
+        "label": "iPad",
+        "added": "2026-10-19T01:09:37.818Z",
+        "last_seen": "2026-10-19T01:09:37.819Z",
+        "this_device": false,
+        "sessions": [
+          {
+            "id": "3",
+            "created_at": "2026-10-19T01:09:37.819Z",
+            "last_seen_at": "2026-10-19T01:09:37.819Z",
+            "absolute_expires_at": "2027-10-19T01:09:37.819Z",
+            "revoked": false,
+            "push": false
+          }
+        ],
         "passkey_last_used": null,
-        "rp_id": "127.0.0.1",
-        "created_at": "2026-10-19T01:11:51.713Z",
-        "last_seen_at": "2026-10-19T01:11:51.713Z",
-        "absolute_expires_at": "2027-10-19T01:11:51.713Z",
+        "created_at": "2026-10-19T01:09:37.818Z",
+        "last_seen_at": "2026-10-19T01:09:37.819Z",
+        "absolute_expires_at": "2027-10-19T01:09:37.819Z",
         "revoked": false
       },
       {
-        "id": "1",
+        "id": "2",
+        "passkey_id": "fixture-KlBg0KKa",
         "label": "iPhone",
+        "added": "2026-10-19T01:09:37.818Z",
+        "last_seen": "2026-10-19T01:09:37.819Z",
+        "this_device": false,
+        "sessions": [
+          {
+            "id": "2",
+            "created_at": "2026-10-19T01:09:37.819Z",
+            "last_seen_at": "2026-10-19T01:09:37.819Z",
+            "absolute_expires_at": "2027-10-19T01:09:37.819Z",
+            "revoked": false,
+            "push": false
+          },
+          {
+            "id": "1",
+            "created_at": "2026-10-19T01:09:37.818Z",
+            "last_seen_at": "2026-10-19T01:09:37.818Z",
+            "absolute_expires_at": "2027-10-19T01:09:37.818Z",
+            "revoked": false,
+            "push": false
+          }
+        ],
         "passkey_last_used": null,
-        "rp_id": "127.0.0.1",
-        "created_at": "2026-10-19T01:11:51.713Z",
-        "last_seen_at": "2026-10-19T01:11:51.713Z",
-        "absolute_expires_at": "2027-10-19T01:11:51.713Z",
+        "created_at": "2026-10-19T01:09:37.818Z",
+        "last_seen_at": "2026-10-19T01:09:37.819Z",
+        "absolute_expires_at": "2027-10-19T01:09:37.819Z",
         "revoked": false
       }
     ]

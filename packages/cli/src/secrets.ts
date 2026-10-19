@@ -9,6 +9,7 @@
 //       secrets sync --to keychain   import `.env`'s secret lines into the Keychain
 //       secrets sync --to env        regenerate `.env`'s secret lines from the Keychain
 //       secrets mint <VAR>           mint a random token into both
+//       secrets mint                 the recorder's three tokens, when it is configured (keeps what exists)
 //       secrets list                 names and where each one lives — never a value
 //       secrets purge                one instance's items, preview-then-confirm
 //
@@ -133,6 +134,32 @@ export const GENERATED_SECRETS: Readonly<Record<string, string>> = {
   // started with them; nothing has been started with this one.
   METISTRY_BRIDGE_TOKEN_RECONCILER_USER:
     "the vault bridge's OWNER bearer — the only credential that may write .metistry/ (docs/ops/auth.md); restart the reconciler once it is minted",
+  // The recorder's three (owner ruling 2026-10-04), on the same bar. Each is a
+  // value that means nothing outside this install and that nobody pastes
+  // anywhere: the bar's control key (the Keychain is where it is read), the
+  // bearer the router presents to the live-capture bridge, and the capture
+  // owner token the bridge posts transcripts with. Nothing was started with
+  // any of them before `metistry up` mints them — the bridge is only ever
+  // started WITH them — so minting can never lock a running service out. They
+  // are minted only while `METISTRY_LIVE_CAPTURE_URL` is set (GENERATED_WHEN):
+  // an install that never asked for a microphone gets none of the three.
+  METISTRY_LIVE_CAPTURE_CONTROL_TOKEN:
+    "the recorder's control key — the Mac app's capture bar reads it from the Keychain and presents it to the live-capture bridge; restart the live-capture bridge once it is minted",
+  METISTRY_BRIDGE_TOKEN_LIVE_CAPTURE:
+    "the bearer the router presents to the live-capture bridge; restart the live-capture bridge once it is minted",
+  METISTRY_LIVE_CAPTURE_INBOX_TOKEN:
+    "the capture owner token the live-capture bridge posts transcripts with — a sync only mints the secret; `metistry up` (or `metistry secrets mint`) also records it in the console's owner tokens, labelled live-capture",
+};
+
+/**
+ * A generated secret that is minted only while another variable is set — the
+ * opt-in that makes it this install's business at all. Adopting one `.env`
+ * already holds is never gated; only creating one is.
+ */
+export const GENERATED_WHEN: Readonly<Record<string, string>> = {
+  METISTRY_LIVE_CAPTURE_CONTROL_TOKEN: "METISTRY_LIVE_CAPTURE_URL",
+  METISTRY_BRIDGE_TOKEN_LIVE_CAPTURE: "METISTRY_LIVE_CAPTURE_URL",
+  METISTRY_LIVE_CAPTURE_INBOX_TOKEN: "METISTRY_LIVE_CAPTURE_URL",
 };
 
 /**
@@ -453,11 +480,11 @@ export async function syncSecrets(direction: SyncDirection, opts: SecretsOptions
           v = inEnv;
           await own.setSecret(name, v);
           adopted.push(name);
-        } else {
+        } else if (!(GENERATED_WHEN[name] && !(before.get(GENERATED_WHEN[name]!) || opts.env?.[GENERATED_WHEN[name]!]))) {
           // Nowhere yet, and one of the few whose value only ever means "this
           // install": mint it into the Keychain now, so an instance that
           // predates the variable gains it on the next sync rather than
-          // needing a verb.
+          // needing a verb. (Not while the opt-in it belongs to is unset.)
           v = (opts.mint ?? mintToken)();
           await own.setSecret(name, v);
           minted.push(name);
@@ -569,6 +596,57 @@ export async function adoptOrMintSecret(name: string, opts: SecretsOptions): Pro
   let value = "";
   await mintSecret(name, { ...opts, mint: () => (value = (opts.mint ?? mintToken)()) });
   return { how: "minted", value };
+}
+
+export interface EnsuredSecret {
+  /**
+   * `kept` — the Keychain (macOS) or `.env` already held one and it stands;
+   * `adopted` — only `.env` held one, and it is now in the Keychain too;
+   * `minted` — neither did.
+   */
+  how: "kept" | "adopted" | "minted";
+  value: string;
+  /** `.env` was written by this call */
+  wroteEnv: boolean;
+}
+
+/**
+ * Make sure this install has `name`, creating it ONLY when no store holds one:
+ * the idempotent sibling of `mintSecret` (which always replaces). On macOS
+ * the Keychain is read first and its value is the one `.env` is made to hold;
+ * a value only `.env` has (an owner-pasted one) is adopted into the Keychain
+ * and never replaced; elsewhere `.env` is the store. Names only in the
+ * output, never the value.
+ */
+export async function ensureSecret(name: string, opts: SecretsOptions): Promise<EnsuredSecret> {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new Error(`${JSON.stringify(name)} is not a variable name`);
+  if (!isSecretVar(name)) throw new Error(`${name} is not a secret-shaped name`);
+  const platform = opts.platform ?? process.platform;
+  const target = opts.envTarget ?? opts.envFile;
+  const fileText = await readText(target);
+  const inEnv = liveValues(fileText).get(name) || opts.env?.[name] || undefined;
+  const store = async (value: string): Promise<boolean> => {
+    if (liveValues(fileText).get(name) === value) return false;
+    const values = new Map([[name, value]]);
+    const { text, missing } = rewriteEnv(fileText, values);
+    await writeEnvFile(target, appendEnv(text, values, missing));
+    return true;
+  };
+  if (platform !== "darwin") {
+    if (inEnv) return { how: "kept", value: inEnv, wroteEnv: await store(inEnv) };
+    const value = (opts.mint ?? mintToken)();
+    return { how: "minted", value, wroteEnv: await store(value) };
+  }
+  const { own } = keychains(opts);
+  const held = await own.getSecret(name);
+  if (held !== undefined && held !== "") return { how: "kept", value: held, wroteEnv: await store(held) };
+  if (inEnv) {
+    await own.setSecret(name, inEnv);
+    return { how: "adopted", value: inEnv, wroteEnv: await store(inEnv) };
+  }
+  const value = (opts.mint ?? mintToken)();
+  await own.setSecret(name, value);
+  return { how: "minted", value, wroteEnv: await store(value) };
 }
 
 // ---- purge -------------------------------------------------------------------

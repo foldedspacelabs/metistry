@@ -12,6 +12,7 @@ import type { Exec, ExecOptions } from "../src/exec.js";
 import { interactiveLine } from "../src/keychain.js";
 import { main } from "../src/main.js";
 import { accountFor, isSecretVar, listSecrets, mintSecret, purgeSecrets, renderSecretList, rewriteEnv, serviceAnswers, sharedScopeSecretName, syncSecrets, wasSharedScope } from "../src/secrets.js";
+import { tokenHash } from "@foldedspacelabs/metistry-core";
 import { decodeSecurity } from "./fake-security.js";
 
 /** One instance's id — the account its own secrets are filed under. */
@@ -672,5 +673,91 @@ describe("metistry secrets list", () => {
     expect(table).toContain("METISTRY_GITHUB_TOKEN");
     // presence is checked WITHOUT -w, so `security` is never even asked for a value
     for (const c of kc.calls) expect(c.args).not.toContain("-w");
+  });
+});
+
+// X-80: `secrets mint` with no variable makes the recorder's three tokens
+// (the same idempotent code `up` runs); with a variable it replaces that one,
+// as ever — and the inbox token is only a credential once the console has its hash.
+describe("metistry secrets mint — the recorder's tokens (X-80)", () => {
+  const RECORDER = ["METISTRY_LIVE_CAPTURE_CONTROL_TOKEN", "METISTRY_BRIDGE_TOKEN_LIVE_CAPTURE", "METISTRY_LIVE_CAPTURE_INBOX_TOKEN"];
+  const instance = async (env: string) => {
+    const dir = await mkdtemp(join(tmpdir(), "metistry-mint-recorder-"));
+    for (const [rel, text] of Object.entries({ ".metistry/identity.yaml": `name: Aide\ninstance_id: "${INSTANCE_ID}"\n`, ".metistry/state/.env": env })) {
+      await mkdir(join(dir, rel, ".."), { recursive: true });
+      await writeFile(join(dir, rel), text, { mode: 0o600 });
+    }
+    return dir;
+  };
+  const ownerTokens = () => {
+    const rows: Array<{ token_hash: string; label: string }> = [];
+    return {
+      rows,
+      openSession: async () => ({
+        query: async (text: string, values: unknown[] = []) => {
+          if (text.startsWith("SELECT")) return { rows: rows.filter((r) => r.token_hash === values[0]) };
+          rows.push({ token_hash: values[0] as string, label: values[1] as string });
+          return { rows: [] };
+        },
+        end: async () => {},
+      }),
+    };
+  };
+  const mint = async (dir: string, kc: ReturnType<typeof fakeSecurity>, db: ReturnType<typeof ownerTokens>, ...rest: string[]) => {
+    const out: string[] = [];
+    try {
+      const code = await main(["secrets", "mint", ...rest, "--instance", dir, "--product-dir", fileURLToPath(new URL("../../..", import.meta.url))], {
+        out: (l) => out.push(l),
+        err: (l) => out.push(l),
+        exec: kc.exec,
+        platform: "darwin",
+        openSession: db.openSession,
+      });
+      return { code, text: out.join("\n") };
+    } finally {
+      // loadInstallEnv writes the (temp) instance's .env into the environment; an earlier mint must not answer for the next
+      for (const n of [...RECORDER, "METISTRY_LIVE_CAPTURE_URL", "METISTRY_INSTANCE_DIR"]) delete process.env[n];
+    }
+  };
+
+  it("**bare, with the recorder configured: makes all three, records the inbox token, keeps them on a rerun**", async () => {
+    const dir = await instance("METISTRY_LIVE_CAPTURE_URL=http://127.0.0.1:7815\n");
+    const kc = fakeSecurity();
+    const db = ownerTokens();
+    const first = await mint(dir, kc, db);
+    expect(first.code, first.text).toBe(0);
+    const held = RECORDER.map((n) => kc.store.get(key(INSTANCE_ID, n))!);
+    for (const v of held) expect(v).toBeTruthy();
+    const env = readFileSync(join(dir, ".metistry/state/.env"), "utf8");
+    RECORDER.forEach((n, i) => expect(env).toContain(`${n}=${held[i]}`));
+    expect(db.rows).toEqual([{ token_hash: tokenHash(held[2]!), label: "live-capture" }]);
+    for (const v of held) expect(first.text).not.toContain(v);
+
+    const stored = new Map(kc.store);
+    const again = await mint(dir, kc, db);
+    expect(again.code, again.text).toBe(0);
+    expect(kc.store).toEqual(stored);
+    expect(readFileSync(join(dir, ".metistry/state/.env"), "utf8")).toBe(env);
+    expect(db.rows).toHaveLength(1);
+  });
+
+  it("**bare, without the recorder configured: refuses and mints nothing**", async () => {
+    const dir = await instance("METISTRY_DB_HOST=127.0.0.1\n");
+    const kc = fakeSecurity();
+    const r = await mint(dir, kc, ownerTokens());
+    expect(r.code).toBe(2);
+    expect(r.text).toContain("METISTRY_LIVE_CAPTURE_URL");
+    expect(kc.calls).toEqual([]);
+  });
+
+  it("naming the inbox token replaces it and records the new one as a capture owner token", async () => {
+    const dir = await instance("METISTRY_LIVE_CAPTURE_URL=http://127.0.0.1:7815\n");
+    const kc = fakeSecurity();
+    const db = ownerTokens();
+    const r = await mint(dir, kc, db, "METISTRY_LIVE_CAPTURE_INBOX_TOKEN");
+    expect(r.code, r.text).toBe(0);
+    expect(db.rows).toEqual([{ token_hash: tokenHash(kc.store.get(key(INSTANCE_ID, "METISTRY_LIVE_CAPTURE_INBOX_TOKEN"))!), label: "live-capture" }]);
+    // the other two are not touched by naming one
+    expect(kc.store.has(key(INSTANCE_ID, "METISTRY_LIVE_CAPTURE_CONTROL_TOKEN"))).toBe(false);
   });
 });

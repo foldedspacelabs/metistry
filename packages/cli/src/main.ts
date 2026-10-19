@@ -85,6 +85,8 @@ import { askKeepAwake, init, type Ask } from "./init.js";
 import { migrateInbox } from "./migrate-inbox.js";
 import { migrateLayout } from "./migrate-layout.js";
 import { migrateShape } from "./migrate-shape.js";
+import type { MigrationSession } from "./migrate.js";
+import { CAPTURE_INBOX_TOKEN, describeRecorderTokens, ensureRecorderTokens, recorderConfigured, registerCaptureOwnerToken } from "./recorder-tokens.js";
 import { ensureInstanceId, instanceEnvFile, readInstanceId } from "./instance.js";
 import { identitySet, readIdentity, renderIdentity, renderIdentitySet, IDENTITY_SET_FIELDS, type IdentityChange } from "./identity.js";
 import {
@@ -114,6 +116,7 @@ import {
   secretsRemove,
   secretsReplace,
   secretsSet,
+  ensureSecret,
   syncSecrets,
   serviceAnswers,
   type TokenService,
@@ -356,7 +359,7 @@ const USAGE = `metistry — Metistry command line
 
   metistry secrets sync [--from keychain|env] [--to env|keychain]
                         [--instance <dir>] [--env-file <path>]
-  metistry secrets mint <VAR> [--instance <dir>] [--env-file <path>]
+  metistry secrets mint [<VAR>] [--instance <dir>] [--env-file <path>]
   metistry secrets list [--json] [--instance <dir>] [--env-file <path>]
   metistry secrets purge --instance <dir> [--yes]
   metistry secrets retire-legacy-env [--yes] [--instance <dir>]
@@ -365,8 +368,10 @@ const USAGE = `metistry — Metistry command line
       .env's secret-shaped variables (names ending _TOKEN _PASSWORD _PRIVATE
       _SECRET _KEY); --to env rewrites just those
       lines in place (0600; every comment and non-secret line preserved) and
-      moves a product-checkout .env into the instance the first time. mint makes
-      a new random token in both. list prints names and where each lives, never
+      moves a product-checkout .env into the instance the first time. mint <VAR>
+      makes a new random token in both; bare, with METISTRY_LIVE_CAPTURE_URL
+      set, it makes the recorder's three (control, bridge, inbox) where they
+      are missing and keeps the ones that exist. list prints names and where each lives, never
       values (--json: the same rows as an array).
       Every item is filed under ONE account: this instance's instance_id. A
       third-party credential (a METISTRY_*_API_KEY, your AWS keys) is an
@@ -1078,6 +1083,8 @@ export interface MainIo {
    * app's first run and from a script.
    */
   ask?: Ask;
+  /** test seam: the database session the recorder's capture owner token is recorded through (`secrets mint`) */
+  openSession?: (env: NodeJS.ProcessEnv) => Promise<(MigrationSession & { end(): Promise<void> }) | null>;
 }
 
 /**
@@ -1512,11 +1519,22 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
           }
           case "mint": {
             const name = positional[1];
+            const register = (token: string) => registerCaptureOwnerToken({ env: process.env, token, out, ...(io.openSession ? { openSession: io.openSession } : {}) });
             if (!name) {
-              err("usage: metistry secrets mint <VAR>");
-              return 2;
+              // bare: the recorder's three tokens, each made only where missing
+              if (!recorderConfigured(process.env)) {
+                err("usage: metistry secrets mint <VAR>   (bare, `secrets mint` makes the recorder's three tokens, and needs METISTRY_LIVE_CAPTURE_URL set)");
+                return 2;
+              }
+              const made = await ensureRecorderTokens({ ...secretsOpts, env: process.env });
+              for (const l of describeRecorderTokens(made)) out(l);
+              if (made.inbox) await register(made.inbox);
+              await followEnv(loaded, out);
+              return made.failed.length > 0 ? 1 : 0;
             }
             await mintSecret(name, secretsOpts);
+            // the inbox token is only a credential once the console has its hash
+            if (name === CAPTURE_INBOX_TOKEN) await register((await ensureSecret(name, secretsOpts)).value);
             await followEnv(loaded, out);
             return 0;
           }
@@ -1536,7 +1554,7 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
             return r.found.length + r.named.length > 0 && incomplete && flags.yes === true ? 1 : 0;
           }
           default:
-            err("usage: metistry secrets sync --to env|keychain | mint <VAR> | list [--named] | purge --instance <dir> [--yes] | retire-legacy-env [--yes]");
+            err("usage: metistry secrets sync --to env|keychain | mint [<VAR>] | list [--named] | purge --instance <dir> [--yes] | retire-legacy-env [--yes]");
             err("       metistry secrets set|replace|remove|hosts|grant <name> … (owner-named secrets — docs/ops/cli.md)");
             err("       metistry secrets migrate-scope [--dry-run] | purge-shared [--yes] (the retired shared scope)");
             return 2;

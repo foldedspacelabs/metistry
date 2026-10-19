@@ -19,7 +19,7 @@ public protocol SettingsStore: Sendable {
     /// route: GET /api/devices
     func devices() async -> Result<DeviceList, ConsoleError>
     /// route: POST /api/devices/:id/revoke
-    func revokeDevice(_ sessionID: Int) async -> Result<DeviceRevocation, ConsoleError>
+    func revokeDevice(_ sessionID: Int, scope: DeviceRevocationScope) async -> Result<DeviceRevocation, ConsoleError>
     /// route: GET /api/status
     func status() async -> Result<ConsoleStatus, ConsoleError>
     /// route: GET /api/instances
@@ -51,10 +51,26 @@ public struct ConsoleHealth: Codable, Sendable, Equatable {
     }
 }
 
-/// `GET /api/devices` — `{devices: […]}`: each session, its passkey's label, and whether it is revoked.
+/// `GET /api/devices` — `{devices: […]}`: one row per enrolled passkey — label, added, last seen,
+/// `this_device`, its sessions under it (§2.22; devices-model.swift reads it).
 public struct DeviceList: ConsoleBody { public let json: JSONValue; public init(json: JSONValue) { self.json = json } }
-/// `POST /api/devices/:id/revoke` — `{revoked: true}`.
+/// `POST /api/devices/:id/revoke` — `{revoked: true, scope, sessions}`.
 public struct DeviceRevocation: ConsoleBody { public let json: JSONValue; public init(json: JSONValue) { self.json = json } }
+
+/// What `POST /api/devices/:id/revoke` revokes (docs/ops/client-api.md, "Who
+/// you are, and your devices"). **Remove** is `device` — the passkey and every
+/// session under it, their push subscriptions dropped, so a removed phone never
+/// signs in again; **Sign Out Everywhere** is `sessions` — this device's
+/// sessions end and its passkey is kept, so it signs in again with Face ID.
+/// `device` is the route's default and is sent as an empty body, exactly as
+/// the recorded fixture made the request.
+public enum DeviceRevocationScope: String, Sendable, Equatable {
+    case device
+    case sessions
+
+    /// The request body: `{}` for the default, `{scope: "sessions"}` otherwise.
+    var body: JSONValue { self == .device ? .object([:]) : .object(["scope": .string(rawValue)]) }
+}
 /// `GET /api/status` — `{checks, as_of}`: the console's own probes in `check()` shape. Everything else is `metistry doctor` (M6).
 public struct ConsoleStatus: ConsoleBody { public let json: JSONValue; public init(json: JSONValue) { self.json = json } }
 /// `GET /api/instances` — `{instances, as_of}`: the peer registry (`instances.yaml`), read-only here (M11).
@@ -99,8 +115,8 @@ extension ConsoleStores: SettingsStore {
     public func whoami() async -> Result<ConsoleWhoamiReply, ConsoleError> { await api.whoami() }
     public func devices() async -> Result<DeviceList, ConsoleError> { await get("/api/devices") }
 
-    public func revokeDevice(_ sessionID: Int) async -> Result<DeviceRevocation, ConsoleError> {
-        await perform("POST", "/api/devices/\(sessionID)/revoke", .object([:]))
+    public func revokeDevice(_ sessionID: Int, scope: DeviceRevocationScope) async -> Result<DeviceRevocation, ConsoleError> {
+        await perform("POST", "/api/devices/\(sessionID)/revoke", scope.body)
     }
 
     public func status() async -> Result<ConsoleStatus, ConsoleError> { await get("/api/status") }

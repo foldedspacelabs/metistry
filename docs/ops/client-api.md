@@ -55,7 +55,7 @@ route by route.
 | `public` | anyone | the bootstrap: health, identity, the WebAuthn ceremony |
 | `agent` | agent bearers, the capture owner token | `/mcp`, `POST /capture` |
 | `owner` | the owner, from any client | a passkey session **or** the local owner token |
-| `local` | the owner **on this Mac** | the local owner token only — accepted solely from a loopback peer (`apps/console/src/local-owner.ts`); a passkey session, even from the same Mac, is refused `403 local_only` naming the Mac app (F-13) |
+| `local` | the owner **on this Mac** | the local owner token only — accepted solely from a loopback peer on the console's **main listener** (`apps/console/src/local-owner.ts`); a passkey session, even from the same Mac, is refused `403 local_only` naming the Mac app (F-13); on the **proxy listener** (`docs/ops/auth.md`, "The proxy listener") no `local` route answers at all |
 
 **Principals** are the credential kinds a route actually admits, spelled as
 the console's own `Auth` kinds:
@@ -64,7 +64,7 @@ the console's own `Auth` kinds:
 | --- | --- |
 | `anyone` | none at all — `public` rows only |
 | `session` | a passkey session cookie (`metistry_session`) |
-| `local_owner` | `METISTRY_LOCAL_OWNER_TOKEN`, from a loopback peer |
+| `local_owner` | `METISTRY_LOCAL_OWNER_TOKEN`, from a loopback peer on the main listener — never through the proxy listener |
 | `owner_token` | a host-minted `owner_tokens` row — the capture Shortcut |
 | `agent` | an agent bearer: an external agent, the assistant, a crew |
 
@@ -90,10 +90,16 @@ The console reads `local` off the table — `isLocalRoute` in
 in `apps/console/src/server.ts` — so a row filed under `local` is enforced
 before any handler runs, with no second list in the server:
 
-- **The local owner token from a loopback peer** gets through. From any other
-  peer it is the uniform `401` an unknown token gets (and the attempt is
-  audited as `owner_token_remote`), exactly as before — the address is the
-  socket's, never a header.
+- **The local owner token from a loopback peer on the main listener** gets
+  through. From any other peer — and from *every* peer on the proxy listener,
+  where a remote-access provider forwards to (`docs/ops/auth.md`, "The proxy
+  listener") — it is the uniform `401` an unknown token gets (and the attempt
+  is audited as `owner_token_remote`, with `meta.listener`), exactly as
+  before — the address and the listener are the socket's, never a header.
+- **On the proxy listener no `local` route answers**: `403 local_only` to a
+  passkey session, audited with `meta.listener = proxy`; the token itself is
+  the `401` above. A request there whose `Host` is not a remote host
+  `METISTRY_ORIGIN` names is `421 misdirected` before any of this.
 - **A passkey session is refused `403 local_only`** — even one from
   `127.0.0.1` — with a message that names the route and the Mac app:
 
@@ -144,7 +150,9 @@ reason, never a control — and a request sent anyway meets this answer.
 `packages/core`'s envelope, `{"error":{"code","message"}}`, on every refusal.
 The codes and their statuses are `packages/core/src/errors.ts`: `invalid_request`
 400, `unauthenticated` 401, `forbidden` 403, `local_only` 403 (a `local` route,
-asked with a passkey session — "The `local` gate" above), `not_found` 404, `conflict` 409,
+asked with a passkey session — "The `local` gate" above), `misdirected` 421 (a
+request on the console's proxy listener whose `Host` is not a remote host
+`METISTRY_ORIGIN` names — `docs/ops/auth.md`, "The proxy listener"), `not_found` 404, `conflict` 409,
 `rate_limited` 429, `internal` 500, `not_available` 503 (the capability is
 absent in this deployment — degrades: absent — never a permission), and
 `section_missing` 409 — the vault bridge's answer when the daily note's

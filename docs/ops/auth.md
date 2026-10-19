@@ -12,7 +12,7 @@ one *principal*.
 | Credential | Presented as | Principal | Reaches |
 | --- | --- | --- | --- |
 | Passkey session | `Cookie: metistry_session=…` | `user` | everything except the `local` routes — minting an agent bearer — which answer `403 local_only` ([client-api.md](client-api.md), "The `local` gate") |
-| **Local owner token** | `Authorization: Bearer $METISTRY_LOCAL_OWNER_TOKEN`, from this machine | `user` | everything except the two session-bound endpoints below |
+| **Local owner token** | `Authorization: Bearer $METISTRY_LOCAL_OWNER_TOKEN`, from this machine, on the console's **main listener** — never on the proxy listener ("The proxy listener", below) | `user` | everything except the two session-bound endpoints below |
 | Host-minted owner token | `Authorization: Bearer …` (an `owner_tokens` row) | `owner_token` | `/capture`, `/message`, `/api/status`, named queries — never management |
 | Agent token | `Authorization: Bearer …` (an `agents` row) | that agent | `/capture` and the mcp-brain mount at `/mcp`; a uniform 403 everywhere else |
 | Crew run token | `Authorization: Bearer …` (an `agents` row, `kind = 'crew'`) | that crew | the same, narrowed to the tool groups its manifest names ([crews.md](crews.md)) |
@@ -201,12 +201,18 @@ machine — are a different question, and they keep registering passkeys
 exactly as before. Nothing about passkey enrollment or login changed.
 
 **The rule.** The token is accepted only when the **connection's peer
-address** is loopback: `127.0.0.1`, `::1`, `::ffff:127.0.0.1`. That
-decision is made from the socket and nothing else. `X-Forwarded-For`,
+address** is loopback — `127.0.0.1`, `::1`, `::ffff:127.0.0.1` — **and the
+connection arrived on the console's main listener**
+(`METISTRY_CONSOLE_HOST:METISTRY_CONSOLE_PORT`). Both facts are read off the
+socket the server accepted and nothing else. `X-Forwarded-For`,
 `Forwarded`, `X-Real-IP` and `Host` are written by the caller, so reading
 any of them would hand the rule to the attacker; there is no configuration
 that turns one of them on, and the misuse tests assert it
-(`apps/console/test/local-owner.test.ts`).
+(`apps/console/test/local-owner.test.ts`). On the **proxy listener** — the
+second place the console answers, for remote-access providers only — the
+token is refused from every peer, loopback included, because the only thing
+a loopback peer proves there is that a tunnel carried the request ("The
+proxy listener", below).
 
 **From anywhere else** the response is a 401 byte-identical to the one an
 unknown token gets — no oracle telling a prober that it holds the right
@@ -220,7 +226,17 @@ from it". On macOS that is the logged-in user — the same claim a platform
 passkey makes. The Keychain is the boundary, and it is the boundary either
 way. What the loopback rule adds is that a token which *leaks* — into a
 log, a screenshot, a synced dotfile — still cannot be replayed from off the
-machine.
+machine **through the console's own ports**. That sentence used to stop
+there, and it was wrong once anything proxied to the console from this Mac:
+a tunnel's agent (`tailscaled`, `cloudflared`, zrok, ngrok) dials the
+console from `127.0.0.1`, so a leaked token sent from a phone *through the
+tunnel* arrived with a loopback peer and was honoured — `local` routes and
+all. That is the finding X-103 closed (plan §2.23): a proxy may be pointed
+only at the proxy listener, where the token is never honoured, and the main
+listener stays where only this Mac's own processes reach it. Pointing a
+proxy at the main port is the one misconfiguration that would reopen it,
+which is why `metistry doctor` fails any provider whose upstream is the
+main port (X-105).
 
 **What it may not do.** Two endpoints act on a device *session row* and so
 need one: `POST /auth/logout` and `/api/push/*` (a push subscription is
@@ -260,6 +276,64 @@ loopback, which is the fail-closed direction; the same container with the
 variable emptied answers 401 to the host. An explicit address or IPv4 CIDR
 is also accepted, for a shape neither of those covers. `0.0.0.0/0` is
 refused rather than honoured.
+
+## The proxy listener
+
+The console answers in **two places**, and which one a request arrived on is
+a fact about the socket — never a header, never an address:
+
+| Listener | Where | For | The local owner token | `local` routes | `Host` |
+| --- | --- | --- | --- | --- | --- |
+| **main** | `METISTRY_CONSOLE_HOST:METISTRY_CONSOLE_PORT` (default `127.0.0.1:8080`) | the Mac app, the CLI, the PWA on this Mac — and nothing that proxies | honoured from a loopback peer (above) | answer, to the token alone | never asked about |
+| **proxy** | the Unix socket `<instance>/.metistry/state/console-proxy.sock` (mode **0600**) and the loopback TCP port `METISTRY_CONSOLE_PROXY_PORT` (default the console port + 1: `8081`) | every remote-access provider's agent — `tailscaled`, `cloudflared`, zrok, ngrok, a TLS terminator for a forwarded port (plan §2.23) | **refused from every peer**, loopback included, and audited (`kind=auth, tool=owner_token_remote, meta.listener=proxy`) — the same uniform 401 an unknown token gets | **never answer**: `403 local_only`, whoever asks, audited with `meta.listener=proxy` | **must be a remote host `METISTRY_ORIGIN` names**, else `421 misdirected` before anything answers |
+
+A request on the proxy listener is **remote by construction**. The listener
+exists because every provider's agent connects to the console *from this
+machine*, so on the main listener a request that crossed a tunnel is
+indistinguishable from the Mac app's; no address rule can tell them apart,
+and the console does not try. Instead the provider is given a listener where
+the question never arises: `local-owner.ts`'s `checkLocalOwner` answers
+`remote` for the token on it whatever the peer says — a loopback address, the
+compose gateway, or no address at all on the socket — and there is no
+configuration that opens the local door there.
+
+**What does work through it** is exactly what a phone needs: the PWA shell,
+the passkey ceremonies, a passkey session on every `owner` route, an agent
+bearer on `/capture` and `/mcp`, `GET /health` and `GET /api/identity`.
+
+**The `Host` rule.** `METISTRY_ORIGIN` lists the origins this console is
+configured for — once a provider is chosen, the remote origin first and the
+loopback origin `init` wrote second (plan §2.23, "How the origin flows").
+The proxy listener answers only a `Host` whose authority matches one of the
+**non-loopback** entries (case-insensitive; `:80` and `:443` elided because
+TLS ended at the provider and the scheme is not on the wire; any other port
+is part of the name, so Funnel on `8443` is `name:8443`). Anything else —
+another name, `127.0.0.1`, `localhost`, the right name on an unconfigured
+port — is `421 misdirected`, decided before the shell, the ceremonies,
+`/health`, `/mcp` and any credential. A **loopback-only install** — every
+install's default — configures no remote host, so its proxy listener refuses
+every request with a message naming Settings ▸ Remote Access; the main
+listener is untouched by any of this. A wrong `Host` is not audited per
+request on purpose: an internet-facing listener's refused bursts are X-111's,
+one row per burst, and a row per probe would make `runs` the thing a scanner
+fills.
+
+**Where it binds.** Under `launchd` the console binds the TCP port on
+`127.0.0.1` and the socket in the instance's state directory; a namespaced
+instance takes the block's second-to-last slot for the port (`base + 6`,
+beside the egress proxy's `base + 7`), because "the console port + 1" there
+is Postgres. Under `compose` the container publishes the port on
+`127.0.0.1` only (`${METISTRY_CONSOLE_PROXY_PORT:-8081}:8081`) and there is
+no socket — the container holds no instance directory (D5). A port the
+console cannot bind is logged and survived: the main listener owes the proxy
+listener nothing, and a provider pointed at a dead proxy port fails to
+connect, which is the fail-closed direction. There is no fallback to the
+main port anywhere.
+
+**Tests.** `apps/console/test/local-owner.test.ts` (the verdicts),
+`apps/console/test/proxy-listener.test.ts` (the `Host` rule) and
+`apps/console/test/proxy-listener.integration.test.ts` (the same over the
+port and the socket, with the audit rows they leave and the socket's mode).
 
 ## Checking it
 

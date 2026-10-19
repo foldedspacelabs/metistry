@@ -9,7 +9,7 @@ boundary differ. Set in `.metistry/deployment.yaml` (plan §4.17, open decision 
 |  | `compose` | `launchd` |
 |---|---|---|
 | db | `pgvector/pgvector:pg17` container | a user-space Postgres 17, `postgres -D`, a **child of the supervisor** |
-| console | container, published on `127.0.0.1:8080` | a child of the supervisor, binds `127.0.0.1:8080` |
+| console | container, published on `127.0.0.1:8080`; its **proxy listener** (plan §2.23) published on `127.0.0.1:8081` only — no socket, the container holds no instance directory | a child of the supervisor, binds `127.0.0.1:8080`; its proxy listener binds `127.0.0.1:8081` (a namespaced block's `base + 6`) and the 0600 socket `<instance>/.metistry/state/console-proxy.sock` |
 | assistant | container; the file passes through the provider key `compute.yaml` names | a child of the supervisor, **under `ops/sandbox/assistant.sb`** — and not a child at all without an engine (below) |
 | reconciler | launchd job | a child of the supervisor, **under `ops/sandbox/reconciler.sb`** |
 | watchdog | launchd job | **it IS the supervisor** |
@@ -22,6 +22,21 @@ boundary differ. Set in `.metistry/deployment.yaml` (plan §4.17, open decision 
 
 `compose` is the default and stays the default until an instance flips
 it. Nothing about an existing install changes by upgrading past this.
+
+**The console's two listeners.** The main one is where this Mac's own
+processes reach the console — the Mac app, the CLI, the PWA opened here —
+and the only place the local owner token is honoured. The **proxy listener**
+is where a remote-access provider (`tailscaled`, `cloudflared`, zrok, ngrok,
+a TLS terminator for a forwarded port) forwards to, and every request on it
+is remote by construction: the token is never honoured, no `local` route
+answers, and the `Host` must be a remote host `METISTRY_ORIGIN` names
+(`docs/ops/auth.md`, "The proxy listener"). `METISTRY_CONSOLE_PROXY_PORT`
+names its port in either shape — the console port + 1 unless `.env` or a
+namespaced instance's block says otherwise (`metistry up` renders it into the
+console's job environment, like `METISTRY_CONSOLE_PORT`; under compose the
+host side of the published port is the variable, the container side is
+`8081`). A provider must never be pointed at the main port; `doctor` fails
+one that is (X-105).
 
 ## Status: `launchd` is trialled end to end (2026-09-10)
 

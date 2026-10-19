@@ -676,7 +676,7 @@ private func row(id: Int, ts: String, type: String, word: String, title: String,
         request["decisions"] = .array(["allow", "deny"].map(JSONValue.string))
         object["request"] = .object(request)
     }
-    if let meeting { object["payload"] = .object(["title": .string(title), "session_title": .string(meeting)]) }
+    if let meeting { object["payload"] = .object(["title": .string(title), "meeting": .object(["session_id": .string("20260928-120000-00ab"), "session_title": .string(meeting), "started_at": .string("2026-09-28T12:00:00.000Z")])]) }
     return .object(object)
 }
 

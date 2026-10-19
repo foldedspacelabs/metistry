@@ -38,10 +38,10 @@ public struct MeetingGroup: Sendable, Equatable, Identifiable {
         self.parts = parts.sorted { ($0.ts, $0.id) < ($1.ts, $1.id) }
     }
 
-    /// The meeting's name: what its parts say they came from, else the first part's ask.
+    /// The meeting's name: `payload.meeting.session_title` (the calendar event's title, else the recorder's; inbox-drain writes `meeting` as an object), else the first part's ask.
     public func title(assistantName: String) -> String {
         for part in parts {
-            if let name = part.payload?.string("meeting", "session_title") { return name }
+            if let name = part.payload?["meeting"]?.string("session_title") { return name }
         }
         return parts.first.map { RequestReading($0, assistantName: assistantName).ask } ?? "Meeting"
     }

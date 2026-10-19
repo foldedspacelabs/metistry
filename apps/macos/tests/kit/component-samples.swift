@@ -238,7 +238,7 @@ func requestCardSamples(_ name: String) async throws -> [ComponentSample] {
     // The meeting: open, then after a partial Accept All.
     let answeredElsewhere = #"{"error":{"code":"conflict","message":"already decided"},"reason":"already_decided","decision":"allow","proposal":{"id":"13"}}"#
     let parts = try (11...15).map { i in
-        try requestRow(i, "knowledge", payload: #"{"title":"\#(["Send Kessler the revised scope", "Book the vendor call", "Draft the SOW", "Ask Dana for the fixture list", "File the notes"][i - 11])","meeting":"Vendor review","due":"2026-09-30"}"#, ts: "2026-09-28T12:3\(i - 10):00.000Z")
+        try requestRow(i, "knowledge", payload: #"{"title":"\#(["Send Kessler the revised scope", "Book the vendor call", "Draft the SOW", "Ask Dana for the fixture list", "File the notes"][i - 11])","meeting":{"session_id":"20260928-120000-00ab","session_title":"Vendor review","started_at":"2026-09-28T12:00:00.000Z","ended_at":null,"event_id":null,"event":null},"due":"2026-09-30"}"#, ts: "2026-09-28T12:3\(i - 10):00.000Z")
     }
     for (sample, run) in [("a meeting — open", false), ("a meeting — 4 of 5 accepted", true)] {
         let transport = AnswerConsole { call, _ in call.path == "/api/proposals/13" ? AnswerConsole.refusal(409, answeredElsewhere) : AnswerConsole.ok() }

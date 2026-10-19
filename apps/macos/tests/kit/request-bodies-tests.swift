@@ -599,7 +599,7 @@ private let threeQuestions = #"{"title":"Three things about the Connections pane
 private func meeting(_ transport: AnswerConsole, hold: @escaping @Sendable (TimeInterval) async throws -> Void = { _ in }) throws -> GroupAnswering {
     // five parts, raised a second apart and handed over out of order
     let parts = try [3, 1, 5, 2, 4].map { i in
-        try requestRow(i, "knowledge", payload: #"{"title":"To-do \#(i)","meeting":"Vendor review"}"#, ts: "2026-09-28T12:00:0\(i).000Z")
+        try requestRow(i, "knowledge", payload: #"{"title":"To-do \#(i)","meeting":{"session_id":"20260928-120000-00ab","session_title":"Vendor review","started_at":"2026-09-28T12:00:00.000Z","ended_at":null,"event_id":null,"event":null}}"#, ts: "2026-09-28T12:00:0\(i).000Z")
     }
     let group = MeetingGroup(id: "mtg-7", parts: parts)
     return GroupAnswering(group, store: stores(transport).0, assistantName: assistantName, hold: hold)
@@ -664,7 +664,7 @@ private func meeting(_ transport: AnswerConsole, hold: @escaping @Sendable (Time
         // the console refuses part 2 the first time, and part 4 goes stale
         if call.path == "/api/proposals/2" && n <= 5 { return AnswerConsole.refusal(503, #"{"error":{"code":"not_available","message":"no vault bridge in this deployment"}}"#) }
         if call.path == "/api/proposals/4" && n <= 5 {
-            return AnswerConsole.refusal(409, #"{"error":{"code":"conflict","message":"changed"},"reason":"stale","proposal":{"id":"4","ts":"2026-09-28T12:00:04.000Z","kind":"knowledge","payload":{"title":"To-do 4, reworded","meeting":"Vendor review"},"decision":"pending","changed_at":"2026-09-28T12:40:00.000Z"}}"#)
+            return AnswerConsole.refusal(409, #"{"error":{"code":"conflict","message":"changed"},"reason":"stale","proposal":{"id":"4","ts":"2026-09-28T12:00:04.000Z","kind":"knowledge","payload":{"title":"To-do 4, reworded","meeting":{"session_id":"20260928-120000-00ab","session_title":"Vendor review","started_at":"2026-09-28T12:00:00.000Z","ended_at":null,"event_id":null,"event":null}},"decision":"pending","changed_at":"2026-09-28T12:40:00.000Z"}}"#)
         }
         return AnswerConsole.ok()
     }
@@ -756,4 +756,15 @@ private let bodiesDirectory = URL(fileURLWithPath: #filePath)
     #expect(blank.groupID == nil)
     let missing = try JSONDecoder().decode(RequestRow.self, from: Data(#"{"id": 2, "kind": "knowledge"}"#.utf8))
     #expect(missing.groupID == nil, "a console older than T8-7")
+}
+
+@Test func aMeetingIsNamedByTheTitleInboxDrainWritesInTheNestedMeeting() throws {
+    // collectors/inbox-drain/run.ts: `meeting` is an object; `session_title` is the
+    // calendar event's title when there is one, else the recorder's.
+    let payload = #"{"title":"Send Kessler the scope","meeting":{"session_id":"20260928-120000-00ab","session_title":"Kessler kickoff","started_at":"2026-09-28T12:00:00.000Z","ended_at":null,"event_id":"ev-1","event":{"event_id":"ev-1","title":"Kessler kickoff"}}}"#
+    let part = try requestRow(1, "knowledge", payload: payload, group: "meeting:20260928-120000-00ab")
+    #expect(MeetingGroup(id: "g", parts: [part]).title(assistantName: assistantName) == "Kessler kickoff")
+    // a part without it is named by what it asks
+    let bare = try requestRow(2, "knowledge", payload: #"{"title":"Book the call"}"#)
+    #expect(MeetingGroup(id: "g", parts: [bare]).title(assistantName: assistantName) == "Book the call")
 }

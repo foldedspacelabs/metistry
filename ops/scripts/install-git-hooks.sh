@@ -1,6 +1,8 @@
 #!/bin/sh
 # Install repo git hooks into the current checkout (worktrees included —
 # hooks live in the shared git dir, so one install covers every worktree).
+# Every file in ops/git-hooks/ is copied (pre-push, commit-msg): re-run after
+# a hook changes — the installed file is a copy.
 set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)

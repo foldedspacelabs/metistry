@@ -648,6 +648,10 @@ audit row (`auth` · `enroll` or `login`, `ok: false`, with the reason).
 
 ## Adding a phone: enrolment codes
 
+The owner's walk-through — the Mac's sheet, the phone's steps, each refusal and
+its fix, and removing a device — is [phone.md](phone.md); this section is the
+mechanism under it.
+
 A device's first passkey is created against a **one-time enrolment code**:
 `POST /auth/enroll/start` checks it without spending it, `POST
 /auth/enroll/finish` spends it as the passkey is stored. A code is 16 random

@@ -117,7 +117,7 @@ public enum AddPhoneWords {
     public static func mustOpen(_ host: String) -> String { "Your phone must be able to open \(host)." }
     public static func added(_ label: String) -> String { "“\(label)” was added" }
     public static let addedNote = "Your phone has its own passkey now. It signs in with Face ID, and you can remove it from Devices anytime."
-    /// The phone guide (X-79 writes it; the website's Docs render this repo's markdown).
+    /// The phone guide, `docs/ops/phone.md` (the website's Docs render this repo's markdown).
     public static let guideURL = URL(string: "https://github.com/foldedspacelabs/metistry/blob/main/docs/ops/phone.md")!
     /// What the sheet runs, said where it runs.
     public static let mintCommand = "metistry enroll --json"

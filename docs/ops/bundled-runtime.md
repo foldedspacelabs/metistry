@@ -36,6 +36,9 @@ runtime/
   llamacpp/
     bin/llama-server    one static, Metal-enabled binary (~11 MB)
     LICENSE             llama.cpp's MIT licence, as shipped
+  remote/               PROVIDER TOOL PACKS — not part of this asset; each is
+    <tool>/             its own release asset, fetched only when the owner
+                        picks that provider (below, "Provider tool packs")
 ```
 
 `packages/cli/src/postgres.ts` resolves `<product>/runtime/postgres/bin` as
@@ -168,7 +171,10 @@ A tree that only works where it was compiled is not a bundled runtime.
 ## Signing
 
 Set `METISTRY_SIGN_IDENTITY` and every Mach-O in `runtime/` — found with
-`file`, so a shell script in `bin/` is never touched — is signed:
+`file`, so a shell script in `bin/` is never touched — is signed. The rule
+is one function, `sign_machos` in `ops/release/pack-lib.sh`, sourced by this
+build and by the provider tool packs' (`build-remote-packs.sh`), so the two
+cannot drift:
 
 ```sh
 codesign --force --options runtime --timestamp \
@@ -180,7 +186,10 @@ codesign --force --options runtime --timestamp \
 Stripping happens **before** signing, because stripping invalidates a
 signature. Unset, signing is skipped with a notice and the build still
 succeeds. A `codesign` that actually fails is a build failure; a missing
-identity never is.
+identity never is. After signing, `verify_signed` (the same file) reads
+`codesign -dvv` on **every** Mach-O and fails the build unless each carries
+the identity's `TeamIdentifier`, the `runtime` flag and a `Timestamp=` — the
+three facts the DMG audit demands of what it embeds.
 
 **Entitlements are carried over, minus `get-task-allow`.** Node's official
 binary is signed with the hardened runtime plus `allow-jit`,
@@ -265,6 +274,71 @@ this existed) is a note, not a failure.
 
 `METISTRY_RUNTIME_DEPS=0` keeps both paths off the network entirely.
 
+## Provider tool packs — `runtime/remote/<tool>/`
+
+The owner's choice of how a phone reaches the Mac (plan §2.23, ruled
+2026-09-30; `docs/ops/remote-access.md`) may need a tool: Tailscale's
+`tailscaled` + `tailscale`, Cloudflare's `cloudflared`, the zrok CLI. The
+owner ruled that Metistry may bundle or install them — and X-112 built it as
+**one pack per tool, one release asset each, fetched only when the owner
+picks that provider.** Nothing from them is in the DMG or in the deps pack
+above; a fresh install has no `runtime/remote/` at all.
+
+```
+runtime/remote/<tool>/
+  manifest.json     tool, version, target, built_at, signed, origin,
+                    source_sha256, license, and a sha256 per Mach-O
+  .release          the product release the pack came from
+  LICENSE           the tool's own licence, as upstream ships it
+  bin/…             tailscaled + tailscale · cloudflared · zrok (or zrok2)
+```
+
+| tool | pinned as | how it is obtained |
+| --- | --- | --- |
+| Tailscale | `TAILSCALE_VERSION` / `TAILSCALE_SHA256`, and `TAILSCALE_GO_TOOLCHAIN` | `tailscaled` and `tailscale` built with `go build` from the pinned tag's source archive (BSD-3); the version stamped in with the two `-X tailscale.com/version.*Stamp` flags `build_dist.sh` uses, `-w -s` as its `--strip`. The archive's `VERSION.txt` must equal the pin. The Go toolchain is **pinned** (`GOTOOLCHAIN=$TAILSCALE_GO_TOOLCHAIN`): the go command fetches exactly that release, verified against the Go checksum database, so the build does not float with the runner image. Bumping Tailscale means re-reading its `go.mod` and moving this pin. |
+| cloudflared | `CLOUDFLARED_VERSION` / `CLOUDFLARED_SHA256` (+ `_LICENSE_SHA256`) | the official `cloudflared-darwin-arm64.tgz` (Apache-2.0), **cross-checked against the digest GitHub publishes for that release asset**, then **re-signed** — the upstream macOS binary is not reliably notarized. Upstream tags are `YYYY.M.N`. |
+| zrok | `ZROK_VERSION` / `ZROK_SHA256` (+ `_LICENSE_SHA256`) | `zrok_<version>_darwin_arm64.tar.gz` (Apache-2.0), cross-checked against the release's own `checksums.sha256.txt`, re-signed. Whatever name the tarball uses (`zrok`, or `zrok2`) is kept; an adapter reads the manifest's `binaries`. |
+
+`ops/release/build-remote-packs.sh [<outdir>] [--only <tool>]` builds the
+three trees (macOS arm64, `go` for Tailscale), verifies each from a **moved
+copy** (`tailscale version`, `cloudflared --version`, `zrok version` print
+the pin), signs every Mach-O as `com.foldedspacelabs.metistry.remote.<name>`
+with the rule above and runs `verify_signed` over the result, then writes
+each manifest. The `remote-packs (darwin-arm64)` release job packs each tree
+as `metistry-remote-<tool>-<version>-darwin-arm64.tar.gz` — a single
+top-level `remote/<tool>/` — and `publish` is gated on it like
+`runtime-deps`, with `checksums.txt` covering every pack.
+
+**How a pack reaches a Mac** (`packages/cli/src/runtime-deps.ts`,
+`installRemotePack`; the adapter-facing API is
+`packages/cli/src/remote/packs.ts`):
+
+1. **`metistry remote set <provider>`** — the adapter's `configure` calls
+   `ensureRemotePack(ctx, tool)`. Resolve the release, download
+   `checksums.txt` and the one asset, verify the sha256; list the tarball
+   (`tar -tzf`) and refuse any entry that is absolute, has a `..` segment or
+   lies outside `remote/<tool>/` — decided here, not left to tar's defaults;
+   unpack **beside** the tree; then verify the pack's **own** manifest — it
+   names this tool, and every Mach-O it lists hashes to what it records;
+   only then swap it into `runtime/remote/<tool>/` and write `.release`. A checksum mismatch or
+   a tampered pack throws, `configure` fails, the record is not written and
+   `runtime/remote/` is byte-for-byte as it was. A pack from an **older**
+   release than the one installed is refused (an old release could carry a
+   tool with a published flaw) unless forced.
+2. **`metistry update`** moves forward every pack that is **already** under
+   `runtime/remote/` to the release it installed, through the same code —
+   and fetches none that is not there. A deps-pack unpack and a seed copy
+   (`metistry runtime install`) both carry `runtime/remote/` across —
+   stepped aside into `.runtime-remote-keep`, brought back after, and
+   **restored first** on the next run if an earlier one crashed between the
+   two renames (a tool fetched since is not clobbered).
+3. **`METISTRY_RUNTIME_DEPS=0`** keeps this off the network too: the pack
+   API reports it and the adapter names the manual install instead.
+
+A provider the owner did not pick fetches nothing — `remote set none`, a
+preview, an `update` on an install with no pack reach for no asset. Tests:
+`packages/cli/test/remote-packs.test.ts`.
+
 ## What is NOT in here
 
 - **The Claude Code CLI** — a collaborator, not a component: it reaches
@@ -272,7 +346,11 @@ this existed) is a note, not a failure.
   (`plugins/claude-code/`). Nothing in the product depends on it.
 - **The Swift TCC helpers** (`ek-helper`, `afm-helper`) — they ship in the
   product runtime pack, Developer ID signed by their own build scripts.
-- **Ollama** and **Tailscale** — optional, offered in-app, degrade absent.
+- **Ollama** — optional, offered in-app, degrades absent.
+- **ngrok** — its terms do not allow redistributing the agent; the adapter
+  uses the owner's own install (plan §2.23).
+- **The provider tools** are not in *this* asset either: each is its own
+  pack, above.
 
 ## A Postgres major upgrade
 

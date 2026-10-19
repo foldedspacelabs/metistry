@@ -101,9 +101,14 @@ describe("one asset name, three files", () => {
     expect(major).toBeGreaterThanOrEqual(Number(/>=(\d+)/.exec(JSON.parse(repoFile("package.json")).engines.node)![1]));
     const script = repoFile("ops/release/build-runtime-deps.sh");
     for (const bin of ["initdb", "pg_ctl", "psql", "pg_dump", "pg_restore", "pg_isready"]) expect(script).toContain(bin);
-    expect(script).toContain("com.foldedspacelabs.metistry.runtime.");
-    expect(script).toContain("--options runtime");
-    expect(script).toContain("--timestamp");
+    // the signing rule lives in pack-lib.sh, shared with the provider tool
+    // packs (X-112); this script names its identifier prefix and sources it
+    const lib = repoFile("ops/release/pack-lib.sh");
+    expect(script).toContain('. "$root/ops/release/pack-lib.sh"');
+    expect(script).toContain('sign_machos "$out" "com.foldedspacelabs.metistry.runtime"');
+    expect(lib).toContain('--identifier "$prefix.$name"');
+    expect(lib).toContain("--options runtime");
+    expect(lib).toContain("--timestamp");
     // a missing identity must never fail the build
     expect(script).toContain('if [ -z "$id" ]; then');
   });

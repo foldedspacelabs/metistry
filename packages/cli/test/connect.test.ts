@@ -652,9 +652,18 @@ describe("connect claude-code", () => {
     const c = fakeConsole();
     const r = await connect({ tool: "claude-code", ...base(home, instanceDir, cl.exec, c.fetchFn) });
     expect(r).toMatchObject({ token: "keychain", config_state: "manual" });
-    expect(r.config_note).toContain("claude mcp add refused: Error: MCP config is locked");
-    expect(renderConnect(r)).toContain("NOT changed — claude mcp add refused");
+    expect(r.config_note).toContain("claude mcp add failed: Error: MCP config is locked");
+    expect(renderConnect(r)).toContain("NOT changed — claude mcp add failed");
     expect(cl.sec.store.size).toBe(1);
+  });
+
+  it("a `claude` that times out (no output at all) is named as a timeout, not as an empty refusal", async () => {
+    const { home, instanceDir } = await scratch();
+    const sec = fakeSecurity();
+    const exec: Exec = async (cmd, argv, opts) => (cmd === "security" ? sec.exec(cmd, argv, opts) : { code: 1, stdout: "", stderr: "" });
+    const r = await connect({ tool: "claude-code", ...base(home, instanceDir, exec, fakeConsole().fetchFn) });
+    expect(r.config_state).toBe("manual");
+    expect(r.config_note).toBe("claude mcp add failed: no output — it probably timed out");
   });
 
   it("a namespaced second instance gets its own server name and variable", async () => {
@@ -692,13 +701,13 @@ describe("the harness registry (Hindsight Q2): every entry passes the same confo
       const second = await connect({ tool, rotate: true, ...base(home, instanceDir, cl.exec, c.fetchFn) });
       const bearers = [...cl.sec.store.values(), first.paste?.bearer, second.paste?.bearer].filter((v): v is string => typeof v === "string" && v !== "");
       expect(bearers.length).toBeGreaterThan(0);
-      const files = tree(home);
+      const files = { ...tree(home), ...tree(instanceDir, "instance/") };
       for (const bearer of bearers) {
         const raw = bearer.replace(/^Bearer /, "");
         for (const [name, body] of Object.entries(files)) expect(body, `${name} must not hold the bearer`).not.toContain(raw);
         expect(JSON.stringify(cl.calls.map((x) => x.argv)), "argv is what ps shows").not.toContain(raw);
         // what is printed: only a paste tool's (Devin's) bearer, on the run that minted it, is ever shown
-        if (!first.paste) for (const r of [first, second]) expect(renderConnect(r)).not.toContain(raw);
+        if (!first.paste) for (const r of [first, second]) expect(renderConnect(r) + JSON.stringify(r)).not.toContain(raw);
       }
       // a config names the bearer by variable, so a reader of the file learns where the secret is, never what it is
       if (cfg) expect(Object.values(files).some((t) => t.includes(first.token_var!))).toBe(true);

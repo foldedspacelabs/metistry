@@ -642,7 +642,8 @@ async function runClaude(ctx: HarnessCtx, args: string[]): Promise<{ code: numbe
   return undefined;
 }
 
-const claudeFirstLine = (r: { stderr: string; stdout: string }): string => (r.stderr.trim() || r.stdout.trim()).split("\n")[0] ?? "";
+/** What `claude` said, first line; with nothing said (exec.ts kills a command at its timeout and returns no output) the likeliest reason is the clock. */
+const claudeFirstLine = (r: { stderr: string; stdout: string }): string => (r.stderr.trim() || r.stdout.trim()).split("\n")[0] || "no output — it probably timed out";
 
 async function writeClaudeConfig(ctx: HarnessCtx): Promise<ConfigWrite> {
   const file = claudeConfigFile(ctx.home, ctx.env);
@@ -658,11 +659,11 @@ async function writeClaudeConfig(ctx: HarnessCtx): Promise<ConfigWrite> {
   if (have) {
     const rm1 = await runClaude(ctx, ["mcp", "remove", "--scope", "user", ctx.key]);
     if (rm1 === undefined) return { state: "manual", manual };
-    if (rm1.code !== 0) return { state: "manual", manual, note: `claude mcp remove refused: ${claudeFirstLine(rm1)}` };
+    if (rm1.code !== 0) return { state: "manual", manual, note: `claude mcp remove failed: ${claudeFirstLine(rm1)}` };
   }
   const r = await runClaude(ctx, ["mcp", "add", "--scope", "user", "--transport", "http", ctx.key, ctx.mcpUrl, "--header", `Authorization: Bearer \${${ctx.varName}}`]);
   if (r === undefined) return { state: "manual", manual };
-  if (r.code !== 0) return { state: "manual", manual, note: `claude mcp add refused: ${claudeFirstLine(r)}` };
+  if (r.code !== 0) return { state: "manual", manual, note: `claude mcp add failed: ${claudeFirstLine(r)}` };
   return { state: "written" };
 }
 
@@ -681,7 +682,7 @@ async function removeClaudeConfig(ctx: HarnessCtx): Promise<ConfigRemoval> {
   const line = `claude mcp remove --scope user ${ctx.key}`;
   const r = await runClaude(ctx, ["mcp", "remove", "--scope", "user", ctx.key]);
   if (r === undefined) throw new Error(`\`claude\` is not on this machine's PATH, so ${file} was not changed — run \`${line}\``);
-  if (r.code !== 0) throw new Error(`\`${line}\` refused (${claudeFirstLine(r)}) — ${file} was not changed`);
+  if (r.code !== 0) throw new Error(`\`${line}\` failed (${claudeFirstLine(r)}) — ${file} was not changed`);
   return "removed-by-tool";
 }
 

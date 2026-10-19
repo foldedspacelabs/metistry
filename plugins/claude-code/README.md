@@ -45,8 +45,11 @@ the token it returns once. Captures then carry the agent's id as
 *which* agent said what, revoke or rotate that one credential without
 touching anything else, and grant it project membership or a knowledge
 read tier later. The same token also mounts the instance's `mcp-brain`
-surface in Claude Code (`claude mcp add --transport http metistry
-https://<origin>/mcp --header "Authorization: Bearer <token>"`), which
+surface in Claude Code. `metistry connect claude-code` registers it (and
+mints the token); by hand it is `claude mcp add --scope user --transport http
+metistry https://<origin>/mcp --header 'Authorization: Bearer
+${METISTRY_AGENT_TOKEN_CLAUDE_CODE}'` — single-quoted, so Claude Code expands
+the variable when it starts and the token is never written to a file. It
 adds `report`, the shared task list, and scoped knowledge search to the
 session — see `packages/mcp-brain/README.md`.
 

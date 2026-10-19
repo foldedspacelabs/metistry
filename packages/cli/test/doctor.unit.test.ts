@@ -47,6 +47,9 @@ async function checkout(opts: { brokenManifests?: boolean } = {}): Promise<strin
   await put("package.json", JSON.stringify({ name: "metistry" }));
   await put("seed/identity.yaml", "name: Seed\n");
   await put("collectors/good/manifest.yaml", "schema: 1\nname: good\ntype: collector\nschedule: '@hourly'\nwrites: [t]\n");
+  // its compiled entry — doctor asks every collector its own check() (X-87)
+  await put("collectors/package.json", JSON.stringify({ type: "module" }));
+  await put("collectors/dist/good/run.js", "export async function check() { return { name: 'good', status: 'ok', latency_ms: 1, probe: 'canned' }; }\n");
   await put("packages/mcp-x/manifest.yaml", "name: x\ntype: bridge\ntransport: http\nport: 7901\nruns_on: host\nexposes: [{name: a}]\n");
   await put("packages/mcp-y/manifest.yaml", "name: y\ntype: bridge\ntransport: http\nport: 7902\nruns_on: host\nexposes: [{name: a}]\n");
   await put("apps/console/manifest.yaml", "name: console\ntype: service\nruns_on: container\nport: 8080\n");

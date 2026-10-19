@@ -46,8 +46,11 @@ type Verdict = Pick<CheckResult, "status" | "remediation" | "meta">;
 
 /** How a refusal reads as a verdict: missing-here is `absent`, everything else `failed`. */
 function refusalVerdict(err: ConnectionRefused | EgressRefused): Verdict {
+  // `meta.refused` is the refusal's own code, so a reader that must tell "this
+  // kind of connection is not dialled here" (`not_built`) from "missing here"
+  // reads a field, never the sentence (a collector's check(), X-87).
   if (err instanceof EgressRefused) {
-    return { status: err.code === "missing_secret" ? "absent" : "failed", remediation: err.message };
+    return { status: err.code === "missing_secret" ? "absent" : "failed", remediation: err.message, meta: { refused: err.code } };
   }
   const absent =
     err.code === "not_built" ||
@@ -55,7 +58,7 @@ function refusalVerdict(err: ConnectionRefused | EgressRefused): Verdict {
     err.code === "runs_elsewhere" ||
     err.code === "variable" ||
     (err.code === "secret" && /no item in this instance/.test(err.message));
-  return { status: absent ? "absent" : "failed", remediation: err.message };
+  return { status: absent ? "absent" : "failed", remediation: err.message, meta: { refused: err.code } };
 }
 
 function describeReach(catalog: ConnectionCatalog, name: string): string {

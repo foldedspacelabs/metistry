@@ -10,6 +10,8 @@
 // already carry, and renaming them would be a migration with no benefit to
 // the reader. Nothing here names a plan or a login.
 
+import { runCheck, type CheckResult } from "@foldedspacelabs/metistry-core";
+
 export interface Db {
   query(text: string, values?: unknown[]): Promise<{ rows: any[] }>;
 }
@@ -21,6 +23,21 @@ export interface ClaudeUsageCtx {
 
 const NAMES = ["claude.tokens_in", "claude.tokens_out", "claude.cost_usd", "claude.cache_read", "claude.cache_write"] as const;
 const isoDay = (d: Date) => d.toISOString().slice(0, 10);
+
+/**
+ * Behavioral probe (X-87): there is nothing to configure — it reads the
+ * `runs` rows the assistant already writes, with no credential and no network
+ * — so the probe is that read, when a database handle is given (a check run
+ * with none, `metistry doctor` without a database, has nothing to attempt and
+ * says so). The database's own row is where an unreachable database is found.
+ */
+export async function check(ctx: { db?: Db | undefined } = {}): Promise<CheckResult> {
+  return runCheck("claude-usage", "SELECT count(*) FROM runs WHERE kind = 'turn' (the rows this rolls up; no credential, no network)", async () => {
+    if (!ctx.db) return { meta: { read: false } };
+    const { rows } = await ctx.db.query("SELECT count(*) AS turns FROM runs WHERE kind = 'turn' AND component = 'assistant'");
+    return { meta: { read: true, turns: Number(rows[0]?.turns ?? 0) } };
+  });
+}
 
 /** One pass. Returns metric rows written. */
 export async function run(db: Db, ctx: ClaudeUsageCtx = {}): Promise<number> {

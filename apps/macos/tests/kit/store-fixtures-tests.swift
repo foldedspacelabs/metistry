@@ -675,21 +675,31 @@ func everyStoreMethodSpeaksItsRouteOverTheSessionTransport() async throws {
     // production wiring: the session child, the gate, the stores
     let session = ConsoleSession(cli: cli, spawner: FixtureSpawner(child: child))
     let byStem = Dictionary(uniqueKeysWithValues: console.fixtures.map { ($0.stem, $0) })
+    let driven = requirements.compactMap { r -> (Requirement, ConsoleFixture, Drive)? in
+        guard r.route != "GET /api/events", let fixture = byStem[stem(r.route)], let drive = drives[r.route] else { return nil }
+        return (r, fixture, drive)
+    }
 
-    for r in requirements where r.route != "GET /api/events" {
-        guard let fixture = byStem[stem(r.route)], let drive = drives[r.route] else { continue }
-        child.clear()
-        if case .failure(let error) = await drive(session.stores, Args(fixture)) {
-            Issue.record("\(r) over the session: \(error.localizedDescription)")
+    // Every method at once, and the answers gathered off the main actor —
+    // see `driveAll`. A line is matched to its route by content, which is sound
+    // because no two fixtures share a method and a path (query included); the
+    // total says no method wrote a line that matched nothing.
+    child.clear()
+    for (r, error) in await driveAll(driven, session.stores) {
+        Issue.record("\(r) over the session: \(error.localizedDescription)")
+    }
+    let lines = child.sent
+    #expect(lines.count == driven.count, "\(driven.count) methods wrote \(lines.count) request lines; a store method is one route")
+    for (r, fixture, _) in driven {
+        let matching = lines.filter { line in
+            let path = line["path"] as? String ?? ""
+            return line["method"] as? String == fixture.method
+                && path.split(separator: "?").first == fixture.path.split(separator: "?").first
+                && ConsoleFixture.query(of: path) == fixture.query
         }
-        let lines = child.sent
-        guard lines.count == 1, let line = lines.first else {
-            Issue.record("\(r) wrote \(lines.count) request lines; a store method is one route"); continue
+        guard matching.count == 1, let line = matching.first else {
+            Issue.record("\(r): \(matching.count) request lines spoke \(fixture.method) \(fixture.path); a store method is one route"); continue
         }
-        let path = line["path"] as? String ?? ""
-        #expect(line["method"] as? String == fixture.method, "\(r)")
-        #expect(path.split(separator: "?").first == fixture.path.split(separator: "?").first, "\(r): sent \(path)")
-        #expect(ConsoleFixture.query(of: path) == fixture.query, "\(r): query")
         let body = try line["body"].map { try JSONValue.parse(JSONSerialization.data(withJSONObject: $0, options: [.fragmentsAllowed])) }
         #expect(body == fixture.body, "\(r): the body on the line is not the body the console accepted")
         #expect(line["idempotency_key"] as? String == fixture.idempotencyKey, "\(r): Idempotency-Key")
@@ -717,6 +727,33 @@ func everyStoreMethodSpeaksItsRouteOverTheSessionTransport() async throws {
     let many = try RunExport(ndjson: Data("{\"id\":1}\n{\"id\":2}\n".utf8))
     #expect(many.rows.count == 2)
     #expect(throws: (any Error).self) { try RunExport(ndjson: Data("{\"id\":1}\nnot json\n".utf8)) }
+}
+
+/// Drives every method at once and answers the failures, in one return to the
+/// caller. Nonisolated on purpose. The test is main-actor bound, and `swift
+/// test` runs it beside some 480 other main-actor tests dispatched at the same
+/// moment, so every `await` that comes back to the main actor waits its turn
+/// behind all of their work — on CI's three-core runner, a third of a second
+/// to a second each. The sequential walk this replaces was three such turns
+/// per route, ~300 in all: 45–55 s against a 60 s limit for a test that takes
+/// 0.1 s alone. Driving the routes concurrently brought the calls down to a
+/// handful of turns, and then draining the group from the main actor put them
+/// back — `next()` is a nonisolated async call, one round trip per result. From
+/// the generic executor the group's hops are cheap, and the caller pays once.
+private nonisolated func driveAll(_ driven: [(Requirement, ConsoleFixture, Drive)], _ stores: ConsoleStores) async -> [(Requirement, ConsoleError)] {
+    await withTaskGroup(of: (Requirement, ConsoleError?).self) { group in
+        for (r, fixture, drive) in driven {
+            group.addTask {
+                if case .failure(let error) = await drive(stores, Args(fixture)) { return (r, error) }
+                return (r, nil)
+            }
+        }
+        var failures: [(Requirement, ConsoleError)] = []
+        for await (r, error) in group {
+            if let error { failures.append((r, error)) }
+        }
+        return failures
+    }
 }
 
 /// A runner for a session whose every request goes down the child: running anything else is the bug.

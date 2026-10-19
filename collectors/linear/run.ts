@@ -33,7 +33,7 @@
 // refuses) fails the run with the reason — redacted, because everything the
 // door returns already is.
 
-import { RESOLVED_AT_SOURCE, lastMirror, raiseMirror, resolveAtSource } from "@foldedspacelabs/metistry-core";
+import { RESOLVED_AT_SOURCE, lastMirror, raiseMirror, resolveAtSource, type CheckResult } from "@foldedspacelabs/metistry-core";
 import {
   LINEAR_CLOSED_STATE_TYPES,
   LINEAR_MODULE,
@@ -45,6 +45,7 @@ import {
   type LinearIssue,
   type SyncOpener,
 } from "@foldedspacelabs/metistry-connections";
+import { syncConnectionCheck, type CheckExtras } from "../check-context.js";
 
 export interface Db {
   query(text: string, values?: unknown[]): Promise<{ rows: any[] }>;
@@ -127,6 +128,23 @@ export function closedReason(now: LinearIssue | undefined): string | null {
   if (LINEAR_CLOSED_STATE_TYPES.includes(now.state.type)) return now.state.type;
   if (!now.assignedToMe) return "unassigned";
   return null;
+}
+
+/**
+ * Behavioral probe (X-87): the Linear connection resolves (the API key
+ * delivered, pinned to api.linear.app) and, when doctor hands in the shared
+ * connection check, still answers. Reads no issues.
+ */
+export async function check(ctx: LinearCtx & CheckExtras = {}): Promise<CheckResult> {
+  const { openSync } = ctx;
+  return syncConnectionCheck({
+    name: COMPONENT,
+    probe: "the Linear connection opens (API key delivered, pinned to api.linear.app) and answers the shared connection check",
+    noInstance: "no instance to read a connection from (METISTRY_INSTANCE_DIR is unset) — the sync reads the Linear connection of an instance; degrades absent",
+    addHint: "`metistry connections add` a linear connection (docs/ops/connections.md, Linear)",
+    open: openSync ? () => openSync({ sync: LINEAR_SYNC, origin: LINEAR_ORIGIN, module: LINEAR_MODULE }) : undefined,
+    extras: ctx,
+  });
 }
 
 /** One reconcile pass. Returns rows upserted + closed. */

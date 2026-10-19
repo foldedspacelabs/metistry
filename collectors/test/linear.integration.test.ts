@@ -320,7 +320,10 @@ describe("no sync path writes a vault file — by construction", () => {
     for (const file of ["run.ts", "complete.ts"]) {
       const src = readFileSync(fileURLToPath(new URL(`../linear/${file}`, import.meta.url)), "utf8");
       const imports = [...src.matchAll(/^import\s[\s\S]*?from\s+"([^"]+)";/gm)].map((m) => m[1]);
-      expect(imports.every((i) => ["@foldedspacelabs/metistry-core", "@foldedspacelabs/metistry-connections", "./run.js"].includes(i!)), `${file}: ${imports.join(", ")}`).toBe(true);
+      expect(imports.every((i) => ["@foldedspacelabs/metistry-core", "@foldedspacelabs/metistry-connections", "./run.js", "../check-context.js"].includes(i!)), `${file}: ${imports.join(", ")}`).toBe(true);
     }
+    // the one shared module it may now reach (its check(), X-87) imports core and nothing else
+    const shared = readFileSync(fileURLToPath(new URL("../check-context.ts", import.meta.url)), "utf8");
+    expect([...shared.matchAll(/^import\s[\s\S]*?from\s+"([^"]+)";/gm)].map((m) => m[1])).toEqual(["@foldedspacelabs/metistry-core"]);
   });
 });

@@ -5,6 +5,7 @@
 // per run (CE bills $0.01/request). Degrades absent without credentials.
 import type { AwsCredentials } from "./sigv4.js";
 import { signV4 } from "./sigv4.js";
+import { runCheck, type CheckResult } from "@foldedspacelabs/metistry-core";
 
 export interface Db {
   query(text: string, values?: unknown[]): Promise<{ rows: any[] }>;
@@ -60,6 +61,24 @@ export async function fetchCosts(ctx: AwsCostsCtx, start: string, end: string): 
   });
   if (!res.ok) throw new Error(`cost explorer: HTTP ${res.status} ${(await res.text()).slice(0, 200)}`);
   return (await res.json()) as CeResponse;
+}
+
+/**
+ * Behavioral probe (X-87): the AWS credential pair is present. That is ALL it
+ * asks — Cost Explorer bills a cent for every request, so a health probe that
+ * called it would spend money on every `metistry doctor`. A pair that is set
+ * and wrong is found by the run, which says so; nothing is dialled here.
+ */
+export async function check(ctx: AwsCostsCtx = {}): Promise<CheckResult> {
+  return runCheck("aws-costs", "METISTRY_AWS_ACCESS_KEY_ID and METISTRY_AWS_SECRET_ACCESS_KEY are both set (Cost Explorer is never called: it bills per request)", async () => {
+    if (!ctx.aws?.accessKeyId || !ctx.aws.secretAccessKey) {
+      return {
+        status: "absent" as const,
+        remediation: "set METISTRY_AWS_ACCESS_KEY_ID and METISTRY_AWS_SECRET_ACCESS_KEY (an IAM key with ce:GetCostAndUsage) in .env — no AWS cost series is recorded meanwhile (degrades absent)",
+      };
+    }
+    return { status: "ok" as const, meta: { session_token: Boolean(ctx.aws.sessionToken), window_days: ctx.awsCostDays ?? 3 } };
+  });
 }
 
 /** One pass. Returns metric rows written. */

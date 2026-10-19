@@ -203,7 +203,7 @@ import Testing
 }
 
 @MainActor
-@Test(.timeLimit(.minutes(1)))
+@Test(.timeLimit(.minutes(2)))
 func aWorkingTurnIsWatchedOffScreenUntilItsMessageSaysDone() async throws {
     let console = ChatConsole(messages: [ChatConsole.message(7, .yours, "what changed?", at: 0, status: "processing")])
     let session = ConsoleSession(transport: console, management: nil)
@@ -227,9 +227,17 @@ func aWorkingTurnIsWatchedOffScreenUntilItsMessageSaysDone() async throws {
 // could fail on its own: the watchdog turns a main actor that has not answered
 // for 20 s (other suites share it, and hold it for a second or two at most)
 // into a crash naming the test, rather than a run that never ends.
+//
+// The time limits (here and on the watch test above) are two minutes for the
+// reason live-events-tests.swift gives at length: every tick is a dozen
+// returns to the main actor, each queued behind the ~480 other main-actor
+// tests `swift test` dispatches at the same moment, and on CI's runner these
+// reached 42–54 s in a passing 65 s run. The one thing here that is wall time
+// — the half-second steps the first test takes beside the watch's own one
+// second cadence — is 3 s alone; the rest is the queue.
 
 @MainActor
-@Test(.timeLimit(.minutes(1)))
+@Test(.timeLimit(.minutes(2)))
 func aWorkingTurnFirstSeenByTheScreensClockIsWatchedWithoutSpinning() async throws {
     let console = ChatConsole(messages: [ChatConsole.message(7, .yours, "what changed?", at: 0, status: "processing")])
     let session = ConsoleSession(transport: console, management: nil)
@@ -262,7 +270,7 @@ func aWorkingTurnFirstSeenByTheScreensClockIsWatchedWithoutSpinning() async thro
 }
 
 @MainActor
-@Test(.timeLimit(.minutes(1)))
+@Test(.timeLimit(.minutes(2)))
 func aSendsOwnTickAndTheWatchItStartsTakeTurnsWithoutSpinning() async throws {
     let console = ChatConsole(messages: [])
     let session = ConsoleSession(transport: console, management: nil)
@@ -283,7 +291,7 @@ func aSendsOwnTickAndTheWatchItStartsTakeTurnsWithoutSpinning() async throws {
 }
 
 @MainActor
-@Test(.timeLimit(.minutes(1)))
+@Test(.timeLimit(.minutes(2)))
 func ticksThatPileUpRunOneAfterAnotherAndAllReturn() async throws {
     let console = ChatConsole(messages: [ChatConsole.message(7, .yours, "what changed?", at: 0, status: "processing")])
     let (model, session) = chatModel(console)

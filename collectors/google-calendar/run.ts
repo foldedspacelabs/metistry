@@ -37,6 +37,8 @@ import type { Db } from "../github-state/run.js";
 import { replaceCalendarWindow, saveSyncState, toRow, type CalendarRow } from "../eventkit-calendar/run.js";
 import { SYNC_DAYS, syncWindow } from "../ics-calendar/run.js";
 import { INVITATION_RULE, RSVP_CAPABILITY, reconcileInvitations } from "../invitations.js";
+import { syncConnectionCheck, type CheckExtras } from "../check-context.js";
+import type { CheckResult } from "@foldedspacelabs/metistry-core";
 
 export { SYNC_DAYS };
 
@@ -57,6 +59,24 @@ export interface GoogleCalendarCtx {
   now?: () => number;
   /** the runner's resolved Needs You switches (`syncs.google-calendar.raise`); absent = the manifest's defaults */
   raise?: Readonly<Record<string, boolean>> | undefined;
+}
+
+/**
+ * Behavioral probe (X-87): the Google Calendar connection resolves — the
+ * sign-in's token secret delivered, sent to exactly Google's two hosts — and,
+ * when doctor hands in the shared connection check, still answers. Mints and
+ * reads nothing.
+ */
+export async function check(ctx: GoogleCalendarCtx & CheckExtras = {}): Promise<CheckResult> {
+  const { openSync } = ctx;
+  return syncConnectionCheck({
+    name: COMPONENT,
+    probe: "the Google Calendar connection opens (sign-in delivered, token hosts pinned) and answers the shared connection check",
+    noInstance: "no instance to read a connection from (METISTRY_INSTANCE_DIR is unset) — the sync reads the Google Calendar connection of an instance; degrades absent",
+    addHint: "`metistry connections add` a google-calendar connection and sign in (docs/ops/connections.md, Google Calendar)",
+    open: openSync ? () => openSync({ sync: GOOGLE_CALENDAR_SYNC, origin: GOOGLE_CALENDAR_ORIGIN, module: GOOGLE_CALENDAR_MODULE, tokenHosts: GOOGLE_TOKEN_HOSTS }) : undefined,
+    extras: ctx,
+  });
 }
 
 /** One pass. Returns rows inserted, changed or removed. */

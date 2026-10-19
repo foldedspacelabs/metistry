@@ -44,11 +44,11 @@ jobs:
           if ! git cat-file -e "$base" 2>/dev/null; then echo "macos=true" >> "$GITHUB_OUTPUT"; echo "sandbox=true" >> "$GITHUB_OUTPUT"; exit 0; fi
           changed=$(git diff --name-only "$base" "${{ github.sha }}")
           echo "$changed" | sed 's/^/  /'
-          # packages/*/helper/** and any Package.swift outside apps/macos also
-          # gate this job: it is the one that runs the TCC bridges' Swift
-          # helper tests (see the macos-app job below), so a helper-only PR
+          # packages/*/helper/** and packages/*/Package.swift (anchored: a
+          # Package.swift elsewhere does not) also gate this job: it is the
+          # one that runs the TCC bridges' Swift helper tests (see the macos-app job below), so a helper-only PR
           # still needs the macOS runner even when apps/macos itself is untouched.
-          if echo "$changed" | grep -qE '^(apps/macos/|packages/core/test/held-to-core/|\.github/workflows/ci\.yml|docs/product/design/tokens|ops/scripts/build-design-tokens|packages/[^/]+/helper/|.*Package\.swift$)'; then
+          if echo "$changed" | grep -qE '^(apps/macos/|packages/core/test/held-to-core/|\.github/workflows/ci\.yml|docs/product/design/tokens|ops/scripts/build-design-tokens|packages/[^/]+/helper/|packages/[^/]+/Package\.swift$)'; then
             echo "macos=true" >> "$GITHUB_OUTPUT"
           else
             echo "macos=false" >> "$GITHUB_OUTPUT"

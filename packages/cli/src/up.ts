@@ -1388,9 +1388,9 @@ export async function up(opts: UpOptions): Promise<UpResult> {
     // the loopback origin second, or the loopback origin alone. A hand-set
     // remote origin the file held is superseded and NAMED, never kept silently
     // — and what that costs is said with it, in the same words as the remote
-    // rows (X-105): passkeys bound to the dropped origin stop signing in, and
-    // until a provider adapter ships (X-106) the honest interim is the line
-    // kept in `.env.pre-render`
+    // rows (X-105): passkeys bound to the dropped origin stop signing in, a
+    // remote origin is configured by `metistry remote set <provider>`, and the
+    // dropped line is kept in `.env.pre-render`
     const origins = consoleOrigins(values);
     const derived =
       origins.value !== undefined

@@ -1425,10 +1425,10 @@ the same yaml and Keychain are byte-identical (a test asserts exactly that):
   alone. A remote origin written into the file by hand is superseded, named,
   and kept in `.env.pre-render` — and `up`'s plan and doctor's `env` row say
   what that costs, in the remote rows' own words: the console no longer
-  answers for that origin and **passkeys added at it no longer sign in**, and
-  until a provider adapter ships (Tailscale, X-106) there is no supported way
-  to serve it, so the honest interim is the line kept in `.env.pre-render`
-  and waiting; `metistry remote set <provider>` is how a remote origin is
+  answers for that origin and **passkeys added at it no longer sign in**; a
+  tunnel to the console's main port is not honoured, the dropped line is kept
+  in `.env.pre-render`, and `metistry remote set tailscale` (or another
+  provider; `docs/ops/remote-access.md`) is how a remote origin is
   configured.
 - **from the login Keychain** — every secret-shaped variable this install
   knows (your `.env`, `.env.example`, the last render), from this

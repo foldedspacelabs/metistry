@@ -481,16 +481,16 @@ describe("metistry up derives the instance's .env", () => {
     expect(env.METISTRY_ORIGIN).toBe("http://127.0.0.1:8080");
     const said = lines.join("\n");
     expect(said).toContain("METISTRY_ORIGIN: the file's value is superseded by deployment.yaml `remote:` (`metistry remote set`), which is what is rendered");
-    // …and what that costs, in the remote rows' own words (X-105): the passkeys, and that no provider ships yet
+    // …and what that costs, in the remote rows' own words (X-105): the passkeys, and the one verb that configures a remote origin
     expect(said).toContain("passkeys added at https://mac.example.ts.net no longer sign in");
-    expect(said).toContain("Until a provider adapter ships (Tailscale, X-106)");
+    expect(said).toContain("`metistry remote set tailscale` (or another provider) is how a remote origin is configured");
     expect(await readFile(join(inst, ".metistry", "state", PRE_RENDER_FILENAME), "utf8")).toBe(handSet);
     // doctor says so too — the same words — until the next render finds nothing to supersede
     const row = await envFileRow(inst);
     expect(row.status).toBe("degraded");
     expect(row.remediation).toContain("METISTRY_ORIGIN (now decided by deployment.yaml `remote:` (`metistry remote set`) — METISTRY_ORIGIN in .env also names https://mac.example.ts.net");
     expect(row.remediation).toContain("passkeys added at https://mac.example.ts.net no longer sign in");
-    expect(row.remediation).toContain("X-106");
+    expect(row.remediation).toContain("`metistry remote set tailscale` (or another provider) is how a remote origin is configured");
   });
 });
 

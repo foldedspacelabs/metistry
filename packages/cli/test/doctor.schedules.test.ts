@@ -355,7 +355,7 @@ describe("doctor: schedules", () => {
     const rows = await scheduleRows(broken, await checkout(), {}, NOW);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ status: "degraded" });
-    expect(rows[0]?.remediation).toContain("pnpm db:migrate");
+    expect(rows[0]?.remediation).toContain("the migrations row above is the finding");
   });
 
   it("no schedulable manifests: no section at all", async () => {

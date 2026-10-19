@@ -51,6 +51,7 @@ import { parseRemoteProviderId, remoteAuthorize, remoteSet, remoteStatus, remote
 import { readTextInput, valueInArgvRefusal, type Terminal } from "./stdin-value.js";
 import { EXTENSION_VERBS, extensionsAdd, extensionsList, extensionsRemove, parseExtensionVerb, renderExtensions, type ExtensionsOptions } from "./extensions.js";
 import { doctor, renderTable, type DoctorDeps } from "./doctor.js";
+import { applyFixes, doctorMode, renderCheckTrailer, renderFixes, type DoctorRunDeps, type DoctorRunReport } from "./doctor-fix.js";
 import { VARIABLE_VERBS, parseVariableVerb, renderVariables, variablesList, variablesSet, variablesUnset, type VariablesOptions } from "./variables.js";
 import {
   CONNECTION_VERBS,
@@ -154,7 +155,7 @@ export interface ParsedArgs {
  * `--version <x.y.z>` silently installed the latest release instead
  * (#198, "not fixed here" #2).
  */
-export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "dry-run", "allow-dirty", "no-launchd", "no-compose", "no-color", "skip-build", "skip-migrate", "rollback", "allow-legacy", "yes", "follow", "namespace", "rotate", "list", "remove", "complete", "skip-test", "remote", "json-lines", "stdio", "named", "clear", "no-discover", "no-browser", "plain", "include-config", "no-app", "relaunch", "no-reexec", "token", "use-app", "access"]);
+export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "dry-run", "check", "fix", "allow-dirty", "no-launchd", "no-compose", "no-color", "skip-build", "skip-migrate", "rollback", "allow-legacy", "yes", "follow", "namespace", "rotate", "list", "remove", "complete", "skip-test", "remote", "json-lines", "stdio", "named", "clear", "no-discover", "no-browser", "plain", "include-config", "no-app", "relaunch", "no-reexec", "token", "use-app", "access"]);
 
 /** The §2.14 verbs over owner-named secrets (M7), and the shared scope's migration (T4-3). `list --named` joins them; `sync|mint|list|purge` are the install's own variables. */
 export const NAMED_SECRET_VERBS = new Set(["set", "replace", "remove", "hosts", "grant", "migrate-scope", "purge-shared"]);
@@ -714,9 +715,24 @@ const USAGE = `metistry — Metistry command line
       METISTRY_URL and METISTRY_OWNER_TOKEN come from the environment (.env in
       the checkout) or the login Keychain; neither is ever printed.
 
-  metistry doctor [--json] [--product-dir <checkout>]
+  metistry doctor [--check | --fix [--yes]] [--json] [--product-dir <checkout>]
       Validate every manifest in the checkout and probe every bridge, service,
-      container and launchd job. Exit 0 when nothing is failed.
+      container and launchd job — then REPAIR what it finds. Every row is
+      classified: fixable (doctor does it: restart a service that is down, apply
+      pending migrations under the advisory lock, write the cli shim, re-seed a
+      missing template, re-render the install …), your hand (the row says the
+      exact step: a TCC grant, a credential another service issues, a download),
+      or informational. In a terminal, plain "doctor" applies every fixable
+      row's fix, asks once per fix that moves files or restarts a running
+      service (--yes skips the question; never the default), re-checks ONCE and
+      prints before → after. Without a terminal, plain "doctor" is --check.
+      --check is read-only (what up, update, CI and the Mac app run); --fix
+      repairs without a terminal. Every fix is one of a closed table, runs
+      through the same step runner as "up", and is appended to
+      <instance>/.metistry/state/doctor-fixes.jsonl. A restart is tried once
+      per METISTRY_DOCTOR_RESTART_WINDOW_MIN (30); after that the row is yours,
+      with the log. --json adds "fix" and "fixed" to every row and "fixes[]".
+      Exit 0 when nothing is failed, no fix failed, and none waits for a --yes.
 
   metistry runtime install --from <Metistry.app | .../Contents/Resources/metistry>
                            [--to <dir>] [--force] [--dry-run]
@@ -1056,7 +1072,7 @@ export const HELP_GROUPS: Array<{ title: string; verbs: Array<[string, string]> 
   {
     title: "every day",
     verbs: [
-      ["doctor", "validate every manifest; probe every bridge, service and job"],
+      ["doctor", "probe every bridge, service and job; repair what it finds"],
       ["restart|stop|start [<service>…]", "one service, several, or everything this shape runs"],
       ["logs <service>", "tail one service's log"],
       ["update", "pull, build, migrate under a lock, restart what changed, pin"],
@@ -1126,8 +1142,8 @@ export function renderHelp(ui: Ui = defaultUi()): string {
 export interface MainIo {
   out?: (s: string) => void;
   err?: (s: string) => void;
-  /** test seam: fakes for doctor's fetch/db/exec */
-  doctorDeps?: Partial<DoctorDeps>;
+  /** test seam: fakes for doctor's fetch/db/exec — and for the fixes a repair run applies (doctor-fix.ts) */
+  doctorDeps?: Partial<DoctorRunDeps>;
   /** test seam: the remote-access adapters `remote` and doctor's `remote` rows use (default the ones this release ships) */
   remoteProviders?: RemoteRegistry;
   /** test seam: a pasted provider token, instead of stdin or the hidden prompt */
@@ -2562,19 +2578,44 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
         err("doctor needs a Metistry checkout to walk: pass --product-dir or set METISTRY_PRODUCT_DIR");
         return 2;
       }
+      if (flags.check === true && flags.fix === true) {
+        err("doctor: --check (read-only) and --fix (repair) exclude each other");
+        return 2;
+      }
       loadEnv();
+      const json = flags.json === true;
+      // Who can be asked decides what a bare `doctor` does (doctor-fix.ts): a
+      // person at a terminal gets the repairs and the y/N questions; a pipe, a
+      // script, the Mac app's refresh and `--json` get the read-only check —
+      // `--json` never asks, because the question would land in the document.
+      const ask = json ? undefined : io.ask ?? (process.stdin.isTTY && process.stdout.isTTY ? terminalAsk : undefined);
+      const mode = doctorMode({ check: flags.check === true, fix: flags.fix === true, interactive: ask !== undefined });
       // the probes are the slow part (every bridge over HTTP, launchctl,
       // docker): a TTY gets a spinner, a pipe gets nothing, and neither gets
       // a byte of it in the --json document
-      const probing = flags.json === true ? undefined : ui.spinner(`probing ${productDir}`, out);
+      const probing = json ? undefined : ui.spinner(`probing ${productDir}`, out);
+      let before;
       try {
-        const report = await doctor({ productDir, ...io.doctorDeps });
-        probing?.stop();
-        out(flags.json === true ? JSON.stringify(report, null, 2) : renderTable(report, ui));
-        return report.ok ? 0 : 1;
+        before = await doctor({ productDir, ...io.doctorDeps });
       } finally {
         probing?.stop();
       }
+      if (mode === "check") {
+        const report: DoctorRunReport = { ...before, mode };
+        if (json) out(JSON.stringify(report, null, 2));
+        else {
+          out(renderTable(report, ui));
+          const trailer = renderCheckTrailer(report, ui);
+          if (trailer) out(trailer);
+        }
+        return report.ok ? 0 : 1;
+      }
+      if (!json) out(renderTable(before, ui));
+      const { report, code } = await applyFixes(before, { deps: { productDir, ...io.doctorDeps }, yes: flags.yes === true, ask, out: json ? () => {} : out, ui });
+      if (json) out(JSON.stringify(report, null, 2));
+      else if (report.fixes && report.fixes.length > 0) out(renderFixes(report, ui));
+      else out(ui.dim("nothing to fix"));
+      return code;
     }
     case "runtime": {
       if (positional[0] !== "install") {

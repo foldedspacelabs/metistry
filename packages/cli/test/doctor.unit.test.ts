@@ -201,7 +201,8 @@ describe("doctor: everything healthy", () => {
     expect(text).toMatch(/^\s+\S+\s+local:llamaserver\s+absent\s+\d+ms$/m);
     expect(text).toMatch(/^\s+\S+\s+local:applefm\s+absent\s+\d+ms$/m);
     expect(text).not.toMatch(/launchd:/); // linux: no launchd rows
-    expect(text).toMatch(/^\s+\S+\s+compose\s+absent\s+\d+ms$/m);
+    // docker missing is the owner's to install: the row says so (X-123); an informational absent row (above) carries no marker
+    expect(text).toMatch(/^\s+\S+\s+compose\s+absent\s+\d+ms\s+your hand$/m);
     expect(text).toContain("docker not found");
 
     const json: string[] = [];
@@ -256,7 +257,9 @@ describe("doctor: the console row with the local owner token", () => {
     expect(r.console?.remediation).not.toMatch(/secrets sync/);
     expect(r.console?.remediation).toMatch(/METISTRY_TRUSTED_LOOPBACK_PROXY/);
     expect(r.console?.remediation).not.toContain("owner-token"); // the value never reaches a report
-    expect(r.console?.action).toEqual({ kind: "run_verb", command: ["metistry", "secrets", "sync", "--to", "env"], label: "Sync secrets to .env" });
+    // the button is the fix the sentence names — a restart, so the running console reads .env's value (re-syncing .env changes nothing)
+    expect(r.console?.action).toEqual({ kind: "run_verb", command: ["metistry", "restart", "console"], label: "Restart the console" });
+    expect(r.console?.repair).toEqual({ id: "restart", target: "console", confirm: true, does: expect.stringContaining("metistry restart console") });
   });
 
   it("without the token, a 401 is still a pass — unchanged", async () => {
@@ -402,9 +405,11 @@ describe("doctor: degraded (runs, needs a hand) never fails the exit code", () =
     const r = byName(report.rows);
     expect(report.ok).toBe(true);
     expect(r.x).toMatchObject({ status: "degraded", remediation: "helper lost its TCC grant" });
-    expect(r.migrations).toMatchObject({ status: "degraded", remediation: expect.stringMatching(/1 migration\(s\) not applied \(0002_b\.sql\) — run pnpm db:migrate/) });
+    // never `pnpm db:migrate` (a release install has no pnpm): doctor applies them itself (X-123)
+    expect(r.migrations).toMatchObject({ status: "degraded", remediation: expect.stringMatching(/1 migration\(s\) not applied \(0002_b\.sql\) — `metistry doctor` applies them/) });
     // T4-21: a per-problem action for the Services pane, beside the terminal text
-    expect(r.migrations?.action).toEqual({ kind: "run_verb", command: ["metistry", "update"], label: "Run metistry update" });
+    expect(r.migrations?.action).toEqual({ kind: "run_verb", command: ["metistry", "doctor"], label: "Apply migrations" });
+    expect(r.migrations?.repair).toMatchObject({ id: "migrate", confirm: false });
     expect(r["compose:console"]).toMatchObject({ status: "degraded", remediation: expect.stringMatching(/starting/) });
     expect(renderTable(report)).toMatch(/0 failed/);
   });
@@ -413,7 +418,7 @@ describe("doctor: degraded (runs, needs a hand) never fails the exit code", () =
     const productDir = await checkout();
     const base = { productDir, env, fetchFn: fakeFetch({ "7901/check": res(200, checkBody("ok")), "/health": res(200), "/api/status": res(200) }), exec: fakeExec({ docker: { code: 127 } }), platform: "linux" as const };
     expect(byName((await doctor({ ...base, db: fakeDb(["0001_a.sql", "0002_b.sql", "0003_future.sql"]) })).rows).migrations).toMatchObject({ status: "degraded", remediation: expect.stringMatching(/0003_future\.sql/) });
-    expect(byName((await doctor({ ...base, db: fakeDb("no-table") })).rows).migrations).toMatchObject({ status: "degraded", remediation: expect.stringMatching(/no schema_migrations table.*2 migrations pending/) });
+    expect(byName((await doctor({ ...base, db: fakeDb("no-table") })).rows).migrations).toMatchObject({ status: "degraded", remediation: expect.stringMatching(/no schema_migrations table — 2 migration\(s\) pending; `metistry doctor` applies them/), repair: { id: "migrate" } });
   });
 });
 
@@ -437,7 +442,7 @@ describe("doctor: failed", () => {
     expect(r.x).toMatchObject({ status: "failed", remediation: expect.stringMatching(/x down at http:\/\/127\.0\.0\.1:7901 \(connect ECONNREFUSED.*\) — docker compose up -d x/) });
     expect(r.console).toMatchObject({ status: "failed", remediation: expect.stringMatching(/\/health returned 500/) });
     expect(r.db).toMatchObject({ status: "failed", remediation: expect.stringMatching(/ECONNREFUSED — docker compose up -d db/) });
-    expect(r.migrations).toMatchObject({ status: "absent", remediation: "not checked — db unreachable" });
+    expect(r.migrations).toMatchObject({ status: "absent", remediation: "not checked — db unreachable; follows the db row" });
     expect(r["launchd:com.foldedspacelabs.metistry.a"]).toMatchObject({ status: "failed", remediation: expect.stringMatching(/state = waiting, last exit code 78 — launchctl kickstart -k gui\/\$\(id -u\)\/com\.foldedspacelabs\.metistry\.a/) });
     expect(r["launchd:com.foldedspacelabs.metistry.b"]?.status).toBe("ok");
     expect(r["compose:db"]).toMatchObject({ status: "failed", remediation: expect.stringMatching(/container exited \(Exited \(1\).*\) — docker compose up -d db/) });

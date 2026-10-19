@@ -434,4 +434,31 @@ describe("metistry up derives the instance's .env", () => {
     expect(second.code).toBe(0);
     expect(await readFile(target, "utf8")).toBe(text);
   });
+
+  it("**derives METISTRY_ORIGIN from the remote-access record: a hand-set remote origin is superseded, named, and kept in .env.pre-render — never silently honoured**", async () => {
+    const P = await checkout();
+    const inst = await mkdtemp(join(tmpdir(), "mi-"));
+    await mkdir(join(inst, ".metistry", "state"), { recursive: true });
+    const target = join(inst, ".metistry", "state", ".env");
+    // the owner's second instance today: a remote origin written into .env by hand, beside `remote: none`
+    const handSet = "METISTRY_ORIGIN=https://mac.example.ts.net,http://127.0.0.1:8080\nMETISTRY_DB_PASSWORD=pw\n";
+    await writeFile(target, handSet);
+    // the CLI loads .env into its environment before `up` runs, so `up` sees the hand-set list there too
+    const env = { METISTRY_INSTANCE_DIR: inst, METISTRY_BRIDGE_TOKEN_RECONCILER_USER: "owner-bearer", METISTRY_ORIGIN: "https://mac.example.ts.net,http://127.0.0.1:8080" } as NodeJS.ProcessEnv;
+    const lines: string[] = [];
+    const { exec } = withKeychain();
+    const r = await up({ productDir: P, platform: "darwin", uid: 501, node: NODE, cliShim: false, home: "/h", launchd: false, doctorFn: okDoctor, env, exec, out: (l) => lines.push(l) });
+    expect(r.code).toBe(0);
+    const after = parseDotEnv(await readFile(target, "utf8"));
+    // the record says none, so the file carries the loopback origin alone — and the jobs are rendered from the same value
+    expect(after.METISTRY_ORIGIN).toBe("http://127.0.0.1:8080");
+    expect(env.METISTRY_ORIGIN).toBe("http://127.0.0.1:8080");
+    const said = lines.join("\n");
+    expect(said).toContain("METISTRY_ORIGIN: the file's value is superseded by deployment.yaml `remote:` (`metistry remote set`), which is what is rendered");
+    expect(await readFile(join(inst, ".metistry", "state", PRE_RENDER_FILENAME), "utf8")).toBe(handSet);
+    // doctor says so too, until the next render finds nothing to supersede
+    const row = await envFileRow(inst);
+    expect(row.status).toBe("degraded");
+    expect(row.remediation).toContain("METISTRY_ORIGIN (now decided by deployment.yaml `remote:` (`metistry remote set`))");
+  });
 });

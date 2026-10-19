@@ -1369,9 +1369,13 @@ the same yaml and Keychain are byte-identical (a test asserts exactly that):
 - **derived from `.metistry/*.yaml`** — what the instance's yaml decides for
   the environment. A value the file had that the yaml now decides otherwise
   is **superseded**: rendered from the yaml, named in `up`'s plan and in
-  doctor's `env` row, and kept in `.env.pre-render` (below). Nothing is
-  derived from yaml yet; the remote-access record (X-105, `METISTRY_ORIGIN`)
-  is the first key that will be.
+  doctor's `env` row, and kept in `.env.pre-render` (below). The first key:
+  `METISTRY_ORIGIN`, from the remote-access record (`deployment.yaml`
+  `remote:`, X-105; `docs/ops/remote-access.md`) — the provider's origin
+  first, the loopback origin second, or with `none` the loopback origin
+  alone. A remote origin written into the file by hand is superseded, named,
+  and kept in `.env.pre-render`; `metistry remote set <provider>` is how one
+  is configured.
 - **from the login Keychain** — every secret-shaped variable this install
   knows (your `.env`, `.env.example`, the last render), from this
   instance's account; a `GENERATED_SECRETS` one minted when no store has it;

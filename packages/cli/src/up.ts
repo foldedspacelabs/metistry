@@ -1383,6 +1383,12 @@ export async function up(opts: UpOptions): Promise<UpResult> {
     if (!r.action(`derive ${target} from .metistry/*.yaml and the login Keychain (secret lines adopted into the Keychain, configuration carried, a hand edit named; values never shown)`)) return;
     const deliver = await deliveredSecretNames({ instanceDir: instanceDir.instanceDir, productDir: runDir });
     for (const n of deliver.notes) r.note(n);
+    // what `.metistry/*.yaml` decides for the file: METISTRY_ORIGIN from the
+    // remote-access record (plan §2.23, X-105) — the provider's origin first,
+    // the loopback origin second, or the loopback origin alone. A hand-set
+    // remote origin the file held is superseded and NAMED, never kept silently
+    const origins = consoleOrigins(values);
+    const derived = origins.value !== undefined ? { METISTRY_ORIGIN: { value: origins.value, from: "deployment.yaml `remote:` (`metistry remote set`)" } } : {};
     let rendered: RenderEnvResult;
     try {
       rendered = await renderEnvFile({
@@ -1394,6 +1400,7 @@ export async function up(opts: UpOptions): Promise<UpResult> {
         env,
         platform: le.platform,
         out: (l) => r.note(l),
+        derived,
         deliver: deliver.names,
         deliverComplete: deliver.complete,
         restartFollows: true,

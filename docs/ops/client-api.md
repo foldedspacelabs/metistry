@@ -622,6 +622,17 @@ It is what `metistry console whoami` and the Mac app's "signed in as" read.
 device is revoked from any other one with `…/revoke` — a lost phone is revoked
 from the Mac.
 
+Each device row is one session joined to its passkey: `id` (the session),
+`label`, `passkey_last_used`, `created_at`, `last_seen_at`,
+`absolute_expires_at`, `revoked`, and **`rp_id`** — the host the passkey was
+created for and the only host it signs in at (`docs/ops/auth.md` *Passkeys:
+origins*; migration `0039`, X-104). A passkey from before `0039` has no
+recorded host; the console serves the first configured origin's host for it,
+so `rp_id` is always a string and a client never needs `METISTRY_ORIGIN` to
+tell which passkeys a change of origin stranded (a passkey whose `rp_id` is no
+longer a configured host; Devices marks it, X-107). Additive: a client that
+does not read it sees the row it always did.
+
 ### Chat
 
 ```

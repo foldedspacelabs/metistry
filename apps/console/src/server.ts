@@ -766,10 +766,20 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       }
     }
 
+    // The passkey ceremonies' rpID follows the request (§2.23, X-104): a
+    // `start` answers for the configured origin it came from, and only for
+    // one — a request from an origin outside METISTRY_ORIGIN is refused here,
+    // naming both sides, as the `finish` steps already did.
     if (key === "POST /auth/enroll/start") {
       const body = (await readJson(req)) as { code?: string };
       if (!body.code || !(await store.peekEnrollmentCode(db, body.code))) return sendError(res, "unauthenticated");
-      const options = await wa.registrationOptions(rp);
+      const from = wa.requestOrigin(rp, req.headers);
+      if (!from) {
+        const err = wa.unconfiguredOrigin(rp, req.headers);
+        await audit("auth", "enroll", false, { refused: err.reason });
+        return sendJson(res, 401, errorEnvelope("unauthenticated", err.reason));
+      }
+      const options = await wa.registrationOptions(rp, wa.rpIDOf(from));
       challenges.put(`enroll:${body.code}`, options.challenge);
       return sendJson(res, 200, { options });
     }
@@ -795,17 +805,24 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
         publicKey: cred.publicKey,
         signCount: cred.signCount,
         transports: cred.transports,
-        origin: cfg.origin,
+        origin: cred.origin,
         label: (body.label ?? "device").slice(0, 80),
+        rpId: cred.rpID,
       });
       const token = await store.issueSession(db, cred.id, cfg.policy);
-      await audit("auth", "enroll", true, { passkey: cred.id });
+      await audit("auth", "enroll", true, { passkey: cred.id, rp_id: cred.rpID });
       res.setHeader("set-cookie", sessionCookie(token, cfg.policy.maxDays * 86400, cfg.secureCookies));
       return sendJson(res, 200, { ok: true });
     }
 
     if (key === "POST /auth/login/start") {
-      const options = await wa.authenticationOptions(rp);
+      const from = wa.requestOrigin(rp, req.headers);
+      if (!from) {
+        const err = wa.unconfiguredOrigin(rp, req.headers);
+        await audit("auth", "login", false, { refused: err.reason });
+        return sendJson(res, 401, errorEnvelope("unauthenticated", err.reason));
+      }
+      const options = await wa.authenticationOptions(rp, wa.rpIDOf(from));
       const k = randomUUID();
       challenges.put(`login:${k}`, options.challenge);
       return sendJson(res, 200, { key: k, options });
@@ -1754,7 +1771,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Ser
       return sendJson(res, 200, { ok: true, feedback: rows[0] });
     }
 
-    if (key === "GET /api/devices") return sendJson(res, 200, { devices: await store.listDevices(db) });
+    if (key === "GET /api/devices") return sendJson(res, 200, { devices: await store.listDevices(db, rp.rpIDs[0]!) });
 
     // ----- external-agent registry (§4.2 management surface; owner session only) -----
     // The registry, plus what has been ASKED for (ruled 2026-09-19): the

@@ -4,15 +4,17 @@
 // secret, a fresh one's bearer reaches the Keychain and NOT the config
 // file, another editor's servers survive the merge, and the file comes
 // back 0600.
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { chmodSync, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   agentTokenVar,
+  backupFile,
   connect,
   connectList,
+  connectRemove,
   cursorConfigFile,
   DEFAULT_GRANTS,
   opencodeConfigFile,
@@ -20,6 +22,7 @@ import {
   parseTool,
   renderConnect,
   renderConnectList,
+  renderRemove,
   serverKey,
   writeCursorConfig,
   writeOpencodeConfig,
@@ -32,7 +35,7 @@ const OWNER = "local-owner-token-never-printed";
 const INSTANCE_ID = "a1b2c3d4-2222-4333-8444-555555555555";
 
 /** A login Keychain in a Map, keyed by (account, service) like the real one. Records calls so a test can prove a value never reached argv. */
-function fakeSecurity(seed: Record<string, string> = {}) {
+function fakeSecurity(seed: Record<string, string> = {}, behaviour: { lockedDelete?: boolean } = {}) {
   const store = new Map(Object.entries(seed));
   const calls: Array<{ args: string[]; argv: string[]; opts: ExecOptions }> = [];
   const exec: Exec = async (cmd, argv, opts = {}) => {
@@ -48,6 +51,10 @@ function fakeSecurity(seed: Record<string, string> = {}) {
     if (args[0] === "find-generic-password") {
       if (!store.has(at)) return { code: 44, stdout: "", stderr: "not found" };
       return { code: 0, stdout: args.includes("-w") ? `${store.get(at)}\n` : "", stderr: "" };
+    }
+    if (args[0] === "delete-generic-password") {
+      if (behaviour.lockedDelete) return { code: 36, stdout: "", stderr: "User interaction is not allowed." };
+      return store.delete(at) ? { code: 0, stdout: "", stderr: "" } : { code: 44, stdout: "", stderr: "not found" };
     }
     return { code: 1, stdout: "", stderr: `unexpected ${args[0]}` };
   };
@@ -87,15 +94,21 @@ function fakeConsole(seed: Partial<Row>[] = []) {
     if (method === "GET" && url.pathname === "/api/agents") return json(200, { agents: [...rows.values()] });
     if (method === "POST" && url.pathname === "/api/agents") {
       const id = String((body as { id?: string }).id);
-      if (rows.has(id)) return json(409, { error: { code: "conflict", message: "agent id already registered" } });
       const remote = (body as { remote?: boolean }).remote === true;
+      // HS-7: a revoked EXTERNAL row is registered again, in place, with nothing it held; anything else that exists is a conflict
+      const old = rows.get(id);
+      if (old && !(old.revoked && old.kind === "external")) return json(409, { error: { code: "conflict", message: "agent id already registered" } });
       rows.set(id, { id, display_name: String((body as { display_name?: string }).display_name), kind: "external", grants: { tier: "none", areas: [] }, projects: [], revoked: false, last_seen_at: null, remote, pending: remote });
       return json(201, { id, token: `minted-${++minted}`, pending: remote, ...(remote ? { proposal_id: 7 } : {}) });
     }
-    const op = /^\/api\/agents\/([a-z][a-z0-9-]*)\/(rotate|grants|projects)$/.exec(url.pathname);
+    const op = /^\/api\/agents\/([a-z][a-z0-9-]*)\/(rotate|grants|projects|revoke)$/.exec(url.pathname);
     if (op) {
       const row = rows.get(op[1]!);
       if (!row || row.revoked) return json(404, { error: { code: "not_found", message: "not found" } });
+      if (op[2] === "revoke") {
+        row.revoked = true;
+        return json(200, { revoked: true });
+      }
       if (op[2] === "rotate") return json(200, { id: row.id, token: `rotated-${++minted}` });
       if (op[2] === "grants") {
         const g = body as { tier: string; areas: string[] };
@@ -200,11 +213,44 @@ describe("connect: the agent row", () => {
     await expect(connect({ tool: "cursor", areas: ["knowledge/lowercase"], ...base(home, instanceDir, kc.exec, c.fetchFn) })).rejects.toThrow(/invalid_request/);
   });
 
-  it("refuses a revoked row rather than pretending to reconnect it", async () => {
+  // HS-7 (ruled 2026-10-04): an accidental revoke is recoverable without a new install
+  it("registers a revoked row again: same id, a NEW token, and what it held does not come back", async () => {
     const { home, instanceDir } = await scratch();
     const kc = fakeSecurity();
-    const c = fakeConsole([{ id: "devin", revoked: true }]);
-    await expect(connect({ tool: "devin", ...base(home, instanceDir, kc.exec, c.fetchFn) })).rejects.toThrow(/revoked/);
+    const c = fakeConsole([{ id: "cursor", display_name: "Cursor", revoked: true, grants: { tier: "areas", areas: ["Areas/Engineering"] }, projects: ["second-instance"] }]);
+    const r = await connect({ tool: "cursor", ...base(home, instanceDir, kc.exec, c.fetchFn) });
+
+    expect(r).toMatchObject({ agent_id: "cursor", created: false, reconnected: true, rotated: false, token: "keychain", grants: DEFAULT_GRANTS, projects: [] });
+    expect(c.calls.map((x) => `${x.method} ${x.path}`)).toEqual(["GET /api/agents", "POST /api/agents"]);
+    expect(c.rows.get("cursor")).toMatchObject({ revoked: false, grants: DEFAULT_GRANTS, projects: [] });
+    expect(kc.store.get(`${INSTANCE_ID}/metistry:METISTRY_AGENT_TOKEN_CURSOR`)).toBe("minted-1");
+    expect(readFileSync(cursorConfigFile(home), "utf8")).toContain("METISTRY_AGENT_TOKEN_CURSOR");
+    const text = renderConnect(r);
+    expect(text).toMatch(/registered again after a revoke/);
+    expect(text).toMatch(/default-deny/);
+    expect(text).not.toContain("minted-1");
+  });
+
+  it("widens a reconnected row only when asked, and --remote on a reconnect is a fresh enrolment, not a promotion", async () => {
+    const { home, instanceDir } = await scratch();
+    const kc = fakeSecurity();
+    const c = fakeConsole([{ id: "devin", display_name: "Devin", revoked: true, remote: false }]);
+    const r = await connect({ tool: "devin", remote: true, areas: ["Areas/Engineering"], ...base(home, instanceDir, kc.exec, c.fetchFn) });
+    expect(c.calls[1]!.body).toEqual({ id: "devin", display_name: "Devin", kind: "external", remote: true });
+    expect(r).toMatchObject({ reconnected: true, pending: true, grants: { tier: "areas", areas: ["Areas/Engineering"] } });
+  });
+
+  it("a console that predates the reconnect says so, rather than showing a bare 409", async () => {
+    const { home, instanceDir } = await scratch();
+    const kc = fakeSecurity();
+    const c = fakeConsole([{ id: "cursor", revoked: true }]);
+    const inner = c.fetchFn;
+    const old = (async (u: string | URL | Request, init?: RequestInit) =>
+      init?.method === "POST" && new URL(String(u)).pathname === "/api/agents"
+        ? new Response(JSON.stringify({ error: { code: "conflict", message: "agent id already registered" } }), { status: 409 })
+        : inner(u, init)) as typeof fetch;
+    await expect(connect({ tool: "cursor", ...base(home, instanceDir, kc.exec, old) })).rejects.toThrow(/predates HS-7.*metistry update/s);
+    expect(kc.store.size).toBe(0);
   });
 
   // S2: approve-before-enroll (docs/research/2026-09-13-google-sam-review.md ADOPT 2)
@@ -539,6 +585,7 @@ describe("connect --list", () => {
     const c = fakeConsole([{ id: "devin", revoked: true }]);
     const listed = await connectList({ ...base(home, instanceDir, kc.exec, c.fetchFn) });
     expect(listed.tools.find((t) => t.tool === "devin")).toMatchObject({ agent: "revoked" });
+    expect(renderConnectList(listed)).toMatch(/registers it\s+again/);
   });
 });
 
@@ -582,5 +629,364 @@ describe("metistry connect (argv)", () => {
     expect(code).toBe(0);
     expect(out).toHaveLength(1);
     expect(JSON.parse(out[0]!).console_url).toBe("http://127.0.0.1:8080");
+  });
+});
+
+// ---- HS-7: `connect --remove` ------------------------------------------------
+
+const KC_CURSOR = `${INSTANCE_ID}/metistry:METISTRY_AGENT_TOKEN_CURSOR`;
+const KC_OPENCODE = `${INSTANCE_ID}/metistry:METISTRY_AGENT_TOKEN_OPENCODE`;
+const NS_PORTS = ["schema: 1", `instance_id: "${INSTANCE_ID}"`, 'label_suffix: "a1b2c3d4"', "base: 8304", "ports:", "  console: 8304", "  db: 8305", "  reconciler: 8306", "  eventkit: 8307", "  apple-fm: 8308", ""].join("\n");
+
+/** Everything in a directory tree, as path → bytes, so a test can prove "nothing else moved". */
+function tree(dir: string, prefix = ""): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!existsSync(dir)) return out;
+  for (const name of readdirSync(dir, { withFileTypes: true })) {
+    const rel = `${prefix}${name.name}`;
+    if (name.isDirectory()) Object.assign(out, tree(join(dir, name.name), `${rel}/`));
+    else out[rel] = readFileSync(join(dir, name.name), "utf8");
+  }
+  return out;
+}
+
+describe("connect --remove: the way back (HS-7)", () => {
+  it("cursor, no file before: revokes the row, deletes the Keychain item, and the file `connect` created is gone again", async () => {
+    const { home, instanceDir } = await scratch();
+    const kc = fakeSecurity();
+    const c = fakeConsole();
+    await connect({ tool: "cursor", ...base(home, instanceDir, kc.exec, c.fetchFn) });
+    expect(existsSync(cursorConfigFile(home))).toBe(true);
+
+    const r = await connectRemove({ tool: "cursor", ...base(home, instanceDir, kc.exec, c.fetchFn) });
+    expect(r).toMatchObject({ agent: "revoked", token: "removed", config: "file-removed", problems: [] });
+    expect(c.rows.get("cursor")?.revoked).toBe(true);
+    expect(kc.store.has(KC_CURSOR)).toBe(false);
+    expect(existsSync(cursorConfigFile(home))).toBe(false);
+    expect(readdirSync(join(home, ".cursor"))).toEqual([]); // no backup, no temp file left behind
+  });
+
+  it("cursor, a file with its own formatting and mode: connect then remove gives back the same BYTES and the same mode", async () => {
+    const { home, instanceDir } = await scratch();
+    const file = cursorConfigFile(home);
+    await mkdir(join(home, ".cursor"), { recursive: true });
+    // tabs, a key order JSON.stringify would not choose, no trailing newline, group-readable
+    const original = '{\n\t"zeta": 1,\n\t"mcpServers": {"linear":   {"url": "https://mcp.linear.app/mcp"}},\n\t"alpha": [1,2,3]}';
+    await writeFile(file, original);
+    chmodSync(file, 0o644);
+    const kc = fakeSecurity();
+    const c = fakeConsole();
+
+    await connect({ tool: "cursor", ...base(home, instanceDir, kc.exec, c.fetchFn) });
+    expect(readFileSync(file, "utf8")).not.toBe(original); // connect did rewrite it
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+    expect(statSync(backupFile(file, "metistry")).mode & 0o777).toBe(0o644); // the copy is no more exposed than the original was
+
+    const r = await connectRemove({ tool: "cursor", ...base(home, instanceDir, kc.exec, c.fetchFn) });
+    expect(r.config).toBe("restored");
+    expect(readFileSync(file, "utf8")).toBe(original);
+    expect(statSync(file).mode & 0o777).toBe(0o644);
+    expect(existsSync(backupFile(file, "metistry"))).toBe(false);
+    expect(readdirSync(join(home, ".cursor"))).toEqual(["mcp.json"]);
+  });
+
+  it("the backup is the file BEFORE the first write, and a second connect does not replace it", async () => {
+    const { home, instanceDir } = await scratch();
+    const file = cursorConfigFile(home);
+    await mkdir(join(home, ".cursor"), { recursive: true });
+    await writeFile(file, '{"mcpServers":{"linear":{"url":"https://mcp.linear.app/mcp"}}}\n');
+    const kc = fakeSecurity();
+    const c = fakeConsole();
+    await connect({ tool: "cursor", ...base(home, instanceDir, kc.exec, c.fetchFn) });
+    const bak = readFileSync(backupFile(file, "metistry"), "utf8");
+    expect(bak).toBe('{"mcpServers":{"linear":{"url":"https://mcp.linear.app/mcp"}}}\n');
+    await connect({ tool: "cursor", rotate: true, ...base(home, instanceDir, kc.exec, c.fetchFn) });
+    expect(readFileSync(backupFile(file, "metistry"), "utf8")).toBe(bak);
+  });
+
+  it("cursor, the owner edited the file after connect: only the entry goes, the edits stay, no stale backup is put back", async () => {
+    const { home, instanceDir } = await scratch();
+    const file = cursorConfigFile(home);
+    await mkdir(join(home, ".cursor"), { recursive: true });
+    await writeFile(file, JSON.stringify({ mcpServers: { linear: { url: "https://mcp.linear.app/mcp" } } }));
+    const kc = fakeSecurity();
+    const c = fakeConsole();
+    await connect({ tool: "cursor", ...base(home, instanceDir, kc.exec, c.fetchFn) });
+    const doc = JSON.parse(readFileSync(file, "utf8"));
+    doc.mcpServers.notion = { url: "https://mcp.notion.com/mcp" }; // added later, by the owner
+    doc.theme = "dark";
+    await writeFile(file, JSON.stringify(doc, null, 2));
+
+    const r = await connectRemove({ tool: "cursor", ...base(home, instanceDir, kc.exec, c.fetchFn) });
+    expect(r.config).toBe("entry-removed");
+    expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({ mcpServers: { linear: { url: "https://mcp.linear.app/mcp" }, notion: { url: "https://mcp.notion.com/mcp" } }, theme: "dark" });
+    expect(existsSync(backupFile(file, "metistry"))).toBe(false);
+  });
+
+  it("opencode: the `$schema` line and the `mcp` block connect added go with the entry — the original comes back byte for byte", async () => {
+    const { home, instanceDir } = await scratch();
+    const file = opencodeConfigFile(home, {});
+    await mkdir(join(home, ".config", "opencode"), { recursive: true });
+    const original = '{"theme":"tokyonight","model":"x/y"}\n';
+    await writeFile(file, original);
+    const kc = fakeSecurity();
+    const c = fakeConsole();
+    const env = { METISTRY_LOCAL_OWNER_TOKEN: OWNER, HOME: home };
+    await connect({ tool: "opencode", ...base(home, instanceDir, kc.exec, c.fetchFn), env });
+    expect(readFileSync(file, "utf8")).toContain("$schema");
+
+    const r = await connectRemove({ tool: "opencode", ...base(home, instanceDir, kc.exec, c.fetchFn), env });
+    expect(r).toMatchObject({ agent: "revoked", token: "removed", config: "restored" });
+    expect(readFileSync(file, "utf8")).toBe(original);
+    expect(kc.store.has(KC_OPENCODE)).toBe(false);
+  });
+
+  it("opencode, no file before: creating it and removing it leave the directory as it was", async () => {
+    const { home, instanceDir } = await scratch();
+    const kc = fakeSecurity();
+    const c = fakeConsole();
+    const env = { METISTRY_LOCAL_OWNER_TOKEN: OWNER, HOME: home };
+    await connect({ tool: "opencode", ...base(home, instanceDir, kc.exec, c.fetchFn), env });
+    const r = await connectRemove({ tool: "opencode", ...base(home, instanceDir, kc.exec, c.fetchFn), env });
+    expect(r.config).toBe("file-removed");
+    expect(readdirSync(join(home, ".config", "opencode"))).toEqual([]);
+  });
+
+  it("opencode, a `$schema` the owner wrote themselves is theirs and stays", async () => {
+    const { home, instanceDir } = await scratch();
+    const file = opencodeConfigFile(home, {});
+    await mkdir(join(home, ".config", "opencode"), { recursive: true });
+    await writeFile(file, '{"$schema":"https://opencode.ai/config.json","theme":"x"}\n');
+    const kc = fakeSecurity();
+    const c = fakeConsole();
+    const env = { METISTRY_LOCAL_OWNER_TOKEN: OWNER, HOME: home };
+    await connect({ tool: "opencode", ...base(home, instanceDir, kc.exec, c.fetchFn), env });
+    await connectRemove({ tool: "opencode", ...base(home, instanceDir, kc.exec, c.fetchFn), env });
+    expect(readFileSync(file, "utf8")).toBe('{"$schema":"https://opencode.ai/config.json","theme":"x"}\n');
+  });
+
+  it("is idempotent: the second run revokes nothing, deletes nothing, and writes nothing", async () => {
+    const { home, instanceDir } = await scratch();
+    const kc = fakeSecurity();
+    const c = fakeConsole();
+    await connect({ tool: "cursor", ...base(home, instanceDir, kc.exec, c.fetchFn) });
+    await connectRemove({ tool: "cursor", ...base(home, instanceDir, kc.exec, c.fetchFn) });
+    const before = tree(home);
+    c.calls.length = 0;
+
+    const again = await connectRemove({ tool: "cursor", ...base(home, instanceDir, kc.exec, c.fetchFn) });
+    expect(again).toMatchObject({ agent: "already-revoked", token: "absent", config: "no-file", problems: [] });
+    expect(c.calls.map((x) => `${x.method} ${x.path}`)).toEqual(["GET /api/agents"]); // no second revoke
+    expect(tree(home)).toEqual(before);
+    expect(renderRemove(again)).toMatch(/was already revoked/);
+  });
+
+  it("a tool that was never connected: nothing to revoke, and another server's file is not rewritten", async () => {
+    const { home, instanceDir } = await scratch();
+    const file = cursorConfigFile(home);
+    await mkdir(join(home, ".cursor"), { recursive: true });
+    const text = '{ "mcpServers": { "linear": { "url": "https://x" } } }';
+    await writeFile(file, text);
+    const kc = fakeSecurity();
+    const c = fakeConsole();
+    const r = await connectRemove({ tool: "cursor", ...base(home, instanceDir, kc.exec, c.fetchFn) });
+    expect(r).toMatchObject({ agent: "absent", token: "absent", config: "no-entry" });
+    expect(readFileSync(file, "utf8")).toBe(text);
+    expect(c.calls.map((x) => x.method)).toEqual(["GET"]);
+  });
+
+  it("removes only its own: another tool's row, Keychain item and config survive", async () => {
+    const { home, instanceDir } = await scratch();
+    const kc = fakeSecurity();
+    const c = fakeConsole();
+    const env = { METISTRY_LOCAL_OWNER_TOKEN: OWNER, HOME: home };
+    await connect({ tool: "cursor", ...base(home, instanceDir, kc.exec, c.fetchFn) });
+    await connect({ tool: "opencode", ...base(home, instanceDir, kc.exec, c.fetchFn), env });
+    const opencodeBytes = readFileSync(opencodeConfigFile(home, env), "utf8");
+
+    await connectRemove({ tool: "cursor", ...base(home, instanceDir, kc.exec, c.fetchFn) });
+    expect(c.rows.get("opencode")?.revoked).toBe(false);
+    expect(kc.store.has(KC_OPENCODE)).toBe(true);
+    expect(readFileSync(opencodeConfigFile(home, env), "utf8")).toBe(opencodeBytes);
+    expect(c.calls.filter((x) => x.path.endsWith("/revoke")).map((x) => x.path)).toEqual(["/api/agents/cursor/revoke"]);
+  });
+
+  it("a namespaced instance removes ITS key and variable, not the other instance's", async () => {
+    const { home, instanceDir } = await scratch();
+    const file = cursorConfigFile(home);
+    await mkdir(join(home, ".cursor"), { recursive: true });
+    const theirs = { url: "http://127.0.0.1:8080/mcp", headers: { Authorization: "Bearer ${env:METISTRY_AGENT_TOKEN_CURSOR}" } };
+    await writeFile(file, JSON.stringify({ mcpServers: { metistry: theirs } }, null, 2));
+    await writeFile(join(instanceDir, ".metistry", "state", "ports.yaml"), NS_PORTS);
+    const kc = fakeSecurity({ [KC_CURSOR]: "the-other-instances-token" });
+    const c = fakeConsole();
+    await connect({ tool: "cursor", ...base(home, instanceDir, kc.exec, c.fetchFn) });
+
+    const r = await connectRemove({ tool: "cursor", ...base(home, instanceDir, kc.exec, c.fetchFn) });
+    expect(r).toMatchObject({ config_key: "metistry-a1b2c3d4", token_var: "METISTRY_AGENT_TOKEN_CURSOR_A1B2C3D4" });
+    expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({ mcpServers: { metistry: theirs } });
+    expect(kc.store.get(KC_CURSOR)).toBe("the-other-instances-token");
+    expect(kc.store.has(`${KC_CURSOR}_A1B2C3D4`)).toBe(false);
+  });
+
+  it("claude-code: revokes and deletes the Keychain item; there is no file, and it says where the export lines live", async () => {
+    const { home, instanceDir } = await scratch();
+    const kc = fakeSecurity();
+    const c = fakeConsole();
+    await connect({ tool: "claude-code", ...base(home, instanceDir, kc.exec, c.fetchFn) });
+    const r = await connectRemove({ tool: "claude-code", ...base(home, instanceDir, kc.exec, c.fetchFn) });
+    expect(r).toMatchObject({ agent: "revoked", token: "removed", config: "n/a" });
+    expect(kc.store.size).toBe(0);
+    expect(renderRemove(r)).toMatch(/METISTRY_OWNER_TOKEN.*profile/);
+    expect(tree(home)).toEqual({});
+  });
+
+  it("devin: revokes the row and touches neither the Keychain nor any file", async () => {
+    const { home, instanceDir } = await scratch();
+    const kc = fakeSecurity();
+    const c = fakeConsole([{ id: "devin", display_name: "Devin" }]);
+    const r = await connectRemove({ tool: "devin", ...base(home, instanceDir, kc.exec, c.fetchFn) });
+    expect(r).toMatchObject({ agent: "revoked", token: "n/a", config: "n/a" });
+    expect(kc.calls).toEqual([]);
+    expect(renderRemove(r)).toContain("Customize → MCPs");
+  });
+
+  it("an unreachable console stops the run BEFORE anything local is touched (a deleted Keychain item with a live token is a bearer nobody holds)", async () => {
+    const { home, instanceDir } = await scratch();
+    const kc = fakeSecurity();
+    const c = fakeConsole();
+    await connect({ tool: "cursor", ...base(home, instanceDir, kc.exec, c.fetchFn) });
+    const before = tree(home);
+    const down = (async () => {
+      throw new TypeError("fetch failed", { cause: new Error("connect ECONNREFUSED 127.0.0.1:8080") });
+    }) as unknown as typeof fetch;
+    await expect(connectRemove({ tool: "cursor", ...base(home, instanceDir, kc.exec, down) })).rejects.toThrow(/console unreachable/);
+    expect(kc.store.has(KC_CURSOR)).toBe(true);
+    expect(tree(home)).toEqual(before);
+  });
+
+  it("a config it cannot parse is reported, left alone, and does not stop the Keychain item going", async () => {
+    const { home, instanceDir } = await scratch();
+    const file = cursorConfigFile(home);
+    await mkdir(join(home, ".cursor"), { recursive: true });
+    const kc = fakeSecurity();
+    const c = fakeConsole();
+    await connect({ tool: "cursor", ...base(home, instanceDir, kc.exec, c.fetchFn) });
+    await writeFile(file, "// the owner added a comment\n{}\n");
+
+    const r = await connectRemove({ tool: "cursor", ...base(home, instanceDir, kc.exec, c.fetchFn) });
+    expect(r.problems).toHaveLength(1);
+    expect(r.problems[0]).toMatch(/not JSON.*by hand/s);
+    expect(r).toMatchObject({ agent: "revoked", token: "removed" });
+    expect(readFileSync(file, "utf8")).toBe("// the owner added a comment\n{}\n");
+    expect(renderRemove(r)).toMatch(/PROBLEM/);
+  });
+
+  it("a Keychain that refuses is a problem, not a silent 'absent', and the config is still put back", async () => {
+    const { home, instanceDir } = await scratch();
+    const kc = fakeSecurity();
+    const c = fakeConsole();
+    await connect({ tool: "cursor", ...base(home, instanceDir, kc.exec, c.fetchFn) });
+    const locked = fakeSecurity({ [KC_CURSOR]: "minted-1" }, { lockedDelete: true });
+    const r = await connectRemove({ tool: "cursor", ...base(home, instanceDir, locked.exec, c.fetchFn) });
+    expect(r.config).toBe("file-removed");
+    expect(r.token).toBe("failed"); // not "removed", not "absent": the item is still there
+    expect(r.problems.join("\n")).toMatch(/Keychain item metistry:METISTRY_AGENT_TOKEN_CURSOR could not be deleted/);
+  });
+
+  it("on a host with no Keychain it still revokes and restores, and says no Keychain was involved", async () => {
+    const { home, instanceDir } = await scratch();
+    const kc = fakeSecurity();
+    const c = fakeConsole();
+    await connect({ tool: "cursor", ...base(home, instanceDir, kc.exec, c.fetchFn) });
+    const r = await connectRemove({ tool: "cursor", ...base(home, instanceDir, kc.exec, c.fetchFn), platform: "linux" });
+    expect(r).toMatchObject({ agent: "revoked", token: "n/a", config: "file-removed", problems: [] });
+    expect(renderRemove(r)).toMatch(/no Keychain/);
+  });
+
+  it("never prints a token, and never reads one back", async () => {
+    const { home, instanceDir } = await scratch();
+    const kc = fakeSecurity();
+    const c = fakeConsole();
+    await connect({ tool: "cursor", ...base(home, instanceDir, kc.exec, c.fetchFn) });
+    kc.calls.length = 0;
+    const r = await connectRemove({ tool: "cursor", ...base(home, instanceDir, kc.exec, c.fetchFn) });
+    expect(JSON.stringify(r) + renderRemove(r)).not.toContain("minted-1");
+    expect(kc.calls.some((call) => call.args.includes("-w"))).toBe(false);
+  });
+
+  it("round trip: remove, then connect again — a live row with a new token, default-deny, and the config written afresh", async () => {
+    const { home, instanceDir } = await scratch();
+    const kc = fakeSecurity();
+    const c = fakeConsole();
+    await connect({ tool: "cursor", areas: ["Areas/Engineering"], ...base(home, instanceDir, kc.exec, c.fetchFn) });
+    await connectRemove({ tool: "cursor", ...base(home, instanceDir, kc.exec, c.fetchFn) });
+    const again = await connect({ tool: "cursor", ...base(home, instanceDir, kc.exec, c.fetchFn) });
+    expect(again).toMatchObject({ reconnected: true, grants: DEFAULT_GRANTS, config_state: "written" });
+    expect(c.rows.get("cursor")).toMatchObject({ revoked: false, grants: DEFAULT_GRANTS });
+    expect(kc.store.get(KC_CURSOR)).toBe("minted-2");
+  });
+});
+
+describe("metistry connect --remove (argv)", () => {
+  async function run(argv: string[], over: { exec: Exec; fetchFn: typeof fetch; home: string; instanceDir: string }) {
+    const out: string[] = [];
+    const err: string[] = [];
+    const code = await main(["connect", ...argv, "--instance", over.instanceDir], { out: (x) => out.push(x), err: (x) => err.push(x), platform: "darwin", home: over.home, exec: over.exec, fetchFn: over.fetchFn });
+    return { code, out: out.join("\n"), err: err.join("\n") };
+  }
+
+  // an owner token reaches the CLI through the Keychain when no env var carries it; one find-generic-password answers it
+  function withOwner(inner: ReturnType<typeof fakeSecurity>): Exec {
+    return async (cmd, argv, opts) => {
+      if (cmd === "security" && argv[0] === "find-generic-password" && String(argv[argv.indexOf("-s") + 1]).includes("LOCAL_OWNER_TOKEN")) return { code: 0, stdout: `${OWNER}\n`, stderr: "" };
+      return inner.exec(cmd, argv, opts);
+    };
+  }
+
+  it("--remove <tool> and <tool> --remove both work, --json is one document, and exit is 0", async () => {
+    const { home, instanceDir } = await scratch();
+    const kc = fakeSecurity();
+    const exec = withOwner(kc);
+    const c = fakeConsole();
+    await connect({ tool: "cursor", ...base(home, instanceDir, exec, c.fetchFn) });
+    const a = await run(["--remove", "cursor", "--json"], { exec, fetchFn: c.fetchFn, home, instanceDir });
+    expect(a.code).toBe(0);
+    expect(JSON.parse(a.out)).toMatchObject({ tool: "cursor", agent: "revoked", config: "file-removed" });
+    const b = await run(["cursor", "--remove"], { exec, fetchFn: c.fetchFn, home, instanceDir });
+    expect(b.code).toBe(0);
+    expect(b.out).toMatch(/was already revoked/);
+  });
+
+  it("refuses flags that contradict it, and an unknown tool, with exit 2 and nothing sent", async () => {
+    const { home, instanceDir } = await scratch();
+    const kc = fakeSecurity();
+    const exec = withOwner(kc);
+    const c = fakeConsole();
+    for (const extra of [["--rotate"], ["--remote"], ["--areas", "Areas/A"], ["--project", "x"]]) {
+      const r = await run(["--remove", "cursor", ...extra], { exec, fetchFn: c.fetchFn, home, instanceDir });
+      expect(r.code).toBe(2);
+      expect(r.err).toMatch(/cannot be combined/);
+    }
+    expect((await run(["--remove", "windsurf"], { exec, fetchFn: c.fetchFn, home, instanceDir })).code).toBe(2);
+    expect(c.calls).toEqual([]);
+  });
+
+  it("exits 1 and names the problem when a step did not finish", async () => {
+    const { home, instanceDir } = await scratch();
+    const kc = fakeSecurity();
+    const exec = withOwner(kc);
+    const c = fakeConsole();
+    await connect({ tool: "cursor", ...base(home, instanceDir, exec, c.fetchFn) });
+    await writeFile(cursorConfigFile(home), "not json");
+    const r = await run(["--remove", "cursor"], { exec, fetchFn: c.fetchFn, home, instanceDir });
+    expect(r.code).toBe(1);
+    expect(r.out).toMatch(/PROBLEM/);
+  });
+
+  it("is in the help text", async () => {
+    const out: string[] = [];
+    await main(["help"], { out: (x) => out.push(x), err: () => {} });
+    expect(out.join("\n")).toContain("metistry connect --remove <cursor|opencode|devin|claude-code>");
   });
 });

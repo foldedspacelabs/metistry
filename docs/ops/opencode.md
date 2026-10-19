@@ -128,8 +128,19 @@ metistry connect --list                # each tool's row, bearer and config
 opencode mcp list                      # OpenCode's own view: the server and whether it connected
 ```
 
-Revocation (`POST /api/agents/opencode/revoke`) is permanent by design: the row
-stays so old proposals keep their provenance, and the id cannot be re-minted.
+`metistry connect --remove opencode` is the way back: it revokes the row
+(`POST /api/agents/opencode/revoke` is the same step alone), deletes the
+Keychain item, and puts `opencode.json` (or `.jsonc`) back exactly as it was
+before the first `connect` — from the copy `connect` keeps beside it
+(`opencode.json.metistry.bak`), or, if you have edited the file since, by
+removing only the `mcp.metistry` entry (and the `$schema` line `connect`
+added). A file `connect` created is deleted again; other servers are never
+touched; running it twice is safe.
+
+A revoked row can be registered again: `metistry connect opencode` revives it
+under the same id (old proposals keep their provenance) with a **new** token and
+default-deny grants — nothing it held comes back, so an accidental revoke
+needs no new install.
 
 **If `opencode mcp list` says `failed`:** the usual cause is the variable never
 reaching the process, so the header goes out as `Bearer ` and the console

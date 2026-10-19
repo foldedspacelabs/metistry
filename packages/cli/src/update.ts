@@ -38,7 +38,7 @@ import { instanceLockPath, readLock, serializeLock, type LockFile, type LockSour
 import { commitPending, ensureOwnerBridgeToken, OWNER_BRIDGE_TOKEN, OWNER_BRIDGE_TOKEN_FIX, OwnerTokenMintFailed, protectedRel, writeProtected, type CommitPending, type EnsureOwnerTokenResult, type ProtectedWrite } from "./protected-write.js";
 import { listMigrationFiles, MIGRATION_LOCK_KEY, openMigrationSession, runMigrations, type MigrateResult, type MigrationSession } from "./migrate.js";
 import { CURRENT_LINK, currentVersion, installRelease, previousVersion, releaseDir, RELEASE_WALK_LIMIT, RELEASES_DIRNAME, rollbackRelease, releaseTarget, runtimePackCommit, type InstallReleaseResult } from "./release.js";
-import { installRuntimeDeps, runtimeDepsEnabled, RUNTIME_DIRNAME, type InstallRuntimeDepsResult } from "./runtime-deps.js";
+import { installRuntimeDeps, REMOTE_DIRNAME, runtimeDepsEnabled, RUNTIME_DIRNAME, updateRemotePacks, type InstallRemotePackResult, type InstallRuntimeDepsResult } from "./runtime-deps.js";
 import { MIGRATE_SCOPE_COMMAND, grantProviderSecrets, migrateScope, type MigrateScopeResult, type ProviderGrantsResult } from "./secrets.js";
 import { StepFailed, StepRunner } from "./steps.js";
 import { type Ui } from "./ui.js";
@@ -134,6 +134,8 @@ export interface UpdateResult {
   release?: InstallReleaseResult;
   /** release mode only: what happened to `<product>/runtime/` (Node, Postgres + pgvector, git) */
   runtimeDeps?: InstallRuntimeDepsResult;
+  /** release mode only: each provider tool pack ALREADY under `runtime/remote/`, moved to the release (one the owner never chose is not fetched) */
+  remotePacks?: InstallRemotePackResult[];
   /** release mode on a launchd Mac: what happened to the Mac app (mac-app.ts) */
   app?: UpdateAppResult;
   /** the directory the rest of the update ran against (`<product-dir>/current` in release mode) */
@@ -384,6 +386,7 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
   let failure: StepFailed | undefined;
   let release: InstallReleaseResult | undefined;
   let runtimeDeps: InstallRuntimeDepsResult | undefined;
+  let remotePacks: InstallRemotePackResult[] | undefined;
   let app: UpdateAppResult | undefined;
   let reexec: ReexecOutcome | undefined;
   let sharedScope: MigrateScopeResult | undefined;
@@ -498,6 +501,7 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
         r.action(`resolve release ${want} of ${env.METISTRY_RELEASE_REPO ?? "foldedspacelabs/metistry"} and download metistry-runtime-${want}-${opts.target ?? releaseTarget(platform)}.tar.gz${opts.releaseVersion ? "" : ` (Latest, or the newest of the last ${RELEASE_WALK_LIMIT} releases that carries this platform's pack — never older than what runs)`}`);
         r.action(`verify its sha256 against checksums.txt, unpack to ${productDir}/releases/${want}/ and point current at it`);
         r.action(`download metistry-runtime-deps-${want}-${opts.target ?? releaseTarget(platform)}.tar.gz the same way and unpack it to ${productDir}/${RUNTIME_DIRNAME}/ (Node, Postgres + pgvector, git)`);
+        r.action(`move each provider tool pack already under ${productDir}/${RUNTIME_DIRNAME}/${REMOTE_DIRNAME}/ to ${want} the same way (metistry-remote-<tool>-${want}-${opts.target ?? releaseTarget(platform)}.tar.gz; a tool whose provider was never chosen is not fetched)`);
       }
       app = await macApp(want);
       if (!opts.rollback && !opts.noReexec) r.action(`hand the rest to ${want}'s own CLI (node ${productDir}/${CURRENT_LINK}/packages/cli/dist/main.js update --continue-from=switched …): build, migrations, restart, lock and doctor run on the release just installed`);
@@ -516,6 +520,11 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
       if (!opts.rollback && runtimeDepsEnabled(env)) {
         runtimeDeps = await installRuntimeDeps(r, { productDir, fetchFn, env, version: releaseVersion, ...(opts.target ? { target: opts.target } : {}) });
         if (!runtimeDeps.installed) r.note(`${RUNTIME_DIRNAME}/: unchanged — ${runtimeDeps.reason}`);
+        // and so does every provider tool pack the owner's choice put under
+        // runtime/remote/ — only those: a pack is fetched by `remote set`,
+        // never by an update (plan §2.23, X-112)
+        remotePacks = await updateRemotePacks(r, { productDir, fetchFn, env, version: releaseVersion, ...(opts.target ? { target: opts.target } : {}) });
+        for (const p of remotePacks) if (!p.installed) r.note(`${RUNTIME_DIRNAME}/${REMOTE_DIRNAME}/${p.tool}/: unchanged — ${p.reason}`);
       }
       app = await macApp(releaseVersion);
       // The rest of this update belongs to the release just installed: this
@@ -525,7 +534,7 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
       if (!opts.rollback && release.installed) {
         reexec = await reexecIntoRelease(r, { productDir, runDir, version: releaseVersion, runningVersion: version, flags: opts.forwardFlags ?? {}, env, disabled: opts.noReexec, tmpDir: opts.reexecTmpDir });
         if (reexec.status === "continued") {
-          return { code: reexec.code ?? 1, source, runDir, commands: r.commands, restarted, restart, deferred, reexec, release, ...(runtimeDeps ? { runtimeDeps } : {}), ...(app ? { app } : {}) };
+          return { code: reexec.code ?? 1, source, runDir, commands: r.commands, restarted, restart, deferred, reexec, release, ...(runtimeDeps ? { runtimeDeps } : {}), ...(remotePacks ? { remotePacks } : {}), ...(app ? { app } : {}) };
         }
         if (reexec.status === "fell-back") {
           // Loud, and not a pass: the install now runs a release whose own CLI
@@ -857,7 +866,7 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
   }
   r.out("");
   r.out(updateSummary({ ui: r.ui, dryRun: r.dryRun, failure, code, source, version: lock?.product.version ?? releaseVersion, migrations, restarted, kickstartFailed: kickFailed.length, app, restart, deferred }));
-  return { code, source, runDir, commands: r.commands, ...(lock ? { lock } : {}), restarted, restart, deferred, ...(reexec ? { reexec } : {}), ...(migrations ? { migrations } : {}), ...(release ? { release } : {}), ...(runtimeDeps ? { runtimeDeps } : {}), ...(app ? { app } : {}), ...(sharedScope ? { sharedScope } : {}), ...(seededTemplates ? { seededTemplates } : {}), ...(vaultCase ? { vaultCase } : {}), ...(pendingCommit ? { pendingCommit } : {}) };
+  return { code, source, runDir, commands: r.commands, ...(lock ? { lock } : {}), restarted, restart, deferred, ...(reexec ? { reexec } : {}), ...(migrations ? { migrations } : {}), ...(release ? { release } : {}), ...(runtimeDeps ? { runtimeDeps } : {}), ...(remotePacks ? { remotePacks } : {}), ...(app ? { app } : {}), ...(sharedScope ? { sharedScope } : {}), ...(seededTemplates ? { seededTemplates } : {}), ...(vaultCase ? { vaultCase } : {}), ...(pendingCommit ? { pendingCommit } : {}) };
 }
 
 // ---- seed templates the vault lacks ---------------------------------------------------

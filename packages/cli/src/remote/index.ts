@@ -39,6 +39,7 @@ import { availableProviders, providerFor, remoteChoices, remoteContext, remoteRo
 
 export { REMOTE_PROVIDERS_BUILT_IN, availableProviders, classifyUpstream, droppedOriginsNote, mainPortRemediation, providerFor, proxySocketPath, remoteChoices, remoteContext, remoteRows, sharedRemoteRows, type RemoteRegistry } from "./rows.js";
 export { none, NONE_ROW_INFO } from "./none.js";
+export { ensureRemotePack, findRemotePack, isRemoteTool, MANUAL_INSTALL, REMOTE_TOOLS, remotePackAssetName, remoteToolDir, type EnsureRemotePackResult, type RemotePack, type RemoteTool } from "./packs.js";
 export type { AuthorizeOptions, Configured, Detection, ProviderOptions, RemoteChoice, RemoteContext, RemoteProvider, RemoteRow, Revoked } from "./provider.js";
 
 export const REMOTE_VERBS = ["status", "set", "authorize", "test", "off"] as const;

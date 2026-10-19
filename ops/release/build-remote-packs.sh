@@ -150,9 +150,11 @@ build_tailscale() {
 }
 
 verify_tailscale() { # <prefix> — from a moved copy
-  local v
-  v="$("$1/bin/tailscale" version 2>&1 | head -1)"
-  [ "$v" = "$TAILSCALE_VERSION" ] || die "tailscale version printed '$v' from the moved copy, not $TAILSCALE_VERSION"
+  local out v
+  # the whole output, not line 1: a tool may print a banner before the version
+  out="$("$1/bin/tailscale" version 2>&1)" || true
+  v="$(printf '%s\n' "$out" | grep -xF -m1 -e "$TAILSCALE_VERSION" || true)"
+  [ -n "$v" ] || die "tailscale version printed '$(printf '%s' "$out" | head -3 | paste -sd'|' -)' from the moved copy, no line of it being $TAILSCALE_VERSION"
   file "$1/bin/tailscaled" | grep -q 'Mach-O 64-bit executable arm64' || die "bin/tailscaled is not an arm64 Mach-O"
   say "tailscale $v, tailscaled is an arm64 Mach-O"
 }
@@ -191,9 +193,10 @@ build_cloudflared() {
 }
 
 verify_cloudflared() { # <prefix>
-  local v
-  v="$("$1/bin/cloudflared" --version 2>&1 | head -1)"
-  printf '%s' "$v" | grep -qF "$CLOUDFLARED_VERSION" || die "cloudflared --version printed '$v' from the moved copy, not $CLOUDFLARED_VERSION"
+  local out v
+  out="$("$1/bin/cloudflared" --version 2>&1)" || true
+  v="$(printf '%s\n' "$out" | grep -F -m1 -e "$CLOUDFLARED_VERSION" || true)"
+  [ -n "$v" ] || die "cloudflared --version printed '$(printf '%s' "$out" | head -3 | paste -sd'|' -)' from the moved copy, no line of it naming $CLOUDFLARED_VERSION"
   say "$v"
 }
 
@@ -231,10 +234,13 @@ build_zrok() {
 }
 
 verify_zrok() { # <prefix>
-  local bin v
+  local bin out v
   bin="$(find "$1/bin" -type f | head -1)"
-  v="$("$bin" version 2>&1 | head -1)"
-  printf '%s' "$v" | grep -qF "$ZROK_VERSION" || die "$(basename "$bin") version printed '$v' from the moved copy, not $ZROK_VERSION"
+  # zrok 2.x prints an ASCII-art banner before the version line (v0.17.1 died
+  # on its first line), so the whole output is searched for the pinned version
+  out="$("$bin" version 2>&1)" || true
+  v="$(printf '%s\n' "$out" | grep -F -m1 -e "$ZROK_VERSION" | sed 's/^[[:space:]]*//' || true)"
+  [ -n "$v" ] || die "$(basename "$bin") version printed no line naming $ZROK_VERSION from the moved copy (output: $(printf '%s' "$out" | tr -s ' \n' ' ' | cut -c1-200))"
   say "$(basename "$bin") $v"
 }
 

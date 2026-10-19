@@ -42,24 +42,31 @@ export async function consumeEnrollmentCode(db: Db, code: string): Promise<boole
   return rows.length === 1;
 }
 
+/**
+ * `rpId` is the host the passkey was created for (0039, §2.23) — the console
+ * always writes it. Absent = NULL, which `getPasskey` and `listDevices` read
+ * as the first configured origin's host: that is exactly a passkey from
+ * before 0039, and the tests that stand one up say so.
+ */
 export async function storePasskey(
   db: Db,
-  p: { id: string; publicKey: Uint8Array; signCount: number; transports: string[]; origin: string; label: string },
+  p: { id: string; publicKey: Uint8Array; signCount: number; transports: string[]; origin: string; label: string; rpId?: string | null },
 ): Promise<void> {
   await db.query(
-    `INSERT INTO passkeys (id, public_key, sign_count, transports, rp_origin, label)
-     VALUES ($1, $2, $3, $4, $5, $6)`,
-    [p.id, Buffer.from(p.publicKey), p.signCount, p.transports, p.origin, p.label],
+    `INSERT INTO passkeys (id, public_key, sign_count, transports, rp_origin, label, rp_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [p.id, Buffer.from(p.publicKey), p.signCount, p.transports, p.origin, p.label, p.rpId ?? null],
   );
 }
 
+/** `rpID` null = a passkey from before 0039; the ceremony reads it as the first configured host. */
 export async function getPasskey(
   db: Db,
   id: string,
-): Promise<{ id: string; publicKey: Uint8Array; counter: number } | null> {
-  const { rows } = await db.query(`SELECT id, public_key, sign_count FROM passkeys WHERE id = $1`, [id]);
+): Promise<{ id: string; publicKey: Uint8Array; counter: number; rpID: string | null } | null> {
+  const { rows } = await db.query(`SELECT id, public_key, sign_count, rp_id FROM passkeys WHERE id = $1`, [id]);
   const r = rows[0];
-  return r ? { id: r.id, publicKey: new Uint8Array(r.public_key), counter: Number(r.sign_count) } : null;
+  return r ? { id: r.id, publicKey: new Uint8Array(r.public_key), counter: Number(r.sign_count), rpID: r.rp_id ?? null } : null;
 }
 
 export async function touchPasskey(db: Db, id: string, newCounter: number): Promise<void> {
@@ -108,12 +115,19 @@ export async function revokeSession(db: Db, sessionId: number): Promise<boolean>
   return rows.length === 1;
 }
 
-export async function listDevices(db: Db): Promise<any[]> {
+/**
+ * Each session with its passkey; `rp_id` is the host the passkey was created
+ * for, read as `defaultRpID` (the first configured origin's host) for a
+ * passkey from before 0039 — resolved here so a client never has to know the
+ * origin list to tell which passkeys a provider change stranded (§2.23).
+ */
+export async function listDevices(db: Db, defaultRpID: string): Promise<any[]> {
   const { rows } = await db.query(
-    `SELECT s.id, p.label, p.last_used_at AS passkey_last_used, s.created_at,
+    `SELECT s.id, p.label, p.last_used_at AS passkey_last_used, COALESCE(p.rp_id, $1) AS rp_id, s.created_at,
             s.last_seen_at, s.absolute_expires_at, s.revoked_at IS NOT NULL AS revoked
      FROM auth_sessions s JOIN passkeys p ON p.id = s.passkey_id
      ORDER BY s.last_seen_at DESC`,
+    [defaultRpID],
   );
   return rows;
 }

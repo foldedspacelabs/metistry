@@ -13,11 +13,13 @@
 // THE SET IS CLOSED AT THE TYPE (invariant 10). `ManagementRow.remoteAccess`
 // does not take "anything starting with `remote`": `RemoteAccessArgv.accepts`
 // is a grammar of exact shapes — `remote status --json`, `remote test
-// --json`, `remote off [--yes] [--json]`, `remote authorize <tailscale|
-// cloudflare> [--no-browser] [--json]`, `remote set <provider> [that
-// provider's flags] [--yes] [--json]` — each flag once, each value from a
-// known list or a bare name, nothing positional after the provider, and
-// `--token` only ever a switch. A `ManagementCommand(.remoteAccess, …)` that
+// --json`, `remote off [--yes] --json`, `remote set <provider> [that
+// provider's flags] [--yes] --json` — no wider than what the app runs: each
+// flag once, each value from a known list or a bare name, nothing positional
+// after the provider, `--json` always (the app parses every answer), and
+// `--token` only ever a switch. `remote authorize` is not here: the flow does
+// not run it (X-106's `configure` signs in itself), so the door does not
+// admit it — doctor's *Sign in to Tailscale* action is shown with Copy. A `ManagementCommand(.remoteAccess, …)` that
 // does not fit is nil, so no runner can be handed it. A PASTED TOKEN NEVER
 // REACHES ARGV: `RemoteSetPlan` puts it on the command's standard input and
 // the grammar refuses `--token=<v>` and any value after `--token`.
@@ -311,8 +313,6 @@ enum RemoteAccessJSON {
 public enum RemoteAccessArgv {
     /// The seven provider ids, in the chooser's order (core's `REMOTE_PROVIDERS`).
     public static let providers = ["none", "tailscale", "relay", "cloudflare", "zrok", "ngrok", "port-forward"]
-    /// The providers with a browser sign-in of their own (`remote authorize`).
-    public static let signInProviders = ["tailscale", "cloudflare"]
     public static let tailscaleModes = ["funnel", "tailnet"]
     public static let ddnsProviders = ["desec", "cloudflare"]
 
@@ -329,7 +329,7 @@ public enum RemoteAccessArgv {
 
     /// The flags `remote set <provider>` takes, per provider (plan §2.23, "Provider flags").
     static func setFlags(for provider: String) -> [String: Flag] {
-        let common: [String: Flag] = ["yes": .bare, "json": .bare, "timeout": .number]
+        let common: [String: Flag] = ["yes": .bare, "json": .bare]
         let own: [String: Flag]
         switch provider {
         case "none": own = [:]
@@ -345,24 +345,25 @@ public enum RemoteAccessArgv {
 
     /// True for exactly the shapes the Mac runs; false for everything else,
     /// including a `--flag=value` spelling, a repeated flag, a value where a
-    /// switch goes, or a positional after the provider.
+    /// switch goes, a positional after the provider, a missing `--json`, or a
+    /// verb the app never runs (`authorize`).
     public static func accepts(_ arguments: [String]) -> Bool {
         guard arguments.first == "remote", arguments.count >= 2 else { return false }
         let verb = arguments[1]
+        let parsed: [String: String]?
         switch verb {
         case "status", "test":
-            return flags(Array(arguments.dropFirst(2)), allowed: ["json": .bare]) != nil
+            parsed = flags(Array(arguments.dropFirst(2)), allowed: ["json": .bare])
         case "off":
-            return flags(Array(arguments.dropFirst(2)), allowed: ["yes": .bare, "json": .bare]) != nil
-        case "authorize":
-            guard arguments.count >= 3, signInProviders.contains(arguments[2]) else { return false }
-            return flags(Array(arguments.dropFirst(3)), allowed: ["no-browser": .bare, "timeout": .number, "json": .bare]) != nil
+            parsed = flags(Array(arguments.dropFirst(2)), allowed: ["yes": .bare, "json": .bare])
         case "set":
             guard arguments.count >= 3, providers.contains(arguments[2]) else { return false }
-            return flags(Array(arguments.dropFirst(3)), allowed: setFlags(for: arguments[2])) != nil
+            parsed = flags(Array(arguments.dropFirst(3)), allowed: setFlags(for: arguments[2]))
         default:
             return false
         }
+        // the app parses every answer, so every shape carries --json
+        return parsed?["json"] != nil
     }
 
     /// The flags as `name → value`, or nil when anything is not in the grammar.

@@ -1031,12 +1031,14 @@ CLI's (`docs/ops/remote-access.md`, "Switching"); the app drives and shows it.
 
 **The door is a closed grammar (invariant 10).** `ManagementRow.remoteAccess`
 (M20) does not accept "anything starting with `remote`":
-`RemoteAccessArgv.accepts` names the exact shapes — `remote status [--json]`,
-`remote test [--json]`, `remote off [--yes] [--json]`, `remote authorize
-<tailscale|cloudflare> [--no-browser] [--timeout <n>] [--json]`, `remote set
-<provider> [that provider's flags] [--yes] [--timeout <n>] [--json]` — each
-flag at most once, each value from a known list or a bare name, nothing
-positional after the provider. **A pasted token never reaches argv**:
+`RemoteAccessArgv.accepts` names the exact shapes — `remote status --json`,
+`remote test --json`, `remote off [--yes] --json`, `remote set <provider>
+[that provider's flags] [--yes] --json` — no wider than what the app runs:
+each flag at most once, each value from a known list or a bare name, nothing
+positional after the provider, `--json` always. `remote authorize` is not
+admitted (the flow does not run it; X-106's `configure` signs in), so
+doctor's *Sign in to Tailscale* action is shown in Services with Copy, like
+any argv outside the door. **A pasted token never reaches argv**:
 `RemoteSetPlan` writes it to the command's standard input with `--token` as
 the bare switch, and `--token <value>`, `--token=<value>` and a value after
 the provider's name are refused by the type. `tests/kit/remote-access-tests.swift`

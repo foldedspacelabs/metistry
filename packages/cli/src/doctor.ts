@@ -91,6 +91,7 @@ import { collectorCheckContext, mergeCollectorCheck, runCollectorCheck, type Col
 import { releaseRootAbove, resolveSeedDir } from "./env.js";
 import { CURRENT_LINK, RELEASES_DIRNAME } from "./release.js";
 import { remoteRows, type RemoteRegistry } from "./remote/rows.js";
+import { parseStarted, runnerGraceSec, serviceAgeSec, startGraceSec, STARTED_ENV, waitOutStart, type AgeContext, type StartedAt } from "./doctor-grace.js";
 
 export interface Db {
   query(text: string, values?: unknown[]): Promise<{ rows: any[] }>;
@@ -167,6 +168,18 @@ export interface DoctorDeps {
   appPath?: string | null;
   /** test seam: the remote-access adapters the `remote` rows ask (default the ones this release ships — remote/rows.ts) */
   remoteProviders?: RemoteRegistry;
+  /**
+   * Jobs the caller has just bootstrapped or kickstarted, by launchd label →
+   * epoch ms (`up`, `update`). A job in here that is younger than the start
+   * grace is *starting*: a probe of it is asked again, and a schedule row
+   * that waits on the console's first tick reads pending (doctor-grace.ts).
+   * Merged with `METISTRY_DOCTOR_STARTED`, which hands the same to a doctor
+   * run as a child process.
+   */
+  startedAt?: StartedAt;
+  /** test seams for the wait: the clock and the sleep */
+  now?: () => number;
+  sleep?: (ms: number) => Promise<void>;
 }
 
 // ---- manifests ------------------------------------------------------------
@@ -1006,6 +1019,8 @@ export async function scheduleRows(
   productDir: string,
   env: NodeJS.ProcessEnv = {},
   now: Date = new Date(),
+  /** how long the console's runner has been up (X-122), asked only when a row is overdue; undefined = unknown, and nothing is graced */
+  runnerUptime?: () => Promise<number | undefined>,
 ): Promise<DoctorRow[]> {
   const scheduled = (await walkManifests(productDir)).flatMap((m) => {
     if (!m.result.ok) return [];
@@ -1091,6 +1106,8 @@ export async function scheduleRows(
   const facts = profileFacts(await readFile(join(instanceDir, PROFILE_PATH), "utf8").catch(() => null));
 
   const out: DoctorRow[] = [];
+  // one lookup for every overdue row, and none when nothing is overdue
+  let runnerUp: Promise<number | undefined> | undefined;
   for (const s of scheduled) {
     const intervalSec = s.bound;
     const lastRun = last.get(`${s.name}/${s.runKind}`);
@@ -1176,6 +1193,19 @@ export async function scheduleRows(
           };
         }
         if (intervalSec > 0 && now.getTime() - lastRun.ts.getTime() > intervalSec * OVERDUE_FACTOR * 1000) {
+          // The runner does nothing before its first tick, a minute after it
+          // starts: a console restarted moments ago (update, up) has not been
+          // given the chance to run what is owed. Not a finding yet — pending,
+          // with why — and a failure again once the grace is spent (X-122).
+          const grace = runnerGraceSec(env);
+          const runnerUptimeSec = await (runnerUp ??= runnerUptime?.() ?? Promise.resolve(undefined));
+          if (runnerUptimeSec !== undefined && runnerUptimeSec < grace) {
+            return {
+              status: "degraded" as const,
+              remediation: `pending: ${s.name} last ran ${humanSec(Math.floor((now.getTime() - lastRun.ts.getTime()) / 1000))} ago, but the console's runner started ${humanSec(Math.floor(runnerUptimeSec))} ago and has not had its first tick yet — checked again once it has been up ${Math.ceil(grace)}s`,
+              meta: { ...meta, pending: true, runner_uptime_sec: Math.floor(runnerUptimeSec), runner_grace_sec: grace },
+            };
+          }
           action = viewConsoleLogs;
           return {
             status: "failed" as const,
@@ -1955,6 +1985,19 @@ export async function connectionRows(o: Parameters<typeof connectionsOptionsFor>
   }
 }
 
+/**
+ * The service a component's probe depends on having started, and the launchd
+ * jobs that serve it. The brain bridge is mounted on the console; the
+ * live-capture bridge answers for a recorder helper behind it, whose job
+ * starts on its own (its `check()` fails while the helper's socket is absent).
+ */
+export function graceSubject(component: string): { service: string; jobs: string[] } {
+  if (component === "brain") return { service: "console", jobs: ["console"] };
+  if (component === "live-capture") return { service: "live-capture", jobs: ["live-capture", "recorder"] };
+  const service = probeTargetFor(component).launchdService ?? component;
+  return { service, jobs: [service] };
+}
+
 export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
   // a COPY: doctor is read-only, and applying this instance's port block to
   // the real process environment would leak into whatever ran it
@@ -1964,6 +2007,10 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
   const platform = deps.platform ?? process.platform;
   const uid = deps.uid ?? (typeof process.getuid === "function" ? process.getuid() : 0);
   const timeoutMs = deps.timeoutMs ?? 5000;
+  // jobs just bootstrapped or kickstarted (doctor-grace.ts): the caller's, and a parent's through the env
+  const started: StartedAt = { ...parseStarted((deps.env ?? process.env)[STARTED_ENV]), ...(deps.startedAt ?? {}) };
+  const clock = deps.now ?? Date.now;
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((res) => setTimeout(res, ms)));
   // what was asked for and what is read can differ: a release install's root
   // holds `releases/` and `current`, and its manifests, seed and migrations
   // are in `current` — the directory `up` has always handed doctor (X-101)
@@ -2027,8 +2074,33 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
     ...(connOpts && checker ? { instance: { dir: connOpts.instanceDir, seedDir: connOpts.seedDir, checker } } : {}),
   });
   const envFiles = envPaths({ instanceDir, productDir })?.read ?? [];
+  // what "just started" is read from, asked only when a row needs it
+  const ageContext = async (): Promise<AgeContext> => ({
+    env,
+    exec,
+    uid,
+    platform,
+    children: supervised ? (await supervised).children : undefined,
+    composeDir: usesCompose(loaded.deployment) ? productDir : undefined,
+    labelSuffix,
+    started,
+    nowMs: clock(),
+  });
   const [componentRows, registries, layout, inbox, profile, vaultCase, cli, app, dbAndSchedules, launchd, keepAwake, remote, supervisor, launchdEnv, containers, localModels, sharedScope, vaultSync, connections] = await Promise.all([
-    (async () => Promise.all((await walkManifests(productDir)).map((m) => componentRow(m, { env, fetchFn, timeoutMs, shape, labelSuffix, compute, supervisor: supervised, collectorCtx, productDir }))))(),
+    (async () =>
+      Promise.all(
+        (await walkManifests(productDir)).map(async (m) => {
+          const probe = (): Promise<DoctorRow> => componentRow(m, { env, fetchFn, timeoutMs, shape, labelSuffix, compute, supervisor: supervised, collectorCtx, productDir });
+          const row = await probe();
+          // a collector's or routine's own check() is about its credentials and its sources, not about a job coming up
+          if (row.status !== "failed" || !m.result.ok || m.result.manifest.type === "collector" || m.result.manifest.type === "routine") return row;
+          // A bridge or the console probed moments after it was started is not
+          // down, it is coming up — the recorder's socket, one second after
+          // bootstrap. Asked again until its start grace is spent (X-122).
+          const { service, jobs } = graceSubject(m.result.manifest.name);
+          return waitOutStart(row, { reprobe: probe, ageSec: async () => serviceAgeSec(await ageContext(), service, jobs), graceSec: startGraceSec(env), sleep, now: clock });
+        }),
+      ))(),
     // the registries over product + extensions: overlays and skips (plan §2.7)
     registriesRow(productDir, env),
     layoutRow(instanceDir),
@@ -2045,7 +2117,10 @@ export async function doctor(deps: DoctorDeps): Promise<DoctorReport> {
       try {
         // schedules after the db rows: they read `runs`, so they are only
         // meaningful once the db row above has said the database answers
-        return [...(await dbRows(db, productDir, shape, labelSuffix)), ...(await scheduleRows(db, productDir, env))];
+        const dbPart = await dbRows(db, productDir, shape, labelSuffix);
+        // the console's runner ticks first a minute after it starts: how long
+        // it has been up decides whether "overdue" is a finding yet (X-122)
+        return [...dbPart, ...(await scheduleRows(db, productDir, env, new Date(clock()), async () => serviceAgeSec(await ageContext(), "console")))];
       } finally {
         // every path, the throwing one included: a pool left open is a
         // handle that outlives the verb that made it

@@ -24,6 +24,7 @@ import { SEED_VAULT_DIR } from "./init.js";
 import { renameCaseMismatches, type VaultCaseResult } from "./vault-case.js";
 import { loadDeployment } from "./deployment.js";
 import { doctor, hostLocal, renderTable, type DoctorDeps, type DoctorReport } from "./doctor.js";
+import { serializeStarted, STARTED_ENV, type StartedAt } from "./doctor-grace.js";
 import { productVersion } from "./env.js";
 import { envPaths, readInstanceId } from "./instance.js";
 import { applyPorts, loadNamespace } from "./namespace.js";
@@ -371,6 +372,11 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
   const prior = lockPath ? await readLock(lockPath) : undefined;
   const source = opts.channel ?? prior?.product.source ?? "git";
   const restarted: string[] = [];
+  /** when each of them was restarted (epoch ms) — the closing doctor waits out a job that has only just started (X-122) */
+  const startedAt: Record<string, number> = {};
+  const markStarted = (label: string): void => {
+    startedAt[label] = Date.now();
+  };
   /** jobs whose kickstart was tried and failed — never counted as restarted (#287), and never as "nothing changed" either */
   const kickFailed: Array<{ label: string; code: number }> = [];
   let migrations: MigrateResult | undefined;
@@ -618,7 +624,10 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
       const supervisorLabel = labelFor(SUPERVISOR_SERVICE, labelSuffix);
       const render = await rerenderLaunchd(r, { productDir, runDir, env, exec: opts.exec, source, version: releaseVersion, envFile: opts.envFile, platform, uid, fetchFn, labelSuffix, owed: restart.owed, upOptions: opts.launchdUp });
       rendered = render.bootstrapped;
-      for (const l of rendered) if (!restarted.includes(l)) restarted.push(l);
+      for (const l of rendered) {
+        markStarted(l);
+        if (!restarted.includes(l)) restarted.push(l);
+      }
       // a stale supervisor.json is owed a restart whether or not any code
       // moved — the same-version rerun that finishes a failed update is
       // exactly that case — and an agent the Mac app registered is not
@@ -640,7 +649,10 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
           // that SUCCEEDED counts: `restarted` is what the summary reports as
           // "kickstarted", and a job that failed was not
           const k = await r.run("launchctl", ["kickstart", "-k", `gui/${uid}/${t.label}`], { tolerateFailure: true, comment: "code changed" });
-          if (k.code === 0) restarted.push(t.label);
+          if (k.code === 0) {
+            restarted.push(t.label);
+            markStarted(t.label);
+          }
           else {
             kickFailed.push({ label: t.label, code: k.code });
             r.note(`${t.label}: kickstart exited ${k.code} — not restarted; \`metistry doctor\` shows its state`);
@@ -669,6 +681,7 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
             const res = await restartSupervisorChild(r, { runDir, env, name: "reconciler" });
             if (res.ok) {
               restarted.push(label);
+              markStarted(label);
               r.note(`reconciler: restarted through the supervisor (${res.detail}) ${why} — nothing else was touched`);
             } else {
               kickFailed.push({ label, code: 1 });
@@ -677,8 +690,10 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
           }
         } else if (!restarted.includes(label)) {
           const k = await r.run("launchctl", ["kickstart", "-k", `gui/${uid}/${label}`], { tolerateFailure: true, comment: why });
-          if (k.code === 0) restarted.push(label);
-          else {
+          if (k.code === 0) {
+            restarted.push(label);
+            markStarted(label);
+          } else {
             kickFailed.push({ label, code: k.code });
             r.note(`${label}: kickstart exited ${k.code} — not restarted, so it has not read ${OWNER_BRIDGE_TOKEN} yet`);
           }
@@ -829,8 +844,8 @@ export async function update(opts: UpdateOptions): Promise<UpdateResult> {
   const mode = opts.closingDoctor ?? (opts.doctorFn || opts.doctorDeps ? "in-process" : "child");
   const doctorCode =
     mode === "child"
-      ? await childClosingDoctor(r, { productDir, runDir, envFile: opts.envFile, doctorDeps: opts.doctorDeps, doctorFn: opts.doctorFn ?? doctor })
-      : await closingDoctor(r, runDir, opts.doctorDeps, opts.doctorFn ?? doctor);
+      ? await childClosingDoctor(r, { productDir, runDir, envFile: opts.envFile, doctorDeps: opts.doctorDeps, doctorFn: opts.doctorFn ?? doctor, startedAt })
+      : await closingDoctor(r, runDir, opts.doctorDeps, opts.doctorFn ?? doctor, startedAt);
   // a deferred failure is still a failure — it just did not get to stop the
   // restart. Non-zero, but only here, at the end.
   const code = failure ? failure.code || 1 : deferred.length > 0 ? 1 : doctorCode;
@@ -963,13 +978,13 @@ export function parseDoctorJson(stdout: string): DoctorReport | undefined {
  */
 export async function childClosingDoctor(
   r: StepRunner,
-  o: { productDir: string; runDir: string; envFile?: string | undefined; doctorDeps?: Partial<DoctorDeps> | undefined; doctorFn: (d: DoctorDeps) => Promise<DoctorReport>; exists?: ((p: string) => boolean) | undefined },
+  o: { productDir: string; runDir: string; envFile?: string | undefined; doctorDeps?: Partial<DoctorDeps> | undefined; doctorFn: (d: DoctorDeps) => Promise<DoctorReport>; exists?: ((p: string) => boolean) | undefined; startedAt?: StartedAt | undefined },
 ): Promise<number> {
   const exists = o.exists ?? existsSync;
   const main = updatedCliMain(o.runDir);
   const inProcess = async (why: string): Promise<number> => {
     r.note(`closing doctor: ${why} — running this process's doctor instead, which is the PRE-update code; if it disagrees with the new release, a standalone \`metistry doctor\` is the truth`);
-    const report = await o.doctorFn({ productDir: o.runDir, exec: r.exec, env: r.env, ...o.doctorDeps });
+    const report = await o.doctorFn({ productDir: o.runDir, exec: r.exec, env: r.env, ...(o.startedAt ? { startedAt: o.startedAt } : {}), ...o.doctorDeps });
     r.out(renderTable(report, r.ui));
     return report.ok ? 0 : 1;
   };
@@ -987,7 +1002,9 @@ export async function childClosingDoctor(
   let res: { code: number; stdout: string; stderr: string };
   try {
     // exit 1 is "doctor is not happy", a verdict — not a failed step
-    res = await r.run(node, args, { tolerateFailure: true, timeoutMs: CHILD_DOCTOR_TIMEOUT_MS, comment: "the updated CLI's doctor: the new manifests, read by the new schema" });
+    // the jobs this run restarted ride in the child's environment, so its doctor waits out their start too
+    const childEnv = o.startedAt && Object.keys(o.startedAt).length > 0 ? { ...r.env, [STARTED_ENV]: serializeStarted(o.startedAt) } : undefined;
+    res = await r.run(node, args, { tolerateFailure: true, timeoutMs: CHILD_DOCTOR_TIMEOUT_MS, ...(childEnv ? { env: childEnv } : {}), comment: "the updated CLI's doctor: the new manifests, read by the new schema" });
   } catch (err) {
     return inProcess(`could not run the updated CLI (${err instanceof Error ? err.message : String(err)})`);
   }

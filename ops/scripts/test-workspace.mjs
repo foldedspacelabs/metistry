@@ -30,8 +30,8 @@
 // Direct vitest runs are unchanged: `METISTRY_TEST_DB_NAME=<shared> vitest
 // run` in a package still uses the shared database test-db.sh built.
 
-import { spawn, spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -114,17 +114,59 @@ export function parseArgs(argv) {
   return opts;
 }
 
-/** The workspace's packages as pnpm sees them (root excluded), each with its package.json `scripts`. */
+/**
+ * The workspace's packages (root excluded), each with its package.json
+ * `scripts`, read from `pnpm-workspace.yaml` with the filesystem alone — no
+ * pnpm needed, so the unit tests can ask this before CI has installed it. The
+ * file's patterns are `<dir>/*` and plain `<dir>`; anything fancier is an
+ * error here rather than a package quietly left untested.
+ */
 export function workspacePackages(root) {
-  const r = spawnSync("pnpm", ["-r", "ls", "--json", "--depth", "-1"], { cwd: root, encoding: "utf8" });
-  if (r.status !== 0) throw new Error(`pnpm -r ls failed: ${r.stderr || r.stdout}`);
-  const list = JSON.parse(r.stdout);
-  return list
-    .filter((p) => resolve(p.path) !== resolve(root))
-    .map((p) => {
-      const manifest = JSON.parse(readFileSync(join(p.path, "package.json"), "utf8"));
-      return { name: p.name, path: p.path, scripts: manifest.scripts ?? {} };
-    });
+  const out = [];
+  for (const pattern of workspacePatterns(readFileSync(join(root, "pnpm-workspace.yaml"), "utf8"))) {
+    const dirs = pattern.endsWith("/*")
+      ? readdirSync(join(root, pattern.slice(0, -2)), { withFileTypes: true })
+          .filter((e) => e.isDirectory())
+          .map((e) => join(root, pattern.slice(0, -2), e.name))
+          .sort()
+      : [join(root, pattern)];
+    for (const dir of dirs) {
+      const file = join(dir, "package.json");
+      if (!existsSync(file)) continue;
+      const manifest = JSON.parse(readFileSync(file, "utf8"));
+      if (!manifest.name) throw new Error(`${file} has no name`);
+      out.push({ name: manifest.name, path: dir, scripts: manifest.scripts ?? {} });
+    }
+  }
+  return out;
+}
+
+/** The `packages:` entries of a pnpm-workspace.yaml: one `- <pattern>` per line, quotes optional. */
+export function workspacePatterns(yamlText) {
+  const patterns = [];
+  let inPackages = false;
+  for (const raw of yamlText.split("\n")) {
+    const line = raw.replace(/#.*$/, "").trimEnd();
+    if (line.trim() === "") continue;
+    if (/^packages:\s*$/.test(line)) {
+      inPackages = true;
+      continue;
+    }
+    if (!/^\s/.test(line)) {
+      inPackages = false;
+      continue;
+    }
+    if (!inPackages) continue;
+    const m = /^\s*-\s*(?:"([^"]*)"|'([^']*)'|(\S+))\s*$/.exec(line);
+    const pattern = m?.[1] ?? m?.[2] ?? m?.[3];
+    if (!pattern) throw new Error(`pnpm-workspace.yaml: cannot read a package pattern from ${JSON.stringify(raw)}`);
+    if (/[!?[\]{}]/.test(pattern) || (pattern.includes("*") && !pattern.endsWith("/*")) || pattern.slice(0, -2).includes("*")) {
+      throw new Error(`pnpm-workspace.yaml: pattern ${JSON.stringify(pattern)} is more than <dir>/* or <dir>, which is all test-workspace.mjs reads`);
+    }
+    patterns.push(pattern.replace(/\/$/, ""));
+  }
+  if (patterns.length === 0) throw new Error("pnpm-workspace.yaml names no packages");
+  return patterns;
 }
 
 /** The child's environment: the scrubbed one this process has, with the two database names pointed at the package's copy. */

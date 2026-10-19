@@ -10,7 +10,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
-import { childEnv, packageDbName, parseArgs, plan, scratchSuffix, workspacePackages } from "../test-workspace.mjs";
+import { childEnv, packageDbName, parseArgs, plan, scratchSuffix, workspacePackages, workspacePatterns } from "../test-workspace.mjs";
 
 const SCRATCH = /^metistry_test_[a-z0-9_]+$/;
 const SUFFIX = /^_[a-z0-9_]+$/;
@@ -95,11 +95,20 @@ test("childEnv: the package's database as METISTRY_TEST_DB_NAME; METISTRY_DB_NAM
   assert.deepEqual(base, { PATH: "/usr/bin", METISTRY_DB_PASSWORD: "pw", METISTRY_TEST_DB_NAME: "metistry_test_x" }, "the caller's env is not mutated");
 });
 
+test("workspacePatterns: pnpm-workspace.yaml's packages list, quotes or not, comments dropped; anything beyond <dir>/* or <dir> is an error", () => {
+  assert.deepEqual(workspacePatterns('packages:\n  - "apps/*"\n  - \'packages/*\'\n  - collectors # one package\n  - routines/\nother:\n  - not/a/package\n'), ["apps/*", "packages/*", "collectors", "routines"]);
+  assert.throws(() => workspacePatterns("packages:\n  - apps/**\n"), /more than <dir>\/\*/);
+  assert.throws(() => workspacePatterns("packages:\n  - '!apps/x'\n"), /more than/);
+  assert.throws(() => workspacePatterns("catalog: {}\n"), /names no packages/);
+});
+
 test("the real workspace: every package with a test script gets its own database within 63 characters, even from the longest default name", () => {
   const root = fileURLToPath(new URL("../../..", import.meta.url));
-  const packages = workspacePackages(root);
-  assert.ok(packages.length > 10, `pnpm -r ls saw ${packages.length} packages`);
+  const packages = workspacePackages(root); // the filesystem, not pnpm — CI runs this before pnpm is installed
+  assert.ok(packages.length > 10, `pnpm-workspace.yaml resolved to ${packages.length} packages`);
   assert.ok(!packages.some((p) => p.name === "metistry"), "the root is not a package to test");
+  assert.ok(packages.some((p) => p.name === "@foldedspacelabs/metistry-core"), "packages/* resolved");
+  assert.ok(packages.some((p) => p.name === "@metistry-apps/collectors"), "a plain <dir> entry resolved");
   const longest = "metistry_test_" + "d".repeat(40);
   for (const base of ["metistry_test_metistry", longest]) {
     const out = plan(packages, base);

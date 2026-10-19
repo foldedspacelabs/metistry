@@ -1,5 +1,87 @@
 # @metistry-apps/macos
 
+## 0.17.0
+
+### Minor Changes
+
+- 9c6a56c: The Status window gains **Fix All** (X-125) — the Mac half of `metistry doctor`'s repair contract (X-123), and a closed-set action (invariant 10): the CLI door `doctor --fix --yes --json`, nothing else. It is offered only while doctor itself has classified a row `fixable` and named its repair; a your-hand row shows what to do and has no button, and a CLI that does not classify rows gets no Fix All. It re-reads first, then runs at once if nothing in the plan moves files or restarts a running service, or otherwise puts a confirm on screen naming every fix (the ones that ask marked) — `--yes` leaves the app only from that sheet's Fix All, and Cancel, Esc and dismissing it send nothing. M6 now admits exactly two argvs — `doctor --check --json` (which every read of doctor now runs, read-only whatever the terminal) and `doctor --fix --yes --json` — instead of any argv beginning `doctor`. The answer is drawn as one line, each fix with the statuses either side of its re-check and the CLI's own ledger, and each row says *fixed* or *still failing*; a fix that asked without being in the confirmed preview is said afterwards, and a CLI that ignored `--fix` is reported as that, not as "nothing needed fixing". Tests: Fix All runs the fixable rows only; a destructive fix asks first and Cancel sends nothing; every other doctor argv is refused; §2.18 for the panel and the sheet.
+- 8eb7adb: X-107: Set Up Remote Access — the guided flow, the wizard step and Settings ▸
+  Remote Access (plan §2.23). The Mac app gains a **Remote Access** step between
+  Services and Door and a **Remote Access** pane in ACCESS before Devices, both
+  one flow over `metistry remote` (M20): choose (None preselected, Tailscale —
+  Any browser marked Recommended, unshipped providers listed as *Not yet
+  available*), then the CLI's own ceremony — the pack, the provider's sign-in
+  page in the browser, each approval page, the handler, the public name, the
+  wait for the origin to answer, the protected write, the old provider's revoke
+  — shown step by step from the lines the CLI prints, with every link it printed
+  offered to open again; then **Check** (`remote test`, said as *answers from
+  this Mac*, never as reaching the phone) and only then **Add a Phone…**. The
+  pane adds **Test** and **Turn Off**, whose confirm names what the provider's
+  revoke undoes, what is left for the owner at the provider, and which phones
+  stop signing in — in the CLI's own preview words. A switch away from a
+  provider confirms the same way before `--yes`. The management runner's M20 row
+  is a closed grammar of exact argv shapes, never a prefix: a pasted token is
+  the command's stdin and refused in every argv spelling. Devices marks a
+  passkey whose host is no longer a configured origin. The CLI: with `--json`,
+  `remote set`'s step notes and the preview line go to stderr so stdout is the
+  one document, and the preview carries `revoked` (what the old provider's
+  revoke would undo) and `stranding` (the sentence about the phones a switch
+  strands).
+- 0708790: Add a Phone sees the phone arrive (design-build-plan §2.23 step 7, X-114). Migration `0040` gives `auth_enrollment_codes` `opened_at` and `opened_via`: `POST /auth/enroll/start` with a live code now stamps which console listener answered it — `proxy` (the one a provider is pointed at, so the request came from outside) or `main` (loopback) — audited once as `auth` · `enroll_opened`. A `proxy` stamp replaces a `main` one and nothing replaces `proxy`; stamping never spends the code, and an unknown, used, expired or cancelled code stamps nothing. `metistry enroll --status <code_id> [--json]` reads it back (read-only; the id, never the code). The Mac's Add a Phone sheet polls it and turns to *Opened on your phone* — "Your phone reached this Mac through <provider>" — between *Ready* and *Added* for `proxy` only, and an expiry without it says the phone did not reach the origin and what to try on the phone. The poll is bounded: it runs only while the event stream is down and stops when the sheet closes; and the sheet now cancels a live code when its window is closed from under it, not only when Done is pressed.
+- dc3e782: Settings ▸ Devices and the Add a Phone sheet (plan §2.22, X-77). The ACCESS
+  group gains **Devices**: a device per passkey from `GET /api/devices` — label,
+  added, last seen, *This device*, its sessions — with **Remove** (the passkey
+  and every session under it, confirmed naming the device) and **Sign Out
+  Everywhere** (sessions only, passkeys kept, once per signed-in device with the
+  caller's own last), both `POST /api/devices/:id/revoke` told apart by scope.
+  **Add a Phone…** — the pane's primary button and the wizard's step 6, one
+  sheet drawn once — runs `metistry enroll --json` (M19) through the management
+  runner and draws the QR with CoreImage's `CIQRCodeGenerator` (no dependency):
+  Checking, Refused (the CLI's own words, no QR), Ready (the QR, the URL, Copy
+  Link, a countdown), Expired, Added (seen on `GET /api/devices`). Closing the
+  sheet in any state runs `enroll --cancel` for a code that is still live. Step
+  6 no longer shows the `enroll.mjs` command or takes a pasted code.
+- 76a8024: `POST /message` carries a session-turn marker (X-84, ruled 2026-10-04; screen 11 §4 *staying on this Mac*). The body takes an optional `capture_session` — the recorder's id of the recording a turn is asked inside — and the capture bar's Ask sets it on every turn sent while a recording runs. A marked turn is **held to the private tier**: the row carries `meta.capture_session`, the drain resolves it through core's `turnTier`, and `private` runs on an `on_machine` provider or the turn is refused with the command that fixes it — never answered on another tier, never shadowed. The marker is checked at the door: a value that is not a recorder id is `400`; a session whose recording the console has seen end (its transcript delivered) is `409` with `reason: "stale"`; an agent bearer is refused the route whole, field or no field, and no refusal writes a row. The route record of a marked turn names `private` and never consults the policy, `GET /api/messages` reads such a turn's `tier` as `private`, and every unmarked turn is routed exactly as before. The Mac's `ChatStore.send` takes `captureSession:`, a retried turn resends the marker it was written with, and the bar's Ask panel says *Staying on this Mac* only while a marker is being sent.
+- 4c717ca: A connection's detail says who uses it and when it was last checked.
+  `GET /api/connections(/:name)` rows now list every user in `used_by` — the
+  agents and crews granted the connection beside its syncs, once it is offered
+  to agents — serve `last_checked` (the time and verdict of the newest check,
+  stamped by `metistry connections test` and `doctor` under the instance's
+  gitignored state directory) and, on an HTTP reach, `header_secrets` (each
+  header with the secret names it carries). Settings ▸ Connections draws all
+  three; `metistry connections show` prints the check and each header's secrets.
+
+### Patch Changes
+
+- 6477006: Fix: the permissions editor carries every autonomy kind core has — `connection_call`, the fifth, included, with core's own ceiling (`propose` at every level, never `allow`). The app's `AgentAutonomy` had four kinds, so a stored `connection_call: deny` was dropped on read and absent from the `PUT /api/agents/:id/autonomy` body — and the body **replaces** the record, so editing a folder, a project or another kind's mode silently turned asking back on, a widening the confirm sheet never listed. Now the record is read whole (a kind this build does not know rides back unchanged), the body sends it whole, `widenings` names `actions.connection_call deny → propose` like the others, the editor draws the fifth row and offers only the modes the kind can reach. Tests: a stored deny survives an unrelated edit; the fifth kind's widening, ceiling and defaults match core's cases; an unknown sixth kind round-trips; the editor draws a row per kind.
+- 71582c9: The Mac app's test suite no longer fails on CI's time limits in a healthy run.
+  The drive-table test that speaks every store method over the session child
+  drives the routes concurrently instead of one after another (a sequential walk
+  was ~300 waits on the main actor's queue, 45–55 s on CI's three-core runner for
+  a test that takes 0.1 s alone), and the live-events, store-session and chat
+  model tests carry a two-minute limit with the reason written down: they wait on
+  the main actor behind the ~480 other main-actor tests `swift test` dispatches at
+  once, not on wall time. No change to the app.
+- 6c9d129: Needs You shows a recording's notes and to-dos as one card. The Mac's request
+  rows decode `group_id`; rows that share one are a single "meeting" line in the
+  list and one meeting card (Accept All, Decline All, each with its own receipt)
+  in the detail. Selection, the bulk verbs and the page limit still count the
+  requests inside it, and a row with no group stays a card of its own.
+- ab5eff9: Fix: Settings ▸ Secrets no longer offers Grant rows for an owner-door secret
+  (`github_write`). The tool already refuses any connection or agent grant for
+  it, so the rows could only fail; the pane now says the secret is read only
+  through its own door, and keeps its Sent Only To hosts, Replace and Delete.
+- d54bb7f: The first-run wizard's copy uses the assistant's configured name once it has been typed in step 2 (the step summaries, the deployment-shape descriptions, and the Compute step's "finish without an engine" notes), and says "the assistant" only before a name is known.
+- d92a8bd: Fix: the Mac decides "loopback" with core's rule, in one place. A connection's
+  URL and an IMAP mailbox host were each judged by their own list — the URL list
+  also took any `*.localhost` name, and the mailbox list took any `127.`-prefixed
+  or bare `localhost` name but not `::1` — so the Connections pane could call a
+  destination safe over plain http or `plain` IMAP that the egress door treats as
+  cleartext. Both now use `EgressDestination.isLoopbackHost`, which is
+  `isLoopbackHost` in `packages/core/src/egress.ts`, and a test reads that
+  function so the two cannot drift.
+- 2b73cc5: Agents and Compute, three small gaps (X-98). The Agents model dropdown labels a model with the one line the Compute pane writes (name, provider, the provider's tag), not `model — provider`: both ask the same `ComputeModelLine`, so a model reads the same wherever the catalogue is absent. The wizard's key note now describes the T4-18 path: the key is one of this instance's own secrets, granted to its provider, and compute.yaml holds only a reference to it. A model download in the Compute pane shows its size and progress as the CLI printed them (nothing is invented when it prints none) and offers Cancel Download, which ends the CLI process that started it (`ProcessCommandRunner` now terminates its child when the calling task is cancelled).
+
 ## 0.16.1
 
 No changes in this release.

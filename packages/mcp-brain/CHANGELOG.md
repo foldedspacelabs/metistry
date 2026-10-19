@@ -1,5 +1,38 @@
 # @foldedspacelabs/metistry-mcp-brain
 
+## 0.17.0
+
+### Minor Changes
+
+- 9fce74e: `connections_call` folds a large answer (X-132; the Context Mode review's CM-6, allowed by the owner 2026-10-04). An upstream answer over `METISTRY_CONNECTION_FOLD_BYTES` (default 8 KiB on the wire) is folded once, after redaction, as a pure function of its text — a JSON array over `METISTRY_CONNECTION_FOLD_ARRAY_OVER` items (20) becomes its first `METISTRY_CONNECTION_FOLD_ARRAY_KEEP` (5), its last and the count; runs of a repeated line become the line and a count; anything still over the threshold gets a head and a tail — so the same answer folds to the same bytes every time. **The whole answer is kept** in the new `connection_answers` table (migration 0042: derived, ephemeral, self-purging after `METISTRY_CONNECTION_ANSWER_KEEP_HOURS`, default 24) under the call's own `runs` id, and read back one page at a time through the same tool — `connections_call { page: "<handle>/<n>" }`, no new tool — **by the principal that made the call and nobody else**: the read is `WHERE run_id = … AND principal = …`, so another caller with the handle hears the same `not_found` an unknown handle does. The `runs` row records `bytes_in`, `bytes_out`, `fold` and the handle. **The owner turns it off per connection**: `metistry connections policy <name> --fold off` writes `fold: false` beside Allow · Ask First · Never and the offer switch; `GET /api/connections` and `connections list --json` carry `fold` on every row.
+
+### Patch Changes
+
+- ce560ef: Two captures racing one idempotency key could delete the file the surviving
+  row names. Capture file names are `<ms>-<name>`, so two attempts inside one
+  millisecond put the same path; the attempt that lost on the idempotency index
+  removed "its" file — the winner's — and the winner's row was left pointing at
+  nothing (Add to Today pressed twice at once: an empty `Inbox/`, about one run
+  in five under three concurrent presses on a fast database). The loser now
+  removes a file only when the winning row does not name it.
+- Updated dependencies [4c27b53]
+- Updated dependencies [6719455]
+- Updated dependencies [5ea6c00]
+- Updated dependencies [13e1b31]
+- Updated dependencies [675e819]
+- Updated dependencies [0708790]
+- Updated dependencies [c90e651]
+- Updated dependencies [2ceeed4]
+- Updated dependencies [9fce74e]
+- Updated dependencies [82bf3ad]
+- Updated dependencies [c0685d8]
+- Updated dependencies [76a8024]
+- Updated dependencies [c2f9f88]
+  - @foldedspacelabs/metistry-core@0.17.0
+  - @foldedspacelabs/metistry-artifacts@0.17.0
+  - @foldedspacelabs/metistry-tasks@0.17.0
+  - @foldedspacelabs/metistry-queries@0.17.0
+
 ## 0.16.1
 
 ### Patch Changes

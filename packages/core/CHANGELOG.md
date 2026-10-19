@@ -1,5 +1,82 @@
 # @foldedspacelabs/metistry-core
 
+## 0.17.0
+
+### Minor Changes
+
+- 4c27b53: A repository maps to a project page, and the last sessions in it come back
+  as handles (research 2026-10-04 context-mode review, CM-3 and CM-4; ruled
+  2026-10-04). `Projects/<Name>.md` takes a `repos:` frontmatter — one git
+  remote or a list, in any clone spelling — which the reconciler reduces to one
+  canonical `host/path` (core's new `normalizeRepoRemote`, the Context Mode
+  Engine's shape) and indexes into the derived `project_repos` table, only from
+  a page the owner wrote. The named query `project_for_repo {remote}` answers
+  with the one page that claims a remote, or nothing when none or two do; no
+  route was added. The reconciler also reads every captured `kind: session`
+  note under `Inbox/` into the derived `vault_sessions` table (core's new
+  `parseSessionNote`: date, tool, repo, branch, turns, files, the owner's first
+  prompt clipped — never the agent's `## Last response`, which has no column),
+  and `recent_sessions {repo, days}` serves a repository's sessions back once
+  the knowledge fold has read them, never one an agent credential captured.
+  Migration `0043_project_repos_and_sessions.sql`, additive and derived in full.
+- 13e1b31: X-103: the console's proxy listener — the local owner token never crosses a tunnel (plan §2.23). Every remote-access provider's agent (`tailscaled`, `cloudflared`, zrok, ngrok, a TLS terminator) connects to the console from `127.0.0.1`, so a request that crossed a tunnel arrived with a loopback peer and the loopback-only `METISTRY_LOCAL_OWNER_TOKEN` was honoured for it — `local` routes and all. The console now answers in two places: the main listener, unchanged, and a **proxy listener** for providers only — a 0600 Unix socket at `<instance>/.metistry/state/console-proxy.sock` and a loopback TCP port `METISTRY_CONSOLE_PROXY_PORT` (default the console port + 1). A request on either is remote by construction: `checkLocalOwner` refuses the token from every peer there and the refusal is audited with the listener; no `local` route answers (`403 local_only`); a `Host` that is not a remote host `METISTRY_ORIGIN` names is refused with core's new `421 misdirected`, before anything else. `docker-compose.yml` publishes the port on `127.0.0.1` only; `metistry up` renders `METISTRY_CONSOLE_PROXY_PORT` into the console's environment, and a namespaced instance takes its block's second-to-last slot for it (the console port + 1 there is Postgres). `docs/ops/auth.md`'s "cannot be replayed from off the machine" is corrected and the listener documented.
+- 675e819: X-105: `metistry remote` — how the owner's phone reaches this Mac (plan §2.23, M20): the record, the adapter interface, and None. `deployment.yaml` gains a `remote:` block — `provider` (none | tailscale | relay | cloudflare | zrok | ngrok | port-forward), `mode`, the `origin` it yields and non-secret `settings` — strict in core's schema, the instance's block winning whole over the seed's, never a credential. `metistry remote [status] | set | authorize | test | off` with `--json`, `--dry-run`, `--instance`: `set` previews without `--yes`; with it, the new provider is configured first, its origin must answer from this Mac, the record is written through the protected write, and only then is the old provider revoked — a failed configure writes nothing, an origin that never answers writes and revokes nothing. A token is read on stdin or hidden at a prompt (the `secrets set` reader, now `stdin-value.ts`); a value in argv is refused and not echoed. `metistry up` derives `METISTRY_ORIGIN` from the record — the remote origin first, the loopback origin second; with None, loopback only — and drops a hand-written remote origin, saying so. The `RemoteProvider` interface (`detect`, `configure`, `status`, `revoke`, optional `authorize`) and its registry live in `packages/cli/src/remote/`; this release ships **None**, whose doctor row is `ok`. Doctor's `remote` kind gives every provider *tool present*, *proxy listener* — **`failed` when the recorded upstream is the console's main port** — and *answers from this Mac*. `docs/ops/remote-access.md` is new.
+- 0708790: Add a Phone sees the phone arrive (design-build-plan §2.23 step 7, X-114). Migration `0040` gives `auth_enrollment_codes` `opened_at` and `opened_via`: `POST /auth/enroll/start` with a live code now stamps which console listener answered it — `proxy` (the one a provider is pointed at, so the request came from outside) or `main` (loopback) — audited once as `auth` · `enroll_opened`. A `proxy` stamp replaces a `main` one and nothing replaces `proxy`; stamping never spends the code, and an unknown, used, expired or cancelled code stamps nothing. `metistry enroll --status <code_id> [--json]` reads it back (read-only; the id, never the code). The Mac's Add a Phone sheet polls it and turns to *Opened on your phone* — "Your phone reached this Mac through <provider>" — between *Ready* and *Added* for `proxy` only, and an expiry without it says the phone did not reach the origin and what to try on the phone. The poll is bounded: it runs only while the event stream is down and stops when the sheet closes; and the sheet now cancels a live code when its window is closed from under it, not only when Done is pressed.
+- c90e651: The session-start briefing (X-128; ruled 2026-10-04, Context Mode Q1–Q3):
+  `GET /api/briefing?repo=&remote=`, an agent bearer's door. The console
+  assembles it with no model from named queries alone — the owner's project
+  page for the repository (X-130), the open tasks in the project, the evening
+  folds naming it and the owner's recent sessions there (X-131) — under the
+  caller's grant: a `none` grant gets an empty briefing, `index` gets titles
+  only, `areas` gets content under its areas and nothing outside them. The
+  owner's own text appears as text; anything the assistant wrote appears as a
+  handle (path, title, date, sha256). Every string is sanitized, the block is
+  labelled reference and addresses nobody, the owner's budget
+  (`METISTRY_BRIEFING_TOKENS`, default 1,200) bounds it, and one `runs` row
+  per briefing carries the handles and the hash of what was sent. On by
+  default for every agent with a read grant; `briefing: false` in an agent's
+  grants opts it out. Core gains `assembleBriefing` and the `console_briefing`
+  door; the seed query `briefing_page_handles` is new and route-only.
+- 2ceeed4: Last time in this repository, for one caller (X-131; ruled 2026-10-04,
+  Context Mode Q3). Core gains `recentSessionsForCaller`, a small function over
+  the named queries `project_for_repo` and `recent_sessions` that the
+  session-start briefing can call: a session the knowledge fold has read goes to
+  any agent its grant allows, one still waiting for the fold only to an agent in
+  the same project as the repository, and every row is copied through a fixed
+  list of fields so no agent-written text is returned. `recent_sessions` takes an
+  `unfolded` param (default false — the safe arm) and each row says whether it is
+  `folded`.
+- 9fce74e: `connections_call` folds a large answer (X-132; the Context Mode review's CM-6, allowed by the owner 2026-10-04). An upstream answer over `METISTRY_CONNECTION_FOLD_BYTES` (default 8 KiB on the wire) is folded once, after redaction, as a pure function of its text — a JSON array over `METISTRY_CONNECTION_FOLD_ARRAY_OVER` items (20) becomes its first `METISTRY_CONNECTION_FOLD_ARRAY_KEEP` (5), its last and the count; runs of a repeated line become the line and a count; anything still over the threshold gets a head and a tail — so the same answer folds to the same bytes every time. **The whole answer is kept** in the new `connection_answers` table (migration 0042: derived, ephemeral, self-purging after `METISTRY_CONNECTION_ANSWER_KEEP_HOURS`, default 24) under the call's own `runs` id, and read back one page at a time through the same tool — `connections_call { page: "<handle>/<n>" }`, no new tool — **by the principal that made the call and nobody else**: the read is `WHERE run_id = … AND principal = …`, so another caller with the handle hears the same `not_found` an unknown handle does. The `runs` row records `bytes_in`, `bytes_out`, `fold` and the handle. **The owner turns it off per connection**: `metistry connections policy <name> --fold off` writes `fold: false` beside Allow · Ask First · Never and the offer switch; `GET /api/connections` and `connections list --json` carry `fold` on every row.
+- 82bf3ad: `metistry enroll` — add a phone (plan §2.22, M19). Mints a one-time,
+  ten-minute passkey enrolment code on this Mac and prints
+  `<first METISTRY_ORIGIN entry>/#enroll=<code>`; `--json` writes exactly one
+  document `{url, code_id, origin, expires_at}`; `--cancel <code_id>` expires
+  an unused code at once. It refuses BEFORE minting — and writes no row — when
+  the phone cannot complete the ceremony against that origin: a loopback host
+  (every install's default), `http:`, an IP literal, or an origin this Mac
+  cannot reach within 5 s or that names another instance; each refusal in its
+  own words, naming `METISTRY_ORIGIN` and the fix. No HTTP route mints a code
+  (a test holds the route table to it). Core gains `enrollment-codes.ts`
+  (mint / peek / consume / cancel) and `owner-tokens.ts` (mint / check /
+  register) so the console, the CLI and `enroll.mjs` run one implementation;
+  the console's `mintEnrollmentCode` now returns `{code, code_id, expires_at}`.
+- 76a8024: `POST /message` carries a session-turn marker (X-84, ruled 2026-10-04; screen 11 §4 *staying on this Mac*). The body takes an optional `capture_session` — the recorder's id of the recording a turn is asked inside — and the capture bar's Ask sets it on every turn sent while a recording runs. A marked turn is **held to the private tier**: the row carries `meta.capture_session`, the drain resolves it through core's `turnTier`, and `private` runs on an `on_machine` provider or the turn is refused with the command that fixes it — never answered on another tier, never shadowed. The marker is checked at the door: a value that is not a recorder id is `400`; a session whose recording the console has seen end (its transcript delivered) is `409` with `reason: "stale"`; an agent bearer is refused the route whole, field or no field, and no refusal writes a row. The route record of a marked turn names `private` and never consults the policy, `GET /api/messages` reads such a turn's `tier` as `private`, and every unmarked turn is routed exactly as before. The Mac's `ChatStore.send` takes `captureSession:`, a retried turn resends the marker it was written with, and the bar's Ask panel says *Staying on this Mac* only while a marker is being sent.
+
+### Patch Changes
+
+- 6719455: Fix: doctor's `sandbox` row reports what the supervisor actually spawned,
+  not what `supervisor.json` says. The supervisor's `status` now carries an
+  optional `spawned: {argv, profile}` per child (additive; an older supervisor
+  omits it), and the row reads that. A confined child can no longer be called
+  unconfined because the file was re-rendered beside it, and a supervisor that
+  does not answer, predates the field, or has not spawned the child reads
+  "could not confirm" rather than either answer. The running process's own argv
+  cannot be used: `sandbox-exec` execs into its target, so it never names the
+  profile.
+- 5ea6c00: `socketDestination` keeps its port (X-93). The `:443` collapse is an HTTPS convention, but the IMAP host guard and `describeConnection` shared it, so an IMAP server on 443 was spelled as the bare host and would have matched a secret's HTTPS *Sent only to* entry. A socket destination now always reads `host:port`; an HTTPS URL on 443 still collapses to the host.
+- c0685d8: Removing a device revokes its passkey (X-76, design-build-plan §2.22). **A device is a passkey, with its sessions under it**: `GET /api/devices` serves one row per enrolled passkey — label, when it was added, when it was last seen, `this_device` on the caller's own row, and its sessions (each saying whether it holds a push subscription) — with the session-row fields the body carried before kept on the row. **Remove** (`POST /api/devices/:id/revoke`, named by any of the device's session ids, with `{}` or no body) now revokes the **passkey** (`passkeys.revoked_at`, migration 0038) and every session under it, dropping their push subscriptions, so a lost phone never signs in again; a revoked passkey's login is refused with the same uniform 401 as an unknown credential's, and a session whose passkey is revoked is refused whatever its own row says. **Sign Out Everywhere keeps its meaning** — sessions only, passkeys kept — as the same door with `{"scope": "sessions"}`; the PWA's Settings posts that once per signed-in device, this one last, and its Remove confirms naming the device. Both land in `runs` (`auth`, `revoke`) with the scope on the record. The core route table's two summaries say so.
+- c2f9f88: `recreateScratchDb` in `@foldedspacelabs/metistry-core/test-env` takes a `template` option: the new `<METISTRY_TEST_DB_NAME><suffix>` database is a `TEMPLATE` copy of that scratch database instead of empty. The template is held to the same rules as the name being created — a scratch name, within Postgres's limit, never an install's. The root `pnpm test` uses it to give every workspace package a migrated copy of the shared scratch database (`ops/scripts/test-workspace.mjs`), so no two packages' DB-backed suites share rows. Every database it creates is set to answer in UTC (`ALTER DATABASE … SET timezone`), as `ops/scripts/test-db.sh` now sets the shared one, so time-dependent suites behave as in CI on any server.
+
 ## 0.16.1
 
 No changes in this release.

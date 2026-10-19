@@ -1,7 +1,0 @@
----
-"@foldedspacelabs/metistry-core": minor
-"@foldedspacelabs/metistry-cli": minor
-"@metistry-apps/console": minor
----
-
-X-103: the console's proxy listener — the local owner token never crosses a tunnel (plan §2.23). Every remote-access provider's agent (`tailscaled`, `cloudflared`, zrok, ngrok, a TLS terminator) connects to the console from `127.0.0.1`, so a request that crossed a tunnel arrived with a loopback peer and the loopback-only `METISTRY_LOCAL_OWNER_TOKEN` was honoured for it — `local` routes and all. The console now answers in two places: the main listener, unchanged, and a **proxy listener** for providers only — a 0600 Unix socket at `<instance>/.metistry/state/console-proxy.sock` and a loopback TCP port `METISTRY_CONSOLE_PROXY_PORT` (default the console port + 1). A request on either is remote by construction: `checkLocalOwner` refuses the token from every peer there and the refusal is audited with the listener; no `local` route answers (`403 local_only`); a `Host` that is not a remote host `METISTRY_ORIGIN` names is refused with core's new `421 misdirected`, before anything else. `docker-compose.yml` publishes the port on `127.0.0.1` only; `metistry up` renders `METISTRY_CONSOLE_PROXY_PORT` into the console's environment, and a namespaced instance takes its block's second-to-last slot for it (the console port + 1 there is Postgres). `docs/ops/auth.md`'s "cannot be replayed from off the machine" is corrected and the listener documented.

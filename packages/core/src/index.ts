@@ -1441,3 +1441,18 @@ export {
   type RecordedSession,
 } from "./meeting-group.js";
 export { normalizeRepoRemote, REPO_REMOTE_MAX } from "./repo-remote.js";
+export {
+  RECENT_SESSIONS_DEFAULT_DAYS,
+  RECENT_SESSIONS_DEFAULT_LIMIT,
+  SESSION_HANDLE_KEYS,
+  callerInProjectOf,
+  projectSlugForPage,
+  recentSessionsForCaller,
+  repoAgreesWithRemote,
+  selectSessionHandles,
+  toSessionHandle,
+  type NamedQueryRunner,
+  type RecentSessionsRequest,
+  type SelectOptions,
+  type SessionHandle,
+} from "./recent-sessions.js";

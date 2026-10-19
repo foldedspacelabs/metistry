@@ -12,7 +12,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import { parse } from "yaml";
 import { QueryStore, type SqlExecutor } from "@foldedspacelabs/metistry-queries";
-import { REQUEST_KINDS, TASK_FILTER_PARAM_SPEC, TASK_QUERY_NAME, compileTaskFilter, finishRun, isRequestKind, normalizeRepoRemote, requestWordOf, requestWordSql, startRun } from "@foldedspacelabs/metistry-core";
+import { REQUEST_KINDS, TASK_FILTER_PARAM_SPEC, TASK_QUERY_NAME, compileTaskFilter, finishRun, isRequestKind, normalizeRepoRemote, recentSessionsForCaller, requestWordOf, requestWordSql, startRun } from "@foldedspacelabs/metistry-core";
 import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
 import { privateTables } from "./private-tables.js";
 import { REMOTE_FIXTURES } from "../../../packages/core/test/fixtures/remotes.js";
@@ -573,8 +573,9 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
 
   // CM-4: last time in this repository, as handles. The ruling of 2026-10-04
   // gates a session on the fold: until folded, only the same project may see
-  // it (which a named query cannot tell — so it serves none); once folded,
-  // anyone with the grant may. An agent credential's capture is never the
+  // it (which a named query cannot tell — so it serves none unless its caller
+  // sets `unfolded`, which core's recentSessionsForCaller does only after
+  // proving the project); once folded, anyone with the grant may. An agent credential's capture is never the
   // owner's session, and the agent's reply has no column to be served from.
   it("recent_sessions: folded sessions in the repo, newest first, handles only — never an unfolded one, an agent's capture, another repo's, or one outside the window", async () => {
     const tag = `rs${Date.now()}`;
@@ -613,10 +614,18 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
       const rows = (await store.run("recent_sessions", { repo: repo.toUpperCase() })).rows; // case-insensitive, like the Mac's filesystem
       expect(rows.map((r) => r.path)).toEqual([foldedA, foldedB]);
       expect(rows[0]).toMatchObject({ tool: "claude-code", repo, branch: "main", turns: 3, files: ["src/a.ts", "src/b.ts"], first_prompt: "Fix the loader test" });
-      expect(Object.keys(rows[0]!).sort()).toEqual(["branch", "date", "files", "first_prompt", "path", "repo", "tool", "turns"]); // handles only — no reply, no cwd, no session id
+      expect(Object.keys(rows[0]!).sort()).toEqual(["branch", "date", "files", "first_prompt", "folded", "path", "repo", "tool", "turns"]); // handles only — no reply, no cwd, no session id
       const dump = JSON.stringify(rows);
       for (const never of ["STILL-WAITING", "PLANTED", "ANOTHER-REPO", "TOO-OLD", "SAID-NO"]) expect(dump).not.toContain(never);
 
+      expect(rows.map((r) => r.folded)).toEqual([true, true]);
+      // the same-project arm (X-131): the caller sets `unfolded` and the waiting session appears, flagged as such —
+      // and it is still not an agent's capture, another repo's, a rejected one, or one outside the window
+      const both = (await store.run("recent_sessions", { repo, unfolded: true })).rows;
+      expect(both.map((r) => [r.path, r.folded])).toEqual([[unfolded, false], [foldedA, true], [foldedB, true]]);
+      const bothDump = JSON.stringify(both);
+      for (const never of ["PLANTED", "ANOTHER-REPO", "TOO-OLD", "SAID-NO"]) expect(bothDump).not.toContain(never);
+      expect((await store.run("recent_sessions", { repo, unfolded: false })).rows.map((r) => r.path)).toEqual([foldedA, foldedB]);
       // the window widens to the old one; the gates do not move
       expect((await store.run("recent_sessions", { repo, days: 60 })).rows.map((r) => r.path)).toEqual([foldedA, foldedB, old]);
       expect((await store.run("recent_sessions", { repo, days: 100_000 })).rows.map((r) => r.path)).toEqual([foldedA, foldedB, old]); // bounded to a year, still not the unfolded one
@@ -627,6 +636,44 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
     } finally {
       await pool.query(`DELETE FROM vault_sessions WHERE path = ANY($1::text[])`, [paths]);
       await pool.query(`DELETE FROM inbox WHERE path = ANY($1::text[])`, [paths]);
+      await pool.query(`DELETE FROM runs WHERE id = $1`, [anchorRun.rows[0]!.id]);
+    }
+  });
+
+  // X-131, end to end: core's recentSessionsForCaller over the REAL queries.
+  it("recentSessionsForCaller: the waiting session reaches an agent in the repository's project and no other", async () => {
+    const tag = `rc${Date.now()}`;
+    const repo = `${tag}-repo`;
+    const page = `Projects/${tag}x.md`; // slug: `<tag>x`
+    const remote = `github.com/org/${repo}`; // a remote ends in the checkout's name, or the same-project arm is closed
+    const [folded, waiting] = [`Inbox/claude-code-session-${tag}-f.md`, `Inbox/claude-code-session-${tag}-w.md`];
+    const anchorRun = await pool.query(
+      `INSERT INTO runs (component, kind, ok, ts, meta) VALUES ('knowledge-fold', 'routine_run', true, now() - interval '2 hours', '{"folded":"true"}') RETURNING id`,
+    );
+    const run = async (name: string, params: Record<string, string | number | boolean>) => (await store.run(name, params)).rows;
+    try {
+      await pool.query(`INSERT INTO project_repos (remote, path) VALUES ($1, $2)`, [remote, page]);
+      for (const [path, ago, prompt] of [[folded, 1, "FOLDED-PROMPT"], [waiting, -1, "WAITING-PROMPT"]] as const) {
+        await pool.query(
+          `INSERT INTO vault_sessions (path, content_hash, tool, repo, started, turns, files, first_prompt) VALUES ($1, 'h', 'claude-code', $2, now() - make_interval(days => 0) - ($3 * interval '1 day'), 2, '[]', $4)`,
+          [path, repo, Math.max(ago, 0), prompt],
+        );
+        await pool.query(`INSERT INTO inbox (source, path, note, ts, status) VALUES ('http', $1, 'note', now() - ($2 * interval '1 day'), 'classified')`, [path, ago]);
+      }
+      const ask = (callerProjects: string[], remoteArg: string | null = remote) =>
+        recentSessionsForCaller(run, { repo, remote: remoteArg, callerProjects });
+      expect((await ask([`${tag}x`])).map((h) => h.path)).toEqual([waiting, folded]); // same project: both, newest first
+      expect((await ask(["someone-else"])).map((h) => h.path)).toEqual([folded]);
+      expect((await ask([])).map((h) => h.path)).toEqual([folded]);
+      expect((await ask([`${tag}x`], null)).map((h) => h.path)).toEqual([folded]); // no remote, no project
+      expect((await ask([`${tag}x`], `github.com/${tag}/another`)).map((h) => h.path)).toEqual([folded]); // a repository no page claims
+      // two pages claim the remote: ambiguous is none, so the waiting session stays back
+      await pool.query(`INSERT INTO project_repos (remote, path) VALUES ($1, $2)`, [remote, `Projects/${tag}y.md`]);
+      expect((await ask([`${tag}x`, `${tag}y`])).map((h) => h.path)).toEqual([folded]);
+    } finally {
+      await pool.query(`DELETE FROM project_repos WHERE remote = $1`, [remote]);
+      await pool.query(`DELETE FROM vault_sessions WHERE path = ANY($1::text[])`, [[folded, waiting]]);
+      await pool.query(`DELETE FROM inbox WHERE path = ANY($1::text[])`, [[folded, waiting]]);
       await pool.query(`DELETE FROM runs WHERE id = $1`, [anchorRun.rows[0]!.id]);
     }
   });

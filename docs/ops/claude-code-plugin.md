@@ -103,6 +103,50 @@ and your files are owner text and vault paths — so no agent reaches it
 through `queries_run`; nothing reads it at session start yet, and the
 consumer will be CM-1/CM-2's briefing under the caller's grant.
 
+**Who is handed what (Context Mode Q3, ruled 2026-10-04).** A session the
+fold has read goes to any agent whose grant allows it. A session still
+waiting for the fold goes only to an agent in the **same project** as the
+repository. The query alone cannot tell who is asking, so its default is the
+safe arm (`unfolded: false`: folded sessions only), and the briefing calls
+core's `recentSessionsForCaller` instead of the query:
+
+0. **`repo` must agree with `remote`.** The checkout's basename is the last
+   segment of the remote (`github.com/org/Metistry` -> `metistry`,
+   case-insensitive; core's `repoAgreesWithRemote`). Membership is proved
+   against the remote while sessions are selected by the basename, so
+   without this tie an agent in project A could send A's remote with another
+   checkout's name and be handed that checkout's waiting sessions. When they
+   disagree, the function does not even resolve a project: folded sessions
+   only. A checkout the owner named differently from its remote gets the
+   folded arm for the same reason.
+1. `project_for_repo {remote}` (X-130) resolves the repository to the one
+   project page that claims it — or none, or *ambiguous*, which is none.
+2. The page's file name is the project slug (`Projects/Drey Mascot.md` →
+   `drey-mascot`, core's `projectSlugForPage`); the agent is in the project
+   when that slug is in its `agents.projects`. **`callerProjects` must be read
+   from the authenticated agent's record (`agents.projects`), never from the
+   request** (body, query string, header): a caller that names its own
+   projects can name any.
+3. Only then does it ask `recent_sessions` with `unfolded: true`, and it drops
+   any row still waiting for the fold whenever step 2 did not hold. No
+   remote, no page, no membership: folded sessions only.
+4. Every row is copied through a fixed list of fields (`SessionHandle`:
+   path, date, tool, repo, branch, turns, files, the owner's first prompt
+   clipped, `folded`), so no agent-written text can ride along — not the
+   `## Last response`, which has no column, and not a field an instance
+   overlay might add to the query. The caller's knowledge grant narrows the
+   result by path (`canSee`).
+
+A session captured by an agent credential is on neither arm. Limits worth
+knowing: a session names its checkout by basename, not by remote, so two
+checkouts with the same directory name share one `repo` match. The agreement
+rule above narrows this for generic names (`app`, `web`): the unfolded arm
+opens only when the remote itself ends in that name. And the slug rule folds
+`Drey Mascot.md`, `Drey-Mascot.md` and `drey_mascot.md` into one project
+(`drey-mascot`); the pages are owner-named, so the impact is low, and an
+explicit `project:` frontmatter on the page is a candidate ruling for the
+owner, not built here.
+
 The summariser exists twice on purpose: the plugin ships as dependency-free
 `.mjs` a stranger runs out of `~/.claude/plugins`, so it cannot import
 `@foldedspacelabs/metistry-core`, which is what the CLI uses.

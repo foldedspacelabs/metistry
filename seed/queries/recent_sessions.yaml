@@ -17,18 +17,22 @@
 # `vault_sessions` has no column for it. This query cannot be widened to it
 # by an instance overlay, because there is nothing to select.
 #
-# **Only once folded, and only the owner's own captures.** The ruling:
-# before a session is folded, only an agent in the SAME project may see it;
-# once folded, any agent with a read grant may. A named query does not know
-# its caller (that is what the knowledge doors and the coming briefing route
-# are for), so this one serves the second case alone — a session whose
-# `inbox` row is at or before the newest fold's `runs` anchor
-# (`routines/knowledge-fold/run.ts`, `meta.folded = 'true'`) — and never a
-# session still waiting. The first case has nothing to serve yet in any
-# event: a captured session carries a checkout basename and a cwd, not a
-# remote, so no session is in a project until the capture names one. A
-# session an AGENT credential captured (`inbox.source_agent` set) is not the
-# owner's and is never served: an agent cannot plant "the owner's first
+# **Only once folded — unless the caller proves the project — and only the
+# owner's own captures.** The ruling (Context Mode Q3, 2026-10-04): before a
+# session is folded, only an agent in the SAME project may see it; once
+# folded, any agent with a read grant may. A named query does not know its
+# caller, so the default is the safe arm: `unfolded` is false, and only a
+# session whose `inbox` row is at or before the newest fold's `runs` anchor
+# (`routines/knowledge-fold/run.ts`, `meta.folded = 'true'`) is served. The
+# other arm is `unfolded = true`, and the query cannot judge it: its one
+# caller, core's `recentSessionsForCaller` (packages/core/src/
+# recent-sessions.ts), sets it only after it has resolved the repository to a
+# project page (`project_for_repo`) and found that page's slug among the
+# caller's own projects — and it drops a row still waiting for the fold
+# whenever that proof is missing, so a mistaken or widened call cannot hand
+# one on. Every row says which arm it is on (`folded`). A session an AGENT
+# credential captured (`inbox.source_agent` set) is not the owner's and is
+# never served on either arm: an agent cannot plant "the owner's first
 # prompt" for the next one to read.
 #
 # **`expose: route`**, on `knowledge_pages.yaml`'s rule (ruled 2026-09-19):
@@ -37,9 +41,8 @@
 # answer this name with the unknown-query refusal, so a `queries: true`
 # grant is not a way past the knowledge tiers to the owner's sessions. The
 # consumer is CM-1's session-start briefing route, which knows its caller's
-# grant and project and applies `canSeeUnder`; that is also where the
-# ruling's first arm — an unfolded session to the same project — belongs,
-# once a capture names its remote.
+# grant and project, calls `recentSessionsForCaller` and applies
+# `canSeeUnder`.
 #
 # `repo` is the checkout's basename as the capture saw it
 # (`repoNameFromPath`), matched case-insensitively — the Mac's filesystem
@@ -50,12 +53,15 @@ description: >-
   The owner's captured coding sessions in one repository (checkout basename,
   case-insensitive), newest first, once the knowledge fold has read them:
   date, tool, repo, branch, turns, files touched (JSON array) and the
-  owner's first prompt clipped — handles only; never the agent's reply,
-  never a session an agent credential captured, never one still waiting for
-  the fold. `days` back from now (default 14, at most 365), `limit` rows
-  (default 20).
+  owner's first prompt clipped, and whether the fold has read it — handles
+  only; never the agent's reply, never a session an agent credential
+  captured. A session still waiting for the fold is served only when
+  `unfolded` is true, which belongs to the caller that has proved the same
+  project (core's recentSessionsForCaller). `days` back from now (default
+  14, at most 365), `limit` rows (default 20).
 params:
   repo: { type: text, default: "" } # blank matches nothing
+  unfolded: { type: boolean, default: false } # true ONLY after the caller's project is proved (recentSessionsForCaller)
   days: { type: int, default: 14 }
   limit: { type: int, default: 20 }
 sql: |
@@ -75,7 +81,8 @@ sql: |
     s.branch,
     s.turns,
     s.files,
-    s.first_prompt
+    s.first_prompt,
+    (a.ts IS NOT NULL AND i.ts <= a.ts) AS folded
   FROM vault_sessions s
   JOIN inbox i ON i.path = s.path
   CROSS JOIN anchor a
@@ -84,7 +91,7 @@ sql: |
     AND lower(s.repo) = lower(btrim(:repo::text))
     AND i.source_agent IS NULL
     AND i.status <> 'rejected'
-    AND a.ts IS NOT NULL AND i.ts <= a.ts
+    AND (:unfolded::boolean OR (a.ts IS NOT NULL AND i.ts <= a.ts))
     AND COALESCE(s.started, i.ts) >= w.since
   ORDER BY COALESCE(s.started, i.ts) DESC, s.path COLLATE "C"
   LIMIT GREATEST(0, LEAST(:limit, 200))

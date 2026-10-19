@@ -55,9 +55,9 @@ Or per Claude Code profile in `~/.claude/settings.json` under `env`.
 Nothing is read from files in the repo; the plugin ships no config.
 
 **Instance split.** A Claude Code profile for the second context gets the
-*second* instance's URL and a token minted *there*; the personal profile gets
-the personal pair. The plugin cannot route to more than one instance, so a
-context can only land in its own vault (§4.11, §4.16).
+*second* instance's URL and a token minted *there*; the profile for the first
+instance gets the first instance's pair. The plugin cannot route to more than
+one instance, so a context can only land in its own vault (§4.11, §4.16).
 
 ## 3. Install
 

@@ -5,7 +5,8 @@ writes `METISTRY_ORIGIN=http://127.0.0.1:<port>`, and nothing outside this
 Mac can open it. A phone needs an HTTPS origin with a stable name before it
 can hold a passkey (`docs/ops/auth.md`, "Passkeys: origins"), so *Add a
 Phone* refuses until one exists — naming **Settings ▸ Remote Access** on the
-Mac and `metistry remote` in a terminal.
+Mac and `metistry remote` in a terminal. The owner's side of the phone —
+installing, signing in, what to do when it will not — is `docs/ops/phone.md`.
 
 The owner picks **how** (plan §2.23, ruled 2026-09-30): a provider, chosen at
 setup and changeable later, each made as close to *sign in, authorize, done*
@@ -20,7 +21,7 @@ Any browser (Funnel)** is the recommended path.
 
 | Choice | Reachable from | TLS ends at — who can read traffic | Origin it yields | Cost | Ticket |
 | --- | --- | --- | --- | --- | --- |
-| **None** *(default)* | this Mac only | — | — (`METISTRY_ORIGIN` stays loopback) | $0 | **this one** |
+| **None** *(default)* | this Mac only | — | — (`METISTRY_ORIGIN` stays loopback) | $0 | **shipped** (X-105, the record and the adapter) |
 | **Tailscale — Any browser (Funnel)** *(recommended)* | the internet; the phone needs no app | the Mac | `https://<node>.<tailnet>.ts.net` | $0 | **shipped** (X-106, below) |
 | **Tailscale — Only my devices** | the owner's tailnet; the phone needs the Tailscale app | the Mac | same name | $0 | **shipped** (X-106, below) |
 | **Metistry Relay** | the internet; no account anywhere | the Mac (the relay passes TLS through unopened) | `https://<id>.u.metistry.app` | $0 — 5 GB a month | X-115… |
@@ -256,8 +257,8 @@ which accepts this Mac's owner token. Run `metistry remote set <provider>`."*
 
 These verbs are the **owner's hand only**: the CLI runs as the person at the
 Mac, the assistant has no shell and no raw git (invariant 9) so it can never
-run them, and this ticket adds **no HTTP route** — nothing the console serves
-can change the record or reach a provider. The Mac app drives the same verbs
+run them, and there is **no HTTP route** for any of it — nothing the console
+serves can change the record or reach a provider. The Mac app drives the same verbs
 over the CLI transport (plan §2.2, M20).
 
 Every verb takes `--instance <dir>` and `--json`; the writing ones preview
@@ -273,7 +274,9 @@ such driver and nothing more: the wizard's *Remote Access* step and Settings ▸
 Remote Access run exactly `remote status --json`, `remote set <provider>
 [flags] [--yes] --json`, `remote test --json` and `remote off [--yes] --json`
 — a closed grammar of argv shapes, a pasted token on the command's stdin —
-and show what the CLI prints: the chooser from `choices`, the preview, each
+and nothing else — `remote authorize`, `--timeout`, `--no-browser` and any
+`--flag=value` spelling are refused by the app's own grammar (M20) — and show
+what the CLI prints: the chooser from `choices`, the preview, each
 link, the doctor rows, and *answers from this Mac*. The switching ceremony
 above is the CLI's; the app drives it and, before a switch away from a
 provider or a Turn Off, confirms with the preview's `revoked` and `stranding`.
@@ -281,8 +284,8 @@ provider or a Turn Off, confirms with the preview's `revoked` and `stranding`.
 | App | CLI |
 | --- | --- |
 | the pane's status | `metistry remote [status] [--json]` — the record, the origins it renders, the chooser, doctor's `remote` rows; exit 1 when a row fails |
-| the guided flow, a provider picked | `metistry remote set <none\|tailscale\|relay\|cloudflare\|zrok\|ngrok\|port-forward> [provider flags] [--yes] [--timeout <seconds>]` |
-| a provider's browser sign-in | `metistry remote authorize <tailscale\|cloudflare> [--no-browser] [--timeout 300]` |
+| the guided flow, a provider picked | `metistry remote set <none\|tailscale\|relay\|cloudflare\|zrok\|ngrok\|port-forward> [provider flags] [--yes] --json` (the app sends no `--timeout` and no `--no-browser`; a terminal can) |
+| — *(terminal only: the app never runs it)* | `metistry remote authorize <tailscale\|cloudflare> [--no-browser] [--timeout 300]` — a provider's browser sign-in; `set` already waits for it, so this is the way to wait again after a timeout |
 | a pasted token | `metistry remote set zrok\|ngrok`, `metistry remote set cloudflare --token` — **on stdin**, or typed hidden at a prompt in a terminal; **never in argv** |
 | Test | `metistry remote test [--json]` — the provider's own state, then `GET <origin>/health` from this Mac naming this instance |
 | Turn Off | `metistry remote off [--yes]` — `set none`, with the old provider's revoke |
@@ -420,6 +423,8 @@ downgrades a pack either.
 
 ## Tests
 
+`apps/macos/tests/kit/remote-access-tests.swift` (X-107) holds the app's side:
+M20's closed grammar, a token that never reaches argv, and the flow's steps.
 `packages/cli/test/remote.test.ts`: a fresh install's `remote --json` says
 `none` and doctor's row is `ok`; with None `METISTRY_ORIGIN` is loopback only
 (a hand-written remote origin is dropped and reported); a token in argv is

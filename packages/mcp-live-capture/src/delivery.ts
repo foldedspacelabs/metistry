@@ -225,7 +225,7 @@ export class Deliverer {
       answer = undefined;
     }
     if (res.status === 401 || res.status === 403) {
-      return { ok: false, status: res.status, why: `the console refused the capture token (HTTP ${res.status}) — METISTRY_LIVE_CAPTURE_INBOX_TOKEN must be a live owner token (docs/ops/capture-shortcut.md §1); the transcript stays on this Mac` };
+      return { ok: false, status: res.status, why: `the console refused the capture token (HTTP ${res.status}) — METISTRY_LIVE_CAPTURE_INBOX_TOKEN must be a live owner token — \`metistry secrets mint METISTRY_LIVE_CAPTURE_INBOX_TOKEN\` makes a fresh one, then restart the bridge; the transcript stays on this Mac` };
     }
     const id = (answer as { id?: unknown } | undefined)?.id;
     if (res.status !== 201 || typeof id !== "number" || !Number.isInteger(id) || id <= 0) {

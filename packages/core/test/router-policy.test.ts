@@ -10,7 +10,7 @@
 // failure reproduces byte for byte. The console-side half (the consultation's
 // deadline, the record, the door) is apps/console/test/router-policy.test.ts.
 import { parse as parseYaml } from "yaml";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { codesFor } from "../src/choice.js";
 import { parseCompute, type Compute } from "../src/compute.js";
 import { INTENT_NAMES, INTENT_UNSURE, intentRulesSchema, isIntent } from "../src/intent.js";
@@ -567,17 +567,26 @@ describe("**no output outside the allow-list, over a generated feature space and
 // ---- the model features --------------------------------------------------------
 
 /** A scorer server that answers each question with the code the test names, and counts the questions. */
-function scorer(answer: { intent?: string; complexity?: string; peak?: number; delayMs?: number; status?: number; body?: string }) {
+function scorer(answer: { intent?: string; complexity?: string; peak?: number; delayMs?: number; hang?: boolean; status?: number; body?: string }) {
   const asked: Array<{ kind: "intent" | "complexity"; body: any }> = [];
+  let inflight = 0;
+  const seen = { peak: 0 }; // the most calls open at once
   const fn = (async (_url: string, init: { body: string; signal?: AbortSignal }) => {
     const body = JSON.parse(init.body);
     const kind = body.top_logprobs === 3 ? "complexity" : "intent";
     asked.push({ kind, body });
-    if (answer.delayMs) {
-      await new Promise<void>((resolve, reject) => {
-        const t = setTimeout(resolve, answer.delayMs);
-        init.signal?.addEventListener("abort", () => (clearTimeout(t), reject(init.signal!.reason)));
-      });
+    inflight++;
+    seen.peak = Math.max(seen.peak, inflight);
+    try {
+      if (answer.delayMs || answer.hang) {
+        // `hang` never answers: only the caller's abort ends it, so a missing deadline hangs the test instead of passing quietly
+        await new Promise<void>((resolve, reject) => {
+          const t = answer.hang ? undefined : setTimeout(resolve, answer.delayMs);
+          init.signal?.addEventListener("abort", () => (clearTimeout(t), reject(init.signal!.reason)));
+        });
+      }
+    } finally {
+      inflight--;
     }
     if (answer.status) return new Response(answer.body ?? "", { status: answer.status });
     const names: readonly string[] = kind === "intent" ? INTENT_NAMES : COMPLEXITY_NAMES;
@@ -591,7 +600,7 @@ function scorer(answer: { intent?: string; complexity?: string; peak?: number; d
     ];
     return new Response(JSON.stringify({ choices: [{ message: { content: codes[i] }, logprobs: { content: [{ top_logprobs: top }] } }] }), { status: 200, headers: { "content-type": "application/json" } });
   }) as unknown as typeof fetch;
-  return { fn, asked };
+  return { fn, asked, seen };
 }
 
 const INTENT_RULES = intentRulesSchema.parse({ min_confidence: 0.8, by_intent: { smalltalk: 0.95 } });
@@ -601,9 +610,8 @@ const BOTH = { intent: true, complexity: true };
 describe("scoreRouteFeatures (§2): the one local scorer, only for what the table reads", () => {
   it("scores both features concurrently on assignments.intent, recording names and numbers", async () => {
     const s = scorer({ intent: "knowledge_search", complexity: "moderate", delayMs: 60 });
-    const started = Date.now();
     const got = await scoreRouteFeatures(access(s.fn), "what did we decide about the lease", { reads: BOTH, intentRules: INTENT_RULES, complexityMinConfidence: 0.7, timeoutMs: 1000 });
-    expect(Date.now() - started).toBeLessThan(115); // two 60 ms calls, side by side
+    expect(s.seen.peak).toBe(2); // both calls were open at once — counted, not timed, so a loaded runner cannot fail it
     expect(s.asked.map((a) => a.kind).sort()).toEqual(["complexity", "intent"]);
     for (const a of s.asked) {
       expect(a.body.model).toBe("gemma4:e4b-it-qat");
@@ -667,15 +675,24 @@ table:
 `);
     const cases: Array<[string, ReturnType<typeof scorer>]> = [
       ["http 500", scorer({ status: 500, body: "boom" })],
-      ["past the deadline", scorer({ intent: "smalltalk", delayMs: 5_000 })],
+      ["past the deadline", scorer({ intent: "smalltalk", hang: true })],
       ["not json", scorer({ status: 200, body: "<html>" })],
     ];
-    for (const [what, s] of cases) {
-      const started = Date.now();
-      const got = await scoreRouteFeatures(access(s.fn), "hey, thanks", { reads: { intent: true, complexity: false }, intentRules: INTENT_RULES, timeoutMs: scorerTimeoutMs(200) });
-      expect(Date.now() - started, what).toBeLessThan(400);
-      expect(got.intent, what).toEqual({ outcome: "unavailable", reason: "no_answer" });
-      expect(decide(intentOnly, { words: 2, attachments: 0, intent: intentValue(got.intent) }), what).toEqual({ outcome: "no_match" });
+    // The deadline is proven without reading a clock: the call is handed an AbortSignal.timeout of exactly the scorer's share
+    // (recorded here), and the hanging scorer can end only by that abort — so the feature coming back absent IS the timeout firing.
+    const deadlines: number[] = [];
+    const real = AbortSignal.timeout.bind(AbortSignal);
+    const spy = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms: number) => (deadlines.push(ms), real(ms)));
+    try {
+      for (const [what, s] of cases) {
+        deadlines.length = 0;
+        const got = await scoreRouteFeatures(access(s.fn), "hey, thanks", { reads: { intent: true, complexity: false }, intentRules: INTENT_RULES, timeoutMs: scorerTimeoutMs(200) });
+        expect(deadlines, what).toEqual([scorerTimeoutMs(200)]);
+        expect(got.intent, what).toEqual({ outcome: "unavailable", reason: "no_answer" });
+        expect(decide(intentOnly, { words: 2, attachments: 0, intent: intentValue(got.intent) }), what).toEqual({ outcome: "no_match" });
+      }
+    } finally {
+      spy.mockRestore();
     }
     expect(scorerTimeoutMs(400)).toBe(300);
     expect(scorerTimeoutMs(50)).toBe(37);

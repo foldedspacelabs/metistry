@@ -798,6 +798,11 @@ export async function renderEnvFile(opts: RenderEnvOptions): Promise<RenderEnvRe
   if (removedGone.length) out(`removed by hand and in no store, so gone: ${removedGone.join(", ")}`);
   if (adopted.length) out(`adopted into the login Keychain from the file (the value the running services hold is kept): ${adopted.join(", ")}`);
   if (adoptedEdits.length) out(`your edit of ${adoptedEdits.join(", ")} went into the login Keychain and is what is rendered — next time, \`metistry secrets mint <VAR>\` (an install token) or \`metistry secrets replace <name>\` (a credential another service issues)`);
+  // an edited line the owner-named store overrules (a credential another
+  // service issues, filled from its item): not adopted, not kept — but named,
+  // with the verb, and the edited line is in the copy kept beside
+  const overruled = [...edited].filter((n) => values.has(n) && values.get(n) !== prev.get(n) && !(n in superseded)).sort();
+  if (overruled.length) out(`your edit of ${overruled.join(", ")} is not what is rendered — a credential another service issues is replaced with \`metistry secrets replace <name>\`; the edited line is in ${PRE_RENDER_FILENAME}`);
   for (const n of minted) out(`minted ${n} — it was in no store: ${GENERATED_SECRETS[n]}`);
   for (const [n, from] of Object.entries(superseded)) out(`${n}: the file's value is superseded by ${from}, which is what is rendered${preRenderKept ? ` (the previous line is in ${PRE_RENDER_FILENAME})` : ""}`);
   if (dropped.length) out(`no longer delivered — nothing in compute.yaml, the connections or secrets.yaml names ${dropped.join(", ")} any more; the secret itself stays in the Keychain`);

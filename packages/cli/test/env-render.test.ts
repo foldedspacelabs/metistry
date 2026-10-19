@@ -225,6 +225,26 @@ describe("renderEnvFile", () => {
     expect((await envFileRow(dir)).status).toBe("ok");
   });
 
+  it("a hand edit of a credential another service issues is overruled by the owner-named store — said, and the line kept in .env.pre-render", async () => {
+    const kc = fakeKeychain({ [`${INSTANCE_ID}/${secretService("openrouter_api_key")}`]: "sk-store" });
+    const { envFile, stateDir } = await instance();
+    await writeFile(envFile, `${HAND_WRITTEN}METISTRY_OPENROUTER_API_KEY=sk-old\n`);
+    await renderEnvFile(renderOpts(kc, envFile, []));
+    const rendered = await readFile(envFile, "utf8");
+    expect(parseDotEnv(rendered).METISTRY_OPENROUTER_API_KEY).toBe("sk-store");
+    const edited = rendered.replace("METISTRY_OPENROUTER_API_KEY=sk-store", "METISTRY_OPENROUTER_API_KEY=sk-hand");
+    await writeFile(envFile, edited);
+    const lines: string[] = [];
+    const r = await renderEnvFile(renderOpts(kc, envFile, lines));
+    expect(r.handEdited?.changed).toEqual(["METISTRY_OPENROUTER_API_KEY"]);
+    expect(r.adoptedEdits).toEqual([]);
+    // the store's value stands; the edit is named, with the verb that changes such a credential, and kept beside
+    expect(parseDotEnv(await readFile(envFile, "utf8")).METISTRY_OPENROUTER_API_KEY).toBe("sk-store");
+    expect(lines.join("\n")).toContain("your edit of METISTRY_OPENROUTER_API_KEY is not what is rendered — a credential another service issues is replaced with `metistry secrets replace <name>`; the edited line is in .env.pre-render");
+    expect(await readFile(join(stateDir, PRE_RENDER_FILENAME), "utf8")).toBe(edited);
+    for (const v of ["sk-store", "sk-hand", "sk-old"]) expect(lines.join("\n")).not.toContain(v);
+  });
+
   it("a hand edit that touches no assignment is still a hand edit, and says so without inventing a line", async () => {
     const kc = fakeKeychain();
     const { envFile, dir } = await instance();

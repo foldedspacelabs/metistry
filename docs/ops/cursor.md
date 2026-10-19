@@ -122,13 +122,27 @@ had widened.
 ```sh
 metistry connect cursor --rotate      # new bearer; the old one dies immediately
 metistry connect --list               # each tool's row, bearer and config
+metistry connect --remove cursor      # revoke + delete the Keychain item + put ~/.cursor/mcp.json back
 curl -X POST http://127.0.0.1:8080/api/agents/cursor/revoke \
   -H "Authorization: Bearer $METISTRY_LOCAL_OWNER_TOKEN"
 ```
 
-Revocation is permanent by design: the row stays so old proposals keep their
-provenance, and the id cannot be re-minted — `metistry connect cursor`
-refuses rather than pretending to reconnect it.
+`connect --remove cursor` undoes what `connect` did, in that order: it revokes
+the row (so the bearer is dead before anything else changes), deletes the
+Keychain item, and takes the `metistry` entry out of `~/.cursor/mcp.json`.
+The file comes back **exactly** as it was before the first `connect`:
+`connect` keeps a copy beside it (`mcp.json.metistry.bak`, same mode) the
+first time it writes, and removal puts those bytes back — or, if you have
+edited the file since, removes only the entry and leaves your edits. A file
+`connect` created is deleted again. Other servers in the file are never
+touched, and running it twice is safe. Delete the `export` line you added
+to your shell profile yourself.
+
+A revoked tool can come back: `metistry connect cursor` on a revoked row
+registers it again — the same id (so old proposals keep their provenance)
+with a **new** token, and with grants, projects and autonomy back at a new
+row's defaults. Nothing it held before returns; `--areas` widens it again.
+This is how an accidental revoke is recovered without a new install.
 
 Without `--rotate`, an already-registered tool is told its token is
 unchanged. The console returns a bearer only when it mints or rotates one,

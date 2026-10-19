@@ -121,6 +121,39 @@ public struct ComputePaneView: View {
 
     // MARK: - What is running, and what the last action said
 
+    /// A download's size and how far it is — both only as the CLI said them —
+    /// and the way to stop it.
+    @ViewBuilder
+    private func downloadLine(_ p: Palette) -> some View {
+        let words = Self.downloadWords(model.downloadProgress, cancelling: model.cancelRequested)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: MetistrySpace.s3) {
+                Text(words).metistryText(.callout, p).fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: MetistrySpace.s2)
+                cancelDownloadButton
+            }
+            VStack(alignment: .leading, spacing: MetistrySpace.s2) {
+                Text(words).metistryText(.callout, p).fixedSize(horizontal: false, vertical: true)
+                cancelDownloadButton
+            }
+        }
+    }
+
+    private var cancelDownloadButton: some View {
+        Button("Cancel Download") { model.cancelDownload() }
+            .disabled(!model.canCancelDownload)
+            .accessibilityLabel("Cancel Download")
+            .accessibilityHint("Stops the download. The model is not installed.")
+    }
+
+    /// *Size 4096.0 MiB · 40%*, or — before the CLI has said — that it has not.
+    nonisolated static func downloadWords(_ progress: DownloadProgress?, cancelling: Bool) -> String {
+        if cancelling { return "Cancelling…" }
+        var parts = [progress?.size.map { "Size \($0)" } ?? "Size not reported yet"]
+        if let percent = progress?.percent { parts.append("\(percent)%") }
+        return parts.joined(separator: " \u{00B7} ")
+    }
+
     @ViewBuilder
     private func activity(_ p: Palette) -> some View {
         if let running = model.running {
@@ -134,6 +167,9 @@ public struct ComputePaneView: View {
                     .metistryText(.caption1, p, .textTertiary)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
+                if running.downloads {
+                    downloadLine(p)
+                }
                 // the CLI's own progress lines — a download's bytes, a pull's
                 // status — never a percentage nobody reported
                 ForEach(Array(model.output.suffix(3).enumerated()), id: \.offset) { _, line in

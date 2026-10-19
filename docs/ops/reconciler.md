@@ -90,6 +90,26 @@ state to preserve): drop them, let one walk run, and they are exactly what
 they were. `POST /reconcile` returns their sizes as `meeting_refs` and
 `people_emails`.
 
+## Project repos and captured sessions
+
+Two more maps, derived on the same terms (migration
+`0043_project_repos_and_sessions.sql`; research 2026-10-04 §6, CM-3 and CM-4):
+
+| Table | From | Which files |
+| --- | --- | --- |
+| `project_repos (remote, path)` | a project page's frontmatter `repos:` — one git remote or a list, each reduced to core's canonical `host/path` (`normalizeRepoRemote`) | `Projects/<Name>.md` pages that are **yours** (no `source:`, or `source: user`); the fold's pages carry its `source:` and never map a repository (`docs/ops/projects.md`) |
+| `vault_sessions (path, content_hash, session_id, tool, repo, cwd, branch, started, ended, turns, files, first_prompt)` | a captured `kind: session` note's frontmatter and its `## Files touched` and `## First prompt` sections (`parseSessionNote`) | every session note under `Inbox/`, whichever door captured it. **Never `## Last response`** — the agent's reply is not parsed and has no column (ruled 2026-10-04) |
+
+`project_for_repo {remote}` resolves a remote to the one page that claims it
+(none when two do); `recent_sessions {repo, days}` serves a repository's
+folded sessions back as handles. Both are `expose: route` — every row is a
+vault path, the owner's title or the owner's own first prompt — so neither
+is reachable through an agent's `queries_run`; CM-1's briefing route is the
+consumer, under the caller's `canSeeUnder`. `POST /reconcile` returns their sizes as
+`project_repos` and `sessions`. A `vault_sessions` row is rewritten only when
+the note's bytes change and deleted when the note is gone; both tables come
+back whole from one walk after a wipe.
+
 ## Pointing it at an instance repo
 
 The reconciler needs exactly one path: `METISTRY_INSTANCE_DIR`, the working
@@ -787,7 +807,7 @@ Setup, modes, and what "deterministic rebuild" means:
 | `METISTRY_EMBED_DIM` | `768` | must match the model AND the `vector(768)` column |
 | `METISTRY_EMBED_BATCH` | `16` | chunks per `/api/embed` request |
 | `METISTRY_EMBED_MAX_FILES_PER_CYCLE` | `200` | the rest wait for the next cycle |
-| `METISTRY_DB_*` | as elsewhere | the index tables (`knowledge_files`, `knowledge_links`, `embeddings`, `vault_tasks`, `vault_task_refs`, `vault_meeting_refs`, `people_emails`, `proposals`, `runs`) |
+| `METISTRY_DB_*` | as elsewhere | the index tables (`knowledge_files`, `knowledge_links`, `embeddings`, `vault_tasks`, `vault_task_refs`, `vault_meeting_refs`, `people_emails`, `project_repos`, `vault_sessions`, `proposals`, `runs`) |
 | `METISTRY_TZ` | unset (then `TZ`, then UTC) | the zone `due friday` and `do monday` resolve against, recorded per row as `parsed_on` |
 | `METISTRY_GIT_HTTP_PROXY` | set by `metistry up` when this install confines the reconciler | the supervisor's egress proxy, passed to git as `-c http.proxy=…` |
 | `METISTRY_GIT_ASKPASS` | set by `metistry up` when this install confines the reconciler | the askpass shim's path. Its presence is also what turns on `-c credential.helper=` — the two move together |

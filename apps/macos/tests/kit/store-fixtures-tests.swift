@@ -238,7 +238,7 @@ private let drives: [String: Drive] = [
     "POST /api/prose/:id/feedback": { s, a in done(await s.rateProse(a.p("id"), Rating(rawValue: a.bInt("rating") ?? 0) ?? .up, note: a.b("note"))) },
     "DELETE /api/prose/:id/feedback": { s, a in done(await s.clearProseRating(a.p("id"))) },
     // Chat
-    "POST /message": { s, a in done(await s.send(a.b("text") ?? "", threadID: a.b("thread_id"), tier: a.b("tier"))) },
+    "POST /message": { s, a in done(await s.send(a.b("text") ?? "", threadID: a.b("thread_id"), tier: a.b("tier"), captureSession: a.b("capture_session"))) },
     "GET /api/messages": { s, a in done(await s.messages(limit: a.qInt("limit"), since: a.q("since"))) },
     "POST /api/messages/:id/feedback": { s, a in done(await s.rate(message: a.pInt("id"), Rating(rawValue: a.bInt("rating") ?? 0) ?? .up, note: a.b("note"))) },
     "DELETE /api/messages/:id/feedback": { s, a in done(await s.clearRating(message: a.pInt("id"))) },

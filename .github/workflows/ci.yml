@@ -48,7 +48,7 @@ jobs:
           # gate this job: it is the one that runs the TCC bridges' Swift
           # helper tests (see the macos-app job below), so a helper-only PR
           # still needs the macOS runner even when apps/macos itself is untouched.
-          if echo "$changed" | grep -qE '^(apps/macos/|\.github/workflows/ci\.yml|docs/product/design/tokens|ops/scripts/build-design-tokens|packages/[^/]+/helper/|.*Package\.swift$)'; then
+          if echo "$changed" | grep -qE '^(apps/macos/|packages/core/test/held-to-core/|\.github/workflows/ci\.yml|docs/product/design/tokens|ops/scripts/build-design-tokens|packages/[^/]+/helper/|.*Package\.swift$)'; then
             echo "macos=true" >> "$GITHUB_OUTPUT"
           else
             echo "macos=false" >> "$GITHUB_OUTPUT"
@@ -94,6 +94,11 @@ jobs:
       # current_database(). A suite building its own pool walks around that,
       # so no test file may (docs/ops/testing.md).
       - run: node ops/scripts/check-test-db.mjs
+      # The Mac app's hand-carried copies of core's decisions (autonomy
+      # arithmetic, key shape) are held to cases both suites read from one
+      # file; this is what keeps both reading it, and the Swift job running
+      # when a case changes (X-100).
+      - run: node ops/scripts/check-held-to-core.mjs
       - name: ops/scripts unit tests
         run: node --test 'ops/scripts/test/*.test.mjs'
       # tokens.css, preview.html and the Mac app's design-tokens.swift are all

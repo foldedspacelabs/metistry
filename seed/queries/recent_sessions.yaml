@@ -1,0 +1,91 @@
+# Seeded default (D4 overlay: an instance file of the same name wins).
+#
+# Last time in this repository (research docs/research/
+# 2026-10-04-context-mode-review.md §6 CM-4; ruled 2026-10-04). Every
+# SessionEnd in Claude Code, Cursor and OpenCode — and `metistry
+# import-sessions` — lands a `kind: session` note in `Inbox/` with the same
+# deterministic summary; the fold reads them each evening; nothing served
+# them back. This is the return path, as HANDLES: date, tool, repo, branch,
+# turns, the files touched, and the owner's first prompt clipped — read
+# from `vault_sessions`, which the reconciler derives from the notes
+# (db/migrations/0043_project_repos_and_sessions.sql, apps/reconciler/src/
+# indexer.ts `syncSessions`).
+#
+# **Never the agent's last reply.** The note's `## Last response` is the
+# agent's own words; the ruling keeps one agent's reply out of what another
+# is handed, so `parseSessionNote` never reads that section and
+# `vault_sessions` has no column for it. This query cannot be widened to it
+# by an instance overlay, because there is nothing to select.
+#
+# **Only once folded, and only the owner's own captures.** The ruling:
+# before a session is folded, only an agent in the SAME project may see it;
+# once folded, any agent with a read grant may. A named query does not know
+# its caller (that is what the knowledge doors and the coming briefing route
+# are for), so this one serves the second case alone — a session whose
+# `inbox` row is at or before the newest fold's `runs` anchor
+# (`routines/knowledge-fold/run.ts`, `meta.folded = 'true'`) — and never a
+# session still waiting. The first case has nothing to serve yet in any
+# event: a captured session carries a checkout basename and a cwd, not a
+# remote, so no session is in a project until the capture names one. A
+# session an AGENT credential captured (`inbox.source_agent` set) is not the
+# owner's and is never served: an agent cannot plant "the owner's first
+# prompt" for the next one to read.
+#
+# **`expose: route`**, on `knowledge_pages.yaml`'s rule (ruled 2026-09-19):
+# every row is a vault path, the owner's own words (their first prompt) and
+# the files they touched. The generic `/api/q/<name>` and `queries_run`
+# answer this name with the unknown-query refusal, so a `queries: true`
+# grant is not a way past the knowledge tiers to the owner's sessions. The
+# consumer is CM-1's session-start briefing route, which knows its caller's
+# grant and project and applies `canSeeUnder`; that is also where the
+# ruling's first arm — an unfolded session to the same project — belongs,
+# once a capture names its remote.
+#
+# `repo` is the checkout's basename as the capture saw it
+# (`repoNameFromPath`), matched case-insensitively — the Mac's filesystem
+# is — and blank matches nothing. `days` is bounded to a year.
+name: recent_sessions
+expose: route
+description: >-
+  The owner's captured coding sessions in one repository (checkout basename,
+  case-insensitive), newest first, once the knowledge fold has read them:
+  date, tool, repo, branch, turns, files touched (JSON array) and the
+  owner's first prompt clipped — handles only; never the agent's reply,
+  never a session an agent credential captured, never one still waiting for
+  the fold. `days` back from now (default 14, at most 365), `limit` rows
+  (default 20).
+params:
+  repo: { type: text, default: "" } # blank matches nothing
+  days: { type: int, default: 14 }
+  limit: { type: int, default: 20 }
+sql: |
+  WITH anchor AS (
+    SELECT max(ts) AS ts
+    FROM runs
+    WHERE component = 'knowledge-fold' AND kind = 'routine_run' AND ok AND meta->>'folded' = 'true'
+  ),
+  span AS (
+    SELECT now() - make_interval(days => GREATEST(1, LEAST(:days, 365))) AS since
+  )
+  SELECT
+    s.path,
+    COALESCE(s.started, i.ts) AS date,
+    s.tool,
+    s.repo,
+    s.branch,
+    s.turns,
+    s.files,
+    s.first_prompt
+  FROM vault_sessions s
+  JOIN inbox i ON i.path = s.path
+  CROSS JOIN anchor a
+  CROSS JOIN span w
+  WHERE btrim(:repo::text) <> ''
+    AND lower(s.repo) = lower(btrim(:repo::text))
+    AND i.source_agent IS NULL
+    AND i.status <> 'rejected'
+    AND a.ts IS NOT NULL AND i.ts <= a.ts
+    AND COALESCE(s.started, i.ts) >= w.since
+  ORDER BY COALESCE(s.started, i.ts) DESC, s.path COLLATE "C"
+  LIMIT GREATEST(0, LEAST(:limit, 200))
+cache_ttl: 0 # a fold that just ran must release its sessions on the next call

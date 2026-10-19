@@ -22,10 +22,17 @@
 //   * Install anything. `connect claude-code` mints the token the plugin
 //     docs have you mint by hand; the plugin itself is still
 //     `/plugin install` (docs/ops/claude-code-plugin.md).
+//
+// And the way back (HS-7, ruled 2026-10-04): `connect --remove <tool>` undoes
+// what `connect` wrote — the row is revoked, the Keychain item deleted, and
+// the tool's config file put back as it was (`connectRemove`, below) — and
+// `connect <tool>` on a revoked row registers it again with a NEW token, so an
+// accidental revoke needs no new install.
 
 import { existsSync } from "node:fs";
-import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { consoleTarget, type ConsoleTarget } from "./console-client.js";
 import { realExec, type Exec } from "./exec.js";
 import { Keychain, keychainAccount, serviceFor } from "./keychain.js";
@@ -136,6 +143,8 @@ export interface ConnectResult {
   loopback: boolean;
   agent_id: string;
   created: boolean;
+  /** the row was REVOKED and this run registered it again: a new token, and grants/projects back to a new row's default-deny (HS-7) */
+  reconnected: boolean;
   rotated: boolean;
   grants: Grants;
   projects: string[];
@@ -245,12 +254,14 @@ export async function connect(opts: ConnectOptions): Promise<ConnectResult> {
   // 1. the row. Idempotent by construction: the id IS the tool name, so a
   //    re-run finds what the last run made.
   const listed = ((await call(api, "GET", "/api/agents")).json.agents ?? []) as AgentRow[];
-  const existing = listed.find((a) => a.id === spec.id);
-  if (existing?.revoked === true) {
-    throw new Error(
-      `agent "${spec.id}" is revoked on ${target.url}. Revocation is permanent — the row stays so old proposals keep their provenance, and its id cannot be re-minted (apps/console/src/agents.ts). Register a differently-named agent by hand if this tool is coming back.`,
-    );
-  }
+  const found = listed.find((a) => a.id === spec.id);
+  // A REVOKED row is not "existing": the owner ruled (2026-10-04, HS-7) that
+  // an accidental revoke must be recoverable without a new install, so it is
+  // registered again below — same id, so old proposals keep their provenance,
+  // new token, and nothing of what it held comes back (the console resets
+  // grants, projects and autonomy; `revokeAgent` already cleared approvals).
+  const reviving = found?.revoked === true;
+  const existing = reviving ? undefined : found;
   // `--remote` is a property of the ENROLMENT, so it is settled when the row
   // is minted and never afterwards: promoting a row the owner already let in
   // would be a widening dressed as a flag, and demoting one would be an
@@ -266,9 +277,18 @@ export async function connect(opts: ConnectOptions): Promise<ConnectResult> {
   let rotated = false;
   let pending = existing?.pending === true;
   if (!existing) {
-    const r = await call(api, "POST", "/api/agents", { id: spec.id, display_name: spec.displayName, kind: "external", ...(opts.remote === true ? { remote: true } : {}) });
+    let r: Awaited<ReturnType<typeof call>>;
+    try {
+      r = await call(api, "POST", "/api/agents", { id: spec.id, display_name: spec.displayName, kind: "external", ...(opts.remote === true ? { remote: true } : {}) });
+    } catch (err) {
+      // a console from before HS-7 answers a revoked id with 409 — say what to do, not just the code
+      if (reviving && /HTTP 409/.test(err instanceof Error ? err.message : "")) {
+        throw new Error(`agent "${spec.id}" is revoked on ${target.url} and that console does not register a revoked agent again (it predates HS-7) — \`metistry update\` brings it up to date, then run this again`);
+      }
+      throw err;
+    }
     token = String(r.json.token ?? "");
-    created = true;
+    created = !reviving;
     pending = r.json.pending === true;
     if (!token) throw new Error(`POST /api/agents answered ${r.status} without a token — nothing to give ${spec.displayName}`);
   } else if (opts.rotate === true) {
@@ -303,6 +323,7 @@ export async function connect(opts: ConnectOptions): Promise<ConnectResult> {
     loopback: /^https?:\/\/(127\.0\.0\.1|\[::1\]|localhost)(:|\/|$)/i.test(target.url),
     agent_id: spec.id,
     created,
+    reconnected: reviving,
     rotated,
     grants,
     projects,
@@ -349,6 +370,34 @@ export async function connect(opts: ConnectOptions): Promise<ConnectResult> {
     result.config_state = spec.id === "opencode" ? await writeOpencodeConfig(file, key, mcpUrl, varName) : await writeCursorConfig(file, key, mcpUrl, varName);
   }
   return result;
+}
+
+// ---- the backup `connect` takes before it writes ----------------------------
+//
+// The first time `connect` changes a tool's config file it copies the file as
+// it was (bytes and mode) to `<file>.<key>.bak`, and never overwrites that copy
+// afterwards — so the backup is always the file BEFORE this verb touched it,
+// and `connect --remove` can give it back exactly. It sits beside the file it
+// protects, so it is no more exposed than the file was (same mode). A file
+// that did not exist has nothing to back up; removal knows it by the empty
+// remainder instead.
+
+/** Where the pre-`connect` copy of `file` lives, per server key (two instances on one Mac each keep their own). */
+export function backupFile(file: string, key: string): string {
+  return `${file}.${key}.bak`;
+}
+
+async function backupOriginal(file: string, key: string): Promise<void> {
+  if (!existsSync(file)) return;
+  const bak = backupFile(file, key);
+  const mode = (await stat(file)).mode & 0o777;
+  try {
+    await writeFile(bak, await readFile(file), { mode, flag: "wx" });
+  } catch (err) {
+    if ((err as { code?: string }).code === "EEXIST") return; // the first copy is the original; keep it
+    throw err;
+  }
+  await chmod(bak, mode); // the umask may have narrowed the create; the copy is no more and no less exposed than the file
 }
 
 // ---- Cursor's config ---------------------------------------------------------
@@ -403,6 +452,7 @@ export async function writeCursorConfig(file: string, key: string, mcpUrl: strin
   const text = `${JSON.stringify(next, null, 2)}\n`;
   if (text === before) return "unchanged";
   await mkdir(dirname(file), { recursive: true });
+  await backupOriginal(file, key);
   await writeFile(file, text, { mode: 0o600 });
   await chmod(file, 0o600);
   return "written";
@@ -495,6 +545,7 @@ export async function writeOpencodeConfig(file: string, key: string, mcpUrl: str
   const text = `${JSON.stringify(next, null, 2)}\n`;
   if (text === before) return "unchanged";
   await mkdir(dirname(file), { recursive: true });
+  await backupOriginal(file, key);
   await writeFile(file, text, { mode: 0o600 });
   await chmod(file, 0o600);
   return "written";
@@ -513,6 +564,261 @@ export async function readOpencodeServer(file: string, key: string): Promise<{ u
   return entry && typeof entry.url === "string" ? { url: entry.url } : undefined;
 }
 
+// ---- `connect --remove <tool>` -----------------------------------------------
+
+/** What happened to a tool's config file. */
+export type ConfigRemoval =
+  /** the file is byte-for-byte what it was before `connect` first wrote it (from the backup) */
+  | "restored"
+  /** the entry is gone and everything else was left alone — the file changed since, so the backup could not be put back whole */
+  | "entry-removed"
+  /** `connect` had created the file and nothing else was in it, so it is gone again */
+  | "file-removed"
+  | "no-entry"
+  | "no-file"
+  /** a tool with no file (`claude-code`, `devin`) */
+  | "n/a";
+
+/**
+ * Take this verb's server entry out of one JSON config and give the file back.
+ *
+ * Parse, drop `<container>.<key>`, then undo the two things `connect` adds
+ * around an entry — an emptied container it created, and OpenCode's `$schema`
+ * line — judged against the backup (`backupOriginal`): if the result is the
+ * backed-up document, the backup's own bytes are written back (formatting,
+ * mode and all), otherwise the file keeps what the owner has done to it since
+ * and only the entry goes. With no backup (a file `connect` created, or one
+ * from before backups) a result with nothing left in it removes the file.
+ * Never touches another server's entry, and never writes a file it cannot
+ * parse.
+ */
+export async function removeConfigEntry(file: string, key: string, container: "mcpServers" | "mcp", schema?: string): Promise<ConfigRemoval> {
+  const bak = backupFile(file, key);
+  const done = async (r: ConfigRemoval): Promise<ConfigRemoval> => {
+    await rm(bak, { force: true }); // ours, and it holds a copy of the owner's other servers — it goes with the entry
+    return r;
+  };
+  if (!existsSync(file)) return done("no-file");
+  const text = await readFile(file, "utf8");
+  let doc: Record<string, unknown> = {};
+  if (text.trim() !== "") {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch (err) {
+      throw new Error(`${file} is not JSON this verb can edit (${err instanceof Error ? err.message : String(err)}) — delete the "${container}.${key}" entry by hand`);
+    }
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error(`${file} does not hold a JSON object — delete the "${container}.${key}" entry by hand`);
+    doc = parsed as Record<string, unknown>;
+  }
+  const servers = doc[container];
+  if (servers === null || typeof servers !== "object" || Array.isArray(servers) || !(key in (servers as object))) return done("no-entry");
+
+  const rest = { ...(servers as Record<string, unknown>) };
+  delete rest[key];
+  const next: Record<string, unknown> = { ...doc, [container]: rest };
+
+  // what the file was before `connect` first wrote it, if we kept that
+  let original: { doc: Record<string, unknown>; mode: number } | undefined;
+  if (existsSync(bak)) {
+    try {
+      const t = await readFile(bak, "utf8");
+      const d: unknown = t.trim() === "" ? {} : JSON.parse(t);
+      if (d !== null && typeof d === "object" && !Array.isArray(d)) original = { doc: d as Record<string, unknown>, mode: (await stat(bak)).mode & 0o777 };
+    } catch {
+      original = undefined; // an unreadable backup is no backup: fall through to the entry-only removal
+    }
+  }
+
+  // `connect` created the container and the schema line when the file had none; take them back unless the original had them
+  if (Object.keys(rest).length === 0 && !(original && container in original.doc)) delete next[container];
+  if (schema !== undefined && next.$schema === schema && !(original && "$schema" in original.doc)) delete next.$schema;
+
+  if (original && isDeepStrictEqual(next, original.doc)) {
+    await atomicWrite(file, await readFile(bak, "utf8"), original.mode);
+    return done("restored");
+  }
+  if (!original && Object.keys(next).length === 0) {
+    await rm(file);
+    return done("file-removed");
+  }
+  await atomicWrite(file, `${JSON.stringify(next, null, 2)}\n`, (await stat(file)).mode & 0o777);
+  return done("entry-removed");
+}
+
+/** Write beside, then rename over: a reader never sees half a config. */
+async function atomicWrite(file: string, text: string, mode: number): Promise<void> {
+  const tmp = `${file}.metistry-${process.pid}.tmp`;
+  try {
+    await writeFile(tmp, text, { mode });
+    await chmod(tmp, mode);
+    await rename(tmp, file);
+  } catch (err) {
+    await rm(tmp, { force: true });
+    throw err;
+  }
+}
+
+export interface RemoveOptions extends Omit<ConnectOptions, "tool" | "rotate" | "areas" | "projects" | "remote"> {
+  tool: ConnectTool;
+}
+
+export interface RemoveResult {
+  tool: ConnectTool;
+  display_name: string;
+  console_url: string;
+  agent_id: string;
+  /** `revoked` now · `already-revoked` (an earlier run, or the console) · `absent` (never registered) */
+  agent: "revoked" | "already-revoked" | "absent";
+  /** pending access requests the revocation settled (the console's own answer) */
+  access_requests?: number[];
+  /** the Keychain item: `removed` · `absent` (none to remove) · `failed` (it is still there; see `problems`) · `n/a` (a tool that keeps none, or a host with no Keychain) */
+  token: "removed" | "absent" | "failed" | "n/a";
+  token_var?: string;
+  keychain_account?: string;
+  keychain_service?: string;
+  config: ConfigRemoval;
+  config_file?: string;
+  config_key?: string;
+  /** steps that did not finish; the run is idempotent, so fixing the cause and running it again completes them */
+  problems: string[];
+}
+
+/**
+ * `metistry connect --remove <tool>`: the other direction, and idempotent —
+ * run it twice and the second run reports nothing left to do.
+ *
+ * Order matters. The row is revoked FIRST: that kills the credential, the one
+ * step with a security consequence, and if the console cannot be reached the
+ * run stops there with nothing local touched (a Keychain item deleted while
+ * its token still authenticates would be a live bearer nobody holds, and the
+ * console never shows one twice). Then the config file, then the Keychain
+ * item; those two are independent, so one failing does not skip the other —
+ * both are reported in `problems`.
+ *
+ * Only what `connect` made: this tool's entry under this instance's key, its
+ * own Keychain item under this instance's account, its own row. Another
+ * server in the same config file, another instance's entry, and the other
+ * tools are not read, let alone written.
+ */
+export async function connectRemove(opts: RemoveOptions): Promise<RemoveResult> {
+  const spec = TOOL_SPECS[opts.tool];
+  const env = opts.env ?? process.env;
+  const platform = opts.platform ?? process.platform;
+  const exec = opts.exec ?? realExec;
+  const ns = await loadNamespace(opts.instanceDir);
+  if (ns) applyPorts(env, ns);
+  const suffix = ns?.labelSuffix;
+  const target = await consoleTarget({ env, platform, exec, ...(opts.instanceId ? { instanceId: opts.instanceId } : {}) });
+  const api: Api = { target, fetchFn: opts.fetchFn ?? fetch, timeoutMs: opts.timeoutMs ?? 10_000 };
+
+  const result: RemoveResult = {
+    tool: spec.id,
+    display_name: spec.displayName,
+    console_url: target.url,
+    agent_id: spec.id,
+    agent: "absent",
+    token: "n/a",
+    config: "n/a",
+    problems: [],
+  };
+
+  // 1. the credential. A failure here is the run's failure: nothing else has happened.
+  const listed = ((await call(api, "GET", "/api/agents")).json.agents ?? []) as AgentRow[];
+  const row = listed.find((a) => a.id === spec.id);
+  if (row?.revoked === true) result.agent = "already-revoked";
+  else if (row) {
+    const r = await call(api, "POST", `/api/agents/${spec.id}/revoke`, {});
+    result.agent = "revoked";
+    const settled = r.json.access_requests;
+    if (Array.isArray(settled) && settled.length > 0) result.access_requests = settled.map(Number);
+  }
+
+  if (spec.config === "paste") return result; // Devin: nothing on this machine to take back
+
+  // 2. the tool's config file
+  const key = serverKey(suffix);
+  if (spec.config === "file") {
+    const home = opts.home ?? env.HOME ?? "";
+    const opencode = spec.id === "opencode";
+    const file = opencode ? opencodeConfigFile(home, env) : cursorConfigFile(home);
+    result.config_file = file;
+    result.config_key = key;
+    try {
+      result.config = await removeConfigEntry(file, key, opencode ? "mcp" : "mcpServers", opencode ? OPENCODE_SCHEMA : undefined);
+    } catch (err) {
+      result.problems.push(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  // 3. the bearer. A host with no Keychain never held one.
+  const varName = agentTokenVar(spec.id, suffix);
+  const account = accountFor(varName, { user: keychainAccount(env), ...(opts.instanceId ? { instance: opts.instanceId } : {}) });
+  result.token_var = varName;
+  result.keychain_account = account;
+  result.keychain_service = serviceFor(varName);
+  if (platform === "darwin") {
+    try {
+      const kc = new Keychain(exec, account);
+      if (await kc.deleteSecret(varName)) result.token = "removed";
+      else if (await kc.hasSecret(varName)) throw new Error("`security` refused — a locked keychain, or a dialog that was declined");
+      else result.token = "absent";
+    } catch (err) {
+      result.token = "failed";
+      result.problems.push(`the Keychain item ${serviceFor(varName)} could not be deleted (${err instanceof Error ? err.message : String(err)}) — delete it in Keychain Access, or run this again`);
+    }
+  }
+  return result;
+}
+
+const CONFIG_WORDS: Record<ConfigRemoval, string> = {
+  restored: "restored to exactly what it was before `connect` first wrote it",
+  "entry-removed": "entry removed; every other line left as it is now (the file had changed since, so the backup was not put back whole)",
+  "file-removed": "removed — `connect` had created it and nothing else was in it",
+  "no-entry": "had no entry to remove",
+  "no-file": "does not exist",
+  "n/a": "",
+};
+
+export function renderRemove(r: RemoveResult): string {
+  const spec = TOOL_SPECS[r.tool];
+  const lines: string[] = [];
+  lines.push(`${r.display_name} → disconnected from ${r.console_url}`);
+  const agentWord =
+    r.agent === "revoked" ? "revoked now — its token authenticates nothing" : r.agent === "already-revoked" ? "was already revoked" : "was never registered here, so there was nothing to revoke";
+  lines.push(`agent     ${r.agent_id} ${agentWord}${r.access_requests?.length ? `; settled ${r.access_requests.length} pending access request${r.access_requests.length === 1 ? "" : "s"}` : ""}`);
+  if (r.config_file) lines.push(`config    ${r.config_file} ${CONFIG_WORDS[r.config]}`);
+  if (r.tool !== "devin") {
+    lines.push(
+      r.token === "removed"
+        ? `token     deleted from the login Keychain (${r.keychain_service}, account ${r.keychain_account})`
+        : r.token === "absent"
+          ? `token     no Keychain item to delete (${r.keychain_service}, account ${r.keychain_account})`
+          : r.token === "failed"
+            ? `token     NOT deleted — ${r.keychain_service} (account ${r.keychain_account}) is still in the login Keychain`
+            : "token     this host has no Keychain, so none was held here",
+    );
+  }
+  if (r.tool === "claude-code") {
+    lines.push("");
+    lines.push("Nothing on disk to restore: the plugin reads its environment. Delete the METISTRY_URL / METISTRY_OWNER_TOKEN / METISTRY_CAPTURE_ON_STOP lines from the profile (or `env` in ~/.claude/settings.json) where you put them, and `/plugin uninstall metistry@metistry` if you are done with the plugin.");
+  } else if (r.tool === "devin") {
+    lines.push("");
+    lines.push("Devin's server was registered by hand, so it is removed by hand: delete it at Customize → MCPs. Its token is already dead either way.");
+  } else {
+    lines.push("");
+    lines.push(`Also delete the \`export ${r.token_var}=…\` line you put in your shell profile — it now reads an empty Keychain item.`);
+  }
+  lines.push("");
+  lines.push(`\`metistry connect ${r.tool}\` registers it again whenever you want it back: same id, a new token, default-deny grants (${spec.doc}).`);
+  if (r.problems.length > 0) {
+    lines.push("");
+    for (const p of r.problems) lines.push(`PROBLEM   ${p}`);
+    lines.push("Fix that and run this again — every step is safe to repeat.");
+  }
+  return lines.join("\n");
+}
+
 // ---- output ------------------------------------------------------------------
 
 /**
@@ -526,10 +832,15 @@ export function renderConnect(r: ConnectResult): string {
   const lines: string[] = [];
   lines.push(`${r.display_name} → ${r.mcp_url}`);
   lines.push(
-    `agent     ${r.agent_id} (${r.created ? "registered now" : r.rotated ? "token rotated" : "already registered"}), kind external, grants ${describeGrants(r.grants)}${
+    `agent     ${r.agent_id} (${r.created ? "registered now" : r.reconnected ? "registered again after a revoke" : r.rotated ? "token rotated" : "already registered"}), kind external, grants ${describeGrants(r.grants)}${
       r.projects.length ? `, projects ${r.projects.join(", ")}` : ""
     }`,
   );
+  if (r.reconnected) {
+    lines.push(
+      `reconnect the revoked row is live again under the same id (its old proposals keep their provenance) with a NEW token. What it held before did not come back: grants are default-deny — \`--areas\` / \`--project\` widen them again, or the Agents panel.`,
+    );
+  }
   if (r.token === "unchanged") {
     lines.push(`token     unchanged — the console returns an agent token only when it mints or rotates one. \`metistry connect ${r.tool} --rotate\` issues a new one (the old one stops working immediately).`);
   }
@@ -672,7 +983,7 @@ export function renderConnectList(r: { console_url: string; tools: ConnectListRo
     "",
     ...ui
       .wrap(
-        "agent: the row in this instance's registry (absent = `metistry connect <tool>` has not run; pending = enrolled --remote and awaiting your approval, so its token authenticates nothing; revoked is permanent).",
+        "agent: the row in this instance's registry (absent = `metistry connect <tool>` has not run; pending = enrolled --remote and awaiting your approval, so its token authenticates nothing; revoked = `metistry connect <tool>` registers it again with a new token and default-deny grants; `connect --remove <tool>` revokes and undoes the config).",
       )
       .split("\n")
       .map((l) => ui.dim(l)),

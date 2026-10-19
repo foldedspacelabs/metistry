@@ -18,10 +18,16 @@
 // that let Today go from a calendar event to its note and from an attendee
 // to a person page (plan §2.9, today-hub-requests A3/A4) — for the same
 // reason, and derived on the same terms.
+//
+// Since CM-3/CM-4 (research 2026-10-04, context-mode review) it fills two
+// more on those terms: `project_repos` (a project page's `repos:` — a git
+// remote → the page the owner wrote for it) and `vault_sessions` (the
+// handles of every captured `kind: session` note under `Inbox/`, never the
+// agent's reply), which `project_for_repo` and `recent_sessions` serve.
 
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { finishRun, KNOWLEDGE_CONFLICT_REF_PREFIX, KNOWLEDGE_CONFLICT_SOURCE_KIND, knowledgeConflictSource, lastMirror, nextRecurrence, raiseMirror, resolveAtSource, RESOLVED_AT_SOURCE, startRun, taskToday, type RequestSource, type RunExecutor, type TaskDateOptions } from "@foldedspacelabs/metistry-core";
+import { finishRun, parseSessionNote, KNOWLEDGE_CONFLICT_REF_PREFIX, KNOWLEDGE_CONFLICT_SOURCE_KIND, knowledgeConflictSource, lastMirror, nextRecurrence, raiseMirror, resolveAtSource, RESOLVED_AT_SOURCE, startRun, taskToday, type RequestSource, type RunExecutor, type TaskDateOptions } from "@foldedspacelabs/metistry-core";
 import type { Committer } from "./committer.js";
 import { EMPTY_SUMMARY, type Embeddings, type EmbedSummary } from "./embeddings.js";
 import type { Vault } from "./vault.js";
@@ -40,6 +46,7 @@ import {
   isMarkdown,
   isMeetingNotePath,
   isPersonPath,
+  isProjectPagePath,
   isTaskPath,
   mimeForPath,
   ownedByUser,
@@ -94,6 +101,10 @@ export interface ReconcileSummary {
   meeting_refs: number;
   /** `people_emails` rows after this cycle: one per (address, People page). */
   people_emails: number;
+  /** `project_repos` rows after this cycle: one per (remote, project page the owner wrote) — CM-3. */
+  project_repos: number;
+  /** `vault_sessions` rows after this cycle: one per captured `kind: session` note under `Inbox/` — CM-4. */
+  sessions: number;
   /** Phase 6: vectors brought up to date this cycle. Absent when no embedder is configured. */
   embeddings?: EmbedSummary;
   duration_ms: number;
@@ -346,6 +357,12 @@ export class Indexer {
     const meetingRefs = await this.syncPairs(MEETING_REFS, meetingRefPairs(scanned.values()));
     const peopleEmails = await this.syncPairs(PEOPLE_EMAILS, personEmailPairs(scanned.values()));
 
+    // a git remote → the project page the owner wrote for it (CM-3), and the
+    // handles of every captured session note (CM-4) — the return path a
+    // coding agent's next session in the same repository is briefed from
+    const projectRepos = await this.syncPairs(PROJECT_REPOS, projectRepoPairs(scanned.values()));
+    const sessions = await this.syncSessions(scanned);
+
     // external edits: Obsidian (any device) writes straight to the tree;
     // nothing else can commit them. Paths with a pending bridge intent are
     // that principal's; conflict copies are flagged, not committed.
@@ -384,6 +401,8 @@ export class Indexer {
       tasks,
       meeting_refs: meetingRefs,
       people_emails: peopleEmails,
+      project_repos: projectRepos,
+      sessions,
       ...(embeddings ? { embeddings } : {}),
       duration_ms: Date.now() - started,
     };
@@ -887,18 +906,59 @@ export class Indexer {
     }
     return want.size;
   }
+
+  /**
+   * **`vault_sessions`** (CM-4): one row per captured `kind: session` note
+   * under `Inbox/`, holding what `recent_sessions` serves back — date, tool,
+   * repo, branch, turns, files, the owner's first prompt clipped — and
+   * nothing the agent wrote: `parseSessionNote` never reads the note's
+   * `## Last response`, so there is no column it could land in.
+   *
+   * Derived in full and keyed by the note's bytes: a row is rewritten only
+   * when the file's hash moved, deleted when the file is gone, and rebuilt
+   * whole by the first walk after a wipe. Only `Inbox/` is read — that is
+   * where every capture door lands a session (docs/ops/inbox.md), it is the
+   * one place the walk keeps a note's bytes, and a session the owner has
+   * moved into the vault proper is knowledge, read through the knowledge
+   * doors under the caller's tier, not a handle here.
+   */
+  private async syncSessions(scanned: Map<string, Scanned>): Promise<number> {
+    const want = new Map<string, { hash: string; facts: NonNullable<ReturnType<typeof parseSessionNote>> }>();
+    for (const s of scanned.values()) {
+      if (s.conflict || !s.bytes || !isMarkdown(s.path) || !isInboxPath(s.path, this.inboxPrefix)) continue;
+      const facts = parseSessionNote(s.bytes.toString("utf8"));
+      if (facts) want.set(s.path, { hash: s.hash, facts });
+    }
+    const held = new Map<string, string>();
+    for (const r of (await this.db.query(`SELECT path, content_hash FROM vault_sessions`)).rows) held.set(String(r.path), String(r.content_hash));
+    const gone = [...held.keys()].filter((p) => !want.has(p));
+    if (gone.length > 0) await this.db.query(`DELETE FROM vault_sessions WHERE path = ANY($1::text[])`, [gone]);
+    for (const [path, { hash, facts }] of want) {
+      if (held.get(path) === hash) continue;
+      await this.db.query(
+        `INSERT INTO vault_sessions (path, content_hash, session_id, tool, repo, cwd, branch, started, ended, turns, files, first_prompt)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12)
+         ON CONFLICT (path) DO UPDATE SET content_hash = EXCLUDED.content_hash, session_id = EXCLUDED.session_id, tool = EXCLUDED.tool,
+           repo = EXCLUDED.repo, cwd = EXCLUDED.cwd, branch = EXCLUDED.branch, started = EXCLUDED.started, ended = EXCLUDED.ended,
+           turns = EXCLUDED.turns, files = EXCLUDED.files, first_prompt = EXCLUDED.first_prompt`,
+        [path, hash, facts.sessionId, facts.tool, facts.repo, facts.cwd, facts.branch, facts.started, facts.ended, facts.turns, JSON.stringify(facts.files), facts.firstPrompt],
+      );
+    }
+    return want.size;
+  }
 }
 
-// ---- meeting refs and people emails (plan §2.9, T1-10) ----------------------
+// ---- meeting refs, people emails and project repos (plan §2.9, T1-10; CM-3) ----
 
 /** A derived `(key, path)` table this walk owns. Both names are constants below — never a value from a note. */
 interface PairTable {
-  name: "vault_meeting_refs" | "people_emails";
-  key: "event_id" | "email";
+  name: "vault_meeting_refs" | "people_emails" | "project_repos";
+  key: "event_id" | "email" | "remote";
 }
 
 const MEETING_REFS: PairTable = { name: "vault_meeting_refs", key: "event_id" };
 const PEOPLE_EMAILS: PairTable = { name: "people_emails", key: "email" };
+const PROJECT_REPOS: PairTable = { name: "project_repos", key: "remote" };
 
 function pairKey(key: string, path: string): string {
   return `${key}${REF_SEP}${path}`;
@@ -933,6 +993,24 @@ export function personEmailPairs(notes: Iterable<{ path: string; conflict: boole
   for (const s of notes) {
     if (s.conflict || !isPersonPath(s.path) || !ownedByUser(s.meta)) continue;
     for (const email of s.meta.emails) want.set(pairKey(email, s.path), [email, s.path]);
+  }
+  return want;
+}
+
+/**
+ * `repos:` from every project page THE USER OWNS (CM-3). `Projects/` is not
+ * a user-only directory — the fold creates entity pages there under its own
+ * `source:` — so ownership is checked here, at the walk, exactly as for a
+ * People page's address: a repository maps to a page only on the owner's
+ * word, and an agent cannot make a repository resolve to a page it wrote.
+ * Two pages that both name one remote are two rows; `project_for_repo`
+ * then resolves neither, the refusal `people_by_email` makes.
+ */
+export function projectRepoPairs(notes: Iterable<{ path: string; conflict: boolean; meta: NoteMeta }>): Map<string, [string, string]> {
+  const want = new Map<string, [string, string]>();
+  for (const s of notes) {
+    if (s.conflict || !isProjectPagePath(s.path) || !ownedByUser(s.meta)) continue;
+    for (const remote of s.meta.repos) want.set(pairKey(remote, s.path), [remote, s.path]);
   }
   return want;
 }

@@ -498,6 +498,11 @@ public struct CaptureBarAskPanel: View {
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(Text(verbatim: model.spokenStatus(at: context.date)))
                 }
+                if let staying = model.askStaysOnThisMacLine {
+                    Text(verbatim: staying)
+                        .metistryFont(.subhead)
+                        .foregroundStyle(p[.textSecondary])
+                }
                 Spacer(minLength: 0)
             } else {
                 CaptureBarMark(live: false, size: 15).accessibilityHidden(true)

@@ -1251,6 +1251,8 @@ export {
   summarizeTranscript,
   renderSessionNote,
   renderSessionBody,
+  parseSessionNote,
+  type SessionNoteFacts,
   sessionTitle,
   idempotencyKey,
   formatDuration,
@@ -1429,3 +1431,4 @@ export {
   type MeetingEventRow,
   type RecordedSession,
 } from "./meeting-group.js";
+export { normalizeRepoRemote, REPO_REMOTE_MAX } from "./repo-remote.js";

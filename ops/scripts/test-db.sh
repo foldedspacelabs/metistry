@@ -4,7 +4,11 @@
 # push-retry storm before this existed). Drops + recreates
 # ${METISTRY_TEST_DB_NAME:-metistry_test} and applies all migrations to it.
 # The root `pnpm test` derives a per-checkout default from the directory
-# name, so parallel worktrees (subagents) never drop each other's db.
+# name, so parallel worktrees (subagents) never drop each other's db. It then
+# hands that migrated database to ops/scripts/test-workspace.mjs, which copies
+# it once per package (`<name>_<package>`, a TEMPLATE copy — no second run of
+# the migrations) so no two packages' suites ever share rows, and drops each
+# copy after. A direct `vitest run` still uses this one.
 #
 # THE GUARD (see migrate.sh for the incident this answers): this script's
 # whole reason to exist is dropping a database, so if METISTRY_TEST_DB_NAME
@@ -86,5 +90,10 @@ export PGPASSWORD="$METISTRY_DB_PASSWORD"
 PSQL="psql -v ON_ERROR_STOP=1 -h $METISTRY_DB_HOST -p $METISTRY_DB_PORT -U $METISTRY_DB_USER --no-psqlrc -q -d postgres"
 $PSQL -c "DROP DATABASE IF EXISTS $METISTRY_TEST_DB_NAME;"
 $PSQL -c "CREATE DATABASE $METISTRY_TEST_DB_NAME;"
+# deterministic in time: the scratch database answers in UTC whatever zone the
+# server runs in (CI's does; a Mac's does not), so a "30 days out" is the same
+# number of hours on every machine, DST or no — test-workspace.mjs's per-package
+# copies set the same (a TEMPLATE does not carry a database setting over)
+$PSQL -c "ALTER DATABASE $METISTRY_TEST_DB_NAME SET timezone = 'UTC';"
 METISTRY_DB_NAME="$METISTRY_TEST_DB_NAME" METISTRY_TEST_DB_NAME="$METISTRY_TEST_DB_NAME" ops/scripts/migrate.sh
 echo "test-db: $METISTRY_TEST_DB_NAME ready"

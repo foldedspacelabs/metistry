@@ -37,7 +37,7 @@ let requestShapes: [String: String] = [
 // MARK: - Rows, as GET /api/proposals serves them
 
 /// One row through the wire's own `Decodable`, `request` and all.
-func requestRow(_ id: Int, _ kind: String, shape: String? = nil, payload: String, ts: String = "2026-09-28T12:00:00.000Z", trust: String = "internal", agent: String = "assistant") throws -> RequestRow {
+func requestRow(_ id: Int, _ kind: String, shape: String? = nil, payload: String, ts: String = "2026-09-28T12:00:00.000Z", trust: String = "internal", agent: String = "assistant", group: String? = nil) throws -> RequestRow {
     var request = shape.map { requestShapes[$0]! } ?? requestShapes[kind] ?? "null"
     // `request.questions` is core's own `questionsOf` reading of THIS row's
     // payload (packages/core/src/decision-block.ts), never a fixed table
@@ -50,7 +50,7 @@ func requestRow(_ id: Int, _ kind: String, shape: String? = nil, payload: String
     }
     let json = """
     {"id": "\(id)", "ts": "\(ts)", "kind": "\(kind)", "source_agent": "\(agent)", "trust": "\(trust)", "payload": \(payload),
-     "decision": "pending", "decided_at": null, "work_id": null, "snoozed_until": null, "request": \(request)}
+     "decision": "pending", "decided_at": null, "work_id": null, "snoozed_until": null, "group_id": \(group.map { "\"\($0)\"" } ?? "null"), "request": \(request)}
     """
     return try JSONDecoder().decode(RequestRow.self, from: Data(json.utf8))
 }
@@ -599,7 +599,7 @@ private let threeQuestions = #"{"title":"Three things about the Connections pane
 private func meeting(_ transport: AnswerConsole, hold: @escaping @Sendable (TimeInterval) async throws -> Void = { _ in }) throws -> GroupAnswering {
     // five parts, raised a second apart and handed over out of order
     let parts = try [3, 1, 5, 2, 4].map { i in
-        try requestRow(i, "knowledge", payload: #"{"title":"To-do \#(i)","meeting":"Vendor review"}"#, ts: "2026-09-28T12:00:0\(i).000Z")
+        try requestRow(i, "knowledge", payload: #"{"title":"To-do \#(i)","meeting":{"session_id":"20260928-120000-00ab","session_title":"Vendor review","started_at":"2026-09-28T12:00:00.000Z","ended_at":null,"event_id":null,"event":null}}"#, ts: "2026-09-28T12:00:0\(i).000Z")
     }
     let group = MeetingGroup(id: "mtg-7", parts: parts)
     return GroupAnswering(group, store: stores(transport).0, assistantName: assistantName, hold: hold)
@@ -664,7 +664,7 @@ private func meeting(_ transport: AnswerConsole, hold: @escaping @Sendable (Time
         // the console refuses part 2 the first time, and part 4 goes stale
         if call.path == "/api/proposals/2" && n <= 5 { return AnswerConsole.refusal(503, #"{"error":{"code":"not_available","message":"no vault bridge in this deployment"}}"#) }
         if call.path == "/api/proposals/4" && n <= 5 {
-            return AnswerConsole.refusal(409, #"{"error":{"code":"conflict","message":"changed"},"reason":"stale","proposal":{"id":"4","ts":"2026-09-28T12:00:04.000Z","kind":"knowledge","payload":{"title":"To-do 4, reworded","meeting":"Vendor review"},"decision":"pending","changed_at":"2026-09-28T12:40:00.000Z"}}"#)
+            return AnswerConsole.refusal(409, #"{"error":{"code":"conflict","message":"changed"},"reason":"stale","proposal":{"id":"4","ts":"2026-09-28T12:00:04.000Z","kind":"knowledge","payload":{"title":"To-do 4, reworded","meeting":{"session_id":"20260928-120000-00ab","session_title":"Vendor review","started_at":"2026-09-28T12:00:00.000Z","ended_at":null,"event_id":null,"event":null}},"decision":"pending","changed_at":"2026-09-28T12:40:00.000Z"}}"#)
         }
         return AnswerConsole.ok()
     }
@@ -728,4 +728,43 @@ private let bodiesDirectory = URL(fileURLWithPath: #filePath)
             #expect(!code.contains("case \(kind)"), "\(name) maps the stored kind \(kind)")
         }
     }
+}
+
+@Test func rowsSharingAGroupIDAreOneCardAndANullGroupIsOneCardEach() throws {
+    let todo = #"{"title":"Send Kessler the scope"}"#
+    let a = try requestRow(1, "knowledge", payload: todo, ts: "2026-09-28T12:00:00.000Z", group: "meeting:20260928-120000-00ab")
+    let loner = try requestRow(2, "knowledge", payload: todo, ts: "2026-09-28T12:05:00.000Z")
+    let b = try requestRow(3, "knowledge", payload: todo, ts: "2026-09-28T11:59:00.000Z", group: "meeting:20260928-120000-00ab")
+    let other = try requestRow(4, "knowledge", payload: todo, ts: "2026-09-28T12:06:00.000Z", group: "meeting:20260927-090000-00cd")
+    let alone = try requestRow(5, "knowledge", payload: todo, ts: "2026-09-28T12:07:00.000Z")
+    #expect(a.groupID == "meeting:20260928-120000-00ab" && loner.groupID == nil)
+
+    let cards = MeetingGroup.cards([a, loner, b, other, alone])
+    #expect(cards.map(\.id) == ["group:meeting:20260928-120000-00ab", "request:2", "group:meeting:20260927-090000-00cd", "request:5"])
+    guard case .meeting(let meeting) = cards[0] else { Issue.record("no group"); return }
+    #expect(meeting.parts.map(\.id) == [3, 1], "one card, its parts oldest first")
+    // a group of one is still the meeting's card, and two rows without a group are two cards
+    guard case .meeting(let one) = cards[2] else { Issue.record("no group"); return }
+    #expect(one.parts.map(\.id) == [4])
+    #expect(MeetingGroup.cards([loner, alone]).count == 2)
+    #expect(MeetingGroup.cards([]).isEmpty)
+}
+
+@Test func aBlankGroupIDIsNoGroup() throws {
+    let json = #"{"id": 1, "ts": "2026-09-28T12:00:00.000Z", "kind": "knowledge", "decision": "pending", "group_id": "  "}"#
+    let blank = try JSONDecoder().decode(RequestRow.self, from: Data(json.utf8))
+    #expect(blank.groupID == nil)
+    let missing = try JSONDecoder().decode(RequestRow.self, from: Data(#"{"id": 2, "kind": "knowledge"}"#.utf8))
+    #expect(missing.groupID == nil, "a console older than T8-7")
+}
+
+@Test func aMeetingIsNamedByTheTitleInboxDrainWritesInTheNestedMeeting() throws {
+    // collectors/inbox-drain/run.ts: `meeting` is an object; `session_title` is the
+    // calendar event's title when there is one, else the recorder's.
+    let payload = #"{"title":"Send Kessler the scope","meeting":{"session_id":"20260928-120000-00ab","session_title":"Kessler kickoff","started_at":"2026-09-28T12:00:00.000Z","ended_at":null,"event_id":"ev-1","event":{"event_id":"ev-1","title":"Kessler kickoff"}}}"#
+    let part = try requestRow(1, "knowledge", payload: payload, group: "meeting:20260928-120000-00ab")
+    #expect(MeetingGroup(id: "g", parts: [part]).title(assistantName: assistantName) == "Kessler kickoff")
+    // a part without it is named by what it asks
+    let bare = try requestRow(2, "knowledge", payload: #"{"title":"Book the call"}"#)
+    #expect(MeetingGroup(id: "g", parts: [bare]).title(assistantName: assistantName) == "Book the call")
 }

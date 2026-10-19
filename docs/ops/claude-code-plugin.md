@@ -11,7 +11,11 @@ the operator's checklist.
 `metistry connect claude-code` does this for you (docs/ops/cli.md): it
 registers `claude-code` as an external agent, puts the bearer in the login
 Keychain, and prints the two `export` lines in §2 with the account filled
-in. It does **not** install the plugin — §3 still does. The rest of this
+in. It does **not** install the plugin — §3 still does.
+`metistry connect --remove claude-code` is the way back: it revokes the row and
+deletes the Keychain item (there is no file to restore — delete the `export`
+lines from your profile yourself); `metistry connect claude-code` again
+registers it afresh, a new token and default-deny grants. The rest of this
 section is the by-hand path, and the owner-token alternative.
 
 On the Studio, one owner token per place the plugin runs — label them so
@@ -76,6 +80,18 @@ same deterministic summary (turns, duration, tools with counts, files
 touched, first prompt, last response); no model is called, and a transcript
 is never posted. Filenames are
 `claude-code-session-<UTC stamp>-<session id prefix>.md`.
+
+**The return path (CM-4).** The reconciler reads every session note back
+into `vault_sessions` — date, tool, repo, branch, turns, files touched and
+your first prompt clipped — and the named query `recent_sessions {repo,
+days}` serves them, newest first, for one checkout basename. Handles only:
+the note's `## Last response` is never parsed, a session is served only
+once the knowledge fold has read it, and a session an agent credential
+captured is never served as yours (`docs/ops/reconciler.md`, "Project repos
+and captured sessions"). The query is `expose: route` — your first prompt
+and your files are owner text and vault paths — so no agent reaches it
+through `queries_run`; nothing reads it at session start yet, and the
+consumer will be CM-1/CM-2's briefing under the caller's grant.
 
 The summariser exists twice on purpose: the plugin ships as dependency-free
 `.mjs` a stranger runs out of `~/.claude/plugins`, so it cannot import

@@ -51,6 +51,15 @@
 //     `wrap`), with the connection, the upstream tool and the secret NAMES the
 //     call carried — refusals included — read back by the `connection_calls`
 //     named query.
+//   * **A large answer is folded, once, as a pure function of its text**
+//     (X-132; connection-fold.ts): over the host's threshold, a listing
+//     becomes its first items, its last and a count, a log its lines and
+//     counts, anything else a head and a tail — and the whole answer is kept
+//     for THIS caller to page (`page: "<handle>/<n>"`; connection-answers.ts),
+//     readable by no other principal and by nobody after it expires. The row
+//     records `bytes_in`, `bytes_out`, `fold` and the handle. The owner turns
+//     folding off per connection (the file's `fold: false`), and then every
+//     answer comes whole.
 //
 // Absent a proxy, both tools answer `not_available` (degrades: absent),
 // uniform with knowledge_read, artifact_* and queries_*.
@@ -69,7 +78,9 @@ import {
   type ToolGroup,
   type ToolMode,
 } from "@foldedspacelabs/metistry-core";
+import { readAnswer, storeAnswer } from "./connection-answers.js";
 import { recentConnectionCalls, recordConfirm, redeemCallerToken, type ConfirmRecord, type RedeemMiss } from "./connection-confirm.js";
+import { DEFAULT_CONNECTION_FOLD, answerText, byteLength, foldText, pagesOf, parsePageRef, wireBytes, type ConnectionFold } from "./connection-fold.js";
 import { done, fail, refuse, type Outcome } from "./outcome.js";
 import { principalOf, trustOf } from "./principal.js";
 import type { AgentPrincipal, Db } from "./types.js";
@@ -130,6 +141,8 @@ export interface ProxiedConnection {
   status: string;
   /** the owner's one switch: may agents reach it through the proxy at all */
   offer_to_agents: boolean;
+  /** the owner's fold switch (X-132): absent or true, a large answer is folded; false, every answer comes whole */
+  fold?: boolean | undefined;
   tools: readonly ProxiedToolPolicy[];
 }
 
@@ -243,15 +256,21 @@ function fromProxyError(connection: string, tool: string | undefined, err: unkno
 }
 
 export interface ConnectionsToolOptions {
-  /** Where the runs rows are: the rate limits are counted there, and a preview's confirm record is kept on its own row. */
+  /** Where the runs rows are: the rate limits are counted there, a preview's confirm record is kept on its own row, and a folded answer is kept under its id. */
   db: Db;
   limits?: ConnectionLimits | undefined;
+  /** The host's fold settings (X-132). Absent → connection-fold.ts' defaults. */
+  fold?: ConnectionFold | undefined;
 }
+
+/** The one answer for a page nobody can read — unknown, expired, another caller's, or stored under another connection or tool. */
+export const NO_SUCH_ANSWER = (page: string): string => `no such answer: ${page}`;
 
 export function registerConnectionsTools(reg: Register, proxy: ConnectionsProxy | undefined, principal: AgentPrincipal, callerBearer: string | undefined, opts: ConnectionsToolOptions): void {
   const p = principalOf(principal);
   const { db } = opts;
   const limits = opts.limits ?? DEFAULT_CONNECTION_LIMITS;
+  const fold = opts.fold ?? DEFAULT_CONNECTION_FOLD;
 
   /** The connections this caller may reach, and the one it named — or the uniform "no such connection". */
   async function reachable(door: "connections_list" | "connections_call", name: string): Promise<{ ok: true; connection: ProxiedConnection } | { ok: false; outcome: Outcome }> {
@@ -270,8 +289,16 @@ export function registerConnectionsTools(reg: Register, proxy: ConnectionsProxy 
     return callerBearer !== undefined && callerBearer.length >= 8 && JSON.stringify(args).includes(callerBearer);
   }
 
-  /** Dial one call through the pool, after its gate has held. `meta.dialled` is what the calls limit counts. */
-  async function dial(connection: string, tool: string, args: Record<string, unknown>, meta: Record<string, unknown>): Promise<Outcome> {
+  /**
+   * Dial one call through the pool, after its gate has held. `meta.dialled`
+   * is what the calls limit counts. The answer comes back redacted by the
+   * pool; what happens to it next is the fold (X-132): at or under the
+   * threshold, or with the connection's folding off, it goes to the caller
+   * whole. Over it, the whole answer is kept under this call's own `runs` id
+   * — the handle — and the caller gets the fold and the handle.
+   */
+  async function dial(c: ProxiedConnection, tool: string, args: Record<string, unknown>, meta: Record<string, unknown>, runId: number): Promise<Outcome> {
+    const connection = c.name;
     let out: ProxiedCallOutcome;
     try {
       out = await proxy!.call({ connection, tool, args, ...(callerBearer ? { caller: { bearer: callerBearer } } : {}) });
@@ -281,9 +308,51 @@ export function registerConnectionsTools(reg: Register, proxy: ConnectionsProxy 
       const dialled = !isConnectionRefused(err) && !(err instanceof EgressRefused);
       return o.ok ? o : { ...o, meta: { ...meta, ...(o.meta ?? {}), ...(dialled ? { dialled: true } : {}) } };
     }
+    const dialledMeta = { ...meta, dialled: true, is_error: out.isError, secrets: [...out.secrets] };
+    const answer = { content: out.content, ...(out.structuredContent !== undefined ? { structuredContent: out.structuredContent } : {}) };
+    const bytesIn = wireBytes(answer);
+    const folding = c.fold !== false;
+    if (!folding || bytesIn <= fold.thresholdBytes) {
+      return done({ connection, tool, ...answer, ...(out.isError ? { isError: true } : {}) }, { ...dialledMeta, bytes_in: bytesIn, bytes_out: bytesIn, ...(folding ? {} : { fold: "off" }) });
+    }
+    const text = answerText(answer);
+    const folded = foldText(text, fold);
+    const pages = pagesOf(text, fold.thresholdBytes).length;
+    const handle = String(runId);
+    if (Number.isFinite(runId)) await storeAnswer(db, { runId, principal: principal.id, connection, tool, answer, bytes: bytesIn, keepHours: fold.keepHours });
+    const result = {
+      connection,
+      tool,
+      content: [{ type: "text", text: folded.text }],
+      folded: {
+        handle,
+        bytes: bytesIn,
+        pages,
+        how: folded.how,
+        note: `The answer was ${bytesIn} bytes and is shown folded. The whole of it is kept for ${fold.keepHours} h: connections_call with the same connection and tool and page "${handle}/1" reads page 1 of ${pages}.`,
+      },
+      ...(out.isError ? { isError: true } : {}),
+    };
+    return done(result, { ...dialledMeta, bytes_in: bytesIn, bytes_out: byteLength(JSON.stringify(result)), fold: folded.how.join("+"), handle, pages });
+  }
+
+  /** `page`: a folded answer read back, one page, by the caller that made the call — nothing dialled, nothing spent. */
+  async function readPage(c: ProxiedConnection, tool: string, page: string, meta: Record<string, unknown>): Promise<Outcome> {
+    const ref = parsePageRef(page);
+    if (!ref) return fail("invalid_request", 'page is "<handle>/<n>": the handle from a folded answer\'s `folded.handle`, n from 1', { ...meta, mode: "page", refusal: "bad_page" });
+    const handle = String(ref.handle);
+    const stored = await readAnswer(db, { runId: ref.handle, principal: principal.id });
+    // Another caller's handle, an expired one, one that never was, or one
+    // stored under another connection or tool: one answer, down one path.
+    if (!stored || stored.connection !== c.name || stored.tool !== tool) return fail("not_found", NO_SUCH_ANSWER(page), { ...meta, mode: "page", handle, refusal: "no_answer" });
+    const pages = pagesOf(answerText(stored.answer), fold.thresholdBytes);
+    if (ref.page < 1 || ref.page > pages.length) {
+      return fail("invalid_request", `${page}: this answer has ${pages.length} page${pages.length === 1 ? "" : "s"} — page is "${handle}/1" to "${handle}/${pages.length}"`, { ...meta, mode: "page", handle, pages: pages.length, refusal: "no_such_page" });
+    }
+    const text = pages[ref.page - 1]!;
     return done(
-      { connection, tool, content: out.content, ...(out.structuredContent !== undefined ? { structuredContent: out.structuredContent } : {}), ...(out.isError ? { isError: true } : {}) },
-      { ...meta, dialled: true, is_error: out.isError, secrets: [...out.secrets] },
+      { connection: c.name, tool, handle, page: ref.page, pages: pages.length, bytes: stored.bytes, text, ...(ref.page < pages.length ? { next: `${handle}/${ref.page + 1}` } : {}) },
+      { ...meta, mode: "page", handle, page: ref.page, pages: pages.length, bytes_out: byteLength(text) },
     );
   }
 
@@ -337,12 +406,13 @@ export function registerConnectionsTools(reg: Register, proxy: ConnectionsProxy 
 
   reg(
     "connections_call",
-    "Call one tool of a lent connection. A change previews first; resend it with its confirm_token.",
+    "Call one tool of a lent connection. A change previews first; resend it with its confirm_token. page reads a folded answer back.",
     {
       connection: z.string().min(1).max(64),
       tool: z.string().min(1).max(128),
       arguments: z.record(z.string(), z.unknown()).optional(),
       confirm_token: z.string().optional(), // any string: only a token this server minted redeems (connection-confirm.ts)
+      page: z.string().optional(), // "<handle>/<n>" from a folded answer — bounded by parsePageRef's shape, not a schema length, which the eager surface would pay for (connection-fold.ts); dials nothing
     },
     async (a, act) => {
       const meta: Record<string, unknown> = { connection: a.connection, connection_tool: a.tool };
@@ -357,13 +427,23 @@ export function registerConnectionsTools(reg: Register, proxy: ConnectionsProxy 
       Object.assign(meta, { group: policy.group, tool_mode: policy.mode });
       const args = a.arguments ?? {};
       const runs = howToolRuns(policy);
-      const runId = Number(act.runId); // this call's own runs row (server.ts's wrap), where a preview keeps its confirm record
+      const runId = Number(act.runId); // this call's own runs row (server.ts's wrap), where a preview keeps its confirm record and a folded answer its handle
+
+      // ---- a folded answer, read back by page (X-132) ---------------------
+      // Past the same gate every call takes — the caller reaches the
+      // connection and is offered the tool — and before any mode: a page is a
+      // read of what this caller was already answered, so it needs no confirm
+      // and no Approve, dials nothing and spends none of the hour.
+      if (a.page !== undefined) {
+        if (a.confirm_token !== undefined) return fail("invalid_request", "page reads a folded answer back and takes no confirm_token — send one or the other", { ...meta, mode: "page", refusal: "page_with_token" });
+        return readPage(r.connection, a.tool, a.page, meta);
+      }
 
       // ---- a Read set to Allow: at once ------------------------------------
       if (runs === "now") {
         const limited = await overLimit(a.connection, "calls", meta);
         if (limited) return limited;
-        return dial(a.connection, a.tool, args, { ...meta, mode: "call" });
+        return dial(r.connection, a.tool, args, { ...meta, mode: "call" }, runId);
       }
 
       // Everything else is previewed first: nothing is dialled until a
@@ -444,7 +524,7 @@ export function registerConnectionsTools(reg: Register, proxy: ConnectionsProxy 
       // The token is spent now, whatever follows: a mismatch is refused and
       // never retried with the same token (eventkit's rule).
       if (redeemed.payload !== connectionCallDigest(payload)) return tokenRefused(a.connection, a.tool, "other_payload", { ...meta, preview_run: redeemed.runId });
-      return dial(a.connection, a.tool, args, { ...meta, mode: "confirmed", preview_run: redeemed.runId });
+      return dial(r.connection, a.tool, args, { ...meta, mode: "confirmed", preview_run: redeemed.runId }, runId);
     },
   );
 }

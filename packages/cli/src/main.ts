@@ -73,7 +73,7 @@ import { loadInstallEnv, productVersion, resolveProductDir, resolveSeedDir, type
 import { consoleSecretNames, loadInstanceCatalog } from "@foldedspacelabs/metistry-connections";
 import { realExec, type Exec } from "./exec.js";
 import { AUTH_MODES, connectRepo, readStdin, type AuthMode } from "./connect-repo.js";
-import { connect, connectList, CONNECT_TOOLS, parseTool, renderConnect, renderConnectList } from "./connect.js";
+import { connect, connectList, connectRemove, CONNECT_TOOLS, parseTool, renderConnect, renderConnectList, renderRemove } from "./connect.js";
 import { consoleCall, renderConsoleCallError, renderWhoami, runConsoleSession, whoami } from "./console-client.js";
 import { agentAutonomy, agentsDefine, agentsList, parseAutonomyFlags, renderAgents, renderAutonomy, renderDefine } from "./agents.js";
 import { enroll, enrollCancel, NoDatabaseError, parseCodeId, renderEnrollCancelled, renderEnrollMinted, renderEnrollRefusal } from "./enroll.js";
@@ -152,7 +152,7 @@ export interface ParsedArgs {
  * `--version <x.y.z>` silently installed the latest release instead
  * (#198, "not fixed here" #2).
  */
-export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "dry-run", "allow-dirty", "no-launchd", "no-compose", "no-color", "skip-build", "skip-migrate", "rollback", "allow-legacy", "yes", "follow", "namespace", "rotate", "list", "complete", "skip-test", "remote", "json-lines", "stdio", "named", "clear", "no-discover", "no-browser", "plain", "include-config", "no-app", "relaunch", "no-reexec"]);
+export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "dry-run", "allow-dirty", "no-launchd", "no-compose", "no-color", "skip-build", "skip-migrate", "rollback", "allow-legacy", "yes", "follow", "namespace", "rotate", "list", "remove", "complete", "skip-test", "remote", "json-lines", "stdio", "named", "clear", "no-discover", "no-browser", "plain", "include-config", "no-app", "relaunch", "no-reexec"]);
 
 /** The §2.14 verbs over owner-named secrets (M7), and the shared scope's migration (T4-3). `list --named` joins them; `sync|mint|list|purge` are the install's own variables. */
 export const NAMED_SECRET_VERBS = new Set(["set", "replace", "remove", "hosts", "grant", "migrate-scope", "purge-shared"]);
@@ -325,6 +325,7 @@ const USAGE = `metistry — Metistry command line
 
   metistry connect <cursor|opencode|devin|claude-code> [--instance <dir>] [--rotate] [--remote]
                    [--areas Areas/A,Projects/B] [--project <slug>] [--json]
+  metistry connect --remove <cursor|opencode|devin|claude-code> [--instance <dir>] [--json]
   metistry connect --list [--json]
       Give one external dev tool its own way into this instance: register it as
       an EXTERNAL agent in the console (the agent id IS the tool name, so a
@@ -355,6 +356,13 @@ const USAGE = `metistry — Metistry command line
       answer the same 401 an unknown token gets — until you let it in from Needs
       You or with POST /api/agents/<id>/approve. Loopback tools stay immediate,
       and --remote is decided at enrolment, never added to a row afterwards.
+      --remove undoes what connect wrote, and is safe to repeat: it revokes the
+      tool's row (first — if the console is down nothing else is touched),
+      deletes its Keychain item, and puts the tool's config file back exactly
+      as connect found it (connect keeps a copy beside the file the first time
+      it writes one). Another server in the same file is never touched. Run
+      connect <tool> afterwards to bring a revoked tool back: the same id and a
+      new token, with grants back at default-deny.
       docs/ops/cursor.md, docs/ops/opencode.md, docs/ops/devin.md,
       docs/ops/console-api.md.
 
@@ -573,7 +581,7 @@ const USAGE = `metistry — Metistry command line
                            [-- <command> [args…]] [--dry-run]
   metistry connections authorize <name> [--no-browser] [--timeout <seconds>]
   metistry connections policy <name> [<tool> allow|ask|never [--group reads|changes|starts_agent]]
-                              [--offer on|off] [--dry-run]
+                              [--offer on|off] [--fold on|off] [--dry-run]
   metistry connections remove <name> [--dry-run]
   metistry connections test <name> [--json]
       Servers Metistry reaches for you (.metistry/connections/<name>.yaml,
@@ -586,7 +594,9 @@ const USAGE = `metistry — Metistry command line
       agent Ask First, offer to agents off (--no-discover writes it without
       dialling). "policy" prints the tool table, or sets one tool to Allow,
       Ask First or Never — a tool that is not listed is refused before
-      anything is dialled. "test" dials it and compares what it offers with
+      anything is dialled; --fold off hands agents this connection's answers
+      whole, however large (on by default: connections_call folds a large
+      answer and keeps it for the caller to page). "test" dials it and compares what it offers with
       the file. "remove" deletes it; what referred to it turns absent. A
       command is given only the environment the file names — never this
       process's — and a granted secret there is given to that command only.
@@ -1292,8 +1302,25 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
       const tool = parseTool(positional[0]);
       if (!tool) {
         err(`usage: metistry connect <${CONNECT_TOOLS.join("|")}> [--rotate] [--remote] [--areas Areas/A,Projects/B] [--project <slug>] [--json]`);
+        err(`       metistry connect --remove <${CONNECT_TOOLS.join("|")}> [--json]`);
         err("       metistry connect --list [--json]");
         return 2;
+      }
+      if (flags.remove === true) {
+        // the way back is its own verb: a flag that mints, widens or enrols beside it would be a contradiction, so it is refused rather than half-obeyed
+        const clash = ["rotate", "remote", "areas", "project"].filter((f) => flags[f] !== undefined);
+        if (clash.length > 0) {
+          err(`metistry connect ${tool}: --remove undoes what connect wrote and cannot be combined with --${clash.join(", --")}`);
+          return 2;
+        }
+        try {
+          const r = await connectRemove({ tool, ...common });
+          out(flags.json === true ? JSON.stringify(r, null, 2) : renderRemove(r));
+          return r.problems.length > 0 ? 1 : 0;
+        } catch (e) {
+          err(`metistry connect --remove ${tool}: ${e instanceof Error ? e.message : String(e)}`);
+          return 1;
+        }
       }
       try {
         const r = await connect({
@@ -2061,7 +2088,7 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
           return 0;
         }
         if (verb === "policy") {
-          const r = await connectionsPolicy(args[1], { tool: args[2], mode: args[3], group: str(flags, "group"), offer: str(flags, "offer") }, connOpts);
+          const r = await connectionsPolicy(args[1], { tool: args[2], mode: args[3], group: str(flags, "group"), offer: str(flags, "offer"), fold: str(flags, "fold") }, connOpts);
           out(json ? JSON.stringify(r, null, 2) : [renderPolicy(r.row), ...(r.delivery ? [r.delivery.detail] : [])].join("\n"));
           return 0;
         }

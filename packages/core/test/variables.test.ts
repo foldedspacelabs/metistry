@@ -4,6 +4,7 @@
 // it, the ways a variable could otherwise hold or leak a secret: a secret's
 // name, a `{{ secret.x }}` smuggled in a value, a value equal to one of the
 // instance's own secrets; and ruling 2 (K8): no schedule or time.
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   InstanceSecrets,
@@ -22,42 +23,15 @@ import {
   variableValueIssue,
 } from "../src/index.js";
 
-/** Shapes of real credentials — built by concatenation so no scanner mistakes this file for a leak. */
-const KEYS: Record<string, string> = {
-  openai: "sk-" + "proj-" + "Ab3dEf6hIj9kLm2nOp5qRs8t",
-  anthropic: "sk-" + "ant-api03-" + "x7Yq2Lm9Pz4Kd8Wn3Rt6Vb1Hc5Jf0",
-  stripe: "sk_" + "live_" + "51HqAbCdEfGh12345678",
-  github: "gh" + "p_" + "aB3dE6gH9jK2mN5pQ8sT1vW4yZ7bC0",
-  github_pat: "github_" + "pat_" + "11ABCDEFG0123456789_abcdefghij",
-  gitlab: "gl" + "pat-" + "xY7zW3vU9tS1rQ5p",
-  slack: "xo" + "xb-" + "1234567890-abcdefghij",
-  aws: "AK" + "IA" + "IOSFODNN7EXAMPLE",
-  google: "AI" + "za" + "SyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q",
-  linear: "lin_" + "api_" + "aBcDeFgHiJkLmNoPqRsTuVwXyZ012345",
-  devin: "ap" + "k_" + "user_ZGV2aW4tdGVzdC1rZXk",
-  jwt: "ey" + "JhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U",
-  pem: "-----BEGIN " + "OPENSSH PRIVATE KEY-----",
-  bearer: "Bearer " + "abcdef0123456789",
-  url_password: "https://owner:" + "hunter2hunter2@git.example.com/repo.git",
-  url_token: "https://calendar.example.com/feed.ics?" + "token=Zq81mNa0pLx",
-  hex: "3f9a1c0b7e2d4a6f8b1c3e5d7f9a0b2c4d6e8f01",
-  base64: "q8ZtR2mXv9LpW4kN7sJ1hG5fD3aB6cE0yU",
-  base36: "k8s7df9a0lqz3mx2vb6n4c1r5t",
-  in_prose: "use " + "gh" + "p_" + "aB3dE6gH9jK2mN5pQ8sT1vW4yZ7bC0 for pushes",
-};
-
-const PLAIN = [
-  "Platform",
-  "foldedspacelabs/metistry, foldedspacelabs/metistry-instance",
-  "https://github.com/foldedspacelabs/metistry",
-  "platform-team-infrastructure-2026",
-  "MyCompanyEngineering2026",
-  "ENG",
-  "3f2a8c1e-9b4d-4e6f-8a1c-2b3d4e5f6a7b", // a UUID is an identifier
-  "Acme Corporation, Inc.",
-  "2026-10-01", // a date is a fact, not a timing
-  "/Users/owner/Development/metistry-instance",
-];
+/**
+ * Shapes of real credentials and values that are not — the cases the Mac app's
+ * `KeyShape` is held to as well (held-to-core/key-shape.json, which both
+ * suites read). A key is stored as segments so no scanner mistakes the file
+ * for a leak.
+ */
+const CASES = JSON.parse(readFileSync(new URL("./held-to-core/key-shape.json", import.meta.url), "utf8")) as { keys: Record<string, string[]>; plain: string[] };
+const KEYS: Record<string, string> = Object.fromEntries(Object.entries(CASES.keys).map(([label, parts]) => [label, parts.join("")]));
+const PLAIN: string[] = CASES.plain;
 
 describe("**a key-shaped value is refused**", () => {
   it.each(Object.entries(KEYS))("%s", (_label, value) => {

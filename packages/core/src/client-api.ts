@@ -157,11 +157,11 @@ export const CLIENT_API: readonly ClientRoute[] = [
   // ----- who you are, and your devices -----
   route("GET", "/api/whoami", "which credential this is and whether it reaches management", { principals: OWNER_AND_CAPTURE_TOKEN }),
   route("POST", "/auth/logout", "end this device's session", { principals: SESSION_ONLY }),
-  route("GET", "/api/devices", "the enrolled passkeys and their sessions"),
-  route("POST", "/api/devices/:id/revoke", "end one device session"),
+  route("GET", "/api/devices", "the devices: a passkey each, its sessions under it (§2.22)"),
+  route("POST", "/api/devices/:id/revoke", "remove a device — its passkey and every session under it; `scope: \"sessions\"` signs it out and keeps the passkey"),
 
   // ----- chat -----
-  route("POST", "/message", "send a message; `tier` picks the model tier for this one", { principals: OWNER_AND_CAPTURE_TOKEN }),
+  route("POST", "/message", "send a message; `tier` picks the model tier for this one; `capture_session` holds it to the private tier", { principals: OWNER_AND_CAPTURE_TOKEN, conflict: ["stale"] }),
   route("GET", "/api/messages", "the conversation, inbound and outbound", { principals: OWNER_AND_CAPTURE_TOKEN, cursor: true }),
   route("POST", "/api/messages/:id/feedback", "rate one reply, with an optional note", { idempotent: "natural" }),
   route("DELETE", "/api/messages/:id/feedback", "clear a reply's rating", { idempotent: "natural" }),

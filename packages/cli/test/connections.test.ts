@@ -306,12 +306,17 @@ describe("metistry connections policy, set, list, show, test, remove", () => {
     const bad = await run(["connections", "policy", "fake", "echo", "sometimes", "--instance", dir]);
     expect(bad.code).toBe(1);
     expect((await run(["connections", "policy", "fake", "--offer", "on", "--instance", dir])).code).toBe(0);
+    // the fold switch (X-132): on unless the owner says off, and only on or off
+    expect((await run(["connections", "policy", "fake", "--fold", "sometimes", "--instance", dir])).code).toBe(1);
+    expect((await run(["connections", "policy", "fake", "--fold", "off", "--instance", dir])).code).toBe(0);
     const c = yamlOf(dir, "fake");
     expect(c.tools.search_issues).toEqual({ group: "reads", mode: "on" });
     expect(c.tools.delete_issue).toEqual({ group: "changes", mode: "off" });
     expect(c.offer_to_agents).toBe(true);
+    expect(c.fold).toBe(false);
 
     const shown = await run(["connections", "policy", "fake", "--instance", dir]);
+    expect(shown.out).toMatch(/fake: offer to agents on; fold large answers off/);
     expect(shown.out).toMatch(/Reads\n\s+search_issues\s+Allow/);
     expect(shown.out).toMatch(/delete_issue\s+Never/);
     expect(shown.out).toMatch(/echo\s+Ask First/);
@@ -342,6 +347,7 @@ describe("metistry connections policy, set, list, show, test, remove", () => {
     expect(connections[0].issues.join("\n")).toMatch(/does not grant env_key to connection:fake — `metistry secrets grant env_key connection:fake on`/);
     expect(connections[0].issues.join("\n")).toMatch(/secret env_key has no item in this instance's Keychain/);
 
+    expect(connections[0].last_checked).toBeNull();
     const shown = await run(["connections", "show", "fake", "--instance", dir]);
     expect(shown.code).toBe(0);
     expect(shown.out).toMatch(/env\s+FAKE_SECRET \(given to this command only; never written to disk\)/);
@@ -356,6 +362,10 @@ describe("metistry connections policy, set, list, show, test, remove", () => {
     const ok = await run(["connections", "test", "fake", "--json", "--instance", dir], kc);
     expect(ok.code, ok.all).toBe(0);
     expect(JSON.parse(ok.out)).toMatchObject({ name: "fake", status: "ok", meta: { tools_seen: 5, listed: 5, missing: [] } });
+    // X-96: a check stamps last_checked (time and verdict); until one has run it reads never
+    const stamped = JSON.parse((await run(["connections", "list", "--json", "--instance", dir])).out).connections[0];
+    expect(stamped.last_checked).toEqual({ at: expect.stringMatching(/^\d{4}-\d\d-\d\dT/), status: "ok" });
+    expect((await run(["connections", "show", "fake", "--instance", dir])).out).toMatch(/checked {2}\d{4}-\d\d-\d\dT\S+ — ok/);
 
     await run(["connections", "set", "fake", "--env", "FAKE_TOOLS=echo,env", "--instance", dir]);
     const degraded = await run(["connections", "test", "fake", "--instance", dir], kc);

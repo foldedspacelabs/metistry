@@ -51,6 +51,7 @@ public struct MetistryCLI: Sendable {
         includeProductDir: Bool = true,
         environment: [String: String] = [:],
         standardInput: String? = nil,
+        terminateOnCancel: Bool = false,
         onOutput: @escaping @Sendable (OutputLine) -> Void = { _ in }
     ) async throws -> CommandResult {
         try await runner.run(
@@ -59,6 +60,7 @@ public struct MetistryCLI: Sendable {
             environment: baseEnvironment.merging(environment) { _, override in override },
             currentDirectory: runtime.productDir,
             standardInput: standardInput,
+            terminateOnCancel: terminateOnCancel,
             onOutput: onOutput
         )
     }

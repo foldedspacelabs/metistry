@@ -61,6 +61,39 @@ public protocol CommandRunner: Sendable {
         standardInput: String?,
         onOutput: @escaping @Sendable (OutputLine) -> Void
     ) async throws -> CommandResult
+
+    /// The same, and — only when `terminateOnCancel` is true — the child is
+    /// ended when the calling task is cancelled. Opt-in, because most callers
+    /// are cancelled by something unrelated to their verb (a view going away
+    /// while `doctor --json` is mid-run) and must see that verb finish: the
+    /// Compute pane's *Cancel Download* is the one that asks. A runner that
+    /// cannot end a child ignores the flag; the default does.
+    func run(
+        executable: URL,
+        arguments: [String],
+        environment: [String: String],
+        currentDirectory: URL?,
+        standardInput: String?,
+        terminateOnCancel: Bool,
+        onOutput: @escaping @Sendable (OutputLine) -> Void
+    ) async throws -> CommandResult
+}
+
+extension CommandRunner {
+    public func run(
+        executable: URL,
+        arguments: [String],
+        environment: [String: String],
+        currentDirectory: URL?,
+        standardInput: String?,
+        terminateOnCancel: Bool,
+        onOutput: @escaping @Sendable (OutputLine) -> Void
+    ) async throws -> CommandResult {
+        try await run(
+            executable: executable, arguments: arguments, environment: environment,
+            currentDirectory: currentDirectory, standardInput: standardInput, onOutput: onOutput
+        )
+    }
 }
 
 public enum CommandRunnerError: LocalizedError {

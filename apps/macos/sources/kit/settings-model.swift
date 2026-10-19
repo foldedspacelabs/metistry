@@ -2,7 +2,7 @@
 // screen-15-settings.md). The window is settings-view.swift; each pane is a
 // file under settings-panes/.
 //
-// Twelve sections in a grouped sidebar (screen-15 §1), and each one is a
+// Thirteen sections in a grouped sidebar (screen-15 §1), and each one is a
 // window onto something else — never a copy of it (app-preferences.swift holds
 // the rule and the pointers this app does persist):
 //
@@ -26,6 +26,11 @@
 //                version --json`, `metistry update` and `--rollback` (M2)
 //   Account      the console sign-in and the instance repository — the old
 //                *Connections* (screen-15 §1)
+//   Devices      devices-model.swift (X-77, plan §2.22): the passkeys from
+//                `GET /api/devices`, Remove and Sign Out Everywhere through
+//                `POST /api/devices/:id/revoke` (scope device | sessions),
+//                confirmed naming the device; Add a Phone… is the sheet
+//                (add-phone-model.swift) running `metistry enroll` (M19)
 //   Connections  connections-model.swift (T6-13a's pane): the list and one
 //                connection from `GET /api/connections(/:name)` and
 //                `GET /api/secrets`; tool modes, the offer switch and Test are
@@ -82,6 +87,7 @@ public final class SettingsModel {
         case compute
         case updates
         case account
+        case devices
         case connections
         case secrets
         case variables
@@ -100,6 +106,7 @@ public final class SettingsModel {
             case .compute: return "Compute"
             case .updates: return "Updates"
             case .account: return "Account"
+            case .devices: return "Devices"
             case .connections: return "Connections"
             case .secrets: return "Secrets"
             case .variables: return "Variables"
@@ -117,6 +124,7 @@ public final class SettingsModel {
             case .compute: return "cpu"
             case .updates: return "arrow.down.circle"
             case .account: return "person.crop.circle"
+            case .devices: return "iphone"
             case .connections: return "link"
             case .secrets: return "key"
             case .variables: return "textformat.abc"
@@ -153,7 +161,7 @@ public final class SettingsModel {
         public var sections: [Section] {
             switch self {
             case .general: return [.instance, .services, .compute, .updates]
-            case .access: return [.account, .connections, .secrets, .variables]
+            case .access: return [.account, .devices, .connections, .secrets, .variables]
             case .capture: return [.liveCapture, .sessions]
             case .tail: return [.keyboard, .advanced]
             }
@@ -173,6 +181,9 @@ public final class SettingsModel {
     /// read-only summary the Connections pane has always shown, and both come
     /// from the same `compute show --json`.
     public let computePane: ComputeModel
+    /// The Devices pane (X-77): the passkeys over the API, Remove and Sign Out
+    /// Everywhere through the one door, and the Add a Phone sheet (M19).
+    public let devicesPane: DevicesModel
     /// The Connections pane: read over the API, changed through M13 and M7.
     public let connectionsPane: ConnectionsModel
     /// The Secrets pane (T6-14): the owner's named secrets, never a value.
@@ -248,6 +259,7 @@ public final class SettingsModel {
         self.instanceDir = instanceDir
         self.consoleSignIn = consoleSignIn ?? ConsoleSignInModel(cli: cli)
         self.computePane = computePane ?? ComputeModel(status: status, cli: cli, session: session, management: management)
+        self.devicesPane = DevicesModel(session: session)
         self.connectionsPane = ConnectionsModel(session: session)
         self.liveCapturePane = LiveCaptureModel(session: session)
         self.sessionsPane = SessionsModel(session: session)
@@ -260,6 +272,8 @@ public final class SettingsModel {
             if case .releaseAvailable(let version) = event.change { self.runtimeAvailable = version }
             return true
         }
+        // The sheet's Copy Link is this pane's pasteboard, which the platform hands in.
+        devicesPane.copyText = { [weak self] text in self?.copyText(text) }
     }
 
     /// §2.2's runner: the session's, which follows every instance switch.
@@ -293,6 +307,7 @@ public final class SettingsModel {
         linkOrigin = nil
         outcome = nil
         computePane.adopt(cli: cli)
+        devicesPane.reset()
         connectionsPane.adopt()
         secretsPane.reset()
         variablesPane.reset()

@@ -1,5 +1,5 @@
 // What the Mac does OUTSIDE the client API, and only this (design-build-plan
-// §2.2, §2.16): the CLI verbs of §2.2's eighteen rows, each there because the
+// §2.2, §2.16): the CLI verbs of §2.2's nineteen rows, each there because the
 // console cannot or must not do it — credentials, the machine, code that
 // runs. Everything else goes through a store and the console's gate.
 //
@@ -22,7 +22,7 @@
 
 import Foundation
 
-/// §2.2's rows, M1–M18: the action, its verbs, and why it is not a route.
+/// §2.2's rows, M1–M19: the action, its verbs, and why it is not a route.
 public enum ManagementRow: String, CaseIterable, Sendable, Equatable {
     case install = "M1"
     case update = "M2"
@@ -42,6 +42,8 @@ public enum ManagementRow: String, CaseIterable, Sendable, Equatable {
     case computeProviders = "M16"
     case localModels = "M17"
     case vaultGit = "M18"
+    /// Add a phone (§2.22): mint a passkey enrolment code on this Mac, or cancel one.
+    case enrollment = "M19"
 
     /// The verbs, as argument prefixes after `metistry` — §2.2's table, word for word.
     public var verbs: [[String]] {
@@ -65,6 +67,8 @@ public enum ManagementRow: String, CaseIterable, Sendable, Equatable {
         case .computeProviders: return ["add", "remove", "set"].map { ["compute", "providers", $0] }
         case .localModels: return ["install", "load", "unload"].map { ["compute", "models", $0] }
         case .vaultGit: return [["vault", "settings"], ["vault", "rollback"]]
+        // `enroll [--json]` mints; `enroll --cancel <code_id>` kills an unused code (X-75, docs/ops/cli.md "Adding a phone")
+        case .enrollment: return [["enroll"]]
         }
     }
 
@@ -89,6 +93,7 @@ public enum ManagementRow: String, CaseIterable, Sendable, Equatable {
         case .computeProviders: return "keys and base URLs — where prompts go"
         case .localModels: return "this Mac's disk and memory"
         case .vaultGit: return "the repository's history and its remote; a rollback still waits for Approve in Needs You"
+        case .enrollment: return "a first credential for a new device; shell access to this Mac is its root of trust (plan §4.2), so no HTTP route mints one"
         }
     }
 }

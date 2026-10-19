@@ -5,8 +5,9 @@
 // through a run row that would describe them wrongly:
 //
 //   6. Door    — this Mac's sign-in state first (it needs no ceremony at all),
-//                then, for the devices that DO need one, the console's own
-//                enrolment code.
+//                then, for the devices that DO need one, Add a Phone… — the
+//                same sheet as Settings ▸ Devices (add-phone-sheet.swift),
+//                minting the code on this Mac with `metistry enroll` (X-77).
 //   7. Claude  — an interactive terminal login the app cannot drive, and a watch
 //                on whether the token's NAME became set.
 //
@@ -21,9 +22,11 @@
 // thing this screen had to say, because this Mac does not need a passkey. It is
 // the same package as the CLI on the same machine and the console takes its
 // local owner token as the `user` principal over loopback. So the step leads
-// with that, offers the enrolment code for the browser and the phone, and the
+// with that, offers Add a Phone… for the browser and the phone, and the
 // "ask macOS" probe moved to Settings → Advanced where a diagnostic belongs
-// (`PasskeyDiagnosticView`, below — the same view, one place).
+// (`PasskeyDiagnosticView`, below — the same view, one place). Until X-77 the
+// step printed the `enroll.mjs` command and took a pasted code; it no longer
+// shows a command at all.
 
 import SwiftUI
 
@@ -63,6 +66,13 @@ public struct PasskeyStepView: View {
                         .metistryText(.footnote, p, .textSecondary)
                 }
                 phaseRow(p)
+            }
+        }
+        // One way in, drawn once: the wizard presents the same sheet Settings ▸
+        // Devices does, over a model the app wires to the console session.
+        .sheet(isPresented: Binding(get: { steps.addPhone != nil }, set: { if !$0 { steps.closeAddPhone() } })) {
+            if let addPhone = steps.addPhone {
+                AddPhoneSheet(model: addPhone) { steps.closeAddPhone() }
             }
         }
     }
@@ -112,31 +122,26 @@ public struct PasskeyStepView: View {
         .metistryCard(p)
     }
 
+    /// Add a Phone… (§2.22): the sheet, not a command to copy. What it costs
+    /// is said beside it, and *“iPhone” was added* satisfies the step.
     private func fallbackCard(_ p: Palette) -> some View {
         VStack(alignment: .leading, spacing: MetistrySpace.s3) {
-            Text("Enrol From the Console").metistryText(.headline, p)
+            Text("Add a Phone or a Browser").metistryText(.headline, p)
             Text(PasskeyEnrolmentModel.fallbackNote)
                 .metistryText(.footnote, p, .textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
-            CommandCard(title: "Mint a code on the host", argument: [PasskeyEnrolmentModel.mintCommand(shape: nil)])
-            Text(PasskeyEnrolmentModel.mintNote)
-                .metistryText(.caption1, p, .textTertiary)
-                .fixedSize(horizontal: false, vertical: true)
-            codeField(p)
-            if let url = model.enrolmentURL {
-                VStack(alignment: .leading, spacing: MetistrySpace.s2) {
-                    Text(url.absoluteString)
-                        .metistryText(.mono, p, .accent)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                    HStack(spacing: MetistrySpace.s3) {
-                        Button("Open in a Browser") { openURL(url) }
-                            .buttonStyle(.borderedProminent)
-                        Text("or type it on the phone")
-                            .metistryText(.caption1, p, .textTertiary)
-                    }
+            HStack(spacing: MetistrySpace.s3) {
+                Button(AddPhoneWords.addAPhone) { steps.beginAddPhone() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(steps.addPhone != nil)
+                if let label = steps.phoneAdded {
+                    StatusDot(.ok)
+                    Text(AddPhoneWords.added(label)).metistryText(.footnote, p, .ok)
                 }
             }
+            Text(DevicesWords.addNote)
+                .metistryText(.caption1, p, .textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .metistryCard(p)

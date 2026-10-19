@@ -261,6 +261,15 @@ public final class FirstRunModel {
     /// Step 6's choice. `thisMacOnly` is the default because it is what is
     /// already true: nothing has to happen for this Mac to be signed in.
     public var doorPlan: DoorPlan = .thisMacOnly
+    /// Step 6's Add a Phone sheet (plan §2.22, X-77), while it is open — the
+    /// same model and view Settings ▸ Devices presents.
+    public private(set) var addPhone: AddPhoneModel?
+    /// The label the phone chose, once the sheet reached *Added*: the door is
+    /// open for it, which satisfies the step (wizard-model.swift).
+    public private(set) var phoneAdded: String?
+    /// Builds the sheet's model. `AppModel` points it at the console session so
+    /// *Added* can be seen; without one it is this install's CLI alone.
+    @ObservationIgnored public var makeAddPhone: @MainActor () -> AddPhoneModel = { AddPhoneModel(management: nil, session: nil) }
     /// Bridge names (doctor's own — `apple-fm`, `eventkit`) the user asked to
     /// enable. Enabling one means minting its token; see `plannedFollowUps`.
     public var bridgeSelection: Set<String> = []
@@ -277,7 +286,26 @@ public final class FirstRunModel {
         self.passkey = passkey
         self.compute = compute ?? ComputeStepModel(cli: cli)
         self.consoleSignIn = consoleSignIn ?? ConsoleSignInModel(cli: cli)
+        makeAddPhone = { [weak self] in AddPhoneModel(management: self?.cli.map { CLIManagementRunner(cli: $0) }, session: nil) }
         reset()
+    }
+
+    // MARK: - Step 6: Add a Phone…
+
+    /// The sheet opens and starts Checking at once (`metistry enroll --json`).
+    public func beginAddPhone() {
+        guard addPhone == nil else { return }
+        let model = makeAddPhone()
+        model.onAdded = { [weak self] label in self?.phoneAdded = label }
+        addPhone = model
+        Task { await model.open() }
+    }
+
+    /// Done, Esc, or the sheet dismissed: a live code is cancelled.
+    public func closeAddPhone() {
+        guard let model = addPhone else { return }
+        addPhone = nil
+        Task { await model.close() }
     }
 
     public func adopt(cli: MetistryCLI?, resolution: RuntimeResolution) {

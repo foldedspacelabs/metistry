@@ -4237,7 +4237,7 @@ exist. Reach enforces it; a client hiding a control is never the control.
 | Services: restart, stop, start, logs; Keep Awake | — | write | the machine; a remote stop locks the owner out |
 | Updates: versions | read | read | |
 | Updates: update, roll back, runtime source | — | write | replaces running code |
-| Account: devices, remove a device (its passkey too, §2.22), Sign Out Everywhere | write | write | a lost phone is removed from another device |
+| Devices: the devices, remove a device (its passkey too, §2.22), Sign Out Everywhere, Add a Phone… (the Mac mints with `metistry enroll`, M19) | write | write | a lost phone is removed from another device; minting stays on the Mac |
 | Account: console sign-in, instance repository | — | write | |
 | Sessions: *Let the assistant learn*, retention | write | write | the session-fold and purge routines' settings, through the Scheduled doors (§2.5) |
 | Sessions: Purge Now | — | write | irreversible |

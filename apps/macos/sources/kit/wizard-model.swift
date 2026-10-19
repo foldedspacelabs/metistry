@@ -244,6 +244,7 @@ public final class WizardModel {
         case .door:
             if steps.consoleSignIn.signIn?.isSignedIn == true { return true }
             if case .enrolled = steps.passkey.phase { return true }
+            if steps.phoneAdded != nil { return true } // Add a Phone… reached *Added* (§2.22)
             return false
         case .compute:
             if case .skipped = steps.compute.phase { return true } // a knowing choice, not an unfinished step

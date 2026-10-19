@@ -195,7 +195,8 @@ private let drives: [String: Drive] = [
     "GET /api/identity": { s, _ in done(await s.identity()) },
     "GET /api/whoami": { s, _ in done(await s.whoami()) },
     "GET /api/devices": { s, _ in done(await s.devices()) },
-    "POST /api/devices/:id/revoke": { s, a in done(await s.revokeDevice(a.pInt("id"))) },
+    // Remove is the route's default scope, sent as the empty body the fixture recorded; Sign Out Everywhere sends `{scope: "sessions"}`
+    "POST /api/devices/:id/revoke": { s, a in done(await s.revokeDevice(a.pInt("id"), scope: a.b("scope") == "sessions" ? .sessions : .device)) },
     "GET /api/status": { s, _ in done(await s.status()) },
     "GET /api/instances": { s, _ in done(await s.instances()) },
     "GET /api/connections": { s, _ in done(await s.connections()) },
@@ -552,12 +553,16 @@ private struct WaitingRow: View {
 // MARK: - Management verbs: §2.2's closed set, at the type
 
 @Test func aManagementCommandIsOnlyEverOneOfSection2point2sVerbs() {
-    #expect(ManagementRow.allCases.map(\.rawValue) == (1...18).map { "M\($0)" })
+    #expect(ManagementRow.allCases.map(\.rawValue) == (1...19).map { "M\($0)" })
     for row in ManagementRow.allCases {
         #expect(!row.verbs.isEmpty && !row.whyNotTheAPI.isEmpty, "\(row.rawValue)")
     }
     #expect(ManagementCommand(.services, ["restart", "console"]) != nil)
     #expect(ManagementCommand(.vaultGit, ["vault", "rollback", "--to", "2026-09-20"]) != nil)
+    // M19 (§2.22): mint, and cancel by id — never a code on argv, never a `console call`
+    #expect(ManagementCommand(.enrollment, ["enroll", "--json"]) != nil)
+    #expect(ManagementCommand(.enrollment, ["enroll", "--cancel", "42", "--json"]) != nil)
+    #expect(ManagementCommand(.enrollment, ["console", "call", "POST", "/api/enroll"]) == nil)
     #expect(ManagementCommand(.computeProviders, ["compute", "providers", "add", "--from", "openrouter"], standardInput: "sk-not-in-argv")?.standardInput == "sk-not-in-argv")
     // misuse: a verb another row owns, a verb §2.2 does not list, and the generic console client
     #expect(ManagementCommand(.services, ["doctor"]) == nil)

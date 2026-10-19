@@ -9,7 +9,7 @@ the window is **not resizable** — it is a fixed size chosen for its content.
 
 ```
 Instance · Services · Compute · Updates
-ACCESS    Account · Connections · Secrets · Variables
+ACCESS    Account · Devices · Connections · Secrets · Variables
 CAPTURE   Live Capture · Sessions
 Keyboard · Advanced
 ```
@@ -22,6 +22,13 @@ Resources, which holds external servers.
 
 > **2026-09-25 (C114, C116, C117):** Resources is now **Connections**; **Secrets**
 > and **Variables** are panes of their own (screen 19).
+
+> **2026-09-28 (plan §2.22, X-77):** ACCESS gains **Devices** — the devices
+> (a passkey each, with its sessions), **Remove** with its confirm naming the
+> device, **Sign Out Everywhere** (which the plan had under Account), and the
+> pane's primary button **Add a Phone…**, the sheet with the QR. The website's
+> "Settings, then Devices" is the product's path. Not drawn on a board; built
+> from §2.22 with this screen's pane grammar.
 
 The Resources board first drew an invented section list (General, Compute,
 Knowledge, Resources, Notifications, Advanced). It now draws this one.

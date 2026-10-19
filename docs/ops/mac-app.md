@@ -110,10 +110,8 @@ path.
 
 | | why | what to do today |
 | --- | --- | --- |
-| **A native passkey** (wizard step 6) | measured, not assumed — see "What ASAuthorization actually says" below. `ASAuthorization` refuses *every* relying party from a Developer ID build, because an application identifier comes from an embedded provisioning profile and a DMG from GitHub Releases has none. **This stopped being step 6's problem on 2026-09-10**: this Mac needs no passkey at all | for a browser or a phone, the step's enrolment code — open the link here, or type it on the phone. Same `passkeys` row either way. The probe is under Settings → Advanced |
+| **A native passkey** (wizard step 6) | measured, not assumed — see "What ASAuthorization actually says" below. `ASAuthorization` refuses *every* relying party from a Developer ID build, because an application identifier comes from an embedded provisioning profile and a DMG from GitHub Releases has none. **This stopped being step 6's problem on 2026-09-10**: this Mac needs no passkey at all | for a browser or a phone, **Add a Phone…** — the step's and Settings ▸ Devices' sheet ("Add a Phone" below): a QR and a link, the code minted on this Mac. Same `passkeys` row either way. The probe is under Settings → Advanced |
 | `connect-repo --auth token` | it reads the PAT from **stdin**, and the app gives every child an empty stdin on purpose so no verb can hang a progress view waiting for a paste | the wizard shows the option, disabled, with that reason; run it in a terminal |
-| **Minting an enrolment code** | there is no HTTP route that mints one, deliberately — whoever can run the host command already controls Postgres and the vault, so shell access is the root of trust for a first passkey (plan §4.2) — and `metistry enroll` is on the CLI's own "not yet" list | step 6 shows the exact `scripts/enroll.mjs` command and takes the code you paste back |
-| **A QR code** for the phone | nothing in this product renders one yet; `apps/console/scripts/enroll.mjs` says the same about itself ("QR rendering arrives with `packages/cli`"), and an encoder is a dependency nobody has asked for | step 6 shows the enrolment URL, selectable, to type or hand over |
 | **The screens behind the rest of the sidebar's rows** | the shell has the rows (T5-2); each screen is its own ticket, and until it lands the row's detail names the gap and offers the web app. Landed in W2, each with its section below: Needs You (T5-4a's list, T5-4b's bodies), Today (T6-1a's spine, T6-1b's brief, Next Up and Close the Day), Chat (T6-2), Activity (T6-3), the Usage popover (T5-6) and the capture composer (T5-5); in W3, Knowledge (T6-4), Agents (T6-5), Scheduled (T6-6), Work ▸ Board (T6-7), Work ▸ Projects (T6-8), Work ▸ Artifacts (T6-9) and Run detail (T6-10). Still to come: the rest of W3 (T6-11) | the PWA — "Add to Dock" in Safari, or the detail's **Open in Browser** |
 | **Attachments in the composer** | New Capture is the text composer (T5-5, "The capture composer" below); live capture is the floating bar's ("The floating bar" below — the #253 hold was lifted 2026-09-30, Q28), and the attachment chip, ⌘⇧A and the window's drop target are not built | the PWA's +, or `metistry console call POST /capture` with `filename` and `content_base64` |
 | **The keep-awake control** (Services) | the model half is shipped — `KeepAwakeSetting` (four values, each with what it costs), `KeepAwakeFacts` (doctor's row) and `deploymentSetKeepAwake` — and the pane is a switch with a radio pair under it, which is the designer's. First run can pass `--keep-awake` and does not ask on its own | a terminal: `metistry deployment set-keep-awake <value> --yes`, or `metistry init --keep-awake <value>` |
@@ -131,6 +129,11 @@ launchd agents); and "an instance id" (`metistry init` mints one into
 **A fifth left it on 2026-09-17**: registering the install's launchd agent
 through `SMAppService.agent(plistName:)`. The app does that now, and Settings
 has the toggle — "The install's agent, nested under the app" below.
+
+**Two more left it with X-77 (plan §2.22)**: minting an enrolment code and a
+QR code for the phone. `metistry enroll` is the verb (M19, X-75) and the app
+runs it; the QR is CoreImage's `CIQRCodeGenerator`, part of macOS, no
+dependency — "Add a Phone" below.
 
 An empty destination is not listed as a greyed-out placeholder. §3.15's
 distinction holds throughout: *empty* (nothing has happened) and *absent* (never
@@ -225,7 +228,7 @@ screen that reached past the store would be the bug this section exists to name.
 | `ReachabilityGate` · `ConsoleAct` | `sources/kit/stores/reachability-gate.swift` | **O3 at the tool.** Every store request passes through it: the newest request's answer is recorded as the connection's reachability (a `401`, no process, no token → unreachable; any answer at all → reachable), and a **decision** is refused before it is sent while unreachable. `ConsoleAct` sorts a request by screen-18 §4's one rule per verb: a read always goes; an **append** — capture, tick, defer (the table's `key` rows) and a 👍/👎 — goes and may be kept by its composer; everything else is a decision, including any route the file does not name |
 | `SectionModel<Value>` | `sources/kit/stores/section-model.swift` | One section of a screen built on the §2.16 stores: `Section`'s state machine, the store read that fills it, `refreshIfDue` (a redraw is never a request), `topics` — the `EventTopic`s an event may name to mark it due (`invalidate()`), and while the stream is live a loaded section with topics waits to be told rather than asking on its clock — and registration with its session so an instance switch drops it |
 | `LiveEvents` · `EventTopic` | `sources/kit/stores/events-store.swift` | **The one live-changes subscription** (`ConsoleSession.events`, T5-7): `GET /api/events` held open over the session child, the last id heard (the console's cursor included), each event handed to the watchers of its topics — the catalogue's "the client refetches" column, one topic per store. `off` · `connecting` · `live` · `down(why)` · `unavailable(why)`; reopened on a backoff (3 s doubling to a minute) with `Last-Event-ID`; a `resync`, an unreadable frame, or a subscription with no cursor to resume from marks every watcher due |
-| `CLIManagementRunner` | `sources/kit/stores/management-runner.swift` | §2.2's verbs (M1–M18) as one `metistry` invocation each through `MetistryCLI`: the argument array `plannedArguments` shows is exactly what runs, a value rides stdin and never argv, and a command may not name its own `--product-dir`. **Not behind the gate** — M5 restarts a console that is down |
+| `CLIManagementRunner` | `sources/kit/stores/management-runner.swift` | §2.2's verbs (M1–M19) as one `metistry` invocation each through `MetistryCLI`: the argument array `plannedArguments` shows is exactly what runs, a value rides stdin and never argv, and a command may not name its own `--product-dir`. **Not behind the gate** — M5 restarts a console that is down |
 | `PinnedItem` · `PinnedItems` | `sources/kit/pinned-items.swift` | The sidebar's Pinned area: project · board · page · search · agent, reorderable and removable, filed in app preferences under `pinnedItems.<instance_id>` |
 
 Three rules the layer encodes rather than asks for:
@@ -328,7 +331,7 @@ ceremony, logout and push, all bound to a device session the Mac does not hold,
 and `/mcp` — are listed with their reasons in
 `apps/console/scripts/client-fixtures.mjs`. Two interfaces sit beside the
 stores: `ManagementRunner`, whose `ManagementCommand` can only hold one of
-§2.2's verbs (M1–M18 — the set is closed at the type; `CLIManagementRunner`
+§2.2's verbs (M1–M19 — the set is closed at the type; `CLIManagementRunner`
 runs it, T5-1), and `LiveCaptureClient`
 for the local live-capture bridge (T8). The bridge and its recorder job are
 `metistry up`'s (T8-2b; `docs/ops/cli.md`), not the app's: the app's
@@ -870,7 +873,7 @@ does not — and should not — see.
 
 **The window (T6-11, screen-15).** Settings is its own window, never a pane
 in the main one: a sidebar in four groups — *Instance · Services · Compute ·
-Updates*, **Access** (*Account · Connections · Secrets · Variables*),
+Updates*, **Access** (*Account · Devices · Connections · Secrets · Variables*),
 **Capture** (*Live Capture · Sessions*), *Keyboard · Advanced* — at a fixed
 **840 × 600** (a 200 pt sidebar, a 640 pt pane; the owner ruled it is not
 resizable, and the scene takes the view's size). Every pane is a vertical
@@ -932,6 +935,10 @@ core's (`LID_CLOSED_*` in `packages/core/src/power.ts`), mirrored in
 | Compute | memory and disk | `ProcessInfo.physicalMemory` less a documented reserve, **labelled an estimate**; the home volume's own capacity figures |
 | Account | console sign-in: who this Mac is, with `via`, the remedy, and the argument array | `metistry console whoami --json` — the app never resolves, holds or displays the token ("Signing in" above) |
 | Account | instance repo status, HEAD, queue depth | `doctor --json` → the `reconciler` row's `meta`. The reconciler is the sole committer, so the app runs no git of its own |
+| Devices | the devices: a passkey each — label, added, last seen, *This device*, its sessions and whether notifications are on | `GET /api/devices` (§2.22, X-76), refetched on `run.finished` events of kind `auth` |
+| Devices | Remove | `POST /api/devices/:id/revoke` with the route's default scope (`{}`): the passkey and every session under it, their push subscriptions dropped — **confirmed, naming the device** (C136); a removed phone is set up again as a new device |
+| Devices | Sign Out Everywhere | the same door with `{scope: "sessions"}` once per signed-in device, the caller's own last; passkeys kept — confirmed, listing the devices. Off, with its reason, when no device is signed in |
+| Devices | Add a Phone… | the sheet ("Add a Phone" below): `metistry enroll --json` (M19) through the management runner, the QR drawn here; `metistry enroll --cancel <code_id>` when the sheet closes or Make a New Code is pressed. **No console route mints a code** |
 | Connections | the list: status, name and type, Used By (*Nobody yet*), *Key expired*, the offer shield | `GET /api/connections` and `GET /api/secrets` — names, never a value ("The Connections pane" above) |
 | Connections | one connection: how it is reached, its secrets with *Sent only to*, *What it sends*, the tools by group, Used By | `GET /api/connections/:name` and `GET /api/secrets`; *What it sends* is worked out from them as core's egress door would, and nothing is dialled |
 | Connections | a tool's mode, the offer switch, Test | `metistry connections policy <name> <tool> allow\|ask\|never`, `policy <name> --offer on\|off`, `connections test <name>` (M13), each **confirmed with the exact command** |
@@ -988,6 +995,44 @@ and `SecretListing` in `packages/cli/src/secrets.ts` is camelCase (`inKeychain`,
 `foundUnder`). The readers accept both spellings of a two-word key rather than
 guessing one and blanking a pane over a convention. That is a reader-side
 tolerance, not a wire contract: the shape is the CLI's.
+
+## Add a Phone
+
+Settings ▸ Devices ▸ **Add a Phone…**, and the wizard's step 6, open one sheet
+(`sources/kit/add-phone-sheet.swift` over `add-phone-model.swift`; plan §2.22,
+X-77). It runs `metistry enroll --json` — M19, a `ManagementCommand` through
+the session's `ManagementRunner`, like every other management verb — because
+**no HTTP route mints an enrolment code**: shell access to this Mac is the
+root of trust for a first passkey (plan §4.2), and the app never asks the
+console for one. The sheet's states, in order:
+
+1. **Checking** — the verb is running.
+2. **Refused** — the CLI refused *before* minting (a loopback host, which is
+   every install's default; `http:`; an IP literal; an origin this Mac cannot
+   reach or that names another instance): its own words, the fix it names,
+   **Learn How** (the phone guide), and **no QR**. Nothing was minted, so
+   closing cancels nothing.
+3. **Ready** — the QR, the URL (selectable, **Copy Link**), *Your phone must
+   be able to open <host>*, and *Expires in 9:41* counting down; **Make a New
+   Code** cancels the old one first.
+4. **Expired** — the QR is replaced, not dimmed, by *This code expired*.
+5. **Added** — `GET /api/devices` shows a passkey that was not there when the
+   sheet opened: *“iPhone” was added*, with the label the phone chose. The
+   list is refetched on `run.finished` events of kind `auth` and polled while
+   the stream is down (§2.20). X-114 adds *Opened on your phone* between Ready
+   and Added.
+
+**Closing the sheet in any state cancels a code that is still live**
+(`metistry enroll --cancel <code_id> --json` — the id, never the code), so a
+QR left on screen or in a screenshot is dead the moment the owner is done.
+The QR is CoreImage's `CIQRCodeGenerator` (error correction M), scaled by an
+integer factor with nearest-neighbour sampling so the modules stay sharp, a
+four-module quiet zone in the bitmap, dark on light in both appearances;
+VoiceOver reads it as *QR code for adding a phone* with the URL as its value.
+`tests/kit/devices-pane-tests.swift` holds the sheet to all of it: a refused
+origin draws no QR, closing in every state cancels a live code, the QR
+decodes (`CIDetector`) to exactly the verb's URL, and the countdown reaches
+Expired on an injected clock.
 
 ## The shell
 

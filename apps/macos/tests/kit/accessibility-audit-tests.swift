@@ -28,6 +28,7 @@ private struct Coverage {
 
 private let viewCoverage: [String: Coverage] = [
     "activity-view.swift": Coverage(test: "activity-view-tests.swift", probes: "ActivityView"),
+    "add-phone-sheet.swift": Coverage(test: "devices-pane-tests.swift", probes: "AddPhoneSheet"),
     "agent-detail-view.swift": Coverage(test: "agents-view-tests.swift", probes: "AccessEditorSheet"),
     "agents-view.swift": Coverage(test: "agents-view-tests.swift", probes: "AgentsView"),
     "artifacts-view.swift": Coverage(test: "artifacts-view-tests.swift", probes: "ArtifactsView"),
@@ -59,6 +60,7 @@ private let viewCoverage: [String: Coverage] = [
     // Every Settings pane is probed by settings-window-tests' walk over every section.
     "settings-panes/account-pane.swift": Coverage(test: "settings-window-tests.swift", probes: "SettingsPaneContent", via: "settings-view.swift"),
     "settings-panes/advanced-pane.swift": Coverage(test: "settings-window-tests.swift", probes: "SettingsPaneContent", via: "settings-view.swift"),
+    "settings-panes/devices-pane.swift": Coverage(test: "devices-pane-tests.swift", probes: "DevicesPaneBody"),
     "settings-panes/updates-pane.swift": Coverage(test: "settings-window-tests.swift", probes: "SettingsPaneContent", via: "settings-view.swift"),
     "settings-panes/instance-pane.swift": Coverage(test: "history-view-tests.swift", probes: "InstanceHistorySection"),
     "settings-panes/instance-sheets.swift": Coverage(test: "settings-window-tests.swift", probes: "IdentityEditorView"),

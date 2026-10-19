@@ -2141,6 +2141,7 @@ prints the rows `GET /api/connections` serves; `show --json` the body of `GET
 ```
 metistry remote [status] [--json] [--instance <dir>]
 metistry remote set <none|tailscale|relay|cloudflare|zrok|ngrok|port-forward> [provider flags] [--yes] [--dry-run] [--timeout <seconds>] [--json]
+  tailscale [--mode funnel|tailnet] [--use-app|--bundled] [--no-browser]
 metistry remote authorize <tailscale|cloudflare> [--no-browser] [--timeout 300] [--json]
 metistry remote test [--json]
 metistry remote off [--yes] [--json]
@@ -2171,8 +2172,9 @@ origin to answer from this Mac (never: nothing written, nothing revoked);
 write the record; revoke the old provider. So the phone is never left with
 nothing mid-change. **`off`** is `set none` with the old provider's revoke.
 A provider this version has no adapter for is refused by name, with the
-choices that exist — this release ships None; the others arrive with their
-own tickets.
+choices that exist — this release ships None and Tailscale (Funnel by
+default, `docs/ops/remote-access.md`, "Tailscale"); the others arrive with
+their own tickets.
 
 **A token never arrives in argv.** `--token` is a switch meaning *read it
 from stdin* (piped, or typed hidden at a prompt in a terminal — the

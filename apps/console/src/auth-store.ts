@@ -14,7 +14,7 @@ export interface Db {
 // this app — and the console — which spends one — run the same code and can
 // never disagree (plan §2.22). Re-exported here so every console caller keeps
 // its `store.*` spelling.
-export { cancelEnrollmentCode, consumeEnrollmentCode, mintEnrollmentCode, peekEnrollmentCode } from "@foldedspacelabs/metistry-core";
+export { cancelEnrollmentCode, consumeEnrollmentCode, mintEnrollmentCode, peekEnrollmentCode, stampEnrollmentOpened } from "@foldedspacelabs/metistry-core";
 
 /**
  * `rpId` is the host the passkey was created for (0039, §2.23) — the console

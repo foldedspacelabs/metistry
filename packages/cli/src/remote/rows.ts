@@ -16,6 +16,10 @@ import { readInstanceId } from "../instance.js";
 import { checkOriginReachable } from "../origins.js";
 import { readSecretValue } from "../stdin-value.js";
 import { none } from "./none.js";
+import { tailscale } from "./tailscale.js";
+import { classifyUpstream, mainPortRemediation } from "./upstream.js";
+
+export { classifyUpstream, mainPortRemediation } from "./upstream.js";
 import type { Detection, RemoteChoice, RemoteContext, RemoteProvider, RemoteRow } from "./provider.js";
 
 /** The console's proxy socket, as the console names it (apps/console/src/proxy-listener.ts `PROXY_SOCKET_FILENAME`) — the same spelling, held to it by the conformance of `docs/ops/auth.md`. */
@@ -27,8 +31,8 @@ export function proxySocketPath(instanceDir: string): string {
 
 export type RemoteRegistry = Partial<Record<RemoteProviderId, RemoteProvider>>;
 
-/** The adapters this release ships. One per ticket: X-106 adds `tailscale`, X-108 `cloudflare`, … — a record naming one not here is reported, never guessed at. */
-export const REMOTE_PROVIDERS_BUILT_IN: RemoteRegistry = { none };
+/** The adapters this release ships. One per ticket: X-106 added `tailscale`, X-108 adds `cloudflare`, … — a record naming one not here is reported, never guessed at. */
+export const REMOTE_PROVIDERS_BUILT_IN: RemoteRegistry = { none, tailscale };
 
 export function providerFor(id: string, registry: RemoteRegistry = REMOTE_PROVIDERS_BUILT_IN): RemoteProvider | undefined {
   return (REMOTE_PROVIDERS as readonly string[]).includes(id) ? registry[id as RemoteProviderId] : undefined;
@@ -101,32 +105,6 @@ export function remoteContext(o: RemoteContextOptions): RemoteContext {
 
 // ---- the shared rows --------------------------------------------------------------
 
-/** The sentence doctor fails a misdirected provider with (§2.23, "Doctor rows"), verbatim. */
-export function mainPortRemediation(provider: string): string {
-  return `${provider} is forwarding to the console's main port, which accepts this Mac's owner token. Run \`metistry remote set ${provider}\`.`;
-}
-
-/**
- * Where the recorded upstream points: the proxy listener (its port or its
- * socket), the MAIN port, somewhere else, or nowhere recorded. A URL or a
- * bare `host:port` is read for its port; a path is compared to the socket.
- */
-export function classifyUpstream(upstream: string | undefined, ctx: Pick<RemoteContext, "consolePort" | "proxyPort" | "proxySocket">): "proxy" | "main" | "other" | "none" {
-  if (upstream === undefined || upstream.trim() === "") return "none";
-  const u = upstream.trim();
-  if (u === ctx.proxySocket || u === `unix:${ctx.proxySocket}` || u === `unix://${ctx.proxySocket}`) return "proxy";
-  let port: number | undefined;
-  try {
-    const url = new URL(u.includes("://") ? u : `http://${u}`);
-    port = url.port === "" ? (url.protocol === "https:" ? 443 : 80) : Number(url.port);
-  } catch {
-    return "other";
-  }
-  if (port === ctx.consolePort) return "main";
-  if (port === ctx.proxyPort) return "proxy";
-  return "other";
-}
-
 const runVerb = (command: string[], label: string): NonNullable<RemoteRow["action"]> => ({ kind: "run_verb", command, label });
 
 /**
@@ -194,7 +172,7 @@ export function droppedOriginsNote(dropped: readonly string[], record: RemoteRec
   const which = dropped.join(", ");
   const interim =
     record.provider === "none"
-      ? "Until a provider adapter ships (Tailscale, X-106), there is no supported way to serve that origin: a tunnel to the console's main port is the configuration the proxy listener closed, and it is not honoured."
+      ? "There is no supported way to serve that origin by hand: a tunnel to the console's main port is the configuration the proxy listener closed, and it is not honoured. `metistry remote set tailscale` (or another provider) is how a remote origin is configured."
       : `A remote origin is configured by \`metistry remote set ${record.provider}\`, never by editing .env.`;
   return `METISTRY_ORIGIN in .env also names ${which}, which the remote-access record (${record.provider}) does not — not carried, so the console does not answer for it and passkeys added at ${which} no longer sign in. ${interim} Remove it from .env to clear this row (docs/ops/remote-access.md).`;
 }

@@ -170,10 +170,11 @@ describe("None — a fresh install (the ticket's acceptance)", () => {
     const code = await main(["remote", "--json", "--product-dir", P, "--instance", I], o);
     expect(code).toBe(0);
     const s = JSON.parse(out.join("\n"));
-    expect(s).toMatchObject({ provider: "none", mode: null, origin: null, settings: {}, origins: [], available: ["none"], ok: true });
+    expect(s).toMatchObject({ provider: "none", mode: null, origin: null, settings: {}, origins: [], available: ["none", "tailscale"], ok: true });
     expect(s.choices.map((c: { id: string }) => c.id)).toEqual(["none", "tailscale", "relay", "cloudflare", "zrok", "ngrok", "port-forward"]);
     expect(s.choices[0]).toMatchObject({ id: "none", tag: "default", available: true });
-    expect(s.choices[1]).toMatchObject({ id: "tailscale", tag: "recommended", available: false });
+    expect(s.choices[1]).toMatchObject({ id: "tailscale", tag: "recommended", available: true });
+    expect(s.choices[2]).toMatchObject({ id: "relay", available: false });
     expect(s.rows).toHaveLength(1);
     expect(s.rows[0]).toMatchObject({ kind: "remote", name: "remote", status: "ok", meta: { provider: "none", origin: null, info: NONE_ROW_INFO } });
     expect(NONE_ROW_INFO).toBe("Remote access: none. Your phone can't reach this Mac. Choose a way in Settings ▸ Remote Access.");
@@ -212,9 +213,9 @@ describe("None — a fresh install (the ticket's acceptance)", () => {
     const P = await checkout();
     const I = await instance();
     const { err, io: o } = io();
-    expect(await main(["remote", "set", "tailscale", "--yes", "--product-dir", P, "--instance", I], o)).toBe(2);
-    expect(err.join("\n")).toContain("tailscale isn't available in this version of Metistry");
-    expect(err.join("\n")).toContain("the choices here today: none");
+    expect(await main(["remote", "set", "relay", "--yes", "--product-dir", P, "--instance", I], o)).toBe(2);
+    expect(err.join("\n")).toContain("relay isn't available in this version of Metistry");
+    expect(err.join("\n")).toContain("the choices here today: none, tailscale");
     expect(existsSync(deploymentPath(I))).toBe(false);
     // the slot is not echoed — a token pasted where the provider goes must not print back
     const typo = io();
@@ -396,7 +397,7 @@ describe("doctor's `remote:origins` row — a hand-written remote origin the rec
     const row = rows[1]!;
     expect(row.remediation).toContain("METISTRY_ORIGIN in .env also names https://studio.ts.net, which the remote-access record (none) does not");
     expect(row.remediation).toContain("passkeys added at https://studio.ts.net no longer sign in");
-    expect(row.remediation).toContain("Until a provider adapter ships (Tailscale, X-106)");
+    expect(row.remediation).toContain("`metistry remote set tailscale` (or another provider) is how a remote origin is configured");
     expect(row.meta).toMatchObject({ provider: "none", dropped: ["https://studio.ts.net"], origins: ["http://127.0.0.1:8080"] });
     // the same sentence `up` prints
     expect(droppedOriginsNote(["https://studio.ts.net"], REMOTE_NONE)).toBe(row.remediation);
@@ -464,14 +465,14 @@ describe("doctor's `remote` kind for a provider", () => {
     const down = await remoteRows({ ...common, deployment: dep({ provider: "zrok", origin: "https://a.share.zrok.io", settings: { upstream: "http://127.0.0.1:8081" } }) });
     expect(down.find((r) => r.name === "remote:zrok:answers")).toMatchObject({ status: "failed", remediation: expect.stringContaining("https://a.share.zrok.io doesn't answer from this Mac, so your phone won't reach it either. Settings ▸ Remote Access shows what zrok reports.") });
 
-    const unknown = await remoteRows({ ...common, deployment: dep({ provider: "tailscale", mode: "funnel", origin: "https://mac.ts.net", settings: {} }) });
+    const unknown = await remoteRows({ ...common, deployment: dep({ provider: "relay", origin: "https://abc.u.metistry.app", settings: {} }) });
     expect(unknown).toHaveLength(1);
-    expect(unknown[0]).toMatchObject({ kind: "remote", name: "remote", status: "failed", remediation: expect.stringContaining("names tailscale, which this version of Metistry has no adapter for"), action: { kind: "run_verb", command: ["metistry", "remote", "off"] } });
+    expect(unknown[0]).toMatchObject({ kind: "remote", name: "remote", status: "failed", remediation: expect.stringContaining("names relay, which this version of Metistry has no adapter for"), action: { kind: "run_verb", command: ["metistry", "remote", "off"] } });
 
     // and `remote status` carries the same rows, exit 1
-    await writeFile(deploymentPath(I), applyRemoteToYaml(undefined, { provider: "tailscale", mode: "funnel", origin: "https://mac.ts.net", settings: {} }, "compose"));
+    await writeFile(deploymentPath(I), applyRemoteToYaml(undefined, { provider: "relay", origin: "https://abc.u.metistry.app", settings: {} }, "compose"));
     const s = await remoteStatus({ ...common, out: () => {} });
-    expect(s).toMatchObject({ provider: "tailscale", mode: "funnel", origin: "https://mac.ts.net", origins: ["https://mac.ts.net", "http://127.0.0.1:8080"], ok: false });
+    expect(s).toMatchObject({ provider: "relay", mode: null, origin: "https://abc.u.metistry.app", origins: ["https://abc.u.metistry.app", "http://127.0.0.1:8080"], ok: false });
     expect(renderRemoteStatus(s, createUi({ noColor: true }))).toContain("no adapter");
     expect(remoteChoices(providers).filter((c) => c.available).map((c) => c.id)).toEqual(["none", "zrok"]);
   });

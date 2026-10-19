@@ -48,7 +48,9 @@ export function checkoutName(dir) {
   }
 }
 
-/** `origin`'s URL for the checkout, without userinfo. Null when there is none. */
+/** `origin`'s URL for the checkout, without userinfo. Null when there is none. * @param {string} dir
+ * @param {any} [run]
+ */
 export function checkoutRemote(dir, run = execFileSync) {
   try {
     const out = String(run("git", ["-C", dir, "remote", "get-url", "origin"], { encoding: "utf8", timeout: 2_000, stdio: ["ignore", "pipe", "ignore"] })).trim();
@@ -59,6 +61,7 @@ export function checkoutRemote(dir, run = execFileSync) {
 }
 
 /** The briefing text to add, or null. Throws an already-redacted Error on a transport or protocol failure. */
+/** @param {any} [opts] */
 export async function fetchBriefing({ directory, env = process.env, fetchFn = fetch, timeoutMs = 5_000, run = execFileSync } = {}) {
   const { url, token, off } = briefingConfig(env);
   if (off || !url || !token || !/^https?:\/\//i.test(url)) return null; // not configured: not an error
@@ -95,6 +98,7 @@ export async function fetchBriefing({ directory, env = process.env, fetchFn = fe
  * The per-session once-only machine. `systemFor(sessionId)` resolves to the
  * text to add to that session's system prompt (or null) and asks the console
  * at most once per session id, however many turns follow.
+ * @param {any} [opts]
  */
 export function createBriefer({ directory = null, env = process.env, fetchFn = fetch, run, log = async () => {} } = {}) {
   /** sessionID → Promise<string | null> */

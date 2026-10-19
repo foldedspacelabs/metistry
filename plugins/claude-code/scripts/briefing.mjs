@@ -44,7 +44,9 @@ export function briefingConfig(env = process.env) {
   };
 }
 
-/** `origin`'s URL for the checkout, without any userinfo (a token in a clone URL must not travel as a query parameter). Null when there is none. */
+/** `origin`'s URL for the checkout, without any userinfo (a token in a clone URL must not travel as a query parameter). Null when there is none. * @param {string} cwd
+ * @param {any} [run]
+ */
 export function checkoutRemote(cwd, run = execFileSync) {
   try {
     const out = String(run("git", ["-C", cwd, "remote", "get-url", "origin"], { encoding: "utf8", timeout: 2_000, stdio: ["ignore", "pipe", "ignore"] })).trim();
@@ -81,6 +83,7 @@ export function claimSession(sessionId, dir = join(tmpdir(), "metistry-briefing"
 }
 
 /** The briefing text to inject, or null. Throws an already-redacted Error on a transport or protocol failure (the caller logs it and injects nothing). */
+/** @param {any} [opts] */
 export async function fetchBriefing({ cwd, env = process.env, fetchFn = fetch, timeoutMs = 5_000, run = execFileSync } = {}) {
   const { url, token } = briefingConfig(env);
   if (!url || !/^https?:\/\//i.test(url)) throw new Error("METISTRY_URL is not set");
@@ -124,6 +127,8 @@ export function hookOutput(text) {
 /**
  * The whole hook: decide, claim, fetch, print. Resolves to a short state word
  * (what the tests assert on); never throws.
+ * @param {any} [input]
+ * @param {any} [opts]
  */
 export async function runSessionStart(input, { env = process.env, fetchFn = fetch, write = (s) => process.stdout.write(`${s}\n`), logErr = (s) => process.stderr.write(`${s}\n`), markerDir, run } = {}) {
   const { token, off, url } = briefingConfig(env);

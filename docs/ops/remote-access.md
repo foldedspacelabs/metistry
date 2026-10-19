@@ -262,6 +262,21 @@ over the CLI transport (plan §2.2, M20).
 
 Every verb takes `--instance <dir>` and `--json`; the writing ones preview
 without `--yes` (`--dry-run` is the same preview, and wins over `--yes`).
+With `--json`, stdout is exactly one document and every step note — the
+sign-in link, each approval page, *Waiting for <name>…* — is stderr's; the
+`set` preview's document carries `revoked` (what the old provider's revoke
+would undo and leave for the owner) and `stranding` (the sentence about the
+phones a switch strands), so a driver can confirm with the CLI's own words.
+
+**The Mac app** (X-107, `docs/ops/mac-app.md`, "Set Up Remote Access") is one
+such driver and nothing more: the wizard's *Remote Access* step and Settings ▸
+Remote Access run exactly `remote status --json`, `remote set <provider>
+[flags] [--yes] --json`, `remote test --json` and `remote off [--yes] --json`
+— a closed grammar of argv shapes, a pasted token on the command's stdin —
+and show what the CLI prints: the chooser from `choices`, the preview, each
+link, the doctor rows, and *answers from this Mac*. The switching ceremony
+above is the CLI's; the app drives it and, before a switch away from a
+provider or a Turn Off, confirms with the preview's `revoked` and `stranding`.
 
 | App | CLI |
 | --- | --- |

@@ -1,0 +1,53 @@
+{
+  "Version": "1.104.1-t0000000000",
+  "TUN": false,
+  "BackendState": "Running",
+  "HaveNodeKey": true,
+  "AuthURL": "",
+  "TailscaleIPs": ["100.101.102.103", "fd7a:115c:a1e0::1"],
+  "Self": {
+    "ID": "nAbCdEf1234",
+    "PublicKey": "nodekey:0000000000000000000000000000000000000000000000000000000000000000",
+    "HostName": "metistry-11111111",
+    "DNSName": "metistry-11111111.tail1234.ts.net.",
+    "OS": "macOS",
+    "UserID": 1234567890,
+    "TailscaleIPs": ["100.101.102.103", "fd7a:115c:a1e0::1"],
+    "AllowedIPs": ["100.101.102.103/32", "fd7a:115c:a1e0::1/128"],
+    "Addrs": [],
+    "CurAddr": "",
+    "Relay": "sfo",
+    "RxBytes": 0,
+    "TxBytes": 0,
+    "Created": "2026-10-19T12:00:00Z",
+    "LastWrite": "0001-01-01T00:00:00Z",
+    "LastSeen": "0001-01-01T00:00:00Z",
+    "LastHandshake": "0001-01-01T00:00:00Z",
+    "Online": true,
+    "ExitNode": false,
+    "ExitNodeOption": false,
+    "Active": false,
+    "PeerAPIURL": ["http://100.101.102.103:36441"],
+    "Capabilities": ["https", "funnel", "https://tailscale.com/cap/is-admin", "https://tailscale.com/cap/file-sharing"],
+    "CapMap": {
+      "funnel": null,
+      "https": null,
+      "https://tailscale.com/cap/file-sharing": null,
+      "https://tailscale.com/cap/is-admin": null
+    },
+    "InNetworkMap": true,
+    "InMagicSock": true,
+    "InEngine": true,
+    "KeyExpiry": "2027-04-17T12:00:00Z"
+  },
+  "Health": [],
+  "MagicDNSSuffix": "tail1234.ts.net",
+  "CurrentTailnet": {
+    "Name": "owner@example.com",
+    "MagicDNSSuffix": "tail1234.ts.net",
+    "MagicDNSEnabled": true
+  },
+  "CertDomains": ["metistry-11111111.tail1234.ts.net"],
+  "Peer": {},
+  "User": {}
+}

@@ -1,0 +1,19 @@
+{
+  "TCP": {
+    "443": {
+      "HTTPS": true
+    }
+  },
+  "Web": {
+    "metistry-11111111.tail1234.ts.net:443": {
+      "Handlers": {
+        "/": {
+          "Proxy": "http://127.0.0.1:8081"
+        }
+      }
+    }
+  },
+  "AllowFunnel": {
+    "metistry-11111111.tail1234.ts.net:443": true
+  }
+}

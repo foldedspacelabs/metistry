@@ -155,7 +155,7 @@ export interface ParsedArgs {
  * `--version <x.y.z>` silently installed the latest release instead
  * (#198, "not fixed here" #2).
  */
-export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "dry-run", "check", "fix", "allow-dirty", "no-launchd", "no-compose", "no-color", "skip-build", "skip-migrate", "rollback", "allow-legacy", "yes", "follow", "namespace", "rotate", "list", "remove", "complete", "skip-test", "remote", "json-lines", "stdio", "named", "clear", "no-discover", "no-browser", "plain", "include-config", "no-app", "relaunch", "no-reexec", "token", "use-app", "access"]);
+export const BOOLEAN_FLAGS = new Set(["force", "json", "help", "dry-run", "check", "fix", "allow-dirty", "no-launchd", "no-compose", "no-color", "skip-build", "skip-migrate", "rollback", "allow-legacy", "yes", "follow", "namespace", "rotate", "list", "remove", "complete", "skip-test", "remote", "json-lines", "stdio", "named", "clear", "no-discover", "no-browser", "plain", "include-config", "no-app", "relaunch", "no-reexec", "token", "use-app", "bundled", "access"]);
 
 /** The §2.14 verbs over owner-named secrets (M7), and the shared scope's migration (T4-3). `list --named` joins them; `sync|mint|list|purge` are the install's own variables. */
 export const NAMED_SECRET_VERBS = new Set(["set", "replace", "remove", "hosts", "grant", "migrate-scope", "purge-shared"]);
@@ -937,11 +937,12 @@ const USAGE = `metistry — Metistry command line
       with the old provider's revoke. A provider's token is read from stdin
       (--token for cloudflare; zrok and ngrok always) or typed hidden at a
       prompt — never as an argument. Provider flags: tailscale [--mode
-      funnel|tailnet] [--use-app]; cloudflare --hostname <name.domain>
+      funnel|tailnet] [--use-app|--bundled] [--no-browser]; cloudflare --hostname <name.domain>
       [--access] [--token]; zrok [--name <name>]; ngrok [--domain <name>];
       port-forward [--ddns desec|cloudflare] [--hostname <name>] [--manual
-      <external-port>]. This version ships none; the others arrive with their
-      own tickets and set says so until then.
+      <external-port>]. This version ships none and tailscale (Funnel by default;
+      the owner's Tailscale app when it is running, else the bundled node — docs/ops/
+      remote-access.md); the others arrive with their own tickets and set says so until then.
 
   metistry vault settings [--push <after_commit|manual|<n>m|<n>h>] [--pull <n>m|<n>h>]
                           [--yes] [--json] [--product-dir <checkout>] [--instance <dir>]
@@ -1907,7 +1908,7 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
           return 2;
         }
         const providerFlags: Record<string, string | boolean> = {};
-        for (const k of ["mode", "use-app", "hostname", "access", "token", "name", "domain", "ddns", "manual"]) if (flags[k] !== undefined) providerFlags[k] = flags[k]!;
+        for (const k of ["mode", "use-app", "bundled", "no-browser", "hostname", "access", "token", "name", "domain", "ddns", "manual"]) if (flags[k] !== undefined) providerFlags[k] = flags[k]!;
         const yes = flags.yes === true && flags["dry-run"] !== true;
         const r = await remoteSet({
           ...common,

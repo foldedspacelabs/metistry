@@ -1053,6 +1053,16 @@ Doctor carries the same comparison as the **`launchd env`** row: `degraded`
 with the drifted names (never a value — the meta carries a short sha256 of
 each side) and `metistry up` as the fix.
 
+Since X-124 the file itself is **derived**: `up` renders
+`.metistry/state/.env` from `.metistry/*.yaml` and the login Keychain before
+any job reads it, and renders the jobs from the same values — so within one
+`up` the file and the installed copies cannot disagree. Doctor's **`env`**
+row reads the file's own hash: `pre-render` (a hand-written file from before
+X-124), `hand-edited` (the changed, added and removed lines named) or `ok`,
+with `metistry up` as the fix (`cli.md`, "`.env` is derived"). "The jobs
+follow `.env`" above still covers the in-place writers that run outside
+`up`, each of which re-stamps a rendered file.
+
 ## Doctor
 
 `doctor`'s first row is the shape and where it was read from, and every

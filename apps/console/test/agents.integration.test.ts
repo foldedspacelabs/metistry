@@ -46,6 +46,19 @@ describe("agent grants validation (pure)", () => {
     }
   });
 
+  // X-128 (ruled 2026-10-04, Context Mode Q2): the session-start briefing is
+  // on by default and the opt-out lives with the grants, spelled by `false`
+  // alone — `true` and absence are the same default and leave no key behind.
+  it("accepts an optional `briefing: false` opt-out (X-128), a fourth axis; `true` and absence are the default and leave no key", () => {
+    expect(agents.validateGrants({ tier: "areas", areas: ["Areas/Fsl"] })).toEqual({ tier: "areas", areas: ["Areas/Fsl"] });
+    expect(agents.validateGrants({ tier: "areas", areas: ["Areas/Fsl"], briefing: true })).toEqual({ tier: "areas", areas: ["Areas/Fsl"] });
+    expect(agents.validateGrants({ tier: "areas", areas: ["Areas/Fsl"], briefing: false })).toEqual({ tier: "areas", areas: ["Areas/Fsl"], briefing: false });
+    expect(agents.validateGrants({ tier: "none", briefing: false })).toEqual({ tier: "none", areas: [], briefing: false });
+    for (const bad of ["no", 0, null, [false]]) expect(() => agents.validateGrants({ tier: "none", briefing: bad }), JSON.stringify(bad)).toThrow(agents.AgentError);
+    // an approval widens a read; it never turns the briefing back on
+    expect(agents.widenedGrants({ tier: "index", areas: [], briefing: false }, "Areas/Ops")).toEqual({ tier: "areas", areas: ["Areas/Ops"], briefing: false });
+  });
+
   it("rejects lowercase roots, the machinery, traversal, and the bare vault", () => {
     // `.metistry/` is unspellable here: an area starts with an uppercase letter
     for (const bad of ["areas/Fsl", "Areas/fsl", "inbox/", "/Areas", "/", "Areas/../secrets", "Areas/Fsl/", "../Areas", ".metistry/queries"]) {

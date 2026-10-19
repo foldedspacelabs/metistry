@@ -1,6 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import {
+  BRIEFING_DEFAULT_TOKENS,
   budgetMiss,
   computeTiers,
   EMBED_DEFAULT_DIM,
@@ -625,6 +626,8 @@ const planTomorrow = planRoutine ? new RoutineTrigger(PLAN_ROUTINE, closeTrigger
 if (!planTomorrow) console.warn(`${PLAN_ROUTINE} is not loaded: Close the Day writes the section but cannot render tomorrow's plan early`);
 
 const server = makeServer(pool, queries, {
+  // The session-start briefing's budget (X-128): the owner's, in tokens; chars/4 is the measure (docs/ops/client-api.md)
+  briefing: { budgetTokens: intEnv("METISTRY_BRIEFING_TOKENS", BRIEFING_DEFAULT_TOKENS) },
   origin,
   // Send to Linear (T4-25): the same opener the syncs read their connection
   // through — the catalog afresh per send, the key filled at the egress door

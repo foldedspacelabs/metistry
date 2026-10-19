@@ -375,10 +375,7 @@ import Testing
 
 // MARK: - Helpers
 
-private func repoRoot() -> URL {
-    URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-        .deletingLastPathComponent().deletingLastPathComponent()
-}
+private func repoRoot() -> URL { HeldToCore.repoRoot }
 
 private func secret(_ name: String, hosts: [String], grant: String?, present: Bool? = true) -> SecretPolicy {
     SecretPolicy(name: name, hosts: hosts, grants: grant.map { ["connection:linear": $0] } ?? [:], expires: nil, present: present)
@@ -413,46 +410,17 @@ private func connectionsSettings(connection: String, secrets: String) throws -> 
 // MARK: - The Mac's loopback set is core's (X-95)
 
 /// Every host core calls loopback the Mac calls loopback, and no other. Held to
-/// core the way the other "held to core" tests are: the test READS
-/// `isLoopbackHost` out of `packages/core/src/egress.ts`, so a change there
-/// fails here until the Mac follows, and then drives a table of spellings
-/// (checked against core's own function when this was written) through the
-/// Mac's.
+/// core by the cases core's own test runs through `isLoopbackHost`
+/// (`packages/core/test/held-to-core/loopback-hosts.json`, X-100) — not by a
+/// table copied here or a scan of core's source text.
 @Test func everyHostCoreCallsLoopbackTheMacCallsLoopbackAndNoOther() throws {
-    let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-    let egress = try String(contentsOf: root.appendingPathComponent("packages/core/src/egress.ts"), encoding: .utf8)
-    let head = "export function isLoopbackHost(host: string): boolean {"
-    let start = try #require(egress.range(of: head), "core's isLoopbackHost moved — find it and update this test")
-    let rest = egress[start.upperBound...]
-    let body = String(rest[..<(try #require(rest.range(of: "\n}\n")).lowerBound)])
-
-    // The function's shape, pinned: the strip and the case fold, the three names, the 127/8 pattern.
-    // If core's body changes, none of these lines match and the Mac's must be changed with it.
-    #expect(body.contains(#"host.replace(/^\[|\]$/g, "").toLowerCase()"#), Comment(rawValue: body))
-    #expect(body.contains(#"/^127(\.\d{1,3}){3}$/.test(h)"#), Comment(rawValue: body))
-    let names = body.components(separatedBy: "\"").enumerated().filter { $0.offset % 2 == 1 }.map(\.element).filter { $0 != "" }
-    #expect(Set(names) == ["localhost", "::1", "0:0:0:0:0:0:0:1"], "core's named loopback hosts: \(names)")
-    for name in names {
-        #expect(EgressDestination.isLoopbackHost(name), "core names \(name)")
-        #expect(EgressDestination.isLoopbackHost("[\(name)]") && EgressDestination.isLoopbackHost(name.uppercased()), "core strips brackets and folds case: \(name)")
-    }
-
-    // Core says yes
-    for host in [
-        "localhost", "LOCALHOST", "Localhost", "[::1]", "::1", "[::1", "::1]", "0:0:0:0:0:0:0:1", "[0:0:0:0:0:0:0:1]",
-        "127.0.0.1", "127.1.2.3", "127.255.255.255", "127.999.999.999", "127.0.0.01", "127.000.000.001", "[127.0.0.1]",
-    ] {
-        #expect(EgressDestination.isLoopbackHost(host), "core calls \(host) loopback")
-    }
-    // Core says no — including the spellings the Mac used to accept (`*.localhost`) and the ones a regex port gets wrong
-    for host in [
-        "foo.localhost", "a.b.localhost", "localhost.", "localhost.example.com", "0.0.0.0", "127.0.0", "127.0.0.1.1",
-        "127.0.0.1\n", "127.0.0.", "127..0.1", "128.0.0.1", "10.0.0.1", "1127.0.0.1", "127.0.0.1234", "::2", "0::1",
-        "::ffff:127.0.0.1", "[::ffff:7f00:1]", "example.com", "127.0.0.1.example.com", "", "[", "]", "[]", "[[::1]]",
-        "127.0.0.\u{0661}", "127.a.0.1", "::", "0:0:0:0:0:0:0:0", "0000:0000:0000:0000:0000:0000:0000:0001",
-    ] {
-        #expect(!EgressDestination.isLoopbackHost(host), "core does not call \(host) loopback")
-    }
+    let core = try HeldToCore.cases("loopback-hosts")
+    let yes = HeldToCore.strings(core["loopback"])
+    let no = HeldToCore.strings(core["not_loopback"])
+    #expect(yes.count > 10 && no.count > 10, "the shared cases did not load")
+    for host in yes { #expect(EgressDestination.isLoopbackHost(host), "core calls \(host.debugDescription) loopback") }
+    // including the spellings the Mac used to accept (`*.localhost`) and the ones a regex port gets wrong
+    for host in no { #expect(!EgressDestination.isLoopbackHost(host), "core does not call \(host.debugDescription) loopback") }
 
     // Both places the Mac decides "cleartext" use it: a URL, and an IMAP mailbox.
     func cleartext(_ url: String) throws -> Bool { try #require(EgressDestination(url: url)).cleartext }

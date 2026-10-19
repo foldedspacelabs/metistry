@@ -82,25 +82,45 @@ import Testing
 
 // MARK: - core's arithmetic, carried over
 
-@Test func autonomyWideningsSaysWhatCoreSays() {
+/// The kinds core's arithmetic speaks of that the app's carried copy does not
+/// (yet): `connection_call`, which core gives its own ceiling (`propose` at
+/// every level). Named here so the gap is a pinned fact, not an accident of a
+/// hand-copied list: the test below fails if core grows a kind, or if this one
+/// stops being missing, until this line is updated on purpose.
+private let kindsCoreHasThatTheAppCarriesNot = ["connection_call"]
+
+@Test func autonomyWideningsSaysWhatCoreSays() throws {
     typealias R = AgentAutonomy.Record
-    // packages/core/test/actions.test.ts, "autonomyWidenings — what the owner's hand is required for"
-    #expect(AgentAutonomy.widenings(R(), R(level: "propose")) == [
-        "level observe → propose", "actions.dispatch deny → propose", "actions.task_update deny → propose", "actions.comment deny → propose", "actions.capture deny → propose",
-    ])
-    #expect(AgentAutonomy.widenings(R(level: "propose"), R(level: "act_within_scope", actions: ["dispatch": "allow"])) == [
-        "level propose → act_within_scope", "actions.dispatch propose → allow", "actions.task_update propose → allow", "actions.comment propose → allow", "actions.capture propose → allow",
-    ])
-    #expect(AgentAutonomy.widenings(R(level: "act_within_scope"), R(level: "propose")) == [])
-    #expect(AgentAutonomy.widenings(R(level: "propose"), R(level: "propose")) == [])
-    #expect(AgentAutonomy.widenings(R(level: "act_within_scope"), R(level: "act_within_scope", actions: ["comment": "deny"])) == [])
-    // an entry raised under a ceiling that refuses it changes nothing
-    #expect(AgentAutonomy.widenings(R(level: "propose"), R(level: "propose", actions: ["comment": "allow"])) == [])
-    // a stored key the console does not know is dropped, never widened
+    // packages/core/test/held-to-core/autonomy-widenings.json — core's own
+    // actions.test.ts runs every case through the real functions
+    let core = try HeldToCore.cases("autonomy-widenings")
+    #expect(HeldToCore.strings(core["levels"]) == AgentAutonomy.levels, "levels are ranked by their order")
+    #expect(HeldToCore.strings(core["modes"]) == AgentAutonomy.modes, "modes are ranked by their order")
+    let coreKinds = HeldToCore.strings(core["kinds"])
+    #expect(coreKinds.filter { !AgentAutonomy.kinds.contains($0) } == kindsCoreHasThatTheAppCarriesNot, "core's kinds: \(coreKinds)")
+    #expect(AgentAutonomy.kinds.allSatisfy(coreKinds.contains))
+    let notCarried = kindsCoreHasThatTheAppCarriesNot
+
+    let widenings = HeldToCore.array(core["widenings"])
+    #expect(widenings.count >= 10, "the shared cases did not load")
+    for c in widenings {
+        let why = c["why"]?.stringValue ?? "?"
+        // a stored record as the console reads it: what the app does not model is dropped
+        let got = AgentAutonomy.widenings(R(json: c["prev"]), R(json: c["next"]))
+        let want = HeldToCore.strings(c["expect"]).filter { line in !notCarried.contains { line.hasPrefix("actions.\($0) ") } }
+        #expect(got == want, "\(why)")
+    }
+
+    let effective = HeldToCore.array(core["effective"])
+    #expect(effective.count >= 5, "the shared cases did not load")
+    for c in effective {
+        let why = c["why"]?.stringValue ?? "?"
+        let want = HeldToCore.object(c["expect"]).compactMapValues(\.stringValue).filter { !notCarried.contains($0.key) }
+        #expect(AgentAutonomy.effective(R(json: c["record"])) == want, "\(why)")
+    }
+
+    // a stored key the console does not know is dropped, never widened (the app's own, not core's)
     #expect(R(json: .object(["level": .string("root"), "actions": .object(["dispatch": .string("always")])])) == R())
-    // effectiveActions agrees with the recorded `scope.autonomy.actions`
-    #expect(AgentAutonomy.effective(R(level: "propose")) == ["dispatch": "propose", "task_update": "propose", "comment": "propose", "capture": "propose"])
-    #expect(AgentAutonomy.effective(R(level: "act_within_scope")) == ["dispatch": "propose", "task_update": "allow", "comment": "allow", "capture": "allow"])
 }
 
 @Test func reachWideningsNameWhatIsAddedAndNothingForANarrowing() {

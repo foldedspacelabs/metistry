@@ -238,7 +238,7 @@ would run: yes
 Integration suites must therefore survive **both** a freshly created database
 (what `pnpm test` now hands every package) and a re-run against one they have
 already written to (`pnpm test:unit`, or vitest invoked directly — either with
-`METISTRY_TEST_DB_NAME` exported, since `testDb()` has no default). Two ways
+`METISTRY_TEST_DB_NAME` exported, since `testDb()` has no default). Three ways
 to get there:
 
 - **Scope by marker** — every row carries an `itest-…` id/project/component and
@@ -251,6 +251,14 @@ to get there:
   push the fixture off the end of a top-10 list. It truncates the eight tables
   the review reads, and refuses to do it unless `current_database()` really is
   the scratch one.
+
+- **Shadow the table** — for a subject that reads a whole table with no filter
+  to put a marker in (`pending_count`, `task_ageing`, Needs You's notifier),
+  where emptying the table would take rows from a sibling file and counting it
+  would count the sibling's. `apps/console/test/private-tables.ts` checks out a
+  connection and gives it `TEMP` copies of the tables (`LIKE … INCLUDING ALL`);
+  the subject runs on that connection and the shared tables are never read,
+  written or deleted. A bare `DELETE FROM <table>` in a test is a bug (X-25).
 
 A suite that truncates must carry that refusal. There is no version of this
 where a test decides at runtime that some database is probably fine to empty.

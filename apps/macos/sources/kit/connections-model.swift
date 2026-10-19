@@ -371,8 +371,9 @@ public struct EgressDestination: Equatable, Sendable {
     }
 
     /// Core's `isLoopbackHost` (`packages/core/src/egress.ts`), spelled the same
-    /// way and held to it by `connections-view-tests.swift`, which reads core's
-    /// function: brackets stripped, lowercased, then `localhost`, `::1`, its
+    /// way and held to it by `connections-view-tests.swift`, which runs the cases
+    /// core's own test runs through that function
+    /// (`packages/core/test/held-to-core/loopback-hosts.json`): brackets stripped, lowercased, then `localhost`, `::1`, its
     /// long form, or `127.` and three more dotted groups of one to three digits.
     /// Nothing else is loopback — `foo.localhost` and `0.0.0.0` are not — so the
     /// Mac never calls a plain-http destination safe that the door would call

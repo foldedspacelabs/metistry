@@ -124,7 +124,15 @@ describe("definition size (docs/research/2026-08-tool-discovery.md's other axis)
     // and moved nothing: a replay of `requests_create` returns it, so the
     // price is one clause of description — no tool, no property — and the
     // replay sentence was reworded around it to fit.
-    expect(tokens).toBeLessThan(4600);
+    //
+    // Folding a large connection answer (X-132; the owner's 2026-10-04 ruling
+    // on the Context Mode review's Q4) cost 14 (4,597 → 4,611) and moved no
+    // ceiling: the read-back is an optional `page` on `connections_call` with
+    // a one-clause description — the ruling said no new tool (X-49) — and the
+    // property carries no schema length, since `parsePageRef` bounds it for
+    // free. It buys the fold that keeps a 58.9 KB listing out of every later
+    // turn of a caller's session. The ratchet moves by that and a margin.
+    expect(tokens).toBeLessThan(4615);
   });
 
   it("no tool advertises `turn_id` — it is a correlation handle, not a parameter (turn-id.ts)", async () => {
@@ -152,9 +160,10 @@ describe("definition size (docs/research/2026-08-tool-discovery.md's other axis)
     // definition, so the tool cannot grow unnoticed. Since the `turn_id` trim
     // this surface no longer crosses 5k at all (5,243 → 4,262); the ceiling
     // moves with it rather than leaving 1.1k of unwatched room. T2-3's
-    // questions moved it with the eager ceiling above (4,494 → 4,558), and
-    // T4-8b's lazy pair with it again (+234).
-    expect(tokens).toBeLessThan(4825);
+    // questions moved it with the eager ceiling above (4,494 → 4,558),
+    // T4-8b's lazy pair with it again (+234), and X-132's `page` on
+    // `connections_call` by its 14 (4,824 → 4,838).
+    expect(tokens).toBeLessThan(4840);
     // a level that admits nothing is exactly alice again — the refusal is the absence
     const observer: AgentPrincipal = { ...alice, id: "observer", autonomy: { level: "observe", actions: { comment: "allow" } } };
     expect((await listedFor(observer)).names).not.toContain("propose_action");

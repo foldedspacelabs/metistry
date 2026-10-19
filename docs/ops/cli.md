@@ -17,6 +17,7 @@ All of them are real.
 | `secrets retire-legacy-env [--yes]` | move what only the product checkout's `.env` still has into the instance's, then delete it |
 | `connect <tool> [--rotate]` | give one external dev tool (Cursor, OpenCode, Devin, Claude Code) its own agent token and config |
 | `connect --list [--json]` | which tools are connected: the row, the bearer, the config |
+| `connect --remove <tool> [--json]` | undo `connect`: revoke the row, delete the Keychain item, put the tool's config back exactly as it was |
 | `console whoami [--json]` | ask the console who it thinks you are, with this install's owner token |
 | `console call <METHOD> <path> [--body @file\|-] [--idempotency-key <key>] [--json]` | one authenticated request against the console, as `whoami`'s same principal — the scripting seam |
 | `console session --stdio` | `console call`, held open: one long-lived child answering JSON request lines on stdin — the Mac app's transport |
@@ -821,6 +822,7 @@ metistry connect cursor --rotate            # a replacement bearer; the old one 
 metistry connect cursor --areas Areas/Engineering --project second-instance
 metistry connect devin --remote             # enrols PENDING: its token works once you let it in
 metistry connect --list [--json]
+metistry connect --remove cursor            # the way back: revoke, delete the Keychain item, restore ~/.cursor/mcp.json
 ```
 
 The verb is idempotent because the agent id **is** the tool name: a re-run
@@ -837,6 +839,52 @@ One delivery per tool, chosen by what the tool can read:
 | `opencode` | `~/.config/opencode/opencode.json` → `mcp.metistry` (`type: "remote"` + `headers`, 0600, other servers preserved; an existing `opencode.jsonc` is the file written, since OpenCode loads it last) | the login Keychain; the file names it as `Bearer {env:METISTRY_AGENT_TOKEN_OPENCODE}` |
 | `claude-code` | nothing — the plugin reads its environment | the login Keychain, with the `export` lines printed |
 | `devin` | nothing — MCP servers are registered in a web form | printed once, for pasting |
+
+### `--remove`: the way back, and coming back (HS-7)
+
+`metistry connect --remove <tool>` undoes what `connect` wrote, and is safe to
+run twice (the second run says there is nothing left). In this order:
+
+1. **the row is revoked** — the bearer is dead before anything local changes.
+   If the console cannot be reached the run stops here and touches nothing
+   else (a Keychain item deleted while its token still authenticates would
+   leave a live bearer nobody holds); start the console and run it again. A
+   tool that was never registered, or is already revoked, passes this step;
+2. **the config is put back** — for `cursor` and `opencode`. The first time
+   `connect` writes a tool's config it copies the file as it was (bytes and
+   mode) to `<file>.<key>.bak` beside it (`mcp.json.metistry.bak`; a namespaced
+   instance's key keeps its own), and never replaces that copy. Removal takes
+   the entry out and, if the result is the backed-up document, writes the
+   backup's own bytes back — formatting, key order, mode and all. If you have
+   edited the file since, only the entry (and the empty `mcpServers` / `mcp`
+   block and OpenCode `$schema` line `connect` added) goes, and your edits
+   stay. A file `connect` created is deleted again. The backup is removed
+   with the entry. Another server in the file, and another instance's entry,
+   are never touched; a file that is not JSON is left alone and named;
+3. **the Keychain item is deleted** — this instance's
+   `METISTRY_AGENT_TOKEN_<TOOL>` under this instance's account, and nothing
+   else. A host with no Keychain never held one.
+
+`claude-code` has no file (the plugin reads its environment) and `devin` has
+neither file nor Keychain item, so for those the output says what to delete by
+hand: the `export` lines in your profile, or the server at Customize → MCPs.
+Steps 2 and 3 are independent: one failing is reported as a `PROBLEM` line and
+exits 1, the other still runs, and re-running finishes the job. `--remove`
+refuses `--rotate`, `--remote`, `--areas` and `--project` (exit 2), and
+`--json` prints the result.
+
+**A revoked tool can be connected again.** `metistry connect <tool>` on a
+revoked row registers it again — the **same id**, so old proposals keep their
+provenance — with a **new** token (stored and written exactly as a first
+connect does). What the row held does **not** come back: grants are
+default-deny, projects and autonomy are empty, and areas the owner approved
+from Needs You are gone. `--areas` / `--project` widen it again; `--remote`
+makes it a fresh enrolment (pending until approved). This is how an
+accidental revoke is recovered without a new install. Only an `external` row
+comes back this way — the assistant's row and a crew's are revived by their
+configuration, never by this door. `POST /api/agents` is the same door
+(`docs/ops/client-api.md`); a console from before this answers it `409`, and
+`connect` says to run `metistry update`.
 
 Because a bearer that cannot be stored would have to be rotated to be
 recovered, `connect cursor`, `connect opencode` and `connect claude-code`
@@ -1813,6 +1861,7 @@ metistry connections policy github                        # the tool table, by g
 metistry connections policy github search_issues allow --group reads
 metistry connections policy github delete_issue never
 metistry connections policy github --offer on             # offer it to agents through Metistry
+metistry connections policy github --fold off             # hand agents its answers whole, however large (on by default: a large answer is folded and paged — docs/ops/connections.md)
 metistry connections set github --env 'LOG_LEVEL=warn' [--unset-env K] [--header K=V] [--unset-header K] [--url …] [-- <command…>]
 metistry connections set work --config region=us              # one field of a known service; the rest keep what the file holds
 metistry connections set calendar --client-id-secret my_client_id [--client-secret-secret my_client_secret]   # bring your own OAuth client

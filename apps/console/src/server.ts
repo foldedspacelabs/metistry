@@ -20,7 +20,7 @@ import { join } from "node:path";
 
 import { API_VERSION, API_VERSION_HEADER, AREA_PREFIX_REFUSAL, knowledgeConflictSource, runCheck, startRun, finishRun, errorEnvelope, intEnv, may, parseAction, noRouteMessage, PROJECT_SLUG_RE, rollSession, statusFor, servedRoute, isLocalRoute, routineGrantsFor, localOnlyMessage, routeKey, resolveActor, ACKNOWLEDGED, SKIP_FEEDBACK, answersText, checkAnswers, describeRequest, parseSubjectFingerprint, requestSubjectOf, subjectUnchanged, validAgentAreaGrant, type QuestionAnswer, type RequestShape, type RequestSubject, type SubjectReading, type CheckResult, type Compute, type ErrorCode, type ErrorEnvelope, type Principal, type ToolGroup, type ToolMode } from "@foldedspacelabs/metistry-core";
 import { QueryError, QueryStore } from "@foldedspacelabs/metistry-queries";
-import { captureToInbox, createBrainServer, dirSink, type CaptureSink, type ConnectionLimits, type ConnectionsProxy, type KnowledgeLister, type KnowledgeReader, type KnowledgeVaultSearcher, type KnowledgeWriter, type QueryEmbedder } from "@foldedspacelabs/metistry-mcp-brain";
+import { captureToInbox, createBrainServer, dirSink, type CaptureSink, type ConnectionFold, type ConnectionLimits, type ConnectionsProxy, type KnowledgeLister, type KnowledgeReader, type KnowledgeVaultSearcher, type KnowledgeWriter, type QueryEmbedder } from "@foldedspacelabs/metistry-mcp-brain";
 import { TasksError, TasksService } from "@foldedspacelabs/metistry-tasks";
 import { ArtifactsService, VaultError, type VaultClient } from "@foldedspacelabs/metistry-artifacts";
 import { artifactRoutes, isArtifactRoute } from "./artifacts-routes.js";
@@ -78,7 +78,7 @@ import { agentList, commandList } from "./commands.js";
 import { purgeArchive, purgePreview } from "@metistry-apps/routines";
 import type { EventHub } from "./events.js";
 import { createRequire } from "node:module";
-import { RECORDING_ROUTE, TRANSCRIPT_PRINCIPAL, recordCaptureSession, recordingRoute, transcriptOf, transcriptPath } from "./recordings.js";
+import { RECORDING_ID_RE, RECORDING_ROUTE, TRANSCRIPT_PRINCIPAL, recordCaptureSession, recordingRoute, transcriptOf, transcriptPath } from "./recordings.js";
 import { meetingAnchorOf, promoteMeetingJots, type AnchorReceipt } from "./meeting-anchors.js";
 
 const require_ = createRequire(import.meta.url);
@@ -235,6 +235,8 @@ export interface ConsoleConfig {
   connectionsProxy?: ConnectionsProxy | undefined;
   /** The proxy's confirm-token lifetime and hourly limits (`METISTRY_CONNECTION_*`, main.ts). Absent = mcp-brain's defaults. */
   connectionLimits?: ConnectionLimits | undefined;
+  /** The proxy's fold settings (X-132). Absent → the bridge's defaults. */
+  connectionFold?: ConnectionFold | undefined;
   /**
    * The live-changes hub `GET /api/events` streams from (events.ts, §2.20):
    * `main.ts` builds it and starts the one `LISTEN` that feeds it. Absent =
@@ -707,6 +709,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Con
     // connections_list / connections_call (plan §2.6): the same pooled client an Approve runs a connection call through
     ...(cfg.connectionsProxy ? { connections: cfg.connectionsProxy } : {}),
     ...(cfg.connectionLimits ? { connectionLimits: cfg.connectionLimits } : {}),
+    ...(cfg.connectionFold ? { connectionFold: cfg.connectionFold } : {}),
     // propose_action at mode `allow` (docs/ops/actions.md): the bridge asks,
     // this console runs it — through the same service call the owner's own
     // click goes through, never a second implementation.
@@ -1025,15 +1028,53 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Con
       // where the message would otherwise take the default tier — a command or
       // a fast path still wins, so picking "deep" never turns `/note` into a
       // model turn. An unknown name is ignored, not invented.
-      const body = (await readJson(req)) as { thread_id?: string; text?: string; tier?: string };
+      //
+      // `capture_session` is the session-turn marker (X-84, ruled 2026-10-04;
+      // screen 11 §4 "staying on this Mac"; plan §2.15): the recorder's id of
+      // the recording a turn is asked inside, set by the bar's Ask panel. A
+      // marked turn is held to the private tier by the drain — core's
+      // `turnTier()` puts `private` over whatever the rules or the picker
+      // chose, and `private` resolves on this Mac or refuses the turn
+      // (`PrivateTierUnavailable`), never falling back — so the marker can
+      // only ever make a turn MORE private, never less. It is checked here
+      // against what the console knows of the session: the id's shape, and
+      // that the recording has not ended. The console learns of a session
+      // when its transcript is delivered (`POST /capture` writes the
+      // `capture_sessions` row at the recording's end), so a session it
+      // holds an ended row for is refused `409 stale`; one it holds no row
+      // for is the recording in progress, which only the Mac can see. An
+      // agent bearer never reaches this handler (the `console_agent` gate
+      // above), so the field is refused from one with everything else: the
+      // uniform 403, and no row. Every unmarked turn is routed as before.
+      const body = (await readJson(req)) as { thread_id?: string; text?: string; tier?: string; capture_session?: unknown };
       if (!body.text) return sendError(res, "invalid_request");
       const thread = body.thread_id ?? "default";
+      let captureSession: string | undefined;
+      if (body.capture_session !== undefined && body.capture_session !== null) {
+        if (typeof body.capture_session !== "string" || !RECORDING_ID_RE.test(body.capture_session)) {
+          await audit("message", "capture_session", false, { thread, reason: "not a recorder session id" });
+          return sendError(res, "invalid_request", "capture_session is a recorder session id: lowercase letters, digits and hyphens");
+        }
+        captureSession = body.capture_session;
+        const ended = await db.query(`SELECT 1 FROM capture_sessions WHERE id = $1 AND (ended_at IS NOT NULL OR transcript_path IS NOT NULL)`, [captureSession]);
+        if (ended.rows.length > 0) {
+          await audit("message", "capture_session", false, { thread, capture_session: captureSession, reason: "the recording has ended" });
+          return sendJson(res, statusFor("conflict"), {
+            ...errorEnvelope("conflict", `capture_session ${captureSession} names a recording that has ended; the turn was not sent`),
+            reason: "stale",
+          });
+        }
+      }
       const decision = cfg.rules ? routeMessage(cfg.rules, body.text, body.tier) : null;
       const decidedAt = new Date();
-      // Durable BEFORE the 202 (SHOULD-7). Routing decision rides in meta.
+      // Durable BEFORE the 202 (SHOULD-7). Routing decision rides in meta, and
+      // so does the session marker — `meta.capture_session` is what the
+      // drain's `captureSessionInScope` reads (docs/ops/compute.md, "The
+      // private tier"). The route itself is recorded as the rules decided it;
+      // the tier the turn RUNS on is the drain's to resolve, and it is private.
       const { rows } = await db.query(
         `INSERT INTO inbound_messages (thread, text, meta) VALUES ($1, $2, $3) RETURNING id`,
-        [thread, body.text, JSON.stringify(decision ? { route: decision } : {})],
+        [thread, body.text, JSON.stringify({ ...(decision ? { route: decision } : {}), ...(captureSession !== undefined ? { capture_session: captureSession } : {}) })],
       );
       const messageId = rows[0]?.id;
       // The route record (docs/ops/dynamic-router.md §6, T9-1): one `runs` row
@@ -1060,6 +1101,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Con
             thread,
             messageId: Number(messageId),
             policy: cfg.routePolicy,
+            captureSession: captureSession !== undefined,
             loadFacts: async () => threadFactsOf((await queries.run("route_features", { thread, exclude_id: Number(messageId) })).rows[0]),
             at: decidedAt,
           });
@@ -1137,7 +1179,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Con
           // fall through: leave for the assistant rather than dropping the turn
         }
       }
-      await audit("message", "inbound", true, { message_id: messageId });
+      await audit("message", "inbound", true, { message_id: messageId, ...(captureSession !== undefined ? { capture_session: captureSession } : {}) });
       sendJson(res, 202, { message_id: messageId });
       return recordRoute();
     }
@@ -1151,7 +1193,13 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Con
       const c = since === null ? null : MESSAGES_CURSOR_RE.exec(since);
       if (since !== null && !c) return sendError(res, "invalid_request");
       // `tier` is the name the router (or a routine) put on the row — what
-      // the composer chips show, so a turn's tier is visible in the thread
+      // the composer chips show, so a turn's tier is visible in the thread —
+      // except a model turn marked with a capture session (X-84), which
+      // reads `private`: that is the tier the drain holds it to whatever the
+      // router chose (core `turnTier`), by the same any-value-but-null test
+      // the drain's `captureSessionInScope` applies, so the thread never
+      // shows a tier the turn did not run on (a marked /note or fast path ran
+      // on no model, and keeps reading none)
       // rather than only in `runs`. `changed_at` is the cursor column: an
       // outbound row moves when its feedback does, so a rating given from
       // the Mac resurfaces on the phone's next `since` pull.
@@ -1168,7 +1216,9 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Con
       const { rows } = await db.query(
         `SELECT id, ts, thread, text, status, direction, feedback, tier, turn_id, changed_at::text || '|' || direction || '|' || id AS cursor FROM (
            SELECT id, ts, thread, text, status, 'in'  AS direction, NULL::jsonb AS feedback,
-                  coalesce(meta->'route'->>'tier', meta->>'tier') AS tier, NULL::text AS turn_id, ts AS changed_at
+                  CASE WHEN (meta->>'capture_session' IS NOT NULL OR meta->'route'->>'capture_session' IS NOT NULL)
+                             AND coalesce(meta->'route'->>'kind', 'model') = 'model' THEN 'private'
+                       ELSE coalesce(meta->'route'->>'tier', meta->>'tier') END AS tier, NULL::text AS turn_id, ts AS changed_at
            FROM inbound_messages
            UNION ALL
            SELECT o.id, o.ts, o.thread, o.text, o.kind, 'out' AS direction,
@@ -1880,13 +1930,13 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Con
     if (key === "POST /api/agents") {
       const body = (await readJson(req)) as { id?: unknown; display_name?: unknown; kind?: unknown; remote?: unknown };
       try {
-        const { id, token, pending } = await agents.createAgent(db, body);
+        const { id, token, pending, revived } = await agents.createAgent(db, body);
         // S2: a remote enrolment starts pending and asks the owner, in the
         // one queue that needs the user (D7). The token is returned here
         // all the same — the console shows a token exactly once — and it
         // authenticates nothing until the answer arrives.
         const proposalId = pending ? await agents.enrollmentProposal(db, { id, display_name: String(body.display_name) }) : undefined;
-        await audit("agent_admin", "mint", true, { agent: id, op: "mint", remote: pending, ...(proposalId ? { proposal: proposalId } : {}) });
+        await audit("agent_admin", "mint", true, { agent: id, op: "mint", remote: pending, ...(revived ? { revived: true } : {}), ...(proposalId ? { proposal: proposalId } : {}) });
         return sendJson(res, 201, { id, token, pending, ...(proposalId ? { proposal_id: proposalId } : {}) }); // the ONE time the token crosses the wire
       } catch (err) {
         if (err instanceof agents.AgentError) return sendError(res, err.code, err.message); // the validator already named the field; do not throw that away

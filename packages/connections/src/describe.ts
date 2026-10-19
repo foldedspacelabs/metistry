@@ -109,6 +109,8 @@ export interface ConnectionRow {
   /** the owner's per-tool policy, by name */
   tools: ConnectionToolRow[];
   offer_to_agents: boolean;
+  /** the owner's fold switch: a large answer over the proxy is folded (true, the default) or comes whole (X-132) */
+  fold: boolean;
   used_by: ConnectionUser[];
   /** the newest check anyone ran, or null for never */
   last_checked: LastChecked | null;
@@ -359,6 +361,7 @@ export async function describeConnection(entry: ConnectionEntry, catalog: Connec
       variables: [],
       tools: [],
       offer_to_agents: false,
+      fold: true,
       used_by: usersOf(entry.name, false, opts.scheduled ?? catalog.scheduled, catalog.entries, opts.granted),
       last_checked: checks.get(entry.name) ?? null,
     };
@@ -385,6 +388,7 @@ export async function describeConnection(entry: ConnectionEntry, catalog: Connec
       .map(([name, p]) => ({ name, group: p.group, mode: p.mode }))
       .sort((a, b) => a.name.localeCompare(b.name)),
     offer_to_agents: c.offer_to_agents,
+    fold: c.fold,
     used_by: usersOf(c.name, c.offer_to_agents, opts.scheduled ?? catalog.scheduled, catalog.entries, opts.granted),
     last_checked: checks.get(c.name) ?? null,
   };

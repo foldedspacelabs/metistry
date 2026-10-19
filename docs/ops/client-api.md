@@ -275,7 +275,7 @@ takes a `since` cursor and answers with the next one.
 | `POST /auth/logout` | owner | session | no | — | — | served | end this device's session |
 | `GET /api/devices` | owner | session · local_owner | natural | — | — | served | the devices: a passkey each, its sessions under it (§2.22) |
 | `POST /api/devices/:id/revoke` | owner | session · local_owner | no | — | — | served | remove a device — its passkey and every session under it; `scope: "sessions"` signs it out and keeps the passkey |
-| `POST /message` | owner | session · local_owner · owner_token | no | — | — | served | send a message; `tier` picks the model tier for this one |
+| `POST /message` | owner | session · local_owner · owner_token | no | stale | — | served | send a message; `tier` picks the model tier for this one; `capture_session` holds it to the private tier |
 | `GET /api/messages` | owner | session · local_owner · owner_token | natural | — | since | served | the conversation, inbound and outbound |
 | `POST /api/messages/:id/feedback` | owner | session · local_owner | natural | — | — | served | rate one reply, with an optional note |
 | `DELETE /api/messages/:id/feedback` | owner | session · local_owner | natural | — | — | served | clear a reply's rating |
@@ -670,7 +670,8 @@ Any `:id` of the device's sessions names it; a device already removed answers
 ### Chat
 
 ```
-POST   /message                      {text, thread_id?, tier?}   202 {"message_id":…, "reply"?: "…"}   400 — no text
+POST   /message                      {text, thread_id?, tier?, capture_session?}   202 {"message_id":…, "reply"?: "…"}
+400 — no text, or a capture_session that is not a recorder session id;  409 reason "stale" — capture_session names a recording that has ended
 GET    /api/messages?limit=&since=   200 {"messages":[…],"cursor":"…","more":false}
 POST   /api/messages/:id/feedback    {rating: 1 | -1, note?}     200 {"ok":true,"feedback":{rating,note,ts}}
 DELETE /api/messages/:id/feedback                                200 {"ok":true,"feedback":null}
@@ -710,6 +711,26 @@ is answered by the assistant into the thread, read back through `GET
 hours late into a moved-on thread confuses more than it helps. Feedback is an
 upsert on the message id — the reply row stays immutable, the judgement is
 revisable (`docs/ops/reply-feedback.md`).
+
+**`capture_session` — the session-turn marker** (X-84, ruled 2026-10-04;
+screen 11 §4 *staying on this Mac*). The recorder's session id
+(`20260928-120000-00ab`) of the recording a turn is asked inside; the Mac's
+capture bar sets it on every Ask sent while a recording runs, and nothing
+else sends it. A marked turn runs on the **private tier** whatever the
+router or `tier` chose — the row carries `meta.capture_session`, the drain
+resolves it through core's `turnTier`, and `private` resolves on an
+`on_machine` provider or the turn is refused with an alert naming
+`metistry compute assign private …`; it never falls back
+(`docs/ops/compute.md`, "The private tier"). `GET /api/messages` reads a
+marked model turn's `tier` as `private`. The marker can only make a turn more
+private: a `/note` or a fast path still answers in the `202`, on this Mac,
+and reads no tier, as before. It is
+checked against what the console knows of the session — a value that is not
+a recorder id is `400`, and an id whose recording the console has seen end
+(its transcript delivered through `POST /capture`) is `409` with `reason:
+"stale"`; a recording in progress has no row yet, so the Mac's word is
+taken. An agent bearer is refused the route whole (`403`), field or no
+field; every unmarked turn is routed exactly as before.
 
 ### Push — bound to a device session
 
@@ -1367,7 +1388,7 @@ uniform `403`, never a `404` that would hide the route's existence.
 
 ```
 GET  /api/agents                      200 {"agents":[{…, "scope":{…}, "permissions":[…]}],"access_requests":[…],"access_ceilings":[…]}
-POST /api/agents                      {id, display_name, kind?, remote?}   201 {"id","token","pending","proposal_id"?}   409 — the id is taken
+POST /api/agents                      {id, display_name, kind?, remote?}   201 {"id","token","pending","proposal_id"?}   409 — the id is taken (a live row, or a revoked internal/crew one)
 PUT  /api/agents/:id/grants           {tier, areas?, queries?, connections?}   200 {"ok":true,"grants":{…}}
 PUT  /api/agents/:id/projects         {projects: [slug, …]}      200 {"ok":true,"projects":[…]}
 PUT  /api/agents/:id/autonomy         {level?, actions?, may_dispatch_to?, accept_from?, max_open_bundles?}
@@ -1384,6 +1405,17 @@ the call that minted it. Registering and rotating mint a credential, which is a
 boundary change, so both are reach `local` (F-13): the local owner token from
 this Mac — the Mac app, `metistry connect` — and a passkey session is refused
 `403 local_only` ("The `local` gate" above).
+
+**A revoked `external` row is registered again by the same call** (HS-7,
+ruled 2026-10-04: an accidental revoke must be recoverable without a new
+install). The `201` is exactly a first mint's — a new token, shown once —
+and the row is revived in place: the id and `created_at` stay, so old
+proposals keep their provenance; the token is new; `grants`, `projects` and
+`autonomy` go back to a new row's defaults, because a credential the owner
+withdrew does not return holding what it held (revocation already cleared the
+areas approved from Needs You). `remote: true` makes it a fresh pending
+enrolment. A live row, or a revoked `internal` or `crew` row, is still `409`
+and is left untouched. The audit row is the mint's, with `revived: true`.
 
 **`POST /api/agents` mints `external` rows only** (T4-6). `kind` may be
 omitted or `external`; anything else is `400 invalid_request`, refused before
@@ -3457,7 +3489,9 @@ GET /api/recordings/:id        served — a recording's retention state: never i
 ```
 
 Every write here is a CLI verb with the owner caller class (M7, M13, M14 below):
-hosts, commands, credentials and the offer switch are the boundary, and a
+hosts, commands, credentials, the offer switch and the fold switch (`fold`:
+whether `connections_call` folds this connection's large answers, X-132;
+`metistry connections policy <name> --fold on|off`) are the boundary, and a
 secret's value never crosses the API in either direction.
 
 #### `GET /api/connections` — the Connections list (`user` principal)
@@ -3479,6 +3513,7 @@ GET /api/connections
                      "tools":[{"name":"create_issue","group":"changes","mode":"ask"},
                               {"name":"search_issues","group":"reads","mode":"on"}],
                      "offer_to_agents":false,
+                     "fold":true,
                      "used_by":[{"kind":"sync","name":"github-state"}],
                      "last_checked":{"at":"2026-09-30T06:50:00.000Z","status":"ok"}}],
      "types":[{"name":"icloud-calendar","title":"iCloud Calendar over CalDAV with an app-specific password",

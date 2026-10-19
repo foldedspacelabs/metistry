@@ -6,6 +6,7 @@
 //
 // Bold (the ticket's own): **an unlisted host is blocked** and **a model body
 // never contains a value**.
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   EgressRefused,
@@ -13,6 +14,7 @@ import {
   SECRET_USE_META_KEY,
   SecretRedactor,
   egressDestination,
+  isLoopbackHost,
   guardedFetch,
   memoryKeychain,
   parseSecretsFile,
@@ -525,5 +527,22 @@ secrets:
     } catch (err) {
       expect((err as Error).message).toMatch(/without TLS — a secret goes off this machine over TLS only/);
     }
+  });
+});
+
+// The Mac app decides "cleartext" with its own spelling of loopback
+// (`EgressDestination.isLoopbackHost`); its tests read this same file, so a
+// host core calls loopback is one the Mac calls loopback, and no other.
+describe("isLoopbackHost — the cases the Mac app is held to", () => {
+  const cases = JSON.parse(readFileSync(new URL("./held-to-core/loopback-hosts.json", import.meta.url), "utf8")) as { loopback: string[]; not_loopback: string[] };
+
+  it("calls exactly these hosts loopback", () => {
+    expect(cases.loopback.length).toBeGreaterThan(10);
+    for (const host of cases.loopback) expect(isLoopbackHost(host), JSON.stringify(host)).toBe(true);
+  });
+
+  it("calls none of these loopback — not *.localhost, not 0.0.0.0, not a near-miss of 127/8 or ::1", () => {
+    expect(cases.not_loopback.length).toBeGreaterThan(10);
+    for (const host of cases.not_loopback) expect(isLoopbackHost(host), JSON.stringify(host)).toBe(false);
   });
 });

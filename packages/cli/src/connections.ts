@@ -219,8 +219,8 @@ export function renderConnectionDetail(d: ConnectionDetail): string {
 }
 
 /** The tool table: by group, each tool with its mode in the owner's words. */
-export function renderPolicy(r: Pick<ConnectionRow, "name" | "tools" | "offer_to_agents">): string {
-  const out = [`  ${r.name}: offer to agents ${r.offer_to_agents ? "on" : "off"}`];
+export function renderPolicy(r: Pick<ConnectionRow, "name" | "tools" | "offer_to_agents" | "fold">): string {
+  const out = [`  ${r.name}: offer to agents ${r.offer_to_agents ? "on" : "off"}; fold large answers ${r.fold ? "on" : "off"}`];
   if (r.tools.length === 0) return [...out, "  no tools listed — nothing may be called. `metistry connections test <name>` shows what the server offers."].join("\n");
   const width = Math.max(...r.tools.map((t) => t.name.length));
   for (const g of TOOL_GROUPS) {
@@ -902,13 +902,16 @@ export interface PolicySpec {
   mode?: string | undefined;
   group?: string | undefined;
   offer?: string | undefined;
+  /** `--fold on|off`: whether `connections_call` folds this connection's large answers (X-132; on by default) */
+  fold?: string | undefined;
 }
 
 /**
  * `connections policy <name>` prints the tool table; `policy <name> <tool>
  * <allow|ask|never> [--group g]` sets one tool's mode (listing it, if it is
  * not yet — its group from the provider, or `--group`); `--offer on|off`
- * sets the offer switch. The owner's hand: nothing else moves a tool to Allow.
+ * sets the offer switch; `--fold on|off` the fold switch. The owner's hand:
+ * nothing else moves a tool to Allow.
  */
 export async function connectionsPolicy(name: string | undefined, spec: PolicySpec, opts: ConnectionsOptions): Promise<{ row: ConnectionRow; delivery?: ProtectedWrite | undefined }> {
   const e = await openConnection(name, opts);
@@ -937,6 +940,11 @@ export async function connectionsPolicy(name: string | undefined, spec: PolicySp
     if (spec.offer !== "on" && spec.offer !== "off") throw new StepFailed("--offer takes on or off");
     doc.setIn(["offer_to_agents"], spec.offer === "on");
     changes.push(`offer to agents ${spec.offer}`);
+  }
+  if (spec.fold !== undefined) {
+    if (spec.fold !== "on" && spec.fold !== "off") throw new StepFailed("--fold takes on or off");
+    doc.setIn(["fold"], spec.fold === "on");
+    changes.push(`fold large answers ${spec.fold}`);
   }
   if (changes.length === 0) {
     const detail = await describeConnectionDetail(e.name, e.catalog, connectionRel(opts.instanceDir, e.name));

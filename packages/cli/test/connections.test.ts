@@ -306,12 +306,17 @@ describe("metistry connections policy, set, list, show, test, remove", () => {
     const bad = await run(["connections", "policy", "fake", "echo", "sometimes", "--instance", dir]);
     expect(bad.code).toBe(1);
     expect((await run(["connections", "policy", "fake", "--offer", "on", "--instance", dir])).code).toBe(0);
+    // the fold switch (X-132): on unless the owner says off, and only on or off
+    expect((await run(["connections", "policy", "fake", "--fold", "sometimes", "--instance", dir])).code).toBe(1);
+    expect((await run(["connections", "policy", "fake", "--fold", "off", "--instance", dir])).code).toBe(0);
     const c = yamlOf(dir, "fake");
     expect(c.tools.search_issues).toEqual({ group: "reads", mode: "on" });
     expect(c.tools.delete_issue).toEqual({ group: "changes", mode: "off" });
     expect(c.offer_to_agents).toBe(true);
+    expect(c.fold).toBe(false);
 
     const shown = await run(["connections", "policy", "fake", "--instance", dir]);
+    expect(shown.out).toMatch(/fake: offer to agents on; fold large answers off/);
     expect(shown.out).toMatch(/Reads\n\s+search_issues\s+Allow/);
     expect(shown.out).toMatch(/delete_issue\s+Never/);
     expect(shown.out).toMatch(/echo\s+Ask First/);

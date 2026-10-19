@@ -570,4 +570,114 @@ describe.skipIf(!hasDb)("agent registry (integration)", () => {
     const audit = await pool.query(`SELECT meta->>'op' AS op, ok FROM runs WHERE kind='agent_admin' AND meta->>'agent'=$1 AND meta->>'op' IN ('rotate','revoke') ORDER BY id`, [agentId]);
     expect(audit.rows).toEqual([{ op: "rotate", ok: true }, { op: "revoke", ok: true }, { op: "revoke", ok: false }, { op: "rotate", ok: false }]);
   });
+
+  // HS-7 (ruled 2026-10-04): an accidental revoke is recoverable without a new
+  // install. The id comes back, the credential is new, and NOTHING the row held
+  // comes back with it.
+  describe("a revoked external agent is registered again (HS-7)", () => {
+    const rid = `${agentId}-rv`;
+    const authed = (t: string) => agents.authenticateAgent(pool, { headers: { authorization: `Bearer ${t}` } });
+    const rowOf = async (id: string) => (await pool.query(`SELECT token_hash, kind, grants, projects, autonomy, created_at, revoked_at, remote, approved_at, grant_source FROM agents WHERE id = $1`, [id])).rows[0];
+
+    afterAll(async () => {
+      await pool.query(`DELETE FROM proposals WHERE source_agent LIKE $1`, [`${rid}%`]);
+      await pool.query(`DELETE FROM agents WHERE id LIKE $1`, [`${rid}%`]);
+    });
+
+    it("revives the row in place: same id and created_at, a new token, the old one still dead, grants/projects/autonomy back at the defaults", async () => {
+      const first = await (await json("POST", "/api/agents", { id: rid, display_name: "first name" })).json();
+      expect((await json("PUT", `/api/agents/${rid}/grants`, { tier: "areas", areas: ["Areas/Fsl"] })).status).toBe(200);
+      expect((await json("PUT", `/api/agents/${rid}/projects`, { projects: ["drey"] })).status).toBe(200);
+      expect((await json("PUT", `/api/agents/${rid}/autonomy`, { level: "propose" })).status).toBe(200);
+      expect(await authed(first.token)).toMatchObject({ grants: { tier: "areas", areas: ["Areas/Fsl"] }, projects: ["drey"] });
+      const before = await rowOf(rid);
+
+      // a live row is still a conflict — registering again is not a way to swap a live credential
+      expect((await json("POST", "/api/agents", { id: rid, display_name: "x" })).status).toBe(409);
+      expect((await authed(first.token))?.id).toBe(rid);
+
+      expect((await json("POST", `/api/agents/${rid}/revoke`)).status).toBe(200);
+      expect(await authed(first.token)).toBeNull();
+
+      const again = await json("POST", "/api/agents", { id: rid, display_name: "second name" });
+      expect(again.status).toBe(201);
+      const second = await again.json();
+      expect(second).toMatchObject({ id: rid, pending: false });
+      expect(second.token).not.toBe(first.token);
+      expect(second).not.toHaveProperty("revived"); // the wire shape is the mint's, unchanged
+
+      expect(await authed(first.token)).toBeNull(); // the credential the owner withdrew stays dead
+      expect(await authed(second.token)).toEqual({ id: rid, kind: "external", grants: { tier: "none", areas: [] }, projects: [], autonomy: {} });
+      const after = await rowOf(rid);
+      expect(after).toMatchObject({ kind: "external", revoked_at: null, remote: false, grant_source: "registry", grants: { tier: "none", areas: [] }, projects: [], autonomy: {} });
+      expect(after.created_at).toEqual(before.created_at); // provenance: old proposals still name this row
+      expect(after.approved_at).not.toBeNull();
+      const list = await (await json("GET", "/api/agents")).json();
+      expect(list.agents.find((a: any) => a.id === rid)).toMatchObject({ display_name: "second name", revoked: false, pending: false });
+      expect(JSON.stringify(list)).not.toContain(second.token);
+
+      const audit = await pool.query(`SELECT ok, meta->>'revived' AS revived FROM runs WHERE kind='agent_admin' AND meta->>'agent'=$1 AND meta->>'op'='mint' ORDER BY id`, [rid]);
+      expect(audit.rows).toEqual([{ ok: true, revived: null }, { ok: true, revived: "true" }]);
+    });
+
+    it("an approved-from-the-queue area does not come back either (the revival clears it, whatever the revoke did)", async () => {
+      const id = `${rid}-ov`;
+      await json("POST", "/api/agents", { id, display_name: "ov" });
+      await pool.query(`INSERT INTO agent_grant_overrides (agent_id, area) VALUES ($1, 'Areas/Fsl')`, [id]);
+      await json("POST", `/api/agents/${id}/revoke`);
+      // an override left on a revoked row (a row that predates the clearing): the revival itself must drop it
+      await pool.query(`INSERT INTO agent_grant_overrides (agent_id, area) VALUES ($1, 'Areas/Fsl') ON CONFLICT DO NOTHING`, [id]);
+      expect((await pool.query(`SELECT count(*)::int AS n FROM agent_grant_overrides WHERE agent_id = $1`, [id])).rows[0].n).toBe(1);
+      const t = (await (await json("POST", "/api/agents", { id, display_name: "ov" })).json()).token;
+      expect((await authed(t))?.grants).toEqual({ tier: "none", areas: [] });
+      expect((await pool.query(`SELECT count(*)::int AS n FROM agent_grant_overrides WHERE agent_id = $1`, [id])).rows[0].n).toBe(0);
+    });
+
+    it("--remote on a reconnect is a fresh enrolment: pending, a Needs You item, and the new token authenticates nothing until approved", async () => {
+      const id = `${rid}-rm`;
+      await json("POST", "/api/agents", { id, display_name: "rm" });
+      await json("POST", `/api/agents/${id}/revoke`);
+      const r = await (await json("POST", "/api/agents", { id, display_name: "rm", remote: true })).json();
+      expect(r).toMatchObject({ id, pending: true });
+      expect(typeof r.proposal_id).toBe("number");
+      expect(await authed(r.token)).toBeNull();
+      expect((await json("POST", `/api/agents/${id}/approve`)).status).toBe(200);
+      expect((await authed(r.token))?.id).toBe(id);
+    });
+
+    it("only an EXTERNAL row comes back through this door: a revoked internal or crew row is a conflict, and stays revoked with its hash untouched", async () => {
+      const internal = `${rid}-in`;
+      const crew = `${rid}-cr`;
+      const internalToken = mintToken(32);
+      await agents.ensureInternalAgent(pool, internal, { token: internalToken });
+      await pool.query(`INSERT INTO agents (id, display_name, kind, token_hash, grant_source, revoked_at) VALUES ($1, 'crew', 'crew', $2, 'manifest', now())`, [crew, tokenHash(mintToken(32))]);
+      expect(await agents.revokeAgent(pool, internal)).toBe(true);
+      for (const id of [internal, crew]) {
+        const before = await rowOf(id);
+        const r = await json("POST", "/api/agents", { id, display_name: "hijack" });
+        expect(r.status, id).toBe(409);
+        const after = await rowOf(id);
+        expect(after.revoked_at, id).not.toBeNull();
+        expect(after.token_hash, id).toBe(before.token_hash);
+        expect(after.kind, id).toBe(before.kind);
+      }
+      expect(await authed(internalToken)).toBeNull();
+    });
+
+    it("the door is the owner's: no credential, an agent bearer, the capture owner token and a passkey session all leave a revoked row revoked", async () => {
+      const id = `${rid}-mu`;
+      const live = await (await json("POST", "/api/agents", { id, display_name: "mu" })).json();
+      await json("POST", `/api/agents/${id}/revoke`);
+      const body = JSON.stringify({ id, display_name: "mu" });
+      const post = (headers: Record<string, string>) => fetch(`${base}/api/agents`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body });
+      expect((await post({})).status).toBe(401);
+      expect((await post({ authorization: `Bearer ${live.token}` })).status).toBe(401); // its own bearer, now dead, is no way back in
+      const other = await (await json("POST", "/api/agents", { id: `${id}x`, display_name: "other" })).json();
+      expect((await post({ authorization: `Bearer ${other.token}` })).status).toBe(403); // a LIVE agent bearer cannot re-register anyone
+      expect((await post({ authorization: `Bearer ${ownerToken}` })).status).toBe(403); // the capture owner token
+      expect((await post({ cookie })).status).toBe(403); // a passkey session: minting a bearer is local-only (F-13)
+      expect((await rowOf(id)).revoked_at).not.toBeNull();
+      expect(await authed(live.token)).toBeNull();
+    });
+  });
 });

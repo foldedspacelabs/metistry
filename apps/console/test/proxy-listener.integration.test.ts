@@ -123,8 +123,12 @@ describe.skipIf(!hasDb)("the proxy listener: remote by construction", () => {
 
   const localOwner = { authorization: `Bearer ${localOwnerToken}` };
   const sinceNow = async (): Promise<number> => Number((await pool.query(`SELECT coalesce(max(id), 0) AS id FROM runs`)).rows[0].id);
-  const authRows = async (tool: string, since: number): Promise<Record<string, unknown>[]> =>
-    (await pool.query(`SELECT meta FROM runs WHERE component = 'console' AND kind = 'auth' AND tool = $1 AND id > $2 ORDER BY id`, [tool, since])).rows.map((r) => r.meta as Record<string, unknown>);
+  // `onlyProxy` narrows to the rows the proxy listener wrote — this file is the
+  // one suite with a proxy listener, so that is its marker (a `since` id alone
+  // also catches the `local_only` and `owner_token_remote` rows any parallel
+  // file's main-listener requests leave in the same minute).
+  const authRows = async (tool: string, since: number, onlyProxy = false): Promise<Record<string, unknown>[]> =>
+    (await pool.query(`SELECT meta FROM runs WHERE component = 'console' AND kind = 'auth' AND tool = $1 AND id > $2 AND ($3::boolean IS NOT TRUE OR meta->>'listener' = 'proxy') ORDER BY id`, [tool, since, onlyProxy])).rows.map((r) => r.meta as Record<string, unknown>);
 
   beforeAll(async () => {
     pool = await testDb(pg.Pool);
@@ -231,13 +235,15 @@ describe.skipIf(!hasDb)("the proxy listener: remote by construction", () => {
     }
 
     // the refusal is on the record, naming the listener and the peer the proxy dialled from
-    const rows = await authRows("owner_token_remote", since);
-    const proxyRows = rows.filter((m) => m.listener === "proxy");
+    const proxyRows = await authRows("owner_token_remote", since, true);
     expect(proxyRows.length).toBe(2);
     expect(proxyRows[0]).toMatchObject({ listener: "proxy", remote: "127.0.0.1", reason: expect.stringContaining("never crosses a tunnel") });
     expect(proxyRows[1]).toMatchObject({ listener: "proxy", remote: "", reason: expect.stringContaining("never crosses a tunnel") });
-    // an unknown token leaves no row: a mismatch is not a refusal of THE token
-    expect(rows.length).toBe(proxyRows.length + (external ? 1 : 0));
+    // an unknown token leaves no row: a mismatch is not a refusal of THE token. The one main-listener
+    // row is the remote-address probe above, identified by the peer it came from — a parallel file's
+    // main-listener rows (reach-gate, server.integration) are not this test's to count.
+    const mainRows = (await authRows("owner_token_remote", since)).filter((m) => m.listener !== "proxy" && m.remote === external);
+    expect(mainRows.length).toBe(external ? 1 : 0);
   });
 
   it("**a `local` route answers 403 there**: a passkey session is refused local_only and audited with the listener; the local owner token is the uniform 401; nothing is minted", async () => {
@@ -259,7 +265,7 @@ describe.skipIf(!hasDb)("the proxy listener: remote by construction", () => {
       const { rows } = await pool.query(`SELECT id FROM agents WHERE id = ANY($1)`, [[idSession, idToken]]);
       expect(rows).toEqual([]);
     }
-    const refused = await authRows("local_only", since);
+    const refused = await authRows("local_only", since, true);
     expect(refused.length).toBe(2);
     for (const m of refused) expect(m).toMatchObject({ route: "POST /api/agents", via: "session", listener: "proxy", reason: expect.stringContaining("never answers on the proxy listener") });
   });
@@ -286,8 +292,8 @@ describe.skipIf(!hasDb)("the proxy listener: remote by construction", () => {
       }
     }
     // the Host gate is before authentication, so the token presented behind a wrong Host leaves no auth row of any kind
-    expect(await authRows("owner_token_remote", since)).toEqual([]);
-    expect(await authRows("local_only", since)).toEqual([]);
+    expect(await authRows("owner_token_remote", since, true)).toEqual([]);
+    expect(await authRows("local_only", since, true)).toEqual([]);
   });
 
   it("the message echoes the Host asked for, bounded, and never the hosts configured", async () => {

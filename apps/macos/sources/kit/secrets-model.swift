@@ -26,10 +26,12 @@
 // what each costs. No console route is added for any of it (invariant 10).
 //
 // A REFUSAL IS THE CLI'S. The app checks nothing the CLI checks — a name, a
-// host, a grantee. X-41 will make a secret an owner door holds refuse any
-// `connection:` or `agent:` grantee at the tool; that refusal lands on the
-// grantee's own row, in the CLI's words, and the switch stays where the file
-// has it.
+// host, a grantee. X-41 makes a secret an owner door holds refuse any
+// `connection:` or `agent:` grantee at the tool; for a CLI refusal that lands on
+// a grantee's own row, in the CLI's words, the switch stays where the file has
+// it. An owner-door secret itself is drawn with no grantee rows at all (X-86):
+// `NamedSecret.isOwnerDoor` only decides what is OFFERED — the refusal stays
+// the tool's.
 
 import Foundation
 import Observation
@@ -149,6 +151,21 @@ public struct NamedSecret: Identifiable, Equatable, Sendable {
     public let lastUsed: Date?
 
     public var id: String { name }
+
+    /// The secrets an owner door reads directly, never through a grant (X-41):
+    /// exactly `OWNER_DOOR_SECRETS` in packages/core/src/secrets.ts, by exact
+    /// name. The wire row carries no kind, and this app imports nothing from the
+    /// packages, so the list is spelled here too — X-42 (an `owner-door:<name>`
+    /// grantee kind) should put a flag on the row and retire this set. It
+    /// decides only what the pane offers; the CLI still refuses the grant.
+    static let ownerDoorNames: Set<String> = ["github_write"]
+
+    /// Read only through its own door, which IS the grant: no *Who may use it*.
+    public var isOwnerDoor: Bool { Self.ownerDoorNames.contains(name) }
+
+    /// What the pane says in place of the grant rows for an owner-door secret.
+    public static let ownerDoorSentence =
+        "This secret is read only through its own door, so it is never granted to a connection, an agent or a provider. Its Sent Only To hosts still apply."
 
     public init(name: String, hosts: [String] = [], grants: [SecretGrant] = [], expires: String? = nil, present: Bool? = true, lastUsed: Date? = nil) {
         self.name = name
@@ -615,6 +632,7 @@ extension SettingsModel {
     }
 
     public func proposeGrant(_ secret: NamedSecret, to grantee: SecretGrantee, _ mode: SecretGrantMode) {
+        guard !secret.isOwnerDoor else { return }   // the pane offers no Grant for it (X-86); the CLI refuses it too (X-41)
         guard secret.mode(for: grantee.id) != mode else { return }
         let arguments: [String] = ["secrets", "grant", secret.name, grantee.id, mode.rawValue] + instanceArguments
         guard let command = ManagementCommand(.secrets, arguments) else { return }

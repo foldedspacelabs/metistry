@@ -281,6 +281,45 @@ private func says(_ node: AXNode, _ text: String) -> Bool {
     #expect(settings.secretsPane.grantRefusal("github_mcp_key", "agent:devin") == nil)
 }
 
+@MainActor
+@Test func anOwnerDoorSecretHasNoGrantRowsAndSaysWhy() async throws {
+    let (app, runner, cleanup) = try await accessApp()
+    defer { cleanup() }
+    let settings = app.settings
+    let door = try #require(settings.secretsPane.rows.first { $0.name == "github_write" })
+    let ordinary = try #require(settings.secretsPane.rows.first { $0.name == "github_mcp_key" })
+    #expect(door.isOwnerDoor)
+    #expect(!ordinary.isOwnerDoor)
+
+    // the owner door: the sentence, and no control that could only fail
+    settings.secretsPane.expanded.insert("github_write")
+    let doorTree = try await AccessibilityProbe.snapshot(SecretDetailView(secret: door, settings: settings, now: Date()).frame(width: SettingsLayout.pane))
+    defer { doorTree.close() }
+    #expect(doorTree.texts.contains(NamedSecret.ownerDoorSentence), "texts: \(doorTree.texts)")
+    // a grant row's picker is named for its mode: On · Ask · Off
+    #expect(!doorTree.controlNames.contains("Ask"), "controls: \(doorTree.controlNames)")
+    #expect(!doorTree.controlNames.contains("On"), "controls: \(doorTree.controlNames)")
+    #expect(!doorTree.controlNames.contains("Off"), "controls: \(doorTree.controlNames)")
+    #expect(!doorTree.texts.contains { $0.contains("No connection or agent to grant it to yet") })
+    // its other controls are still there
+    #expect(doorTree.controlNames.contains("Save the hosts for github_write"))
+    #expect(doorTree.controlNames.contains("Delete github_write"))
+
+    // an ordinary secret keeps its rows, and not the sentence
+    let ordinaryTree = try await AccessibilityProbe.snapshot(SecretDetailView(secret: ordinary, settings: settings, now: Date()).frame(width: SettingsLayout.pane))
+    defer { ordinaryTree.close() }
+    #expect(ordinaryTree.controlNames.contains("Ask"), "controls: \(ordinaryTree.controlNames)")
+    #expect(ordinaryTree.controlNames.contains("On"), "controls: \(ordinaryTree.controlNames)")
+    #expect(!ordinaryTree.texts.contains(NamedSecret.ownerDoorSentence))
+
+    // and no path to a grant command for the owner door, even by a direct call
+    settings.proposeGrant(door, to: SecretGrantee("agent:cursor"), .on)
+    #expect(settings.confirmation == nil)
+    #expect(runner.commands.isEmpty)
+    settings.proposeGrant(ordinary, to: SecretGrantee("agent:cursor"), .on)
+    #expect(settings.confirmation != nil)
+}
+
 // MARK: - The recorded rows
 
 @MainActor

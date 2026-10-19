@@ -165,14 +165,20 @@ struct SecretDetailView: View {
 
             VStack(alignment: .leading, spacing: MetistrySpace.s2) {
                 Text("Who May Use It").metistryText(.subhead, p).accessibilityAddTraits(.isHeader)
-                let grantees = pane.grantees(for: secret)
-                if grantees.isEmpty {
-                    Text("No connection or agent to grant it to yet. Add one, and it is listed here — Off until you turn it on.")
+                if secret.isOwnerDoor {
+                    Text(NamedSecret.ownerDoorSentence)
                         .metistryText(.caption1, p, .textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
-                }
-                ForEach(grantees) { grantee in
-                    GrantRowView(secret: secret, grantee: grantee, settings: settings)
+                } else {
+                    let grantees = pane.grantees(for: secret)
+                    if grantees.isEmpty {
+                        Text("No connection or agent to grant it to yet. Add one, and it is listed here — Off until you turn it on.")
+                            .metistryText(.caption1, p, .textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    ForEach(grantees) { grantee in
+                        GrantRowView(secret: secret, grantee: grantee, settings: settings)
+                    }
                 }
             }
 

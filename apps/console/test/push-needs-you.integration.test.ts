@@ -16,6 +16,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import pg from "pg";
 import { looksLikeKey, mintToken } from "@foldedspacelabs/metistry-core";
 import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
+import { privateTables, type PrivateTables } from "./private-tables.js";
 
 // What web-push was handed: the subscription's endpoint and the exact bytes.
 const wire = vi.hoisted(() => [] as { endpoint: string; body: string }[]);
@@ -72,6 +73,12 @@ describe("the payload a push carries (X-32)", () => {
 
 describe.skipIf(!hasDb)("Needs You's notifier (integration, X-32)", () => {
   let pool: pg.Pool;
+  // The notifier pushes whatever the WHOLE queue grows by, and counts a burst
+  // across it, so a request another file raises in parallel is a push here and
+  // a marker cannot filter it out. The notifier and `raise` share this
+  // connection, whose `proposals` is the test's own (test/private-tables.ts);
+  // sessions, passkeys and runs stay the real tables, keyed by the suffix.
+  let db: PrivateTables;
   const suffix = mintToken(4).toLowerCase().replaceAll(/[^a-z0-9]/g, "").slice(0, 6) || "x";
   const MARK = `x32-${suffix}`;
   const endpoint = `https://push.example/x32-${suffix}`;
@@ -80,10 +87,10 @@ describe.skipIf(!hasDb)("Needs You's notifier (integration, X-32)", () => {
   /** What reached this test's subscription, parsed. */
   const mine = () => wire.filter((w) => w.endpoint === endpoint);
   const parsed = () => mine().map((w) => JSON.parse(w.body) as Record<string, unknown>);
-  const pass = () => needsYouNotifier(pool, (p) => sendToAll(pool, cfg, p));
+  const pass = () => needsYouNotifier(db, (p) => sendToAll(db, cfg, p));
 
   async function raise(kind: string, payload: Record<string, unknown>, extra: { snoozed_until?: string; group_id?: string } = {}): Promise<number> {
-    const { rows } = await pool.query(
+    const { rows } = await db.query(
       `INSERT INTO proposals (kind, source_agent, trust, payload, snoozed_until, group_id)
        VALUES ($1, $2, 'internal', $3::jsonb, $4::timestamptz, $5) RETURNING id`,
       [kind, `x32-agent-${suffix}`, JSON.stringify(payload), extra.snoozed_until ?? null, extra.group_id ?? null],
@@ -97,6 +104,7 @@ describe.skipIf(!hasDb)("Needs You's notifier (integration, X-32)", () => {
 
   beforeAll(async () => {
     pool = await testDb(pg.Pool);
+    db = await privateTables(pool, ["proposals"]);
     const passkey = `x32-passkey-${suffix}`;
     await pool.query(`INSERT INTO passkeys (id, public_key, rp_origin, label) VALUES ($1, $2, 'https://console.example.test', 'x32 phone')`, [passkey, Buffer.from([1])]);
     const { rows } = await pool.query(
@@ -108,14 +116,14 @@ describe.skipIf(!hasDb)("Needs You's notifier (integration, X-32)", () => {
   });
 
   afterAll(async () => {
-    await pool.query(`UPDATE proposals SET decision = 'deny', decided_at = now() WHERE source_agent = $1 AND decision = 'pending'`, [`x32-agent-${suffix}`]);
+    await db.done(); // the shadow `proposals` goes with it: no pending row of this file's is left for anyone
     await pool.query(`UPDATE auth_sessions SET push_subscription = NULL, revoked_at = now() WHERE id = $1`, [sessionId]);
     await pool.end();
   });
 
   it("an outbound message never pushes; a Needs You request pushes once, carrying type, title and its card's url and nothing else", async () => {
     wire.length = 0;
-    const timer = startNotifier(pool, cfg, 40);
+    const timer = startNotifier(db, cfg, 40);
     try {
       await new Promise((r) => setTimeout(r, 200)); // the first pass learns the queue as it stands
       for (const kind of ["reply", "ack", "brief", "review", "alert"]) await outbound(kind, `${MARK} ${kind}: here is the key you asked for ${KEY}`);
@@ -157,7 +165,7 @@ describe.skipIf(!hasDb)("Needs You's notifier (integration, X-32)", () => {
     const next = pass();
     await next();
     expect(await next()).toBe(0); // put down: not showing, not pushed
-    await pool.query(`UPDATE proposals SET snoozed_until = now() - interval '1 second' WHERE id = $1`, [id]);
+    await db.query(`UPDATE proposals SET snoozed_until = now() - interval '1 second' WHERE id = $1`, [id]);
     expect(await next()).toBe(1);
     expect(await next()).toBe(0); // once
     expect(parsed()).toEqual([{ type: "Question", title: "Needs You", url: `/#/needs-you/${id}` }]);

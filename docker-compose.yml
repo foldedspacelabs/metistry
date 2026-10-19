@@ -125,6 +125,16 @@ services:
     ports:
       # loopback by default (invariant 8) — the user's routing layer adds reach
       - "127.0.0.1:${METISTRY_CONSOLE_PORT:-8080}:8080"
+      # the PROXY listener (plan §2.23, X-103; docs/ops/auth.md "The proxy
+      # listener"): the one port a remote-access provider — tailscaled,
+      # cloudflared, zrok, ngrok — may forward to. Every request on it is
+      # remote by construction: the local owner token is never honoured, no
+      # `local` route answers, the Host must be the configured remote host.
+      # Published on 127.0.0.1 ONLY: the provider's agent runs on this host
+      # and dials it there. In-container it is the console port + 1 (8081);
+      # there is no Unix socket under compose — the container holds no
+      # instance directory (D5).
+      - "127.0.0.1:${METISTRY_CONSOLE_PROXY_PORT:-8081}:8081"
     volumes:
       - inbox:/data/inbox   # fallback only (see METISTRY_INBOX_DIR above)
       # the ONE instance path this container sees, read-only: the policy

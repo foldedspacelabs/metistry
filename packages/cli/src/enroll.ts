@@ -1,6 +1,7 @@
 // `metistry enroll` — add a phone (plan §2.22, M19). Mints a one-time passkey
 // enrolment code on THIS Mac and prints the URL the phone opens; `--cancel
-// <code_id>` kills an unused one at once.
+// <code_id>` kills an unused one at once; `--status <code_id>` reads whether
+// the phone has reached the console with it yet (§2.23 step 7, X-114).
 //
 // The root of trust does not move (plan §4.2): shell access to the host is what
 // mints a first credential, so no HTTP route does this — not an unauthenticated
@@ -24,7 +25,7 @@
 
 import { readFile } from "node:fs/promises";
 import { parse as parseYaml } from "yaml";
-import { cancelEnrollmentCode, finishRun, instanceFile, mintEnrollmentCode, REMOTE_NONE, remoteSchema, startRun, type CancelEnrollmentOutcome, type RemoteRecord } from "@foldedspacelabs/metistry-core";
+import { cancelEnrollmentCode, enrollmentStatus, finishRun, instanceFile, mintEnrollmentCode, REMOTE_NONE, remoteSchema, startRun, type CancelEnrollmentOutcome, type EnrollmentStatus, type RemoteRecord } from "@foldedspacelabs/metistry-core";
 import { consoleOrigins } from "./deployment.js";
 import { openDbFromEnv, type Db } from "./doctor.js";
 import { readInstanceId } from "./instance.js";
@@ -186,6 +187,28 @@ export async function enrollCancel(opts: EnrollOptions & { codeId: number }): Pr
   });
 }
 
+/**
+ * `--status <code_id> --json`'s one document: the code's state and whether the
+ * phone's `POST /auth/enroll/start` has reached the console (X-114). `opened_via`
+ * is `proxy` when it arrived through the listener a provider is pointed at —
+ * the only value the sheet treats as *Opened on your phone* — and `main` when it
+ * came over loopback. `provider` is `remote.provider` from `deployment.yaml`
+ * (null with none), so the sheet can say "through <provider>". The code is
+ * never in it, and neither is anything that could be used to guess it.
+ */
+export interface EnrollStatusReport extends EnrollmentStatus {
+  provider: string | null;
+}
+
+/** Read a code's status by id. Read-only: no row is written, and nothing lands in `runs` (the sheet polls this). Undefined for an id that never existed. */
+export async function enrollStatus(opts: EnrollOptions & { codeId: number }): Promise<EnrollStatusReport | undefined> {
+  const provider = (await readRemoteProvider(opts.instanceDir)) ?? null;
+  return withDb(opts, async (db) => {
+    const status = await enrollmentStatus(db, opts.codeId);
+    return status ? { ...status, provider } : undefined;
+  });
+}
+
 // ---- rendering --------------------------------------------------------------
 
 function clock(iso: string): string {
@@ -224,4 +247,14 @@ export function renderEnrollCancelled(c: EnrollCancelled): string {
     case "not_found":
       return `no enrolment code has id ${c.code_id}.`;
   }
+}
+
+export function renderEnrollStatus(r: EnrollStatusReport): string {
+  const opened =
+    r.opened_via === "proxy"
+      ? `opened on the phone through the proxy listener${r.opened_at ? ` at ${clock(r.opened_at)}` : ""}`
+      : r.opened_via === "main"
+        ? `opened on this Mac's own listener${r.opened_at ? ` at ${clock(r.opened_at)}` : ""} — that is not proof a phone reached it`
+        : "not opened yet";
+  return `code ${r.code_id}: ${r.state}; ${opened}.`;
 }

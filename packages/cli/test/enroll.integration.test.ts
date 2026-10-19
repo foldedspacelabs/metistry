@@ -6,9 +6,9 @@
 // applied. Skipped without a db.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
-import { consumeEnrollmentCode, peekEnrollmentCode, tokenHash } from "@foldedspacelabs/metistry-core";
+import { consumeEnrollmentCode, peekEnrollmentCode, stampEnrollmentOpened, tokenHash } from "@foldedspacelabs/metistry-core";
 import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
-import { enroll, enrollCancel } from "../src/enroll.js";
+import { enroll, enrollCancel, enrollStatus } from "../src/enroll.js";
 
 const { hasDb } = loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
 const ORIGIN = "https://metis.example";
@@ -115,5 +115,26 @@ describe.skipIf(!hasDb)("metistry enroll against the scratch db", () => {
       [true, "cancelled"],
       [true, "already_expired"],
     ]);
+  });
+  it("--status reads the opened stamp by id: null until the console stamps it, `proxy` after, and the code is never in the document — read-only, no runs row", async () => {
+    const r = await enroll({ env: { METISTRY_ORIGIN: ORIGIN }, db: pool, fetchFn: up });
+    if (r.kind !== "minted") throw new Error("not minted");
+    const code = codeOf(r.minted.url);
+    const runsBefore = Number((await pool.query("SELECT count(*)::int AS n FROM runs WHERE tool LIKE 'enroll%'")).rows[0].n);
+    const fresh = await enrollStatus({ env: {}, db: pool, codeId: r.minted.code_id });
+    expect(fresh).toEqual({ code_id: r.minted.code_id, state: "live", expires_at: r.minted.expires_at, opened_at: null, opened_via: null, provider: null });
+    await stampEnrollmentOpened(pool, code, "main");
+    expect(await enrollStatus({ env: {}, db: pool, codeId: r.minted.code_id })).toMatchObject({ state: "live", opened_via: "main" });
+    await stampEnrollmentOpened(pool, code, "proxy");
+    const opened = await enrollStatus({ env: {}, db: pool, codeId: r.minted.code_id });
+    expect(opened).toMatchObject({ state: "live", opened_via: "proxy" });
+    expect(opened?.opened_at).toMatch(/^\d{4}-\d\d-\d\dT/);
+    expect(JSON.stringify(opened)).not.toContain(code);
+    // cancelled is dead but keeps what it saw; a stranger's id is undefined
+    await enrollCancel({ env: {}, db: pool, codeId: r.minted.code_id });
+    expect(await enrollStatus({ env: {}, db: pool, codeId: r.minted.code_id })).toMatchObject({ state: "expired", opened_via: "proxy" });
+    expect(await enrollStatus({ env: {}, db: pool, codeId: 2147483647 })).toBeUndefined();
+    const runsAfter = Number((await pool.query("SELECT count(*)::int AS n FROM runs WHERE tool LIKE 'enroll%'")).rows[0].n);
+    expect(runsAfter).toBe(runsBefore + 1); // the cancel's row alone
   });
 });

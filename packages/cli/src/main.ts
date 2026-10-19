@@ -78,7 +78,7 @@ import { AUTH_MODES, connectRepo, type AuthMode } from "./connect-repo.js";
 import { connect, connectList, connectRemove, CONNECT_TOOLS, parseTool, renderConnect, renderConnectList, renderRemove } from "./connect.js";
 import { consoleCall, renderConsoleCallError, renderWhoami, runConsoleSession, whoami } from "./console-client.js";
 import { agentAutonomy, agentsDefine, agentsList, parseAutonomyFlags, renderAgents, renderAutonomy, renderDefine } from "./agents.js";
-import { enroll, enrollCancel, NoDatabaseError, parseCodeId, renderEnrollCancelled, renderEnrollMinted, renderEnrollRefusal } from "./enroll.js";
+import { enroll, enrollCancel, enrollStatus, NoDatabaseError, parseCodeId, renderEnrollCancelled, renderEnrollMinted, renderEnrollRefusal, renderEnrollStatus } from "./enroll.js";
 
 const AGENTS_USAGE =
   "usage: metistry agents list [--json] | metistry agents autonomy <id> [--level observe|propose|act_within_scope] [--allow <kind>] [--propose <kind>] [--deny <kind>] [--json]" +
@@ -479,6 +479,7 @@ const USAGE = `metistry — Metistry command line
 
   metistry enroll [--json] [--instance <dir>] [--env-file <path>]
   metistry enroll --cancel <code_id> [--json] [--instance <dir>] [--env-file <path>]
+  metistry enroll --status <code_id> [--json] [--instance <dir>] [--env-file <path>]
       Add a phone (plan §2.22, M19). Mints a one-time passkey enrolment code on
       THIS Mac — single use, 10 minutes, stored hashed in auth_enrollment_codes —
       and prints the URL to open on the phone: <first METISTRY_ORIGIN entry>/#enroll=<code>.
@@ -493,6 +494,11 @@ const USAGE = `metistry — Metistry command line
       message, origin, fix}} on a refusal. --cancel <code_id> expires an unused
       code at once (the id --json printed, never the code); the Mac's Add a
       Phone sheet runs it when it closes. Both land in runs (auth).
+      --status <code_id> is read-only: whether the phone's request for this code has
+      reached the console (§2.23, X-114). --json: {code_id, state: live|used|expired,
+      expires_at, opened_at, opened_via: proxy|main|null, provider}. Only "proxy" —
+      the listener a provider is pointed at — is proof the phone reached this Mac
+      from outside; the code itself is never printed. Exits 1 for an unknown id.
 
   metistry identity [--json] [--instance <dir>]
   metistry identity set [--name <name>] [--mention <@slug>] [--mark <glyph>] [--dry-run] [--json]
@@ -1085,7 +1091,7 @@ export const HELP_GROUPS: Array<{ title: string; verbs: Array<[string, string]> 
     verbs: [
       ["connect <tool> | --list", "give Cursor, OpenCode, Devin or Claude Code its own way in"],
       ["console whoami | call | session", "authenticated requests against the console, as you"],
-      ["enroll [--cancel <code_id>]", "add a phone: a one-time enrolment code, minted here and never over HTTP"],
+      ["enroll [--cancel|--status <code_id>]", "add a phone: a one-time enrolment code, minted here and never over HTTP"],
       ["runs export", "the audit ledger as NDJSON, oldest first, resumable"],
       ["import-sessions", "summarise this machine's Claude Code sessions into /capture"],
     ],
@@ -2369,13 +2375,36 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
       }
     }
     case "enroll": {
-      const usage = "usage: metistry enroll [--json] [--instance <dir>] [--env-file <path>] | metistry enroll --cancel <code_id> [--json]";
+      const usage = "usage: metistry enroll [--json] [--instance <dir>] [--env-file <path>] | metistry enroll --cancel <code_id> [--json] | metistry enroll --status <code_id> [--json]";
       if (positional.length > 0) {
         err(usage);
         return 2;
       }
       const loadedEnroll = loadEnv();
       const common = { env: process.env, instanceDir: loadedEnroll.instanceDir, fetchFn: io.fetchFn };
+      if (flags.cancel !== undefined && flags.status !== undefined) {
+        err(`--cancel and --status are separate acts\n${usage}`);
+        return 2;
+      }
+      if (flags.status !== undefined) {
+        const codeId = parseCodeId(flags.status);
+        if (codeId === undefined) {
+          err(`--status takes the code id --json printed (a positive integer), not ${JSON.stringify(flags.status)}\n${usage}`);
+          return 2;
+        }
+        try {
+          const status = await enrollStatus({ ...common, codeId });
+          if (!status) {
+            err(`metistry enroll --status: no enrolment code has id ${codeId}.`);
+            return 1;
+          }
+          out(flags.json === true ? JSON.stringify(status) : renderEnrollStatus(status));
+          return 0;
+        } catch (e) {
+          err(`metistry enroll --status: ${e instanceof Error ? e.message : String(e)}`);
+          return e instanceof NoDatabaseError ? 2 : 1;
+        }
+      }
       if (flags.cancel !== undefined) {
         const codeId = parseCodeId(flags.cancel);
         if (codeId === undefined) {

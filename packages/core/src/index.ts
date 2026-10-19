@@ -1077,10 +1077,15 @@ export {
   ENROLLMENT_CODE_TTL_MIN,
   cancelEnrollmentCode,
   consumeEnrollmentCode,
+  enrollmentStatus,
   mintEnrollmentCode,
   peekEnrollmentCode,
+  stampEnrollmentOpened,
   type CancelEnrollmentOutcome,
   type EnrollmentDb,
+  type EnrollmentListener,
+  type EnrollmentState,
+  type EnrollmentStatus,
   type MintedEnrollmentCode,
 } from "./enrollment-codes.js";
 export { checkOwnerToken, mintOwnerToken, registerOwnerToken, type OwnerTokenDb, type RegisterOwnerTokenOutcome } from "./owner-tokens.js";

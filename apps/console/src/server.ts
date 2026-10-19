@@ -896,6 +896,14 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Con
     if (key === "POST /auth/enroll/start") {
       const body = (await readJson(req)) as { code?: string };
       if (!body.code || !(await store.peekEnrollmentCode(db, body.code))) return sendError(res, "unauthenticated");
+      // The phone reached this console with a live code (§2.23 step 7, X-114):
+      // stamp which listener answered. `proxy` is the proof from outside the
+      // sheet shows as *Opened on your phone*; `main` is recorded and never
+      // offered as it. Stamping is not using — the code is untouched — and it
+      // is audited once, when a stamp was actually written. The code itself is
+      // never in the record, only its row id.
+      const stamped = await store.stampEnrollmentOpened(db, body.code, listener);
+      if (stamped !== undefined) await audit("auth", "enroll_opened", true, { code_id: stamped, listener });
       const from = wa.requestOrigin(rp, req.headers);
       if (!from) {
         const err = wa.unconfiguredOrigin(rp, req.headers);

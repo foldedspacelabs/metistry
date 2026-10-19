@@ -22,6 +22,7 @@ import {
   renderEnrollCancelled,
   renderEnrollMinted,
   renderEnrollRefusal,
+  renderEnrollStatus,
   type EnrollRefusal,
 } from "../src/enroll.js";
 import type { Db } from "../src/doctor.js";
@@ -312,6 +313,17 @@ describe("rendering", () => {
   });
 });
 
+describe("renderEnrollStatus", () => {
+  const base = { code_id: 4, state: "live" as const, expires_at: "2026-10-19T14:52:10.000Z", provider: null };
+  it("says what the stamp proves: only a proxy-listener open is a phone that reached this Mac", () => {
+    expect(renderEnrollStatus({ ...base, opened_at: null, opened_via: null })).toBe("code 4: live; not opened yet.");
+    expect(renderEnrollStatus({ ...base, opened_at: "2026-10-19T14:45:00.000Z", opened_via: "proxy" })).toContain("opened on the phone through the proxy listener");
+    const main = renderEnrollStatus({ ...base, opened_at: "2026-10-19T14:45:00.000Z", opened_via: "main" });
+    expect(main).toContain("that is not proof a phone reached it");
+    expect(main).not.toContain("on the phone");
+  });
+});
+
 describe("parseCodeId", () => {
   it("takes a positive integer and nothing else — a code is never an id", () => {
     expect(parseCodeId("42")).toBe(42);
@@ -332,6 +344,11 @@ describe("metistry enroll (CLI)", () => {
     expect(await run(["--cancel"])).toBe(2);
     expect(await run(["--cancel", "abc"])).toBe(2);
     expect(await run(["--cancel", "0"])).toBe(2);
+    expect(await run(["--status"])).toBe(2);
+    expect(await run(["--status", "abc"])).toBe(2);
+    expect(await run(["--status", "0"])).toBe(2);
+    expect(await run(["--status", "4", "--cancel", "4"])).toBe(2);
+    expect(err.join("\n")).toContain("metistry enroll --status <code_id>");
     expect(err.join("\n")).toContain("metistry enroll --cancel <code_id>");
     expect(err.join("\n")).toContain("a positive integer");
   });
@@ -368,6 +385,7 @@ describe("metistry enroll (CLI)", () => {
     const out: string[] = [];
     expect(await main(["help"], { out: (s) => out.push(s), err: () => {} })).toBe(0);
     expect(out.join("\n")).toContain("metistry enroll --cancel <code_id>");
+    expect(out.join("\n")).toContain("metistry enroll --status <code_id>");
     expect(out.join("\n")).toContain("add a phone");
   });
 });

@@ -49,6 +49,13 @@ private let unreachableRefusal = CommandResult(
     stderr: ""
 )
 
+/// `metistry enroll --status <id> --json` (docs/ops/cli.md): the code's state and what the console stamped on it.
+private func statusResult(codeID: Int, openedVia: String?, provider: String? = "tailscale") -> CommandResult {
+    let opened = openedVia.map { #""opened_at":"2026-10-19T14:44:02.511Z","opened_via":"\#($0)""# } ?? #""opened_at":null,"opened_via":null"#
+    let who = provider.map { #""\#($0)""# } ?? "null"
+    return CommandResult(exitCode: 0, stdout: #"{"code_id":\#(codeID),"state":"live","expires_at":"2026-10-19T14:52:10.000Z",\#(opened),"provider":\#(who)}"# + "\n", stderr: "")
+}
+
 /// `metistry enroll` as the sheet drives it: records every command, answers a
 /// mint with what the test scripted, and can hold a mint open so a test can
 /// close the sheet while it is Checking.
@@ -57,6 +64,8 @@ private final class EnrollRunner: ManagementRunner, @unchecked Sendable {
     private var _commands: [ManagementCommand] = []
     private var _mint: CommandResult
     var cancelAnswer = CommandResult(exitCode: 0, stdout: #"{"code_id":42,"outcome":"cancelled","cancelled":true}"# + "\n", stderr: "")
+    /// What `metistry enroll --status` answers: not opened yet, unless a test says otherwise.
+    var statusAnswer = statusResult(codeID: 42, openedVia: nil)
     /// Held before a mint is answered.
     var mintDelay: Duration?
 
@@ -67,12 +76,14 @@ private final class EnrollRunner: ManagementRunner, @unchecked Sendable {
     /// The argument arrays, after `metistry`.
     var argv: [[String]] { commands.map(\.arguments) }
     var cancels: [[String]] { argv.filter { $0.starts(with: ["enroll", "--cancel"]) } }
+    var statusReads: [[String]] { argv.filter { $0.starts(with: ["enroll", "--status"]) } }
 
     func plannedArguments(_ command: ManagementCommand) -> [String] { ["metistry"] + command.arguments }
 
     func run(_ command: ManagementCommand, onOutput: @escaping @Sendable (OutputLine) -> Void) async throws -> CommandResult {
         lock.withLock { _commands.append(command) }
         if command.arguments.starts(with: ["enroll", "--cancel"]) { return cancelAnswer }
+        if command.arguments.starts(with: ["enroll", "--status"]) { return lock.withLock { statusAnswer } }
         if let mintDelay { try? await Task.sleep(for: mintDelay) }
         return mint
     }
@@ -250,6 +261,284 @@ private func sheet(mint: CommandResult, console: FixtureConsole? = nil) throws -
     #expect(renew.liveCode?.codeID == 47)
     await renew.close()
     #expect(renewRunner.cancels.last == ["enroll", "--cancel", "47", "--json"])
+}
+
+// MARK: - Opened on your phone (X-114)
+
+@MainActor
+@Test func theSheetTurnsToOpenedOnYourPhoneOnlyForTheProxyListener() async throws {
+    let (model, runner, session) = try sheet(mint: CommandResult(exitCode: 0, stdout: mintedJSON() + "\n", stderr: ""))
+    defer { withExtendedLifetime(session) {} }
+    await model.open()
+    guard case .ready(let code) = model.phase else {
+        Issue.record("expected ready, got \(model.phase)")
+        return
+    }
+
+    // not opened: still Ready
+    await model.checkOpened()
+    #expect(model.phase == .ready(code))
+    #expect(runner.statusReads == [["enroll", "--status", "42", "--json"]], "asked by the id, never the code")
+
+    // opened on THIS Mac's own listener (the owner clicked the link): recorded by the console, never shown as the phone
+    runner.statusAnswer = statusResult(codeID: 42, openedVia: "main")
+    await model.checkOpened()
+    #expect(model.phase == .ready(code))
+    #expect(!model.phoneReachedMac)
+
+    // an answer for another code (a stale reply) is not this code's
+    runner.statusAnswer = statusResult(codeID: 41, openedVia: "proxy")
+    await model.checkOpened()
+    #expect(model.phase == .ready(code))
+
+    // a CLI older than the flag, or one that cannot answer: nothing changes
+    runner.statusAnswer = CommandResult(exitCode: 2, stdout: "", stderr: "unknown flag\n")
+    await model.checkOpened()
+    #expect(model.phase == .ready(code))
+
+    // through the proxy listener: the proof from outside
+    runner.statusAnswer = statusResult(codeID: 42, openedVia: "proxy")
+    await model.checkOpened()
+    #expect(model.phase == .openedOnPhone(code, provider: "Tailscale"))
+    #expect(model.phoneReachedMac)
+    #expect(model.qr == nil, "Opened replaces the QR")
+    #expect(model.liveCode == code, "the code is still live until the phone uses it")
+    let tree = try await AccessibilityProbe.snapshot(AddPhoneSheet(model: model, onDone: {}))
+    defer { tree.close() }
+    let names = tree.nodes.map(\.name).filter { !$0.isEmpty }
+    #expect(tree.nodes.contains { $0.name.contains(AddPhoneWords.openedTitle) }, "\(names)")
+    #expect(tree.nodes.contains { $0.name.contains("Your phone reached this Mac through Tailscale.") }, "\(names)")
+    #expect(!tree.nodes.contains { $0.name == AddPhoneWords.qrLabel })
+    #expect(tree.controlNames.contains(AddPhoneWords.makeANewCode))
+    #expect(tree.controlNames.contains(AddPhoneWords.done))
+    #expect(tree.unlabeledBesidesFields.isEmpty, "unlabeled: \(tree.unlabeledBesidesFields)")
+
+    // …then the phone is added: Opened goes on to Added
+    let reads = runner.statusReads.count
+    await model.checkOpened()
+    #expect(runner.statusReads.count == reads, "once opened there is nothing more to ask")
+    #expect(model.phase == .openedOnPhone(code, provider: "Tailscale"))
+
+    // closing from Opened still kills the live code
+    await model.close()
+    #expect(runner.cancels == [["enroll", "--cancel", "42", "--json"]])
+}
+
+@MainActor
+@Test func openedOnYourPhoneGoesOnToAddedWhenThePhoneArrives() async throws {
+    let base = try FixtureConsole(devicesFixtures { _ in })
+    let swappable = SwappableConsole(base)
+    let runner = EnrollRunner(mint: CommandResult(exitCode: 0, stdout: mintedJSON() + "\n", stderr: ""))
+    let session = ConsoleSession(transport: swappable, management: runner)
+    let model = AddPhoneModel(management: runner, session: session)
+    model.now = { t0 }
+    model.pollInterval = .seconds(3600)
+    await model.open()
+    runner.statusAnswer = statusResult(codeID: 42, openedVia: "proxy", provider: nil)
+    await model.checkOpened()
+    guard case .openedOnPhone(let code, let provider) = model.phase else {
+        Issue.record("expected openedOnPhone, got \(model.phase)")
+        return
+    }
+    #expect(provider == nil)
+    #expect(AddPhoneWords.opened(through: provider) == "Your phone reached this Mac from outside.")
+    swappable.inner = try FixtureConsole(devicesFixtures { devices in
+        devices.insert([
+            "id": "9", "passkey_id": "fixture-new-phone", "label": "Matt's iPhone", "rp_id": "metis.example",
+            "added": iso(t0.addingTimeInterval(30)), "last_seen": iso(t0.addingTimeInterval(30)), "this_device": false,
+            "sessions": [["id": "9", "created_at": iso(t0.addingTimeInterval(30)), "last_seen_at": iso(t0.addingTimeInterval(30)), "absolute_expires_at": iso(t0.addingTimeInterval(86_400)), "revoked": false, "push": false]],
+        ], at: 0)
+    })
+    await model.checkArrival()
+    #expect(model.phase == .added(label: "Matt's iPhone"))
+    _ = code
+    await model.close()
+}
+
+@MainActor
+@Test func aCodeThatExpiresWithoutAProxyOpenSaysThePhoneDidNotReachTheOrigin() async throws {
+    // never opened: the sentence, naming the origin
+    let (never, _, s1) = try sheet(mint: CommandResult(exitCode: 0, stdout: mintedJSON(codeID: 42) + "\n", stderr: ""))
+    defer { withExtendedLifetime(s1) {} }
+    await never.open()
+    never.tick(now: t0.addingTimeInterval(600))
+    guard case .expired = never.phase else {
+        Issue.record("expected expired, got \(never.phase)")
+        return
+    }
+    #expect(!never.phoneReachedMac)
+    #expect(AddPhoneWords.notReached("https://metis.example") == "Your phone didn't reach https://metis.example. Open it in Safari on your phone with Wi-Fi off to see what it says.")
+    let tree = try await AccessibilityProbe.snapshot(AddPhoneSheet(model: never, onDone: {}))
+    defer { tree.close() }
+    #expect(tree.nodes.contains { $0.name == AddPhoneWords.notReached("https://metis.example") }, "\(tree.nodes.map(\.name).filter { !$0.isEmpty })")
+    await never.close()
+
+    // opened on this Mac's own listener only: that is not the phone reaching it, so the sentence stands
+    let (mainOnly, mainRunner, s2) = try sheet(mint: CommandResult(exitCode: 0, stdout: mintedJSON(codeID: 42) + "\n", stderr: ""))
+    defer { withExtendedLifetime(s2) {} }
+    await mainOnly.open()
+    mainRunner.statusAnswer = statusResult(codeID: 42, openedVia: "main")
+    await mainOnly.checkOpened()
+    mainOnly.tick(now: t0.addingTimeInterval(600))
+    #expect(!mainOnly.phoneReachedMac)
+    let t2 = try await AccessibilityProbe.snapshot(AddPhoneSheet(model: mainOnly, onDone: {}))
+    defer { t2.close() }
+    #expect(t2.nodes.contains { $0.name == AddPhoneWords.notReached("https://metis.example") })
+    await mainOnly.close()
+
+    // the phone reached it but never finished: Expired, and no claim that it never got there
+    let (reached, reachedRunner, s3) = try sheet(mint: CommandResult(exitCode: 0, stdout: mintedJSON(codeID: 42) + "\n", stderr: ""))
+    defer { withExtendedLifetime(s3) {} }
+    await reached.open()
+    reachedRunner.statusAnswer = statusResult(codeID: 42, openedVia: "proxy")
+    await reached.checkOpened()
+    reached.tick(now: t0.addingTimeInterval(600))
+    guard case .expired = reached.phase else {
+        Issue.record("expected expired, got \(reached.phase)")
+        return
+    }
+    #expect(reached.phoneReachedMac)
+    let t3 = try await AccessibilityProbe.snapshot(AddPhoneSheet(model: reached, onDone: {}))
+    defer { t3.close() }
+    #expect(t3.nodes.contains { $0.name == AddPhoneWords.expired })
+    #expect(!t3.nodes.contains { $0.name.contains("didn't reach") })
+    #expect(reachedRunner.cancels.isEmpty, "an expired code is not live")
+    // a new code starts over: the old one's open does not carry to it
+    reachedRunner.statusAnswer = statusResult(codeID: 43, openedVia: nil)
+    reachedRunner.mint = CommandResult(exitCode: 0, stdout: mintedJSON(codeID: 43) + "\n", stderr: "")
+    await reached.makeNewCode()
+    #expect(reached.phase == .ready(EnrollmentCode(url: mintedURL, codeID: 43, origin: "https://metis.example", expiresAt: t0.addingTimeInterval(600))))
+    #expect(!reached.phoneReachedMac)
+    await reached.close()
+}
+
+/// Steps the poll one wake at a time: `sleep` parks until `release()`, and
+/// `untilParked()` returns once the loop is parked again — so a test knows the
+/// wake it released has been fully handled. No clock, no real sleeping.
+private final class Signals: @unchecked Sendable {
+    private let stream: AsyncStream<Void>
+    private let continuation: AsyncStream<Void>.Continuation
+    private var iterator: AsyncStream<Void>.Iterator
+
+    init() {
+        (stream, continuation) = AsyncStream<Void>.makeStream()
+        iterator = stream.makeAsyncIterator()
+    }
+
+    func send() { continuation.yield() }
+    /// Returns when a signal arrives — or at once, with nothing, if the awaiting task is cancelled.
+    func next() async { _ = await iterator.next() }
+}
+
+@MainActor
+private final class PollGate {
+    private let wakes = Signals()
+    private let parks = Signals()
+    private(set) var entered = 0
+    private(set) var intervals: [Duration] = []
+
+    func sleep(_ interval: Duration) async {
+        entered += 1
+        intervals.append(interval)
+        parks.send()
+        await wakes.next()
+    }
+
+    func release() { wakes.send() }
+    func untilParked() async { await parks.next() }
+}
+
+@MainActor
+@Test func theArrivalPollRunsOnlyWhileTheStreamIsDownAndEndsWhenTheSheetCloses() async throws {
+    let runner = EnrollRunner(mint: CommandResult(exitCode: 0, stdout: mintedJSON() + "\n", stderr: ""))
+    let console = try FixtureConsole.recorded()
+    let session = ConsoleSession(transport: console, management: runner)
+    let model = AddPhoneModel(management: runner, session: session)
+    model.now = { t0 }
+    let gate = PollGate()
+    model.sleep = { await gate.sleep($0) }
+    var live = false
+    model.streamIsLive = { live }
+    let devicesReads = { console.calls.filter { $0.method == "GET" && $0.path == "/api/devices" }.count }
+
+    await model.open() // the baseline read, then the mint
+    await gate.untilParked() // the loop is waiting out its first interval
+    #expect(gate.intervals == [.seconds(5)], "the poll is the 5 s fallback")
+    let baseline = devicesReads()
+    #expect(runner.statusReads.isEmpty)
+
+    // the stream is down: a wake asks both questions — the devices route and the code's status
+    gate.release()
+    await gate.untilParked()
+    #expect(devicesReads() == baseline + 1)
+    #expect(runner.statusReads.count == 1)
+
+    // the stream comes up: it says when to look, so a wake asks nothing
+    live = true
+    gate.release()
+    await gate.untilParked()
+    gate.release()
+    await gate.untilParked()
+    #expect(devicesReads() == baseline + 1, "no poll while the stream is live")
+    #expect(runner.statusReads.count == 1)
+
+    // …and when it drops, the poll asks again
+    live = false
+    gate.release()
+    await gate.untilParked()
+    #expect(devicesReads() == baseline + 2)
+    #expect(runner.statusReads.count == 2)
+
+    // closing ends the poll: close() waits for the loop to finish, and a late wake does nothing
+    let parked = gate.entered
+    await model.close()
+    gate.release()
+    gate.release()
+    #expect(gate.entered == parked, "the loop did not sleep again after close")
+    #expect(devicesReads() == baseline + 2)
+    #expect(runner.statusReads.count == 2)
+    await model.pollTick()
+    #expect(devicesReads() == baseline + 2, "a tick after close asks nothing")
+    #expect(runner.statusReads.count == 2)
+    #expect(runner.cancels == [["enroll", "--cancel", "42", "--json"]])
+}
+
+@MainActor
+@Test func aSheetWhoseWindowGoesAwayStillCancelsItsLiveCode() async throws {
+    // The Settings window or the wizard closing under an open sheet never calls the presenter's binding setter
+    // (only Done, Esc and a dismissal do), so the view going away has to ask for the close itself.
+    let (model, runner, session) = try sheet(mint: CommandResult(exitCode: 0, stdout: mintedJSON() + "\n", stderr: ""))
+    defer { withExtendedLifetime(session) {} }
+    await model.open()
+    var done = 0
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: 600), styleMask: [.titled, .closable], backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    window.contentView = NSHostingView(rootView: AddPhoneSheet(model: model, onDone: { done += 1 }))
+    window.orderFront(nil)
+    window.contentView?.layoutSubtreeIfNeeded()
+    try await Task.sleep(for: .milliseconds(300)) // the view appears; the harness has no hook for that
+    #expect(done == 0, "an open sheet asks for nothing")
+    window.contentView = nil // the window's content going away is what closing it does to the sheet
+    for _ in 0..<500 where done == 0 { try await Task.sleep(for: .milliseconds(4)) }
+    #expect(done == 1, "the presenter was asked to close the sheet")
+    window.close()
+    await model.close() // what the presenter's close then does
+    #expect(runner.cancels == [["enroll", "--cancel", "42", "--json"]])
+
+    // …and a sheet already closed by Done does not ask again
+    let (closed, _, s2) = try sheet(mint: CommandResult(exitCode: 0, stdout: mintedJSON(codeID: 50) + "\n", stderr: ""))
+    defer { withExtendedLifetime(s2) {} }
+    await closed.open()
+    await closed.close()
+    var again = 0
+    let w2 = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: 600), styleMask: [.titled], backing: .buffered, defer: false)
+    w2.isReleasedWhenClosed = false
+    w2.contentView = NSHostingView(rootView: AddPhoneSheet(model: closed, onDone: { again += 1 }))
+    w2.orderFront(nil)
+    try await Task.sleep(for: .milliseconds(300))
+    w2.contentView = nil
+    try await Task.sleep(for: .milliseconds(300))
+    #expect(again == 0)
 }
 
 // MARK: - The QR

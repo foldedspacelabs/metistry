@@ -18,13 +18,20 @@
 // words with the fix it names (§3.16: never re-worded) and nothing else.
 //
 // X-114 adds one state between *Ready* and *Added*: **Opened on your phone**,
-// read from `metistry enroll --status <code_id>` once the console stamps
-// `auth_enrollment_codes.opened_via` on the proxy listener (§2.23 step 7). It
-// goes where `Phase` says, and the arrival check below is where it is read.
+// read from `metistry enroll --status <code_id> --json` once the console stamps
+// `auth_enrollment_codes.opened_via` on the proxy listener (§2.23 step 7).
+// Only `proxy` is the proof — a `main` stamp is the owner opening the link on
+// this Mac and is never shown as the phone arriving. A code that expires
+// without it says the phone did not reach the origin and what to try.
 //
 // Arrival is `GET /api/devices`, refetched on `run.finished` events of kind
 // `auth` (an enrolment lands in `runs`, §2.22) and polled while the stream is
-// down (§2.20) — no new route, no new read path (invariant 3).
+// down (§2.20) — no new route, no new read path (invariant 3). The opened
+// stamp is read the same way: on those events (the console audits the stamp as
+// an `auth` run), and by the same bounded poll — which wakes every
+// `pollInterval`, does nothing while the stream is live, and ends with the
+// sheet. Closing the sheet — Done, Esc, or the window going away under it —
+// cancels a code that is still live.
 
 import CoreImage
 import Foundation
@@ -116,6 +123,29 @@ public enum AddPhoneWords {
     /// only on this Mac still passes, so the sheet says what the phone needs.
     public static func mustOpen(_ host: String) -> String { "Your phone must be able to open \(host)." }
     public static func added(_ label: String) -> String { "“\(label)” was added" }
+    /// *Opened on your phone* (§2.23 step 7, X-114): the console saw the phone's request for this code arrive through the proxy listener.
+    public static let openedTitle = "Opened on your phone"
+    public static func opened(through provider: String?) -> String {
+        guard let provider else { return "Your phone reached this Mac from outside." }
+        return "Your phone reached this Mac through \(provider)."
+    }
+    public static let openedNote = "Finish on your phone. This code still works once."
+    /// The code ran out and the console never heard from a phone on the proxy listener.
+    public static func notReached(_ origin: String) -> String {
+        "Your phone didn't reach \(origin). Open it in Safari on your phone with Wi-Fi off to see what it says."
+    }
+    /// What `remote.provider` reads as, said as a person would; an id this build does not know is said as it is.
+    public static func providerName(_ id: String) -> String {
+        switch id {
+        case "tailscale": return "Tailscale"
+        case "relay": return "Metistry Relay"
+        case "cloudflare": return "Cloudflare"
+        case "zrok": return "zrok"
+        case "ngrok": return "ngrok"
+        case "port-forward": return "port forwarding"
+        default: return id
+        }
+    }
     public static let addedNote = "Your phone has its own passkey now. It signs in with Face ID, and you can remove it from Devices anytime."
     /// The phone guide (X-79 writes it; the website's Docs render this repo's markdown).
     public static let guideURL = URL(string: "https://github.com/foldedspacelabs/metistry/blob/main/docs/ops/phone.md")!
@@ -128,9 +158,8 @@ public enum AddPhoneWords {
 @MainActor
 @Observable
 public final class AddPhoneModel {
-    /// The sheet's states, in §2.22's order. **X-114's `openedOnPhone` goes
-    /// between `ready` and `added`** — the console saw this code's
-    /// `POST /auth/enroll/start` arrive through the proxy listener.
+    /// The sheet's states, in §2.22's order, with X-114's `openedOnPhone`
+    /// between `ready` and `added`.
     public enum Phase: Equatable, Sendable {
         /// `metistry enroll --json` is running.
         case checking
@@ -138,6 +167,10 @@ public final class AddPhoneModel {
         case refused(EnrollmentRefusal)
         /// The QR, the URL, the countdown.
         case ready(EnrollmentCode)
+        /// The console saw this code's `POST /auth/enroll/start` arrive through
+        /// the proxy listener (§2.23 step 7): the proof from outside that the
+        /// phone reached this Mac. `provider` is `remote.provider`, if one is chosen.
+        case openedOnPhone(EnrollmentCode, provider: String?)
         /// The code's ten minutes ran out; the QR is replaced, not dimmed.
         case expired(EnrollmentCode)
         /// `GET /api/devices` shows a passkey enrolled after the sheet opened.
@@ -156,6 +189,10 @@ public final class AddPhoneModel {
     /// view draws this, so there is no QR to draw for a refusal.
     public private(set) var qr: CGImage?
     public private(set) var isClosed = false
+    /// True once the console reported the phone's start through the proxy
+    /// listener for the code on screen. An expiry with this false says the
+    /// phone did not reach the origin.
+    public private(set) var phoneReachedMac = false
     /// Cancellations this sheet asked for, newest last: the code ids.
     public private(set) var cancelled: [Int] = []
 
@@ -167,6 +204,12 @@ public final class AddPhoneModel {
     @ObservationIgnored public var onAdded: @MainActor (String) -> Void = { _ in }
     /// How often `GET /api/devices` is asked while the event stream is down.
     @ObservationIgnored public var pollInterval: Duration = .seconds(5)
+    /// How the poll waits — injectable, so a test steps it a tick at a time
+    /// with no real sleeping.
+    @ObservationIgnored public var sleep: @MainActor (Duration) async -> Void = { try? await Task.sleep(for: $0) }
+    /// A test's stand-in for "the event stream is up" (the poll does nothing
+    /// while it is). Nil reads the session's own stream.
+    @ObservationIgnored public var streamIsLive: (@MainActor () -> Bool)?
 
     @ObservationIgnored private let management: (any ManagementRunner)?
     @ObservationIgnored private weak var session: ConsoleSession?
@@ -206,6 +249,7 @@ public final class AddPhoneModel {
         generation += 1
         let current = generation
         stopExpiry()
+        phoneReachedMac = false
         setPhase(.checking)
         guard let management else {
             setPhase(.unavailable("No metistry runtime located — finish step 1 of first run."))
@@ -257,7 +301,12 @@ public final class AddPhoneModel {
     /// The clock reached the code's expiry: the QR is replaced by *This code
     /// expired*. Injected by a test; the real sheet's timer calls it too.
     public func tick(now: Date) {
-        guard case .ready(let code) = phase, !code.isLive(at: now) else { return }
+        let code: EnrollmentCode
+        switch phase {
+        case .ready(let c), .openedOnPhone(let c, _): code = c
+        default: return
+        }
+        guard !code.isLive(at: now) else { return }
         liveCode = nil
         setPhase(.expired(code))
     }
@@ -268,6 +317,9 @@ public final class AddPhoneModel {
         expiryTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(wait))
             guard !Task.isCancelled, let self else { return }
+            // the phone may have opened it since the last look: say so, not "did not reach"
+            await self.checkOpened()
+            guard !Task.isCancelled else { return }
             self.tick(now: self.now())
         }
     }
@@ -289,24 +341,62 @@ public final class AddPhoneModel {
     private func startWatching() {
         guard !watching, let session else { return }
         watching = true
-        // An enrolment lands in `runs` as kind `auth` (§2.22), so `run.finished`
-        // of that kind says a device may have arrived; the list is refetched
-        // through its own route, never read off the event.
+        // An enrolment lands in `runs` as kind `auth` (§2.22), and so does the
+        // console's note that a phone opened a code (`enroll_opened`), so
+        // `run.finished` of that kind says a device may have arrived or the
+        // phone may have opened it; both are re-read through their own doors
+        // (the devices route; `enroll --status`), never read off the event.
         session.events.watch([.runs]) { [weak self] event in
             guard let self, !self.isClosed else { return false }
             if case .runFinished(_, let kind, _) = event.change, kind == "auth" {
-                Task { await self.checkArrival() }
+                Task {
+                    await self.checkOpened()
+                    await self.checkArrival()
+                }
             }
             return true
         }
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
-                try? await Task.sleep(for: self.pollInterval)
+                await self.sleep(self.pollInterval)
                 guard !Task.isCancelled, !self.isClosed else { return }
-                if self.session?.events.isLive != true { await self.checkArrival() }
+                await self.pollTick()
             }
         }
+    }
+
+    /// One wake of the fallback poll: nothing while the stream is live (it
+    /// says when to look), otherwise both looks. Ends with the sheet — `close()`
+    /// cancels the task, and a wake after it does nothing.
+    func pollTick() async {
+        guard !isClosed, !(streamIsLive?() ?? (session?.events.isLive == true)) else { return }
+        await checkOpened()
+        await checkArrival()
+    }
+
+    // MARK: Opened on your phone
+
+    /// `metistry enroll --status <code_id> --json`: the console stamped this
+    /// code from the proxy listener — the phone reached this Mac from outside
+    /// (§2.23 step 7). A `main` stamp is the owner opening the link here and
+    /// is not shown. Read-only on the CLI side, so asking often costs nothing
+    /// but a process.
+    public func checkOpened() async {
+        guard case .ready(let code) = phase else { return }
+        guard let management, !isClosed,
+              let command = ManagementCommand(.enrollment, ["enroll", "--status", String(code.codeID), "--json"])
+        else { return }
+        let current = generation
+        guard let result = try? await management.run(command, onOutput: { _ in }), result.exitCode == 0,
+              let document = JSONValue.parseTrailing(in: result.stdout),
+              current == generation, !isClosed
+        else { return }
+        guard document.int("code_id") == code.codeID, document.string("opened_via") == "proxy" else { return }
+        phoneReachedMac = true
+        // an expired code stays Expired (but no longer says the phone never got there)
+        guard case .ready = phase else { return }
+        setPhase(.openedOnPhone(code, provider: document.string("provider").map(AddPhoneWords.providerName)))
     }
 
     /// `GET /api/devices`: a passkey that was not there when the sheet opened
@@ -339,8 +429,12 @@ public final class AddPhoneModel {
         isClosed = true
         generation += 1
         stopExpiry()
-        pollTask?.cancel()
+        // The poll ends with the sheet: cancelled, and waited for, so nothing it
+        // started can run after `close()` returns.
+        let poll = pollTask
         pollTask = nil
+        poll?.cancel()
+        await poll?.value
         await cancelLiveCode()
     }
 

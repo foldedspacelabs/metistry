@@ -286,9 +286,9 @@ func adoptingEndsTheOldChildAndTheNextRequestStartsOneForTheNewInstance() async 
 
 @Test func aCommandCannotNameItsOwnProductDirectory() {
     // which product runs a verb is the locator's answer, appended by the runner
-    #expect(ManagementCommand(.doctor, ["doctor", "--json", "--product-dir", "/elsewhere"]) == nil)
+    #expect(ManagementCommand(.doctor, ["doctor", "--check", "--json", "--product-dir", "/elsewhere"]) == nil)
     #expect(ManagementCommand(.update, ["update", "--product-dir=/elsewhere"]) == nil)
-    #expect(ManagementCommand(.doctor, ["doctor", "--json"]) != nil)
+    #expect(ManagementCommand(.doctor, ["doctor", "--check", "--json"]) != nil)
 }
 
 // MARK: - The two bugs F-7 reported

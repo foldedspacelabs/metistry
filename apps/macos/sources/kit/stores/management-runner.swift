@@ -53,6 +53,7 @@ public enum ManagementRow: String, CaseIterable, Sendable, Equatable {
         case .deploymentShape: return [["deployment", "set-shape"]]
         case .keepAwake: return [["deployment", "set-keep-awake"]]
         case .services: return [["restart"], ["stop"], ["start"], ["logs"]]
+        // the prefix is the verb; `exactShapes` closes it to the two argvs the app runs
         case .doctor: return [["doctor"]]
         case .secrets: return ["set", "replace", "remove", "hosts", "grant", "migrate-scope", "purge-shared"].map { ["secrets", $0] }
         case .instanceRepository: return [["connect-repo"]]
@@ -71,6 +72,27 @@ public enum ManagementRow: String, CaseIterable, Sendable, Equatable {
         case .enrollment: return [["enroll"]]
         }
     }
+
+    /// A row whose argument arrays are EXACT shapes, not a verb prefix: the
+    /// whole argv after `metistry` must equal one of these, so nothing can be
+    /// appended to it. M6 is the one such row (ruled 2026-10-04): `doctor` has
+    /// a read and a repair, and the repair is a closed-set action
+    /// (invariant 10) — a prefix would let the app pass `doctor` anything the
+    /// CLI grows later. `nil` for every other row, which stays prefix-checked.
+    public var exactShapes: [[String]]? {
+        switch self {
+        case .doctor: return [Self.doctorCheckArguments, Self.doctorFixArguments]
+        default: return nil
+        }
+    }
+
+    /// The read: `metistry doctor --check --json` — read-only by flag, not by
+    /// the CLI's guess about whether a terminal is attached.
+    public static let doctorCheckArguments = ["doctor", "--check", "--json"]
+    /// Fix All: `metistry doctor --fix --yes --json`. `--yes` is only ever sent
+    /// after the owner has confirmed a preview that named every fix that asks
+    /// (status-model.swift) — never as a default.
+    public static let doctorFixArguments = ["doctor", "--fix", "--yes", "--json"]
 
     /// Why the console does not do it (§2.2's last column).
     public var whyNotTheAPI: String {
@@ -117,12 +139,17 @@ public struct ManagementCommand: Sendable, Equatable {
         return copy
     }
 
-    /// Nil unless `arguments` begin with one of the row's verbs — and nil for
+    /// Nil unless `arguments` begin with one of the row's verbs — or, for a row
+    /// with `exactShapes`, ARE one of them — and nil for
     /// a `--product-dir` among them: which product runs a verb is the runtime
     /// locator's answer (runtime-locator.swift), appended by the runner, and a
     /// command that named its own would be a second answer to that question.
     public init?(_ row: ManagementRow, _ arguments: [String], standardInput: String? = nil) {
-        guard row.verbs.contains(where: { arguments.starts(with: $0) }) else { return nil }
+        if let shapes = row.exactShapes {
+            guard shapes.contains(arguments) else { return nil }
+        } else {
+            guard row.verbs.contains(where: { arguments.starts(with: $0) }) else { return nil }
+        }
         guard !arguments.contains(where: { $0 == Self.productDirFlag || $0.hasPrefix(Self.productDirFlag + "=") }) else { return nil }
         self.row = row
         self.arguments = arguments

@@ -112,7 +112,7 @@ path.
 
 | | why | what to do today |
 | --- | --- | --- |
-| **A native passkey** (wizard step 6) | measured, not assumed — see "What ASAuthorization actually says" below. `ASAuthorization` refuses *every* relying party from a Developer ID build, because an application identifier comes from an embedded provisioning profile and a DMG from GitHub Releases has none. **This stopped being step 6's problem on 2026-09-10**: this Mac needs no passkey at all | for a browser or a phone, **Add a Phone…** — the step's and Settings ▸ Devices' sheet ("Add a Phone" below): a QR and a link, the code minted on this Mac. Same `passkeys` row either way. The probe is under Settings → Advanced |
+| **A native passkey** (wizard step 7) | measured, not assumed — see "What ASAuthorization actually says" below. `ASAuthorization` refuses *every* relying party from a Developer ID build, because an application identifier comes from an embedded provisioning profile and a DMG from GitHub Releases has none. **This stopped being step 7's problem on 2026-09-10** (it was step 6 until X-107 put Remote Access before it): this Mac needs no passkey at all | for a browser or a phone, **Add a Phone…** — the step's and Settings ▸ Devices' sheet ("Add a Phone" below): a QR and a link, the code minted on this Mac. Same `passkeys` row either way. The probe is under Settings → Advanced |
 | `connect-repo --auth token` | it reads the PAT from **stdin**, and the app gives every child an empty stdin on purpose so no verb can hang a progress view waiting for a paste | the wizard shows the option, disabled, with that reason; run it in a terminal |
 | **The screens behind the rest of the sidebar's rows** | the shell has the rows (T5-2); each screen is its own ticket, and until it lands the row's detail names the gap and offers the web app. Landed in W2, each with its section below: Needs You (T5-4a's list, T5-4b's bodies), Today (T6-1a's spine, T6-1b's brief, Next Up and Close the Day), Chat (T6-2), Activity (T6-3), the Usage popover (T5-6) and the capture composer (T5-5); in W3, Knowledge (T6-4), Agents (T6-5), Scheduled (T6-6), Work ▸ Board (T6-7), Work ▸ Projects (T6-8), Work ▸ Artifacts (T6-9) and Run detail (T6-10). Still to come: the rest of W3 (T6-11) | the PWA — "Add to Dock" in Safari, or the detail's **Open in Browser** |
 | **Attachments in the composer** | New Capture is the text composer (T5-5, "The capture composer" below); live capture is the floating bar's ("The floating bar" below — the #253 hold was lifted 2026-09-30, Q28), and the attachment chip, ⌘⇧A and the window's drop target are not built | the PWA's +, or `metistry console call POST /capture` with `filename` and `content_base64` |
@@ -193,7 +193,7 @@ times: the Status panel's header (under the doctor summary, with `via`),
 Settings ▸ Account (the full card, with the remedy and the exact argument
 array), the menu bar (a second dot beside the `console` row, and the headline
 inside its submenu — a service being *up* and a service *knowing who you are*
-are different questions), and the wizard's step 6, which now leads with it.
+are different questions), and the wizard's door step, which now leads with it.
 
 **What the app can and cannot call.** It can ask who it is, and — since the
 data layer below — it can make any authenticated request the owner surface
@@ -875,7 +875,7 @@ does not — and should not — see.
 
 **The window (T6-11, screen-15).** Settings is its own window, never a pane
 in the main one: a sidebar in four groups — *Instance · Services · Compute ·
-Updates*, **Access** (*Account · Devices · Connections · Secrets · Variables*),
+Updates*, **Access** (*Account · Remote Access · Devices · Connections · Secrets · Variables*),
 **Capture** (*Live Capture · Sessions*), *Keyboard · Advanced* — at a fixed
 **840 × 600** (a 200 pt sidebar, a 640 pt pane; the owner ruled it is not
 resizable, and the scene takes the view's size). Every pane is a vertical
@@ -937,7 +937,11 @@ core's (`LID_CLOSED_*` in `packages/core/src/power.ts`), mirrored in
 | Compute | memory and disk | `ProcessInfo.physicalMemory` less a documented reserve, **labelled an estimate**; the home volume's own capacity figures |
 | Account | console sign-in: who this Mac is, with `via`, the remedy, and the argument array | `metistry console whoami --json` — the app never resolves, holds or displays the token ("Signing in" above) |
 | Account | instance repo status, HEAD, queue depth | `doctor --check --json` → the `reconciler` row's `meta`. The reconciler is the sole committer, so the app runs no git of its own |
-| Devices | the devices: a passkey each — label, added, last seen, *This device*, its sessions and whether notifications are on | `GET /api/devices` (§2.22, X-76), refetched on `run.finished` events of kind `auth` |
+| Remote Access | the choice and mode, the address, `METISTRY_ORIGIN`, the provider's doctor rows with *Checked <when>* | `metistry remote status --json` (M20, plan §2.23) through the management runner — the `remote:` record, the rendered origins, the chooser's rows and doctor's `remote` rows in one read ("Set Up Remote Access" below) |
+| Remote Access | Change… | the guided flow as this window's sheet — `remote set <provider> [flags] --json` for the preview, `… --yes --json` for the ceremony, `remote test --json` for the check; its Add a Phone… closes the sheet and opens Devices' |
+| Remote Access | Test | `metistry remote test --json` — step 6, said as *answers from this Mac* |
+| Remote Access | Turn Off | `metistry remote off --json` first (the preview: what the provider's revoke would undo, what is left for you at the provider, which phones stop signing in), shown as the confirm's costs (C136); only Turn Off runs `remote off --yes --json` |
+| Devices | the devices: a passkey each — label, added, last seen, *This device*, its sessions and whether notifications are on; *Added for old.example.com. Remove it and add this phone again.* on a passkey whose `rp_id` is not a configured origin's host (X-107) | `GET /api/devices` (§2.22, X-76), refetched on `run.finished` events of kind `auth`; the configured hosts are the Remote Access pane's one `remote status --json` read |
 | Devices | Remove | `POST /api/devices/:id/revoke` with the route's default scope (`{}`): the passkey and every session under it, their push subscriptions dropped — **confirmed, naming the device** (C136); a removed phone is set up again as a new device |
 | Devices | Sign Out Everywhere | the same door with `{scope: "sessions"}` once per signed-in device, the caller's own last; passkeys kept — confirmed, listing the devices. Off, with its reason, when no device is signed in |
 | Devices | Add a Phone… | the sheet ("Add a Phone" below): `metistry enroll --json` (M19) through the management runner, the QR drawn here; `metistry enroll --status <code_id> --json` for *Opened on your phone* (X-114); `metistry enroll --cancel <code_id>` when the sheet closes or Make a New Code is pressed. **No console route mints a code** |
@@ -998,9 +1002,60 @@ and `SecretListing` in `packages/cli/src/secrets.ts` is camelCase (`inKeychain`,
 guessing one and blanking a pane over a convention. That is a reader-side
 tolerance, not a wire contract: the shape is the CLI's.
 
+## Set Up Remote Access
+
+The wizard's step 6, **Remote Access** (between Services and Door), and
+Settings ▸ Remote Access ▸ **Change…** present one flow
+(`sources/kit/remote-access-flow.swift` over `remote-access-model.swift`; plan
+§2.23, X-107) — the plan's seven steps: choose · get the tool · sign in ·
+approve · expose · check · Add a Phone. The app runs **three verbs and nothing
+else**, each through the management runner's M20 row:
+
+| the flow | runs | shows |
+| --- | --- | --- |
+| 1. Choose | `metistry remote status --json` | *How should your phone reach this Mac?* — the CLI's `choices` in the plan's order, **None** preselected, *Tailscale — Any browser (Funnel) — Recommended*; a provider whose adapter has not shipped is listed and says *Not yet available*. Tailscale adds its mode (*Any browser (Funnel)* · *Only my devices (tailnet)*) and *Use the Tailscale app already on this Mac* (`--use-app`). Each change of choice re-runs the preview below |
+| the preview | `metistry remote set <provider> [flags] --json` (no `--yes`: read-only on the CLI side — `detect`, and a dry `revoke` of the old provider) | whether the tool is here and signed in, the address, *Set-up would:* the CLI's `would_change` lines, and — for a switch — the CLI's `stranding` sentence and what the old provider's revoke would undo. The one button is the act: **Set Up Tailscale**, or **Switch to Tailscale** |
+| 2–5. Get the tool, sign in, approve, expose | `metistry remote set <provider> [flags] --yes --json`, streamed, cancellable (the process ends with the task) | where the CLI is, read from the lines it prints to stderr under `--json` (`RemoteFlowProgress`): *fetched Metistry's Tailscale pack* → get the tool; *sign in to Tailscale at: <url>* → sign in; *Tailscale asks you to approve Funnel … one click at: <url>* → approve; *Waiting for <name> to appear on the internet* and *waiting for <origin> to answer from this Mac* → expose. Every link the CLI printed is offered to open again. The CLI opened the browser itself; completion (`BackendState` reaching `Running`) is the CLI's reading, never the app's |
+| 6. Check | `metistry remote test --json` | the rows, and *<origin> answers from this Mac* — **never worded as reaching the phone** (§2.23: a Mac on the same tailnet may reach a Funnel name over the tailnet); tailnet mode adds *Your phone must be signed in to the same Tailscale account.* A failed row shows its doctor sentence; a failed `set` shows the CLI's last line and the not-ok rows of `remote status --json` |
+| 7. Add a Phone | — | **Add a Phone…** is offered only once the check passed: the wizard opens step 7's sheet; the pane's sheet closes and Devices' opens |
+
+**The switch confirms, naming the cost (C136).** Choosing a provider while
+another is in place puts a `CostConfirmation` in front of `--yes`: the
+preview's `stranding` sentence first (*phones added under <old origin> stop
+working once this changes…*), then what the old provider's revoke would undo
+and what is left for the owner at the provider — the CLI's words, never the
+app's. A first set-up from None runs on its button; the preview card was the
+informed half. The switching ceremony itself — configure, wait for the new
+origin to answer from this Mac, the protected write, revoke the old — is the
+CLI's (`docs/ops/remote-access.md`, "Switching"); the app drives and shows it.
+
+**The door is a closed grammar (invariant 10).** `ManagementRow.remoteAccess`
+(M20) does not accept "anything starting with `remote`":
+`RemoteAccessArgv.accepts` names the exact shapes — `remote status --json`,
+`remote test --json`, `remote off [--yes] --json`, `remote set <provider>
+[that provider's flags] [--yes] --json` — no wider than what the app runs:
+each flag at most once, each value from a known list or a bare name, nothing
+positional after the provider, `--json` always. `remote authorize` is not
+admitted (the flow does not run it; X-106's `configure` signs in), so
+doctor's *Sign in to Tailscale* action is shown in Services with Copy, like
+any argv outside the door. **A pasted token never reaches argv**:
+`RemoteSetPlan` writes it to the command's standard input with `--token` as
+the bare switch, and `--token <value>`, `--token=<value>` and a value after
+the provider's name are refused by the type. `tests/kit/remote-access-tests.swift`
+holds the whole flow to it: None preselected and Continue satisfies the step;
+Add a Phone is not offered before the check passes; the check is never worded
+as reaching the phone; a pasted token never reaches argv; Turn Off's confirm
+names what revoke undoes; each step's failure shows its doctor sentence; and
+every `remote` argv outside the grammar is refused.
+
+**Satisfying the wizard's step.** Continuing with None satisfies it — an
+install that exposes nothing is correct — as does a provider the flow set up
+here. A provider chosen but not set up leaves the step optional: Continue and
+Skip both stay open, as for the door and compute.
+
 ## Add a Phone
 
-Settings ▸ Devices ▸ **Add a Phone…**, and the wizard's step 6, open one sheet
+Settings ▸ Devices ▸ **Add a Phone…**, and the wizard's step 7, open one sheet
 (`sources/kit/add-phone-sheet.swift` over `add-phone-model.swift`; plan §2.22,
 X-77). It runs `metistry enroll --json` — M19, a `ManagementCommand` through
 the session's `ManagementRunner`, like every other management verb — because

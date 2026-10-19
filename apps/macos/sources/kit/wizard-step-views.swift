@@ -1,15 +1,18 @@
-// The two wizard steps that are not a `metistry` verb.
+// The three wizard steps that are not a `metistry` verb.
 //
 // Every other step is "here is the argument array, here is the CLI's output".
-// These two are not, so they get their own screens rather than being forced
+// These three are not, so they get their own screens rather than being forced
 // through a run row that would describe them wrongly:
 //
-//   6. Door    — this Mac's sign-in state first (it needs no ceremony at all),
+//   6. Remote Access — Set Up Remote Access (plan §2.23, X-107): the guided
+//                flow remote-access-flow.swift draws, the same one Settings ▸
+//                Remote Access ▸ Change… presents; None preselected, and its
+//                Add a Phone… is step 7's sheet.
+//   7. Door    — this Mac's sign-in state first (it needs no ceremony at all),
 //                then, for the devices that DO need one, Add a Phone… — the
 //                same sheet as Settings ▸ Devices (add-phone-sheet.swift),
 //                minting the code on this Mac with `metistry enroll` (X-77).
-//   7. Claude  — an interactive terminal login the app cannot drive, and a watch
-//                on whether the token's NAME became set.
+//   8. Compute — where the assistant's turns run (compute-step.swift).
 //
 // Both keep the app's promise in their own currency: the exact thing that will
 // happen, before it happens, and the system's own words when it refuses.
@@ -30,7 +33,45 @@
 
 import SwiftUI
 
-// MARK: - Step 6
+// MARK: - Step 6: Set Up Remote Access
+
+/// The guided flow in the wizard: the flow's view over the first-run model's
+/// `remoteAccess`, and step 7's Add a Phone sheet when the flow reaches it.
+public struct RemoteAccessStepView: View {
+    @Environment(\.colorScheme) private var scheme
+    private let steps: FirstRunModel
+
+    public init(steps: FirstRunModel) {
+        self.steps = steps
+    }
+
+    public var body: some View {
+        let p = Palette(scheme)
+        VStack(alignment: .leading, spacing: MetistrySpace.s4) {
+            RemoteAccessFlowView(model: steps.remoteAccess)
+            if let label = steps.phoneAdded {
+                HStack(spacing: MetistrySpace.s2) {
+                    StatusDot(.ok)
+                    Text(AddPhoneWords.added(label)).metistryText(.footnote, p, .ok)
+                }
+            }
+        }
+        // Step 7's sheet, presented here too: one way in, drawn once.
+        .sheet(isPresented: Binding(get: { steps.addPhone != nil }, set: { if !$0 { steps.closeAddPhone() } })) {
+            if let addPhone = steps.addPhone {
+                AddPhoneSheet(model: addPhone) { steps.closeAddPhone() }
+            }
+        }
+        .sheet(isPresented: Binding(get: { steps.remoteAccess.confirmation != nil }, set: { if !$0 { steps.remoteAccess.choose(.cancel) } })) {
+            if let confirmation = steps.remoteAccess.confirmation {
+                CostConfirmView(confirmation) { choice in steps.remoteAccess.choose(choice) }
+                    .frame(width: 480)
+            }
+        }
+    }
+}
+
+// MARK: - Step 7
 
 public struct PasskeyStepView: View {
     @Environment(\.colorScheme) private var scheme
@@ -248,7 +289,7 @@ public struct PasskeyDiagnosticView: View {
     }
 }
 
-// MARK: - Step 7
+// MARK: - Step 8
 
 /// Choosing where the assistant's turns run. Three cards and a way out: the
 /// provider, the model, and — where the provider needs one — a secure field

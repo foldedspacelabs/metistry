@@ -20,7 +20,7 @@ import Testing
 @Test func theSidebarIsScreen15sSectionsInItsFourGroups() {
     #expect(SettingsModel.SectionGroup.allCases.map { $0.sections.map(\.title) } == [
         ["Instance", "Services", "Compute", "Updates"],
-        ["Account", "Devices", "Connections", "Secrets", "Variables"],
+        ["Account", "Remote Access", "Devices", "Connections", "Secrets", "Variables"],
         ["Live Capture", "Sessions"],
         ["Keyboard", "Advanced"],
     ])
@@ -33,6 +33,10 @@ import Testing
     // the ACCESS group gains Devices (plan §2.22, X-77): the website's "Settings, then Devices" is the product's path
     #expect(SettingsModel.Section.devices.group == .access)
     #expect(SettingsModel.Section.devices.title == "Devices")
+    // and Remote Access, before Devices (plan §2.23, X-107; screen-15 §1)
+    #expect(SettingsModel.Section.remoteAccess.group == .access)
+    #expect(SettingsModel.Section.remoteAccess.title == "Remote Access")
+    #expect(SettingsModel.SectionGroup.access.sections.firstIndex(of: .remoteAccess)! + 1 == SettingsModel.SectionGroup.access.sections.firstIndex(of: .devices)!)
     // the window is fixed and set by its widest pane (§2)
     #expect(SettingsLayout.width == SettingsLayout.sidebar + SettingsLayout.pane)
     #expect((SettingsLayout.width, SettingsLayout.height) == (840, 600))

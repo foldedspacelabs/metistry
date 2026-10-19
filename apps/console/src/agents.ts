@@ -638,7 +638,13 @@ export async function createAgent(
     throw err;
   }
   if (rows.length !== 1) throw new AgentError("conflict", "agent id already registered");
-  return { id, token, pending: remote, revived: rows[0]!.inserted !== true };
+  const revived = rows[0]!.inserted !== true;
+  // A revived row holds nothing it had: `revokeAgent` cleared the areas the
+  // owner approved from the queue, and this clears them again rather than
+  // relying on that, so no path to a revoked row (a row that predates the
+  // clearing, a revoke made some other way) can hand them back.
+  if (revived) await clearGrantOverrides(db, id);
+  return { id, token, pending: remote, revived };
 }
 
 /**

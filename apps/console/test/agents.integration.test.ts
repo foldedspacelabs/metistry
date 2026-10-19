@@ -620,11 +620,14 @@ describe.skipIf(!hasDb)("agent registry (integration)", () => {
       expect(audit.rows).toEqual([{ ok: true, revived: null }, { ok: true, revived: "true" }]);
     });
 
-    it("an approved-from-the-queue area does not come back either (revocation cleared it)", async () => {
+    it("an approved-from-the-queue area does not come back either (the revival clears it, whatever the revoke did)", async () => {
       const id = `${rid}-ov`;
       await json("POST", "/api/agents", { id, display_name: "ov" });
       await pool.query(`INSERT INTO agent_grant_overrides (agent_id, area) VALUES ($1, 'Areas/Fsl')`, [id]);
       await json("POST", `/api/agents/${id}/revoke`);
+      // an override left on a revoked row (a row that predates the clearing): the revival itself must drop it
+      await pool.query(`INSERT INTO agent_grant_overrides (agent_id, area) VALUES ($1, 'Areas/Fsl') ON CONFLICT DO NOTHING`, [id]);
+      expect((await pool.query(`SELECT count(*)::int AS n FROM agent_grant_overrides WHERE agent_id = $1`, [id])).rows[0].n).toBe(1);
       const t = (await (await json("POST", "/api/agents", { id, display_name: "ov" })).json()).token;
       expect((await authed(t))?.grants).toEqual({ tier: "none", areas: [] });
       expect((await pool.query(`SELECT count(*)::int AS n FROM agent_grant_overrides WHERE agent_id = $1`, [id])).rows[0].n).toBe(0);

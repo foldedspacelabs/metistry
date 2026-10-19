@@ -3,9 +3,9 @@
   "name": "metistry",
   "displayName": "Metistry",
   "version": "0.1.0",
-  "description": "Capture decisions, findings and notes from a Claude Code session into a Metistry instance's inbox (POST /capture). Optional end-of-session summary hook, off by default.",
+  "description": "Starts each session with a Metistry briefing for the checkout (on by default, opt-out per agent), and captures decisions, findings and notes from a Claude Code session into a Metistry instance's inbox (POST /capture). Optional end-of-session summary hook, off by default.",
   "author": { "name": "Folded Space Labs", "url": "https://github.com/foldedspacelabs" },
   "repository": "https://github.com/foldedspacelabs/metistry",
   "license": "Apache-2.0",
-  "keywords": ["metistry", "capture", "knowledge", "second-brain"]
+  "keywords": ["metistry", "briefing", "capture", "knowledge", "second-brain"]
 }

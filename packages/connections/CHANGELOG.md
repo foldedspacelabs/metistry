@@ -1,5 +1,49 @@
 # @foldedspacelabs/metistry-connections
 
+## 0.17.0
+
+### Minor Changes
+
+- 9fce74e: `connections_call` folds a large answer (X-132; the Context Mode review's CM-6, allowed by the owner 2026-10-04). An upstream answer over `METISTRY_CONNECTION_FOLD_BYTES` (default 8 KiB on the wire) is folded once, after redaction, as a pure function of its text — a JSON array over `METISTRY_CONNECTION_FOLD_ARRAY_OVER` items (20) becomes its first `METISTRY_CONNECTION_FOLD_ARRAY_KEEP` (5), its last and the count; runs of a repeated line become the line and a count; anything still over the threshold gets a head and a tail — so the same answer folds to the same bytes every time. **The whole answer is kept** in the new `connection_answers` table (migration 0042: derived, ephemeral, self-purging after `METISTRY_CONNECTION_ANSWER_KEEP_HOURS`, default 24) under the call's own `runs` id, and read back one page at a time through the same tool — `connections_call { page: "<handle>/<n>" }`, no new tool — **by the principal that made the call and nobody else**: the read is `WHERE run_id = … AND principal = …`, so another caller with the handle hears the same `not_found` an unknown handle does. The `runs` row records `bytes_in`, `bytes_out`, `fold` and the handle. **The owner turns it off per connection**: `metistry connections policy <name> --fold off` writes `fold: false` beside Allow · Ask First · Never and the offer switch; `GET /api/connections` and `connections list --json` carry `fold` on every row.
+- 4065f91: X-87: every collector exports `check()`, and `metistry doctor` asks it. The ten
+  that had none (the Google, ICS, CalDAV and EventKit calendars, Linear, GitHub,
+  mail, AWS costs, Claude usage and the inbox sort) report cheap, local-first
+  state: configuration and credential presence, the connection they read opened
+  through the console's own opener, and — where the shared connection check dials
+  that kind of connection — its verdict, never a full sync and never a billed
+  call. Doctor loads each collector's compiled entry (a build or a release pack)
+  and lays the verdict over that collector's one row; a module that will not
+  load, or a `check()` that throws, hangs or answers something that is not the
+  `check()` shape, is a `failed` row and the rest of the report still runs. One
+  CI test holds the convention for every collector manifest, with no allowlist.
+  A connection check's refusal now carries its code as `meta.refused`.
+- 4c717ca: A connection's detail says who uses it and when it was last checked.
+  `GET /api/connections(/:name)` rows now list every user in `used_by` — the
+  agents and crews granted the connection beside its syncs, once it is offered
+  to agents — serve `last_checked` (the time and verdict of the newest check,
+  stamped by `metistry connections test` and `doctor` under the instance's
+  gitignored state directory) and, on an HTTP reach, `header_secrets` (each
+  header with the secret names it carries). Settings ▸ Connections draws all
+  three; `metistry connections show` prints the check and each header's secrets.
+
+### Patch Changes
+
+- 5ea6c00: `socketDestination` keeps its port (X-93). The `:443` collapse is an HTTPS convention, but the IMAP host guard and `describeConnection` shared it, so an IMAP server on 443 was spelled as the bare host and would have matched a secret's HTTPS *Sent only to* entry. A socket destination now always reads `host:port`; an HTTPS URL on 443 still collapses to the host.
+- Updated dependencies [4c27b53]
+- Updated dependencies [6719455]
+- Updated dependencies [5ea6c00]
+- Updated dependencies [13e1b31]
+- Updated dependencies [675e819]
+- Updated dependencies [0708790]
+- Updated dependencies [c90e651]
+- Updated dependencies [2ceeed4]
+- Updated dependencies [9fce74e]
+- Updated dependencies [82bf3ad]
+- Updated dependencies [c0685d8]
+- Updated dependencies [76a8024]
+- Updated dependencies [c2f9f88]
+  - @foldedspacelabs/metistry-core@0.17.0
+
 ## 0.16.1
 
 ### Patch Changes

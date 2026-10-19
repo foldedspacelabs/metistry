@@ -1,5 +1,67 @@
 # @metistry-apps/collectors
 
+## 0.17.0
+
+### Minor Changes
+
+- e576dba: Removed: the one-release compatibility shim for GitHub Issues and Devin dispatch
+  (T4-11), now that 0.16.0 has shipped. **Before updating, re-create both targets
+  as connections** — nothing carries over on its own. `METISTRY_GITHUB_TOKEN` and
+  `METISTRY_DEVIN_API_KEY` in the environment are no longer read (an env key alone
+  dispatches nothing and feeds no sync), and a `targets/` manifest other than the
+  crews' `local-crew` is refused at load: the product no longer ships
+  `targets/github-issues` or `targets/devin-sessions`, and an owner's
+  `.metistry/targets/` overlay or extension of one is skipped the same way. For a
+  key that lived only in `.env`, store it first: `metistry secrets set devin_api_key`
+  (or `github_write_token`) on stdin; for one the retired shared scope still holds,
+  `metistry secrets migrate-scope` copies `METISTRY_DEVIN_API_KEY` to `devin_api_key`.
+  Then `metistry secrets hosts …`, `metistry secrets grant … connection:<name> on`,
+  and `metistry connections add <name> --type agent --provider devin|github-issues
+  … --config org=org-…|repo=owner/repo` (docs/ops/connections.md, *Agent
+  connections*), `metistry secrets sync --to env`, and drop the old `.env` lines.
+  `metistry doctor` has a new *target keys* row naming a key still set, and its
+  *registries* row lists a refused `targets/` manifest, each with the verb; the
+  console logs the same at start. `METISTRY_GITHUB_TOKEN` still serves `metistry
+  update`'s Releases API calls.
+- 4065f91: X-87: every collector exports `check()`, and `metistry doctor` asks it. The ten
+  that had none (the Google, ICS, CalDAV and EventKit calendars, Linear, GitHub,
+  mail, AWS costs, Claude usage and the inbox sort) report cheap, local-first
+  state: configuration and credential presence, the connection they read opened
+  through the console's own opener, and — where the shared connection check dials
+  that kind of connection — its verdict, never a full sync and never a billed
+  call. Doctor loads each collector's compiled entry (a build or a release pack)
+  and lays the verdict over that collector's one row; a module that will not
+  load, or a `check()` that throws, hangs or answers something that is not the
+  `check()` shape, is a `failed` row and the rest of the report still runs. One
+  CI test holds the convention for every collector manifest, with no allowlist.
+  A connection check's refusal now carries its code as `meta.refused`.
+
+### Patch Changes
+
+- a8c6e2b: X-26: the Linear sync's read of the rows that left the owner's list is ordered by
+  `external_ref`, so the ids it looks up in Linear and the order it closes rows and
+  writes receipts no longer depend on Postgres's physical row order (the root cause
+  of the `linear.integration` "closed or given to someone else" flake).
+- Updated dependencies [ce560ef]
+- Updated dependencies [4c27b53]
+- Updated dependencies [6719455]
+- Updated dependencies [5ea6c00]
+- Updated dependencies [13e1b31]
+- Updated dependencies [675e819]
+- Updated dependencies [0708790]
+- Updated dependencies [c90e651]
+- Updated dependencies [2ceeed4]
+- Updated dependencies [9fce74e]
+- Updated dependencies [82bf3ad]
+- Updated dependencies [c0685d8]
+- Updated dependencies [76a8024]
+- Updated dependencies [4065f91]
+- Updated dependencies [c2f9f88]
+- Updated dependencies [4c717ca]
+  - @foldedspacelabs/metistry-mcp-brain@0.17.0
+  - @foldedspacelabs/metistry-core@0.17.0
+  - @foldedspacelabs/metistry-connections@0.17.0
+
 ## 0.16.1
 
 ### Patch Changes

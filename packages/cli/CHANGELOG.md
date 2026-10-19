@@ -1,5 +1,255 @@
 # @foldedspacelabs/metistry-cli
 
+## 0.17.0
+
+### Minor Changes
+
+- c939006: `metistry doctor` repairs what it finds (X-123). Every row is classified in
+  code — `fixable` (doctor does it), `hand` (the owner does it; the row names
+  the exact step) or `info` (a fact) — and a bare `doctor` in a terminal applies
+  every fixable row's fix from a closed table of existing audited services
+  (`metistry restart`, the migration runner under the advisory lock, `up`'s
+  render, `update`'s template, vault-case and migrate-scope steps, the cli shim,
+  `migrate-layout`, `migrate-inbox`), asks once per fix that moves files or
+  restarts a running service (`--yes` skips the question; never the default),
+  re-checks once and prints before → after. `--check` is read-only (what `up`,
+  `update`, CI and the Mac app run; `update`'s child doctor passes it
+  explicitly), `--fix` repairs without a terminal, and a bare `doctor` with
+  nobody to ask is `--check`. A restart-class fix is tried once per
+  `METISTRY_DOCTOR_RESTART_WINDOW_MIN` (30) — the fix log,
+  `<instance>/.metistry/state/doctor-fixes.jsonl` (0600; names, never a value),
+  is the evidence. `--json` adds `mode`, per-row `fix` and `fixed`, `repair` on
+  a fixable row, and `fixes[]`. The migrations row no longer says `pnpm
+  db:migrate` (a release install has none): doctor applies them. The
+  local-model default-port scan (LM Studio 1234, Ollama 11434) is skipped once
+  `compute.yaml` names the instance's own on-machine provider; `compute models
+  list` still asks for it. The console-401 button is now the restart the row's
+  own words name, not `secrets sync --to env`.
+- e7035f0: HS-7: `metistry connect --remove <tool>` undoes what `connect` wrote, and a
+  revoked tool can be connected again. `--remove` revokes the tool's row first
+  (if the console is down nothing else is touched), puts its config file back
+  exactly as `connect` found it — `connect` now keeps a copy beside the file the
+  first time it writes (`<file>.<key>.bak`, same mode), and removal writes those
+  bytes back, or removes only its own entry if the file has changed since, or
+  deletes a file it created — then deletes the Keychain item. Other servers in
+  the file are never touched, and running it twice is safe. `POST /api/agents`
+  now registers a revoked `external` row again in place (same id and
+  provenance, a new token, grants, projects and autonomy back at default-deny);
+  a live row, or a revoked internal or crew row, is still a 409. `connect
+  <tool>` on a revoked row uses it instead of refusing.
+- 13e1b31: X-103: the console's proxy listener — the local owner token never crosses a tunnel (plan §2.23). Every remote-access provider's agent (`tailscaled`, `cloudflared`, zrok, ngrok, a TLS terminator) connects to the console from `127.0.0.1`, so a request that crossed a tunnel arrived with a loopback peer and the loopback-only `METISTRY_LOCAL_OWNER_TOKEN` was honoured for it — `local` routes and all. The console now answers in two places: the main listener, unchanged, and a **proxy listener** for providers only — a 0600 Unix socket at `<instance>/.metistry/state/console-proxy.sock` and a loopback TCP port `METISTRY_CONSOLE_PROXY_PORT` (default the console port + 1). A request on either is remote by construction: `checkLocalOwner` refuses the token from every peer there and the refusal is audited with the listener; no `local` route answers (`403 local_only`); a `Host` that is not a remote host `METISTRY_ORIGIN` names is refused with core's new `421 misdirected`, before anything else. `docker-compose.yml` publishes the port on `127.0.0.1` only; `metistry up` renders `METISTRY_CONSOLE_PROXY_PORT` into the console's environment, and a namespaced instance takes its block's second-to-last slot for it (the console port + 1 there is Postgres). `docs/ops/auth.md`'s "cannot be replayed from off the machine" is corrected and the listener documented.
+- 675e819: X-105: `metistry remote` — how the owner's phone reaches this Mac (plan §2.23, M20): the record, the adapter interface, and None. `deployment.yaml` gains a `remote:` block — `provider` (none | tailscale | relay | cloudflare | zrok | ngrok | port-forward), `mode`, the `origin` it yields and non-secret `settings` — strict in core's schema, the instance's block winning whole over the seed's, never a credential. `metistry remote [status] | set | authorize | test | off` with `--json`, `--dry-run`, `--instance`: `set` previews without `--yes`; with it, the new provider is configured first, its origin must answer from this Mac, the record is written through the protected write, and only then is the old provider revoked — a failed configure writes nothing, an origin that never answers writes and revokes nothing. A token is read on stdin or hidden at a prompt (the `secrets set` reader, now `stdin-value.ts`); a value in argv is refused and not echoed. `metistry up` derives `METISTRY_ORIGIN` from the record — the remote origin first, the loopback origin second; with None, loopback only — and drops a hand-written remote origin, saying so. The `RemoteProvider` interface (`detect`, `configure`, `status`, `revoke`, optional `authorize`) and its registry live in `packages/cli/src/remote/`; this release ships **None**, whose doctor row is `ok`. Doctor's `remote` kind gives every provider *tool present*, *proxy listener* — **`failed` when the recorded upstream is the console's main port** — and *answers from this Mac*. `docs/ops/remote-access.md` is new.
+- 36017f3: The Tailscale adapter (plan §2.23, X-106) — Funnel by default, tailnet as the
+  alternative. `metistry remote set tailscale` brings a node onto the owner's
+  tailnet, signs it in through Tailscale's own login page (completion read from
+  `BackendState`, never a credential), surfaces each one-click approval page
+  (HTTPS, Funnel) as the flow's one step, runs `tailscale funnel` (or `serve`)
+  to the console's PROXY listener — never the main port — and waits for the
+  public name, then for the origin to answer from this Mac, before the record is
+  written. The node is the owner's running Tailscale app when there is one, else
+  X-112's bundled unprivileged `tailscaled` (userspace networking, state 0700
+  under the instance, its own launchd job, named `metistry-<instance>`), behind
+  one switch (`--use-app` / `--bundled`). Funnel refuses to configure unless
+  the proxy listener answers with X-111's hardening headers. Doctor gains the
+  Tailscale rows (node, signed in, state dir, HTTPS, Funnel, the live handler —
+  `failed` at the main port — public name, key expiry); revoke resets the
+  handler, logs the bundled node out, stops it and removes its state, and names
+  the admin-console entry left for the owner. `launchd.ts` gains
+  `renderAgentPlist`; the upstream classifier moves to `remote/upstream.ts`.
+- 8eb7adb: X-107: Set Up Remote Access — the guided flow, the wizard step and Settings ▸
+  Remote Access (plan §2.23). The Mac app gains a **Remote Access** step between
+  Services and Door and a **Remote Access** pane in ACCESS before Devices, both
+  one flow over `metistry remote` (M20): choose (None preselected, Tailscale —
+  Any browser marked Recommended, unshipped providers listed as *Not yet
+  available*), then the CLI's own ceremony — the pack, the provider's sign-in
+  page in the browser, each approval page, the handler, the public name, the
+  wait for the origin to answer, the protected write, the old provider's revoke
+  — shown step by step from the lines the CLI prints, with every link it printed
+  offered to open again; then **Check** (`remote test`, said as *answers from
+  this Mac*, never as reaching the phone) and only then **Add a Phone…**. The
+  pane adds **Test** and **Turn Off**, whose confirm names what the provider's
+  revoke undoes, what is left for the owner at the provider, and which phones
+  stop signing in — in the CLI's own preview words. A switch away from a
+  provider confirms the same way before `--yes`. The management runner's M20 row
+  is a closed grammar of exact argv shapes, never a prefix: a pasted token is
+  the command's stdin and refused in every argv spelling. Devices marks a
+  passkey whose host is no longer a configured origin. The CLI: with `--json`,
+  `remote set`'s step notes and the preview line go to stderr so stdout is the
+  one document, and the preview carries `revoked` (what the old provider's
+  revoke would undo) and `stranding` (the sentence about the phones a switch
+  strands).
+- 44573fd: Provider tool packs (plan §2.23, X-112). The tools a remote-access provider
+  needs — Tailscale's `tailscaled` + `tailscale` built from a pinned upstream
+  tag, the official `cloudflared` binary, the zrok CLI — are each built as their
+  own release asset by `ops/release/build-remote-packs.sh`: pinned by version
+  and sha256 in `runtime-versions.env`, cross-checked against what upstream
+  publishes, the licence shipped beside the binary, every Mach-O signed with
+  the runtime pack's rule (now one shared function in `pack-lib.sh`) and
+  checked for the release identity after signing. `metistry remote set
+  <provider>` fetches only its provider's pack, through the same verify-then-
+  unpack path as the runtime packs plus the pack's own manifest, into
+  `<product>/runtime/remote/<tool>/` — a checksum mismatch or a tampered pack
+  fails `set`, writes nothing and leaves `runtime/remote/` byte-for-byte as it
+  was; an older release is never swapped in over a newer pack. `metistry
+  update` moves forward every pack already there and fetches none the owner
+  never chose; a deps-pack unpack and a seed copy carry `runtime/remote/`
+  across; `METISTRY_RUNTIME_DEPS=0` keeps it off the network and the adapter
+  names the manual install. Nothing goes in the DMG. The adapter-facing API
+  (`findRemotePack`, `ensureRemotePack`, `MANUAL_INSTALL`) is in
+  `packages/cli/src/remote/packs.ts` for X-106, X-108 and X-113.
+- 0708790: Add a Phone sees the phone arrive (design-build-plan §2.23 step 7, X-114). Migration `0040` gives `auth_enrollment_codes` `opened_at` and `opened_via`: `POST /auth/enroll/start` with a live code now stamps which console listener answered it — `proxy` (the one a provider is pointed at, so the request came from outside) or `main` (loopback) — audited once as `auth` · `enroll_opened`. A `proxy` stamp replaces a `main` one and nothing replaces `proxy`; stamping never spends the code, and an unknown, used, expired or cancelled code stamps nothing. `metistry enroll --status <code_id> [--json]` reads it back (read-only; the id, never the code). The Mac's Add a Phone sheet polls it and turns to *Opened on your phone* — "Your phone reached this Mac through <provider>" — between *Ready* and *Added* for `proxy` only, and an expiry without it says the phone did not reach the origin and what to try on the phone. The poll is bounded: it runs only while the event stream is down and stops when the sheet closes; and the sheet now cancels a live code when its window is closed from under it, not only when Done is pressed.
+- 97c741a: X-129: the plugins deliver the session-start briefing, on by default. The
+  Claude Code plugin gains a `SessionStart` hook (`startup` and `clear`) that
+  asks `GET /api/briefing` once per session with the agent bearer and injects the
+  text as context; the OpenCode plugin does the same through
+  `experimental.chat.system.transform`, asking once per session and adding the
+  same text to every turn. Any failure injects nothing and never blocks the
+  session; an opted-out agent is answered the empty briefing by the console, so
+  nothing is injected; the bearer is only ever in the header. `metistry connect
+  <tool> --briefing on|off` sets and clears the per-agent opt-out (kept in the
+  agent's grants), `connect` and `connect --list` say what delivers it per
+  harness (a `briefing` field on each registry entry; Cursor and Devin do not
+  deliver it yet), and a grants write now carries the whole envelope, so
+  `--areas` no longer drops an opt-out, `queries` or `connections`.
+- 9fce74e: `connections_call` folds a large answer (X-132; the Context Mode review's CM-6, allowed by the owner 2026-10-04). An upstream answer over `METISTRY_CONNECTION_FOLD_BYTES` (default 8 KiB on the wire) is folded once, after redaction, as a pure function of its text — a JSON array over `METISTRY_CONNECTION_FOLD_ARRAY_OVER` items (20) becomes its first `METISTRY_CONNECTION_FOLD_ARRAY_KEEP` (5), its last and the count; runs of a repeated line become the line and a count; anything still over the threshold gets a head and a tail — so the same answer folds to the same bytes every time. **The whole answer is kept** in the new `connection_answers` table (migration 0042: derived, ephemeral, self-purging after `METISTRY_CONNECTION_ANSWER_KEEP_HOURS`, default 24) under the call's own `runs` id, and read back one page at a time through the same tool — `connections_call { page: "<handle>/<n>" }`, no new tool — **by the principal that made the call and nobody else**: the read is `WHERE run_id = … AND principal = …`, so another caller with the handle hears the same `not_found` an unknown handle does. The `runs` row records `bytes_in`, `bytes_out`, `fold` and the handle. **The owner turns it off per connection**: `metistry connections policy <name> --fold off` writes `fold: false` beside Allow · Ask First · Never and the offer switch; `GET /api/connections` and `connections list --json` carry `fold` on every row.
+- 3e2bc8b: X-133: `metistry connect claude-code` reads as well as writes. Besides the
+  plugin's capture variables it now registers the console's `/mcp` with Claude
+  Code at user scope (`claude mcp add --scope user`), the Authorization header
+  being `Bearer ${METISTRY_AGENT_TOKEN_CLAUDE_CODE}` — Claude Code expands the
+  variable, so the bearer never reaches a file or `ps`. Claude Code owns its
+  config file, so `connect` asks the tool rather than rewriting it; without
+  `claude` on the PATH it prints the add line instead. `connect --list` shows
+  both halves and `connect --remove claude-code` removes the entry (only if it
+  is the one `connect` wrote). Each tool is now one entry in a harness registry
+  (`HARNESSES`) that `connect`, `--list` and `--remove` are written against, and
+  every entry passes the same conformance test.
+- 82bf3ad: `metistry enroll` — add a phone (plan §2.22, M19). Mints a one-time,
+  ten-minute passkey enrolment code on this Mac and prints
+  `<first METISTRY_ORIGIN entry>/#enroll=<code>`; `--json` writes exactly one
+  document `{url, code_id, origin, expires_at}`; `--cancel <code_id>` expires
+  an unused code at once. It refuses BEFORE minting — and writes no row — when
+  the phone cannot complete the ceremony against that origin: a loopback host
+  (every install's default), `http:`, an IP literal, or an origin this Mac
+  cannot reach within 5 s or that names another instance; each refusal in its
+  own words, naming `METISTRY_ORIGIN` and the fix. No HTTP route mints a code
+  (a test holds the route table to it). Core gains `enrollment-codes.ts`
+  (mint / peek / consume / cancel) and `owner-tokens.ts` (mint / check /
+  register) so the console, the CLI and `enroll.mjs` run one implementation;
+  the console's `mintEnrollmentCode` now returns `{code, code_id, expires_at}`.
+- c210a2f: `metistry up` makes the recorder's three tokens (X-80). With
+  `METISTRY_LIVE_CAPTURE_URL` set, `up` — and bare `metistry secrets mint` —
+  make `METISTRY_LIVE_CAPTURE_CONTROL_TOKEN` (the login Keychain item the Mac
+  app's bar reads, filed under the instance's id), `METISTRY_BRIDGE_TOKEN_LIVE_CAPTURE`
+  and `METISTRY_LIVE_CAPTURE_INBOX_TOKEN` (a capture owner token labelled
+  `live-capture`, recorded in the console's `owner_tokens` by hash) wherever none
+  exists, before the jobs are rendered so the bridge is started with them. A
+  value any store already holds is kept — a Keychain item stands, an owner-pasted
+  `.env` value is adopted into the Keychain — and a rerun changes nothing; a
+  database that is down or not yet migrated leaves the inbox token minted and the
+  next `up` records it. All three join `GENERATED_SECRETS` (minted by
+  `secrets sync --to env` too, but only while the recorder is configured). The
+  bridge's `check()` and delivery messages now point at `metistry up` /
+  `metistry secrets mint` instead of telling the owner to set the token by hand.
+- e576dba: Removed: the one-release compatibility shim for GitHub Issues and Devin dispatch
+  (T4-11), now that 0.16.0 has shipped. **Before updating, re-create both targets
+  as connections** — nothing carries over on its own. `METISTRY_GITHUB_TOKEN` and
+  `METISTRY_DEVIN_API_KEY` in the environment are no longer read (an env key alone
+  dispatches nothing and feeds no sync), and a `targets/` manifest other than the
+  crews' `local-crew` is refused at load: the product no longer ships
+  `targets/github-issues` or `targets/devin-sessions`, and an owner's
+  `.metistry/targets/` overlay or extension of one is skipped the same way. For a
+  key that lived only in `.env`, store it first: `metistry secrets set devin_api_key`
+  (or `github_write_token`) on stdin; for one the retired shared scope still holds,
+  `metistry secrets migrate-scope` copies `METISTRY_DEVIN_API_KEY` to `devin_api_key`.
+  Then `metistry secrets hosts …`, `metistry secrets grant … connection:<name> on`,
+  and `metistry connections add <name> --type agent --provider devin|github-issues
+  … --config org=org-…|repo=owner/repo` (docs/ops/connections.md, *Agent
+  connections*), `metistry secrets sync --to env`, and drop the old `.env` lines.
+  `metistry doctor` has a new *target keys* row naming a key still set, and its
+  *registries* row lists a refused `targets/` manifest, each with the verb; the
+  console logs the same at start. `METISTRY_GITHUB_TOKEN` still serves `metistry
+  update`'s Releases API calls.
+- 4065f91: X-87: every collector exports `check()`, and `metistry doctor` asks it. The ten
+  that had none (the Google, ICS, CalDAV and EventKit calendars, Linear, GitHub,
+  mail, AWS costs, Claude usage and the inbox sort) report cheap, local-first
+  state: configuration and credential presence, the connection they read opened
+  through the console's own opener, and — where the shared connection check dials
+  that kind of connection — its verdict, never a full sync and never a billed
+  call. Doctor loads each collector's compiled entry (a build or a release pack)
+  and lays the verdict over that collector's one row; a module that will not
+  load, or a `check()` that throws, hangs or answers something that is not the
+  `check()` shape, is a `failed` row and the rest of the report still runs. One
+  CI test holds the convention for every collector manifest, with no allowlist.
+  A connection check's refusal now carries its code as `meta.refused`.
+- 4c717ca: A connection's detail says who uses it and when it was last checked.
+  `GET /api/connections(/:name)` rows now list every user in `used_by` — the
+  agents and crews granted the connection beside its syncs, once it is offered
+  to agents — serve `last_checked` (the time and verdict of the newest check,
+  stamped by `metistry connections test` and `doctor` under the instance's
+  gitignored state directory) and, on an HTTP reach, `header_secrets` (each
+  header with the secret names it carries). Settings ▸ Connections draws all
+  three; `metistry connections show` prints the check and each header's secrets.
+
+### Patch Changes
+
+- 77dc0ae: Fix: a bare `metistry doctor` (no `--product-dir`, no `METISTRY_PRODUCT_DIR`)
+  from an installed CLI resolves the release install it runs from — the product
+  dir holding `releases/` and `current` — instead of a development checkout
+  beside it or around it. Doctor reads that release's `current` and says so:
+  the table's first line names `release <version> (read from <dir>)`, and
+  `doctor --json` carries a `product` object (`kind`, `version`, `install_dir`,
+  `read_dir`). A checkout is labelled `checkout`.
+- 6719455: Fix: doctor's `sandbox` row reports what the supervisor actually spawned,
+  not what `supervisor.json` says. The supervisor's `status` now carries an
+  optional `spawned: {argv, profile}` per child (additive; an older supervisor
+  omits it), and the row reads that. A confined child can no longer be called
+  unconfined because the file was re-rendered beside it, and a supervisor that
+  does not answer, predates the field, or has not spawned the child reads
+  "could not confirm" rather than either answer. The running process's own argv
+  cannot be used: `sandbox-exec` execs into its target, so it never names the
+  profile.
+- 7f4f648: Fix: `metistry doctor` no longer fails a healthy install for racing a job it
+  has just started (X-122). A bridge, the console or the brain whose probe fails
+  while its job (for the recorder, its helper) started less than 30 seconds ago
+  is probed again every second until it answers, and fails only once that grace
+  is spent; a schedule row that is overdue while the console's runner has not yet
+  had its first tick reads *pending* instead of *failed*. The grace is
+  `METISTRY_DOCTOR_START_GRACE_SEC` (and the console's `METISTRY_RUNNER_TICK_MS`
+  for the schedule rows); a job that was not just started, or whose age nothing
+  can tell, is still reported failed at once. `up` and `update` tell their
+  closing doctor which jobs they have just bootstrapped or kickstarted, and
+  `update` hands the same to its child doctor in `METISTRY_DOCTOR_STARTED`.
+- 1ebfdda: X-1: the document sweep. The CLI README's `doctor` section now names `--check`,
+  `--fix` and the repair markers, and the two usage examples that spelled an
+  origin use a neutral host (`https://assistant.example.com`) instead of the
+  assistant's name. No behaviour changes.
+- fdbcd6b: X-127: every terminal read in the CLI behaves like `secrets set`. `connect-repo --auth token` no longer tells the owner a token is "never echoed" while the terminal echoes it: in a terminal it prompts on stderr and reads one hidden line (`stdin-value.ts`'s `readHiddenLine`); piped, it is read to EOF as before. `console call --body -` and `agents define --prompt-file -` — a body and a prompt are neither secret nor one line — now say on stderr, never stdout, that the input ends with Ctrl-D, and keep the echo; piped stdin is unchanged. `compute providers add`'s stale "then Ctrl-D" line now says what happens (pipe the key, or paste it at the hidden prompt). `readStdin` moves to `stdin-value.ts` (still exported from the package), and a `Terminal` seam lets a test hand in a fake one.
+- c3c84c3: X-134: `metistry connect --remove <tool>` takes away exactly the entry
+  `connect` wrote, for every tool in the harness registry. An entry under
+  `connect`'s own key whose Authorization header is not the one `connect` writes
+  (a hand-made server that happens to be called `metistry`, with its own bearer)
+  is left alone and reported as a `PROBLEM` line for Cursor and OpenCode too —
+  Claude Code's entry already refused that way. The row is still revoked and the
+  Keychain item still goes; the foreign header is never echoed.
+- f9c5a91: `metistry enroll`'s refusals end by pointing at `docs/ops/phone.md` (the phone guide) instead of `docs/ops/auth.md`.
+- Updated dependencies [4c27b53]
+- Updated dependencies [6719455]
+- Updated dependencies [5ea6c00]
+- Updated dependencies [13e1b31]
+- Updated dependencies [675e819]
+- Updated dependencies [0708790]
+- Updated dependencies [c90e651]
+- Updated dependencies [2ceeed4]
+- Updated dependencies [9fce74e]
+- Updated dependencies [82bf3ad]
+- Updated dependencies [c0685d8]
+- Updated dependencies [76a8024]
+- Updated dependencies [4065f91]
+- Updated dependencies [c2f9f88]
+- Updated dependencies [4c717ca]
+  - @foldedspacelabs/metistry-core@0.17.0
+  - @foldedspacelabs/metistry-connections@0.17.0
+
 ## 0.16.1
 
 ### Patch Changes

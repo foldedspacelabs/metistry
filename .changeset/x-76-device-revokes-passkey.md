@@ -1,6 +1,0 @@
----
-"@metistry-apps/console": minor
-"@foldedspacelabs/metistry-core": patch
----
-
-Removing a device revokes its passkey (X-76, design-build-plan §2.22). **A device is a passkey, with its sessions under it**: `GET /api/devices` serves one row per enrolled passkey — label, when it was added, when it was last seen, `this_device` on the caller's own row, and its sessions (each saying whether it holds a push subscription) — with the session-row fields the body carried before kept on the row. **Remove** (`POST /api/devices/:id/revoke`, named by any of the device's session ids, with `{}` or no body) now revokes the **passkey** (`passkeys.revoked_at`, migration 0038) and every session under it, dropping their push subscriptions, so a lost phone never signs in again; a revoked passkey's login is refused with the same uniform 401 as an unknown credential's, and a session whose passkey is revoked is refused whatever its own row says. **Sign Out Everywhere keeps its meaning** — sessions only, passkeys kept — as the same door with `{"scope": "sessions"}`; the PWA's Settings posts that once per signed-in device, this one last, and its Remove confirms naming the device. Both land in `runs` (`auth`, `revoke`) with the scope on the record. The core route table's two summaries say so.

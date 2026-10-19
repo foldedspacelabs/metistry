@@ -1,5 +1,43 @@
 # @metistry-apps/eval
 
+## 0.17.0
+
+### Minor Changes
+
+- 34dfe5c: T9-3b (X-121): `metistry-eval generate-complexity`, a fixture generator for
+  the router's confirmatory eval (docs/ops/dynamic-router.md §7.2, "Generating
+  fixtures"). Two non-Claude models from two families — a writer and a blind
+  relabeller — are called through an OpenAI-compatible endpoint configured from
+  the environment; a Claude id or a one-family pair is refused, and every prompt
+  is checked against a frozen list of the rubric's phrases and the live planner
+  wording before it is sent. Agreement keeps the label; an adjacent
+  disagreement keeps the writer's with the relabeller's as `accept`; opposite
+  ones and every D08-class item go to `adjudicate.jsonl` for the owner, capped,
+  the overflow dropped and counted. The stats report gives the counts, the
+  agreement, |r| and the recording's sha256. Every row is `source: generated`,
+  and `metistry-eval complexity` now reads `complexity.jsonl` and
+  `complexity.generated.jsonl` under `--instance` and holds the two sets to the
+  bar separately, never blended.
+
+### Patch Changes
+
+- Updated dependencies [ce560ef]
+- Updated dependencies [4c27b53]
+- Updated dependencies [6719455]
+- Updated dependencies [5ea6c00]
+- Updated dependencies [13e1b31]
+- Updated dependencies [675e819]
+- Updated dependencies [0708790]
+- Updated dependencies [c90e651]
+- Updated dependencies [2ceeed4]
+- Updated dependencies [9fce74e]
+- Updated dependencies [82bf3ad]
+- Updated dependencies [c0685d8]
+- Updated dependencies [76a8024]
+- Updated dependencies [c2f9f88]
+  - @foldedspacelabs/metistry-mcp-brain@0.17.0
+  - @foldedspacelabs/metistry-core@0.17.0
+
 ## 0.16.1
 
 ### Patch Changes

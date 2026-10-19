@@ -1,5 +1,33 @@
 # @metistry-apps/watchdog
 
+## 0.17.0
+
+### Patch Changes
+
+- 6719455: Fix: doctor's `sandbox` row reports what the supervisor actually spawned,
+  not what `supervisor.json` says. The supervisor's `status` now carries an
+  optional `spawned: {argv, profile}` per child (additive; an older supervisor
+  omits it), and the row reads that. A confined child can no longer be called
+  unconfined because the file was re-rendered beside it, and a supervisor that
+  does not answer, predates the field, or has not spawned the child reads
+  "could not confirm" rather than either answer. The running process's own argv
+  cannot be used: `sandbox-exec` execs into its target, so it never names the
+  profile.
+- Updated dependencies [4c27b53]
+- Updated dependencies [6719455]
+- Updated dependencies [5ea6c00]
+- Updated dependencies [13e1b31]
+- Updated dependencies [675e819]
+- Updated dependencies [0708790]
+- Updated dependencies [c90e651]
+- Updated dependencies [2ceeed4]
+- Updated dependencies [9fce74e]
+- Updated dependencies [82bf3ad]
+- Updated dependencies [c0685d8]
+- Updated dependencies [76a8024]
+- Updated dependencies [c2f9f88]
+  - @foldedspacelabs/metistry-core@0.17.0
+
 ## 0.16.1
 
 ### Patch Changes

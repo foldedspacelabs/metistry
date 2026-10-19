@@ -1,5 +1,42 @@
 # @metistry-apps/reconciler
 
+## 0.17.0
+
+### Minor Changes
+
+- 4c27b53: A repository maps to a project page, and the last sessions in it come back
+  as handles (research 2026-10-04 context-mode review, CM-3 and CM-4; ruled
+  2026-10-04). `Projects/<Name>.md` takes a `repos:` frontmatter — one git
+  remote or a list, in any clone spelling — which the reconciler reduces to one
+  canonical `host/path` (core's new `normalizeRepoRemote`, the Context Mode
+  Engine's shape) and indexes into the derived `project_repos` table, only from
+  a page the owner wrote. The named query `project_for_repo {remote}` answers
+  with the one page that claims a remote, or nothing when none or two do; no
+  route was added. The reconciler also reads every captured `kind: session`
+  note under `Inbox/` into the derived `vault_sessions` table (core's new
+  `parseSessionNote`: date, tool, repo, branch, turns, files, the owner's first
+  prompt clipped — never the agent's `## Last response`, which has no column),
+  and `recent_sessions {repo, days}` serves a repository's sessions back once
+  the knowledge fold has read them, never one an agent credential captured.
+  Migration `0043_project_repos_and_sessions.sql`, additive and derived in full.
+
+### Patch Changes
+
+- Updated dependencies [4c27b53]
+- Updated dependencies [6719455]
+- Updated dependencies [5ea6c00]
+- Updated dependencies [13e1b31]
+- Updated dependencies [675e819]
+- Updated dependencies [0708790]
+- Updated dependencies [c90e651]
+- Updated dependencies [2ceeed4]
+- Updated dependencies [9fce74e]
+- Updated dependencies [82bf3ad]
+- Updated dependencies [c0685d8]
+- Updated dependencies [76a8024]
+- Updated dependencies [c2f9f88]
+  - @foldedspacelabs/metistry-core@0.17.0
+
 ## 0.16.1
 
 ### Patch Changes

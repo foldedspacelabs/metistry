@@ -1,5 +1,0 @@
----
-"@metistry-apps/console": minor
----
-
-Passkeys per origin — the rpID follows the request (X-104, design-build-plan §2.23). The passkey ceremonies used to take their rpID from the first `METISTRY_ORIGIN` entry, so a second configured origin on another host could never finish one. Now `POST /auth/enroll/start` and `POST /auth/login/start` issue the host of the configured origin the request came from (its `Origin` header, matched exactly; a client that sends none is issued the canonical origin's host, as before), an origin outside the list is refused there with a reason naming both sides, verification takes the whole list as `expectedOrigin` and `expectedRPID`, and migration `0039` adds `passkeys.rp_id` — the host each passkey was created for, null reading as the first origin's host for every passkey from before it. Sign-in holds a passkey to its own host: one created at the second origin signs in there and is refused at the first, naming both sides. `GET /api/devices` serves each passkey's `rp_id` (additive).

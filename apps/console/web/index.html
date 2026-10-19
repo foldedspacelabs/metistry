@@ -108,8 +108,10 @@
       <button type="button" data-view="artifacts">Artifacts</button>
     </div>
     <!-- The wall (screen 18 §0, §7.4): sign in with a passkey, or — opened from
-         a one-time link (#enroll=) — name this device and enrol it. Every
-         refusal is the line under the buttons, never a browser alert. -->
+         a one-time link (#enroll=, which app.js takes out of the URL once read;
+         §2.22) — name this device and enrol it. The installed app opens here
+         to sign in with that passkey, never to enrol. Every refusal is the line
+         under the buttons, never a browser alert. -->
     <section id="auth" hidden>
       <h2 id="auth-msg">Sign In</h2>
       <div id="enroll-form" class="field" hidden>
@@ -414,13 +416,16 @@
     </section>
 
     <!-- Install on iPhone (screen 18 §6): Safari has no install prompt, and
-         push needs the installed app, so the sheet says the three steps. -->
+         push needs the installed app, so the sheet says the three steps. It
+         follows the enrolment wall by itself in Safari (§2.22, X-78), and its
+         last line says when notifications are asked — in context, never during
+         setup — so the question later is no surprise. -->
     <section id="install" hidden>
       <p>Safari has no install button, and notifications need the app on your Home Screen.</p>
       <ol class="install-steps">
         <li>Tap <b>Share</b> <svg class="glyph" role="img" aria-label="(the square with an arrow)" focusable="false"><use href="#g-share"/></svg> in Safari's toolbar.</li>
         <li>Choose <b>Add to Home Screen</b>, then <b>Add</b>.</li>
-        <li>Open <b>Metistry</b> from your Home Screen, and turn notifications on there.</li>
+        <li>Open <b>Metistry</b> from your Home Screen and sign in. You'll be asked about notifications the first time something needs you.</li>
       </ol>
     </section>
 

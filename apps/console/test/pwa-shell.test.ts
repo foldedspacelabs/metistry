@@ -407,7 +407,7 @@ describe("the views split out of app.js (T7-3a)", () => {
     expect(SRC).toContain('import { artifactRoute, mountWork, roomRoute } from "./work.js";');
     expect(SRC).toContain('import { mountKnowledge } from "./knowledge.js";');
     expect(SRC).toContain('import { mountMore } from "./more.js";');
-    expect(SRC).toContain('import { mountNotify } from "./notify.js";');
+    expect(SRC).toContain('import { deviceOf, installOffer, mountNotify } from "./notify.js";');
     for (const m of ["today.js", "needs-you.js", "work.js", "knowledge.js", "more.js", "notify.js", "lib.js"]) expect(read(`../web/${m}`), m).not.toMatch(/from "\.\/app\.js"/);
     expect(read("../web/lib.js")).not.toMatch(/\bdocument\.|\bwindow\./); // DOM-free: a test imports it as it is
   });

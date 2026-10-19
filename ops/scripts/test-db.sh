@@ -4,7 +4,11 @@
 # push-retry storm before this existed). Drops + recreates
 # ${METISTRY_TEST_DB_NAME:-metistry_test} and applies all migrations to it.
 # The root `pnpm test` derives a per-checkout default from the directory
-# name, so parallel worktrees (subagents) never drop each other's db.
+# name, so parallel worktrees (subagents) never drop each other's db. It then
+# hands that migrated database to ops/scripts/test-workspace.mjs, which copies
+# it once per package (`<name>_<package>`, a TEMPLATE copy — no second run of
+# the migrations) so no two packages' suites ever share rows, and drops each
+# copy after. A direct `vitest run` still uses this one.
 #
 # THE GUARD (see migrate.sh for the incident this answers): this script's
 # whole reason to exist is dropping a database, so if METISTRY_TEST_DB_NAME

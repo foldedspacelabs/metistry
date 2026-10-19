@@ -1,4 +1,4 @@
-// The wizard is a state machine over the plan's seven steps. These tests are
+// The wizard is a state machine over the plan's eight steps. These tests are
 // what stops it becoming a maze: you can always go back, you can always skip
 // what is genuinely optional, you can never be stuck on a step the product
 // cannot do, and every choice on screen carries both sides of itself.
@@ -30,13 +30,15 @@ private func wizard(
 }
 
 @MainActor
-@Test func itWalksTheSevenStepsInOrderAndBacksOutOfThem() {
+@Test func itWalksTheEightStepsInOrderAndBacksOutOfThem() {
     let w = wizard()
     w.present()
     #expect(w.isPresented)
     #expect(w.current == .runtime)
     #expect(!w.canGoBack)
-    #expect(w.progressLabel == "Step 1 of 7")
+    #expect(w.progressLabel == "Step 1 of 8")
+    // Services, then Remote Access (plan §2.23, X-107), then Door, then Compute
+    #expect(FirstRunStep.allCases.map(\.title) == ["Runtime", "Instance", "Versioning", "Secrets", "Services", "Remote Access", "Door", "Compute"])
 
     // Step 1 is satisfied the moment a runtime is located.
     #expect(w.canContinue)
@@ -93,11 +95,11 @@ private func wizard(
 }
 
 @MainActor
-@Test func stepsSixAndSevenAnswerFromTheirOwnModelsAndNeverWallTheWizard() {
+@Test func stepsSevenAndEightAnswerFromTheirOwnModelsAndNeverWallTheWizard() {
     let w = wizard()
     w.present(from: .door)
     // Neither is a `metistry` verb, so neither has an argument array or a run
-    // row — and neither is satisfied until the thing itself happened. Step 6's
+    // row — and neither is satisfied until the thing itself happened. Step 7's
     // "thing" is now a successful whoami, which has not been asked yet.
     #expect(!w.steps.canRun(.door))
     #expect(!w.isSatisfied(.door))

@@ -254,6 +254,21 @@ export interface TestDbOptions {
   installNames?: readonly InstallDbName[];
 }
 
+export interface RecreateScratchDbOptions extends TestDbOptions {
+  /** required: the new database is `<METISTRY_TEST_DB_NAME><suffix>`, never the shared scratch database itself */
+  suffix: string;
+  /**
+   * Copy this database — schema and rows — instead of creating an empty one
+   * (`CREATE DATABASE … TEMPLATE`). Held to the same rules as the name being
+   * created: a scratch name, within Postgres's limit, not an install's.
+   * `ops/scripts/test-workspace.mjs` passes the migrated shared scratch
+   * database, so each package's copy starts with every migration applied and
+   * none of its siblings' rows. Postgres refuses the copy while anything is
+   * connected to the template.
+   */
+  template?: string;
+}
+
 /** One database an install on this machine is configured with, and the file that says so. */
 export interface InstallDbName {
   name: string;
@@ -422,13 +437,28 @@ export async function testDb<P extends TestDbPool>(Pool: TestDbPoolConstructor<P
 
 /**
  * Drop and create `<METISTRY_TEST_DB_NAME><suffix>`, fresh — for a suite that
- * needs a whole database of its own. Returns its name. The maintenance
- * connection to `postgres` this takes never leaves the function, the name is
- * validated exactly as `testDb`'s is, and a suffix is required: the shared
- * scratch database every other suite is using is out of reach.
+ * needs a whole database of its own, or for the workspace test runner, which
+ * gives every package one. Returns its name. The maintenance connection to
+ * `postgres` this takes never leaves the function, the name is validated
+ * exactly as `testDb`'s is, and a suffix is required: the shared scratch
+ * database every other suite is using is out of reach. With `template`, the
+ * new database is a copy of that one rather than empty.
  */
-export async function recreateScratchDb<P extends TestDbPool>(Pool: TestDbPoolConstructor<P>, opts: TestDbOptions & { suffix: string }): Promise<string> {
-  return onMaintenanceDb(Pool, opts, (name) => [`DROP DATABASE IF EXISTS "${name}"`, `CREATE DATABASE "${name}"`]);
+export async function recreateScratchDb<P extends TestDbPool>(Pool: TestDbPoolConstructor<P>, opts: RecreateScratchDbOptions): Promise<string> {
+  const template = opts.template === undefined ? "" : ` TEMPLATE "${scratchTemplateName(opts)}"`;
+  return onMaintenanceDb(Pool, opts, (name) => [`DROP DATABASE IF EXISTS "${name}"`, `CREATE DATABASE "${name}"${template}`]);
+}
+
+/** `opts.template`, or a refusal: it is a database this helper would itself be allowed to create, and never an install's. */
+function scratchTemplateName(opts: RecreateScratchDbOptions): string {
+  const template = opts.template ?? "";
+  if (!SCRATCH_DB.test(template)) {
+    throw refusal(`template ${JSON.stringify(template)} is not a scratch database name.`, `A template is the migrated scratch database — ${TEST_DB_PREFIX} followed by lowercase letters, digits and underscores — never anything else on the server.`);
+  }
+  if (template.length > PG_IDENT_MAX) throw refusal(`template ${template} is ${template.length} characters; Postgres keeps ${PG_IDENT_MAX}, so it would copy a truncated name, not this one.`, "Shorten METISTRY_TEST_DB_NAME.");
+  const hit = (opts.installNames ?? installDbNames({ env: opts.env ?? process.env })).find((i) => i.name === template);
+  if (hit) throw refusal(`template ${template} is the database ${hit.source} configures for an install on this machine.`, "Copy only a scratch database.");
+  return template;
 }
 
 /** Drop what `recreateScratchDb` made. Same rules. */

@@ -16,6 +16,7 @@ import {
   testDbConfig,
   testDbEnv,
   testEnvViolations,
+  TEST_DB_PREFIX,
   TEST_ENV_TEMP_ONLY,
   type TestDbConnection,
 } from "../src/test-env.js";
@@ -359,5 +360,26 @@ describe("recreateScratchDb / dropScratchDb", () => {
       { database: "postgres", max: 1, sql: [`DROP DATABASE IF EXISTS "${SCRATCH}_mig"`, `CREATE DATABASE "${SCRATCH}_mig"`], ended: true },
       { database: "postgres", max: 1, sql: [`DROP DATABASE IF EXISTS "${SCRATCH}_mig"`], ended: true },
     ]);
+  });
+});
+
+describe("recreateScratchDb with a template — the workspace runner's per-package copy", () => {
+  it("copies the shared scratch database instead of starting empty", async () => {
+    const { Pool, made } = fakePg();
+    expect(await recreateScratchDb(Pool, { env: dbEnv(), suffix: "_core", template: SCRATCH, ...NO_INSTALL })).toBe(`${SCRATCH}_core`);
+    expect(made.map((m) => ({ database: m.config.database, sql: m.sql, ended: m.ended }))).toEqual([
+      { database: "postgres", sql: [`DROP DATABASE IF EXISTS "${SCRATCH}_core"`, `CREATE DATABASE "${SCRATCH}_core" TEMPLATE "${SCRATCH}"`], ended: true },
+    ]);
+  });
+
+  it("refuses a template that is not a scratch database, or is an install's, and connects nowhere", async () => {
+    const { Pool, made } = fakePg();
+    await expect(recreateScratchDb(Pool, { env: dbEnv(), suffix: "_core", template: "metistry", ...NO_INSTALL })).rejects.toThrow('template "metistry" is not a scratch database name');
+    await expect(recreateScratchDb(Pool, { env: dbEnv(), suffix: "_core", template: "", ...NO_INSTALL })).rejects.toThrow("not a scratch database name");
+    await expect(recreateScratchDb(Pool, { env: dbEnv(), suffix: "_core", template: `${SCRATCH}; DROP DATABASE x`, ...NO_INSTALL })).rejects.toThrow("not a scratch database name");
+    await expect(recreateScratchDb(Pool, { env: dbEnv(), suffix: "_core", template: `${TEST_DB_PREFIX}${"a".repeat(60)}`, ...NO_INSTALL })).rejects.toThrow("Postgres keeps 63");
+    const installed = { installNames: [{ name: "metistry_test_live", source: "/x/.metistry/state/.env" }] };
+    await expect(recreateScratchDb(Pool, { env: dbEnv(), suffix: "_core", template: "metistry_test_live", ...installed })).rejects.toThrow("configures for an install on this machine");
+    expect(made).toEqual([]);
   });
 });

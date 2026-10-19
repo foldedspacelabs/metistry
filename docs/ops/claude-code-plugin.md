@@ -100,8 +100,11 @@ once the knowledge fold has read it, and a session an agent credential
 captured is never served as yours (`docs/ops/reconciler.md`, "Project repos
 and captured sessions"). The query is `expose: route` — your first prompt
 and your files are owner text and vault paths — so no agent reaches it
-through `queries_run`; nothing reads it at session start yet, and the
-consumer will be CM-1/CM-2's briefing under the caller's grant.
+through `queries_run`. Its consumer is the session-start briefing, `GET
+/api/briefing` (X-128, `docs/ops/client-api.md`): handles plus the owner's
+own text, under the caller's grant, on by default for every agent with a
+read grant and opt-out per agent (`briefing: false` in its grants). X-129's
+SessionStart hook is what will call it.
 
 **Who is handed what (Context Mode Q3, ruled 2026-10-04).** A session the
 fold has read goes to any agent whose grant allows it. A session still

@@ -2,7 +2,7 @@
 // screen-15-settings.md). The window is settings-view.swift; each pane is a
 // file under settings-panes/.
 //
-// Thirteen sections in a grouped sidebar (screen-15 §1), and each one is a
+// Fourteen sections in a grouped sidebar (screen-15 §1), and each one is a
 // window onto something else — never a copy of it (app-preferences.swift holds
 // the rule and the pointers this app does persist):
 //

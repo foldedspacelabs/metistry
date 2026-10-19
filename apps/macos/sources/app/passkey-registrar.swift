@@ -9,7 +9,7 @@
 //
 // NOTHING HERE PARAPHRASES macOS. The failure case is the `NSError`'s domain,
 // code and description as given, because the whole value of the diagnostic in
-// step 6 is being able to read what the system actually said about a
+// step 7 is being able to read what the system actually said about a
 // relying-party identifier it would not accept.
 
 import AppKit

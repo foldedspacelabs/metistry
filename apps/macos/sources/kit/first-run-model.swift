@@ -176,7 +176,7 @@ public enum RepoPlan: String, CaseIterable, Sendable, Identifiable {
     public var id: String { rawValue }
 }
 
-/// Step 6's two shapes, since the owner decision of 2026-09-10.
+/// Step 7's two shapes, since the owner decision of 2026-09-10.
 ///
 /// This Mac needs nothing: the app is the same package as the CLI on the same
 /// machine, so the console takes its local owner token as the `user` principal
@@ -227,7 +227,7 @@ public final class FirstRunModel {
     /// `metistry remote`, the same model Settings ▸ Remote Access ▸ Change…
     /// presents. None preselected; its Add a Phone… is step 7's sheet.
     public let remoteAccess: RemoteAccessFlowModel
-    /// Step 6 now LEADS with this: whether the console already takes this Mac as
+    /// Step 7 now LEADS with this: whether the console already takes this Mac as
     /// the owner. It is the same instance the Status header and Settings →
     /// Connections show, so the wizard cannot disagree with the rest of the app
     /// about who is signed in.
@@ -271,10 +271,10 @@ public final class FirstRunModel {
     public var keepAwake: KeepAwakeSetting?
     public var repoPlan: RepoPlan = .now
     public var repoAuth: RepoAuth = .device
-    /// Step 6's choice. `thisMacOnly` is the default because it is what is
+    /// Step 7's choice. `thisMacOnly` is the default because it is what is
     /// already true: nothing has to happen for this Mac to be signed in.
     public var doorPlan: DoorPlan = .thisMacOnly
-    /// Step 6's Add a Phone sheet (plan §2.22, X-77), while it is open — the
+    /// Step 7's Add a Phone sheet (plan §2.22, X-77), while it is open — the
     /// same model and view Settings ▸ Devices presents.
     public private(set) var addPhone: AddPhoneModel?
     /// The label the phone chose, once the sheet reached *Added*: the door is
@@ -306,7 +306,7 @@ public final class FirstRunModel {
         reset()
     }
 
-    // MARK: - Step 6: Add a Phone…
+    // MARK: - Step 7: Add a Phone…
 
     /// The sheet opens and starts Checking at once (`metistry enroll --json`).
     public func beginAddPhone() {

@@ -89,7 +89,7 @@ public final class ComputeModel {
     /// The shared doctor report: the local servers and the `assistant` row
     /// are read from it; this pane runs no probe of its own (invariant 3).
     public let status: StatusModel
-    /// The add-a-provider sheet — the WIZARD's step 7 model, not a second one.
+    /// The add-a-provider sheet — the WIZARD's step 8 model, not a second one.
     /// The key's single path to a `metistry` process's stdin lives in
     /// `ComputeStepModel.apply()`, and a second implementation of it is
     /// exactly the thing that would eventually put a key in argv.

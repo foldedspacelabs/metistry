@@ -73,6 +73,7 @@ describe("checkConnection — ok, degraded, absent, failed", () => {
     const r = await checkConnection(poolFor(noItem), noItem, "fake");
     expect(r.status).toBe("absent");
     expect(r.remediation).toMatch(/env_key/);
+    expect(r.meta).toEqual({ refused: "secret" }); // the refusal's own code rides in meta, so a reader never parses the sentence (X-87)
 
     const noType = catalogOf([{ ...stdio("fake", {}), provider: "github-official" }]);
     expect((await checkConnection(poolFor(noType), noType, "fake")).status).toBe("absent");
@@ -83,6 +84,7 @@ describe("checkConnection — ok, degraded, absent, failed", () => {
     const r = await checkConnection(poolFor(notGranted, { env_key: "x".repeat(12) }), notGranted, "fake");
     expect(r.status).toBe("failed");
     expect(r.remediation).toMatch(/metistry secrets grant env_key connection:fake on/);
+    expect(r.meta).toMatchObject({ refused: expect.any(String) });
 
     const fake = await fakeHttpMcp();
     await fake.close();

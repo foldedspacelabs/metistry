@@ -10,7 +10,11 @@ import { describe, expect, it } from "vitest";
 import { secretsMirrorDir } from "@foldedspacelabs/metistry-core";
 import { startPolicyMirror } from "../src/policy-mirror.js";
 
-const until = async (ok: () => boolean, ms = 2000) => {
+// Waits for a condition the mirror will reach on its own. The bound only
+// decides how long a genuine hang takes to report — a pass never depends on
+// it, so a loaded runner can be as slow as it likes.
+const UNTIL_BOUND_MS = 20_000;
+const until = async (ok: () => boolean, ms = UNTIL_BOUND_MS) => {
   const end = Date.now() + ms;
   while (!ok()) {
     if (Date.now() > end) throw new Error("timed out");
@@ -33,16 +37,19 @@ describe("startPolicyMirror", () => {
 
       await writeFile(`${canonical}.tmp`, "secrets:\n  k:\n    grants:\n      provider:openrouter: off\n");
       await rename(`${canonical}.tmp`, canonical);
-      await until(() => readFileSync(mirrored, "utf8").includes("provider:openrouter: off"));
+      // The mirror logs AFTER its file operation resolves, so the file changing
+      // is seen before the line is: wait on the line too, never assert it at the
+      // instant the file moves (that was the intermittent failure).
+      await until(() => readFileSync(mirrored, "utf8").includes("provider:openrouter: off") && lines.filter((l) => l.includes("written")).length >= 2);
 
       await rm(canonical);
-      await until(() => !existsSync(mirrored));
+      await until(() => !existsSync(mirrored) && lines.some((l) => l.includes("removed")));
       expect(lines.filter((l) => l.includes("written")).length).toBeGreaterThanOrEqual(2);
       expect(lines.some((l) => l.includes("removed"))).toBe(true);
     } finally {
       m.stop();
     }
-  });
+  }, 60_000);
 
   it("a failing mirror never throws, and says so once until the error changes", async () => {
     const lines: string[] = [];
@@ -59,5 +66,5 @@ describe("startPolicyMirror", () => {
     await until(() => n >= 4);
     m.stop();
     expect(lines.filter((l) => l.includes("EACCES"))).toHaveLength(1);
-  });
+  }, 60_000);
 });

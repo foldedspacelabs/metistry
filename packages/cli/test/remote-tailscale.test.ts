@@ -29,6 +29,7 @@ import {
   DNS_TIMEOUT_MS,
   handlerOf,
   hasCapability,
+  isOpenableUrl,
   KEY_EXPIRY_WARN_DAYS,
   nodeNameFor,
   parseMode,
@@ -130,6 +131,8 @@ function world(P: string, I: string, o: WorldOptions = {}) {
     opened: [] as string[],
     launchctl: [] as string[],
     tailscale: [] as string[],
+    /** when set, the node reports this instead of Tailscale's login URL */
+    badAuthUrl: undefined as string | undefined,
   };
   const dnsName = o.dnsName ?? NAME;
   const status = (backend: string, hostName: string): TailscaleStatus => {
@@ -162,7 +165,7 @@ function world(P: string, I: string, o: WorldOptions = {}) {
       if (node === "pack") {
         state.upCalled = true;
         state.backend = "NeedsLogin";
-        return { code: 1, stdout: JSON.stringify({ AuthURL: AUTH_URL, QR: "data:image/png;base64,AAAA", BackendState: "NeedsLogin" }), stderr: "timeout waiting for Tailscale service to enter a Running state; check health with \"tailscale status\"\n" };
+        return { code: 1, stdout: JSON.stringify({ AuthURL: state.badAuthUrl ?? AUTH_URL, QR: "data:image/png;base64,AAAA", BackendState: "NeedsLogin" }), stderr: "timeout waiting for Tailscale service to enter a Running state; check health with \"tailscale status\"\n" };
       }
       return { code: 1, stdout: "", stderr: "Tailscale is stopped.\n" };
     }
@@ -454,8 +457,9 @@ describe("`metistry remote set tailscale --yes` — Funnel, the bundled node, en
     expect(plist).toContain("<key>StandardOutPath</key><string>/tmp/metistry-tailscale.log</string>");
     expect(w.state.launchctl).toEqual([`bootout gui/501/${label}`, `print gui/501/${label}`, `bootstrap gui/501 ${plistPath(home)}`, `kickstart -k gui/501/${label}`]);
 
-    // the state directory is 0700
+    // the state directory is 0700 — and so is the socket's directory: tailscaled's socket is 0666, so the directory is the only guard
     expect(((await stat(tailscaleStateDir(I))).mode & 0o777).toString(8)).toBe("700");
+    expect(((await stat(join(w.sock, ".."))).mode & 0o777).toString(8)).toBe("700");
 
     // sign-in: `up` under Metistry's hostname, the login URL opened, completion read from BackendState
     expect(w.state.tailscale).toContain(`pack: --socket=${w.sock} up --json --timeout=10s --hostname=${NODE} --accept-dns=false --accept-routes=false`);
@@ -740,6 +744,24 @@ describe("no half-switch: a `remote set tailscale` that cannot reach the new ori
     expect(a.signed_in).toBe(false);
     expect(a.detail).toContain("didn't finish within 0 s");
     expect(w.state.opened).toEqual([AUTH_URL]); // --no-browser: not opened again
+  });
+
+  it("only an https:// address is handed to `open`: anything else the node reports is printed and refused", async () => {
+    expect(isOpenableUrl(AUTH_URL)).toBe(true);
+    expect(isOpenableUrl("https://headscale.example.net/register/mkey:abc")).toBe(true);
+    for (const bad of ["http://login.tailscale.com/a/x", "javascript:alert(1)", "file:///etc/passwd", "login.tailscale.com/a/x", "", "-"]) expect(isOpenableUrl(bad), bad).toBe(false);
+    const P = await product();
+    const I = await instance();
+    const w = world(P, I, { signInAfterPolls: Infinity });
+    const { opts } = await setOpts(P, I, w, { none, tailscale: w.provider });
+    const lines: string[] = [];
+    const ctx: RemoteContext = { productDir: P, instanceDir: I, env: opts.env, instanceId: INSTANCE_ID, record: { provider: "none", settings: {} }, consolePort: 8080, proxyPort: 8081, proxySocket: "/x", exec: w.exec, fetchFn: w.fetchFn, platform: "darwin", uid: 501, readToken: async () => "", note: (l) => lines.push(l), dryRun: false, timeoutMs: 50 };
+    w.state.badAuthUrl = "javascript:alert(1)";
+    const a = await w.provider.authorize!(ctx, { noBrowser: false, timeoutMs: 10 });
+    expect(a.signed_in).toBe(false);
+    expect(w.state.opened).toEqual([]); // never handed to `open`
+    expect(lines.join("\n")).toContain("sign in to Tailscale at: javascript:alert(1)");
+    expect(lines.join("\n")).toContain("not an https:// address, so it is printed and not opened");
   });
 
   it("the bundled node needs launchd: on another platform it is refused naming --use-app; a socket path too long for the kernel is refused before anything starts", async () => {

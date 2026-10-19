@@ -166,6 +166,15 @@ export function approvalLinksIn(text: string): { url: string; what: "HTTPS" | "F
   return out;
 }
 
+/** What `open` is handed: an `https:` URL and nothing else — Tailscale's login and approval pages are, and so is a headscale's. Anything the node reports that is not one is printed, never opened. */
+export function isOpenableUrl(url: string): boolean {
+  try {
+    return new URL(url).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 // ---- each BackendState, its row and its sentence --------------------------------------------
 
 export interface StateRow {
@@ -395,7 +404,10 @@ export function tailscaleProvider(overrides: Partial<TailscaleDeps> = {}): Remot
     if (ctx.dryRun) return { dir, socket };
     await mkdir(dir, { recursive: true, mode: 0o700 });
     await chmod(dir, 0o700);
-    await mkdir(join(socket, ".."), { recursive: true });
+    // tailscaled creates its LocalAPI socket 0666 and macOS grants every unix-socket peer read/write, so the
+    // directory's mode is the only guard on who can drive the node — 0700, like the state directory
+    await mkdir(join(socket, ".."), { recursive: true, mode: 0o700 });
+    await chmod(join(socket, ".."), 0o700);
     return { dir, socket };
   }
 
@@ -453,6 +465,10 @@ export function tailscaleProvider(overrides: Partial<TailscaleDeps> = {}): Remot
   async function openInBrowser(ctx: RemoteContext, url: string, noBrowser: boolean, what: string): Promise<void> {
     ctx.note(`${what}: ${url}`);
     if (noBrowser || ctx.platform !== "darwin") return;
+    if (!isOpenableUrl(url)) {
+      ctx.note("that is not an https:// address, so it is printed and not opened — open it yourself if it is what you expect");
+      return;
+    }
     const r = await ctx.exec("open", [url], { env: ctx.env, timeoutMs: 20_000 });
     if (r.code !== 0) ctx.note(`the browser did not open (${r.stderr.trim() || `exit ${r.code}`}) — open the address above yourself`);
     else ctx.note("the browser is open — finish there; this waits");

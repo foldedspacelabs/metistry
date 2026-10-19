@@ -71,6 +71,23 @@ public enum QueueCard: Sendable, Equatable, Identifiable {
         case .meeting(let group): return "group:\(group.id)"
         }
     }
+
+    /// The row that stands for the card in a list and in a selection: a
+    /// request's own, or a meeting's oldest part.
+    public var leadID: Int {
+        switch self {
+        case .request(let row): return row.id
+        case .meeting(let group): return group.parts.first?.id ?? 0
+        }
+    }
+
+    /// Every request the card answers for, in the order they are answered.
+    public var partIDs: [Int] {
+        switch self {
+        case .request(let row): return [row.id]
+        case .meeting(let group): return group.parts.map(\.id)
+        }
+    }
 }
 
 public extension MeetingGroup {
@@ -196,6 +213,12 @@ public final class GroupAnswering {
         self.store = store
         self.assistantName = assistantName
         self.hold = hold
+    }
+
+    /// Every answer has gone and the card says what happened to each.
+    public var isDone: Bool {
+        if case .done = phase { return true }
+        return false
     }
 
     public var isBusy: Bool {

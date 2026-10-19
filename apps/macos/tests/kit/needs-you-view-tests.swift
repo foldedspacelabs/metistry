@@ -408,6 +408,90 @@ import Testing
     }
 }
 
+// MARK: - A recording's rows are one card (X-82)
+
+/// Two notes that came from one recording, and a request of its own between them.
+private func meetingQueue() -> QueueConsole {
+    let group = "meeting:20260928-120000-00ab"
+    return QueueConsole(rows: [
+        row(id: 11, ts: "2026-09-28T12:04:00.000Z", type: "task", word: "to-do", title: "Send Kessler the scope", group: group, meeting: "Kessler kickoff"),
+        row(id: 12, ts: "2026-09-28T12:03:00.000Z", type: "question", word: "question", title: "Which fixture format?"),
+        row(id: 10, ts: "2026-09-28T12:02:00.000Z", type: "note", word: "note", title: "Kessler wants Friday", group: group, meeting: "Kessler kickoff"),
+    ])
+}
+
+@MainActor
+@Test func aRecordingsRowsAreOneCardInNeedsYouAndAnUngroupedRowIsItsOwn() async throws {
+    let console = meetingQueue()
+    let (model, session) = queueModel(console, now: Date(timeIntervalSince1970: 1_790_000_000))
+    defer { withExtendedLifetime(session) {} }
+    await model.refresh()
+    #expect(model.rows.count == 3, "three requests are waiting")
+    let lines = model.groups(assistantName: "Aide").flatMap(\.rows)
+    #expect(lines.count == 2, "…as two cards: \(lines.map(\.id))")
+    let meeting = try #require(lines.first { $0.isMeeting })
+    #expect(meeting.partIDs == [10, 11], "the meeting's parts, oldest first")
+    #expect(meeting.id == 10 && meeting.word == "meeting" && meeting.title == "Kessler kickoff")
+    #expect(meeting.spoken.contains("meeting, Kessler kickoff. 2 parts."), "\(meeting.spoken)")
+    let own = try #require(lines.first { !$0.isMeeting })
+    #expect(own.id == 12 && own.partIDs == [12])
+
+    // the meeting is selected as one card: its detail is the meeting, not a request
+    model.selection = [10]
+    #expect(!model.isBulk && model.selectedRow == nil)
+    #expect(model.selectedMeeting?.parts.map(\.id) == [10, 11])
+    model.selection = [12]
+    #expect(model.selectedRow?.id == 12 && model.selectedMeeting == nil)
+    // a part of it lands on its card
+    model.focus(on: 11)
+    #expect(model.selection == [10])
+
+    // the batch, the selection and the page limit are keyed by the requests inside
+    model.selectAllOnPage()
+    #expect(model.isBulk)
+    #expect(model.bulkIDs == [10, 11, 12])
+    _ = await model.answerSelection(.decline)
+    let sent = try #require(console.calls.first { $0.method == "POST" })
+    let ids: [Int] = (sent.body?["ids"]?.arrayValue ?? []).compactMap { $0.intValue }
+    #expect(ids == [10, 11, 12], "Decline reaches every part")
+    #expect(sent.body?["decision"]?.stringValue == "deny")
+}
+
+@MainActor
+@Test func aMeetingCardIsHeldWhileItsGroupIsInTheQueue() async throws {
+    let (model, session) = queueModel(meetingQueue(), now: Date(timeIntervalSince1970: 1_790_000_000))
+    defer { withExtendedLifetime(session) {} }
+    await model.refresh()
+    model.selection = [10]
+    let group = try #require(model.selectedMeeting)
+    let card = try #require(model.meetingCard(for: group, assistantName: "Aide"))
+    #expect(model.meetingCard(for: group, assistantName: "Aide") === card, "one card, so its Undo and receipts survive a refresh")
+    await model.refresh()
+    let again = try #require(model.selectedMeeting)
+    #expect(model.meetingCard(for: again, assistantName: "Aide") === card)
+    #expect(model.meetingCard(for: group, assistantName: "Other") !== card, "another name rebuilds it")
+}
+
+@MainActor
+@Test func theMeetingCardSpeaksItsListLineAndItsControls() async throws {
+    let (model, session) = queueModel(meetingQueue(), now: Date(timeIntervalSince1970: 1_790_000_000))
+    defer { withExtendedLifetime(session) {} }
+    await model.refresh()
+    model.selection = [10]
+    let view = NeedsYouView(model: model, waiting: 3, assistantName: "Aide", onGoToToday: {}) { row in
+        NeedsYouRequestSummary(row, assistantName: "Aide", consoleURL: nil, now: Date(timeIntervalSince1970: 1_790_000_000), calendar: model.calendar)
+    }
+    let tree = try await AccessibilityProbe.snapshot(view.frame(width: 1000, height: 640))
+    defer { tree.close() }
+    #expect(tree.unlabeledControls.isEmpty, "unlabeled: \(tree.unlabeledControls)")
+    #expect(tree.saysAssistant.isEmpty, "says assistant: \(tree.saysAssistant)")
+    let said = tree.labels + tree.texts
+    #expect(said.contains { $0.contains("meeting, Kessler kickoff. 2 parts.") }, "said: \(said)")
+    #expect(said.contains { $0.contains("question, Which fixture format?") }, "said: \(said)")
+    let controls = tree.controlNames
+    #expect(controls.contains { $0.hasPrefix("Accept All") } && controls.contains { $0.hasPrefix("Decline All") }, "controls: \(controls)")
+}
+
 // MARK: - Glyphs and words
 
 @Test func aTypesGlyphIsNeverOneAComponentAlreadyGivesAMeaning() {
@@ -579,13 +663,20 @@ private func recordedRows() throws -> [JSONValue] {
     try #require(ConsoleFixture.load("get-api-proposals").replyJSON?["proposals"]?.arrayValue)
 }
 
-private func row(id: Int, ts: String, type: String, word: String, title: String, agent: String = "assistant", trust: String = "internal", source: [String: String]? = nil) -> JSONValue {
+private func row(id: Int, ts: String, type: String, word: String, title: String, agent: String = "assistant", trust: String = "internal", source: [String: String]? = nil, group: String? = nil, meeting: String? = nil) -> JSONValue {
     var object: [String: JSONValue] = [
         "id": .string(String(id)), "ts": .string(ts), "kind": .string(type), "source_agent": .string(agent), "trust": .string(trust),
         "payload": .object(["title": .string(title)]), "decision": .string("pending"), "decided_at": .null, "work_id": .null, "snoozed_until": .null,
         "request": .object(["type": .string(type), "word": .string(word), "body": .string("preview"), "grouped": .bool(false), "decisions": .array([])]),
     ]
     if let source { object["source"] = .object(source.mapValues(JSONValue.string)) }
+    object["group_id"] = group.map(JSONValue.string) ?? .null
+    // a meeting's parts take Accept All and Decline All as their own answers
+    if group != nil, case .object(var request)? = object["request"] {
+        request["decisions"] = .array(["allow", "deny"].map(JSONValue.string))
+        object["request"] = .object(request)
+    }
+    if let meeting { object["payload"] = .object(["title": .string(title), "session_title": .string(meeting)]) }
     return .object(object)
 }
 

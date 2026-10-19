@@ -313,7 +313,7 @@ public struct RequestRow: Codable, Sendable, Equatable, Identifiable {
         source = try? c.decodeIfPresent(RequestSource.self, forKey: .source)
         // An empty group is no group: one blank id would make unrelated rows one card.
         let group = (try? c.decodeIfPresent(String.self, forKey: .groupID)) ?? nil
-        groupID = group.flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 }
+        groupID = group.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
     }
 
     public init(id: Int, ts: String, kind: String, payload: JSONValue? = nil, decision: String? = "pending", cursor: String? = nil, snoozedUntil: String? = nil, sourceAgent: String? = nil, trust: String? = nil, decidedAt: String? = nil, workID: Int? = nil, request: RequestShape? = nil, source: RequestSource? = nil, groupID: String? = nil) {

@@ -4,7 +4,7 @@
 
 import { createHash } from "node:crypto";
 import { parse as parseYaml } from "yaml";
-import { INSTANCE_LAYOUT, JOURNAL_DIR, isUserOwnedPath, parseTaskLine, validAreaPrefix, type ParsedTaskLine, type TaskDateOptions } from "@foldedspacelabs/metistry-core";
+import { INSTANCE_LAYOUT, JOURNAL_DIR, isUserOwnedPath, normalizeRepoRemote, parseTaskLine, validAreaPrefix, type ParsedTaskLine, type TaskDateOptions } from "@foldedspacelabs/metistry-core";
 
 export interface NoteMeta {
   title: string | null;
@@ -34,6 +34,14 @@ export interface NoteMeta {
    * the user owns (`isPersonPath` + `ownedByUser`).
    */
   emails: string[];
+  /**
+   * The frontmatter `repos:` — one git remote or a list, each reduced to
+   * core's canonical `host/path` by `projectRepos`; anything that is not
+   * plainly a remote is dropped rather than repaired. The walk reads it only
+   * from a project page the user owns (`isProjectPagePath` + `ownedByUser`),
+   * so a repository maps to a page only on the owner's word (CM-3).
+   */
+  repos: string[];
 }
 
 export interface NoteLink {
@@ -86,6 +94,7 @@ export function parseFrontmatter(text: string): { meta: NoteMeta; body: string; 
       area: area === null ? null : unwikilink(area),
       event_id: meetingEventId(o.event_id),
       emails: personEmails(o.email),
+      repos: projectRepos(o.repos),
     },
     body: text.slice(m[0].length),
     bodyLine,
@@ -94,7 +103,7 @@ export function parseFrontmatter(text: string): { meta: NoteMeta; body: string; 
 
 /** A note with no frontmatter the index reads. */
 export function emptyNoteMeta(): NoteMeta {
-  return { title: null, description: null, draft: false, source: null, area: null, event_id: null, emails: [] };
+  return { title: null, description: null, draft: false, source: null, area: null, event_id: null, emails: [], repos: [] };
 }
 
 /** Longer than any calendar's event id (EventKit's, Google's, an iCalendar UID); a longer value is refused, never cut to fit. */
@@ -143,6 +152,27 @@ export function personEmails(value: unknown): string[] {
     if (typeof item !== "string") continue;
     const email = normaliseEmail(item);
     if (email !== null) out.add(email);
+  }
+  return [...out];
+}
+
+/** Remotes read from one project page. A project has a few; a list of hundreds is not a project. */
+const REPOS_PER_PAGE_MAX = 16; // limit: fixed — a bound on one page's frontmatter, so one note cannot flood the table
+
+/**
+ * `repos:` as the walk stores it — the key `project_for_repo` looks a remote
+ * up by. One string or a YAML list of strings, each reduced to core's
+ * canonical shape (`normalizeRepoRemote`: `host/path`, scheme and credential
+ * dropped, `.git` dropped, host lowercased); an entry that is not plainly a
+ * remote is dropped, duplicates collapse.
+ */
+export function projectRepos(value: unknown): string[] {
+  const items = typeof value === "string" ? [value] : Array.isArray(value) ? value : [];
+  const out = new Set<string>();
+  for (const item of items) {
+    if (out.size >= REPOS_PER_PAGE_MAX) break;
+    const remote = normalizeRepoRemote(item);
+    if (remote !== null) out.add(remote);
   }
   return [...out];
 }
@@ -559,6 +589,19 @@ export const MEETINGS_PREFIX = `${JOURNAL_DIR}/Meetings`;
  */
 export function isMeetingNotePath(path: string): boolean {
   return isMarkdown(path) && path.startsWith(`${MEETINGS_PREFIX}/`) && isUserOwnedPath(path);
+}
+
+/**
+ * A project PAGE: `Projects/<Name>.md`, one level down and nowhere else
+ * (CM-3). A note inside a project's folder (`Projects/Drey/Notes.md`) is in
+ * the project — `projectForPath` — but is not the page that stands for it,
+ * and `repos:` on such a note maps nothing. Ownership is checked beside this
+ * (`ownedByUser`), not here: `Projects/` is not a user-only directory, and
+ * the fold creates pages in it under its own `source:`.
+ */
+export function isProjectPagePath(path: string): boolean {
+  const segs = path.split("/");
+  return segs.length === 2 && segs[0] === PROJECTS_PREFIX && isMarkdown(path);
 }
 
 /** A person page: any markdown under `People/`, the directory `peoplePages` reads. */

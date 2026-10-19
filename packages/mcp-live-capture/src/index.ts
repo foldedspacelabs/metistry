@@ -208,7 +208,7 @@ export async function check(helper: HelperClient, deliverer?: Deliverer): Promis
       return { status: "degraded" as const, remediation: "the microphone is not allowed — System Settings ▸ Privacy & Security ▸ Microphone; recordings keep app audio only", meta };
     }
     if (delivery === "off") {
-      return { status: "degraded" as const, remediation: "transcripts are kept on this Mac and never reach Metistry — set METISTRY_LIVE_CAPTURE_INBOX_TOKEN to a capture owner token (docs/ops/capture-shortcut.md §1) and restart the bridge", meta };
+      return { status: "degraded" as const, remediation: "transcripts are kept on this Mac and never reach Metistry — `metistry up` (or `metistry secrets mint`) makes METISTRY_LIVE_CAPTURE_INBOX_TOKEN, a capture owner token; then restart the bridge", meta };
     }
     if (delivery.last_error !== undefined && delivery.owed > 0) {
       return { status: "degraded" as const, remediation: `${delivery.owed} recording${delivery.owed === 1 ? "" : "s"} not yet delivered: ${delivery.last_error}`, meta };

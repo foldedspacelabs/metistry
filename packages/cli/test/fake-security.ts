@@ -4,7 +4,7 @@
 // nothing else. `args` is what `security` executes; `argv` is the process's
 // real argv — the thing `ps` shows, and the thing every "the value never
 // travels in argv" assertion must be about.
-import type { ExecOptions } from "../src/exec.js";
+import type { Exec, ExecOptions } from "../src/exec.js";
 
 /**
  * security(1)'s interactive-mode tokenizer (SecurityTool's `split_line`):
@@ -57,4 +57,32 @@ export function decodeSecurity(argv: string[], opts: ExecOptions = {}): Security
   const args = splitSecurityLine(lines[0]!);
   const w = args.indexOf("-w");
   return { args, argv, ...(w >= 0 && w + 1 < args.length ? { value: args[w + 1]! } : {}) };
+}
+
+/**
+ * A login Keychain in a Map, keyed by account and service, behind the `exec`
+ * seam. `refuse` makes the write of one service fail the way a locked
+ * Keychain does. `calls` is every `security` invocation, argv included, so a
+ * test can prove a value never travelled there.
+ */
+export function fakeKeychain(seed: Record<string, string> = {}, refuse?: (service: string) => boolean) {
+  const store = new Map(Object.entries(seed));
+  const calls: Array<{ args: string[]; argv: string[] }> = [];
+  const exec: Exec = async (cmd, argv, opts: ExecOptions = {}) => {
+    const { args, value } = cmd === "security" ? decodeSecurity(argv, opts) : { args: argv, value: undefined };
+    calls.push({ args, argv });
+    const service = args[args.indexOf("-s") + 1] ?? "";
+    const at = `${args[args.indexOf("-a") + 1] ?? ""}/${service}`;
+    if (args[0] === "add-generic-password") {
+      if (refuse?.(service)) return { code: 36, stdout: "", stderr: "User interaction is not allowed." };
+      store.set(at, value ?? "");
+      return { code: 0, stdout: "", stderr: "" };
+    }
+    if (args[0] === "find-generic-password") {
+      if (!store.has(at)) return { code: 44, stdout: "", stderr: "not found" };
+      return { code: 0, stdout: args.includes("-w") ? `${store.get(at)}\n` : "", stderr: "" };
+    }
+    return { code: 1, stdout: "", stderr: `unexpected ${args[0]}` };
+  };
+  return { exec, store, calls };
 }

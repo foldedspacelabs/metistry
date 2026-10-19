@@ -11,7 +11,7 @@ All of them are real.
 | --- | --- |
 | `init <dir>` | create a private instance repo, asking once whether to keep this Mac awake (`--keep-awake <value>` answers it without a terminal) |
 | `connect-repo <url>` | point the instance repo at a remote, mint credentials the reconciler can push with |
-| `secrets sync\|mint\|list [--json]` | move secrets between the Keychain and `.env` |
+| `secrets sync\|mint\|list [--json]` | move secrets between the Keychain and `.env`; bare `mint` makes the recorder's three tokens |
 | `secrets set\|replace\|remove\|hosts\|grant <name>` | owner-named secrets, per instance: the value on stdin — piped, or typed hidden at a prompt when run in a terminal — into the Keychain, the policy into `.metistry/secrets.yaml` |
 | `secrets list --named [--json]` | the owner-named secrets: names, hosts, grants, presence — never a value |
 | `secrets retire-legacy-env [--yes]` | move what only the product checkout's `.env` still has into the instance's, then delete it |
@@ -1220,9 +1220,32 @@ edited by hand (`docs/product/desktop-app-plan.md`, first-run step 4).
 metistry secrets sync --to keychain               # import .env's secret lines into the Keychain
 metistry secrets sync --to env                    # regenerate .env's secret lines from the Keychain
 metistry secrets mint METISTRY_ASSISTANT_TOKEN    # a new random token, into both
+metistry secrets mint                             # the recorder's three tokens (METISTRY_LIVE_CAPTURE_URL set): the ones missing, kept if present
 metistry secrets list                             # names, scopes and where each lives — never a value
 metistry secrets purge --instance <dir> [--yes]   # delete one instance's Keychain items
 ```
+
+**The recorder's three tokens** (X-80). With `METISTRY_LIVE_CAPTURE_URL` set,
+`metistry up` — and bare `metistry secrets mint` — make
+`METISTRY_LIVE_CAPTURE_CONTROL_TOKEN` (the bar's key: the Keychain item the
+Mac app reads, account = the instance's id), `METISTRY_BRIDGE_TOKEN_LIVE_CAPTURE`
+(what the router presents to the bridge) and `METISTRY_LIVE_CAPTURE_INBOX_TOKEN`
+(a capture owner token labelled `live-capture`, the one the bridge posts
+transcripts with) wherever none exists, before any job is rendered, so the
+bridge is started with them. Nothing is replaced: a Keychain item stands and
+fills `.env`; a value only `.env` holds (an owner-pasted bridge token) is
+adopted into the Keychain; a rerun changes nothing. The inbox token's hash is
+also recorded in the console's `owner_tokens` once the database answers —
+`up` does it again every run, so a rebuilt database is repaired without
+rotating the token; a row the owner revoked is reported, never revived
+(`metistry secrets mint METISTRY_LIVE_CAPTURE_INBOX_TOKEN` makes a fresh one).
+A database that is down or not yet migrated is a note and the next `up`
+records it. Naming one of the three (`secrets mint <VAR>`) replaces it on
+purpose, followed by `metistry restart live-capture`. Without
+`METISTRY_LIVE_CAPTURE_URL` none of the three is made — bare `mint` says so
+and exits 2, and `sync --to env` leaves them alone too. All three are in
+`GENERATED_SECRETS`: their values mean nothing outside this install and
+nothing was started with them before they were made.
 
 `--from` says the same thing from the other end (`--from env` ==
 `--to keychain`); one of them is required, because guessing the direction
@@ -1354,7 +1377,9 @@ whose value means nothing outside this install, so minting one can never be
 the wrong guess and nobody has to paste it anywhere. `metistry up`'s
 generated `METISTRY_DB_PASSWORD` is the precedent; `METISTRY_LOCAL_OWNER_TOKEN`
 (the console's) and `METISTRY_BRIDGE_TOKEN_RECONCILER_USER` (the
-reconciler's owner bearer) are the current list (`docs/ops/auth.md`).
+reconciler's owner bearer) are the first two of the current list
+(`docs/ops/auth.md`); the recorder's three follow, minted only while
+`METISTRY_LIVE_CAPTURE_URL` is set.
 
 **It adopts before it mints.** When one of them is missing from the
 Keychain but `.env` already has a value, that value is the one the running
@@ -2181,8 +2206,10 @@ set; before that the bridge's row is `absent`, "not configured"). The
 is the bridge's own `check()`: the three grants as macOS lets a helper know
 them, the on-device transcriber, and the transcript delivery — `degraded`
 while `METISTRY_LIVE_CAPTURE_INBOX_TOKEN` is unset (transcripts stay on the
-Mac) or while a recording is still owed to the inbox, with the console's
-own reason. Its restart hint is `metistry restart live-capture`.
+Mac — `metistry up` makes the token, so this means a bridge started before
+it did: `metistry restart live-capture`) or while a recording is still owed to
+the inbox, with the console's own reason. Its restart hint is `metistry
+restart live-capture`.
 
 **The `registries` row** (plan §2.7). One row across every registry kind —
 collectors, routines, targets, provider templates, connection types — loaded
@@ -2398,7 +2425,9 @@ return the instance to the fixed labels and ports.
    `live-capture` bridge beside the other bridges (a supervisor child under
    the launchd shape). Without the variable neither exists, so an install
    that never asked for a microphone never grows a job that could ask for
-   one. A release carries no built bundle; `up` pins the job at the signed
+   one. `up` also makes the recorder's three tokens (control, bridge, inbox)
+   where they are missing, before the jobs are rendered — see *Secrets* above.
+   A release carries no built bundle; `up` pins the job at the signed
    one in the install root the way it pins the calendar's, and a missing one
    is a note naming `packages/mcp-live-capture/scripts/build-helper.sh`.
 

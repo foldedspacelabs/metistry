@@ -73,13 +73,17 @@ Microphone, Audio Capture (*Audio only*) and Screen Recording (*Window* and
 | --- | --- |
 | `METISTRY_BRIDGE_TOKEN_LIVE_CAPTURE` | `GET /check`, `GET /status` and `GET /recording/review` (`recording_review`), all reads — the manifest's `exposes:`, what a tool caller may invoke — and `POST /recording/retention`, which is not a tool: the console's retention routine reporting ingestion |
 | `METISTRY_LIVE_CAPTURE_CONTROL_TOKEN` | all of those, plus `POST /recording/start` (every mode — *Audio only*, *Window*, *Screen*), `/recording/stop`, `/recording/keep-going` and `/recording/purge`. This is the person at the Mac, pressing Record or Purge Now |
-| `METISTRY_LIVE_CAPTURE_INBOX_TOKEN` | nothing here — the bridge refuses it like a stranger's. It is the capture owner token the bridge **presents** to the console's `POST /capture` when a session ends (capture and messages only; `docs/ops/capture-shortcut.md` §1 mints one) |
+| `METISTRY_LIVE_CAPTURE_INBOX_TOKEN` | nothing here — the bridge refuses it like a stranger's. It is the capture owner token the bridge **presents** to the console's `POST /capture` when a session ends (capture and messages only; on a Metistry install `metistry up` mints it, otherwise `docs/ops/capture-shortcut.md` §1 does) |
 
-On a Metistry install the control token is minted like every install
-variable — `metistry secrets mint METISTRY_LIVE_CAPTURE_CONTROL_TOKEN` puts it
-in the login Keychain (`metistry:METISTRY_LIVE_CAPTURE_CONTROL_TOKEN`, under
-the instance's id) and in `.env`, then `metistry restart live-capture` — and
-the Mac app's floating bar reads it from that one Keychain item and presents
+On a Metistry install all three are minted for you: `metistry up` makes each
+one that is missing as soon as `METISTRY_LIVE_CAPTURE_URL` is set (and bare
+`metistry secrets mint` does the same, keeping any that exist). The control
+token goes into the login Keychain
+(`metistry:METISTRY_LIVE_CAPTURE_CONTROL_TOKEN`, under the instance's id) and
+`.env`; the inbox token is also recorded as a capture owner token labelled
+`live-capture`. `metistry secrets mint METISTRY_LIVE_CAPTURE_CONTROL_TOKEN`
+replaces one on purpose, followed by `metistry restart live-capture`. The Mac
+app's floating bar reads it from that one Keychain item and presents
 it to `127.0.0.1:7815` only. The bar never holds the bridge token
 (`apps/macos`, `docs/ops/mac-app.md` "The floating bar").
 

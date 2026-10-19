@@ -11,7 +11,8 @@ import { describe, expect, it } from "vitest";
 import { serializeLock } from "../src/lock.js";
 import { main } from "../src/main.js";
 import { up } from "../src/up.js";
-import { decodeSecurity } from "./fake-security.js";
+import { tokenHash } from "@foldedspacelabs/metistry-core";
+import { decodeSecurity, fakeKeychain } from "./fake-security.js";
 import { checkout, failDoctor, fakeExec, HELPER, JOBS, okDoctor, RECONCILER, retired, retiredCalls, shown, WATCHDOG } from "./fixtures.js";
 
 const NODE = "/usr/local/bin/node";
@@ -213,6 +214,113 @@ describe("metistry up", () => {
     const again = fakeExec();
     await up({ ...base(P), env: { METISTRY_BRIDGE_TOKEN_RECONCILER_USER: "already" }, exec: again, out: () => {}, home: "/h", launchd: false, doctorFn: okDoctor });
     expect(again.calls.map(shown).filter((c) => c.startsWith("security"))).toEqual([]);
+  });
+
+  // X-80 (owner ruling 2026-10-04): an install that configures the recorder
+  // has its three tokens made by `up`, not by an owner-hand `secrets mint`.
+  describe("the recorder's three tokens", () => {
+    const RECORDER = ["METISTRY_LIVE_CAPTURE_CONTROL_TOKEN", "METISTRY_BRIDGE_TOKEN_LIVE_CAPTURE", "METISTRY_LIVE_CAPTURE_INBOX_TOKEN"];
+    const withKeychain = () => {
+      const kc = fakeKeychain();
+      return { kc, exec: fakeExec({ security: (argv, opts) => kc.exec("security", argv, opts) }) };
+    };
+    const ownerTokens = () => {
+      const rows: Array<{ token_hash: string; label: string }> = [];
+      let opened = 0;
+      const openSession = async () => {
+        opened++;
+        return {
+          query: async (text: string, values: unknown[] = []) => {
+            if (text.startsWith("SELECT")) return { rows: rows.filter((r) => r.token_hash === values[0]) };
+            rows.push({ token_hash: values[0] as string, label: values[1] as string });
+            return { rows: [] };
+          },
+          end: async () => {},
+        };
+      };
+      return { rows, openSession, opened: () => opened };
+    };
+    const run = (P: string, exec: ReturnType<typeof fakeExec>, env: NodeJS.ProcessEnv, extra: Record<string, unknown> = {}) =>
+      up({ ...base(P), env, exec, out: () => {}, home: "/h", compose: false, launchd: false, doctorFn: okDoctor, ...extra });
+
+    it("**with the recorder configured and no token, mints all three; a second `up` keeps them**", async () => {
+      const P = await checkout();
+      const { kc, exec } = withKeychain();
+      const db = ownerTokens();
+      const env = { METISTRY_BRIDGE_TOKEN_RECONCILER_USER: "owner-bearer", METISTRY_LIVE_CAPTURE_URL: "http://127.0.0.1:7815" };
+      const lines: string[] = [];
+      const first = await up({ ...base(P), env: { ...env }, exec, out: (l) => lines.push(l), home: "/h", compose: false, launchd: false, doctorFn: okDoctor, openSession: db.openSession });
+      expect(first.code).toBe(0);
+
+      // the Keychain item the bar reads, and the .env the bridge is started with
+      const held = RECORDER.map((n) => kc.store.get(`metistry/metistry:${n}`));
+      for (const v of held) expect(v).toBeTruthy();
+      expect(new Set(held).size).toBe(3);
+      const dotenv = readFileSync(join(P, ".env"), "utf8");
+      RECORDER.forEach((n, i) => expect(dotenv).toContain(`${n}=${held[i]}`));
+      // the inbox token is a capture owner token labelled live-capture, by hash
+      expect(db.rows).toEqual([{ token_hash: tokenHash(held[2]!), label: "live-capture" }]);
+      // names only
+      for (const v of held) {
+        expect(lines.join("\n")).not.toContain(v!);
+        for (const c of kc.calls) for (const a of c.argv) expect(a).not.toContain(v!);
+      }
+      expect(lines.join("\n")).toContain("recorder tokens minted: METISTRY_LIVE_CAPTURE_CONTROL_TOKEN, METISTRY_BRIDGE_TOKEN_LIVE_CAPTURE, METISTRY_LIVE_CAPTURE_INBOX_TOKEN");
+
+      // a second `up` — the CLI would load the .env it just wrote — keeps all three
+      const before = new Map(kc.store);
+      kc.calls.length = 0;
+      const second = await up({ ...base(P), env: { ...env }, exec, out: () => {}, home: "/h", compose: false, launchd: false, doctorFn: okDoctor, openSession: db.openSession, mintRecorderToken: () => "MUST-NOT-BE-USED" });
+      expect(second.code).toBe(0);
+      expect(kc.calls.filter((c) => c.args[0] === "add-generic-password")).toEqual([]);
+      expect(kc.store).toEqual(before);
+      expect(readFileSync(join(P, ".env"), "utf8")).toBe(dotenv);
+      expect(db.rows).toHaveLength(1); // recorded once; the second `up` finds the row
+    });
+
+    it("**without the recorder configured, mints nothing — no Keychain call, no .env line, no database**", async () => {
+      const P = await checkout();
+      const { kc, exec } = withKeychain();
+      const db = ownerTokens();
+      const r = await up({ ...base(P), exec, out: () => {}, home: "/h", compose: false, launchd: false, doctorFn: okDoctor, openSession: db.openSession });
+      expect(r.code).toBe(0);
+      expect(kc.calls).toEqual([]);
+      expect(db.opened()).toBe(0);
+      const dotenv = existsSync(join(P, ".env")) ? readFileSync(join(P, ".env"), "utf8") : "";
+      for (const n of RECORDER) expect(dotenv).not.toContain(n);
+    });
+
+    it("--dry-run makes and records nothing, and says what it would do", async () => {
+      const P = await checkout();
+      const { kc, exec } = withKeychain();
+      const db = ownerTokens();
+      const lines: string[] = [];
+      const r = await up({ ...base(P), env: { METISTRY_BRIDGE_TOKEN_RECONCILER_USER: "owner-bearer", METISTRY_LIVE_CAPTURE_URL: "http://127.0.0.1:7815" }, exec, out: (l) => lines.push(l), home: "/h", compose: false, launchd: false, dryRun: true, openSession: db.openSession });
+      expect(r.code).toBe(0);
+      expect(kc.calls).toEqual([]);
+      expect(db.opened()).toBe(0);
+      expect(lines.join("\n")).toContain("recorder's control, bridge and inbox tokens");
+    });
+
+    it("an owner-pasted bridge token is adopted, not replaced", async () => {
+      const P = await checkout();
+      await writeFile(join(P, ".env"), "METISTRY_BRIDGE_TOKEN_LIVE_CAPTURE=owner-pasted\n");
+      const { kc, exec } = withKeychain();
+      const r = await run(P, exec, { METISTRY_BRIDGE_TOKEN_RECONCILER_USER: "owner-bearer", METISTRY_LIVE_CAPTURE_URL: "http://127.0.0.1:7815", METISTRY_BRIDGE_TOKEN_LIVE_CAPTURE: "owner-pasted" }, { openSession: ownerTokens().openSession });
+      expect(r.code).toBe(0);
+      expect(kc.store.get("metistry/metistry:METISTRY_BRIDGE_TOKEN_LIVE_CAPTURE")).toBe("owner-pasted");
+      expect(readFileSync(join(P, ".env"), "utf8")).toContain("METISTRY_BRIDGE_TOKEN_LIVE_CAPTURE=owner-pasted\n");
+    });
+
+    it("a database that is not up yet leaves the inbox token minted and says `up` records it", async () => {
+      const P = await checkout();
+      const { exec } = withKeychain();
+      const lines: string[] = [];
+      const r = await up({ ...base(P), env: { METISTRY_BRIDGE_TOKEN_RECONCILER_USER: "owner-bearer", METISTRY_LIVE_CAPTURE_URL: "http://127.0.0.1:7815" }, exec, out: (l) => lines.push(l), home: "/h", compose: false, launchd: false, doctorFn: okDoctor, openSession: async () => null });
+      expect(r.code).toBe(0);
+      expect(lines.join("\n")).toContain("not yet recorded as an owner token");
+      expect(readFileSync(join(P, ".env"), "utf8")).toContain("METISTRY_LIVE_CAPTURE_INBOX_TOKEN=");
+    });
   });
 
   it("the closing doctor gets the same env and exec the plan ran with", async () => {

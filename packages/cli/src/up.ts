@@ -86,6 +86,8 @@ import {
 import { shellUnsafeEnvLines } from "./env.js";
 import { ensureInstanceId, envPaths, readInstanceId } from "./instance.js";
 import { ensureOwnerBridgeToken } from "./protected-write.js";
+import { describeRecorderTokens, ensureRecorderTokens, recorderConfigured, registerCaptureOwnerToken, type EnsureRecorderTokensResult } from "./recorder-tokens.js";
+import type { MigrationSession } from "./migrate.js";
 import { allocateBase, applyPorts, loadNamespace, portEnv, PORTED_SERVICES, portsFile, portsOf, serializeNamespace, suffixFor, type Namespace } from "./namespace.js";
 import { llamaServerChild } from "./local-models.js";
 import { instanceLockPath, readLock, type LockFile, type LockSource } from "./lock.js";
@@ -161,6 +163,10 @@ export interface UpOptions {
   mintPassword?: (() => string) | undefined;
   /** test seam: the vault bridge's owner bearer, minted once for an install that has none */
   mintOwnerToken?: (() => string) | undefined;
+  /** test seam: the recorder's tokens, minted once for an install that configures the recorder */
+  mintRecorderToken?: (() => string) | undefined;
+  /** test seam: the database session the recorder's capture owner token is recorded through */
+  openSession?: ((env: NodeJS.ProcessEnv) => Promise<(MigrationSession & { end(): Promise<void> }) | null>) | undefined;
   /** test seam: the fetch the bundled-runtime download uses */
   fetchFn?: typeof fetch | undefined;
   /** the deps pack's os-arch (default: this host's) */
@@ -1289,6 +1295,28 @@ export async function up(opts: UpOptions): Promise<UpResult> {
     r.note(`namespace: labels ${LABEL_PREFIX}${ns.labelSuffix}.<service>, ports ${ns.base}-${ns.base + PORTED_SERVICES.length - 1} — from ${ns.from}`);
     r.note(applied.length ? `namespace → environment: ${applied.join(" ")}` : "namespace → environment: nothing to fill; .env already sets every port and URL");
   }
+  // The recorder's three tokens, once this instance has its id (the Mac app
+  // reads the control key from the Keychain under that account) and before the
+  // jobs are rendered, so the bridge is STARTED with them. Opt-in: nothing is
+  // made unless METISTRY_LIVE_CAPTURE_URL is set. Each is kept when it exists.
+  // Inside `update` the render is a re-render and `.env` already holds them.
+  let recorder: EnsureRecorderTokensResult | undefined;
+  if (!opts.within && recorderConfigured(env)) {
+    const wanted = "make the recorder's control, bridge and inbox tokens where they are missing (login Keychain + .env; an existing value is kept; never shown)";
+    if (r.action(wanted)) {
+      recorder = await ensureRecorderTokens({
+        env,
+        also: values.env,
+        envFile,
+        platform: le.platform,
+        ...(instanceId ? { instanceId } : {}),
+        exec: r.exec,
+        out: (l) => r.note(l),
+        ...(opts.mintRecorderToken ? { mint: opts.mintRecorderToken } : {}),
+      });
+      for (const l of describeRecorderTokens(recorder)) r.note(l);
+    }
+  }
   // one line, before anything is written: an install with no engine is a
   // shape, not a fault (docs/ops/assistant-tools.md, "Running without an
   // engine"), and the operator should see WHY there is no assistant below
@@ -1355,6 +1383,13 @@ export async function up(opts: UpOptions): Promise<UpResult> {
         r.section("database");
         await finishPostgres(r, pg);
       }
+    }
+
+    // The capture owner token's row, once the database is up. Soft: a database
+    // that is not answering or not migrated yet is a note, and the next `up`
+    // records it (recorder-tokens.ts).
+    if (recorder?.inbox) {
+      await registerCaptureOwnerToken({ env: { ...values.env }, token: recorder.inbox, out: (l) => r.note(l), ...(opts.openSession ? { openSession: opts.openSession } : {}) });
     }
 
     // the cli shim: independent of compose/launchd, but — like everything

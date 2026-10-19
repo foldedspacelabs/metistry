@@ -2981,7 +2981,7 @@ where none.
 `rsvp` capability**.
 *Accept:* —
 
-*Ruling 2026-10-04 (Q-a):* §2.12's excerpt stays and is built: a message card carries an excerpt of the body, not headers only. The body is read behind §4.12's on-device reduction (the PoC-13 bar), the question's own framing — a follow-up, not yet a ticket.
+*Ruling 2026-10-04 (Q-a):* §2.12's excerpt stays and is built: a message card carries an excerpt of the body, not headers only. A follow-up, not yet a ticket.
 
 **T4-18 · Compute** · L · W2 · deps T4-1 —
 *Spec:* Providers gain `enabled` and `billing`; keys as secret references;
@@ -4340,7 +4340,7 @@ whichever Q-c rules.
 as the subject, and no line of the note reaches the feed**.
 *Accept:* —
 
-*Ruling 2026-10-04 (Q-c):* the subject comes from the title alone; no tier gate.
+*Ruling 2026-10-04 (Q-c):* "take it from the subject only" — "subject" read as the question's title-only option: the subject comes from the title alone; no tier gate.
 
 **X-84 · `POST /message` carries a session-turn marker** · M · W5 · deps T8-6, T6-15 —
 *Spec:* waits on the owner's W4 question Q-b. Screen 11 §4 ("staying on this
@@ -5043,8 +5043,9 @@ agreement rate, the pile and r. The output is
 `<instance>/.metistry/eval/complexity.generated.jsonl`, apart from anything the
 owner wrote; the owner spot-checks it, and `metistry-eval complexity` scores
 generated and owner-written fixtures **separately**, each against the bar (the
-Routr review's lesson, #492). This amends §7.2's "the owner's, never the
-product's" for generated items only, on the owner's 2026-10-04 approval; the
+Routr review's lesson, #492). Amending §7.2's "the owner's, never the
+product's" for generated items only is the coordinator's proposal, reading Q-g's
+"Run it and then accept" as covering it — for the owner to confirm; the
 shipped example stays empty, and no agent runs the generator against the live
 instance.
 *Files:* `packages/eval/src/generate.ts` (new), `packages/eval/src/main.ts`,
@@ -5288,9 +5289,9 @@ the designer.
 | W1 | 44 | 119.5 |
 | W2 | 35 | 128.5 |
 | W3 | 46 | 127.5 |
-| W4 | 17 | 65 |
-| W5 | 1 | 1 |
-| **Total** | **162** | **≈ 479.5** (±30 %) |
+| W4 | 22 | 73 |
+| W5 | 39 | 69 |
+| **Total** | **205** | **≈ 555.5** (±30 %) |
 
 **Revised from ≈ 411.** Added by the answers and the additions: real-time events
 (10: T2-18, T5-7, T7-7), vault git (22.5: T10), Linear (10: T4-24…T4-26), Tomorrow's

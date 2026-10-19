@@ -503,11 +503,11 @@ waits on one names it by letter.
 | --- | --- | --- | --- |
 | Q-a | §2.12 says a message card is "inferred with an excerpt", but T4-17 ships it header-only. Change the wording, or keep the excerpt as the goal behind §4.12's on-device reduction? **Ruled 2026-10-04:** keep the excerpt and build it (T4-17, plan). | Header-only inference; the card's copy says so. | The §2.12 wording, or the §4.12 reduction ticket |
 | Q-b | Screen 11 §4, "staying on this Mac": `POST /message` carries no session-turn marker, so an Ask-panel turn inside a capture session cannot be held to the private tier. Today the panel says so honestly rather than faking it. Add the field? **Ruled 2026-10-04:** add the field (X-84). | No marker; the Ask panel is not drawn as private. | X-84 |
-| Q-c | A pre-existing private-tier leak: `seed/queries/activity_feed.yaml`'s capture branch derives `subject` from the note's first line, so a transcript's first spoken line is servable through `queries_run` on any tier — unlike `recording_review`, which the assistant cannot reach. Gate the branch, or take the subject from the title only? **Ruled 2026-10-04:** "take it from the subject only" — the title alone, no gate (X-83). | The leak stands, documented. | X-83 |
+| Q-c | A pre-existing private-tier leak: `seed/queries/activity_feed.yaml`'s capture branch derives `subject` from the note's first line, so a transcript's first spoken line is servable through `queries_run` on any tier — unlike `recording_review`, which the assistant cannot reach. Gate the branch, or take the subject from the title only? **Ruled 2026-10-04:** "take it from the subject only" — "subject" read as the question's "title only" option; no gate (X-83). | The leak stands, documented. | X-83 |
 | Q-d | A capture proposal's payload carries the full note text (T8-2b), so a transcript's whole text sits on its request row. Acceptable under the private-tier rule, or must the row carry a reference only? **Ruled 2026-10-04:** a reference only (T8-2b, plan). | Full text on the row. | The T8-2b follow-up, if any |
 | Q-e | May Metistry ship a Desktop OAuth client secret for Google? Google may require it at token exchange even with PKCE. **Ruled 2026-10-04:** yes (T4-14, plan). | Owners bring their own client; the manifest schema refuses a `client_secret`. | The maintainer's Google client |
 | Q-f | Device-local preferences (`anyAppShortcuts`, `captureBar`) live in `UserDefaults`. Accept the store, or move them to a device-local file? **Ruled 2026-10-04:** the store is fine (X-91). | `UserDefaults`, tested to hold those two keys beside the three pointers. | X-91 |
-| Q-g | T9-4 (#466): run `metistry-eval complexity` and accept, or hold? **Ruled 2026-10-04:** run it, then accept — on fixtures from X-121's generator (T9-4, plan). | Open, rebased, waiting on the eval's bar. | The W4 release |
+| Q-g | T9-4 (#466): run `metistry-eval complexity` and accept, or hold? **Ruled 2026-10-04:** run it, then accept (T9-4, plan). | Open, rebased, waiting on the eval's bar. | The W4 release |
 | Q-h | `--config`: T6-13b's manifest-validated flag replaced T4-11's. Confirm the one flag and its refusals (unknown key, bad shape, secret kind). **Ruled 2026-10-04:** confirmed. | The validated flag. | — |
 | Q-i | The connections `types` payload also carries `description`, `provides`, `capabilities`, `tools` and per-field help — more than the ruling's literal field list (no secrets). Accept? **Ruled 2026-10-04:** accepted. | The wider payload is served. | — |
 
@@ -745,7 +745,11 @@ per-collector row, with one strict CI check. The second #456 flake (Linear's
 "closed or given to someone else") is X-26's, a candidate not in W5, so X-126
 takes the policy-mirror flake only. X-127 gives the hidden one-line reader to
 the token only: a request body and an agent prompt are neither secret nor one
-line, so in a terminal they prompt on stderr and keep the echo.
+line, so in a terminal they prompt on stderr and keep the echo. **To confirm:**
+X-121 amends `docs/ops/dynamic-router.md` §7.2's "the owner's, never the
+product's" for generated fixtures — the coordinator's proposal, reading Q-g's
+"Run it and then accept" as covering it, not an owner approval of the
+amendment itself.
 
 ## Rulings the owner must make
 

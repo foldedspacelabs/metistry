@@ -83,7 +83,13 @@ reading it from `.env` (`packages/cli/src/origins.ts`, `renderOrigins`):
 - with **None: the loopback origin alone**.
 
 A non-loopback entry someone wrote into `.env` beside `remote: none` is
-**not carried**, and `up` says so in its plan. That is deliberate: a
+**not carried**: `up` says so in its plan, and doctor carries a `degraded`
+`remote:origins` row with the same sentence — the console does not answer
+for that origin, and **passkeys added at it no longer sign in**. Until a
+provider adapter ships (Tailscale, X-106), there is no supported interim way
+to serve such an origin — a tunnel to the console's main port is exactly the
+configuration the proxy listener closed, and it is not honoured; remove the
+entry from `.env`, or wait for `metistry remote set <provider>`. That is deliberate: a
 hand-written remote origin with a proxy pointed at the console's main port is
 the configuration X-103 found unsafe — the main listener honours this Mac's
 owner token for anything a tunnel carries. The record is the one way a remote
@@ -122,6 +128,12 @@ main port**, by name: *"<provider> is forwarding to the console's main port,
 which accepts this Mac's owner token. Run `metistry remote set <provider>`."*
 
 ## The verbs
+
+These verbs are the **owner's hand only**: the CLI runs as the person at the
+Mac, the assistant has no shell and no raw git (invariant 9) so it can never
+run them, and this ticket adds **no HTTP route** — nothing the console serves
+can change the record or reach a provider. The Mac app drives the same verbs
+over the CLI transport (plan §2.2, M20).
 
 Every verb takes `--instance <dir>` and `--json`; the writing ones preview
 without `--yes` (`--dry-run` is the same preview, and wins over `--yes`).

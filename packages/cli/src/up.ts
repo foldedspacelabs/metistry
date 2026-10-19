@@ -43,6 +43,7 @@ import {
   type EgressInput,
   type GitCredentialLookup,
 } from "@foldedspacelabs/metistry-core";
+import { droppedOriginsNote } from "./remote/rows.js";
 import { assistantEnv, consoleEnv, consoleOrigins, consolePort, dbPort, engineAbsentNote, engineStatus, instanceVars, loadDeployment, type ShapeContext } from "./deployment.js";
 import { doctor, renderTable, type DoctorDeps, type DoctorReport } from "./doctor.js";
 import type { Exec } from "./exec.js";
@@ -1290,7 +1291,9 @@ export async function up(opts: UpOptions): Promise<UpResult> {
         : `remote access: ${remote.provider}${remote.mode ? ` (${remote.mode})` : ""} — METISTRY_ORIGIN: ${origins.value ?? "(none)"}`,
     );
     if (origins.dropped.length > 0) {
-      r.note(`METISTRY_ORIGIN in .env also names ${origins.dropped.join(", ")}, which the remote-access record does not — not carried: a remote origin is configured by \`metistry remote set <provider>\`, never by editing .env (docs/ops/remote-access.md)`);
+      // the same sentence doctor's `remote:origins` row carries — this note is
+      // read only by someone watching `up`, and the row is where the rest see it
+      r.note(droppedOriginsNote(origins.dropped, remote));
     }
   }
   r.note(`node: ${le.node} (${chosenNode.why}) — every launchd job execs this`);

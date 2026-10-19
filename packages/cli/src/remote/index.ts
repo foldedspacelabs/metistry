@@ -37,7 +37,7 @@ import { defaultUi, statusName, type Ui } from "../ui.js";
 import type { AuthorizeOptions, Detection, ProviderOptions, RemoteChoice, RemoteContext, RemoteProvider, RemoteRow, Revoked } from "./provider.js";
 import { availableProviders, providerFor, remoteChoices, remoteContext, remoteRows, REMOTE_PROVIDERS_BUILT_IN, type RemoteRegistry } from "./rows.js";
 
-export { REMOTE_PROVIDERS_BUILT_IN, availableProviders, classifyUpstream, mainPortRemediation, providerFor, proxySocketPath, remoteChoices, remoteContext, remoteRows, sharedRemoteRows, type RemoteRegistry } from "./rows.js";
+export { REMOTE_PROVIDERS_BUILT_IN, availableProviders, classifyUpstream, droppedOriginsNote, mainPortRemediation, providerFor, proxySocketPath, remoteChoices, remoteContext, remoteRows, sharedRemoteRows, type RemoteRegistry } from "./rows.js";
 export { none, NONE_ROW_INFO } from "./none.js";
 export type { AuthorizeOptions, Configured, Detection, ProviderOptions, RemoteChoice, RemoteContext, RemoteProvider, RemoteRow, Revoked } from "./provider.js";
 

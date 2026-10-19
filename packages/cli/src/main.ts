@@ -1849,7 +1849,8 @@ async function dispatch(argv: string[], io: MainIo, notices: string[]): Promise<
         // set | off
         const provider = verb === "off" ? "none" : parseRemoteProviderId(positional[1]);
         if (!provider) {
-          err(`usage: metistry remote set <none|tailscale|relay|cloudflare|zrok|ngrok|port-forward> [provider flags] [--yes]${positional[1] !== undefined ? ` — ${JSON.stringify(positional[1])} is not one of them` : ""}`);
+          // the slot is NOT echoed: a token pasted where the provider's name goes must not be printed back
+          err(`usage: metistry remote set <none|tailscale|relay|cloudflare|zrok|ngrok|port-forward> [provider flags] [--yes]${positional[1] !== undefined ? " — that is not a known provider; the names are none, tailscale, relay, cloudflare, zrok, ngrok, port-forward" : ""}`);
           return 2;
         }
         // A VALUE in argv is refused without being repeated: a token pasted

@@ -4,7 +4,7 @@
 // record, revoke the old. A fake provider stands in for every adapter a later
 // ticket ships, so the ordering and the write-nothing-on-failure rule are
 // tested here once and inherited.
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -18,6 +18,7 @@ import { renderOrigins } from "../src/origins.js";
 import {
   applyRemoteToYaml,
   classifyUpstream,
+  droppedOriginsNote,
   mainPortRemediation,
   none,
   NONE_ROW_INFO,
@@ -84,7 +85,15 @@ function fakeProvider(o: FakeOptions): RemoteProvider {
       return [{ kind: "remote", name: `remote:${o.id}:own`, status: "ok", latency_ms: 0, probe: `${o.id}'s own row`, meta: { origin: ctx.record.origin ?? null } }];
     },
     async revoke(ctx) {
-      o.log.push(`revoke:${o.id}${ctx.dryRun ? ":dry" : ""}`);
+      // what the RECORD says at the moment revoke runs — the proof that the
+      // new provider was written before the old one is undone
+      let recorded = "absent";
+      try {
+        recorded = String((parseYamlish(readFileSync(join(ctx.instanceDir, ".metistry", "deployment.yaml"), "utf8")) as { remote?: { provider?: string } }).remote?.provider ?? "none");
+      } catch {
+        /* no file yet */
+      }
+      o.log.push(`revoke:${o.id}${ctx.dryRun ? ":dry" : ""}:record=${recorded}`);
       return { undone: [`the ${o.id} handler`], left_for_owner: [`the node in ${o.id}'s admin console`] };
     },
   };
@@ -207,9 +216,11 @@ describe("None — a fresh install (the ticket's acceptance)", () => {
     expect(err.join("\n")).toContain("tailscale isn't available in this version of Metistry");
     expect(err.join("\n")).toContain("the choices here today: none");
     expect(existsSync(deploymentPath(I))).toBe(false);
+    // the slot is not echoed — a token pasted where the provider goes must not print back
     const typo = io();
-    expect(await main(["remote", "set", "tailscail", "--product-dir", P, "--instance", I], typo.io)).toBe(2);
-    expect(typo.err.join("\n")).toContain('"tailscail" is not one of them');
+    expect(await main(["remote", "set", "zrk_pasted_in_the_wrong_slot", "--product-dir", P, "--instance", I], typo.io)).toBe(2);
+    expect(typo.err.join("\n")).toContain("not a known provider; the names are none, tailscale");
+    expect([...typo.out, ...typo.err].join("\n")).not.toContain("zrk_pasted");
   });
 });
 
@@ -242,6 +253,19 @@ describe("a token never arrives in argv (the `secrets set` rule)", () => {
       expect(err.join("\n")).toContain("never taken as an argument");
     }
     expect(existsSync(deploymentPath(I))).toBe(false);
+  });
+
+  it("`--dry-run` wins over `--yes`: nothing configured, written or revoked, and the preview line is printed", async () => {
+    const P = await checkout();
+    const I = await instance();
+    const log: string[] = [];
+    const providers: RemoteRegistry = { none, zrok: fakeProvider({ id: "zrok", origin: "https://a.share.zrok.io", log }) };
+    const { out, io: o } = io({ remoteProviders: providers, fetchFn: fakeNet(new Set(["https://a.share.zrok.io"])).fetchFn });
+    expect(await main(["remote", "set", "zrok", "--yes", "--dry-run", "--json", "--product-dir", P, "--instance", I], o)).toBe(0);
+    expect(log).toEqual(["detect:zrok"]);
+    expect(existsSync(deploymentPath(I))).toBe(false);
+    expect(out.join("\n")).toContain("preview only — pass --yes to do this.");
+    expect(JSON.parse(out.filter((l) => l.startsWith("{") || l.startsWith(" ") || l.startsWith("}")).join("\n"))).toMatchObject({ applied: false, provider: "zrok" });
   });
 
   it("a bare `--token` means read it from stdin: the switch itself carries no value", async () => {
@@ -320,14 +344,14 @@ describe("switching providers — a fake adapter exercises the ordering", () => 
     log.length = 0;
     const preview = await remoteSet({ ...opts, provider: "none", options: { flags: {} } });
     expect(preview.applied).toBe(false);
-    expect(log).toEqual(["revoke:zrok:dry"]); // the real None adapter is asked, and it logs nothing
+    expect(log).toEqual(["revoke:zrok:dry:record=zrok"]); // the real None adapter is asked, and it logs nothing
     expect(lines.join("\n")).toContain("phones added under https://a.share.zrok.io stop working");
     expect(lines.join("\n")).toContain("then undo at zrok: the zrok handler");
     expect(lines.join("\n")).toContain("left for you at zrok: the node in zrok's admin console");
     log.length = 0;
     const off = await remoteSet({ ...opts, provider: "none", options: { flags: {} }, yes: true });
     expect(off).toMatchObject({ from: "zrok", provider: "none", origin: null, applied: true, revoked: { undone: ["the zrok handler"], left_for_owner: ["the node in zrok's admin console"] } });
-    expect(log).toEqual(["revoke:zrok:dry", "revoke:zrok"]);
+    expect(log).toEqual(["revoke:zrok:dry:record=zrok", "revoke:zrok:record=none"]); // the record already says none when zrok is undone
     expect(parseDeployment(parseYamlish(await readFile(deploymentPath(I), "utf8"))).remote).toEqual({ provider: "none", settings: {} });
   });
 
@@ -344,8 +368,8 @@ describe("switching providers — a fake adapter exercises the ordering", () => 
 
     // ngrok never comes up: nothing written, zrok not revoked, zrok still the record
     await expect(remoteSet({ ...opts, provider: "ngrok", options: { flags: {} }, yes: true })).rejects.toThrow(/https:\/\/b\.ngrok-free\.dev hasn't answered from this Mac within 0 s .*nothing was written and zrok is still in place/);
-    expect(log).toEqual(["detect:ngrok", "revoke:zrok:dry", "configure:ngrok"]);
-    expect(log).not.toContain("revoke:zrok");
+    expect(log).toEqual(["detect:ngrok", "revoke:zrok:dry:record=zrok", "configure:ngrok"]);
+    expect(log.some((l) => l.startsWith("revoke:zrok:record="))).toBe(false);
     expect(probes.length).toBeGreaterThan(0);
     expect(probes.every((p) => p === "health:https://b.ngrok-free.dev")).toBe(true);
     expect(parseDeployment(parseYamlish(await readFile(deploymentPath(I), "utf8"))).remote?.provider).toBe("zrok");
@@ -356,9 +380,33 @@ describe("switching providers — a fake adapter exercises the ordering", () => 
     probes.length = 0;
     const r = await remoteSet({ ...opts, provider: "ngrok", options: { flags: {} }, yes: true });
     expect(r).toMatchObject({ from: "zrok", provider: "ngrok", applied: true, revoked: { undone: ["the zrok handler"] } });
-    expect(log).toEqual(["detect:ngrok", "revoke:zrok:dry", "configure:ngrok", "revoke:zrok"]);
+    // write BEFORE revoke: when zrok's revoke runs, deployment.yaml already names ngrok
+    expect(log).toEqual(["detect:ngrok", "revoke:zrok:dry:record=zrok", "configure:ngrok", "revoke:zrok:record=ngrok"]);
     expect(probes).toEqual(["health:https://b.ngrok-free.dev", "identity:https://b.ngrok-free.dev"]);
     expect(parseDeployment(parseYamlish(await readFile(deploymentPath(I), "utf8"))).remote).toMatchObject({ provider: "ngrok", origin: "https://b.ngrok-free.dev" });
+  });
+});
+
+describe("doctor's `remote:origins` row — a hand-written remote origin the record does not name", () => {
+  it("None plus a remote origin in .env: the None row stays ok and a degraded row names the origin, the stranded passkeys and the honest interim", async () => {
+    const P = await checkout();
+    const I = await instance();
+    const rows = await remoteRows({ deployment: { shape: "launchd", services: {} }, productDir: P, instanceDir: I, env: { METISTRY_INSTANCE_DIR: I, METISTRY_ORIGIN: "https://studio.ts.net,http://127.0.0.1:8080" }, fetchFn: fakeNet(new Set()).fetchFn, exec: fakeExec(), platform: "darwin", uid: 501 });
+    expect(rows.map((r) => `${r.name}=${r.status}`)).toEqual(["remote=ok", "remote:origins=degraded"]);
+    const row = rows[1]!;
+    expect(row.remediation).toContain("METISTRY_ORIGIN in .env also names https://studio.ts.net, which the remote-access record (none) does not");
+    expect(row.remediation).toContain("passkeys added at https://studio.ts.net no longer sign in");
+    expect(row.remediation).toContain("Until a provider adapter ships (Tailscale, X-106)");
+    expect(row.meta).toMatchObject({ provider: "none", dropped: ["https://studio.ts.net"], origins: ["http://127.0.0.1:8080"] });
+    // the same sentence `up` prints
+    expect(droppedOriginsNote(["https://studio.ts.net"], REMOTE_NONE)).toBe(row.remediation);
+    // nothing dropped: no row
+    const clean = await remoteRows({ deployment: { shape: "launchd", services: {} }, productDir: P, instanceDir: I, env: { METISTRY_INSTANCE_DIR: I, METISTRY_ORIGIN: "http://127.0.0.1:8080" }, fetchFn: fakeNet(new Set()).fetchFn, exec: fakeExec(), platform: "darwin", uid: 501 });
+    expect(clean.map((r) => r.name)).toEqual(["remote"]);
+    // through doctor: degraded never fails the report
+    const report = await doctor({ productDir: P, env: { METISTRY_INSTANCE_DIR: I, METISTRY_ORIGIN: "https://studio.ts.net" }, deployment: { shape: "compose", services: {} }, fetchFn: fakeNet(new Set()).fetchFn, db: null, exec: fakeExec({ docker: () => ({ code: 127, stdout: "", stderr: "not found" }) }), platform: "linux", uid: 501, appPath: null });
+    expect(report.ok).toBe(true);
+    expect(report.rows.find((r) => r.name === "remote:origins")?.status).toBe("degraded");
   });
 });
 

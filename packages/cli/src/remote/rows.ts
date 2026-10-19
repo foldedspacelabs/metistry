@@ -10,7 +10,7 @@
 // fails it by name.
 
 import { REMOTE_PROVIDERS, instanceStatePath, remoteOf, runCheck, type Deployment, type RemoteProviderId, type RemoteRecord } from "@foldedspacelabs/metistry-core";
-import { consolePort, consoleProxyPort } from "../deployment.js";
+import { consoleOrigins, consolePort, consoleProxyPort } from "../deployment.js";
 import { realExec, type Exec } from "../exec.js";
 import { readInstanceId } from "../instance.js";
 import { checkOriginReachable } from "../origins.js";
@@ -189,6 +189,34 @@ export async function sharedRemoteRows(ctx: RemoteContext, provider: RemoteProvi
   return rows;
 }
 
+/** The one sentence for a remote origin someone wrote into `.env` that the record does not name — `up`'s note and doctor's row say the same thing. */
+export function droppedOriginsNote(dropped: readonly string[], record: RemoteRecord): string {
+  const which = dropped.join(", ");
+  const interim =
+    record.provider === "none"
+      ? "Until a provider adapter ships (Tailscale, X-106), there is no supported way to serve that origin: a tunnel to the console's main port is the configuration the proxy listener closed, and it is not honoured."
+      : `A remote origin is configured by \`metistry remote set ${record.provider}\`, never by editing .env.`;
+  return `METISTRY_ORIGIN in .env also names ${which}, which the remote-access record (${record.provider}) does not — not carried, so the console does not answer for it and passkeys added at ${which} no longer sign in. ${interim} Remove it from .env to clear this row (docs/ops/remote-access.md).`;
+}
+
+/**
+ * One `degraded` row when `.env` names a remote origin the record does not:
+ * `up` prints the same sentence, but `up` runs under `update` and launchd
+ * where nobody reads it — doctor is the surface the owner sees.
+ */
+async function droppedOriginsRow(record: RemoteRecord, env: NodeJS.ProcessEnv): Promise<RemoteRow | undefined> {
+  const origins = consoleOrigins({ env, remote: record });
+  if (origins.dropped.length === 0) return undefined;
+  return {
+    kind: "remote",
+    ...(await runCheck("remote:origins", "every remote origin METISTRY_ORIGIN names in .env is one the remote-access record configures", async () => ({
+      status: "degraded",
+      remediation: droppedOriginsNote(origins.dropped, record),
+      meta: { provider: record.provider, dropped: origins.dropped, origins: origins.value ? origins.value.split(",") : [] },
+    }))),
+  };
+}
+
 // ---- doctor's `remote` kind ------------------------------------------------------
 
 export interface RemoteRowsOptions {
@@ -232,10 +260,12 @@ export async function remoteRows(o: RemoteRowsOptions): Promise<RemoteRow[]> {
   }
   const instanceId = o.instanceId ?? (await readInstanceId(o.instanceDir).catch(() => undefined));
   const ctx = remoteContext({ productDir: o.productDir, instanceDir: o.instanceDir, env: o.env, record, instanceId, exec: o.exec, fetchFn: o.fetchFn, platform: o.platform, uid: o.uid, timeoutMs: o.timeoutMs });
-  if (provider.id === "none") return provider.status(ctx);
+  const dropped = await droppedOriginsRow(record, o.env);
+  const tail = dropped ? [dropped] : [];
+  if (provider.id === "none") return [...(await provider.status(ctx)), ...tail];
   try {
     const detection = await provider.detect(ctx);
-    return [...(await sharedRemoteRows(ctx, provider, detection)), ...(await provider.status(ctx))];
+    return [...(await sharedRemoteRows(ctx, provider, detection)), ...(await provider.status(ctx)), ...tail];
   } catch (err) {
     return [
       {

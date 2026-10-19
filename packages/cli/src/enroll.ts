@@ -24,7 +24,8 @@
 
 import { readFile } from "node:fs/promises";
 import { parse as parseYaml } from "yaml";
-import { cancelEnrollmentCode, finishRun, instanceFile, mintEnrollmentCode, startRun, type CancelEnrollmentOutcome } from "@foldedspacelabs/metistry-core";
+import { cancelEnrollmentCode, finishRun, instanceFile, mintEnrollmentCode, REMOTE_NONE, remoteSchema, startRun, type CancelEnrollmentOutcome, type RemoteRecord } from "@foldedspacelabs/metistry-core";
+import { consoleOrigins } from "./deployment.js";
 import { openDbFromEnv, type Db } from "./doctor.js";
 import { readInstanceId } from "./instance.js";
 import { checkOriginReachable, checkOriginShape, firstOrigin, type EnrollRefusal } from "./origins.js";
@@ -47,17 +48,46 @@ export {
   type ReachabilityOptions,
 } from "./origins.js";
 
-/** `remote.provider` from the instance's `deployment.yaml` (§2.23), when the file has one; never throws. */
-export async function readRemoteProvider(instanceDir: string | undefined): Promise<string | undefined> {
+/**
+ * The remote-access record from the instance's `deployment.yaml` (§2.23):
+ * the `remote:` block as core's schema reads it, `none` when the file or the
+ * block is absent. Undefined only when there is no instance directory to
+ * consult, or the file does not parse — never throws, because a refusal must
+ * be a sentence about the origin, not a stack trace about YAML.
+ */
+export async function readRemoteRecord(instanceDir: string | undefined): Promise<RemoteRecord | undefined> {
   if (!instanceDir) return undefined;
+  let doc: unknown;
   try {
-    const doc = parseYaml(await readFile(instanceFile(instanceDir, "deployment"), "utf8")) as unknown;
-    const remote = doc !== null && typeof doc === "object" ? (doc as { remote?: unknown }).remote : undefined;
-    const provider = remote !== null && typeof remote === "object" ? (remote as { provider?: unknown }).provider : undefined;
-    return typeof provider === "string" && provider.trim() !== "" ? provider.trim() : undefined;
-  } catch {
+    doc = parseYaml(await readFile(instanceFile(instanceDir, "deployment"), "utf8"));
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return REMOTE_NONE;
     return undefined;
   }
+  const remote = doc !== null && typeof doc === "object" ? (doc as { remote?: unknown }).remote : undefined;
+  if (remote === undefined || remote === null) return REMOTE_NONE;
+  const parsed = remoteSchema.safeParse(remote);
+  return parsed.success ? parsed.data : undefined;
+}
+
+/** `remote.provider` from the instance's `deployment.yaml` (§2.23), when the file has one; never throws. */
+export async function readRemoteProvider(instanceDir: string | undefined): Promise<string | undefined> {
+  const record = await readRemoteRecord(instanceDir);
+  return record === undefined || record.provider === "none" ? undefined : record.provider;
+}
+
+/**
+ * The origin the phone opens — the FIRST entry of `METISTRY_ORIGIN` as the
+ * console actually runs with it (plan §2.23, "How the origin flows"): derived
+ * from the remote-access record exactly as `metistry up` derives it
+ * (`consoleOrigins`), so a recorded provider's origin comes first and a
+ * hand-written remote origin beside `remote: none` is not minted for — the
+ * console would refuse that ceremony anyway. With no instance directory there
+ * is no record to consult, and the environment is taken as written.
+ */
+export function enrollOrigin(env: NodeJS.ProcessEnv, record: RemoteRecord | undefined): string | undefined {
+  if (record === undefined) return firstOrigin(env);
+  return firstOrigin({ METISTRY_ORIGIN: consoleOrigins({ env, remote: record }).value });
 }
 
 export interface EnrollOptions {
@@ -104,10 +134,14 @@ async function withDb<T>(opts: { env: NodeJS.ProcessEnv; db?: Db | undefined }, 
  * lands in `runs` (`auth` / `enroll`) like every add and remove (§2.22).
  */
 export async function enroll(opts: EnrollOptions): Promise<EnrollResult> {
-  const origin = firstOrigin(opts.env);
+  // the record first: the origin the phone opens is the one the console runs
+  // with, which `up` derives from deployment.yaml's remote: block, not .env
+  const record = await readRemoteRecord(opts.instanceDir);
+  const origin = enrollOrigin(opts.env, record);
   const shape = checkOriginShape(origin);
   if (!shape.ok) return { kind: "refused", refusal: shape.refusal };
-  const [instanceId, provider] = await Promise.all([opts.instanceDir ? readInstanceId(opts.instanceDir) : Promise.resolve(undefined), readRemoteProvider(opts.instanceDir)]);
+  const instanceId = opts.instanceDir ? await readInstanceId(opts.instanceDir) : undefined;
+  const provider = record === undefined || record.provider === "none" ? undefined : record.provider;
   const unreachable = await checkOriginReachable(shape.url, { fetchFn: opts.fetchFn, instanceId, provider, timeoutMs: opts.timeoutMs });
   if (unreachable) return { kind: "refused", refusal: unreachable };
   return withDb(opts, async (db) => {

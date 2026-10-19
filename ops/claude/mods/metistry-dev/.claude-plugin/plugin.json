@@ -1,0 +1,8 @@
+{
+  "name": "metistry-dev",
+  "version": "0.1.0",
+  "description": "Metistry dev mod (spike): writes the agent-brief commit trailer by construction and shows a read-only merge-queue / open-PR pane.",
+  "author": {
+    "name": "Folded Space Labs"
+  }
+}

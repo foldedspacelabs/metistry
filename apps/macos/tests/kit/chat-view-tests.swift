@@ -48,35 +48,50 @@ import Testing
     #expect(ChatArrival.of(newReplies: 1, isAtBottom: true) == .follow)
 
     // …and in a window: scrolled to the top, a reply arrives, the view does not move.
+    //
+    // Nothing below waits a fixed time or a counted number of polls. The suite
+    // runs eight hundred tests on one main actor, so the run loop that lays a
+    // window out can be a long way behind: every step waits on the state it
+    // needs (the layout reached, the scroll landed), against a deadline
+    // measured in seconds, never in turns of a loop.
     let window = host(ChatView(model: model, assistantName: "Aide", clock: ClockTime(timeZone: utc), calendar: utcCalendar), size: CGSize(width: 900, height: 560))
     defer { window.close() }
+    let scroll = try await eventuallyFound(in: window) {
+        scrollViews(in: $0).max { $0.documentView?.frame.height ?? 0 < $1.documentView?.frame.height ?? 0 }
+    }
     // the first paint lands at the end; wait for it to settle there
-    try await waitUntil(seconds: 5) { scrollViews(in: window.contentView!).contains { ($0.documentView?.frame.height ?? 0) > 1000 && $0.contentView.bounds.origin.y > 0 } }
-    let scroll = try #require(scrollViews(in: window.contentView!).max { $0.documentView?.frame.height ?? 0 < $1.documentView?.frame.height ?? 0 })
-    try await waitUntil(seconds: 5) { model.isAtBottom }
-    try await Task.sleep(for: .milliseconds(200))
+    try await eventually(in: window) { (scroll.documentView?.frame.height ?? 0) > 1000 && scroll.isAtEnd && model.isAtBottom }
+    try await settled(scroll, in: window)
+    #expect(model.isAtBottom && scroll.isAtEnd, "the first paint did not stay at the end")
+    #expect(!model.showsNewReplyPill, "the first paint left the pill from the model-only half showing")
     // the reader scrolls up to the top
     scroll.contentView.scroll(to: .zero)
     scroll.reflectScrolledClipView(scroll.contentView)
-    try await waitUntil(seconds: 5) { !model.isAtBottom }
-    try await Task.sleep(for: .milliseconds(200))
+    try await eventually(in: window) { !model.isAtBottom }
+    try await settled(scroll, in: window)
     #expect(!model.isAtBottom, "at the top of thirty turns, the reader is not at the bottom")
     #expect(scroll.contentView.bounds.origin.y == 0)
     let origin = scroll.contentView.bounds.origin
-    let pillsBefore = model.followRequests
+    let heightBefore = scroll.documentView?.frame.height ?? 0
+    let followsBefore = model.followRequests
 
     console.append(ChatConsole.message(26, .reply, "another reply while you read", at: 26 * 60))
     model.transcript.invalidate()
     await model.tick()
-    try await Task.sleep(for: .milliseconds(400))
+    // the arrival is on the page before the viewport is judged: a judgement
+    // made before the new row is laid out would pass whatever the view did
+    try await eventually(in: window) { (scroll.documentView?.frame.height ?? 0) > heightBefore }
+    try await settled(scroll, in: window)
     #expect(scroll.contentView.bounds.origin == origin, "the viewport moved: \(origin) → \(scroll.contentView.bounds.origin)")
-    #expect(model.followRequests == pillsBefore)
+    #expect(model.followRequests == followsBefore)
     #expect(model.showsNewReplyPill)
 
     // The pill, pressed, is the one thing that scrolls.
     model.jumpToNewReply()
-    try await Task.sleep(for: .milliseconds(400))
+    try await eventually(in: window) { scroll.contentView.bounds.origin.y > origin.y }
+    try await settled(scroll, in: window)
     #expect(scroll.contentView.bounds.origin.y > origin.y, "the pill did not take the reader to the reply")
+    #expect(scroll.isAtEnd, "the pill did not take the reader to the end")
 }
 
 @Test func theDotsHoldFlatUnderReduceMotion() throws {
@@ -802,6 +817,73 @@ private func waitUntil(seconds: Double = 2, _ condition: @escaping () -> Bool) a
         try await Task.sleep(for: .milliseconds(10))
     }
     Issue.record("timed out waiting")
+}
+
+/// Whether a scroll view shows the transcript's end: the document's last
+/// content, which sits the transcript's bottom padding above its edge (the view
+/// scrolls the end marker to the bottom of the viewport, not the padding).
+extension NSScrollView {
+    @MainActor
+    fileprivate var isAtEnd: Bool {
+        guard let document = documentView else { return false }
+        return contentView.bounds.maxY >= document.frame.height - MetistrySpace.s5 - 2
+    }
+}
+
+/// Gives the window's layout and display passes their turn, as the run loop
+/// would between two events, so a wait is on the screen's state rather than on
+/// how soon a loaded run loop gets round to it.
+@MainActor
+private func pump(_ window: NSWindow) async throws {
+    window.contentView?.layoutSubtreeIfNeeded()
+    window.displayIfNeeded()
+    try await Task.sleep(for: .milliseconds(10))
+}
+
+/// Waits until `condition` holds, pumping the window between looks. The bound
+/// is wall-clock and wide: it exists so a broken view fails, not so a busy
+/// machine does.
+@MainActor
+private func eventually(in window: NSWindow, seconds: Double = 60, _ condition: @MainActor () -> Bool) async throws {
+    let deadline = ContinuousClock.now + .seconds(seconds)
+    while !condition() {
+        if ContinuousClock.now > deadline {
+            Issue.record("timed out waiting after \(seconds) s")
+            return
+        }
+        try await pump(window)
+    }
+}
+
+@MainActor
+private func eventuallyFound<T>(in window: NSWindow, seconds: Double = 60, _ find: @MainActor (NSView) -> T?) async throws -> T {
+    let deadline = ContinuousClock.now + .seconds(seconds)
+    while true {
+        if let content = window.contentView, let found = find(content) { return found }
+        if ContinuousClock.now > deadline { throw TimedOut() }
+        try await pump(window)
+    }
+}
+
+private struct TimedOut: Error {}
+
+/// Waits until the scroll view has stopped changing: its position and its
+/// document's height the same across several passes of the window's layout.
+@MainActor
+private func settled(_ scroll: NSScrollView, in window: NSWindow, passes: Int = 8, seconds: Double = 60) async throws {
+    let deadline = ContinuousClock.now + .seconds(seconds)
+    var last: (CGPoint, CGFloat)?
+    var steady = 0
+    while steady < passes {
+        if ContinuousClock.now > deadline {
+            Issue.record("the scroll view never settled after \(seconds) s")
+            return
+        }
+        try await pump(window)
+        let now = (scroll.contentView.bounds.origin, scroll.documentView?.frame.height ?? 0)
+        steady = (last.map { $0 == now } ?? false) ? steady + 1 : 0
+        last = now
+    }
 }
 
 /// Watches the main actor from a thread of its own. A main actor that has not

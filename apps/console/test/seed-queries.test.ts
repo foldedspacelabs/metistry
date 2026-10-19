@@ -645,7 +645,7 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
     const tag = `rc${Date.now()}`;
     const repo = `${tag}-repo`;
     const page = `Projects/${tag}x.md`; // slug: `<tag>x`
-    const remote = `github.com/${tag}/repo`;
+    const remote = `github.com/org/${repo}`; // a remote ends in the checkout's name, or the same-project arm is closed
     const [folded, waiting] = [`Inbox/claude-code-session-${tag}-f.md`, `Inbox/claude-code-session-${tag}-w.md`];
     const anchorRun = await pool.query(
       `INSERT INTO runs (component, kind, ok, ts, meta) VALUES ('knowledge-fold', 'routine_run', true, now() - interval '2 hours', '{"folded":"true"}') RETURNING id`,

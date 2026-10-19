@@ -100,11 +100,23 @@ repository. The query alone cannot tell who is asking, so its default is the
 safe arm (`unfolded: false`: folded sessions only), and the briefing calls
 core's `recentSessionsForCaller` instead of the query:
 
+0. **`repo` must agree with `remote`.** The checkout's basename is the last
+   segment of the remote (`github.com/org/Metistry` -> `metistry`,
+   case-insensitive; core's `repoAgreesWithRemote`). Membership is proved
+   against the remote while sessions are selected by the basename, so
+   without this tie an agent in project A could send A's remote with another
+   checkout's name and be handed that checkout's waiting sessions. When they
+   disagree, the function does not even resolve a project: folded sessions
+   only. A checkout the owner named differently from its remote gets the
+   folded arm for the same reason.
 1. `project_for_repo {remote}` (X-130) resolves the repository to the one
    project page that claims it — or none, or *ambiguous*, which is none.
 2. The page's file name is the project slug (`Projects/Drey Mascot.md` →
    `drey-mascot`, core's `projectSlugForPage`); the agent is in the project
-   when that slug is in its `agents.projects`.
+   when that slug is in its `agents.projects`. **`callerProjects` must be read
+   from the authenticated agent's record (`agents.projects`), never from the
+   request** (body, query string, header): a caller that names its own
+   projects can name any.
 3. Only then does it ask `recent_sessions` with `unfolded: true`, and it drops
    any row still waiting for the fold whenever step 2 did not hold. No
    remote, no page, no membership: folded sessions only.
@@ -115,11 +127,15 @@ core's `recentSessionsForCaller` instead of the query:
    overlay might add to the query. The caller's knowledge grant narrows the
    result by path (`canSee`).
 
-A session captured by an agent credential is on neither arm. A limit worth
+A session captured by an agent credential is on neither arm. Limits worth
 knowing: a session names its checkout by basename, not by remote, so two
-checkouts with the same directory name share one `repo` match; the same-project
-arm is therefore as exact as the basename, and a repository the owner keeps
-under two names is two repositories until a capture records its remote.
+checkouts with the same directory name share one `repo` match. The agreement
+rule above narrows this for generic names (`app`, `web`): the unfolded arm
+opens only when the remote itself ends in that name. And the slug rule folds
+`Drey Mascot.md`, `Drey-Mascot.md` and `drey_mascot.md` into one project
+(`drey-mascot`); the pages are owner-named, so the impact is low, and an
+explicit `project:` frontmatter on the page is a candidate ruling for the
+owner, not built here.
 
 The summariser exists twice on purpose: the plugin ships as dependency-free
 `.mjs` a stranger runs out of `~/.claude/plugins`, so it cannot import

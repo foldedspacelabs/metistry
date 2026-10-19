@@ -1439,6 +1439,7 @@ export {
   callerInProjectOf,
   projectSlugForPage,
   recentSessionsForCaller,
+  repoAgreesWithRemote,
   selectSessionHandles,
   toSessionHandle,
   type NamedQueryRunner,

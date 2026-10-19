@@ -22,6 +22,7 @@
 
 import { FIRST_PROMPT_CHARS, MAX_FILES, clip } from "./session-summary.js";
 import { PROJECT_SLUG_RE } from "./projects.js";
+import { normalizeRepoRemote } from "./repo-remote.js";
 
 /** One earlier session as an agent is handed it. A closed shape: add a field here and the tests say so. */
 export interface SessionHandle {
@@ -67,6 +68,24 @@ export function projectSlugForPage(path: string | null | undefined): string | nu
 export function callerInProjectOf(page: string | null | undefined, callerProjects: readonly string[]): boolean {
   const slug = projectSlugForPage(page);
   return slug !== null && callerProjects.includes(slug);
+}
+
+/**
+ * Does the checkout basename agree with the remote? The last path segment of
+ * the canonical remote (`github.com/org/Repo` -> `repo`) must equal `repo`,
+ * case-insensitively. Project membership is proved against the remote while
+ * sessions are selected by the basename, and they are two inputs: without
+ * this tie, an agent in project A could send A's remote with another
+ * checkout's name and be handed that checkout's waiting sessions. A checkout
+ * the owner named differently from its remote therefore gets folded sessions
+ * only: the safe side. It also narrows a generic directory name (`app`,
+ * `web`) to repositories whose remote ends the same way.
+ */
+export function repoAgreesWithRemote(repo: string, remote: string | null | undefined): boolean {
+  const canon = normalizeRepoRemote(remote);
+  if (!canon) return false;
+  const last = canon.slice(canon.lastIndexOf("/") + 1).toLowerCase();
+  return last !== "" && last === repo.trim().toLowerCase();
 }
 
 const text = (v: unknown): string | null => (typeof v === "string" ? v : null);
@@ -118,7 +137,12 @@ export interface RecentSessionsRequest {
   repo: string;
   /** The repository's git remote, in any clone spelling; absent = no project, so folded sessions only. */
   remote?: string | null;
-  /** Projects the calling agent belongs to (`agents.projects`). */
+  /**
+   * Projects the calling agent belongs to (`agents.projects`). MUST come from
+   * the AUTHENTICATED agent's record, never from the request body, a query
+   * string or a header the caller can set: a caller that names its own
+   * projects can name any.
+   */
   callerProjects: readonly string[];
   days?: number;
   limit?: number;
@@ -130,14 +154,15 @@ export interface RecentSessionsRequest {
  * project page (`project_for_repo` — the one page that claims the remote, or
  * none), asks `recent_sessions` for the unfolded arm only when that page's
  * project is one of the caller's, and filters the answer again on the way
- * out. An unmapped repository, an ambiguous one (two pages claim it), and a
+ * out. An unmapped repository, an ambiguous one (two pages claim it), a
+ * `repo` that does not agree with the `remote` (`repoAgreesWithRemote`), and a
  * caller outside the project all fall to the same place: folded sessions
- * only.
+ * only. `callerProjects` is the authenticated agent's own record.
  */
 export async function recentSessionsForCaller(run: NamedQueryRunner, req: RecentSessionsRequest): Promise<SessionHandle[]> {
   if (!req.repo.trim()) return [];
   let allowUnfolded = false;
-  if (req.remote && req.remote.trim()) {
+  if (req.remote && req.remote.trim() && repoAgreesWithRemote(req.repo, req.remote)) {
     const page = (await run("project_for_repo", { remote: req.remote }))[0];
     allowUnfolded = callerInProjectOf(text(page?.path), req.callerProjects);
   }

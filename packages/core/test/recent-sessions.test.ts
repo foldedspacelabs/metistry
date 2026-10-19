@@ -11,6 +11,7 @@ import {
   callerInProjectOf,
   projectSlugForPage,
   recentSessionsForCaller,
+  repoAgreesWithRemote,
   selectSessionHandles,
   toSessionHandle,
   type NamedQueryRunner,
@@ -80,6 +81,27 @@ describe("recentSessionsForCaller", () => {
     // a caller with no projects
     const nobody = stub({ projectPage: "Projects/Metistry.md", rows: [FOLDED, WAITING] });
     expect((await recentSessionsForCaller(nobody.run, { repo: "metistry", remote: "github.com/o/metistry", callerProjects: [] })).map((h) => h.path)).toEqual([FOLDED.path]);
+  });
+
+  it("project A's remote with another checkout's name gets folded rows only", async () => {
+    // the agent is in project `metistry`, whose remote is sent, but asks for the sessions of the checkout `other-checkout`
+    const s = stub({ projectPage: "Projects/Metistry.md", rows: [row({ repo: "other-checkout" }), row({ path: "Inbox/w.md", repo: "other-checkout", first_prompt: "OTHER-CHECKOUT-WAITING", folded: false })] });
+    const got = await recentSessionsForCaller(s.run, { repo: "other-checkout", remote: "git@github.com:org/Metistry.git", callerProjects: ["metistry"] });
+    expect(got.map((h) => h.folded)).toEqual([true]);
+    expect(JSON.stringify(got)).not.toContain("OTHER-CHECKOUT-WAITING");
+    expect(s.calls.map((c) => c.name)).toEqual(["recent_sessions"]); // never even resolved a project
+    expect(s.calls[0]!.params.unfolded).toBe(false);
+    // the same remote with the checkout it names, in another spelling and case, is the same-project arm
+    const same = stub({ projectPage: "Projects/Metistry.md", rows: [FOLDED, WAITING] });
+    expect((await recentSessionsForCaller(same.run, { repo: "METISTRY", remote: "https://GitHub.com/org/metistry.git/", callerProjects: ["metistry"] })).map((h) => h.folded)).toEqual([true, false]);
+  });
+
+  it("repoAgreesWithRemote: the remote's last segment, case-insensitively, and nothing it cannot read", () => {
+    expect(repoAgreesWithRemote("Metistry", "git@github.com:org/metistry.git")).toBe(true);
+    expect(repoAgreesWithRemote("metistry", "ssh://git@host.example:2222/g/sub/Metistry/")).toBe(true);
+    for (const [repo, remote] of [["app", "github.com/org/metistry"], ["", "github.com/org/x"], ["metistry", "metistry"], ["metistry", null], ["metistry", "github.com/metistry/other"]] as const) {
+      expect(repoAgreesWithRemote(repo, remote), `${repo} ${remote}`).toBe(false);
+    }
   });
 
   it("an agent in the same project is also handed the sessions still waiting for the fold", async () => {

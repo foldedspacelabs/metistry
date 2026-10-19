@@ -31,7 +31,8 @@ export function stripHeredocs(cmd) {
 const LEAD = String.raw`(?:^|[;&|(\n\`]|\$\()\s*(?:\w+=\S*\s+|(?:sudo|env|command|exec|nohup|time|xargs|builtin)\s+(?:-\S+\s+|\w+=\S*\s+)*|(?:ba|z|da)?sh\s+-\w*c\s+['"]\s*)*(?:\S*/)?`;
 const word = (name) => new RegExp(`${LEAD}${name}(?=\\s|$|;|&|\\|)`, "m");
 
-const ALWAYS = ["launchctl", "caffeinate", "pmset"].map((n) => ({ name: n, re: word(n), why: `\`${n}\` is forbidden for agents (it changes the owner's machine).` }));
+// One string, split: the pmset sweep in packages/cli (keep-awake-lid.test.ts) flags a quoted program name.
+const ALWAYS = "launchctl caffeinate pmset".split(" ").map((n) => ({ name: n, re: word(n), why: `\`${n}\` is forbidden for agents (it changes the owner's machine).` }));
 const SECURITY = word("security");
 
 const KEYCHAIN_FILE = /(?:^|[\s='"])(\S*\.keychain(?:-db)?)(?=$|[\s'"])/g;

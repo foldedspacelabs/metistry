@@ -71,9 +71,29 @@ else
   say "notarytool submit --wait  (keychain profile \"$profile\")"
 fi
 
-submit_out="$(xcrun notarytool submit "$artifact" "${creds[@]}" --wait 2>&1 | tee /dev/stderr)" || true
-submission_id="$(printf '%s\n' "$submit_out" | grep -oE '^\s*id: [0-9a-f-]{36}' | head -1 | awk '{print $2}')"
-status="$(printf '%s\n' "$submit_out" | grep -oE '^\s*status: .*' | tail -1 | awk '{print $2}')"
+# Apple's side drops the connection now and then (v0.17.1: NSURLErrorDomain
+# -1005 "The network connection was lost", then "The validate action failed!
+# Error 68", after a good build and sign). Only that — a transport failure
+# that never got a verdict from Apple — is retried: 3 attempts, 60 s apart
+# (METISTRY_NOTARY_RETRY_DELAY overrides the gap, for tests). Any submission
+# status at all (Invalid, Rejected, …) is a verdict and fails at once below.
+transport_re='NSURLErrorDomain.*Code=-(1005|1001|1009|1004)|network connection was lost|request timed out|The validate action failed|Error 68'
+attempts=3
+delay="${METISTRY_NOTARY_RETRY_DELAY:-60}"
+attempt=1
+while :; do
+  submit_out="$(xcrun notarytool submit "$artifact" "${creds[@]}" --wait 2>&1 | tee /dev/stderr)" || true
+  submission_id="$(printf '%s\n' "$submit_out" | grep -oE '^\s*id: [0-9a-f-]{36}' | head -1 | awk '{print $2}')" || true
+  status="$(printf '%s\n' "$submit_out" | grep -oE '^\s*status: .*' | tail -1 | awk '{print $2}')" || true
+  [ "$status" = "Accepted" ] && break
+  if [ -z "$status" ] && [ "$attempt" -lt "$attempts" ] && printf '%s\n' "$submit_out" | grep -qE "$transport_re"; then
+    say "notarytool hit a network/transport error (attempt $attempt of $attempts) — retrying in ${delay}s"
+    sleep "$delay"
+    attempt=$((attempt + 1))
+    continue
+  fi
+  break
+done
 if [ "$status" != "Accepted" ]; then
   say "notarization status: ${status:-unknown} (submission ${submission_id:-unknown})"
   if [ -n "$submission_id" ]; then

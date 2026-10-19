@@ -84,6 +84,18 @@ describe.skipIf(!hasDb)("Settings' Mac-only rows: the route refuses a passkey se
     expect(who.session_id).toBeDefined();
   });
 
+  it("**X-99: the doors the phone's model and pause controls call are open to the passkey session and shut to no credential** — the session is never turned away at the gate, and no cookie is a 401", async () => {
+    const doors: [string, string][] = [
+      ["POST", "/api/compute/assign"], ["POST", "/api/scheduled/routines/probe/pause"], ["POST", "/api/scheduled/routines/probe/resume"], ["PUT", "/api/scheduled/syncs/probe"],
+    ];
+    for (const [method, path] of doors) {
+      const init = { method, headers: { "content-type": "application/json" }, body: "{}" };
+      expect((await fetch(base + path, init)).status, `${method} ${path} with no credential`).toBe(401);
+      const res = await fetch(base + path, { ...init, headers: { ...init.headers, cookie } });
+      expect([401, 403], `${method} ${path} with the passkey session answered ${res.status}`).not.toContain(res.status);
+    }
+  });
+
   it("the served PWA carries no request to a `local` route: the page and settings.js as a browser gets them", async () => {
     for (const path of ["/", "/settings.js", "/app.js", "/more.js"]) {
       const res = await fetch(base + path);

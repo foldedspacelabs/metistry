@@ -14,6 +14,9 @@ import { CLIENT_API, isLocalRoute, routeKey, servedRoute } from "@foldedspacelab
 import {
   MAC_ONLY_ROUTES,
   OFFLINE_SETTING,
+  assignmentRowHtml,
+  modelChoices,
+  scheduledRowHtml,
   SETTINGS_GROUPS,
   devicesRowsHtml,
   limitSummary,
@@ -36,6 +39,8 @@ const RECORDED: Record<string, Record<string, unknown>> = {
   "/api/whoami": { ...fixture("get-api-whoami"), via: "passkey_session", session_id: 2 },
   "/api/status": fixture("get-api-status"),
   "/api/compute": fixture("get-api-compute"),
+  "/api/compute/models": fixture("get-api-compute-models"),
+  "/api/scheduled": fixture("get-api-scheduled"),
   "/api/projects": fixture("get-api-projects"),
   "/api/devices": fixture("get-api-devices"),
   "/api/connections": fixture("get-api-connections"),
@@ -357,5 +362,215 @@ describe("live (T7-7): Settings refetches on what changes it, and never under an
     await m.click({ act: "cancel" });
     await m.view.refresh();
     expect(m.b.calls.length).toBeGreaterThan(reads);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// X-99 — the phone's writable rows have controls
+// ---------------------------------------------------------------------------
+
+/** What the phone may write, as `METHOD path` — the whole of it, so a new door is a decision in this list. */
+const PHONE_WRITES = [
+  "POST /api/compute/assign", "POST /api/compute/budget", "PUT /api/projects/x",
+  "POST /api/scheduled/routines/x/pause", "POST /api/scheduled/routines/x/resume", "PUT /api/scheduled/syncs/x",
+  "POST /api/devices/x/revoke",
+];
+
+describe("**the phone changes the model and pauses a routine through the existing routes**", () => {
+  it("the assistant's model: Change reads the providers' models once, then Save is the assign door for `default` with the ref and the effort", async () => {
+    const m = mounted({ write: () => ({ body: { ok: true, target: "assignments.default", provider: "lmstudio", model: "qwen", effort: "high" } }) });
+    await m.view.settings();
+    expect(m.page()).toContain('data-act="edit-model"');
+    expect(m.b.calls.map((c) => c.path)).not.toContain("/api/compute/models"); // the live lists are asked for on Change, never by the page
+    await m.click({ act: "edit-model" });
+    expect(m.b.calls.filter((c) => c.path === "/api/compute/models").length).toBe(1);
+    expect(m.page()).toContain('data-form="model"');
+    expect(m.page()).toContain('<optgroup label="lmstudio">');
+    expect(m.page()).toContain('<option value="lmstudio/gemma" selected>gemma</option>'); // the current one, selected
+    expect(m.page()).toContain('<option value="openrouter/anthropic/claude-sonnet-5">anthropic/claude-sonnet-5</option>'); // the id after the provider keeps its own slashes
+    expect(m.page()).not.toContain('value="ollama/'); // a provider that is switched off is not offered
+    expect(m.page()).toContain('<option value="medium" selected>Medium</option>');
+    expect(m.b.writes()).toEqual([]);
+    m.b.$("model-ref").value = "lmstudio/qwen";
+    m.b.$("model-effort").value = "high";
+    await m.submit({ form: "model" });
+    expect(m.b.writes()).toEqual([{ path: "/api/compute/assign", method: "POST", headers: {}, body: { tier: "default", model: "lmstudio/qwen", effort: "high" } }]);
+    expect(m.b.$("settings-head").innerHTML).toContain("Saved — Aide uses lmstudio/qwen at high effort.");
+    expect(m.page()).not.toContain('data-form="model"');
+  });
+
+  it("the effort can change when the providers cannot be listed — and a refusal is said in the server's words", async () => {
+    const m = mounted({
+      reads: { "/api/compute/models": { status: 503, body: { error: { code: "not_available", message: "no provider answered" } } } },
+      write: () => ({ status: 400, body: { error: { code: "invalid_request", message: "providers.lmstudio is switched off (enabled: false)" } } }),
+    });
+    await m.view.settings();
+    await m.click({ act: "edit-model" });
+    expect(m.page()).toContain("Couldn't list the models — no provider answered. The effort can still change.");
+    expect(m.page()).toContain('<option value="lmstudio/gemma" selected>gemma</option>');
+    m.b.$("model-ref").value = "lmstudio/gemma";
+    m.b.$("model-effort").value = "low";
+    await m.submit({ form: "model" });
+    expect(m.page()).toContain("providers.lmstudio is switched off (enabled: false)");
+  });
+
+  it("nothing is sent that could only fail: no model chosen where none is assigned, or an effort that is not one", async () => {
+    const compute = { ...RECORDED["/api/compute"], assignments: [] };
+    const m = mounted({ reads: { "/api/compute": { body: compute } } });
+    await m.view.settings();
+    expect(m.page()).toContain("not assigned");
+    await m.click({ act: "edit-model" });
+    expect(m.page()).toContain('<option value="" selected>Choose a model</option>');
+    m.b.$("model-ref").value = "";
+    await m.submit({ form: "model" });
+    expect(m.page()).toContain("Not saved — choose a model.");
+    m.b.$("model-ref").value = "lmstudio/qwen";
+    m.b.$("model-effort").value = "extreme";
+    await m.submit({ form: "model" });
+    expect(m.page()).toContain("Not saved — effort is low, medium or high.");
+    expect(m.b.writes()).toEqual([]);
+  });
+
+  it("when the console says it cannot write compute.yaml, there is no Change to press", () => {
+    expect(assignmentRowHtml({ ...RECORDED["/api/compute"], writable: false }, "Aide")).not.toContain("<button");
+    expect(assignmentRowHtml(RECORDED["/api/compute"], "Aide")).toContain('data-act="edit-model"');
+  });
+
+  it("Cancel while the models are still being read closes the form and nothing is sent", async () => {
+    const m = mounted();
+    await m.view.settings();
+    const pending = m.click({ act: "edit-model" });
+    await m.click({ act: "cancel" });
+    await pending;
+    expect(m.page()).not.toContain('data-form="model"');
+    expect(m.b.writes()).toEqual([]);
+  });
+
+  it("the choices: a switched-off provider and one that did not answer are left out; the current model is always there", () => {
+    const compute = RECORDED["/api/compute"];
+    const models = { providers: [{ name: "lmstudio", ok: true, models: ["a"] }, { name: "openrouter", ok: false, models: [] }, { name: "ollama", ok: true, models: ["z"] }] };
+    expect(modelChoices(models, compute).map((g) => [g.provider, g.refs])).toEqual([["lmstudio", ["lmstudio/gemma", "lmstudio/a"]]]);
+  });
+
+  it("Scheduled's pause: a routine is paused through its pause door and resumed through its resume door, the list read again each time", async () => {
+    const m = mounted();
+    await m.view.settings();
+    expect(m.page()).toContain('data-act="pause" data-kind="routine" data-name="morning-brief"');
+    await m.click({ act: "pause", kind: "routine", name: "morning-brief" });
+    await m.click({ act: "resume", kind: "routine", name: "morning-brief" });
+    expect(m.b.writes().map((c) => [c.method, c.path, c.body])).toEqual([
+      ["POST", "/api/scheduled/routines/morning-brief/pause", {}],
+      ["POST", "/api/scheduled/routines/morning-brief/resume", {}],
+    ]);
+    expect(m.b.calls.filter((c) => c.path === "/api/scheduled").length).toBe(3); // the page's own read, then one after each
+    expect(m.b.$("settings-rest").innerHTML).toContain("Morning Brief is running again.");
+  });
+
+  it("a sync is paused and resumed through the sync door with `paused` — the Mac's own call", async () => {
+    const m = mounted();
+    await m.view.settings();
+    await m.click({ act: "pause", kind: "sync", name: "devin-sessions" });
+    await m.click({ act: "resume", kind: "sync", name: "devin-sessions" });
+    expect(m.b.writes().map((c) => [c.method, c.path, c.body])).toEqual([
+      ["PUT", "/api/scheduled/syncs/devin-sessions", { paused: true }],
+      ["PUT", "/api/scheduled/syncs/devin-sessions", { paused: false }],
+    ]);
+  });
+
+  it("a paused routine reads Resume and says paused; a refusal is said in the server's words, and the row stays as the console has it", async () => {
+    const scheduled = fixture("get-api-scheduled") as { routines: Record<string, unknown>[] };
+    const paused = { ...scheduled, routines: scheduled.routines.map((r) => (r.name === "standup" ? { ...r, paused: { value: true, origin: "yours" } } : r)) };
+    const m = mounted({ reads: { "/api/scheduled": { body: paused } }, write: () => ({ status: 400, body: { error: { code: "invalid_request", message: "scheduled.yaml does not validate" } } }) });
+    await m.view.settings();
+    const row = scheduledRowHtml((paused.routines as Record<string, unknown>[]).find((r) => r.name === "standup"), "routine");
+    expect(row).toContain("paused");
+    expect(row).toContain('data-act="resume"');
+    await m.click({ act: "pause", kind: "routine", name: "morning-brief" });
+    expect(m.page()).toContain("Morning Brief was not paused — scheduled.yaml does not validate.");
+  });
+
+  it("a pause in flight is not sent twice", async () => {
+    const m = mounted();
+    await m.view.settings();
+    const first = m.click({ act: "pause", kind: "routine", name: "standup" });
+    const second = m.click({ act: "pause", kind: "routine", name: "standup" });
+    await Promise.all([first, second]);
+    expect(m.b.writes().length).toBe(1);
+  });
+
+  it("Scheduled's pause is not offered offline, and says so", async () => {
+    const m = mounted({ offline: true });
+    await m.view.settings();
+    expect(m.page()).toMatch(/data-act="pause"[^>]*data-needs-connection/);
+    await m.click({ act: "pause", kind: "routine", name: "standup" });
+    await m.click({ act: "edit-model" });
+    expect(m.b.writes()).toEqual([]);
+    expect(m.page()).toContain(OFFLINE_SETTING);
+    expect(m.page()).not.toContain('data-form="model"');
+  });
+});
+
+describe("**no Secrets or provider control is drawn**", () => {
+  it("every control the page draws is one the phone is meant to have — pressing all of them, the requests are exactly the PHONE_WRITES doors", async () => {
+    const m = mounted();
+    await m.view.settings();
+    const pressed = new Set<string>();
+    for (let round = 0; round < 4; round++) {
+      for (const tag of m.page().matchAll(/<button[^>]*data-act="([^"]+)"([^>]*)>/g)) {
+        const data: Record<string, string> = { act: tag[1]! };
+        for (const a of tag[2]!.matchAll(/data-([a-z]+)="([^"]*)"/g)) if (a[1] !== "needs") data[a[1]!] = a[2]!.replaceAll("&quot;", '"').replaceAll("&amp;", "&");
+        const key = JSON.stringify(data);
+        if (pressed.has(key) || data.act === "cancel" || data.act === "view") continue;
+        pressed.add(key);
+        await m.click(data);
+      }
+    }
+    expect([...pressed].some((k) => k.includes("edit-model"))).toBe(true);
+    expect([...pressed].some((k) => k.includes('"pause"'))).toBe(true);
+    const sent = m.b.writes().map((c) => `${c.method} ${c.path.replaceAll(/\/(?:routines|syncs|projects|devices)\/[^/]+/g, (seg) => `/${seg.split("/")[1]}/x`)}`);
+    for (const s of sent) expect(PHONE_WRITES, s).toContain(s);
+    expect(sent.length).toBeGreaterThan(0);
+  });
+
+  it("the Compute and Secrets groups draw no provider, key or base-URL control and no way to set, replace or remove a secret — on any state of the page", async () => {
+    const m = mounted();
+    await m.view.settings();
+    await m.click({ act: "edit-model" });
+    for (const id of ["compute", "secrets", "variables"]) {
+      const group = new RegExp(`<ul class="group settings-group" id="set-${id}"[\\s\\S]*?</ul>`).exec(m.page())?.[0] ?? "";
+      expect(group.length, id).toBeGreaterThan(0);
+      expect(group, id).not.toMatch(/type="(?:password|url|file)"|name="(?:key|secret|base_url|api_key)"|data-act="(?:set|replace|remove|add|test)[^"]*"/i);
+    }
+    const secrets = /<ul class="group settings-group" id="set-secrets"[\s\S]*?<\/ul>/.exec(m.page())?.[0] ?? "";
+    expect(secrets).not.toMatch(/<button|<form|<input|<select/);
+    // the model form is two menus and Save — no text field a key or a URL could be typed into
+    const form = /<form class="setting-form" data-form="model"[\s\S]*?<\/form>/.exec(m.page())?.[0] ?? "";
+    expect(form).not.toMatch(/<input/);
+    expect([...form.matchAll(/<select id="([^"]+)"/g)].map((x) => x[1])).toEqual(["model-ref", "model-effort"]);
+  });
+
+  it("settings.js sends only the PHONE_WRITES — read off every request in its source; no provider test, unassign, secret or variable door", () => {
+    const writes = requestsIn(SETTINGS_SRC).filter((r) => r.method !== "GET").map((r) => `${r.method} ${r.path}`);
+    // not vacuous: the scan sees every door the phone writes through…
+    expect(writes.sort()).toEqual([
+      "POST /api/compute/assign", "POST /api/compute/budget", "POST /api/devices/x/revoke", "POST /api/scheduled/routines/x/pause",
+      "POST /api/scheduled/routines/x/resume", "PUT /api/projects/x", "PUT /api/scheduled/syncs/x",
+    ].sort());
+    // …and each is one of the doors the phone is meant to have
+    for (const w of writes) expect(PHONE_WRITES, w).toContain(w);
+    const code = SETTINGS_SRC.replace(/^\s*\/\/.*$/gm, "").replace(/local: \[[^\]]*\]/g, "");
+    expect(code).not.toMatch(/\/api\/compute\/(?:providers|unassign|catalogue)|\/api\/secrets["`'][^)]*method|\/api\/variables/);
+    expect(code).toContain("/api/compute/assign");
+  });
+
+  it("the doors the phone writes through are served, and none is `local` — so the gate lets a passkey session reach them and the Mac-only list stays exactly the `local` routes", () => {
+    for (const w of PHONE_WRITES) {
+      const [method, path] = w.split(" ") as [string, string];
+      const row = servedRoute(method, path);
+      expect(row, w).toBeDefined();
+      expect(isLocalRoute(row!), w).toBe(false);
+    }
+    // and the doors that would widen the boundary are `local` or have no phone control
+    for (const w of ["PUT /api/scheduled/routines/x/assignment", "POST /api/scheduled/routines"]) expect(isLocalRoute(servedRoute(...(w.split(" ") as [string, string]))!), w).toBe(true);
   });
 });

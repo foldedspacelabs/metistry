@@ -279,9 +279,15 @@ public struct RequestRow: Codable, Sendable, Equatable, Identifiable {
     /// What this request mirrors — `{kind, external_ref, person}` (migration
     /// 0027, T1-8) — or nil for a request an agent or the assistant raised.
     public let source: RequestSource?
+    /// The card this row is answered as, when it shares one with others — a
+    /// recording's notes and to-dos carry `meeting:<session id>` (migration
+    /// 0027, T8-7; served on `GET /api/proposals` since #476). Nil for a row
+    /// that stands alone, and for a console that predates the column.
+    public let groupID: String?
 
     enum CodingKeys: String, CodingKey {
         case id, ts, kind, trust, payload, decision, cursor, request, source
+        case groupID = "group_id"
         case sourceAgent = "source_agent"
         case decidedAt = "decided_at"
         case workID = "work_id"
@@ -305,9 +311,12 @@ public struct RequestRow: Codable, Sendable, Equatable, Identifiable {
         // costs the row its reading, never the whole queue (P5).
         request = try? c.decodeIfPresent(RequestShape.self, forKey: .request)
         source = try? c.decodeIfPresent(RequestSource.self, forKey: .source)
+        // An empty group is no group: one blank id would make unrelated rows one card.
+        let group = (try? c.decodeIfPresent(String.self, forKey: .groupID)) ?? nil
+        groupID = group.flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 }
     }
 
-    public init(id: Int, ts: String, kind: String, payload: JSONValue? = nil, decision: String? = "pending", cursor: String? = nil, snoozedUntil: String? = nil, sourceAgent: String? = nil, trust: String? = nil, decidedAt: String? = nil, workID: Int? = nil, request: RequestShape? = nil, source: RequestSource? = nil) {
+    public init(id: Int, ts: String, kind: String, payload: JSONValue? = nil, decision: String? = "pending", cursor: String? = nil, snoozedUntil: String? = nil, sourceAgent: String? = nil, trust: String? = nil, decidedAt: String? = nil, workID: Int? = nil, request: RequestShape? = nil, source: RequestSource? = nil, groupID: String? = nil) {
         self.id = id
         self.ts = ts
         self.kind = kind
@@ -321,6 +330,7 @@ public struct RequestRow: Codable, Sendable, Equatable, Identifiable {
         self.workID = workID
         self.request = request
         self.source = source
+        self.groupID = groupID
     }
 
     public var isPending: Bool { (decision ?? "pending") == "pending" }

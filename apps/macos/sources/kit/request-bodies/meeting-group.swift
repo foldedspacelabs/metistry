@@ -1,7 +1,9 @@
 // A meeting is one card (screen 3 §10.3; C81; §2.12): its notes and to-dos
 // are separate requests that share one group id, and the card answers them
-// together. Which rows are one meeting is the list's to say (`group_id` —
-// not yet on `GET /api/proposals`); this file takes the parts it is given.
+// together. Which rows are one meeting is the list's to say: rows that share
+// a `group_id` on `GET /api/proposals` (T8-7) are one card, and a row without
+// one is a card of its own (`MeetingGroup.cards`); past that, this file takes
+// the parts it is given.
 //
 // ACCEPT ALL IS NOT A BATCH. `POST /api/proposals/batch` refuses Approve on
 // purpose — each approval has its own consequence — so Accept All is one
@@ -55,6 +57,37 @@ public struct MeetingGroup: Sendable, Equatable, Identifiable {
             let facets = part.payload.flatMap { BodyReading.todo($0) }?.facets ?? TaskFacets()
             return TodoItem(RequestReading(part, assistantName: assistantName).ask, facets: facets)
         }
+    }
+}
+
+/// One card of the queue: a request on its own, or a meeting's parts together.
+public enum QueueCard: Sendable, Equatable, Identifiable {
+    case request(RequestRow)
+    case meeting(MeetingGroup)
+
+    public var id: String {
+        switch self {
+        case .request(let row): return "request:\(row.id)"
+        case .meeting(let group): return "group:\(group.id)"
+        }
+    }
+}
+
+public extension MeetingGroup {
+    /// The queue as cards, in the order given (a group stands where its first
+    /// row does). Rows that share a `group_id` are ONE card; a row with no
+    /// group is a card each — it is never joined to another by what it says.
+    static func cards(_ rows: [RequestRow]) -> [QueueCard] {
+        var members: [String: [RequestRow]] = [:]
+        for row in rows { if let id = row.groupID { members[id, default: []].append(row) } }
+        var placed: Set<String> = []
+        var cards: [QueueCard] = []
+        for row in rows {
+            guard let id = row.groupID else { cards.append(.request(row)); continue }
+            guard placed.insert(id).inserted else { continue }
+            cards.append(.meeting(MeetingGroup(id: id, parts: members[id] ?? [row])))
+        }
+        return cards
     }
 }
 
@@ -243,7 +276,8 @@ public final class GroupAnswering {
         let patched = RequestRow(
             id: current.id, ts: current.ts, kind: current.kind, payload: current.payload, decision: current.decision,
             cursor: current.cursor, snoozedUntil: current.snoozedUntil, sourceAgent: current.sourceAgent, trust: current.trust,
-            decidedAt: current.decidedAt, workID: current.workID, request: current.request, source: current.source ?? part.source
+            decidedAt: current.decidedAt, workID: current.workID, request: current.request, source: current.source ?? part.source,
+            groupID: current.groupID ?? part.groupID
         )
         group = MeetingGroup(id: group.id, parts: group.parts.map { $0.id == part.id ? patched : $0 })
         seen[part.id] = proposal.string("changed_at") ?? fresh.ts

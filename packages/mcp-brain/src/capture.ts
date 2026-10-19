@@ -246,11 +246,20 @@ export async function captureToInbox(db: Db, sink: CaptureSink | string, input: 
     return { id: Number(rows[0]?.id), path: rel, sha256: sha };
   } catch (err) {
     // 23505 = unique_violation on (principal, key): two attempts raced past
-    // the lookup above. The other one's row wins; this file never existed.
+    // the lookup above. The other one's row wins; this file never existed —
+    // unless it IS the winner's file. Names are `<ms>-<name>`, so two
+    // attempts in one millisecond put the same path; the winner's insert
+    // (ON CONFLICT on path) and this one's can then meet on the idempotency
+    // index instead, and removing "our" file would delete the winner's,
+    // leaving its row pointing at nothing. Remove only a file the winning
+    // row does not name.
     if (idem && (err as { code?: string }).code === "23505") {
-      await dest.remove(rel);
       const prior = await findByIdempotency(db, idem);
-      if (prior) return prior;
+      if (prior) {
+        if (prior.path !== rel) await dest.remove(rel);
+        return prior;
+      }
+      await dest.remove(rel);
     }
     throw err;
   }

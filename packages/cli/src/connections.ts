@@ -197,6 +197,7 @@ export function renderConnections(rows: ConnectionRow[]): string {
     if (r.reach) out.push(`    reaches  ${reachLine(r.reach)}`);
     if (r.reach) out.push(`    tools    ${toolCounts(r)}`);
     out.push(`    used by  ${r.used_by.length ? r.used_by.map((u) => `${u.kind} ${u.name}`).join(", ") : "nobody yet"}`);
+    out.push(`    checked  ${r.last_checked ? `${r.last_checked.at} — ${r.last_checked.status}` : "never"}`);
     for (const i of r.issues) out.push(`    ! ${i}`);
   }
   return out.join("\n");
@@ -205,7 +206,10 @@ export function renderConnections(rows: ConnectionRow[]): string {
 export function renderConnectionDetail(d: ConnectionDetail): string {
   const out = [renderConnections([d]), `    file     ${d.file}`];
   if (d.description) out.push(`    about    ${d.description}`);
-  if (d.reach?.class === "http" && (d.reach.headers.length || d.reach.query.length)) out.push(`    sends    ${[...d.reach.headers.map((h) => `header ${h}`), ...d.reach.query.map((q) => `query ${q}`)].join(", ")}`);
+  if (d.reach?.class === "http" && (d.reach.headers.length || d.reach.query.length)) {
+    const header = (h: { header: string; secrets: string[] }) => `header ${h.header}${h.secrets.length ? ` (${h.secrets.join(", ")})` : ""}`;
+    out.push(`    sends    ${[...d.reach.header_secrets.map(header), ...d.reach.query.map((q) => `query ${q}`)].join(", ")}`);
+  }
   if (d.reach?.class === "command" && d.reach.env.length) out.push(`    env      ${d.reach.env.join(", ")} (given to this command only; never written to disk)`);
   if (d.secrets.length) out.push(`    secrets  ${d.secrets.join(", ")}`);
   if (d.variables.length) out.push(`    vars     ${d.variables.join(", ")}`);

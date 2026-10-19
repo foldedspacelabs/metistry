@@ -163,7 +163,10 @@ Databases are made and dropped only through core's `recreateScratchDb` /
 `dropScratchDb` (its `template` option is this), so every name is held to the
 rules `testDb()` applies, and the base is cut back when a long checkout name
 plus a long package name would pass Postgres's 63 characters — a visible cut
-rather than the server's silent one.
+rather than the server's silent one. Every scratch database — the shared one
+`test-db.sh` makes and each copy — is `ALTER DATABASE … SET timezone = 'UTC'`,
+so a suite sees the same clock as CI whatever zone the server runs in: a
+"30 days out" is 30 × 24 hours on a Mac in November too.
 
 Why: until 2026-10-18 the root script was `pnpm -r --workspace-concurrency=1
 run test` against the one database, and a `--no-file-parallelism` appended to

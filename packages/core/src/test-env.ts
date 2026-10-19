@@ -442,11 +442,17 @@ export async function testDb<P extends TestDbPool>(Pool: TestDbPoolConstructor<P
  * `postgres` this takes never leaves the function, the name is validated
  * exactly as `testDb`'s is, and a suffix is required: the shared scratch
  * database every other suite is using is out of reach. With `template`, the
- * new database is a copy of that one rather than empty.
+ * new database is a copy of that one rather than empty. Either way it is
+ * set to answer in UTC, as the shared scratch database is.
  */
 export async function recreateScratchDb<P extends TestDbPool>(Pool: TestDbPoolConstructor<P>, opts: RecreateScratchDbOptions): Promise<string> {
   const template = opts.template === undefined ? "" : ` TEMPLATE "${scratchTemplateName(opts)}"`;
-  return onMaintenanceDb(Pool, opts, (name) => [`DROP DATABASE IF EXISTS "${name}"`, `CREATE DATABASE "${name}"${template}`]);
+  // Deterministic in time: a scratch database answers in UTC whatever the
+  // server's own zone (CI's is UTC; a developer's Mac is not), so a "30 days
+  // out" is 30 × 24 hours on every machine, DST or no. A per-database setting
+  // is not copied by TEMPLATE, so each copy sets its own — as test-db.sh does
+  // for the shared one.
+  return onMaintenanceDb(Pool, opts, (name) => [`DROP DATABASE IF EXISTS "${name}"`, `CREATE DATABASE "${name}"${template}`, `ALTER DATABASE "${name}" SET timezone = 'UTC'`]);
 }
 
 /** `opts.template`, or a refusal: it is a database this helper would itself be allowed to create, and never an install's. */

@@ -352,23 +352,23 @@ describe("recreateScratchDb / dropScratchDb", () => {
     expect(made).toEqual([]);
   });
 
-  it("drop and create only <scratch><suffix>, over a maintenance connection that is ended before returning", async () => {
+  it("drop and create only <scratch><suffix> — set to UTC — over a maintenance connection that is ended before returning", async () => {
     const { Pool, made } = fakePg();
     expect(await recreateScratchDb(Pool, { env: dbEnv(), suffix: "_mig", ...NO_INSTALL })).toBe(`${SCRATCH}_mig`);
     await dropScratchDb(Pool, { env: dbEnv(), suffix: "_mig", ...NO_INSTALL });
     expect(made.map((m) => ({ database: m.config.database, max: m.config.max, sql: m.sql, ended: m.ended }))).toEqual([
-      { database: "postgres", max: 1, sql: [`DROP DATABASE IF EXISTS "${SCRATCH}_mig"`, `CREATE DATABASE "${SCRATCH}_mig"`], ended: true },
+      { database: "postgres", max: 1, sql: [`DROP DATABASE IF EXISTS "${SCRATCH}_mig"`, `CREATE DATABASE "${SCRATCH}_mig"`, `ALTER DATABASE "${SCRATCH}_mig" SET timezone = 'UTC'`], ended: true },
       { database: "postgres", max: 1, sql: [`DROP DATABASE IF EXISTS "${SCRATCH}_mig"`], ended: true },
     ]);
   });
 });
 
 describe("recreateScratchDb with a template — the workspace runner's per-package copy", () => {
-  it("copies the shared scratch database instead of starting empty", async () => {
+  it("copies the shared scratch database instead of starting empty, and sets the copy to UTC (a TEMPLATE does not carry the setting over)", async () => {
     const { Pool, made } = fakePg();
     expect(await recreateScratchDb(Pool, { env: dbEnv(), suffix: "_core", template: SCRATCH, ...NO_INSTALL })).toBe(`${SCRATCH}_core`);
     expect(made.map((m) => ({ database: m.config.database, sql: m.sql, ended: m.ended }))).toEqual([
-      { database: "postgres", sql: [`DROP DATABASE IF EXISTS "${SCRATCH}_core"`, `CREATE DATABASE "${SCRATCH}_core" TEMPLATE "${SCRATCH}"`], ended: true },
+      { database: "postgres", sql: [`DROP DATABASE IF EXISTS "${SCRATCH}_core"`, `CREATE DATABASE "${SCRATCH}_core" TEMPLATE "${SCRATCH}"`, `ALTER DATABASE "${SCRATCH}_core" SET timezone = 'UTC'`], ended: true },
     ]);
   });
 

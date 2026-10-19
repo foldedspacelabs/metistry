@@ -158,7 +158,7 @@ once every instance on the Mac has its copy.
 `--instance <dir>` says which instance; `--env-file` targets a `.env`
 other than `<instance>/state/.env`.
 
-## `metistry doctor [--json] [--product-dir <checkout>]`
+## `metistry doctor [--check | --fix [--yes]] [--json] [--product-dir <checkout>]`
 
 Generic over manifests (invariant 5). It walks `collectors/`, `routines/`,
 `packages/*/manifest.yaml`, `apps/*/manifest.yaml` and `targets/` in the
@@ -188,6 +188,13 @@ Output is a table — `name`, `kind`, `status` (`ok` | `degraded` | `failed` |
 **Exit code 0 when nothing is `failed`**; `degraded` and `absent` are
 informational (a bridge that is not configured degrades absent by design).
 `--json` prints `{ as_of, product_dir, ok, rows: CheckResult & { kind } }`.
+
+Doctor also **repairs**: in a terminal a bare `metistry doctor` applies every row's
+fix that is doctor's to make (asking once for a fix that moves files or restarts a
+running service) and re-checks once; `--check` is read-only; `--fix [--yes]` repairs
+without a terminal. A row says who puts it right — `fixable`, or `your hand` with the
+exact step — and `--json` adds `mode`, a `fix` class on every row and, in fix mode,
+`fixes[]`. The whole contract is in `docs/ops/cli.md` of the repository.
 
 ## `metistry up [--no-compose] [--no-launchd] [--dry-run] [--product-dir <checkout>]`
 

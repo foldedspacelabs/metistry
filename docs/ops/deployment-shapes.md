@@ -36,7 +36,8 @@ namespaced instance's block says otherwise (`metistry up` renders it into the
 console's job environment, like `METISTRY_CONSOLE_PORT`; under compose the
 host side of the published port is the variable, the container side is
 `8081`). A provider must never be pointed at the main port; `doctor` fails
-one that is (X-105).
+one that is, and `metistry remote` is how a provider is chosen and pointed at
+the proxy listener (`docs/ops/remote-access.md`).
 
 ## Status: `launchd` is trialled end to end (2026-09-10)
 

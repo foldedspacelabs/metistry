@@ -2,7 +2,7 @@
 
 `packages/cli` (`@foldedspacelabs/metistry-cli`, plan §4.16: `init | doctor
 | up | update`, plus the install verbs the Mac app drives — `connect-repo`,
-`secrets`, `identity`, `version` and `deployment`,
+`secrets`, `identity`, `version`, `deployment` and `remote`,
 `docs/product/desktop-app-plan.md` — and the per-service verbs its menu bar
 drives: `restart | stop | start | logs`, below) is the operator's front door.
 All of them are real.
@@ -27,6 +27,11 @@ All of them are real.
 | `deployment [--json]` | the effective shape (D4 overlay) and the services it implies, with cheap running state |
 | `deployment set-shape <compose\|launchd>` | write the instance's `.metistry/deployment.yaml` through the reconciler, preview-then-confirm |
 | `deployment set-keep-awake [<never\|allow_sleep_on_battery\|always\|always_lid_closed>] [--enabled\|--sleep-on-battery\|--sleep-lid-closed true\|false]` | whether this install holds the Mac awake, on which power, and whether a closed lid should stay awake (macOS); the same protected write; the lid setting is stored and never applied — only an administrator's `pmset` delivers it |
+| `remote [status] [--json]` | how your phone reaches this Mac (plan §2.23, M20): the `remote:` record of `.metistry/deployment.yaml`, the origins it renders into `METISTRY_ORIGIN`, the chooser, and doctor's `remote` rows — `docs/ops/remote-access.md` |
+| `remote set <none\|tailscale\|relay\|cloudflare\|zrok\|ngrok\|port-forward> [provider flags] [--yes] [--timeout <s>]` | choose a provider: preview without `--yes`; with it, configure the new one, wait for its origin to answer from this Mac, write the record (the same protected write), then revoke the old — a failed set-up writes nothing; a token comes on stdin (`--token`), never as an argument |
+| `remote authorize <tailscale\|cloudflare> [--no-browser] [--timeout 300]` | a provider's own browser sign-in, where it has one |
+| `remote test [--json]` | the provider's state and `GET <origin>/health` from this Mac naming this instance (step 6 of the guided flow) |
+| `remote off [--yes]` | back to None, running the old provider's revoke |
 | `vault settings [--push <after_commit\|manual\|<n>m\|<n>h>] [--pull <n>m\|<n>h] [--yes] [--json]` | the vault's git sync policy (M18): when the reconciler pushes and pulls; the same protected write |
 | `vault rollback <commit> \| --to <date> \| --file <path> [--to <date>] [--include-config] \| --request <id>` | roll the vault back (M18): a Needs You request with the preview; Approve makes one new commit as `user`; configuration only with `--include-config` |
 | `migrate-layout [--dry-run] [--json] [--allow-dirty]` | carry an instance from the legacy layout to the flat one: the directory becomes the vault, the machinery moves under `.metistry/`, stored paths lose `Knowledge/` |
@@ -2035,6 +2040,64 @@ the `user` principal, edited as a YAML document so your comments survive, and
 judged exactly as the reader will before anything is written. `list --json`
 prints the rows `GET /api/connections` serves; `show --json` the body of `GET
 /api/connections/:name` (`docs/ops/client-api.md`).
+
+## Reaching this Mac from outside: `metistry remote`
+
+```
+metistry remote [status] [--json] [--instance <dir>]
+metistry remote set <none|tailscale|relay|cloudflare|zrok|ngrok|port-forward> [provider flags] [--yes] [--dry-run] [--timeout <seconds>] [--json]
+metistry remote authorize <tailscale|cloudflare> [--no-browser] [--timeout 300] [--json]
+metistry remote test [--json]
+metistry remote off [--yes] [--json]
+```
+
+How the owner's phone reaches this Mac (plan §2.23, M20; the whole story is
+`docs/ops/remote-access.md`). Every install starts at **None**: nothing is
+exposed, `METISTRY_ORIGIN` is the loopback origin alone, and `metistry enroll`
+refuses naming Settings ▸ Remote Access. The record is the `remote:` block of
+the instance's `.metistry/deployment.yaml` — `provider`, `mode`, the `origin`
+it yields and non-secret `settings` (where it forwards to, a node name, a
+tunnel id); **no credential is in it**. It is a §4.7 protected path, written
+through the reconciler as `user` with preview-then-confirm, exactly as
+`deployment set-keep-awake` and `vault settings` write theirs.
+
+`metistry up` **derives** `METISTRY_ORIGIN` from the record: the provider's
+origin first, the loopback origin second — or, with None, the loopback origin
+alone. A remote origin hand-written into `.env` beside `remote: none` is not
+carried, and `up` says so: a tunnel at the console's **main** port is the
+configuration X-103 found unsafe, so the record is the one way a remote origin
+is configured.
+
+**`set`** previews without `--yes` (what `detect` found, what would change,
+which phones the change strands, what the old provider's revoke would undo and
+leave for you). With `--yes`, in this order: configure the new provider (a
+throw writes nothing); wait up to `--timeout` (default 120 s) for the new
+origin to answer from this Mac (never: nothing written, nothing revoked);
+write the record; revoke the old provider. So the phone is never left with
+nothing mid-change. **`off`** is `set none` with the old provider's revoke.
+A provider this version has no adapter for is refused by name, with the
+choices that exist — this release ships None; the others arrive with their
+own tickets.
+
+**A token never arrives in argv.** `--token` is a switch meaning *read it
+from stdin* (piped, or typed hidden at a prompt in a terminal — the
+`secrets set` reader). `--token abc`, `--token=abc`, or a value pasted after
+the provider's name is refused with exit 2 and is not echoed.
+
+**`remote --json`** is one document: `provider`, `mode`, `origin`,
+`settings`, `from` (which file the record came from), `origins` (the rendered
+`METISTRY_ORIGIN` list), `dropped_origins`, `available` (the ids this release
+can run), `choices` (the chooser's rows, in the plan's order, each with
+`available`), `rows` (doctor's `remote` rows) and `ok`. Exit 1 when a row is
+`failed`. `remote set --json` prints `{from, provider, origin, applied,
+detail, revoked?, detection}`.
+
+**Doctor's `remote` kind.** None is one `ok` row — *"Remote access: none.
+Your phone can't reach this Mac. Choose a way in Settings ▸ Remote Access."*
+Every provider gets *tool present*, *proxy listener* — **`failed` when its
+recorded upstream is the console's main port**: *"<provider> is forwarding to
+the console's main port, which accepts this Mac's owner token. Run `metistry
+remote set <provider>`."* — and *answers from this Mac*, then its own rows.
 
 ## Adding a phone: `metistry enroll`
 

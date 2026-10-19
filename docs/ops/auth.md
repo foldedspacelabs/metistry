@@ -628,7 +628,7 @@ ceremony answers 401 with a reason naming both sides:
 
 ```json
 {"error":{"code":"unauthenticated","message":"origin mismatch: this console
- expects https://metis.example or https://metis.tailnet.ts.net, the browser
+ expects https://assistant.example or https://assistant.tailnet.ts.net, the browser
  presented https://elsewhere.example — set METISTRY_ORIGIN to the origin you
  actually load"}}
 ```
@@ -637,7 +637,7 @@ and a passkey presented where it was not added:
 
 ```json
 {"error":{"code":"unauthenticated","message":"rpID mismatch: this passkey was
- added for metis.tailnet.ts.net, the browser presented https://metis.example
+ added for assistant.tailnet.ts.net, the browser presented https://assistant.example
  — a passkey signs in only where it was added; add this device again there"}}
 ```
 

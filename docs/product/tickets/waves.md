@@ -239,7 +239,7 @@ Generated from `docs/product/design-build-plan.md` by `ops/scripts/tickets.mjs`.
 
 - [ ] **W5 checkpoint** — merged, main green, scratch-instance upgrade, conformance test, Mac smoke, release · waiting on X-97 (todo), X-1 (todo)
 
-## W4 candidates — 68 tickets, 125 agent-days, no wave yet
+## W4 candidates — 96 tickets, 157.5 agent-days, no wave yet
 
 Follow-ups specified in the plan (§3.2's *Candidates* row) that nobody has scheduled. The owner assigns each one a wave at a checkpoint; until then none is dispatched.
 
@@ -311,3 +311,31 @@ Follow-ups specified in the plan (§3.2's *Candidates* row) that nobody has sche
 - [x] [X-132](x/x-132.md) · `connections_call` folds a large answer · M · opus
 - [x] [X-133](x/x-133.md) · `connect claude-code` reads as well as writes · S · sonnet
 - [ ] [X-134](x/x-134.md) · `connect --remove`, and a reconnect after a revoke · M · opus · after X-133 · **blocked**
+- [ ] [X-135](x/x-135.md) · The Mac's accessibility text probes read macOS 27 · S · sonnet
+- [ ] [X-136](x/x-136.md) · The Mac tests wait on state, never on a count · M · opus · after X-28
+- [ ] [X-137](x/x-137.md) · A fresh install's `up` applies the pending migrations · M · opus · after X-123
+- [ ] [X-138](x/x-138.md) · `init --shape launchd` prints a second instance's own ports · S · sonnet
+- [ ] [X-139](x/x-139.md) · The fixture recorder's fixed work ids advance the sequence · S · sonnet
+- [ ] [X-140](x/x-140.md) · Two DB-backed suites leave their siblings' rows alone · S · sonnet · after X-25
+- [ ] [X-141](x/x-141.md) · Every capture attempt names its own file · S · sonnet
+- [ ] [X-142](x/x-142.md) · The `.env` render's line hashes are keyed · S · sonnet · after X-124
+- [ ] [X-143](x/x-143.md) · The hidden read restores the terminal in `finally`, and Ctrl-C is tested on `connect-repo` · S · sonnet · after X-127
+- [ ] [X-144](x/x-144.md) · No fixture spells the assistant's name · S · sonnet
+- [ ] [X-145](x/x-145.md) · The devices-pane stubs speak `enroll`'s current refusals · S · sonnet · after X-79
+- [ ] [X-146](x/x-146.md) · `connect --remove`'s help names what it refuses · S · sonnet · after X-134
+- [ ] [X-147](x/x-147.md) · A reconnected agent starts without its predecessor's declines · S · sonnet · after X-134
+- [ ] [X-148](x/x-148.md) · An opted-out agent's briefing says so, not `tier: none` · S · sonnet · after X-128
+- [ ] [X-149](x/x-149.md) · `GET /api/briefing` is bounded per bearer and answered from a short cache · S · sonnet · after X-128
+- [ ] [X-150](x/x-150.md) · The briefing's marker directory is the user's own · S · sonnet · after X-129
+- [ ] [X-151](x/x-151.md) · The CLI's slow tests declare their timeouts · S · sonnet
+- [ ] [X-152](x/x-152.md) · M6 admits `doctor` by its exact form, not by prefix · S · sonnet · after X-123, X-125
+- [ ] [X-153](x/x-153.md) · Doctor's restart fixer takes the path `metistry restart` takes · S · sonnet · after X-123
+- [ ] [X-154](x/x-154.md) · Doctor's rules 4, 7 and 9 · M · opus · after X-123
+- [ ] [X-155](x/x-155.md) · Connection check stamps survive two writers · S · sonnet · after X-96
+- [ ] [X-156](x/x-156.md) · `used_by` lists only who can reach a connection · S · sonnet · after X-96
+- [ ] [X-157](x/x-157.md) · The compose shape carries every proxy-listener variable · S · sonnet · after X-111
+- [ ] [X-158](x/x-158.md) · Linear's planner test resets what it `SET` · S · sonnet · after X-26
+- [ ] [X-159](x/x-159.md) · The Add a Phone sheet cancels its code when its window closes · S · sonnet · after X-77
+- [ ] [X-160](x/x-160.md) · The recorder's refusal of a non-scratch database has a test · S · sonnet
+- [ ] [X-161](x/x-161.md) · The watchdog's all-ok test is deterministic · S · sonnet
+- [ ] [X-162](x/x-162.md) · A namespaced instance's doctor names only its own ports · S · sonnet

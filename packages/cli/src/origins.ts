@@ -34,7 +34,7 @@ export interface EnrollRefusal {
 
 /** Every refusal ends here (§2.22): Settings ▸ Remote Access on the Mac, `metistry remote` in a terminal, and the guide. */
 export const ENROLL_FIX =
-  "Choose how your phone reaches this Mac in Settings ▸ Remote Access (`metistry remote` in a terminal); docs/ops/auth.md (\"Passkeys: origins\") says what METISTRY_ORIGIN has to be.";
+  "Choose how your phone reaches this Mac in Settings ▸ Remote Access (`metistry remote` in a terminal); docs/ops/phone.md says what METISTRY_ORIGIN has to be and what each refusal means.";
 
 /** `METISTRY_ORIGIN` as a list: comma-separated, each entry trimmed and without a trailing slash, blanks dropped. */
 export function splitOrigins(value: string | undefined): string[] {

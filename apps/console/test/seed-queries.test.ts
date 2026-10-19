@@ -15,6 +15,7 @@ import { QueryStore, type SqlExecutor } from "@foldedspacelabs/metistry-queries"
 import { REQUEST_KINDS, TASK_FILTER_PARAM_SPEC, TASK_QUERY_NAME, compileTaskFilter, finishRun, isRequestKind, normalizeRepoRemote, requestWordOf, requestWordSql, startRun } from "@foldedspacelabs/metistry-core";
 import { loadTestEnv, testDb } from "@foldedspacelabs/metistry-core/test-env";
 import { privateTables } from "./private-tables.js";
+import { REMOTE_FIXTURES } from "../../../packages/core/test/fixtures/remotes.js";
 
 loadTestEnv(new URL("../../../.env", import.meta.url)); // METISTRY_DB_* only, and nothing of the operator's install (docs/ops/testing.md)
 
@@ -194,6 +195,11 @@ describe("seed queries", () => {
     // `recording_state` (T8-4) is a recording's retention state — when the
     // owner recorded a meeting, which apps it heard, where its transcript
     // is: `GET /api/recordings/:id`'s alone, never an agent's.
+    // `project_for_repo` (CM-3) is a vault path and the owner's title for a
+    // page they wrote; `recent_sessions` (CM-4) is vault paths, the files
+    // the owner touched and their own first prompt. Both are CM-1's
+    // briefing route's to read under `canSeeUnder`, never a way past the
+    // knowledge tiers for a `queries: true` grant.
     expect(routeBacked.sort()).toEqual([
       "board",
       "calendar_event",
@@ -210,6 +216,8 @@ describe("seed queries", () => {
       "pending_count",
       "pending_requests",
       "people_by_email",
+      "project_for_repo",
+      "recent_sessions",
       "recording_state",
       "route_features",
       "routine_history",
@@ -521,53 +529,45 @@ describe.skipIf(!hasDb)("seed queries against the migrated schema", () => {
   // normalizeRepoRemote reduced the stored one; this is the parity test —
   // every raw spelling below is stored through the TypeScript and looked up
   // through the SQL, so the two cannot drift apart unnoticed.
-  it("project_for_repo: every clone spelling finds the one page; two claimants, an unknown remote and a non-remote resolve to nothing (never guessed)", async () => {
+  it("project_for_repo: every clone spelling in REMOTE_FIXTURES finds the one page the TypeScript stored it under; two claimants, an unknown remote and a non-remote resolve to nothing (never guessed)", async () => {
     const tag = `pfr${Date.now()}`;
-    const page = `Projects/${tag} Metistry.md`;
+    // one page per distinct canonical remote in the shared fixture list — the
+    // TS side stores, the SQL side looks up, so the two normalisers are held
+    // to the same spellings (an upper-case SSH user among them)
+    const canonicals = [...new Set(REMOTE_FIXTURES.map(([, c]) => c))];
+    const pageFor = new Map(canonicals.map((c, i) => [c, `Projects/${tag} Page ${i}.md`]));
+    const pages = [...pageFor.values()];
     const twinA = `Projects/${tag} Twin A.md`;
     const twinB = `Projects/${tag} Twin B.md`;
-    const spellings = [
-      `git@github.com:${tag}/metistry.git`,
-      `git@github.com:${tag}/metistry`,
-      `https://github.com/${tag}/metistry.git`,
-      `https://github.com/${tag}/metistry/`,
-      `  https://GitHub.com/${tag}/metistry  `,
-      `https://user:token@github.com/${tag}/metistry.git`,
-      `ssh://git@github.com/${tag}/metistry.git`,
-      `github.com/${tag}/metistry`,
-    ];
-    const canonical = normalizeRepoRemote(spellings[0])!;
-    expect(canonical).toBe(`github.com/${tag}/metistry`);
-    for (const raw of spellings) expect(normalizeRepoRemote(raw), raw).toBe(canonical); // the TS side agrees with itself first
-    const port = normalizeRepoRemote(`ssh://git@gitlab.example:2222/${tag}/Sub/Repo.git/`)!; // a port and a cased path survive
     const shared = normalizeRepoRemote(`https://github.com/${tag}/shared`)!;
-    await pool.query(
-      `INSERT INTO knowledge_files (path, mtime, content_hash, title, description) VALUES ($1, now(), 'h1', $4, 'the product'), ($2, now(), 'h2', NULL, NULL), ($3, now(), 'h3', NULL, NULL)`,
-      [page, twinA, twinB, `${tag} Metistry`],
-    );
-    await pool.query(`INSERT INTO project_repos (remote, path) VALUES ($1, $2), ($3, $2), ($4, $5), ($4, $6)`, [canonical, page, port, shared, twinA, twinB]);
+    for (const [c, path] of pageFor) {
+      await pool.query(`INSERT INTO knowledge_files (path, mtime, content_hash, title, description) VALUES ($1, now(), 'h', $2, $3)`, [path, `${tag} ${c}`, `page for ${c}`]);
+      await pool.query(`INSERT INTO project_repos (remote, path) VALUES ($1, $2)`, [normalizeRepoRemote(c), path]); // stored through the TypeScript
+    }
+    await pool.query(`INSERT INTO knowledge_files (path, mtime, content_hash) VALUES ($1, now(), 'h2'), ($2, now(), 'h3')`, [twinA, twinB]);
+    await pool.query(`INSERT INTO project_repos (remote, path) VALUES ($1, $2), ($1, $3)`, [shared, twinA, twinB]);
     try {
-      for (const raw of spellings) {
-        const rows = (await store.run("project_for_repo", { remote: raw })).rows;
-        expect(rows, raw).toEqual([{ remote: canonical, path: page, title: `${tag} Metistry`, description: "the product" }]);
+      for (const [raw, canonical] of REMOTE_FIXTURES) {
+        expect(normalizeRepoRemote(raw), raw).toBe(canonical); // the TS side agrees with the list…
+        const rows = (await store.run("project_for_repo", { remote: raw })).rows; // …and the SQL side finds what the TS side stored
+        expect(rows, raw).toEqual([{ remote: canonical, path: pageFor.get(canonical), title: `${tag} ${canonical}`, description: `page for ${canonical}` }]);
       }
-      // the SQL's own normalisation, on inputs with a port and a cased path
-      expect((await store.run("project_for_repo", { remote: `ssh://git@GitLab.Example:2222/${tag}/Sub/Repo.git` })).rows.map((r) => r.remote)).toEqual([port]);
-      expect((await store.run("project_for_repo", { remote: `ssh://git@gitlab.example:2222/${tag}/sub/repo` })).rows).toHaveLength(0); // the path's case is kept: a different repository
+      // the path's case is kept: a different spelling is a different repository
+      expect((await store.run("project_for_repo", { remote: "ssh://git@gitlab.example:2222/group/sub/REPO" })).rows).toHaveLength(0);
       // two pages claim one remote: neither is the project
       expect((await store.run("project_for_repo", { remote: `git@github.com:${tag}/shared.git` })).rows).toHaveLength(0);
       // an unmapped repository is no project — no fallback on a basename or a prefix
       expect((await store.run("project_for_repo", { remote: `https://github.com/${tag}/metistry-instance` })).rows).toHaveLength(0);
-      expect((await store.run("project_for_repo", { remote: `github.com/${tag}` })).rows).toHaveLength(0);
+      expect((await store.run("project_for_repo", { remote: "github.com/foldedspacelabs" })).rows).toHaveLength(0);
       expect((await store.run("project_for_repo", { remote: "metistry" })).rows).toHaveLength(0);
       // not plainly a remote: matches nothing rather than something
-      for (const bad of ["", "   ", "%", `https://github.com/${tag}/me tistry`, "github.com", "/x/y", "x'; DROP TABLE project_repos; --"]) {
+      for (const bad of ["", "   ", "%", "https://github.com/folded spacelabs/metistry", "github.com", "/x/y", "x'; DROP TABLE project_repos; --"]) {
         expect((await store.run("project_for_repo", { remote: bad })).rows, JSON.stringify(bad)).toHaveLength(0);
       }
       expect((await store.run("project_for_repo")).rows).toHaveLength(0); // the default, blank
     } finally {
-      await pool.query(`DELETE FROM project_repos WHERE path = ANY($1::text[])`, [[page, twinA, twinB]]);
-      await pool.query(`DELETE FROM knowledge_files WHERE path = ANY($1::text[])`, [[page, twinA, twinB]]);
+      await pool.query(`DELETE FROM project_repos WHERE path = ANY($1::text[])`, [[...pages, twinA, twinB]]);
+      await pool.query(`DELETE FROM knowledge_files WHERE path = ANY($1::text[])`, [[...pages, twinA, twinB]]);
     }
   });
 

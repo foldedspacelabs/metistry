@@ -30,13 +30,18 @@
 # this query. A value that is not plainly a remote (whitespace inside it, no
 # host, no path) reduces to NULL and matches nothing.
 #
-# `expose: generic`, deliberately: the row is one HANDLE — a path, a title,
-# a one-line description — for a remote the caller already holds, the same
-# surface `board`, `open_work` and `areas_overview` already publish by name,
-# and the owner grants `queries: true` per agent. The page's BYTES are not
-# here and never will be: they are read through the knowledge doors under
-# the caller's tier.
+# **`expose: route`**, on `knowledge_pages.yaml`'s rule (ruled 2026-09-19:
+# path-bearing or owner-text rows are route-only): every row carries a vault
+# path and the owner's own title and description for a page they wrote. The
+# generic `/api/q/<name>` and `queries_run` answer this name with the
+# refusal they answer an unknown name with, so an agent with `queries: true`
+# cannot use it to probe which repositories the owner keeps a page for. The
+# consumer is CM-1's session-start briefing route, which applies
+# `canSeeUnder` to the path before it hands the handle on; until it exists
+# the owner's session reads it at the generic door as they read every
+# route-only query.
 name: project_for_repo
+expose: route
 description: >-
   The one project page (Projects/<Name>.md the owner wrote) whose `repos:`
   frontmatter names a git remote — path, title, description, and the remote
@@ -52,7 +57,7 @@ sql: |
   stripped AS (
     SELECT CASE
              WHEN r = '' OR length(r) > 512 OR r ~ '[\s\x01-\x1f\x7f]' THEN NULL
-             WHEN r ~* '^[a-z0-9_-]+@[^:/]+:.+$' THEN regexp_replace(r, '^[a-z0-9_-]+@([^:/]+):/*(.+)$', '\1/\2')
+             WHEN r ~* '^[a-z0-9_-]+@[^:/]+:.+$' THEN regexp_replace(r, '^[a-z0-9_-]+@([^:/]+):/*(.+)$', '\1/\2', 'i')
              ELSE regexp_replace(r, '^[a-z][a-z0-9+.-]*://([^@/]+@)?', '', 'i')
            END AS u
     FROM raw

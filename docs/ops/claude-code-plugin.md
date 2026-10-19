@@ -88,8 +88,10 @@ days}` serves them, newest first, for one checkout basename. Handles only:
 the note's `## Last response` is never parsed, a session is served only
 once the knowledge fold has read it, and a session an agent credential
 captured is never served as yours (`docs/ops/reconciler.md`, "Project repos
-and captured sessions"). Nothing reads it at session start yet; that is
-CM-1/CM-2's briefing.
+and captured sessions"). The query is `expose: route` — your first prompt
+and your files are owner text and vault paths — so no agent reaches it
+through `queries_run`; nothing reads it at session start yet, and the
+consumer will be CM-1/CM-2's briefing under the caller's grant.
 
 The summariser exists twice on purpose: the plugin ships as dependency-free
 `.mjs` a stranger runs out of `~/.claude/plugins`, so it cannot import

@@ -4,20 +4,9 @@
 import { describe, expect, it } from "vitest";
 import { normalizeRepoRemote, REPO_REMOTE_MAX } from "../src/repo-remote.js";
 
-/** Raw spelling → canonical shape. Exported for the SQL parity test, which stores the right side and looks the left side up. */
-export const REMOTE_FIXTURES: [raw: string, canonical: string][] = [
-  ["git@github.com:foldedspacelabs/metistry.git", "github.com/foldedspacelabs/metistry"],
-  ["git@github.com:foldedspacelabs/metistry", "github.com/foldedspacelabs/metistry"],
-  ["https://github.com/foldedspacelabs/metistry.git", "github.com/foldedspacelabs/metistry"],
-  ["https://github.com/foldedspacelabs/metistry/", "github.com/foldedspacelabs/metistry"],
-  ["  https://GitHub.com/foldedspacelabs/metistry  ", "github.com/foldedspacelabs/metistry"],
-  ["https://user:token@github.com/foldedspacelabs/metistry.git", "github.com/foldedspacelabs/metistry"],
-  ["ssh://git@github.com/foldedspacelabs/metistry.git", "github.com/foldedspacelabs/metistry"],
-  ["ssh://git@gitlab.example:2222/group/sub/repo.git/", "gitlab.example:2222/group/sub/repo"],
-  ["git://Example.org/a//b.git", "example.org/a/b"], // doubled slashes inside the path collapse
-  ["github.com/foldedspacelabs/metistry", "github.com/foldedspacelabs/metistry"], // already canonical
-  ["git@github.com:Org/Repo.GIT", "github.com/Org/Repo"], // host lowercased, path as written
-];
+import { REMOTE_FIXTURES } from "./fixtures/remotes.js";
+
+export { REMOTE_FIXTURES };
 
 describe("normalizeRepoRemote", () => {
   it("folds every clone spelling of one repository to the Engine's host/path shape", () => {

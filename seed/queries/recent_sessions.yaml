@@ -31,10 +31,21 @@
 # owner's and is never served: an agent cannot plant "the owner's first
 # prompt" for the next one to read.
 #
+# **`expose: route`**, on `knowledge_pages.yaml`'s rule (ruled 2026-09-19):
+# every row is a vault path, the owner's own words (their first prompt) and
+# the files they touched. The generic `/api/q/<name>` and `queries_run`
+# answer this name with the unknown-query refusal, so a `queries: true`
+# grant is not a way past the knowledge tiers to the owner's sessions. The
+# consumer is CM-1's session-start briefing route, which knows its caller's
+# grant and project and applies `canSeeUnder`; that is also where the
+# ruling's first arm — an unfolded session to the same project — belongs,
+# once a capture names its remote.
+#
 # `repo` is the checkout's basename as the capture saw it
 # (`repoNameFromPath`), matched case-insensitively — the Mac's filesystem
 # is — and blank matches nothing. `days` is bounded to a year.
 name: recent_sessions
+expose: route
 description: >-
   The owner's captured coding sessions in one repository (checkout basename,
   case-insensitive), newest first, once the knowledge fold has read them:

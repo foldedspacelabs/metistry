@@ -15,10 +15,10 @@
 
 import { existsSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { instanceStatePath, overlayFiles, SEED_DIR } from "@foldedspacelabs/metistry-core";
+import { instanceStatePath, overlayFiles, SANDBOX_EXEC, SEED_DIR } from "@foldedspacelabs/metistry-core";
 import type { Compute, InstancePathKey } from "@foldedspacelabs/metistry-core";
 
-export const SANDBOX_EXEC = "/usr/bin/sandbox-exec";
+export { SANDBOX_EXEC };
 export const SANDBOX_PROFILE_REL = "ops/sandbox/assistant.sb";
 
 /**

@@ -173,10 +173,45 @@ export type ChildState =
   /** in the config, not started yet */
   | "pending";
 
+/** The macOS Seatbelt launcher. It EXECS into its target, so a running child's own argv never names it. */
+export const SANDBOX_EXEC = "/usr/bin/sandbox-exec";
+
+/**
+ * The Seatbelt profile an argv runs under: the `-f` operand of a leading
+ * `sandbox-exec`, or null when the argv does not start with it. One reading of
+ * an argv, shared by the supervisor (which reports it at spawn) and anything
+ * that wants to read a rendered config the same way.
+ */
+export function sandboxProfileOf(argv: readonly string[]): string | null {
+  if (argv[0] !== SANDBOX_EXEC) return null;
+  const i = argv.indexOf("-f");
+  return i === -1 ? null : (argv[i + 1] ?? null);
+}
+
+/**
+ * What the supervisor ACTUALLY spawned for a child — the answer to "is this
+ * confined" that only the parent has. `sandbox-exec` execs into its target,
+ * so once the child is running its own argv (`ps`) shows `node main.js` and
+ * nothing of the profile; `supervisor.json` on disk can be a render newer
+ * than what runs. The supervisor reads this off the spec it handed to spawn().
+ */
+export interface SpawnedInfo {
+  /** the argv handed to spawn(), including any `sandbox-exec -f <profile>` prefix */
+  argv: string[];
+  /** the Seatbelt profile path, or null when the child was not launched under `sandbox-exec` */
+  profile: string | null;
+}
+
 export interface ChildStatus {
   name: string;
   state: ChildState;
   pid?: number;
+  /**
+   * What the last spawn ran; absent until the child has been spawned once,
+   * and absent from a supervisor that predates the field — a reader must
+   * treat absence as "not known", never as "unconfined" or "confined".
+   */
+  spawned?: SpawnedInfo;
   /** how long the current process has been up, ms */
   uptimeMs?: number;
   restarts: number;

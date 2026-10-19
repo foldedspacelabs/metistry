@@ -610,7 +610,7 @@ moved-on thread is confusing); the research note says why.
 ```
 GET  /api/whoami               200 {"principal":"user","via":"local_owner_token","management":true,"origin":"…","as_of":"…"}
 POST /auth/logout              200 {"ok":true}          403 — the local owner token has no session to end
-GET  /api/devices              200 {"devices":[{id, passkey_id, label, added, last_seen, this_device, sessions:[…]}, …]}
+GET  /api/devices              200 {"devices":[{id, passkey_id, rp_id, label, added, last_seen, this_device, sessions:[…]}, …]}
 POST /api/devices/:id/revoke   {scope?: "device" | "sessions"}   200 {"revoked":true,"scope":"device","sessions":2}
                                404 — no such session, or its device is already removed;  400 — a scope that is neither
 ```
@@ -630,6 +630,7 @@ been removed, newest seen first:
 | `id` | what Remove posts to `…/:id/revoke`: the device's newest session row, live or not — every device has one, because enrolment issues a session |
 | `passkey_id` | the credential id |
 | `label` | the name the device chose at enrolment |
+| `rp_id` | the host the passkey was created for and the only host it signs in at (`docs/ops/auth.md` *Passkeys: origins*; migration `0039`, X-104) — a passkey from before `0039` has no recorded host, so the console serves the first configured origin's host for it; always a string, so a client never needs `METISTRY_ORIGIN` to tell which passkeys a change of origin stranded (Devices marks them, X-107) |
 | `added` | when the passkey was enrolled |
 | `last_seen` | the latest of its sessions' `last_seen_at` and the passkey's last login |
 | `this_device` | `true` on the caller's own row — the passkey of its session; `false` on every row for the local owner token, which has no device |
@@ -657,17 +658,6 @@ signs in again with the passkey it has. Both land in `runs` (`auth`, `revoke`)
 with the scope, the passkey and the number of sessions ended on the record.
 Any `:id` of the device's sessions names it; a device already removed answers
 404, as an unknown session does.
-
-Each device row is one session joined to its passkey: `id` (the session),
-`label`, `passkey_last_used`, `created_at`, `last_seen_at`,
-`absolute_expires_at`, `revoked`, and **`rp_id`** — the host the passkey was
-created for and the only host it signs in at (`docs/ops/auth.md` *Passkeys:
-origins*; migration `0039`, X-104). A passkey from before `0039` has no
-recorded host; the console serves the first configured origin's host for it,
-so `rp_id` is always a string and a client never needs `METISTRY_ORIGIN` to
-tell which passkeys a change of origin stranded (a passkey whose `rp_id` is no
-longer a configured host; Devices marks it, X-107). Additive: a client that
-does not read it sees the row it always did.
 
 ### Chat
 

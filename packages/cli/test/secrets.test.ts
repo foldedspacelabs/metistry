@@ -13,6 +13,8 @@ import { interactiveLine } from "../src/keychain.js";
 import { main } from "../src/main.js";
 import { accountFor, isSecretVar, listSecrets, mintSecret, purgeSecrets, renderSecretList, rewriteEnv, serviceAnswers, sharedScopeSecretName, syncSecrets, wasSharedScope } from "../src/secrets.js";
 import { tokenHash } from "@foldedspacelabs/metistry-core";
+import { inspectEnvText } from "../src/env-render.js";
+import { parseDotEnv } from "../src/env.js";
 import { decodeSecurity } from "./fake-security.js";
 
 /** One instance's id — the account its own secrets are filed under. */
@@ -89,7 +91,7 @@ describe("isSecretVar", () => {
 });
 
 describe("metistry secrets sync", () => {
-  it("round-trips .env → Keychain → .env, preserving every other line byte-for-byte", async () => {
+  it("round-trips .env → Keychain → .env: every secret from the Keychain, every other assignment carried with its value", async () => {
     const file = await envFile();
     const kc = fakeSecurity();
     const lines: string[] = [];
@@ -114,26 +116,27 @@ describe("metistry secrets sync", () => {
     kc.store.set(key(USER, "METISTRY_DB_PASSWORD"), "rotated-in-the-keychain");
     const back = await syncSecrets("env", opts);
     expect(back.changed.sort()).toEqual(["METISTRY_DB_PASSWORD", "METISTRY_VAPID_PRIVATE"]);
-    // no instance_id, so no owner-named store to fill it from: its .env line is left exactly as it was
-    expect(back.skipped).toEqual(["METISTRY_OPENROUTER_API_KEY", "METISTRY_GITHUB_TOKEN"]);
+    // no instance_id, so no owner-named store to fill it from: its .env line is
+    // carried as it was (never lost); the commented declaration has no value to carry
+    expect(back.skipped).toEqual(["METISTRY_GITHUB_TOKEN"]);
 
+    // the file is DERIVED (X-124): stamped, every secret from the Keychain,
+    // every other assignment carried with the value it had
     const after = readFileSync(file, "utf8");
-    expect(after).toBe(ENV_TEXT.replace("METISTRY_DB_PASSWORD=change-me", "METISTRY_DB_PASSWORD=rotated-in-the-keychain"));
-    // every comment, blank line and non-secret assignment is identical
-    const untouched = (t: string) => t.split("\n").filter((l) => !l.startsWith("METISTRY_DB_PASSWORD="));
-    expect(untouched(after)).toEqual(untouched(ENV_TEXT));
+    expect(inspectEnvText(after).kind).toBe("rendered");
+    expect(parseDotEnv(after)).toEqual({ ...parseDotEnv(ENV_TEXT), METISTRY_DB_PASSWORD: "rotated-in-the-keychain" });
     expect(statSync(file).mode & 0o777).toBe(0o600);
   });
 
-  it("appends a secret .env never declared (the name comes from .env.example) under one marker", async () => {
+  it("renders a secret .env never declared (the name comes from .env.example) from the Keychain", async () => {
     const file = await envFile("METISTRY_DB_HOST=127.0.0.1\n");
     const example = join(file, "..", ".env.example");
     await writeFile(example, "METISTRY_DB_HOST=\n# METISTRY_ASSISTANT_TOKEN=\n");
     const kc = fakeSecurity({ [key(USER, "METISTRY_ASSISTANT_TOKEN")]: "tok" });
     await syncSecrets("env", { envFile: file, exampleFile: example, exec: kc.exec, out: () => {}, platform: "darwin", env: {} });
-    expect(readFileSync(file, "utf8")).toBe(
-      "METISTRY_DB_HOST=127.0.0.1\n\n# --- written by `metistry secrets sync --to env` from the Keychain ---\nMETISTRY_ASSISTANT_TOKEN=tok\n",
-    );
+    const after = readFileSync(file, "utf8");
+    expect(inspectEnvText(after).kind).toBe("rendered");
+    expect(parseDotEnv(after)).toEqual({ METISTRY_DB_HOST: "127.0.0.1", METISTRY_ASSISTANT_TOKEN: "tok" });
   });
 
   // GENERATED_SECRETS: an install that predates a variable gains it on the
@@ -156,7 +159,7 @@ describe("metistry secrets sync", () => {
     expect(r.minted).toEqual(["METISTRY_LOCAL_OWNER_TOKEN"]);
     expect(kc.store.get(key(INSTANCE_ID, "METISTRY_LOCAL_OWNER_TOKEN"))).toBe("MINTED-OWNER-TOKEN");
     expect(kc.store.has(key(USER, "METISTRY_LOCAL_OWNER_TOKEN"))).toBe(false); // instance-scoped, not the person's
-    expect(readFileSync(file, "utf8")).toBe("METISTRY_DB_HOST=127.0.0.1\nMETISTRY_LOCAL_OWNER_TOKEN=MINTED-OWNER-TOKEN\n");
+    expect(parseDotEnv(readFileSync(file, "utf8"))).toEqual({ METISTRY_DB_HOST: "127.0.0.1", METISTRY_LOCAL_OWNER_TOKEN: "MINTED-OWNER-TOKEN" });
     expect(out.join("\n")).toContain("minted METISTRY_LOCAL_OWNER_TOKEN");
     expect(out.join("\n")).not.toContain("MINTED-OWNER-TOKEN"); // a value is never printed
     for (const c of kc.calls) for (const a of c.argv) expect(a).not.toContain("MINTED-OWNER-TOKEN");
@@ -180,7 +183,8 @@ describe("metistry secrets sync", () => {
     expect(r.minted).toEqual(["METISTRY_BRIDGE_TOKEN_RECONCILER_USER"]);
     expect(r.skipped).toEqual(["METISTRY_BRIDGE_TOKEN_RECONCILER"]);
     expect(kc.store.get(key(INSTANCE_ID, "METISTRY_BRIDGE_TOKEN_RECONCILER_USER"))).toBe("MINTED-OWNER-BEARER");
-    expect(readFileSync(file, "utf8")).toBe("METISTRY_BRIDGE_TOKEN_RECONCILER=\nMETISTRY_BRIDGE_TOKEN_RECONCILER_USER=MINTED-OWNER-BEARER\n");
+    // the empty declaration has no value to carry, so the derived file has one line
+    expect(parseDotEnv(readFileSync(file, "utf8"))).toEqual({ METISTRY_BRIDGE_TOKEN_RECONCILER_USER: "MINTED-OWNER-BEARER" });
     expect(out.join("\n")).not.toContain("MINTED-OWNER-BEARER");
     expect(out.join("\n")).toContain("restart");
   });
@@ -189,7 +193,7 @@ describe("metistry secrets sync", () => {
   // the values the running console and reconciler were started with — but
   // whose Keychain did not. Minting there rotated both behind the running
   // services, and every Mac app write came back 401 / `unauthenticated`.
-  it("**adopts a generated token .env already holds into the Keychain — never mints over it, .env byte-for-byte unchanged**", async () => {
+  it("**adopts a generated token .env already holds into the Keychain — never mints over it, every value unchanged**", async () => {
     const text = "METISTRY_DB_HOST=127.0.0.1\nMETISTRY_LOCAL_OWNER_TOKEN=running-console-token\n# the reconciler's owner bearer\nMETISTRY_BRIDGE_TOKEN_RECONCILER_USER='running-owner-bearer'\n";
     const file = await envFile(text);
     const kc = fakeSecurity();
@@ -208,15 +212,16 @@ describe("metistry secrets sync", () => {
     });
     expect(mints).toBe(0);
     expect(r.minted).toEqual([]);
-    expect(r.adopted).toEqual(["METISTRY_LOCAL_OWNER_TOKEN", "METISTRY_BRIDGE_TOKEN_RECONCILER_USER"]);
+    expect(r.adopted).toEqual(["METISTRY_BRIDGE_TOKEN_RECONCILER_USER", "METISTRY_LOCAL_OWNER_TOKEN"]);
     expect(r.rotated).toEqual([]);
     expect(r.restart).toEqual([]);
     expect(probed).toEqual([]); // nothing changed, so nothing to ask about
     expect(kc.store.get(key(INSTANCE_ID, "METISTRY_LOCAL_OWNER_TOKEN"))).toBe("running-console-token");
     expect(kc.store.get(key(INSTANCE_ID, "METISTRY_BRIDGE_TOKEN_RECONCILER_USER"))).toBe("running-owner-bearer");
-    expect(readFileSync(file, "utf8")).toBe(text);
+    // the derived file holds exactly the values the running services were started with
+    expect(parseDotEnv(readFileSync(file, "utf8"))).toEqual(parseDotEnv(text));
     const said = out.join("\n");
-    expect(said).toContain("adopted METISTRY_LOCAL_OWNER_TOKEN");
+    expect(said).toContain("adopted into the login Keychain from the file (the value the running services hold is kept): METISTRY_BRIDGE_TOKEN_RECONCILER_USER, METISTRY_LOCAL_OWNER_TOKEN");
     expect(said).not.toContain("minted");
     expect(said).not.toContain("running-console-token");
     expect(said).not.toContain("running-owner-bearer");
@@ -237,7 +242,7 @@ describe("metistry secrets sync", () => {
     expect(mints).toBe(1);
     expect(r.minted).toEqual(["METISTRY_LOCAL_OWNER_TOKEN"]);
     expect(r.adopted).toEqual([]);
-    expect(readFileSync(file, "utf8")).toBe("METISTRY_LOCAL_OWNER_TOKEN=MINTED-1\n");
+    expect(parseDotEnv(readFileSync(file, "utf8"))).toEqual({ METISTRY_LOCAL_OWNER_TOKEN: "MINTED-1" });
     await syncSecrets("env", { envFile: file, instanceId: INSTANCE_ID, exec: kc.exec, out: () => {}, platform: "darwin", env: {}, mint: () => `MINTED-${++mints}` });
     expect(mints).toBe(1);
   });
@@ -249,7 +254,7 @@ describe("metistry secrets sync", () => {
     expect(r.minted).toEqual([]);
     expect(r.adopted).toEqual([]);
     expect(r.rotated).toEqual(["METISTRY_LOCAL_OWNER_TOKEN"]);
-    expect(readFileSync(file, "utf8")).toBe("X=1\nMETISTRY_LOCAL_OWNER_TOKEN=keychain-value\n");
+    expect(parseDotEnv(readFileSync(file, "utf8"))).toEqual({ X: "1", METISTRY_LOCAL_OWNER_TOKEN: "keychain-value" });
   });
 
   it("under an installed launchd shape the restart is the verb's own (env-follow.ts): no `metistry restart`, which would respawn the child with supervisor.json's stale environment", async () => {
@@ -270,8 +275,8 @@ describe("metistry secrets sync", () => {
     const out: string[] = [];
     const running = { console: true, reconciler: true } as const;
     const r = await syncSecrets("env", { envFile: file, instanceId: INSTANCE_ID, exec: kc.exec, out: (l) => out.push(l), platform: "darwin", env: {}, mint: () => "FRESH", serviceRunning: async (svc) => running[svc] });
-    expect(r.rotated).toEqual(["METISTRY_LOCAL_OWNER_TOKEN", "METISTRY_BRIDGE_TOKEN_RECONCILER_USER"]);
-    expect(r.restart).toEqual(["console", "reconciler"]);
+    expect(r.rotated).toEqual(["METISTRY_BRIDGE_TOKEN_RECONCILER_USER", "METISTRY_LOCAL_OWNER_TOKEN"]);
+    expect(r.restart.sort()).toEqual(["console", "reconciler"]);
     const said = out.join("\n");
     expect(said).toMatch(/RESTART NEEDED: the console is running with the previous METISTRY_LOCAL_OWNER_TOKEN .* `metistry restart console`/);
     expect(said).toMatch(/RESTART NEEDED: the reconciler is running with the previous METISTRY_BRIDGE_TOKEN_RECONCILER_USER .* `metistry restart reconciler`/);
@@ -307,7 +312,10 @@ describe("metistry secrets sync", () => {
     const r = await syncSecrets("env", { envFile: file, instanceId: INSTANCE_ID, exec: kc.exec, out: () => {}, platform: "darwin", env: {} });
     expect(r.minted).toEqual([]);
     expect(r.skipped.sort()).toEqual(["METISTRY_BRIDGE_TOKEN_RECONCILER", "METISTRY_GITHUB_TOKEN", "METISTRY_OPENROUTER_API_KEY"]);
-    expect(readFileSync(file, "utf8")).toBe("METISTRY_GITHUB_TOKEN=\nMETISTRY_OPENROUTER_API_KEY=\nMETISTRY_BRIDGE_TOKEN_RECONCILER=\n");
+    // nothing to render and nothing to carry: a stamped file with no assignment
+    const after = readFileSync(file, "utf8");
+    expect(inspectEnvText(after).kind).toBe("rendered");
+    expect(parseDotEnv(after)).toEqual({});
   });
 
   it("uncomments a documented-but-unset declaration in place", () => {
@@ -320,7 +328,7 @@ describe("metistry secrets sync", () => {
     const file = await envFile("METISTRY_DB_PASSWORD=x\n");
     const kc = fakeSecurity({ [key(USER, "METISTRY_DB_PASSWORD")]: "pass word # not a comment" });
     await syncSecrets("env", { envFile: file, exec: kc.exec, out: () => {}, platform: "darwin", env: {} });
-    expect(readFileSync(file, "utf8")).toBe("METISTRY_DB_PASSWORD='pass word # not a comment'\n");
+    expect(readFileSync(file, "utf8")).toContain("\nMETISTRY_DB_PASSWORD='pass word # not a comment'\n");
 
     kc.store.set(key(USER, "METISTRY_DB_PASSWORD"), "has'quote");
     await expect(syncSecrets("env", { envFile: file, exec: kc.exec, out: () => {}, platform: "darwin", env: {} })).rejects.toThrow(/single quote/);
@@ -464,13 +472,14 @@ describe("instance-scoped secrets", () => {
     const r = await syncSecrets("env", { envFile: file, envTarget: target, exec: kc.exec, out: (l) => lines.push(l), platform: "darwin", env: {}, instanceId: INSTANCE_ID });
 
     expect(r.wrote).toBe(target);
-    // every line of the old file is carried over, not just the secrets
+    // every assignment of the old file is carried over, not just the secrets — into a derived, stamped file
     const moved = readFileSync(target, "utf8");
-    expect(moved).toBe(ENV_TEXT.replace("METISTRY_DB_PASSWORD=change-me", "METISTRY_DB_PASSWORD=rotated"));
+    expect(inspectEnvText(moved).kind).toBe("rendered");
+    expect(parseDotEnv(moved)).toEqual({ ...parseDotEnv(ENV_TEXT), METISTRY_DB_PASSWORD: "rotated" });
     expect(statSync(target).mode & 0o777).toBe(0o600);
     // and the running install's file is untouched
     expect(readFileSync(file, "utf8")).toBe(ENV_TEXT);
-    expect(lines.join("\n")).toContain("LEFT IN PLACE");
+    expect(lines.join("\n")).toContain("the old file is left in place");
   });
 
   it("mint files the new token under the instance's account", async () => {

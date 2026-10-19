@@ -20,7 +20,7 @@ import { join } from "node:path";
 
 import { API_VERSION, API_VERSION_HEADER, AREA_PREFIX_REFUSAL, knowledgeConflictSource, runCheck, startRun, finishRun, errorEnvelope, intEnv, may, parseAction, noRouteMessage, PROJECT_SLUG_RE, rollSession, statusFor, servedRoute, isLocalRoute, routineGrantsFor, localOnlyMessage, routeKey, resolveActor, ACKNOWLEDGED, SKIP_FEEDBACK, answersText, checkAnswers, describeRequest, parseSubjectFingerprint, requestSubjectOf, subjectUnchanged, validAgentAreaGrant, type QuestionAnswer, type RequestShape, type RequestSubject, type SubjectReading, type CheckResult, type Compute, type ErrorCode, type ErrorEnvelope, type Principal, type ToolGroup, type ToolMode } from "@foldedspacelabs/metistry-core";
 import { QueryError, QueryStore } from "@foldedspacelabs/metistry-queries";
-import { captureToInbox, createBrainServer, dirSink, type CaptureSink, type ConnectionLimits, type ConnectionsProxy, type KnowledgeLister, type KnowledgeReader, type KnowledgeVaultSearcher, type KnowledgeWriter, type QueryEmbedder } from "@foldedspacelabs/metistry-mcp-brain";
+import { captureToInbox, createBrainServer, dirSink, type CaptureSink, type ConnectionFold, type ConnectionLimits, type ConnectionsProxy, type KnowledgeLister, type KnowledgeReader, type KnowledgeVaultSearcher, type KnowledgeWriter, type QueryEmbedder } from "@foldedspacelabs/metistry-mcp-brain";
 import { TasksError, TasksService } from "@foldedspacelabs/metistry-tasks";
 import { ArtifactsService, VaultError, type VaultClient } from "@foldedspacelabs/metistry-artifacts";
 import { artifactRoutes, isArtifactRoute } from "./artifacts-routes.js";
@@ -235,6 +235,8 @@ export interface ConsoleConfig {
   connectionsProxy?: ConnectionsProxy | undefined;
   /** The proxy's confirm-token lifetime and hourly limits (`METISTRY_CONNECTION_*`, main.ts). Absent = mcp-brain's defaults. */
   connectionLimits?: ConnectionLimits | undefined;
+  /** The proxy's fold settings (X-132). Absent → the bridge's defaults. */
+  connectionFold?: ConnectionFold | undefined;
   /**
    * The live-changes hub `GET /api/events` streams from (events.ts, §2.20):
    * `main.ts` builds it and starts the one `LISTEN` that feeds it. Absent =
@@ -707,6 +709,7 @@ export function makeServer(db: Db, queries: QueryStore, cfg: ConsoleConfig): Con
     // connections_list / connections_call (plan §2.6): the same pooled client an Approve runs a connection call through
     ...(cfg.connectionsProxy ? { connections: cfg.connectionsProxy } : {}),
     ...(cfg.connectionLimits ? { connectionLimits: cfg.connectionLimits } : {}),
+    ...(cfg.connectionFold ? { connectionFold: cfg.connectionFold } : {}),
     // propose_action at mode `allow` (docs/ops/actions.md): the bridge asks,
     // this console runs it — through the same service call the owner's own
     // click goes through, never a second implementation.

@@ -271,13 +271,55 @@ the `runs` row as `meta.detail`, where the owner reads it. The caller's bearer
 reaches the proxy only as `caller.bearer`, so a call whose arguments carry it
 is refused `caller_credential`; it is never sent upstream.
 
+**Folded answers (X-132; the owner's 2026-10-04 ruling on the Context Mode
+review's Q4).** An upstream answer over `METISTRY_CONNECTION_FOLD_BYTES`
+(default 8192 bytes on the wire) does not reach the caller whole. After the
+pool's redaction, `connections_call` applies one deterministic fold — a pure
+function of the text and the settings, so the same answer folds to the same
+bytes every time and a client's prompt cache sees one stable prefix
+(`packages/mcp-brain/src/connection-fold.ts`):
+
+| The answer | Becomes |
+| --- | --- |
+| a JSON array over `METISTRY_CONNECTION_FOLD_ARRAY_OVER` items (default 20) | `{"folded":"array","count":N,"first":[…the first `METISTRY_CONNECTION_FOLD_ARRAY_KEEP` (default 5)…],"last":{…}}` |
+| text with runs of a repeated line | the line once and `[×n]`; blank runs `[×n blank lines]` |
+| anything still over the threshold | a head (three quarters) and a tail (one quarter), with `…[N bytes folded — the whole answer is on its pages]…` between |
+
+The reply is `{connection, tool, content: [one text block], folded: {handle,
+bytes, pages, how, note}}` — `how` is the shapes that applied (`array`,
+`lines`, `cap`), `handle` is the call's own `runs` id. **The whole answer is
+kept** in `connection_answers` (migration 0042; derived and ephemeral, deleted
+on the next write after `METISTRY_CONNECTION_ANSWER_KEEP_HOURS`, default 24),
+and read back one page at a time — no new tool (X-49) — through the same
+door: `connections_call { connection, tool, page: "<handle>/<n>" }` answers
+`{handle, page, pages, bytes, text, next}`, pages cut at code points so every
+byte of the answer is on exactly one page. A page stands behind the gate every
+call takes (the grant, the offer, the tool not at Never), dials nothing, spends
+none of the hour and takes no confirm token. **Only the principal that made
+the call reads it back**: the row carries that principal and the read is
+`WHERE run_id = … AND principal = …` — another caller presenting the handle,
+an expired handle, one that never was, or one stored under another connection
+or tool all hear the one `not_found` (*no such answer: <handle>/<n>*). A page
+past the last is `invalid_request` naming the range.
+
+**The owner turns folding off per connection**: `metistry connections policy
+<name> --fold off` writes `fold: false` to the file (on is the default and the
+file's absence of the key), beside the per-tool Allow · Ask First · Never and
+the offer switch, and the listing (`GET /api/connections`, `connections list
+--json`) says which. With it off every answer comes whole, however large, and
+nothing is stored. Nothing is folded below the threshold either way.
+
 **The audit.** Every `connections_call` — refusals included — is one `runs`
 row of kind `connection_call`: the principal as `component`,
 `meta.connection`, `meta.connection_tool`, the secret NAMES it carried in
 `meta.secrets` (so *last used* on the Secrets list counts it), and
 `meta.is_error` when the upstream's tool reported failure — plus
 `meta.group`, `meta.tool_mode` (the owner's policy), `meta.mode` (what the call
-did: `call`, `preview`, `ask`, `confirmed`) and `meta.dialled`. An Approve is a
+did: `call`, `preview`, `ask`, `confirmed`, `page`) and `meta.dialled`. A
+dialled call also carries `meta.bytes_in` and `meta.bytes_out` (the answer's
+bytes on the wire, whole and as sent), and a folded one `meta.fold` (the
+shapes), `meta.handle` and `meta.pages`; a connection with folding off says
+`meta.fold: "off"`. An Approve is a
 `connection_call` row too, written by the console (`tool: approve`, `mode:
 approved`). The
 `connection_calls` named query (`expose: route`) reads them back by

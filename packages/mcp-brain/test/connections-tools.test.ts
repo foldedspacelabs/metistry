@@ -337,3 +337,99 @@ describe("the audit — one connection_call row per call", () => {
     expect(db.runs.at(-1)).toMatchObject({ kind: "tool", tool: "connections_list", ok: true });
   });
 });
+
+// The fold (X-132; connection-fold.ts) at the tool, with a fake Db that
+// stores nothing: what the caller sees of a large answer, what the row
+// records, and the gate `page` stands behind. The pages themselves — stored
+// and read back by the same principal only — are connections-fold.integration.test.ts.
+describe("a large answer is folded, once, and the owner can turn it off (X-132)", () => {
+  // 400 items ≈ 24 KB: over the default threshold (8 KiB) and the default array size (20)
+  const items = Array.from({ length: 400 }, (_, i) => ({ number: i + 1, title: `issue ${i + 1}: a flaky test in CI`, state: i % 2 ? "open" : "closed" }));
+  const big = JSON.stringify(items);
+  const bigAnswer = async () => ({ content: [{ type: "text", text: big }], isError: false, secrets: [] });
+  /** A proxy over the listing given, answering the big listing. */
+  function proxyOver(connections: ProxiedConnection[], answer = bigAnswer) {
+    const proxy = fakeProxy(answer);
+    proxy.list = async () => connections;
+    return proxy;
+  }
+
+  it("over the threshold: the first items, the last and the count come back with a handle; the row carries bytes in, bytes out and the handle", async () => {
+    const db = recordingDb();
+    const proxy = proxyOver([GITHUB]);
+    const { call } = await brainFor(agent(["github"]), proxy, db);
+    const r = await call("connections_call", { connection: "github", tool: "list_issues" });
+    expect(r.isError).toBe(false);
+    expect(JSON.parse(r.body.content[0].text)).toEqual({ folded: "array", count: 400, first: items.slice(0, 5), last: items[399] });
+    const pages = Math.ceil(Buffer.byteLength(big) / 8192); // the default page is the default threshold
+    expect(r.body.folded).toMatchObject({ handle: String(db.runs.length), bytes: Buffer.byteLength(JSON.stringify({ content: [{ type: "text", text: big }] })), pages, how: ["array"] });
+    expect(r.body.folded.note).toContain(`page "${db.runs.length}/1"`);
+    const row = db.runs.at(-1)!;
+    expect(row.meta).toMatchObject({ mode: "call", dialled: true, fold: "array", handle: String(db.runs.length), pages, bytes_in: r.body.folded.bytes });
+    expect(row.meta.bytes_out as number).toBeLessThan(row.meta.bytes_in as number);
+    // the same answer folds the same way again — a pure function of the text
+    const again = await call("connections_call", { connection: "github", tool: "list_issues" });
+    expect(again.body.content).toEqual(r.body.content);
+  });
+
+  it("at or under the threshold the answer comes whole, and the row still says how many bytes", async () => {
+    const db = recordingDb();
+    const { call } = await brainFor(agent(["github"]), fakeProxy(), db);
+    const r = await call("connections_call", { connection: "github", tool: "list_issues" });
+    expect(r.body).toEqual({ connection: "github", tool: "list_issues", content: [{ type: "text", text: "called list_issues" }] });
+    expect(db.runs.at(-1)!.meta).toMatchObject({ bytes_in: expect.any(Number), bytes_out: expect.any(Number) });
+    expect(db.runs.at(-1)!.meta).not.toHaveProperty("fold");
+    expect(db.runs.at(-1)!.meta).not.toHaveProperty("handle");
+  });
+
+  it("with folding off the answer comes whole, however large — and the row says the switch was off", async () => {
+    const db = recordingDb();
+    const { call } = await brainFor(agent(["github"]), proxyOver([{ ...GITHUB, fold: false }]), db);
+    const r = await call("connections_call", { connection: "github", tool: "list_issues" });
+    expect(r.isError).toBe(false);
+    expect(r.body.content).toEqual([{ type: "text", text: big }]);
+    expect(r.body.folded).toBeUndefined();
+    expect(db.runs.at(-1)!.meta).toMatchObject({ fold: "off", dialled: true });
+    expect(db.runs.at(-1)!.meta).not.toHaveProperty("handle");
+  });
+
+  it("page stands behind the same gate as a call: no credential is 401, an un-lent connection is 'no such connection', a tool at Never is 'no such tool' — and nothing is dialled", async () => {
+    // no credential: the uniform 401 before any tool runs
+    const proxy = fakeProxy();
+    const anon = createBrainServer({ db: recordingDb(), authenticate: async () => null, tasks: new TasksService(recordingDb()), inboxDir: "/nonexistent", connections: proxy });
+    const http = createServer((req, res) => void anon.handle(req, res));
+    await new Promise<void>((r) => http.listen(0, "127.0.0.1", r));
+    servers.push({ close: () => new Promise<void>((r) => http.close(() => r())) });
+    const res = await fetch(`http://127.0.0.1:${(http.address() as AddressInfo).port}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "connections_call", arguments: { connection: "github", tool: "list_issues", page: "1/1" } } }),
+    });
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: { code: "unauthenticated", message: "authentication required" } });
+    // no grant: the connection does not exist for this caller
+    const { call } = await brainFor(agent([]), proxy);
+    expect((await call("connections_call", { connection: "github", tool: "list_issues", page: "1/1" })).body.error).toEqual({ code: "not_found", message: "no such connection: github" });
+    // a grant, a tool at Never
+    const lent = await brainFor(agent(["github"]), proxy);
+    expect((await lent.call("connections_call", { connection: "github", tool: "delete_repo", page: "1/1" })).body.error).toEqual({ code: "not_found", message: "no such tool: github/delete_repo" });
+    expect(proxy.calls).toEqual([]);
+  });
+
+  it("page is `<handle>/<n>`, takes no confirm_token, and an answer nobody stored is 'no such answer'", async () => {
+    const db = recordingDb();
+    const proxy = fakeProxy();
+    const { call } = await brainFor(agent(["github"]), proxy, db);
+    const shape = await call("connections_call", { connection: "github", tool: "list_issues", page: "nope" });
+    expect(shape.body.error.code).toBe("invalid_request");
+    expect(shape.body.error.message).toContain('"<handle>/<n>"');
+    expect(db.runs.at(-1)!.meta).toMatchObject({ mode: "page", refusal: "bad_page" });
+    const both = await call("connections_call", { connection: "github", tool: "create_issue", page: "1/1", confirm_token: "A".repeat(43) });
+    expect(both.body.error.code).toBe("invalid_request");
+    expect(db.runs.at(-1)!.meta).toMatchObject({ refusal: "page_with_token" });
+    // the fake Db stores nothing, so every handle is nobody's
+    expect((await call("connections_call", { connection: "github", tool: "list_issues", page: "7/1" })).body.error).toEqual({ code: "not_found", message: "no such answer: 7/1" });
+    expect(db.runs.at(-1)!.meta).toMatchObject({ mode: "page", handle: "7", refusal: "no_answer" });
+    expect(proxy.calls).toEqual([]);
+  });
+});

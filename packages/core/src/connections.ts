@@ -703,6 +703,14 @@ export const connectionFileSchema = z
     tools: z.record(toolName, connectionToolPolicy).default({}),
     /** Off: the assistant and syncs only. On: agents may reach it through the proxy, per their grants (C115). */
     offer_to_agents: z.boolean().default(false),
+    /**
+     * On (the default): an upstream answer over the proxy's threshold is
+     * folded on `connections_call` — the first items, the last, a count, or
+     * a head and a tail — and kept whole for the same caller to page (X-132).
+     * Off: every answer comes whole, whatever its size. The owner's switch,
+     * beside the per-tool policy; `metistry connections policy <name> --fold`.
+     */
+    fold: z.boolean().default(true),
   })
   .superRefine((c, ctx) => {
     for (const list of ["secrets", "variables"] as const) {

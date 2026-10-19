@@ -123,8 +123,12 @@ describe.skipIf(!hasDb)("the proxy listener: remote by construction", () => {
 
   const localOwner = { authorization: `Bearer ${localOwnerToken}` };
   const sinceNow = async (): Promise<number> => Number((await pool.query(`SELECT coalesce(max(id), 0) AS id FROM runs`)).rows[0].id);
-  const authRows = async (tool: string, since: number): Promise<Record<string, unknown>[]> =>
-    (await pool.query(`SELECT meta FROM runs WHERE component = 'console' AND kind = 'auth' AND tool = $1 AND id > $2 ORDER BY id`, [tool, since])).rows.map((r) => r.meta as Record<string, unknown>);
+  // `onlyProxy` narrows to the rows the proxy listener wrote — this file is the
+  // one suite with a proxy listener, so that is its marker (a `since` id alone
+  // also catches the `local_only` and `owner_token_remote` rows any parallel
+  // file's main-listener requests leave in the same minute).
+  const authRows = async (tool: string, since: number, onlyProxy = false): Promise<Record<string, unknown>[]> =>
+    (await pool.query(`SELECT meta FROM runs WHERE component = 'console' AND kind = 'auth' AND tool = $1 AND id > $2 AND ($3::boolean IS NOT TRUE OR meta->>'listener' = 'proxy') ORDER BY id`, [tool, since, onlyProxy])).rows.map((r) => r.meta as Record<string, unknown>);
 
   beforeAll(async () => {
     pool = await testDb(pg.Pool);
@@ -259,7 +263,7 @@ describe.skipIf(!hasDb)("the proxy listener: remote by construction", () => {
       const { rows } = await pool.query(`SELECT id FROM agents WHERE id = ANY($1)`, [[idSession, idToken]]);
       expect(rows).toEqual([]);
     }
-    const refused = await authRows("local_only", since);
+    const refused = await authRows("local_only", since, true);
     expect(refused.length).toBe(2);
     for (const m of refused) expect(m).toMatchObject({ route: "POST /api/agents", via: "session", listener: "proxy", reason: expect.stringContaining("never answers on the proxy listener") });
   });
@@ -286,8 +290,8 @@ describe.skipIf(!hasDb)("the proxy listener: remote by construction", () => {
       }
     }
     // the Host gate is before authentication, so the token presented behind a wrong Host leaves no auth row of any kind
-    expect(await authRows("owner_token_remote", since)).toEqual([]);
-    expect(await authRows("local_only", since)).toEqual([]);
+    expect(await authRows("owner_token_remote", since, true)).toEqual([]);
+    expect(await authRows("local_only", since, true)).toEqual([]);
   });
 
   it("the message echoes the Host asked for, bounded, and never the hosts configured", async () => {

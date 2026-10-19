@@ -117,7 +117,9 @@ Two more, for the tests that need them:
   database of the suite's own, `<METISTRY_TEST_DB_NAME><suffix>` (the migration
   runner's suite uses `_mig`). The maintenance connection to `postgres` never
   leaves the helper, and a suffix is required, so the shared scratch database
-  is never one suite's to drop.
+  is never one suite's to drop. `{ suffix, template }` makes the new database
+  a `TEMPLATE` copy of `template`, itself held to the same rules — how the
+  workspace runner gives each package a migrated copy of the shared one.
 
 `node ops/scripts/check-test-db.mjs` (CI) holds every test file to this: it
 fails on a `pg` `Pool`/`Client` constructed under any import name, and on
@@ -146,6 +148,51 @@ directory, copy `seed/` into a temp dir and point at that.
 `METISTRY_TEST_DB_NAME` and applies every migration. The default is derived
 from the checkout's directory name, so parallel worktrees never drop each
 other's database.
+
+### One database per package
+
+The suites then run through `ops/scripts/test-workspace.mjs`, not `pnpm -r run
+test` — and **each package gets a scratch database of its own**. For every
+workspace package with a `test` script the runner creates
+`<METISTRY_TEST_DB_NAME>_<package>` (`…_core`, `…_console`, `…_mcp_brain`: the
+unscoped name, `metistry-` dropped, lowercase) as a `TEMPLATE` copy of the
+migrated shared database — schema and seed rows, no second run of the
+migrations, none of a sibling's leftovers — runs the package's `test` script
+with `METISTRY_TEST_DB_NAME` pointed at the copy, and drops the copy after.
+Databases are made and dropped only through core's `recreateScratchDb` /
+`dropScratchDb` (its `template` option is this), so every name is held to the
+rules `testDb()` applies, and the base is cut back when a long checkout name
+plus a long package name would pass Postgres's 63 characters — a visible cut
+rather than the server's silent one. Every scratch database — the shared one
+`test-db.sh` makes and each copy — is `ALTER DATABASE … SET timezone = 'UTC'`,
+so a suite sees the same clock as CI whatever zone the server runs in: a
+"30 days out" is 30 × 24 hours on a Mac in November too.
+
+Why: until 2026-10-18 the root script was `pnpm -r --workspace-concurrency=1
+run test` against the one database, and a `--no-file-parallelism` appended to
+that line never reached vitest. Every suite owned its rows by marker (below),
+and W4 still saw the same cross-suite flakes again — morning-brief, tasks'
+`external_ref`, reply-review's FK, linear-order, push-needs-you — because
+suites in different packages shared one row space, and a marker protects only
+the rows a suite remembers to mark. Per-suite ownership stays worthwhile
+(two files in one package still share that package's copy); this removes the
+space packages collided in.
+
+Packages run one at a time by default, as `--workspace-concurrency=1` did.
+With their databases apart they may run side by side:
+
+```sh
+pnpm test                                            # test-db.sh, then every package
+pnpm test -- --concurrency 2                         # two packages at once, two databases
+pnpm test -- --only tasks --only artifacts           # a subset (name, unscoped name or directory)
+```
+
+The runner refuses to start without `METISTRY_TEST_DB_NAME` — there is no
+default base to copy — and reads the checkout's `.env` through `loadTestEnv`,
+so its children inherit the same two things a test may (above) and nothing
+else. A direct `vitest run` in one package is unchanged: it uses the shared
+database `test-db.sh` built, so what the next section says about re-runs
+still holds for it.
 
 ### Which database am I about to touch
 
@@ -189,9 +236,10 @@ would run: yes
 ```
 
 Integration suites must therefore survive **both** a freshly created database
-and a re-run against one they have already written to (`pnpm test:unit`, or
-vitest invoked directly — either with `METISTRY_TEST_DB_NAME` exported, since
-`testDb()` has no default). Two ways to get there:
+(what `pnpm test` now hands every package) and a re-run against one they have
+already written to (`pnpm test:unit`, or vitest invoked directly — either with
+`METISTRY_TEST_DB_NAME` exported, since `testDb()` has no default). Two ways
+to get there:
 
 - **Scope by marker** — every row carries an `itest-…` id/project/component and
   the suite deletes its own in `beforeAll` and `afterAll`. This is the default

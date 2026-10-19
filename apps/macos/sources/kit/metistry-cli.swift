@@ -65,14 +65,15 @@ public struct MetistryCLI: Sendable {
         )
     }
 
-    /// `metistry doctor --json`.
+    /// `metistry doctor --check --json` — the one read (M6, pinned to this argv
+    /// in management-runner.swift), read-only whatever the terminal.
     ///
     /// Exit code 1 means "something is `failed`", not "the command broke"
     /// (docs/ops/cli.md), and the report is on stdout either way — so the JSON
     /// is parsed first and the exit code is only consulted when there is no
     /// report to show.
     public func doctor(onOutput: @escaping @Sendable (OutputLine) -> Void = { _ in }) async throws -> DoctorReport {
-        let result = try await run(["doctor", "--json"], onOutput: onOutput)
+        let result = try await run(ManagementRow.doctorCheckArguments, onOutput: onOutput)
         guard let data = result.stdout.data(using: .utf8), !data.isEmpty else {
             throw DoctorError.noOutput(exitCode: result.exitCode, stderr: result.stderr)
         }
@@ -205,7 +206,7 @@ public struct MetistryCLI: Sendable {
             switch self {
             case .noOutput(let code, let stderr):
                 let detail = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-                return "`metistry doctor --json` printed nothing (exit \(code))\(detail.isEmpty ? "" : ": \(detail)")"
+                return "`metistry doctor --check --json` printed nothing (exit \(code))\(detail.isEmpty ? "" : ": \(detail)")"
             case .undecodable(let underlying, let code, _, let stderr):
                 let detail = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
                 return "could not read the doctor report (exit \(code)): \(underlying.localizedDescription)\(detail.isEmpty ? "" : " — \(detail)")"

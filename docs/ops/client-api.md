@@ -273,8 +273,8 @@ takes a `since` cursor and answers with the next one.
 | `POST /capture` | agent · owner | session · local_owner · owner_token · agent | key | — | — | served | a note or a file into `Inbox/`; `source: "app"` for an owner credential (T2-1) |
 | `GET /api/whoami` | owner | session · local_owner · owner_token | natural | — | — | served | which credential this is and whether it reaches management |
 | `POST /auth/logout` | owner | session | no | — | — | served | end this device's session |
-| `GET /api/devices` | owner | session · local_owner | natural | — | — | served | the enrolled passkeys and their sessions |
-| `POST /api/devices/:id/revoke` | owner | session · local_owner | no | — | — | served | end one device session |
+| `GET /api/devices` | owner | session · local_owner | natural | — | — | served | the devices: a passkey each, its sessions under it (§2.22) |
+| `POST /api/devices/:id/revoke` | owner | session · local_owner | no | — | — | served | remove a device — its passkey and every session under it; `scope: "sessions"` signs it out and keeps the passkey |
 | `POST /message` | owner | session · local_owner · owner_token | no | — | — | served | send a message; `tier` picks the model tier for this one |
 | `GET /api/messages` | owner | session · local_owner · owner_token | natural | — | since | served | the conversation, inbound and outbound |
 | `POST /api/messages/:id/feedback` | owner | session · local_owner | natural | — | — | served | rate one reply, with an optional note |
@@ -618,28 +618,54 @@ moved-on thread is confusing); the research note says why.
 ```
 GET  /api/whoami               200 {"principal":"user","via":"local_owner_token","management":true,"origin":"…","as_of":"…"}
 POST /auth/logout              200 {"ok":true}          403 — the local owner token has no session to end
-GET  /api/devices              200 {"devices":[…]}
-POST /api/devices/:id/revoke   200 {"revoked":true}     404 — no such session
+GET  /api/devices              200 {"devices":[{id, passkey_id, rp_id, label, added, last_seen, this_device, sessions:[…]}, …]}
+POST /api/devices/:id/revoke   {scope?: "device" | "sessions"}   200 {"revoked":true,"scope":"device","sessions":2}
+                               404 — no such session, or its device is already removed;  400 — a scope that is neither
 ```
 
 `whoami` says which credential the console sees: `via` is `passkey_session`,
 `local_owner_token` or `owner_token` (a capture token answers `principal:
 "owner_token"`, `management: false`); `session_id` rides along for a session.
 It is what `metistry console whoami` and the Mac app's "signed in as" read.
-**Logout** ends the calling device's session row, so it takes a session; a
-device is revoked from any other one with `…/revoke` — a lost phone is revoked
-from the Mac.
+**Logout** ends the calling device's session row, so it takes a session.
 
-Each device row is one session joined to its passkey: `id` (the session),
-`label`, `passkey_last_used`, `created_at`, `last_seen_at`,
-`absolute_expires_at`, `revoked`, and **`rp_id`** — the host the passkey was
-created for and the only host it signs in at (`docs/ops/auth.md` *Passkeys:
-origins*; migration `0039`, X-104). A passkey from before `0039` has no
-recorded host; the console serves the first configured origin's host for it,
-so `rp_id` is always a string and a client never needs `METISTRY_ORIGIN` to
-tell which passkeys a change of origin stranded (a passkey whose `rp_id` is no
-longer a configured host; Devices marks it, X-107). Additive: a client that
-does not read it sees the row it always did.
+**A device is a passkey, with its sessions under it** (design-build-plan
+§2.22). `GET /api/devices` serves one row per enrolled passkey that has not
+been removed, newest seen first:
+
+| field | |
+| --- | --- |
+| `id` | what Remove posts to `…/:id/revoke`: the device's newest session row, live or not — every device has one, because enrolment issues a session |
+| `passkey_id` | the credential id |
+| `label` | the name the device chose at enrolment |
+| `rp_id` | the host the passkey was created for and the only host it signs in at (`docs/ops/auth.md` *Passkeys: origins*; migration `0039`, X-104) — a passkey from before `0039` has no recorded host, so the console serves the first configured origin's host for it; always a string, so a client never needs `METISTRY_ORIGIN` to tell which passkeys a change of origin stranded (Devices marks them, X-107) |
+| `added` | when the passkey was enrolled |
+| `last_seen` | the latest of its sessions' `last_seen_at` and the passkey's last login |
+| `this_device` | `true` on the caller's own row — the passkey of its session; `false` on every row for the local owner token, which has no device |
+| `sessions` | each session under it: `{id, created_at, last_seen_at, absolute_expires_at, revoked, push}` — `push` says a notification subscription is held |
+
+The session-row fields the body carried before §2.22 — `passkey_last_used`,
+`created_at`, `last_seen_at`, `absolute_expires_at`, `revoked` — stay on the
+row (the passkey's dates, the newest session's expiry; `revoked` is always
+false, since a removed device is not listed), so a reader of the old shape
+reads something true. The PWA marks *This Device* from `this_device`, falling
+back to `GET /api/whoami`'s `session_id` against `sessions`.
+
+**Remove** — `POST /api/devices/:id/revoke` with `{}` or no body (`scope:
+"device"`) — is what the website promises ("you can remove it from Devices
+anytime"): the device's **passkey is revoked** (`passkeys.revoked_at`,
+migration 0038), so it never signs in again, and **every session under it is
+revoked**, each losing its push subscription, so its notifications stop. A
+revoked passkey's login is refused with the **same uniform 401 as an unknown
+credential's** — nothing in the answer says whether it ever existed. Remove is
+irreversible, so a client confirms it naming the device (C136); a removed phone
+is set up again as a new device, with a new passkey. **Sign Out Everywhere**
+keeps its meaning — sessions only, passkeys kept: it is this door with `{scope:
+"sessions"}` once per signed-in device, the caller's own last, and each device
+signs in again with the passkey it has. Both land in `runs` (`auth`, `revoke`)
+with the scope, the passkey and the number of sessions ended on the record.
+Any `:id` of the device's sessions names it; a device already removed answers
+404, as an unknown session does.
 
 ### Chat
 
@@ -3453,7 +3479,8 @@ GET /api/connections
                      "tools":[{"name":"create_issue","group":"changes","mode":"ask"},
                               {"name":"search_issues","group":"reads","mode":"on"}],
                      "offer_to_agents":false,
-                     "used_by":[{"kind":"sync","name":"github-state"}]}],
+                     "used_by":[{"kind":"sync","name":"github-state"}],
+                     "last_checked":{"at":"2026-09-30T06:50:00.000Z","status":"ok"}}],
      "types":[{"name":"icloud-calendar","title":"iCloud Calendar over CalDAV with an app-specific password",
                "description":"iCloud Calendar over CalDAV with an app-specific password — your events on Today, …",
                "origin":"product","provides":"calendar","transports":["http"],"auth":["basic"],
@@ -3470,16 +3497,39 @@ One row per file in the instance's `.metistry/connections/`, sorted by name
 `metistry connections list --json` prints). `type` is what it is (`mcp`,
 `calendar`, …) and `provider` the connection-type unit that reaches it, or
 `custom`. `reach` is how Metistry reaches it — `http` (`url`, `auth` scheme,
-header and query-parameter **names**, `timeout_s`), `command` (`command`,
+header and query-parameter **names**, `header_secrets`, `timeout_s`), `command` (`command`,
 `args`, `cwd`, environment-variable **names**, `runs_on`), `path`, or `imap`
 (`host`, `port`, `security` `tls` · `plain`, `auth: "basic"` — a mailbox,
 T4-15; never the username or the password). `tools`
 is the owner's per-tool policy: each tool's `group` (`reads` · `changes` ·
 `starts_agent`) and `mode` (`on` · `ask` · `off`, drawn *Allow · Ask First ·
-Never*). `used_by` is what reads it today — the syncs in `scheduled.yaml` that
-name it; agents reach a connection through the lazy pair on `/mcp`
-(`docs/ops/connections.md`), and until they are lent one an empty list is the
-true answer (*Nobody yet*).
+Never*).
+
+**`used_by`** is everything that uses it, each `{kind, name}`: `sync` (the syncs
+in `scheduled.yaml` that name it), then `agent` and `crew` — a registry row
+granted the connection (`grants.connections`) — by `name` = the row's id, sorted
+by kind and name. A grant counts only once the owner has **offered** the
+connection to agents (`offer_to_agents`): it is the one rule the proxy applies
+(`mayConnection`), so a grant on an unoffered connection reaches nothing and is
+not listed. A revoked or still-pending row is not a user, and the assistant
+(which reaches every connection) is not listed against each. An empty list is
+the true answer (*Nobody yet*). The console fills the agents from its registry;
+`metistry connections list|show --json` has no registry to ask, so it lists
+syncs only.
+
+**`header_secrets`** (on an `http` reach) is `[{header, secrets}]`, one entry
+per header in `headers` order: the **names** of the secrets that header's value
+carries (`["relay_key"]`, or `[]` for a header that names none). Never the value
+or the template around it — a header per secret lists one secret each.
+
+**`last_checked`** is `{at, status}` — the ISO time and doctor's word
+(`ok` · `degraded` · `failed` · `absent`) of the newest check anyone ran
+(`metistry connections test`, `metistry doctor`, the Mac's Test) — or `null`
+for never. A check leaves it as a stamp in the instance's gitignored
+`.metistry/state/connection-checks.json` (time and verdict only, never the
+check's message); the route **reads** that file and dials nothing. It is
+derived and disposable (invariant 1): lose it and every connection reads
+*never checked* until its next check.
 
 **`status`** is one of doctor's words, and `issues` says why, one sentence each:
 
@@ -3519,10 +3569,8 @@ secret only by name.
 
 **Nothing here dials.** A GET that started a command or reached a server would
 be a read with a side effect; whether a connection answers is `metistry
-connections test <name>` and `metistry doctor` on the Mac. The last check or
-call the console itself made (`runs` rows `connection_check` /
-`connection_call`, which `connection.health` announces) joins the row when the
-console makes calls (T4-8b). Every write — add, set, policy, remove — is
+connections test <name>` and `metistry doctor` on the Mac, and the time and
+verdict of the last one is the row's `last_checked`. Every write — add, set, policy, remove — is
 `metistry connections` on the Mac (M13, `docs/ops/cli.md`): a connection file
 says where Metistry reaches and with which credential, which is the boundary,
 so no route writes one (invariant 10).
@@ -4150,7 +4198,7 @@ exist. Reach enforces it; a client hiding a control is never the control.
 | Services: restart, stop, start, logs; Keep Awake | — | write | the machine; a remote stop locks the owner out |
 | Updates: versions | read | read | |
 | Updates: update, roll back, runtime source | — | write | replaces running code |
-| Account: devices, revoke a device, Sign Out Everywhere | write | write | a lost phone is revoked from another device |
+| Account: devices, remove a device (its passkey too, §2.22), Sign Out Everywhere | write | write | a lost phone is removed from another device |
 | Account: console sign-in, instance repository | — | write | |
 | Sessions: *Let the assistant learn*, retention | write | write | the session-fold and purge routines' settings, through the Scheduled doors (§2.5) |
 | Sessions: Purge Now | — | write | irreversible |
@@ -4172,11 +4220,12 @@ chosen from `GET /api/compute/models` on the providers already switched on —
 read only when the form opens), Scheduled's pause (`POST
 /api/scheduled/routines/:name/pause|resume`, and `PUT /api/scheduled/syncs/:name`
 with `{paused}` for a sync, X-99), the budgets (`POST /api/compute/budget`,
-`PUT /api/projects/:slug`) and devices (`POST /api/devices/:id/revoke`, and
-Sign Out Everywhere as that door once per live device, the caller's own
-session last) it writes, and every row whose phone column is **—**, or whose
-write is the Mac's, as its reason with no control. `GET /api/whoami`'s
-`session_id` is how it marks *This Device*.
+`PUT /api/projects/:slug`) and devices (`POST /api/devices/:id/revoke` —
+Remove, and Sign Out Everywhere as that door with `scope: "sessions"` once per
+signed-in device, the caller's own last) it writes, and every row whose phone
+column is **—**, or whose write is the Mac's, as its reason with no control.
+`this_device` on a devices row is how it marks *This Device*, with `GET
+/api/whoami`'s `session_id` as the fallback.
 
 ## Outside the contract
 

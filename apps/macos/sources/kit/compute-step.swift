@@ -313,10 +313,21 @@ public final class ComputeStepModel {
         phase = .skipped
     }
 
-    public nonisolated static let skipNote =
-        "You can finish without one. With no `assignments.default` in compute.yaml there is no engine: `metistry up` does not start the assistant at all, "
-        + "`metistry doctor` reports `assistant: absent`, and captures, tasks, search and the console keep working — queued turns simply wait. "
-        + "Settings → Compute, or `metistry compute assign default <provider/model>`, adds one whenever you like."
+    public nonisolated static let skipNote = skipNote(assistantName: nil)
+
+    /// `doctor`'s `assistant: absent` is the CLI's own key, quoted as it
+    /// prints, so it stays as it is whatever the assistant is called.
+    public nonisolated static func skipNote(assistantName: String?) -> String {
+        let a = WizardCopy(name: assistantName)
+        return "You can finish without one. With no `assignments.default` in compute.yaml there is no engine: `metistry up` does not start \(a.subject) at all, "
+            + "`metistry doctor` reports `assistant: absent`, and captures, tasks, search and the console keep working — queued turns simply wait. "
+            + "Settings → Compute, or `metistry compute assign default <provider/model>`, adds one whenever you like."
+    }
+
+    /// The one-line status once the owner has chosen to finish without an engine.
+    public nonisolated static func skippedLine(assistantName: String?) -> String {
+        "no engine — \(WizardCopy(name: assistantName).subject) will not be started, and everything else will"
+    }
 
     public nonisolated static let keyNote =
         "The key goes to the command's standard input — never onto a command line, never into a file this app writes, never into a log. "

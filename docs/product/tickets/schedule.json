@@ -199,10 +199,48 @@
     },
     "W5": {
       "tickets": [
+        "X-103",
+        "X-104",
+        "X-111",
+        "X-88",
+        "X-80",
+        "X-85",
+        "X-102",
+        "X-101",
+        "X-87",
+        "X-75",
+        "X-76",
+        "X-78",
+        "X-105",
+        "X-112",
+        "X-106",
+        "X-77",
+        "X-79",
+        "X-114",
+        "X-107",
+        "X-82",
+        "X-86",
+        "X-90",
+        "X-91",
+        "X-92",
+        "X-93",
+        "X-94",
+        "X-95",
+        "X-96",
+        "X-97",
+        "X-98",
+        "X-99",
+        "X-100",
+        "X-83",
+        "X-84",
+        "X-121",
+        "X-122",
+        "X-126",
+        "X-127",
         "X-1"
       ],
-      "count": 1,
-      "agent_days": 1
+      "count": 39,
+      "agent_days": 69
     }
   },
   "tickets": {
@@ -3143,7 +3181,7 @@
     "X-80": {
       "title": "`metistry up` mints the recorder's control token",
       "track": "X",
-      "wave": "candidate",
+      "wave": "W5",
       "size": "S",
       "days": 1,
       "model": "sonnet",
@@ -3152,7 +3190,7 @@
         "T8-5"
       ],
       "file": "docs/product/tickets/x/x-80.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-81": {
       "title": "Kept recordings have a list route",
@@ -3172,7 +3210,7 @@
     "X-82": {
       "title": "The Mac's meeting group decodes `group_id`",
       "track": "X",
-      "wave": "candidate",
+      "wave": "W5",
       "size": "S",
       "days": 1,
       "model": "sonnet",
@@ -3186,7 +3224,7 @@
     "X-83": {
       "title": "The activity feed's capture subject reads the title only",
       "track": "X",
-      "wave": "candidate",
+      "wave": "W5",
       "size": "S",
       "days": 1,
       "model": "sonnet",
@@ -3195,12 +3233,12 @@
         "T8-6"
       ],
       "file": "docs/product/tickets/x/x-83.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-84": {
       "title": "`POST /message` carries a session-turn marker",
       "track": "X",
-      "wave": "candidate",
+      "wave": "W5",
       "size": "M",
       "days": 2.5,
       "model": "opus",
@@ -3215,7 +3253,7 @@
     "X-85": {
       "title": "The targets shim comes out",
       "track": "X",
-      "wave": "candidate",
+      "wave": "W5",
       "size": "S",
       "days": 1,
       "model": "sonnet",
@@ -3229,7 +3267,7 @@
     "X-86": {
       "title": "The Mac's Secrets pane hides Grant for an owner-door secret",
       "track": "X",
-      "wave": "candidate",
+      "wave": "W5",
       "size": "S",
       "days": 1,
       "model": "sonnet",
@@ -3239,15 +3277,15 @@
         "T6-14"
       ],
       "file": "docs/product/tickets/x/x-86.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-87": {
       "title": "The calendar collectors export `check()`",
       "track": "X",
-      "wave": "candidate",
-      "size": "S",
-      "days": 1,
-      "model": "sonnet",
+      "wave": "W5",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
       "effort": "default",
       "deps": [
         "T4-14"
@@ -3258,7 +3296,7 @@
     "X-88": {
       "title": "The workspace test script isolates each package's database",
       "track": "X",
-      "wave": "candidate",
+      "wave": "W5",
       "size": "M",
       "days": 2.5,
       "model": "opus",
@@ -3284,7 +3322,7 @@
     "X-90": {
       "title": "The hot-key and accessibility audits see what they miss",
       "track": "X",
-      "wave": "candidate",
+      "wave": "W5",
       "size": "S",
       "days": 1,
       "model": "sonnet",
@@ -3298,7 +3336,7 @@
     "X-91": {
       "title": "The three-pointers test tolerates the device-local keys",
       "track": "X",
-      "wave": "candidate",
+      "wave": "W5",
       "size": "S",
       "days": 1,
       "model": "sonnet",
@@ -3313,7 +3351,7 @@
     "X-92": {
       "title": "Dispatch's `REPO_RE` has a misuse test",
       "track": "X",
-      "wave": "candidate",
+      "wave": "W5",
       "size": "S",
       "days": 1,
       "model": "sonnet",
@@ -3322,12 +3360,12 @@
         "T4-11"
       ],
       "file": "docs/product/tickets/x/x-92.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-93": {
       "title": "`socketDestination` keeps IMAP's port",
       "track": "X",
-      "wave": "candidate",
+      "wave": "W5",
       "size": "S",
       "days": 1,
       "model": "sonnet",
@@ -3336,12 +3374,12 @@
         "T4-15"
       ],
       "file": "docs/product/tickets/x/x-93.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-94": {
       "title": "The wizard's copy templates the configured name",
       "track": "X",
-      "wave": "candidate",
+      "wave": "W5",
       "size": "S",
       "days": 1,
       "model": "sonnet",
@@ -3355,7 +3393,7 @@
     "X-95": {
       "title": "The Mac's loopback set matches core's",
       "track": "X",
-      "wave": "candidate",
+      "wave": "W5",
       "size": "S",
       "days": 1,
       "model": "sonnet",
@@ -3369,7 +3407,7 @@
     "X-96": {
       "title": "A connection's detail says who uses it and when it was checked",
       "track": "X",
-      "wave": "candidate",
+      "wave": "W5",
       "size": "S",
       "days": 1,
       "model": "sonnet",
@@ -3383,7 +3421,7 @@
     "X-97": {
       "title": "Variables: when it was set, the preview an agent sees, and a key's expiry",
       "track": "X",
-      "wave": "candidate",
+      "wave": "W5",
       "size": "S",
       "days": 1,
       "model": "sonnet",
@@ -3397,7 +3435,7 @@
     "X-98": {
       "title": "Agents and Compute: the model line, the key note and the download",
       "track": "X",
-      "wave": "candidate",
+      "wave": "W5",
       "size": "S",
       "days": 1,
       "model": "sonnet",
@@ -3412,7 +3450,7 @@
     "X-99": {
       "title": "The phone's writable rows have controls",
       "track": "X",
-      "wave": "candidate",
+      "wave": "W5",
       "size": "S",
       "days": 1,
       "model": "sonnet",
@@ -3421,12 +3459,12 @@
         "T7-6"
       ],
       "file": "docs/product/tickets/x/x-99.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-100": {
       "title": "The \"held to core\" Swift tests cannot drift",
       "track": "X",
-      "wave": "candidate",
+      "wave": "W5",
       "size": "S",
       "days": 1,
       "model": "sonnet",
@@ -3441,19 +3479,19 @@
     "X-101": {
       "title": "Bare `metistry doctor` resolves the product directory it runs from",
       "track": "X",
-      "wave": "candidate",
+      "wave": "W5",
       "size": "S",
       "days": 1,
       "model": "sonnet",
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/x/x-101.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-102": {
       "title": "The recorder leaves no fixed-id rows behind",
       "track": "X",
-      "wave": "candidate",
+      "wave": "W5",
       "size": "S",
       "days": 1,
       "model": "sonnet",
@@ -3462,12 +3500,12 @@
         "X-31"
       ],
       "file": "docs/product/tickets/x/x-102.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-75": {
       "title": "`metistry enroll` — an enrolment code minted on this Mac",
       "track": "X",
-      "wave": "candidate",
+      "wave": "W5",
       "size": "M",
       "days": 2.5,
       "model": "opus",
@@ -3479,7 +3517,7 @@
     "X-76": {
       "title": "Removing a device revokes its passkey",
       "track": "X",
-      "wave": "candidate",
+      "wave": "W5",
       "size": "M",
       "days": 2.5,
       "model": "opus",
@@ -3491,7 +3529,7 @@
     "X-77": {
       "title": "Settings ▸ Devices and the Add a Phone sheet",
       "track": "X",
-      "wave": "candidate",
+      "wave": "W5",
       "size": "L",
       "days": 5,
       "model": "opus",
@@ -3506,19 +3544,19 @@
     "X-78": {
       "title": "The phone's half: enrol, install, sign in",
       "track": "X",
-      "wave": "candidate",
+      "wave": "W5",
       "size": "M",
       "days": 2.5,
       "model": "opus",
       "effort": "default",
       "deps": [],
       "file": "docs/product/tickets/x/x-78.md",
-      "status": "todo"
+      "status": "in-review"
     },
     "X-79": {
       "title": "The phone guide, and the website's copy re-checked",
       "track": "X",
-      "wave": "candidate",
+      "wave": "W5",
       "size": "S",
       "days": 1,
       "model": "sonnet",
@@ -3535,7 +3573,7 @@
     "X-103": {
       "title": "The console's proxy listener — the local owner token never crosses a tunnel",
       "track": "X",
-      "wave": "candidate",
+      "wave": "W5",
       "size": "M",
       "days": 2.5,
       "model": "opus",
@@ -3547,7 +3585,7 @@
     "X-104": {
       "title": "Passkeys per origin — the rpID follows the request",
       "track": "X",
-      "wave": "candidate",
+      "wave": "W5",
       "size": "M",
       "days": 2.5,
       "model": "opus",
@@ -3559,7 +3597,7 @@
     "X-105": {
       "title": "`metistry remote` — the record, the adapter interface, and None",
       "track": "X",
-      "wave": "candidate",
+      "wave": "W5",
       "size": "M",
       "days": 2.5,
       "model": "opus",
@@ -3574,7 +3612,7 @@
     "X-106": {
       "title": "The Tailscale adapter — Funnel by default, tailnet as the alternative",
       "track": "X",
-      "wave": "candidate",
+      "wave": "W5",
       "size": "L",
       "days": 5,
       "model": "opus",
@@ -3590,7 +3628,7 @@
     "X-107": {
       "title": "Set Up Remote Access — the guided flow, the wizard step and Settings ▸ Remote Access",
       "track": "X",
-      "wave": "candidate",
+      "wave": "W5",
       "size": "L",
       "days": 5,
       "model": "opus",
@@ -3607,7 +3645,7 @@
     "X-111": {
       "title": "A console on the internet — rate limits and headers on the proxy listener",
       "track": "X",
-      "wave": "candidate",
+      "wave": "W5",
       "size": "M",
       "days": 2.5,
       "model": "opus",
@@ -3667,7 +3705,7 @@
     "X-112": {
       "title": "Provider tool packs — pinned, signed, fetched on choice",
       "track": "X",
-      "wave": "candidate",
+      "wave": "W5",
       "size": "M",
       "days": 2.5,
       "model": "opus",
@@ -3697,7 +3735,7 @@
     "X-114": {
       "title": "Add a Phone sees the phone arrive — *Opened on your phone*",
       "track": "X",
-      "wave": "candidate",
+      "wave": "W5",
       "size": "S",
       "days": 1,
       "model": "sonnet",
@@ -3800,6 +3838,191 @@
       "file": "docs/product/tickets/x/x-120.md",
       "status": "todo"
     },
+    "X-121": {
+      "title": "The complexity fixtures, generated and blind-relabelled",
+      "track": "X",
+      "wave": "W5",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "T9-3"
+      ],
+      "file": "docs/product/tickets/x/x-121.md",
+      "status": "todo"
+    },
+    "X-122": {
+      "title": "Doctor waits out a job it has just started",
+      "track": "X",
+      "wave": "W5",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-122.md",
+      "status": "todo"
+    },
+    "X-123": {
+      "title": "`metistry doctor` repairs what it finds",
+      "track": "X",
+      "wave": "candidate",
+      "size": "L",
+      "days": 5,
+      "model": "opus",
+      "effort": "high",
+      "deps": [
+        "X-122",
+        "X-48"
+      ],
+      "file": "docs/product/tickets/x/x-123.md",
+      "status": "todo"
+    },
+    "X-124": {
+      "title": "`.env` is derived, never hand-edited",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-124.md",
+      "status": "todo"
+    },
+    "X-125": {
+      "title": "Fix All in the Status window",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-123"
+      ],
+      "file": "docs/product/tickets/x/x-125.md",
+      "status": "todo"
+    },
+    "X-126": {
+      "title": "The policy mirror's rename-revoke test is deterministic",
+      "track": "X",
+      "wave": "W5",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-126.md",
+      "status": "todo"
+    },
+    "X-127": {
+      "title": "Every terminal read behaves like `secrets set`",
+      "track": "X",
+      "wave": "W5",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-127.md",
+      "status": "todo"
+    },
+    "X-128": {
+      "title": "A session-start briefing: handles and the owner's text",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "X-130",
+        "X-131",
+        "X-133"
+      ],
+      "file": "docs/product/tickets/x/x-128.md",
+      "status": "todo"
+    },
+    "X-129": {
+      "title": "Plugins deliver the briefing at session start, on by default",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-128"
+      ],
+      "file": "docs/product/tickets/x/x-129.md",
+      "status": "todo"
+    },
+    "X-130": {
+      "title": "A repository maps to a project page",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-130.md",
+      "status": "todo"
+    },
+    "X-131": {
+      "title": "Last time in this repository",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [
+        "X-130"
+      ],
+      "file": "docs/product/tickets/x/x-131.md",
+      "status": "todo"
+    },
+    "X-132": {
+      "title": "`connections_call` folds a large answer",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-132.md",
+      "status": "todo"
+    },
+    "X-133": {
+      "title": "`connect claude-code` reads as well as writes",
+      "track": "X",
+      "wave": "candidate",
+      "size": "S",
+      "days": 1,
+      "model": "sonnet",
+      "effort": "default",
+      "deps": [],
+      "file": "docs/product/tickets/x/x-133.md",
+      "status": "todo"
+    },
+    "X-134": {
+      "title": "`connect --remove`, and a reconnect after a revoke",
+      "track": "X",
+      "wave": "candidate",
+      "size": "M",
+      "days": 2.5,
+      "model": "opus",
+      "effort": "default",
+      "deps": [
+        "X-133"
+      ],
+      "file": "docs/product/tickets/x/x-134.md",
+      "status": "todo"
+    },
     "X-1": {
       "title": "The document sweep",
       "track": "X",
@@ -3814,13 +4037,13 @@
     }
   },
   "totals": {
-    "tickets": 167,
-    "agent_days": 487.5,
+    "tickets": 205,
+    "agent_days": 555.5,
     "waves": 6,
-    "candidates": 92
+    "candidates": 68
   },
   "critical_path": {
-    "days": 35,
+    "days": 37.5,
     "path": [
       "F-3",
       "T4-1",
@@ -3829,7 +4052,8 @@
       "T4-8b",
       "T4-9",
       "T4-10",
-      "T4-11"
+      "T4-14",
+      "X-87"
     ]
   },
   "candidates": {
@@ -3880,54 +4104,30 @@
       "X-72",
       "X-73",
       "X-74",
-      "X-80",
       "X-81",
-      "X-82",
-      "X-83",
-      "X-84",
-      "X-85",
-      "X-86",
-      "X-87",
-      "X-88",
       "X-89",
-      "X-90",
-      "X-91",
-      "X-92",
-      "X-93",
-      "X-94",
-      "X-95",
-      "X-96",
-      "X-97",
-      "X-98",
-      "X-99",
-      "X-100",
-      "X-101",
-      "X-102",
-      "X-75",
-      "X-76",
-      "X-77",
-      "X-78",
-      "X-79",
-      "X-103",
-      "X-104",
-      "X-105",
-      "X-106",
-      "X-107",
       "X-108",
       "X-109",
       "X-110",
-      "X-111",
-      "X-112",
       "X-113",
-      "X-114",
       "X-115",
       "X-116",
       "X-117",
       "X-118",
       "X-119",
-      "X-120"
+      "X-120",
+      "X-123",
+      "X-124",
+      "X-125",
+      "X-128",
+      "X-129",
+      "X-130",
+      "X-131",
+      "X-132",
+      "X-133",
+      "X-134"
     ],
-    "count": 92,
-    "agent_days": 166
+    "count": 68,
+    "agent_days": 125
   }
 }

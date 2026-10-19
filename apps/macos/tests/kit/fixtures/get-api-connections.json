@@ -61,7 +61,65 @@
             "kind": "sync",
             "name": "github-state"
           }
-        ]
+        ],
+        "last_checked": null
+      },
+      {
+        "name": "intranet",
+        "type": "mcp",
+        "provider": "custom",
+        "description": "The team's docs server",
+        "status": "failed",
+        "issues": [
+          "secrets.yaml does not grant github_mcp_key to connection:intranet — `metistry secrets grant github_mcp_key connection:intranet on`"
+        ],
+        "reach": {
+          "class": "http",
+          "url": "https://api.github.com/mcp",
+          "auth": "none",
+          "headers": [
+            "X-Api-Key",
+            "X-Team"
+          ],
+          "header_secrets": [
+            {
+              "header": "X-Api-Key",
+              "secrets": [
+                "github_mcp_key"
+              ]
+            },
+            {
+              "header": "X-Team",
+              "secrets": []
+            }
+          ],
+          "query": [],
+          "timeout_s": null
+        },
+        "secrets": [
+          "github_mcp_key"
+        ],
+        "variables": [
+          "team_name"
+        ],
+        "tools": [
+          {
+            "name": "read_page",
+            "group": "reads",
+            "mode": "on"
+          }
+        ],
+        "offer_to_agents": true,
+        "used_by": [
+          {
+            "kind": "agent",
+            "name": "opencode"
+          }
+        ],
+        "last_checked": {
+          "at": "2026-09-30T06:50:00.000Z",
+          "status": "degraded"
+        }
       }
     ],
     "types": [
@@ -330,6 +388,6 @@
         ]
       }
     ],
-    "as_of": "2026-09-30T06:54:06.424Z"
+    "as_of": "2026-10-19T01:22:42.361Z"
   }
 }

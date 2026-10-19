@@ -19,10 +19,15 @@
 //            does not list this connection's host as one it may be sent to —
 //            exactly what the egress door would refuse, said ahead of time.
 //
-// *Used by* is what reads it today: the syncs in `scheduled.yaml` that name
-// it. Agents reach a connection through the lazy pair and their grants
-// (T4-8b); until then nothing else uses one, and an empty list is the true
-// answer (screen 9: *Nobody yet* is a real value).
+// *Used by* is everything that reads it: the syncs in `scheduled.yaml` that
+// name it, and the agents and crews granted it (`DescribeOptions.granted`,
+// which the host fills from its registry — this package holds no agent list)
+// when the owner has offered it to agents, the one rule core's `mayConnection`
+// applies. Nothing else uses one, and an empty list is the true answer
+// (screen 9: *Nobody yet* is a real value).
+//
+// *Last checked* is the time and verdict of the newest check anyone ran
+// (`stamps.ts`) — null until one has been.
 
 import {
   egressDestination,
@@ -51,17 +56,31 @@ import { connectionGrantee } from "./door.js";
 import { isGeneratedType } from "./generated.js";
 import { oauthClientOf, oauthSecretNames } from "./oauth.js";
 import { planHttp } from "./plan.js";
+import { readCheckStamps, type LastChecked } from "./stamps.js";
 import { syncReaders } from "./sync.js";
 
-/** Who reads a connection. Syncs today; agents and the assistant once the lazy pair lands (T4-8b). */
+export type { LastChecked } from "./stamps.js";
+
+/**
+ * Who reads a connection: a sync that names it, or an agent or a crew granted
+ * it through the lazy pair (T4-8b). The assistant reaches every connection
+ * and is not listed against each.
+ */
 export interface ConnectionUser {
-  kind: "sync";
+  kind: "sync" | "agent" | "crew";
+  /** the sync's name, or the agent's or crew's id */
   name: string;
+}
+
+/** One header an HTTP connection sends, with the secrets its value names — names, never the value or the template around it. */
+export interface HeaderSecrets {
+  header: string;
+  secrets: string[];
 }
 
 /** How Metistry reaches it — names only for headers, query parameters and environment variables. */
 export type ReachSummary =
-  | { class: "http"; url: string; auth: AuthScheme; headers: string[]; query: string[]; timeout_s: number | null }
+  | { class: "http"; url: string; auth: AuthScheme; headers: string[]; header_secrets: HeaderSecrets[]; query: string[]; timeout_s: number | null }
   | { class: "command"; command: string; args: string[]; cwd: string | null; env: string[]; runs_on: "host" | "container" }
   | { class: "path"; path: string; include: string[]; skip: string[]; watch: boolean }
   /** an IMAP mailbox (T4-15): where it goes and how — never the username or the password */
@@ -91,6 +110,8 @@ export interface ConnectionRow {
   tools: ConnectionToolRow[];
   offer_to_agents: boolean;
   used_by: ConnectionUser[];
+  /** the newest check anyone ran, or null for never */
+  last_checked: LastChecked | null;
 }
 
 /**
@@ -198,6 +219,10 @@ export interface DescribeOptions {
   presence?: SecretPresence | undefined;
   /** `scheduled.yaml`, for *used by*. Default: the catalog's */
   scheduled?: Scheduled | null | undefined;
+  /** connection name → the agents and crews granted it, from the host's registry (revoked and pending rows already left out). Absent: none are known, and none are listed */
+  granted?: ReadonlyMap<string, readonly ConnectionUser[]> | undefined;
+  /** connection name → its last check. Default: read from the instance's state directory (`stamps.ts`) when the catalog names one */
+  checks?: ReadonlyMap<string, LastChecked> | undefined;
 }
 
 function reachOf(entry: ConnectionEntry): ReachSummary | null {
@@ -205,15 +230,30 @@ function reachOf(entry: ConnectionEntry): ReachSummary | null {
   if (!c) return null;
   const { http, command, path, imap } = c.reach;
   if (imap) return { class: "imap", host: imap.host, port: imap.port, security: imap.security, auth: "basic" };
-  if (http) return { class: "http", url: http.url, auth: http.auth.scheme, headers: Object.keys(http.headers).sort(), query: Object.keys(http.query).sort(), timeout_s: http.timeout_s ?? null };
+  if (http) return { class: "http", url: http.url, auth: http.auth.scheme, headers: Object.keys(http.headers).sort(), header_secrets: headerSecrets(http.headers), query: Object.keys(http.query).sort(), timeout_s: http.timeout_s ?? null };
   if (command) return { class: "command", command: command.command, args: [...command.args], cwd: command.cwd ?? null, env: Object.keys(command.env).sort(), runs_on: command.runs_on };
   if (path) return { class: "path", path: path.path, include: [...path.include], skip: [...path.skip], watch: path.watch };
   return null;
 }
 
-/** The syncs that read `name`: those `scheduled.yaml` names it for, and the sync its provider declares when that sync reads it (`syncReaders`, the rule the sync itself opens by). */
-function usersOf(name: string, scheduled: Scheduled | null | undefined, entries: readonly ConnectionEntry[]): ConnectionUser[] {
-  return (syncReaders({ entries, scheduled }).get(name) ?? []).map((sync) => ({ kind: "sync" as const, name: sync }));
+/** Each header with the secrets its value names, sorted by header — a header per secret lists one each. */
+function headerSecrets(headers: Record<string, string>): HeaderSecrets[] {
+  return Object.keys(headers)
+    .sort()
+    .map((header) => ({ header, secrets: [...secretRefsIn(headers[header]!).names].sort() }));
+}
+
+/**
+ * Who reads `name`: the syncs `scheduled.yaml` names it for (and the sync its
+ * provider declares when that sync reads it — `syncReaders`, the rule the sync
+ * itself opens by), then the agents and crews granted it. A grant reaches only
+ * a connection the owner has offered to agents (core's `mayConnection`), so an
+ * unoffered connection's grants are not "use".
+ */
+function usersOf(name: string, offered: boolean, scheduled: Scheduled | null | undefined, entries: readonly ConnectionEntry[], granted: DescribeOptions["granted"]): ConnectionUser[] {
+  const syncs = (syncReaders({ entries, scheduled }).get(name) ?? []).map((sync) => ({ kind: "sync" as const, name: sync }));
+  const holders = offered ? [...(granted?.get(name) ?? [])].sort((a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name)) : [];
+  return [...syncs, ...holders];
 }
 
 /** What the caller can add to a file's own verdict: missing variables and secret items (absent), grants and hosts the door would refuse (failed). */
@@ -303,6 +343,7 @@ async function runtimeIssues(entry: ConnectionEntry, catalog: ConnectionCatalog,
 
 /** One row. */
 export async function describeConnection(entry: ConnectionEntry, catalog: ConnectionCatalog, opts: DescribeOptions = {}): Promise<ConnectionRow> {
+  const checks = opts.checks ?? (await readCheckStamps(catalog.baseDir));
   const c = entry.connection;
   if (!c || entry.status === "failed") {
     // the file broke a rule: its name, its status and why — nothing it holds
@@ -318,7 +359,8 @@ export async function describeConnection(entry: ConnectionEntry, catalog: Connec
       variables: [],
       tools: [],
       offer_to_agents: false,
-      used_by: usersOf(entry.name, opts.scheduled ?? catalog.scheduled, catalog.entries),
+      used_by: usersOf(entry.name, false, opts.scheduled ?? catalog.scheduled, catalog.entries, opts.granted),
+      last_checked: checks.get(entry.name) ?? null,
     };
   }
   let status: ConnectionStatus = entry.status;
@@ -343,14 +385,16 @@ export async function describeConnection(entry: ConnectionEntry, catalog: Connec
       .map(([name, p]) => ({ name, group: p.group, mode: p.mode }))
       .sort((a, b) => a.name.localeCompare(b.name)),
     offer_to_agents: c.offer_to_agents,
-    used_by: usersOf(c.name, opts.scheduled ?? catalog.scheduled, catalog.entries),
+    used_by: usersOf(c.name, c.offer_to_agents, opts.scheduled ?? catalog.scheduled, catalog.entries, opts.granted),
+    last_checked: checks.get(c.name) ?? null,
   };
 }
 
 /** Every row, sorted by name. */
 export async function describeConnections(catalog: ConnectionCatalog, opts: DescribeOptions = {}): Promise<ConnectionRow[]> {
   const rows: ConnectionRow[] = [];
-  for (const e of [...catalog.entries].sort((a, b) => a.name.localeCompare(b.name))) rows.push(await describeConnection(e, catalog, opts));
+  const shared = { ...opts, checks: opts.checks ?? (await readCheckStamps(catalog.baseDir)) };
+  for (const e of [...catalog.entries].sort((a, b) => a.name.localeCompare(b.name))) rows.push(await describeConnection(e, catalog, shared));
   return rows;
 }
 
